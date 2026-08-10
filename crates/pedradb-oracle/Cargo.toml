@@ -1,0 +1,18 @@
+[package]
+name = "pedradb-oracle"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "RocksDB (C++) bindings used only as a correctness/performance oracle for pedradb-core tests"
+
+[dependencies]
+pedradb-core.workspace = true
+
+# Real RocksDB, used exclusively as an external oracle (never linked into
+# the shipped engine). Feature-gated so CI without a C++ toolchain can skip.
+rocksdb = { version = "0.22", optional = true, default-features = false }
+
+[features]
+default = []
+# Enables the live RocksDB oracle. Requires a working C++ toolchain.
+live-rocksdb = ["dep:rocksdb"]

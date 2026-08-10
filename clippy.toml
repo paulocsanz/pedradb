@@ -1,0 +1,18 @@
+# clippy configuration for the pedradb workspace.
+#
+# These identifiers are product/proper nouns used in prose; they read worse
+# wrapped in backticks. Listing them keeps `clippy::doc_markdown` useful for
+# catching genuinely missing backticks on code identifiers, while not nagging
+# about the names below. This is the lint's intended extension mechanism
+# (used by tokio, serde, rust-lang crates, etc.).
+doc-valid-idents = [
+    "PedraDB",
+    "RocksDB",
+    "CRC32C",
+    "Castagnoli",
+    "MemTable",
+    "SSTable",
+    "fsync",
+    "fdatasync",
+    "..",
+]

@@ -1,0 +1,30 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/pedradb-core",
+    "crates/pedradb-oracle",
+    "crates/pedradb-cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+rust-version = "1.75"
+
+[workspace.dependencies]
+# Internal
+pedradb-core = { path = "crates/pedradb-core" }
+pedradb-oracle = { path = "crates/pedradb-oracle" }
+
+# Shared
+crc32c = "0.6"
+thiserror = "1"
+parking_lot = "0.12"
+bytes = "1"
+tracing = "0.1"
+
+[profile.release]
+debug = 1
+lto = "thin"
+codegen-units = 1

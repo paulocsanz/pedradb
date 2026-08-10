@@ -1,0 +1,13 @@
+[package]
+name = "pedradb-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "PedraDB core LSM-tree storage engine (clean-room Rust reimplementation of RocksDB concepts)"
+
+[dependencies]
+crc32c.workspace = true
+thiserror.workspace = true
+parking_lot.workspace = true
+bytes.workspace = true
+tracing.workspace = true
