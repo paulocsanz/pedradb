@@ -305,18 +305,21 @@ P0 **does not require** SST, full compaction, Monkey/WiscKey, or simulation fram
 
 ### Open / possibly wrong (need explicit call)
 
+Deep research (peers, nuances, regrets):  
+**[`0001-open-decisions-deep-dive.md`](0001-open-decisions-deep-dive.md)**
+
 | ID | Topic | Options | Notes / recommendation |
 |----|--------|---------|------------------------|
-| **O1** | **Commit durability default** | (a) fsync WAL on every commit (safer, slower) (b) OS buffer default like fjall/RocksDB (faster, easy to misuse) | **Recommend (a) for P0** to justify “correct”; add relaxed path in P1/P2 |
-| **O2** | **Write concurrency** | (a) OCC multi-writer from day one (b) single-writer TX only for P0 | **Recommend (b) for P0** if it ships faster; OCC in P1 — *challenge if you need multi-writer early* |
-| **O3** | **Physical keyspaces** | (a) none in v1 — prefixes only (b) fjall-like keyspaces | **Recommend (a)** for surface; revisit if substrate users demand isolation |
-| **O4** | **Interactive TX vs apply-batch first** | (a) interactive TX is P0 (b) atomic batch apply first for Raft-shaped embedders | **Recommend (a)** for justify-use story; batch as sugar or P2.3 |
-| **O5** | **Snapshot epoch** | (a) at `begin` (b) at first read | **Recommend (a)** simpler mental model |
-| **O6** | **LSM strategy day one** | (a) simple leveling/tiering until correct (b) design SST/layout for Lazy Leveling now | **Recommend (a)** for P0–P1; don’t block justify-use on Dostoevsky |
-| **O7** | **Value log (WiscKey)** | (a) later P2 (b) early | **Recommend (a)** until large-value benches hurt |
-| **O8** | **Max key/value size** | hard limits vs soft | Set concrete limits in P1 (e.g. key ≤ 64KiB, value ≤ 4GiB soft) — TBD numbers |
-| **O9** | **Language bindings** | Rust only vs C ABI later | **Rust only** until P2+ |
-| **O10** | **Name “PedraDB” vs engine-only branding** | sounds like a full DB product | Optional rename later; scope is engine/kernel either way |
+| **O1** | **Commit durability default** | (a) fsync WAL on every commit (safer, slower) (b) OS buffer default like fjall/RocksDB (faster, easy to misuse) | **Recommend (a) for P0**; RocksDB/fjall/Badger default (b) and users get burned; Postgres/SQLite culture is (a). Group commit later for speed. |
+| **O2** | **Write concurrency** | (a) OCC multi-writer from day one (b) single-writer TX only for P0 | **Recommend (b) for P0** (redb/LMDB); TiDB regretted optimistic-only under OLTP; Raft apply is single-writer per Region anyway. OCC in P1. |
+| **O3** | **Physical keyspaces** | (a) none in v1 — prefixes only (b) fjall-like keyspaces | **Recommend (a)** FDB-style; RocksDB CF zoo is an ops regret; TiKV keeps tiny fixed CF set. |
+| **O4** | **Interactive TX vs apply-batch first** | (a) interactive TX is P0 (b) atomic batch apply first | **Recommend (a)** for justify-use; implement commit as internal batch; expose `apply_batch` P2 for substrate. |
+| **O5** | **Snapshot epoch** | (a) at `begin` (b) at first read | **Recommend (a)**; FDB-like; simpler tests. |
+| **O6** | **LSM strategy day one** | (a) simple correct first (b) Lazy Leveling now | **Recommend (a)**; don’t sled-research-block P0. |
+| **O7** | **Value log (WiscKey)** | (a) later P2 (b) early | **Recommend (a)**; Badger/Titan GC is the regret. |
+| **O8** | **Max key/value size** | hard limits vs soft | Proposal: key 64KiB hard; value soft large; TX buffer cap for memory — see deep dive. |
+| **O9** | **Language bindings** | Rust only vs C ABI later | **Rust only** until P2+. |
+| **O10** | **Name “PedraDB”** | keep vs rename | Keep; message “library kernel” in README. |
 
 **Author bias to challenge:** O1 (sync default may be too slow for “fast” pitch), O2 (single-writer may feel “not serious”), O3 (no keyspaces may lose fjall users who want CF isolation).
 
