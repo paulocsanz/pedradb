@@ -191,13 +191,36 @@ PedraDB only makes sense if **LSM write path + research opts + substrate for hea
 | **Model** | Stateless compute + S3 data + manifest coordination (“no server to manage”) |
 | **vs PedraDB** | Cloud-native/serverless state layer, not local LSM substrate |
 
-### 4.3 sled — cautionary tale
+### 4.3 sled — cautionary tale (why it “stagnated”)
 
 | Field | Detail |
 |-------|--------|
+| **URL** | https://github.com/spacejam/sled |
 | **Multi-node?** | **No** (embedded) |
-| **Status** | Effectively **stalled / abandoned** relative to early promises |
-| **Lesson** | Ambitious Rust embed DB needs multi-year maintenance or dies |
+| **Crates.io** | Still **`1.0.0-alpha.*`** after years (e.g. alpha.124); never a boring stable 1.0 |
+| **Own warnings** | README: if reliability is primary → **use SQLite** (“sled is beta”); space amp vs RocksDB; format **will break** before 1.0; multi-process → use LMDB |
+| **Rewrite trap** | README states main is a **large in-progress rewrite** (out of sync with docs); priorities: full storage rewrite via [komora](https://github.com/komora-io) / marble, memory layout rewrite, API changes |
+| **Architecture ambition** | Not classic LSM or simple B-tree: lock-free index, custom heap/slab, flush epochs, no traditional WAL — hard to finish and prove |
+| **Maintainer model** | Heavily associated with one lead (spacejam); sponsor-funded; high bus factor |
+| **Activity** | Repo not archived; occasional commits; **not** “dead GitHub,” but **not production-default** either — long alpha + rewrite = community treats as risky |
+
+**Was sled “safe” (no `unsafe`)?**
+
+| Claim people make | Reality |
+|-------------------|---------|
+| “Pure Rust” | **Yes** in the sense of **not linking C++ RocksDB** — implemented in Rust |
+| “`forbid(unsafe)` / 100% safe Rust” | **No.** Source uses `unsafe` (alloc, heap, metadata, sync primitives, etc. — dozens of `unsafe` tokens on main). Has a serious [SAFETY.md](https://github.com/spacejam/sled/blob/main/SAFETY.md) (STPA hazard analysis) precisely because concurrent + IO + reclaim needs care |
+| Memory-safe *by default* vs C++ | Better baseline than C++, but **unsafe blocks still exist**; not the fjall-style “100% safe” marketing |
+
+**Why it feels stagnated (summary):**
+
+1. **Never graduated reliability story** — self-labeled beta/alpha; tells serious users to pick SQLite/RocksDB/LMDB for core constraints.  
+2. **Perpetual rewrite** — 0.x production-ish lore vs 1.0 redesign unfinished for a long time → adopters freeze or leave.  
+3. **Scope too hard for one-person-class bandwidth** — lock-free + novel on-disk design + TX + compression + …  
+4. **Format / migration debt** — breaking disk format before 1.0 scares embedders.  
+5. **Space/write economics** — README admits sometimes worse space than RocksDB.  
+
+**Lesson for PedraDB:** justify use with a **small finished kernel** before rewrites and sim theater; don’t ship “champagne of beta” forever; if you use `unsafe`, document it — if you claim `forbid(unsafe)`, mean it (fjall-style).
 
 ### 4.4 nebari + BonsaiDb
 
