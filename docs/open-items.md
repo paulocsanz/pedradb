@@ -246,6 +246,7 @@ new evidence.
 | [`compare-fjall.md`](compare-fjall.md) | PedraDB vs fjall (closest Rust peer) |
 | [`rfc/0001-pedradb-high-level-spec.md`](rfc/0001-pedradb-high-level-spec.md) | **Normative** high-level RFC (P0/P1/P2, open decisions) |
 | [`rfc/0001-open-decisions-deep-dive.md`](rfc/0001-open-decisions-deep-dive.md) | O1–O10 deep dive: peers, nuances, regrets |
+| [`session-synthesis-architecture-and-doubt.md`](session-synthesis-architecture-and-doubt.md) | Full conversation synthesis + “is PedraDB wrong?” |
 | [`fdb-limitations-analysis.md`](fdb-limitations-analysis.md) | Why PedraDB solves FDB's 4 limitations |
 | [`open-items.md`](open-items.md) | This file — living status tracker |
 | [`references/`](references/) | All primary sources (papers as PDF+TXT, blog posts, docs) |
