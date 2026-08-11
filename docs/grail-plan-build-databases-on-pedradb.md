@@ -260,19 +260,178 @@ You might still use etcd. Building on PedraDB makes sense if you want **one kern
 
 ---
 
-## 9. Scylla specifically (why it’s the odd one out)
+## 9. Horizontally scalable “Postgres” (N writers, M regions)
 
-| Scylla | PedraDB grail |
-|--------|----------------|
-| Multi-master, tunable / often eventual | Strong local ACID; outer CP Raft |
-| Shard-per-core Seastar | Threaded library |
-| CQL / wide-column | Ordered KV + layers |
+This is **not** PedraDB alone. It is **Rung 5** on the ladder: distributed SQL
+on a distributed TX KV that uses PedraDB **per node** — the same shape as
+**TiDB → TiKV → RocksDB** or **CockroachDB → Pebble**.
 
-**Do not** force PedraDB to be Scylla. If the company needs Scylla-class, that’s a **different** engineering program (or use Scylla). The grail covers **SQLite → Postgres-ish → TiKV/FDB → etcd** far more naturally than Scylla.
+### What “Postgres-like, horizontally scalable” means
+
+| Piece | Meaning |
+|-------|---------|
+| **Postgres-like** | SQL, transactions, schemas, indexes, client protocol *or* wire-compatible enough to migrate apps |
+| **Horizontally scalable** | Add machines → more storage + more query/TX throughput |
+| **M regions** | Keyspace (or table data) split into **M** contiguous ranges (Regions/Ranges) |
+| **N writers** | **Not** N processes writing the **same** key without coordination. Means **N nodes can accept writes at once**, each as **leader of some regions** |
+
+### N writers, correctly understood
+
+```
+Wrong mental model (multi-master same key):
+  Node A and Node B both write key K independently → LWW / conflicts
+  = Scylla/Cassandra style
+
+Right mental model (multi-Raft / CRDB / TiKV):
+  Region 1 keys [a,m)  leader = Node A  → writes to those keys go to A
+  Region 2 keys [m,z)  leader = Node B  → writes to those keys go to B
+  N writers = N region-leaders (often on different nodes)
+  Same key → still exactly one leader
+```
+
+So: **N writers globally, 1 writer per key range.**  
+That is how you get scale-out write throughput **and** keep strong transactions.
+
+### Stack (Postgres-horizontal on PedraDB)
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│  SQL clients (Postgres wire optional; or custom SQL API)     │
+├──────────────────────────────────────────────────────────────┤
+│  SQL layer (stateless × K)                                   │
+│  parse · plan · execute · distributed TX coordinator         │
+│  (TiDB / Cockroach SQL role)                                 │
+├──────────────────────────────────────────────────────────────┤
+│  Distributed KV + TX                                         │
+│  M Regions · multi-Raft · placement (PD) · 2PC/Parallel Commits│
+│  (TiKV / CRDB KV+TX role)                                    │
+├──────────────────────────────────────────────────────────────┤
+│  On each node: PedraDB library                               │
+│  apply Raft batches · local multi-key ACID for one Region    │
+└──────────────────────────────────────────────────────────────┘
+```
+
+| Layer | Count | Role |
+|-------|-------|------|
+| SQL frontends | K (stateless, LB) | Scale **query planning/compute** |
+| Nodes holding data | N | Scale **storage + region leaders** |
+| Regions | M (≫ N typically) | Unit of sharding + Raft group |
+| PedraDB instances | 1 per node (or per process) | Local durable state |
+
+### Data placement (tables → keys → regions)
+
+SQL layer encodes rows/indexes as **ordered keys** (TiDB-style `t{table}_r{row}`,
+`t{table}_i{index}_…`).  
+
+- Table data spreads across **many regions** as key space grows.  
+- Hot table can split into more regions (M increases).  
+- Secondary indexes are **more keys** in the same (or related) key space —  
+  updated in the **same distributed TX** as the row (needs multi-key TX across
+  regions when index and row live in different regions).
+
+### Transactions spanning regions
+
+| Case | Mechanism |
+|------|-----------|
+| All keys in **one** region | Local PedraDB TX (or apply_batch) on leader only — fast path |
+| Keys in **several** regions | Distributed TX (Percolator / Parallel Commits / 2PC) across region leaders |
+| Read-only at snapshot | Reads from leaders (or followers with bounded staleness later) |
+
+PedraDB’s local multi-key ACID makes the **single-region** path trivial and
+correct. Cross-region is **outer product** work — same tax TiDB/CRDB already pay.
+
+### N writers vs Postgres vanilla
+
+| Vanilla Postgres | Horizontal stack on PedraDB |
+|------------------|-----------------------------|
+| One primary writer (typical) | Many region leaders = many write entry points |
+| Scale-up vertical | Scale-out add nodes → rebalance regions |
+| Streaming replicas mostly read | Every region has Raft followers; leader serves writes |
+| Extensions / one process | Stateless SQL × K + storage nodes × N |
+
+### What PedraDB does / does not do in this story
+
+| PedraDB | Outer “distributed Postgres” product |
+|---------|--------------------------------------|
+| Store bytes, local TX, ranges, crash recovery | SQL, optimizer, catalog |
+| Fast apply of ordered batches | Multi-Raft, PD, split/merge regions |
+| Durability options local | Quorum durability for “SQL commit” |
+| No network | gRPC, wire protocol, auth |
+
+### Effort honesty
+
+Building full Postgres-compatible horizontal SQL is **years** (TiDB/CRDB scale
+of investment). The grail path is still valid:
+
+1. PedraDB kernel  
+2. Distributed KV (TiKV-class)  
+3. SQL layer (Postgres- or MySQL-shaped)
+
+You can stop at (2) and still have a huge platform. (3) is optional product.
+
+### Where “N writers” breaks if you get the model wrong
+
+- Allowing two leaders for the same region → split brain.  
+- Skipping distributed TX for multi-region SQL updates → broken indexes.  
+- Putting SQL in PedraDB core → kernel dies under surface.  
+- Expecting Scylla-like “any node writes any key with ONE” → different product.
 
 ---
 
-## 10. Concrete “how we use PedraDB” recipes
+## 10. Scylla specifically (why it’s off the main line)
+
+### Two different physics
+
+| | **Main grail line** (PedraDB → TiKV/FDB/etcd/SQL-CP) | **Scylla / Cassandra line** |
+|--|------------------------------------------------------|-----------------------------|
+| **Write to same key** | Single leader / single order (Raft or equivalent) | **Multi-master**: any replica can accept write |
+| **Conflict** | Prevent or abort (OCC / locks / Raft order) | **Reconcile later** (timestamp LWW, etc.) |
+| **Default consistency** | Strong (serializable / SI / linearizable reads) | **Tunable**; often **eventual** at CL=ONE |
+| **Multi-key TX** | Core value (local + distributed 2PC) | **Not** general ACID cross-partition; LWT is special-case Paxos per partition |
+| **Indexes as layers** | Safe if same TX as data | Hard: data vs index can diverge under concurrent multi-master |
+| **Runtime** | Library + optional Raft product | Seastar shard-per-core, gossip, vnode ring |
+| **API culture** | KV/SQL ACID | CQL wide-column, denormalize for queries |
+
+### Why Scylla is “out of the main line” (not “bad”)
+
+1. **Contradicts the pillar thesis**  
+   PedraDB’s reason to exist is **multi-key ACID + order** so layers (indexes,
+   SQL catalogs, etcd revisions) stay correct. Scylla’s strength is **availability
+   and throughput** under a model where concurrent writes to the same key are
+   allowed and reconciled — the opposite default.
+
+2. **You cannot get Scylla behavior “for free” from PedraDB**  
+   Putting PedraDB under a Scylla-like API either:
+   - **Forces single-leader per partition** → you built **TiKV-shaped** CQL, not Scylla; or  
+   - **Allows multi-master on top of ACID local stores** → you throw away global
+     ACID and reimplement LWW/repair — PedraDB’s TX doesn’t buy the Scylla model.
+
+3. **Different operational and hardware culture**  
+   Thread-per-core, shared-nothing shards, compaction strategies as product
+   surface, tunable CL per query — a full second platform.
+
+4. **Grail already has a horizontal write story without Scylla**  
+   **N region leaders** (above) = horizontal write scale **with** strong TX.  
+   That’s the CRDB/TiKV answer to “we need more writers,” not multi-master LWW.
+
+### When Scylla *would* be in-scope
+
+| Situation | Approach |
+|-----------|----------|
+| Company primary workload is AP, LWW, CQL, extreme single-key QPS | **Use Scylla** (or fork that line) — don’t warp PedraDB |
+| Want CQL **with** strong TX per partition only | Possible as a **layer** on multi-Raft+PedraDB (more TiKV than Scylla) |
+| Marketing “we replace everything including Scylla” | Dishonest unless you build a second engine/product line |
+
+### One sentence
+
+**Main line = CP / ACID / single-writer-per-key-range / layers.**  
+**Scylla line = AP / multi-master / tunable / repair.**  
+PedraDB is designed for the first; calling Scylla “out of main line” means
+**don’t design the kernel for the second**, not “Scylla is irrelevant as a product in the market.”
+
+---
+
+## 11. Concrete “how we use PedraDB” recipes
 
 ### Recipe S — SQLite niche (embed)
 
@@ -298,15 +457,33 @@ Client --> TX coordinator (2PC / Parallel Commits)
                     └─ PedraDB (local TX or apply_batch)
 ```
 
-### Recipe Q — TiDB niche
+### Recipe Q — TiDB / MySQL-wire distributed SQL
 
 ```
 MySQL client --> SQL layer --> Recipe K
 ```
 
+### Recipe P — Postgres-like horizontally scalable SQL (N writers, M regions)
+
+```
+Postgres clients (or PG-wire)
+       │
+  SQL layer × K (stateless)
+       │  encode rows/indexes as ordered keys
+       │  distributed TX if multi-region
+       ▼
+  M Regions (multi-Raft) on N nodes
+       │  each Region leader = one writer for that key range
+       │  N writers total ≈ leaders spread across nodes
+       ▼
+  PedraDB on each node (local apply / local TX)
+```
+
+See §9 for full semantics of N writers / M regions.
+
 ---
 
-## 11. Decision log (resolve the “are we wrong?” thread)
+## 12. Decision log (resolve the “are we wrong?” thread)
 
 | Decision | Proposal |
 |----------|----------|
@@ -314,12 +491,14 @@ MySQL client --> SQL layer --> Recipe K
 | Is multi-node in PedraDB? | **No** — separate products |
 | Durability | **Default DataSync + optional async + group commit** |
 | First competitive target after kernel | Prefer **embed (SQLite-class)** or **coord (etcd-class)**; not Scylla |
+| Horizontal Postgres | **Rung 5**: SQL + multi-Raft + PedraDB; N writers = N region leaders |
+| Scylla | **Off main line** — AP multi-master ≠ ACID pillar; use Scylla or separate program |
 | Relation to fjall | Compete on TX-first kernel; if P0 slips, facade-on-fjall or adopt fjall |
 | etcd | Product **on top** of PedraDB + Raft, not PedraDB itself |
 
 ---
 
-## 12. Near-term plan (actionable)
+## 13. Near-term plan (actionable)
 
 1. **Lock RFC-0001** with durability = default sync + optional async; single-writer P0; prefixes; interactive TX.  
 2. **Ship P0** (TX + crash) — justify use.  
@@ -329,6 +508,6 @@ MySQL client --> SQL layer --> Recipe K
 
 ---
 
-## 13. One paragraph
+## 14. One paragraph
 
-PedraDB should stay **local**, with **async available and sync the honest default for commit**, plus **group commit** so we don’t become a single-node etcd performance trap. The grail is not PedraDB replacing Postgres/TiKV/Scylla/**etcd** by itself — it’s PedraDB as the **shared kernel** under embed ACID, then (separately) Raft-backed **etcd-class** coord, **TiKV-class** KV, and **TiDB-class** SQL. Scylla-class AP multi-master is out of the main line. Success is measured first by a tiny correct TX kernel people use, then by one real upper product — not by promising every database on day one.
+PedraDB should stay **local**, with **async available and sync the honest default for commit**, plus **group commit** so we don’t become a single-node etcd performance trap. The grail is not PedraDB replacing Postgres/TiKV/Scylla/**etcd** by itself — it’s PedraDB as the **shared kernel** under embed ACID, then (separately) Raft-backed **etcd-class** coord, **TiKV-class** KV, and **horizontal Postgres/TiDB-class SQL** (N writers = many region leaders, M regions, distributed TX when needed). Scylla-class AP multi-master is out of the main line because it allows concurrent writers on the **same** key and reconciles later — incompatible with the ACID/index-layer thesis. Success is measured first by a tiny correct TX kernel people use, then by one real upper product — not by promising every database on day one.
