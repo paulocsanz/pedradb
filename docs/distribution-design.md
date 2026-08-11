@@ -573,6 +573,28 @@ Applications that don't need distribution use PedraDB embedded directly.
 
 ---
 
+## Deep research follow-up
+
+Protocol-level findings (Percolator paper, TiKV optimistic/pessimistic TX,
+PD scheduling, TSO format, CockroachDB Parallel Commits + HLC, openraft vs
+raft-rs, etcd guarantees) are documented in:
+
+**[`distribution-deep-research.md`](distribution-deep-research.md)**
+
+Key upgrades from that research (not fully detailed above):
+
+1. **Cross-Region commit target = Parallel Commits**, not classic serial 2PC
+   (halves consensus latency).
+2. **TiDB defaulted to pessimistic TX** (v3.0.8+) because optimistic aborts
+   kill OLTP under contention; PedraDB should support both modes eventually.
+3. **TSO is 46-bit physical ms + 18-bit logical** (TiDB); HLC is the
+   decentralized alternative (CRDB) but needs NTP discipline.
+4. **In-memory locks + pipelined locking** are critical for latency but fragile
+   under partition — must be configurable.
+5. **PD (placement driver)** is a separate service with store/Region heartbeats
+   and three operators: AddReplica, RemoveReplica, TransferLeader.
+6. **openraft vs raft-rs** both viable; decision deferred to distribution work.
+
 ## Sources
 
 | Ref | Source | Fetched |
@@ -581,4 +603,5 @@ Applications that don't need distribution use PedraDB embedded directly.
 | [FDB-cap] | FDB CAP Theorem analysis — apple.github.io/foundationdb/cap-theorem.html | 2026-08-10 |
 | [FDB-cons] | FDB Consistency — apple.github.io/foundationdb/consistency.html | 2026-08-10 |
 | [TiKV] | TiKV Overview — docs.pingcap.com/tidb/stable/tikv-overview/ | 2026-08-10 |
+| [Deep] | `docs/distribution-deep-research.md` — Percolator, Parallel Commits, PD, TSO, Raft libs | 2026-08-10 |
 | [Prior] | `docs/distributed-systems-analysis.md` — ScyllaDB, Ceph, CockroachDB analysis | prior session |

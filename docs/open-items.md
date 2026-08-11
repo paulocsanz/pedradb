@@ -147,9 +147,12 @@ range) but O(ranges) memory, which is typically much smaller.
 | 10 | Redwood (FDB's new B+tree) internals | 🔲 open | Interesting for comparison, not blocking |
 | 11 | Pebble metamorphic testing framework details | 🔲 open | Relevant for Slice 8 (simulation) |
 | 12 | ~~Distribution design (how embedded → distributed)~~ | ✅ done | `docs/distribution-design.md` — multi-Raft, CP, strict serializable |
-| 13 | Rust Raft implementations (openraft vs raft-rs) | 🔲 open | Needed when building distribution layer (post-Slice 7) |
-| 14 | Percolator 2PC implementation details (TiKV source) | 🔲 open | Needed for distributed transaction coordinator |
-| 15 | HLC (Hybrid Logical Clocks) vs timestamp oracle | 🔲 open | Decision needed: HLC (CockroachDB) vs oracle (TiKV) |
+| 13 | ~~Distribution deep research (Percolator, Parallel Commits, PD, TSO, Raft)~~ | ✅ done | `docs/distribution-deep-research.md` + `references/percolator-osdi2010.pdf` |
+| 14 | Rust Raft implementations (openraft vs raft-rs) | 🔲 open | Research done; decision deferred to distribution layer (post-Slice 7) |
+| 15 | HLC vs TSO for distributed timestamps | 🔲 open | TSO simpler; HLC scalable; both documented in deep research |
+| 16 | Optimistic vs pessimistic default (distributed) | 🔲 open | TiDB switched to pessimistic for OLTP; PedraDB may want both |
+| 17 | Parallel Commits implementation details | 🔲 open | Target protocol; need design when building pedradb-txn |
+| 18 | In-memory vs durable distributed locks | 🔲 open | TiKV lesson: in-memory is fast, fragile under partition |
 
 ---
 
@@ -186,6 +189,9 @@ new evidence.
 | 24 | Range-based sharding (not hash-based) | Preserves ordered KV semantics | Future layer |
 | 25 | Single-leader per Region (not multi-master) | Strict serializability | Future layer |
 | 26 | Distribution is a layer on top of embedded core | Architecture decision | Future layer |
+| 27 | Cross-Region commit via Parallel Commits (not classic 2PC) | CRDB Parallel Commits | Future layer |
+| 28 | Eventual consistency never as default | Foundation correctness | Future layer |
+| 29 | Percolator-style primary/secondary locks for cross-Region TX | Percolator OSDI'10 + TiKV | Future layer |
 
 ---
 
@@ -224,6 +230,7 @@ new evidence.
 | [`engine-landscape-and-ideal-path.md`](engine-landscape-and-ideal-path.md) | Comparison of 10 engines, the 3 optimizations nobody combined |
 | [`distributed-systems-analysis.md`](distributed-systems-analysis.md) | ScyllaDB, Ceph, TiKV, FDB, CockroachDB, ClickHouse layer analysis |
 | [`distribution-design.md`](distribution-design.md) | How embedded PedraDB becomes distributed (multi-Raft, CP, strict serializable) |
+| [`distribution-deep-research.md`](distribution-deep-research.md) | Protocol-level research: Percolator, Parallel Commits, PD, TSO, Raft libs |
 | [`fdb-limitations-analysis.md`](fdb-limitations-analysis.md) | Why PedraDB solves FDB's 4 limitations |
 | [`open-items.md`](open-items.md) | This file — living status tracker |
 | [`references/`](references/) | All primary sources (papers as PDF+TXT, blog posts, docs) |
