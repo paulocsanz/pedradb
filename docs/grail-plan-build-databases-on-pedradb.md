@@ -223,40 +223,30 @@ Scylla-class only if strategy changes.
 
 ---
 
-## 8. etcd specifically (you meant etcd, not “etc.”)
+## 8. etcd / DCS / Patroni (PedraDB is storage only)
 
-### What etcd is
+**Nuance:** PedraDB does **not** implement the etcd protocol. We implement a
+**DCS product** (elections, leases, watches) **on top**, using PedraDB as the
+**local state-machine store** — e.g. to replace etcd for **Patroni** leader
+election.
 
-- Distributed **coordination** store: config, elections, leases, watches.  
-- Strong consistency, **single Raft group**, bbolt local.  
-- Small data, not app OLTP warehouse.
-
-### How PedraDB helps build an etcd alternative
+Full write-up: [`pedradb-as-dcs-storage-for-patroni.md`](pedradb-as-dcs-storage-for-patroni.md).
 
 ```
-etcd-compatible (or better) API layer
-    watches · leases · revisions · TX (stm)
-           │
-    single- or multi-Raft
-           │
-    PedraDB as state machine storage
-    (ordered keys, atomic apply of log entries)
+Patroni ──► pedra-dcs (Raft + lease + watch + optional etcd API or Patroni plugin)
+               └── PedraDB (bytes, TX/apply, no network)
 ```
 
-| etcd need | PedraDB | Extra product code |
-|-----------|---------|-------------------|
-| Ordered KV | Yes | Key layout for revisions |
-| Atomic multi-key | Yes (apply_batch / TX) | Map Raft entry → batch |
-| Durability | DataSync / Raft log sync | Raft fsync policy |
-| Watch | No in kernel | Watch hub on apply |
-| Lease / TTL | No in kernel | Lease wheel + delete keys |
-| Multi-node | No | Raft membership |
+| Need | Who owns it |
+|------|-------------|
+| `take_leader` / CAS / TTL | **pedra-dcs** |
+| etcd gRPC or Patroni `AbstractDCS` | **pedra-dcs** / plugin |
+| Persist keys, atomic apply, range | **PedraDB** |
+| Multi-node agreement | **Raft in pedra-dcs**, not PedraDB |
 
-**PedraDB does not speak etcd API.** A **pedra-coord** (name TBD) does, the way TiDB speaks MySQL on TiKV.
-
-### Why not “just use etcd”
-
-You might still use etcd. Building on PedraDB makes sense if you want **one kernel** under coord + KV + SQL later (one ops/skill stack) — the grail. That’s a **platform** bet, not a year-1 requirement.
+**Why not “just use etcd”:** platform bet (one kernel under coord + KV + SQL later).
+Year-1: PedraDB kernel first; DCS product second; full etcd wire optional
+(Patroni plugin may be smaller than full etcd clone).
 
 ---
 

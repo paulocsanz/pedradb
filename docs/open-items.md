@@ -248,6 +248,7 @@ new evidence.
 | [`rfc/0001-open-decisions-deep-dive.md`](rfc/0001-open-decisions-deep-dive.md) | O1–O10 deep dive: peers, nuances, regrets |
 | [`session-synthesis-architecture-and-doubt.md`](session-synthesis-architecture-and-doubt.md) | Full conversation synthesis + “is PedraDB wrong?” |
 | [`grail-plan-build-databases-on-pedradb.md`](grail-plan-build-databases-on-pedradb.md) | Plan: kernel → SQLite/etcd/TiKV/TiDB-class products |
+| [`pedradb-as-dcs-storage-for-patroni.md`](pedradb-as-dcs-storage-for-patroni.md) | DCS on PedraDB for Patroni elections (not etcd protocol in core) |
 | [`fdb-limitations-analysis.md`](fdb-limitations-analysis.md) | Why PedraDB solves FDB's 4 limitations |
 | [`open-items.md`](open-items.md) | This file — living status tracker |
 | [`references/`](references/) | All primary sources (papers as PDF+TXT, blog posts, docs) |
