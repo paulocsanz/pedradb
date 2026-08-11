@@ -10,14 +10,21 @@ nothing else. Database builders create layers on top, using transactions to
 guarantee consistency.
 
 ```
-┌───────────────────────────────────────────────┐
-│   SQL DB · Document DB · Graph DB · ...       │  ← user-built layers
-├───────────────────────────────────────────────┤
-│   PedraDB: ordered KV + ACID transactions     │  ← the pillar
-├───────────────────────────────────────────────┤
-│   LSM engine (WiscKey + Monkey + Dostoevsky)  │  ← implementation detail
-└───────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────┐
+│  L3  SQL · Document · Graph · …                          │  layers
+├──────────────────────────────────────────────────────────┤
+│  L2  cluster (future): multi-Raft, FDB/TiKV-class        │
+├──────────────────────────────────────────────────────────┤
+│  L1  transactional KV API (ACID)                         │  the pillar
+├──────────────────────────────────────────────────────────┤
+│  L0  local store: LSM + WiscKey + Monkey + Dostoevsky    │  storage primitive
+└──────────────────────────────────────────────────────────┘
 ```
+
+L0 is the local primitive (RocksDB/Redwood role). L1 is ACID on top (embedded
+first). L2 is optional distribution (TiKV-shaped multi-Raft, FDB-level
+contract, without FDB’s hard distributed taxes). See
+[`docs/architecture-refined.md`](docs/architecture-refined.md).
 
 ## Why transactions at the core
 
@@ -55,6 +62,7 @@ cargo run -p pedradb-cli -- wal /tmp/demo.log
 ## Documentation
 
 - [`docs/architecture.md`](docs/architecture.md) — full architecture and roadmap
+- [`docs/architecture-refined.md`](docs/architecture-refined.md) — L0 store / L1 db / L2 cluster
 - [`docs/fdb-limitations-analysis.md`](docs/fdb-limitations-analysis.md) — why PedraDB solves what FDB can't
 - [`docs/engine-landscape-and-ideal-path.md`](docs/engine-landscape-and-ideal-path.md) — engine comparison
 - [`docs/distributed-systems-analysis.md`](docs/distributed-systems-analysis.md) — ScyllaDB, Ceph, TiKV, FDB analysis

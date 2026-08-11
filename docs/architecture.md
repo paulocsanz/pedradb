@@ -18,30 +18,39 @@ database built on top must reinvent consistency — the hardest problem.
 
 ## Architecture (layered)
 
+Research clarified roles: **FDB ≈ TiKV** (distributed TX KV), not RocksDB
+(local engine). PedraDB is built **bottom-up** so the local primitive can later
+underpin an FDB/TiKV-class system — without FDB’s distributed taxes and without
+bolting TX onto a dumb engine after the fact.
+
 ```
-┌─────────────────────────────────────────────────────┐
-│         SQL DB · Document DB · Graph DB · ...       │  user-built layers
-├─────────────────────────────────────────────────────┤
-│  PedraDB Transactional API                          │  the pillar
-│    Transaction { get, put, delete, range_read }     │
-│    snapshot isolation · ACID · conflict detection   │
-├─────────────────────────────────────────────────────┤
-│  MVCC + Sequence Numbers + Commit Pipeline          │  transaction layer
-├─────────────────────────────────────────────────────┤
-│  LSM Engine (implementation detail, swappable)      │
-│    WiscKey KV separation · Monkey Bloom allocation  │
-│    Dostoevsky Lazy Leveling                         │
-├─────────────────────────────────────────────────────┤
-│  WAL · MemTable · SST · Value Log · Compaction      │  storage
-└─────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│  L3  SQL · Document · Graph · …                              │  user layers
+├──────────────────────────────────────────────────────────────┤
+│  L2  pedradb-cluster (future)                                │  FDB/TiKV-class
+│      multi-Raft · PD/TSO · Parallel Commits                  │  (not FDB roles)
+├──────────────────────────────────────────────────────────────┤
+│  L1  pedradb-db  — Transactional API                         │  the pillar
+│      get/put/delete/range · ACID · MVCC · OCC                │  embedded first
+├──────────────────────────────────────────────────────────────┤
+│  L0  pedradb-store  — local KV storage primitive             │  RocksDB/Redwood role
+│      WAL · MemTable · SST · value log · compaction           │  LSM + WiscKey/Monkey/
+│      (no multi-key TX required at this layer)                │  Dostoevsky
+└──────────────────────────────────────────────────────────────┘
 ```
 
-Everything below the transactional API is an **implementation detail**. The
-public contract is: ordered KV + ACID transactions. The LSM engine underneath
-incorporates three proven-but-unadopted academic optimizations (WiscKey, Monkey,
-Dostoevsky) that no production engine has combined — because backward
-compatibility, testing risk, and cold-start effort prevented it. PedraDB, as a
-new project, faces none of those barriers.
+| Layer | Role | Analogy |
+|-------|------|---------|
+| **L0 store** | Local durable ordered KV | RocksDB (TiKV) / Redwood (FDB) |
+| **L1 db** | ACID TX on L0 | What TiKV had to invent on RocksDB; what FDB bakes into the product |
+| **L2 cluster** | Horizontal scale + HA | TiKV multi-Raft shape; FDB-level consistency goals |
+| **L3 layers** | Data models | TiDB / Record Layer / app code |
+
+**Public contract (L1):** ordered KV + ACID transactions. L0 is the swappable
+storage substrate (in practice our LSM). L2 is optional distribution.
+
+Full refinement (boundaries, crate split, decision log):
+[`architecture-refined.md`](architecture-refined.md).
 
 ## Why transactions at the core (not as a layer)
 
