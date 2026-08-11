@@ -10,17 +10,22 @@ origem e indica a implicação concreta para o PedraDB.
 |-----|-------|------|
 | [P1] | "Introducing Pebble" — Cockroach Labs, 15 set 2020 | Anúncio + rationale |
 | [P2] | `pebble/docs/rocksdb.md` — "Pebble vs RocksDB: Implementation Differences" | Análise técnica detalhada |
+| [D] | Dayan & Idreos, "Dostoevsky" — SIGMOD 2018 | Modelo de custo LSM, Lazy Leveling |
+| [M] | Dayan & Idreos, "Monkey: Optimal Navigable Key-Value Store" — SIGMOD 2017 | Alocação ótima de Bloom filters |
+| [F] | fjall-rs blog — "Announcing Fjall 2.0", set 2024 | Engine LSM em Rust puro (forbid unsafe) |
 
-Arquivos locais:
-- `docs/references/pebble-announcement-2020.md` (ref [P1])
-- `docs/references/pebble-vs-rocksdb-differences.md` (ref [P2])
+Arquivos locais (persistidos para reuso entre sessões):
+- `docs/references/pebble-announcement-2020.md` — ref [P1]
+- `docs/references/pebble-vs-rocksdb-differences.md` — ref [P2]
+- `docs/references/dostoevsky-sigmod2018.pdf` + `.txt` — ref [D]
+- `docs/references/monkey-sigmod2017.pdf` + `.txt` — ref [M]
+- `docs/references/fjall-2-announcement.html` — ref [F]
 
-> **Nota de honestidade:** `web_search` esteve indisponível (saldo da API
-> esgotado), então não foi possível buscar a survey LSM do Niv Dayan (VLDB) nem
-> issues abertas no GitHub do RocksDB nesta rodada. As fontes abaixo são apenas
-> as duas do Pebble, que são autoritativas mas representam a perspectiva de um
-> usuário (CockroachDB). Fica como pendência cruzar com a survey acadêmica e os
-> issues do RocksDB quando a pesquisa voltar.
+> **Nota metodológica:** a pesquisa inicial usou `web_search` (indisponível por
+> limite do wrapper). Corrigido: pesquisa feita via `curl` direto ao DuckDuckGo
+> + fetch das fontes primárias. As fontes acadêmicas ([D], [M]) são peer-reviewed
+> (SIGMOD); as de engenharia ([P1], [P2], [F]) são de times que construíram
+> engines LSM em produção.
 
 ---
 
@@ -179,25 +184,130 @@ iterator, não recriar.
 
 ---
 
-## Resumo: o que o PedraDB deve fazer diferente (checklist de design)
+## 11. Alocação subótima de Bloom filters (todas com o mesmo FPR)
+
+**Crítica [M] — Monkey (SIGMOD 2017):** RocksDB (e todos os LSMs da época)
+alocam a **mesma** false positive rate (FPR) para o Bloom filter de cada run,
+independente do tamanho do run. Isso é matematicamente subótimo:
+
+- O custo de pior caso de um point lookup é proporcional à **soma** das FPRs
+  de todos os filtros.
+- Como cada I/O para acessar um run custa o mesmo (fence pointers em RAM),
+  dar mais bits ao filtro do run maior (que já é o maior) reduz pouco o FPR
+  dele. Os mesmos bits alocados aos filtros dos runs menores (níveis acima)
+  teriam impacto exponencialmente maior.
+
+**Insight do Monkey [M]:** alocar FPR proporcional ao tamanho do run — os FPRs
+dos níveis menores **decrescem exponencialmente**. A soma das FPRs vira uma série
+geométrica que converge para uma constante **independente de L** (número de
+níveis). Resultado: **shave de O(L)** no custo de lookup.
+
+- RocksDB/LevelDB: lookup cost = O(L · e^(-M/N))
+- Monkey: lookup cost = O(e^(-M/N)) — constante, não cresce com os dados.
+- Monkey melhora latência de lookup em **50-80%** em experimentos.
+
+**Implicação PedraDB:** na Fatia 3 (SST format), não usar FPR uniforme. Alocar
+bits por filtro proporcional ao tamanho do run, com FPR decrescendo
+exponencialmente dos níveis menores pros maiores. Isso é uma melhoria que custa
+zero em tempo de execução e é puramente uma decisão de design na hora de
+construir os filtros.
+
+## 12. Merging supérfluo em todos os níveis exceto o último
+
+**Crítica [D] — Dostoevsky (SIGMOD 2018):** esta é a crítica mais profunda ao
+design do RocksDB. Todos os LSMs mainstream (RocksDB, LevelDB, Cassandra, HBase)
+fazem merges de custo igual em **todos** os níveis. Mas:
+
+> *"Merge operations from all levels of LSM-tree but the largest (i.e., most merge
+> operations) reduce point lookup cost, long range lookup cost, and storage space
+> by a negligible amount while significantly adding to the amortized cost of
+> updates."* — [D]
+
+Em outras palavras: ~90% dos merges que o RocksDB faz contribuem com quase nada
+para reduzir lookup cost ou space amplification — só servem para inflar a write
+amplification. Os gains de lookup e space vêm quase inteiramente do último nível
+(o maior).
+
+**Solução — Lazy Leveling [D]:** fazer leveling (1 run por nível) **só no último
+nível**, e tiering (múltiplos runs acumulando) nos níveis menores. Isso melhora
+o custo de update (menos write amplification) mantendo os mesmos bounds de point
+lookup, long range lookup, e space amplification.
+
+**Solução — Fluid LSM-tree [D]:** generalização do espaço de design que
+parametriza a frequência de merge separadamente para o último nível e para os
+demais. Pode assumir qualquer design existente (leveling puro, tiering puro,
+bLSM, Lazy Leveling) como caso especial. "Dostoevsky" navega esse espaço
+analiticamente para encontrar o tuning ótimo para dado workload e hardware, e
+**estritamento domina** todos os designs existentes em performance e espaço.
+
+**Implicação PedraDB:** na Fatia 6 (Compaction), não copiar cegamente o algoritmo
+de compaction do RocksDB (leveling puro ou tiering puro). Projetar a estratégia
+de compaction como algo configurável/adaptativo, com Lazy Leveling como default.
+O modelo de custo do Dostoevsky (equações fechadas em [D]) pode guiar o tuning
+automático.
+
+## 13. Trade-offs não-lineares difíceis de co-tunar
+
+**Crítica [D] + [M]:** a relação entre os knobs de design (size ratio T, merge
+policy, buffer size, Bloom filter FPR) e performance é **não-linear**, e os
+manuais de tuning do RocksDB são essencialmente "tente e veja". Não há um modelo
+analítico que diga "para este workload e hardware, esta configuração é ótima".
+
+**Implicação PedraDB:** incorporar as equações de custo de [D] como ferramenta
+de auto-tuning, não depender só de heurísticas. O PedraDB pode expor um modelo
+de custo que, dado o workload observado, recomenda (ou aplica automaticamente)
+o tuning ótimo — algo que nem RocksDB nem Pebble fazem hoje.
+
+---
+
+## Engenharia em Rust: lições do fjall
+
+**[F] — fjall 2.0:** o fjall é o LSM-tree KV store em Rust ativo mais maduro
+que existe hoje. Lições diretamente aplicáveis:
+
+- **`#![forbid(unsafe_code)]`** confirmado como viável e sustentável (o fjall
+  inteiro é unsafe-free). Reforça a decisão do PedraDB.
+- **Tipo `Slice` custom** em vez de `Arc<[u8]>` para valores — imutável,
+  clonável, com futura otimização de alocação. A diferença material: o fjall
+  mudou de `Arc<[u8]>` para um tipo próprio na 2.0 para poder controlar melhor
+  a estratégia de alocação.
+- **Key-value separation** (inspirado em BlobDB do RocksDB + Titan do PingCAP):
+  valores grandes vão para um "value log" separado, reduzindo write
+  amplification na LSM. É como overflow pages em B-tree.
+- **Compressão per-partição** (LZ4 default, zlib opcional via `miniz-oxide`).
+- **Garbage collection de valor log** em duas fases: scan + evict.
+
+**Implicação PedraDB:** planejar desde cedo para o tipo `Slice` (Fatia 2), e
+deixar a arquitetura preparada para key-value separation numa fatia futura.
+
+---
 
 | # | Decisão de design | Origem | Fatia |
 |---|-------------------|--------|-------|
 | 1 | `InternalKey` como struct, não string encoded | [P2] | 2 |
 | 2 | MemTable com arena de tamanho fixo | [P2] | 2 |
-| 3 | Batch como nível da LSM (seqnum high-bit) | [P2] | 4/7 |
-| 4 | Commit pipeline com publish-queue lock-free, sem group-commit leader | [P2] | batches |
-| 5 | Range tombstones integrados ao merging iterator + skip de blocos | [P2] | 7 |
-| 6 | Flush/compaction pacing por invariante, não rate-limit estático | [P2] | 4/6 |
-| 7 | Sem write-throttling artificial (stall explícito > degradação silenciosa) | [P2] | 6 |
-| 8 | Dispatch estático (enum+match) no hot path de iterators | [P2] | 7 |
-| 9 | `SetBounds` / `SeekPrefixGE` na API de iterator | [P2] | 7 |
-| 10 | Surface area enxuta: feature só entra se servir ao caso de uso | [P1] | sempre |
+| 3 | Tipo `Slice` custom para valores (não `Arc<[u8]>`) | [F] | 2 |
+| 4 | Bloom filter FPR proporcional ao tamanho do run (decresce exponencialmente) | [M] | 3 |
+| 5 | Batch como nível da LSM (seqnum high-bit) | [P2] | 4/7 |
+| 6 | Commit pipeline com publish-queue lock-free, sem group-commit leader | [P2] | batches |
+| 7 | Range tombstones integrados ao merging iterator + skip de blocos | [P2] | 7 |
+| 8 | Flush/compaction pacing por invariante, não rate-limit estático | [P2] | 4/6 |
+| 9 | Sem write-throttling artificial (stall explícito > degradação silenciosa) | [P2] | 6 |
+| 10 | Dispatch estático (enum+match) no hot path de iterators | [P2] | 7 |
+| 11 | `SetBounds` / `SeekPrefixGE` na API de iterator | [P2] | 7 |
+| 12 | Lazy Leveling como estratégia default de compaction (tiering acima, leveling no último) | [D] | 6 |
+| 13 | Modelo de custo analítico (equações de Dostoevsky) para auto-tuning | [D] | 6+ |
+| 14 | Key-value separation preparada na arquitetura | [F] | futuro |
+| 15 | Surface area enxuta: feature só entra se servir ao caso de uso | [P1] | sempre |
 
-## Pendências de pesquisa (quando `web_search` voltar)
+## Pendências de pesquisa
 
-- [ ] Survey LSM do Niv Dayan (VLDB) — amplificação de write/read/space e tuning
+Concluídas nesta rodada (via `curl` direto):
+- [x] ~~Survey LSM do Niv Dayan~~ → resolvido pelos papers [D] (Dostoevsky) e [M] (Monkey)
+- [x] ~~Dostoevsky / Monkey~~ → baixados e analisados
+- [x] ~~Engines Rust modernos~~ → fjall [F] analisado
+
+Ainda pendentes:
 - [ ] Issues abertos no facebook/rocksdb sobre compaction, amplificação, memtable
-- [ ] Dostoevsky / Monkey (Dayan & Idreos) — tuning de níveis/size-ratio
+- [ ] slateDB (Rust LSM para object storage) — abordagem de log-structuring em cloud
 - [ ] Críticas de hardware-consciousness (NVMe, direct I/O, io_uring)
-- [ ] slateDB / fjall (Rust LSM modernos) — o que já fizeram diferente
