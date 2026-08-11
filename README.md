@@ -1,25 +1,25 @@
 # PedraDB
 
-A **transactional key-value storage engine** in Rust, designed as a foundation
-for building databases.
+**Small surface. High speed. Absurd potential to build on top.**
 
-PedraDB is not another KV store. It is a **pillar** upon which other databases
-(SQL, document, graph, time-series) are constructed — inspired by FoundationDB's
-layer concept. The core exposes ordered key-value with ACID transactions and
-nothing else. Database builders create layers on top, using transactions to
-guarantee consistency.
+A tiny pure-Rust **library**: ordered key-value + multi-key **ACID** on one
+machine — nothing else. The kernel other databases (and apps) build on.
+
+```text
+open → begin → get / put / delete / range → commit
+```
+
+No server. No multi-node. No SQL. No index zoo. LSM research stays under the hood.
 
 ```
-  Future multi-node DB (other product)     PedraDB (this repo)
-  “tipo TiKV / FDB”                        local library only
+  App or future multi-node DB              PedraDB (this repo)
         │                                        │
-        └── each node embeds ──────────────────► │  LSM + local ACID TX
-                                                 │  (papel do RocksDB)
+        └── embeds ────────────────────────────► │  local ACID ordered KV
+                                                 │  (RocksDB’s role + TX)
 ```
 
-**PedraDB has no multi-node.** It is what RocksDB is to TiKV: the on-disk
-engine linked into a process. A separate DB we may build later uses PedraDB on
-every node. See [`docs/architecture-refined.md`](docs/architecture-refined.md).
+Focus: [`docs/positioning.md`](docs/positioning.md) · Architecture:
+[`docs/architecture-refined.md`](docs/architecture-refined.md).
 
 ## Why transactions at the core
 
@@ -56,8 +56,9 @@ cargo run -p pedradb-cli -- wal /tmp/demo.log
 
 ## Documentation
 
-- [`docs/architecture.md`](docs/architecture.md) — full architecture and roadmap
-- [`docs/architecture-refined.md`](docs/architecture-refined.md) — L0 store / L1 db / L2 cluster
+- [`docs/positioning.md`](docs/positioning.md) — **focus**: small surface, speed, build-on power
+- [`docs/architecture.md`](docs/architecture.md) — architecture and roadmap
+- [`docs/architecture-refined.md`](docs/architecture-refined.md) — local-only substrate role
 - [`docs/fdb-limitations-analysis.md`](docs/fdb-limitations-analysis.md) — why PedraDB solves what FDB can't
 - [`docs/engine-landscape-and-ideal-path.md`](docs/engine-landscape-and-ideal-path.md) — engine comparison
 - [`docs/distributed-systems-analysis.md`](docs/distributed-systems-analysis.md) — ScyllaDB, Ceph, TiKV, FDB analysis

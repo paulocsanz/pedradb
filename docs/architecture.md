@@ -5,16 +5,28 @@ for building databases.
 
 ## Mission
 
-PedraDB is not "another KV store." It is a **pillar** upon which other databases
-(SQL, document, graph, time-series) are constructed. The core exposes an ordered
-key-value store with ACID transactions and nothing else — no data model, no
-query language, no indexes. Database builders create layers on top, using
-transactions to guarantee consistency between data and indexes.
+**Small surface. High speed. Absurd potential to build on top.**
 
-This model is inspired by FoundationDB's layer concept, where the transaction
-manifesto establishes that **transactions enable abstraction**: they make layers
-composable, reliable, and efficient. Without ACID transactions at the core, every
-database built on top must reinvent consistency — the hardest problem.
+The Rust embed space is crowded (fjall, SurrealKV, redb…). PedraDB does not win
+by feature count. It wins on **power per unit of API**:
+
+> Ordered key-value + multi-key ACID, **local library only** — so layers and
+> future databases can treat it as bedrock.
+
+Public mental model:
+
+```text
+open → begin → get/put/delete/range → commit
+```
+
+No server, no multi-node, no SQL, no indexes in core. Research LSM (WiscKey,
+Monkey, Lazy Leveling) is **under the hood**, not a knob zoo.
+
+Inspired by FoundationDB’s layer concept: **transactions enable abstraction**.
+Unlike FDB, PedraDB stays **in-process** (no cluster tax on the local path).
+Unlike RocksDB, multi-key ACID is **in the kernel**, not bolted on later.
+
+Focus doctrine: [`positioning.md`](positioning.md).
 
 ## Architecture (layered)
 

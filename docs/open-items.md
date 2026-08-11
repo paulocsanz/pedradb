@@ -196,6 +196,8 @@ new evidence.
 | 31 | Own LSM (not wrap RocksDB, not port Redwood) | architecture-refined.md | Store |
 | 32 | Local TX in PedraDB (outer DB embeds it; no bolt-on from zero) | architecture-refined.md | TX |
 | 33 | Distribution docs = research for outer DB, not PedraDB roadmap | architecture-refined.md | Global |
+| 34 | Optimize power/surface ratio; public API ≈ open+TX CRUD+range | positioning.md | Global |
+| 35 | Research LSM under the hood, not API knobs | positioning.md | Global |
 
 ---
 
@@ -240,6 +242,7 @@ new evidence.
 | [`foundationdb-layers-and-products.md`](foundationdb-layers-and-products.md) | What runs on FDB: Record/Document layers, Snowflake, CloudKit, Astra, … |
 | [`etcd-comparison.md`](etcd-comparison.md) | etcd vs PedraDB, FDB, TiKV/TiDB, CRDB, Scylla, RocksDB, … |
 | [`competitive-landscape-rust.md`](competitive-landscape-rust.md) | Rust/local engine peers: fjall, SurrealKV, redb, AgateDB, SlateDB… |
+| [`positioning.md`](positioning.md) | Focus: tiny API, speed, max layer leverage (power/surface) |
 | [`fdb-limitations-analysis.md`](fdb-limitations-analysis.md) | Why PedraDB solves FDB's 4 limitations |
 | [`open-items.md`](open-items.md) | This file — living status tracker |
 | [`references/`](references/) | All primary sources (papers as PDF+TXT, blog posts, docs) |
