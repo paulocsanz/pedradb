@@ -252,6 +252,7 @@ new evidence.
 | [`doctrine-primitives-and-api-layers.md`](doctrine-primitives-and-api-layers.md) | Doctrine: powerful primitive + API layers only |
 | [`plug-map-replace-incumbents.md`](plug-map-replace-incumbents.md) | Where to plug: etcd, Patroni, SQLite, PG, TiKV, TiDB, Scylla |
 | [`upsides-only.md`](upsides-only.md) | Upsides only: multi-writer regions, plugs, platform |
+| [`plan-limitations-and-failure-modes.md`](plan-limitations-and-failure-modes.md) | Where the grail plan can fail later (perf, security, …) |
 | [`fdb-limitations-analysis.md`](fdb-limitations-analysis.md) | Why PedraDB solves FDB's 4 limitations |
 | [`open-items.md`](open-items.md) | This file — living status tracker |
 | [`references/`](references/) | All primary sources (papers as PDF+TXT, blog posts, docs) |
