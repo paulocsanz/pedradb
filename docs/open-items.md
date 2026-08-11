@@ -233,6 +233,7 @@ new evidence.
 | [`distribution-deep-research.md`](distribution-deep-research.md) | Protocol-level research: Percolator, Parallel Commits, PD, TSO, Raft libs |
 | [`scylladb-architecture.md`](scylladb-architecture.md) | How Scylla operates (AP multi-master, Seastar, tunable CL) vs PedraDB |
 | [`tidb-architecture.md`](tidb-architecture.md) | TiDB = MySQL SQL layer on TiKV+PD+TiFlash; validates PedraDB layers |
+| [`foundationdb-layers-and-products.md`](foundationdb-layers-and-products.md) | What runs on FDB: Record/Document layers, Snowflake, CloudKit, Astra, … |
 | [`fdb-limitations-analysis.md`](fdb-limitations-analysis.md) | Why PedraDB solves FDB's 4 limitations |
 | [`open-items.md`](open-items.md) | This file — living status tracker |
 | [`references/`](references/) | All primary sources (papers as PDF+TXT, blog posts, docs) |
