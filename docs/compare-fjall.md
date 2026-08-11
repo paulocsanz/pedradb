@@ -153,6 +153,130 @@ PedraDB is only justified if **power/surface** and **TX-as-identity** are real �
 
 ---
 
+## Nuances (where the simple table lies)
+
+### 1. “Both have transactions” — not the same product shape
+
+| Nuance | fjall | PedraDB target |
+|--------|-------|----------------|
+| TX is optional | **Yes** — `Database` without TX is first-class | **No** — TX is the face of the product |
+| Interactive TX | Only on `*TxDatabase` | Default |
+| WriteBatch vs TX | Batch = atomic write group; **not** full TX (no read-your-writes of intermediary state) | User thinks in `Tx`, not “batch vs map” |
+| Two TX modes | **SingleWriter** (one write TX at a time) **or** **Optimistic** (OCC, retries) | Need one clear story (likely OCC + docs; single-writer is a valid mode but not two products) |
+| Base MVCC without TX | Snapshot reads OK; **RMW can lose updates** if you stay on plain `Database` | Don’t offer a footgun “fast path” that drops serializability by default |
+
+**Nuance:** fjall *can* do serializable TX; many users will still open plain `Database` and think they’re fine. PedraDB’s bet is **no dual personality** — harder to misuse, smaller API, less “modes.”
+
+### 2. Durability is easy to misunderstand
+
+fjall (explicit):
+
+- After insert/remove/commit, data typically hits **OS page cache**, **not** necessarily disk.
+- Matches **RocksDB default** culture.
+- You call `persist(PersistMode)` when you care; on `Drop`, journal tries **sync to disk**.
+
+**Nuance:** “I committed” ≠ “survives power loss” unless you understand persist.  
+PedraDB must pick a **boring default** and document it in one sentence (e.g. commit durability policy), without a zoo of modes — but must not pretend every put is fsync.
+
+### 3. Multi-thread ≠ multi-process
+
+fjall:
+
+- **Multi-thread:** yes, internally synchronized; clone `Database` / keyspaces.
+- **Multi-process:** **no** — single DB must not be opened from two processes.
+
+Same for PedraDB (RocksDB-class embed).  
+**Nuance:** “embedded concurrent” never means “two OS processes share one directory” unless you design that (LMDB does readers; we don’t claim it).
+
+### 4. Keyspaces are a real product fork
+
+fjall: each keyspace = **own physical LSM**; isolation + cross-keyspace atomic ops.
+
+That’s power **and** surface (options per keyspace, mental model of many trees).
+
+PedraDB v1: **one ordered key space**; namespaces = **key prefixes in a layer** (FDB style).
+
+**Nuance:** prefix layering is enough for most “column family” needs if you have TX; physical keyspaces help operational isolation and compaction independence — trade surface vs control. PedraDB chooses **less surface**.
+
+### 5. “Safe Rust” is table stakes, not a wedge
+
+fjall already markets **100% safe** Rust.  
+PedraDB `forbid(unsafe)` does **not** differentiate on marketing alone.
+
+**Nuance:** safety is hygiene; win on API + correctness model + speed + substrate clarity.
+
+### 6. Maturity asymmetry kills abstract wedges
+
+fjall: stable-ish **3.x**, disk format stability claim, migration path on major, community, sponsors.  
+PedraDB: early.
+
+**Nuance:** every architectural advantage is **hypothetical** until phase A (TX demo). “We’ll be a better substrate” does not beat “ships today” for users.
+
+### 7. Implementation split vs monorepo kernel
+
+fjall = `fjall` (DB API) + `lsm-tree` (engine).  
+PedraDB = modules/crates with **store vs tx** boundary, but one kernel product.
+
+**Nuance:** fjall’s split is good engineering; PedraDB shouldn’t reinvent packaging theater — the difference is **which API is sacred** (map+optional TX vs TX kernel).
+
+### 8. Optional features become a gravitational pull
+
+fjall: compression, KV-sep, compaction filters, metrics features, bytes backends…
+
+Each is reasonable. Together they pull toward **RocksDB surface area**.
+
+**Nuance:** PedraDB’s risk is copying that gravity. Research opts should **fold into defaults** when benches prove them, not become `DatabaseBuilder::with_monkey_bloom(true)`.
+
+### 9. Compaction filters vs layers
+
+fjall: custom logic **during compaction** (engine hook).  
+FDB/PedraDB philosophy: rich behavior in **layers using TX**, not engine plugins.
+
+**Nuance:** compaction filters are powerful and leak engine internals into apps. PedraDB should almost always say **no** — keep the kernel dumb.
+
+### 10. Where the wedge actually evaporates
+
+If PedraDB ships:
+
+- optional non-TX mode + keyspaces + filter hooks + many persist modes  
+
+…then it **is** fjall with different branding and less maturity → **use fjall**.
+
+If PedraDB ships:
+
+- one TX API, clear durability, fast path, boring defaults, index layer in &lt;100 lines  
+
+…then it’s a **different product** even if both are “Rust LSM embeds.”
+
+### 11. Justify-use nuance (both local)
+
+| User need | Better first answer |
+|-----------|---------------------|
+| Ship embed LSM this quarter | **fjall** |
+| Learn / teach FDB-style layers in-process | PedraDB *if* TX API is real |
+| Max ops surface / CF-like isolation | **fjall** keyspaces |
+| Minimal API under your own DB product | PedraDB *if* substrate contract exists |
+| Proven disk format + migration story | **fjall** today |
+
+### 12. What we should *not* overclaim vs fjall
+
+| Overclaim | Reality |
+|-----------|---------|
+| “Only we have ACID” | fjall has serializable TX modes |
+| “Only we are pure safe Rust” | fjall claims 100% safe |
+| “Only we are local embed” | both are |
+| “We’re faster” | unproven until benches |
+| “We’re the substrate for multi-node” | marketing until an outer DB exists; fjall can be embedded too |
+
+**Real narrow claims (if earned):**
+
+1. Smaller, TX-mandatory surface → harder to misuse.  
+2. Explicit non-goals → better long-term kernel.  
+3. Implementation quality (amp, recovery, sim) → trust for serious substrate.  
+4. Designed apply/TX hooks for *our* future multi-node DB — still must work as a plain library first.
+
+---
+
 ## Sources
 
 - https://github.com/fjall-rs/fjall README (features, non-goals, transactional modes, stable disk format)
