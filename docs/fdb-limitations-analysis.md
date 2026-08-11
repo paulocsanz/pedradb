@@ -248,11 +248,69 @@ architecture.
 
 ---
 
+## Other official API / design limitations (beyond the big four)
+
+Source: [Known Limitations](https://apple.github.io/foundationdb/known-limitations.html) and
+[Anti-Features](https://apple.github.io/foundationdb/anti-features.html) (FDB 7.3 docs).
+
+### Still design / API limits (not only “the big four”)
+
+| Limitation | Official detail | PedraDB inherits? |
+|------------|-----------------|-------------------|
+| **Key size ≤ 10,000 bytes** | Hard client error if exceeded | Soft: can allow larger keys; still should keep keys small for LSM/range efficiency |
+| **Value size ≤ 100,000 bytes** | Hard limit (already analyzed) | ❌ WiscKey |
+| **Transaction ≤ 10 MB affected data** | Keys/values/ranges written **and** keys/ranges **read** count; values *read* do **not** count | ❌ local memory bound |
+| **TX duration ≤ 5 s** | After first read: further DB reads → `transaction_too_old`; commit with writes → abort | ❌ local MVCC |
+| **Key selectors with large offsets are O(offset)** | Paging via `key+1000` style offsets is a mis-pattern | Same algorithmic issue if we expose offset selectors; fix = limit+resume / iterators (FDB’s own workaround) |
+| **Not a security boundary** | Anyone who can connect can read/write **all** keys; no user-level ACL in core | Same if we keep FDB-style minimal core — ACL is a layer or process isolation |
+| **Hot-key read ceiling** | Reads load-balance across replicas, but RF is fixed (e.g. 3) → ~aggregate of 3 processes for one hot key/range | Embedded: one process; distributed multi-Raft: same class of hot-key problem (single leader) |
+| **No indexes / SQL / query language in core** | Deliberate anti-feature | ✅ same by design (PedraDB anti-features) |
+| **No disconnected / offline-first in core** | Would sacrifice ACID | ✅ same — app/layer problem |
+| **No long R/W transactions (by design)** | MVCC conflict window | Partially: duration ok embedded; OCC aborts remain |
+
+### Soft / operational limits (current version, not pure API)
+
+| Limit | Official note | PedraDB relevance |
+|-------|---------------|-------------------|
+| **Transactions > 1 MB** | “Should modify design”; can hurt performance/availability briefly even under 10 MB cap | Careful with huge embedded TX too (memtable/flushable batch) |
+| **Cluster size ~500 processes** tested | Larger may scale sublinearly | Future distribution concern |
+| **DB size tested ~100 TB** logical KV | Disk much larger with replication | Future scale testing |
+| **HDD + SSD engine** | Rotational disks not recommended for SSD engine | Ops, not API |
+| **Must retry on conflicts / `commit_unknown_result`** | Client responsibility (OCC + uncertain commit) | Same class of API for distributed; embedded can simplify some cases |
+
+### API surface realities (not always listed as “limitations” but constrain design)
+
+These are part of the **minimal KV API contract**, not bugs:
+
+1. **Only ordered KV operations** — get, set, clear, range, atomic ops, watches in some bindings; no joins, no secondary indexes.
+2. **Optimistic concurrency only** — no server-side row locks like InnoDB; conflicts = abort + client retry.
+3. **Client is in the loop** — reads go to storage servers; writes buffer on client until commit (FDB model). Layers implement richer models in process.
+4. **Conflict ranges are explicit or inferred from reads/writes** — snapshot reads intentionally skip conflict tracking (you must add ranges if needed).
+5. **System keyspace `\xff`** — reserved; layers must not corrupt system metadata.
+6. **Watches are not a full CDC product** — useful, but not changefeeds/SQL triggers.
+7. **Language bindings vary** — C API is the core; higher-level features differ by binding.
+
+### What PedraDB still does **not** magically remove
+
+Even with embedded solving 5s / 10MB / 100KB / long TX:
+
+| Remains | Why |
+|---------|-----|
+| OCC abort under contention | Concurrency control method |
+| Need for client retry logic | Same for any OCC system |
+| Hot keys as throughput ceiling (when distributed) | Single-leader per key range |
+| No SQL/indexes in core | Deliberate (same anti-features as FDB) |
+| Security not free | Process isolation / layer ACL |
+| Bad key design (huge keys, offset paging) | Algorithmic / modeling |
+
+---
+
 ## References
 
 | Ref | Source |
 |-----|--------|
-| [FDB-docs] | FoundationDB documentation — transaction size limits, known limitations |
+| [FDB-lim] | apple.github.io/foundationdb/known-limitations.html (2026-08-11) |
+| [FDB-anti] | apple.github.io/foundationdb/anti-features.html (2026-08-11) |
 | [FDB-layer] | FoundationDB layer concept — `docs/references/foundationdb-layer-concept.md` |
 | [W] | WiscKey (FAST'16) — `docs/references/wisckey-fast2016.pdf` |
 | [P2] | Pebble vs RocksDB differences — `docs/references/pebble-vs-rocksdb-differences.md` |
