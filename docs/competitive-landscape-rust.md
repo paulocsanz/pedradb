@@ -1,238 +1,398 @@
-# Competitive landscape: who else is doing what PedraDB is doing?
+# Competitive landscape (detailed): engines in PedraDB’s niche
 
-> Research snapshot (2026-08-11). PedraDB’s niche: **embedded local ordered KV
-> library in Rust**, durable on disk, intended as a **substrate** (RocksDB role)
-> that can also offer **local multi-key ACID**, with a research-backed LSM
-> (WiscKey + Monkey + Lazy Leveling) and FDB-style layer philosophy.
+> Who else builds **local embedded storage** (RocksDB’s job) — especially in
+> Rust — and which of them are actually **multi-node products**?
 >
-> Others *have* built pieces of this. Almost nobody ships the full combination.
-
-Primary sources: project READMEs / GitHub (fjall, redb, SurrealKV, SlateDB,
-Tonbo, sled, AgateDB, parity-db, nebari, wickdb, heed, raft-engine, rust-rocksdb).
-
----
-
-## TL;DR
-
-| Question | Answer |
-|----------|--------|
-| Já existe engine LSM embutida em Rust? | **Sim** — fjall, SurrealKV, wickdb, AgateDB (exp.), outros |
-| Já existe KV embutido com ACID em Rust? | **Sim** — redb, heed/LMDB, fjall (TX opcional), SurrealKV |
-| Alguém é “o RocksDB do TiKV em Rust puro, maduro, default do ecossistema”? | **Não** — TiKV ainda usa RocksDB C++; AgateDB é experimental |
-| Alguém combinou WiscKey + Monkey + Lazy Leveling + sim FDB + TX local + papel de pillar? | **Não de forma completa e madura** |
-| Devemos desistir? | **Não** — mas o espaço **não está vazio**; o diferencial tem que ser explícito |
+> **Short answer on multi-node:** almost all of the “Rust engine peers” are
+> **local libraries only**. Multi-node shows up in **products that *use* those
+> engines** (SurrealDB, TiKV, BonsaiDb), not in the engines themselves — the
+> same split we want for PedraDB.
+>
+> Sources: project READMEs (fetched 2026-08-11). Snapshot, not a living
+> scoreboard of stars/versions.
 
 ---
 
-## Map of the space
+## 1. What PedraDB is (so comparison is fair)
+
+| PedraDB is | PedraDB is not |
+|------------|----------------|
+| Embedded **library** | Network server |
+| **Local** ordered KV (+ planned local multi-key ACID) | Multi-Raft / cluster product |
+| Substrate role (**RocksDB / Redwood**) | TiKV / FDB product role |
+| Pure Rust, local disk LSM (target) | SQL product, Redis, object-store-first DB |
+
+Comparisons below mark each project as:
+
+- **LOCAL** — library / single process (may allow multi-thread)
+- **MULTI-NODE product** — ships cluster/replication as the product
+- **HYBRID** — library *and* optional server/cluster modes
+- **CLOUD-SHAPED local** — “embedded” API but durability is remote object store (not a Raft cluster of peers, but not single-disk either)
+
+---
+
+## 2. Multi-node cheat sheet (the question you asked)
+
+| Project | Multi-node? | What that means |
+|---------|-------------|-----------------|
+| **PedraDB** | **No** | Local library only |
+| **fjall** | **No** | Explicitly *not* a standalone server |
+| **SurrealKV** | **No** | Embedded engine; cluster is **SurrealDB** product |
+| **redb** | **No** | Embedded ACID KV |
+| **heed / LMDB** | **No** | Embedded; multi-*process* readers via mmap, not a cluster |
+| **AgateDB** | **No** | Experimental local engine for TiKV; **TiKV** is multi-node |
+| **wickdb** | **No** | Pure Rust LSM embed |
+| **parity-db** | **No** | Local blockchain state store; node software is separate |
+| **nebari** | **No** | Local TX layer; **BonsaiDb** can network |
+| **raft-engine** | **No** | Local log store *for* Multi-Raft (TiKV); not the cluster |
+| **rust-rocksdb** | **No** | FFI to RocksDB library |
+| **RocksDB / Pebble / Redwood** | **No** | Local engines only |
+| **SlateDB** | **Not peer-cluster** | Embedded API; data on **object storage** (shared durable medium) — replication via object store, not Raft nodes of SlateDB |
+| **Tonbo** | **Not peer-cluster** | Embedded/serverless; data on **S3**; “no server to manage” |
+| **sled** | **No** | Embedded (stale) |
+| **SurrealDB** | **Yes (product)** | Can run distributed cluster; **uses** SurrealKV/RocksDB-class engines underneath |
+| **TiKV** | **Yes** | Multi-Raft distributed KV; **uses** RocksDB (+ raft-engine) |
+| **FoundationDB** | **Yes** | Distributed TX KV; **uses** Redwood locally |
+| **BonsaiDb** | **Optional network** | Local and/or QUIC/WebSocket server; not the same as TiKV multi-Raft sharding |
+| **CockroachDB / TiDB** | **Yes** | Distributed SQL products |
+
+**Rule of thumb:**  
+If it is named like an **engine** (fjall, redb, SurrealKV, RocksDB) → **local**.  
+If it is named like a **database product** (TiKV, FDB, SurrealDB, TiDB) → **may be multi-node**, and it **embeds** a local engine.
+
+PedraDB is intentionally in the **engine** column.
+
+---
+
+## 3. Detailed profiles — closest Rust peers
+
+### 3.1 fjall
+
+| Field | Detail |
+|-------|--------|
+| **URL** | https://github.com/fjall-rs/fjall |
+| **Role** | Embeddable LSM key-value engine |
+| **Multi-node?** | **No.** README: *“It is not: A standalone database server”* |
+| **Network server?** | No |
+| **Language** | Pure Rust, safe |
+| **Structure** | LSM-tree (RocksDB-like) |
+| **API** | Thread-safe BTreeMap-like; multiple keyspaces (column-family analogues) |
+| **Transactions** | **Optional**: `OptimisticTxDatabase` (OCC multi-writer serializable) or `SingleWriterTxDatabase` |
+| **KV separation** | Optional (large blobs) |
+| **Compression** | Built-in (LZ4 default) |
+| **Durability** | App chooses `persist` mode; default flush to OS buffers (RocksDB-like), not always fsync |
+| **Maturity** | Active, one of the most visible Rust LSM embeds |
+| **Used as substrate by a big distributed DB?** | Not as TiKV uses RocksDB; general application embed |
+
+**vs PedraDB**
+
+| Same | Different (PedraDB target) |
+|------|----------------------------|
+| Local LSM library | TX + research compaction/filters as **defaults**, not only optional |
+| Pure Rust | Explicit “outer multi-node DB will embed us” contract |
+| Optional TX / KV-sep | Simulation-first culture; Monkey + Lazy Leveling design center |
+
+**Closest competitor in the ecosystem.**
+
+---
+
+### 3.2 SurrealKV
+
+| Field | Detail |
+|-------|--------|
+| **URL** | https://github.com/surrealdb/surrealkv |
+| **Role** | Versioned embedded LSM for **SurrealDB** (reduce RocksDB dependency) |
+| **Multi-node?** | **No** (engine). Multi-node is **SurrealDB** |
+| **Network server?** | No (library) |
+| **Structure** | LSM + value log (Wisckey-style) + GC |
+| **Transactions** | **ACID**, snapshot isolation / MVCC, concurrent R/W |
+| **Extras** | Time-travel / historical queries, checkpoint & restore, durability levels |
+| **Maturity** | Product-backed by SurrealDB org |
+| **Substrate story** | Yes — but **for SurrealDB**, not a neutral pillar |
+
+**vs PedraDB**
+
+Very similar *technical* checklist (LSM + ACID + value log).  
+PedraDB aims to be **vendor-neutral substrate** + broader research LSM defaults; SurrealKV optimizes for Surreal access patterns and product roadmap.
+
+---
+
+### 3.3 AgateDB (TiKV)
+
+| Field | Detail |
+|-------|--------|
+| **URL** | https://github.com/tikv/agatedb |
+| **Role** | Experimental pure-Rust engine path for **TiKV** (Badger → unistore opts) |
+| **Multi-node?** | **No** (engine). **TiKV** is multi-node and still production-defaults to **RocksDB** |
+| **Network server?** | No |
+| **Structure** | LSM / Badger-like; MVCC (managed mode) |
+| **Maturity** | Early / heavy development |
+| **Why it exists** | Memory safety + TiKV integration; land unistore optimizations |
+
+**vs PedraDB**
+
+Same *strategic* sentence: “something TiKV-class could use instead of RocksDB.”  
+AgateDB is TiKV-shaped and experimental. PedraDB is general-purpose substrate + local TX first.
+
+---
+
+### 3.4 redb
+
+| Field | Detail |
+|-------|--------|
+| **URL** | https://github.com/cberner/redb |
+| **Role** | Simple, portable, high-performance **ACID** embedded KV |
+| **Multi-node?** | **No** |
+| **Network server?** | No |
+| **Structure** | Copy-on-write **B+trees** (LMDB-inspired), not LSM |
+| **Transactions** | First-class write/read transactions |
+| **Maturity** | **Stable**; format stability promised |
+| **Sweet spot** | Embed when you want ACID + pure Rust **today**, not write-amp research |
+
+**vs PedraDB**
+
+Best “ship now” pure-Rust ACID embed for many apps.  
+PedraDB only makes sense if **LSM write path + research opts + substrate for heavy write OLTP** matter more than “stable B-tree ACID.”
+
+---
+
+### 3.5 heed (LMDB)
+
+| Field | Detail |
+|-------|--------|
+| **URL** | https://github.com/meilisearch/heed |
+| **Role** | Rust-centric **LMDB** bindings (typed keys/values, ACID) |
+| **Multi-node?** | **No** |
+| **Network server?** | No |
+| **Multi-process?** | LMDB allows **multiple reader processes** via mmap; **single writer** |
+| **Structure** | B+tree mmap (C core) |
+| **Maturity** | Production (e.g. Meilisearch stack) |
+| **vs PedraDB** | Not pure-Rust engine; not LSM; different concurrency model |
+
+---
+
+## 4. Related Rust projects (same neighborhood, different job)
+
+### 4.1 SlateDB — embedded LSM on **object storage**
+
+| Field | Detail |
+|-------|--------|
+| **Multi-node peer cluster?** | **No** Raft cluster of SlateDB nodes |
+| **Shared durability?** | **Yes** — S3/GCS/ABS/… is the shared log of record |
+| **API** | Embedded library |
+| **Trade-off** | Bottomless + easy “replication” via object store; higher latency/API cost |
+| **vs PedraDB** | Different medium (object store vs local disk). Not a RocksDB replacement for TiKV-style local apply |
+
+### 4.2 Tonbo — serverless / edge, Parquet on S3
+
+| Field | Detail |
+|-------|--------|
+| **Multi-node peer cluster?** | **No** traditional DB cluster |
+| **Model** | Stateless compute + S3 data + manifest coordination (“no server to manage”) |
+| **vs PedraDB** | Cloud-native/serverless state layer, not local LSM substrate |
+
+### 4.3 sled — cautionary tale
+
+| Field | Detail |
+|-------|--------|
+| **Multi-node?** | **No** (embedded) |
+| **Status** | Effectively **stalled / abandoned** relative to early promises |
+| **Lesson** | Ambitious Rust embed DB needs multi-year maintenance or dies |
+
+### 4.4 nebari + BonsaiDb
+
+| Field | Detail |
+|-------|--------|
+| **nebari** | Local transactional storage (alpha); **no** multi-node |
+| **BonsaiDb** | Product on nebari: local **and/or** networked (QUIC/WebSockets) |
+| **Multi-node?** | BonsaiDb = **optional network server**, not TiKV-style sharded multi-Raft by default |
+| **vs PedraDB** | Product-coupled; different storage design |
+
+### 4.5 parity-db
+
+| Field | Detail |
+|-------|--------|
+| **Multi-node?** | **No** — local store for blockchain clients |
+| **Design** | Hash-oriented columns, refcounting, large-batch writes |
+| **vs PedraDB** | Specialized keys/workload |
+
+### 4.6 wickdb
+
+| Field | Detail |
+|-------|--------|
+| **Multi-node?** | **No** (pure Rust LSM embed) |
+| **vs PedraDB** | Same broad niche as fjall; smaller ecosystem mindshare |
+
+### 4.7 raft-engine (TiKV)
+
+| Field | Detail |
+|-------|--------|
+| **Multi-node?** | **No** — local **log** engine for Multi-Raft |
+| **Job** | Store Raft logs efficiently (bitcask-like), not general ordered KV for app data |
+| **vs PedraDB** | Complementary component in a TiKV-like stack, not a competitor for “RocksDB for user data” |
+
+### 4.8 rust-rocksdb
+
+| Field | Detail |
+|-------|--------|
+| **Multi-node?** | **No** |
+| **What** | Rust FFI to **C++ RocksDB** |
+| **vs PedraDB** | Escape hatch / oracle / competitor by dependency, not a rewrite |
+
+---
+
+## 5. Non-Rust substrates and products (context)
+
+| Name | Multi-node? | Role |
+|------|-------------|------|
+| **RocksDB** | No | Industry-default local LSM library |
+| **Pebble** | No | Local LSM for CockroachDB |
+| **Titan** | No | WiscKey-style **plugin** on RocksDB (TiKV) |
+| **TerarkDB** | No | ByteDance RocksDB fork (C++) |
+| **Redwood** | No (alone) | FDB’s local B-tree; not a public embed product |
+| **Badger** | No | Go LSM + value log + TX (Dgraph) |
+| **TiKV** | **Yes** | Distributed TX KV; embeds RocksDB |
+| **FoundationDB** | **Yes** | Distributed TX KV; embeds Redwood |
+| **CockroachDB** | **Yes** | Distributed SQL; embeds Pebble |
+| **TiDB** | **Yes** | SQL layer on TiKV |
+| **SurrealDB** | **Yes (optional cluster)** | Multi-model product; embeds SurrealKV/etc. |
+| **etcd** | **Yes (single Raft group)** | Coordination KV, not app-data substrate |
+
+---
+
+## 6. Feature matrix (engines only)
+
+| Project | Local lib | Multi-node product? | LSM | Local multi-key ACID | KV-sep | Pure Rust engine | Active | Notes |
+|---------|-----------|---------------------|-----|----------------------|--------|------------------|--------|-------|
+| **PedraDB** | Yes | **No** | Yes | Target: yes core | Target: WiscKey | Yes | Early | Neutral substrate |
+| fjall | Yes | **No** | Yes | Optional | Optional | Yes | Yes | Closest peer |
+| SurrealKV | Yes | **No** | Yes | Yes | Yes | Yes | Yes | Surreal-first |
+| AgateDB | Yes | **No** | Yes | MVCC | Badger-like | Yes | Exp. | TiKV-first |
+| redb | Yes | **No** | No (B+tree) | Yes | N/A | Yes | Stable | Ship-today ACID |
+| heed | Yes | **No** | No (LMDB) | Yes (LMDB) | N/A | Bindings | Stable | C core |
+| SlateDB | Yes | Object-store shared | Yes | Limited | Planned | Yes | Yes | Not local-disk RocksDB |
+| Tonbo | Yes | S3-centric | Parquet/S3 | MVCC-ish | N/A | Yes | Yes | Serverless |
+| sled | Yes | **No** | Custom | Partial | No | Yes | Stale | Cautionary |
+| parity-db | Yes | **No** | Custom | Batches | Size tables | Yes | Yes | Chain-specific |
+| wickdb | Yes | **No** | Yes | ? | ? | Yes | Smaller | Peer LSM |
+| raft-engine | Yes | **No** | Log | Batches | N/A | Yes | Yes | Raft logs only |
+| RocksDB | Yes | **No** | Yes | No (core) | BlobDB opt | C++ | Yes | Default substrate |
+| Pebble | Yes | **No** | Yes | No (core) | No | Go | Yes | Under CRDB |
+
+---
+
+## 7. Products that *are* multi-node (and what they embed)
 
 ```
-                    ACID multi-key local TX
-                           ▲
-              redb · heed  │  SurrealKV · fjall(opt)
-              (B-tree)     │  (LSM + TX)
-                           │
-     pure storage ─────────┼──────────── rich product
-     (RocksDB role)        │            (DB product)
-                           │
-              wickdb       │  sled(?) SurrealDB
-              parity-db    │  nebari    (uses SurrealKV)
-              AgateDB      │
-                           │
-                    SlateDB · Tonbo
-                    (object store / serverless)
-                           │
-                           ▼
-                    durability / cloud
+┌──────────────────┐     embeds      ┌─────────────────┐
+│ TiKV (multi-node)│ ───────────────►│ RocksDB (local) │
+│                  │                 │ raft-engine     │
+└──────────────────┘                 └─────────────────┘
+
+┌──────────────────┐     embeds      ┌─────────────────┐
+│ FDB (multi-node) │ ───────────────►│ Redwood (local) │
+└──────────────────┘                 └─────────────────┘
+
+┌──────────────────┐     embeds      ┌─────────────────┐
+│ SurrealDB        │ ───────────────►│ SurrealKV / …   │
+│ (optional cluster)│                └─────────────────┘
+└──────────────────┘
+
+┌──────────────────┐     embeds      ┌─────────────────┐
+│ Future our DB    │ ───────────────►│ PedraDB (local) │  ← intended split
+│ (multi-node)     │                 └─────────────────┘
+└──────────────────┘
 ```
 
-PedraDB aims at the **upper-left → center**: local LSM substrate **with** TX,
-usable by a future outer multi-node DB (like RocksDB under TiKV), not a
-serverless S3 engine and not a full SQL product.
+**None of fjall / redb / SurrealKV / AgateDB / heed are multi-node products.**  
+They are the **left-hand box empty** — the engine column.
 
 ---
 
-## Closest peers (same job class)
+## 8. Implications for PedraDB (detailed)
 
-### 1. fjall — closest active Rust LSM peer
+### 8.1 You are not alone
 
-| | |
-|--|--|
-| **What** | Embeddable LSM KV, pure Rust, BTreeMap-like API |
-| **TX** | Serializable transactions **optional** |
-| **KV-sep** | Optional (large blobs) |
-| **Safety** | 100% safe Rust |
-| **Status** | Active, growing (~2k+★ on GitHub topic search) |
-| **vs PedraDB** | Same niche (local LSM library). PedraDB differentiates on: TX **default**/first-class pillar, Monkey Bloom, Lazy Leveling as design center, explicit “substrate for outer TiKV-class DB”, simulation-first testing culture |
+Building “Rust embedded KV” is a **crowded idea**. fjall and SurrealKV are real.
 
-**Verdict:** Real competitor. Must track feature parity and quality bar.
+### 8.2 Multi-node is not what differentiates you from them
 
-### 2. SurrealKV — LSM + ACID + Wisckey for SurrealDB
+Almost all peers are **also local-only**.  
+Saying “we’re local only” does **not** separate PedraDB from fjall — it **aligns** you with them and with RocksDB.
 
-| | |
-|--|--|
-| **What** | Versioned embedded LSM for **SurrealDB** (replace RocksDB dependency) |
-| **TX** | ACID, snapshot isolation / MVCC |
-| **KV-sep** | Value log (Wisckey-style) + GC |
-| **Extras** | Time-travel queries, checkpoint/restore |
-| **Status** | Product-backed (SurrealDB org) |
-| **vs PedraDB** | Very similar technical goals (LSM + TX + value log). Coupled to SurrealDB evolution; not positioned as universal “pillar for any layer.” No claim of Monkey/Dostoevsky combination |
+What *would* wrongly differentiate you: adding multi-node to PedraDB and competing with TiKV/FDB as a product.
 
-**Verdict:** Strongest proof that “RocksDB replacement in Rust with TX” is in demand. PedraDB is the **generalist substrate**; SurrealKV is **Surreal-first**.
+### 8.3 Real wedges (must be earned)
 
-### 3. AgateDB (TiKV) — experimental RocksDB/Badger path for TiKV
+1. **Research LSM defaults** — WiscKey + Monkey + Lazy Leveling together  
+2. **Local multi-key ACID as core contract** for substrate consumers (not only optional)  
+3. **Neutral pillar** — not Surreal-only, not TiKV-only  
+4. **Simulation / crash discipline** from day one  
+5. **Clear apply/batch API** for a future outer multi-node DB  
 
-| | |
-|--|--|
-| **What** | Pure Rust KV; plan: port Badger → unistore opts → TiKV engine |
-| **TX/MVCC** | KV with MVCC (managed-mode Badger-like) |
-| **Status** | Early / heavy development; not TiKV production default |
-| **vs PedraDB** | Same *strategic* idea (“engine TiKV can use instead of RocksDB”). TiKV-specific optimizations; not a general pillar product |
+### 8.4 What to track monthly
 
-**Verdict:** Validates the “replace RocksDB under a distributed KV” thesis. PedraDB is not TiKV-locked.
+| Peer | Watch for |
+|------|-----------|
+| fjall | TX defaults, KV-sep maturity, production adopters |
+| SurrealKV | Features landing in SurrealDB; generality of API |
+| redb | Performance vs LSM for write-heavy benches |
+| AgateDB | Whether TiKV ever moves off RocksDB |
+| SlateDB | Only if object-store substrate becomes a goal (currently no) |
 
-### 4. redb — mature pure-Rust ACID, but B+tree not LSM
+### 8.5 When *not* to build PedraDB
 
-| | |
-|--|--|
-| **What** | ACID embedded KV, COW B+trees, LMDB-inspired |
-| **Status** | **Stable**, maintained, format stable |
-| **vs PedraDB** | Better “production readiness” story today. Different structure (B-tree): weaker write-heavy asymptotics vs LSM research path. Not aimed at WiscKey/Monkey/Dostoevsky |
+- If “good enough pure Rust LSM + optional TX” = **fjall**  
+- If “stable ACID B-tree” = **redb**  
+- If “Surreal-shaped” = **SurrealKV**  
+- If “just use C++” = **RocksDB** via rust-rocksdb  
 
-**Verdict:** Best “just use this” Rust ACID embed today for many apps. PedraDB only wins if LSM + research path + substrate story matters.
-
-### 5. heed (LMDB bindings) — battle-tested C core
-
-| | |
-|--|--|
-| **What** | Safe Rust API over **LMDB** (mmap B+tree, MVCC, single writer) |
-| **Used by** | Meilisearch, etc. |
-| **vs PedraDB** | Not pure Rust engine; not LSM; single-writer model. Production proven |
-
-**Verdict:** Different trade-offs (read-heavy, simple). Not the same design space.
+Build PedraDB only if the **substrate + research LSM + local ACID** story is the product.
 
 ---
 
-## Related but different niche
+## 9. FAQ
 
-| Project | Niche | Why not the same as PedraDB |
-|---------|-------|-----------------------------|
-| **SlateDB** | LSM **on object storage** (S3…), bottomless | Cloud object latency/cost model; not local-disk RocksDB replacement |
-| **Tonbo** | Embedded for **serverless/edge**; Parquet on S3; Arrow | Stateless compute + S3; not local LSM substrate for TiKV-like DB |
-| **sled** | Embedded “B-link” style DB | Effectively **stalled/abandoned** — cautionary tale |
-| **nebari** | TX storage for BonsaiDb (Couchstore-inspired) | Alpha; product-coupled; not LSM research path |
-| **parity-db** | Blockchain state (hash keys, refcount) | Specialized workload, not general ordered KV pillar |
-| **wickdb** | Pure Rust LSM | Smaller mindshare; check maturity before relying |
-| **raft-engine** | **Only** Multi-Raft logs (bitcask-like) | Log store, not general KV |
-| **rust-rocksdb** | FFI to RocksDB C++ | Not a rewrite; inherits RocksDB design + unsafe boundary |
-| **Pebble** (Go) | CRDB’s RocksDB-class engine | Same *role*, different language; no Monkey/Dostoevsky |
-| **Badger** (Go) | WiscKey LSM + TX | Closest *paper* cousin; Go; Dgraph stack |
+### Do fjall / redb / SurrealKV have multi-node?
 
----
+**No.** Local libraries. (fjall explicitly is not a server.)
 
-## Non-Rust “same problem” (substrate engines)
+### Does SurrealDB have multi-node?
 
-| Engine | Lang | Role | Notes |
-|--------|------|------|-------|
-| **RocksDB** | C++ | De-facto substrate | What PedraDB/SurrealKV/AgateDB want to displace |
-| **Pebble** | Go | RocksDB-class for CRDB | Clean-room; still classic leveling |
-| **WiredTiger** | C | MongoDB | B-tree/LSM hybrid |
-| **Redwood** | C++ | FDB local store | B-tree, not a public “embed me” product |
-| **LevelDB** | C++ | Ancestor | Too limited for modern substrates |
+**Yes (optional distributed mode).** That is the **product**, not SurrealKV.
+
+### Does AgateDB make TiKV pure-Rust end-to-end?
+
+**Not in production today.** TiKV still uses RocksDB; AgateDB is experimental.
+
+### Is SlateDB multi-node?
+
+**Not like TiKV.** Many clients can share object storage; there is no SlateDB Raft membership product in the RocksDB sense. Durability/replication is the object store’s job.
+
+### Should PedraDB add multi-node because FDB has it?
+
+**No.** FDB is the *product* class. PedraDB is the *engine* class. Multi-node belongs to a **future separate DB** that embeds PedraDB.
 
 ---
 
-## Feature matrix (local embed focus)
+## 10. Sources
 
-| Project | Lang | Structure | Local multi-key ACID | KV-sep | Pure Rust | Active | Explicit “substrate for distributed DB” |
-|---------|------|-----------|----------------------|--------|-----------|--------|----------------------------------------|
-| **PedraDB (target)** | Rust | LSM | **Yes (core)** | Yes (WiscKey) | Yes forbid(unsafe) | Early | **Yes** |
-| fjall | Rust | LSM | Optional | Optional | Yes | Yes | Partial (general embed) |
-| SurrealKV | Rust | LSM | Yes | Yes | Yes | Yes (Surreal) | For SurrealDB |
-| AgateDB | Rust | LSM (Badger-like) | MVCC | Badger-style | Yes | Experimental | For TiKV |
-| redb | Rust | B+tree COW | Yes | N/A | Yes | Stable | General embed |
-| heed/LMDB | Rust+C | B+tree mmap | Yes (LMDB model) | N/A | Bindings | Stable | General embed |
-| SlateDB | Rust | LSM→object store | Limited model | Planned | Yes | Yes | Cloud embed |
-| Tonbo | Rust | Parquet/S3 | MVCC-ish | N/A | Yes | Yes | Serverless |
-| sled | Rust | Custom | Partial | No | Yes | **Stale** | Was “the” hope |
-| Pebble | Go | LSM | No (CRDB adds) | No | — | Yes | Under CRDB |
-| RocksDB | C++ | LSM | No (limited) | BlobDB opt | — | Yes | Industry default |
+| Project | Source |
+|---------|--------|
+| fjall | github.com/fjall-rs/fjall README (“not a standalone database server”) |
+| SurrealKV | github.com/surrealdb/surrealkv README |
+| SurrealDB | github.com/surrealdb/surrealdb README (embedded or distributed cluster) |
+| redb | github.com/cberner/redb README |
+| AgateDB | github.com/tikv/agatedb README |
+| SlateDB | github.com/slatedb/slatedb README |
+| Tonbo | github.com/tonbo-io/tonbo README |
+| sled | github.com/spacejam/sled README |
+| parity-db | github.com/paritytech/parity-db README |
+| nebari / BonsaiDb | github.com/khonsulabs/{nebari,bonsaidb} README |
+| heed | github.com/meilisearch/heed README |
+| raft-engine | github.com/tikv/raft-engine README |
+| Titan | github.com/tikv/titan README |
+| TerarkDB | github.com/bytedance/terarkdb README |
 
----
-
-## Where PedraDB still has a wedge (if we execute)
-
-1. **Combination of research defaults**  
-   WiscKey + Monkey Bloom + Lazy Leveling as **default architecture**, not optional experiments. fjall/SurrealKV touch pieces (KV-sep, TX); full trio + cost-model compaction is still rare.
-
-2. **Substrate contract, not a product DB**  
-   Explicit API for “outer TiKV-class process will apply batches / use local TX” — AgateDB is TiKV-specific; SurrealKV is Surreal-specific; fjall is general app embed. PedraDB can be **neutral pillar**.
-
-3. **TX in the substrate without being a network DB**  
-   RocksDB/Pebble force bolt-on TX (TiKV/CRDB pain). redb has TX but B-tree. SurrealKV/fjall prove demand; PedraDB centers TX + LSM research together.
-
-4. **Deterministic simulation as identity**  
-   SlateDB has DST; FDB invented the culture; few local LSMs treat full crash/disk simulation as non-negotiable from day one.
-
-5. **Language + safety**  
-   Pure Rust `forbid(unsafe)` vs rust-rocksdb FFI / C++ RocksDB.
-
-### Honest risks
-
-| Risk | Detail |
-|------|--------|
-| **fjall / SurrealKV ship first** | May cover “good enough” for many users |
-| **redb wins simplicity** | If workload isn’t write-amp heavy, B-tree ACID is fine |
-| **sled trauma** | Ecosystem skeptical of ambitious Rust embed DBs that stall |
-| **TiKV stays on RocksDB** | AgateDB may never replace production RocksDB |
-| **Scope creep** | Becoming “mini TiKV” or “mini FDB” kills the substrate focus |
-
----
-
-## Strategic implications for PedraDB
-
-| Do | Don’t |
-|----|--------|
-| Stay **library-only, local disk** (RocksDB role) | Ship multi-node “because FDB has it” |
-| Make **local ACID** excellent and documented for outer DBs | Compete with Redis features |
-| Publish design: Monkey + Lazy Leveling + WiscKey | Silent clone of fjall |
-| Oracle-test vs RocksDB | Depend on RocksDB in production |
-| Track fjall + SurrealKV releases as peers | Ignore them and reinvent blindly |
-| Kill features that don’t serve “substrate + local TX” | Build SQL/server in core |
-
----
-
-## Recommendation
-
-Your doubt is right: **Rust already has real attempts** (fjall, SurrealKV, redb, AgateDB, SlateDB, Tonbo…).  
-
-PedraDB is **not** inventing “embedded KV in Rust.” It is inventing (or still needs to earn) a **specific corner**:
-
-> Pure-Rust local LSM **substrate** with **first-class multi-key ACID**,  
-> research-optimal compaction/filters/KV-sep,  
-> simulation-hardened,  
-> designed so a **future multi-node DB** embeds it like TiKV embeds RocksDB —  
-> without PedraDB itself becoming that multi-node DB.
-
-If that corner is not held tightly, **fjall or SurrealKV** are the rational defaults instead of a greenfield engine.
-
----
-
-## Sources
-
-| Project | URL |
-|---------|-----|
-| fjall | github.com/fjall-rs/fjall |
-| SurrealKV | github.com/surrealdb/surrealkv |
-| redb | github.com/cberner/redb |
-| SlateDB | github.com/slatedb/slatedb |
-| Tonbo | github.com/tonbo-io/tonbo |
-| sled | github.com/spacejam/sled |
-| AgateDB | github.com/tikv/agatedb |
-| parity-db | github.com/paritytech/parity-db |
-| nebari | github.com/khonsulabs/nebari |
-| heed | github.com/meilisearch/heed |
-| raft-engine | github.com/tikv/raft-engine |
-| wickdb | github.com/Fullstop000/wickdb |
-| rust-rocksdb | github.com/rust-rocksdb/rust-rocksdb |
-| GH search | `lsm embedded language:Rust` (2026-08-11) |
+Related PedraDB docs: `architecture-refined.md`, `engine-landscape-and-ideal-path.md`,
+`distribution-design.md` (outer DB research only).
