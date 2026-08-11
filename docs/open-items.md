@@ -244,6 +244,7 @@ new evidence.
 | [`competitive-landscape-rust.md`](competitive-landscape-rust.md) | Rust/local engine peers: fjall, SurrealKV, redb, AgateDB, SlateDB… |
 | [`positioning.md`](positioning.md) | Focus: tiny API, speed, max layer leverage (power/surface) |
 | [`compare-fjall.md`](compare-fjall.md) | PedraDB vs fjall (closest Rust peer) |
+| [`rfc/0001-pedradb-high-level-spec.md`](rfc/0001-pedradb-high-level-spec.md) | **Normative** high-level RFC (P0/P1/P2, open decisions) |
 | [`fdb-limitations-analysis.md`](fdb-limitations-analysis.md) | Why PedraDB solves FDB's 4 limitations |
 | [`open-items.md`](open-items.md) | This file — living status tracker |
 | [`references/`](references/) | All primary sources (papers as PDF+TXT, blog posts, docs) |
