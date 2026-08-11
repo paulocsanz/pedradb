@@ -239,6 +239,7 @@ new evidence.
 | [`tidb-architecture.md`](tidb-architecture.md) | TiDB = MySQL SQL layer on TiKV+PD+TiFlash; validates PedraDB layers |
 | [`foundationdb-layers-and-products.md`](foundationdb-layers-and-products.md) | What runs on FDB: Record/Document layers, Snowflake, CloudKit, Astra, … |
 | [`etcd-comparison.md`](etcd-comparison.md) | etcd vs PedraDB, FDB, TiKV/TiDB, CRDB, Scylla, RocksDB, … |
+| [`competitive-landscape-rust.md`](competitive-landscape-rust.md) | Rust/local engine peers: fjall, SurrealKV, redb, AgateDB, SlateDB… |
 | [`fdb-limitations-analysis.md`](fdb-limitations-analysis.md) | Why PedraDB solves FDB's 4 limitations |
 | [`open-items.md`](open-items.md) | This file — living status tracker |
 | [`references/`](references/) | All primary sources (papers as PDF+TXT, blog posts, docs) |
