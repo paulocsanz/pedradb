@@ -366,7 +366,93 @@ begins (post-Slice 7).
 
 ---
 
-## 7. Consistency model spectrum (refined)
+## 7. Where FoundationDB sits in this comparison
+
+FDB is **not** "another multi-Raft KV." It is a **third architecture** that
+shares PedraDB's *product philosophy* (transactions in the core, layers on top,
+strict serializability) but uses a **totally different distribution machinery**.
+
+### The three families
+
+```
+Family 1: Multi-Raft shared-nothing          Family 2: Decoupled roles (FDB)
+  TiKV, CockroachDB, etcd-per-range            FoundationDB
+  ─────────────────────────────────          ──────────────────────────
+  Data sharded into Regions/Ranges           Data sharded into storage servers
+  Each shard = independent Raft group        Write path is a GLOBAL pipeline:
+  TX across shards = 2PC / Parallel Commits    GRV proxy → commit proxy →
+  Local engine has NO core TX                  resolver → tx log → storage
+  (RocksDB/Pebble: just storage)             Local engine is B-tree (Redwood),
+                                               not LSM; TX is the system
+
+Family 3: Embedded + TX first (PedraDB path)
+  ─────────────────────────────────────────
+  Core = ordered KV + ACID (like FDB's API contract)
+  Deployment = library (unlike FDB's client-server)
+  Future distribution = multi-Raft (like TiKV/CRDB),
+    NOT FDB's decoupled roles
+  Advantage: local TX already exist before you distribute
+```
+
+### Head-to-head matrix
+
+| Dimension | FoundationDB | TiKV / CockroachDB | PedraDB (target) |
+|-----------|--------------|--------------------|------------------|
+| **API philosophy** | Ordered KV + ACID only; layers on top | TiKV: raw TX KV; CRDB: SQL-first | Same as FDB (layers) |
+| **Process model** | Client–server cluster (always distributed) | Client–server cluster | Embedded first; distribution is optional layer |
+| **Local storage** | Redwood B+tree (was SQLite-derived) | RocksDB / Pebble (LSM) | LSM (WiscKey + Monkey + Lazy Leveling) |
+| **Local TX in engine?** | N/A — TX is the distributed system | ❌ bolted on (Percolator / CRDB TX layer) | ✅ in core before distribution |
+| **Distribution architecture** | **Decoupled roles** (master, proxies, resolvers, tx logs, storage) | **Multi-Raft** Regions + 2PC | Multi-Raft (chosen) over FDB roles |
+| **Write path** | Every commit goes through global pipeline | Write to Region leader → Raft majority | Same as multi-Raft when distributed |
+| **Read path** | Client → storage server **directly** (bypasses TX system after GRV) | Client → Region leader (or follower stale) | Same as multi-Raft when distributed |
+| **Global write order** | Yes — master assigns one commit version sequence | No global order; per-Range order + TX timestamps | Per-Region + distributed TX timestamps |
+| **Multi-write** | Parallel commit proxies, but **one global version stream** | True multi-leader across Regions | Multi-leader across Regions |
+| **Conflict detection** | Central **resolvers** (hold ~5s of writes) | Percolator locks / CRDB intents + timestamp cache | Local OCC + cross-Region 2PC/Parallel Commits |
+| **Consistency** | **Strict serializable** | TiKV: SI/RR; CRDB: serializable | Strict serializable (FDB-level goal) |
+| **CAP** | CP | CP | CP |
+| **TX timeout** | Hard **5s** (resolver/MVCC window) | Soft (e.g. TiDB max-txn-ttl ~1h) | Generous embedded; distributed TBD |
+| **TX size limit** | **10 MB** (resolver + network) | Larger practical limits | Unlimited embedded; network-bound when distributed |
+| **Value size limit** | **~100 KB** | Larger (RocksDB/Pebble) | Large via WiscKey |
+| **Long-running TX** | Effectively no | Possible with limits | Yes embedded; coordinated when distributed |
+| **Testing crown jewel** | Deterministic simulation (~1T CPU-hrs) | Integration + Jepsen-style | Adopt FDB-style simulation |
+| **Language / impl** | C++ + Flow DSL | Go (CRDB) / Rust (TiKV) | Rust, `forbid(unsafe)` |
+| **Why not used by CRDB/TiKV** | Closed-source 2015–2018; not embeddable; Flow; size/time limits | Built their own | — |
+
+### What PedraDB copies from FDB vs what it does not
+
+| From FDB | PedraDB? | Why |
+|----------|----------|-----|
+| Layer concept (TX in core, no SQL/indexes in core) | ✅ Yes | Architecture soul of the project |
+| Strict serializability as the contract | ✅ Yes | Layers need correctness |
+| CP under partition | ✅ Yes | Same CAP choice |
+| Deterministic simulation testing | ✅ Yes (Slice 8) | Only way to trust novel compaction + later Raft |
+| OCC + conflict ranges | ✅ Yes (local) | Fits embedded; FDB does it distributed via resolvers |
+| Decoupled roles (proxies/resolvers/tx logs) | ❌ No | Extreme complexity; bespoke; hard to reimplement safely |
+| 5s / 10MB / 100KB limits | ❌ No (embedded); only soft network limits when distributed | Those are *distributed architecture taxes*, not fundamentals |
+| Client–server only | ❌ No | Embedded is the empty niche |
+| B-tree Redwood | ❌ No | LSM + academic optimizations |
+
+### One-sentence placements
+
+- **FoundationDB** = the gold standard for *transactional API + consistency + simulation testing*, implemented as a **specialized distributed OS** of roles.
+- **TiKV / CockroachDB** = gold standard for *multi-Raft distribution over a dumb local engine*, with TX bolted on.
+- **PedraDB** = FDB's *contract and testing ambition* + TiKV/CRDB's *distribution shape* + a *local engine that already has TX and modern LSM research* — and start **embedded**, so FDB's hard limits never become the default experience.
+
+### Why FDB is not "eventual" and not "simple multi-write"
+
+- **Not eventual:** strict serializability; minority partition cannot accept divergent writes.
+- **Not multi-master:** there is a single master version assignment; commit proxies scale throughput but do not create independent write leaders per key range the way multi-Raft leaders do.
+- **Reads scale better than multi-Raft leaders** in theory: clients talk to storage servers directly after getting a read version. Writes still pay the global pipeline.
+
+### Practical implication for PedraDB roadmap
+
+1. **Now–Slice 7:** be FDB-like *as a library* (embedded TX KV) without any of FDB's distributed taxes.
+2. **Later distribution:** look like TiKV/CRDB *on the wire* (multi-Raft + Parallel Commits), not like FDB's role zoo.
+3. **Always:** keep FDB's simulation culture as the correctness bar.
+
+---
+
+## 8. Consistency model spectrum (refined)
 
 | System | Default isolation | Linearizable reads? | Multi-write? | TSO / clock |
 |--------|-------------------|---------------------|--------------|-------------|
@@ -384,7 +470,7 @@ indexes on top of eventual bases).
 
 ---
 
-## 8. Multi-write refined (from primary sources)
+## 9. Multi-write refined (from primary sources)
 
 ### What production systems actually do
 
@@ -410,7 +496,7 @@ has exactly one leader. Not multi-master.
 
 ---
 
-## 9. Protocol latency model (concrete)
+## 10. Protocol latency model (concrete)
 
 Assume LAN RTT = 0.5 ms, consensus (majority of 3) ≈ 1 RTT, WAN RTT = 50 ms.
 
@@ -426,7 +512,7 @@ Assume LAN RTT = 0.5 ms, consensus (majority of 3) ≈ 1 RTT, WAN RTT = 50 ms.
 
 ---
 
-## 10. What PedraDB's local TX buys us (refined)
+## 11. What PedraDB's local TX buys us (refined)
 
 When building the distributed layer, PedraDB's embedded ACID changes the work:
 
@@ -445,7 +531,7 @@ not reinventing local transactions.** That is PedraDB's structural advantage.
 
 ---
 
-## 11. Refined recommendations for PedraDB
+## 12. Refined recommendations for PedraDB
 
 ### Settled (from this research)
 
@@ -480,7 +566,7 @@ not reinventing local transactions.** That is PedraDB's structural advantage.
 
 ---
 
-## 12. Implementation sketch (future crate layout)
+## 13. Implementation sketch (future crate layout)
 
 ```
 pedradb-core/          # embedded TX + LSM (current work)
@@ -494,7 +580,7 @@ None of these start until Slices 0–7 of the embedded core are solid.
 
 ---
 
-## 13. Sources
+## 14. Sources
 
 | Ref | Source | Persisted / fetched |
 |-----|--------|---------------------|
