@@ -63,6 +63,7 @@ cargo run -p pedradb-cli -- wal /tmp/demo.log
 - [`docs/scylladb-architecture.md`](docs/scylladb-architecture.md) — how ScyllaDB operates (AP multi-master NoSQL)
 - [`docs/tidb-architecture.md`](docs/tidb-architecture.md) — TiDB as SQL layer on TiKV/PD/TiFlash
 - [`docs/foundationdb-layers-and-products.md`](docs/foundationdb-layers-and-products.md) — DBs and products built on FoundationDB
+- [`docs/etcd-comparison.md`](docs/etcd-comparison.md) — etcd vs all systems in this research
 - [`docs/rocksdb-critiques-and-improvements.md`](docs/rocksdb-critiques-and-improvements.md) — detailed critiques
 - [`docs/open-items.md`](docs/open-items.md) — living list of open items and status
 - [`docs/references/`](docs/references/) — all primary sources (papers, docs)
