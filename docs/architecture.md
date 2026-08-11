@@ -148,26 +148,18 @@ Sources persisted in `docs/references/`.
 ```
 pedradb/
 ├── crates/
-│   ├── pedradb-core/      # transactional KV engine (the pillar)
-│   ├── pedradb-sim/       # deterministic simulation test framework
-│   ├── pedradb-oracle/    # RocksDB bindings for cross-validation (dev only)
+│   ├── pedradb-core/      # L0 store + L1 db (modules split as they grow)
+│   ├── pedradb-sim/       # deterministic simulation
+│   ├── pedradb-oracle/    # RocksDB oracle for L0 tests only
 │   └── pedradb-cli/       # CLI
 ├── docs/
-│   ├── architecture.md                  # this file
-│   ├── rocksdb-critiques-and-improvements.md
-│   ├── engine-landscape-and-ideal-path.md
-│   ├── distributed-systems-analysis.md
-│   ├── distribution-design.md           # how embedded → distributed
-│   ├── distribution-deep-research.md    # Percolator, Parallel Commits, PD, Raft
-│   ├── scylladb-architecture.md         # Scylla: AP multi-master, Seastar, tunable CL
-│   ├── tidb-architecture.md             # TiDB: SQL layer on TiKV+PD+TiFlash
-│   ├── fdb-limitations-analysis.md
-│   ├── open-items.md                    # living list of open items
-│   └── references/                      # all primary sources
+│   ├── architecture.md
+│   ├── architecture-refined.md   # L0/L1/L2 split (authoritative layering)
+│   └── … (see docs/open-items.md index)
 └── clippy.toml
 ```
 
-`pedradb-core` is `#![forbid(unsafe_code)]`. The engine is pure Rust.
+`pedradb-core` is `#![forbid(unsafe_code)]`. WAL today is early **L0**.
 
 ## Delivery roadmap
 
