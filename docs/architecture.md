@@ -70,6 +70,30 @@ distributed transaction layers on top — years of engineering each. PedraDB put
 transactions in the core so that database builders never have to solve
 consistency themselves.
 
+## Why PedraDB solves what FDB can't
+
+FoundationDB has the right model (transactions in the core) but pays a
+distributed-systems tax: 5-second transaction timeout, 10 MB transaction size
+limit, 100 KB value limit, no long-running transactions. Every one of these
+is a consequence of network round-trips, remote resolvers, and replication —
+**not** a fundamental limit.
+
+PedraDB is **embedded**: the transaction manager and storage engine share one
+process. The commit path is a function call, not a network hop. This means:
+
+| FDB limit | Why it exists | PedraDB |
+|-----------|---------------|---------|
+| 5 s timeout | Network latency across proxies/resolvers/storage | Local commit, no network |
+| 10 MB tx size | Serialized over network to resolver | Direct MemTable write, no serialization |
+| 100 KB value | Replicated 3× through proxies | WiscKey value log, written once |
+| No long txns | Resolver memory + cluster-wide MVCC GC | Local MVCC, GC tied to local snapshots |
+
+The **one** limit PedraDB shares with FDB is OCC conflict rate for long-running
+concurrent transactions — a property of optimistic concurrency control itself,
+not of any deployment topology.
+
+Full analysis: [`docs/fdb-limitations-analysis.md`](fdb-limitations-analysis.md).
+
 ## Anti-features (deliberately NOT in the core)
 
 Following the FoundationDB principle: the core is minimal so it can be as strong
@@ -119,10 +143,13 @@ pedradb/
 │   ├── pedradb-oracle/    # RocksDB bindings for cross-validation (dev only)
 │   └── pedradb-cli/       # CLI
 ├── docs/
-│   ├── architecture.md            # this file
+│   ├── architecture.md                  # this file
 │   ├── rocksdb-critiques-and-improvements.md
 │   ├── engine-landscape-and-ideal-path.md
-│   └── references/                # all primary sources
+│   ├── distributed-systems-analysis.md
+│   ├── fdb-limitations-analysis.md
+│   ├── open-items.md                    # living list of open items
+│   └── references/                      # all primary sources
 └── clippy.toml
 ```
 
@@ -133,11 +160,34 @@ pedradb/
 | Slice | Status | What it delivers |
 |-------|--------|------------------|
 | 0. WAL | ✅ done | Append-only crash-safe log (block format, masked CRC32C, recovery) |
-| 1. InternalKey + MemTable | ⏳ next | Versioned keys as structs, sorted in-memory buffer, sequence numbers |
-| 2. Transaction manager | 🔲 | Snapshot isolation, conflict detection, atomic commit (WAL + memtable) |
-| 3. Transactional API | 🔲 | Public `Transaction` API: get/put/delete/range_read, begin/commit/abort |
-| 4. SST format + flush | 🔲 | Block-based SST with Monkey Bloom, WiscKey value log, MemTable→SST |
-| 5. Get + range scan | 🔲 | Point lookup + merged iterator across MemTable ∪ SSTs, MVCC filtering |
-| 6. Compaction | 🔲 | Lazy Leveling (Dostoevsky), invariant-based pacing |
-| 7. Deterministic simulation | 🔲 | FDB-style simulation: disk/time/crash modeling, reproducible runs |
-| 8. Cross-validation harness | 🔲 | Oracle diff: same workload vs RocksDB, snapshot comparison |
+| 1. InternalKey + MemTable | ⏳ next | Versioned keys as structs (`InternalKey`), sorted in-memory buffer (skip list or B-tree), fixed-size arena, sequence numbers, custom `Slice` type |
+| 2. Transaction manager | 🔲 | Snapshot isolation via MVCC, optimistic concurrency control (OCC), conflict detection (interval tree of read/write ranges), atomic commit (WAL + memtable publish) |
+| 3. Transactional API | 🔲 | Public `Transaction` API: `get`/`put`/`delete`/`range_read`, `begin`/`commit`/`abort`; conflict-range declarations |
+| 4. SST format + flush | 🔲 | Block-based SST with Monkey Bloom allocation, WiscKey value log for large values, MemTable→SST flush, flushable batches for oversized transactions |
+| 5. Get + range scan | 🔲 | Point lookup + merged iterator across MemTable ∪ SSTs, MVCC filtering by sequence number, range tombstone integration with block-skip |
+| 6. Compaction | 🔲 | Lazy Leveling (Dostoevsky) as default, tiering in small levels + leveling in largest, invariant-based pacing (not static rate limit), analytical cost model for auto-tuning |
+| 7. Version GC | 🔲 | Reclaim MVCC versions older than the oldest active snapshot; "snapshot too old" safety valve; WiscKey value-log garbage collection (scan + evict) |
+| 8. Deterministic simulation | 🔲 | FDB-style simulation: disk/time/crash modeling, reproducible runs, randomized workloads + fault injection |
+| 9. Cross-validation harness | 🔲 | Oracle diff: same workload vs RocksDB, snapshot comparison, format compatibility checks |
+
+### Cross-cutting engineering items (span multiple slices)
+
+These design decisions are resolved in principle but need concrete implementation
+within their target slices:
+
+| Item | Target slice | Status | Notes |
+|------|-------------|--------|-------|
+| `InternalKey` as struct (not encoded string) | 1 | designed | Pebble lesson [P2]; avoids alloc on every Seek |
+| Fixed-size MemTable arena | 1 | designed | Pebble lesson [P2]; prevents OOM from large batches |
+| Custom `Slice` type for values | 1 | designed | fjall lesson [F]; controls allocation strategy |
+| Conflict detection (interval tree) | 2 | designed | Range-based, not per-key; reduces false aborts |
+| Commit publish-queue (lock-free) | 2 | designed | Pebble lesson [P2]; no group-commit leader |
+| Flushable batches for oversized txns | 4 | designed | Pebble lesson [P2]; batch becomes LSM level |
+| Monkey Bloom allocation | 4 | designed | FPR ∝ run size, decreasing exponentially [M] |
+| WiscKey value log | 4 | designed | Values written once, never compacted [W] |
+| Range tombstones in merging iterator | 5 | designed | Pebble lesson [P2]; block-skip optimization |
+| Static dispatch (enum+match) on hot path | 5 | designed | Pebble lesson [P2]; no trait objects in iterators |
+| Lazy Leveling compaction strategy | 6 | designed | Dostoevsky [D]; needs simulation to validate |
+| Version GC strategy | 7 | **open** | Stop-the-world vs incremental vs "snapshot too old" error |
+| Value-log GC strategy | 7 | **open** | Online vs batch; interaction with compaction |
+| Backpressure strategy | 7 | **open** | Explicit stall vs adaptive admission control |
