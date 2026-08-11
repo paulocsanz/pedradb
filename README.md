@@ -61,6 +61,7 @@ cargo run -p pedradb-cli -- wal /tmp/demo.log
 - [`docs/distribution-design.md`](docs/distribution-design.md) — how embedded PedraDB becomes distributed
 - [`docs/distribution-deep-research.md`](docs/distribution-deep-research.md) — Percolator, Parallel Commits, PD, TSO, Raft
 - [`docs/scylladb-architecture.md`](docs/scylladb-architecture.md) — how ScyllaDB operates (AP multi-master NoSQL)
+- [`docs/tidb-architecture.md`](docs/tidb-architecture.md) — TiDB as SQL layer on TiKV/PD/TiFlash
 - [`docs/rocksdb-critiques-and-improvements.md`](docs/rocksdb-critiques-and-improvements.md) — detailed critiques
 - [`docs/open-items.md`](docs/open-items.md) — living list of open items and status
 - [`docs/references/`](docs/references/) — all primary sources (papers, docs)

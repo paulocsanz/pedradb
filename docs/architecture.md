@@ -151,6 +151,7 @@ pedradb/
 │   ├── distribution-design.md           # how embedded → distributed
 │   ├── distribution-deep-research.md    # Percolator, Parallel Commits, PD, Raft
 │   ├── scylladb-architecture.md         # Scylla: AP multi-master, Seastar, tunable CL
+│   ├── tidb-architecture.md             # TiDB: SQL layer on TiKV+PD+TiFlash
 │   ├── fdb-limitations-analysis.md
 │   ├── open-items.md                    # living list of open items
 │   └── references/                      # all primary sources
