@@ -1,44 +1,59 @@
 # PedraDB
 
-A clean-room reimplementation of RocksDB-style LSM-tree storage, in Rust.
+A **transactional key-value storage engine** in Rust, designed as a foundation
+for building databases.
 
-PedraDB rebuilds RocksDB's storage layers (WAL, MemTable, SSTable, flush,
-compaction) from scratch in idiomatic Rust, using the real RocksDB only as an
-external test oracle. No C++ is linked into the shipped engine.
+PedraDB is not another KV store. It is a **pillar** upon which other databases
+(SQL, document, graph, time-series) are constructed — inspired by FoundationDB's
+layer concept. The core exposes ordered key-value with ACID transactions and
+nothing else. Database builders create layers on top, using transactions to
+guarantee consistency.
+
+```
+┌───────────────────────────────────────────────┐
+│   SQL DB · Document DB · Graph DB · ...       │  ← user-built layers
+├───────────────────────────────────────────────┤
+│   PedraDB: ordered KV + ACID transactions     │  ← the pillar
+├───────────────────────────────────────────────┤
+│   LSM engine (WiscKey + Monkey + Dostoevsky)  │  ← implementation detail
+└───────────────────────────────────────────────┘
+```
+
+## Why transactions at the core
+
+RocksDB has no ACID transactions. Every database built on it (CockroachDB, TiKV)
+had to reinvent distributed consistency from scratch — years of engineering each.
+PedraDB puts transactions in the core so database builders never have to solve
+consistency themselves.
 
 ## Status
 
-| Slice         | Status |
-|---------------|--------|
-| WAL           | ✅ done |
-| MemTable      | ⏳ next |
-| SST format    | 🔲 |
-| Flush         | 🔲 |
-| Get / lookup  | 🔲 |
-| Compaction    | 🔲 |
-| Iterators     | 🔲 |
-| Transactions  | 🔲 |
+| Slice | Status |
+|-------|--------|
+| WAL (crash-safe log) | ✅ |
+| InternalKey + MemTable | ⏳ next |
+| Transaction manager | 🔲 |
+| Transactional API | 🔲 |
+| SST + flush (WiscKey + Monkey) | 🔲 |
+| Get + range scan | 🔲 |
+| Compaction (Lazy Leveling) | 🔲 |
+| Deterministic simulation | 🔲 |
 
 See [`docs/architecture.md`](docs/architecture.md) for the full design.
 
 ## Build & test
 
 ```sh
-cargo test --workspace          # core tests (no C++ needed)
+cargo test --workspace
 cargo clippy --workspace --all-targets
-cargo run -p pedradb-cli -- wal /tmp/demo.log   # WAL demo: write, fsync, recover
+cargo run -p pedradb-cli -- wal /tmp/demo.log
 ```
 
-The live RocksDB oracle is opt-in (requires a C++ toolchain):
+## Documentation
 
-```sh
-cargo test -p pedradb-oracle --features live-rocksdb
-```
-
-## Layout
-
-- `crates/pedradb-core` — the engine (`#![forbid(unsafe_code)]`)
-- `crates/pedradb-oracle` — RocksDB bindings + diff harness (dev/test only)
-- `crates/pedradb-cli` — the `pedra` CLI
+- [`docs/architecture.md`](docs/architecture.md) — full architecture and roadmap
+- [`docs/engine-landscape-and-ideal-path.md`](docs/engine-landscape-and-ideal-path.md) — engine comparison
+- [`docs/rocksdb-critiques-and-improvements.md`](docs/rocksdb-critiques-and-improvements.md) — detailed critiques
+- [`docs/references/`](docs/references/) — all primary sources (papers, docs)
 
 License: Apache-2.0.

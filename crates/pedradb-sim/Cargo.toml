@@ -1,0 +1,9 @@
+[package]
+name = "pedradb-sim"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Deterministic simulation testing framework for PedraDB (FoundationDB-style)"
+
+[dependencies]
+pedradb-core.workspace = true
