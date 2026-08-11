@@ -101,9 +101,80 @@ Never: implement etcd/Postgres wire **inside** `pedradb-core`.
 
 ---
 
+## Syntax on top of deep protocols (another layer, not the kernel)
+
+If the **semantic protocols** are solid (DCS ops, distributed TX KV, relational
+catalog + execution), a **syntax / wire layer** is mostly translation:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  L4  Syntax / wire                                          │
+│  SQL text · Postgres/MySQL wire · etcd gRPC · CQL · JSON   │
+│  “só parse + mapear pra ops do protocolo de baixo”         │
+├─────────────────────────────────────────────────────────────┤
+│  L3  Deep protocol (semantic API)                           │
+│  take_leader · lease · watch · BeginTX · Get/Put range     │
+│  Insert row · secondary index maintain · DDL ops             │
+│  stable, versioned, language-agnostic                        │
+├─────────────────────────────────────────────────────────────┤
+│  L2  Distribution (if any)                                  │
+│  Raft · regions · 2PC                                        │
+├─────────────────────────────────────────────────────────────┤
+│  L1  PedraDB primitive                                      │
+│  ordered KV + multi-key ACID                                 │
+└─────────────────────────────────────────────────────────────┘
+```
+
+| Layer | Owns | Example |
+|-------|------|---------|
+| **Syntax** | Parsers, wire codecs, error codes for clients | `SELECT …`, Postgres startup packet, etcd `Watch` RPC |
+| **Deep protocol** | Real meaning: elections, TX, schema | `AttemptAcquireLeader`, `Commit(writes)`, `CreateIndex` |
+| **Distribution** | Multi-node agreement | Raft apply |
+| **PedraDB** | Bytes + local atomicity | `put`/`range`/`commit` |
+
+### Why this split helps
+
+1. **Many syntaxes, one semantics** — Postgres-wire *and* MySQL-wire *and* a
+   custom RPC can all call the same deep SQL/TX protocol.  
+2. **Patroni** can use a **small deep DCS protocol** first; etcd gRPC syntax
+   later is “just” another codec on the same ops (`LeaseGrant`, `Txn`, …).  
+3. **Testing** targets the deep protocol (correctness); syntax tests are
+   compatibility suites.  
+4. **PedraDB never sees SQL or etcd** — only the deep layer’s encoded keys/TX.
+
+### What not to do
+
+| Mistake | Why |
+|---------|-----|
+| Parse SQL inside PedraDB | Kernel bloat; freezes storage to one product |
+| Invent wire format before deep ops are stable | Rewrite codecs forever |
+| Duplicate semantics per syntax | Two “almost leaders” for etcd vs Patroni plugin |
+
+### Order of build
+
+```
+1. Primitive (PedraDB)     — must work
+2. Deep protocol           — DCS ops / KV TX / relational ops (as needed)
+3. One client (library)    — apps call deep protocol directly
+4. Syntax/wire             — optional sugar for ecosystem compatibility
+```
+
+**Example Patroni path:**
+
+```
+Path B (faster):  Patroni plugin → deep DCS API → Raft → PedraDB
+Path A (later):   Patroni etcd client → etcd syntax layer → same deep DCS API → …
+```
+
+Same deep protocol; syntax is optional.
+
+---
+
 ## Bottom line
 
 Yes: **powerful primitive + API layers only.**  
 PedraDB = primitive.  
-etcd-for-Patroni, horizontal Postgres, TiKV-class = **layers** (and distribution next to them).  
+**Deep protocols** = product semantics (DCS, TX KV, SQL ops).  
+**Syntax** = thin mapping (SQL text, etcd gRPC, PG wire) on those protocols.  
+etcd-for-Patroni, horizontal Postgres, TiKV-class = layers — never protocols inside the kernel.  
 That’s the whole architecture.
