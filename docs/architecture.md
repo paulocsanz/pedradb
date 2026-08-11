@@ -5,28 +5,21 @@ for building databases.
 
 ## Mission
 
-**Small surface. High speed. Absurd potential to build on top.**
+**Justify use first.** Someone picks PedraDB because:
 
-The Rust embed space is crowded (fjall, SurrealKV, redb…). PedraDB does not win
-by feature count. It wins on **power per unit of API**:
-
-> Ordered key-value + multi-key ACID, **local library only** — so layers and
-> future databases can treat it as bedrock.
-
-Public mental model:
+> Multi-key ACID + ordered KV, embedded, tiny API — correct updates without a
+> cluster and without bolting TX onto RocksDB.
 
 ```text
 open → begin → get/put/delete/range → commit
 ```
 
-No server, no multi-node, no SQL, no indexes in core. Research LSM (WiscKey,
-Monkey, Lazy Leveling) is **under the hood**, not a knob zoo.
+**Later** (trust and speed, not the pitch): deterministic simulation, research
+LSM (WiscKey / Monkey / Lazy Leveling), optional outer multi-node product that
+*embeds* PedraDB.
 
-Inspired by FoundationDB’s layer concept: **transactions enable abstraction**.
-Unlike FDB, PedraDB stays **in-process** (no cluster tax on the local path).
-Unlike RocksDB, multi-key ACID is **in the kernel**, not bolted on later.
-
-Focus doctrine: [`positioning.md`](positioning.md).
+Local library only. No server, no multi-node in this product.  
+Doctrine: [`positioning.md`](positioning.md) (phases A→D: justify → real → fast → trust).
 
 ## Architecture (layered)
 

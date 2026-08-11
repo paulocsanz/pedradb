@@ -1,15 +1,16 @@
 # PedraDB
 
-**Small surface. High speed. Absurd potential to build on top.**
-
-A tiny pure-Rust **library**: ordered key-value + multi-key **ACID** on one
-machine — nothing else. The kernel other databases (and apps) build on.
+**Why use it:** multi-key ACID + ordered KV, in-process, tiny API — so you can
+update data (and indexes) correctly without a cluster or C++ RocksDB.
 
 ```text
 open → begin → get / put / delete / range → commit
 ```
 
-No server. No multi-node. No SQL. No index zoo. LSM research stays under the hood.
+Small surface. Fast path. Build on top.  
+No server, no multi-node, no SQL. Simulation and research LSM come **after**
+that use is real — they don’t justify the crate by themselves.
+See [`docs/positioning.md`](docs/positioning.md).
 
 ```
   App or future multi-node DB              PedraDB (this repo)

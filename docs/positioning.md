@@ -1,82 +1,153 @@
-# PedraDB positioning: small surface, high speed, absurd build-on potential
+# PedraDB positioning: justify use first; polish later
 
-> The embedded KV space in Rust is **crowded** (fjall, SurrealKV, redb, heed…).
-> PedraDB only wins with a **tight focus**, not a bigger feature list.
+> The embedded KV space is **crowded**. PedraDB only exists if someone has a
+> **clear reason to use it**. Deterministic simulation, academic LSM papers,
+> and long-term architecture are **how we earn trust later** — not the pitch,
+> and not the first milestone.
 >
-> **North star:** the smallest durable API that still lets someone build a
-> serious database (or app) on top — and make that path **fast**.
+> **Order of proof:** useful kernel → fast enough → correct under stress →
+> fancy substrate story. Never the reverse.
 
 ---
 
-## One sentence
+## 1. Why would anyone use this? (justify first)
 
-**PedraDB is a tiny, blazing-fast, pure-Rust library: ordered key-value + ACID transactions on one machine — nothing else — so other systems can treat it as bedrock.**
+Someone reaches for PedraDB instead of the defaults when **all** of this is true:
 
-Not a server. Not a cluster. Not SQL. Not Redis. Not “RocksDB with 400 options.”
+| Need | Why not the default |
+|------|---------------------|
+| **Embedded** (in-process library) | Postgres/FDB/TiKV are servers/clusters |
+| **Durable ordered KV** | Hash maps / Redis aren’t the source of truth |
+| **Multi-key ACID in one commit** | RocksDB/Pebble don’t give real multi-key TX; easy to corrupt “data + index” |
+| **Tiny API** | Don’t want RocksDB’s surface or a SQL engine |
+| **Rust, no C++ in the hot path** | rust-rocksdb is FFI + RocksDB’s complexity |
+
+**The use case in one line:**
+
+> “I need to update several keys atomically, keep them ordered for scans, survive crash, link a library — and later maybe build a real DB/layer on that.”
+
+Concrete examples (early justification):
+
+1. **App embed** — accounts, jobs, metadata: debit A, credit B, write audit row — **one transaction**.  
+2. **Secondary index layer** — `put(row)` + `put(index_entry)` same commit (FDB layer pattern, local).  
+3. **State machine under your own protocol** — apply a batch of key updates atomically when *your* code is ready (outer product later; even solo apps need this).
+
+If we cannot demo (1) and (2) **simply and quickly**, papers and sim don’t matter.
+
+### What does *not* justify use (yet)
+
+| Pitch | Problem |
+|-------|---------|
+| “We have deterministic simulation” | User doesn’t open a crate for your test framework |
+| “WiscKey + Monkey + Dostoevsky” | User cares about p99 and not losing data, not paper names |
+| “Future multi-node like TiKV” | That’s another product; doesn’t justify *this* library today |
+| “More features than fjall” | Crowded field; we lose feature races |
+
+Those become **reasons to trust and stay** after the kernel already justifies itself.
 
 ---
 
-## The problem with a crowded field
+## 2. One sentence (product)
 
-| Temptation | Why it fails |
-|------------|--------------|
-| Match fjall feature-for-feature | Becomes a worse fjall |
-| Match SurrealKV + time-travel + … | Becomes a worse Surreal engine |
-| Add multi-node “like FDB” | Becomes a worse TiKV, years of work |
-| Add SQL / documents in core | Kills the pillar; layers never form |
-| Expose every RocksDB knob | Surface explodes; nobody trusts defaults |
+**PedraDB is a tiny, fast, pure-Rust library: ordered key-value + multi-key ACID on one machine — so you can build correctly on top without a cluster or a C++ engine.**
 
-**Crowded markets reward subtraction.**  
-FDB’s power is what it **refused** to put in the core. Same rule.
-
----
-
-## Focus (what we optimize for)
-
-Three constraints, in order:
-
-### 1. Surface area → **tiny**
-
-Public mental model fits on a card:
+Not a server. Not multi-node. Not SQL.
 
 ```text
-open(path) -> Db
-db.begin() -> Tx
-tx.get(k) / tx.put(k,v) / tx.delete(k) / tx.range(a..b)
-tx.commit() / tx.abort()
+open → begin → get / put / delete / range → commit
 ```
 
-Optional later (still small): snapshots, explicit conflict ranges, sync policy.
-**Not** in v1 surface: column families zoo, merge operators zoo, SQL, secondary
-indexes, network, multi-tenancy product features, admin RPC, changefeeds.
+---
 
-If a feature doesn’t make **layers more correct or simpler**, it doesn’t enter.
+## 3. Order of delivery (justify → then deepen)
 
-### 2. Speed → **default path is fast**
+| Phase | Ships | Proves |
+|-------|--------|--------|
+| **A. Justify use** | WAL + memtable + get/put + **TX commit** + basic durability | “I can build a correct multi-key update with a small API” |
+| **B. Make it real** | SST, range, crash recovery, compaction that doesn’t fall over | Survives restart; handles more than a toy |
+| **C. Make it fast** | Benches, less amp, fewer allocs; *then* research opts if they move numbers | Worth embedding under something serious |
+| **D. Make it trusted** | Deterministic sim, fault injection, oracle vs RocksDB where useful | Sleep at night; adopt as substrate |
+| **E. Optional later** | Outer multi-node product embeds PedraDB | Scale-out story — **not** required to justify PedraDB |
 
-- Hot path: put/get/commit/range with minimal allocation and syscalls.
-- Durable when asked; no mandatory “enterprise tax” on every op.
-- LSM tuned for **write-heavy substrate** use (ingest + TX), not 200 knobs.
-- Measure early (microbenches + sim); refuse features that slow the core path.
+**Determinism / sim = phase D, not phase A.**  
+We may write tests early; we don’t *sell* or *block* the product on a full FDB-style simulator before the API is useful.
 
-“Absurdo de potencial” **sem** ser rápido vira paperware. Speed is table stakes
-for anyone choosing an engine under their product.
+**Research LSM = phase C tools**, not the homepage. Ship a correct LSM path first; adopt WiscKey/Monkey/Lazy Leveling when they buy measurable speed/space — still zero extra API surface.
 
-### 3. Build-on potential → **transactions as the superpower**
+---
 
-The only reason this exists instead of “just use fjall/redb”:
+## 4. Focus once use is justified
 
-> **Multi-key ACID on an ordered KV, local, in-process**  
-> so a layer can update data + indexes in one commit without inventing consensus.
+Three constraints, still valid — but **after** the “why use” is real:
 
-That is FDB’s manifesto, **without** requiring a cluster and **without**
-FDB’s 5s/10MB/100KB taxes on the local path.
+### Surface → tiny
 
-Everything we build (WAL, MemTable, SST, MVCC, compaction) exists to make
-**that API** correct and fast — not to showcase storage algorithms for their own sake.
+Same card API. If a layer can do it with TX → not core.
 
-Research (WiscKey / Monkey / Lazy Leveling) is **implementation**, not product
-surface. Users don’t configure “Monkey”; they get fast lookups and lower write amp.
+### Speed → default path fast
+
+Measure get/put/commit. Refuse surface that slows the kernel.
+
+### Build-on → TX is the superpower
+
+Multi-key ACID + order is why this isn’t “just another map on disk.”
+
+---
+
+## 5. Crowded field: how we still justify
+
+| Default choice | When PedraDB wins the “why” |
+|----------------|----------------------------|
+| **fjall** | You want **TX-first kernel** and a ruthlessly smaller “database kernel” story, not optional TX + broader embed kit |
+| **redb** | You need **write-heavy LSM** substrate long-term, not B-tree ACID for lighter embeds |
+| **SurrealKV** | You’re **not** building inside Surreal’s product |
+| **RocksDB** | You want **Rust + multi-key ACID** without C++ and without bolting TX yourself |
+| **FDB/TiKV** | You need **embed / single process**, not a cluster |
+
+Until phase A works, none of that paragraph is earned.
+
+---
+
+## 6. Non-goals (unchanged, keep surface small)
+
+No multi-node, no server, no SQL/indexes in core, no knob zoo, no object-store-first, no Redis types.
+
+---
+
+## 7. Success metrics by phase
+
+| Phase | Metric that matters |
+|-------|---------------------|
+| **A Justify** | &lt;30 min to a multi-key TX demo; index-layer sketch in tens of lines |
+| **B Real** | Crash + reopen keeps committed data; range works |
+| **C Fast** | Benches vs a peer on get/put/commit; no silent regressions |
+| **D Trust** | Sim/fault tests catch real bugs; oracle where it pays off |
+
+Stars, paper count, and “we planned multi-node” do not justify use.
+
+---
+
+## 8. Decision filter (updated)
+
+1. **Does this make the justify-use path clearer or faster to demo?** If no, defer.  
+2. **Does it protect the tiny TX API?**  
+3. **Is it speed/correctness of get/put/commit/range?**  
+4. **Can a layer do it?** → layer  
+5. **Is it sim/papers/cluster storytelling before phase A works?** → later  
+
+---
+
+## 9. Decision log
+
+| # | Decision | Status |
+|---|----------|--------|
+| P0 | **Justify use first** (useful TX KV kernel) before sim/research as identity | **Accepted** |
+| P1 | Power/surface ratio | Accepted |
+| P2 | API ≈ open + TX CRUD + range | Accepted |
+| P3 | Speed of that path | Accepted |
+| P4 | Multi-key ACID = build-on superpower | Accepted |
+| P5 | Local library only | Accepted |
+| P6 | Sim + papers = later trust/speed, not the pitch | **Accepted** |
 
 ---
 
