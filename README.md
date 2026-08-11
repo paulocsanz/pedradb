@@ -22,6 +22,7 @@ See [`docs/positioning.md`](docs/positioning.md).
 **Spec (normative high-level):** [`docs/rfc/0001-pedradb-high-level-spec.md`](docs/rfc/0001-pedradb-high-level-spec.md)  
 **Open decisions deep dive:** [`docs/rfc/0001-open-decisions-deep-dive.md`](docs/rfc/0001-open-decisions-deep-dive.md)  
 **Session synthesis + strategic doubt:** [`docs/session-synthesis-architecture-and-doubt.md`](docs/session-synthesis-architecture-and-doubt.md)  
+**Grail plan (DBs on PedraDB, incl. etcd-class):** [`docs/grail-plan-build-databases-on-pedradb.md`](docs/grail-plan-build-databases-on-pedradb.md)  
 Focus: [`docs/positioning.md`](docs/positioning.md) · Architecture:
 [`docs/architecture-refined.md`](docs/architecture-refined.md).
 
