@@ -243,6 +243,7 @@ new evidence.
 | [`etcd-comparison.md`](etcd-comparison.md) | etcd vs PedraDB, FDB, TiKV/TiDB, CRDB, Scylla, RocksDB, … |
 | [`competitive-landscape-rust.md`](competitive-landscape-rust.md) | Rust/local engine peers: fjall, SurrealKV, redb, AgateDB, SlateDB… |
 | [`positioning.md`](positioning.md) | Focus: tiny API, speed, max layer leverage (power/surface) |
+| [`compare-fjall.md`](compare-fjall.md) | PedraDB vs fjall (closest Rust peer) |
 | [`fdb-limitations-analysis.md`](fdb-limitations-analysis.md) | Why PedraDB solves FDB's 4 limitations |
 | [`open-items.md`](open-items.md) | This file — living status tracker |
 | [`references/`](references/) | All primary sources (papers as PDF+TXT, blog posts, docs) |
