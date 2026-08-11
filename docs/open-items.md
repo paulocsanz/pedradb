@@ -250,6 +250,7 @@ new evidence.
 | [`grail-plan-build-databases-on-pedradb.md`](grail-plan-build-databases-on-pedradb.md) | Plan: kernel → SQLite/etcd/TiKV/TiDB-class products |
 | [`pedradb-as-dcs-storage-for-patroni.md`](pedradb-as-dcs-storage-for-patroni.md) | DCS on PedraDB for Patroni elections (not etcd protocol in core) |
 | [`doctrine-primitives-and-api-layers.md`](doctrine-primitives-and-api-layers.md) | Doctrine: powerful primitive + API layers only |
+| [`plug-map-replace-incumbents.md`](plug-map-replace-incumbents.md) | Where to plug: etcd, Patroni, SQLite, PG, TiKV, TiDB, Scylla |
 | [`fdb-limitations-analysis.md`](fdb-limitations-analysis.md) | Why PedraDB solves FDB's 4 limitations |
 | [`open-items.md`](open-items.md) | This file — living status tracker |
 | [`references/`](references/) | All primary sources (papers as PDF+TXT, blog posts, docs) |

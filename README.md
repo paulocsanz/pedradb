@@ -24,6 +24,7 @@ See [`docs/positioning.md`](docs/positioning.md).
 **Session synthesis + strategic doubt:** [`docs/session-synthesis-architecture-and-doubt.md`](docs/session-synthesis-architecture-and-doubt.md)  
 **Grail plan (DBs on PedraDB, incl. etcd-class):** [`docs/grail-plan-build-databases-on-pedradb.md`](docs/grail-plan-build-databases-on-pedradb.md)  
 **Doctrine (primitive + API layers only):** [`docs/doctrine-primitives-and-api-layers.md`](docs/doctrine-primitives-and-api-layers.md)  
+**Plug map (replace etcd/SQLite/PG/TiKV/…):** [`docs/plug-map-replace-incumbents.md`](docs/plug-map-replace-incumbents.md)  
 Focus: [`docs/positioning.md`](docs/positioning.md) · Architecture:
 [`docs/architecture-refined.md`](docs/architecture-refined.md).
 
