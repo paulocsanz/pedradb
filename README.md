@@ -58,6 +58,7 @@ cargo run -p pedradb-cli -- wal /tmp/demo.log
 - [`docs/fdb-limitations-analysis.md`](docs/fdb-limitations-analysis.md) — why PedraDB solves what FDB can't
 - [`docs/engine-landscape-and-ideal-path.md`](docs/engine-landscape-and-ideal-path.md) — engine comparison
 - [`docs/distributed-systems-analysis.md`](docs/distributed-systems-analysis.md) — ScyllaDB, Ceph, TiKV, FDB analysis
+- [`docs/distribution-design.md`](docs/distribution-design.md) — how embedded PedraDB becomes distributed
 - [`docs/rocksdb-critiques-and-improvements.md`](docs/rocksdb-critiques-and-improvements.md) — detailed critiques
 - [`docs/open-items.md`](docs/open-items.md) — living list of open items and status
 - [`docs/references/`](docs/references/) — all primary sources (papers, docs)

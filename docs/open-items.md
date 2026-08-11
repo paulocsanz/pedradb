@@ -146,6 +146,10 @@ range) but O(ranges) memory, which is typically much smaller.
 | 9 | Hardware-consciousness (NVMe, direct I/O, io_uring) | 🔲 open | Relevant for Slice 4 (SST I/O) and performance |
 | 10 | Redwood (FDB's new B+tree) internals | 🔲 open | Interesting for comparison, not blocking |
 | 11 | Pebble metamorphic testing framework details | 🔲 open | Relevant for Slice 8 (simulation) |
+| 12 | ~~Distribution design (how embedded → distributed)~~ | ✅ done | `docs/distribution-design.md` — multi-Raft, CP, strict serializable |
+| 13 | Rust Raft implementations (openraft vs raft-rs) | 🔲 open | Needed when building distribution layer (post-Slice 7) |
+| 14 | Percolator 2PC implementation details (TiKV source) | 🔲 open | Needed for distributed transaction coordinator |
+| 15 | HLC (Hybrid Logical Clocks) vs timestamp oracle | 🔲 open | Decision needed: HLC (CockroachDB) vs oracle (TiKV) |
 
 ---
 
@@ -176,6 +180,12 @@ new evidence.
 | 18 | Deterministic simulation testing | FDB | Slice 8 |
 | 19 | No built-in distribution (embedded first) | Architecture decision | Global |
 | 20 | WAL block format compatible with RocksDB | Compatibility | Slice 0 ✅ |
+| 21 | Distribution via multi-Raft (not FDB decoupled model) | Simplicity, latency, Rust Raft libs | Future layer |
+| 22 | Strict serializable consistency (not eventual) | FDB model; correctness non-negotiable | Future layer |
+| 23 | CP choice (consistency over availability during partition) | FDB CAP analysis | Future layer |
+| 24 | Range-based sharding (not hash-based) | Preserves ordered KV semantics | Future layer |
+| 25 | Single-leader per Region (not multi-master) | Strict serializability | Future layer |
+| 26 | Distribution is a layer on top of embedded core | Architecture decision | Future layer |
 
 ---
 
@@ -213,6 +223,7 @@ new evidence.
 | [`rocksdb-critiques-and-improvements.md`](rocksdb-critiques-and-improvements.md) | 15 design decisions from Pebble, Dostoevsky, Monkey, fjall |
 | [`engine-landscape-and-ideal-path.md`](engine-landscape-and-ideal-path.md) | Comparison of 10 engines, the 3 optimizations nobody combined |
 | [`distributed-systems-analysis.md`](distributed-systems-analysis.md) | ScyllaDB, Ceph, TiKV, FDB, CockroachDB, ClickHouse layer analysis |
+| [`distribution-design.md`](distribution-design.md) | How embedded PedraDB becomes distributed (multi-Raft, CP, strict serializable) |
 | [`fdb-limitations-analysis.md`](fdb-limitations-analysis.md) | Why PedraDB solves FDB's 4 limitations |
 | [`open-items.md`](open-items.md) | This file — living status tracker |
 | [`references/`](references/) | All primary sources (papers as PDF+TXT, blog posts, docs) |

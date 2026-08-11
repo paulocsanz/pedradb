@@ -106,9 +106,10 @@ as possible.
   indexes using transactions (store index entries alongside data, update atomically).
 - **No analytic frameworks.** No MapReduce, no streaming. Layers build these on top
   of range reads.
-- **No built-in distribution.** PedraDB is an embedded engine. Distribution (Raft,
-  sharding, cross-node transactions) is a separate concern — layers or wrappers
-  add it when needed.
+- **No built-in distribution.** PedraDB is an embedded engine. Distribution
+  (Raft, sharding, cross-node transactions) is a separate concern — layers or
+  wrappers add it when needed. The full distribution design is documented in
+  [`distribution-design.md`](distribution-design.md).
 
 ## Testing strategy: deterministic simulation
 
@@ -147,6 +148,7 @@ pedradb/
 │   ├── rocksdb-critiques-and-improvements.md
 │   ├── engine-landscape-and-ideal-path.md
 │   ├── distributed-systems-analysis.md
+│   ├── distribution-design.md           # how embedded → distributed
 │   ├── fdb-limitations-analysis.md
 │   ├── open-items.md                    # living list of open items
 │   └── references/                      # all primary sources
