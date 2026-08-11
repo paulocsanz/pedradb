@@ -192,10 +192,10 @@ new evidence.
 | 27 | Cross-Region commit via Parallel Commits (not classic 2PC) | CRDB Parallel Commits | Future layer |
 | 28 | Eventual consistency never as default | Foundation correctness | Future layer |
 | 29 | Percolator-style primary/secondary locks for cross-Region TX | Percolator OSDI'10 + TiKV | Future layer |
-| 30 | Explicit L0 store / L1 db / L2 cluster layering | architecture-refined.md | Global |
-| 31 | L0 = own LSM (not wrap RocksDB, not port Redwood) | architecture-refined.md | L0 |
-| 32 | L1 before L2 (TX before distribution) | architecture-refined.md | L1→L2 |
-| 33 | Logical store/db module split; crate split when stable | architecture-refined.md | Deferred |
+| 30 | PedraDB = local library only (RocksDB role); multi-node = other product | architecture-refined.md | Global |
+| 31 | Own LSM (not wrap RocksDB, not port Redwood) | architecture-refined.md | Store |
+| 32 | Local TX in PedraDB (outer DB embeds it; no bolt-on from zero) | architecture-refined.md | TX |
+| 33 | Distribution docs = research for outer DB, not PedraDB roadmap | architecture-refined.md | Global |
 
 ---
 

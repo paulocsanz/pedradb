@@ -18,39 +18,41 @@ database built on top must reinvent consistency — the hardest problem.
 
 ## Architecture (layered)
 
-Research clarified roles: **FDB ≈ TiKV** (distributed TX KV), not RocksDB
-(local engine). PedraDB is built **bottom-up** so the local primitive can later
-underpin an FDB/TiKV-class system — without FDB’s distributed taxes and without
-bolting TX onto a dumb engine after the fact.
+**PedraDB is local only** — the library TiKV would embed instead of RocksDB
+(or FDB instead of Redwood). **Multi-node is not PedraDB.** A future separate
+DB product may embed PedraDB on every node.
+
+```
+  Future outer DB (NOT PedraDB)          PedraDB (this project)
+  multi-Raft · PD · gRPC · 2PC           single process, one machine
+       │                                      │
+       │  each node links ──────────────────► │  library
+       │                                      │  LSM + local ACID TX
+```
+
+Inside the PedraDB library (still one node):
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
-│  L3  SQL · Document · Graph · …                              │  user layers
+│  Local transactional API                                     │
+│    get/put/delete/range · ACID · MVCC · OCC                  │
 ├──────────────────────────────────────────────────────────────┤
-│  L2  pedradb-cluster (future)                                │  FDB/TiKV-class
-│      multi-Raft · PD/TSO · Parallel Commits                  │  (not FDB roles)
-├──────────────────────────────────────────────────────────────┤
-│  L1  pedradb-db  — Transactional API                         │  the pillar
-│      get/put/delete/range · ACID · MVCC · OCC                │  embedded first
-├──────────────────────────────────────────────────────────────┤
-│  L0  pedradb-store  — local KV storage primitive             │  RocksDB/Redwood role
-│      WAL · MemTable · SST · value log · compaction           │  LSM + WiscKey/Monkey/
-│      (no multi-key TX required at this layer)                │  Dostoevsky
+│  Local storage engine                                        │
+│    WAL · MemTable · SST · value log · compaction             │
+│    LSM + WiscKey + Monkey + Dostoevsky                       │
 └──────────────────────────────────────────────────────────────┘
 ```
 
-| Layer | Role | Analogy |
+| Piece | Role | Analogy |
 |-------|------|---------|
-| **L0 store** | Local durable ordered KV | RocksDB (TiKV) / Redwood (FDB) |
-| **L1 db** | ACID TX on L0 | What TiKV had to invent on RocksDB; what FDB bakes into the product |
-| **L2 cluster** | Horizontal scale + HA | TiKV multi-Raft shape; FDB-level consistency goals |
-| **L3 layers** | Data models | TiDB / Record Layer / app code |
+| **PedraDB** | Local engine (+ local TX) | **RocksDB** in TiKV / **Redwood** in FDB |
+| **Outer multi-node DB** (later, other name) | Cluster product | **TiKV** / **FDB** |
+| **Layers** | SQL, doc, graph… | TiDB / Record Layer |
 
-**Public contract (L1):** ordered KV + ACID transactions. L0 is the swappable
-storage substrate (in practice our LSM). L2 is optional distribution.
+**Public contract:** ordered KV + ACID transactions **on one machine** (embedded).
+No Raft, no PD, no network service in this product.
 
-Full refinement (boundaries, crate split, decision log):
-[`architecture-refined.md`](architecture-refined.md).
+Full clarification: [`architecture-refined.md`](architecture-refined.md).
 
 ## Why transactions at the core (not as a layer)
 
@@ -115,10 +117,12 @@ as possible.
   indexes using transactions (store index entries alongside data, update atomically).
 - **No analytic frameworks.** No MapReduce, no streaming. Layers build these on top
   of range reads.
-- **No built-in distribution.** PedraDB is an embedded engine. Distribution
-  (Raft, sharding, cross-node transactions) is a separate concern — layers or
-  wrappers add it when needed. The full distribution design is documented in
-  [`distribution-design.md`](distribution-design.md).
+- **No multi-node / no Raft / no cluster.** PedraDB is an **embedded local
+  library** only — like RocksDB. Horizontal scale and cross-node TX belong to a
+  **different product** that *embeds* PedraDB per node (like TiKV embeds
+  RocksDB). Research on that outer shape lives in
+  [`distribution-design.md`](distribution-design.md); it is **not** PedraDB
+  scope.
 
 ## Testing strategy: deterministic simulation
 

@@ -1,256 +1,186 @@
-# Refined architecture: local storage primitive → FDB/TiKV-class DB
+# Architecture: PedraDB is the local primitive (not the multi-node DB)
 
-> Clarifies the product layering after research. **FDB is comparable to TiKV**
-> (distributed transactional KV), not to RocksDB (local engine). PedraDB
-> therefore builds **bottom-up**: a local KV storage primitive first, then a
-> transactional DB on top of it, then (optionally) a distributed FDB/TiKV-class
-> system that **uses that primitive** the way TiKV uses RocksDB and FDB uses
-> Redwood — but without FDB’s distributed taxes and without bolting TX onto a
-> non-transactional engine after the fact.
-
----
-
-## The insight (agreed)
-
-```
-RocksDB / Redwood / pedradb-store     =  local storage primitive
-TiKV / FoundationDB / pedradb-db      =  distributed (or local) transactional KV product
-TiDB / Record Layer / user layers     =  data models on top
-```
-
-| Role | FDB | TiKV | PedraDB |
-|------|-----|------|---------|
-| Local storage | **Redwood** (B+tree) | **RocksDB** (LSM) | **`pedradb-store`** (LSM + WiscKey/Monkey/Dostoevsky) |
-| TX + product API | Whole cluster (roles) | Percolator on RocksDB | **`pedradb-txn` + API** (local first) |
-| Distribution | Decoupled roles | Multi-Raft | **Multi-Raft later** (TiKV shape, not FDB roles) |
-| Deploy today | Cluster only | Cluster only | **Library / embedded first** |
-
-**PedraDB is not “pick TiKV or FDB.”** It is:
-
-1. **Build a better local primitive** than RocksDB/Redwood (LSM research + Rust safety).
-2. **Put TX on that primitive from day one** (avoid TiKV’s years bolting Percolator on RocksDB).
-3. **Scale out like TiKV** (multi-Raft), with **FDB’s API philosophy** (minimal core, layers, strict consistency, simulation testing), **without FDB’s hard distributed limits** where embedded/local commit applies.
+> **PedraDB does not ship multi-node.** It is the embedded local storage
+> (and local TX) engine — the role **RocksDB plays for TiKV** and **Redwood
+> plays for FoundationDB**.
+>
+> A **separate product** (our future FDB/TiKV-class database) will **link
+> PedraDB as its per-node store**, the same way TiKV embeds RocksDB on every
+> TiKV server. That outer DB owns Raft, PD, networking, cross-node TX.
+> PedraDB owns the disk on one machine.
 
 ---
 
-## Three layers (the architecture)
+## One picture
 
 ```
-┌──────────────────────────────────────────────────────────────────┐
-│  L3  User layers                                                 │
-│      SQL · Document · Graph · etcd-like · object metadata · …    │
-├──────────────────────────────────────────────────────────────────┤
-│  L2  pedradb-cluster  (future)                                   │
-│      multi-Raft · PD/TSO · Parallel Commits · shard-aware client │
-│      “FDB/TiKV-class product, without FDB defects”               │
-├──────────────────────────────────────────────────────────────────┤
-│  L1  pedradb-db  (transactional KV)                              │
-│      Transaction { get, put, delete, range }                     │
-│      MVCC · OCC · commit pipeline · version GC                   │
-│      usable embedded OR as the apply target under Raft           │
-├──────────────────────────────────────────────────────────────────┤
-│  L0  pedradb-store  (local KV storage primitive)                 │
-│      WAL · MemTable · SST · value log · flush · compaction       │
-│      crash recovery · iterators · no multi-key TX required here  │
-│      “what RocksDB/Redwood are to TiKV/FDB”                      │
-└──────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│  OUR FUTURE DB (separate product — not PedraDB)                 │
+│  “tipo TiKV / FDB”                                              │
+│                                                                 │
+│   multi-Raft · routing · TSO/HLC · 2PC/Parallel Commits · gRPC  │
+│                                                                 │
+│    ┌──────────┐   ┌──────────┐   ┌──────────┐                   │
+│    │  Node A  │   │  Node B  │   │  Node C  │                   │
+│    │ ┌──────┐ │   │ ┌──────┐ │   │ ┌──────┐ │                   │
+│    │ │Pedra │ │   │ │Pedra │ │   │ │Pedra │ │  ← one PedraDB    │
+│    │ │ DB   │ │   │ │ DB   │ │   │ │ DB   │ │    instance per   │
+│    │ │(local)│ │   │ │(local)│ │   │ │(local)│ │    node/process │
+│    │ └──────┘ │   │ └──────┘ │   │ └──────┘ │                   │
+│    └──────────┘   └──────────┘   └──────────┘                   │
+└─────────────────────────────────────────────────────────────────┘
+
+PedraDB alone (this repo, this product):
+
+┌──────────────────────────────────────┐
+│  App or outer DB process             │
+│    └─ pedradb (library)              │  single process, single machine
+│         WAL · MemTable · SST · TX    │  no cluster, no Raft, no PD
+└──────────────────────────────────────┘
 ```
 
-### L0 — `pedradb-store` (local primitive)
+| Product | Scope | Analogy |
+|---------|--------|---------|
+| **PedraDB** (this project) | **Local only** — library, one process, one disk | **RocksDB** inside TiKV; **Redwood** inside FDB |
+| **Outer DB** (future, other name) | Multi-node TX KV (or SQL) | **TiKV** or **FDB** as a product |
+| **Layers** on the outer DB | SQL, doc, graph… | TiDB on TiKV; Record Layer on FDB |
 
-**Job:** durable, ordered, single-node key-value **storage** — the thing that
-owns the disk format and recovery.
-
-| Is | Is not |
-|----|--------|
-| WAL, MemTable, SST, compaction | Network, Raft, SQL |
-| Point get + range iterate | Multi-key ACID (that’s L1) |
-| Crash-safe local durability | Cluster membership |
-| Swappable in principle | User-facing product alone |
-
-**Design choices (locked):**
-
-- **LSM**, not B-tree (write-heavy OLTP; WiscKey/Monkey/Dostoevsky apply to LSM).
-- Clean-room Rust, `#![forbid(unsafe_code)]`.
-- RocksDB as **oracle only** (format/behavior tests), not linked into the engine.
-- Not a Redwood port — different structure on purpose.
-
-**Analogy:** RocksDB to TiKV, Redwood to FDB, bbolt to etcd.
-
-**Why build our own instead of wrapping RocksDB?**
-
-| Wrap RocksDB | Own `pedradb-store` |
-|--------------|---------------------|
-| Instant engine | Control of format + compaction |
-| Inherit write-amp, uniform Bloom, C++/FFI | WiscKey + Monkey + Lazy Leveling from day 1 |
-| TX still bolted on later (TiKV path) | L1 designed **with** L0 (seqnum, InternalKey, batch-as-level) |
-| PedraDB becomes “another TiKV” | PedraDB can be embedded pillar **and** cluster substrate |
-
-### L1 — `pedradb-db` (transactional KV)
-
-**Job:** ACID ordered KV API on top of L0 — the **pillar** for layers.
-
-| Is | Is not |
-|----|--------|
-| `begin/commit/abort`, snapshot, OCC | SQL, indexes, documents |
-| MVCC filtering over L0 versions | Distribution (optional L2) |
-| Embedded library for apps | Bound to multi-node deploy |
-
-**Critical design rule:** L1 must be usable in **two** modes without forking:
-
-1. **Embedded:** app links L1; commit = local WAL + memtable publish.  
-2. **Replica apply path:** Raft (L2) proposes a batch → L1/L0 apply is the
-   state machine. Local TX semantics stay consistent.
-
-This is how we avoid TiKV’s historical pain: they had L0 (RocksDB) without L1,
-so TX became a huge distributed layer. We have L1 **before** L2.
-
-### L2 — `pedradb-cluster` (FDB/TiKV-class, future)
-
-**Job:** horizontal scale + HA for the same L1 API.
-
-| Choice | Decision |
-|--------|----------|
-| Shape | **Multi-Raft** (TiKV/CRDB), not FDB decoupled roles |
-| Cross-shard TX | Parallel Commits (not classic 2PC latency) |
-| Consistency | Strict serializable / CP |
-| Clock | TSO or HLC (open) |
-| Connection model | Shard-aware gRPC client; **not** PgBouncer-on-primary |
-| FDB defects | No 5s/10MB/100KB as **hard** embedded limits; soft network bounds only when distributed |
-
-**Analogy:** TiKV’s *distribution*, FDB’s *product contract*, our L0+L1 as substrate.
-
-### L3 — user layers
-
-Unchanged philosophy: SQL, document, graph, “etcd-like coordination,” etc.
-built with multi-key TX. See TiDB-on-TiKV and Record Layer-on-FDB as existence
-proofs.
+**PedraDB is never “the cluster.”** The cluster **uses** PedraDB.
 
 ---
 
-## What we are building *now* vs later
+## Why this split
 
-| Phase | Delivers | Maps to |
-|-------|----------|---------|
-| **Now** | WAL → MemTable → SST → get/scan → compaction | **L0 store** (+ enough versioning for L1) |
-| **Next** | TX manager + public Transaction API | **L1 db** |
-| **Then** | Simulation + oracle | Trust L0+L1 |
-| **Later** | multi-Raft + PD + distributed TX | **L2 cluster** |
-| **Optional** | SQL / other | **L3** |
+| If PedraDB tried to be TiKV/FDB | If PedraDB stays local (correct) |
+|--------------------------------|----------------------------------|
+| Mixes engine + consensus + product | Clear job: best local ordered KV (+ local TX) |
+| Forces Raft/PD into the same roadmap as SST format | Outer DB can be designed later on a stable store |
+| Competes with TiKV as a full distributed product | Competes with **RocksDB/Pebble** as the substrate |
+| Harder to embed in random apps | Any app or any cluster can `use pedradb` |
 
-Current code (`pedradb-core` WAL) is the start of **L0**. Going forward, the
-crate split should make L0 vs L1 explicit (even if monorepo keeps them as
-modules first):
-
-```
-crates/
-  pedradb-store/     # L0 local primitive (or module store::)
-  pedradb-db/        # L1 transactional API (or module db:: / tx::)
-  pedradb-cluster/   # L2 future
-  pedradb-sim/
-  pedradb-oracle/    # RocksDB oracle for L0 behavior
-  pedradb-cli/
-```
-
-Until a clean split is painful, `pedradb-core` may host both `store` and `tx`
-modules — but **architecturally** they stay separate boundaries.
+TiKV’s lesson: they **wrapped RocksDB** and then spent years on TX + multi-Raft
+**outside** RocksDB. PedraDB’s job is to be a **better thing to wrap** — so the
+outer DB (when we build it) does not inherit RocksDB’s write-amp, and can
+optionally get **local ACID** from the library instead of inventing everything
+on a mute engine.
 
 ---
 
-## Interface sketch (boundaries)
+## What *is* inside PedraDB
 
-### L0 store (primitive)
+Still two **internal** layers, both **local**:
 
-```text
-Store::open(path, opts) -> Store
-Store::put(key, value) / delete(key)     # single-key or batch, no multi-key ACID
-Store::get(key) -> Option<value>
-Store::scan(start, end) -> Iterator
-Store::write_batch(batch) -> durable after sync policy
-Store::flush() / compact() / sequence_number()
+```
+┌─────────────────────────────────────────────────────────┐
+│  PedraDB (single binary/library — one node)             │
+│                                                         │
+│  ┌───────────────────────────────────────────────────┐  │
+│  │  Local transactional API (recommended in core)    │  │
+│  │  begin/commit · MVCC · OCC · multi-key ACID       │  │
+│  │  = so outer DB / apps don’t reinvent local TX     │  │
+│  ├───────────────────────────────────────────────────┤  │
+│  │  Local storage engine                             │  │
+│  │  WAL · MemTable · SST · value log · compaction    │  │
+│  │  LSM + WiscKey + Monkey + Dostoevsky              │  │
+│  └───────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────┘
 ```
 
-Versioned internal keys (`user_key + seq + kind`) live here or at L0/L1
-boundary — same as RocksDB InternalKey. L1 assigns seqnums on commit.
+| Inside PedraDB | Outside PedraDB (other product / later) |
+|----------------|----------------------------------------|
+| WAL, SST, compaction | Raft / multi-Raft |
+| Local get/put/scan | Network protocol, gRPC |
+| Local multi-key TX (ACID on one machine) | Cross-node 2PC / Parallel Commits |
+| Crash recovery on one disk | PD, TSO, rebalancing, membership |
+| `#![forbid(unsafe_code)]` engine | Cluster operator, load balancer |
 
-### L1 db (transactions)
+**Local TX ≠ multi-node.**  
+ACID on one process is still “RocksDB-class product surface with TX,” not a
+cluster. The outer DB uses that when applying a Raft log entry or serving a
+single-Region transaction entirely on one node.
 
-```text
-Db::open(...) -> Db          # owns a Store
-Db::begin() -> Transaction
-Transaction::get/put/delete/range
-Transaction::commit() / abort()
-# commit: conflict check → assign seq → WAL+memtable (or Raft propose in L2)
+---
+
+## Mapping to the industry
+
+| Role | In TiKV stack | In FDB stack | In our stack |
+|------|---------------|--------------|--------------|
+| Local engine | RocksDB | Redwood | **PedraDB** |
+| Distributed KV product | TiKV | FoundationDB | **Future DB (name TBD)** |
+| SQL / model layer | TiDB | Record Layer / apps | Layers on the future DB (or on PedraDB embedded) |
+
 ```
-
-### L2 cluster (later)
-
-```text
-Cluster::open(...) 
-# same Transaction API; commit may 2PC across Regions
-# each Region’s apply path calls into L1/L0 on that node
+TiKV node:     [ TiKV Raft + Percolator ] → [ RocksDB ]
+FDB storage:   [ FDB roles / replication ] → [ Redwood ]
+Our node:      [ Future DB Raft + TX  ] → [ PedraDB  ]
+App embedded:  [ App code             ] → [ PedraDB  ]
 ```
 
 ---
 
-## Explicit non-goals at each layer
+## What we are *not* doing in this repo
 
-| Layer | Will not do |
-|-------|-------------|
-| L0 | Multi-key TX, SQL, network, multi-tenancy product features |
-| L1 | SQL, secondary indexes, multi-Raft (may expose hooks for apply) |
-| L2 | Replace L0 with RocksDB “for speed” as default path; FDB role zoo |
-| L3 | Living inside L0/L1 crates |
+- ❌ Multi-Raft / PD / cluster membership as PedraDB features  
+- ❌ “PedraDB L2 cluster” as part of the PedraDB product  
+- ❌ Requiring PgBouncer or any network pooler for PedraDB  
+- ❌ Porting Redwood or wrapping RocksDB as the engine  
 
----
-
-## How this fixes the FDB / TiKV / RocksDB confusion
-
-| Question | Answer |
-|----------|--------|
-| Is PedraDB like RocksDB? | **L0 yes** (local engine role). |
-| Is PedraDB like FDB? | **L1+L2 product contract yes** (TX KV + layers). |
-| Is PedraDB like TiKV? | **L2 shape yes** (multi-Raft); **L0+L1 better integrated** than RocksDB+bolt-on TX. |
-| Do we reimplement FDB in Rust? | **Reimplement the *class of system*** (distributed TX KV without FDB defects), not a line-by-line FDB clone (no Flow, no role zoo required). |
-| Do we need Redwood *and* RocksDB? | **Neither as dependency.** One primitive: our LSM store. Redwood/RocksDB are *reference roles*, not crates we must ship. |
-| PgBouncer? | Not for L0/L1/L2 KV. Only maybe a future SQL layer frontend. |
+Distribution design docs (`distribution-design.md`, etc.) remain **research for
+the future outer DB**, not a PedraDB roadmap item. They inform what PedraDB
+must **support as a library** (apply batch, iterators, local TX, crash safety),
+not what PedraDB **implements as a network service**.
 
 ---
 
-## Roadmap alignment
+## What PedraDB must expose so a TiKV-like DB can use it
 
-Existing slices 0–7 map cleanly:
+The outer DB needs roughly what TiKV needs from RocksDB:
 
-| Slices | Layer |
-|--------|-------|
-| 0–1, 4–6 (WAL, MemTable, SST, get/scan, compaction) | **L0 store** |
-| 2–3, 7 (TX manager, API, version GC) | **L1 db** |
-| 8–9 sim + oracle | Trust L0+L1 |
-| Future | **L2 cluster** |
+| Capability | Why the outer DB needs it |
+|------------|---------------------------|
+| Durable write batch / atomic apply | Raft log apply → commit state machine |
+| Ordered scan / snapshot read | Reads, compaction of logical state, TX |
+| Local multi-key TX or atomic batch | Single-Region TX without distributed 2PC |
+| Crash recovery | Node reboot |
+| Controlled memory / flush | Backpressure, flow control |
+| Stable disk format + versioning | Rolling upgrades of the outer DB |
 
-**Next engineering step remains Slice 1** (InternalKey + MemTable) — solid L0
-foundation. L1 TX sits on L0 once versions and batches exist.
+Building **local TX into PedraDB** means the outer DB can treat “this Region’s
+leader commit” as a PedraDB transaction instead of hand-rolling MVCC on raw
+SST put/get (the expensive TiKV path).
 
 ---
 
-## Decision log (this refinement)
+## Roadmap (PedraDB only — all local)
+
+| Slice | What | For outer DB? |
+|-------|------|----------------|
+| 0 WAL ✅ | Crash-safe log | Apply durability |
+| 1 MemTable + InternalKey | In-memory ordered buffer | Buffer before flush |
+| 2–3 Local TX API | Multi-key ACID on one node | Single-Region TX / apply |
+| 4–6 SST, get/scan, compaction | Durable LSM | Long-term store |
+| 7 Version GC | MVCC reclaim | Long-lived snapshots |
+| 8–9 Sim + oracle | Trust | Same |
+
+**No slice is “add multi-node to PedraDB.”**
+
+---
+
+## Decision log
 
 | # | Decision | Status |
 |---|----------|--------|
-| R1 | Explicit L0 store / L1 db / L2 cluster split | **Accepted** |
-| R2 | L0 = LSM (not Redwood B-tree port) | **Accepted** |
-| R3 | L2 = multi-Raft (not FDB roles) | **Accepted** (prior) |
-| R4 | L1 before L2 (TX before distribution) | **Accepted** |
-| R5 | Do not wrap RocksDB as L0 default | **Accepted** |
-| R6 | Oracle RocksDB for L0 tests only | **Accepted** |
-| R7 | Crate split store/db when modules stabilize | **Deferred** (logical boundary now) |
+| 1 | PedraDB = **local library only** | **Accepted** |
+| 2 | Multi-node = **separate product** that embeds PedraDB | **Accepted** |
+| 3 | PedraDB role = RocksDB/Redwood, not TiKV/FDB product | **Accepted** |
+| 4 | Local LSM (not Redwood port, not RocksDB wrap) | **Accepted** |
+| 5 | Local TX in PedraDB (so outer DB isn’t forced to bolt-on from zero) | **Accepted** |
+| 6 | Distribution docs = research for outer DB, not PedraDB scope | **Accepted** |
 
 ---
 
-## Related docs
+## Related
 
-- [`architecture.md`](architecture.md) — mission, anti-features, roadmap  
-- [`distribution-design.md`](distribution-design.md) — L2 multi-Raft  
-- [`fdb-limitations-analysis.md`](fdb-limitations-analysis.md) — defects L2 must not reintroduce as hard limits  
-- [`engine-landscape-and-ideal-path.md`](engine-landscape-and-ideal-path.md) — why LSM + three papers  
-- [`tidb-architecture.md`](tidb-architecture.md) — proof of L3 on a TX KV  
+- [`architecture.md`](architecture.md) — mission + delivery slices (all local)  
+- [`distribution-design.md`](distribution-design.md) — how an *outer* multi-Raft DB would look (not PedraDB features)  
+- [`engine-landscape-and-ideal-path.md`](engine-landscape-and-ideal-path.md) — why this LSM  

@@ -10,21 +10,16 @@ nothing else. Database builders create layers on top, using transactions to
 guarantee consistency.
 
 ```
-┌──────────────────────────────────────────────────────────┐
-│  L3  SQL · Document · Graph · …                          │  layers
-├──────────────────────────────────────────────────────────┤
-│  L2  cluster (future): multi-Raft, FDB/TiKV-class        │
-├──────────────────────────────────────────────────────────┤
-│  L1  transactional KV API (ACID)                         │  the pillar
-├──────────────────────────────────────────────────────────┤
-│  L0  local store: LSM + WiscKey + Monkey + Dostoevsky    │  storage primitive
-└──────────────────────────────────────────────────────────┘
+  Future multi-node DB (other product)     PedraDB (this repo)
+  “tipo TiKV / FDB”                        local library only
+        │                                        │
+        └── each node embeds ──────────────────► │  LSM + local ACID TX
+                                                 │  (papel do RocksDB)
 ```
 
-L0 is the local primitive (RocksDB/Redwood role). L1 is ACID on top (embedded
-first). L2 is optional distribution (TiKV-shaped multi-Raft, FDB-level
-contract, without FDB’s hard distributed taxes). See
-[`docs/architecture-refined.md`](docs/architecture-refined.md).
+**PedraDB has no multi-node.** It is what RocksDB is to TiKV: the on-disk
+engine linked into a process. A separate DB we may build later uses PedraDB on
+every node. See [`docs/architecture-refined.md`](docs/architecture-refined.md).
 
 ## Why transactions at the core
 
