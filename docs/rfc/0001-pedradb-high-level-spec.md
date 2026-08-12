@@ -1,6 +1,6 @@
 # RFC-0001: PedraDB high-level specification
 
-**Status:** draft  
+**Status:** done (P0–P2 main-line complete; multi-node/wire in [RFC-0012](0012-next-significant-steps.md) also done)  
 **Updated:** 2026-08-11  
 **Authors:** PedraDB session notes (consolidated)  
 **Readers:** product + engineering — challenge open decisions before more code
@@ -11,9 +11,8 @@
 
 ### What exists today (facts)
 
-- Workspace `pedradb` with crates: `pedradb-core`, `pedradb-sim` (placeholder), `pedradb-oracle` (trait + optional RocksDB), `pedradb-cli`.
-- **P0 slice partially shipped:** WAL (block format, masked CRC32C, fragment, recovery) with tests; `#![forbid(unsafe_code)]`, clippy pedantic clean.
-- No MemTable, SST, TX API, or public `Db` yet.
+- Workspace `pedradb` with crates: `pedradb-core`, `pedradb-sim` (fault injection), `pedradb-oracle` (model + optional RocksDB), `pedradb-cli`.
+- **P0–P2 main line shipped** on the local library (see status table).
 - Extensive research docs (engines, FDB, TiKV, fjall, distribution) — **research is not product surface**.
 
 ### Why now
@@ -200,28 +199,29 @@ Someone can, with the public API only:
 Smallest vertical that proves the product sentence.
 
 - [x] **P0.1** Crash-safe WAL append + recovery — status: `done`  
-- [ ] **P0.2** Versioned in-memory map (InternalKey + MemTable) + seqnums — status: `todo`  
-- [ ] **P0.3** Recover MemTable from WAL; basic `get`/`put`/`delete` on single “auto-commit” or internal batch — status: `todo`  
-- [ ] **P0.4** Public `Transaction` (begin, get/put/delete, commit/abort) with **correct multi-key atomicity** on MemTable+WAL (OCC or single-writer — pick in P0.4 design note) — status: `todo`  
-- [ ] **P0.5** Documented durability on `commit` + crash test (kill after commit → reopen) — status: `todo`  
-- [ ] **P0.6** Minimal user-facing docs: open/TX example + index-layer sketch — status: `todo`  
+- [x] **P0.2** Versioned in-memory map (InternalKey + MemTable) + seqnums — status: `done` ([RFC-0002](0002-internal-key-memtable.md))  
+- [x] **P0.3** Recover MemTable from WAL; basic `get`/`put`/`delete` auto-commit — status: `done` ([RFC-0003](0003-wal-recover-basic-engine.md))
+- [x] **P0.4** Public `Transaction` (begin, get/put/delete, commit/abort) multi-key atomicity (single-writer) — status: `done` ([RFC-0004](0004-transaction-api.md))  
+- [x] **P0.5** Documented durability on `commit` + crash test (kill after commit → reopen) — status: `done`  
+- [x] **P0.6** Minimal user-facing docs: open/TX example + index-layer sketch — status: `done` ([usage.md](../usage.md))  
 
 P0 **does not require** SST, full compaction, Monkey/WiscKey, or simulation framework.
 
 ### P1 — real store (survive growth)
 
-- [ ] **P1.1** Flush MemTable → SST; reopen loads SST set — status: `todo`  
-- [ ] **P1.2** `get`/`range` merge MemTable ∪ SSTs with MVCC visibility — status: `todo`  
-- [ ] **P1.3** Compaction (correctness first; simple strategy OK) — status: `todo`  
-- [ ] **P1.4** Conflict detection solid (interval tree or equivalent) if OCC — status: `todo`  
-- [ ] **P1.5** Benches for get/put/commit (baseline numbers) — status: `todo`  
+- [x] **P1.1** Flush MemTable → SST; reopen loads SST set — status: `done` ([RFC-0006](0006-sst-flush.md))  
+- [x] **P1.2** `get`/`range` merge MemTable ∪ SSTs with MVCC visibility — status: `done`  
+- [x] **P1.3** Compaction (correctness first; simple strategy OK) — status: `done`  
+- [x] **P1.4** Conflict detection solid (interval tree or equivalent) if OCC — status: `n/a` (single-writer retained; OCC deferred)  
+- [x] **P1.5** Benches for get/put/commit (baseline numbers) — status: `done` (`benches/baseline.rs`)  
+- [x] **P1.6** WAL addressable read from offset / sequence (export primitive) — status: `done` (`Wal::recover_from_offset`)
 
 ### P2 — trust, speed, substrate polish
 
-- [ ] **P2.1** Deterministic simulation / fault injection (disk, crash) — status: `todo`  
-- [ ] **P2.2** Research opts when benches show gain (value log, Bloom policy, Lazy Leveling) — status: `todo`  
-- [ ] **P2.3** Apply-batch / snapshot APIs if needed by outer multi-node design — status: `todo`  
-- [ ] **P2.4** Oracle harness vs RocksDB where meaningful — status: `todo`  
+- [x] **P2.1** Deterministic simulation / fault injection (disk, crash) — status: `done` (`pedradb-sim`)  
+- [x] **P2.2** Research opts when benches show gain — status: `n/a` / deferred until measured win (baseline captured; no Lazy Leveling/WiscKey/Bloom shipped unmeasured)  
+- [x] **P2.3** Apply-batch (ordered external apply, no OCC) + snapshot hooks — status: `done` (`apply_batch`, `Snapshot`)  
+- [x] **P2.4** Oracle harness vs RocksDB where meaningful — status: `done` (model default; `live-rocksdb` optional)  
 
 ### Explicit non-slices (other RFCs / other repos)
 
@@ -236,20 +236,21 @@ P0 **does not require** SST, full compaction, Monkey/WiscKey, or simulation fram
 | ID | Band | Title | Status | Task / PR | Updated |
 |----|------|-------|--------|-----------|---------|
 | P0.1 | p0 | WAL append + recovery | done | initial WAL | 2026-08-10 |
-| P0.2 | p0 | InternalKey + MemTable + seqnums | todo | — | 2026-08-11 |
-| P0.3 | p0 | WAL → MemTable recover; basic get/put | todo | — | 2026-08-11 |
-| P0.4 | p0 | Public multi-key Transaction | todo | — | 2026-08-11 |
-| P0.5 | p0 | Commit durability + crash test | todo | — | 2026-08-11 |
-| P0.6 | p0 | Minimal usage + index-layer docs | todo | — | 2026-08-11 |
-| P1.1 | p1 | SST flush + reopen | todo | — | 2026-08-11 |
-| P1.2 | p1 | Merged get/range + MVCC | todo | — | 2026-08-11 |
-| P1.3 | p1 | Compaction correctness | todo | — | 2026-08-11 |
-| P1.4 | p1 | OCC conflict structure | todo | — | 2026-08-11 |
-| P1.5 | p1 | Baseline benches | todo | — | 2026-08-11 |
-| P2.1 | p2 | Deterministic simulation | todo | — | 2026-08-11 |
-| P2.2 | p2 | Research LSM opts (measured) | todo | — | 2026-08-11 |
-| P2.3 | p2 | Apply-batch / substrate hooks | todo | — | 2026-08-11 |
-| P2.4 | p2 | RocksDB oracle harness | todo | — | 2026-08-11 |
+| P0.2 | p0 | InternalKey + MemTable + seqnums | done | RFC-0002 / key+memtable | 2026-08-11 |
+| P0.3 | p0 | WAL → MemTable recover; basic get/put | done | RFC-0003 / batch+db | 2026-08-11 |
+| P0.4 | p0 | Public multi-key Transaction | done | RFC-0004 / tx.rs | 2026-08-11 |
+| P0.5 | p0 | Commit durability + crash test | done | db rustdoc + crash tests | 2026-08-11 |
+| P0.6 | p0 | Minimal usage + index-layer docs | done | docs/usage.md + pedra demo | 2026-08-11 |
+| P1.1 | p1 | SST flush + reopen | done | RFC-0006 / sst + Db::flush | 2026-08-11 |
+| P1.2 | p1 | Merged get/range + MVCC | done | Db::range + merge | 2026-08-11 |
+| P1.3 | p1 | Compaction correctness | done | Db::compact | 2026-08-11 |
+| P1.4 | p1 | OCC conflict structure | n/a | single-writer retained (O2) | 2026-08-11 |
+| P1.5 | p1 | Baseline benches | done | benches/baseline.rs | 2026-08-11 |
+| P1.6 | p1 | WAL seek/export by offset/seq | done | recover_from_offset | 2026-08-11 |
+| P2.1 | p2 | Deterministic simulation | done | pedradb-sim FaultEnv | 2026-08-11 |
+| P2.2 | p2 | Research LSM opts (measured) | n/a | deferred; baseline benches only | 2026-08-11 |
+| P2.3 | p2 | Apply-batch / substrate hooks | done | apply_batch + Snapshot | 2026-08-11 |
+| P2.4 | p2 | RocksDB oracle harness | done | model default; live-rocksdb optional | 2026-08-11 |
 
 ---
 
@@ -310,8 +311,8 @@ Deep research (peers, nuances, regrets):
 
 | ID | Topic | Options | Notes / recommendation |
 |----|--------|---------|------------------------|
-| **O1** | **Commit durability default** | (a) fsync WAL on every commit (safer, slower) (b) OS buffer default like fjall/RocksDB (faster, easy to misuse) | **Recommend (a) for P0**; RocksDB/fjall/Badger default (b) and users get burned; Postgres/SQLite culture is (a). Group commit later for speed. |
-| **O2** | **Write concurrency** | (a) OCC multi-writer from day one (b) single-writer TX only for P0 | **Recommend (b) for P0** (redb/LMDB); TiDB regretted optimistic-only under OLTP; Raft apply is single-writer per Region anyway. OCC in P1. |
+| **O1** | **Commit durability default** | (a) fsync WAL on every commit (safer, slower) (b) OS buffer default like fjall/RocksDB (faster, easy to misuse) | **Locked for P0: (a)** — WAL `fdatasync` (or equiv.) before `commit` returns Ok. Group commit / relaxed later. |
+| **O2** | **Write concurrency** | (a) OCC multi-writer from day one (b) single-writer TX only for P0 | **Locked for P0: (b)** single-writer TX; concurrent readers OK. OCC optional in P1. |
 | **O3** | **Physical keyspaces** | (a) none in v1 — prefixes only (b) fjall-like keyspaces | **Recommend (a)** FDB-style; RocksDB CF zoo is an ops regret; TiKV keeps tiny fixed CF set. |
 | **O4** | **Interactive TX vs apply-batch first** | (a) interactive TX is P0 (b) atomic batch apply first | **Recommend (a)** for justify-use; implement commit as internal batch; expose `apply_batch` P2 for substrate. |
 | **O5** | **Snapshot epoch** | (a) at `begin` (b) at first read | **Recommend (a)**; FDB-like; simpler tests. |

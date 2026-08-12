@@ -106,7 +106,7 @@ impl<W: Write + Seek> WalWriter<W> {
         let length_u16 = u16::try_from(data.len())
             .expect("physical record fragment must fit in u16");
 
-        let checksum = crc::record_checksum(rtype as u8, data);
+        let checksum = crc::record_checksum(rtype as u8, length_u16, data);
 
         let mut header = [0u8; HEADER_SIZE];
         header[0..4].copy_from_slice(&checksum.to_le_bytes());
@@ -128,6 +128,15 @@ impl<W: Write + Seek> WalWriter<W> {
     pub fn flush(&mut self) -> Result<()> {
         self.out.flush()?;
         Ok(())
+    }
+
+    /// Byte offset in the sink after the last flush (start of next write).
+    ///
+    /// # Errors
+    /// Returns [`std::io::Error`] if the sink position cannot be queried.
+    pub fn stream_position(&mut self) -> Result<u64> {
+        self.out.flush()?;
+        Ok(self.out.stream_position()?)
     }
 
     /// Consume the writer and return the underlying sink.

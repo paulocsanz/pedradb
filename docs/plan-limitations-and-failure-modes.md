@@ -220,7 +220,8 @@ Not “reasons to quit tomorrow” — **places to watch** so we don’t paint o
 |--------|--------------------------------------|
 | **Full Postgres** | Extensions, PL/pgSQL, catalog quirks — years; apps still break |
 | **Full etcd for k8s** | Watch/lease scale + exact semantics |
-| **True Scylla** | **Fundamental mismatch** (AP multi-master) — plan will never become Scylla without a second product line |
+| **True Scylla product** | **Fundamental mismatch** (AP multi-master) — plan will never become Scylla without a second product line |
+| **Scylla *need* (control plane)** | **Not a limitation of physics** — multi-Raft + watch replaces that need; see `scylla-need-replacement.md` |
 | **SQLite ABI drop-in** | Almost never worth it |
 
 ### 5.2 Time-to-value

@@ -189,15 +189,24 @@ local TX in engine (faster single-region path), Rust purity, fewer limits than F
 
 ### Scylla / Cassandra
 
-| Must match for *true* switch | Reality vs our plan |
-|------------------------------|---------------------|
-| Multi-master same key, tunable CL, repair, CQL | **Our main line does not offer this** |
-| Extreme single-partition write QPS, AP bias | Different physics |
+Split into **product** vs **platform need** (see `scylla-need-replacement.md`).
 
-**To justify switch to *our* stack:** customer must accept **CP + single-writer-per-key-range** (maybe CQL syntax only).  
-**To justify switch to Scylla from us:** opposite.
+| Must match for *true product* switch (CQL apps) | Reality vs our plan |
+|-------------------------------------------------|---------------------|
+| Multi-master same key, tunable CL, repair, CQL | **Main line does not offer this** |
+| Extreme same-key multi-writer AP bias | Different physics |
 
-**No honest “replace Scylla with PedraDB grail”** without a second product line.
+**No honest “we are Scylla”** without a second product line.
+
+| Platform *need* (mono-shaped control plane) | Bar to leave Scylla for our stack |
+|---------------------------------------------|-----------------------------------|
+| Scale-out route/WID/assignment store | Multi-Raft + PedraDB |
+| Sub-second route/overlay push | Watch / apply stream (not CQL) |
+| LWT leases / FSM CAS | Native TX / CAS (often **better**) |
+| Ops strain on Scylla cluster | Clearer CP runbooks + one substrate with DCS/SQL later |
+
+**To justify switch (need):** CP + single-writer-per-key is usually *desired* for routing maps;  
+horizontal QPS from **many keys / many leaders**; gRPC gateway, not CQL drop-in.
 
 ---
 

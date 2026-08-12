@@ -32,13 +32,16 @@ pub fn crc32c(data: &[u8]) -> u32 {
     crc32c::crc32c(data)
 }
 
-/// Compute the masked CRC over the record **type byte + payload**, which is
-/// exactly the region RocksDB checksums for a physical log record.
+/// Compute the masked CRC over **length (LE u16) + type byte + payload**.
+///
+/// PedraDB deliberately includes the length field (unlike classic RocksDB,
+/// which checksums only `{type, data}`). A flipped length mid-file otherwise
+/// looks like a clean torn tail (`Ok(None)`), silently dropping later durable
+/// WAL records (F4). Pre-release: not byte-compatible with RocksDB WAL CRCs.
 #[must_use]
-pub fn record_checksum(record_type: u8, data: &[u8]) -> u32 {
-    // RocksDB extends the CRC over { type, data } in that order. We feed them
-    // as a contiguous run without allocating.
-    let crc = crc32c::crc32c_append(0, &[record_type]);
+pub fn record_checksum(record_type: u8, length: u16, data: &[u8]) -> u32 {
+    let crc = crc32c::crc32c_append(0, &length.to_le_bytes());
+    let crc = crc32c::crc32c_append(crc, &[record_type]);
     let crc = crc32c::crc32c_append(crc, data);
     mask(crc)
 }

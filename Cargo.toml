@@ -5,6 +5,15 @@ members = [
     "crates/pedradb-sim",
     "crates/pedradb-oracle",
     "crates/pedradb-cli",
+    "crates/pedradb-apply",
+    "crates/pedradb-replicate",
+    "crates/pedradb-raft",
+    "crates/pedradb-dcs",
+    "crates/pedradb-sql",
+    "crates/pedradb-stream",
+    "crates/pedradb-http",
+    "crates/pedradb-dst",
+    "crates/pedradb-store",
 ]
 
 [workspace.package]
@@ -18,6 +27,15 @@ rust-version = "1.75"
 pedradb-core = { path = "crates/pedradb-core" }
 pedradb-sim = { path = "crates/pedradb-sim" }
 pedradb-oracle = { path = "crates/pedradb-oracle" }
+pedradb-apply = { path = "crates/pedradb-apply" }
+pedradb-replicate = { path = "crates/pedradb-replicate" }
+pedradb-raft = { path = "crates/pedradb-raft" }
+pedradb-dcs = { path = "crates/pedradb-dcs" }
+pedradb-sql = { path = "crates/pedradb-sql" }
+pedradb-stream = { path = "crates/pedradb-stream" }
+pedradb-http = { path = "crates/pedradb-http" }
+pedradb-dst = { path = "crates/pedradb-dst" }
+pedradb-store = { path = "crates/pedradb-store" }
 
 # Shared
 crc32c = "0.6"

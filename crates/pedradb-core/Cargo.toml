@@ -11,3 +11,11 @@ thiserror.workspace = true
 parking_lot.workspace = true
 bytes.workspace = true
 tracing.workspace = true
+
+[[bench]]
+name = "baseline"
+harness = false
+
+[[example]]
+name = "secondary_index"
+path = "../../examples/secondary_index.rs"

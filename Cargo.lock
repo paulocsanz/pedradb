@@ -262,6 +262,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "pedradb-apply"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "pedradb-core",
+]
+
+[[package]]
 name = "pedradb-cli"
 version = "0.1.0"
 dependencies = [
@@ -280,6 +288,33 @@ dependencies = [
 ]
 
 [[package]]
+name = "pedradb-dcs"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "pedradb-core",
+ "thiserror",
+]
+
+[[package]]
+name = "pedradb-dst"
+version = "0.1.0"
+dependencies = [
+ "pedradb-core",
+ "pedradb-sim",
+]
+
+[[package]]
+name = "pedradb-http"
+version = "0.1.0"
+dependencies = [
+ "pedradb-apply",
+ "pedradb-core",
+ "pedradb-dcs",
+ "thiserror",
+]
+
+[[package]]
 name = "pedradb-oracle"
 version = "0.1.0"
 dependencies = [
@@ -288,10 +323,59 @@ dependencies = [
 ]
 
 [[package]]
+name = "pedradb-raft"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "crc32c",
+ "pedradb-apply",
+ "pedradb-core",
+ "pedradb-dcs",
+ "thiserror",
+]
+
+[[package]]
+name = "pedradb-replicate"
+version = "0.1.0"
+dependencies = [
+ "pedradb-core",
+ "thiserror",
+]
+
+[[package]]
 name = "pedradb-sim"
 version = "0.1.0"
 dependencies = [
  "pedradb-core",
+]
+
+[[package]]
+name = "pedradb-sql"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "pedradb-core",
+ "thiserror",
+]
+
+[[package]]
+name = "pedradb-store"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "crc32c",
+ "pedradb-core",
+ "pedradb-dcs",
+ "thiserror",
+]
+
+[[package]]
+name = "pedradb-stream"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "pedradb-core",
+ "thiserror",
 ]
 
 [[package]]

@@ -1,0 +1,11 @@
+[package]
+name = "pedradb-sql"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Minimal SQL subset over PedraDB (RFC-0010 P2.2)"
+
+[dependencies]
+pedradb-core.workspace = true
+bytes.workspace = true
+thiserror.workspace = true

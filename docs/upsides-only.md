@@ -56,6 +56,7 @@ Node C: leader R3, R6
 | **Plug where SQLite was** | Embed PedraDB (or thin SQL) for local ACID apps |
 | **Plug where MySQL/PG wire was** | Syntax layer → same apps, new horizontal backend |
 | **Plug where TiKV was** | Distributed KV API; PedraDB = RocksDB role, with local TX built-in |
+| **Replace Scylla *need* (not CQL)** | Scale-out route/WID/orchestrator store + watches → leave Scylla without multi-master product |
 | **Many syntaxes, one semantics** | PG wire + MySQL wire + custom RPC on the **same** deep protocol |
 | **Deep protocol first** | Ship Patroni/DCS ops before full etcd gRPC; add syntax later without redesign |
 | **Incremental compatibility** | Subset wire now; widen dialect over time without changing PedraDB |
@@ -70,7 +71,10 @@ Node C: leader R3, R6
 | **DCS / elections** | Patroni-class HA coordination on Raft + PedraDB (bbolt role) |
 | **Distributed TX KV** | TiKV/FDB-class platform; local TX simplifies single-region path |
 | **Horizontal SQL** | TiDB/CRDB-class: N writers via region leaders, apps still speak SQL wire |
+| **Networking / orchestration CP** | Sub-second route & WID maps via multi-Raft + watch (mono Scylla jobs without Scylla) |
 | **Shared ops skill** | One storage kernel to operate, backup mental model, test once |
+
+See `scylla-need-replacement.md` for the control-plane scale-out story.
 
 ---
 

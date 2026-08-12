@@ -1,0 +1,12 @@
+[package]
+name = "pedradb-apply"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Ordered log apply helpers for embedding PedraDB under Raft / fake logs (RFC-0010)"
+
+[dependencies]
+pedradb-core.workspace = true
+bytes.workspace = true
+
+[dev-dependencies]

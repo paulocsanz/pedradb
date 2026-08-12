@@ -1,0 +1,10 @@
+[package]
+name = "pedradb-dst"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Seedable DST harness over FailingEnv (RFC-0012 P1.3)"
+
+[dependencies]
+pedradb-core.workspace = true
+pedradb-sim.workspace = true

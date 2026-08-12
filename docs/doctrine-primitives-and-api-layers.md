@@ -1,7 +1,7 @@
 # Doctrine: powerful primitives + API layers only
 
 **Status:** core product doctrine  
-**Updated:** 2026-08-11  
+**Updated:** 2026-08-12  
 
 ---
 
@@ -9,21 +9,23 @@
 
 **PedraDB is a powerful primitive (local ordered KV + multi-key ACID). Everything users recognize as a “database product” is an API layer on top — not more features stuffed into the kernel.**
 
+The distributed HA product family built on that primitive is **[MontanhaDb](montanhadb.md) (Montan-HA-DB)** — TiKV-class ambition, correct layering.
+
 ```
 ┌──────────────────────────────────────────────────────────┐
-│  API layers (separate products / crates)                 │
-│  Patroni DCS · etcd-like · SQL · document · app schemas  │
-│  “só protocolo + semântica de produto”                   │
+│  Montanha-DCS · Live · SQL · stream (layers)             │
+│  election/lock = TX on keys · open leadership sessions │
 ├──────────────────────────────────────────────────────────┤
-│  Optional distribution layer                             │
-│  Raft / multi-Raft · placement · cross-node TX           │
-│  (still not PedraDB core)                                │
+│  Montanha-Store — multi-Raft KV (horizontal primitive)   │
+│  many range writers · placement                          │
 ├──────────────────────────────────────────────────────────┤
-│  Primitive: PedraDB                                      │
+│  PedraDB — local kernel                                  │
 │  open · begin · get/put/delete/range · commit            │
-│  durable · ordered · multi-key atomic · one process      │
 └──────────────────────────────────────────────────────────┘
 ```
+
+**DCS is built on the store**, not the other way around.  
+See [montanha-layering-dcs-on-store.md](montanha-layering-dcs-on-store.md).
 
 ---
 

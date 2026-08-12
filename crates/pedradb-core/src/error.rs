@@ -28,6 +28,27 @@ pub enum CoreError {
     /// An internal invariant was violated.
     #[error("internal error: {0}")]
     Internal(String),
+
+    /// Transaction was already committed or aborted.
+    #[error("transaction already finished")]
+    TransactionFinished,
+
+    /// Transaction is empty and commit was refused (optional policy — unused if empty commit allowed).
+    #[error("transaction error: {0}")]
+    Transaction(String),
+
+    /// Another process (or non-stolen lock) already has this DB directory open.
+    #[error("database already open at {path}: held by pid {holder_pid:?}")]
+    AlreadyOpen {
+        /// Directory that is locked.
+        path: std::path::PathBuf,
+        /// PID written in `LOCK`, if parseable.
+        holder_pid: Option<u32>,
+    },
+
+    /// MANIFEST / CURRENT contents are unreadable or inconsistent.
+    #[error("corrupt manifest: {0}")]
+    CorruptManifest(String),
 }
 
 /// Convenience `Result` alias used throughout the crate.

@@ -1,7 +1,8 @@
 # PedraDB as storage under a DCS (Patroni elections) — not etcd protocol in PedraDB
 
-**Status:** design note  
-**Updated:** 2026-08-11  
+**Status:** design note + **P0 SM shipped** (`crates/pedradb-dcs`)  
+**Updated:** 2026-08-12  
+**See also:** [live leadership + Patroni-shaped HA (full design)](live-leadership-and-patroni-shaped-ha.md) · [multi-node without etcd footguns](multi-node-without-etcd-footguns.md) · [DCS market](dcs-market-landscape.md)
 
 ---
 
@@ -59,6 +60,19 @@ Patroni abstracts this as **`AbstractDCS`** (`attempt_to_acquire_leader`, `updat
 So “substituir etcd no Patroni” means: **implement those DCS operations** in a new backend **or** speak enough **etcd API** that the existing etcd backend works.
 
 ---
+
+## Shipped state machine (`pedradb-dcs`)
+
+| API | Role for Patroni |
+|-----|------------------|
+| `create` / `cas` | `attempt_to_acquire_leader`, config version CAS |
+| `grant_lease` / `keepalive` / `expire_leases` | Leader TTL / renew |
+| `try_acquire_leader` / `renew_leader` | Thin helpers over create+lease |
+| `watch_prefix` / `poll_watch` | React to leader key changes |
+| `put` / `get` / `delete` | members, config, failover state |
+
+Multi-node: run DCS ops through `pedradb-raft` apply (same pattern as KV).  
+Wire: still Path A (etcd gRPC) or Path B (Python DCS plugin) — **not** in this crate.
 
 ## Two ways to plug into Patroni
 

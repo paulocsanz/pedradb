@@ -12,10 +12,10 @@
 //! A record is durable only after [`Wal::sync_all`] (or `sync_data`) returns.
 //! A partial trailing record left by a crash is silently skipped on recovery.
 
-use std::fs::{File, OpenOptions};
-use std::io::{BufReader, Seek, SeekFrom};
+use std::io::BufReader;
 use std::path::Path;
 
+use crate::env::{Env, EnvFile, StdEnv};
 use crate::error::Result;
 
 pub mod crc;
@@ -28,37 +28,65 @@ pub use writer::WalWriter;
 
 /// High-level, file-backed WAL with real durability semantics.
 ///
-/// Wraps a [`WalWriter<File>`] and exposes `sync_all`/`sync_data` for fsync.
-/// For unit tests that don't need the filesystem, use [`WalWriter`] directly
-/// over a `Cursor`.
-pub struct Wal {
-    writer: WalWriter<File>,
+/// Wraps a [`WalWriter`] over an [`EnvFile`] and exposes `sync_all`/`sync_data`
+/// for fsync. For unit tests that don't need the filesystem, use [`WalWriter`]
+/// directly over a `Cursor`.
+pub struct Wal<F: EnvFile = <StdEnv as Env>::File> {
+    writer: WalWriter<F>,
 }
 
-impl Wal {
-    /// Create (or truncate) a fresh WAL at `path`.
+impl Wal<<StdEnv as Env>::File> {
+    /// Create (or truncate) a fresh WAL at `path` on the real filesystem.
     ///
     /// # Errors
     /// Returns [`std::io::Error`] if the file cannot be created or opened.
     pub fn create<P: AsRef<Path>>(path: P) -> Result<Self> {
-        let file = OpenOptions::new()
-            .create(true)
-            .write(true)
-            .truncate(true)
-            .open(path)?;
+        Self::create_on(&StdEnv, path)
+    }
+
+    /// Open an existing WAL for appending on the real filesystem.
+    ///
+    /// # Errors
+    /// Returns [`std::io::Error`] if the file cannot be opened or seeked.
+    pub fn append<P: AsRef<Path>>(path: P) -> Result<Self> {
+        Self::append_on(&StdEnv, path)
+    }
+
+    /// Replay every complete logical record (real filesystem).
+    ///
+    /// # Errors
+    /// Read failure or CRC mismatch.
+    pub fn recover<P: AsRef<Path>>(path: P) -> Result<Vec<Vec<u8>>> {
+        Self::recover_on(&StdEnv, path)
+    }
+
+    /// Replay from byte offset (real filesystem).
+    ///
+    /// # Errors
+    /// I/O, CRC, or invalid offset.
+    pub fn recover_from_offset<P: AsRef<Path>>(path: P, offset: u64) -> Result<Vec<Vec<u8>>> {
+        Self::recover_from_offset_on(&StdEnv, path, offset)
+    }
+}
+
+impl<F: EnvFile> Wal<F> {
+    /// Create (or truncate) a fresh WAL via `env`.
+    ///
+    /// # Errors
+    /// Env I/O.
+    pub fn create_on<E: Env<File = F>, P: AsRef<Path>>(env: &E, path: P) -> Result<Self> {
+        let file = env.create(path.as_ref())?;
         Ok(Self {
             writer: WalWriter::new(file)?,
         })
     }
 
-    /// Open an existing WAL for appending (positioned at end).
+    /// Open existing WAL for appending via `env` (creates if missing).
     ///
     /// # Errors
-    /// Returns [`std::io::Error`] if the file cannot be opened or seeked.
-    pub fn append<P: AsRef<Path>>(path: P) -> Result<Self> {
-        let mut file = OpenOptions::new().create(true).append(true).open(path)?;
-        // Position at end so the writer computes the correct in-block offset.
-        file.seek(SeekFrom::End(0))?;
+    /// Env I/O.
+    pub fn append_on<E: Env<File = F>, P: AsRef<Path>>(env: &E, path: P) -> Result<Self> {
+        let file = env.open_append(path.as_ref())?;
         Ok(Self {
             writer: WalWriter::new(file)?,
         })
@@ -73,9 +101,7 @@ impl Wal {
         self.writer.add_record(data)
     }
 
-    /// Flush + `fdatasync` (sync data only). Cheaper than [`Self::sync_all`];
-    /// sufficient when file metadata (size) is already stable, i.e. an
-    /// existing appended-to file.
+    /// Flush + `fdatasync` (sync data only).
     ///
     /// # Errors
     /// Returns [`std::io::Error`] propagated from flush or `sync_data`.
@@ -85,8 +111,7 @@ impl Wal {
         Ok(())
     }
 
-    /// Flush + `fsync` (data + metadata). Required after creating/truncating
-    /// the file so its new size is durable.
+    /// Flush + `fsync` (data + metadata).
     ///
     /// # Errors
     /// Returns [`std::io::Error`] propagated from flush or `fsync`.
@@ -96,17 +121,41 @@ impl Wal {
         Ok(())
     }
 
-    /// Replay every complete logical record in the WAL file at `path`, in
-    /// write order. A truncated trailing record (from a crash) is skipped.
+    /// Replay every complete logical record via `env`.
     ///
     /// On a CRC error, replay stops and the error is returned; callers can
-    /// decide whether to truncate or halt.
+    /// decide whether to truncate or halt. A truncated trailing record is
+    /// skipped.
     ///
     /// # Errors
-    /// Returns [`crate::error::CoreError`] on read failure or CRC mismatch.
-    pub fn recover<P: AsRef<Path>>(path: P) -> Result<Vec<Vec<u8>>> {
-        let file = File::open(path)?;
+    /// Read failure or CRC mismatch.
+    pub fn recover_on<E: Env<File = F>, P: AsRef<Path>>(
+        env: &E,
+        path: P,
+    ) -> Result<Vec<Vec<u8>>> {
+        let file = env.open_read(path.as_ref())?;
         WalReader::new(BufReader::new(file)).collect_all()
+    }
+
+    /// Replay complete logical records starting at byte `offset` via `env`.
+    ///
+    /// # Errors
+    /// I/O, CRC, or invalid offset.
+    pub fn recover_from_offset_on<E: Env<File = F>, P: AsRef<Path>>(
+        env: &E,
+        path: P,
+        offset: u64,
+    ) -> Result<Vec<Vec<u8>>> {
+        let file = env.open_read(path.as_ref())?;
+        WalReader::from_offset(BufReader::new(file), offset)?.collect_all()
+    }
+
+    /// Current end offset of the WAL (after flush); use for export cursors.
+    ///
+    /// # Errors
+    /// I/O from flush or seeking.
+    pub fn stream_position(&mut self) -> Result<u64> {
+        self.writer.stream_position()
     }
 
     /// Flush and close the underlying file.

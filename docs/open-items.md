@@ -4,19 +4,19 @@
 > item is closed, or a new open question emerges. The authoritative source for
 > "what's done, what's next, what's unresolved."
 
-Last updated: 2026-08-10
+Last updated: 2026-08-11
 
 ---
 
 ## Current state at a glance
 
 ```
- pedradb-core    WAL ✅  | MemTable ⏳  | TX 🔲  | SST 🔲  | Compaction 🔲
- pedradb-sim     placeholder
- pedradb-oracle  trait defined, RocksDB bindings behind feature flag
- pedradb-cli     version + wal commands
+ pedradb-core    WAL ✅  | MemTable ✅  | Db ✅  | TX ✅  | SST ✅  | range ✅  | compact ✅  | apply_batch ✅
+ pedradb-sim     fault inject (P2.1) ✅
+ pedradb-oracle  model oracle + optional live-rocksdb ✅
+ pedradb-cli     version + wal + demo
 
- Tests: 11 passing (WAL)     Clippy: 0 warnings     unsafe: #![forbid]
+ P0 + P1 + P2 complete (P2.2 research opts deferred until measured)
 ```
 
 ---
@@ -26,17 +26,19 @@ Last updated: 2026-08-10
 | # | Slice | Status | Key deliverables | Blocked by |
 |---|-------|--------|-----------------|------------|
 | 0 | WAL | ✅ done | Block format, masked CRC32C, fragmentation, recovery | — |
-| 1 | InternalKey + MemTable | ⏳ next | `InternalKey` struct, sorted in-memory map, seqnum, `Slice` type, fixed arena | — |
-| 2 | Transaction manager | 🔲 | MVCC snapshot isolation, OCC conflict detection, commit pipeline | Slice 1 |
-| 3 | Transactional API | 🔲 | `Transaction { get, put, delete, range_read, commit, abort }` | Slice 2 |
-| 4 | SST + flush | 🔲 | Block-based SST, Monkey Bloom, WiscKey value log, flushable batches | Slices 1–2 |
-| 5 | Get + range scan | 🔲 | Merged iterator (MemTable ∪ SSTs), MVCC filter, range tombstones | Slice 4 |
-| 6 | Compaction | 🔲 | Lazy Leveling, invariant-based pacing, cost model | Slice 4 |
-| 7 | Version GC | 🔲 | MVCC version reclaim, value-log GC, backpressure | Slices 4–6 |
-| 8 | Deterministic simulation | 🔲 | Disk/time/crash modeling, reproducible runs | Slices 2–6 |
-| 9 | Cross-validation harness | 🔲 | Oracle diff vs RocksDB | Slices 4–6 |
+| 1 | InternalKey + MemTable | ✅ done | `InternalKey` struct + Ord/encode, MemTable get/put/delete/range @ snapshot | — |
+| 2 | WAL recover → MemTable + basic engine get/put | ✅ done | WriteRecord v1, `Db::open/put/get/delete`, reopen | Slice 1 |
+| 3 | Transaction manager + API | ✅ done | begin/commit multi-key ACID (single-writer) | Slice 2 |
+| 4 | SST + flush | ✅ done | Simple SST v1 + Db::flush + get merge | Slice 2–3 |
+| 5 | Get + range scan (merged) | ✅ done | `Db::range` + `merge::visible_range` | Slice 4 |
+| 6 | Compaction | ✅ done | `Db::compact` whole-merge | Slice 4 |
+| 7 | Version GC | 🔲 | MVCC reclaim | Slices 4–6 |
+| 8 | Deterministic simulation | ✅ base / 🔲 sweeps | FaultEnv + **Env/FailingEnv** ([RFC-0011](rfc/0011-env-fault-injection.md) P0 done; Nth-op/seed sweeps P1) | P2.1 + RFC-0011 |
+| 9 | Cross-validation harness | ✅ done | pedradb-oracle model (+ live-rocksdb feature) | P2.4 |
 
-**Next action:** Slice 1 (InternalKey + MemTable).
+**Next action:** RFC-0009 P1 (block SST / GC) **and** RFC-0010 P1 (single-region Raft) in parallel.  
+**RFCs:** [0009 RocksDB-class](rfc/0009-rocksdb-class-engine.md) · [0010 DBs on top](rfc/0010-dbs-on-top.md)  
+**Research vs P0:** no hard conflicts — see [`conversation-learnings-and-short-term-alignment.md`](conversation-learnings-and-short-term-alignment.md).
 
 ---
 
@@ -238,7 +240,14 @@ new evidence.
 | [`distribution-design.md`](distribution-design.md) | How embedded PedraDB becomes distributed (multi-Raft, CP, strict serializable) |
 | [`distribution-deep-research.md`](distribution-deep-research.md) | Protocol-level research: Percolator, Parallel Commits, PD, TSO, Raft libs |
 | [`scylladb-architecture.md`](scylladb-architecture.md) | How Scylla operates (AP multi-master, Seastar, tunable CL) vs PedraDB |
+| [`scylla-need-replacement.md`](scylla-need-replacement.md) | Replace Scylla *need* (routes, overlay, orchestrator) — not CQL drop-in |
 | [`tidb-architecture.md`](tidb-architecture.md) | TiDB = MySQL SQL layer on TiKV+PD+TiFlash; validates PedraDB layers |
+| [`tidb-vs-postgres-mysql.md`](tidb-vs-postgres-mysql.md) | TiDB vs Postgres vs MySQL monoliths — choice table + PedraDB quadrant |
+| [`sql-lessons-for-the-grail.md`](sql-lessons-for-the-grail.md) | Postgres/MySQL + Aurora/Neon (log-is-the-DB), Vitess/Citus (proxy+shard), Spanner (TrueTime) — cross-cutting lessons, Rung 1.5, WAL export Must |
+| [`object-storage-as-substrate-possibility.md`](object-storage-as-substrate-possibility.md) | SlateDB/WarpStream/turbopuffer/Tigris; kernel exclusion confirmed; Rung 1.5 WAL→object open |
+| [`conversation-learnings-and-short-term-alignment.md`](conversation-learnings-and-short-term-alignment.md) | All conversation learnings + **conflict matrix vs P0** |
+| [`nats-need-replacement.md`](nats-need-replacement.md) | JetStream-class stream on PedraDB+Raft vs Core NATS; Jepsen 2.12.1 findings |
+| [`usage.md`](usage.md) | **P0 user docs**: open/TX, durability, secondary-index sketch |
 | [`foundationdb-layers-and-products.md`](foundationdb-layers-and-products.md) | What runs on FDB: Record/Document layers, Snowflake, CloudKit, Astra, … |
 | [`etcd-comparison.md`](etcd-comparison.md) | etcd vs PedraDB, FDB, TiKV/TiDB, CRDB, Scylla, RocksDB, … |
 | [`competitive-landscape-rust.md`](competitive-landscape-rust.md) | Rust/local engine peers: fjall, SurrealKV, redb, AgateDB, SlateDB… |

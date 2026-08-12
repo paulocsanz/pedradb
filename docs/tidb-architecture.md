@@ -6,6 +6,9 @@
 >
 > In PedraDB vocabulary: TiDB is a **layer**. TiKV is the (almost) pillar — but
 > the pillar is RocksDB without core TX, so TiDB/TiKV had to bolt on Percolator.
+>
+> **Also:** [`tidb-vs-postgres-mysql.md`](tidb-vs-postgres-mysql.md) — TiDB vs
+> the monoliths (Postgres, MySQL): when each wins, PedraDB quadrant.
 
 Primary sources (PingCAP docs, fetched 2026-08-11):
 - [TiDB Architecture](https://docs.pingcap.com/tidb/stable/tidb-architecture/)

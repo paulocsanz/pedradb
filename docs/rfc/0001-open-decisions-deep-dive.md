@@ -1,6 +1,6 @@
 # RFC-0001 open decisions: deep dive (competition, nuances, regrets)
 
-**Status:** research companion to [RFC-0001](0001-pedradb-high-level-spec.md)  
+**Status:** done (research companion; decisions frozen for P0–P2; revisit only via [RFC-0012](0012-next-significant-steps.md))  
 **Updated:** 2026-08-11  
 **Purpose:** Ground O1–O10 in what peers actually do, where people get burned, and what PedraDB should pick for P0 vs later.
 

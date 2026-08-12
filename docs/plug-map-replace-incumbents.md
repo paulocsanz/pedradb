@@ -122,10 +122,11 @@ PedraDB is never that boundary (except pure embed “link the library”).
 
 | | |
 |--|--|
-| **Plug people want** | CQL + any-replica writes + tunable CL |
+| **Plug people want (product)** | CQL + any-replica writes + tunable CL |
 | **Reality** | That **semantic** is multi-master / often eventual — **not** what PedraDB+Raft gives by default |
-| **Honest options** | (1) Use Scylla for that niche. (2) Offer **CQL syntax** on **CP** multi-Raft+PedraDB = “Cassandra API, TiKV physics” — **not** a true Scylla replace. (3) Separate AP product line. |
-| **Main line** | **Do not** design PedraDB for Scylla plug-in as primary goal |
+| **Need people actually have (mono-shaped)** | Scale-out control-plane KV + CAS + sub-second route/WID push — **not** CQL drop-in |
+| **Honest options** | (1) Keep Scylla for true AP CQL. (2) **Replace the need** with multi-Raft + PedraDB + watch + gRPC gateway (see `scylla-need-replacement.md`). (3) Optional CQL **syntax** on CP = “Cassandra API, TiKV physics,” not Scylla. |
+| **Main line** | Do **not** design kernel for AP multi-master; **do** design L2/L3 so platforms stop *needing* Scylla for networking/orchestration metadata |
 
 ---
 
@@ -150,7 +151,7 @@ Always say which type you mean when promising “replace X.”
 2. Plugin plug      Patroni → DCS plugin       (etcd role, smaller than full etcd wire)
 3. Wire plug        etcd API → same DCS        (true “where etcd was”)
 4. Wire plug        MySQL or PG → SQL+dist KV  (TiDB/CRDB class — large)
-5. Avoid as primary Scylla wire as true AP replace
+5. Avoid as primary Scylla **CQL/AP** wire; prefer replace **need** via KV+watch gateway
 ```
 
 ---
@@ -164,7 +165,8 @@ Always say which type you mean when promising “replace X.”
 | App `postgres://…` single primary | `postgres://sql-gateway…` (horizontal SQL product) |
 | TiDB `mysql://tidb…` | `mysql://our-sql…` |
 | TiKV PD/TiKV endpoints | our-kv endpoints |
-| Scylla CQL contact points | **Keep Scylla** unless you accept CP-CQL product |
+| Scylla CQL (customer AP apps) | **Keep Scylla** unless CP-CQL product |
+| Scylla for routes / orchestrator (platform need) | **gRPC gateway** over multi-Raft+PedraDB+watch — see `scylla-need-replacement.md` |
 
 ---
 
@@ -174,6 +176,7 @@ Always say which type you mean when promising “replace X.”
 - **PedraDB** = always the **bottom storage primitive**, never the plug itself (except pure embed).  
 - **etcd / Patroni** = DCS product in the middle; PedraDB stores state.  
 - **Postgres horizontal / TiDB** = SQL wire + dist stack + PedraDB/node.  
-- **Scylla** = different plug semantics; not the main-line promise.
+- **Scylla product (CQL/AP)** = not the main-line promise.  
+- **Scylla *need* (control-plane metadata + push)** = same stack as TiKV/etcd-class + watches; no drop-in required.
 
-Related: `doctrine-primitives-and-api-layers.md`, `grail-plan-build-databases-on-pedradb.md`, `pedradb-as-dcs-storage-for-patroni.md`.
+Related: `doctrine-primitives-and-api-layers.md`, `grail-plan-build-databases-on-pedradb.md`, `pedradb-as-dcs-storage-for-patroni.md`, `scylla-need-replacement.md`.

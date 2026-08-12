@@ -2,7 +2,8 @@
 
 **Status:** working journal (not normative alone — see RFC-0001 for product spec)  
 **Updated:** 2026-08-11  
-**Purpose:** Persist everything discussed so decisions and doubts don’t live only in chat.
+**Purpose:** Persist everything discussed so decisions and doubts don’t live only in chat.  
+**Later synthesis (learnings + P0 conflict check):** [`conversation-learnings-and-short-term-alignment.md`](conversation-learnings-and-short-term-alignment.md)
 
 ---
 
@@ -59,7 +60,13 @@
 6. Positioning: **tiny surface, speed, build-on potential**; **justify use first**; simulation/papers **later**.  
 7. RFC-0001 high-level spec + open decisions O1–O10 + deep dive.  
 8. Durability debate: fsync on commit vs RocksDB/fjall defaults; TiKV protected by **Raft quorum**, not by RocksDB sync=true on every put.  
-9. **Current emotional/strategic state:** maybe PedraDB is the wrong approach; document everything and sit with the doubt.
+9. **Current emotional/strategic state:** maybe PedraDB is the wrong approach; document everything and sit with the doubt.  
+10. **Grail ladder + etcd/Patroni DCS + plug map + switch bar** — layers doctrine; Scylla product vs Scylla *need*.  
+11. **P0 implementation start:** RFC-0002; InternalKey + MemTable shipped; WAL was already P0.1.  
+12. **SQL world:** TiDB vs Postgres/MySQL; Aurora/Neon log-is-DB; Vitess/Citus; Spanner TrueTime; Rung 1.5; WAL export → Must.  
+13. **WAL-as-storage primitive:** sequence + snapshot get already in code; pageserver *role* is outer product; PedraDB materializes.  
+14. **Object storage possibility:** kernel still no; Rung 1.5 export open (SlateDB/WarpStream/turbopuffer/Tigris researched).  
+15. **Alignment:** research does **not** conflict with short-term P0 — see `conversation-learnings-and-short-term-alignment.md`.
 
 ---
 
@@ -240,6 +247,12 @@ If (1)–(3) fail → **use fjall (or D)** and keep research docs as future insu
 | `docs/distribution-deep-research.md` | Percolator, Parallel Commits, PD, etc. |
 | `docs/etcd-comparison.md` | etcd vs everyone |
 | `docs/scylladb-architecture.md` | Scylla (AP multi-master) |
+| `docs/scylla-need-replacement.md` | Replace Scylla *need* (mono networking/orch), not product |
+| `docs/tidb-vs-postgres-mysql.md` | Monolith SQL vs TiDB distributed |
+| `docs/sql-lessons-for-the-grail.md` | Aurora/Neon/Vitess/Citus/Spanner → ladder |
+| `docs/object-storage-as-substrate-possibility.md` | S3 as Rung 1.5 medium (open), not kernel |
+| `docs/conversation-learnings-and-short-term-alignment.md` | All learnings + P0 conflict matrix |
+| `docs/rfc/0002-internal-key-memtable.md` | P0.2 done |
 | `docs/tidb-architecture.md` | TiDB as SQL layer on TiKV |
 | `docs/foundationdb-layers-and-products.md` | What runs on FDB |
 | `docs/engine-landscape-and-ideal-path.md` | Broader engine survey |

@@ -1,0 +1,18 @@
+[package]
+name = "pedradb-raft"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Minimal in-process Raft over PedraDB apply (RFC-0010)"
+
+[dependencies]
+pedradb-core.workspace = true
+pedradb-apply.workspace = true
+pedradb-dcs.workspace = true
+bytes.workspace = true
+crc32c.workspace = true
+thiserror.workspace = true
+
+[[bin]]
+name = "pedra-raft-node"
+path = "src/bin/pedra-raft-node.rs"

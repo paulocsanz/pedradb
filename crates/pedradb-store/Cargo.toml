@@ -1,0 +1,13 @@
+[package]
+name = "pedradb-store"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Montanha-Store: multi-Raft range KV on PedraDB (substrate for DCS)"
+
+[dependencies]
+pedradb-core.workspace = true
+pedradb-dcs.workspace = true
+bytes.workspace = true
+crc32c.workspace = true
+thiserror.workspace = true

@@ -1,0 +1,11 @@
+[package]
+name = "pedradb-stream"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Durable append-only stream over PedraDB (RFC-0010 P2.4 / JetStream-class need)"
+
+[dependencies]
+pedradb-core.workspace = true
+bytes.workspace = true
+thiserror.workspace = true

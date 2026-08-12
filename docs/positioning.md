@@ -161,7 +161,7 @@ Stars, paper count, and “we planned multi-node” do not justify use.
 | Secondary indexes in core | Layer (using TX) |
 | Document / graph / wide-column models | Layer |
 | Redis-like data types | Different product |
-| Object-store-first (S3) | Different niche (SlateDB/Tonbo) |
+| Object-store-first (S3) | Different niche (SlateDB/Tonbo). **Kernel exclusion confirmed** by `object-storage-as-substrate-possibility.md`; the WAL-export-medium question (Rung 1.5) stays **open**, tracked separately — not re-litigated here |
 | Hundreds of tunables | Small surface + good defaults |
 | Compatibility with RocksDB on-disk format | Clean-room; oracle for behavior tests only |
 | Being “the next sled” feature demo | Ship a boring, small, fast contract |
