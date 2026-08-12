@@ -1,6 +1,10 @@
 //! Minimal HTTP/1.0 wire for PedraDB products (RFC-0012 P1.1 / P1.2).
 //!
-//! Not production TLS. Routes:
+//! Not production TLS. Optional shared-secret auth via
+//! `Authorization: Bearer <token>` or `X-Pedra-Token: <token>`.
+//! Empty token = open bind (lab only).
+//!
+//! Routes:
 //!
 //! **KV** (`KvServer`):
 //! - `GET /kv/<key>` → raw value or 404
@@ -42,7 +46,7 @@ pub enum HttpError {
 /// Result.
 pub type Result<T> = std::result::Result<T, HttpError>;
 
-fn read_req(stream: &mut TcpStream) -> Result<(String, String, Vec<u8>)> {
+fn read_req(stream: &mut TcpStream) -> Result<(String, String, Vec<u8>, Vec<(String, String)>)> {
     let mut buf = Vec::new();
     let mut tmp = [0u8; 1024];
     loop {
@@ -68,7 +72,11 @@ fn read_req(stream: &mut TcpStream) -> Result<(String, String, Vec<u8>)> {
     let method = parts.next().unwrap_or("").to_string();
     let path = parts.next().unwrap_or("/").to_string();
     let mut content_len = 0usize;
+    let mut headers = Vec::new();
     for line in lines {
+        if let Some((k, v)) = line.split_once(':') {
+            headers.push((k.trim().to_ascii_lowercase(), v.trim().to_string()));
+        }
         if let Some(v) = line
             .to_ascii_lowercase()
             .strip_prefix("content-length:")
@@ -101,7 +109,34 @@ fn read_req(stream: &mut TcpStream) -> Result<(String, String, Vec<u8>)> {
     }
     body.truncate(content_len);
     let _ = body_start;
-    Ok((method, path, body))
+    Ok((method, path, body, headers))
+}
+
+/// Extract bearer / X-Pedra-Token from headers.
+fn header_token(headers: &[(String, String)]) -> Option<&str> {
+    for (k, v) in headers {
+        if k == "x-pedra-token" {
+            return Some(v.as_str());
+        }
+        if k == "authorization" {
+            if let Some(rest) = v
+                .strip_prefix("Bearer ")
+                .or_else(|| v.strip_prefix("bearer "))
+            {
+                return Some(rest.trim());
+            }
+            return Some(v.as_str());
+        }
+    }
+    None
+}
+
+fn authorize(headers: &[(String, String)], token: &Option<String>) -> bool {
+    match token {
+        None => true,
+        Some(t) if t.is_empty() => true,
+        Some(t) => header_token(headers) == Some(t.as_str()),
+    }
 }
 
 fn write_resp(stream: &mut TcpStream, code: u16, reason: &str, body: &[u8]) -> Result<()> {
@@ -117,17 +152,28 @@ fn write_resp(stream: &mut TcpStream, code: u16, reason: &str, body: &[u8]) -> R
 /// KV HTTP server.
 pub struct KvServer {
     kv: Arc<Mutex<KvService>>,
+    /// Shared secret; `None`/empty = open bind (lab only).
+    auth_token: Option<String>,
 }
 
 impl KvServer {
-    /// Open DB at path.
+    /// Open DB at path (no auth).
     ///
     /// # Errors
     /// Open.
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
+        Self::open_with_auth(path, None)
+    }
+
+    /// Open with optional bearer / `X-Pedra-Token` auth.
+    ///
+    /// # Errors
+    /// Open.
+    pub fn open_with_auth(path: impl AsRef<Path>, token: Option<String>) -> Result<Self> {
         let kv = KvService::open(path).map_err(|e| HttpError::App(e.to_string()))?;
         Ok(Self {
             kv: Arc::new(Mutex::new(kv)),
+            auth_token: token,
         })
     }
 
@@ -138,22 +184,31 @@ impl KvServer {
     pub fn serve(self, addr: SocketAddr) -> Result<()> {
         let listener = TcpListener::bind(addr)?;
         let kv = self.kv;
+        let auth = self.auth_token;
         for conn in listener.incoming() {
             let mut stream = match conn {
                 Ok(s) => s,
                 Err(_) => continue,
             };
             let kv = Arc::clone(&kv);
+            let auth = auth.clone();
             thread::spawn(move || {
-                let _ = handle_kv(&mut stream, &kv);
+                let _ = handle_kv(&mut stream, &kv, &auth);
             });
         }
         Ok(())
     }
 }
 
-fn handle_kv(stream: &mut TcpStream, kv: &Arc<Mutex<KvService>>) -> Result<()> {
-    let (method, path, body) = read_req(stream)?;
+fn handle_kv(
+    stream: &mut TcpStream,
+    kv: &Arc<Mutex<KvService>>,
+    auth: &Option<String>,
+) -> Result<()> {
+    let (method, path, body, headers) = read_req(stream)?;
+    if !authorize(&headers, auth) {
+        return write_resp(stream, 401, "Unauthorized", b"auth required");
+    }
     if let Some(key) = path.strip_prefix("/kv/") {
         let key = key.as_bytes();
         match method.as_str() {
@@ -187,17 +242,27 @@ fn handle_kv(stream: &mut TcpStream, kv: &Arc<Mutex<KvService>>) -> Result<()> {
 /// DCS HTTP server (Patroni-oriented subset).
 pub struct DcsServer {
     dcs: Arc<Mutex<Dcs>>,
+    auth_token: Option<String>,
 }
 
 impl DcsServer {
-    /// Open DCS store.
+    /// Open DCS store (no auth).
     ///
     /// # Errors
     /// Open.
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
+        Self::open_with_auth(path, None)
+    }
+
+    /// Open with optional token auth (same headers as [`KvServer`]).
+    ///
+    /// # Errors
+    /// Open.
+    pub fn open_with_auth(path: impl AsRef<Path>, token: Option<String>) -> Result<Self> {
         let dcs = Dcs::open(path).map_err(|e| HttpError::App(e.to_string()))?;
         Ok(Self {
             dcs: Arc::new(Mutex::new(dcs)),
+            auth_token: token,
         })
     }
 
@@ -208,14 +273,16 @@ impl DcsServer {
     pub fn serve(self, addr: SocketAddr) -> Result<()> {
         let listener = TcpListener::bind(addr)?;
         let dcs = self.dcs;
+        let auth = self.auth_token;
         for conn in listener.incoming() {
             let mut stream = match conn {
                 Ok(s) => s,
                 Err(_) => continue,
             };
             let dcs = Arc::clone(&dcs);
+            let auth = auth.clone();
             thread::spawn(move || {
-                let _ = handle_dcs(&mut stream, &dcs);
+                let _ = handle_dcs(&mut stream, &dcs, &auth);
             });
         }
         Ok(())
@@ -238,8 +305,15 @@ fn path_only(path: &str) -> &str {
     path.split_once('?').map(|(p, _)| p).unwrap_or(path)
 }
 
-fn handle_dcs(stream: &mut TcpStream, dcs: &Arc<Mutex<Dcs>>) -> Result<()> {
-    let (method, path, body) = read_req(stream)?;
+fn handle_dcs(
+    stream: &mut TcpStream,
+    dcs: &Arc<Mutex<Dcs>>,
+    auth: &Option<String>,
+) -> Result<()> {
+    let (method, path, body, headers) = read_req(stream)?;
+    if !authorize(&headers, auth) {
+        return write_resp(stream, 401, "Unauthorized", b"auth required");
+    }
     let po = path_only(&path);
     if let Some(key) = po.strip_prefix("/dcs/kv/") {
         let key = key.as_bytes();
@@ -324,9 +398,23 @@ pub fn http_exchange(
     path: &str,
     body: &[u8],
 ) -> Result<(u16, Vec<u8>)> {
+    http_exchange_auth(addr, method, path, body, None)
+}
+
+/// HTTP client with optional bearer token.
+pub fn http_exchange_auth(
+    addr: SocketAddr,
+    method: &str,
+    path: &str,
+    body: &[u8],
+    token: Option<&str>,
+) -> Result<(u16, Vec<u8>)> {
     let mut stream = TcpStream::connect(addr)?;
+    let auth_h = token
+        .map(|t| format!("Authorization: Bearer {t}\r\n"))
+        .unwrap_or_default();
     let req = format!(
-        "{method} {path} HTTP/1.0\r\nContent-Length: {}\r\nHost: localhost\r\n\r\n",
+        "{method} {path} HTTP/1.0\r\nContent-Length: {}\r\nHost: localhost\r\n{auth_h}\r\n",
         body.len()
     );
     stream.write_all(req.as_bytes())?;
@@ -445,6 +533,31 @@ mod tests {
         // If we got a response body path through App error, fine; main check is
         // we did not allocate 1GiB (process still alive, test finishes).
         let _ = resp;
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn kv_http_requires_token_when_configured() {
+        let dir = temp("auth");
+        let port = 20100 + (std::process::id() % 400) as u16;
+        let addr: SocketAddr = format!("127.0.0.1:{port}").parse().unwrap();
+        let srv = KvServer::open_with_auth(&dir, Some("sekrit".into())).unwrap();
+        thread::spawn(move || {
+            let _ = srv.serve(addr);
+        });
+        thread::sleep(Duration::from_millis(100));
+        let (code, _) = http_exchange(addr, "PUT", "/kv/x", b"y").unwrap();
+        assert_eq!(code, 401, "missing token must 401");
+        let (code, _) =
+            http_exchange_auth(addr, "PUT", "/kv/x", b"y", Some("wrong")).unwrap();
+        assert_eq!(code, 401, "wrong token must 401");
+        let (code, _) =
+            http_exchange_auth(addr, "PUT", "/kv/x", b"y", Some("sekrit")).unwrap();
+        assert_eq!(code, 200);
+        let (code, body) =
+            http_exchange_auth(addr, "GET", "/kv/x", b"", Some("sekrit")).unwrap();
+        assert_eq!(code, 200);
+        assert_eq!(body, b"y");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

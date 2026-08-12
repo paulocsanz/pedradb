@@ -4,6 +4,7 @@
 **Updated:** 2026-08-12  
 **Normative product contract:** [RFC-0013: MontanhaDb product specification](rfc/0013-montanhadb-product.md) — **implement and validate against that RFC**  
 **P0 invariant ↔ test map:** [montanha-invariants-and-tests.md](montanha-invariants-and-tests.md)  
+**DST / fault seams (keep determinismo separate):** [dst-seams.md](dst-seams.md)  
 **Doctrine vs FDB (read if confused):** [montanha-vs-foundationdb.md](montanha-vs-foundationdb.md)  
 **Deep research (market + TiKV/FDB/CRDB/etcd):** [montanhadb-deep-research.md](montanhadb-deep-research.md)
 
@@ -105,7 +106,7 @@ MontanhaDb is a **family of deployable capabilities**, not a single binary forev
 
 | Surface | Purpose | Today (in monorepo) |
 |---------|---------|---------------------|
-| **Montanha-Store** | Horizontal multi-Raft KV (**substrate**) | **`pedradb-store`**: multi-range + majority + **`put_batch`** (in-range multi-key atomic; cross-range hard-fail) |
+| **Montanha-Store** | Horizontal multi-Raft KV (**substrate**) | **`pedradb-store`**: multi-range + majority + `put_batch` (same-range) + **`commit_tx`** (cross-range multi-key 2PC). **Not** full FDB product parity. |
 | **Montanha-DCS** | Coord layer **on Store** (TX/CAS) | **`StoreCluster::dcs_create` / `dcs_cas`**; bootstrap single Raft still exists |
 | **Montanha-Raft** | Consensus transport (domain / multi-group) | `pedradb-raft`, `pedra-raft-node` |
 | **Montanha-Live** | Best-effort leadership streams on meta keys | Design done; hub not shipped |

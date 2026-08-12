@@ -29,6 +29,7 @@ fn kind_to_u64(k: FaultKind) -> u64 {
         FaultKind::PermissionDenied => 2,
         FaultKind::Interrupted => 3,
         FaultKind::SyncFail => 4,
+        FaultKind::ShortWrite => 5,
     }
 }
 
@@ -38,6 +39,7 @@ fn kind_from_u64(v: u64) -> FaultKind {
         2 => FaultKind::PermissionDenied,
         3 => FaultKind::Interrupted,
         4 => FaultKind::SyncFail,
+        5 => FaultKind::ShortWrite,
         _ => FaultKind::IoError,
     }
 }

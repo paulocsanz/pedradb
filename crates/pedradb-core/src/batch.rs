@@ -64,6 +64,21 @@ impl WriteOp {
             value: Bytes::new(),
         }
     }
+
+    /// Range-delete `[start, end)` at `sequence` (end stored in value).
+    #[must_use]
+    pub fn delete_range(
+        sequence: SequenceNumber,
+        start: impl Into<Bytes>,
+        end: impl Into<Bytes>,
+    ) -> Self {
+        Self {
+            kind: ValueType::RangeDeletion,
+            sequence,
+            key: start.into(),
+            value: end.into(),
+        }
+    }
 }
 
 /// A batch of ops written as one logical WAL record.

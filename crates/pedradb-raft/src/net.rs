@@ -8,8 +8,14 @@
 //! - tag `5` = Status
 //! - tag `6` = DcsCommand propose
 //! - tag `7` = DcsGet
+//! - tag `0x80` = Auth (shared-secret handshake; first frame when auth enabled)
 //!
 //! Replies: same framing with type-specific payloads.
+//!
+//! # Auth
+//! When [`NetworkNode`] / [`PeerClient`] are configured with a non-empty shared
+//! secret, each TCP connection must begin with an auth frame (`0x80` + secret).
+//! Empty secret = open bind (lab only; **do not** expose publicly).
 
 use std::collections::HashMap;
 use std::io::{Read, Write};
@@ -134,6 +140,11 @@ fn encode_op(b: &mut Vec<u8>, op: &BatchOp) {
             b.push(2);
             put_bytes(b, key);
         }
+        BatchOp::DeleteRange { start, end } => {
+            b.push(3);
+            put_bytes(b, start);
+            put_bytes(b, end);
+        }
     }
 }
 
@@ -153,6 +164,10 @@ fn decode_op(buf: &[u8], off: &mut usize) -> Result<BatchOp> {
         }),
         2 => Ok(BatchOp::Delete {
             key: bytes::Bytes::from(take_bytes(buf, off)?),
+        }),
+        3 => Ok(BatchOp::DeleteRange {
+            start: bytes::Bytes::from(take_bytes(buf, off)?),
+            end: bytes::Bytes::from(take_bytes(buf, off)?),
         }),
         _ => Err(RaftError::Network("bad op".into())),
     }
@@ -247,20 +262,61 @@ fn decode_ae_reply(buf: &[u8]) -> Result<AppendEntriesReply> {
     })
 }
 
+/// Auth frame tag (connection preamble).
+const AUTH_TAG: u8 = 0x80;
+
+fn write_auth(stream: &mut impl Write, secret: &[u8]) -> Result<()> {
+    let mut b = vec![AUTH_TAG];
+    put_bytes(&mut b, secret);
+    write_frame(stream, &b)
+}
+
+fn expect_auth(stream: &mut impl Read, secret: &[u8]) -> Result<()> {
+    let body = read_frame(stream)?;
+    if body.first().copied() != Some(AUTH_TAG) {
+        return Err(RaftError::Network("auth required".into()));
+    }
+    let mut off = 1usize;
+    let got = take_bytes(&body, &mut off)?;
+    if got.as_slice() != secret {
+        return Err(RaftError::Network("auth rejected".into()));
+    }
+    Ok(())
+}
+
 /// RPC client to one peer.
 pub struct PeerClient {
     addr: SocketAddr,
+    /// Shared secret; empty = no auth handshake.
+    auth: Vec<u8>,
 }
 
 impl PeerClient {
-    /// Peer at `addr`.
+    /// Peer at `addr` (no auth).
     #[must_use]
     pub fn new(addr: SocketAddr) -> Self {
-        Self { addr }
+        Self {
+            addr,
+            auth: Vec::new(),
+        }
+    }
+
+    /// Peer with shared-secret auth (must match server).
+    #[must_use]
+    pub fn with_auth(addr: SocketAddr, secret: impl AsRef<[u8]>) -> Self {
+        Self {
+            addr,
+            auth: secret.as_ref().to_vec(),
+        }
     }
 
     fn connect(&self) -> Result<TcpStream> {
-        TcpStream::connect_timeout(&self.addr, Duration::from_secs(2)).map_err(io_net)
+        let mut s =
+            TcpStream::connect_timeout(&self.addr, Duration::from_secs(2)).map_err(io_net)?;
+        if !self.auth.is_empty() {
+            write_auth(&mut s, &self.auth)?;
+        }
+        Ok(s)
     }
 
     /// RequestVote.
@@ -405,6 +461,8 @@ pub struct NetworkNode {
     peers: HashMap<u64, SocketAddr>,
     peer_ids: Vec<u64>,
     bind: SocketAddr,
+    /// Shared secret for peer/client connections; empty = open (lab only).
+    auth: Vec<u8>,
 }
 
 impl NetworkNode {
@@ -418,6 +476,20 @@ impl NetworkNode {
         bind: SocketAddr,
         peers: HashMap<u64, SocketAddr>,
     ) -> Result<Self> {
+        Self::open_with_auth(id, data_dir, bind, peers, &[][..])
+    }
+
+    /// Like [`Self::open`] with a shared secret (required for public binds).
+    ///
+    /// # Errors
+    /// Open / bind.
+    pub fn open_with_auth(
+        id: u64,
+        data_dir: impl AsRef<Path>,
+        bind: SocketAddr,
+        peers: HashMap<u64, SocketAddr>,
+        secret: impl AsRef<[u8]>,
+    ) -> Result<Self> {
         let data_dir = data_dir.as_ref();
         std::fs::create_dir_all(data_dir).map_err(io_net)?;
         let db = Db::open_with(
@@ -426,7 +498,9 @@ impl NetworkNode {
                 sync: true,
                 auto_flush_bytes: None,
                 auto_compact_sst_count: None,
+                auto_compact_sst_bytes: None,
                 exclusive: true,
+                large_value_threshold: None,
             },
         )?;
         let meta = persist::raft_meta_dir(data_dir);
@@ -446,6 +520,7 @@ impl NetworkNode {
             peers,
             peer_ids,
             bind,
+            auth: secret.as_ref().to_vec(),
         })
     }
 
@@ -462,6 +537,7 @@ impl NetworkNode {
         let node = Arc::clone(&self.node);
         let peers = self.peers.clone();
         let peer_ids = self.peer_ids.clone();
+        let auth = self.auth.clone();
         let id = {
             let n = node.lock().map_err(|e| RaftError::Network(e.to_string()))?;
             n.id()
@@ -469,9 +545,12 @@ impl NetworkNode {
 
         // Ticker + election/heartbeat using network RPC.
         let tick_node = Arc::clone(&self.node);
+        let tick_auth = auth.clone();
+        let tick_peers = peers.clone();
+        let tick_ids = peer_ids.clone();
         thread::spawn(move || loop {
             thread::sleep(Duration::from_millis(50));
-            let _ = network_tick(&tick_node, id, &peers, &peer_ids);
+            let _ = network_tick(&tick_node, id, &tick_peers, &tick_ids, &tick_auth);
         });
 
         for conn in listener.incoming() {
@@ -479,8 +558,9 @@ impl NetworkNode {
             let node = Arc::clone(&self.node);
             let peers = self.peers.clone();
             let peer_ids = self.peer_ids.clone();
+            let auth = auth.clone();
             thread::spawn(move || {
-                let _ = handle_conn(&mut stream, &node, id, &peers, &peer_ids);
+                let _ = handle_conn(&mut stream, &node, id, &peers, &peer_ids, &auth);
             });
         }
         Ok(())
@@ -493,7 +573,11 @@ fn handle_conn(
     self_id: u64,
     peers: &HashMap<u64, SocketAddr>,
     peer_ids: &[u64],
+    auth: &[u8],
 ) -> Result<()> {
+    if !auth.is_empty() {
+        expect_auth(stream, auth)?;
+    }
     let body = read_frame(stream)?;
     if body.is_empty() {
         return Ok(());
@@ -521,7 +605,7 @@ fn handle_conn(
             let mut off = 1;
             let key = take_bytes(&body, &mut off)?;
             let value = take_bytes(&body, &mut off)?;
-            let res = network_propose(node, self_id, peers, peer_ids, &key, &value);
+            let res = network_propose(node, self_id, peers, peer_ids, auth, &key, &value);
             match res {
                 Ok(idx) => {
                     let mut b = vec![1u8];
@@ -559,7 +643,7 @@ fn handle_conn(
             let payload = take_bytes(&body, &mut off)?;
             let cmd = pedradb_dcs::DcsCommand::decode(&payload)
                 .map_err(|e| RaftError::Network(e.to_string()))?;
-            match network_propose_dcs(node, self_id, peers, peer_ids, &cmd) {
+            match network_propose_dcs(node, self_id, peers, peer_ids, auth, &cmd) {
                 Ok(idx) => {
                     let mut b = vec![1u8];
                     put_u64(&mut b, idx);
@@ -604,6 +688,7 @@ fn network_propose_dcs(
     self_id: u64,
     peers: &HashMap<u64, SocketAddr>,
     peer_ids: &[u64],
+    auth: &[u8],
     cmd: &pedradb_dcs::DcsCommand,
 ) -> Result<u64> {
     {
@@ -631,7 +716,7 @@ fn network_propose_dcs(
         n.persist_log()?;
         e
     };
-    network_broadcast_append(node, self_id, peers, peer_ids, vec![entry.clone()])?;
+    network_broadcast_append(node, self_id, peers, peer_ids, auth, vec![entry.clone()])?;
     // F11: only ACK after majority commit.
     let commit = {
         let n = node.lock().map_err(|e| RaftError::Network(e.to_string()))?;
@@ -651,6 +736,7 @@ fn network_propose(
     self_id: u64,
     peers: &HashMap<u64, SocketAddr>,
     peer_ids: &[u64],
+    auth: &[u8],
     key: &[u8],
     value: &[u8],
 ) -> Result<u64> {
@@ -675,7 +761,7 @@ fn network_propose(
         n.persist_log()?;
         e
     };
-    network_broadcast_append(node, self_id, peers, peer_ids, vec![entry.clone()])?;
+    network_broadcast_append(node, self_id, peers, peer_ids, auth, vec![entry.clone()])?;
     // F11: only ACK after majority commit.
     let commit = {
         let n = node.lock().map_err(|e| RaftError::Network(e.to_string()))?;
@@ -695,6 +781,7 @@ fn network_tick(
     self_id: u64,
     peers: &HashMap<u64, SocketAddr>,
     peer_ids: &[u64],
+    auth: &[u8],
 ) -> Result<()> {
     let action = {
         let mut n = node.lock().map_err(|e| RaftError::Network(e.to_string()))?;
@@ -714,8 +801,8 @@ fn network_tick(
         }
     };
     match action {
-        Some(1) => network_broadcast_append(node, self_id, peers, peer_ids, Vec::new()),
-        Some(2) => network_start_election(node, self_id, peers, peer_ids),
+        Some(1) => network_broadcast_append(node, self_id, peers, peer_ids, auth, Vec::new()),
+        Some(2) => network_start_election(node, self_id, peers, peer_ids, auth),
         _ => Ok(()),
     }
 }
@@ -725,6 +812,7 @@ fn network_start_election(
     self_id: u64,
     peers: &HashMap<u64, SocketAddr>,
     peer_ids: &[u64],
+    auth: &[u8],
 ) -> Result<()> {
     let args = {
         let mut n = node.lock().map_err(|e| RaftError::Network(e.to_string()))?;
@@ -759,7 +847,11 @@ fn network_start_election(
         let Some(addr) = peers.get(&pid) else {
             continue;
         };
-        let client = PeerClient::new(*addr);
+        let client = if auth.is_empty() {
+            PeerClient::new(*addr)
+        } else {
+            PeerClient::with_auth(*addr, auth)
+        };
         if let Ok(reply) = client.request_vote(&args) {
             if reply.term > args.term {
                 let mut n = node.lock().map_err(|e| RaftError::Network(e.to_string()))?;
@@ -779,7 +871,7 @@ fn network_start_election(
             }
         }
         // F18: replicate leader noop and advance commit (single-node critical).
-        network_broadcast_append(node, self_id, peers, peer_ids, Vec::new())?;
+        network_broadcast_append(node, self_id, peers, peer_ids, auth, Vec::new())?;
     }
     Ok(())
 }
@@ -789,6 +881,7 @@ fn network_broadcast_append(
     self_id: u64,
     peers: &HashMap<u64, SocketAddr>,
     peer_ids: &[u64],
+    auth: &[u8],
     new_entries: Vec<RaftLogEntry>,
 ) -> Result<()> {
     // Attach new entries already on leader log if any; broadcast current tail.
@@ -837,7 +930,11 @@ fn network_broadcast_append(
             entries,
             leader_commit: commit,
         };
-        let client = PeerClient::new(*addr);
+        let client = if auth.is_empty() {
+            PeerClient::new(*addr)
+        } else {
+            PeerClient::with_auth(*addr, auth)
+        };
         if let Ok(reply) = client.append_entries(&args) {
             let mut n = node.lock().map_err(|e| RaftError::Network(e.to_string()))?;
             if reply.term > term {
@@ -890,10 +987,26 @@ fn network_broadcast_append(
 /// # Errors
 /// Timeout.
 pub fn wait_for_leader(addrs: &[SocketAddr], max_ms: u64) -> Result<SocketAddr> {
+    wait_for_leader_auth(addrs, max_ms, &[])
+}
+
+/// Like [`wait_for_leader`] when the cluster requires a shared secret.
+///
+/// # Errors
+/// Timeout.
+pub fn wait_for_leader_auth(
+    addrs: &[SocketAddr],
+    max_ms: u64,
+    secret: &[u8],
+) -> Result<SocketAddr> {
     let steps = max_ms / 50;
     for _ in 0..steps {
         for &a in addrs {
-            let c = PeerClient::new(a);
+            let c = if secret.is_empty() {
+                PeerClient::new(a)
+            } else {
+                PeerClient::with_auth(a, secret)
+            };
             if let Ok((is_leader, _, _)) = c.status() {
                 if is_leader {
                     return Ok(a);
@@ -909,4 +1022,27 @@ pub fn wait_for_leader(addrs: &[SocketAddr], max_ms: u64) -> Result<SocketAddr> 
 #[must_use]
 pub fn node_data_dir(parent: impl AsRef<Path>, id: u64) -> PathBuf {
     parent.as_ref().join(format!("net-node-{id}"))
+}
+
+#[cfg(test)]
+mod auth_tests {
+    use super::*;
+    use std::io::Cursor;
+
+    #[test]
+    fn auth_frame_roundtrip() {
+        let mut buf = Vec::new();
+        write_auth(&mut buf, b"s3cret").unwrap();
+        let mut cur = Cursor::new(buf);
+        expect_auth(&mut cur, b"s3cret").unwrap();
+        assert!(expect_auth(&mut Cursor::new(vec![]), b"s3cret").is_err());
+    }
+
+    #[test]
+    fn auth_rejects_wrong_secret() {
+        let mut buf = Vec::new();
+        write_auth(&mut buf, b"good").unwrap();
+        let mut cur = Cursor::new(buf);
+        assert!(expect_auth(&mut cur, b"bad").is_err());
+    }
 }

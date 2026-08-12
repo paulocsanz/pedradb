@@ -1,0 +1,328 @@
+//! Post-commit change feed for watch/CDC layers (RFC-0019 P0.3).
+//!
+//! Durable append-only `CHANGELOG` next to the DB; rebuilt/extended on open from
+//! the file and any WAL ops not yet flushed into it. No ghost seq beyond the
+//! durable last sequence of the live DB.
+
+use std::io::{Read, Write};
+use std::path::{Path, PathBuf};
+
+use bytes::Bytes;
+
+use crate::batch::WriteOp;
+use crate::env::{Env, EnvFile};
+use crate::error::{CoreError, Result};
+use crate::key::{SequenceNumber, ValueType};
+
+/// On-disk changelog file name inside the DB directory.
+pub const CHANGELOG_FILE_NAME: &str = "CHANGELOG";
+
+const MAGIC: &[u8; 8] = b"PDBCHLG1";
+
+/// Kind of a logical change visible to subscribers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChangeKind {
+    /// Put / value at `sequence`.
+    Put,
+    /// Point delete tombstone.
+    Delete,
+    /// Range delete `[key, value)` where value holds the exclusive end.
+    DeleteRange,
+}
+
+impl ChangeKind {
+    fn from_value_type(k: ValueType) -> Self {
+        match k {
+            ValueType::Value => Self::Put,
+            ValueType::Deletion => Self::Delete,
+            ValueType::RangeDeletion => Self::DeleteRange,
+        }
+    }
+
+    fn to_u8(self) -> u8 {
+        match self {
+            Self::Put => 1,
+            Self::Delete => 0,
+            Self::DeleteRange => 2,
+        }
+    }
+
+    fn from_u8(v: u8) -> Option<Self> {
+        match v {
+            0 => Some(Self::Delete),
+            1 => Some(Self::Put),
+            2 => Some(Self::DeleteRange),
+            _ => None,
+        }
+    }
+}
+
+/// One durable logical change (one sequence).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChangeEntry {
+    /// Sequence of this change (matches WAL/MemTable assignment).
+    pub sequence: SequenceNumber,
+    /// User key (start key for range deletes).
+    pub key: Bytes,
+    /// Put / delete / range-delete.
+    pub kind: ChangeKind,
+    /// Value for puts; empty for point deletes; exclusive end for range deletes.
+    pub value: Bytes,
+}
+
+impl ChangeEntry {
+    /// Build from a WAL [`WriteOp`] (value may be a vlog pointer — feed stores as written).
+    #[must_use]
+    pub fn from_write_op(op: &WriteOp) -> Self {
+        Self {
+            sequence: op.sequence,
+            key: op.key.clone(),
+            kind: ChangeKind::from_value_type(op.kind),
+            value: op.value.clone(),
+        }
+    }
+}
+
+/// In-memory + durable changelog.
+#[derive(Debug, Default, Clone)]
+pub struct ChangeLog {
+    entries: Vec<ChangeEntry>,
+}
+
+impl ChangeLog {
+    /// Empty log.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Number of recorded changes.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    /// Whether empty.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    /// Highest sequence in the log, if any.
+    #[must_use]
+    pub fn max_sequence(&self) -> Option<SequenceNumber> {
+        self.entries.last().map(|e| e.sequence)
+    }
+
+    /// Append entries (must be non-decreasing by sequence).
+    pub fn extend(&mut self, new: impl IntoIterator<Item = ChangeEntry>) {
+        for e in new {
+            if let Some(max) = self.max_sequence() {
+                debug_assert!(e.sequence > max);
+            }
+            self.entries.push(e);
+        }
+    }
+
+    /// Changes with `from_seq < sequence <= to_seq` (exclusive lower, inclusive upper).
+    #[must_use]
+    pub fn changes_in(&self, from_seq: SequenceNumber, to_seq: SequenceNumber) -> Vec<ChangeEntry> {
+        self.entries
+            .iter()
+            .filter(|e| e.sequence > from_seq && e.sequence <= to_seq)
+            .cloned()
+            .collect()
+    }
+
+    /// All changes with `sequence > from_seq` (tail).
+    #[must_use]
+    pub fn changes_after(&self, from_seq: SequenceNumber) -> Vec<ChangeEntry> {
+        self.entries
+            .iter()
+            .filter(|e| e.sequence > from_seq)
+            .cloned()
+            .collect()
+    }
+
+    /// Load from `CHANGELOG` if present.
+    ///
+    /// # Errors
+    /// I/O or corrupt file.
+    pub fn load_on(env: &impl Env, dir: &Path) -> Result<Self> {
+        let path = dir.join(CHANGELOG_FILE_NAME);
+        if !env.exists(&path) {
+            return Ok(Self::new());
+        }
+        let mut f = env.open_read(&path)?;
+        let mut buf = Vec::new();
+        f.read_to_end(&mut buf)?;
+        decode_changelog(&buf)
+    }
+
+    /// Persist full log to `CHANGELOG` (rewrite) and fsync.
+    ///
+    /// # Errors
+    /// I/O.
+    pub fn store_on(&self, env: &impl Env, dir: &Path) -> Result<()> {
+        let path = dir.join(CHANGELOG_FILE_NAME);
+        let tmp = dir.join(format!("{CHANGELOG_FILE_NAME}.tmp"));
+        let body = encode_changelog(self)?;
+        {
+            let mut f = env.create(&tmp)?;
+            f.write_all(&body)?;
+            f.sync_all()?;
+        }
+        if env.exists(&path) {
+            env.remove_file(&path)?;
+        }
+        env.rename(&tmp, &path)?;
+        let _ = env.sync_dir(dir);
+        Ok(())
+    }
+
+    /// Path helper.
+    #[must_use]
+    pub fn path(dir: &Path) -> PathBuf {
+        dir.join(CHANGELOG_FILE_NAME)
+    }
+}
+
+fn encode_changelog(log: &ChangeLog) -> Result<Vec<u8>> {
+    let mut buf = Vec::new();
+    buf.extend_from_slice(MAGIC);
+    let n = u32::try_from(log.entries.len()).map_err(|_| {
+        CoreError::Internal("changelog too large".into())
+    })?;
+    buf.extend_from_slice(&n.to_le_bytes());
+    for e in &log.entries {
+        buf.extend_from_slice(&e.sequence.to_le_bytes());
+        let klen = u32::try_from(e.key.len()).map_err(|_| {
+            CoreError::Internal("changelog key too large".into())
+        })?;
+        buf.extend_from_slice(&klen.to_le_bytes());
+        buf.extend_from_slice(&e.key);
+        buf.push(e.kind.to_u8());
+        let vlen = u32::try_from(e.value.len()).map_err(|_| {
+            CoreError::Internal("changelog value too large".into())
+        })?;
+        buf.extend_from_slice(&vlen.to_le_bytes());
+        buf.extend_from_slice(&e.value);
+    }
+    let crc = crc32c::crc32c(&buf);
+    buf.extend_from_slice(&crc.to_le_bytes());
+    Ok(buf)
+}
+
+fn decode_changelog(buf: &[u8]) -> Result<ChangeLog> {
+    if buf.len() < 8 + 4 + 4 {
+        return Err(CoreError::Internal("changelog too short".into()));
+    }
+    let (payload, crc_bytes) = buf.split_at(buf.len() - 4);
+    let stored = u32::from_le_bytes(crc_bytes.try_into().map_err(|_| {
+        CoreError::Internal("changelog crc truncated".into())
+    })?);
+    let got = crc32c::crc32c(payload);
+    if stored != got {
+        return Err(CoreError::Internal(format!(
+            "changelog CRC mismatch: {stored:#x} vs {got:#x}"
+        )));
+    }
+    if &payload[0..8] != MAGIC {
+        return Err(CoreError::Internal("bad changelog magic".into()));
+    }
+    let n = u32::from_le_bytes(payload[8..12].try_into().unwrap()) as usize;
+    let mut off = 12;
+    let mut entries = Vec::with_capacity(n);
+    for _ in 0..n {
+        if off + 8 + 4 > payload.len() {
+            return Err(CoreError::Internal("changelog truncated entry".into()));
+        }
+        let sequence = u64::from_le_bytes(payload[off..off + 8].try_into().unwrap());
+        off += 8;
+        let klen = u32::from_le_bytes(payload[off..off + 4].try_into().unwrap()) as usize;
+        off += 4;
+        if off + klen + 1 + 4 > payload.len() {
+            return Err(CoreError::Internal("changelog truncated key".into()));
+        }
+        let key = Bytes::copy_from_slice(&payload[off..off + klen]);
+        off += klen;
+        let kind = ChangeKind::from_u8(payload[off]).ok_or_else(|| {
+            CoreError::Internal("bad changelog kind".into())
+        })?;
+        off += 1;
+        let vlen = u32::from_le_bytes(payload[off..off + 4].try_into().unwrap()) as usize;
+        off += 4;
+        if off + vlen > payload.len() {
+            return Err(CoreError::Internal("changelog truncated value".into()));
+        }
+        let value = Bytes::copy_from_slice(&payload[off..off + vlen]);
+        off += vlen;
+        entries.push(ChangeEntry {
+            sequence,
+            key,
+            kind,
+            value,
+        });
+    }
+    if off != payload.len() {
+        return Err(CoreError::Internal("changelog trailing garbage".into()));
+    }
+    Ok(ChangeLog { entries })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::env::StdEnv;
+    use std::fs;
+
+    #[test]
+    fn encode_decode_round_trip() {
+        let mut log = ChangeLog::new();
+        log.extend([
+            ChangeEntry {
+                sequence: 1,
+                key: Bytes::from_static(b"a"),
+                kind: ChangeKind::Put,
+                value: Bytes::from_static(b"1"),
+            },
+            ChangeEntry {
+                sequence: 2,
+                key: Bytes::from_static(b"a"),
+                kind: ChangeKind::Delete,
+                value: Bytes::new(),
+            },
+        ]);
+        let raw = encode_changelog(&log).unwrap();
+        let got = decode_changelog(&raw).unwrap();
+        assert_eq!(got.entries, log.entries);
+        assert_eq!(got.changes_in(0, 1).len(), 1);
+        assert_eq!(got.changes_after(1).len(), 1);
+    }
+
+    #[test]
+    fn store_load_file() {
+        let dir = std::env::temp_dir().join(format!(
+            "pedradb-changelog-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let env = StdEnv;
+        let mut log = ChangeLog::new();
+        log.extend([ChangeEntry {
+            sequence: 3,
+            key: Bytes::from_static(b"k"),
+            kind: ChangeKind::Put,
+            value: Bytes::from_static(b"v"),
+        }]);
+        log.store_on(&env, &dir).unwrap();
+        let loaded = ChangeLog::load_on(&env, &dir).unwrap();
+        assert_eq!(loaded.entries.len(), 1);
+        assert_eq!(loaded.entries[0].sequence, 3);
+        let _ = fs::remove_dir_all(&dir);
+    }
+}

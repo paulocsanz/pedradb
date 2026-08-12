@@ -107,7 +107,9 @@
 - Long **alpha**, self-says use SQLite for reliability; format breaks before 1.0.  
 - Perpetual **rewrite** (komora/marble); high ambition (not simple LSM).  
 - **Pure Rust but not forbid(unsafe)** — uses `unsafe` + SAFETY.md.  
-- Lesson: don’t live in rewrite; ship a small useful kernel; don’t overclaim.
+- Lesson: don’t live in rewrite; ship a small useful kernel; don’t overclaim.  
+- **Full write-up:** ceilings vs peers, anti-corner checklist, **`pedra-map` sled layer**, B-tree-class reads without second store —  
+  [`performance-ceiling-option-preservation-and-sled-layer.md`](performance-ceiling-option-preservation-and-sled-layer.md).
 
 ### 3.5 Multi-node among “competitors”
 
@@ -256,6 +258,7 @@ If (1)–(3) fail → **use fjall (or D)** and keep research docs as future insu
 | `docs/tidb-architecture.md` | TiDB as SQL layer on TiKV |
 | `docs/foundationdb-layers-and-products.md` | What runs on FDB |
 | `docs/engine-landscape-and-ideal-path.md` | Broader engine survey |
+| `docs/performance-ceiling-option-preservation-and-sled-layer.md` | Perf ceilings, anti-corner, pedra-map/sled layer, B-tree reads w/o dual store |
 | `docs/session-synthesis-architecture-and-doubt.md` | **This file** |
 
 Code today: WAL (P0.1 done). Everything else is design.

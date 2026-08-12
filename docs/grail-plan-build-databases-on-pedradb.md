@@ -159,6 +159,7 @@ Rung X  NOT primary             Scylla-class AP multi-master (different physics)
 | Clear durability options | App vs Raft apply vs bulk load |
 | Single-process multi-thread | Normal servers |
 | Stable-enough disk format story | Don’t sled |
+| Sled/BTreeMap DX without novel storage | `pedra-map` layer — [perf ceiling + sled layer](performance-ceiling-option-preservation-and-sled-layer.md) |
 | Tiny API | Layers compose |
 | **Snapshot / seq number export** (promoted from Should, see `sql-lessons-for-the-grail.md` §6) | Every rung above the kernel — Rung 1.5 (WAL-shipped replicas), Rung 3 (Raft apply), Rung 6 (watches), any future Aurora/Neon-shaped storage product — depends on PedraDB's WAL being a first-class, addressable, replayable artifact from day 1. Aurora's "the log is the database" and Neon's Safekeeper/Pageserver split both confirm the WAL *is* the distribution primitive, not an implementation detail to retrofit later |
 

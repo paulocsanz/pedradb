@@ -115,7 +115,7 @@ That is a **maturity / scaffolding** gap, not a permanent “we are TiKV.”
 |--|------------------|-------------------------|-----------------------------|
 | Data plane consensus story | Unbundled: versions, resolvers, tlogs, storage | **Multi-Raft** per region | **Multi-Raft ranges** MVP (`pedradb-store`) |
 | Membership / coordinators | Paxos coordinators + cluster controller | PD (+ etcd inside PD historically) | Still thin / evolving |
-| Famous testing | Deterministic **simulation** at huge scale | Extensive tests; different culture | Kernel fault injection (`FailingEnv`); not FDB Simulation |
+| Famous testing | Deterministic **simulation** at huge scale | Extensive tests; different culture | Kernel `FailingEnv` + out-of-tree **World** (Net+PeerMsg+seed `trace_hash`); not FDB Simulation |
 
 **Nuance:** Saying “Montanha uses multi-Raft” answers **how we replicate this year**, not **what product we are**. FDB also shards storage; it just doesn’t market itself as “multi-Raft database.”
 

@@ -30,7 +30,9 @@ fn open_nosync_autoflush(path: impl AsRef<std::path::Path>) -> Db {
             sync: true,
             auto_flush_bytes: None,
             auto_compact_sst_count: None,
+            auto_compact_sst_bytes: None,
             exclusive: true,
+                large_value_threshold: None,
         },
     )
     .expect("open")

@@ -222,6 +222,9 @@ PedraDB only makes sense if **LSM write path + research opts + substrate for hea
 
 **Lesson for PedraDB:** justify use with a **small finished kernel** before rewrites and sim theater; don’t ship “champagne of beta” forever; if you use `unsafe`, document it — if you claim `forbid(unsafe)`, mean it (fjall-style).
 
+**Sled DX without sled storage:** map-like / sled-shaped API is a **layer** on PedraDB (`pedra-map`), not a second engine. Full plan (ceilings, option preservation, mapping table, delivery slices):  
+[`performance-ceiling-option-preservation-and-sled-layer.md`](performance-ceiling-option-preservation-and-sled-layer.md).
+
 ### 4.4 nebari + BonsaiDb
 
 | Field | Detail |

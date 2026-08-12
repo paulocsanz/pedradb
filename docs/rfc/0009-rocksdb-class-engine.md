@@ -1,7 +1,7 @@
 # RFC-0009: RocksDB-class engine maturity
 
-**Status:** done (P0–P2 complete; Bloom/value-log/LL research → [RFC-0012](0012-next-significant-steps.md))  
-**Updated:** 2026-08-11  
+**Status:** done (P0–P2 complete; maturity wave 2 → [RFC-0014](0014-rocks-pebble-redwood-maturity.md))  
+**Updated:** 2026-08-12  
 **Parent:** [RFC-0001](0001-pedradb-high-level-spec.md)  
 **Parallel tracks:** A (justify use) + B (engine depth)  
 **Sibling:** [RFC-0010](0010-dbs-on-top.md) — products *on* PedraDB  

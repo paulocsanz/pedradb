@@ -113,14 +113,25 @@ RFC §9: `T-DCS-*`, `T-DCS-APPLY-*`.
 
 API: [`StoreCluster::put_batch`](../../crates/pedradb-store/src/lib.rs) — one raft log entry `RangeEntry::Batch`, apply via PedraDB `apply_batch`.
 
-### Cross-range policy (P1 honesty / I-XR-*)
+### Cross-range multi-key TX (FDB-class defining gap / I-TX-*)
 
-| Policy | Behavior | Test |
-|--------|----------|------|
-| **Hard-fail (shipped)** | Keys locating to ≥2 ranges → `StoreError::CrossRange`; **zero** partial apply | `put_batch_cross_range_hard_fails` |
-| Global FDB-style cross-range TX | **Not shipped** — layers must co-locate keys or split ops | — |
+| Invariant | Test / harness | Crate |
+|-----------|----------------|-------|
+| I-TX-1 Ok cross-range ⇒ all keys majority-applied | `commit_tx_cross_range_atomic_majority` | pedradb-store |
+| I-TX-2 fail/abort ⇒ no partial user keys | `commit_tx_cross_range_minority_no_partial`; `commit_tx_finish_fail_after_prepare_no_partial` | pedradb-store |
+| I-TX-3 write-write conflict on intents | `commit_tx_write_write_conflict` | pedradb-store |
+| I-TX-4 multi-range single-key still works | `multi_range_puts_still_work_with_tx_path` | pedradb-store |
+| I-TX-5 multi-process durable TX | `tests/multiprocess_tx.rs` + bin `montanha-store-smoke` | pedradb-store |
 
-This is **TiKV-store-class** co-location for multi-key atomicity, not FDB global TX. Documented so layers do not overclaim.
+API: `commit_tx` / `tx_start` / `tx_finish` / `tx_cancel` — 2PC prepare/commit with durable intents.
+
+| Path | Behavior |
+|------|----------|
+| `put_batch` same range | Fast path (single raft entry) |
+| `put_batch` cross-range | Still **`CrossRange` hard-fail** (use `commit_tx`) |
+| `commit_tx` any ranges | Atomic multi-key (2PC) |
+
+**Isolation rule (documented):** write-write conflict while intents are held (`Conflict`). Not full FDB OCC/SSI on reads; not Simulation/wire/ops parity.
 
 ### PedraDB boundary (I-PEDRA-*)
 
@@ -129,11 +140,11 @@ This is **TiKV-store-class** co-location for multi-key atomicity, not FDB global
 | I-PEDRA-1 one dir one process | Store opens `store-node-{id}` per peer; exclusive PedraDB open |
 | I-PEDRA-2 no Raft in core | Raft only in `pedradb-store` / `pedradb-raft` |
 
-### Multi-process store (P1.4)
+### Multi-process store (P1.4 / I-TX-5)
 
 | Status | Note |
 |--------|------|
-| **Deferred** | Network multi-Raft store binary not required for P1 multi-key; reopen when `pedradb-store` has multi-process elect+put harness (or reuse pattern from `pedra-raft-node` multi_process tests for store). In-process gates I-MK-* remain the bar. |
+| **Shipped (smoke)** | `montanha-store-smoke write\|verify` + `cargo test -p pedradb-store --test multiprocess_tx` — process A elect+`commit_tx`, process B reopens and checks majority. Not full network multi-Raft mesh. |
 
 ### Extra durability (supporting P0)
 

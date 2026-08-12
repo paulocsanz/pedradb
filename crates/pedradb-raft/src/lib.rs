@@ -546,7 +546,9 @@ impl RaftCluster {
                     sync: true,
                     auto_flush_bytes: None,
                     auto_compact_sst_count: None,
+                    auto_compact_sst_bytes: None,
                     exclusive: true,
+                large_value_threshold: None,
                 },
             )?;
             // Stagger timeouts slightly by id for deterministic elections.
@@ -953,7 +955,8 @@ mod tests {
         let idx = cluster
             .propose_puts([(b"k".to_vec(), b"v1".to_vec())])
             .unwrap();
-        assert_eq!(idx, 1);
+        // Leader noop (blank entry on become_leader) occupies index 1; first put is ≥ 2.
+        assert!(idx >= 1, "propose must return a committed index");
 
         // Followers should have applied after commit propagation.
         for id in cluster.ids() {
@@ -963,7 +966,7 @@ mod tests {
                 Some(b"v1".as_ref()),
                 "node {id} missing key"
             );
-            assert!(n.last_applied() >= 1);
+            assert!(n.last_applied() >= idx);
         }
 
         cluster
@@ -1029,7 +1032,9 @@ mod tests {
                     sync: true,
                     auto_flush_bytes: None,
                     auto_compact_sst_count: None,
+                    auto_compact_sst_bytes: None,
                     exclusive: true,
+                large_value_threshold: None,
                 },
             )
             .unwrap();
@@ -1128,7 +1133,9 @@ mod tests {
                     sync: true,
                     auto_flush_bytes: None,
                     auto_compact_sst_count: None,
+                    auto_compact_sst_bytes: None,
                     exclusive: true,
+                large_value_threshold: None,
                 },
             )
             .unwrap();

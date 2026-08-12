@@ -14,6 +14,8 @@ members = [
     "crates/pedradb-http",
     "crates/pedradb-dst",
     "crates/pedradb-store",
+    "crates/pedradb-io-uring",
+    "crates/pedradb-ops",
 ]
 
 [workspace.package]
@@ -36,6 +38,8 @@ pedradb-stream = { path = "crates/pedradb-stream" }
 pedradb-http = { path = "crates/pedradb-http" }
 pedradb-dst = { path = "crates/pedradb-dst" }
 pedradb-store = { path = "crates/pedradb-store" }
+pedradb-io-uring = { path = "crates/pedradb-io-uring" }
+pedradb-ops = { path = "crates/pedradb-ops" }
 
 # Shared
 crc32c = "0.6"
@@ -43,6 +47,7 @@ thiserror = "1"
 parking_lot = "0.12"
 bytes = "1"
 tracing = "0.1"
+lz4_flex = { version = "0.11", default-features = false, features = ["std"] }
 
 [profile.release]
 debug = 1

@@ -24,15 +24,19 @@
 pub mod command;
 
 pub use command::{
-    apply_dcs_command, check_command, dcs_get, DcsCommand, DCS_CMD_MARKER,
+    apply_dcs_command, check_command, check_command_at, dcs_get, dcs_get_at, lease_live,
+    DcsCommand, DCS_CMD_MARKER,
 };
 
 use std::collections::HashMap;
 use std::path::Path;
 use std::time::{Duration, Instant};
 
-use pedradb_core::{Db, OpenOptions, Result as CoreResult};
+use pedradb_core::{Db, Env, Host, OpenOptions, Result as CoreResult, StdEnv};
 use thiserror::Error;
+
+// Re-export core time / host seams so DCS and store share one DST plug surface.
+pub use pedradb_core::{Clock, DetHost, ManualClock, SystemClock};
 
 /// DCS errors.
 #[derive(Debug, Error)]
@@ -53,58 +57,6 @@ pub enum DcsError {
 
 /// Result alias.
 pub type Result<T> = std::result::Result<T, DcsError>;
-
-// Duplicate Debug in derive - fix that
-// I accidentally put Debug twice - fix when writing
-
-/// Logical clock for lease TTL (test-friendly).
-pub trait Clock {
-    /// Current time.
-    fn now(&self) -> Instant;
-}
-
-/// Wall clock.
-#[derive(Debug, Default, Clone, Copy)]
-pub struct SystemClock;
-
-impl Clock for SystemClock {
-    fn now(&self) -> Instant {
-        Instant::now()
-    }
-}
-
-/// Manual clock for tests.
-#[derive(Debug, Clone)]
-pub struct ManualClock {
-    now: Instant,
-}
-
-impl ManualClock {
-    /// Start at a frozen instant.
-    #[must_use]
-    pub fn new() -> Self {
-        Self {
-            now: Instant::now(),
-        }
-    }
-
-    /// Advance by `d`.
-    pub fn advance(&mut self, d: Duration) {
-        self.now += d;
-    }
-}
-
-impl Default for ManualClock {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl Clock for ManualClock {
-    fn now(&self) -> Instant {
-        self.now
-    }
-}
 
 /// Key-value entry with etcd-like metadata.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -213,8 +165,10 @@ struct Lease {
 ///
 /// Multi-node agreement is the job of Raft (`pedradb-raft`); this type is the
 /// **state machine** + local API.
-pub struct Dcs<C: Clock = SystemClock> {
-    db: Db,
+///
+/// Generic over [`Clock`] (lease TTL) and [`Env`] (disk faults via `FailingEnv`).
+pub struct Dcs<C: Clock = SystemClock, E: Env = StdEnv> {
+    db: Db<E>,
     clock: C,
     next_lease_id: u64,
     leases: HashMap<u64, Lease>,
@@ -223,31 +177,56 @@ pub struct Dcs<C: Clock = SystemClock> {
     watch_log: Vec<(u64, Event)>, // (revision, event)
 }
 
-impl Dcs<SystemClock> {
-    /// Open or create a DCS store at `path`.
+impl Dcs<SystemClock, StdEnv> {
+    /// Open or create a DCS store at `path` (production wall clock + real FS).
     ///
     /// # Errors
     /// PedraDB open.
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
-        Self::open_with_clock(path, SystemClock)
+        Self::open_with_env_clock(path, StdEnv, SystemClock)
     }
 }
 
-impl<C: Clock> Dcs<C> {
-    /// Open with an explicit clock (tests).
+impl<C: Clock> Dcs<C, StdEnv> {
+    /// Open with an explicit clock (tests); real filesystem.
     ///
     /// # Errors
     /// PedraDB open.
     pub fn open_with_clock(path: impl AsRef<Path>, clock: C) -> Result<Self> {
-        let db = Db::open_with(
+        Self::open_with_env_clock(path, StdEnv, clock)
+    }
+}
+
+impl<C: Clock, E: Env> Dcs<C, E> {
+    /// Open with injectable disk + clock (DST: `FailingEnv` + `ManualClock`).
+    ///
+    /// # Errors
+    /// PedraDB open.
+    pub fn open_with_env_clock(path: impl AsRef<Path>, env: E, clock: C) -> Result<Self> {
+        let db = Db::open_with_env(
             path,
             OpenOptions {
                 sync: true,
                 auto_flush_bytes: None,
                 auto_compact_sst_count: None,
+                auto_compact_sst_bytes: None,
                 exclusive: true,
+                large_value_threshold: None,
             },
+            env,
         )?;
+        Self::from_open_db(db, clock)
+    }
+
+    /// Open from a [`Host`] (env + clock; RNG unused at DCS layer).
+    ///
+    /// # Errors
+    /// PedraDB open.
+    pub fn open_with_host(path: impl AsRef<Path>, host: &impl Host<Env = E, Clock = C>) -> Result<Self> {
+        Self::open_with_env_clock(path, host.env().clone(), host.clock().clone())
+    }
+
+    fn from_open_db(db: Db<E>, clock: C) -> Result<Self> {
         // F7: leases are process-local. On restart the table is empty. Two
         // hazards if we naively start `next_lease_id` at 1 with orphans on disk:
         //   1) granting reuses id N that is still bound to a leader key → that
@@ -586,6 +565,11 @@ impl<C: Clock> Dcs<C> {
     pub fn clock_mut(&mut self) -> &mut C {
         &mut self.clock
     }
+
+    /// Shared reference to the clock (e.g. [`pedradb_core::ManualClock::advance`] takes `&self`).
+    pub fn clock(&self) -> &C {
+        &self.clock
+    }
 }
 
 #[cfg(test)]
@@ -660,6 +644,23 @@ mod tests {
         let lease = dcs.grant_lease(Duration::from_millis(5));
         dcs.put(b"k", b"v", lease).unwrap();
         dcs.clock_mut().advance(Duration::from_secs(1));
+        let expired = dcs.expire_leases().unwrap();
+        assert_eq!(expired, vec![lease]);
+        assert!(dcs.get(b"k").is_none());
+        dcs.close().unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn open_with_host_uses_manual_clock() {
+        use pedradb_core::{DetHost, Host, StdEnv};
+        let dir = temp_dir("host");
+        let host = DetHost::with_seed(StdEnv, 99);
+        let mut dcs = Dcs::open_with_host(&dir, &host).unwrap();
+        let lease = dcs.grant_lease(Duration::from_millis(1));
+        dcs.put(b"k", b"v", lease).unwrap();
+        // Advance via host handle (shared ManualClock state).
+        host.clock().advance(Duration::from_secs(1));
         let expired = dcs.expire_leases().unwrap();
         assert_eq!(expired, vec![lease]);
         assert!(dcs.get(b"k").is_none());

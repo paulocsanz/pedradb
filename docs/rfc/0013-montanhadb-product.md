@@ -266,7 +266,7 @@ Smallest useful Montanha: **correct multi-range store + DCS-on-store + deep test
 
 ### P2 — climb (not required for “P0 Montanha”)
 
-- [ ] **P2.1** Cross-range TX strategy doc + optional prototype — status: `todo`  
+- [x] **P2.1** Cross-range TX strategy doc + optional prototype — status: `done` (`commit_tx` 2PC shipped; not full FDB OCC)  
 - [ ] **P2.2** Placement / split / merge automation beyond static splits — status: `todo`  
 - [ ] **P2.3** Production binary packaging, TLS, auth — status: `todo`  
 - [ ] **P2.4** Optional etcd-shaped façade (Kine-like) on store — status: `todo`  
@@ -290,10 +290,10 @@ Smallest useful Montanha: **correct multi-range store + DCS-on-store + deep test
 | P1.1 | p1 | In-range multi-key atomic | done | put_batch + put_batch_* tests | 2026-08-12 |
 | P1.2 | p1 | Live hub MVP | todo | — | 2026-08-12 |
 | P1.3 | p1 | Cluster id / membership | todo | — | 2026-08-12 |
-| P1.4 | p1 | Multi-process/network harness | done | **deferred**: reopen when store multi-process elect+put exists; in-process I-MK bar | 2026-08-12 |
+| P1.4 | p1 | Multi-process/network harness | done | montanha-store-smoke + multiprocess_tx test | 2026-08-12 |
+| P2.1 | p2 | Cross-range TX | done | commit_tx / tx_start / tx_finish 2PC | 2026-08-12 |
 | P1.5 | p1 | Metrics or explicit none | todo | — | 2026-08-12 |
 | P1.6 | p1 | DCS leases fail-safe | todo | — | 2026-08-12 |
-| P2.1 | p2 | Cross-range TX strategy | todo | — | 2026-08-12 |
 | P2.2 | p2 | Placement/split/merge | todo | — | 2026-08-12 |
 | P2.3 | p2 | Prod binary/TLS/auth | todo | — | 2026-08-12 |
 | P2.4 | p2 | etcd façade optional | todo | — | 2026-08-12 |

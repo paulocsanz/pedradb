@@ -2,8 +2,11 @@
 //!
 //! Given versioned entries ordered by [`InternalKey`] (user key ascending,
 //! sequence descending), emit one live value per user key at a snapshot.
+//! Supports range tombstones ([`ValueType::RangeDeletion`]) and a streaming
+//! merge path that does not require materialising the full keyspace first.
 
-use std::collections::BTreeMap;
+use std::cmp::Ordering;
+use std::collections::{BinaryHeap, BTreeMap};
 use std::ops::Bound;
 
 use bytes::Bytes;
@@ -17,6 +20,25 @@ pub struct VisibleKv {
     pub key: Bytes,
     /// Value at snapshot.
     pub value: Bytes,
+}
+
+/// A range tombstone covering `[start, end)` at `sequence`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RangeTombstone {
+    /// Inclusive start user key.
+    pub start: Bytes,
+    /// Exclusive end user key.
+    pub end: Bytes,
+    /// Sequence of the range delete.
+    pub sequence: SequenceNumber,
+}
+
+impl RangeTombstone {
+    /// Whether `user_key` is covered by this tombstone.
+    #[must_use]
+    pub fn covers(&self, user_key: &[u8]) -> bool {
+        user_key >= self.start.as_ref() && user_key < self.end.as_ref()
+    }
 }
 
 /// Whether `user_key` falls within `[start, end)` style bounds.
@@ -35,23 +57,77 @@ pub fn user_key_in_range(user_key: &[u8], start: Bound<&[u8]>, end: Bound<&[u8]>
     after_start && before_end
 }
 
+/// Extract range tombstones visible at `snapshot` from a stream of versions.
+#[must_use]
+pub fn collect_range_tombstones(
+    entries: impl IntoIterator<Item = (InternalKey, Bytes)>,
+    snapshot: SequenceNumber,
+) -> Vec<RangeTombstone> {
+    let mut out = Vec::new();
+    for (ikey, value) in entries {
+        if ikey.kind != ValueType::RangeDeletion || ikey.sequence > snapshot {
+            continue;
+        }
+        out.push(RangeTombstone {
+            start: ikey.user_key,
+            end: value,
+            sequence: ikey.sequence,
+        });
+    }
+    out
+}
+
+/// Whether a point version at `point_seq` for `user_key` is hidden by a range del.
+#[must_use]
+pub fn range_deleted(
+    user_key: &[u8],
+    point_seq: SequenceNumber,
+    tombstones: &[RangeTombstone],
+) -> bool {
+    tombstones.iter().any(|t| {
+        t.covers(user_key) && t.sequence > point_seq
+    })
+}
+
 /// Merge version streams and return visible puts in user-key order.
 ///
 /// `entries` must be iterable in any order; they are sorted via [`BTreeMap`].
 /// For each user key, the newest version with `sequence <= snapshot` wins;
-/// deletions hide the key.
+/// deletions and covering range tombstones hide the key.
 pub fn visible_range(
     entries: impl IntoIterator<Item = (InternalKey, Bytes)>,
     snapshot: SequenceNumber,
     start: Bound<&[u8]>,
     end: Bound<&[u8]>,
 ) -> Vec<VisibleKv> {
+    visible_range_limited(entries, snapshot, start, end, None)
+}
+
+/// Like [`visible_range`], but stops after `limit` live keys when `Some`.
+pub fn visible_range_limited(
+    entries: impl IntoIterator<Item = (InternalKey, Bytes)>,
+    snapshot: SequenceNumber,
+    start: Bound<&[u8]>,
+    end: Bound<&[u8]>,
+    limit: Option<usize>,
+) -> Vec<VisibleKv> {
     let mut map: BTreeMap<InternalKey, Bytes> = BTreeMap::new();
+    let mut range_dels = Vec::new();
     for (ikey, value) in entries {
-        if !user_key_in_range(ikey.user_key.as_ref(), start, end) {
+        if ikey.sequence > snapshot {
             continue;
         }
-        if ikey.sequence > snapshot {
+        if ikey.kind == ValueType::RangeDeletion {
+            // Keep all range dels that might cover keys in range (start key may
+            // be before `start` bound).
+            range_dels.push(RangeTombstone {
+                start: ikey.user_key,
+                end: value,
+                sequence: ikey.sequence,
+            });
+            continue;
+        }
+        if !user_key_in_range(ikey.user_key.as_ref(), start, end) {
             continue;
         }
         map.insert(ikey, value);
@@ -60,13 +136,24 @@ pub fn visible_range(
     let mut out = Vec::new();
     let mut iter = map.into_iter().peekable();
     while let Some((ikey, value)) = iter.next() {
+        if let Some(max) = limit {
+            if out.len() >= max {
+                break;
+            }
+        }
         let user_key = ikey.user_key.clone();
         let live = match ikey.kind {
-            ValueType::Value => Some(VisibleKv {
-                key: user_key.clone(),
-                value,
-            }),
-            ValueType::Deletion => None,
+            ValueType::Value => {
+                if range_deleted(user_key.as_ref(), ikey.sequence, &range_dels) {
+                    None
+                } else {
+                    Some(VisibleKv {
+                        key: user_key.clone(),
+                        value,
+                    })
+                }
+            }
+            ValueType::Deletion | ValueType::RangeDeletion => None,
         };
         // Skip older versions of the same user key (map order = newest first).
         while let Some((next, _)) = iter.peek() {
@@ -81,6 +168,193 @@ pub fn visible_range(
         }
     }
     out
+}
+
+/// Heap entry for multi-way merge of sorted internal-key streams (min-heap by [`InternalKey`]).
+struct HeapItem {
+    key: InternalKey,
+    value: Bytes,
+    stream: usize,
+}
+
+impl PartialEq for HeapItem {
+    fn eq(&self, other: &Self) -> bool {
+        self.key == other.key
+    }
+}
+impl Eq for HeapItem {}
+impl PartialOrd for HeapItem {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+impl Ord for HeapItem {
+    fn cmp(&self, other: &Self) -> Ordering {
+        // BinaryHeap is max-heap; reverse so smallest InternalKey is popped first.
+        other.key.cmp(&self.key)
+    }
+}
+
+/// Streaming merge of **pre-sorted** internal entry streams into visible KVs.
+///
+/// Each stream must already be ordered by [`InternalKey`]. The iterator pulls
+/// one entry at a time (O(streams) memory beyond the streams themselves) and
+/// never materialises the full keyspace as a single `Vec` of all pairs.
+pub struct StreamingVisibleIter {
+    heap: BinaryHeap<HeapItem>,
+    streams: Vec<std::vec::IntoIter<(InternalKey, Bytes)>>,
+    snapshot: SequenceNumber,
+    range_dels: Vec<RangeTombstone>,
+    start: Bound<Bytes>,
+    end: Bound<Bytes>,
+    limit: Option<usize>,
+    emitted: usize,
+    /// Last user key for which we already decided visibility (skip older versions).
+    skip_user: Option<Bytes>,
+}
+
+impl StreamingVisibleIter {
+    /// Build from sorted streams (each `Vec` sorted by [`InternalKey`]).
+    ///
+    /// Range tombstones are collected from all streams first (typically few).
+    #[must_use]
+    pub fn new(
+        streams: Vec<Vec<(InternalKey, Bytes)>>,
+        snapshot: SequenceNumber,
+        start: Bound<&[u8]>,
+        end: Bound<&[u8]>,
+        limit: Option<usize>,
+    ) -> Self {
+        let start_b = bound_to_owned(start);
+        let end_b = bound_to_owned(end);
+
+        let mut range_dels = Vec::new();
+        let mut point_streams = Vec::with_capacity(streams.len());
+        for stream in streams {
+            let mut points = Vec::with_capacity(stream.len());
+            for (ikey, value) in stream {
+                if ikey.sequence > snapshot {
+                    continue;
+                }
+                if ikey.kind == ValueType::RangeDeletion {
+                    range_dels.push(RangeTombstone {
+                        start: ikey.user_key,
+                        end: value,
+                        sequence: ikey.sequence,
+                    });
+                } else {
+                    points.push((ikey, value));
+                }
+            }
+            point_streams.push(points);
+        }
+
+        let mut heap = BinaryHeap::new();
+        let mut iters = Vec::with_capacity(point_streams.len());
+        for (i, s) in point_streams.into_iter().enumerate() {
+            let mut it = s.into_iter();
+            if let Some((k, v)) = it.next() {
+                heap.push(HeapItem {
+                    key: k,
+                    value: v,
+                    stream: i,
+                });
+            }
+            iters.push(it);
+        }
+
+        Self {
+            heap,
+            streams: iters,
+            snapshot,
+            range_dels,
+            start: start_b,
+            end: end_b,
+            limit,
+            emitted: 0,
+            skip_user: None,
+        }
+    }
+
+    fn in_range(&self, user_key: &[u8]) -> bool {
+        let start = bound_as_ref(&self.start);
+        let end = bound_as_ref(&self.end);
+        user_key_in_range(user_key, start, end)
+    }
+}
+
+impl Iterator for StreamingVisibleIter {
+    type Item = VisibleKv;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if let Some(max) = self.limit {
+            if self.emitted >= max {
+                return None;
+            }
+        }
+        while let Some(item) = self.heap.pop() {
+            // Refill from same stream.
+            if let Some((k, v)) = self.streams[item.stream].next() {
+                self.heap.push(HeapItem {
+                    key: k,
+                    value: v,
+                    stream: item.stream,
+                });
+            }
+
+            let ikey = item.key;
+            let value = item.value;
+            if ikey.sequence > self.snapshot {
+                continue;
+            }
+            if let Some(ref skip) = self.skip_user {
+                if ikey.user_key == *skip {
+                    continue;
+                }
+            }
+            if !self.in_range(ikey.user_key.as_ref()) {
+                // Still mark skip if we see versions outside range for same key? no.
+                continue;
+            }
+
+            // Newest version for this user key (heap order = InternalKey order).
+            self.skip_user = Some(ikey.user_key.clone());
+            let live = match ikey.kind {
+                ValueType::Value => {
+                    if range_deleted(ikey.user_key.as_ref(), ikey.sequence, &self.range_dels) {
+                        None
+                    } else {
+                        Some(VisibleKv {
+                            key: ikey.user_key.clone(),
+                            value,
+                        })
+                    }
+                }
+                ValueType::Deletion | ValueType::RangeDeletion => None,
+            };
+            if let Some(kv) = live {
+                self.emitted = self.emitted.saturating_add(1);
+                return Some(kv);
+            }
+        }
+        None
+    }
+}
+
+fn bound_to_owned(b: Bound<&[u8]>) -> Bound<Bytes> {
+    match b {
+        Bound::Unbounded => Bound::Unbounded,
+        Bound::Included(s) => Bound::Included(Bytes::copy_from_slice(s)),
+        Bound::Excluded(s) => Bound::Excluded(Bytes::copy_from_slice(s)),
+    }
+}
+
+fn bound_as_ref(b: &Bound<Bytes>) -> Bound<&[u8]> {
+    match b {
+        Bound::Unbounded => Bound::Unbounded,
+        Bound::Included(s) => Bound::Included(s.as_ref()),
+        Bound::Excluded(s) => Bound::Excluded(s.as_ref()),
+    }
 }
 
 /// Options for version GC during compaction (RFC-0009 P1.3).
@@ -108,32 +382,56 @@ impl CompactGcOptions {
 /// Filter/merge versions for a compacted SST.
 ///
 /// Input may be unsorted; output is sorted by [`InternalKey`].
+/// Range tombstones are kept (when not GC'd) and applied to drop covered values
+/// when `keep_only_latest` is set.
 #[must_use]
 pub fn gc_compact_entries(
     entries: impl IntoIterator<Item = (InternalKey, Bytes)>,
     gc: CompactGcOptions,
 ) -> Vec<(InternalKey, Bytes)> {
     let mut map: BTreeMap<InternalKey, Bytes> = BTreeMap::new();
+    let mut range_dels = Vec::new();
     for (ikey, value) in entries {
         if ikey.sequence < gc.min_sequence {
+            continue;
+        }
+        if ikey.kind == ValueType::RangeDeletion {
+            range_dels.push((ikey, value));
             continue;
         }
         map.insert(ikey, value);
     }
 
     if !gc.keep_only_latest {
-        return map.into_iter().collect();
+        let mut out: Vec<_> = map.into_iter().collect();
+        out.extend(range_dels);
+        out.sort_by(|a, b| a.0.cmp(&b.0));
+        return out;
     }
 
-    // Newest first per user key (InternalKey order).
+    // Apply range dels as coverage, keep only latest point version, drop covered.
+    let tombs: Vec<RangeTombstone> = range_dels
+        .iter()
+        .map(|(k, v)| RangeTombstone {
+            start: k.user_key.clone(),
+            end: v.clone(),
+            sequence: k.sequence,
+        })
+        .collect();
+
     let mut out = Vec::new();
     let mut iter = map.into_iter().peekable();
     while let Some((ikey, value)) = iter.next() {
         let user_key = ikey.user_key.clone();
         let keep = match ikey.kind {
-            ValueType::Value => Some((ikey, value)),
-            // Tombstone as newest → key gone from compacted file.
-            ValueType::Deletion => None,
+            ValueType::Value => {
+                if range_deleted(user_key.as_ref(), ikey.sequence, &tombs) {
+                    None
+                } else {
+                    Some((ikey, value))
+                }
+            }
+            ValueType::Deletion | ValueType::RangeDeletion => None,
         };
         while let Some((next, _)) = iter.peek() {
             if next.user_key == user_key {
@@ -146,6 +444,7 @@ pub fn gc_compact_entries(
             out.push(pair);
         }
     }
+    // Drop range tombstones under latest_only (keys already gone).
     out
 }
 
@@ -224,5 +523,68 @@ mod tests {
         );
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].1.as_ref(), b"a5");
+    }
+
+    #[test]
+    fn range_limit_stops_early() {
+        let entries = vec![
+            (ik(b"a", 1, ValueType::Value), Bytes::from_static(b"1")),
+            (ik(b"b", 2, ValueType::Value), Bytes::from_static(b"2")),
+            (ik(b"c", 3, ValueType::Value), Bytes::from_static(b"3")),
+            (ik(b"d", 4, ValueType::Value), Bytes::from_static(b"4")),
+        ];
+        let got = visible_range_limited(
+            entries,
+            10,
+            Bound::Unbounded,
+            Bound::Unbounded,
+            Some(2),
+        );
+        assert_eq!(got.len(), 2);
+        assert_eq!(got[0].key.as_ref(), b"a");
+        assert_eq!(got[1].key.as_ref(), b"b");
+    }
+
+    #[test]
+    fn range_deletion_hides_keys_in_interval() {
+        let entries = vec![
+            (ik(b"a", 1, ValueType::Value), Bytes::from_static(b"1")),
+            (ik(b"b", 2, ValueType::Value), Bytes::from_static(b"2")),
+            (ik(b"c", 3, ValueType::Value), Bytes::from_static(b"3")),
+            (ik(b"a", 4, ValueType::RangeDeletion), Bytes::from_static(b"c")),
+        ];
+        let got = visible_range(entries, 10, Bound::Unbounded, Bound::Unbounded);
+        // [a,c) deleted → only c remains
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].key.as_ref(), b"c");
+    }
+
+    #[test]
+    fn streaming_matches_batch_visible() {
+        let s1 = vec![
+            (ik(b"a", 1, ValueType::Value), Bytes::from_static(b"1")),
+            (ik(b"c", 3, ValueType::Value), Bytes::from_static(b"3")),
+        ];
+        let s2 = vec![
+            (ik(b"b", 2, ValueType::Value), Bytes::from_static(b"2")),
+            (ik(b"c", 4, ValueType::Value), Bytes::from_static(b"3b")),
+        ];
+        let batch = visible_range(
+            s1.iter()
+                .chain(s2.iter())
+                .map(|(k, v)| (k.clone(), v.clone())),
+            10,
+            Bound::Unbounded,
+            Bound::Unbounded,
+        );
+        let stream: Vec<_> = StreamingVisibleIter::new(
+            vec![s1, s2],
+            10,
+            Bound::Unbounded,
+            Bound::Unbounded,
+            None,
+        )
+        .collect();
+        assert_eq!(stream, batch);
     }
 }

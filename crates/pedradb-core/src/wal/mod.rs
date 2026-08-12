@@ -158,11 +158,19 @@ impl<F: EnvFile> Wal<F> {
         self.writer.stream_position()
     }
 
+    /// Flush buffered WAL data without taking ownership (for `Db` paths with `Drop`).
+    ///
+    /// # Errors
+    /// Returns [`std::io::Error`] if flushing fails.
+    pub fn flush(&mut self) -> Result<()> {
+        self.writer.flush()
+    }
+
     /// Flush and close the underlying file.
     ///
     /// # Errors
     /// Returns [`std::io::Error`] if flushing fails.
     pub fn close(mut self) -> Result<()> {
-        self.writer.flush()
+        self.flush()
     }
 }

@@ -1,9 +1,9 @@
 //! Filesystem seam for PedraDB (RBS/`depot-store` `Media` pattern, sync).
 //!
-//! Production uses [`StdEnv`] (passthrough to `std::fs`). Tests and
-//! `pedradb-sim` inject faults via a wrapping [`Env`] (e.g. `FailingEnv`)
-//! without rewriting the engine. Shaped by what the engine does today:
-//! create/append/read files, fsync, truncate, directory list/sync/remove.
+//! Production default is [`StdEnv`] (passthrough to `std::fs`). On Linux, use
+//! the `pedradb-io-uring` crate (`IoUringEnv`) for **`io_uring`** write + fsync
+//! without changing engine code. Tests and `pedradb-sim` inject faults via a
+//! wrapping [`Env`] (e.g. `FailingEnv`) without rewriting the engine.
 
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Seek, SeekFrom, Write};
@@ -108,6 +108,20 @@ pub trait Env: Clone {
     /// # Errors
     /// Underlying I/O.
     fn metadata_len(&self, path: &Path) -> io::Result<u64>;
+
+    /// Copy `from` → `to` (create/truncate dest), then fsync dest.
+    ///
+    /// Used by [`crate::db::Db::create_checkpoint`]. Default walks `open_read` + `create`.
+    ///
+    /// # Errors
+    /// Underlying I/O.
+    fn copy_file(&self, from: &Path, to: &Path) -> io::Result<()> {
+        let mut src = self.open_read(from)?;
+        let mut dst = self.create(to)?;
+        io::copy(&mut src, &mut dst)?;
+        dst.sync_all()?;
+        Ok(())
+    }
 }
 
 impl EnvFile for File {

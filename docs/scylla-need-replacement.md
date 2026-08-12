@@ -1,19 +1,31 @@
 # Replacing the *need* for Scylla (not Scylla the product)
 
-**Status:** architecture reframing  
-**Updated:** 2026-08-11  
+**Status:** architecture target — **in grail line**  
+**Updated:** 2026-08-12  
 **Audience:** PedraDB grail plan + anyone comparing us to Railway-style control planes  
 
-This document answers a refined question:
+## Product intent (lock-in)
+
+> **Future: replace Scylla *as the platform store* with PedraDB primitives + layers on top**  
+> (Montanha multi-Raft, watch/CDC, CAS/leases, any-node accept).  
+> **Not** CQL drop-in. **Not** AP multi-master same-key as the default contract.  
+> **Yes** horizontal N leaders, sub-second push, multi-key TX where it matters,  
+> deep resilience (any healthy node receives the client message).
+
+Platform vision: [`node-primitive-and-unified-platform.md`](node-primitive-and-unified-platform.md) §6.0.5 (any-node accept).
+
+This document answers:
 
 > We do **not** need CQL drop-in, Alternator, or Cassandra multi-master semantics.  
 > We need an architecture that **removes the operational and scale need** for a Scylla cluster  
 > when the real workload is **high-speed horizontal control plane** (route discovery, DNS,  
-> overlay WID→host, orchestrator state) — as in `railway/mono`.
+> overlay WID→host, orchestrator state) — as in `railway/mono` — and the same stack  
+> is the path to “Scylla-shaped *need*” for other control planes.
 
 **Related:** `scylladb-architecture.md` (how Scylla works as a product),  
-`grail-plan-build-databases-on-pedradb.md` §10 (old “off main line” for AP multi-master),  
-`plug-map-replace-incumbents.md`, `upsides-only.md`, `switch-justification-bar.md`.
+`grail-plan-build-databases-on-pedradb.md`,  
+`plug-map-replace-incumbents.md`, `upsides-only.md`, `switch-justification-bar.md`,  
+[`htap-storage-primitives-and-research.md`](htap-storage-primitives-and-research.md) (orthogonal: analytics path, not Scylla).
 
 ---
 
@@ -137,15 +149,20 @@ Strip the product name. The platform needs:
 | Orchestrator full-table status scan | Range prefix `/stackers/` or secondary index keyspace; still scale by sharding |
 | Poll every 2s status cache | Prefer **watch** or short poll on revision; 2s poll is a product choice, not physics |
 
-### 4.2 Why this is *not* multi-master Scylla
+### 4.2 Why this is *not* multi-master Scylla — and still deeply resilient
 
 | Property | Scylla main path | This architecture |
 |----------|------------------|-------------------|
-| Same key concurrent writers | Allowed; LWW / timestamps | **One region leader**; conflicts = reject / retry |
+| Same key concurrent writers | Allowed; LWW / timestamps | **One range leader** orders commits; conflicts = reject / retry |
+| Client → “which primary?” | Any replica (AP write) | **Any healthy node accepts** → forward to owner / new leader after failover ([any-node accept](node-primitive-and-unified-platform.md#605-any-node-accept-deep-resilience--what-we-do-want)) |
 | Multi-key atomicity | No (except rare multi-partition LWT pain) | **Yes** on PedraDB (+ 2PC only if keys span regions) |
 | Change feed | CDC product feature | Explicit layer on Raft apply (or log shipping) |
 | Availability under partition | Prefer AP write | Prefer **CP** for control correctness (stale route is worse than brief unavailability of promote) |
 | Seastar / CQL | Core identity | Irrelevant |
+
+**Resilience the product feels:**  
+If node 1 dies, clients keep talking to node 2/3; the cluster elects a new owner for each range; forwards succeed.  
+**Correctness:** two nodes never silently commit the same key without shared quorum.
 
 For **networking control**, CP is usually the right default: a split-brain WID→host map  
 drops or blackholes traffic. Sub-second **correct** push beats available **wrong** write.
@@ -157,6 +174,7 @@ You do **not** need multi-master on one key to scale:
 - **Different routes / WIDs / stackers** hash to **different regions** → parallel leaders → aggregate QPS.  
 - **Group commit + PedraDB** on the leader node for local durability.  
 - **Watch fanout** is a messaging problem (N clients, batched invalidations), not an LSM multi-master problem.  
+- **Any-node accept** so clients are not pinned to a sticky “primary contact.”  
 - **Read replicas** (optional later): follower reads with bounded staleness for DNS if proven safe.
 
 That is the same scale-out story as TiKV/FDB for metadata-heavy platforms — and what Express  
@@ -172,12 +190,85 @@ Doctrine: PedraDB stays local. Everything else is a product layer.
 |-------|----------|---------------------|
 | **L1 PedraDB** | Durable ordered KV + multi-key ACID + optional sync/group commit | Local correctness substrate |
 | **L2 multi-Raft + PD** | Shard, elect, rebalance, single-writer-per-key range | Horizontal store like “Scylla as shared DB” |
+| **L2b any-node front door** | Accept any op on any node; proxy/forward to range owner | Operational resilience without AP multi-master |
 | **L3 watch / change log** | Subscribe by key prefix; sub-second notify | Replaces CDC subscription role |
 | **L3 CAS / leases** | Generation, IF-NOT-EXISTS, exclusive holds | Replaces LWT islands — with stronger multi-key option |
 | **L4 network-cp-shaped service** | Routes, DNS discovery, overlay CP API | App leaves Scylla contact points |
 | **L4 orchestrator store gateway** | Stackers, assignments, FSM rows | App leaves Scylla for scheduling state |
 
 **No CQL required.** Wire can be gRPC/protobuf (what network-cp and orchestrator already speak).
+
+**Stack slogan:**  
+`Pedra + Montanha + watch + any-node accept  →  replace Scylla *need* for control plane.`
+
+---
+
+## 5.1 What **PedraDB (L1 local kernel)** must provide
+
+**Delivery RFC:** [RFC-0019](rfc/0019-local-primitive-for-platform-and-scylla-need.md) (CAS, seq pin, change feed, multi_get, soak, backup under load).
+
+This is **only** the per-node store. Horizontal scale, any-node accept, watch bus, and PD are **L2+**.  
+If L1 is weak, every region leader reintroduces storage bugs under Raft apply.
+
+### Must-have for Scylla-need (local)
+
+| Capability | Why control plane needs it | Pedra status (living) | Gap / action |
+|------------|----------------------------|------------------------|--------------|
+| **Durable ordered KV** | Routes, WID→host, leases, status as keys | ✅ get/put/delete, ordered keys | Keep contracts |
+| **WAL fsync policy** | Ok ⇒ durable after crash | ✅ sync default + fence | Document for apply path |
+| **Multi-key TX / apply_batch** | Row + index, FSM multi-field, CAS bundles | ✅ `begin`/`commit`, `apply_batch` | Prefer apply_batch for Raft apply |
+| **Snapshot / get_at** | Consistent reads at seq; OCC | ✅ Snapshot, get_at | Layer-visible **LSN/seq pin** for watch |
+| **Range / prefix scan** | List stackers, routes under prefix | ✅ scan / range_limited | **multi_get** for hot DNS-style point fan-out |
+| **Point lookup fast path** | Discovery / DNS hot path | ✅ bloom, bounds, lazy blocks, cache | Row cache optional; bench under load |
+| **CAS / compare-and-swap** | LWT substitute: version, IF NOT EXISTS | ✅ `put_if_absent` / `put_if_eq` / `compare_and_swap` (RFC-0019) | Concurrent mismatch → `CasMismatch` |
+| **Tombstones + delete** | Remove routes, expire | ✅ delete / delete_range | Subscriber → watch delete events |
+| **last_sequence / stable seq** | Apply order, watch watermark, lag | ✅ last_sequence + **seq returned** from put/apply/tx | Layer pin documented in usage |
+| **apply_batch deterministic** | Raft/log apply same bytes → same state | ✅ | Golden tests under FailingEnv |
+| **Flush / compact / recover** | Survive restart; bound mem/WAL | ✅ | Auto-compact under CP write storms — soak |
+| **Group commit / concurrent writers** | Many applies / concurrent region traffic on one node | ✅ group commit, ConcurrentDb, OCC | Measure p99 under concurrent apply |
+| **Checkpoint / backup / ship** | Rebuild node, CDC seed | ✅ ops | Continuous backup under load (0016 P2.1) |
+| **verify_checksums / stats** | Ops, amp visibility | ✅ | — |
+| **Env seam** | DST, disk faults | ✅ | Keep apply path on Env |
+| **Exclusive dir / single process** | No multi-process one dir | ✅ LOCK | Raft = one process per engine dir |
+
+### Should-have (makes L2/L3 cheap, still L1)
+
+| Capability | Why | Status | Gap |
+|------------|-----|--------|-----|
+| **multi_get** | N point lookups without N× path overhead | ✅ RFC-0019 | Parity vs N×get tested |
+| **scan project (key-only)** | Watch rebuild / list keys without payloads | ✅ `ScanProjection::KeyOnly` | Full remains default |
+| **Change log / commit hook** | Emit (seq, writes) after durable commit for watch | ✅ `changes` / `changes_after` + durable CHANGELOG | Hole-detectable from pin; rebuild on open |
+| **Lease-friendly TTL** (optional) | Soft expire of discovery rows | 🔲 | Layer can use absolute expiry in value + sweeper; core TTL later if needed |
+| **WriteOptions / batch no_sync + group sync** | Bulk apply / catch-up | ✅ | Use carefully under Raft (usually sync on commit) |
+| **compact_for_reads** | Read-heavy prefixes after burst writes | ✅ `Db::compact_for_reads` | Latest-only full SST collapse |
+
+### Explicitly **not** L1 (do not put in pedradb-core)
+
+| Capability | Where it lives |
+|------------|----------------|
+| Multi-Raft, PD, rebalance | Montanha-Store |
+| Any-node accept / proxy | Montanha / gateway |
+| Watch fanout network | watch / stream service |
+| CQL, Alternator | Never required |
+| Columnar OLAP | HTAP projection (other path) |
+| Shared multi-process data dir | Forbidden |
+
+### L1 bar in one checklist (definition of “ready as local primitive”)
+
+```text
+[x] apply_batch: Ok ⇒ recover same state (crash mid-batch tests)
+[x] multi-key TX: route + index one commit (no half-update)
+[x] CAS / put_if: version bump without lost update under concurrency
+[x] prefix range + limited scan: list / page without OOM
+[x] multi_get: N keys one path (discovery)
+[x] commit returns seq; layer can pin watches at seq
+[x] post-commit change feed seam (iterator or hook) for L3 watch
+[x] concurrent apply + group commit evidence (wal_sync_count soak)
+[x] FailingEnv soak on apply/CAS: silent_wrong=0
+[x] open/recover after kill; verify_checksums green
+```
+
+**L1 local primitive bar is green (RFC-0019).** Remaining Scylla-need work is **L2/L3** (Montanha multi-Raft, any-node accept, watch fanout product) — not core storage footguns.
 
 ---
 

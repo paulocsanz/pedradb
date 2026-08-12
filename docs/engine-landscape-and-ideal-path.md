@@ -120,6 +120,11 @@ Rust B-link tree with MVCC. Promised a lot, **abandoned/maintainer gone silent**
 Important lesson for the Rust ecosystem: a storage engine needs sustained
 engineering over years, not just a clever architecture.
 
+**PedraDB response (documented):** do not copy sled storage; optional
+**sled-shaped API layer** on LSM; preserve format/iterator options so
+WiscKey/Monkey/Lazy Leveling stay possible — see
+[`performance-ceiling-option-preservation-and-sled-layer.md`](performance-ceiling-option-preservation-and-sled-layer.md).
+
 ---
 
 ## The asymptotically ideal path (and why nobody walked it)

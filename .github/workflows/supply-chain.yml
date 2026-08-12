@@ -1,0 +1,24 @@
+# RFC-0015 P2.3 — advisories gate
+name: supply-chain
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  schedule:
+    # Weekly Monday 06:00 UTC — catch new RUSTSEC advisories
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+jobs:
+  cargo-deny:
+    name: cargo deny check advisories
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install cargo-deny
+        uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check advisories
+          arguments: --all-features

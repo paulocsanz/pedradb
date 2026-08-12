@@ -13,6 +13,9 @@ bytes.workspace = true
 crc32c.workspace = true
 thiserror.workspace = true
 
+[dev-dependencies]
+pedradb-sim.workspace = true
+
 [[bin]]
 name = "pedra-raft-node"
 path = "src/bin/pedra-raft-node.rs"

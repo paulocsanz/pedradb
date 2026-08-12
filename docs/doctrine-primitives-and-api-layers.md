@@ -3,6 +3,12 @@
 **Status:** core product doctrine  
 **Updated:** 2026-08-12  
 
+**Extended vision (node SoR → HTAP → multi-leader unified face):**  
+[`node-primitive-and-unified-platform.md`](node-primitive-and-unified-platform.md) — Pedra as per-node substitute substrate for SQLite/PG/TiKV/FDB/Redis/NATS/… roles; OLTP + OLAP RO projection; Montanha N leaders; anti dual-truth.  
+
+**HTAP physics + literature (triangle, not magic engine):**  
+[`htap-storage-primitives-and-research.md`](htap-storage-primitives-and-research.md) — primary PDFs under `docs/references/*htap*` / LASER / PolarDB-IMCI / ByteHTAP / HaSiS.
+
 ---
 
 ## One sentence
@@ -48,6 +54,7 @@ This is the **FoundationDB layer concept**, with PedraDB as the **local** primit
 | Product goal | Primitive (PedraDB) | API layer |
 |--------------|---------------------|-----------|
 | App embed ACID | TX put row + index | App code / tiny schema helper |
+| **Sled / BTreeMap-shaped DX** | Same ordered KV + multi-key TX | **`pedra-map` / sled-compat** — insert/get/CAS/trees-as-prefixes; **not** sled storage ([perf + layer plan](performance-ceiling-option-preservation-and-sled-layer.md)) |
 | Replace etcd for **Patroni** election | Atomic put leader key, range members | **pedra-dcs**: lease, watch, Raft; optional etcd API or Patroni plugin |
 | TiKV-class KV | Local apply / local TX | multi-Raft + distributed TX API |
 | Horizontal Postgres | Same | SQL layer + regions + N leaders |
@@ -86,9 +93,10 @@ If the primitive is weak, layers reintroduce storage bugs. If the primitive grow
 |---------|------|
 | **Now** | Make the **primitive** real (P0 TX + durability) |
 | **Next** | One **API layer** that proves the thesis (e.g. Patroni DCS or embed index kit) |
+| **Also next** | Optional **`pedra-map`** (sled-shaped DX) once core TX+range are solid — see [performance ceiling + sled layer](performance-ceiling-option-preservation-and-sled-layer.md) |
 | **Later** | More layers (distributed KV, SQL) reusing the same PedraDB |
 
-Never: implement etcd/Postgres wire **inside** `pedradb-core`.
+Never: implement etcd/Postgres wire **or sled storage** **inside** `pedradb-core`.
 
 ---
 

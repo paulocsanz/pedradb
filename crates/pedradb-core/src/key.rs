@@ -33,6 +33,10 @@ pub enum ValueType {
     Deletion = 0,
     /// Ordinary put.
     Value = 1,
+    /// Range tombstone: hides `[user_key, end)` where `end` is stored in the value.
+    ///
+    /// Covers point versions with `sequence <` this tombstone's sequence (RocksDB-style).
+    RangeDeletion = 2,
 }
 
 impl ValueType {
@@ -42,6 +46,7 @@ impl ValueType {
         match byte {
             0 => Some(Self::Deletion),
             1 => Some(Self::Value),
+            2 => Some(Self::RangeDeletion),
             _ => None,
         }
     }
@@ -175,7 +180,8 @@ mod tests {
     fn value_type_round_trip() {
         assert_eq!(ValueType::from_u8(0), Some(ValueType::Deletion));
         assert_eq!(ValueType::from_u8(1), Some(ValueType::Value));
-        assert_eq!(ValueType::from_u8(2), None);
+        assert_eq!(ValueType::from_u8(2), Some(ValueType::RangeDeletion));
+        assert_eq!(ValueType::from_u8(3), None);
     }
 
     #[test]

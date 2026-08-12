@@ -19,6 +19,11 @@
 //! # Thread-safe faults
 //! [`FailingEnvArc`] is `Send + Sync` for multi-thread stress.
 //!
+//! # Non-determinism seams (plug DST later)
+//! Re-exports [`pedradb_core::{Clock, ManualClock, Rng, SeedRng, Host, DetHost}`]
+//! so harnesses depend on one place. Keep full schedules in out-of-tree
+//! `determinismo/`; this crate only supplies media models + trait re-exports.
+//!
 //! This is not a full FoundationDB-scale clock/disk simulator; it is a small,
 //! reproducible injection surface over the real [`pedradb_core::Db`] recovery path.
 
@@ -29,9 +34,14 @@ mod failing;
 mod failing_arc;
 mod recording;
 
-pub use failing::{FailingEnv, FaultKind};
+pub use failing::{FailingEnv, FaultKind, OpClass};
 pub use failing_arc::FailingEnvArc;
 pub use recording::{RecordingEnv, SyncPolicy};
+
+// DST / non-determinism primitives (implemented in core; sim is the usual import path).
+pub use pedradb_core::{
+    Clock, DetHost, Host, ManualClock, Rng, SeedRng, StdHost, SystemClock, SystemRng,
+};
 
 use std::fs::{self, OpenOptions};
 use std::path::{Path, PathBuf};
@@ -83,7 +93,9 @@ impl FaultEnv {
                 sync,
                 auto_flush_bytes: None,
                 auto_compact_sst_count: None,
+                auto_compact_sst_bytes: None,
                 exclusive: true,
+                large_value_threshold: None,
             },
         )
     }
@@ -198,9 +210,557 @@ pub fn scenario_truncated_tail_loses_unsynced_suffix(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use pedradb_core::{Db, DetHost, Host, OpenOptions};
 
     fn parent() -> PathBuf {
         std::env::temp_dir()
+    }
+
+    fn opts() -> OpenOptions {
+        OpenOptions {
+            sync: true,
+            auto_flush_bytes: None,
+            auto_compact_sst_count: None,
+            auto_compact_sst_bytes: None,
+            exclusive: true,
+                large_value_threshold: None,
+        }
+    }
+
+    /// RFC-0018 inventory trial_ref: SyncFail + RecordingEnv lying.
+    #[test]
+    fn sync_fail_and_recording_lying() {
+        use pedradb_core::env::{Env, EnvFile};
+        use std::io::Write;
+
+        let dir = parent().join(format!(
+            "pedradb-syncfail-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let env = FailingEnv::passing();
+        env.arm_op_class(OpClass::Sync, 0, true, FaultKind::SyncFail);
+        {
+            let mut f = env.create(&dir.join("x")).unwrap();
+            f.write_all(b"data").unwrap();
+            assert!(f.sync_all().is_err(), "SyncFail must trip sync");
+        }
+        assert!(env.tripped());
+        // Lying fsync: put under RecordingEnv, crash, key must not recover.
+        let rec = RecordingEnv::lying();
+        {
+            let mut db = Db::open_with_env(&dir.join("rec"), opts(), rec.clone()).unwrap();
+            db.put(b"k", b"pending").unwrap();
+            db.close().unwrap();
+        }
+        rec.crash();
+        let db = Db::open_with_env(&dir.join("rec"), opts(), rec).unwrap();
+        assert_eq!(
+            db.get(b"k"),
+            None,
+            "lying fsync must not retain after crash"
+        );
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn det_host_open_with_host_put_get() {
+        let dir = parent().join(format!(
+            "pedradb-dethost-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        let host = DetHost::with_seed(FailingEnv::passing(), 0xC0FFEE);
+        host.clock()
+            .advance(std::time::Duration::from_millis(1 + host.rng().gen_range(9)));
+        let mut db = Db::open_with_host(&dir, opts(), &host).unwrap();
+        db.put(b"via-host", b"ok").unwrap();
+        assert_eq!(db.get(b"via-host").as_deref(), Some(b"ok".as_ref()));
+        db.close().unwrap();
+        // Reopen still via host seam.
+        let db = Db::open_with_host(&dir, opts(), &host).unwrap();
+        assert_eq!(db.get(b"via-host").as_deref(), Some(b"ok".as_ref()));
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn det_host_failing_env_trips_put() {
+        let dir = parent().join(format!(
+            "pedradb-dethost-fail-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        // Budget small so a later put fails; seed path still durable under passing reopen.
+        {
+            let host = DetHost::with_seed(FailingEnv::passing(), 1);
+            let mut db = Db::open_with_host(&dir, opts(), &host).unwrap();
+            db.put(b"seed", b"1").unwrap();
+            db.close().unwrap();
+        }
+        let host = DetHost::with_seed(FailingEnv::fail_after(3), 1);
+        let open = Db::open_with_host(&dir, opts(), &host);
+        // May open or fail depending on op count; either way no panic.
+        if let Ok(mut db) = open {
+            let _ = db.put(b"x", b"y");
+            drop(db);
+        }
+        host.env().disarm();
+        let host = DetHost::with_seed(FailingEnv::passing(), 2);
+        let db = Db::open_with_host(&dir, opts(), &host).unwrap();
+        assert_eq!(db.get(b"seed").as_deref(), Some(b"1".as_ref()));
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0016 P0.1: **every** FailingEnv arm budget for `compact_vlog` must leave
+    /// either correct in-process large gets (not silent None) or a durability fence
+    /// (fail-closed writes). Reopen under a clean env always recovers live keys.
+    ///
+    /// Does **not** break on the first Err — covers early (pre-MANIFEST) and late
+    /// (post-inventory / handle open) fault windows.
+    #[test]
+    fn fail_mid_vlog_gc_then_continue_large_values_ok() {
+        let big_a = vec![0xAAu8; 2048];
+        let big_b = vec![0xBBu8; 2048];
+        let big_c = vec![0xCCu8; 2048];
+
+        let vlog_opts = OpenOptions {
+            sync: true,
+            auto_flush_bytes: None,
+            auto_compact_sst_count: None,
+            auto_compact_sst_bytes: None,
+            exclusive: true,
+            large_value_threshold: Some(512),
+        };
+
+        let mut saw_gc_err = false;
+        // Cover pre-MANIFEST and late post-commit ops (rewrite + install + open + promote).
+        for n in 0..=80u64 {
+            let dir = parent().join(format!(
+                "pedradb-fail-mid-gc-n{n}-{}",
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos()
+            ));
+            let _ = fs::remove_dir_all(&dir);
+
+            // Seed under healthy env.
+            {
+                let mut db = Db::open_with_env(&dir, vlog_opts, FailingEnv::passing()).unwrap();
+                db.put(b"keep_a", &big_a).unwrap();
+                db.put(b"keep_b", &big_b).unwrap();
+                db.put(b"drop_me", &big_c).unwrap();
+                db.flush().unwrap();
+                db.delete(b"drop_me").unwrap();
+                db.flush().unwrap();
+                db.compact_with(pedradb_core::CompactOptions::latest_only())
+                    .unwrap();
+                db.close().unwrap();
+            }
+
+            let env = FailingEnv::passing();
+            {
+                let mut db = Db::open_with_env(&dir, vlog_opts, env.clone()).unwrap();
+                // Reclaim work so GC is non-trivial.
+                db.put(b"junk", &big_c).unwrap();
+                db.delete(b"junk").unwrap();
+                db.flush().unwrap();
+
+                env.disarm();
+                env.arm(n, true);
+                let res = db.compact_vlog();
+                env.disarm();
+
+                match res {
+                    Ok(_stats) => {
+                        assert!(
+                            !db.is_durability_fenced(),
+                            "arm={n}: successful GC must not fence"
+                        );
+                        assert_eq!(
+                            db.get(b"keep_a").as_deref(),
+                            Some(big_a.as_slice()),
+                            "arm={n}: post-Ok keep_a"
+                        );
+                        assert_eq!(
+                            db.get(b"keep_b").as_deref(),
+                            Some(big_b.as_slice()),
+                            "arm={n}: post-Ok keep_b"
+                        );
+                    }
+                    Err(_) => {
+                        saw_gc_err = true;
+                        if db.is_durability_fenced() {
+                            // Fail-closed: further puts refuse; do not require get.
+                            assert!(
+                                db.put(b"after_fence", b"x").is_err(),
+                                "arm={n}: fenced Db must reject puts"
+                            );
+                        } else {
+                            // Still serving: large keys must not be silent-None.
+                            assert_eq!(
+                                db.get(b"keep_a").as_deref(),
+                                Some(big_a.as_slice()),
+                                "arm={n}: after Err, unfenced keep_a must resolve"
+                            );
+                            assert_eq!(
+                                db.get(b"keep_b").as_deref(),
+                                Some(big_b.as_slice()),
+                                "arm={n}: after Err, unfenced keep_b must resolve"
+                            );
+                            db.put(b"keep_c", &big_c).unwrap();
+                            db.flush().unwrap();
+                            assert_eq!(db.get(b"keep_c").as_deref(), Some(big_c.as_slice()));
+                        }
+                    }
+                }
+                let _ = db.close();
+            }
+
+            // Clean reopen: live large keys always correct (MANIFEST-consistent).
+            let db = Db::open_with_env(&dir, vlog_opts, FailingEnv::passing()).unwrap();
+            assert_eq!(
+                db.get(b"keep_a").as_deref(),
+                Some(big_a.as_slice()),
+                "arm={n}: reopen keep_a"
+            );
+            assert_eq!(
+                db.get(b"keep_b").as_deref(),
+                Some(big_b.as_slice()),
+                "arm={n}: reopen keep_b"
+            );
+            db.close().unwrap();
+            let _ = fs::remove_dir_all(&dir);
+        }
+        assert!(
+            saw_gc_err,
+            "expected at least one compact_vlog Err across arm 0..=80"
+        );
+    }
+
+    /// RFC-0016 P0.4: fixed-seed soak on FailingEnv — silent_wrong=0 on acked prefix.
+    #[test]
+    fn soak_failing_env_fixed_seed_silent_wrong_zero() {
+        use pedradb_core::{rng::Rng, CompactOptions, SeedRng};
+        use std::collections::HashMap;
+
+        let dir = parent().join(format!(
+            "pedradb-soak-fail-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        let seed = 0x00C0_FFEE_u64;
+        let env = FailingEnv::passing(); // start healthy; inject transient faults by schedule
+        let host = DetHost::with_seed(env.clone(), seed);
+        let rng = SeedRng::new(seed);
+        let mut model: HashMap<Vec<u8>, Vec<u8>> = HashMap::new();
+        let mut silent_wrong = 0u64;
+
+        let vlog_opts = OpenOptions {
+            sync: true,
+            auto_flush_bytes: Some(16 * 1024),
+            auto_compact_sst_count: Some(6),
+            auto_compact_sst_bytes: None,
+            exclusive: true,
+            large_value_threshold: Some(256),
+        };
+
+        {
+            let mut db = Db::open_with_host(&dir, vlog_opts, &host).unwrap();
+            for step in 0..280u64 {
+                // Occasional one-shot I/O fault (heals after one fail).
+                if step > 0 && step % 40 == 0 {
+                    env.arm(0, true);
+                }
+                let op = rng.next_u64() % 100;
+                let k = format!("k{:04}", rng.next_u64() % 32);
+                let key = k.as_bytes();
+                if op < 50 {
+                    let sz = 8 + (rng.next_u64() % 400) as usize;
+                    let mut val = vec![0u8; sz];
+                    for b in &mut val {
+                        *b = (rng.next_u64() & 0xff) as u8;
+                    }
+                    match db.put(key, &val) {
+                        Ok(()) => {
+                            model.insert(key.to_vec(), val);
+                        }
+                        Err(_) => {
+                            // Fault/fence: only acked prefix is in model.
+                            env.disarm();
+                        }
+                    }
+                } else if op < 70 {
+                    match db.delete(key) {
+                        Ok(()) => {
+                            model.remove(key);
+                        }
+                        Err(_) => env.disarm(),
+                    }
+                } else if op < 85 {
+                    match db.get(key) {
+                        Some(got) => {
+                            let expect = model.get(key).map(Vec::as_slice);
+                            if Some(got.as_ref()) != expect {
+                                silent_wrong += 1;
+                            }
+                        }
+                        None => {
+                            if model.contains_key(key) {
+                                silent_wrong += 1;
+                            }
+                        }
+                    }
+                } else if op < 92 {
+                    let _ = db.flush();
+                    env.disarm();
+                } else if op < 97 {
+                    let _ = db.compact();
+                    env.disarm();
+                } else {
+                    let _ = db.compact_vlog();
+                    env.disarm();
+                }
+            }
+            env.disarm();
+            // Final check of acked model under healed env.
+            for i in 0..32u64 {
+                let kk = format!("k{i:04}");
+                let got = db.get(kk.as_bytes());
+                let expect = model.get(kk.as_bytes()).map(Vec::as_slice);
+                if got.as_deref() != expect {
+                    silent_wrong += 1;
+                }
+            }
+            // Optional latest_only reclaim path is avoided (tombstone footgun).
+            let _ = CompactOptions::default();
+            let _ = db.close();
+        }
+
+        // Reopen on clean Env (same seed host with passing).
+        env.disarm();
+        let host2 = DetHost::with_seed(FailingEnv::passing(), seed);
+        let db = Db::open_with_host(&dir, vlog_opts, &host2).unwrap();
+        for i in 0..32u64 {
+            let kk = format!("k{i:04}");
+            let got = db.get(kk.as_bytes());
+            let expect = model.get(kk.as_bytes()).map(Vec::as_slice);
+            if got.as_deref() != expect {
+                silent_wrong += 1;
+            }
+        }
+        db.close().unwrap();
+        assert_eq!(silent_wrong, 0, "FailingEnv soak silent_wrong must be 0");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0019: CHANGELOG persist fail after durable WAL must not fail the client,
+    /// roll sequences, skip mem apply, or invent feed-ahead-of-get.
+    #[test]
+    fn rfc19_changelog_store_fail_after_wal_still_ok() {
+        use pedradb_core::{ChangeKind, ConcurrentDb};
+
+        let dir = parent().join(format!(
+            "pedradb-rfc19-chlog-fail-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        let env = FailingEnv::passing();
+        let opts = OpenOptions {
+            sync: true,
+            auto_flush_bytes: None,
+            auto_compact_sst_count: None,
+            auto_compact_sst_bytes: None,
+            exclusive: true,
+            large_value_threshold: None,
+        };
+
+        // --- Path A: commit_ops_with (Db::put) ---
+        {
+            let mut db = Db::open_with_env(&dir, opts, env.clone()).unwrap();
+            let s1 = db.put_with_seq(b"a", b"1").unwrap();
+            assert_eq!(db.get(b"a").as_deref(), Some(b"1".as_ref()));
+
+            // Next CHANGELOG rewrite fails at rename; WAL put still durable.
+            env.arm_op_class(OpClass::Rename, 0, true, FaultKind::IoError);
+            let s2 = db
+                .put_with_seq(b"b", b"2")
+                .expect("CHANGELOG store must not gate durable put");
+            env.disarm();
+
+            assert!(s2 > s1, "sequence must advance (no reuse after durable WAL)");
+            assert_eq!(
+                db.get(b"b").as_deref(),
+                Some(b"2".as_ref()),
+                "mem must apply once WAL is durable"
+            );
+            let feed = db.changes_after(s1);
+            assert_eq!(feed.len(), 1);
+            assert_eq!(feed[0].sequence, s2);
+            assert_eq!(feed[0].kind, ChangeKind::Put);
+            assert_eq!(feed[0].key.as_ref(), b"b");
+            assert!(
+                feed.iter().all(|e| e.sequence <= db.last_sequence()),
+                "feed must not show seq beyond durable last"
+            );
+
+            // Next put advances again; still consistent.
+            let s3 = db.put_with_seq(b"c", b"3").unwrap();
+            assert!(s3 > s2);
+            assert_eq!(db.get(b"c").as_deref(), Some(b"3".as_ref()));
+            db.close().unwrap();
+        }
+
+        // Reopen: rebuild from WAL even if CHANGELOG was incomplete.
+        {
+            let db = Db::open_with_env(&dir, opts, FailingEnv::passing()).unwrap();
+            assert_eq!(db.get(b"a").as_deref(), Some(b"1".as_ref()));
+            assert_eq!(db.get(b"b").as_deref(), Some(b"2".as_ref()));
+            assert_eq!(db.get(b"c").as_deref(), Some(b"3".as_ref()));
+            let all = db.changes_after(0);
+            assert!(all.iter().any(|e| e.key.as_ref() == b"b"));
+            assert!(all.iter().all(|e| e.sequence <= db.last_sequence()));
+            db.close().unwrap();
+        }
+
+        // --- Path B: group_commit (ConcurrentDb) ---
+        let dir2 = parent().join(format!(
+            "pedradb-rfc19-chlog-group-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = fs::remove_dir_all(&dir2);
+        let env2 = FailingEnv::passing();
+        {
+            let inner = Db::open_with_env(&dir2, opts, env2.clone()).unwrap();
+            let db = ConcurrentDb::from_db(inner);
+            db.put(b"x", b"1").unwrap();
+            env2.arm_op_class(OpClass::Rename, 0, true, FaultKind::IoError);
+            db.put(b"y", b"2")
+                .expect("group_commit must not fail client after durable WAL");
+            env2.disarm();
+            assert_eq!(db.get(b"y").as_deref(), Some(b"2".as_ref()));
+            let after = db.changes_after(0);
+            assert!(after.iter().any(|e| e.key.as_ref() == b"y"));
+            assert!(after.iter().all(|e| e.sequence <= db.last_sequence()));
+            // Sequence advances on next write.
+            let before = db.last_sequence();
+            db.put(b"z", b"3").unwrap();
+            assert!(db.last_sequence() > before);
+        }
+
+        let _ = fs::remove_dir_all(&dir);
+        let _ = fs::remove_dir_all(&dir2);
+    }
+
+    /// RFC-0019 P1.3: apply_batch + CAS under FailingEnv — silent_wrong=0 on acked prefix.
+    #[test]
+    fn rfc19_apply_cas_failing_env_silent_wrong_zero() {
+        use pedradb_core::{rng::Rng, BatchOp, SeedRng};
+        use std::collections::HashMap;
+
+        let dir = parent().join(format!(
+            "pedradb-rfc19-apply-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        let seed = 0x0019_00A1_u64;
+        let env = FailingEnv::passing();
+        let host = DetHost::with_seed(env.clone(), seed);
+        let rng = SeedRng::new(seed);
+        let mut model: HashMap<Vec<u8>, Vec<u8>> = HashMap::new();
+        let mut silent_wrong = 0u64;
+        let opts = OpenOptions {
+            sync: true,
+            auto_flush_bytes: Some(8 * 1024),
+            auto_compact_sst_count: None,
+            auto_compact_sst_bytes: None,
+            exclusive: true,
+            large_value_threshold: None,
+        };
+
+        {
+            let mut db = Db::open_with_host(&dir, opts, &host).unwrap();
+            for step in 0..200u64 {
+                if step > 0 && step % 35 == 0 {
+                    env.arm(0, true);
+                }
+                let k = format!("k{:03}", rng.next_u64() % 24);
+                let key = k.as_bytes().to_vec();
+                let op = rng.next_u64() % 100;
+                if op < 45 {
+                    let val = format!("v{step}").into_bytes();
+                    let batch = [
+                        BatchOp::put(key.clone(), val.clone()),
+                        BatchOp::put(format!("idx-{}", step % 8), key.clone()),
+                    ];
+                    match db.apply_batch(batch) {
+                        Ok(_) => {
+                            model.insert(key, val);
+                        }
+                        Err(_) => env.disarm(),
+                    }
+                } else if op < 60 {
+                    match db.put_if_absent(&key, b"cas-first") {
+                        Ok(_) => {
+                            model.entry(key).or_insert_with(|| b"cas-first".to_vec());
+                        }
+                        Err(pedradb_core::CoreError::CasMismatch) => {}
+                        Err(_) => env.disarm(),
+                    }
+                } else if op < 75 {
+                    match db.delete(&key) {
+                        Ok(()) => {
+                            model.remove(&key);
+                        }
+                        Err(_) => env.disarm(),
+                    }
+                } else {
+                    let got = db.get(&key);
+                    let expect = model.get(&key).map(Vec::as_slice);
+                    if got.as_deref() != expect {
+                        silent_wrong += 1;
+                    }
+                }
+            }
+            env.disarm();
+            for (k, v) in &model {
+                if db.get(k).as_deref() != Some(v.as_slice()) {
+                    silent_wrong += 1;
+                }
+            }
+            let syncs = db.wal_sync_count();
+            eprintln!(
+                "rfc19_apply_cas_failing_env_silent_wrong_zero wal_sync_count={syncs} silent_wrong={silent_wrong}"
+            );
+            let _ = db.close();
+        }
+        assert_eq!(silent_wrong, 0);
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -211,6 +771,116 @@ mod tests {
     #[test]
     fn truncate_wal_drops_tail_keeps_prefix() {
         scenario_truncated_tail_loses_unsynced_suffix(parent()).unwrap();
+    }
+
+    /// Multi-key TX Ok under sync + process kill → both keys recovered (all-or-nothing).
+    #[test]
+    fn multi_key_tx_ok_survives_crash_reopen() {
+        let env = FaultEnv::new(parent()).unwrap();
+        {
+            let mut db = env.open(true).unwrap();
+            let mut tx = db.begin();
+            tx.put(b"row", b"R").unwrap();
+            tx.put(b"idx", b"I").unwrap();
+            tx.commit().unwrap();
+            std::mem::forget(db);
+        }
+        let db = env.open(true).unwrap();
+        assert_eq!(db.get(b"row").as_deref(), Some(b"R".as_ref()));
+        assert_eq!(db.get(b"idx").as_deref(), Some(b"I".as_ref()));
+        env.cleanup();
+    }
+
+    /// Uncommitted multi-key TX leaves no half-visible state after crash.
+    #[test]
+    fn multi_key_tx_uncommitted_no_half_after_crash() {
+        let env = FaultEnv::new(parent()).unwrap();
+        {
+            let mut db = env.open(true).unwrap();
+            db.put(b"base", b"0").unwrap();
+            let mut tx = db.begin();
+            tx.put(b"h1", b"1").unwrap();
+            tx.put(b"h2", b"2").unwrap();
+            std::mem::forget(tx);
+            std::mem::forget(db);
+        }
+        let db = env.open(true).unwrap();
+        assert_eq!(db.get(b"base").as_deref(), Some(b"0".as_ref()));
+        assert_eq!(db.get(b"h1"), None);
+        assert_eq!(db.get(b"h2"), None);
+        env.cleanup();
+    }
+
+    /// fail_after schedule: acked prefix survives; no wrong recovered values for known acks.
+    #[test]
+    fn fail_after_schedule_no_silent_wrong_on_acked_prefix() {
+        use pedradb_core::{Db, OpenOptions};
+        use std::collections::BTreeMap;
+
+        let dir = parent().join(format!(
+            "pedradb-fail-sched-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        let env = FailingEnv::passing();
+        let mut acked: BTreeMap<Vec<u8>, Vec<u8>> = BTreeMap::new();
+        let mut db = Db::open_with_env(
+            &dir,
+            OpenOptions {
+                sync: true,
+                auto_flush_bytes: None,
+                auto_compact_sst_count: None,
+                auto_compact_sst_bytes: None,
+                exclusive: true,
+                large_value_threshold: None,
+            },
+            env.clone(),
+        )
+        .unwrap();
+        for i in 0..12u8 {
+            let k = vec![b'k', i];
+            let v = vec![b'v', i];
+            db.put(&k, &v).unwrap();
+            acked.insert(k, v);
+        }
+        // Inject fault for subsequent ops.
+        env.arm(2, false);
+        for i in 12..20u8 {
+            let k = vec![b'k', i];
+            let v = vec![b'v', i];
+            if db.put(&k, &v).is_ok() {
+                acked.insert(k, v);
+            } else {
+                break;
+            }
+        }
+        drop(db);
+        env.disarm();
+        let db = Db::open_with_env(
+            &dir,
+            OpenOptions {
+                sync: true,
+                auto_flush_bytes: None,
+                auto_compact_sst_count: None,
+                auto_compact_sst_bytes: None,
+                exclusive: true,
+                large_value_threshold: None,
+            },
+            env,
+        )
+        .unwrap();
+        for (k, v) in &acked {
+            assert_eq!(
+                db.get(k).as_deref(),
+                Some(v.as_slice()),
+                "silent wrong/missing for acked key {k:?}"
+            );
+        }
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -234,7 +904,9 @@ mod tests {
                 sync: true,
                 auto_flush_bytes: None,
                 auto_compact_sst_count: None,
+                auto_compact_sst_bytes: None,
                 exclusive: true,
+                large_value_threshold: None,
             },
             env,
         );
@@ -268,7 +940,9 @@ mod tests {
                 sync: true,
                 auto_flush_bytes: None,
                 auto_compact_sst_count: None,
+                auto_compact_sst_bytes: None,
                 exclusive: true,
+                large_value_threshold: None,
             },
             env.clone(),
         )
@@ -291,7 +965,9 @@ mod tests {
                 sync: true,
                 auto_flush_bytes: None,
                 auto_compact_sst_count: None,
+                auto_compact_sst_bytes: None,
                 exclusive: true,
+                large_value_threshold: None,
             },
             env,
         )
@@ -325,7 +1001,9 @@ mod tests {
                 sync: true,
                 auto_flush_bytes: None,
                 auto_compact_sst_count: None,
+                auto_compact_sst_bytes: None,
                 exclusive: true,
+                large_value_threshold: None,
             },
             env.clone(),
         )
@@ -355,7 +1033,9 @@ mod tests {
                 sync: true,
                 auto_flush_bytes: None,
                 auto_compact_sst_count: None,
+                auto_compact_sst_bytes: None,
                 exclusive: true,
+                large_value_threshold: None,
             },
             env,
         )
@@ -397,7 +1077,9 @@ mod tests {
                 sync: true,
                 auto_flush_bytes: None,
                 auto_compact_sst_count: None,
+                auto_compact_sst_bytes: None,
                 exclusive: true,
+                large_value_threshold: None,
             },
             env,
         );
@@ -425,7 +1107,9 @@ mod tests {
                 sync: true,
                 auto_flush_bytes: None,
                 auto_compact_sst_count: None,
+                auto_compact_sst_bytes: None,
                 exclusive: true,
+                large_value_threshold: None,
             },
             env,
         );
@@ -459,7 +1143,9 @@ mod tests {
                 sync: true,
                 auto_flush_bytes: None,
                 auto_compact_sst_count: None,
+                auto_compact_sst_bytes: None,
                 exclusive: true,
+                large_value_threshold: None,
             },
             env.clone(),
         )
@@ -483,7 +1169,9 @@ mod tests {
                 sync: true,
                 auto_flush_bytes: None,
                 auto_compact_sst_count: None,
+                auto_compact_sst_bytes: None,
                 exclusive: true,
+                large_value_threshold: None,
             },
             env,
         )
@@ -503,7 +1191,9 @@ mod tests {
             sync: true,
             auto_flush_bytes: Some(64),
             auto_compact_sst_count: None,
+            auto_compact_sst_bytes: None,
             exclusive: true,
+                large_value_threshold: None,
         };
         let big = vec![b'x'; 128];
 
@@ -559,7 +1249,9 @@ mod tests {
             sync: true,
             auto_flush_bytes: None,
             auto_compact_sst_count: None,
+            auto_compact_sst_bytes: None,
             exclusive: true,
+                large_value_threshold: None,
         };
 
         for n in 0..40u64 {
@@ -620,5 +1312,468 @@ mod tests {
             }
             let _ = fs::remove_dir_all(&dir);
         }
+    }
+
+    /// Failed multi-key TX must not burn sequence numbers or leave partial keys.
+    #[test]
+    fn tx_fail_mid_commit_no_partial_and_seq_not_burned() {
+        let dir = parent().join(format!(
+            "pedradb-tx-fail-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        // Open + seed put under generous budget, then arm fail for next multi-op commit.
+        let env = FailingEnv::passing();
+        let mut db = Db::open_with_env(&dir, opts(), env.clone()).unwrap();
+        db.put(b"seed", b"ok").unwrap();
+        let seq_before = db.last_sequence();
+        assert_eq!(seq_before, 1);
+
+        // Arm: next fallible env ops fail (WAL append for TX).
+        env.arm(0, true);
+        {
+            let mut tx = db.begin();
+            tx.put(b"a", b"1").unwrap();
+            tx.put(b"b", b"2").unwrap();
+            tx.put(b"c", b"3").unwrap();
+            let err = tx.commit().expect_err("commit must fail under arm(0)");
+            let _ = err;
+        }
+        // No partial apply.
+        assert!(db.get(b"a").is_none());
+        assert!(db.get(b"b").is_none());
+        assert!(db.get(b"c").is_none());
+        assert_eq!(db.get(b"seed").as_deref(), Some(b"ok".as_ref()));
+        // Sequence not burned: next successful put should use 2, not 5.
+        assert_eq!(
+            db.last_sequence(),
+            seq_before,
+            "failed TX must restore next_seq (got {})",
+            db.last_sequence()
+        );
+
+        env.disarm();
+        {
+            let mut tx = db.begin();
+            tx.put(b"a", b"1").unwrap();
+            tx.put(b"b", b"2").unwrap();
+            tx.commit().unwrap();
+        }
+        assert_eq!(db.get(b"a").as_deref(), Some(b"1".as_ref()));
+        assert_eq!(db.get(b"b").as_deref(), Some(b"2".as_ref()));
+        assert_eq!(db.last_sequence(), seq_before + 2);
+        db.close().unwrap();
+
+        // Reopen: still no phantom sequences / partial keys.
+        let db = Db::open_with_env(&dir, opts(), FailingEnv::passing()).unwrap();
+        assert_eq!(db.get(b"seed").as_deref(), Some(b"ok".as_ref()));
+        assert_eq!(db.get(b"a").as_deref(), Some(b"1".as_ref()));
+        assert_eq!(db.get(b"b").as_deref(), Some(b"2".as_ref()));
+        assert!(db.get(b"c").is_none());
+        assert_eq!(db.last_sequence(), seq_before + 2);
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// apply_batch under fail_after: sequences restored on Err.
+    #[test]
+    fn batch_fail_mid_commit_restores_sequence() {
+        let dir = parent().join(format!(
+            "pedradb-batch-fail-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let env = FailingEnv::passing();
+        let mut db = Db::open_with_env(&dir, opts(), env.clone()).unwrap();
+        db.put(b"x", b"1").unwrap();
+        let seq = db.last_sequence();
+        env.arm(0, true);
+        let r = db.apply_batch([
+            pedradb_core::BatchOp::put(b"y", b"2"),
+            pedradb_core::BatchOp::put(b"z", b"3"),
+        ]);
+        assert!(r.is_err());
+        assert!(db.get(b"y").is_none());
+        assert_eq!(db.last_sequence(), seq);
+        env.disarm();
+        // If the injection hit after append+required sync, the handle is fenced
+        // and further puts refuse until reopen (RFC-0015 H1). Heal path: reopen.
+        if db.is_durability_fenced() {
+            db.close().unwrap();
+            let mut db = Db::open_with_env(&dir, opts(), env).unwrap();
+            db.put(b"y", b"2").unwrap();
+            assert!(db.last_sequence() >= seq + 1);
+            db.close().unwrap();
+        } else {
+            db.put(b"y", b"2").unwrap();
+            assert_eq!(db.last_sequence(), seq + 1);
+            db.close().unwrap();
+        }
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0015 P0.1/P0.3: required WAL sync fail → fence; further puts refuse; reopen consistent.
+    #[test]
+    fn sync_fail_after_append_fences_until_reopen() {
+        use pedradb_core::{CoreError, Db, OpenOptions};
+
+        let dir = parent().join(format!(
+            "pedradb-fence-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+
+        let env = FailingEnv::passing();
+        let mut db = Db::open_with_env(
+            &dir,
+            OpenOptions {
+                sync: true,
+                auto_flush_bytes: None,
+                auto_compact_sst_count: None,
+                auto_compact_sst_bytes: None,
+                exclusive: true,
+                large_value_threshold: None,
+            },
+            env.clone(),
+        )
+        .unwrap();
+        db.put(b"a", b"1").unwrap();
+        assert!(!db.is_durability_fenced());
+
+        // SyncFail: writes land; next sync_all (put path) fails after append.
+        env.arm_with_kind(0, false, FaultKind::SyncFail);
+        let err = db.put(b"b", b"2").unwrap_err();
+        assert!(
+            matches!(err, CoreError::Io(_)) || err.to_string().contains("sync"),
+            "first failure should be the injected sync err, got {err:?}"
+        );
+        assert!(db.is_durability_fenced());
+        // In-process mem must not show the unacked write.
+        assert!(db.get(b"b").is_none());
+
+        let fenced = db.put(b"c", b"3").unwrap_err();
+        assert!(
+            matches!(fenced, CoreError::DurabilityFenced),
+            "expected DurabilityFenced, got {fenced:?}"
+        );
+
+        drop(db);
+        env.disarm();
+        let db = Db::open_with_env(
+            &dir,
+            OpenOptions {
+                sync: true,
+                auto_flush_bytes: None,
+                auto_compact_sst_count: None,
+                auto_compact_sst_bytes: None,
+                exclusive: true,
+                large_value_threshold: None,
+            },
+            env,
+        )
+        .unwrap();
+        assert!(!db.is_durability_fenced());
+        assert_eq!(db.get(b"a").as_deref(), Some(b"1".as_ref()));
+        // Append succeeded before sync fail → WAL recovery may surface `b`.
+        assert_eq!(
+            db.get(b"b").as_deref(),
+            Some(b"2".as_ref()),
+            "failed-sync write still recoverable from WAL after reopen"
+        );
+        assert!(db.get(b"c").is_none(), "fenced put must not appear");
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0015 P0.2/P0.3: sync_dir failure under sync=true fails flush/MANIFEST path.
+    #[test]
+    fn sync_dir_fail_propagates_on_flush() {
+        use pedradb_core::{
+            Db, Env, EnvFile, OpenOptions, Result as CoreResult, StdEnv,
+        };
+        use std::cell::Cell;
+        use std::io::{self, Read, Seek, SeekFrom, Write};
+        use std::path::Path;
+        use std::rc::Rc;
+
+        /// Env that only bombs `sync_dir` when armed (writes/sync_all still work).
+        #[derive(Clone)]
+        struct SyncDirBomb {
+            inner: StdEnv,
+            fail: Rc<Cell<bool>>,
+        }
+
+        struct BombFile {
+            inner: <StdEnv as Env>::File,
+        }
+
+        impl Read for BombFile {
+            fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+                self.inner.read(buf)
+            }
+        }
+        impl Write for BombFile {
+            fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+                self.inner.write(buf)
+            }
+            fn flush(&mut self) -> io::Result<()> {
+                self.inner.flush()
+            }
+        }
+        impl Seek for BombFile {
+            fn seek(&mut self, pos: SeekFrom) -> io::Result<u64> {
+                self.inner.seek(pos)
+            }
+        }
+        impl EnvFile for BombFile {
+            fn sync_data(&mut self) -> io::Result<()> {
+                self.inner.sync_data()
+            }
+            fn sync_all(&mut self) -> io::Result<()> {
+                self.inner.sync_all()
+            }
+            fn set_len(&mut self, len: u64) -> io::Result<()> {
+                self.inner.set_len(len)
+            }
+            fn len(&mut self) -> io::Result<u64> {
+                self.inner.len()
+            }
+        }
+
+        impl Env for SyncDirBomb {
+            type File = BombFile;
+            fn create_dir_all(&self, path: &Path) -> io::Result<()> {
+                self.inner.create_dir_all(path)
+            }
+            fn create(&self, path: &Path) -> io::Result<Self::File> {
+                Ok(BombFile {
+                    inner: self.inner.create(path)?,
+                })
+            }
+            fn open_append(&self, path: &Path) -> io::Result<Self::File> {
+                Ok(BombFile {
+                    inner: self.inner.open_append(path)?,
+                })
+            }
+            fn open_read(&self, path: &Path) -> io::Result<Self::File> {
+                Ok(BombFile {
+                    inner: self.inner.open_read(path)?,
+                })
+            }
+            fn sync_dir(&self, path: &Path) -> io::Result<()> {
+                if self.fail.get() {
+                    return Err(io::Error::other("injected sync_dir failure"));
+                }
+                self.inner.sync_dir(path)
+            }
+            fn read_dir_names(&self, path: &Path) -> io::Result<Vec<String>> {
+                self.inner.read_dir_names(path)
+            }
+            fn remove_file(&self, path: &Path) -> io::Result<()> {
+                self.inner.remove_file(path)
+            }
+            fn rename(&self, from: &Path, to: &Path) -> io::Result<()> {
+                self.inner.rename(from, to)
+            }
+            fn exists(&self, path: &Path) -> bool {
+                self.inner.exists(path)
+            }
+            fn metadata_len(&self, path: &Path) -> io::Result<u64> {
+                self.inner.metadata_len(path)
+            }
+        }
+
+        let dir = parent().join(format!(
+            "pedradb-syncdir-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+
+        let fail = Rc::new(Cell::new(false));
+        let env = SyncDirBomb {
+            inner: StdEnv,
+            fail: Rc::clone(&fail),
+        };
+        let mut db = Db::open_with_env(
+            &dir,
+            OpenOptions {
+                sync: true,
+                auto_flush_bytes: None,
+                auto_compact_sst_count: None,
+                auto_compact_sst_bytes: None,
+                exclusive: true,
+                large_value_threshold: None,
+            },
+            env.clone(),
+        )
+        .unwrap();
+        db.put(b"k", b"v").unwrap();
+        fail.set(true);
+        let err = db.flush().unwrap_err();
+        assert!(
+            err.to_string().contains("sync_dir") || matches!(err, pedradb_core::CoreError::Io(_)),
+            "expected sync_dir propagation, got {err:?}"
+        );
+        // Heal: disarm and reopen — acked put must still recover from WAL.
+        fail.set(false);
+        drop(db);
+        let db: CoreResult<Db<_>> = Db::open_with_env(
+            &dir,
+            OpenOptions {
+                sync: true,
+                auto_flush_bytes: None,
+                auto_compact_sst_count: None,
+                auto_compact_sst_bytes: None,
+                exclusive: true,
+                large_value_threshold: None,
+            },
+            env,
+        );
+        let db = db.expect("reopen after failed flush");
+        assert_eq!(db.get(b"k").as_deref(), Some(b"v".as_ref()));
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0015 P1.1: Db close/drop releases LOCK via Env (remove_file counted).
+    #[test]
+    fn dir_lock_release_via_env_on_close() {
+        use pedradb_core::{Db, Env, EnvFile, OpenOptions, StdEnv, LOCK_FILE};
+        use std::cell::Cell;
+        use std::io::{self, Read, Seek, SeekFrom, Write};
+        use std::path::Path;
+        use std::rc::Rc;
+
+        #[derive(Clone)]
+        struct CountRemove {
+            inner: StdEnv,
+            removes: Rc<Cell<u64>>,
+        }
+        struct F {
+            inner: <StdEnv as Env>::File,
+        }
+        impl Read for F {
+            fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+                self.inner.read(buf)
+            }
+        }
+        impl Write for F {
+            fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+                self.inner.write(buf)
+            }
+            fn flush(&mut self) -> io::Result<()> {
+                self.inner.flush()
+            }
+        }
+        impl Seek for F {
+            fn seek(&mut self, pos: SeekFrom) -> io::Result<u64> {
+                self.inner.seek(pos)
+            }
+        }
+        impl EnvFile for F {
+            fn sync_data(&mut self) -> io::Result<()> {
+                self.inner.sync_data()
+            }
+            fn sync_all(&mut self) -> io::Result<()> {
+                self.inner.sync_all()
+            }
+            fn set_len(&mut self, len: u64) -> io::Result<()> {
+                self.inner.set_len(len)
+            }
+            fn len(&mut self) -> io::Result<u64> {
+                self.inner.len()
+            }
+        }
+        impl Env for CountRemove {
+            type File = F;
+            fn create_dir_all(&self, path: &Path) -> io::Result<()> {
+                self.inner.create_dir_all(path)
+            }
+            fn create(&self, path: &Path) -> io::Result<Self::File> {
+                Ok(F {
+                    inner: self.inner.create(path)?,
+                })
+            }
+            fn open_append(&self, path: &Path) -> io::Result<Self::File> {
+                Ok(F {
+                    inner: self.inner.open_append(path)?,
+                })
+            }
+            fn open_read(&self, path: &Path) -> io::Result<Self::File> {
+                Ok(F {
+                    inner: self.inner.open_read(path)?,
+                })
+            }
+            fn sync_dir(&self, path: &Path) -> io::Result<()> {
+                self.inner.sync_dir(path)
+            }
+            fn read_dir_names(&self, path: &Path) -> io::Result<Vec<String>> {
+                self.inner.read_dir_names(path)
+            }
+            fn remove_file(&self, path: &Path) -> io::Result<()> {
+                self.removes.set(self.removes.get() + 1);
+                self.inner.remove_file(path)
+            }
+            fn rename(&self, from: &Path, to: &Path) -> io::Result<()> {
+                self.inner.rename(from, to)
+            }
+            fn exists(&self, path: &Path) -> bool {
+                self.inner.exists(path)
+            }
+            fn metadata_len(&self, path: &Path) -> io::Result<u64> {
+                self.inner.metadata_len(path)
+            }
+        }
+
+        let dir = parent().join(format!(
+            "pedradb-unlock-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        let removes = Rc::new(Cell::new(0));
+        let env = CountRemove {
+            inner: StdEnv,
+            removes: Rc::clone(&removes),
+        };
+        let db = Db::open_with_env(
+            &dir,
+            OpenOptions {
+                sync: true,
+                auto_flush_bytes: None,
+                auto_compact_sst_count: None,
+                auto_compact_sst_bytes: None,
+                exclusive: true,
+                large_value_threshold: None,
+            },
+            env,
+        )
+        .unwrap();
+        assert!(dir.join(LOCK_FILE).exists());
+        let before = removes.get();
+        db.close().unwrap();
+        assert!(
+            removes.get() > before,
+            "close must unlock via Env::remove_file"
+        );
+        assert!(!dir.join(LOCK_FILE).exists());
+        let _ = fs::remove_dir_all(&dir);
     }
 }

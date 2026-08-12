@@ -2,7 +2,9 @@
 
 **Status:** adversarial review of the grail plan  
 **Updated:** 2026-08-11  
-**Complements:** `upsides-only.md` (positive case), `grail-plan-…`, RFC-0001  
+**Complements:** `upsides-only.md` (positive case), `grail-plan-…`, RFC-0001,
+[`performance-ceiling-option-preservation-and-sled-layer.md`](performance-ceiling-option-preservation-and-sled-layer.md)
+(ceilings vs Rocks/Pebble/sled/redwood, anti-corner checklist, sled API layer, B-tree-class reads without dual store).
 
 Honest constraints of:
 

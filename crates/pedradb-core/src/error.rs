@@ -49,6 +49,24 @@ pub enum CoreError {
     /// MANIFEST / CURRENT contents are unreadable or inconsistent.
     #[error("corrupt manifest: {0}")]
     CorruptManifest(String),
+
+    /// A required WAL `sync_all` failed after append; this `Db` refuses further
+    /// writes until `close` + `open` (reopen rebuilds mem from WAL).
+    ///
+    /// The original failure may still have left a complete record on disk
+    /// (uncertain outcome). `Ok` still means durable when `sync=true`.
+    #[error("database fenced after durability failure; close and reopen to recover")]
+    DurabilityFenced,
+
+    /// Optimistic concurrency control: another commit changed a key this TX
+    /// read or wrote since its snapshot (RFC-0014 P2.1).
+    #[error("transaction conflict: key changed since snapshot")]
+    TransactionConflict,
+
+    /// Conditional put failed: key state did not match the expected precondition
+    /// (RFC-0019 CAS / `put_if`).
+    #[error("compare-and-swap precondition failed")]
+    CasMismatch,
 }
 
 /// Convenience `Result` alias used throughout the crate.

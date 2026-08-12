@@ -431,7 +431,9 @@ mod tests {
             sync: true,
             auto_flush_bytes: None,
             auto_compact_sst_count: None,
+            auto_compact_sst_bytes: None,
             exclusive: false, // virtual FS has no real LOCK process semantics
+            large_value_threshold: None,
         }
     }
 

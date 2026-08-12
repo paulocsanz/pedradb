@@ -99,13 +99,70 @@ impl MemTable {
         debug_assert!(ikey.sequence <= snapshot);
         match ikey.kind {
             ValueType::Deletion => Lookup::Deleted,
-            ValueType::Value => Lookup::Found(value.clone()),
+            ValueType::Value => {
+                // Check covering range tombstones with higher sequence.
+                if self.range_deleted(user_key, ikey.sequence, snapshot) {
+                    Lookup::Deleted
+                } else {
+                    Lookup::Found(value.clone())
+                }
+            }
+            ValueType::RangeDeletion => Lookup::NotFound,
         }
+    }
+
+    /// Insert a range tombstone covering `[start, end)` at `sequence`.
+    pub fn delete_range(
+        &mut self,
+        start: impl Into<Bytes>,
+        end: impl Into<Bytes>,
+        sequence: SequenceNumber,
+    ) {
+        let start = start.into();
+        let end = end.into();
+        let key = InternalKey::new(start, sequence, ValueType::RangeDeletion);
+        self.insert(key, end);
+    }
+
+    /// Whether a point at `point_seq` is covered by a range tombstone ≤ `snapshot`.
+    fn range_deleted(
+        &self,
+        user_key: &[u8],
+        point_seq: SequenceNumber,
+        snapshot: SequenceNumber,
+    ) -> bool {
+        for (ikey, end) in &self.map {
+            if ikey.kind != ValueType::RangeDeletion || ikey.sequence > snapshot {
+                continue;
+            }
+            if ikey.sequence > point_seq
+                && user_key >= ikey.user_key.as_ref()
+                && user_key < end.as_ref()
+            {
+                return true;
+            }
+        }
+        false
     }
 
     /// All internal versions in [`InternalKey`] order (for SST flush).
     pub fn iter_internal(&self) -> impl Iterator<Item = (&InternalKey, &Bytes)> + '_ {
         self.map.iter()
+    }
+
+    /// Rewrite every stored value with `f` (used by value-log GC remapping).
+    pub fn map_values<F>(&mut self, mut f: F)
+    where
+        F: FnMut(&Bytes) -> Bytes,
+    {
+        let old = std::mem::take(&mut self.map);
+        self.approx_bytes = 0;
+        for (k, v) in old {
+            let new_v = f(&v);
+            let entry_bytes = k.user_key.len() + new_v.len() + 8;
+            self.approx_bytes = self.approx_bytes.saturating_add(entry_bytes);
+            self.map.insert(k, new_v);
+        }
     }
 
     /// Iterate user-visible entries in user-key order at `snapshot`.
@@ -162,8 +219,11 @@ impl Iterator for SnapshotIter<'_> {
             // Newest visible version for this user key (map order = newest first).
             let user_key = ikey.user_key.clone();
             let result = match ikey.kind {
-                ValueType::Value => Some((user_key.clone(), value.clone())),
-                ValueType::Deletion => None,
+                ValueType::Value => {
+                    // SnapshotIter does not apply range dels; Db merge path does.
+                    Some((user_key.clone(), value.clone()))
+                }
+                ValueType::Deletion | ValueType::RangeDeletion => None,
             };
             // Skip remaining versions of the same user key.
             while let Some((next_key, _)) = self.inner.peek() {

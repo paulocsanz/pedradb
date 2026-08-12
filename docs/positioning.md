@@ -49,9 +49,11 @@ Those become **reasons to trust and stay** after the kernel already justifies it
 
 ## 2. One sentence (product)
 
-**PedraDB is a tiny, fast, pure-Rust library: ordered key-value + multi-key ACID on one machine — so you can build correctly on top without a cluster or a C++ engine.**
+**PedraDB (kernel):** a tiny, fast, pure-Rust library — ordered key-value + multi-key ACID on one machine — so you can build correctly on top without a cluster or a C++ engine.
 
-Not a server. Not multi-node. Not SQL.
+**Platform north star (Montanha + layers, not kernel pitch):**  
+a **Postgres-class high-level system** that **replaces the need for Scylla + ClickHouse + NATS in one product** (multi-primary, automatic OLTP/OLAP/stream paths). Full write-up: [`node-primitive-and-unified-platform.md`](node-primitive-and-unified-platform.md) §1.  
+That ambition does **not** change the order of proof below (kernel useful first).
 
 ```text
 open → begin → get / put / delete / range → commit
@@ -103,6 +105,8 @@ Multi-key ACID + order is why this isn’t “just another map on disk.”
 | **SurrealKV** | You’re **not** building inside Surreal’s product |
 | **RocksDB** | You want **Rust + multi-key ACID** without C++ and without bolting TX yourself |
 | **FDB/TiKV** | You need **embed / single process**, not a cluster |
+
+**Robustness honesty (not a win claim):** PedraDB is not more battle-tested than RocksDB, Pebble, or FDB storage — see [`robustness-vs-rocks-pebble-fdb.md`](robustness-vs-rocks-pebble-fdb.md).
 
 Until phase A works, none of that paragraph is earned.
 
@@ -161,10 +165,11 @@ Stars, paper count, and “we planned multi-node” do not justify use.
 | Secondary indexes in core | Layer (using TX) |
 | Document / graph / wide-column models | Layer |
 | Redis-like data types | Different product |
-| Object-store-first (S3) | Different niche (SlateDB/Tonbo). **Kernel exclusion confirmed** by `object-storage-as-substrate-possibility.md`; the WAL-export-medium question (Rung 1.5) stays **open**, tracked separately — not re-litigated here |
+| Object-store-first (S3) | Different niche (SlateDB/Tonbo). Kernel exclusion confirmed; WAL-export (Rung 1.5) still open. The SQLite-VFS / hot-tier question is a **different slot** (Pedra under a VFS, not Pedra-as-S3) — see [`sqlite-object-storage-agents-and-pedradb.md`](sqlite-object-storage-agents-and-pedradb.md) |
 | Hundreds of tunables | Small surface + good defaults |
 | Compatibility with RocksDB on-disk format | Clean-room; oracle for behavior tests only |
 | Being “the next sled” feature demo | Ship a boring, small, fast contract |
+| Rebuilding sled’s novel storage for DX | **Layer** sled-shaped API on LSM; preserve format options — see [`performance-ceiling-option-preservation-and-sled-layer.md`](performance-ceiling-option-preservation-and-sled-layer.md) |
 
 ---
 

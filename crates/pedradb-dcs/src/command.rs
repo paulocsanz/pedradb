@@ -1,10 +1,17 @@
 //! Replicated DCS commands for Raft apply (compose DCS + consensus).
 //!
 //! Leader checks preconditions, then logs a [`DcsCommand`]. Every node applies
-//! the same command to its PedraDB via [`apply_dcs_command`] — no lease table
-//! required for lease=0 ops (multi-node first ship).
+//! the same command to its PedraDB via [`apply_dcs_command`].
+//!
+//! # Lease field (multi-node / store path)
+//!
+//! - `lease == 0` — no TTL (immortal until delete).
+//! - `lease != 0` — **absolute deadline in logical milliseconds** (cluster clock).
+//!   Baked into the log at propose time so apply is deterministic; reads use
+//!   [`dcs_get_at`] with the caller's current logical time. This is the durable
+//!   multi-node alternative to the process-local lease table in [`crate::Dcs`].
 
-use pedradb_core::Db;
+use pedradb_core::{Db, Env};
 
 use crate::{
     decode_meta, decode_u64, encode_meta, encode_u64, kv_key, meta_key, DcsError, KeyValue,
@@ -162,7 +169,7 @@ fn take_u64(buf: &[u8], off: &mut usize) -> Result<u64> {
     Ok(v)
 }
 
-fn get_kv(db: &Db, key: &[u8]) -> Option<KeyValue> {
+fn get_kv<E: Env>(db: &Db<E>, key: &[u8]) -> Option<KeyValue> {
     let val = db.get(&kv_key(key))?;
     let meta = db.get(&meta_key(key))?;
     let (create, mod_rev, lease) = decode_meta(&meta).ok()?;
@@ -175,7 +182,22 @@ fn get_kv(db: &Db, key: &[u8]) -> Option<KeyValue> {
     })
 }
 
-fn revision(db: &Db) -> u64 {
+/// Whether a binding is still live at `now_ms` (`lease==0` never expires).
+#[must_use]
+pub fn lease_live(lease: u64, now_ms: u64) -> bool {
+    lease == 0 || now_ms < lease
+}
+
+fn get_kv_at<E: Env>(db: &Db<E>, key: &[u8], now_ms: u64) -> Option<KeyValue> {
+    let kv = get_kv(db, key)?;
+    if lease_live(kv.lease, now_ms) {
+        Some(kv)
+    } else {
+        None
+    }
+}
+
+fn revision<E: Env>(db: &Db<E>) -> u64 {
     db.get(REV_KEY)
         .and_then(|b| decode_u64(&b).ok())
         .unwrap_or(0)
@@ -183,13 +205,27 @@ fn revision(db: &Db) -> u64 {
 
 /// Read-only precondition check (leader, before propose).
 ///
+/// Uses raw presence (no clock). Prefer [`check_command_at`] when leases use
+/// absolute deadlines.
+///
 /// # Errors
 /// CAS / create failure (same as local DCS).
-pub fn check_command(db: &Db, cmd: &DcsCommand) -> Result<()> {
+pub fn check_command<E: Env>(db: &Db<E>, cmd: &DcsCommand) -> Result<()> {
+    check_command_at(db, cmd, 0)
+}
+
+/// Precondition check with logical clock (`now_ms`).
+///
+/// Expired leased keys (`lease != 0 && now_ms >= lease`) count as **absent**
+/// for create/CAS (F7 multi-node: lock liveness after TTL).
+///
+/// # Errors
+/// CAS / create failure.
+pub fn check_command_at<E: Env>(db: &Db<E>, cmd: &DcsCommand, now_ms: u64) -> Result<()> {
     match cmd {
         DcsCommand::Put { .. } => Ok(()),
         DcsCommand::Create { key, .. } => {
-            if get_kv(db, key).is_some() {
+            if get_kv_at(db, key, now_ms).is_some() {
                 Err(DcsError::CasFailed("key exists"))
             } else {
                 Ok(())
@@ -198,7 +234,7 @@ pub fn check_command(db: &Db, cmd: &DcsCommand) -> Result<()> {
         DcsCommand::Cas {
             key, expected_rev, ..
         } => {
-            let cur = get_kv(db, key);
+            let cur = get_kv_at(db, key, now_ms);
             match (*expected_rev, cur) {
                 (0, Some(_)) => Err(DcsError::CasFailed("expected absent")),
                 (0, None) => Ok(()),
@@ -220,12 +256,20 @@ pub fn check_command(db: &Db, cmd: &DcsCommand) -> Result<()> {
 ///
 /// # Errors
 /// I/O, or CAS precondition failure (revision mismatch).
-pub fn apply_dcs_command(db: &mut Db, cmd: &DcsCommand) -> Result<u64> {
+pub fn apply_dcs_command<E: Env>(db: &mut Db<E>, cmd: &DcsCommand) -> Result<u64> {
     match cmd {
         DcsCommand::Create { key, value, lease } => {
             if let Some(existing) = get_kv(db, key) {
-                let _ = (value, lease);
-                return Ok(existing.mod_revision);
+                // Dual-append same create (same absolute lease deadline): idempotent.
+                if existing.lease == *lease && existing.value == *value {
+                    return Ok(existing.mod_revision);
+                }
+                // Immortal key already present (lease=0): keep dual-append safety.
+                if existing.lease == 0 {
+                    return Ok(existing.mod_revision);
+                }
+                // Leased binding with different deadline/value: leader re-created after
+                // expiry (or CAS path) — overwrite so apply cursor never stalls.
             }
             put_new(db, key, value, *lease, None)
         }
@@ -240,23 +284,25 @@ pub fn apply_dcs_command(db: &mut Db, cmd: &DcsCommand) -> Result<u64> {
             expected_rev,
             lease,
         } => {
-            // expected_rev == 0 is create-if-absent: idempotent if key already present
-            // (same dual-append safety as Create).
+            // expected_rev == 0 is create-if-absent: dual-append safety when same binding.
             if *expected_rev == 0 {
                 if let Some(existing) = get_kv(db, key) {
-                    let _ = (value, lease);
+                    if existing.lease == *lease && existing.value == *value {
+                        return Ok(existing.mod_revision);
+                    }
+                    if existing.lease == 0 {
+                        return Ok(existing.mod_revision);
+                    }
+                    // else fall through to overwrite (re-create after expiry)
+                }
+            } else if let Some(existing) = get_kv(db, key) {
+                if existing.mod_revision != *expected_rev {
+                    // Stale CAS on apply: no-op keep cursor (leader pre-checked).
                     return Ok(existing.mod_revision);
                 }
             } else {
-                check_command(
-                    db,
-                    &DcsCommand::Cas {
-                        key: key.clone(),
-                        value: value.clone(),
-                        expected_rev: *expected_rev,
-                        lease: *lease,
-                    },
-                )?;
+                // Key missing on apply — no-op revision.
+                return Ok(revision(db));
             }
             let prev = get_kv(db, key);
             let create_hint = prev.map(|p| p.create_revision);
@@ -277,8 +323,8 @@ pub fn apply_dcs_command(db: &mut Db, cmd: &DcsCommand) -> Result<u64> {
     }
 }
 
-fn put_new(
-    db: &mut Db,
+fn put_new<E: Env>(
+    db: &mut Db<E>,
     key: &[u8],
     value: &[u8],
     lease: u64,
@@ -294,10 +340,16 @@ fn put_new(
     Ok(rev)
 }
 
-/// Point get for followers (raw DCS layout).
+/// Point get for followers (raw DCS layout — **ignores** lease expiry).
 #[must_use]
-pub fn dcs_get(db: &Db, key: &[u8]) -> Option<KeyValue> {
+pub fn dcs_get<E: Env>(db: &Db<E>, key: &[u8]) -> Option<KeyValue> {
     get_kv(db, key)
+}
+
+/// Point get with absolute-deadline lease check (`now_ms` = cluster logical time).
+#[must_use]
+pub fn dcs_get_at<E: Env>(db: &Db<E>, key: &[u8], now_ms: u64) -> Option<KeyValue> {
+    get_kv_at(db, key, now_ms)
 }
 
 #[cfg(test)]
@@ -317,7 +369,9 @@ mod tests {
                 sync: true,
                 auto_flush_bytes: None,
                 auto_compact_sst_count: None,
+                auto_compact_sst_bytes: None,
                 exclusive: true,
+                large_value_threshold: None,
             },
         )
         .unwrap();
@@ -344,6 +398,34 @@ mod tests {
         assert_eq!(rev2, 1);
         // Leader pre-check still rejects create-if-absent race for clients.
         assert!(check_command(&db, &cmd).is_err());
+        db.close().unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn absolute_lease_deadline_expires_for_get_and_create() {
+        let (dir, mut db) = temp_db();
+        let expiry = 1_000u64;
+        let cmd = DcsCommand::Create {
+            key: b"lock".to_vec(),
+            value: b"holder-a".to_vec(),
+            lease: expiry,
+        };
+        apply_dcs_command(&mut db, &cmd).unwrap();
+        assert!(dcs_get_at(&db, b"lock", 999).is_some());
+        assert!(dcs_get_at(&db, b"lock", 1_000).is_none());
+        // After expiry, create-if-absent is allowed again.
+        assert!(check_command_at(&db, &cmd, 1_000).is_ok());
+        let cmd2 = DcsCommand::Create {
+            key: b"lock".to_vec(),
+            value: b"holder-b".to_vec(),
+            lease: 5_000,
+        };
+        apply_dcs_command(&mut db, &cmd2).unwrap();
+        assert_eq!(
+            dcs_get_at(&db, b"lock", 1_001).unwrap().value,
+            b"holder-b"
+        );
         db.close().unwrap();
         let _ = std::fs::remove_dir_all(&dir);
     }

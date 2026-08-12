@@ -13,8 +13,6 @@ use crate::batch::WriteOp;
 use crate::db::{Db, WriteOptions};
 use crate::error::{CoreError, Result};
 use crate::key::SequenceNumber;
-use crate::memtable::Lookup;
-
 /// Staging entry: put value or delete.
 #[derive(Debug, Clone)]
 enum Stage {
@@ -63,10 +61,8 @@ impl<'db, E: crate::env::Env> Transaction<'db, E> {
         if self.snapshot == 0 {
             return None;
         }
-        match self.db.lookup(key, self.snapshot) {
-            Lookup::Found(v) => Some(v),
-            Lookup::Deleted | Lookup::NotFound => None,
-        }
+        // Use public get_at so vlog pointers resolve (RFC-0014 P2.2).
+        self.db.get_at(crate::db::Snapshot::at(self.snapshot), key)
     }
 
     /// Stage a put (visible to later `get` in this TX; durable only after commit).
@@ -95,39 +91,59 @@ impl<'db, E: crate::env::Env> Transaction<'db, E> {
 
     /// Commit all staged ops in one WAL record (multi-key atomic).
     ///
-    /// Empty transactions succeed without writing.
+    /// Empty transactions succeed without writing (returns current `last_sequence`).
     ///
     /// # Errors
     /// WAL I/O, sequence exhaustion, or already finished.
-    pub fn commit(self) -> Result<()> {
+    pub fn commit(self) -> Result<crate::key::SequenceNumber> {
         self.commit_with(WriteOptions::default())
     }
 
-    /// Commit with explicit [`WriteOptions`] (e.g. `no_sync` + later [`Db::sync`]).
+    /// Commit with explicit [`WriteOptions`]; returns the last sequence of the TX.
     ///
     /// # Errors
     /// WAL I/O, sequence exhaustion, or already finished.
-    pub fn commit_with(mut self, durability: WriteOptions) -> Result<()> {
+    pub fn commit_with(mut self, durability: WriteOptions) -> Result<crate::key::SequenceNumber> {
         self.ensure_open()?;
         if self.staging.is_empty() {
             self.finished = true;
-            return Ok(());
+            return Ok(self.db.last_sequence());
         }
 
         let staging = mem::take(&mut self.staging);
+        // Sequence checkpoint: if WAL append fails mid-commit, restore so we do
+        // not burn sequence numbers for a non-durable TX (denser fail accounting).
+        let seq_checkpoint = self.db.next_seq_peek();
         let mut records = Vec::with_capacity(staging.len());
         for (key, stage) in staging {
-            let seq = self.db.alloc_seq()?;
+            let seq = match self.db.alloc_seq() {
+                Ok(s) => s,
+                Err(e) => {
+                    self.db.restore_next_seq(seq_checkpoint);
+                    // Staging was taken — leave finished so Drop does not double-free.
+                    self.finished = true;
+                    return Err(e);
+                }
+            };
             match stage {
                 Stage::Put(value) => records.push(WriteOp::put(seq, key, value)),
                 Stage::Delete => records.push(WriteOp::delete(seq, key)),
             }
         }
-        self.db.commit_ops_with(records, durability)?;
-        // F18: TX is durable after commit_ops; auto-flush must not fail the commit.
-        self.db.maybe_auto_flush_best_effort();
-        self.finished = true;
-        Ok(())
+        let last_seq = records.last().map_or(0, |o| o.sequence);
+        match self.db.commit_ops_with(records, durability) {
+            Ok(()) => {
+                // F18: TX is durable after commit_ops; auto-flush must not fail the commit.
+                self.db.maybe_auto_flush_best_effort();
+                self.finished = true;
+                Ok(last_seq)
+            }
+            Err(e) => {
+                self.db.restore_next_seq(seq_checkpoint);
+                self.finished = true;
+                Err(e)
+            }
+        }
     }
 
     /// Discard staged changes.

@@ -1,0 +1,15 @@
+[package]
+name = "pedradb-io-uring"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Linux io_uring Env for PedraDB (WAL/SST write + fsync); POSIX fallback elsewhere"
+rust-version.workspace = true
+
+[dependencies]
+pedradb-core.workspace = true
+parking_lot.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+io-uring = "0.7"
+libc = "0.2"

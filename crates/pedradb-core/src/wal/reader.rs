@@ -425,8 +425,6 @@ mod tests {
         assert_eq!(recs, vec![b"durable".to_vec()]);
     }
 
-    /// F14: type byte flipped Full→Middle must not look like clean EOF (would
-    /// drop every later durable record with SilentWrong).
     /// Multi-block logical records: many large payloads + prefix/suffix recover.
     #[test]
     fn multi_block_stress_round_trip() {

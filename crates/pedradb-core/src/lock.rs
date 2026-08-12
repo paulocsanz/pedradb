@@ -19,11 +19,17 @@ use crate::error::{CoreError, Result};
 /// Lock file name inside the DB directory.
 pub const LOCK_FILE: &str = "LOCK";
 
-/// Held exclusive ownership of a DB directory. Removing the file on drop.
+/// Held exclusive ownership of a DB directory.
+///
+/// Prefer [`DirLock::release`] via [`Env`] on the primary shutdown path
+/// ([`crate::db::Db::close`] / `Drop`) so unlock is fault-injectable.
+/// [`Drop`] remains OS best-effort (`std::fs`) when `release` was not called.
 #[derive(Debug)]
 pub struct DirLock {
     path: PathBuf,
     pid: u32,
+    /// Set after a successful [`Self::release`] so Drop is a no-op.
+    released: bool,
 }
 
 impl DirLock {
@@ -54,7 +60,11 @@ impl DirLock {
         }
 
         write_lock_pid(env, &path, pid)?;
-        Ok(Self { path, pid })
+        Ok(Self {
+            path,
+            pid,
+            released: false,
+        })
     }
 
     /// Path of the lock file.
@@ -62,11 +72,40 @@ impl DirLock {
     pub fn path(&self) -> &Path {
         &self.path
     }
+
+    /// Whether this lock still owns the file (not yet [`Self::release`]d).
+    #[must_use]
+    pub fn is_held(&self) -> bool {
+        !self.released
+    }
+
+    /// Release `LOCK` through [`Env`] (primary unlock path; DST-visible).
+    ///
+    /// Removes the file only if it still contains our PID. Idempotent after success.
+    ///
+    /// # Errors
+    /// I/O from `Env::remove_file` / read.
+    pub fn release<E: Env>(&mut self, env: &E) -> Result<()> {
+        if self.released {
+            return Ok(());
+        }
+        if env.exists(&self.path) {
+            let holder = read_lock_pid(env, &self.path)?;
+            if holder.is_none_or(|h| h == self.pid) {
+                env.remove_file(&self.path)?;
+            }
+        }
+        self.released = true;
+        Ok(())
+    }
 }
 
 impl Drop for DirLock {
     fn drop(&mut self) {
-        // Best-effort release; use std::fs so Drop does not need Env.
+        // Best-effort only when primary Env release was not used (RFC-0015 H3).
+        if self.released {
+            return;
+        }
         if let Ok(bytes) = std::fs::read(&self.path) {
             let text = String::from_utf8_lossy(&bytes);
             if text.trim().parse::<u32>().ok() == Some(self.pid) {
@@ -179,6 +218,21 @@ mod tests {
         let lock2 = DirLock::acquire(&env, &dir).unwrap();
         drop(lock2);
         assert!(!dir.join(LOCK_FILE).exists());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn release_via_env_clears_lock_and_drop_is_noop() {
+        let dir = temp_dir();
+        let env = StdEnv;
+        let mut lock = DirLock::acquire(&env, &dir).unwrap();
+        assert!(dir.join(LOCK_FILE).exists());
+        lock.release(&env).unwrap();
+        assert!(!dir.join(LOCK_FILE).exists());
+        assert!(!lock.is_held());
+        // Second release is idempotent; Drop must not error.
+        lock.release(&env).unwrap();
+        drop(lock);
         let _ = fs::remove_dir_all(&dir);
     }
 

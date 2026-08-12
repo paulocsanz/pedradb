@@ -1,4 +1,4 @@
-//! SST file builder and reader (v2 block layout + sparse index).
+//! SST file builder and reader (v2/v3 block layout + sparse index + bloom).
 //!
 //! # On-disk v2
 //! ```text
@@ -13,25 +13,49 @@
 //! //   for each block: offset u64, length u32, first_user_key_len u32, first_user_key
 //! ```
 //!
-//! v1 files (flat entry list) are still readable.
+//! # On-disk v3 (current write path)
+//! Same as v2, then a bloom filter section:
+//! ```text
+//! bloom: nbits u32 | k u32 | nbytes u32 | bits[nbytes]
+//! ```
+//! Trailing CRC32C covers the full body (all versions that write CRC).
+//!
+//! v1 files (flat entry list) and v2 files are still readable.
+//!
+//! # Lazy blocks (RFC-0014 P1.2)
+//!
+//! v2+ tables keep the CRC-stripped payload and sparse index in memory and
+//! **decode data blocks on demand** for point gets and bounded ranges. Full
+//! entry materialization happens only for compaction / whole-table clone.
+//! Range tombstones are extracted once at open so point gets stay correct
+//! without scanning every block for deletes.
 
 use std::io::{Read, Write};
+use std::ops::Bound;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use bytes::Bytes;
+use parking_lot::Mutex;
 
+use crate::bloom::{BloomFilter, DEFAULT_BITS_PER_KEY};
 use crate::env::{Env, EnvFile, StdEnv};
 use crate::error::{CoreError, Result};
 use crate::key::{InternalKey, SequenceNumber, ValueType};
 use crate::memtable::{Lookup, MemTable};
+use crate::merge::user_key_in_range;
 
 /// File magic: PEDRSST + NUL.
 pub const SST_MAGIC: &[u8; 8] = b"PEDRSST\0";
 /// Legacy flat format.
 pub const SST_VERSION_V1: u32 = 1;
-/// Block + sparse index format.
-pub const SST_VERSION: u32 = 2;
-/// Target encoded size per data block.
+/// Block + sparse index format (no on-disk bloom).
+pub const SST_VERSION_V2: u32 = 2;
+/// Block + sparse index + bloom filter (uncompressed blocks).
+pub const SST_VERSION_V3: u32 = 3;
+/// Block + sparse index + bloom + **lz4-compressed** data blocks (current writer).
+pub const SST_VERSION: u32 = 4;
+/// Target encoded size per data block (pre-compression).
 pub const BLOCK_TARGET: usize = 4_096;
 
 /// Absolute ceiling on SST entry count (defense-in-depth vs corrupt headers).
@@ -89,15 +113,35 @@ struct BlockHandle {
     first_user_key: Bytes,
 }
 
+/// Cached full entry materialization for an SST (shared across clones).
+type EntriesCache = Arc<Mutex<Option<Vec<(InternalKey, Bytes)>>>>;
+
 /// In-memory view of one SST file.
+///
+/// For v2+ (`payload` non-empty): data blocks are decoded lazily. For v1:
+/// all entries are eager in the materialization cache.
 #[derive(Debug, Clone)]
 pub struct SstTable {
     path: PathBuf,
-    /// Sorted by [`InternalKey`] order (same as MemTable).
-    entries: Vec<(InternalKey, Bytes)>,
+    /// CRC-stripped file body for lazy block decode (empty for legacy v1).
+    payload: Arc<[u8]>,
+    /// Whether data blocks are lz4 (SST v4).
+    compressed_blocks: bool,
+    /// Cached full decode (`None` until first materialize for lazy tables).
+    entries: EntriesCache,
+    /// Range tombstones extracted at open (lazy tables) or from entries (v1).
+    range_tombstones: Vec<(InternalKey, Bytes)>,
+    /// Header entry count (or materialized length for v1).
+    num_entries: usize,
     max_sequence: SequenceNumber,
-    /// Sparse index (v2); empty for v1.
+    /// Sparse index (v2+); empty for v1.
     index: Vec<BlockHandle>,
+    /// On-disk or rebuilt bloom (always-true when inactive).
+    bloom: BloomFilter,
+    /// Smallest user key in file (None if empty).
+    smallest_user_key: Option<Bytes>,
+    /// Largest user key in file (None if empty).
+    largest_user_key: Option<Bytes>,
 }
 
 impl SstTable {
@@ -110,13 +154,71 @@ impl SstTable {
     /// Number of internal key versions stored.
     #[must_use]
     pub fn len(&self) -> usize {
-        self.entries.len()
+        self.num_entries
     }
 
     /// Whether the table has no entries.
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.entries.is_empty()
+        self.num_entries == 0
+    }
+
+    /// Whether this table uses on-demand block decode (v2+ with retained payload).
+    #[must_use]
+    pub fn is_lazy(&self) -> bool {
+        !self.payload.is_empty() && !self.index.is_empty()
+    }
+
+    /// Append range tombstones visible at `snapshot` into `out` (no full materialize).
+    pub fn collect_range_tombstones(
+        &self,
+        snapshot: SequenceNumber,
+        out: &mut Vec<crate::merge::RangeTombstone>,
+    ) {
+        for (ikey, end) in &self.range_tombstones {
+            if ikey.sequence > snapshot {
+                continue;
+            }
+            out.push(crate::merge::RangeTombstone {
+                start: ikey.user_key.clone(),
+                end: end.clone(),
+                sequence: ikey.sequence,
+            });
+        }
+    }
+
+    /// Point version at `user_key` ≤ `snapshot`, ignoring range tombstones.
+    ///
+    /// Loads one data block for lazy tables. Returns `(sequence, lookup)`.
+    #[must_use]
+    pub fn point_at(
+        &self,
+        user_key: &[u8],
+        snapshot: SequenceNumber,
+    ) -> Option<(SequenceNumber, Lookup)> {
+        if let (Some(lo), Some(hi)) = (
+            self.smallest_user_key.as_deref(),
+            self.largest_user_key.as_deref(),
+        ) {
+            if user_key < lo || user_key > hi {
+                // Still may need range del from start < lo covering key — handled
+                // by caller collecting tombstones. Point cannot be here if key > hi.
+                if user_key < lo {
+                    return None;
+                }
+                if user_key > hi {
+                    return None;
+                }
+            }
+        }
+        if !self.bloom.may_contain(user_key) && !self.has_range_tombstones() {
+            return None;
+        }
+        // Bloom miss: still probe if only checking points with active bloom.
+        if !self.bloom.may_contain(user_key) {
+            return None;
+        }
+        self.point_in_blocks(user_key, snapshot)
     }
 
     /// Highest sequence number present in this file.
@@ -131,24 +233,247 @@ impl SstTable {
         self.index.len()
     }
 
+    /// Whether the on-disk / rebuilt bloom is active.
+    #[must_use]
+    pub fn has_bloom(&self) -> bool {
+        self.bloom.is_active()
+    }
+
+    /// Smallest user key, if any.
+    #[must_use]
+    pub fn smallest_user_key(&self) -> Option<&[u8]> {
+        self.smallest_user_key.as_deref()
+    }
+
+    /// Largest user key, if any.
+    #[must_use]
+    pub fn largest_user_key(&self) -> Option<&[u8]> {
+        self.largest_user_key.as_deref()
+    }
+
+    /// Fast negative: key cannot be in this file (bounds and/or bloom).
+    #[must_use]
+    pub fn key_may_match(&self, user_key: &[u8]) -> bool {
+        if let (Some(lo), Some(hi)) = (
+            self.smallest_user_key.as_deref(),
+            self.largest_user_key.as_deref(),
+        ) {
+            if user_key < lo || user_key > hi {
+                return false;
+            }
+        }
+        self.bloom.may_contain(user_key)
+    }
+
     /// Point lookup at `snapshot` (same semantics as [`MemTable::get`]).
+    ///
+    /// Lazy tables load **one** data block (plus open-time range tombstones).
     #[must_use]
     pub fn get(&self, user_key: &[u8], snapshot: SequenceNumber) -> Lookup {
-        let mut i = self.lower_bound_user_key(user_key);
-        while i < self.entries.len() {
-            let (ikey, value) = &self.entries[i];
+        // Bounds prune only (bloom can miss keys covered solely by a range tombstone
+        // whose start key differs from `user_key`).
+        if let (Some(lo), Some(hi)) = (
+            self.smallest_user_key.as_deref(),
+            self.largest_user_key.as_deref(),
+        ) {
+            // Range tombstone end may extend past largest point key; still probe if
+            // any range del could cover (start <= key). Conservative: skip only
+            // when key < lo (no start can cover) — ends may be > hi.
+            if user_key < lo {
+                return Lookup::NotFound;
+            }
+            let _ = hi;
+        }
+
+        let mut point = Lookup::NotFound;
+        let mut point_seq = 0u64;
+        if self.bloom.may_contain(user_key) || self.has_range_tombstones() {
+            if let Some((seq, look)) = self.point_in_blocks(user_key, snapshot) {
+                point_seq = seq;
+                point = look;
+            }
+        }
+
+        match point {
+            Lookup::Found(v) => {
+                if self.range_deleted(user_key, point_seq, snapshot) {
+                    Lookup::Deleted
+                } else {
+                    Lookup::Found(v)
+                }
+            }
+            Lookup::Deleted => Lookup::Deleted,
+            Lookup::NotFound => {
+                if self.range_deleted(user_key, 0, snapshot) {
+                    Lookup::Deleted
+                } else {
+                    Lookup::NotFound
+                }
+            }
+        }
+    }
+
+    fn has_range_tombstones(&self) -> bool {
+        !self.range_tombstones.is_empty()
+    }
+
+    /// Whether a point version is covered by a range tombstone in this file.
+    fn range_deleted(
+        &self,
+        user_key: &[u8],
+        point_seq: SequenceNumber,
+        snapshot: SequenceNumber,
+    ) -> bool {
+        for (ikey, end) in &self.range_tombstones {
+            if ikey.sequence > snapshot {
+                continue;
+            }
+            if ikey.sequence > point_seq
+                && user_key >= ikey.user_key.as_ref()
+                && user_key < end.as_ref()
+            {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Point version at `user_key` ≤ `snapshot` from data blocks (lazy or materialised).
+    ///
+    /// A single user key can span **multiple** data blocks when the flush writer
+    /// splits mid-key (large multi-version memtables). We must scan every block
+    /// that may hold versions of `user_key` and take the newest visible one —
+    /// looking only at `block_for_user_key` (last block with `first_key` ≤ user)
+    /// returns a stale older version when newer versions sit in a prior block.
+    fn point_in_blocks(
+        &self,
+        user_key: &[u8],
+        snapshot: SequenceNumber,
+    ) -> Option<(SequenceNumber, Lookup)> {
+        if !self.is_lazy() {
+            let block = self.materialize_entries().ok()?;
+            return Self::best_point_in_entry_slice(&block, user_key, snapshot);
+        }
+        if self.index.is_empty() {
+            return None;
+        }
+        let mut best: Option<(SequenceNumber, Lookup)> = None;
+        for bi in 0..self.index.len() {
+            let first = self.index[bi].first_user_key.as_ref();
+            if first > user_key {
+                break;
+            }
+            // Entire block is strictly before `user_key` if the next block starts
+            // before `user_key` as well (sorted index).
+            if bi + 1 < self.index.len()
+                && self.index[bi + 1].first_user_key.as_ref() < user_key
+            {
+                continue;
+            }
+            let Ok(block) = self.decode_block(bi) else {
+                continue;
+            };
+            if let Some((seq, look)) = Self::best_point_in_entry_slice(&block, user_key, snapshot)
+            {
+                if best.as_ref().is_none_or(|(s, _)| seq > *s) {
+                    best = Some((seq, look));
+                }
+            }
+        }
+        best
+    }
+
+    /// Newest point version of `user_key` with `sequence <= snapshot` in a sorted entry slice.
+    fn best_point_in_entry_slice(
+        block: &[(InternalKey, Bytes)],
+        user_key: &[u8],
+        snapshot: SequenceNumber,
+    ) -> Option<(SequenceNumber, Lookup)> {
+        let mut i = block.partition_point(|(ikey, _)| ikey.user_key.as_ref() < user_key);
+        let mut best: Option<(SequenceNumber, Lookup)> = None;
+        while i < block.len() {
+            let (ikey, value) = &block[i];
             if ikey.user_key.as_ref() != user_key {
                 break;
             }
+            if ikey.kind == ValueType::RangeDeletion {
+                i += 1;
+                continue;
+            }
             if ikey.sequence <= snapshot {
-                return match ikey.kind {
-                    ValueType::Deletion => Lookup::Deleted,
-                    ValueType::Value => Lookup::Found(value.clone()),
-                };
+                // Entries are newest-first for a user key; first hit is best in one block.
+                // Still scan if we ever change order — keep max seq for safety.
+                if best.as_ref().is_none_or(|(s, _)| ikey.sequence > *s) {
+                    let look = match ikey.kind {
+                        ValueType::Deletion => Lookup::Deleted,
+                        ValueType::Value => Lookup::Found(value.clone()),
+                        ValueType::RangeDeletion => Lookup::NotFound,
+                    };
+                    best = Some((ikey.sequence, look));
+                }
             }
             i += 1;
         }
-        Lookup::NotFound
+        best
+    }
+
+    /// Decode one data block by index (v2+). Verified at open; re-decode is infallible
+    /// unless payload was corrupted in RAM — then returns `Err`.
+    ///
+    /// # Errors
+    /// Corrupt block payload or invalid index.
+    pub fn decode_block(&self, block_idx: usize) -> Result<Vec<(InternalKey, Bytes)>> {
+        let h = self.index.get(block_idx).ok_or_else(|| {
+            CoreError::Internal(format!(
+                "SST block index {block_idx} out of range in {}",
+                self.path.display()
+            ))
+        })?;
+        if self.payload.is_empty() {
+            return Err(CoreError::Internal(
+                "decode_block on v1/eager SST without payload".into(),
+            ));
+        }
+        decode_block_from_payload(&self.payload, h, self.compressed_blocks, &self.path)
+    }
+
+    /// Materialize all entries (cached). Used by compaction and full scans.
+    ///
+    /// # Errors
+    /// Block decode failure.
+    pub fn materialize_entries(&self) -> Result<Vec<(InternalKey, Bytes)>> {
+        {
+            let g = self.entries.lock();
+            if let Some(ref e) = *g {
+                return Ok(e.clone());
+            }
+        }
+        let all = if self.index.is_empty() {
+            // v1 should already have cache filled at open.
+            return Err(CoreError::Internal(format!(
+                "SST {} has no entries cache and no index",
+                self.path.display()
+            )));
+        } else {
+            let mut out = Vec::with_capacity(self.num_entries);
+            for i in 0..self.index.len() {
+                out.extend(self.decode_block(i)?);
+            }
+            if out.len() != self.num_entries {
+                return Err(CoreError::Internal(format!(
+                    "SST entry count mismatch on materialize: header {}, got {} in {}",
+                    self.num_entries,
+                    out.len(),
+                    self.path.display()
+                )));
+            }
+            out
+        };
+        let mut g = self.entries.lock();
+        if g.is_none() {
+            *g = Some(all.clone());
+        }
+        Ok(g.as_ref().map_or(all, Clone::clone))
     }
 
     /// Which index block would contain `user_key` (for tests / future lazy load).
@@ -223,7 +548,9 @@ impl SstTable {
         let version = c.read_u32()?;
         match version {
             SST_VERSION_V1 => Self::decode_v1(path, payload.len(), &mut c),
-            SST_VERSION => Self::decode_v2(path, payload, &mut c),
+            SST_VERSION_V2 => Self::decode_v2_or_v3(path, payload, &mut c, false, false),
+            SST_VERSION_V3 => Self::decode_v2_or_v3(path, payload, &mut c, true, false),
+            SST_VERSION => Self::decode_v2_or_v3(path, payload, &mut c, true, true),
             other => Err(CoreError::Internal(format!(
                 "unsupported SST version {other} in {}",
                 path.display()
@@ -256,15 +583,25 @@ impl SstTable {
             )));
         }
         ensure_sorted(&entries, path)?;
-        Ok(Self {
-            path: path.to_path_buf(),
+        Ok(Self::from_eager_entries(
+            path.to_path_buf(),
             entries,
             max_sequence,
-            index: Vec::new(),
-        })
+            Vec::new(),
+            BloomFilter::always_true(),
+            Arc::from([]),
+            false,
+        ))
     }
 
-    fn decode_v2(path: &Path, buf: &[u8], c: &mut Cursor<'_>) -> Result<Self> {
+    #[allow(clippy::too_many_lines)] // single open/decode path; split would obscure format steps
+    fn decode_v2_or_v3(
+        path: &Path,
+        buf: &[u8],
+        c: &mut Cursor<'_>,
+        expect_bloom: bool,
+        compressed_blocks: bool,
+    ) -> Result<Self> {
         let n = usize::try_from(c.read_u64()?).map_err(|_| {
             CoreError::Internal("SST entry count does not fit usize".into())
         })?;
@@ -299,62 +636,292 @@ impl SstTable {
                 first_user_key,
             });
         }
-        if !ic.is_empty() {
-            return Err(CoreError::Internal(format!(
-                "trailing index bytes in SST {}",
-                path.display()
-            )));
-        }
 
-        let mut entries = Vec::with_capacity(n);
+        let bloom = if expect_bloom {
+            let rest = &buf[data_end + (ic.pos)..];
+            BloomFilter::decode(rest).map_err(|e| {
+                CoreError::Internal(format!("SST bloom in {}: {e}", path.display()))
+            })?
+        } else {
+            if !ic.is_empty() {
+                return Err(CoreError::Internal(format!(
+                    "trailing index bytes in SST {}",
+                    path.display()
+                )));
+            }
+            BloomFilter::always_true()
+        };
+
+        // Verify blocks + collect range tombstones and key bounds without retaining
+        // every point entry (lazy steady-state memory).
+        let mut range_tombstones = Vec::new();
+        let mut smallest_user_key: Option<Bytes> = None;
+        let mut largest_user_key: Option<Bytes> = None;
+        let mut decoded_n = 0usize;
+        let mut last_ikey: Option<InternalKey> = None;
         for h in &index {
-            let start = usize::try_from(h.offset).map_err(|_| {
-                CoreError::Internal("block offset overflow".into())
-            })?;
-            let len = h.length as usize;
-            let end = start
-                .checked_add(len)
-                .ok_or_else(|| CoreError::Internal("block length overflow".into()))?;
-            if end > buf.len() {
-                return Err(CoreError::Internal("block past EOF".into()));
-            }
-            let mut bc = Cursor::new(&buf[start..end]);
-            while !bc.is_empty() {
-                let (ikey, value) = read_entry(&mut bc)?;
-                entries.push((ikey, value));
+            let block = decode_block_from_payload(buf, h, compressed_blocks, path)?;
+            for (ikey, value) in block {
+                if let Some(ref prev) = last_ikey {
+                    if prev > &ikey {
+                        return Err(CoreError::Internal(format!(
+                            "SST entries not sorted in {}",
+                            path.display()
+                        )));
+                    }
+                }
+                last_ikey = Some(ikey.clone());
+                decoded_n += 1;
+                let uk = ikey.user_key.clone();
+                if smallest_user_key.is_none() {
+                    smallest_user_key = Some(uk.clone());
+                }
+                largest_user_key = Some(uk);
+                if ikey.kind == ValueType::RangeDeletion {
+                    range_tombstones.push((ikey, value));
+                }
             }
         }
 
-        if entries.len() != n {
+        if decoded_n != n {
             return Err(CoreError::Internal(format!(
-                "SST entry count mismatch: header {n}, decoded {}",
-                entries.len()
+                "SST entry count mismatch: header {n}, decoded {decoded_n}"
             )));
         }
-        ensure_sorted(&entries, path)?;
+
+        // Rebuild bloom for v2 files that lack an on-disk filter (needs all keys).
+        let bloom = if bloom.is_active() {
+            bloom
+        } else {
+            // One full pass for bloom rebuild only (v2 legacy).
+            let mut all = Vec::with_capacity(n);
+            for h in &index {
+                all.extend(decode_block_from_payload(buf, h, compressed_blocks, path)?);
+            }
+            rebuild_bloom(&all)
+        };
+
+        let payload: Arc<[u8]> = Arc::from(buf.to_vec().into_boxed_slice());
         Ok(Self {
             path: path.to_path_buf(),
-            entries,
+            payload,
+            compressed_blocks,
+            // Lazy: do not retain full entry vec after open verification.
+            entries: Arc::new(Mutex::new(None)),
+            range_tombstones,
+            num_entries: n,
             max_sequence,
             index,
+            bloom,
+            smallest_user_key,
+            largest_user_key,
         })
     }
 
-    fn lower_bound_user_key(&self, user_key: &[u8]) -> usize {
-        self.entries
-            .partition_point(|(ikey, _)| ikey.user_key.as_ref() < user_key)
+    fn from_eager_entries(
+        path: PathBuf,
+        entries: Vec<(InternalKey, Bytes)>,
+        max_sequence: SequenceNumber,
+        index: Vec<BlockHandle>,
+        bloom: BloomFilter,
+        payload: Arc<[u8]>,
+        compressed_blocks: bool,
+    ) -> Self {
+        let (smallest_user_key, largest_user_key) = user_key_bounds(&entries);
+        let range_tombstones: Vec<_> = entries
+            .iter()
+            .filter(|(k, _)| k.kind == ValueType::RangeDeletion)
+            .cloned()
+            .collect();
+        let num_entries = entries.len();
+        Self {
+            path,
+            payload,
+            compressed_blocks,
+            entries: Arc::new(Mutex::new(Some(entries))),
+            range_tombstones,
+            num_entries,
+            max_sequence,
+            index,
+            bloom,
+            smallest_user_key,
+            largest_user_key,
+        }
     }
 
-    /// All internal versions in sorted order.
-    pub fn iter_internal(&self) -> impl Iterator<Item = (&InternalKey, &Bytes)> + '_ {
-        self.entries.iter().map(|(k, v)| (k, v))
+    /// All internal versions in sorted order (materializes lazy tables).
+    ///
+    /// # Panics
+    /// Does not panic; corrupt re-decode yields empty iterator after logging via empty vec.
+    pub fn iter_internal(&self) -> impl Iterator<Item = (InternalKey, Bytes)> + '_ {
+        self.entries_cloned().into_iter()
     }
 
-    /// Clone all entries (for compaction merge).
+    /// Clone all entries (for compaction merge). Materializes lazy tables.
     #[must_use]
     pub fn entries_cloned(&self) -> Vec<(InternalKey, Bytes)> {
-        self.entries.clone()
+        self.materialize_entries().unwrap_or_default()
     }
+
+    /// Clone only internal entries whose user key falls in `[start, end)`.
+    ///
+    /// Lazy tables decode **only overlapping index blocks** (plus all range
+    /// tombstones, which may start outside the bound but cover keys inside).
+    #[must_use]
+    pub fn entries_in_user_range(
+        &self,
+        start: Bound<&[u8]>,
+        end: Bound<&[u8]>,
+    ) -> Vec<(InternalKey, Bytes)> {
+        // Fast reject when the whole file is outside the range.
+        if let (Some(lo), Some(hi)) = (
+            self.smallest_user_key.as_deref(),
+            self.largest_user_key.as_deref(),
+        ) {
+            let file_before_end = match end {
+                Bound::Unbounded => true,
+                Bound::Included(e) => lo <= e,
+                Bound::Excluded(e) => lo < e,
+            };
+            let file_after_start = match start {
+                Bound::Unbounded => true,
+                Bound::Included(s) => hi >= s,
+                Bound::Excluded(s) => hi > s,
+            };
+            if !file_before_end || !file_after_start {
+                return Vec::new();
+            }
+        }
+
+        if self.is_lazy() {
+            let mut out = Vec::new();
+            // Always include range tombstones (coverage may extend into the range).
+            for (k, v) in &self.range_tombstones {
+                out.push((k.clone(), v.clone()));
+            }
+            for bi in self.blocks_overlapping_range(start, end) {
+                if let Ok(block) = self.decode_block(bi) {
+                    for (k, v) in block {
+                        if k.kind == ValueType::RangeDeletion {
+                            continue; // already added
+                        }
+                        if user_key_in_range(k.user_key.as_ref(), start, end) {
+                            out.push((k, v));
+                        }
+                    }
+                }
+            }
+            out.sort_by(|a, b| a.0.cmp(&b.0));
+            return out;
+        }
+
+        let entries = self.entries_cloned();
+        entries
+            .into_iter()
+            .filter(|(ikey, _)| {
+                ikey.kind == ValueType::RangeDeletion
+                    || user_key_in_range(ikey.user_key.as_ref(), start, end)
+            })
+            .collect()
+    }
+
+    /// Index blocks that may contain point keys in `[start, end)`.
+    ///
+    /// Conservative: block `i` covers keys from `first_user_key[i]` up to
+    /// `first_user_key[i+1]` (exclusive), or +∞ for the last block.
+    fn blocks_overlapping_range(&self, start: Bound<&[u8]>, end: Bound<&[u8]>) -> Vec<usize> {
+        if self.index.is_empty() {
+            return Vec::new();
+        }
+        let mut out = Vec::new();
+        for (i, h) in self.index.iter().enumerate() {
+            let block_lo = h.first_user_key.as_ref();
+            let block_hi_excl = self.index.get(i + 1).map(|n| n.first_user_key.as_ref());
+            // block range [block_lo, block_hi_excl) intersects [start, end)?
+            let ends_after_start = match start {
+                Bound::Unbounded => true,
+                Bound::Included(s) => block_hi_excl.is_none_or(|hi| hi > s),
+                Bound::Excluded(s) => block_hi_excl.is_none_or(|hi| hi > s),
+            };
+            let starts_before_end = match end {
+                Bound::Unbounded => true,
+                Bound::Included(e) => block_lo <= e,
+                Bound::Excluded(e) => block_lo < e,
+            };
+            if ends_after_start && starts_before_end {
+                out.push(i);
+            }
+        }
+        if out.is_empty() {
+            (0..self.index.len()).collect()
+        } else {
+            out
+        }
+    }
+}
+
+fn decode_block_from_payload(
+    buf: &[u8],
+    h: &BlockHandle,
+    compressed_blocks: bool,
+    path: &Path,
+) -> Result<Vec<(InternalKey, Bytes)>> {
+    let start = usize::try_from(h.offset).map_err(|_| {
+        CoreError::Internal("block offset overflow".into())
+    })?;
+    let len = h.length as usize;
+    let end = start
+        .checked_add(len)
+        .ok_or_else(|| CoreError::Internal("block length overflow".into()))?;
+    if end > buf.len() {
+        return Err(CoreError::Internal(format!(
+            "block past EOF in {}",
+            path.display()
+        )));
+    }
+    let raw = &buf[start..end];
+    let plain: Vec<u8> = if compressed_blocks {
+        lz4_flex::decompress_size_prepended(raw).map_err(|e| {
+            CoreError::Internal(format!(
+                "SST lz4 decompress failed in {}: {e}",
+                path.display()
+            ))
+        })?
+    } else {
+        raw.to_vec()
+    };
+    let mut bc = Cursor::new(&plain);
+    let mut entries = Vec::new();
+    while !bc.is_empty() {
+        entries.push(read_entry(&mut bc)?);
+    }
+    Ok(entries)
+}
+
+fn user_key_bounds(entries: &[(InternalKey, Bytes)]) -> (Option<Bytes>, Option<Bytes>) {
+    if entries.is_empty() {
+        return (None, None);
+    }
+    let first = entries[0].0.user_key.clone();
+    let last = entries[entries.len() - 1].0.user_key.clone();
+    (Some(first), Some(last))
+}
+
+fn rebuild_bloom(entries: &[(InternalKey, Bytes)]) -> BloomFilter {
+    if entries.is_empty() {
+        return BloomFilter::always_true();
+    }
+    // Distinct user keys ≈ entries (upper bound is fine for sizing).
+    let mut bloom = BloomFilter::with_capacity(entries.len(), DEFAULT_BITS_PER_KEY);
+    let mut last: Option<&[u8]> = None;
+    for (ikey, _) in entries {
+        let uk = ikey.user_key.as_ref();
+        if last != Some(uk) {
+            bloom.insert(uk);
+            last = Some(uk);
+        }
+    }
+    bloom
 }
 
 fn ensure_sorted(entries: &[(InternalKey, Bytes)], path: &Path) -> Result<()> {
@@ -425,7 +992,7 @@ pub fn write_sst_entries(
     write_sst_entries_on(&StdEnv, path, entries)
 }
 
-/// Write SST entries via `env` (fsyncs before return).
+/// Write SST entries via `env` (fsyncs before return). Writes **v4** (lz4 blocks + bloom).
 ///
 /// # Errors
 /// I/O failures.
@@ -443,11 +1010,12 @@ pub fn write_sst_entries_on(
         max_sequence = max_sequence.max(ikey.sequence);
     }
 
+    let bloom = rebuild_bloom(&sorted);
+
     let mut data = Vec::new();
     let mut index: Vec<BlockHandle> = Vec::new();
     let mut block_buf = Vec::new();
     let mut block_first_user: Option<Bytes> = None;
-    let data_base = 0u64; // relative; real offset = header_len + relative
 
     let flush_block = |data: &mut Vec<u8>,
                        block_buf: &mut Vec<u8>,
@@ -457,14 +1025,15 @@ pub fn write_sst_entries_on(
         if block_buf.is_empty() {
             return Ok(());
         }
+        let compressed = lz4_flex::compress_prepend_size(block_buf);
         let offset = data.len() as u64;
-        let length = u32::try_from(block_buf.len()).map_err(|_| {
+        let length = u32::try_from(compressed.len()).map_err(|_| {
             CoreError::Internal("SST block too large".into())
         })?;
         let first = block_first_user
             .take()
             .ok_or_else(|| CoreError::Internal("block missing first key".into()))?;
-        data.extend_from_slice(block_buf);
+        data.extend_from_slice(&compressed);
         block_buf.clear();
         index.push(BlockHandle {
             offset,
@@ -474,15 +1043,26 @@ pub fn write_sst_entries_on(
         Ok(())
     };
 
+    // Prefer not to split a user key across blocks (keeps point_at to one block).
+    // If a single key's versions exceed BLOCK_TARGET, we still spill mid-key and
+    // `point_in_blocks` scans every block that may hold that key.
+    let mut block_last_user: Option<Bytes> = None;
     for (ikey, value) in &sorted {
         let enc = encode_entry(ikey, value)?;
-        if !block_buf.is_empty() && block_buf.len() + enc.len() > BLOCK_TARGET {
+        let same_user = block_last_user
+            .as_ref()
+            .is_some_and(|u| u.as_ref() == ikey.user_key.as_ref());
+        if !block_buf.is_empty()
+            && block_buf.len() + enc.len() > BLOCK_TARGET
+            && !same_user
+        {
             flush_block(&mut data, &mut block_buf, &mut block_first_user, &mut index)?;
         }
         if block_buf.is_empty() {
             block_first_user = Some(ikey.user_key.clone());
         }
         block_buf.extend_from_slice(&enc);
+        block_last_user = Some(ikey.user_key.clone());
     }
     flush_block(&mut data, &mut block_buf, &mut block_first_user, &mut index)?;
 
@@ -505,7 +1085,6 @@ pub fn write_sst_entries_on(
     body.extend_from_slice(&data_len.to_le_bytes());
 
     let header_len = body.len() as u64;
-    // Fix block offsets to absolute file offsets.
     for h in &mut index {
         h.offset += header_len;
     }
@@ -521,8 +1100,8 @@ pub fn write_sst_entries_on(
         body.extend_from_slice(&h.first_user_key);
     }
 
-    let _ = data_base;
-    // Trailing CRC32C over the whole SST body (F3: no prior integrity check).
+    body.extend_from_slice(&bloom.encode());
+
     let file_crc = crc32c::crc32c(&body);
     body.extend_from_slice(&file_crc.to_le_bytes());
     {
@@ -602,13 +1181,52 @@ mod tests {
         assert_eq!(table.len(), 3);
         assert_eq!(table.max_sequence(), 3);
         assert!(table.block_count() >= 1);
+        assert!(table.has_bloom(), "v3 writer embeds bloom");
+        assert!(
+            table.is_lazy(),
+            "v4 SST must retain payload for lazy block load"
+        );
+        // Point get must work without full materialize cache.
+        assert!(table.entries.lock().is_none());
         assert_eq!(table.get(b"b", 10), Lookup::Found(Bytes::from_static(b"vb")));
+        assert!(
+            table.entries.lock().is_none(),
+            "point get must not force full materialize"
+        );
         assert_eq!(table.get(b"a", 10), Lookup::Deleted);
         assert_eq!(table.get(b"a", 1), Lookup::Found(Bytes::from_static(b"va")));
+        assert!(!table.key_may_match(b"zzz-absent-key-xxxxxxxx"));
 
         let reopened = SstTable::open(&path).unwrap();
         assert_eq!(reopened.get(b"b", 10), Lookup::Found(Bytes::from_static(b"vb")));
         assert!(reopened.block_for_user_key(b"b").is_some());
+        assert!(reopened.has_bloom());
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn entries_in_user_range_prunes() {
+        let mut entries = Vec::new();
+        for i in 0..20u32 {
+            let k = format!("k{i:02}");
+            entries.push((
+                InternalKey::new(
+                    Bytes::copy_from_slice(k.as_bytes()),
+                    u64::from(i) + 1,
+                    ValueType::Value,
+                ),
+                Bytes::from_static(b"v"),
+            ));
+        }
+        let path = temp_path();
+        let table = write_sst_entries(&path, &entries).unwrap();
+        let mid = table.entries_in_user_range(
+            Bound::Included(b"k05".as_ref()),
+            Bound::Excluded(b"k10".as_ref()),
+        );
+        assert_eq!(mid.len(), 5);
+        assert_eq!(mid[0].0.user_key.as_ref(), b"k05");
+        assert_eq!(mid[4].0.user_key.as_ref(), b"k09");
         let _ = std::fs::remove_file(&path);
     }
 

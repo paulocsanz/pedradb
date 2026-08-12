@@ -4,19 +4,24 @@
 > item is closed, or a new open question emerges. The authoritative source for
 > "what's done, what's next, what's unresolved."
 
-Last updated: 2026-08-11
+Last updated: 2026-08-12
 
 ---
 
 ## Current state at a glance
 
 ```
- pedradb-core    WAL ✅  | MemTable ✅  | Db ✅  | TX ✅  | SST ✅  | range ✅  | compact ✅  | apply_batch ✅
- pedradb-sim     fault inject (P2.1) ✅
+ pedradb-core    WAL ✅  | MemTable ✅  | Db ✅  | TX ✅  | SST v3+Bloom ✅  | range/limit ✅
+                 compact ✅  | apply_batch ✅  | checkpoint ✅  | stats/verify ✅
+                 vlog+GC ✅  | group commit / dual-mem ✅
+ pedradb-sim     FailingEnv / RecordingEnv ✅
  pedradb-oracle  model oracle + optional live-rocksdb ✅
  pedradb-cli     version + wal + demo
 
- P0 + P1 + P2 complete (P2.2 research opts deferred until measured)
+ RFC-0009 done · RFC-0014 done (P0–P2) · RFC-0015 done
+ RFC-0016 P0 done (vlog GC + stats + soak; P1.4/P2.1–2 open)
+ RFC-0017 draft (Montanha FDB-class)
+ Vision: docs/node-primitive-and-unified-platform.md (SoR + projections + multi-leader)
 ```
 
 ---
@@ -29,16 +34,26 @@ Last updated: 2026-08-11
 | 1 | InternalKey + MemTable | ✅ done | `InternalKey` struct + Ord/encode, MemTable get/put/delete/range @ snapshot | — |
 | 2 | WAL recover → MemTable + basic engine get/put | ✅ done | WriteRecord v1, `Db::open/put/get/delete`, reopen | Slice 1 |
 | 3 | Transaction manager + API | ✅ done | begin/commit multi-key ACID (single-writer) | Slice 2 |
-| 4 | SST + flush | ✅ done | Simple SST v1 + Db::flush + get merge | Slice 2–3 |
-| 5 | Get + range scan (merged) | ✅ done | `Db::range` + `merge::visible_range` | Slice 4 |
-| 6 | Compaction | ✅ done | `Db::compact` whole-merge | Slice 4 |
-| 7 | Version GC | 🔲 | MVCC reclaim | Slices 4–6 |
-| 8 | Deterministic simulation | ✅ base / 🔲 sweeps | FaultEnv + **Env/FailingEnv** ([RFC-0011](rfc/0011-env-fault-injection.md) P0 done; Nth-op/seed sweeps P1) | P2.1 + RFC-0011 |
-| 9 | Cross-validation harness | ✅ done | pedradb-oracle model (+ live-rocksdb feature) | P2.4 |
+| 4 | SST + flush | ✅ done | SST v3 blocks + bloom + Db::flush | Slice 2–3 |
+| 5 | Get + range scan (merged) | ✅ done | `range` / `range_limited` + prune | Slice 4 |
+| 6 | Compaction | ✅ done | whole-merge; count **or bytes** auto trigger | Slice 4 |
+| 7 | Version GC | ✅ API | `CompactGcOptions` / `compact_with` (auto-compact keeps history) | — |
+| 8 | Deterministic simulation | ✅ base / 🔲 sweeps | Env/FailingEnv + campaigns | continuous hunt |
+| 9 | Cross-validation harness | ✅ done | pedradb-oracle model (+ live-rocksdb feature) | — |
+| 10 | Ops surfaces (RFC-0014 P0) | ✅ done | checkpoint, stats, verify_checksums | — |
+| 11 | Streaming range / lazy blocks (RFC-0014 P1) | ✅ done | scan + lazy SST blocks + levels + lz4 | — |
+| 12 | Audit correctness fixes (RFC-0015) | ✅ done | fence, sync_dir, Env seams, compact stats, deny CI | — |
 
-**Next action:** RFC-0009 P1 (block SST / GC) **and** RFC-0010 P1 (single-region Raft) in parallel.  
-**RFCs:** [0009 RocksDB-class](rfc/0009-rocksdb-class-engine.md) · [0010 DBs on top](rfc/0010-dbs-on-top.md)  
-**Research vs P0:** no hard conflicts — see [`conversation-learnings-and-short-term-alignment.md`](conversation-learnings-and-short-term-alignment.md).
+**Next action:** [RFC-0019](rfc/0019-local-primitive-for-platform-and-scylla-need.md) **P0** (CAS + seq pin + change feed) so L1 is ready for Scylla-need; and/or [RFC-0016](rfc/0016-pedradb-production-robustness.md) P1.4/P2.1; and/or [RFC-0017](rfc/0017-montanha-fdb-class-substrate.md) **P0**.
+
+**Platform north star:** Postgres-class face that replaces **Scylla + ClickHouse + NATS need** in one system  
+([`node-primitive-and-unified-platform.md`](node-primitive-and-unified-platform.md) §1).  
+Kernel = Pedra; horizontal = Montanha; analytics = OLAP RO; streams = layer; CP scale = scylla-need path.
+
+**Perf ceiling + sled layer:** living plan in
+[`performance-ceiling-option-preservation-and-sled-layer.md`](performance-ceiling-option-preservation-and-sled-layer.md)
+(K1–K3 kernel phases, L0–L3 `pedra-map` / sled-compat; anti-corner checklist F1–X6).  
+**RFCs:** [0009](rfc/0009-rocksdb-class-engine.md) · [0010](rfc/0010-dbs-on-top.md) · [0014 maturity](rfc/0014-rocks-pebble-redwood-maturity.md) · [0015 audit](rfc/0015-audit-pedradb-correctness-fixes.md) · [0016 robustness](rfc/0016-pedradb-production-robustness.md) · [0017 Montanha FDB-class](rfc/0017-montanha-fdb-class-substrate.md)
 
 ---
 
@@ -62,11 +77,16 @@ slice can be implemented.
 
 **Likely answer:** (b) as primary + (c) as safety valve. Needs benchmarking.
 
-### 2.2 Value-log GC strategy (Slice 7)
+### 2.2 Value-log GC strategy (Slice 7) — **resolved for P0**
 
-**Question:** How does PedraDB garbage-collect the WiscKey value log?
+**Answer (RFC-0016 P0.1):** Rewrite-compact via `Db::compact_vlog`: collect live
+VLG1 refs from mem/imm/SSTs → write `VALUES.vlog.new` → remap SST/mem pointers →
+MANIFEST + adopt marker → promote. Threshold remains **opt-in off by default**.
 
-**Context:** Values are written append-only. When a key is overwritten or
+**Open residual:** automatic GC scheduling / background worker; tighter
+integration with `latest_only` SST GC (tombstone retention across levels).
+
+**Context (historical):** Values are written append-only. When a key is overwritten or
 deleted, the old value becomes garbage. The value log needs periodic
 compaction to reclaim space.
 
@@ -241,10 +261,12 @@ new evidence.
 | [`distribution-deep-research.md`](distribution-deep-research.md) | Protocol-level research: Percolator, Parallel Commits, PD, TSO, Raft libs |
 | [`scylladb-architecture.md`](scylladb-architecture.md) | How Scylla operates (AP multi-master, Seastar, tunable CL) vs PedraDB |
 | [`scylla-need-replacement.md`](scylla-need-replacement.md) | Replace Scylla *need* (routes, overlay, orchestrator) — not CQL drop-in |
+| [`htap-storage-primitives-and-research.md`](htap-storage-primitives-and-research.md) | **Canonical 2026-08-12:** HTAP triangle, storage primitives, LASER/HaSiS/PolarDB/ByteHTAP/PIM; primaries in `references/*htap*` |
 | [`tidb-architecture.md`](tidb-architecture.md) | TiDB = MySQL SQL layer on TiKV+PD+TiFlash; validates PedraDB layers |
 | [`tidb-vs-postgres-mysql.md`](tidb-vs-postgres-mysql.md) | TiDB vs Postgres vs MySQL monoliths — choice table + PedraDB quadrant |
 | [`sql-lessons-for-the-grail.md`](sql-lessons-for-the-grail.md) | Postgres/MySQL + Aurora/Neon (log-is-the-DB), Vitess/Citus (proxy+shard), Spanner (TrueTime) — cross-cutting lessons, Rung 1.5, WAL export Must |
-| [`object-storage-as-substrate-possibility.md`](object-storage-as-substrate-possibility.md) | SlateDB/WarpStream/turbopuffer/Tigris; kernel exclusion confirmed; Rung 1.5 WAL→object open |
+| [`object-storage-as-substrate-possibility.md`](object-storage-as-substrate-possibility.md) | SlateDB/WarpStream/turbopuffer; **scope superseded** — Tigris data-plane claim corrected; SST “not built” stale |
+| [`sqlite-object-storage-agents-and-pedradb.md`](sqlite-object-storage-agents-and-pedradb.md) | **Canonical 2026-08-12:** SQLite-VFS + object/block-on-object (mercado, não tese de agente); Pedra slots + deep gaps; primaries in `references/sqlite-object-storage-primaries.md` |
 | [`conversation-learnings-and-short-term-alignment.md`](conversation-learnings-and-short-term-alignment.md) | All conversation learnings + **conflict matrix vs P0** |
 | [`nats-need-replacement.md`](nats-need-replacement.md) | JetStream-class stream on PedraDB+Raft vs Core NATS; Jepsen 2.12.1 findings |
 | [`usage.md`](usage.md) | **P0 user docs**: open/TX, durability, secondary-index sketch |
@@ -262,6 +284,7 @@ new evidence.
 | [`plug-map-replace-incumbents.md`](plug-map-replace-incumbents.md) | Where to plug: etcd, Patroni, SQLite, PG, TiKV, TiDB, Scylla |
 | [`upsides-only.md`](upsides-only.md) | Upsides only: multi-writer regions, plugs, platform |
 | [`plan-limitations-and-failure-modes.md`](plan-limitations-and-failure-modes.md) | Where the grail plan can fail later (perf, security, …) |
+| [`performance-ceiling-option-preservation-and-sled-layer.md`](performance-ceiling-option-preservation-and-sled-layer.md) | Perf ceiling vs peers; anti-corner checklist; B-tree reads without dual store; **pedra-map / sled-compat layer** plan |
 | [`switch-justification-bar.md`](switch-justification-bar.md) | Guarantees + upsides needed to justify switching to us |
 | [`fdb-limitations-analysis.md`](fdb-limitations-analysis.md) | Why PedraDB solves FDB's 4 limitations |
 | [`open-items.md`](open-items.md) | This file — living status tracker |

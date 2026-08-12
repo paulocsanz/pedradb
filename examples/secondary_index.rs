@@ -37,7 +37,9 @@ fn main() -> Result<()> {
             sync: true,
             auto_flush_bytes: Some(1024 * 1024),
             auto_compact_sst_count: None,
+            auto_compact_sst_bytes: None,
             exclusive: true,
+                large_value_threshold: None,
         },
     )?;
 

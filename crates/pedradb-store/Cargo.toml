@@ -5,6 +5,10 @@ edition.workspace = true
 license.workspace = true
 description = "Montanha-Store: multi-Raft range KV on PedraDB (substrate for DCS)"
 
+[[bin]]
+name = "montanha-store-smoke"
+path = "src/bin/montanha-store-smoke.rs"
+
 [dependencies]
 pedradb-core.workspace = true
 pedradb-dcs.workspace = true

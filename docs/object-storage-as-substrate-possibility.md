@@ -1,5 +1,18 @@
 # Object storage as a substrate — a possibility, with nuances
 
+> **Superseded in scope (2026-08-12).** This note only covers
+> SlateDB / WarpStream / turbopuffer / Tigris and a kernel-vs-WAL-export
+> question. It **misses** the live SQLite-VFS + one-DB-per-agent category
+> (Rivet, Turso AgentFS/diskless, mvSQLite/Willow, Litestream VFS) and it
+> **gets Tigris’s data plane wrong** (FDB is metadata; object bytes live on
+> block stores — see Tigris’s own architecture page). SST/compaction are
+> also no longer “not built yet.”
+>
+> Canonical follow-up (primaries + code, not this summary):
+> [`sqlite-object-storage-agents-and-pedradb.md`](sqlite-object-storage-agents-and-pedradb.md).
+> The Rung-0 kernel exclusion still holds; do not use *this* file as the
+> map of the object-storage trend.
+
 > **Status: exploratory, not a decision.** `positioning.md` currently lists
 > "Object-store-first (S3)" as a permanent non-goal "until proven wrong,"
 > citing SlateDB/Tonbo as the occupants of that niche. This doc takes that
@@ -48,15 +61,16 @@ the whole thesis of this doc in one sentence: block storage's scaling model
 runs out exactly where "elastic" and "distributed" begin, and object
 storage is where the industry keeps landing instead.
 
-**Tigris (the thing "Fly has too") is not raw S3 underneath.** Its own docs
-are explicit: it's an S3-compatible API **in front of FoundationDB** —
-strict serializability, native compare-and-set, multi-object transactions,
-multi-cluster geo-replication. This is the exact "layer" pattern this whole
-research program keeps finding: Tigris is FDB wearing an S3 costume, the
-same relationship TiDB has to TiKV, or Snowflake's metadata has to FDB
-(`foundationdb-layers-and-products.md`). **Object storage as a product is
-already, quietly, often a transactional KV store underneath — the same
-substrate PedraDB is trying to be.**
+**Tigris (the thing "Fly has too") is not raw S3 underneath — and it is
+also not “FDB storing the objects.”** Its own architecture page splits
+the plane: **metadata** (location, user meta, buckets, IAM) lives in
+**FoundationDB** (strict serializability, CAS, multi-key TX, multi-cluster
+replication); **object bytes** go to regional **block stores**. The S3
+costume is the API + metadata TX, not the data plane. The layer pattern
+still holds for *metadata* (same family as Snowflake-on-FDB); do not
+round that up to “S3 products are secretly FDB.” See the 2026-08-12
+correction in
+[`sqlite-object-storage-agents-and-pedradb.md`](sqlite-object-storage-agents-and-pedradb.md).
 
 ### Why this became possible only recently
 
@@ -200,12 +214,10 @@ this doc just built: object storage holds the durable, bottomless history;
 **PedraDB — local, in-process, ACID — plays the role turbopuffer's NVMe
 cache node or Neon's Pageserver plays**, materializing the hot working set
 so reads never pay the object-storage floor. This is real (turbopuffer
-proves the shape works at production scale) but **depends on PedraDB
-having SST/compaction first** (not built yet, per `lib.rs`'s own "later"
-note) — the natural boundary for "what's hot in PedraDB locally vs what's
-pushed cold to objects" doesn't exist until there's a flush/compaction
-story to hook it into. This is a Rung 4/5-adjacent possibility, not a
-near-term one.
+proves the shape works at production scale). **SST/compaction/vlog now
+exist** (`sst/table.rs` v4, `Db::compact`, `compact_vlog`) — the 2026-08-11
+“not built yet” clause is stale. The remaining hole is an object-shaped
+media trait (PUT/GET/CAS), not the LSM itself. Still Rung 4/5-adjacent.
 
 ### Where this does not change anything
 
