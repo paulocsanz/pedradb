@@ -1,0 +1,112 @@
+{
+  "bench": "montanha-fdb-shaped-v1",
+  "host": "unknown",
+  "suite": "mini-bt,tcp",
+  "nodes": 3,
+  "payload_bytes": 64,
+  "n_default": 24,
+  "tx_keys": 8,
+  "multi_ranges": 4,
+  "threads": 4,
+  "warmup": 2,
+  "benches": [
+    {
+    "name": "D1_tcp_put",
+    "n": 24,
+    "qps": 3.419,
+    "p50_ms": 292.1854,
+    "p95_ms": 346.1055,
+    "p99_ms": 353.9933,
+    "max_ms": 353.9933,
+    "wall_s": 7.0194
+  },
+    {
+    "name": "D2_tcp_get",
+    "n": 24,
+    "qps": 6086.092,
+    "p50_ms": 0.1643,
+    "p95_ms": 0.1960,
+    "p99_ms": 0.2628,
+    "max_ms": 0.2628,
+    "wall_s": 0.0039
+  },
+    {
+    "name": "D3_tcp_commit_tx_2k",
+    "n": 15,
+    "qps": 2.850,
+    "p50_ms": 345.3106,
+    "p95_ms": 366.2135,
+    "p99_ms": 423.4627,
+    "max_ms": 423.4627,
+    "wall_s": 5.2629
+  },
+    {
+    "name": "D4_tcp_mt_put_4thr",
+    "n": 24,
+    "qps": 3.345,
+    "p50_ms": 936.0960,
+    "p95_ms": 2189.9810,
+    "p99_ms": 2697.1573,
+    "max_ms": 2697.1573,
+    "wall_s": 7.1739
+  },
+    {
+    "name": "D5_tcp_dcs_create_get",
+    "rev": 1,
+    "exclusive_fail": true,
+    "majority_seen": 3,
+    "create_ms": 283.3716,
+    "note": "etcd-need over real TCP"
+  },
+    {
+    "name": "E1_mini_bindingtester_soak",
+    "ops": 150,
+    "ops_per_s": 1.59,
+    "commits_ok": 109,
+    "commits_err": 23,
+    "multi_key_ok": 23,
+    "ww_pairs_ok": 23,
+    "mismatches": 0,
+    "wall_s": 94.3220,
+    "pass": true
+  },
+    {
+    "name": "E2_tcp_multiclient_mini_bt",
+    "threads": 4,
+    "ops_ok": 20,
+    "ops_err": 0,
+    "model_keys": 29,
+    "verified_majority": 29,
+    "mismatches": 0,
+    "wall_s": 6.4763,
+    "pass": true
+  }
+  ],
+  "limitations": [
+    "In-process core suite: no real NIC (suite tcp adds real localhost TCP).",
+    "C1 Mutex multi-thread serializes StoreCluster — concurrent waiters, not parallel leaders.",
+    "D4 multi-thread TCP is the honest concurrent client path on one range.",
+    "FDB face path (A3) includes OCC bookkeeping; compare to A1 raw put for face overhead.",
+    "Multi-range TX (B2) exercises cross-range 2PC; expect cliff vs A4.",
+    "E1 mini-bt: model-checked random soak + multi-key + WW pairs (not full bindingtester).",
+    "E2 TCP multi-client: partitioned keys per thread + majority verify (true concurrent writers).",
+    "Not YCSB / not production FDB — see docs/montanha-vs-fdb-bench.md."
+  ],
+  "anomalies": [],
+  "vs_fdb": {
+    "claim": "not field peer",
+    "how_to_compare": "docs/montanha-vs-fdb-bench.md",
+    "fdb_workloads": [
+      "single key set/get (A1/A3/D1)",
+      "multi-key transaction (A4/D3)",
+      "get_range (A5)",
+      "clear_range (A6)",
+      "hot key conflicts (A7)",
+      "index+row TX (A8)",
+      "multi-shard / multi-range TX (B2)",
+      "multi-client TCP (D4)",
+      "random soak (E1)",
+      "TCP multi-client mini-bt (E2)"
+    ]
+  }
+}

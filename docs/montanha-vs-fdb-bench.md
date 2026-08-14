@@ -62,7 +62,8 @@ cargo run -p pedradb-store --release --bin montanha-perf-gate -- findings/perf-g
 | **D3** TCP CommitTx | multi-key over wire | TX + TCP |
 | **D4** TCP multi-thread put | N client threads | **true concurrent clients** |
 | **D5** TCP DCS create/get | etcd-need over TCP | exclusive create + majority |
-| **E1** mini-bindingtester | random set/clear/get/range vs model | silent-wrong soak |
+| **E1** mini-bindingtester | random set/clear/get/range + multi-key + WW | silent-wrong soak |
+| **E2** TCP multi-client mini-bt | N threads, partitioned keys, majority verify | concurrent writers |
 
 ## How to compare to FDB (same shapes)
 
@@ -166,3 +167,19 @@ Machine-local only — **not** FDB comparison numbers. Use for ratios.
 | E1_mini_bt | **pass**, mismatches=0, ~1.9 ops/s model-checked |
 
 **Nuance:** multi-thread TCP does **not** linear-scale put QPS on a single range leader — expect p50 inflation (leader serializes). Aggregate QPS can still match or beat single-thread D1 when dial/retry is healthy.
+
+## Sample E1/E2 correctness (N=24, 4 thr)
+
+| Check | Result |
+|-------|--------|
+| E1 multi_key_ok | 23 |
+| E1 ww_pairs_ok | 23 (exactly-one-winner) |
+| E1 mismatches | **0** |
+| E2 ops_ok / ops_err | 20 / 0 |
+| E2 verified_majority | **29/29** |
+| E2 mismatches | **0** |
+
+```bash
+MONTANHA_BENCH_SUITE=mini-bt,tcp MONTANHA_BENCH_N=40 MONTANHA_BENCH_THREADS=4 \
+  cargo run -p pedradb-store --release --bin montanha-fdb-bench -- findings/fdb-bench-e2
+```

@@ -762,7 +762,7 @@ fn main() {
 
     // ── Suite E: mini-bindingtester random soak ──────────────────────────
     if suite_enabled("mini-bt") {
-        progress!("E mini-bindingtester soak…");
+        progress!("E1 mini-bindingtester soak…");
         let dir = out.join("db-minib");
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
@@ -773,6 +773,8 @@ fn main() {
         let mut mismatches = 0u64;
         let mut commits_ok = 0u64;
         let mut commits_err = 0u64;
+        let mut multi_ok = 0u64;
+        let mut ww_ok = 0u64;
         let mut rng = 0xFDB_B1_u64;
         let mut next = || {
             rng ^= rng << 13;
@@ -782,7 +784,7 @@ fn main() {
         };
         let t0 = Instant::now();
         for i in 0..ops {
-            let op = next() % 5;
+            let op = next() % 7;
             let k = format!("mb/{}", next() % 32).into_bytes();
             match op {
                 0 | 1 => {
@@ -822,6 +824,51 @@ fn main() {
                         }
                     }
                 }
+                4 => {
+                    // multi-key TX (2 keys)
+                    let k2 = format!("mb/{}", next() % 32).into_bytes();
+                    let v1 = format!("m{}", next() % 1000).into_bytes();
+                    let v2 = format!("m{}", next() % 1000).into_bytes();
+                    let mut tr = c.begin();
+                    tr.set(&k, &v1).unwrap();
+                    tr.set(&k2, &v2).unwrap();
+                    match tr.commit(&mut c) {
+                        Ok(_) => {
+                            model.insert(k, v1);
+                            model.insert(k2, v2);
+                            commits_ok += 1;
+                            multi_ok += 1;
+                        }
+                        Err(_) => commits_err += 1,
+                    }
+                }
+                5 => {
+                    // intentional WW: two TX same key — exactly one should win
+                    let mut t1 = c.begin();
+                    let mut t2 = c.begin();
+                    let _ = t1.get(&c, &k);
+                    let _ = t2.get(&c, &k);
+                    let va = format!("a{}", next() % 100).into_bytes();
+                    let vb = format!("b{}", next() % 100).into_bytes();
+                    t1.set(&k, &va).unwrap();
+                    t2.set(&k, &vb).unwrap();
+                    let r1 = t1.commit(&mut c);
+                    let r2 = t2.commit(&mut c);
+                    let wins = r1.is_ok() as u8 + r2.is_ok() as u8;
+                    if wins != 1 {
+                        mismatches += 1;
+                        notes.push(format!("mini-bt WW wins={wins} i={i}"));
+                    } else {
+                        ww_ok += 1;
+                        if r1.is_ok() {
+                            model.insert(k, va);
+                        } else {
+                            model.insert(k, vb);
+                        }
+                        commits_ok += 1;
+                        commits_err += 1; // the loser
+                    }
+                }
                 _ => {
                     let mut tr = c.begin();
                     let pairs = tr.get_range(&c, b"mb/", b"mb0").unwrap();
@@ -851,6 +898,8 @@ fn main() {
     "ops_per_s": {ops_s:.2},
     "commits_ok": {commits_ok},
     "commits_err": {commits_err},
+    "multi_key_ok": {multi_ok},
+    "ww_pairs_ok": {ww_ok},
     "mismatches": {mismatches},
     "wall_s": {ws:.4},
     "pass": {pass}
@@ -858,11 +907,169 @@ fn main() {
             ws = wall.as_secs_f64(),
             pass = mismatches == 0,
         ));
-        progress!("E1 mini-bt ops={ops} mismatches={mismatches} ok_commit={commits_ok}");
+        progress!(
+            "E1 mini-bt ops={ops} mismatches={mismatches} ok_commit={commits_ok} multi={multi_ok} ww={ww_ok}"
+        );
         if mismatches > 0 {
             notes.push(format!("mini-bt FAILED mismatches={mismatches}"));
         }
         drop(c);
+
+        // E2: TCP multi-client — partitioned keys (no model race), final global verify
+        if suite_enabled("tcp") || suite_enabled("threads") || suite_enabled("all") {
+            match find_montanha_tcp() {
+                None => notes.push("E2 skipped: no montanha-tcp".into()),
+                Some(bin) => {
+                    progress!("E2 TCP multi-client mini-bt ({n_threads} thr)…");
+                    let tmp = out.join("tcp-minib");
+                    let _ = std::fs::remove_dir_all(&tmp);
+                    std::fs::create_dir_all(&tmp).unwrap();
+                    let nodes = start_tcp_cluster(&bin, &tmp, 1);
+                    let peers: Vec<(u64, String)> =
+                        nodes.iter().map(|n| (n.id, n.addr.to_string())).collect();
+                    let addrs: Vec<String> =
+                        nodes.iter().map(|n| n.addr.to_string()).collect();
+                    let per = (n.max(20) / n_threads).max(8);
+                    let peers_a = Arc::new(peers);
+                    let mut handles = Vec::new();
+                    let t0 = Instant::now();
+                    for tid in 0..n_threads {
+                        let peers = (*peers_a).clone();
+                        handles.push(thread::spawn(move || {
+                            let mut cli =
+                                TcpClusterClient::new(peers).with_max_attempts(64);
+                            let mut local: BTreeMap<Vec<u8>, Vec<u8>> = BTreeMap::new();
+                            let mut ok = 0u64;
+                            let mut err = 0u64;
+                            let mut rng = 0xBEEF_u64 ^ (tid as u64).wrapping_mul(0x9E37);
+                            let mut next = || {
+                                rng ^= rng << 13;
+                                rng ^= rng >> 7;
+                                rng ^= rng << 17;
+                                rng
+                            };
+                            for i in 0..per {
+                                let slot = next() % 16;
+                                let k = format!("e2/{tid}/{slot}").into_bytes();
+                                let op = next() % 3;
+                                match op {
+                                    0 => {
+                                        let v = format!("t{tid}-i{i}").into_bytes();
+                                        let mut done = false;
+                                        for _ in 0..10 {
+                                            if cli.put(&k, &v).is_ok() {
+                                                local.insert(k.clone(), v.clone());
+                                                ok += 1;
+                                                done = true;
+                                                break;
+                                            }
+                                            thread::sleep(Duration::from_millis(15));
+                                        }
+                                        if !done {
+                                            err += 1;
+                                        }
+                                    }
+                                    1 => {
+                                        // 2-key TX in same partition
+                                        let k2 =
+                                            format!("e2/{tid}/{}", (slot + 1) % 16).into_bytes();
+                                        let v1 = format!("a{i}").into_bytes();
+                                        let v2 = format!("b{i}").into_bytes();
+                                        let pairs =
+                                            vec![(k.clone(), v1.clone()), (k2.clone(), v2.clone())];
+                                        let mut done = false;
+                                        for _ in 0..12 {
+                                            if cli.commit_tx(&pairs).is_ok() {
+                                                local.insert(k.clone(), v1.clone());
+                                                local.insert(k2, v2);
+                                                ok += 1;
+                                                done = true;
+                                                break;
+                                            }
+                                            thread::sleep(Duration::from_millis(20));
+                                        }
+                                        if !done {
+                                            err += 1;
+                                        }
+                                    }
+                                    _ => {
+                                        // read own key — best effort (may lag)
+                                        let _ = cli; // use get via any peer in verify pass
+                                    }
+                                }
+                            }
+                            (ok, err, local)
+                        }));
+                    }
+                    let mut merged = BTreeMap::new();
+                    let mut ok_all = 0u64;
+                    let mut err_all = 0u64;
+                    for h in handles {
+                        let (ok, err, local) = h.join().unwrap();
+                        ok_all += ok;
+                        err_all += err;
+                        for (k, v) in local {
+                            merged.insert(k, v);
+                        }
+                    }
+                    // Global verify: every merged key visible on majority
+                    let mut mismatches = 0u64;
+                    let mut verified = 0u64;
+                    for (k, v) in &merged {
+                        let mut seen = 0u32;
+                        let deadline = Instant::now() + Duration::from_secs(5);
+                        while Instant::now() < deadline && seen < 2 {
+                            seen = 0;
+                            for a in &addrs {
+                                if client_get(a, k).ok().flatten().as_deref() == Some(v.as_slice())
+                                {
+                                    seen += 1;
+                                }
+                            }
+                            if seen < 2 {
+                                thread::sleep(Duration::from_millis(30));
+                            }
+                        }
+                        if seen >= 2 {
+                            verified += 1;
+                        } else {
+                            mismatches += 1;
+                            if mismatches < 5 {
+                                notes.push(format!(
+                                    "E2 missing majority key={}",
+                                    String::from_utf8_lossy(k)
+                                ));
+                            }
+                        }
+                    }
+                    let wall = t0.elapsed();
+                    benches.push(format!(
+                        r#"{{
+    "name": "E2_tcp_multiclient_mini_bt",
+    "threads": {n_threads},
+    "ops_ok": {ok_all},
+    "ops_err": {err_all},
+    "model_keys": {mk},
+    "verified_majority": {verified},
+    "mismatches": {mismatches},
+    "wall_s": {ws:.4},
+    "pass": {pass}
+  }}"#,
+                        mk = merged.len(),
+                        ws = wall.as_secs_f64(),
+                        pass = mismatches == 0 && err_all < ok_all.saturating_add(1),
+                    ));
+                    progress!(
+                        "E2 tcp multi-bt ok={ok_all} err={err_all} verified={verified}/{} mismatches={mismatches}",
+                        merged.len()
+                    );
+                    if mismatches > 0 {
+                        notes.push(format!("E2 FAILED mismatches={mismatches}"));
+                    }
+                    drop(nodes);
+                }
+            }
+        }
     }
 
     let limitations = r#"[
@@ -871,7 +1078,8 @@ fn main() {
     "D4 multi-thread TCP is the honest concurrent client path on one range.",
     "FDB face path (A3) includes OCC bookkeeping; compare to A1 raw put for face overhead.",
     "Multi-range TX (B2) exercises cross-range 2PC; expect cliff vs A4.",
-    "E1 mini-bt is a model-checked random soak, not full FoundationDB bindingtester.",
+    "E1 mini-bt: model-checked random soak + multi-key + WW pairs (not full bindingtester).",
+    "E2 TCP multi-client: partitioned keys per thread + majority verify (true concurrent writers).",
     "Not YCSB / not production FDB — see docs/montanha-vs-fdb-bench.md."
   ]"#;
 
@@ -922,7 +1130,8 @@ fn main() {
       "index+row TX (A8)",
       "multi-shard / multi-range TX (B2)",
       "multi-client TCP (D4)",
-      "random soak (E1)"
+      "random soak (E1)",
+      "TCP multi-client mini-bt (E2)"
     ]
   }}
 }}
