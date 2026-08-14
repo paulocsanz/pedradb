@@ -1784,9 +1784,6 @@ impl<E: Env> StoreCluster<E> {
                 continue;
             };
             let rows = scan_prefix(&node.db, INTENT_PREFIX);
-            if rows.is_empty() {
-                continue;
-            }
             let mut by_txn: HashMap<u64, Vec<Vec<u8>>> = HashMap::new();
             let mut garbage: Vec<Vec<u8>> = Vec::new();
             for (ik, raw) in rows {
@@ -1798,6 +1795,19 @@ impl<E: Env> StoreCluster<E> {
                     by_txn.entry(oid).or_default().push(user);
                 } else {
                     garbage.push(ik);
+                }
+            }
+            // Partial TxnCommit deletes intents but keeps preimages — still in-flight.
+            for (pk, _) in scan_prefix(&node.db, TXN_PREFIX) {
+                let Some(rest) = pk.strip_prefix(TXN_PREFIX) else {
+                    continue;
+                };
+                if rest.len() < 8 {
+                    continue;
+                }
+                let tid = u64::from_le_bytes(rest[0..8].try_into().unwrap());
+                if let Some(user) = rest[8..].strip_prefix(b"/pre/") {
+                    by_txn.entry(tid).or_default().push(user.to_vec());
                 }
             }
             for (tid, ks) in by_txn {
