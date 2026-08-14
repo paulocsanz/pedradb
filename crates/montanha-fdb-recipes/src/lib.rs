@@ -499,6 +499,130 @@ impl PriorityQueue {
     }
 }
 
+// ── Phase 3: Record Layer *seed* (not Apple Record Layer) ─────────────────
+
+/// Thin record store: primary row + one secondary index in a single TX.
+///
+/// Stands in as a **Record Layer seed** for bug-hunt / substitution work.
+/// Not a planner, not multi-type indexes, not Java RL.
+pub struct RecordTable {
+    /// Table name bytes (subspace).
+    name: Vec<u8>,
+    /// Secondary index column name.
+    index_col: Vec<u8>,
+}
+
+impl RecordTable {
+    /// Create a record table with a named secondary index column.
+    #[must_use]
+    pub fn new(table: impl AsRef<[u8]>, index_col: impl AsRef<[u8]>) -> Self {
+        Self {
+            name: table.as_ref().to_vec(),
+            index_col: index_col.as_ref().to_vec(),
+        }
+    }
+
+    fn row_key(&self, pk: &[u8]) -> Vec<u8> {
+        Subspace::new(b"rec")
+            .sub(&self.name)
+            .sub(b"r")
+            .pack(&[pk])
+    }
+
+    fn idx_key(&self, idx_val: &[u8], pk: &[u8]) -> Vec<u8> {
+        Subspace::new(b"rec")
+            .sub(&self.name)
+            .sub(b"i")
+            .sub(&self.index_col)
+            .pack(&[idx_val, pk])
+    }
+
+    /// Upsert record + maintain secondary index atomically.
+    ///
+    /// # Errors
+    /// Conflict / store.
+    pub fn upsert(
+        &self,
+        cluster: &mut StoreCluster,
+        pk: &[u8],
+        index_val: &[u8],
+        payload: &[u8],
+    ) -> Result<u64> {
+        let mut tr = cluster.begin();
+        let rk = self.row_key(pk);
+        // Drop old index entry if index value changed.
+        if let Some(old) = tr.get(cluster, &rk)? {
+            // payload layout: index_val\0body
+            if let Some(sep) = old.iter().position(|&b| b == 0) {
+                let old_iv = &old[..sep];
+                if old_iv != index_val {
+                    tr.clear(self.idx_key(old_iv, pk))?;
+                }
+            }
+        }
+        let mut body = index_val.to_vec();
+        body.push(0);
+        body.extend_from_slice(payload);
+        tr.set(&rk, &body)?;
+        tr.set(self.idx_key(index_val, pk), b"\x01")?;
+        tr.commit(cluster)
+    }
+
+    /// Lookup by primary key → (index_val, payload).
+    ///
+    /// # Errors
+    /// Store.
+    pub fn get_by_pk(
+        &self,
+        cluster: &StoreCluster,
+        pk: &[u8],
+    ) -> Result<Option<(Vec<u8>, Vec<u8>)>> {
+        let mut tr = Transaction::at_version(cluster.read_version());
+        let Some(raw) = tr.get(cluster, self.row_key(pk))? else {
+            return Ok(None);
+        };
+        let sep = raw.iter().position(|&b| b == 0).unwrap_or(raw.len());
+        let iv = raw[..sep].to_vec();
+        let body = if sep < raw.len() {
+            raw[sep + 1..].to_vec()
+        } else {
+            Vec::new()
+        };
+        Ok(Some((iv, body)))
+    }
+
+    /// Lookup PKs by secondary index value.
+    ///
+    /// # Errors
+    /// Range / store.
+    pub fn lookup_index(
+        &self,
+        cluster: &StoreCluster,
+        index_val: &[u8],
+    ) -> Result<Vec<Vec<u8>>> {
+        let mut tr = Transaction::at_version(cluster.read_version());
+        // Prefix range: all keys under index_val/
+        let start = Subspace::new(b"rec")
+            .sub(&self.name)
+            .sub(b"i")
+            .sub(&self.index_col)
+            .pack(&[index_val]);
+        let mut end = start.clone();
+        end.push(0xff);
+        let pairs = tr.get_range(cluster, &start, &end)?;
+        let mut pks = Vec::new();
+        for (k, v) in pairs {
+            if !is_live(&v) {
+                continue;
+            }
+            if let Some(pos) = k.iter().rposition(|&b| b == 0) {
+                pks.push(k[pos + 1..].to_vec());
+            }
+        }
+        Ok(pks)
+    }
+}
+
 // ── Tests (adversarial: must fail if Montanha SI/OCC regresses) ────────────
 
 #[cfg(test)]
@@ -686,6 +810,57 @@ mod tests {
         assert_eq!(pq.pop_min(&mut c).unwrap().as_deref(), Some(b"high".as_ref()));
         assert_eq!(pq.pop_min(&mut c).unwrap().as_deref(), Some(b"mid".as_ref()));
         assert_eq!(pq.pop_min(&mut c).unwrap().as_deref(), Some(b"low".as_ref()));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Phase 3: Record Layer seed — concurrent upsert Conflict fail-closed.
+    #[test]
+    fn phase3_record_table_concurrent_conflict() {
+        let (dir, mut c) = open3();
+        let rec = RecordTable::new(b"users", b"email");
+        rec.upsert(&mut c, b"1", b"a@b.c", b"alice").unwrap();
+
+        let mut t1 = c.begin();
+        let mut t2 = c.begin();
+        let rk = rec.row_key(b"1");
+        let _ = t1.get(&c, &rk).unwrap();
+        let _ = t2.get(&c, &rk).unwrap();
+        // Both try to change email index
+        let mut body1 = b"x@y.z".to_vec();
+        body1.push(0);
+        body1.extend_from_slice(b"A");
+        let mut body2 = b"p@q.r".to_vec();
+        body2.push(0);
+        body2.extend_from_slice(b"B");
+        t1.set(&rk, &body1).unwrap();
+        t1.set(rec.idx_key(b"x@y.z", b"1"), b"\x01").unwrap();
+        t2.set(&rk, &body2).unwrap();
+        t2.set(rec.idx_key(b"p@q.r", b"1"), b"\x01").unwrap();
+        let r1 = t1.commit(&mut c);
+        let r2 = t2.commit(&mut c);
+        let ok = r1.is_ok() as u8 + r2.is_ok() as u8;
+        assert_eq!(
+            ok, 1,
+            "exactly one record upsert must win, r1={r1:?} r2={r2:?}"
+        );
+        let (email, _) = rec.get_by_pk(&c, b"1").unwrap().expect("row");
+        let by_email = rec.lookup_index(&c, &email).unwrap();
+        assert!(
+            by_email.iter().any(|p| p == b"1"),
+            "index must match winning row email={email:?} pks={by_email:?}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn phase3_record_table_index_lookup() {
+        let (dir, mut c) = open3();
+        let rec = RecordTable::new(b"item", b"sku");
+        rec.upsert(&mut c, b"pk1", b"SKU-1", b"row1").unwrap();
+        rec.upsert(&mut c, b"pk2", b"SKU-1", b"row2").unwrap();
+        rec.upsert(&mut c, b"pk3", b"SKU-2", b"row3").unwrap();
+        let pks = rec.lookup_index(&c, b"SKU-1").unwrap();
+        assert_eq!(pks.len(), 2, "SKU-1 → two pks: {pks:?}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

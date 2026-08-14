@@ -4,7 +4,7 @@
 > item is closed, or a new open question emerges. The authoritative source for
 > "what's done, what's next, what's unresolved."
 
-Last updated: 2026-08-14 (RFC-0023: real snapshot SI + OCC + watermark too-old + Transaction API + fdb-compat; not FDB field peer)
+Last updated: 2026-08-14 (RFC-0023 + Slipstream/Quicksilver v2 research note)
 
 ---
 
@@ -43,11 +43,11 @@ Last updated: 2026-08-14 (RFC-0023: real snapshot SI + OCC + watermark too-old +
 | 11 | Streaming range / lazy blocks (RFC-0014 P1) | ✅ done | scan + lazy SST blocks + levels + lz4 | — |
 | 12 | Audit correctness fixes (RFC-0015) | ✅ done | fence, sync_dir, Env seams, compact stats, deny CI | — |
 
-**Next action:** Phase 1 — fdb-compat vs bindingtester subset; Phase 2 — etcd workloads; Phase 3 — Record Layer shim (long).  
-**Shipped (recipes):** `montanha-fdb-recipes` — FDB design recipes (table, simple index, queue, multimap, PQ) + SI/OCC regression tests.  
-**Shipped (0023):** real `get_at_version` SI, unified `Transaction`, watermark GC, range OCC, `fdb_compat` + optional `c-api`.  
-**Shipped (0022 thin faces):** N-writer layers etcd/TiKV/table/PG/OLAP/stream.  
-**Do not** read 0017/0021/0022/0023 as FDB field peer or full fdbcli.  
+**Next action:** Optional deeper bindingtester / TCP etcd wire / Java Record Layer shim.  
+**Shipped Phase 1–3:** [montanha-fdb-phases.md](montanha-fdb-phases.md) — fdb-compat harness, etcd multiproc freeze, `RecordTable` seed.  
+**Shipped (recipes):** `montanha-fdb-recipes` — design recipes + SI/OCC.  
+**Shipped (0023):** SI, Transaction, watermark, fdb_compat + c-api.  
+**Do not** claim FDB field peer, full bindingtester, or production Record Layer.  
 
 Shipped (0017 lab): TCP multi-host + caixote mesh + proxy.  
 Shipped (0021 **all Status rows**): TX/limits, perf/sim gates, `/v1/cluster`, split, **TCP rewire without SSH**, region-aware dial lab, drills, runbooks.
@@ -181,6 +181,7 @@ range) but O(ranges) memory, which is typically much smaller.
 | 16 | Optimistic vs pessimistic default (distributed) | 🔲 open | TiDB switched to pessimistic for OLTP; PedraDB may want both |
 | 17 | Parallel Commits implementation details | 🔲 open | Target protocol; need design when building pedradb-txn |
 | 18 | In-memory vs durable distributed locks | 🔲 open | TiKV lesson: in-memory is fast, fragile under partition |
+| 19 | ~~Slipstream + Quicksilver v2 (config fold / edge cache)~~ | ✅ done | `docs/slipstream-and-quicksilver-learnings.md` + `references/{slipstream,quicksilver}/` — not a SoR redesign; P0 is cursor-after-apply + ship resume |
 
 ---
 
@@ -275,6 +276,7 @@ new evidence.
 | [`sqlite-object-storage-agents-and-pedradb.md`](sqlite-object-storage-agents-and-pedradb.md) | **Canonical 2026-08-12:** SQLite-VFS + object/block-on-object (mercado, não tese de agente); Pedra slots + deep gaps; primaries in `references/sqlite-object-storage-primaries.md` |
 | [`conversation-learnings-and-short-term-alignment.md`](conversation-learnings-and-short-term-alignment.md) | All conversation learnings + **conflict matrix vs P0** |
 | [`nats-need-replacement.md`](nats-need-replacement.md) | JetStream-class stream on PedraDB+Raft vs Core NATS; Jepsen 2.12.1 findings |
+| [`slipstream-and-quicksilver-learnings.md`](slipstream-and-quicksilver-learnings.md) | **2026-08-14:** QS v2 tiered cache + Slipstream fold/cursor-after-apply; what to steal vs not mix into Montanha SoR |
 | [`usage.md`](usage.md) | **P0 user docs**: open/TX, durability, secondary-index sketch |
 | [`foundationdb-layers-and-products.md`](foundationdb-layers-and-products.md) | What runs on FDB: Record/Document layers, Snowflake, CloudKit, Astra, … |
 | [`etcd-comparison.md`](etcd-comparison.md) | etcd vs PedraDB, FDB, TiKV/TiDB, CRDB, Scylla, RocksDB, … |

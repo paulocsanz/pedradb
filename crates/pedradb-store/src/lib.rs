@@ -58,7 +58,9 @@ pub use client::{
     classify, classify_message, leader_from_status, ClientClass, PendingTx, SnapshotTx,
     TcpClusterClient, Transaction, MAX_SNAPSHOT_LAG,
 };
-pub use fdb_compat::{FdbDatabase, FdbError, FdbTransaction};
+pub use fdb_compat::{
+    run_phase1_bindingtester_subset, FdbDatabase, FdbError, FdbTransaction, Phase1HarnessReport,
+};
 pub use fdb_layers::{
     IdempotentIndex, NaiveAllocator, NaiveList, SafeAllocator, SafeList,
 };
