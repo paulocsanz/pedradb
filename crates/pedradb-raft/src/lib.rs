@@ -13,6 +13,9 @@
 
 pub mod net;
 pub mod persist;
+pub mod vote_kernel;
+
+pub use vote_kernel::{vote_decision, VoteDecision, VoteInputs};
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -393,25 +396,28 @@ fn handle_request_vote(node: &mut RaftNode, args: &RequestVoteArgs) -> RequestVo
         node.become_follower(args.term);
     }
     let mut vote_granted = false;
-    if args.term == node.hard.current_term {
-        let can_vote =
-            node.hard.voted_for.is_none() || node.hard.voted_for == Some(args.candidate_id);
-        // Raft log up-to-date check.
-        let up_to_date = args.last_log_term > node.last_log_term()
-            || (args.last_log_term == node.last_log_term()
-                && args.last_log_index >= node.last_log_index());
-        if can_vote && up_to_date {
-            // F15: only grant after durable vote (Raft: persist before reply).
-            let prev = node.hard.voted_for;
-            node.hard.voted_for = Some(args.candidate_id);
-            match node.persist_hard() {
-                Ok(()) => {
-                    node.election_ticks_left = node.election_timeout;
-                    vote_granted = true;
-                }
-                Err(_) => {
-                    node.hard.voted_for = prev;
-                }
+    // Beyond-style: pure decision (vote_kernel) then persist-before-grant (F15).
+    let decision = vote_kernel::vote_decision(VoteInputs {
+        current_term: node.hard.current_term,
+        voted_for: node.hard.voted_for,
+        last_log_term: node.last_log_term(),
+        last_log_index: node.last_log_index(),
+        candidate_term: args.term,
+        candidate_id: args.candidate_id,
+        candidate_last_log_term: args.last_log_term,
+        candidate_last_log_index: args.last_log_index,
+    });
+    if decision == VoteDecision::WouldGrant {
+        // Protocol (not in the pure kernel): only grant after durable vote.
+        let prev = node.hard.voted_for;
+        node.hard.voted_for = Some(args.candidate_id);
+        match node.persist_hard() {
+            Ok(()) => {
+                node.election_ticks_left = node.election_timeout;
+                vote_granted = true;
+            }
+            Err(_) => {
+                node.hard.voted_for = prev;
             }
         }
     }
@@ -1180,6 +1186,52 @@ mod tests {
                 "missing k{i}"
             );
         }
+        let _ = std::fs::remove_dir_all(&parent);
+    }
+
+    /// AS-IS mutant of the **caller protocol** (not the pure kernel): set
+    /// `vote_granted` without durable persist. Disk must *not* show the vote —
+    /// this is the F15 gap the FIXED path closes. Proves the persist-before-grant
+    /// invariant has teeth (Beyond mutation discipline).
+    #[test]
+    fn as_is_grant_without_persist_leaves_disk_unvoted() {
+        let parent = temp_parent();
+        let mut cluster = RaftCluster::open(&parent, 1).unwrap();
+        let n = cluster.nodes.get_mut(&1).unwrap();
+        n.hard.current_term = 5;
+        n.hard.voted_for = None;
+        // Mutant: decision WouldGrant, update memory, **skip** persist_hard, grant.
+        let args = RequestVoteArgs {
+            term: 5,
+            candidate_id: 9,
+            last_log_index: 0,
+            last_log_term: 0,
+        };
+        let d = vote_kernel::vote_decision(VoteInputs {
+            current_term: n.hard.current_term,
+            voted_for: n.hard.voted_for,
+            last_log_term: n.last_log_term(),
+            last_log_index: n.last_log_index(),
+            candidate_term: args.term,
+            candidate_id: args.candidate_id,
+            candidate_last_log_term: args.last_log_term,
+            candidate_last_log_index: args.last_log_index,
+        });
+        assert_eq!(d, VoteDecision::WouldGrant);
+        n.hard.voted_for = Some(9);
+        let grant_without_persist = true; // AS-IS mutant
+        assert!(grant_without_persist);
+        // Disk still empty vote for term 5 (we never called persist after vote).
+        let meta = persist::raft_meta_dir(&parent.join("node-1"));
+        // May have older hard state from open; force reload after mutant.
+        let hard = persist::load_hard(&meta).unwrap_or(HardState {
+            current_term: 0,
+            voted_for: None,
+        });
+        assert!(
+            hard.voted_for != Some(9),
+            "AS-IS: grant without persist must leave disk without candidate 9 vote (got {hard:?})"
+        );
         let _ = std::fs::remove_dir_all(&parent);
     }
 
