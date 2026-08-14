@@ -1,0 +1,11 @@
+[package]
+name = "montanha-fdb-recipes"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "FDB design recipes on Montanha Transaction (bug-hunt / SI-OCC regression suite)"
+
+[dependencies]
+pedradb-store.workspace = true
+
+[dev-dependencies]

@@ -43,8 +43,9 @@ Last updated: 2026-08-14 (RFC-0023: real snapshot SI + OCC + watermark too-old +
 | 11 | Streaming range / lazy blocks (RFC-0014 P1) | ✅ done | scan + lazy SST blocks + levels + lz4 | — |
 | 12 | Audit correctness fixes (RFC-0015) | ✅ done | fence, sync_dir, Env seams, compact stats, deny CI | — |
 
-**Next action:** Optional product packaging of fdb-compat C ABI / multi-lang; placement auto-balance; keep honesty — **not** FDB field peer.  
-**Shipped (0023):** real `get_at_version` SI, unified `Transaction`, watermark GC too-old, range conflict, `fdb_compat` Rust face.  
+**Next action:** Phase 1 — fdb-compat vs bindingtester subset; Phase 2 — etcd workloads; Phase 3 — Record Layer shim (long).  
+**Shipped (recipes):** `montanha-fdb-recipes` — FDB design recipes (table, simple index, queue, multimap, PQ) + SI/OCC regression tests.  
+**Shipped (0023):** real `get_at_version` SI, unified `Transaction`, watermark GC, range OCC, `fdb_compat` + optional `c-api`.  
 **Shipped (0022 thin faces):** N-writer layers etcd/TiKV/table/PG/OLAP/stream.  
 **Do not** read 0017/0021/0022/0023 as FDB field peer or full fdbcli.  
 
