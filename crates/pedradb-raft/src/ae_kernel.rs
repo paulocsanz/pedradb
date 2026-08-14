@@ -55,12 +55,17 @@ pub enum AeEntryAction {
 
 /// Pure rule for one AE log entry against follower state.
 ///
-/// # Invariant (F16)
+/// # Post-condition (F16 / theorem-ready)
 ///
-/// - `TruncateAndInstall` ⇒ `entry_index > commit_index` and local term differs.
-/// - `Refuse` when term conflict at `entry_index <= commit_index` (never rewrite
-///   committed history) or when appending would leave a hole.
-/// - `Append` only when `entry_index == last_log_index + 1`.
+/// ```text
+/// ensures
+///   (action == TruncateAndInstall) ==> (entry_index > commit_index)
+///   (action == Append) ==> (existing_term.is_none()
+///                           && entry_index == last_log_index + 1)
+///   (existing conflict && entry_index <= commit_index) ==> action == Refuse
+/// ```
+///
+/// Finite-domain check: [`tests::theorem_ae_f16_on_finite_domain`].
 #[must_use]
 pub fn ae_entry_action(
     entry_index: u64,
@@ -89,6 +94,39 @@ pub fn ae_entry_action(
             }
         }
     }
+}
+
+/// Spec predicates for F16 safety (used by finite-domain theorem).
+#[must_use]
+pub fn ae_f16_safe(
+    entry_index: u64,
+    entry_term: u64,
+    existing_term: Option<u64>,
+    commit_index: u64,
+    last_log_index: u64,
+    action: AeEntryAction,
+) -> bool {
+    let _ = entry_term;
+    // Never truncate/install at or before commit.
+    if matches!(action, AeEntryAction::TruncateAndInstall) && entry_index <= commit_index {
+        return false;
+    }
+    // Append only contiguous hole-free.
+    if matches!(action, AeEntryAction::Append) {
+        if existing_term.is_some() {
+            return false;
+        }
+        if entry_index != last_log_index.saturating_add(1) {
+            return false;
+        }
+    }
+    // Conflict on committed index must Refuse (when existing differs).
+    if let Some(t) = existing_term {
+        if t != entry_term && entry_index <= commit_index {
+            return matches!(action, AeEntryAction::Refuse);
+        }
+    }
+    true
 }
 
 /// AS-IS mutant: always truncate-and-install on term conflict, **even at/before
@@ -178,5 +216,66 @@ mod tests {
         let mutant = ae_entry_action_as_is_rewrite_committed(1, 9, Some(3), 1, 5);
         assert_eq!(fixed, AeEntryAction::Refuse);
         assert_eq!(mutant, AeEntryAction::TruncateAndInstall);
+    }
+
+    /// P1.4-style finite theorem for F16 safety predicates.
+    #[test]
+    fn theorem_ae_f16_on_finite_domain() {
+        const B: u64 = 5;
+        let mut n = 0u64;
+        for entry_index in 0..B {
+            for entry_term in 0..B {
+                for commit_index in 0..B {
+                    for last_log_index in 0..B {
+                        for ex in 0..=B {
+                            let existing = if ex == B { None } else { Some(ex) };
+                            let act = ae_entry_action(
+                                entry_index,
+                                entry_term,
+                                existing,
+                                commit_index,
+                                last_log_index,
+                            );
+                            assert!(
+                                ae_f16_safe(
+                                    entry_index,
+                                    entry_term,
+                                    existing,
+                                    commit_index,
+                                    last_log_index,
+                                    act
+                                ),
+                                "F16 unsafe at idx={entry_index} term={entry_term} ex={existing:?} commit={commit_index} last={last_log_index} → {act:?}"
+                            );
+                            // Mutant must violate F16 on committed conflict.
+                            if let Some(t) = existing {
+                                if t != entry_term && entry_index <= commit_index {
+                                    let m = ae_entry_action_as_is_rewrite_committed(
+                                        entry_index,
+                                        entry_term,
+                                        existing,
+                                        commit_index,
+                                        last_log_index,
+                                    );
+                                    assert!(
+                                        !ae_f16_safe(
+                                            entry_index,
+                                            entry_term,
+                                            existing,
+                                            commit_index,
+                                            last_log_index,
+                                            m
+                                        ),
+                                        "mutant must violate F16 here"
+                                    );
+                                }
+                            }
+                            n += 1;
+                        }
+                    }
+                }
+            }
+        }
+        assert_eq!(n, B.pow(4) * (B + 1));
     }
 }

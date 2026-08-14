@@ -15,7 +15,7 @@
 //! | Grant only after `persist_hard` Ok | caller (`handle_request_vote`) |
 //! | Persist may fail / lie | **axiom** — World / FailingEnv / det_io; never a theorem fact |
 //!
-//! Spec page: `determinismo/pedradb-dst/formal/F15-vote-decision.md`.
+//! Spec page: `determinismo/pedradb-dst/specs/f15-vote-decision.md`.
 
 #![forbid(unsafe_code)]
 
@@ -50,32 +50,77 @@ pub enum VoteDecision {
     Deny,
 }
 
+/// Whether the follower may still vote for `candidate_id` in this term.
+#[must_use]
+pub fn can_vote(voted_for: Option<u64>, candidate_id: u64) -> bool {
+    voted_for.is_none() || voted_for == Some(candidate_id)
+}
+
+/// Raft §5.4.1 log up-to-date (candidate at least as new as local).
+#[must_use]
+pub fn log_up_to_date(
+    my_last_term: u64,
+    my_last_index: u64,
+    cand_last_term: u64,
+    cand_last_index: u64,
+) -> bool {
+    cand_last_term > my_last_term
+        || (cand_last_term == my_last_term && cand_last_index >= my_last_index)
+}
+
 /// Pure RequestVote decision.
 ///
-/// # Invariant (post-condition of the rule)
+/// # Post-condition (theorem statement — RFC-0002 P1.4)
 ///
-/// - `WouldGrant` ⇒ `candidate_term == current_term`
-///   ∧ (`voted_for` is `None` ∨ `voted_for == Some(candidate_id)`)
-///   ∧ candidate log is at least as up-to-date as local log.
-/// - `Deny` ⇒ not all of the above.
+/// ```text
+/// ensures
+///   (vote_decision(i) == WouldGrant) <==>
+///     i.candidate_term == i.current_term
+///     && can_vote(i.voted_for, i.candidate_id)
+///     && log_up_to_date(i.last_log_term, i.last_log_index,
+///                       i.candidate_last_log_term, i.candidate_last_log_index)
+/// ```
+///
+/// Machine-checked today: [`tests::theorem_vote_decision_iff_on_finite_domain`]
+/// enumerates a finite universe. Verus/`ensures` or Aeneas→Lean: same statement
+/// when toolchain is available (see `pedradb-dst/formal/P1.4-vote-theorem.md`).
 ///
 /// # Does not cover
 ///
-/// Durability of the vote, network delivery, or step-down side effects — those are
-/// the caller's protocol + environment axioms (F15).
+/// Durability of the vote, network delivery, or step-down — caller + axioms (F15).
 #[must_use]
 pub fn vote_decision(i: VoteInputs) -> VoteDecision {
     if i.candidate_term != i.current_term {
         return VoteDecision::Deny;
     }
-    let can_vote = i.voted_for.is_none() || i.voted_for == Some(i.candidate_id);
-    let up_to_date = i.candidate_last_log_term > i.last_log_term
-        || (i.candidate_last_log_term == i.last_log_term
-            && i.candidate_last_log_index >= i.last_log_index);
-    if can_vote && up_to_date {
+    if can_vote(i.voted_for, i.candidate_id)
+        && log_up_to_date(
+            i.last_log_term,
+            i.last_log_index,
+            i.candidate_last_log_term,
+            i.candidate_last_log_index,
+        )
+    {
         VoteDecision::WouldGrant
     } else {
         VoteDecision::Deny
+    }
+}
+
+/// Spec predicate: outcome matches the closed-form rule (bidirectional).
+#[must_use]
+pub fn vote_decision_spec(i: VoteInputs, d: VoteDecision) -> bool {
+    let grant = i.candidate_term == i.current_term
+        && can_vote(i.voted_for, i.candidate_id)
+        && log_up_to_date(
+            i.last_log_term,
+            i.last_log_index,
+            i.candidate_last_log_term,
+            i.candidate_last_log_index,
+        );
+    match d {
+        VoteDecision::WouldGrant => grant,
+        VoteDecision::Deny => !grant,
     }
 }
 
@@ -177,5 +222,52 @@ mod tests {
             vote_decision_as_is_ignore_log_and_vote(i),
             VoteDecision::WouldGrant
         );
+    }
+
+    /// P1.4 finite-domain theorem: ∀ inputs in U, `vote_decision` ⇔ closed-form spec.
+    ///
+    /// Universe sized for CI (~few hundred ms): terms/ids/logs in `{0..3}`.
+    /// This is not ∀u64; it is a machine-checked proof on U and a regression
+    /// that the implementation matches the `ensures` statement above.
+    #[test]
+    fn theorem_vote_decision_iff_on_finite_domain() {
+        const B: u64 = 4; // domain 0..B for each numeric field
+        let mut n = 0u64;
+        for current_term in 0..B {
+            for candidate_term in 0..B {
+                for candidate_id in 0..B {
+                    for last_log_term in 0..B {
+                        for last_log_index in 0..B {
+                            for cand_lt in 0..B {
+                                for cand_li in 0..B {
+                                    // voted_for: None or Some(v) for v in 0..B
+                                    for vf in 0..=B {
+                                        let voted_for = if vf == B { None } else { Some(vf) };
+                                        let i = VoteInputs {
+                                            current_term,
+                                            voted_for,
+                                            last_log_term,
+                                            last_log_index,
+                                            candidate_term,
+                                            candidate_id,
+                                            candidate_last_log_term: cand_lt,
+                                            candidate_last_log_index: cand_li,
+                                        };
+                                        let d = vote_decision(i);
+                                        assert!(
+                                            vote_decision_spec(i, d),
+                                            "spec broken at {i:?} → {d:?}"
+                                        );
+                                        n += 1;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        // B^7 * (B+1) = 4^7 * 5 = 81920
+        assert_eq!(n, B.pow(7) * (B + 1));
     }
 }
