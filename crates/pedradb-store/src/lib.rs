@@ -71,9 +71,10 @@ pub use layers::{
 };
 pub use msg::PeerMsg;
 pub use tcp::{
-    client_commit_tx, client_get, client_put, client_set_peers, client_status, client_tick,
-    connect as tcp_connect, connect_host as tcp_connect_host, peer_wire, read_frame,
-    resolve_host_port, write_frame, WireMsg,
+    client_commit_tx, client_dcs_cas, client_dcs_create, client_dcs_get, client_get, client_put,
+    client_set_peers, client_status, client_tick, connect as tcp_connect,
+    connect_host as tcp_connect_host, peer_wire, read_frame, resolve_host_port, write_frame,
+    WireMsg,
 };
 
 use std::collections::{HashMap, VecDeque};
@@ -1110,21 +1111,29 @@ fn apply_txn_abort<E: Env>(db: &mut Db<E>, txn_id: u64, keys: &[Vec<u8>]) -> Res
 ///
 /// Missing preimage (peer never prepared) leaves the user key untouched so a
 /// lagging replica that still holds the old value is not wiped.
+///
+/// F52: a prior majority `TxnCommit` may already have written `\0store/hist/`
+/// under the TX's `si_gen` with the **aborted** new value. After Pedra restore,
+/// rewrite that hist tip so SI matches the restored preimage (reopen-safe).
 fn apply_txn_revert<E: Env>(db: &mut Db<E>, txn_id: u64, keys: &[Vec<u8>]) -> Result<()> {
     // F47: never drop an abort fence here. A later raft replay of TxnCommit
     // must still see status=abort. Successful materialise is the only path
     // that clears status (apply_txn_commit).
     let keep_abort = db.get(&txn_status_key(txn_id)).as_deref() == Some(b"abort".as_ref());
     let mut ops = Vec::new();
+    let mut restored: Vec<(Vec<u8>, Option<Vec<u8>>)> = Vec::new();
     for u in keys {
         let pre_raw = db.get(&txn_pre_key(txn_id, u));
-        match pre_raw
+        let pre = pre_raw
             .as_ref()
-            .and_then(|b| decode_preimage(b.as_ref()))
-        {
+            .and_then(|b| decode_preimage(b.as_ref()));
+        match &pre {
             Some(Some(val)) => ops.push(BatchOp::put(u.as_slice(), val.as_slice())),
             Some(None) => ops.push(BatchOp::delete(u.as_slice())),
             None => {}
+        }
+        if let Some(p) = pre {
+            restored.push((u.clone(), p));
         }
         ops.push(BatchOp::delete(intent_key(u)));
         ops.push(BatchOp::delete(txn_pair_key(txn_id, u)));
@@ -1132,6 +1141,14 @@ fn apply_txn_revert<E: Env>(db: &mut Db<E>, txn_id: u64, keys: &[Vec<u8>]) -> Re
     }
     if !ops.is_empty() {
         db.apply_batch(ops)?;
+    }
+    // F52: align durable SI hist with restored Pedra (TxnCommit may have stamped
+    // the aborted write under si_gen before this compensating entry applied).
+    for (u, pre) in &restored {
+        if is_reserved_store_key(u) {
+            continue;
+        }
+        repair_si_hist_tip(db, u, pre.as_deref())?;
     }
     let prefix = txn_pair_prefix(txn_id);
     let end = {
@@ -1143,6 +1160,37 @@ fn apply_txn_revert<E: Env>(db: &mut Db<E>, txn_id: u64, keys: &[Vec<u8>]) -> Re
     if left.is_empty() && !keep_abort {
         db.apply_batch([BatchOp::delete(txn_status_key(txn_id))])?;
     }
+    Ok(())
+}
+
+/// Rewrite the last SI hist entry for `user_key` to `live` (F52).
+///
+/// If hist is empty, no-op (no SI stamp to repair). Same gen as the tip is kept
+/// so generations reserved by a failed multi-range TX do not keep advertising
+/// the aborted write after Pedra preimage restore.
+fn repair_si_hist_tip<E: Env>(
+    db: &mut Db<E>,
+    user_key: &[u8],
+    live: Option<&[u8]>,
+) -> Result<()> {
+    let hk = hist_key(user_key);
+    let mut hist = match db.get(&hk).and_then(|b| decode_hist(b.as_ref()).ok()) {
+        Some(h) if !h.is_empty() => h,
+        _ => return Ok(()),
+    };
+    let tip_gen = hist.last().map(|(g, _)| *g).unwrap_or(0);
+    if tip_gen == 0 {
+        // Only the gen-0 preimage floor — leave it; nothing committed to unwind.
+        return Ok(());
+    }
+    let new_val = live.map(|v| v.to_vec());
+    if hist.last().map(|(_, v)| v.as_ref()) == Some(new_val.as_ref()) {
+        return Ok(());
+    }
+    if let Some(last) = hist.last_mut() {
+        last.1 = new_val;
+    }
+    db.put(&hk, &encode_hist(&hist))?;
     Ok(())
 }
 
@@ -7423,10 +7471,9 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// F50 probe: get_at_version after clear must keep pre-clear value at old snap;
-    /// tip snapshot must be None; reopen must not resurrect.
+    /// SI: get_at_version after clear keeps pre-clear value; tip/reopen stay absent.
     #[test]
-    fn probe_get_at_version_after_clear_and_reopen() {
+    fn get_at_version_after_clear_and_reopen() {
         let dir = temp();
         let gen_clear;
         let gen_before;
@@ -7482,10 +7529,9 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// F50 probe: finish_queued abort after leader kill must not drop SI notes for
-    /// an already majority-committed index (or leave OCC blind).
+    /// Queued: finish after leader failover must flush SI notes for committed index.
     #[test]
-    fn probe_finish_queued_abort_after_leader_failover_committed() {
+    fn finish_queued_after_leader_failover_flushes_si_notes() {
         let dir = temp();
         let mut c = StoreCluster::open_with_rng(&dir, 3, 1, SeedRng::new(0xF50_01)).unwrap();
         c.set_rpc_mode(RpcMode::Queued);
@@ -7543,10 +7589,9 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// F50 probe: abort finish_queued on uncommitted index must not strip notes of a
-    /// later concurrent outstanding put that later majority-commits.
+    /// Queued: abort of earlier uncommitted index must not silently apply later put without OCC notes.
     #[test]
-    fn probe_finish_queued_abort_must_not_drop_later_pending_notes() {
+    fn finish_queued_abort_earlier_does_not_orphan_later_put() {
         let dir = temp();
         let mut c = StoreCluster::open_with_rng(&dir, 3, 1, SeedRng::new(0xF50_02)).unwrap();
         c.set_rpc_mode(RpcMode::Queued);
@@ -7641,10 +7686,10 @@ mod tests {
     }
 
 
-    /// F51 probe: failed multi-range tx_finish after partial commit must not leave
-    /// SI hist at reserved gen pointing at the aborted write (Pedra restored).
+    /// F52: failed multi-range `tx_finish` after partial `TxnCommit` must not leave
+    /// durable SI hist advertising the aborted write after Pedra preimage restore.
     #[test]
-    fn probe_partial_tx_finish_si_hist_matches_restored_preimage() {
+    fn partial_tx_finish_si_hist_matches_restored_preimage() {
         let dir = temp();
         let mut c = StoreCluster::open(&dir, 3, 3).unwrap();
         c.elect_all(80).unwrap();
@@ -7678,7 +7723,7 @@ mod tests {
             assert_ne!(
                 v.as_deref(),
                 Some(b"new-a".as_ref()),
-                "F51: SI hist gen {g} still shows aborted write; pedra=old-a v={v:?} before={gen_before} after={gen_after}"
+                "F52: SI hist gen {g} still shows aborted write; pedra=old-a v={v:?} before={gen_before} after={gen_after}"
             );
         }
         // Tip SI must match Pedra (old-a).
@@ -7699,9 +7744,76 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// F50 probe: watermark GC floor must keep last value readable at safe_watermark.
+
+    /// F52 follow-on: range scan after failed multi-range finish must not show aborted writes.
     #[test]
-    fn probe_watermark_gc_floor_preserves_readable_snap() {
+    fn partial_tx_finish_range_scan_no_aborted_write() {
+        let dir = temp();
+        let mut c = StoreCluster::open(&dir, 3, 3).unwrap();
+        c.elect_all(80).unwrap();
+        let keys = keys_one_per_range(&c);
+        c.put(&keys[0], b"old-a").unwrap();
+        c.put(&keys[1], b"old-b").unwrap();
+        let h = c
+            .tx_start([
+                (keys[0].as_slice(), b"new-a".as_slice()),
+                (keys[1].as_slice(), b"new-b".as_slice()),
+            ])
+            .unwrap();
+        let last = *h.ranges.last().unwrap();
+        let _ = c.step_down_range_leader(last);
+        let _ = c.tx_finish(&h).expect_err("fail finish");
+        c.elect_all(80).unwrap();
+        let tip = c.read_version();
+        let range = c.keys_in_range_at(&[], &[], tip).unwrap();
+        for (k, v) in &range {
+            assert_ne!(v.as_slice(), b"new-a", "aborted write in range scan {k:?}");
+            assert_ne!(v.as_slice(), b"new-b", "aborted write in range scan {k:?}");
+        }
+        // Must still see preimages.
+        assert!(
+            range.iter().any(|(k, v)| k == &keys[0] && v.as_slice() == b"old-a"),
+            "missing old-a in {range:?}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// F52: force_local/open path repairs SI hist when raft TxnRevert cannot majority.
+    #[test]
+    fn force_local_revert_repairs_si_hist() {
+        let dir = temp();
+        let mut c = StoreCluster::open(&dir, 3, 3).unwrap();
+        c.elect_all(80).unwrap();
+        let keys = keys_one_per_range(&c);
+        c.put(&keys[0], b"old-a").unwrap();
+        c.put(&keys[1], b"old-b").unwrap();
+        let h = c
+            .tx_start([
+                (keys[0].as_slice(), b"new-a".as_slice()),
+                (keys[1].as_slice(), b"new-b".as_slice()),
+            ])
+            .unwrap();
+        // Commit first range only by killing last range leader before finish.
+        let last = *h.ranges.last().unwrap();
+        let first = h.ranges[0];
+        let _ = c.step_down_range_leader(last);
+        let _ = c.tx_finish(&h).expect_err("fail");
+        // Kill first range leader too — reopen must still have repaired hist via force_local.
+        let _ = c.step_down_range_leader(first);
+        drop(c);
+        let c = StoreCluster::open(&dir, 3, 3).unwrap();
+        assert_eq!(c.get(&keys[0]).unwrap().as_deref(), Some(b"old-a".as_ref()));
+        assert_eq!(
+            c.get_at_version(&keys[0], c.read_version()).unwrap().as_deref(),
+            Some(b"old-a".as_ref()),
+            "force_local/open path must not leave SI tip at new-a"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Watermark GC floor keeps live values readable at safe_watermark.
+    #[test]
+    fn watermark_gc_floor_preserves_readable_snap() {
         let dir = temp();
         let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
         c.elect_all(80).unwrap();
@@ -7734,9 +7846,9 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// F50 probe: conflict range OCC vs concurrent clear of key inside range.
+    /// Range OCC: concurrent clear inside get_range interval must Conflict.
     #[test]
-    fn probe_range_occ_conflicts_on_clear_inside_range() {
+    fn range_occ_conflicts_on_clear_inside_range() {
         let dir = temp();
         let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
         c.elect_all(80).unwrap();
