@@ -991,7 +991,12 @@ fn clear_range_txn_meta<E: Env>(db: &mut Db<E>, start: &[u8], end: &[u8]) -> Res
             Bound::Excluded(end_p.as_slice()),
         );
         if left.is_empty() {
-            let _ = db.apply_batch([BatchOp::delete(txn_status_key(tid))]);
+            // F47: abort fence must survive snapshot install (export is user
+            // keys only). Wiping status here lets a later TxnCommit replay.
+            let st = db.get(&txn_status_key(tid));
+            if st.as_deref() != Some(b"abort".as_ref()) {
+                let _ = db.apply_batch([BatchOp::delete(txn_status_key(tid))]);
+            }
         }
     }
     Ok(())
@@ -1106,6 +1111,10 @@ fn apply_txn_abort<E: Env>(db: &mut Db<E>, txn_id: u64, keys: &[Vec<u8>]) -> Res
 /// Missing preimage (peer never prepared) leaves the user key untouched so a
 /// lagging replica that still holds the old value is not wiped.
 fn apply_txn_revert<E: Env>(db: &mut Db<E>, txn_id: u64, keys: &[Vec<u8>]) -> Result<()> {
+    // F47: never drop an abort fence here. A later raft replay of TxnCommit
+    // must still see status=abort. Successful materialise is the only path
+    // that clears status (apply_txn_commit).
+    let keep_abort = db.get(&txn_status_key(txn_id)).as_deref() == Some(b"abort".as_ref());
     let mut ops = Vec::new();
     for u in keys {
         let pre_raw = db.get(&txn_pre_key(txn_id, u));
@@ -1131,7 +1140,7 @@ fn apply_txn_revert<E: Env>(db: &mut Db<E>, txn_id: u64, keys: &[Vec<u8>]) -> Re
         e
     };
     let left = db.range(Bound::Included(prefix.as_slice()), Bound::Excluded(end.as_slice()));
-    if left.is_empty() {
+    if left.is_empty() && !keep_abort {
         db.apply_batch([BatchOp::delete(txn_status_key(txn_id))])?;
     }
     Ok(())
@@ -2693,6 +2702,7 @@ impl<E: Env> StoreCluster<E> {
         }
         let mut ok_append = true;
         let mut log_dirty = false;
+        let log_before = p.log.clone();
         for e in &entries {
             if let Some(i) = p.log.iter().position(|x| x.index == e.index) {
                 // Conflict if term *or* payload differs (leader may have
@@ -2718,6 +2728,7 @@ impl<E: Env> StoreCluster<E> {
             }
         }
         if !ok_append {
+            p.log = log_before;
             return Ok(PeerMsg::AppendEntriesReply {
                 range_id,
                 term: p.term,
@@ -2727,12 +2738,24 @@ impl<E: Env> StoreCluster<E> {
         }
         p.log.sort_by_key(|e| e.index);
         p.log.dedup_by_key(|e| e.index);
-        if log_dirty {
-            let _ = persist_log_db(&mut n.db, range_id, p);
+        // F47: success ack means the suffix is durable. Swallowing persist
+        // failure made the leader advance commit; heal+elect then majority-
+        // applied a TxnCommit the client already heard as Err.
+        if log_dirty && persist_log_db(&mut n.db, range_id, p).is_err() {
+            p.log = log_before;
+            return Ok(PeerMsg::AppendEntriesReply {
+                range_id,
+                term: p.term,
+                success: false,
+                match_index: 0,
+            });
         }
         if leader_commit > p.commit {
+            let old_commit = p.commit;
             p.commit = leader_commit.min(p.last_index());
-            let _ = persist_commit_db(&mut n.db, range_id, p);
+            if persist_commit_db(&mut n.db, range_id, p).is_err() {
+                p.commit = old_commit;
+            }
         }
         let match_i = entries
             .last()
@@ -4177,6 +4200,7 @@ impl<E: Env> StoreCluster<E> {
     /// (F37) so intermediate generations never observe a partial multi-range apply.
     pub fn tx_finish(&mut self, handle: &TxHandle) -> Result<()> {
         let si_gen = self.commit_generation.saturating_add(1);
+        let mut committed: Vec<u64> = Vec::new();
         for rid in &handle.ranges {
             let keys = Self::keys_for_range(handle, *rid).to_vec();
             match self.propose_on_range(
@@ -4187,16 +4211,33 @@ impl<E: Env> StoreCluster<E> {
                     si_gen,
                 },
             ) {
-                Ok(()) => {}
+                Ok(()) => committed.push(*rid),
                 Err(e) => {
-                    // Fence first so an uncommitted TxnCommit cannot materialise
-                    // after heal/elect even if discard raced (F47).
+                    // F47: abort is a log decision, not only a local Pedra put.
+                    // Ranges that already majority-committed TxnCommit must get
+                    // a majority TxnRevert on the same raft log. Local fence
+                    // remains defense-in-depth for reopen/apply.
                     self.fence_txn_aborted(handle.id);
                     for rid2 in &handle.ranges {
                         let akeys = Self::keys_for_range(handle, *rid2).to_vec();
-                        self.cleanup_range_keys(*rid2, handle.id, &akeys, CleanupMode::Revert);
+                        if committed.contains(rid2) {
+                            let _ = self.propose_on_range(
+                                *rid2,
+                                RangeEntry::TxnRevert {
+                                    txn_id: handle.id,
+                                    keys: akeys.clone(),
+                                },
+                            );
+                            self.force_local_clear_keys(handle.id, &akeys, true);
+                        } else {
+                            self.cleanup_range_keys(
+                                *rid2,
+                                handle.id,
+                                &akeys,
+                                CleanupMode::Revert,
+                            );
+                        }
                     }
-                    // Re-fence after cleanup (revert may drop status keys).
                     self.fence_txn_aborted(handle.id);
                     return Err(e);
                 }

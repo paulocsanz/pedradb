@@ -118,7 +118,7 @@ API: [`StoreCluster::put_batch`](../../crates/pedradb-store/src/lib.rs) — one 
 | Invariant | Test / harness | Crate |
 |-----------|----------------|-------|
 | I-TX-1 Ok cross-range ⇒ all keys majority-applied | `commit_tx_cross_range_atomic_majority` | pedradb-store |
-| I-TX-2 fail/abort ⇒ no partial user keys | `commit_tx_cross_range_minority_no_partial`; `commit_tx_finish_fail_after_prepare_no_partial` | pedradb-store |
+| I-TX-2 fail/abort ⇒ no partial user keys | `commit_tx_cross_range_minority_no_partial`; `commit_tx_finish_fail_after_prepare_no_partial`; `fail_after_mid_2pc_restores_preimage` (F47) | pedradb-store |
 | I-TX-3 write-write conflict on intents | `commit_tx_write_write_conflict` | pedradb-store |
 | I-TX-4 multi-range single-key still works | `multi_range_puts_still_work_with_tx_path` | pedradb-store |
 | I-TX-5 multi-process durable TX | `tests/multiprocess_tx.rs` + bin `montanha-store-smoke` | pedradb-store |

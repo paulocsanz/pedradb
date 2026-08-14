@@ -326,71 +326,86 @@ fn clear_is_real_pedra_delete() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// FailingEnv mid-2PC: finish cannot majority-apply; preimage stays; no stuck intents.
-/// F47: abort fence + reopen revert so heal/elect cannot majority-install aborted TX.
+/// F47: client heard finish fail; heal+reopen+elect must not majority-install the TX.
+///
+/// No `tx_cancel` before drop — that hid the soak (cancel after heal rewrote
+/// Pedra while the committed `TxnCommit` stayed in the raft log).
 #[test]
 fn fail_after_mid_2pc_restores_preimage() {
-    let dir = temp();
-    let e1 = FailingEnv::passing();
-    let e2 = FailingEnv::passing();
-    let e3 = FailingEnv::passing();
-    let mut c = StoreCluster::open_with_envs_rng(
-        &dir,
-        3,
-        3,
-        [e1.clone(), e2.clone(), e3.clone()],
-        pedradb_core::SeedRng::new(0xF2C_FA17),
-    )
-    .unwrap();
-    c.elect_all(80).unwrap();
-    let keys = keys_one_per_range(&c);
-    assert!(keys.len() >= 2);
-    c.put(&keys[0], b"old-a").unwrap();
-    c.put(&keys[1], b"old-b").unwrap();
-    let h = c
-        .tx_start([
-            (keys[0].as_slice(), b"new-a".as_slice()),
-            (keys[1].as_slice(), b"new-b".as_slice()),
-        ])
-        .expect("prepare");
-    // Majority disks dead for writes — finish must fail closed.
-    e1.arm_op_class(OpClass::Write, 0, false, FaultKind::IoError);
-    e2.arm_op_class(OpClass::Write, 0, false, FaultKind::IoError);
-    let err = c.tx_finish(&h);
-    assert!(err.is_err(), "finish under dead majority must fail, got {err:?}");
-    // I-TX-2: fail ⇒ no *majority* new apply (a single leader replica may
-    // have applied locally before replication died — LocalApplied, not I-MAJ).
-    assert!(
-        c.count_applied_eq(&keys[0], b"new-a") < 2,
-        "new-a majority-applied after failed finish"
-    );
-    assert!(
-        c.count_applied_eq(&keys[1], b"new-b") < 2,
-        "new-b majority-applied after failed finish"
-    );
-    e1.arm(u64::MAX, false);
-    e2.arm(u64::MAX, false);
-    c.elect_all(80).unwrap();
-    let _ = c.tx_cancel(&h);
-    drop(c);
-    // Reopen reverts leftover preimages (F35) even if cancel could not write.
-    let mut c = StoreCluster::open_with_envs_rng(
-        &dir,
-        3,
-        3,
-        [e1.clone(), e2.clone(), e3.clone()],
-        pedradb_core::SeedRng::new(0xF2C_FA18),
-    )
-    .unwrap();
-    c.elect_all(80).unwrap();
-    assert!(
-        c.count_applied_eq(&keys[0], b"new-a") < 2,
-        "reopen must not majority-install new-a"
-    );
-    c.put(&keys[0], b"after")
-        .expect("put after heal+reopen must not Conflict on leftover intent");
-    assert!(c.count_applied_eq(&keys[0], b"after") >= 2);
-    let _ = std::fs::remove_dir_all(&dir);
+    for seed in [0xF2C_FA17_u64, 0xF47_F47, 0x00C0_FFEE] {
+        let dir = temp();
+        let e1 = FailingEnv::passing();
+        let e2 = FailingEnv::passing();
+        let e3 = FailingEnv::passing();
+        let keys;
+        {
+            let mut c = StoreCluster::open_with_envs_rng(
+                &dir,
+                3,
+                3,
+                [e1.clone(), e2.clone(), e3.clone()],
+                pedradb_core::SeedRng::new(seed),
+            )
+            .unwrap();
+            c.elect_all(80).unwrap();
+            keys = keys_one_per_range(&c);
+            assert!(keys.len() >= 2);
+            c.put(&keys[0], b"old-a").unwrap();
+            c.put(&keys[1], b"old-b").unwrap();
+            let h = c
+                .tx_start([
+                    (keys[0].as_slice(), b"new-a".as_slice()),
+                    (keys[1].as_slice(), b"new-b".as_slice()),
+                ])
+                .expect("prepare");
+            e1.arm_op_class(OpClass::Write, 0, false, FaultKind::IoError);
+            e2.arm_op_class(OpClass::Write, 0, false, FaultKind::IoError);
+            let err = c.tx_finish(&h);
+            assert!(
+                err.is_err(),
+                "seed {seed:#x}: finish under dead majority must fail, got {err:?}"
+            );
+            assert!(
+                c.count_applied_eq(&keys[0], b"new-a") < 2,
+                "seed {seed:#x}: new-a majority-applied after failed finish"
+            );
+            assert!(
+                c.count_applied_eq(&keys[1], b"new-b") < 2,
+                "seed {seed:#x}: new-b majority-applied after failed finish"
+            );
+            // Heal disks, then crash the process — no cancel, no elect.
+            e1.arm(u64::MAX, false);
+            e2.arm(u64::MAX, false);
+            drop(c);
+        }
+        let mut c = StoreCluster::open_with_envs_rng(
+            &dir,
+            3,
+            3,
+            [e1.clone(), e2.clone(), e3.clone()],
+            pedradb_core::SeedRng::new(seed ^ 0xA5A5_A5A5),
+        )
+        .unwrap();
+        c.elect_all(80).unwrap();
+        assert!(
+            c.count_applied_eq(&keys[0], b"new-a") < 2,
+            "seed {seed:#x}: reopen+elect majority-installed new-a (F47)"
+        );
+        assert!(
+            c.count_applied_eq(&keys[1], b"new-b") < 2,
+            "seed {seed:#x}: reopen+elect majority-installed new-b (F47)"
+        );
+        let got0 = c.get(&keys[0]).unwrap();
+        assert_eq!(
+            got0.as_deref(),
+            Some(b"old-a".as_ref()),
+            "seed {seed:#x}: preimage lost after reopen, got {got0:?}"
+        );
+        c.put(&keys[0], b"after")
+            .expect("put after heal+reopen must not Conflict on leftover intent");
+        assert!(c.count_applied_eq(&keys[0], b"after") >= 2);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
 
 /// Bitrot on `\0store/hist/` must not serve the tip as an old snapshot.

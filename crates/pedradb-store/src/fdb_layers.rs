@@ -7,18 +7,25 @@
 use crate::client::Transaction;
 use crate::{Result, StoreCluster, StoreError};
 
+/// Blind retry budget (FDB 1021-shaped). Unbounded Conflict retry hangs soaks.
+const LAYER_RETRY_LIMIT: u32 = 64;
+
 /// Retry on retryable store errors (the careless layer).
 fn retry_loop<T>(mut once: impl FnMut() -> Result<T>) -> Result<T> {
-    loop {
+    let mut last: Option<StoreError> = None;
+    for _ in 0..LAYER_RETRY_LIMIT {
         match once() {
             Ok(v) => return Ok(v),
-            Err(StoreError::NotCommitted { .. })
-            | Err(StoreError::NotLeader { .. })
-            | Err(StoreError::Conflict)
-            | Err(StoreError::TransactionTooOld { .. }) => continue,
+            Err(e @ (StoreError::NotCommitted { .. }
+            | StoreError::NotLeader { .. }
+            | StoreError::Conflict
+            | StoreError::TransactionTooOld { .. })) => {
+                last = Some(e);
+            }
             Err(e) => return Err(e),
         }
     }
+    Err(last.unwrap_or_else(|| StoreError::Msg("layer retry budget exceeded".into())))
 }
 
 /// Directory-shaped: increment a counter, write `name/N`. Blind retry leaks a name.
