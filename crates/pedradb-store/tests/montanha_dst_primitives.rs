@@ -375,13 +375,8 @@ fn fail_after_mid_2pc_restores_preimage() {
     e2.arm(u64::MAX, false);
     c.elect_all(80).unwrap();
     let _ = c.tx_cancel(&h);
-    eprintln!(
-        "after finish new-a={} new-b={}",
-        c.count_applied_eq(&keys[0], b"new-a"),
-        c.count_applied_eq(&keys[1], b"new-b")
-    );
     drop(c);
-    // Reopen aborts leftover intents (F35) even if cancel could not write.
+    // Reopen reverts leftover preimages (F35) even if cancel could not write.
     let mut c = StoreCluster::open_with_envs_rng(
         &dir,
         3,
@@ -390,17 +385,7 @@ fn fail_after_mid_2pc_restores_preimage() {
         pedradb_core::SeedRng::new(0xF2C_FA18),
     )
     .unwrap();
-    eprintln!(
-        "after open (no elect) new-a={} new-b={}",
-        c.count_applied_eq(&keys[0], b"new-a"),
-        c.count_applied_eq(&keys[1], b"new-b")
-    );
     c.elect_all(80).unwrap();
-    eprintln!(
-        "after elect new-a={} new-b={}",
-        c.count_applied_eq(&keys[0], b"new-a"),
-        c.count_applied_eq(&keys[1], b"new-b")
-    );
     assert!(
         c.count_applied_eq(&keys[0], b"new-a") < 2,
         "reopen must not majority-install new-a"

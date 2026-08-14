@@ -1,4 +1,4 @@
-# Montanha FDB-layer substitution — Phases 1–3
+# Montanha FDB-layer substitution — Phases 1–3 (+1b)
 
 **Status:** done (thin real proofs)  
 **Updated:** 2026-08-14  
@@ -8,12 +8,13 @@ Not FDB field peer. Not full bindingtester. Not production Apple Record Layer.
 | Phase | Proof | Entry point | Tests |
 |-------|--------|-------------|--------|
 | **1** FDB-shaped client | create_tx / get / set / clear / commit + Conflict / too-old / limit + SI | `pedradb_store::run_phase1_bindingtester_subset` | `phase1_bindingtester_subset_harness` |
+| **1b** deeper subset | multi-key atomic, `get_range` + staging overlay, range OCC + no false conflict, clear→set same key | same harness (11 steps) | same |
 | **2** etcd multiproc freeze | create/CAS/get/watch only on multi-process store | `EtcdNeedFace` + smoke `etcd-need` | `multi_process_etcd_need_face_freeze` |
 | **3** Record seed | row + secondary index in one TX; concurrent Conflict | `montanha_fdb_recipes::RecordTable` | `phase3_record_table_*` |
 
 ## Honesty residual
 
-- Phase 1 is a **subset** of FDB client semantics, not 100% bindingtester.  
+- Phase 1/1b is a **subset** of FDB client semantics, not 100% bindingtester (no full op list, no directory layer, no watches on fdb face).  
 - Phase 2 freezes dual SoR for **locks/config**, not full etcd gRPC.  
 - Phase 3 is a **seed** (encoding + multi-key TX), not Java Record Layer / SQL planner.
 

@@ -194,3 +194,5 @@ Subjects, queue groups, leaf nodes, superclusters = product surface on top — n
 2. **Core NATS need** (ephemeral high-speed bus) is **not** solved by “a database”; don’t force PedraDB there.  
 3. **No drop-in.** Same rule as Scylla: replace the **job**, not the logo.  
 4. **P0 unchanged** — but durability and log-export priorities stay **confirmed**, not diluted.
+
+**Follow-up (2026-08-14):** the *consumer* of a bounded KV log (cursor-after-apply, expiry resync, fold export) is documented from Slipstream + Quicksilver v2 in [`slipstream-and-quicksilver-learnings.md`](slipstream-and-quicksilver-learnings.md). That layer is not JetStream and not Montanha TX.

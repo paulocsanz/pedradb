@@ -43,8 +43,8 @@ Last updated: 2026-08-14 (RFC-0023 + Slipstream/Quicksilver v2 research note)
 | 11 | Streaming range / lazy blocks (RFC-0014 P1) | ✅ done | scan + lazy SST blocks + levels + lz4 | — |
 | 12 | Audit correctness fixes (RFC-0015) | ✅ done | fence, sync_dir, Env seams, compact stats, deny CI | — |
 
-**Next action:** Optional deeper bindingtester / TCP etcd wire / Java Record Layer shim.  
-**Shipped Phase 1–3:** [montanha-fdb-phases.md](montanha-fdb-phases.md) — fdb-compat harness, etcd multiproc freeze, `RecordTable` seed.  
+**Next action:** Optional TCP etcd wire / full bindingtester / Java Record Layer (explicit non-goals until requested).  
+**Shipped Phase 1–3 +1b:** [montanha-fdb-phases.md](montanha-fdb-phases.md) — fdb-compat harness (11 steps: SI + range OCC + multi-key), etcd multiproc freeze, `RecordTable` seed.  
 **Shipped (recipes):** `montanha-fdb-recipes` — design recipes + SI/OCC.  
 **Shipped (0023):** SI, Transaction, watermark, fdb_compat + c-api.  
 **Do not** claim FDB field peer, full bindingtester, or production Record Layer.  

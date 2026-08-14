@@ -144,7 +144,9 @@ pub struct Phase1HarnessReport {
 ///
 /// Covers: create_transaction → set/get/clear/commit, WW → `NotCommitted`,
 /// snapshot isolation (concurrent put invisible to in-TX get + read-set Conflict),
-/// and too-old mapping. Not full FoundationDB bindingtester.
+/// too-old / limit mapping, **plus** Phase 1b: multi-key atomic commit,
+/// `get_range` contents + staging overlay, range OCC conflict, out-of-range
+/// write does not conflict. Not full FoundationDB bindingtester.
 ///
 /// # Errors
 /// First failed assertion as `FdbError::Other` or mapped store error.
@@ -239,7 +241,153 @@ pub fn run_phase1_bindingtester_subset(
         steps_ok.push("si_read_set_conflict");
     }
 
-    // 5) too-old maps
+    // ── Phase 1b: deeper bindingtester subset (range + multi-key) ──────────
+    // Run *before* too-old: force_safe_watermark would poison later commits.
+
+    // 5) multi-key atomic commit via face
+    {
+        let mut tr = db.create_transaction();
+        tr.set(b"p1b/a", b"1")
+            .map_err(|e| FdbError::from_store(&e))?;
+        tr.set(b"p1b/b", b"2")
+            .map_err(|e| FdbError::from_store(&e))?;
+        db.commit(tr)?;
+        let mut tr2 = db.create_transaction();
+        let a = tr2
+            .get(&db, b"p1b/a")
+            .map_err(|e| FdbError::from_store(&e))?;
+        let b = tr2
+            .get(&db, b"p1b/b")
+            .map_err(|e| FdbError::from_store(&e))?;
+        if a.as_deref() != Some(b"1".as_ref()) || b.as_deref() != Some(b"2".as_ref()) {
+            return Err(FdbError::Other(format!(
+                "multi-key after commit a={a:?} b={b:?}"
+            )));
+        }
+        steps_ok.push("multi_key_atomic");
+    }
+
+    // 6) get_range sees committed keys; staging overlay visible in same TX
+    {
+        let mut tr = db.create_transaction();
+        let pairs = tr
+            .get_range(&db, b"p1b/", b"p1b0")
+            .map_err(|e| FdbError::from_store(&e))?;
+        let keys: Vec<&[u8]> = pairs.iter().map(|(k, _)| k.as_slice()).collect();
+        if !keys.contains(&b"p1b/a".as_slice()) || !keys.contains(&b"p1b/b".as_slice()) {
+            return Err(FdbError::Other(format!(
+                "get_range missing committed keys: {keys:?}"
+            )));
+        }
+        // Stage new key in range — must appear in subsequent get_range on same TX.
+        tr.set(b"p1b/c", b"3")
+            .map_err(|e| FdbError::from_store(&e))?;
+        let pairs2 = tr
+            .get_range(&db, b"p1b/", b"p1b0")
+            .map_err(|e| FdbError::from_store(&e))?;
+        let has_c = pairs2.iter().any(|(k, v)| k.as_slice() == b"p1b/c" && v == b"3");
+        if !has_c {
+            return Err(FdbError::Other(format!(
+                "staging overlay missing p1b/c in get_range: {pairs2:?}"
+            )));
+        }
+        db.commit(tr)?;
+        steps_ok.push("get_range_contents_and_overlay");
+    }
+
+    // 7) range OCC: get_range then concurrent write **in** range → NotCommitted
+    {
+        let mut tr = db.create_transaction();
+        let _ = tr
+            .get_range(&db, b"p1b/", b"p1b0")
+            .map_err(|e| FdbError::from_store(&e))?;
+        db.cluster()
+            .put(b"p1b/a", b"mut")
+            .map_err(|e| FdbError::from_store(&e))?;
+        tr.set(b"p1b/d", b"x")
+            .map_err(|e| FdbError::from_store(&e))?;
+        let err = db.commit(tr).expect_err("range OCC must Conflict");
+        if err != FdbError::NotCommitted {
+            return Err(FdbError::Other(format!(
+                "expected range NotCommitted, got {err:?}"
+            )));
+        }
+        steps_ok.push("range_conflict");
+    }
+
+    // 8) write **outside** conflict range must commit (no false Conflict)
+    {
+        let mut tr = db.create_transaction();
+        let _ = tr
+            .get_range(&db, b"p1b/", b"p1b0")
+            .map_err(|e| FdbError::from_store(&e))?;
+        // Concurrent mutation outside [p1b/, p1b0)
+        db.cluster()
+            .put(b"p1b_out/z", b"ok")
+            .map_err(|e| FdbError::from_store(&e))?;
+        tr.set(b"p1b/e", b"y")
+            .map_err(|e| FdbError::from_store(&e))?;
+        db.commit(tr)?;
+        let mut tr2 = db.create_transaction();
+        let got = tr2
+            .get(&db, b"p1b/e")
+            .map_err(|e| FdbError::from_store(&e))?;
+        if got.as_deref() != Some(b"y".as_ref()) {
+            return Err(FdbError::Other(format!(
+                "out-of-range concurrent write must not block commit, got {got:?}"
+            )));
+        }
+        steps_ok.push("range_no_false_conflict");
+    }
+
+    // 9) clear then set same key in one TX (staging)
+    {
+        db.cluster()
+            .put(b"p1b/flip", b"old")
+            .map_err(|e| FdbError::from_store(&e))?;
+        let mut tr = db.create_transaction();
+        tr.clear(b"p1b/flip")
+            .map_err(|e| FdbError::from_store(&e))?;
+        let mid = tr
+            .get(&db, b"p1b/flip")
+            .map_err(|e| FdbError::from_store(&e))?;
+        if mid.is_some() {
+            return Err(FdbError::Other(format!(
+                "clear must hide key in-TX, got {mid:?}"
+            )));
+        }
+        tr.set(b"p1b/flip", b"new")
+            .map_err(|e| FdbError::from_store(&e))?;
+        db.commit(tr)?;
+        let mut tr2 = db.create_transaction();
+        let got = tr2
+            .get(&db, b"p1b/flip")
+            .map_err(|e| FdbError::from_store(&e))?;
+        if got.as_deref() != Some(b"new".as_ref()) {
+            return Err(FdbError::Other(format!(
+                "clear+set same key commit got {got:?}"
+            )));
+        }
+        steps_ok.push("clear_then_set_same_key");
+    }
+
+    // 10) limit maps (oversized value) — no watermark side effects
+    {
+        let mut tr = db.create_transaction();
+        let big = vec![0u8; crate::MAX_VALUE_BYTES + 1];
+        let err = tr
+            .set(b"p1/big", &big)
+            .expect_err("oversized set must fail");
+        let mapped = FdbError::from_store(&err);
+        if mapped != FdbError::Limit {
+            return Err(FdbError::Other(format!(
+                "expected Limit, got {mapped:?} from {err}"
+            )));
+        }
+        steps_ok.push("limit");
+    }
+
+    // 11) too-old maps — last: advances safe_watermark and would poison later commits
     {
         let mut tr = db.create_transaction();
         tr.set(b"p1/old", b"1")
@@ -254,22 +402,6 @@ pub fn run_phase1_bindingtester_subset(
             )));
         }
         steps_ok.push("too_old");
-    }
-
-    // 6) limit maps (oversized value)
-    {
-        let mut tr = db.create_transaction();
-        let big = vec![0u8; crate::MAX_VALUE_BYTES + 1];
-        let err = tr
-            .set(b"p1/big", &big)
-            .expect_err("oversized set must fail");
-        let mapped = FdbError::from_store(&err);
-        if mapped != FdbError::Limit {
-            return Err(FdbError::Other(format!(
-                "expected Limit, got {mapped:?} from {err}"
-            )));
-        }
-        steps_ok.push("limit");
     }
 
     Ok(Phase1HarnessReport { steps_ok })
@@ -339,7 +471,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// Phase 1: full FDB-shaped harness on real 3-node store.
+    /// Phase 1 + 1b: FDB-shaped harness on real 3-node store (incl. range OCC).
     #[test]
     fn phase1_bindingtester_subset_harness() {
         let dir = temp();
@@ -356,7 +488,17 @@ mod tests {
             "ww step missing: {:?}",
             report.steps_ok
         );
-        assert_eq!(report.steps_ok.len(), 6, "steps={:?}", report.steps_ok);
+        assert!(
+            report.steps_ok.contains(&"range_conflict"),
+            "range OCC missing: {:?}",
+            report.steps_ok
+        );
+        assert!(
+            report.steps_ok.contains(&"range_no_false_conflict"),
+            "false-conflict guard missing: {:?}",
+            report.steps_ok
+        );
+        assert_eq!(report.steps_ok.len(), 11, "steps={:?}", report.steps_ok);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
