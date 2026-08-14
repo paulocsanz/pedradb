@@ -18,6 +18,12 @@
 //! - **Cross-range multi-key TX** via [`StoreCluster::commit_tx`] / [`tx_start`] /
 //!   [`tx_finish`]: 2PC prepare/commit with durable intents (FDB-class *gap* vs
 //!   same-range-only batch). Write-write conflicts on intent-held keys abort.
+//! - **Snapshot/OCC client TX** (RFC-0022): [`StoreCluster::snapshot_begin`] /
+//!   [`client::SnapshotTx`] — snapshot generation at begin, OCC on commit,
+//!   optional [`StoreError::TransactionTooOld`]. Leadership-invisible (no range ids).
+//! - **Watch** after majority commit via [`WatchHub`] (RFC-0022 P0.3).
+//! - **Product faces** in [`layers`] (etcd-need, TiKV-like, table/SQLite encode,
+//!   PG N-writer, OLAP RO, stream) — thin layers, not wire clones.
 //!
 //! # Reads
 //!
@@ -37,8 +43,27 @@
 #![warn(missing_docs)]
 
 mod msg;
+pub mod client;
+pub mod fdb_compat;
+pub mod layers;
+pub mod tcp;
 
+pub use client::{
+    classify, classify_message, leader_from_status, ClientClass, PendingTx, SnapshotTx,
+    TcpClusterClient, Transaction, MAX_SNAPSHOT_LAG,
+};
+pub use fdb_compat::{FdbDatabase, FdbError, FdbTransaction};
+pub use layers::{
+    olap_get, olap_ingest, pg_upsert, pks_one_per_range, put_with_secondary_index,
+    raw_keys_one_per_range, sql_multi_table_write, stream_get, stream_publish, table_get, table_put,
+    table_row_key, EtcdNeedFace, TikvKvFace, WatchEvent, WatchHub,
+};
 pub use msg::PeerMsg;
+pub use tcp::{
+    client_commit_tx, client_get, client_put, client_set_peers, client_status, client_tick,
+    connect as tcp_connect, connect_host as tcp_connect_host, peer_wire, read_frame,
+    resolve_host_port, write_frame, WireMsg,
+};
 
 use std::collections::{HashMap, VecDeque};
 use std::ops::Bound;
@@ -126,6 +151,30 @@ pub enum StoreError {
     /// Prepared TX was aborted (conflict during prepare apply or explicit cancel).
     #[error("transaction {0} aborted")]
     TxnAborted(u64),
+    /// Snapshot is too old relative to cluster commit generation (RFC-0022 / FDB-class).
+    #[error("transaction too old: snapshot {snapshot}, current {current}")]
+    TransactionTooOld {
+        /// Generation at [`StoreCluster::snapshot_begin`].
+        snapshot: u64,
+        /// Cluster [`StoreCluster::read_version`] at commit attempt.
+        current: u64,
+    },
+    /// Single value exceeds [`MAX_VALUE_BYTES`].
+    #[error("value too large: {size} bytes (limit {limit})")]
+    ValueTooLarge {
+        /// Actual size in bytes.
+        size: usize,
+        /// Configured limit.
+        limit: usize,
+    },
+    /// Transaction payload (sum of key+value sizes or key count) exceeds limit.
+    #[error("transaction too large: {size} (limit {limit})")]
+    TransactionTooLarge {
+        /// Measured size (bytes or key count — see message context via fields).
+        size: usize,
+        /// Configured limit.
+        limit: usize,
+    },
     /// No range covers key.
     #[error("no range for key")]
     NoRange,
@@ -133,6 +182,13 @@ pub enum StoreError {
     #[error("{0}")]
     Msg(String),
 }
+
+/// Max single value size for client TX / put paths (FDB-class order; Montanha-chosen).
+pub const MAX_VALUE_BYTES: usize = 100 * 1024;
+/// Max sum of key+value bytes in one client TX commit.
+pub const MAX_TX_BYTES: usize = 10 * 1024 * 1024;
+/// Max number of keys in one client TX commit.
+pub const MAX_TX_KEYS: usize = 10_000;
 
 /// Handle for a multi-range TX after successful prepare (2PC).
 #[derive(Debug, Clone)]
@@ -276,6 +332,18 @@ fn raft_meta_key(range_id: u64, kind: &str) -> Vec<u8> {
     k
 }
 
+/// Half-open interval `[start, end)` on raw key bytes (`end` empty = +∞).
+#[must_use]
+pub fn key_in_half_open(key: &[u8], start: &[u8], end: &[u8]) -> bool {
+    if key < start {
+        return false;
+    }
+    if end.is_empty() {
+        return true;
+    }
+    key < end
+}
+
 fn is_reserved_store_key(key: &[u8]) -> bool {
     key.starts_with(RAFT_META_PREFIX)
         || key.starts_with(INTENT_PREFIX)
@@ -326,6 +394,41 @@ fn decode_intent(raw: &[u8]) -> Option<(u64, &[u8])> {
 }
 
 /// True if `user` has an intent held by a *different* txn (or any if `self_id` is None).
+/// Validate key/value pairs against TX size limits (RFC-0021 P0.2).
+pub fn validate_tx_pairs(pairs: &[(Vec<u8>, Vec<u8>)]) -> Result<()> {
+    if pairs.len() > MAX_TX_KEYS {
+        return Err(StoreError::TransactionTooLarge {
+            size: pairs.len(),
+            limit: MAX_TX_KEYS,
+        });
+    }
+    let mut total = 0usize;
+    for (k, v) in pairs {
+        if v.len() > MAX_VALUE_BYTES {
+            return Err(StoreError::ValueTooLarge {
+                size: v.len(),
+                limit: MAX_VALUE_BYTES,
+            });
+        }
+        if is_reserved_store_key(k) {
+            return Err(StoreError::Msg(
+                "key prefix reserved for store internal meta".into(),
+            ));
+        }
+        total = total.saturating_add(k.len()).saturating_add(v.len());
+        if total > MAX_TX_BYTES {
+            return Err(StoreError::TransactionTooLarge {
+                size: total,
+                limit: MAX_TX_BYTES,
+            });
+        }
+    }
+    if pairs.is_empty() {
+        return Err(StoreError::Msg("empty transaction".into()));
+    }
+    Ok(())
+}
+
 fn intent_conflict<E: Env>(db: &Db<E>, user: &[u8], self_id: Option<u64>) -> bool {
     let Some(raw) = db.get(&intent_key(user)) else {
         return false;
@@ -996,7 +1099,33 @@ pub struct StoreCluster<E: Env = StdEnv> {
     now_ms: u64,
     /// When true, each [`Self::tick`] also advances `now_ms` by this many ms (World).
     ms_per_tick: u64,
+    /// RFC-0021 P2.6: node_id → region label (lab multi-site; empty = unknown).
+    node_regions: HashMap<u64, String>,
+    /// RFC-0021 P1.3: optional dial map id → host:port (in-process control plane;
+    /// multi-host nodes still push via TCP `SetPeers` without SSH).
+    peer_addrs: HashMap<u64, String>,
+    /// Monotonic commit generation (RFC-0022/0023 snapshot/OCC `read_version`).
+    commit_generation: u64,
+    /// Last commit generation that mutated each user key (OCC).
+    key_versions: HashMap<Vec<u8>, u64>,
+    /// Per-key history: `(generation, value)` ordered ascending by generation.
+    /// Generation `0` holds the pre-image before the first mutation in this process
+    /// (RFC-0023 snapshot reads). Value `None` = deleted / absent.
+    key_history: HashMap<Vec<u8>, Vec<(u64, Option<Vec<u8>>)>>,
+    /// Snapshots strictly below this are too old (version GC watermark).
+    safe_watermark: u64,
+    /// Preimages staged at propose time; flushed when log index majority-commits
+    /// (Direct Ok **and** Queued `finish_queued_propose`). Key: `(range_id, log_index)`.
+    pending_version_notes: HashMap<(u64, u64), Vec<(Vec<u8>, Vec<u8>, Option<Vec<u8>>)>>,
+    /// Last log index per range already flushed into version history (idempotent).
+    version_notes_through: HashMap<u64, u64>,
+    /// In-process watch hub; notified after majority put/commit_tx (RFC-0022 P0.3).
+    watch: WatchHub,
 }
+
+/// How many commit generations of version history to retain (RFC-0023 P0.4).
+/// Snapshots older than `commit_generation - VERSION_RETENTION` become too-old after GC.
+pub const VERSION_RETENTION: u64 = 64;
 
 impl StoreCluster<StdEnv> {
     /// Open `n_nodes` under `parent`, with `n_ranges` equal splits of the keyspace.
@@ -1009,6 +1138,103 @@ impl StoreCluster<StdEnv> {
     /// Open / bad args.
     pub fn open(parent: impl AsRef<Path>, n_nodes: u64, n_ranges: u64) -> Result<Self> {
         Self::open_with_rng(parent, n_nodes, n_ranges, SeedRng::new(0xA11CE))
+    }
+
+    /// Open **one** local node for multi-host TCP (RFC-0017 P0.1).
+    ///
+    /// Only `store-node-{self_id}` is opened; `member_ids` is the full Raft
+    /// membership (must include `self_id`). Use [`RpcMode::Queued`] and pump
+    /// outbound PeerMsg over the network to remote peers.
+    ///
+    /// # Errors
+    /// Open / bad args.
+    pub fn open_single_node(
+        parent: impl AsRef<Path>,
+        self_id: u64,
+        member_ids: &[u64],
+        n_ranges: u64,
+    ) -> Result<Self> {
+        Self::open_single_node_with_rng(
+            parent,
+            self_id,
+            member_ids,
+            n_ranges,
+            SeedRng::new(0xA11CE ^ self_id.wrapping_mul(0x9E37_79B9)),
+        )
+    }
+
+    /// [`open_single_node`](Self::open_single_node) with explicit RNG.
+    ///
+    /// # Errors
+    /// Open / bad args.
+    pub fn open_single_node_with_rng(
+        parent: impl AsRef<Path>,
+        self_id: u64,
+        member_ids: &[u64],
+        n_ranges: u64,
+        rng: SeedRng,
+    ) -> Result<Self> {
+        if n_ranges == 0 || member_ids.is_empty() {
+            return Err(StoreError::Msg("need members and ranges".into()));
+        }
+        if !member_ids.contains(&self_id) {
+            return Err(StoreError::Msg("self_id not in member_ids".into()));
+        }
+        if n_ranges > 256 {
+            return Err(StoreError::Msg(
+                "n_ranges > 256 not supported (single-byte keyspace split)".into(),
+            ));
+        }
+        let parent = parent.as_ref();
+        let ranges = split_keyspace(n_ranges);
+        let opts = OpenOptions {
+            sync: true,
+            auto_flush_bytes: None,
+            auto_compact_sst_count: None,
+            auto_compact_sst_bytes: None,
+            exclusive: true,
+            large_value_threshold: None,
+        };
+        let dir = parent.join(format!("store-node-{self_id}"));
+        let db = Db::open_with_env(&dir, opts, StdEnv)?;
+        let mut rmap = HashMap::new();
+        for meta in &ranges {
+            rmap.insert(meta.id, load_range_peer(&db, meta.id, self_id)?);
+        }
+        let mut nodes = HashMap::new();
+        nodes.insert(
+            self_id,
+            StoreNode {
+                db,
+                ranges: rmap,
+                participating: true,
+            },
+        );
+        let mut ids: Vec<u64> = member_ids.to_vec();
+        ids.sort_unstable();
+        ids.dedup();
+        Ok(Self {
+            nodes,
+            ids,
+            ranges,
+            rng,
+            next_txn_id: 1,
+            rpc_mode: RpcMode::Queued,
+            outbound: VecDeque::new(),
+            election_votes: HashMap::new(),
+            logical_now: 0,
+            now_ms: 0,
+            ms_per_tick: 10,
+            node_regions: HashMap::new(),
+            peer_addrs: HashMap::new(),
+            commit_generation: 0,
+            key_versions: HashMap::new(),
+            key_history: HashMap::new(),
+            safe_watermark: 0,
+            pending_version_notes: HashMap::new(),
+            version_notes_through: HashMap::new(),
+            watch: WatchHub::new(),
+        })
     }
 
     /// Open with a deterministic RNG for election jitter (DST / reproducible tests).
@@ -1119,6 +1345,15 @@ impl<E: Env> StoreCluster<E> {
             logical_now: 0,
             now_ms: 0,
             ms_per_tick: 10,
+            node_regions: HashMap::new(),
+            peer_addrs: HashMap::new(),
+            commit_generation: 0,
+            key_versions: HashMap::new(),
+            key_history: HashMap::new(),
+            safe_watermark: 0,
+            pending_version_notes: HashMap::new(),
+            version_notes_through: HashMap::new(),
+            watch: WatchHub::new(),
         })
     }
 
@@ -1362,12 +1597,38 @@ impl<E: Env> StoreCluster<E> {
     }
 
     /// Whether `node_id` participates in Raft (not partitioned).
+    ///
+    /// Remote peers (not opened in this process — multi-host TCP) count as
+    /// participating if they remain in membership [`Self::node_ids`].
     #[must_use]
     pub fn is_participating(&self, node_id: u64) -> bool {
-        self.nodes
-            .get(&node_id)
-            .map(|n| n.participating)
-            .unwrap_or(false)
+        if let Some(n) = self.nodes.get(&node_id) {
+            n.participating
+        } else {
+            self.ids.contains(&node_id)
+        }
+    }
+
+    /// True if this process holds the PedraDB for `node_id`.
+    #[must_use]
+    pub fn is_local_node(&self, node_id: u64) -> bool {
+        self.nodes.contains_key(&node_id)
+    }
+
+    /// Local node id when this process is a single-node multi-host member.
+    #[must_use]
+    pub fn local_node_id(&self) -> Option<u64> {
+        if self.nodes.len() == 1 {
+            self.nodes.keys().next().copied()
+        } else {
+            None
+        }
+    }
+
+    /// Raft membership ids (sorted).
+    #[must_use]
+    pub fn member_ids(&self) -> &[u64] {
+        &self.ids
     }
 
     /// Partition or heal a node (no votes / append / leadership while off).
@@ -1538,7 +1799,7 @@ impl<E: Env> StoreCluster<E> {
         let mut elect: Vec<u64> = Vec::new();
         let mut hb: Vec<u64> = Vec::new();
         for &nid in ids {
-            if !self.is_participating(nid) {
+            if !self.is_participating(nid) || !self.is_local_node(nid) {
                 continue;
             }
             let p = self.nodes.get_mut(&nid).unwrap().ranges.get_mut(&rid).unwrap();
@@ -2000,10 +2261,10 @@ impl<E: Env> StoreCluster<E> {
             }
         }
         self.try_advance_commit(range_id, leader)?;
-        // Apply on participating nodes for this range.
+        // Apply only **local** participating nodes (multi-host).
         let ids = self.ids.clone();
         for &nid in &ids {
-            if self.is_participating(nid) {
+            if self.is_local_node(nid) && self.is_participating(nid) {
                 self.apply_range(nid, range_id)?;
             }
         }
@@ -2189,7 +2450,7 @@ impl<E: Env> StoreCluster<E> {
         self.try_advance_commit(range_id, leader)?;
         let ids = self.ids.clone();
         for &nid in &ids {
-            if self.is_participating(nid) {
+            if self.is_local_node(nid) && self.is_participating(nid) {
                 self.apply_range(nid, range_id)?;
             }
         }
@@ -2220,6 +2481,8 @@ impl<E: Env> StoreCluster<E> {
         let had_client = client.is_some();
         let mut proposed_index: Option<u64> = None;
         if let Some(entry) = client {
+            // Capture preimages **before** apply (Queued may apply much later).
+            let note_items = self.preimages_for_entry(&entry);
             let n = self.nodes.get_mut(&leader).unwrap();
             let p = n.ranges.get_mut(&rid).unwrap();
             if p.role != Role::Leader {
@@ -2237,6 +2500,9 @@ impl<E: Env> StoreCluster<E> {
             });
             proposed_index = Some(idx);
             persist_log_db(&mut n.db, rid, p)?;
+            if !note_items.is_empty() {
+                self.pending_version_notes.insert((rid, idx), note_items);
+            }
         }
         let (term, commit, last, log_snap) = {
             let p = self.nodes.get(&leader).unwrap().ranges.get(&rid).unwrap();
@@ -2325,10 +2591,9 @@ impl<E: Env> StoreCluster<E> {
             }
         }
 
-        // Apply on participating nodes for this range (Direct path; Queued also
-        // applies on AE receipt / AE-reply handling).
+        // Apply only **local** participating nodes (multi-host: remotes apply via AE).
         for &nid in &ids {
-            if self.is_participating(nid) {
+            if self.is_local_node(nid) && self.is_participating(nid) {
                 self.apply_range(nid, rid)?;
             }
         }
@@ -2336,9 +2601,21 @@ impl<E: Env> StoreCluster<E> {
         if had_client {
             self.broadcast_append(rid, leader, None)?;
             for &nid in &ids {
-                if self.is_participating(nid) {
+                if self.is_local_node(nid) && self.is_participating(nid) {
                     self.apply_range(nid, rid)?;
                 }
+            }
+        }
+        // Version history / OCC: flush notes for any client entry that majority-committed.
+        if let Some(idx) = proposed_index {
+            let commit_now = self
+                .nodes
+                .get(&leader)
+                .and_then(|n| n.ranges.get(&rid))
+                .map(|p| p.commit)
+                .unwrap_or(0);
+            if commit_now >= idx {
+                self.flush_version_notes_through(rid, idx);
             }
         }
         // F27: drop applied prefix once every participating peer has applied it.
@@ -2350,6 +2627,7 @@ impl<E: Env> StoreCluster<E> {
     /// and apply; if still uncommitted and `abort` is true, discard from leader.
     ///
     /// Used by World after pumping Net for a client put that returned NotCommitted.
+    /// Also flushes version/OCC notes once the entry is majority-committed (RFC-0023).
     ///
     /// # Errors
     /// I/O / apply.
@@ -2366,6 +2644,7 @@ impl<E: Env> StoreCluster<E> {
                 if let Some(&any) = self.ids.first() {
                     self.discard_uncommitted_from(range_id, any, index)?;
                 }
+                self.drop_pending_version_notes_from(range_id, index);
             }
             return Ok(false);
         };
@@ -2373,18 +2652,21 @@ impl<E: Env> StoreCluster<E> {
         if commit >= index {
             let ids = self.ids.clone();
             for &nid in &ids {
-                if self.is_participating(nid) {
+                if self.is_local_node(nid) && self.is_participating(nid) {
                     self.apply_range(nid, range_id)?;
                 }
             }
+            // OCC/SI version history — must run even when put() returned NotCommitted.
+            self.flush_version_notes_through(range_id, index);
             self.maybe_compact_logs(range_id)?;
             // Heartbeat commit to followers.
-            if self.is_participating(leader) {
+            if self.is_local_node(leader) && self.is_participating(leader) {
                 let _ = self.broadcast_append(range_id, leader, None);
             }
             Ok(true)
         } else if abort_if_uncommitted {
             self.discard_uncommitted_from(range_id, leader, index)?;
+            self.drop_pending_version_notes_from(range_id, index);
             Ok(false)
         } else {
             Ok(false)
@@ -2401,16 +2683,34 @@ impl<E: Env> StoreCluster<E> {
         if ids.is_empty() {
             return Ok(());
         }
-        let min_applied = ids
-            .iter()
-            .map(|&nid| self.applied_index(nid, rid))
-            .min()
-            .unwrap_or(0);
+        // Multi-host: remotes are not in `nodes` — use leader match_index for them.
+        let mut min_applied = u64::MAX;
+        for &nid in &ids {
+            if self.is_local_node(nid) {
+                min_applied = min_applied.min(self.applied_index(nid, rid));
+            } else if let Some(leader) = self.range_leader(rid) {
+                if self.is_local_node(leader) {
+                    let mi = self
+                        .nodes
+                        .get(&leader)
+                        .and_then(|n| n.ranges.get(&rid))
+                        .and_then(|p| p.match_index.get(&nid).copied())
+                        .unwrap_or(0);
+                    min_applied = min_applied.min(mi);
+                }
+            }
+        }
+        if min_applied == u64::MAX {
+            min_applied = 0;
+        }
         if min_applied == 0 {
             return Ok(());
         }
-        // Every member must still be able to resolve term_at(min_applied) (log or snap).
+        // Compact only local peers (remote peers compact independently).
         for &nid in &ids {
+            if !self.is_local_node(nid) {
+                continue;
+            }
             let p = self.nodes.get(&nid).unwrap().ranges.get(&rid).unwrap();
             if p.snapshot_index >= min_applied {
                 continue;
@@ -2420,6 +2720,9 @@ impl<E: Env> StoreCluster<E> {
             }
         }
         for &nid in &ids {
+            if !self.is_local_node(nid) {
+                continue;
+            }
             let n = self.nodes.get_mut(&nid).unwrap();
             let p = n.ranges.get_mut(&rid).unwrap();
             if p.snapshot_index >= min_applied {
@@ -2476,6 +2779,7 @@ impl<E: Env> StoreCluster<E> {
                 persist_applied_db(&mut n.db, rid, p)?;
             }
         }
+        self.drop_pending_version_notes_from(rid, from_index);
         if let Some(p) = self
             .nodes
             .get_mut(&leader)
@@ -2566,6 +2870,10 @@ impl<E: Env> StoreCluster<E> {
     }
 
     fn apply_range(&mut self, nid: u64, rid: u64) -> Result<()> {
+        // Multi-host: remotes apply via their own AE path; never touch missing local dbs.
+        if !self.is_local_node(nid) {
+            return Ok(());
+        }
         let node = self.nodes.get_mut(&nid).unwrap();
         // Collect entries to apply, then mutate db + peer separately (borrowck).
         let (start, end, recs) = {
@@ -2632,7 +2940,246 @@ impl<E: Env> StoreCluster<E> {
         Ok(())
     }
 
+    /// Best-effort leader id known by **local** peers (from AE `leader_id`).
+    ///
+    /// Multi-host: when this process is not leader, still surface a routing hint.
+    #[must_use]
+    pub fn leader_hint(&self, range_id: u64) -> Option<u64> {
+        if let Some(lid) = self.range_leader(range_id) {
+            return Some(lid);
+        }
+        for n in self.nodes.values() {
+            if let Some(p) = n.ranges.get(&range_id) {
+                if let Some(lid) = p.leader_id {
+                    return Some(lid);
+                }
+            }
+        }
+        None
+    }
+
+    /// Human-readable multi-host status (local id, leaders, membership).
+    #[must_use]
+    pub fn status_text(&self) -> String {
+        let local = self
+            .local_node_id()
+            .map(|id| id.to_string())
+            .unwrap_or_else(|| "multi".into());
+        let mut parts = vec![format!("local={local}"), format!("members={:?}", self.ids)];
+        for r in &self.ranges {
+            let lead = self
+                .range_leader(r.id)
+                .or_else(|| self.leader_hint(r.id))
+                .map(|l| l.to_string())
+                .unwrap_or_else(|| "-".into());
+            parts.push(format!("r{}:leader={lead}", r.id));
+        }
+        parts.join(" ")
+    }
+
+    /// Admin: split the range that contains `split_key` into `[start, split_key)` and
+    /// `[split_key, end)` (RFC-0021 P1.2 minimal PD). New range id = max(id)+1.
+    ///
+    /// Does **not** migrate historical raft log; for lab/scale-out of **new** writes.
+    /// Existing keys stay on the left range only if `key < split_key`.
+    ///
+    /// # Errors
+    /// No range, split at start/end, empty split key issues.
+    pub fn split_range_at(&mut self, split_key: impl AsRef<[u8]>) -> Result<(u64, u64)> {
+        let sk = split_key.as_ref().to_vec();
+        if sk.is_empty() {
+            return Err(StoreError::Msg("split_key must be non-empty".into()));
+        }
+        let rid = self.locate(&sk)?;
+        let meta = self
+            .ranges
+            .iter()
+            .find(|r| r.id == rid)
+            .cloned()
+            .ok_or(StoreError::NoRange)?;
+        if !meta.start.is_empty() && sk.as_slice() <= meta.start.as_slice() {
+            return Err(StoreError::Msg("split_key must be > range start".into()));
+        }
+        if !meta.end.is_empty() && sk.as_slice() >= meta.end.as_slice() {
+            return Err(StoreError::Msg("split_key must be < range end".into()));
+        }
+        let new_id = self.ranges.iter().map(|r| r.id).max().unwrap_or(0) + 1;
+        // Shrink old range end to split_key; new range [split_key, old_end).
+        for r in &mut self.ranges {
+            if r.id == rid {
+                r.end = sk.clone();
+            }
+        }
+        self.ranges.push(RangeMeta {
+            id: new_id,
+            start: sk,
+            end: meta.end,
+        });
+        self.ranges.sort_by_key(|r| r.id);
+        // Install empty raft peers on every local node for the new range.
+        let node_ids: Vec<u64> = self.nodes.keys().copied().collect();
+        for nid in node_ids {
+            let n = self.nodes.get_mut(&nid).unwrap();
+            n.ranges
+                .insert(new_id, load_range_peer(&n.db, new_id, nid)?);
+        }
+        // Elect leaders for both ranges after split.
+        self.elect_all(120)?;
+        Ok((rid, new_id))
+    }
+
+    /// Merge two **adjacent** ranges into the left one (RFC-0022 P1.2 placement).
+    ///
+    /// Lab control-plane: does not ship historical raft logs; for rebalance hooks
+    /// after load shifts. Right range id is removed from the map.
+    ///
+    /// # Errors
+    /// Unknown ids, non-adjacent ranges.
+    pub fn merge_adjacent_ranges(&mut self, left_id: u64, right_id: u64) -> Result<u64> {
+        let left = self
+            .ranges
+            .iter()
+            .find(|r| r.id == left_id)
+            .cloned()
+            .ok_or_else(|| StoreError::Msg(format!("unknown range {left_id}")))?;
+        let right = self
+            .ranges
+            .iter()
+            .find(|r| r.id == right_id)
+            .cloned()
+            .ok_or_else(|| StoreError::Msg(format!("unknown range {right_id}")))?;
+        if left.end != right.start {
+            return Err(StoreError::Msg(
+                "ranges are not adjacent (left.end must equal right.start)".into(),
+            ));
+        }
+        for r in &mut self.ranges {
+            if r.id == left_id {
+                r.end = right.end.clone();
+            }
+        }
+        self.ranges.retain(|r| r.id != right_id);
+        for n in self.nodes.values_mut() {
+            n.ranges.remove(&right_id);
+        }
+        self.elect_all(80)?;
+        Ok(left_id)
+    }
+
+    /// Set region label for a member (RFC-0021 P2.6 lab multi-site).
+    pub fn set_node_region(&mut self, node_id: u64, region: impl Into<String>) -> Result<()> {
+        if !self.ids.contains(&node_id) {
+            return Err(StoreError::Msg(format!("unknown member {node_id}")));
+        }
+        self.node_regions.insert(node_id, region.into());
+        Ok(())
+    }
+
+    /// Region for `node_id` if set.
+    #[must_use]
+    pub fn node_region(&self, node_id: u64) -> Option<&str> {
+        self.node_regions.get(&node_id).map(|s| s.as_str())
+    }
+
+    /// Prefer members in `prefer_region` first (then others by id). Lab routing hint.
+    #[must_use]
+    pub fn dial_order_prefer_region(&self, prefer_region: Option<&str>) -> Vec<u64> {
+        let mut same = Vec::new();
+        let mut other = Vec::new();
+        for &id in &self.ids {
+            let reg = self.node_regions.get(&id).map(|s| s.as_str());
+            if prefer_region.is_some() && reg == prefer_region {
+                same.push(id);
+            } else {
+                other.push(id);
+            }
+        }
+        same.sort_unstable();
+        other.sort_unstable();
+        same.extend(other);
+        same
+    }
+
+    /// Install peer dial map in-process (RFC-0021 P1.3). Does not require SSH.
+    pub fn set_peer_addrs(
+        &mut self,
+        peers: impl IntoIterator<Item = (u64, String)>,
+    ) -> Result<()> {
+        let map: HashMap<u64, String> = peers.into_iter().collect();
+        if map.is_empty() {
+            return Err(StoreError::Msg("empty peer map".into()));
+        }
+        self.peer_addrs = map;
+        Ok(())
+    }
+
+    /// Current peer dial map (may be empty if never set).
+    #[must_use]
+    pub fn peer_addrs(&self) -> &HashMap<u64, String> {
+        &self.peer_addrs
+    }
+
+    /// Machine-readable cluster status (RFC-0021 P0.5) — no serde dep, hand JSON.
+    ///
+    /// Shape:
+    /// ```json
+    /// {"local":1,"members":[1,2,3],"regions":{"1":"a"},"peers":{"1":"h:p"},"ranges":[...]}
+    /// ```
+    #[must_use]
+    pub fn cluster_status_json(&self) -> String {
+        let local = self
+            .local_node_id()
+            .map(|id| id.to_string())
+            .unwrap_or_else(|| "null".into());
+        let members = self
+            .ids
+            .iter()
+            .map(|id| id.to_string())
+            .collect::<Vec<_>>()
+            .join(",");
+        let mut regions = Vec::new();
+        for (id, reg) in &self.node_regions {
+            let esc = reg.replace('\\', "\\\\").replace('"', "\\\"");
+            regions.push(format!("\"{id}\":\"{esc}\""));
+        }
+        let mut peers = Vec::new();
+        for (id, addr) in &self.peer_addrs {
+            let esc = addr.replace('\\', "\\\\").replace('"', "\\\"");
+            peers.push(format!("\"{id}\":\"{esc}\""));
+        }
+        let mut ranges = Vec::new();
+        for r in &self.ranges {
+            let lead = self
+                .range_leader(r.id)
+                .or_else(|| self.leader_hint(r.id))
+                .map(|l| l.to_string())
+                .unwrap_or_else(|| "null".into());
+            let mut commits = Vec::new();
+            let mut applieds = Vec::new();
+            for &nid in &self.ids {
+                commits.push(format!("\"{nid}\":{}", self.commit_index(nid, r.id)));
+                applieds.push(format!("\"{nid}\":{}", self.applied_index(nid, r.id)));
+            }
+            ranges.push(format!(
+                "{{\"id\":{},\"leader\":{},\"commit\":{{{}}},\"applied\":{{{}}}}}",
+                r.id,
+                lead,
+                commits.join(","),
+                applieds.join(",")
+            ));
+        }
+        format!(
+            "{{\"local\":{local},\"members\":[{members}],\"regions\":{{{}}},\"peers\":{{{}}},\"ranges\":[{}]}}",
+            regions.join(","),
+            peers.join(","),
+            ranges.join(",")
+        )
+    }
+
     /// Put key/value via the leader of the owning range.
+    ///
+    /// Multi-host: only the process that holds the live leader may propose;
+    /// others return [`StoreError::NotLeader`] with a routing hint when known.
     pub fn put(&mut self, key: impl AsRef<[u8]>, value: impl AsRef<[u8]>) -> Result<()> {
         let key = key.as_ref().to_vec();
         if is_reserved_store_key(&key) {
@@ -2641,22 +3188,40 @@ impl<E: Env> StoreCluster<E> {
             ));
         }
         let value = value.as_ref().to_vec();
+        if value.len() > MAX_VALUE_BYTES {
+            return Err(StoreError::ValueTooLarge {
+                size: value.len(),
+                limit: MAX_VALUE_BYTES,
+            });
+        }
         let rid = self.locate(&key)?;
         let leader = self.range_leader(rid).ok_or(StoreError::NotLeader {
             range_id: rid,
-            leader: None,
+            leader: self.leader_hint(rid),
         })?;
+        if !self.is_local_node(leader) {
+            return Err(StoreError::NotLeader {
+                range_id: rid,
+                leader: Some(leader),
+            });
+        }
         {
             let db = &self.nodes.get(&leader).unwrap().db;
             if intent_conflict(db, &key, None) {
                 return Err(StoreError::Conflict);
             }
         }
+        // Version notes staged inside broadcast_append; flushed on majority commit
+        // (Direct Ok or later via finish_queued_propose).
         self.broadcast_append(
             rid,
             leader,
-            Some(RangeEntry::Put { key, value }),
-        )
+            Some(RangeEntry::Put {
+                key: key.clone(),
+                value: value.clone(),
+            }),
+        )?;
+        Ok(())
     }
 
     /// Atomically put multiple key/value pairs in **one** raft log entry.
@@ -2685,6 +3250,7 @@ impl<E: Env> StoreCluster<E> {
         if owned.is_empty() {
             return Ok(());
         }
+        validate_tx_pairs(&owned)?;
         let mut range_ids: Vec<u64> = Vec::new();
         for (k, _) in &owned {
             let rid = self.locate(k)?;
@@ -2709,7 +3275,14 @@ impl<E: Env> StoreCluster<E> {
                 }
             }
         }
-        self.broadcast_append(rid, leader, Some(RangeEntry::Batch { pairs: owned }))
+        self.broadcast_append(
+            rid,
+            leader,
+            Some(RangeEntry::Batch {
+                pairs: owned.clone(),
+            }),
+        )?;
+        Ok(())
     }
 
     fn alloc_txn_id(&mut self) -> u64 {
@@ -2927,13 +3500,20 @@ impl<E: Env> StoreCluster<E> {
     /// - Prepare all ranges then commit per-range keys only.
     /// - On prepare or commit failure: abort/revert so **no** majority user-key
     ///   apply remains from this TX; intents are force-cleared if raft cannot.
+    /// - Enforces [`MAX_VALUE_BYTES`] / [`MAX_TX_BYTES`] / [`MAX_TX_KEYS`].
     ///
     /// Returns the transaction id on success.
     pub fn commit_tx(
         &mut self,
         pairs: impl IntoIterator<Item = (impl AsRef<[u8]>, impl AsRef<[u8]>)>,
     ) -> Result<u64> {
-        let handle = self.tx_start(pairs)?;
+        let owned: Vec<(Vec<u8>, Vec<u8>)> = pairs
+            .into_iter()
+            .map(|(k, v)| (k.as_ref().to_vec(), v.as_ref().to_vec()))
+            .collect();
+        validate_tx_pairs(&owned)?;
+        // TxnCommit entries stage version notes at propose; flushed on majority.
+        let handle = self.tx_start(owned)?;
         match self.tx_finish(&handle) {
             Ok(()) => Ok(handle.id),
             Err(e) => {
@@ -2944,14 +3524,403 @@ impl<E: Env> StoreCluster<E> {
         }
     }
 
+    /// Open a **write-only** buffered TX without snapshot (weak path). Prefer [`Self::begin`].
+    #[must_use]
+    pub fn pending_tx_begin(&self) -> crate::client::PendingTx {
+        crate::client::PendingTx::new()
+    }
+
+    /// RFC-0023 default: unified snapshot TX (alias of [`Self::begin`]).
+    #[must_use]
+    pub fn tx_begin(&self) -> crate::client::Transaction {
+        self.begin()
+    }
+
+    /// Cluster commit generation (RFC-0023 `read_version`). Starts at 0; bumps on
+    /// successful majority put / put_batch / commit_tx.
+    #[must_use]
+    pub fn read_version(&self) -> u64 {
+        self.commit_generation
+    }
+
+    /// Lowest readable snapshot (versions strictly below are too old after GC).
+    #[must_use]
+    pub fn safe_watermark(&self) -> u64 {
+        self.safe_watermark
+    }
+
+    /// Begin a snapshot TX at the current [`Self::read_version`] (RFC-0023 default).
+    ///
+    /// Leadership-invisible: callers never pass range or node ids.
+    #[must_use]
+    pub fn begin(&self) -> crate::client::Transaction {
+        crate::client::Transaction::at_version(self.commit_generation)
+    }
+
+    /// Alias for [`Self::begin`] (RFC-0022 name).
+    #[must_use]
+    pub fn snapshot_begin(&self) -> SnapshotTx {
+        self.begin()
+    }
+
+    /// Current value of `key` as of the latest commit (history tip or Pedra).
+    fn value_now(&self, key: &[u8]) -> Option<Vec<u8>> {
+        if let Some(hist) = self.key_history.get(key) {
+            if let Some((_, v)) = hist.last() {
+                return v.clone();
+            }
+        }
+        self.get(key).ok().flatten().map(|b| b.to_vec())
+    }
+
+    /// Build version-note items for a client log entry (preimages at propose time).
+    fn preimages_for_entry(
+        &self,
+        entry: &RangeEntry,
+    ) -> Vec<(Vec<u8>, Vec<u8>, Option<Vec<u8>>)> {
+        match entry {
+            RangeEntry::Put { key, value } => {
+                if is_reserved_store_key(key) {
+                    return Vec::new();
+                }
+                vec![(key.clone(), value.clone(), self.value_now(key))]
+            }
+            RangeEntry::Batch { pairs } => pairs
+                .iter()
+                .filter(|(k, _)| !is_reserved_store_key(k))
+                .map(|(k, v)| (k.clone(), v.clone(), self.value_now(k)))
+                .collect(),
+            RangeEntry::TxnCommit { txn_id, keys } => {
+                // Materialized user values live in txn pair / intent records on any local db.
+                let nid = self
+                    .local_node_id()
+                    .or_else(|| self.ids.first().copied())
+                    .unwrap_or(1);
+                let Some(n) = self.nodes.get(&nid) else {
+                    return Vec::new();
+                };
+                let mut out = Vec::new();
+                for k in keys {
+                    if is_reserved_store_key(k) {
+                        continue;
+                    }
+                    let val = n
+                        .db
+                        .get(&txn_pair_key(*txn_id, k))
+                        .map(|b| b.to_vec())
+                        .or_else(|| {
+                            n.db.get(&intent_key(k)).and_then(|raw| {
+                                decode_intent(&raw).and_then(|(oid, v)| {
+                                    if oid == *txn_id {
+                                        Some(v.to_vec())
+                                    } else {
+                                        None
+                                    }
+                                })
+                            })
+                        })
+                        .unwrap_or_default();
+                    out.push((k.clone(), val, self.value_now(k)));
+                }
+                out
+            }
+            RangeEntry::Dcs(cmd) => {
+                let (key, value) = match cmd {
+                    DcsCommand::Put { key, value, .. }
+                    | DcsCommand::Create { key, value, .. }
+                    | DcsCommand::Cas { key, value, .. } => (key.clone(), value.clone()),
+                    DcsCommand::Delete { key } => (key.clone(), Vec::new()),
+                };
+                vec![(key.clone(), value, self.value_now(&key))]
+            }
+            RangeEntry::Noop
+            | RangeEntry::TxnPrepare { .. }
+            | RangeEntry::TxnAbort { .. }
+            | RangeEntry::TxnRevert { .. } => Vec::new(),
+        }
+    }
+
+    /// Flush staged version notes for `range_id` through `through_index` (inclusive).
+    fn flush_version_notes_through(&mut self, range_id: u64, through_index: u64) {
+        let already = self
+            .version_notes_through
+            .get(&range_id)
+            .copied()
+            .unwrap_or(0);
+        if through_index <= already {
+            return;
+        }
+        let mut idxs: Vec<u64> = self
+            .pending_version_notes
+            .keys()
+            .filter(|(r, i)| *r == range_id && *i > already && *i <= through_index)
+            .map(|(_, i)| *i)
+            .collect();
+        idxs.sort_unstable();
+        for idx in idxs {
+            if let Some(items) = self.pending_version_notes.remove(&(range_id, idx)) {
+                self.note_mutations(&items);
+            }
+            self.version_notes_through.insert(range_id, idx);
+        }
+        // Advance watermark even if some indices had empty notes (Noop).
+        let cur = self
+            .version_notes_through
+            .get(&range_id)
+            .copied()
+            .unwrap_or(0);
+        if through_index > cur {
+            self.version_notes_through.insert(range_id, through_index);
+        }
+    }
+
+    /// Drop staged notes for discarded (uncommitted) log indexes.
+    fn drop_pending_version_notes_from(&mut self, range_id: u64, from_index: u64) {
+        self.pending_version_notes
+            .retain(|(r, i), _| !(*r == range_id && *i >= from_index));
+    }
+
+    /// Value of `key` as of snapshot generation `R` (RFC-0023 SI).
+    ///
+    /// Does **not** return commits with generation `> R`. Own-TX write buffering is
+    /// the caller's responsibility.
+    ///
+    /// # Errors
+    /// Store get errors for keys never versioned in this process.
+    pub fn get_at_version(&self, key: &[u8], snapshot: u64) -> Result<Option<Vec<u8>>> {
+        if let Some(hist) = self.key_history.get(key) {
+            for (g, val) in hist.iter().rev() {
+                if *g <= snapshot {
+                    return Ok(val.clone());
+                }
+            }
+            // All history entries are after snapshot (should not happen if gen-0 exists).
+            return Ok(None);
+        }
+        // Never mutated since open: Pedra holds the gen-0 world for this key.
+        Ok(self.get(key)?.map(|b| b.to_vec()))
+    }
+
+    /// Record mutations for OCC + version history + watch after a majority commit.
+    ///
+    /// Each item is `(key, new_value, preimage_before_this_commit)`.
+    fn note_mutations(&mut self, items: &[(Vec<u8>, Vec<u8>, Option<Vec<u8>>)]) {
+        if items.is_empty() {
+            return;
+        }
+        self.commit_generation = self.commit_generation.saturating_add(1);
+        let g = self.commit_generation;
+        for (k, val, pre) in items {
+            let hist = self.key_history.entry(k.clone()).or_default();
+            if hist.is_empty() {
+                hist.push((0, pre.clone()));
+            }
+            hist.push((g, Some(val.clone())));
+            self.key_versions.insert(k.clone(), g);
+            self.watch.notify(k, val, g);
+        }
+        self.maybe_gc_versions();
+    }
+
+    /// Advance watermark and prune version history (RFC-0023 P0.4).
+    fn maybe_gc_versions(&mut self) {
+        if self.commit_generation <= VERSION_RETENTION {
+            return;
+        }
+        let new_wm = self.commit_generation.saturating_sub(VERSION_RETENTION);
+        if new_wm <= self.safe_watermark {
+            return;
+        }
+        self.safe_watermark = new_wm;
+        for hist in self.key_history.values_mut() {
+            let mut floor_val: Option<Option<Vec<u8>>> = None;
+            let mut kept: Vec<(u64, Option<Vec<u8>>)> = Vec::new();
+            for (g, v) in hist.drain(..) {
+                if g < new_wm {
+                    floor_val = Some(v);
+                } else {
+                    kept.push((g, v));
+                }
+            }
+            if let Some(v) = floor_val {
+                // Floor readable for snapshot in [new_wm-1, first kept).
+                let floor_gen = new_wm.saturating_sub(1);
+                hist.push((floor_gen, v));
+            }
+            hist.extend(kept);
+        }
+    }
+
+    /// OCC check then majority commit (used by [`Transaction::commit`] / SnapshotTx).
+    ///
+    /// # Errors
+    /// [`StoreError::TransactionTooOld`], [`StoreError::Conflict`], commit failures.
+    pub fn commit_snapshot_tx(
+        &mut self,
+        snapshot: u64,
+        read_keys: impl IntoIterator<Item = Vec<u8>>,
+        pairs: Vec<(Vec<u8>, Vec<u8>)>,
+    ) -> Result<u64> {
+        self.commit_transaction(snapshot, read_keys, pairs, std::iter::empty())
+    }
+
+    /// Full TX commit: too-old, OCC on keys + conflict ranges, then majority apply.
+    ///
+    /// # Errors
+    /// TooOld, Conflict, limits, NotLeader, NotCommitted.
+    pub fn commit_transaction(
+        &mut self,
+        snapshot: u64,
+        read_keys: impl IntoIterator<Item = Vec<u8>>,
+        pairs: Vec<(Vec<u8>, Vec<u8>)>,
+        conflict_ranges: impl IntoIterator<Item = (Vec<u8>, Vec<u8>)>,
+    ) -> Result<u64> {
+        let current = self.commit_generation;
+        if snapshot < self.safe_watermark {
+            return Err(StoreError::TransactionTooOld {
+                snapshot,
+                current: self.safe_watermark,
+            });
+        }
+        if current.saturating_sub(snapshot) > MAX_SNAPSHOT_LAG {
+            return Err(StoreError::TransactionTooOld {
+                snapshot,
+                current,
+            });
+        }
+        let read_keys: Vec<Vec<u8>> = read_keys.into_iter().collect();
+        for k in &read_keys {
+            if self.key_versions.get(k).copied().unwrap_or(0) > snapshot {
+                return Err(StoreError::Conflict);
+            }
+        }
+        for (k, _) in &pairs {
+            if self.key_versions.get(k).copied().unwrap_or(0) > snapshot {
+                return Err(StoreError::Conflict);
+            }
+        }
+        let ranges: Vec<(Vec<u8>, Vec<u8>)> = conflict_ranges.into_iter().collect();
+        for (start, end) in &ranges {
+            for (k, ver) in &self.key_versions {
+                if *ver > snapshot && key_in_half_open(k, start, end) {
+                    return Err(StoreError::Conflict);
+                }
+            }
+        }
+        self.commit_tx(pairs)
+    }
+
+    /// Keys in `[start, end)` visible at `snapshot` (history + Pedra gen-0 scan).
+    ///
+    /// Scans Pedra so durable keys after reopen (no in-memory history) still appear.
+    /// Reserved store meta keys are skipped. Lab/ cap: unbounded Pedra range (tests).
+    pub fn keys_in_range_at(
+        &self,
+        start: &[u8],
+        end: &[u8],
+        snapshot: u64,
+    ) -> Result<Vec<(Vec<u8>, Vec<u8>)>> {
+        use std::collections::BTreeSet;
+        let mut key_set: BTreeSet<Vec<u8>> = BTreeSet::new();
+        for k in self.key_history.keys() {
+            if key_in_half_open(k, start, end) && !is_reserved_store_key(k) {
+                key_set.insert(k.clone());
+            }
+        }
+        // Pedra scan for keys never recorded in this process history (e.g. after reopen).
+        let nid = self
+            .local_node_id()
+            .or_else(|| self.ids.first().copied())
+            .ok_or_else(|| StoreError::Msg("empty cluster".into()))?;
+        if let Some(n) = self.nodes.get(&nid) {
+            let start_b = Bound::Included(start);
+            let end_b = if end.is_empty() {
+                Bound::Unbounded
+            } else {
+                Bound::Excluded(end)
+            };
+            for (k, _) in n.db.range(start_b, end_b) {
+                if !is_reserved_store_key(&k) {
+                    key_set.insert(k.to_vec());
+                }
+            }
+        }
+        let mut out = Vec::with_capacity(key_set.len());
+        for k in key_set {
+            if let Some(v) = self.get_at_version(&k, snapshot)? {
+                out.push((k, v));
+            }
+        }
+        Ok(out)
+    }
+
+    /// Subscribe to key-prefix events after majority commit (RFC-0022 P0.3).
+    pub fn watch_prefix(&mut self, prefix: impl AsRef<[u8]>) -> (u64, std::sync::mpsc::Receiver<WatchEvent>) {
+        self.watch.watch_prefix(prefix)
+    }
+
+    /// Drop a watch subscription.
+    pub fn unwatch(&mut self, id: u64) {
+        self.watch.unwatch(id);
+    }
+
+    /// Shared watch hub (layers / Scylla-need CP helpers).
+    #[must_use]
+    pub fn watch_hub(&self) -> &WatchHub {
+        &self.watch
+    }
+
+    /// Mutable watch hub.
+    pub fn watch_hub_mut(&mut self) -> &mut WatchHub {
+        &mut self.watch
+    }
+
+    /// Version of last mutation of `key` (0 if never written in this process).
+    #[must_use]
+    pub fn key_version(&self, key: &[u8]) -> u64 {
+        self.key_versions.get(key).copied().unwrap_or(0)
+    }
+
+    /// Leadership-invisible put: same as [`Self::put`] — routes to the live range
+    /// leader in-process without the caller naming a node (RFC-0022 P0.2).
+    ///
+    /// Multi-host TCP clients use [`TcpClusterClient::put`] for NotLeader retry.
+    ///
+    /// # Errors
+    /// Same as [`Self::put`].
+    pub fn put_routed_invisible(
+        &mut self,
+        key: impl AsRef<[u8]>,
+        value: impl AsRef<[u8]>,
+    ) -> Result<()> {
+        self.put(key, value)
+    }
+
+    /// Test helper: force watermark (RFC-0023 too-old path without thousands of puts).
+    #[doc(hidden)]
+    pub fn force_safe_watermark_for_test(&mut self, wm: u64) {
+        self.safe_watermark = wm;
+    }
+
+    /// Test helper: advance commit generation (legacy; prefer watermark for too-old).
+    #[doc(hidden)]
+    pub fn force_read_version_for_test(&mut self, v: u64) {
+        self.commit_generation = v;
+    }
+
     /// Get from a node (applied state). **LocalApplied** semantics — non-linearizable.
     pub fn get_on(&self, node_id: u64, key: &[u8]) -> Result<Option<Bytes>> {
         self.get_with_policy(node_id, key, ReadPolicy::LocalApplied)
     }
 
-    /// Get from node 1 if present (local applied).
+    /// Get from a local node (prefer single-host local id; else first member).
+    ///
+    /// Multi-host: reads the only local PedraDB. LocalApplied semantics.
     pub fn get(&self, key: &[u8]) -> Result<Option<Bytes>> {
-        let id = *self.ids.first().ok_or_else(|| StoreError::Msg("empty".into()))?;
+        let id = self
+            .local_node_id()
+            .or_else(|| self.ids.first().copied())
+            .ok_or_else(|| StoreError::Msg("empty".into()))?;
         self.get_on(id, key)
     }
 
@@ -3001,6 +3970,77 @@ impl<E: Env> StoreCluster<E> {
             leader: None,
         })?;
         self.get_with_policy(leader, key, ReadPolicy::Strong)
+    }
+
+    /// Fast read replica path (TiKV-style follower read): **LocalApplied** on the
+    /// freshest non-leader member when possible; otherwise any applied peer.
+    ///
+    /// Not linearizable — may lag the leader. Prefer [`Self::get_strong`] for
+    /// FDB-class linearizable reads. Used for scale-out read amp.
+    ///
+    /// # Errors
+    /// Empty cluster / unknown range.
+    pub fn get_fast_replica(&self, key: &[u8]) -> Result<Option<Bytes>> {
+        let rid = self.locate(key)?;
+        let leader = self.range_leader(rid);
+        // Pick member with highest applied index among followers (or all if no leader).
+        let mut best: Option<(u64, u64)> = None; // (applied, node_id)
+        for &nid in &self.ids {
+            if !self.is_participating(nid) {
+                continue;
+            }
+            if Some(nid) == leader {
+                continue;
+            }
+            let applied = self.applied_index(nid, rid);
+            match best {
+                None => best = Some((applied, nid)),
+                Some((a, _)) if applied >= a => best = Some((applied, nid)),
+                _ => {}
+            }
+        }
+        let node = best
+            .map(|(_, n)| n)
+            .or(leader)
+            .or_else(|| self.ids.first().copied())
+            .ok_or_else(|| StoreError::Msg("no replica".into()))?;
+        self.get_with_policy(node, key, ReadPolicy::LocalApplied)
+    }
+
+    /// How far `node_id` lags the leader commit index on `range_id` (`commit - applied`).
+    ///
+    /// `0` = caught up; negative should not occur (clamped to 0).
+    #[must_use]
+    pub fn applied_lag(&self, node_id: u64, range_id: u64) -> u64 {
+        let leader = self.range_leader(range_id);
+        let leader_commit = leader
+            .map(|l| self.commit_index(l, range_id))
+            .unwrap_or_else(|| self.commit_index(node_id, range_id));
+        let applied = self.applied_index(node_id, range_id);
+        leader_commit.saturating_sub(applied)
+    }
+
+    /// Max applied lag across participating members of a range (0 = fully caught up).
+    #[must_use]
+    pub fn max_applied_lag(&self, range_id: u64) -> u64 {
+        self.ids
+            .iter()
+            .filter(|&&nid| self.is_participating(nid))
+            .map(|&nid| self.applied_lag(nid, range_id))
+            .max()
+            .unwrap_or(0)
+    }
+
+    /// Multi-range concurrent-friendly put: same as [`Self::put`] but returns the
+    /// range id that accepted the write (for multiwrite / client routing metrics).
+    ///
+    /// # Errors
+    /// Same as [`Self::put`].
+    pub fn put_routed(&mut self, key: impl AsRef<[u8]>, value: impl AsRef<[u8]>) -> Result<u64> {
+        let key_ref = key.as_ref();
+        let rid = self.locate(key_ref)?;
+        self.put(key_ref, value)?;
+        Ok(rid)
     }
 
     /// DCS create-if-absent on the range that owns `key` (meta keys should use `m/` prefix).
@@ -3063,6 +4103,12 @@ impl<E: Env> StoreCluster<E> {
             | DcsCommand::Cas { key, .. }
             | DcsCommand::Delete { key } => key.clone(),
         };
+        let watch_val: Vec<u8> = match &cmd {
+            DcsCommand::Put { value, .. }
+            | DcsCommand::Create { value, .. }
+            | DcsCommand::Cas { value, .. } => value.clone(),
+            DcsCommand::Delete { .. } => Vec::new(),
+        };
         let is_delete = matches!(cmd, DcsCommand::Delete { .. });
         let rid = self.locate(&key)?;
         let leader = self.range_leader(rid).ok_or(StoreError::NotLeader {
@@ -3110,6 +4156,8 @@ impl<E: Env> StoreCluster<E> {
                     commit: 0,
                 });
             }
+            // Version notes flushed via broadcast_append majority path.
+            let _ = watch_val;
             return Ok(rev);
         }
         let kv = dcs_get_at(&n.db, &key, now).ok_or(StoreError::NotCommitted {
@@ -3124,6 +4172,7 @@ impl<E: Env> StoreCluster<E> {
                 commit: self.commit_index(leader, rid),
             });
         }
+        let _ = watch_val;
         Ok(kv.mod_revision)
     }
 
@@ -3287,6 +4336,81 @@ mod tests {
         let val = b"v-queued";
         put_queued(&mut c, key, val);
         assert_eq!(c.count_applied_eq(key, val), 3);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0023 skeptic: Queued put must advance version history so OCC sees the write.
+    ///
+    /// Repro of greenwash: TX begin after seed; Queued overwrite of read-set key;
+    /// without finish_queued note_mutations, commit would Ok (silent wrong).
+    #[test]
+    fn queued_put_advances_versions_for_tx_occ() {
+        let dir = temp();
+        let mut c = StoreCluster::open_with_rng(&dir, 3, 1, SeedRng::new(0x51_0001)).unwrap();
+        // Seed under Direct so note path is clean, then switch to Queued.
+        c.elect_all(80).unwrap();
+        c.put(b"qk", b"v0").unwrap();
+        assert!(c.key_version(b"qk") >= 1);
+        let gen_after_seed = c.read_version();
+
+        c.set_rpc_mode(RpcMode::Queued);
+        let mut tx = c.begin();
+        assert_eq!(tx.snapshot_version(), gen_after_seed);
+        assert_eq!(
+            tx.get(&c, b"qk").unwrap().as_deref(),
+            Some(b"v0".as_ref()),
+            "snapshot must see seed"
+        );
+
+        // Concurrent Queued overwrite (typically NotCommitted then finish).
+        put_queued(&mut c, b"qk", b"v1");
+        assert!(
+            c.key_version(b"qk") > gen_after_seed,
+            "Queued majority apply must bump key_version (got {} seed_gen={gen_after_seed})",
+            c.key_version(b"qk")
+        );
+        assert!(
+            c.read_version() > gen_after_seed,
+            "commit_generation must advance after Queued put"
+        );
+        // SI: still sees v0
+        assert_eq!(
+            tx.get(&c, b"qk").unwrap().as_deref(),
+            Some(b"v0".as_ref()),
+            "must not see Queued concurrent write"
+        );
+        tx.set(b"other", b"x").unwrap();
+        let err = tx.commit(&mut c).expect_err("read-set OCC after Queued put");
+        assert!(
+            matches!(err, StoreError::Conflict),
+            "expected Conflict after Queued concurrent write, got {err:?}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Range scan after reopen must see Pedra-durable keys (not history-only).
+    #[test]
+    fn keys_in_range_at_after_reopen_sees_pedra() {
+        let dir = temp();
+        {
+            let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+            c.elect_all(80).unwrap();
+            c.put(b"rr/a", b"1").unwrap();
+            c.put(b"rr/b", b"2").unwrap();
+            let got = c.keys_in_range_at(b"rr/", b"rr0", c.read_version()).unwrap();
+            assert!(got.len() >= 2, "before reopen: {got:?}");
+        }
+        // Reopen: in-memory key_history is empty; Pedra still has keys.
+        let c = StoreCluster::open(&dir, 3, 1).unwrap();
+        let got = c.keys_in_range_at(b"rr/", b"rr0", 0).unwrap();
+        assert!(
+            got.iter().any(|(k, v)| k.as_slice() == b"rr/a" && v.as_slice() == b"1"),
+            "after reopen must see rr/a from Pedra, got {got:?}"
+        );
+        assert!(
+            got.iter().any(|(k, v)| k.as_slice() == b"rr/b" && v.as_slice() == b"2"),
+            "after reopen must see rr/b from Pedra, got {got:?}"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -4395,6 +5519,116 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// RFC-0021 P0.1 / 0023: write-only PendingTx still works; default is Transaction.
+    #[test]
+    fn pending_tx_client_session_atomic_majority() {
+        let dir = temp();
+        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        c.elect_all(80).unwrap();
+        let mut tx = c.pending_tx_begin();
+        tx.set(b"pt-a", b"1").unwrap();
+        tx.set(b"pt-b", b"2").unwrap();
+        assert_eq!(tx.get_buffered(b"pt-a"), Some(b"1".as_ref()));
+        let tid = tx.commit(&mut c).unwrap();
+        assert!(tid >= 1);
+        assert!(c.count_applied_eq(b"pt-a", b"1") >= 2);
+        assert!(c.count_applied_eq(b"pt-b", b"2") >= 2);
+        // Default begin() is snapshot Transaction.
+        let mut t2 = c.begin();
+        t2.set(b"pt-c", b"3").unwrap();
+        t2.commit(&mut c).unwrap();
+        assert!(c.count_applied_eq(b"pt-c", b"3") >= 2);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0021 P1.2: split_range_at creates a second range; puts still work.
+    #[test]
+    fn split_range_at_two_ranges_put() {
+        let dir = temp();
+        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        c.elect_all(80).unwrap();
+        assert_eq!(c.range_metas().len(), 1);
+        let (left, right) = c.split_range_at([0x80u8]).unwrap();
+        assert_eq!(left, 1);
+        assert_eq!(right, 2);
+        assert_eq!(c.range_metas().len(), 2);
+        c.put([0x10u8], b"lo").unwrap();
+        c.put([0x90u8], b"hi").unwrap();
+        assert!(c.count_applied_eq(&[0x10], b"lo") >= 2);
+        assert!(c.count_applied_eq(&[0x90], b"hi") >= 2);
+        assert_ne!(c.locate(&[0x10]).unwrap(), c.locate(&[0x90]).unwrap());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0021 P0.5: cluster_status_json has members + range leaders.
+    #[test]
+    fn cluster_status_json_has_leaders() {
+        let dir = temp();
+        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        c.elect_all(80).unwrap();
+        let js = c.cluster_status_json();
+        assert!(js.contains("\"members\""), "{js}");
+        assert!(js.contains("\"ranges\""), "{js}");
+        assert!(js.contains("\"leader\""), "{js}");
+        // Must parse as JSON-ish object
+        assert!(js.starts_with('{') && js.ends_with('}'), "{js}");
+        let lead = c.range_leader(1).expect("leader");
+        assert!(js.contains(&format!("\"leader\":{lead}")), "{js}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0021 P1.3: peer dial map installed in-process without SSH.
+    #[test]
+    fn set_peer_addrs_without_ssh() {
+        let dir = temp();
+        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        c.set_peer_addrs([
+            (1u64, "10.0.0.1:9701".into()),
+            (2, "10.0.0.2:9701".into()),
+            (3, "10.0.0.3:9701".into()),
+        ])
+        .unwrap();
+        assert_eq!(c.peer_addrs().get(&2).map(|s| s.as_str()), Some("10.0.0.2:9701"));
+        let js = c.cluster_status_json();
+        assert!(js.contains("10.0.0.2:9701"), "{js}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0021 P2.6: region tags change dial preference order.
+    #[test]
+    fn region_prefer_dial_order() {
+        let dir = temp();
+        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        c.set_node_region(1, "us-east").unwrap();
+        c.set_node_region(2, "us-east").unwrap();
+        c.set_node_region(3, "eu-west").unwrap();
+        let order = c.dial_order_prefer_region(Some("eu-west"));
+        assert_eq!(order[0], 3, "eu-west member first: {order:?}");
+        assert!(order[1..].contains(&1) && order[1..].contains(&2));
+        let js = c.cluster_status_json();
+        assert!(js.contains("eu-west") && js.contains("us-east"), "{js}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0021 P0.2: oversized value rejected with typed error.
+    #[test]
+    fn commit_tx_rejects_value_too_large() {
+        let dir = temp();
+        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        c.elect_all(40).unwrap();
+        let big = vec![7u8; MAX_VALUE_BYTES + 1];
+        let err = c.commit_tx([(b"k", big.as_slice())]).unwrap_err();
+        assert!(
+            matches!(err, StoreError::ValueTooLarge { .. }),
+            "got {err:?}"
+        );
+        assert!(matches!(
+            crate::client::classify(&err),
+            crate::client::ClientClass::LimitRejected { kind: "value", .. }
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// P1.5: tick advances logical_now; advance_time is pure (no wall clock).
     #[test]
     fn logical_time_advances_with_tick() {
@@ -4585,6 +5819,96 @@ mod tests {
             })
             .count();
         assert!(n >= 2, "recreate must majority-replicate; seen={n}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0020 P1.2 / W7: minority partition cannot majority-commit a put.
+    #[test]
+    fn rfc20_partition_minority_cannot_commit() {
+        let dir = temp();
+        let mut c = StoreCluster::open_with_rng(&dir, 3, 1, SeedRng::new(0x0020_0A17)).unwrap();
+        c.elect_all(80).unwrap();
+        let key = b"part-key";
+        let rid = c.locate(key).unwrap();
+        let leader = c.range_leader(rid).expect("leader");
+        // Partition both followers → leader is minority alone.
+        let ids: Vec<u64> = c.node_ids().to_vec();
+        for &nid in &ids {
+            if nid != leader {
+                c.set_participating(nid, false).unwrap();
+            }
+        }
+        let err = c.put(key, b"should-fail");
+        assert!(
+            matches!(err, Err(StoreError::NotCommitted { .. })),
+            "minority put must NotCommitted, got {err:?}"
+        );
+        // No node should show the value as applied majority.
+        assert_eq!(
+            c.count_applied_eq(key, b"should-fail"),
+            0,
+            "minority put must not apply as majority-visible"
+        );
+        for &nid in &ids {
+            let v = c.get_on(nid, key).ok().flatten();
+            assert!(
+                v.is_none() || v.as_ref().map(|b| b.as_ref()) != Some(b"should-fail".as_ref()),
+                "node {nid} must not expose minority-only value"
+            );
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0020 P1.2 / W8: majority put + leader kill + re-elect → silent_wrong=0 catch-up.
+    #[test]
+    fn rfc20_leader_kill_after_majority_catchup() {
+        let dir = temp();
+        let mut c = StoreCluster::open_with_rng(&dir, 3, 1, SeedRng::new(0x0020_C111)).unwrap();
+        c.set_rpc_mode(RpcMode::Queued);
+        elect_queued(&mut c, 100);
+
+        let key = b"kill-key";
+        put_queued(&mut c, key, b"acked");
+        assert!(
+            c.count_applied_eq(key, b"acked") >= 2,
+            "pre-kill majority apply required"
+        );
+        let rid = c.locate(key).unwrap();
+        let old = c.range_leader(rid).expect("leader");
+        // Leader kill (partition + step down path).
+        c.set_participating(old, false).unwrap();
+        for _ in 0..200 {
+            c.tick().unwrap();
+            pump_queued(&mut c, 48);
+            if let Some(l) = c.range_leader(rid) {
+                if l != old {
+                    break;
+                }
+            }
+        }
+        assert!(
+            c.range_leader(rid).is_some_and(|l| l != old),
+            "new leader after kill"
+        );
+
+        let mut silent_wrong = 0u64;
+        for &nid in c.node_ids() {
+            if nid == old {
+                continue;
+            }
+            match c.get_on(nid, key) {
+                Ok(Some(v)) if v.as_ref() == b"acked" => {}
+                other => {
+                    silent_wrong += 1;
+                    eprintln!("node {nid} wrong after leader kill: {other:?}");
+                }
+            }
+        }
+        assert_eq!(silent_wrong, 0, "leader-kill catch-up silent_wrong");
+
+        // Post-failover write still majority-commits.
+        put_queued(&mut c, b"kill-key-2", b"after");
+        assert!(c.count_applied_eq(b"kill-key-2", b"after") >= 2);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

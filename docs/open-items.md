@@ -4,7 +4,7 @@
 > item is closed, or a new open question emerges. The authoritative source for
 > "what's done, what's next, what's unresolved."
 
-Last updated: 2026-08-12
+Last updated: 2026-08-14 (RFC-0023: real snapshot SI + OCC + watermark too-old + Transaction API + fdb-compat; not FDB field peer)
 
 ---
 
@@ -13,14 +13,13 @@ Last updated: 2026-08-12
 ```
  pedradb-core    WAL ✅  | MemTable ✅  | Db ✅  | TX ✅  | SST v3+Bloom ✅  | range/limit ✅
                  compact ✅  | apply_batch ✅  | checkpoint ✅  | stats/verify ✅
-                 vlog+GC ✅  | group commit / dual-mem ✅
+                 vlog+GC ✅  | group commit / dual-mem ✅  | CAS/feed/seq (0019) ✅
  pedradb-sim     FailingEnv / RecordingEnv ✅
  pedradb-oracle  model oracle + optional live-rocksdb ✅
  pedradb-cli     version + wal + demo
 
- RFC-0009 done · RFC-0014 done (P0–P2) · RFC-0015 done
- RFC-0016 P0 done (vlog GC + stats + soak; P1.4/P2.1–2 open)
- RFC-0017 draft (Montanha FDB-class)
+ RFC-0009 done · RFC-0014 done · RFC-0015 done · RFC-0019 done
+ RFC-0016 P0 done · RFC-0017 draft · RFC-0020 done (P0–P2 synthetic field maturity)
  Vision: docs/node-primitive-and-unified-platform.md (SoR + projections + multi-leader)
 ```
 
@@ -44,7 +43,13 @@ Last updated: 2026-08-12
 | 11 | Streaming range / lazy blocks (RFC-0014 P1) | ✅ done | scan + lazy SST blocks + levels + lz4 | — |
 | 12 | Audit correctness fixes (RFC-0015) | ✅ done | fence, sync_dir, Env seams, compact stats, deny CI | — |
 
-**Next action:** [RFC-0019](rfc/0019-local-primitive-for-platform-and-scylla-need.md) **P0** (CAS + seq pin + change feed) so L1 is ready for Scylla-need; and/or [RFC-0016](rfc/0016-pedradb-production-robustness.md) P1.4/P2.1; and/or [RFC-0017](rfc/0017-montanha-fdb-class-substrate.md) **P0**.
+**Next action:** Optional product packaging of fdb-compat C ABI / multi-lang; placement auto-balance; keep honesty — **not** FDB field peer.  
+**Shipped (0023):** real `get_at_version` SI, unified `Transaction`, watermark GC too-old, range conflict, `fdb_compat` Rust face.  
+**Shipped (0022 thin faces):** N-writer layers etcd/TiKV/table/PG/OLAP/stream.  
+**Do not** read 0017/0021/0022/0023 as FDB field peer or full fdbcli.  
+
+Shipped (0017 lab): TCP multi-host + caixote mesh + proxy.  
+Shipped (0021 **all Status rows**): TX/limits, perf/sim gates, `/v1/cluster`, split, **TCP rewire without SSH**, region-aware dial lab, drills, runbooks.
 
 **Platform north star:** Postgres-class face that replaces **Scylla + ClickHouse + NATS need** in one system  
 ([`node-primitive-and-unified-platform.md`](node-primitive-and-unified-platform.md) §1).  
@@ -53,7 +58,7 @@ Kernel = Pedra; horizontal = Montanha; analytics = OLAP RO; streams = layer; CP 
 **Perf ceiling + sled layer:** living plan in
 [`performance-ceiling-option-preservation-and-sled-layer.md`](performance-ceiling-option-preservation-and-sled-layer.md)
 (K1–K3 kernel phases, L0–L3 `pedra-map` / sled-compat; anti-corner checklist F1–X6).  
-**RFCs:** [0009](rfc/0009-rocksdb-class-engine.md) · [0010](rfc/0010-dbs-on-top.md) · [0014 maturity](rfc/0014-rocks-pebble-redwood-maturity.md) · [0015 audit](rfc/0015-audit-pedradb-correctness-fixes.md) · [0016 robustness](rfc/0016-pedradb-production-robustness.md) · [0017 Montanha FDB-class](rfc/0017-montanha-fdb-class-substrate.md)
+**RFCs:** [0009](rfc/0009-rocksdb-class-engine.md) · [0010](rfc/0010-dbs-on-top.md) · [0014 maturity](rfc/0014-rocks-pebble-redwood-maturity.md) · [0015 audit](rfc/0015-audit-pedradb-correctness-fixes.md) · [0016 robustness](rfc/0016-pedradb-production-robustness.md) · [0017 Montanha FDB-class](rfc/0017-montanha-fdb-class-substrate.md) · [0018 FDB method](rfc/0018-fdb-method-parity-and-fault-coverage.md) · [0019 L1](rfc/0019-local-primitive-for-platform-and-scylla-need.md) · [0020 synthetic field](rfc/0020-synthetic-field-maturity.md) · [0021 lab gates](rfc/0021-montanha-fdb-tikv-parity-gaps.md) · [**0022 functional FDB + N-writer layers**](rfc/0022-montanha-fdb-functional-parity-and-layer-substrate.md)
 
 ---
 

@@ -16,6 +16,9 @@ members = [
     "crates/pedradb-store",
     "crates/pedradb-io-uring",
     "crates/pedradb-ops",
+    "crates/pedradb-lease",
+    "crates/pedradb-index",
+    "crates/pedradb-journal",
 ]
 
 [workspace.package]
@@ -40,6 +43,9 @@ pedradb-dst = { path = "crates/pedradb-dst" }
 pedradb-store = { path = "crates/pedradb-store" }
 pedradb-io-uring = { path = "crates/pedradb-io-uring" }
 pedradb-ops = { path = "crates/pedradb-ops" }
+pedradb-lease = { path = "crates/pedradb-lease" }
+pedradb-index = { path = "crates/pedradb-index" }
+pedradb-journal = { path = "crates/pedradb-journal" }
 
 # Shared
 crc32c = "0.6"

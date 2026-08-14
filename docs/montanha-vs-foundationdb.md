@@ -1,7 +1,7 @@
 # Montanha vs FoundationDB — what is the same, what is different, and why it confuses
 
 **Status:** alignment note (read this when “FDB vs TiKV vs Montanha” feels muddy)  
-**Updated:** 2026-08-12  
+**Updated:** 2026-08-13  
 **Product:** [MontanhaDb](montanhadb.md)  
 **Normative contract:** [RFC-0013](rfc/0013-montanhadb-product.md)  
 **Related:** [fdb-limitations-analysis.md](fdb-limitations-analysis.md), [foundationdb-layers-and-products.md](foundationdb-layers-and-products.md), [montanha-layering-dcs-on-store.md](montanha-layering-dcs-on-store.md)
@@ -102,7 +102,7 @@ Montanha peer process:
 | Client mental model | “I open a TX, read/write keys, commit” — **one** cluster TX model | “I `put` a key; the **range leader** replicates via Raft” |
 | Cross-key atomicity | First-class in the core API (with size/time limits) | **Strong locally** in PedraDB; **across peers** only what the store log applies (DCS multi-key is per command / future TX work) |
 | Who is “the leader”? | Hidden behind proxies / sequencers (you don’t pick a range leader by hand) | Explicit per-range leadership in the multi-Raft MVP |
-| Read models | Serializable snapshot reads as part of TX | Named policies: **local applied** vs **strong** (leader) |
+| Read models | Serializable snapshot reads as part of TX | **Strong** (leader) + **fast RO** (`get_fast_replica` / LocalApplied lag metrics) — TiKV-style follower reads |
 
 **Nuance:**  
 - **Target product feel** (FDB-like): apps think in **transactions on keys**, not “Raft groups.”  
@@ -115,7 +115,7 @@ That is a **maturity / scaffolding** gap, not a permanent “we are TiKV.”
 |--|------------------|-------------------------|-----------------------------|
 | Data plane consensus story | Unbundled: versions, resolvers, tlogs, storage | **Multi-Raft** per region | **Multi-Raft ranges** MVP (`pedradb-store`) |
 | Membership / coordinators | Paxos coordinators + cluster controller | PD (+ etcd inside PD historically) | Still thin / evolving |
-| Famous testing | Deterministic **simulation** at huge scale | Extensive tests; different culture | Kernel `FailingEnv` + out-of-tree **World** (Net+PeerMsg+seed `trace_hash`); not FDB Simulation |
+| Famous testing | Deterministic **simulation** at huge scale | Extensive tests; different culture | Kernel `FailingEnv` + World lab + **in-tree** lossy-net I-MAJ + seed-replay + multi-node canaries (`montanha_fdb_path`); still not FDB-scale Simulation |
 
 **Nuance:** Saying “Montanha uses multi-Raft” answers **how we replicate this year**, not **what product we are**. FDB also shards storage; it just doesn’t market itself as “multi-Raft database.”
 
@@ -197,6 +197,38 @@ TiKV itself is **closer to Montanha’s multi-Raft MVP** mechanically, and **far
 | On FDB | On Montanha |
 |--------|-------------|
 | Overkill for many teams, but works | Bootstrap single-domain Raft still exists; long-term still **layer on store**, not “Montanha = etcd” |
+
+---
+
+## 5.5 Measured lab limits (2026-08-13) — not field peer
+
+**Peer trajectory:** open gaps and P0–P2 plan live in [RFC-0021](rfc/0021-montanha-fdb-tikv-parity-gaps.md).  
+RFC-0017 lab completion does **not** mean FDB/TiKV parity.
+
+**Honesty:** wall times include cold compile when first run; **test body** times below. Not Apple-scale FDB Simulation / multi-TB / geo.  
+
+**Perf gate v0** (in-process 3-node, example `findings/perf-gate-v0-verify/perf_report.json`): put/get/PendingTx commit p50/p99 JSON — lab only, not field peer. Sim volume gate: `scripts/montanha_sim_volume_v0.sh` (8h via `PEDRA_SIM_VOLUME_WALL_SECS=28800`).
+
+| Proof | How | Measured | Limit / claim |
+|-------|-----|----------|---------------|
+| 3-node TCP elect + put majority | `tcp_3node_elect_put_majority` | ~0.9s body | Localhost only; majority ≥2 of 3 |
+| Multi-process DCS + index layer | `multi_process_dcs_layer_freeze` | ~1.9s body | OS process reopen; **no** dual DCS raft |
+| Client NotLeader retry | `tcp_client_retry_not_leader` | ~1s body | Follower-first dial → leader put |
+| ENOSPC on majority | `p21_disk_full_on_majority_blocks_commit` | ~3s body | Fail closed; heal restores put |
+| Rolling restart sim | `p21_rolling_restart_majority_holds` | ~15s body | In-process partition/heal, not real process kill |
+| Clock skew (logical) | `p21_clock_skew_advance_time_still_maj` | ~few s | `advance_time` ticks; not NTP skew |
+| Caixote multi-VM Raft | `montanha_tcp_mesh_wire.sh raft` (m13) | lab | 3 services, mesh IPs, smoke **majority 2/3**, `/leader` role health |
+| Universe A–E | `scripts/universe_abcde.sh` | ~3–4 min wall (2026-08-13) | multiprocess + fdb_path + 3× matrix + chaos; **silent_wrong=0**; E=det_io residual on Darwin |
+
+| Capability | FDB (field) | Montanha (lab max proven) |
+|------------|-------------|---------------------------|
+| Multi-machine majority put | Yes | Yes — TCP localhost + caixote Linux mesh |
+| Leader kill / re-elect | Continuous | In-process + TCP smoke; caixote node restart ops-manual |
+| Disk full on majority | Simulation schedules | FailingEnv ENOSPC 2/3 nodes |
+| Product layers on cluster | Record Layer, etc. | DCS + put_batch index pins multi-process only |
+| Simulation volume | CPU-years | Seed-stable elect + lossy net I-MAJ; not Simulation-scale |
+
+**Do not claim:** multi-TB, geo, fdbcli parity, silent_wrong=0 under full FDB fault schedules.
 
 ---
 

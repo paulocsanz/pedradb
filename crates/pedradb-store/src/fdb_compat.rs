@@ -1,0 +1,199 @@
+//! FDB-shaped client face for plug/test (RFC-0023 P1.1) — **not** product identity.
+//!
+//! Maps a small FoundationDB transaction mental model onto Montanha's native
+//! [`Transaction`](crate::client::Transaction) physics. No fdbcli / full C ABI.
+
+use crate::client::{ClientClass, Transaction};
+use crate::{classify, Result, StoreCluster, StoreError};
+
+/// FDB-like error class for harness mapping.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FdbError {
+    /// `not_committed` / conflict.
+    NotCommitted,
+    /// `transaction_too_old`.
+    TransactionTooOld,
+    /// Size / limit.
+    Limit,
+    /// Unavailable / not leader.
+    Unavailable(String),
+    /// Other.
+    Other(String),
+}
+
+impl FdbError {
+    /// Map a store error into FDB-shaped classes.
+    #[must_use]
+    pub fn from_store(err: &StoreError) -> Self {
+        match err {
+            StoreError::TransactionTooOld { .. } => FdbError::TransactionTooOld,
+            StoreError::Conflict | StoreError::TxnAborted(_) => FdbError::NotCommitted,
+            StoreError::ValueTooLarge { .. } | StoreError::TransactionTooLarge { .. } => {
+                FdbError::Limit
+            }
+            other => match classify(other) {
+                ClientClass::Conflict => FdbError::NotCommitted,
+                ClientClass::LimitRejected { .. } => FdbError::Limit,
+                ClientClass::NotLeader { .. }
+                | ClientClass::StaleLeader { .. }
+                | ClientClass::NotCommitted { .. }
+                | ClientClass::Unavailable(_) => FdbError::Unavailable(other.to_string()),
+                ClientClass::Other(s) => FdbError::Other(s),
+            },
+        }
+    }
+}
+
+/// Database handle (cluster reference for in-process lab).
+pub struct FdbDatabase<'a> {
+    cluster: &'a mut StoreCluster,
+}
+
+impl<'a> FdbDatabase<'a> {
+    /// Wrap a store cluster (leadership-invisible API surface).
+    pub fn open(cluster: &'a mut StoreCluster) -> Self {
+        Self { cluster }
+    }
+
+    /// `create_transaction` — snapshot TX at current read version.
+    #[must_use]
+    pub fn create_transaction(&self) -> FdbTransaction {
+        FdbTransaction {
+            inner: Transaction::at_version(self.cluster.read_version()),
+        }
+    }
+
+    /// Commit a transaction against this database.
+    ///
+    /// # Errors
+    /// Store / FDB-mapped failures.
+    pub fn commit(&mut self, tx: FdbTransaction) -> std::result::Result<u64, FdbError> {
+        tx.inner
+            .commit(self.cluster)
+            .map_err(|e| FdbError::from_store(&e))
+    }
+
+    /// Raw cluster (tests).
+    pub fn cluster(&mut self) -> &mut StoreCluster {
+        self.cluster
+    }
+}
+
+/// FDB-shaped transaction (get/set/clear/commit).
+pub struct FdbTransaction {
+    inner: Transaction,
+}
+
+impl FdbTransaction {
+    /// Snapshot version at begin.
+    #[must_use]
+    pub fn read_version(&self) -> u64 {
+        self.inner.snapshot_version()
+    }
+
+    /// Snapshot get.
+    ///
+    /// # Errors
+    /// Store errors.
+    pub fn get(
+        &mut self,
+        db: &FdbDatabase<'_>,
+        key: impl AsRef<[u8]>,
+    ) -> Result<Option<Vec<u8>>> {
+        self.inner.get(db.cluster, key)
+    }
+
+    /// Stage set.
+    ///
+    /// # Errors
+    /// Limits.
+    pub fn set(&mut self, key: impl AsRef<[u8]>, value: impl AsRef<[u8]>) -> Result<()> {
+        self.inner.set(key, value)
+    }
+
+    /// Stage clear.
+    ///
+    /// # Errors
+    /// Limits.
+    pub fn clear(&mut self, key: impl AsRef<[u8]>) -> Result<()> {
+        self.inner.clear(key)
+    }
+
+    /// Range get + conflict range registration.
+    ///
+    /// # Errors
+    /// Store errors.
+    pub fn get_range(
+        &mut self,
+        db: &FdbDatabase<'_>,
+        start: impl AsRef<[u8]>,
+        end: impl AsRef<[u8]>,
+    ) -> Result<Vec<(Vec<u8>, Vec<u8>)>> {
+        self.inner.get_range(db.cluster, start, end)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::StoreCluster;
+
+    fn temp() -> std::path::PathBuf {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static N: AtomicU64 = AtomicU64::new(0);
+        let i = N.fetch_add(1, Ordering::Relaxed);
+        let n = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let d = std::env::temp_dir().join(format!("fdb-compat-{n}-{i}"));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    #[test]
+    fn fdb_compat_get_set_commit_roundtrip() {
+        let dir = temp();
+        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        c.elect_all(80).unwrap();
+        let mut db = FdbDatabase::open(&mut c);
+        let mut tr = db.create_transaction();
+        tr.set(b"fdb/k", b"v1").unwrap();
+        let ver = db.commit(tr).unwrap();
+        assert!(ver >= 1);
+        let mut tr2 = db.create_transaction();
+        assert_eq!(tr2.get(&db, b"fdb/k").unwrap().as_deref(), Some(b"v1".as_ref()));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn fdb_compat_conflict_maps_not_committed() {
+        let dir = temp();
+        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        c.elect_all(80).unwrap();
+        let mut db = FdbDatabase::open(&mut c);
+        let mut t1 = db.create_transaction();
+        let mut t2 = db.create_transaction();
+        t1.set(b"x", b"1").unwrap();
+        t2.set(b"x", b"2").unwrap();
+        db.commit(t1).unwrap();
+        let err = db.commit(t2).unwrap_err();
+        assert_eq!(err, FdbError::NotCommitted);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn fdb_compat_too_old_maps() {
+        let dir = temp();
+        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        c.elect_all(40).unwrap();
+        let mut db = FdbDatabase::open(&mut c);
+        let mut tr = db.create_transaction();
+        tr.set(b"late", b"1").unwrap();
+        db.cluster().force_safe_watermark_for_test(1);
+        let err = db.commit(tr).unwrap_err();
+        assert_eq!(err, FdbError::TransactionTooOld);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}

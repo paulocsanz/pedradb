@@ -86,7 +86,7 @@ Default commit **fsyncs the WAL** before `Ok` (process-crash safe after successf
 | Oracle | `pedradb-oracle` | ✅ model (+ optional RocksDB) |
 | Ordered apply | `pedradb-apply` | ✅ LogApplier, FakeLog, KvService, InProcessCluster |
 | Raft (TCP + persist) | `pedradb-raft`, `pedra-raft-node` | ✅ elect, put, multi-process, failover |
-| **Montanha-Store** multi-Raft | `pedradb-store` | ✅ ranges + put/get + **DCS on store** + Queued RPC |
+| **Montanha-Store** multi-Raft | `pedradb-store`, `montanha-tcp` | ✅ ranges + put/get + DCS + Queued RPC + **TCP multi-host (MTCP)** |
 | WAL ship replica | `pedradb-replicate` | ✅ |
 | DCS SM | `pedradb-dcs` | ✅ CAS, lease, watch, leader lock |
 | HTTP wire | `pedradb-http` | ✅ KV + DCS |
@@ -98,10 +98,12 @@ Default commit **fsyncs the WAL** before `Ok` (process-crash safe after successf
 | Toward Rocks/Pebble/Redwood | [RFC-0014](docs/rfc/0014-rocks-pebble-redwood-maturity.md) | done P0–P2 (OCC, vlog spill, incremental backup) |
 | Audit durability / Env fixes | [RFC-0015](docs/rfc/0015-audit-pedradb-correctness-fixes.md) | done (P0–P2) |
 | Pedra production robustness | [RFC-0016](docs/rfc/0016-pedradb-production-robustness.md) | P0 done — `compact_vlog`, stats, soak; P1 group-commit done; P1.4/P2.1 open |
-| Montanha FDB-class substrate | [RFC-0017](docs/rfc/0017-montanha-fdb-class-substrate.md) | draft — multi-process majority, cluster DST, placement |
+| Montanha FDB-class substrate | [RFC-0017](docs/rfc/0017-montanha-fdb-class-substrate.md) | P0 done (incl. **TCP multi-host P0.1** + caixote Linux lab); P2 open |
 | L1 primitive for platform + Scylla-need | [RFC-0019](docs/rfc/0019-local-primitive-for-platform-and-scylla-need.md) | done (P0–P2.2) — CAS, seq pin, change feed, multi_get, soak, compact_for_reads |
+| Synthetic field maturity | [RFC-0020](docs/rfc/0020-synthetic-field-maturity.md) | **P0–P2 done** — gate, soaks, canaries (lease/index/journal), cluster matrix, explore, race, fuzz, residuals |
+| Lease / index / journal canaries | `pedradb-lease`, `pedradb-index`, `pedradb-journal` | ✅ W1–W4 workloads silent_wrong=0 |
 
-RFCs **0001–0012**, **0014**, **0015** delivered. **0016/0017** are the next robustness + cluster waves (not field parity claims).
+RFCs **0001–0012**, **0014**, **0015**, **0019** delivered. **0020** is the confidence/volume program; **0016/0017** remain robustness + cluster substrate (not Rocks field parity claims).
 
 ## Build & test
 
@@ -110,6 +112,14 @@ cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 cargo bench -p pedradb-core --bench baseline
 cargo run -p pedradb-cli -- demo /tmp/pedra-demo
+# Montanha TCP multi-host (RFC-0017 P0.1) — 3 processes, elect+put+majority
+cargo test -p pedradb-store --test tcp_multihost
+cargo run -p pedradb-store --bin montanha-tcp -- node --id 1 --data /tmp/m1 --bind 127.0.0.1:9701 \
+  --peer 1=127.0.0.1:9701 --peer 2=127.0.0.1:9702 --peer 3=127.0.0.1:9703
+# Real Linux lab on caixote (3-process local3; smoke on start + external ports)
+./scripts/montanha_tcp_caixote.sh all
+# docker smoke: docker run --rm --platform linux/amd64 -e CLUSTER=smoke ghcr.io/paulocsanz/montanha-tcp:p01-m3
+# Multi-container mesh (experimental): MONTANHA_MESH=1 — blocked on caixote WG/hairpin today
 # Local backup / PITR / migrate
 cargo run -p pedradb-cli -- backup /tmp/pedra-demo /tmp/pedra-bak
 cargo run -p pedradb-cli -- ship-wal /tmp/pedra-demo /tmp/pedra-bak   # after more durable writes (still in WAL)

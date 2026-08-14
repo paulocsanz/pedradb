@@ -15,6 +15,7 @@
 | [`rfc/0010-dbs-on-top.md`](rfc/0010-dbs-on-top.md) | Product slices on core |
 | [`rfc/0016-pedradb-production-robustness.md`](rfc/0016-pedradb-production-robustness.md) | Local kernel production bar |
 | [`rfc/0017-montanha-fdb-class-substrate.md`](rfc/0017-montanha-fdb-class-substrate.md) | Multi-node / multi-Raft |
+| [`rfc/0022-montanha-fdb-functional-parity-and-layer-substrate.md`](rfc/0022-montanha-fdb-functional-parity-and-layer-substrate.md) | **Functional FDB parity**; prove Montanha via N-writer layers (PG/TiKV/etcd/OLAP/…) |
 | [`montanhadb.md`](montanhadb.md) | HA product family |
 | [`htap-storage-primitives-and-research.md`](htap-storage-primitives-and-research.md) | **Canonical HTAP:** triangle (layout × freshness × isolation), Zhang/Li architectures, LASER/PolarDB/ByteHTAP/HaSiS/PIM, primaries in `references/` |
 

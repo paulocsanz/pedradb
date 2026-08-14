@@ -334,6 +334,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "pedradb-index"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "pedradb-core",
+]
+
+[[package]]
 name = "pedradb-io-uring"
 version = "0.1.0"
 dependencies = [
@@ -341,6 +349,23 @@ dependencies = [
  "libc",
  "parking_lot",
  "pedradb-core",
+]
+
+[[package]]
+name = "pedradb-journal"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "pedradb-core",
+]
+
+[[package]]
+name = "pedradb-lease"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "pedradb-core",
+ "pedradb-sim",
 ]
 
 [[package]]
@@ -406,6 +431,7 @@ dependencies = [
  "crc32c",
  "pedradb-core",
  "pedradb-dcs",
+ "pedradb-sim",
  "thiserror",
 ]
 

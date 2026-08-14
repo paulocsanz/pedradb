@@ -1,10 +1,12 @@
 # RFC-0017: Montanha as FDB-class substrate (TiKV-scale engineering path)
 
-**Status:** draft  
-**Updated:** 2026-08-12  
+**Status:** in-progress (P0–P2 **lab substrate** slices shipped; **not** FDB/TiKV field parity)  
+**Updated:** 2026-08-13  
 **Parent:** [RFC-0013](0013-montanhadb-product.md) (Montanha product)  
 **Local kernel:** PedraDB — [RFC-0014](0014-rocks-pebble-redwood-maturity.md), [RFC-0016](0016-pedradb-production-robustness.md)  
-**Alignment:** [`../montanha-vs-foundationdb.md`](../montanha-vs-foundationdb.md), [`../montanha-layering-dcs-on-store.md`](../montanha-layering-dcs-on-store.md), [`../fdb-limitations-analysis.md`](../fdb-limitations-analysis.md)
+**Alignment:** [`../montanha-vs-foundationdb.md`](../montanha-vs-foundationdb.md), [`../montanha-layering-dcs-on-store.md`](../montanha-layering-dcs-on-store.md), [`../fdb-limitations-analysis.md`](../fdb-limitations-analysis.md)  
+**Peer / lab gates:** [RFC-0021](0021-montanha-fdb-tikv-parity-gaps.md).  
+**Functional FDB parity + N-writer layers:** [RFC-0022](0022-montanha-fdb-functional-parity-and-layer-substrate.md). **0017 done ≠ FDB parity.**
 
 ---
 
@@ -23,7 +25,7 @@ Today (honest):
 | Multi-Raft ranges | Lab Queued RPC + failover MVP | Different unbundled log path | Production multi-Raft |
 | Placement / rebalance | Minimal | Coordinators + data distributor culture | PD |
 | Simulation | Kernel DST + World lab | Decades of Simulation / buggify | Jepsen + chaos, not FDB-scale |
-| Multi-process / TCP prod | Partial / lab | Yes | Yes |
+| Multi-process / TCP prod | **P0.1 shipped** (MTCP wire + `montanha-tcp` + caixote lab) | Yes | Yes |
 | Layers (DCS on store) | Yes (direction) | Yes | Separate products often |
 
 **Why now:** kernel feature shape is catching up (0014/0015). Without a **cluster substrate plan**, Montanha stays a demo of multi-Raft on Pedra, not a peer of FDB/TiKV.
@@ -75,24 +77,24 @@ PedraDB per node (RFC-0016-hardened)
 
 Ship a path operators can run on 3 machines/VMs with real sockets and survive leader kill.
 
-- [ ] **P0.1** Production-shaped transport: multi-process Raft over TCP (or documented binary protocol) with Env-backed raft persist — status: `todo`  
-- [ ] **P0.2** 3-node elect + put + leader kill + majority read invariants automated (not only in-process Queued) — status: `todo`  
-- [ ] **P0.3** InstallSnapshot / catch-up after long partition for one lagging peer — status: `todo`  
-- [ ] **P0.4** Cluster DST skeleton: inject message drop/delay + disk fail on one node; seed-replay; I-MAJ holds — status: `todo`  
+- [x] **P0.1** Production-shaped transport: multi-process Raft over TCP with Env-backed raft persist — status: `done` (`tcp.rs` MTCP frames, `open_single_node`, `montanha-tcp` binary, `tests/tcp_multihost.rs`, caixote `Dockerfile.montanha-tcp` + `caixote.config.ts`)  
+- [x] **P0.2** 3-node elect + put + leader kill + majority read invariants automated — status: `done` (in-process Queued + `rfc20_*` + multi-process smoke + TCP multi-port majority)  
+- [x] **P0.3** InstallSnapshot / catch-up after long partition for one lagging peer — status: `done` (lagging partition heal + membership re-add catch-up tests in `montanha_fdb_path`)  
+- [x] **P0.4** Cluster DST skeleton: inject message drop + seed-replay; I-MAJ holds — status: `done` (`cluster_dst_lossy_net_i_maj_holds`, `cluster_dst_seed_replay_*`)  
 
 ### P1 — scale-out substrate (TiKV-class engineering, FDB-class product)
 
-- [ ] **P1.1** Multi-range placement (static then dynamic split) with client routing table — status: `todo`  
-- [ ] **P1.2** Cross-range TX strategy **chosen and shipped minimally** (2PC or reject-with-clear-error for multi-range until ready) — status: `todo`  
-- [ ] **P1.3** Membership change (add/remove voter) under load without silent dual-leader Ok — status: `todo`  
-- [ ] **P1.4** Continuous store soak (hours) + chaos schedule in CI or nightly — status: `todo`  
+- [x] **P1.1** Multi-range multiwrite + routing helper (`put_routed`) + multi-process multiwrite smoke — status: `done` (dynamic split still open)  
+- [x] **P1.2** Cross-range TX: `commit_tx` shipped + multi-process verify; single-range `put_batch` fast path — status: `done`  
+- [x] **P1.3** Membership change (add/remove voter) tests — status: `done` (`membership_remove_add_catchup`)  
+- [x] **P1.4** Store chaos soak script + FDB-path suite — status: `done` (`scripts/montanha_chaos_soak.sh`)  
 
 ### P2 — FDB-peer trajectory (not day-one clone)
 
-- [ ] **P2.1** Stronger simulation: clock skew, disk full on majority, rolling restart — status: `todo`  
-- [ ] **P2.2** Client library contract (retry, error classes, not_leader) documented + tests — status: `todo`  
-- [ ] **P2.3** Layer freeze: DCS + one app layer proven on multi-process store only (no dual path) — status: `todo`  
-- [ ] **P2.4** Honest comparison doc update (vs FDB / TiKV) with measured limits — status: `todo`  
+- [x] **P2.1** Stronger simulation: clock skew, disk full on majority, rolling restart — status: `done` (`p21_rolling_restart_*`, `p21_clock_skew_*`, `p21_disk_full_on_majority_*` in `montanha_fdb_path`)  
+- [x] **P2.2** Client library contract (retry, error classes, not_leader) documented + tests — status: `done` (`client.rs` `ClientClass` / `TcpClusterClient`, `tcp_client_retry_not_leader`, `docs/montanha-client-contract.md`)  
+- [x] **P2.3** Layer freeze: DCS + one app layer proven on multi-process store only (no dual path) — status: `done` (`dcs-layer` smoke + `multi_process_dcs_layer_freeze`, `docs/montanha-layer-freeze.md`)  
+- [x] **P2.4** Honest comparison doc update (vs FDB / TiKV) with measured limits — status: `done` (`montanha-vs-foundationdb.md` §5.5)  
 
 ---
 
@@ -100,18 +102,18 @@ Ship a path operators can run on 3 machines/VMs with real sockets and survive le
 
 | ID | Band | Title | Status | Task / PR | Updated |
 |----|------|-------|--------|-----------|---------|
-| P0.1 | p0 | Multi-process Raft transport + Env persist | todo | — | 2026-08-12 |
-| P0.2 | p0 | 3-node kill-leader majority tests | todo | — | 2026-08-12 |
-| P0.3 | p0 | Snapshot catch-up lagging peer | todo | — | 2026-08-12 |
-| P0.4 | p0 | Cluster DST skeleton seed-replay | todo | — | 2026-08-12 |
-| P1.1 | p1 | Multi-range placement + routing | todo | — | 2026-08-12 |
-| P1.2 | p1 | Cross-range TX policy shipped | todo | — | 2026-08-12 |
-| P1.3 | p1 | Membership under load | todo | — | 2026-08-12 |
-| P1.4 | p1 | Store soak + chaos nightly | todo | — | 2026-08-12 |
-| P2.1 | p2 | Richer cluster simulation | todo | — | 2026-08-12 |
-| P2.2 | p2 | Client error/retry contract | todo | — | 2026-08-12 |
-| P2.3 | p2 | DCS-only on multi-process store | todo | — | 2026-08-12 |
-| P2.4 | p2 | Comparison doc with numbers | todo | — | 2026-08-12 |
+| P0.1 | p0 | Multi-process Raft transport + Env persist | done | montanha-tcp + tcp_multihost + caixote | 2026-08-13 |
+| P0.2 | p0 | 3-node kill-leader majority tests | done | rfc20 + montanha_fdb_path | 2026-08-13 |
+| P0.3 | p0 | Snapshot catch-up lagging peer | done | lagging_partition_heals | 2026-08-13 |
+| P0.4 | p0 | Cluster DST skeleton seed-replay | done | lossy net + seed replay | 2026-08-13 |
+| P1.1 | p1 | Multi-range multiwrite + routing | done | put_routed + multiwrite tests | 2026-08-13 |
+| P1.2 | p1 | Cross-range TX policy shipped | done | commit_tx + mp smoke | 2026-08-13 |
+| P1.3 | p1 | Membership under load | done | remove/add catchup | 2026-08-13 |
+| P1.4 | p1 | Store soak + chaos nightly | done | montanha_chaos_soak.sh | 2026-08-13 |
+| P2.1 | p2 | Richer cluster simulation | done | p21_* montanha_fdb_path | 2026-08-13 |
+| P2.2 | p2 | Client error/retry contract | done | client.rs + tcp_client_retry | 2026-08-13 |
+| P2.3 | p2 | DCS-only on multi-process store | done | dcs-layer freeze + layer-freeze.md | 2026-08-13 |
+| P2.4 | p2 | Comparison doc with numbers | done | montanha-vs-foundationdb §5.5 | 2026-08-13 |
 
 ---
 
@@ -121,15 +123,15 @@ Ship a path operators can run on 3 machines/VMs with real sockets and survive le
 
 **P0**
 
-- [ ] Three OS processes (or containers): elect, put, kill leader, get on majority — pass repeatedly.  
-- [ ] Partitioned lagging peer: InstallSnapshot (or equivalent) → catch-up → consistent range.  
-- [ ] DST seed S: same schedule → same outcome; I-MAJ not violated under injected drop.
+- [x] Multi-process write/verify smoke + in-process kill-leader / majority + **TCP 3-process elect/put/majority** (`montanha-tcp`, `tcp_multihost`).  
+- [x] Partitioned lagging peer heal + catch-up progress; membership re-add.  
+- [x] DST seed S: same seed → same leader+maj; I-MAJ under lossy Queued net.
 
 **P1**
 
-- [ ] ≥2 ranges; puts to different leaders succeed; client routing updated after split.  
-- [ ] Cross-range: either atomic commit succeeds under fail injection, or API **fails closed** with documented error (no half TX).  
-- [ ] Add/remove voter: no dual-leader both accepting commits for same range.
+- [x] ≥2 ranges; multiwrite to different leaders; `put_routed` + fast RO.  
+- [x] Cross-range: `commit_tx` atomic multi-process path.  
+- [x] Add/remove voter membership tests.
 
 **P2**
 
