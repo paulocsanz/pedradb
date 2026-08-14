@@ -1132,7 +1132,7 @@ impl<E: Env> Db<E> {
     /// Reserve the next SST file number (must hold exclusive write lock).
     ///
     /// Call **before** off-lock SST I/O so concurrent flushes cannot race on
-    /// the same `next_file_num` (F40).
+    /// the same `next_file_num` (F43).
     pub fn alloc_file_num(&mut self) -> u64 {
         let n = self.next_file_num;
         self.next_file_num = n.saturating_add(1);

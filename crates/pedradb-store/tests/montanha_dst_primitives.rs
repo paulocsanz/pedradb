@@ -256,3 +256,40 @@ fn multi_range_tx_conflicts_with_range_read() {
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+
+/// SI notes after commit_tx must not be sourced from a lagging `ids[0]` node.
+///
+/// `note_tx_commit` used `local_node_id().or(ids.first())` — with multi-node
+/// in-process, that is always node 1. If node 1 is partitioned, majority commit
+/// still succeeds on 2/3 but history records empty/stale values for the TX.
+#[test]
+fn note_tx_commit_reads_applied_not_lagging_first_node() {
+    let dir = temp();
+    let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+    c.elect_all(80).unwrap();
+    c.put(b"k", b"old").unwrap();
+    // Partition node 1 so it will not apply later commits.
+    c.set_participating(1, false).unwrap();
+    // Re-elect among 2/3 if needed.
+    c.elect_all(120).unwrap();
+    assert!(c.range_leader(1).is_some_and(|l| l != 1), "leader must not be partitioned node");
+    let gen_before = c.read_version();
+    c.commit_tx([(b"k".as_slice(), b"new".as_slice())])
+        .expect("majority commit without node 1");
+    let gen = c.read_version();
+    assert_eq!(gen, gen_before + 1, "generation must advance");
+    // Snapshot at new gen must see *new*, not empty/old from lagging node 1.
+    let at = c.get_at_version(b"k", gen).unwrap();
+    assert_eq!(
+        at.as_deref(),
+        Some(b"new".as_ref()),
+        "SI history recorded lagging/first-node view: {at:?}"
+    );
+    // Strong path on live leader still sees new.
+    assert_eq!(
+        c.get_strong(b"k").unwrap().as_deref(),
+        Some(b"new".as_ref())
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}

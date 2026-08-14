@@ -819,6 +819,76 @@ fn decode_entry(buf: &[u8], off: &mut usize) -> Result<RangeEntry> {
     }
 }
 
+/// Clear intents + txn pair/pre/status for user keys in `[start, end)`.
+///
+/// Intent/txn keys live under `\0store/*` (often outside the user range), so a
+/// range keyspace wipe does not reach them. Used by install-snapshot (F40).
+fn clear_range_txn_meta<E: Env>(db: &mut Db<E>, start: &[u8], end: &[u8]) -> Result<()> {
+    let mut ops: Vec<BatchOp> = Vec::new();
+    let mut touched_txns: Vec<u64> = Vec::new();
+    for (ik, raw) in scan_prefix(db, INTENT_PREFIX) {
+        let user = match ik.strip_prefix(INTENT_PREFIX) {
+            Some(u) => u,
+            None => continue,
+        };
+        if !key_in_half_open(user, start, end) {
+            continue;
+        }
+        if let Some((tid, _)) = decode_intent(&raw) {
+            if !touched_txns.contains(&tid) {
+                touched_txns.push(tid);
+            }
+            ops.push(BatchOp::delete(txn_pair_key(tid, user)));
+            ops.push(BatchOp::delete(txn_pre_key(tid, user)));
+        }
+        ops.push(BatchOp::delete(ik));
+    }
+    // Also drop stray pair/pre rows without a live intent (partial crash).
+    for (pk, _) in scan_prefix(db, TXN_PREFIX) {
+        let Some(rest) = pk.strip_prefix(TXN_PREFIX) else {
+            continue;
+        };
+        if rest.len() < 8 {
+            continue;
+        }
+        let tid = u64::from_le_bytes(rest[0..8].try_into().unwrap());
+        let after = &rest[8..];
+        let user = if let Some(u) = after.strip_prefix(b"/k/") {
+            u
+        } else if let Some(u) = after.strip_prefix(b"/pre/") {
+            u
+        } else {
+            continue;
+        };
+        if !key_in_half_open(user, start, end) {
+            continue;
+        }
+        if !touched_txns.contains(&tid) {
+            touched_txns.push(tid);
+        }
+        ops.push(BatchOp::delete(pk));
+    }
+    if !ops.is_empty() {
+        db.apply_batch(ops)?;
+    }
+    for tid in touched_txns {
+        let prefix = txn_pair_prefix(tid);
+        let end_p = {
+            let mut e = prefix.clone();
+            e.push(0xff);
+            e
+        };
+        let left = db.range(
+            Bound::Included(prefix.as_slice()),
+            Bound::Excluded(end_p.as_slice()),
+        );
+        if left.is_empty() {
+            let _ = db.apply_batch([BatchOp::delete(txn_status_key(tid))]);
+        }
+    }
+    Ok(())
+}
+
 fn clear_txn_keys<E: Env>(db: &mut Db<E>, txn_id: u64, keys: &[Vec<u8>]) -> Result<()> {
     if keys.is_empty() {
         return Ok(());
@@ -2598,7 +2668,13 @@ impl<E: Env> StoreCluster<E> {
         Ok(())
     }
 
-    /// Export applied KV for a range from `node_id` (install-snapshot payload).
+    /// Export **user** applied KV for a range (install-snapshot payload).
+    ///
+    /// Reserved `\0store/*` keys are **never** exported:
+    /// - Raft meta is per-node (term/vote/log); shipping the leader's meta onto a
+    ///   follower corrupts that peer (F41).
+    /// - Intents/txn/SI are not range-applied state; orphans are cleared on install
+    ///   for keys in this range (F40) or on open recovery (F35).
     fn export_range_kv(&self, node_id: u64, rid: u64) -> Result<Vec<(Vec<u8>, Vec<u8>)>> {
         let meta = self
             .ranges
@@ -2622,16 +2698,10 @@ impl<E: Env> StoreCluster<E> {
         };
         let mut out = Vec::new();
         for (k, v) in n.db.range(start_b, end) {
-            // Skip other ranges' internal keys only if reserved store prefix for other ranges —
-            // export all user + intent/txn in this keyspace slice; always include this range's raft meta.
-            out.push((k.to_vec(), v.to_vec()));
-        }
-        // Raft meta for this range may live under NUL prefix (outside user keyspace).
-        for kind in ["hard", "snap", "log", "commit", "applied"] {
-            let mk = raft_meta_key(rid, kind);
-            if let Some(v) = n.db.get(&mk) {
-                out.push((mk, v.to_vec()));
+            if is_reserved_store_key(&k) {
+                continue;
             }
+            out.push((k.to_vec(), v.to_vec()));
         }
         Ok(out)
     }
@@ -2691,37 +2761,50 @@ impl<E: Env> StoreCluster<E> {
             let _ = persist_commit_db(&mut n.db, range_id, p);
             let _ = persist_applied_db(&mut n.db, range_id, p);
         }
-        // Replace applied state for this range (F38): put-only merge left keys the
-        // leader had deleted after the follower went offline / was compacted past.
+        // Replace applied **user** state for this range (F38/F40/F41):
+        // - Wipe only non-reserved keys in [start,end) (never `\0store/*`).
+        // - Clear intents/txn meta for user keys owned by this range (they live
+        //   under `\0store/intent|txn/` outside the user keyspace).
+        // - Apply export user keys only; ignore reserved keys if a peer still
+        //   sends them (old wire). Raft meta for *this* range was already
+        //   persisted from local peer state above — never from the leader export.
         {
             let meta = self
                 .ranges
                 .iter()
                 .find(|r| r.id == range_id)
-                .ok_or_else(|| StoreError::Msg("install snap: bad range".into()))?;
-            let start = meta.start.as_slice();
-            let end_b = if meta.end.is_empty() {
-                Bound::Unbounded
-            } else {
-                Bound::Excluded(meta.end.as_slice())
-            };
-            let start_b = if meta.start.is_empty() {
-                Bound::Unbounded
-            } else {
-                Bound::Included(start)
-            };
+                .ok_or_else(|| StoreError::Msg("install snap: bad range".into()))?
+                .clone();
+            let start = meta.start.clone();
+            let end = meta.end.clone();
             let n = self.nodes.get_mut(&to).unwrap();
+            let start_b = if start.is_empty() {
+                Bound::Unbounded
+            } else {
+                Bound::Included(start.as_slice())
+            };
+            let end_b = if end.is_empty() {
+                Bound::Unbounded
+            } else {
+                Bound::Excluded(end.as_slice())
+            };
             let stale: Vec<Vec<u8>> = n
                 .db
                 .range(start_b, end_b)
                 .into_iter()
                 .map(|(k, _)| k.to_vec())
+                .filter(|k| !is_reserved_store_key(k))
                 .collect();
             if !stale.is_empty() {
                 let ops: Vec<BatchOp> = stale.into_iter().map(BatchOp::delete).collect();
                 n.db.apply_batch(ops)?;
             }
+            // Drop orphan intents / txn records for keys in this range (F40).
+            clear_range_txn_meta(&mut n.db, start.as_slice(), end.as_slice())?;
             for (k, v) in &kv_pairs {
+                if is_reserved_store_key(k) {
+                    continue;
+                }
                 n.db.put(k, v)?;
             }
         }
@@ -3771,7 +3854,7 @@ impl<E: Env> StoreCluster<E> {
     /// 2PC phase 2: commit a prepared TX (materialize intents **per range**).
     ///
     /// If a later range fails to commit, already-committed ranges are **reverted**
-    /// (user keys deleted) and remaining ranges aborted so criterion 1 holds:
+    /// (preimage restored; F34) and remaining ranges aborted so criterion 1 holds:
     /// fail ⇒ no majority user-key apply from this TX. Cleanup is force-local on
     /// every peer so a leaderless range cannot leave stuck intents on disk.
     ///
@@ -3811,50 +3894,78 @@ impl<E: Env> StoreCluster<E> {
         Ok(())
     }
 
+    /// Best local node to read applied TX state for `rid` after majority commit.
+    ///
+    /// Prefer the live range leader (just applied), else the participating peer with
+    /// highest `applied`. Never default to a partitioned `ids[0]` (F42).
+    fn best_applied_reader(&self, rid: u64) -> Option<u64> {
+        if let Some(lead) = self.range_leader(rid) {
+            if self.is_local_node(lead) && self.is_participating(lead) {
+                return Some(lead);
+            }
+        }
+        self.ids
+            .iter()
+            .copied()
+            .filter(|&nid| self.is_local_node(nid) && self.is_participating(nid))
+            .max_by_key(|&nid| self.applied_index(nid, rid))
+            .or_else(|| self.local_node_id())
+            .or_else(|| {
+                self.ids
+                    .iter()
+                    .copied()
+                    .filter(|&nid| self.is_local_node(nid))
+                    .max_by_key(|&nid| self.applied_index(nid, rid))
+            })
+    }
+
     /// Record all keys of a finished 2PC TX under a **single** commit generation.
     ///
     /// Preimages are read from durable prepare records; new values from applied user
     /// keys (or leftover pair/intent if a peer is still catching up).
+    ///
+    /// Per-range reads use [`Self::best_applied_reader`] so a lagging `ids[0]` cannot
+    /// poison SI history after a majority commit that excluded that node (F42).
     fn note_tx_commit(&mut self, handle: &TxHandle) {
-        let nid = self
-            .local_node_id()
-            .or_else(|| self.ids.first().copied())
-            .unwrap_or(1);
         let mut items: Vec<(Vec<u8>, Vec<u8>, Option<Vec<u8>>)> = Vec::new();
-        if let Some(n) = self.nodes.get(&nid) {
-            for (_, keys) in &handle.keys_by_range {
-                for k in keys {
-                    if is_reserved_store_key(k) {
-                        continue;
-                    }
-                    let pre = n
-                        .db
-                        .get(&txn_pre_key(handle.id, k))
-                        .and_then(|b| decode_preimage(b.as_ref()))
-                        .unwrap_or(None);
-                    let val = n
-                        .db
-                        .get(k)
-                        .map(|b| b.to_vec())
-                        .or_else(|| {
-                            n.db
-                                .get(&txn_pair_key(handle.id, k))
-                                .map(|b| b.to_vec())
-                        })
-                        .or_else(|| {
-                            n.db.get(&intent_key(k)).and_then(|raw| {
-                                decode_intent(&raw).and_then(|(oid, v)| {
-                                    if oid == handle.id {
-                                        Some(v.to_vec())
-                                    } else {
-                                        None
-                                    }
-                                })
+        for (rid, keys) in &handle.keys_by_range {
+            let Some(nid) = self.best_applied_reader(*rid) else {
+                continue;
+            };
+            let Some(n) = self.nodes.get(&nid) else {
+                continue;
+            };
+            for k in keys {
+                if is_reserved_store_key(k) {
+                    continue;
+                }
+                let pre = n
+                    .db
+                    .get(&txn_pre_key(handle.id, k))
+                    .and_then(|b| decode_preimage(b.as_ref()))
+                    .unwrap_or(None);
+                let val = n
+                    .db
+                    .get(k)
+                    .map(|b| b.to_vec())
+                    .or_else(|| {
+                        n.db
+                            .get(&txn_pair_key(handle.id, k))
+                            .map(|b| b.to_vec())
+                    })
+                    .or_else(|| {
+                        n.db.get(&intent_key(k)).and_then(|raw| {
+                            decode_intent(&raw).and_then(|(oid, v)| {
+                                if oid == handle.id {
+                                    Some(v.to_vec())
+                                } else {
+                                    None
+                                }
                             })
                         })
-                        .unwrap_or_default();
-                    items.push((k.clone(), val, pre));
-                }
+                    })
+                    .unwrap_or_default();
+                items.push((k.clone(), val, pre));
             }
         }
         self.note_mutations(&items);
@@ -3957,13 +4068,21 @@ impl<E: Env> StoreCluster<E> {
     }
 
     /// Current value of `key` as of the latest commit (history tip or Pedra).
+    ///
+    /// Pedra fallback uses [`Self::best_applied_reader`] for the key's range — not
+    /// `ids[0]` / arbitrary LocalApplied (same F42 class as `note_tx_commit`).
     fn value_now(&self, key: &[u8]) -> Option<Vec<u8>> {
         if let Some(hist) = self.key_history.get(key) {
             if let Some((_, v)) = hist.last() {
                 return v.clone();
             }
         }
-        self.get(key).ok().flatten().map(|b| b.to_vec())
+        let rid = self.locate(key).ok()?;
+        let nid = self.best_applied_reader(rid)?;
+        self.nodes
+            .get(&nid)
+            .and_then(|n| n.db.get(key))
+            .map(|b| b.to_vec())
     }
 
     /// Build version-note items for a client log entry (preimages at propose time).
@@ -6133,6 +6252,210 @@ mod tests {
             c.get_on(3, b"stale-k").unwrap().is_none(),
             "install-snapshot merge left stale key on follower: {:?}",
             c.get_on(3, b"stale-k").unwrap()
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Direct install-snapshot of a **user** range must clear orphan intents for
+    /// keys in that range even though intent keys live under `\0store/` (low
+    /// range keyspace). Full remove/re-add can mask this when range-0 install
+    /// side-effect wipes all `\0store/*`.
+    #[test]
+    fn install_snapshot_user_range_clears_orphan_intents() {
+        let dir = temp();
+        let mut c = StoreCluster::open(&dir, 3, 4).unwrap();
+        c.elect_all(80).unwrap();
+        let user = b"intent-k"; // 0x69 → mid range
+        let user_rid = c.locate(user).unwrap();
+        let intent_rid = c.locate(&intent_key(user)).unwrap();
+        assert_ne!(user_rid, intent_rid);
+        c.put(user, b"seed").unwrap();
+        c.put([0x01, b'a'], b"low").unwrap();
+        // Orphan intent on peer 3 only (simulates prepare then offline past commit).
+        {
+            let n = c.nodes.get_mut(&3).unwrap();
+            n.db
+                .put(intent_key(user), encode_intent(9_999, b"ghost"))
+                .unwrap();
+            n.db.put(txn_pair_key(9_999, user), b"ghost").unwrap();
+            n.db
+                .put(txn_pre_key(9_999, user), encode_preimage(Some(b"seed")))
+                .unwrap();
+            n.db.put(txn_status_key(9_999), b"prepared").unwrap();
+            assert!(intent_conflict(&n.db, user, None));
+        }
+        let export = c.export_range_kv(1, user_rid).unwrap();
+        let leader = c.range_leader(user_rid).unwrap();
+        let (term, snap_i, snap_t) = {
+            let p = c.nodes.get(&leader).unwrap().ranges.get(&user_rid).unwrap();
+            (p.term.max(1), p.applied.max(1), p.term.max(1))
+        };
+        // Install user-range snapshot onto peer 3 only (no range-0 install).
+        let reply = c
+            .on_install_snapshot(3, user_rid, term, leader, snap_i, snap_t, export)
+            .unwrap();
+        match reply {
+            PeerMsg::InstallSnapshotReply { success: true, .. } => {}
+            other => panic!("install failed: {other:?}"),
+        }
+        assert_eq!(
+            c.get_on(3, user).unwrap().as_deref(),
+            Some(b"seed".as_ref()),
+            "user value restored from export"
+        );
+        assert!(
+            !intent_conflict(&c.nodes.get(&3).unwrap().db, user, None),
+            "orphan intent for key in installed range must be cleared \
+             (intent key is in range {intent_rid}, install was range {user_rid})"
+        );
+        // Low-range user data must not be touched by mid-range install.
+        assert_eq!(
+            c.get_on(3, &[0x01, b'a']).unwrap().as_deref(),
+            Some(b"low".as_ref())
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Install-snapshot wipe must not delete other ranges' raft meta / reserved
+    /// keys just because they share the low byte range (`\0store/...`).
+    #[test]
+    fn install_snapshot_range0_preserves_other_range_raft_meta() {
+        let dir = temp();
+        let mut c = StoreCluster::open(&dir, 3, 4).unwrap();
+        c.elect_all(80).unwrap();
+        c.put([0x01, b'a'], b"low-v").unwrap();
+        c.put(b"high-key", b"hi-v").unwrap();
+        let rid0 = c.locate(&[0x01, b'a']).unwrap();
+        let rid_hi = c.locate(b"high-key").unwrap();
+        assert_ne!(rid0, rid_hi);
+        let hard_hi = raft_meta_key(rid_hi, "hard");
+        let log_hi = raft_meta_key(rid_hi, "log");
+        let commit_hi = raft_meta_key(rid_hi, "commit");
+        // Snapshot of durable high-range meta before range-0 install.
+        let hard_before = c.nodes.get(&3).unwrap().db.get(&hard_hi).map(|b| b.to_vec());
+        let log_before = c.nodes.get(&3).unwrap().db.get(&log_hi).map(|b| b.to_vec());
+        let commit_before = c
+            .nodes
+            .get(&3)
+            .unwrap()
+            .db
+            .get(&commit_hi)
+            .map(|b| b.to_vec());
+        assert!(hard_before.is_some() && commit_before.is_some());
+        // In-progress prepare intent for a *high* key (must not vanish on range0 install
+        // either — abort is coordinator's job; wipe must be range-scoped).
+        {
+            let n = c.nodes.get_mut(&3).unwrap();
+            n.db
+                .put(intent_key(b"high-key"), encode_intent(42, b"inflight"))
+                .unwrap();
+        }
+        let export0 = c.export_range_kv(1, rid0).unwrap();
+        let leader = c.range_leader(rid0).unwrap();
+        let (term, snap_i, snap_t) = {
+            let p = c.nodes.get(&leader).unwrap().ranges.get(&rid0).unwrap();
+            (p.term.max(1), p.applied.max(1), p.term.max(1))
+        };
+        c.on_install_snapshot(3, rid0, term, leader, snap_i, snap_t, export0)
+            .unwrap();
+        assert_eq!(
+            c.nodes.get(&3).unwrap().db.get(&hard_hi).map(|b| b.to_vec()),
+            hard_before,
+            "range-0 install wiped high-range raft hard meta"
+        );
+        assert_eq!(
+            c.nodes.get(&3).unwrap().db.get(&log_hi).map(|b| b.to_vec()),
+            log_before,
+            "range-0 install wiped high-range raft log meta"
+        );
+        assert_eq!(
+            c.nodes
+                .get(&3)
+                .unwrap()
+                .db
+                .get(&commit_hi)
+                .map(|b| b.to_vec()),
+            commit_before,
+            "range-0 install wiped high-range raft commit meta"
+        );
+        assert_eq!(
+            c.get_on(3, b"high-key").unwrap().as_deref(),
+            Some(b"hi-v".as_ref()),
+            "high-range user data must survive range-0 install"
+        );
+        // Intent for high key: must still exist (not range-0's to clear as "user wipe").
+        // Clearing orphan intents is done by user-range install / open recovery.
+        assert!(
+            intent_conflict(&c.nodes.get(&3).unwrap().db, b"high-key", None),
+            "range-0 install must not blindly delete intents for other ranges' keys"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Install-snapshot must not replace the follower's raft hard/log with the
+    /// leader's (per-node state). Export used to ship `\0store/raft/*` from the
+    /// leader into the payload.
+    #[test]
+    fn install_snapshot_does_not_import_leader_raft_meta() {
+        let dir = temp();
+        let mut c = StoreCluster::open(&dir, 3, 2).unwrap();
+        c.elect_all(80).unwrap();
+        c.put([0x01, b'a'], b"v").unwrap();
+        let rid = c.locate(&[0x01, b'a']).unwrap();
+        let leader = c.range_leader(rid).unwrap();
+        let follower = if leader == 1 { 2 } else { 1 };
+        let hard_k = raft_meta_key(rid, "hard");
+        // Give follower a distinct hard state (term already matches cluster; flip vote).
+        {
+            let n = c.nodes.get_mut(&follower).unwrap();
+            let p = n.ranges.get_mut(&rid).unwrap();
+            p.voted_for = Some(follower);
+            persist_hard_db(&mut n.db, rid, p).unwrap();
+        }
+        let follower_hard = c
+            .nodes
+            .get(&follower)
+            .unwrap()
+            .db
+            .get(&hard_k)
+            .map(|b| b.to_vec())
+            .expect("follower hard");
+        let leader_hard = c
+            .nodes
+            .get(&leader)
+            .unwrap()
+            .db
+            .get(&hard_k)
+            .map(|b| b.to_vec())
+            .expect("leader hard");
+        assert_ne!(
+            follower_hard, leader_hard,
+            "precondition: hard states must differ"
+        );
+        let export = c.export_range_kv(leader, rid).unwrap();
+        assert!(
+            export.iter().all(|(k, _)| !is_reserved_store_key(k)),
+            "export must not contain reserved raft/intent keys"
+        );
+        let (term, snap_i, snap_t) = {
+            let p = c.nodes.get(&leader).unwrap().ranges.get(&rid).unwrap();
+            (p.term.max(1), p.applied.max(1), p.term.max(1))
+        };
+        c.on_install_snapshot(follower, rid, term, leader, snap_i, snap_t, export)
+            .unwrap();
+        let after = c
+            .nodes
+            .get(&follower)
+            .unwrap()
+            .db
+            .get(&hard_k)
+            .map(|b| b.to_vec());
+        // Local persist in on_install_snapshot may rewrite hard from in-memory peer
+        // (term/vote), but must never become a copy of the *leader's* pre-install hard.
+        assert_ne!(
+            after.as_ref(),
+            Some(&leader_hard),
+            "follower hard became leader hard after install-snapshot"
         );
         let _ = std::fs::remove_dir_all(&dir);
     }

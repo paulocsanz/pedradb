@@ -394,7 +394,7 @@ impl<E: Env> ConcurrentDb<E> {
         // At most two pipeline steps: drain existing imm, then switch+flush active.
         // Do **not** loop while concurrent puts refill mem (that would never end).
         for _ in 0..2 {
-            // F40: allocate SST file number under the write lock so concurrent
+            // F43: allocate SST file number under the write lock so concurrent
             // flushes cannot both read the same next_file_num during off-lock I/O.
             let prepared = {
                 let mut g = self.inner.write();
@@ -846,7 +846,7 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
     }
 
-    /// F40: concurrent flush prep must allocate distinct SST file numbers.
+    /// F43: concurrent flush prep must allocate distinct SST file numbers.
     #[test]
     fn concurrent_flush_allocates_distinct_file_nums() {
         use std::sync::{Arc, Barrier};
