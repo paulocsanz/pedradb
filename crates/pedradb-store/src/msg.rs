@@ -246,7 +246,9 @@ impl PeerMsg {
                 let prev_log_term = take_u64(buf, &mut off)?;
                 let leader_commit = take_u64(buf, &mut off)?;
                 let n = take_u64(buf, &mut off)? as usize;
-                if n > 1_000_000 {
+                // Soft cap + residual (F2/F9/F39): tiny frames must not allocate for huge n.
+                let rem = buf.len().saturating_sub(off);
+                if n > 1_000_000 || n > rem {
                     return Err(StoreError::Msg("ae entries too many".into()));
                 }
                 let mut entries = Vec::with_capacity(n);
@@ -298,7 +300,9 @@ impl PeerMsg {
                 let last_included_index = take_u64(buf, &mut off)?;
                 let last_included_term = take_u64(buf, &mut off)?;
                 let n = take_u64(buf, &mut off)? as usize;
-                if n > 2_000_000 {
+                // Soft cap + residual (F2/F9/F39).
+                let rem = buf.len().saturating_sub(off);
+                if n > 2_000_000 || n > rem {
                     return Err(StoreError::Msg("snapshot kv too many".into()));
                 }
                 let mut kv_pairs = Vec::with_capacity(n);
@@ -391,5 +395,21 @@ mod tests {
         };
         assert_eq!(PeerMsg::decode(&a.encode()).unwrap(), a);
         assert_eq!(PeerMsg::decode(&b.encode()).unwrap(), b);
+    }
+
+    /// Hostile AE count below soft cap but above residual must fail-stop without huge alloc.
+    #[test]
+    fn ae_rejects_count_past_residual() {
+        let mut b = vec![3u8]; // AppendEntries tag
+        for v in [1u64, 1, 1, 0, 0, 0] {
+            b.extend_from_slice(&v.to_le_bytes());
+        }
+        // n = 100_000 entries claimed, zero body remaining after count.
+        b.extend_from_slice(&100_000u64.to_le_bytes());
+        let err = PeerMsg::decode(&b).expect_err("must reject");
+        assert!(
+            err.to_string().contains("too many") || err.to_string().contains("eof"),
+            "got {err}"
+        );
     }
 }

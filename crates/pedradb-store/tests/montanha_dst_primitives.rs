@@ -174,3 +174,85 @@ fn snapshot_isolation_survives_reopen() {
     assert!(matches!(err, StoreError::Conflict), "got {err:?}");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// Multi-range commit_tx must not expose intermediate SI generations that see
+/// only a subset of the TX's keys (FDB commit version is one number).
+#[test]
+fn multi_range_commit_tx_single_generation_visibility() {
+    let dir = temp();
+    let mut c = StoreCluster::open(&dir, 3, 3).unwrap();
+    c.elect_all(80).unwrap();
+    let keys = keys_one_per_range(&c);
+    assert!(keys.len() >= 2);
+    let gen_before = c.read_version();
+    c.commit_tx([
+        (keys[0].as_slice(), b"a".as_slice()),
+        (keys[1].as_slice(), b"b".as_slice()),
+    ])
+    .expect("cross-range commit");
+    let gen_after = c.read_version();
+    // Intermediate generations must not see only one key of the TX.
+    for g in gen_before..=gen_after {
+        let v0 = c.get_at_version(&keys[0], g).unwrap();
+        let v1 = c.get_at_version(&keys[1], g).unwrap();
+        let saw0 = v0.as_deref() == Some(b"a".as_ref());
+        let saw1 = v1.as_deref() == Some(b"b".as_ref());
+        assert_eq!(
+            saw0, saw1,
+            "gen {g}: partial multi-range visibility saw0={saw0} saw1={saw1} v0={v0:?} v1={v1:?} before={gen_before} after={gen_after}"
+        );
+    }
+    // One logical TX → one generation bump (not one per range).
+    assert_eq!(
+        gen_after,
+        gen_before + 1,
+        "cross-range commit_tx must advance commit_generation once, before={gen_before} after={gen_after}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Duplicate keys in one commit_tx: last write wins, single intent, no double-apply mess.
+#[test]
+fn commit_tx_duplicate_keys_last_wins() {
+    let dir = temp();
+    let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+    c.elect_all(80).unwrap();
+    c.commit_tx([
+        (b"dup".as_slice(), b"first".as_slice()),
+        (b"dup".as_slice(), b"second".as_slice()),
+    ])
+    .expect("dup keys in one TX");
+    assert_eq!(
+        c.get(b"dup").unwrap().as_deref(),
+        Some(b"second".as_ref()),
+        "last pair should win"
+    );
+    assert!(c.count_applied_eq(b"dup", b"second") >= 2);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// OCC range conflict must fire when a concurrent multi-range TX writes inside the range.
+#[test]
+fn multi_range_tx_conflicts_with_range_read() {
+    let dir = temp();
+    let mut c = StoreCluster::open(&dir, 3, 3).unwrap();
+    c.elect_all(80).unwrap();
+    let keys = keys_one_per_range(&c);
+    assert!(keys.len() >= 2);
+    c.put(&keys[0], b"seed").unwrap();
+    let mut tx = c.begin();
+    let _ = tx.get_range(&c, &keys[0][..keys[0].len().saturating_sub(0)], b"\xff").unwrap();
+    // Concurrent multi-range write that includes the seed key.
+    c.commit_tx([
+        (keys[0].as_slice(), b"other".as_slice()),
+        (keys[1].as_slice(), b"x".as_slice()),
+    ])
+    .unwrap();
+    tx.set(b"zzz-out", b"1").unwrap();
+    let err = tx.commit(&mut c).expect_err("range OCC vs multi-range write");
+    assert!(
+        matches!(err, StoreError::Conflict),
+        "expected Conflict, got {err:?}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}

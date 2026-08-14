@@ -719,7 +719,9 @@ fn decode_key_list(buf: &[u8], off: &mut usize) -> Result<Vec<Vec<u8>>> {
     }
     let n = u32::from_le_bytes(buf[*off..*off + 4].try_into().unwrap()) as usize;
     *off += 4;
-    if n > 1_000_000 {
+    // Soft cap + residual (F2/F39): n may be < 1e6 yet still >> remaining bytes.
+    let rem = buf.len().saturating_sub(*off);
+    if n > 1_000_000 || n > rem {
         return Err(StoreError::Msg("key list too large".into()));
     }
     let mut keys = Vec::with_capacity(n);
@@ -753,8 +755,9 @@ fn decode_entry(buf: &[u8], off: &mut usize) -> Result<RangeEntry> {
             }
             let n = u32::from_le_bytes(buf[*off..*off + 4].try_into().unwrap()) as usize;
             *off += 4;
-            // Bound pairs (hostile / corrupt log).
-            if n > 1_000_000 {
+            // Soft cap + residual (F2/F39).
+            let rem = buf.len().saturating_sub(*off);
+            if n > 1_000_000 || n > rem {
                 return Err(StoreError::Msg("batch too large".into()));
             }
             let mut pairs = Vec::with_capacity(n);
@@ -773,7 +776,8 @@ fn decode_entry(buf: &[u8], off: &mut usize) -> Result<RangeEntry> {
             *off += 8;
             let n = u32::from_le_bytes(buf[*off..*off + 4].try_into().unwrap()) as usize;
             *off += 4;
-            if n > 1_000_000 {
+            let rem = buf.len().saturating_sub(*off);
+            if n > 1_000_000 || n > rem {
                 return Err(StoreError::Msg("txn prepare too large".into()));
             }
             let mut pairs = Vec::with_capacity(n);
@@ -2687,9 +2691,36 @@ impl<E: Env> StoreCluster<E> {
             let _ = persist_commit_db(&mut n.db, range_id, p);
             let _ = persist_applied_db(&mut n.db, range_id, p);
         }
-        // Materialize applied state.
+        // Replace applied state for this range (F38): put-only merge left keys the
+        // leader had deleted after the follower went offline / was compacted past.
         {
+            let meta = self
+                .ranges
+                .iter()
+                .find(|r| r.id == range_id)
+                .ok_or_else(|| StoreError::Msg("install snap: bad range".into()))?;
+            let start = meta.start.as_slice();
+            let end_b = if meta.end.is_empty() {
+                Bound::Unbounded
+            } else {
+                Bound::Excluded(meta.end.as_slice())
+            };
+            let start_b = if meta.start.is_empty() {
+                Bound::Unbounded
+            } else {
+                Bound::Included(start)
+            };
             let n = self.nodes.get_mut(&to).unwrap();
+            let stale: Vec<Vec<u8>> = n
+                .db
+                .range(start_b, end_b)
+                .into_iter()
+                .map(|(k, _)| k.to_vec())
+                .collect();
+            if !stale.is_empty() {
+                let ops: Vec<BatchOp> = stale.into_iter().map(BatchOp::delete).collect();
+                n.db.apply_batch(ops)?;
+            }
             for (k, v) in &kv_pairs {
                 n.db.put(k, v)?;
             }
@@ -3743,6 +3774,9 @@ impl<E: Env> StoreCluster<E> {
     /// (user keys deleted) and remaining ranges aborted so criterion 1 holds:
     /// fail ⇒ no majority user-key apply from this TX. Cleanup is force-local on
     /// every peer so a leaderless range cannot leave stuck intents on disk.
+    ///
+    /// On full success, SI/OCC history is advanced **once** for all keys in the TX
+    /// (F37) so intermediate generations never observe a partial multi-range apply.
     pub fn tx_finish(&mut self, handle: &TxHandle) -> Result<()> {
         let mut committed: Vec<u64> = Vec::new();
         for rid in &handle.ranges {
@@ -3771,8 +3805,59 @@ impl<E: Env> StoreCluster<E> {
                 }
             }
         }
+        // One SI generation for the whole TX (must run before preimages drop).
+        self.note_tx_commit(handle);
         self.drop_preimages(handle);
         Ok(())
+    }
+
+    /// Record all keys of a finished 2PC TX under a **single** commit generation.
+    ///
+    /// Preimages are read from durable prepare records; new values from applied user
+    /// keys (or leftover pair/intent if a peer is still catching up).
+    fn note_tx_commit(&mut self, handle: &TxHandle) {
+        let nid = self
+            .local_node_id()
+            .or_else(|| self.ids.first().copied())
+            .unwrap_or(1);
+        let mut items: Vec<(Vec<u8>, Vec<u8>, Option<Vec<u8>>)> = Vec::new();
+        if let Some(n) = self.nodes.get(&nid) {
+            for (_, keys) in &handle.keys_by_range {
+                for k in keys {
+                    if is_reserved_store_key(k) {
+                        continue;
+                    }
+                    let pre = n
+                        .db
+                        .get(&txn_pre_key(handle.id, k))
+                        .and_then(|b| decode_preimage(b.as_ref()))
+                        .unwrap_or(None);
+                    let val = n
+                        .db
+                        .get(k)
+                        .map(|b| b.to_vec())
+                        .or_else(|| {
+                            n.db
+                                .get(&txn_pair_key(handle.id, k))
+                                .map(|b| b.to_vec())
+                        })
+                        .or_else(|| {
+                            n.db.get(&intent_key(k)).and_then(|raw| {
+                                decode_intent(&raw).and_then(|(oid, v)| {
+                                    if oid == handle.id {
+                                        Some(v.to_vec())
+                                    } else {
+                                        None
+                                    }
+                                })
+                            })
+                        })
+                        .unwrap_or_default();
+                    items.push((k.clone(), val, pre));
+                }
+            }
+        }
+        self.note_mutations(&items);
     }
 
     /// Drop prepare-time preimages after a *successful* all-range commit.
@@ -3898,40 +3983,9 @@ impl<E: Env> StoreCluster<E> {
                 .filter(|(k, _)| !is_reserved_store_key(k))
                 .map(|(k, v)| (k.clone(), v.clone(), self.value_now(k)))
                 .collect(),
-            RangeEntry::TxnCommit { txn_id, keys } => {
-                // Materialized user values live in txn pair / intent records on any local db.
-                let nid = self
-                    .local_node_id()
-                    .or_else(|| self.ids.first().copied())
-                    .unwrap_or(1);
-                let Some(n) = self.nodes.get(&nid) else {
-                    return Vec::new();
-                };
-                let mut out = Vec::new();
-                for k in keys {
-                    if is_reserved_store_key(k) {
-                        continue;
-                    }
-                    let val = n
-                        .db
-                        .get(&txn_pair_key(*txn_id, k))
-                        .map(|b| b.to_vec())
-                        .or_else(|| {
-                            n.db.get(&intent_key(k)).and_then(|raw| {
-                                decode_intent(&raw).and_then(|(oid, v)| {
-                                    if oid == *txn_id {
-                                        Some(v.to_vec())
-                                    } else {
-                                        None
-                                    }
-                                })
-                            })
-                        })
-                        .unwrap_or_default();
-                    out.push((k.clone(), val, self.value_now(k)));
-                }
-                out
-            }
+            // TxnCommit SI notes are deferred to [`Self::note_tx_commit`] after *all*
+            // ranges majority-commit (F37: one generation per logical multi-range TX).
+            RangeEntry::TxnCommit { .. } => Vec::new(),
             RangeEntry::Dcs(cmd) => {
                 let (key, value) = match cmd {
                     DcsCommand::Put { key, value, .. }
@@ -6031,6 +6085,54 @@ mod tests {
         assert!(
             c.snapshot_index(3, rid) >= 1 || c.applied_index(3, rid) >= 1,
             "peer 3 watermarks advanced"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Install-snapshot must replace range state, not merge — keys deleted on the
+    /// leader after compact must not remain on a re-added lagging follower.
+    #[test]
+    fn install_snapshot_clears_stale_keys_not_in_export() {
+        let dir = temp();
+        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        c.elect_all(80).unwrap();
+        c.put(b"stale-k", b"old").unwrap();
+        assert!(c.count_applied_eq(b"stale-k", b"old") >= 2);
+        c.remove_member(3).unwrap();
+        for i in 0..12u8 {
+            c.put([b'n', i], [b'v', i]).unwrap();
+        }
+        // Simulate a committed delete that was folded into the snapshot prefix
+        // (no AE redo of the delete for a compact-behind peer).
+        for nid in [1u64, 2] {
+            if let Some(n) = c.nodes.get_mut(&nid) {
+                let _ = n.db.delete(b"stale-k");
+            }
+        }
+        assert!(c.get_on(1, b"stale-k").unwrap().is_none());
+        assert_eq!(
+            c.get_on(3, b"stale-k").unwrap().as_deref(),
+            Some(b"old".as_ref())
+        );
+        let rid = c.locate(b"stale-k").unwrap();
+        let leader = c.range_leader(rid).unwrap();
+        assert!(
+            c.snapshot_index(leader, rid) >= 1,
+            "need compact for install-snapshot path, snap={}",
+            c.snapshot_index(leader, rid)
+        );
+        c.add_member(3).unwrap();
+        for _ in 0..40 {
+            c.tick().unwrap();
+        }
+        let _ = c.put(b"catchup-ping2", b"1");
+        for _ in 0..15 {
+            c.tick().unwrap();
+        }
+        assert!(
+            c.get_on(3, b"stale-k").unwrap().is_none(),
+            "install-snapshot merge left stale key on follower: {:?}",
+            c.get_on(3, b"stale-k").unwrap()
         );
         let _ = std::fs::remove_dir_all(&dir);
     }

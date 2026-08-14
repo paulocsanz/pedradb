@@ -251,7 +251,9 @@ impl WireMsg {
             }
             11 => {
                 let n = take_u32(buf, &mut off)? as usize;
-                if n > 10_000 {
+                // Soft cap + residual (F2/F39).
+                let rem = buf.len().saturating_sub(off);
+                if n > 10_000 || n > rem {
                     return Err(StoreError::Msg("commit_tx too many pairs".into()));
                 }
                 let mut pairs = Vec::with_capacity(n);
