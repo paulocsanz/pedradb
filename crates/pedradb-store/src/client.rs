@@ -443,6 +443,24 @@ impl Transaction {
         Ok(())
     }
 
+    /// Clear every key currently visible in `[start, end)` at the snapshot
+    /// (FDB-shaped `clear_range` seed — stages per-key clears + range conflict).
+    ///
+    /// # Errors
+    /// Store / TX size limits.
+    pub fn clear_range(
+        &mut self,
+        cluster: &StoreCluster,
+        start: impl AsRef<[u8]>,
+        end: impl AsRef<[u8]>,
+    ) -> Result<()> {
+        let pairs = self.get_range(cluster, start, end)?;
+        for (k, _) in pairs {
+            self.clear(k)?;
+        }
+        Ok(())
+    }
+
     /// Staged set pairs; clears are empty values (**delete** on apply).
     #[must_use]
     pub fn pairs(&self) -> Vec<(Vec<u8>, Vec<u8>)> {

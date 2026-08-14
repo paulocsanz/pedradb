@@ -568,6 +568,121 @@ impl RecordTable {
         tr.commit(cluster)
     }
 
+    /// Unique secondary index: fail if `index_val` already points at a **different** pk.
+    ///
+    /// # Errors
+    /// Conflict, or [`pedradb_store::StoreError::Msg`] when uniqueness is violated.
+    pub fn upsert_unique(
+        &self,
+        cluster: &mut StoreCluster,
+        pk: &[u8],
+        index_val: &[u8],
+        payload: &[u8],
+    ) -> Result<u64> {
+        let mut tr = cluster.begin();
+        let rk = self.row_key(pk);
+        // Scan existing pks for this index value (range under index subspace).
+        let holders = self.lookup_index_in_tx(&mut tr, cluster, index_val)?;
+        for h in &holders {
+            if h.as_slice() != pk {
+                return Err(pedradb_store::StoreError::Msg(format!(
+                    "unique index {}:{} already held by other pk",
+                    String::from_utf8_lossy(&self.index_col),
+                    String::from_utf8_lossy(index_val)
+                )));
+            }
+        }
+        if let Some(old) = tr.get(cluster, &rk)? {
+            if let Some(sep) = old.iter().position(|&b| b == 0) {
+                let old_iv = &old[..sep];
+                if old_iv != index_val {
+                    tr.clear(self.idx_key(old_iv, pk))?;
+                }
+            }
+        }
+        let mut body = index_val.to_vec();
+        body.push(0);
+        body.extend_from_slice(payload);
+        tr.set(&rk, &body)?;
+        tr.set(self.idx_key(index_val, pk), b"\x01")?;
+        tr.commit(cluster)
+    }
+
+    /// Upsert with **two** secondary indexes in one TX (multi-index seed).
+    ///
+    /// Payload stored as `iv1\0iv2\0body`. Indexes: primary `index_col` and `index2_col`.
+    ///
+    /// # Errors
+    /// Conflict / store.
+    pub fn upsert_two_indexes(
+        &self,
+        cluster: &mut StoreCluster,
+        index2_col: &[u8],
+        pk: &[u8],
+        index_val: &[u8],
+        index2_val: &[u8],
+        payload: &[u8],
+    ) -> Result<u64> {
+        let mut tr = cluster.begin();
+        let rk = self.row_key(pk);
+        if let Some(old) = tr.get(cluster, &rk)? {
+            // layout: iv1\0iv2\0body
+            let parts: Vec<&[u8]> = old.split(|&b| b == 0).collect();
+            if parts.len() >= 2 {
+                if parts[0] != index_val {
+                    tr.clear(self.idx_key(parts[0], pk))?;
+                }
+                if parts[1] != index2_val {
+                    tr.clear(self.idx2_key(index2_col, parts[1], pk))?;
+                }
+            }
+        }
+        let mut body = index_val.to_vec();
+        body.push(0);
+        body.extend_from_slice(index2_val);
+        body.push(0);
+        body.extend_from_slice(payload);
+        tr.set(&rk, &body)?;
+        tr.set(self.idx_key(index_val, pk), b"\x01")?;
+        tr.set(self.idx2_key(index2_col, index2_val, pk), b"\x01")?;
+        tr.commit(cluster)
+    }
+
+    fn idx2_key(&self, col: &[u8], idx_val: &[u8], pk: &[u8]) -> Vec<u8> {
+        Subspace::new(b"rec")
+            .sub(&self.name)
+            .sub(b"i")
+            .sub(col)
+            .pack(&[idx_val, pk])
+    }
+
+    fn lookup_index_in_tx(
+        &self,
+        tr: &mut Transaction,
+        cluster: &StoreCluster,
+        index_val: &[u8],
+    ) -> Result<Vec<Vec<u8>>> {
+        let prefix = Subspace::new(b"rec")
+            .sub(&self.name)
+            .sub(b"i")
+            .sub(&self.index_col)
+            .pack(&[index_val]);
+        let mut end = prefix.clone();
+        end.push(0xff);
+        let pairs = tr.get_range(cluster, &prefix, &end)?;
+        let mut pks = Vec::new();
+        for (k, v) in pairs {
+            if !is_live(&v) {
+                continue;
+            }
+            // key = ...\0idx_val\0pk
+            if let Some(pk) = k.rsplit(|b| *b == 0).next() {
+                pks.push(pk.to_vec());
+            }
+        }
+        Ok(pks)
+    }
+
     /// Lookup by primary key → (index_val, payload).
     ///
     /// # Errors
@@ -861,6 +976,43 @@ mod tests {
         rec.upsert(&mut c, b"pk3", b"SKU-2", b"row3").unwrap();
         let pks = rec.lookup_index(&c, b"SKU-1").unwrap();
         assert_eq!(pks.len(), 2, "SKU-1 → two pks: {pks:?}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Phase C: unique secondary index reject + multi-index atomic maintain.
+    #[test]
+    fn phase3_record_unique_and_multi_index() {
+        let (dir, mut c) = open3();
+        let rec = RecordTable::new(b"acct", b"email");
+        rec.upsert_unique(&mut c, b"1", b"a@x", b"alice").unwrap();
+        let err = rec
+            .upsert_unique(&mut c, b"2", b"a@x", b"bob")
+            .expect_err("duplicate email must fail");
+        assert!(
+            err.to_string().contains("unique"),
+            "expected unique error, got {err}"
+        );
+        // same pk may re-upsert unique
+        rec.upsert_unique(&mut c, b"1", b"a@x", b"alice2").unwrap();
+
+        rec.upsert_two_indexes(&mut c, b"phone", b"9", b"e@9", b"555", b"z")
+            .unwrap();
+        let by_email = rec.lookup_index(&c, b"e@9").unwrap();
+        assert!(by_email.iter().any(|p| p == b"9"), "email index {by_email:?}");
+        // phone index via subspace pack
+        let phone_prefix = Subspace::new(b"rec")
+            .sub(b"acct")
+            .sub(b"i")
+            .sub(b"phone")
+            .pack(&[b"555"]);
+        let mut end = phone_prefix.clone();
+        end.push(0xff);
+        let mut tr = c.begin();
+        let pairs = tr.get_range(&c, &phone_prefix, &end).unwrap();
+        assert!(
+            pairs.iter().any(|(k, v)| !v.is_empty() && k.ends_with(b"9")),
+            "phone index missing: {pairs:?}"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 

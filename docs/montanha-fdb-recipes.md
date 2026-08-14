@@ -34,7 +34,7 @@ cargo test -p montanha-fdb-recipes
 
 ## Next phases
 
-1. ~~fdb-compat / bindingtester subset~~ + **1b range/multi-key** — done  
-2. ~~etcd-shaped multiproc workloads~~ — done (freeze, not full wire)  
-3. ~~Record Layer seed~~ — done; full Java RL / SQL planner still long-horizon  
-4. Optional: TCP etcd wire, full bindingtester
+1. ~~fdb-compat / bindingtester subset~~ + **1b range/multi-key/clear_range** — done  
+2. ~~etcd-shaped multiproc + TCP DCS wire~~ — done (not full etcd gRPC)  
+3. ~~Record Layer seed~~ + unique / multi-index — done; full Java RL still long-horizon  
+4. Continuous DST soak; full bindingtester only if requested

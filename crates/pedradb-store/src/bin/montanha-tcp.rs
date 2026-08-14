@@ -157,6 +157,21 @@ enum Work {
         pairs: Vec<(Vec<u8>, Vec<u8>)>,
         resp: SyncSender<Result<u64, String>>,
     },
+    DcsCreate {
+        key: Vec<u8>,
+        value: Vec<u8>,
+        resp: SyncSender<Result<u64, String>>,
+    },
+    DcsCas {
+        key: Vec<u8>,
+        value: Vec<u8>,
+        expected_rev: u64,
+        resp: SyncSender<Result<u64, String>>,
+    },
+    DcsGet {
+        key: Vec<u8>,
+        resp: SyncSender<Result<Option<Vec<u8>>, String>>,
+    },
 }
 
 fn cmd_node(args: &[String]) {
@@ -516,6 +531,55 @@ fn handle_conn(tx: SyncSender<Work>, mut stream: TcpStream) -> Result<(), StoreE
                 )?,
             }
         }
+        WireMsg::DcsCreate { key, value } => {
+            let (rtx, rrx) = mpsc::sync_channel(1);
+            tx.send(Work::DcsCreate {
+                key,
+                value,
+                resp: rtx,
+            })
+            .map_err(|_| StoreError::Msg("worker dead".into()))?;
+            let r = rrx
+                .recv_timeout(Duration::from_secs(25))
+                .map_err(|_| StoreError::Msg("dcs_create timeout".into()))?;
+            match r {
+                Ok(rev) => write_frame(&mut stream, &WireMsg::RespRev { rev })?,
+                Err(m) => write_frame(&mut stream, &WireMsg::RespErr { message: m })?,
+            }
+        }
+        WireMsg::DcsCas {
+            key,
+            value,
+            expected_rev,
+        } => {
+            let (rtx, rrx) = mpsc::sync_channel(1);
+            tx.send(Work::DcsCas {
+                key,
+                value,
+                expected_rev,
+                resp: rtx,
+            })
+            .map_err(|_| StoreError::Msg("worker dead".into()))?;
+            let r = rrx
+                .recv_timeout(Duration::from_secs(25))
+                .map_err(|_| StoreError::Msg("dcs_cas timeout".into()))?;
+            match r {
+                Ok(rev) => write_frame(&mut stream, &WireMsg::RespRev { rev })?,
+                Err(m) => write_frame(&mut stream, &WireMsg::RespErr { message: m })?,
+            }
+        }
+        WireMsg::DcsGet { key } => {
+            let (rtx, rrx) = mpsc::sync_channel(1);
+            tx.send(Work::DcsGet { key, resp: rtx })
+                .map_err(|_| StoreError::Msg("worker dead".into()))?;
+            let r = rrx
+                .recv_timeout(Duration::from_secs(10))
+                .map_err(|_| StoreError::Msg("dcs_get timeout".into()))?;
+            match r {
+                Ok(v) => write_frame(&mut stream, &WireMsg::RespValue { value: v })?,
+                Err(m) => write_frame(&mut stream, &WireMsg::RespErr { message: m })?,
+            }
+        }
         other => {
             write_frame(
                 &mut stream,
@@ -577,6 +641,42 @@ fn worker_loop(
             Ok(Work::CommitTx { pairs, resp }) => {
                 let r = commit_tx_drive(id, &mut cluster, &peers, &pairs, &rx);
                 let _ = resp.send(r.map_err(|e| e.to_string()));
+            }
+            Ok(Work::DcsCreate { key, value, resp }) => {
+                let r = dcs_mutate_drive(
+                    id,
+                    &mut cluster,
+                    &peers,
+                    &rx,
+                    DcsMutate::Create { key, value },
+                );
+                let _ = resp.send(r.map_err(|e| e.to_string()));
+            }
+            Ok(Work::DcsCas {
+                key,
+                value,
+                expected_rev,
+                resp,
+            }) => {
+                let r = dcs_mutate_drive(
+                    id,
+                    &mut cluster,
+                    &peers,
+                    &rx,
+                    DcsMutate::Cas {
+                        key,
+                        value,
+                        expected_rev,
+                    },
+                );
+                let _ = resp.send(r.map_err(|e| e.to_string()));
+            }
+            Ok(Work::DcsGet { key, resp }) => {
+                let r = cluster
+                    .dcs_get_on(id, &key)
+                    .map(|o| o.map(|kv| kv.value))
+                    .map_err(|e| e.to_string());
+                let _ = resp.send(r);
             }
             Ok(Work::SetPeers {
                 peers: new_peers,
@@ -817,8 +917,109 @@ fn service_nested(
         Work::CommitTx { pairs: _, resp } => {
             let _ = resp.send(Err("busy: commit_tx in progress".into()));
         }
+        Work::DcsCreate { key: _, value: _, resp } => {
+            let _ = resp.send(Err("busy: dcs mutate in progress".into()));
+        }
+        Work::DcsCas {
+            key: _,
+            value: _,
+            expected_rev: _,
+            resp,
+        } => {
+            let _ = resp.send(Err("busy: dcs mutate in progress".into()));
+        }
+        Work::DcsGet { key, resp } => {
+            let r = cluster
+                .dcs_get_on(self_id, &key)
+                .map(|o| o.map(|kv| kv.value))
+                .map_err(|e| e.to_string());
+            let _ = resp.send(r);
+        }
         Work::SetPeers { peers: _, resp } => {
             let _ = resp.send(Err("busy: cannot set-peers nested".into()));
+        }
+    }
+}
+
+enum DcsMutate {
+    Create { key: Vec<u8>, value: Vec<u8> },
+    Cas {
+        key: Vec<u8>,
+        value: Vec<u8>,
+        expected_rev: u64,
+    },
+}
+
+/// Drive DCS create/CAS while pumping peer AE (same nested pattern as put).
+fn dcs_mutate_drive(
+    self_id: u64,
+    cluster: &mut StoreCluster,
+    peers: &HashMap<u64, String>,
+    rx: &Receiver<Work>,
+    op: DcsMutate,
+) -> Result<u64, StoreError> {
+    for _ in 0..16 {
+        match rx.try_recv() {
+            Ok(w) => service_nested(self_id, cluster, peers, w),
+            Err(_) => break,
+        }
+    }
+    let _ = cluster.tick();
+    flush_outbound(self_id, cluster, peers);
+
+    let dcs_key = match &op {
+        DcsMutate::Create { key, .. } | DcsMutate::Cas { key, .. } => key.clone(),
+    };
+    let result = match op {
+        DcsMutate::Create { key, value } => cluster.dcs_create(&key, &value),
+        DcsMutate::Cas {
+            key,
+            value,
+            expected_rev,
+        } => cluster.dcs_cas(&key, &value, expected_rev),
+    };
+    match result {
+        Ok(rev) => {
+            flush_outbound(self_id, cluster, peers);
+            pump_ae(self_id, cluster, peers, rx, 40);
+            Ok(rev)
+        }
+        Err(StoreError::NotCommitted {
+            range_id, index, ..
+        }) => {
+            flush_outbound(self_id, cluster, peers);
+            let deadline = Instant::now() + Duration::from_secs(15);
+            while Instant::now() < deadline {
+                while let Ok(w) = rx.try_recv() {
+                    service_nested(self_id, cluster, peers, w);
+                }
+                if let Ok(true) = cluster.finish_queued_propose(range_id, index, false) {
+                    flush_outbound(self_id, cluster, peers);
+                    pump_ae(self_id, cluster, peers, rx, 20);
+                    if let Ok(Some(kv)) = cluster.dcs_get_on(self_id, &dcs_key) {
+                        return Ok(kv.mod_revision);
+                    }
+                    return Ok(1);
+                }
+                let _ = cluster.tick();
+                flush_outbound(self_id, cluster, peers);
+                match rx.recv_timeout(Duration::from_millis(10)) {
+                    Ok(w) => service_nested(self_id, cluster, peers, w),
+                    Err(mpsc::RecvTimeoutError::Timeout) => {}
+                    Err(mpsc::RecvTimeoutError::Disconnected) => break,
+                }
+            }
+            let commit = cluster.commit_index(self_id, range_id);
+            let _ = cluster.finish_queued_propose(range_id, index, true);
+            Err(StoreError::NotCommitted {
+                range_id,
+                index,
+                commit,
+            })
+        }
+        Err(e) => {
+            flush_outbound(self_id, cluster, peers);
+            Err(e)
         }
     }
 }

@@ -131,6 +131,19 @@ impl FdbTransaction {
     ) -> Result<Vec<(Vec<u8>, Vec<u8>)>> {
         self.inner.get_range(db.cluster, start, end)
     }
+
+    /// Clear all keys in half-open `[start, end)` visible at snapshot (seed).
+    ///
+    /// # Errors
+    /// Store / limits.
+    pub fn clear_range(
+        &mut self,
+        db: &FdbDatabase<'_>,
+        start: impl AsRef<[u8]>,
+        end: impl AsRef<[u8]>,
+    ) -> Result<()> {
+        self.inner.clear_range(db.cluster, start, end)
+    }
 }
 
 /// Result of the Phase-1 bindingtester-subset harness (human-readable steps).
@@ -371,7 +384,41 @@ pub fn run_phase1_bindingtester_subset(
         steps_ok.push("clear_then_set_same_key");
     }
 
-    // 10) limit maps (oversized value) — no watermark side effects
+    // 10) clear_range removes all keys in half-open range
+    {
+        let mut tr = db.create_transaction();
+        tr.set(b"p1c/a", b"1")
+            .map_err(|e| FdbError::from_store(&e))?;
+        tr.set(b"p1c/b", b"2")
+            .map_err(|e| FdbError::from_store(&e))?;
+        tr.set(b"p1c_out", b"keep")
+            .map_err(|e| FdbError::from_store(&e))?;
+        db.commit(tr)?;
+        let mut tr2 = db.create_transaction();
+        tr2.clear_range(&db, b"p1c/", b"p1c0")
+            .map_err(|e| FdbError::from_store(&e))?;
+        db.commit(tr2)?;
+        let mut tr3 = db.create_transaction();
+        let left = tr3
+            .get_range(&db, b"p1c/", b"p1c0")
+            .map_err(|e| FdbError::from_store(&e))?;
+        if !left.is_empty() {
+            return Err(FdbError::Other(format!(
+                "clear_range left keys {left:?}"
+            )));
+        }
+        let keep = tr3
+            .get(&db, b"p1c_out")
+            .map_err(|e| FdbError::from_store(&e))?;
+        if keep.as_deref() != Some(b"keep".as_ref()) {
+            return Err(FdbError::Other(format!(
+                "clear_range must not touch outside key, got {keep:?}"
+            )));
+        }
+        steps_ok.push("clear_range");
+    }
+
+    // 11) limit maps (oversized value) — no watermark side effects
     {
         let mut tr = db.create_transaction();
         let big = vec![0u8; crate::MAX_VALUE_BYTES + 1];
@@ -387,7 +434,7 @@ pub fn run_phase1_bindingtester_subset(
         steps_ok.push("limit");
     }
 
-    // 11) too-old maps — last: advances safe_watermark and would poison later commits
+    // 12) too-old maps — last: advances safe_watermark and would poison later commits
     {
         let mut tr = db.create_transaction();
         tr.set(b"p1/old", b"1")
@@ -498,7 +545,12 @@ mod tests {
             "false-conflict guard missing: {:?}",
             report.steps_ok
         );
-        assert_eq!(report.steps_ok.len(), 11, "steps={:?}", report.steps_ok);
+        assert!(
+            report.steps_ok.contains(&"clear_range"),
+            "clear_range missing: {:?}",
+            report.steps_ok
+        );
+        assert_eq!(report.steps_ok.len(), 12, "steps={:?}", report.steps_ok);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

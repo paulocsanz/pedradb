@@ -4,7 +4,7 @@
 > item is closed, or a new open question emerges. The authoritative source for
 > "what's done, what's next, what's unresolved."
 
-Last updated: 2026-08-14 (RFC-0023 + Slipstream/Quicksilver v2 research note)
+Last updated: 2026-08-14 (RFC-0024 draft: Montanha fold for Caixote)
 
 ---
 
@@ -43,11 +43,11 @@ Last updated: 2026-08-14 (RFC-0023 + Slipstream/Quicksilver v2 research note)
 | 11 | Streaming range / lazy blocks (RFC-0014 P1) | ✅ done | scan + lazy SST blocks + levels + lz4 | — |
 | 12 | Audit correctness fixes (RFC-0015) | ✅ done | fence, sync_dir, Env seams, compact stats, deny CI | — |
 
-**Next action:** Optional TCP etcd wire / full bindingtester / Java Record Layer (explicit non-goals until requested).  
-**Shipped Phase 1–3 +1b:** [montanha-fdb-phases.md](montanha-fdb-phases.md) — fdb-compat harness (11 steps: SI + range OCC + multi-key), etcd multiproc freeze, `RecordTable` seed.  
-**Shipped (recipes):** `montanha-fdb-recipes` — design recipes + SI/OCC.  
+**Next action:** Continuous DST soak; full bindingtester / Java RL only if requested (non-goals).  
+**Shipped Phase 1–3 + A–E continuum:** [montanha-fdb-phases.md](montanha-fdb-phases.md) — fdb-compat 12-step harness (`clear_range`), etcd multiproc + **TCP DCS wire**, `RecordTable` unique/multi-index, platform need faces (CP/OLAP/stream), F47–F49 residuals.  
+**Shipped (recipes):** `montanha-fdb-recipes` — design recipes + SI/OCC + Record seed.  
 **Shipped (0023):** SI, Transaction, watermark, fdb_compat + c-api.  
-**Do not** claim FDB field peer, full bindingtester, or production Record Layer.  
+**Do not** claim FDB field peer, full bindingtester, production Record Layer, or drop-in etcd/Scylla/CH/NATS.  
 
 Shipped (0017 lab): TCP multi-host + caixote mesh + proxy.  
 Shipped (0021 **all Status rows**): TX/limits, perf/sim gates, `/v1/cluster`, split, **TCP rewire without SSH**, region-aware dial lab, drills, runbooks.
@@ -59,7 +59,7 @@ Kernel = Pedra; horizontal = Montanha; analytics = OLAP RO; streams = layer; CP 
 **Perf ceiling + sled layer:** living plan in
 [`performance-ceiling-option-preservation-and-sled-layer.md`](performance-ceiling-option-preservation-and-sled-layer.md)
 (K1–K3 kernel phases, L0–L3 `pedra-map` / sled-compat; anti-corner checklist F1–X6).  
-**RFCs:** [0009](rfc/0009-rocksdb-class-engine.md) · [0010](rfc/0010-dbs-on-top.md) · [0014 maturity](rfc/0014-rocks-pebble-redwood-maturity.md) · [0015 audit](rfc/0015-audit-pedradb-correctness-fixes.md) · [0016 robustness](rfc/0016-pedradb-production-robustness.md) · [0017 Montanha FDB-class](rfc/0017-montanha-fdb-class-substrate.md) · [0018 FDB method](rfc/0018-fdb-method-parity-and-fault-coverage.md) · [0019 L1](rfc/0019-local-primitive-for-platform-and-scylla-need.md) · [0020 synthetic field](rfc/0020-synthetic-field-maturity.md) · [0021 lab gates](rfc/0021-montanha-fdb-tikv-parity-gaps.md) · [**0022 functional FDB + N-writer layers**](rfc/0022-montanha-fdb-functional-parity-and-layer-substrate.md)
+**RFCs:** [0009](rfc/0009-rocksdb-class-engine.md) · [0010](rfc/0010-dbs-on-top.md) · [0014 maturity](rfc/0014-rocks-pebble-redwood-maturity.md) · [0015 audit](rfc/0015-audit-pedradb-correctness-fixes.md) · [0016 robustness](rfc/0016-pedradb-production-robustness.md) · [0017 Montanha FDB-class](rfc/0017-montanha-fdb-class-substrate.md) · [0018 FDB method](rfc/0018-fdb-method-parity-and-fault-coverage.md) · [0019 L1](rfc/0019-local-primitive-for-platform-and-scylla-need.md) · [0020 synthetic field](rfc/0020-synthetic-field-maturity.md) · [0021 lab gates](rfc/0021-montanha-fdb-tikv-parity-gaps.md) · [**0022 functional FDB + N-writer layers**](rfc/0022-montanha-fdb-functional-parity-and-layer-substrate.md) · [**0024 Montanha fold / Caixote**](rfc/0024-montanha-fold-for-caixote.md) (draft)
 
 ---
 
@@ -277,6 +277,7 @@ new evidence.
 | [`conversation-learnings-and-short-term-alignment.md`](conversation-learnings-and-short-term-alignment.md) | All conversation learnings + **conflict matrix vs P0** |
 | [`nats-need-replacement.md`](nats-need-replacement.md) | JetStream-class stream on PedraDB+Raft vs Core NATS; Jepsen 2.12.1 findings |
 | [`slipstream-and-quicksilver-learnings.md`](slipstream-and-quicksilver-learnings.md) | **2026-08-14:** QS v2 tiered cache + Slipstream fold/cursor-after-apply; what to steal vs not mix into Montanha SoR |
+| [`rfc/0024-montanha-fold-for-caixote.md`](rfc/0024-montanha-fold-for-caixote.md) | **Draft:** Slipstream-class fold on Montanha for Caixote (P0 combinator+Pedra fold; P1 federation by seq) |
 | [`usage.md`](usage.md) | **P0 user docs**: open/TX, durability, secondary-index sketch |
 | [`foundationdb-layers-and-products.md`](foundationdb-layers-and-products.md) | What runs on FDB: Record/Document layers, Snowflake, CloudKit, Astra, … |
 | [`etcd-comparison.md`](etcd-comparison.md) | etcd vs PedraDB, FDB, TiKV/TiDB, CRDB, Scylla, RocksDB, … |

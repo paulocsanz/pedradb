@@ -351,6 +351,103 @@ fn tcp_client_retry_not_leader() {
     assert_eq!(got, b"v1");
 }
 
+/// Phase A: etcd-need create/CAS/get over **real TCP** (no dual etcd SoR).
+#[test]
+fn tcp_etcd_need_create_cas_get() {
+    let tmp = tempfile_dir("tcp_etcd");
+    let nodes = start_cluster(&tmp);
+    let peer_flags: Vec<String> = nodes
+        .iter()
+        .flat_map(|n| vec!["--peer".into(), format!("{}={}", n.id, n.addr)])
+        .collect();
+    assert!(
+        Command::new(bin())
+            .arg("elect-wait")
+            .args(&peer_flags)
+            .status()
+            .unwrap()
+            .success(),
+        "elect-wait"
+    );
+
+    // Full coordination key (EtcdNeedFace prefix `m/`).
+    let key = b"m/lock/pg1";
+    let deadline = Instant::now() + Duration::from_secs(25);
+    let mut rev = 0u64;
+    let mut created = false;
+    while Instant::now() < deadline && !created {
+        for n in &nodes {
+            match pedradb_store::client_dcs_create(n.addr.to_string(), key, b"node-a") {
+                Ok(r) => {
+                    rev = r;
+                    created = true;
+                    break;
+                }
+                Err(_) => {}
+            }
+        }
+        if !created {
+            thread::sleep(Duration::from_millis(40));
+        }
+    }
+    assert!(created && rev >= 1, "create failed rev={rev}");
+
+    // Exclusive create must fail on every node once key exists.
+    let mut exclusive_fail = false;
+    for n in &nodes {
+        if pedradb_store::client_dcs_create(n.addr.to_string(), key, b"node-b").is_err() {
+            exclusive_fail = true;
+            break;
+        }
+    }
+    assert!(exclusive_fail, "second create must fail");
+
+    // CAS on the current revision.
+    let mut cas_ok = false;
+    let mut rev2 = 0u64;
+    let deadline = Instant::now() + Duration::from_secs(15);
+    while Instant::now() < deadline && !cas_ok {
+        for n in &nodes {
+            match pedradb_store::client_dcs_cas(n.addr.to_string(), key, b"node-a2", rev) {
+                Ok(r) => {
+                    rev2 = r;
+                    cas_ok = true;
+                    break;
+                }
+                Err(_) => {}
+            }
+        }
+        if !cas_ok {
+            thread::sleep(Duration::from_millis(40));
+        }
+    }
+    assert!(cas_ok && rev2 > rev, "cas rev={rev2} prev={rev}");
+
+    // Majority visibility of new value via DcsGet.
+    let deadline = Instant::now() + Duration::from_secs(15);
+    loop {
+        let mut seen = 0u32;
+        for n in &nodes {
+            if pedradb_store::client_dcs_get(n.addr.to_string(), key)
+                .ok()
+                .flatten()
+                .as_deref()
+                == Some(b"node-a2".as_ref())
+            {
+                seen += 1;
+            }
+        }
+        if seen >= 2 {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "majority dcs get timeout seen={seen}"
+        );
+        thread::sleep(Duration::from_millis(50));
+    }
+}
+
 fn tempfile_dir(name: &str) -> PathBuf {
     let mut p = std::env::temp_dir();
     p.push(format!(

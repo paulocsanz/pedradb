@@ -14,6 +14,10 @@
 //! - tag 10 SetPeers: u32 count + repeated (id u64, host_port bytes) — runtime mesh rewire
 //! - tag 11 CommitTx: u32 n + repeated (key, value) — atomic multi-key TX (RFC-0021)
 //! - tag 12 RespTxn: u64 txn_id
+//! - tag 13 DcsCreate: key, value — etcd-need create-if-absent (returns RespRev)
+//! - tag 14 DcsCas: key, value, expected_rev
+//! - tag 15 DcsGet: key — returns RespValue (user bytes) or empty
+//! - tag 16 RespRev: u64 mod_revision
 
 use crate::msg::PeerMsg;
 use crate::{Result, StoreError, validate_tx_pairs};
@@ -82,6 +86,32 @@ pub enum WireMsg {
     RespTxn {
         /// Transaction id assigned by the store.
         txn_id: u64,
+    },
+    /// etcd-need DCS create-if-absent (full key, typically `m/...`).
+    DcsCreate {
+        /// Full key including coordination prefix.
+        key: Vec<u8>,
+        /// Value bytes.
+        value: Vec<u8>,
+    },
+    /// etcd-need DCS compare-and-swap by revision.
+    DcsCas {
+        /// Full key.
+        key: Vec<u8>,
+        /// New value.
+        value: Vec<u8>,
+        /// Expected mod_revision.
+        expected_rev: u64,
+    },
+    /// etcd-need DCS get (lease-aware on server).
+    DcsGet {
+        /// Full key.
+        key: Vec<u8>,
+    },
+    /// Successful DCS create/CAS revision.
+    RespRev {
+        /// `mod_revision` after the mutation.
+        rev: u64,
     },
 }
 
@@ -184,6 +214,29 @@ impl WireMsg {
                 b.push(12);
                 put_u64(&mut b, *txn_id);
             }
+            WireMsg::DcsCreate { key, value } => {
+                b.push(13);
+                put_bytes(&mut b, key);
+                put_bytes(&mut b, value);
+            }
+            WireMsg::DcsCas {
+                key,
+                value,
+                expected_rev,
+            } => {
+                b.push(14);
+                put_bytes(&mut b, key);
+                put_bytes(&mut b, value);
+                put_u64(&mut b, *expected_rev);
+            }
+            WireMsg::DcsGet { key } => {
+                b.push(15);
+                put_bytes(&mut b, key);
+            }
+            WireMsg::RespRev { rev } => {
+                b.push(16);
+                put_u64(&mut b, *rev);
+            }
         }
         b
     }
@@ -266,6 +319,27 @@ impl WireMsg {
             }
             12 => Ok(WireMsg::RespTxn {
                 txn_id: take_u64(buf, &mut off)?,
+            }),
+            13 => {
+                let key = take_bytes(buf, &mut off)?;
+                let value = take_bytes(buf, &mut off)?;
+                Ok(WireMsg::DcsCreate { key, value })
+            }
+            14 => {
+                let key = take_bytes(buf, &mut off)?;
+                let value = take_bytes(buf, &mut off)?;
+                let expected_rev = take_u64(buf, &mut off)?;
+                Ok(WireMsg::DcsCas {
+                    key,
+                    value,
+                    expected_rev,
+                })
+            }
+            15 => Ok(WireMsg::DcsGet {
+                key: take_bytes(buf, &mut off)?,
+            }),
+            16 => Ok(WireMsg::RespRev {
+                rev: take_u64(buf, &mut off)?,
             }),
             t => Err(StoreError::Msg(format!("tcp bad tag {t}"))),
         }
@@ -445,6 +519,78 @@ pub fn client_commit_tx(
     }
 }
 
+/// Client helper: DCS create-if-absent over TCP (returns mod_revision).
+///
+/// # Errors
+/// Network, NotLeader, key exists, NotCommitted.
+pub fn client_dcs_create(addr: impl AsRef<str>, key: &[u8], value: &[u8]) -> Result<u64> {
+    let mut s = connect_host(addr.as_ref(), Duration::from_secs(3))?;
+    s.set_read_timeout(Some(Duration::from_secs(20))).ok();
+    write_frame(
+        &mut s,
+        &WireMsg::DcsCreate {
+            key: key.to_vec(),
+            value: value.to_vec(),
+        },
+    )?;
+    match read_frame(&mut s)? {
+        WireMsg::RespRev { rev } => Ok(rev),
+        WireMsg::RespErr { message } => {
+            Err(crate::client::classify_message(&message).into_store_err(&message))
+        }
+        other => Err(StoreError::Msg(format!("unexpected dcs_create resp {other:?}"))),
+    }
+}
+
+/// Client helper: DCS CAS over TCP.
+///
+/// # Errors
+/// Network, NotLeader, revision mismatch, NotCommitted.
+pub fn client_dcs_cas(
+    addr: impl AsRef<str>,
+    key: &[u8],
+    value: &[u8],
+    expected_rev: u64,
+) -> Result<u64> {
+    let mut s = connect_host(addr.as_ref(), Duration::from_secs(3))?;
+    s.set_read_timeout(Some(Duration::from_secs(20))).ok();
+    write_frame(
+        &mut s,
+        &WireMsg::DcsCas {
+            key: key.to_vec(),
+            value: value.to_vec(),
+            expected_rev,
+        },
+    )?;
+    match read_frame(&mut s)? {
+        WireMsg::RespRev { rev } => Ok(rev),
+        WireMsg::RespErr { message } => {
+            Err(crate::client::classify_message(&message).into_store_err(&message))
+        }
+        other => Err(StoreError::Msg(format!("unexpected dcs_cas resp {other:?}"))),
+    }
+}
+
+/// Client helper: DCS get over TCP (user value only; lease-aware server-side).
+///
+/// # Errors
+/// Network / server error.
+pub fn client_dcs_get(addr: impl AsRef<str>, key: &[u8]) -> Result<Option<Vec<u8>>> {
+    let mut s = connect_host(addr.as_ref(), Duration::from_secs(3))?;
+    s.set_read_timeout(Some(Duration::from_secs(10))).ok();
+    write_frame(
+        &mut s,
+        &WireMsg::DcsGet {
+            key: key.to_vec(),
+        },
+    )?;
+    match read_frame(&mut s)? {
+        WireMsg::RespValue { value } => Ok(value),
+        WireMsg::RespErr { message } => Err(StoreError::Msg(message)),
+        other => Err(StoreError::Msg(format!("unexpected dcs_get resp {other:?}"))),
+    }
+}
+
 /// Client helper: replace peer address map on a running node (no restart).
 ///
 /// # Errors
@@ -491,6 +637,27 @@ mod tests {
         let r = WireMsg::RespValue {
             value: Some(b"v".to_vec()),
         };
+        assert_eq!(WireMsg::decode(&r.encode()).unwrap(), r);
+    }
+
+    #[test]
+    fn wire_dcs_create_cas_get_rev() {
+        let c = WireMsg::DcsCreate {
+            key: b"m/lock".to_vec(),
+            value: b"n1".to_vec(),
+        };
+        assert_eq!(WireMsg::decode(&c.encode()).unwrap(), c);
+        let cas = WireMsg::DcsCas {
+            key: b"m/lock".to_vec(),
+            value: b"n2".to_vec(),
+            expected_rev: 3,
+        };
+        assert_eq!(WireMsg::decode(&cas.encode()).unwrap(), cas);
+        let g = WireMsg::DcsGet {
+            key: b"m/lock".to_vec(),
+        };
+        assert_eq!(WireMsg::decode(&g.encode()).unwrap(), g);
+        let r = WireMsg::RespRev { rev: 9 };
         assert_eq!(WireMsg::decode(&r.encode()).unwrap(), r);
     }
 

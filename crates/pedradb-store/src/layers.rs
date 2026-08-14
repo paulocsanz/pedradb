@@ -805,4 +805,60 @@ mod tests {
         let _ = hub;
         let _ = std::fs::remove_dir_all(&dir);
     }
+
+    /// Platform need faces seed: Scylla-CP + CH/OLAP RO + NATS/stream on one SoR.
+    ///
+    /// Not drop-in Scylla / ClickHouse / JetStream — job-shaped primitives only.
+    #[test]
+    fn platform_need_faces_scylla_olap_stream() {
+        let dir = temp();
+        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        c.elect_all(80).unwrap();
+
+        // Scylla-need CP: durable put under cp/ + watch notify on hub.
+        let mut hub = WatchHub::new();
+        let (_id, rx) = hub.watch_prefix(b"cp/");
+        cp_put(&mut c, &hub, b"token/1", b"owner-a").unwrap();
+        let ev = rx
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .expect("cp watch");
+        assert_eq!(ev.key, b"cp/token/1");
+        assert_eq!(ev.value, b"owner-a");
+        assert_eq!(
+            c.get(b"cp/token/1").unwrap().as_deref(),
+            Some(b"owner-a".as_ref())
+        );
+
+        // ClickHouse-need OLAP: append-only ingest + RO get (same SoR, no dual write).
+        olap_ingest(&mut c, b"events", 1, b"e1").unwrap();
+        olap_ingest(&mut c, b"events", 2, b"e2").unwrap();
+        assert_eq!(
+            olap_get(&c, b"events", 1).unwrap().as_deref(),
+            Some(b"e1".as_ref())
+        );
+        assert_eq!(
+            olap_get(&c, b"events", 2).unwrap().as_deref(),
+            Some(b"e2".as_ref())
+        );
+
+        // NATS-need durable subject: publish by seq + consume by cursor.
+        stream_publish(&mut c, b"jobs", 1, b"j1").unwrap();
+        stream_publish(&mut c, b"jobs", 2, b"j2").unwrap();
+        assert_eq!(
+            stream_get(&c, b"jobs", 1).unwrap().as_deref(),
+            Some(b"j1".as_ref())
+        );
+        assert_eq!(
+            stream_get(&c, b"jobs", 2).unwrap().as_deref(),
+            Some(b"j2".as_ref())
+        );
+
+        // etcd-need still exclusive on same cluster (coordination path).
+        let rev = EtcdNeedFace::create(&mut c, b"leader", b"n1").unwrap();
+        assert!(EtcdNeedFace::create(&mut c, b"leader", b"n2").is_err());
+        let rev2 = EtcdNeedFace::cas(&mut c, b"leader", b"n1b", rev).unwrap();
+        assert!(rev2 > rev);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
