@@ -420,7 +420,8 @@ fn hist_bitrot_does_not_silent_wrong_old_snapshot() {
         assert!(c.read_version() >= 2);
         drop(c);
     }
-    // Flip a byte in the durable SI hist row (CRC should reject on reload).
+    // Flip a byte in the durable SI hist row on *every* node so no peer has
+    // a good hist. CRC reject on all → key absent from key_history.
     {
         let opts = OpenOptions {
             sync: true,
@@ -430,27 +431,37 @@ fn hist_bitrot_does_not_silent_wrong_old_snapshot() {
             exclusive: true,
             large_value_threshold: None,
         };
-        let mut db = Db::open_with(&dir.join("store-node-1"), opts).unwrap();
         let mut hk = b"\0store/hist/".to_vec();
         hk.extend_from_slice(b"hk");
-        if let Some(raw) = db.get(&hk) {
-            let mut flipped = raw.to_vec();
-            if !flipped.is_empty() {
-                let i = flipped.len() / 2;
-                flipped[i] ^= 0xFF;
-                db.put(&hk, &flipped).unwrap();
+        for nid in 1..=3u64 {
+            let mut db = Db::open_with(&dir.join(format!("store-node-{nid}")), opts).unwrap();
+            if let Some(raw) = db.get(&hk) {
+                let mut flipped = raw.to_vec();
+                if !flipped.is_empty() {
+                    let i = flipped.len() / 2;
+                    flipped[i] ^= 0xFF;
+                    db.put(&hk, &flipped).unwrap();
+                } else {
+                }
+            } else {
             }
+            drop(db);
         }
-        drop(db);
     }
     let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
     c.elect_all(40).unwrap();
-    // Tip read is fine; an *old* snapshot must not invent v1 from Pedra tip.
+    // Tip may still read Pedra; snapshot 0 must NOT invent tip as pre-history.
+    let tip = c.get(b"hk").unwrap();
+    assert_eq!(tip.as_deref(), Some(b"v1".as_ref()), "tip still v1");
     let at0 = c.get_at_version(b"hk", 0).unwrap();
     assert_ne!(
         at0.as_deref(),
         Some(b"v1".as_ref()),
-        "bitrot hist must not silently serve tip as snapshot 0, got {at0:?}"
+        "F50: bitrot hist on all peers must not silently serve tip as snapshot 0, got {at0:?}"
+    );
+    assert!(
+        at0.is_none(),
+        "F50: expected None at snapshot 0 when hist unusable, got {at0:?}"
     );
     let _ = std::fs::remove_dir_all(&dir);
 }

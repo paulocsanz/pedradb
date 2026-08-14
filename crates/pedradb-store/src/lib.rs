@@ -3100,6 +3100,11 @@ impl<E: Env> StoreCluster<E> {
             // Otherwise a later heal/cancel can majority-commit the orphan.
             if let Err(e) = persist_log_db(&mut n.db, rid, p) {
                 p.log.pop();
+                // F49/F50: unreserve SI gen so a failed propose does not burn
+                // generations (and so retry can re-use the same logical slot).
+                if stamped_gen > 0 && self.commit_generation == stamped_gen {
+                    self.commit_generation = stamped_gen.saturating_sub(1);
+                }
                 return Err(e);
             }
             if !note_items.is_empty() {
@@ -4067,10 +4072,17 @@ impl<E: Env> StoreCluster<E> {
         for (rid, range_pairs) in &groups {
             let keys: Vec<Vec<u8>> = range_pairs.iter().map(|(k, _)| k.clone()).collect();
             // Leader pre-check intents.
-            let leader = self.range_leader(*rid).ok_or(StoreError::NotLeader {
-                range_id: *rid,
-                leader: None,
-            })?;
+            // F50: any failure after earlier ranges prepared must abort those intents.
+            // `?` on missing leader previously returned without cleanup → immortal Conflict.
+            let Some(leader) = self.range_leader(*rid) else {
+                for (pr, pkeys) in &keys_by_range {
+                    self.cleanup_range_keys(*pr, txn_id, pkeys, CleanupMode::Abort);
+                }
+                return Err(StoreError::NotLeader {
+                    range_id: *rid,
+                    leader: None,
+                });
+            };
             {
                 let db = &self.nodes.get(&leader).unwrap().db;
                 for (k, _) in range_pairs {
@@ -4827,6 +4839,20 @@ impl<E: Env> StoreCluster<E> {
     /// Get from a node (applied state). **LocalApplied** semantics — non-linearizable.
     pub fn get_on(&self, node_id: u64, key: &[u8]) -> Result<Option<Bytes>> {
         self.get_with_policy(node_id, key, ReadPolicy::LocalApplied)
+    }
+
+    /// CHANGELOG tail on a local applied Pedra (RFC-0024 fold follow).
+    ///
+    /// Not a Raft read. Fold consumers filter prefixes themselves.
+    #[must_use]
+    pub fn changelog_after(&self, from_seq: u64) -> Vec<pedradb_core::ChangeEntry> {
+        let Some(id) = self.local_node_id().or_else(|| self.ids.first().copied()) else {
+            return Vec::new();
+        };
+        let Some(n) = self.nodes.get(&id) else {
+            return Vec::new();
+        };
+        n.db.changes_after(from_seq)
     }
 
     /// Get from a local node (prefer single-host local id; else first member).
@@ -7394,6 +7420,340 @@ mod tests {
         // Post-failover write still majority-commits.
         put_queued(&mut c, b"kill-key-2", b"after");
         assert!(c.count_applied_eq(b"kill-key-2", b"after") >= 2);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// F50 probe: get_at_version after clear must keep pre-clear value at old snap;
+    /// tip snapshot must be None; reopen must not resurrect.
+    #[test]
+    fn probe_get_at_version_after_clear_and_reopen() {
+        let dir = temp();
+        let gen_clear;
+        let gen_before;
+        {
+            let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+            c.elect_all(80).unwrap();
+            c.put(b"gk", b"v0").unwrap();
+            gen_before = c.read_version();
+            assert_eq!(
+                c.get_at_version(b"gk", gen_before).unwrap().as_deref(),
+                Some(b"v0".as_ref())
+            );
+            let mut tx = c.begin();
+            tx.clear(b"gk").unwrap();
+            tx.commit(&mut c).unwrap();
+            gen_clear = c.read_version();
+            assert!(gen_clear > gen_before);
+            assert_eq!(
+                c.get_at_version(b"gk", gen_before).unwrap().as_deref(),
+                Some(b"v0".as_ref()),
+                "pre-clear snapshot must still see v0"
+            );
+            assert_eq!(
+                c.get_at_version(b"gk", gen_clear).unwrap(),
+                None,
+                "post-clear snapshot must be None"
+            );
+            // keys_in_range must not resurrect cleared key at tip.
+            let range = c.keys_in_range_at(b"g", b"h", gen_clear).unwrap();
+            assert!(
+                range.iter().all(|(k, _)| k.as_slice() != b"gk"),
+                "cleared key in range at tip: {range:?}"
+            );
+            let range_old = c.keys_in_range_at(b"g", b"h", gen_before).unwrap();
+            assert!(
+                range_old.iter().any(|(k, v)| k.as_slice() == b"gk" && v.as_slice() == b"v0"),
+                "pre-clear range must include gk=v0: {range_old:?}"
+            );
+            drop(c);
+        }
+        let c = StoreCluster::open(&dir, 3, 1).unwrap();
+        assert_eq!(
+            c.get_at_version(b"gk", gen_before).unwrap().as_deref(),
+            Some(b"v0".as_ref()),
+            "reopen: pre-clear snap must see v0"
+        );
+        assert_eq!(
+            c.get_at_version(b"gk", gen_clear).unwrap(),
+            None,
+            "reopen: post-clear must stay None"
+        );
+        assert_eq!(c.get(b"gk").unwrap(), None);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// F50 probe: finish_queued abort after leader kill must not drop SI notes for
+    /// an already majority-committed index (or leave OCC blind).
+    #[test]
+    fn probe_finish_queued_abort_after_leader_failover_committed() {
+        let dir = temp();
+        let mut c = StoreCluster::open_with_rng(&dir, 3, 1, SeedRng::new(0xF50_01)).unwrap();
+        c.set_rpc_mode(RpcMode::Queued);
+        elect_queued(&mut c, 120);
+        put_queued(&mut c, b"seed", b"0");
+        let gen0 = c.read_version();
+
+        // Outstanding put.
+        let (rid, idx) = match c.put(b"q", b"1") {
+            Err(StoreError::NotCommitted {
+                range_id, index, ..
+            }) => (range_id, index),
+            Ok(()) => panic!("expected NotCommitted under Queued"),
+            Err(e) => panic!("{e}"),
+        };
+        // Deliver AE so majority commits, but do NOT finish notes yet.
+        pump_queued(&mut c, 128);
+        let leader = c.range_leader(rid).expect("leader");
+        let commit = c.commit_index(leader, rid);
+        assert!(
+            commit >= idx,
+            "after pump entry should be majority-committed commit={commit} idx={idx}"
+        );
+
+        // Kill leader; elect new one while entry is committed.
+        c.set_participating(leader, false).unwrap();
+        for _ in 0..200 {
+            c.tick().unwrap();
+            pump_queued(&mut c, 48);
+            if c.range_leader(rid).is_some_and(|l| l != leader) {
+                break;
+            }
+        }
+        assert!(
+            c.range_leader(rid).is_some_and(|l| l != leader),
+            "need new leader"
+        );
+
+        // Client still holds (rid, idx). finish with abort_if_uncommitted=true.
+        // If committed, must return true and flush SI notes — not discard.
+        let ok = c.finish_queued_propose(rid, idx, true).unwrap();
+        assert!(
+            ok,
+            "finish_queued must report committed after failover (not abort-drop notes)"
+        );
+        assert!(
+            c.key_version(b"q") > gen0,
+            "SI/OCC version must advance for majority-committed Queued put after failover"
+        );
+        assert_eq!(c.get(b"q").unwrap().as_deref(), Some(b"1".as_ref()));
+        // Concurrent TX that read seed and would race on q must Conflict if it read q.
+        let mut tx = c.begin();
+        // Start TX at current gen after finish — just check get works.
+        assert_eq!(tx.get(&c, b"q").unwrap().as_deref(), Some(b"1".as_ref()));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// F50 probe: abort finish_queued on uncommitted index must not strip notes of a
+    /// later concurrent outstanding put that later majority-commits.
+    #[test]
+    fn probe_finish_queued_abort_must_not_drop_later_pending_notes() {
+        let dir = temp();
+        let mut c = StoreCluster::open_with_rng(&dir, 3, 1, SeedRng::new(0xF50_02)).unwrap();
+        c.set_rpc_mode(RpcMode::Queued);
+        elect_queued(&mut c, 120);
+        put_queued(&mut c, b"a", b"0");
+        put_queued(&mut c, b"b", b"0");
+        let gen0 = c.read_version();
+
+        // Two outstanding proposes.
+        let (r1, i1) = match c.put(b"a", b"A") {
+            Err(StoreError::NotCommitted {
+                range_id, index, ..
+            }) => (range_id, index),
+            other => panic!("put a: {other:?}"),
+        };
+        let (r2, i2) = match c.put(b"b", b"B") {
+            Err(StoreError::NotCommitted {
+                range_id, index, ..
+            }) => (range_id, index),
+            other => panic!("put b: {other:?}"),
+        };
+        assert_eq!(r1, r2);
+        assert!(i2 > i1);
+
+        // Abort only the first WITHOUT pumping (still uncommitted) — drops notes >= i1
+        // if implementation uses from_index retain wrong (drops later too).
+        let aborted = c.finish_queued_propose(r1, i1, true).unwrap();
+        assert!(!aborted, "first put must still be uncommitted");
+
+        // Pump and finish second.
+        pump_queued(&mut c, 128);
+        let committed = c.finish_queued_propose(r2, i2, true).unwrap();
+        // Second may have been discarded if discard_uncommitted_from(i1) truncated i2!
+        if committed {
+            assert!(
+                c.key_version(b"b") > gen0,
+                "second put notes must survive abort of earlier uncommitted index"
+            );
+            assert_eq!(c.get(b"b").unwrap().as_deref(), Some(b"B".as_ref()));
+        } else {
+            // If log truncated both, b must not be silently applied without versions.
+            let applied = c.count_applied_eq(b"b", b"B");
+            assert_eq!(
+                applied, 0,
+                "if finish false, b must not be majority-applied (silent wrong if applied without OCC)"
+            );
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// F50: multi-range `tx_start` NotLeader mid-prepare must abort earlier intents.
+    ///
+    /// `range_leader` miss used `?` after range0/1 already prepared → immortal
+    /// Conflict on those keys until process reopen (F35 open recovery only).
+    #[test]
+    fn multi_range_prepare_not_leader_aborts_earlier_intents() {
+        let dir = temp();
+        let mut c = StoreCluster::open(&dir, 3, 3).unwrap();
+        c.elect_all(80).unwrap();
+        let keys = keys_one_per_range(&c);
+        assert!(keys.len() >= 3);
+        c.put(&keys[0], b"old0").unwrap();
+        c.put(&keys[1], b"old1").unwrap();
+        c.put(&keys[2], b"old2").unwrap();
+        // Kill leader of last range so prepare fails mid-way (after earlier prepares).
+        let last = c.locate(&keys[2]).unwrap();
+        let _ = c.step_down_range_leader(last);
+        let err = c
+            .tx_start([
+                (keys[0].as_slice(), b"n0".as_slice()),
+                (keys[1].as_slice(), b"n1".as_slice()),
+                (keys[2].as_slice(), b"n2".as_slice()),
+            ])
+            .expect_err("prepare without last leader");
+        assert!(
+            matches!(
+                err,
+                StoreError::NotLeader { .. } | StoreError::NotCommitted { .. }
+            ),
+            "{err:?}"
+        );
+        // Re-elect and put must not Conflict on leftover intents.
+        c.elect_all(120).unwrap();
+        c.put(&keys[0], b"after")
+            .expect("F50: no stuck intent on range0 after failed multi-range prepare");
+        c.put(&keys[1], b"after")
+            .expect("F50: no stuck intent on range1 after failed multi-range prepare");
+        assert_eq!(c.get(&keys[0]).unwrap().as_deref(), Some(b"after".as_ref()));
+        // Preimages preserved on the range that never prepared.
+        assert_eq!(c.get(&keys[2]).unwrap().as_deref(), Some(b"old2".as_ref()));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+
+    /// F51 probe: failed multi-range tx_finish after partial commit must not leave
+    /// SI hist at reserved gen pointing at the aborted write (Pedra restored).
+    #[test]
+    fn probe_partial_tx_finish_si_hist_matches_restored_preimage() {
+        let dir = temp();
+        let mut c = StoreCluster::open(&dir, 3, 3).unwrap();
+        c.elect_all(80).unwrap();
+        let keys = keys_one_per_range(&c);
+        assert!(keys.len() >= 2);
+        c.put(&keys[0], b"old-a").unwrap();
+        c.put(&keys[1], b"old-b").unwrap();
+        let gen_before = c.read_version();
+        let h = c
+            .tx_start([
+                (keys[0].as_slice(), b"new-a".as_slice()),
+                (keys[1].as_slice(), b"new-b".as_slice()),
+            ])
+            .expect("prepare");
+        let last = *h.ranges.last().unwrap();
+        let _ = c.step_down_range_leader(last);
+        let err = c.tx_finish(&h).expect_err("finish without last leader");
+        assert!(
+            matches!(
+                err,
+                StoreError::NotLeader { .. } | StoreError::NotCommitted { .. }
+            ),
+            "{err:?}"
+        );
+        // Pedra restored.
+        assert_eq!(c.get(&keys[0]).unwrap().as_deref(), Some(b"old-a".as_ref()));
+        let gen_after = c.read_version();
+        // Any generation at/after the failed TX reserve must not SI-see new-a.
+        for g in gen_before..=gen_after.saturating_add(1) {
+            let v = c.get_at_version(&keys[0], g).unwrap();
+            assert_ne!(
+                v.as_deref(),
+                Some(b"new-a".as_ref()),
+                "F51: SI hist gen {g} still shows aborted write; pedra=old-a v={v:?} before={gen_before} after={gen_after}"
+            );
+        }
+        // Tip SI must match Pedra (old-a).
+        assert_eq!(
+            c.get_at_version(&keys[0], c.read_version()).unwrap().as_deref(),
+            Some(b"old-a".as_ref()),
+            "tip SI must match restored preimage"
+        );
+        // Reopen: durable apply-path hist must not resurrect new-a.
+        drop(c);
+        let c = StoreCluster::open(&dir, 3, 3).unwrap();
+        assert_eq!(c.get(&keys[0]).unwrap().as_deref(), Some(b"old-a".as_ref()));
+        assert_eq!(
+            c.get_at_version(&keys[0], c.read_version()).unwrap().as_deref(),
+            Some(b"old-a".as_ref()),
+            "reopen SI tip must be old-a not aborted new-a"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// F50 probe: watermark GC floor must keep last value readable at safe_watermark.
+    #[test]
+    fn probe_watermark_gc_floor_preserves_readable_snap() {
+        let dir = temp();
+        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        c.elect_all(80).unwrap();
+        c.put(b"w", b"keep").unwrap();
+        let g_put = c.read_version();
+        // Advance generation well past VERSION_RETENTION via other keys.
+        for i in 0..70u64 {
+            let k = format!("x{i:04}");
+            c.put(k.as_bytes(), b"z").unwrap();
+        }
+        let wm = c.safe_watermark();
+        assert!(wm > 0, "watermark should advance after retention");
+        // Snapshot at max(g_put, wm) if g_put < wm, too-old for TX; get_at_version
+        // still defines value at watermark boundary.
+        let at_wm = c.get_at_version(b"w", wm).unwrap();
+        // Key was never deleted; floor must still yield "keep".
+        assert_eq!(
+            at_wm.as_deref(),
+            Some(b"keep".as_ref()),
+            "GC floor must preserve live value at watermark wm={wm} g_put={g_put} tip={}",
+            c.read_version()
+        );
+        // Tip also keep.
+        assert_eq!(
+            c.get_at_version(b"w", c.read_version())
+                .unwrap()
+                .as_deref(),
+            Some(b"keep".as_ref())
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// F50 probe: conflict range OCC vs concurrent clear of key inside range.
+    #[test]
+    fn probe_range_occ_conflicts_on_clear_inside_range() {
+        let dir = temp();
+        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        c.elect_all(80).unwrap();
+        c.put(b"p/a", b"1").unwrap();
+        c.put(b"p/b", b"2").unwrap();
+        let mut tx = c.begin();
+        let _ = tx.get_range(&c, b"p/", b"p0").unwrap();
+        // Concurrent clear of a key inside the range.
+        let mut t2 = c.begin();
+        t2.clear(b"p/a").unwrap();
+        t2.commit(&mut c).unwrap();
+        tx.set(b"p/c", b"3").unwrap();
+        let err = tx.commit(&mut c).expect_err("range OCC vs clear");
+        assert!(
+            matches!(err, StoreError::Conflict),
+            "expected Conflict after clear in range, got {err:?}"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

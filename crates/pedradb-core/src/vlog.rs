@@ -123,11 +123,19 @@ impl<F: EnvFile> ValueLog<F> {
     pub fn open_with_flag<E: Env<File = F>>(env: &E, dir: &Path, use_new: bool) -> Result<Self> {
         let path = Self::resolve_path(env, dir, use_new);
         if !env.exists(&path) {
-            // Create primary only when not expecting a staged `.new`.
             let main = dir.join(VLOG_FILE_NAME);
-            if use_new && env.exists(&dir.join(VLOG_NEW_NAME)) {
-                return Self::open_path(env, dir.join(VLOG_NEW_NAME));
+            let newp = dir.join(VLOG_NEW_NAME);
+            if use_new && env.exists(&newp) {
+                return Self::open_path(env, newp);
             }
+            // F51: MANIFEST `vlog_use_new` means SST pointers target the staged
+            // layout. Inventing an empty primary would make large values vanish.
+            if use_new && !env.exists(&main) && !env.exists(&newp) {
+                return Err(CoreError::Internal(
+                    "vlog missing under vlog_use_new (mid-promote?). refuse empty create".into(),
+                ));
+            }
+            // Fresh DB / first large put: create empty primary.
             let mut f = env.create(&main)?;
             Write::write_all(&mut f, MAGIC)?;
             f.sync_all()?;
@@ -265,9 +273,9 @@ impl<F: EnvFile> ValueLog<F> {
             // Already promoted or never staged.
             return Self::open_on(env, dir);
         }
-        if env.exists(&main) {
-            env.remove_file(&main)?;
-        }
+        // F51: do **not** remove `main` before rename. POSIX rename replaces the
+        // destination atomically; remove-then-rename left a window with no vlog
+        // file (and a failed rename after remove lost the primary).
         env.rename(&newp, &main)?;
         let _ = env.sync_dir(dir);
         // Best-effort clear legacy adopt marker from older builds.
@@ -371,6 +379,45 @@ mod tests {
         assert_eq!(got.as_ref(), data.as_slice());
         let ptr = encode_vlog_ref(off, len, crc);
         assert!(decode_vlog_ref(ptr.as_ref()).is_some());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// F51: promote uses atomic rename over primary (no remove-before-rename).
+    #[test]
+    fn promote_atomic_rename_keeps_primary() {
+        let dir = std::env::temp_dir().join(format!(
+            "pedradb-vlog-promote-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let env = StdEnv;
+        {
+            let mut vl = ValueLog::open_on(&env, &dir).unwrap();
+            vl.append(&[0xAAu8; 64]).unwrap();
+        }
+        let main = dir.join(VLOG_FILE_NAME);
+        let newp = dir.join(VLOG_NEW_NAME);
+        // Stage a larger .new (rewrite path).
+        let live = vec![(8u64, Bytes::from(vec![0xAAu8; 64]))];
+        ValueLog::<std::fs::File>::rewrite_live_to_new(&env, &dir, &live).unwrap();
+        assert!(env.exists(&newp));
+        let before = env.metadata_len(&newp).unwrap();
+        ValueLog::promote_new_and_reopen(&env, &dir).unwrap();
+        assert!(env.exists(&main), "primary must exist after promote");
+        assert!(!env.exists(&newp), ".new must be consumed");
+        let after = env.metadata_len(&main).unwrap();
+        assert_eq!(after, before, "promoted primary keeps staged bytes");
+        // use_new with neither file must fail-stop, not invent empty log.
+        let _ = env.remove_file(&main);
+        let err = ValueLog::<std::fs::File>::open_with_flag(&env, &dir, true).unwrap_err();
+        assert!(
+            err.to_string().contains("vlog missing") || err.to_string().contains("refuse"),
+            "got {err}"
+        );
         let _ = fs::remove_dir_all(&dir);
     }
 
