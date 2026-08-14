@@ -11,10 +11,12 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
+pub mod ae_kernel;
 pub mod net;
 pub mod persist;
 pub mod vote_kernel;
 
+pub use ae_kernel::{ae_entry_action, ae_prev_log_ok, AeEntryAction};
 pub use vote_kernel::{vote_decision, VoteDecision, VoteInputs};
 
 use std::collections::HashMap;
@@ -392,11 +394,33 @@ pub struct AppendEntriesReply {
 }
 
 fn handle_request_vote(node: &mut RaftNode, args: &RequestVoteArgs) -> RequestVoteReply {
+    let meta = node.meta_dir.clone();
+    handle_request_vote_with_persist(node, args, |hard| {
+        persist_hard_state(meta.as_deref(), hard)
+    })
+}
+
+/// Persist hook used by the production RequestVote path and by DST injectors.
+fn persist_hard_state(meta_dir: Option<&Path>, hard: &HardState) -> Result<()> {
+    if let Some(dir) = meta_dir {
+        persist::store_hard(dir, hard)?;
+    }
+    Ok(())
+}
+
+/// RequestVote after the pure kernel: persist, then grant only on Ok (F15).
+///
+/// `persist` is the only I/O. Tests inject failure here; production uses
+/// [`persist_hard_state`] (same `store_hard` as [`RaftNode::persist_hard`]).
+pub fn handle_request_vote_with_persist(
+    node: &mut RaftNode,
+    args: &RequestVoteArgs,
+    persist: impl FnOnce(&HardState) -> Result<()>,
+) -> RequestVoteReply {
     if args.term > node.hard.current_term {
         node.become_follower(args.term);
     }
     let mut vote_granted = false;
-    // Beyond-style: pure decision (vote_kernel) then persist-before-grant (F15).
     let decision = vote_kernel::vote_decision(VoteInputs {
         current_term: node.hard.current_term,
         voted_for: node.hard.voted_for,
@@ -408,10 +432,9 @@ fn handle_request_vote(node: &mut RaftNode, args: &RequestVoteArgs) -> RequestVo
         candidate_last_log_index: args.last_log_index,
     });
     if decision == VoteDecision::WouldGrant {
-        // Protocol (not in the pure kernel): only grant after durable vote.
         let prev = node.hard.voted_for;
         node.hard.voted_for = Some(args.candidate_id);
-        match node.persist_hard() {
+        match persist(&node.hard) {
             Ok(()) => {
                 node.election_ticks_left = node.election_timeout;
                 vote_granted = true;
@@ -420,6 +443,38 @@ fn handle_request_vote(node: &mut RaftNode, args: &RequestVoteArgs) -> RequestVo
                 node.hard.voted_for = prev;
             }
         }
+    }
+    RequestVoteReply {
+        term: node.hard.current_term,
+        vote_granted,
+    }
+}
+
+/// AS-IS mutant: grant in memory **then** persist. Persist Err still leaves
+/// `vote_granted == true` — the F15 bug. Tests assert this fails the F15 oracle.
+pub fn handle_request_vote_grant_then_persist(
+    node: &mut RaftNode,
+    args: &RequestVoteArgs,
+    persist: impl FnOnce(&HardState) -> Result<()>,
+) -> RequestVoteReply {
+    if args.term > node.hard.current_term {
+        node.become_follower(args.term);
+    }
+    let mut vote_granted = false;
+    let decision = vote_kernel::vote_decision(VoteInputs {
+        current_term: node.hard.current_term,
+        voted_for: node.hard.voted_for,
+        last_log_term: node.last_log_term(),
+        last_log_index: node.last_log_index(),
+        candidate_term: args.term,
+        candidate_id: args.candidate_id,
+        candidate_last_log_term: args.last_log_term,
+        candidate_last_log_index: args.last_log_index,
+    });
+    if decision == VoteDecision::WouldGrant {
+        node.hard.voted_for = Some(args.candidate_id);
+        vote_granted = true;
+        let _ = persist(&node.hard);
     }
     RequestVoteReply {
         term: node.hard.current_term,
@@ -453,11 +508,13 @@ fn handle_append_entries(node: &mut RaftNode, args: &AppendEntriesArgs) -> Appen
     }
     node.leader_id = Some(args.leader_id);
 
-    // Log consistency check.
-    if args.prev_log_index > 0
-        && (node.last_log_index() < args.prev_log_index
-            || node.log_term_at(args.prev_log_index) != args.prev_log_term)
-    {
+    // Log consistency (pure kernel) then mutate log (caller).
+    if !ae_kernel::ae_prev_log_ok(
+        args.prev_log_index,
+        args.prev_log_term,
+        node.last_log_index(),
+        node.log_term_at(args.prev_log_index),
+    ) {
         return AppendEntriesReply {
             term: node.hard.current_term,
             success: false,
@@ -465,35 +522,37 @@ fn handle_append_entries(node: &mut RaftNode, args: &AppendEntriesArgs) -> Appen
         };
     }
 
-    // Append new entries; truncate conflict suffix (Raft §5.3).
-    // F16: never delete a committed entry (safety); refuse AE that conflicts
-    // at/before commit_index instead of silently rewriting history.
+    // Append / conflict resolve via ae_kernel (F16: never rewrite ≤ commit).
     for e in &args.entries {
-        if let Some(existing) = node.log.iter().position(|x| x.index == e.index) {
-            if node.log[existing].term != e.term {
-                if e.index <= node.commit_index {
-                    return AppendEntriesReply {
-                        term: node.hard.current_term,
-                        success: false,
-                        match_index: node.last_log_index(),
-                    };
-                }
-                node.log.truncate(existing);
+        let existing_term = node
+            .log
+            .iter()
+            .find(|x| x.index == e.index)
+            .map(|x| x.term);
+        match ae_kernel::ae_entry_action(
+            e.index,
+            e.term,
+            existing_term,
+            node.commit_index,
+            node.last_log_index(),
+        ) {
+            AeEntryAction::Keep => {}
+            AeEntryAction::Append => {
                 node.log.push(e.clone());
             }
-            // Same index+term: already present, keep (and any later suffix until
-            // a later conflicting entry is processed).
-        } else {
-            // Only append if contiguous (no holes).
-            let expect = node.last_log_index() + 1;
-            if e.index != expect {
+            AeEntryAction::TruncateAndInstall => {
+                if let Some(pos) = node.log.iter().position(|x| x.index == e.index) {
+                    node.log.truncate(pos);
+                }
+                node.log.push(e.clone());
+            }
+            AeEntryAction::Refuse => {
                 return AppendEntriesReply {
                     term: node.hard.current_term,
                     success: false,
                     match_index: node.last_log_index(),
                 };
             }
-            node.log.push(e.clone());
         }
     }
     node.log.sort_by_key(|e| e.index);
@@ -592,6 +651,11 @@ impl RaftCluster {
     #[must_use]
     pub fn node(&self, id: u64) -> Option<&RaftNode> {
         self.nodes.get(&id)
+    }
+
+    /// Mutable node (DST persist injectors / RequestVote harness).
+    pub fn node_mut(&mut self, id: u64) -> Option<&mut RaftNode> {
+        self.nodes.get_mut(&id)
     }
 
     /// Current leader id if any node is leader.
@@ -1232,6 +1296,64 @@ mod tests {
             hard.voted_for != Some(9),
             "AS-IS: grant without persist must leave disk without candidate 9 vote (got {hard:?})"
         );
+        let _ = std::fs::remove_dir_all(&parent);
+    }
+
+    /// F15: injected persist Err ⇒ production handler does not grant.
+    #[test]
+    fn persist_fail_never_grants() {
+        let parent = temp_parent();
+        let mut cluster = RaftCluster::open(&parent, 1).unwrap();
+        let n = cluster.node_mut(1).unwrap();
+        n.hard.current_term = 5;
+        n.hard.voted_for = None;
+        let reply = handle_request_vote_with_persist(
+            n,
+            &RequestVoteArgs {
+                term: 5,
+                candidate_id: 2,
+                last_log_index: 0,
+                last_log_term: 0,
+            },
+            |_| Err(RaftError::Persist("injected".into())),
+        );
+        assert!(!reply.vote_granted);
+        assert_eq!(n.hard.voted_for, None);
+        let _ = std::fs::remove_dir_all(&parent);
+    }
+
+    /// Mutant grant-then-persist violates F15 when persist fails; FIXED does not.
+    #[test]
+    fn mutation_grant_then_persist_violates_f15() {
+        let parent = temp_parent();
+        let mut cluster = RaftCluster::open(&parent, 1).unwrap();
+        let args = RequestVoteArgs {
+            term: 5,
+            candidate_id: 2,
+            last_log_index: 0,
+            last_log_term: 0,
+        };
+        {
+            let n = cluster.node_mut(1).unwrap();
+            n.hard.current_term = 5;
+            n.hard.voted_for = None;
+            let broken = handle_request_vote_grant_then_persist(n, &args, |_| {
+                Err(RaftError::Persist("injected".into()))
+            });
+            assert!(
+                broken.vote_granted,
+                "mutant must grant despite persist Err (teeth)"
+            );
+        }
+        {
+            let n = cluster.node_mut(1).unwrap();
+            n.hard.current_term = 5;
+            n.hard.voted_for = None;
+            let fixed = handle_request_vote_with_persist(n, &args, |_| {
+                Err(RaftError::Persist("injected".into()))
+            });
+            assert!(!fixed.vote_granted, "FIXED must not grant on persist Err");
+        }
         let _ = std::fs::remove_dir_all(&parent);
     }
 
