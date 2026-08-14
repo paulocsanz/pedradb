@@ -4,7 +4,7 @@
 > item is closed, or a new open question emerges. The authoritative source for
 > "what's done, what's next, what's unresolved."
 
-Last updated: 2026-08-14 (RFC-0024 draft: Montanha fold for Caixote)
+Last updated: 2026-08-14 (RFC-0024 done: Montanha fold for Caixote)
 
 ---
 
@@ -43,8 +43,9 @@ Last updated: 2026-08-14 (RFC-0024 draft: Montanha fold for Caixote)
 | 11 | Streaming range / lazy blocks (RFC-0014 P1) | ✅ done | scan + lazy SST blocks + levels + lz4 | — |
 | 12 | Audit correctness fixes (RFC-0015) | ✅ done | fence, sync_dir, Env seams, compact stats, deny CI | — |
 
-**Next action:** Continuous DST soak; full bindingtester / Java RL only if requested (non-goals).  
+**Next action:** Continuous DST soak; fill FDB side of [montanha-vs-fdb-bench.md](montanha-vs-fdb-bench.md) on lab hardware; full bindingtester / Java RL only if requested.  
 **Shipped Phase 1–3 + A–E continuum:** [montanha-fdb-phases.md](montanha-fdb-phases.md) — fdb-compat 12-step harness (`clear_range`), etcd multiproc + **TCP DCS wire**, `RecordTable` unique/multi-index, platform need faces (CP/OLAP/stream), F47–F49 residuals.  
+**Shipped (bench):** `montanha-fdb-bench` — FDB-shaped microbenches (put/get/face/TX/range/clear/hot-key/record/cross-range) → `fdb_shaped_bench.json`; method in [montanha-vs-fdb-bench.md](montanha-vs-fdb-bench.md).  
 **Shipped (recipes):** `montanha-fdb-recipes` — design recipes + SI/OCC + Record seed.  
 **Shipped (0023):** SI, Transaction, watermark, fdb_compat + c-api.  
 **Do not** claim FDB field peer, full bindingtester, production Record Layer, or drop-in etcd/Scylla/CH/NATS.  
@@ -59,7 +60,7 @@ Kernel = Pedra; horizontal = Montanha; analytics = OLAP RO; streams = layer; CP 
 **Perf ceiling + sled layer:** living plan in
 [`performance-ceiling-option-preservation-and-sled-layer.md`](performance-ceiling-option-preservation-and-sled-layer.md)
 (K1–K3 kernel phases, L0–L3 `pedra-map` / sled-compat; anti-corner checklist F1–X6).  
-**RFCs:** [0009](rfc/0009-rocksdb-class-engine.md) · [0010](rfc/0010-dbs-on-top.md) · [0014 maturity](rfc/0014-rocks-pebble-redwood-maturity.md) · [0015 audit](rfc/0015-audit-pedradb-correctness-fixes.md) · [0016 robustness](rfc/0016-pedradb-production-robustness.md) · [0017 Montanha FDB-class](rfc/0017-montanha-fdb-class-substrate.md) · [0018 FDB method](rfc/0018-fdb-method-parity-and-fault-coverage.md) · [0019 L1](rfc/0019-local-primitive-for-platform-and-scylla-need.md) · [0020 synthetic field](rfc/0020-synthetic-field-maturity.md) · [0021 lab gates](rfc/0021-montanha-fdb-tikv-parity-gaps.md) · [**0022 functional FDB + N-writer layers**](rfc/0022-montanha-fdb-functional-parity-and-layer-substrate.md) · [**0024 Montanha fold / Caixote**](rfc/0024-montanha-fold-for-caixote.md) (draft)
+**RFCs:** [0009](rfc/0009-rocksdb-class-engine.md) · [0010](rfc/0010-dbs-on-top.md) · [0014 maturity](rfc/0014-rocks-pebble-redwood-maturity.md) · [0015 audit](rfc/0015-audit-pedradb-correctness-fixes.md) · [0016 robustness](rfc/0016-pedradb-production-robustness.md) · [0017 Montanha FDB-class](rfc/0017-montanha-fdb-class-substrate.md) · [0018 FDB method](rfc/0018-fdb-method-parity-and-fault-coverage.md) · [0019 L1](rfc/0019-local-primitive-for-platform-and-scylla-need.md) · [0020 synthetic field](rfc/0020-synthetic-field-maturity.md) · [0021 lab gates](rfc/0021-montanha-fdb-tikv-parity-gaps.md) · [**0022 functional FDB + N-writer layers**](rfc/0022-montanha-fdb-functional-parity-and-layer-substrate.md) · [**0024 Montanha fold / Caixote**](rfc/0024-montanha-fold-for-caixote.md) (**done**)
 
 ---
 

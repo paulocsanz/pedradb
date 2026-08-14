@@ -17,6 +17,10 @@ path = "src/bin/montanha-tcp.rs"
 name = "montanha-perf-gate"
 path = "src/bin/montanha-perf-gate.rs"
 
+[[bin]]
+name = "montanha-fdb-bench"
+path = "src/bin/montanha-fdb-bench.rs"
+
 [features]
 default = []
 ## Thin C ABI (`montanha_fdb_*`) for external harnesses that speak FDB-shaped C.

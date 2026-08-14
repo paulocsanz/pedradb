@@ -16,6 +16,7 @@ Not drop-in etcd/Scylla/ClickHouse/NATS.
 | **3b / C** Record +1 | unique secondary index; two indexes in one TX | `upsert_unique` / `upsert_two_indexes` | `phase3_record_unique_and_multi_index` |
 | **D** DST residuals | F47 abort fence mid-2PC; F48 AE durable; F49 si_gen Queued | store recovery / AE / si_gen | `fail_after_mid_2pc_*`, related |
 | **E** platform need faces | Scylla-CP + OLAP RO + stream subject + etcd-need on one SoR | `cp_put` / `olap_*` / `stream_*` / `EtcdNeedFace` | `platform_need_faces_scylla_olap_stream` |
+| **Bench** FDB-shaped limits | put/get/face/TX/range/clear/hot-key/record/cross-range latency+qps | `montanha-fdb-bench` | `findings/fdb-bench-*/fdb_shaped_bench.json` |
 
 ## Honesty residual
 
