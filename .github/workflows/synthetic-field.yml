@@ -1,0 +1,110 @@
+# RFC-0020 — synthetic field maturity (P0–P2 gates; stretch soak scheduled)
+name: synthetic-field
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  schedule:
+    - cron: "0 5 * * *"
+  workflow_dispatch:
+
+jobs:
+  silent-wrong-gate:
+    name: silent_wrong gate (P0.1)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: silent_wrong gate
+        run: bash scripts/ci_silent_wrong_gate.sh
+
+  canaries:
+    name: lease + index + journal canaries
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: canaries
+        run: |
+          cargo test -p pedradb-lease -- --nocapture
+          cargo test -p pedradb-index -- --nocapture
+          cargo test -p pedradb-journal -- --nocapture
+
+  codec-fuzz-smoke:
+    name: codec fuzz smokes (P0.5 + P1.5)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: fuzz smokes
+        run: |
+          cargo test -p pedradb-core --test codec_fuzz_smoke -- --nocapture
+          cargo test -p pedradb-core --test codec_fuzz_smoke_p1 -- --nocapture
+          cargo test -p pedradb-store --test peer_msg_fuzz_smoke -- --nocapture
+
+  cluster-matrix:
+    name: partition + leader-kill (P1.2)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: store rfc20 matrix
+        run: cargo test -p pedradb-store rfc20_ -- --nocapture
+
+  race-job:
+    name: ConcurrentDb race stress (P1.4)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: race job
+        run: bash scripts/race_job.sh
+
+  explore:
+    name: explore campaign (P1.3)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: explore
+        run: bash scripts/explore_campaign.sh explore-out
+        env:
+          PEDRA_EXPLORE_ROUNDS: "2"
+
+  overnight-soak:
+    name: volume soak (P0.2 / P1.6)
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: 10k ops soak
+        env:
+          PEDRA_SOAK_TRIALS: "10000"
+          PEDRA_SOAK_MIN: "10000"
+          PEDRA_SOAK_MODE: "ops"
+        run: bash scripts/overnight_soak.sh volume_report.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: volume-report
+          path: volume_report.json
+
+  universe-abcde:
+    name: universe A–E (multi-proc + canaries + matrix + det_io)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: multiprocess + fdb path
+        run: |
+          cargo test -p pedradb-store --test multiprocess_tx -- --nocapture
+          cargo test -p pedradb-store --test montanha_fdb_path -- --nocapture
+      - name: det_io status
+        run: bash scripts/det_io_status.sh det_io_status.txt
+      - name: montanha matrix (1 round)
+        env:
+          PEDRA_MONTA_MATRIX_ROUNDS: "1"
+          PEDRA_MONTA_ROUNDS: "1"
+        run: bash scripts/montanha_overnight_matrix.sh matrix-out

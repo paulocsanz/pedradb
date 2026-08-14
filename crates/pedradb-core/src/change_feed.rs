@@ -213,7 +213,11 @@ fn encode_changelog(log: &ChangeLog) -> Result<Vec<u8>> {
     Ok(buf)
 }
 
-fn decode_changelog(buf: &[u8]) -> Result<ChangeLog> {
+/// Decode a CHANGELOG payload (for open + codec fuzz smoke, RFC-0020 P0.5).
+///
+/// # Errors
+/// Truncation, bad magic, CRC mismatch, or corrupt entries.
+pub fn decode_changelog(buf: &[u8]) -> Result<ChangeLog> {
     if buf.len() < 8 + 4 + 4 {
         return Err(CoreError::Internal("changelog too short".into()));
     }
@@ -325,4 +329,47 @@ mod tests {
         assert_eq!(loaded.entries[0].sequence, 3);
         let _ = fs::remove_dir_all(&dir);
     }
+
+    /// Crash between remove(CHANGELOG) and rename(.tmp): after flush, WAL no longer
+    /// holds history → feed permanently empty while SST data remains (silent feed loss).
+    #[test]
+    fn changelog_lost_after_remove_post_flush() {
+        use crate::db::{Db, OpenOptions};
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let n = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let dir = std::env::temp_dir().join(format!("pedradb-chlog-loss-{n}"));
+        let _ = fs::remove_dir_all(&dir);
+        let opts = OpenOptions {
+            sync: true,
+            auto_flush_bytes: None,
+            auto_compact_sst_count: None,
+            auto_compact_sst_bytes: None,
+            exclusive: true,
+            large_value_threshold: None,
+        };
+        {
+            let mut db = Db::open_with(&dir, opts).unwrap();
+            for i in 0..5u8 {
+                db.put([b'k', i], [b'v', i]).unwrap();
+            }
+            assert_eq!(db.changes_after(0).len(), 5);
+            db.flush().unwrap();
+            drop(db);
+        }
+        // Simulate store_on crash window: old CHANGELOG removed, rename not done.
+        let path = dir.join(CHANGELOG_FILE_NAME);
+        assert!(path.exists());
+        fs::remove_file(&path).unwrap();
+        let db = Db::open_with(&dir, opts).unwrap();
+        let feed = db.changes_after(0);
+        assert!(db.get(b"k\x00").is_some() || db.get(&[b'k', 0]).is_some());
+        assert!(
+            !feed.is_empty(),
+            "BUG: CHANGELOG gone post-flush → feed empty while keys live in SST (len={}, last={})",
+            feed.len(),
+            db.last_sequence()
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
 }

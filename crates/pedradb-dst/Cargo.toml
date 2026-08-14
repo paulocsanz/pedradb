@@ -8,3 +8,11 @@ description = "Seedable DST harness over FailingEnv (RFC-0012 P1.3)"
 [dependencies]
 pedradb-core.workspace = true
 pedradb-sim.workspace = true
+
+[[bin]]
+name = "silent_wrong_gate"
+path = "src/bin/silent_wrong_gate.rs"
+
+[[bin]]
+name = "volume_soak"
+path = "src/bin/volume_soak.rs"

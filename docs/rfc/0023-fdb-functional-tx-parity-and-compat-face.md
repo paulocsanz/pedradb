@@ -54,7 +54,7 @@ Do **not** regress Pedra embed strengths (no forced FDB 5s/100KB on local-only).
 | P1.3 | p1 | Range conflict subset | done | `tx_range_read_conflict` + `keys_in_range_at_after_reopen_sees_pedra` (Pedra scan) | 2026-08-14 |
 | P1.4 | p1 | Versioned watch | done | WatchEvent.version + tests | 2026-08-14 |
 | P2.1 | p2 | Cluster vs embed limits | done | §Limits below + `docs` pointer | 2026-08-14 |
-| P2.2 | p2 | Rust-only fdb-compat | done | `fdb_compat` module (no C ABI yet) | 2026-08-14 |
+| P2.2 | p2 | fdb-compat + thin C ABI | done | `fdb_compat` + feature `c-api` (`fdb_c`, `include/montanha_fdb.h`) | 2026-08-14 |
 | P2.3 | p2 | Parallel commit residual | done | §Out of scope residual | 2026-08-14 |
 
 **Honesty:** not FDB field peer; not full fdbcli/C API; not Apple Simulation.

@@ -1,0 +1,25 @@
+# Multi-host Montanha-Store TCP node (RFC-0017 P0.1) — Linux real path for caixote.
+# Build:  docker build -f Dockerfile.montanha-tcp -t montanha-tcp:dev .
+# Run 3:  docker run --rm -e CLUSTER=local3 montanha-tcp:dev
+
+FROM rust:1-bookworm AS build
+WORKDIR /src
+# Full workspace (pedradb-store pulls sibling path deps).
+COPY Cargo.toml Cargo.lock ./
+COPY crates ./crates
+RUN cargo build --release -p pedradb-store --bin montanha-tcp \
+    && strip target/release/montanha-tcp
+
+FROM debian:bookworm-slim
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      ca-certificates netcat-openbsd iproute2 iputils-ping \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=build /src/target/release/montanha-tcp /usr/local/bin/montanha-tcp
+COPY scripts/montanha_tcp_entrypoint.sh /usr/local/bin/montanha_tcp_entrypoint.sh
+RUN chmod +x /usr/local/bin/montanha_tcp_entrypoint.sh
+ENV DATA_DIR=/data
+VOLUME ["/data"]
+EXPOSE 9701 9702 9703 9780
+# Explicit bash (CHV/runc can report "exec format error" on #!/usr/bin/env bash
+# shebang-only ENTRYPOINT in some guest setups).
+ENTRYPOINT ["/bin/bash", "/usr/local/bin/montanha_tcp_entrypoint.sh"]

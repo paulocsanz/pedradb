@@ -39,12 +39,17 @@
 //! [`StoreCluster::dcs_create`] / [`dcs_cas`] run [`pedradb_dcs::apply_dcs_command`]
 //! **only on commit** via a raft log entry carrying a `DcsCommand` payload.
 
-#![forbid(unsafe_code)]
+// `deny` (not forbid) so the optional C ABI face can use a thin `unsafe` boundary.
+#![deny(unsafe_code)]
 #![warn(missing_docs)]
 
 mod msg;
 pub mod client;
 pub mod fdb_compat;
+/// Thin C ABI for fdb-compat plug tests (RFC-0023 P2.2). Feature `c-api`.
+#[cfg(feature = "c-api")]
+#[allow(unsafe_code)]
+pub mod fdb_c;
 pub mod layers;
 pub mod tcp;
 

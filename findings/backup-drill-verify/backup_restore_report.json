@@ -1,0 +1,10 @@
+{
+  "gate": "rfc0021-p1.5-backup-restore-drill",
+  "proofs": [
+    "put_batch_survives_reopen",
+    "multi_process_commit_tx_write_then_verify"
+  ],
+  "note": "dir-level Pedra reopen = restore class for lab; not full cluster snapshot product",
+  "ts": "2026-08-13T21:51:27Z",
+  "ok": true
+}

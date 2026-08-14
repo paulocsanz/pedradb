@@ -143,38 +143,84 @@ impl FailState {
 
 }
 
-/// Test [`Env`]: passthrough to [`StdEnv`] that injects faults.
+/// Test [`Env`]: wraps an inner [`Env`] and injects faults.
+///
+/// Default inner is [`StdEnv`]. For Linux io_uring stress, wrap an
+/// `IoUringEnv` from `pedradb-io-uring` via [`FailingEnv::wrap`].
 ///
 /// Models:
 /// - **dead disk**: `fail_after(n)` — N ops succeed, then permanent failure
 /// - **one-shot**: `arm_one_failure()` / `arm(n, true)` — single blip then heal
 /// - **sync-only**: `FaultKind::SyncFail` — writes land, fsync fails (durability lie edge)
 #[derive(Debug, Clone)]
-pub struct FailingEnv {
-    inner: StdEnv,
+pub struct FailingEnv<E: Env = StdEnv> {
+    inner: E,
     state: Rc<FailState>,
 }
 
-impl FailingEnv {
+impl FailingEnv<StdEnv> {
     /// Let `n` fallible ops succeed; fail the next and all after (dead disk).
     #[must_use]
     pub fn fail_after(n: u64) -> Self {
-        Self::with_state(n, false, FaultKind::IoError)
+        Self::with_inner(StdEnv, n, false, FaultKind::IoError)
     }
 
     /// Like [`fail_after`](Self::fail_after) but with an explicit error kind.
     #[must_use]
     pub fn fail_after_kind(n: u64, kind: FaultKind) -> Self {
-        Self::with_state(n, false, kind)
+        Self::with_inner(StdEnv, n, false, kind)
     }
 
     /// Never injects until [`arm_one_failure`](Self::arm_one_failure) / [`arm`](Self::arm).
     #[must_use]
     pub fn passing() -> Self {
-        Self::with_state(u64::MAX, false, FaultKind::IoError)
+        Self::with_inner(StdEnv, u64::MAX, false, FaultKind::IoError)
     }
 
-    fn with_state(remaining: u64, once: bool, kind: FaultKind) -> Self {
+    /// Seedable arm: derive `fail_after(n)` from a `u64` seed (RFC-0011 P1.2).
+    ///
+    /// Deterministic: same seed → same `n` in `1..=32` (avoids fail_after(0) open
+    /// always failing so put/flush paths get exercised in sweeps).
+    #[must_use]
+    pub fn from_seed(seed: u64) -> Self {
+        let n = (seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) >> 48) % 32 + 1;
+        Self::fail_after(n)
+    }
+
+    /// Seed + kind.
+    #[must_use]
+    pub fn from_seed_kind(seed: u64, kind: FaultKind) -> Self {
+        let n = (seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) >> 48) % 32 + 1;
+        Self::fail_after_kind(n, kind)
+    }
+
+    /// The `n` that [`from_seed`] would use (for harness logs).
+    #[must_use]
+    pub fn seed_to_fail_after(seed: u64) -> u64 {
+        (seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) >> 48) % 32 + 1
+    }
+}
+
+impl<E: Env> FailingEnv<E> {
+    /// Wrap any production/test [`Env`] with a healthy (passing) fault layer.
+    #[must_use]
+    pub fn wrap(inner: E) -> Self {
+        Self::with_inner(inner, u64::MAX, false, FaultKind::IoError)
+    }
+
+    /// Wrap `inner` and arm dead-disk after `n` successful ops.
+    #[must_use]
+    pub fn wrap_fail_after(inner: E, n: u64) -> Self {
+        Self::with_inner(inner, n, false, FaultKind::IoError)
+    }
+
+    /// Wrap `inner` with an explicit fail-after kind.
+    #[must_use]
+    pub fn wrap_fail_after_kind(inner: E, n: u64, kind: FaultKind) -> Self {
+        Self::with_inner(inner, n, false, kind)
+    }
+
+    fn with_inner(inner: E, remaining: u64, once: bool, kind: FaultKind) -> Self {
         let state = FailState {
             remaining: Cell::new(remaining),
             fired: Cell::new(false),
@@ -187,7 +233,7 @@ impl FailingEnv {
             delay_per_op: Cell::new(0),
         };
         Self {
-            inner: StdEnv,
+            inner,
             state: Rc::new(state),
         }
     }
@@ -286,44 +332,21 @@ impl FailingEnv {
     pub fn op_class(&self) -> OpClass {
         self.state.op_class.get()
     }
-
-    /// Seedable arm: derive `fail_after(n)` from a `u64` seed (RFC-0011 P1.2).
-    ///
-    /// Deterministic: same seed → same `n` in `1..=32` (avoids fail_after(0) open
-    /// always failing so put/flush paths get exercised in sweeps).
-    #[must_use]
-    pub fn from_seed(seed: u64) -> Self {
-        let n = (seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) >> 48) % 32 + 1;
-        Self::fail_after(n)
-    }
-
-    /// Seed + kind.
-    #[must_use]
-    pub fn from_seed_kind(seed: u64, kind: FaultKind) -> Self {
-        let n = (seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) >> 48) % 32 + 1;
-        Self::fail_after_kind(n, kind)
-    }
-
-    /// The `n` that [`from_seed`] would use (for harness logs).
-    #[must_use]
-    pub fn seed_to_fail_after(seed: u64) -> u64 {
-        (seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) >> 48) % 32 + 1
-    }
 }
 
 /// File handle of [`FailingEnv`].
-pub struct FailingFile {
-    inner: <StdEnv as Env>::File,
+pub struct FailingFile<F: EnvFile> {
+    inner: F,
     state: Rc<FailState>,
 }
 
-impl FailingFile {
+impl<F: EnvFile> FailingFile<F> {
     fn gate(&self, class: OpClass) -> io::Result<()> {
         self.state.gate_class(class)
     }
 }
 
-impl Read for FailingFile {
+impl<F: EnvFile> Read for FailingFile<F> {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         // Reads count as Meta-class only when filter is Any or Meta.
         self.gate(OpClass::Meta)?;
@@ -331,7 +354,7 @@ impl Read for FailingFile {
     }
 }
 
-impl Write for FailingFile {
+impl<F: EnvFile> Write for FailingFile<F> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         // Short-write injection: partial success then error once.
         if self.state.kind.get().is_short_write()
@@ -372,14 +395,14 @@ impl Write for FailingFile {
     }
 }
 
-impl Seek for FailingFile {
+impl<F: EnvFile> Seek for FailingFile<F> {
     fn seek(&mut self, pos: SeekFrom) -> io::Result<u64> {
         // Seek is not a durability barrier; do not count against fail budget.
         self.inner.seek(pos)
     }
 }
 
-impl EnvFile for FailingFile {
+impl<F: EnvFile> EnvFile for FailingFile<F> {
     fn sync_data(&mut self) -> io::Result<()> {
         self.gate(OpClass::Sync)?;
         self.inner.sync_data()
@@ -401,8 +424,8 @@ impl EnvFile for FailingFile {
     }
 }
 
-impl Env for FailingEnv {
-    type File = FailingFile;
+impl<E: Env> Env for FailingEnv<E> {
+    type File = FailingFile<E::File>;
 
     fn create_dir_all(&self, path: &Path) -> io::Result<()> {
         self.state.gate_class(OpClass::CreateOpen)?;

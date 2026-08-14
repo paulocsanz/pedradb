@@ -1,0 +1,10 @@
+[package]
+name = "pedradb-index"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Secondary-index canary on public Pedra multi-key TX (RFC-0020 P1.1)"
+
+[dependencies]
+pedradb-core.workspace = true
+bytes.workspace = true
