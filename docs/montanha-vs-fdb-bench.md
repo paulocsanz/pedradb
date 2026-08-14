@@ -22,12 +22,18 @@ The goal is to **find cliffs**, not to win a marketing table.
 
 ```bash
 # Release matters — debug numbers are not comparable.
+# Suites: core | threads | tcp | mini-bt | all  (default: core,threads,mini-bt,tcp)
 cargo run -p pedradb-store --release --bin montanha-fdb-bench -- findings/fdb-bench-local
+cargo build -p pedradb-store --release --bin montanha-tcp   # required for suite=tcp
 
 # Larger / heavier
-MONTANHA_BENCH_N=500 MONTANHA_BENCH_PAYLOAD=256 MONTANHA_BENCH_TX_KEYS=16 \
-  MONTANHA_BENCH_RANGES=8 \
+MONTANHA_BENCH_SUITE=all MONTANHA_BENCH_N=100 MONTANHA_BENCH_THREADS=8 \
+  MONTANHA_BENCH_PAYLOAD=256 MONTANHA_BENCH_TX_KEYS=16 MONTANHA_BENCH_RANGES=8 \
   cargo run -p pedradb-store --release --bin montanha-fdb-bench -- findings/fdb-bench-heavy
+
+# TCP + mini-bt only (faster loop on network path)
+MONTANHA_BENCH_SUITE=tcp,mini-bt MONTANHA_BENCH_N=40 \
+  cargo run -p pedradb-store --release --bin montanha-fdb-bench -- findings/fdb-bench-tcp
 ```
 
 Output: `findings/.../fdb_shaped_bench.json`
@@ -52,6 +58,11 @@ cargo run -p pedradb-store --release --bin montanha-perf-gate -- findings/perf-g
 | **A8** row+index TX | Record-layer-ish | 2-key maintain index |
 | **B1** disjoint multi-range put | multi-proxy / multi-shard | fan-out by range |
 | **B2** cross-range TX | multi-shard TX | **2PC tax** (main cliff candidate) |
+| **D1–D2** TCP put/get | real localhost TCP majority | network path vs A1/A2 |
+| **D3** TCP CommitTx | multi-key over wire | TX + TCP |
+| **D4** TCP multi-thread put | N client threads | **true concurrent clients** |
+| **D5** TCP DCS create/get | etcd-need over TCP | exclusive create + majority |
+| **E1** mini-bindingtester | random set/clear/get/range vs model | silent-wrong soak |
 
 ## How to compare to FDB (same shapes)
 
@@ -142,3 +153,16 @@ Machine-local only — **not** FDB comparison numbers. Use for ratios.
 - **A1/A4 multi-key**: point put is **3.50×** 4-key TX QPS
 
 **Cliff:** B2 p50 ≈ 2.6s on this laptop — layers must co-locate keys when possible.
+
+## Sample TCP + mini-bt (v1, N=16, 4 threads)
+
+| Bench | Result |
+|-------|--------|
+| D1_tcp_put | ~3 qps, p50 ~330 ms |
+| D2_tcp_get | ~6k qps, p50 ~0.16 ms |
+| D3_tcp_commit_tx_2k | 15/15 ok, ~2.5 qps |
+| D4_tcp_mt_put_4thr | 16 ok, aggregate ~3.3 qps (p50 higher under contention) |
+| D5_tcp_dcs | rev=1, exclusive_fail=true, majority_seen=3 |
+| E1_mini_bt | **pass**, mismatches=0, ~1.9 ops/s model-checked |
+
+**Nuance:** multi-thread TCP does **not** linear-scale put QPS on a single range leader — expect p50 inflation (leader serializes). Aggregate QPS can still match or beat single-thread D1 when dial/retry is healthy.

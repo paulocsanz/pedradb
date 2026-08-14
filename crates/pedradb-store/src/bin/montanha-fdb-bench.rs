@@ -9,14 +9,24 @@
 //!   MONTANHA_BENCH_TX_KEYS    keys per multi-key TX (default 8)
 //!   MONTANHA_BENCH_RANGES     range count for multi-range suite (default 4)
 //!   MONTANHA_BENCH_WARMUP     warmup ops discarded (default 20)
+//!   MONTANHA_BENCH_THREADS    concurrent client threads for C/T suites (default 4)
+//!   MONTANHA_BENCH_SUITE      comma list: core,threads,tcp,mini-bt,all (default core,threads,mini-bt)
 //!
 //! Writes `fdb_shaped_bench.json` + human summary. Compare to FDB using the same
 //! workload shapes (see docs/montanha-vs-fdb-bench.md). Not a claim of field parity.
 
 #![forbid(unsafe_code)]
 
-use pedradb_store::{FdbDatabase, StoreCluster};
-use std::path::PathBuf;
+use pedradb_store::{
+    client_dcs_create, client_dcs_get, client_get, client_status, client_tick, FdbDatabase,
+    StoreCluster, TcpClusterClient,
+};
+use std::collections::BTreeMap;
+use std::net::SocketAddr;
+use std::path::{Path, PathBuf};
+use std::process::{Child, Command, Stdio};
+use std::sync::Arc;
+use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 fn env_usize(key: &str, default: usize) -> usize {
@@ -60,6 +70,137 @@ fn ms(t: Instant) -> f64 {
     t.elapsed().as_secs_f64() * 1000.0
 }
 
+fn suite_enabled(want: &str) -> bool {
+    let s =
+        std::env::var("MONTANHA_BENCH_SUITE").unwrap_or_else(|_| "core,threads,mini-bt,tcp".into());
+    let s = s.to_lowercase();
+    if s.split(',').any(|x| x.trim() == "all") {
+        return true;
+    }
+    s.split(',').any(|x| x.trim() == want)
+}
+
+fn find_montanha_tcp() -> Option<PathBuf> {
+    if let Ok(p) = std::env::var("CARGO_BIN_EXE_montanha-tcp") {
+        let pb = PathBuf::from(p);
+        if pb.exists() {
+            return Some(pb);
+        }
+    }
+    let candidates = [
+        PathBuf::from("target/release/montanha-tcp"),
+        PathBuf::from("target/debug/montanha-tcp"),
+    ];
+    for c in candidates {
+        if c.exists() {
+            return Some(c);
+        }
+    }
+    // Next to this binary
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            let p = dir.join("montanha-tcp");
+            if p.exists() {
+                return Some(p);
+            }
+        }
+    }
+    None
+}
+
+struct TcpNode {
+    child: Child,
+    addr: SocketAddr,
+    id: u64,
+}
+
+impl Drop for TcpNode {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+fn free_port() -> u16 {
+    std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port()
+}
+
+fn start_tcp_cluster(bin: &Path, tmp: &Path, n_ranges: u64) -> Vec<TcpNode> {
+    let ports: Vec<u16> = (0..3).map(|_| free_port()).collect();
+    let peers: Vec<(u64, SocketAddr)> = ports
+        .iter()
+        .enumerate()
+        .map(|(i, &p)| {
+            (
+                (i as u64) + 1,
+                format!("127.0.0.1:{p}").parse().unwrap(),
+            )
+        })
+        .collect();
+    let peer_flags: Vec<String> = peers
+        .iter()
+        .flat_map(|(id, a)| vec!["--peer".into(), format!("{id}={a}")])
+        .collect();
+    let mut nodes = Vec::new();
+    for (id, addr) in &peers {
+        let data = tmp.join(format!("n{id}"));
+        std::fs::create_dir_all(&data).unwrap();
+        let child = Command::new(bin)
+            .arg("node")
+            .arg("--id")
+            .arg(id.to_string())
+            .arg("--data")
+            .arg(&data)
+            .arg("--bind")
+            .arg(addr.to_string())
+            .arg("--ranges")
+            .arg(n_ranges.to_string())
+            .args(&peer_flags)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn montanha-tcp");
+        nodes.push(TcpNode {
+            child,
+            addr: *addr,
+            id: *id,
+        });
+    }
+    let deadline = Instant::now() + Duration::from_secs(15);
+    for n in &nodes {
+        loop {
+            if client_status(n.addr.to_string()).is_ok() {
+                break;
+            }
+            if Instant::now() > deadline {
+                panic!("tcp node {} not up", n.id);
+            }
+            thread::sleep(Duration::from_millis(40));
+        }
+    }
+    // elect: tick all nodes until status shows a leader
+    let peer_flags: Vec<String> = nodes
+        .iter()
+        .flat_map(|n| vec!["--peer".into(), format!("{}={}", n.id, n.addr)])
+        .collect();
+    let _ = Command::new(bin)
+        .arg("elect-wait")
+        .args(&peer_flags)
+        .status();
+    // Fallback ticks if elect-wait missing/old
+    for _ in 0..80 {
+        for n in &nodes {
+            let _ = client_tick(n.addr.to_string(), 2);
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
+    nodes
+}
+
 fn main() {
     let out = std::env::args()
         .nth(1)
@@ -78,6 +219,7 @@ fn main() {
     let tx_keys = env_usize("MONTANHA_BENCH_TX_KEYS", 8).max(2);
     let n_ranges = env_usize("MONTANHA_BENCH_RANGES", 4).max(1) as u64;
     let warmup = env_usize("MONTANHA_BENCH_WARMUP", 20);
+    let n_threads = env_usize("MONTANHA_BENCH_THREADS", 4).max(1);
     let val = vec![b'x'; payload];
 
     let mut benches = Vec::new();
@@ -90,7 +232,7 @@ fn main() {
     }
 
     // ── Suite A: single-range majority (baseline substrate) ───────────────
-    {
+    if suite_enabled("core") {
         let dir = out.join("db-r1");
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
@@ -317,7 +459,7 @@ fn main() {
     }
 
     // ── Suite B: multi-range (N writers potential / cross-range 2PC cost) ─
-    {
+    if suite_enabled("core") {
         let dir = out.join(format!("db-r{n_ranges}"));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
@@ -412,15 +554,325 @@ fn main() {
         drop(c);
     }
 
-    // ── Limitation heuristics (ratios of thumb from this run) ─────────────
+
+    // ── Suite C: multi-thread needs Send StoreCluster — use TCP suite D4 ─
+    // StoreCluster holds SeedRng (Rc) and is !Send; concurrent clients = suite tcp.
+    if suite_enabled("threads") && !suite_enabled("tcp") {
+        notes.push(
+            "threads suite: in-process StoreCluster is !Send; enabling TCP multi-thread path"
+                .into(),
+        );
+    }
+
+    // ── Suite D: real TCP cluster (network path + multi-thread clients) ─
+    // Also runs when suite includes "threads" (honest concurrent clients).
+    if suite_enabled("tcp") || suite_enabled("threads") {
+        match find_montanha_tcp() {
+            None => {
+                notes.push("tcp suite skipped: montanha-tcp binary not found".into());
+                progress!("D skip: no montanha-tcp");
+            }
+            Some(bin) => {
+                progress!("D TCP suite with {}", bin.display());
+                let tmp = out.join("tcp-cluster");
+                let _ = std::fs::remove_dir_all(&tmp);
+                std::fs::create_dir_all(&tmp).unwrap();
+                let nodes = start_tcp_cluster(&bin, &tmp, 1);
+                let addrs: Vec<String> = nodes.iter().map(|n| n.addr.to_string()).collect();
+                let peers: Vec<(u64, String)> =
+                    nodes.iter().map(|n| (n.id, n.addr.to_string())).collect();
+
+                let mut client = TcpClusterClient::new(peers.clone()).with_max_attempts(48);
+                let mut lats = Vec::with_capacity(n.min(40));
+                let d1n = n.min(40);
+                let t0 = Instant::now();
+                let mut ok = 0usize;
+                for i in 0..d1n {
+                    let k = format!("tcp-p-{i:05}").into_bytes();
+                    let t = Instant::now();
+                    if client.put(&k, &val).is_ok() {
+                        ok += 1;
+                        lats.push(ms(t));
+                    }
+                }
+                let wall = t0.elapsed();
+                if lats.is_empty() {
+                    notes.push("D1 tcp put: zero successes".into());
+                } else {
+                    benches.push(summarize("D1_tcp_put", ok, wall, &mut lats));
+                }
+                progress!("D1 tcp put ok={ok}/{d1n}");
+
+                let mut lats = Vec::with_capacity(ok);
+                let t0 = Instant::now();
+                let mut gok = 0usize;
+                for i in 0..ok {
+                    let k = format!("tcp-p-{i:05}").into_bytes();
+                    let t = Instant::now();
+                    for a in &addrs {
+                        if client_get(a, &k).ok().flatten().is_some() {
+                            gok += 1;
+                            lats.push(ms(t));
+                            break;
+                        }
+                    }
+                }
+                if !lats.is_empty() {
+                    benches.push(summarize("D2_tcp_get", gok, t0.elapsed(), &mut lats));
+                }
+                progress!("D2 tcp get ok={gok}");
+
+                let d3n = n.min(15);
+                let mut lats = Vec::with_capacity(d3n);
+                let t0 = Instant::now();
+                let mut cok = 0usize;
+                for i in 0..d3n {
+                    let pairs = vec![
+                        (format!("tcp-tx-{i:04}-a").into_bytes(), val.clone()),
+                        (format!("tcp-tx-{i:04}-b").into_bytes(), val.clone()),
+                    ];
+                    let t = Instant::now();
+                    // Retries: CommitTx under TCP can NotLeader / busy.
+                    for _ in 0..12 {
+                        if client.commit_tx(&pairs).is_ok() {
+                            cok += 1;
+                            lats.push(ms(t));
+                            break;
+                        }
+                        thread::sleep(Duration::from_millis(30));
+                    }
+                }
+                if !lats.is_empty() {
+                    benches.push(summarize("D3_tcp_commit_tx_2k", cok, t0.elapsed(), &mut lats));
+                } else {
+                    notes.push(format!("D3 tcp commit_tx: zero successes ({d3n} tries)"));
+                }
+                progress!("D3 tcp commit_tx ok={cok}/{d3n}");
+
+                let per = (n.min(40) / n_threads).max(3);
+                let peers_a = Arc::new(peers.clone());
+                let val_a = Arc::new(val.clone());
+                let t0 = Instant::now();
+                let mut handles = Vec::new();
+                for tid in 0..n_threads {
+                    let peers = (*peers_a).clone();
+                    let v = Arc::clone(&val_a);
+                    handles.push(thread::spawn(move || {
+                        // One TcpClusterClient per thread (NotLeader retry).
+                        let mut cli = TcpClusterClient::new(peers).with_max_attempts(64);
+                        let mut lats = Vec::new();
+                        let mut ok = 0u64;
+                        for i in 0..per {
+                            let k = format!("tcp-mt-{tid:02}-{i:04}").into_bytes();
+                            let t = Instant::now();
+                            // brief backoff storms under multi-thread dial
+                            for attempt in 0..8 {
+                                if cli.put(&k, &v).is_ok() {
+                                    ok += 1;
+                                    lats.push(ms(t));
+                                    break;
+                                }
+                                thread::sleep(Duration::from_millis(10 + attempt * 5));
+                            }
+                        }
+                        (ok, lats)
+                    }));
+                }
+                let mut all = Vec::new();
+                let mut total_ok = 0u64;
+                for h in handles {
+                    let (ok, l) = h.join().unwrap();
+                    total_ok += ok;
+                    all.extend(l);
+                }
+                if !all.is_empty() {
+                    benches.push(summarize(
+                        &format!("D4_tcp_mt_put_{n_threads}thr"),
+                        total_ok as usize,
+                        t0.elapsed(),
+                        &mut all,
+                    ));
+                } else {
+                    notes.push(format!("D4 tcp multi-thread put: zero successes (threads={n_threads})"));
+                }
+                progress!("D4 tcp multi-thread put ok={total_ok}");
+
+                // Extra ticks so DCS range has a stable leader after put storm.
+                for _ in 0..40 {
+                    for a in &addrs {
+                        let _ = client_tick(a, 2);
+                    }
+                    thread::sleep(Duration::from_millis(15));
+                }
+                let t0 = Instant::now();
+                let mut rev = 0u64;
+                let key = b"m/bench/lock";
+                let deadline = Instant::now() + Duration::from_secs(12);
+                while Instant::now() < deadline && rev == 0 {
+                    for a in &addrs {
+                        if let Ok(r) = client_dcs_create(a, key, b"holder") {
+                            rev = r;
+                            break;
+                        }
+                    }
+                    if rev == 0 {
+                        thread::sleep(Duration::from_millis(50));
+                    }
+                }
+                let create_ms = t0.elapsed().as_secs_f64() * 1000.0;
+                let mut exclusive_fail = false;
+                if rev > 0 {
+                    for a in &addrs {
+                        if client_dcs_create(a, key, b"other").is_err() {
+                            exclusive_fail = true;
+                            break;
+                        }
+                    }
+                }
+                let mut seen = 0u32;
+                let deadline = Instant::now() + Duration::from_secs(8);
+                while Instant::now() < deadline && seen < 2 {
+                    seen = 0;
+                    for a in &addrs {
+                        if client_dcs_get(a, key).ok().flatten().as_deref()
+                            == Some(b"holder".as_ref())
+                        {
+                            seen += 1;
+                        }
+                    }
+                    if seen < 2 {
+                        thread::sleep(Duration::from_millis(40));
+                    }
+                }
+                benches.push(format!(
+                    r#"{{
+    "name": "D5_tcp_dcs_create_get",
+    "rev": {rev},
+    "exclusive_fail": {exclusive_fail},
+    "majority_seen": {seen},
+    "create_ms": {create_ms:.4},
+    "note": "etcd-need over real TCP"
+  }}"#
+                ));
+                progress!("D5 tcp dcs rev={rev} exclusive_fail={exclusive_fail} seen={seen}");
+                drop(nodes);
+            }
+        }
+    }
+
+    // ── Suite E: mini-bindingtester random soak ──────────────────────────
+    if suite_enabled("mini-bt") {
+        progress!("E mini-bindingtester soak…");
+        let dir = out.join("db-minib");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut c = StoreCluster::open(&dir, 3, 1).expect("open mini");
+        c.elect_all(100).expect("elect mini");
+        let mut model: BTreeMap<Vec<u8>, Vec<u8>> = BTreeMap::new();
+        let ops = n.max(50) * 3;
+        let mut mismatches = 0u64;
+        let mut commits_ok = 0u64;
+        let mut commits_err = 0u64;
+        let mut rng = 0xFDB_B1_u64;
+        let mut next = || {
+            rng ^= rng << 13;
+            rng ^= rng >> 7;
+            rng ^= rng << 17;
+            rng
+        };
+        let t0 = Instant::now();
+        for i in 0..ops {
+            let op = next() % 5;
+            let k = format!("mb/{}", next() % 32).into_bytes();
+            match op {
+                0 | 1 => {
+                    let v = format!("v{}", next() % 1000).into_bytes();
+                    let mut tr = c.begin();
+                    tr.set(&k, &v).unwrap();
+                    match tr.commit(&mut c) {
+                        Ok(_) => {
+                            model.insert(k, v);
+                            commits_ok += 1;
+                        }
+                        Err(_) => commits_err += 1,
+                    }
+                }
+                2 => {
+                    let mut tr = c.begin();
+                    tr.clear(&k).unwrap();
+                    match tr.commit(&mut c) {
+                        Ok(_) => {
+                            model.remove(&k);
+                            commits_ok += 1;
+                        }
+                        Err(_) => commits_err += 1,
+                    }
+                }
+                3 => {
+                    let mut tr = c.begin();
+                    let got = tr.get(&c, &k).unwrap();
+                    let exp = model.get(&k).cloned();
+                    if got != exp {
+                        mismatches += 1;
+                        if mismatches < 5 {
+                            notes.push(format!(
+                                "mini-bt mismatch i={i} key={}",
+                                String::from_utf8_lossy(&k)
+                            ));
+                        }
+                    }
+                }
+                _ => {
+                    let mut tr = c.begin();
+                    let pairs = tr.get_range(&c, b"mb/", b"mb0").unwrap();
+                    for (pk, pv) in &pairs {
+                        if let Some(ev) = model.get(pk) {
+                            if ev != pv {
+                                mismatches += 1;
+                            }
+                        }
+                    }
+                    for (mk, mv) in &model {
+                        if mk.starts_with(b"mb/")
+                            && !pairs.iter().any(|(k, v)| k == mk && v == mv)
+                        {
+                            mismatches += 1;
+                        }
+                    }
+                }
+            }
+        }
+        let wall = t0.elapsed();
+        let ops_s = ops as f64 / wall.as_secs_f64().max(1e-12);
+        benches.push(format!(
+            r#"{{
+    "name": "E1_mini_bindingtester_soak",
+    "ops": {ops},
+    "ops_per_s": {ops_s:.2},
+    "commits_ok": {commits_ok},
+    "commits_err": {commits_err},
+    "mismatches": {mismatches},
+    "wall_s": {ws:.4},
+    "pass": {pass}
+  }}"#,
+            ws = wall.as_secs_f64(),
+            pass = mismatches == 0,
+        ));
+        progress!("E1 mini-bt ops={ops} mismatches={mismatches} ok_commit={commits_ok}");
+        if mismatches > 0 {
+            notes.push(format!("mini-bt FAILED mismatches={mismatches}"));
+        }
+        drop(c);
+    }
+
     let limitations = r#"[
-    "In-process 3-node majority: no real NIC/kernel TCP in this binary (use montanha-tcp benches separately).",
-    "Single-threaded client: not max cluster aggregate; measures serial substrate cost.",
+    "In-process core suite: no real NIC (suite tcp adds real localhost TCP).",
+    "C1 Mutex multi-thread serializes StoreCluster — concurrent waiters, not parallel leaders.",
+    "D4 multi-thread TCP is the honest concurrent client path on one range.",
     "FDB face path (A3) includes OCC bookkeeping; compare to A1 raw put for face overhead.",
-    "Multi-range TX (B2) exercises cross-range commit; expect >> same-range A4 if 2PC dominates.",
-    "Hot-key A7 measures conflict correctness under sequential dual-TX, not parallel OS threads.",
-    "Not YCSB / not fdb_latency / not production FDB cluster — use docs/montanha-vs-fdb-bench.md for FDB side.",
-    "Disk/fsync policy is Pedra lab default on this machine — label sync mode when comparing to FDB."
+    "Multi-range TX (B2) exercises cross-range 2PC; expect cliff vs A4.",
+    "E1 mini-bt is a model-checked random soak, not full FoundationDB bindingtester.",
+    "Not YCSB / not production FDB — see docs/montanha-vs-fdb-bench.md."
   ]"#;
 
     let host = std::env::var("HOSTNAME")
@@ -438,16 +890,20 @@ fn main() {
                 .join(",")
         )
     };
+    let suite =
+        std::env::var("MONTANHA_BENCH_SUITE").unwrap_or_else(|_| "core,threads,mini-bt".into());
 
     let report = format!(
         r#"{{
-  "bench": "montanha-fdb-shaped-v0",
+  "bench": "montanha-fdb-shaped-v1",
   "host": "{host}",
+  "suite": "{suite}",
   "nodes": 3,
   "payload_bytes": {payload},
   "n_default": {n},
   "tx_keys": {tx_keys},
   "multi_ranges": {n_ranges},
+  "threads": {n_threads},
   "warmup": {warmup},
   "benches": [
     {body}
@@ -458,13 +914,15 @@ fn main() {
     "claim": "not field peer",
     "how_to_compare": "docs/montanha-vs-fdb-bench.md",
     "fdb_workloads": [
-      "single key set/get (A1/A3)",
-      "multi-key transaction (A4)",
+      "single key set/get (A1/A3/D1)",
+      "multi-key transaction (A4/D3)",
       "get_range (A5)",
       "clear_range (A6)",
       "hot key conflicts (A7)",
       "index+row TX (A8)",
-      "multi-shard / multi-range TX (B2)"
+      "multi-shard / multi-range TX (B2)",
+      "multi-client TCP (D4)",
+      "random soak (E1)"
     ]
   }}
 }}
@@ -477,8 +935,8 @@ fn main() {
     println!("{report}");
     println!("wrote {}", path.display());
 
-    // Human ratio hints if we can parse qps from names — optional stderr summary
     eprintln!("--- montanha-fdb-bench done ---");
     eprintln!("report: {}", path.display());
-    eprintln!("Compare A1 vs A3 (face overhead), A4 vs B2 (cross-range tax), A5/A6 range costs.");
+    eprintln!("Suites: core | threads | tcp | mini-bt | all");
+    eprintln!("Compare A1 vs A3 (face), A4 vs B2 (2PC), A1 vs D1 (TCP tax), C1 vs D4 (mutex vs real concurrent).");
 }
