@@ -1049,7 +1049,10 @@ fn apply_txn_prepare<E: Env>(db: &mut Db<E>, txn_id: u64, pairs: &[(Vec<u8>, Vec
 fn apply_txn_commit<E: Env>(db: &mut Db<E>, txn_id: u64, keys: &[Vec<u8>]) -> Result<()> {
     let st = db.get(&txn_status_key(txn_id));
     if st.as_deref() == Some(b"abort".as_ref()) {
-        clear_txn_keys(db, txn_id, keys)?;
+        // F47: fenced TX — never materialise. If a prior apply already wrote user
+        // keys, restore preimages (same as TxnRevert). Keep abort fence durable.
+        let _ = apply_txn_revert(db, txn_id, keys);
+        let _ = db.put(txn_status_key(txn_id), b"abort");
         return Ok(());
     }
     let mut ops = Vec::new();
@@ -1813,9 +1816,13 @@ impl<E: Env> StoreCluster<E> {
                 }
             }
             for (tid, ks) in by_txn {
-                // Revert (restore preimage), not abort: a partial TxnCommit
+                // F47: fence abort so raft replay of TxnCommit cannot re-materialise.
+                let _ = node.db.put(txn_status_key(tid), b"abort");
+                // Revert (restore preimage), not abort-only: a partial TxnCommit
                 // may have materialised user keys before disk death.
                 let _ = apply_txn_revert(&mut node.db, tid, &ks);
+                // Keep abort fence after revert (revert/clear may drop status).
+                let _ = node.db.put(txn_status_key(tid), b"abort");
             }
             if !garbage.is_empty() {
                 let ops: Vec<BatchOp> = garbage.into_iter().map(BatchOp::delete).collect();
@@ -3057,11 +3064,58 @@ impl<E: Env> StoreCluster<E> {
                 entry,
             });
             proposed_index = Some(idx);
-            persist_log_db(&mut n.db, rid, p)?;
+            // F47: if durable log write fails, roll back the in-memory push.
+            // Otherwise a later heal/cancel can majority-commit the orphan.
+            if let Err(e) = persist_log_db(&mut n.db, rid, p) {
+                p.log.pop();
+                return Err(e);
+            }
             if !note_items.is_empty() {
                 self.pending_version_notes.insert((rid, idx), note_items);
             }
         }
+
+        // Run replication/apply; on *any* failure before the client index is
+        // majority-committed, discard the orphan (Direct RPC). NotCommitted is
+        // only one failure mode — IoError mid-AE previously left the entry in
+        // the leader log and FailingEnv+heal installed it (F47).
+        let outcome = self.broadcast_append_after_propose(
+            rid,
+            leader,
+            &ids,
+            proposed_index,
+            had_client,
+        );
+        if let Err(e) = outcome {
+            if let Some(idx) = proposed_index {
+                if self.rpc_mode == RpcMode::Direct {
+                    let commit_now = self
+                        .nodes
+                        .get(&leader)
+                        .and_then(|n| n.ranges.get(&rid))
+                        .map(|p| p.commit)
+                        .unwrap_or(0);
+                    if commit_now < idx {
+                        // Best-effort: discard must not be blocked by dead disks
+                        // on a subset of peers (in-memory truncate still runs).
+                        let _ = self.discard_uncommitted_from(rid, leader, idx);
+                    }
+                }
+            }
+            return Err(e);
+        }
+        Ok(())
+    }
+
+    /// Replication + apply tail of [`broadcast_append`] after an optional client push.
+    fn broadcast_append_after_propose(
+        &mut self,
+        rid: u64,
+        leader: u64,
+        ids: &[u64],
+        proposed_index: Option<u64>,
+        had_client: bool,
+    ) -> Result<()> {
         let (term, commit, last, log_snap) = {
             let p = self.nodes.get(&leader).unwrap().ranges.get(&rid).unwrap();
             if p.role != Role::Leader {
@@ -3080,7 +3134,7 @@ impl<E: Env> StoreCluster<E> {
             .map(|p| (p.snapshot_index, p.snapshot_term))
             .unwrap_or((0, 0));
 
-        for &pid in &ids {
+        for &pid in ids {
             if pid == leader || !self.is_participating(pid) {
                 continue;
             }
@@ -3139,7 +3193,8 @@ impl<E: Env> StoreCluster<E> {
                 .unwrap_or(0);
             if commit_now < idx {
                 if self.rpc_mode == RpcMode::Direct {
-                    self.discard_uncommitted_from(rid, leader, idx)?;
+                    // Best-effort discard under partial disk death (F47).
+                    let _ = self.discard_uncommitted_from(rid, leader, idx);
                 }
                 return Err(StoreError::NotCommitted {
                     range_id: rid,
@@ -3150,7 +3205,7 @@ impl<E: Env> StoreCluster<E> {
         }
 
         // Apply only **local** participating nodes (multi-host: remotes apply via AE).
-        for &nid in &ids {
+        for &nid in ids {
             if self.is_local_node(nid) && self.is_participating(nid) {
                 self.apply_range(nid, rid)?;
             }
@@ -3158,7 +3213,7 @@ impl<E: Env> StoreCluster<E> {
         // Heartbeat to push commit to followers (no client entry → no NotCommitted gate).
         if had_client {
             self.broadcast_append(rid, leader, None)?;
-            for &nid in &ids {
+            for &nid in ids {
                 if self.is_local_node(nid) && self.is_participating(nid) {
                     self.apply_range(nid, rid)?;
                 }
@@ -3330,11 +3385,13 @@ impl<E: Env> StoreCluster<E> {
             }
             // Always re-persist when we truncated (or even if empty retain matched —
             // propose already wrote the orphan index to disk on the leader).
+            // Best-effort under FailingEnv: in-memory truncate is the critical
+            // anti-orphan; a dead peer disk must not block discarding others (F47).
             if p.log.len() != before_len || nid == leader {
-                persist_log_db(&mut n.db, rid, p)?;
+                let _ = persist_log_db(&mut n.db, rid, p);
             }
             if applied_dirty {
-                persist_applied_db(&mut n.db, rid, p)?;
+                let _ = persist_applied_db(&mut n.db, rid, p);
             }
         }
         self.drop_pending_version_notes_from(rid, from_index);
@@ -4060,6 +4117,20 @@ impl<E: Env> StoreCluster<E> {
         }
     }
 
+    /// F47: durable abort fence so a later-committed raft `TxnCommit` (orphan log
+    /// entry after a failed `tx_finish` + heal/elect) cannot materialise user keys.
+    ///
+    /// [`apply_txn_commit`] treats status `abort` as no-op for the put path.
+    fn fence_txn_aborted(&mut self, txn_id: u64) {
+        let key = txn_status_key(txn_id);
+        let ids = self.ids.clone();
+        for nid in ids {
+            if let Some(n) = self.nodes.get_mut(&nid) {
+                let _ = n.db.put(&key, b"abort");
+            }
+        }
+    }
+
     /// Try raft cleanup; always force-local clear so leaderless ranges cannot stick intents.
     fn cleanup_range_keys(
         &mut self,
@@ -4091,16 +4162,21 @@ impl<E: Env> StoreCluster<E> {
 
     /// 2PC phase 2: commit a prepared TX (materialize intents **per range**).
     ///
-    /// If a later range fails to commit, already-committed ranges are **reverted**
-    /// (preimage restored; F34) and remaining ranges aborted so criterion 1 holds:
-    /// fail ⇒ no majority user-key apply from this TX. Cleanup is force-local on
-    /// every peer so a leaderless range cannot leave stuck intents on disk.
+    /// If any range fails to commit, **all** prepared ranges are **reverted**
+    /// (preimage restored; F34) so criterion 1 holds: fail ⇒ no majority user-key
+    /// apply from this TX. Cleanup is force-local on every peer so a leaderless
+    /// range cannot leave stuck intents on disk.
+    ///
+    /// Always Revert (not Abort) after prepare (F47): Abort deletes preimages
+    /// without restoring user keys. An orphan `TxnCommit` that later majority-
+    /// applies would then stick forever. Revert is idempotent when Commit never
+    /// applied (preimage == live value). A durable abort fence is written so
+    /// any residual raft `TxnCommit` re-apply is a no-op / re-revert.
     ///
     /// On full success, SI/OCC history is advanced **once** for all keys in the TX
     /// (F37) so intermediate generations never observe a partial multi-range apply.
     pub fn tx_finish(&mut self, handle: &TxHandle) -> Result<()> {
         let si_gen = self.commit_generation.saturating_add(1);
-        let mut committed: Vec<u64> = Vec::new();
         for rid in &handle.ranges {
             let keys = Self::keys_for_range(handle, *rid).to_vec();
             match self.propose_on_range(
@@ -4111,19 +4187,17 @@ impl<E: Env> StoreCluster<E> {
                     si_gen,
                 },
             ) {
-                Ok(()) => committed.push(*rid),
+                Ok(()) => {}
                 Err(e) => {
-                    for cr in &committed {
-                        let ckeys = Self::keys_for_range(handle, *cr).to_vec();
-                        self.cleanup_range_keys(*cr, handle.id, &ckeys, CleanupMode::Revert);
-                    }
+                    // Fence first so an uncommitted TxnCommit cannot materialise
+                    // after heal/elect even if discard raced (F47).
+                    self.fence_txn_aborted(handle.id);
                     for rid2 in &handle.ranges {
-                        if committed.contains(rid2) {
-                            continue;
-                        }
                         let akeys = Self::keys_for_range(handle, *rid2).to_vec();
-                        self.cleanup_range_keys(*rid2, handle.id, &akeys, CleanupMode::Abort);
+                        self.cleanup_range_keys(*rid2, handle.id, &akeys, CleanupMode::Revert);
                     }
+                    // Re-fence after cleanup (revert may drop status keys).
+                    self.fence_txn_aborted(handle.id);
                     return Err(e);
                 }
             }
@@ -4232,6 +4306,8 @@ impl<E: Env> StoreCluster<E> {
 
     /// Abort a prepared TX (drop intents on all peers, even without leaders).
     pub fn tx_cancel(&mut self, handle: &TxHandle) -> Result<()> {
+        // F47: fence first so in-flight/uncommitted TxnCommit cannot apply later.
+        self.fence_txn_aborted(handle.id);
         // Revert (not abort-only): a failed `tx_finish` may have materialised
         // some ranges before disk death; abort would drop intents and leave
         // those user keys. Restore prepare-time preimages (F34).
@@ -4239,6 +4315,7 @@ impl<E: Env> StoreCluster<E> {
             let keys = Self::keys_for_range(handle, *rid).to_vec();
             self.cleanup_range_keys(*rid, handle.id, &keys, CleanupMode::Revert);
         }
+        self.fence_txn_aborted(handle.id);
         Ok(())
     }
 

@@ -327,11 +327,8 @@ fn clear_is_real_pedra_delete() {
 }
 
 /// FailingEnv mid-2PC: finish cannot majority-apply; preimage stays; no stuck intents.
-/// Residual / flaky under FailingEnv: partial range `TxnCommit` can majority-apply
-/// before finish fails; reopen re-applies raft without guaranteed revert (OPEN —
-/// not blocking F44–F46). Re-enable when coordinator recovery is durable.
+/// F47: abort fence + reopen revert so heal/elect cannot majority-install aborted TX.
 #[test]
-#[ignore = "OPEN residual: mid-2PC majority commit vs reopen (see F47 candidate)"]
 fn fail_after_mid_2pc_restores_preimage() {
     let dir = temp();
     let e1 = FailingEnv::passing();
