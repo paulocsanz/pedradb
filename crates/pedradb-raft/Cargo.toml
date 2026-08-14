@@ -15,6 +15,8 @@ thiserror.workspace = true
 
 [dev-dependencies]
 pedradb-sim.workspace = true
+# Beyond-style fidelity: models call production vote_kernel / ae_kernel (RFC-0002 P1.3).
+stateright = "0.31"
 
 [[bin]]
 name = "pedra-raft-node"
