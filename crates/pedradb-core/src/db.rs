@@ -1066,11 +1066,32 @@ impl<E: Env> Db<E> {
             self.env
                 .copy_file(&wal_src, &dest.join(WAL_FILE_NAME))?;
         }
-        // Large-value spill file (RFC-0014 P2.2): SST/WAL may hold only VLG1 pointers.
+        // Large-value spill (RFC-0014 P2.2): SST/WAL may hold only VLG1 pointers.
+        // F44: mid-GC MANIFEST may set `vlog_use_new` with live data in VALUES.vlog.new
+        // and remapped SST offsets. Copying only the primary file leaves open falling
+        // back to stale primary bytes → missing/wrong large values after restore.
         let vlog_src = self.dir.join(VLOG_FILE_NAME);
         if self.env.exists(&vlog_src) {
             self.env
                 .copy_file(&vlog_src, &dest.join(VLOG_FILE_NAME))?;
+        }
+        let vlog_new_src = self.dir.join(crate::vlog::VLOG_NEW_NAME);
+        if self.vlog_use_new && self.env.exists(&vlog_new_src) {
+            self.env
+                .copy_file(&vlog_new_src, &dest.join(crate::vlog::VLOG_NEW_NAME))?;
+        }
+        // Adopt marker (if present) so open prefers the same vlog generation.
+        let adopt = self.dir.join(crate::vlog::VLOG_ADOPT_NAME);
+        if self.env.exists(&adopt) {
+            self.env
+                .copy_file(&adopt, &dest.join(crate::vlog::VLOG_ADOPT_NAME))?;
+        }
+        // F46: CHANGELOG is the durable change-feed cache. After flush the WAL is
+        // empty/rotated — omit CHANGELOG from the checkpoint → silent feed loss.
+        let chlog = self.dir.join(crate::change_feed::CHANGELOG_FILE_NAME);
+        if self.env.exists(&chlog) {
+            self.env
+                .copy_file(&chlog, &dest.join(crate::change_feed::CHANGELOG_FILE_NAME))?;
         }
 
         let meta = CheckpointMeta {
@@ -1187,7 +1208,11 @@ impl<E: Env> Db<E> {
         }
     }
 
-    /// Install a flushed L0 SST (MANIFEST before success). Clears pipeline imm slot.
+    /// Install a flushed L0 SST (MANIFEST before success).
+    ///
+    /// Does **not** clear [`Self::imm`]: the caller already took the imm via
+    /// [`Self::prepare_flush_imm`] / `flush_imm_to_l0`. Clearing here would drop a
+    /// concurrently restored or second pipeline imm (F45).
     ///
     /// If `file_num` was pre-allocated via [`Self::alloc_file_num`], `next_file_num`
     /// is already past it and is left unchanged. On exclusive paths that only peeked
@@ -1211,12 +1236,20 @@ impl<E: Env> Db<E> {
             self.next_file_num = prev_next;
             return Err(e);
         }
-        self.imm = None;
         Ok(())
     }
 
     /// Restore an imm memtable after a failed off-lock flush ([`crate::concurrent::ConcurrentDb`]).
+    ///
+    /// If another imm is already present (dual-flush race), fold this table's
+    /// entries into the **active** mem so neither pipeline's data is dropped (F45).
     pub fn restore_imm(&mut self, imm: MemTable) {
+        if self.imm.is_some() {
+            for (k, v) in imm.iter_internal() {
+                self.mem.insert(k.clone(), v.clone());
+            }
+            return;
+        }
         self.imm = Some(imm);
     }
 
@@ -4239,6 +4272,165 @@ mod tests {
             "writes after checkpoint must not appear in checkpoint"
         );
         restored.verify_checksums().unwrap();
+        restored.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+        let _ = fs::remove_dir_all(&ckpt);
+    }
+
+    #[test]
+    fn checkpoint_preserves_large_vlog_values() {
+        let dir = temp_dir();
+        let ckpt = temp_dir();
+        let big = vec![0xABu8; 4096];
+        {
+            let mut db = Db::open_with(
+                &dir,
+                OpenOptions {
+                    sync: true,
+                    auto_flush_bytes: None,
+                    auto_compact_sst_count: None,
+                    auto_compact_sst_bytes: None,
+                    exclusive: true,
+                    large_value_threshold: Some(512),
+                },
+            )
+            .unwrap();
+            db.put(b"huge", &big).unwrap();
+            db.flush().unwrap();
+            assert_eq!(db.get(b"huge").as_deref(), Some(big.as_slice()));
+            db.create_checkpoint(&ckpt).unwrap();
+            db.close().unwrap();
+        }
+        let restored = Db::open_with(
+            &ckpt,
+            OpenOptions {
+                sync: true,
+                auto_flush_bytes: None,
+                auto_compact_sst_count: None,
+                auto_compact_sst_bytes: None,
+                exclusive: true,
+                large_value_threshold: Some(512),
+            },
+        )
+        .unwrap();
+        let got = restored.get(b"huge");
+        assert_eq!(
+            got.as_deref(),
+            Some(big.as_slice()),
+            "checkpoint must include VALUES.vlog so VLG1 resolves (got {:?})",
+            got.as_ref().map(|b| b.len())
+        );
+        restored.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+        let _ = fs::remove_dir_all(&ckpt);
+    }
+
+    /// F44: checkpoint after staged vlog GC (MANIFEST `vlog_use_new`, primary still old)
+    /// must ship the live `.new` log (or promote) so remapped SST pointers resolve.
+    ///
+    /// Layout must **shift**: an orphaned large payload is GC'd so the live record's
+    /// offset in `.new` differs from the primary — copying only `VALUES.vlog` then
+    /// open+use_new falls back to primary and can silently return the wrong bytes.
+    /// CHANGELOG is the durable change-feed cache; checkpoint must copy it so
+    /// feed history survives restore after flush (WAL may be empty).
+    #[test]
+    fn checkpoint_copies_changelog_feed() {
+        let dir = temp_dir();
+        let ckpt = temp_dir();
+        {
+            let mut db = Db::open(&dir).unwrap();
+            db.put(b"a", b"1").unwrap();
+            db.put(b"b", b"2").unwrap();
+            db.flush().unwrap();
+            assert_eq!(db.changes_after(0).len(), 2);
+            assert!(dir.join(crate::change_feed::CHANGELOG_FILE_NAME).exists());
+            db.create_checkpoint(&ckpt).unwrap();
+            db.close().unwrap();
+        }
+        assert!(
+            ckpt.join(crate::change_feed::CHANGELOG_FILE_NAME).exists(),
+            "checkpoint must include CHANGELOG"
+        );
+        let restored = Db::open(&ckpt).unwrap();
+        let feed = restored.changes_after(0);
+        assert_eq!(
+            feed.len(),
+            2,
+            "restored feed must keep flushed history, got {feed:?}"
+        );
+        restored.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+        let _ = fs::remove_dir_all(&ckpt);
+    }
+
+
+    #[test]
+    fn checkpoint_mid_vlog_gc_preserves_large_values() {
+        let dir = temp_dir();
+        let ckpt = temp_dir();
+        let dead = vec![0x11u8; 2048];
+        let live = vec![0x22u8; 3000];
+        {
+            let mut db = Db::open_with(
+                &dir,
+                OpenOptions {
+                    sync: true,
+                    auto_flush_bytes: None,
+                    auto_compact_sst_count: None,
+                    auto_compact_sst_bytes: None,
+                    exclusive: true,
+                    large_value_threshold: Some(512),
+                },
+            )
+            .unwrap();
+            db.put(b"dead", &dead).unwrap();
+            db.put(b"live", &live).unwrap();
+            db.delete(b"dead").unwrap();
+            db.flush().unwrap();
+            // Drop dead versions from SST so GC does not copy the orphan payload.
+            db.compact_with(CompactOptions::latest_only()).unwrap();
+            let stats = db.compact_vlog_stage_manifest().unwrap();
+            assert!(db.vlog_use_new, "staged GC must set use_new");
+            assert!(
+                stats.bytes_after < stats.bytes_before,
+                "GC must shrink so live offsets move (before={} after={})",
+                stats.bytes_before,
+                stats.bytes_after
+            );
+            assert_eq!(db.get(b"live").as_deref(), Some(live.as_slice()));
+            assert!(db.get(b"dead").is_none());
+            // Source of the bug: only primary vlog would be copied pre-fix.
+            assert!(
+                dir.join(crate::vlog::VLOG_NEW_NAME).exists(),
+                "staged .new must exist"
+            );
+            db.create_checkpoint(&ckpt).unwrap();
+            db.close().unwrap();
+        }
+        // Sanity: checkpoint must contain a usable vlog for remapped SSTs.
+        assert!(
+            ckpt.join(VLOG_FILE_NAME).exists() || ckpt.join(crate::vlog::VLOG_NEW_NAME).exists(),
+            "checkpoint missing vlog files"
+        );
+        let restored = Db::open_with(
+            &ckpt,
+            OpenOptions {
+                sync: true,
+                auto_flush_bytes: None,
+                auto_compact_sst_count: None,
+                auto_compact_sst_bytes: None,
+                exclusive: true,
+                large_value_threshold: Some(512),
+            },
+        )
+        .unwrap();
+        let got = restored.get(b"live");
+        assert_eq!(
+            got.as_deref(),
+            Some(live.as_slice()),
+            "checkpoint mid-vlog-GC must resolve remapped VLG1 (got {:?})",
+            got.as_ref().map(|b| (b.len(), b.first().copied()))
+        );
         restored.close().unwrap();
         let _ = fs::remove_dir_all(&dir);
         let _ = fs::remove_dir_all(&ckpt);

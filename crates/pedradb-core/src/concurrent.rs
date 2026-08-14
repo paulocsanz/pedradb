@@ -132,6 +132,9 @@ impl WriteGroup {
 pub struct ConcurrentDb<E: Env = StdEnv> {
     inner: Arc<RwLock<Db<E>>>,
     writes: Arc<WriteGroup>,
+    /// Single-flight flush/compact pipeline (F45): dual concurrent `prepare_flush_imm`
+    /// + failed `restore_imm` could otherwise race on the one imm slot.
+    flush_lock: Arc<Mutex<()>>,
 }
 
 impl ConcurrentDb<StdEnv> {
@@ -151,6 +154,7 @@ impl ConcurrentDb<StdEnv> {
         Ok(Self {
             inner: Arc::new(RwLock::new(Db::open_with(path, opts)?)),
             writes: Arc::new(WriteGroup::new()),
+            flush_lock: Arc::new(Mutex::new(())),
         })
     }
 }
@@ -162,6 +166,7 @@ impl<E: Env> ConcurrentDb<E> {
         Self {
             inner: Arc::new(RwLock::new(db)),
             writes: Arc::new(WriteGroup::new()),
+            flush_lock: Arc::new(Mutex::new(())),
         }
     }
 
@@ -173,6 +178,7 @@ impl<E: Env> ConcurrentDb<E> {
         Ok(Self {
             inner: Arc::new(RwLock::new(Db::open_with_env(path, opts, env)?)),
             writes: Arc::new(WriteGroup::new()),
+            flush_lock: Arc::new(Mutex::new(())),
         })
     }
 
@@ -386,11 +392,13 @@ impl<E: Env> ConcurrentDb<E> {
     /// Flush with dual-memtable pipeline: short lock to switch, SST I/O off-lock.
     ///
     /// Concurrent `put`s may proceed into the new active mem while the immutable
-    /// table is written to L0.
+    /// table is written to L0. Flush itself is **single-flight** across threads
+    /// (F45) so only one imm is off-lock at a time; puts still group-commit freely.
     ///
     /// # Errors
     /// I/O.
     pub fn flush(&self) -> Result<()> {
+        let _flush = self.flush_lock.lock();
         // At most two pipeline steps: drain existing imm, then switch+flush active.
         // Do **not** loop while concurrent puts refill mem (that would never end).
         for _ in 0..2 {
@@ -843,6 +851,60 @@ mod tests {
         }
         flusher.join().unwrap();
         assert!(db.get(b"x\x00").is_some());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// F45: dual concurrent flush + failed restore must not drop another imm's data.
+    ///
+    /// Interleaving:
+    /// 1. A prepares immA (keys `a*`) off-lock
+    /// 2. Concurrent puts land in new mem (`b*`)
+    /// 3. B prepares immB
+    /// 4. A fails SST I/O and `restore_imm(immA)`
+    /// 5. B succeeds `install_l0_sst` (which clears `imm`)
+    /// Pre-fix: step 5 wiped immA → silent loss of `a*`.
+    #[test]
+    fn dual_flush_restore_then_install_does_not_drop_other_imm() {
+        let dir = temp_dir();
+        let db = open_sync(&dir);
+        for i in 0..20u8 {
+            db.put([b'a', i], [b'A', i]).unwrap();
+        }
+        let (imm_a, num_a) = db.with_write(|d| {
+            let imm = d.prepare_flush_imm().unwrap().expect("immA");
+            let num = d.alloc_file_num();
+            (imm, num)
+        });
+        for i in 0..20u8 {
+            db.put([b'b', i], [b'B', i]).unwrap();
+        }
+        let (imm_b, num_b) = db.with_write(|d| {
+            let imm = d.prepare_flush_imm().unwrap().expect("immB");
+            let num = d.alloc_file_num();
+            (imm, num)
+        });
+        assert_ne!(num_a, num_b);
+        // A "fails" and restores (production ConcurrentDb::flush error path).
+        db.with_write(|d| d.restore_imm(imm_a));
+        // B succeeds install of its SST.
+        let (table_b, n_b, _) = db
+            .with_read(|d| d.write_memtable_to_l0_file_num(&imm_b, num_b))
+            .unwrap();
+        assert_eq!(n_b, num_b);
+        db.with_write(|d| d.install_l0_sst(table_b, num_b).unwrap());
+        // Keys from immA must still be visible (mem/imm/SST), not silently dropped.
+        for i in 0..20u8 {
+            assert_eq!(
+                db.get(&[b'a', i]).as_deref(),
+                Some([b'A', i].as_slice()),
+                "lost immA key a{i} after dual flush restore/install"
+            );
+            assert_eq!(
+                db.get(&[b'b', i]).as_deref(),
+                Some([b'B', i].as_slice()),
+                "lost immB key b{i}"
+            );
+        }
         let _ = fs::remove_dir_all(&dir);
     }
 

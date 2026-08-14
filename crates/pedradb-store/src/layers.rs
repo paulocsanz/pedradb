@@ -237,7 +237,7 @@ impl TikvKvFace {
         Ok(cluster.get(key)?.map(|b| b.to_vec()))
     }
 
-    /// Delete = put empty tombstone value for lab simplicity.
+    /// Delete via empty put (store apply path is Pedra `delete`).
     pub fn delete(cluster: &mut StoreCluster, key: &[u8]) -> Result<()> {
         cluster.put(key, b"")
     }

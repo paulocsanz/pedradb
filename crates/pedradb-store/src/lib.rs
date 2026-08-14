@@ -1209,6 +1209,10 @@ fn load_range_peer<E: Env>(db: &Db<E>, range_id: u64, node_id: u64) -> Result<Ra
     if peer.snapshot_index > 0 {
         peer.log.retain(|e| e.index > peer.snapshot_index);
     }
+    // I-MAJ-3 / failed 2PC: uncommitted suffix must not survive reopen.
+    // A later election + noop would majority-commit an entry the client
+    // already saw as NotCommitted (FailingEnv mid-finish).
+    peer.log.retain(|e| e.index <= peer.commit);
     // Role is always follower after process restart (volatile leadership).
     peer.role = Role::Follower;
     peer.leader_id = None;
@@ -1272,6 +1276,7 @@ fn persist_snap_db<E: Env>(db: &mut Db<E>, range_id: u64, peer: &RangePeer) -> R
 }
 
 /// Per-range raft state on one node (log durable in PedraDB; apply → same DB).
+#[derive(Clone)]
 struct RangePeer {
     role: Role,
     term: u64,
@@ -1726,6 +1731,26 @@ impl<E: Env> StoreCluster<E> {
         self.abort_leftover_intents();
         self.load_si_from_disk();
         self.recover_next_txn_id();
+        self.persist_truncated_logs();
+    }
+
+    /// Persist raft logs after load truncated any uncommitted suffix.
+    fn persist_truncated_logs(&mut self) {
+        let ids = self.ids.clone();
+        let range_ids: Vec<u64> = self.ranges.iter().map(|r| r.id).collect();
+        for nid in ids {
+            if !self.is_local_node(nid) {
+                continue;
+            }
+            let Some(node) = self.nodes.get_mut(&nid) else {
+                continue;
+            };
+            for rid in &range_ids {
+                if let Some(peer) = node.ranges.get(rid).cloned() {
+                    let _ = persist_log_db(&mut node.db, *rid, &peer);
+                }
+            }
+        }
     }
 
     fn persist_u64_meta_all(&mut self, kind: &str, n: u64) {
@@ -1776,7 +1801,9 @@ impl<E: Env> StoreCluster<E> {
                 }
             }
             for (tid, ks) in by_txn {
-                let _ = apply_txn_abort(&mut node.db, tid, &ks);
+                // Revert (restore preimage), not abort: a partial TxnCommit
+                // may have materialised user keys before disk death.
+                let _ = apply_txn_revert(&mut node.db, tid, &ks);
             }
             if !garbage.is_empty() {
                 let ops: Vec<BatchOp> = garbage.into_iter().map(BatchOp::delete).collect();
@@ -4193,9 +4220,12 @@ impl<E: Env> StoreCluster<E> {
 
     /// Abort a prepared TX (drop intents on all peers, even without leaders).
     pub fn tx_cancel(&mut self, handle: &TxHandle) -> Result<()> {
+        // Revert (not abort-only): a failed `tx_finish` may have materialised
+        // some ranges before disk death; abort would drop intents and leave
+        // those user keys. Restore prepare-time preimages (F34).
         for rid in &handle.ranges {
             let keys = Self::keys_for_range(handle, *rid).to_vec();
-            self.cleanup_range_keys(*rid, handle.id, &keys, CleanupMode::Abort);
+            self.cleanup_range_keys(*rid, handle.id, &keys, CleanupMode::Revert);
         }
         Ok(())
     }

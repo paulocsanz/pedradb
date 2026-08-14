@@ -4,6 +4,8 @@
 //! Pedra, RBS, and FDB: compensating-action data loss, immortal intents
 //! after crash (F7 class), and snapshot isolation that evaporates on reopen.
 
+use pedradb_core::{Db, OpenOptions};
+use pedradb_sim::{FailingEnv, FaultKind, OpClass};
 use pedradb_store::{StoreCluster, StoreError};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -22,7 +24,7 @@ fn temp() -> PathBuf {
     d
 }
 
-fn keys_one_per_range(c: &StoreCluster) -> Vec<Vec<u8>> {
+fn keys_one_per_range<E: pedradb_core::Env>(c: &StoreCluster<E>) -> Vec<Vec<u8>> {
     c.range_metas()
         .iter()
         .map(|r| {
@@ -290,6 +292,149 @@ fn note_tx_commit_reads_applied_not_lagging_first_node() {
     assert_eq!(
         c.get_strong(b"k").unwrap().as_deref(),
         Some(b"new".as_ref())
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// `Transaction::clear` must Pedra-delete: get after commit is None, not Some([]).
+#[test]
+fn clear_is_real_pedra_delete() {
+    let dir = temp();
+    {
+        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        c.elect_all(80).unwrap();
+        c.put(b"gone", b"here").unwrap();
+        assert_eq!(c.get(b"gone").unwrap().as_deref(), Some(b"here".as_ref()));
+        let mut tx = c.begin();
+        tx.clear(b"gone").unwrap();
+        tx.commit(&mut c).unwrap();
+        assert_eq!(
+            c.get(b"gone").unwrap().as_deref(),
+            None,
+            "clear must not leave an empty-value tombstone"
+        );
+        assert_eq!(c.get_at_version(b"gone", c.read_version()).unwrap(), None);
+        drop(c);
+    }
+    let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+    c.elect_all(40).unwrap();
+    assert_eq!(
+        c.get(b"gone").unwrap().as_deref(),
+        None,
+        "delete must survive reopen"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// FailingEnv mid-2PC: finish cannot majority-apply; preimage stays; no stuck intents.
+#[test]
+fn fail_after_mid_2pc_restores_preimage() {
+    let dir = temp();
+    let e1 = FailingEnv::passing();
+    let e2 = FailingEnv::passing();
+    let e3 = FailingEnv::passing();
+    let mut c = StoreCluster::open_with_envs_rng(
+        &dir,
+        3,
+        3,
+        [e1.clone(), e2.clone(), e3.clone()],
+        pedradb_core::SeedRng::new(0xF2C_FA17),
+    )
+    .unwrap();
+    c.elect_all(80).unwrap();
+    let keys = keys_one_per_range(&c);
+    assert!(keys.len() >= 2);
+    c.put(&keys[0], b"old-a").unwrap();
+    c.put(&keys[1], b"old-b").unwrap();
+    let h = c
+        .tx_start([
+            (keys[0].as_slice(), b"new-a".as_slice()),
+            (keys[1].as_slice(), b"new-b".as_slice()),
+        ])
+        .expect("prepare");
+    // Majority disks dead for writes — finish must fail closed.
+    e1.arm_op_class(OpClass::Write, 0, false, FaultKind::IoError);
+    e2.arm_op_class(OpClass::Write, 0, false, FaultKind::IoError);
+    let err = c.tx_finish(&h);
+    assert!(err.is_err(), "finish under dead majority must fail, got {err:?}");
+    // I-TX-2: fail ⇒ no *majority* new apply (a single leader replica may
+    // have applied locally before replication died — LocalApplied, not I-MAJ).
+    assert!(
+        c.count_applied_eq(&keys[0], b"new-a") < 2,
+        "new-a majority-applied after failed finish"
+    );
+    assert!(
+        c.count_applied_eq(&keys[1], b"new-b") < 2,
+        "new-b majority-applied after failed finish"
+    );
+    e1.arm(u64::MAX, false);
+    e2.arm(u64::MAX, false);
+    c.elect_all(80).unwrap();
+    let _ = c.tx_cancel(&h);
+    drop(c);
+    // Reopen aborts leftover intents (F35) even if cancel could not write.
+    let mut c = StoreCluster::open_with_envs_rng(
+        &dir,
+        3,
+        3,
+        [e1.clone(), e2.clone(), e3.clone()],
+        pedradb_core::SeedRng::new(0xF2C_FA18),
+    )
+    .unwrap();
+    c.elect_all(80).unwrap();
+    assert!(
+        c.count_applied_eq(&keys[0], b"new-a") < 2,
+        "reopen must not majority-install new-a"
+    );
+    c.put(&keys[0], b"after")
+        .expect("put after heal+reopen must not Conflict on leftover intent");
+    assert!(c.count_applied_eq(&keys[0], b"after") >= 2);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Bitrot on `\0store/hist/` must not serve the tip as an old snapshot.
+#[test]
+fn hist_bitrot_does_not_silent_wrong_old_snapshot() {
+    let dir = temp();
+    {
+        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        c.elect_all(80).unwrap();
+        c.put(b"hk", b"v0").unwrap();
+        c.put(b"hk", b"v1").unwrap();
+        assert!(c.read_version() >= 2);
+        drop(c);
+    }
+    // Flip a byte in the durable SI hist row (CRC should reject on reload).
+    {
+        let opts = OpenOptions {
+            sync: true,
+            auto_flush_bytes: None,
+            auto_compact_sst_count: None,
+            auto_compact_sst_bytes: None,
+            exclusive: true,
+            large_value_threshold: None,
+        };
+        let mut db = Db::open_with(&dir.join("store-node-1"), opts).unwrap();
+        let mut hk = b"\0store/hist/".to_vec();
+        hk.extend_from_slice(b"hk");
+        if let Some(raw) = db.get(&hk) {
+            let mut flipped = raw.to_vec();
+            if !flipped.is_empty() {
+                let i = flipped.len() / 2;
+                flipped[i] ^= 0xFF;
+                db.put(&hk, &flipped).unwrap();
+            }
+        }
+        drop(db);
+    }
+    let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+    c.elect_all(40).unwrap();
+    // Tip read is fine; an *old* snapshot must not invent v1 from Pedra tip.
+    let at0 = c.get_at_version(b"hk", 0).unwrap();
+    assert_ne!(
+        at0.as_deref(),
+        Some(b"v1".as_ref()),
+        "bitrot hist must not silently serve tip as snapshot 0, got {at0:?}"
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
