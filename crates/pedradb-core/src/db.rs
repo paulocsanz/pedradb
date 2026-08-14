@@ -642,12 +642,27 @@ impl<E: Env> Db<E> {
     }
 
     /// Whether any version of `key` has `sequence > snapshot` (OCC conflict probe).
+    ///
+    /// Includes point puts/deletes **and** range tombstones that cover `key`
+    /// (F30: a concurrent `delete_range` that covers a read/write key must conflict).
     #[must_use]
     pub fn key_has_write_after(&self, key: &[u8], snapshot: SequenceNumber) -> bool {
+        use crate::key::ValueType;
         for table in std::iter::once(&self.mem).chain(self.imm.as_ref()) {
-            for (ikey, _) in table.iter_internal() {
-                if ikey.user_key.as_ref() == key && ikey.sequence > snapshot {
+            for (ikey, value) in table.iter_internal() {
+                if ikey.sequence <= snapshot {
+                    continue;
+                }
+                if ikey.user_key.as_ref() == key {
                     return true;
+                }
+                // Range tombstone `[start, end)` covers key even when start != key.
+                if ikey.kind == ValueType::RangeDeletion {
+                    let start = ikey.user_key.as_ref();
+                    let end = value.as_ref();
+                    if key >= start && key < end {
+                        return true;
+                    }
                 }
             }
         }
@@ -658,11 +673,11 @@ impl<E: Env> Db<E> {
                     return true;
                 }
             }
-            // Also newer range tombstones that start at this key.
+            // Any newer range tombstone that **covers** this key (not only start==key).
             let mut tombs = Vec::new();
             table.collect_range_tombstones(MAX_SEQUENCE_NUMBER, &mut tombs);
             for t in tombs {
-                if t.start.as_ref() == key && t.sequence > snapshot {
+                if t.sequence > snapshot && t.covers(key) {
                     return true;
                 }
             }

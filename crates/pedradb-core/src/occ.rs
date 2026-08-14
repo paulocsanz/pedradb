@@ -183,11 +183,14 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn temp_dir() -> std::path::PathBuf {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static N: AtomicU64 = AtomicU64::new(0);
         let n = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let dir = std::env::temp_dir().join(format!("pedradb-occ-{n}"));
+        let i = N.fetch_add(1, Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!("pedradb-occ-{n}-{i}"));
         let _ = fs::remove_dir_all(&dir);
         dir
     }
@@ -311,6 +314,78 @@ mod tests {
         // Value is one of the two writers (or single winner).
         let v = db.get(b"counter").unwrap();
         assert!(v.as_ref() == [0] || v.as_ref() == [1] || v.as_ref() == b"0");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Concurrent delete_range covering a read key must conflict OCC.
+    #[test]
+    fn occ_conflicts_on_range_delete_covering_key() {
+        let dir = temp_dir();
+        let db = open_cdb(&dir);
+        db.put(b"m", b"v0").unwrap();
+
+        let mut tx = db.begin_occ();
+        assert_eq!(tx.get(b"m").as_deref(), Some(b"v0".as_ref()));
+        // Concurrent writer range-deletes [a,z) which covers m
+        db.delete_range(b"a", b"z").unwrap();
+        // TX still tries to write m based on stale snapshot
+        tx.put(b"m", b"from_occ").unwrap();
+        let err = tx.commit();
+        // Expected: TransactionConflict. Bug if Ok and m resurrects under range tomb.
+        match err {
+            Err(CoreError::TransactionConflict) => {
+                assert!(db.get(b"m").is_none(), "range tomb must hide m");
+            }
+            Ok(()) => {
+                panic!(
+                    "BUG: OCC commit succeeded after covering delete_range; get={:?}",
+                    db.get(b"m")
+                );
+            }
+            Err(e) => panic!("unexpected error: {e:?}"),
+        }
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn occ_conflicts_on_range_delete_after_flush() {
+        let dir = temp_dir();
+        let db = open_cdb(&dir);
+        db.put(b"m", b"v0").unwrap();
+        db.flush().unwrap();
+
+        let mut tx = db.begin_occ();
+        assert_eq!(tx.get(b"m").as_deref(), Some(b"v0".as_ref()));
+        db.delete_range(b"a", b"z").unwrap();
+        db.flush().unwrap();
+        tx.put(b"m", b"from_occ").unwrap();
+        let err = tx.commit();
+        match err {
+            Err(CoreError::TransactionConflict) => {}
+            Ok(()) => panic!(
+                "BUG: OCC ok after flushed range-delete; get={:?}",
+                db.get(b"m")
+            ),
+            Err(e) => panic!("unexpected {e:?}"),
+        }
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Write-only OCC (no prior get) must still conflict with covering range delete.
+    #[test]
+    fn occ_write_only_conflicts_on_range_delete() {
+        let dir = temp_dir();
+        let db = open_cdb(&dir);
+        db.put(b"m", b"v0").unwrap();
+        let mut tx = db.begin_occ();
+        db.delete_range(b"a", b"z").unwrap();
+        tx.put(b"m", b"from_occ").unwrap();
+        let err = tx.commit().unwrap_err();
+        assert!(
+            matches!(err, CoreError::TransactionConflict),
+            "write-only OCC must conflict: {err:?}"
+        );
+        assert!(db.get(b"m").is_none());
         let _ = fs::remove_dir_all(&dir);
     }
 }

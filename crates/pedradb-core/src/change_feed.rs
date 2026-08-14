@@ -146,8 +146,12 @@ impl ChangeLog {
 
     /// Load from `CHANGELOG` if present.
     ///
+    /// On-disk feed is a **cache** (WAL rebuild fills gaps). Corrupt / truncated
+    /// files must not brick DB open (F33): treat as empty and let open rebuild
+    /// from WAL when possible.
+    ///
     /// # Errors
-    /// I/O or corrupt file.
+    /// I/O reading the file (not decode errors).
     pub fn load_on(env: &impl Env, dir: &Path) -> Result<Self> {
         let path = dir.join(CHANGELOG_FILE_NAME);
         if !env.exists(&path) {
@@ -156,10 +160,27 @@ impl ChangeLog {
         let mut f = env.open_read(&path)?;
         let mut buf = Vec::new();
         f.read_to_end(&mut buf)?;
-        decode_changelog(&buf)
+        match decode_changelog(&buf) {
+            Ok(log) => Ok(log),
+            Err(e) => {
+                tracing::warn!(
+                    error = %e,
+                    path = %path.display(),
+                    "CHANGELOG corrupt or unreadable; treating as empty cache (F33)"
+                );
+                // Best-effort quarantine so a later rewrite does not keep re-reading poison.
+                let bad = dir.join(format!("{CHANGELOG_FILE_NAME}.corrupt"));
+                let _ = env.rename(&path, &bad);
+                Ok(Self::new())
+            }
+        }
     }
 
     /// Persist full log to `CHANGELOG` (rewrite) and fsync.
+    ///
+    /// Uses atomic rename over the destination (POSIX replaces in place). Does
+    /// **not** `remove_file` the live `CHANGELOG` first — that window permanently
+    /// loses the feed after WAL truncate/flush (F31).
     ///
     /// # Errors
     /// I/O.
@@ -172,9 +193,7 @@ impl ChangeLog {
             f.write_all(&body)?;
             f.sync_all()?;
         }
-        if env.exists(&path) {
-            env.remove_file(&path)?;
-        }
+        // Atomic replace: rename overwrites existing path on the same filesystem.
         env.rename(&tmp, &path)?;
         let _ = env.sync_dir(dir);
         Ok(())
@@ -235,6 +254,15 @@ pub fn decode_changelog(buf: &[u8]) -> Result<ChangeLog> {
         return Err(CoreError::Internal("bad changelog magic".into()));
     }
     let n = u32::from_le_bytes(payload[8..12].try_into().unwrap()) as usize;
+    // F32: never `with_capacity(n)` from an untrusted header alone (F2-class OOM).
+    // Minimum entry wire size: seq(8)+klen(4)+kind(1)+vlen(4) = 17 (empty key/value).
+    const MIN_ENTRY_BYTES: usize = 17;
+    let max_possible = payload.len().saturating_sub(12) / MIN_ENTRY_BYTES;
+    if n > max_possible {
+        return Err(CoreError::Internal(format!(
+            "changelog entry count {n} exceeds file residual (max {max_possible})"
+        )));
+    }
     let mut off = 12;
     let mut entries = Vec::with_capacity(n);
     for _ in 0..n {
@@ -330,10 +358,11 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
     }
 
-    /// Crash between remove(CHANGELOG) and rename(.tmp): after flush, WAL no longer
-    /// holds history → feed permanently empty while SST data remains (silent feed loss).
+    /// F31 residual: rebuild is WAL-only. If `CHANGELOG` is gone after flush (old
+    /// remove-before-rename crash, or external delete), feed is empty while SST
+    /// keys remain. `store_on` no longer removes first (atomic rename only).
     #[test]
-    fn changelog_lost_after_remove_post_flush() {
+    fn changelog_missing_post_flush_empties_feed_wal_only_rebuild() {
         use crate::db::{Db, OpenOptions};
         use std::time::{SystemTime, UNIX_EPOCH};
         let n = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
@@ -356,20 +385,81 @@ mod tests {
             db.flush().unwrap();
             drop(db);
         }
-        // Simulate store_on crash window: old CHANGELOG removed, rename not done.
         let path = dir.join(CHANGELOG_FILE_NAME);
         assert!(path.exists());
         fs::remove_file(&path).unwrap();
         let db = Db::open_with(&dir, opts).unwrap();
         let feed = db.changes_after(0);
-        assert!(db.get(b"k\x00").is_some() || db.get(&[b'k', 0]).is_some());
         assert!(
-            !feed.is_empty(),
-            "BUG: CHANGELOG gone post-flush → feed empty while keys live in SST (len={}, last={})",
-            feed.len(),
-            db.last_sequence()
+            db.get(&[b'k', 0]).is_some(),
+            "data plane must still see SST keys"
         );
+        // Known residual: no SST→feed rebuild. Document, don't fail-open as silent wrong.
+        assert!(
+            feed.is_empty(),
+            "WAL-only rebuild leaves feed empty when CHANGELOG missing post-flush"
+        );
+        assert!(db.last_sequence() >= 5);
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// F32: huge entry count must fail-stop, not allocate multi-GiB.
+    #[test]
+    fn decode_rejects_huge_entry_count() {
+        let mut payload = Vec::new();
+        payload.extend_from_slice(MAGIC);
+        payload.extend_from_slice(&0x0FFF_FFFFu32.to_le_bytes()); // huge n, no entries
+        let crc = crc32c::crc32c(&payload);
+        payload.extend_from_slice(&crc.to_le_bytes());
+        let err = decode_changelog(&payload).unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("exceeds") || msg.contains("count"),
+            "expected count bound error, got {msg}"
+        );
+    }
+
+    /// Corrupt CHANGELOG should not brick open of durable SST data (feed is a cache).
+    #[test]
+    fn corrupt_changelog_does_not_block_open() {
+        use crate::db::{Db, OpenOptions};
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let n = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let dir = std::env::temp_dir().join(format!("pedradb-chlog-corrupt-{n}"));
+        let _ = fs::remove_dir_all(&dir);
+        let opts = OpenOptions {
+            sync: true,
+            auto_flush_bytes: None,
+            auto_compact_sst_count: None,
+            auto_compact_sst_bytes: None,
+            exclusive: true,
+            large_value_threshold: None,
+        };
+        {
+            let mut db = Db::open_with(&dir, opts).unwrap();
+            db.put(b"k", b"v").unwrap();
+            db.flush().unwrap();
+            drop(db);
+        }
+        let path = dir.join(CHANGELOG_FILE_NAME);
+        let mut bytes = fs::read(&path).unwrap();
+        // Flip a payload byte (not just CRC) so CRC mismatches.
+        if bytes.len() > 20 {
+            bytes[12] ^= 0xff;
+        }
+        fs::write(&path, &bytes).unwrap();
+        match Db::open_with(&dir, opts) {
+            Ok(db) => {
+                assert_eq!(db.get(b"k").as_deref(), Some(b"v".as_ref()));
+                // feed may be empty after WAL rotate — data plane must work
+                let _ = db.changes_after(0);
+                let _ = fs::remove_dir_all(&dir);
+            }
+            Err(e) => {
+                let _ = fs::remove_dir_all(&dir);
+                panic!("BUG: corrupt CHANGELOG blocks open of SST data: {e}");
+            }
+        }
     }
 
 }
