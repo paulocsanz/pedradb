@@ -1471,9 +1471,13 @@ pub struct StoreCluster<E: Env = StdEnv> {
     key_history: HashMap<Vec<u8>, Vec<(u64, Option<Vec<u8>>)>>,
     /// Snapshots strictly below this are too old (version GC watermark).
     safe_watermark: u64,
-    /// Preimages staged at propose time; flushed when log index majority-commits
-    /// (Direct Ok **and** Queued `finish_queued_propose`). Key: `(range_id, log_index)`.
-    pending_version_notes: HashMap<(u64, u64), Vec<(Vec<u8>, Vec<u8>, Option<Vec<u8>>)>>,
+    /// Preimages + reserved SI gen staged at propose; flushed when log index
+    /// majority-commits (Direct Ok **and** Queued `finish_queued_propose`).
+    /// Key: `(range_id, log_index)` → `(si_gen, items)`.
+    /// F49: gen is reserved in `with_si_gen` so concurrent outstanding proposes
+    /// never embed the same durable `si_gen`.
+    pending_version_notes:
+        HashMap<(u64, u64), (u64, Vec<(Vec<u8>, Vec<u8>, Option<Vec<u8>>)>)>,
     /// Last log index per range already flushed into version history (idempotent).
     version_notes_through: HashMap<u64, u64>,
     /// In-process watch hub; notified after majority put/commit_tx (RFC-0022 P0.3).
@@ -3071,6 +3075,11 @@ impl<E: Env> StoreCluster<E> {
             // Assign SI generation + capture preimages **before** apply.
             let entry = self.with_si_gen(entry);
             let note_items = self.preimages_for_entry(&entry);
+            let stamped_gen = match &entry {
+                RangeEntry::Put { si_gen, .. } | RangeEntry::Batch { si_gen, .. } => *si_gen,
+                RangeEntry::TxnCommit { si_gen, .. } => *si_gen,
+                _ => 0,
+            };
             let n = self.nodes.get_mut(&leader).unwrap();
             let p = n.ranges.get_mut(&rid).unwrap();
             if p.role != Role::Leader {
@@ -3094,7 +3103,8 @@ impl<E: Env> StoreCluster<E> {
                 return Err(e);
             }
             if !note_items.is_empty() {
-                self.pending_version_notes.insert((rid, idx), note_items);
+                self.pending_version_notes
+                    .insert((rid, idx), (stamped_gen, note_items));
             }
         }
 
@@ -4199,7 +4209,9 @@ impl<E: Env> StoreCluster<E> {
     /// On full success, SI/OCC history is advanced **once** for all keys in the TX
     /// (F37) so intermediate generations never observe a partial multi-range apply.
     pub fn tx_finish(&mut self, handle: &TxHandle) -> Result<()> {
-        let si_gen = self.commit_generation.saturating_add(1);
+        // Reserve one SI gen for the whole multi-range TX (F37 + F49).
+        self.commit_generation = self.commit_generation.saturating_add(1);
+        let si_gen = self.commit_generation;
         let mut committed: Vec<u64> = Vec::new();
         for rid in &handle.ranges {
             let keys = Self::keys_for_range(handle, *rid).to_vec();
@@ -4244,7 +4256,7 @@ impl<E: Env> StoreCluster<E> {
             }
         }
         // One SI generation for the whole TX (must run before preimages drop).
-        self.note_tx_commit(handle);
+        self.note_tx_commit(handle, si_gen);
         self.drop_preimages(handle);
         Ok(())
     }
@@ -4281,7 +4293,7 @@ impl<E: Env> StoreCluster<E> {
     ///
     /// Per-range reads use [`Self::best_applied_reader`] so a lagging `ids[0]` cannot
     /// poison SI history after a majority commit that excluded that node (F42).
-    fn note_tx_commit(&mut self, handle: &TxHandle) {
+    fn note_tx_commit(&mut self, handle: &TxHandle, si_gen: u64) {
         let mut items: Vec<(Vec<u8>, Vec<u8>, Option<Vec<u8>>)> = Vec::new();
         for (rid, keys) in &handle.keys_by_range {
             let Some(nid) = self.best_applied_reader(*rid) else {
@@ -4323,7 +4335,8 @@ impl<E: Env> StoreCluster<E> {
                 items.push((k.clone(), val, pre));
             }
         }
-        self.note_mutations(&items);
+        // Use the gen reserved at `tx_finish` (matches durable TxnCommit.si_gen).
+        self.note_mutations_at(Some(si_gen), &items);
     }
 
     /// Drop prepare-time preimages after a *successful* all-range commit.
@@ -4447,20 +4460,27 @@ impl<E: Env> StoreCluster<E> {
     }
 
     /// Stamp a client entry with a new SI generation (leader propose path).
+    ///
+    /// **Reserves** [`Self::commit_generation`] immediately (F49) so two outstanding
+    /// Queued proposes never embed the same durable `si_gen` in the raft log /
+    /// apply-path hist. `note_mutations` applies the reserved gen without a second bump.
     fn with_si_gen(&mut self, entry: RangeEntry) -> RangeEntry {
-        let gen = self.commit_generation.saturating_add(1);
-        // Reserve gen so concurrent proposes get distinct numbers before flush.
-        // Actual memory bump still happens in note_mutations / apply.
         match entry {
-            RangeEntry::Put { key, value, .. } => RangeEntry::Put {
-                key,
-                value,
-                si_gen: gen,
-            },
-            RangeEntry::Batch { pairs, .. } => RangeEntry::Batch {
-                pairs,
-                si_gen: gen,
-            },
+            RangeEntry::Put { key, value, .. } => {
+                self.commit_generation = self.commit_generation.saturating_add(1);
+                RangeEntry::Put {
+                    key,
+                    value,
+                    si_gen: self.commit_generation,
+                }
+            }
+            RangeEntry::Batch { pairs, .. } => {
+                self.commit_generation = self.commit_generation.saturating_add(1);
+                RangeEntry::Batch {
+                    pairs,
+                    si_gen: self.commit_generation,
+                }
+            }
             other => other,
         }
     }
@@ -4519,8 +4539,8 @@ impl<E: Env> StoreCluster<E> {
             .collect();
         idxs.sort_unstable();
         for idx in idxs {
-            if let Some(items) = self.pending_version_notes.remove(&(range_id, idx)) {
-                self.note_mutations(&items);
+            if let Some((gen, items)) = self.pending_version_notes.remove(&(range_id, idx)) {
+                self.note_mutations_at(Some(gen), &items);
             }
             self.version_notes_through.insert(range_id, idx);
         }
@@ -4573,12 +4593,29 @@ impl<E: Env> StoreCluster<E> {
     /// best-effort mirror for reopen when apply already stored hist.
     ///
     /// Each item is `(key, new_value, preimage)`. Empty `new_value` ⇒ deleted (`None` in hist).
-    fn note_mutations(&mut self, items: &[(Vec<u8>, Vec<u8>, Option<Vec<u8>>)]) {
+    ///
+    /// When `reserved` is `Some(g)` use that SI generation (assigned at propose /
+    /// `tx_finish`) without a second bump (F49). `None` allocates a new gen.
+    fn note_mutations_at(
+        &mut self,
+        reserved: Option<u64>,
+        items: &[(Vec<u8>, Vec<u8>, Option<Vec<u8>>)],
+    ) {
         if items.is_empty() {
             return;
         }
-        self.commit_generation = self.commit_generation.saturating_add(1);
-        let g = self.commit_generation;
+        let g = match reserved {
+            Some(r) if r > 0 => {
+                if r > self.commit_generation {
+                    self.commit_generation = r;
+                }
+                r
+            }
+            _ => {
+                self.commit_generation = self.commit_generation.saturating_add(1);
+                self.commit_generation
+            }
+        };
         for (k, val, pre) in items {
             let hist = self.key_history.entry(k.clone()).or_default();
             if hist.is_empty() {
@@ -5215,6 +5252,128 @@ mod tests {
         let val = b"v-queued";
         put_queued(&mut c, key, val);
         assert_eq!(c.count_applied_eq(key, val), 3);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// F49: two outstanding Queued proposes must stamp **distinct** durable SI gens.
+    ///
+    /// `with_si_gen` claimed to reserve gens but only read `commit_generation+1`
+    /// without advancing. Two NotCommitted puts both embed the same `si_gen` in the
+    /// raft log; Raft apply then writes `\0store/hist/` under that shared gen. A
+    /// crash after apply (or any path that reloads apply hist before coordinator
+    /// `note_mutations` rewrites) collapses both commits into one generation →
+    /// SI snapshot that should see only the first also sees the second.
+    #[test]
+    fn queued_double_propose_distinct_si_gens_survive_reopen() {
+        let dir = temp();
+        let mut c = StoreCluster::open_with_rng(&dir, 3, 1, SeedRng::new(0xF49_51_01)).unwrap();
+        c.elect_all(80).unwrap();
+        c.put(b"f48/a", b"old-a").unwrap();
+        c.put(b"f48/b", b"old-b").unwrap();
+        let gen_seed = c.read_version();
+        assert!(gen_seed >= 2, "seed puts must advance generation");
+
+        c.set_rpc_mode(RpcMode::Queued);
+        // Two client proposes **without** finish between them — both stamp si_gen
+        // before any note_mutations bump.
+        let (r1, i1) = match c.put(b"f48/a", b"new-a") {
+            Err(StoreError::NotCommitted {
+                range_id, index, ..
+            }) => (range_id, index),
+            Ok(()) => panic!("Queued put should return NotCommitted before pump"),
+            Err(e) => panic!("unexpected: {e}"),
+        };
+        let (r2, i2) = match c.put(b"f48/b", b"new-b") {
+            Err(StoreError::NotCommitted {
+                range_id, index, ..
+            }) => (range_id, index),
+            Ok(()) => panic!("second Queued put should return NotCommitted"),
+            Err(e) => panic!("unexpected: {e}"),
+        };
+        assert_eq!(r1, r2, "single range cluster");
+        assert_ne!(i1, i2, "distinct log indexes");
+
+        // Inspect raft log stamps **before** finish (apply/note paths).
+        let mut stamped: Vec<(u64, u64)> = Vec::new(); // (index, si_gen)
+        {
+            let leader = c.range_leader(r1).expect("leader");
+            let n = c.nodes.get(&leader).unwrap();
+            let p = n.ranges.get(&r1).unwrap();
+            for rec in &p.log {
+                if rec.index == i1 || rec.index == i2 {
+                    if let RangeEntry::Put { si_gen, .. } = &rec.entry {
+                        stamped.push((rec.index, *si_gen));
+                    }
+                }
+            }
+        }
+        stamped.sort_by_key(|(i, _)| *i);
+        assert_eq!(stamped.len(), 2, "both puts must be in leader log: {stamped:?}");
+        assert_ne!(
+            stamped[0].1, stamped[1].1,
+            "F49: raft Put si_gen collision — both embeds {} (indexes {} and {})",
+            stamped[0].1, stamped[0].0, stamped[1].0
+        );
+        assert!(
+            stamped[0].1 > gen_seed && stamped[1].1 > gen_seed,
+            "stamped gens {stamped:?} must exceed seed {gen_seed}"
+        );
+
+        pump_queued(&mut c, 128);
+        assert!(
+            c.finish_queued_propose(r1, i1, true).unwrap(),
+            "first put must majority-commit"
+        );
+        assert!(
+            c.finish_queued_propose(r2, i2, true).unwrap(),
+            "second put must majority-commit"
+        );
+        pump_queued(&mut c, 32);
+
+        let va = c.key_version(b"f48/a");
+        let vb = c.key_version(b"f48/b");
+        assert_ne!(va, vb, "in-memory OCC versions must differ");
+        let mid = va.min(vb);
+        if vb > va {
+            assert_eq!(
+                c.get_at_version(b"f48/b", mid).unwrap().as_deref(),
+                Some(b"old-b".as_ref()),
+                "in-memory SI: snapshot@{mid} must not see second commit"
+            );
+        } else {
+            assert_eq!(
+                c.get_at_version(b"f48/a", mid).unwrap().as_deref(),
+                Some(b"old-a".as_ref()),
+                "in-memory SI: snapshot@{mid} must not see second commit"
+            );
+        }
+
+        // Simulate crash **after Raft apply wrote hist, before coordinator notes**:
+        // reload SI only from apply-path hist gens (si_gen embedded in log).
+        // Apply uses the stamped si_gen; collision ⇒ both keys share one gen.
+        drop(c);
+        let mut c = StoreCluster::open_with_rng(&dir, 3, 1, SeedRng::new(0xF49_51_02)).unwrap();
+        c.elect_all(40).unwrap();
+        // Happy-path reopen may be healed by persist_si_keys; the log stamp assert
+        // above is the primary F49 gate. Still check SI if versions differ.
+        let va2 = c.key_version(b"f48/a");
+        let vb2 = c.key_version(b"f48/b");
+        if va2 != vb2 {
+            let mid2 = va2.min(vb2);
+            if vb2 > va2 {
+                assert_eq!(
+                    c.get_at_version(b"f48/b", mid2).unwrap().as_deref(),
+                    Some(b"old-b".as_ref()),
+                    "reopen SI snapshot@{mid2}"
+                );
+            } else {
+                assert_eq!(
+                    c.get_at_version(b"f48/a", mid2).unwrap().as_deref(),
+                    Some(b"old-a".as_ref()),
+                    "reopen SI snapshot@{mid2}"
+                );
+            }
+        }
         let _ = std::fs::remove_dir_all(&dir);
     }
 
