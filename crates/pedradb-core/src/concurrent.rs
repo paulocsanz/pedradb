@@ -394,21 +394,33 @@ impl<E: Env> ConcurrentDb<E> {
         // At most two pipeline steps: drain existing imm, then switch+flush active.
         // Do **not** loop while concurrent puts refill mem (that would never end).
         for _ in 0..2 {
-            let imm = {
+            // F40: allocate SST file number under the write lock so concurrent
+            // flushes cannot both read the same next_file_num during off-lock I/O.
+            let prepared = {
                 let mut g = self.inner.write();
-                g.prepare_flush_imm()?
+                match g.prepare_flush_imm()? {
+                    None => None,
+                    Some(imm) => {
+                        let num = g.alloc_file_num();
+                        Some((imm, num))
+                    }
+                }
             };
-            let Some(imm) = imm else {
+            let Some((imm, file_num)) = prepared else {
                 break;
             };
             // Heavy I/O without write lock — other threads group-commit freely.
             let write_result = {
                 let g = self.inner.read();
-                g.write_memtable_to_l0_file(&imm)
+                g.write_memtable_to_l0_file_num(&imm, file_num)
             };
-            let (table, file_num) = match write_result {
-                Ok((t, n, _)) => (t, n),
+            let table = match write_result {
+                Ok((t, n, _)) => {
+                    debug_assert_eq!(n, file_num);
+                    t
+                }
                 Err(e) => {
+                    // Leave a file-num gap (harmless); put imm back for retry/safety.
                     self.inner.write().restore_imm(imm);
                     return Err(e);
                 }
@@ -833,4 +845,147 @@ mod tests {
         assert!(db.get(b"x\x00").is_some());
         let _ = fs::remove_dir_all(&dir);
     }
+
+    /// F40: concurrent flush prep must allocate distinct SST file numbers.
+    #[test]
+    fn concurrent_flush_allocates_distinct_file_nums() {
+        use std::sync::{Arc, Barrier};
+        use std::thread;
+        let dir = temp_dir();
+        let db = Arc::new(open_sync(&dir));
+        for i in 0..30u8 {
+            db.put([b'a', i], [b'v', i]).unwrap();
+        }
+        // Drain first mem under exclusive prepare+alloc semantics.
+        let imm1_num = {
+            let g = db.with_write(|d| {
+                let imm = d.prepare_flush_imm().unwrap().expect("imm1");
+                let num = d.alloc_file_num();
+                (imm, num)
+            });
+            // Put more while holding first imm offline (simulates concurrent flush I/O).
+            for i in 0..30u8 {
+                db.put([b'b', i], [b'w', i]).unwrap();
+            }
+            let (imm1, num1) = g;
+            let imm2_num = db.with_write(|d| {
+                let imm = d.prepare_flush_imm().unwrap().expect("imm2");
+                let num = d.alloc_file_num();
+                (imm, num)
+            });
+            let (imm2, num2) = imm2_num;
+            assert_ne!(num1, num2, "concurrent imm must get distinct file nums");
+            assert!(num2 > num1);
+            // Off-lock writes with pre-allocated nums must not collide paths.
+            let db_r = Arc::clone(&db);
+            let barrier = Arc::new(Barrier::new(2));
+            let b1 = Arc::clone(&barrier);
+            let b2 = Arc::clone(&barrier);
+            let h1 = thread::spawn({
+                let db_r = Arc::clone(&db_r);
+                move || {
+                    b1.wait();
+                    db_r.with_read(|d| d.write_memtable_to_l0_file_num(&imm1, num1))
+                }
+            });
+            let h2 = thread::spawn({
+                let db_r = Arc::clone(&db_r);
+                move || {
+                    b2.wait();
+                    db_r.with_read(|d| d.write_memtable_to_l0_file_num(&imm2, num2))
+                }
+            });
+            let (t1, n1, _) = h1.join().unwrap().unwrap();
+            let (t2, n2, _) = h2.join().unwrap().unwrap();
+            assert_eq!(n1, num1);
+            assert_eq!(n2, num2);
+            db.with_write(|d| {
+                d.install_l0_sst(t1, num1).unwrap();
+                d.install_l0_sst(t2, num2).unwrap();
+            });
+            (num1, num2)
+        };
+        let _ = imm1_num;
+        for i in 0..30u8 {
+            assert!(db.get(&[b'a', i]).is_some(), "lost a{i}");
+            assert!(db.get(&[b'b', i]).is_some(), "lost b{i}");
+        }
+        let names: Vec<_> = fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .filter(|n| n.ends_with(".sst"))
+            .collect();
+        let mut uniq = names.clone();
+        uniq.sort();
+        uniq.dedup();
+        assert_eq!(uniq.len(), names.len(), "duplicate SST paths: {names:?}");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Concurrent flush + puts: SST file numbers must stay unique and no lost keys.
+    #[test]
+    fn concurrent_flush_distinct_sst_file_nums() {
+        use std::sync::{Arc, Barrier};
+        use std::thread;
+        let dir = temp_dir();
+        let db = Arc::new(open_sync(&dir));
+        let n_threads = 8usize;
+        let barrier = Arc::new(Barrier::new(n_threads));
+        let mut handles = Vec::new();
+        for t in 0..n_threads {
+            let db = Arc::clone(&db);
+            let barrier = Arc::clone(&barrier);
+            handles.push(thread::spawn(move || {
+                for i in 0..40u8 {
+                    db.put([b'k', t as u8, i], [b'v', t as u8, i]).unwrap();
+                }
+                barrier.wait();
+                // All threads flush together after data is in.
+                for _ in 0..3 {
+                    for i in 0..10u8 {
+                        let _ = db.put([b'x', t as u8, i], [b'y', t as u8, i]);
+                    }
+                    db.flush().unwrap();
+                }
+            }));
+        }
+        for h in handles {
+            h.join().unwrap();
+        }
+        let mut missing = 0usize;
+        for t in 0..n_threads {
+            for i in 0..40u8 {
+                if db.get(&[b'k', t as u8, i]).is_none() {
+                    missing += 1;
+                }
+            }
+        }
+        let mut names: Vec<_> = fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .filter(|n| n.ends_with(".sst") && !n.contains(".tmp"))
+            .collect();
+        names.sort();
+        let mut stems = names.clone();
+        stems.dedup();
+        eprintln!("ssts={} unique={} missing={}", names.len(), stems.len(), missing);
+        assert_eq!(stems.len(), names.len(), "duplicate SST files: {names:?}");
+        assert_eq!(missing, 0, "lost keys after concurrent flush stress");
+        // reopen durability
+        drop(db);
+        let db2 = open_sync(&dir);
+        let mut miss2 = 0;
+        for t in 0..n_threads {
+            for i in 0..40u8 {
+                if db2.get(&[b'k', t as u8, i]).is_none() {
+                    miss2 += 1;
+                }
+            }
+        }
+        assert_eq!(miss2, 0, "lost keys after reopen");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
 }

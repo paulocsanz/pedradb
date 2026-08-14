@@ -1129,14 +1129,27 @@ impl<E: Env> Db<E> {
         Ok(Some(std::mem::replace(&mut self.mem, MemTable::new())))
     }
 
-    /// Write `imm` to a new L0 SST on disk (no Db lock required for the write itself).
+    /// Reserve the next SST file number (must hold exclusive write lock).
     ///
-    /// Returns the open table + assigned file number path for [`Self::install_l0_sst`].
+    /// Call **before** off-lock SST I/O so concurrent flushes cannot race on
+    /// the same `next_file_num` (F40).
+    pub fn alloc_file_num(&mut self) -> u64 {
+        let n = self.next_file_num;
+        self.next_file_num = n.saturating_add(1);
+        n
+    }
+
+    /// Write `imm` to L0 using a **pre-allocated** file number (no Db write lock).
+    ///
+    /// Prefer [`Self::alloc_file_num`] under the write lock, then this for I/O.
     ///
     /// # Errors
     /// SST I/O.
-    pub fn write_memtable_to_l0_file(&self, imm: &MemTable) -> Result<(SstTable, u64, PathBuf)> {
-        let num = self.next_file_num;
+    pub fn write_memtable_to_l0_file_num(
+        &self,
+        imm: &MemTable,
+        num: u64,
+    ) -> Result<(SstTable, u64, PathBuf)> {
         let final_path = self.dir.join(format!("{num:06}.sst"));
         let tmp_path = self.dir.join(format!("{num:06}.sst.tmp"));
         match write_sst_on(&self.env, &tmp_path, imm) {
@@ -1157,6 +1170,17 @@ impl<E: Env> Db<E> {
         }
     }
 
+    /// Write `imm` to a new L0 SST (exclusive path: peeks `next_file_num`, no bump).
+    ///
+    /// Concurrent callers must use [`Self::alloc_file_num`] +
+    /// [`Self::write_memtable_to_l0_file_num`] instead.
+    ///
+    /// # Errors
+    /// SST I/O.
+    pub fn write_memtable_to_l0_file(&self, imm: &MemTable) -> Result<(SstTable, u64, PathBuf)> {
+        self.write_memtable_to_l0_file_num(imm, self.next_file_num)
+    }
+
     fn note_sst_bytes_written(&mut self, path: &Path) {
         if let Ok(len) = self.env.metadata_len(path) {
             self.bytes_written_sst = self.bytes_written_sst.saturating_add(len);
@@ -1165,18 +1189,26 @@ impl<E: Env> Db<E> {
 
     /// Install a flushed L0 SST (MANIFEST before success). Clears pipeline imm slot.
     ///
+    /// If `file_num` was pre-allocated via [`Self::alloc_file_num`], `next_file_num`
+    /// is already past it and is left unchanged. On exclusive paths that only peeked
+    /// the number, advances `next_file_num` to `file_num + 1`.
+    ///
     /// # Errors
     /// MANIFEST I/O (rolls back inventory).
     pub fn install_l0_sst(&mut self, table: SstTable, file_num: u64) -> Result<()> {
         self.note_sst_bytes_written(table.path());
         self.table_cache.insert(Arc::new(table.clone()));
-        self.next_file_num = file_num + 1;
+        let prev_next = self.next_file_num;
+        // Pre-allocated: next already > file_num. Exclusive peek path: advance.
+        if self.next_file_num <= file_num {
+            self.next_file_num = file_num.saturating_add(1);
+        }
         self.ssts.push(table);
         self.sst_levels.push(0);
         if let Err(e) = self.persist_manifest() {
             let _ = self.ssts.pop();
             let _ = self.sst_levels.pop();
-            self.next_file_num = file_num;
+            self.next_file_num = prev_next;
             return Err(e);
         }
         self.imm = None;
