@@ -46,6 +46,7 @@
 mod msg;
 pub mod client;
 pub mod fdb_compat;
+pub mod fdb_layers;
 /// Thin C ABI for fdb-compat plug tests (RFC-0023 P2.2). Feature `c-api`.
 #[cfg(feature = "c-api")]
 #[allow(unsafe_code)]
@@ -58,6 +59,9 @@ pub use client::{
     TcpClusterClient, Transaction, MAX_SNAPSHOT_LAG,
 };
 pub use fdb_compat::{FdbDatabase, FdbError, FdbTransaction};
+pub use fdb_layers::{
+    IdempotentIndex, NaiveAllocator, NaiveList, SafeAllocator, SafeList,
+};
 pub use layers::{
     olap_get, olap_ingest, pg_upsert, pks_one_per_range, put_with_secondary_index,
     raw_keys_one_per_range, sql_multi_table_write, stream_get, stream_publish, table_get, table_put,
@@ -328,6 +332,8 @@ enum Role {
 const RAFT_META_PREFIX: &[u8] = b"\0store/raft/";
 const INTENT_PREFIX: &[u8] = b"\0store/intent/";
 const TXN_PREFIX: &[u8] = b"\0store/txn/";
+const SI_META_PREFIX: &[u8] = b"\0store/meta/";
+const HIST_PREFIX: &[u8] = b"\0store/hist/";
 
 fn raft_meta_key(range_id: u64, kind: &str) -> Vec<u8> {
     let mut k = RAFT_META_PREFIX.to_vec();
@@ -353,6 +359,8 @@ fn is_reserved_store_key(key: &[u8]) -> bool {
     key.starts_with(RAFT_META_PREFIX)
         || key.starts_with(INTENT_PREFIX)
         || key.starts_with(TXN_PREFIX)
+        || key.starts_with(SI_META_PREFIX)
+        || key.starts_with(HIST_PREFIX)
 }
 
 fn intent_key(user: &[u8]) -> Vec<u8> {
@@ -381,6 +389,123 @@ fn txn_pair_prefix(txn_id: u64) -> Vec<u8> {
     k.extend_from_slice(&txn_id.to_le_bytes());
     k.extend_from_slice(b"/k/");
     k
+}
+
+fn txn_pre_key(txn_id: u64, user: &[u8]) -> Vec<u8> {
+    let mut k = TXN_PREFIX.to_vec();
+    k.extend_from_slice(&txn_id.to_le_bytes());
+    k.extend_from_slice(b"/pre/");
+    k.extend_from_slice(user);
+    k
+}
+
+fn si_meta_key(kind: &str) -> Vec<u8> {
+    let mut k = SI_META_PREFIX.to_vec();
+    k.extend_from_slice(kind.as_bytes());
+    k
+}
+
+fn hist_key(user: &[u8]) -> Vec<u8> {
+    let mut k = HIST_PREFIX.to_vec();
+    k.extend_from_slice(user);
+    k
+}
+
+/// `None` = key was absent at prepare; `Some(v)` = restore `v`.
+fn encode_preimage(present: Option<&[u8]>) -> Vec<u8> {
+    match present {
+        None => vec![0],
+        Some(v) => {
+            let mut b = Vec::with_capacity(1 + v.len());
+            b.push(1);
+            b.extend_from_slice(v);
+            b
+        }
+    }
+}
+
+fn decode_preimage(raw: &[u8]) -> Option<Option<Vec<u8>>> {
+    if raw.is_empty() {
+        return None;
+    }
+    match raw[0] {
+        0 => Some(None),
+        1 => Some(Some(raw[1..].to_vec())),
+        _ => None,
+    }
+}
+
+fn prefix_exclusive_end(prefix: &[u8]) -> Option<Vec<u8>> {
+    let mut e = prefix.to_vec();
+    while let Some(last) = e.last_mut() {
+        if *last < 0xff {
+            *last += 1;
+            return Some(e);
+        }
+        e.pop();
+    }
+    None
+}
+
+fn scan_prefix<E: Env>(db: &Db<E>, prefix: &[u8]) -> Vec<(Vec<u8>, Vec<u8>)> {
+    let start = Bound::Included(prefix);
+    let end_owned = prefix_exclusive_end(prefix);
+    let end = match end_owned.as_deref() {
+        Some(e) => Bound::Excluded(e),
+        None => Bound::Unbounded,
+    };
+    db.range(start, end)
+        .into_iter()
+        .map(|(k, v)| (k.to_vec(), v.to_vec()))
+        .collect()
+}
+
+fn encode_hist(hist: &[(u64, Option<Vec<u8>>)]) -> Vec<u8> {
+    let mut b = Vec::new();
+    b.extend_from_slice(&(hist.len() as u32).to_le_bytes());
+    for (g, v) in hist {
+        b.extend_from_slice(&g.to_le_bytes());
+        match v {
+            Some(val) => {
+                b.push(1);
+                encode_bytes(&mut b, val);
+            }
+            None => b.push(0),
+        }
+    }
+    append_crc(&mut b);
+    b
+}
+
+fn decode_hist(buf: &[u8]) -> Result<Vec<(u64, Option<Vec<u8>>)>> {
+    let p = strip_crc(buf)?;
+    if p.len() < 4 {
+        return Err(StoreError::Msg("hist short".into()));
+    }
+    let n = u32::from_le_bytes(p[0..4].try_into().unwrap()) as usize;
+    if n > 10_000 {
+        return Err(StoreError::Msg("hist too large".into()));
+    }
+    let mut off = 4;
+    let mut out = Vec::with_capacity(n);
+    for _ in 0..n {
+        if off + 9 > p.len() {
+            return Err(StoreError::Msg("hist entry eof".into()));
+        }
+        let g = u64::from_le_bytes(p[off..off + 8].try_into().unwrap());
+        off += 8;
+        let tag = p[off];
+        off += 1;
+        match tag {
+            0 => out.push((g, None)),
+            1 => {
+                let v = take_bytes(p, &mut off)?;
+                out.push((g, Some(v)));
+            }
+            _ => return Err(StoreError::Msg("hist tag".into())),
+        }
+    }
+    Ok(out)
 }
 
 fn encode_intent(txn_id: u64, value: &[u8]) -> Vec<u8> {
@@ -698,6 +823,7 @@ fn clear_txn_keys<E: Env>(db: &mut Db<E>, txn_id: u64, keys: &[Vec<u8>]) -> Resu
     for u in keys {
         ops.push(BatchOp::delete(intent_key(u)));
         ops.push(BatchOp::delete(txn_pair_key(txn_id, u)));
+        ops.push(BatchOp::delete(txn_pre_key(txn_id, u)));
     }
     // Drop status only when no pair index remains for this txn.
     let prefix = txn_pair_prefix(txn_id);
@@ -724,6 +850,11 @@ fn apply_txn_prepare<E: Env>(db: &mut Db<E>, txn_id: u64, pairs: &[(Vec<u8>, Vec
     }
     let mut ops = Vec::new();
     for (k, v) in pairs {
+        let pre = db.get(k);
+        ops.push(BatchOp::put(
+            txn_pre_key(txn_id, k),
+            encode_preimage(pre.as_deref()),
+        ));
         ops.push(BatchOp::put(intent_key(k), encode_intent(txn_id, v)));
         ops.push(BatchOp::put(txn_pair_key(txn_id, k), v));
     }
@@ -752,6 +883,8 @@ fn apply_txn_commit<E: Env>(db: &mut Db<E>, txn_id: u64, keys: &[Vec<u8>]) -> Re
         }
         ops.push(BatchOp::delete(intent_key(u)));
         ops.push(BatchOp::delete(txn_pair_key(txn_id, u)));
+        // Keep preimage until the coordinator finishes all ranges — revert
+        // after a later-range failure must still restore the old value.
     }
     if !ops.is_empty() {
         db.apply_batch(ops)?;
@@ -775,13 +908,25 @@ fn apply_txn_abort<E: Env>(db: &mut Db<E>, txn_id: u64, keys: &[Vec<u8>]) -> Res
     clear_txn_keys(db, txn_id, keys)
 }
 
-/// Compensating action: remove user keys written by a partial commit.
+/// Compensating action: restore the prepare-time preimage (not blind delete).
+///
+/// Missing preimage (peer never prepared) leaves the user key untouched so a
+/// lagging replica that still holds the old value is not wiped.
 fn apply_txn_revert<E: Env>(db: &mut Db<E>, txn_id: u64, keys: &[Vec<u8>]) -> Result<()> {
     let mut ops = Vec::new();
     for u in keys {
-        ops.push(BatchOp::delete(u));
+        let pre_raw = db.get(&txn_pre_key(txn_id, u));
+        match pre_raw
+            .as_ref()
+            .and_then(|b| decode_preimage(b.as_ref()))
+        {
+            Some(Some(val)) => ops.push(BatchOp::put(u.as_slice(), val.as_slice())),
+            Some(None) => ops.push(BatchOp::delete(u.as_slice())),
+            None => {}
+        }
         ops.push(BatchOp::delete(intent_key(u)));
         ops.push(BatchOp::delete(txn_pair_key(txn_id, u)));
+        ops.push(BatchOp::delete(txn_pre_key(txn_id, u)));
     }
     if !ops.is_empty() {
         db.apply_batch(ops)?;
@@ -1218,7 +1363,7 @@ impl StoreCluster<StdEnv> {
         let mut ids: Vec<u64> = member_ids.to_vec();
         ids.sort_unstable();
         ids.dedup();
-        Ok(Self {
+        let mut cluster = Self {
             nodes,
             ids,
             ranges,
@@ -1239,7 +1384,9 @@ impl StoreCluster<StdEnv> {
             pending_version_notes: HashMap::new(),
             version_notes_through: HashMap::new(),
             watch: WatchHub::new(),
-        })
+        };
+        cluster.recover_after_open();
+        Ok(cluster)
     }
 
     /// Open with a deterministic RNG for election jitter (DST / reproducible tests).
@@ -1338,7 +1485,7 @@ impl<E: Env> StoreCluster<E> {
             );
             ids.push(id);
         }
-        Ok(Self {
+        let mut cluster = Self {
             nodes,
             ids,
             ranges,
@@ -1359,7 +1506,9 @@ impl<E: Env> StoreCluster<E> {
             pending_version_notes: HashMap::new(),
             version_notes_through: HashMap::new(),
             watch: WatchHub::new(),
-        })
+        };
+        cluster.recover_after_open();
+        Ok(cluster)
     }
 
     /// Current logical time (monotone; advanced by [`Self::tick`] / [`Self::advance_time`]).
@@ -1382,6 +1531,139 @@ impl<E: Env> StoreCluster<E> {
     /// Set ms added to `now_ms` on each raft [`Self::tick`] (default 10).
     pub fn set_ms_per_tick(&mut self, ms: u64) {
         self.ms_per_tick = ms;
+    }
+
+    /// Crash recovery: abort leftover 2PC intents, restore SI meta + next txn id.
+    fn recover_after_open(&mut self) {
+        self.abort_leftover_intents();
+        self.load_si_from_disk();
+        self.recover_next_txn_id();
+    }
+
+    fn persist_u64_meta_all(&mut self, kind: &str, n: u64) {
+        let key = si_meta_key(kind);
+        let val = encode_u64_meta(n);
+        let ids = self.ids.clone();
+        for nid in ids {
+            if let Some(node) = self.nodes.get_mut(&nid) {
+                let _ = node.db.put(&key, &val);
+            }
+        }
+    }
+
+    fn load_u64_meta_max(&self, kind: &str) -> u64 {
+        let key = si_meta_key(kind);
+        let mut max = 0u64;
+        for node in self.nodes.values() {
+            if let Some(raw) = node.db.get(&key) {
+                if let Ok(v) = decode_u64_meta(raw.as_ref()) {
+                    max = max.max(v);
+                }
+            }
+        }
+        max
+    }
+
+    fn abort_leftover_intents(&mut self) {
+        let ids = self.ids.clone();
+        for nid in ids {
+            let Some(node) = self.nodes.get_mut(&nid) else {
+                continue;
+            };
+            let rows = scan_prefix(&node.db, INTENT_PREFIX);
+            if rows.is_empty() {
+                continue;
+            }
+            let mut by_txn: HashMap<u64, Vec<Vec<u8>>> = HashMap::new();
+            let mut garbage: Vec<Vec<u8>> = Vec::new();
+            for (ik, raw) in rows {
+                let user = ik
+                    .strip_prefix(INTENT_PREFIX)
+                    .unwrap_or(ik.as_slice())
+                    .to_vec();
+                if let Some((oid, _)) = decode_intent(&raw) {
+                    by_txn.entry(oid).or_default().push(user);
+                } else {
+                    garbage.push(ik);
+                }
+            }
+            for (tid, ks) in by_txn {
+                let _ = apply_txn_abort(&mut node.db, tid, &ks);
+            }
+            if !garbage.is_empty() {
+                let ops: Vec<BatchOp> = garbage.into_iter().map(BatchOp::delete).collect();
+                let _ = node.db.apply_batch(ops);
+            }
+        }
+    }
+
+    fn load_si_from_disk(&mut self) {
+        self.commit_generation = self.load_u64_meta_max("generation");
+        self.safe_watermark = self.load_u64_meta_max("watermark");
+        let mut best: HashMap<Vec<u8>, Vec<(u64, Option<Vec<u8>>)>> = HashMap::new();
+        for node in self.nodes.values() {
+            for (hk, raw) in scan_prefix(&node.db, HIST_PREFIX) {
+                let Some(user) = hk.strip_prefix(HIST_PREFIX) else {
+                    continue;
+                };
+                let Ok(hist) = decode_hist(&raw) else {
+                    continue;
+                };
+                let existing = best
+                    .get(user)
+                    .and_then(|h| h.last().map(|(g, _)| *g))
+                    .unwrap_or(0);
+                let new_last = hist.last().map(|(g, _)| *g).unwrap_or(0);
+                if new_last >= existing {
+                    best.insert(user.to_vec(), hist);
+                }
+            }
+        }
+        self.key_history = best;
+        self.key_versions.clear();
+        for (k, hist) in &self.key_history {
+            if let Some((g, _)) = hist.iter().rev().find(|(g, _)| *g > 0) {
+                self.key_versions.insert(k.clone(), *g);
+            }
+        }
+    }
+
+    fn recover_next_txn_id(&mut self) {
+        let mut max_id = self.load_u64_meta_max("next_txn");
+        for node in self.nodes.values() {
+            for (k, _) in scan_prefix(&node.db, TXN_PREFIX) {
+                if let Some(rest) = k.strip_prefix(TXN_PREFIX) {
+                    if rest.len() >= 8 {
+                        let id = u64::from_le_bytes(rest[0..8].try_into().unwrap());
+                        max_id = max_id.max(id);
+                    }
+                }
+            }
+        }
+        self.next_txn_id = max_id.saturating_add(1).max(1);
+    }
+
+    fn persist_si_keys(&mut self, keys: &[Vec<u8>]) {
+        let gen = encode_u64_meta(self.commit_generation);
+        let wm = encode_u64_meta(self.safe_watermark);
+        let gen_key = si_meta_key("generation");
+        let wm_key = si_meta_key("watermark");
+        let mut hist_writes: Vec<(Vec<u8>, Vec<u8>)> = Vec::new();
+        for k in keys {
+            if let Some(hist) = self.key_history.get(k) {
+                hist_writes.push((hist_key(k), encode_hist(hist)));
+            }
+        }
+        let ids = self.ids.clone();
+        for nid in ids {
+            if let Some(node) = self.nodes.get_mut(&nid) {
+                let _ = node.db.put(&gen_key, &gen);
+                let _ = node.db.put(&wm_key, &wm);
+                for (hk, hv) in &hist_writes {
+                    let _ = node.db.put(hk, hv);
+                }
+            }
+        }
     }
 
     /// Advance logical time by `dt` steps; each step runs one raft timer tick
@@ -3293,6 +3575,7 @@ impl<E: Env> StoreCluster<E> {
     fn alloc_txn_id(&mut self) -> u64 {
         let id = self.next_txn_id;
         self.next_txn_id = self.next_txn_id.saturating_add(1).max(1);
+        self.persist_u64_meta_all("next_txn", id);
         id
     }
 
@@ -3488,7 +3771,27 @@ impl<E: Env> StoreCluster<E> {
                 }
             }
         }
+        self.drop_preimages(handle);
         Ok(())
+    }
+
+    /// Drop prepare-time preimages after a *successful* all-range commit.
+    fn drop_preimages(&mut self, handle: &TxHandle) {
+        let ids = self.ids.clone();
+        for nid in ids {
+            let Some(node) = self.nodes.get_mut(&nid) else {
+                continue;
+            };
+            let mut ops = Vec::new();
+            for (_, keys) in &handle.keys_by_range {
+                for u in keys {
+                    ops.push(BatchOp::delete(txn_pre_key(handle.id, u)));
+                }
+            }
+            if !ops.is_empty() {
+                let _ = node.db.apply_batch(ops);
+            }
+        }
     }
 
     /// Abort a prepared TX (drop intents on all peers, even without leaders).
@@ -3725,6 +4028,8 @@ impl<E: Env> StoreCluster<E> {
             self.watch.notify(k, val, g);
         }
         self.maybe_gc_versions();
+        let keys: Vec<Vec<u8>> = items.iter().map(|(k, _, _)| k.clone()).collect();
+        self.persist_si_keys(&keys);
     }
 
     /// Advance watermark and prune version history (RFC-0023 P0.4).
@@ -4405,16 +4710,22 @@ mod tests {
             let got = c.keys_in_range_at(b"rr/", b"rr0", c.read_version()).unwrap();
             assert!(got.len() >= 2, "before reopen: {got:?}");
         }
-        // Reopen: in-memory key_history is empty; Pedra still has keys.
+        // Reopen: SI meta + history are durable; read at current generation.
         let c = StoreCluster::open(&dir, 3, 1).unwrap();
-        let got = c.keys_in_range_at(b"rr/", b"rr0", 0).unwrap();
+        let got = c.keys_in_range_at(b"rr/", b"rr0", c.read_version()).unwrap();
         assert!(
             got.iter().any(|(k, v)| k.as_slice() == b"rr/a" && v.as_slice() == b"1"),
-            "after reopen must see rr/a from Pedra, got {got:?}"
+            "after reopen must see rr/a at current generation, got {got:?}"
         );
         assert!(
             got.iter().any(|(k, v)| k.as_slice() == b"rr/b" && v.as_slice() == b"2"),
-            "after reopen must see rr/b from Pedra, got {got:?}"
+            "after reopen must see rr/b at current generation, got {got:?}"
+        );
+        // Snapshot 0 is the pre-first-commit world (keys absent), not "see tip".
+        let at0 = c.keys_in_range_at(b"rr/", b"rr0", 0).unwrap();
+        assert!(
+            !at0.iter().any(|(k, _)| k.as_slice() == b"rr/a" || k.as_slice() == b"rr/b"),
+            "snapshot 0 must not show post-gen-0 keys, got {at0:?}"
         );
         let _ = std::fs::remove_dir_all(&dir);
     }
