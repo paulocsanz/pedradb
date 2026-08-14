@@ -183,3 +183,15 @@ Machine-local only — **not** FDB comparison numbers. Use for ratios.
 MONTANHA_BENCH_SUITE=mini-bt,tcp MONTANHA_BENCH_N=40 MONTANHA_BENCH_THREADS=4 \
   cargo run -p pedradb-store --release --bin montanha-fdb-bench -- findings/fdb-bench-e2
 ```
+
+## CI gates (not optional benches)
+
+```bash
+# Always-on model soak + WW/multi-key
+cargo test -p pedradb-store --test mini_bt_soak mini_bt_inprocess -- --nocapture
+
+# Concurrent TCP writers + majority verify
+cargo test -p pedradb-store --test mini_bt_soak mini_bt_tcp_multiclient -- --nocapture
+```
+
+These fail the build on silent-wrong; the bench binary remains for latency/QPS cliffs.

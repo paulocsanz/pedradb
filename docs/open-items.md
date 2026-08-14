@@ -45,7 +45,8 @@ Last updated: 2026-08-14 (RFC-0024 done: Montanha fold for Caixote)
 
 **Next action:** Continuous DST soak; fill FDB side of [montanha-vs-fdb-bench.md](montanha-vs-fdb-bench.md) on lab hardware; full bindingtester / Java RL only if requested.  
 **Shipped Phase 1–3 + A–E continuum:** [montanha-fdb-phases.md](montanha-fdb-phases.md) — fdb-compat 12-step harness (`clear_range`), etcd multiproc + **TCP DCS wire**, `RecordTable` unique/multi-index, platform need faces (CP/OLAP/stream), F47–F49 residuals.  
-**Shipped (bench):** `montanha-fdb-bench` — FDB-shaped microbenches (put/get/face/TX/range/clear/hot-key/record/cross-range) → `fdb_shaped_bench.json`; method in [montanha-vs-fdb-bench.md](montanha-vs-fdb-bench.md).  
+**Shipped (bench):** `montanha-fdb-bench` — FDB-shaped microbenches + TCP multi-client + mini-bt E1/E2 → `fdb_shaped_bench.json`; method in [montanha-vs-fdb-bench.md](montanha-vs-fdb-bench.md).  
+**Shipped (CI mini-bt):** `cargo test -p pedradb-store --test mini_bt_soak` — in-process model soak + TCP multi-client majority verify.  
 **Shipped (recipes):** `montanha-fdb-recipes` — design recipes + SI/OCC + Record seed.  
 **Shipped (0023):** SI, Transaction, watermark, fdb_compat + c-api.  
 **Do not** claim FDB field peer, full bindingtester, production Record Layer, or drop-in etcd/Scylla/CH/NATS.  
