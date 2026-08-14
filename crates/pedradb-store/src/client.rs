@@ -425,7 +425,8 @@ impl Transaction {
         Ok(())
     }
 
-    /// Stage a clear/delete (empty value tombstone on commit for lab simplicity).
+    /// Stage a clear/delete. On commit, Montanha applies Pedra **`delete`**
+    /// (empty payload is the wire signal for delete — not a stored empty value).
     ///
     /// # Errors
     /// TX size limits.
@@ -442,7 +443,7 @@ impl Transaction {
         Ok(())
     }
 
-    /// Staged set pairs (clears become empty values).
+    /// Staged set pairs; clears are empty values (**delete** on apply).
     #[must_use]
     pub fn pairs(&self) -> Vec<(Vec<u8>, Vec<u8>)> {
         let mut out: Vec<(Vec<u8>, Vec<u8>)> = self

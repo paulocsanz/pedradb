@@ -373,6 +373,7 @@ mod tests {
                 entry: RangeEntry::Put {
                     key: b"k".to_vec(),
                     value: b"v".to_vec(),
+                    si_gen: 0,
                 },
             }],
         };

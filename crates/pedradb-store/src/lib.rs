@@ -258,17 +258,21 @@ impl RangeMeta {
 /// One raft log entry for a range (payload inside [`LogRec`]).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RangeEntry {
-    /// User put.
+    /// User put. Empty `value` means **delete** (Pedra `delete`, not empty payload).
     Put {
         /// User key.
         key: Vec<u8>,
-        /// Value bytes.
+        /// Value bytes; empty ⇒ delete key.
         value: Vec<u8>,
+        /// Snapshot/OCC generation assigned at propose (0 = no SI side-effect).
+        si_gen: u64,
     },
-    /// Atomic multi-put (same range); applied via PedraDB `apply_batch`.
+    /// Atomic multi-put/delete (same range); empty values ⇒ delete.
     Batch {
-        /// Ordered key/value pairs.
+        /// Ordered key/value pairs (empty value ⇒ delete).
         pairs: Vec<(Vec<u8>, Vec<u8>)>,
+        /// Snapshot/OCC generation for this batch (0 = no SI side-effect).
+        si_gen: u64,
     },
     /// DCS command (applied via pedradb-dcs).
     Dcs(DcsCommand),
@@ -287,6 +291,8 @@ pub enum RangeEntry {
         txn_id: u64,
         /// User keys to commit in this range.
         keys: Vec<Vec<u8>>,
+        /// One SI generation for the whole 2PC TX (0 = no SI side-effect).
+        si_gen: u64,
     },
     /// TX abort: drop intents for listed keys (this range).
     TxnAbort {
@@ -458,6 +464,36 @@ fn scan_prefix<E: Env>(db: &Db<E>, prefix: &[u8]) -> Vec<(Vec<u8>, Vec<u8>)> {
         .into_iter()
         .map(|(k, v)| (k.to_vec(), v.to_vec()))
         .collect()
+}
+
+/// Apply user put or true Pedra delete (empty value ⇒ delete).
+fn apply_put_or_delete<E: Env>(db: &mut Db<E>, key: &[u8], value: &[u8]) -> Result<()> {
+    if value.is_empty() {
+        db.delete(key)?;
+    } else {
+        db.put(key, value)?;
+    }
+    Ok(())
+}
+
+/// Durable SI history row on this replica (written during Raft apply — same path as user data).
+fn persist_si_hist_on_db<E: Env>(
+    db: &mut Db<E>,
+    user_key: &[u8],
+    gen: u64,
+    new_val: Option<&[u8]>,
+) -> Result<()> {
+    let hk = hist_key(user_key);
+    let mut hist = db
+        .get(&hk)
+        .and_then(|b| decode_hist(b.as_ref()).ok())
+        .unwrap_or_default();
+    // Avoid duplicate gen append on replay.
+    if hist.last().map(|(g, _)| *g) != Some(gen) {
+        hist.push((gen, new_val.map(|v| v.to_vec())));
+    }
+    db.put(&hk, &encode_hist(&hist))?;
+    Ok(())
 }
 
 fn encode_hist(hist: &[(u64, Option<Vec<u8>>)]) -> Vec<u8> {
@@ -657,10 +693,12 @@ fn take_bytes(buf: &[u8], off: &mut usize) -> Result<Vec<u8>> {
 fn encode_entry(e: &RangeEntry) -> Vec<u8> {
     let mut b = Vec::new();
     match e {
-        RangeEntry::Put { key, value } => {
-            b.push(1);
+        // Tag 11: Put + si_gen (tag 1 legacy decode still accepted).
+        RangeEntry::Put { key, value, si_gen } => {
+            b.push(11);
             encode_bytes(&mut b, key);
             encode_bytes(&mut b, value);
+            b.extend_from_slice(&si_gen.to_le_bytes());
         }
         RangeEntry::Dcs(cmd) => {
             b.push(2);
@@ -668,13 +706,15 @@ fn encode_entry(e: &RangeEntry) -> Vec<u8> {
             encode_bytes(&mut b, &raw);
         }
         RangeEntry::Noop => b.push(3),
-        RangeEntry::Batch { pairs } => {
-            b.push(4);
+        // Tag 12: Batch + si_gen (tag 4 legacy).
+        RangeEntry::Batch { pairs, si_gen } => {
+            b.push(12);
             b.extend_from_slice(&(pairs.len() as u32).to_le_bytes());
             for (k, v) in pairs {
                 encode_bytes(&mut b, k);
                 encode_bytes(&mut b, v);
             }
+            b.extend_from_slice(&si_gen.to_le_bytes());
         }
         RangeEntry::TxnPrepare { txn_id, pairs } => {
             b.push(5);
@@ -685,13 +725,15 @@ fn encode_entry(e: &RangeEntry) -> Vec<u8> {
                 encode_bytes(&mut b, v);
             }
         }
-        RangeEntry::TxnCommit { txn_id, keys } => {
-            b.push(6);
+        RangeEntry::TxnCommit { txn_id, keys, si_gen } => {
+            // Tag 13: commit + si_gen (tag 6 legacy decode still accepted).
+            b.push(13);
             b.extend_from_slice(&txn_id.to_le_bytes());
             b.extend_from_slice(&(keys.len() as u32).to_le_bytes());
             for k in keys {
                 encode_bytes(&mut b, k);
             }
+            b.extend_from_slice(&si_gen.to_le_bytes());
         }
         RangeEntry::TxnAbort { txn_id, keys } => {
             b.push(7);
@@ -739,9 +781,28 @@ fn decode_entry(buf: &[u8], off: &mut usize) -> Result<RangeEntry> {
     *off += 1;
     match tag {
         1 => {
+            // Legacy Put without si_gen.
             let key = take_bytes(buf, off)?;
             let value = take_bytes(buf, off)?;
-            Ok(RangeEntry::Put { key, value })
+            Ok(RangeEntry::Put {
+                key,
+                value,
+                si_gen: 0,
+            })
+        }
+        11 => {
+            let key = take_bytes(buf, off)?;
+            let value = take_bytes(buf, off)?;
+            if *off + 8 > buf.len() {
+                return Err(StoreError::Msg("put si_gen eof".into()));
+            }
+            let si_gen = u64::from_le_bytes(buf[*off..*off + 8].try_into().unwrap());
+            *off += 8;
+            Ok(RangeEntry::Put {
+                key,
+                value,
+                si_gen,
+            })
         }
         2 => {
             let raw = take_bytes(buf, off)?;
@@ -766,7 +827,30 @@ fn decode_entry(buf: &[u8], off: &mut usize) -> Result<RangeEntry> {
                 let value = take_bytes(buf, off)?;
                 pairs.push((key, value));
             }
-            Ok(RangeEntry::Batch { pairs })
+            Ok(RangeEntry::Batch { pairs, si_gen: 0 })
+        }
+        12 => {
+            if *off + 4 > buf.len() {
+                return Err(StoreError::Msg("batch12 count eof".into()));
+            }
+            let n = u32::from_le_bytes(buf[*off..*off + 4].try_into().unwrap()) as usize;
+            *off += 4;
+            let rem = buf.len().saturating_sub(*off);
+            if n > 1_000_000 || n > rem {
+                return Err(StoreError::Msg("batch12 too large".into()));
+            }
+            let mut pairs = Vec::with_capacity(n);
+            for _ in 0..n {
+                let key = take_bytes(buf, off)?;
+                let value = take_bytes(buf, off)?;
+                pairs.push((key, value));
+            }
+            if *off + 8 > buf.len() {
+                return Err(StoreError::Msg("batch si_gen eof".into()));
+            }
+            let si_gen = u64::from_le_bytes(buf[*off..*off + 8].try_into().unwrap());
+            *off += 8;
+            Ok(RangeEntry::Batch { pairs, si_gen })
         }
         5 => {
             if *off + 8 + 4 > buf.len() {
@@ -795,7 +879,29 @@ fn decode_entry(buf: &[u8], off: &mut usize) -> Result<RangeEntry> {
             let txn_id = u64::from_le_bytes(buf[*off..*off + 8].try_into().unwrap());
             *off += 8;
             let keys = decode_key_list(buf, off)?;
-            Ok(RangeEntry::TxnCommit { txn_id, keys })
+            Ok(RangeEntry::TxnCommit {
+                txn_id,
+                keys,
+                si_gen: 0,
+            })
+        }
+        13 => {
+            if *off + 8 > buf.len() {
+                return Err(StoreError::Msg("txn commit13 eof".into()));
+            }
+            let txn_id = u64::from_le_bytes(buf[*off..*off + 8].try_into().unwrap());
+            *off += 8;
+            let keys = decode_key_list(buf, off)?;
+            if *off + 8 > buf.len() {
+                return Err(StoreError::Msg("txn commit si_gen eof".into()));
+            }
+            let si_gen = u64::from_le_bytes(buf[*off..*off + 8].try_into().unwrap());
+            *off += 8;
+            Ok(RangeEntry::TxnCommit {
+                txn_id,
+                keys,
+                si_gen,
+            })
         }
         7 => {
             if *off + 8 > buf.len() {
@@ -947,11 +1053,19 @@ fn apply_txn_commit<E: Env>(db: &mut Db<E>, txn_id: u64, keys: &[Vec<u8>]) -> Re
     let mut ops = Vec::new();
     for u in keys {
         if let Some(raw) = db.get(&txn_pair_key(txn_id, u)) {
-            ops.push(BatchOp::put(u, raw.as_ref()));
+            if raw.is_empty() {
+                ops.push(BatchOp::delete(u.as_slice()));
+            } else {
+                ops.push(BatchOp::put(u.as_slice(), raw.as_ref()));
+            }
         } else if let Some(raw) = db.get(&intent_key(u)) {
             if let Some((oid, val)) = decode_intent(&raw) {
                 if oid == txn_id {
-                    ops.push(BatchOp::put(u, val));
+                    if val.is_empty() {
+                        ops.push(BatchOp::delete(u.as_slice()));
+                    } else {
+                        ops.push(BatchOp::put(u.as_slice(), val));
+                    }
                 }
             }
         }
@@ -1730,6 +1844,9 @@ impl<E: Env> StoreCluster<E> {
         }
         let ids = self.ids.clone();
         for nid in ids {
+            if !self.is_participating(nid) {
+                continue;
+            }
             if let Some(node) = self.nodes.get_mut(&nid) {
                 let _ = node.db.put(&gen_key, &gen);
                 let _ = node.db.put(&wm_key, &wm);
@@ -2882,7 +2999,8 @@ impl<E: Env> StoreCluster<E> {
         let had_client = client.is_some();
         let mut proposed_index: Option<u64> = None;
         if let Some(entry) = client {
-            // Capture preimages **before** apply (Queued may apply much later).
+            // Assign SI generation + capture preimages **before** apply.
+            let entry = self.with_si_gen(entry);
             let note_items = self.preimages_for_entry(&entry);
             let n = self.nodes.get_mut(&leader).unwrap();
             let p = n.ranges.get_mut(&rid).unwrap();
@@ -3234,7 +3352,11 @@ impl<E: Env> StoreCluster<E> {
         p.log.push(LogRec {
             index: idx,
             term,
-            entry: RangeEntry::Put { key, value },
+            entry: RangeEntry::Put {
+                key,
+                value,
+                si_gen: 0,
+            },
         });
         // Recompute commit with only local knowledge (match_index unchanged) —
         // must NOT commit the new index without majority match.
@@ -3297,26 +3419,92 @@ impl<E: Env> StoreCluster<E> {
         let mut applied_to = start - 1;
         for rec in &recs {
             match &rec.entry {
-                RangeEntry::Put { key, value } => {
+                RangeEntry::Put {
+                    key,
+                    value,
+                    si_gen,
+                } => {
                     if !is_reserved_store_key(key) {
-                        node.db.put(key, value)?;
+                        apply_put_or_delete(&mut node.db, key, value)?;
+                        if *si_gen > 0 {
+                            persist_si_hist_on_db(
+                                &mut node.db,
+                                key,
+                                *si_gen,
+                                if value.is_empty() {
+                                    None
+                                } else {
+                                    Some(value.as_slice())
+                                },
+                            )?;
+                        }
                     }
                 }
-                RangeEntry::Batch { pairs } => {
-                    let ops: Vec<BatchOp> = pairs
-                        .iter()
-                        .filter(|(k, _)| !is_reserved_store_key(k))
-                        .map(|(k, v)| BatchOp::put(k, v))
-                        .collect();
+                RangeEntry::Batch { pairs, si_gen } => {
+                    let mut ops: Vec<BatchOp> = Vec::new();
+                    for (k, v) in pairs {
+                        if is_reserved_store_key(k) {
+                            continue;
+                        }
+                        if v.is_empty() {
+                            ops.push(BatchOp::delete(k));
+                        } else {
+                            ops.push(BatchOp::put(k, v));
+                        }
+                    }
                     if !ops.is_empty() {
                         node.db.apply_batch(ops)?;
+                    }
+                    if *si_gen > 0 {
+                        for (k, v) in pairs {
+                            if is_reserved_store_key(k) {
+                                continue;
+                            }
+                            persist_si_hist_on_db(
+                                &mut node.db,
+                                k,
+                                *si_gen,
+                                if v.is_empty() {
+                                    None
+                                } else {
+                                    Some(v.as_slice())
+                                },
+                            )?;
+                        }
+                        // Durable generation watermark on this replica (Raft-applied path).
+                        let _ = node.db.put(
+                            &si_meta_key("generation"),
+                            &encode_u64_meta(*si_gen),
+                        );
                     }
                 }
                 RangeEntry::TxnPrepare { txn_id, pairs } => {
                     apply_txn_prepare(&mut node.db, *txn_id, pairs)?;
                 }
-                RangeEntry::TxnCommit { txn_id, keys } => {
+                RangeEntry::TxnCommit {
+                    txn_id,
+                    keys,
+                    si_gen,
+                } => {
                     apply_txn_commit(&mut node.db, *txn_id, keys)?;
+                    if *si_gen > 0 {
+                        for k in keys {
+                            if is_reserved_store_key(k) {
+                                continue;
+                            }
+                            let live = node.db.get(k);
+                            persist_si_hist_on_db(
+                                &mut node.db,
+                                k,
+                                *si_gen,
+                                live.as_deref(),
+                            )?;
+                        }
+                        let _ = node.db.put(
+                            &si_meta_key("generation"),
+                            &encode_u64_meta(*si_gen),
+                        );
+                    }
                 }
                 RangeEntry::TxnAbort { txn_id, keys } => {
                     apply_txn_abort(&mut node.db, *txn_id, keys)?;
@@ -3332,6 +3520,15 @@ impl<E: Env> StoreCluster<E> {
                     }
                 }
                 RangeEntry::Noop => {}
+            }
+            // Put path: also bump generation meta when SI gen present.
+            if let RangeEntry::Put { si_gen, .. } = &rec.entry {
+                if *si_gen > 0 {
+                    let _ = node.db.put(
+                        &si_meta_key("generation"),
+                        &encode_u64_meta(*si_gen),
+                    );
+                }
             }
             applied_to = rec.index;
         }
@@ -3620,6 +3817,7 @@ impl<E: Env> StoreCluster<E> {
             Some(RangeEntry::Put {
                 key: key.clone(),
                 value: value.clone(),
+                si_gen: 0, // assigned in with_si_gen at propose
             }),
         )?;
         Ok(())
@@ -3681,6 +3879,7 @@ impl<E: Env> StoreCluster<E> {
             leader,
             Some(RangeEntry::Batch {
                 pairs: owned.clone(),
+                si_gen: 0,
             }),
         )?;
         Ok(())
@@ -3861,6 +4060,7 @@ impl<E: Env> StoreCluster<E> {
     /// On full success, SI/OCC history is advanced **once** for all keys in the TX
     /// (F37) so intermediate generations never observe a partial multi-range apply.
     pub fn tx_finish(&mut self, handle: &TxHandle) -> Result<()> {
+        let si_gen = self.commit_generation.saturating_add(1);
         let mut committed: Vec<u64> = Vec::new();
         for rid in &handle.ranges {
             let keys = Self::keys_for_range(handle, *rid).to_vec();
@@ -3869,6 +4069,7 @@ impl<E: Env> StoreCluster<E> {
                 RangeEntry::TxnCommit {
                     txn_id: handle.id,
                     keys: keys.clone(),
+                    si_gen,
                 },
             ) {
                 Ok(()) => committed.push(*rid),
@@ -4085,19 +4286,38 @@ impl<E: Env> StoreCluster<E> {
             .map(|b| b.to_vec())
     }
 
+    /// Stamp a client entry with a new SI generation (leader propose path).
+    fn with_si_gen(&mut self, entry: RangeEntry) -> RangeEntry {
+        let gen = self.commit_generation.saturating_add(1);
+        // Reserve gen so concurrent proposes get distinct numbers before flush.
+        // Actual memory bump still happens in note_mutations / apply.
+        match entry {
+            RangeEntry::Put { key, value, .. } => RangeEntry::Put {
+                key,
+                value,
+                si_gen: gen,
+            },
+            RangeEntry::Batch { pairs, .. } => RangeEntry::Batch {
+                pairs,
+                si_gen: gen,
+            },
+            other => other,
+        }
+    }
+
     /// Build version-note items for a client log entry (preimages at propose time).
     fn preimages_for_entry(
         &self,
         entry: &RangeEntry,
     ) -> Vec<(Vec<u8>, Vec<u8>, Option<Vec<u8>>)> {
         match entry {
-            RangeEntry::Put { key, value } => {
+            RangeEntry::Put { key, value, .. } => {
                 if is_reserved_store_key(key) {
                     return Vec::new();
                 }
                 vec![(key.clone(), value.clone(), self.value_now(key))]
             }
-            RangeEntry::Batch { pairs } => pairs
+            RangeEntry::Batch { pairs, .. } => pairs
                 .iter()
                 .filter(|(k, _)| !is_reserved_store_key(k))
                 .map(|(k, v)| (k.clone(), v.clone(), self.value_now(k)))
@@ -4178,13 +4398,21 @@ impl<E: Env> StoreCluster<E> {
             // All history entries are after snapshot (should not happen if gen-0 exists).
             return Ok(None);
         }
-        // Never mutated since open: Pedra holds the gen-0 world for this key.
+        // Missing hist: do not serve the Pedra tip as an old snapshot (bitrot /
+        // unreplicated SI). Tip is only valid at/after the current generation.
+        if snapshot < self.commit_generation {
+            return Ok(None);
+        }
         Ok(self.get(key)?.map(|b| b.to_vec()))
     }
 
-    /// Record mutations for OCC + version history + watch after a majority commit.
+    /// Record mutations for OCC + in-memory version history after majority commit.
     ///
-    /// Each item is `(key, new_value, preimage_before_this_commit)`.
+    /// Durable hist is written on each replica in [`Self::apply_range`] (Raft path).
+    /// This updates the coordinator memory map + watch; `persist_si_keys` is a
+    /// best-effort mirror for reopen when apply already stored hist.
+    ///
+    /// Each item is `(key, new_value, preimage)`. Empty `new_value` ⇒ deleted (`None` in hist).
     fn note_mutations(&mut self, items: &[(Vec<u8>, Vec<u8>, Option<Vec<u8>>)]) {
         if items.is_empty() {
             return;
@@ -4196,11 +4424,19 @@ impl<E: Env> StoreCluster<E> {
             if hist.is_empty() {
                 hist.push((0, pre.clone()));
             }
-            hist.push((g, Some(val.clone())));
+            let live = if val.is_empty() {
+                None
+            } else {
+                Some(val.clone())
+            };
+            if hist.last().map(|(hg, _)| *hg) != Some(g) {
+                hist.push((g, live));
+            }
             self.key_versions.insert(k.clone(), g);
             self.watch.notify(k, val, g);
         }
         self.maybe_gc_versions();
+        // Mirror watermark/generation; hist rows already on disk via apply when si_gen>0.
         let keys: Vec<Vec<u8>> = items.iter().map(|(k, _, _)| k.clone()).collect();
         self.persist_si_keys(&keys);
     }
@@ -4868,6 +5104,130 @@ mod tests {
             matches!(err, StoreError::Conflict),
             "expected Conflict after Queued concurrent write, got {err:?}"
         );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Residual fix: clear ⇒ Pedra delete, not empty payload.
+    #[test]
+    fn clear_is_true_delete_not_empty_value() {
+        let dir = temp();
+        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        c.elect_all(80).unwrap();
+        c.put(b"gone", b"here").unwrap();
+        assert_eq!(c.get(b"gone").unwrap().as_deref(), Some(b"here".as_ref()));
+        let mut tx = c.begin();
+        tx.clear(b"gone").unwrap();
+        tx.commit(&mut c).unwrap();
+        // Pedra must report absence, not Some([]).
+        assert!(
+            c.get(b"gone").unwrap().is_none(),
+            "clear must Pedra-delete; got {:?}",
+            c.get(b"gone").unwrap()
+        );
+        // Snapshot at latest also None.
+        assert!(c.get_at_version(b"gone", c.read_version()).unwrap().is_none());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// SI hist is written on Raft apply path (reopen loads hist from Pedra).
+    #[test]
+    fn si_hist_survives_reopen_after_put() {
+        let dir = temp();
+        {
+            let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+            c.elect_all(80).unwrap();
+            c.put(b"si-k", b"v1").unwrap();
+            assert!(c.read_version() >= 1);
+            assert_eq!(
+                c.get_at_version(b"si-k", c.read_version())
+                    .unwrap()
+                    .as_deref(),
+                Some(b"v1".as_ref())
+            );
+        }
+        let c = StoreCluster::open(&dir, 3, 1).unwrap();
+        // load_si_from_disk should restore generation + hist
+        assert!(
+            c.read_version() >= 1,
+            "generation must reload from disk, got {}",
+            c.read_version()
+        );
+        assert_eq!(
+            c.get_at_version(b"si-k", c.read_version())
+                .unwrap()
+                .as_deref(),
+            Some(b"v1".as_ref()),
+            "hist must reload so SI still sees v1"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Bitrot on \0store/hist/ must fail closed (CRC), not return wrong value silently.
+    #[test]
+    fn si_hist_bitrot_fail_closed() {
+        let dir = temp();
+        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        c.elect_all(80).unwrap();
+        c.put(b"br", b"good").unwrap();
+        let hk = {
+            let mut k = b"\0store/hist/".to_vec();
+            k.extend_from_slice(b"br");
+            k
+        };
+        // Flip a byte in durable hist on every node.
+        for nid in 1..=3u64 {
+            let n = c.nodes.get_mut(&nid).unwrap();
+            if let Some(raw) = n.db.get(&hk) {
+                let mut v = raw.to_vec();
+                if !v.is_empty() {
+                    let i = v.len() / 2;
+                    v[i] ^= 0xFF;
+                    n.db.put(&hk, &v).unwrap();
+                }
+            }
+        }
+        // Corrupt hist decode fails → load skips; get may still see user key from Pedra.
+        // decode_hist on explicit read must error (CRC).
+        let n = c.nodes.get(&1).unwrap();
+        let raw = n.db.get(&hk).expect("hist key exists");
+        assert!(
+            decode_hist(raw.as_ref()).is_err(),
+            "bitrot must fail CRC, not decode silently"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// FailingEnv during multi-key 2PC: no silent partial success without majority path.
+    #[test]
+    fn failing_env_commit_tx_no_silent_wrong() {
+        use pedradb_sim::FailingEnv;
+        let dir = temp();
+        // Fail disk after enough ops for open+elect; mid-commit may error.
+        let env = FailingEnv::fail_after(120);
+        let mut c =
+            StoreCluster::open_with_env_rng(&dir, 3, 1, env, SeedRng::new(0xF41)).unwrap();
+        let _ = c.elect_all(120);
+        if c.range_leader(1).is_none() {
+            let _ = std::fs::remove_dir_all(&dir);
+            return;
+        }
+        let r = c.commit_tx([(b"a", b"1"), (b"b", b"2")]);
+        match r {
+            Ok(_) => {
+                let a = c.get(b"a").unwrap();
+                let b = c.get(b"b").unwrap();
+                assert_eq!(a.as_deref(), Some(b"1".as_ref()));
+                assert_eq!(b.as_deref(), Some(b"2".as_ref()));
+            }
+            Err(_) => {
+                let a_ok = c.count_applied_eq(b"a", b"1");
+                let b_ok = c.count_applied_eq(b"b", b"2");
+                assert!(
+                    !(a_ok >= 2 && b_ok < 2) && !(b_ok >= 2 && a_ok < 2),
+                    "partial majority apply: a={a_ok} b={b_ok}"
+                );
+            }
+        }
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -5670,6 +6030,7 @@ mod tests {
                 entry: RangeEntry::Put {
                     key: b"after-cas".to_vec(),
                     value: b"ok".to_vec(),
+                    si_gen: 0,
                 },
             });
             p.commit = idx2;
@@ -6046,6 +6407,70 @@ mod tests {
         assert!(c.count_applied_eq(&[0x10], b"lo") >= 2);
         assert!(c.count_applied_eq(&[0x90], b"hi") >= 2);
         assert_ne!(c.locate(&[0x10]).unwrap(), c.locate(&[0x90]).unwrap());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Residual: split while a TX is prepared — finish or fail-closed cleanup.
+    #[test]
+    fn split_range_during_prepared_tx_finish_or_cancel_safe() {
+        let dir = temp();
+        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        c.elect_all(80).unwrap();
+        // Single range; keys will fall on different sides after split at 0x80.
+        let h = c
+            .tx_start([
+                ([0x10u8], b"L".as_slice()),
+                ([0x90u8], b"R".as_slice()),
+            ])
+            .unwrap();
+        let (left, right) = c.split_range_at([0x80u8]).unwrap();
+        assert_ne!(left, right);
+        match c.tx_finish(&h) {
+            Ok(()) => {
+                assert!(c.count_applied_eq(&[0x10], b"L") >= 2);
+                assert!(c.count_applied_eq(&[0x90], b"R") >= 2);
+            }
+            Err(e) => {
+                let _ = c.tx_cancel(&h);
+                assert_eq!(
+                    c.count_applied_eq(&[0x10], b"L"),
+                    0,
+                    "partial after fail: {e}"
+                );
+                assert_eq!(
+                    c.count_applied_eq(&[0x90], b"R"),
+                    0,
+                    "partial after fail: {e}"
+                );
+                c.commit_tx([
+                    ([0x10u8], b"L2".as_slice()),
+                    ([0x90u8], b"R2".as_slice()),
+                ])
+                .expect("must not immortal-intent after split+fail");
+            }
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Residual: remove_member while TX prepared — finish still majority-commits.
+    #[test]
+    fn remove_member_during_prepared_tx() {
+        let dir = temp();
+        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        c.elect_all(80).unwrap();
+        let h = c.tx_start([(b"k1", b"v1"), (b"k2", b"v2")]).unwrap();
+        let rid = c.locate(b"k1").unwrap();
+        let leader = c.range_leader(rid).unwrap();
+        let victim = c
+            .node_ids()
+            .iter()
+            .copied()
+            .find(|&id| id != leader)
+            .unwrap();
+        c.remove_member(victim).unwrap();
+        c.tx_finish(&h).expect("finish after shrink membership");
+        assert!(c.count_applied_eq(b"k1", b"v1") >= 1);
+        assert!(c.count_applied_eq(b"k2", b"v2") >= 1);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

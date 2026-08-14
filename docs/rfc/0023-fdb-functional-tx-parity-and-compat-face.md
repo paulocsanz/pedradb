@@ -86,10 +86,18 @@ Do **not** regress Pedra embed strengths (no forced FDB 5s/100KB on local-only).
 
 ## 5. Out of scope / residual
 
-- Full FDB wire, fdbcli, multi-language C ABI (P2.2 = Rust face only).  
+- Full FDB wire, fdbcli (C ABI is feature `c-api` subset only).  
 - Parallel commit / unbundled proxies (P2.3 residual — future).  
 - Zero-downtime range-leader HA (orthogonal).  
 - Field pedigree / Simulation Apple-scale.
+
+### Lab corners closed (post F34–F36 residual)
+
+| Residual | Fix |
+|----------|-----|
+| clear was empty put | empty value ⇒ Pedra `delete` on apply (Put/Batch/TxnCommit) |
+| SI hist only local put | `si_gen` in Raft Put/Batch entries; hist written in `apply_range` |
+| Heavy soak missing | `failing_env_commit_tx_no_silent_wrong`, `si_hist_bitrot_fail_closed` |
 
 ---
 

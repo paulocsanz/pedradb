@@ -22,8 +22,9 @@ Not a Record Layer clone. Not wire-compatible FDB.
 
 ## Known Montanha delta vs FDB
 
-- **`clear` stages empty values** rather than removing keys from range scans. Recipes treat **empty value as tombstone** (`is_live`). Index presence uses `\x01`, not FDB’s empty string.
-- Future store work: true delete / range tombstones would simplify layers.
+- **`clear` is real Pedra delete** (empty payload on the wire ⇒ `BatchOp::delete` on apply). Recipes still treat empty as tombstone in range helpers for safety.
+- **SI hist** is written on the Raft apply path (`si_gen` in Put/Batch log entries + `\0store/hist/`), not only as a side-channel local put.
+- Index presence may still use `\x01` for clarity vs empty.
 
 ## Run
 
