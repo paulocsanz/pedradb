@@ -15,21 +15,28 @@
 
 **Default: A** (more multi-Raft ranges on monolithic peer). Reconfirmed 2026-08-14.
 
-### Lab numbers (`montanha-fdb-bench` suite `scale`, N=16 sequential client)
+### Lab numbers (`montanha-fdb-bench` suite `scale`)
 
-| Ranges | keys/s (disjoint put) |
-|--------|------------------------|
-| 1 | ~1.7 |
-| 2 | ~1.9 |
-| 4 | ~2.2 |
-| 8 | ~1.5 |
+**S1 — sequential single client (N=16)**
 
-**Read:** single-threaded client does **not** get linear speedup from more ranges (serialized client + per-put majority still dominate). Option A still wins for **multi-writer** (one leader per range) when layers fan out concurrent clients — measure that next before B. Artifact: `findings/fdb-bench-scale/`.
+| Ranges | keys/s |
+|--------|--------|
+| 1–8 | ~0.9–2.1 (flat) |
+
+**S2 — 4 TCP clients, keys partitioned by range (N=16 total ok)**
+
+| Ranges | keys/s | vs 1-range |
+|--------|--------|------------|
+| 1 | ~1.9 | 1× (hot leader) |
+| 4 | ~5.2 | **~2.7×** |
+| 8 | ~8.4 | **~4.3×** |
+
+**Read:** sequential client cannot exercise multi-leader parallelism. **Multi-client multi-range proves option A**: more ranges ⇒ higher aggregate put QPS when writers fan out. Artifact: `findings/fdb-bench-scale-s2c/`. Option B (unbundle) still not justified.
 
 Rationale:
-- Lab already multi-Raft; PD/split is the natural next scale lever.
-- Unbundling (B) is higher cost and not justified while sequential put is fsync/Raft limited.
-- Revisit B only if multi-client multi-range saturates leader CPU with healthy fsync amortisation.
+- Lab multi-Raft scales write capacity under concurrent partitioned clients.
+- Unbundling (B) is higher cost until multi-client multi-range saturates CPU with amortised fsync.
+- Layers should shard by range prefix and open N writers (not one hot client).
 
 ## Required inputs before flipping to B
 

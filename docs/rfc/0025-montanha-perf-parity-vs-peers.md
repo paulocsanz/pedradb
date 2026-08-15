@@ -54,7 +54,7 @@
 ### P2 — later / polish
 
 - [x] **P2.1** Optional FDB comparator (`montanha-fdb-compare`, template if no fdbcli) — status: `done`  
-- [x] **P2.2** Scale probe S1 ranges 1/2/4/8 + reconfirm option A — status: `done`  
+- [x] **P2.2** Scale probe S1 (seq) + **S2 multi-client multi-range TCP** + reconfirm option A — status: `done`  
 - [x] **P2.3** Read capacity doc + `get_strong`/`get_fast_replica` tests/bench B4 — status: `done`  
 
 ## Status (living — update with every PR)

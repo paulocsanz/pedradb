@@ -11,6 +11,7 @@
 //!   MONTANHA_BENCH_WARMUP     warmup ops discarded (default 20)
 //!   MONTANHA_BENCH_THREADS    concurrent client threads for C/T suites (default 4)
 //!   MONTANHA_BENCH_SUITE      comma list: core,threads,tcp,mini-bt,scale,all
+//!     (scale includes S1 sequential + S2 multi-client multi-range TCP)
 //!
 //! Writes `fdb_shaped_bench.json` + human summary. Compare to FDB using the same
 //! workload shapes (see docs/montanha-vs-fdb-bench.md). Not a claim of field parity.
@@ -191,12 +192,13 @@ fn start_tcp_cluster(bin: &Path, tmp: &Path, n_ranges: u64) -> Vec<TcpNode> {
         .arg("elect-wait")
         .args(&peer_flags)
         .status();
-    // Fallback ticks if elect-wait missing/old
-    for _ in 0..80 {
+    // Multi-range: elect every range leader (elect-wait alone may only settle r1).
+    let rounds = 80u32.saturating_add(n_ranges as u32 * 40);
+    for _ in 0..rounds {
         for n in &nodes {
-            let _ = client_tick(n.addr.to_string(), 2);
+            let _ = client_tick(n.addr.to_string(), 3);
         }
-        thread::sleep(Duration::from_millis(20));
+        thread::sleep(Duration::from_millis(15));
     }
     nodes
 }
@@ -713,6 +715,79 @@ fn main() {
             ));
             progress!("S1 ranges={nr} keys_per_s={kps:.2}");
             drop(c);
+        }
+
+        // S2: multi-client multi-range (TCP) — true option-A scale probe.
+        // Sequential S1 cannot prove multi-leader parallelism; concurrent clients can.
+        if let Some(bin) = find_montanha_tcp() {
+            progress!("S2 multi-client multi-range TCP…");
+            let per = (n.min(24) / n_threads.max(1)).max(4);
+            for &nr in &[1u64, 4, 8] {
+                let tmp = out.join(format!("tcp-scale-r{nr}"));
+                let _ = std::fs::remove_dir_all(&tmp);
+                std::fs::create_dir_all(&tmp).unwrap();
+                let nodes = start_tcp_cluster(&bin, &tmp, nr);
+                let peers: Vec<(u64, String)> =
+                    nodes.iter().map(|n| (n.id, n.addr.to_string())).collect();
+                // Fixed thread count; map thread → range by tid % nr (hot range if thr>nr).
+                let thr = n_threads.max(1);
+                let step = (256u64 / nr.max(1)) as u8;
+                let peers_a = Arc::new(peers);
+                let val_a = Arc::new(val.clone());
+                let t0 = Instant::now();
+                let mut handles = Vec::new();
+                for tid in 0..thr {
+                    let peers = (*peers_a).clone();
+                    let v = Arc::clone(&val_a);
+                    let range_i = (tid as u64) % nr;
+                    let start_b = if range_i == 0 {
+                        0u8
+                    } else {
+                        (range_i as u8).saturating_mul(step)
+                    };
+                    handles.push(thread::spawn(move || {
+                        let mut cli = TcpClusterClient::new(peers).with_max_attempts(64);
+                        let mut ok = 0u64;
+                        for i in 0..per {
+                            let mut k = vec![start_b, b't'];
+                            k.extend_from_slice(format!("-{tid:02}-{i:04}").as_bytes());
+                            for _ in 0..12 {
+                                if cli.put(&k, &v).is_ok() {
+                                    ok += 1;
+                                    break;
+                                }
+                                thread::sleep(Duration::from_millis(15));
+                            }
+                        }
+                        ok
+                    }));
+                }
+                let mut total_ok = 0u64;
+                for h in handles {
+                    total_ok += h.join().unwrap();
+                }
+                let wall = t0.elapsed();
+                let kps = total_ok as f64 / wall.as_secs_f64().max(1e-12);
+                benches.push(format!(
+                    r#"{{
+    "name": "S2_tcp_mt_put_r{nr}_t{thr}",
+    "ranges": {nr},
+    "threads": {thr},
+    "keys_ok": {total_ok},
+    "keys_per_s": {kps:.3},
+    "wall_s": {ws:.4},
+    "note": "multi-client multi-range; expect higher keys/s as ranges increase if leaders parallelize"
+  }}"#,
+                    ws = wall.as_secs_f64(),
+                ));
+                progress!(
+                    "S2 ranges={nr} thr={thr} ok={total_ok} keys_per_s={kps:.2}"
+                );
+                drop(nodes);
+            }
+        } else {
+            notes.push("S2 skipped: montanha-tcp not found".into());
+            progress!("S2 skip: no montanha-tcp");
         }
     }
 
