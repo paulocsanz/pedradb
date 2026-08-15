@@ -39,10 +39,11 @@ pub use cl_kernel::{
 };
 pub use fail_closed::{
     expects_100_continue, expects_100_continue_as_is, header_break_end, header_break_end_as_is,
-    header_break_len, host_values_conflict, host_values_conflict_as_is,
-    http_version_requires_host, http_version_requires_host_as_is, parse_error_status,
-    parse_error_writes_status, parse_error_writes_status_as_is, present_bad_int_is_error,
-    present_bad_int_is_error_as_is, reject_transfer_encoding, reject_transfer_encoding_as_is,
+    header_break_len, host_value_ok, host_value_ok_as_is, host_values_conflict,
+    host_values_conflict_as_is, http_version_requires_host, http_version_requires_host_as_is,
+    parse_error_status, parse_error_writes_status, parse_error_writes_status_as_is,
+    present_bad_int_is_error, present_bad_int_is_error_as_is, reject_transfer_encoding,
+    reject_transfer_encoding_as_is,
 };
 pub use form_kernel::{
     form_decode, form_decode_as_is, form_plus_byte, form_plus_byte_as_is, from_hex,
@@ -151,7 +152,8 @@ fn read_req(stream: &mut TcpStream) -> Result<(String, String, Vec<u8>, Vec<(Str
         }
     }
     // F157: RFC 9112 — HTTP/1.1 without Host used to 200-store.
-    if http_version_requires_host(version) && host.is_none() {
+    // F158: empty `Host:` counted as present.
+    if http_version_requires_host(version) && !host.as_deref().is_some_and(host_value_ok) {
         return Err(HttpError::App("missing host".into()));
     }
     // Cap body size (F8): previously Content-Length could force multi-GiB alloc.
@@ -1781,9 +1783,7 @@ mod tests {
 
         let mut stream = TcpStream::connect(addr).unwrap();
         stream
-            .write_all(
-                b"PUT /kv/h1 HTTP/1.1\r\nHost: localhost\r\nContent-Length: 2\r\n\r\nok",
-            )
+            .write_all(b"PUT /kv/h1 HTTP/1.1\r\nHost: localhost\r\nContent-Length: 2\r\n\r\nok")
             .unwrap();
         let _ = stream.shutdown(std::net::Shutdown::Write);
         let mut resp = Vec::new();

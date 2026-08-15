@@ -124,6 +124,18 @@ pub fn host_values_conflict_as_is(_a: &str, _b: &str) -> bool {
     false
 }
 
+/// F158: RFC 9112 invalid `Host` field-value (empty after OWS trim).
+#[must_use]
+pub fn host_value_ok(value: &str) -> bool {
+    !value.is_empty()
+}
+
+/// AS-IS F157 residual: empty Host counted as present.
+#[must_use]
+pub fn host_value_ok_as_is(_value: &str) -> bool {
+    true
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -193,5 +205,8 @@ mod tests {
         assert!(host_values_conflict("a", "b"));
         assert!(!host_values_conflict("a", "a"));
         assert!(!host_values_conflict_as_is("a", "b"));
+        assert!(host_value_ok("localhost"));
+        assert!(!host_value_ok(""));
+        assert!(host_value_ok_as_is(""));
     }
 }
