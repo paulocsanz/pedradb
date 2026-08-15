@@ -1,0 +1,20 @@
+    Finished `release` profile [optimized + debuginfo] target(s) in 0.10s
+     Running `target/release/montanha-fdb-bench findings/fdb-bench-scale-s5`
+[fdb-bench] S scale multi-range put probe…
+[fdb-bench] S1 ranges=1 keys_per_s=1.00
+[fdb-bench] S1 ranges=2 keys_per_s=0.87
+[fdb-bench] S1 ranges=4 keys_per_s=1.03
+[fdb-bench] S1 ranges=8 keys_per_s=0.83
+[fdb-bench] S2 multi-client multi-range TCP…
+elected all ranges (r1=1) from node 3 status=local=3 members=[1, 2, 3] r1:leader=1
+[fdb-bench] S2 ranges=1 thr=4 ok=16 keys_per_s=1.10
+elected all ranges (r1=1 r2=2 r3=3 r4=1) from node 3 status=local=3 members=[1, 2, 3] r1:leader=1 r2:leader=2 r3:leader=3 r4:leader=1
+[fdb-bench] S2 ranges=4 thr=4 ok=16 keys_per_s=0.38
+elected all ranges (r1=1 r2=2 r3=3 r4=1 r5=2 r6=3 r7=1 r8=2) from node 1 status=local=1 members=[1, 2, 3] r1:leader=1 r2:leader=2 r3:leader=3 r4:leader=1 r5:leader=2 r6:leader=3 r7:leader=1 r8:leader=2
+[fdb-bench] S2 ranges=8 thr=4 ok=16 keys_per_s=0.08
+[fdb-bench] S3 multi-client multi-range TCP PutBatch…
+elected all ranges (r1=1) from node 1 status=local=1 members=[1, 2, 3] r1:leader=1
+[fdb-bench] S3 ranges=1 thr=4 batch=8 ok_keys=56 keys_per_s=0.09 batches_per_s=0.01
+elected all ranges (r1=1 r2=2 r3=3 r4=1) from node 3 status=local=3 members=[1, 2, 3] r1:leader=1 r2:leader=2 r3:leader=3 r4:leader=1
+[fdb-bench] S3 ranges=4 thr=4 batch=8 ok_keys=104 keys_per_s=0.13 batches_per_s=0.02
+elected all ranges (r1=3 r2=3 r3=2 r4=1 r5=2 r6=3 r7=1 r8=2) from node 1 status=local=1 members=[1, 2, 3] r1:leader=3 r2:leader=3 r3:leader=2 r4:leader=1 r5:leader=2 r6:leader=3 r7:leader=1 r8:leader=2

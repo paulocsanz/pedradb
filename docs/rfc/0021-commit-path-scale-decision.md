@@ -53,7 +53,9 @@ Earlier s2c lab had higher r8 (~8.4 keys/s); **r8 is noisy** under thr≪ranges.
 
 **Fix:** per-`(node, range)` timeouts — preferred leader for range `r` is `members[(r-1) % n]` with shortest timeout; ring distance staggers the rest. API: `rebalance_range_leaders` if jitter still skews load; `leader_nodes()` for observability.
 
-Residual: r8 under load / HB tax can still look noisy; option A still prefers multi-client multi-range with **spread leaders**.
+**Elect proof (`findings/fdb-bench-scale-s5/`):** S2 r4 → `r1=1 r2=2 r3=3 r4=1`; S2 r8 → round-robin across 3 nodes. Diversity works.
+
+**Throughput residual (same run, host loaded):** S2 r1 ~1.1 keys/s, r4 ~0.38, r8 ~0.08 — spread leaders did not restore s2c-era multi-range QPS. Remaining cliff is multi-Raft HB/fsync per group (and machine load), not leader colocation. Option A still default; re-measure on quiet hardware before flipping anything.
 
 Rationale:
 - Lab multi-Raft scales write capacity under concurrent partitioned clients (S2 r1→r4) **when leaders are spread**.
