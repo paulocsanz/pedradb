@@ -1024,17 +1024,21 @@ impl<E: Env> Db<E> {
     /// for pagination and large scans.
     #[must_use]
     pub fn range(&self, start: Bound<&[u8]>, end: Bound<&[u8]>) -> Vec<(Bytes, Bytes)> {
+        // Latest sequence is always ≥ the GC watermark.
         self.range_at(self.last_sequence(), start, end)
+            .unwrap_or_else(|_| Vec::new())
     }
 
     /// Range scan at an explicit snapshot sequence.
-    #[must_use]
+    ///
+    /// # Errors
+    /// [`CoreError::SnapshotTooOld`] if `snapshot` is below the version-GC watermark.
     pub fn range_at(
         &self,
         snapshot: SequenceNumber,
         start: Bound<&[u8]>,
         end: Bound<&[u8]>,
-    ) -> Vec<(Bytes, Bytes)> {
+    ) -> Result<Vec<(Bytes, Bytes)>> {
         self.range_at_limited(snapshot, start, end, None)
     }
 
@@ -1049,26 +1053,30 @@ impl<E: Env> Db<E> {
         limit: Option<usize>,
     ) -> Vec<(Bytes, Bytes)> {
         self.range_at_limited(self.last_sequence(), start, end, limit)
+            .unwrap_or_else(|_| Vec::new())
     }
 
     /// Range at `snapshot` with optional live-key `limit`.
     ///
-    /// Uses the streaming merge path ([`Self::scan_at`]) so the full keyspace is
+    /// Uses the streaming merge path ([`Self::try_scan_at`]) so the full keyspace is
     /// not required as a single materialised `Vec` of all live pairs.
-    #[must_use]
+    ///
+    /// # Errors
+    /// [`CoreError::SnapshotTooOld`] if `snapshot` is below the version-GC watermark.
     pub fn range_at_limited(
         &self,
         snapshot: SequenceNumber,
         start: Bound<&[u8]>,
         end: Bound<&[u8]>,
         limit: Option<usize>,
-    ) -> Vec<(Bytes, Bytes)> {
-        self.scan_at(snapshot, start, end, limit)
+    ) -> Result<Vec<(Bytes, Bytes)>> {
+        Ok(self
+            .try_scan_at(snapshot, start, end, limit)?
             .filter_map(|VisibleKv { key, value }| {
                 let value = self.resolve_stored_value(value).ok()?;
                 Some((key, value))
             })
-            .collect()
+            .collect())
     }
 
     /// Streaming range scan at the latest snapshot (public bound-memory path).
@@ -1096,6 +1104,10 @@ impl<E: Env> Db<E> {
     }
 
     /// Streaming range at `snapshot` with optional live-key `limit`.
+    ///
+    /// Prefer [`Self::try_scan_at`] when the snapshot may predate version GC.
+    /// This convenience path **panics** on [`CoreError::SnapshotTooOld`] so a
+    /// too-old scan cannot silently look like an empty range.
     pub fn scan_at(
         &self,
         snapshot: SequenceNumber,
@@ -1103,10 +1115,27 @@ impl<E: Env> Db<E> {
         end: Bound<&[u8]>,
         limit: Option<usize>,
     ) -> impl Iterator<Item = VisibleKv> + '_ {
-        self.scan_at_projected(snapshot, start, end, limit, ScanProjection::Full)
+        self.try_scan_at(snapshot, start, end, limit)
+            .unwrap_or_else(|e| {
+                panic!("scan_at: {e}; use try_scan_at for recoverable SnapshotTooOld")
+            })
     }
 
-    /// [`scan_at`](Self::scan_at) with projection.
+    /// Fail-closed streaming scan at `snapshot` (open-items §2.1 (c) range path).
+    ///
+    /// # Errors
+    /// [`CoreError::SnapshotTooOld`] if history for `snapshot` may have been dropped.
+    pub fn try_scan_at(
+        &self,
+        snapshot: SequenceNumber,
+        start: Bound<&[u8]>,
+        end: Bound<&[u8]>,
+        limit: Option<usize>,
+    ) -> Result<impl Iterator<Item = VisibleKv> + '_> {
+        self.try_scan_at_projected(snapshot, start, end, limit, ScanProjection::Full)
+    }
+
+    /// [`scan_at`](Self::scan_at) with projection (panics on too-old snapshot).
     pub fn scan_at_projected(
         &self,
         snapshot: SequenceNumber,
@@ -1115,15 +1144,34 @@ impl<E: Env> Db<E> {
         limit: Option<usize>,
         projection: ScanProjection,
     ) -> impl Iterator<Item = VisibleKv> + '_ {
+        self.try_scan_at_projected(snapshot, start, end, limit, projection)
+            .unwrap_or_else(|e| {
+                panic!("scan_at_projected: {e}; use try_scan_at_projected for recoverable SnapshotTooOld")
+            })
+    }
+
+    /// Fail-closed projected scan (see [`Self::try_scan_at`]).
+    ///
+    /// # Errors
+    /// [`CoreError::SnapshotTooOld`].
+    pub fn try_scan_at_projected(
+        &self,
+        snapshot: SequenceNumber,
+        start: Bound<&[u8]>,
+        end: Bound<&[u8]>,
+        limit: Option<usize>,
+        projection: ScanProjection,
+    ) -> Result<impl Iterator<Item = VisibleKv> + '_> {
+        self.ensure_snapshot_readable(Snapshot::at(snapshot))?;
         let resolve = matches!(projection, ScanProjection::Full);
         let raw = self.scan_at_raw(snapshot, start, end, limit, resolve);
-        raw.map(move |VisibleKv { key, value }| match projection {
+        Ok(raw.map(move |VisibleKv { key, value }| match projection {
             ScanProjection::Full => VisibleKv { key, value },
             ScanProjection::KeyOnly => VisibleKv {
                 key,
                 value: Bytes::new(),
             },
-        })
+        }))
     }
 
     fn scan_at_raw(
@@ -5154,6 +5202,26 @@ mod tests {
             ),
             "got {err:?}"
         );
+        // Range path must not silently look empty.
+        let err = db
+            .range_at(old_seq, Bound::Unbounded, Bound::Unbounded)
+            .unwrap_err();
+        assert!(
+            matches!(err, CoreError::SnapshotTooOld { .. }),
+            "range_at too old: {err:?}"
+        );
+        let err = db
+            .try_scan_at(old_seq, Bound::Unbounded, Bound::Unbounded, None)
+            .err()
+            .expect("try_scan_at must fail closed");
+        assert!(
+            matches!(err, CoreError::SnapshotTooOld { .. }),
+            "try_scan_at too old: {err:?}"
+        );
+        // Latest range still works.
+        let live = db.range(Bound::Unbounded, Bound::Unbounded);
+        assert_eq!(live.len(), 1);
+        assert_eq!(live[0].1.as_ref(), b"new");
         db.close().unwrap();
         let _ = fs::remove_dir_all(&dir);
     }

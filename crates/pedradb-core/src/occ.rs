@@ -113,7 +113,7 @@ impl<E: Env> OccTransaction<E> {
     /// Commit with durability options.
     ///
     /// # Errors
-    /// Conflict, WAL I/O, or finished.
+    /// Conflict, [`CoreError::SnapshotTooOld`], WAL I/O, or finished.
     pub fn commit_with(mut self, durability: WriteOptions) -> Result<()> {
         self.ensure_open()?;
         if self.staging.is_empty() {
@@ -128,6 +128,8 @@ impl<E: Env> OccTransaction<E> {
         self.finished = true;
 
         db.with_write(|inner| {
+            // Concurrent reclaim may have advanced the GC watermark past our snap.
+            inner.ensure_snapshot_readable(crate::db::Snapshot::at(snapshot))?;
             // Validate: no version with seq > snapshot on any read or write key.
             for key in read_set.iter().chain(staging.keys()) {
                 if inner.key_has_write_after(key.as_ref(), snapshot) {
@@ -255,6 +257,34 @@ mod tests {
         }
         assert_eq!(db.get(b"a").as_deref(), Some(b"1".as_ref()));
         assert_eq!(db.get(b"b").as_deref(), Some(b"2".as_ref()));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Concurrent reclaim past OCC snapshot → commit fails SnapshotTooOld.
+    #[test]
+    fn occ_commit_too_old_after_reclaim() {
+        let dir = temp_dir();
+        let db = open_cdb(&dir);
+        db.put(b"k", b"v0").unwrap();
+        let mut tx = db.begin_occ();
+        tx.put(b"k", b"v1").unwrap();
+        // Reclaim without pins advances watermark to last_seq at reclaim time.
+        db.compact_reclaim().unwrap();
+        // Further writes raise last_seq; force a history-dropping latest_only after
+        // more versions so watermark is strictly above the OCC snapshot.
+        db.put(b"k", b"v2").unwrap();
+        db.flush().unwrap();
+        db.with_write(|inner| {
+            inner
+                .compact_with(crate::db::CompactOptions::latest_only())
+                .unwrap();
+        });
+        assert!(db.earliest_readable_sequence() > 0);
+        let err = tx.commit().unwrap_err();
+        assert!(
+            matches!(err, CoreError::SnapshotTooOld { .. }),
+            "expected SnapshotTooOld on OCC commit, got {err:?}"
+        );
         let _ = fs::remove_dir_all(&dir);
     }
 

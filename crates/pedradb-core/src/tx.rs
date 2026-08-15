@@ -105,9 +105,13 @@ impl<'db, E: crate::env::Env> Transaction<'db, E> {
     /// Commit with explicit [`WriteOptions`]; returns the last sequence of the TX.
     ///
     /// # Errors
-    /// WAL I/O, sequence exhaustion, or already finished.
+    /// WAL I/O, sequence exhaustion, already finished, or
+    /// [`CoreError::SnapshotTooOld`] if version GC advanced past this TX snapshot.
     pub fn commit_with(mut self, durability: WriteOptions) -> Result<crate::key::SequenceNumber> {
         self.ensure_open()?;
+        // Fail-closed before allocating sequences (open-items §2.1 (c)).
+        self.db
+            .ensure_snapshot_readable(crate::db::Snapshot::at(self.snapshot))?;
         if self.staging.is_empty() {
             self.finished = true;
             return Ok(self.db.last_sequence());
