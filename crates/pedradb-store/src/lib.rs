@@ -3065,8 +3065,25 @@ impl<E: Env> StoreCluster<E> {
             let n = self.nodes.get_mut(&cand).unwrap();
             let p = n.ranges.get_mut(&rid).unwrap();
             if p.term == term && p.role == Role::Candidate {
+                // F148: become_leader pushes a Noop and sets Leader in RAM before
+                // durable log persist. On fail, roll back so we are not a live
+                // Leader of a non-durable blank entry (F147 class).
+                let prev_role = p.role;
+                let prev_leader_id = p.leader_id;
+                let prev_log_len = p.log.len();
+                let prev_next = p.next_index.clone();
+                let prev_match = p.match_index.clone();
+                let prev_hb = p.hb_left;
                 p.become_leader(&ids, cand);
-                persist_log_db(&mut n.db, rid, p)?;
+                if let Err(e) = persist_log_db(&mut n.db, rid, p) {
+                    p.role = prev_role;
+                    p.leader_id = prev_leader_id;
+                    p.log.truncate(prev_log_len);
+                    p.next_index = prev_next;
+                    p.match_index = prev_match;
+                    p.hb_left = prev_hb;
+                    return Err(e);
+                }
                 true
             } else {
                 false
@@ -8700,6 +8717,59 @@ mod tests {
             snap >= 1,
             "membership shrink should allow compact; snap={snap}"
         );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// F148: try_become_leader must not leave Leader + non-durable Noop on log fail.
+    #[test]
+    fn try_become_leader_log_persist_fail_stays_candidate() {
+        use pedradb_sim::{FailingEnv, SeedRng};
+        let dir = temp();
+        let e1 = FailingEnv::passing();
+        let e2 = FailingEnv::passing();
+        let e3 = FailingEnv::passing();
+        let mut c = StoreCluster::open_with_envs_rng(
+            &dir,
+            3,
+            1,
+            [e1.clone(), e2, e3],
+            SeedRng::new(0xF148),
+        )
+        .unwrap();
+        c.elect_all(80).unwrap();
+        let rid = 1u64;
+        let _ = c.step_down_range_leader(rid);
+        // Durable Candidate of a new term (hard ok); log write will fail.
+        let (term, log_len_before) = {
+            let n = c.nodes.get_mut(&1).unwrap();
+            let p = n.ranges.get_mut(&rid).unwrap();
+            p.term += 1;
+            p.role = Role::Candidate;
+            p.voted_for = Some(1);
+            p.leader_id = None;
+            let t = p.term;
+            let len = p.log.len();
+            persist_hard_db(&mut n.db, rid, p).unwrap();
+            (t, len)
+        };
+        e1.arm_one_failure();
+        let err = c.try_become_leader(rid, 1, term);
+        assert!(
+            err.is_err(),
+            "try_become_leader must surface log persist fail: {err:?}"
+        );
+        let p = c.nodes.get(&1).unwrap().ranges.get(&rid).unwrap();
+        assert!(
+            matches!(p.role, Role::Candidate),
+            "AS-IS stuck as Leader; must stay Candidate, role={:?}",
+            p.role
+        );
+        assert_eq!(
+            p.log.len(),
+            log_len_before,
+            "Noop blank entry must not stick after log persist fail"
+        );
+        assert_eq!(p.term, term, "term must remain the candidate term");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
