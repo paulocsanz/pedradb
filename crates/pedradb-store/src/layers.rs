@@ -130,7 +130,30 @@ impl EtcdNeedFace {
 
 // ── Secondary index via multi-key TX ───────────────────────────────────────
 
+fn push_len_pref(buf: &mut Vec<u8>, part: &[u8]) {
+    let n = u32::try_from(part.len()).expect("component len fits u32");
+    buf.extend_from_slice(&n.to_be_bytes());
+    buf.extend_from_slice(part);
+}
+
+/// Tip key storing the last secondary index value for (table, col, pk) — F64.
+#[must_use]
+pub fn table_index_tip_key(table: &[u8], col: &[u8], pk: &[u8]) -> Vec<u8> {
+    // Lead with pk so tip shards with the row (same range leader).
+    let mut k = Vec::with_capacity(pk.len() + table.len() + col.len() + 16);
+    k.extend_from_slice(pk);
+    k.push(0x00);
+    k.extend_from_slice(b"m"); // meta tip marker
+    push_len_pref(&mut k, table);
+    push_len_pref(&mut k, col);
+    k
+}
+
 /// Maintain primary row + secondary index entry in one TX (no app dual-write).
+///
+/// F64: on index_val change, clears the previous reverse key (was a silent stale
+/// hit). Row body stays opaque; last index_val is stored under
+/// [`table_index_tip_key`].
 pub fn put_with_secondary_index(
     cluster: &mut StoreCluster,
     table: &[u8],
@@ -140,9 +163,16 @@ pub fn put_with_secondary_index(
     row: &[u8],
 ) -> Result<u64> {
     let data_key = table_row_key(table, pk);
+    let tip_key = table_index_tip_key(table, index_col, pk);
     let idx_key = table_index_key(table, index_col, index_val, pk);
     let mut tx = cluster.begin();
+    if let Some(old_iv) = tx.get(cluster, &tip_key)? {
+        if old_iv.as_slice() != index_val {
+            tx.clear(table_index_key(table, index_col, &old_iv, pk))?;
+        }
+    }
     tx.set(&data_key, row)?;
+    tx.set(&tip_key, index_val)?;
     // index maps indexed value → pk
     tx.set(&idx_key, pk)?;
     tx.commit(cluster)
@@ -160,6 +190,16 @@ pub fn lookup_secondary(
     Ok(cluster.get(&idx_key)?.map(|b| b.to_vec()))
 }
 
+/// Range of reverse keys for exact `index_val` (not slash/prefix siblings).
+#[must_use]
+pub fn table_index_value_range(val: &[u8]) -> (Vec<u8>, Vec<u8>) {
+    let mut start = val.to_vec();
+    start.push(0x00);
+    let mut end = val.to_vec();
+    end.push(0x01);
+    (start, end)
+}
+
 // ── Table / SQLite-class encoding on Pedra keys ────────────────────────────
 //
 // Montanha splits the keyspace on **leading bytes** (single-byte range starts).
@@ -167,49 +207,52 @@ pub fn lookup_secondary(
 // disjoint PKs can land on **different range leaders** (true N writers).
 // Fixed prefixes like `t/` first would collocate every table on one range.
 
-/// Encode a logical table row: `{pk}\0t/{table}/r`.
+/// Encode a logical table row: `{pk}\0t` + length-prefixed table (F64).
 ///
 /// Leading with `pk` makes first-byte range splits place different PKs on
 /// different leaders (Postgres N-writer / TiDB-shaped sharding).
 #[must_use]
 pub fn table_row_key(table: &[u8], pk: &[u8]) -> Vec<u8> {
-    let mut k = Vec::with_capacity(pk.len() + table.len() + 8);
+    let mut k = Vec::with_capacity(pk.len() + table.len() + 12);
     k.extend_from_slice(pk);
     k.push(0x00);
-    k.extend_from_slice(b"t/");
-    k.extend_from_slice(table);
-    k.extend_from_slice(b"/r");
+    k.extend_from_slice(b"t");
+    push_len_pref(&mut k, table);
     k
 }
 
-/// Secondary index key: `{index_val}\0i/{table}/{col}/{pk}`.
+/// Secondary index key: `{val}\0` + length-prefixed (`i`, table, col, pk).
+///
+/// F64: slash-joined `i/{table}/{col}/{pk}` collided when any component
+/// contained `/` (e.g. table=`a` col=`b/c` pk=`d` vs table=`a/b` col=`c` pk=`d`).
 ///
 /// Shards by indexed value so index partitions can also spread across ranges;
 /// maintaining row+index still uses multi-key TX (possibly cross-range).
 #[must_use]
 pub fn table_index_key(table: &[u8], col: &[u8], val: &[u8], pk: &[u8]) -> Vec<u8> {
-    let mut k = Vec::with_capacity(val.len() + table.len() + col.len() + pk.len() + 8);
+    let mut k = Vec::with_capacity(val.len() + table.len() + col.len() + pk.len() + 24);
     k.extend_from_slice(val);
     k.push(0x00);
-    k.extend_from_slice(b"i/");
-    k.extend_from_slice(table);
-    k.push(b'/');
-    k.extend_from_slice(col);
-    k.push(b'/');
-    k.extend_from_slice(pk);
+    push_len_pref(&mut k, b"i");
+    push_len_pref(&mut k, table);
+    push_len_pref(&mut k, col);
+    push_len_pref(&mut k, pk);
     k
 }
 
-/// Put a table row (TX single key) without naming leaders.
+/// Put a table row without naming leaders (RFC-0025: single-key path).
+///
+/// For **row + secondary index**, prefer [`put_with_secondary_index`] (one TX)
+/// or [`StoreCluster::put_many`] when keys share a range.
 pub fn table_put(
     cluster: &mut StoreCluster,
     table: &[u8],
     pk: &[u8],
     row: &[u8],
 ) -> Result<u64> {
-    let mut tx = cluster.begin();
-    tx.set(table_row_key(table, pk), row)?;
-    tx.commit(cluster)
+    // Single key: put_batch of one is still one Raft entry (same as put).
+    cluster.put_batch([(table_row_key(table, pk).as_slice(), row)])?;
+    Ok(cluster.read_version())
 }
 
 /// Get table row.
@@ -732,6 +775,44 @@ mod tests {
                 .unwrap()
                 .as_deref(),
             Some(b"42".as_ref())
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// F64: slash-joined table/col/pk collides; update must drop old reverse key.
+    #[test]
+    fn table_index_injective_and_clears_stale_on_change() {
+        let dir = temp();
+        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        c.elect_all(90).unwrap();
+        // Two different (table,col,pk) must not share a key under old i/t/c/pk.
+        let k1 = table_index_key(b"a", b"b/c", b"v", b"d");
+        let k2 = table_index_key(b"a/b", b"c", b"v", b"d");
+        assert_ne!(
+            k1, k2,
+            "slash join collision: a,b/c,d vs a/b,c,d both {k1:?}"
+        );
+        let r1 = table_row_key(b"a", b"pk1");
+        let r2 = table_row_key(b"a/x", b"pk1");
+        assert_ne!(r1, r2, "row key must distinguish table names with slash");
+
+        put_with_secondary_index(&mut c, b"t", b"1", b"email", b"old@x", b"row").unwrap();
+        put_with_secondary_index(&mut c, b"t", b"1", b"email", b"new@x", b"row2").unwrap();
+        assert!(
+            lookup_secondary(&c, b"t", b"email", b"old@x", b"1")
+                .unwrap()
+                .is_none(),
+            "stale secondary under old@x after email change"
+        );
+        assert_eq!(
+            lookup_secondary(&c, b"t", b"email", b"new@x", b"1")
+                .unwrap()
+                .as_deref(),
+            Some(b"1".as_ref())
+        );
+        assert_eq!(
+            table_get(&c, b"t", b"1").unwrap().as_deref(),
+            Some(b"row2".as_ref())
         );
         let _ = std::fs::remove_dir_all(&dir);
     }

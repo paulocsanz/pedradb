@@ -47,9 +47,9 @@
 ### P1 — next wave
 
 - [ ] **P1.1** Group-commit / multi-inflight propose on same range under concurrent clients — status: `todo`  
-- [ ] **P1.2** Raft log persist cost: avoid full-log rewrite O(n) on every append (segment or compact-first) — status: `todo`  
+- [x] **P1.2** Raft log persist: contiguous append → segment keys + one `apply_batch` (not full blob rewrite) — status: `done`  
 - [ ] **P1.3** TCP path: pipelined put + batch wire (CommitTx already); multi-range client dial — status: `todo`  
-- [ ] **P1.4** Layer defaults: Record/etcd-need/recipes use batch/TX not N×put — status: `todo`  
+- [x] **P1.4** Layer defaults: `table_put` via put_batch; secondary index already TX; docs point to put_many — status: `done`  
 
 ### P2 — later / polish
 
@@ -65,9 +65,9 @@
 | P0.2 | p0 | batch vs single bench | done | 0025 | 2026-08-14 |
 | P0.3 | p0 | RFC living status | done | 0025 | 2026-08-14 |
 | P1.1 | p1 | concurrent group commit | todo | — | 2026-08-14 |
-| P1.2 | p1 | raft log append cost | todo | — | 2026-08-14 |
+| P1.2 | p1 | raft log append cost | done | incremental log_e + log_hi | 2026-08-14 |
 | P1.3 | p1 | TCP pipeline/batch | todo | — | 2026-08-14 |
-| P1.4 | p1 | layer batch defaults | todo | — | 2026-08-14 |
+| P1.4 | p1 | layer batch defaults | done | table_put/docs | 2026-08-14 |
 | P2.1 | p2 | FDB side comparator | todo | — | 2026-08-14 |
 | P2.2 | p2 | scale A vs B decision | todo | — | 2026-08-14 |
 | P2.3 | p2 | strong RO capacity | todo | — | 2026-08-14 |

@@ -69,8 +69,9 @@ pub use fdb_layers::{
     IdempotentIndex, NaiveAllocator, NaiveList, SafeAllocator, SafeList,
 };
 pub use layers::{
-    olap_get, olap_ingest, pg_upsert, pks_one_per_range, put_with_secondary_index,
-    raw_keys_one_per_range, sql_multi_table_write, stream_get, stream_publish, table_get, table_put,
+    olap_get, olap_ingest, olap_list_at, olap_stream_range, pg_upsert, pks_one_per_range,
+    put_with_secondary_index, raw_keys_one_per_range, sql_multi_table_write, stream_get,
+    stream_list_at, stream_publish, table_get, table_put,
     table_row_key, EtcdNeedFace, TikvKvFace, WatchEvent, WatchHub,
 };
 pub use ae_ack_kernel::{ae_ack_success, ae_ack_success_as_is};
@@ -1225,6 +1226,40 @@ fn encode_log(log: &[LogRec]) -> Vec<u8> {
     b
 }
 
+fn encode_one_log_rec(rec: &LogRec) -> Vec<u8> {
+    let mut b = Vec::new();
+    b.extend_from_slice(&rec.index.to_le_bytes());
+    b.extend_from_slice(&rec.term.to_le_bytes());
+    b.extend_from_slice(&encode_entry(&rec.entry));
+    append_crc(&mut b);
+    b
+}
+
+fn decode_one_log_rec(buf: &[u8]) -> Result<LogRec> {
+    let p = strip_crc(buf)?;
+    if p.len() < 16 {
+        return Err(StoreError::Msg("log rec short".into()));
+    }
+    let index = u64::from_le_bytes(p[0..8].try_into().unwrap());
+    let term = u64::from_le_bytes(p[8..16].try_into().unwrap());
+    let mut off = 16;
+    let entry = decode_entry(p, &mut off)?;
+    if off != p.len() {
+        return Err(StoreError::Msg("log rec trailing garbage".into()));
+    }
+    Ok(LogRec {
+        index,
+        term,
+        entry,
+    })
+}
+
+fn log_entry_key(range_id: u64, index: u64) -> Vec<u8> {
+    let mut k = raft_meta_key(range_id, "log/e/");
+    k.extend_from_slice(&index.to_be_bytes());
+    k
+}
+
 fn decode_log(buf: &[u8]) -> Result<Vec<LogRec>> {
     let p = strip_crc(buf)?;
     if p.len() < 8 {
@@ -1276,6 +1311,19 @@ fn load_range_peer<E: Env>(db: &Db<E>, range_id: u64, node_id: u64) -> Result<Ra
     if let Some(raw) = db.get(&raft_meta_key(range_id, "log")) {
         peer.log = decode_log(&raw)?;
     }
+    // RFC-0025 P1.2: segment entries beyond the base blob (incremental persist).
+    let blob_last = peer.last_index();
+    if let Some(raw) = db.get(&raft_meta_key(range_id, "log_hi")) {
+        let hi = decode_u64_meta(&raw)?;
+        if hi > blob_last {
+            for i in (blob_last + 1)..=hi {
+                if let Some(eraw) = db.get(&log_entry_key(range_id, i)) {
+                    peer.log.push(decode_one_log_rec(eraw.as_ref())?);
+                }
+            }
+        }
+    }
+    peer.disk_log_hi = peer.last_index();
     if let Some(raw) = db.get(&raft_meta_key(range_id, "commit")) {
         peer.commit = decode_u64_meta(&raw)?;
     }
@@ -1308,8 +1356,54 @@ fn persist_hard_db<E: Env>(db: &mut Db<E>, range_id: u64, peer: &RangePeer) -> R
     Ok(())
 }
 
-fn persist_log_db<E: Env>(db: &mut Db<E>, range_id: u64, peer: &RangePeer) -> Result<()> {
-    db.put(raft_meta_key(range_id, "log"), encode_log(&peer.log))?;
+/// Persist raft log (RFC-0025 P1.2).
+///
+/// Fast path: when the log only **grew** by contiguous new indices since
+/// [`RangePeer::disk_log_hi`], append those entries + `log_hi` in **one**
+/// Pedra `apply_batch` (single fsync) instead of rewriting the full blob.
+/// Truncate / compact / gaps fall back to full `log` blob rewrite.
+fn persist_log_db<E: Env>(db: &mut Db<E>, range_id: u64, peer: &mut RangePeer) -> Result<()> {
+    let last = peer.last_index();
+    let new: Vec<&LogRec> = peer
+        .log
+        .iter()
+        .filter(|e| e.index > peer.disk_log_hi)
+        .collect();
+    let expected = last.saturating_sub(peer.disk_log_hi);
+    let continuous = last > peer.disk_log_hi
+        && !new.is_empty()
+        && new.len() as u64 == expected
+        && new.first().map(|e| e.index) == Some(peer.disk_log_hi.saturating_add(1))
+        && new.last().map(|e| e.index) == Some(last);
+
+    if continuous {
+        let mut ops: Vec<BatchOp> = Vec::with_capacity(new.len() + 1);
+        for e in &new {
+            ops.push(BatchOp::put(
+                log_entry_key(range_id, e.index),
+                encode_one_log_rec(e),
+            ));
+        }
+        ops.push(BatchOp::put(
+            raft_meta_key(range_id, "log_hi"),
+            encode_u64_meta(last),
+        ));
+        db.apply_batch(ops)?;
+        peer.disk_log_hi = last;
+        return Ok(());
+    }
+
+    // Full rewrite (truncate, compact, empty, or non-contiguous).
+    let mut ops = vec![BatchOp::put(
+        raft_meta_key(range_id, "log"),
+        encode_log(&peer.log),
+    )];
+    ops.push(BatchOp::put(
+        raft_meta_key(range_id, "log_hi"),
+        encode_u64_meta(last),
+    ));
+    db.apply_batch(ops)?;
+    peer.disk_log_hi = last;
     Ok(())
 }
 
@@ -1375,6 +1469,9 @@ struct RangePeer {
     next_index: HashMap<u64, u64>,
     match_index: HashMap<u64, u64>,
     leader_id: Option<u64>,
+    /// Highest log index known durable on Pedra for this peer (RFC-0025 P1.2).
+    /// Volatile after load; used to choose append vs full rewrite on persist.
+    disk_log_hi: u64,
 }
 
 impl RangePeer {
@@ -1394,6 +1491,7 @@ impl RangePeer {
             next_index: HashMap::new(),
             match_index: HashMap::new(),
             leader_id: None,
+            disk_log_hi: 0,
         }
     }
 
@@ -1897,8 +1995,8 @@ impl<E: Env> StoreCluster<E> {
                 continue;
             };
             for rid in &range_ids {
-                if let Some(peer) = node.ranges.get(rid).cloned() {
-                    let _ = persist_log_db(&mut node.db, *rid, &peer);
+                if let Some(peer) = node.ranges.get_mut(rid) {
+                    let _ = persist_log_db(&mut node.db, *rid, peer);
                 }
             }
         }
