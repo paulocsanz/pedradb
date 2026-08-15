@@ -36,9 +36,7 @@
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
-use crate::tcp::{
-    client_commit_tx, client_put, client_put_batch, client_set_peers, client_status,
-};
+use crate::tcp::{client_commit_tx, client_put, client_put_batch, client_set_peers, client_status};
 use crate::{
     validate_tx_pairs, Result, StoreCluster, StoreError, MAX_TX_BYTES, MAX_TX_KEYS, MAX_VALUE_BYTES,
 };
@@ -105,9 +103,9 @@ pub fn classify(err: &StoreError) -> ClientClass {
         StoreError::NotCommitted { range_id, .. } => ClientClass::NotCommitted {
             range_id: Some(*range_id),
         },
-        StoreError::Conflict
-        | StoreError::TxnAborted(_)
-        | StoreError::TransactionTooOld { .. } => ClientClass::Conflict,
+        StoreError::Conflict | StoreError::TxnAborted(_) | StoreError::TransactionTooOld { .. } => {
+            ClientClass::Conflict
+        }
         StoreError::ValueTooLarge { size, limit } => ClientClass::LimitRejected {
             kind: "value",
             size: *size,
@@ -118,6 +116,13 @@ pub fn classify(err: &StoreError) -> ClientClass {
             size: *size,
             limit: *limit,
         },
+        // Retryable after compact / flush — not a permanent limit.
+        StoreError::WriteStall { l0_files, limit } => ClientClass::Unavailable(format!(
+            "write stall L0={l0_files} limit={limit}"
+        )),
+        StoreError::WriteStallMem { mem_bytes, limit } => ClientClass::Unavailable(format!(
+            "write stall mem={mem_bytes}B limit={limit}B"
+        )),
         StoreError::Msg(m) => classify_message(m),
         other => ClientClass::Other(other.to_string()),
     }
@@ -127,6 +132,9 @@ pub fn classify(err: &StoreError) -> ClientClass {
 #[must_use]
 pub fn classify_message(m: &str) -> ClientClass {
     let lower = m.to_ascii_lowercase();
+    if lower.contains("write stall") {
+        return ClientClass::Unavailable(m.to_string());
+    }
     if lower.contains("not leader") {
         return ClientClass::NotLeader {
             range_id: parse_range_id(m),
@@ -267,7 +275,10 @@ impl PendingTx {
     /// Pairs snapshot for commit / TCP.
     #[must_use]
     pub fn pairs(&self) -> Vec<(Vec<u8>, Vec<u8>)> {
-        self.ops.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
+        self.ops
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect()
     }
 
     /// Commit against an in-process [`StoreCluster`] (majority via `commit_tx`).
@@ -339,7 +350,11 @@ impl Transaction {
     ///
     /// # Errors
     /// Store errors.
-    pub fn get(&mut self, cluster: &StoreCluster, key: impl AsRef<[u8]>) -> Result<Option<Vec<u8>>> {
+    pub fn get(
+        &mut self,
+        cluster: &StoreCluster,
+        key: impl AsRef<[u8]>,
+    ) -> Result<Option<Vec<u8>>> {
         let k = key.as_ref();
         self.read_keys.insert(k.to_vec());
         if self.clears.contains(k) {
@@ -487,12 +502,7 @@ impl Transaction {
             return Err(StoreError::Msg("empty transaction".into()));
         }
         validate_tx_pairs(&pairs)?;
-        cluster.commit_transaction(
-            self.snapshot,
-            self.read_keys,
-            pairs,
-            self.conflict_ranges,
-        )
+        cluster.commit_transaction(self.snapshot, self.read_keys, pairs, self.conflict_ranges)
     }
 }
 
@@ -507,7 +517,12 @@ fn parse_range_id(m: &str) -> Option<u64> {
 
 fn parse_leader_hint(m: &str) -> Option<u64> {
     // leader=Some(2) or leader=2 or leader:Some(2)
-    for key in ["leader=Some(", "leader=", "live_leader=Some(", "live_leader="] {
+    for key in [
+        "leader=Some(",
+        "leader=",
+        "live_leader=Some(",
+        "live_leader=",
+    ] {
         if let Some(i) = m.find(key) {
             let rest = &m[i + key.len()..];
             let num: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
@@ -1073,7 +1088,8 @@ mod tests {
 
     #[test]
     fn dial_order_prefers_range_leader() {
-        let mut c = TcpClusterClient::new([(1, "a:1".into()), (2, "b:2".into()), (3, "c:3".into())]);
+        let mut c =
+            TcpClusterClient::new([(1, "a:1".into()), (2, "b:2".into()), (3, "c:3".into())]);
         c.prefer = Some(1);
         c.leaders.insert(4, 3);
         let order = c.dial_order_for(Some(4));

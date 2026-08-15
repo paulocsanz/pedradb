@@ -31,6 +31,9 @@ impl FdbError {
             StoreError::ValueTooLarge { .. } | StoreError::TransactionTooLarge { .. } => {
                 FdbError::Limit
             }
+            StoreError::WriteStall { .. } | StoreError::WriteStallMem { .. } => {
+                FdbError::Unavailable(err.to_string())
+            }
             other => match classify(other) {
                 ClientClass::Conflict => FdbError::NotCommitted,
                 ClientClass::LimitRejected { .. } => FdbError::Limit,
@@ -95,11 +98,7 @@ impl FdbTransaction {
     ///
     /// # Errors
     /// Store errors.
-    pub fn get(
-        &mut self,
-        db: &FdbDatabase<'_>,
-        key: impl AsRef<[u8]>,
-    ) -> Result<Option<Vec<u8>>> {
+    pub fn get(&mut self, db: &FdbDatabase<'_>, key: impl AsRef<[u8]>) -> Result<Option<Vec<u8>>> {
         self.inner.get(db.cluster, key)
     }
 
@@ -188,8 +187,7 @@ pub fn run_phase1_bindingtester_subset(
     // 2) clear + commit → absent
     {
         let mut tr = db.create_transaction();
-        tr.clear(b"p1/k")
-            .map_err(|e| FdbError::from_store(&e))?;
+        tr.clear(b"p1/k").map_err(|e| FdbError::from_store(&e))?;
         db.commit(tr)?;
         let mut tr2 = db.create_transaction();
         let got = tr2
@@ -223,7 +221,9 @@ pub fn run_phase1_bindingtester_subset(
 
     // 4) Snapshot isolation: concurrent writer invisible; read-set Conflict on commit
     {
-        db.cluster().put(b"p1/si", b"v0").map_err(|e| FdbError::from_store(&e))?;
+        db.cluster()
+            .put(b"p1/si", b"v0")
+            .map_err(|e| FdbError::from_store(&e))?;
         let mut tr = db.create_transaction();
         let snap = tr
             .get(&db, b"p1/si")
@@ -298,7 +298,9 @@ pub fn run_phase1_bindingtester_subset(
         let pairs2 = tr
             .get_range(&db, b"p1b/", b"p1b0")
             .map_err(|e| FdbError::from_store(&e))?;
-        let has_c = pairs2.iter().any(|(k, v)| k.as_slice() == b"p1b/c" && v == b"3");
+        let has_c = pairs2
+            .iter()
+            .any(|(k, v)| k.as_slice() == b"p1b/c" && v == b"3");
         if !has_c {
             return Err(FdbError::Other(format!(
                 "staging overlay missing p1b/c in get_range: {pairs2:?}"
@@ -403,9 +405,7 @@ pub fn run_phase1_bindingtester_subset(
             .get_range(&db, b"p1c/", b"p1c0")
             .map_err(|e| FdbError::from_store(&e))?;
         if !left.is_empty() {
-            return Err(FdbError::Other(format!(
-                "clear_range left keys {left:?}"
-            )));
+            return Err(FdbError::Other(format!("clear_range left keys {left:?}")));
         }
         let keep = tr3
             .get(&db, b"p1c_out")
@@ -484,7 +484,10 @@ mod tests {
         let ver = db.commit(tr).unwrap();
         assert!(ver >= 1);
         let mut tr2 = db.create_transaction();
-        assert_eq!(tr2.get(&db, b"fdb/k").unwrap().as_deref(), Some(b"v1".as_ref()));
+        assert_eq!(
+            tr2.get(&db, b"fdb/k").unwrap().as_deref(),
+            Some(b"v1".as_ref())
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 

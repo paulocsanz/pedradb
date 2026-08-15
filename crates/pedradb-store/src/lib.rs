@@ -186,9 +186,10 @@ pub enum RpcMode {
 /// Store errors.
 #[derive(Debug, Error)]
 pub enum StoreError {
-    /// PedraDB.
+    /// PedraDB (non-admission errors). Write stalls are mapped to
+    /// [`Self::WriteStall`] / [`Self::WriteStallMem`].
     #[error("pedradb: {0}")]
-    Core(#[from] pedradb_core::CoreError),
+    Core(#[source] pedradb_core::CoreError),
     /// DCS layer.
     #[error("dcs: {0}")]
     Dcs(#[from] pedradb_dcs::DcsError),
@@ -248,6 +249,22 @@ pub enum StoreError {
         /// Cluster [`StoreCluster::read_version`] at commit attempt.
         current: u64,
     },
+    /// Pedra L0 write stall (open-items §2.3) — compact/retry, no sleep in engine.
+    #[error("write stall: L0 has {l0_files} files (limit {limit})")]
+    WriteStall {
+        /// Current L0 SST count.
+        l0_files: usize,
+        /// Configured stall threshold.
+        limit: usize,
+    },
+    /// Pedra memtable write stall (open-items §2.3 c).
+    #[error("write stall: memtable ~{mem_bytes}B (limit {limit}B)")]
+    WriteStallMem {
+        /// Approximate active memtable bytes.
+        mem_bytes: usize,
+        /// Configured stall threshold in bytes.
+        limit: usize,
+    },
     /// Single value exceeds [`MAX_VALUE_BYTES`].
     #[error("value too large: {size} bytes (limit {limit})")]
     ValueTooLarge {
@@ -270,6 +287,20 @@ pub enum StoreError {
     /// Empty cluster / bad config.
     #[error("{0}")]
     Msg(String),
+}
+
+impl From<pedradb_core::CoreError> for StoreError {
+    fn from(e: pedradb_core::CoreError) -> Self {
+        match e {
+            pedradb_core::CoreError::WriteStall { l0_files, limit } => {
+                StoreError::WriteStall { l0_files, limit }
+            }
+            pedradb_core::CoreError::WriteStallMem { mem_bytes, limit } => {
+                StoreError::WriteStallMem { mem_bytes, limit }
+            }
+            other => StoreError::Core(other),
+        }
+    }
 }
 
 /// Max single value size for client TX / put paths (FDB-class order; Montanha-chosen).
@@ -8241,6 +8272,31 @@ mod tests {
             assert!(n.db.write_stall_drain());
         }
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Core WriteStall maps to first-class StoreError (not opaque Core).
+    #[test]
+    fn write_stall_maps_from_core_error() {
+        let e: StoreError = pedradb_core::CoreError::WriteStall {
+            l0_files: 9,
+            limit: 8,
+        }
+        .into();
+        assert!(matches!(
+            e,
+            StoreError::WriteStall {
+                l0_files: 9,
+                limit: 8
+            }
+        ));
+        let e: StoreError = pedradb_core::CoreError::WriteStallMem {
+            mem_bytes: 100,
+            limit: 64,
+        }
+        .into();
+        assert!(matches!(e, StoreError::WriteStallMem { limit: 64, .. }));
+        let cls = crate::client::classify(&e);
+        assert!(matches!(cls, crate::client::ClientClass::Unavailable(_)));
     }
 
     /// P1.1: index-style primary row + secondary key in one batch.
