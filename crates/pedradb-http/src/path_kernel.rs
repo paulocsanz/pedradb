@@ -46,10 +46,43 @@ fn strip_http_authority_rest(target: &str) -> Option<&str> {
     }
 }
 
-/// F161: Host and absolute-form / network-path authority disagree (RFC 9112).
+/// F161/F162: Host and absolute-form / network-path authority disagree (RFC 9112).
+/// F162: ignore `userinfo@` and default `:80` / `:443` (raw compare 400'd those).
 #[must_use]
 pub fn host_authority_mismatch(host: &str, authority: &str) -> bool {
-    !host.eq_ignore_ascii_case(authority)
+    let (h1, p1) = split_host_port(host);
+    let (h2, p2) = split_host_port(authority);
+    if !h1.eq_ignore_ascii_case(h2) {
+        return true;
+    }
+    !ports_equivalent(p1, p2)
+}
+
+/// Host / `[v6]` and optional numeric port. Strips a leading `userinfo@`.
+#[must_use]
+pub fn split_host_port(raw: &str) -> (&str, Option<&str>) {
+    let s = raw.rsplit_once('@').map_or(raw, |(_, h)| h);
+    if let Some(rest) = s.strip_prefix('[') {
+        if let Some(end) = rest.find(']') {
+            let host = &s[..=end + 1];
+            let port = rest[end + 1..].strip_prefix(':').filter(|p| !p.is_empty());
+            return (host, port);
+        }
+    }
+    if let Some((h, p)) = s.rsplit_once(':') {
+        if !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()) {
+            return (h, Some(p));
+        }
+    }
+    (s, None)
+}
+
+fn ports_equivalent(a: Option<&str>, b: Option<&str>) -> bool {
+    match (a, b) {
+        (None, None) => true,
+        (Some(x), Some(y)) => x == y,
+        (None, Some(p)) | (Some(p), None) => p == "80" || p == "443",
+    }
 }
 
 /// AS-IS F161: never compare Host to the request-target authority.
@@ -139,6 +172,14 @@ mod tests {
         assert!(host_authority_mismatch("localhost", "evil.example"));
         assert!(!host_authority_mismatch("LocalHost", "localhost"));
         assert!(!host_authority_mismatch_as_is("localhost", "evil.example"));
+        // F162: default port + userinfo are not mismatches.
+        assert!(!host_authority_mismatch("localhost", "localhost:80"));
+        assert!(!host_authority_mismatch("localhost", "localhost:443"));
+        assert!(!host_authority_mismatch("localhost", "user:pass@localhost"));
+        assert!(host_authority_mismatch("localhost", "localhost:8080"));
+        assert!(host_authority_mismatch("localhost", "evil.example:80"));
+        assert_eq!(split_host_port("user:p@h:80"), ("h", Some("80")));
+        assert_eq!(split_host_port("[::1]:80"), ("[::1]", Some("80")));
     }
 
     #[test]

@@ -48,12 +48,13 @@ pub use fail_closed::{
 };
 pub use form_kernel::{
     form_decode, form_decode_as_is, form_plus_byte, form_plus_byte_as_is, from_hex,
-    plus_before_percent, query_u64_conflict, query_u64_conflict_as_is, query_values_conflict,
+    plus_before_percent, query_part_is_bare_name, query_part_is_bare_name_as_is,
+    query_u64_conflict, query_u64_conflict_as_is, query_values_conflict,
     query_values_conflict_as_is,
 };
 pub use path_kernel::{
     host_authority_mismatch, host_authority_mismatch_as_is, origin_form_path,
-    origin_form_path_as_is, path_after_authority, request_target_authority,
+    origin_form_path_as_is, path_after_authority, request_target_authority, split_host_port,
     strip_authority_for_routing, strip_authority_for_routing_as_is, strip_http_authority,
     strip_uri_fragment, strip_uri_fragment_as_is,
 };
@@ -441,13 +442,19 @@ fn query_decoded_values(path: &str, key: &str) -> Vec<String> {
     };
     let mut out = Vec::new();
     for part in q.split('&') {
-        let Some((k, v)) = part.split_once('=') else {
+        if part.is_empty() {
             continue;
-        };
-        // F106: names were compared raw; `?%6Bey=` missed `key`.
-        if form_decode(k) == key.as_bytes() {
-            // F101: form-urlencoded — `+` is space *before* `%HH`.
-            out.push(String::from_utf8_lossy(&form_decode(v)).into_owned());
+        }
+        // F106: names form-decoded.
+        if let Some((k, v)) = part.split_once('=') {
+            if form_decode(k) == key.as_bytes() {
+                // F101: form-urlencoded — `+` is space *before* `%HH`.
+                out.push(String::from_utf8_lossy(&form_decode(v)).into_owned());
+            }
+        } else if form_decode(part) == key.as_bytes() {
+            // F163: bare flag `?rev` / `&ttl_ms` is a present name with empty value
+            // (was skipped → missing → default 0 / create).
+            out.push(String::new());
         }
     }
     out
@@ -455,7 +462,14 @@ fn query_decoded_values(path: &str, key: &str) -> Vec<String> {
 
 /// Parse an optional query integer. Missing → `None`. Present but unparseable → error (F105).
 /// F155: distinct repeats (`rev=1&rev=0`) used to take the first and CAS.
+/// F162: `?rev` (no `=`) used to be skipped so missing→0 created.
 fn query_u64(path: &str, key: &str) -> Result<Option<u64>> {
+    let path = strip_uri_fragment(path);
+    if let Some(q) = path.split_once('?').map(|(_, q)| q) {
+        if q.split('&').any(|p| query_part_is_bare_name(p, key)) {
+            return Err(HttpError::App(format!("bad {key}")));
+        }
+    }
     let mut seen: Option<u64> = None;
     for s in query_decoded_values(path, key) {
         let n = match s.parse() {
@@ -964,6 +978,32 @@ mod tests {
         );
         let (c3, b3) = http_exchange(addr, "PUT", "/dcs/kv/k?rev=1&rev=1", b"v2").unwrap();
         assert_eq!(c3, 200, "identical repeated rev is ok, {b3:?}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// F163: `?rev` without `=` used to be skipped (no value) so CAS used
+    /// missing→0 and created. Present name without a value must 400 (F105).
+    #[test]
+    fn dcs_http_bare_rev_flag_does_not_create() {
+        let dir = temp("dcs-rev-flag");
+        let addr = bind_ephemeral();
+        let srv = DcsServer::open(&dir).unwrap();
+        thread::spawn(move || {
+            let _ = srv.serve(addr);
+        });
+        thread::sleep(Duration::from_millis(100));
+        let (c1, b1) = http_exchange(addr, "PUT", "/dcs/kv/k?rev", b"v1").unwrap();
+        assert_eq!(
+            c1, 400,
+            "bare ?rev must 400, not create as rev=0, got {c1} {b1:?}"
+        );
+        let (c2, body) = http_exchange(addr, "GET", "/dcs/kv/k", b"").unwrap();
+        assert_eq!(
+            c2, 404,
+            "bare ?rev must not store, GET {c2} {body:?}"
+        );
+        let (c3, b3) = http_exchange(addr, "PUT", "/dcs/kv/k?rev=0", b"v1").unwrap();
+        assert_eq!(c3, 200, "explicit rev=0 still creates, {b3:?}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -1992,8 +2032,8 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// F161: F160 compared Host to the raw authority. `http://localhost:80`
-    /// + `Host: localhost` (default port) and `userinfo@host` 400'd.
+    /// F162 residual of F161: raw authority compare 400'd default `:80`/`:443`
+    /// and `userinfo@host` when Host was only the hostname.
     #[test]
     fn kv_http_absolute_form_default_port_matches_host() {
         let dir = temp("abs-port");
