@@ -103,22 +103,22 @@ fn read_req(stream: &mut TcpStream) -> Result<(String, String, Vec<u8>, Vec<(Str
     let mut has_content_len = false;
     let mut headers = Vec::new();
     for line in lines {
-        if let Some((k, v)) = line.split_once(':') {
-            headers.push((k.trim().to_ascii_lowercase(), v.trim().to_string()));
-        }
+        let Some((k, v)) = line.split_once(':') else {
+            continue;
+        };
+        // RFC 9112: field-name, then `:`. Trim OWS around the name so
+        // `Transfer-Encoding :` / `Content-Length :` still match (F142).
+        let name = k.trim().to_ascii_lowercase();
+        let val = v.trim();
+        headers.push((name.clone(), val.to_string()));
         // F104: Transfer-Encoding is unsupported. Honouring CL while ignoring TE
         // (or treating TE as opaque body) mis-frames the payload — fail closed.
-        if line
-            .to_ascii_lowercase()
-            .trim_start()
-            .starts_with("transfer-encoding:")
-            && reject_transfer_encoding()
-        {
+        if name == "transfer-encoding" && reject_transfer_encoding() {
             return Err(HttpError::App("transfer-encoding not supported".into()));
         }
-        if let Some(v) = line.to_ascii_lowercase().strip_prefix("content-length:") {
+        if name == "content-length" {
             // F87: invalid CL used to become 0 and truncate the body to empty.
-            let n = match v.trim().parse::<usize>() {
+            let n = match val.parse::<usize>() {
                 Ok(n) => n,
                 Err(_) if invalid_cl_as_zero() => 0,
                 Err(_) => return Err(HttpError::App("bad content-length".into())),
@@ -760,10 +760,7 @@ mod tests {
             "query name %6Bey must be key, same lock as /dcs/kv/lock, body={body:?}"
         );
         let (c3, _) = http_exchange(addr, "GET", "/dcs/kv/%2Fleader", b"").unwrap();
-        assert_eq!(
-            c3, 404,
-            "must not have fallen back to default key /leader"
-        );
+        assert_eq!(c3, 404, "must not have fallen back to default key /leader");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -1053,6 +1050,44 @@ mod tests {
         assert_eq!(
             code, 404,
             "chunked body must not be stored raw, GET {code} {body:?}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// F142: space before `:` used to skip the TE reject (`Transfer-Encoding :`).
+    #[test]
+    fn kv_http_transfer_encoding_space_before_colon_rejected() {
+        let dir = temp("te-ows");
+        let addr = bind_ephemeral();
+        let srv = KvServer::open(&dir).unwrap();
+        thread::spawn(move || {
+            let _ = srv.serve(addr);
+        });
+        thread::sleep(Duration::from_millis(100));
+        let mut stream = TcpStream::connect(addr).unwrap();
+        stream
+            .write_all(
+                b"PUT /kv/te-ows HTTP/1.0\r\nTransfer-Encoding : chunked\r\nHost: localhost\r\n\r\n2\r\nhi\r\n0\r\n\r\n",
+            )
+            .unwrap();
+        let _ = stream.shutdown(std::net::Shutdown::Write);
+        let mut resp = Vec::new();
+        let _ = stream.read_to_end(&mut resp);
+        let text = String::from_utf8_lossy(&resp);
+        let put_code = text
+            .lines()
+            .next()
+            .and_then(|l| l.split_whitespace().nth(1))
+            .and_then(|c| c.parse::<u16>().ok())
+            .unwrap_or(0);
+        assert_eq!(
+            put_code, 400,
+            "TE with space before colon must be 400, got {put_code} {text:?}"
+        );
+        let (code, body) = http_exchange(addr, "GET", "/kv/te-ows", b"").unwrap();
+        assert_eq!(
+            code, 404,
+            "spaced TE must not store raw chunks, GET {code} {body:?}"
         );
         let _ = std::fs::remove_dir_all(&dir);
     }
