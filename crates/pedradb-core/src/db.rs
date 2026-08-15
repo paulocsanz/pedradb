@@ -173,10 +173,14 @@ pub struct DbStats {
     pub auto_reclaim: bool,
     /// Writes refused by L0 / mem write stall (open-items §2.3).
     pub write_stall_count: u64,
+    /// Soft L0 pressure drains (not refusals).
+    pub write_pressure_count: u64,
     /// Configured L0 stall limit (`0` = disabled).
     pub write_stall_l0: u64,
     /// Configured mem stall limit in bytes (`0` = disabled).
     pub write_stall_mem_bytes: u64,
+    /// Configured L0 soft-pressure threshold (`0` = disabled).
+    pub write_pressure_l0: u64,
 }
 
 /// Per-blob GC stats for operator / auto-pick (RFC-0029 P1.1).
@@ -231,15 +235,17 @@ impl DbStats {
     #[must_use]
     pub fn gc_line(&self) -> String {
         format!(
-            "earliest_readable={} pins={} auto_reclaim={} compact={} auto_compact_fail={} write_stall={} (l0_limit={} mem_limit={})",
+            "earliest_readable={} pins={} auto_reclaim={} compact={} auto_compact_fail={} write_stall={} pressure={} (l0_limit={} mem_limit={} pressure_l0={})",
             self.earliest_readable_seq,
             self.snapshot_pin_count,
             self.auto_reclaim,
             self.compact_count,
             self.auto_compact_failures,
             self.write_stall_count,
+            self.write_pressure_count,
             self.write_stall_l0,
-            self.write_stall_mem_bytes
+            self.write_stall_mem_bytes,
+            self.write_pressure_l0
         )
     }
 }
@@ -505,10 +511,14 @@ pub struct Db<E: Env = StdEnv> {
     write_stall_l0: Option<usize>,
     /// When `Some(n)`, refuse writes if active mem ≈ ≥ n bytes (open-items §2.3 c).
     write_stall_mem_bytes: Option<usize>,
+    /// When `Some(n)`, one flush+compact when L0 ≥ n before admit (open-items §2.3 b).
+    write_pressure_l0: Option<usize>,
     /// When true with a stall limit: one flush+compact attempt before refusing.
     write_stall_drain: bool,
     /// Count of writes refused by L0 / mem stall.
     write_stall_count: u64,
+    /// Count of soft pressure drains (not errors).
+    write_pressure_count: u64,
     /// Open [`SnapshotPin`]s: pin id → sequence (open-items §2.1).
     snapshot_pins: std::collections::BTreeMap<u64, SequenceNumber>,
     /// Next pin id (monotonic; never reused for this process open).
@@ -712,8 +722,10 @@ impl<E: Env> Db<E> {
             auto_reclaim: false,
             write_stall_l0: None,
             write_stall_mem_bytes: None,
+            write_pressure_l0: None,
             write_stall_drain: false,
             write_stall_count: 0,
+            write_pressure_count: 0,
             snapshot_pins: std::collections::BTreeMap::new(),
             next_snapshot_pin_id: 1,
             earliest_readable_seq,
@@ -1061,6 +1073,35 @@ impl<E: Env> Db<E> {
     #[must_use]
     pub fn write_stall_mem_bytes(&self) -> Option<usize> {
         self.write_stall_mem_bytes
+    }
+
+    /// Soft L0 pressure: when L0 ≥ `n`, run one flush+compact before admitting
+    /// the write (open-items §2.3 option b — no sleep, no refuse).
+    ///
+    /// Typically set **below** [`Self::set_write_stall_l0`] so the engine self-helps
+    /// under load and only hard-stalls if still over the hard limit. Default off.
+    pub fn set_write_pressure_l0(&mut self, limit: Option<usize>) {
+        self.write_pressure_l0 = limit.filter(|n| *n > 0);
+    }
+
+    /// Current soft L0 pressure threshold, if enabled.
+    #[must_use]
+    pub fn write_pressure_l0(&self) -> Option<usize> {
+        self.write_pressure_l0
+    }
+
+    /// Times soft pressure triggered a drain pass.
+    #[must_use]
+    pub fn write_pressure_count(&self) -> u64 {
+        self.write_pressure_count
+    }
+
+    /// One flush + leveled compact (shared by pressure and stall-drain).
+    fn drain_l0_once(&mut self) {
+        if !self.mem.is_empty() || self.imm.is_some() {
+            let _ = self.flush();
+        }
+        let _ = self.compact_with_ssts_only(CompactOptions::default());
     }
 
     /// Current auto blob-GC threshold, if enabled.
@@ -1451,8 +1492,10 @@ impl<E: Env> Db<E> {
             snapshot_pin_count: self.snapshot_pins.len(),
             auto_reclaim: self.auto_reclaim,
             write_stall_count: self.write_stall_count,
+            write_pressure_count: self.write_pressure_count,
             write_stall_l0: self.write_stall_l0.unwrap_or(0) as u64,
             write_stall_mem_bytes: self.write_stall_mem_bytes.unwrap_or(0) as u64,
+            write_pressure_l0: self.write_pressure_l0.unwrap_or(0) as u64,
         }
     }
 
@@ -3496,6 +3539,14 @@ impl<E: Env> Db<E> {
             }
         }
 
+        // Soft pressure (b): drain once when L0 is elevated, then continue to hard check.
+        if let Some(soft) = self.write_pressure_l0 {
+            if self.level_file_count(0) >= soft {
+                self.drain_l0_once();
+                self.write_pressure_count = self.write_pressure_count.saturating_add(1);
+            }
+        }
+
         let Some(limit) = self.write_stall_l0 else {
             return Ok(());
         };
@@ -3505,10 +3556,7 @@ impl<E: Env> Db<E> {
         }
         if self.write_stall_drain {
             // One honest self-help pass — no sleep, no unbounded loop.
-            if !self.mem.is_empty() || self.imm.is_some() {
-                let _ = self.flush();
-            }
-            let _ = self.compact_with_ssts_only(CompactOptions::default());
+            self.drain_l0_once();
             l0 = self.level_file_count(0);
             if l0 < limit {
                 return Ok(());
@@ -5463,6 +5511,43 @@ mod tests {
         assert_eq!(db.get(b"ok").as_deref(), Some(b"1".as_ref()));
         assert_eq!(db.write_stall_count(), stalls_before);
         assert!(db.sst_count() >= 1, "drain should have flushed");
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Soft L0 pressure drains without refusing the write (§2.3 b).
+    #[test]
+    fn write_pressure_l0_drains_without_error() {
+        let dir = temp_dir();
+        let mut db = Db::open_with(
+            &dir,
+            OpenOptions {
+                sync: true,
+                auto_flush_bytes: None,
+                auto_compact_sst_count: None,
+                auto_compact_sst_bytes: None,
+                exclusive: true,
+                large_value_threshold: None,
+            },
+        )
+        .unwrap();
+        for i in 0..3u8 {
+            db.put([b'k', i], [b'v', i]).unwrap();
+            db.flush().unwrap();
+        }
+        let l0_before = db.level_file_count(0);
+        assert!(l0_before >= 2, "need L0 pressure, got {l0_before}");
+        db.set_write_pressure_l0(Some(2));
+        assert_eq!(db.write_pressure_l0(), Some(2));
+        let pressure_before = db.write_pressure_count();
+        // Put under pressure: must succeed and record a pressure drain.
+        db.put(b"under-pressure", b"1").unwrap();
+        assert_eq!(db.get(b"under-pressure").as_deref(), Some(b"1".as_ref()));
+        assert!(
+            db.write_pressure_count() > pressure_before,
+            "expected pressure drain counter bump"
+        );
+        assert_eq!(db.write_stall_count(), 0, "soft pressure must not hard-stall");
         db.close().unwrap();
         let _ = fs::remove_dir_all(&dir);
     }

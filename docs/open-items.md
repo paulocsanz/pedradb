@@ -136,14 +136,13 @@ Needs study of their implementations.
 **Question:** When write rate exceeds flush/compaction capacity, what does
 PedraDB do?
 
-**Answer (2026-08-15):** **(a)+(c) honest stalls**, opt-in (no sleep).
-- **L0:** `set_write_stall_l0(Some(n))` → [`CoreError::WriteStall`] when L0 ≥ n.
-- **Mem:** `set_write_stall_mem_bytes(Some(b))` → [`CoreError::WriteStallMem`]
-  when active mem ≈ ≥ b (bounds unbounded mem growth).
-- **Drain:** `set_write_stall_drain(true)` tries one flush (+ compact for L0)
-  before refusing. Default for all: **off**.
-Stats: `write_stall_count` / `gc_line`. ConcurrentDb mirrors. Soft slowdown
-(b) still open.
+**Answer (2026-08-15):** **(a)+(b)+(c)** opt-in (no artificial sleep).
+- **L0 hard:** `set_write_stall_l0(Some(n))` → [`CoreError::WriteStall`].
+- **L0 soft pressure (b):** `set_write_pressure_l0(Some(n))` → one flush+compact
+  before admit (no error); counter `write_pressure_count`. Typically n < hard.
+- **Mem (c):** `set_write_stall_mem_bytes(Some(b))` → [`CoreError::WriteStallMem`].
+- **Hard drain:** `set_write_stall_drain(true)` one drain before hard refuse.
+Default for all: **off**. Stats in `gc_line`. ConcurrentDb mirrors.
 
 **Options (historical):**
 - **(a) Explicit stall:** block new writes until L0 is drained. Honest but harsh.

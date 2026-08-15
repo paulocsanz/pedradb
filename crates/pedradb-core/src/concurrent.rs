@@ -286,6 +286,23 @@ impl<E: Env> ConcurrentDb<E> {
         self.inner.read().write_stall_mem_bytes()
     }
 
+    /// Soft L0 pressure drain (see [`Db::set_write_pressure_l0`]).
+    pub fn set_write_pressure_l0(&self, limit: Option<usize>) {
+        self.inner.write().set_write_pressure_l0(limit);
+    }
+
+    /// Current soft L0 pressure threshold, if enabled.
+    #[must_use]
+    pub fn write_pressure_l0(&self) -> Option<usize> {
+        self.inner.read().write_pressure_l0()
+    }
+
+    /// Soft pressure drain count.
+    #[must_use]
+    pub fn write_pressure_count(&self) -> u64 {
+        self.inner.read().write_pressure_count()
+    }
+
     /// Blob rotate cap (see [`Db::set_vlog_rotate_bytes`]).
     pub fn set_vlog_rotate_bytes(&self, bytes: Option<u64>) {
         self.inner.write().set_vlog_rotate_bytes(bytes);
