@@ -369,7 +369,7 @@ fn adversarial_iterator_positioning() {
             }
         }
         for probe in ["k05", "k15", "k25"] {
-            let it = db
+            let mut it = db
                 .iterator(IteratorMode::From(probe.as_bytes(), Direction::Forward))
                 .unwrap();
             let got: Vec<(Vec<u8>, Vec<u8>)> = it.collect_rest();

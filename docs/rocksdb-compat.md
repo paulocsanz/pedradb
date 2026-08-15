@@ -17,7 +17,7 @@
 | `delete_range_cf` | ✅ | Maps to Pedra range-delete |
 | `write(WriteBatch)` | ✅ atomic | One Pedra `apply_batch` = one WAL group; failed batch applies nothing (tested under fault) |
 | `snapshot()` + `get`/`get_cf`/`iterator(_cf)` | ✅ | Sequence-pinned; isolation tested |
-| `iterator(IteratorMode)` / `iterator_cf` | ✅ (eager) | `Start`/`End`/`From(k, Forward\|Reverse)`; materialized — documented perf scope |
+| `iterator(IteratorMode)` / `iterator_cf` | ✅ (janela 64) | `Start`/`End`/`From`; forward refill via `range_at_limited` (RFC-0032 P0.1) |
 | `flush` / `compact` | ✅ | |
 
 Dependency swap for a consumer (alias, no crates.io patch):

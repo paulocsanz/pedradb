@@ -20,7 +20,8 @@ use pedradb_core::{BatchOp, CoreError, Db, Env, Snapshot as CoreSnapshot, StdEnv
 use bytes::Bytes;
 use std::fmt;
 use std::ops::Bound;
-use std::sync::Mutex;
+use std::collections::VecDeque;
+use std::sync::{Arc, Mutex};
 
 /// Compatibility error surface (rust-rocksdb exposes one opaque `Error`).
 #[derive(Debug, Clone)]
@@ -126,20 +127,25 @@ impl KeyCodec {
     }
 }
 
-fn encode_bound_ref(codec: &KeyCodec, cf: &str, b: Bound<&[u8]>) -> Bound<Vec<u8>> {
-    match b {
-        Bound::Included(k) => Bound::Included(codec.encode(cf, k)),
-        Bound::Excluded(k) => Bound::Excluded(codec.encode(cf, k)),
-        Bound::Unbounded => Bound::Unbounded,
-    }
-}
-
 fn bound_as_ref(b: &Bound<Vec<u8>>) -> Bound<&[u8]> {
     match b {
         Bound::Included(k) => Bound::Included(k.as_slice()),
         Bound::Excluded(k) => Bound::Excluded(k.as_slice()),
         Bound::Unbounded => Bound::Unbounded,
     }
+}
+
+/// First encoded key strictly greater than `enc`, if any.
+fn encoded_succ(enc: &[u8]) -> Option<Vec<u8>> {
+    let mut e = enc.to_vec();
+    for i in (0..e.len()).rev() {
+        if e[i] < 0xff {
+            e[i] += 1;
+            e.truncate(i + 1);
+            return Some(e);
+        }
+    }
+    None
 }
 
 
@@ -237,15 +243,24 @@ pub enum IteratorMode<'a> {
     From(&'a [u8], Direction),
 }
 
-/// Materialized iterator over one CF snapshot (eager; compat v0 scope).
-#[derive(Debug)]
-pub struct DBIterator {
+/// Page size (RFC-0032 P0.1). Forward refills; never materialises the whole CF.
+const ITER_WINDOW: usize = 64;
+
+/// Windowed CF iterator (RFC-0032 P0.1). Same positioning semantics as v0.
+pub struct DBIterator<E: Env = StdEnv> {
     items: Vec<(Vec<u8>, Vec<u8>)>,
     idx: usize,
     reverse: bool,
+    inner: Arc<Mutex<Db<E>>>,
+    codec: KeyCodec,
+    cf: String,
+    seq: pedradb_core::SequenceNumber,
+    cf_start: Bound<Vec<u8>>,
+    cf_end: Bound<Vec<u8>>,
+    exhausted: bool,
 }
 
-impl DBIterator {
+impl<E: Env> DBIterator<E> {
     /// Whether positioned on a valid entry.
     #[must_use]
     pub fn valid(&self) -> bool {
@@ -259,9 +274,16 @@ impl DBIterator {
             return;
         }
         if self.reverse {
-            self.idx = self.idx.wrapping_sub(1);
+            if self.idx == 0 {
+                self.refill_reverse();
+            } else {
+                self.idx -= 1;
+            }
         } else {
             self.idx += 1;
+            if self.idx >= self.items.len() {
+                self.refill_forward();
+            }
         }
     }
 
@@ -283,14 +305,111 @@ impl DBIterator {
             .unwrap_or(&[])
     }
 
-    /// Collect remaining entries from the current position (harness helper).
-    #[must_use]
-    pub fn collect_rest(&self) -> Vec<(Vec<u8>, Vec<u8>)> {
-        if !self.valid() {
-            return Vec::new();
+    /// Remaining entries from here to the CF bound (refills pages).
+    pub fn collect_rest(&mut self) -> Vec<(Vec<u8>, Vec<u8>)> {
+        let mut out = Vec::new();
+        while self.valid() {
+            out.push((self.key().to_vec(), self.value().to_vec()));
+            self.next();
         }
-        self.items[self.idx..].to_vec()
+        out
     }
+
+    fn invalidate(&mut self) {
+        self.exhausted = true;
+        self.idx = if self.reverse {
+            usize::MAX
+        } else {
+            self.items.len()
+        };
+    }
+
+    fn refill_forward(&mut self) {
+        if self.exhausted || self.items.is_empty() {
+            self.invalidate();
+            return;
+        }
+        let last = self.items[self.items.len() - 1].0.clone();
+        let start = Bound::Excluded(self.codec.encode(&self.cf, &last));
+        match page_forward(
+            &self.inner,
+            &self.codec,
+            &self.cf,
+            self.seq,
+            start,
+            bound_as_ref(&self.cf_end),
+            ITER_WINDOW,
+        ) {
+            Ok(page) if !page.is_empty() => {
+                self.items = page;
+                self.idx = 0;
+            }
+            _ => self.invalidate(),
+        }
+    }
+
+    fn refill_reverse(&mut self) {
+        if self.exhausted || self.items.is_empty() {
+            self.invalidate();
+            return;
+        }
+        let first = self.items[0].0.clone();
+        let end = Bound::Excluded(self.codec.encode(&self.cf, &first));
+        match page_last_n(
+            &self.inner,
+            &self.codec,
+            &self.cf,
+            self.seq,
+            bound_as_ref(&self.cf_start),
+            end,
+            ITER_WINDOW,
+        ) {
+            Ok(page) if !page.is_empty() => {
+                self.idx = page.len() - 1;
+                self.items = page;
+            }
+            _ => self.invalidate(),
+        }
+    }
+}
+
+fn page_forward<E: Env>(
+    inner: &Arc<Mutex<Db<E>>>,
+    codec: &KeyCodec,
+    cf: &str,
+    seq: pedradb_core::SequenceNumber,
+    start: Bound<Vec<u8>>,
+    end: Bound<&[u8]>,
+    limit: usize,
+) -> Result<Vec<(Vec<u8>, Vec<u8>)>> {
+    let db = inner.lock().expect("db mutex");
+    let s = bound_as_ref(&start);
+    Ok(db
+        .range_at_limited(seq, s, end, Some(limit))?
+        .into_iter()
+        .map(|(k, v)| (codec.decode(cf, &k).to_vec(), v.to_vec()))
+        .collect())
+}
+
+fn page_last_n<E: Env>(
+    inner: &Arc<Mutex<Db<E>>>,
+    codec: &KeyCodec,
+    cf: &str,
+    seq: pedradb_core::SequenceNumber,
+    start: Bound<&[u8]>,
+    end: Bound<Vec<u8>>,
+    n: usize,
+) -> Result<Vec<(Vec<u8>, Vec<u8>)>> {
+    let db = inner.lock().expect("db mutex");
+    let e = bound_as_ref(&end);
+    let mut ring: VecDeque<(Vec<u8>, Vec<u8>)> = VecDeque::with_capacity(n.saturating_add(1));
+    for pair in db.try_scan_at(seq, start, e, None)? {
+        if ring.len() == n {
+            ring.pop_front();
+        }
+        ring.push_back((codec.decode(cf, &pair.key).to_vec(), pair.value.to_vec()));
+    }
+    Ok(ring.into_iter().collect())
 }
 
 /// Read snapshot (sequence-pinned point + iterator reads).
@@ -320,7 +439,7 @@ impl<E: Env> Snapshot<'_, E> {
     ///
     /// # Errors
     /// Unknown CF or snapshot-too-old.
-    pub fn iterator(&self, mode: IteratorMode) -> Result<DBIterator> {
+    pub fn iterator(&self, mode: IteratorMode) -> Result<DBIterator<E>> {
         self.iterator_cf(&ColumnFamily { name: DEFAULT_CF.into() }, mode)
     }
 
@@ -328,10 +447,9 @@ impl<E: Env> Snapshot<'_, E> {
     ///
     /// # Errors
     /// Unknown CF or snapshot-too-old.
-    pub fn iterator_cf(&self, cf: &ColumnFamily, mode: IteratorMode) -> Result<DBIterator> {
-        let guard = self.db.inner.lock().expect("db mutex");
+    pub fn iterator_cf(&self, cf: &ColumnFamily, mode: IteratorMode) -> Result<DBIterator<E>> {
         scan_cf_at(
-            &guard,
+            &self.db.inner,
             &self.db.codec,
             &cf.name,
             mode,
@@ -341,68 +459,96 @@ impl<E: Env> Snapshot<'_, E> {
     }
 }
 
+fn cf_bounds(codec: &KeyCodec, cf: &str) -> (Bound<Vec<u8>>, Bound<Vec<u8>>) {
+    if codec.default_raw && cf == DEFAULT_CF {
+        (Bound::Unbounded, Bound::Unbounded)
+    } else {
+        let start = Bound::Included(codec.encode(cf, &[]));
+        let mut succ = codec.encode(cf, &[]);
+        *succ.last_mut().expect("prefix non-empty") = 1;
+        (start, Bound::Excluded(succ))
+    }
+}
+
 fn scan_cf_at<E: Env>(
-    db: &Db<E>,
+    inner: &Arc<Mutex<Db<E>>>,
     codec: &KeyCodec,
     cf: &str,
     mode: IteratorMode,
     seq: pedradb_core::SequenceNumber,
     known: &[String],
-) -> Result<DBIterator> {
+) -> Result<DBIterator<E>> {
     if cf != DEFAULT_CF && !known.iter().any(|c| c == cf) {
         return Err(Error(format!("column family not found: {cf}")));
     }
-    let start = match mode {
-        IteratorMode::From(k, Direction::Forward) => Bound::Included(k),
-        _ => Bound::Unbounded,
-    };
-    // Full-CF scan, then position (compat v0: eager).
-    // Bound the scan to this CF's keyspace so encoded keys of other CFs
-    // never leak into a full-CF iteration. Raw default (no named CFs) is the
-    // whole keyspace; prefixed CFs scan [prefix, prefix\x01).
-    let (start_b, end_b) = if codec.default_raw && cf == DEFAULT_CF {
-        (
-            encode_bound_ref(codec, cf, start),
-            Bound::<Vec<u8>>::Unbounded,
-        )
-    } else {
-        let s = match start {
-            Bound::Unbounded => Bound::Included(codec.encode(cf, &[])),
-            other => encode_bound_ref(codec, cf, other),
-        };
-        let mut succ = codec.encode(cf, &[]);
-        *succ.last_mut().expect("prefix non-empty") = 1; // \0 -> \x01 successor
-        (s, Bound::Excluded(succ))
-    };
-    let (s_ref, e_ref) = (bound_as_ref(&start_b), bound_as_ref(&end_b));
-    let items: Vec<(Vec<u8>, Vec<u8>)> = db
-        .range_at(seq, s_ref, e_ref)?
-        .into_iter()
-        .map(|(k, v)| (codec.decode(cf, &k).to_vec(), v.to_vec()))
-        .collect();
-    let (idx, reverse) = match mode {
-        IteratorMode::Start => (0, false),
-        IteratorMode::End => (items.len().saturating_sub(1), true),
-        IteratorMode::From(k, Direction::Forward) => (
-            items.partition_point(|(ik, _)| ik.as_slice() < k),
-            false,
-        ),
+    let (cf_start, cf_end) = cf_bounds(codec, cf);
+    let (items, idx, reverse) = match mode {
+        IteratorMode::Start | IteratorMode::From(_, Direction::Forward) => {
+            let user_lo = match mode {
+                IteratorMode::From(k, _) => Bound::Included(codec.encode(cf, k)),
+                _ => cf_start.clone(),
+            };
+            let page = page_forward(
+                inner,
+                codec,
+                cf,
+                seq,
+                user_lo,
+                bound_as_ref(&cf_end),
+                ITER_WINDOW,
+            )?;
+            (page, 0, false)
+        }
+        IteratorMode::End => {
+            let page = page_last_n(
+                inner,
+                codec,
+                cf,
+                seq,
+                bound_as_ref(&cf_start),
+                cf_end.clone(),
+                ITER_WINDOW,
+            )?;
+            let i = page.len().saturating_sub(1);
+            (page, i, true)
+        }
         IteratorMode::From(k, Direction::Reverse) => {
-            // Last index with key <= k.
-            let le = items.partition_point(|(ik, _)| ik.as_slice() <= k);
-            (le.saturating_sub(1), true)
+            let enc = codec.encode(cf, k);
+            let hi = match encoded_succ(&enc) {
+                Some(s) => Bound::Excluded(s),
+                None => cf_end.clone(),
+            };
+            let page = page_last_n(
+                inner,
+                codec,
+                cf,
+                seq,
+                bound_as_ref(&cf_start),
+                hi,
+                ITER_WINDOW,
+            )?;
+            let i = page.len().saturating_sub(1);
+            (page, i, true)
         }
     };
+    let exhausted = items.is_empty();
     Ok(DBIterator {
         items,
         idx,
         reverse,
+        inner: Arc::clone(inner),
+        codec: codec.clone(),
+        cf: cf.to_string(),
+        seq,
+        cf_start,
+        cf_end,
+        exhausted,
     })
 }
 
 /// rust-rocksdb-shaped database on top of a Pedra `Db`.
 pub struct DB<E: Env = StdEnv> {
-    inner: Mutex<Db<E>>,
+    inner: Arc<Mutex<Db<E>>>,
     cfs: Vec<String>,
     codec: KeyCodec,
 }
@@ -470,7 +616,7 @@ impl<E: Env> DB<E> {
         let db = Db::open_with_env(dir, pedradb_core::OpenOptions::default(), env)?;
         let codec = KeyCodec::new(&names);
         Ok(Self {
-            inner: Mutex::new(db),
+            inner: Arc::new(Mutex::new(db)),
             cfs: names,
             codec,
         })
@@ -627,7 +773,7 @@ impl<E: Env> DB<E> {
     ///
     /// # Errors
     /// Pedra scan errors.
-    pub fn iterator(&self, mode: IteratorMode) -> Result<DBIterator> {
+    pub fn iterator(&self, mode: IteratorMode) -> Result<DBIterator<E>> {
         self.iterator_cf(&ColumnFamily { name: DEFAULT_CF.into() }, mode)
     }
 
@@ -635,16 +781,9 @@ impl<E: Env> DB<E> {
     ///
     /// # Errors
     /// Unknown CF or Pedra scan errors.
-    pub fn iterator_cf(&self, cf: &ColumnFamily, mode: IteratorMode) -> Result<DBIterator> {
-        let guard = self.inner.lock().expect("db mutex");
-        scan_cf_at(
-            &guard,
-            &self.codec,
-            &cf.name,
-            mode,
-            guard.last_sequence(),
-            &self.cfs,
-        )
+    pub fn iterator_cf(&self, cf: &ColumnFamily, mode: IteratorMode) -> Result<DBIterator<E>> {
+        let seq = self.inner.lock().expect("db mutex").last_sequence();
+        scan_cf_at(&self.inner, &self.codec, &cf.name, mode, seq, &self.cfs)
     }
 
     /// Flush memtable to SST.
@@ -784,6 +923,51 @@ mod tests {
         db.put(b"log-1", b"d1").unwrap();
         assert_eq!(db.get_cf(&raft, b"log-1").unwrap().as_deref(), Some(&b"r1"[..]));
         assert_eq!(db.get(b"log-1").unwrap().as_deref(), Some(&b"d1"[..]));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn iterator_window_forward_matches_model() {
+        let dir = tmp("iterwin");
+        let db = DB::open_default(&dir).unwrap();
+        let n = 200usize;
+        for i in 0..n {
+            db.put(format!("k{i:04}").as_bytes(), [i as u8]).unwrap();
+        }
+        let mid = format!("k{:04}", 150);
+        let mut it = db
+            .iterator(IteratorMode::From(mid.as_bytes(), Direction::Forward))
+            .unwrap();
+        let got = it.collect_rest();
+        assert_eq!(got.len(), n - 150, "got {}", got.len());
+        assert_eq!(got[0].0, b"k0150");
+        assert_eq!(got.last().unwrap().0, b"k0199");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn latest_prefix_does_not_see_other_users() {
+        let dir = tmp("latestp");
+        let db = DB::open_default(&dir).unwrap();
+        for u in 0..80u8 {
+            for ver in 1..=3u8 {
+                let mut k = format!("u/{u:03}").into_bytes();
+                k.extend_from_slice(&u64::from(ver).to_be_bytes());
+                db.put(&k, [ver]).unwrap();
+            }
+        }
+        let prefix = format!("u/{:03}", 40).into_bytes();
+        let mut it = db
+            .iterator(IteratorMode::From(prefix.as_slice(), Direction::Forward))
+            .unwrap();
+        let mut last = None;
+        while it.valid() && it.key().starts_with(&prefix) {
+            last = Some(it.key().to_vec());
+            it.next();
+        }
+        let last = last.expect("user 40 has versions");
+        assert!(last.starts_with(&prefix));
+        assert_eq!(&last[prefix.len()..], &3u64.to_be_bytes());
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

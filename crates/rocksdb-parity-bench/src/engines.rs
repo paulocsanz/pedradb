@@ -88,21 +88,21 @@ impl Engine for CompatEngine {
         self.db.write(&wb).is_ok()
     }
     fn latest_cf(&self, cf: &str, prefix: &[u8]) -> Result<Option<Vec<u8>>, ()> {
+        // RFC-0032 P0.2: last key in [prefix, prefix_succ) — do not reverse-scan the CF.
         let h = self.db.cf_handle(cf).ok_or(())?;
-        let mut seek = prefix.to_vec();
-        seek.extend_from_slice(&u64::MAX.to_be_bytes());
-        let it = self
+        let mut it = self
             .db
             .iterator_cf(
                 &h,
-                rocksdb_compat::IteratorMode::From(&seek, rocksdb_compat::Direction::Reverse),
+                rocksdb_compat::IteratorMode::From(prefix, rocksdb_compat::Direction::Forward),
             )
             .map_err(|_| ())?;
-        if it.valid() && it.key().starts_with(prefix) {
-            Ok(Some(it.key().to_vec()))
-        } else {
-            Ok(None)
+        let mut last = None;
+        while it.valid() && it.key().starts_with(prefix) {
+            last = Some(it.key().to_vec());
+            it.next();
         }
+        Ok(last)
     }
     fn scan_count_cf(&self, cf: &str, start: &[u8], end: &[u8], cap: usize) -> Result<usize, ()> {
         let h = self.db.cf_handle(cf).ok_or(())?;

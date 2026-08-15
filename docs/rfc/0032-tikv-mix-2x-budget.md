@@ -64,9 +64,9 @@ Herdadas de [RFC-0031](0031-rocks-parity-10x-budget.md) G1–G8. Em particular:
 
 ### P0 — must ship first (useful alone)
 
-- [ ] **P0.1** Iterador do compat com janela bornada no *forward* (`range_at_limited` / refill; `collect_rest` recarrega até o bound do CF) — status: `todo`
-- [ ] **P0.2** `latest_cf` / SeekForPrev-shaped: last key em `[prefix, prefix_succ)` — **não** reverse-scan do CF inteiro — status: `todo`
-- [ ] **P0.3** Re-medir esta tabela (`tikv_ycsb_parity_v0.sh` + FULL_SYNC=1); MVCC latest e short scan ≥ floor 0.5 vs F_FULLFSYNC; adversarial iterator + `cargo test -p rocksdb-compat` sem editar asserção — status: `todo`
+- [x] **P0.1** Iterador do compat com janela bornada no *forward* (`range_at_limited` / refill; `collect_rest` recarrega até o bound do CF) — status: `done`
+- [x] **P0.2** `latest_cf` / SeekForPrev-shaped: last key em `[prefix, prefix_succ)` — **não** reverse-scan do CF inteiro — status: `done`
+- [ ] **P0.3** Re-medir esta tabela (`tikv_ycsb_parity_v0.sh` + FULL_SYNC=1); MVCC latest e short scan ≥ floor 0.5 vs F_FULLFSYNC; adversarial iterator + `cargo test -p rocksdb-compat` sem editar asserção — status: `todo` (P0.1/P0.2: mvcc 3.2→81 qps / p50 292→2.3 ms @1024/1KB; ainda ≪ floor 0.5)
 - [x] **P0.4** RFC + Status vivo (este doc) — status: `done`
 
 ### P1 — next wave
@@ -83,8 +83,8 @@ Herdadas de [RFC-0031](0031-rocks-parity-10x-budget.md) G1–G8. Em particular:
 
 | ID | Band | Title | Status | Task / PR | Updated |
 |----|------|-------|--------|-----------|---------|
-| P0.1 | p0 | iterator janela forward | todo | — | 2026-08-15 |
-| P0.2 | p0 | latest_cf prefix-bounded | todo | — | 2026-08-15 |
+| P0.1 | p0 | iterator janela forward | done | este commit | 2026-08-15 |
+| P0.2 | p0 | latest_cf prefix-bounded | done | este commit | 2026-08-15 |
 | P0.3 | p0 | re-medida MVCC/scan ≥ 0.5 | todo | — | 2026-08-15 |
 | P0.4 | p0 | RFC + status vivo | done | este doc | 2026-08-15 |
 | P1.1 | p1 | point-get C ≥ 0.5 | todo | — | 2026-08-15 |
