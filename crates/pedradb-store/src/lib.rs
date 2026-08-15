@@ -5257,7 +5257,7 @@ impl<E: Env> StoreCluster<E> {
             })
     }
 
-    /// Get LocalApplied from the freshest local PedraDB (F68).
+    /// Get LocalApplied from the freshest local PedraDB (F72).
     ///
     /// Multi-node in-process: prefer [`Self::best_changelog_reader`] so a lagging
     /// `ids[0]` is not the default read source (same class as F55/F62). Multi-host
