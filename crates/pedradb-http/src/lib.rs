@@ -177,15 +177,23 @@ fn read_req(stream: &mut TcpStream) -> Result<(String, String, Vec<u8>, Vec<(Str
 
 /// Extract bearer / X-Pedra-Token from headers.
 fn header_token(headers: &[(String, String)]) -> Option<&str> {
+    // F149: Authorization (RFC 9110) wins over X-Pedra-Token; custom header is
+    // fallback only (was first-match and shadowed a valid Bearer).
+    // F150: non-Bearer Authorization (e.g. Basic) must not stop the scan —
+    // keep looking for a later Bearer (or fall back to X-Pedra-Token).
+    let mut x_pedra = None;
     for (k, v) in headers {
-        if k == "x-pedra-token" {
-            return Some(v.as_str());
-        }
         if k == "authorization" {
-            return bearer_token_from_value(v);
+            if let Some(t) = bearer_token_from_value(v) {
+                return Some(t);
+            }
+            continue;
+        }
+        if k == "x-pedra-token" && x_pedra.is_none() {
+            x_pedra = Some(v.as_str());
         }
     }
-    None
+    x_pedra
 }
 
 fn authorize(headers: &[(String, String)], token: &Option<String>) -> bool {
@@ -857,6 +865,80 @@ mod tests {
         let (code, body) = http_exchange_auth(addr, "GET", "/kv/x", b"", Some("sekrit")).unwrap();
         assert_eq!(code, 200);
         assert_eq!(body, b"y");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// F149: `X-Pedra-Token` listed first used to shadow a valid Authorization.
+    #[test]
+    fn kv_http_authorization_not_shadowed_by_x_pedra_token() {
+        let dir = temp("auth-shadow");
+        let addr = bind_ephemeral();
+        let srv = KvServer::open_with_auth(&dir, Some("sekrit".into())).unwrap();
+        thread::spawn(move || {
+            let _ = srv.serve(addr);
+        });
+        thread::sleep(Duration::from_millis(100));
+        let mut stream = TcpStream::connect(addr).unwrap();
+        stream
+            .write_all(
+                b"PUT /kv/sh HTTP/1.0\r\nX-Pedra-Token: nope\r\nAuthorization: Bearer sekrit\r\nContent-Length: 2\r\nHost: localhost\r\n\r\nok",
+            )
+            .unwrap();
+        let _ = stream.shutdown(std::net::Shutdown::Write);
+        let mut resp = Vec::new();
+        let _ = stream.read_to_end(&mut resp);
+        let text = String::from_utf8_lossy(&resp);
+        let put_code = text
+            .lines()
+            .next()
+            .and_then(|l| l.split_whitespace().nth(1))
+            .and_then(|c| c.parse::<u16>().ok())
+            .unwrap_or(0);
+        assert_eq!(
+            put_code, 200,
+            "valid Bearer must win over a dummy X-Pedra-Token, got {put_code} {text:?}"
+        );
+        let (code, body) =
+            http_exchange_auth(addr, "GET", "/kv/sh", b"", Some("sekrit")).unwrap();
+        assert_eq!(code, 200, "GET after dual-header PUT, body={body:?}");
+        assert_eq!(body, b"ok");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// F150: first `Authorization: Basic` used to shadow a later Bearer.
+    #[test]
+    fn kv_http_bearer_not_shadowed_by_earlier_basic() {
+        let dir = temp("auth-basic");
+        let addr = bind_ephemeral();
+        let srv = KvServer::open_with_auth(&dir, Some("sekrit".into())).unwrap();
+        thread::spawn(move || {
+            let _ = srv.serve(addr);
+        });
+        thread::sleep(Duration::from_millis(100));
+        let mut stream = TcpStream::connect(addr).unwrap();
+        stream
+            .write_all(
+                b"PUT /kv/ba HTTP/1.0\r\nAuthorization: Basic YWJj\r\nAuthorization: Bearer sekrit\r\nContent-Length: 2\r\nHost: localhost\r\n\r\nok",
+            )
+            .unwrap();
+        let _ = stream.shutdown(std::net::Shutdown::Write);
+        let mut resp = Vec::new();
+        let _ = stream.read_to_end(&mut resp);
+        let text = String::from_utf8_lossy(&resp);
+        let put_code = text
+            .lines()
+            .next()
+            .and_then(|l| l.split_whitespace().nth(1))
+            .and_then(|c| c.parse::<u16>().ok())
+            .unwrap_or(0);
+        assert_eq!(
+            put_code, 200,
+            "Bearer after Basic must authenticate, got {put_code} {text:?}"
+        );
+        let (code, body) =
+            http_exchange_auth(addr, "GET", "/kv/ba", b"", Some("sekrit")).unwrap();
+        assert_eq!(code, 200, "GET after Basic+Bearer PUT, body={body:?}");
+        assert_eq!(body, b"ok");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

@@ -52,7 +52,12 @@ pub fn is_bearer_scheme_as_is(scheme: &str) -> bool {
     scheme == "Bearer" || scheme == "bearer"
 }
 
-/// Token after a Bearer scheme, or the whole value if the scheme is not Bearer.
+/// Token after a Bearer scheme.
+///
+/// - `Bearer <tok>` / `BEARER <tok>` → `Some(tok)` (F85)
+/// - Other auth-scheme (`Basic …`, `Digest …`) → `None` so the caller can keep
+///   scanning (F150 — first Basic must not lock out a later Bearer)
+/// - Bare value with no scheme → `Some(value)` (legacy)
 #[must_use]
 pub fn bearer_token_from_value(value: &str) -> Option<&str> {
     let v = value.trim();
@@ -60,6 +65,7 @@ pub fn bearer_token_from_value(value: &str) -> Option<&str> {
         if is_bearer_scheme(scheme) {
             return Some(rest.trim());
         }
+        return None;
     }
     Some(v)
 }
@@ -84,6 +90,10 @@ mod tests {
         assert_eq!(bearer_token_from_value("BEARER sekrit"), Some("sekrit"));
         assert_eq!(bearer_token_from_value("Bearer sekrit"), Some("sekrit"));
         assert_ne!(is_bearer_scheme("BEARER"), is_bearer_scheme_as_is("BEARER"));
+        // F150: non-Bearer schemes are not bearer tokens.
+        assert_eq!(bearer_token_from_value("Basic YWJj"), None);
+        assert_eq!(bearer_token_from_value("Digest abc"), None);
+        assert_eq!(bearer_token_from_value("bare"), Some("bare"));
     }
 
     #[test]
