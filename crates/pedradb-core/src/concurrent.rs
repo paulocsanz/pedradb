@@ -269,10 +269,21 @@ impl<E: Env> ConcurrentDb<E> {
         self.inner.read().write_stall_drain()
     }
 
-    /// Writes refused by L0 stall.
+    /// Writes refused by L0 / mem stall.
     #[must_use]
     pub fn write_stall_count(&self) -> u64 {
         self.inner.read().write_stall_count()
+    }
+
+    /// Memtable stall threshold (see [`Db::set_write_stall_mem_bytes`]).
+    pub fn set_write_stall_mem_bytes(&self, bytes: Option<usize>) {
+        self.inner.write().set_write_stall_mem_bytes(bytes);
+    }
+
+    /// Current memtable stall threshold in bytes, if enabled.
+    #[must_use]
+    pub fn write_stall_mem_bytes(&self) -> Option<usize> {
+        self.inner.read().write_stall_mem_bytes()
     }
 
     /// Blob rotate cap (see [`Db::set_vlog_rotate_bytes`]).

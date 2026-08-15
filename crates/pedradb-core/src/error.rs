@@ -92,6 +92,18 @@ pub enum CoreError {
         /// Configured stall threshold.
         limit: usize,
     },
+
+    /// Write refused because the active memtable is too large (open-items §2.3 option c).
+    ///
+    /// Bound against unbounded mem growth when flush cannot keep up. Off by default
+    /// (`set_write_stall_mem_bytes`). With drain enabled, one flush is attempted first.
+    #[error("write stall: memtable ~{mem_bytes}B (limit {limit}B)")]
+    WriteStallMem {
+        /// Approximate active memtable bytes.
+        mem_bytes: usize,
+        /// Configured stall threshold in bytes.
+        limit: usize,
+    },
 }
 
 /// Convenience `Result` alias used throughout the crate.

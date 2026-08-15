@@ -171,10 +171,12 @@ pub struct DbStats {
     pub snapshot_pin_count: usize,
     /// Whether auto-compact uses pin-aware reclaim (session setter).
     pub auto_reclaim: bool,
-    /// Writes refused by L0 write stall (open-items §2.3).
+    /// Writes refused by L0 / mem write stall (open-items §2.3).
     pub write_stall_count: u64,
     /// Configured L0 stall limit (`0` = disabled).
     pub write_stall_l0: u64,
+    /// Configured mem stall limit in bytes (`0` = disabled).
+    pub write_stall_mem_bytes: u64,
 }
 
 /// Per-blob GC stats for operator / auto-pick (RFC-0029 P1.1).
@@ -229,14 +231,15 @@ impl DbStats {
     #[must_use]
     pub fn gc_line(&self) -> String {
         format!(
-            "earliest_readable={} pins={} auto_reclaim={} compact={} auto_compact_fail={} write_stall={} (l0_limit={})",
+            "earliest_readable={} pins={} auto_reclaim={} compact={} auto_compact_fail={} write_stall={} (l0_limit={} mem_limit={})",
             self.earliest_readable_seq,
             self.snapshot_pin_count,
             self.auto_reclaim,
             self.compact_count,
             self.auto_compact_failures,
             self.write_stall_count,
-            self.write_stall_l0
+            self.write_stall_l0,
+            self.write_stall_mem_bytes
         )
     }
 }
@@ -500,9 +503,11 @@ pub struct Db<E: Env = StdEnv> {
     auto_reclaim: bool,
     /// When `Some(n)`, refuse writes if L0 SST count ≥ n (open-items §2.3).
     write_stall_l0: Option<usize>,
+    /// When `Some(n)`, refuse writes if active mem ≈ ≥ n bytes (open-items §2.3 c).
+    write_stall_mem_bytes: Option<usize>,
     /// When true with a stall limit: one flush+compact attempt before refusing.
     write_stall_drain: bool,
-    /// Count of writes refused by L0 stall.
+    /// Count of writes refused by L0 / mem stall.
     write_stall_count: u64,
     /// Open [`SnapshotPin`]s: pin id → sequence (open-items §2.1).
     snapshot_pins: std::collections::BTreeMap<u64, SequenceNumber>,
@@ -706,6 +711,7 @@ impl<E: Env> Db<E> {
             auto_blob_gc_min_ratio: None,
             auto_reclaim: false,
             write_stall_l0: None,
+            write_stall_mem_bytes: None,
             write_stall_drain: false,
             write_stall_count: 0,
             snapshot_pins: std::collections::BTreeMap::new(),
@@ -1037,10 +1043,24 @@ impl<E: Env> Db<E> {
         self.write_stall_drain
     }
 
-    /// Times a write was refused for L0 stall (observability).
+    /// Times a write was refused for L0 or mem stall (observability).
     #[must_use]
     pub fn write_stall_count(&self) -> u64 {
         self.write_stall_count
+    }
+
+    /// Opt-in write stall when active memtable ≈ ≥ `bytes` (open-items §2.3 c).
+    ///
+    /// `None` or `0` disables (default). Bounds mem growth when auto-flush cannot
+    /// keep up. With [`Self::set_write_stall_drain`], one flush is tried first.
+    pub fn set_write_stall_mem_bytes(&mut self, bytes: Option<usize>) {
+        self.write_stall_mem_bytes = bytes.filter(|n| *n > 0);
+    }
+
+    /// Current memtable stall threshold in bytes, if enabled.
+    #[must_use]
+    pub fn write_stall_mem_bytes(&self) -> Option<usize> {
+        self.write_stall_mem_bytes
     }
 
     /// Current auto blob-GC threshold, if enabled.
@@ -1432,6 +1452,7 @@ impl<E: Env> Db<E> {
             auto_reclaim: self.auto_reclaim,
             write_stall_count: self.write_stall_count,
             write_stall_l0: self.write_stall_l0.unwrap_or(0) as u64,
+            write_stall_mem_bytes: self.write_stall_mem_bytes.unwrap_or(0) as u64,
         }
     }
 
@@ -3324,6 +3345,11 @@ impl<E: Env> Db<E> {
                     .map(|_| Err(CoreError::WriteStall { l0_files, limit }))
                     .collect();
             }
+            Err(CoreError::WriteStallMem { mem_bytes, limit }) => {
+                return (0..n)
+                    .map(|_| Err(CoreError::WriteStallMem { mem_bytes, limit }))
+                    .collect();
+            }
             Err(e) => {
                 let msg = e.to_string();
                 return (0..n)
@@ -3453,8 +3479,23 @@ impl<E: Env> Db<E> {
         Ok(())
     }
 
-    /// Refuse writes when L0 is at/above the stall limit (open-items §2.3).
+    /// Refuse writes when L0 or mem is at/above stall limits (open-items §2.3).
     pub(crate) fn ensure_write_admitted(&mut self) -> Result<()> {
+        // Mem bound first: flush is the natural drain for mem pressure.
+        if let Some(limit) = self.write_stall_mem_bytes {
+            let mut mem_bytes = self.mem.approx_memory_usage();
+            if mem_bytes >= limit {
+                if self.write_stall_drain {
+                    let _ = self.flush();
+                    mem_bytes = self.mem.approx_memory_usage();
+                }
+                if mem_bytes >= limit {
+                    self.write_stall_count = self.write_stall_count.saturating_add(1);
+                    return Err(CoreError::WriteStallMem { mem_bytes, limit });
+                }
+            }
+        }
+
         let Some(limit) = self.write_stall_l0 else {
             return Ok(());
         };
@@ -5347,6 +5388,81 @@ mod tests {
             db.put(b"c", b"3").unwrap();
             assert_eq!(db.get(b"c").as_deref(), Some(b"3".as_ref()));
         }
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Mem stall without drain: put fails when active mem exceeds limit.
+    #[test]
+    fn write_stall_mem_refuses_when_over_limit() {
+        let dir = temp_dir();
+        let mut db = Db::open_with(
+            &dir,
+            OpenOptions {
+                sync: true,
+                auto_flush_bytes: None, // no auto flush — mem grows
+                auto_compact_sst_count: None,
+                auto_compact_sst_bytes: None,
+                exclusive: true,
+                large_value_threshold: None,
+            },
+        )
+        .unwrap();
+        // Tiny limit: one modest put should exceed after a few writes.
+        db.set_write_stall_mem_bytes(Some(64));
+        assert_eq!(db.write_stall_mem_bytes(), Some(64));
+        let payload = vec![0xABu8; 40];
+        db.put(b"a", &payload).unwrap(); // first write under/near limit
+        // Keep putting until stall (no drain).
+        let mut stalled = false;
+        for i in 0..20u8 {
+            match db.put([b'k', i], &payload) {
+                Ok(()) => {}
+                Err(CoreError::WriteStallMem { mem_bytes, limit }) => {
+                    assert!(mem_bytes >= limit);
+                    assert_eq!(limit, 64);
+                    stalled = true;
+                    break;
+                }
+                Err(e) => panic!("unexpected {e:?}"),
+            }
+        }
+        assert!(stalled, "expected WriteStallMem");
+        assert!(db.write_stall_count() >= 1);
+        // Explicit flush clears mem; writes resume.
+        db.flush().unwrap();
+        db.put(b"after", b"ok").unwrap();
+        assert_eq!(db.get(b"after").as_deref(), Some(b"ok".as_ref()));
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Mem stall + drain: flush admits the write.
+    #[test]
+    fn write_stall_mem_drain_flushes() {
+        let dir = temp_dir();
+        let mut db = Db::open_with(
+            &dir,
+            OpenOptions {
+                sync: true,
+                auto_flush_bytes: None,
+                auto_compact_sst_count: None,
+                auto_compact_sst_bytes: None,
+                exclusive: true,
+                large_value_threshold: None,
+            },
+        )
+        .unwrap();
+        let payload = vec![0xCDu8; 80];
+        db.put(b"seed", &payload).unwrap();
+        // seed alone is large enough that mem is over a 64B stall limit.
+        db.set_write_stall_mem_bytes(Some(64));
+        db.set_write_stall_drain(true);
+        let stalls_before = db.write_stall_count();
+        db.put(b"ok", b"1").unwrap();
+        assert_eq!(db.get(b"ok").as_deref(), Some(b"1".as_ref()));
+        assert_eq!(db.write_stall_count(), stalls_before);
+        assert!(db.sst_count() >= 1, "drain should have flushed");
         db.close().unwrap();
         let _ = fs::remove_dir_all(&dir);
     }
