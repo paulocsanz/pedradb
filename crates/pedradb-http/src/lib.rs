@@ -326,10 +326,11 @@ fn query_param(path: &str, key: &str) -> Option<String> {
     None
 }
 
-/// Origin-form path for routing (strip query; accept absolute-form request-target).
+/// Origin-form path for routing (strip query; accept absolute / network-path forms).
 ///
 /// F91: proxies/clients may send `http://host/kv/x` (absolute-form). A raw
 /// `strip_prefix("/kv/")` then failed and every route 404'd.
+/// F92: network-path-reference `//host/kv/x` (no scheme) had the same miss.
 fn path_only(path: &str) -> &str {
     let mut p = path;
     // Absolute-form: scheme://authority/path?query
@@ -339,6 +340,9 @@ fn path_only(path: &str) -> &str {
         .or_else(|| p.strip_prefix("HTTP://"))
         .or_else(|| p.strip_prefix("HTTPS://"))
     {
+        p = rest.find('/').map(|i| &rest[i..]).unwrap_or("/");
+    } else if let Some(rest) = p.strip_prefix("//") {
+        // F92: network-path-reference //authority/path (no scheme)
         p = rest.find('/').map(|i| &rest[i..]).unwrap_or("/");
     }
     p.split_once('?').map(|(a, _)| a).unwrap_or(p)
@@ -844,6 +848,45 @@ mod tests {
         assert_eq!(path_only("https://h/kv/a%2Fb?q=1"), "/kv/a%2Fb");
         assert_eq!(path_only("HTTP://H/dcs/kv/k"), "/dcs/kv/k");
         assert_eq!(path_only("http://only-host"), "/");
+        // F92: network-path-reference (no scheme)
+        assert_eq!(path_only("//127.0.0.1:9/kv/x"), "/kv/x");
+        assert_eq!(path_only("//h/dcs/kv/k?rev=1"), "/dcs/kv/k");
+        assert_eq!(path_only("//only-host"), "/");
+    }
+
+    /// F92: network-path `//host/kv/k` must route like origin-form.
+    #[test]
+    fn kv_http_network_path_request_target() {
+        let dir = temp("net-path");
+        let addr = bind_ephemeral();
+        let srv = KvServer::open(&dir).unwrap();
+        thread::spawn(move || {
+            let _ = srv.serve(addr);
+        });
+        thread::sleep(Duration::from_millis(100));
+        let mut stream = TcpStream::connect(addr).unwrap();
+        let host = format!("{addr}");
+        let req = format!(
+            "PUT //{host}/kv/np HTTP/1.0\r\nContent-Length: 2\r\nHost: {host}\r\n\r\nok"
+        );
+        stream.write_all(req.as_bytes()).unwrap();
+        let _ = stream.shutdown(std::net::Shutdown::Write);
+        let mut resp = Vec::new();
+        stream.read_to_end(&mut resp).unwrap();
+        let text = String::from_utf8_lossy(&resp);
+        let put_code = text
+            .lines()
+            .next()
+            .and_then(|l| l.split_whitespace().nth(1))
+            .and_then(|c| c.parse::<u16>().ok())
+            .unwrap_or(0);
+        assert_eq!(
+            put_code, 200,
+            "network-path PUT must route to /kv/np, resp={text:?}"
+        );
+        let (code, body) = http_exchange(addr, "GET", "/kv/np", b"").unwrap();
+        assert_eq!((code, body.as_slice()), (200, b"ok".as_slice()));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// F91: absolute-form `PUT http://host/kv/k` must not 404 the route.

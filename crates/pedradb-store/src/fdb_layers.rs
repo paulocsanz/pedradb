@@ -16,10 +16,12 @@ fn retry_loop<T>(mut once: impl FnMut() -> Result<T>) -> Result<T> {
     for _ in 0..LAYER_RETRY_LIMIT {
         match once() {
             Ok(v) => return Ok(v),
-            Err(e @ (StoreError::NotCommitted { .. }
-            | StoreError::NotLeader { .. }
-            | StoreError::Conflict
-            | StoreError::TransactionTooOld { .. })) => {
+            Err(
+                e @ (StoreError::NotCommitted { .. }
+                | StoreError::NotLeader { .. }
+                | StoreError::Conflict
+                | StoreError::TransactionTooOld { .. }),
+            ) => {
                 last = Some(e);
             }
             Err(e) => return Err(e),
@@ -44,7 +46,9 @@ impl NaiveAllocator {
     pub fn allocate(cluster: &mut StoreCluster) -> Result<Vec<u8>> {
         retry_loop(|| {
             let mut tr = cluster.begin();
-            let raw = tr.get(cluster, Self::NEXT)?.unwrap_or_else(|| b"0".to_vec());
+            let raw = tr
+                .get(cluster, Self::NEXT)?
+                .unwrap_or_else(|| b"0".to_vec());
             let n: u64 = std::str::from_utf8(&raw)
                 .ok()
                 .and_then(|s| s.parse().ok())
@@ -100,7 +104,9 @@ impl SafeAllocator {
                 let _ = tr.commit(cluster);
                 return Ok(existing);
             }
-            let raw = tr.get(cluster, Self::NEXT)?.unwrap_or_else(|| b"0".to_vec());
+            let raw = tr
+                .get(cluster, Self::NEXT)?
+                .unwrap_or_else(|| b"0".to_vec());
             let n: u64 = std::str::from_utf8(&raw)
                 .ok()
                 .and_then(|s| s.parse().ok())
@@ -232,11 +238,7 @@ impl IdempotentIndex {
         let value = value.to_vec();
         retry_loop(|| {
             let mut tr = cluster.begin();
-            let dkey = {
-                let mut k = Self::DATA.to_vec();
-                k.extend_from_slice(&key);
-                k
-            };
+            let dkey = Self::data_key(&key);
             if let Some(old) = tr.get(cluster, &dkey)? {
                 if old != value {
                     tr.clear(&Self::idx_key(&old, &key))?;
@@ -256,16 +258,14 @@ impl IdempotentIndex {
     /// Store get errors.
     pub fn get(cluster: &StoreCluster, key: &[u8]) -> Result<Option<Vec<u8>>> {
         let mut tr = Transaction::at_version(cluster.read_version());
-        let mut dkey = Self::DATA.to_vec();
-        dkey.extend_from_slice(key);
-        tr.get(cluster, dkey)
+        tr.get(cluster, Self::data_key(key))
     }
 
     /// Keys indexed under `value`.
     ///
-    /// Reverse keys are `IDX || u32be(len(value)) || value || 0x00 || user_key`
-    /// (F78). F61 used `IDX || value || 0x00 || key`, which stopped slash
-    /// siblings (`red` ⊃ `red/foo`) but not NUL siblings (`red` ⊃ `red\0foo`).
+    /// Reverse keys are
+    /// `IDX || u32be(len(value)) || value || 0x00 || u32be(len(key)) || key`
+    /// (F78 value; F93 user key length-prefix).
     ///
     /// # Errors
     /// Store range errors.
@@ -277,32 +277,53 @@ impl IdempotentIndex {
         Ok(pairs
             .into_iter()
             .filter(|(_, v)| !v.is_empty())
-            .filter_map(|(k, _)| k.get(n..).map(Vec::from))
+            .filter_map(|(k, _)| {
+                let rest = k.get(n..)?;
+                // F93: length-prefixed user key after the value child sep.
+                if rest.len() < 4 {
+                    return None;
+                }
+                let ulen = u32::from_be_bytes(rest[0..4].try_into().ok()?) as usize;
+                if rest.len() != 4 + ulen {
+                    // Legacy raw user key (pre-F93): accept remainder as key.
+                    return Some(rest.to_vec());
+                }
+                Some(rest[4..].to_vec())
+            })
             .collect())
     }
 
-    fn push_idx_value(buf: &mut Vec<u8>, value: &[u8]) {
-        let n = u32::try_from(value.len()).expect("index value len fits u32");
+    fn push_len(buf: &mut Vec<u8>, part: &[u8]) {
+        let n = u32::try_from(part.len()).expect("index component len fits u32");
         buf.extend_from_slice(&n.to_be_bytes());
-        buf.extend_from_slice(value);
+        buf.extend_from_slice(part);
+    }
+
+    /// F93: data keys are `DATA || u32be(len) || key` so `DATA||a` is not a
+    /// byte-prefix of `DATA||ab` under half-open scans.
+    fn data_key(key: &[u8]) -> Vec<u8> {
+        let mut k = Self::DATA.to_vec();
+        Self::push_len(&mut k, key);
+        k
+    }
+
+    fn idx_prefix(value: &[u8]) -> Vec<u8> {
+        let mut idx = Self::IDX.to_vec();
+        idx.extend_from_slice(&crate::len_pref_value(value));
+        idx
     }
 
     fn idx_key(value: &[u8], key: &[u8]) -> Vec<u8> {
-        let mut idx = Self::IDX.to_vec();
-        Self::push_idx_value(&mut idx, value);
+        let mut idx = Self::idx_prefix(value);
         idx.push(0x00);
-        idx.extend_from_slice(key);
+        // F93: length-prefix user key (was raw concat).
+        Self::push_len(&mut idx, key);
         idx
     }
 
     /// `[IDX||len||value||0x00, IDX||len||value||0x01)` — exact value, any user key.
     fn idx_children(value: &[u8]) -> (Vec<u8>, Vec<u8>) {
-        let mut start = Self::IDX.to_vec();
-        Self::push_idx_value(&mut start, value);
-        start.push(0x00);
-        let mut end = start.clone();
-        *end.last_mut().unwrap() = 0x01;
-        (start, end)
+        crate::exact_value_children(&Self::idx_prefix(value))
     }
 }
 
@@ -417,7 +438,10 @@ mod tests {
         );
         let red = IdempotentIndex::keys_for(&c, b"red").unwrap();
         let blue = IdempotentIndex::keys_for(&c, b"blue").unwrap();
-        assert!(red.is_empty(), "old index entry must be cleared, got {red:?}");
+        assert!(
+            red.is_empty(),
+            "old index entry must be cleared, got {red:?}"
+        );
         assert_eq!(blue.len(), 2, "k1+k2 under blue, got {blue:?}");
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -469,7 +493,8 @@ mod tests {
             "k1 missing under red: {red:?}"
         );
         assert!(
-            !red.iter().any(|k| k.as_slice() == b"k2" || k.windows(3).any(|w| w == b"foo")),
+            !red.iter()
+                .any(|k| k.as_slice() == b"k2" || k.windows(3).any(|w| w == b"foo")),
             "keys_for(red) included sibling value red/foo: {red:?}"
         );
         let long = IdempotentIndex::keys_for(&c, b"red/foo").unwrap();
@@ -522,6 +547,51 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// F93: data keys were `DATA || key` so `DATA||a` is a byte-prefix of
+    /// `DATA||ab` — a half-open prefix scan of one id leaked the sibling.
+    #[test]
+    fn idempotent_index_data_key_not_prefix_of_sibling_id() {
+        let dir = temp();
+        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        c.elect_all(80).unwrap();
+        IdempotentIndex::put(&mut c, b"a", b"va").unwrap();
+        IdempotentIndex::put(&mut c, b"ab", b"vab").unwrap();
+        assert_eq!(
+            IdempotentIndex::get(&c, b"a").unwrap().as_deref(),
+            Some(b"va".as_ref())
+        );
+        assert_eq!(
+            IdempotentIndex::get(&c, b"ab").unwrap().as_deref(),
+            Some(b"vab".as_ref())
+        );
+        let dk_a = IdempotentIndex::data_key(b"a");
+        let dk_ab = IdempotentIndex::data_key(b"ab");
+        assert!(
+            !dk_ab.starts_with(&dk_a),
+            "data_key(a) must not be a prefix of data_key(ab): {dk_a:?} vs {dk_ab:?}"
+        );
+        let end = crate::prefix_exclusive_end(&dk_a);
+        let hits = c
+            .keys_in_range_at(&dk_a, end.as_deref().unwrap_or(&[]), c.read_version())
+            .unwrap();
+        assert_eq!(
+            hits.len(),
+            1,
+            "prefix scan of data_key(a) leaked siblings: {hits:?}"
+        );
+        assert_eq!(hits[0].0, dk_a);
+        // Reverse index still lists exact user keys.
+        assert_eq!(
+            IdempotentIndex::keys_for(&c, b"va").unwrap(),
+            vec![b"a".to_vec()]
+        );
+        assert_eq!(
+            IdempotentIndex::keys_for(&c, b"vab").unwrap(),
+            vec![b"ab".to_vec()]
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn safe_list_no_dup_on_crash_retry() {
         let dir = temp();
@@ -535,7 +605,11 @@ mod tests {
         c.elect_all(80).unwrap();
         SafeList::append(&mut c, b"item", b"tok-1").unwrap();
         let items = SafeList::items(&c).unwrap();
-        assert_eq!(items.len(), 1, "safe list must not duplicate, got {items:?}");
+        assert_eq!(
+            items.len(),
+            1,
+            "safe list must not duplicate, got {items:?}"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -44,39 +44,28 @@
 #![warn(missing_docs)]
 
 mod ae_ack_kernel;
+pub mod client;
 mod commit_kernel;
 mod compact_kernel;
-mod si_kernel;
-mod snapshot_kernel;
-mod txn_kernel;
-mod msg;
-pub mod client;
-pub mod fdb_compat;
-pub mod fdb_layers;
 /// Thin C ABI for fdb-compat plug tests (RFC-0023 P2.2). Feature `c-api`.
 #[cfg(feature = "c-api")]
 #[allow(unsafe_code)]
 pub mod fdb_c;
+pub mod fdb_compat;
+pub mod fdb_layers;
+mod index_val_kernel;
 pub mod layers;
+mod msg;
+mod si_kernel;
+mod snapshot_kernel;
 pub mod tcp;
+mod txn_kernel;
 
+pub use ae_ack_kernel::{ae_ack_success, ae_ack_success_as_is};
 pub use client::{
     classify, classify_message, leader_from_status, leaders_from_status, ClientClass, PendingTx,
     SnapshotTx, TcpClusterClient, Transaction, MAX_SNAPSHOT_LAG,
 };
-pub use fdb_compat::{
-    run_phase1_bindingtester_subset, FdbDatabase, FdbError, FdbTransaction, Phase1HarnessReport,
-};
-pub use fdb_layers::{
-    IdempotentIndex, NaiveAllocator, NaiveList, SafeAllocator, SafeList,
-};
-pub use layers::{
-    olap_get, olap_ingest, olap_list_at, olap_stream_range, pg_upsert, pks_one_per_range,
-    put_with_secondary_index, raw_keys_one_per_range, sql_multi_table_write, stream_get,
-    stream_list_at, stream_publish, table_get, table_put,
-    table_row_key, EtcdNeedFace, TikvKvFace, WatchEvent, WatchHub,
-};
-pub use ae_ack_kernel::{ae_ack_success, ae_ack_success_as_is};
 pub use commit_kernel::{
     may_commit_at, may_commit_at_as_is, propose_ack_ok, propose_ack_ok_as_is, recover_commit,
     recover_commit_as_is,
@@ -85,26 +74,40 @@ pub use compact_kernel::{
     compact_index_floor, compact_ready, may_compact_through, may_compact_through_as_is,
     peer_counts_for_compact, peer_counts_for_compact_as_is,
 };
-pub use si_kernel::{si_reader_beats, si_reader_beats_as_is};
-pub use snapshot_kernel::{
-    snapshot_needs_txn_meta_clear, snapshot_needs_txn_meta_clear_as_is,
-    snapshot_touches_user_key, snapshot_touches_user_key_as_is,
+pub use fdb_compat::{
+    run_phase1_bindingtester_subset, FdbDatabase, FdbError, FdbTransaction, Phase1HarnessReport,
 };
-pub use txn_kernel::{
-    discard_cut, discard_cut_as_is, leftover_txn_is_aborted, leftover_txn_is_aborted_as_is,
-    next_txn_id_after, next_txn_id_as_is, prepare_error_aborts_earlier,
-    prepare_error_aborts_earlier_as_is, recover_si_generation, recover_si_generation_as_is,
-    revert_clears_status, revert_clears_status_as_is, revert_user_action, revert_user_action_as_is,
-    reserve_si_gen, reserve_si_gen_as_is, should_repair_si_hist, should_repair_si_hist_as_is,
-    txn_commit_action, txn_commit_action_as_is, unreserve_si_gen, RevertUserAction, SiGenReserve,
-    TxnCommitAction,
+pub use fdb_layers::{IdempotentIndex, NaiveAllocator, NaiveList, SafeAllocator, SafeList};
+pub use index_val_kernel::{
+    exact_value_children, exact_value_children_as_is, len_pref_value, len_pref_value_as_is,
+    value_len_tag, value_len_tag_as_is,
+};
+pub use layers::{
+    olap_get, olap_ingest, olap_list_at, olap_stream_range, pg_upsert, pks_one_per_range,
+    put_with_secondary_index, raw_keys_one_per_range, sql_multi_table_write, stream_get,
+    stream_list_at, stream_publish, table_get, table_put, table_row_key, EtcdNeedFace, TikvKvFace,
+    WatchEvent, WatchHub,
 };
 pub use msg::PeerMsg;
+pub use si_kernel::{si_reader_beats, si_reader_beats_as_is};
+pub use snapshot_kernel::{
+    snapshot_needs_txn_meta_clear, snapshot_needs_txn_meta_clear_as_is, snapshot_touches_user_key,
+    snapshot_touches_user_key_as_is,
+};
 pub use tcp::{
     client_commit_tx, client_dcs_cas, client_dcs_create, client_dcs_get, client_get, client_put,
     client_put_batch, client_set_peers, client_status, client_tick, connect as tcp_connect,
     connect_host as tcp_connect_host, peer_wire, read_frame, resolve_host_port, write_frame,
     WireMsg,
+};
+pub use txn_kernel::{
+    discard_cut, discard_cut_as_is, leftover_txn_is_aborted, leftover_txn_is_aborted_as_is,
+    next_txn_id_after, next_txn_id_as_is, prepare_error_aborts_earlier,
+    prepare_error_aborts_earlier_as_is, recover_si_generation, recover_si_generation_as_is,
+    reserve_si_gen, reserve_si_gen_as_is, revert_clears_status, revert_clears_status_as_is,
+    revert_user_action, revert_user_action_as_is, should_repair_si_hist,
+    should_repair_si_hist_as_is, txn_commit_action, txn_commit_action_as_is, unreserve_si_gen,
+    RevertUserAction, SiGenReserve, TxnCommitAction,
 };
 /// Pedra open knobs under each Montanha node (RFC-0025 P0.1).
 ///
@@ -136,9 +139,7 @@ use std::path::{Path, PathBuf};
 
 use bytes::Bytes;
 use pedradb_core::{BatchOp, Db, Env, Host, OpenOptions, Rng, SeedRng, StdEnv};
-use pedradb_dcs::{
-    apply_dcs_command, check_command_at, dcs_get, dcs_get_at, DcsCommand, KeyValue,
-};
+use pedradb_dcs::{apply_dcs_command, check_command_at, dcs_get, dcs_get_at, DcsCommand, KeyValue};
 use thiserror::Error;
 
 /// How peer RPCs (RequestVote / AppendEntries) are delivered.
@@ -306,8 +307,7 @@ impl RangeMeta {
     /// Whether `key` is in this range.
     #[must_use]
     pub fn contains(&self, key: &[u8]) -> bool {
-        key >= self.start.as_slice()
-            && (self.end.is_empty() || key < self.end.as_slice())
+        key >= self.start.as_slice() && (self.end.is_empty() || key < self.end.as_slice())
     }
 }
 
@@ -771,7 +771,11 @@ fn encode_entry(e: &RangeEntry) -> Vec<u8> {
                 encode_bytes(&mut b, v);
             }
         }
-        RangeEntry::TxnCommit { txn_id, keys, si_gen } => {
+        RangeEntry::TxnCommit {
+            txn_id,
+            keys,
+            si_gen,
+        } => {
             // Tag 13: commit + si_gen (tag 6 legacy decode still accepted).
             b.push(13);
             b.extend_from_slice(&txn_id.to_le_bytes());
@@ -844,11 +848,7 @@ fn decode_entry(buf: &[u8], off: &mut usize) -> Result<RangeEntry> {
             }
             let si_gen = u64::from_le_bytes(buf[*off..*off + 8].try_into().unwrap());
             *off += 8;
-            Ok(RangeEntry::Put {
-                key,
-                value,
-                si_gen,
-            })
+            Ok(RangeEntry::Put { key, value, si_gen })
         }
         2 => {
             let raw = take_bytes(buf, off)?;
@@ -1059,7 +1059,11 @@ fn clear_txn_keys<E: Env>(db: &mut Db<E>, txn_id: u64, keys: &[Vec<u8>]) -> Resu
     Ok(())
 }
 
-fn apply_txn_prepare<E: Env>(db: &mut Db<E>, txn_id: u64, pairs: &[(Vec<u8>, Vec<u8>)]) -> Result<()> {
+fn apply_txn_prepare<E: Env>(
+    db: &mut Db<E>,
+    txn_id: u64,
+    pairs: &[(Vec<u8>, Vec<u8>)],
+) -> Result<()> {
     for (k, _) in pairs {
         if intent_conflict(db, k, Some(txn_id)) {
             db.put(txn_status_key(txn_id), b"abort")?;
@@ -1150,9 +1154,7 @@ fn apply_txn_revert<E: Env>(db: &mut Db<E>, txn_id: u64, keys: &[Vec<u8>]) -> Re
     let mut restored: Vec<(Vec<u8>, Option<Vec<u8>>)> = Vec::new();
     for u in keys {
         let pre_raw = db.get(&txn_pre_key(txn_id, u));
-        let pre = pre_raw
-            .as_ref()
-            .and_then(|b| decode_preimage(b.as_ref()));
+        let pre = pre_raw.as_ref().and_then(|b| decode_preimage(b.as_ref()));
         let had_pre = pre.is_some();
         let pre_was_absent = matches!(pre, Some(None));
         match txn_kernel::revert_user_action(had_pre, pre_was_absent) {
@@ -1197,11 +1199,7 @@ fn apply_txn_revert<E: Env>(db: &mut Db<E>, txn_id: u64, keys: &[Vec<u8>]) -> Re
 /// If hist is empty, no-op (no SI stamp to repair). Same gen as the tip is kept
 /// so generations reserved by a failed multi-range TX do not keep advertising
 /// the aborted write after Pedra preimage restore.
-fn repair_si_hist_tip<E: Env>(
-    db: &mut Db<E>,
-    user_key: &[u8],
-    live: Option<&[u8]>,
-) -> Result<()> {
+fn repair_si_hist_tip<E: Env>(db: &mut Db<E>, user_key: &[u8], live: Option<&[u8]>) -> Result<()> {
     let hk = hist_key(user_key);
     let mut hist = match db.get(&hk).and_then(|b| decode_hist(b.as_ref()).ok()) {
         Some(h) if !h.is_empty() => h,
@@ -1256,11 +1254,7 @@ fn decode_one_log_rec(buf: &[u8]) -> Result<LogRec> {
     if off != p.len() {
         return Err(StoreError::Msg("log rec trailing garbage".into()));
     }
-    Ok(LogRec {
-        index,
-        term,
-        entry,
-    })
+    Ok(LogRec { index, term, entry })
 }
 
 fn log_entry_key(range_id: u64, index: u64) -> Vec<u8> {
@@ -1293,11 +1287,7 @@ fn decode_log(buf: &[u8]) -> Result<Vec<LogRec>> {
         let term = u64::from_le_bytes(p[off..off + 8].try_into().unwrap());
         off += 8;
         let entry = decode_entry(p, &mut off)?;
-        out.push(LogRec {
-            index,
-            term,
-            entry,
-        });
+        out.push(LogRec { index, term, entry });
     }
     if off != p.len() {
         return Err(StoreError::Msg("log trailing garbage".into()));
@@ -1499,7 +1489,11 @@ fn election_timeout_for(node_id: u64, range_id: u64, member_ids: &[u64]) -> u64 
     sorted.dedup();
     if sorted.is_empty() {
         // [4, 9] — independent of pure node_id so multi-range still spreads.
-        return 4 + ((node_id.wrapping_mul(5).wrapping_add(range_id.wrapping_mul(7))) % 6);
+        return 4
+            + ((node_id
+                .wrapping_mul(5)
+                .wrapping_add(range_id.wrapping_mul(7)))
+                % 6);
     }
     let n = sorted.len();
     let pref = sorted[(range_id.saturating_sub(1) as usize) % n];
@@ -1536,15 +1530,11 @@ impl RangePeer {
     }
 
     fn last_index(&self) -> u64 {
-        self.log
-            .last()
-            .map_or(self.snapshot_index, |e| e.index)
+        self.log.last().map_or(self.snapshot_index, |e| e.index)
     }
 
     fn last_term(&self) -> u64 {
-        self.log
-            .last()
-            .map_or(self.snapshot_term, |e| e.term)
+        self.log.last().map_or(self.snapshot_term, |e| e.term)
     }
 
     fn term_at(&self, index: u64) -> u64 {
@@ -1682,8 +1672,7 @@ pub struct StoreCluster<E: Env = StdEnv> {
     /// Key: `(range_id, log_index)` → `(si_gen, items)`.
     /// F49: gen is reserved in `with_si_gen` so concurrent outstanding proposes
     /// never embed the same durable `si_gen`.
-    pending_version_notes:
-        HashMap<(u64, u64), (u64, Vec<(Vec<u8>, Vec<u8>, Option<Vec<u8>>)>)>,
+    pending_version_notes: HashMap<(u64, u64), (u64, Vec<(Vec<u8>, Vec<u8>, Option<Vec<u8>>)>)>,
     /// Last log index per range already flushed into version history (idempotent).
     version_notes_through: HashMap<u64, u64>,
     /// In-process watch hub; notified after majority put/commit_tx (RFC-0022 P0.3).
@@ -1722,14 +1711,7 @@ impl StoreCluster<StdEnv> {
         opts: StoreOpenOptions,
     ) -> Result<Self> {
         let envs: Vec<StdEnv> = (0..n_nodes).map(|_| StdEnv).collect();
-        Self::open_with_envs_rng_opts(
-            parent,
-            n_nodes,
-            n_ranges,
-            envs,
-            SeedRng::new(0xA11CE),
-            opts,
-        )
+        Self::open_with_envs_rng_opts(parent, n_nodes, n_ranges, envs, SeedRng::new(0xA11CE), opts)
     }
 
     /// Open **one** local node for multi-host TCP (RFC-0017 P0.1).
@@ -1883,7 +1865,14 @@ impl<E: Env> StoreCluster<E> {
         envs: impl IntoIterator<Item = E>,
         rng: SeedRng,
     ) -> Result<Self> {
-        Self::open_with_envs_rng_opts(parent, n_nodes, n_ranges, envs, rng, StoreOpenOptions::default())
+        Self::open_with_envs_rng_opts(
+            parent,
+            n_nodes,
+            n_ranges,
+            envs,
+            rng,
+            StoreOpenOptions::default(),
+        )
     }
 
     /// Like [`open_with_envs_rng`](Self::open_with_envs_rng) with Pedra durability knobs.
@@ -2122,8 +2111,10 @@ impl<E: Env> StoreCluster<E> {
     }
 
     fn load_si_from_disk(&mut self) {
-        self.commit_generation = txn_kernel::recover_si_generation(self.load_u64_meta_max("generation"));
-        self.safe_watermark = txn_kernel::recover_si_generation(self.load_u64_meta_max("watermark"));
+        self.commit_generation =
+            txn_kernel::recover_si_generation(self.load_u64_meta_max("generation"));
+        self.safe_watermark =
+            txn_kernel::recover_si_generation(self.load_u64_meta_max("watermark"));
         let mut best: HashMap<Vec<u8>, Vec<(u64, Option<Vec<u8>>)>> = HashMap::new();
         for node in self.nodes.values() {
             for (hk, raw) in scan_prefix(&node.db, HIST_PREFIX) {
@@ -2221,7 +2212,9 @@ impl<E: Env> StoreCluster<E> {
             return Ok(());
         }
         if self.ids.len() <= 1 {
-            return Err(StoreError::Msg("remove_member: cannot empty membership".into()));
+            return Err(StoreError::Msg(
+                "remove_member: cannot empty membership".into(),
+            ));
         }
         self.ids.retain(|&id| id != node_id);
         if let Some(n) = self.nodes.get_mut(&node_id) {
@@ -2603,7 +2596,10 @@ impl<E: Env> StoreCluster<E> {
     /// Elect leaders for all ranges (bounded ticks).
     pub fn elect_all(&mut self, max_ticks: u64) -> Result<()> {
         for _ in 0..max_ticks {
-            let all = self.ranges.iter().all(|r| self.range_leader(r.id).is_some());
+            let all = self
+                .ranges
+                .iter()
+                .all(|r| self.range_leader(r.id).is_some());
             if all {
                 return Ok(());
             }
@@ -2681,7 +2677,13 @@ impl<E: Env> StoreCluster<E> {
             if !self.is_participating(nid) || !self.is_local_node(nid) {
                 continue;
             }
-            let p = self.nodes.get_mut(&nid).unwrap().ranges.get_mut(&rid).unwrap();
+            let p = self
+                .nodes
+                .get_mut(&nid)
+                .unwrap()
+                .ranges
+                .get_mut(&rid)
+                .unwrap();
             match p.role {
                 Role::Leader => {
                     if p.hb_left == 0 {
@@ -3036,8 +3038,7 @@ impl<E: Env> StoreCluster<E> {
         }
         p.leader_id = Some(leader_id);
         let prev = prev_log_index;
-        let consistent =
-            prev == 0 || (p.last_index() >= prev && p.term_at(prev) == prev_log_term);
+        let consistent = prev == 0 || (p.last_index() >= prev && p.term_at(prev) == prev_log_term);
         if !consistent {
             return Ok(PeerMsg::AppendEntriesReply {
                 range_id,
@@ -3108,9 +3109,7 @@ impl<E: Env> StoreCluster<E> {
                 p.commit = old_commit;
             }
         }
-        let match_i = entries
-            .last()
-            .map_or(prev_log_index, |e| e.index);
+        let match_i = entries.last().map_or(prev_log_index, |e| e.index);
         let term_now = p.term;
         // Apply committed entries on follower (re-borrow after peer mut ends).
         self.apply_range(to, range_id)?;
@@ -3465,13 +3464,8 @@ impl<E: Env> StoreCluster<E> {
         // majority-committed, discard the orphan (Direct RPC). NotCommitted is
         // only one failure mode — IoError mid-AE previously left the entry in
         // the leader log and FailingEnv+heal installed it (F47).
-        let outcome = self.broadcast_append_after_propose(
-            rid,
-            leader,
-            &ids,
-            proposed_index,
-            had_client,
-        );
+        let outcome =
+            self.broadcast_append_after_propose(rid, leader, &ids, proposed_index, had_client);
         if let Err(e) = outcome {
             if let Some(idx) = proposed_index {
                 if self.rpc_mode == RpcMode::Direct {
@@ -3753,12 +3747,7 @@ impl<E: Env> StoreCluster<E> {
     /// **Durability:** client entries are written via [`persist_log_db`] at propose
     /// time; this path must re-persist the truncated log (and applied cursor if
     /// clamped) so a process reopen cannot resurrect an orphan (I-MAJ-3 / I-DCS-5).
-    fn discard_uncommitted_from(
-        &mut self,
-        rid: u64,
-        leader: u64,
-        from_index: u64,
-    ) -> Result<()> {
+    fn discard_uncommitted_from(&mut self, rid: u64, leader: u64, from_index: u64) -> Result<()> {
         let ids = self.ids.clone();
         for &nid in &ids {
             let Some(n) = self.nodes.get_mut(&nid) else {
@@ -3909,11 +3898,7 @@ impl<E: Env> StoreCluster<E> {
         let mut applied_to = start - 1;
         for rec in &recs {
             match &rec.entry {
-                RangeEntry::Put {
-                    key,
-                    value,
-                    si_gen,
-                } => {
+                RangeEntry::Put { key, value, si_gen } => {
                     if !is_reserved_store_key(key) {
                         apply_put_or_delete(&mut node.db, key, value)?;
                         if *si_gen > 0 {
@@ -3962,10 +3947,9 @@ impl<E: Env> StoreCluster<E> {
                             )?;
                         }
                         // Durable generation watermark on this replica (Raft-applied path).
-                        let _ = node.db.put(
-                            &si_meta_key("generation"),
-                            &encode_u64_meta(*si_gen),
-                        );
+                        let _ = node
+                            .db
+                            .put(&si_meta_key("generation"), &encode_u64_meta(*si_gen));
                     }
                 }
                 RangeEntry::TxnPrepare { txn_id, pairs } => {
@@ -3983,17 +3967,11 @@ impl<E: Env> StoreCluster<E> {
                                 continue;
                             }
                             let live = node.db.get(k);
-                            persist_si_hist_on_db(
-                                &mut node.db,
-                                k,
-                                *si_gen,
-                                live.as_deref(),
-                            )?;
+                            persist_si_hist_on_db(&mut node.db, k, *si_gen, live.as_deref())?;
                         }
-                        let _ = node.db.put(
-                            &si_meta_key("generation"),
-                            &encode_u64_meta(*si_gen),
-                        );
+                        let _ = node
+                            .db
+                            .put(&si_meta_key("generation"), &encode_u64_meta(*si_gen));
                     }
                 }
                 RangeEntry::TxnAbort { txn_id, keys } => {
@@ -4013,10 +3991,9 @@ impl<E: Env> StoreCluster<E> {
             // Put path: also bump generation meta when SI gen present.
             if let RangeEntry::Put { si_gen, .. } = &rec.entry {
                 if *si_gen > 0 {
-                    let _ = node.db.put(
-                        &si_meta_key("generation"),
-                        &encode_u64_meta(*si_gen),
-                    );
+                    let _ = node
+                        .db
+                        .put(&si_meta_key("generation"), &encode_u64_meta(*si_gen));
                 }
             }
             applied_to = rec.index;
@@ -4189,10 +4166,7 @@ impl<E: Env> StoreCluster<E> {
     }
 
     /// Install peer dial map in-process (RFC-0021 P1.3). Does not require SSH.
-    pub fn set_peer_addrs(
-        &mut self,
-        peers: impl IntoIterator<Item = (u64, String)>,
-    ) -> Result<()> {
+    pub fn set_peer_addrs(&mut self, peers: impl IntoIterator<Item = (u64, String)>) -> Result<()> {
         let map: HashMap<u64, String> = peers.into_iter().collect();
         if map.is_empty() {
             return Err(StoreError::Msg("empty peer map".into()));
@@ -4425,11 +4399,7 @@ impl<E: Env> StoreCluster<E> {
         }
         // Clone so a failed put_many does not wipe the buffer (F66).
         let snapshot: Vec<(Vec<u8>, Vec<u8>)> = self.write_coalesce.clone();
-        self.put_many(
-            snapshot
-                .iter()
-                .map(|(k, v)| (k.as_slice(), v.as_slice())),
-        )?;
+        self.put_many(snapshot.iter().map(|(k, v)| (k.as_slice(), v.as_slice())))?;
         self.write_coalesce.clear();
         Ok(())
     }
@@ -4481,7 +4451,10 @@ impl<E: Env> StoreCluster<E> {
                 });
             }
             let rid = self.locate(&key)?;
-            by_range.entry(rid).or_default().push((key.clone(), val.clone()));
+            by_range
+                .entry(rid)
+                .or_default()
+                .push((key.clone(), val.clone()));
             flat.push((key, val));
         }
         // F77: multi-range sequential put_batch left earlier ranges committed when a
@@ -4634,12 +4607,7 @@ impl<E: Env> StoreCluster<E> {
     ///
     /// Used when a range has no leader so `TxnAbort`/`TxnRevert` cannot majority-commit.
     /// Prevents durable stuck intents that would `Conflict` forever (I-TX-2 / reopen).
-    fn force_local_clear_keys(
-        &mut self,
-        txn_id: u64,
-        keys: &[Vec<u8>],
-        delete_user_values: bool,
-    ) {
+    fn force_local_clear_keys(&mut self, txn_id: u64, keys: &[Vec<u8>], delete_user_values: bool) {
         let ids = self.ids.clone();
         for nid in ids {
             let Some(n) = self.nodes.get_mut(&nid) else {
@@ -4668,13 +4636,7 @@ impl<E: Env> StoreCluster<E> {
     }
 
     /// Try raft cleanup; always force-local clear so leaderless ranges cannot stick intents.
-    fn cleanup_range_keys(
-        &mut self,
-        rid: u64,
-        txn_id: u64,
-        keys: &[Vec<u8>],
-        mode: CleanupMode,
-    ) {
+    fn cleanup_range_keys(&mut self, rid: u64, txn_id: u64, keys: &[Vec<u8>], mode: CleanupMode) {
         let entry = match mode {
             CleanupMode::Abort => RangeEntry::TxnAbort {
                 txn_id,
@@ -4689,11 +4651,7 @@ impl<E: Env> StoreCluster<E> {
         // Even if raft Ok, force-local is idempotent and heals any lagging peer.
         // If raft failed (no leader), force-local is the only way to drop disk intents.
         let _ = raft_ok;
-        self.force_local_clear_keys(
-            txn_id,
-            keys,
-            matches!(mode, CleanupMode::Revert),
-        );
+        self.force_local_clear_keys(txn_id, keys, matches!(mode, CleanupMode::Revert));
     }
 
     /// 2PC phase 2: commit a prepared TX (materialize intents **per range**).
@@ -4746,12 +4704,7 @@ impl<E: Env> StoreCluster<E> {
                             );
                             self.force_local_clear_keys(handle.id, &akeys, true);
                         } else {
-                            self.cleanup_range_keys(
-                                *rid2,
-                                handle.id,
-                                &akeys,
-                                CleanupMode::Revert,
-                            );
+                            self.cleanup_range_keys(*rid2, handle.id, &akeys, CleanupMode::Revert);
                         }
                     }
                     self.fence_txn_aborted(handle.id);
@@ -4770,9 +4723,9 @@ impl<E: Env> StoreCluster<E> {
     /// Prefer the live range leader (just applied), else the participating peer with
     /// highest `applied`. Never default to a partitioned `ids[0]` (F42).
     fn best_applied_reader(&self, rid: u64) -> Option<u64> {
-        let lead = self.range_leader(rid).filter(|&l| {
-            self.is_local_node(l) && self.is_participating(l)
-        });
+        let lead = self
+            .range_leader(rid)
+            .filter(|&l| self.is_local_node(l) && self.is_participating(l));
         let self_id = self.local_node_id();
         let mut best: Option<(u64, bool, bool, bool, u64)> = None;
         for &nid in &self.ids {
@@ -4786,8 +4739,7 @@ impl<E: Env> StoreCluster<E> {
             match best {
                 None => best = Some((nid, c_lead, c_part, c_self, c_app)),
                 Some((_, bl, bp, bs, ba)) => {
-                    if si_kernel::si_reader_beats(c_lead, c_part, c_self, c_app, bl, bp, bs, ba)
-                    {
+                    if si_kernel::si_reader_beats(c_lead, c_part, c_self, c_app, bl, bp, bs, ba) {
                         best = Some((nid, c_lead, c_part, c_self, c_app));
                     }
                 }
@@ -4816,32 +4768,26 @@ impl<E: Env> StoreCluster<E> {
                 if is_reserved_store_key(k) {
                     continue;
                 }
-                let pre = n
-                    .db
-                    .get(&txn_pre_key(handle.id, k))
-                    .and_then(|b| decode_preimage(b.as_ref()))
-                    .unwrap_or(None);
-                let val = n
-                    .db
-                    .get(k)
-                    .map(|b| b.to_vec())
-                    .or_else(|| {
-                        n.db
-                            .get(&txn_pair_key(handle.id, k))
-                            .map(|b| b.to_vec())
-                    })
-                    .or_else(|| {
-                        n.db.get(&intent_key(k)).and_then(|raw| {
-                            decode_intent(&raw).and_then(|(oid, v)| {
-                                if oid == handle.id {
-                                    Some(v.to_vec())
-                                } else {
-                                    None
-                                }
+                let pre =
+                    n.db.get(&txn_pre_key(handle.id, k))
+                        .and_then(|b| decode_preimage(b.as_ref()))
+                        .unwrap_or(None);
+                let val =
+                    n.db.get(k)
+                        .map(|b| b.to_vec())
+                        .or_else(|| n.db.get(&txn_pair_key(handle.id, k)).map(|b| b.to_vec()))
+                        .or_else(|| {
+                            n.db.get(&intent_key(k)).and_then(|raw| {
+                                decode_intent(&raw).and_then(|(oid, v)| {
+                                    if oid == handle.id {
+                                        Some(v.to_vec())
+                                    } else {
+                                        None
+                                    }
+                                })
                             })
                         })
-                    })
-                    .unwrap_or_default();
+                        .unwrap_or_default();
                 items.push((k.clone(), val, pre));
             }
         }
@@ -4998,10 +4944,7 @@ impl<E: Env> StoreCluster<E> {
     }
 
     /// Build version-note items for a client log entry (preimages at propose time).
-    fn preimages_for_entry(
-        &self,
-        entry: &RangeEntry,
-    ) -> Vec<(Vec<u8>, Vec<u8>, Option<Vec<u8>>)> {
+    fn preimages_for_entry(&self, entry: &RangeEntry) -> Vec<(Vec<u8>, Vec<u8>, Option<Vec<u8>>)> {
         match entry {
             RangeEntry::Put { key, value, .. } => {
                 if is_reserved_store_key(key) {
@@ -5211,10 +5154,7 @@ impl<E: Env> StoreCluster<E> {
             });
         }
         if current.saturating_sub(snapshot) > MAX_SNAPSHOT_LAG {
-            return Err(StoreError::TransactionTooOld {
-                snapshot,
-                current,
-            });
+            return Err(StoreError::TransactionTooOld { snapshot, current });
         }
         let read_keys: Vec<Vec<u8>> = read_keys.into_iter().collect();
         for k in &read_keys {
@@ -5287,7 +5227,10 @@ impl<E: Env> StoreCluster<E> {
     }
 
     /// Subscribe to key-prefix events after majority commit (RFC-0022 P0.3).
-    pub fn watch_prefix(&mut self, prefix: impl AsRef<[u8]>) -> (u64, std::sync::mpsc::Receiver<WatchEvent>) {
+    pub fn watch_prefix(
+        &mut self,
+        prefix: impl AsRef<[u8]>,
+    ) -> (u64, std::sync::mpsc::Receiver<WatchEvent>) {
         self.watch.watch_prefix(prefix)
     }
 
@@ -5378,8 +5321,7 @@ impl<E: Env> StoreCluster<E> {
             match best {
                 None => best = Some((nid, false, c_part, c_self, c_seq)),
                 Some((_, bl, bp, bs, ba)) => {
-                    if si_kernel::si_reader_beats(false, c_part, c_self, c_seq, bl, bp, bs, ba)
-                    {
+                    if si_kernel::si_reader_beats(false, c_part, c_self, c_seq, bl, bp, bs, ba) {
                         best = Some((nid, false, c_part, c_self, c_seq));
                     }
                 }
@@ -5436,10 +5378,7 @@ impl<E: Env> StoreCluster<E> {
                 // Fail closed: need a *unique* live leader, and it must be this node.
                 let live = self.range_leader(rid);
                 let claims = self.leader_claim_count(rid);
-                let thinks = n
-                    .ranges
-                    .get(&rid)
-                    .is_some_and(|p| p.role == Role::Leader);
+                let thinks = n.ranges.get(&rid).is_some_and(|p| p.role == Role::Leader);
                 if claims != 1 || live != Some(node_id) || !thinks || !n.participating {
                     return Err(StoreError::StaleLeader {
                         range_id: rid,
@@ -5634,21 +5573,20 @@ impl<E: Env> StoreCluster<E> {
                     "dcs delete committed but key still present".into(),
                 ));
             }
-            let rev = n
-                .db
-                .get(b"d/rev")
-                .and_then(|b| {
-                    if b.len() >= 8 {
-                        Some(u64::from_le_bytes(b[..8].try_into().ok()?))
-                    } else {
-                        None
-                    }
-                })
-                .ok_or(StoreError::NotCommitted {
-                    range_id: rid,
-                    index: 0,
-                    commit: 0,
-                })?;
+            let rev =
+                n.db.get(b"d/rev")
+                    .and_then(|b| {
+                        if b.len() >= 8 {
+                            Some(u64::from_le_bytes(b[..8].try_into().ok()?))
+                        } else {
+                            None
+                        }
+                    })
+                    .ok_or(StoreError::NotCommitted {
+                        range_id: rid,
+                        index: 0,
+                        commit: 0,
+                    })?;
             if rev == 0 {
                 return Err(StoreError::NotCommitted {
                     range_id: rid,
@@ -5829,8 +5767,8 @@ mod tests {
         assert_eq!(election_timeout_for(3, 1, &members), 5);
         // range 2 → prefer node 2
         assert_eq!(election_timeout_for(2, 2, &members), 3);
-        assert_eq!(election_timeout_for(1, 2, &members), 5); // dist ring: 1 is after 2→3→1 = 2 steps? 
-        // pref_pos=1 (node2), my_pos=0 (node1): dist = (0+3-1)%3 = 2 → timeout 5
+        assert_eq!(election_timeout_for(1, 2, &members), 5); // dist ring: 1 is after 2→3→1 = 2 steps?
+                                                             // pref_pos=1 (node2), my_pos=0 (node1): dist = (0+3-1)%3 = 2 → timeout 5
         assert_eq!(election_timeout_for(3, 2, &members), 4);
     }
 
@@ -5945,7 +5883,11 @@ mod tests {
             }
         }
         stamped.sort_by_key(|(i, _)| *i);
-        assert_eq!(stamped.len(), 2, "both puts must be in leader log: {stamped:?}");
+        assert_eq!(
+            stamped.len(),
+            2,
+            "both puts must be in leader log: {stamped:?}"
+        );
         assert_ne!(
             stamped[0].1, stamped[1].1,
             "F49: raft Put si_gen collision — both embeds {} (indexes {} and {})",
@@ -6055,7 +5997,9 @@ mod tests {
             "must not see Queued concurrent write"
         );
         tx.set(b"other", b"x").unwrap();
-        let err = tx.commit(&mut c).expect_err("read-set OCC after Queued put");
+        let err = tx
+            .commit(&mut c)
+            .expect_err("read-set OCC after Queued put");
         assert!(
             matches!(err, StoreError::Conflict),
             "expected Conflict after Queued concurrent write, got {err:?}"
@@ -6081,7 +6025,10 @@ mod tests {
             c.get(b"gone").unwrap()
         );
         // Snapshot at latest also None.
-        assert!(c.get_at_version(b"gone", c.read_version()).unwrap().is_none());
+        assert!(c
+            .get_at_version(b"gone", c.read_version())
+            .unwrap()
+            .is_none());
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -6160,8 +6107,7 @@ mod tests {
         let dir = temp();
         // Fail disk after enough ops for open+elect; mid-commit may error.
         let env = FailingEnv::fail_after(120);
-        let mut c =
-            StoreCluster::open_with_env_rng(&dir, 3, 1, env, SeedRng::new(0xF41)).unwrap();
+        let mut c = StoreCluster::open_with_env_rng(&dir, 3, 1, env, SeedRng::new(0xF41)).unwrap();
         let _ = c.elect_all(120);
         if c.range_leader(1).is_none() {
             let _ = std::fs::remove_dir_all(&dir);
@@ -6196,24 +6142,31 @@ mod tests {
             c.elect_all(80).unwrap();
             c.put(b"rr/a", b"1").unwrap();
             c.put(b"rr/b", b"2").unwrap();
-            let got = c.keys_in_range_at(b"rr/", b"rr0", c.read_version()).unwrap();
+            let got = c
+                .keys_in_range_at(b"rr/", b"rr0", c.read_version())
+                .unwrap();
             assert!(got.len() >= 2, "before reopen: {got:?}");
         }
         // Reopen: SI meta + history are durable; read at current generation.
         let c = StoreCluster::open(&dir, 3, 1).unwrap();
-        let got = c.keys_in_range_at(b"rr/", b"rr0", c.read_version()).unwrap();
+        let got = c
+            .keys_in_range_at(b"rr/", b"rr0", c.read_version())
+            .unwrap();
         assert!(
-            got.iter().any(|(k, v)| k.as_slice() == b"rr/a" && v.as_slice() == b"1"),
+            got.iter()
+                .any(|(k, v)| k.as_slice() == b"rr/a" && v.as_slice() == b"1"),
             "after reopen must see rr/a at current generation, got {got:?}"
         );
         assert!(
-            got.iter().any(|(k, v)| k.as_slice() == b"rr/b" && v.as_slice() == b"2"),
+            got.iter()
+                .any(|(k, v)| k.as_slice() == b"rr/b" && v.as_slice() == b"2"),
             "after reopen must see rr/b at current generation, got {got:?}"
         );
         // Snapshot 0 is the pre-first-commit world (keys absent), not "see tip".
         let at0 = c.keys_in_range_at(b"rr/", b"rr0", 0).unwrap();
         assert!(
-            !at0.iter().any(|(k, _)| k.as_slice() == b"rr/a" || k.as_slice() == b"rr/b"),
+            !at0.iter()
+                .any(|(k, _)| k.as_slice() == b"rr/a" || k.as_slice() == b"rr/b"),
             "snapshot 0 must not show post-gen-0 keys, got {at0:?}"
         );
         let _ = std::fs::remove_dir_all(&dir);
@@ -6247,15 +6200,12 @@ mod tests {
                 }
             }
         }
-        let new_leader = c.range_leader(rid).expect("new leader after Queued re-elect");
+        let new_leader = c
+            .range_leader(rid)
+            .expect("new leader after Queued re-elect");
         assert_ne!(new_leader, old, "must not keep deposed leader");
 
-        let remaining: Vec<u64> = c
-            .node_ids()
-            .iter()
-            .copied()
-            .filter(|&n| n != old)
-            .collect();
+        let remaining: Vec<u64> = c.node_ids().iter().copied().filter(|&n| n != old).collect();
         let seen = remaining
             .iter()
             .filter(|&&n| {
@@ -6266,7 +6216,8 @@ mod tests {
             })
             .count();
         assert_eq!(
-            seen, remaining.len(),
+            seen,
+            remaining.len(),
             "all remaining peers must retain committed pre-failover key; seen={seen}"
         );
 
@@ -6453,7 +6404,9 @@ mod tests {
 
         c.elect_all(80).unwrap();
         // Clean retry succeeds and replicates.
-        let rev = c.dcs_create(&key, b"node-a").expect("retry create after heal");
+        let rev = c
+            .dcs_create(&key, b"node-a")
+            .expect("retry create after heal");
         assert!(rev >= 1);
         for &nid in &ids {
             let kv = c.dcs_get_on(nid, &key).unwrap().expect("replicated");
@@ -6563,10 +6516,7 @@ mod tests {
         c.elect_all(80).unwrap();
         let key = b"read-k";
         c.put(key, b"v1").unwrap();
-        assert_eq!(
-            c.get_strong(key).unwrap().as_deref(),
-            Some(b"v1".as_ref())
-        );
+        assert_eq!(c.get_strong(key).unwrap().as_deref(), Some(b"v1".as_ref()));
 
         let rid = c.locate(key).unwrap();
         let _old = c.step_down_range_leader(rid).unwrap();
@@ -6621,10 +6571,7 @@ mod tests {
             p.leader_id = Some(live);
         }
         assert_eq!(c.range_leader(rid), Some(live));
-        assert_eq!(
-            c.get_strong(key).unwrap().as_deref(),
-            Some(b"v1".as_ref())
-        );
+        assert_eq!(c.get_strong(key).unwrap().as_deref(), Some(b"v1".as_ref()));
 
         // Follower still cannot serve strong.
         let follower = c.node_ids().iter().copied().find(|&n| n != live).unwrap();
@@ -6661,12 +6608,7 @@ mod tests {
         assert_ne!(new_leader, old);
 
         // Prior commit still readable on majority of remaining peers.
-        let remaining: Vec<u64> = c
-            .node_ids()
-            .iter()
-            .copied()
-            .filter(|&n| n != old)
-            .collect();
+        let remaining: Vec<u64> = c.node_ids().iter().copied().filter(|&n| n != old).collect();
         let seen = remaining
             .iter()
             .filter(|&&n| {
@@ -6760,12 +6702,7 @@ mod tests {
         let rid = c.locate(b"before").unwrap();
         // Partition one follower after it has applied "before".
         let leader = c.range_leader(rid).unwrap();
-        let offline = c
-            .node_ids()
-            .iter()
-            .copied()
-            .find(|&n| n != leader)
-            .unwrap();
+        let offline = c.node_ids().iter().copied().find(|&n| n != leader).unwrap();
         let applied_offline = c.applied_index(offline, rid);
         assert!(applied_offline >= 1);
         c.set_participating(offline, false).unwrap();
@@ -6778,7 +6715,14 @@ mod tests {
             if nid == offline {
                 continue;
             }
-            let snap = c.nodes.get(&nid).unwrap().ranges.get(&rid).unwrap().snapshot_index;
+            let snap = c
+                .nodes
+                .get(&nid)
+                .unwrap()
+                .ranges
+                .get(&rid)
+                .unwrap()
+                .snapshot_index;
             assert!(
                 snap <= applied_offline,
                 "node {nid}: snapshot {snap} advanced past offline applied {applied_offline}"
@@ -6883,10 +6827,7 @@ mod tests {
         // New election + put still works on recovered meta.
         c.elect_all(80).unwrap();
         c.put(b"after-reopen", b"ok").unwrap();
-        assert_eq!(
-            c.count_applied_eq(b"after-reopen", b"ok"),
-            3
-        );
+        assert_eq!(c.count_applied_eq(b"after-reopen", b"ok"), 3);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -6966,7 +6907,13 @@ mod tests {
         let rid = c.locate(&key).unwrap();
         let leader = c.range_leader(rid).unwrap();
         {
-            let p = c.nodes.get_mut(&leader).unwrap().ranges.get_mut(&rid).unwrap();
+            let p = c
+                .nodes
+                .get_mut(&leader)
+                .unwrap()
+                .ranges
+                .get_mut(&rid)
+                .unwrap();
             let idx = p.last_index() + 1;
             let term = p.term;
             p.log.push(LogRec {
@@ -7024,7 +6971,6 @@ mod tests {
         assert_eq!(c.locate(b"a").unwrap(), c.locate(b"c").unwrap());
         let _ = std::fs::remove_dir_all(&dir);
     }
-
 
     /// RFC-0025 P2.3: strong leader read vs fast replica.
     #[test]
@@ -7147,8 +7093,11 @@ mod tests {
         };
         assert_ne!(c.locate(&k0).unwrap(), c.locate(&k1).unwrap());
         // Happy path: both apply atomically via commit_tx.
-        c.put_many([(k0.as_slice(), b"v0".as_slice()), (k1.as_slice(), b"v1".as_slice())])
-            .unwrap();
+        c.put_many([
+            (k0.as_slice(), b"v0".as_slice()),
+            (k1.as_slice(), b"v1".as_slice()),
+        ])
+        .unwrap();
         assert!(c.count_applied_eq(&k0, b"v0") >= 2);
         assert!(c.count_applied_eq(&k1, b"v1") >= 2);
         let _ = std::fs::remove_dir_all(&dir);
@@ -7169,8 +7118,8 @@ mod tests {
 
         // Lab capacity open: sync=false still elects and writes (not crash-safe).
         let dir2 = temp();
-        let mut c = StoreCluster::open_with_options(&dir2, 3, 1, StoreOpenOptions::lab_capacity())
-            .unwrap();
+        let mut c =
+            StoreCluster::open_with_options(&dir2, 3, 1, StoreOpenOptions::lab_capacity()).unwrap();
         c.elect_all(60).unwrap();
         c.put(b"lab", b"1").unwrap();
         assert!(c.count_applied_eq(b"lab", b"1") >= 2);
@@ -7187,14 +7136,20 @@ mod tests {
         let row = b"row/user/42";
         let idx = b"idx/email/a@b.co";
         let payload = br#"{"email":"a@b.co"}"#;
-        c.put_batch([(row.as_slice(), payload.as_slice()), (idx.as_slice(), row.as_slice())])
-            .unwrap();
+        c.put_batch([
+            (row.as_slice(), payload.as_slice()),
+            (idx.as_slice(), row.as_slice()),
+        ])
+        .unwrap();
         assert!(c.count_applied_eq(row, payload) >= 2);
         assert!(c.count_applied_eq(idx, row) >= 2);
         // Point lookup path: secondary → primary key → row.
         let pk = c.get(idx).unwrap().expect("idx");
         assert_eq!(pk.as_ref(), row);
-        assert_eq!(c.get(pk.as_ref()).unwrap().as_deref(), Some(payload.as_ref()));
+        assert_eq!(
+            c.get(pk.as_ref()).unwrap().as_deref(),
+            Some(payload.as_ref())
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -7331,7 +7286,9 @@ mod tests {
         // Knock out the last prepared range's leader so commit cannot majority there.
         let last = *h.ranges.last().unwrap();
         let _ = c.step_down_range_leader(last);
-        let err = c.tx_finish(&h).expect_err("finish without last leader must fail");
+        let err = c
+            .tx_finish(&h)
+            .expect_err("finish without last leader must fail");
         assert!(
             matches!(
                 err,
@@ -7526,10 +7483,7 @@ mod tests {
         c.elect_all(80).unwrap();
         // Single range; keys will fall on different sides after split at 0x80.
         let h = c
-            .tx_start([
-                ([0x10u8], b"L".as_slice()),
-                ([0x90u8], b"R".as_slice()),
-            ])
+            .tx_start([([0x10u8], b"L".as_slice()), ([0x90u8], b"R".as_slice())])
             .unwrap();
         let (left, right) = c.split_range_at([0x80u8]).unwrap();
         assert_ne!(left, right);
@@ -7550,11 +7504,8 @@ mod tests {
                     0,
                     "partial after fail: {e}"
                 );
-                c.commit_tx([
-                    ([0x10u8], b"L2".as_slice()),
-                    ([0x90u8], b"R2".as_slice()),
-                ])
-                .expect("must not immortal-intent after split+fail");
+                c.commit_tx([([0x10u8], b"L2".as_slice()), ([0x90u8], b"R2".as_slice())])
+                    .expect("must not immortal-intent after split+fail");
             }
         }
         let _ = std::fs::remove_dir_all(&dir);
@@ -7610,7 +7561,10 @@ mod tests {
             (3, "10.0.0.3:9701".into()),
         ])
         .unwrap();
-        assert_eq!(c.peer_addrs().get(&2).map(|s| s.as_str()), Some("10.0.0.2:9701"));
+        assert_eq!(
+            c.peer_addrs().get(&2).map(|s| s.as_str()),
+            Some("10.0.0.2:9701")
+        );
         let js = c.cluster_status_json();
         assert!(js.contains("10.0.0.2:9701"), "{js}");
         let _ = std::fs::remove_dir_all(&dir);
@@ -7807,12 +7761,10 @@ mod tests {
         // Orphan intent on peer 3 only (simulates prepare then offline past commit).
         {
             let n = c.nodes.get_mut(&3).unwrap();
-            n.db
-                .put(intent_key(user), encode_intent(9_999, b"ghost"))
+            n.db.put(intent_key(user), encode_intent(9_999, b"ghost"))
                 .unwrap();
             n.db.put(txn_pair_key(9_999, user), b"ghost").unwrap();
-            n.db
-                .put(txn_pre_key(9_999, user), encode_preimage(Some(b"seed")))
+            n.db.put(txn_pre_key(9_999, user), encode_preimage(Some(b"seed")))
                 .unwrap();
             n.db.put(txn_status_key(9_999), b"prepared").unwrap();
             assert!(intent_conflict(&n.db, user, None));
@@ -7865,7 +7817,13 @@ mod tests {
         let log_hi = raft_meta_key(rid_hi, "log");
         let commit_hi = raft_meta_key(rid_hi, "commit");
         // Snapshot of durable high-range meta before range-0 install.
-        let hard_before = c.nodes.get(&3).unwrap().db.get(&hard_hi).map(|b| b.to_vec());
+        let hard_before = c
+            .nodes
+            .get(&3)
+            .unwrap()
+            .db
+            .get(&hard_hi)
+            .map(|b| b.to_vec());
         let log_before = c.nodes.get(&3).unwrap().db.get(&log_hi).map(|b| b.to_vec());
         let commit_before = c
             .nodes
@@ -7879,8 +7837,7 @@ mod tests {
         // either — abort is coordinator's job; wipe must be range-scoped).
         {
             let n = c.nodes.get_mut(&3).unwrap();
-            n.db
-                .put(intent_key(b"high-key"), encode_intent(42, b"inflight"))
+            n.db.put(intent_key(b"high-key"), encode_intent(42, b"inflight"))
                 .unwrap();
         }
         let export0 = c.export_range_kv(1, rid0).unwrap();
@@ -7892,7 +7849,12 @@ mod tests {
         c.on_install_snapshot(3, rid0, term, leader, snap_i, snap_t, export0)
             .unwrap();
         assert_eq!(
-            c.nodes.get(&3).unwrap().db.get(&hard_hi).map(|b| b.to_vec()),
+            c.nodes
+                .get(&3)
+                .unwrap()
+                .db
+                .get(&hard_hi)
+                .map(|b| b.to_vec()),
             hard_before,
             "range-0 install wiped high-range raft hard meta"
         );
@@ -8011,7 +7973,10 @@ mod tests {
         }
         // Exactly one node may succeed strong read when unique leader exists.
         let ok_n = history.iter().filter(|h| h.2).count();
-        assert_eq!(ok_n, 1, "exactly one strong-read Ok under unique leader; hist={history:?}");
+        assert_eq!(
+            ok_n, 1,
+            "exactly one strong-read Ok under unique leader; hist={history:?}"
+        );
         // Force dual-leader claim: both 1 and 2 think Leader.
         let rid = c.locate(key).unwrap();
         for nid in [1u64, 2] {
@@ -8020,13 +7985,19 @@ mod tests {
             p.leader_id = Some(nid);
         }
         assert!(c.leader_claim_count(rid) >= 2);
-        assert!(c.range_leader(rid).is_none(), "dual claim → no unique leader");
+        assert!(
+            c.range_leader(rid).is_none(),
+            "dual claim → no unique leader"
+        );
         for nid in 1..=3u64 {
             let err = c
                 .get_with_policy(nid, key, ReadPolicy::Strong)
                 .expect_err("strong read must fail-closed under dual leader");
             assert!(
-                matches!(err, StoreError::StaleLeader { .. } | StoreError::NotLeader { .. }),
+                matches!(
+                    err,
+                    StoreError::StaleLeader { .. } | StoreError::NotLeader { .. }
+                ),
                 "got {err}"
             );
         }
@@ -8062,10 +8033,7 @@ mod tests {
         c.elect_all(80).unwrap();
         let key = meta_key(b"leader-lock");
         c.dcs_create_ttl(&key, b"node-a", 100).unwrap();
-        assert_eq!(
-            c.dcs_get_on(1, &key).unwrap().unwrap().value,
-            b"node-a"
-        );
+        assert_eq!(c.dcs_get_on(1, &key).unwrap().unwrap().value, b"node-a");
         // Before deadline: create fails.
         assert!(c.dcs_create_ttl(&key, b"node-b", 100).is_err());
         // Advance past absolute deadline.
@@ -8077,10 +8045,7 @@ mod tests {
         // Re-create after expiry (HA lock re-election).
         let rev = c.dcs_create_ttl(&key, b"node-b", 500).unwrap();
         assert!(rev >= 1);
-        assert_eq!(
-            c.dcs_get_on(2, &key).unwrap().unwrap().value,
-            b"node-b"
-        );
+        assert_eq!(c.dcs_get_on(2, &key).unwrap().unwrap().value, b"node-b");
         // Majority holds the new binding.
         let n = c
             .node_ids()
@@ -8224,7 +8189,9 @@ mod tests {
             );
             let range_old = c.keys_in_range_at(b"g", b"h", gen_before).unwrap();
             assert!(
-                range_old.iter().any(|(k, v)| k.as_slice() == b"gk" && v.as_slice() == b"v0"),
+                range_old
+                    .iter()
+                    .any(|(k, v)| k.as_slice() == b"gk" && v.as_slice() == b"v0"),
                 "pre-clear range must include gk=v0: {range_old:?}"
             );
             drop(c);
@@ -8400,7 +8367,6 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-
     /// F52: failed multi-range `tx_finish` after partial `TxnCommit` must not leave
     /// durable SI hist advertising the aborted write after Pedra preimage restore.
     #[test]
@@ -8443,7 +8409,9 @@ mod tests {
         }
         // Tip SI must match Pedra (old-a).
         assert_eq!(
-            c.get_at_version(&keys[0], c.read_version()).unwrap().as_deref(),
+            c.get_at_version(&keys[0], c.read_version())
+                .unwrap()
+                .as_deref(),
             Some(b"old-a".as_ref()),
             "tip SI must match restored preimage"
         );
@@ -8452,13 +8420,14 @@ mod tests {
         let c = StoreCluster::open(&dir, 3, 3).unwrap();
         assert_eq!(c.get(&keys[0]).unwrap().as_deref(), Some(b"old-a".as_ref()));
         assert_eq!(
-            c.get_at_version(&keys[0], c.read_version()).unwrap().as_deref(),
+            c.get_at_version(&keys[0], c.read_version())
+                .unwrap()
+                .as_deref(),
             Some(b"old-a".as_ref()),
             "reopen SI tip must be old-a not aborted new-a"
         );
         let _ = std::fs::remove_dir_all(&dir);
     }
-
 
     /// F52 follow-on: range scan after failed multi-range finish must not show aborted writes.
     #[test]
@@ -8487,7 +8456,9 @@ mod tests {
         }
         // Must still see preimages.
         assert!(
-            range.iter().any(|(k, v)| k == &keys[0] && v.as_slice() == b"old-a"),
+            range
+                .iter()
+                .any(|(k, v)| k == &keys[0] && v.as_slice() == b"old-a"),
             "missing old-a in {range:?}"
         );
         let _ = std::fs::remove_dir_all(&dir);
@@ -8519,7 +8490,9 @@ mod tests {
         let c = StoreCluster::open(&dir, 3, 3).unwrap();
         assert_eq!(c.get(&keys[0]).unwrap().as_deref(), Some(b"old-a".as_ref()));
         assert_eq!(
-            c.get_at_version(&keys[0], c.read_version()).unwrap().as_deref(),
+            c.get_at_version(&keys[0], c.read_version())
+                .unwrap()
+                .as_deref(),
             Some(b"old-a".as_ref()),
             "force_local/open path must not leave SI tip at new-a"
         );
@@ -8553,9 +8526,7 @@ mod tests {
         );
         // Tip also keep.
         assert_eq!(
-            c.get_at_version(b"w", c.read_version())
-                .unwrap()
-                .as_deref(),
+            c.get_at_version(b"w", c.read_version()).unwrap().as_deref(),
             Some(b"keep".as_ref())
         );
         let _ = std::fs::remove_dir_all(&dir);
