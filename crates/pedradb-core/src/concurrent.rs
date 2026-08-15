@@ -22,7 +22,7 @@
 
 use std::collections::VecDeque;
 use std::ops::Bound;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, SyncSender};
 use std::sync::Arc;
 
@@ -386,6 +386,12 @@ impl<E: Env> ConcurrentDb<E> {
         self.inner.read().stats()
     }
 
+    /// DB directory (read lock; path is stable for the open lifetime).
+    #[must_use]
+    pub fn path(&self) -> PathBuf {
+        self.inner.read().path().to_path_buf()
+    }
+
     /// Last sequence (read lock).
     #[must_use]
     pub fn last_sequence(&self) -> SequenceNumber {
@@ -396,6 +402,38 @@ impl<E: Env> ConcurrentDb<E> {
     #[must_use]
     pub fn wal_sync_count(&self) -> u64 {
         self.inner.read().wal_sync_count()
+    }
+
+    /// Group fsync for prior `WriteOptions::no_sync` writes (write lock).
+    ///
+    /// # Errors
+    /// Same as [`Db::sync`].
+    pub fn sync(&self) -> Result<()> {
+        self.inner.write().sync()
+    }
+
+    /// Flush WAL and release directory lock via Env (consumes this handle).
+    ///
+    /// Other Arc clones of the same DB (if any) are not closed; prefer a single
+    /// owner for exclusive open.
+    ///
+    /// # Errors
+    /// Same as [`Db::close`].
+    pub fn close(self) -> Result<()> {
+        // Drop write-group / flush locks first, then close the sole Db if unique.
+        let ConcurrentDb {
+            inner,
+            writes: _,
+            flush_lock: _,
+        } = self;
+        match Arc::try_unwrap(inner) {
+            Ok(lock) => lock.into_inner().close(),
+            Err(shared) => {
+                // Still referenced — best-effort WAL sync under write lock only.
+                shared.write().sync()?;
+                Ok(())
+            }
+        }
     }
 
     fn resolve_sync(&self, opts: WriteOptions) -> bool {
@@ -1391,6 +1429,23 @@ mod tests {
         assert_eq!(db.snapshot_pin_count(), 1);
         db.release_snapshot_pin(pin);
         assert_eq!(db.snapshot_pin_count(), 0);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// path / sync / close parity with Db for ops tooling.
+    #[test]
+    fn concurrent_path_sync_close() {
+        let dir = temp_dir();
+        let db = open_sync(&dir);
+        assert_eq!(db.path(), dir);
+        db.put(b"k", b"v").unwrap();
+        db.sync().unwrap();
+        assert_eq!(db.get(b"k").as_deref(), Some(b"v".as_ref()));
+        db.close().unwrap();
+        // Exclusive open after close.
+        let db2 = open_sync(&dir);
+        assert_eq!(db2.get(b"k").as_deref(), Some(b"v".as_ref()));
+        db2.close().unwrap();
         let _ = fs::remove_dir_all(&dir);
     }
 
