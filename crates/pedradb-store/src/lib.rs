@@ -1867,7 +1867,7 @@ impl StoreCluster<StdEnv> {
             watch: WatchHub::new(),
             write_coalesce: Vec::new(),
         };
-        cluster.recover_after_open();
+        cluster.recover_after_open()?;
         Ok(cluster)
     }
 
@@ -2013,7 +2013,7 @@ impl<E: Env> StoreCluster<E> {
             watch: WatchHub::new(),
             write_coalesce: Vec::new(),
         };
-        cluster.recover_after_open();
+        cluster.recover_after_open()?;
         Ok(cluster)
     }
 
@@ -2043,22 +2043,28 @@ impl<E: Env> StoreCluster<E> {
     }
 
     /// Crash recovery: abort leftover 2PC intents, restore SI meta + next txn id.
-    fn recover_after_open(&mut self) {
+    ///
+    /// # Errors
+    /// Present-but-corrupt SI counters (`generation` / `watermark` / `next_txn` / `now_ms`)
+    /// with no valid replica copy (F114).
+    fn recover_after_open(&mut self) -> Result<()> {
         self.abort_leftover_intents();
-        self.load_si_from_disk();
-        self.recover_next_txn_id();
-        self.recover_now_ms();
+        self.load_si_from_disk()?;
+        self.recover_next_txn_id()?;
+        self.recover_now_ms()?;
         self.persist_truncated_logs();
+        Ok(())
     }
 
     /// Restore the DCS lease clock (max across local replicas). Never go backwards.
-    fn recover_now_ms(&mut self) {
-        let loaded = self.load_u64_meta_max("now_ms");
+    fn recover_now_ms(&mut self) -> Result<()> {
+        let loaded = self.load_u64_meta_max("now_ms")?;
         self.now_ms = self.now_ms.max(loaded);
         self.persisted_now_ms = self.now_ms;
         if self.now_ms > 0 {
             self.has_ttl_leases = true;
         }
+        Ok(())
     }
 
     /// Durable `now_ms` so TTL expiry survives process death (F56).
@@ -2100,17 +2106,33 @@ impl<E: Env> StoreCluster<E> {
         }
     }
 
-    fn load_u64_meta_max(&self, kind: &str) -> u64 {
+    /// Max of a SI u64 meta key across local replicas.
+    ///
+    /// Missing on all nodes → 0. At least one valid decode → max of valids
+    /// (corrupt siblings ignored). Present only as corrupt → Err (F114: do not
+    /// treat bitrot as "never written" and restart counters at 0).
+    fn load_u64_meta_max(&self, kind: &str) -> Result<u64> {
         let key = si_meta_key(kind);
         let mut max = 0u64;
+        let mut any_valid = false;
+        let mut any_corrupt = false;
         for node in self.nodes.values() {
             if let Some(raw) = node.db.get(&key) {
-                if let Ok(v) = decode_u64_meta(raw.as_ref()) {
-                    max = max.max(v);
+                match decode_u64_meta(raw.as_ref()) {
+                    Ok(v) => {
+                        any_valid = true;
+                        max = max.max(v);
+                    }
+                    Err(_) => any_corrupt = true,
                 }
             }
         }
-        max
+        if any_corrupt && !any_valid {
+            return Err(StoreError::Msg(format!(
+                "si meta {kind}: corrupt on all local replicas"
+            )));
+        }
+        Ok(max)
     }
 
     fn abort_leftover_intents(&mut self) {
@@ -2167,11 +2189,9 @@ impl<E: Env> StoreCluster<E> {
         }
     }
 
-    fn load_si_from_disk(&mut self) {
-        self.commit_generation =
-            txn_kernel::recover_si_generation(self.load_u64_meta_max("generation"));
-        self.safe_watermark =
-            txn_kernel::recover_si_generation(self.load_u64_meta_max("watermark"));
+    fn load_si_from_disk(&mut self) -> Result<()> {
+        let meta_gen = self.load_u64_meta_max("generation")?;
+        let meta_wm = self.load_u64_meta_max("watermark")?;
         let mut best: HashMap<Vec<u8>, Vec<(u64, Option<Vec<u8>>)>> = HashMap::new();
         for node in self.nodes.values() {
             for (hk, raw) in scan_prefix(&node.db, HIST_PREFIX) {
@@ -2194,15 +2214,22 @@ impl<E: Env> StoreCluster<E> {
         }
         self.key_history = best;
         self.key_versions.clear();
+        let mut hist_tip = 0u64;
         for (k, hist) in &self.key_history {
             if let Some((g, _)) = hist.iter().rev().find(|(g, _)| *g > 0) {
+                hist_tip = hist_tip.max(*g);
                 self.key_versions.insert(k.clone(), *g);
             }
         }
+        // Belt: never restart below durable hist tips even if meta lagged.
+        self.commit_generation =
+            txn_kernel::recover_si_generation(meta_gen.max(hist_tip));
+        self.safe_watermark = txn_kernel::recover_si_generation(meta_wm.min(self.commit_generation));
+        Ok(())
     }
 
-    fn recover_next_txn_id(&mut self) {
-        let mut max_id = self.load_u64_meta_max("next_txn");
+    fn recover_next_txn_id(&mut self) -> Result<()> {
+        let mut max_id = self.load_u64_meta_max("next_txn")?;
         for node in self.nodes.values() {
             for (k, _) in scan_prefix(&node.db, TXN_PREFIX) {
                 if let Some(rest) = k.strip_prefix(TXN_PREFIX) {
@@ -2214,6 +2241,7 @@ impl<E: Env> StoreCluster<E> {
             }
         }
         self.next_txn_id = txn_kernel::next_txn_id_after(max_id);
+        Ok(())
     }
 
     fn persist_si_keys(&mut self, keys: &[Vec<u8>]) {
@@ -6352,6 +6380,59 @@ mod tests {
                 .as_deref(),
             Some(b"v1".as_ref()),
             "hist must reload so SI still sees v1"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// F114: garbage SI generation meta was ignored → reopen at gen 0 → reuse gens.
+    #[test]
+    fn open_rejects_corrupt_si_generation_meta() {
+        let dir = temp();
+        {
+            let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+            c.elect_all(80).unwrap();
+            c.put(b"k", b"v1").unwrap();
+            assert!(c.read_version() >= 1);
+            let gk = si_meta_key("generation");
+            for nid in c.ids.clone() {
+                if let Some(n) = c.nodes.get_mut(&nid) {
+                    // Not a valid encode_u64_meta blob (no CRC / short).
+                    n.db.put(&gk, b"xx").unwrap();
+                }
+            }
+        }
+        match StoreCluster::open(&dir, 3, 1) {
+            Ok(_) => panic!("corrupt generation on all replicas must fail open, not restart at 0"),
+            Err(e) => assert!(
+                e.to_string().contains("si meta generation"),
+                "expected si meta generation error, got {e}"
+            ),
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// F114: one good replica still recovers generation (corrupt siblings ignored).
+    #[test]
+    fn open_uses_max_valid_si_generation_when_sibling_corrupt() {
+        let dir = temp();
+        let gen_before = {
+            let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+            c.elect_all(80).unwrap();
+            c.put(b"k", b"v1").unwrap();
+            let g = c.read_version();
+            assert!(g >= 1);
+            // Poison only node 1; nodes 2/3 keep valid meta.
+            let gk = si_meta_key("generation");
+            if let Some(n) = c.nodes.get_mut(&1) {
+                n.db.put(&gk, b"xx").unwrap();
+            }
+            g
+        };
+        let c = StoreCluster::open(&dir, 3, 1).unwrap();
+        assert!(
+            c.read_version() >= gen_before,
+            "valid sibling meta must win over corrupt: got {} want >= {gen_before}",
+            c.read_version()
         );
         let _ = std::fs::remove_dir_all(&dir);
     }
