@@ -18,6 +18,90 @@ fn is_live(v: &[u8]) -> bool {
     !v.is_empty()
 }
 
+/// Length-prefixed field join (F60).
+///
+/// Historical recipe payloads used `a || 0x00 || b`. Any `0x00` inside `a`
+/// truncated the field on decode, so index maintenance cleared the wrong key
+/// and left a stale secondary entry (silent extra hit on the old zip/index).
+#[must_use]
+fn encode_fields(parts: &[&[u8]]) -> Vec<u8> {
+    let mut out = Vec::new();
+    for p in parts {
+        let n = u32::try_from(p.len()).expect("field len fits u32");
+        out.extend_from_slice(&n.to_be_bytes());
+        out.extend_from_slice(p);
+    }
+    out
+}
+
+/// Decode `encode_fields` payload into `n` fields (body may trail the last).
+///
+/// Returns `None` on short/corrupt input.
+#[must_use]
+fn decode_fields(raw: &[u8], n: usize) -> Option<Vec<Vec<u8>>> {
+    let mut off = 0usize;
+    let mut out = Vec::with_capacity(n);
+    for _ in 0..n {
+        if raw.len() < off + 4 {
+            return None;
+        }
+        let len = u32::from_be_bytes(raw[off..off + 4].try_into().ok()?) as usize;
+        off += 4;
+        if raw.len() < off + len {
+            return None;
+        }
+        out.push(raw[off..off + len].to_vec());
+        off += len;
+    }
+    // Trailing bytes after `n` length-prefixed fields = last "body" if caller
+    // encoded body as a final field — we always encode all parts as fields.
+    if off != raw.len() {
+        // Tolerate legacy `a\0b` only when no length header looks valid? No —
+        // strict: residual bytes mean corrupt / wrong codec.
+        // Actually body is always a field too, so off must equal len.
+        return None;
+    }
+    Some(out)
+}
+
+/// Best-effort decode: length-prefixed first, then legacy `sep=0x00` layout.
+#[must_use]
+fn decode_pair_compat(raw: &[u8]) -> (Vec<u8>, Vec<u8>) {
+    if let Some(parts) = decode_fields(raw, 2) {
+        return (parts[0].clone(), parts[1].clone());
+    }
+    // Legacy F60-broken: first 0x00 splits a/b (NUL inside `a` truncates).
+    let sep = raw.iter().position(|&b| b == 0).unwrap_or(raw.len());
+    let a = raw[..sep].to_vec();
+    let b = if sep < raw.len() {
+        raw[sep + 1..].to_vec()
+    } else {
+        Vec::new()
+    };
+    (a, b)
+}
+
+#[must_use]
+fn decode_triple_compat(raw: &[u8]) -> (Vec<u8>, Vec<u8>, Vec<u8>) {
+    if let Some(parts) = decode_fields(raw, 3) {
+        return (parts[0].clone(), parts[1].clone(), parts[2].clone());
+    }
+    let parts: Vec<&[u8]> = raw.split(|&b| b == 0).collect();
+    let a = parts.first().map(|p| p.to_vec()).unwrap_or_default();
+    let b = parts.get(1).map(|p| p.to_vec()).unwrap_or_default();
+    let c = if parts.len() > 2 {
+        let mut v = parts[2].to_vec();
+        for p in &parts[3..] {
+            v.push(0);
+            v.extend_from_slice(p);
+        }
+        v
+    } else {
+        Vec::new()
+    };
+    (a, b, c)
+}
+
 // ── Subspace / tuple packing (minimal FDB-style ordered keys) ──────────────
 
 /// Ordered key prefix for a named subspace (like FDB `Subspace`).
@@ -85,6 +169,15 @@ impl Subspace {
         let mut end = packed;
         end.push(0x01);
         (start, end)
+    }
+
+    /// Next packed component of `key` under `self.pack(parts)`.
+    ///
+    /// Must not split on the last `0x00` in `key` — a child may contain NULs (F60).
+    #[must_use]
+    pub fn child_suffix(&self, parts: &[&[u8]], key: &[u8]) -> Option<Vec<u8>> {
+        let (start, _) = self.children_range(parts);
+        key.strip_prefix(start.as_slice()).map(Vec::from)
     }
 
     /// Prefix bytes.
@@ -219,17 +312,13 @@ impl IndexedUsers {
         let mut tr = cluster.begin();
         // If replacing, drop old index entry when zip changes (read old if present).
         if let Some(old) = tr.get(cluster, self.user_key(id))? {
-            // payload layout: zip\0name
-            if let Some(sep) = old.iter().position(|&b| b == 0) {
-                let old_zip = &old[..sep];
-                if old_zip != zipcode {
-                    tr.clear(self.index_key(old_zip, id))?;
-                }
+            // payload: length-prefixed (zip, name) — F60; legacy zip\0name still read.
+            let (old_zip, _) = decode_pair_compat(&old);
+            if old_zip.as_slice() != zipcode {
+                tr.clear(self.index_key(&old_zip, id))?;
             }
         }
-        let mut payload = zipcode.to_vec();
-        payload.push(0);
-        payload.extend_from_slice(name);
+        let payload = encode_fields(&[zipcode, name]);
         tr.set(self.user_key(id), &payload)?;
         // Non-empty marker: Montanha `clear` stages empty values as tombstones;
         // FDB recipe uses '' for index presence — we use \x01 so ranges can skip tombs.
@@ -250,14 +339,7 @@ impl IndexedUsers {
         let Some(raw) = tr.get(cluster, self.user_key(id))? else {
             return Ok(None);
         };
-        let sep = raw.iter().position(|&b| b == 0).unwrap_or(raw.len());
-        let zip = raw[..sep].to_vec();
-        let name = if sep < raw.len() {
-            raw[sep + 1..].to_vec()
-        } else {
-            Vec::new()
-        };
-        Ok(Some((zip, name)))
+        Ok(Some(decode_pair_compat(&raw)))
     }
 
     /// IDs with given zipcode via index range (FDB recipe `get_user_IDs_in_region`).
@@ -273,9 +355,8 @@ impl IndexedUsers {
             if !is_live(&v) {
                 continue; // tombstone after clear
             }
-            // unpack last component as id
-            if let Some(pos) = k.iter().rposition(|&b| b == 0) {
-                ids.push(k[pos + 1..].to_vec());
+            if let Some(id) = self.zip_index.child_suffix(&[zipcode], &k) {
+                ids.push(id);
             }
         }
         Ok(ids)
@@ -563,17 +644,13 @@ impl RecordTable {
         let rk = self.row_key(pk);
         // Drop old index entry if index value changed.
         if let Some(old) = tr.get(cluster, &rk)? {
-            // payload layout: index_val\0body
-            if let Some(sep) = old.iter().position(|&b| b == 0) {
-                let old_iv = &old[..sep];
-                if old_iv != index_val {
-                    tr.clear(self.idx_key(old_iv, pk))?;
-                }
+            // payload: length-prefixed (index_val, body) — F60.
+            let (old_iv, _) = decode_pair_compat(&old);
+            if old_iv.as_slice() != index_val {
+                tr.clear(self.idx_key(&old_iv, pk))?;
             }
         }
-        let mut body = index_val.to_vec();
-        body.push(0);
-        body.extend_from_slice(payload);
+        let body = encode_fields(&[index_val, payload]);
         tr.set(&rk, &body)?;
         tr.set(self.idx_key(index_val, pk), b"\x01")?;
         tr.commit(cluster)
@@ -604,16 +681,12 @@ impl RecordTable {
             }
         }
         if let Some(old) = tr.get(cluster, &rk)? {
-            if let Some(sep) = old.iter().position(|&b| b == 0) {
-                let old_iv = &old[..sep];
-                if old_iv != index_val {
-                    tr.clear(self.idx_key(old_iv, pk))?;
-                }
+            let (old_iv, _) = decode_pair_compat(&old);
+            if old_iv.as_slice() != index_val {
+                tr.clear(self.idx_key(&old_iv, pk))?;
             }
         }
-        let mut body = index_val.to_vec();
-        body.push(0);
-        body.extend_from_slice(payload);
+        let body = encode_fields(&[index_val, payload]);
         tr.set(&rk, &body)?;
         tr.set(self.idx_key(index_val, pk), b"\x01")?;
         tr.commit(cluster)
@@ -621,7 +694,8 @@ impl RecordTable {
 
     /// Upsert with **two** secondary indexes in one TX (multi-index seed).
     ///
-    /// Payload stored as `iv1\0iv2\0body`. Indexes: primary `index_col` and `index2_col`.
+    /// Payload: length-prefixed `(iv1, iv2, body)` (F60). Indexes: primary
+    /// `index_col` and `index2_col`.
     ///
     /// # Errors
     /// Conflict / store.
@@ -637,22 +711,15 @@ impl RecordTable {
         let mut tr = cluster.begin();
         let rk = self.row_key(pk);
         if let Some(old) = tr.get(cluster, &rk)? {
-            // layout: iv1\0iv2\0body
-            let parts: Vec<&[u8]> = old.split(|&b| b == 0).collect();
-            if parts.len() >= 2 {
-                if parts[0] != index_val {
-                    tr.clear(self.idx_key(parts[0], pk))?;
-                }
-                if parts[1] != index2_val {
-                    tr.clear(self.idx2_key(index2_col, parts[1], pk))?;
-                }
+            let (old_iv1, old_iv2, _) = decode_triple_compat(&old);
+            if old_iv1.as_slice() != index_val {
+                tr.clear(self.idx_key(&old_iv1, pk))?;
+            }
+            if old_iv2.as_slice() != index2_val {
+                tr.clear(self.idx2_key(index2_col, &old_iv2, pk))?;
             }
         }
-        let mut body = index_val.to_vec();
-        body.push(0);
-        body.extend_from_slice(index2_val);
-        body.push(0);
-        body.extend_from_slice(payload);
+        let body = encode_fields(&[index_val, index2_val, payload]);
         tr.set(&rk, &body)?;
         tr.set(self.idx_key(index_val, pk), b"\x01")?;
         tr.set(self.idx2_key(index2_col, index2_val, pk), b"\x01")?;
@@ -673,20 +740,19 @@ impl RecordTable {
         cluster: &StoreCluster,
         index_val: &[u8],
     ) -> Result<Vec<Vec<u8>>> {
-        let (prefix, end) = Subspace::new(b"rec")
+        let idx = Subspace::new(b"rec")
             .sub(&self.name)
             .sub(b"i")
-            .sub(&self.index_col)
-            .children_range(&[index_val]);
+            .sub(&self.index_col);
+        let (prefix, end) = idx.children_range(&[index_val]);
         let pairs = tr.get_range(cluster, &prefix, &end)?;
         let mut pks = Vec::new();
         for (k, v) in pairs {
             if !is_live(&v) {
                 continue;
             }
-            // key = ...\0idx_val\0pk
-            if let Some(pk) = k.rsplit(|b| *b == 0).next() {
-                pks.push(pk.to_vec());
+            if let Some(pk) = idx.child_suffix(&[index_val], &k) {
+                pks.push(pk);
             }
         }
         Ok(pks)
@@ -705,14 +771,7 @@ impl RecordTable {
         let Some(raw) = tr.get(cluster, self.row_key(pk))? else {
             return Ok(None);
         };
-        let sep = raw.iter().position(|&b| b == 0).unwrap_or(raw.len());
-        let iv = raw[..sep].to_vec();
-        let body = if sep < raw.len() {
-            raw[sep + 1..].to_vec()
-        } else {
-            Vec::new()
-        };
-        Ok(Some((iv, body)))
+        Ok(Some(decode_pair_compat(&raw)))
     }
 
     /// Lookup PKs by secondary index value.
@@ -725,19 +784,19 @@ impl RecordTable {
         index_val: &[u8],
     ) -> Result<Vec<Vec<u8>>> {
         let mut tr = Transaction::at_version(cluster.read_version());
-        let (start, end) = Subspace::new(b"rec")
+        let idx = Subspace::new(b"rec")
             .sub(&self.name)
             .sub(b"i")
-            .sub(&self.index_col)
-            .children_range(&[index_val]);
+            .sub(&self.index_col);
+        let (start, end) = idx.children_range(&[index_val]);
         let pairs = tr.get_range(cluster, &start, &end)?;
         let mut pks = Vec::new();
         for (k, v) in pairs {
             if !is_live(&v) {
                 continue;
             }
-            if let Some(pos) = k.iter().rposition(|&b| b == 0) {
-                pks.push(k[pos + 1..].to_vec());
+            if let Some(pk) = idx.child_suffix(&[index_val], &k) {
+                pks.push(pk);
             }
         }
         Ok(pks)
@@ -844,6 +903,123 @@ mod tests {
         assert!(
             in90.iter().any(|i| i.as_slice() == ff),
             "0xff user id must remain in zip 90: {in90:?}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Value payload used to be `zip || 0x00 || name`. A zip containing `0x00`
+    /// truncates on re-read so zip change clears the wrong index key and leaves
+    /// a stale secondary entry (silent extra id under the old zip).
+    #[test]
+    fn set_user_zip_with_nul_clears_old_index_on_change() {
+        let (dir, mut c) = open3();
+        let u = IndexedUsers::new();
+        let zip_nul = [b'9', 0x00, b'0'];
+        u.set_user(&mut c, b"u1", b"alice", &zip_nul).unwrap();
+        assert!(
+            u.ids_in_zip(&c, &zip_nul)
+                .unwrap()
+                .iter()
+                .any(|i| i == b"u1"),
+            "initial nul zip must list u1"
+        );
+        u.set_user(&mut c, b"u1", b"alice", b"99").unwrap();
+        let stale = u.ids_in_zip(&c, &zip_nul).unwrap();
+        assert!(
+            stale.is_empty(),
+            "zip change left stale index under nul zip (value\\0 split): {stale:?}"
+        );
+        assert!(
+            u.ids_in_zip(&c, b"99")
+                .unwrap()
+                .iter()
+                .any(|i| i == b"u1"),
+            "new zip must list u1"
+        );
+        let (z, n) = u.get_user(&c, b"u1").unwrap().expect("u1");
+        assert_eq!(z, b"99");
+        assert_eq!(n, b"alice");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Packed children are `pack(zip) || 0x00 || id`. Splitting the key on the
+    /// last `0x00` truncates an id that itself contains `0x00`.
+    #[test]
+    fn simple_index_round_trips_id_containing_nul() {
+        let (dir, mut c) = open3();
+        let u = IndexedUsers::new();
+        let id = [b'a', 0x00, b'b'];
+        u.set_user(&mut c, &id, b"nul", b"90").unwrap();
+        let got = u.get_user(&c, &id).unwrap();
+        assert!(got.is_some(), "point get must see nul id");
+        let in90 = u.ids_in_zip(&c, b"90").unwrap();
+        assert!(
+            in90.iter().any(|i| i.as_slice() == id),
+            "ids_in_zip truncated nul id (rsplit 0x00): {in90:?}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Payload `zip || 0x00 || name` truncated a zip that contains NUL, so
+    /// `set_user` cleared the wrong index key and left a stale hit.
+    #[test]
+    fn simple_index_nul_zip_does_not_leave_stale_on_update() {
+        let (dir, mut c) = open3();
+        let u = IndexedUsers::new();
+        let zip = [b'9', 0x00, b'0'];
+        u.set_user(&mut c, b"x", b"alice", &zip).unwrap();
+        let (got_zip, name) = u.get_user(&c, b"x").unwrap().unwrap();
+        assert_eq!(got_zip, zip, "get_user must round-trip zip with NUL");
+        assert_eq!(name, b"alice");
+        u.set_user(&mut c, b"x", b"alice", b"90").unwrap();
+        let old = u.ids_in_zip(&c, &zip).unwrap();
+        assert!(
+            !old.iter().any(|i| i == b"x"),
+            "stale index under NUL zip after move: {old:?}"
+        );
+        let now = u.ids_in_zip(&c, b"90").unwrap();
+        assert!(now.iter().any(|i| i == b"x"), "moved zip missing: {now:?}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn record_index_round_trips_pk_containing_nul() {
+        let (dir, mut c) = open3();
+        let rec = RecordTable::new(b"acct", b"email");
+        let pk = [b'p', 0x00, b'k'];
+        rec.upsert_unique(&mut c, &pk, b"n@x", b"row").unwrap();
+        let got = rec.lookup_index(&c, b"n@x").unwrap();
+        assert!(
+            got.iter().any(|p| p.as_slice() == pk),
+            "record index truncated nul pk: {got:?}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Index value with embedded NUL: change must drop the old index entry.
+    #[test]
+    fn record_index_val_with_nul_clears_on_change() {
+        let (dir, mut c) = open3();
+        let rec = RecordTable::new(b"acct2", b"email");
+        let iv = [b'a', 0x00, b'@', b'x'];
+        rec.upsert(&mut c, b"pk1", &iv, b"row").unwrap();
+        assert!(
+            rec.lookup_index(&c, &iv)
+                .unwrap()
+                .iter()
+                .any(|p| p == b"pk1")
+        );
+        rec.upsert(&mut c, b"pk1", b"b@x", b"row").unwrap();
+        let stale = rec.lookup_index(&c, &iv).unwrap();
+        assert!(
+            stale.is_empty(),
+            "index_val with NUL left stale entry after change: {stale:?}"
+        );
+        assert!(
+            rec.lookup_index(&c, b"b@x")
+                .unwrap()
+                .iter()
+                .any(|p| p == b"pk1")
         );
         let _ = std::fs::remove_dir_all(&dir);
     }

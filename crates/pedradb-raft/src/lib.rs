@@ -325,14 +325,12 @@ impl RaftNode {
                         })?;
                         // F12: apply must be total. CAS/create conflicts on re-apply or
                         // racing log entries must not freeze last_applied forever.
-                        match pedradb_dcs::apply_dcs_command(&mut self.db, &cmd) {
-                            Ok(_) => {}
-                            Err(pedradb_dcs::DcsError::CasFailed(_)) => {}
-                            Err(e) => {
-                                return Err(pedradb_core::CoreError::Internal(format!(
-                                    "dcs apply: {e}"
-                                )));
-                            }
+                        let r = pedradb_dcs::apply_dcs_command(&mut self.db, &cmd);
+                        if !pedradb_dcs::dcs_apply_should_advance_result(&r) {
+                            let e = r.unwrap_err();
+                            return Err(pedradb_core::CoreError::Internal(format!(
+                                "dcs apply: {e}"
+                            )));
                         }
                         self.last_applied = next;
                         continue;

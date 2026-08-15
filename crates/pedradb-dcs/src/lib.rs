@@ -21,12 +21,16 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
+pub mod apply_kernel;
 pub mod command;
 pub mod lease_kernel;
 
 pub use command::{
     apply_dcs_command, check_command, check_command_at, dcs_get, dcs_get_at, DcsCommand,
     DCS_CMD_MARKER,
+};
+pub use apply_kernel::{
+    dcs_apply_should_advance, dcs_apply_should_advance_as_is, dcs_apply_should_advance_result,
 };
 pub use lease_kernel::{
     lease_live, lease_table_expired, lease_table_expired_as_is, next_lease_id_after,

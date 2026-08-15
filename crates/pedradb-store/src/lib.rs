@@ -45,6 +45,7 @@
 
 mod ae_ack_kernel;
 mod commit_kernel;
+mod compact_kernel;
 mod txn_kernel;
 mod msg;
 pub mod client;
@@ -76,6 +77,10 @@ pub use ae_ack_kernel::{ae_ack_success, ae_ack_success_as_is};
 pub use commit_kernel::{
     may_commit_at, may_commit_at_as_is, propose_ack_ok, propose_ack_ok_as_is, recover_commit,
     recover_commit_as_is,
+};
+pub use compact_kernel::{
+    compact_index_floor, compact_ready, may_compact_through, may_compact_through_as_is,
+    peer_counts_for_compact, peer_counts_for_compact_as_is,
 };
 pub use txn_kernel::{
     discard_cut, discard_cut_as_is, revert_clears_status, revert_clears_status_as_is,
@@ -1422,18 +1427,14 @@ impl RangePeer {
 
     /// Drop log entries with `index <= through` (F27). Caller persists.
     fn compact_through(&mut self, through: u64) {
-        if through <= self.snapshot_index || through == 0 {
-            return;
-        }
         let term = self.term_at(through);
-        if term == 0 && through > self.snapshot_index {
-            // Entry not found — cannot compact past known log.
+        if !compact_kernel::may_compact_through(self.snapshot_index, through, term) {
             return;
         }
         self.log.retain(|e| e.index > through);
         self.snapshot_index = through;
         self.snapshot_term = term;
-        let floor = through + 1;
+        let floor = compact_kernel::compact_index_floor(through);
         for ni in self.next_index.values_mut() {
             *ni = (*ni).max(floor);
         }
@@ -3477,6 +3478,9 @@ impl<E: Env> StoreCluster<E> {
         // Multi-host: remotes are not in `nodes` — use leader match_index for them.
         let mut min_applied = u64::MAX;
         for &nid in &ids {
+            if !compact_kernel::peer_counts_for_compact(self.is_participating(nid)) {
+                continue;
+            }
             if self.is_local_node(nid) {
                 min_applied = min_applied.min(self.applied_index(nid, rid));
             } else if let Some(leader) = self.range_leader(rid) {
@@ -3494,7 +3498,7 @@ impl<E: Env> StoreCluster<E> {
         if min_applied == u64::MAX {
             min_applied = 0;
         }
-        if min_applied == 0 {
+        if !compact_kernel::compact_ready(min_applied) {
             return Ok(());
         }
         // Compact only local peers (remote peers compact independently).
@@ -3506,7 +3510,12 @@ impl<E: Env> StoreCluster<E> {
             if p.snapshot_index >= min_applied {
                 continue;
             }
-            if p.term_at(min_applied) == 0 && min_applied > p.snapshot_index {
+            if !compact_kernel::may_compact_through(
+                p.snapshot_index,
+                min_applied,
+                p.term_at(min_applied),
+            ) && p.snapshot_index < min_applied
+            {
                 return Ok(()); // lagging peer missing entry; wait
             }
         }
@@ -3787,10 +3796,9 @@ impl<E: Env> StoreCluster<E> {
                     apply_txn_revert(&mut node.db, *txn_id, keys)?;
                 }
                 RangeEntry::Dcs(cmd) => {
-                    match apply_dcs_command(&mut node.db, cmd) {
-                        Ok(_) => {}
-                        Err(pedradb_dcs::DcsError::CasFailed(_)) => {}
-                        Err(e) => return Err(StoreError::Dcs(e)),
+                    let r = apply_dcs_command(&mut node.db, cmd);
+                    if !pedradb_dcs::dcs_apply_should_advance_result(&r) {
+                        return Err(StoreError::Dcs(r.unwrap_err()));
                     }
                 }
                 RangeEntry::Noop => {}
