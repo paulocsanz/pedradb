@@ -38,6 +38,7 @@ fn main() {
 
     let montanha_raw = std::fs::read_to_string(&montanha_json).unwrap_or_else(|_| "{}".into());
     let extracted = extract_montanha_metrics(&montanha_raw);
+    let montanha_bp = extract_bool_field(&montanha_raw, "write_backpressure");
 
     let peer_path = std::env::var("MONTANHA_FDB_PEER").ok();
     let peer_raw = peer_path
@@ -47,6 +48,9 @@ fn main() {
         .as_ref()
         .map(|s| extract_montanha_metrics(s))
         .unwrap_or_default();
+    let fdb_bp = peer_raw
+        .as_ref()
+        .and_then(|s| extract_bool_field(s, "write_backpressure"));
 
     let fdb_cluster = std::env::var("FDB_CLUSTER_FILE").ok();
     let fdbcli = which("fdbcli");
@@ -148,21 +152,25 @@ fn main() {
         .unwrap_or_else(|| "null".into());
 
     let montanha_metrics_json = metrics_to_json(&extracted);
+    let montanha_bp_json = bool_opt_json(montanha_bp);
+    let fdb_bp_json = bool_opt_json(fdb_bp);
     let report = format!(
         r#"{{
   "compare": "montanha-fdb-shaped-v1",
   "montanha_path": {mj:?},
+  "montanha_write_backpressure": {montanha_bp_json},
   "montanha_metrics": {montanha_metrics_json},
   "fdb": {{
     "status": "{fdb_status}",
     "cluster_file": {cf_json},
     "fdbcli": {cli_json},
     "peer_file": {peer_json},
+    "write_backpressure": {fdb_bp_json},
     "probe": {fdb_probe},
-    "how_to_fill": "1) Lab fdbserver. 2) scripts/fdb_side_shapes.sh or Python binding. 3) Write fdb_shaped_peer.json with same bench names + keys_per_s. 4) MONTANHA_FDB_PEER=... montanha-fdb-compare. See docs/montanha-vs-fdb-bench.md"
+    "how_to_fill": "1) Lab fdbserver. 2) scripts/fdb_side_shapes.sh or Python binding. 3) Write fdb_shaped_peer.json with same bench names + keys_per_s (+ optional write_backpressure). 4) MONTANHA_FDB_PEER=... montanha-fdb-compare. See docs/montanha-vs-fdb-bench.md"
   }},
   "ratios": {ratios},
-  "honesty": "Montanha numbers alone are not field parity. FDB side optional. Topology/durability must be labeled."
+  "honesty": "Montanha numbers alone are not field parity. FDB side optional. Topology/durability must be labeled. write_backpressure is pass-through from Montanha/peer JSON (MONTANHA_WRITE_BACKPRESSURE lab flag)."
 }}
 "#,
         mj = montanha_json,
@@ -174,7 +182,32 @@ fn main() {
     std::fs::write(&tmpl, &template).expect("write template");
     println!("{report}");
     eprintln!("wrote {}", path.display());
-    eprintln!("wrote {} (fill keys_per_s then set MONTANHA_FDB_PEER)", tmpl.display());
+    eprintln!(
+        "wrote {} (fill keys_per_s then set MONTANHA_FDB_PEER)",
+        tmpl.display()
+    );
+}
+
+fn extract_bool_field(raw: &str, field: &str) -> Option<bool> {
+    let key = format!("\"{field}\"");
+    let i = raw.find(&key)?;
+    let rest = &raw[i + key.len()..];
+    let rest = rest.trim_start().strip_prefix(':')?.trim_start();
+    if rest.starts_with("true") {
+        Some(true)
+    } else if rest.starts_with("false") {
+        Some(false)
+    } else {
+        None
+    }
+}
+
+fn bool_opt_json(v: Option<bool>) -> String {
+    match v {
+        Some(true) => "true".into(),
+        Some(false) => "false".into(),
+        None => "null".into(),
+    }
 }
 
 /// Best-effort extract name → keys_per_s (or qps) from fdb_shaped_bench JSON.
@@ -187,9 +220,10 @@ fn extract_montanha_metrics(raw: &str) -> BTreeMap<String, f64> {
         };
         let kps = json_number_field(chunk, "keys_per_s")
             .or_else(|| json_number_field(chunk, "qps"))
-            .or_else(|| json_number_field(chunk, "keys_ok").and_then(|k| {
-                json_number_field(chunk, "wall_s").map(|w| k / w.max(1e-12))
-            }));
+            .or_else(|| {
+                json_number_field(chunk, "keys_ok")
+                    .and_then(|k| json_number_field(chunk, "wall_s").map(|w| k / w.max(1e-12)))
+            });
         if let Some(v) = kps {
             out.insert(name, v);
         }
@@ -270,5 +304,21 @@ fn which(bin: &str) -> Option<PathBuf> {
 
 #[cfg(test)]
 mod tests {
-    // Binary crate — run via `cargo run`; parse helpers tested by integration use.
+    use super::*;
+
+    #[test]
+    fn extract_bool_write_backpressure() {
+        let raw = r#"{"bench":"x","write_backpressure":true,"benches":[]}"#;
+        assert_eq!(extract_bool_field(raw, "write_backpressure"), Some(true));
+        let raw2 = r#"{"write_backpressure": false}"#;
+        assert_eq!(extract_bool_field(raw2, "write_backpressure"), Some(false));
+        assert_eq!(extract_bool_field("{}", "write_backpressure"), None);
+    }
+
+    #[test]
+    fn extract_metrics_still_works() {
+        let raw = r#"{"benches":[{"name":"A1_raw_put","keys_per_s":12.5}]}"#;
+        let m = extract_montanha_metrics(raw);
+        assert!((m.get("A1_raw_put").copied().unwrap_or(0.0) - 12.5).abs() < 1e-9);
+    }
 }

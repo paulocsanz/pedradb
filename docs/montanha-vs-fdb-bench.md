@@ -93,7 +93,9 @@ MONTANHA_FDB_PEER=findings/fdb-side-local/fdb_shaped_peer.json \
   findings/fdb-bench-scale-s10/fdb_shaped_bench.json findings/fdb-compare-local
 ```
 
-Outputs: `compare_report.json` (montanha_metrics + ratios), `fdb_shaped_peer.template.json`.
+Outputs: `compare_report.json` (montanha_metrics + ratios + pass-through
+`montanha_write_backpressure` / `fdb.write_backpressure` when present in JSON),
+`fdb_shaped_peer.template.json`.
 
 **Sample Montanha column (S10 scale, 2026-08-15 lab laptop):**
 

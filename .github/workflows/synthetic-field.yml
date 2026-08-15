@@ -133,12 +133,18 @@ jobs:
         run: bash scripts/montanha_scale_gate_v0.sh findings/scale-gate-ci-bp
       - name: mini-bt soak (in-process + TCP multi-client)
         run: cargo test -p pedradb-store --test mini_bt_soak -- --nocapture
+      - name: mini-bt soak (Pedra L0 write backpressure)
+        env:
+          MONTANHA_WRITE_BACKPRESSURE: "1"
+        run: cargo test -p pedradb-store --test mini_bt_soak -- --nocapture
       - name: fdb-compare (Montanha extract; FDB optional)
         run: |
           cargo run -p pedradb-store --release --bin montanha-fdb-compare -- \
             findings/fdb-bench-scale-s10/fdb_shaped_bench.json findings/fdb-compare-ci
           test -f findings/fdb-compare-ci/compare_report.json
           test -f findings/fdb-compare-ci/fdb_shaped_peer.template.json
+          # Older scale benches may omit write_backpressure → null is fine.
+          python3 -c "import json; r=json.load(open('findings/fdb-compare-ci/compare_report.json')); assert 'montanha_write_backpressure' in r, r; print('montanha_write_backpressure=', r.get('montanha_write_backpressure'))"
       - uses: actions/upload-artifact@v4
         if: always()
         with:

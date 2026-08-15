@@ -6,7 +6,7 @@
 //! Not full FoundationDB bindingtester.
 
 use pedradb_store::{
-    client_get, client_status, client_tick, StoreCluster, TcpClusterClient,
+    client_get, client_status, client_tick, StoreCluster, StoreOpenOptions, TcpClusterClient,
 };
 use std::collections::BTreeMap;
 use std::net::SocketAddr;
@@ -16,6 +16,22 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+
+/// Lab flag parity with scale-gate / fdb-bench / montanha-tcp.
+fn write_backpressure_enabled() -> bool {
+    std::env::var("MONTANHA_WRITE_BACKPRESSURE")
+        .ok()
+        .as_deref()
+        == Some("1")
+}
+
+fn store_opts() -> StoreOpenOptions {
+    let mut opts = StoreOpenOptions::default();
+    if write_backpressure_enabled() {
+        opts = opts.with_write_backpressure();
+    }
+    opts
+}
 
 fn temp_dir(tag: &str) -> PathBuf {
     static N: AtomicU64 = AtomicU64::new(0);
@@ -41,11 +57,11 @@ fn xorshift(rng: &mut u64) -> u64 {
 #[test]
 fn mini_bt_inprocess_model_checked_soak() {
     let dir = temp_dir("e1");
-    let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+    let mut c = StoreCluster::open_with_options(&dir, 3, 1, store_opts()).unwrap();
     c.elect_all(100).unwrap();
 
     let mut model: BTreeMap<Vec<u8>, Vec<u8>> = BTreeMap::new();
-    let mut rng = 0xFDB_C1_u64;
+    let mut rng = 0x000F_DBC1_u64;
     // Keep CI under ~1–2 min wall on laptop debug builds.
     let ops = 80usize;
     let mut mismatches = 0u64;
@@ -172,12 +188,7 @@ fn start_tcp_cluster(bin: &Path, tmp: &Path) -> Vec<TcpNode> {
     let peers: Vec<(u64, SocketAddr)> = ports
         .iter()
         .enumerate()
-        .map(|(i, &p)| {
-            (
-                (i as u64) + 1,
-                format!("127.0.0.1:{p}").parse().unwrap(),
-            )
-        })
+        .map(|(i, &p)| ((i as u64) + 1, format!("127.0.0.1:{p}").parse().unwrap()))
         .collect();
     let peer_flags: Vec<String> = peers
         .iter()
@@ -187,8 +198,8 @@ fn start_tcp_cluster(bin: &Path, tmp: &Path) -> Vec<TcpNode> {
     for (id, addr) in &peers {
         let data = tmp.join(format!("n{id}"));
         std::fs::create_dir_all(&data).unwrap();
-        let child = Command::new(bin)
-            .arg("node")
+        let mut cmd = Command::new(bin);
+        cmd.arg("node")
             .arg("--id")
             .arg(id.to_string())
             .arg("--data")
@@ -199,9 +210,12 @@ fn start_tcp_cluster(bin: &Path, tmp: &Path) -> Vec<TcpNode> {
             .arg("1")
             .args(&peer_flags)
             .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .expect("spawn montanha-tcp");
+            .stderr(Stdio::null());
+        // Explicit flag (env also works via montanha-tcp); keep soak independent of inherit quirks.
+        if write_backpressure_enabled() {
+            cmd.arg("--write-backpressure");
+        }
+        let child = cmd.spawn().expect("spawn montanha-tcp");
         nodes.push(TcpNode {
             child,
             addr: *addr,
@@ -314,7 +328,8 @@ fn mini_bt_tcp_multiclient_majority_verify() {
         }
     }
     assert_eq!(
-        missing, 0,
+        missing,
+        0,
         "majority visibility failed for {missing} keys (model {})",
         merged.len()
     );
