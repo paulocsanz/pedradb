@@ -1396,14 +1396,26 @@ fn load_range_peer<E: Env>(
         peer.log = decode_log(&raw)?;
     }
     // RFC-0025 P1.2: segment entries beyond the base blob (incremental persist).
+    // F121: log_hi is a hard upper bound — missing/wrong-index segment rows
+    // must fail open (silent skip left holes; last_index jumped over gaps).
     let blob_last = peer.last_index();
     if let Some(raw) = db.get(&raft_meta_key(range_id, "log_hi")) {
         let hi = decode_u64_meta(&raw)?;
         if hi > blob_last {
             for i in (blob_last + 1)..=hi {
-                if let Some(eraw) = db.get(&log_entry_key(range_id, i)) {
-                    peer.log.push(decode_one_log_rec(eraw.as_ref())?);
+                let Some(eraw) = db.get(&log_entry_key(range_id, i)) else {
+                    return Err(StoreError::Msg(format!(
+                        "raft log segment gap: range {range_id} index {i} missing (log_hi={hi})"
+                    )));
+                };
+                let rec = decode_one_log_rec(eraw.as_ref())?;
+                if rec.index != i {
+                    return Err(StoreError::Msg(format!(
+                        "raft log segment index mismatch: range {range_id} want {i} got {}",
+                        rec.index
+                    )));
                 }
+                peer.log.push(rec);
             }
         }
     }
@@ -7362,6 +7374,59 @@ mod tests {
         );
         c.put(b"post-compact", b"yes").unwrap();
         assert_eq!(c.count_applied_eq(b"post-compact", b"yes"), 3);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// F121: missing segment row under log_hi used to be skipped → log holes.
+    #[test]
+    fn open_rejects_raft_log_segment_gap() {
+        let dir = temp();
+        {
+            let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+            // No elect/put required — inject a segment gap on every node's Pedra.
+            let rid = 1u64;
+            let rec1 = LogRec {
+                index: 1,
+                term: 1,
+                entry: RangeEntry::Noop,
+            };
+            let rec3 = LogRec {
+                index: 3,
+                term: 1,
+                entry: RangeEntry::Noop,
+            };
+            for nid in c.ids.clone() {
+                let n = c.nodes.get_mut(&nid).unwrap();
+                // Base blob empty → load walks log_hi segments 1..=3.
+                n.db
+                    .put(&raft_meta_key(rid, "log"), encode_log(&[]))
+                    .unwrap();
+                n.db
+                    .put(&raft_meta_key(rid, "log_hi"), encode_u64_meta(3))
+                    .unwrap();
+                n.db
+                    .put(&log_entry_key(rid, 1), encode_one_log_rec(&rec1))
+                    .unwrap();
+                // index 2 intentionally missing
+                n.db
+                    .put(&log_entry_key(rid, 3), encode_one_log_rec(&rec3))
+                    .unwrap();
+                // Keep commit/applied low so uncommitted-suffix trim is a no-op.
+                n.db
+                    .put(&raft_meta_key(rid, "commit"), encode_u64_meta(0))
+                    .unwrap();
+                n.db
+                    .put(&raft_meta_key(rid, "applied"), encode_u64_meta(0))
+                    .unwrap();
+            }
+        }
+        match StoreCluster::open(&dir, 3, 1) {
+            Ok(_) => panic!("log segment gap must fail open, not load a holed log"),
+            Err(e) => assert!(
+                e.to_string().contains("segment gap") || e.to_string().contains("log segment"),
+                "expected segment gap error, got {e}"
+            ),
+        }
         let _ = std::fs::remove_dir_all(&dir);
     }
 
