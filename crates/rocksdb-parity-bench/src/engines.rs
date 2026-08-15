@@ -130,6 +130,12 @@ pub struct RocksEngine {
     db: rocksdb::DB,
     wopts: rocksdb::WriteOptions,
     sync: bool,
+    /// After each durable write, `sync_all` every `*.log` so the peer pays
+    /// `F_FULLFSYNC` (macOS) — same syscall class as Pedra `File::sync_all`.
+    /// librocksdb-sys is built *without* `HAVE_FULLFSYNC`, so default Rocks
+    /// `WriteOptions.sync` is `fdatasync` (~50µs here), not `F_FULLFSYNC` (~5ms).
+    full_sync: bool,
+    dir: std::path::PathBuf,
 }
 
 #[cfg(feature = "real")]
@@ -141,7 +147,31 @@ impl RocksEngine {
         let db = rocksdb::DB::open_cf(&opts, path, DEPS_CFS).expect("rocksdb open_cf");
         let mut wopts = rocksdb::WriteOptions::default();
         wopts.set_sync(sync);
-        Self { db, wopts, sync }
+        let full_sync = crate::env_usize("ROCKS_PARITY_FULL_SYNC", 0) != 0;
+        Self {
+            db,
+            wopts,
+            sync,
+            full_sync,
+            dir: path.to_path_buf(),
+        }
+    }
+
+    fn full_sync_wal(&self) {
+        if !self.full_sync {
+            return;
+        }
+        let Ok(rd) = std::fs::read_dir(&self.dir) else {
+            return;
+        };
+        for e in rd.flatten() {
+            if !e.file_name().to_string_lossy().ends_with(".log") {
+                continue;
+            }
+            if let Ok(f) = std::fs::File::open(e.path()) {
+                let _ = f.sync_all();
+            }
+        }
     }
 }
 
@@ -151,17 +181,23 @@ impl Engine for RocksEngine {
         "rocksdb"
     }
     fn durability(&self) -> &'static str {
-        if self.sync {
-            "sync-per-write (WriteOptions.sync=true)"
-        } else {
-            "async-wal (WriteOptions.sync=false, rocksdb default)"
+        match (self.sync, self.full_sync) {
+            (true, true) => {
+                "sync-per-write + F_FULLFSYNC on WAL (same class as Pedra File::sync_all)"
+            }
+            (true, false) => "sync-per-write (WriteOptions.sync=true; fdatasync on this build)",
+            (false, _) => "async-wal (WriteOptions.sync=false, rocksdb default)",
         }
     }
     fn sync(&self) -> bool {
         self.sync
     }
     fn put(&self, k: &[u8], v: &[u8]) -> bool {
-        self.db.put_opt(k, v, &self.wopts).is_ok()
+        let ok = self.db.put_opt(k, v, &self.wopts).is_ok();
+        if ok {
+            self.full_sync_wal();
+        }
+        ok
     }
     fn get(&self, k: &[u8]) -> Result<Option<Vec<u8>>, ()> {
         self.db.get(k).map_err(|_| ())
@@ -179,10 +215,14 @@ impl Engine for RocksEngine {
             .count())
     }
     fn put_cf(&self, cf: &str, k: &[u8], v: &[u8]) -> bool {
-        match self.db.cf_handle(cf) {
+        let ok = match self.db.cf_handle(cf) {
             Some(h) => self.db.put_cf_opt(h, k, v, &self.wopts).is_ok(),
             None => false,
+        };
+        if ok {
+            self.full_sync_wal();
         }
+        ok
     }
     fn get_cf(&self, cf: &str, k: &[u8]) -> Result<Option<Vec<u8>>, ()> {
         let h = self.db.cf_handle(cf).ok_or(())?;
@@ -211,7 +251,11 @@ impl Engine for RocksEngine {
                 return false;
             }
         }
-        self.db.write_opt(wb, &self.wopts).is_ok()
+        let ok = self.db.write_opt(wb, &self.wopts).is_ok();
+        if ok {
+            self.full_sync_wal();
+        }
+        ok
     }
     fn latest_cf(&self, cf: &str, prefix: &[u8]) -> Result<Option<Vec<u8>>, ()> {
         let h = self.db.cf_handle(cf).ok_or(())?;

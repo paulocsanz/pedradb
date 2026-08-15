@@ -154,8 +154,11 @@ checkpoint still persist. Seed 1024 puts 39.7 s → 6.5 s; ycsb_a 94 → 390
 qps. Residual with `interval=0` is the same (~3.8 ms p50) — one WAL
 `File::sync_all` (`F_FULLFSYNC` on macOS). RocksDB `sync=true` is `fsync`,
 not `F_FULLFSYNC`; we do **not** downgrade `sync_all` to win the bench (G1).
-`ROCKS_PARITY_RATIO_FLOOR` stays report-only until write shapes cross 0.1.
-See [RFC-0031](rfc/0031-rocks-parity-10x-budget.md).
+`ROCKS_PARITY_RATIO_FLOOR` against the **fdatasync** peer stays report-only
+(mixing `F_FULLFSYNC` ~4.8 ms with `fdatasync` ~50 µs is not an engine
+measurement). Official 2× gate is vs `ROCKS_PARITY_FULL_SYNC=1`. Writes
+already meet it; `ycsb_c` / `deps_mvcc_latest` / `deps_scan` wait on P1
+iterators. See [RFC-0031](rfc/0031-rocks-parity-10x-budget.md).
 
 ### Lab numbers after P0.1 debounce (2026-08-15, interval=64, same records/ops)
 

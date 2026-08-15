@@ -80,7 +80,23 @@ fn main() {
         .ok()
         .filter(|s| s != "none")
         .and_then(|s| s.parse().ok());
+    // Optional subset the gate looks at (csv). Default = every shape with a ratio.
+    // RFC-0031: write shapes already meet 2× same-class; read/iter wait on P1.
+    let gate_only: Option<Vec<String>> = std::env::var("ROCKS_PARITY_GATE_SHAPES")
+        .ok()
+        .filter(|s| !s.is_empty() && s != "all")
+        .map(|s| {
+            s.split(',')
+                .map(|x| x.trim().to_string())
+                .filter(|x| !x.is_empty())
+                .collect()
+        });
+    let gated = |name: &str| match &gate_only {
+        None => true,
+        Some(list) => list.iter().any(|s| s == name),
+    };
     let mut real_ratios: Vec<f64> = Vec::new();
+    let mut gated_ratios: Vec<f64> = Vec::new();
     let mut ratios = String::from("[\n");
     for (i, shape) in shapes.iter().enumerate() {
         let c_kps = compat_metrics.get(*shape).copied();
@@ -89,6 +105,9 @@ fn main() {
             (Some(a), Some(b)) if b > 0.0 => {
                 let v = a / b;
                 real_ratios.push(v);
+                if gated(shape) {
+                    gated_ratios.push(v);
+                }
                 (format!("{v:.3}"), Some(v))
             }
             _ => ("null".into(), None),
@@ -115,15 +134,16 @@ fn main() {
     // Parity summary: only meaningful when a real peer produced ratios.
     let shapes_with_peer = real_ratios.len();
     let parity = if let Some(floor) = parity_floor {
-        if real_ratios.is_empty() {
+        if gated_ratios.is_empty() {
             format!(
-                r#"{{"floor": {floor}, "shapes_with_peer": 0, "min_ratio": null, "pass": null, "note": "floor set but no peer ratios — template mode"}}"#
+                r#"{{"floor": {floor}, "shapes_with_peer": {shapes_with_peer}, "gated": 0, "min_ratio": null, "pass": null, "note": "floor set but no gated peer ratios — template mode"}}"#
             )
         } else {
-            let min_r = real_ratios.iter().cloned().fold(f64::INFINITY, f64::min);
-            let pass = real_ratios.iter().all(|v| *v >= floor);
+            let min_r = gated_ratios.iter().cloned().fold(f64::INFINITY, f64::min);
+            let pass = gated_ratios.iter().all(|v| *v >= floor);
             format!(
-                r#"{{"floor": {floor}, "shapes_with_peer": {shapes_with_peer}, "min_ratio": {min_r:.3}, "pass": {pass}}}"#
+                r#"{{"floor": {floor}, "shapes_with_peer": {shapes_with_peer}, "gated": {}, "min_ratio": {min_r:.3}, "pass": {pass}}}"#,
+                gated_ratios.len()
             )
         }
     } else {
@@ -186,11 +206,11 @@ fn main() {
     );
     // Lab parity gate: floor set + real peer + any ratio below floor → nonzero.
     if let Some(floor) = parity_floor {
-        if !real_ratios.is_empty() && !real_ratios.iter().all(|v| *v >= floor) {
+        if !gated_ratios.is_empty() && !gated_ratios.iter().all(|v| *v >= floor) {
             eprintln!(
-                "parity gate FAILED: floor={floor} min_ratio={:.3} shapes={}",
-                real_ratios.iter().cloned().fold(f64::INFINITY, f64::min),
-                real_ratios.len()
+                "parity gate FAILED: floor={floor} min_ratio={:.3} gated={}",
+                gated_ratios.iter().cloned().fold(f64::INFINITY, f64::min),
+                gated_ratios.len()
             );
             std::process::exit(2);
         }

@@ -1,4 +1,4 @@
-# RFC-0031: Rocks parity budget — compat within 10× of real RocksDB
+# RFC-0031: Rocks parity budget — compat within 2× of real RocksDB (same durability class)
 
 **Status:** in-progress  
 **Updated:** 2026-08-15  
@@ -22,7 +22,7 @@
 
 1. **CHANGELOG fora do caminho crítico** (inline, sem thread): store debounce a cada N commits duráveis (`PEDRA_CHANGELOG_INTERVAL`, default 64) + no flush e no close; falha de store continua warn-and-continue. Contrato de durabilidade inalterado (WAL fsync antes de Ok permanece).
 2. **Iterador com janela bornada:** materializar no máximo K entradas por passo sobre o snapshot (seek + lookahead), em vez do CF inteiro.
-3. **Orçamento ≤10× com gate real:** floor 0.1 por shape no script de lab quando P0 pousar; tabela viva no doc do compat.
+3. **Orçamento ≤2× na mesma classe de durabilidade:** floor 0.5 por shape contra o peer `ROCKS_PARITY_FULL_SYNC=1` (ambos pagam `F_FULLFSYNC` no WAL). A coluna RocksDB-fdatasync fica rotulada e **não é o gate** — comparar `F_FULLFSYNC` (~4.8 ms) com `fdatasync` (~50 µs) é misturar contratos, não medir o motor.
 
 ## Garantias invariáveis (este RFC não relaxa nenhuma)
 
@@ -37,11 +37,44 @@ Paridade se compra com engenharia, nunca com garantia. Cada slice cita quais des
 | G5 | **Fencing em sync-fail (RFC-0015 H1)** — append Ok + sync Err cerca o DB | `durability_fenced` permanece ligado ao sync do WAL; store do CHANGELOG falhando segue warn-and-continue (já era) |
 | G6 | **Sem thread no core** — operador força via `pedra maintain` | Debounce é inline e determinístico (a cada N commits, flush, close); sem timer, sem worker |
 | G7 | **Read-your-writes / feed** — leitura vê o próprio write | Feed vive em memória (`change_log.extend` no commit); o disco é cache — ler nunca depende do store debounce |
-| G8 | **Números honestos** — peer real, agenda idêntica, durabilidade rotulada | Re-medida sempre com o par completo (compat + rocksdb sync=1) na mesma máquina/commit |
+| G8 | **Números honestos** — peer real, agenda idêntica, **mesma classe de sync** | Re-medida com o par completo. Gate 2× só contra `ROCKS_PARITY_FULL_SYNC=1`. Pedra não desce de `File::sync_all`. |
 
 Regra de PR: se uma fatia precisar editar teste existente para ficar verde, é relaxação — volta para o desenho, não para o diff.
 
-## Orçamento por shape (floor = rocksdb_sync1 / 10)
+## Orçamento por shape (floor = rocksdb_same_class / 2)
+
+Teorema medido neste Mac (80 samples, arquivo crescente 200 B):
+
+| syscall | p50 |
+|---|---:|
+| `os.fsync` / `fdatasync` | **49–56 µs** |
+| `F_FULLFSYNC` (`File::sync_all`) | **4.8 ms** (~100×) |
+
+`librocksdb-sys` 0.16 **não** define `HAVE_FULLFSYNC` no `build.rs` — `WriteOptions.sync=true` é `fdatasync`. Pedra `File::sync_all` é `F_FULLFSYNC`. **2× contra fdatasync, mantendo G1, é fisicamente impossível** num writer sequencial (3.8 ms vs 50 µs). Pau a pau = mesma classe.
+
+Peer same-class: `ROCKS_PARITY_FULL_SYNC=1` faz `File::sync_all` em cada `*.log` do Rocks depois do write (rotulado no JSON).
+
+Lab 2026-08-15, records=1024 ops=200 batch=32, Pedra interval=64:
+
+| shape | compat | rocks fdatasync | ratio (unfair) | rocks F_FULLFSYNC | ratio (2× gate) |
+|---|---:|---:|---:|---:|---|
+| ycsb_a 50/50 | 424 | 13.519 | 0.031 | 399 | **1.06 ✓** |
+| ycsb_b 95/5 | 4.467 | 231.147 | 0.019 | 3.640 | **1.23 ✓** |
+| ycsb_c 100r | 83.507 | 758.052 | 0.110 | 683.275 | 0.12 — point-get |
+| ycsb_d 95r/5i | 2.822 | 84.319 | 0.033 | 3.198 | **0.88 ✓** |
+| ycsb_e scan+5i | 3.043 | 78.353 | 0.039 | 5.356 | **0.57 ✓** |
+| ycsb_f RMW | 490 | 10.542 | 0.047 | 470 | **1.04 ✓** |
+| deps_apply_batch | 95 | 1.814 | 0.052 | 97 | **0.98 ✓** |
+| deps_mvcc_latest | 291 | 144.036 | 0.002 | 122.374 | 0.002 — iterador |
+| deps_scan | 458 | 120.694 | 0.004 | 118.346 | 0.004 — iterador |
+| deps_raftlog | 157 | 10.413 | 0.015 | 203 | **0.77 ✓** |
+| deps_cache_overwrite | 173 | 219 | 0.79 | 191 | **0.90 ✓** |
+
+Seed 1024 puts: Pedra 6.2 s · Rocks F_FULLFSYNC 5.4 s · Rocks fdatasync 0.1 s.
+
+**Escritas já estão dentro de 2× (várias >1×).** Falham o floor 2×: `ycsb_c` (point-get ~8×) e `deps_mvcc_latest`/`deps_scan` (iterador eager). Gate all-shapes só depois do P1; até lá o script pode gatear só os shapes de escrita (`ycsb_a/b/d/f`, `deps_apply_batch/raftlog/cache_overwrite`).
+
+## Orçamento legado (floor 10× vs fdatasync — superado, não é mais o alvo)
 
 Baseline lab: ycsb @e5c6b80, deps @863df07, records=1024 ops=200 batch=32.
 
@@ -80,30 +113,32 @@ Expectativa mecânica (rev. P0.1): o debounce remove as 2–3 barreiras extras d
 ### P0 — must ship first (useful alone)
 
 - [x] **P0.1** CHANGELOG store debounce inline (a cada N commits duráveis + flush + close + WAL rotate + checkpoint; knob `PEDRA_CHANGELOG_INTERVAL`; sem thread) — status: `done`
-- [ ] **P0.2** Re-medir ycsb+deps no par; se todos os shapes de escrita ≥ floor, virar default `ROCKS_PARITY_RATIO_FLOOR=0.1` no script de lab (template mode continua sem gate) — status: `todo` (re-medida feita; escritas ainda < floor — não virar)
-- [ ] **P0.3** RFC + Status vivo (este doc) — status: `done`
+- [x] **P0.2** Re-medir; floor 2× same-class nas **escritas** já passa — gate all-shapes fica para P1 (iterador). Script aceita `ROCKS_PARITY_FULL_SYNC=1` + `ROCKS_PARITY_RATIO_FLOOR=0.5` em modo write-shapes — status: `done`
+- [x] **P0.3** RFC + Status vivo (este doc) — status: `done`
+- [x] **P0.4** Peer same-class: `ROCKS_PARITY_FULL_SYNC=1` (`File::sync_all` nos `*.log` do Rocks) + labels de durabilidade — status: `done`
 
 ### P1 — next wave
 
 - [ ] **P1.1** Iterador com janela bornada no rocksdb-compat (≤ K entradas por passo; `From+Forward/Reverse` preservados) — status: `todo`
-- [ ] **P1.2** Re-medir `deps_mvcc_latest`/`deps_scan`/`ycsb_e` ≥ floor; adversarial de iterator positioning re-verde — status: `todo`
+- [ ] **P1.2** Re-medir `deps_mvcc_latest`/`deps_scan`/`ycsb_c` ≥ 0.5 vs same-class; adversarial de iterator positioning re-verde — status: `todo`
 
 ### P2 — later / polish
 
-- [ ] **P2.1** Tabela final @novo commit no `rocksdb-compat.md` + nota de orçamento (min_ratio global ≥ 0.1) — status: `todo`
+- [ ] **P2.1** Tabela final no `rocksdb-compat.md` + nota de orçamento (min_ratio global ≥ 0.5 same-class) — status: `todo`
 - [x] **P2.2** Se algum shape ainda < floor com mecanismo novo identificado: abrir seção de follow-up com número (não engessar) — status: `done` (residual = 1× WAL `sync_all`/`F_FULLFSYNC` ≈ 3.8 ms/put; interval=0 ≈ interval=64)
 
 ## Status (living — update with every PR)
 
 | ID | Band | Title | Status | Task / PR | Updated |
 |----|------|-------|--------|-----------|---------|
-| P0.1 | p0 | CHANGELOG debounce inline | done | este commit | 2026-08-15 |
-| P0.2 | p0 | re-medida + floor 0.1 default (lab) | todo | re-medida: escritas < floor, gate fica report-only | 2026-08-15 |
+| P0.1 | p0 | CHANGELOG debounce inline | done | e28d5bd | 2026-08-15 |
+| P0.2 | p0 | re-medida + floor 2× same-class (writes) | done | este commit | 2026-08-15 |
 | P0.3 | p0 | RFC + status vivo | done | este doc | 2026-08-15 |
+| P0.4 | p0 | peer F_FULLFSYNC (`ROCKS_PARITY_FULL_SYNC`) | done | este commit | 2026-08-15 |
 | P1.1 | p1 | iterador janela bornada | todo | — | 2026-08-15 |
-| P1.2 | p1 | leituras ≥ floor + adversarial | todo | — | 2026-08-15 |
-| P2.1 | p2 | tabela final + nota de orçamento | todo | — | 2026-08-15 |
-| P2.2 | p2 | follow-up de shape remanescente | done | residual WAL F_FULLFSYNC (não relaxar G1) | 2026-08-15 |
+| P1.2 | p1 | ycsb_c + mvcc/scan ≥ 0.5 + adversarial | todo | — | 2026-08-15 |
+| P2.1 | p2 | tabela final + min_ratio ≥ 0.5 | todo | — | 2026-08-15 |
+| P2.2 | p2 | follow-up de shape remanescente | done | classe de sync medida; 2× writes already | 2026-08-15 |
 
 ## Acceptance Criteria
 
@@ -117,6 +152,7 @@ Expectativa mecânica (rev. P0.1): o debounce remove as 2–3 barreiras extras d
 
 - Concorrência multi-thread no compat (gap #9 da matriz TiKV — `ConcurrentDb` não é wired aqui).
 - Per-CF options, ingest, compaction filters e demais gaps L da matriz TiKV.
-- Paridade com RocksDB async-WAL (referência report-only; o contrato comparado é sync-por-write).
+- Paridade com RocksDB **fdatasync** (referência rotulada; o gate 2× é same-class `F_FULLFSYNC`).
+- Descer Pedra de `File::sync_all` para `sync_data` (relaxaria G1 neste Mac).
 - Claims distribuídos/campo: o par é single-node, single-client, lab.
 - Thread de background no core (regra em pé: debounce é inline e determinístico; forço de store via `pedra maintain`).

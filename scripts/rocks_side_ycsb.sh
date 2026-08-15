@@ -5,8 +5,10 @@
 #   scripts/rocks_side_ycsb.sh [out_dir]
 # Env:
 #   ROCKS_YCSB_*     shared knobs (records/ops/payload/dist) — same as compat side
-#   ROCKS_PARITY_SYNC  1 (default) = sync per write (matches Pedra fsync-before-Ok);
+#   ROCKS_PARITY_SYNC  1 (default) = WriteOptions.sync (fdatasync on this rust build)
 #                    0 = RocksDB async-WAL default (reference run, label differs)
+#   ROCKS_PARITY_FULL_SYNC  1 = also File::sync_all each *.log (F_FULLFSYNC; same
+#                    class as Pedra). Default 0. This is the RFC-0031 2× peer.
 # On build/run failure writes an honest all-null stub (status "unavailable").
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
