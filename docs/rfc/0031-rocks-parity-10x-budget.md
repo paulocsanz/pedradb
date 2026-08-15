@@ -24,6 +24,23 @@
 2. **Iterador com janela bornada:** materializar no máximo K entradas por passo sobre o snapshot (seek + lookahead), em vez do CF inteiro.
 3. **Orçamento ≤10× com gate real:** floor 0.1 por shape no script de lab quando P0 pousar; tabela viva no doc do compat.
 
+## Garantias invariáveis (este RFC não relaxa nenhuma)
+
+Paridade se compra com engenharia, nunca com garantia. Cada slice cita quais destes contratos poderia tocar e re-roda os gates correspondentes no mesmo PR:
+
+| # | Garantia | Por que o P0/P1 não toca (verificado no fonte) |
+|---|---|---|
+| G1 | **WAL fsync antes de Ok** — write ack'ado sobrevive a crash/power | `commit_ops_with` mantém `wal.sync_all()` no caminho antes de aplicar mem e retornar Ok; o debounce move só `change_log.store_on` (cache), nunca o sync do WAL |
+| G2 | **CRC fail-closed / never silent-wrong** | Nada muda em recovery/codec; suites de reopen fail-closed re-verdes |
+| G3 | **TX all-or-nothing** | Batch continua um único `apply_batch` atômico; só a frequência do store do cache muda |
+| G4 | **Accept-set pós-crash** (Ok pin exatamente um resultado; Err uni os possíveis; nunca-escrito admite None) | Suite adversarial FailingEnv do rocksdb-compat re-verde **sem editar uma asserção**; CHANGELOG ausente é caso já aceito (F33/F53: reopen reconstrói de WAL/SST) |
+| G5 | **Fencing em sync-fail (RFC-0015 H1)** — append Ok + sync Err cerca o DB | `durability_fenced` permanece ligado ao sync do WAL; store do CHANGELOG falhando segue warn-and-continue (já era) |
+| G6 | **Sem thread no core** — operador força via `pedra maintain` | Debounce é inline e determinístico (a cada N commits, flush, close); sem timer, sem worker |
+| G7 | **Read-your-writes / feed** — leitura vê o próprio write | Feed vive em memória (`change_log.extend` no commit); o disco é cache — ler nunca depende do store debounce |
+| G8 | **Números honestos** — peer real, agenda idêntica, durabilidade rotulada | Re-medida sempre com o par completo (compat + rocksdb sync=1) na mesma máquina/commit |
+
+Regra de PR: se uma fatia precisar editar teste existente para ficar verde, é relaxação — volta para o desenho, não para o diff.
+
 ## Orçamento por shape (floor = rocksdb_sync1 / 10)
 
 Baseline lab: ycsb @e5c6b80, deps @863df07, records=1024 ops=200 batch=32.
@@ -76,7 +93,8 @@ Expectativa mecânica: removendo o CHANGELOG do caminho crítico, um put fica ~a
 
 ## Acceptance Criteria
 
-- **Tests:** suite adversarial do rocksdb-compat inteira verde **sem relaxação** (Accept-set pós-crash inalterado: CHANGELOG ausente nunca falha read — reopen reconstrói do WAL, já coberto por SyncFail/ShortWrite/dead-disk); unit novo do debounce (N-1 commits sem store → reopen equivalente; N-ésimo storea; flush/close stoream); iterator positioning ×8 re-verde com janela.
+- **Tests:** suite adversarial do rocksdb-compat inteira verde **sem relaxação** (G4: nenhuma asserção editada — Accept-set pós-crash inalterado: CHANGELOG ausente nunca falha read — reopen reconstrói do WAL, já coberto por SyncFail/ShortWrite/dead-disk/F33/F53); unit novo do debounce (N-1 commits sem store → reopen equivalente ao com store; N-ésimo storea; flush/close stoream; store falhando não vira erro de commit — G5/G7); iterator positioning ×8 re-verde com janela (G2: sem mudança de semântica de invalidação/reverse).
+- **Gate por slice (G1–G8):** cada PR de slice lista quais garantias poderia tocar e o comando exato re-executado (`cargo test -p rocksdb-compat`, suites de reopen fail-closed, codec fuzz) no corpo do commit.
 - **Telemetry:** bench JSON ganha campo `changelog_interval` no report do compat; compare passa a exibir `min_ratio` vs floor 0.1 quando peer real.
 - **Documentation:** este RFC + tabela atualizada em `rocksdb-compat.md` + linha em `open-items.md`.
 - **Screenshots:** backend-only.
