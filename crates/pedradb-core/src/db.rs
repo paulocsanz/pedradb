@@ -1465,10 +1465,17 @@ impl<E: Env> Db<E> {
         resolve_values: bool,
     ) -> Vec<(InternalKey, Bytes)> {
         let mut stream = Vec::new();
-        for (k, v) in table.iter_internal() {
-            if k.kind == ValueType::RangeDeletion
-                || crate::merge::user_key_in_range(k.user_key.as_ref(), start, end)
-            {
+        if table.has_range_tombstones() {
+            // Covering tombstones may start outside `[start, end)`.
+            for (k, v) in table.iter_internal() {
+                if k.kind == ValueType::RangeDeletion
+                    || crate::merge::user_key_in_range(k.user_key.as_ref(), start, end)
+                {
+                    stream.push((k.clone(), v.clone()));
+                }
+            }
+        } else {
+            for (k, v) in table.iter_internal_range(start, end) {
                 stream.push((k.clone(), v.clone()));
             }
         }

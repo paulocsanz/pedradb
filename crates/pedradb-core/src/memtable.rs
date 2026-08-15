@@ -34,6 +34,8 @@ pub struct MemTable {
     map: BTreeMap<InternalKey, Bytes>,
     /// Approximate bytes for flush triggers (user key + value + trailer).
     approx_bytes: usize,
+    /// Range-tombstone entries (full-map fallback on ranged scan when > 0).
+    range_tombstones: usize,
 }
 
 impl MemTable {
@@ -64,11 +66,15 @@ impl MemTable {
     /// Insert a put or deletion. Does not assign sequence numbers — caller does.
     pub fn insert(&mut self, key: InternalKey, value: Bytes) {
         let entry_bytes = key.user_key.len() + value.len() + 8;
+        let is_rd = key.kind == ValueType::RangeDeletion;
         if let Some(old) = self.map.insert(key, value) {
             // Replaced an identical internal key (unusual); adjust estimate.
             self.approx_bytes = self.approx_bytes.saturating_sub(old.len());
         } else {
             self.approx_bytes = self.approx_bytes.saturating_add(entry_bytes);
+            if is_rd {
+                self.range_tombstones = self.range_tombstones.saturating_add(1);
+            }
         }
     }
 
@@ -150,6 +156,66 @@ impl MemTable {
         self.map.iter()
     }
 
+    /// Whether any range tombstone is stored (ranged scan must include them).
+    #[must_use]
+    pub fn has_range_tombstones(&self) -> bool {
+        self.range_tombstones > 0
+    }
+
+    /// Internal versions with user key in `[start, end)` (BTree range, not a full scan).
+    ///
+    /// Range tombstones whose start key sits outside the interval are **not**
+    /// yielded — callers that must honor covering tombstones should fall back
+    /// to [`Self::iter_internal`] when [`Self::has_range_tombstones`] is true.
+    pub fn iter_internal_range<'a>(
+        &'a self,
+        start: Bound<&'a [u8]>,
+        end: Bound<&'a [u8]>,
+    ) -> impl Iterator<Item = (&'a InternalKey, &'a Bytes)> + 'a {
+        use crate::key::MAX_SEQUENCE_NUMBER;
+        // Smallest internal key for user `u` (newest, highest kind).
+        let start_key = match start {
+            Bound::Unbounded => None,
+            Bound::Included(s) => Some(InternalKey::new(
+                Bytes::copy_from_slice(s),
+                MAX_SEQUENCE_NUMBER,
+                ValueType::RangeDeletion,
+            )),
+            Bound::Excluded(s) => Some(InternalKey::new(
+                Bytes::copy_from_slice(s),
+                0,
+                ValueType::Deletion,
+            )),
+        };
+        // Largest internal key still in-range for user `u` (oldest, lowest kind).
+        let end_key = match end {
+            Bound::Unbounded => None,
+            Bound::Included(e) => Some(InternalKey::new(
+                Bytes::copy_from_slice(e),
+                0,
+                ValueType::Deletion,
+            )),
+            Bound::Excluded(e) => Some(InternalKey::new(
+                Bytes::copy_from_slice(e),
+                MAX_SEQUENCE_NUMBER,
+                ValueType::RangeDeletion,
+            )),
+        };
+        let start_excl = matches!(start, Bound::Excluded(_));
+        let end_excl = matches!(end, Bound::Excluded(_));
+        let lo = match (start_key.as_ref(), start_excl) {
+            (None, _) => Bound::Unbounded,
+            (Some(k), false) => Bound::Included(k),
+            (Some(k), true) => Bound::Excluded(k),
+        };
+        let hi = match (end_key.as_ref(), end_excl) {
+            (None, _) => Bound::Unbounded,
+            (Some(k), false) => Bound::Included(k),
+            (Some(k), true) => Bound::Excluded(k),
+        };
+        self.map.range((lo, hi))
+    }
+
     /// Rewrite every stored value with `f` (used by value-log GC remapping).
     pub fn map_values<F>(&mut self, mut f: F)
     where
@@ -157,6 +223,7 @@ impl MemTable {
     {
         let old = std::mem::take(&mut self.map);
         self.approx_bytes = 0;
+        self.range_tombstones = 0;
         for (k, v) in old {
             let new_v = f(&v);
             let entry_bytes = k.user_key.len() + new_v.len() + 8;
@@ -317,6 +384,24 @@ mod tests {
             .map(|(k, _)| k)
             .collect();
         assert_eq!(mid, vec![Bytes::from_static(b"b"), Bytes::from_static(b"c")]);
+    }
+
+    #[test]
+    fn iter_internal_range_skips_outside_prefix() {
+        let mut mt = MemTable::new();
+        for k in [b"a" as &[u8], b"b", b"c", b"d", b"e"] {
+            mt.put(k, 1, b"v".as_slice());
+        }
+        mt.put(b"b".as_slice(), 2, b"v2".as_slice());
+        let got: Vec<&[u8]> = mt
+            .iter_internal_range(Bound::Included(b"b"), Bound::Excluded(b"d"))
+            .map(|(k, _)| k.user_key.as_ref())
+            .collect();
+        assert!(got.iter().all(|u| *u == b"b" || *u == b"c"), "{got:?}");
+        assert_eq!(got.iter().filter(|u| **u == b"b").count(), 2);
+        assert!(!mt.has_range_tombstones());
+        mt.delete_range(b"a".as_slice(), b"z".as_slice(), 3);
+        assert!(mt.has_range_tombstones());
     }
 
     #[test]
