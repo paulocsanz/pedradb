@@ -3010,6 +3010,12 @@ impl<E: Env> StoreCluster<E> {
         let (term, last_i, last_t) = {
             let n = self.nodes.get_mut(&cand).unwrap();
             let p = n.ranges.get_mut(&rid).unwrap();
+            // F147: term/role/vote must not stick in RAM if hard cannot persist
+            // (same class as F125/F127 — non-durable Candidate of a higher term).
+            let prev_term = p.term;
+            let prev_role = p.role;
+            let prev_voted = p.voted_for;
+            let prev_election_left = p.election_left;
             p.term += 1;
             p.role = Role::Candidate;
             p.voted_for = Some(cand);
@@ -3017,7 +3023,13 @@ impl<E: Env> StoreCluster<E> {
             let t = p.term;
             let li = p.last_index();
             let lt = p.last_term();
-            persist_hard_db(&mut n.db, rid, p)?;
+            if let Err(e) = persist_hard_db(&mut n.db, rid, p) {
+                p.term = prev_term;
+                p.role = prev_role;
+                p.voted_for = prev_voted;
+                p.election_left = prev_election_left;
+                return Err(e);
+            }
             (t, li, lt)
         };
         // Self-vote; majority of configured membership.
@@ -5411,11 +5423,7 @@ impl<E: Env> StoreCluster<E> {
     ///
     /// # Errors
     /// SI meta persist while applying notes (F136).
-    fn flush_version_notes_through(
-        &mut self,
-        range_id: u64,
-        through_index: u64,
-    ) -> Result<()> {
+    fn flush_version_notes_through(&mut self, range_id: u64, through_index: u64) -> Result<()> {
         let already = self
             .version_notes_through
             .get(&range_id)
@@ -8695,6 +8703,62 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// F147: start_election must roll back term/role/vote if hard persist fails.
+    #[test]
+    fn start_election_hard_persist_fail_does_not_stick_term() {
+        use pedradb_sim::{FailingEnv, SeedRng};
+        let dir = temp();
+        let e1 = FailingEnv::passing();
+        let e2 = FailingEnv::passing();
+        let e3 = FailingEnv::passing();
+        let mut c = StoreCluster::open_with_envs_rng(
+            &dir,
+            3,
+            1,
+            [e1.clone(), e2, e3],
+            SeedRng::new(0xF147),
+        )
+        .unwrap();
+        c.elect_all(80).unwrap();
+        let rid = 1u64;
+        // Force a known follower so start_election is meaningful.
+        let _ = c.step_down_range_leader(rid);
+        // Arm the candidate (node 1) so its next hard write fails.
+        let before = {
+            let p = c.nodes.get(&1).unwrap().ranges.get(&rid).unwrap();
+            (p.term, p.role, p.voted_for)
+        };
+        e1.arm_one_failure();
+        let err = c.start_election(rid, 1);
+        assert!(
+            err.is_err(),
+            "start_election must surface hard persist fail: {err:?}"
+        );
+        let after = {
+            let p = c.nodes.get(&1).unwrap().ranges.get(&rid).unwrap();
+            (p.term, p.role, p.voted_for)
+        };
+        assert_eq!(
+            after.0, before.0,
+            "AS-IS stuck at term+1 in RAM; must restore term (before={before:?} after={after:?})"
+        );
+        assert_eq!(
+            after.1, before.1,
+            "role must roll back on hard fail (before={before:?} after={after:?})"
+        );
+        assert_eq!(
+            after.2, before.2,
+            "voted_for must roll back on hard fail (before={before:?} after={after:?})"
+        );
+        // Disk hard matches RAM.
+        if let Some(raw) = c.nodes.get(&1).unwrap().db.get(&raft_meta_key(rid, "hard")) {
+            let (disk_term, disk_vote) = decode_hard(raw.as_ref()).unwrap();
+            assert_eq!(disk_term, before.0);
+            assert_eq!(disk_vote, before.2);
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// F127: AE under higher term must not proceed if hard state cannot persist.
     #[test]
     fn append_entries_hard_persist_fail_rejects() {
@@ -9056,12 +9120,7 @@ mod tests {
             "AS-IS stuck at non-durable higher term {high}; must stay {peer_term}, got {after}"
         );
         // Disk hard must match RAM (no reopen surprise).
-        let hard_raw = c
-            .nodes
-            .get(&3)
-            .unwrap()
-            .db
-            .get(&raft_meta_key(rid, "hard"));
+        let hard_raw = c.nodes.get(&3).unwrap().db.get(&raft_meta_key(rid, "hard"));
         if let Some(raw) = hard_raw {
             let (disk_term, _) = decode_hard(raw.as_ref()).expect("hard decodes");
             assert_eq!(
@@ -9497,8 +9556,7 @@ mod tests {
         // Simulate prepare preimage + materialised commit on all local peers.
         for nid in c.ids.clone() {
             let n = c.nodes.get_mut(&nid).unwrap();
-            n.db
-                .put(txn_pre_key(tid, b"u"), encode_preimage(Some(b"old")))
+            n.db.put(txn_pre_key(tid, b"u"), encode_preimage(Some(b"old")))
                 .unwrap();
             n.db.put(b"u", b"new").unwrap();
             n.db.put(txn_status_key(tid), b"prepared").unwrap();
@@ -9506,7 +9564,10 @@ mod tests {
         // No leader → propose TxnRevert fails; force-local still restores preimage.
         let rid = 1u64;
         let _ = c.step_down_range_leader(rid);
-        assert!(c.range_leader(rid).is_none(), "need leaderless for raft fail");
+        assert!(
+            c.range_leader(rid).is_none(),
+            "need leaderless for raft fail"
+        );
         let err = c.revert_majority_committed_range(rid, tid, &[b"u".to_vec()]);
         assert!(
             err.is_err(),
@@ -9535,11 +9596,9 @@ mod tests {
         let tid = 55u64;
         let n = c.nodes.get_mut(&1).unwrap();
         // Simulate abort fence + prepare preimage; apply commit must stay fenced.
-        n.db
-            .put(txn_pre_key(tid, b"u"), encode_preimage(Some(b"live")))
+        n.db.put(txn_pre_key(tid, b"u"), encode_preimage(Some(b"live")))
             .unwrap();
-        n.db
-            .put(intent_key(b"u"), encode_intent(tid, b"new"))
+        n.db.put(intent_key(b"u"), encode_intent(tid, b"new"))
             .unwrap();
         n.db.put(txn_status_key(tid), b"abort").unwrap();
         apply_txn_commit(&mut n.db, tid, &[b"u".to_vec()]).unwrap();
@@ -9575,7 +9634,10 @@ mod tests {
         c.elect_all(80).unwrap();
         // Prepare multi-key then poison preimages so cancel/revert fails closed.
         let h = c
-            .tx_start([(b"a".as_slice(), b"1".as_slice()), (b"b".as_slice(), b"2".as_slice())])
+            .tx_start([
+                (b"a".as_slice(), b"1".as_slice()),
+                (b"b".as_slice(), b"2".as_slice()),
+            ])
             .unwrap();
         // Force finish failure: partition so commit cannot majority.
         c.set_participating(2, false).unwrap();
@@ -9583,22 +9645,21 @@ mod tests {
         // Poison preimages so the post-finish cancel hits F118.
         for nid in c.ids.clone() {
             if let Some(n) = c.nodes.get_mut(&nid) {
-                n.db
-                    .put(&txn_pre_key(h.id, b"a"), b"\xffbad")
-                    .unwrap();
+                n.db.put(&txn_pre_key(h.id, b"a"), b"\xffbad").unwrap();
             }
         }
         // Use commit_tx path: finish will fail (minority), cancel should surface preimage err.
         // Direct commit_tx from pairs — re-prepare via new commit_tx after poison is wrong.
         // Call the match arm logic: tx_finish then cancel.
         let finish_err = c.tx_finish(&h);
-        assert!(finish_err.is_err(), "finish without majority: {finish_err:?}");
+        assert!(
+            finish_err.is_err(),
+            "finish without majority: {finish_err:?}"
+        );
         // Poison remaining keys and cancel — must err.
         for nid in c.ids.clone() {
             if let Some(n) = c.nodes.get_mut(&nid) {
-                n.db
-                    .put(&txn_pre_key(h.id, b"b"), b"\xffbad")
-                    .unwrap();
+                n.db.put(&txn_pre_key(h.id, b"b"), b"\xffbad").unwrap();
             }
         }
         let cancel_err = c.tx_cancel(&h);
@@ -9705,14 +9766,10 @@ mod tests {
                 n.db.put(b"k", b"old").unwrap();
             }
         }
-        let h = c
-            .tx_start([(b"k".as_slice(), b"new".as_slice())])
-            .unwrap();
+        let h = c.tx_start([(b"k".as_slice(), b"new".as_slice())]).unwrap();
         for nid in c.ids.clone() {
             if let Some(n) = c.nodes.get_mut(&nid) {
-                n.db
-                    .put(&txn_pre_key(h.id, b"k"), b"\xffbad")
-                    .unwrap();
+                n.db.put(&txn_pre_key(h.id, b"k"), b"\xffbad").unwrap();
             }
         }
         let err = c.tx_finish(&h);
@@ -9729,9 +9786,7 @@ mod tests {
         let dir = temp();
         let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
         c.elect_all(80).unwrap();
-        let h = c
-            .tx_start([(b"k".as_slice(), b"new".as_slice())])
-            .unwrap();
+        let h = c.tx_start([(b"k".as_slice(), b"new".as_slice())]).unwrap();
         // Reader sees no live key / pair, only a short intent → old code
         // decoded as None and stamped empty (SI delete).
         for nid in c.ids.clone() {
