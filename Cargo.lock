@@ -741,6 +741,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "rocksdb-parity-bench"
+version = "0.1.0"
+dependencies = [
+ "rocksdb",
+ "rocksdb-compat",
+]
+
+[[package]]
 name = "rustc-hash"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

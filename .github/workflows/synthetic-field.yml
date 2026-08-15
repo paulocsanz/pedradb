@@ -154,6 +154,15 @@ jobs:
           cargo run -q -p pedradb-store --release --bin montanha-fdb-compare -- \
             findings/ycsb-ci/fdb_shaped_bench.json findings/fdb-parity-ci
           python3 -c "import json; r=json.load(open('findings/fdb-parity-ci/compare_report.json')); assert 'parity' in r and 'ycsb_a' in [x['shape'] for x in r['ratios']], r; assert r['parity']['pass'] is None, r"
+      - name: rocks parity bench (compat side) + template compare
+        env:
+          ROCKS_YCSB_RECORDS: "128"
+          ROCKS_YCSB_OPS: "48"
+        run: |
+          cargo run -q --release -p rocksdb-parity-bench --bin rocks-parity-bench -- findings/rocks-parity-ci compat
+          python3 -c "import json; r=json.load(open('findings/rocks-parity-ci/rocks_parity_bench.json')); names=[b['name'] for b in r['benches']]; assert all(f'ycsb_{w}' in names for w in 'abcdef'), names; assert r['engine']=='compat' and r['sync'] is True, r"
+          ROCKS_PARITY_TEMPLATE=1 bash scripts/rocksdb_parity_v0.sh findings/rocks-parity-ci-e2e
+          python3 -c "import json; r=json.load(open('findings/rocks-parity-ci-e2e/compare/compare_report.json')); assert r['parity']['pass'] is None and r['parity']['shapes_with_peer']==0, r"
       - name: mini-bt soak (Pedra L0 write backpressure)
         env:
           MONTANHA_WRITE_BACKPRESSURE: "1"
@@ -176,5 +185,7 @@ jobs:
             findings/bp-ab-ci/bp_ab_report.json
             findings/ycsb-ci/fdb_shaped_bench.json
             findings/fdb-parity-ci/compare_report.json
+            findings/rocks-parity-ci/rocks_parity_bench.json
+            findings/rocks-parity-ci-e2e/compare/compare_report.json
             findings/fdb-compare-ci/compare_report.json
             findings/fdb-compare-ci/fdb_shaped_peer.template.json

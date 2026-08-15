@@ -89,9 +89,73 @@ API surface). What this ships: the API-shaped substrate, the alias-swap
 mechanism, and the adversarial gates that any future swap work can run
 unchanged. **Do not** claim "TiKV on Pedra" from this.
 
+## Bench parity vs real RocksDB (YCSB A–F)
+
+`crates/rocksdb-parity-bench` runs the same six YCSB shapes as the Montanha
+FDB suite through **one generic runner** with two engine adapters, so the op
+schedule (rng seed, zipf CDF, read/insert/scan/RMW mix) cannot drift between
+engines:
+
+- `compat` — `rocksdb-compat` on pedradb-core (single node, single client,
+  WAL fsync before Ok).
+- `rocksdb` — real RocksDB via the `rocksdb` crate (feature `real`, matching
+  the `pedradb-oracle` pin 0.22 / librocksdb-sys 8.10, no compression codecs
+  — payload is random bytes). Durability is labeled: default
+  `ROCKS_PARITY_SYNC=1` (sync per write, matched to Pedra's contract);
+  `ROCKS_PARITY_SYNC=0` runs RocksDB's async-WAL default as a reference.
+
+```bash
+# compat side
+cargo run -q --release -p rocksdb-parity-bench -- findings/rocks-parity-local/compat compat
+# real side (sync-per-write)
+ROCKS_PARITY_SYNC=1 scripts/rocks_side_ycsb.sh findings/rocks-parity-local/rocks_side
+# compare + optional gate (ROCKS_PARITY_RATIO_FLOOR; "none"/unset = report-only)
+ROCKS_PARITY_PEER=findings/rocks-parity-local/rocks_side/rocks_shaped_peer.json \
+  ROCKS_PARITY_RATIO_FLOOR=0.5 \
+  cargo run -q --release -p rocksdb-parity-bench --bin rocks-parity-compare -- \
+    findings/rocks-parity-local/compat/rocks_parity_bench.json findings/rocks-parity-local/compare
+# or everything at once:
+scripts/rocksdb_parity_v0.sh findings/rocks-parity-local
+```
+
+Report: `compat_over_rocksdb` per shape + `parity` block
+(`floor`/`shapes_with_peer`/`min_ratio`/`pass`); exit 2 when a floor is set
+**and** a real peer produced ratios below it. `ROCKS_PARITY_TEMPLATE=1`
+skips the real side (CI template mode, `parity.pass: null`).
+
+Honesty: single-node, single-client lab bench through the compat API subset —
+not a distributed/field claim, and the compat side always fsyncs (the peer's
+`sync`/`durability` labels are carried in every report).
+
+### Lab numbers (2026-08-15, worktree @ e5c6b80, records=1024 ops=200 payload=100 uniform)
+
+| shape | compat qps | rocksdb sync-per-write | ratio | rocksdb async-WAL | ratio |
+|---|---:|---:|---:|---:|---:|
+| ycsb_a 50/50 | 94 | 37,728 | **0.002** | 343,643 | 0.000 |
+| ycsb_b 95/5 | 913 | 85,674 | 0.011 | 1,145,036 | 0.001 |
+| ycsb_c 100r | 156,103 | 1,556,420 | 0.100 | 218,510 | 0.714 |
+| ycsb_d 95r/5i | 817 | 88,484 | 0.009 | 1,148,053 | 0.001 |
+| ycsb_e scan+5i | 1,073 | 147,289 | 0.007 | 234,707 | 0.005 |
+| ycsb_f RMW | 110 | 47,001 | **0.002** | 293,327 | 0.000 |
+
+**Diagnosed write cliff (mechanism, not hand-wave):** every synced write in
+`pedradb-core` `commit_ops_with` re-stores the whole CHANGELOG
+(`change_feed.rs::store_on`: encode all entries → tmp write → `sync_all` →
+rename → dir fsync) — three durability barriers per put plus a body that
+grows with every write (quadratic; small runs score relatively better, which
+matches: 96-record smoke ratios 0.002–0.47 vs 1024-record 0.002–0.01).
+RocksDB's synced path is one WAL fsync (~26 µs here — APFS `fsync` is not
+F_FULLFSYNC, so RocksDB's sync-per-write is cheap on this lab box).
+RFC-0019 already allows batching: the on-disk CHANGELOG is a *cache* rebuilt
+from WAL and must never gate commit success — periodic/batched store is the
+sanctioned fix. Until that lands, `ROCKS_PARITY_RATIO_FLOOR` stays
+report-only (`none`) in `rocksdb_parity_v0.sh`; reads (ycsb_c) are the
+closest shape at 0.10–0.71×.
+
 ## Reproduce
 
 ```bash
 cargo test -p rocksdb-compat                # API + adversarial suite
 cargo test -p rocksdb-compat --test adversarial -- --nocapture
+cargo test -p rocksdb-parity-bench          # harness determinism + compare extraction
 ```

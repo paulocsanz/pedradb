@@ -162,6 +162,7 @@ fn main() {
     ratios.push_str("\n  ]");
 
     // Parity summary: only meaningful when a real peer produced ratios.
+    let shapes_with_peer = real_ratios.len();
     let parity = if let Some(floor) = parity_floor {
         if real_ratios.is_empty() {
             format!(
@@ -171,12 +172,13 @@ fn main() {
             let min_r = real_ratios.iter().cloned().fold(f64::INFINITY, f64::min);
             let pass = real_ratios.iter().all(|v| *v >= floor);
             format!(
-                r#"{{"floor": {floor}, "shapes_with_peer": {}, "min_ratio": {min_r:.3}, "pass": {pass}}}"#,
-                real_ratios.len()
+                r#"{{"floor": {floor}, "shapes_with_peer": {shapes_with_peer}, "min_ratio": {min_r:.3}, "pass": {pass}}}"#
             )
         }
     } else {
-        r#"{"floor": null, "shapes_with_peer": 0, "min_ratio": null, "pass": null, "note": "set MONTANHA_PARITY_RATIO_FLOOR to gate"}"#.into()
+        format!(
+            r#"{{"floor": null, "shapes_with_peer": {shapes_with_peer}, "min_ratio": null, "pass": null, "note": "set MONTANHA_PARITY_RATIO_FLOOR to gate"}}"#
+        )
     };
 
     let template = fdb_peer_template(&extracted);
