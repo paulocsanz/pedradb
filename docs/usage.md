@@ -193,6 +193,7 @@ Full contract: rustdoc on `db` module. Audit fix backlog: [RFC-0015](rfc/0015-au
 | `ConcurrentDb::begin_occ` / `OccTransaction` | **OCC multi-writer** TX: conflict → `TransactionConflict` (RFC-0014 P2.1) |
 | `OpenOptions.large_value_threshold` | **Opt-in** (`None` default): spill large values to `VALUES.vlog` (WiscKey-shaped) |
 | `Db::compact_vlog()` | Crash-safe value-log GC rewrite (RFC-0016 P0.1); reclaim after overwrite/delete + SST version drop |
+| `Db::set_vlog_rotate_bytes` / `compact_blob` | RFC-0029: numbered `*.blob` + one sealed-file GC; prefetch N=4 on scan |
 | `BackupEngine::create_incremental` / `restore_with_increments` | Incremental WAL archive + restore (RFC-0014 P2.3) |
 | `Db::verify_checksums()` | Re-validate SST + WAL integrity (fail-stop on bitrot) |
 | `WriteOptions` / `put_with` / `apply_batch_with` | Per-write sync or `no_sync` + later `Db::sync` (group fsync) |
@@ -256,16 +257,50 @@ let mut db = Db::open_with(
 // 2) Then rewrite the value log:
 let stats = db.compact_vlog()?;
 // stats.bytes_before / bytes_after / live_records
+println!("{}", db.stats().vlog_line());
+```
+
+CLI (exclusive open):
+
+```text
+$ pedra stats /path/to/db
+last_sequence=…
+sst_count=… sst_bytes=…
+wal_bytes=… wal_syncs=…
+vlog file=12345678B live=1048576B records=12 ratio=0.085 gc=0 blobs=0 prefetch=0 sst_written=…
 ```
 
 | Rule | Why |
 |------|-----|
 | Threshold **off** by default | Avoid silent disk fill in production |
 | Watch `DbStats.vlog_bytes` vs `vlog_live_bytes` | When `vlog_bytes ≫ vlog_live_bytes`, call `compact_vlog` |
+| `pedra stats <db>` | Prints `vlog file=…B live=…B records=… ratio=0.xxx gc=N blobs=N prefetch=N sst_written=…B` (RFC-0026 P0.1 / 0029). Alert if `ratio` stays ≪ 1 under update churn |
 | Checkpoint/backup copies full `VALUES.vlog` | Correctness requires the log, including unreclaimed garbage until GC |
 | GC keeps every VLG1 still referenced by mem/imm/**any SST version** | Run SST compact / `latest_only` carefully before expecting big reclaim |
 
 **Crash safety:** GC writes `VALUES.vlog.new`, then remaps SST pointers and swings **MANIFEST** with `vlog_use_new=true` (atomic CURRENT). Only then does open prefer `.new`. Before that MANIFEST install, open keeps the primary vlog + old offsets. After MANIFEST and before promote, open uses `.new` + remapped SSTs.
+
+### Blob generations (RFC-0029 P0)
+
+Opt-in rotation after open. New large spills go to numbered files (`000001.blob`, …) with `VLG3` pointers (`file_num`, offset, len, crc). File 0 remains `VALUES.vlog` / `VLG1`.
+
+```rust
+db.set_vlog_rotate_bytes(Some(64 * 1024 * 1024)); // rotate after 64 MiB
+db.put(b"k", &big)?;
+// After latest_only dropped old SST versions of one sealed file:
+let stats = db.compact_blob(sealed_file_num)?;
+println!("{}", db.stats().vlog_line());
+// vlog file=…B live=…B records=… ratio=… gc=… blobs=N prefetch=… sst_written=…B
+```
+
+| Rule | Why |
+|------|-----|
+| Cap is a **session setter**, not `OpenOptions` | Reopen appends to the last `*.blob`; set the cap again to keep rotating |
+| `compact_blob` refuses the **active** file | Rotate first, or use `compact_vlog` for file 0 |
+| `compact_blob` remaps only SSTs that mention that file | Other generations stay put |
+| Scan prefetch is N=4 sequential Env reads | Same visible keys as `get`; `scan_prefetch_hits` counts windows |
+| Checkpoint copies every `*.blob` | Pointers are not self-contained |
+| WAL stays | L5b `REFUSE` — do not drop the LSM WAL |
 
 ---
 

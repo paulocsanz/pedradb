@@ -33,11 +33,23 @@ pub struct RangeTombstone {
     pub sequence: SequenceNumber,
 }
 
+/// Half-open cover `[start, end)` (F30 OCC / range delete).
+#[must_use]
+pub fn range_tombstone_covers(start: &[u8], end: &[u8], key: &[u8]) -> bool {
+    key >= start && key < end
+}
+
+/// AS-IS F30: only the range **start** conflicts (misses covering deletes).
+#[must_use]
+pub fn range_tombstone_covers_as_is(start: &[u8], _end: &[u8], key: &[u8]) -> bool {
+    key == start
+}
+
 impl RangeTombstone {
     /// Whether `user_key` is covered by this tombstone.
     #[must_use]
     pub fn covers(&self, user_key: &[u8]) -> bool {
-        user_key >= self.start.as_ref() && user_key < self.end.as_ref()
+        range_tombstone_covers(self.start.as_ref(), self.end.as_ref(), user_key)
     }
 }
 
@@ -455,6 +467,31 @@ mod tests {
 
     fn ik(user: &[u8], seq: u64, kind: ValueType) -> InternalKey {
         InternalKey::new(Bytes::copy_from_slice(user), seq, kind)
+    }
+
+    #[test]
+    fn f30_covers_interior_not_only_start() {
+        assert!(range_tombstone_covers(b"a", b"z", b"m"));
+        assert!(range_tombstone_covers(b"a", b"z", b"a"));
+        assert!(!range_tombstone_covers(b"a", b"z", b"z"));
+        assert!(!range_tombstone_covers_as_is(b"a", b"z", b"m"));
+        assert!(range_tombstone_covers_as_is(b"a", b"z", b"a"));
+    }
+
+    #[test]
+    fn theorem_covers_on_short_keys() {
+        const A: [&[u8]; 4] = [b"a", b"m", b"y", b"z"];
+        for start in A {
+            for end in A {
+                for key in A {
+                    let d = range_tombstone_covers(start, end, key);
+                    assert_eq!(d, key >= start && key < end);
+                    if key != start && d {
+                        assert!(!range_tombstone_covers_as_is(start, end, key));
+                    }
+                }
+            }
+        }
     }
 
     #[test]

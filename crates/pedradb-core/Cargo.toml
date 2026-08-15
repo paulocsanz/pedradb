@@ -22,6 +22,10 @@ lz4_flex.workspace = true
 name = "baseline"
 harness = false
 
+[[bench]]
+name = "vlog_zipf"
+harness = false
+
 [[example]]
 name = "secondary_index"
 path = "../../examples/secondary_index.rs"

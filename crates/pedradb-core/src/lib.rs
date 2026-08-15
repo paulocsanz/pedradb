@@ -51,7 +51,8 @@ pub use db::{
 };
 pub use occ::OccTransaction;
 pub use vlog::{
-    decode_vlog_ref, encode_vlog_ref, ValueLog, VlogRewriteStats, VLOG_FILE_NAME, VLOG_NEW_NAME,
+    blob_path, decode_vlog_ptr, decode_vlog_ref, encode_vlog_ptr, encode_vlog_ref, list_blob_nums,
+    ValueLog, VlogPtr, VlogRewriteStats, VLOG_BLOB_PREFIX, VLOG_FILE_NAME, VLOG_NEW_NAME,
     VLOG_VALUE_PREFIX,
 };
 pub use env::{Env, EnvFile, StdEnv};
@@ -68,8 +69,9 @@ pub use lock::{DirLock, LOCK_FILE};
 pub use manifest::{VersionSet, CURRENT_FILE, MANIFEST_PREFIX};
 pub use memtable::{Lookup, MemTable};
 pub use merge::{
-    collect_range_tombstones, gc_compact_entries, range_deleted, user_key_in_range, visible_range,
-    visible_range_limited, CompactGcOptions, RangeTombstone, StreamingVisibleIter, VisibleKv,
+    collect_range_tombstones, gc_compact_entries, range_deleted, range_tombstone_covers,
+    range_tombstone_covers_as_is, user_key_in_range, visible_range, visible_range_limited,
+    CompactGcOptions, RangeTombstone, StreamingVisibleIter, VisibleKv,
 };
 pub use rng::{mix_seed, Rng, SeedRng, SystemRng};
 pub use sst::{

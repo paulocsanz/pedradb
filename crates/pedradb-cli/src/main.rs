@@ -8,7 +8,7 @@ fn main() -> std::process::ExitCode {
     let args: Vec<String> = std::env::args().collect();
     if args.len() < 2 {
         eprintln!(
-            "usage: pedra <demo|wal|version|backup|restore|pitr|ship-wal|list-backups|verify-backup|inspect|migrate> [args...]"
+            "usage: pedra <demo|wal|version|backup|restore|pitr|ship-wal|list-backups|verify-backup|inspect|stats|migrate> [args...]"
         );
         return std::process::ExitCode::from(2);
     }
@@ -26,6 +26,7 @@ fn main() -> std::process::ExitCode {
         "list-backups" => list_backups_cmd(&args[2..]),
         "verify-backup" => verify_backup_cmd(&args[2..]),
         "inspect" => inspect_cmd(&args[2..]),
+        "stats" => stats_cmd(&args[2..]),
         "migrate" => migrate_cmd(&args[2..]),
         other => {
             eprintln!("unknown command: {other}");
@@ -255,6 +256,27 @@ fn verify_backup_cmd(args: &[String]) -> std::process::ExitCode {
         Ok(())
     })() {
         Ok(()) => std::process::ExitCode::SUCCESS,
+        Err(e) => {
+            eprintln!("error: {e}");
+            std::process::ExitCode::FAILURE
+        }
+    }
+}
+
+fn stats_cmd(args: &[String]) -> std::process::ExitCode {
+    if args.is_empty() {
+        eprintln!("usage: pedra stats <db_path>");
+        return std::process::ExitCode::from(2);
+    }
+    match open_live(&args[0]) {
+        Ok(db) => {
+            let s = db.stats();
+            println!("last_sequence={}", s.last_sequence);
+            println!("sst_count={} sst_bytes={}", s.sst_count, s.sst_bytes);
+            println!("wal_bytes={} wal_syncs={}", s.wal_bytes, s.wal_sync_count);
+            println!("{}", s.vlog_line());
+            std::process::ExitCode::SUCCESS
+        }
         Err(e) => {
             eprintln!("error: {e}");
             std::process::ExitCode::FAILURE

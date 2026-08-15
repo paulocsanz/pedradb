@@ -53,6 +53,7 @@
 use std::collections::BTreeMap;
 use std::ops::Bound;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use bytes::Bytes;
 
@@ -159,6 +160,42 @@ pub struct DbStats {
     pub compact_count: u64,
     /// Successful value-log GC rewrites ([`Db::compact_vlog`]).
     pub vlog_gc_count: u64,
+    /// Number of `NNNNNN.blob` generations on disk (RFC-0029).
+    pub blob_files: u32,
+    /// Scan windows that issued a vlog prefetch (RFC-0029 P0.3).
+    pub scan_prefetch_hits: u64,
+}
+
+impl DbStats {
+    /// Live payload / on-disk vlog. `1.0` if there is no vlog file.
+    ///
+    /// RFC-0026 P0.1: one number an operator can alert on (`≪ 1` ⇒ garbage).
+    #[must_use]
+    pub fn vlog_live_ratio(&self) -> f64 {
+        if self.vlog_bytes == 0 {
+            return 1.0;
+        }
+        #[allow(clippy::cast_precision_loss)]
+        {
+            (self.vlog_live_bytes as f64 / self.vlog_bytes as f64).clamp(0.0, 1.0)
+        }
+    }
+
+    /// One-line vlog observability (CLI / usage).
+    #[must_use]
+    pub fn vlog_line(&self) -> String {
+        format!(
+            "vlog file={}B live={}B records={} ratio={:.3} gc={} blobs={} prefetch={} sst_written={}B",
+            self.vlog_bytes,
+            self.vlog_live_bytes,
+            self.vlog_live_records,
+            self.vlog_live_ratio(),
+            self.vlog_gc_count,
+            self.blob_files,
+            self.scan_prefetch_hits,
+            self.bytes_written_sst
+        )
+    }
 }
 
 /// Metadata written next to a checkpoint (ops / restore tooling).
@@ -371,6 +408,14 @@ pub struct Db<E: Env = StdEnv> {
     large_value_threshold: Option<usize>,
     /// Append-only value log when large values / existing vlog file present.
     vlog: Option<Mutex<ValueLog<E::File>>>,
+    /// Rotate the active blob after this many bytes (`None` = single `VALUES.vlog`).
+    vlog_rotate_bytes: Option<u64>,
+    /// Active blob generation (`0` = `VALUES.vlog`).
+    blob_active: u32,
+    /// Prefetch window for scan vlog resolves (`0` = one-by-one).
+    scan_prefetch: usize,
+    /// Windows of prefetch issued (observability).
+    prefetch_hits: AtomicU64,
     /// Count of successful WAL `sync_all` (observability / group-commit tests).
     wal_sync_count: u64,
     /// Logical user-value bytes ingested.
@@ -501,7 +546,11 @@ impl<E: Env> Db<E> {
         let large_value_threshold = opts.large_value_threshold.filter(|n| *n > 0);
         let vlog_path = dir.join(VLOG_FILE_NAME);
         let vlog_new = dir.join(crate::vlog::VLOG_NEW_NAME);
-        let vlog = if large_value_threshold.is_some()
+        let blob_nums = vlog::list_blob_nums(&env, &dir);
+        let blob_active = blob_nums.last().copied().unwrap_or(0);
+        let vlog = if blob_active > 0 {
+            Some(Mutex::new(ValueLog::open_blob(&env, &dir, blob_active)?))
+        } else if large_value_threshold.is_some()
             || env.exists(&vlog_path)
             || (vlog_use_new && env.exists(&vlog_new))
         {
@@ -538,6 +587,10 @@ impl<E: Env> Db<E> {
             last_auto_compact_error: None,
             large_value_threshold,
             vlog,
+            vlog_rotate_bytes: None,
+            blob_active,
+            scan_prefetch: 4,
+            prefetch_hits: AtomicU64::new(0),
             wal_sync_count: 0,
             bytes_ingested: 0,
             bytes_written_wal: 0,
@@ -663,7 +716,7 @@ impl<E: Env> Db<E> {
                 if ikey.kind == ValueType::RangeDeletion {
                     let start = ikey.user_key.as_ref();
                     let end = value.as_ref();
-                    if key >= start && key < end {
+                    if crate::merge::range_tombstone_covers(start, end, key) {
                         return true;
                     }
                 }
@@ -690,16 +743,47 @@ impl<E: Env> Db<E> {
 
     /// Resolve vlog pointer to payload (or return inline value).
     fn resolve_stored_value(&self, stored: Bytes) -> Result<Bytes> {
-        if vlog::decode_vlog_ref(stored.as_ref()).is_none() {
+        let Some(ptr) = vlog::decode_vlog_ptr(stored.as_ref()) else {
             return Ok(stored);
-        }
+        };
         let Some(ref vlog) = self.vlog else {
             return Err(CoreError::Internal(
                 "vlog ref in DB but VALUES.vlog not open".into(),
             ));
         };
         let guard = vlog.lock();
-        vlog::resolve_value_on(&self.env, Some(&*guard), stored)
+        guard.read_ptr_on(&self.env, &self.dir, ptr, self.vlog_use_new)
+    }
+
+    /// Enable blob rotation after `bytes` on the active file (RFC-0029). `None` disables.
+    pub fn set_vlog_rotate_bytes(&mut self, bytes: Option<u64>) {
+        self.vlog_rotate_bytes = bytes.filter(|n| *n > 0);
+    }
+
+    /// Active blob generation (`0` = single `VALUES.vlog`).
+    #[must_use]
+    pub fn blob_active(&self) -> u32 {
+        self.blob_active
+    }
+
+    /// Sealed + active blob file numbers on disk.
+    #[must_use]
+    pub fn blob_file_nums(&self) -> Vec<u32> {
+        vlog::list_blob_nums(&self.env, &self.dir)
+    }
+
+    fn rotate_blob(&mut self) -> Result<()> {
+        let next = if self.blob_active == 0 {
+            1
+        } else {
+            self.blob_active
+                .checked_add(1)
+                .ok_or_else(|| CoreError::Internal("blob generation overflow".into()))?
+        };
+        let log = ValueLog::open_blob(&self.env, &self.dir, next)?;
+        self.vlog = Some(Mutex::new(log));
+        self.blob_active = next;
+        Ok(())
     }
 
     /// Maybe rewrite a large put value into the vlog; returns stored value bytes.
@@ -711,17 +795,39 @@ impl<E: Env> Db<E> {
             return Ok(value);
         }
         if self.vlog.is_none() {
-            self.vlog = Some(Mutex::new(ValueLog::open_with_flag(
-                &self.env,
-                &self.dir,
-                self.vlog_use_new,
-            )?));
+            if self.vlog_rotate_bytes.is_some() {
+                self.rotate_blob()?;
+            } else {
+                self.vlog = Some(Mutex::new(ValueLog::open_with_flag(
+                    &self.env,
+                    &self.dir,
+                    self.vlog_use_new,
+                )?));
+            }
+        }
+        if let Some(cap) = self.vlog_rotate_bytes {
+            // Open already created VALUES.vlog when the threshold is set.
+            // Rotation mode must start at 000001.blob — otherwise the first
+            // spills are VLG1 on file 0 and the first get after rotate misses.
+            if self.blob_active == 0 {
+                self.rotate_blob()?;
+            } else {
+                let len = self.vlog.as_ref().map_or(0, |v| v.lock().len_bytes());
+                if len >= cap {
+                    self.rotate_blob()?;
+                }
+            }
         }
         let vlog = self.vlog.as_ref().expect("just opened");
         let mut guard = vlog.lock();
         let (off, len, crc) = guard.append(value.as_ref())?;
         drop(guard);
-        Ok(vlog::encode_vlog_ref(off, len, crc))
+        Ok(vlog::encode_vlog_ptr(vlog::VlogPtr {
+            file_num: self.blob_active,
+            offset: off,
+            len,
+            crc,
+        }))
     }
 
     /// Range scan at the latest committed snapshot over MemTable ∪ SSTs.
@@ -863,9 +969,7 @@ impl<E: Env> Db<E> {
         for table in &self.ssts {
             let mut s = table.entries_in_user_range(start, end);
             if resolve_values {
-                for (k, v) in &mut s {
-                    *v = self.resolve_stream_value(k.kind, v.clone());
-                }
+                self.prefetch_resolve_stream(&mut s);
             }
             streams.push(s);
         }
@@ -884,15 +988,40 @@ impl<E: Env> Db<E> {
             if k.kind == ValueType::RangeDeletion
                 || crate::merge::user_key_in_range(k.user_key.as_ref(), start, end)
             {
-                let v = if resolve_values {
-                    self.resolve_stream_value(k.kind, v.clone())
-                } else {
-                    v.clone()
-                };
-                stream.push((k.clone(), v));
+                stream.push((k.clone(), v.clone()));
             }
         }
+        if resolve_values {
+            self.prefetch_resolve_stream(&mut stream);
+        }
         stream
+    }
+
+    /// Resolve vlog pointers in windows of [`Self::scan_prefetch`] (RFC-0029 P0.3).
+    ///
+    /// Single-threaded: each window issues up to N `Env` reads then continues.
+    /// Order of `stream` is unchanged. Missing/corrupt values become empty bytes
+    /// (same as [`Self::resolve_stream_value`]).
+    fn prefetch_resolve_stream(&self, stream: &mut [(InternalKey, Bytes)]) {
+        let n = self.scan_prefetch.max(1);
+        let mut i = 0;
+        while i < stream.len() {
+            let end = (i + n).min(stream.len());
+            let mut issued = 0u64;
+            for slot in &mut stream[i..end] {
+                if slot.0.kind == ValueType::RangeDeletion {
+                    continue;
+                }
+                if vlog::decode_vlog_ptr(slot.1.as_ref()).is_some() {
+                    issued = issued.saturating_add(1);
+                }
+                slot.1 = self.resolve_stream_value(slot.0.kind, slot.1.clone());
+            }
+            if issued > 0 && self.scan_prefetch > 1 {
+                self.prefetch_hits.fetch_add(1, Ordering::Relaxed);
+            }
+            i = end;
+        }
     }
 
     /// Resolve VLG1 for user values; leave range-tombstone end keys untouched.
@@ -945,23 +1074,39 @@ impl<E: Env> Db<E> {
             bytes_written_sst: self.bytes_written_sst,
             compact_count: self.compact_count,
             vlog_gc_count: self.vlog_gc_count,
+            blob_files: u32::try_from(vlog::list_blob_nums(&self.env, &self.dir).len())
+                .unwrap_or(u32::MAX),
+            scan_prefetch_hits: self.prefetch_hits.load(Ordering::Relaxed),
         }
     }
 
     /// `(vlog_bytes, live_bytes, live_records)` for observability.
     fn vlog_size_stats(&self) -> (u64, u64, u64) {
-        let vlog_bytes = if let Some(ref v) = self.vlog {
+        let mut vlog_bytes = if let Some(ref v) = self.vlog {
             v.lock().len_bytes()
         } else {
             let p = self.dir.join(VLOG_FILE_NAME);
             self.env.metadata_len(&p).unwrap_or(0)
         };
+        for n in vlog::list_blob_nums(&self.env, &self.dir) {
+            if n == self.blob_active {
+                continue;
+            }
+            let p = vlog::blob_path(&self.dir, n);
+            vlog_bytes = vlog_bytes.saturating_add(self.env.metadata_len(&p).unwrap_or(0));
+        }
+        if self.blob_active > 0 {
+            let legacy = self.dir.join(VLOG_FILE_NAME);
+            if self.env.exists(&legacy) {
+                vlog_bytes = vlog_bytes.saturating_add(self.env.metadata_len(&legacy).unwrap_or(0));
+            }
+        }
         let mut live_bytes = 0u64;
-        let mut seen = std::collections::HashSet::new();
+        let mut seen: std::collections::HashSet<(u32, u64)> = std::collections::HashSet::new();
         let mut consider = |stored: &Bytes| {
-            if let Some((off, len, _)) = vlog::decode_vlog_ref(stored.as_ref()) {
-                if seen.insert(off) {
-                    live_bytes = live_bytes.saturating_add(u64::from(len));
+            if let Some(ptr) = vlog::decode_vlog_ptr(stored.as_ref()) {
+                if seen.insert((ptr.file_num, ptr.offset)) {
+                    live_bytes = live_bytes.saturating_add(u64::from(ptr.len));
                 }
             }
         };
@@ -1077,6 +1222,13 @@ impl<E: Env> Db<E> {
         if self.env.exists(&vlog_src) {
             self.env
                 .copy_file(&vlog_src, &dest.join(VLOG_FILE_NAME))?;
+        }
+        for num in vlog::list_blob_nums(&self.env, &self.dir) {
+            let src = vlog::blob_path(&self.dir, num);
+            let name = src.file_name().ok_or_else(|| {
+                CoreError::Internal("blob path missing file name".into())
+            })?;
+            self.env.copy_file(&src, &dest.join(name))?;
         }
         let vlog_new_src = self.dir.join(crate::vlog::VLOG_NEW_NAME);
         if self.vlog_use_new && self.env.exists(&vlog_new_src) {
@@ -1567,7 +1719,20 @@ impl<E: Env> Db<E> {
         // Promote on disk, then swap handle without clearing first.
         match ValueLog::promote_new_and_reopen(&self.env, &self.dir) {
             Ok(new_log) => {
-                self.vlog = Some(Mutex::new(new_log));
+                if self.blob_active > 0 {
+                    match ValueLog::open_blob(&self.env, &self.dir, self.blob_active) {
+                        Ok(blob) => {
+                            self.vlog = Some(Mutex::new(blob));
+                        }
+                        Err(e) => {
+                            self.vlog = Some(Mutex::new(new_log));
+                            self.durability_fenced = true;
+                            return Err(e);
+                        }
+                    }
+                } else {
+                    self.vlog = Some(Mutex::new(new_log));
+                }
             }
             Err(e) => {
                 // Rename may or may not have completed; never leave vlog=None.
@@ -1586,6 +1751,202 @@ impl<E: Env> Db<E> {
         Ok(())
     }
 
+    /// GC one sealed blob generation (RFC-0029 P0.2).
+    ///
+    /// Rewrites live records of `file_num` into a new blob, remaps only SSTs that
+    /// mention that generation, then deletes the old file. Refuses the **active**
+    /// append file (rotate first, or use [`Self::compact_vlog`] for file 0).
+    ///
+    /// # Errors
+    /// I/O, CRC, active-file refuse, or durability fence.
+    pub fn compact_blob(&mut self, file_num: u32) -> Result<VlogRewriteStats> {
+        self.ensure_not_fenced()?;
+        if file_num == 0 {
+            return self.compact_vlog();
+        }
+        if file_num == self.blob_active {
+            return Err(CoreError::Internal(
+                "compact_blob refuses the active append generation (rotate first)".into(),
+            ));
+        }
+        self.flush()?;
+        let live = self.collect_vlog_live_for_file(file_num)?;
+        let src = vlog::blob_path(&self.dir, file_num);
+        let bytes_before = self.env.metadata_len(&src).unwrap_or(0);
+        let dest_num = vlog::list_blob_nums(&self.env, &self.dir)
+            .last()
+            .copied()
+            .unwrap_or(self.blob_active)
+            .saturating_add(1)
+            .max(self.blob_active.saturating_add(1));
+        let (stats, remap) = ValueLog::<E::File>::rewrite_live_to_blob(
+            &self.env,
+            &self.dir,
+            dest_num,
+            &live,
+            bytes_before,
+        )?;
+        let prepared = match self.prepare_remapped_ssts_blob(file_num, &remap) {
+            Ok(p) => p,
+            Err(e) => {
+                let _ = self.env.remove_file(&vlog::blob_path(&self.dir, dest_num));
+                return Err(e);
+            }
+        };
+        let old_paths = prepared.old_paths;
+        let next_file_num = prepared.next_file_num;
+        let new_tables = prepared.tables;
+        let new_levels = prepared.levels;
+        let staged_bytes = prepared.bytes_written;
+
+        let prev_ssts = std::mem::replace(&mut self.ssts, new_tables);
+        let prev_levels = std::mem::replace(&mut self.sst_levels, new_levels);
+        let prev_next = self.next_file_num;
+        self.next_file_num = next_file_num;
+
+        if let Err(e) = self.persist_manifest() {
+            self.ssts = prev_ssts;
+            self.sst_levels = prev_levels;
+            self.next_file_num = prev_next;
+            let _ = self.env.remove_file(&vlog::blob_path(&self.dir, dest_num));
+            return Err(e);
+        }
+
+        let remap_fn = |stored: &Bytes| vlog::remap_stored_blob(stored, file_num, &remap);
+        self.mem.map_values(remap_fn);
+        if let Some(ref mut imm) = self.imm {
+            imm.map_values(remap_fn);
+        }
+        self.bytes_written_sst = self.bytes_written_sst.saturating_add(staged_bytes);
+        for t in &self.ssts {
+            self.table_cache.insert(Arc::new(t.clone()));
+        }
+        for path in old_paths {
+            let _ = self.env.remove_file(&path);
+        }
+        let _ = self.env.remove_file(&src);
+        let _ = self.env.sync_dir(&self.dir);
+        self.vlog_gc_count = self.vlog_gc_count.saturating_add(1);
+        Ok(stats)
+    }
+
+    fn collect_vlog_live_for_file(&self, file_num: u32) -> Result<Vec<(u64, Bytes)>> {
+        let mut meta: std::collections::BTreeMap<u64, (u32, u32)> =
+            std::collections::BTreeMap::new();
+        let mut consider = |stored: &Bytes| {
+            if let Some(ptr) = vlog::decode_vlog_ptr(stored.as_ref()) {
+                if ptr.file_num == file_num {
+                    meta.entry(ptr.offset).or_insert((ptr.len, ptr.crc));
+                }
+            }
+        };
+        for (_, v) in self.mem.iter_internal() {
+            consider(v);
+        }
+        if let Some(ref imm) = self.imm {
+            for (_, v) in imm.iter_internal() {
+                consider(v);
+            }
+        }
+        for t in &self.ssts {
+            for (_, v) in t.entries_cloned() {
+                consider(&v);
+            }
+        }
+        let Some(ref handle) = self.vlog else {
+            return Ok(Vec::new());
+        };
+        let guard = handle.lock();
+        let mut live = Vec::with_capacity(meta.len());
+        for (off, (len, crc)) in meta {
+            let ptr = vlog::VlogPtr {
+                file_num,
+                offset: off,
+                len,
+                crc,
+            };
+            live.push((
+                off,
+                guard.read_ptr_on(&self.env, &self.dir, ptr, self.vlog_use_new)?,
+            ));
+        }
+        Ok(live)
+    }
+
+    fn prepare_remapped_ssts_blob<S: std::hash::BuildHasher>(
+        &self,
+        file_num: u32,
+        remap: &std::collections::HashMap<u64, Bytes, S>,
+    ) -> Result<PreparedVlogSsts> {
+        let mut next_file_num = self.next_file_num;
+        let mut new_tables = Vec::with_capacity(self.ssts.len());
+        let mut new_levels = Vec::with_capacity(self.sst_levels.len());
+        let mut old_paths = Vec::new();
+        let mut staged_paths = Vec::new();
+        let mut bytes_written = 0u64;
+        let remap_one = |stored: &Bytes| vlog::remap_stored_blob(stored, file_num, remap);
+
+        for (idx, table) in self.ssts.iter().enumerate() {
+            let mentions = table.entries_cloned().iter().any(|(_, v)| {
+                vlog::decode_vlog_ptr(v.as_ref()).is_some_and(|p| p.file_num == file_num)
+            });
+            let level = self.sst_levels.get(idx).copied().unwrap_or(0);
+            if !mentions {
+                new_tables.push(table.clone());
+                new_levels.push(level);
+                continue;
+            }
+            let num = next_file_num;
+            next_file_num = next_file_num.saturating_add(1);
+            let dest = VersionSet::sst_path(&self.dir, num);
+            let tmp = dest.with_extension("sst.tmp");
+            staged_paths.push(tmp.clone());
+            staged_paths.push(dest.clone());
+            let entries: Vec<(InternalKey, Bytes)> = table
+                .entries_cloned()
+                .into_iter()
+                .map(|(k, v)| (k, remap_one(&v)))
+                .collect();
+            match write_sst_entries_on(&self.env, &tmp, &entries) {
+                Ok(_) => {}
+                Err(e) => {
+                    for p in &staged_paths {
+                        let _ = self.env.remove_file(p);
+                    }
+                    return Err(e);
+                }
+            }
+            if let Err(e) = self.env.rename(&tmp, &dest) {
+                for p in &staged_paths {
+                    let _ = self.env.remove_file(p);
+                }
+                return Err(CoreError::Io(e));
+            }
+            let written = self.env.metadata_len(&dest).unwrap_or(0);
+            bytes_written = bytes_written.saturating_add(written);
+            match SstTable::open_on(&self.env, dest) {
+                Ok(t) => {
+                    old_paths.push(table.path().to_path_buf());
+                    new_tables.push(t);
+                    new_levels.push(level);
+                }
+                Err(e) => {
+                    for p in &staged_paths {
+                        let _ = self.env.remove_file(p);
+                    }
+                    return Err(e);
+                }
+            }
+        }
+        Ok(PreparedVlogSsts {
+            tables: new_tables,
+            levels: new_levels,
+            old_paths,
+            next_file_num,
+            bytes_written,
+        })
+    }
+
     /// Open (or replace) the value-log handle for `use_new` without ever assigning
     /// `self.vlog = None` first.
     ///
@@ -1596,14 +1957,25 @@ impl<E: Env> Db<E> {
     /// # Errors
     /// I/O opening the log.
     fn replace_vlog_handle(&mut self, use_new: bool) -> Result<()> {
-        match ValueLog::open_with_flag(&self.env, &self.dir, use_new) {
+        // File-0 GC must not steal the append handle off a numbered blob.
+        let opened = if self.blob_active > 0 {
+            ValueLog::open_blob(&self.env, &self.dir, self.blob_active)
+        } else {
+            ValueLog::open_with_flag(&self.env, &self.dir, use_new)
+        };
+        match opened {
             Ok(log) => {
                 self.vlog = Some(Mutex::new(log));
                 Ok(())
             }
             Err(e) => {
                 // Retry once; still never clear the old handle first.
-                if let Ok(log) = ValueLog::open_with_flag(&self.env, &self.dir, use_new) {
+                let retry = if self.blob_active > 0 {
+                    ValueLog::open_blob(&self.env, &self.dir, self.blob_active)
+                } else {
+                    ValueLog::open_with_flag(&self.env, &self.dir, use_new)
+                };
+                if let Ok(log) = retry {
                     self.vlog = Some(Mutex::new(log));
                     return Ok(());
                 }
@@ -1714,7 +2086,17 @@ impl<E: Env> Db<E> {
         let guard = vlog.lock();
         let mut live = Vec::with_capacity(meta.len());
         for (off, (len, crc)) in meta {
-            let data = guard.read_at_on(&self.env, off, len, crc)?;
+            let data = guard.read_ptr_on(
+                &self.env,
+                &self.dir,
+                vlog::VlogPtr {
+                    file_num: 0,
+                    offset: off,
+                    len,
+                    crc,
+                },
+                self.vlog_use_new,
+            )?;
             live.push((off, data));
         }
         Ok(live)
@@ -3074,6 +3456,176 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
     }
 
+    #[test]
+    fn blob_rotate_reopen() {
+        let dir = temp_dir();
+        let payload = vec![0xABu8; 2000];
+        {
+            let mut db = Db::open_with(&dir, vlog_opts()).unwrap();
+            db.set_vlog_rotate_bytes(Some(4_096));
+            for i in 0..8u8 {
+                db.put(&[b'k', i], &payload).unwrap();
+            }
+            db.flush().unwrap();
+            let nums = db.blob_file_nums();
+            assert!(
+                nums.len() >= 2,
+                "expected rotation, blobs={nums:?} line={}",
+                db.stats().vlog_line()
+            );
+            assert!(db.blob_active() >= 1);
+            for i in 0..8u8 {
+                assert_eq!(db.get(&[b'k', i]).as_deref(), Some(payload.as_slice()));
+            }
+            db.close().unwrap();
+        }
+        let db = Db::open_with(&dir, vlog_opts()).unwrap();
+        assert!(db.blob_file_nums().len() >= 2);
+        for i in 0..8u8 {
+            assert_eq!(
+                db.get(&[b'k', i]).as_deref(),
+                Some(payload.as_slice()),
+                "key k{i} after reopen"
+            );
+        }
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Rotation after some VLG1 spills must keep file-0 reads.
+    #[test]
+    fn blob_rotate_keeps_legacy_vlg1() {
+        let dir = temp_dir();
+        let v1 = vec![0xABu8; 2000];
+        let v2 = vec![0xCDu8; 2000];
+        {
+            let mut db = Db::open_with(&dir, vlog_opts()).unwrap();
+            db.put(b"old", &v1).unwrap();
+            db.set_vlog_rotate_bytes(Some(4_096));
+            for i in 0..6u8 {
+                db.put(&[b'n', i], &v2).unwrap();
+            }
+            db.flush().unwrap();
+            assert_eq!(db.get(b"old").as_deref(), Some(v1.as_slice()));
+            for i in 0..6u8 {
+                assert_eq!(db.get(&[b'n', i]).as_deref(), Some(v2.as_slice()));
+            }
+            db.close().unwrap();
+        }
+        let db = Db::open_with(&dir, vlog_opts()).unwrap();
+        assert_eq!(db.get(b"old").as_deref(), Some(v1.as_slice()));
+        assert_eq!(db.get(&[b'n', 0]).as_deref(), Some(v2.as_slice()));
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn compact_blob_drops_dead_only() {
+        let dir = temp_dir();
+        let v1 = vec![0x11u8; 1800];
+        let v2 = vec![0x22u8; 1800];
+        let mut db = Db::open_with(&dir, vlog_opts()).unwrap();
+        db.set_vlog_rotate_bytes(Some(3_500));
+        db.put(b"a", &v1).unwrap();
+        db.put(b"b", &v1).unwrap();
+        db.flush().unwrap();
+        db.put(b"a", &v2).unwrap();
+        db.put(b"c", &v2).unwrap();
+        db.flush().unwrap();
+        db.compact_with(CompactOptions::latest_only()).unwrap();
+        let sealed = db
+            .blob_file_nums()
+            .into_iter()
+            .find(|n| *n != db.blob_active())
+            .expect("sealed blob");
+        let before = db.stats().vlog_bytes;
+        let st = db.compact_blob(sealed).unwrap();
+        assert!(st.bytes_after <= st.bytes_before);
+        assert!(!vlog::blob_path(&dir, sealed).exists() || st.live_records == 0);
+        assert_eq!(db.get(b"a").as_deref(), Some(v2.as_slice()));
+        assert_eq!(db.get(b"b").as_deref(), Some(v1.as_slice()));
+        assert_eq!(db.get(b"c").as_deref(), Some(v2.as_slice()));
+        assert!(db.stats().vlog_bytes <= before);
+        db.close().unwrap();
+        let db = Db::open_with(&dir, vlog_opts()).unwrap();
+        assert_eq!(db.get(b"a").as_deref(), Some(v2.as_slice()));
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn scan_prefetch_same_visible_kvs() {
+        let dir = temp_dir();
+        let payload = vec![0xCDu8; 1500];
+        let mut db = Db::open_with(&dir, vlog_opts()).unwrap();
+        db.set_vlog_rotate_bytes(Some(8_192));
+        for i in 0..6u8 {
+            db.put(&[b'p', i], &payload).unwrap();
+        }
+        db.flush().unwrap();
+        let scanned: Vec<_> = db
+            .scan(
+                Bound::Unbounded,
+                Bound::Unbounded,
+            )
+            .map(|kv| (kv.key.to_vec(), kv.value.to_vec()))
+            .collect();
+        assert_eq!(scanned.len(), 6);
+        for i in 0..6u8 {
+            let got = db.get(&[b'p', i]).unwrap();
+            let from_scan = scanned
+                .iter()
+                .find(|(k, _)| k.as_slice() == [b'p', i])
+                .map(|(_, v)| v.as_slice());
+            assert_eq!(from_scan, Some(got.as_ref()));
+        }
+        assert!(
+            db.stats().scan_prefetch_hits > 0,
+            "prefetch should fire on vlog scan: {}",
+            db.stats().vlog_line()
+        );
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn compact_blob_crash_after_new_file_keeps_reads() {
+        let dir = temp_dir();
+        let payload = vec![0x99u8; 1600];
+        let mut db = Db::open_with(&dir, vlog_opts()).unwrap();
+        db.set_vlog_rotate_bytes(Some(3_200));
+        db.put(b"x", &payload).unwrap();
+        db.put(b"y", &payload).unwrap();
+        db.flush().unwrap();
+        db.put(b"z", &payload).unwrap();
+        db.flush().unwrap();
+        let sealed = db
+            .blob_file_nums()
+            .into_iter()
+            .find(|n| *n != db.blob_active());
+        if let Some(n) = sealed {
+            let live = db.collect_vlog_live_for_file(n).unwrap();
+            let dest = n.saturating_add(10);
+            let _ = ValueLog::<std::fs::File>::rewrite_live_to_blob(
+                &crate::env::StdEnv,
+                &dir,
+                dest,
+                &live,
+                1,
+            )
+            .unwrap();
+            assert!(vlog::blob_path(&dir, dest).exists());
+            assert!(vlog::blob_path(&dir, n).exists());
+        }
+        assert_eq!(db.get(b"x").as_deref(), Some(payload.as_slice()));
+        assert_eq!(db.get(b"y").as_deref(), Some(payload.as_slice()));
+        db.close().unwrap();
+        let db = Db::open_with(&dir, vlog_opts()).unwrap();
+        assert_eq!(db.get(b"x").as_deref(), Some(payload.as_slice()));
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
     /// RFC-0016 P0.3: amp / durability metrics move under load.
     #[test]
     fn stats_amp_and_vlog_metrics() {
@@ -3089,7 +3641,17 @@ mod tests {
         assert!(s.vlog_bytes > 0);
         assert!(s.vlog_live_bytes >= 1024);
         assert_eq!(s.vlog_live_records, 1);
+        let big2 = vec![0xBBu8; 1024];
+        db.put(b"a", &big2).unwrap();
         db.flush().unwrap();
+        db.compact_with(CompactOptions::latest_only()).unwrap();
+        let s2 = db.stats();
+        assert!(
+            s2.vlog_bytes > s2.vlog_live_bytes,
+            "after latest_only, old vlog record is unreferenced: {}",
+            s2.vlog_line()
+        );
+        assert!(s2.vlog_live_ratio() < 1.0);
         assert!(db.stats().bytes_written_sst > 0);
         db.close().unwrap();
         let _ = fs::remove_dir_all(&dir);

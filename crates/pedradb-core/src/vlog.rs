@@ -9,6 +9,9 @@
 //!
 //! SST/mem store a compact [`VLOG_VALUE_PREFIX`] pointer instead of the payload.
 //! [`rewrite_live`] builds a new log with only live records (GC).
+//!
+//! RFC-0029: optional numbered blob files (`000001.blob`) with [`VLOG_BLOB_PREFIX`]
+//! pointers (`file_num`, offset). File 0 remains `VALUES.vlog` / `VLG1`.
 
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
@@ -29,6 +32,23 @@ const MAGIC: &[u8; 8] = b"PDBVLOG1";
 
 /// Inline value marker: `VLG1` + offset `u64` + len `u32` + data CRC `u32`.
 pub const VLOG_VALUE_PREFIX: &[u8; 4] = b"VLG1";
+/// Blob pointer: `VLG3` + `file_num` `u32` + offset `u64` + len `u32` + crc `u32`.
+pub const VLOG_BLOB_PREFIX: &[u8; 4] = b"VLG3";
+/// Sealed / active blob file suffix (`000001.blob`).
+pub const BLOB_SUFFIX: &str = ".blob";
+
+/// Decoded value-log pointer (file 0 = [`VLOG_FILE_NAME`] / `VLG1`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct VlogPtr {
+    /// Blob generation (`0` = legacy `VALUES.vlog`).
+    pub file_num: u32,
+    /// Byte offset of the record header in that file.
+    pub offset: u64,
+    /// Payload length.
+    pub len: u32,
+    /// CRC32C of the payload.
+    pub crc: u32,
+}
 
 /// Encode a pointer to a vlog record as a mem/SST value.
 #[must_use]
@@ -51,6 +71,76 @@ pub fn decode_vlog_ref(value: &[u8]) -> Option<(u64, u32, u32)> {
     let len = u32::from_le_bytes(value[12..16].try_into().ok()?);
     let crc = u32::from_le_bytes(value[16..20].try_into().ok()?);
     Some((offset, len, crc))
+}
+
+/// Decode `VLG1` or `VLG3`.
+#[must_use]
+pub fn decode_vlog_ptr(value: &[u8]) -> Option<VlogPtr> {
+    if value.len() == 4 + 8 + 4 + 4 && value.starts_with(VLOG_VALUE_PREFIX) {
+        let (offset, len, crc) = decode_vlog_ref(value)?;
+        return Some(VlogPtr {
+            file_num: 0,
+            offset,
+            len,
+            crc,
+        });
+    }
+    if value.len() == 4 + 4 + 8 + 4 + 4 && value.starts_with(VLOG_BLOB_PREFIX) {
+        let file_num = u32::from_le_bytes(value[4..8].try_into().ok()?);
+        let offset = u64::from_le_bytes(value[8..16].try_into().ok()?);
+        let len = u32::from_le_bytes(value[16..20].try_into().ok()?);
+        let crc = u32::from_le_bytes(value[20..24].try_into().ok()?);
+        return Some(VlogPtr {
+            file_num,
+            offset,
+            len,
+            crc,
+        });
+    }
+    None
+}
+
+/// Encode a pointer (`VLG1` when `file_num == 0`, else `VLG3`).
+#[must_use]
+pub fn encode_vlog_ptr(ptr: VlogPtr) -> Bytes {
+    if ptr.file_num == 0 {
+        return encode_vlog_ref(ptr.offset, ptr.len, ptr.crc);
+    }
+    let mut v = Vec::with_capacity(24);
+    v.extend_from_slice(VLOG_BLOB_PREFIX);
+    v.extend_from_slice(&ptr.file_num.to_le_bytes());
+    v.extend_from_slice(&ptr.offset.to_le_bytes());
+    v.extend_from_slice(&ptr.len.to_le_bytes());
+    v.extend_from_slice(&ptr.crc.to_le_bytes());
+    Bytes::from(v)
+}
+
+/// Path of blob generation `num` (`000001.blob`).
+#[must_use]
+pub fn blob_path(dir: &Path, num: u32) -> PathBuf {
+    dir.join(format!("{num:06}{BLOB_SUFFIX}"))
+}
+
+/// Parse `000001.blob` → `1`.
+#[must_use]
+pub fn parse_blob_name(name: &str) -> Option<u32> {
+    let stem = name.strip_suffix(BLOB_SUFFIX)?;
+    if stem.is_empty() || !stem.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    stem.parse().ok()
+}
+
+/// Discover sealed/active blob generations under `dir` (sorted).
+#[must_use]
+pub fn list_blob_nums<E: Env>(env: &E, dir: &Path) -> Vec<u32> {
+    let Ok(names) = env.read_dir_names(dir) else {
+        return Vec::new();
+    };
+    let mut nums: Vec<u32> = names.iter().filter_map(|n| parse_blob_name(n)).collect();
+    nums.sort_unstable();
+    nums.dedup();
+    nums
 }
 
 /// Result of rewriting the value log with only live records.
@@ -114,6 +204,25 @@ impl<F: EnvFile> ValueLog<F> {
     /// I/O.
     pub fn open_on<E: Env<File = F>>(env: &E, dir: &Path) -> Result<Self> {
         Self::open_with_flag(env, dir, false)
+    }
+
+    /// Open numbered blob `{num:06}.blob` for append (creates if missing).
+    ///
+    /// # Errors
+    /// I/O.
+    pub fn open_blob<E: Env<File = F>>(env: &E, dir: &Path, num: u32) -> Result<Self> {
+        if num == 0 {
+            return Self::open_on(env, dir);
+        }
+        let path = blob_path(dir, num);
+        if !env.exists(&path) {
+            let mut f = env.create(&path)?;
+            Write::write_all(&mut f, MAGIC)?;
+            f.sync_all()?;
+            drop(f);
+            let _ = env.sync_dir(dir);
+        }
+        Self::open_path(env, path)
     }
 
     /// Open vlog using MANIFEST `vlog_use_new` flag.
@@ -193,6 +302,51 @@ impl<F: EnvFile> ValueLog<F> {
         Ok((offset, len, crc))
     }
 
+    /// Path that holds `ptr`.
+    ///
+    /// File 0 is `VALUES.vlog` / `.new`. After rotation the open handle is a
+    /// numbered blob — using `self.path` for file 0 would read the wrong file
+    /// (`VLG1` get → None). When the handle is not the legacy log, honor
+    /// `use_new` the same way [`Self::resolve_path`] does.
+    #[must_use]
+    pub fn path_for_ptr<E: Env>(
+        env: &E,
+        dir: &Path,
+        ptr: VlogPtr,
+        use_new: bool,
+        open_path: &Path,
+    ) -> PathBuf {
+        if ptr.file_num == 0 {
+            let name = open_path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("");
+            if name == VLOG_FILE_NAME || name == VLOG_NEW_NAME {
+                return open_path.to_path_buf();
+            }
+            return Self::resolve_path(env, dir, use_new);
+        }
+        blob_path(dir, ptr.file_num)
+    }
+
+    /// Read a [`VlogPtr`], opening a sealed blob by `file_num` when needed.
+    ///
+    /// `use_new` selects `VALUES.vlog.new` for file 0 when the handle is a
+    /// numbered blob (mid-GC after MANIFEST, RFC-0029 mixed mode).
+    ///
+    /// # Errors
+    /// I/O or CRC.
+    pub fn read_ptr_on<E: Env>(
+        &self,
+        env: &E,
+        dir: &Path,
+        ptr: VlogPtr,
+        use_new: bool,
+    ) -> Result<Bytes> {
+        let path = Self::path_for_ptr(env, dir, ptr, use_new, &self.path);
+        read_record_at(env, &path, ptr.offset, ptr.len, ptr.crc)
+    }
+
     /// Read a record at `offset` via a separate read handle.
     ///
     /// # Errors
@@ -260,6 +414,74 @@ impl<F: EnvFile> ValueLog<F> {
             live_records: live.len() as u64,
         };
         Ok((stats, remap))
+    }
+
+    /// Rewrite `live` records into a **new** blob file `dest_num` (does not delete source).
+    ///
+    /// `live` is `(old_offset, payload)` from one source generation.
+    /// Remap keys are old offsets; values are [`encode_vlog_ptr`] for `dest_num`.
+    ///
+    /// # Errors
+    /// I/O.
+    pub fn rewrite_live_to_blob<E: Env<File = F>>(
+        env: &E,
+        dir: &Path,
+        dest_num: u32,
+        live: &[(u64, Bytes)],
+        bytes_before: u64,
+    ) -> Result<(VlogRewriteStats, std::collections::HashMap<u64, Bytes>)> {
+        if dest_num == 0 {
+            return Err(CoreError::Internal(
+                "rewrite_live_to_blob dest must be a numbered blob".into(),
+            ));
+        }
+        let dest = blob_path(dir, dest_num);
+        if env.exists(&dest) {
+            return Err(CoreError::Internal(format!(
+                "blob dest exists: {}",
+                dest.display()
+            )));
+        }
+        let mut body = Vec::new();
+        body.extend_from_slice(MAGIC);
+        let mut remap = std::collections::HashMap::new();
+        let mut next = MAGIC.len() as u64;
+        for (old_off, data) in live {
+            let len = u32::try_from(data.len()).map_err(|_| {
+                CoreError::Internal("vlog value too large".into())
+            })?;
+            let crc = crc32c::crc32c(data);
+            let new_off = next;
+            body.extend_from_slice(&len.to_le_bytes());
+            body.extend_from_slice(&crc.to_le_bytes());
+            body.extend_from_slice(data);
+            next = next
+                .checked_add(8 + u64::from(len))
+                .ok_or_else(|| CoreError::Internal("blob rewrite overflow".into()))?;
+            remap.insert(
+                *old_off,
+                encode_vlog_ptr(VlogPtr {
+                    file_num: dest_num,
+                    offset: new_off,
+                    len,
+                    crc,
+                }),
+            );
+        }
+        {
+            let mut f = env.create(&dest)?;
+            Write::write_all(&mut f, &body)?;
+            f.sync_all()?;
+        }
+        let _ = env.sync_dir(dir);
+        Ok((
+            VlogRewriteStats {
+                bytes_before,
+                bytes_after: body.len() as u64,
+                live_records: live.len() as u64,
+            },
+            remap,
+        ))
     }
 
     /// After MANIFEST records remapped SSTs (`vlog_use_new`): promote `.new` → primary.
@@ -330,25 +552,49 @@ pub fn resolve_value_on<E: Env, F: EnvFile>(
     vlog: Option<&ValueLog<F>>,
     stored: Bytes,
 ) -> Result<Bytes> {
-    if let Some((off, len, crc)) = decode_vlog_ref(stored.as_ref()) {
+    if let Some(ptr) = decode_vlog_ptr(stored.as_ref()) {
         let log = vlog.ok_or_else(|| {
             CoreError::Internal("vlog ref present but value log not open".into())
         })?;
-        log.read_at_on(env, off, len, crc)
+        let dir = log.path.parent().unwrap_or_else(|| Path::new("."));
+        log.read_ptr_on(env, dir, ptr, false)
     } else {
         Ok(stored)
     }
 }
 
 /// Remap a stored value if it is a `VLG1` pointer present in `remap` (old offset → new ref).
+///
+/// `VLG3` is left untouched: file-0 rewrite offsets collide with blob offsets
+/// (both start at 8) and must not steal numbered-blob pointers.
 #[must_use]
 pub fn remap_stored_value<S: std::hash::BuildHasher>(
     stored: &Bytes,
     remap: &std::collections::HashMap<u64, Bytes, S>,
 ) -> Bytes {
-    if let Some((off, _, _)) = decode_vlog_ref(stored.as_ref()) {
-        if let Some(new_ref) = remap.get(&off) {
+    if let Some(ptr) = decode_vlog_ptr(stored.as_ref()) {
+        if ptr.file_num != 0 {
+            return stored.clone();
+        }
+        if let Some(new_ref) = remap.get(&ptr.offset) {
             return new_ref.clone();
+        }
+    }
+    stored.clone()
+}
+
+/// Remap only pointers that match `file_num` (RFC-0029 one-blob GC).
+#[must_use]
+pub fn remap_stored_blob<S: std::hash::BuildHasher>(
+    stored: &Bytes,
+    file_num: u32,
+    remap: &std::collections::HashMap<u64, Bytes, S>,
+) -> Bytes {
+    if let Some(ptr) = decode_vlog_ptr(stored.as_ref()) {
+        if ptr.file_num == file_num {
+            if let Some(new_ref) = remap.get(&ptr.offset) {
+                return new_ref.clone();
+            }
         }
     }
     stored.clone()
@@ -379,6 +625,80 @@ mod tests {
         assert_eq!(got.as_ref(), data.as_slice());
         let ptr = encode_vlog_ref(off, len, crc);
         assert!(decode_vlog_ref(ptr.as_ref()).is_some());
+        let blob = encode_vlog_ptr(VlogPtr {
+            file_num: 3,
+            offset: off,
+            len,
+            crc,
+        });
+        let decoded = decode_vlog_ptr(&blob).unwrap();
+        assert_eq!(decoded.file_num, 3);
+        assert_eq!(decoded.offset, off);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// After the handle moves to a numbered blob, file-0 reads must still
+    /// hit `VALUES.vlog` (not the active `.blob`).
+    #[test]
+    fn read_ptr_on_file0_after_blob_handle() {
+        let dir = std::env::temp_dir().join(format!(
+            "pedradb-vlog-ptr-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let env = StdEnv;
+        let mut log0 = ValueLog::open_on(&env, &dir).unwrap();
+        let legacy = vec![0x11u8; 64];
+        let (off0, len0, crc0) = log0.append(&legacy).unwrap();
+        drop(log0);
+        let mut blob = ValueLog::open_blob(&env, &dir, 1).unwrap();
+        let later = vec![0x22u8; 64];
+        let (off1, len1, crc1) = blob.append(&later).unwrap();
+        let got0 = blob
+            .read_ptr_on(
+                &env,
+                &dir,
+                VlogPtr {
+                    file_num: 0,
+                    offset: off0,
+                    len: len0,
+                    crc: crc0,
+                },
+                false,
+            )
+            .unwrap();
+        assert_eq!(got0.as_ref(), legacy.as_slice());
+        let got1 = blob
+            .read_ptr_on(
+                &env,
+                &dir,
+                VlogPtr {
+                    file_num: 1,
+                    offset: off1,
+                    len: len1,
+                    crc: crc1,
+                },
+                false,
+            )
+            .unwrap();
+        assert_eq!(got1.as_ref(), later.as_slice());
+        let mut remap = std::collections::HashMap::new();
+        remap.insert(off0, encode_vlog_ref(8, 1, 0));
+        let vlg3 = encode_vlog_ptr(VlogPtr {
+            file_num: 1,
+            offset: off0,
+            len: len0,
+            crc: crc0,
+        });
+        assert_eq!(
+            remap_stored_value(&vlg3, &remap),
+            vlg3,
+            "file-0 remap must not rewrite VLG3"
+        );
         let _ = fs::remove_dir_all(&dir);
     }
 
