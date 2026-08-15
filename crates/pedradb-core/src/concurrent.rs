@@ -469,17 +469,26 @@ impl<E: Env> ConcurrentDb<E> {
 
     /// Read-oriented full collapse (RFC-0019 P2.2).
     ///
+    /// Single-flight with [`Self::flush`] so `Db::flush` cannot rotate WAL
+    /// while another flush holds acked keys only in the read pin.
+    ///
     /// # Errors
     /// I/O.
     pub fn compact_for_reads(&self) -> Result<()> {
+        let _flush = self.flush_lock.lock();
         self.inner.write().compact_for_reads()
     }
 
-    /// Checkpoint (exclusive write lock — flushes first).
+    /// Checkpoint (single-flight with flush — flushes first).
+    ///
+    /// Takes [`Self::flush_lock`] so this cannot run during off-lock SST I/O.
+    /// `Db::flush` inside also refuses to rotate WAL while a flush read pin is
+    /// live (acked keys would otherwise vanish from the copied WAL).
     ///
     /// # Errors
     /// I/O.
     pub fn create_checkpoint(&self, dest: impl AsRef<Path>) -> Result<CheckpointMeta> {
+        let _flush = self.flush_lock.lock();
         self.inner.write().create_checkpoint(dest)
     }
 
@@ -887,6 +896,47 @@ mod tests {
         db.with_write(|d| d.install_l0_sst(table, num).unwrap());
         assert_eq!(db.get(b"k").as_deref(), Some(b"acked".as_ref()));
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// F116: checkpoint while flush I/O holds the memtable off-lock must still
+    /// restore the acked key (WAL must not rotate past the pin; F110 residual).
+    #[test]
+    fn checkpoint_during_off_lock_flush_keeps_acked() {
+        let dir = temp_dir();
+        let db = open_sync(&dir);
+        db.put(b"k", b"acked").unwrap();
+        let (imm, num) = db.with_write(|d| {
+            let imm = d.prepare_flush_imm().unwrap().expect("imm");
+            let num = d.alloc_file_num();
+            (imm, num)
+        });
+        let dest = dir.join("ckpt");
+        db.create_checkpoint(&dest).unwrap();
+        let restored = ConcurrentDb::open_with(
+            &dest,
+            OpenOptions {
+                sync: true,
+                auto_flush_bytes: None,
+                auto_compact_sst_count: None,
+                auto_compact_sst_bytes: None,
+                exclusive: true,
+                large_value_threshold: None,
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            restored.get(b"k").as_deref(),
+            Some(b"acked".as_ref()),
+            "checkpoint mid off-lock flush must keep acked k"
+        );
+        let (table, n, _) = db
+            .with_read(|d| d.write_memtable_to_l0_file_num(&imm, num))
+            .unwrap();
+        assert_eq!(n, num);
+        db.with_write(|d| d.install_l0_sst(table, num).unwrap());
+        assert_eq!(db.get(b"k").as_deref(), Some(b"acked".as_ref()));
+        let _ = fs::remove_dir_all(&dir);
+        let _ = fs::remove_dir_all(&dest);
     }
 
     /// F45: dual concurrent flush + failed restore must not drop another imm's data.

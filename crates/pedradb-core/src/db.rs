@@ -1264,8 +1264,9 @@ impl<E: Env> Db<E> {
     /// Flush MemTable(s) to L0 SST(s) using dual-memtable switch (pipeline).
     ///
     /// Active mem is swapped to immutable; new writes go to a fresh mem while
-    /// imm is written to SST. WAL is rotated only when both mem and imm are empty
-    /// after the flush (so concurrent post-switch puts are not lost).
+    /// imm is written to SST. WAL is rotated only when mem, imm, **and** the
+    /// off-lock flush read pin are empty (so a concurrent checkpoint cannot
+    /// copy a truncated WAL while acked keys live only in the pin).
     ///
     /// # Errors
     /// I/O while writing SST or recreating the WAL.
@@ -1317,6 +1318,17 @@ impl<E: Env> Db<E> {
     /// Drop the off-lock flush read pin (after a test wants the pre-fix hole).
     pub fn clear_flush_read_pin(&mut self) {
         self.flush_read_pin = None;
+    }
+
+    /// Rotate WAL even if [`Self::flush_read_pin`] is live (pre-fix hole).
+    ///
+    /// Production [`Self::try_rotate_wal`] must refuse while a pin holds the
+    /// only copy of acked keys. Tests use this to replay the truncate.
+    ///
+    /// # Errors
+    /// WAL create / close I/O.
+    pub fn rotate_wal_ignoring_pin(&mut self) -> Result<()> {
+        self.rotate_wal_now()
     }
 
     /// Reserve the next SST file number (must hold exclusive write lock).
@@ -1477,11 +1489,19 @@ impl<E: Env> Db<E> {
         Ok(())
     }
 
-    /// Rotate WAL only when there is no unflushed mem/imm data.
+    /// Rotate WAL only when mem, imm, **and** the off-lock flush pin are empty.
+    ///
+    /// After [`Self::prepare_flush_imm`] the only copy of acked keys may be the
+    /// pin (and an in-flight SST). Truncating WAL here leaves a checkpoint or
+    /// crash with nothing to replay.
     fn try_rotate_wal(&mut self) -> Result<()> {
-        if !self.mem.is_empty() || self.imm.is_some() {
+        if !self.mem_is_empty_for_rotate() {
             return Ok(());
         }
+        self.rotate_wal_now()
+    }
+
+    fn rotate_wal_now(&mut self) -> Result<()> {
         let wal_path = self.dir.join(WAL_FILE_NAME);
         let old = std::mem::replace(&mut self.wal, Wal::create_on(&self.env, &wal_path)?);
         old.close()?;

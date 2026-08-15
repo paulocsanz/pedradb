@@ -182,6 +182,14 @@ fn get_kv<E: Env>(db: &Db<E>, key: &[u8]) -> Option<KeyValue> {
     })
 }
 
+/// F115: present-but-undecodable meta is not absence (Create/CAS-0 must not overwrite).
+fn reject_undecodable_meta<E: Env>(db: &Db<E>, key: &[u8]) -> Result<()> {
+    if let Some(raw) = db.get(&meta_key(key)) {
+        decode_meta(&raw)?;
+    }
+    Ok(())
+}
+
 pub use crate::lease_kernel::lease_live;
 
 fn get_kv_at<E: Env>(db: &Db<E>, key: &[u8], now_ms: u64) -> Option<KeyValue> {
@@ -223,6 +231,7 @@ pub fn check_command_at<E: Env>(db: &Db<E>, cmd: &DcsCommand, now_ms: u64) -> Re
     match cmd {
         DcsCommand::Put { .. } => Ok(()),
         DcsCommand::Create { key, .. } => {
+            reject_undecodable_meta(db, key)?;
             if get_kv_at(db, key, now_ms).is_some() {
                 Err(DcsError::CasFailed("key exists"))
             } else {
@@ -235,7 +244,7 @@ pub fn check_command_at<E: Env>(db: &Db<E>, cmd: &DcsCommand, now_ms: u64) -> Re
             let cur = get_kv_at(db, key, now_ms);
             match (*expected_rev, cur) {
                 (0, Some(_)) => Err(DcsError::CasFailed("expected absent")),
-                (0, None) => Ok(()),
+                (0, None) => reject_undecodable_meta(db, key),
                 (r, Some(kv)) if kv.mod_revision == r => Ok(()),
                 (_, None) => Err(DcsError::CasFailed("key missing")),
                 _ => Err(DcsError::CasFailed("revision mismatch")),
@@ -257,6 +266,7 @@ pub fn check_command_at<E: Env>(db: &Db<E>, cmd: &DcsCommand, now_ms: u64) -> Re
 pub fn apply_dcs_command<E: Env>(db: &mut Db<E>, cmd: &DcsCommand) -> Result<u64> {
     match cmd {
         DcsCommand::Create { key, value, lease } => {
+            reject_undecodable_meta(db, key)?;
             if let Some(existing) = get_kv(db, key) {
                 // Dual-append same create (same absolute lease deadline): idempotent.
                 if existing.lease == *lease && existing.value == *value {
@@ -284,6 +294,7 @@ pub fn apply_dcs_command<E: Env>(db: &mut Db<E>, cmd: &DcsCommand) -> Result<u64
         } => {
             // expected_rev == 0 is create-if-absent: dual-append safety when same binding.
             if *expected_rev == 0 {
+                reject_undecodable_meta(db, key)?;
                 if let Some(existing) = get_kv(db, key) {
                     if existing.lease == *lease && existing.value == *value {
                         return Ok(existing.mod_revision);
@@ -451,6 +462,32 @@ mod tests {
         );
         assert_eq!(dcs_get(&db, b"a").unwrap().mod_revision, 1);
         assert!(dcs_get(&db, b"b").is_none());
+        db.close().unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// F115: corrupt meta must not look absent on apply Create.
+    #[test]
+    fn apply_create_rejects_undecodable_meta() {
+        let (dir, mut db) = temp_db();
+        let cmd = DcsCommand::Put {
+            key: b"a".to_vec(),
+            value: b"keep".to_vec(),
+            lease: 0,
+        };
+        apply_dcs_command(&mut db, &cmd).unwrap();
+        db.put(&meta_key(b"a"), b"xx").unwrap();
+        let steal = DcsCommand::Create {
+            key: b"a".to_vec(),
+            value: b"steal".to_vec(),
+            lease: 0,
+        };
+        let err = apply_dcs_command(&mut db, &steal);
+        assert!(
+            err.is_err(),
+            "apply Create must not overwrite corrupt-meta key: {err:?}"
+        );
+        assert_eq!(db.get(&kv_key(b"a")).as_deref(), Some(b"keep".as_ref()));
         db.close().unwrap();
         let _ = std::fs::remove_dir_all(&dir);
     }

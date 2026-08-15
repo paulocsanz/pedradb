@@ -387,8 +387,17 @@ impl<C: Clock, E: Env> Dcs<C, E> {
         self.put(key, value, lease)
     }
 
+    /// F115: present meta that does not decode is not "absent" (do not GC / overwrite).
+    fn reject_undecodable_meta(&self, key: &[u8]) -> Result<()> {
+        if let Some(raw) = self.db.get(&meta_key(key)) {
+            decode_meta(&raw)?;
+        }
+        Ok(())
+    }
+
     /// Remove raw `d/k/` + `d/m/` rows without bumping revision / watch (orphan GC).
     fn delete_raw_orphan(&mut self, key: &[u8]) -> Result<()> {
+        self.reject_undecodable_meta(key)?;
         if self.db.get(&kv_key(key)).is_none() && self.db.get(&meta_key(key)).is_none() {
             return Ok(());
         }
@@ -414,7 +423,7 @@ impl<C: Clock, E: Env> Dcs<C, E> {
         let cur = self.get(key);
         match (expected_rev, cur) {
             (0, Some(_)) => return Err(DcsError::CasFailed("expected absent")),
-            (0, None) => {}
+            (0, None) => self.reject_undecodable_meta(key)?,
             (r, Some(kv)) if kv.mod_revision == r => {}
             (_, None) => return Err(DcsError::CasFailed("key missing")),
             _ => return Err(DcsError::CasFailed("revision mismatch")),
@@ -875,7 +884,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// F114: corrupt meta made get() miss and create-if-absent overwrite the value.
+    /// F115: corrupt meta made get() miss and create-if-absent overwrite the value.
     #[test]
     fn create_rejects_undecodable_meta() {
         let dir = temp_dir("meta-corrupt");
