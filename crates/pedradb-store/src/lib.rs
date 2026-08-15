@@ -44,6 +44,8 @@
 #![warn(missing_docs)]
 
 mod ae_ack_kernel;
+mod commit_kernel;
+mod txn_kernel;
 mod msg;
 pub mod client;
 pub mod fdb_compat;
@@ -71,6 +73,16 @@ pub use layers::{
     table_row_key, EtcdNeedFace, TikvKvFace, WatchEvent, WatchHub,
 };
 pub use ae_ack_kernel::{ae_ack_success, ae_ack_success_as_is};
+pub use commit_kernel::{
+    may_commit_at, may_commit_at_as_is, propose_ack_ok, propose_ack_ok_as_is, recover_commit,
+    recover_commit_as_is,
+};
+pub use txn_kernel::{
+    discard_cut, discard_cut_as_is, revert_clears_status, revert_clears_status_as_is,
+    revert_user_action, revert_user_action_as_is, should_repair_si_hist,
+    should_repair_si_hist_as_is, txn_commit_action, txn_commit_action_as_is, RevertUserAction,
+    TxnCommitAction,
+};
 pub use msg::PeerMsg;
 pub use tcp::{
     client_commit_tx, client_dcs_cas, client_dcs_create, client_dcs_get, client_get, client_put,
@@ -470,17 +482,7 @@ fn decode_preimage(raw: &[u8]) -> Option<Option<Vec<u8>>> {
     }
 }
 
-pub(crate) fn prefix_exclusive_end(prefix: &[u8]) -> Option<Vec<u8>> {
-    let mut e = prefix.to_vec();
-    while let Some(last) = e.last_mut() {
-        if *last < 0xff {
-            *last += 1;
-            return Some(e);
-        }
-        e.pop();
-    }
-    None
-}
+pub(crate) use pedradb_core::prefix_exclusive_end;
 
 fn scan_prefix<E: Env>(db: &Db<E>, prefix: &[u8]) -> Vec<(Vec<u8>, Vec<u8>)> {
     let start = Bound::Included(prefix);
@@ -1067,7 +1069,8 @@ fn apply_txn_prepare<E: Env>(db: &mut Db<E>, txn_id: u64, pairs: &[(Vec<u8>, Vec
 /// Materialize intents for **only** `keys` (this range's slice of the TX).
 fn apply_txn_commit<E: Env>(db: &mut Db<E>, txn_id: u64, keys: &[Vec<u8>]) -> Result<()> {
     let st = db.get(&txn_status_key(txn_id));
-    if st.as_deref() == Some(b"abort".as_ref()) {
+    let status_is_abort = st.as_deref() == Some(b"abort".as_ref());
+    if txn_kernel::txn_commit_action(status_is_abort) == txn_kernel::TxnCommitAction::Revert {
         // F47: fenced TX — never materialise. If a prior apply already wrote user
         // keys, restore preimages (same as TxnRevert). Keep abort fence durable.
         let _ = apply_txn_revert(db, txn_id, keys);
@@ -1127,7 +1130,7 @@ fn apply_txn_revert<E: Env>(db: &mut Db<E>, txn_id: u64, keys: &[Vec<u8>]) -> Re
     // F47: never drop an abort fence here. A later raft replay of TxnCommit
     // must still see status=abort. Successful materialise is the only path
     // that clears status (apply_txn_commit).
-    let keep_abort = db.get(&txn_status_key(txn_id)).as_deref() == Some(b"abort".as_ref());
+    let status_is_abort = db.get(&txn_status_key(txn_id)).as_deref() == Some(b"abort".as_ref());
     let mut ops = Vec::new();
     let mut restored: Vec<(Vec<u8>, Option<Vec<u8>>)> = Vec::new();
     for u in keys {
@@ -1135,10 +1138,18 @@ fn apply_txn_revert<E: Env>(db: &mut Db<E>, txn_id: u64, keys: &[Vec<u8>]) -> Re
         let pre = pre_raw
             .as_ref()
             .and_then(|b| decode_preimage(b.as_ref()));
-        match &pre {
-            Some(Some(val)) => ops.push(BatchOp::put(u.as_slice(), val.as_slice())),
-            Some(None) => ops.push(BatchOp::delete(u.as_slice())),
-            None => {}
+        let had_pre = pre.is_some();
+        let pre_was_absent = matches!(pre, Some(None));
+        match txn_kernel::revert_user_action(had_pre, pre_was_absent) {
+            txn_kernel::RevertUserAction::RestoreValue => {
+                if let Some(Some(val)) = &pre {
+                    ops.push(BatchOp::put(u.as_slice(), val.as_slice()));
+                }
+            }
+            txn_kernel::RevertUserAction::RestoreAbsent => {
+                ops.push(BatchOp::delete(u.as_slice()));
+            }
+            txn_kernel::RevertUserAction::LeaveUntouched => {}
         }
         if let Some(p) = pre {
             restored.push((u.clone(), p));
@@ -1153,14 +1164,14 @@ fn apply_txn_revert<E: Env>(db: &mut Db<E>, txn_id: u64, keys: &[Vec<u8>]) -> Re
     // F52: align durable SI hist with restored Pedra (TxnCommit may have stamped
     // the aborted write under si_gen before this compensating entry applied).
     for (u, pre) in &restored {
-        if is_reserved_store_key(u) {
+        if !txn_kernel::should_repair_si_hist(true, is_reserved_store_key(u)) {
             continue;
         }
         repair_si_hist_tip(db, u, pre.as_deref())?;
     }
     let prefix = txn_pair_prefix(txn_id);
     let left = scan_prefix(db, &prefix);
-    if left.is_empty() && !keep_abort {
+    if txn_kernel::revert_clears_status(status_is_abort, left.is_empty()) {
         db.apply_batch([BatchOp::delete(txn_status_key(txn_id))])?;
     }
     Ok(())
@@ -1266,9 +1277,9 @@ fn load_range_peer<E: Env>(db: &Db<E>, range_id: u64, node_id: u64) -> Result<Ra
     if let Some(raw) = db.get(&raft_meta_key(range_id, "applied")) {
         peer.applied = decode_u64_meta(&raw)?;
     }
-    // Cap watermarks to log length (corrupt/partial meta).
+    // Cap watermarks to log length (corrupt/partial meta). F10.
     let last = peer.last_index();
-    peer.commit = peer.commit.min(last);
+    peer.commit = commit_kernel::recover_commit(peer.commit, last);
     peer.applied = peer.applied.min(peer.commit);
     // Drop any log entries already covered by snapshot (idempotent load).
     if peer.snapshot_index > 0 {
@@ -2976,7 +2987,7 @@ impl<E: Env> StoreCluster<E> {
                     }
                 })
                 .count();
-            if count >= maj && p.term_at(idx) == p.term {
+            if commit_kernel::may_commit_at(p.term_at(idx), p.term, count >= maj) {
                 if idx > p.commit {
                     p.commit = idx;
                     let _ = persist_commit_db(&mut n.db, rid, p);
@@ -3262,7 +3273,7 @@ impl<E: Env> StoreCluster<E> {
                         .and_then(|n| n.ranges.get(&rid))
                         .map(|p| p.commit)
                         .unwrap_or(0);
-                    if commit_now < idx {
+                    if !commit_kernel::propose_ack_ok(idx, commit_now) {
                         // Best-effort: discard must not be blocked by dead disks
                         // on a subset of peers (in-memory truncate still runs).
                         let _ = self.discard_uncommitted_from(rid, leader, idx);
@@ -3358,7 +3369,7 @@ impl<E: Env> StoreCluster<E> {
                 .and_then(|n| n.ranges.get(&rid))
                 .map(|p| p.commit)
                 .unwrap_or(0);
-            if commit_now < idx {
+            if !commit_kernel::propose_ack_ok(idx, commit_now) {
                 if self.rpc_mode == RpcMode::Direct {
                     // Best-effort discard under partial disk death (F47).
                     let _ = self.discard_uncommitted_from(rid, leader, idx);
@@ -3541,7 +3552,7 @@ impl<E: Env> StoreCluster<E> {
                 continue;
             };
             // Never discard at or below commit (safety).
-            let cut = from_index.max(p.commit.saturating_add(1));
+            let cut = txn_kernel::discard_cut(from_index, p.commit);
             let before_len = p.log.len();
             p.log.retain(|e| e.index < cut);
             let mut applied_dirty = false;
@@ -3645,7 +3656,7 @@ impl<E: Env> StoreCluster<E> {
                     }
                 })
                 .count();
-            if count >= maj && p.term_at(n) == p.term {
+            if commit_kernel::may_commit_at(p.term_at(n), p.term, count >= maj) {
                 new_commit = n;
                 break;
             }

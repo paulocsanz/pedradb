@@ -2,7 +2,7 @@
 
 use crate::{FoldCursor, FoldError, FoldMetrics, FoldRole, FoldUpdate, Result};
 use bytes::Bytes;
-use pedradb_core::{BatchOp, Db, Env, OpenOptions, StdEnv};
+use pedradb_core::{prefix_exclusive_end, BatchOp, Db, Env, OpenOptions, StdEnv};
 use std::path::{Path, PathBuf};
 
 /// Meta key for the applied cursor (not a user key).
@@ -159,20 +159,6 @@ impl<E: Env> PedraFold<E> {
     pub fn close(self) {
         drop(self.db);
     }
-}
-
-/// Exclusive end of every key that starts with `prefix` (increment last
-/// non-0xff byte). `None` = unbounded (prefix empty or all 0xff).
-fn prefix_exclusive_end(prefix: &[u8]) -> Option<Vec<u8>> {
-    let mut e = prefix.to_vec();
-    while let Some(last) = e.last_mut() {
-        if *last < 0xff {
-            *last += 1;
-            return Some(e);
-        }
-        e.pop();
-    }
-    None
 }
 
 fn apply_inner<E: Env>(

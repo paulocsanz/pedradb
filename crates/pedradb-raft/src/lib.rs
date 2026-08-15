@@ -12,12 +12,17 @@
 #![warn(missing_docs)]
 
 pub mod ae_kernel;
+pub mod commit_kernel;
 pub mod net;
 pub mod persist;
 pub mod vote_kernel;
 
 pub use ae_kernel::{
     ae_ack_success, ae_ack_success_as_is, ae_entry_action, ae_prev_log_ok, AeEntryAction,
+};
+pub use commit_kernel::{
+    may_commit_at, may_commit_at_as_is, propose_ack_ok, propose_ack_ok_as_is, recover_commit,
+    recover_commit_as_is, recover_last_applied, recover_last_applied_as_is,
 };
 pub use vote_kernel::{
     grant_after_persist, grant_after_persist_as_is, vote_decision, PersistOutcome, VoteDecision,
@@ -635,12 +640,10 @@ impl RaftCluster {
             node.meta_dir = Some(meta);
             node.hard = hard;
             node.log = log;
-            // F10: never treat the full on-disk log as committed. Only the durable
-            // commit index (capped by log length) is trusted; re-apply 1..=commit
-            // so a crash between commit advance and SM apply cannot strand data.
+            // F10: never treat the full on-disk log as committed.
             let log_last = node.log.last().map_or(0, |e| e.index);
-            node.commit_index = commit.min(log_last);
-            node.last_applied = 0;
+            node.commit_index = commit_kernel::recover_commit(commit, log_last);
+            node.last_applied = commit_kernel::recover_last_applied();
             node.apply_committed()?;
             nodes.insert(id, node);
             ids.push(id);
@@ -945,7 +948,7 @@ impl RaftCluster {
                 continue;
             }
             let term_at = self.nodes.get(&leader_id).unwrap().log_term_at(n);
-            if term_at == term {
+            if commit_kernel::may_commit_at(term_at, term, true) {
                 let leader = self.nodes.get_mut(&leader_id).unwrap();
                 if n > leader.commit_index {
                     leader.set_commit_and_apply(n)?;
@@ -991,7 +994,7 @@ impl RaftCluster {
             .get(&leader_id)
             .map(|n| n.commit_index)
             .unwrap_or(0);
-        if commit < index {
+        if !commit_kernel::propose_ack_ok(index, commit) {
             return Err(RaftError::NotCommitted {
                 index,
                 commit_index: commit,

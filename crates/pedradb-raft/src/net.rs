@@ -511,8 +511,8 @@ impl NetworkNode {
         node.log = log;
         // F10: durable commit only; re-apply committed prefix.
         let log_last = node.log.last().map_or(0, |e| e.index);
-        node.commit_index = commit.min(log_last);
-        node.last_applied = 0;
+        node.commit_index = crate::commit_kernel::recover_commit(commit, log_last);
+        node.last_applied = crate::commit_kernel::recover_last_applied();
         node.apply_committed().map_err(RaftError::from)?;
         let peer_ids: Vec<u64> = peers.keys().copied().collect();
         Ok(Self {
@@ -722,7 +722,7 @@ fn network_propose_dcs(
         let n = node.lock().map_err(|e| RaftError::Network(e.to_string()))?;
         n.commit_index
     };
-    if commit < entry.index {
+    if !crate::commit_kernel::propose_ack_ok(entry.index, commit) {
         return Err(RaftError::NotCommitted {
             index: entry.index,
             commit_index: commit,
@@ -767,7 +767,7 @@ fn network_propose(
         let n = node.lock().map_err(|e| RaftError::Network(e.to_string()))?;
         n.commit_index
     };
-    if commit < entry.index {
+    if !crate::commit_kernel::propose_ack_ok(entry.index, commit) {
         return Err(RaftError::NotCommitted {
             index: entry.index,
             commit_index: commit,

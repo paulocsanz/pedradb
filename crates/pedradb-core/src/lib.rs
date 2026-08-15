@@ -29,6 +29,7 @@ pub mod manifest;
 pub mod memtable;
 pub mod merge;
 pub mod occ;
+pub mod prefix;
 pub mod rng;
 pub mod sst;
 pub mod time;
@@ -59,6 +60,9 @@ pub use host::{DetHost, Host, StdHost};
 pub use key::{
     pack_sequence_and_type, unpack_sequence_and_type, InternalKey, SequenceNumber, ValueType,
     MAX_SEQUENCE_NUMBER,
+};
+pub use prefix::{
+    key_in_prefix_range, prefix_exclusive_end, prefix_exclusive_end_as_is,
 };
 pub use lock::{DirLock, LOCK_FILE};
 pub use manifest::{VersionSet, CURRENT_FILE, MANIFEST_PREFIX};

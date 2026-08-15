@@ -15,7 +15,7 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
-use pedradb_core::{Db, OpenOptions, Result as CoreResult};
+use pedradb_core::{prefix_exclusive_end as prefix_successor, Db, OpenOptions, Result as CoreResult};
 use thiserror::Error;
 
 /// SQL execution errors.
@@ -251,19 +251,6 @@ impl SqlEngine {
     pub fn close(self) -> CoreResult<()> {
         self.db.close()
     }
-}
-
-/// Next key after all keys with `prefix` (exclusive end), or `None` if none.
-fn prefix_successor(prefix: &[u8]) -> Option<Vec<u8>> {
-    let mut e = prefix.to_vec();
-    while let Some(last) = e.last_mut() {
-        if *last < 0xff {
-            *last += 1;
-            return Some(e);
-        }
-        e.pop();
-    }
-    None
 }
 
 fn is_ident(s: &str) -> bool {

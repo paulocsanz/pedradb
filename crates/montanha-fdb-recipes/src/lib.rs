@@ -63,13 +63,28 @@ impl Subspace {
         s
     }
 
-    /// Exclusive end: first byte after prefix (FDB range end).
+    /// Exclusive end of packed children: `prefix || 0x01`.
+    ///
+    /// Keys are `prefix || 0x00 || rest`. `prefix || 0xff` is **not** that
+    /// interval — a longer sibling component (zip `900` vs `90`) sorts inside
+    /// `[pack(90), pack(90)||0xff)` (F59).
     #[must_use]
     pub fn range_end(&self) -> Vec<u8> {
         let mut e = self.prefix.clone();
-        // successor of prefix as half-open end for keys under this subspace
-        e.push(0xff);
+        e.push(0x01);
         e
+    }
+
+    /// Half-open range of packed children of `self.pack(parts)`:
+    /// `[pack || 0x00, pack || 0x01)`.
+    #[must_use]
+    pub fn children_range(&self, parts: &[&[u8]]) -> (Vec<u8>, Vec<u8>) {
+        let packed = self.pack(parts);
+        let mut start = packed.clone();
+        start.push(0x00);
+        let mut end = packed;
+        end.push(0x01);
+        (start, end)
     }
 
     /// Prefix bytes.
@@ -251,9 +266,7 @@ impl IndexedUsers {
     /// Range / store.
     pub fn ids_in_zip(&self, cluster: &StoreCluster, zipcode: &[u8]) -> Result<Vec<Vec<u8>>> {
         let mut tr = Transaction::at_version(cluster.read_version());
-        let start = self.zip_index.pack(&[zipcode]);
-        let mut end = start.clone();
-        end.push(0xff);
+        let (start, end) = self.zip_index.children_range(&[zipcode]);
         let pairs = tr.get_range(cluster, &start, &end)?;
         let mut ids = Vec::new();
         for (k, v) in pairs {
@@ -403,9 +416,7 @@ impl Multimap {
     /// Range.
     pub fn get_all(&self, cluster: &StoreCluster, key: &[u8]) -> Result<Vec<Vec<u8>>> {
         let mut tr = Transaction::at_version(cluster.read_version());
-        let start = self.root.pack(&[key]);
-        let mut end = start.clone();
-        end.push(0xff);
+        let (start, end) = self.root.children_range(&[key]);
         let pairs = tr.get_range(cluster, &start, &end)?;
         Ok(pairs
             .into_iter()
@@ -662,13 +673,11 @@ impl RecordTable {
         cluster: &StoreCluster,
         index_val: &[u8],
     ) -> Result<Vec<Vec<u8>>> {
-        let prefix = Subspace::new(b"rec")
+        let (prefix, end) = Subspace::new(b"rec")
             .sub(&self.name)
             .sub(b"i")
             .sub(&self.index_col)
-            .pack(&[index_val]);
-        let mut end = prefix.clone();
-        end.push(0xff);
+            .children_range(&[index_val]);
         let pairs = tr.get_range(cluster, &prefix, &end)?;
         let mut pks = Vec::new();
         for (k, v) in pairs {
@@ -716,14 +725,11 @@ impl RecordTable {
         index_val: &[u8],
     ) -> Result<Vec<Vec<u8>>> {
         let mut tr = Transaction::at_version(cluster.read_version());
-        // Prefix range: all keys under index_val/
-        let start = Subspace::new(b"rec")
+        let (start, end) = Subspace::new(b"rec")
             .sub(&self.name)
             .sub(b"i")
             .sub(&self.index_col)
-            .pack(&[index_val]);
-        let mut end = start.clone();
-        end.push(0xff);
+            .children_range(&[index_val]);
         let pairs = tr.get_range(cluster, &start, &end)?;
         let mut pks = Vec::new();
         for (k, v) in pairs {
@@ -803,6 +809,58 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// `pack(zip) || 0xff` is not a tuple prefix: zip `900` sorts inside
+    /// `[pack(90), pack(90)||0xff)` and leaks into `ids_in_zip("90")`.
+    /// FDB tuple layer terminates each element; this pack does not.
+    #[test]
+    fn simple_index_does_not_include_prefix_sibling_zip() {
+        let (dir, mut c) = open3();
+        let u = IndexedUsers::new();
+        u.set_user(&mut c, b"short", b"a", b"90").unwrap();
+        u.set_user(&mut c, b"long", b"b", b"900").unwrap();
+        assert_eq!(
+            u.get_user(&c, b"long").unwrap().unwrap().0,
+            b"900",
+            "point get must still see the longer zip"
+        );
+        let in90 = u.ids_in_zip(&c, b"90").unwrap();
+        assert!(
+            in90.iter().any(|i| i == b"short"),
+            "zip 90 missing own id: {in90:?}"
+        );
+        assert!(
+            !in90.iter().any(|i| i == b"long"),
+            "zip 90 range included sibling zip 900 (pack||0xff): {in90:?}"
+        );
+        let in900 = u.ids_in_zip(&c, b"900").unwrap();
+        assert!(
+            in900.iter().any(|i| i == b"long") && !in900.iter().any(|i| i == b"short"),
+            "zip 900 must be exact, got {in900:?}"
+        );
+        // User id starting with 0xff is a packed *child* (`\0` then 0xff) — must stay.
+        let ff = [0xff, b'z'];
+        u.set_user(&mut c, &ff, b"c", b"90").unwrap();
+        let in90 = u.ids_in_zip(&c, b"90").unwrap();
+        assert!(
+            in90.iter().any(|i| i.as_slice() == ff),
+            "0xff user id must remain in zip 90: {in90:?}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn multimap_get_all_does_not_include_prefix_sibling_key() {
+        let (dir, mut c) = open3();
+        let mm = Multimap::new(b"tags");
+        mm.insert(&mut c, b"a", b"red").unwrap();
+        mm.insert(&mut c, b"aa", b"blue").unwrap();
+        let a = mm.get_all(&c, b"a").unwrap();
+        assert_eq!(a, vec![b"red".to_vec()], "key a leaked sibling aa: {a:?}");
+        let aa = mm.get_all(&c, b"aa").unwrap();
+        assert_eq!(aa, vec![b"blue".to_vec()]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// Concurrent writer must not leave index without primary (OCC / multi-key TX).
     #[test]
     fn simple_index_concurrent_set_no_orphan_index() {
@@ -850,33 +908,14 @@ mod tests {
         u.set_user(&mut c, b"a", b"alice", b"90000").unwrap();
 
         let mut tr = c.begin();
-        let before = tr
-            .get_range(
-                &c,
-                &u.zip_index.pack(&[b"90000"]),
-                &{
-                    let mut e = u.zip_index.pack(&[b"90000"]);
-                    e.push(0xff);
-                    e
-                },
-            )
-            .unwrap();
+        let (z0, z1) = u.zip_index.children_range(&[b"90000"]);
+        let before = tr.get_range(&c, &z0, &z1).unwrap();
         let n_before = before.len();
 
         // Concurrent insert same zip
         u.set_user(&mut c, b"b", b"bob", b"90000").unwrap();
 
-        let after = tr
-            .get_range(
-                &c,
-                &u.zip_index.pack(&[b"90000"]),
-                &{
-                    let mut e = u.zip_index.pack(&[b"90000"]);
-                    e.push(0xff);
-                    e
-                },
-            )
-            .unwrap();
+        let after = tr.get_range(&c, &z0, &z1).unwrap();
         assert_eq!(
             after.len(),
             n_before,
@@ -1000,13 +1039,11 @@ mod tests {
         let by_email = rec.lookup_index(&c, b"e@9").unwrap();
         assert!(by_email.iter().any(|p| p == b"9"), "email index {by_email:?}");
         // phone index via subspace pack
-        let phone_prefix = Subspace::new(b"rec")
+        let (phone_prefix, end) = Subspace::new(b"rec")
             .sub(b"acct")
             .sub(b"i")
             .sub(b"phone")
-            .pack(&[b"555"]);
-        let mut end = phone_prefix.clone();
-        end.push(0xff);
+            .children_range(&[b"555"]);
         let mut tr = c.begin();
         let pairs = tr.get_range(&c, &phone_prefix, &end).unwrap();
         assert!(
