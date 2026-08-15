@@ -1,0 +1,158 @@
+{
+  "bench": "montanha-fdb-shaped-v1",
+  "host": "unknown",
+  "suite": "core",
+  "nodes": 3,
+  "payload_bytes": 64,
+  "n_default": 32,
+  "tx_keys": 4,
+  "multi_ranges": 2,
+  "threads": 4,
+  "warmup": 4,
+  "benches": [
+    {
+    "name": "A1_raw_put_1range",
+    "n": 32,
+    "qps": 2.051,
+    "p50_ms": 495.9943,
+    "p95_ms": 547.1028,
+    "p99_ms": 653.8255,
+    "max_ms": 653.8255,
+    "wall_s": 15.6055
+  },
+    {
+    "name": "A1b_put_batch_16",
+    "batches": 2,
+    "keys": 32,
+    "keys_per_s": 9.575,
+    "batch_p50_ms": 1736.1195,
+    "batch_p99_ms": 1736.1195,
+    "wall_s": 3.3422,
+    "note": "keys/s vs A1 qps shows amortization of one Raft entry per batch"
+  },
+    {
+    "name": "A1c_put_many_32",
+    "keys": 32,
+    "keys_per_s": 11.548,
+    "wall_s": 2.7711
+  },
+    {
+    "name": "A2_raw_get_1range",
+    "n": 32,
+    "qps": 555314.534,
+    "p50_ms": 0.0014,
+    "p95_ms": 0.0015,
+    "p99_ms": 0.0102,
+    "max_ms": 0.0102,
+    "wall_s": 0.0001
+  },
+    {
+    "name": "A3_fdb_face_set_commit_1k",
+    "n": 32,
+    "qps": 1.142,
+    "p50_ms": 796.3112,
+    "p95_ms": 953.1893,
+    "p99_ms": 2693.7535,
+    "max_ms": 2693.7535,
+    "wall_s": 28.0109
+  },
+    {
+    "name": "A4_snapshot_tx_4keys_1range",
+    "n": 32,
+    "qps": 0.984,
+    "p50_ms": 1019.0255,
+    "p95_ms": 1078.9431,
+    "p99_ms": 1112.9978,
+    "max_ms": 1112.9978,
+    "wall_s": 32.5269
+  },
+    {
+    "name": "A5_get_range_prefix",
+    "n": 32,
+    "qps": 26551.433,
+    "p50_ms": 0.0301,
+    "p95_ms": 0.0422,
+    "p99_ms": 0.1979,
+    "max_ms": 0.1979,
+    "wall_s": 0.0012
+  },
+    {
+    "name": "A6_clear_range_4keys",
+    "n": 20,
+    "qps": 0.953,
+    "p50_ms": 1062.1470,
+    "p95_ms": 1102.0263,
+    "p99_ms": 1121.9456,
+    "max_ms": 1121.9456,
+    "wall_s": 20.9931
+  },
+    {
+    "name": "A7_hot_key_ww_conflict",
+    "pairs": 32,
+    "success_commits": 32,
+    "abort_commits": 32,
+    "abort_ratio": 0.5000,
+    "success_p50_ms": 834.8515,
+    "success_p99_ms": 2675.3692,
+    "wall_s": 31.9533,
+    "note": "exactly one of two concurrent WW should win per pair"
+  },
+    {
+    "name": "A8_record_row_plus_index_tx",
+    "n": 32,
+    "qps": 1.011,
+    "p50_ms": 975.9332,
+    "p95_ms": 1155.6456,
+    "p99_ms": 1210.6603,
+    "max_ms": 1210.6603,
+    "wall_s": 31.6585
+  },
+    {
+    "name": "B1_disjoint_put_2ranges",
+    "n": 32,
+    "qps": 2.151,
+    "p50_ms": 453.9248,
+    "p95_ms": 517.1377,
+    "p99_ms": 603.7257,
+    "max_ms": 603.7257,
+    "wall_s": 14.8769
+  },
+    {
+    "name": "B2_cross_range_tx_2keys",
+    "n": 12,
+    "fails": 0,
+    "qps": 0.479,
+    "p50_ms": 1835.2864,
+    "p99_ms": 4435.5001,
+    "wall_s": 25.0308,
+    "note": "2PC multi-range cliff; expected >> A4 same-range; small n by design"
+  }
+  ],
+  "limitations": [
+    "In-process core suite: no real NIC (suite tcp adds real localhost TCP).",
+    "C1 Mutex multi-thread serializes StoreCluster — concurrent waiters, not parallel leaders.",
+    "D4 multi-thread TCP is the honest concurrent client path on one range.",
+    "FDB face path (A3) includes OCC bookkeeping; compare to A1 raw put for face overhead.",
+    "Multi-range TX (B2) exercises cross-range 2PC; expect cliff vs A4.",
+    "E1 mini-bt: model-checked random soak + multi-key + WW pairs (not full bindingtester).",
+    "E2 TCP multi-client: partitioned keys per thread + majority verify (true concurrent writers).",
+    "Not YCSB / not production FDB — see docs/montanha-vs-fdb-bench.md."
+  ],
+  "anomalies": [],
+  "vs_fdb": {
+    "claim": "not field peer",
+    "how_to_compare": "docs/montanha-vs-fdb-bench.md",
+    "fdb_workloads": [
+      "single key set/get (A1/A3/D1)",
+      "multi-key transaction (A4/D3)",
+      "get_range (A5)",
+      "clear_range (A6)",
+      "hot key conflicts (A7)",
+      "index+row TX (A8)",
+      "multi-shard / multi-range TX (B2)",
+      "multi-client TCP (D4)",
+      "random soak (E1)",
+      "TCP multi-client mini-bt (E2)"
+    ]
+  }
+}

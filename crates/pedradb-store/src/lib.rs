@@ -77,6 +77,30 @@ pub use tcp::{
     WireMsg,
 };
 
+/// Pedra open knobs under each Montanha node (RFC-0025 P0.1).
+///
+/// Default matches historical `open` (WAL fsync on every durable write).
+#[derive(Debug, Clone)]
+pub struct StoreOpenOptions {
+    /// When `true` (default), Pedra fsyncs the WAL before Ok on put/batch.
+    /// Set `false` only for **bulk load / capacity lab** — not crash-safe.
+    pub pedra_sync: bool,
+}
+
+impl Default for StoreOpenOptions {
+    fn default() -> Self {
+        Self { pedra_sync: true }
+    }
+}
+
+impl StoreOpenOptions {
+    /// Lab capacity mode: Pedra `sync=false` (faster, not durable on process crash).
+    #[must_use]
+    pub fn lab_capacity() -> Self {
+        Self { pedra_sync: false }
+    }
+}
+
 use std::collections::{HashMap, VecDeque};
 use std::ops::Bound;
 use std::path::{Path, PathBuf};
@@ -444,7 +468,7 @@ fn decode_preimage(raw: &[u8]) -> Option<Option<Vec<u8>>> {
     }
 }
 
-fn prefix_exclusive_end(prefix: &[u8]) -> Option<Vec<u8>> {
+pub(crate) fn prefix_exclusive_end(prefix: &[u8]) -> Option<Vec<u8>> {
     let mut e = prefix.to_vec();
     while let Some(last) = e.last_mut() {
         if *last < 0xff {
@@ -982,15 +1006,7 @@ fn clear_range_txn_meta<E: Env>(db: &mut Db<E>, start: &[u8], end: &[u8]) -> Res
     }
     for tid in touched_txns {
         let prefix = txn_pair_prefix(tid);
-        let end_p = {
-            let mut e = prefix.clone();
-            e.push(0xff);
-            e
-        };
-        let left = db.range(
-            Bound::Included(prefix.as_slice()),
-            Bound::Excluded(end_p.as_slice()),
-        );
+        let left = scan_prefix(db, &prefix);
         if left.is_empty() {
             // F47: abort fence must survive snapshot install (export is user
             // keys only). Wiping status here lets a later TxnCommit replay.
@@ -1015,13 +1031,8 @@ fn clear_txn_keys<E: Env>(db: &mut Db<E>, txn_id: u64, keys: &[Vec<u8>]) -> Resu
     }
     // Drop status only when no pair index remains for this txn.
     let prefix = txn_pair_prefix(txn_id);
-    let end = {
-        let mut e = prefix.clone();
-        e.push(0xff);
-        e
-    };
     db.apply_batch(ops)?;
-    let left = db.range(Bound::Included(prefix.as_slice()), Bound::Excluded(end.as_slice()));
+    let left = scan_prefix(db, &prefix);
     if left.is_empty() {
         let _ = db.put(txn_status_key(txn_id), b""); // will delete below
         db.apply_batch([BatchOp::delete(txn_status_key(txn_id))])?;
@@ -1090,12 +1101,7 @@ fn apply_txn_commit<E: Env>(db: &mut Db<E>, txn_id: u64, keys: &[Vec<u8>]) -> Re
     }
     // Clear status when no remaining pair records for this txn.
     let prefix = txn_pair_prefix(txn_id);
-    let end = {
-        let mut e = prefix.clone();
-        e.push(0xff);
-        e
-    };
-    let left = db.range(Bound::Included(prefix.as_slice()), Bound::Excluded(end.as_slice()));
+    let left = scan_prefix(db, &prefix);
     if left.is_empty() {
         db.apply_batch([BatchOp::delete(txn_status_key(txn_id))])?;
     }
@@ -1151,12 +1157,7 @@ fn apply_txn_revert<E: Env>(db: &mut Db<E>, txn_id: u64, keys: &[Vec<u8>]) -> Re
         repair_si_hist_tip(db, u, pre.as_deref())?;
     }
     let prefix = txn_pair_prefix(txn_id);
-    let end = {
-        let mut e = prefix.clone();
-        e.push(0xff);
-        e
-    };
-    let left = db.range(Bound::Included(prefix.as_slice()), Bound::Excluded(end.as_slice()));
+    let left = scan_prefix(db, &prefix);
     if left.is_empty() && !keep_abort {
         db.apply_batch([BatchOp::delete(txn_status_key(txn_id))])?;
     }
@@ -1502,6 +1503,11 @@ pub struct StoreCluster<E: Env = StdEnv> {
     /// Cluster logical clock in **milliseconds** for DCS absolute-deadline leases.
     /// Advanced by [`Self::advance_now_ms`] / optionally with ticks.
     now_ms: u64,
+    /// Last `now_ms` fsynced into SI meta (must not go backwards on reopen — F56).
+    persisted_now_ms: u64,
+    /// True once a non-zero DCS lease deadline has been proposed (or recovered).
+    /// Tick persists `now_ms` only then, so elect-all without TTL stays cheap.
+    has_ttl_leases: bool,
     /// When true, each [`Self::tick`] also advances `now_ms` by this many ms (World).
     ms_per_tick: u64,
     /// RFC-0021 P2.6: node_id → region label (lab multi-site; empty = unknown).
@@ -1547,6 +1553,29 @@ impl StoreCluster<StdEnv> {
     /// Open / bad args.
     pub fn open(parent: impl AsRef<Path>, n_nodes: u64, n_ranges: u64) -> Result<Self> {
         Self::open_with_rng(parent, n_nodes, n_ranges, SeedRng::new(0xA11CE))
+    }
+
+    /// Open with Pedra durability knobs (RFC-0025). Default `open` = durable.
+    ///
+    /// Use [`StoreOpenOptions::lab_capacity`] only for bulk/bench (not crash-safe).
+    ///
+    /// # Errors
+    /// Open / bad args.
+    pub fn open_with_options(
+        parent: impl AsRef<Path>,
+        n_nodes: u64,
+        n_ranges: u64,
+        opts: StoreOpenOptions,
+    ) -> Result<Self> {
+        let envs: Vec<StdEnv> = (0..n_nodes).map(|_| StdEnv).collect();
+        Self::open_with_envs_rng_opts(
+            parent,
+            n_nodes,
+            n_ranges,
+            envs,
+            SeedRng::new(0xA11CE),
+            opts,
+        )
     }
 
     /// Open **one** local node for multi-host TCP (RFC-0017 P0.1).
@@ -1597,7 +1626,7 @@ impl StoreCluster<StdEnv> {
         let parent = parent.as_ref();
         let ranges = split_keyspace(n_ranges);
         let opts = OpenOptions {
-            sync: true,
+            sync: true, // single-node multiproc path: always durable
             auto_flush_bytes: None,
             auto_compact_sst_count: None,
             auto_compact_sst_bytes: None,
@@ -1633,6 +1662,8 @@ impl StoreCluster<StdEnv> {
             election_votes: HashMap::new(),
             logical_now: 0,
             now_ms: 0,
+            persisted_now_ms: 0,
+            has_ttl_leases: false,
             ms_per_tick: 10,
             node_regions: HashMap::new(),
             peer_addrs: HashMap::new(),
@@ -1697,6 +1728,21 @@ impl<E: Env> StoreCluster<E> {
         envs: impl IntoIterator<Item = E>,
         rng: SeedRng,
     ) -> Result<Self> {
+        Self::open_with_envs_rng_opts(parent, n_nodes, n_ranges, envs, rng, StoreOpenOptions::default())
+    }
+
+    /// Like [`open_with_envs_rng`](Self::open_with_envs_rng) with Pedra durability knobs.
+    ///
+    /// # Errors
+    /// Open / bad args / env count mismatch.
+    pub fn open_with_envs_rng_opts(
+        parent: impl AsRef<Path>,
+        n_nodes: u64,
+        n_ranges: u64,
+        envs: impl IntoIterator<Item = E>,
+        rng: SeedRng,
+        store_opts: StoreOpenOptions,
+    ) -> Result<Self> {
         if n_nodes == 0 || n_ranges == 0 {
             return Err(StoreError::Msg("need nodes and ranges".into()));
         }
@@ -1718,12 +1764,12 @@ impl<E: Env> StoreCluster<E> {
         let mut nodes = HashMap::new();
         let mut ids = Vec::new();
         let opts = OpenOptions {
-            sync: true,
+            sync: store_opts.pedra_sync,
             auto_flush_bytes: None,
             auto_compact_sst_count: None,
             auto_compact_sst_bytes: None,
             exclusive: true,
-                large_value_threshold: None,
+            large_value_threshold: None,
         };
         for (i, env) in envs.into_iter().enumerate() {
             let id = (i as u64) + 1;
@@ -1755,6 +1801,8 @@ impl<E: Env> StoreCluster<E> {
             election_votes: HashMap::new(),
             logical_now: 0,
             now_ms: 0,
+            persisted_now_ms: 0,
+            has_ttl_leases: false,
             ms_per_tick: 10,
             node_regions: HashMap::new(),
             peer_addrs: HashMap::new(),
@@ -1783,8 +1831,11 @@ impl<E: Env> StoreCluster<E> {
     }
 
     /// Advance only the lease clock (does not tick raft).
+    ///
+    /// Persists the new value (F56): expired DCS leases must stay dead across reopen.
     pub fn advance_now_ms(&mut self, ms: u64) {
         self.now_ms = self.now_ms.saturating_add(ms);
+        self.persist_now_ms();
     }
 
     /// Set ms added to `now_ms` on each raft [`Self::tick`] (default 10).
@@ -1797,7 +1848,27 @@ impl<E: Env> StoreCluster<E> {
         self.abort_leftover_intents();
         self.load_si_from_disk();
         self.recover_next_txn_id();
+        self.recover_now_ms();
         self.persist_truncated_logs();
+    }
+
+    /// Restore the DCS lease clock (max across local replicas). Never go backwards.
+    fn recover_now_ms(&mut self) {
+        let loaded = self.load_u64_meta_max("now_ms");
+        self.now_ms = self.now_ms.max(loaded);
+        self.persisted_now_ms = self.now_ms;
+        if self.now_ms > 0 {
+            self.has_ttl_leases = true;
+        }
+    }
+
+    /// Durable `now_ms` so TTL expiry survives process death (F56).
+    fn persist_now_ms(&mut self) {
+        if self.now_ms <= self.persisted_now_ms {
+            return;
+        }
+        self.persist_u64_meta_all("now_ms", self.now_ms);
+        self.persisted_now_ms = self.now_ms;
     }
 
     /// Persist raft logs after load truncated any uncommitted suffix.
@@ -2360,6 +2431,9 @@ impl<E: Env> StoreCluster<E> {
     pub fn tick(&mut self) -> Result<()> {
         self.logical_now = self.logical_now.saturating_add(1);
         self.now_ms = self.now_ms.saturating_add(self.ms_per_tick);
+        if self.has_ttl_leases && self.ms_per_tick > 0 {
+            self.persist_now_ms();
+        }
         let ids = self.ids.clone();
         let range_ids: Vec<u64> = self.ranges.iter().map(|r| r.id).collect();
         for rid in range_ids {
@@ -4067,6 +4141,48 @@ impl<E: Env> StoreCluster<E> {
         Ok(())
     }
 
+    /// Put many keys with **same-range batching** (RFC-0025 P0.1).
+    ///
+    /// Groups pairs by range and calls [`Self::put_batch`] once per group. Prefer
+    /// this over N×[`Self::put`] when keys share a range (layers: row+index,
+    /// bulk ingest). Cross-range still costs one batch per range (not full 2PC).
+    ///
+    /// # Errors
+    /// Same as [`Self::put_batch`] per group.
+    pub fn put_many(
+        &mut self,
+        pairs: impl IntoIterator<Item = (impl AsRef<[u8]>, impl AsRef<[u8]>)>,
+    ) -> Result<()> {
+        let mut by_range: HashMap<u64, Vec<(Vec<u8>, Vec<u8>)>> = HashMap::new();
+        for (k, v) in pairs {
+            let key = k.as_ref().to_vec();
+            if is_reserved_store_key(&key) {
+                return Err(StoreError::Msg(
+                    "key prefix reserved for store internal meta".into(),
+                ));
+            }
+            let val = v.as_ref().to_vec();
+            if val.len() > MAX_VALUE_BYTES {
+                return Err(StoreError::ValueTooLarge {
+                    size: val.len(),
+                    limit: MAX_VALUE_BYTES,
+                });
+            }
+            let rid = self.locate(&key)?;
+            by_range.entry(rid).or_default().push((key, val));
+        }
+        let mut rids: Vec<u64> = by_range.keys().copied().collect();
+        rids.sort_unstable();
+        for rid in rids {
+            let group = by_range.remove(&rid).unwrap_or_default();
+            if group.is_empty() {
+                continue;
+            }
+            self.put_batch(group)?;
+        }
+        Ok(())
+    }
+
     fn alloc_txn_id(&mut self) -> u64 {
         let id = self.next_txn_id;
         self.next_txn_id = self.next_txn_id.saturating_add(1).max(1);
@@ -4889,18 +5005,46 @@ impl<E: Env> StoreCluster<E> {
         self.get_with_policy(node_id, key, ReadPolicy::LocalApplied)
     }
 
-    /// CHANGELOG tail on a local applied Pedra (RFC-0024 fold follow).
+    /// CHANGELOG tail on a caught-up local Pedra (RFC-0024 fold follow).
     ///
-    /// Not a Raft read. Fold consumers filter prefixes themselves.
+    /// Not a Raft read. Prefers the participating local node with the highest
+    /// Pedra `last_sequence` so a partitioned `ids[0]` cannot starve the fold
+    /// (same class as F42).
     #[must_use]
     pub fn changelog_after(&self, from_seq: u64) -> Vec<pedradb_core::ChangeEntry> {
-        let Some(id) = self.local_node_id().or_else(|| self.ids.first().copied()) else {
+        let Some(id) = self.best_changelog_reader() else {
             return Vec::new();
         };
         let Some(n) = self.nodes.get(&id) else {
             return Vec::new();
         };
         n.db.changes_after(from_seq)
+    }
+
+    fn best_changelog_reader(&self) -> Option<u64> {
+        self.ids
+            .iter()
+            .copied()
+            .filter(|&nid| self.is_local_node(nid) && self.is_participating(nid))
+            .max_by_key(|&nid| {
+                self.nodes
+                    .get(&nid)
+                    .map(|n| n.db.last_sequence())
+                    .unwrap_or(0)
+            })
+            .or_else(|| self.local_node_id())
+            .or_else(|| {
+                self.ids
+                    .iter()
+                    .copied()
+                    .filter(|&nid| self.is_local_node(nid))
+                    .max_by_key(|&nid| {
+                        self.nodes
+                            .get(&nid)
+                            .map(|n| n.db.last_sequence())
+                            .unwrap_or(0)
+                    })
+            })
     }
 
     /// Get from a local node (prefer single-host local id; else first member).
@@ -5100,6 +5244,16 @@ impl<E: Env> StoreCluster<E> {
             DcsCommand::Delete { .. } => Vec::new(),
         };
         let is_delete = matches!(cmd, DcsCommand::Delete { .. });
+        let lease = match &cmd {
+            DcsCommand::Put { lease, .. }
+            | DcsCommand::Create { lease, .. }
+            | DcsCommand::Cas { lease, .. } => *lease,
+            DcsCommand::Delete { .. } => 0,
+        };
+        if lease != 0 {
+            self.has_ttl_leases = true;
+            self.persist_now_ms();
+        }
         let rid = self.locate(&key)?;
         let leader = self.range_leader(rid).ok_or(StoreError::NotLeader {
             range_id: rid,
@@ -6460,6 +6614,29 @@ mod tests {
         // Single range so all keys co-located.
         assert_eq!(c.locate(b"a").unwrap(), c.locate(b"c").unwrap());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0025 P0.1: put_many groups by range into put_batch.
+    #[test]
+    fn put_many_same_range_and_lab_open() {
+        let dir = temp();
+        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        c.elect_all(60).unwrap();
+        c.put_many([(b"m1", b"a"), (b"m2", b"b"), (b"m3", b"c")])
+            .unwrap();
+        assert!(c.count_applied_eq(b"m1", b"a") >= 2);
+        assert!(c.count_applied_eq(b"m3", b"c") >= 2);
+        drop(c);
+        let _ = std::fs::remove_dir_all(&dir);
+
+        // Lab capacity open: sync=false still elects and writes (not crash-safe).
+        let dir2 = temp();
+        let mut c = StoreCluster::open_with_options(&dir2, 3, 1, StoreOpenOptions::lab_capacity())
+            .unwrap();
+        c.elect_all(60).unwrap();
+        c.put(b"lab", b"1").unwrap();
+        assert!(c.count_applied_eq(b"lab", b"1") >= 2);
+        let _ = std::fs::remove_dir_all(&dir2);
     }
 
     /// P1.1: index-style primary row + secondary key in one batch.

@@ -260,6 +260,66 @@ fn main() {
         benches.push(summarize("A1_raw_put_1range", n, t0.elapsed(), &mut lats));
         progress!("A1 raw put done");
 
+        // A1b: same-range put_batch of batch_sz keys (amortize Raft+WAL) — RFC-0025
+        let batch_sz = 16usize.min(n.max(1));
+        let batches = (n / batch_sz).max(1);
+        let mut lats = Vec::with_capacity(batches);
+        let t0 = Instant::now();
+        let mut keys_written = 0usize;
+        for b in 0..batches {
+            let mut pairs = Vec::with_capacity(batch_sz);
+            for j in 0..batch_sz {
+                let k = format!("bat-{b:04}-{j:02}").into_bytes();
+                pairs.push((k, val.clone()));
+            }
+            let t = Instant::now();
+            c.put_batch(pairs.iter().map(|(k, v)| (k.as_slice(), v.as_slice())))
+                .expect("put_batch");
+            lats.push(ms(t));
+            keys_written += batch_sz;
+        }
+        let wall = t0.elapsed();
+        let key_qps = keys_written as f64 / wall.as_secs_f64().max(1e-12);
+        lats.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        benches.push(format!(
+            r#"{{
+    "name": "A1b_put_batch_{batch_sz}",
+    "batches": {batches},
+    "keys": {keys_written},
+    "keys_per_s": {key_qps:.3},
+    "batch_p50_ms": {p50:.4},
+    "batch_p99_ms": {p99:.4},
+    "wall_s": {ws:.4},
+    "note": "keys/s vs A1 qps shows amortization of one Raft entry per batch"
+  }}"#,
+            p50 = pct(&lats, 50.0),
+            p99 = pct(&lats, 99.0),
+            ws = wall.as_secs_f64(),
+        ));
+        progress!("A1b put_batch done keys_per_s={key_qps:.1}");
+
+        // A1c: put_many (same as batch when one range)
+        let many_n = n.min(64);
+        let mut pairs: Vec<(Vec<u8>, Vec<u8>)> = (0..many_n)
+            .map(|i| (format!("many-{i:04}").into_bytes(), val.clone()))
+            .collect();
+        let t0 = Instant::now();
+        c.put_many(pairs.iter().map(|(k, v)| (k.as_slice(), v.as_slice())))
+            .expect("put_many");
+        let wall = t0.elapsed();
+        benches.push(format!(
+            r#"{{
+    "name": "A1c_put_many_{many_n}",
+    "keys": {many_n},
+    "keys_per_s": {kps:.3},
+    "wall_s": {ws:.4}
+  }}"#,
+            kps = many_n as f64 / wall.as_secs_f64().max(1e-12),
+            ws = wall.as_secs_f64(),
+        ));
+        progress!("A1c put_many done");
+        let _ = pairs;
+
         // A2 raw get
         let mut lats = Vec::with_capacity(n);
         let t0 = Instant::now();
