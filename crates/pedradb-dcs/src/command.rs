@@ -10,12 +10,15 @@
 //!   Baked into the log at propose time so apply is deterministic; reads use
 //!   [`dcs_get_at`] with the caller's current logical time. This is the durable
 //!   multi-node alternative to the process-local lease table in [`crate::Dcs`].
+//!
+//! Apply of Create / Cas(rev=0) is insert-or-no-op (never overwrite). Re-create
+//! after TTL is [`bind_absent_create`] → Cas on the expired corpse's revision.
 
 use pedradb_core::{Db, Env};
 
 use crate::{
-    decode_meta, decode_u64, encode_meta, encode_u64, kv_key, meta_key, DcsError, KeyValue,
-    Result, REV_KEY,
+    decode_meta, decode_u64, encode_meta, encode_u64, kv_key, meta_key, DcsError, KeyValue, Result,
+    REV_KEY,
 };
 
 /// Marker key used inside Raft log entries (not a user DCS key).
@@ -254,12 +257,72 @@ pub fn check_command_at<E: Env>(db: &Db<E>, cmd: &DcsCommand, now_ms: u64) -> Re
     }
 }
 
+/// After a successful [`check_command_at`], rewrite Create / Cas(rev=0) that
+/// races an **expired physical corpse** into `Cas(expected_rev = corpse.rev)`.
+///
+/// Apply of Create / Cas(0) never overwrites (I-DCS-1 at apply). Re-create
+/// after TTL must be this CAS so the first binder wins and a later duplicate
+/// no-ops. Does **not** rewrite a still-live key — that would turn a TOCTOU
+/// into a lock steal.
+#[must_use]
+pub fn bind_absent_create<E: Env>(db: &Db<E>, cmd: DcsCommand, now_ms: u64) -> DcsCommand {
+    match cmd {
+        DcsCommand::Create { key, value, lease } => {
+            if let Some(rev) = expired_corpse_cas_rev(db, &key, now_ms) {
+                DcsCommand::Cas {
+                    key,
+                    value,
+                    expected_rev: rev,
+                    lease,
+                }
+            } else {
+                DcsCommand::Create { key, value, lease }
+            }
+        }
+        DcsCommand::Cas {
+            key,
+            value,
+            expected_rev: 0,
+            lease,
+        } => {
+            if let Some(rev) = expired_corpse_cas_rev(db, &key, now_ms) {
+                DcsCommand::Cas {
+                    key,
+                    value,
+                    expected_rev: rev,
+                    lease,
+                }
+            } else {
+                DcsCommand::Cas {
+                    key,
+                    value,
+                    expected_rev: 0,
+                    lease,
+                }
+            }
+        }
+        other => other,
+    }
+}
+
+fn expired_corpse_cas_rev<E: Env>(db: &Db<E>, key: &[u8], now_ms: u64) -> Option<u64> {
+    let existing = get_kv(db, key)?;
+    if lease_live(existing.lease, now_ms) {
+        None
+    } else {
+        Some(existing.mod_revision)
+    }
+}
+
 /// Apply a command to `db` (all Raft followers + leader on commit).
 ///
 /// **Raft apply must not permanently stall the apply cursor.** A second
-/// [`DcsCommand::Create`] when the key already exists is a no-op that returns
-/// the existing revision (dual-append / retry safety). Leader **pre-check**
-/// via [`check_command`] still rejects client create races before propose.
+/// [`DcsCommand::Create`] / Cas(rev=0) when the key already exists is a no-op
+/// that returns the existing revision (I-DCS-1 at apply; dual-append / retry).
+/// Re-create after TTL is **not** Create overwrite: the leader binds to
+/// [`bind_absent_create`] (Cas on the physical rev) after pre-check.
+/// Leader **pre-check** via [`check_command_at`] still rejects client create
+/// races before propose.
 ///
 /// # Errors
 /// I/O, or CAS precondition failure (revision mismatch).
@@ -268,16 +331,8 @@ pub fn apply_dcs_command<E: Env>(db: &mut Db<E>, cmd: &DcsCommand) -> Result<u64
         DcsCommand::Create { key, value, lease } => {
             reject_undecodable_meta(db, key)?;
             if let Some(existing) = get_kv(db, key) {
-                // Dual-append same create (same absolute lease deadline): idempotent.
-                if existing.lease == *lease && existing.value == *value {
-                    return Ok(existing.mod_revision);
-                }
-                // Immortal key already present (lease=0): keep dual-append safety.
-                if existing.lease == 0 {
-                    return Ok(existing.mod_revision);
-                }
-                // Leased binding with different deadline/value: leader re-created after
-                // expiry (or CAS path) — overwrite so apply cursor never stalls.
+                // Physical presence → no-op. Cursor advances. Never overwrite.
+                return Ok(existing.mod_revision);
             }
             put_new(db, key, value, *lease, None)
         }
@@ -292,17 +347,11 @@ pub fn apply_dcs_command<E: Env>(db: &mut Db<E>, cmd: &DcsCommand) -> Result<u64
             expected_rev,
             lease,
         } => {
-            // expected_rev == 0 is create-if-absent: dual-append safety when same binding.
+            // expected_rev == 0 is create-if-absent: same rule as Create (never overwrite).
             if *expected_rev == 0 {
                 reject_undecodable_meta(db, key)?;
                 if let Some(existing) = get_kv(db, key) {
-                    if existing.lease == *lease && existing.value == *value {
-                        return Ok(existing.mod_revision);
-                    }
-                    if existing.lease == 0 {
-                        return Ok(existing.mod_revision);
-                    }
-                    // else fall through to overwrite (re-create after expiry)
+                    return Ok(existing.mod_revision);
                 }
             } else if let Some(existing) = get_kv(db, key) {
                 if existing.mod_revision != *expected_rev {
@@ -412,7 +461,35 @@ mod tests {
     }
 
     #[test]
-    fn absolute_lease_deadline_expires_for_get_and_create() {
+    fn apply_create_does_not_overwrite_existing() {
+        let (dir, mut db) = temp_db();
+        let first = DcsCommand::Create {
+            key: b"lock".to_vec(),
+            value: b"holder-a".to_vec(),
+            lease: 5_000,
+        };
+        let rev = apply_dcs_command(&mut db, &first).unwrap();
+        let steal = DcsCommand::Create {
+            key: b"lock".to_vec(),
+            value: b"holder-b".to_vec(),
+            lease: 9_000,
+        };
+        assert_eq!(apply_dcs_command(&mut db, &steal).unwrap(), rev);
+        assert_eq!(dcs_get(&db, b"lock").unwrap().value, b"holder-a");
+        let steal0 = DcsCommand::Cas {
+            key: b"lock".to_vec(),
+            value: b"holder-c".to_vec(),
+            expected_rev: 0,
+            lease: 9_000,
+        };
+        assert_eq!(apply_dcs_command(&mut db, &steal0).unwrap(), rev);
+        assert_eq!(dcs_get(&db, b"lock").unwrap().value, b"holder-a");
+        db.close().unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn bind_then_cas_takes_expired_lock_second_loses() {
         let (dir, mut db) = temp_db();
         let expiry = 1_000u64;
         let cmd = DcsCommand::Create {
@@ -423,18 +500,50 @@ mod tests {
         apply_dcs_command(&mut db, &cmd).unwrap();
         assert!(dcs_get_at(&db, b"lock", 999).is_some());
         assert!(dcs_get_at(&db, b"lock", 1_000).is_none());
-        // After expiry, create-if-absent is allowed again.
+        // After expiry, create-if-absent is allowed again at pre-check.
         assert!(check_command_at(&db, &cmd, 1_000).is_ok());
         let cmd2 = DcsCommand::Create {
             key: b"lock".to_vec(),
             value: b"holder-b".to_vec(),
             lease: 5_000,
         };
+        // Raw Create apply must not steal (corpse still on disk).
         apply_dcs_command(&mut db, &cmd2).unwrap();
-        assert_eq!(
-            dcs_get_at(&db, b"lock", 1_001).unwrap().value,
-            b"holder-b"
+        assert_eq!(dcs_get(&db, b"lock").unwrap().value, b"holder-a");
+        let bound = bind_absent_create(&db, cmd2, 1_000);
+        assert!(
+            matches!(
+                &bound,
+                DcsCommand::Cas {
+                    expected_rev: 1,
+                    value,
+                    ..
+                } if value == b"holder-b"
+            ),
+            "expired corpse must bind to Cas(rev=1), got {bound:?}"
         );
+        let cmd3 = DcsCommand::Create {
+            key: b"lock".to_vec(),
+            value: b"holder-c".to_vec(),
+            lease: 5_000,
+        };
+        let bound_lose = bind_absent_create(&db, cmd3, 1_000);
+        let rev = apply_dcs_command(&mut db, &bound).unwrap();
+        assert_eq!(rev, 2);
+        assert_eq!(dcs_get_at(&db, b"lock", 1_001).unwrap().value, b"holder-b");
+        // Second binder (same corpse rev) no-ops; first holder stays.
+        assert_eq!(apply_dcs_command(&mut db, &bound_lose).unwrap(), 2);
+        assert_eq!(dcs_get(&db, b"lock").unwrap().value, b"holder-b");
+        // Live key: bind must not rewrite Create into a steal Cas.
+        let live_create = DcsCommand::Create {
+            key: b"lock".to_vec(),
+            value: b"holder-d".to_vec(),
+            lease: 9_000,
+        };
+        assert!(matches!(
+            bind_absent_create(&db, live_create, 1_001),
+            DcsCommand::Create { .. }
+        ));
         db.close().unwrap();
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -476,7 +585,7 @@ mod tests {
             lease: 0,
         };
         apply_dcs_command(&mut db, &cmd).unwrap();
-        db.put(&meta_key(b"a"), b"xx").unwrap();
+        db.put(meta_key(b"a"), b"xx").unwrap();
         let steal = DcsCommand::Create {
             key: b"a".to_vec(),
             value: b"steal".to_vec(),

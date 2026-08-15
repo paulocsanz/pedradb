@@ -530,9 +530,7 @@ impl NetworkNode {
     /// Bind failure.
     pub fn serve(self) -> Result<()> {
         let listener = TcpListener::bind(self.bind).map_err(io_net)?;
-        listener
-            .set_nonblocking(false)
-            .map_err(io_net)?;
+        listener.set_nonblocking(false).map_err(io_net)?;
 
         let node = Arc::clone(&self.node);
         let peers = self.peers.clone();
@@ -691,7 +689,7 @@ fn network_propose_dcs(
     auth: &[u8],
     cmd: &pedradb_dcs::DcsCommand,
 ) -> Result<u64> {
-    {
+    let bound = {
         let n = node.lock().map_err(|e| RaftError::Network(e.to_string()))?;
         if !n.is_leader() {
             return Err(RaftError::NotLeader {
@@ -699,7 +697,10 @@ fn network_propose_dcs(
             });
         }
         pedradb_dcs::check_command(&n.db, cmd).map_err(|e| RaftError::Network(e.to_string()))?;
-    }
+        // now_ms=0: this path is immortal-lease today; bind is a no-op unless a
+        // corpse is already expired at 0. Same function as the store propose.
+        pedradb_dcs::bind_absent_create(&n.db, cmd.clone(), 0)
+    };
     let entry = {
         let mut n = node.lock().map_err(|e| RaftError::Network(e.to_string()))?;
         let index = n.log.last().map_or(0, |e| e.index) + 1;
@@ -707,10 +708,7 @@ fn network_propose_dcs(
         let e = RaftLogEntry {
             index,
             term,
-            ops: vec![BatchOp::put(
-                pedradb_dcs::DCS_CMD_MARKER,
-                cmd.encode(),
-            )],
+            ops: vec![BatchOp::put(pedradb_dcs::DCS_CMD_MARKER, bound.encode())],
         };
         n.log.push(e.clone());
         n.persist_log()?;

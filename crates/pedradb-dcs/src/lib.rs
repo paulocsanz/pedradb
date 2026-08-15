@@ -25,12 +25,12 @@ pub mod apply_kernel;
 pub mod command;
 pub mod lease_kernel;
 
-pub use command::{
-    apply_dcs_command, check_command, check_command_at, dcs_get, dcs_get_at, DcsCommand,
-    DCS_CMD_MARKER,
-};
 pub use apply_kernel::{
     dcs_apply_should_advance, dcs_apply_should_advance_as_is, dcs_apply_should_advance_result,
+};
+pub use command::{
+    apply_dcs_command, bind_absent_create, check_command, check_command_at, dcs_get, dcs_get_at,
+    DcsCommand, DCS_CMD_MARKER,
 };
 pub use lease_kernel::{
     lease_live, lease_table_expired, lease_table_expired_as_is, next_lease_id_after,
@@ -251,7 +251,10 @@ impl<C: Clock, E: Env> Dcs<C, E> {
     ///
     /// # Errors
     /// PedraDB open.
-    pub fn open_with_host(path: impl AsRef<Path>, host: &impl Host<Env = E, Clock = C>) -> Result<Self> {
+    pub fn open_with_host(
+        path: impl AsRef<Path>,
+        host: &impl Host<Env = E, Clock = C>,
+    ) -> Result<Self> {
         Self::open_with_env_clock(path, host.env().clone(), host.clock().clone())
     }
 
@@ -351,9 +354,7 @@ impl<C: Clock, E: Env> Dcs<C, E> {
         }
         let prev = self.get(key);
         let rev = self.bump_revision()?;
-        let create = prev
-            .as_ref()
-            .map_or(rev, |p| p.create_revision);
+        let create = prev.as_ref().map_or(rev, |p| p.create_revision);
         let mut tx = self.db.begin();
         tx.put(kv_key(key), value)?;
         tx.put(meta_key(key), encode_meta(create, rev, lease))?;
@@ -413,13 +414,7 @@ impl<C: Clock, E: Env> Dcs<C, E> {
     ///
     /// # Errors
     /// I/O or revision mismatch.
-    pub fn cas(
-        &mut self,
-        key: &[u8],
-        value: &[u8],
-        expected_rev: u64,
-        lease: u64,
-    ) -> Result<u64> {
+    pub fn cas(&mut self, key: &[u8], value: &[u8], expected_rev: u64, lease: u64) -> Result<u64> {
         let cur = self.get(key);
         match (expected_rev, cur) {
             (0, Some(_)) => return Err(DcsError::CasFailed("expected absent")),
@@ -685,11 +680,7 @@ mod tests {
                 None => std::ops::Bound::Unbounded,
             },
         );
-        assert_eq!(
-            hits.len(),
-            1,
-            "prefix scan of kv_key(a) leaked: {hits:?}"
-        );
+        assert_eq!(hits.len(), 1, "prefix scan of kv_key(a) leaked: {hits:?}");
         dcs.close().unwrap();
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -813,7 +804,9 @@ mod tests {
         // New leader wins create-if-absent after restart (orphan GC + logical hide).
         dcs.create(b"/leader", b"new-node", 0)
             .expect("new leader must win create after DCS restart");
-        let kv = dcs.get(b"/leader").expect("leader key present after take-over");
+        let kv = dcs
+            .get(b"/leader")
+            .expect("leader key present after take-over");
         assert_eq!(kv.value, b"new-node");
         dcs.delete(b"/leader").unwrap();
         let (rev, _lease) = dcs
@@ -851,7 +844,10 @@ mod tests {
             let l2 = dcs.grant_lease(Duration::from_secs(60));
             // l2 must not equal any id that was on disk at crash (would reanimate).
             dcs.put(b"/k2", b"v2", l2).unwrap();
-            assert!(dcs.get(b"/k1").is_none(), "grant must not reanimate orphan /k1");
+            assert!(
+                dcs.get(b"/k1").is_none(),
+                "grant must not reanimate orphan /k1"
+            );
             assert_eq!(dcs.get(b"/k2").unwrap().value, b"v2");
             dcs.close().unwrap();
         }
@@ -890,7 +886,7 @@ mod tests {
         let dir = temp_dir("meta-corrupt");
         let mut dcs = Dcs::open(&dir).unwrap();
         dcs.put(b"a", b"keep", 0).unwrap();
-        dcs.db.put(&meta_key(b"a"), b"xx").unwrap();
+        dcs.db.put(meta_key(b"a"), b"xx").unwrap();
         assert!(
             dcs.get(b"a").is_none(),
             "get stays Option: corrupt meta is not a live binding"

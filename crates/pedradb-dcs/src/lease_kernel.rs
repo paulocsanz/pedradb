@@ -32,10 +32,7 @@ pub fn lease_live(lease: u64, now_ms: u64) -> bool {
 /// `table_hit = Some(clock_expired)` — caller already evaluated `now >= expiry`.
 #[must_use]
 pub fn lease_table_expired(table_hit: Option<bool>) -> bool {
-    match table_hit {
-        None => true,
-        Some(clock_expired) => clock_expired,
-    }
+    table_hit.unwrap_or(true)
 }
 
 /// Next grant id after scanning disk max (F7 reanimation).
@@ -50,10 +47,7 @@ pub fn next_lease_id_after(max_seen_on_disk: u64) -> u64 {
 /// AS-IS F7 immortal: unknown id treated as live.
 #[must_use]
 pub fn lease_table_expired_as_is(table_hit: Option<bool>) -> bool {
-    match table_hit {
-        None => false,
-        Some(clock_expired) => clock_expired,
-    }
+    table_hit.unwrap_or_default()
 }
 
 /// AS-IS F7 reanimation: always restart the counter at 1.
@@ -147,7 +141,7 @@ mod tests {
 
     #[test]
     fn theorem_table_and_next_on_bool_domain() {
-        assert_eq!(lease_table_expired(None), true);
+        assert!(lease_table_expired(None));
         for e in [false, true] {
             assert_eq!(lease_table_expired(Some(e)), e);
             assert_eq!(lease_table_expired_as_is(Some(e)), e);
