@@ -3,11 +3,15 @@
 //! Usage:
 //!   cargo run -p pedradb-store --bin montanha-perf-gate -- [out_dir]
 //!
+//! Env:
+//!   MONTANHA_PERF_PUTS / GETS / TX / PAYLOAD
+//!   MONTANHA_WRITE_BACKPRESSURE=1  Pedra L0 pressure/stall defaults
+//!
 //! Writes `perf_report.json` under out_dir (default findings/perf-<utc>).
 
 #![forbid(unsafe_code)]
 
-use pedradb_store::StoreCluster;
+use pedradb_store::{StoreCluster, StoreOpenOptions};
 use std::path::PathBuf;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -53,7 +57,12 @@ fn main() {
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
 
-    let mut c = StoreCluster::open(&dir, 3, 1).expect("open");
+    let write_bp = std::env::var("MONTANHA_WRITE_BACKPRESSURE").ok().as_deref() == Some("1");
+    let mut opts = StoreOpenOptions::default();
+    if write_bp {
+        opts = opts.with_write_backpressure();
+    }
+    let mut c = StoreCluster::open_with_options(&dir, 3, 1, opts).expect("open");
     c.elect_all(120).expect("elect");
 
     let val = vec![b'x'; payload];
@@ -98,13 +107,18 @@ fn main() {
     let put_qps = n_put as f64 / put_wall.as_secs_f64().max(1e-9);
     let get_qps = n_get as f64 / get_wall.as_secs_f64().max(1e-9);
     let tx_qps = n_tx as f64 / tx_wall.as_secs_f64().max(1e-9);
+    let status = c.status_text();
+    // Escape for JSON string.
+    let status_esc = status.replace('\\', "\\\\").replace('"', "\\\"");
 
     let report = format!(
         r#"{{
   "gate": "rfc0021-p0.3-perf-v0",
   "nodes": 3,
   "ranges": 1,
+  "write_backpressure": {write_bp},
   "payload_bytes": {payload},
+  "status": "{status_esc}",
   "put": {{
     "n": {n_put},
     "qps": {put_qps:.3},
@@ -127,7 +141,7 @@ fn main() {
     "p99_ms": {p99t:.4},
     "wall_s": {tw:.4}
   }},
-  "note": "in-process 3-node majority; not field peer; not YCSB"
+  "note": "in-process 3-node majority; not field peer; not YCSB; MONTANHA_WRITE_BACKPRESSURE=1 opts Pedra L0 admission"
 }}
 "#,
         p50p = pct(&put_lat, 50.0),
