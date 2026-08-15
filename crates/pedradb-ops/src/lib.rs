@@ -65,6 +65,8 @@ pub struct BackupMeta {
     pub base_sequence: SequenceNumber,
     /// SST count at checkpoint.
     pub sst_count: usize,
+    /// Version-GC watermark at checkpoint (MANIFEST v4 / PDBCKP02).
+    pub earliest_readable_seq: SequenceNumber,
     /// Directory of the base (`…/base-000001`).
     pub path: PathBuf,
 }
@@ -224,6 +226,7 @@ impl<E: Env> BackupEngine<E> {
             id,
             base_sequence: ck.last_sequence,
             sst_count: ck.sst_count,
+            earliest_readable_seq: ck.earliest_readable_seq,
             path: dest,
         })
     }
@@ -310,6 +313,7 @@ impl<E: Env> BackupEngine<E> {
                 id,
                 base_sequence: ck.last_sequence,
                 sst_count: ck.sst_count,
+                earliest_readable_seq: ck.earliest_readable_seq,
                 path,
             });
         }
@@ -892,6 +896,32 @@ mod tests {
         assert_eq!(list.len(), 2);
         assert_eq!(list[0].id, 1);
         assert_eq!(list[1].id, 2);
+        db.close().unwrap();
+        let _ = std::fs::remove_dir_all(&data);
+        let _ = std::fs::remove_dir_all(&bak);
+    }
+
+    /// BackupMeta carries GC watermark from checkpoint meta (PDBCKP02).
+    #[test]
+    fn backup_meta_includes_earliest_readable() {
+        use pedradb_core::CompactOptions;
+        let data = temp();
+        let bak = temp();
+        let mut db = open_db(&data);
+        db.put(b"k", b"old").unwrap();
+        db.flush().unwrap();
+        db.put(b"k", b"new").unwrap();
+        db.flush().unwrap();
+        db.compact_with(CompactOptions::latest_only()).unwrap();
+        let floor = db.earliest_readable_sequence();
+        assert!(floor > 0);
+        let mut eng = BackupEngine::open(&bak).unwrap();
+        let meta = eng.create_base_backup(&mut db).unwrap();
+        assert_eq!(meta.earliest_readable_seq, floor);
+        let list = eng.list_backups().unwrap();
+        assert_eq!(list[0].earliest_readable_seq, floor);
+        let ck = eng.verify_backup(meta.id).unwrap();
+        assert_eq!(ck.earliest_readable_seq, floor);
         db.close().unwrap();
         let _ = std::fs::remove_dir_all(&data);
         let _ = std::fs::remove_dir_all(&bak);

@@ -139,10 +139,11 @@ fn backup_cmd(args: &[String]) -> std::process::ExitCode {
         let mut eng = BackupEngine::open(&args[1])?;
         let meta = eng.create_base_backup(&mut db)?;
         println!(
-            "base backup id={} seq={} ssts={} path={}",
+            "base backup id={} seq={} ssts={} earliest_readable={} path={}",
             meta.id,
             meta.base_sequence,
             meta.sst_count,
+            meta.earliest_readable_seq,
             meta.path.display()
         );
         db.close()?;
@@ -233,10 +234,11 @@ fn list_backups_cmd(args: &[String]) -> std::process::ExitCode {
         let eng = BackupEngine::open(&args[0])?;
         for b in eng.list_backups()? {
             println!(
-                "id={} base_seq={} ssts={} path={}",
+                "id={} base_seq={} ssts={} earliest_readable={} path={}",
                 b.id,
                 b.base_sequence,
                 b.sst_count,
+                b.earliest_readable_seq,
                 b.path.display()
             );
         }
@@ -260,7 +262,10 @@ fn verify_backup_cmd(args: &[String]) -> std::process::ExitCode {
         let eng = BackupEngine::open(&args[0])?;
         let id: u64 = args[1].parse()?;
         let m = eng.verify_backup(id)?;
-        println!("ok id={id} seq={} ssts={}", m.last_sequence, m.sst_count);
+        println!(
+            "ok id={id} seq={} ssts={} earliest_readable={}",
+            m.last_sequence, m.sst_count, m.earliest_readable_seq
+        );
         Ok(())
     })() {
         Ok(()) => std::process::ExitCode::SUCCESS,
