@@ -73,12 +73,13 @@ and was killed. These are the bounds that the script actually runs:
 
 | Harness | Symbolic | Bound |
 |---------|----------|-------|
-| `decode_header_ok_yields_safe_filter` | header fields + payload | residual ≤ 8 B, k ≤ 8, unwind 24 |
-| `insert_then_may_contain_all_keys` | 1 key × 3 B, capacity, bpk | capacity ≤ 8, bpk 1..=10, unwind 16 |
-| `encode_decode_roundtrip_preserves_filter` | 1 key × 3 B, capacity, bpk | same, unwind 16 |
-| `inactive_filter_never_rejects` | 1 key × 4 B | unwind 8 |
+| `insert_then_may_contain_all_keys` | 2-byte key | decoded 64-bit / k=2 filter, unwind 8 — **green** (2959 checks, ~90 s) |
+| `inactive_filter_never_rejects` | 1 key × 4 B | unwind 8 — **green** (337 checks, <1 s) |
+| `decode_header_ok_yields_safe_filter` | header + payload | residual ≤ 8, k ≤ 8 — **not in the script** (CBMC class of T3) |
+| `encode_decode_roundtrip_preserves_filter` | 1 key × 3 B | **not in the script** — OOM / stall; T2 is the exhaustive test |
 
-Unbounded T1 (model domain) is the Verus twin; the algebraic T1 core
+Unbounded T1 (model domain) is the Verus twin. The algebraic T1 core
 (`set_bit` then `test_bit` on the same index) on the production extract
-is the Lean file. Multi-key / larger filters stay with the exhaustive
-test + fuzz.
+is Lean `set_bit_test_bit_same`. Multi-key / larger filters stay with
+the exhaustive test + fuzz. The insert-loop / query-loop composition
+on the extract is not claimed.

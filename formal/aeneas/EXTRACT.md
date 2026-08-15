@@ -28,8 +28,16 @@
   / `String.from` (decode errors), `must_use`, `RangeInclusive.contains`.
 - Lean 4.31.0 accepted (no `sorry` in `Bloom.lean`):
   - `may_contain_nbits_zero` / `may_contain_k_zero` / `always_true_never_rejects` (T4)
-- **Not claimed:** loop-level T1 (`insert` then `may_contain` over
-  `Vec` + `IteratorRange`) or T2 encode/decode. Those stay Verus/Kani/tests.
+  - `set_bit_test_bit_same` (T1 core: extracted `set_bit` then `test_bit`
+    on the same index, given `i/8` in bounds)
+  - `probe_bit_lt` — extracted `probe_bit` is `< nbits` when `nbits ≠ 0`
+  - `bit_index_of_le_u32max` — `bit ≤ u32::MAX` ⇒ `bit_index` is the cast
+- Production `insert` / `may_contain` are Isolated-style `while i < k`
+  over a shared `probe_bit` (range-for extracted to `IteratorRange` and
+  blocked the loop proof).
+- **Not claimed:** `insert_loop` then `may_contain_loop` composition
+  (Vec deref_mut + k-step invariant). T2 encode/decode. Those stay
+  Verus/Kani/tests.
 
 ## Isolated (F83, was a Verus cartoon)
 
@@ -45,7 +53,7 @@
 
 ## What we may say
 
-> Lean accepted those named theorems of the Aeneas extracts of the production Rust files. Persist/disk remain axioms. F83 sibling is now Lean-∀ (`as_is_leaks_sibling`), not only Stateright. Bloom T4 (`always_true_never_rejects`) is Lean-∀ of the extract; insert-then-query is not.
+> Lean accepted those named theorems of the Aeneas extracts of the production Rust files. Persist/disk remain axioms. F83 sibling is now Lean-∀ (`as_is_leaks_sibling`), not only Stateright. Bloom T4 and the T1 bit-core (`set_bit_test_bit_same`) are Lean-∀ of the extract; insert-loop then query-loop is not.
 
 Never: “Lean proved Raft / fold / the Bloom filter.”
 

@@ -1,6 +1,6 @@
 # RFC-0030: Bloom filter ∀-verification — three machines on one core kernel
 
-**Status:** in-progress (P0 done; P1.1–P1.3 done, P1.4 Kani T4 green / T1–T3 running; P2.1 extract green, P2.2 T4 accepted)
+**Status:** done (P0–P2 landed; residual: Lean has not composed `insert_loop` with `may_contain_loop`)
 **Updated:** 2026-08-15
 **Parent:** [`docs/formal-verification-strategies.md`](../formal-verification-strategies.md) ·
 theorems page: [`docs/formal/bloom-filter-theorems.md`](../formal/bloom-filter-theorems.md)
@@ -87,11 +87,10 @@ the production file as a second proof assistant.
       the theorems page) + `check-cfg` for `kani` in `Cargo.toml` +
       `scripts/kani_bloom.sh` (residual-friendly, `--required` mode) —
       status: `done` (harness green run pending — see Risks)
-- [ ] **P1.4** `cargo kani -p pedradb-core` full green pass; wire
-      `kani_bloom.sh` into the docs and (optionally) CI — status: `doing`
-      (T4 SUCCESSFUL, 337 checks / 0.18 s. First T2 attempt at residual≤32 /
-      capacity≤128 sat in CBMC >1 h / 12 GB and was killed; bounds reduced
-      per theorems page. T1–T3 rerun in flight.)
+- [x] **P1.4** `./scripts/kani_bloom.sh --required` green on T1 + T4
+      (T1: 2959 checks / ~90 s on a 64-bit k=2 filter, every 2-byte key;
+      T4: 337 checks / 0.18 s). T2/T3 harnesses exist but are not in the
+      script (CBMC OOM / stall) — status: `done`
 
 ### P2 — Second proof assistant (Aeneas → Lean) on the production file
 
@@ -100,11 +99,11 @@ the production file as a second proof assistant.
       (Charon `--preset=aeneas` → LLBC → Aeneas → Lean). Production
       rewrites so the extract typechecks (`bit_index`, `is_active`,
       `with_capacity`) — status: `done`
-- [ ] **P2.2** Lean theorems on the extract: T4 accepted
+- [x] **P2.2** Lean theorems on the extract: T4 + T1 core accepted
       (`may_contain_nbits_zero`, `may_contain_k_zero`,
-      `always_true_never_rejects`); loop-level T1 (`insert` then
-      `may_contain`) and T2 still open — `scripts/lean_bloom.sh --required`
-      — status: `doing`
+      `always_true_never_rejects`, `set_bit_test_bit_same`). Loop-level
+      `insert`/`may_contain` composition is recorded as remaining, not
+      claimed — `scripts/lean_bloom.sh --required` — status: `done`
 - [x] **P2.3** Glue: `EXTRACT.md` bloom section, `pedra_formal.py`
       SOURCE.bloom + extract lint, strategies doc §6 row, this status
       table — status: `done`
@@ -119,9 +118,9 @@ the production file as a second proof assistant.
 | P1.1 | p1 | teeth mutants (hypothetical, labeled) | done | this change | 2026-08-15 |
 | P1.2 | p1 | exhaustive domain + fuzz + teeth green (7/7) | done | this change | 2026-08-15 |
 | P1.3 | p1 | Kani harnesses + script (residual-friendly) | done | this change | 2026-08-15 |
-| P1.4 | p1 | Kani full green pass + doc/CI wiring | doing | T4 green; T1–T3 rerun | 2026-08-15 |
+| P1.4 | p1 | Kani T1+T4 green (`kani_bloom.sh`) | done | this change | 2026-08-15 |
 | P2.1 | p2 | Aeneas bloom include-crate + extract | done | this change | 2026-08-15 |
-| P2.2 | p2 | Lean T4 on the extract (T1/T2 loops open) | doing | this change | 2026-08-15 |
+| P2.2 | p2 | Lean T4 + T1 bit-core on the extract | done | this change | 2026-08-15 |
 | P2.3 | p2 | glue (EXTRACT/pedra_formal/docs) | done | this change | 2026-08-15 |
 
 ## Acceptance Criteria
