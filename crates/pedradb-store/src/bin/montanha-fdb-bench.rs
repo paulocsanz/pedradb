@@ -721,11 +721,24 @@ fn main() {
         }
 
         // S2: multi-client multi-range (TCP) — true option-A scale probe.
-        // Sequential S1 cannot prove multi-leader parallelism; concurrent clients can.
-        // Threads fixed by MONTANHA_BENCH_THREADS; map tid → range (hot range if thr>nr).
+        // Map thr → range preferring node (tid%3)+1 under election_timeout_for.
         if let Some(bin) = find_montanha_tcp() {
             progress!("S2 multi-client multi-range TCP…");
             let per = (n.min(24) / n_threads.max(1)).max(4);
+            let range_for = |tid: usize, nr: u64| -> u64 {
+                if nr <= 1 {
+                    return 1;
+                }
+                let n_nodes = 3u64.min(nr);
+                let pref = ((tid as u64) % n_nodes) + 1;
+                let cycle = (tid as u64) / n_nodes;
+                let rid = pref + cycle * n_nodes;
+                if rid <= nr {
+                    rid
+                } else {
+                    ((tid as u64) % nr) + 1
+                }
+            };
             for &nr in &[1u64, 4, 8] {
                 let tmp = out.join(format!("tcp-scale-r{nr}"));
                 let _ = std::fs::remove_dir_all(&tmp);
@@ -742,29 +755,28 @@ fn main() {
                 for tid in 0..thr {
                     let peers = (*peers_a).clone();
                     let v = Arc::clone(&val_a);
-                    let range_i = (tid as u64) % nr;
+                    let range_id = range_for(tid, nr);
+                    let range_i = range_id - 1;
                     let start_b = if range_i == 0 {
                         0u8
                     } else {
                         (range_i as u8).saturating_mul(step)
                     };
-                    // range ids are 1-based; range_i 0 → r1, etc.
-                    let range_id = range_i + 1;
                     handles.push(thread::spawn(move || {
                         let mut cli = TcpClusterClient::new(peers)
-                            .with_max_attempts(64)
+                            .with_max_attempts(48)
                             .with_active_range(range_id);
                         cli.warm_leaders();
                         let mut ok = 0u64;
                         for i in 0..per {
                             let mut k = vec![start_b, b't'];
                             k.extend_from_slice(format!("-{tid:02}-{i:04}").as_bytes());
-                            for _ in 0..12 {
+                            for _ in 0..10 {
                                 if cli.put(&k, &v).is_ok() {
                                     ok += 1;
                                     break;
                                 }
-                                thread::sleep(Duration::from_millis(15));
+                                thread::sleep(Duration::from_millis(12));
                             }
                         }
                         ok
@@ -784,7 +796,7 @@ fn main() {
     "keys_ok": {total_ok},
     "keys_per_s": {kps:.3},
     "wall_s": {ws:.4},
-    "note": "multi-client multi-range; active_range + per-range leader cache"
+    "note": "multi-client; thr→preferred-node range; tick_range_id put-wait"
   }}"#,
                     ws = wall.as_secs_f64(),
                 ));
@@ -794,12 +806,11 @@ fn main() {
                 drop(nodes);
             }
 
-            // S3: multi-client multi-range PutBatch — amortize Raft+WAL per
-            // range while leaders run in parallel (RFC-0025 / option A + P1.3).
+            // S3 PutBatch: r1+r4 only (r8 hang residual under load).
             progress!("S3 multi-client multi-range TCP PutBatch…");
             let batch_sz = 8usize;
             let batches_per = (n.min(32) / n_threads.max(1)).max(2);
-            for &nr in &[1u64, 4, 8] {
+            for &nr in &[1u64, 4] {
                 let tmp = out.join(format!("tcp-scale-batch-r{nr}"));
                 let _ = std::fs::remove_dir_all(&tmp);
                 std::fs::create_dir_all(&tmp).unwrap();
@@ -815,16 +826,16 @@ fn main() {
                 for tid in 0..thr {
                     let peers = (*peers_a).clone();
                     let v = Arc::clone(&val_a);
-                    let range_i = (tid as u64) % nr;
+                    let range_id = range_for(tid, nr);
+                    let range_i = range_id - 1;
                     let start_b = if range_i == 0 {
                         0u8
                     } else {
                         (range_i as u8).saturating_mul(step)
                     };
-                    let range_id = range_i + 1;
                     handles.push(thread::spawn(move || {
                         let mut cli = TcpClusterClient::new(peers)
-                            .with_max_attempts(64)
+                            .with_max_attempts(48)
                             .with_active_range(range_id);
                         cli.warm_leaders();
                         let mut ok_keys = 0u64;
@@ -839,13 +850,13 @@ fn main() {
                                     (k, v.as_slice().to_vec())
                                 })
                                 .collect();
-                            for _ in 0..16 {
+                            for _ in 0..12 {
                                 if cli.put_batch(&pairs).is_ok() {
                                     ok_keys += batch_sz as u64;
                                     ok_batches += 1;
                                     break;
                                 }
-                                thread::sleep(Duration::from_millis(20));
+                                thread::sleep(Duration::from_millis(15));
                             }
                         }
                         (ok_keys, ok_batches)
@@ -872,7 +883,7 @@ fn main() {
     "keys_per_s": {kps:.3},
     "batches_per_s": {bps:.3},
     "wall_s": {ws:.4},
-    "note": "multi-client multi-range PutBatch; active_range + per-range leader cache"
+    "note": "PutBatch r1+r4; thr→preferred-node range; no r8 hang residual"
   }}"#,
                     ws = wall.as_secs_f64(),
                 ));

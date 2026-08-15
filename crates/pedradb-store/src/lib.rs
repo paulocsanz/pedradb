@@ -2642,8 +2642,16 @@ impl<E: Env> StoreCluster<E> {
         self.tick_range(range_id, &ids)
     }
 
-    /// Elect leaders for all ranges (bounded ticks).
+    /// Elect leaders for all ranges (bounded ticks), then best-effort rebalance.
     pub fn elect_all(&mut self, max_ticks: u64) -> Result<()> {
+        self.elect_until_all_have_leaders(max_ticks)?;
+        // Best-effort balance; uses elect_until (no recursive rebalance).
+        let _ = self.rebalance_range_leaders(max_ticks);
+        Ok(())
+    }
+
+    /// Tick until every range has a unique leader (no rebalance).
+    fn elect_until_all_have_leaders(&mut self, max_ticks: u64) -> Result<()> {
         for _ in 0..max_ticks {
             let all = self
                 .ranges
@@ -2713,8 +2721,8 @@ impl<E: Env> StoreCluster<E> {
                 })
                 .unwrap_or(ranges[0]);
             let _ = self.step_down_range_leader(rid)?;
-            // Re-elect; preferred node for rid should win if still short-timeout.
-            self.elect_all(max_ticks)?;
+            // Re-elect without nested rebalance (avoids elect_all recursion).
+            self.elect_until_all_have_leaders(max_ticks)?;
         }
         Ok(())
     }
