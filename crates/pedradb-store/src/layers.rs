@@ -40,8 +40,7 @@ impl WatchHub {
         let (tx, rx) = mpsc::sync_channel(256);
         let id = self.next_id;
         self.next_id = self.next_id.saturating_add(1);
-        self.subs
-            .insert(id, (prefix.as_ref().to_vec(), tx));
+        self.subs.insert(id, (prefix.as_ref().to_vec(), tx));
         (id, rx)
     }
 
@@ -101,10 +100,7 @@ impl EtcdNeedFace {
     /// Get coordination key (LocalApplied on the freshest local replica).
     ///
     /// F73: do not default to `ids[0]` — a partitioned node 1 misses majority creates.
-    pub fn get(
-        cluster: &StoreCluster,
-        key: &[u8],
-    ) -> Result<Option<pedradb_dcs::KeyValue>> {
+    pub fn get(cluster: &StoreCluster, key: &[u8]) -> Result<Option<pedradb_dcs::KeyValue>> {
         cluster.dcs_get(&Self::full_key(key))
     }
 
@@ -118,9 +114,11 @@ impl EtcdNeedFace {
         cluster.dcs_get_on(node_id, &full)
     }
 
+    /// F96: `m/ || key` made `m/a` a byte-prefix of `m/ab` under half-open
+    /// scans. Length-prefix the user key (point create/cas/get stay exact).
     fn full_key(key: &[u8]) -> Vec<u8> {
         let mut k = Self::PREFIX.to_vec();
-        k.extend_from_slice(key);
+        k.extend_from_slice(&crate::len_pref_value(key));
         k
     }
 }
@@ -128,9 +126,7 @@ impl EtcdNeedFace {
 // ── Secondary index via multi-key TX ───────────────────────────────────────
 
 fn push_len_pref(buf: &mut Vec<u8>, part: &[u8]) {
-    let n = u32::try_from(part.len()).expect("component len fits u32");
-    buf.extend_from_slice(&n.to_be_bytes());
-    buf.extend_from_slice(part);
+    buf.extend_from_slice(&crate::len_pref_value(part));
 }
 
 /// Tip key storing the last secondary index value for (table, col, pk) — F64.
@@ -139,7 +135,7 @@ pub fn table_index_tip_key(table: &[u8], col: &[u8], pk: &[u8]) -> Vec<u8> {
     // Lead with first byte of pk for range sharding; length-prefix full pk (F82).
     let mut k = Vec::with_capacity(pk.len() + table.len() + col.len() + 24);
     k.push(pk.first().copied().unwrap_or(0));
-    push_len_pref(&mut k, pk);
+    k.extend_from_slice(&crate::len_pref_value(pk));
     k.push(0x00);
     k.extend_from_slice(b"m"); // meta tip marker
     push_len_pref(&mut k, table);
@@ -191,20 +187,16 @@ pub fn lookup_secondary(
 /// Leading bytes of a reverse index key: first byte of `val` (range shard)
 /// then length-prefixed `val` (F80). Raw `val||0x00` leaked `val||0x00||foo`.
 fn table_index_val_prefix(val: &[u8]) -> Vec<u8> {
-    let mut k = Vec::with_capacity(5 + val.len());
+    let mut k = Vec::with_capacity(1 + 4 + val.len());
     k.push(val.first().copied().unwrap_or(0));
-    push_len_pref(&mut k, val);
+    k.extend_from_slice(&crate::len_pref_value(val));
     k
 }
 
 /// Range of reverse keys for exact `index_val` (not slash/NUL prefix siblings).
 #[must_use]
 pub fn table_index_value_range(val: &[u8]) -> (Vec<u8>, Vec<u8>) {
-    let mut start = table_index_val_prefix(val);
-    start.push(0x00);
-    let mut end = table_index_val_prefix(val);
-    end.push(0x01);
-    (start, end)
+    crate::exact_value_children(&table_index_val_prefix(val))
 }
 
 // ── Table / SQLite-class encoding on Pedra keys ────────────────────────────
@@ -224,7 +216,7 @@ pub fn table_row_key(table: &[u8], pk: &[u8]) -> Vec<u8> {
     // Shard on first pk byte; length-prefix the full pk.
     let mut k = Vec::with_capacity(pk.len() + table.len() + 16);
     k.push(pk.first().copied().unwrap_or(0));
-    push_len_pref(&mut k, pk);
+    k.extend_from_slice(&crate::len_pref_value(pk));
     k.push(0x00);
     k.extend_from_slice(b"t");
     push_len_pref(&mut k, table);
@@ -257,12 +249,7 @@ pub fn table_index_key(table: &[u8], col: &[u8], val: &[u8], pk: &[u8]) -> Vec<u
 ///
 /// For **row + secondary index**, prefer [`put_with_secondary_index`] (one TX)
 /// or [`StoreCluster::put_many`] when keys share a range.
-pub fn table_put(
-    cluster: &mut StoreCluster,
-    table: &[u8],
-    pk: &[u8],
-    row: &[u8],
-) -> Result<u64> {
+pub fn table_put(cluster: &mut StoreCluster, table: &[u8], pk: &[u8], row: &[u8]) -> Result<u64> {
     // Single key: put_batch of one is still one Raft entry (same as put).
     cluster.put_batch([(table_row_key(table, pk).as_slice(), row)])?;
     Ok(cluster.read_version())
@@ -299,10 +286,7 @@ impl TikvKvFace {
     }
 
     /// Multi-key TX put (N keys atomic; may be cross-range).
-    pub fn batch_put(
-        cluster: &mut StoreCluster,
-        pairs: &[(Vec<u8>, Vec<u8>)],
-    ) -> Result<u64> {
+    pub fn batch_put(cluster: &mut StoreCluster, pairs: &[(Vec<u8>, Vec<u8>)]) -> Result<u64> {
         let mut tx = cluster.begin();
         for (k, v) in pairs {
             tx.set(k, v)?;
@@ -341,12 +325,7 @@ pub fn pg_pk_key(table: &[u8], pk: &[u8]) -> Vec<u8> {
 ///
 /// For multi-writer scale, pick PKs whose leading bytes fall in different
 /// [`StoreCluster`] ranges (see `table_row_key`).
-pub fn pg_upsert(
-    cluster: &mut StoreCluster,
-    table: &[u8],
-    pk: &[u8],
-    row: &[u8],
-) -> Result<u64> {
+pub fn pg_upsert(cluster: &mut StoreCluster, table: &[u8], pk: &[u8], row: &[u8]) -> Result<u64> {
     table_put(cluster, table, pk, row)
 }
 
@@ -389,12 +368,10 @@ pub fn olap_ingest(
 }
 
 /// Read back a single ingested event (RO path from same SoR).
-pub fn olap_get(
-    cluster: &StoreCluster,
-    stream: &[u8],
-    seq: u64,
-) -> Result<Option<Vec<u8>>> {
-    Ok(cluster.get(&olap_event_key(stream, seq))?.map(|b| b.to_vec()))
+pub fn olap_get(cluster: &StoreCluster, stream: &[u8], seq: u64) -> Result<Option<Vec<u8>>> {
+    Ok(cluster
+        .get(&olap_event_key(stream, seq))?
+        .map(|b| b.to_vec()))
 }
 
 /// Half-open range of all seqs under `stream` name (exact, not slash children).
@@ -420,7 +397,7 @@ pub fn subject_seq_key(ns: &[u8], subject: &[u8], seq: u64) -> Vec<u8> {
     // F81: length-prefix subject (F63 used subject||0x00 which nests subject||0x00||…).
     let mut k = Vec::with_capacity(ns.len() + subject.len() + 8 + 20);
     k.extend_from_slice(ns);
-    push_len_pref(&mut k, subject);
+    k.extend_from_slice(&crate::len_pref_value(subject));
     k.push(0x00);
     k.extend_from_slice(format!("{seq:020}").as_bytes());
     k
@@ -429,13 +406,10 @@ pub fn subject_seq_key(ns: &[u8], subject: &[u8], seq: u64) -> Vec<u8> {
 /// Exact subject children: `[ns||len||subject||0x00, ns||len||subject||0x01)`.
 #[must_use]
 pub fn subject_children_range(ns: &[u8], subject: &[u8]) -> (Vec<u8>, Vec<u8>) {
-    let mut start = Vec::with_capacity(ns.len() + subject.len() + 8);
-    start.extend_from_slice(ns);
-    push_len_pref(&mut start, subject);
-    start.push(0x00);
-    let mut end = start.clone();
-    *end.last_mut().unwrap() = 0x01;
-    (start, end)
+    let mut p = Vec::with_capacity(ns.len() + 4 + subject.len());
+    p.extend_from_slice(ns);
+    p.extend_from_slice(&crate::len_pref_value(subject));
+    crate::exact_value_children(&p)
 }
 
 /// Publish to durable subject (key = `stream/{subject}\0{seq}`).
@@ -449,11 +423,7 @@ pub fn stream_publish(
 }
 
 /// Consume one message by seq (cursor external).
-pub fn stream_get(
-    cluster: &StoreCluster,
-    subject: &[u8],
-    seq: u64,
-) -> Result<Option<Vec<u8>>> {
+pub fn stream_get(cluster: &StoreCluster, subject: &[u8], seq: u64) -> Result<Option<Vec<u8>>> {
     Ok(cluster
         .get(&subject_seq_key(b"stream/", subject, seq))?
         .map(|b| b.to_vec()))
@@ -497,12 +467,7 @@ fn list_subject_at(
 // ── Scylla-need CP helper ──────────────────────────────────────────────────
 
 /// High-level CP put under `cp/` with optional watch notify.
-pub fn cp_put(
-    cluster: &mut StoreCluster,
-    hub: &WatchHub,
-    key: &[u8],
-    value: &[u8],
-) -> Result<()> {
+pub fn cp_put(cluster: &mut StoreCluster, hub: &WatchHub, key: &[u8], value: &[u8]) -> Result<()> {
     let mut k = b"cp/".to_vec();
     k.extend_from_slice(key);
     cluster.put(&k, value)?;
@@ -572,10 +537,7 @@ mod tests {
         t2.set(b"k", b"v2").unwrap();
         t1.commit(&mut c).unwrap();
         let err = t2.commit(&mut c).expect_err("OCC WW");
-        assert!(
-            matches!(err, StoreError::Conflict),
-            "got {err:?}"
-        );
+        assert!(matches!(err, StoreError::Conflict), "got {err:?}");
         assert_eq!(c.get(b"k").unwrap().as_deref(), Some(b"v1".as_ref()));
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -737,6 +699,40 @@ mod tests {
             .unwrap()
             .expect("get used lagging node 1, missing live lock");
         assert_eq!(kv.value.as_slice(), b"holder");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// F96: `m/ || key` made `m/a` a prefix of `m/ab` under half-open scans.
+    #[test]
+    fn etcd_need_full_key_not_prefix_of_sibling() {
+        let dir = temp();
+        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        c.elect_all(80).unwrap();
+        EtcdNeedFace::create(&mut c, b"a", b"va").unwrap();
+        EtcdNeedFace::create(&mut c, b"ab", b"vab").unwrap();
+        assert_eq!(
+            EtcdNeedFace::get(&c, b"a").unwrap().unwrap().value.as_slice(),
+            b"va"
+        );
+        assert_eq!(
+            EtcdNeedFace::get(&c, b"ab").unwrap().unwrap().value.as_slice(),
+            b"vab"
+        );
+        let ka = EtcdNeedFace::full_key(b"a");
+        let kab = EtcdNeedFace::full_key(b"ab");
+        assert!(
+            !kab.starts_with(&ka),
+            "full_key(a) must not prefix full_key(ab): {ka:?} vs {kab:?}"
+        );
+        let end = crate::prefix_exclusive_end(&ka);
+        let hits = c
+            .keys_in_range_at(&ka, end.as_deref().unwrap_or(&[]), c.read_version())
+            .unwrap();
+        assert_eq!(
+            hits.len(),
+            1,
+            "prefix scan of full_key(a) leaked: {hits:?}"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -1007,11 +1003,7 @@ mod tests {
             stream_get(&c, b"subj", 1).unwrap().as_deref(),
             Some(b"m1".as_ref())
         );
-        sql_multi_table_write(
-            &mut c,
-            &[(b"u", b"1", b"alice"), (b"p", b"9", b"post")],
-        )
-        .unwrap();
+        sql_multi_table_write(&mut c, &[(b"u", b"1", b"alice"), (b"p", b"9", b"post")]).unwrap();
         assert_eq!(
             table_get(&c, b"u", b"1").unwrap().as_deref(),
             Some(b"alice".as_ref())
@@ -1032,11 +1024,19 @@ mod tests {
         stream_publish(&mut c, b"jobs/extra", 1, b"jleak").unwrap();
         let snap = c.read_version();
         let ev = olap_list_at(&c, b"events", snap).unwrap();
-        assert_eq!(ev, vec![(1, b"e1".to_vec())], "olap events leaked sibling: {ev:?}");
+        assert_eq!(
+            ev,
+            vec![(1, b"e1".to_vec())],
+            "olap events leaked sibling: {ev:?}"
+        );
         let extra = olap_list_at(&c, b"events/extra", snap).unwrap();
         assert_eq!(extra, vec![(1, b"leak".to_vec())]);
         let jobs = stream_list_at(&c, b"jobs", snap).unwrap();
-        assert_eq!(jobs, vec![(1, b"j1".to_vec())], "stream jobs leaked sibling: {jobs:?}");
+        assert_eq!(
+            jobs,
+            vec![(1, b"j1".to_vec())],
+            "stream jobs leaked sibling: {jobs:?}"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -1170,6 +1170,4 @@ mod tests {
         assert_eq!(nested, vec![(1, b"nested".to_vec())]);
         let _ = std::fs::remove_dir_all(&dir);
     }
-
-
 }

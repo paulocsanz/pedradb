@@ -87,6 +87,16 @@ impl SafeAllocator {
     /// Token → name.
     pub const TOKEN_PREFIX: &'static [u8] = b"\x03";
 
+    /// F95: token map key `TOKEN || u32be(len) || token` (raw concat made
+    /// `TOKEN||a` a prefix of `TOKEN||ab`).
+    fn token_key(token: &[u8]) -> Vec<u8> {
+        let mut k = Self::TOKEN_PREFIX.to_vec();
+        let n = u32::try_from(token.len()).expect("token len fits u32");
+        k.extend_from_slice(&n.to_be_bytes());
+        k.extend_from_slice(token);
+        k
+    }
+
     /// Allocate or return the name already bound to `token`.
     ///
     /// # Errors
@@ -95,11 +105,7 @@ impl SafeAllocator {
         let tok = token.to_vec();
         retry_loop(|| {
             let mut tr = cluster.begin();
-            let tkey = {
-                let mut k = Self::TOKEN_PREFIX.to_vec();
-                k.extend_from_slice(&tok);
-                k
-            };
+            let tkey = Self::token_key(&tok);
             if let Some(existing) = tr.get(cluster, &tkey)? {
                 let _ = tr.commit(cluster);
                 return Ok(existing);
@@ -180,6 +186,16 @@ impl SafeList {
     /// Seen-token prefix.
     pub const SEEN: &'static [u8] = b"\x11seen/";
 
+    /// F94: seen keys are `SEEN || u32be(len) || token` so `SEEN||a` is not a
+    /// byte-prefix of `SEEN||ab` under half-open scans.
+    fn seen_key(token: &[u8]) -> Vec<u8> {
+        let mut k = Self::SEEN.to_vec();
+        let n = u32::try_from(token.len()).expect("token len fits u32");
+        k.extend_from_slice(&n.to_be_bytes());
+        k.extend_from_slice(token);
+        k
+    }
+
     /// Append `item` unless `token` was already applied.
     ///
     /// # Errors
@@ -189,11 +205,7 @@ impl SafeList {
         let token = token.to_vec();
         retry_loop(|| {
             let mut tr = cluster.begin();
-            let seen = {
-                let mut k = Self::SEEN.to_vec();
-                k.extend_from_slice(&token);
-                k
-            };
+            let seen = Self::seen_key(&token);
             if tr.get(cluster, &seen)?.is_some() {
                 let _ = tr.commit(cluster);
                 return Ok(());
@@ -609,6 +621,70 @@ mod tests {
             items.len(),
             1,
             "safe list must not duplicate, got {items:?}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// F94: seen keys were `SEEN || token` so `SEEN||a` is a prefix of `SEEN||ab`.
+    #[test]
+    fn safe_list_seen_token_not_prefix_of_sibling() {
+        let dir = temp();
+        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        c.elect_all(80).unwrap();
+        SafeList::append(&mut c, b"i1", b"a").unwrap();
+        SafeList::append(&mut c, b"i2", b"ab").unwrap();
+        assert_eq!(SafeList::items(&c).unwrap().len(), 2);
+        let sa = SafeList::seen_key(b"a");
+        let sab = SafeList::seen_key(b"ab");
+        assert!(
+            !sab.starts_with(&sa),
+            "seen_key(a) must not prefix seen_key(ab): {sa:?} vs {sab:?}"
+        );
+        // Distinct tokens stay independent: re-append `a` is still idempotent.
+        SafeList::append(&mut c, b"i1-dup", b"a").unwrap();
+        assert_eq!(
+            SafeList::items(&c).unwrap().len(),
+            2,
+            "token a must not collide with ab"
+        );
+        let end = crate::prefix_exclusive_end(&sa);
+        let hits = c
+            .keys_in_range_at(&sa, end.as_deref().unwrap_or(&[]), c.read_version())
+            .unwrap();
+        assert_eq!(
+            hits.len(),
+            1,
+            "prefix scan of seen_key(a) leaked: {hits:?}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// F95: token keys were `TOKEN || token` so `TOKEN||a` prefixes `TOKEN||ab`.
+    #[test]
+    fn safe_allocator_token_not_prefix_of_sibling() {
+        let dir = temp();
+        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        c.elect_all(80).unwrap();
+        let n1 = SafeAllocator::allocate(&mut c, b"a").unwrap();
+        let n2 = SafeAllocator::allocate(&mut c, b"ab").unwrap();
+        assert_ne!(n1, n2, "distinct tokens must get distinct names");
+        let t1 = SafeAllocator::token_key(b"a");
+        let t2 = SafeAllocator::token_key(b"ab");
+        assert!(
+            !t2.starts_with(&t1),
+            "token_key(a) must not prefix token_key(ab): {t1:?} vs {t2:?}"
+        );
+        // Re-allocate with token `a` must return same name (not ab's).
+        let n1b = SafeAllocator::allocate(&mut c, b"a").unwrap();
+        assert_eq!(n1b, n1);
+        let end = crate::prefix_exclusive_end(&t1);
+        let hits = c
+            .keys_in_range_at(&t1, end.as_deref().unwrap_or(&[]), c.read_version())
+            .unwrap();
+        assert_eq!(
+            hits.len(),
+            1,
+            "prefix scan of token_key(a) leaked: {hits:?}"
         );
         let _ = std::fs::remove_dir_all(&dir);
     }
