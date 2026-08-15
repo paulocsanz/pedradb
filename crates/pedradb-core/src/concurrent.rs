@@ -187,6 +187,26 @@ impl<E: Env> ConcurrentDb<E> {
         self.inner.read().get(key)
     }
 
+    /// Point get at an explicit snapshot (read lock).
+    ///
+    /// # Errors
+    /// [`CoreError::SnapshotTooOld`] if `snap` is below the GC watermark.
+    pub fn get_at(&self, snap: Snapshot, key: &[u8]) -> Result<Option<Bytes>> {
+        self.inner.read().get_at(snap, key)
+    }
+
+    /// Multi-get at snapshot (read lock).
+    ///
+    /// # Errors
+    /// [`CoreError::SnapshotTooOld`].
+    pub fn multi_get_at(
+        &self,
+        snap: Snapshot,
+        keys: &[impl AsRef<[u8]>],
+    ) -> Result<Vec<Option<Bytes>>> {
+        self.inner.read().multi_get_at(snap, keys)
+    }
+
     /// Snapshot (read lock). Bare sequence — does not register a pin.
     #[must_use]
     pub fn snapshot(&self) -> Snapshot {
@@ -243,10 +263,50 @@ impl<E: Env> ConcurrentDb<E> {
         self.inner.write().compact_reclaim()
     }
 
-    /// Range collect (read lock).
+    /// Range collect at latest (read lock).
     #[must_use]
     pub fn range(&self, start: Bound<&[u8]>, end: Bound<&[u8]>) -> Vec<(Bytes, Bytes)> {
         self.inner.read().range(start, end)
+    }
+
+    /// Range at snapshot (read lock).
+    ///
+    /// # Errors
+    /// [`CoreError::SnapshotTooOld`].
+    pub fn range_at(
+        &self,
+        snapshot: SequenceNumber,
+        start: Bound<&[u8]>,
+        end: Bound<&[u8]>,
+    ) -> Result<Vec<(Bytes, Bytes)>> {
+        self.inner.read().range_at(snapshot, start, end)
+    }
+
+    /// Bounded range at latest (read lock).
+    #[must_use]
+    pub fn range_limited(
+        &self,
+        start: Bound<&[u8]>,
+        end: Bound<&[u8]>,
+        limit: Option<usize>,
+    ) -> Vec<(Bytes, Bytes)> {
+        self.inner.read().range_limited(start, end, limit)
+    }
+
+    /// Bounded range at snapshot (read lock).
+    ///
+    /// # Errors
+    /// [`CoreError::SnapshotTooOld`].
+    pub fn range_at_limited(
+        &self,
+        snapshot: SequenceNumber,
+        start: Bound<&[u8]>,
+        end: Bound<&[u8]>,
+        limit: Option<usize>,
+    ) -> Result<Vec<(Bytes, Bytes)>> {
+        self.inner
+            .read()
+            .range_at_limited(snapshot, start, end, limit)
     }
 
     /// Streaming scan collected under a read lock (iterator cannot outlive the lock).
@@ -259,6 +319,23 @@ impl<E: Env> ConcurrentDb<E> {
             .scan(start, end)
             .map(|VisibleKv { key, value }| (key, value))
             .collect()
+    }
+
+    /// Historical scan collected under a read lock (fail-closed on too-old snap).
+    ///
+    /// # Errors
+    /// [`CoreError::SnapshotTooOld`].
+    pub fn scan_collect_at(
+        &self,
+        snapshot: SequenceNumber,
+        start: Bound<&[u8]>,
+        end: Bound<&[u8]>,
+        limit: Option<usize>,
+    ) -> Result<Vec<(Bytes, Bytes)>> {
+        // Collect under the lock via range_at_limited (same fail-closed path).
+        self.inner
+            .read()
+            .range_at_limited(snapshot, start, end, limit)
     }
 
     /// Stats (read lock).
@@ -1160,6 +1237,58 @@ mod tests {
             }
         }
         assert_eq!(miss2, 0, "lost keys after reopen");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// get_at / range_at / scan_collect_at fail closed after reclaim (API parity).
+    #[test]
+    fn concurrent_snapshot_reads_fail_closed_after_reclaim() {
+        use std::ops::Bound;
+        let dir = temp_dir();
+        let db = ConcurrentDb::open_with(
+            &dir,
+            OpenOptions {
+                sync: true,
+                auto_flush_bytes: None,
+                auto_compact_sst_count: None,
+                auto_compact_sst_bytes: None,
+                exclusive: true,
+                large_value_threshold: None,
+            },
+        )
+        .unwrap();
+        db.put(b"k", b"old").unwrap();
+        db.flush().unwrap();
+        let old = db.snapshot();
+        db.put(b"k", b"new").unwrap();
+        db.flush().unwrap();
+        assert_eq!(
+            db.get_at(old, b"k").unwrap().as_deref(),
+            Some(b"old".as_ref())
+        );
+        db.compact_with(CompactOptions::latest_only()).unwrap();
+        let err = db.get_at(old, b"k").unwrap_err();
+        assert!(
+            matches!(err, CoreError::SnapshotTooOld { .. }),
+            "get_at: {err:?}"
+        );
+        let err = db
+            .range_at(old.sequence(), Bound::Unbounded, Bound::Unbounded)
+            .unwrap_err();
+        assert!(
+            matches!(err, CoreError::SnapshotTooOld { .. }),
+            "range_at: {err:?}"
+        );
+        let err = db
+            .scan_collect_at(old.sequence(), Bound::Unbounded, Bound::Unbounded, None)
+            .unwrap_err();
+        assert!(
+            matches!(err, CoreError::SnapshotTooOld { .. }),
+            "scan_collect_at: {err:?}"
+        );
+        assert_eq!(db.get(b"k").as_deref(), Some(b"new".as_ref()));
+        let live = db.range(Bound::Unbounded, Bound::Unbounded);
+        assert_eq!(live.len(), 1);
         let _ = fs::remove_dir_all(&dir);
     }
 

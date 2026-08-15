@@ -192,7 +192,11 @@ fn restore_cmd(args: &[String]) -> std::process::ExitCode {
         let eng = BackupEngine::open(&args[0])?;
         let id: u64 = args[1].parse()?;
         eng.restore(id, &args[2])?;
-        println!("restored backup {id} -> {}", args[2]);
+        let rep = inspect_format(&args[2])?;
+        println!(
+            "restored backup {id} -> {} earliest_readable={} ssts={}",
+            args[2], rep.earliest_readable_seq, rep.sst_count
+        );
         Ok(())
     })() {
         Ok(()) => std::process::ExitCode::SUCCESS,
