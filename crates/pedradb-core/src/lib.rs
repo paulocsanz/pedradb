@@ -18,6 +18,7 @@ pub mod bloom;
 pub mod buggify_hooks;
 pub mod cache;
 pub mod change_feed;
+pub mod changelog_kernel;
 pub mod concurrent;
 pub mod db;
 pub mod env;
@@ -40,20 +41,13 @@ pub mod wal;
 pub use batch::{WriteOp, WriteRecord, WRITE_RECORD_VERSION};
 pub use bloom::{BloomFilter, DEFAULT_BITS_PER_KEY};
 pub use cache::{BlockCache, TableCache};
-pub use change_feed::{
-    decode_changelog, ChangeEntry, ChangeKind, ChangeLog, CHANGELOG_FILE_NAME,
-};
+pub use change_feed::{decode_changelog, ChangeEntry, ChangeKind, ChangeLog, CHANGELOG_FILE_NAME};
+pub use changelog_kernel::{changelog_needs_sst_rebuild, changelog_needs_sst_rebuild_as_is};
 pub use concurrent::ConcurrentDb;
 pub use db::{
     copy_db_directory, read_checkpoint_meta, BatchOp, CheckpointMeta, CompactOptions, Db, DbStats,
     OpenOptions, ScanProjection, Snapshot, WriteOptions, CHECKPOINT_META_FILE,
     L0_COMPACTION_TRIGGER, MAX_LSM_LEVEL, WAL_FILE_NAME,
-};
-pub use occ::OccTransaction;
-pub use vlog::{
-    blob_path, decode_vlog_ptr, decode_vlog_ref, encode_vlog_ptr, encode_vlog_ref, list_blob_nums,
-    ValueLog, VlogPtr, VlogRewriteStats, VLOG_BLOB_PREFIX, VLOG_FILE_NAME, VLOG_NEW_NAME,
-    VLOG_VALUE_PREFIX,
 };
 pub use env::{Env, EnvFile, StdEnv};
 pub use error::{CoreError, Result};
@@ -61,9 +55,6 @@ pub use host::{DetHost, Host, StdHost};
 pub use key::{
     pack_sequence_and_type, unpack_sequence_and_type, InternalKey, SequenceNumber, ValueType,
     MAX_SEQUENCE_NUMBER,
-};
-pub use prefix::{
-    key_in_prefix_range, prefix_exclusive_end, prefix_exclusive_end_as_is,
 };
 pub use lock::{DirLock, LOCK_FILE};
 pub use manifest::{VersionSet, CURRENT_FILE, MANIFEST_PREFIX};
@@ -73,9 +64,14 @@ pub use merge::{
     range_tombstone_covers_as_is, user_key_in_range, visible_range, visible_range_limited,
     CompactGcOptions, RangeTombstone, StreamingVisibleIter, VisibleKv,
 };
+pub use occ::OccTransaction;
+pub use prefix::{key_in_prefix_range, prefix_exclusive_end, prefix_exclusive_end_as_is};
 pub use rng::{mix_seed, Rng, SeedRng, SystemRng};
-pub use sst::{
-    write_sst, write_sst_entries, write_sst_entries_on, write_sst_on, SstTable,
-};
+pub use sst::{write_sst, write_sst_entries, write_sst_entries_on, write_sst_on, SstTable};
 pub use time::{Clock, ManualClock, SystemClock};
 pub use tx::Transaction;
+pub use vlog::{
+    blob_path, decode_vlog_ptr, decode_vlog_ref, encode_vlog_ptr, encode_vlog_ref, list_blob_nums,
+    ValueLog, VlogPtr, VlogRewriteStats, VLOG_BLOB_PREFIX, VLOG_FILE_NAME, VLOG_NEW_NAME,
+    VLOG_VALUE_PREFIX,
+};

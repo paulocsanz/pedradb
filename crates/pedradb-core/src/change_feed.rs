@@ -215,21 +215,18 @@ impl ChangeLog {
 fn encode_changelog(log: &ChangeLog) -> Result<Vec<u8>> {
     let mut buf = Vec::new();
     buf.extend_from_slice(MAGIC);
-    let n = u32::try_from(log.entries.len()).map_err(|_| {
-        CoreError::Internal("changelog too large".into())
-    })?;
+    let n = u32::try_from(log.entries.len())
+        .map_err(|_| CoreError::Internal("changelog too large".into()))?;
     buf.extend_from_slice(&n.to_le_bytes());
     for e in &log.entries {
         buf.extend_from_slice(&e.sequence.to_le_bytes());
-        let klen = u32::try_from(e.key.len()).map_err(|_| {
-            CoreError::Internal("changelog key too large".into())
-        })?;
+        let klen = u32::try_from(e.key.len())
+            .map_err(|_| CoreError::Internal("changelog key too large".into()))?;
         buf.extend_from_slice(&klen.to_le_bytes());
         buf.extend_from_slice(&e.key);
         buf.push(e.kind.to_u8());
-        let vlen = u32::try_from(e.value.len()).map_err(|_| {
-            CoreError::Internal("changelog value too large".into())
-        })?;
+        let vlen = u32::try_from(e.value.len())
+            .map_err(|_| CoreError::Internal("changelog value too large".into()))?;
         buf.extend_from_slice(&vlen.to_le_bytes());
         buf.extend_from_slice(&e.value);
     }
@@ -247,9 +244,11 @@ pub fn decode_changelog(buf: &[u8]) -> Result<ChangeLog> {
         return Err(CoreError::Internal("changelog too short".into()));
     }
     let (payload, crc_bytes) = buf.split_at(buf.len() - 4);
-    let stored = u32::from_le_bytes(crc_bytes.try_into().map_err(|_| {
-        CoreError::Internal("changelog crc truncated".into())
-    })?);
+    let stored = u32::from_le_bytes(
+        crc_bytes
+            .try_into()
+            .map_err(|_| CoreError::Internal("changelog crc truncated".into()))?,
+    );
     let got = crc32c::crc32c(payload);
     if stored != got {
         return Err(CoreError::Internal(format!(
@@ -284,9 +283,8 @@ pub fn decode_changelog(buf: &[u8]) -> Result<ChangeLog> {
         }
         let key = Bytes::copy_from_slice(&payload[off..off + klen]);
         off += klen;
-        let kind = ChangeKind::from_u8(payload[off]).ok_or_else(|| {
-            CoreError::Internal("bad changelog kind".into())
-        })?;
+        let kind = ChangeKind::from_u8(payload[off])
+            .ok_or_else(|| CoreError::Internal("bad changelog kind".into()))?;
         off += 1;
         let vlen = u32::from_le_bytes(payload[off..off + 4].try_into().unwrap()) as usize;
         off += 4;
@@ -364,12 +362,15 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
     }
 
-    /// F50: missing CHANGELOG after flush rebuilds last-per-key from SST (not empty).
+    /// F53: missing CHANGELOG after flush rebuilds last-per-key from SST (not empty).
     #[test]
     fn changelog_missing_post_flush_rebuilds_feed_from_sst() {
         use crate::db::{Db, OpenOptions};
         use std::time::{SystemTime, UNIX_EPOCH};
-        let n = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let n = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
         let dir = std::env::temp_dir().join(format!("pedradb-chlog-loss-{n}"));
         let _ = fs::remove_dir_all(&dir);
         let opts = OpenOptions {
@@ -434,7 +435,10 @@ mod tests {
     fn corrupt_changelog_does_not_block_open() {
         use crate::db::{Db, OpenOptions};
         use std::time::{SystemTime, UNIX_EPOCH};
-        let n = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let n = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
         let dir = std::env::temp_dir().join(format!("pedradb-chlog-corrupt-{n}"));
         let _ = fs::remove_dir_all(&dir);
         let opts = OpenOptions {
@@ -471,5 +475,4 @@ mod tests {
             }
         }
     }
-
 }

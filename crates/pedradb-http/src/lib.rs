@@ -72,6 +72,7 @@ fn read_req(stream: &mut TcpStream) -> Result<(String, String, Vec<u8>, Vec<(Str
     let method = parts.next().unwrap_or("").to_ascii_uppercase();
     let path = parts.next().unwrap_or("/").to_string();
     let mut content_len = 0usize;
+    let mut has_content_len = false;
     let mut headers = Vec::new();
     for line in lines {
         if let Some((k, v)) = line.split_once(':') {
@@ -81,12 +82,17 @@ fn read_req(stream: &mut TcpStream) -> Result<(String, String, Vec<u8>, Vec<(Str
             .to_ascii_lowercase()
             .strip_prefix("content-length:")
         {
-            content_len = v.trim().parse().unwrap_or(0);
+            has_content_len = true;
+            // F87: invalid CL used to become 0 and truncate the body to empty.
+            content_len = v
+                .trim()
+                .parse()
+                .map_err(|_| HttpError::App("bad content-length".into()))?;
         }
     }
     // Cap body size (F8): previously Content-Length could force multi-GiB alloc.
     const MAX_BODY: usize = 16 * 1024 * 1024;
-    if content_len > MAX_BODY {
+    if has_content_len && content_len > MAX_BODY {
         return Err(HttpError::App(format!(
             "content-length {content_len} exceeds max {MAX_BODY}"
         )));
@@ -97,17 +103,27 @@ fn read_req(stream: &mut TcpStream) -> Result<(String, String, Vec<u8>, Vec<(Str
         .unwrap()
         + 4;
     let mut body = buf[header_end..].to_vec();
-    while body.len() < content_len {
-        let n = stream.read(&mut tmp)?;
-        if n == 0 {
-            break;
+    if has_content_len {
+        while body.len() < content_len {
+            let n = stream.read(&mut tmp)?;
+            if n == 0 {
+                break;
+            }
+            body.extend_from_slice(&tmp[..n]);
+            if body.len() > MAX_BODY {
+                return Err(HttpError::App("body exceeds max".into()));
+            }
         }
-        body.extend_from_slice(&tmp[..n]);
+        body.truncate(content_len);
+    } else {
+        // F86: no Content-Length — keep bytes already past the header break.
+        // Do not drain the socket (GET/keep-alive would hang waiting for EOF).
+        // Previously content_len defaulted to 0 and `truncate(0)` discarded
+        // a PUT payload that arrived with the headers.
         if body.len() > MAX_BODY {
             return Err(HttpError::App("body exceeds max".into()));
         }
     }
-    body.truncate(content_len);
     let _ = body_start;
     Ok((method, path, body, headers))
 }
@@ -690,6 +706,80 @@ mod tests {
             "Authorization: BEARER must authenticate, body={body:?}"
         );
         assert_eq!(body, b"y");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// F86: HTTP/1.0 PUT without Content-Length still delivered a body after
+    /// the header break. `read_req` defaulted CL=0 and `truncate(0)` dropped it,
+    /// so the store recorded empty instead of the payload.
+    #[test]
+    fn kv_http_put_without_content_length_keeps_body() {
+        let dir = temp("no-cl");
+        let addr = bind_ephemeral();
+        let srv = KvServer::open(&dir).unwrap();
+        thread::spawn(move || {
+            let _ = srv.serve(addr);
+        });
+        thread::sleep(Duration::from_millis(100));
+        let mut stream = TcpStream::connect(addr).unwrap();
+        stream
+            .write_all(b"PUT /kv/nobody HTTP/1.0\r\nHost: localhost\r\n\r\nhello")
+            .unwrap();
+        let _ = stream.shutdown(std::net::Shutdown::Write);
+        let mut resp = Vec::new();
+        stream.read_to_end(&mut resp).unwrap();
+        let text = String::from_utf8_lossy(&resp);
+        let put_code = text
+            .lines()
+            .next()
+            .and_then(|l| l.split_whitespace().nth(1))
+            .and_then(|c| c.parse::<u16>().ok())
+            .unwrap_or(0);
+        assert_eq!(put_code, 200, "PUT without CL must still be accepted, {text:?}");
+        let (code, body) = http_exchange(addr, "GET", "/kv/nobody", b"").unwrap();
+        assert_eq!(
+            code, 200,
+            "missing Content-Length dropped the body, GET code={code} body={body:?}"
+        );
+        assert_eq!(
+            body, b"hello",
+            "PUT body after header break must be stored, got {body:?}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// F87: `Content-Length: abc` parsed as 0 (`unwrap_or(0)`) and truncated
+    /// the payload — same silent empty put as F86, with a *present* bad header.
+    #[test]
+    fn kv_http_bad_content_length_does_not_store_empty() {
+        let dir = temp("bad-cl");
+        let addr = bind_ephemeral();
+        let srv = KvServer::open(&dir).unwrap();
+        thread::spawn(move || {
+            let _ = srv.serve(addr);
+        });
+        thread::sleep(Duration::from_millis(100));
+        let mut stream = TcpStream::connect(addr).unwrap();
+        stream
+            .write_all(b"PUT /kv/badcl HTTP/1.0\r\nContent-Length: abc\r\nHost: localhost\r\n\r\nhello")
+            .unwrap();
+        let _ = stream.shutdown(std::net::Shutdown::Write);
+        let mut resp = Vec::new();
+        let _ = stream.read_to_end(&mut resp);
+        let (code, body) = http_exchange(addr, "GET", "/kv/badcl", b"").unwrap();
+        assert!(
+            !(code == 200 && body.is_empty()),
+            "bad Content-Length stored empty value (silent wrong), GET {code} {body:?}"
+        );
+        assert_ne!(
+            (code, body.as_slice()),
+            (200, b"hello".as_slice()),
+            "malformed Content-Length must not be treated as a successful framed put"
+        );
+        assert_eq!(
+            code, 404,
+            "malformed Content-Length must fail closed (no store), GET {code} {body:?}"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -60,6 +60,7 @@ use bytes::Bytes;
 use crate::batch::{WriteOp, WriteRecord};
 use crate::cache::{BlockCache, TableCache};
 use crate::change_feed::{ChangeEntry, ChangeKind, ChangeLog};
+use crate::changelog_kernel::changelog_needs_sst_rebuild;
 use crate::env::{Env, EnvFile, StdEnv};
 use crate::error::{CoreError, Result};
 use crate::host::Host;
@@ -68,13 +69,13 @@ use crate::lock::DirLock;
 use crate::manifest::{self, VersionSet};
 use crate::memtable::{Lookup, MemTable};
 use crate::merge::{range_deleted, StreamingVisibleIter, VisibleKv};
-use crate::vlog::{self, ValueLog, VlogRewriteStats, VLOG_FILE_NAME};
-use std::io::{Read, Write};
-use std::sync::Arc;
-use parking_lot::Mutex;
 use crate::sst::{write_sst_entries_on, write_sst_on, SstTable};
 use crate::tx::Transaction;
+use crate::vlog::{self, ValueLog, VlogRewriteStats, VLOG_FILE_NAME};
 use crate::wal::Wal;
+use parking_lot::Mutex;
+use std::io::{Read, Write};
+use std::sync::Arc;
 
 /// Max LSM level we promote into (L0 = flush target, L1+ = compacted).
 pub const MAX_LSM_LEVEL: u32 = 3;
@@ -460,7 +461,11 @@ impl<E: Env> Db<E> {
     ///
     /// # Errors
     /// Same as [`Self::open_with_env`].
-    pub fn open_with_host(path: impl AsRef<Path>, opts: OpenOptions, host: &impl Host<Env = E>) -> Result<Self> {
+    pub fn open_with_host(
+        path: impl AsRef<Path>,
+        opts: OpenOptions,
+        host: &impl Host<Env = E>,
+    ) -> Result<Self> {
         Self::open_with_env(path, opts, host.env().clone())
     }
 
@@ -540,7 +545,9 @@ impl<E: Env> Db<E> {
 
         let next_seq = max_seq.saturating_add(1).max(1);
         if next_seq > MAX_SEQUENCE_NUMBER {
-            return Err(CoreError::Internal("sequence number space exhausted".into()));
+            return Err(CoreError::Internal(
+                "sequence number space exhausted".into(),
+            ));
         }
 
         let large_value_threshold = opts.large_value_threshold.filter(|n| *n > 0);
@@ -842,11 +849,7 @@ impl<E: Env> Db<E> {
     /// Prefer [`Self::range_limited`] or streaming [`Self::scan`] / [`Self::scan_at`]
     /// for pagination and large scans.
     #[must_use]
-    pub fn range(
-        &self,
-        start: Bound<&[u8]>,
-        end: Bound<&[u8]>,
-    ) -> Vec<(Bytes, Bytes)> {
+    pub fn range(&self, start: Bound<&[u8]>, end: Bound<&[u8]>) -> Vec<(Bytes, Bytes)> {
         self.range_at(self.last_sequence(), start, end)
     }
 
@@ -960,8 +963,7 @@ impl<E: Env> Db<E> {
         if snapshot == 0 {
             return StreamingVisibleIter::new(Vec::new(), 0, start, end, limit);
         }
-        let mut streams: Vec<Vec<(InternalKey, Bytes)>> =
-            Vec::with_capacity(2 + self.ssts.len());
+        let mut streams: Vec<Vec<(InternalKey, Bytes)>> = Vec::with_capacity(2 + self.ssts.len());
         streams.push(self.memtable_stream(&self.mem, start, end, resolve_values));
         if let Some(ref imm) = self.imm {
             streams.push(self.memtable_stream(imm, start, end, resolve_values));
@@ -1029,7 +1031,8 @@ impl<E: Env> Db<E> {
         if kind == ValueType::RangeDeletion {
             return stored;
         }
-        self.resolve_stored_value(stored).unwrap_or_else(|_| Bytes::new())
+        self.resolve_stored_value(stored)
+            .unwrap_or_else(|_| Bytes::new())
     }
 
     /// Observability snapshot: sizes, counts, WAL length (RFC-0014 / RFC-0016).
@@ -1061,10 +1064,7 @@ impl<E: Env> Db<E> {
             block_cache_hits: self.block_cache.hits(),
             block_cache_misses: self.block_cache.misses(),
             auto_compact_failures: self.auto_compact_failures,
-            last_auto_compact_error: self
-                .last_auto_compact_error
-                .clone()
-                .unwrap_or_default(),
+            last_auto_compact_error: self.last_auto_compact_error.clone().unwrap_or_default(),
             wal_sync_count: self.wal_sync_count,
             vlog_bytes,
             vlog_live_bytes,
@@ -1194,7 +1194,9 @@ impl<E: Env> Db<E> {
         for name in self.env.read_dir_names(&self.dir)? {
             // Inventory files only (`MANIFEST-000001`); skip `MANIFEST-*.tmp` install temps.
             if name.starts_with(manifest::MANIFEST_PREFIX)
-                && !name.rsplit_once('.').is_some_and(|(_, e)| e.eq_ignore_ascii_case("tmp"))
+                && !name
+                    .rsplit_once('.')
+                    .is_some_and(|(_, e)| e.eq_ignore_ascii_case("tmp"))
             {
                 self.env
                     .copy_file(&self.dir.join(&name), &dest.join(&name))?;
@@ -1206,13 +1208,11 @@ impl<E: Env> Db<E> {
                 .file_name()
                 .and_then(|n| n.to_str())
                 .ok_or_else(|| CoreError::Internal("sst path missing name".into()))?;
-            self.env
-                .copy_file(table.path(), &dest.join(name))?;
+            self.env.copy_file(table.path(), &dest.join(name))?;
         }
         let wal_src = self.dir.join(WAL_FILE_NAME);
         if self.env.exists(&wal_src) {
-            self.env
-                .copy_file(&wal_src, &dest.join(WAL_FILE_NAME))?;
+            self.env.copy_file(&wal_src, &dest.join(WAL_FILE_NAME))?;
         }
         // Large-value spill (RFC-0014 P2.2): SST/WAL may hold only VLG1 pointers.
         // F44: mid-GC MANIFEST may set `vlog_use_new` with live data in VALUES.vlog.new
@@ -1220,14 +1220,13 @@ impl<E: Env> Db<E> {
         // back to stale primary bytes → missing/wrong large values after restore.
         let vlog_src = self.dir.join(VLOG_FILE_NAME);
         if self.env.exists(&vlog_src) {
-            self.env
-                .copy_file(&vlog_src, &dest.join(VLOG_FILE_NAME))?;
+            self.env.copy_file(&vlog_src, &dest.join(VLOG_FILE_NAME))?;
         }
         for num in vlog::list_blob_nums(&self.env, &self.dir) {
             let src = vlog::blob_path(&self.dir, num);
-            let name = src.file_name().ok_or_else(|| {
-                CoreError::Internal("blob path missing file name".into())
-            })?;
+            let name = src
+                .file_name()
+                .ok_or_else(|| CoreError::Internal("blob path missing file name".into()))?;
             self.env.copy_file(&src, &dest.join(name))?;
         }
         let vlog_new_src = self.dir.join(crate::vlog::VLOG_NEW_NAME);
@@ -1269,7 +1268,8 @@ impl<E: Env> Db<E> {
     pub fn flush(&mut self) -> Result<()> {
         self.ensure_not_fenced()?;
         let _ = crate::buggify_hooks::maybe_arm(crate::buggify_hooks::sites::BEFORE_SST_RENAME);
-        let _ = crate::buggify_hooks::maybe_arm(crate::buggify_hooks::sites::BEFORE_MANIFEST_RENAME);
+        let _ =
+            crate::buggify_hooks::maybe_arm(crate::buggify_hooks::sites::BEFORE_MANIFEST_RENAME);
         // Finish any in-flight imm first (single-flight).
         if self.imm.is_some() {
             self.flush_imm_to_l0()?;
@@ -1508,8 +1508,7 @@ impl<E: Env> Db<E> {
         for t in &self.ssts {
             merged.extend(t.entries_cloned());
         }
-        let merged =
-            crate::merge::gc_compact_entries(merged, CompactOptions::latest_only().gc);
+        let merged = crate::merge::gc_compact_entries(merged, CompactOptions::latest_only().gc);
 
         let num = self.next_file_num;
         let final_path = self.dir.join(format!("{num:06}.sst"));
@@ -1990,12 +1989,13 @@ impl<E: Env> Db<E> {
     /// `vlog_use_new` / mem / `self.vlog`.
     fn prepare_vlog_gc(&self) -> Result<VlogGcPrepared> {
         let live = self.collect_vlog_live_payloads()?;
-        let (stats, remap) =
-            ValueLog::<E::File>::rewrite_live_to_new(&self.env, &self.dir, &live)?;
+        let (stats, remap) = ValueLog::<E::File>::rewrite_live_to_new(&self.env, &self.dir, &live)?;
         let prepared = match self.prepare_remapped_ssts(&remap) {
             Ok(p) => p,
             Err(e) => {
-                let _ = self.env.remove_file(&self.dir.join(crate::vlog::VLOG_NEW_NAME));
+                let _ = self
+                    .env
+                    .remove_file(&self.dir.join(crate::vlog::VLOG_NEW_NAME));
                 return Err(e);
             }
         };
@@ -2008,11 +2008,7 @@ impl<E: Env> Db<E> {
 
     /// Install phase: MANIFEST commit then handle swap + mem remap.
     fn install_vlog_gc(&mut self, prepared: VlogGcPrepared) -> Result<VlogRewriteStats> {
-        let VlogGcPrepared {
-            stats,
-            remap,
-            ssts,
-        } = prepared;
+        let VlogGcPrepared { stats, remap, ssts } = prepared;
         let old_paths = ssts.old_paths;
         let next_file_num = ssts.next_file_num;
         let new_tables = ssts.tables;
@@ -2030,7 +2026,9 @@ impl<E: Env> Db<E> {
             self.sst_levels = prev_levels;
             self.next_file_num = prev_next;
             self.vlog_use_new = false;
-            let _ = self.env.remove_file(&self.dir.join(crate::vlog::VLOG_NEW_NAME));
+            let _ = self
+                .env
+                .remove_file(&self.dir.join(crate::vlog::VLOG_NEW_NAME));
             return Err(e);
         }
 
@@ -2341,11 +2339,7 @@ impl<E: Env> Db<E> {
     ///
     /// # Errors
     /// WAL I/O, sequence exhaustion, or `start >= end`.
-    pub fn delete_range(
-        &mut self,
-        start: impl AsRef<[u8]>,
-        end: impl AsRef<[u8]>,
-    ) -> Result<()> {
+    pub fn delete_range(&mut self, start: impl AsRef<[u8]>, end: impl AsRef<[u8]>) -> Result<()> {
         self.delete_range_with(start, end, WriteOptions::default())
     }
 
@@ -2400,27 +2394,24 @@ impl<E: Env> Db<E> {
     /// All durable changes with `sequence > from_seq` (tail / watch catch-up).
     #[must_use]
     pub fn changes_after(&self, from_seq: SequenceNumber) -> Vec<ChangeEntry> {
-        self.change_log.changes_after(from_seq.min(self.last_sequence()))
+        self.change_log
+            .changes_after(from_seq.min(self.last_sequence()))
     }
 
     /// When CHANGELOG is missing after flush (WAL already truncated), rebuild a
     /// last-per-key feed from MemTable ∪ SSTs so fold/journal are not empty.
     fn maybe_rebuild_feed_from_live(&mut self) {
-        if self.change_log.max_sequence().unwrap_or(0) > 0 {
-            return;
-        }
-        if self.last_sequence() == 0 {
+        let feed_empty = self.change_log.max_sequence().unwrap_or(0) == 0;
+        if !changelog_needs_sst_rebuild(feed_empty, self.last_sequence()) {
             return;
         }
         let mut latest: BTreeMap<Bytes, (InternalKey, Bytes)> = BTreeMap::new();
         let consider = |map: &mut BTreeMap<Bytes, (InternalKey, Bytes)>,
                         ik: InternalKey,
-                        v: Bytes| {
-            match map.get(&ik.user_key) {
-                Some((old, _)) if old.sequence >= ik.sequence => {}
-                _ => {
-                    map.insert(ik.user_key.clone(), (ik, v));
-                }
+                        v: Bytes| match map.get(&ik.user_key) {
+            Some((old, _)) if old.sequence >= ik.sequence => {}
+            _ => {
+                map.insert(ik.user_key.clone(), (ik, v));
             }
         };
         for (ik, v) in self.mem.iter_internal() {
@@ -2500,8 +2491,7 @@ impl<E: Env> Db<E> {
             };
             match op {
                 BatchOp::Put { key, value } => {
-                    self.bytes_ingested =
-                        self.bytes_ingested.saturating_add(value.len() as u64);
+                    self.bytes_ingested = self.bytes_ingested.saturating_add(value.len() as u64);
                     let stored = match self.maybe_spill_large_value(value) {
                         Ok(v) => v,
                         Err(e) => {
@@ -2657,7 +2647,9 @@ impl<E: Env> Db<E> {
     pub(crate) fn alloc_seq(&mut self) -> Result<SequenceNumber> {
         let seq = self.next_seq;
         if seq > MAX_SEQUENCE_NUMBER {
-            return Err(CoreError::Internal("sequence number space exhausted".into()));
+            return Err(CoreError::Internal(
+                "sequence number space exhausted".into(),
+            ));
         }
         self.next_seq = seq + 1;
         Ok(seq)
@@ -2734,8 +2726,7 @@ impl<E: Env> Db<E> {
             };
             match op {
                 BatchOp::Put { key, value } => {
-                    self.bytes_ingested =
-                        self.bytes_ingested.saturating_add(value.len() as u64);
+                    self.bytes_ingested = self.bytes_ingested.saturating_add(value.len() as u64);
                     let stored = match self.maybe_spill_large_value(value) {
                         Ok(v) => v,
                         Err(e) => {
@@ -2756,9 +2747,7 @@ impl<E: Env> Db<E> {
         if records.is_empty() {
             return Ok((records, self.last_sequence()));
         }
-        let last = records
-            .last()
-            .map_or(self.last_sequence(), |o| o.sequence);
+        let last = records.last().map_or(self.last_sequence(), |o| o.sequence);
         Ok((records, last))
     }
 
@@ -2882,7 +2871,11 @@ fn finish_group_results(
 ) -> Vec<Result<SequenceNumber>> {
     results
         .into_iter()
-        .map(|r| r.unwrap_or(Err(CoreError::Internal("group commit missing result".into()))))
+        .map(|r| {
+            r.unwrap_or(Err(CoreError::Internal(
+                "group commit missing result".into(),
+            )))
+        })
         .collect()
 }
 
@@ -3062,7 +3055,9 @@ pub fn read_checkpoint_meta(env: &impl Env, dir: impl AsRef<Path>) -> Result<Che
         .map_err(|_| CoreError::Internal("checkpoint meta count truncated".into()))?;
     let sst_count_u64 = u64::from_le_bytes(count_arr);
     let sst_count = usize::try_from(sst_count_u64).map_err(|_| {
-        CoreError::Internal(format!("checkpoint sst_count {sst_count_u64} does not fit usize"))
+        CoreError::Internal(format!(
+            "checkpoint sst_count {sst_count_u64} does not fit usize"
+        ))
     })?;
     Ok(CheckpointMeta {
         last_sequence,
@@ -3076,7 +3071,11 @@ pub fn read_checkpoint_meta(env: &impl Env, dir: impl AsRef<Path>) -> Result<Che
 ///
 /// # Errors
 /// I/O or non-empty dest.
-pub fn copy_db_directory(env: &impl Env, src: impl AsRef<Path>, dest: impl AsRef<Path>) -> Result<()> {
+pub fn copy_db_directory(
+    env: &impl Env,
+    src: impl AsRef<Path>,
+    dest: impl AsRef<Path>,
+) -> Result<()> {
     let src = src.as_ref();
     let dest = dest.as_ref();
     if env.exists(dest) {
@@ -3208,10 +3207,7 @@ fn recover_ssts<E: Env>(
 }
 
 /// Load `NNNNNN.sst` files ascending; return tables, next file num, max sequence.
-fn load_ssts_scan<E: Env>(
-    env: &E,
-    dir: &Path,
-) -> Result<(Vec<SstTable>, u64, SequenceNumber)> {
+fn load_ssts_scan<E: Env>(env: &E, dir: &Path) -> Result<(Vec<SstTable>, u64, SequenceNumber)> {
     let mut files: Vec<(u64, PathBuf)> = Vec::new();
     if env.exists(dir) {
         for name in env.read_dir_names(dir)? {
@@ -3564,10 +3560,7 @@ mod tests {
         }
         db.flush().unwrap();
         let scanned: Vec<_> = db
-            .scan(
-                Bound::Unbounded,
-                Bound::Unbounded,
-            )
+            .scan(Bound::Unbounded, Bound::Unbounded)
             .map(|kv| (kv.key.to_vec(), kv.value.to_vec()))
             .collect();
         assert_eq!(scanned.len(), 6);
@@ -3863,7 +3856,7 @@ mod tests {
                     auto_compact_sst_count: None,
                     auto_compact_sst_bytes: None,
                     exclusive: true,
-                large_value_threshold: None,
+                    large_value_threshold: None,
                 },
             )
             .unwrap();
@@ -3984,7 +3977,7 @@ mod tests {
                     auto_compact_sst_count: None,
                     auto_compact_sst_bytes: None,
                     exclusive: true,
-                large_value_threshold: None,
+                    large_value_threshold: None,
                 },
             )
             .unwrap();
@@ -4016,11 +4009,8 @@ mod tests {
             model.insert(b"tx-a".to_vec(), b"A".to_vec());
             model.insert(b"tx-b".to_vec(), b"B".to_vec());
             // Batch.
-            db.apply_batch([
-                BatchOp::put(b"batch1", b"1"),
-                BatchOp::put(b"batch2", b"2"),
-            ])
-            .unwrap();
+            db.apply_batch([BatchOp::put(b"batch1", b"1"), BatchOp::put(b"batch2", b"2")])
+                .unwrap();
             model.insert(b"batch1".to_vec(), b"1".to_vec());
             model.insert(b"batch2".to_vec(), b"2".to_vec());
             db.flush().unwrap();
@@ -4268,7 +4258,7 @@ mod tests {
                     auto_compact_sst_count: None,
                     auto_compact_sst_bytes: None,
                     exclusive: true,
-                large_value_threshold: None,
+                    large_value_threshold: None,
                 },
             )
             .unwrap();
@@ -4378,10 +4368,7 @@ mod tests {
                 self.inner.create_dir_all(path)
             }
             fn create(&self, path: &Path) -> io::Result<Self::File> {
-                let name = path
-                    .file_name()
-                    .and_then(|n| n.to_str())
-                    .unwrap_or("");
+                let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
                 if name.ends_with(".sst.tmp") {
                     let left = self.remaining.get();
                     if left == 0 {
@@ -4662,7 +4649,11 @@ mod tests {
                 .stderr(Stdio::null())
                 .spawn()
                 .unwrap();
-            fs::write(dir.join(crate::lock::LOCK_FILE), format!("{}\n", child.id())).unwrap();
+            fs::write(
+                dir.join(crate::lock::LOCK_FILE),
+                format!("{}\n", child.id()),
+            )
+            .unwrap();
             match Db::open(&dir) {
                 Err(CoreError::AlreadyOpen { .. }) => {}
                 Ok(_) => {
@@ -4707,7 +4698,7 @@ mod tests {
             auto_compact_sst_count: None,
             auto_compact_sst_bytes: None,
             exclusive: false,
-                large_value_threshold: None,
+            large_value_threshold: None,
         };
         let db = Db::open_with(&dir, opts).unwrap();
         assert!(
@@ -4984,7 +4975,6 @@ mod tests {
         let _ = fs::remove_dir_all(&ckpt);
     }
 
-
     #[test]
     fn checkpoint_mid_vlog_gc_preserves_large_values() {
         let dir = temp_dir();
@@ -5068,10 +5058,7 @@ mod tests {
         db.flush().unwrap();
         assert_eq!(db.sst_count(), 1);
         // Present key still works through bloom + index.
-        assert_eq!(
-            db.get(b"present-0025").as_deref(),
-            Some(b"v".as_ref())
-        );
+        assert_eq!(db.get(b"present-0025").as_deref(), Some(b"v".as_ref()));
         // Absent keys must not invent values (bloom may F.P. but get still correct).
         for i in 0..50u32 {
             let k = format!("absent-{i:04}");
@@ -5124,7 +5111,11 @@ mod tests {
             "compact must promote into L1+, max_level={}",
             db.max_level()
         );
-        assert_eq!(db.level_file_count(0), 0, "L0 should be empty after compact into L1");
+        assert_eq!(
+            db.level_file_count(0),
+            0,
+            "L0 should be empty after compact into L1"
+        );
         assert!(db.level_file_count(1) >= 1);
 
         // New flush stays on L0 while L1 holds compacted data → ≥2 levels live.
@@ -5205,15 +5196,17 @@ mod tests {
         }
         // Chunked: first page then exclusive continue.
         let page: Vec<_> = db
-            .scan_at(db.last_sequence(), Bound::Unbounded, Bound::Unbounded, Some(100))
+            .scan_at(
+                db.last_sequence(),
+                Bound::Unbounded,
+                Bound::Unbounded,
+                Some(100),
+            )
             .collect();
         assert_eq!(page.len(), 100);
         let next_start = page.last().unwrap().key.clone();
         let rest: Vec<_> = db
-            .scan(
-                Bound::Excluded(next_start.as_ref()),
-                Bound::Unbounded,
-            )
+            .scan(Bound::Excluded(next_start.as_ref()), Bound::Unbounded)
             .collect();
         assert_eq!(rest.len(), (N as usize) - 100);
         // range_at_limited uses the same streaming path.
@@ -5269,7 +5262,10 @@ mod tests {
             db.max_level()
         );
         // Compact is subset (levels remain; not necessarily single SST forever).
-        assert!(db.sst_count() >= 2, "multi-level inventory should keep ≥2 files");
+        assert!(
+            db.sst_count() >= 2,
+            "multi-level inventory should keep ≥2 files"
+        );
 
         let streamed: Vec<_> = db
             .scan(Bound::Unbounded, Bound::Unbounded)
@@ -5310,7 +5306,7 @@ mod tests {
                     auto_compact_sst_count: None,
                     auto_compact_sst_bytes: None,
                     exclusive: true,
-                large_value_threshold: None,
+                    large_value_threshold: None,
                 },
             )
             .unwrap();
@@ -5333,13 +5329,22 @@ mod tests {
                 db.table_cache.hits() > hits_before,
                 "second open must be a table-cache hit"
             );
-            assert_eq!(db.get(b"ck0001").as_deref(), Some(vec![b'Z'; 128].as_slice()));
+            assert_eq!(
+                db.get(b"ck0001").as_deref(),
+                Some(vec![b'Z'; 128].as_slice())
+            );
             db.close().unwrap();
         }
         // Reopen: compressed SST v4 still readable.
         let db = Db::open(&dir).unwrap();
-        assert_eq!(db.get(b"ck0001").as_deref(), Some(vec![b'Z'; 128].as_slice()));
-        assert_eq!(db.get(b"ck0199").as_deref(), Some(vec![b'Z'; 128].as_slice()));
+        assert_eq!(
+            db.get(b"ck0001").as_deref(),
+            Some(vec![b'Z'; 128].as_slice())
+        );
+        assert_eq!(
+            db.get(b"ck0199").as_deref(),
+            Some(vec![b'Z'; 128].as_slice())
+        );
         // verify uses table cache path.
         db.table_cache.reset_stats();
         db.verify_checksums().unwrap();
@@ -5466,7 +5471,7 @@ mod tests {
                     auto_compact_sst_count: if auto { Some(2) } else { None },
                     auto_compact_sst_bytes: None,
                     exclusive: true,
-                large_value_threshold: None,
+                    large_value_threshold: None,
                 },
             )
             .unwrap();
@@ -5523,7 +5528,9 @@ mod tests {
         );
         // Sanity: deleted keys gone, overwrites present.
         assert!(a.iter().all(|(k, _)| k[0] != b'k' || k[1] >= 10));
-        assert!(a.iter().any(|(k, v)| k == b"k\x0f".as_slice() && v[0] == b'z'));
+        assert!(a
+            .iter()
+            .any(|(k, v)| k == b"k\x0f".as_slice() && v[0] == b'z'));
         let _ = fs::remove_dir_all(&d1);
         let _ = fs::remove_dir_all(&d2);
     }
@@ -5755,18 +5762,20 @@ mod tests {
         use std::thread;
 
         let dir = temp_dir();
-        let db = Arc::new(crate::ConcurrentDb::open_with(
-            &dir,
-            OpenOptions {
-                sync: true,
-                auto_flush_bytes: Some(8 * 1024),
-                auto_compact_sst_count: None,
-                auto_compact_sst_bytes: None,
-                exclusive: true,
-                large_value_threshold: None,
-            },
-        )
-        .unwrap());
+        let db = Arc::new(
+            crate::ConcurrentDb::open_with(
+                &dir,
+                OpenOptions {
+                    sync: true,
+                    auto_flush_bytes: Some(8 * 1024),
+                    auto_compact_sst_count: None,
+                    auto_compact_sst_bytes: None,
+                    exclusive: true,
+                    large_value_threshold: None,
+                },
+            )
+            .unwrap(),
+        );
 
         let silent_wrong = Arc::new(std::sync::atomic::AtomicU64::new(0));
         let mut handles = Vec::new();
