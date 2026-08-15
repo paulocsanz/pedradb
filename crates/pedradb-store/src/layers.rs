@@ -136,9 +136,10 @@ fn push_len_pref(buf: &mut Vec<u8>, part: &[u8]) {
 /// Tip key storing the last secondary index value for (table, col, pk) — F64.
 #[must_use]
 pub fn table_index_tip_key(table: &[u8], col: &[u8], pk: &[u8]) -> Vec<u8> {
-    // Lead with pk so tip shards with the row (same range leader).
-    let mut k = Vec::with_capacity(pk.len() + table.len() + col.len() + 16);
-    k.extend_from_slice(pk);
+    // Lead with first byte of pk for range sharding; length-prefix full pk (F82).
+    let mut k = Vec::with_capacity(pk.len() + table.len() + col.len() + 24);
+    k.push(pk.first().copied().unwrap_or(0));
+    push_len_pref(&mut k, pk);
     k.push(0x00);
     k.extend_from_slice(b"m"); // meta tip marker
     push_len_pref(&mut k, table);
@@ -219,8 +220,11 @@ pub fn table_index_value_range(val: &[u8]) -> (Vec<u8>, Vec<u8>) {
 /// different leaders (Postgres N-writer / TiDB-shaped sharding).
 #[must_use]
 pub fn table_row_key(table: &[u8], pk: &[u8]) -> Vec<u8> {
-    let mut k = Vec::with_capacity(pk.len() + table.len() + 12);
-    k.extend_from_slice(pk);
+    // F82: raw `pk||0x00||t||…` is not injective when `pk` embeds `0x00` + marker.
+    // Shard on first pk byte; length-prefix the full pk.
+    let mut k = Vec::with_capacity(pk.len() + table.len() + 16);
+    k.push(pk.first().copied().unwrap_or(0));
+    push_len_pref(&mut k, pk);
     k.push(0x00);
     k.extend_from_slice(b"t");
     push_len_pref(&mut k, table);
@@ -824,6 +828,17 @@ mod tests {
         let r1 = table_row_key(b"a", b"pk1");
         let r2 = table_row_key(b"a/x", b"pk1");
         assert_ne!(r1, r2, "row key must distinguish table names with slash");
+        // F82: length-prefix pk so embedded 0x00 cannot forge markers.
+        assert_ne!(
+            table_row_key(b"x", b"a"),
+            table_row_key(b"x", &[b'a', 0x00, b't']),
+            "row key must distinguish pk with embedded NUL"
+        );
+        assert_ne!(
+            table_row_key(b"tbl", b"p"),
+            table_index_tip_key(b"tbl", b"c", b"p"),
+            "row key must not collide with tip key"
+        );
 
         put_with_secondary_index(&mut c, b"t", b"1", b"email", b"old@x", b"row").unwrap();
         put_with_secondary_index(&mut c, b"t", b"1", b"email", b"new@x", b"row2").unwrap();
