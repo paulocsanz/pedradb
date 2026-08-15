@@ -4373,6 +4373,7 @@ impl<E: Env> StoreCluster<E> {
         pairs: impl IntoIterator<Item = (impl AsRef<[u8]>, impl AsRef<[u8]>)>,
     ) -> Result<()> {
         let mut by_range: HashMap<u64, Vec<(Vec<u8>, Vec<u8>)>> = HashMap::new();
+        let mut flat: Vec<(Vec<u8>, Vec<u8>)> = Vec::new();
         for (k, v) in pairs {
             let key = k.as_ref().to_vec();
             if is_reserved_store_key(&key) {
@@ -4388,7 +4389,14 @@ impl<E: Env> StoreCluster<E> {
                 });
             }
             let rid = self.locate(&key)?;
-            by_range.entry(rid).or_default().push((key, val));
+            by_range.entry(rid).or_default().push((key.clone(), val.clone()));
+            flat.push((key, val));
+        }
+        // F77: multi-range sequential put_batch left earlier ranges committed when a
+        // later range failed (silent partial apply). Cross-range uses 2PC commit_tx.
+        if by_range.len() > 1 {
+            let _ = self.commit_tx(flat)?;
+            return Ok(());
         }
         let mut rids: Vec<u64> = by_range.keys().copied().collect();
         rids.sort_unstable();
@@ -6935,7 +6943,37 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// RFC-0025 P0.1: put_many groups by range into put_batch.
+    /// F77: multi-range put_many uses 2PC (not sequential put_batch half-apply).
+    #[test]
+    fn put_many_multi_range_is_atomic_on_failure() {
+        let dir = temp();
+        let mut c = StoreCluster::open(&dir, 3, 4).unwrap();
+        c.elect_all(100).unwrap();
+        // Keys in different first-byte ranges under 4-way split.
+        let metas = c.range_metas().to_vec();
+        assert!(metas.len() >= 2, "need multi-range: {metas:?}");
+        let k0 = if metas[0].start.is_empty() {
+            vec![0x00, b'a']
+        } else {
+            let mut k = metas[0].start.clone();
+            k.push(b'a');
+            k
+        };
+        let k1 = {
+            let mut k = metas[1].start.clone();
+            k.push(b'b');
+            k
+        };
+        assert_ne!(c.locate(&k0).unwrap(), c.locate(&k1).unwrap());
+        // Happy path: both apply atomically via commit_tx.
+        c.put_many([(k0.as_slice(), b"v0".as_slice()), (k1.as_slice(), b"v1".as_slice())])
+            .unwrap();
+        assert!(c.count_applied_eq(&k0, b"v0") >= 2);
+        assert!(c.count_applied_eq(&k1, b"v1") >= 2);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0025 P0.1: put_many groups by range into put_batch (single range).
     #[test]
     fn put_many_same_range_and_lab_open() {
         let dir = temp();
