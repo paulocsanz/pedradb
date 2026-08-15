@@ -18,6 +18,7 @@
 //! - tag 14 DcsCas: key, value, expected_rev
 //! - tag 15 DcsGet: key — returns RespValue (user bytes) or empty
 //! - tag 16 RespRev: u64 mod_revision
+//! - tag 17 PutBatch: u32 n + repeated (key, value) — range-grouped put_many (RFC-0025 P1.3)
 
 use crate::msg::PeerMsg;
 use crate::{Result, StoreError, validate_tx_pairs};
@@ -112,6 +113,11 @@ pub enum WireMsg {
     RespRev {
         /// `mod_revision` after the mutation.
         rev: u64,
+    },
+    /// Multi-key put via server `put_many` (not full 2PC TX; same-range batch).
+    PutBatch {
+        /// Key/value pairs (may span ranges → one batch each).
+        pairs: Vec<(Vec<u8>, Vec<u8>)>,
     },
 }
 
@@ -237,6 +243,14 @@ impl WireMsg {
                 b.push(16);
                 put_u64(&mut b, *rev);
             }
+            WireMsg::PutBatch { pairs } => {
+                b.push(17);
+                put_u32(&mut b, pairs.len() as u32);
+                for (k, v) in pairs {
+                    put_bytes(&mut b, k);
+                    put_bytes(&mut b, v);
+                }
+            }
         }
         b
     }
@@ -341,6 +355,20 @@ impl WireMsg {
             16 => Ok(WireMsg::RespRev {
                 rev: take_u64(buf, &mut off)?,
             }),
+            17 => {
+                let n = take_u32(buf, &mut off)? as usize;
+                let rem = buf.len().saturating_sub(off);
+                if n > 10_000 || n > rem {
+                    return Err(StoreError::Msg("put_batch too many pairs".into()));
+                }
+                let mut pairs = Vec::with_capacity(n);
+                for _ in 0..n {
+                    let key = take_bytes(buf, &mut off)?;
+                    let value = take_bytes(buf, &mut off)?;
+                    pairs.push((key, value));
+                }
+                Ok(WireMsg::PutBatch { pairs })
+            }
             t => Err(StoreError::Msg(format!("tcp bad tag {t}"))),
         }
     }
@@ -519,6 +547,35 @@ pub fn client_commit_tx(
     }
 }
 
+/// Client helper: multi-key put via TCP `PutBatch` → server `put_many` (RFC-0025 P1.3).
+///
+/// One RTT for N keys (grouped by range on server). Not a full OCC transaction
+/// (use [`client_commit_tx`] for that).
+///
+/// # Errors
+/// Network, NotLeader, NotCommitted, limits.
+pub fn client_put_batch(addr: impl AsRef<str>, pairs: &[(Vec<u8>, Vec<u8>)]) -> Result<()> {
+    if pairs.is_empty() {
+        return Ok(());
+    }
+    validate_tx_pairs(pairs)?;
+    let mut s = connect_host(addr.as_ref(), Duration::from_secs(3))?;
+    s.set_read_timeout(Some(Duration::from_secs(20))).ok();
+    write_frame(
+        &mut s,
+        &WireMsg::PutBatch {
+            pairs: pairs.to_vec(),
+        },
+    )?;
+    match read_frame(&mut s)? {
+        WireMsg::RespOk => Ok(()),
+        WireMsg::RespErr { message } => {
+            Err(crate::client::classify_message(&message).into_store_err(&message))
+        }
+        other => Err(StoreError::Msg(format!("unexpected put_batch resp {other:?}"))),
+    }
+}
+
 /// Client helper: DCS create-if-absent over TCP (returns mod_revision).
 ///
 /// # Errors
@@ -638,6 +695,14 @@ mod tests {
             value: Some(b"v".to_vec()),
         };
         assert_eq!(WireMsg::decode(&r.encode()).unwrap(), r);
+    }
+
+    #[test]
+    fn wire_put_batch_roundtrip() {
+        let m = WireMsg::PutBatch {
+            pairs: vec![(b"a".to_vec(), b"1".to_vec()), (b"b".to_vec(), b"2".to_vec())],
+        };
+        assert_eq!(WireMsg::decode(&m.encode()).unwrap(), m);
     }
 
     #[test]

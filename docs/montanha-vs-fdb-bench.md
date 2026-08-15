@@ -62,6 +62,7 @@ cargo run -p pedradb-store --release --bin montanha-perf-gate -- findings/perf-g
 | **D3** TCP CommitTx | multi-key over wire | TX + TCP |
 | **D4** TCP multi-thread put | N client threads | **true concurrent clients** |
 | **D5** TCP DCS create/get | etcd-need over TCP | exclusive create + majority |
+| **D6** TCP PutBatch | multi-key one RTT | put_many over wire |
 | **E1** mini-bindingtester | random set/clear/get/range + multi-key + WW | silent-wrong soak |
 | **E2** TCP multi-client mini-bt | N threads, partitioned keys, majority verify | concurrent writers |
 

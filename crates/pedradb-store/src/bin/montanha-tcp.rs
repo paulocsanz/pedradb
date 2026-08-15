@@ -136,6 +136,10 @@ enum Work {
         value: Vec<u8>,
         resp: SyncSender<Result<(), String>>,
     },
+    PutBatch {
+        pairs: Vec<(Vec<u8>, Vec<u8>)>,
+        resp: SyncSender<Result<(), String>>,
+    },
     Get {
         key: Vec<u8>,
         resp: SyncSender<Result<Option<Vec<u8>>, String>>,
@@ -456,6 +460,18 @@ fn handle_conn(tx: SyncSender<Work>, mut stream: TcpStream) -> Result<(), StoreE
                 )?,
             }
         }
+        WireMsg::PutBatch { pairs } => {
+            let (rtx, rrx) = mpsc::sync_channel(1);
+            tx.send(Work::PutBatch { pairs, resp: rtx })
+                .map_err(|_| StoreError::Msg("worker dead".into()))?;
+            let r = rrx
+                .recv_timeout(Duration::from_secs(25))
+                .map_err(|_| StoreError::Msg("put_batch timeout".into()))?;
+            match r {
+                Ok(()) => write_frame(&mut stream, &WireMsg::RespOk)?,
+                Err(m) => write_frame(&mut stream, &WireMsg::RespErr { message: m })?,
+            }
+        }
         WireMsg::Get { key } => {
             let (rtx, rrx) = mpsc::sync_channel(1);
             tx.send(Work::Get { key, resp: rtx })
@@ -647,6 +663,10 @@ fn worker_loop(
                 if let Some(w) = deferred {
                     service_nested(id, &mut cluster, &peers, w);
                 }
+            }
+            Ok(Work::PutBatch { pairs, resp }) => {
+                let r = put_many_until_committed(id, &mut cluster, &peers, &pairs, &rx);
+                let _ = resp.send(r.map_err(|e| e.to_string()));
             }
             Ok(Work::Get { key, resp }) => {
                 let r = cluster
@@ -965,6 +985,9 @@ fn service_nested(
         Work::Put { key: _, value: _, resp } => {
             // Nested put while another put waits: refuse to avoid re-entrancy mess.
             let _ = resp.send(Err("busy: put in progress".into()));
+        }
+        Work::PutBatch { pairs: _, resp } => {
+            let _ = resp.send(Err("busy: put_batch in progress".into()));
         }
         Work::CommitTx { pairs: _, resp } => {
             let _ = resp.send(Err("busy: commit_tx in progress".into()));

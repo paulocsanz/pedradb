@@ -92,7 +92,7 @@ pub use txn_kernel::{
 pub use msg::PeerMsg;
 pub use tcp::{
     client_commit_tx, client_dcs_cas, client_dcs_create, client_dcs_get, client_get, client_put,
-    client_set_peers, client_status, client_tick, connect as tcp_connect,
+    client_put_batch, client_set_peers, client_status, client_tick, connect as tcp_connect,
     connect_host as tcp_connect_host, peer_wire, read_frame, resolve_host_port, write_frame,
     WireMsg,
 };

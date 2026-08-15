@@ -836,6 +836,39 @@ fn main() {
   }}"#
                 ));
                 progress!("D5 tcp dcs rev={rev} exclusive_fail={exclusive_fail} seen={seen}");
+
+                // D6: PutBatch one RTT multi-key (RFC-0025 P1.3)
+                let batch_sz = 16usize.min(n.max(1));
+                let pairs: Vec<(Vec<u8>, Vec<u8>)> = (0..batch_sz)
+                    .map(|i| (format!("tpb-{i:03}").into_bytes(), val.clone()))
+                    .collect();
+                let t0 = Instant::now();
+                let mut ok = false;
+                for _ in 0..20 {
+                    if client.put_batch(&pairs).is_ok() {
+                        ok = true;
+                        break;
+                    }
+                    thread::sleep(Duration::from_millis(30));
+                }
+                let wall = t0.elapsed();
+                if ok {
+                    benches.push(format!(
+                        r#"{{
+    "name": "D6_tcp_put_batch_{batch_sz}",
+    "keys": {batch_sz},
+    "keys_per_s": {kps:.3},
+    "wall_s": {ws:.4},
+    "note": "one RTT PutBatch vs N× D1 put"
+  }}"#,
+                        kps = batch_sz as f64 / wall.as_secs_f64().max(1e-12),
+                        ws = wall.as_secs_f64(),
+                    ));
+                    progress!("D6 tcp put_batch ok keys_per_s={:.1}", batch_sz as f64 / wall.as_secs_f64().max(1e-12));
+                } else {
+                    notes.push("D6 tcp put_batch failed".into());
+                    progress!("D6 tcp put_batch FAILED");
+                }
                 drop(nodes);
             }
         }

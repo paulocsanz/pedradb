@@ -36,7 +36,9 @@
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
-use crate::tcp::{client_commit_tx, client_put, client_set_peers, client_status};
+use crate::tcp::{
+    client_commit_tx, client_put, client_put_batch, client_set_peers, client_status,
+};
 use crate::{
     validate_tx_pairs, Result, StoreCluster, StoreError, MAX_TX_BYTES, MAX_TX_KEYS, MAX_VALUE_BYTES,
 };
@@ -775,6 +777,69 @@ impl TcpClusterClient {
     #[must_use]
     pub fn begin_tx(&self) -> PendingTx {
         PendingTx::new()
+    }
+
+    /// Multi-key put via TCP `PutBatch` → server `put_many` (RFC-0025 P1.3).
+    ///
+    /// One RTT for the batch (range-grouped on server). Prefer this over N×[`Self::put`].
+    ///
+    /// # Errors
+    /// Exhausted attempts, Conflict, limits, or non-retryable error.
+    pub fn put_batch(&mut self, pairs: &[(Vec<u8>, Vec<u8>)]) -> Result<()> {
+        if pairs.is_empty() {
+            return Ok(());
+        }
+        validate_tx_pairs(pairs)?;
+        let deadline = Instant::now() + Duration::from_secs(20);
+        let mut attempts = 0u32;
+        let mut last = StoreError::Msg("no peers".into());
+
+        while attempts < self.max_attempts && Instant::now() < deadline {
+            attempts += 1;
+            let order = self.dial_order();
+            for id in order {
+                let Some(addr) = self.peers.get(&id).cloned() else {
+                    continue;
+                };
+                match client_put_batch(&addr, pairs) {
+                    Ok(()) => {
+                        self.prefer = Some(id);
+                        return Ok(());
+                    }
+                    Err(e) => {
+                        last = e;
+                        let class = match &last {
+                            StoreError::Msg(m) => classify_message(m),
+                            other => classify(other),
+                        };
+                        match class {
+                            ClientClass::NotLeader { leader, .. }
+                            | ClientClass::StaleLeader {
+                                live_leader: leader,
+                                ..
+                            } => {
+                                if let Some(lid) = leader {
+                                    self.prefer = Some(lid);
+                                } else {
+                                    self.refresh_leader_from_status();
+                                }
+                                continue;
+                            }
+                            ClientClass::Unavailable(_) | ClientClass::NotCommitted { .. } => {
+                                continue;
+                            }
+                            ClientClass::Conflict | ClientClass::LimitRejected { .. } => {
+                                return Err(last);
+                            }
+                            ClientClass::Other(_) => continue,
+                        }
+                    }
+                }
+            }
+            std::thread::sleep(Duration::from_millis(20));
+            self.refresh_leader_from_status();
+        }
+        Err(last)
     }
 
     /// Commit staged pairs with NotLeader routing (TCP `CommitTx`).

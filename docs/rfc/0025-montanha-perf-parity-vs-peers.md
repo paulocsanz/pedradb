@@ -48,7 +48,7 @@
 
 - [x] **P1.1** Write coalesce: `put_buffered`/`flush_writes`/`put_coalesce` + TCP worker Put batching — status: `done`  
 - [x] **P1.2** Raft log persist: contiguous append → segment keys + one `apply_batch` (not full blob rewrite) — status: `done`  
-- [ ] **P1.3** TCP path: pipelined put + batch wire (CommitTx already); multi-range client dial — status: `todo`  
+- [x] **P1.3** TCP `PutBatch` wire + `client_put_batch` / `TcpClusterClient::put_batch` — status: `done`  
 - [x] **P1.4** Layer defaults: `table_put` via put_batch; secondary index already TX; docs point to put_many — status: `done`  
 
 ### P2 — later / polish
@@ -66,7 +66,7 @@
 | P0.3 | p0 | RFC living status | done | 0025 | 2026-08-14 |
 | P1.1 | p1 | write coalesce / TCP batch Puts | done | put_buffered + tcp coalesce | 2026-08-14 |
 | P1.2 | p1 | raft log append cost | done | incremental log_e + log_hi | 2026-08-14 |
-| P1.3 | p1 | TCP pipeline/batch | todo | — | 2026-08-14 |
+| P1.3 | p1 | TCP PutBatch wire | done | tag 17 + client | 2026-08-14 |
 | P1.4 | p1 | layer batch defaults | done | table_put/docs | 2026-08-14 |
 | P2.1 | p2 | FDB side comparator | todo | — | 2026-08-14 |
 | P2.2 | p2 | scale A vs B decision | todo | — | 2026-08-14 |

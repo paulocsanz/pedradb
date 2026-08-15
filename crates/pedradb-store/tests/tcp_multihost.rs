@@ -351,6 +351,61 @@ fn tcp_client_retry_not_leader() {
     assert_eq!(got, b"v1");
 }
 
+/// RFC-0025 P1.3: PutBatch one RTT for multi-key put_many on real TCP.
+#[test]
+fn tcp_put_batch_majority() {
+    let tmp = tempfile_dir("tcp_pbatch");
+    let nodes = start_cluster(&tmp);
+    let peer_flags: Vec<String> = nodes
+        .iter()
+        .flat_map(|n| vec!["--peer".into(), format!("{}={}", n.id, n.addr)])
+        .collect();
+    assert!(Command::new(bin())
+        .arg("elect-wait")
+        .args(&peer_flags)
+        .status()
+        .unwrap()
+        .success());
+    let peers: Vec<(u64, String)> = nodes
+        .iter()
+        .map(|n| (n.id, n.addr.to_string()))
+        .collect();
+    let mut client = pedradb_store::TcpClusterClient::new(peers).with_max_attempts(48);
+    let pairs: Vec<(Vec<u8>, Vec<u8>)> = (0..8u8)
+        .map(|i| (format!("pb-{i}").into_bytes(), vec![i]))
+        .collect();
+    let deadline = Instant::now() + Duration::from_secs(20);
+    let mut ok = false;
+    while Instant::now() < deadline && !ok {
+        if client.put_batch(&pairs).is_ok() {
+            ok = true;
+        } else {
+            thread::sleep(Duration::from_millis(40));
+        }
+    }
+    assert!(ok, "put_batch failed");
+    // Majority visibility
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let mut seen = 0u32;
+        for n in &nodes {
+            if pedradb_store::client_get(n.addr.to_string(), b"pb-0")
+                .ok()
+                .flatten()
+                .as_deref()
+                == Some(&[0u8][..])
+            {
+                seen += 1;
+            }
+        }
+        if seen >= 2 {
+            break;
+        }
+        assert!(Instant::now() < deadline, "majority timeout for put_batch");
+        thread::sleep(Duration::from_millis(40));
+    }
+}
+
 /// Phase A: etcd-need create/CAS/get over **real TCP** (no dual etcd SoR).
 #[test]
 fn tcp_etcd_need_create_cas_get() {
