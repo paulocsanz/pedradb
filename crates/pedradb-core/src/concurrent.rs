@@ -209,6 +209,20 @@ impl<E: Env> ConcurrentDb<E> {
         self.inner.read().oldest_pinned_sequence()
     }
 
+    /// Version-GC watermark (see [`Db::earliest_readable_sequence`]).
+    #[must_use]
+    pub fn earliest_readable_sequence(&self) -> SequenceNumber {
+        self.inner.read().earliest_readable_sequence()
+    }
+
+    /// Fail closed when a snapshot is below the GC watermark.
+    ///
+    /// # Errors
+    /// [`CoreError::SnapshotTooOld`].
+    pub fn ensure_snapshot_readable(&self, snap: Snapshot) -> Result<()> {
+        self.inner.read().ensure_snapshot_readable(snap)
+    }
+
     /// Snapshot-safe compact reclaim (see [`Db::compact_reclaim`]).
     ///
     /// # Errors

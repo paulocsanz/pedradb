@@ -67,6 +67,21 @@ pub enum CoreError {
     /// (RFC-0019 CAS / `put_if`).
     #[error("compare-and-swap precondition failed")]
     CasMismatch,
+
+    /// Read snapshot is older than the version-GC watermark (open-items §2.1 (c)).
+    ///
+    /// History required for `requested` may have been dropped by
+    /// [`crate::db::Db::compact_reclaim`], `latest_only`, or an explicit GC floor.
+    /// Montanha maps the store-level cousin to FDB `transaction_too_old`.
+    #[error(
+        "snapshot too old: requested sequence {requested}, earliest readable {earliest}"
+    )]
+    SnapshotTooOld {
+        /// Sequence the caller asked to read at.
+        requested: crate::key::SequenceNumber,
+        /// Lowest sequence still guaranteed readable after GC.
+        earliest: crate::key::SequenceNumber,
+    },
 }
 
 /// Convenience `Result` alias used throughout the crate.

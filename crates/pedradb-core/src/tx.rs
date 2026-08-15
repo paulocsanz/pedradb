@@ -50,19 +50,22 @@ impl<'db, E: crate::env::Env> Transaction<'db, E> {
     }
 
     /// Read a key: staging first, then MemTable at snapshot.
-    #[must_use]
-    pub fn get(&self, key: &[u8]) -> Option<Bytes> {
+    ///
+    /// # Errors
+    /// [`CoreError::SnapshotTooOld`] if version GC dropped history for this TX's snapshot.
+    pub fn get(&self, key: &[u8]) -> Result<Option<Bytes>> {
         if let Some(stage) = self.staging.get(key) {
-            return match stage {
+            return Ok(match stage {
                 Stage::Put(v) => Some(v.clone()),
                 Stage::Delete => None,
-            };
+            });
         }
         if self.snapshot == 0 {
-            return None;
+            return Ok(None);
         }
         // Use public get_at so vlog pointers resolve (RFC-0014 P2.2).
-        self.db.get_at(crate::db::Snapshot::at(self.snapshot), key)
+        self.db
+            .get_at(crate::db::Snapshot::at(self.snapshot), key)
     }
 
     /// Stage a put (visible to later `get` in this TX; durable only after commit).
@@ -240,13 +243,13 @@ mod tests {
         db.put(b"a", b"1").unwrap();
         {
             let mut tx = db.begin();
-            assert_eq!(tx.get(b"a").as_deref(), Some(b"1".as_ref()));
+            assert_eq!(tx.get(b"a").unwrap().as_deref(), Some(b"1".as_ref()));
             tx.put(b"a", b"2").unwrap();
-            assert_eq!(tx.get(b"a").as_deref(), Some(b"2".as_ref()));
+            assert_eq!(tx.get(b"a").unwrap().as_deref(), Some(b"2".as_ref()));
             tx.delete(b"a").unwrap();
-            assert_eq!(tx.get(b"a"), None);
+            assert_eq!(tx.get(b"a").unwrap(), None);
             tx.put(b"a", b"3").unwrap();
-            assert_eq!(tx.get(b"a").as_deref(), Some(b"3".as_ref()));
+            assert_eq!(tx.get(b"a").unwrap().as_deref(), Some(b"3".as_ref()));
             tx.commit().unwrap();
         }
         assert_eq!(db.get(b"a").as_deref(), Some(b"3".as_ref()));
@@ -263,7 +266,7 @@ mod tests {
         db.put(b"a", b"1").unwrap();
         let tx = db.begin();
         assert_eq!(tx.snapshot(), 1);
-        assert_eq!(tx.get(b"a").as_deref(), Some(b"1".as_ref()));
+        assert_eq!(tx.get(b"a").unwrap().as_deref(), Some(b"1".as_ref()));
         tx.commit().unwrap();
         db.close().unwrap();
         let _ = fs::remove_dir_all(&dir);

@@ -472,6 +472,9 @@ pub struct Db<E: Env = StdEnv> {
     snapshot_pins: std::collections::BTreeMap<u64, SequenceNumber>,
     /// Next pin id (monotonic; never reused for this process open).
     next_snapshot_pin_id: u64,
+    /// Version-GC watermark: snapshots with `seq < earliest_readable_seq` are
+    /// [`CoreError::SnapshotTooOld`] (open-items §2.1 (c)). `0` = no floor.
+    earliest_readable_seq: SequenceNumber,
     /// Count of successful WAL `sync_all` (observability / group-commit tests).
     wal_sync_count: u64,
     /// Logical user-value bytes ingested.
@@ -657,6 +660,7 @@ impl<E: Env> Db<E> {
             auto_blob_gc_min_ratio: None,
             snapshot_pins: std::collections::BTreeMap::new(),
             next_snapshot_pin_id: 1,
+            earliest_readable_seq: 0,
             wal_sync_count: 0,
             bytes_ingested: 0,
             bytes_written_wal: 0,
@@ -779,22 +783,67 @@ impl<E: Env> Db<E> {
         self.snapshot_pins.len()
     }
 
+    /// Lowest sequence still guaranteed readable after version GC (0 = no floor).
+    #[must_use]
+    pub fn earliest_readable_sequence(&self) -> SequenceNumber {
+        self.earliest_readable_seq
+    }
+
+    /// Fail closed when `snap` is below the version-GC watermark.
+    ///
+    /// # Errors
+    /// [`CoreError::SnapshotTooOld`] when history for `snap` may have been dropped.
+    pub fn ensure_snapshot_readable(&self, snap: Snapshot) -> Result<()> {
+        if snap.seq < self.earliest_readable_seq {
+            return Err(CoreError::SnapshotTooOld {
+                requested: snap.seq,
+                earliest: self.earliest_readable_seq,
+            });
+        }
+        Ok(())
+    }
+
+    /// Raise the GC watermark (monotonic). Used after history-dropping compact.
+    fn raise_earliest_readable(&mut self, floor: SequenceNumber) {
+        if floor > self.earliest_readable_seq {
+            self.earliest_readable_seq = floor;
+        }
+    }
+
+    /// After a compact that ran version GC, advance the too-old watermark.
+    fn note_version_gc_watermark(&mut self, gc: crate::merge::CompactGcOptions) {
+        if let Some(oldest) = gc.oldest_snapshot {
+            self.raise_earliest_readable(oldest);
+        } else if gc.keep_only_latest {
+            // Only current versions remain — anything below last_seq may miss history.
+            self.raise_earliest_readable(self.last_sequence());
+        } else if gc.min_sequence > 0 {
+            self.raise_earliest_readable(gc.min_sequence);
+        }
+    }
+
     /// Point lookup at the latest committed sequence (MemTable ∪ SSTs).
     #[must_use]
     pub fn get(&self, key: &[u8]) -> Option<Bytes> {
-        self.get_at(self.snapshot(), key)
+        // Latest snapshot is always ≥ watermark when watermark is raised from
+        // last_sequence / pin floor after GC; fall back to None only on fence.
+        self.get_at(self.snapshot(), key).ok().flatten()
     }
 
     /// Point lookup at an explicit [`Snapshot`].
-    #[must_use]
-    pub fn get_at(&self, snap: Snapshot, key: &[u8]) -> Option<Bytes> {
+    ///
+    /// # Errors
+    /// [`CoreError::SnapshotTooOld`] if `snap` is below the version-GC watermark
+    /// (history may have been dropped by reclaim / `latest_only`).
+    pub fn get_at(&self, snap: Snapshot, key: &[u8]) -> Result<Option<Bytes>> {
         if snap.seq == 0 {
-            return None;
+            return Ok(None);
         }
-        match self.lookup(key, snap.seq) {
+        self.ensure_snapshot_readable(snap)?;
+        Ok(match self.lookup(key, snap.seq) {
             Lookup::Found(v) => self.resolve_stored_value(v).ok(),
             Lookup::Deleted | Lookup::NotFound => None,
-        }
+        })
     }
 
     /// Whether any version of `key` has `sequence > snapshot` (OCC conflict probe).
@@ -1745,6 +1794,7 @@ impl<E: Env> Db<E> {
             }
         }
         self.compact_count = self.compact_count.saturating_add(1);
+        self.note_version_gc_watermark(CompactOptions::latest_only().gc);
         // latest_only rewrite — same auto-blob path as leveled compact.
         self.run_auto_blob_gc_best_effort();
         Ok(())
@@ -1864,8 +1914,11 @@ impl<E: Env> Db<E> {
             }
         }
         self.compact_count = self.compact_count.saturating_add(1);
-        if options.gc.keep_only_latest {
-            // Dead vlog pointers dropped — maybe reclaim sealed blobs.
+        if options.gc.requests_gc() {
+            self.note_version_gc_watermark(options.gc);
+        }
+        if options.gc.keep_only_latest || options.gc.oldest_snapshot.is_some() {
+            // Dead vlog pointers may have been dropped — maybe reclaim sealed blobs.
             self.run_auto_blob_gc_best_effort();
         }
         Ok(())
@@ -2669,8 +2722,28 @@ impl<E: Env> Db<E> {
 
     /// [`multi_get`](Self::multi_get) at an explicit [`Snapshot`].
     #[must_use]
-    pub fn multi_get_at(&self, snap: Snapshot, keys: &[impl AsRef<[u8]>]) -> Vec<Option<Bytes>> {
-        keys.iter().map(|k| self.get_at(snap, k.as_ref())).collect()
+    /// Multi-get at an explicit snapshot.
+    ///
+    /// # Errors
+    /// [`CoreError::SnapshotTooOld`] if `snap` is below the version-GC watermark.
+    pub fn multi_get_at(
+        &self,
+        snap: Snapshot,
+        keys: &[impl AsRef<[u8]>],
+    ) -> Result<Vec<Option<Bytes>>> {
+        self.ensure_snapshot_readable(snap)?;
+        Ok(keys
+            .iter()
+            .map(|k| {
+                if snap.seq == 0 {
+                    return None;
+                }
+                match self.lookup(k.as_ref(), snap.seq) {
+                    Lookup::Found(v) => self.resolve_stored_value(v).ok(),
+                    Lookup::Deleted | Lookup::NotFound => None,
+                }
+            })
+            .collect())
     }
 
     /// Changes with `from_seq < sequence <= to_seq` (RFC-0019 change feed).
@@ -4608,7 +4681,7 @@ mod tests {
         db.flush().unwrap();
         {
             let mut tx = db.begin();
-            assert_eq!(tx.get(b"row").as_deref(), Some(b"R".as_ref()));
+            assert_eq!(tx.get(b"row").unwrap().as_deref(), Some(b"R".as_ref()));
             tx.put(b"idx", b"I").unwrap();
             tx.commit().unwrap();
         }
@@ -4946,7 +5019,7 @@ mod tests {
         assert_eq!(db.get(b"k").as_deref(), Some(b"new".as_ref()));
         // Historical read at pre-overwrite snapshot must still see "old".
         assert_eq!(
-            db.get_at(snap, b"k").as_deref(),
+            db.get_at(snap, b"k").unwrap().as_deref(),
             Some(b"old".as_ref()),
             "F20: auto-compact must not GC versions still visible at open snapshots"
         );
@@ -5017,7 +5090,7 @@ mod tests {
         let pin = db.pin_snapshot();
         assert_eq!(db.snapshot_pin_count(), 1);
         assert_eq!(db.oldest_pinned_sequence(), Some(pin.sequence()));
-        assert_eq!(db.get_at(pin.snapshot(), b"k").as_deref(), Some(b"old".as_ref()));
+        assert_eq!(db.get_at(pin.snapshot(), b"k").unwrap().as_deref(), Some(b"old".as_ref()));
 
         db.put(b"k", b"new").unwrap();
         db.flush().unwrap();
@@ -5025,15 +5098,62 @@ mod tests {
 
         // Reclaim must keep `old` while pin is open.
         db.compact_reclaim().unwrap();
-        assert_eq!(db.get_at(pin.snapshot(), b"k").as_deref(), Some(b"old".as_ref()));
+        assert_eq!(db.get_at(pin.snapshot(), b"k").unwrap().as_deref(), Some(b"old".as_ref()));
         assert_eq!(db.get(b"k").as_deref(), Some(b"new".as_ref()));
 
         db.release_snapshot_pin(pin);
         assert_eq!(db.snapshot_pin_count(), 0);
         // No pins → reclaim drops superseded history (latest-only watermark).
+        let floor_before = db.earliest_readable_sequence();
         db.compact_reclaim().unwrap();
+        assert!(
+            db.earliest_readable_sequence() >= floor_before
+                && db.earliest_readable_sequence() > 0,
+            "reclaim without pins must raise watermark"
+        );
         assert_eq!(db.get(b"k").as_deref(), Some(b"new".as_ref()));
-        // Bare snapshot at the old seq may no longer resolve if history was GC'd.
+        // Bare old snapshot is fail-closed (open-items §2.1 (c)).
+        let old_snap = Snapshot::at(1.min(db.earliest_readable_sequence().saturating_sub(1)));
+        if old_snap.sequence() < db.earliest_readable_sequence() {
+            let err = db.get_at(old_snap, b"k").unwrap_err();
+            assert!(
+                matches!(err, CoreError::SnapshotTooOld { .. }),
+                "expected SnapshotTooOld, got {err:?}"
+            );
+        }
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// open-items §2.1 (c): latest_only raises watermark; old get_at fails closed.
+    #[test]
+    fn snapshot_too_old_after_latest_only() {
+        let dir = temp_dir();
+        let mut db = Db::open(&dir).unwrap();
+        db.put(b"k", b"old").unwrap();
+        let old_seq = db.last_sequence();
+        db.flush().unwrap();
+        db.put(b"k", b"new").unwrap();
+        db.flush().unwrap();
+        let snap = Snapshot::at(old_seq);
+        assert_eq!(
+            db.get_at(snap, b"k").unwrap().as_deref(),
+            Some(b"old".as_ref())
+        );
+        db.compact_with(CompactOptions::latest_only()).unwrap();
+        assert!(db.earliest_readable_sequence() > 0);
+        assert_eq!(db.get(b"k").as_deref(), Some(b"new".as_ref()));
+        let err = db.get_at(snap, b"k").unwrap_err();
+        assert!(
+            matches!(
+                err,
+                CoreError::SnapshotTooOld {
+                    requested,
+                    earliest
+                } if requested == old_seq && earliest == db.earliest_readable_sequence()
+            ),
+            "got {err:?}"
+        );
         db.close().unwrap();
         let _ = fs::remove_dir_all(&dir);
     }
@@ -5263,10 +5383,10 @@ mod tests {
             assert_eq!(last, 3);
             let snap = db.snapshot();
             assert_eq!(snap.sequence(), 3);
-            assert_eq!(db.get_at(snap, b"row").as_deref(), Some(b"R".as_ref()));
-            assert_eq!(db.get_at(snap, b"idx").as_deref(), Some(b"I".as_ref()));
+            assert_eq!(db.get_at(snap, b"row").unwrap().as_deref(), Some(b"R".as_ref()));
+            assert_eq!(db.get_at(snap, b"idx").unwrap().as_deref(), Some(b"I".as_ref()));
             // Old snapshot still empty world
-            assert_eq!(db.get_at(before, b"row"), None);
+            assert_eq!(db.get_at(before, b"row").unwrap(), None);
             db.close().unwrap();
         }
         let db = Db::open(&dir).unwrap();
@@ -6107,12 +6227,12 @@ mod tests {
 
         let seq = db.put_with_seq(b"k", b"v1").unwrap();
         assert_eq!(
-            db.get_at(Snapshot::at(seq), b"k").as_deref(),
+            db.get_at(Snapshot::at(seq), b"k").unwrap().as_deref(),
             Some(b"v1".as_ref())
         );
         if seq > 0 {
             assert_eq!(
-                db.get_at(Snapshot::at(seq - 1), b"k"),
+                db.get_at(Snapshot::at(seq - 1), b"k").unwrap(),
                 None,
                 "seq-1 must not see the put"
             );
@@ -6120,9 +6240,9 @@ mod tests {
 
         let del_seq = db.delete_with_seq(b"k").unwrap();
         assert!(del_seq > seq);
-        assert_eq!(db.get_at(Snapshot::at(del_seq), b"k"), None);
+        assert_eq!(db.get_at(Snapshot::at(del_seq), b"k").unwrap(), None);
         assert_eq!(
-            db.get_at(Snapshot::at(seq), b"k").as_deref(),
+            db.get_at(Snapshot::at(seq), b"k").unwrap().as_deref(),
             Some(b"v1".as_ref()),
             "historical snapshot still sees pre-delete put"
         );
@@ -6131,16 +6251,16 @@ mod tests {
             .apply_batch([BatchOp::put(b"a", b"1"), BatchOp::put(b"b", b"2")])
             .unwrap();
         assert_eq!(
-            db.get_at(Snapshot::at(last), b"a").as_deref(),
+            db.get_at(Snapshot::at(last), b"a").unwrap().as_deref(),
             Some(b"1".as_ref())
         );
         assert_eq!(
-            db.get_at(Snapshot::at(last), b"b").as_deref(),
+            db.get_at(Snapshot::at(last), b"b").unwrap().as_deref(),
             Some(b"2".as_ref())
         );
         // First key of batch is last-1 when two ops.
         assert_eq!(
-            db.get_at(Snapshot::at(last - 1), b"b"),
+            db.get_at(Snapshot::at(last - 1), b"b").unwrap(),
             None,
             "second batch key not visible before its seq"
         );
@@ -6150,7 +6270,7 @@ mod tests {
         tx.put(b"t2", b"y").unwrap();
         let tx_seq = tx.commit().unwrap();
         assert_eq!(
-            db.get_at(Snapshot::at(tx_seq), b"t2").as_deref(),
+            db.get_at(Snapshot::at(tx_seq), b"t2").unwrap().as_deref(),
             Some(b"y".as_ref())
         );
         db.close().unwrap();
@@ -6223,7 +6343,7 @@ mod tests {
         assert_eq!(multi[3], None);
 
         let snap = Snapshot::at(db.last_sequence());
-        let multi_at = db.multi_get_at(snap, &keys);
+        let multi_at = db.multi_get_at(snap, &keys).unwrap();
         assert_eq!(multi_at, multi);
 
         let full_keys: Vec<_> = db

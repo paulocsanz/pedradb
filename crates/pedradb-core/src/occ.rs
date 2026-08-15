@@ -59,17 +59,19 @@ impl<E: Env> OccTransaction<E> {
     }
 
     /// Read at snapshot; records the key in the OCC read set.
-    #[must_use]
-    pub fn get(&mut self, key: &[u8]) -> Option<Bytes> {
+    ///
+    /// # Errors
+    /// [`CoreError::SnapshotTooOld`] if version GC dropped history for this TX's snapshot.
+    pub fn get(&mut self, key: &[u8]) -> crate::error::Result<Option<Bytes>> {
         self.read_set.insert(Bytes::copy_from_slice(key));
         if let Some(stage) = self.staging.get(key) {
-            return match stage {
+            return Ok(match stage {
                 Stage::Put(v) => Some(v.clone()),
                 Stage::Delete => None,
-            };
+            });
         }
         if self.snapshot == 0 {
-            return None;
+            return Ok(None);
         }
         // Use get_at so VLG1 pointers resolve (same as single-writer Transaction).
         self.db
@@ -228,9 +230,16 @@ mod tests {
         .unwrap();
         db.put(b"huge", &big).unwrap();
         let mut tx = db.begin_occ();
-        let v = tx.get(b"huge").expect("OCC get must see key");
+        let v = tx
+            .get(b"huge")
+            .expect("OCC get result")
+            .expect("OCC get must see key");
         assert_eq!(v.as_ref(), big.as_slice());
-        assert_eq!(v.len(), 2048, "OCC get must resolve VLG1, not return pointer");
+        assert_eq!(
+            v.len(),
+            2048,
+            "OCC get must resolve VLG1, not return pointer"
+        );
         let _ = fs::remove_dir_all(&dir);
     }
 
@@ -258,8 +267,8 @@ mod tests {
         // Two overlapping OCC txs: both read k, both try to write k.
         let mut tx1 = db.begin_occ();
         let mut tx2 = db.begin_occ();
-        assert_eq!(tx1.get(b"k").as_deref(), Some(b"v0".as_ref()));
-        assert_eq!(tx2.get(b"k").as_deref(), Some(b"v0".as_ref()));
+        assert_eq!(tx1.get(b"k").unwrap().as_deref(), Some(b"v0".as_ref()));
+        assert_eq!(tx2.get(b"k").unwrap().as_deref(), Some(b"v0".as_ref()));
         tx1.put(b"k", b"from1").unwrap();
         tx2.put(b"k", b"from2").unwrap();
         tx1.commit().unwrap();
@@ -325,7 +334,7 @@ mod tests {
         db.put(b"m", b"v0").unwrap();
 
         let mut tx = db.begin_occ();
-        assert_eq!(tx.get(b"m").as_deref(), Some(b"v0".as_ref()));
+        assert_eq!(tx.get(b"m").unwrap().as_deref(), Some(b"v0".as_ref()));
         // Concurrent writer range-deletes [a,z) which covers m
         db.delete_range(b"a", b"z").unwrap();
         // TX still tries to write m based on stale snapshot
@@ -355,7 +364,7 @@ mod tests {
         db.flush().unwrap();
 
         let mut tx = db.begin_occ();
-        assert_eq!(tx.get(b"m").as_deref(), Some(b"v0".as_ref()));
+        assert_eq!(tx.get(b"m").unwrap().as_deref(), Some(b"v0".as_ref()));
         db.delete_range(b"a", b"z").unwrap();
         db.flush().unwrap();
         tx.put(b"m", b"from_occ").unwrap();

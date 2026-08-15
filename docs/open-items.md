@@ -74,20 +74,26 @@ These are questions where the general direction is known but the specific
 approach hasn't been finalized. Each needs a concrete decision before its target
 slice can be implemented.
 
-### 2.1 Version GC strategy (Slice 7) — **partial (b) shipped**
+### 2.1 Version GC strategy (Slice 7) — **(b)+(c) shipped**
 
 **Question:** How does PedraDB reclaim old MVCC versions?
 
-**Answer (2026-08-15):** **(b) piggyback** via `Db::compact_reclaim` +
-`CompactGcOptions::for_oldest_snapshot` (Rocks-style: drop a superseded version
-when the next newer has `seq <= oldest open pin`). Pins are explicit:
-`pin_snapshot` / `release_snapshot_pin` (also on `ConcurrentDb`). Bare
-`Snapshot` tokens still do **not** block GC (F20: auto-compact stays history-
-preserving).
+**Answer (2026-08-15):**
+- **(b) piggyback** via `Db::compact_reclaim` +
+  `CompactGcOptions::for_oldest_snapshot` (Rocks-style: drop a superseded version
+  when the next newer has `seq <= oldest open pin`). Pins are explicit:
+  `pin_snapshot` / `release_snapshot_pin` (also on `ConcurrentDb`). Bare
+  `Snapshot` tokens still do **not** block GC (F20: auto-compact stays history-
+  preserving).
+- **(c) safety valve:** `earliest_readable_sequence` watermark raised on
+  history-dropping GC (`latest_only`, `for_oldest_snapshot`, `min_sequence`).
+  `get_at` / `multi_get_at` / TX·OCC `get` return
+  [`CoreError::SnapshotTooOld`](../crates/pedradb-core/src/error.rs) fail-closed
+  (Montanha already maps store-level too-old to FDB `transaction_too_old`).
 
-**Still open:** (c) "snapshot too old" safety valve; auto-compact does **not**
-call `compact_reclaim` by default (would change get_at contract for unpinned
-seqs).
+**Still open:** auto-compact does **not** call `compact_reclaim` by default
+(would change latency/space for workloads that rely on long bare snapshots
+without pins).
 
 **Options (historical):**
 - **(a) Stop-the-world pause:** scan all versions, remove those older than the
