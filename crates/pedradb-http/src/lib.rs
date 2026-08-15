@@ -38,9 +38,10 @@ pub use cl_kernel::{
     short_body_vs_cl_is_error, short_body_vs_cl_is_error_as_is,
 };
 pub use fail_closed::{
-    parse_error_status, parse_error_writes_status, parse_error_writes_status_as_is,
-    present_bad_int_is_error, present_bad_int_is_error_as_is, reject_transfer_encoding,
-    reject_transfer_encoding_as_is,
+    expects_100_continue, expects_100_continue_as_is, header_break_end, header_break_end_as_is,
+    header_break_len, parse_error_status, parse_error_writes_status,
+    parse_error_writes_status_as_is, present_bad_int_is_error, present_bad_int_is_error_as_is,
+    reject_transfer_encoding, reject_transfer_encoding_as_is,
 };
 pub use form_kernel::{
     form_decode, form_decode_as_is, form_plus_byte, form_plus_byte_as_is, from_hex,
@@ -85,17 +86,18 @@ fn read_req(stream: &mut TcpStream) -> Result<(String, String, Vec<u8>, Vec<(Str
             break;
         }
         buf.extend_from_slice(&tmp[..n]);
-        if buf.windows(4).any(|w| w == b"\r\n\r\n") {
+        // F153: stop at `\n\n` as well as `\r\n\r\n` (LF-only clients).
+        if header_break_end(&buf).is_some() {
             break;
         }
         if buf.len() > 1024 * 1024 {
             return Err(HttpError::App("req too large".into()));
         }
     }
-    let text = String::from_utf8_lossy(&buf);
-    let (head, body_start) = text
-        .split_once("\r\n\r\n")
-        .ok_or_else(|| HttpError::App("bad http".into()))?;
+    let header_end = header_break_end(&buf).ok_or_else(|| HttpError::App("bad http".into()))?;
+    let brk = header_break_len(&buf, header_end);
+    let text = String::from_utf8_lossy(&buf[..header_end - brk]);
+    let head = text.as_ref();
     let mut lines = head.lines();
     let req = lines.next().unwrap_or("");
     let mut parts = req.split_whitespace();
@@ -141,9 +143,16 @@ fn read_req(stream: &mut TcpStream) -> Result<(String, String, Vec<u8>, Vec<(Str
             "content-length {content_len} exceeds max {MAX_BODY}"
         )));
     }
-    let header_end = buf.windows(4).position(|w| w == b"\r\n\r\n").unwrap() + 4;
     let mut body = buf[header_end..].to_vec();
     if has_content_len {
+        // F154: client with Expect: 100-continue waits for 100 before the body.
+        if body.len() < content_len
+            && headers
+                .iter()
+                .any(|(n, v)| n == "expect" && expects_100_continue(v))
+        {
+            stream.write_all(b"HTTP/1.1 100 Continue\r\n\r\n")?;
+        }
         while body.len() < content_len {
             let n = stream.read(&mut tmp)?;
             if n == 0 {
@@ -172,7 +181,6 @@ fn read_req(stream: &mut TcpStream) -> Result<(String, String, Vec<u8>, Vec<(Str
     } else {
         body.truncate(0);
     }
-    let _ = body_start;
     Ok((method, path, body, headers))
 }
 
@@ -1464,6 +1472,113 @@ mod tests {
             code, 404,
             "truncated PUT must not store, GET {code} {body:?}"
         );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// F153: LF-only header break (`\n\n`, no CR) used to 400 ("bad http").
+    /// `read_req` only looked for `\r\n\r\n`.
+    #[test]
+    fn kv_http_lf_only_header_break() {
+        let dir = temp("lf-hdr");
+        let addr = bind_ephemeral();
+        let srv = KvServer::open(&dir).unwrap();
+        thread::spawn(move || {
+            let _ = srv.serve(addr);
+        });
+        thread::sleep(Duration::from_millis(100));
+        let mut stream = TcpStream::connect(addr).unwrap();
+        stream
+            .write_all(b"PUT /kv/lf HTTP/1.0\nContent-Length: 2\nHost: localhost\n\nok")
+            .unwrap();
+        let _ = stream.shutdown(std::net::Shutdown::Write);
+        let mut resp = Vec::new();
+        let _ = stream.read_to_end(&mut resp);
+        let text = String::from_utf8_lossy(&resp);
+        let put_code = text
+            .lines()
+            .next()
+            .and_then(|l| l.split_whitespace().nth(1))
+            .and_then(|c| c.parse::<u16>().ok())
+            .unwrap_or(0);
+        assert_eq!(
+            put_code, 200,
+            "LF-only header break must parse, got {put_code} {text:?}"
+        );
+        let (code, body) = http_exchange(addr, "GET", "/kv/lf", b"").unwrap();
+        assert_eq!(code, 200, "GET after LF-only PUT, body={body:?}");
+        assert_eq!(body, b"ok");
+
+        let mut stream = TcpStream::connect(addr).unwrap();
+        stream
+            .write_all(b"PUT /kv/bin HTTP/1.0\nContent-Length: 8\nHost: localhost\n\nab\r\n\r\ncd")
+            .unwrap();
+        let _ = stream.shutdown(std::net::Shutdown::Write);
+        let mut resp = Vec::new();
+        let _ = stream.read_to_end(&mut resp);
+        let text = String::from_utf8_lossy(&resp);
+        let put_code = text
+            .lines()
+            .next()
+            .and_then(|l| l.split_whitespace().nth(1))
+            .and_then(|c| c.parse::<u16>().ok())
+            .unwrap_or(0);
+        assert_eq!(
+            put_code, 200,
+            "LF headers + CRLF in body must store the body, got {put_code} {text:?}"
+        );
+        let (code, body) = http_exchange(addr, "GET", "/kv/bin", b"").unwrap();
+        assert_eq!(code, 200, "GET binary after LF PUT, body={body:?}");
+        assert_eq!(body, b"ab\r\n\r\ncd");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// F154: `Expect: 100-continue` used to hang — server waited for the body
+    /// while the client waited for `100 Continue`.
+    #[test]
+    fn kv_http_expect_100_continue_then_body() {
+        let dir = temp("expect-100");
+        let addr = bind_ephemeral();
+        let srv = KvServer::open(&dir).unwrap();
+        thread::spawn(move || {
+            let _ = srv.serve(addr);
+        });
+        thread::sleep(Duration::from_millis(100));
+        let mut stream = TcpStream::connect(addr).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_millis(500)))
+            .unwrap();
+        stream
+            .write_all(
+                b"PUT /kv/ex HTTP/1.0\r\nContent-Length: 2\r\nExpect: 100-continue\r\nHost: localhost\r\n\r\n",
+            )
+            .unwrap();
+        let mut interim = [0u8; 128];
+        let n = stream
+            .read(&mut interim)
+            .expect("server must send 100 Continue (AS-IS: client/server deadlock)");
+        let head = String::from_utf8_lossy(&interim[..n]);
+        assert!(
+            head.contains("100"),
+            "expected 100 Continue, got {head:?}"
+        );
+        stream.write_all(b"ok").unwrap();
+        let _ = stream.shutdown(std::net::Shutdown::Write);
+        let mut resp = Vec::new();
+        let _ = stream.read_to_end(&mut resp);
+        let text = String::from_utf8_lossy(&resp);
+        let put_code = text
+            .lines()
+            .next()
+            .and_then(|l| l.split_whitespace().nth(1))
+            .and_then(|c| c.parse::<u16>().ok())
+            .unwrap_or(0);
+        assert_eq!(
+            put_code, 200,
+            "PUT after 100 Continue must store, got {put_code} {text:?}"
+        );
+        let (code, body) = http_exchange(addr, "GET", "/kv/ex", b"").unwrap();
+        assert_eq!(code, 200, "GET after Expect PUT, body={body:?}");
+        assert_eq!(body, b"ok");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
