@@ -153,9 +153,8 @@ fn read_req(stream: &mut TcpStream) -> Result<(String, String, Vec<u8>, Vec<(Str
                 return Err(HttpError::App("body exceeds max".into()));
             }
         }
-        // F146: short body vs declared Content-Length used to truncate and store
-        // a partial payload (200). Fail closed — same class as F87 bad CL.
-        if body.len() < content_len {
+        // F146: short body vs declared Content-Length used to 200-store a prefix.
+        if short_body_vs_cl_is_error(body.len() as u64, content_len as u64) {
             return Err(HttpError::App(format!(
                 "body shorter than content-length ({}/{})",
                 body.len(),
@@ -163,10 +162,6 @@ fn read_req(stream: &mut TcpStream) -> Result<(String, String, Vec<u8>, Vec<(Str
             )));
         }
         body.truncate(content_len);
-        // F146: EOF before the declared length used to 200-store a prefix.
-        if short_body_vs_cl_is_error(body.len() as u64, content_len as u64) {
-            return Err(HttpError::App("short body vs content-length".into()));
-        }
     } else if keep_body_without_cl() {
         // F86: no Content-Length — keep bytes already past the header break.
         // Do not drain the socket (GET/keep-alive would hang waiting for EOF).

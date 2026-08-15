@@ -41,6 +41,18 @@ pub fn content_length_repeat_ok_as_is(_first: u64, _next: u64) -> bool {
     true
 }
 
+/// F146: EOF before `Content-Length` bytes is a framing error (not a short store).
+#[must_use]
+pub fn short_body_vs_cl_is_error(got: u64, declared: u64) -> bool {
+    got < declared
+}
+
+/// AS-IS F146: accept whatever arrived and truncate.
+#[must_use]
+pub fn short_body_vs_cl_is_error_as_is(_got: u64, _declared: u64) -> bool {
+    false
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -81,5 +93,8 @@ mod tests {
         assert_eq!(n, 36);
         assert_ne!(keep_body_without_cl(), keep_body_without_cl_as_is());
         assert_ne!(invalid_cl_as_zero(), invalid_cl_as_zero_as_is());
+        assert!(short_body_vs_cl_is_error(2, 5));
+        assert!(!short_body_vs_cl_is_error(5, 5));
+        assert!(!short_body_vs_cl_is_error_as_is(2, 5));
     }
 }
