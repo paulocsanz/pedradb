@@ -4946,8 +4946,11 @@ impl<E: Env> StoreCluster<E> {
             }
         }
         // Pedra scan for keys never recorded in this process history (e.g. after reopen).
+        // F62 / F55-class: never prefer lagging `ids[0]` — use the best changelog
+        // reader (max last_sequence among local participating nodes).
         let nid = self
-            .local_node_id()
+            .best_changelog_reader()
+            .or_else(|| self.local_node_id())
             .or_else(|| self.ids.first().copied())
             .ok_or_else(|| StoreError::Msg("empty cluster".into()))?;
         if let Some(n) = self.nodes.get(&nid) {

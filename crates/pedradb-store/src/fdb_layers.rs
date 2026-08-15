@@ -239,20 +239,12 @@ impl IdempotentIndex {
             };
             if let Some(old) = tr.get(cluster, &dkey)? {
                 if old != value {
-                    let mut old_idx = Self::IDX.to_vec();
-                    old_idx.extend_from_slice(&old);
-                    old_idx.push(b'/');
-                    old_idx.extend_from_slice(&key);
-                    tr.clear(&old_idx)?;
+                    tr.clear(&Self::idx_key(&old, &key))?;
                 }
             }
             tr.set(&dkey, &value)?;
-            let mut idx = Self::IDX.to_vec();
-            idx.extend_from_slice(&value);
-            idx.push(b'/');
-            idx.extend_from_slice(&key);
             // Non-empty: Montanha `clear` is an empty-value tombstone (lab).
-            tr.set(&idx, b"1")?;
+            tr.set(&Self::idx_key(&value, &key), b"1")?;
             tr.commit(cluster)?;
             Ok(())
         })
@@ -271,21 +263,40 @@ impl IdempotentIndex {
 
     /// Keys indexed under `value`.
     ///
+    /// Reverse keys are `IDX || value || 0x00 || user_key` (F61). A `'/'`
+    /// separator made `keys_for("red")` include value `"red/foo"`.
+    ///
     /// # Errors
     /// Store range errors.
     pub fn keys_for(cluster: &StoreCluster, value: &[u8]) -> Result<Vec<Vec<u8>>> {
         let mut tr = Transaction::at_version(cluster.read_version());
-        let mut prefix = Self::IDX.to_vec();
-        prefix.extend_from_slice(value);
-        prefix.push(b'/');
-        let end = crate::prefix_exclusive_end(&prefix).unwrap_or_default();
-        let pairs = tr.get_range(cluster, &prefix, &end)?;
-        let n = prefix.len();
+        let (start, end) = Self::idx_children(value);
+        let pairs = tr.get_range(cluster, &start, &end)?;
+        let n = start.len();
         Ok(pairs
             .into_iter()
             .filter(|(_, v)| !v.is_empty())
             .filter_map(|(k, _)| k.get(n..).map(Vec::from))
             .collect())
+    }
+
+    fn idx_key(value: &[u8], key: &[u8]) -> Vec<u8> {
+        let mut idx = Self::IDX.to_vec();
+        idx.extend_from_slice(value);
+        idx.push(0x00);
+        idx.extend_from_slice(key);
+        idx
+    }
+
+    /// `[IDX||value||0x00, IDX||value||0x01)` — exact value, any user key.
+    fn idx_children(value: &[u8]) -> (Vec<u8>, Vec<u8>) {
+        let mut start = Self::IDX.to_vec();
+        start.extend_from_slice(value);
+        start.push(0x00);
+        let mut end = Self::IDX.to_vec();
+        end.extend_from_slice(value);
+        end.push(0x01);
+        (start, end)
     }
 }
 
@@ -428,6 +439,42 @@ mod tests {
         assert!(
             red.iter().any(|k| k.as_slice() == ff),
             "0xff user key missing from keys_for (prefix||0xff end): {red:?}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Reverse keys were `IDX || value || '/' || user_key`. `keys_for("red")`
+    /// used prefix `IDX||red||/` whose exclusive successor still contains
+    /// `IDX||red/foo||/…` (`'/' < successor('/')`).
+    #[test]
+    fn idempotent_index_keys_for_does_not_include_value_prefix_sibling() {
+        let dir = temp();
+        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        c.elect_all(80).unwrap();
+        IdempotentIndex::put(&mut c, b"k1", b"red").unwrap();
+        IdempotentIndex::put(&mut c, b"k2", b"red/foo").unwrap();
+        assert_eq!(
+            IdempotentIndex::get(&c, b"k2").unwrap().as_deref(),
+            Some(b"red/foo".as_ref())
+        );
+        let red = IdempotentIndex::keys_for(&c, b"red").unwrap();
+        assert!(
+            red.iter().any(|k| k.as_slice() == b"k1"),
+            "k1 missing under red: {red:?}"
+        );
+        assert!(
+            !red.iter().any(|k| k.as_slice() == b"k2" || k.windows(3).any(|w| w == b"foo")),
+            "keys_for(red) included sibling value red/foo: {red:?}"
+        );
+        let long = IdempotentIndex::keys_for(&c, b"red/foo").unwrap();
+        assert_eq!(long, vec![b"k2".to_vec()], "exact value red/foo: {long:?}");
+        let nul_val = [b'r', 0x00, b'd'];
+        let nul_key = [b'k', 0x00, b'3'];
+        IdempotentIndex::put(&mut c, &nul_key, &nul_val).unwrap();
+        let got = IdempotentIndex::keys_for(&c, &nul_val).unwrap();
+        assert!(
+            got.iter().any(|k| k.as_slice() == nul_key),
+            "NUL in value/key must round-trip: {got:?}"
         );
         let _ = std::fs::remove_dir_all(&dir);
     }

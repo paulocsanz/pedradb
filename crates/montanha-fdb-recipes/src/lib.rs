@@ -119,24 +119,44 @@ impl Subspace {
         }
     }
 
-    /// Nested subspace: `self/part`.
+    /// Nested subspace: `self/part` (length-prefixed component — F62).
     #[must_use]
     pub fn sub(&self, part: impl AsRef<[u8]>) -> Self {
         let mut p = self.prefix.clone();
-        p.push(0x00);
-        p.extend_from_slice(part.as_ref());
+        Self::push_component(&mut p, part.as_ref());
         Self { prefix: p }
     }
 
-    /// Pack a key under this subspace: `prefix\0part1\0part2...`.
+    /// Pack a key under this subspace: `prefix || (0x00 || u32be len || part)*`.
+    ///
+    /// F62: raw `0x00 || part` collides when a component embeds `0x00`
+    /// (`pack([a\\0b, c]) == pack([a, b\\0c])`). Length-prefix each part.
     #[must_use]
     pub fn pack(&self, parts: &[&[u8]]) -> Vec<u8> {
         let mut k = self.prefix.clone();
         for p in parts {
-            k.push(0x00);
-            k.extend_from_slice(p);
+            Self::push_component(&mut k, p);
         }
         k
+    }
+
+    fn push_component(buf: &mut Vec<u8>, part: &[u8]) {
+        buf.push(0x00);
+        let n = u32::try_from(part.len()).expect("component len fits u32");
+        buf.extend_from_slice(&n.to_be_bytes());
+        buf.extend_from_slice(part);
+    }
+
+    /// Decode one length-prefixed component after a `0x00` separator.
+    fn take_component(rest: &[u8]) -> Option<(&[u8], &[u8])> {
+        if rest.len() < 4 {
+            return None;
+        }
+        let n = u32::from_be_bytes(rest[0..4].try_into().ok()?) as usize;
+        if rest.len() < 4 + n {
+            return None;
+        }
+        Some((&rest[4..4 + n], &rest[4 + n..]))
     }
 
     /// Inclusive start of range for this subspace.
@@ -171,13 +191,16 @@ impl Subspace {
         (start, end)
     }
 
-    /// Next packed component of `key` under `self.pack(parts)`.
+    /// Immediate packed child of `self.pack(parts)` inside `key`.
     ///
-    /// Must not split on the last `0x00` in `key` — a child may contain NULs (F60).
+    /// F60/F62: does not split on raw `0x00` inside the component; reads the
+    /// length-prefixed field after `pack || 0x00`.
     #[must_use]
     pub fn child_suffix(&self, parts: &[&[u8]], key: &[u8]) -> Option<Vec<u8>> {
         let (start, _) = self.children_range(parts);
-        key.strip_prefix(start.as_slice()).map(Vec::from)
+        let rest = key.strip_prefix(start.as_slice())?;
+        let (comp, _) = Self::take_component(rest)?;
+        Some(comp.to_vec())
     }
 
     /// Prefix bytes.
@@ -905,6 +928,26 @@ mod tests {
             "0xff user id must remain in zip 90: {in90:?}"
         );
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// F62: raw `0x00||part` pack collides when components embed NUL.
+    #[test]
+    fn pack_is_injective_when_components_contain_nul() {
+        let s = Subspace::new(b"t");
+        let a = s.pack(&[b"a\x00b", b"c"]);
+        let b = s.pack(&[b"a", b"b\x00c"]);
+        assert_ne!(
+            a, b,
+            "pack collision: [a\\0b,c] vs [a,b\\0c] both encode to {a:?}"
+        );
+        // Nested sub must also length-prefix.
+        let s1 = Subspace::new(b"r").sub(b"a\x00b");
+        let s2 = Subspace::new(b"r").sub(b"a").sub(b"b");
+        assert_ne!(
+            s1.as_bytes(),
+            s2.as_bytes(),
+            "sub collision for NUL vs nested"
+        );
     }
 
     /// Value payload used to be `zip || 0x00 || name`. A zip containing `0x00`

@@ -312,6 +312,14 @@ fn changelog_after_skips_lagging_first_node() {
         feed.iter().any(|e| e.key.as_ref() == b"/host/h1/new"),
         "changelog_after used lagging node 1, missing new key: {feed:?}"
     );
+    let snap = c.read_version();
+    let ranged = c
+        .keys_in_range_at(b"/host/h1/", b"/host/h10", snap)
+        .unwrap();
+    assert!(
+        ranged.iter().any(|(k, v)| k.as_slice() == b"/host/h1/new" && v.as_slice() == b"v1"),
+        "get_range/keys_in_range_at used lagging node 1, missing new key: {ranged:?}"
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }
 
