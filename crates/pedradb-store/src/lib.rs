@@ -153,6 +153,45 @@ impl StoreOpenOptions {
     }
 }
 
+/// Aggregate Pedra L0 / mem admission counters across local nodes (lab A/B, gates).
+///
+/// Config fields are the first non-zero values seen (same on every node when opened
+/// with [`StoreOpenOptions::with_write_backpressure`]).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct WriteAdmissionSnap {
+    /// Local nodes that contributed stats.
+    pub nodes: u64,
+    /// Max L0 SST file count across nodes.
+    pub l0_files_max: u64,
+    /// Sum of hard-stall refusals across nodes.
+    pub write_stall_count_sum: u64,
+    /// Sum of soft-pressure drains across nodes.
+    pub write_pressure_count_sum: u64,
+    /// Configured hard L0 stall limit (`0` = disabled).
+    pub write_stall_l0: u64,
+    /// Configured soft L0 pressure threshold (`0` = disabled).
+    pub write_pressure_l0: u64,
+    /// Configured mem stall limit in bytes (`0` = disabled).
+    pub write_stall_mem_bytes: u64,
+}
+
+impl WriteAdmissionSnap {
+    /// Compact JSON object (no outer braces nesting helpers).
+    #[must_use]
+    pub fn to_json_object(&self) -> String {
+        format!(
+            r#"{{"nodes":{},"l0_files_max":{},"write_stall_count_sum":{},"write_pressure_count_sum":{},"write_stall_l0":{},"write_pressure_l0":{},"write_stall_mem_bytes":{}}}"#,
+            self.nodes,
+            self.l0_files_max,
+            self.write_stall_count_sum,
+            self.write_pressure_count_sum,
+            self.write_stall_l0,
+            self.write_pressure_l0,
+            self.write_stall_mem_bytes
+        )
+    }
+}
+
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::ops::Bound;
 use std::path::{Path, PathBuf};
@@ -4544,6 +4583,32 @@ impl<E: Env> StoreCluster<E> {
         parts.join(" ")
     }
 
+    /// Aggregate Pedra L0/mem admission stats across local nodes (structured gates / A-B).
+    #[must_use]
+    pub fn write_admission_snap(&self) -> WriteAdmissionSnap {
+        let mut out = WriteAdmissionSnap::default();
+        for id in &self.ids {
+            let Some(n) = self.nodes.get(id) else {
+                continue;
+            };
+            let s = n.db.stats();
+            out.nodes += 1;
+            out.l0_files_max = out.l0_files_max.max(s.l0_files);
+            out.write_stall_count_sum += s.write_stall_count;
+            out.write_pressure_count_sum += s.write_pressure_count;
+            if s.write_stall_l0 > 0 {
+                out.write_stall_l0 = s.write_stall_l0;
+            }
+            if s.write_pressure_l0 > 0 {
+                out.write_pressure_l0 = s.write_pressure_l0;
+            }
+            if s.write_stall_mem_bytes > 0 {
+                out.write_stall_mem_bytes = s.write_stall_mem_bytes;
+            }
+        }
+        out
+    }
+
     /// Admin: split the range that contains `split_key` into `[start, split_key)` and
     /// `[split_key, end)` (RFC-0021 P1.2 minimal PD). New range id = max(id)+1.
     ///
@@ -8358,6 +8423,16 @@ mod tests {
                 pedradb_core::L0_COMPACTION_TRIGGER.saturating_mul(2)
             )),
             "hard stall limit in status: {st}"
+        );
+        let snap = c.write_admission_snap();
+        assert_eq!(snap.nodes, 1);
+        assert_eq!(
+            snap.write_pressure_l0,
+            pedradb_core::L0_COMPACTION_TRIGGER as u64
+        );
+        assert_eq!(
+            snap.write_stall_l0,
+            pedradb_core::L0_COMPACTION_TRIGGER.saturating_mul(2) as u64
         );
         let _ = std::fs::remove_dir_all(&dir);
     }

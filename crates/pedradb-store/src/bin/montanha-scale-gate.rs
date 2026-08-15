@@ -157,16 +157,27 @@ fn main() {
         notes.push(format!("single_range_put keys_per_s={kps1:.3}"));
     }
 
-    // Pedra L0 / stall counters after load (ops honesty).
+    // Pedra L0 / stall counters after load (ops honesty + structured A/B).
+    let adm_r4 = c4.write_admission_snap();
+    let adm_r1 = c1.write_admission_snap();
     let status_r4 = c4.status_text();
     let status_r1 = c1.status_text();
     notes.push(format!("status_r4={status_r4}"));
     notes.push(format!("status_r1={status_r1}"));
+    notes.push(format!("admission_r4={}", adm_r4.to_json_object()));
+    notes.push(format!("admission_r1={}", adm_r1.to_json_object()));
+    if write_bp {
+        if adm_r4.write_stall_l0 == 0 && adm_r1.write_stall_l0 == 0 {
+            failures.push("write_backpressure=1 but write_stall_l0 config is 0".into());
+        }
+    }
 
     drop(c4);
     drop(c1);
 
     let pass = failures.is_empty();
+    let adm_r4_json = adm_r4.to_json_object();
+    let adm_r1_json = adm_r1.to_json_object();
     let report = format!(
         r#"{{
   "gate": "rfc0021-0025-scale-option-a-v0",
@@ -177,9 +188,11 @@ fn main() {
   "multi_range_keys_per_s": {mr_kps:.3},
   "single_range_keys_per_s": {kps1:.3},
   "put_batch_sz": {batch_sz},
+  "admission_r4": {adm_r4_json},
+  "admission_r1": {adm_r1_json},
   "notes": {notes:?},
   "failures": {failures:?},
-  "note": "in-process; TCP multi-client remains montanha-fdb-bench suite scale; MONTANHA_WRITE_BACKPRESSURE=1 opts into Pedra L0 admission"
+  "note": "in-process; TCP multi-client remains montanha-fdb-bench suite scale; MONTANHA_WRITE_BACKPRESSURE=1 opts into Pedra L0 admission; admission_* are WriteAdmissionSnap aggregates"
 }}
 "#
     );

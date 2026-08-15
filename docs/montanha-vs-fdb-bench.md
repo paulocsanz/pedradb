@@ -39,6 +39,12 @@ MONTANHA_BENCH_SUITE=tcp,mini-bt MONTANHA_BENCH_N=40 \
 MONTANHA_WRITE_BACKPRESSURE=1 MONTANHA_BENCH_SUITE=core MONTANHA_BENCH_N=50 \
   cargo run -p pedradb-store --release --bin montanha-fdb-bench -- findings/fdb-bench-bp
 # same flag on montanha-scale-gate; report field write_backpressure: true|false
+# Structured admission counters: scale_report.admission_r{1,4} (WriteAdmissionSnap)
+
+# A/B scale-gate off vs BP (observational thr ratio; no field claim)
+bash scripts/montanha_bp_ab_v0.sh findings/bp-ab-local
+# or compare existing dual gate outputs:
+# bash scripts/montanha_bp_ab_v0.sh --from findings/scale-gate-ci findings/scale-gate-ci-bp findings/bp-ab-ci
 ```
 
 Output: `findings/.../fdb_shaped_bench.json`

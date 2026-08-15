@@ -108,8 +108,10 @@ fn main() {
     let get_qps = n_get as f64 / get_wall.as_secs_f64().max(1e-9);
     let tx_qps = n_tx as f64 / tx_wall.as_secs_f64().max(1e-9);
     let status = c.status_text();
+    let adm = c.write_admission_snap();
     // Escape for JSON string.
     let status_esc = status.replace('\\', "\\\\").replace('"', "\\\"");
+    let adm_json = adm.to_json_object();
 
     let report = format!(
         r#"{{
@@ -119,6 +121,7 @@ fn main() {
   "write_backpressure": {write_bp},
   "payload_bytes": {payload},
   "status": "{status_esc}",
+  "admission": {adm_json},
   "put": {{
     "n": {n_put},
     "qps": {put_qps:.3},
@@ -141,7 +144,7 @@ fn main() {
     "p99_ms": {p99t:.4},
     "wall_s": {tw:.4}
   }},
-  "note": "in-process 3-node majority; not field peer; not YCSB; MONTANHA_WRITE_BACKPRESSURE=1 opts Pedra L0 admission"
+  "note": "in-process 3-node majority; not field peer; not YCSB; MONTANHA_WRITE_BACKPRESSURE=1 opts Pedra L0 admission; admission is WriteAdmissionSnap"
 }}
 "#,
         p50p = pct(&put_lat, 50.0),
