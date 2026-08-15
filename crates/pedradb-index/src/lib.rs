@@ -9,7 +9,7 @@
 use pedradb_core::{Db, OpenOptions, Result, StdEnv};
 use std::path::Path;
 
-/// Primary key prefix: `row/{id}`
+/// Primary key prefix: `row/` + length-prefixed id (F89).
 pub const ROW_PREFIX: &[u8] = b"row/";
 /// Secondary index namespace (F65).
 pub const IDX_PREFIX: &[u8] = b"idx/";
@@ -21,10 +21,14 @@ fn push_len_pref(buf: &mut Vec<u8>, part: &[u8]) {
 }
 
 /// Build primary key for row id.
+///
+/// F89: raw `row/ || id` made `row/a` a byte-prefix of `row/ab`, so any
+/// half-open prefix scan of one id leaked sibling rows. Length-prefix the id
+/// (same framing as [`idx_key`]).
 #[must_use]
 pub fn row_key(id: impl AsRef<[u8]>) -> Vec<u8> {
     let mut k = ROW_PREFIX.to_vec();
-    k.extend_from_slice(id.as_ref());
+    push_len_pref(&mut k, id.as_ref());
     k
 }
 
@@ -232,6 +236,42 @@ mod tests {
         let d = std::env::temp_dir().join(format!("pedra-index-{n}-{i}"));
         let _ = fs::remove_dir_all(&d);
         d
+    }
+
+    #[test]
+    fn row_key_id_is_not_prefix_of_sibling_id() {
+        // F89 AS-IS: `row/` || id → `row/a` is a prefix of `row/ab`.
+        let a = row_key(b"a");
+        let ab = row_key(b"ab");
+        assert!(
+            !ab.starts_with(&a),
+            "row_key(a) must not be a byte-prefix of row_key(ab): {a:?} vs {ab:?}"
+        );
+        assert_ne!(a, ab);
+        // NUL / slash in ids stay distinct point keys.
+        assert_ne!(row_key(b"a/b"), row_key(b"a"));
+        assert_ne!(row_key(b"a\0b"), row_key(b"a"));
+        let dir = temp();
+        let mut db = Db::open(&dir).unwrap();
+        put_row_with_indexes(&mut db, b"a", b"va", b"n1", b"e1").unwrap();
+        put_row_with_indexes(&mut db, b"ab", b"vab", b"n2", b"e2").unwrap();
+        assert_eq!(db.get(&row_key(b"a")).as_deref(), Some(b"va".as_ref()));
+        assert_eq!(db.get(&row_key(b"ab")).as_deref(), Some(b"vab".as_ref()));
+        // Prefix scan of exact row_key("a") must not include "ab".
+        let end = pedradb_core::prefix_exclusive_end(&a);
+        let hits: Vec<_> = db
+            .range(
+                std::ops::Bound::Included(a.as_slice()),
+                match end.as_deref() {
+                    Some(e) => std::ops::Bound::Excluded(e),
+                    None => std::ops::Bound::Unbounded,
+                },
+            )
+            .into_iter()
+            .map(|(k, _)| k.to_vec())
+            .collect();
+        assert_eq!(hits, vec![a.clone()], "prefix scan leaked siblings: {hits:?}");
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]

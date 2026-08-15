@@ -82,12 +82,18 @@ fn read_req(stream: &mut TcpStream) -> Result<(String, String, Vec<u8>, Vec<(Str
             .to_ascii_lowercase()
             .strip_prefix("content-length:")
         {
-            has_content_len = true;
             // F87: invalid CL used to become 0 and truncate the body to empty.
-            content_len = v
+            let n = v
                 .trim()
                 .parse()
                 .map_err(|_| HttpError::App("bad content-length".into()))?;
+            // F88: differing Content-Length fields — last header used to win
+            // (`5` then `0` stored empty). RFC 9112: reject the message.
+            if has_content_len && n != content_len {
+                return Err(HttpError::App("conflicting content-length".into()));
+            }
+            has_content_len = true;
+            content_len = n;
         }
     }
     // Cap body size (F8): previously Content-Length could force multi-GiB alloc.
@@ -779,6 +785,38 @@ mod tests {
         assert_eq!(
             code, 404,
             "malformed Content-Length must fail closed (no store), GET {code} {body:?}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// F88: two Content-Length values — last header won. `5` then `0` truncated
+    /// the payload and stored empty (RFC 9112: differing CLs must be rejected).
+    #[test]
+    fn kv_http_conflicting_content_length_does_not_store_empty() {
+        let dir = temp("dup-cl");
+        let addr = bind_ephemeral();
+        let srv = KvServer::open(&dir).unwrap();
+        thread::spawn(move || {
+            let _ = srv.serve(addr);
+        });
+        thread::sleep(Duration::from_millis(100));
+        let mut stream = TcpStream::connect(addr).unwrap();
+        stream
+            .write_all(
+                b"PUT /kv/dupcl HTTP/1.0\r\nContent-Length: 5\r\nContent-Length: 0\r\nHost: localhost\r\n\r\nhello",
+            )
+            .unwrap();
+        let _ = stream.shutdown(std::net::Shutdown::Write);
+        let mut resp = Vec::new();
+        let _ = stream.read_to_end(&mut resp);
+        let (code, body) = http_exchange(addr, "GET", "/kv/dupcl", b"").unwrap();
+        assert!(
+            !(code == 200 && body.is_empty()),
+            "conflicting Content-Length stored empty (last=0 won), GET {code} {body:?}"
+        );
+        assert_eq!(
+            code, 404,
+            "differing Content-Length must fail closed, GET {code} {body:?}"
         );
         let _ = std::fs::remove_dir_all(&dir);
     }
