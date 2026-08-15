@@ -81,9 +81,11 @@ pub fn log_up_to_date(
 ///                       i.candidate_last_log_term, i.candidate_last_log_index)
 /// ```
 ///
-/// Machine-checked today: [`tests::theorem_vote_decision_iff_on_finite_domain`]
-/// enumerates a finite universe. Verus/`ensures` or Aeneas→Lean: same statement
-/// when toolchain is available (see `pedradb-dst/formal/P1.4-vote-theorem.md`).
+/// Machine-checked:
+/// - finite universe: [`tests::theorem_vote_decision_iff_on_finite_domain`]
+/// - ∀u64 Verus twin: `crates/pedradb-raft/verus/vote_decision.rs`
+///   (`./scripts/verus_vote_decision.sh` → `1 verified, 0 errors`)
+/// See `determinismo/pedradb-dst/formal/P1.4-vote-theorem.md`.
 ///
 /// # Does not cover
 ///
@@ -133,6 +135,31 @@ pub fn vote_decision_as_is_ignore_log_and_vote(i: VoteInputs) -> VoteDecision {
     } else {
         VoteDecision::Deny
     }
+}
+
+/// Persist result the handler sees (axiom of the environment).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PersistOutcome {
+    /// `persist_hard` returned Ok.
+    Ok,
+    /// `persist_hard` returned Err.
+    Err,
+}
+
+/// F15 protocol: Grant on the wire only if the kernel would grant **and** persist Ok.
+///
+/// This is the refinement of `handle_request_vote_with_persist` minus I/O.
+/// `sent_grant ⇒ persist == Ok`.
+#[must_use]
+pub fn grant_after_persist(decision: VoteDecision, persist: PersistOutcome) -> bool {
+    decision == VoteDecision::WouldGrant && persist == PersistOutcome::Ok
+}
+
+/// AS-IS F15: grant as soon as the kernel says so, persist is ignored.
+#[must_use]
+pub fn grant_after_persist_as_is(decision: VoteDecision, persist: PersistOutcome) -> bool {
+    let _ = persist;
+    decision == VoteDecision::WouldGrant
 }
 
 #[cfg(test)]

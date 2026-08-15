@@ -17,7 +17,10 @@ pub mod persist;
 pub mod vote_kernel;
 
 pub use ae_kernel::{ae_entry_action, ae_prev_log_ok, AeEntryAction};
-pub use vote_kernel::{vote_decision, VoteDecision, VoteInputs};
+pub use vote_kernel::{
+    grant_after_persist, grant_after_persist_as_is, vote_decision, PersistOutcome, VoteDecision,
+    VoteInputs,
+};
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
