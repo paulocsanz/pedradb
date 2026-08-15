@@ -43,7 +43,7 @@ Last updated: 2026-08-14 (RFC-0024 done: Montanha fold for Caixote)
 | 11 | Streaming range / lazy blocks (RFC-0014 P1) | ✅ done | scan + lazy SST blocks + levels + lz4 | — |
 | 12 | Audit correctness fixes (RFC-0015) | ✅ done | fence, sync_dir, Env seams, compact stats, deny CI | — |
 
-**Next action:** Continuous DST soak; fill FDB side of [montanha-vs-fdb-bench.md](montanha-vs-fdb-bench.md) on lab hardware; full bindingtester / Java RL only if requested.  
+**Next action:** Continuous DST soak; fill FDB side of [montanha-vs-fdb-bench.md](montanha-vs-fdb-bench.md) on lab hardware; full bindingtester / Java RL only if requested. Scale option-A hygiene: `./scripts/montanha_scale_gate_v0.sh`.  
 **Shipped Phase 1–3 + A–E continuum:** [montanha-fdb-phases.md](montanha-fdb-phases.md) — fdb-compat 12-step harness (`clear_range`), etcd multiproc + **TCP DCS wire**, `RecordTable` unique/multi-index, platform need faces (CP/OLAP/stream), F47–F49 residuals.  
 **Shipped (bench):** `montanha-fdb-bench` — FDB-shaped microbenches + TCP multi-client + mini-bt E1/E2 → `fdb_shaped_bench.json`; method in [montanha-vs-fdb-bench.md](montanha-vs-fdb-bench.md).  
 **Shipped (CI mini-bt):** `cargo test -p pedradb-store --test mini_bt_soak` — in-process model soak + TCP multi-client majority verify.  

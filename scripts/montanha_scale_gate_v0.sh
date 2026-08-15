@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# RFC-0021 / 0025 — scale option-A gate v0 (in-process, CI-friendly).
+# Fails if leader diversity / multi-range put / put_batch hygiene regresses.
+set -euo pipefail
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT"
+OUT="${1:-$ROOT/findings/scale-gate-$(date -u +%Y%m%dT%H%M%SZ)}"
+mkdir -p "$OUT"
+export MONTANHA_SCALE_KEYS="${MONTANHA_SCALE_KEYS:-8}"
+export MONTANHA_SCALE_BATCH="${MONTANHA_SCALE_BATCH:-8}"
+echo "montanha_scale_gate_v0 → $OUT"
+cargo run -q -p pedradb-store --release --bin montanha-scale-gate -- "$OUT"
+test -f "$OUT/scale_report.json"
+python3 - <<PY
+import json
+from pathlib import Path
+r = json.loads(Path("$OUT/scale_report.json").read_text())
+assert r.get("gate") == "rfc0021-0025-scale-option-a-v0"
+assert r.get("pass") is True, r.get("failures")
+assert r.get("leader_nodes_r4", 0) >= 2, r
+assert r.get("multi_range_puts_ok", 0) >= 4, r
+print("scale gate v0 OK leaders=", r["leader_nodes_r4"], "mr_kps=", r["multi_range_keys_per_s"])
+PY

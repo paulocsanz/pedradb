@@ -1,0 +1,12 @@
+{
+  "gate": "rfc0021-0025-scale-option-a-v0",
+  "pass": true,
+  "leader_nodes_r4": 3,
+  "multi_range_puts_ok": 4,
+  "multi_range_keys_per_s": 1.791,
+  "single_range_keys_per_s": 1.991,
+  "put_batch_sz": 8,
+  "notes": ["leader_nodes=[1, 2, 3]", "put_batch_8 ok wall_ms=1086.9", "disjoint_put_4ranges keys_per_s=1.791", "single_range_put keys_per_s=1.991"],
+  "failures": [],
+  "note": "in-process; TCP multi-client remains montanha-fdb-bench suite scale"
+}

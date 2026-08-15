@@ -76,6 +76,15 @@ While waiting for majority on one put/batch, TCP used full `cluster.tick()` → 
 
 **S10** (`findings/fdb-bench-scale-s10/`): thr = max(threads, min(nr,8)) so r8 is fully covered. S3 PutBatch r1/r4/r8 = 0.77 / **2.44** / **2.73** keys/s (128 keys ok on r8, no hang). Option A **reconfirmed** under concurrent clients when leaders are spread **and** put-wait does not full-tick idle ranges.
 
+### CI hygiene gate
+
+```bash
+./scripts/montanha_scale_gate_v0.sh findings/scale-gate-verify
+# or: cargo run -p pedradb-store --release --bin montanha-scale-gate -- findings/scale-gate-verify
+```
+
+In-process checks: ≥2 leader nodes @ 4 ranges, `put_batch`, disjoint multi-range puts, 1-range baseline. TCP multi-client remains `montanha-fdb-bench` suite `scale`.
+
 Rationale:
 - Lab multi-Raft scales write capacity under concurrent partitioned clients (S2 r1→r4) **when leaders are spread**.
 - PutBatch is the right bulk path (S3 r1); multi-range batch needs more soak + leader diversity.
