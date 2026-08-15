@@ -136,13 +136,16 @@ impl StoreOpenOptions {
     }
 }
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::ops::Bound;
 use std::path::{Path, PathBuf};
 
 use bytes::Bytes;
 use pedradb_core::{BatchOp, Db, Env, Host, OpenOptions, Rng, SeedRng, StdEnv};
-use pedradb_dcs::{apply_dcs_command, check_command_at, dcs_get, dcs_get_at, DcsCommand, KeyValue};
+use pedradb_dcs::{
+    apply_dcs_command, bind_absent_create, check_command_at, dcs_get, dcs_get_at, DcsCommand,
+    KeyValue,
+};
 use thiserror::Error;
 
 /// How peer RPCs (RequestVote / AppendEntries) are delivered.
@@ -655,12 +658,16 @@ fn encode_intent(txn_id: u64, value: &[u8]) -> Vec<u8> {
     b
 }
 
-fn decode_intent(raw: &[u8]) -> Option<(u64, &[u8])> {
+/// Decode intent value: `u64le txn_id || payload`.
+///
+/// Short blob is **Err** (F120) — callers that treated `None` as "no intent"
+/// skipped materialise on commit while still deleting the intent key.
+fn decode_intent(raw: &[u8]) -> Result<(u64, &[u8])> {
     if raw.len() < 8 {
-        return None;
+        return Err(StoreError::Msg("intent short".into()));
     }
-    let id = u64::from_le_bytes(raw[0..8].try_into().ok()?);
-    Some((id, &raw[8..]))
+    let id = u64::from_le_bytes(raw[0..8].try_into().unwrap());
+    Ok((id, &raw[8..]))
 }
 
 /// True if `user` has an intent held by a *different* txn (or any if `self_id` is None).
@@ -703,7 +710,8 @@ fn intent_conflict<E: Env>(db: &Db<E>, user: &[u8], self_id: Option<u64>) -> boo
     let Some(raw) = db.get(&intent_key(user)) else {
         return false;
     };
-    let Some((oid, _)) = decode_intent(&raw) else {
+    // Present undecodable intent blocks prepare (fail closed).
+    let Ok((oid, _)) = decode_intent(&raw) else {
         return true;
     };
     match self_id {
@@ -1046,7 +1054,7 @@ fn clear_range_txn_meta<E: Env>(db: &mut Db<E>, start: &[u8], end: &[u8]) -> Res
         if !key_in_half_open(&user, start, end) {
             continue;
         }
-        if let Some((tid, _)) = decode_intent(&raw) {
+        if let Ok((tid, _)) = decode_intent(&raw) {
             if !touched_txns.contains(&tid) {
                 touched_txns.push(tid);
             }
@@ -1155,7 +1163,8 @@ fn apply_txn_commit<E: Env>(db: &mut Db<E>, txn_id: u64, keys: &[Vec<u8>]) -> Re
     if txn_kernel::txn_commit_action(status_is_abort) == txn_kernel::TxnCommitAction::Revert {
         // F47: fenced TX — never materialise. If a prior apply already wrote user
         // keys, restore preimages (same as TxnRevert). Keep abort fence durable.
-        let _ = apply_txn_revert(db, txn_id, keys);
+        // Propagate corrupt-preimage errors (F118) — do not leave aborted writes.
+        apply_txn_revert(db, txn_id, keys)?;
         let _ = db.put(txn_status_key(txn_id), b"abort");
         return Ok(());
     }
@@ -1168,13 +1177,13 @@ fn apply_txn_commit<E: Env>(db: &mut Db<E>, txn_id: u64, keys: &[Vec<u8>]) -> Re
                 ops.push(BatchOp::put(u.as_slice(), raw.as_ref()));
             }
         } else if let Some(raw) = db.get(&intent_key(u)) {
-            if let Some((oid, val)) = decode_intent(&raw) {
-                if oid == txn_id {
-                    if val.is_empty() {
-                        ops.push(BatchOp::delete(u.as_slice()));
-                    } else {
-                        ops.push(BatchOp::put(u.as_slice(), val));
-                    }
+            // F120: present corrupt intent must not skip materialise then delete.
+            let (oid, val) = decode_intent(&raw)?;
+            if oid == txn_id {
+                if val.is_empty() {
+                    ops.push(BatchOp::delete(u.as_slice()));
+                } else {
+                    ops.push(BatchOp::put(u.as_slice(), val));
                 }
             }
         }
@@ -2168,7 +2177,7 @@ impl<E: Env> StoreCluster<E> {
                     .strip_prefix(INTENT_PREFIX)
                     .and_then(user_from_meta_suffix)
                     .unwrap_or_else(|| ik.clone());
-                if let Some((oid, _)) = decode_intent(&raw) {
+                if let Ok((oid, _)) = decode_intent(&raw) {
                     by_txn.entry(oid).or_default().push(user);
                 } else {
                     garbage.push(ik);
@@ -2209,24 +2218,39 @@ impl<E: Env> StoreCluster<E> {
         let meta_gen = self.load_u64_meta_max("generation")?;
         let meta_wm = self.load_u64_meta_max("watermark")?;
         let mut best: HashMap<Vec<u8>, Vec<(u64, Option<Vec<u8>>)>> = HashMap::new();
+        // F119: present-but-corrupt hist on every replica used to be skipped →
+        // SI snapshots evaporated. Track users that only had corrupt blobs.
+        let mut corrupt_only: HashSet<Vec<u8>> = HashSet::new();
         for node in self.nodes.values() {
             for (hk, raw) in scan_prefix(&node.db, HIST_PREFIX) {
                 let Some(user) = hk.strip_prefix(HIST_PREFIX).and_then(user_from_meta_suffix)
                 else {
                     continue;
                 };
-                let Ok(hist) = decode_hist(&raw) else {
-                    continue;
-                };
-                let existing = best
-                    .get(&user)
-                    .and_then(|h| h.last().map(|(g, _)| *g))
-                    .unwrap_or(0);
-                let new_last = hist.last().map(|(g, _)| *g).unwrap_or(0);
-                if new_last >= existing {
-                    best.insert(user, hist);
+                match decode_hist(&raw) {
+                    Ok(hist) => {
+                        corrupt_only.remove(&user);
+                        let existing = best
+                            .get(&user)
+                            .and_then(|h| h.last().map(|(g, _)| *g))
+                            .unwrap_or(0);
+                        let new_last = hist.last().map(|(g, _)| *g).unwrap_or(0);
+                        if new_last >= existing {
+                            best.insert(user, hist);
+                        }
+                    }
+                    Err(_) => {
+                        if !best.contains_key(&user) {
+                            corrupt_only.insert(user);
+                        }
+                    }
                 }
             }
+        }
+        if !corrupt_only.is_empty() {
+            return Err(StoreError::Msg(
+                "si hist: corrupt on all local replicas".into(),
+            ));
         }
         self.key_history = best;
         self.key_versions.clear();
@@ -2238,9 +2262,9 @@ impl<E: Env> StoreCluster<E> {
             }
         }
         // Belt: never restart below durable hist tips even if meta lagged.
-        self.commit_generation =
-            txn_kernel::recover_si_generation(meta_gen.max(hist_tip));
-        self.safe_watermark = txn_kernel::recover_si_generation(meta_wm.min(self.commit_generation));
+        self.commit_generation = txn_kernel::recover_si_generation(meta_gen.max(hist_tip));
+        self.safe_watermark =
+            txn_kernel::recover_si_generation(meta_wm.min(self.commit_generation));
         Ok(())
     }
 
@@ -4965,7 +4989,7 @@ impl<E: Env> StoreCluster<E> {
                         .or_else(|| n.db.get(&txn_pair_key(handle.id, k)).map(|b| b.to_vec()))
                         .or_else(|| {
                             n.db.get(&intent_key(k)).and_then(|raw| {
-                                decode_intent(&raw).and_then(|(oid, v)| {
+                                decode_intent(&raw).ok().and_then(|(oid, v)| {
                                     if oid == handle.id {
                                         Some(v.to_vec())
                                     } else {
@@ -5776,10 +5800,13 @@ impl<E: Env> StoreCluster<E> {
         })?;
         let now = self.now_ms;
         // Pre-check on leader db (expired leased keys count as absent).
-        {
+        // Then bind Create/Cas(0) against an expired corpse to Cas(old rev)
+        // so apply never overwrites (I-DCS-1).
+        let cmd = {
             let db = &self.nodes.get(&leader).unwrap().db;
             check_command_at(db, &cmd, now).map_err(StoreError::Dcs)?;
-        }
+            bind_absent_create(db, cmd, now)
+        };
         // Majority commit required: NotCommitted if followers cannot form a majority.
         self.broadcast_append(rid, leader, Some(RangeEntry::Dcs(cmd)))?;
         // Post-condition: entry applied on leader. Never return Ok(0) for a successful mutate.
@@ -5830,7 +5857,13 @@ impl<E: Env> StoreCluster<E> {
                 commit: self.commit_index(leader, rid),
             });
         }
-        let _ = watch_val;
+        // Apply of a losing Create/Cas is a no-op: the live key is the winner.
+        // Do not Ok the loser's client with the winner's revision (I-DCS-1).
+        if kv.value.as_slice() != watch_val.as_slice() || (lease != 0 && kv.lease != lease) {
+            return Err(StoreError::Dcs(pedradb_dcs::DcsError::CasFailed(
+                "lost race",
+            )));
+        }
         Ok(kv.mod_revision)
     }
 
@@ -5986,11 +6019,13 @@ mod tests {
         let snap = c.read_version();
         let got = c.keys_in_range_at(&[], &[], snap).unwrap();
         assert!(
-            got.iter().any(|(k, v)| k == &keys[0] && v.as_slice() == b"v0"),
+            got.iter()
+                .any(|(k, v)| k == &keys[0] && v.as_slice() == b"v0"),
             "range-0 key missing after partition: {got:?}"
         );
         assert!(
-            got.iter().any(|(k, v)| k == &keys[1] && v.as_slice() == b"v1"),
+            got.iter()
+                .any(|(k, v)| k == &keys[1] && v.as_slice() == b"v1"),
             "range-1 key missing (scan used start-range reader only): {got:?}"
         );
         let _ = std::fs::remove_dir_all(&dir);
@@ -6559,6 +6594,59 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// F119: one valid hist replica still recovers SI (corrupt siblings ignored).
+    #[test]
+    fn open_uses_valid_si_hist_when_sibling_corrupt() {
+        let dir = temp();
+        let g1;
+        {
+            let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+            c.elect_all(80).unwrap();
+            c.put(b"h", b"v1").unwrap();
+            g1 = c.read_version();
+            c.put(b"h", b"v2").unwrap();
+            let hk = hist_key(b"h");
+            if let Some(n) = c.nodes.get_mut(&1) {
+                n.db.put(&hk, b"xx").unwrap();
+            }
+        }
+        let c = StoreCluster::open(&dir, 3, 1).unwrap();
+        assert_eq!(
+            c.get_at_version(b"h", g1).unwrap().as_deref(),
+            Some(b"v1".as_ref()),
+            "valid sibling hist must win over corrupt"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// F120: short intent on commit skipped materialise but still deleted the intent.
+    #[test]
+    fn apply_txn_commit_rejects_short_intent() {
+        let dir = temp();
+        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        c.elect_all(80).unwrap();
+        let nid = c.ids[0];
+        let n = c.nodes.get_mut(&nid).unwrap();
+        let tid = 77u64;
+        n.db.put(txn_status_key(tid), b"prepared").unwrap();
+        // No pair row — commit falls back to intent; short blob is corrupt.
+        n.db.put(intent_key(b"u"), b"xxxx").unwrap();
+        let err = apply_txn_commit(&mut n.db, tid, &[b"u".to_vec()]);
+        assert!(
+            err.is_err(),
+            "short intent must fail closed on commit: {err:?}"
+        );
+        assert!(
+            n.db.get(&intent_key(b"u")).is_some(),
+            "failed commit must not drop the short intent"
+        );
+        assert!(
+            n.db.get(b"u").is_none(),
+            "user key must not be invented from garbage intent"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// F118: present garbage preimage must not look like "peer never prepared".
     #[test]
     fn apply_txn_revert_rejects_corrupt_preimage() {
@@ -6569,9 +6657,7 @@ mod tests {
         let nid = c.ids[0];
         let n = c.nodes.get_mut(&nid).unwrap();
         let tid = 42u64;
-        n.db
-            .put(txn_pre_key(tid, b"u"), b"\xffgarbage")
-            .unwrap();
+        n.db.put(txn_pre_key(tid, b"u"), b"\xffgarbage").unwrap();
         let err = apply_txn_revert(&mut n.db, tid, &[b"u".to_vec()]);
         assert!(
             err.is_err(),
@@ -7488,6 +7574,57 @@ mod tests {
         assert_eq!(
             c.get_on(leader, b"after-cas").unwrap().as_deref(),
             Some(b"ok".as_ref())
+        );
+        assert_eq!(
+            c.dcs_get_on(leader, &key).unwrap().unwrap().value,
+            b"a",
+            "injected Create must not steal the live binding"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// I-DCS-1 at apply: a later Create in the log must not overwrite a live lease.
+    #[test]
+    fn dcs_apply_create_does_not_steal_live_lock() {
+        let dir = temp();
+        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        c.set_ms_per_tick(0);
+        c.elect_all(80).unwrap();
+        let key = meta_key(b"live-lock");
+        c.dcs_create_ttl(&key, b"holder-a", 10_000).unwrap();
+        let rid = c.locate(&key).unwrap();
+        let leader = c.range_leader(rid).unwrap();
+        {
+            let p = c
+                .nodes
+                .get_mut(&leader)
+                .unwrap()
+                .ranges
+                .get_mut(&rid)
+                .unwrap();
+            let idx = p.last_index() + 1;
+            let term = p.term;
+            p.log.push(LogRec {
+                index: idx,
+                term,
+                entry: RangeEntry::Dcs(DcsCommand::Create {
+                    key: key.clone(),
+                    value: b"holder-b".to_vec(),
+                    lease: 99_000,
+                }),
+            });
+            p.commit = idx;
+        }
+        c.apply_range(leader, rid).unwrap();
+        assert_eq!(
+            c.applied_index(leader, rid),
+            c.commit_index(leader, rid),
+            "Create conflict must still advance apply"
+        );
+        assert_eq!(
+            c.dcs_get_on(leader, &key).unwrap().unwrap().value,
+            b"holder-a",
+            "live leased Create must not last-write-wins"
         );
         let _ = std::fs::remove_dir_all(&dir);
     }
