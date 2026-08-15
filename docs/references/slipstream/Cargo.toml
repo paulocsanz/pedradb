@@ -1,0 +1,68 @@
+[workspace]
+resolver = "2"
+
+[workspace.package]
+edition = "2024"
+license = "MIT"
+rust-version = "1.92"
+
+[package]
+name = "beyond-slipstream"
+version = "0.7.2"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Watchable distributed config over NATS JetStream — cache locally, stream updates, resume from a sequence number after any restart."
+
+[lib]
+name = "slipstream"
+path = "src/lib.rs"
+
+[dependencies]
+aho-corasick = "1"
+async-nats = "0.46"
+async-trait = "0.1"
+base64 = "0.22"
+blake3 = "1.8.5"
+crc32fast = "1"
+fjall = { version = "3", optional = true }
+futures = "0.3"
+object_store = { version = "0.13.2", optional = true, features = ["aws", "fs"] }
+rocksdb = { package = "rust-rocksdb", version = "0.50", optional = true, default-features = false, features = ["lz4", "zstd", "bindgen-runtime"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tar = { version = "0.4.46", optional = true }
+tempfile = "3"
+thiserror = "2"
+tokio = { version = "1", features = ["macros", "rt", "sync", "time"] }
+tracing = "0.1"
+url = "2"
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+stateright = "0.31.0"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
+
+[[bench]]
+name = "snapshot"
+harness = false
+
+[[bench]]
+name = "ack"
+harness = false
+
+[[bench]]
+name = "applied"
+harness = false
+
+[[bench]]
+name = "snapshot_backends"
+harness = false
+required-features = ["fjall", "rocksdb"]
+
+[features]
+fjall = ["dep:fjall"]
+rocksdb = ["dep:rocksdb"]
+# Artifact transport: tar wire format + object_store (S3/GCS/Azure/local-fs)
+# upload/download, plus run_export_round. tokio/fs streams downloads to disk.
+transport = ["dep:object_store", "dep:tar", "tokio/fs"]

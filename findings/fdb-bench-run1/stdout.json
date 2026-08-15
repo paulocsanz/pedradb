@@ -1,0 +1,138 @@
+{
+  "bench": "montanha-fdb-shaped-v0",
+  "host": "unknown",
+  "nodes": 3,
+  "payload_bytes": 64,
+  "n_default": 25,
+  "tx_keys": 4,
+  "multi_ranges": 4,
+  "warmup": 5,
+  "benches": [
+    {
+    "name": "A1_raw_put_1range",
+    "n": 25,
+    "qps": 0.986,
+    "p50_ms": 683.5413,
+    "p95_ms": 1371.3363,
+    "p99_ms": 7229.6912,
+    "max_ms": 7229.6912,
+    "wall_s": 25.3625
+  },
+    {
+    "name": "A2_raw_get_1range",
+    "n": 25,
+    "qps": 251995.807,
+    "p50_ms": 0.0009,
+    "p95_ms": 0.0155,
+    "p99_ms": 0.0311,
+    "max_ms": 0.0311,
+    "wall_s": 0.0001
+  },
+    {
+    "name": "A3_fdb_face_set_commit_1k",
+    "n": 25,
+    "qps": 0.750,
+    "p50_ms": 1267.1489,
+    "p95_ms": 1791.5197,
+    "p99_ms": 2229.0575,
+    "max_ms": 2229.0575,
+    "wall_s": 33.3374
+  },
+    {
+    "name": "A4_snapshot_tx_4keys_1range",
+    "n": 25,
+    "qps": 0.590,
+    "p50_ms": 1553.9998,
+    "p95_ms": 2556.6687,
+    "p99_ms": 2868.0379,
+    "max_ms": 2868.0379,
+    "wall_s": 42.3526
+  },
+    {
+    "name": "A5_get_range_prefix",
+    "n": 25,
+    "qps": 12890.472,
+    "p50_ms": 0.0551,
+    "p95_ms": 0.2170,
+    "p99_ms": 0.2783,
+    "max_ms": 0.2783,
+    "wall_s": 0.0019
+  },
+    {
+    "name": "A6_clear_range_4keys",
+    "n": 20,
+    "qps": 0.486,
+    "p50_ms": 2064.1263,
+    "p95_ms": 2730.1771,
+    "p99_ms": 3259.7542,
+    "max_ms": 3259.7542,
+    "wall_s": 41.1880
+  },
+    {
+    "name": "A7_hot_key_ww_conflict",
+    "pairs": 25,
+    "success_commits": 25,
+    "abort_commits": 25,
+    "abort_ratio": 0.5000,
+    "success_p50_ms": 1080.1703,
+    "success_p99_ms": 3531.6478,
+    "wall_s": 33.4086,
+    "note": "exactly one of two concurrent WW should win per pair"
+  },
+    {
+    "name": "A8_record_row_plus_index_tx",
+    "n": 25,
+    "qps": 0.824,
+    "p50_ms": 1145.3130,
+    "p95_ms": 1503.2989,
+    "p99_ms": 1824.5613,
+    "max_ms": 1824.5613,
+    "wall_s": 30.3306
+  },
+    {
+    "name": "B1_disjoint_put_4ranges",
+    "n": 25,
+    "qps": 1.744,
+    "p50_ms": 561.1237,
+    "p95_ms": 676.9788,
+    "p99_ms": 755.8788,
+    "max_ms": 755.8788,
+    "wall_s": 14.3385
+  },
+    {
+    "name": "B2_cross_range_tx_4keys",
+    "n": 25,
+    "fails": 0,
+    "qps": 0.243,
+    "p50_ms": 3374.0461,
+    "p99_ms": 13900.0117,
+    "wall_s": 102.9306,
+    "note": "2PC-ish multi-range; expected slower than A4 same-range"
+  }
+  ],
+  "limitations": [
+    "In-process 3-node majority: no real NIC/kernel TCP in this binary (use montanha-tcp benches separately).",
+    "Single-threaded client: not max cluster aggregate; measures serial substrate cost.",
+    "FDB face path (A3) includes OCC bookkeeping; compare to A1 raw put for face overhead.",
+    "Multi-range TX (B2) exercises cross-range commit; expect >> same-range A4 if 2PC dominates.",
+    "Hot-key A7 measures conflict correctness under sequential dual-TX, not parallel OS threads.",
+    "Not YCSB / not fdb_latency / not production FDB cluster — use docs/montanha-vs-fdb-bench.md for FDB side.",
+    "Disk/fsync policy is Pedra lab default on this machine — label sync mode when comparing to FDB."
+  ],
+  "anomalies": [],
+  "vs_fdb": {
+    "claim": "not field peer",
+    "how_to_compare": "docs/montanha-vs-fdb-bench.md",
+    "fdb_workloads": [
+      "single key set/get (A1/A3)",
+      "multi-key transaction (A4)",
+      "get_range (A5)",
+      "clear_range (A6)",
+      "hot key conflicts (A7)",
+      "index+row TX (A8)",
+      "multi-shard / multi-range TX (B2)"
+    ]
+  }
+}
+
+wrote findings/fdb-bench-run1/fdb_shaped_bench.json

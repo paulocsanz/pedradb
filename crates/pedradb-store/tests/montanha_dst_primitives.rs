@@ -296,6 +296,25 @@ fn note_tx_commit_reads_applied_not_lagging_first_node() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// Fold `changelog_after` must not read a partitioned `ids[0]` (F42 class).
+#[test]
+fn changelog_after_skips_lagging_first_node() {
+    let dir = temp();
+    let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+    c.elect_all(80).unwrap();
+    c.put(b"/host/h1/old", b"v0").unwrap();
+    c.set_participating(1, false).unwrap();
+    c.elect_all(120).unwrap();
+    assert!(c.range_leader(1).is_some_and(|l| l != 1));
+    c.put(b"/host/h1/new", b"v1").unwrap();
+    let feed = c.changelog_after(0);
+    assert!(
+        feed.iter().any(|e| e.key.as_ref() == b"/host/h1/new"),
+        "changelog_after used lagging node 1, missing new key: {feed:?}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// `Transaction::clear` must Pedra-delete: get after commit is None, not Some([]).
 #[test]
 fn clear_is_real_pedra_delete() {
@@ -463,5 +482,63 @@ fn hist_bitrot_does_not_silent_wrong_old_snapshot() {
         at0.is_none(),
         "F50: expected None at snapshot 0 when hist unusable, got {at0:?}"
     );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// F56: store DCS TTL is an absolute `now_ms` deadline in the raft log, but
+/// `now_ms` itself was RAM-only. After the clock passed the deadline the key
+/// is absent; reopen reset the clock to 0 and the expired lock reanimated
+/// (F7 class — HA fence comes back).
+#[test]
+fn dcs_ttl_expired_stays_dead_after_reopen() {
+    let dir = temp();
+    let key = pedradb_store::meta_key(b"leader-lock");
+    {
+        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        c.set_ms_per_tick(0);
+        c.elect_all(80).unwrap();
+        c.dcs_create_ttl(&key, b"node-a", 100).unwrap();
+        assert!(c.dcs_get_on(1, &key).unwrap().is_some());
+        c.advance_now_ms(100);
+        assert!(
+            c.dcs_get_on(1, &key).unwrap().is_none(),
+            "expired lease must be absent before crash"
+        );
+        drop(c);
+    }
+    {
+        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        c.set_ms_per_tick(0);
+        assert!(
+            c.dcs_get_on(1, &key).unwrap().is_none(),
+            "expired DCS lease must not reanimate after reopen (now_ms reset)"
+        );
+        c.elect_all(80).unwrap();
+        // Lock is free: a new holder can take it.
+        let rev = c
+            .dcs_create_ttl(&key, b"node-b", 500)
+            .expect("expired lock must be reclaimable after reopen");
+        assert!(rev >= 1);
+        assert_eq!(
+            c.dcs_get_on(2, &key).unwrap().unwrap().value,
+            b"node-b"
+        );
+        drop(c);
+    }
+    // Still-valid TTL must survive a crash (do not expire everything on open).
+    {
+        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        c.set_ms_per_tick(0);
+        c.elect_all(40).unwrap();
+        let live = pedradb_store::meta_key(b"live-lock");
+        c.dcs_create_ttl(&live, b"hold", 10_000).unwrap();
+        drop(c);
+        let c = StoreCluster::open(&dir, 3, 1).unwrap();
+        let kv = c
+            .dcs_get_on(1, &live)
+            .unwrap()
+            .expect("unexpired TTL lease must survive reopen");
+        assert_eq!(kv.value.as_slice(), b"hold");
+    }
     let _ = std::fs::remove_dir_all(&dir);
 }

@@ -16,7 +16,9 @@ pub mod net;
 pub mod persist;
 pub mod vote_kernel;
 
-pub use ae_kernel::{ae_entry_action, ae_prev_log_ok, AeEntryAction};
+pub use ae_kernel::{
+    ae_ack_success, ae_ack_success_as_is, ae_entry_action, ae_prev_log_ok, AeEntryAction,
+};
 pub use vote_kernel::{
     grant_after_persist, grant_after_persist_as_is, vote_decision, PersistOutcome, VoteDecision,
     VoteInputs,
@@ -560,8 +562,14 @@ fn handle_append_entries(node: &mut RaftNode, args: &AppendEntriesArgs) -> Appen
     }
     node.log.sort_by_key(|e| e.index);
     node.log.dedup_by_key(|e| e.index);
-    if !args.entries.is_empty() && node.persist_log().is_err() {
-        // Log not durable — do not advance commit based on this AE.
+    let log_dirty = !args.entries.is_empty();
+    let persist_ok = if log_dirty {
+        node.persist_log().is_ok()
+    } else {
+        true
+    };
+    if !ae_kernel::ae_ack_success(log_dirty, persist_ok) {
+        // F48: log not durable — do not ack success / advance leader match.
         return AppendEntriesReply {
             term: node.hard.current_term,
             success: false,

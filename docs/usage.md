@@ -1,7 +1,7 @@
 # PedraDB usage (P0)
 
 **Status:** user-facing minimal docs for justify-use  
-**Updated:** 2026-08-12  
+**Updated:** 2026-08-14  
 **API:** `pedradb-core` — `Db`, `Transaction`, `OpenOptions`  
 **Engine maturity:** [RFC-0014](rfc/0014-rocks-pebble-redwood-maturity.md)
 
@@ -106,6 +106,48 @@ fn layer_sketch(db: &mut Db) -> pedradb_core::Result<()> {
 
 ---
 
+## Montanha fold — open, pin, resume (RFC-0024)
+
+A **fold** is a local Pedra materializer of a Montanha/Pedra prefix. It is **not**
+a Raft member and **not** linearizable. `get` is LocalApplied at the pinned
+cursor. Use Montanha `get_strong` only when you need SoR.
+
+The pin advances **after** `apply` returns. A crash between receive and apply
+re-delivers those revisions; a torn apply cannot leave the pin ahead of data.
+
+```rust
+use pedradb_fold::{
+    watch_applied_prefix, caixote_host_filter, FoldStore, PedraFold,
+};
+use pedradb_journal::JournalConsumer;
+
+fn open_pin_resume(src: &pedradb_core::Db, fold_dir: &std::path::Path) -> pedradb_fold::Result<()> {
+    let prefixes = caixote_host_filter("h1", &["vm-a"]);
+    let (pin, mut fold) = PedraFold::open(fold_dir)?;
+    let mut consumer = JournalConsumer { pin: pin.seq() };
+    // apply batch, then persist pin (watch_applied does this)
+    watch_applied_prefix(src, &mut consumer, &mut fold, Some(&prefixes))?;
+    let _ = fold.get(b"/host/h1/cap")?; // LocalApplied
+    // Reopen: only seq > pin is delivered
+    drop(fold);
+    let (pin2, fold2) = PedraFold::open(fold_dir)?;
+    assert!(pin2.seq() >= pin.seq());
+    let _ = fold2;
+    Ok(())
+}
+```
+
+| API | Role |
+|-----|------|
+| `PedraFold::open` / `open_role` | Open or resume a fold directory; recovered cursor is the last applied seq |
+| `watch_applied` / `watch_applied_prefix` | CHANGELOG → apply → *then* pin |
+| `JournalConsumer::peek` + `pin_after_apply` | Same invariant without `catch_up` (pin-on-read) |
+| `state_sync_then_tail` | No-cursor start is last-per-key then live |
+| `export_fold` / `import_fold` | Checkpoint + cursor; reopen cursor must equal live |
+| `FoldRole::{Storage, Relay, Proxy}` | Full replica / cursor-only / keep-keys evict-values |
+
+---
+
 ## Durability (read this)
 
 | Call | Default (`OpenOptions { sync: true }`) |
@@ -168,6 +210,7 @@ Full contract: rustdoc on `db` module. Audit fix backlog: [RFC-0015](rfc/0015-au
 | `pedradb-dcs` | etcd-class DCS SM: CAS, leases, watch, leader lock (Patroni path) |
 | `pedradb-sql` | Minimal SQL: CREATE/INSERT/SELECT/DELETE over tables-as-prefixes |
 | `pedradb-stream` | Durable append stream + consumer cursors (JetStream-class *need*) |
+| `pedradb-fold` | Slipstream-class fold on Montanha/Pedra (RFC-0024); not a Raft voter |
 | `pedradb-sim` | FailingEnv, RecordingEnv, lying sync, short-write, `from_seed`, FailingEnvArc |
 
 Multi-node / wire (RFC-0012 **delivered**):

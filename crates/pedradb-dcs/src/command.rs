@@ -182,11 +182,7 @@ fn get_kv<E: Env>(db: &Db<E>, key: &[u8]) -> Option<KeyValue> {
     })
 }
 
-/// Whether a binding is still live at `now_ms` (`lease==0` never expires).
-#[must_use]
-pub fn lease_live(lease: u64, now_ms: u64) -> bool {
-    lease == 0 || now_ms < lease
-}
+pub use crate::lease_kernel::lease_live;
 
 fn get_kv_at<E: Env>(db: &Db<E>, key: &[u8], now_ms: u64) -> Option<KeyValue> {
     let kv = get_kv(db, key)?;

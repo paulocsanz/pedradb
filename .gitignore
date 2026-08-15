@@ -2,3 +2,11 @@
 **/*.rs.bk
 *.log
 /tmp
+
+# Research PDFs stay local; fichas / txt / catalog go in git.
+/research/pdfs/**
+!/research/pdfs/README.md
+/research/fontes/**
+!/research/fontes/README.md
+!/research/fontes/**/*.txt
+!/research/fontes/**/*.md

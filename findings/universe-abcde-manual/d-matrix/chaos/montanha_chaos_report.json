@@ -1,0 +1,11 @@
+{
+  "gate": "montanha-chaos",
+  "rounds": 3,
+  "silent_wrong": 0,
+  "suites": [
+    "montanha_fdb_path",
+    "multiprocess_tx"
+  ],
+  "log_dir": "findings/universe-abcde-manual/d-matrix/chaos",
+  "ts": "2026-08-13T12:56:02Z"
+}

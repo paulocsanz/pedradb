@@ -96,6 +96,12 @@ impl ChangeLog {
         Self::default()
     }
 
+    /// Replace contents with `entries` sorted by sequence (SST last-per-key rebuild).
+    pub fn replace_sorted(&mut self, mut entries: Vec<ChangeEntry>) {
+        entries.sort_by_key(|e| e.sequence);
+        self.entries = entries;
+    }
+
     /// Number of recorded changes.
     #[must_use]
     pub fn len(&self) -> usize {
@@ -358,11 +364,9 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
     }
 
-    /// F31 residual: rebuild is WAL-only. If `CHANGELOG` is gone after flush (old
-    /// remove-before-rename crash, or external delete), feed is empty while SST
-    /// keys remain. `store_on` no longer removes first (atomic rename only).
+    /// F50: missing CHANGELOG after flush rebuilds last-per-key from SST (not empty).
     #[test]
-    fn changelog_missing_post_flush_empties_feed_wal_only_rebuild() {
+    fn changelog_missing_post_flush_rebuilds_feed_from_sst() {
         use crate::db::{Db, OpenOptions};
         use std::time::{SystemTime, UNIX_EPOCH};
         let n = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
@@ -394,11 +398,17 @@ mod tests {
             db.get(&[b'k', 0]).is_some(),
             "data plane must still see SST keys"
         );
-        // Known residual: no SST→feed rebuild. Document, don't fail-open as silent wrong.
-        assert!(
-            feed.is_empty(),
-            "WAL-only rebuild leaves feed empty when CHANGELOG missing post-flush"
+        assert_eq!(
+            feed.len(),
+            5,
+            "SST last-per-key rebuild must restore feed, got {feed:?}"
         );
+        for i in 0..5u8 {
+            assert!(
+                feed.iter().any(|e| e.key.as_ref() == [b'k', i]),
+                "missing k{i} in rebuilt feed"
+            );
+        }
         assert!(db.last_sequence() >= 5);
         let _ = fs::remove_dir_all(&dir);
     }

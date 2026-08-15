@@ -278,8 +278,7 @@ impl IdempotentIndex {
         let mut prefix = Self::IDX.to_vec();
         prefix.extend_from_slice(value);
         prefix.push(b'/');
-        let mut end = prefix.clone();
-        end.push(0xff);
+        let end = crate::prefix_exclusive_end(&prefix).unwrap_or_default();
         let pairs = tr.get_range(cluster, &prefix, &end)?;
         let n = prefix.len();
         Ok(pairs
@@ -403,6 +402,33 @@ mod tests {
         let blue = IdempotentIndex::keys_for(&c, b"blue").unwrap();
         assert!(red.is_empty(), "old index entry must be cleared, got {red:?}");
         assert_eq!(blue.len(), 2, "k1+k2 under blue, got {blue:?}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Index reverse lookup must include user keys whose first byte is 0xff
+    /// (`keys_for` used exclusive end `prefix || 0xff` — same class as F57).
+    #[test]
+    fn idempotent_index_keys_for_includes_ff_user_key() {
+        let dir = temp();
+        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        c.elect_all(80).unwrap();
+        let ff = [0xff, b'z'];
+        IdempotentIndex::put(&mut c, b"plain", b"red").unwrap();
+        IdempotentIndex::put(&mut c, &ff, b"red").unwrap();
+        assert_eq!(
+            IdempotentIndex::get(&c, &ff).unwrap().as_deref(),
+            Some(b"red".as_ref()),
+            "point get must see 0xff key"
+        );
+        let red = IdempotentIndex::keys_for(&c, b"red").unwrap();
+        assert!(
+            red.iter().any(|k| k.as_slice() == b"plain"),
+            "plain key missing: {red:?}"
+        );
+        assert!(
+            red.iter().any(|k| k.as_slice() == ff),
+            "0xff user key missing from keys_for (prefix||0xff end): {red:?}"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 

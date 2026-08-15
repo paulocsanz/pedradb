@@ -1,0 +1,21 @@
+[package]
+name = "pedradb-fold"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Slipstream-class fold on Montanha/Pedra (RFC-0024)"
+
+[[bin]]
+name = "fold-smoke"
+path = "src/bin/fold_smoke.rs"
+
+[dependencies]
+pedradb-core.workspace = true
+pedradb-journal.workspace = true
+pedradb-replicate.workspace = true
+pedradb-store.workspace = true
+bytes.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+pedradb-sim.workspace = true

@@ -1,0 +1,10 @@
+blocked_residuals_status 2026-08-13T12:56:02Z
+os=Darwin-arm64
+C1.1=blocked_darwin_sip entry=scripts/linux_det_io_ci.sh substitute=RecordingEnv
+C2.2=blocked_no_guest entry=scripts/qemu_subset_revalidate.sh (in-process only)
+C2.3=blocked_toolchain live-rocks optional when C++ rocksdb feature available
+C2.4=blocked_no_field_deploy checklist=LEDGER empty P0 REAL + ops deploy note
+entry_ok=linux_det_io_ci.sh
+entry_ok=qemu_subset_revalidate.sh
+entry_ok=overnight_mask_soak.sh
+blocked_residuals_status OK

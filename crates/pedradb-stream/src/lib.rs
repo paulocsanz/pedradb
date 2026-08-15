@@ -125,15 +125,11 @@ impl Stream {
         })
     }
 
-    /// Read next message for `consumer` (advances cursor after read).
-    ///
-    /// # Errors
-    /// I/O when updating cursor.
-    pub fn next(&mut self, consumer: &str) -> Result<Option<Message>> {
+    fn load_consumer_seq(&self, consumer: &str) -> Result<u64> {
         if consumer.is_empty() || consumer.contains('/') {
             return Err(StreamError::Msg("bad consumer name".into()));
         }
-        let last = self
+        Ok(self
             .db
             .get(&self.consumer_key(consumer))
             .and_then(|b| {
@@ -143,29 +139,57 @@ impl Stream {
                     None
                 }
             })
-            .unwrap_or(0);
-        let want = last + 1;
-        let Some(msg) = self.get(want) else {
+            .unwrap_or(0))
+    }
+
+    /// Peek next message **without** advancing the cursor (at-least-once).
+    ///
+    /// Fold/RFC-0024: pin only after the caller applied the message ([`ack`]).
+    ///
+    /// # Errors
+    /// Bad consumer name.
+    pub fn peek(&self, consumer: &str) -> Result<Option<Message>> {
+        let last = self.load_consumer_seq(consumer)?;
+        Ok(self.get(last + 1))
+    }
+
+    /// Persist cursor through `seq` after the caller applied that message.
+    ///
+    /// # Errors
+    /// Bad name, I/O, or `seq` not the next expected (no holes).
+    pub fn ack(&mut self, consumer: &str, seq: u64) -> Result<()> {
+        let last = self.load_consumer_seq(consumer)?;
+        if seq != last + 1 {
+            return Err(StreamError::Msg(format!(
+                "ack {seq} out of order (cursor {last})"
+            )));
+        }
+        if self.get(seq).is_none() {
+            return Err(StreamError::Msg(format!("ack {seq}: no such message")));
+        }
+        self.db
+            .put(self.consumer_key(consumer), seq.to_le_bytes())?;
+        Ok(())
+    }
+
+    /// Read next message and **immediately** ack (at-most-once / lab convenience).
+    ///
+    /// Crash after this returns may skip the message. Prefer [`peek`] + [`ack`].
+    ///
+    /// # Errors
+    /// I/O when updating cursor.
+    pub fn next(&mut self, consumer: &str) -> Result<Option<Message>> {
+        let Some(msg) = self.peek(consumer)? else {
             return Ok(None);
         };
-        self.db
-            .put(self.consumer_key(consumer), want.to_le_bytes())?;
+        self.ack(consumer, msg.seq)?;
         Ok(Some(msg))
     }
 
-    /// Consumer cursor (last delivered seq).
+    /// Consumer cursor (last **acked** seq).
     #[must_use]
     pub fn consumer_seq(&self, consumer: &str) -> u64 {
-        self.db
-            .get(&self.consumer_key(consumer))
-            .and_then(|b| {
-                if b.len() >= 8 {
-                    Some(u64::from_le_bytes(b[..8].try_into().ok()?))
-                } else {
-                    None
-                }
-            })
-            .unwrap_or(0)
+        self.load_consumer_seq(consumer).unwrap_or(0)
     }
 
     /// Close.
@@ -218,6 +242,34 @@ mod tests {
         // Second consumer from start.
         let m = s.next("c2").unwrap().unwrap();
         assert_eq!(m.seq, 1);
+        s.close().unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0024 class: peek without ack; crash; same message still next.
+    #[test]
+    fn peek_without_ack_survives_reopen() {
+        let dir = temp();
+        {
+            let mut s = Stream::open(&dir, "events").unwrap();
+            s.publish(b"keep").unwrap();
+            s.publish(b"later").unwrap();
+            let m = s.peek("c1").unwrap().unwrap();
+            assert_eq!(m.seq, 1);
+            assert_eq!(m.data, b"keep");
+            assert_eq!(s.consumer_seq("c1"), 0, "peek must not pin");
+            drop(s);
+        }
+        let mut s = Stream::open(&dir, "events").unwrap();
+        let m = s.peek("c1").unwrap().unwrap();
+        assert_eq!(
+            m.data, b"keep",
+            "unacked peek must not skip after reopen"
+        );
+        s.ack("c1", 1).unwrap();
+        assert_eq!(s.consumer_seq("c1"), 1);
+        let m2 = s.peek("c1").unwrap().unwrap();
+        assert_eq!(m2.data, b"later");
         s.close().unwrap();
         let _ = std::fs::remove_dir_all(&dir);
     }

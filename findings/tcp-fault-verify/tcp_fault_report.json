@@ -1,0 +1,10 @@
+{
+  "gate": "rfc0021-p1.4-tcp-fault-inject",
+  "proofs": [
+    "tcp_multihost real localhost TCP",
+    "montanha_fdb_path multi-fault (lossy net / disk / restart)"
+  ],
+  "note": "full iptables toxiproxy optional; CI uses real TCP + in-process fault schedules",
+  "ts": "2026-08-13T21:51:43Z",
+  "ok": true
+}

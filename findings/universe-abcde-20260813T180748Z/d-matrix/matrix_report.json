@@ -1,0 +1,7 @@
+{
+  "gate": "D-overnight-matrix",
+  "rounds": 3,
+  "silent_wrong": 0,
+  "log_dir": "findings/universe-abcde-20260813T180748Z/d-matrix",
+  "ts": "2026-08-13T18:11:58Z"
+}

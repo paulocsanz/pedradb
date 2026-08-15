@@ -1,0 +1,12 @@
+{
+  "gate": "rfc0021-p0.4-sim-volume-v0",
+  "seed_count": 3,
+  "rounds": 1,
+  "runs": 3,
+  "wall_secs": 190,
+  "wall_budget_secs": 0,
+  "silent_wrong": 0,
+  "log_dir": "findings/sim-volume-v0-verify",
+  "ts": "2026-08-13T21:51:14Z",
+  "note": "seed bank \u00d7 montanha_fdb_path multi-fault; set PEDRA_SIM_VOLUME_WALL_SECS=28800 for 8h"
+}

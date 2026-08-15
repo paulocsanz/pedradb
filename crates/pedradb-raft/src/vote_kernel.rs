@@ -241,6 +241,19 @@ mod tests {
     }
 
     #[test]
+    fn grant_after_persist_implies_ok() {
+        assert!(grant_after_persist(
+            VoteDecision::WouldGrant,
+            PersistOutcome::Ok
+        ));
+        assert!(!grant_after_persist(
+            VoteDecision::WouldGrant,
+            PersistOutcome::Err
+        ));
+        assert!(!grant_after_persist(VoteDecision::Deny, PersistOutcome::Ok));
+    }
+
+    #[test]
     fn as_is_mutant_differs_on_double_vote() {
         let mut i = base();
         i.voted_for = Some(9);

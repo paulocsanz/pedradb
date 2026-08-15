@@ -50,6 +50,7 @@
 //! - [`Db::stats`] / [`Db::verify_checksums`] — observability and integrity.
 //! - SST v3 embeds a Bloom filter; get prunes by bounds + filter.
 
+use std::collections::BTreeMap;
 use std::ops::Bound;
 use std::path::{Path, PathBuf};
 
@@ -57,7 +58,7 @@ use bytes::Bytes;
 
 use crate::batch::{WriteOp, WriteRecord};
 use crate::cache::{BlockCache, TableCache};
-use crate::change_feed::{ChangeEntry, ChangeLog};
+use crate::change_feed::{ChangeEntry, ChangeKind, ChangeLog};
 use crate::env::{Env, EnvFile, StdEnv};
 use crate::error::{CoreError, Result};
 use crate::host::Host;
@@ -513,7 +514,7 @@ impl<E: Env> Db<E> {
             None
         };
 
-        Ok(Self {
+        let mut db = Self {
             dir,
             env,
             wal,
@@ -544,7 +545,9 @@ impl<E: Env> Db<E> {
             compact_count: 0,
             vlog_gc_count: 0,
             change_log,
-        })
+        };
+        db.maybe_rebuild_feed_from_live();
+        Ok(db)
     }
 
     /// Default WAL sync policy from open options (`true` unless opened with `sync: false`).
@@ -2016,6 +2019,62 @@ impl<E: Env> Db<E> {
     #[must_use]
     pub fn changes_after(&self, from_seq: SequenceNumber) -> Vec<ChangeEntry> {
         self.change_log.changes_after(from_seq.min(self.last_sequence()))
+    }
+
+    /// When CHANGELOG is missing after flush (WAL already truncated), rebuild a
+    /// last-per-key feed from MemTable ∪ SSTs so fold/journal are not empty.
+    fn maybe_rebuild_feed_from_live(&mut self) {
+        if self.change_log.max_sequence().unwrap_or(0) > 0 {
+            return;
+        }
+        if self.last_sequence() == 0 {
+            return;
+        }
+        let mut latest: BTreeMap<Bytes, (InternalKey, Bytes)> = BTreeMap::new();
+        let consider = |map: &mut BTreeMap<Bytes, (InternalKey, Bytes)>,
+                        ik: InternalKey,
+                        v: Bytes| {
+            match map.get(&ik.user_key) {
+                Some((old, _)) if old.sequence >= ik.sequence => {}
+                _ => {
+                    map.insert(ik.user_key.clone(), (ik, v));
+                }
+            }
+        };
+        for (ik, v) in self.mem.iter_internal() {
+            consider(&mut latest, ik.clone(), v.clone());
+        }
+        if let Some(ref imm) = self.imm {
+            for (ik, v) in imm.iter_internal() {
+                consider(&mut latest, ik.clone(), v.clone());
+            }
+        }
+        for sst in &self.ssts {
+            for (ik, v) in sst.iter_internal() {
+                consider(&mut latest, ik, v);
+            }
+        }
+        if latest.is_empty() {
+            return;
+        }
+        let entries: Vec<ChangeEntry> = latest
+            .into_values()
+            .map(|(ik, v)| {
+                let value = self.resolve_stored_value(v.clone()).unwrap_or(v);
+                ChangeEntry {
+                    sequence: ik.sequence,
+                    key: ik.user_key,
+                    kind: match ik.kind {
+                        ValueType::Value => ChangeKind::Put,
+                        ValueType::Deletion => ChangeKind::Delete,
+                        ValueType::RangeDeletion => ChangeKind::DeleteRange,
+                    },
+                    value,
+                }
+            })
+            .collect();
+        self.change_log.replace_sorted(entries);
+        let _ = self.change_log.store_on(&self.env, &self.dir);
     }
 
     /// Apply an ordered multi-op batch atomically (one WAL record, no OCC).

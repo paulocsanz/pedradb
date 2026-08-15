@@ -6,9 +6,7 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
-use pedradb_core::{
-    ChangeEntry, ChangeKind, Db, OpenOptions, Result, SequenceNumber, StdEnv,
-};
+use pedradb_core::{ChangeEntry, ChangeKind, Db, OpenOptions, Result, SequenceNumber, StdEnv};
 use std::path::Path;
 
 /// In-process journal consumer pinned at a sequence.
@@ -26,18 +24,33 @@ impl JournalConsumer {
     }
 
     /// Poll durable changes after pin; advances pin to max seen.
+    ///
+    /// Pin-on-read is the journal-canary contract. Fold consumers must **not**
+    /// use this: call [`Self::peek`] then [`Self::pin_after_apply`] after the
+    /// fold `apply` returns (RFC-0024).
     pub fn catch_up(&mut self, db: &Db<StdEnv>) -> Vec<ChangeEntry> {
-        let last = db.last_sequence();
-        let batch = db.changes_after(self.pin);
-        // Invariant: never report beyond durable last.
-        let batch: Vec<_> = batch
-            .into_iter()
-            .filter(|e| e.sequence <= last)
-            .collect();
+        let batch = self.peek(db);
         if let Some(m) = batch.iter().map(|e| e.sequence).max() {
             self.pin = m;
         }
         batch
+    }
+
+    /// Poll durable changes after pin **without** advancing the pin.
+    #[must_use]
+    pub fn peek(&self, db: &Db<StdEnv>) -> Vec<ChangeEntry> {
+        let last = db.last_sequence();
+        db.changes_after(self.pin)
+            .into_iter()
+            .filter(|e| e.sequence <= last)
+            .collect()
+    }
+
+    /// Persist pin only after the caller applied every revision `<= applied_through`.
+    pub fn pin_after_apply(&mut self, applied_through: SequenceNumber) {
+        if applied_through > self.pin {
+            self.pin = applied_through;
+        }
     }
 }
 
@@ -155,7 +168,11 @@ pub fn workload_feed_watermark(dir: impl AsRef<Path>) -> Result<WorkloadReport> 
 ///
 /// # Errors
 /// Put I/O.
-pub fn append(db: &mut Db<StdEnv>, key: impl AsRef<[u8]>, val: impl AsRef<[u8]>) -> Result<SequenceNumber> {
+pub fn append(
+    db: &mut Db<StdEnv>,
+    key: impl AsRef<[u8]>,
+    val: impl AsRef<[u8]>,
+) -> Result<SequenceNumber> {
     db.put_with_seq(key, val)
 }
 
@@ -194,6 +211,20 @@ mod tests {
         assert_eq!(got.len(), 1);
         assert_eq!(c.pin, s);
         assert!(got[0].sequence <= db.last_sequence());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn peek_does_not_advance_pin() {
+        let dir = temp();
+        let mut db = Db::open(&dir).unwrap();
+        let mut c = JournalConsumer::new();
+        let s = append(&mut db, b"a", b"1").unwrap();
+        let got = c.peek(&db);
+        assert_eq!(got.len(), 1);
+        assert_eq!(c.pin, 0, "peek must not pin on receipt");
+        c.pin_after_apply(s);
+        assert_eq!(c.pin, s);
         let _ = fs::remove_dir_all(&dir);
     }
 

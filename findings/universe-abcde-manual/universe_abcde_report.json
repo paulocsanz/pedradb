@@ -1,0 +1,12 @@
+{
+  "gate": "universe-ABCDE",
+  "silent_wrong": 0,
+  "legs": [
+    "A-multiprocess",
+    "ABC-fdb-path",
+    "D-matrix",
+    "E-detio"
+  ],
+  "log_dir": "findings/universe-abcde-manual",
+  "ts": "2026-08-13T12:56:15Z"
+}

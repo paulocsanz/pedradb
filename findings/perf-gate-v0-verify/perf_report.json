@@ -1,0 +1,29 @@
+{
+  "gate": "rfc0021-p0.3-perf-v0",
+  "nodes": 3,
+  "ranges": 1,
+  "payload_bytes": 64,
+  "put": {
+    "n": 200,
+    "qps": 3.599,
+    "p50_ms": 245.9097,
+    "p99_ms": 877.2837,
+    "wall_s": 55.5649
+  },
+  "get": {
+    "n": 200,
+    "qps": 13362.955,
+    "p50_ms": 0.0735,
+    "p99_ms": 0.0975,
+    "wall_s": 0.0150
+  },
+  "commit_tx_pending": {
+    "n": 50,
+    "keys_per_tx": 2,
+    "qps": 1.364,
+    "p50_ms": 722.9694,
+    "p99_ms": 1168.9760,
+    "wall_s": 36.6622
+  },
+  "note": "in-process 3-node majority; not field peer; not YCSB"
+}

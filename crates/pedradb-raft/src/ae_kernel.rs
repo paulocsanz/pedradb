@@ -66,6 +66,7 @@ pub enum AeEntryAction {
 /// ```
 ///
 /// Finite-domain check: [`tests::theorem_ae_f16_on_finite_domain`].
+/// ∀u64 Verus twin: `crates/pedradb-raft/verus/ae_entry_action.rs`.
 #[must_use]
 pub fn ae_entry_action(
     entry_index: u64,
@@ -126,6 +127,20 @@ pub fn ae_f16_safe(
             return matches!(action, AeEntryAction::Refuse);
         }
     }
+    true
+}
+
+/// F48 protocol: AE `success: true` only if a dirty log was persisted.
+///
+/// `success ⇒ !log_dirty ∨ persist_ok`. Persist is an axiom (FailingEnv / det_io).
+#[must_use]
+pub fn ae_ack_success(log_dirty: bool, persist_ok: bool) -> bool {
+    !log_dirty || persist_ok
+}
+
+/// AS-IS F48: always ack success (swallow persist). Mutant must fail the theorem.
+#[must_use]
+pub fn ae_ack_success_as_is(_log_dirty: bool, _persist_ok: bool) -> bool {
     true
 }
 
@@ -216,6 +231,39 @@ mod tests {
         let mutant = ae_entry_action_as_is_rewrite_committed(1, 9, Some(3), 1, 5);
         assert_eq!(fixed, AeEntryAction::Refuse);
         assert_eq!(mutant, AeEntryAction::TruncateAndInstall);
+    }
+
+    #[test]
+    fn ack_clean_log_without_persist() {
+        assert!(ae_ack_success(false, false));
+        assert!(ae_ack_success(false, true));
+    }
+
+    #[test]
+    fn ack_dirty_requires_persist() {
+        assert!(ae_ack_success(true, true));
+        assert!(!ae_ack_success(true, false));
+    }
+
+    #[test]
+    fn as_is_swallows_persist_fail() {
+        assert!(ae_ack_success_as_is(true, false));
+        assert_ne!(ae_ack_success(true, false), ae_ack_success_as_is(true, false));
+    }
+
+    #[test]
+    fn theorem_ae_ack_on_bool_domain() {
+        for dirty in [false, true] {
+            for ok in [false, true] {
+                let d = ae_ack_success(dirty, ok);
+                assert_eq!(d, !dirty || ok);
+                assert!(!(d && dirty && !ok), "F48: success ∧ dirty ⇒ persist");
+                if dirty && !ok {
+                    assert!(ae_ack_success_as_is(dirty, ok));
+                    assert!(!d);
+                }
+            }
+        }
     }
 
     /// P1.4-style finite theorem for F16 safety predicates.

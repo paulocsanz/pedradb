@@ -22,10 +22,15 @@
 #![warn(missing_docs)]
 
 pub mod command;
+pub mod lease_kernel;
 
 pub use command::{
-    apply_dcs_command, check_command, check_command_at, dcs_get, dcs_get_at, lease_live,
-    DcsCommand, DCS_CMD_MARKER,
+    apply_dcs_command, check_command, check_command_at, dcs_get, dcs_get_at, DcsCommand,
+    DCS_CMD_MARKER,
+};
+pub use lease_kernel::{
+    lease_live, lease_table_expired, lease_table_expired_as_is, next_lease_id_after,
+    next_lease_id_as_is,
 };
 
 use std::collections::HashMap;
@@ -254,7 +259,7 @@ impl<C: Clock, E: Env> Dcs<C, E> {
         let mut this = Self {
             db,
             clock,
-            next_lease_id: max_lease.saturating_add(1).max(1),
+            next_lease_id: lease_kernel::next_lease_id_after(max_lease),
             leases: HashMap::new(),
             next_watch_id: 1,
             watch_log: Vec::new(),
@@ -299,13 +304,9 @@ impl<C: Clock, E: Env> Dcs<C, E> {
     }
 
     fn lease_expired(&self, id: u64) -> bool {
-        match self.leases.get(&id) {
-            // Unknown lease id (process restart wiped the in-memory table, or never
-            // granted here): treat as **expired**. Treating unknown as live made
-            // leader keys immortal across DCS restarts (F7) — etcd-class HA break.
-            None => true,
-            Some(l) => self.clock.now() >= l.expiry,
-        }
+        // F7: unknown id → expired. Clock compare stays in the caller (Instant).
+        let hit = self.leases.get(&id).map(|l| self.clock.now() >= l.expiry);
+        lease_kernel::lease_table_expired(hit)
     }
 
     /// Unconditional put (creates or overwrites). Returns new revision.

@@ -19,6 +19,7 @@ members = [
     "crates/pedradb-lease",
     "crates/pedradb-index",
     "crates/pedradb-journal",
+    "crates/pedradb-fold",
     "crates/montanha-fdb-recipes",
 ]
 
@@ -47,6 +48,7 @@ pedradb-ops = { path = "crates/pedradb-ops" }
 pedradb-lease = { path = "crates/pedradb-lease" }
 pedradb-index = { path = "crates/pedradb-index" }
 pedradb-journal = { path = "crates/pedradb-journal" }
+pedradb-fold = { path = "crates/pedradb-fold" }
 montanha-fdb-recipes = { path = "crates/montanha-fdb-recipes" }
 
 # Shared

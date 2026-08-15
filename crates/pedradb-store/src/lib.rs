@@ -43,6 +43,7 @@
 #![deny(unsafe_code)]
 #![warn(missing_docs)]
 
+mod ae_ack_kernel;
 mod msg;
 pub mod client;
 pub mod fdb_compat;
@@ -69,6 +70,7 @@ pub use layers::{
     raw_keys_one_per_range, sql_multi_table_write, stream_get, stream_publish, table_get, table_put,
     table_row_key, EtcdNeedFace, TikvKvFace, WatchEvent, WatchHub,
 };
+pub use ae_ack_kernel::{ae_ack_success, ae_ack_success_as_is};
 pub use msg::PeerMsg;
 pub use tcp::{
     client_commit_tx, client_dcs_cas, client_dcs_create, client_dcs_get, client_get, client_put,
@@ -2864,10 +2866,15 @@ impl<E: Env> StoreCluster<E> {
         }
         p.log.sort_by_key(|e| e.index);
         p.log.dedup_by_key(|e| e.index);
-        // F47: success ack means the suffix is durable. Swallowing persist
+        // F48: success ack means the suffix is durable. Swallowing persist
         // failure made the leader advance commit; heal+elect then majority-
         // applied a TxnCommit the client already heard as Err.
-        if log_dirty && persist_log_db(&mut n.db, range_id, p).is_err() {
+        let persist_ok = if log_dirty {
+            persist_log_db(&mut n.db, range_id, p).is_ok()
+        } else {
+            true
+        };
+        if !ae_ack_kernel::ae_ack_success(log_dirty, persist_ok) {
             p.log = log_before;
             return Ok(PeerMsg::AppendEntriesReply {
                 range_id,

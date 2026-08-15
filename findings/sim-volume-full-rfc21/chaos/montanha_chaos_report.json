@@ -1,0 +1,11 @@
+{
+  "gate": "montanha-chaos",
+  "rounds": 3,
+  "silent_wrong": 0,
+  "suites": [
+    "montanha_fdb_path",
+    "multiprocess_tx"
+  ],
+  "log_dir": "findings/sim-volume-full-rfc21/chaos",
+  "ts": "2026-08-13T22:00:28Z"
+}

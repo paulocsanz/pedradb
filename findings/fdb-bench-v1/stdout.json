@@ -1,0 +1,191 @@
+elected leader=2 (from node 3) status=local=3 members=[1, 2, 3] r1:leader=2
+{
+  "bench": "montanha-fdb-shaped-v1",
+  "host": "unknown",
+  "suite": "all",
+  "nodes": 3,
+  "payload_bytes": 64,
+  "n_default": 20,
+  "tx_keys": 4,
+  "multi_ranges": 4,
+  "threads": 4,
+  "warmup": 5,
+  "benches": [
+    {
+    "name": "A1_raw_put_1range",
+    "n": 20,
+    "qps": 1.190,
+    "p50_ms": 817.9932,
+    "p95_ms": 1094.0595,
+    "p99_ms": 1209.8855,
+    "max_ms": 1209.8855,
+    "wall_s": 16.8101
+  },
+    {
+    "name": "A2_raw_get_1range",
+    "n": 20,
+    "qps": 574168.174,
+    "p50_ms": 0.0011,
+    "p95_ms": 0.0013,
+    "p99_ms": 0.0091,
+    "max_ms": 0.0091,
+    "wall_s": 0.0000
+  },
+    {
+    "name": "A3_fdb_face_set_commit_1k",
+    "n": 20,
+    "qps": 0.767,
+    "p50_ms": 1233.2909,
+    "p95_ms": 1882.4536,
+    "p99_ms": 1899.6059,
+    "max_ms": 1899.6059,
+    "wall_s": 26.0829
+  },
+    {
+    "name": "A4_snapshot_tx_4keys_1range",
+    "n": 20,
+    "qps": 0.854,
+    "p50_ms": 1164.0215,
+    "p95_ms": 1342.8511,
+    "p99_ms": 1457.1682,
+    "max_ms": 1457.1682,
+    "wall_s": 23.4112
+  },
+    {
+    "name": "A5_get_range_prefix",
+    "n": 20,
+    "qps": 42436.536,
+    "p50_ms": 0.0190,
+    "p95_ms": 0.0270,
+    "p99_ms": 0.0921,
+    "max_ms": 0.0921,
+    "wall_s": 0.0005
+  },
+    {
+    "name": "A6_clear_range_4keys",
+    "n": 20,
+    "qps": 0.435,
+    "p50_ms": 2077.9419,
+    "p95_ms": 3218.8321,
+    "p99_ms": 7156.9833,
+    "max_ms": 7156.9833,
+    "wall_s": 45.9854
+  },
+    {
+    "name": "A7_hot_key_ww_conflict",
+    "pairs": 20,
+    "success_commits": 20,
+    "abort_commits": 20,
+    "abort_ratio": 0.5000,
+    "success_p50_ms": 1621.1212,
+    "success_p99_ms": 9062.1021,
+    "wall_s": 40.1501,
+    "note": "exactly one of two concurrent WW should win per pair"
+  },
+    {
+    "name": "A8_record_row_plus_index_tx",
+    "n": 20,
+    "qps": 0.403,
+    "p50_ms": 2092.6201,
+    "p95_ms": 3464.7818,
+    "p99_ms": 8504.5785,
+    "max_ms": 8504.5785,
+    "wall_s": 49.5853
+  },
+    {
+    "name": "B1_disjoint_put_4ranges",
+    "n": 20,
+    "qps": 0.707,
+    "p50_ms": 1165.0698,
+    "p95_ms": 1571.5375,
+    "p99_ms": 7236.2948,
+    "max_ms": 7236.2948,
+    "wall_s": 28.2804
+  },
+    {
+    "name": "B2_cross_range_tx_4keys",
+    "n": 12,
+    "fails": 0,
+    "qps": 0.108,
+    "p50_ms": 7654.9483,
+    "p99_ms": 16789.5749,
+    "wall_s": 111.2841,
+    "note": "2PC multi-range cliff; expected >> A4 same-range; small n by design"
+  },
+    {
+    "name": "D1_tcp_put",
+    "n": 20,
+    "qps": 1.292,
+    "p50_ms": 552.8667,
+    "p95_ms": 1151.3998,
+    "p99_ms": 3622.4880,
+    "max_ms": 3622.4880,
+    "wall_s": 15.4831
+  },
+    {
+    "name": "D2_tcp_get",
+    "n": 20,
+    "qps": 0.333,
+    "p50_ms": 0.5738,
+    "p95_ms": 10001.9070,
+    "p99_ms": 10001.9524,
+    "max_ms": 10001.9524,
+    "wall_s": 60.0162
+  },
+    {
+    "name": "D3_tcp_commit_tx_2k",
+    "n": 1,
+    "qps": 0.022,
+    "p50_ms": 1172.1659,
+    "p95_ms": 1172.1659,
+    "p99_ms": 1172.1659,
+    "max_ms": 1172.1659,
+    "wall_s": 46.0460
+  },
+    {
+    "name": "D5_tcp_dcs_create_get",
+    "rev": 0,
+    "exclusive_fail": true,
+    "majority_seen": 0,
+    "create_ms": 0.6543,
+    "note": "etcd-need over real TCP"
+  },
+    {
+    "name": "E1_mini_bindingtester_soak",
+    "ops": 150,
+    "ops_per_s": 1.45,
+    "commits_ok": 94,
+    "commits_err": 0,
+    "mismatches": 0,
+    "wall_s": 103.7936,
+    "pass": true
+  }
+  ],
+  "limitations": [
+    "In-process core suite: no real NIC (suite tcp adds real localhost TCP).",
+    "C1 Mutex multi-thread serializes StoreCluster — concurrent waiters, not parallel leaders.",
+    "D4 multi-thread TCP is the honest concurrent client path on one range.",
+    "FDB face path (A3) includes OCC bookkeeping; compare to A1 raw put for face overhead.",
+    "Multi-range TX (B2) exercises cross-range 2PC; expect cliff vs A4.",
+    "E1 mini-bt is a model-checked random soak, not full FoundationDB bindingtester.",
+    "Not YCSB / not production FDB — see docs/montanha-vs-fdb-bench.md."
+  ],
+  "anomalies": [],
+  "vs_fdb": {
+    "claim": "not field peer",
+    "how_to_compare": "docs/montanha-vs-fdb-bench.md",
+    "fdb_workloads": [
+      "single key set/get (A1/A3/D1)",
+      "multi-key transaction (A4/D3)",
+      "get_range (A5)",
+      "clear_range (A6)",
+      "hot key conflicts (A7)",
+      "index+row TX (A8)",
+      "multi-shard / multi-range TX (B2)",
+      "multi-client TCP (D4)",
+      "random soak (E1)"
+    ]
+  }
+}
+
+wrote findings/fdb-bench-v1/fdb_shaped_bench.json
