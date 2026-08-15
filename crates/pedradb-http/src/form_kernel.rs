@@ -92,6 +92,18 @@ pub fn query_u64_conflict_as_is(_a: u64, _b: u64) -> bool {
     false
 }
 
+/// F162: a query part with no `=` whose decoded name is `key` (`?rev`).
+#[must_use]
+pub fn query_part_is_bare_name(part: &str, key: &str) -> bool {
+    !part.is_empty() && !part.contains('=') && form_decode(part) == key.as_bytes()
+}
+
+/// AS-IS F162: skip parts without `=`.
+#[must_use]
+pub fn query_part_is_bare_name_as_is(_part: &str, _key: &str) -> bool {
+    false
+}
+
 /// AS-IS F101: `%HH` only (no `+` → space).
 #[must_use]
 pub fn form_decode_as_is(s: &str) -> Vec<u8> {
@@ -150,5 +162,10 @@ mod tests {
         assert!(query_u64_conflict(1, 0));
         assert!(!query_u64_conflict(1, 1));
         assert!(!query_u64_conflict_as_is(1, 0));
+        assert!(query_part_is_bare_name("rev", "rev"));
+        assert!(query_part_is_bare_name("%72ev", "rev"));
+        assert!(!query_part_is_bare_name("rev=0", "rev"));
+        assert!(!query_part_is_bare_name("ttl_ms", "rev"));
+        assert!(!query_part_is_bare_name_as_is("rev", "rev"));
     }
 }

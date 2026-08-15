@@ -451,7 +451,7 @@ fn query_decoded_values(path: &str, key: &str) -> Vec<String> {
                 // F101: form-urlencoded — `+` is space *before* `%HH`.
                 out.push(String::from_utf8_lossy(&form_decode(v)).into_owned());
             }
-        } else if form_decode(part) == key.as_bytes() {
+        } else if query_part_is_bare_name(part, key) {
             // F163: bare flag `?rev` / `&ttl_ms` is a present name with empty value
             // (was skipped → missing → default 0 / create).
             out.push(String::new());
@@ -488,7 +488,14 @@ fn query_u64(path: &str, key: &str) -> Result<Option<u64>> {
 }
 
 /// F155: string query name with two distinct values (`key=a&key=b`) is 400.
+/// F164: bare `?key` / empty `?key=` used to become `""` (or the `/leader` default).
 fn query_param_unique(path: &str, key: &str) -> Result<Option<String>> {
+    let path = strip_uri_fragment(path);
+    if let Some(q) = path.split_once('?').map(|(_, q)| q) {
+        if q.split('&').any(|p| query_part_is_bare_name(p, key)) {
+            return Err(HttpError::App(format!("bad {key}")));
+        }
+    }
     let vs = query_decoded_values(path, key);
     if vs.is_empty() {
         return Ok(None);
@@ -496,6 +503,9 @@ fn query_param_unique(path: &str, key: &str) -> Result<Option<String>> {
     let refs: Vec<&str> = vs.iter().map(String::as_str).collect();
     if query_values_conflict(&refs) {
         return Err(HttpError::App(format!("conflicting {key}")));
+    }
+    if vs[0].is_empty() {
+        return Err(HttpError::App(format!("bad {key}")));
     }
     Ok(Some(vs[0].clone()))
 }
@@ -1004,6 +1014,44 @@ mod tests {
         );
         let (c3, b3) = http_exchange(addr, "PUT", "/dcs/kv/k?rev=0", b"v1").unwrap();
         assert_eq!(c3, 200, "explicit rev=0 still creates, {b3:?}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// F164: bare `?key` (F162 residual on strings) used to become "" or the
+    /// `/leader` default. Present name without value must 400.
+    #[test]
+    fn dcs_http_bare_key_flag_does_not_default_leader() {
+        let dir = temp("dcs-key-flag");
+        let addr = bind_ephemeral();
+        let srv = DcsServer::open(&dir).unwrap();
+        thread::spawn(move || {
+            let _ = srv.serve(addr);
+        });
+        thread::sleep(Duration::from_millis(100));
+        let (c1, b1) = http_exchange(
+            addr,
+            "POST",
+            "/dcs/leader?key&holder=n1&ttl_ms=8000",
+            b"",
+        )
+        .unwrap();
+        assert_eq!(
+            c1, 400,
+            "bare ?key must 400, not lock /leader or empty, got {c1} {b1:?}"
+        );
+        let (c2, body) = http_exchange(addr, "GET", "/dcs/kv/%2Fleader", b"").unwrap();
+        assert_eq!(
+            c2, 404,
+            "must not have fallen back to /leader, GET {c2} {body:?}"
+        );
+        let (c3, b3) = http_exchange(
+            addr,
+            "POST",
+            "/dcs/leader?key=lock&holder=n1&ttl_ms=8000",
+            b"",
+        )
+        .unwrap();
+        assert_eq!(c3, 200, "explicit key=lock still acquires, {b3:?}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
