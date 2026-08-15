@@ -208,6 +208,46 @@ fn fold_follow_montanha_prefix() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// F83: `/vm/{id}` was a raw `starts_with` prefix. Host owning `vm-a` also
+/// followed `vm-ab` / `vm-a2` (and the same on `/assign/`).
+#[test]
+fn caixote_host_filter_does_not_include_vm_id_prefix_sibling() {
+    let dir = temp();
+    let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+    c.elect_all(80).unwrap();
+    c.put(b"/host/h1/cap", b"ok").unwrap();
+    c.put(b"/vm/vm-a", b"mine").unwrap();
+    c.put(b"/vm/vm-ab", b"sib").unwrap();
+    c.put(b"/vm/vm-a2", b"sib2").unwrap();
+    c.put(b"/vm/vm-a/disk", b"child").unwrap();
+    c.put(b"/assign/vm-a", b"hold").unwrap();
+    c.put(b"/assign/vm-ab", b"leak").unwrap();
+    let prefixes = caixote_host_filter("h1", &["vm-a"]);
+    let ups = follow_store_prefix(&c, &prefixes, FoldCursor::none());
+    let keys: Vec<&[u8]> = ups.iter().map(|u| u.key()).collect();
+    assert!(
+        keys.iter().any(|k| *k == b"/vm/vm-a"),
+        "own vm missing: {keys:?}"
+    );
+    assert!(
+        keys.iter().any(|k| *k == b"/assign/vm-a"),
+        "own assign missing: {keys:?}"
+    );
+    assert!(
+        keys.iter().any(|k| *k == b"/vm/vm-a/disk"),
+        "child path under own vm should stay: {keys:?}"
+    );
+    assert!(
+        !keys.iter().any(|k| *k == b"/vm/vm-ab" || *k == b"/vm/vm-a2"),
+        "vm-a filter included sibling vm id: {keys:?}"
+    );
+    assert!(
+        !keys.iter().any(|k| *k == b"/assign/vm-ab"),
+        "assign/vm-a filter included assign/vm-ab: {keys:?}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// Host/VM fixture: reopen delivers only seq > pin.
 #[test]
 fn fold_resume_after_reopen() {

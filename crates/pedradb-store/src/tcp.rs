@@ -114,9 +114,10 @@ pub enum WireMsg {
         /// `mod_revision` after the mutation.
         rev: u64,
     },
-    /// Multi-key put via server `put_many` (not full 2PC TX; same-range batch).
+    /// Multi-key put via server `put_many` (same-range batch; multi-range uses
+    /// 2PC `commit_tx` inside `put_many` — F77).
     PutBatch {
-        /// Key/value pairs (may span ranges → one batch each).
+        /// Key/value pairs (may span ranges).
         pairs: Vec<(Vec<u8>, Vec<u8>)>,
     },
 }

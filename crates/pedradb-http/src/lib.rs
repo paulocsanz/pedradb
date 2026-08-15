@@ -119,13 +119,15 @@ fn header_token(headers: &[(String, String)]) -> Option<&str> {
             return Some(v.as_str());
         }
         if k == "authorization" {
-            if let Some(rest) = v
-                .strip_prefix("Bearer ")
-                .or_else(|| v.strip_prefix("bearer "))
-            {
-                return Some(rest.trim());
+            let v = v.trim();
+            // F85: scheme is case-insensitive (RFC 9110). Only `Bearer`/`bearer`
+            // matched; `BEARER tok` was compared as the whole header → 401.
+            if let Some((scheme, rest)) = v.split_once(char::is_whitespace) {
+                if scheme.eq_ignore_ascii_case("bearer") {
+                    return Some(rest.trim());
+                }
             }
-            return Some(v.as_str());
+            return Some(v);
         }
     }
     None
@@ -647,6 +649,46 @@ mod tests {
         let (code, body) =
             http_exchange_auth(addr, "GET", "/kv/x", b"", Some("sekrit")).unwrap();
         assert_eq!(code, 200);
+        assert_eq!(body, b"y");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// F85: RFC 9110 auth scheme is case-insensitive. Only `Bearer` / `bearer`
+    /// were accepted; `BEARER` compared the whole header to the token → 401.
+    #[test]
+    fn kv_http_bearer_scheme_case_insensitive() {
+        let dir = temp("auth-scheme");
+        let addr = bind_ephemeral();
+        let srv = KvServer::open_with_auth(&dir, Some("sekrit".into())).unwrap();
+        thread::spawn(move || {
+            let _ = srv.serve(addr);
+        });
+        thread::sleep(Duration::from_millis(100));
+        let (code, _) =
+            http_exchange_auth(addr, "PUT", "/kv/x", b"y", Some("sekrit")).unwrap();
+        assert_eq!(code, 200);
+        let mut stream = TcpStream::connect(addr).unwrap();
+        stream
+            .write_all(b"GET /kv/x HTTP/1.0\r\nAuthorization: BEARER sekrit\r\nHost: localhost\r\n\r\n")
+            .unwrap();
+        let mut resp = Vec::new();
+        stream.read_to_end(&mut resp).unwrap();
+        let text = String::from_utf8_lossy(&resp);
+        let code = text
+            .lines()
+            .next()
+            .and_then(|l| l.split_whitespace().nth(1))
+            .and_then(|c| c.parse::<u16>().ok())
+            .unwrap_or(0);
+        let body = resp
+            .windows(4)
+            .position(|w| w == b"\r\n\r\n")
+            .map(|i| resp[i + 4..].to_vec())
+            .unwrap_or_default();
+        assert_eq!(
+            code, 200,
+            "Authorization: BEARER must authenticate, body={body:?}"
+        );
         assert_eq!(body, b"y");
         let _ = std::fs::remove_dir_all(&dir);
     }

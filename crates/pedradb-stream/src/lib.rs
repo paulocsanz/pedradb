@@ -11,6 +11,12 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
+pub mod cursor_kernel;
+
+pub use cursor_kernel::{
+    ack_in_order, ack_in_order_as_is, next_seq, peek_pins_cursor, peek_pins_cursor_as_is,
+};
+
 use pedradb_core::{Db, OpenOptions, Result as CoreResult};
 use thiserror::Error;
 
@@ -173,7 +179,8 @@ impl Stream {
     /// Bad consumer name.
     pub fn peek(&self, consumer: &str) -> Result<Option<Message>> {
         let last = self.load_consumer_seq(consumer)?;
-        Ok(self.get(last + 1))
+        debug_assert!(!cursor_kernel::peek_pins_cursor());
+        Ok(self.get(cursor_kernel::next_seq(last)))
     }
 
     /// Persist cursor through `seq` after the caller applied that message.
@@ -182,7 +189,7 @@ impl Stream {
     /// Bad name, I/O, or `seq` not the next expected (no holes).
     pub fn ack(&mut self, consumer: &str, seq: u64) -> Result<()> {
         let last = self.load_consumer_seq(consumer)?;
-        if seq != last + 1 {
+        if !cursor_kernel::ack_in_order(last, seq) {
             return Err(StreamError::Msg(format!(
                 "ack {seq} out of order (cursor {last})"
             )));

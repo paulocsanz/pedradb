@@ -106,6 +106,9 @@ pub fn resync_expired<E: Env>(
     let mut out = Vec::new();
     for pref in prefixes.iter() {
         for (k, _) in store.range(pref)? {
+            if !in_prefixes(&k, prefixes) {
+                continue;
+            }
             if !live.contains(&k) {
                 out.push(FoldUpdate::Delete { key: k, seq: pin.0 });
             }

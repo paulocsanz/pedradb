@@ -11,8 +11,9 @@ pub fn caixote_host_filter(host_id: &str, vm_ids: &[&str]) -> PrefixSet {
     let mut s = PrefixSet::new();
     s.push(format!("/host/{host_id}/").into_bytes());
     for vm in vm_ids {
-        s.push(format!("/vm/{vm}").into_bytes());
-        s.push(format!("/assign/{vm}").into_bytes());
+        // Isolated ids (F83): `/vm/vm-a` must not `starts_with`-match `/vm/vm-ab`.
+        s.push_isolated(format!("/vm/{vm}").into_bytes());
+        s.push_isolated(format!("/assign/{vm}").into_bytes());
     }
     s
 }

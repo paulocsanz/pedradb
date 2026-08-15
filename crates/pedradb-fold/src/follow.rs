@@ -8,6 +8,9 @@ use pedradb_store::StoreCluster;
 #[derive(Debug, Clone, Default)]
 pub struct PrefixSet {
     prefixes: Vec<Vec<u8>>,
+    /// Exact key, or that key + `/` + rest (F83). Not raw `starts_with`
+    /// (`/vm/vm-a` must not match `/vm/vm-ab`).
+    isolated: Vec<Vec<u8>>,
 }
 
 impl PrefixSet {
@@ -22,25 +25,44 @@ impl PrefixSet {
     pub fn one(prefix: impl AsRef<[u8]>) -> Self {
         Self {
             prefixes: vec![prefix.as_ref().to_vec()],
+            isolated: Vec::new(),
         }
     }
 
-    /// Add a prefix.
+    /// Add a directory prefix (`starts_with`). Prefer a trailing `/`.
     pub fn push(&mut self, prefix: impl AsRef<[u8]>) {
         self.prefixes.push(prefix.as_ref().to_vec());
     }
 
-    /// Borrowed prefixes.
+    /// Add an id key: matches exactly, or children under `id/`.
+    ///
+    /// F83: `/vm/vm-a` as a `starts_with` prefix also matched `/vm/vm-ab`.
+    pub fn push_isolated(&mut self, key: impl AsRef<[u8]>) {
+        self.isolated.push(key.as_ref().to_vec());
+    }
+
+    /// Borrowed directory prefixes (plus isolated ids, for range backstops).
     #[must_use]
     pub fn iter(&self) -> impl Iterator<Item = &[u8]> {
-        self.prefixes.iter().map(Vec::as_slice)
+        self.prefixes
+            .iter()
+            .chain(self.isolated.iter())
+            .map(Vec::as_slice)
     }
+}
+
+fn isolated_match(key: &[u8], id: &[u8]) -> bool {
+    if key == id {
+        return true;
+    }
+    key.starts_with(id) && key.get(id.len()) == Some(&b'/')
 }
 
 /// Whether `key` is in any prefix of `set`.
 #[must_use]
 pub fn in_prefixes(key: &[u8], set: &PrefixSet) -> bool {
     set.prefixes.iter().any(|p| key.starts_with(p))
+        || set.isolated.iter().any(|id| isolated_match(key, id))
 }
 
 /// Fold-internal meta (`\0fold/cursor`, `\0fold/keyset/…`). Not user data (F67/F68).
