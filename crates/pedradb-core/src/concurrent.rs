@@ -832,7 +832,7 @@ impl<E: Env> ConcurrentDb<E> {
 
 // Silence unused import if StreamingVisibleIter only used in docs.
 #[allow(dead_code)]
-fn _stream_ty(_: StreamingVisibleIter) {}
+fn _stream_ty(_: StreamingVisibleIter<'_>) {}
 
 #[cfg(test)]
 mod tests {

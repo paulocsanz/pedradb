@@ -30,6 +30,7 @@
 //! Range tombstones are extracted once at open so point gets stay correct
 //! without scanning every block for deletes.
 
+use std::cell::Cell;
 use std::io::{Read, Write};
 use std::ops::Bound;
 use std::path::{Path, PathBuf};
@@ -64,6 +65,21 @@ pub const BLOCK_TARGET: usize = 4_096;
 /// reject absurd counts before `Vec::with_capacity` (F2: bit-flip of
 /// `num_entries` caused multi-EiB allocation attempts).
 pub const MAX_SST_ENTRIES: usize = 64 * 1024 * 1024;
+
+thread_local! {
+    static SST_BLOCKS_DECODED: Cell<usize> = const { Cell::new(0) };
+}
+
+/// Reset the thread-local SST block-decode counter (RFC-0033 tests).
+pub fn reset_sst_blocks_decoded() {
+    SST_BLOCKS_DECODED.with(|c| c.set(0));
+}
+
+/// Blocks actually decompressed on this thread since the last reset.
+#[must_use]
+pub fn sst_blocks_decoded() -> usize {
+    SST_BLOCKS_DECODED.with(Cell::get)
+}
 
 /// Minimum encoded bytes we assume per SST entry (`ikey_len` + `val_len` headers alone).
 const MIN_ENCODED_ENTRY: usize = 8;
@@ -431,7 +447,81 @@ impl SstTable {
                 "decode_block on v1/eager SST without payload".into(),
             ));
         }
+        SST_BLOCKS_DECODED.with(|c| c.set(c.get().saturating_add(1)));
         decode_block_from_payload(&self.payload, h, self.compressed_blocks, &self.path)
+    }
+
+    /// Point keys in `[start, end)`, one SST block at a time (RFC-0033 P0.3).
+    ///
+    /// `load` decodes block `i` (caller may hit [`crate::cache::BlockCache`]).
+    /// Range tombstones are **not** yielded — collect them separately so a
+    /// covering delete whose start sits outside the bound still applies.
+    pub fn iter_user_range<'a>(
+        &'a self,
+        start: Bound<&[u8]>,
+        end: Bound<&[u8]>,
+        load: Box<dyn FnMut(usize) -> Vec<(InternalKey, Bytes)> + 'a>,
+    ) -> SstRangeIter<'a> {
+        let start_b = match start {
+            Bound::Unbounded => Bound::Unbounded,
+            Bound::Included(s) => Bound::Included(Bytes::copy_from_slice(s)),
+            Bound::Excluded(s) => Bound::Excluded(Bytes::copy_from_slice(s)),
+        };
+        let end_b = match end {
+            Bound::Unbounded => Bound::Unbounded,
+            Bound::Included(s) => Bound::Included(Bytes::copy_from_slice(s)),
+            Bound::Excluded(s) => Bound::Excluded(Bytes::copy_from_slice(s)),
+        };
+        if let (Some(lo), Some(hi)) = (
+            self.smallest_user_key.as_deref(),
+            self.largest_user_key.as_deref(),
+        ) {
+            let file_before_end = match end {
+                Bound::Unbounded => true,
+                Bound::Included(e) => lo <= e,
+                Bound::Excluded(e) => lo < e,
+            };
+            let file_after_start = match start {
+                Bound::Unbounded => true,
+                Bound::Included(s) => hi >= s,
+                Bound::Excluded(s) => hi > s,
+            };
+            if !file_before_end || !file_after_start {
+                return SstRangeIter {
+                    leftover: Vec::new().into_iter(),
+                    blocks: Vec::new().into_iter(),
+                    load,
+                    start: start_b,
+                    end: end_b,
+                };
+            }
+        }
+        if self.is_lazy() {
+            SstRangeIter {
+                leftover: Vec::new().into_iter(),
+                blocks: self.blocks_overlapping_range(start, end).into_iter(),
+                load,
+                start: start_b,
+                end: end_b,
+            }
+        } else {
+            let leftover = self
+                .entries_cloned()
+                .into_iter()
+                .filter(|(k, _)| {
+                    k.kind != ValueType::RangeDeletion
+                        && user_key_in_range(k.user_key.as_ref(), start, end)
+                })
+                .collect::<Vec<_>>()
+                .into_iter();
+            SstRangeIter {
+                leftover,
+                blocks: Vec::new().into_iter(),
+                load,
+                start: start_b,
+                end: end_b,
+            }
+        }
     }
 
     /// Materialize all entries (cached). Used by compaction and full scans.
@@ -980,6 +1070,45 @@ impl SstTable {
         }
         // Empty means no block intersects — do not decode the whole file.
         out
+    }
+}
+
+/// Lazy per-block SST range (RFC-0033 P0.3). Stops when the merge stops pulling.
+pub struct SstRangeIter<'a> {
+    leftover: std::vec::IntoIter<(InternalKey, Bytes)>,
+    blocks: std::vec::IntoIter<usize>,
+    load: Box<dyn FnMut(usize) -> Vec<(InternalKey, Bytes)> + 'a>,
+    start: Bound<Bytes>,
+    end: Bound<Bytes>,
+}
+
+impl Iterator for SstRangeIter<'_> {
+    type Item = (InternalKey, Bytes);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            if let Some((k, v)) = self.leftover.next() {
+                if k.kind == ValueType::RangeDeletion {
+                    continue;
+                }
+                let start = match &self.start {
+                    Bound::Unbounded => Bound::Unbounded,
+                    Bound::Included(s) => Bound::Included(s.as_ref()),
+                    Bound::Excluded(s) => Bound::Excluded(s.as_ref()),
+                };
+                let end = match &self.end {
+                    Bound::Unbounded => Bound::Unbounded,
+                    Bound::Included(s) => Bound::Included(s.as_ref()),
+                    Bound::Excluded(s) => Bound::Excluded(s.as_ref()),
+                };
+                if user_key_in_range(k.user_key.as_ref(), start, end) {
+                    return Some((k, v));
+                }
+                continue;
+            }
+            let bi = self.blocks.next()?;
+            self.leftover = (self.load)(bi).into_iter();
+        }
     }
 }
 

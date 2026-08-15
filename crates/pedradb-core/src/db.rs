@@ -1495,26 +1495,42 @@ impl<E: Env> Db<E> {
         end: Bound<&[u8]>,
         limit: Option<usize>,
         resolve_values: bool,
-    ) -> StreamingVisibleIter {
+    ) -> StreamingVisibleIter<'_> {
         if snapshot == 0 {
             return StreamingVisibleIter::new(Vec::new(), 0, start, end, limit);
         }
-        let mut streams: Vec<Vec<(InternalKey, Bytes)>> = Vec::with_capacity(3 + self.ssts.len());
-        // F110: include flush_read_pin so range/scan see acked keys during off-lock flush.
-        // Do not cap per-layer collection at `limit`: a tombstone covering the
-        // first N keys of one SST would hide live keys later in the same file
-        // (G2). `limit` is applied at merge emit in StreamingVisibleIter.
+        // Range tombstones first (G2): a covering delete whose start sits
+        // before `start` must still hide keys in the window. Point streams
+        // are lazy — later SST blocks are not decoded after `limit` emits.
+        let mut range_dels = Vec::new();
+        let mut streams: Vec<crate::merge::LayerStream<'_>> =
+            Vec::with_capacity(3 + self.ssts.len());
         for table in self.mem_layers() {
-            streams.push(self.memtable_stream(table, start, end, resolve_values));
+            table.collect_range_tombstones(snapshot, &mut range_dels);
+            let pts = self.memtable_stream(table, start, end, resolve_values);
+            streams.push(Box::new(pts.into_iter()));
         }
         for table in &self.ssts {
-            let mut s = table.entries_in_user_range(start, end);
-            if resolve_values {
-                self.prefetch_resolve_stream(&mut s);
-            }
-            streams.push(s);
+            table.collect_range_tombstones(snapshot, &mut range_dels);
+            let cache = &self.block_cache;
+            let path = table.path().to_path_buf();
+            let db = self;
+            let load: Box<dyn FnMut(usize) -> Vec<(InternalKey, Bytes)> + '_> =
+                Box::new(move |bi| {
+                    let mut entries = cache
+                        .get_or_insert_with(&path, bi, || {
+                            table.decode_block(bi).unwrap_or_default()
+                        })
+                        .as_ref()
+                        .clone();
+                    if resolve_values {
+                        db.prefetch_resolve_stream(&mut entries);
+                    }
+                    entries
+                });
+            streams.push(Box::new(table.iter_user_range(start, end, load)));
         }
-        StreamingVisibleIter::new(streams, snapshot, start, end, limit)
+        StreamingVisibleIter::from_point_streams(streams, range_dels, snapshot, start, end, limit)
     }
 
     fn memtable_stream(
@@ -1527,14 +1543,18 @@ impl<E: Env> Db<E> {
         let mut stream = Vec::new();
         if table.has_range_tombstones() {
             for (k, v) in table.iter_internal() {
-                if k.kind == ValueType::RangeDeletion
-                    || crate::merge::user_key_in_range(k.user_key.as_ref(), start, end)
-                {
+                if k.kind == ValueType::RangeDeletion {
+                    continue;
+                }
+                if crate::merge::user_key_in_range(k.user_key.as_ref(), start, end) {
                     stream.push((k.clone(), v.clone()));
                 }
             }
         } else {
             for (k, v) in table.iter_internal_range(start, end) {
+                if k.kind == ValueType::RangeDeletion {
+                    continue;
+                }
                 stream.push((k.clone(), v.clone()));
             }
         }
@@ -7571,6 +7591,73 @@ mod tests {
             .collect();
         assert_eq!(limited.len(), 25);
         assert_eq!(limited, all[..25]);
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0033 P0.3: `limit` must cut SST block decodes, not only emit.
+    #[test]
+    fn try_scan_at_limit_decodes_fewer_sst_blocks() {
+        let dir = temp_dir();
+        let mut db = Db::open(&dir).unwrap();
+        let payload = vec![b'x'; 256];
+        for i in 0..80u32 {
+            db.put(format!("k{i:03}").as_bytes(), &payload).unwrap();
+        }
+        db.flush().unwrap();
+        let snap = db.last_sequence();
+        db.block_cache.clear();
+        crate::sst::reset_sst_blocks_decoded();
+        let all: Vec<_> = db
+            .try_scan_at(snap, Bound::Unbounded, Bound::Unbounded, None)
+            .unwrap()
+            .collect();
+        let decoded_all = crate::sst::sst_blocks_decoded();
+        assert!(
+            decoded_all >= 2,
+            "need a multi-block SST, decoded {decoded_all}"
+        );
+        assert_eq!(all.len(), 80);
+
+        db.block_cache.clear();
+        crate::sst::reset_sst_blocks_decoded();
+        let limited: Vec<_> = db
+            .try_scan_at(snap, Bound::Unbounded, Bound::Unbounded, Some(5))
+            .unwrap()
+            .collect();
+        let decoded_lim = crate::sst::sst_blocks_decoded();
+        assert_eq!(limited.len(), 5);
+        assert_eq!(
+            limited.iter().map(|kv| kv.key.clone()).collect::<Vec<_>>(),
+            all[..5].iter().map(|kv| kv.key.clone()).collect::<Vec<_>>()
+        );
+        assert!(
+            decoded_lim < decoded_all,
+            "limit must cut block I/O: limited={decoded_lim} full={decoded_all}"
+        );
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// G2: a deleted prefix must not make a limited scan return empty.
+    #[test]
+    fn try_scan_at_limit_tombstone_does_not_hide_later_keys() {
+        let dir = temp_dir();
+        let mut db = Db::open(&dir).unwrap();
+        for i in 0..40u32 {
+            db.put(format!("k{i:03}").as_bytes(), b"v").unwrap();
+        }
+        db.flush().unwrap();
+        db.delete_range(b"k000", b"k010").unwrap();
+        let snap = db.last_sequence();
+        let limited: Vec<_> = db
+            .try_scan_at(snap, Bound::Unbounded, Bound::Unbounded, Some(5))
+            .unwrap()
+            .map(|kv| kv.key)
+            .collect();
+        assert_eq!(limited.len(), 5);
+        assert_eq!(&limited[0][..], b"k010");
+        assert_eq!(&limited[4][..], b"k014");
         db.close().unwrap();
         let _ = fs::remove_dir_all(&dir);
     }

@@ -10,6 +10,7 @@
 mod table;
 
 pub use table::{
-    write_sst, write_sst_entries, write_sst_entries_on, write_sst_on, SstTable, SST_VERSION,
-    SST_VERSION_V1, SST_VERSION_V2, SST_VERSION_V3,
+    reset_sst_blocks_decoded, sst_blocks_decoded, write_sst, write_sst_entries,
+    write_sst_entries_on, write_sst_on, SstRangeIter, SstTable, SST_VERSION, SST_VERSION_V1,
+    SST_VERSION_V2, SST_VERSION_V3,
 };

@@ -63,12 +63,12 @@ Herdadas de RFC-0031/0032. Em especial:
 
 - [x] **P0.1** `Db::last_under_prefix(seq, prefix)` / `last_in_range` — mem BTree + por-SST last point no prefixo; teste: K versões × N users, devolve a maior do user, sem ver o vizinho — status: `done`
 - [x] **P0.2** `latest_cf` (compat bench + engines) usa `last_under_prefix`; re-medida `deps_mvcc_latest` — status: `done`
-- [ ] **P0.3** `try_scan_at` honra `limit` na coleta (para de puxar blocos/streams quando `emitted == limit`); `deps_scan` re-medido — status: `todo`
+- [x] **P0.3** `try_scan_at` honra `limit` na coleta (para de puxar blocos/streams quando `emitted == limit`); `deps_scan` re-medido — status: `done`
 - [x] **P0.4** RFC + Status vivo (este doc) — status: `done`
 
 ### P1 — next wave
 
-- [ ] **P1.1** SST: `entries_in_user_range` / last-in-prefix não decodifica bloco cujo `first_user_key` já passou do end — status: `todo`
+- [x] **P1.1** SST: `entries_in_user_range` / last-in-prefix não decodifica bloco cujo `first_user_key` já passou do end — status: `done`
 - [ ] **P1.2** Gate `ROCKS_PARITY_RATIO_FLOOR=0.5` + `ROCKS_PARITY_GATE_SHAPES=deps_mvcc_latest,deps_scan` contra FULL_SYNC no `tikv_ycsb_parity_v0.sh` — status: `todo`
 
 ### P2 — later / polish
@@ -82,9 +82,9 @@ Herdadas de RFC-0031/0032. Em especial:
 |----|------|-------|--------|-----------|---------|
 | P0.1 | p0 | last_under_prefix no core | done | este commit | 2026-08-15 |
 | P0.2 | p0 | latest_cf usa last_under_prefix | done | este commit; 4096/2000 zipf 1KB deps-only: mvcc 899 qps / p50 0.90 ms (era 124 / 1.9 ms) | 2026-08-15 |
-| P0.3 | p0 | scan limit corta coleta | todo | cap por camada rejeitado (G2) | 2026-08-15 |
+| P0.3 | p0 | scan limit corta coleta | done | 4096/2000: scan 2778 qps / p50 0.35 ms (era 1024 / 0.97) | 2026-08-15 |
 | P0.4 | p0 | RFC + status vivo | done | este doc | 2026-08-15 |
-| P1.1 | p1 | SST skip blocos past end | todo | — | 2026-08-15 |
+| P1.1 | p1 | SST skip blocos past end | done | `blocks_overlapping_range` already exclusive-end | 2026-08-15 |
 | P1.2 | p1 | gate 0.5 mvcc+scan | todo | — | 2026-08-15 |
 | P2.1 | p2 | tabela lab | todo | — | 2026-08-15 |
 | P2.2 | p2 | follow-up se residual | todo | — | 2026-08-15 |
@@ -98,7 +98,7 @@ Herdadas de RFC-0031/0032. Em especial:
 
 ## Decision (P0.3 — do not cap per layer)
 
-A per-SST / per-mem `max_user_keys = limit` **before** merge can hide live keys: if the first N user keys of an L0 file are tombstoned in a newer layer (or in the same file), the merge never sees key N+1. That is a G2 break. Collection therefore still materialises the overlapping range; `limit` stays on **emit** (`StreamingVisibleIter`). `count_cf` uses `ScanProjection::KeyOnly` so deps_scan does not resolve 1 KB values it never reads. Lazy block pull when `emitted == limit` remains P0.3.
+A per-SST / per-mem `max_user_keys = limit` **before** merge can hide live keys: if the first N user keys of an L0 file are tombstoned in a newer layer (or in the same file), the merge never sees key N+1. That is a G2 break. P0.3 therefore pulls SST **blocks lazily**: `StreamingVisibleIter` stops asking for the next block when `emitted == limit`. Range tombstones are collected from every layer first (including those whose start sits before the scan bound). `BlockCache` (already on `Db`, unused on this path) is wired so zipfian rescans do not lz4-decode the same block every time. `count_cf` stays `ScanProjection::KeyOnly`.
 
 ## Out of scope
 

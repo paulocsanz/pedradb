@@ -207,14 +207,20 @@ impl Ord for HeapItem {
     }
 }
 
+/// One sorted point-key stream (RFC-0033: pulled lazily so `limit` cuts I/O).
+pub type LayerStream<'a> = Box<dyn Iterator<Item = (InternalKey, Bytes)> + 'a>;
+
 /// Streaming merge of **pre-sorted** internal entry streams into visible KVs.
 ///
 /// Each stream must already be ordered by [`InternalKey`]. The iterator pulls
 /// one entry at a time (O(streams) memory beyond the streams themselves) and
 /// never materialises the full keyspace as a single `Vec` of all pairs.
-pub struct StreamingVisibleIter {
+/// When `limit` is set, later blocks of a lazy SST stream are never decoded
+/// (RFC-0033 P0.3). Range tombstones must be supplied up front so a deleted
+/// prefix cannot hide later live keys (G2).
+pub struct StreamingVisibleIter<'a> {
     heap: BinaryHeap<HeapItem>,
-    streams: Vec<std::vec::IntoIter<(InternalKey, Bytes)>>,
+    streams: Vec<LayerStream<'a>>,
     snapshot: SequenceNumber,
     range_dels: Vec<RangeTombstone>,
     start: Bound<Bytes>,
@@ -225,7 +231,7 @@ pub struct StreamingVisibleIter {
     skip_user: Option<Bytes>,
 }
 
-impl StreamingVisibleIter {
+impl StreamingVisibleIter<'static> {
     /// Build from sorted streams (each `Vec` sorted by [`InternalKey`]).
     ///
     /// Range tombstones are collected from all streams first (typically few).
@@ -237,9 +243,6 @@ impl StreamingVisibleIter {
         end: Bound<&[u8]>,
         limit: Option<usize>,
     ) -> Self {
-        let start_b = bound_to_owned(start);
-        let end_b = bound_to_owned(end);
-
         let mut range_dels = Vec::new();
         let mut point_streams = Vec::with_capacity(streams.len());
         for stream in streams {
@@ -260,11 +263,29 @@ impl StreamingVisibleIter {
             }
             point_streams.push(points);
         }
+        let boxed: Vec<LayerStream<'static>> = point_streams
+            .into_iter()
+            .map(|s| Box::new(s.into_iter()) as LayerStream<'static>)
+            .collect();
+        StreamingVisibleIter::from_point_streams(boxed, range_dels, snapshot, start, end, limit)
+    }
+}
 
+impl<'a> StreamingVisibleIter<'a> {
+    /// Merge already-filtered point streams. Range tombstones are **not**
+    /// taken from the streams — pass every covering tombstone in `range_dels`
+    /// (including those whose start key sits before `start`).
+    #[must_use]
+    pub fn from_point_streams(
+        mut streams: Vec<LayerStream<'a>>,
+        range_dels: Vec<RangeTombstone>,
+        snapshot: SequenceNumber,
+        start: Bound<&[u8]>,
+        end: Bound<&[u8]>,
+        limit: Option<usize>,
+    ) -> Self {
         let mut heap = BinaryHeap::new();
-        let mut iters = Vec::with_capacity(point_streams.len());
-        for (i, s) in point_streams.into_iter().enumerate() {
-            let mut it = s.into_iter();
+        for (i, it) in streams.iter_mut().enumerate() {
             if let Some((k, v)) = it.next() {
                 heap.push(HeapItem {
                     key: k,
@@ -272,16 +293,14 @@ impl StreamingVisibleIter {
                     stream: i,
                 });
             }
-            iters.push(it);
         }
-
         Self {
             heap,
-            streams: iters,
+            streams,
             snapshot,
             range_dels,
-            start: start_b,
-            end: end_b,
+            start: bound_to_owned(start),
+            end: bound_to_owned(end),
             limit,
             emitted: 0,
             skip_user: None,
@@ -295,7 +314,7 @@ impl StreamingVisibleIter {
     }
 }
 
-impl Iterator for StreamingVisibleIter {
+impl Iterator for StreamingVisibleIter<'_> {
     type Item = VisibleKv;
 
     fn next(&mut self) -> Option<Self::Item> {
