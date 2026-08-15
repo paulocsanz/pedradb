@@ -11,15 +11,18 @@ pub fn path_after_authority(rest: &str) -> &str {
     rest.find('/').map(|i| &rest[i..]).unwrap_or("/")
 }
 
-/// Strip `http(s)://authority` (the four literals production accepts).
+/// Strip `http(s)://authority` (scheme case-insensitive — RFC 9110 / F145).
 #[must_use]
 pub fn strip_http_authority(target: &str) -> Option<&str> {
-    target
-        .strip_prefix("http://")
-        .or_else(|| target.strip_prefix("https://"))
-        .or_else(|| target.strip_prefix("HTTP://"))
-        .or_else(|| target.strip_prefix("HTTPS://"))
-        .map(path_after_authority)
+    let b = target.as_bytes();
+    let rest = if b.len() >= 7 && b[..7].eq_ignore_ascii_case(b"http://") {
+        Some(&target[7..])
+    } else if b.len() >= 8 && b[..8].eq_ignore_ascii_case(b"https://") {
+        Some(&target[8..])
+    } else {
+        None
+    };
+    rest.map(path_after_authority)
 }
 
 /// F91/F92: strip absolute-form / network-path, then the query string.
@@ -68,6 +71,9 @@ mod tests {
         assert_eq!(origin_form_path("//127.0.0.1:9/kv/x"), "/kv/x");
         assert_eq!(origin_form_path("//h/dcs/kv/k?rev=1"), "/dcs/kv/k");
         assert_eq!(origin_form_path("//only-host"), "/");
+        // F145: scheme is case-insensitive (RFC 9110).
+        assert_eq!(origin_form_path("Http://h/kv/x"), "/kv/x");
+        assert_eq!(origin_form_path("HtTpS://h/kv/y?z=1"), "/kv/y");
     }
 
     #[test]

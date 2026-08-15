@@ -34,6 +34,7 @@ pub use auth_kernel::{
 pub use cl_kernel::{
     content_length_repeat_ok, content_length_repeat_ok_as_is, invalid_cl_as_zero,
     invalid_cl_as_zero_as_is, keep_body_without_cl, keep_body_without_cl_as_is,
+    short_body_vs_cl_is_error, short_body_vs_cl_is_error_as_is,
 };
 pub use fail_closed::{
     parse_error_status, parse_error_writes_status, parse_error_writes_status_as_is,
@@ -152,7 +153,20 @@ fn read_req(stream: &mut TcpStream) -> Result<(String, String, Vec<u8>, Vec<(Str
                 return Err(HttpError::App("body exceeds max".into()));
             }
         }
+        // F146: short body vs declared Content-Length used to truncate and store
+        // a partial payload (200). Fail closed — same class as F87 bad CL.
+        if body.len() < content_len {
+            return Err(HttpError::App(format!(
+                "body shorter than content-length ({}/{})",
+                body.len(),
+                content_len
+            )));
+        }
         body.truncate(content_len);
+        // F146: EOF before the declared length used to 200-store a prefix.
+        if short_body_vs_cl_is_error(body.len() as u64, content_len as u64) {
+            return Err(HttpError::App("short body vs content-length".into()));
+        }
     } else if keep_body_without_cl() {
         // F86: no Content-Length — keep bytes already past the header break.
         // Do not drain the socket (GET/keep-alive would hang waiting for EOF).
@@ -1100,6 +1114,9 @@ mod tests {
         assert_eq!(path_only("http://127.0.0.1:9/kv/x"), "/kv/x");
         assert_eq!(path_only("https://h/kv/a%2Fb?q=1"), "/kv/a%2Fb");
         assert_eq!(path_only("HTTP://H/dcs/kv/k"), "/dcs/kv/k");
+        // F145: mixed-case scheme
+        assert_eq!(path_only("Http://127.0.0.1:9/kv/x"), "/kv/x");
+        assert_eq!(path_only("HtTpS://h/kv/y"), "/kv/y");
         assert_eq!(path_only("http://only-host"), "/");
         // F92: network-path-reference (no scheme)
         assert_eq!(path_only("//127.0.0.1:9/kv/x"), "/kv/x");
@@ -1187,6 +1204,78 @@ mod tests {
             .map(|i| resp[i + 4..].to_vec())
             .unwrap_or_default();
         assert_eq!(body, b"yes", "absolute-form GET must return value");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// F145: mixed-case `Http://` absolute-form used to 404 (only four literals).
+    #[test]
+    fn kv_http_mixed_case_scheme_absolute_form() {
+        let dir = temp("mix-scheme");
+        let addr = bind_ephemeral();
+        let srv = KvServer::open(&dir).unwrap();
+        thread::spawn(move || {
+            let _ = srv.serve(addr);
+        });
+        thread::sleep(Duration::from_millis(100));
+        let mut stream = TcpStream::connect(addr).unwrap();
+        let host = format!("{addr}");
+        let req = format!(
+            "PUT Http://{host}/kv/mix HTTP/1.0\r\nContent-Length: 3\r\nHost: {host}\r\n\r\nyes"
+        );
+        stream.write_all(req.as_bytes()).unwrap();
+        let _ = stream.shutdown(std::net::Shutdown::Write);
+        let mut resp = Vec::new();
+        stream.read_to_end(&mut resp).unwrap();
+        let text = String::from_utf8_lossy(&resp);
+        let put_code = text
+            .lines()
+            .next()
+            .and_then(|l| l.split_whitespace().nth(1))
+            .and_then(|c| c.parse::<u16>().ok())
+            .unwrap_or(0);
+        assert_eq!(
+            put_code, 200,
+            "Http:// absolute-form must route, resp={text:?}"
+        );
+        let (code, body) = http_exchange(addr, "GET", "/kv/mix", b"").unwrap();
+        assert_eq!(code, 200, "GET after mixed-scheme PUT, body={body:?}");
+        assert_eq!(body, b"yes");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// F146: Content-Length 5 + only 2 bytes used to 200-store the short body.
+    #[test]
+    fn kv_http_short_body_vs_content_length_rejected() {
+        let dir = temp("short-cl");
+        let addr = bind_ephemeral();
+        let srv = KvServer::open(&dir).unwrap();
+        thread::spawn(move || {
+            let _ = srv.serve(addr);
+        });
+        thread::sleep(Duration::from_millis(100));
+        let mut stream = TcpStream::connect(addr).unwrap();
+        stream
+            .write_all(b"PUT /kv/short HTTP/1.0\r\nContent-Length: 5\r\nHost: localhost\r\n\r\nhi")
+            .unwrap();
+        let _ = stream.shutdown(std::net::Shutdown::Write);
+        let mut resp = Vec::new();
+        let _ = stream.read_to_end(&mut resp);
+        let text = String::from_utf8_lossy(&resp);
+        let put_code = text
+            .lines()
+            .next()
+            .and_then(|l| l.split_whitespace().nth(1))
+            .and_then(|c| c.parse::<u16>().ok())
+            .unwrap_or(0);
+        assert_eq!(
+            put_code, 400,
+            "short body vs Content-Length must be 400, got {put_code} {text:?}"
+        );
+        let (code, body) = http_exchange(addr, "GET", "/kv/short", b"").unwrap();
+        assert_eq!(
+            code, 404,
+            "truncated PUT must not store, GET {code} {body:?}"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
