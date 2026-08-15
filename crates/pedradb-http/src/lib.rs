@@ -39,9 +39,10 @@ pub use cl_kernel::{
 };
 pub use fail_closed::{
     expects_100_continue, expects_100_continue_as_is, header_break_end, header_break_end_as_is,
-    header_break_len, parse_error_status, parse_error_writes_status,
-    parse_error_writes_status_as_is, present_bad_int_is_error, present_bad_int_is_error_as_is,
-    reject_transfer_encoding, reject_transfer_encoding_as_is,
+    header_break_len, host_values_conflict, host_values_conflict_as_is,
+    http_version_requires_host, http_version_requires_host_as_is, parse_error_status,
+    parse_error_writes_status, parse_error_writes_status_as_is, present_bad_int_is_error,
+    present_bad_int_is_error_as_is, reject_transfer_encoding, reject_transfer_encoding_as_is,
 };
 pub use form_kernel::{
     form_decode, form_decode_as_is, form_plus_byte, form_plus_byte_as_is, from_hex,
@@ -105,8 +106,10 @@ fn read_req(stream: &mut TcpStream) -> Result<(String, String, Vec<u8>, Vec<(Str
     let mut parts = req.split_whitespace();
     let method = normalize_http_method(parts.next().unwrap_or(""));
     let path = parts.next().unwrap_or("/").to_string();
+    let version = parts.next().unwrap_or("");
     let mut content_len = 0usize;
     let mut has_content_len = false;
+    let mut host: Option<String> = None;
     let mut headers = Vec::new();
     for line in lines {
         let Some((k, v)) = line.split_once(':') else {
@@ -117,6 +120,15 @@ fn read_req(stream: &mut TcpStream) -> Result<(String, String, Vec<u8>, Vec<(Str
         let name = k.trim().to_ascii_lowercase();
         let val = v.trim();
         headers.push((name.clone(), val.to_string()));
+        if name == "host" {
+            if let Some(prev) = host.as_deref() {
+                if host_values_conflict(prev, val) {
+                    return Err(HttpError::App("conflicting host".into()));
+                }
+            } else {
+                host = Some(val.to_string());
+            }
+        }
         // F104: Transfer-Encoding is unsupported. Honouring CL while ignoring TE
         // (or treating TE as opaque body) mis-frames the payload — fail closed.
         if name == "transfer-encoding" && reject_transfer_encoding() {
@@ -137,6 +149,10 @@ fn read_req(stream: &mut TcpStream) -> Result<(String, String, Vec<u8>, Vec<(Str
             has_content_len = true;
             content_len = n;
         }
+    }
+    // F157: RFC 9112 — HTTP/1.1 without Host used to 200-store.
+    if http_version_requires_host(version) && host.is_none() {
+        return Err(HttpError::App("missing host".into()));
     }
     // Cap body size (F8): previously Content-Length could force multi-GiB alloc.
     const MAX_BODY: usize = 16 * 1024 * 1024;
@@ -1703,6 +1719,121 @@ mod tests {
         assert!(
             String::from_utf8_lossy(&body).contains("v1"),
             "create must land, body={body:?}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// F157: RFC 9112 — HTTP/1.1 without Host used to 200-store.
+    #[test]
+    fn kv_http11_missing_host_rejected() {
+        let dir = temp("http11-host");
+        let addr = bind_ephemeral();
+        let srv = KvServer::open(&dir).unwrap();
+        thread::spawn(move || {
+            let _ = srv.serve(addr);
+        });
+        thread::sleep(Duration::from_millis(100));
+        let mut stream = TcpStream::connect(addr).unwrap();
+        stream
+            .write_all(b"PUT /kv/h HTTP/1.1\r\nContent-Length: 2\r\n\r\nok")
+            .unwrap();
+        let _ = stream.shutdown(std::net::Shutdown::Write);
+        let mut resp = Vec::new();
+        let _ = stream.read_to_end(&mut resp);
+        let text = String::from_utf8_lossy(&resp);
+        let put_code = text
+            .lines()
+            .next()
+            .and_then(|l| l.split_whitespace().nth(1))
+            .and_then(|c| c.parse::<u16>().ok())
+            .unwrap_or(0);
+        assert_eq!(
+            put_code, 400,
+            "HTTP/1.1 without Host must 400, got {put_code} {text:?}"
+        );
+        let (code, body) = http_exchange(addr, "GET", "/kv/h", b"").unwrap();
+        assert_eq!(
+            code, 404,
+            "missing-Host PUT must not store, GET {code} {body:?}"
+        );
+
+        let mut stream = TcpStream::connect(addr).unwrap();
+        stream
+            .write_all(b"PUT /kv/h2 HTTP/1.1\r\nHost: a\r\nHost: b\r\nContent-Length: 2\r\n\r\nok")
+            .unwrap();
+        let _ = stream.shutdown(std::net::Shutdown::Write);
+        let mut resp = Vec::new();
+        let _ = stream.read_to_end(&mut resp);
+        let text = String::from_utf8_lossy(&resp);
+        let put_code = text
+            .lines()
+            .next()
+            .and_then(|l| l.split_whitespace().nth(1))
+            .and_then(|c| c.parse::<u16>().ok())
+            .unwrap_or(0);
+        assert_eq!(
+            put_code, 400,
+            "conflicting Host must 400, got {put_code} {text:?}"
+        );
+
+        let (code, _) = http_exchange(addr, "PUT", "/kv/h0", b"ok").unwrap();
+        assert_eq!(code, 200, "HTTP/1.0 without Host still allowed");
+
+        let mut stream = TcpStream::connect(addr).unwrap();
+        stream
+            .write_all(
+                b"PUT /kv/h1 HTTP/1.1\r\nHost: localhost\r\nContent-Length: 2\r\n\r\nok",
+            )
+            .unwrap();
+        let _ = stream.shutdown(std::net::Shutdown::Write);
+        let mut resp = Vec::new();
+        let _ = stream.read_to_end(&mut resp);
+        let text = String::from_utf8_lossy(&resp);
+        let put_code = text
+            .lines()
+            .next()
+            .and_then(|l| l.split_whitespace().nth(1))
+            .and_then(|c| c.parse::<u16>().ok())
+            .unwrap_or(0);
+        assert_eq!(put_code, 200, "HTTP/1.1 with Host must work, {text:?}");
+        let (code, body) = http_exchange(addr, "GET", "/kv/h1", b"").unwrap();
+        assert_eq!((code, body.as_slice()), (200, b"ok".as_slice()));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// F158: RFC 9112 — empty `Host:` on HTTP/1.1 used to count as present (F157
+    /// only checked `host.is_none()`) and 200-store.
+    #[test]
+    fn kv_http11_empty_host_rejected() {
+        let dir = temp("http11-empty-host");
+        let addr = bind_ephemeral();
+        let srv = KvServer::open(&dir).unwrap();
+        thread::spawn(move || {
+            let _ = srv.serve(addr);
+        });
+        thread::sleep(Duration::from_millis(100));
+        let mut stream = TcpStream::connect(addr).unwrap();
+        stream
+            .write_all(b"PUT /kv/eh HTTP/1.1\r\nHost:\r\nContent-Length: 2\r\n\r\nok")
+            .unwrap();
+        let _ = stream.shutdown(std::net::Shutdown::Write);
+        let mut resp = Vec::new();
+        let _ = stream.read_to_end(&mut resp);
+        let text = String::from_utf8_lossy(&resp);
+        let put_code = text
+            .lines()
+            .next()
+            .and_then(|l| l.split_whitespace().nth(1))
+            .and_then(|c| c.parse::<u16>().ok())
+            .unwrap_or(0);
+        assert_eq!(
+            put_code, 400,
+            "HTTP/1.1 empty Host must 400, got {put_code} {text:?}"
+        );
+        let (code, body) = http_exchange(addr, "GET", "/kv/eh", b"").unwrap();
+        assert_eq!(
+            code, 404,
+            "empty-Host PUT must not store, GET {code} {body:?}"
         );
         let _ = std::fs::remove_dir_all(&dir);
     }

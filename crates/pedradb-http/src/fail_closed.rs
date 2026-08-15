@@ -94,6 +94,36 @@ pub fn expects_100_continue_as_is(_value: &str) -> bool {
     false
 }
 
+/// F157: RFC 9112 — HTTP/1.1 (and later) request-line requires `Host`.
+#[must_use]
+pub fn http_version_requires_host(version: &str) -> bool {
+    let v = version.trim();
+    let rest = if v.len() >= 5 && v[..5].eq_ignore_ascii_case("HTTP/") {
+        &v[5..]
+    } else {
+        return false;
+    };
+    rest != "1.0" && !rest.eq_ignore_ascii_case("1.0")
+}
+
+/// AS-IS F157: never require Host.
+#[must_use]
+pub fn http_version_requires_host_as_is(_version: &str) -> bool {
+    false
+}
+
+/// F157: two `Host` field-values disagree.
+#[must_use]
+pub fn host_values_conflict(a: &str, b: &str) -> bool {
+    a != b
+}
+
+/// AS-IS: last Host wins.
+#[must_use]
+pub fn host_values_conflict_as_is(_a: &str, _b: &str) -> bool {
+    false
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -134,7 +164,10 @@ mod tests {
         let mixed = b"PUT /kv/b HTTP/1.0\nContent-Length: 8\n\nab\r\n\r\ncd";
         let m = header_break_end(mixed).expect("mixed");
         assert_eq!(&mixed[m..], b"ab\r\n\r\ncd");
-        assert_eq!(header_break_end_as_is(mixed).map(|i| &mixed[i..]), Some(&b"cd"[..]));
+        assert_eq!(
+            header_break_end_as_is(mixed).map(|i| &mixed[i..]),
+            Some(&b"cd"[..])
+        );
     }
 
     #[test]
@@ -147,5 +180,18 @@ mod tests {
         assert!(!expects_100_continue(""));
         assert!(!expects_100_continue("102-processing"));
         assert!(!expects_100_continue_as_is("100-continue"));
+    }
+
+    #[test]
+    fn f157_http11_host() {
+        assert!(http_version_requires_host("HTTP/1.1"));
+        assert!(http_version_requires_host("http/1.1"));
+        assert!(http_version_requires_host("HTTP/2.0"));
+        assert!(!http_version_requires_host("HTTP/1.0"));
+        assert!(!http_version_requires_host(""));
+        assert!(!http_version_requires_host_as_is("HTTP/1.1"));
+        assert!(host_values_conflict("a", "b"));
+        assert!(!host_values_conflict("a", "a"));
+        assert!(!host_values_conflict_as_is("a", "b"));
     }
 }
