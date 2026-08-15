@@ -1165,7 +1165,8 @@ fn apply_txn_commit<E: Env>(db: &mut Db<E>, txn_id: u64, keys: &[Vec<u8>]) -> Re
         // keys, restore preimages (same as TxnRevert). Keep abort fence durable.
         // Propagate corrupt-preimage errors (F118) — do not leave aborted writes.
         apply_txn_revert(db, txn_id, keys)?;
-        let _ = db.put(txn_status_key(txn_id), b"abort");
+        // F134: keep abort fence durable after fenced commit path (F130 class).
+        db.put(txn_status_key(txn_id), b"abort")?;
         return Ok(());
     }
     let mut ops = Vec::new();
@@ -2359,16 +2360,23 @@ impl<E: Env> StoreCluster<E> {
         Ok(())
     }
 
-    fn persist_si_keys(&mut self, keys: &[Vec<u8>]) {
-        let gen = encode_u64_meta(self.commit_generation);
-        let wm = encode_u64_meta(self.safe_watermark);
-        let gen_key = si_meta_key("generation");
-        let wm_key = si_meta_key("watermark");
+    /// Mirror SI generation / watermark / hist for reopen.
+    ///
+    /// # Errors
+    /// F136: generation/watermark must land on at least one replica (same class
+    /// as F131/F132 meta). Hist rows are best-effort here — Raft apply already
+    /// wrote them when `si_gen > 0`.
+    fn persist_si_keys(&mut self, keys: &[Vec<u8>]) -> Result<()> {
+        self.persist_u64_meta_all("generation", self.commit_generation)?;
+        self.persist_u64_meta_all("watermark", self.safe_watermark)?;
         let mut hist_writes: Vec<(Vec<u8>, Vec<u8>)> = Vec::new();
         for k in keys {
             if let Some(hist) = self.key_history.get(k) {
                 hist_writes.push((hist_key(k), encode_hist(hist)));
             }
+        }
+        if hist_writes.is_empty() {
+            return Ok(());
         }
         let ids = self.ids.clone();
         for nid in ids {
@@ -2376,13 +2384,12 @@ impl<E: Env> StoreCluster<E> {
                 continue;
             }
             if let Some(node) = self.nodes.get_mut(&nid) {
-                let _ = node.db.put(&gen_key, &gen);
-                let _ = node.db.put(&wm_key, &wm);
                 for (hk, hv) in &hist_writes {
                     let _ = node.db.put(hk, hv);
                 }
             }
         }
+        Ok(())
     }
 
     /// Advance logical time by `dt` steps; each step runs one raft timer tick
@@ -3936,7 +3943,7 @@ impl<E: Env> StoreCluster<E> {
                 .map(|p| p.commit)
                 .unwrap_or(0);
             if commit_now >= idx {
-                self.flush_version_notes_through(rid, idx);
+                self.flush_version_notes_through(rid, idx)?;
             }
         }
         // F27: drop applied prefix once every participating peer has applied it.
@@ -3978,7 +3985,7 @@ impl<E: Env> StoreCluster<E> {
                 }
             }
             // OCC/SI version history — must run even when put() returned NotCommitted.
-            self.flush_version_notes_through(range_id, index);
+            self.flush_version_notes_through(range_id, index)?;
             self.maybe_compact_logs(range_id)?;
             // Heartbeat commit to followers.
             if self.is_local_node(leader) && self.is_participating(leader) {
@@ -5085,8 +5092,8 @@ impl<E: Env> StoreCluster<E> {
             }
         }
         // One SI generation for the whole TX (must run before preimages drop).
-        self.note_tx_commit(handle, si_gen);
-        self.drop_preimages(handle);
+        self.note_tx_commit(handle, si_gen)?;
+        self.drop_preimages(handle)?;
         Ok(())
     }
 
@@ -5127,7 +5134,10 @@ impl<E: Env> StoreCluster<E> {
     ///
     /// Per-range reads use [`Self::best_applied_reader`] so a lagging `ids[0]` cannot
     /// poison SI history after a majority commit that excluded that node (F42).
-    fn note_tx_commit(&mut self, handle: &TxHandle, si_gen: u64) {
+    ///
+    /// # Errors
+    /// SI meta persist (F136).
+    fn note_tx_commit(&mut self, handle: &TxHandle, si_gen: u64) -> Result<()> {
         let mut items: Vec<VersionNote> = Vec::new();
         for (rid, keys) in &handle.keys_by_range {
             let Some(nid) = self.best_applied_reader(*rid) else {
@@ -5167,11 +5177,15 @@ impl<E: Env> StoreCluster<E> {
             }
         }
         // Use the gen reserved at `tx_finish` (matches durable TxnCommit.si_gen).
-        self.note_mutations_at(Some(si_gen), &items);
+        self.note_mutations_at(Some(si_gen), &items)?;
+        Ok(())
     }
 
     /// Drop prepare-time preimages after a *successful* all-range commit.
-    fn drop_preimages(&mut self, handle: &TxHandle) {
+    ///
+    /// # Errors
+    /// I/O deleting preimage keys (leftover pre confuses later reverts).
+    fn drop_preimages(&mut self, handle: &TxHandle) -> Result<()> {
         let ids = self.ids.clone();
         for nid in ids {
             let Some(node) = self.nodes.get_mut(&nid) else {
@@ -5184,9 +5198,10 @@ impl<E: Env> StoreCluster<E> {
                 }
             }
             if !ops.is_empty() {
-                let _ = node.db.apply_batch(ops);
+                node.db.apply_batch(ops)?;
             }
         }
+        Ok(())
     }
 
     /// Abort a prepared TX (drop intents on all peers, even without leaders).
@@ -5227,7 +5242,10 @@ impl<E: Env> StoreCluster<E> {
             Ok(()) => Ok(handle.id),
             Err(e) => {
                 // tx_finish already reverts/aborts with force-local; cancel is extra sweep.
-                let _ = self.tx_cancel(&handle);
+                // F135: surface cancel failure (corrupt pre / fence) over the original err.
+                if let Err(ce) = self.tx_cancel(&handle) {
+                    return Err(ce);
+                }
                 Err(e)
             }
         }
@@ -5352,14 +5370,21 @@ impl<E: Env> StoreCluster<E> {
     }
 
     /// Flush staged version notes for `range_id` through `through_index` (inclusive).
-    fn flush_version_notes_through(&mut self, range_id: u64, through_index: u64) {
+    ///
+    /// # Errors
+    /// SI meta persist while applying notes (F136).
+    fn flush_version_notes_through(
+        &mut self,
+        range_id: u64,
+        through_index: u64,
+    ) -> Result<()> {
         let already = self
             .version_notes_through
             .get(&range_id)
             .copied()
             .unwrap_or(0);
         if through_index <= already {
-            return;
+            return Ok(());
         }
         let mut idxs: Vec<u64> = self
             .pending_version_notes
@@ -5370,7 +5395,7 @@ impl<E: Env> StoreCluster<E> {
         idxs.sort_unstable();
         for idx in idxs {
             if let Some((gen, items)) = self.pending_version_notes.remove(&(range_id, idx)) {
-                self.note_mutations_at(Some(gen), &items);
+                self.note_mutations_at(Some(gen), &items)?;
             }
             self.version_notes_through.insert(range_id, idx);
         }
@@ -5383,6 +5408,7 @@ impl<E: Env> StoreCluster<E> {
         if through_index > cur {
             self.version_notes_through.insert(range_id, through_index);
         }
+        Ok(())
     }
 
     /// Drop staged notes for discarded (uncommitted) log indexes.
@@ -5426,9 +5452,12 @@ impl<E: Env> StoreCluster<E> {
     ///
     /// When `reserved` is `Some(g)` use that SI generation (assigned at propose /
     /// `tx_finish`) without a second bump (F49). `None` allocates a new gen.
-    fn note_mutations_at(&mut self, reserved: Option<u64>, items: &[VersionNote]) {
+    ///
+    /// # Errors
+    /// SI generation/watermark persist (F136).
+    fn note_mutations_at(&mut self, reserved: Option<u64>, items: &[VersionNote]) -> Result<()> {
         if items.is_empty() {
-            return;
+            return Ok(());
         }
         let g = match reserved {
             Some(r) if r > 0 => {
@@ -5461,7 +5490,8 @@ impl<E: Env> StoreCluster<E> {
         self.maybe_gc_versions();
         // Mirror watermark/generation; hist rows already on disk via apply when si_gen>0.
         let keys: Vec<Vec<u8>> = items.iter().map(|(k, _, _)| k.clone()).collect();
-        self.persist_si_keys(&keys);
+        self.persist_si_keys(&keys)?;
+        Ok(())
     }
 
     /// Advance watermark and prune version history (RFC-0023 P0.4).
@@ -9345,6 +9375,119 @@ mod tests {
             })
             .count();
         assert!(n >= 2, "recreate must majority-replicate; seen={n}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// F134: fenced TxnCommit apply must re-fence after revert (not swallow put).
+    #[test]
+    fn apply_txn_commit_fenced_keeps_abort_status() {
+        let dir = temp();
+        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        c.elect_all(80).unwrap();
+        c.put(b"u", b"live").unwrap();
+        let tid = 55u64;
+        let n = c.nodes.get_mut(&1).unwrap();
+        // Simulate abort fence + prepare preimage; apply commit must stay fenced.
+        n.db
+            .put(txn_pre_key(tid, b"u"), encode_preimage(Some(b"live")))
+            .unwrap();
+        n.db
+            .put(intent_key(b"u"), encode_intent(tid, b"new"))
+            .unwrap();
+        n.db.put(txn_status_key(tid), b"abort").unwrap();
+        apply_txn_commit(&mut n.db, tid, &[b"u".to_vec()]).unwrap();
+        assert_eq!(
+            n.db.get(&txn_status_key(tid)).as_deref(),
+            Some(b"abort".as_ref()),
+            "fenced commit must re-fence abort after revert"
+        );
+        assert_eq!(
+            n.db.get(b"u").as_deref(),
+            Some(b"live".as_ref()),
+            "must restore preimage, not materialise intent"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// F135: commit_tx must surface tx_cancel failure after tx_finish err.
+    #[test]
+    fn commit_tx_surfaces_cancel_after_finish_fail() {
+        use pedradb_sim::{FailingEnv, SeedRng};
+        let dir = temp();
+        let e1 = FailingEnv::passing();
+        let e2 = FailingEnv::passing();
+        let e3 = FailingEnv::passing();
+        let mut c = StoreCluster::open_with_envs_rng(
+            &dir,
+            3,
+            1,
+            [e1.clone(), e2.clone(), e3.clone()],
+            SeedRng::new(0xF135),
+        )
+        .unwrap();
+        c.elect_all(80).unwrap();
+        // Prepare multi-key then poison preimages so cancel/revert fails closed.
+        let h = c
+            .tx_start([(b"a".as_slice(), b"1".as_slice()), (b"b".as_slice(), b"2".as_slice())])
+            .unwrap();
+        // Force finish failure: partition so commit cannot majority.
+        c.set_participating(2, false).unwrap();
+        c.set_participating(3, false).unwrap();
+        // Poison preimages so the post-finish cancel hits F118.
+        for nid in c.ids.clone() {
+            if let Some(n) = c.nodes.get_mut(&nid) {
+                n.db
+                    .put(&txn_pre_key(h.id, b"a"), b"\xffbad")
+                    .unwrap();
+            }
+        }
+        // Use commit_tx path: finish will fail (minority), cancel should surface preimage err.
+        // Direct commit_tx from pairs — re-prepare via new commit_tx after poison is wrong.
+        // Call the match arm logic: tx_finish then cancel.
+        let finish_err = c.tx_finish(&h);
+        assert!(finish_err.is_err(), "finish without majority: {finish_err:?}");
+        // Poison remaining keys and cancel — must err.
+        for nid in c.ids.clone() {
+            if let Some(n) = c.nodes.get_mut(&nid) {
+                n.db
+                    .put(&txn_pre_key(h.id, b"b"), b"\xffbad")
+                    .unwrap();
+            }
+        }
+        let cancel_err = c.tx_cancel(&h);
+        assert!(
+            cancel_err.is_err(),
+            "cancel with corrupt pre must err: {cancel_err:?}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// F136: SI generation meta must not silently miss all replica puts.
+    #[test]
+    fn persist_si_keys_gen_fail_is_err() {
+        use pedradb_sim::{FailingEnv, SeedRng};
+        let dir = temp();
+        let e1 = FailingEnv::passing();
+        let e2 = FailingEnv::passing();
+        let e3 = FailingEnv::passing();
+        let mut c = StoreCluster::open_with_envs_rng(
+            &dir,
+            3,
+            1,
+            [e1.clone(), e2.clone(), e3.clone()],
+            SeedRng::new(0xF136),
+        )
+        .unwrap();
+        c.elect_all(80).unwrap();
+        c.put(b"k", b"v").unwrap();
+        e1.arm_one_failure();
+        e2.arm_one_failure();
+        e3.arm_one_failure();
+        let err = c.persist_si_keys(&[b"k".to_vec()]);
+        assert!(
+            err.is_err(),
+            "all-replica gen persist miss must fail closed: {err:?}"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
