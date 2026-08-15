@@ -5825,6 +5825,32 @@ mod tests {
     }
 
     #[test]
+    fn tick_range_id_drives_only_named_range() {
+        let dir = temp();
+        let mut c = StoreCluster::open(&dir, 3, 4).unwrap();
+        c.elect_all(120).unwrap();
+        let rid = c.range_metas()[0].id;
+        // Put on range 1 should succeed after single-range ticks only.
+        let k = if c.range_metas()[0].start.is_empty() {
+            vec![0u8, b'x']
+        } else {
+            let mut k = c.range_metas()[0].start.clone();
+            k.push(b'x');
+            k
+        };
+        c.put(&k, b"v").unwrap();
+        for _ in 0..20 {
+            c.tick_range_id(rid).unwrap();
+        }
+        assert_eq!(c.get_strong(&k).unwrap().as_deref(), Some(b"v".as_ref()));
+        assert!(
+            c.tick_range_id(999).is_err(),
+            "unknown range must fail"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn multi_range_election_timeouts_diversify_leaders() {
         // Root cause of option-A residual: node-only timeouts → one node leads all ranges.
         let dir = temp();

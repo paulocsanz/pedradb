@@ -831,7 +831,8 @@ fn finish_not_committed(
             flush_outbound(self_id, cluster, peers);
             return Ok(());
         }
-        let _ = cluster.tick();
+        // Only tick the range being committed — multi-Raft full tick multiplies HB cost.
+        let _ = cluster.tick_range_id(range_id);
         flush_outbound(self_id, cluster, peers);
         match rx.recv_timeout(Duration::from_millis(10)) {
             Ok(w) => service_nested(self_id, cluster, peers, w),
@@ -877,7 +878,11 @@ fn commit_tx_drive(
     match cluster.put_batch(batch.iter().copied()) {
         Ok(()) => {
             flush_outbound(self_id, cluster, peers);
-            pump_ae(self_id, cluster, peers, rx, 40);
+            // Same-range batch: pump only that range if known after locate.
+            let rid = batch
+                .first()
+                .and_then(|(k, _)| cluster.locate(k).ok());
+            pump_ae(self_id, cluster, peers, rx, 40, rid);
             // Synthetic id: put_batch has no txn_id; 1 means "committed batch".
             Ok(1)
         }
@@ -892,10 +897,10 @@ fn commit_tx_drive(
                 }
                 if let Ok(true) = cluster.finish_queued_propose(range_id, index, false) {
                     flush_outbound(self_id, cluster, peers);
-                    pump_ae(self_id, cluster, peers, rx, 20);
+                    pump_ae(self_id, cluster, peers, rx, 20, Some(range_id));
                     return Ok(1);
                 }
-                let _ = cluster.tick();
+                let _ = cluster.tick_range_id(range_id);
                 flush_outbound(self_id, cluster, peers);
                 match rx.recv_timeout(Duration::from_millis(10)) {
                     Ok(w) => service_nested(self_id, cluster, peers, w),
@@ -916,7 +921,7 @@ fn commit_tx_drive(
             match cluster.commit_tx(batch.iter().copied()) {
                 Ok(tid) => {
                     flush_outbound(self_id, cluster, peers);
-                    pump_ae(self_id, cluster, peers, rx, 40);
+                    pump_ae(self_id, cluster, peers, rx, 40, None);
                     Ok(tid)
                 }
                 Err(e) => {
@@ -935,12 +940,20 @@ fn pump_ae(
     peers: &HashMap<u64, String>,
     rx: &Receiver<Work>,
     n: usize,
+    range_id: Option<u64>,
 ) {
     for _ in 0..n {
         while let Ok(w) = rx.try_recv() {
             service_nested(self_id, cluster, peers, w);
         }
-        let _ = cluster.tick();
+        match range_id {
+            Some(rid) => {
+                let _ = cluster.tick_range_id(rid);
+            }
+            None => {
+                let _ = cluster.tick();
+            }
+        }
         flush_outbound(self_id, cluster, peers);
         thread::sleep(Duration::from_millis(5));
     }
@@ -1057,7 +1070,7 @@ fn dcs_mutate_drive(
     match result {
         Ok(rev) => {
             flush_outbound(self_id, cluster, peers);
-            pump_ae(self_id, cluster, peers, rx, 40);
+            pump_ae(self_id, cluster, peers, rx, 40, None);
             Ok(rev)
         }
         Err(StoreError::NotCommitted {
@@ -1071,13 +1084,13 @@ fn dcs_mutate_drive(
                 }
                 if let Ok(true) = cluster.finish_queued_propose(range_id, index, false) {
                     flush_outbound(self_id, cluster, peers);
-                    pump_ae(self_id, cluster, peers, rx, 20);
+                    pump_ae(self_id, cluster, peers, rx, 20, Some(range_id));
                     if let Ok(Some(kv)) = cluster.dcs_get_on(self_id, &dcs_key) {
                         return Ok(kv.mod_revision);
                     }
                     return Ok(1);
                 }
-                let _ = cluster.tick();
+                let _ = cluster.tick_range_id(range_id);
                 flush_outbound(self_id, cluster, peers);
                 match rx.recv_timeout(Duration::from_millis(10)) {
                     Ok(w) => service_nested(self_id, cluster, peers, w),

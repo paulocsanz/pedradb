@@ -23,6 +23,7 @@
 
 mod auth_kernel;
 mod cl_kernel;
+mod form_kernel;
 mod path_kernel;
 
 pub use auth_kernel::{
@@ -32,6 +33,10 @@ pub use auth_kernel::{
 pub use cl_kernel::{
     content_length_repeat_ok, content_length_repeat_ok_as_is, invalid_cl_as_zero,
     invalid_cl_as_zero_as_is, keep_body_without_cl, keep_body_without_cl_as_is,
+};
+pub use form_kernel::{
+    form_decode, form_decode_as_is, form_plus_byte, form_plus_byte_as_is, from_hex,
+    plus_before_percent,
 };
 pub use path_kernel::{
     origin_form_path, origin_form_path_as_is, path_after_authority, strip_authority_for_routing,
@@ -94,6 +99,15 @@ fn read_req(stream: &mut TcpStream) -> Result<(String, String, Vec<u8>, Vec<(Str
     for line in lines {
         if let Some((k, v)) = line.split_once(':') {
             headers.push((k.trim().to_ascii_lowercase(), v.trim().to_string()));
+        }
+        // F104: Transfer-Encoding is unsupported. Honouring CL while ignoring TE
+        // (or treating TE as opaque body) mis-frames the payload — fail closed.
+        if line
+            .to_ascii_lowercase()
+            .trim_start()
+            .starts_with("transfer-encoding:")
+        {
+            return Err(HttpError::App("transfer-encoding not supported".into()));
         }
         if let Some(v) = line.to_ascii_lowercase().strip_prefix("content-length:") {
             // F87: invalid CL used to become 0 and truncate the body to empty.
@@ -356,7 +370,7 @@ fn percent_decode(s: &str) -> Vec<u8> {
     let mut i = 0;
     while i < b.len() {
         if b[i] == b'%' && i + 2 < b.len() {
-            if let (Some(h), Some(l)) = (from_hex(b[i + 1]), from_hex(b[i + 2])) {
+            if let (Some(h), Some(l)) = (crate::from_hex(b[i + 1]), crate::from_hex(b[i + 2])) {
                 out.push((h << 4) | l);
                 i += 3;
                 continue;
@@ -366,39 +380,6 @@ fn percent_decode(s: &str) -> Vec<u8> {
         i += 1;
     }
     out
-}
-
-/// Form-urlencoded decode for query values (F101): `+` → space, then `%HH`.
-fn form_decode(s: &str) -> Vec<u8> {
-    let b = s.as_bytes();
-    let mut out = Vec::with_capacity(b.len());
-    let mut i = 0;
-    while i < b.len() {
-        if b[i] == b'+' {
-            out.push(b' ');
-            i += 1;
-            continue;
-        }
-        if b[i] == b'%' && i + 2 < b.len() {
-            if let (Some(h), Some(l)) = (from_hex(b[i + 1]), from_hex(b[i + 2])) {
-                out.push((h << 4) | l);
-                i += 3;
-                continue;
-            }
-        }
-        out.push(b[i]);
-        i += 1;
-    }
-    out
-}
-
-fn from_hex(c: u8) -> Option<u8> {
-    match c {
-        b'0'..=b'9' => Some(c - b'0'),
-        b'a'..=b'f' => Some(c - b'a' + 10),
-        b'A'..=b'F' => Some(c - b'A' + 10),
-        _ => None,
-    }
 }
 
 fn handle_dcs(stream: &mut TcpStream, dcs: &Arc<Mutex<Dcs>>, auth: &Option<String>) -> Result<()> {
@@ -925,6 +906,46 @@ mod tests {
         assert_eq!(
             code, 404,
             "differing Content-Length must fail closed, GET {code} {body:?}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// F104: Transfer-Encoding is unsupported. A body framed as chunked while
+    /// Content-Length is honoured (or ignored) mis-stores the payload.
+    #[test]
+    fn kv_http_transfer_encoding_rejected() {
+        let dir = temp("te");
+        let addr = bind_ephemeral();
+        let srv = KvServer::open(&dir).unwrap();
+        thread::spawn(move || {
+            let _ = srv.serve(addr);
+        });
+        thread::sleep(Duration::from_millis(100));
+        let mut stream = TcpStream::connect(addr).unwrap();
+        // Chunked body "hi" without CL — AS-IS would keep raw "2\r\nhi\r\n0\r\n\r\n".
+        stream
+            .write_all(
+                b"PUT /kv/te HTTP/1.0\r\nTransfer-Encoding: chunked\r\nHost: localhost\r\n\r\n2\r\nhi\r\n0\r\n\r\n",
+            )
+            .unwrap();
+        let _ = stream.shutdown(std::net::Shutdown::Write);
+        let mut resp = Vec::new();
+        let _ = stream.read_to_end(&mut resp);
+        let text = String::from_utf8_lossy(&resp);
+        let put_code = text
+            .lines()
+            .next()
+            .and_then(|l| l.split_whitespace().nth(1))
+            .and_then(|c| c.parse::<u16>().ok())
+            .unwrap_or(0);
+        assert_eq!(
+            put_code, 400,
+            "Transfer-Encoding must fail closed with 400, got {put_code} {text:?}"
+        );
+        let (code, body) = http_exchange(addr, "GET", "/kv/te", b"").unwrap();
+        assert_eq!(
+            code, 404,
+            "chunked body must not be stored raw, GET {code} {body:?}"
         );
         let _ = std::fs::remove_dir_all(&dir);
     }
