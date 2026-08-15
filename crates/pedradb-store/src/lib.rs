@@ -4383,8 +4383,15 @@ impl<E: Env> StoreCluster<E> {
             applied_to = rec.index;
         }
         let peer = node.ranges.get_mut(&rid).unwrap();
+        // F160 residual of F126: do not leave RAM applied ahead of durable meta.
+        // AS-IS set applied then `?` on persist fail — cursor stuck high; compact
+        // could drop log that reopen still needs for re-apply.
+        let old_applied = peer.applied;
         peer.applied = applied_to.min(end);
-        persist_applied_db(&mut node.db, rid, peer)?;
+        if let Err(e) = persist_applied_db(&mut node.db, rid, peer) {
+            peer.applied = old_applied;
+            return Err(e);
+        }
         Ok(())
     }
 
@@ -9765,6 +9772,61 @@ mod tests {
         assert!(
             err.is_err(),
             "all-replica gen persist miss must fail closed: {err:?}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// F160: applied cursor must not stick high if applied-meta persist fails (F126 class).
+    #[test]
+    fn apply_range_applied_persist_fail_does_not_advance_applied() {
+        use pedradb_sim::{FailingEnv, SeedRng};
+        let dir = temp();
+        let e1 = FailingEnv::passing();
+        let e2 = FailingEnv::passing();
+        let e3 = FailingEnv::passing();
+        let mut c = StoreCluster::open_with_envs_rng(
+            &dir,
+            3,
+            1,
+            [e1.clone(), e2.clone(), e3.clone()],
+            SeedRng::new(0xF160),
+        )
+        .unwrap();
+        c.elect_all(80).unwrap();
+        c.put(b"k", b"v0").unwrap();
+        let rid = c.locate(b"k").unwrap();
+        let nid = c.range_leader(rid).unwrap();
+        let applied0 = c.applied_index(nid, rid);
+        {
+            let p = c.nodes.get_mut(&nid).unwrap().ranges.get_mut(&rid).unwrap();
+            let idx = p.last_index() + 1;
+            let term = p.term;
+            p.log.push(LogRec {
+                index: idx,
+                term,
+                // si_gen=0: one user put, then applied-meta put (second op fails).
+                entry: RangeEntry::Put {
+                    key: b"k2".to_vec(),
+                    value: b"v2".to_vec(),
+                    si_gen: 0,
+                },
+            });
+            p.commit = idx;
+        }
+        match nid {
+            1 => e1.arm(1, true),
+            2 => e2.arm(1, true),
+            _ => e3.arm(1, true),
+        }
+        let err = c.apply_range(nid, rid);
+        assert!(
+            err.is_err(),
+            "applied-meta persist miss must fail apply: {err:?}"
+        );
+        assert_eq!(
+            c.applied_index(nid, rid),
+            applied0,
+            "AS-IS stuck applied high after failed persist_applied; must roll back"
         );
         let _ = std::fs::remove_dir_all(&dir);
     }
