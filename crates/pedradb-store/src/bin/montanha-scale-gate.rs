@@ -11,15 +11,28 @@
 //! Env:
 //!   MONTANHA_SCALE_KEYS  puts per range probe (default 8)
 //!   MONTANHA_SCALE_BATCH batch size for put_batch (default 8)
+//!   MONTANHA_WRITE_BACKPRESSURE=1  enable Pedra L0 pressure/stall defaults
 //!
 //! Exit 0 only if all checks pass; writes `scale_report.json`.
 
 #![forbid(unsafe_code)]
 
-use pedradb_store::StoreCluster;
+use pedradb_store::{StoreCluster, StoreOpenOptions};
 use std::path::PathBuf;
 use std::process;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
+
+fn store_opts() -> StoreOpenOptions {
+    let mut opts = StoreOpenOptions::default();
+    if std::env::var("MONTANHA_WRITE_BACKPRESSURE").ok().as_deref() == Some("1") {
+        opts = opts.with_write_backpressure();
+    }
+    opts
+}
+
+fn open_cluster(dir: &std::path::Path, n_nodes: u64, n_ranges: u64) -> StoreCluster {
+    StoreCluster::open_with_options(dir, n_nodes, n_ranges, store_opts()).expect("open cluster")
+}
 
 fn main() {
     let out = std::env::args()
@@ -42,15 +55,19 @@ fn main() {
         .ok()
         .and_then(|s| s.parse().ok())
         .unwrap_or(8);
+    let write_bp = std::env::var("MONTANHA_WRITE_BACKPRESSURE").ok().as_deref() == Some("1");
 
     let mut failures: Vec<String> = Vec::new();
     let mut notes: Vec<String> = Vec::new();
+    if write_bp {
+        notes.push("write_backpressure=1".into());
+    }
 
     // ── Check 1: leader diversity @ 4 ranges ─────────────────────────────
     let dir4 = out.join("db-r4");
     let _ = std::fs::remove_dir_all(&dir4);
     std::fs::create_dir_all(&dir4).unwrap();
-    let mut c4 = StoreCluster::open(&dir4, 3, 4).expect("open 4-range");
+    let mut c4 = open_cluster(&dir4, 3, 4);
     c4.elect_all(200).expect("elect 4-range");
     let leaders = c4.leader_nodes();
     let n_leaders = leaders.len();
@@ -123,7 +140,7 @@ fn main() {
     let dir1 = out.join("db-r1");
     let _ = std::fs::remove_dir_all(&dir1);
     std::fs::create_dir_all(&dir1).unwrap();
-    let mut c1 = StoreCluster::open(&dir1, 3, 1).expect("open 1-range");
+    let mut c1 = open_cluster(&dir1, 3, 1);
     c1.elect_all(120).expect("elect 1-range");
     let t1 = Instant::now();
     let mut ok1 = 0u64;
@@ -140,6 +157,12 @@ fn main() {
         notes.push(format!("single_range_put keys_per_s={kps1:.3}"));
     }
 
+    // Pedra L0 / stall counters after load (ops honesty).
+    let status_r4 = c4.status_text();
+    let status_r1 = c1.status_text();
+    notes.push(format!("status_r4={status_r4}"));
+    notes.push(format!("status_r1={status_r1}"));
+
     drop(c4);
     drop(c1);
 
@@ -148,6 +171,7 @@ fn main() {
         r#"{{
   "gate": "rfc0021-0025-scale-option-a-v0",
   "pass": {pass},
+  "write_backpressure": {write_bp},
   "leader_nodes_r4": {n_leaders},
   "multi_range_puts_ok": {mr_ok},
   "multi_range_keys_per_s": {mr_kps:.3},
@@ -155,7 +179,7 @@ fn main() {
   "put_batch_sz": {batch_sz},
   "notes": {notes:?},
   "failures": {failures:?},
-  "note": "in-process; TCP multi-client remains montanha-fdb-bench suite scale"
+  "note": "in-process; TCP multi-client remains montanha-fdb-bench suite scale; MONTANHA_WRITE_BACKPRESSURE=1 opts into Pedra L0 admission"
 }}
 "#
     );
