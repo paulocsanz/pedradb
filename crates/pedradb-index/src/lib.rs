@@ -11,8 +11,14 @@ use std::path::Path;
 
 /// Primary key prefix: `row/{id}`
 pub const ROW_PREFIX: &[u8] = b"row/";
-/// Secondary index: `idx/{field}/{value}` → row id
+/// Secondary index namespace (F65).
 pub const IDX_PREFIX: &[u8] = b"idx/";
+
+fn push_len_pref(buf: &mut Vec<u8>, part: &[u8]) {
+    let n = u32::try_from(part.len()).expect("component len fits u32");
+    buf.extend_from_slice(&n.to_be_bytes());
+    buf.extend_from_slice(part);
+}
 
 /// Build primary key for row id.
 #[must_use]
@@ -22,13 +28,16 @@ pub fn row_key(id: impl AsRef<[u8]>) -> Vec<u8> {
     k
 }
 
-/// Build secondary index key `idx/{field}/{value}`.
+/// Build secondary index key for `(field, value)` → row id (F65).
+///
+/// - Slash join: `idx/name/a/b` equaled both `(name, a/b)` and `(name/a, b)`.
+/// - `0x00` join: `(a, b\\0c)` equaled `(a\\0b, c)`.
+/// Length-prefix each component after `idx/`.
 #[must_use]
 pub fn idx_key(field: impl AsRef<[u8]>, value: impl AsRef<[u8]>) -> Vec<u8> {
     let mut k = IDX_PREFIX.to_vec();
-    k.extend_from_slice(field.as_ref());
-    k.push(b'/');
-    k.extend_from_slice(value.as_ref());
+    push_len_pref(&mut k, field.as_ref());
+    push_len_pref(&mut k, value.as_ref());
     k
 }
 
@@ -223,6 +232,39 @@ mod tests {
         let d = std::env::temp_dir().join(format!("pedra-index-{n}-{i}"));
         let _ = fs::remove_dir_all(&d);
         d
+    }
+
+    #[test]
+    fn idx_key_is_injective_when_components_contain_slash() {
+        assert_ne!(
+            idx_key(b"name", b"a/b"),
+            idx_key(b"name/a", b"b"),
+            "idx/field/value slash join collided"
+        );
+        assert_ne!(idx_key(b"name", b"a"), idx_key(b"nam", b"e/a"));
+        // 0x00 join also collides without length-prefix.
+        assert_ne!(
+            idx_key(b"a", b"b\x00c"),
+            idx_key(b"a\x00b", b"c"),
+            "idx field\\0value NUL join collided"
+        );
+        let dir = temp();
+        let mut db = Db::open(&dir).unwrap();
+        put_row_with_indexes(&mut db, b"1", b"body", b"a/b", b"e1").unwrap();
+        put_row_with_indexes(&mut db, b"2", b"body2", b"x", b"e2").unwrap();
+        assert_eq!(
+            db.get(&idx_key(b"name", b"a/b")).as_deref(),
+            Some(b"1".as_ref()),
+            "name a/b must stay id 1"
+        );
+        // A second row whose slash-joined key used to overwrite the first.
+        db.put(&idx_key(b"name/a", b"b"), b"2").unwrap();
+        assert_eq!(
+            db.get(&idx_key(b"name", b"a/b")).as_deref(),
+            Some(b"1".as_ref()),
+            "writing name/a + b must not clobber name + a/b"
+        );
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
