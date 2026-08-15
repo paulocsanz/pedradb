@@ -296,17 +296,23 @@ impl<C: Clock, E: Env> Dcs<C, E> {
         Ok(this)
     }
 
-    /// Global cluster revision (0 if empty).
+    /// Load durable cluster revision. Missing → 0; present but short/corrupt → Err (F113).
+    fn load_revision(&self) -> Result<u64> {
+        match self.db.get(REV_KEY) {
+            None => Ok(0),
+            Some(b) => decode_u64(&b),
+        }
+    }
+
+    /// Global cluster revision (0 if empty or unreadable). Mutating paths use
+    /// [`Self::load_revision`] so a torn `d/rev` cannot reuse revision 1 (F113).
     #[must_use]
     pub fn revision(&self) -> u64 {
-        self.db
-            .get(REV_KEY)
-            .and_then(|b| decode_u64(&b).ok())
-            .unwrap_or(0)
+        self.load_revision().unwrap_or(0)
     }
 
     fn bump_revision(&mut self) -> Result<u64> {
-        let r = self.revision() + 1;
+        let r = self.load_revision()? + 1;
         self.db.put(REV_KEY, encode_u64(r))?;
         Ok(r)
     }
@@ -840,6 +846,57 @@ mod tests {
             assert_eq!(dcs.get(b"/k2").unwrap().value, b"v2");
             dcs.close().unwrap();
         }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// F113: garbage `d/rev` parsed as 0 and reused revision 1.
+    #[test]
+    fn put_rejects_truncated_cluster_revision() {
+        let dir = temp_dir("rev-corrupt");
+        let mut dcs = Dcs::open(&dir).unwrap();
+        let r1 = dcs.put(b"a", b"1", 0).unwrap();
+        assert_eq!(r1, 1);
+        dcs.db.put(REV_KEY, b"xx").unwrap();
+        let err = dcs.put(b"b", b"2", 0);
+        assert!(
+            err.is_err(),
+            "corrupt cluster rev must fail closed, not reuse 1: {err:?}"
+        );
+        assert_eq!(
+            dcs.get(b"a").unwrap().mod_revision,
+            1,
+            "first key must keep its revision"
+        );
+        assert!(
+            dcs.get(b"b").is_none(),
+            "second put must not land under a reused revision"
+        );
+        dcs.close().unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// F114: corrupt meta made get() miss and create-if-absent overwrite the value.
+    #[test]
+    fn create_rejects_undecodable_meta() {
+        let dir = temp_dir("meta-corrupt");
+        let mut dcs = Dcs::open(&dir).unwrap();
+        dcs.put(b"a", b"keep", 0).unwrap();
+        dcs.db.put(&meta_key(b"a"), b"xx").unwrap();
+        assert!(
+            dcs.get(b"a").is_none(),
+            "get stays Option: corrupt meta is not a live binding"
+        );
+        let err = dcs.create(b"a", b"steal", 0);
+        assert!(
+            err.is_err(),
+            "create must not treat corrupt meta as absent: {err:?}"
+        );
+        assert_eq!(
+            dcs.db.get(&kv_key(b"a")).as_deref(),
+            Some(b"keep".as_ref()),
+            "raw value must survive failed create"
+        );
+        dcs.close().unwrap();
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

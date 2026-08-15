@@ -193,10 +193,12 @@ fn get_kv_at<E: Env>(db: &Db<E>, key: &[u8], now_ms: u64) -> Option<KeyValue> {
     }
 }
 
-fn revision<E: Env>(db: &Db<E>) -> u64 {
-    db.get(REV_KEY)
-        .and_then(|b| decode_u64(&b).ok())
-        .unwrap_or(0)
+/// Missing `d/rev` → 0; present but unreadable → Err (F113, do not reuse rev 1).
+fn revision<E: Env>(db: &Db<E>) -> Result<u64> {
+    match db.get(REV_KEY) {
+        None => Ok(0),
+        Some(b) => decode_u64(&b),
+    }
 }
 
 /// Read-only precondition check (leader, before propose).
@@ -298,7 +300,7 @@ pub fn apply_dcs_command<E: Env>(db: &mut Db<E>, cmd: &DcsCommand) -> Result<u64
                 }
             } else {
                 // Key missing on apply — no-op revision.
-                return Ok(revision(db));
+                return revision(db);
             }
             let prev = get_kv(db, key);
             let create_hint = prev.map(|p| p.create_revision);
@@ -306,9 +308,9 @@ pub fn apply_dcs_command<E: Env>(db: &mut Db<E>, cmd: &DcsCommand) -> Result<u64
         }
         DcsCommand::Delete { key } => {
             if get_kv(db, key).is_none() {
-                return Ok(revision(db));
+                return revision(db);
             }
-            let rev = revision(db) + 1;
+            let rev = revision(db)? + 1;
             let mut tx = db.begin();
             tx.put(REV_KEY, encode_u64(rev))?;
             tx.delete(kv_key(key))?;
@@ -326,7 +328,7 @@ fn put_new<E: Env>(
     lease: u64,
     create_hint: Option<u64>,
 ) -> Result<u64> {
-    let rev = revision(db) + 1;
+    let rev = revision(db)? + 1;
     let create = create_hint.unwrap_or(rev);
     let mut tx = db.begin();
     tx.put(REV_KEY, encode_u64(rev))?;
@@ -422,6 +424,33 @@ mod tests {
             dcs_get_at(&db, b"lock", 1_001).unwrap().value,
             b"holder-b"
         );
+        db.close().unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// F113: garbage `d/rev` must not reuse revision 1 on apply.
+    #[test]
+    fn apply_rejects_truncated_cluster_revision() {
+        let (dir, mut db) = temp_db();
+        let cmd = DcsCommand::Put {
+            key: b"a".to_vec(),
+            value: b"1".to_vec(),
+            lease: 0,
+        };
+        assert_eq!(apply_dcs_command(&mut db, &cmd).unwrap(), 1);
+        db.put(REV_KEY, b"xx").unwrap();
+        let cmd2 = DcsCommand::Put {
+            key: b"b".to_vec(),
+            value: b"2".to_vec(),
+            lease: 0,
+        };
+        let err = apply_dcs_command(&mut db, &cmd2);
+        assert!(
+            err.is_err(),
+            "corrupt cluster rev must fail closed on apply: {err:?}"
+        );
+        assert_eq!(dcs_get(&db, b"a").unwrap().mod_revision, 1);
+        assert!(dcs_get(&db, b"b").is_none());
         db.close().unwrap();
         let _ = std::fs::remove_dir_all(&dir);
     }
