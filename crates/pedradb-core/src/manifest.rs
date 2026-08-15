@@ -26,8 +26,10 @@ const MAGIC: &[u8; 4] = b"PDBM";
 const FORMAT_VERSION_V1: u32 = 1;
 /// Levels only (no vlog flag).
 const FORMAT_VERSION_V2: u32 = 2;
-/// Current: levels + `vlog_use_new` (RFC-0016 crash-safe value-log GC).
-const FORMAT_VERSION: u32 = 3;
+/// Levels + `vlog_use_new` (RFC-0016 crash-safe value-log GC).
+const FORMAT_VERSION_V3: u32 = 3;
+/// Current: v3 + `earliest_readable_seq` (open-items §2.1 watermark across reopen).
+const FORMAT_VERSION: u32 = 4;
 
 /// Live SST set + allocator cursor recovered from (or written to) disk.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -42,6 +44,8 @@ pub struct VersionSet {
     pub manifest_file_num: u64,
     /// When true, open must use `VALUES.vlog.new` (SST pointers already remapped).
     pub vlog_use_new: bool,
+    /// Version-GC watermark: snapshots with `seq < this` are too old after reopen.
+    pub earliest_readable_seq: u64,
 }
 
 impl VersionSet {
@@ -54,6 +58,7 @@ impl VersionSet {
             sst_levels: Vec::new(),
             manifest_file_num: 0,
             vlog_use_new: false,
+            earliest_readable_seq: 0,
         }
     }
 
@@ -80,11 +85,12 @@ impl VersionSet {
 
 /// Encode a version set to bytes (payload + trailing CRC32C of the payload).
 ///
-/// Writes format v3: each live file is `(file_num u64, level u32)`, then `vlog_use_new u8`.
+/// Writes format **v4**: each live file is `(file_num u64, level u32)`, then
+/// `vlog_use_new u8`, then `earliest_readable_seq u64`.
 #[must_use]
 pub fn encode(vs: &VersionSet) -> Vec<u8> {
     let n = vs.sst_file_nums.len();
-    let mut buf = Vec::with_capacity(4 + 4 + 8 + 8 + 4 + n * 12 + 1 + 4);
+    let mut buf = Vec::with_capacity(4 + 4 + 8 + 8 + 4 + n * 12 + 1 + 8 + 4);
     buf.extend_from_slice(MAGIC);
     buf.extend_from_slice(&FORMAT_VERSION.to_le_bytes());
     buf.extend_from_slice(&vs.next_file_num.to_le_bytes());
@@ -98,6 +104,7 @@ pub fn encode(vs: &VersionSet) -> Vec<u8> {
         buf.extend_from_slice(&level.to_le_bytes());
     }
     buf.push(u8::from(vs.vlog_use_new));
+    buf.extend_from_slice(&vs.earliest_readable_seq.to_le_bytes());
     let crc = crc32c::crc32c(&buf);
     buf.extend_from_slice(&crc.to_le_bytes());
     buf
@@ -129,12 +136,7 @@ pub fn decode(buf: &[u8]) -> Result<VersionSet> {
     }
     // Trailing CRC32C over the payload (F5: silent empty inventory on bit-flip of `n`).
     let (payload, crc_bytes) = buf.split_at(buf.len() - 4);
-    let stored = u32::from_le_bytes([
-        crc_bytes[0],
-        crc_bytes[1],
-        crc_bytes[2],
-        crc_bytes[3],
-    ]);
+    let stored = u32::from_le_bytes([crc_bytes[0], crc_bytes[1], crc_bytes[2], crc_bytes[3]]);
     let computed = crc32c::crc32c(payload);
     if stored != computed {
         return Err(CoreError::CorruptManifest(format!(
@@ -160,7 +162,9 @@ pub fn decode(buf: &[u8]) -> Result<VersionSet> {
                 return Err(CoreError::CorruptManifest("truncated file list".into()));
             }
             if payload.len() != need {
-                return Err(CoreError::CorruptManifest("trailing garbage before CRC".into()));
+                return Err(CoreError::CorruptManifest(
+                    "trailing garbage before CRC".into(),
+                ));
             }
             let mut sst_file_nums = Vec::with_capacity(n);
             for i in 0..n {
@@ -172,6 +176,7 @@ pub fn decode(buf: &[u8]) -> Result<VersionSet> {
                 sst_file_nums,
                 manifest_file_num,
                 vlog_use_new: false,
+                earliest_readable_seq: 0,
             })
         }
         FORMAT_VERSION_V2 => {
@@ -180,7 +185,9 @@ pub fn decode(buf: &[u8]) -> Result<VersionSet> {
                 return Err(CoreError::CorruptManifest("truncated file list".into()));
             }
             if payload.len() != need {
-                return Err(CoreError::CorruptManifest("trailing garbage before CRC".into()));
+                return Err(CoreError::CorruptManifest(
+                    "trailing garbage before CRC".into(),
+                ));
             }
             let mut sst_file_nums = Vec::with_capacity(n);
             let mut sst_levels = Vec::with_capacity(n);
@@ -195,15 +202,18 @@ pub fn decode(buf: &[u8]) -> Result<VersionSet> {
                 sst_levels,
                 manifest_file_num,
                 vlog_use_new: false,
+                earliest_readable_seq: 0,
             })
         }
-        FORMAT_VERSION => {
+        FORMAT_VERSION_V3 => {
             let need = 28 + n * 12 + 1;
             if payload.len() < need {
                 return Err(CoreError::CorruptManifest("truncated file list".into()));
             }
             if payload.len() != need {
-                return Err(CoreError::CorruptManifest("trailing garbage before CRC".into()));
+                return Err(CoreError::CorruptManifest(
+                    "trailing garbage before CRC".into(),
+                ));
             }
             let mut sst_file_nums = Vec::with_capacity(n);
             let mut sst_levels = Vec::with_capacity(n);
@@ -219,6 +229,36 @@ pub fn decode(buf: &[u8]) -> Result<VersionSet> {
                 sst_levels,
                 manifest_file_num,
                 vlog_use_new,
+                earliest_readable_seq: 0,
+            })
+        }
+        FORMAT_VERSION => {
+            let need = 28 + n * 12 + 1 + 8;
+            if payload.len() < need {
+                return Err(CoreError::CorruptManifest("truncated file list".into()));
+            }
+            if payload.len() != need {
+                return Err(CoreError::CorruptManifest(
+                    "trailing garbage before CRC".into(),
+                ));
+            }
+            let mut sst_file_nums = Vec::with_capacity(n);
+            let mut sst_levels = Vec::with_capacity(n);
+            for i in 0..n {
+                let base = 28 + i * 12;
+                sst_file_nums.push(le_u64(payload, base)?);
+                sst_levels.push(le_u32(payload, base + 8)?);
+            }
+            let flag_off = 28 + n * 12;
+            let vlog_use_new = payload[flag_off] != 0;
+            let earliest_readable_seq = le_u64(payload, flag_off + 1)?;
+            Ok(VersionSet {
+                next_file_num,
+                sst_file_nums,
+                sst_levels,
+                manifest_file_num,
+                vlog_use_new,
+                earliest_readable_seq,
             })
         }
         other => Err(CoreError::CorruptManifest(format!(
@@ -419,9 +459,30 @@ mod tests {
             sst_levels: vec![0, 1, 1],
             manifest_file_num: 2,
             vlog_use_new: true,
+            earliest_readable_seq: 42,
         };
         let out = decode(&encode(&vs)).unwrap();
         assert_eq!(out, vs);
+    }
+
+    #[test]
+    fn decode_v3_legacy_watermark_zero() {
+        // Hand-build v3: levels + vlog flag, no earliest_readable.
+        let mut body = Vec::new();
+        body.extend_from_slice(MAGIC);
+        body.extend_from_slice(&FORMAT_VERSION_V3.to_le_bytes());
+        body.extend_from_slice(&4u64.to_le_bytes());
+        body.extend_from_slice(&1u64.to_le_bytes());
+        body.extend_from_slice(&1u32.to_le_bytes());
+        body.extend_from_slice(&1u64.to_le_bytes());
+        body.extend_from_slice(&0u32.to_le_bytes());
+        body.push(1u8); // vlog_use_new
+        let crc = crc32c::crc32c(&body);
+        body.extend_from_slice(&crc.to_le_bytes());
+        let vs = decode(&body).unwrap();
+        assert_eq!(vs.sst_file_nums, vec![1]);
+        assert!(vs.vlog_use_new);
+        assert_eq!(vs.earliest_readable_seq, 0);
     }
 
     #[test]
@@ -451,6 +512,7 @@ mod tests {
             sst_levels: vec![0],
             manifest_file_num: 1,
             vlog_use_new: false,
+            earliest_readable_seq: 0,
         };
         // Build v2 payload manually (no flag byte).
         let mut body = Vec::new();
@@ -483,6 +545,7 @@ mod tests {
             sst_levels: vec![0, 1],
             manifest_file_num: 0,
             vlog_use_new: false,
+            earliest_readable_seq: 9,
         };
         install_next(&env, &dir, &mut vs, true).unwrap();
         assert_eq!(vs.manifest_file_num, 1);
@@ -492,6 +555,7 @@ mod tests {
         assert_eq!(loaded.sst_levels, vec![0, 1]);
         assert_eq!(loaded.next_file_num, 4);
         assert!(!loaded.vlog_use_new);
+        assert_eq!(loaded.earliest_readable_seq, 9);
 
         gc_orphan_ssts(&env, &dir, &loaded.sst_file_nums).unwrap();
         assert!(dir.join("000001.sst").exists());

@@ -90,6 +90,7 @@ slice can be implemented.
   `get_at` / `multi_get_at` / TX·OCC `get` return
   [`CoreError::SnapshotTooOld`](../crates/pedradb-core/src/error.rs) fail-closed
   (Montanha already maps store-level too-old to FDB `transaction_too_old`).
+  **Durable:** MANIFEST format **v4** stores the watermark; reopen restores it.
 
 **Opt-in auto path:** `set_auto_reclaim(true)` makes threshold auto-compact use
 snapshot-safe reclaim (pin floor or last seq) and advance the too-old watermark.

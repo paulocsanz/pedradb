@@ -185,7 +185,7 @@ Full contract: rustdoc on `db` module. Audit fix backlog: [RFC-0015](rfc/0015-au
 | `Db::scan` / `scan_at` | **Preferred** streaming merge for large ranges (bound memory) |
 | `Db::compact` / `compact_with` / `compact_reclaim` | Merge SSTs (tmp→rename); optional version GC; pin-aware reclaim |
 | `Db::pin_snapshot` / `release_snapshot_pin` | Register/release read pin so `compact_reclaim` keeps history |
-| `get_at` / `range_at` / `try_scan_at` / `SnapshotTooOld` | History-dropping GC raises watermark; old snaps fail closed (scan panic vs try) |
+| `get_at` / `range_at` / `try_scan_at` / `SnapshotTooOld` | History-dropping GC raises watermark (MANIFEST v4 durable); old snaps fail closed |
 | TX·OCC commit | Also refuse `SnapshotTooOld` if reclaim advanced past the TX snapshot |
 | `set_auto_reclaim(true)` | Opt-in: auto-compact piggybacks pin-aware reclaim (default off / F20) |
 | `Db::create_checkpoint(dest)` | Point-in-time copy (flush + file set); openable as a DB |

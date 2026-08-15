@@ -551,8 +551,15 @@ impl<E: Env> Db<E> {
 
         let table_cache = TableCache::new(64);
         let block_cache = BlockCache::new(256);
-        let (ssts, sst_levels, next_file_num, manifest_file_num, vlog_use_new, mut max_seq) =
-            recover_ssts(&env, &dir, opts.sync, &table_cache)?;
+        let (
+            ssts,
+            sst_levels,
+            next_file_num,
+            manifest_file_num,
+            vlog_use_new,
+            mut max_seq,
+            earliest_readable_seq,
+        ) = recover_ssts(&env, &dir, opts.sync, &table_cache)?;
 
         let wal_path = dir.join(WAL_FILE_NAME);
         let mut mem = MemTable::new();
@@ -604,7 +611,13 @@ impl<E: Env> Db<E> {
             Wal::create_on(&env, &wal_path)?
         };
 
-        let next_seq = max_seq.saturating_add(1).max(1);
+        // Watermark may exceed max sequence still present in SSTs (e.g. latest_only
+        // dropped a high-seq tombstone). Keep last_sequence ≥ earliest so current
+        // gets never look "too old" after reopen.
+        let next_seq = max_seq
+            .max(earliest_readable_seq)
+            .saturating_add(1)
+            .max(1);
         if next_seq > MAX_SEQUENCE_NUMBER {
             return Err(CoreError::Internal(
                 "sequence number space exhausted".into(),
@@ -664,7 +677,7 @@ impl<E: Env> Db<E> {
             auto_reclaim: false,
             snapshot_pins: std::collections::BTreeMap::new(),
             next_snapshot_pin_id: 1,
-            earliest_readable_seq: 0,
+            earliest_readable_seq,
             wal_sync_count: 0,
             bytes_ingested: 0,
             bytes_written_wal: 0,
@@ -1859,6 +1872,8 @@ impl<E: Env> Db<E> {
         if let Ok(len) = self.env.metadata_len(&final_path) {
             self.bytes_written_sst = self.bytes_written_sst.saturating_add(len);
         }
+        // Watermark must be raised before MANIFEST so reopen recovers it.
+        self.note_version_gc_watermark(CompactOptions::latest_only().gc);
         self.persist_manifest()?;
 
         for path in old_paths {
@@ -1867,7 +1882,6 @@ impl<E: Env> Db<E> {
             }
         }
         self.compact_count = self.compact_count.saturating_add(1);
-        self.note_version_gc_watermark(CompactOptions::latest_only().gc);
         // latest_only rewrite — same auto-blob path as leveled compact.
         self.run_auto_blob_gc_best_effort();
         Ok(())
@@ -1979,6 +1993,10 @@ impl<E: Env> Db<E> {
         if let Ok(len) = self.env.metadata_len(&final_path) {
             self.bytes_written_sst = self.bytes_written_sst.saturating_add(len);
         }
+        // Raise GC watermark before MANIFEST install (durable across reopen).
+        if options.gc.requests_gc() {
+            self.note_version_gc_watermark(options.gc);
+        }
         self.persist_manifest()?;
 
         for path in old_paths {
@@ -1987,9 +2005,6 @@ impl<E: Env> Db<E> {
             }
         }
         self.compact_count = self.compact_count.saturating_add(1);
-        if options.gc.requests_gc() {
-            self.note_version_gc_watermark(options.gc);
-        }
         if options.gc.keep_only_latest || options.gc.oldest_snapshot.is_some() {
             // Dead vlog pointers may have been dropped — maybe reclaim sealed blobs.
             self.run_auto_blob_gc_best_effort();
@@ -3463,6 +3478,7 @@ impl<E: Env> Db<E> {
             sst_levels: self.sst_levels.clone(),
             manifest_file_num: self.manifest_file_num,
             vlog_use_new: self.vlog_use_new,
+            earliest_readable_seq: self.earliest_readable_seq,
         };
         vs.normalize_levels();
         manifest::install_next(&self.env, &self.dir, &mut vs, self.sync)?;
@@ -3608,10 +3624,19 @@ struct VlogGcPrepared {
 
 /// Recover SST tables from MANIFEST when present, else directory scan (legacy).
 ///
-/// Recovered SST inventory: tables, levels, next file num, manifest num, `vlog_use_new`, max seq.
-type RecoveredSsts = (Vec<SstTable>, Vec<u32>, u64, u64, bool, SequenceNumber);
+/// Recovered SST inventory: tables, levels, next file num, manifest num,
+/// `vlog_use_new`, max seq, earliest_readable_seq.
+type RecoveredSsts = (
+    Vec<SstTable>,
+    Vec<u32>,
+    u64,
+    u64,
+    bool,
+    SequenceNumber,
+    SequenceNumber,
+);
 
-/// Returns `(tables, levels, next_file_num, manifest_file_num, vlog_use_new, max_sequence)`.
+/// Returns `(tables, levels, next_file_num, manifest_file_num, vlog_use_new, max_sequence, earliest_readable)`.
 fn recover_ssts<E: Env>(
     env: &E,
     dir: &Path,
@@ -3644,6 +3669,7 @@ fn recover_ssts<E: Env>(
             vs.manifest_file_num,
             vs.vlog_use_new,
             max_seq,
+            vs.earliest_readable_seq,
         ));
     }
 
@@ -3664,6 +3690,7 @@ fn recover_ssts<E: Env>(
         sst_levels: levels.clone(),
         manifest_file_num: 0,
         vlog_use_new: false,
+        earliest_readable_seq: 0,
     };
     // Always install so subsequent opens use inventory (even if empty).
     manifest::install_next(env, dir, &mut vs, sync)?;
@@ -3674,6 +3701,7 @@ fn recover_ssts<E: Env>(
         vs.manifest_file_num,
         false,
         max_seq,
+        0,
     ))
 }
 
@@ -5283,6 +5311,7 @@ mod tests {
         );
         db.compact_with(CompactOptions::latest_only()).unwrap();
         assert!(db.earliest_readable_sequence() > 0);
+        let floor = db.earliest_readable_sequence();
         assert_eq!(db.get(b"k").as_deref(), Some(b"new".as_ref()));
         let err = db.get_at(snap, b"k").unwrap_err();
         assert!(
@@ -5291,7 +5320,7 @@ mod tests {
                 CoreError::SnapshotTooOld {
                     requested,
                     earliest
-                } if requested == old_seq && earliest == db.earliest_readable_sequence()
+                } if requested == old_seq && earliest == floor
             ),
             "got {err:?}"
         );
@@ -5315,6 +5344,21 @@ mod tests {
         let live = db.range(Bound::Unbounded, Bound::Unbounded);
         assert_eq!(live.len(), 1);
         assert_eq!(live[0].1.as_ref(), b"new");
+        db.close().unwrap();
+
+        // MANIFEST v4: watermark survives reopen.
+        let db = Db::open(&dir).unwrap();
+        assert_eq!(
+            db.earliest_readable_sequence(),
+            floor,
+            "earliest_readable must load from MANIFEST"
+        );
+        let err = db.get_at(snap, b"k").unwrap_err();
+        assert!(
+            matches!(err, CoreError::SnapshotTooOld { .. }),
+            "reopen still too-old: {err:?}"
+        );
+        assert_eq!(db.get(b"k").as_deref(), Some(b"new".as_ref()));
         db.close().unwrap();
         let _ = fs::remove_dir_all(&dir);
     }
