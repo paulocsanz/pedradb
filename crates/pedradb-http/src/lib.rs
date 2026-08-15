@@ -23,6 +23,7 @@
 
 mod auth_kernel;
 mod cl_kernel;
+mod fail_closed;
 mod form_kernel;
 mod path_kernel;
 
@@ -33,6 +34,11 @@ pub use auth_kernel::{
 pub use cl_kernel::{
     content_length_repeat_ok, content_length_repeat_ok_as_is, invalid_cl_as_zero,
     invalid_cl_as_zero_as_is, keep_body_without_cl, keep_body_without_cl_as_is,
+};
+pub use fail_closed::{
+    parse_error_status, parse_error_writes_status, parse_error_writes_status_as_is,
+    present_bad_int_is_error, present_bad_int_is_error_as_is, reject_transfer_encoding,
+    reject_transfer_encoding_as_is,
 };
 pub use form_kernel::{
     form_decode, form_decode_as_is, form_plus_byte, form_plus_byte_as_is, from_hex,
@@ -106,6 +112,7 @@ fn read_req(stream: &mut TcpStream) -> Result<(String, String, Vec<u8>, Vec<(Str
             .to_ascii_lowercase()
             .trim_start()
             .starts_with("transfer-encoding:")
+            && reject_transfer_encoding()
         {
             return Err(HttpError::App("transfer-encoding not supported".into()));
         }
@@ -251,8 +258,10 @@ fn handle_kv(
     let (method, path, body, headers) = match read_req(stream) {
         Ok(r) => r,
         Err(e) => {
-            let msg = e.to_string();
-            let _ = write_resp(stream, 400, "Bad Request", msg.as_bytes());
+            if parse_error_writes_status() {
+                let msg = e.to_string();
+                let _ = write_resp(stream, parse_error_status(), "Bad Request", msg.as_bytes());
+            }
             return Err(e);
         }
     };
@@ -339,13 +348,25 @@ impl DcsServer {
     }
 }
 
+/// Parse an optional query integer. Missing → `None`. Present but unparseable → error (F105).
+fn query_u64(path: &str, key: &str) -> Result<Option<u64>> {
+    match query_param(path, key) {
+        None => Ok(None),
+        Some(s) => match s.parse() {
+            Ok(n) => Ok(Some(n)),
+            Err(_) if !present_bad_int_is_error() => Ok(None),
+            Err(_) => Err(HttpError::App(format!("bad {key}"))),
+        },
+    }
+}
+
 fn query_param(path: &str, key: &str) -> Option<String> {
     let q = path.split_once('?')?.1;
     for part in q.split('&') {
         if let Some((k, v)) = part.split_once('=') {
-            if k == key {
+            // F106: names were compared raw; `?%6Bey=` missed `key`.
+            if form_decode(k) == key.as_bytes() {
                 // F101: form-urlencoded — `+` is space *before* `%HH`.
-                // `%2B` remains literal `+` (form_decode handles order).
                 return Some(String::from_utf8_lossy(&form_decode(v)).into_owned());
             }
         }
@@ -387,8 +408,10 @@ fn handle_dcs(stream: &mut TcpStream, dcs: &Arc<Mutex<Dcs>>, auth: &Option<Strin
     let (method, path, body, headers) = match read_req(stream) {
         Ok(r) => r,
         Err(e) => {
-            let msg = e.to_string();
-            let _ = write_resp(stream, 400, "Bad Request", msg.as_bytes());
+            if parse_error_writes_status() {
+                let msg = e.to_string();
+                let _ = write_resp(stream, parse_error_status(), "Bad Request", msg.as_bytes());
+            }
             return Err(e);
         }
     };
@@ -414,9 +437,13 @@ fn handle_dcs(stream: &mut TcpStream, dcs: &Arc<Mutex<Dcs>>, auth: &Option<Strin
                 }
             }
             "PUT" => {
-                let rev: u64 = query_param(&path, "rev")
-                    .and_then(|s| s.parse().ok())
-                    .unwrap_or(0);
+                let rev = match query_u64(&path, "rev") {
+                    Ok(n) => n.unwrap_or(0),
+                    Err(e) => {
+                        write_resp(stream, 400, "Bad Request", e.to_string().as_bytes())?;
+                        return Ok(());
+                    }
+                };
                 let mut g = dcs.lock().map_err(|e| HttpError::App(e.to_string()))?;
                 match g.cas(&key, &body, rev, 0) {
                     Ok(new_rev) => {
@@ -430,9 +457,13 @@ fn handle_dcs(stream: &mut TcpStream, dcs: &Arc<Mutex<Dcs>>, auth: &Option<Strin
         return Ok(());
     }
     if po == "/dcs/lease" && method == "POST" {
-        let ttl_ms: u64 = query_param(&path, "ttl_ms")
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(30_000);
+        let ttl_ms = match query_u64(&path, "ttl_ms") {
+            Ok(n) => n.unwrap_or(30_000),
+            Err(e) => {
+                write_resp(stream, 400, "Bad Request", e.to_string().as_bytes())?;
+                return Ok(());
+            }
+        };
         let mut g = dcs.lock().map_err(|e| HttpError::App(e.to_string()))?;
         let id = g.grant_lease(Duration::from_millis(ttl_ms));
         write_resp(stream, 200, "OK", format!("{id}\n").as_bytes())?;
@@ -441,9 +472,13 @@ fn handle_dcs(stream: &mut TcpStream, dcs: &Arc<Mutex<Dcs>>, auth: &Option<Strin
     if po == "/dcs/leader" && method == "POST" {
         let key = query_param(&path, "key").unwrap_or_else(|| "/leader".into());
         let holder = query_param(&path, "holder").unwrap_or_else(|| "node".into());
-        let ttl_ms: u64 = query_param(&path, "ttl_ms")
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(30_000);
+        let ttl_ms = match query_u64(&path, "ttl_ms") {
+            Ok(n) => n.unwrap_or(30_000),
+            Err(e) => {
+                write_resp(stream, 400, "Bad Request", e.to_string().as_bytes())?;
+                return Ok(());
+            }
+        };
         let mut g = dcs.lock().map_err(|e| HttpError::App(e.to_string()))?;
         match g.try_acquire_leader(
             key.as_bytes(),
@@ -465,12 +500,20 @@ fn handle_dcs(stream: &mut TcpStream, dcs: &Arc<Mutex<Dcs>>, auth: &Option<Strin
     if po == "/dcs/renew" && method == "POST" {
         let key = query_param(&path, "key").unwrap_or_else(|| "/leader".into());
         let holder = query_param(&path, "holder").unwrap_or_else(|| "node".into());
-        let lease: u64 = query_param(&path, "lease")
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(0);
-        let rev: u64 = query_param(&path, "rev")
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(0);
+        let lease = match query_u64(&path, "lease") {
+            Ok(n) => n.unwrap_or(0),
+            Err(e) => {
+                write_resp(stream, 400, "Bad Request", e.to_string().as_bytes())?;
+                return Ok(());
+            }
+        };
+        let rev = match query_u64(&path, "rev") {
+            Ok(n) => n.unwrap_or(0),
+            Err(e) => {
+                write_resp(stream, 400, "Bad Request", e.to_string().as_bytes())?;
+                return Ok(());
+            }
+        };
         let mut g = dcs.lock().map_err(|e| HttpError::App(e.to_string()))?;
         match g.renew_leader(key.as_bytes(), holder.as_bytes(), lease, rev) {
             Ok(new_rev) => write_resp(stream, 200, "OK", format!("{new_rev}\n").as_bytes())?,
@@ -689,6 +732,70 @@ mod tests {
         assert_eq!(c3, 200, "{b3:?}");
         let (c4, _) = http_exchange(addr, "GET", "/dcs/kv/plus%2Bsign", b"").unwrap();
         assert_eq!(c4, 200, "%2B must stay literal plus, not become space");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// F106: query *names* were not form-decoded. `?%6Bey=lock` did not match
+    /// `key`, so acquire used the default `/leader` and GET `/dcs/kv/lock` 404'd.
+    #[test]
+    fn dcs_http_query_name_percent_decoded() {
+        let dir = temp("dcs-qname");
+        let addr = bind_ephemeral();
+        let srv = DcsServer::open(&dir).unwrap();
+        thread::spawn(move || {
+            let _ = srv.serve(addr);
+        });
+        thread::sleep(Duration::from_millis(100));
+        let (c1, b1) = http_exchange(
+            addr,
+            "POST",
+            "/dcs/leader?%6Bey=lock&holder=n1&ttl_ms=8000",
+            b"",
+        )
+        .unwrap();
+        assert_eq!(c1, 200, "{b1:?}");
+        let (c2, body) = http_exchange(addr, "GET", "/dcs/kv/lock", b"").unwrap();
+        assert_eq!(
+            c2, 200,
+            "query name %6Bey must be key, same lock as /dcs/kv/lock, body={body:?}"
+        );
+        let (c3, _) = http_exchange(addr, "GET", "/dcs/kv/%2Fleader", b"").unwrap();
+        assert_eq!(
+            c3, 404,
+            "must not have fallen back to default key /leader"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// F105: `ttl_ms=abc` parsed as default 30s (`unwrap_or(30_000)`) and
+    /// acquired the lock. Present-but-invalid integer must fail closed.
+    #[test]
+    fn dcs_http_bad_ttl_ms_does_not_store_lock() {
+        let dir = temp("dcs-ttl");
+        let addr = bind_ephemeral();
+        let srv = DcsServer::open(&dir).unwrap();
+        thread::spawn(move || {
+            let _ = srv.serve(addr);
+        });
+        thread::sleep(Duration::from_millis(100));
+        let (c1, b1) = http_exchange(
+            addr,
+            "POST",
+            "/dcs/leader?key=lock&holder=n1&ttl_ms=abc",
+            b"",
+        )
+        .unwrap();
+        assert_eq!(
+            c1, 400,
+            "unparseable ttl_ms must 400, not acquire, got {c1} {b1:?}"
+        );
+        let (c2, body) = http_exchange(addr, "GET", "/dcs/kv/lock", b"").unwrap();
+        assert_eq!(
+            c2, 404,
+            "bad ttl_ms must not store a lock, GET {c2} {body:?}"
+        );
+        let (c3, b3) = http_exchange(addr, "POST", "/dcs/leader?key=lock&holder=n1", b"").unwrap();
+        assert_eq!(c3, 200, "omitted ttl_ms still defaults, {b3:?}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
