@@ -40,7 +40,7 @@ use std::time::{Duration, Instant};
 
 use pedradb_store::{
     client_get, client_put, client_set_peers, client_status, client_tick, read_frame,
-    resolve_host_port, write_frame, StoreCluster, StoreError, WireMsg,
+    resolve_host_port, write_frame, StoreCluster, StoreError, StoreOpenOptions, WireMsg,
 };
 
 fn main() {
@@ -48,7 +48,7 @@ fn main() {
     if args.is_empty() {
         eprintln!(
             "usage: montanha-tcp <node|put|get|status|tick|smoke|elect-wait|set-peers|proxy> [flags]\n\
-             node: --id N --data DIR --bind ADDR --peer id=addr... [--ranges N] [--health ADDR]\n\
+             node: --id N --data DIR --bind ADDR --peer id=addr... [--ranges N] [--health ADDR] [--write-backpressure]\n\
              put:  --addr HOST:PORT --key K --value V [--peer id=addr...]\n\
              get:  --addr HOST:PORT --key K\n\
              status/tick: --addr HOST:PORT [--n N]\n\
@@ -180,10 +180,7 @@ enum Work {
 }
 
 fn cmd_node(args: &[String]) {
-    let id: u64 = flag_val(args, "--id")
-        .expect("--id")
-        .parse()
-        .expect("id");
+    let id: u64 = flag_val(args, "--id").expect("--id").parse().expect("id");
     let data = PathBuf::from(flag_val(args, "--data").unwrap_or_else(|| format!("./mtcp-{id}")));
     let bind: SocketAddr = flag_val(args, "--bind")
         .unwrap_or_else(|| format!("0.0.0.0:{}", 9700 + id))
@@ -206,18 +203,29 @@ fn cmd_node(args: &[String]) {
     if peers.is_empty() {
         peers.insert(id, bind_hp.clone());
     }
-    if !peers.contains_key(&id) {
-        peers.insert(id, bind_hp);
-    }
+    peers.entry(id).or_insert(bind_hp);
     let mut member_ids: Vec<u64> = peers.keys().copied().collect();
     member_ids.sort_unstable();
+    let write_bp = args.iter().any(|a| a == "--write-backpressure")
+        || env::var("MONTANHA_WRITE_BACKPRESSURE").ok().as_deref() == Some("1");
+    let mut store_opts = StoreOpenOptions::default();
+    if write_bp {
+        store_opts = store_opts.with_write_backpressure();
+        eprintln!("montanha-tcp: Pedra L0 write backpressure defaults enabled");
+    }
 
     std::fs::create_dir_all(&data).ok();
-    let cluster = StoreCluster::open_single_node(&data, id, &member_ids, n_ranges)
-        .unwrap_or_else(|e| {
-            eprintln!("open_single_node: {e}");
-            process::exit(1);
-        });
+    let cluster = StoreCluster::open_single_node_with_options(
+        &data,
+        id,
+        &member_ids,
+        n_ranges,
+        store_opts,
+    )
+    .unwrap_or_else(|e| {
+        eprintln!("open_single_node: {e}");
+        process::exit(1);
+    });
 
     let (tx, rx) = mpsc::sync_channel::<Work>(256);
 
@@ -252,12 +260,8 @@ fn health_http_loop(bind: SocketAddr, self_id: u64, tx: SyncSender<Work>) {
     eprintln!("health http listening on {bind}");
     for conn in listener.incoming() {
         let Ok(mut stream) = conn else { continue };
-        stream
-            .set_read_timeout(Some(Duration::from_secs(2)))
-            .ok();
-        stream
-            .set_write_timeout(Some(Duration::from_secs(2)))
-            .ok();
+        stream.set_read_timeout(Some(Duration::from_secs(2))).ok();
+        stream.set_write_timeout(Some(Duration::from_secs(2))).ok();
         let mut buf = [0u8; 1024];
         let n = match std::io::Read::read(&mut stream, &mut buf) {
             Ok(0) | Err(_) => continue,
@@ -418,12 +422,8 @@ impl Drop for InflightGuard {
 fn handle_conn(tx: SyncSender<Work>, mut stream: TcpStream) -> Result<(), StoreError> {
     // Short first-frame timeout: TCP health probes that never send MTCP must not
     // pin FDs for 30s (EMFILE under proxy churn).
-    stream
-        .set_read_timeout(Some(Duration::from_secs(3)))
-        .ok();
-    stream
-        .set_write_timeout(Some(Duration::from_secs(5)))
-        .ok();
+    stream.set_read_timeout(Some(Duration::from_secs(3))).ok();
+    stream.set_write_timeout(Some(Duration::from_secs(5))).ok();
     stream.set_nodelay(true).ok();
     let msg = read_frame(&mut stream)?;
     match msg {
@@ -455,10 +455,7 @@ fn handle_conn(tx: SyncSender<Work>, mut stream: TcpStream) -> Result<(), StoreE
                 .map_err(|_| StoreError::Msg("put timeout".into()))?;
             match r {
                 Ok(()) => write_frame(&mut stream, &WireMsg::RespOk)?,
-                Err(m) => write_frame(
-                    &mut stream,
-                    &WireMsg::RespErr { message: m },
-                )?,
+                Err(m) => write_frame(&mut stream, &WireMsg::RespErr { message: m })?,
             }
         }
         WireMsg::PutBatch { pairs } => {
@@ -482,10 +479,7 @@ fn handle_conn(tx: SyncSender<Work>, mut stream: TcpStream) -> Result<(), StoreE
                 .map_err(|_| StoreError::Msg("get timeout".into()))?;
             match r {
                 Ok(v) => write_frame(&mut stream, &WireMsg::RespValue { value: v })?,
-                Err(m) => write_frame(
-                    &mut stream,
-                    &WireMsg::RespErr { message: m },
-                )?,
+                Err(m) => write_frame(&mut stream, &WireMsg::RespErr { message: m })?,
             }
         }
         WireMsg::Tick => {
@@ -497,10 +491,7 @@ fn handle_conn(tx: SyncSender<Work>, mut stream: TcpStream) -> Result<(), StoreE
                 .map_err(|_| StoreError::Msg("tick timeout".into()))?;
             match r {
                 Ok(()) => write_frame(&mut stream, &WireMsg::RespOk)?,
-                Err(m) => write_frame(
-                    &mut stream,
-                    &WireMsg::RespErr { message: m },
-                )?,
+                Err(m) => write_frame(&mut stream, &WireMsg::RespErr { message: m })?,
             }
         }
         WireMsg::Status => {
@@ -512,10 +503,7 @@ fn handle_conn(tx: SyncSender<Work>, mut stream: TcpStream) -> Result<(), StoreE
                 .map_err(|_| StoreError::Msg("status timeout".into()))?;
             match r {
                 Ok(text) => write_frame(&mut stream, &WireMsg::StatusResp { text })?,
-                Err(m) => write_frame(
-                    &mut stream,
-                    &WireMsg::RespErr { message: m },
-                )?,
+                Err(m) => write_frame(&mut stream, &WireMsg::RespErr { message: m })?,
             }
         }
         WireMsg::SetPeers { peers } => {
@@ -527,10 +515,7 @@ fn handle_conn(tx: SyncSender<Work>, mut stream: TcpStream) -> Result<(), StoreE
                 .map_err(|_| StoreError::Msg("setpeers timeout".into()))?;
             match r {
                 Ok(()) => write_frame(&mut stream, &WireMsg::RespOk)?,
-                Err(m) => write_frame(
-                    &mut stream,
-                    &WireMsg::RespErr { message: m },
-                )?,
+                Err(m) => write_frame(&mut stream, &WireMsg::RespErr { message: m })?,
             }
         }
         WireMsg::CommitTx { pairs } => {
@@ -542,10 +527,7 @@ fn handle_conn(tx: SyncSender<Work>, mut stream: TcpStream) -> Result<(), StoreE
                 .map_err(|_| StoreError::Msg("commit_tx timeout".into()))?;
             match r {
                 Ok(txn_id) => write_frame(&mut stream, &WireMsg::RespTxn { txn_id })?,
-                Err(m) => write_frame(
-                    &mut stream,
-                    &WireMsg::RespErr { message: m },
-                )?,
+                Err(m) => write_frame(&mut stream, &WireMsg::RespErr { message: m })?,
             }
         }
         WireMsg::DcsCreate { key, value } => {
@@ -767,11 +749,7 @@ fn worker_loop(
     }
 }
 
-fn flush_outbound(
-    self_id: u64,
-    cluster: &mut StoreCluster,
-    peers: &HashMap<u64, String>,
-) {
+fn flush_outbound(self_id: u64, cluster: &mut StoreCluster, peers: &HashMap<u64, String>) {
     let batch = cluster.drain_outbound();
     for (from, to, bytes) in batch {
         if to == self_id {
@@ -808,9 +786,7 @@ fn put_many_until_committed(
             Err(StoreError::NotCommitted {
                 range_id, index, ..
             }) => {
-                return finish_not_committed(
-                    self_id, cluster, peers, rx, range_id, index,
-                );
+                return finish_not_committed(self_id, cluster, peers, rx, range_id, index);
             }
             Err(e) => return Err(e),
         }
@@ -893,9 +869,7 @@ fn commit_tx_drive(
         Ok(()) => {
             flush_outbound(self_id, cluster, peers);
             // Same-range batch: pump only that range if known after locate.
-            let rid = batch
-                .first()
-                .and_then(|(k, _)| cluster.locate(k).ok());
+            let rid = batch.first().and_then(|(k, _)| cluster.locate(k).ok());
             pump_ae(self_id, cluster, peers, rx, 40, rid);
             // Synthetic id: put_batch has no txn_id; 1 means "committed batch".
             Ok(1)
@@ -973,12 +947,7 @@ fn pump_ae(
     }
 }
 
-fn service_nested(
-    self_id: u64,
-    cluster: &mut StoreCluster,
-    peers: &HashMap<u64, String>,
-    w: Work,
-) {
+fn service_nested(self_id: u64, cluster: &mut StoreCluster, peers: &HashMap<u64, String>, w: Work) {
     match w {
         Work::Peer {
             from,
@@ -1010,7 +979,11 @@ fn service_nested(
                 .map_err(|e| e.to_string());
             let _ = resp.send(r);
         }
-        Work::Put { key: _, value: _, resp } => {
+        Work::Put {
+            key: _,
+            value: _,
+            resp,
+        } => {
             // Nested put while another put waits: refuse to avoid re-entrancy mess.
             let _ = resp.send(Err("busy: put in progress".into()));
         }
@@ -1020,7 +993,11 @@ fn service_nested(
         Work::CommitTx { pairs: _, resp } => {
             let _ = resp.send(Err("busy: commit_tx in progress".into()));
         }
-        Work::DcsCreate { key: _, value: _, resp } => {
+        Work::DcsCreate {
+            key: _,
+            value: _,
+            resp,
+        } => {
             let _ = resp.send(Err("busy: dcs mutate in progress".into()));
         }
         Work::DcsCas {
@@ -1045,7 +1022,10 @@ fn service_nested(
 }
 
 enum DcsMutate {
-    Create { key: Vec<u8>, value: Vec<u8> },
+    Create {
+        key: Vec<u8>,
+        value: Vec<u8>,
+    },
     Cas {
         key: Vec<u8>,
         value: Vec<u8>,
@@ -1474,9 +1454,7 @@ fn http_get_status(health_hp: &str, path: &str) -> u16 {
         .set_write_timeout(Some(Duration::from_millis(400)))
         .ok();
     let host = health_hp.split(':').next().unwrap_or(health_hp);
-    let req = format!(
-        "GET {path} HTTP/1.0\r\nHost: {host}\r\nConnection: close\r\n\r\n"
-    );
+    let req = format!("GET {path} HTTP/1.0\r\nHost: {host}\r\nConnection: close\r\n\r\n");
     if stream.write_all(req.as_bytes()).is_err() {
         return 0;
     }
@@ -1645,9 +1623,7 @@ fn cmd_proxy(args: &[String]) {
             let Ok(addr) = resolve_host_port(&backend_hp) else {
                 return;
             };
-            let Ok(upstream) =
-                TcpStream::connect_timeout(&addr, Duration::from_secs(2))
-            else {
+            let Ok(upstream) = TcpStream::connect_timeout(&addr, Duration::from_secs(2)) else {
                 return;
             };
             let _ = client.set_nodelay(true);

@@ -1906,12 +1906,33 @@ impl StoreCluster<StdEnv> {
         member_ids: &[u64],
         n_ranges: u64,
     ) -> Result<Self> {
-        Self::open_single_node_with_rng(
+        Self::open_single_node_with_options(
+            parent,
+            self_id,
+            member_ids,
+            n_ranges,
+            StoreOpenOptions::default(),
+        )
+    }
+
+    /// [`open_single_node`](Self::open_single_node) with Pedra open knobs (sync / backpressure).
+    ///
+    /// # Errors
+    /// Open / bad args.
+    pub fn open_single_node_with_options(
+        parent: impl AsRef<Path>,
+        self_id: u64,
+        member_ids: &[u64],
+        n_ranges: u64,
+        store_opts: StoreOpenOptions,
+    ) -> Result<Self> {
+        Self::open_single_node_with_rng_opts(
             parent,
             self_id,
             member_ids,
             n_ranges,
             SeedRng::new(0xA11CE ^ self_id.wrapping_mul(0x9E37_79B9)),
+            store_opts,
         )
     }
 
@@ -1925,6 +1946,28 @@ impl StoreCluster<StdEnv> {
         member_ids: &[u64],
         n_ranges: u64,
         rng: SeedRng,
+    ) -> Result<Self> {
+        Self::open_single_node_with_rng_opts(
+            parent,
+            self_id,
+            member_ids,
+            n_ranges,
+            rng,
+            StoreOpenOptions::default(),
+        )
+    }
+
+    /// Multiproc single-node open with RNG and Pedra open knobs.
+    ///
+    /// # Errors
+    /// Open / bad args.
+    pub fn open_single_node_with_rng_opts(
+        parent: impl AsRef<Path>,
+        self_id: u64,
+        member_ids: &[u64],
+        n_ranges: u64,
+        rng: SeedRng,
+        store_opts: StoreOpenOptions,
     ) -> Result<Self> {
         if n_ranges == 0 || member_ids.is_empty() {
             return Err(StoreError::Msg("need members and ranges".into()));
@@ -1940,7 +1983,8 @@ impl StoreCluster<StdEnv> {
         let parent = parent.as_ref();
         let ranges = split_keyspace(n_ranges);
         let opts = OpenOptions {
-            sync: true, // single-node multiproc path: always durable
+            // Multiproc path: honor store_opts.pedra_sync (default true = durable).
+            sync: store_opts.pedra_sync,
             auto_flush_bytes: None,
             auto_compact_sst_count: None,
             auto_compact_sst_bytes: None,
@@ -1948,7 +1992,10 @@ impl StoreCluster<StdEnv> {
             large_value_threshold: None,
         };
         let dir = parent.join(format!("store-node-{self_id}"));
-        let db = Db::open_with_env(&dir, opts, StdEnv)?;
+        let mut db = Db::open_with_env(&dir, opts, StdEnv)?;
+        if store_opts.pedra_write_backpressure {
+            db.enable_write_backpressure_defaults();
+        }
         let mut ids: Vec<u64> = member_ids.to_vec();
         ids.sort_unstable();
         ids.dedup();
@@ -8271,6 +8318,21 @@ mod tests {
             );
             assert!(n.db.write_stall_drain());
         }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Multiproc single-node path also honors write-backpressure open opts.
+    #[test]
+    fn open_single_node_with_write_backpressure() {
+        let dir = temp();
+        let opts = StoreOpenOptions::default().with_write_backpressure();
+        let c = StoreCluster::open_single_node_with_options(&dir, 1, &[1], 1, opts).unwrap();
+        let n = c.nodes.get(&1).expect("node 1");
+        assert_eq!(
+            n.db.write_pressure_l0(),
+            Some(pedradb_core::L0_COMPACTION_TRIGGER)
+        );
+        assert!(n.db.write_stall_drain());
         let _ = std::fs::remove_dir_all(&dir);
     }
 
