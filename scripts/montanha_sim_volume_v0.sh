@@ -48,6 +48,10 @@ fi
 if ! bash scripts/montanha_chaos_soak.sh "$LOG/chaos" 2>&1 | tee "$LOG/chaos.log"; then
   FAIL=1
 fi
+# Option-A scale hygiene (in-process leader diversity + multi-range put)
+if ! bash scripts/montanha_scale_gate_v0.sh "$LOG/scale-gate" 2>&1 | tee "$LOG/scale-gate.log"; then
+  FAIL=1
+fi
 
 END=$(date +%s)
 python3 - <<PY
@@ -63,9 +67,10 @@ report = {
     "wall_secs": int("$END") - int("$START"),
     "wall_budget_secs": int("$WALL"),
     "silent_wrong": fail,
+    "suites": ["montanha_fdb_path", "multiprocess_tx", "chaos_soak", "scale_gate"],
     "log_dir": str(log),
     "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-    "note": "seed bank × montanha_fdb_path multi-fault; set PEDRA_SIM_VOLUME_WALL_SECS=28800 for 8h",
+    "note": "seed bank × montanha_fdb_path multi-fault + scale gate; PEDRA_SIM_VOLUME_WALL_SECS=28800 for 8h",
 }
 (log / "sim_volume_report.json").write_text(json.dumps(report, indent=2) + "\n")
 print(json.dumps(report, indent=2))
