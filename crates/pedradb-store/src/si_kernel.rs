@@ -1,8 +1,9 @@
-//! Pure SI / changelog reader ranking (RFC-0002 P19 / P21 / F42 / F55).
+//! Pure SI / changelog reader ranking (RFC-0002 P19 / P21 / P30 / F42 / F55 / F84).
 //!
 //! Production [`crate::StoreCluster::best_applied_reader`] and
 //! [`crate::StoreCluster::best_changelog_reader`] fold local peers with
 //! [`si_reader_beats`]. Watermark is `applied` (F42) or `last_sequence` (F55).
+//! Point `get` / `dcs_get` use [`point_get_prefer_applied`] (F84).
 
 #![forbid(unsafe_code)]
 
@@ -33,6 +34,31 @@ pub fn si_reader_beats(
         return c_self;
     }
     c_applied > b_applied
+}
+
+/// F84: point LocalApplied `get` ranks by per-range `applied`, not Pedra
+/// `last_sequence` (a node busy on range A can lag on range B).
+#[must_use]
+pub fn point_get_prefer_applied() -> bool {
+    true
+}
+
+/// AS-IS F84: `best_changelog_reader` (max global `last_sequence`).
+#[must_use]
+pub fn point_get_prefer_applied_as_is() -> bool {
+    false
+}
+
+/// Watermark folded into [`si_reader_beats`] for a point get (FIXED: range applied).
+#[must_use]
+pub fn point_get_watermark(range_applied: u64, _global_seq: u64) -> u64 {
+    range_applied
+}
+
+/// AS-IS F84: global Pedra sequence.
+#[must_use]
+pub fn point_get_watermark_as_is(_range_applied: u64, global_seq: u64) -> u64 {
+    global_seq
 }
 
 /// AS-IS F42: first candidate always stays (ids[0] / first local).
@@ -82,6 +108,15 @@ mod tests {
     }
 
     #[test]
+    fn point_get_uses_range_applied() {
+        assert!(point_get_prefer_applied());
+        assert!(!point_get_prefer_applied_as_is());
+        assert_eq!(point_get_watermark(3, 99), 3);
+        assert_eq!(point_get_watermark_as_is(3, 99), 99);
+        assert!(point_get_watermark(3, 99) < point_get_watermark_as_is(3, 99));
+    }
+
+    #[test]
     fn theorem_on_bool_domain() {
         let mut n = 0u32;
         for cl in [false, true] {
@@ -92,11 +127,8 @@ mod tests {
                             for bs in [false, true] {
                                 for ca in 0u64..3 {
                                     for ba in 0u64..3 {
-                                        let d = si_reader_beats(
-                                            cl, cp, cs, ca, bl, bp, bs, ba,
-                                        );
-                                        let want = (cl && cp, cp, cs, ca)
-                                            > (bl && bp, bp, bs, ba);
+                                        let d = si_reader_beats(cl, cp, cs, ca, bl, bp, bs, ba);
+                                        let want = (cl && cp, cp, cs, ca) > (bl && bp, bp, bs, ba);
                                         assert_eq!(d, want);
                                         assert!(!si_reader_beats_as_is(
                                             cl, cp, cs, ca, bl, bp, bs, ba,

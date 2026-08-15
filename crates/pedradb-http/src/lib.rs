@@ -21,6 +21,17 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
+mod auth_kernel;
+mod cl_kernel;
+
+pub use auth_kernel::{
+    ascii_lower, bearer_token_from_value, is_bearer_scheme, is_bearer_scheme_as_is,
+};
+pub use cl_kernel::{
+    content_length_repeat_ok, content_length_repeat_ok_as_is, invalid_cl_as_zero,
+    invalid_cl_as_zero_as_is, keep_body_without_cl, keep_body_without_cl_as_is,
+};
+
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::path::Path;
@@ -78,18 +89,16 @@ fn read_req(stream: &mut TcpStream) -> Result<(String, String, Vec<u8>, Vec<(Str
         if let Some((k, v)) = line.split_once(':') {
             headers.push((k.trim().to_ascii_lowercase(), v.trim().to_string()));
         }
-        if let Some(v) = line
-            .to_ascii_lowercase()
-            .strip_prefix("content-length:")
-        {
+        if let Some(v) = line.to_ascii_lowercase().strip_prefix("content-length:") {
             // F87: invalid CL used to become 0 and truncate the body to empty.
-            let n = v
-                .trim()
-                .parse()
-                .map_err(|_| HttpError::App("bad content-length".into()))?;
+            let n = match v.trim().parse::<usize>() {
+                Ok(n) => n,
+                Err(_) if invalid_cl_as_zero() => 0,
+                Err(_) => return Err(HttpError::App("bad content-length".into())),
+            };
             // F88: differing Content-Length fields — last header used to win
             // (`5` then `0` stored empty). RFC 9112: reject the message.
-            if has_content_len && n != content_len {
+            if has_content_len && !content_length_repeat_ok(content_len as u64, n as u64) {
                 return Err(HttpError::App("conflicting content-length".into()));
             }
             has_content_len = true;
@@ -103,11 +112,7 @@ fn read_req(stream: &mut TcpStream) -> Result<(String, String, Vec<u8>, Vec<(Str
             "content-length {content_len} exceeds max {MAX_BODY}"
         )));
     }
-    let header_end = buf
-        .windows(4)
-        .position(|w| w == b"\r\n\r\n")
-        .unwrap()
-        + 4;
+    let header_end = buf.windows(4).position(|w| w == b"\r\n\r\n").unwrap() + 4;
     let mut body = buf[header_end..].to_vec();
     if has_content_len {
         while body.len() < content_len {
@@ -121,14 +126,14 @@ fn read_req(stream: &mut TcpStream) -> Result<(String, String, Vec<u8>, Vec<(Str
             }
         }
         body.truncate(content_len);
-    } else {
+    } else if keep_body_without_cl() {
         // F86: no Content-Length — keep bytes already past the header break.
         // Do not drain the socket (GET/keep-alive would hang waiting for EOF).
-        // Previously content_len defaulted to 0 and `truncate(0)` discarded
-        // a PUT payload that arrived with the headers.
         if body.len() > MAX_BODY {
             return Err(HttpError::App("body exceeds max".into()));
         }
+    } else {
+        body.truncate(0);
     }
     let _ = body_start;
     Ok((method, path, body, headers))
@@ -141,15 +146,7 @@ fn header_token(headers: &[(String, String)]) -> Option<&str> {
             return Some(v.as_str());
         }
         if k == "authorization" {
-            let v = v.trim();
-            // F85: scheme is case-insensitive (RFC 9110). Only `Bearer`/`bearer`
-            // matched; `BEARER tok` was compared as the whole header → 401.
-            if let Some((scheme, rest)) = v.split_once(char::is_whitespace) {
-                if scheme.eq_ignore_ascii_case("bearer") {
-                    return Some(rest.trim());
-                }
-            }
-            return Some(v);
+            return bearer_token_from_value(v);
         }
     }
     None
@@ -252,8 +249,7 @@ fn handle_kv(
             }
             "DELETE" => {
                 let mut g = kv.lock().map_err(|e| HttpError::App(e.to_string()))?;
-                g.delete(key)
-                    .map_err(|e| HttpError::App(e.to_string()))?;
+                g.delete(key).map_err(|e| HttpError::App(e.to_string()))?;
                 write_resp(stream, 200, "OK", b"ok")?;
             }
             _ => write_resp(stream, 405, "Method Not Allowed", b"")?,
@@ -376,11 +372,7 @@ fn from_hex(c: u8) -> Option<u8> {
     }
 }
 
-fn handle_dcs(
-    stream: &mut TcpStream,
-    dcs: &Arc<Mutex<Dcs>>,
-    auth: &Option<String>,
-) -> Result<()> {
+fn handle_dcs(stream: &mut TcpStream, dcs: &Arc<Mutex<Dcs>>, auth: &Option<String>) -> Result<()> {
     let (method, path, body, headers) = read_req(stream)?;
     if !authorize(&headers, auth) {
         return write_resp(stream, 401, "Unauthorized", b"auth required");
@@ -393,14 +385,20 @@ fn handle_dcs(
                 let g = dcs.lock().map_err(|e| HttpError::App(e.to_string()))?;
                 match g.get(&key) {
                     Some(kv) => {
-                        let line = format!("{} {}\n", kv.mod_revision, String::from_utf8_lossy(&kv.value));
+                        let line = format!(
+                            "{} {}\n",
+                            kv.mod_revision,
+                            String::from_utf8_lossy(&kv.value)
+                        );
                         write_resp(stream, 200, "OK", line.as_bytes())?;
                     }
                     None => write_resp(stream, 404, "Not Found", b"")?,
                 }
             }
             "PUT" => {
-                let rev: u64 = query_param(&path, "rev").and_then(|s| s.parse().ok()).unwrap_or(0);
+                let rev: u64 = query_param(&path, "rev")
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(0);
                 let mut g = dcs.lock().map_err(|e| HttpError::App(e.to_string()))?;
                 match g.cas(&key, &body, rev, 0) {
                     Ok(new_rev) => {
@@ -429,8 +427,11 @@ fn handle_dcs(
             .and_then(|s| s.parse().ok())
             .unwrap_or(30_000);
         let mut g = dcs.lock().map_err(|e| HttpError::App(e.to_string()))?;
-        match g.try_acquire_leader(key.as_bytes(), holder.as_bytes(), Duration::from_millis(ttl_ms))
-        {
+        match g.try_acquire_leader(
+            key.as_bytes(),
+            holder.as_bytes(),
+            Duration::from_millis(ttl_ms),
+        ) {
             Ok((rev, lease)) => {
                 write_resp(
                     stream,
@@ -680,14 +681,11 @@ mod tests {
         thread::sleep(Duration::from_millis(100));
         let (code, _) = http_exchange(addr, "PUT", "/kv/x", b"y").unwrap();
         assert_eq!(code, 401, "missing token must 401");
-        let (code, _) =
-            http_exchange_auth(addr, "PUT", "/kv/x", b"y", Some("wrong")).unwrap();
+        let (code, _) = http_exchange_auth(addr, "PUT", "/kv/x", b"y", Some("wrong")).unwrap();
         assert_eq!(code, 401, "wrong token must 401");
-        let (code, _) =
-            http_exchange_auth(addr, "PUT", "/kv/x", b"y", Some("sekrit")).unwrap();
+        let (code, _) = http_exchange_auth(addr, "PUT", "/kv/x", b"y", Some("sekrit")).unwrap();
         assert_eq!(code, 200);
-        let (code, body) =
-            http_exchange_auth(addr, "GET", "/kv/x", b"", Some("sekrit")).unwrap();
+        let (code, body) = http_exchange_auth(addr, "GET", "/kv/x", b"", Some("sekrit")).unwrap();
         assert_eq!(code, 200);
         assert_eq!(body, b"y");
         let _ = std::fs::remove_dir_all(&dir);
@@ -704,12 +702,13 @@ mod tests {
             let _ = srv.serve(addr);
         });
         thread::sleep(Duration::from_millis(100));
-        let (code, _) =
-            http_exchange_auth(addr, "PUT", "/kv/x", b"y", Some("sekrit")).unwrap();
+        let (code, _) = http_exchange_auth(addr, "PUT", "/kv/x", b"y", Some("sekrit")).unwrap();
         assert_eq!(code, 200);
         let mut stream = TcpStream::connect(addr).unwrap();
         stream
-            .write_all(b"GET /kv/x HTTP/1.0\r\nAuthorization: BEARER sekrit\r\nHost: localhost\r\n\r\n")
+            .write_all(
+                b"GET /kv/x HTTP/1.0\r\nAuthorization: BEARER sekrit\r\nHost: localhost\r\n\r\n",
+            )
             .unwrap();
         let mut resp = Vec::new();
         stream.read_to_end(&mut resp).unwrap();
@@ -759,7 +758,10 @@ mod tests {
             .and_then(|l| l.split_whitespace().nth(1))
             .and_then(|c| c.parse::<u16>().ok())
             .unwrap_or(0);
-        assert_eq!(put_code, 200, "PUT without CL must still be accepted, {text:?}");
+        assert_eq!(
+            put_code, 200,
+            "PUT without CL must still be accepted, {text:?}"
+        );
         let (code, body) = http_exchange(addr, "GET", "/kv/nobody", b"").unwrap();
         assert_eq!(
             code, 200,
@@ -785,7 +787,9 @@ mod tests {
         thread::sleep(Duration::from_millis(100));
         let mut stream = TcpStream::connect(addr).unwrap();
         stream
-            .write_all(b"PUT /kv/badcl HTTP/1.0\r\nContent-Length: abc\r\nHost: localhost\r\n\r\nhello")
+            .write_all(
+                b"PUT /kv/badcl HTTP/1.0\r\nContent-Length: abc\r\nHost: localhost\r\n\r\nhello",
+            )
             .unwrap();
         let _ = stream.shutdown(std::net::Shutdown::Write);
         let mut resp = Vec::new();
@@ -866,9 +870,8 @@ mod tests {
         thread::sleep(Duration::from_millis(100));
         let mut stream = TcpStream::connect(addr).unwrap();
         let host = format!("{addr}");
-        let req = format!(
-            "PUT //{host}/kv/np HTTP/1.0\r\nContent-Length: 2\r\nHost: {host}\r\n\r\nok"
-        );
+        let req =
+            format!("PUT //{host}/kv/np HTTP/1.0\r\nContent-Length: 2\r\nHost: {host}\r\n\r\nok");
         stream.write_all(req.as_bytes()).unwrap();
         let _ = stream.shutdown(std::net::Shutdown::Write);
         let mut resp = Vec::new();

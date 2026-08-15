@@ -90,4 +90,40 @@ proof fn lemma_leader_beats_lagging_first()
 {
 }
 
+pub open spec fn point_get_watermark_spec(range_applied: u64, _global_seq: u64) -> u64 {
+    range_applied
+}
+
+pub open spec fn point_get_watermark_as_is_spec(_range_applied: u64, global_seq: u64) -> u64 {
+    global_seq
+}
+
+/// F84: point get ranks by per-range applied, not Pedra last_sequence.
+pub fn point_get_watermark(range_applied: u64, global_seq: u64) -> (w: u64)
+    ensures
+        w == point_get_watermark_spec(range_applied, global_seq),
+        w == range_applied,
+{
+    let _ = global_seq;
+    range_applied
+}
+
+pub fn point_get_watermark_as_is(range_applied: u64, global_seq: u64) -> (w: u64)
+    ensures
+        w == point_get_watermark_as_is_spec(range_applied, global_seq),
+        w == global_seq,
+{
+    let _ = range_applied;
+    global_seq
+}
+
+/// A node busy on another range (global_seq > applied) is ranked by applied.
+proof fn lemma_as_is_ignores_lagging_range(applied: u64, global: u64)
+    requires
+        applied < global,
+    ensures
+        point_get_watermark_spec(applied, global) < point_get_watermark_as_is_spec(applied, global),
+{
+}
+
 } // verus!

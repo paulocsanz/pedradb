@@ -89,7 +89,10 @@ pub use layers::{
     WatchEvent, WatchHub,
 };
 pub use msg::PeerMsg;
-pub use si_kernel::{si_reader_beats, si_reader_beats_as_is};
+pub use si_kernel::{
+    point_get_prefer_applied, point_get_prefer_applied_as_is, point_get_watermark,
+    point_get_watermark_as_is, si_reader_beats, si_reader_beats_as_is,
+};
 pub use snapshot_kernel::{
     snapshot_needs_txn_meta_clear, snapshot_needs_txn_meta_clear_as_is, snapshot_touches_user_key,
     snapshot_touches_user_key_as_is,
@@ -425,9 +428,28 @@ fn is_reserved_store_key(key: &[u8]) -> bool {
         || key.starts_with(HIST_PREFIX)
 }
 
+/// F100: length-prefix user under intent/hist/txn so `intent/a` is not a
+/// byte-prefix of `intent/ab` (same class as F89–F99).
+fn push_user_component(buf: &mut Vec<u8>, user: &[u8]) {
+    let n = u32::try_from(user.len()).expect("store user key len fits u32");
+    buf.extend_from_slice(&n.to_be_bytes());
+    buf.extend_from_slice(user);
+}
+
+/// Decode user after a fixed meta prefix (F100 length-prefix; legacy raw OK).
+fn user_from_meta_suffix(rest: &[u8]) -> Option<Vec<u8>> {
+    if rest.len() >= 4 {
+        let n = u32::from_be_bytes(rest[0..4].try_into().ok()?) as usize;
+        if rest.len() == 4 + n {
+            return Some(rest[4..].to_vec());
+        }
+    }
+    Some(rest.to_vec())
+}
+
 fn intent_key(user: &[u8]) -> Vec<u8> {
     let mut k = INTENT_PREFIX.to_vec();
-    k.extend_from_slice(user);
+    push_user_component(&mut k, user);
     k
 }
 
@@ -442,7 +464,7 @@ fn txn_pair_key(txn_id: u64, user: &[u8]) -> Vec<u8> {
     let mut k = TXN_PREFIX.to_vec();
     k.extend_from_slice(&txn_id.to_le_bytes());
     k.extend_from_slice(b"/k/");
-    k.extend_from_slice(user);
+    push_user_component(&mut k, user);
     k
 }
 
@@ -457,7 +479,7 @@ fn txn_pre_key(txn_id: u64, user: &[u8]) -> Vec<u8> {
     let mut k = TXN_PREFIX.to_vec();
     k.extend_from_slice(&txn_id.to_le_bytes());
     k.extend_from_slice(b"/pre/");
-    k.extend_from_slice(user);
+    push_user_component(&mut k, user);
     k
 }
 
@@ -469,7 +491,7 @@ fn si_meta_key(kind: &str) -> Vec<u8> {
 
 fn hist_key(user: &[u8]) -> Vec<u8> {
     let mut k = HIST_PREFIX.to_vec();
-    k.extend_from_slice(user);
+    push_user_component(&mut k, user);
     k
 }
 
@@ -979,19 +1001,21 @@ fn clear_range_txn_meta<E: Env>(db: &mut Db<E>, start: &[u8], end: &[u8]) -> Res
     let mut ops: Vec<BatchOp> = Vec::new();
     let mut touched_txns: Vec<u64> = Vec::new();
     for (ik, raw) in scan_prefix(db, INTENT_PREFIX) {
-        let user = match ik.strip_prefix(INTENT_PREFIX) {
-            Some(u) => u,
-            None => continue,
+        let Some(user) = ik
+            .strip_prefix(INTENT_PREFIX)
+            .and_then(user_from_meta_suffix)
+        else {
+            continue;
         };
-        if !key_in_half_open(user, start, end) {
+        if !key_in_half_open(&user, start, end) {
             continue;
         }
         if let Some((tid, _)) = decode_intent(&raw) {
             if !touched_txns.contains(&tid) {
                 touched_txns.push(tid);
             }
-            ops.push(BatchOp::delete(txn_pair_key(tid, user)));
-            ops.push(BatchOp::delete(txn_pre_key(tid, user)));
+            ops.push(BatchOp::delete(txn_pair_key(tid, &user)));
+            ops.push(BatchOp::delete(txn_pre_key(tid, &user)));
         }
         ops.push(BatchOp::delete(ik));
     }
@@ -1006,13 +1030,16 @@ fn clear_range_txn_meta<E: Env>(db: &mut Db<E>, start: &[u8], end: &[u8]) -> Res
         let tid = u64::from_le_bytes(rest[0..8].try_into().unwrap());
         let after = &rest[8..];
         let user = if let Some(u) = after.strip_prefix(b"/k/") {
-            u
+            user_from_meta_suffix(u)
         } else if let Some(u) = after.strip_prefix(b"/pre/") {
-            u
+            user_from_meta_suffix(u)
         } else {
+            None
+        };
+        let Some(user) = user else {
             continue;
         };
-        if !key_in_half_open(user, start, end) {
+        if !key_in_half_open(&user, start, end) {
             continue;
         }
         if !touched_txns.contains(&tid) {
@@ -2073,8 +2100,8 @@ impl<E: Env> StoreCluster<E> {
             for (ik, raw) in rows {
                 let user = ik
                     .strip_prefix(INTENT_PREFIX)
-                    .unwrap_or(ik.as_slice())
-                    .to_vec();
+                    .and_then(user_from_meta_suffix)
+                    .unwrap_or_else(|| ik.clone());
                 if let Some((oid, _)) = decode_intent(&raw) {
                     by_txn.entry(oid).or_default().push(user);
                 } else {
@@ -2090,8 +2117,10 @@ impl<E: Env> StoreCluster<E> {
                     continue;
                 }
                 let tid = u64::from_le_bytes(rest[0..8].try_into().unwrap());
-                if let Some(user) = rest[8..].strip_prefix(b"/pre/") {
-                    by_txn.entry(tid).or_default().push(user.to_vec());
+                if let Some(u) = rest[8..].strip_prefix(b"/pre/") {
+                    if let Some(user) = user_from_meta_suffix(u) {
+                        by_txn.entry(tid).or_default().push(user);
+                    }
                 }
             }
             for (tid, ks) in by_txn {
@@ -2118,19 +2147,22 @@ impl<E: Env> StoreCluster<E> {
         let mut best: HashMap<Vec<u8>, Vec<(u64, Option<Vec<u8>>)>> = HashMap::new();
         for node in self.nodes.values() {
             for (hk, raw) in scan_prefix(&node.db, HIST_PREFIX) {
-                let Some(user) = hk.strip_prefix(HIST_PREFIX) else {
+                let Some(user) = hk
+                    .strip_prefix(HIST_PREFIX)
+                    .and_then(user_from_meta_suffix)
+                else {
                     continue;
                 };
                 let Ok(hist) = decode_hist(&raw) else {
                     continue;
                 };
                 let existing = best
-                    .get(user)
+                    .get(&user)
                     .and_then(|h| h.last().map(|(g, _)| *g))
                     .unwrap_or(0);
                 let new_last = hist.last().map(|(g, _)| *g).unwrap_or(0);
                 if new_last >= existing {
-                    best.insert(user.to_vec(), hist);
+                    best.insert(user, hist);
                 }
             }
         }
@@ -5346,9 +5378,11 @@ impl<E: Env> StoreCluster<E> {
 
     /// Best local node to serve a LocalApplied read of `key` (F84).
     fn best_reader_for_key(&self, key: &[u8]) -> Option<u64> {
-        if let Ok(rid) = self.locate(key) {
-            if let Some(id) = self.best_applied_reader(rid) {
-                return Some(id);
+        if si_kernel::point_get_prefer_applied() {
+            if let Ok(rid) = self.locate(key) {
+                if let Some(id) = self.best_applied_reader(rid) {
+                    return Some(id);
+                }
             }
         }
         self.best_changelog_reader()
@@ -5689,10 +5723,13 @@ fn split_keyspace(n: u64) -> Vec<RangeMeta> {
 pub const META_PREFIX: &[u8] = b"m/";
 
 /// Build a meta key under `m/`.
+///
+/// F100: raw `m/` || suffix made `m/a` a byte-prefix of `m/ab` (F96 only
+/// fixed [`layers::EtcdNeedFace`] `full_key`). Length-prefix the suffix.
 #[must_use]
 pub fn meta_key(suffix: &[u8]) -> Vec<u8> {
     let mut k = META_PREFIX.to_vec();
-    k.extend_from_slice(suffix);
+    k.extend_from_slice(&len_pref_value(suffix));
     k
 }
 
@@ -5713,6 +5750,42 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         d
+    }
+
+    /// F100: `m/` || suffix made `m/a` a prefix of `m/ab` (F96 fixed EtcdNeedFace only).
+    #[test]
+    fn meta_key_suffix_is_not_prefix_of_sibling() {
+        let a = meta_key(b"a");
+        let ab = meta_key(b"ab");
+        assert!(
+            !ab.starts_with(&a),
+            "meta_key(a) must not be a byte-prefix of meta_key(ab): {a:?} vs {ab:?}"
+        );
+        assert_ne!(a, ab);
+        assert_ne!(meta_key(b"smoke"), meta_key(b"smoke/k0"));
+        let dir = temp();
+        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        c.elect_all(80).unwrap();
+        c.put(&a, b"ha").unwrap();
+        c.put(&ab, b"hab").unwrap();
+        let end = pedradb_core::prefix_exclusive_end(&a);
+        let snap = c.read_version();
+        let hits = c
+            .keys_in_range_at(
+                &a,
+                end.as_deref().unwrap_or(&[]),
+                snap,
+            )
+            .unwrap();
+        assert!(
+            hits.iter().any(|(k, v)| k == &a && v.as_slice() == b"ha"),
+            "own meta_key missing: {hits:?}"
+        );
+        assert!(
+            !hits.iter().any(|(k, _)| k == &ab),
+            "meta_key(a) range leaked sibling ab: {hits:?}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     fn keys_one_per_range(c: &StoreCluster) -> Vec<Vec<u8>> {
@@ -6072,11 +6145,8 @@ mod tests {
         let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
         c.elect_all(80).unwrap();
         c.put(b"br", b"good").unwrap();
-        let hk = {
-            let mut k = b"\0store/hist/".to_vec();
-            k.extend_from_slice(b"br");
-            k
-        };
+        // F100: hist_key length-prefixes the user component.
+        let hk = hist_key(b"br");
         // Flip a byte in durable hist on every node.
         for nid in 1..=3u64 {
             let n = c.nodes.get_mut(&nid).unwrap();
@@ -6840,6 +6910,56 @@ mod tests {
         bad.extend_from_slice(b"1/hard");
         let err = c.put(&bad, b"x").unwrap_err();
         assert!(err.to_string().contains("reserved"), "{err}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// F100: intent/hist/txn user keys length-prefixed — no sibling prefix leak.
+    #[test]
+    fn intent_hist_txn_user_keys_not_prefix_siblings() {
+        let ia = intent_key(b"a");
+        let iab = intent_key(b"ab");
+        let ha = hist_key(b"a");
+        let hab = hist_key(b"ab");
+        let pa = txn_pair_key(1, b"a");
+        let pab = txn_pair_key(1, b"ab");
+        assert!(
+            !iab.starts_with(&ia),
+            "intent_key(a) must not prefix intent_key(ab): {ia:?} vs {iab:?}"
+        );
+        assert!(
+            !hab.starts_with(&ha),
+            "hist_key(a) must not prefix hist_key(ab)"
+        );
+        assert!(
+            !pab.starts_with(&pa),
+            "txn_pair_key(a) must not prefix txn_pair_key(ab)"
+        );
+        // Decode path used by open GC / install-snapshot.
+        assert_eq!(
+            user_from_meta_suffix(ia.strip_prefix(INTENT_PREFIX).unwrap()).as_deref(),
+            Some(b"a".as_ref())
+        );
+        assert_eq!(
+            user_from_meta_suffix(iab.strip_prefix(INTENT_PREFIX).unwrap()).as_deref(),
+            Some(b"ab".as_ref())
+        );
+        // Round-trip: multi-key TX with sibling user keys stays independent.
+        let dir = temp();
+        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        c.elect_all(80).unwrap();
+        c.commit_tx([
+            (b"a".as_slice(), b"va".as_slice()),
+            (b"ab".as_slice(), b"vab".as_slice()),
+        ])
+        .unwrap();
+        assert_eq!(c.get(b"a").unwrap().as_deref(), Some(b"va".as_ref()));
+        assert_eq!(c.get(b"ab").unwrap().as_deref(), Some(b"vab".as_ref()));
+        // SI hist load after reopen.
+        drop(c);
+        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        c.elect_all(40).unwrap();
+        assert_eq!(c.get(b"a").unwrap().as_deref(), Some(b"va".as_ref()));
+        assert_eq!(c.get(b"ab").unwrap().as_deref(), Some(b"vab".as_ref()));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
