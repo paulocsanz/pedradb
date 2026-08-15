@@ -326,8 +326,22 @@ fn query_param(path: &str, key: &str) -> Option<String> {
     None
 }
 
+/// Origin-form path for routing (strip query; accept absolute-form request-target).
+///
+/// F91: proxies/clients may send `http://host/kv/x` (absolute-form). A raw
+/// `strip_prefix("/kv/")` then failed and every route 404'd.
 fn path_only(path: &str) -> &str {
-    path.split_once('?').map(|(p, _)| p).unwrap_or(path)
+    let mut p = path;
+    // Absolute-form: scheme://authority/path?query
+    if let Some(rest) = p
+        .strip_prefix("http://")
+        .or_else(|| p.strip_prefix("https://"))
+        .or_else(|| p.strip_prefix("HTTP://"))
+        .or_else(|| p.strip_prefix("HTTPS://"))
+    {
+        p = rest.find('/').map(|i| &rest[i..]).unwrap_or("/");
+    }
+    p.split_once('?').map(|(a, _)| a).unwrap_or(p)
 }
 
 /// Decode `%HH` in a path segment (F75). Invalid sequences are left as-is.
@@ -818,6 +832,66 @@ mod tests {
             code, 404,
             "differing Content-Length must fail closed, GET {code} {body:?}"
         );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn path_only_strips_absolute_form_request_target() {
+        assert_eq!(path_only("/kv/x"), "/kv/x");
+        assert_eq!(path_only("/kv/x?y=1"), "/kv/x");
+        // F91: absolute-form must yield origin-form path
+        assert_eq!(path_only("http://127.0.0.1:9/kv/x"), "/kv/x");
+        assert_eq!(path_only("https://h/kv/a%2Fb?q=1"), "/kv/a%2Fb");
+        assert_eq!(path_only("HTTP://H/dcs/kv/k"), "/dcs/kv/k");
+        assert_eq!(path_only("http://only-host"), "/");
+    }
+
+    /// F91: absolute-form `PUT http://host/kv/k` must not 404 the route.
+    #[test]
+    fn kv_http_absolute_form_request_target() {
+        let dir = temp("abs-form");
+        let addr = bind_ephemeral();
+        let srv = KvServer::open(&dir).unwrap();
+        thread::spawn(move || {
+            let _ = srv.serve(addr);
+        });
+        thread::sleep(Duration::from_millis(100));
+        let mut stream = TcpStream::connect(addr).unwrap();
+        let host = format!("{addr}");
+        let req = format!(
+            "PUT http://{host}/kv/abs HTTP/1.0\r\nContent-Length: 3\r\nHost: {host}\r\n\r\nyes"
+        );
+        stream.write_all(req.as_bytes()).unwrap();
+        let _ = stream.shutdown(std::net::Shutdown::Write);
+        let mut resp = Vec::new();
+        stream.read_to_end(&mut resp).unwrap();
+        let text = String::from_utf8_lossy(&resp);
+        let put_code = text
+            .lines()
+            .next()
+            .and_then(|l| l.split_whitespace().nth(1))
+            .and_then(|c| c.parse::<u16>().ok())
+            .unwrap_or(0);
+        assert_eq!(
+            put_code, 200,
+            "absolute-form PUT must route to /kv/abs, resp={text:?}"
+        );
+        let (code, body) = http_exchange(addr, "GET", "/kv/abs", b"").unwrap();
+        assert_eq!(code, 200, "GET after absolute-form PUT, body={body:?}");
+        assert_eq!(body, b"yes");
+        // GET absolute-form too
+        let mut stream = TcpStream::connect(addr).unwrap();
+        let req = format!("GET http://{host}/kv/abs HTTP/1.0\r\nHost: {host}\r\n\r\n");
+        stream.write_all(req.as_bytes()).unwrap();
+        let _ = stream.shutdown(std::net::Shutdown::Write);
+        let mut resp = Vec::new();
+        stream.read_to_end(&mut resp).unwrap();
+        let body = resp
+            .windows(4)
+            .position(|w| w == b"\r\n\r\n")
+            .map(|i| resp[i + 4..].to_vec())
+            .unwrap_or_default();
+        assert_eq!(body, b"yes", "absolute-form GET must return value");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

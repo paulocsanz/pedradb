@@ -9,6 +9,19 @@
 #![deny(unsafe_code)]
 #![warn(missing_docs)]
 
+mod children_kernel;
+mod fields_kernel;
+
+pub use children_kernel::{
+    key_in_half_open, next_byte_in_packed_children, next_byte_in_packed_children_as_is,
+    packed_children_end, packed_children_end_as_is, packed_children_start, PACKED_CHILD_END,
+    PACKED_CHILD_END_AS_IS, PACKED_CHILD_SEP,
+};
+pub use fields_kernel::{
+    child_bytes_after, child_bytes_after_as_is, decode_fields, decode_pair_first_nul,
+    encode_fields, encode_fields_as_is, field_kept, field_kept_as_is,
+};
+
 use pedradb_store::{Result, StoreCluster, Transaction};
 
 /// Live value? Empty bytes are treated as **cleared/tombstone** (FDB clear removes
@@ -18,67 +31,13 @@ fn is_live(v: &[u8]) -> bool {
     !v.is_empty()
 }
 
-/// Length-prefixed field join (F60).
-///
-/// Historical recipe payloads used `a || 0x00 || b`. Any `0x00` inside `a`
-/// truncated the field on decode, so index maintenance cleared the wrong key
-/// and left a stale secondary entry (silent extra hit on the old zip/index).
-#[must_use]
-fn encode_fields(parts: &[&[u8]]) -> Vec<u8> {
-    let mut out = Vec::new();
-    for p in parts {
-        let n = u32::try_from(p.len()).expect("field len fits u32");
-        out.extend_from_slice(&n.to_be_bytes());
-        out.extend_from_slice(p);
-    }
-    out
-}
-
-/// Decode `encode_fields` payload into `n` fields (body may trail the last).
-///
-/// Returns `None` on short/corrupt input.
-#[must_use]
-fn decode_fields(raw: &[u8], n: usize) -> Option<Vec<Vec<u8>>> {
-    let mut off = 0usize;
-    let mut out = Vec::with_capacity(n);
-    for _ in 0..n {
-        if raw.len() < off + 4 {
-            return None;
-        }
-        let len = u32::from_be_bytes(raw[off..off + 4].try_into().ok()?) as usize;
-        off += 4;
-        if raw.len() < off + len {
-            return None;
-        }
-        out.push(raw[off..off + len].to_vec());
-        off += len;
-    }
-    // Trailing bytes after `n` length-prefixed fields = last "body" if caller
-    // encoded body as a final field — we always encode all parts as fields.
-    if off != raw.len() {
-        // Tolerate legacy `a\0b` only when no length header looks valid? No —
-        // strict: residual bytes mean corrupt / wrong codec.
-        // Actually body is always a field too, so off must equal len.
-        return None;
-    }
-    Some(out)
-}
-
 /// Best-effort decode: length-prefixed first, then legacy `sep=0x00` layout.
 #[must_use]
 fn decode_pair_compat(raw: &[u8]) -> (Vec<u8>, Vec<u8>) {
     if let Some(parts) = decode_fields(raw, 2) {
         return (parts[0].clone(), parts[1].clone());
     }
-    // Legacy F60-broken: first 0x00 splits a/b (NUL inside `a` truncates).
-    let sep = raw.iter().position(|&b| b == 0).unwrap_or(raw.len());
-    let a = raw[..sep].to_vec();
-    let b = if sep < raw.len() {
-        raw[sep + 1..].to_vec()
-    } else {
-        Vec::new()
-    };
-    (a, b)
+    decode_pair_first_nul(raw)
 }
 
 #[must_use]
@@ -162,9 +121,7 @@ impl Subspace {
     /// Inclusive start of range for this subspace.
     #[must_use]
     pub fn range_start(&self) -> Vec<u8> {
-        let mut s = self.prefix.clone();
-        s.push(0x00);
-        s
+        packed_children_start(&self.prefix)
     }
 
     /// Exclusive end of packed children: `prefix || 0x01`.
@@ -174,9 +131,7 @@ impl Subspace {
     /// `[pack(90), pack(90)||0xff)` (F59).
     #[must_use]
     pub fn range_end(&self) -> Vec<u8> {
-        let mut e = self.prefix.clone();
-        e.push(0x01);
-        e
+        packed_children_end(&self.prefix)
     }
 
     /// Half-open range of packed children of `self.pack(parts)`:
@@ -184,11 +139,7 @@ impl Subspace {
     #[must_use]
     pub fn children_range(&self, parts: &[&[u8]]) -> (Vec<u8>, Vec<u8>) {
         let packed = self.pack(parts);
-        let mut start = packed.clone();
-        start.push(0x00);
-        let mut end = packed;
-        end.push(0x01);
-        (start, end)
+        (packed_children_start(&packed), packed_children_end(&packed))
     }
 
     /// Immediate packed child of `self.pack(parts)` inside `key`.
@@ -198,7 +149,7 @@ impl Subspace {
     #[must_use]
     pub fn child_suffix(&self, parts: &[&[u8]], key: &[u8]) -> Option<Vec<u8>> {
         let (start, _) = self.children_range(parts);
-        let rest = key.strip_prefix(start.as_slice())?;
+        let rest = child_bytes_after(key, start.as_slice())?;
         let (comp, _) = Self::take_component(rest)?;
         Some(comp.to_vec())
     }
@@ -279,12 +230,7 @@ impl Table {
     ///
     /// # Errors
     /// Store errors.
-    pub fn get(
-        &self,
-        cluster: &StoreCluster,
-        row: &[u8],
-        col: &[u8],
-    ) -> Result<Option<Vec<u8>>> {
+    pub fn get(&self, cluster: &StoreCluster, row: &[u8], col: &[u8]) -> Result<Option<Vec<u8>>> {
         let mut tr = Transaction::at_version(cluster.read_version());
         self.get_cell(&mut tr, cluster, row, col)
     }
@@ -420,12 +366,8 @@ impl Queue {
     }
 
     fn parse_u64(raw: Option<Vec<u8>>) -> u64 {
-        raw.and_then(|b| {
-            std::str::from_utf8(&b)
-                .ok()
-                .and_then(|s| s.parse().ok())
-        })
-        .unwrap_or(0)
+        raw.and_then(|b| std::str::from_utf8(&b).ok().and_then(|s| s.parse().ok()))
+            .unwrap_or(0)
     }
 
     /// Push to back.
@@ -501,12 +443,7 @@ impl Multimap {
     ///
     /// # Errors
     /// Commit.
-    pub fn insert(
-        &self,
-        cluster: &mut StoreCluster,
-        key: &[u8],
-        value: &[u8],
-    ) -> Result<u64> {
+    pub fn insert(&self, cluster: &mut StoreCluster, key: &[u8], value: &[u8]) -> Result<u64> {
         let mut tr = cluster.begin();
         // key: root/key/value so same value is idempotent
         let k = self.root.pack(&[key, value]);
@@ -553,20 +490,11 @@ impl PriorityQueue {
     ///
     /// # Errors
     /// Commit.
-    pub fn push(
-        &self,
-        cluster: &mut StoreCluster,
-        priority: u64,
-        value: &[u8],
-    ) -> Result<u64> {
+    pub fn push(&self, cluster: &mut StoreCluster, priority: u64, value: &[u8]) -> Result<u64> {
         let mut tr = cluster.begin();
         let seq = tr
             .get(cluster, self.seq_meta.pack(&[b"n"]))?
-            .and_then(|b| {
-                std::str::from_utf8(&b)
-                    .ok()
-                    .and_then(|s| s.parse().ok())
-            })
+            .and_then(|b| std::str::from_utf8(&b).ok().and_then(|s| s.parse().ok()))
             .unwrap_or(0u64);
         let prio_bytes = priority.to_be_bytes();
         let seq_bytes = format!("{seq:020}");
@@ -590,10 +518,7 @@ impl PriorityQueue {
         let start = self.data.range_start();
         let end = self.data.range_end();
         let pairs = tr.get_range(cluster, &start, &end)?;
-        Ok(pairs
-            .into_iter()
-            .find(|(_, v)| is_live(v))
-            .map(|(_, v)| v))
+        Ok(pairs.into_iter().find(|(_, v)| is_live(v)).map(|(_, v)| v))
     }
 
     /// Pop min.
@@ -638,10 +563,7 @@ impl RecordTable {
     }
 
     fn row_key(&self, pk: &[u8]) -> Vec<u8> {
-        Subspace::new(b"rec")
-            .sub(&self.name)
-            .sub(b"r")
-            .pack(&[pk])
+        Subspace::new(b"rec").sub(&self.name).sub(b"r").pack(&[pk])
     }
 
     fn idx_key(&self, idx_val: &[u8], pk: &[u8]) -> Vec<u8> {
@@ -801,11 +723,7 @@ impl RecordTable {
     ///
     /// # Errors
     /// Range / store.
-    pub fn lookup_index(
-        &self,
-        cluster: &StoreCluster,
-        index_val: &[u8],
-    ) -> Result<Vec<Vec<u8>>> {
+    pub fn lookup_index(&self, cluster: &StoreCluster, index_val: &[u8]) -> Result<Vec<Vec<u8>>> {
         let mut tr = Transaction::at_version(cluster.read_version());
         let idx = Subspace::new(b"rec")
             .sub(&self.name)
@@ -973,10 +891,7 @@ mod tests {
             "zip change left stale index under nul zip (value\\0 split): {stale:?}"
         );
         assert!(
-            u.ids_in_zip(&c, b"99")
-                .unwrap()
-                .iter()
-                .any(|i| i == b"u1"),
+            u.ids_in_zip(&c, b"99").unwrap().iter().any(|i| i == b"u1"),
             "new zip must list u1"
         );
         let (z, n) = u.get_user(&c, b"u1").unwrap().expect("u1");
@@ -1046,24 +961,22 @@ mod tests {
         let rec = RecordTable::new(b"acct2", b"email");
         let iv = [b'a', 0x00, b'@', b'x'];
         rec.upsert(&mut c, b"pk1", &iv, b"row").unwrap();
-        assert!(
-            rec.lookup_index(&c, &iv)
-                .unwrap()
-                .iter()
-                .any(|p| p == b"pk1")
-        );
+        assert!(rec
+            .lookup_index(&c, &iv)
+            .unwrap()
+            .iter()
+            .any(|p| p == b"pk1"));
         rec.upsert(&mut c, b"pk1", b"b@x", b"row").unwrap();
         let stale = rec.lookup_index(&c, &iv).unwrap();
         assert!(
             stale.is_empty(),
             "index_val with NUL left stale entry after change: {stale:?}"
         );
-        assert!(
-            rec.lookup_index(&c, b"b@x")
-                .unwrap()
-                .iter()
-                .any(|p| p == b"pk1")
-        );
+        assert!(rec
+            .lookup_index(&c, b"b@x")
+            .unwrap()
+            .iter()
+            .any(|p| p == b"pk1"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -1180,9 +1093,18 @@ mod tests {
         pq.push(&mut c, 1, b"high").unwrap();
         pq.push(&mut c, 5, b"mid").unwrap();
         assert_eq!(pq.peek_min(&c).unwrap().as_deref(), Some(b"high".as_ref()));
-        assert_eq!(pq.pop_min(&mut c).unwrap().as_deref(), Some(b"high".as_ref()));
-        assert_eq!(pq.pop_min(&mut c).unwrap().as_deref(), Some(b"mid".as_ref()));
-        assert_eq!(pq.pop_min(&mut c).unwrap().as_deref(), Some(b"low".as_ref()));
+        assert_eq!(
+            pq.pop_min(&mut c).unwrap().as_deref(),
+            Some(b"high".as_ref())
+        );
+        assert_eq!(
+            pq.pop_min(&mut c).unwrap().as_deref(),
+            Some(b"mid".as_ref())
+        );
+        assert_eq!(
+            pq.pop_min(&mut c).unwrap().as_deref(),
+            Some(b"low".as_ref())
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -1256,7 +1178,10 @@ mod tests {
         rec.upsert_two_indexes(&mut c, b"phone", b"9", b"e@9", b"555", b"z")
             .unwrap();
         let by_email = rec.lookup_index(&c, b"e@9").unwrap();
-        assert!(by_email.iter().any(|p| p == b"9"), "email index {by_email:?}");
+        assert!(
+            by_email.iter().any(|p| p == b"9"),
+            "email index {by_email:?}"
+        );
         // phone index via subspace pack
         let (phone_prefix, end) = Subspace::new(b"rec")
             .sub(b"acct")
@@ -1266,7 +1191,9 @@ mod tests {
         let mut tr = c.begin();
         let pairs = tr.get_range(&c, &phone_prefix, &end).unwrap();
         assert!(
-            pairs.iter().any(|(k, v)| !v.is_empty() && k.ends_with(b"9")),
+            pairs
+                .iter()
+                .any(|(k, v)| !v.is_empty() && k.ends_with(b"9")),
             "phone index missing: {pairs:?}"
         );
         let _ = std::fs::remove_dir_all(&dir);

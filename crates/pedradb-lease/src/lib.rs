@@ -16,13 +16,22 @@ use std::path::Path;
 /// Key prefix for lease records.
 pub const LEASE_PREFIX: &[u8] = b"lease/";
 
+fn push_len_pref(buf: &mut Vec<u8>, part: &[u8]) {
+    let n = u32::try_from(part.len()).expect("lease name len fits u32");
+    buf.extend_from_slice(&n.to_be_bytes());
+    buf.extend_from_slice(part);
+}
+
 /// Build the storage key for a lease name.
+///
+/// F90: raw `lease/` || name made `lease/a` a byte-prefix of `lease/ab`.
+/// Length-prefix the name (same framing as `pedradb-index` `row_key`, F89).
 #[must_use]
 pub fn lease_key(name: impl AsRef<[u8]>) -> Vec<u8> {
     let n = name.as_ref();
-    let mut k = Vec::with_capacity(LEASE_PREFIX.len() + n.len());
+    let mut k = Vec::with_capacity(LEASE_PREFIX.len() + 4 + n.len());
     k.extend_from_slice(LEASE_PREFIX);
-    k.extend_from_slice(n);
+    push_len_pref(&mut k, n);
     k
 }
 
@@ -405,5 +414,45 @@ mod tests {
         assert_eq!(w2.silent_wrong, 0, "lease-crash-reopen {w2:?}");
         let _ = fs::remove_dir_all(&d1);
         let _ = fs::remove_dir_all(&d2);
+    }
+
+    /// F90: `lease/` || name made `lease/a` a prefix of `lease/ab`.
+    #[test]
+    fn lease_key_name_is_not_prefix_of_sibling_name() {
+        let a = lease_key(b"a");
+        let ab = lease_key(b"ab");
+        assert!(
+            !ab.starts_with(&a),
+            "lease_key(a) must not be a byte-prefix of lease_key(ab): {a:?} vs {ab:?}"
+        );
+        assert_ne!(a, ab);
+        let dir = temp_dir();
+        let store = LeaseStore::open(&dir).unwrap();
+        store.try_acquire(b"a", b"ha").unwrap().unwrap();
+        store.try_acquire(b"ab", b"hab").unwrap().unwrap();
+        assert_eq!(store.holder(b"a").as_deref(), Some(b"ha".as_ref()));
+        assert_eq!(store.holder(b"ab").as_deref(), Some(b"hab".as_ref()));
+        let end = pedradb_core::prefix_exclusive_end(&a);
+        let hits: Vec<_> = store
+            .db()
+            .range(
+                std::ops::Bound::Included(a.as_slice()),
+                match end.as_deref() {
+                    Some(e) => std::ops::Bound::Excluded(e),
+                    None => std::ops::Bound::Unbounded,
+                },
+            )
+            .into_iter()
+            .map(|(k, _)| k)
+            .collect();
+        assert!(
+            hits.iter().any(|k| k.as_ref() == a.as_slice()),
+            "own lease missing from prefix scan: {hits:?}"
+        );
+        assert!(
+            !hits.iter().any(|k| k.as_ref() == ab.as_slice()),
+            "lease_key(a) prefix scan leaked sibling ab: {hits:?}"
+        );
+        let _ = fs::remove_dir_all(&dir);
     }
 }
