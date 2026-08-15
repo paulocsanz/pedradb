@@ -28,8 +28,9 @@ mod form_kernel;
 mod path_kernel;
 
 pub use auth_kernel::{
-    ascii_lower, ascii_upper, bearer_token_from_value, is_bearer_scheme, is_bearer_scheme_as_is,
-    normalize_http_method, normalize_http_method_as_is,
+    ascii_lower, ascii_upper, authorization_matches, bearer_token_from_value, is_bearer_scheme,
+    is_bearer_scheme_as_is, is_non_bearer_auth_scheme, normalize_http_method,
+    normalize_http_method_as_is,
 };
 pub use cl_kernel::{
     content_length_repeat_ok, content_length_repeat_ok_as_is, invalid_cl_as_zero,
@@ -181,6 +182,7 @@ fn header_token(headers: &[(String, String)]) -> Option<&str> {
     // fallback only (was first-match and shadowed a valid Bearer).
     // F150: non-Bearer Authorization (e.g. Basic) must not stop the scan —
     // keep looking for a later Bearer (or fall back to X-Pedra-Token).
+    // F151: scheme-only `Authorization: Bearer` is not a token either.
     let mut x_pedra = None;
     for (k, v) in headers {
         if k == "authorization" {
@@ -200,7 +202,9 @@ fn authorize(headers: &[(String, String)], token: &Option<String>) -> bool {
     match token {
         None => true,
         Some(t) if t.is_empty() => true,
-        Some(t) => header_token(headers) == Some(t.as_str()),
+        // F152: any extracted Bearer may match; first dummy Bearer used to 401
+        // a later valid one via header_token first-match.
+        Some(t) => authorization_matches(headers, t),
     }
 }
 
@@ -938,6 +942,113 @@ mod tests {
         let (code, body) =
             http_exchange_auth(addr, "GET", "/kv/ba", b"", Some("sekrit")).unwrap();
         assert_eq!(code, 200, "GET after Basic+Bearer PUT, body={body:?}");
+        assert_eq!(body, b"ok");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// F151: scheme-only `Authorization: Bearer` used to parse as the raw token
+    /// `"Bearer"` and stop the scan, so a later `Bearer <secret>` 401'd.
+    #[test]
+    fn kv_http_bearer_not_shadowed_by_earlier_scheme_only() {
+        let dir = temp("auth-scheme-only");
+        let addr = bind_ephemeral();
+        let srv = KvServer::open_with_auth(&dir, Some("sekrit".into())).unwrap();
+        thread::spawn(move || {
+            let _ = srv.serve(addr);
+        });
+        thread::sleep(Duration::from_millis(100));
+        let mut stream = TcpStream::connect(addr).unwrap();
+        stream
+            .write_all(
+                b"PUT /kv/so HTTP/1.0\r\nAuthorization: Bearer\r\nAuthorization: Bearer sekrit\r\nContent-Length: 2\r\nHost: localhost\r\n\r\nok",
+            )
+            .unwrap();
+        let _ = stream.shutdown(std::net::Shutdown::Write);
+        let mut resp = Vec::new();
+        let _ = stream.read_to_end(&mut resp);
+        let text = String::from_utf8_lossy(&resp);
+        let put_code = text
+            .lines()
+            .next()
+            .and_then(|l| l.split_whitespace().nth(1))
+            .and_then(|c| c.parse::<u16>().ok())
+            .unwrap_or(0);
+        assert_eq!(
+            put_code, 200,
+            "Bearer after scheme-only Authorization must authenticate, got {put_code} {text:?}"
+        );
+        let (code, body) =
+            http_exchange_auth(addr, "GET", "/kv/so", b"", Some("sekrit")).unwrap();
+        assert_eq!(code, 200, "GET after scheme-only+Bearer PUT, body={body:?}");
+        assert_eq!(body, b"ok");
+
+        let mut stream = TcpStream::connect(addr).unwrap();
+        stream
+            .write_all(
+                b"PUT /kv/sb HTTP/1.0\r\nAuthorization: Basic\r\nAuthorization: Bearer sekrit\r\nContent-Length: 2\r\nHost: localhost\r\n\r\nok",
+            )
+            .unwrap();
+        let _ = stream.shutdown(std::net::Shutdown::Write);
+        let mut resp = Vec::new();
+        let _ = stream.read_to_end(&mut resp);
+        let text = String::from_utf8_lossy(&resp);
+        let put_code = text
+            .lines()
+            .next()
+            .and_then(|l| l.split_whitespace().nth(1))
+            .and_then(|c| c.parse::<u16>().ok())
+            .unwrap_or(0);
+        assert_eq!(
+            put_code, 200,
+            "Bearer after scheme-only Basic must authenticate, got {put_code} {text:?}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn header_token_is_first_extracted_bearer() {
+        let h = [
+            ("authorization".into(), "Bearer nope".into()),
+            ("authorization".into(), "Bearer sekrit".into()),
+        ];
+        assert_eq!(header_token(&h), Some("nope"));
+        assert!(authorization_matches(&h, "sekrit"));
+    }
+
+    /// F152: first `Authorization: Bearer <wrong>` used to lock out a later
+    /// valid Bearer (same first-match class as F150/F151).
+    #[test]
+    fn kv_http_later_bearer_not_shadowed_by_earlier_wrong_bearer() {
+        let dir = temp("auth-wrong-bearer");
+        let addr = bind_ephemeral();
+        let srv = KvServer::open_with_auth(&dir, Some("sekrit".into())).unwrap();
+        thread::spawn(move || {
+            let _ = srv.serve(addr);
+        });
+        thread::sleep(Duration::from_millis(100));
+        let mut stream = TcpStream::connect(addr).unwrap();
+        stream
+            .write_all(
+                b"PUT /kv/wb HTTP/1.0\r\nAuthorization: Bearer nope\r\nAuthorization: Bearer sekrit\r\nContent-Length: 2\r\nHost: localhost\r\n\r\nok",
+            )
+            .unwrap();
+        let _ = stream.shutdown(std::net::Shutdown::Write);
+        let mut resp = Vec::new();
+        let _ = stream.read_to_end(&mut resp);
+        let text = String::from_utf8_lossy(&resp);
+        let put_code = text
+            .lines()
+            .next()
+            .and_then(|l| l.split_whitespace().nth(1))
+            .and_then(|c| c.parse::<u16>().ok())
+            .unwrap_or(0);
+        assert_eq!(
+            put_code, 200,
+            "later valid Bearer must authenticate, got {put_code} {text:?}"
+        );
+        let (code, body) =
+            http_exchange_auth(addr, "GET", "/kv/wb", b"", Some("sekrit")).unwrap();
+        assert_eq!(code, 200, "GET after wrong+valid Bearer PUT, body={body:?}");
         assert_eq!(body, b"ok");
         let _ = std::fs::remove_dir_all(&dir);
     }

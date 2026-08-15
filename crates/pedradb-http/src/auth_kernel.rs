@@ -46,6 +46,16 @@ pub fn is_bearer_scheme(scheme: &str) -> bool {
     scheme.eq_ignore_ascii_case("bearer")
 }
 
+/// Other common auth-schemes. Scheme-only (`Authorization: Basic`) is not a
+/// shared-secret token (F151).
+#[must_use]
+pub fn is_non_bearer_auth_scheme(scheme: &str) -> bool {
+    scheme.eq_ignore_ascii_case("basic")
+        || scheme.eq_ignore_ascii_case("digest")
+        || scheme.eq_ignore_ascii_case("negotiate")
+        || scheme.eq_ignore_ascii_case("ntlm")
+}
+
 /// AS-IS F85: only the two literal prefixes that were stripped.
 #[must_use]
 pub fn is_bearer_scheme_as_is(scheme: &str) -> bool {
@@ -57,17 +67,64 @@ pub fn is_bearer_scheme_as_is(scheme: &str) -> bool {
 /// - `Bearer <tok>` / `BEARER <tok>` → `Some(tok)` (F85)
 /// - Other auth-scheme (`Basic …`, `Digest …`) → `None` so the caller can keep
 ///   scanning (F150 — first Basic must not lock out a later Bearer)
+/// - Scheme-only `Bearer` / `BEARER` (no credentials) → `None` (F151 — used to
+///   be the raw token `"Bearer"` and stop the scan)
+/// - Empty value → `None`
 /// - Bare value with no scheme → `Some(value)` (legacy)
 #[must_use]
 pub fn bearer_token_from_value(value: &str) -> Option<&str> {
     let v = value.trim();
+    if v.is_empty() {
+        return None;
+    }
     if let Some((scheme, rest)) = v.split_once(char::is_whitespace) {
         if is_bearer_scheme(scheme) {
-            return Some(rest.trim());
+            let tok = rest.trim();
+            if tok.is_empty() {
+                return None;
+            }
+            return Some(tok);
         }
         return None;
     }
+    // F151: `Authorization: Bearer` / `Basic` with no credentials is the
+    // scheme, not a shared-secret token named "Bearer" / "Basic".
+    if is_bearer_scheme(v) || is_non_bearer_auth_scheme(v) {
+        return None;
+    }
     Some(v)
+}
+
+/// F152: a later valid Bearer must win over an earlier dummy Bearer.
+///
+/// X-Pedra-Token is fallback only when no Bearer token was extracted (F149).
+#[must_use]
+pub fn authorization_matches<K: AsRef<str>, V: AsRef<str>>(
+    headers: &[(K, V)],
+    expected: &str,
+) -> bool {
+    let mut saw_bearer = false;
+    let mut x_pedra: Option<&str> = None;
+    for (k, v) in headers {
+        let k = k.as_ref();
+        let v = v.as_ref();
+        if k.eq_ignore_ascii_case("authorization") {
+            if let Some(t) = bearer_token_from_value(v) {
+                saw_bearer = true;
+                if t == expected {
+                    return true;
+                }
+            }
+            continue;
+        }
+        if k.eq_ignore_ascii_case("x-pedra-token") && x_pedra.is_none() {
+            x_pedra = Some(v);
+        }
+    }
+    if saw_bearer {
+        return false;
+    }
+    x_pedra == Some(expected)
 }
 
 #[cfg(test)]
@@ -94,6 +151,34 @@ mod tests {
         assert_eq!(bearer_token_from_value("Basic YWJj"), None);
         assert_eq!(bearer_token_from_value("Digest abc"), None);
         assert_eq!(bearer_token_from_value("bare"), Some("bare"));
+        // F151: scheme-only / empty Bearer is not a token.
+        assert_eq!(bearer_token_from_value("Bearer"), None);
+        assert_eq!(bearer_token_from_value("BEARER"), None);
+        assert_eq!(bearer_token_from_value("Bearer   "), None);
+        assert_eq!(bearer_token_from_value("Basic"), None);
+        assert_eq!(bearer_token_from_value("DIGEST"), None);
+        assert_eq!(bearer_token_from_value(""), None);
+        assert_eq!(bearer_token_from_value("   "), None);
+    }
+
+    #[test]
+    fn any_bearer_matches() {
+        let dual = [
+            ("authorization".to_string(), "Bearer nope".to_string()),
+            ("authorization".to_string(), "Bearer sekrit".to_string()),
+        ];
+        assert!(authorization_matches(&dual, "sekrit"));
+        assert!(!authorization_matches(&dual, "nope-other"));
+        let x_only = [("x-pedra-token".to_string(), "sekrit".to_string())];
+        assert!(authorization_matches(&x_only, "sekrit"));
+        let bearer_then_x = [
+            ("authorization".to_string(), "Bearer nope".to_string()),
+            ("x-pedra-token".to_string(), "sekrit".to_string()),
+        ];
+        assert!(
+            !authorization_matches(&bearer_then_x, "sekrit"),
+            "F149: X-Pedra must not override a present (wrong) Bearer"
+        );
     }
 
     #[test]
