@@ -18,6 +18,9 @@ bytes.workspace = true
 tracing.workspace = true
 lz4_flex.workspace = true
 
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2"
+
 [[bench]]
 name = "baseline"
 harness = false

@@ -44,6 +44,15 @@ pub trait EnvFile: Read + Write + Seek {
     }
 }
 
+/// Hint for [`Env::advise`] (RFC-0029 P1.2 — `posix_fadvise`-shaped).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AdviseKind {
+    /// Prefetch / readahead (Linux `POSIX_FADV_WILLNEED`).
+    WillNeed,
+    /// Drop pages from cache (Linux `POSIX_FADV_DONTNEED`).
+    DontNeed,
+}
+
 /// Directory + file namespace the engine uses.
 ///
 /// `Clone` so flush/open paths can hold a copy alongside open file handles
@@ -120,6 +129,25 @@ pub trait Env: Clone {
         let mut dst = self.create(to)?;
         io::copy(&mut src, &mut dst)?;
         dst.sync_all()?;
+        Ok(())
+    }
+
+    /// Optional kernel readahead / cache-drop for `[offset, offset+len)` of `path`.
+    ///
+    /// Default is a **no-op** (sim / non-Linux). Production [`StdEnv`] uses
+    /// `posix_fadvise` on Linux. Errors are best-effort — callers should not
+    /// fail the request on advise failure.
+    ///
+    /// # Errors
+    /// Underlying I/O when the platform implements the hint.
+    fn advise(
+        &self,
+        path: &Path,
+        offset: u64,
+        len: u64,
+        kind: AdviseKind,
+    ) -> io::Result<()> {
+        let _ = (path, offset, len, kind);
         Ok(())
     }
 }
@@ -202,6 +230,70 @@ impl Env for StdEnv {
 
     fn metadata_len(&self, path: &Path) -> io::Result<u64> {
         Ok(fs::metadata(path)?.len())
+    }
+
+    fn advise(
+        &self,
+        path: &Path,
+        offset: u64,
+        len: u64,
+        kind: AdviseKind,
+    ) -> io::Result<()> {
+        #[cfg(target_os = "linux")]
+        {
+            use std::os::unix::io::AsRawFd;
+            let f = File::open(path)?;
+            let advice = match kind {
+                AdviseKind::WillNeed => libc::POSIX_FADV_WILLNEED,
+                AdviseKind::DontNeed => libc::POSIX_FADV_DONTNEED,
+            };
+            // posix_fadvise returns 0 on success, errno-style code otherwise.
+            let rc = unsafe {
+                libc::posix_fadvise(
+                    f.as_raw_fd(),
+                    i64::try_from(offset).unwrap_or(i64::MAX),
+                    i64::try_from(len).unwrap_or(0),
+                    advice,
+                )
+            };
+            if rc != 0 {
+                return Err(io::Error::from_raw_os_error(rc));
+            }
+            return Ok(());
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            let _ = (path, offset, len, kind);
+            Ok(())
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    #[test]
+    fn advise_default_and_std_are_best_effort() {
+        let dir = std::env::temp_dir().join(format!(
+            "pedra-advise-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("blob.bin");
+        {
+            let mut f = File::create(&path).unwrap();
+            f.write_all(&[0u8; 4096]).unwrap();
+            f.sync_all().unwrap();
+        }
+        // No-op platforms and Linux: must not panic; missing file may error on Linux open.
+        StdEnv.advise(&path, 0, 4096, AdviseKind::WillNeed).unwrap();
+        StdEnv.advise(&path, 0, 4096, AdviseKind::DontNeed).unwrap();
+        let _ = fs::remove_dir_all(&dir);
     }
 }
 

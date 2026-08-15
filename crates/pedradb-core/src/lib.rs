@@ -49,7 +49,7 @@ pub use db::{
     CompactOptions, Db, DbStats, OpenOptions, ScanProjection, Snapshot, WriteOptions,
     CHECKPOINT_META_FILE, L0_COMPACTION_TRIGGER, MAX_LSM_LEVEL, WAL_FILE_NAME,
 };
-pub use env::{Env, EnvFile, StdEnv};
+pub use env::{AdviseKind, Env, EnvFile, StdEnv};
 pub use error::{CoreError, Result};
 pub use host::{DetHost, Host, StdHost};
 pub use key::{

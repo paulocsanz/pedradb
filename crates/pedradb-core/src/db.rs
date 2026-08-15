@@ -1023,14 +1023,34 @@ impl<E: Env> Db<E> {
     /// Resolve vlog pointers in windows of [`Self::scan_prefetch`] (RFC-0029 P0.3).
     ///
     /// Single-threaded: each window issues up to N `Env` reads then continues.
-    /// Order of `stream` is unchanged. Missing/corrupt values become empty bytes
-    /// (same as [`Self::resolve_stream_value`]).
+    /// Before resolving a window, best-effort [`Env::advise`] `WillNeed` on each
+    /// vlog pointer range (RFC-0029 P1.2). Order of `stream` is unchanged.
+    /// Missing/corrupt values become empty bytes (same as [`Self::resolve_stream_value`]).
     fn prefetch_resolve_stream(&self, stream: &mut [(InternalKey, Bytes)]) {
         let n = self.scan_prefetch.max(1);
         let mut i = 0;
         while i < stream.len() {
             let end = (i + n).min(stream.len());
             let mut issued = 0u64;
+            // Kernel readahead hints (no-op on sim / non-Linux).
+            for slot in &stream[i..end] {
+                if slot.0.kind == ValueType::RangeDeletion {
+                    continue;
+                }
+                if let Some(ptr) = vlog::decode_vlog_ptr(slot.1.as_ref()) {
+                    let path = if ptr.file_num == 0 {
+                        self.dir.join(VLOG_FILE_NAME)
+                    } else {
+                        vlog::blob_path(&self.dir, ptr.file_num)
+                    };
+                    let _ = self.env.advise(
+                        &path,
+                        ptr.offset,
+                        u64::from(ptr.len),
+                        crate::env::AdviseKind::WillNeed,
+                    );
+                }
+            }
             for slot in &mut stream[i..end] {
                 if slot.0.kind == ValueType::RangeDeletion {
                     continue;

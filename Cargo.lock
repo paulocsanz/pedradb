@@ -406,6 +406,7 @@ version = "0.1.0"
 dependencies = [
  "bytes",
  "crc32c",
+ "libc",
  "lz4_flex",
  "parking_lot",
  "thiserror",
@@ -476,6 +477,7 @@ version = "0.1.0"
 dependencies = [
  "bytes",
  "pedradb-core",
+ "stateright",
 ]
 
 [[package]]
@@ -552,6 +554,7 @@ dependencies = [
  "pedradb-core",
  "pedradb-dcs",
  "pedradb-sim",
+ "stateright",
  "thiserror",
 ]
 
