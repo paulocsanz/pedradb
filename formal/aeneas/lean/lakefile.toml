@@ -1,0 +1,19 @@
+name = "vote_kernel"
+defaultTargets = ["Vote"]
+
+# Sibling checkout: /Users/paulo/software/aeneas (rev in ../PINS.md).
+[[require]]
+name = "aeneas"
+path = "../../../../aeneas/backends/lean"
+
+[[lean_lib]]
+name = "VoteKernel"
+
+[[lean_lib]]
+name = "Vote"
+
+[[lean_lib]]
+name = "IsolatedKernel"
+
+[[lean_lib]]
+name = "Isolated"

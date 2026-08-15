@@ -9,3 +9,7 @@ description = "etcd-class DCS state machine on PedraDB (RFC-0010 P2.1 / Patroni 
 pedradb-core.workspace = true
 bytes.workspace = true
 thiserror.workspace = true
+
+[dev-dependencies]
+# Same production lease_kernel as Dcs::get / dcs_get_at (F7 / F56).
+stateright = "0.31"

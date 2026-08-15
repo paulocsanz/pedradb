@@ -255,14 +255,7 @@ mod tests {
             let mut out: *mut u8 = ptr::null_mut();
             let mut len: usize = 0;
             assert_eq!(
-                montanha_fdb_transaction_get(
-                    db,
-                    tr2,
-                    key.as_ptr(),
-                    key.len(),
-                    &mut out,
-                    &mut len
-                ),
+                montanha_fdb_transaction_get(db, tr2, key.as_ptr(), key.len(), &mut out, &mut len),
                 MONTAHA_FDB_OK
             );
             assert_eq!(len, 2);

@@ -43,3 +43,5 @@ thiserror.workspace = true
 
 [dev-dependencies]
 pedradb-sim.workspace = true
+# Same production txn_kernel as apply / discard (RFC-0002 P9).
+stateright = "0.31"

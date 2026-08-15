@@ -10,19 +10,19 @@ Status de **acesso/leitura**, não de importância. Símbolos:
 | R003 | ❌ | 2007 | SOSP | Dynamo: Amazon's Highly Available Key-Value Store | — |
 | R004 | ❌ | 2012 | SIGMOD | bLSM: a general purpose log structured merge tree | — |
 | R005 | ✅ | 2016 | FAST | WiscKey: Separating Keys from Values in SSD-conscious Storage | `docs/references/wisckey-fast2016.pdf` |
-| R006 | ⚠️ | 2017 | SIGMOD | Monkey: Optimal Navigable Key-Value Store | `docs/references/monkey-sigmod2017.pdf` |
-| R007 | ⚠️ | 2018 | SIGMOD | Dostoevsky: Better Space-Time Trade-Offs for LSM-Tree Based Key-Value Stores | `docs/references/dostoevsky-sigmod2018.pdf` |
+| R006 | ✅ | 2017 | SIGMOD | Monkey: Optimal Navigable Key-Value Store | `docs/references/monkey-sigmod2017.pdf` |
+| R007 | ✅ | 2018 | SIGMOD | Dostoevsky: Better Space-Time Trade-Offs for LSM-Tree Based Key-Value Stores | `docs/references/dostoevsky-sigmod2018.pdf` |
 | R008 | ❌ | 2017 | SOSP | PebblesDB: Building Key-Value Stores using Fragmented Log-Structured Merge Trees | — |
 | R009 | ❌ | 2020 | FAST | Characterizing, Modeling, and Benchmarking RocksDB Key-Value Workloads at Facebook | — |
-| R010 | ❌ | 2021 | FAST | Evolution of Development Priorities in Key-value Stores Serving Large-scale Applications: The RocksDB Experience | — |
+| R010 | ✅ | 2021 | FAST | Evolution of Development Priorities in Key-value Stores Serving Large-scale Applications: The RocksDB Experience | `research/fontes/R010_Dong_2021_RocksExperience.pdf` |
 | R011 | ❌ | 2020 | ACM CSUR | LSM-based Storage Techniques: A Survey | — |
-| R012 | ❌ | 2021 | VLDB | Constructing and Analyzing the LSM Compaction Design Space | — |
-| R013 | ❌ | 2022 | VLDB | Spooky: Granulating LSM-Tree Compactions Correctly | — |
-| R014 | ❌ | 2022 | VLDB | Endure: A Robust Tuning Paradigm for LSM Trees Under Workload Uncertainty | — |
+| R012 | ✅ | 2021 | VLDB | Constructing and Analyzing the LSM Compaction Design Space | `research/fontes/R012_Sarkar_2021_LSMCompaction.pdf` |
+| R013 | ✅ | 2022 | VLDB | Spooky: Granulating LSM-Tree Compactions Correctly | `research/fontes/R013_Dayan_2022_Spooky.pdf` |
+| R014 | ✅ | 2022 | VLDB | Endure: A Robust Tuning Paradigm for LSM Trees Under Workload Uncertainty | `research/fontes/R014_Huynh_2022_Endure.pdf` |
 | R015 | ❌ | 2024 | VLDBJ | Towards flexibility and robustness of LSM trees | — |
-| R016 | ❌ | 2023 | FAST | ADOC: Automatically Harmonizing Dataflow Between Components in Log-Structured Key-Value Stores | — |
-| R017 | ❌ | 2019 | ATC | SILK: Preventing Latency Spikes in Log-Structured Merge Key-Value Stores | — |
-| R018 | ❌ | 2018 | ATC | HashKV: Enabling Efficient Updates in KV Storage via Hashing | — |
+| R016 | ✅ | 2023 | FAST | ADOC: Automatically Harmonizing Dataflow Between Components in Log-Structured Key-Value Stores | `research/fontes/R016_Yu_2023_ADOC.pdf` |
+| R017 | ✅ | 2019 | ATC | SILK: Preventing Latency Spikes in Log-Structured Merge Key-Value Stores | `research/fontes/R017_Balmau_2019_SILK.pdf` |
+| R018 | ✅ | 2018 | ATC | HashKV: Enabling Efficient Updates in KV Storage via Hashing | `docs/references/hashkv-atc2018.pdf` |
 | R019 | ❌ | 2020 | OSDI | From WiscKey to Bourbon: A Learned Index for Log-Structured Merge Trees | — |
 | R020 | ❌ | 2021 | SIGMOD | Chucky: A Succinct Cuckoo Filter for LSM-Tree | — |
 | R021 | ❌ | 2021 | arXiv 2103.02515 | Ribbon filter: practically smaller than Bloom and faster | — |
@@ -35,7 +35,7 @@ Status de **acesso/leitura**, não de importância. Símbolos:
 | R028 | ❌ | 2025 | SIGMOD | How to Grow an LSM-tree? Towards Bridging the Gap Between Theory and Practice | — |
 | R029 | ❌ | 2020 | ATC | SplinterDB: Closing the Bandwidth Gap for NVMe Key-Value Stores | — |
 | R030 | ❌ | 2023 | SIGMOD | SplinterDB and Maplets: Improving the Tradeoffs in Key-Value Store Compaction Policy | — |
-| R031 | ❌ | 2020 | SIGMOD | Lethe: A Tunable Delete-Aware LSM Engine | — |
+| R031 | ✅ | 2020 | SIGMOD | Lethe: A Tunable Delete-Aware LSM Engine | `research/fontes/R031_Sarkar_2020_Lethe.pdf` |
 | R032 | ⚠️ | 2023 | ICDE | Real-Time LSM-Trees for HTAP Workloads | `docs/references/realtime-lsm-htap-2022.pdf` |
 | R033 | ❌ | 2018 | SIGMOD | SuRF: Practical Range Query Filtering with Fast Succinct Tries | — |
 | R034 | ❌ | 2020 | SIGMOD | Rosetta: A Robust Space-Time Optimized Range Filter for Key-Value Stores | — |
@@ -45,14 +45,14 @@ Status de **acesso/leitura**, não de importância. Símbolos:
 | R038 | ❌ | 2018 | SIGMOD | FASTER: A Concurrent Key-Value Store with In-Place Updates | — |
 | R039 | ❌ | 2025 | arXiv 2507.09642 | Rethinking LSM-tree based Key-Value Stores: A Survey | — |
 | R040 | ❌ | 2026 | VLDB (accepted) | Dynamic read & write optimization with TurtleKV | — |
-| R041 | ⚠️ | 2010 | OSDI | Large-scale Incremental Processing Using Distributed Transactions and Notifications | `docs/references/percolator-osdi2010.pdf` |
+| R041 | ✅ | 2010 | OSDI | Large-scale Incremental Processing Using Distributed Transactions and Notifications | `docs/references/percolator-osdi2010.pdf` |
 | R042 | ❌ | 2012 | OSDI | Spanner: Google's Globally-Distributed Database | — |
-| R043 | ❌ | 2021 | SIGMOD | FoundationDB: A Distributed Unbundled Transactional Key Value Store | — |
-| R044 | ❌ | 2019 | SIGMOD | FoundationDB Record Layer: A Multi-Tenant Structured Datastore | — |
-| R045 | ❌ | 2020 | SIGMOD | CockroachDB: The Resilient Geo-Distributed SQL Database | — |
+| R043 | ✅ | 2021 | SIGMOD | FoundationDB: A Distributed Unbundled Transactional Key Value Store | `research/fontes/R043_Zhou_2021_FoundationDB.pdf` |
+| R044 | ✅ | 2019 | SIGMOD | FoundationDB Record Layer: A Multi-Tenant Structured Datastore | `research/fontes/R044_Chrysafis_2019_RecordLayer.pdf` |
+| R045 | ✅ | 2020 | SIGMOD | CockroachDB: The Resilient Geo-Distributed SQL Database | `research/fontes/R045_Taft_2020_CockroachDB.pdf` |
 | R046 | ❌ | 2022 | SIGMOD | Enabling the Next Generation of Multi-Region Applications with CockroachDB | — |
 | R047 | ❌ | 2025 | SIGMOD | CockroachDB Serverless: Sub-second Scaling from Zero with Multi-region Cluster Virtualization | — |
-| R048 | ⚠️ | 2020 | VLDB | TiDB: A Raft-based HTAP Database | `docs/references/tidb-raft-htap-vldb2020.pdf` |
+| R048 | ✅ | 2020 | VLDB | TiDB: A Raft-based HTAP Database | `docs/references/tidb-raft-htap-vldb2020.pdf` |
 | R049 | ❌ | 2022 | VLDB | OceanBase: A 707 Million tpmC Distributed Relational Database | — |
 | R050 | ❌ | 2023 | VLDB | OceanBase Paetica: A Hybrid Shared-Nothing/Shared-Everything Database | — |
 | R051 | ❌ | 2022 | VLDB | Magma: A High Data Density Storage Engine Used in Couchbase | — |

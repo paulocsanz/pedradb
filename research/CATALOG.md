@@ -1,13 +1,13 @@
 # Catalog — 100 papers for PedraDB
 
-**Updated:** 2026-08-14
+**Updated:** 2026-08-15
 **Machine copy:** [`catalog.tsv`](catalog.tsv) (same ids)
 **How ranked:** [`sources/HOW-THIS-LIST-WAS-BUILT.md`](sources/HOW-THIS-LIST-WAS-BUILT.md)
 **Norma:** [`QUALIDADE.md`](QUALIDADE.md) · **vai:** [`PLANO.md`](PLANO.md) · **ledger:** [`LEDGER.md`](LEDGER.md)
 
 This is a **relevance ranking for this repo**, not a global top-100. Recency is weighted (40 of 100 are 2020–2026) but canonical theory stays because we keep re-deriving it.
 
-**Status today:** 13 PDFs em `docs/references/`. **1 ficha D4** (R005). O resto do catálogo continua hipótese até ficha.
+**Status today:** 23 PDFs. **16 fichas D4**. O resto do catálogo continua hipótese até ficha.
 
 Legend: **C** = canonical · **R** = recent (2020–2026) · status `listed` | `have-pdf` | `ficha` | `blocked`
 
@@ -20,19 +20,19 @@ Legend: **C** = canonical · **R** = recent (2020–2026) · status `listed` | `
 | 3 | R003 | 2007 | SOSP | dist | C | listed | Dynamo | AP contrast; we are CP |
 | 4 | R004 | 2012 | SIGMOD | engine | C | listed | bLSM | Bloom + stall scheduling |
 | 5 | R005 | 2016 | FAST | engine | C | ficha | WiscKey | vlog; GC incremental OPEN |
-| 6 | R006 | 2017 | SIGMOD | engine | C | have-pdf | Monkey | non-uniform Bloom FPR |
-| 7 | R007 | 2018 | SIGMOD | engine | C | have-pdf | Dostoevsky | Lazy Leveling; **non-ship** |
+| 6 | R006 | 2017 | SIGMOD | engine | C | ficha | Monkey | non-uniform Bloom FPR |
+| 7 | R007 | 2018 | SIGMOD | engine | C | ficha | Dostoevsky | Lazy Leveling; L3 REFUSE |
 | 8 | R008 | 2017 | SOSP | engine | C | listed | PebblesDB | fragmented LSM / guards |
 | 9 | R009 | 2020 | FAST | engine | R | listed | RocksDB workloads at Facebook | real key/value sizes |
-| 10 | R010 | 2021 | FAST | engine | R | listed | The RocksDB Experience | incumbent we are scored against |
+| 10 | R010 | 2021 | FAST | engine | R | ficha | The RocksDB Experience | incumbent; space>WA |
 | 11 | R011 | 2020 | CSUR | engine | R | listed | LSM-based Storage Techniques | pre-2020 map |
-| 12 | R012 | 2021 | VLDB | engine | R | listed | LSM compaction design space | when / which / how much / layout |
-| 13 | R013 | 2022 | VLDB | engine | R | listed | Spooky | granulated compact |
-| 14 | R014 | 2022 | VLDB | engine | R | listed | Endure | robust tuning |
+| 12 | R012 | 2021 | VLDB | engine | R | ficha | LSM compaction design space | 4 primitives; L35 LO+1; L36–L37 REFUSE |
+| 13 | R013 | 2022 | VLDB | engine | R | ficha | Spooky | L11 after L35; Full≠Full-do-par |
+| 14 | R014 | 2022 | VLDB | engine | R | ficha | Endure | L12 robust static; always leveling |
 | 15 | R015 | 2024 | VLDBJ | engine | R | listed | Flexibility and robustness of LSM trees | Endure journal |
-| 16 | R016 | 2023 | FAST | engine | R | listed | ADOC | stall = dataflow |
-| 17 | R017 | 2019 | ATC | engine | C | listed | SILK | pacing / tail latency |
-| 18 | R018 | 2018 | ATC | engine | C | listed | HashKV | vlog GC locality |
+| 16 | R016 | 2023 | FAST | engine | R | ficha | ADOC | L41 overflow names; L42 tuner REFUSE |
+| 17 | R017 | 2019 | ATC | engine | C | ficha | SILK | L41 stall names + flush>L0 |
+| 18 | R018 | 2018 | ATC | engine | C | ficha | HashKV | hash groups; L19 MEASURE; Fig. 2 19.7× |
 | 19 | R019 | 2020 | OSDI | engine | R | listed | Bourbon | learned SST index; likely refuse |
 | 20 | R020 | 2021 | SIGMOD | ds | R | listed | Chucky | cuckoo filter for LSM |
 | 21 | R021 | 2021 | arXiv | ds | R | listed | Ribbon filter | Rocks shipped it; we have Bloom |
@@ -45,7 +45,7 @@ Legend: **C** = canonical · **R** = recent (2020–2026) · status `listed` | `
 | 28 | R028 | 2025 | SIGMOD | engine | R | listed | How to Grow an LSM-tree | vertical vs horizontal growth |
 | 29 | R029 | 2020 | ATC | engine | R | listed | SplinterDB | NVMe-first alternative |
 | 30 | R030 | 2023 | SIGMOD | engine | R | listed | SplinterDB and Maplets | compact policy on Bε-tree |
-| 31 | R031 | 2020 | SIGMOD | engine | R | listed | Lethe | deletes that disappear |
+| 31 | R031 | 2020 | SIGMOD | engine | R | ficha | Lethe | L38 FADE MEASURE; L43 KiWi REFUSE |
 | 32 | R032 | 2023 | ICDE | htap | R | have-pdf | Real-Time LSM-Trees | LASER; not 2nd primary |
 | 33 | R033 | 2018 | SIGMOD | ds | C | listed | SuRF | range filter |
 | 34 | R034 | 2020 | SIGMOD | ds | R | listed | Rosetta | range filter |
@@ -55,14 +55,14 @@ Legend: **C** = canonical · **R** = recent (2020–2026) · status `listed` | `
 | 38 | R038 | 2018 | SIGMOD | engine | C | listed | FASTER | hybrid log / in-place hot |
 | 39 | R039 | 2025 | arXiv | engine | R | listed | Rethinking LSM-KVS (survey) | 2020–25 map; not primary |
 | 40 | R040 | 2026 | VLDB* | engine | R | listed | TurtleKV | newest hybrid; confirm camera-ready |
-| 41 | R041 | 2010 | OSDI | layer | C | have-pdf | Percolator | OCC + oracle + 2PC on KV |
+| 41 | R041 | 2010 | OSDI | layer | C | ficha | Percolator | SI+2PC on KV; L22/L23 REFUSE |
 | 42 | R042 | 2012 | OSDI | dist | C | listed | Spanner | TrueTime we will not fake |
-| 43 | R043 | 2021 | SIGMOD | dist | R | listed | FoundationDB | Montanha face + DST |
-| 44 | R044 | 2019 | SIGMOD | layer | C | listed | FDB Record Layer | indexes as KV projections |
-| 45 | R045 | 2020 | SIGMOD | layer | R | listed | CockroachDB | SQL + Multi-Raft + Pebble |
+| 43 | R043 | 2021 | SIGMOD | dist | R | ficha | FoundationDB | layers+sim; L29 REFUSE role-split |
+| 44 | R044 | 2019 | SIGMOD | layer | C | ficha | FDB Record Layer | same-TX indexes; L32 REFUSE produto RL |
+| 45 | R045 | 2020 | SIGMOD | layer | R | ficha | CockroachDB | Multi-Raft; L39 lease MEASURE; L40 REFUSE |
 | 46 | R046 | 2022 | SIGMOD | dist | R | listed | Multi-region CockroachDB | declarative geo |
 | 47 | R047 | 2025 | SIGMOD | dist | R | listed | CockroachDB Serverless | multi-tenant virt; not P0 |
-| 48 | R048 | 2020 | VLDB | layer | R | have-pdf | TiDB (Raft HTAP) | learner ≠ voter |
+| 48 | R048 | 2020 | VLDB | layer | R | ficha | TiDB (Raft HTAP) | learner ≠ voter; L24 REFUSE |
 | 49 | R049 | 2022 | VLDB | layer | R | listed | OceanBase | LSM inside distributed SQL |
 | 50 | R050 | 2023 | VLDB | dist | R | listed | OceanBase Paetica | one binary, one or many nodes |
 | 51 | R051 | 2022 | VLDB | engine | R | listed | Magma | LSM + segmented log |
@@ -137,7 +137,18 @@ Do not re-fetch. Fichar from these first (Wave 0 in `queue.md`):
 | ID | Path |
 |----|------|
 | R005 | `docs/references/wisckey-fast2016.pdf` |
+| R018 | `docs/references/hashkv-atc2018.pdf` |
 | R006 | `docs/references/monkey-sigmod2017.pdf` |
+| R010 | `research/fontes/R010_Dong_2021_RocksExperience.pdf` |
+| R043 | `research/fontes/R043_Zhou_2021_FoundationDB.pdf` |
+| R044 | `research/fontes/R044_Chrysafis_2019_RecordLayer.pdf` |
+| R012 | `research/fontes/R012_Sarkar_2021_LSMCompaction.pdf` |
+| R013 | `research/fontes/R013_Dayan_2022_Spooky.pdf` |
+| R014 | `research/fontes/R014_Huynh_2022_Endure.pdf` |
+| R017 | `research/fontes/R017_Balmau_2019_SILK.pdf` |
+| R016 | `research/fontes/R016_Yu_2023_ADOC.pdf` |
+| R031 | `research/fontes/R031_Sarkar_2020_Lethe.pdf` |
+| R045 | `research/fontes/R045_Taft_2020_CockroachDB.pdf` |
 | R007 | `docs/references/dostoevsky-sigmod2018.pdf` |
 | R032 | `docs/references/realtime-lsm-htap-2022.pdf` |
 | R041 | `docs/references/percolator-osdi2010.pdf` |

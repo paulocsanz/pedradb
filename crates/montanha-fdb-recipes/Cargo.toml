@@ -9,3 +9,5 @@ description = "FDB design recipes on Montanha Transaction (bug-hunt / SI-OCC reg
 pedradb-store.workspace = true
 
 [dev-dependencies]
+# Same production pack_cut_tag as Subspace::pack (F62).
+stateright = "0.31"

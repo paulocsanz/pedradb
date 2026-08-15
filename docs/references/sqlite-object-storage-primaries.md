@@ -140,6 +140,10 @@ Source: <https://www.tigrisdata.com/docs/concepts/architecture/>
 This contradicts the 2026-08-11 in-repo claim that Tigris is “FDB wearing
 an S3 costume” as the *data* plane. Costume is the API; data plane is block.
 
+Longer extract + media-tier note (2026-08-15):
+[`tigris-architecture-primaries.md`](tigris-architecture-primaries.md),
+[`../research/object-storage/06-tigris-and-media-tiers.md`](../research/object-storage/06-tigris-and-media-tiers.md).
+
 ## JuiceFS (docs)
 
 Sources: <https://juicefs.com/docs/cloud/introduction/architecture/> ;

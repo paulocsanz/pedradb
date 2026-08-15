@@ -53,7 +53,12 @@ pub enum VoteDecision {
 /// Whether the follower may still vote for `candidate_id` in this term.
 #[must_use]
 pub fn can_vote(voted_for: Option<u64>, candidate_id: u64) -> bool {
-    voted_for.is_none() || voted_for == Some(candidate_id)
+    // Match, not `Option ==`: Aeneas has no model of `PartialEq<Option<u64>>`
+    // (extract would axiom it). `u64 == u64` is in the Lean std.
+    match voted_for {
+        None => true,
+        Some(v) => v == candidate_id,
+    }
 }
 
 /// Raft §5.4.1 log up-to-date (candidate at least as new as local).
@@ -85,6 +90,7 @@ pub fn log_up_to_date(
 /// - finite universe: [`tests::theorem_vote_decision_iff_on_finite_domain`]
 /// - ∀u64 Verus twin: `crates/pedradb-raft/verus/vote_decision.rs`
 ///   (`./scripts/verus_vote_decision.sh` → `1 verified, 0 errors`)
+///
 /// See `determinismo/pedradb-dst/formal/P1.4-vote-theorem.md`.
 ///
 /// # Does not cover
@@ -152,7 +158,12 @@ pub enum PersistOutcome {
 /// `sent_grant ⇒ persist == Ok`.
 #[must_use]
 pub fn grant_after_persist(decision: VoteDecision, persist: PersistOutcome) -> bool {
-    decision == VoteDecision::WouldGrant && persist == PersistOutcome::Ok
+    // Match, not `==` on enums: derived PartialEq extracts to discriminant
+    // `Result` wrappers that Lean cannot `cases` through.
+    matches!(
+        (decision, persist),
+        (VoteDecision::WouldGrant, PersistOutcome::Ok)
+    )
 }
 
 /// AS-IS F15: grant as soon as the kernel says so, persist is ignored.

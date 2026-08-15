@@ -14,9 +14,7 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
-use pedradb_core::{
-    BatchOp, Db, Result, SequenceNumber, Snapshot, Transaction, WriteOptions,
-};
+use pedradb_core::{BatchOp, Db, Result, SequenceNumber, Snapshot, Transaction, WriteOptions};
 
 /// One committed log entry: an ordered multi-op batch for PedraDB.
 #[derive(Debug, Clone)]
@@ -33,10 +31,7 @@ impl LogEntry {
     pub fn puts(index: u64, kvs: impl IntoIterator<Item = (Vec<u8>, Vec<u8>)>) -> Self {
         Self {
             index,
-            ops: kvs
-                .into_iter()
-                .map(|(k, v)| BatchOp::put(k, v))
-                .collect(),
+            ops: kvs.into_iter().map(|(k, v)| BatchOp::put(k, v)).collect(),
         }
     }
 }
@@ -197,10 +192,7 @@ impl InProcessCluster {
         assert!(!dbs.is_empty(), "cluster needs at least one node");
         let nodes = dbs
             .into_iter()
-            .map(|db| ClusterNode {
-                db,
-                last_index: 0,
-            })
+            .map(|db| ClusterNode { db, last_index: 0 })
             .collect();
         Self {
             log: FakeLog::new(),
@@ -501,11 +493,7 @@ mod tests {
         let d0 = temp_dir("c0");
         let d1 = temp_dir("c1");
         let d2 = temp_dir("c2");
-        let mut cluster = InProcessCluster::new(vec![
-            open_db(&d0),
-            open_db(&d1),
-            open_db(&d2),
-        ]);
+        let mut cluster = InProcessCluster::new(vec![open_db(&d0), open_db(&d1), open_db(&d2)]);
         assert_eq!(cluster.majority(), 2);
 
         cluster

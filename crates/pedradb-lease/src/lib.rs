@@ -8,9 +8,7 @@
 #![warn(missing_docs)]
 
 use bytes::Bytes;
-use pedradb_core::{
-    ConcurrentDb, CoreError, Db, Env, OpenOptions, Result, SequenceNumber, StdEnv,
-};
+use pedradb_core::{ConcurrentDb, CoreError, Db, Env, OpenOptions, Result, SequenceNumber, StdEnv};
 use std::path::Path;
 
 /// Key prefix for lease records.
@@ -126,7 +124,10 @@ impl<E: Env> LeaseStore<E> {
         new_holder: impl AsRef<[u8]>,
     ) -> Result<Option<SequenceNumber>> {
         let key = lease_key(name);
-        match self.db.put_if_eq(&key, expected.as_ref(), new_holder.as_ref()) {
+        match self
+            .db
+            .put_if_eq(&key, expected.as_ref(), new_holder.as_ref())
+        {
             Ok(seq) => Ok(Some(seq)),
             Err(CoreError::CasMismatch) => Ok(None),
             Err(e) => Err(e),
@@ -140,21 +141,15 @@ impl<E: Env> LeaseStore<E> {
     ///
     /// # Errors
     /// WAL I/O.
-    pub fn try_release(
-        &self,
-        name: impl AsRef<[u8]>,
-        holder: impl AsRef<[u8]>,
-    ) -> Result<bool> {
+    pub fn try_release(&self, name: impl AsRef<[u8]>, holder: impl AsRef<[u8]>) -> Result<bool> {
         let key = lease_key(name);
         let holder = holder.as_ref().to_vec();
-        self.db.with_write(|db| {
-            match db.get(&key) {
-                Some(cur) if cur.as_ref() == holder.as_slice() => {
-                    db.delete(&key)?;
-                    Ok(true)
-                }
-                _ => Ok(false),
+        self.db.with_write(|db| match db.get(&key) {
+            Some(cur) if cur.as_ref() == holder.as_slice() => {
+                db.delete(&key)?;
+                Ok(true)
             }
+            _ => Ok(false),
         })
     }
 
@@ -185,10 +180,7 @@ pub struct WorkloadReport {
 ///
 /// # Errors
 /// Open/I/O failures.
-pub fn workload_hotkey_cas(
-    dir: impl AsRef<Path>,
-    contenders: usize,
-) -> Result<WorkloadReport> {
+pub fn workload_hotkey_cas(dir: impl AsRef<Path>, contenders: usize) -> Result<WorkloadReport> {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
     use std::thread;
@@ -249,7 +241,8 @@ pub fn workload_hotkey_cas(
         silent_wrong,
         detail: format!(
             "winners={winners} lost={lost} holder={:?}",
-            live.as_ref().map(|b| String::from_utf8_lossy(b).into_owned())
+            live.as_ref()
+                .map(|b| String::from_utf8_lossy(b).into_owned())
         ),
     })
 }

@@ -66,7 +66,7 @@ Honest gap (2026-08-12):
 ### P2 (shipped)
 
 - **OCC multi-writer:** [`ConcurrentDb::begin_occ`] / [`OccTransaction`] — snapshot + read/write-set validation; `TransactionConflict` fail-closed (not coarse-mutex-only “multi-writer”).  
-- **Value log (WiscKey-shaped):** `OpenOptions::large_value_threshold` spills large puts to `VALUES.vlog`; SST/mem store `VLG1` pointers; **GC deferred** (file grows).  
+- **Value log (WiscKey-shaped):** `OpenOptions::large_value_threshold` spills large puts to `VALUES.vlog`; SST/mem store `VLG1` pointers. Full-file rewrite GC later shipped as `Db::compact_vlog` ([RFC-0016](0016-pedradb-production-robustness.md) P0.1). Blob generations + one-file GC + scan prefetch: [RFC-0029](0029-blob-generations-and-scan-prefetch.md) P0. Menu [RFC-0026](0026-value-store-evolution-menu.md) picked C; 0027/0028 not approved.  
 - **Incremental backup:** `BackupEngine::create_incremental` (= `ship_wal`), `list_increments`, `restore_with_increments` + existing PITR.  
 - Match Pebble range-delete / ingestion semantics only if Montanha needs them (still optional later).
 

@@ -437,8 +437,8 @@ impl<C: Clock, E: Env> Dcs<C, E> {
     /// I/O.
     pub fn delete(&mut self, key: &[u8]) -> Result<Option<u64>> {
         let live = self.get(key);
-        let has_physical = self.db.get(&kv_key(key)).is_some()
-            || self.db.get(&meta_key(key)).is_some();
+        let has_physical =
+            self.db.get(&kv_key(key)).is_some() || self.db.get(&meta_key(key)).is_some();
         if live.is_none() && !has_physical {
             return Ok(None);
         }

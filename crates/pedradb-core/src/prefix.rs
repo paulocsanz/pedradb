@@ -80,7 +80,11 @@ mod tests {
     #[test]
     fn empty_as_is_drops_ff_keys() {
         let key = [0xff, b'z'];
-        assert!(key_in_prefix_range(&key, b"", prefix_exclusive_end(b"").as_deref()));
+        assert!(key_in_prefix_range(
+            &key,
+            b"",
+            prefix_exclusive_end(b"").as_deref()
+        ));
         assert!(!key_in_prefix_range(
             &key,
             b"",

@@ -15,7 +15,11 @@ use std::io::{Read, Seek, SeekFrom};
 use crate::error::{CoreError, Result};
 
 use super::crc;
-use super::format::{decode_crc, decode_length, BLOCK_SIZE, HEADER_SIZE, RecordType};
+use super::format::{decode_crc, decode_length, RecordType, BLOCK_SIZE, HEADER_SIZE};
+use super::recover_kernel::{
+    fragment_act, is_length_resyncable, physical_payload_act, recover_collect_act, FragAct,
+    FragKind, PhysicalAct, RecoverAct, RecoverKind,
+};
 
 /// A streaming reader that yields logical records from a byte source.
 pub struct WalReader<R> {
@@ -62,9 +66,8 @@ impl<R: Read + Seek> WalReader<R> {
         if !reader.read_next_block()? {
             return Ok(reader);
         }
-        let within = usize::try_from(offset - block_start).map_err(|_| {
-            CoreError::Internal("WAL offset does not fit usize".into())
-        })?;
+        let within = usize::try_from(offset - block_start)
+            .map_err(|_| CoreError::Internal("WAL offset does not fit usize".into()))?;
         if within > reader.block_end {
             return Err(CoreError::Internal(format!(
                 "WAL offset {offset} past end of block starting at {block_start}"
@@ -78,7 +81,6 @@ impl<R: Read + Seek> WalReader<R> {
 }
 
 impl<R: Read> WalReader<R> {
-
     /// Read the next complete logical record, or `Ok(None)` at a clean
     /// end-of-log.
     ///
@@ -89,9 +91,7 @@ impl<R: Read> WalReader<R> {
     pub fn read_record(&mut self) -> Result<Option<Vec<u8>>> {
         loop {
             // Need at least HEADER_SIZE bytes from the current block.
-            if self.block_cursor + HEADER_SIZE > self.block_end
-                && !self.read_next_block()?
-            {
+            if self.block_cursor + HEADER_SIZE > self.block_end && !self.read_next_block()? {
                 // Truncated or clean EOF: any pending scratch is abandoned
                 // (the crash happened mid-fragmented record).
                 return Ok(None);
@@ -99,10 +99,8 @@ impl<R: Read> WalReader<R> {
 
             let header_offset = self.block_cursor;
             let rtype_byte = self.block[header_offset + 6];
-            let length = decode_length([
-                self.block[header_offset + 4],
-                self.block[header_offset + 5],
-            ]);
+            let length =
+                decode_length([self.block[header_offset + 4], self.block[header_offset + 5]]);
 
             // A zero type + zero length header is block padding (or prealloc).
             if rtype_byte == RecordType::Zero as u8 && length == 0 {
@@ -118,35 +116,41 @@ impl<R: Read> WalReader<R> {
                 ))
             })?;
 
-            // Physical records never span blocks. A length larger than the max
-            // payload in a block is always corrupt (bitrot of length used to
-            // look like clean EOF and drop the rest of the WAL — F4).
+            // Physical records never span blocks. Length vs block bounds is
+            // F4: oversize / full-block overrun used to look like clean EOF.
             let max_payload = BLOCK_SIZE - HEADER_SIZE;
-            if length > max_payload {
-                return Err(CoreError::Internal(format!(
-                    "WAL record length {length} exceeds max physical payload {max_payload} at offset {}",
-                    self.current_record_stream_offset()
-                )));
-            }
-
             let payload_start = header_offset + HEADER_SIZE;
-            let payload_end = payload_start + length;
-
-            if payload_end > self.block_end {
-                // Payload extends past what we have.
-                // Full block → corrupt length (writer always fragments).
-                if self.block_end == BLOCK_SIZE {
+            let payload_end_u64 = payload_start as u64 + length as u64;
+            match physical_payload_act(
+                length as u64,
+                max_payload as u64,
+                payload_end_u64,
+                self.block_end as u64,
+                BLOCK_SIZE as u64,
+            ) {
+                PhysicalAct::FailStop => {
+                    if length > max_payload {
+                        return Err(CoreError::Internal(format!(
+                            "WAL record length {length} exceeds max physical payload {max_payload} at offset {}",
+                            self.current_record_stream_offset()
+                        )));
+                    }
                     return Err(CoreError::Internal(format!(
                         "WAL record length {length} exceeds remainder of full block at offset {}",
                         self.current_record_stream_offset()
                     )));
                 }
-                // Short final block: could be a crash torn tail *or* bitrot of
-                // length. Report Truncated so `collect_all` can keep any prefix
-                // already decoded; a Truncated at offset 0 with no prior records
-                // fails open (fail-stop) instead of silently empty WAL (F4).
-                return Err(CoreError::Truncated(self.current_record_stream_offset()));
+                PhysicalAct::Truncated => {
+                    // Short final block: torn tail *or* length bitrot. Report
+                    // Truncated so `collect_all` can keep a decoded prefix; a
+                    // Truncated at offset 0 with no prior records fail-stops
+                    // instead of a silently empty WAL (F4).
+                    return Err(CoreError::Truncated(self.current_record_stream_offset()));
+                }
+                PhysicalAct::CleanEof => return Ok(None),
+                PhysicalAct::Continue => {}
             }
+            let payload_end = payload_start + length;
 
             let stored_crc = decode_crc([
                 self.block[header_offset],
@@ -172,39 +176,36 @@ impl<R: Read> WalReader<R> {
             let payload = &self.block[payload_start..payload_end];
             self.block_cursor = payload_end;
 
-            match rtype {
-                RecordType::Full => {
-                    self.scratch.clear();
-                    return Ok(Some(payload.to_vec()));
-                }
-                RecordType::First => {
-                    self.scratch.clear();
-                    self.scratch.extend_from_slice(payload);
-                }
-                RecordType::Middle => {
-                    if self.scratch.is_empty() {
-                        // F14: orphan Middle must not look like clean EOF — that
-                        // silently dropped every durable record after a bit-flipped
-                        // type byte (SilentWrong class). Fail-stop instead.
-                        return Err(CoreError::Internal(format!(
-                            "WAL orphan Middle fragment at offset {}",
-                            self.current_record_stream_offset()
-                        )));
-                    }
-                    self.scratch.extend_from_slice(payload);
-                }
-                RecordType::Last => {
-                    if self.scratch.is_empty() {
-                        // F14: same as Middle — not clean EOF.
-                        return Err(CoreError::Internal(format!(
-                            "WAL orphan Last fragment at offset {}",
-                            self.current_record_stream_offset()
-                        )));
+            match fragment_act(FragKind::from_record_type(rtype), self.scratch.is_empty()) {
+                FragAct::Yield => {
+                    if rtype == RecordType::Full {
+                        self.scratch.clear();
+                        return Ok(Some(payload.to_vec()));
                     }
                     self.scratch.extend_from_slice(payload);
                     return Ok(Some(std::mem::take(&mut self.scratch)));
                 }
-                RecordType::Zero => {} // non-padding zero (length != 0): unusual, skipped
+                FragAct::Start => {
+                    self.scratch.clear();
+                    self.scratch.extend_from_slice(payload);
+                }
+                FragAct::Accumulate => {
+                    self.scratch.extend_from_slice(payload);
+                }
+                FragAct::FailStop => {
+                    // F14: orphan Middle/Last must not look like clean EOF.
+                    let name = if rtype == RecordType::Middle {
+                        "Middle"
+                    } else {
+                        "Last"
+                    };
+                    return Err(CoreError::Internal(format!(
+                        "WAL orphan {name} fragment at offset {}",
+                        self.current_record_stream_offset()
+                    )));
+                }
+                FragAct::Skip => {}
+                FragAct::CleanEof => return Ok(None),
             }
         }
     }
@@ -239,45 +240,56 @@ impl<R: Read> WalReader<R> {
 impl<R: Read> WalReader<R> {
     /// Collect every remaining record into a `Vec`.
     ///
-    /// - Clean EOF (`Ok(None)`) → stop.
-    /// - [`CoreError::Truncated`] / length-style Internal: **resync** one byte at a
-    ///   time for the next CRC-valid record (F4 residual mid-WAL length bitrot).
-    /// - [`CoreError::Crc`] after a non-empty prefix → keep prefix only (do **not**
-    ///   resync: false alignments skipped durable later records and exploded
-    ///   `SilentWrong` counts in the dense sweep).
-    /// - Resync at true EOF with prefix → return prefix (torn tail).
+    /// Policy is [`recover_collect_act`] (F4 / F14 / CRC):
+    /// - Clean EOF → stop.
+    /// - Truncated / length / unknown type → resync one byte (mid-WAL length bitrot).
+    /// - CRC and orphan fragment → **fail-stop** (do not resync).
+    /// - Resync at true EOF with a prefix → keep the prefix (torn tail).
+    /// - Resync at true EOF with an empty prefix → fail-stop (F4 empty WAL).
     ///
     /// # Errors
     /// See [`WalReader::read_record`]; resync exhaustion.
     pub fn collect_all(&mut self) -> Result<Vec<Vec<u8>>> {
-        const MAX_CONSECUTIVE_SKIPS: u64 = 4 * 1024 * 1024;
         let mut out = Vec::new();
         let mut consecutive_skips = 0u64;
 
         loop {
-            match self.read_record() {
-                Ok(Some(rec)) => {
-                    out.push(rec);
-                    consecutive_skips = 0;
-                }
-                Ok(None) => break,
-                // CRC mismatch is always fail-stop (do not soft-drop later records,
-                // and do not resync — both produced SilentWrong in dense sweeps).
-                Err(e) if is_length_resyncable(&e) => {
-                    if !self.skip_byte_for_resync()? {
-                        if out.is_empty() {
-                            return Err(e);
-                        }
-                        break;
+            let outcome = self.read_record();
+            let kind = recover_kind_from_read(&outcome);
+            let prefix_n = out.len() as u64;
+            let can_skip = if is_length_resyncable(kind) {
+                self.skip_byte_for_resync()?
+            } else {
+                false
+            };
+            let skips = if can_skip {
+                consecutive_skips.saturating_add(1)
+            } else {
+                consecutive_skips
+            };
+
+            match recover_collect_act(kind, prefix_n, can_skip, skips) {
+                RecoverAct::KeepRecord => match outcome {
+                    Ok(Some(rec)) => {
+                        out.push(rec);
+                        consecutive_skips = 0;
                     }
-                    consecutive_skips += 1;
-                    if consecutive_skips > MAX_CONSECUTIVE_SKIPS {
+                    _ => {
                         return Err(CoreError::Internal(
-                            "WAL resync exceeded max consecutive skips".into(),
+                            "WAL recover KeepRecord without a record".into(),
                         ));
                     }
+                },
+                RecoverAct::Stop | RecoverAct::KeepPrefix => break,
+                RecoverAct::Resync => consecutive_skips = skips,
+                RecoverAct::FailStop => {
+                    return match outcome {
+                        Err(e) => Err(e),
+                        Ok(_) => Err(CoreError::Internal(
+                            "WAL recover fail-stop on clean read".into(),
+                        )),
+                    };
                 }
-                Err(e) => return Err(e),
             }
         }
         Ok(out)
@@ -300,17 +312,33 @@ impl<R: Read> WalReader<R> {
     }
 }
 
-fn is_length_resyncable(err: &CoreError) -> bool {
+fn recover_kind_from_read(r: &Result<Option<Vec<u8>>>) -> RecoverKind {
+    match r {
+        Ok(Some(_)) => RecoverKind::Record,
+        Ok(None) => RecoverKind::CleanEof,
+        Err(e) => recover_kind(e),
+    }
+}
+
+fn recover_kind(err: &CoreError) -> RecoverKind {
     match err {
-        CoreError::Truncated(_) => true,
+        CoreError::Truncated(_) => RecoverKind::Truncated,
+        CoreError::Crc { .. } => RecoverKind::Crc,
         CoreError::Internal(msg) => {
-            // Length / framing errors, and mid-scan junk headers while resyncing.
-            msg.contains("WAL record length")
+            if msg.contains("orphan") {
+                RecoverKind::OrphanFragment
+            } else if msg.contains("WAL record length")
                 || msg.contains("exceeds max physical")
                 || msg.contains("exceeds remainder of full block")
-                || msg.contains("unknown record type")
+            {
+                RecoverKind::LengthCorrupt
+            } else if msg.contains("unknown record type") {
+                RecoverKind::UnknownType
+            } else {
+                RecoverKind::Other
+            }
         }
-        _ => false,
+        _ => RecoverKind::Other,
     }
 }
 
@@ -459,11 +487,7 @@ mod tests {
         let len = u16::from_le_bytes([buf[HEADER_SIZE + 5 + 4], buf[HEADER_SIZE + 5 + 5]]);
         let payload_start = HEADER_SIZE + 5 + HEADER_SIZE;
         let payload = &buf[payload_start..payload_start + len as usize];
-        let new_crc = super::super::crc::record_checksum(
-            RecordType::Middle as u8,
-            len,
-            payload,
-        );
+        let new_crc = super::super::crc::record_checksum(RecordType::Middle as u8, len, payload);
         buf[HEADER_SIZE + 5..HEADER_SIZE + 5 + 4].copy_from_slice(&new_crc.to_le_bytes());
 
         let err = WalReader::new(Cursor::new(buf)).collect_all().unwrap_err();
@@ -487,5 +511,44 @@ mod tests {
         assert_eq!(recs.len(), 10);
         assert_eq!(recs[0], b"rec-0");
         assert_eq!(recs[9], b"rec-9");
+    }
+
+    #[test]
+    fn recover_kind_tags_match_read_record_errors() {
+        assert_eq!(
+            recover_kind(&CoreError::Truncated(0)),
+            RecoverKind::Truncated
+        );
+        assert_eq!(
+            recover_kind(&CoreError::Crc {
+                offset: 0,
+                expected: 1,
+                found: 2
+            }),
+            RecoverKind::Crc
+        );
+        assert_eq!(
+            recover_kind(&CoreError::Internal(
+                "WAL orphan Middle fragment at offset 3".into()
+            )),
+            RecoverKind::OrphanFragment
+        );
+        assert_eq!(
+            recover_kind(&CoreError::Internal(
+                "WAL record length 9 exceeds max physical payload 8 at offset 0".into()
+            )),
+            RecoverKind::LengthCorrupt
+        );
+        assert_eq!(
+            recover_kind(&CoreError::Internal(
+                "unknown record type 0x5 at stream offset 0".into()
+            )),
+            RecoverKind::UnknownType
+        );
+        assert!(!is_length_resyncable(RecoverKind::Crc));
+        assert!(!is_length_resyncable(RecoverKind::OrphanFragment));
+        assert!(is_length_resyncable(RecoverKind::Truncated));
+        assert!(is_length_resyncable(RecoverKind::LengthCorrupt));
+        assert!(is_length_resyncable(RecoverKind::UnknownType));
     }
 }

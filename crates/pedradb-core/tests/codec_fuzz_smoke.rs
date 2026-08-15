@@ -102,7 +102,10 @@ fn mutate(seed: &[u8], step: u64) -> Vec<u8> {
 #[test]
 fn codec_fuzz_smoke_write_record() {
     let seed = seed_write_record();
-    assert!(WriteRecord::decode(&seed).is_ok(), "seed corpus must decode");
+    assert!(
+        WriteRecord::decode(&seed).is_ok(),
+        "seed corpus must decode"
+    );
     let mut ok = 0u64;
     let mut err = 0u64;
     for step in 0..512u64 {
@@ -110,7 +113,10 @@ fn codec_fuzz_smoke_write_record() {
         match std::panic::catch_unwind(|| WriteRecord::decode(&m)) {
             Ok(Ok(_)) => ok += 1,
             Ok(Err(_)) => err += 1,
-            Err(_) => panic!("WriteRecord::decode panicked on step={step} len={}", m.len()),
+            Err(_) => panic!(
+                "WriteRecord::decode panicked on step={step} len={}",
+                m.len()
+            ),
         }
     }
     assert!(ok + err == 512);

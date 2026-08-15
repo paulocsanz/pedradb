@@ -1,0 +1,1041 @@
+             Spooky: Granulating LSM-Tree Compactions Correctly
+                                    Niv Dayan                                             Tamar Weiss, Shmuel Dashevsky, Michael Pan,
+                             University of Toronto                                             Edward Bortnikov, Moshe Twitto
+                           nivdayan@cs.toronto.edu                                                              Pliops
+                                                                                         {tamarw,shmueld,michaelp,ebortnik,moshet}@pliops.com
+
+ABSTRACT
+Modern storage engines and key-value stores have come to rely on
+the log-structured merge-tree (LSM-tree) as their core data struc-
+ture. LSM-tree operates by gradually merge-sorting data across
+levels of exponentially increasing capacities in storage. A crucial
+design dimension of LSM-tree is its compaction granularity. Some
+designs perform Full Merge, whereby entire levels get compacted
+at once. Others perform Partial Merge, whereby smaller groups of
+files with overlapping key ranges are compacted independently.
+This paper shows that both strategies exhibit serious flaws. With
+Full Merge, space-amplification is exorbitant. The reason is that                             Figure 1: Existing LSM-trees cannot reach high storage uti-
+while compacting the LSM-tree’s largest level, there must be at                               lization while maintaining moderate write-amplification.
+least twice as much storage space as data to store both the original                          1    INTRODUCTION
+and new files until the compaction is finished. On the other hand,
+Partial Merge exhibits excessive write-amplification. The reason                              LSM-Tree. LSM-tree has become the backbone of modern key-
+is twofold. (1) The files getting compacted typically do not have                             value stores and storage engines. It ingests key-value entries from
+perfectly overlapping key ranges, and so some non-overlapping                                 the application by buffering them in memory. When the buffer fills
+data is superfluously rewritten in each compaction. (2) Files with                            up, it flushes these entries to storage (typically a flash-based SSD)
+different lifetimes become interspersed within the SSD leading to                             as a sorted array called a run. LSM-tree then compacts smaller runs
+high SSD garbage-collection overheads. As the data size grows,                                into larger ones to (1) restrict the number of runs that a query has to
+these problems grow in magnitude.                                                             search, and to (2) discard obsolete entries, for which newer versions
+    We introduce Spooky, a novel compaction granulation method                                with the same keys have been inserted. It organizes these runs based
+to address these problems. Spooky partitions data at the largest                              on their ages across levels of exponentially increasing capacities.
+level into equally sized files, and it partitions data at smaller levels                      LSM-tree is used widely including in OLTP [37], HTAP [61], social
+based on the file boundaries at the largest level. This allows merging                        graphs [65], FTL design [21], data series [49–51], blockchain [30],
+one group of perfectly overlapping files at a time to limit space-                            stream-processing [16], etc.
+amplification and compaction overheads. At the same time, Spooky                              Compaction Granularity. The compaction policy of an LSM-tree
+writes larger though fewer files simultaneously so that files with                            dictates which data to merge under which circumstances. Exist-
+different lifetimes do not become as interspersed within the SSD.                             ing work has rigorously studied how to tune the eagerness of a
+This cheapens garbage-collection. We show empirically that Spooky                             compaction policy as a means of striking different trade-offs be-
+achieves >2x lower space-amplification than Full Merge and >2x                                tween the costs of reads, writes, and space [22, 23, 45, 67, 70, 74, 80].
+lower write-amplification than Partial Merge at the same time.                                This paper focuses on an orthogonal yet crucial design dimension:
+                                                                                              compaction granularity. Existing compaction designs can broadly
+                                                                                              be lumped into two categories with respect to how they granu-
+                                                                                              late compactions: Full Merge and Partial Merge [72]. Each entails a
+PVLDB Reference Format:
+                                                                                              particular flaw.
+Niv Dayan, Tamar Weiss, Shmuel Dashevsky, Michael Pan, Edward
+Bortnikov, Moshe Twitto. Spooky: Granulating LSM-Tree Compactions                             Partial Merge. With Partial Merge, each run is partitioned into
+Correctly . PVLDB, 15(11): 3071 - 3084, 2022.                                                 multiple small files of equal sizes. When a level reaches capacity,
+doi:10.14778/3551793.3551853                                                                  one file from within that level is selected and merged into files with
+                                                                                              overlapping key ranges at the next larger level. Partial merge is
+                                                                                              used by default in LevelDB [35] and RocksDB [33]. Its core problem
+                                                                                              is high write-amplification. The reason is twofold. First, the files
+                                                                                              chosen to be merged typically do not have perfectly overlapping
+This work is licensed under the Creative Commons BY-NC-ND 4.0 International                   key ranges. Each compaction therefore superfluously rewrites some
+License. Visit https://creativecommons.org/licenses/by-nc-nd/4.0/ to view a copy of
+this license. For any use beyond those covered by this license, obtain permission by
+                                                                                              non-overlapping data [57]. Second, simultaneous compactions at
+emailing info@vldb.org. Copyright is held by the owner/author(s). Publication rights          different levels cause files with different lifespans to become physi-
+licensed to the VLDB Endowment.                                                               cally interspersed within the SSD [12, 28]. This makes it hard for
+Proceedings of the VLDB Endowment, Vol. 15, No. 11 ISSN 2150-8097.
+doi:10.14778/3551793.3551853                                                                  the SSD to perform efficient internal garbage-collection, especially
+                                                                                              as the data size grows. We illustrate this problem in Figure 1 with
+
+
+
+
+                                                                                       3071
+the curve labeled Partial Merge. Write-amplification increases at an           at Level 𝑖 − 1. When the largest level reaches capacity, a new larger
+accelerating rate as storage utilization (i.e., user data size divided         level is added. The number of levels 𝐿 is ≈ log𝑇 ( 𝑁/𝐵 ), where 𝑁 is
+by storage capacity) increases. Figure 1 is based on an experiment             the data size and 𝐵 is the buffer size. Figure 2 lists terms used to
+described in Sections 3.                                                       describe LSM-tree throughout the paper.
+Full Merge. With Full Merge, entire levels are merged all at once.                 For each insert, update, or delete request issued by the applica-
+Full merge is used by default in Cassandra [3], HBase [4]. The core            tion, a data entry comprising a key and a value is put in the buffer
+problem is that until a merge operation is finished, the files being           (in case of a delete, the value is a tombstone [71]). When the buffer
+merged cannot be disposed of. This means that compacting the                   fills up, it gets flushed to Level 1 as a file sorted based on its en-
+LSM-tree’s largest level, which is exponentially larger than the               tries’ keys. Whenever one of the levels in storage reaches capacity,
+rest, requires having twice as much storage capacity as user data              some file from within it is merged into one of the next larger levels.
+until the operation is finished. As a result, Full Merge cannot reach          Whenever two entries with the same key are encountered during
+a storage utilization of over 50%. It therefore wastes most of the             compaction, the older one is considered obsolete and discarded.
+available storage capacity, as shown in Figure 1.                                  Each file can be thought of as a static B-tree whose internal nodes
+Research Problem. Figure 1 shows that neither Partial Merge nor                are cached in memory. There is an in-memory Bloom filter [13]
+Full Merge can achieve a high storage utilization and moderate                 for each file to allow point reads to skip accessing files that do not
+write-amplification at the same time. Is it possible to bridge this            contain a given key. A point read searches the levels from smallest
+gap and attain the best of both worlds?                                        to largest to find the most recent version of an entry with a given
+Spooky. We introduce Spooky: Partitioned Compaction for Key-                   key. A range read sort-merges entries within a specified key range
+Value Stores. Spooky partitions the LSM-tree’s largest level into              across all levels to return the most recent version of each entry in
+equally-sized files, and it partitions a few of the subsequent largest         the range to the user.
+levels based on the file boundaries at the largest level. This allows          Concurrency Control. In the original LSM-tree paper, each level
+merging one group of perfectly overlapping files at a time to restrict         is a mutable B-tree, and locks are held to transfer data from one
+both space-amplification and compaction overheads. At smaller                  B-tree to another when a level reaches capacity [67]. To obviate lock-
+levels, Spooky performs Full Merge to limit write-amplification                ing bottlenecks, however, most modern LSM-trees employ multi-
+yet without inflating space requirements as these levels are ex-               version concurrency control [32]. In RocksDB, for example, a new
+ponentially smaller. In addition, Spooky writes and deletes files              version object is created after each compaction/flush operation.
+sequentially within each level and across fewer levels at a time. As           This object contains a list of all files active at the instant in time
+a result, fewer files become physically interspersed within the SSD            that the compaction/flush finished. Point and range reads operate
+to cheapen garbage-collection.                                                 over files within the version object that was newest when they
+   Spooky is a meta-policy: it is orthogonal to other compaction               commenced to return consistent output to the user.
+aspects such as eagerness [22, 23, 45, 67, 69, 80] , key-value separa-         Space-Amplification. LSM-tree occupies more storage space than
+tion [15, 55, 58, 81], hardware acceleration/customization [11, 26,            the size of the user data. The reason is twofold. First, obsolete entries
+77, 85, 91], performance stabilization [8, 56, 59, 74], etc. As such, it       take up space until compaction discards them. We refer to this as
+both complements and enhances existing LSM-tree variants and                   durable space-amplification.
+the variety of applications that they each optimize for.                           Second, multi-version concurrency control prevents the system
+Contributions. Our contributions are as follow.                                from reclaiming space occupied by a file until the compaction oper-
+                                                                               ating on this file has finished [3, 4, 33, 35]. We refer to the temporary
+    (1) We posit Full and Partial Merge as the two core compaction
+                                                                               extra space needed during compaction to store the original and
+        granulation strategies used by modern LSM-trees. We pro-
+                                                                               merged data at the same time as transient space-amplification.
+        vide cost models and experiments to show that Full Merge
+                                                                                   We distinguish between logical and physical data size as the
+        suffers from exorbitant space-amplification while Partial
+                                                                               LSM-tree’s size before and after space-amplification (space-amp) is
+        Merge suffers from excessive write-amplification.
+                                                                               considered. We define total space-amp in Equation 1 as the factor
+    (2) We introduce Spooky, a new compaction granulation ap-
+                                                                               by which the physical data size is greater than the logical data size.
+        proach that (I) partitions data at larger levels into perfectly
+                                                                               Durable and transient space-amp are each defined here as a fraction
+        overlapping groups of files that can be merged using lit-
+                                                                               of the logical data size. The inverse of total space-amp is storage-
+        tle extra space or superfluous work, and that (II) issues
+                                                                               utilization, the fraction of the storage device that can store user
+        SSD-friendly I/O patterns that cheapen garbage-collection.
+                                                                               data. It is generally desirable to operate at a high storage utilization
+    (3) We show experimentally that Spooky achieves >2x lower
+                                                                               to take advantage of the available hardware.
+        space-amplification than Full Merge and >2x better write-
+        amplification than Partial Merge at the same time.                        total space-amp = 1 + transient space-amp + durable space-amp     (1)
+    (4) We show that Spooky’s lower write-amplification improves               Write-Amplification. The LSM-tree’s compactions cause each
+        both read and write throughput.                                        data entry to be rewritten to storage multiple times. The average
+                                                                               number of times an entry is physically rewritten is known as write-
+2    LSM-TREE FUNDAMENTALS                                                     amplification (write-amp). It is generally desirable to keep write-
+LSM-tree organizes data across 𝐿 levels of exponentially increasing            amp low as it consumes storage bandwidth and lifetime.
+capacities. Level 0 is an in-memory buffer (aka memtable). All other             In addition to compactions, there is another important source of
+levels are in storage. The capacity at Level 𝑖 is 𝑇 times larger than          write-amp for LSM-tree: SSD garbage-collection (GC) [28]. Modern
+
+
+
+
+                                                                        3072
+                          Leveling               Lazy-Leveling                     Tiering                       Term     Definition
+               1                                                                                                  N       overall data size (bytes)
+                                                                                                                  B       buffer size (bytes)
+      levels   2                                                                                                  T       LSM-tree size ratio
+                                                                                                                   L      number of LSM-tree levels
+               3
+                                                                                                                  Ni      data size at Level i (bytes)
+                                        more read &                 more write                                    Ci      capacity at Level i (bytes)
+                                      space optimized               optimized                                     X       level to which Spooky performs dividing merge
+
+Figure 2: LSM-tree spans various merge policies and parameters that allow optimizing for different applications/workloads.
+Each rectangle in the figure represents a run, which is a unit of sorted data that comprises one or more files.
+ level             capacity                             capacity
+                                                                                                      Dynamic Capacity Adaptation (DCA). Durable space-amp ex-
+  0                   B       …                            B        …
+                                                                                                      hibits a pathological worst-case. When a new level is added to the
+  1                 B ⋅ T1    …                         N3 ⋅ T −2 …                                   LSM-tree to accommodate more data, its capacity is set to be larger
+                                                                                                      by a factor of 𝑇 than the capacity at the previously largest level.
+  2                 B ⋅ T2                              N3 ⋅ T −1
+                                                                                                      When this happens, the data size at the new largest level is far
+  3                 B ⋅ T3        N3 bytes               B ⋅ T3         N3 bytes                      smaller than its capacity. As the now second largest level fills up
+                                                                                                      with new data, it can come to contain as much data as the current
+                              (A) Without DCA                           (B) With DCA
+                                                                                                      data size at the largest level. In this case, durable space-amp may
+Figure 3: DCA restricts durable space-amplification by                                                be two or greater, as illustrated in Figure 3 Part (A). To remedy this,
+shrinking capacities at smaller levels based on the data size                                         RocksDB introduced a technique coined Dynamic Capacity Adap-
+at the largest level. This example assumes leveling.                                                  tation (DCA) [31]. As shown in Figure 3 Part (B), DCA restricts the
+                                                                                                      capacities at Levels 1 to 𝐿 − 1 based on the data size rather than the
+flash-based SSDs lay out data sequentially across erase units [1, 75].                                capacity at Level 𝐿. With leveling or lazy leveling, DCA bounds the
+As the SSD fills up, GC kicks in to reclaim space. It does this by (1)                                worst-case durable space-amp to the expression in Equation 3. We
+picking an erase unit with ideally as little remaining live data as                                   leverage DCA in conjunction with Spooky throughout the paper.
+possible, (2) migrating any live data to other erase units, and (3)                                                                                1
+erasing the target unit [1, 24, 36]. Hence, GC can cause data to be                                                        durable space-amp ≤                            (3)
+                                                                                                                                                 𝑇 −1
+rewritten multiple times.
+   Since GC occurs opaquely within the SSD, it has historically been                                  Compaction Granularity. The granularity of compaction controls
+difficult to measure. Hence, most papers on LSM-tree to date only                                     how much data to merge in one go when a level has reached ca-
+focus on optimizing compaction overheads [22, 23, 66, 69, 70, 80].                                    pacity. Compaction granularity is an orthogonal design dimension
+In this paper, we emphasize that total write-amp is the product of                                    to the merge policy [72]. There are two mainstream granulation
+both sources of write-amp, as expressed in Equation 2. Hence, these                                   approaches: Full vs. Partial. They profoundly impact the balance
+sources must be co-optimized to curb total write-amp.                                                 between write-amp and space-amp.
+                                                                                                      Full Merge. With Full Merge, compaction is performed at the
+               total write-amp = compaction write-amp × GC write-amp                     (2)
+                                                                                                      granularity of whole levels. Full Merge is used in Cassandra, Hbase,
+Merge Policy. The compaction policy of an LSM-tree determines                                         and Universal Compaction in RocksDB.
+which data to merge when. The two mainstream policies are known                                          Full Merge lends itself to preemption, a technique used to reduce
+as leveling and tiering, as illustrated in Figure 2.                                                  write-amp by predicting across how many levels the next merge op-
+   With leveling, new data arriving at a level is immediately merged                                  eration will recurse and merging them all at once [22]. Figure 4 Part
+with whichever overlapping data already exists at that level. As                                      (A) illustrates an example where Levels 1 to 4, which are all nearly
+a result, each level contains at most one sorted unit of data, also                                   full, are merged all at once. In contrast, Part (B) shows how without
+referred to as a run. Each run consists of one or more files.                                         preemption, a merge operation from Level 1 recurses to Level 4,
+   With tiering [45], each level contains multiple runs. When a                                       causing data originally at Levels 1 and 2 to be rewritten three and
+level reaches capacity, all runs within it are merged into a single                                   two times, respectively. We leverage preemption in conjunction
+run at the next larger level. Tiering is more write-optimized than                                    with Full Merge throughout the paper to optimize write-amp.
+leveling as each compaction spans fewer data. However, it is less                                        The core problem with Full Merge is that while compacting the
+read-efficient as each query has to search more runs per level. It                                    largest level, which contains most of the data, transient space-amp
+is also less space-efficient as it takes longer to identify and discard                               skyrockets as the original files cannot be disposed of until the
+obsolete entries. With both leveling and tiering, the size ratio 𝑇                                    compaction is finished [63, 66].
+can be fine-tuned to control the trade-off between compaction vs.                                     Partial Merge. With Partial Merge, used by default in LevelDB and
+query and space overheads [19].                                                                       RocksDB, each run is partitioned into multiple files (a.k.a. Sorted
+   Figure 2 also illustrates a hybrid policy named lazy leveling,                                     String Tables or SSTs). When Level 𝑖 fills up, some file from Level 𝑖
+which applies leveling at the largest level and tiering at smaller                                    is picked and merged into the files with overlapping key ranges at
+levels. Its write cost is similar to that of tiering while still having                               Level 𝑖 + 1. Different methods have been proposed for how to pick
+similar space and point read overheads to those of leveling [22]. It                                  this file (e.g., randomly or round-robin). The best-known technique,
+therefore offers good trade-offs in-between. We apply Spooky to all                                   coined ChooseBest [76], picks the file that overlaps with the least
+three policies in this work to demonstrate its broad applicability.                                   amount of data at the next larger level to minimize write-amp.
+
+
+
+
+                                                                                               3073
+         1
+                                                                                                        i                       20 - 55   56 - 68   69 - 99
+         2                                                                                    levels
+ level                                                                                                 i+1   1 - 10   15 - 25   26 - 40   51 - 61    65-70    71 - 79   80 - 99
+         3
+                                                                                                                                          51 - 60   61 - 65   66 - 70
+         4
+
+             (A) Full Preemptive Merge           (B) Full Recursive Merge
+
+Figure 4: Preemptive merge allows some of the data is skip                                    Figure 5: With Partial Merge, each run is partitioned into
+merging merged across some of the levels, thus reducing                                       multiple files, and smaller independent groups of intersect-
+write-amp.                                                                                    ing files are merged at a time.
+
+For example, in Figure 5, the leftmost SST at Level 𝐿 − 1 overlaps                               Figure 6 Part (A) issues unique random insertions to an initially
+with four SSTs at Level 𝐿, the middle with two, and the rightmost                             empty database. The x-axis reports the number of times the buffer
+with three. Hence, the middle file is picked. Partial Merge exhibits                          has flushed (i.e., 𝑁/𝐵 ). The y-axis measures write-amp for each
+lower transient space-amp than Full Merge as compaction is more                               baseline against its model predictions. We observe that Full Merge
+granular. However, it exhibits a higher write-amp than Full Merge                             exhibits a lower write-amp than Partial Merge. The reasons are that
+as we show in Section 3.                                                                      (1) it uses preemption to skip merging entries across nearly full
+                                                                                              levels, and (2) it avoids the problem of superfluous edge merging
+3        PROBLEM ANALYSIS                                                                     by compacting whole levels at a time.
+This section analyzes write-amp and space-amp for Full vs. Partial                               Figure 6 Part (B) repeats the experiment with different size ratios
+Merge to formalize the problem. We assume the leveling merge pol-                             on the x-axis while fixing 𝑁 /𝐵, the number of times the buffer has
+icy for both baselines. We also assume uniformly random insertions                            flushed, to 3500. With Full Merge, the size ratio has an approxi-
+to model the worst-case write-amp.                                                            mately linear relationship to write-amp. It is therefore possible to
+Modeling Compaction Write-Amp. With Full Merge, the 𝑖 th run                                  reduce write-amp by tuning the size ratio to smaller values. With
+arriving at a level after the level was last empty entails a write-                           Partial Merge, however, write-amp cannot be reduced beyond the
+amp of 𝑖 to merge with the existing run at that level. After 𝑇 − 1                            global minimum shown in the figure. The reason is that with Partial
+runs arrive, a preemptive merge spanning this level takes place and                           Merge, smaller size ratios cause the relative amount of superfluous
+empties it again. Hence, each level contributes 𝑇1 · 𝑇𝑖=1 𝑖 = 𝑇 2−1 to
+                                                    ∑︁ −1                                     work (i.e., rewriting one file’s worth of non-overlapping data) to
+write-amp, resulting in Equation 4.                                                           increase relative to the amount of useful work performed in each
+                                                             𝑇 −1                             compaction (i.e., merging ≈ 𝑇/2 files’ worth of overlapping data). In
+                compaction write-amp with Full Merge =            ·𝐿             (4)          summary, Full Merge exhibits lower write-amp than Partial Merge
+                                                               2
+   With Partial Merge, a file picked using ChooseBest from a full                             across the board, and it is also more amenable to tuning.
+Level 𝑖 intersects with ≈ 𝑇/2 files’ worth of data on average at                              Garbage-Collection Write-Amp. We now measure SSD garbage-
+Level 𝑖 + 1 [57, 76]. The overlap among these files typically isn’t                           collection (GC) with Full vs. Partial Merge. We run a large-scale
+perfect, however, leading to additional overhead. For example, in                             experiment that fills up an initially empty LSM-tree with unique
+Figure 5, the file picked from Level 𝑖 with key range 56-68 does not                          random insertions followed by random updates for one day on
+perfectly overlap with the two intersecting files at Level 𝑖 + 1, which                       a 960GB SSD. We use the Linux nvme command to report the
+have a wider combined key range of 51-70. This means that entries                             data volume that the operating system writes to the SSD vs. the
+at both edges of the compaction, in the ranges of 51-56 and 68-                               data volume that the SSD physically writes to flash. This allows
+70, are superfluously rewritten. We coin this problem superfluous                             calculating write-amp due to GC throughout the experiment. For
+edge merging. On average, one additional file’s worth of data is                              both baselines, the size ratio is set to 5, the buffer size to 64MB, and
+superfluously included in each compaction, leading to the write-                              DCA is turned on. The rest of the setup is given in Section 6.
+amp expression in Equation 5.                                                                    Since our goal is to elicit SSD garbage-collection, it is important
+                                                              𝑇 +1                            to fill up the SSD so that it is stressed for free space. The Full
+               compaction write-amp with Partial Merge =           ·𝐿            (5)          Merge baseline, however, is unable to utilize most of the available
+                                                                2
+Compaction Write-Amp Experiments. We verify Equations 4                                       storage capacity due to its high transient space-amp. We therefore
+and 5 using RocksDB to provide a principled comparison between                                employ different logical data sizes in this experiment: 369GB and
+the baselines that they each represent. We use the default RocksDB                            644GB with Full and Partial Merge, respectively. As we will see, the
+compaction policy to represent Partial Merge, and we created a                                physical data size comes out to ≈ 800GB with both baselines thus
+Full Preemptive Merge implementation within RocksDB1 . The size                               providing us with a degree of experimental control.
+ratio 𝑇 is set to 5 and the buffer size 𝐵 is set to 64MB. The rest of                            Figure 7 Part (A) plots three curves for Partial Merge: (1) com-
+the implementation and setup details are in Sections 5 and 6.                                 paction write-amp, (2) GC write-amp, and (3) their product, total
+                                                                                              write-amp. During the experiment, GC write-amp steadily increases
+1 We did not use RocksDB’s Universal Compaction to represent Full Merge because it
+                                                                                              (up to ≈ 3). The reason is that multiple compactions across different
+is not a leveled merge policy but rather a bounded-depth policy (more in Section 7).
+Therefore, it does not lend itself to an apples-to-apples comparison with the default         levels of the LSM-tree occur simultaneously. This causes files to
+RocksDB compaction policy for our purposes.                                                   become physically interspersed within the same SSD erase units.
+
+
+
+
+                                                                                       3074
+           T                                  N/B                                                                  al
+                                                                                                             tot
+                                                                                                       rge
+                                                                                                 l   Me
+                                                                                             rtia
+                                                                                           Pa
+
+
+                                                                                          Partial Merge LSM
+                                                                                              Full Merge
+
+                                                                                           Partial Merge GC
+
+
+    (A)                        N B              (B)           T)                             (A)                                 (B)
+
+Figure 6: Full Merge exhibits lower write-amp than Partial                      Figure 7: Partial Merge exhibits skyrocketing write-amp as
+Merge as the data grows (A) and across different tunings (B).                   we approach device capacity (A), while Full Merge wastes
+Our cost models predict write-amp reasonably well.                              most of the available storage capacity (B).
+
+Since files from different levels have exponentially varying lifes-
+pans, some data in each erase unit is disposed of quickly while other           is set to ten this time, and we run each trial for at least one day for
+data lingers for longer. Hence, the SSD must internally migrate                 write-amp to converge. For each trial, we report storage-utilization
+older data to reclaim space. This is a manifestation of a well-known            on the x-axis against total write-amp on the y-axis. For Partial
+problem of “hot” and “cold” data mixing within an SSD to inflate                Merge, total write-amp increases at an accelerating rate as storage
+GC overheads [27, 75]. We observe that while GC write-amp is far                utilization increases. This is a well-known phenomenon with SSDs:
+smaller than compaction write-amp, it multiplies with it to cause               as they fill up, erase blocks with little remaining live data become
+total write-amp to exceed fifty by the experiment’s end.                        increasingly hard to find [75]. GC migration overheads therefore
+    It is tempting to think that using larger files with Partial Merge          increase rapidly. The outcome is that each additional byte of user
+would eliminate these GC overheads by causing larger units of                   data costs disproportionately more to store in terms of forgone per-
+data to be written and erased all at once across SSD erase units.               formance. In contrast, Full Merge maintains a low total write-amp
+We falsify this notion later in Section 6 by showing that even with             but is unable to reach a storage utilization of over 50%.
+large files, GC overheads remain high because simultaneous partial              Problem Summary. Full Merge exhibits exorbitant space-amp. On
+compactions still cause files from different levels to mix physically.          the other hand, Partial Merge exhibits massive write-amp as storage
+    For Full Merge, the figure only depicts compaction write-amp                utilization increases. Can we devise a new compaction granulation
+as no GC write-amp was detected. The reason is that Full Merge                  approach that enables high storage utilization and moderate write-
+writes one large file at a time. The SSD erase units that store this            amp at the same time?
+large file also get cleared all at once when this file is deleted. This
+allows the SSD to reclaim space without migrating data internally.
+                                                                                4    SPOOKY
+Measuring and Modeling Space-Amp. Figure 7 Part (B) reports
+                                                                                We introduce Spooky, a new method of granulating LSM-tree merge
+the physical data size of each baseline for the same experiment as
+                                                                                operations that eliminates the contention between write-amp and
+in Figure 7 Part (A). With Full Merge, the curve is sawtooth-shaped
+                                                                                space-amp. As shown in Figure 8, Spooky comprises six design
+since compactions into the LSM-tree’s largest level occasionally
+                                                                                decisions. (1) It partitions the largest level into equally-sized files,
+cause transient space-amp to skyrocket. In contrast, the curve for
+                                                                                and (2) it partitions a few of the subsequent largest levels based on
+Partial Merge is smooth because compactions are more granular.
+                                                                                the file boundaries at the largest level. (3) This allows Spooky to per-
+The physical data size for both baselines is approximately equal
+                                                                                form partitioned merge, namely compacting one group of perfectly
+even though the Partial Merge baseline accommodates nearly twice
+                                                                                overlapping files at a time across the largest levels to restrict both
+as much logical data.
+                                                                                write-amp and space-amp. (4) At smaller levels, Spooky performs
+    We provide space-amp models for Partial and Full merge in
+                                                                                full preemptive merge. This improves write-amp without harming
+Equations 6 and 7 to enable an analytical comparison. The term
+  1                                                                             space-amp as these levels are exponentially smaller. (5) Spooky
+𝑇 −1 in both equations accounts for the worst-case durable space-               restricts the number of files being simultaneously written to the
+amp from Equation 3. Otherwise, space-amp with Full Merge is
+                                                                                SSD to limit the mixing of hot and cold data within the same SSD
+higher by an additive factor of one to account for the fact that its
+                                                                                erase blocks. (6) Within each level, Spooky writes data sequentially
+transient space-amp occasionally requires as much extra space as
+                                                                                and later disposes of it sequentially as well. Hence, large swaths of
+the logical data size. By contrast, transient space-amp with Partial
+                                                                                data written sequentially to the SSD are also deleted sequentially.
+Merge is assumed here to be negligible due to the small file sizes
+                                                                                This allows the SSD to reclaim space more cheaply.
+used (i.e., typically 2-64MB).
+                                                                                   For ease of exposition, Section 4.1 describes a limited form of
+                                                         1                      Spooky that performs partitioned merge only at the largest two
+          maximum space-amp with Partial Merge = 1 +               (6)
+                                                       𝑇 −1                     levels. Section 4.2 generalizes Spooky to perform partitioned merge
+                                                         1                      across more levels to further reduce space overheads. Section 4.3
+               maximum space-amp with Full Merge = 2 +             (7)
+                                                       𝑇 −1                     focuses on Spooky’s ability to accommodate skewed workloads.
+Scalability with Data Size. Figure 1 in Section 1 repeats the exper-            Sections 4.1 to 4.3 assume the leveled merge policy, and Section 4.4
+iment in Figure 7 while varying storage utilization. The size ratio             extends Spooky to tiered and hybrid merge policies.
+
+
+
+
+                                                                         3075
+levels                             ...                                                             1  Function Merge_Workflow( ):
+                                                                                                    2    int target_lvl = smallest level 𝑞 such that 1 ≤ 𝑞 ≤ 𝐿 − 1 and
+L-3      (5) restrict the number                          (4) perform full                                        ∑︁𝑞
+                                                                                                           𝐶𝑞 < 𝑖=0 𝑆𝑖
+         of files simultaneously                          preemptive merge at
+         being written                                    smaller levels                            3    if target_lvl < L-1 then
+L-2                                                                                                 4         merge_into_one_file(0, target_lvl)
+                                                         (2) partition some subsequent              5    else if target_lvl == L-1 then
+                                                         large levels based on the file             6         array<key> boundaries = get_largest_level_file_boundaries()
+L-1                      A    E    GK    M       Z                                                            merge_and_partition_output(0, L-1, boundaries)
+                                                         boundaries at Level L                      7
+                                                                                                    8    if 𝑁𝐿−1 ≥ 𝐶𝐿−1 then
+                                                                      (1) partition                 9         for pair p of overlapping files at Levels 𝐿 − 1 and 𝐿 do
+L         A             E    G               K       M           Z
+                                                                      Level L into                 10               int 𝑓 𝑖𝑙𝑒𝑚𝑎𝑥 = 𝐶𝐿−1
+                                                                      equally-sized files          11               merge(𝑝 , 𝑓 𝑖𝑙𝑒𝑚𝑎𝑥 )
+         A               E
+                                                                                                   12         if 𝑁𝐿 ≥ 𝐶𝐿 then
+    (3) merge one partition at     (6) write and dispose of files                                  13               add a new level with capacity 𝐶𝐿+1 = 𝐶𝐿 · 𝑇
+    a time at the larger levels    sequentially at each level                                      14               increment 𝐿
+                                                                                                   15         else if 𝑁𝐿 < 𝐶𝐿 /𝑇 then
+Figure 8: Spooky restricts space-amp and write-amp at the                                          16               set capacity of Level 𝐿 − 1 to 𝐶𝐿 /𝑇 and remove Level 𝐿
+same time by introducing and adhering to six principles of                                         17               decrement 𝐿
+compaction granulation.                                                                            18         for 𝑖 = 𝐿 − 1; 𝐿 ≥ 1; 𝑖 − − do
+                                                                                                   19               𝐶𝑖 = 𝑁𝐿 /𝑇 𝐿−𝑖
+
+4.1       Two-Level Spooky                                                                              Algorithm 1: Compaction workflow for 2L-Spooky.
+Two-Level Spooky (2L-Spooky) performs partitioned merge across
+the largest two levels of an LSM-tree as shown in Figure 8. Level 𝐿
+(the largest level) is partitioned into files, each of which comprises                             Hence, all files at Level 𝐿 have similar sizes between 𝑁𝐿/(𝑇 ·2) and
+at most 𝑁𝐿/𝑇 bytes, where 𝑁𝐿 is the data size at Level 𝐿 and 𝑇 is                                  𝑁𝐿/𝑇 bytes. We omit these details from Algorithm 1 for readability.
+the LSM-tree’s size ratio. This divides Level 𝐿 into at least 𝑇 files                              These file adjustments occur seamlessly during partitioned merge
+of approximately equal sizes. Level 𝐿 − 1 (the second largest level)                               operations and therefore involve no additional overhead.
+is also partitioned into files such that the key range at each file                                Evolving the Tree. After a partitioned merge, Algorithm 1 checks
+overlaps with at most one file at Level 𝐿. This allows merging one                                 if Level 𝐿 is now at capacity. If so, we add a new level (Lines 12-
+pair of overlapping files at a time across the largest two levels.                                 14). On the other hand, if many deletes took place and the largest
+At Levels 0 to 𝐿 − 1, 2L-Spooky performs full preemptive merge.                                    level significantly shrank, we remove one level (Lines 15-17). If the
+Algorithm 1 describes 2L-Spooky’s workflow, which is invoked                                       number of levels changed, the run at the previously largest level is
+whenever the buffer fills up and decides which files to merge in                                   placed at the new largest level. We then perform dynamic capacity
+response. Let us go through its steps in detail.                                                   adaptation to restrict durable space-amp (Lines 18-19).
+Full Preemptive Merge at Smaller Levels. Algorithm 1 first picks                                   Write-Amp Analysis. The full preemptive merge operations at
+some full preemptive merge operation to perform along Levels 0                                     smaller levels achieve the modest write-amp of Full Merge across
+to 𝐿 − 1. Specifically, It chooses the smallest level 𝑞 in the range                               Levels 1 to 𝐿 − 2. At Level 𝐿 − 1, each entry is rewritten one extra
+1 ≤ 𝑞 ≤ 𝐿 − 1 that wouldn’t reach capacity if we merged all data at                                time relative to pure Full Merge. The reason is that Level 𝐿 − 1
+smaller levels into it (Line 2). It then compacts all data at Levels 0                             has to reach capacity before a partitioned merge is triggered (i.e.,
+to 𝑞 and places the resulting run at Level 𝑞 (Lines 3-7).                                          there is no preemption at Level 𝐿 − 1). At Level 𝐿, the absence of
+Dividing Merge. A compaction into Level 𝐿 − 1 is coined a dividing                                 overlap across different pairs of files prevents superfluous rewriting
+merge. A run written by a dividing merge is partitioned such that                                  of non-overlapping data and thus keeps write-amp on par with Full
+each output file perfectly overlaps with at most one file at Level 𝐿                               Merge. Hence, 2L-Spooky increases write-amp by an additive factor
+(Lines 6-7). On the other hand, any run written at Levels 1 to 𝐿 − 2                               of one relative to Full Merge, as stated in Equation 8.
+is stored as one file (Line 4).
+                                                                                                                                                        𝑇 −1
+Partitioned Merge. When Level 𝐿 − 1 reaches capacity (Line 8),                                                     write-amp with 2L-Spooky = 𝐿 ·            +1               (8)
+                                                                                                                                                          2
+2L-Spooky triggers a partitioned merge. As shown in Figure 8, this
+involves merging one pair of overlapping files from Levels 𝐿 − 1                                   Design for Low SSD Garbage-Collection Overheads. With our
+and 𝐿 at a time into Level 𝐿 (Lines 9-11). If the projected size of an                             design so far, at most three files can be simultaneously written to
+output file is greater than 𝑁𝐿/𝑇 , the output is split into two equally-                           storage: one due to the buffer flushing, one due to a full preemptive
+sized files (Line 10). The pairs of files are merged in the order of the                           merge, and one due to a partitioned merge. Hence, at most three
+keys they contain. This ensures that data is written and disposed                                  files can become physically interspersed within the underlying
+of in the same order.                                                                              SSD. In addition, Spooky writes data sequentially at every level
+Seamless Adaptation. Under skewed deletes, one file may abruptly                                   and later disposes of it in the same order. As long as there are
+shrink causing the others to become relatively larger. In this case,                               no concurrent writes from other running applications, this design
+Spooky splits any file that is now greater than the maximum file                                   cheapens SSD garbage-collection as large contiguous storage areas
+size (𝑁𝐿/𝑇 bytes) into two during the next partitioned merge. If the                               that are written at the same time tend to also be cleared at the
+cumulative size of two or more adjacent pairs of overlapping files                                 same time. GC overheads are harder to reason about analytically as
+at Levels 𝐿 − 1 and 𝐿 is lower than the maximum file size, we merge                                they depend on the particular SSD firmware, which is opaque. We
+them all into one file at Level 𝐿 during the next partitioned merge.                               therefore measure Spooky’s impact on GC empirically in Section 6.
+
+
+
+
+                                                                                            3076
+                                                                               1  Function Merge_Workflow:
+                                                                                2    array<key> boundaries = get_largest_level_file_boundaries()
+                                                                                3    int target_lvl = smallest level 𝑞 such that 1 ≤ 𝑞 ≤ 𝑋 and
+                                                                                              ∑︁𝑞
+                                                                                       𝐶𝑞 < 𝑖=0 𝑁𝑖
+                                                                                4    if target_lvl < 𝑋 then
+                                                                                5         merge_into_one_file(0, target_lvl)
+                                                                                6    else if target_lvl == 𝑋 then
+                                                                                7         merge_and_partition_output(0, 𝑋 , boundaries)
+                                                                                8    if 𝑁𝑋 ≥ 𝐶𝑋 then
+                                                                                9         target_lvl = smallest level 𝑧 such that 𝑋 + 1 ≤ 𝑧 ≤ 𝐿 and
+                                                                                                   ∑︁𝑧
+            (A)           T)                     (B)           T)                           𝐶𝑧 < 𝑖=𝑋      𝑁𝑖 . If no such level exists, however, pick Level 𝐿 .
+                                                                               10         for partition 𝑝 of intersecting files at Levels 𝑋 to 𝑧 do
+Figure 9: 2L-Spooky significantly improves space-amp rela-                     11               if 𝑋 + 1 ≤ 𝑡𝑎𝑟𝑔𝑒𝑡 _𝑙 𝑣𝑙 ≤ 𝐿 − 1 then
+                                                                               12                    merge(𝑝 , boundaries)
+tive to Full Merge and write-amp relative to Partial Merge.                    13               else if 𝑡𝑎𝑟𝑔𝑒𝑡 _𝑙 𝑣𝑙 == 𝐿 then
+                                                                               14                    int 𝑓 𝑖𝑙𝑒𝑚𝑎𝑥 = 𝐶𝑋
+Transient Space-Amp Analysis. A dividing merge and a par-                      15                    merge(𝑝 , 𝑓 𝑖𝑙𝑒𝑚𝑎𝑥 )
+titioned merge never occur at the same time, yet they are both                 16         if 𝑁𝐿 ≥ 𝐶𝐿 then
+                                                                               17               add a new level with capacity 𝐶𝐿+1 = 𝐶𝐿 · 𝑇
+the bottlenecks in terms of transient space-amp. Hence, transient              18               increment 𝐿
+space-amp for the system is lower bounded by the expression                    19         else if 𝑁𝐿 < 𝐶𝐿 /𝑇 then
+max(𝑓 𝑖𝑙𝑒𝑚𝑎𝑥 , 𝐶𝐿−1 )/𝑁𝐿 . The term 𝑓 𝑖𝑙𝑒𝑚𝑎𝑥 denotes the maximum               20               set capacity of Level 𝐿 − 1 to 𝐶𝐿 /𝑇 and remove Level 𝐿
+file size at Level 𝐿 and controls transient space-amp for a partitioned        21               decrement 𝐿
+                                                                               22         for 𝑖 = 𝐿 − 1; 𝐿 ≥ 1; 𝑖 − − do
+merge. The term 𝐶𝐿−1 denotes the capacity at Level 𝐿 − 1 and con-              23               𝐶𝑖 = 𝑁𝐿 /𝑇 𝐿−𝑖
+trols transient space-amp for a dividing merge. Note that while it                  Algorithm 2: Spooky’s generalized merge workflow.
+is possible to decrease 𝑓 𝑖𝑙𝑒𝑚𝑎𝑥 to lower transient space-amp for a
+partitioned merge, the overall transient space-amp would still be
+lower bounded by 𝐶𝐿−1 , and so setting 𝑓 𝑖𝑙𝑒𝑚𝑎𝑥 to be lower than               is complete. This section generalizes Spooky to support dividing
+𝐶𝐿−1 is inconsequential. This explains our motivation for setting              merge operations into any level to overcome this bound.
+𝑓 𝑖𝑙𝑒𝑚𝑎𝑥 to 𝐶𝐿−1 = 𝑁𝐿 /𝑇 (Line 10). The overall transient space-amp                Algorithm 2 describes Spooky’s generalized compaction work-
+for 2L-Spooky is therefore 1/𝑇 .                                               flow. The workflow takes a parameter 𝑋 , which determines the
+Total Space-Amp Analysis. Due to dynamic capacity adapta-                      level into which we perform dividing merge operations. Level 𝑋 is
+tion, Spooky’s durable space-amp is upper-bounded by Equation                  the smallest level at which we start partitioning runs based on the
+3. We plug it along with Spooky’s transient space-amp of 1/𝑇 into              file boundaries at Level 𝐿 (the largest level). For example, 𝑋 , is set
+Equation 1 to obtain Spooky’s total space-amp in Equation 9.                   to 𝐿 − 1 in Figure 8 and to 𝐿 − 2 in Figure 10. In addition, we now
+                                                1     1                        partition Level 𝐿 into files whose sizes are dictated by the capacity
+               space-amp with 2L-Spooky = 1 + +                       (9)
+                                                𝑇 𝑇 −1                         at Level 𝑋 (i.e., at most 𝐶𝑋 = 𝑁𝐿 /𝑇 𝐿−𝑋 bytes each).
+Summary. Figure 9 Part (A) plots 2L-Spooky’s write-amp against                 Merging at Smaller Levels. Algorithm 2 is different from Algo-
+Full and Partial Merge (Eqs. 5, 4, and 8) as we vary the size ratio. The       rithm 1 in that full preemptive merge operations only take place
+data size 𝑁 is assumed to be 1TB while the buffer size 𝐵 is 64MB.              along levels 0 to 𝑋 − 1 while dividing merge operations now take
+2L-Spooky significantly reduces write-amp relative to Partial Merge            place into Level 𝑋 (rather than into Level 𝐿 − 1 as before). All else
+while almost matching Full Merge. Note that the figure ignores the             is the same as in Algorithm 1.
+impact of SSD garbage-collection and therefore understates the                 Partitioned Preemptive Merge. When Level 𝑋 fills up, Spooky
+total write-amp differences between these baselines.                           performs a partitioned merge operation along the largest 𝐿 − 𝑋
+    Figure 9 Part (B) plots storage utilization, the inverse of space-         levels, one group of at most 𝐿 − 𝑋 perfectly overlapping files at a
+amp, for all three baselines (Eqs. 7, 6 and 9). 2L-Spooky improves             time. An important design decision in the generalized workflow
+space-utilization compared with Full Merge by 10% to 30% depend-               is to combine the idea preemption with partitioned merge to limit
+ing on the tuning of 𝑇 . Compared with partial merge, however,                 the write-amp emanating from larger levels. Specifically, when
+space-utilization with 2L-Spooky is ≈ 10% worse across the board.              Level 𝑋 is full, Algorithm 2 picks the smallest level 𝑧 in the range
+    In summary, while 2L-Spooky enables new attractive write/space             𝑋 + 1 ≤ 𝑧 ≤ 𝐿 that would not reach capacity if we merged all
+cost balances, its write-amp is still higher than with Full Merge by           data within this range of levels into it (Line 9). Then, one group
+one and its space-utilization is higher than with Partial Merge by             of overlapping files across Levels 𝑋 to 𝑧 is merged at a time into
+≈ 10%. It therefore leaves something to be desired. We improve it              Level 𝑧. If the target Level 𝑧 is not the largest level, the resulting
+further in Section 4.2.                                                        run is partitioned based on the file boundaries at the largest level
+                                                                               (Lines 11-12) to facilitate future partitioned merge operations.
+4.2    Generalizing Spooky for Better Trade-Offs                               Example. In Figure 10, 𝑋 is set to 𝐿 − 2. In Part (A), the cumulative
+In Section 4.1, we saw that dividing merge operations into Level               data size at Levels 𝐿 − 2 and 𝐿 − 1 does not exceed the capacity at
+𝐿 − 1 create a lower bound of 1/𝑇 on transient space-amp. To recap,            Level 𝐿 − 1, and so we merge one pair of files from Levels 𝐿 − 2
+the reason is that Level 𝐿 − 1 comprises a fraction of 1/𝑇 of the data         and 𝐿 − 1 at a time into Level 𝐿 − 1. In Part (B), however, the data
+size. This level is rewritten from scratch during each dividing merge          size at Levels 𝐿 − 2 and 𝐿 − 1 does exceed the capacity at Level
+operation, and the input files cannot be deleted until the merge               𝐿 − 1, and so Level 𝐿 is chosen as the target. We therefore merge
+
+
+
+
+                                                                        3077
+   (A)                      ...        full preemptive merge fills              (B)                              ...           full preemptive merge fills
+                                       up Level L-2                                                                            up Level L-2
+   L-3
+
+                                            The data size at Levels L-2 and                                                         The data size at Levels L-2
+   L-2                                      L-1 does not exceed the                                                                 and L-1 exceeds the capacity
+                                            capacity at Level L-1, and so                                                           at Level L-1, and so we now
+   L-1                                      we start a partitioned merge                                                            start a preemptive partitioned
+                                            into Level L-1                                                                          merge into Level L
+
+   L
+
+                Figure 10: Spooky performs partitioned preemptive merge along larger levels to lower write-amp.
+                                                                                     levels                ...                      levels
+three overlapping files from Levels 𝐿 − 2, 𝐿 − 1 and 𝐿 at a time into
+Level 𝐿. In this case, preemption allows us to merge the data from                   L-2                                             0                 CD
+Level 𝐿 − 2 once rather than twice on the way to Level 𝐿.
+Write-Amp Analysis. At Levels 1 to 𝑋 − 1, full preemptive merge                      L-1               A         B                   1              AB
+
+operations keep write-amp on par with our Full Merge baseline.
+At Level 𝑋 , each entry is rewritten one extra time relative to Full                 L        A    B   C         D     E   F         2                  ...
+Merge as there is no preemption at this level. At Levels 𝑋 + 1 to 𝐿,
+                                                                                              A    B       (A)                                          (B)
+write-amp is the same as with Full Merge as we effectively perform
+full preemptive merge across groups of perfectly overlapping files.
+                                                                                     Figure 11: Spooky optimizes for skewed writes by avoiding
+Hence, write-amp is the same as for 2L-Spooky in Equation 8. By
+                                                                                     compactions of non-overlapping files.
+setting 𝑋 to Level 𝐿, Spooky becomes identical to Full Merge and
+can therefore be seen as a generalization of this baseline.                          increasing transient space-amplification. At the same time, Spooky
+                                                                                     significantly improves space-amplification relative to Full Merge
+                                              {︄
+                                       𝑇 −1      0    𝑋 =𝐿                           while slightly increasing write-amplification. Overall, Spooky pro-
+         write-amp with Spooky = 𝐿 ·        +                          (10)          vides new and improved trade-offs in-between.
+                                         2       1    otherwise
+Total Space-Amp Analysis. A partitioned merge entails a tran-                        4.3          Optimizing for Skew
+sient space-amp of at most 𝑇 𝐿−𝑋  1 as Level 𝐿 is partitioned into at
+                                                                                     So far, we have been analyzing Spooky under the assumption of uni-
+least 𝑇 𝐿−𝑋 files of approximately equal sizes. A dividing merge
+                                                      1 as the capac-                formly random insertions to reason about the worst-care write-amp
+operation also entails a transient space-amp of 𝑇 𝐿−𝑋
+                                                                                     and quality of service guarantees. With skewed updates, however,
+                                      1
+ity at this level is a fraction of 𝑇 𝐿−𝑋 of the data size. The overall               Spooky provides additional advantages. Specifically, Spooky avoids
+transient space-amp, which is the maximum of these two expres-                       having to compact files at larger levels (𝑋 + 1 to 𝐿) that do not
+sions, is therefore also 𝑇 𝐿−𝑋1 . By plugging this expression along
+                                                                                     overlap with newer updates during a partitioned merge. Figure 11
+with Equation 3 for durable space-amp into Equation 1, we obtain                     Part (A) illustrates an example with 2L-Spooky. As shown, all newer
+Spooky’s total space-amp in Equation 11.                                             data at Level 𝐿 − 1 overlaps with just one of the files at Level 𝐿.
+                                               1        1                            Spooky therefore only compacts the two overlapping files while
+             space-amp with Spooky = 1 +          +                (11)
+                                            𝑇 𝐿−𝑋 𝑇 − 1                              leaving all other files untouched during the next partitioned merge.
+Controlling the Number of Open Files. While decreasing the                           In contrast, Full Merge would have to rewrite all of Level 𝐿 as it
+parameter 𝑋 reduces transient space-amplification, it also increases                 stores every level as one file. Hence, Spooky not only matches Full
+the number of files in the system. Many operating systems limit the                  Merge in the worst-case but also improves on it in the skewed case.
+number of files that can be simultaneously open to safeguard against                     Spooky also allows dividing data at smaller levels into multiple
+resource over-utilization. It is important not to exceed this amount                 files to optimize for skew. In Figure 11 Part (B), for instance, the
+to prevent the system from crashing. We provide Equation 12 to                       buffer is flushed into Level 1, though its contents do not intersect
+model the maximum number of files with respect to 𝑋 . The intuition                  with the existing file at Level 1. They are therefore flushed as a
+for the equation is that Spooky performs partitioned merge across                    new small file rather than being compacted into the existing file at
+                                                                                     Level 1. This feature is particularly useful for handling sequential
+the largest (𝐿 − 𝑋 ) levels, each of which contains 𝑇 𝐿−𝑋 files. In
+                                                                                     writes in the key space efficiently.
+addition, there is one file across each of the smaller (𝑋 −1) levels. In
+section 6, we show that tuning 𝑋 to 𝐿 − 2 provides a good practical
+balance between transient space-amp and the number of open files.
+                                                                                     4.4          Supporting Tiered & Hybrid Merge Policies
+Such a tuning also ensures that metadata volume remains modest                       While we have focused so far on how to apply Spooky to the leveled
+and that files remain large enough to be written to storage using                    merge policy, our overarching vision is towards navigable systems
+large sequential writes.                                                             that can learn and adapt across a wide design space to optimize for
+                                                                                     different workloads [6, 38–43]. Hence, it is important to show that
+         maximum number of files = (𝐿 − 𝑋 ) · 𝑇 𝐿−𝑋 + (𝑋 − 1)          (12)
+                                                                                     Spooky generalizes to other merge policies as well. Figure 12 Part
+New Space/Write Trade-Offs. Overall, Spooky significantly im-                        (A) shows how to do so with lazy leveling, which consists of one run
+proves write-amplification relative to Partial Merge while slightly                  at the largest level and multiple runs at each of the smaller levels.
+
+
+
+
+                                                                              3078
+    Levels        (A) Lazy Leveling                      (B) Tiering
+                                                                                             and so it loosely corresponds to Level 0 in our LSM-tree formaliza-
+                                                                                             tion from Section 2. Flushing the buffer to rLevel 0 contributes an
+    L-2                     ... ...   ...                  ... ... ...
+                                                                                             additive factor of one to write-amp, and so our implementation has
+    L-1                                                                                      a higher write-amp by one than the earlier write-models models
+                                                                                             (in Eqs. 8 and 10).
+    L                                                                                        Level to rLevel Mappings. In RocksDB, all rLevels except rLevel
+Figure 12: Spooky is compatible with any merge policy, in-                                   0 can only store one run (i.e., a non-overlapping collection of files).
+cluding tiered and hybrid ones.                                                              To support tiered and hybrid merge policies, whereby each level can
+                                                                                             contain multiple runs, we had to overcome this constraint. We did
+This example assumes 2L-Spooky to visualize the core idea clearly.                           so by mapping each level in our LSM-tree formalization to one or
+Each shading corresponds to a disjoint part of the key space. As                             more consecutive RocksDB rLevels. For example, in a tiered merge
+shown, each dividing merge operation compacts all data at Levels                             policy, Level 1 in our formalization corresponds to rLevels 1 to 𝑇 ,
+0 to 𝐿 − 2 into a new run at Level 𝐿 − 1, and it partitions this run                         Level 2 to rLevels 𝑇 + 1 to 2 · 𝑇 , etc.
+based on the file boundaries at Level 𝐿. During a partitioned merge,                         Assuming Tiered/Hybrid Merge Policies. Our implementation
+we draw one overlapping group of files from each of the runs at                              has a parameter 𝐺 for the number of greedy levels from largest
+Level 𝐿 − 1 and compact them with the corresponding file at Level                            to smallest that employ the leveling merge policy. Hence, when
+𝐿. This design allows benefiting from even lower write-amp than                              𝐺 ≥ 𝐿, we have pure leveling, when 𝐺 = 0 we have pure tiering,
+before while still providing the same space-amp guarantees.                                  and when 𝐺 = 1 we have lazy leveling. Thus, our implementation
+   Figure 12 Part (B) applies Spooky to the tiered merge policy.                             can assume different merge policies with different trade-offs for
+Level 𝐿 consists of multiple runs, and the data at both Levels 𝐿 − 1                         various application scenarios. The size ratio 𝑇 can further be varied
+and 𝐿 is partitioned based on the file boundaries at the oldest run at                       to fine-tune these trade-offs.
+Level 𝐿. A dividing merge operation compacts all data at Levels 0 to
+                                                                                             Full Merge. For our full merge baseline, we use our Spooky im-
+𝐿 − 2 into a new run at Level 𝐿 − 1. During a partitioned merge, we
+                                                                                             plementation yet with partitioned merge turned off. Hence, full
+add one run to Level 𝐿 by merging one group of overlapping files
+                                                                                             preemptive merge is performed across all levels.
+from level 𝐿 − 1 at a time into Level 𝐿. This design trades durable
+space-amp for even better write-amp guarantees. This instance                                Avoiding Stalling. RocksDB’s default compaction policy can per-
+of Spooky represents an improved version of LWC-tree [83, 84],                               form internal rLevel 0 compactions, whereby multiple files at rLevel
+which carefully orchestrates merge operations across larger levels                           0 are compacted into a single file that gets placed back at Level 0.
+to restrict transient space-amp while executing them at a large                              The goal is to prevent the system from stalling when rLevel 0 is full
+enough granularity that garbage-collection overheads within the                              (i.e., has 𝛾 files) yet there is an ongoing compaction into rLevel 1
+SSD are mitigated.                                                                           that must finish before we trigger a new compaction from rLevel 0
+                                                                                             to rLevel 1. We also enable rLevel 0 compactions within our Spooky
+5       IMPLEMENTATION                                                                       implementation to prevent stalling. Specifically, whenever a full
+                                                                                             preemptive merge is taking place and we already have 𝛼 or more
+This section discusses Spooky’s implementation within RocksDB.                               files of approximately equal sizes, created consecutively, and not
+Encapsulation. There is an abstract compaction_picker.h class                                currently being merged, we compact these files into one file, which
+within RocksDB. Its role is to implement the logic of which files to                         gets placed back at rLevel 0.
+compact under which conditions and how to partition the output                               Concurrency. Our implementation follows RocksDB in that each
+into new files. We implemented Spooky by inheriting from this class                          compaction runs on background thread/s. We use the sub-comp-
+and implementing the logic of Algorithm 2. Our implementation is                             action feature of RocksDB to partition large compactions across
+therefore encapsulated in one file. This highlights an advantage of                          multiple threads. Our design allows for partitioned compactions,
+Spooky from an engineering perspective as it leaves all other system                         full preemptive compactions, and Level 0 compactions to run con-
+aspects (e.g., recovery, concurrency control, etc.) unchanged.                               currently. Hence, there can be at most three compactions running
+rLevels. We refer to levels in the RocksDB implementation as                                 simultaneously, though each of these compactions may be further
+rLevels to prevent ambiguity with levels in our LSM-tree formal-                             parallelized using sub-compactions.
+ization introduced in Section 2.
+rLevel 0. In RocksDB, rLevel 0 is the first rLevel in storage, and it                        6   EVALUATION
+is special: it is the only rLevel whose constituent files may overlap                        We now show experimentally that Spooky is the only compaction
+in terms of the keys they contain. When rLevel 0 has accrued 𝛼                               granulation strategy that achieves high storage utilization, moder-
+files flushed from the buffer, the compaction picker, and hence our                          ate write-amp, and high performance at the same time.
+Algorithm 2, is invoked. Once there are 𝛽 files at rLevel 0, write
+                                                                                             Platform. Our machine has an 11th Gen Intel i7-11700 CPU with
+throttling is turned on. When there are 𝛾 files at rLevel 0, the sys-
+                                                                                             sixteen 2.50GHz cores. The memory hierarchy consists of 48 KB of
+tem stalls to allow ongoing compactions to finish. We tune these
+                                                                                             L1 cache, 512 KB of L2 cache, 16 MB of L3 cache, and 64GB of DDR
+parameters to 𝛼 = 4, 𝛽 = 4 and 𝛾 = 9 throughout our experiments2 .
+                                                                                             memory. An Ubuntu 18.04.4 LTS operating system is installed on a
+Note that in effect, rLevel 0 can be seen as an extension of the buffer,
+                                                                                             240GB KIOXIA EXCERIA SATA SSD. The experiments are running
+2 In the RocksDB code, 𝛼 is referred to as level0_file_num_compaction_trigger, 𝛽 as          on a 960GB Samsung NVME SSD model MZ1L2960HCJR-00A07
+level0_slowdown_writes_trigger, and 𝛾 as level0_stop_writes_trigger.                         with the ext4 file system.
+
+
+
+
+                                                                                      3079
+                                                                  merge write-amp                 GC write-amp                              total write-amp
+   space (GB)
+
+
+
+
+                (A)                                                                 (B)                          (C)                                          (D)
+
+
+ Uniform
+                         Full Merge Spooky Partial Merge
+
+
+
+
+                                                           99.9 percentile (ms)             merge write-amp                                 total write-amp
+                writes     87300    54200     26100
+
+ Workload
+                point      3860      2500      1970
+                seeks       489      316        233
+
+
+
+
+  Zipfian
+                         Full Merge Spooky Partial Merge
+                writes    174000   166000     130000
+
+
+ Workload
+                point      6180      5930      2580
+                seeks       784      742        258
+
+                 (E) Throughput (ops/sec)                                           (F)                          (G)                                          (H)
+
+Figure 13: Full Merge exhibits low write-amp but cannot reach high storage utilization. Partial Merge can reach high storage
+utilization at the expense of high write-amp. Spooky is the only compaction granulation scheme that achieves high storage
+utilization, moderate write-amp, and good performance at the same time.
+Setup. We use db_bench to run all experiments as it is the stan-                                         Spooky Enables High Storage Utilization. Figure 13 Parts (A)
+dard tool used to benchmark RocksDB. Every entry consists of a                                           to (D) measure space and write-amplification over time for the
+randomly generated 16B key and a 512B value. Unless otherwise                                            different baseline as we issue unique uniformly random insertions
+mentioned, all baselines use the leveling merge policy, a size ratio                                     followed by uniformly random updates for one day.
+of 5, and a memtable size of 64MB. Bloom filters are enabled and                                             Part (A) shows that Partial Merge exhibits negligible transient
+assigned 10 bits per entry. Dynamic capacity adaptation is applied                                       space-amp, so it can store more logical data (644GB in this case).
+for all baselines. The data block size is 4KB. We use one application                                    In contrast, Full Merge exhibits a sawtooth-shaped curve due to
+thread to issue inserts/updates, and we employ sixteen background                                        its massive transient space-amp. It can therefore support a smaller
+threads to parallelize compactions.                                                                      logical data size (369GB in this experiment). For Spooky, the curve is
+   We use the implementation from Section 5 to represent Spooky                                          also sawtooth-shaped due to its partitioned merge operations. The
+and Full Merge. For Spooky, we set the parameter 𝑋 , the level into                                      teeth are significantly smaller than with Full Merge, though, due to
+which Spooky performs dividing merge operations, to 𝐿 − 2, the                                           the finer merge granularity. This allows Spooky to match Partial
+third largest level, though we also later experiment with other                                          Merge in terms of logical data size (also 644GB in this experiment).
+tunings of 𝑋 . For Partial Merge, we use the standard compaction                                         Spooky Reduces Compaction Overheads. Figure 13 Part (B)
+policy of RocksDB with the default file size of 64MB.                                                    measures write-amp due to compaction operations over time. Write-
+Experimental Control. Before each experimental trial, we delete                                          amp with Spooky is slightly higher than with Full Merge since
+the database from the previous trial and reset the SSD using the                                         Spooky stores ≈ 2x more logical data. At the same time, Spooky
+fstrim command. This allows the SSD to reclaim space internally.                                         improves on Partial Merge by ≈ 30% while matching it in terms of
+We then fill up the drive from scratch for the next trial. This ensures                                  logical data size. The reason is that Spooky eliminates superfluous
+that subsequent experimental trials do not impact each other.                                            edge merging while leveraging preemption across most levels.
+    To elicit and measure the influence of SSD garbage-collection, it                                    Spooky Reduces Garbage-Collection. Figure 13 Part (C) mea-
+is crucial to run all experiments at a high storage utilization so that                                  sures the SSD’s garbage-collection write-amp over time. Full Merge
+the SSD is stressed for free space. However, our Full Merge baseline                                     exhibits no overheads since all writes and deletes are large and
+is unable to reach a storage utilization of over 50%, which is also                                      sequential, and because the data size is smaller so the SSD is not
+its core flaw. For this reason, the Full Merge baseline employs a                                        stressed for free space. Partial Merge exhibits the highest overheads
+smaller logical data size in some experiments.                                                           because its many simultaneous small compactions cause many files
+Performance Monitoring. We run the du Linux command to                                                   with different lifespans to become interspersed within the same SSD
+monitor the physical database size every five seconds. We also run                                       erase units. With Spooky, garbage-collection is significantly cheaper.
+the nvme command every two minutes to report the SSD’s internal                                          The reason is that it writes fewer though larger files simultaneously.
+garbage-collection write-amp. We use RocksDB’s internal statistics                                       This leads to less interspersing of files with disparate lifespans
+to report the number of bytes flushed and compacted every two                                            within the SSD and hence > 2x cheaper garbage-collection.
+minutes to allow computing write-amp due to compactions. We                                                 Figure 13 Part (D) reports total write-up, the product of the write-
+use db_bench to report throughput for queries and updates.                                               amps due to compaction and garbage-collection from Parts (B) and
+
+
+
+
+                                                                                          3080
+                                                                                                                  Writes   Point     Seek
+
+
+
+
+    storage space (GB)
+                                                                                       Lazy
+
+
+                                                                                                                                            storage space (GB)
+                                                                                                         Full     150000   4110      347
+
+
+
+
+                                           total write-amp
+                                                                                                        Spooky    120000   3390      274
+
+                                                                                                         Full     130000   3760      354
+
+
+
+
+                                                                             Leveling leveling Tiered
+                                                                                                        Spooky    100000   4000      343
+
+                                                                                                         Full     89000    3930      497
+                                                                                                        Spooky    71900    3780      488
+                                                                                                        Partial   61400    991       134
+
+
+                         (A)                                 (B)                                          (C) Throughput (ops/sec)                               (D)
+Figure 14: Spooky is compatible across a wide spectrum of compaction policies, including tiering and lazy leveling (Parts A-C).
+Spooky generally works best with 𝑋 = 𝐿 − 2 to balance transient space-amp and the number of open files (Part D).
+
+                                                                                                    to store the same data size. The bottom part of Figure 13 Part (E)
+
+
+
+
+Storage Space (GB)                     Write-Amplification
+                                                                                                    gives throughput measurements for Zipfian writes, point reads, and
+                                                                                                    seeks. Again, Spooky significantly improves on Partial Merge and
+                                                                                                    almost matches Full Merge while being able to store nearly 2x more
+                                                                                                    data.
+                                                                                                    Spooky Applies Across Numerous Merge Policies. Figures 15
+                                                                                                    Parts (A) to (C) evaluate Spooky with the Tiered and Lazy Leveled
+                                                                                                    merge policies, described in Section 4.4, along with the previous
+                               (A)                                 (B)                              leveled strategies. All baselines have 250GB of logical data, and
+                                                                                                    the workload is uniformly random. Relative to Full Merge, Spooky
+Figure 15: Large files with Partial Merge cause the system to                                       significantly reduces transient space-amplification without signifi-
+crash due to transient space-amp (A). With the largest file                                         cantly impacting write-amplification for any merge policy.
+size we tried that did not crash (2GB), SSD garbage-collection                                         Figures 15 Part (C) provides corresponding throughput figures
+is still a severe performance issue (B).                                                            for writes as well as for point reads and seeks issued from a parallel
+                                                                                                    thread. From the theory, we would expect the leveling baselines to
+(C). Spooky reduces total write-amp by ≈ 𝑥2.5 relative to Partial
+                                                                                                    exhibit the best read performance as there are fewer runs to access.
+Merge while matching it in terms of logical data size.
+                                                                                                    Interestingly, we observe that leveled partial merge (RocksDB’s de-
+Spooky Improves Read/Write Performance. The top table in                                            fault compaction policy) exhibits the worse read performance. The
+Figure 13 Part (E) compares throughput for the three baselines with                                 reason is that its background write-amplification is far higher, and
+a uniform workload (to three significant figures). The point reads                                  this interferes with read performance. In contrast, all Spooky base-
+and seek measurements were gathered by adding one thread to                                         lines significantly reduce write-amplification and thereby improve
+issue queries in parallel to the thread issuing writes.                                             both read and write throughput at the same time.
+   Spooky improves update throughput relative to partial merge
+by approximately the same factor by which it improves on its total                                 Tuning 𝑋 . Figure 14 Part (D) explores different tunings of 𝑋 for
+write-amp. This shows that reductions in total write-amp translate                                 Spooky under the leveling merge policy and a logical data size of
+to direct improvements in write throughput.                                                        644GB. With 𝑋 tuned to 𝐿 − 1, the second largest level, the system
+   Furthermore, Spooky significantly improves query performance                                    runs out of space and crashes since large files are merged at a time.
+relative to Partial Merge because there is less background write-                                  As we decrease 𝑋 to 𝐿 − 2 and 𝐿 − 3, space requirements decrease
+amp to impede queries. Full Merge exhibits the best throughput                                     at a diminishing rate. With 𝑋 set to 𝐿 − 4, the system crashes due
+results overall, but this is because its dataset is smaller. The 99.9 per-                         to having too many open files (the limit in our OS is set to 1024).
+centile latency in Figure 13 Part (F) shows that Spooky’s throughput                               Thus, setting 𝑋 to 𝐿 − 2 is sufficient for most practical purposes.
+improvements do not involve a sacrifice in performance stability.                                  Larger Files Only Slightly Improve Partial Merge. It is tempting
+Spooky Improves Skewed Workloads. We extended db_bench                                             to think that using larger files with Partial Merge would eliminate
+to support Zipfian workloads and ran an experiment that first fills                                GC overheads by causing larger units of data to be written and
+up a database with uniformly random unique insertions followed by                                  erased all at once across SSD erase units. In Figure 15 Part (A), we
+ten hours of Zipfian point updates. The Zipf distribution parameter                                try three large file sizes. With 10GB and 5GB files, the database
+is set to one. The hot keys are randomly distributed across the                                    crashed after exceeding the SSD storage capacity, and so the re-
+key space, and they change every two hours to reflect changing                                     spective curves are incomplete. The reason is that larger files entail
+hotspots. As in previous experiments, Spooky and Partial Merge                                     a higher transient space-amp that causes the physical data size to
+employ a logical data size of 644GB while Full Merge uses a smaller                                vary widely, as evidenced by the noisier curves. Since 2GB files
+logical data size of 369GB.                                                                        were the largest we succeeded in finishing the experiment with, we
+   Figures 13 Parts (G) shows write-amplification arising from com-                                measure write-amp for Partial Merge with 2GB files in Figure 15
+paction operations of the LSM-tree, while Part (H) shows total                                     Part (B). GC overheads are slightly lower than in Figure 13 Part (C),
+write-amplification, which also accounts for SSD garbage-collection.                               which uses 64MB files. However, these overheads are still consid-
+Spooky significantly improves on Partial Merge while being able                                    erable and result in higher total write-amp than with Spooky. The
+
+
+
+
+                                                                         3081
+reason is that even with 2GB files, concurrent compactions cause               largest level at the same time. Spooky avoids the first problem by
+these files to become physically interspersed. These findings are              allocating data within each level through a layer of indirection, and
+in line with contemporaneous work [11]. Overall, GC overheads                  the second by merging into the largest level one partition at a time.
+with Partial Merge are not a tuning issue but rather an intrinsic              In addition, Spooky is applicable across all merge policies, and it
+problem, to which Spooky offers a novel solution.                              addresses the problem of SSD garbage-collection.
+Key Takeaway. Figure 1 measures total write-amp as we increase                 Richer Hardware. Zoned Namespaces (ZNS) [11, 17, 85], no-FTL
+storage utilization. The size ratio 𝑇 is set to 10. Full Merge can-            [77] and computational storage [68] have recently been proposed
+not exceed a storage utilization of over 50%. Partial Merge reaches            for controlling the placement of LSM-tree data across erase blocks
+80% storage utilization but its write-amp is exorbitant. In contrast,          within storage to cheapen garbage-collection. Spooky is also de-
+Spooky matches Partial Merge in terms of storage utilization while             signed to address the problem of SSD garbage-collection, yet it
+achieving, in this case, 3x lower total write-amp. Spooky is therefore         does so through the standard block device interface. It is therefore
+the best choice enabling excellent storage utilization and perfor-             applicable across a wider range of storage devices. At the same time,
+mance at the same time.                                                        Spooky lends itself to ZNS and no-FTL by writing and disposing of
+                                                                               large swaths of data sequentially. Thus, Spooky can be integrated
+7    RELATED WORK                                                              with such schemes to further reduce garbage-collection overheads.
+                                                                                   In addition, specialized hardware such as FPGAs [37, 91], hetero-
+Other Merge Policies. In addition to tiered/leveled merge policies
+                                                                               geneous storage [87], data processors [26], open-channel SSDs [78],
+that offer logarithmic read/write scalability (see Sections 2 and 3),
+                                                                               GPUs [5], and non-volatile memory [48, 52, 86] have all been pro-
+other merge policies with different scalability trade-offs have been
+                                                                               posed as means of speeding up LSM-trees. Other hardware tech-
+proposed. Bounded depth merge policies fix the number of runs
+                                                                               niques leverage multi-core CPUs [89], lock-free synchronization
+to a constant to limit query costs, yet this causes write-amp to
+                                                                               [34] and distributed processing [2, 53]. Spooky is fully compatible
+increase more rapidly [63, 64]. In contrast, LSM-bush scales write-
+                                                                               with these approaches in that its only task is to select which files to
+amp at a slower rate of 𝑂 (log log 𝑁 ) yet pays more in terms of query
+                                                                               merge. The execution of compaction is orthogonal and can easily
+costs. Both of these strains of merge policies have been described as
+                                                                               be performed on different types of hardware and storage.
+employing Full Merge, and so such policies can be readily combined
+with Spooky to restrict transient space-amp.                                   Key-Value Separation. Recent work proposes to store the values
+                                                                               of data entries in an external log [15, 58, 81] or in a separate tiered
+Compaction Granulation Techniques. Since the tiered merge
+                                                                               LSM-tree [55]. This improves write-amp while sacrificing scan per-
+policy was first deployed by Cassandra in conjunction with Full
+                                                                               formance. Spooky can be combined with the LSM-tree component/s
+Merge, several recent works propose finer granulation techniques
+                                                                               in such designs for better write-amp vs. space-amp balances.
+to limit transient space-amp specifically with tiering [73]. They
+propose to partition the multiple runs at each level based on (1)              In-Memory Optimizations. Various optimizations have been
+the hashes of keys [80], (2) randomly [69], (3) into equally-sized             proposed for LSM-tree’s in-memory data structures including adap-
+files (or in other words using Partial Merge) [66, 92], or (4) based           tive or learned caching [60, 79, 82], leaned fence pointers [18],
+on the file boundaries at the oldest run in the system [83, 84]. In            tiered buffering [7, 14], selective flushing [7], smarter Bloom filters
+the context of bounded-depth policies, striped compaction, Striped             [19, 20, 88, 93, 95] or replacements thereof [25, 29, 44, 62, 70, 90, 91],
+Compaction in Hbase performs full key-space partitioning                       and materialized indexes for scans [94]. Spooky is fully comple-
+    LSM-trie partitions the multiple runs at each level into perfectly         mentary with such works as it only impacts the decision of which
+overlapping files based on the hashes of their keys, but it forgoes the        files to merge and how to partition the output.
+ability to perform range reads [80]. PebblesDB partitions the key              Performance Stability. Recent work focuses on maintaining stable
+space randomly, which can occasionally result in excessively large             performance during compaction operations [59]. Various prioriti-
+partitions [69]. Some designs partition runs into equally sized files          zation [8, 9, 47], synchronization [74], deamortization [10, 54], and
+[66, 92], yet this leads to superfluous edge merging and thus higher           throttling techniques [56] have been proposed. Our Spooky imple-
+write-amp. LWC-tree [83, 84] partitions runs at smaller levels based           mentation on RocksDB performs compaction on concurrent threads
+on file boundaries at larger levels while dividing files at larger levels      to avoid blocking the application, yet it could benefit from these
+based on size. Still, LWC-tree does not prevent the system from                more advanced techniques to more evenly schedule the overheads
+merging multiple partitions at once into the largest level, and so             of large compaction operations in time.
+the system may crash. In contrast, Spooky ensures only one large
+merge operation happens at a time, while at the same time forcing              8    CONCLUSION
+all writes within each level to be sequential to also restrict GC              Existing methods for granulating LSM-tree compactions either
+garbage-collection. Furthermore, Spooky is generalized across the              waste most of the available storage capacity or involve exorbitant
+whole space of merge policies rather than just tiering.                        write-amplification. We introduce Spooky, the first approach to
+    The partitioned exponential file is a collection of non-overlapping        achieve high storage utilization and moderate write-amplification
+leveled LSM-trees, each of which is allocated contiguously in the              at the same time.
+LBA space [46]. As the sizes of partitions change, fragmentation is
+created leading to either poorer storage utilization or higher write-          REFERENCES
+amp for de-fragmentation. Furthermore, no transient space-amp                   [1] Nitin Agrawal, Vijayan Prabhakaran, Ted Wobber, John D. Davis, Mark Manasse,
+guarantees are provided as multiple partitions may merge into their                 and Rina Panigrahy. 2008. Design Tradeoffs for SSD Performance. ATC (2008).
+
+
+
+
+                                                                        3082
+ [2] Muhammad Yousuf Ahmad and Bettina Kemme. 2015. Compaction management                          The RocksDB Experience. In USENIX FAST.
+     in distributed key-value datastores. PVLDB (2015).                                       [33] Facebook. 2022. RocksDB. https://github.com/facebook/rocksdb (2022).
+ [3] Apache. 2022. Cassandra. http://cassandra.apache.org (2022).                             [34] Guy Golan-Gueta, Edward Bortnikov, Eshcar Hillel, and Idit Keidar. 2015. Scaling
+ [4] Apache. 2022. HBase. http://hbase.apache.org/ (2022).                                         Concurrent Log-Structured Data Stores. EuroSys (2015).
+ [5] Saman Ashkiani, Shengren Li, Martin Farach-Colton, Nina Amenta, and John D               [35] Google. 2022. LevelDB. https://github.com/google/leveldb/ (2022).
+     Owens. 2018. GPU LSM: A dynamic dictionary data structure for the GPU. In                [36] Aayush Gupta, Youngjae Kim, and Bhuvan Urgaonkar. 2009. DFTL: a flash trans-
+     IEEE IPDPS. IEEE.                                                                             lation layer employing demand-based selective caching of page-level address
+ [6] Manos Athanassoulis, Michael S. Kester, Lukas M. Maas, Radu Stoica, Stratos                   mappings. ASPLOS (2009).
+     Idreos, Anastasia Ailamaki, and Mark Callaghan. 2016. Designing Access Meth-             [37] Gui Huang, Xuntao Cheng, Jianying Wang, Yujie Wang, Dengcheng He, Tieying
+     ods: The RUM Conjecture. EDBT (2016).                                                         Zhang, Feifei Li, Sheng Wang, Wei Cao, and Qiang Li. 2019. X-Engine: An
+ [7] Oana Balmau, Diego Didona, Rachid Guerraoui, Willy Zwaenepoel, Huapeng                        optimized storage engine for large-scale E-commerce transaction processing. In
+     Yuan, Aashray Arora, Karan Gupta, and Pavan Konka. 2017. TRIAD: Creating                      SIGMOD.
+     Synergies Between Memory, Disk and Log in Log Structured Key-Value Stores.               [38] Stratos Idreos, Manos Athanassoulis, Niv Dayan, Demi Guo, Mike S Kester, Lukas
+     USENIX ATC (2017).                                                                            Maas, and Kostas Zoumpatianos. 2015. Past and future steps for adaptive storage
+ [8] Oana Balmau, Florin Dinu, Willy Zwaenepoel, Karan Gupta, Ravishankar Chand-                   data systems: From shallow to deep adaptivity. In Real-Time Business Intelligence
+     hiramoorthi, and Diego Didona. 2019. SILK: Preventing Latency Spikes in Log-                  and Analytics. Springer.
+     Structured Merge Key-Value Stores. In USENIX ATC.                                        [39] Stratos Idreos, Niv Dayan, Wilson Qin, Mali Akmanalp, Sophie Hilgard, Andrew
+ [9] Oana Balmau, Florin Dinu, Willy Zwaenepoel, Karan Gupta, Ravishankar Chand-                   Ross, James Lennon, Varun Jain, Harshita Gupta, David Li, et al. 2019. Learning
+     hiramoorthi, and Diego Didona. 2020. Silk+ preventing latency spikes in log-                  Key-Value Store Design. arXiv preprint arXiv:1907.05443 (2019).
+     structured merge key-value stores running heterogeneous workloads. TOCS                  [40] Stratos Idreos, Niv Dayan, Wilson Qin, Mali Akmanalp, Sophie Hilgard, Andrew
+     (2020).                                                                                       Ross, James Lennon, Varun Jain, Harshita Gupta, David Li, and Zichen Zhu. 2019.
+[10] Michael A. Bender, Martin Farach-Colton, Jeremy T. Fineman, Yonatan R. Fogel,                 Design Continuums and the Path Toward Self-Designing Key-Value Stores that
+     Bradley C. Kuszmaul, and Jelani Nelson. 2007. Cache-Oblivious Streaming B-                    Know and Learn. In CIDR.
+     trees. SPAA (2007).                                                                      [41] Stratos Idreos, Kostas Zoumpatianos, Manos Athanassoulis, Niv Dayan, Brian
+[11] Matias Bjørling, Abutalib Aghayev, Hans Holmberg, Aravind Ramesh, Damien                      Hentschel, Michael S. Kester, Demi Guo, Lukas M. Maas, Wilson Qin, Abdul
+     Le Moal, Gregory R Ganger, and George Amvrosiadis. 2021. ZNS: Avoiding the                    Wasay, and Yiyou Sun. 2018. The Periodic Table of Data Structures. IEEE DEBULL
+     Block Interface Tax for Flash-based SSDs.                                                     41, 3 (2018), 64–75.
+[12] Matias Bjørling, Philippe Bonnet, Luc Bouganim, and Niv Dayan. 2013. The                 [42] Stratos Idreos, Kostas Zoumpatianos, Subarna Chatterjee, Wilson Qin, Abdul
+     Necessary Death of the Block Device Interface. CIDR (2013).                                   Wasay, Brian Hentschel, Mike Kester, Niv Dayan, Demi Guo, Minseo Kang, et al.
+[13] Burton H. Bloom. 1970. Space/Time Trade-offs in Hash Coding with Allowable                    2019. Learning data structure alchemy. IEEE DEBULL (2019).
+     Errors. CACM 13, 7 (1970), 422–426.                                                      [43] Stratos Idreos, Kostas Zoumpatianos, Brian Hentschel, Michael S Kester, and
+[14] Edward Bortnikov, Anastasia Braginsky, Eshcar Hillel, Idit Keidar, and Gali Sheffi.           Demi Guo. 2018. The Data Calculator: Data Structure Design and Cost Synthesis
+     2018. Accordion: Better Memory Organization for LSM Key-Value Stores. PVLDB                   from First Principles and Learned Cost Models. SIGMOD (2018).
+     11, 12 (2018), 1863–1875.                                                                [44] Junsu Im, Jinwook Bae, Chanwoo Chung, Sungjin Lee, et al. 2020. PinK: High-
+[15] Helen H W Chan, Yongkun Li, Patrick P C Lee, and Yinlong Xu. 2018. HashKV:                    speed In-storage Key-value Store with Bounded Tails. In USENIX ATC.
+     Enabling Efficient Updates in KV Storage via Hashing. ATC (2018).                        [45] H. V. Jagadish, P. P. S. Narayan, Sridhar Seshadri, S. Sudarshan, and Rama Kan-
+[16] Guoqiang Jerry Chen, Janet L Wiener, Shridhar Iyer, Anshul Jaiswal, Ran Lei,                  neganti. 1997. Incremental Organization for Data Recording and Warehousing.
+     Nikhil Simha, Wei Wang, Kevin Wilfong, Tim Williamson, and Serhat Yilmaz.                     VLDB (1997).
+     2016. Realtime data processing at facebook. In SIGMOD.                                   [46] Christopher Jermaine, Edward Omiecinski, and Wai Gen Yee. 2007. The Parti-
+[17] Gunhee Choi, Kwanghee Lee, Myunghoon Oh, Jongmoo Choi, Jhuyeong Jhin,                         tioned Exponential File for Database Storage Management. VLDBJ (2007).
+     and Yongseok Oh. 2020. A New LSM-style Garbage Collection Scheme for ZNS                 [47] Peiquan Jin, Jianchuan Li, and Hai Long. 2021. DLC: A New Compaction Scheme
+     SSDs. In USENIX HotStorage.                                                                   for LSM-tree with High Stability and Low Latency. In EDBT.
+[18] Yifan Dai, Yien Xu, Aishwarya Ganesan, Ramnatthan Alagappan, Brian Kroth,                [48] Sudarsun Kannan, Nitish Bhat, Ada Gavrilovska, Andrea Arpaci-Dusseau, and
+     Andrea Arpaci-Dusseau, and Remzi Arpaci-Dusseau. 2020. From wisckey to                        Remzi Arpaci-Dusseau. 2018. Redesigning LSMs for nonvolatile memory with
+     bourbon: A learned index for log-structured merge trees. In USENIX OSDI.                      NoveLSM. In USENIX ATC.
+[19] Niv Dayan, Manos Athanassoulis, and Stratos Idreos. 2017. Monkey: Optimal                [49] Haridimos Kondylakis, Niv Dayan, Kostas Zoumpatianos, and Themis Palpanas.
+     Navigable Key-Value Store. SIGMOD (2017).                                                     2018. Coconut: A scalable bottom-up approach for building data series indexes.
+[20] Niv Dayan, Manos Athanassoulis, and Stratos Idreos. 2018. Optimal Bloom                       PVLDB (2018).
+     Filters and Adaptive Merging for LSM-Trees. TODS (2018).                                 [50] Haridimos Kondylakis, Niv Dayan, Kostas Zoumpatianos, and Themis Palpanas.
+[21] Niv Dayan, Philippe Bonnet, and Stratos Idreos. 2016. GeckoFTL: Scalable Flash                2019. Coconut Palm: Static and Streaming Data Series Exploration Now in your
+     Translation Techniques For Very Large Flash Devices. SIGMOD (2016).                           Palm. In SIGMOD.
+[22] Niv Dayan and Stratos Idreos. 2018. Dostoevsky: Better Space-Time Trade-Offs             [51] Haridimos Kondylakis, Niv Dayan, Kostas Zoumpatianos, and Themis Palpanas.
+     for LSM-Tree Based Key-Value Stores via Adaptive Removal of Superfluous                       2019. Coconut: sortable summarizations for scalable indexes over static and
+     Merging. SIGMOD (2018).                                                                       streaming data series. VLDBJ (2019).
+[23] Niv Dayan and Stratos Idreos. 2019. The Log-Structured Merge-Bush & the                  [52] Cheng Li, Hao Chen, Chaoyi Ruan, Xiaosong Ma, and Yinlong Xu. 2021. Lever-
+     Wacky Continuum. In SIGMOD.                                                                   aging NVMe SSDs for Building a Fast, Cost-effective, LSM-tree-based KV Store.
+[24] Niv Dayan, Martin Kjær Svendsen, Matias Bjorling, Philippe Bonnet, and Luc                    ACM TOS (2021).
+     Bouganim. 2013. EagleTree: exploring the design space of SSD-based algorithms.           [53] Jianchuan Li, Peiquan Jin, Yuanjin Lin, Ming Zhao, Yi Wang, and Kuankuan Guo.
+     VLDB (2013).                                                                                  2021. Elastic and Stable Compaction for LSM-tree: A FaaS-Based Approach on
+[25] Niv Dayan and Moshe Twitto. 2021. Chucky: A Succinct Cuckoo Filter for                        TerarkDB. In CIKM.
+     LSM-Tree. In SIGMOD.                                                                     [54] Yinan Li, Bingsheng He, Jun Yang, Qiong Luo, Ke Yi, and Robin Jun Yang. 2010.
+[26] Niv Dayan, Moshe Twitto, Yuval Rochman, Uri Beitler, Itai Ben Zion, Edward                    Tree Indexing on Solid State Drives. PVLDB 3, 1-2 (2010), 1195–1206.
+     Bortnikov, Shmuel Dashevsky, Ofer Frishman, Evgeni Ginzburg, Igal Maly, et al.           [55] Yongkun Li, Zhen Liu, Patrick P. C. Lee, Jiayu Wu, Yinlong Xu, Yi Wu, Liu Tang,
+     2021. The end of Moore’s law and the rise of the data processor. PVLDB (2021).                Qi Liu, and Qiu Cui. 2021. Differentiated Key-Value Storage Management for
+[27] Peter Desnoyers. 2014. Analytic models of SSD write performance. ACM TOS                      Balanced I/O Performance. In USENIX ATC.
+     (2014).                                                                                  [56] Junkai Liang and Yunpeng Chai. 2021. CruiseDB: An LSM-Tree Key-Value Store
+[28] Diego Didona, Nikolas Ioannou, Radu Stoica, and Kornilios Kourtis. 2021. Toward               with Both Better Tail Throughput and Tail Latency. In ICDE.
+     a better understanding and evaluation of tree structures on flash ssds. VLDB             [57] Hyeontaek Lim, David G. Andersen, and Michael Kaminsky. 2016. Towards
+     (2021).                                                                                       Accurate and Fast Evaluation of Multi-Stage Log-structured Designs. FAST
+[29] Peter C. Dillinger and Stefan Walzer. 2021. Ribbon filter: practically smaller than           (2016).
+     Bloom and Xor. CoRR (2021).                                                              [58] Lanyue Lu, Thanumalayan Sankaranarayana Pillai, Andrea C. Arpaci-Dusseau,
+[30] Tien Tuan Anh Dinh, Ji Wang, Gang Chen, Rui Liu, Beng Chin Ooi, and Kian-                     and Remzi H. Arpaci-Dusseau. 2016. WiscKey: Separating Keys from Values in
+     Lee Tan. 2017. Blockbench: A framework for analyzing private blockchains. In                  SSD-conscious Storage. FAST (2016).
+     SIGMOD.                                                                                  [59] Chen Luo and Michael J Carey. 2019. On performance stability in LSM-based
+[31] Siying Dong, Mark Callaghan, Leonidas Galanis, Dhruba Borthakur, Tony Savor,                  storage systems (extended version). VLDB (2019).
+     and Michael Strum. 2017. Optimizing Space Amplification in RocksDB. CIDR                 [60] Chen Luo and Michael J Carey. 2020. LSM-based storage techniques: a survey.
+     (2017).                                                                                       The VLDB Journal (2020).
+[32] Siying Dong, Andrew Kryczka, Yanqin Jin, and Michael Stumm. 2021. Evolution
+     of Development Priorities in Key-value Stores Serving Large-scale Applications:
+
+
+
+
+                                                                                       3083
+[61] Chen Luo, Pinar Tözün, Yuanyuan Tian, Ronald Barber, Vijayshankar Raman,                    (2015).
+     and Richard Sidle. 2019. Umzi: Unified Multi-Zone Indexing for Large-Scale             [81] Giorgos Xanthakis, Giorgos Saloustros, Nikos Batsaras, Anastasios Papagiannis,
+     HTAP. In EDBT.                                                                              and Angelos Bilas. 2021. Parallax: Hybrid Key-Value Placement in LSM-based
+[62] Siqiang Luo, Subarna Chatterjee, Rafael Ketsetsidis, Niv Dayan, Wilson Qin, and             Key-Value Stores. In Proceedings of the ACM Symposium on Cloud Computing.
+     Stratos Idreos. 2020. Rosetta: A Robust Space-Time Optimized Range Filter for               305–318.
+     Key-Value Stores. In SIGMOD.                                                           [82] Lei Yang, Hong Wu, Tieying Zhang, Xuntao Cheng, Feifei Li, Lei Zou, Yujie
+[63] Qizhong Mao, Steven Jacobs, Waleed Amjad, Vagelis Hristidis, Vassilis J Tsotras,            Wang, Rongyao Chen, Jianying Wang, and Gui Huang. 2020. Leaper: a learned
+     and Neal E Young. 2021. Comparison and evaluation of state-of-the-art LSM                   prefetcher for cache invalidation in LSM-tree based storage engines. PVLDB
+     merge policies. VLDB Journal (2021).                                                        (2020).
+[64] Claire Mathieu, Carl Staelin, Neal E Young, and Arman Yousefi. 2014. Bigtable          [83] Ting Yao, Jiguang Wan, Ping Huang, Xubin He, Qingxin Gui, Fei Wu, and Chang-
+     merge compaction. arXiv preprint arXiv:1407.3008 (2014).                                    sheng Xie. 2017. A Light-weight Compaction Tree to Reduce I/O Amplification
+[65] Yoshinori Matsunobu, Siying Dong, and Herman Lee. 2020. MyRocks: LSM-Tree                   toward Efficient Key-Value Stores. MSST (2017).
+     Database Storage Engine Serving Facebook’s Social Graph. VLDB (2020).                  [84] Ting Yao, Jiguang Wan, Ping Huang, Xubin He, Fei Wu, and Changsheng Xie.
+[66] Fei Mei, Qiang Cao, Hong Jiang, and Jingjun Li. 2018. SifrDB: A unified solution            2017. Building Efficient Key-Value Stores via a Lightweight Compaction Tree.
+     for write-optimized key-value stores in large datacenter. In ACM SOCC.                      TOS (2017).
+[67] Patrick E. O’Neil, Edward Cheng, Dieter Gawlick, and Elizabeth J. O’Neil. 1996.        [85] Ting Yao, Jiguang Wan, Ping Huang, Yiwen Zhang, Zhiwen Liu, Changsheng
+     The log-structured merge-tree (LSM-tree). Acta Informatica 33, 4 (1996), 351–385.           Xie, and Xubin He. 2019. Geardb: A gc-free key-value store on hm-smr drives
+[68] Ivan Luiz Picoli, Philippe Bonnet, and Pinar Tözün. 2019. LSM management on                 with gear compaction. In USENIX FAST.
+     computational storage. In DaMoN.                                                       [86] Ting Yao, Yiwen Zhang, Jiguang Wan, Qiu Cui, Liu Tang, Hong Jiang, Chang-
+[69] Pandian Raju, Rohan Kadekodi, Vijay Chidambaram, and Ittai Abraham. 2017.                   sheng Xie, and Xubin He. 2020. MatrixKV: Reducing Write Stalls and Write
+     PebblesDB: Building Key-Value Stores using Fragmented Log-Structured Merge                  Amplification in LSM-tree Based KV Stores with Matrix Container in NVM. In
+     Trees. SOSP (2017).                                                                         USENIX ATC.
+[70] Kai Ren, Qing Zheng, Joy Arulraj, and Garth Gibson. 2017. SlimDB: A Space-             [87] Hobin Yoon, Juncheng Yang, Sveinn Fannar Kristjansson, Steinn E Sigurdarson,
+     Efficient Key-Value Storage Engine For Semi-Sorted Data. PVLDB 10, 13 (2017),               Ymir Vigfusson, and Ada Gavrilovska. 2018. Mutant: Balancing storage cost and
+     2037–2048.                                                                                  latency in lsm-tree data stores. In ACM SOCC.
+[71] Subhadeep Sarkar, Tarikul Islam Papon, Dimitris Staratzis, and Manos Athanas-          [88] Yinliang Yue, Bingsheng He, Yuzhe Li, and Weiping Wang. 2017. Building an
+     soulis. 2020. Lethe: A Tunable Delete-Aware LSM Engine. In SIGMOD.                          Efficient Put-Intensive Key-Value Store with Skip-Tree. TPDS (2017).
+[72] Subhadeep Sarkar, Dimitris Staratzis, Zichen Zhu, and Manos Athanassoulis.             [89] Dong Ping Zhang, Nuwan Jayasena, Alexander Lyashevsky, Joseph L Greathouse,
+     2021. Constructing and Analyzing the LSM Compaction Design Space. VLDB                      Lifan Xu, and Michael Ignatowski. 2014. TOP-PIM: throughput-oriented pro-
+     (2021).                                                                                     grammable processing in memory. HPDC (2014).
+[73] ScyllaDB. 2022. ScyllaDB. https://github.com/scylladb/scylladb (2022).                 [90] Huanchen Zhang, Hyeontaek Lim, Viktor Leis, David G Andersen, Michael
+[74] Russell Sears and Raghu Ramakrishnan. 2012. bLSM: A General Purpose Log                     Kaminsky, Kimberly Keeton, and Andrew Pavlo. 2018. SuRF: Practical Range
+     Structured Merge Tree. SIGMOD (2012).                                                       Query Filtering with Fast Succinct Tries. SIGMOD (2018).
+[75] Radu Stoica and Anastasia Ailamaki. 2013. Improving Flash Write Performance            [91] Teng Zhang, Jianying Wang, Xuntao Cheng, Hao Xu, Nanlong Yu, Gui Huang,
+     by Using Update Frequency. PVLDB (2013).                                                    Tieying Zhang, Dengcheng He, Feifei Li, Wei Cao, et al. 2020. FPGA-Accelerated
+[76] Risi Thonangi and Jun Yang. 2017. On Log-Structured Merge for Solid-State                   Compactions for LSM-based Key-Value Store. In USENIX FAST.
+     Drives. ICDE (2017).                                                                   [92] Weitao Zhang, Yinlong Xu, Yongkun Li, and Dinglong Li. 2016. Improving write
+[77] Tobias Vinçon, Sergej Hardock, Christian Riegger, Julian Oppermann, Andreas                 performance of LSMT-based key-value store. In IEEE ICPADS.
+     Koch, and Ilia Petrov. 2018. NoFTL-KV: Tackling Write-Amplification on KV-             [93] Yueming Zhang, Yongkun Li, Fan Guo, Cheng Li, and Yinlong Xu. 2018. ElasticBF:
+     Stores with Native Storage Management.. In EDBT.                                            Fine-grained and Elastic Bloom Filter Towards Efficient Read for LSM-tree-based
+[78] Peng Wang, Guangyu Sun, Song Jiang, Jian Ouyang, Shiding Lin, Chen Zhang,                   KV Stores. HotStorage (2018).
+     and Jason Cong. 2014. An Efficient Design and Implementation of LSM-Tree               [94] Wenshao Zhong, Chen Chen, Xingbo Wu, and Song Jiang. 2021. REMIX: Efficient
+     based Key-Value Store on Open-Channel SSD. EuroSys (2014).                                  Range Query for LSM-trees. In USENIX FAST.
+[79] Fenggang Wu, Ming-Hong Yang, Baoquan Zhang, and David HC Du. 2020. AC-                 [95] Zichen Zhu, Ju Hyoung Mun, Aneesh Raman, and Manos Athanassoulis. 2021.
+     key: Adaptive caching for LSM-based key-value stores. In USENIX ATC.                        Reducing Bloom Filter CPU Overhead in LSM-Trees on Modern Storage Devices.
+[80] Xingbo Wu, Yuehai Xu, Zili Shao, and Song Jiang. 2015. LSM-trie: An LSM-                    In DaMoN.
+     tree-based Ultra-Large Key-Value Store for Small Data Items. USENIX ATC
+
+
+
+
+                                                                                     3084
+

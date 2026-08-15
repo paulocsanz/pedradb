@@ -903,24 +903,23 @@ impl SstTable {
         end: Bound<&[u8]>,
         max_user_keys: Option<usize>,
     ) -> Vec<(InternalKey, Bytes)> {
-        // Fast reject when the whole file is outside the range.
-        if let (Some(lo), Some(hi)) = (
+        // F167: point bounds alone would skip a file whose range tombstone spans
+        // into the window (the tombstone end key lives in the value and never
+        // extends `largest_user_key`). Ask the kernel; `range_tombstones` are
+        // already resident (open-time collection).
+        let tomb_pairs: Vec<(&[u8], &[u8])> = self
+            .range_tombstones
+            .iter()
+            .map(|(k, end)| (k.user_key.as_ref(), end.as_ref()))
+            .collect();
+        if !super::scan_kernel::scan_reads_file(
             self.smallest_user_key.as_deref(),
             self.largest_user_key.as_deref(),
+            &tomb_pairs,
+            start,
+            end,
         ) {
-            let file_before_end = match end {
-                Bound::Unbounded => true,
-                Bound::Included(e) => lo <= e,
-                Bound::Excluded(e) => lo < e,
-            };
-            let file_after_start = match start {
-                Bound::Unbounded => true,
-                Bound::Included(s) => hi >= s,
-                Bound::Excluded(s) => hi > s,
-            };
-            if !file_before_end || !file_after_start {
-                return Vec::new();
-            }
+            return Vec::new();
         }
 
         if self.is_lazy() {
@@ -1326,9 +1325,13 @@ pub fn write_sst_entries_on(
         Ok(())
     };
 
-    // Prefer not to split a user key across blocks (keeps point_at to one block).
-    // If a single key's versions exceed BLOCK_TARGET, we still spill mid-key and
-    // `point_in_blocks` scans every block that may hold that key.
+    // NEVER split a user key across blocks: the spill condition requires
+    // `!same_user`, so a key's versions (however large) stay in one block.
+    // Load-bearing for `blocks_overlapping_range` — it treats
+    // `index[i+1].first_user_key` as an exclusive bound on block i's user keys,
+    // which only holds when all versions of a key live in a single block.
+    // `point_in_blocks` is hardened either way (F29); pinned by
+    // `writer_never_splits_user_key_across_blocks`.
     let mut block_last_user: Option<Bytes> = None;
     for (ikey, value) in &sorted {
         let enc = encode_entry(ikey, value)?;
@@ -1509,6 +1512,43 @@ mod tests {
         assert_eq!(mid.len(), 5);
         assert_eq!(mid[0].0.user_key.as_ref(), b"k05");
         assert_eq!(mid[4].0.user_key.as_ref(), b"k09");
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// Writer invariant the scan fast-path depends on: all versions of a user
+    /// key land in a single block even when they exceed `BLOCK_TARGET`.
+    /// If this ever breaks, `blocks_overlapping_range` (used by scan/range
+    /// via `entries_in_user_range`) starts dropping the newest versions at the
+    /// split key — see the comment on the spill condition.
+    #[test]
+    fn writer_never_splits_user_key_across_blocks() {
+        // One key with versions far past BLOCK_TARGET, then a later key.
+        let mut entries = Vec::new();
+        for seq in (1..=12u64).rev() {
+            entries.push((
+                InternalKey::new(Bytes::copy_from_slice(b"k"), seq, ValueType::Value),
+                Bytes::from(vec![seq as u8; 1024]),
+            ));
+        }
+        entries.push((
+            InternalKey::new(Bytes::copy_from_slice(b"z"), 13, ValueType::Value),
+            Bytes::from_static(b"zv"),
+        ));
+        let path = temp_path();
+        let table = write_sst_entries(&path, &entries).unwrap();
+        assert!(
+            table.block_count() >= 2,
+            "later key must force a second block"
+        );
+        // Every k-version must be visible to a scan starting exactly at k
+        // (the split-key boundary the block-overlap fast-path reasons about).
+        let binding = table.entries_in_user_range(Bound::Included(&b"k"[..]), Bound::Unbounded);
+        let k_seqs: Vec<u64> = binding
+            .iter()
+            .filter(|(ik, _)| ik.user_key.as_ref() == b"k")
+            .map(|(ik, _)| ik.sequence)
+            .collect();
+        assert_eq!(k_seqs, (1..=12).rev().collect::<Vec<_>>());
         let _ = std::fs::remove_file(&path);
     }
 

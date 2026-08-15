@@ -19,6 +19,29 @@ pub const CHANGELOG_FILE_NAME: &str = "CHANGELOG";
 
 const MAGIC: &[u8; 8] = b"PDBCHLG1";
 
+fn le_u32(raw: &[u8]) -> Result<u32> {
+    let bytes: [u8; 4] = raw
+        .try_into()
+        .map_err(|_| CoreError::Internal("changelog truncated u32".into()))?;
+    Ok(u32::from_le_bytes(bytes))
+}
+
+fn le_u32_at(buf: &[u8], off: usize) -> Result<u32> {
+    le_u32(
+        buf.get(off..off + 4)
+            .ok_or_else(|| CoreError::Internal("changelog truncated u32".into()))?,
+    )
+}
+
+fn le_u64_at(buf: &[u8], off: usize) -> Result<u64> {
+    let bytes: [u8; 8] = buf
+        .get(off..off + 8)
+        .ok_or_else(|| CoreError::Internal("changelog truncated u64".into()))?
+        .try_into()
+        .map_err(|_| CoreError::Internal("changelog truncated u64".into()))?;
+    Ok(u64::from_le_bytes(bytes))
+}
+
 /// Kind of a logical change visible to subscribers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ChangeKind {
@@ -240,15 +263,14 @@ fn encode_changelog(log: &ChangeLog) -> Result<Vec<u8>> {
 /// # Errors
 /// Truncation, bad magic, CRC mismatch, or corrupt entries.
 pub fn decode_changelog(buf: &[u8]) -> Result<ChangeLog> {
+    // F32: never `with_capacity(n)` from an untrusted header alone (F2-class OOM).
+    // Minimum entry wire size: seq(8)+klen(4)+kind(1)+vlen(4) = 17 (empty key/value).
+    const MIN_ENTRY_BYTES: usize = 17;
     if buf.len() < 8 + 4 + 4 {
         return Err(CoreError::Internal("changelog too short".into()));
     }
     let (payload, crc_bytes) = buf.split_at(buf.len() - 4);
-    let stored = u32::from_le_bytes(
-        crc_bytes
-            .try_into()
-            .map_err(|_| CoreError::Internal("changelog crc truncated".into()))?,
-    );
+    let stored = le_u32(crc_bytes)?;
     let got = crc32c::crc32c(payload);
     if stored != got {
         return Err(CoreError::Internal(format!(
@@ -258,10 +280,7 @@ pub fn decode_changelog(buf: &[u8]) -> Result<ChangeLog> {
     if &payload[0..8] != MAGIC {
         return Err(CoreError::Internal("bad changelog magic".into()));
     }
-    let n = u32::from_le_bytes(payload[8..12].try_into().unwrap()) as usize;
-    // F32: never `with_capacity(n)` from an untrusted header alone (F2-class OOM).
-    // Minimum entry wire size: seq(8)+klen(4)+kind(1)+vlen(4) = 17 (empty key/value).
-    const MIN_ENTRY_BYTES: usize = 17;
+    let n = le_u32_at(payload, 8)? as usize;
     let max_possible = payload.len().saturating_sub(12) / MIN_ENTRY_BYTES;
     if n > max_possible {
         return Err(CoreError::Internal(format!(
@@ -274,9 +293,9 @@ pub fn decode_changelog(buf: &[u8]) -> Result<ChangeLog> {
         if off + 8 + 4 > payload.len() {
             return Err(CoreError::Internal("changelog truncated entry".into()));
         }
-        let sequence = u64::from_le_bytes(payload[off..off + 8].try_into().unwrap());
+        let sequence = le_u64_at(payload, off)?;
         off += 8;
-        let klen = u32::from_le_bytes(payload[off..off + 4].try_into().unwrap()) as usize;
+        let klen = le_u32_at(payload, off)? as usize;
         off += 4;
         if off + klen + 1 + 4 > payload.len() {
             return Err(CoreError::Internal("changelog truncated key".into()));
@@ -286,7 +305,7 @@ pub fn decode_changelog(buf: &[u8]) -> Result<ChangeLog> {
         let kind = ChangeKind::from_u8(payload[off])
             .ok_or_else(|| CoreError::Internal("bad changelog kind".into()))?;
         off += 1;
-        let vlen = u32::from_le_bytes(payload[off..off + 4].try_into().unwrap()) as usize;
+        let vlen = le_u32_at(payload, off)? as usize;
         off += 4;
         if off + vlen > payload.len() {
             return Err(CoreError::Internal("changelog truncated value".into()));

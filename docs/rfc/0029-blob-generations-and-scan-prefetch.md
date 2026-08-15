@@ -55,7 +55,10 @@ This RFC is the “looks like our SST world” option: more files, same Env/MANI
 ### P1
 
 - [x] **P1.1** Auto-pick worst dead_ratio file (operator still can pass an id) — status: `done`
-- [x] **P1.2** `posix_fadvise`-shaped `Env::advise` (optional; no-op on sim) — status: `done`
+- [x] **P1.2** `posix_fadvise`-shaped `Env::advise` (optional; no-op on sim / `StdEnv`) — status: `done`
+  Linux `posix_fadvise` is implemented on `IoUringEnv` (`pedradb-io-uring`) so
+  `pedradb-core` stays `#![forbid(unsafe_code)]`. Scan prefetch still issues
+  the hint; `StdEnv` / DST envs no-op.
 
 ### P2
 
@@ -70,7 +73,7 @@ This RFC is the “looks like our SST world” option: more files, same Env/MANI
 | P0.2 | p0 | GC one blob file | done | `Db::compact_blob` | 2026-08-14 |
 | P0.3 | p0 | deterministic scan prefetch | done | `prefetch_resolve_stream` N=4 | 2026-08-14 |
 | P1.1 | p1 | auto worst-ratio | done | `blob_gc_candidates` + `compact_blob_auto` | 2026-08-15 |
-| P1.2 | p1 | Env advise | done | `AdviseKind` + `Env::advise`; Linux `posix_fadvise`; scan prefetch | 2026-08-15 |
+| P1.2 | p1 | Env advise | done | `AdviseKind` + `Env::advise`; Linux `posix_fadvise` on `IoUringEnv` (core stays forbid) | 2026-08-15 |
 | P2.1 | p2 | Titan primary note | done | `docs/references/titan-options-primary-note.md` | 2026-08-15 |
 | P2.2 | p2 | prefetch N from bench | done | `set_scan_prefetch` + `scan_prefetch_n_window_measure` | 2026-08-15 |
 

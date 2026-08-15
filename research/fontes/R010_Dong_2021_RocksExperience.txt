@@ -1,0 +1,1123 @@
+Evolution of Development Priorities in Key-value
+    Stores Serving Large-scale Applications:
+            The RocksDB Experience
+     Siying Dong, Andrew Kryczka, and Yanqin Jin, Facebook Inc.;
+                Michael Stumm, University of Toronto
+        https://www.usenix.org/conference/fast21/presentation/dong
+
+
+
+
+     This paper is included in the Proceedings of the
+19th USENIX Conference on File and Storage Technologies.
+                        February 23–25, 2021
+                            978-1-939133-20-5
+
+
+
+
+                                       Open access to the Proceedings
+                                      of the 19th USENIX Conference on
+                                        File and Storage Technologies
+                                           is sponsored by USENIX.
+              Evolution of Development Priorities in Key-value Stores Serving
+                   Large-scale Applications: The RocksDB Experience
+
+                       Siying Dong† , Andrew Kryczka† , Yanqin Jin† and Michael Stumm‡
+                               † Facebook Inc., 1 Hacker Way, Menlo Park, CA, U.S.A
+                                         ‡ University of Toronto, Toronto, Canada
+
+
+
+
+                         Abstract                                      removes dead data and optimizes LSM-trees as described in
+                                                                       §2). RocksDB may be tuned for high write throughput or high
+RocksDB is a key-value store targeting large-scale distributed
+                                                                       read throughput, for space efficiency, or something in between.
+systems and optimized for Solid State Drives (SSDs). This pa-
+                                                                       Due to its configurability, RocksDB is used by many appli-
+per describes how our priorities in developing RocksDB have
+                                                                       cations, representing a wide range of use cases. At Facebook
+evolved over the last eight years. The evolution is the result
+                                                                       alone, RocksDB is used by over 30 different applications, in
+both of hardware trends and of extensive experience running
+                                                                       aggregate storing many hundreds of petabytes of production
+RocksDB at scale in production at a number of organizations.
+                                                                       data. Besides being used as a storage engine for databases
+We describe how and why RocksDB’s resource optimization
+                                                                       (e.g., MySQL [37], Rocksandra [6], CockroachDB [64], Mon-
+target migrated from write amplification, to space amplifica-
+                                                                       goDB [40], and TiDB [27]), RocksDB is also used for the
+tion, to CPU utilization. Lessons from running large-scale
+                                                                       following types of services with highly disparate characteris-
+applications taught us that resource allocation needs to be
+                                                                       tics (summarized in Table 1):
+managed across different RocksDB instances, that data for-
+                                                                          • Stream processing: RocksDB is used to store stag-
+mat needs to remain backward and forward compatible to
+                                                                             ing data in Apache Flink [12], Kafka Stream [31],
+allow incremental software rollout, and that appropriate sup-
+                                                                             Samza [43], and Facebook’s Stylus [15].
+port for database replication and backups are needed. Lessons
+                                                                          • Logging/queuing services: RocksDB is used by Face-
+from failure handling taught us that data corruption errors
+                                                                             book’s LogDevice [5] (that uses both SSDs and HDDs),
+needed to be detected earlier and at every layer of the system.
+                                                                             Uber’s Cherami [8], and Iron.io [29].
+                                                                          • Index services: RocksDB is used by Facebook’s
+1   Introduction                                                             Dragon [59] and Rockset [58].
+                                                                          • Caching on SSD: In-memory caching services, such as
+RocksDB [19, 54] is a high-performance persistent key-                       Netflix’s EVCache [7], Qihoo’s Pika [51] and Redis [46],
+value storage engine created in 2012 by Facebook, based                      store data evicted from DRAM on SSDs using RocksDB.
+on Google’s LevelDB code base [22]. It is optimized for the               A prior paper presented an analysis of several database ap-
+specific characteristics of Solid State Drives (SSDs), targets         plications using RocksDB [11]. Table 2 summarizes some of
+large-scale (distributed) applications, and is designed as a           the key system metrics obtained from production workloads.
+library component that is embedded in higher-level appli-                 Having a storage engine that can support many different
+cations. As such, each RocksDB instance manages data on                use cases offers the advantage that the same storage engine
+storage devices of just a single server node; it does not handle       can be used across different applications. Indeed, having each
+any inter-host operations, such as replication and load balanc-        application build its own storage subsystem is problematic,
+ing, and it does not perform high-level operations, such as            as doing so is challenging. Even simple applications need
+checkpoints — it leaves the implementation of these opera-             to protect against media corruption using checksums, guar-
+tions to the application, but provides appropriate support so          antee data consistency after crashes, issue the right system
+they can do it effectively.                                            calls in the correct order to guarantee durability of writes, and
+   RocksDB and its various components are highly customiz-             handle errors returned from the file system in a correct man-
+able, allowing the storage engine to be tailored to a wide             ner. A well-established common storage engine can deliver
+spectrum of requirements and workloads; customizations can             sophistication in all those domains.
+include the write-ahead log (WAL) treatment, the compres-                 Additional benefits are achieved from having a common
+sion strategy, and the compaction strategy (a process that             storage engine when the client applications run within a com-
+
+
+
+USENIX Association                                                 19th USENIX Conference on File and Storage Technologies          33
+                    Read/Write     Read Types          Special               be managed across multiple RocksDB instances, since a sin-
+                                                       Characteristics
+                                                                             gle server may host multiple instances; (ii) data format must
+                                                       Transactions
+Databases           Mixed          Get + Iterator
+                                                       and backups           be backward and forward compatible, since RocksDB soft-
+                                                       Time window           ware updates are deployed/rolled-back incrementally; and
+Stream Processing   Write-Heavy    Get or Iterator                           (iii) proper support for database replication and backups are
+                                                       and checkpoints
+
+Logging / Queues    Write-Heavy    Iterator            Support HDD too
+                                                                             important.
+Index Services      Read-Heavy     Iterator            Bulk loading
+                                                                                §5 describes our experiences on failure handling. Large-
+Cache               Write-Heavy    Get                 Can drop data
+                                                                             scale distributed systems typically use replication for fault
+                                                                             tolerance and high availability. However, single node failures
+                                                                             must be properly handled to achieve that goal. We have found
+Table 1: RocksDB use cases and their workload characteristics
+                                                                             that simply identifying and propagating file system and check-
+                    CPU     Space Util   Flash              Read             sum errors is not sufficient. Rather, faults (such as bitflips) at
+                                         Endurance          Bandwidth
+                                                                             every layer must be identified as early as possible and appli-
+Stream Processing   11%           48%                16%              1.6%
+                                                                             cations should be able to specify policies for handling them
+Logging / Queues    46%           45%                7%               1.0%
+                                                                             in an automated way when possible.
+Index Services      47%           61%                5%            10.0%
+                                                                                §6 presents our thoughts on improving the key-value inter-
+Cache                3%           78%                74%              3.5%
+                                                                             face. While the core interface is simple and powerful given
+                                                                             its flexibility, it limits the performance for some critical use
+Table 2: System metrics for a typical use case from each                     cases. We describe our support for user-defined timestamps
+application category.                                                        separate from the key and value.
+                                                                                §8 lists several areas where RockDB would benefit from
+mon infrastructure: the monitoring framework, performance                    future research.
+profiling facilities, and debugging tools can all be shared. For
+example, different application owners within a company can
+take advantage of the same internal framework that reports                   2     Background
+statistics to the same dashboard, monitor the system using the
+same tools, and manage RocksDB using the same embedded                       The characteristics of flash have profoundly impacted the de-
+admin service. This consolidation not only allows expertise to               sign of RocksDB. The asymmetry in read/write performance
+be easily reused among different teams, but also allows infor-               and limited endurance pose challenges and opportunities in
+mation to be aggregated to common portals and encourages                     the design of data structures and system architectures. As
+developing tools to manage them.                                             such, RocksDB employs flash-friendly data structures and
+   Given the diverse set of applications that have adopted                   optimizes for modern hardware.
+RocksDB, it is natural that priorities for its development have
+evolved. This paper describes how our priorities evolved over                2.1    Embedded storage on flash based SSDs
+the last eight years as we learned practical lessons from real-
+world applications (both within Facebook and other organiza-                 Over the last decade, we have witnessed the proliferation of
+tions) and observed changes in hardware trends, causing us to                flash-based SSD for serving online data. The low latency
+revisit some of our early assumptions. We also describe our                  and high throughput device not only challenged software to
+RocksDB development priorities for the near future.                          take advantage of its full capabilities, but also transformed
+   §2 provides background on SSDs and Log-Structured                         how many stateful services are implemented. An SSD offers
+Merge (LSM) trees [45]. From the beginning, RocksDB chose                    hundreds of thousands of Input/Output Operations per Second
+the LSM tree as its primary data structure to address the                    (IOPS) for both of read and write, which is thousands of times
+asymmetry in read/write performance and the limited en-                      faster than a spinning hard drive. It can also support hundreds
+durance of flash-based SSDs. We believe LSM-trees have                       of MBs of bandwidth. Yet high write bandwidth cannot be
+served RocksDB well and argue they will remain a good fit                    sustained due to a limited number of program/erase cycles.
+even with upcoming hardware trends (§3). The LSM-tree data                   These factors provide an opportunity to rethink the storage
+structure is one of the reasons RocksDB can accommodate                      engine’s data structures to optimize for this hardware.
+different types applications with disparate requirements.                       The high performance of the SSD, in many cases, also
+   §3 describes how our primary optimization target shifted                  shifted the performance bottleneck from device I/O to the
+from minimizing write amplification to minimizing space                      network for both of latency and throughput. It became more
+amplification, and from optimizing performance to optimizing                 attractive for applications to design their architecture to store
+efficiency.                                                                  data on local SSDs rather than use a remote data storage ser-
+   §4 describes lessons we learned serving large-scale dis-                  vice. This increased the demand for a key-value store engines
+tributed systems; for example: (i) resource allocation must                  that are embedded in applications.
+
+
+
+34      19th USENIX Conference on File and Storage Technologies                                                         USENIX Association
+                                                                                                                                #I/O per Get()      # I/O per Get()
+ Level 0    L0_1          MemTable
+
+
+ Level 1    L1_1   L1_2
+                                                                                        Write           Max Space   Avg Space                                         # I/O per
+
+                                                                                                                                with bloom filter   without filter
+ Level 2    L2_1   L2_2   L2_3   L2_4
+
+
+ Level 3
+                                                                                        Amplification   Overhead    Overhead                                          iterator seek
+            L3_1   L3_2   L3_3   L3_4   L3_5   L3_6                      Compaction
+ Level 4    L5_1   L4_2   L4_3   L4_4   L4_5   L4_6   L4_7   L4_8        Leveled        16.07            9.8%        9.5%       0.99                 1.7              1.84
+                                                                         Tiered          4.8            94.4%       45.5%       1.03                3.39              4.80
+Figure 1: RocksDB LSM-tree using leveled compaction. Each                FIFO            2.14            N/A         N/A        1.16                528               967
+white box is an SSTable.
+                                                                        Table 3: Write amplification, overhead and read I/O for three
+   RocksDB was created to address these requirements. We                major compaction types under RocksDB 5.9. Number of
+wanted to create a flexible key-value store to serve a wide             sorted runs is set to 12 for Tiered Compaction, and 20 bloom
+range of applications using local SSD drives while optimizing           filter bits per key are used for FIFO Compaction. Direct I/O is
+for the characteristics of SSDs. LSM trees played a key role            used and block cache size is set to be 10% of fully compacted
+in achieving these goals.                                               DB size. Write amplification is calculated as total SSTable file
+                                                                        writes vs number of Mem-Table bytes flushed. WAL writes
+                                                                        are not included.
+2.2        RocksDB architecture
+RocksDB uses Log-Structured Merge (LSM) trees [45] as its
+primary data structure to store data.
+                                                                        key is not present in the last level. It begins by searching all
+   Writes. Whenever data is written to RocksDB, it is added             MemTables, followed by all Level-0 SSTables, and then the
+to an in-memory write buffer called MemTable, as well as an             SSTables in successively higher levels. At each of these levels,
+on-disk Write Ahead Log (WAL). Memtable is implemented                  binary search is used. Bloom filters are used to eliminate an
+as a skiplist so keep the data ordered with O(log n) insert and         unnecessary search within an SSTable file. Scans require that
+search overhead. The WAL is used for recovery after a failure,          all levels be searched.
+but is not mandatory. Once the size of the MemTable reaches
+a configured size, then (i) the MemTable and WAL become                    RocksDB supports multiple different types of compaction.
+immutable, (ii) a new MemTable and WAL are allocated for                Leveled Compaction was adapted from LevelDB and then
+subsequent writes, (iii) the contents of the MemTable are               improved [19]. In this compaction style, levels are assigned
+flushed to a “Sorted String Table” (SSTable) data file on disk,         exponentially increasing size targets as exemplified by the
+and (iv) the flushed MemTable and associated WAL are dis-               dashed boxes in Fig. 1. Tiered Compaction (called Univer-
+carded. Each SSTable stores data in sorted order, divided into          sal Compaction in RocksDB) is similar to what is used by
+uniformly-sized blocks. Each SSTable also has an index block            Apache Cassandra or HBase. Multiple sorted runs are lazily
+with one index entry per SSTable block for binary search.               compacted together, either when there are too many sorted
+   Compaction. The LSM tree has multiple levels of SSTa-                runs, or the ratio between total DB size over the size of the
+bles, as shown in Fig. 1. The newest SSTables are created               largest sorted run exceeds a configurable threshold. Finally,
+by MemTable flushes and placed in Level-0. Levels higher                FIFO Compaction simply discards old files once the DB hits
+than Level-0 are created by a process called compaction. The            a size limit and only performs lightweight compactions. It
+size of SSTables on a given level are limited by configura-             targets in-memory caching applications.
+tion parameters. When level-L’s size target is exceeded, some
+SSTables in level-L are selected and merged with the over-                 Being able to configure the type of compaction allows
+lapping SSTables in level-(L+1). In doing so, deleted and               RocksDB to serve a wide range of use cases. By using differ-
+overwritten data is removed, and the table is optimized for             ent compaction styles, RocksDB can be configured as read
+read performance and space efficiency. This process grad-               friendly, write friendly, or very write friendly for special cache
+ually migrates written data from Level-0 to the last level.             workloads. However, application owners will need to consider
+Compaction I/O is efficient as it can be parallelized and only          trade-offs among the different metrics for their specific use
+involves bulk reads and writes of entire files.                         case [2]. A lazier compaction algorithm improves write am-
+   Level-0 SSTables have overlapping key ranges, as each                plification and write throughput, but read performance suffers,
+SSTable covers a full sorted run. Later levels each contain             while a more aggressive compaction sacrifices write perfor-
+only one sorted run so the SSTables in these levels contain a           mance but allows for faster reads. Services like logging or
+partition of their level’s sorted run.                                  stream processing can use a write heavy setup while database
+   Reads. In the read path, a key lookup occurs at each suc-            services need a balanced approach. Table 3 depicts this flexi-
+cessive level until the key is found or it is determined that the       bility by way of micro-benchmark results.
+
+
+
+USENIX Association                                                  19th USENIX Conference on File and Storage Technologies                                                  35
+                      100                                                                                 Dynamic Leveled                             LevelDB-style
+                                                                                                            Compaction                                 Compaction
+
+                                                                                                      Fully compac-                             Fully compac-
+                           10
+
+     Writes per 1TB data
+                                                                                                                      Steady DB   Space over-                   Steady DB   Space over-
+                                                                                         # keys
+                            1
+                                                                                                      ted size (GB)                             ted size (GB)
+            MB/s
+                                                                                         (millions)                   size (GB)   head(%)                       size (GB)   head(%)
+                           0.1
+                                                                                          200          12.0           13.5        12.4           12.0           15.1        25.6
+                                     Tiered compaction    Leveled compaction              400          24.0           26.9        11.8           24.0           26.9        12.2
+                    0.01                                                                  600          36.0           40.4        12.2           36.4           42.5        16.9
+                                 0     5        10          15       20        25
+                                              Write Amplification                         800          48.0           54.2        12.7           48.3           57.9        19.7
+                                                                                        1,000          60.1           67.5        12.4           60.3           73.8        22.4
+Figure 2: Survey of write amplification and write rate across
+42 randomly sampled ZippyDB and MyRocks applications.                               Table 4: RocksDB space efficiency measured in a micro-
+                                                                                    benchmark: data is prepopulated and each write is to a key
+3    Evolution of resource optimization targets                                     chosen randomly from the pre-populated key space. RocksDB
+Here we describe how our resource optimization target                               5.9 with all default options. Constant 2MB/s write rate.
+evolved over time: from write amplification to space am-
+                                                                                    provide (yet still high enough to make HDDs unattractive,
+plification to CPU utilization.
+                                                                                    even when ignoring maintenance overhead). As a result, we
+Write amplification                                                                 shifted our resource optimization target to disk space.
+When we started developing RocksDB, we initially focused                               Fortunately, LSM-trees also work well when optimizing for
+on saving flash erase cycles and thus write amplification,                          disk space due to their non-fragmented data layout. However,
+following the general view of the community at the time                             we saw an opportunity to improve Leveled Compaction by re-
+(e.g., [34]). This was rightly an important target for many ap-                     ducing the amount of dead data (i.e., deleted and overwritten
+plications, in particular for those with write-heavy workloads                      data) in the LSM tree. We developed Dynamic Leveled Com-
+(Table 1) where it continues to be an issue.                                        paction, where the size of each level in the tree is automati-
+   Write amplification emerges at two levels. SSDs them-                            cally adjusted based on the actual size of the last level (instead
+selves introduce write amplification: by our observations be-                       of setting the size of each level statically) [19]. This method
+tween 1.1 and 3. Storage and database software also generate                        achieves better and more stable space efficiency than Leveled
+write amplification; this can sometimes be as high as 100                           Compaction. Table 3 shows space efficiency measured in a
+(e.g., when an entire 4KB/8KB/16KB page is written out for                          random write benchmark: Dynamic Leveled Compaction lim-
+changes of less than 100 bytes).                                                    its space overhead to 13%, while Leveled Compaction can
+   Leveled Compaction in RocksDB usually exhibits write                             add more than 25% . Moreover, space overhead in the worst
+amplification between 10 and 30, which is several times better                      case under Leveled Compaction can be as high as 90%, while
+than when using B-trees in many cases. For example, when                            it is stable for dynamic leveling. In fact, for UDB, one of
+running LinkBench on MySQL, RocksDB issues only 5% as                               Facebooks main databases, the space footprint was reduced
+many writes per transaction as InnoDB, a B-tree based storage                       to 50% when InnoDB was replaced by RocksDB [36].
+engine [37]. Still, write amplification in the 10–30 range is too
+                                                                                    CPU utilization
+high for write-heavy applications. For this reason we added
+                                                                                    An issue of concern sometimes raised is that SSDs have be-
+Tiered Compaction, which brings write amplification down
+                                                                                    come so fast that software is no longer able to take advantage
+to the 4–10 range, although with lower read performance; see
+                                                                                    of their full potential. That is, with SSDs, the bottleneck has
+Table 3. Figure 2 depicts RocksDB’s write amplification under
+                                                                                    shifted from the storage device to the CPU, so fundamental
+different data ingestion rates. RocksDB application owners
+                                                                                    improvements to the software are necessary. We do not share
+often pick a compaction method to reduce write amplification
+                                                                                    this concern based on our experience, and we do not expect
+when the write rate is high, and compact more aggressively
+                                                                                    it to become an issue with future NAND flash based SSDs
+when the write rate is low to achieve space efficiency and read
+                                                                                    for two reasons. First, only a few applications are limited by
+performance goals.
+                                                                                    the IOPS provided by the SSDs; as discussed in §4.2, most
+Space amplification                                                                 applications are limited by space.
+After several years of development, we observed that for most                           Second, we find that any server with a high-end CPU has
+applications, space utilization was far more important than                         more than enough compute power to saturate one high-end
+write amplification, given that neither flash write cycles nor                      SSD. RocksDB has never had an issue making full use of
+write overhead were constraining. In fact the number of IOPS                        SSD performance in our environment. Of course, it is possi-
+utilized in practice was low compared to what the SSD could                         ble to configure a system that results in the CPU becoming a
+
+
+
+36   19th USENIX Conference on File and Storage Technologies                                                                                              USENIX Association
+          Flash endurance              Read bandwidth                until several years ago, the price of CPUs and memory was
+  100%                         100%                                  reasonably low relative to SSDs, but CPU and memory prices
+   90%                          90%
+   80%                          80%
+                                                                     have increased substantially, so decreasing CPU overhead
+   70%                          70%                                  and memory usage has increased in importance. Early efforts
+   60%                          60%                                  to lower CPU overhead included the introduction of prefix
+   50%                          50%
+   40%                          40%
+                                                                     bloom filters, applying the bloom filter before index lookups,
+   30%                          30%                                  and other bloom filter improvements. There remains room for
+   20%                          20%
+                                                                     further improvement.
+   10%                          10%
+   0%                           0%                                   Adapting to newer technologies
+               CPU                         Space                     New architectural improvements related to SSDs could eas-
+  100%                         100%                                  ily disrupt RocksDB’s relevancy. For example, open-channel
+   90%                          90%
+   80%                          80%
+                                                                     SSDs [50, 66], multi-stream SSD [68] and ZNS [4] promise
+   70%                          70%                                  to improve query latency and save flash erase cycles. How-
+   60%                          60%
+                                                                     ever, these new technologies would benefit only a minority of
+   50%                          50%
+   40%                          40%
+                                                                     the applications using RocksDB, given that most applications
+   30%                          30%                                  are space constrained, not erase cycle or latency constrained.
+   20%                          20%
+   10%                          10%
+                                                                     Further, having RocksDB accommodate these technologies
+   0%                           0%                                   directly would challenge the unified RocksDB experience.
+                                                                     One possible path worth exploring would be to delegate the
+Figure 3: Resource utilization across four metrics. Each line        accommodation of these technologies to the underlying file
+represents a different deployment with a different workload.         system, perhaps with RocksDB providing additional hints.
+Measurements were taken over the course of one month. All               In-storage computing potentially might offer significant
+numbers are the average across all hosts in the deployment.          gains, but it is unclear how many RocksDB applications would
+CPU and read bandwidth are for the highest hour during the           actually benefit from this. We suspect it would be challenging
+month. Flash endurance and space utilization are average             for RocksDB to adapt to in-storage computing, likely requir-
+across the entire month.                                             ing API changes to the entire software stack to fully exploit.
+                                                                     We look forward to future research on how best to do this.
+                                                                        Disaggregated (remote) storage appears to be a much more
+bottleneck; e.g., a system with one CPU and multiple SSDs.
+                                                                     interesting optimization target and is a current priority. So
+However, effective systems are typically those configured to
+                                                                     far, our optimizations have assumed the flash was locally at-
+be well-balanced, which today’s technology allows. Inten-
+                                                                     tached, as our system infrastructure is primarily configured
+sive write-dominated workloads may also cause the CPU to
+                                                                     this way.However, faster networks currently allow many more
+become a bottleneck. For some, this can be mitigated by con-
+                                                                     I/Os to be served remotely, so the performance of running
+figuring RocksDB to use a more lightweight compression
+                                                                     RocksDB with remote storage has become viable for an in-
+option. For the other cases, the workload may simply not
+                                                                     creasing number of applications. With remote storage, it is
+be suitable for SSDs since it would exceed the typical flash
+                                                                     easier to make full use of both CPU and SSD resources at
+endurance budget that allows the SSD to last 2-5 years.
+                                                                     the same time, because they can be separately provisioned
+   To confirm our view, we surveyed 42 different deployments         on demand (something much more difficult to achieve with
+of ZippyDB [65] and MyRocks in production, each serving              locally attached SSDs). As a result, optimizing RocksDB for
+a different application. Fig. 3 shows the result. Most of the        remote flash storage has become a priority. We are currently
+workloads are space constrained. Some are indeed CPU heavy,          addressing the challenge of long I/O latency by trying to con-
+but hosts are generally not fully utilized to leave headroom         solidate and parallelize I/Os. We have adapted RocksDB to
+for growth and handling data center or region-level failures         handle transient failures, pass QoS requirements to underly-
+(or because of misconfigurations). Most of these deployments         ing systems, and report profiling information. However, more
+include hundreds of hosts, so averages give an idea of the           work is needed.
+resource needs for these use cases, considering that workloads          Storage Class Memory (SCM) is a promising technology.
+can be freely (re-)balanced among those hosts (§4).                  We are investigating how best to take advantage of it. Several
+   Nevertheless, reducing CPU overheads has become an im-            possibilities are worth considering: 1. use SCM as an exten-
+portant optimization target, given that the low hanging fruit        sion of DRAM — this raises the questions of how best to
+of reducing space amplification has been harvested. Reduc-           implement key data structures (e.g., block cache or memtable)
+ing CPU overheads improves the performance of the few                with mixed DRAM and SCM, and what overheads are intro-
+applications where the CPU is indeed constraining. More              duced when trying to exploit the offered persistency; 2. use
+importantly, optimizations that reduce CPU overheads allow           SCM as the main storage of the database, but we note that
+for hardware configurations that are more cost-effective —           RocksDB tends to be bottlenecked by space or CPU, rather
+
+
+
+USENIX Association                                               19th USENIX Conference on File and Storage Technologies        37
+than I/O; and 3. use SCM for the WALs, but this raises the           support prioritization among RocksDB instances to make sure
+question of whether this use case alone justifies the costs          a resource is prioritized for the instances that need it most.
+of SCM, considering that we only need a small staging area              Another lesson learned when running multiple instances
+before it is moved to SSD.                                           in one process: liberally spawning unpooled threads can be
+                                                                     problematic, especially if the threads are long-lived. Having
+Main Data Structure Revisited
+                                                                     too many threads increases the probability of CPU, causes
+We continuously revisit the question of whether LSM-trees
+                                                                     excessive context switching overhead, and makes debugging
+remain appropriate, but continue to come to the conclusion
+                                                                     extremely difficult, and I/O spikes. If a RocksDB instance
+that they do. The price of SSDs hasn’t dropped enough to
+                                                                     needs to perform some work using a thread that may go to
+change the space and flash endurance bottlenecks for most
+                                                                     sleep or wait on a condition, then it is better to use a thread
+use cases and the alternative of trading SSD usage with CPU
+                                                                     pool where size and resource usage can be easily capped.
+or DRAM only makes sense for a few applications. While the
+                                                                        Global (per host) resource management is more challenging
+main conclusion remains the same, we frequently hear users’
+                                                                     when the RocksDB instances run in separate processes, given
+demands for write amplification lower than what RocksDB
+                                                                     that each shard only has local information. Two strategies can
+can provide. Nevertheless, we noted that when object sizes
+                                                                     be applied. First, each instance is configured to use resources
+are large, write amplification can be reduced by separating
+                                                                     conservatively, as opposed to greedily. With compaction, for
+key and value (e.g. WiscKey [35] and ForrestDB [1]), so we
+                                                                     example, each instance can initiate fewer compactions than
+are adding this to RocksDB (called BlobDB).
+                                                                     “normal,” ramping up only when compactions are behind. The
+                                                                     downside of this strategy is that the global resources may
+4    Lessons on serving large-scale systems                          not be fully exploited, leading to sub-optimal resource usage.
+                                                                     The second, operationally more challenging strategy is for
+RocksDB is a building block for a wide variety of large-scale        the instances to share resource usage information amongst
+distributed systems with disparate requirements. Over time,          themselves and to adapt accordingly in an attempt to optimize
+we learned that improvements were needed with respect to             resource usage more globally. More work will be needed to
+resource management, WAL treatment, batched file deletions,          improve host-wide resource management in RocksDB.
+data format compatibility, and configuration management.
+                                                                     WAL treatment
+Resource management                                                  Traditional databases tend to force a write-ahead-log (WAL)
+Large-scale distributed data services typically partition the        write upon every write operation to ensure durability. In con-
+data into shards that are distributed across multiple server         trast, large-scale distributed storage systems typically repli-
+nodes for storage. The size of shards is limited, because a          cate data for performance and availability, and they do so with
+shard is the unit for load balancing and replication, and be-        various consistency guarantees. For example, if copies of the
+cause shards are copied between nodes atomically for this            same data exist in multiple replicas, and one replica becomes
+purpose. As a result, each server node will typically host tens      corrupted or inaccessible, then the storage system uses valid
+or hundreds of shards. In our context, a separate RocksDB            replica(s) from other unaffected hosts to rebuild the replica of
+instance is used to service each shard, which means that a           the failed host. For such systems, RocksDB WAL writes are
+storage host will have many RocksDB instances running on it.         less critical. Further, distributed systems often have their own
+These instances can either all run in one single address space,      replication logs (e.g., Paxos logs), in which case RocksDB
+or each in its own address space.                                    WAL are not needed at all.
+   The fact that a host may run many RocksDB instances                  We learned it is helpful to provide options for tuning WAL
+has implications on resource management. Given that the              sync behavior to meet the needs of different applications.
+instances share the host’s resources, the resources need to be       Specifically, we introduced differentiated WAL operating
+managed both globally (per host) and locally (per instance)          modes: (i) synchronous WAL writes, (i) buffered WAL writes,
+to ensure they are used fairly and efficiently. When running         and (i) no WAL writes at all. For buffered WAL treatment,
+in single process mode, having global resource limits is im-         WAL is periodically written out to disk in the background at
+portant, including for (1) memory for write buffer and block         low priority so as not to impact RocksDB’s traffic latencies.
+cache, (2) compaction I/O bandwidth, (3) compaction threads,
+(4) total disk usage and (5) file deletion rate (described below),   Rate-limited file deletions
+and such limits are potentially needed on a per-I/O device           RocksDB typically interacts with the underlying storage de-
+basis. Local resource limits are also needed, for example to en-     vice via a file system. These file systems are flash-SSD-aware;
+sure that a single instance cannot utilize an excessive amount       e.g., XFS, with realtime discard, may issue a TRIM com-
+of any resource. RocksDB allows applications to create one           mand [28] to the SSD whenever a file is deleted. TRIM com-
+or more resource controllers (implemented as C++ objects             mands are commonly believed to improve performance and
+passed to different DB objects) for each type of resource and        flash endurance [21], as validated by our production experi-
+also do so on a per instance basis. Finally, it is important to      ence. However, it may also cause performance issues. TRIM
+
+
+
+38   19th USENIX Conference on File and Storage Technologies                                                  USENIX Association
+is more disruptive than we originally thought: in addition                                Compac-           Compre-    SSTable   Plug-in
+to updating the address mapping (most often in the SSD’s                  Config Area:      tion     I/O     ssion       file      fcts
+internal memory), the SSD firmware also needs to write these            Configurations:      14       4        2          7         6
+changes to FTL’s1 journal in flash, which in turn may trigger
+SSD’s internal garbage collection, causing considerable data           Table 5: The number of distinct configurations used across 39
+movement with an attendant negative impact on foreground               ZippyDB deployments
+IO latencies. To avoid TRIM activity spikes and associated
+increases in I/O latency, we introduced rate limiting for file         option. Second, configuration options not explicitly specified
+deletion to prevent multiple files from being deleted simulta-         by the code were automatically set to RocksDB’s default val-
+neously (which happens after compactions).                             ues. When a RocksDB software update included changes to
+Data format compatibility                                              the default configuration parameters (e.g., to increase memory
+Large scale distributed applications run their services on many        usage or compaction parallelism), applications would some-
+hosts, and they expect zero downtime. As a result, software            times experience unexpected consequences.
+upgrades are incrementally rolled out across the hosts; and               To address these issues, RocksDB first introduced the abil-
+when issues arise, the updates are rolled back. In light of            ity for a RocksDB instance to open a database with a string
+continuous deployment [56], these software upgrades occur              parameter that included configuration options. Later RocksDB
+frequently; RocksDB issues a new release once a month.For              introduced support for optionally storing an options file along
+this reason, it is important that the data on disk remain both         with the database. We also introduced two tools: (i) a vali-
+backward and forward compatible across the different soft-             dation tool that validates whether the options for opening a
+ware versions. A newly upgraded (or rolled back) RocksDB               database was compatible with the target database; and (ii) a
+instance must be able to make sense of the data stored on disk         migration tool rewrites a database to be compatible with the
+by the previous instance. Further, RocksDB data files may              desired options (although this tool is limited).
+need to be copied between distributed instances for replica               A more serious problem with RocksDB configuration man-
+building or load balancing, and these instances may be run-            agement is the large number of configuration options. In the
+ning different versions. A lack of a forward compatibility             early years of RocksDB, we made the design choice of sup-
+guarantee caused operational difficulties in some RocksDB              porting a high degree of customization: we introduced many
+deployments, which led us to add the guarantee.                        new knobs, and introduced the support of pluggable compo-
+   RocksDB goes to great lengths to ensure data remains both           nents, all to allow applications to realize their performance
+forward and backward compatible (except for new features).             potential. This proved to be a successful strategy for gaining
+This is challenging both technically and process-wise, but we          initial traction early on. However, a common complaint now
+have found the effort pays off. For backwards compatibility,           is that there are far too many options and that it is too difficult
+RocksDB must be able to understand all formats previously              to understand their effects; i.e., it has become very difficult to
+written to disk; this adds software and maintenance complex-           specify an “optimal” configuration.
+ities. For forward compatibility, future data formats need to             More daunting beyond having many configuration parame-
+be understood, and we aim to maintain forward compatibility            ters to tune is the fact that the optimal configuration depends
+for at least one year. This can be achieved in part, by using          not just on the system that has RocksDB embedded, but also
+generic techniques, such as those used by Protocol Buffer [63]         on the workload generated by the applications above them.
+or Thrift [62]. For configuration file entries, RocksDB needs          Consider, for example, ZippyDB [65], an in-house developed,
+to be able to identify new fields and use best-effort guesses on       large-scale distributed key-value store that uses RocksDB
+how to apply the configuration or when to discard. We con-             on its nodes. ZippyDB serves numerous different applica-
+tinuously test different versions of RocksDB with different            tions, sometimes individually, sometimes in a multi-tenant
+versions of its data.                                                  setup. Although significant efforts go into using uniform con-
+                                                                       figurations across all ZippyDB use cases wherever possible,
+Managing configurations                                                the workloads are so different for the different use cases, a
+RocksDB is highly configurable so that applications can op-            uniform configuration is not practically feasible when perfor-
+timize for their workload. However, we have found config-              mance is important. Table 5 shows that across the 39 ZippyDB
+uration management to be a challenge. Initially, RocksDB               deployments we sampled, over 25 distinct configurations.
+inherited LevelDB’s method of configuring parameters where
+                                                                          Tuning configuration parameters is also particularly chal-
+the parameter options were directly embedded in the code.
+                                                                       lenging for systems with embedded RocksDB that are shipped
+This caused two problems. First, parameter options were often
+                                                                       to third parties. Consider a third party using a database such
+tied to the data stored on disk, causing potential compatibility
+                                                                       as MySQL or ZippyDB within one of their applications. The
+issues when data files created using one option could not be
+                                                                       third party will typically know very little about RocksDB
+opened by a RocksDB instance newly configured with another
+                                                                       and how it is best tuned. And the database owners have little
+  1 FTL: Flash Translation Layer.                                      appetite for tuning the systems of their clients.
+
+
+
+USENIX Association                                                 19th USENIX Conference on File and Storage Technologies              39
+   These real-world lessons triggered changes in our configu-      reads with their own sequence numbers because RocksDB
+ration support strategy. We have spent considerable effort on      does not currently support multi-versioning with user defined
+improving out-of-box performance and simplifying configura-        timestamps.
+tions. Our current focus is on providing automatic adaptivity,
+while continuing to support extensive explicit configuration,
+given that RocksDB continues to server specialized applica-        5    Lessons on failure handling
+tions. We note that pursuing adaptivity while retaining explicit
+configurability creates significant code maintenance overhead,     Through production experience, we have learned three major
+we believe the benefits of having a consolidated storage en-       lessons about failure handling. First, data corruption needs to
+gine outweighs the code complexity.                                be detected early to minimize the risk of data unavailability
+                                                                   or loss, and in doing so to pinpoint where the error originated.
+Replication and backup support
+                                                                   Second, integrity protection must cover the entire system to
+RocksDB is a single node library. The applications that
+                                                                   prevent silent corruptions from being exposed to RocksDB
+use RocksDB are responsible for replication and backups
+                                                                   clients or spreading to other replicas (see Fig. 4). Third, errors
+if needed. Each application implements these functions in
+                                                                   need to be treated in a differentiated manner.
+its own way (for legitimate reasons), so it is important that
+RocksDB offer appropriate support these functions.                 Frequency of silent corruptions
+   Bootstrapping a new replica by copying all the data from        RocksDB users do not usually use data protection by SSD
+an existing one can be done in two ways. First, all the keys       (e.g. DIF/DIX) for performance reason, and storage media cor-
+can be read from a source replica and then written to the desti-   ruptions are detected by RocksDB block checksums, which
+nation replica (logical copying). On the source side, RocksDB      is a routine feature for all mature databases so we skip the
+supports data scanning operations by offering the ability to       analysis here. CPU/memory corruption does happen rarely
+minimize the impact on concurrent online queries; e.g., by         and it is difficult to accurately quantify. Applications that use
+providing the option to not cache the result of these operations   RocksDB often run data consistency checks that compare
+and thus prevent cache trashing. On the destination side, bulk     replicas for integrity. This catches errors, but those could have
+loading is supported and also optimized for this scenario.         been introduced either by RocksDB or by the client applica-
+   Second, bootstrapping a new replica can be done by copy-        tion (e.g., when replicating, backing up, or restoring data).
+ing SSTables and other files directly (physical copying).             We found that the frequency of corruptions introduced at
+RocksDB assists physical copying by identifying existing           the RocksDB level can be estimated by comparing primary
+database files at a current point in time, and preventing them     and secondary indexes in MyRocks database tables that have
+from being deleted or mutated. Supporting physical copying         both; any inconsistencies whould have been introduced at
+is an important reason RocksDB stores data on an underlying        the RocksDB level, including CPU or memory corruptions.
+file system, as it allows each application to use its own tools.   Based on our measurements, corruptions are introduced at
+We believe the potential performance gains of RocksDB di-          the RocksDB level roughly once every three months for each
+rectly using a block device interface or heavily integrating       100PB of data. Worse, in 40% of those cases, the corruption
+with FTL does not outweigh the aforementioned benefit.             had already propagated to other replicas.
+   Backup is an important feature for most databases and other        Data corruptions also occur when transferring data, often
+applications. For backups, applications have the same logi-        because of software bugs. For example, a bug in the underly-
+cal vs. physical choice as with replication. One difference        ing storage system when handling network failures, caused
+between backups and replication is that applications often         us to see, over a period of time, roughly 17 checksum mis-
+need to manage multiple backups. While most applications           matches for every petabyte of physical data transferred.
+implement their own backups (to accommodate their own
+requirements), RocksDB provides a backup engine for appli-         Multi-layer protection
+cations to use if their backup requirements are simple.            Data corruption needs to be detected as early as possible to
+   We see two areas for further improvement in this area, but      minimize downtime and data loss. Most RocksDB applica-
+both require changes to the key-value API; they are discussed      tions have their data replicated on multiple hosts; when a
+in §6. The first involves applying updates in a consistent         checksum mismatch is detected, the corrupt replica is dis-
+order on different replicas, which introduces performance          carded and replaced with a correct one. However, this is a
+challenges. The second involves performance issues surround-       viable option only as long as a correct replica still exists.
+ing write requests that are issued one at a time and the fact         Today, RocksDB checksums file data at multiple levels to
+that replicas can fall behind and applications may wish these      identify corruption in the layers beneath it. These, as well as
+replicas to catch up faster. Various solutions have been im-       the planned application layer checksum, are shown in Fig. 4.
+plemented by different applications to address these issues,       Multiple levels of checksums are important, primarily because
+but they all have limitations [20]. The challenge is that ap-      they help detect corruptions early and because they protect
+plications cannot issue writes out of order and do snapshot        against different types of threats. Block checksums, inherited
+
+
+
+40   19th USENIX Conference on File and Storage Technologies                                                  USENIX Association
+from LevelDB, prevent data corrupted at or below the file sys-
+                                                                                                  Client
+tem from being exposed to the client. File checksums, added
+in 2020, protect against corruption caused by the underlying                        [Write]          [Read]
+storage system from being propagated to other replicas and                          Pass in K/V      Check block and
+                                                                                    Checksums        KV Checksums
+against corruption caused when transferring SSTable files
+over the wire. For WAL files, handoff checksums enable effi-                              Memtables           [Memtable     SSTable
+                                                                                            Per K/V           Flush]
+cient early detection of corruptions at write time.                                        checksums          Check K/V
+                                                                                                                             Block
+                                                                                                                           checksums
+                                                                                                              checksums
+   Block integrity. Each SSTable block or WAL fragment has
+a checksum attached to it, generated when the data is created.                                       [Compaction]         Underlying
+                                                                                                     check block and       Storage
+Unlike the file checksum that is verified only when the file is                                      K/V cksums
+moved, this checksum is verified every time the data is read,                           DB Metadata
+                                                                                                                           SSTable
+                                                                                            File
+due to its smaller scope. Doing so prevents data corrupted by                            checksums
+                                                                                                           FS Handoff
+                                                                                                           Checksums         Block
+the storage layer from being exposed to RocksDB clients.                                                                   checksums
+
+   File integrity. File contents are particularly at risk of be-                                  [Backup/Restore]        [Replica File Copy]
+ing corrupted during transfer operations; e.g., for backups or                                    Check file checksums    Check file checksums
+
+when distributing SSTable files. To address this, SSTables are                                      Backup
+                                                                                                    Storage               Another Replica
+protected by their own checksum, generated when the table
+is created. An SSTable’s checksum is recorded in the meta-
+data’s SSTable file entry, and is validated with the SSTable                          Figure 4: Four Types of Checksums
+file wherever it is transferred. However, we note that other
+files, such as WAL files, are still not protected this way.              Severity-based error handling
+   Handoff integrity. An established technique for detecting             Most of the faults RocksDB encounters are errors returned by
+write corruptions early is to generate a handoff checksum                the underlying storage system. These errors can stem from
+on the data to be written to the underlying file system, and             a multitude of issues, from severe problems like a read-only
+pass it down along with the data, where it is verified by the            file system, to transient problems like a full disk or a network
+lower layers [48, 70]. We wish to protect WAL writes using               error accessing remote storage. Early on, RocksDB reacted to
+such a write API, since unlike SSTables, WALs benefit from               such issues either by simply returning error messages to the
+incremental validation on each append. Unfortunately, local              client or by permanently halting all write operations.
+file systems rarely support this — some, specialized stacks,                Today, we aim to interrupt RocksDB operations only if the
+such as Oracle ASM [49] do, however.                                     error is not locally recoverable; e.g., transient network errors
+   On the other hand, when running on remote storage, the                should not require user intervention to restart the RocksDB
+write API can be changed to accept a checksum, hooking into              instance. To implement this, we improved RocksDB to peri-
+the storage service’s internal ECC. RocksDB can use check-               odically retry resume operations after encountering an error
+sum combining techniques on the existing WAL fragment                    classified as transient. As a result, we obtain operational ben-
+checksums to efficiently compute a write handoff checksum.               efits as clients do not need to manually mitigate RocksDB for
+Since our storage service performs write-time verification, we           a significant portion of faults that occur.
+expect it to be extremely infrequent for corruption detection
+to be delayed until read time.
+                                                                         6   Lessons on the key-value interface
+End-to-end protection
+While the layers of protection described above prevent clients           The core key-value (KV) interface is surprisingly versatile.
+from being exposed to corrupt data in many cases, they are not           Almost all storage workloads can be served by a datastore
+comprehensive. One deficiency of the protections mentioned               with a KV API; we have rarely seen an application not able to
+so far is that data is unprotected above the file I/O layer; e.g.,       implement functionality using this interface. That is perhaps
+data in MemTable and the block cache. Data corrupted at this             why KV-stores are so popular. The KV interface is generic.
+level will be undetectable and thus will eventually be exposed           Both keys and values are variable-length byte arrays. Appli-
+to the user. Further, flush or compaction operations can persist         cations have great flexibility in determining what information
+corrupted data, making the corruption permanent.                         to pack into each key and value, and they can freely choose
+   Key-value integrity. To address this problem, we are cur-             from a rich set of encoding schemes. Consequently, it is the
+rently implementing per-key-value checksums to detect cor-               application that is responsible for parsing and interpreting the
+ruptions that occur above the file I/O layer. This checksum              keys and values. Another benefit of the KV interface is its
+will be transferred along with the key/value wherever it is              portability. It is relatively easy to migrate from one key-value
+copied, although we will elide it from file data where alterna-          system to another. However, while many use cases achieve op-
+tive integrity protection already exists.                                timal performance with this simple interface, we have noticed
+
+
+
+USENIX Association                                                   19th USENIX Conference on File and Storage Technologies                     41
+that it can limit performance for some applications.                         workload                          throughput gain
+   For example, building concurrency control outside of                      fill_seq + read_random                  1.2
+RocksDB is possible but hard to make efficient, especially if                fill_seq + read_while_writing           1.9
+two-phase-commit needs to be supported where some data                       fill_random + read_random               1.9
+                                                                             fill_random +read_while_writing         2.0
+persistency is needed before committing the transaction. We
+added transaction support for this reason, which is used by
+MyRocks (MySQL+RocksDB). We continue to add features;               Table 6: DB_bench microbenchmark using the timestamp
+e.g., gap/next key locking and large transactions support.          API sees ≥ 1.2X throughput improvement.
+   In other cases, the limitation is caused by the key-value
+interface itself. Accordingly, we have started to investigate       timestamp and evaluated this approach with DB-Bench. The
+possible extensions to the basic key-value interface. One such      results are shown in Table 6. Each workload has two steps:
+extension is support for user-defined timestamps.                   the first step populates the database, and we measure perfor-
+                                                                    mance during the second step. For example, in “fill_seq +
+Versions and timestamps                                             read_random”, we populate the initial database by writing
+Over the last few years, we have come to understand the im-         a number of keys in ascending order, and in step 2 perform
+portance of data versioning. We have concluded that version         random read operations. Relative to the baseline, where the
+information should become a first-class citizen in RocksDB,         application encodes a timestamp as part of the key (transpar-
+in order to properly support features, such as multi-version        ent to RocksDB), the application-specified timestamp API can
+concurrency control (MVCC) and point-in-time reads. To              lead to a 1.2X or better throughput gain. The improvements
+achieve this, RocksDB needs to be capable of accessing dif-         arise from treating the timestamp as metadata separate from
+ferent versions efficiently.                                        the user key, because then point lookups can be used instead
+   So far, RocksDB has internally been using 56-bit sequence        of iterators to get the newest value for a key, and Bloom filters
+numbers to identify different versions of KV-pairs. The se-         may identify SSTables not containing that key. Additionally,
+quence number is generated by RocksDB and incremented               the timestamp range covered by an SSTable can be stored in
+on every client write (hence, all data is logically arranged        its properties, which can be leveraged to exclude SSTables
+in sorted order). The client application cannot affect the se-      that could only contain stale values.
+quence number. However RocksDB allows the application to               We hope this feature will make it easier for users to imple-
+take a Snapshot of the DB, after which RocksDB guarantees           ment multi-versioning in their systems for single node MVCC,
+that all KV pairs that existed at the time of the snapshot will     distributed transactions, or resolving conflicts in multi-master
+persist until the snapshot is explicitly released by application.   replication. The more complicated API, however, is less
+As a result, multiple KV-pairs with the same key may co-exist,      straightforward to use and perhaps prone to misuse. Further,
+differentiated by their sequence numbers.                           the database would consume more disk space than storing no
+   This approach to versioning is inadequate as it does not         timestamp, and would be less portable to other systems.
+satisfy the requirements of many applications. To read from
+a past state, a snapshot must have already been taken at the
+previous point in time. RocksDB does not support taking             7   Related Work
+a snapshot of the past, since there is no API to specify a
+time-point. Moreover, it is inefficient to support point-in-time    Our work on RocksDB has benefited from a broad range of
+reads. Finally, each RocksDB instance assigns its own se-           research in a number of areas.
+quence numbers and snapshots can be obtained only on a per
+                                                                    Storage Engine Libraries
+instance basis. This complicates versioning for applications
+                                                                    Many storage engine have been built as a library to be embed-
+with multiple, (possibly replicated) shards, each of which is a
+                                                                    ded in applications. RocksDB’s KV interface is more prim-
+RocksDB instance. In summary, it is essentially impossible to
+                                                                    itive than, for example, BerkeleyDB [44], SQLite [47] and
+create versions of data that offer cross-shard consistent reads.
+                                                                    Hekaton [18]. Further, RocksDB differs from these systems
+   Applications can work around these limitations by encod-
+                                                                    by focusing on the performance of modern server workloads,
+ing timestamps within the key or within the value. However,
+                                                                    which require high throughput and low latency, and typically
+they will experience performance degradations in either case.
+                                                                    run on high end SSDs and multicore CPUs. This differs from
+Encoding within the key sacrifices performance for point-
+                                                                    systems with more general targets, or built for faster storage
+lookups, while encoding within the value sacrifices perfor-
+                                                                    media [18, 30].
+mance for out-of-order writes to the same key and complicates
+the reading of old versions of keys. We believe application-        Key-value stores for SSDs
+specified timestamps would better address these limitations,        Over the years, much effort has gone into optimizing key-
+where the application can tag its data with timestamps that         value stores, especially for SSDs. As early as 2011, SILT [34]
+can be understood globally, and do so outside the key or value.     proposed a key-value store that balanced between memory
+   We have added basic support for application-specified            efficiency, CPU, and performance. ForestDB[45] uses HB+
+
+
+
+42   19th USENIX Conference on File and Storage Technologies                                                    USENIX Association
+trees to index on top of logs. TokuDB [32] and other databases         ration, multi-level checksums and application-specified times-
+use FractalTree/Bε trees. LOCS [67], NoFTL-KV [66] and                 tamps, we plan to unify leveled and tiered compaction and
+FlashKV [69] target Open-Channel SSDs for improved per-                improve adaptivity. However, a number of open questions
+formance. While RocksDB benefited from these efforts, our              could benefit from further research.
+position and strategy for improving performance is different             1. How can we use SSD/HDD hybrid storage to improve
+and we continue to depend on LSM trees. Several studies have                efficiency?
+compared the performance of RocksDB with other databases                 2. How can we mitigate the performance impact on readers
+such as InnoDB [41], TokuDB [19] [37], and WiredTiger [10].                 when there are many consecutive deletion markers?
+                                                                         3. How should we improve our write throttling algorithms?
+                                                                         4. Can we develop an efficient way of comparing two repli-
+LSM-tree improvements
+                                                                            cas to ensure they contain the same data?
+Several systems also use LSM trees and improved their perfor-
+                                                                         5. How can we best exploit SCM? Should we still use LSM
+mance. Write amplifications is often the primary optimization
+                                                                            tree and how to organize storage hierarchy?
+goal; e.g., WiscKey [35], PebblesDB [52], IAM-tree [25] and
+                                                                         6. Can there be a generic integrity API to handle data hand-
+TRIAD [3]. These systems go further in optimizing for write
+                                                                            off between RocksDB and the file system layer?
+amplification than RocksDB which focuses more on trade-
+offs among different metrics. SlimDB [53] optimized LSM
+trees for space efficiency; RocksDB also focuses on deleting           9   Conclusions
+dead data. Monkey [17] attempts to balance between DRAM
+and IOPs. bLSM [57], VT-tree [60] and cLSM [24] optimize               RocksDB has grown from a key-value store serving niche ap-
+for the general performance of LSM trees.                              plications to its current position of widespread adoption across
+                                                                       numerous industrial large-scale distributed applications. The
+Large-scale storage systems                                            LSM tree as the main data structure has served RocksDB
+There are numerous distributed storage systems [13, 14, 16,            well, as it exhibits good write and space amplification. Our
+26,38,64]. They usually have complex architectures spanning            view on performance has, however, evolved over time. While
+multiple processes, hosts and data centers. They are not di-           write and space amplification remain the primary concern,
+rectly comparable to RocksDB, a storage engine library on              additional focus has shifted to CPU and DRAM efficiency, as
+a single node. Other systems (e.g.,MongoDB, MySQL [42],                well as remote storage.
+Microsoft SQL Server [38]) can use modular storage engines;               Lessons from running large-scale applications taught us
+they have addressed similar challenges to what RocksDB                 that resource allocation needs to be managed across different
+faces, including failure handling and using timestamps.                RocksDB instances, that the data format needs to remain back-
+   Failure handling. Checksums are frequently used to detect           ward and forward compatible to allow incremental software
+data corruption [9, 23, 42]. Our argument that we need both            deployments, that appropriate support for database replica-
+end-to-end and handoff checksums still mirrors the classic             tion and backups are needed, and that configuration manage-
+end-to-end argument [55] and is similar to the strategy used           ment needs to be straightforward and preferably automated.
+by others: [61], ZFS [71], Linux [48] and [70]. Our argument           Lessons from failure handling taught us that data corruption
+for earlier corruption detection is similar to [33] which argues       errors need to be detected earlier and at every layer of the
+that domain-specific checking is inadequate.                           system. The key-value interface enjoys great popularity for
+   Timestamp support. Several storage systems provide times-           its simplicity with some limitations in performance. Some
+tamp support: HBase [26], WiredTiger [39] and BigTable [14];           simple revisions to the interface might yield a better balance.
+Cassandra [13] supports a timestamp as an ordinary column.
+In these systems, timestamps are a count of the number of mil-
+liseconds since the UNIX epoch. Hekaton [18] uses a mono-              Acknowledgments
+tonically increasing counter to assign timestamps, which is
+similar to the RocksDB sequence number. RocksDB’s on-                  We attribute the success of RocksDB to all current and
+going work on a user timestamp can be complementary to                 past RocksDB team members at Facebook, all those who
+the aforementioned efforts. We hope key-value APIs with a              made contributions in the open-source community, as well
+user-defined timestamp extension can make it easier for upper-         as RocksDB users. We especially thank Mark Callaghan, the
+level systems to support features related to data versioning           mentor to the project for years, as well as Dhruba Borthakur,
+with low overhead in both performance and efficiency.                  the lead founding member of RocksDB. We also appreciate
+                                                                       comments to the paper by Jason Flinn and Mahesh Balakr-
+                                                                       ishnan. Finally, we thank our shepherd, Ethan Miller, and the
+8   Future Work and Open Questions                                     anonymous reviewers for their valuable feedback.
+
+Besides completing the improvements mentioned above, in-
+cluding optimizing for dis-aggregated storage, key-value sepa-
+
+
+
+USENIX Association                                                 19th USENIX Conference on File and Storage Technologies         43
+A    RocksDB Feature Timeline
+
+                    Performance                     Configurability                     Features
+                                                                                 • Compaction filters
+       2012    • Multi-threaded compactions                                      • Locking SSTables from
+                                                                                   deletion
+               • Tiered compaction
+               • Prefix Bloom filter
+       2103
+                                                  • Pluggable MemTable           • Merge Operator
+               • Bloom Filter for MemTables
+                                                  • Pluggable file format
+               • Separate thread pool for
+                 MemTable flush
+
+               • FIFO compaction                                                 • Backup engine
+                                                  • String-based config
+       2014
+               • Compaction rate limiter                                         • Support for multiple key
+                                                    options
+               • Cache-friendly Bloom filters                                      spaces ("column family")
+                                                  • Dynamic config changes
+                                                                                 • Physical checkpoints
+
+               • Dynamic leveled compaction       • Separate config file         • Bulk loading for SSTable
+
+       2015
+               • File deletion rate limiting      • Config compatibility           file integration
+               • Parallel Level 0 and 1             checker                      • Optimistic and
+                 compaction                                                        pessimistic transactions
+
+                                                  • MemTable total size caps
+               • Different compression for
+                                                    across instances
+       2016
+                 last level                                                      • DeleteRange()
+                                                  • Compaction migration
+               • Parallel MemTable inserts
+                                                    tools
+
+               • Separate thread pool for
+                                                  • Single memory limit for
+                 bottom-most compactions
+       2017
+                                                    both block cache and
+               • Two-level file indices
+                                                    MemTable
+               • Level 0 to level 0
+                 compactions
+                                                                                 • Automatic recovery from
+
+       2018
+               • Dictionary compression                                            out-of-space errors
+               • Hash index into data blocks                                     • Query trace and replay
+                                                                                   tools
+
+
+       2019
+               • Batched MultiGet() with          • Configure plug-in function
+                 parallel I/O                       using object registry
+                                                                                 • Secondary instance
+
+                                                                                 • Entire file checksum
+               • Multithreaded single file                                       • Automatically recover
+       2020      compression                                                       from retriable errors
+                                                                                 • Partial support for user-
+                                                                                   defined timestamps
+
+
+
+
+44   19th USENIX Conference on File and Storage Technologies                                    USENIX Association
+B   Recap of lessons learned
+Some of the lessons we learned include:
+
+ 1. It’s important that a storage engine can be tuned to fit different performance characteristics. (§1)
+
+ 2. Space efficiency is the bottleneck for most applications using SSDs. (§3, Space amplification)
+
+ 3. CPU overhead is becoming more important to allow systems to run more efficiently. (§3, CPU utilization)
+
+ 4. Global, per host, resource management is necessary when many RocksDB instances run on the same host. (§4, Resource
+    management)
+
+ 5. Having WAL treatment be configurable (synchronous WAL writes, buffered WAL writes or disabled WAL) offers applica-
+    tions performance advantages. (§4, WAL treatment)
+
+ 6. The SSD TRIM operation is good for performance but file deletions need to be rate limited to prevent occasional performance
+    issues. (§4, Rate-limited file deletions)
+
+ 7. RocksDB needs to provide both of backward and “forward” compatibility. (§4, Data format compatibility)
+
+ 8. Automatic configuration adaptivity is helpful in simplifying configuration management. (§4, Managing configurations)
+
+ 9. Data replication and backups need to be properly supported. (§4, Replication and backup support)
+
+10. It is beneficial to detect data corruptions earlier, rather than eventually. (§5)
+
+11. CPU/memory corruption does happen, though very rarely, and sometimes cannot be handled by data replication. (§5)
+
+12. Integrity protection must cover the entire system in order to prevent corrupted data (e.g., caused by bitflips in CPU/memory)
+    from being exposed to clients or other replicas; detecting corruption only when the data is at rest or being sent over the wire
+    is insufficient. (§5)
+
+13. Users often demand RocksDB to automatically recover from transient I/O errors, e.g. out-of-space or caused by network
+    problems. (§5)
+
+14. Error handling needs to be treated in a differentiated manner, depending on their causes and consequences. (§5)
+
+15. The key/value interface is versatile, but there are some performance limitation; adding a timestamp to key/value can offer a
+    good balance between performance and simplicity. (§6)
+
+C    Recap of design choices revisited
+Some notable design choices revisited include:
+
+ 1. Customizability is always good to users. (§4, Managing configurations)
+
+ 2. RocksDB can be blind to CPU bit flips. (§5)
+
+ 3. It’s OK to panic when seeing any I/O error. (§5)
+
+
+
+
+USENIX Association                                              19th USENIX Conference on File and Storage Technologies         45
+References                                                     [11] Zhichao Cao, Siying Dong, Sagar Vemuri, and
+                                                                    David H.C. Du. Characterizing, modeling, and bench-
+ [1] Jung-Sang Ahn, Chiyoung Seo, Ravi Mayuram, Rahim               marking RocksDB key-value workloads at Facebook. In
+     Yaseen, Jin-Soo Kim, and Seungryoul Maeng. ForestDB:           18th USENIX Conf. on File and Storage Technologies
+     A fast key-value storage system for variable-length            (FAST’20), pages 209–223, February 2020.
+     string keys. IEEE Trans. on Computers, 65(3):902–915,
+     2015.                                                     [12] Paris Carbone, Asterios Katsifodimos, Stephan Ewen,
+                                                                    Volker Markl, Seif Haridi, and Kostas Tzoumas. Apache
+ [2] Manos Athanassoulis, Michael S Kester, Lukas M Maas,
+                                                                    Flink: Stream and batch processing in a single engine.
+     Radu Stoica, Stratos Idreos, Anastasia Ailamaki, and
+                                                                    Bulletin of the IEEE Computer Society Technical Com-
+     Mark Callaghan. Designing access methods: The
+                                                                    mittee on Data Engineering, 36(4), 2015.
+     RUM conjecture. In Proc. Intl. Conf on Extending
+     Database Technology (EDBT), volume 2016, pages 461–       [13] Apache Cassandra. https://cassandra.apache.o
+     466, 2016.                                                     rg/. [Online; retrieved September 2020].
+ [3] Oana Balmau, Diego Didona, Rachid Guerraoui, Willy
+     Zwaenepoel, Huapeng Yuan, Aashray Arora, Karan            [14] Fay Chang, Jeffrey Dean, Sanjay Ghemawat, Wilson C
+     Gupta, and Pavan Konka. TRIAD: Creating synergies              Hsieh, Deborah A Wallach, Mike Burrows, Tushar Chan-
+     between memory, disk and log in log-structured key-            dra, Andrew Fikes, and Robert E Gruber. Bigtable: A
+     value stores. In Proc. USENIX Annual Technical Con-            distributed storage system for structured data. ACM
+     ference (USENIX-ATC’17), pages 363–375, 2017.                  Trans. on Computer Systems (TOCS), 26(2):1–26, 2008.
+
+ [4] Matias Bjørling. Zone Append: A new way of writing        [15] Guoqiang Jerry Chen, Janet L Wiener, Shridhar Iyer, An-
+     to zoned storage. In Proc. Usenix Linux Storage and            shul Jaiswal, Ran Lei, Nikhil Simha, Wei Wang, Kevin
+     Filesystems Conference (VAULT’20), 2020.                       Wilfong, Tim Williamson, and Serhat Yilmaz. Realtime
+                                                                    data processing at Facebook. In Proc. Intl. Conf. on
+ [5] Facebook Engineering Blog. LogDevice: A distributed            Management of Data, pages 1087–1098, 2016.
+     data store for logs. https://engineering.fb.com/c
+     ore-data/logdevice-a-distributed-data-stor                [16] James C Corbett, Jeffrey Dean, Michael Epstein, An-
+     e-for-logs/. [Online; retrieved September 2020].               drew Fikes, Christopher Frost, Jeffrey John Furman,
+ [6] Instagram Engineering Blog. Open-sourcing a 10x                Sanjay Ghemawat, Andrey Gubarev, Christopher Heiser,
+     reduction in Apache Cassandra tail latency. https:             Peter Hochschild, et al. Spanner: Google’s globally dis-
+     //instagram-engineering.com/open-sourcing-                     tributed database. ACM Trans. on Computer Systems
+     a-10x-reduction-in-apache-cassandra-tail-l                     (TOCS), 31(3):1–22, 2013.
+     atency-d64f86b43589. [Online; retrieved September
+     2020].                                                    [17] Niv Dayan, Manos Athanassoulis, and Stratos Idreos.
+                                                                    Monkey: Optimal navigable key-value store. In Proc.
+ [7] Netflix Technology Blog. Application data caching              Intl. Conf. on Management of Data (SIGMOD’17),
+     using SSDs: The Moneta project: Next generation EV-            pages 79–94, 2017.
+     Cache for better cost optimization. https://netf
+     lixtechblog.com/application-data-caching                  [18] Cristian Diaconu, Craig Freedman, Erik Ismert, Per-Ake
+    -\protect\discretionary{\char\hyphenchar\f                      Larson, Pravin Mittal, Ryan Stonecipher, Nitin Verma,
+     ont}{}{}using-ssds-5bf25df851ef. [Online; re-                  and Mike Zwilling. Hekaton: SQL server’s memory-
+     trieved September 2020].                                       optimized OLTP engine. In Proc. ACM SIGMOD Intl.
+                                                                    Conf. on Management of Data (SIGMOD’13), pages
+ [8] Uber Engineering Blog. Cherami: Uber Engineering’s             1243–1254, 2013.
+     durable and scalable task queue in Go. https://en
+     g.uber.com/cherami-message-queue-system/.                 [19] Siying Dong, Mark Callaghan, Leonidas Galanis,
+     [Online; retrieved September 2020].                            Dhruba Borthakur, Tony Savor, and Michael Stumm.
+ [9] Dhruba Borthakur. HDFS architecture guide. Hadoop              Optimizing space amplification in RocksDB. In Proc.
+     Apache Project, 53(1-13):2, 2008.                              Conf. on Innovative Data Systems Research (CIDR’17),
+                                                                    2017.
+[10] Mark Callaghan. MongoRocks and WiredTiger versus
+     LinkBench on a small server. http://smalldatum.b          [20] Jose Faleiro. The dangers of logical replication and a
+     logspot.com/2016/10/mongorocks-and-wiredti                     practical solution. In Proc. 18th Intl. Workshop on High
+     ger-versus.html. [Online; retrieved Jan 2021].                 Performance Transaction Systems (HPTS’19), 2019.
+
+
+
+46   19th USENIX Conference on File and Storage Technologies                                           USENIX Association
+[21] Tasha Frankie, Gordon Hughes, and Ken Kreutz-                      rg/meeting/83/materials/slides-83-nfsv4-2.
+     Delgado. A mathematical model of the trim command                  [Online; retrieved September 2020].
+     in NAND-flash SSDs. In Proc. 50th Annual Southeast
+     Regional Conference (ACM-SE’12), pages 59–64, 2012.           [34] Hyeontaek Lim, Bin Fan, David G Andersen, and
+                                                                        Michael Kaminsky. SILT: A memory-efficient, high-
+[22] S. Ghemawat and J. Dean. LevelDB. https://github                   performance key-value store. In Proc. 23rd ACM Symp.
+     .com/google/leveldb, 2011.                                         on Operating Systems Principles (SOSP’11), pages 1–
+                                                                        13, 2011.
+[23] Sanjay Ghemawat, Howard Gobioff, and Shun-Tak Le-
+     ung. The Google File System. In Proc. 19th ACM Symp.          [35] Lanyue Lu, Thanumalayan Sankaranarayana Pillai, Har-
+     on Operating systems principles (SOSP’13), pages 29–               iharan Gopalakrishnan, Andrea C Arpaci-Dusseau, and
+     43, 2003.                                                          Remzi H Arpaci-Dusseau. Wisckey: Separating keys
+                                                                        from values in SSD-conscious storage. ACM Trans. on
+[24] Guy Golan-Gueta, Edward Bortnikov, Eshcar Hillel, and              Storage (TOS), 13(1):1–28, 2017.
+     Idit Keidar. Scaling concurrent log-structured data
+     stores. In Proc. European Conf. on Computer Systems           [36] Yoshinori Matsunobu. Migrating a database from Inn-
+     (EUROSYS’15), pages 1–14, 2015.                                    oDB to MyRock. Facebook Engineering Blog https:
+                                                                        //engineering.fb.com/core-data/migrating
+[25] Caixin Gong, Shuibing He, Yili Gong, and Yingchun Lei.            -a-database-from-innodb-to-myrocks/, 2017.
+     On integration of appends and merges in log-structured             [Online; retrieved September 2020].
+     merge trees. In Proc. 48th Intl. Conf. on Parallel Pro-
+     cessing (ICPP’19), pages 1–10, 2019.                          [37] Yoshinori Matsunobu, Siying Dong, and Herman Lee.
+                                                                        MyRocks: LSM-tree database storage engine serving
+[26] Apache HBase. https://hbase.apache.org/. [On-                      Facebook’s Social Graph. Proc. VLDB Endowment,
+     line; retrieved September 2020].                                   13(12):3217–3230, August 2020.
+
+[27] Dongxu Huang, Qi Liu, Qiu Cui, Zhuhe Fang, Xiaoyu             [38] Microsoft. Microsoft SQL Server. https://www.micr
+     Ma, Fei Xu, Li Shen, Liu Tang, Yuxing Zhou, Meng-                  osoft.com/en-us/sql-server/. [Online; retrieved
+     long Huang, Wan Wei, Cong Liu, Jian Zhang, Jianjun                 September 2020].
+     Li, Xuelian Wu, Lingyu Song, Ruoxi Sun, Shuaipeng
+                                                                   [39] MongoDB. WiredTiger Storage Engine. https://
+     Yu, Lei Zhao, Nicholas Cameron, Liquan Pei, and Xin
+                                                                        docs.mongodb.com/manual/core/wiredtiger/.
+     Tang. TiDB: A Raft-based HTAP database. Proc. VLDB
+                                                                        [Online; retrieved September 2020].
+     Endow., 13(12):3072–3084, August 2020.
+                                                                   [40] MongoRocks. RocksDB storage engine module for
+[28] Intel. Trim overview. https://www.intel.com/co
+                                                                        MongoDB. https://github.com/mongodb-par
+     ntent/www/us/en/support/articles/000016148                         tners/mongo-rocks. [Online; retrieved September
+     /memory-and-storage.html. [Online; retrieved Jan                   2020].
+     2021].
+                                                                   [41] MySQL. Introduction to InnodeDB. https://dev.my
+[29] Iron.io. Confluent https://www.iron.io. [Online;                   sql.com/doc/refman/5.6/en/innodb-introduct
+     retrieved September 2020].                                         ion.html. [Online; retrieved September 2020].
+[30] Hideaki Kimura. FOEDUS: OLTP engine for a thousand            [42] MySQL. MySQL. https://www.mysql.com/. [On-
+     cores and NVRAM. In Proc. SIGMOD Intl. Conf. on                    line; retrieved September 2020].
+     Management of Data (SIGMOD’15), pages 691–706,
+     2015.                                                         [43] Shadi A Noghabi, Kartik Paramasivam, Yi Pan, Navina
+                                                                        Ramesh, Jon Bringhurst, Indranil Gupta, and Roy H
+[31] Jay Kreps. Introducing Kafka Streams: Stream process-              Campbell. Samza: Stateful scalable stream processing at
+     ing made simple. Confluent https://www.conflu                      LinkedIn. Proc. of the VLDB Endowment, 10(12):1634–
+     ent.io/blog/introducing-kafka-streams-stre                         1645, 2017.
+     am-processing-made-simple/. [Online; retrieved
+     September 2020].                                              [44] Michael A Olson, Keith Bostic, and Margo I Seltzer.
+                                                                        Berkeley DB. In USENIX Annual Technical Conference,
+[32] B Kuszmaul. How TokuDB fractal tree indexes work.                  FREENIX Track, pages 183–191, 1999.
+     Technical report, Technical report, TokuTek, 2010.
+                                                                   [45] Patrick O’Neil, Edward Cheng, Dieter Gawlick, and Eliz-
+[33] Chuck Lever. End-to-end data integrity requirements for            abeth O’Neil. The log-structured merge-tree (LSM-tree).
+     NFS. Oracle Corp. https://datatracker.ietf.o                       Acta Informatica, 33(4):351–385, 1996.
+
+
+
+USENIX Association                                             19th USENIX Conference on File and Storage Technologies      47
+[46] Keren Ouaknine, Oran Agra, and Zvika Guz. Optimiza-        [59] Arun Sharma. LogDevice: A distributed data store for
+     tion of RocksDB for Redis on flash. In Proc. Intl. Conf.        logs. Facebook Engineering Blog https://engine
+     on Compute and Data Analysis, pages 155–161, 2017.              ering.fb.com/data-infrastructure/dragon-
+                                                                     a-distributed-graph-query-engine/. [Online;
+[47] Mike Owens. The definitive guide to SQLite. Apress,             retrieved September 2020].
+     2006.
+[48] Martin K Petersen. Linux data integrity extensions. In     [60] Pradeep J Shetty, Richard P Spillane, Ravikant R Mal-
+     Linux Symposium, volume 4, page 5, 2008.                        pani, Binesh Andrews, Justin Seyster, and Erez Zadok.
+                                                                     Building workload-independent storage with VT-trees.
+[49] Martin K. Petersen and Sergio Leunissen. Eliminating            In Proc. 11th USENIX Conf. on File and Storage Tech-
+     silent data corruption with Oracle Linux. Oracle Corp.          nologies (FAST’13), pages 17–30, 2013.
+     https://oss.oracle.com/~mkp/docs/data-inte
+     grity-webcast.pdf. [Online; retrieved September            [61] Gopalan Sivathanu, Charles P Wright, and Erez Zadok.
+     2020].                                                          Enhancing file system integrity through checksums.
+                                                                     Technical report, Citeseer, 2004.
+[50] Ivan Luiz Picoli, Niclas Hedam, Philippe Bonnet, and
+     Pinar Tözün. Open-channel SSD (What is it good for).       [62] Mark Slee, Aditya Agarwal, and Marc Kwiatkowski.
+     In Proc. Conf. on Innovative Data Systems Research              Thrift: Scalable cross-language services implementation.
+     (CIDR’20), 2020.                                                Facebook White Paper, 5(8), 2007.
+[51] Qihoo. Confluent https://github.com/Qihoo360/              [63] Google Open Source. Protobuf. https://opensour
+     pika. [Online; retrieved September 2020].                       ce.google/projects/protobuf. [Online; retrieved
+[52] Pandian Raju, Rohan Kadekodi, Vijay Chidambaram,                September 2020].
+     and Ittai Abraham. PebblesDB: Building key-value           [64] Rebecca Taft, Irfan Sharif, Andrei Matei, Nathan Van-
+     stores using fragmented log-structured merge trees. In          Benschoten, Jordan Lewis, Tobias Grieger, Kai Niemi,
+     Proc. 26th Symp. on Operating Systems Principles                Andy Woods, Anne Birzin, Raphael Poss, Paul Bardea,
+     (SOSP’17), pages 497–514, 2017.                                 Amruta Ranade, Ben Darnell, Bram Gruneir, Justin Jaf-
+[53] Kai Ren, Qing Zheng, Joy Arulraj, and Garth Gibson.             fray, Lucy Zhang, and Peter Mattis. CockroachDB: The
+     SlimDB: A space-efficient key-value storage engine              resilient geo-distributed SQL database. In Proc. ACM
+     for semi-sorted data. Proc. of the VLDB Endowment               SIGMOD Intl. Conf. on Management of Data (SIG-
+     (VLDB’17), 10(13):2037–2048, 2017.                              MOD’20), page 1493–1509, 2020.
+
+[54] RocksDB.org. A persistent key-value store for fast stor-   [65] Amy Tai, Andrew Kryczka, Shobhit O. Kanaujia,
+     age environments. https://rocksdb.org. [Online;                 Kyle Jamieson, Michael J. Freedman, and Asaf Cidon.
+     retrieved September 2020].                                      Who’s afraid of uncorrectable bit errors? Online re-
+                                                                     covery of flash errors with distributed redundancy. In
+[55] Jerome H Saltzer, David P Reed, and David D Clark.              2019 USENIX Annual Technical Conference (USENIX
+     End-to-end arguments in system design. ACM Trans. on            ATC’19), pages 977–992, Renton, WA, July 2019.
+     Computer Systems (TOCS), 2(4):277–288, 1984.
+[56] Tony Savor, Mitchell Douglas, Michael Gentili, Laurie      [66] Tobias Vinçon, Sergej Hardock, Christian Riegger, Ju-
+     Williams, Kent Beck, and Michael Stumm. Continu-                lian Oppermann, Andreas Koch, and Ilia Petrov. NoFTL-
+     ous deployment at Facebook and OANDA. In 2016                   KV: Tackling write-amplification on KV-stores with
+     IEEE/ACM 38th International Conference on Software              native storage management. In Proc. 21st Intl. Conf.
+     Engineering Companion (ICSE-C), pages 21–30. IEEE,              on Extending Database Technology (EDBT’18), pages
+     2016.                                                           457–460, 2018.
+
+[57] Russell Sears and Raghu Ramakrishnan. bLSM: a gen-         [67] Peng Wang, Guangyu Sun, Song Jiang, Jian Ouyang,
+     eral purpose log-structured merge tree. In Proc. Intl.          Shiding Lin, Chen Zhang, and Jason Cong. An efficient
+     Conf. on Management of Data (SIGMOD’12), pages                  design and implementation of LSM-tree based key-value
+     217–228, 2012.                                                  store on open-channel SSD. In Proc. 9th European Conf.
+                                                                     on Computer Systems (EUROSYS’14, pages 1–14, 2014.
+[58] Arun Sharma. How we use RocksDB at Rockset. Rock-
+     set Blog https://rockset.com/blog/how-we-use-              [68] Fei Yang, K Dou, S Chen, JU Kang, and S Cho. Multi-
+     rocksdb-at-rockset/. [Online; retrieved September               streaming RocksDB. In Proc. Non-Volatile Memories
+     2020].                                                          Workshop, 2015.
+
+
+
+48   19th USENIX Conference on File and Storage Technologies                                           USENIX Association
+[69] Jiacheng Zhang, Youyou Lu, Jiwu Shu, and Xiongjun
+     Qin. FlashKV: Accelerating KV performance with open-
+     channel SSDs. ACM Trans on Embedded Computing
+     Systems (TECS), 16(5s):1–19, 2017.
+[70] Yupu Zhang, Daniel S Myers, Andrea C Arpaci-
+     Dusseau, and Remzi H Arpaci-Dusseau. Zettabyte reli-
+     ability with flexible end-to-end data integrity. In Proc.
+     29th IEEE Symp. on Mass Storage Systems and Tech-
+     nologies (MSST’13), pages 1–14, 2013.
+[71] Yupu Zhang, Abhishek Rajimwale, Andrea C Arpaci-
+     Dusseau, and Remzi H Arpaci-Dusseau. End-to-end
+     data integrity for file systems: A ZFS case study. In Proc.
+     8th USENIX Conf. on File and Storage Technologies
+     (FAST’10), pages 29–42, 2010.
+
+
+
+
+USENIX Association                                                 19th USENIX Conference on File and Storage Technologies   49
+

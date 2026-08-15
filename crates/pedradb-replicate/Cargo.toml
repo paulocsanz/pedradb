@@ -11,3 +11,4 @@ thiserror.workspace = true
 
 [dev-dependencies]
 pedradb-sim.workspace = true
+stateright = "0.31"

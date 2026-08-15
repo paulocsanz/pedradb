@@ -118,11 +118,11 @@ impl Stream {
     fn load_last_seq(&self) -> Result<u64> {
         match self.db.get(&self.meta_key()) {
             None => Ok(0),
-            Some(b) if b.len() >= 8 => Ok(u64::from_le_bytes(
-                b[..8]
-                    .try_into()
-                    .map_err(|_| StreamError::Msg("stream meta: bad length".into()))?,
-            )),
+            Some(b) if b.len() >= 8 => {
+                Ok(u64::from_le_bytes(b[..8].try_into().map_err(|_| {
+                    StreamError::Msg("stream meta: bad length".into())
+                })?))
+            }
             Some(_) => Err(StreamError::Msg("stream meta: truncated last_seq".into())),
         }
     }
@@ -166,11 +166,11 @@ impl Stream {
         // F111: missing cursor → 0; present but short → hard error (not silent rewind).
         match self.db.get(&self.consumer_key(consumer)) {
             None => Ok(0),
-            Some(b) if b.len() >= 8 => Ok(u64::from_le_bytes(
-                b[..8]
-                    .try_into()
-                    .map_err(|_| StreamError::Msg("consumer cursor: bad length".into()))?,
-            )),
+            Some(b) if b.len() >= 8 => {
+                Ok(u64::from_le_bytes(b[..8].try_into().map_err(|_| {
+                    StreamError::Msg("consumer cursor: bad length".into())
+                })?))
+            }
             Some(_) => Err(StreamError::Msg("consumer cursor: truncated".into())),
         }
     }
@@ -296,10 +296,7 @@ mod tests {
         }
         let mut s = Stream::open(&dir, "events").unwrap();
         let m = s.peek("c1").unwrap().unwrap();
-        assert_eq!(
-            m.data, b"keep",
-            "unacked peek must not skip after reopen"
-        );
+        assert_eq!(m.data, b"keep", "unacked peek must not skip after reopen");
         s.ack("c1", 1).unwrap();
         assert_eq!(s.consumer_seq("c1"), 1);
         let m2 = s.peek("c1").unwrap().unwrap();
@@ -360,5 +357,4 @@ mod tests {
         }
         let _ = std::fs::remove_dir_all(&dir);
     }
-
 }

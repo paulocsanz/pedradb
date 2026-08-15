@@ -40,7 +40,7 @@ fn durable_opts() -> OpenOptions {
         auto_compact_sst_count: None,
         auto_compact_sst_bytes: None,
         exclusive: true,
-                large_value_threshold: None,
+        large_value_threshold: None,
     }
 }
 
@@ -73,8 +73,9 @@ pub fn run_seed_trial(parent: impl AsRef<Path>, seed: u64) -> std::io::Result<Se
     let host = host_for_seed(seed);
     // Advance logical time once so clock seam is exercised (kernel ignores it;
     // layers share the same host shape).
-    host.clock()
-        .advance(std::time::Duration::from_millis(1 + host.rng().gen_range(49)));
+    host.clock().advance(std::time::Duration::from_millis(
+        1 + host.rng().gen_range(49),
+    ));
 
     let open_ok = Db::open_with_host(&dir, opts, &host).is_ok();
     let mut puts_ok = 0u32;

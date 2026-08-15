@@ -50,7 +50,10 @@ fn main() {
         peers.insert(id, bind);
     }
 
-    eprintln!("pedra-raft-node id={id} bind={bind} data={}", data.display());
+    eprintln!(
+        "pedra-raft-node id={id} bind={bind} data={}",
+        data.display()
+    );
     let node = NetworkNode::open(id, data, bind, peers).unwrap_or_else(|e| {
         eprintln!("open failed: {e}");
         process::exit(1);

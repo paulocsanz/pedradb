@@ -145,9 +145,7 @@ fn process_alive(pid: u32) -> bool {
     }
     #[cfg(unix)]
     {
-        let output = Command::new("kill")
-            .args(["-0", &pid.to_string()])
-            .output();
+        let output = Command::new("kill").args(["-0", &pid.to_string()]).output();
         match output {
             Ok(o) if o.status.success() => true,
             Ok(o) => {

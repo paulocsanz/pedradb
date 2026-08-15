@@ -1,0 +1,888 @@
+       FoundationDB: A Distributed Unbundled Transactional Key
+                             Value Store
+                   Jingyu Zhou                                                     Alex Miller                                     Rusty Sears
+                     Meng Xu                                                    Evan Tschannen                                     John Leach
+                 Alexander Shraer                                                Steve Atherton                                   Dave Rosenthal
+                Bala Namasivayam                                               Andrew J. Beamon                                     Xin Dong
+                          Apple Inc.                                                  Snowflake Inc.                                    Apple Inc.
+
+                     Will Wilson                                                     Alec Grieser                               Bhaskar Muppana
+                     Ben Collins                                                      Young Liu                                    Xiaoge Su
+                    David Scherer                                                    Alvin Moore                                 Vishesh Yadav
+                      antithesis.com                                                     Apple Inc.                                     Apple Inc.
+
+Abstract                                                                                        ACM Reference Format:
+                                                                                                Jingyu Zhou, Meng Xu, Alexander Shraer, Bala Namasivayam, Alex Miller,
+FoundationDB is an open source transactional key value store cre-
+                                                                                                Evan Tschannen, Steve Atherton, Andrew J. Beamon, Rusty Sears, John
+ated more than ten years ago. It is one of the first systems to combine                         Leach, Dave Rosenthal, Xin Dong, Will Wilson, Ben Collins, David Scherer,
+the flexibility and scalability of NoSQL architectures with the power                           Alec Grieser, Young Liu, Alvin Moore, Bhaskar Muppana, Xiaoge Su, and Vishesh
+of ACID transactions (a.k.a. NewSQL). FoundationDB adopts an                                    Yadav. 2021. FoundationDB: A Distributed Unbundled Transactional Key
+unbundled architecture that decouples an in-memory transaction                                  Value Store. In Proceedings of the 2021 International Conference on Manage-
+management system, a distributed storage system, and a built-in                                 ment of Data (SIGMOD ’21), June 20–25, 2021, Virtual Event, China. ACM,
+distributed configuration system. Each sub-system can be indepen-                               New York, NY, USA, 14 pages. https://doi.org/10.1145/3448016.3457559
+dently provisioned and configured to achieve the desired scalabil-
+ity, high-availability and fault tolerance properties. FoundationDB
+uniquely integrates a deterministic simulation framework, used to                               1     Introduction
+test every new feature of the system under a myriad of possible                                 Many cloud services rely on scalable, distributed storage backends
+faults. This rigorous testing makes FoundationDB extremely stable                               for persisting application state. Such storage systems must be fault
+and allows developers to introduce and release new features in a                                tolerant and highly available, and at the same time provide suffi-
+rapid cadence. FoundationDB offers a minimal and carefully chosen                               ciently strong semantics and flexible data models to enable rapid
+feature set, which has enabled a range of disparate systems (from                               application development. Such services must scale to billions of
+semi-relational databases, document and object stores, to graph                                 users, petabytes or exabytes of stored data, and millions of requests
+databases and more) to be built as layers on top. FoundationDB is                               per second.
+the underpinning of cloud infrastructure at Apple, Snowflake and                                    More than a decade ago, NoSQL storage systems emerged offer-
+other companies, due to its consistency, robustness and availability                            ing ease of application development, making it simple to scale and
+for storing user data, system metadata and configuration, and other                             operate storage systems, offering fault-tolerance and supporting a
+critical information.                                                                           wide range of data models (instead of the traditional rigid relational
+                                                                                                model). In order to scale, these systems sacrificed transactional
+CCS Concepts
+                                                                                                semantics, and instead provided eventual consistency, forcing ap-
+• Information systems → Key-value stores; Distributed data-                                     plication developers to reason about interleavings of updates from
+base transactions; • Computing methodologies → Distributed                                      concurrent operations. FoundationDB avoids this trade-off by pro-
+simulation.                                                                                     viding serializable transactions while scaling to handle the large
+Keywords                                                                                        workloads these systems target at. In addition to helping applica-
+                                                                                                tions correctly manage data stored as simple key-value pairs, this
+unbundled database, OLTP, strict serializability, multiversion con-                             also enables FoundationDB’s users to implement more advanced
+currency control, optimistic concurrency control, simulation testing                            features, such as consistent secondary indices and referential in-
+                                                                                                tegrity checks [28]. Realizing their importance for building applica-
+Permission to make digital or hard copies of all or part of this work for personal or
+classroom use is granted without fee provided that copies are not made or distributed           tions, many NoSQL systems retrofitted ACID transactions in recent
+for profit or commercial advantage and that copies bear this notice and the full citation       years. For example Apache Cassandra [45], MongoDB [10], Couch-
+on the first page. Copyrights for components of this work owned by others than the              Base [1] and other NoSQL systems now all support some form of
+author(s) must be honored. Abstracting with credit is permitted. To copy otherwise, or
+republish, to post on servers or to redistribute to lists, requires prior specific permission   ACID, accompanied by SQL dialects.
+and/or a fee. Request permissions from permissions@acm.org.                                         FoundationDB (FDB) [5] was created in 2009 and gets its name
+SIGMOD ’21, June 20–25, 2021, Virtual Event, China                                              from the focus on providing what we saw as the foundational set of
+© 2021 Copyright held by the owner/author(s). Publication rights licensed to ACM.
+ACM ISBN 978-1-4503-8343-1/21/06. . . $15.00                                                    building blocks required to build higher-level distributed systems.
+https://doi.org/10.1145/3448016.3457559                                                         It is an ordered, transactional, key-value store natively supporting
+multi-key strictly serializable transactions across its entire key-       strict serializability through a combination of optimistic concur-
+space. Unlike most databases, which bundle together a storage             rency control (OCC) [44] and multi-version concurrency control
+engine, data model, and query language, forcing users to choose all       (MVCC) [18]. Besides a lock-free architecture, one of the features
+three or none, FDB takes a modular approach: it provides a highly         distinguishing FDB from other distributed databases is its approach
+scalable, transactional storage engine with a minimal yet carefully       to handling failures. Unlike most similar systems, FDB does not
+chosen set of features. It provides no structured semantics, no query     rely on quorums to mask failures, but rather tries to eagerly detect
+language, data model or schema management, secondary indices or           and recover from them by reconfiguring the system. This allows us
+many other features one normally finds in a transactional database.       to achieve the same level of fault tolerance with significantly fewer
+Offering these would benefit some applications but others that do         resources: FDB can tolerate 𝑓 failures with only 𝑓 + 1 (rather than
+not require them (or do so in a slightly different form) would need to    2𝑓 + 1) replicas. This approach is best suited for deployments in
+work around. Instead, the NoSQL model leaves application develop-         a local or metro area. For WAN deployments, FDB offers a novel
+ers with great flexibility. While FDB defaults to strictly serializable   strategy that avoids cross-region write latencies while providing
+transactions, it allows relaxing these semantics for applications         automatic failover between regions without losing data.
+that don’t require them with flexible, fine-grained controls over            The contributions of this paper are:
+conflicts.                                                                      • An open source distributed storage system, FoundationDB,
+   One of the reasons for its popularity and growing open source                  combining NoSQL and ACID, used in production at Ap-
+community is FoundationDB’s focus on the “lower half” of a data-                  ple, Snowflake, VMWare and other companies, satisfying
+base, leaving the rest to its “layers”—stateless applications devel-              their stringent scalability, availability, and durability require-
+oped on top to provide various data models and other capabilities.                ments;
+With this, applications that would traditionally require completely             • A carefully chosen feature set that has been used to imple-
+different types of storage systems, can instead all leverage FDB.                 ment a range of widely disparate storage systems;
+Indeed, the wide range of layers that have been built on FDB in                 • An integrated deterministic simulation framework that makes
+recent years are evidence to the usefulness of this unusual design.               FoundationDB one of the most stable systems of its kind;
+For example, the FoundationDB Record Layer [28] adds back much                    and
+of what users expect from a relational database, and JanusGraph [9],            • A unique architecture and approach to transaction process-
+a graph database, provides an implementation as a FoundationDB                    ing, fault tolerance, and high availability.
+layer [8]. In its newest release, CouchDB [2] (arguably the first
+NoSQL system) is being re-built as a layer on top of FoundationDB.           The remainder of this paper is organized as follows. Section 2
+   Testing and debugging distributed systems is at least as hard          details the design of FDB. Section 3 describes geo-replication and
+as building them. Unexpected process and network failures, mes-           failover. Section 4 discusses the deterministic simulation framework.
+sage reorderings, and other sources of non-determinism can expose         Section 5 evaluates the performance of FDB. Section 6 describes
+subtle bugs and implicit assumptions that break in reality, which         our lessons learned from developing FDB. Section 7 summarizes
+are extremely difficult to reproduce or debug. The consequences of        related work and Section 8 concludes the paper.
+such subtle bugs are especially severe for database systems, which        2     Design
+purport to offer perfect fidelity to an unambiguous contract. More-
+over, the stateful nature of a database system means that any such        A production database needs to solve many problems, including
+bug can result in subtle data corruption that may not be discovered       data persistence, data partitioning, load balancing, membership and
+for months. Model checking techniques can verify the correctness          failure detection, failure recovery, replica placement and synchro-
+of distributed protocols, but often fall short of checking the ac-        nization, overload control, scaling, concurrency and job schedul-
+tual implementation. Deep bugs [46], which only happen when               ing, system monitoring and alerting, backup, multi-language client
+multiple crashes or restarts occur in a particular sequence, pose a       library, system upgrade and deployment, and configuration man-
+challenge even for end-to-end testing infrastructure. The develop-        agement. Discussing all these details is not possible, so this paper
+ment of FDB took a radical approach—before building the database          focuses on the architectural design of FDB and its implications on
+itself, we built a deterministic database simulation framework that       transaction management, replication, and fault tolerance.
+can simulate a network of interacting processes and a variety of          2.1     Design Principles
+disk, process, network, and request-level failures and recoveries, all
+within a single physical process. This rigorous testing in simulation     The main design principles of FDB are:
+makes FDB extremely stable, and allows its developers to introduce              • Divide-and-Conquer (or separation of concerns). FDB decou-
+new features and releases in a rapid cadence. This is unusual not                 ples the transaction management system (write path) from
+only for distributed databases, but even for centralized systems.                 the distributed storage (read path) and scales them inde-
+   FDB adopts an unbundled architecture [50] that comprises a con-                pendently. Within the transaction management system, pro-
+trol plane and a data plane. The control plane manages the metadata               cesses are assigned various roles representing different as-
+of the cluster and uses Active Disk Paxos [27] for high availability.             pects of transaction management, including timestamp man-
+The data plane consists of a transaction management system, re-                   agement, accepting commits, conflict detection, and logging.
+sponsible for processing updates, and a distributed storage layer                 Furthermore, cluster-wide orchestrating tasks, such as over-
+serving reads; both can be independently scaled out. FDB achieves                 load control, load balancing, and failure recovery are also
+                                                                                  divided and serviced by additional heterogeneous roles.
+      • Make failure a common case. For distributed systems, failure                                                  Control Plane
+        is a norm rather than an exception. In the transaction man-                                        Coordinators    Cluster      Data        Rate
+                                                                                                                          Controller Distributor   keeper
+        agement system of FDB, we handle all failures through the
+                                                                                                               …
+        recovery path: instead of fixing all possible failure scenar-
+        ios, the transaction system proactively shuts down when it
+        detects a failure. As a result, all failure handling is reduced
+                                                                                                                          Data Plane
+        to a single recovery operation, which becomes a common
+        and well-tested code path. Such error handling strategy is                                              Transaction System (TS)
+                                                                                                                                          Sequencer
+        desirable as long as the recovery is quick, and pays dividends                                                         1.1
+        by simplifying the normal transaction processing.                        Client Transaction             Proxies        3.1
+
+      • Fail fast and recover fast. To improve availability, FDB strives                              1                       3.2         Resolvers
+                                                                                   Get Read Version
+        to minimize Mean-Time-To-Recovery (MTTR), which in-
+        cludes the time to detect a failure, proactively shut down the                  Reads         3         3.3
+        transaction management system, and recover. In our produc-
+        tion clusters, the total time is usually less than five seconds
+                                                                                        Writes
+                                                                                                                      Log System (LS)
+        (see Section 5.3).                                                             Commit         2                                  LogServers
+      • Simulation testing. FDB relies on a randomized, deterministic
+        simulation framework for testing the correctness of its dis-
+        tributed database. Because simulation tests are both efficient                                             Storage System (SS)
+        and repeatable, they not only expose deep bugs [46], but also
+                                                                                Transaction RPCs
+        boost developer productivity and the code quality of FDB.
+                                                                                Async. data copy                           StorageServers
+2.2     System Interface
+FDB exposes operations to read and modify single keys as well
+                                                                              Figure 1: The architecture and the transaction processing of
+as ranges of keys. The get() and set() operations read and write a
+                                                                              FDB.
+single key-value pair, respectively. For ranges, 𝑔𝑒𝑡𝑅𝑎𝑛𝑔𝑒 () returns
+a sorted list of keys and their values within the given range; and
+𝑐𝑙𝑒𝑎𝑟 () deletes all keys-value pairs whithin a range or starting with
+a certain key prefix.                                                         2.3.2 Data Plane FDB targets OLTP workloads that are read-mostly,
+   An FDB transaction observes and modifies a snapshot of the                 read and write a small set of keys, have low contention, and re-
+database at a certain version and changes are applied to the under-           quire scalability. FDB chooses an unbundled architecture [50]: a dis-
+lying database only when the transaction commits. A transaction’s             tributed transaction management system (TS) performs in-memory
+writes (i.e., set() and clear() calls) are buffered by the FDB client until   transaction processing, a log system (LS) stores Write-Ahead-Log
+the final commit() call, and read-your-write semantics are preserved          (WAL) for TS, and a separate distributed storage system (SS) is used
+by combining results from database look-ups with uncommitted                  for storing data and servicing reads. The TS provides transaction
+writes of the transaction. Key and value sizes are limited to 10 KB           processing and consists of a Sequencer, Proxies, and Resolvers,
+and 100 KB respectively for better performance. Transaction size is           all of which are stateless processes. The LS contains a set of Log-
+limited to 10 MB, including the size of all written keys and values           Servers and the SS has a number of StorageServers. This scales
+as well as the size of all keys in read or write conflict ranges that         well to Apple’s largest transactional workloads [28].
+are explicitly specified.                                                         The Sequencer assigns a read version and a commit version to
+                                                                              each transaction and, for historical reasons, also recruits Proxies,
+2.3     Architecture                                                          Resolvers, and LogServers. Proxies offer MVCC read versions
+An FDB cluster has a control plane for managing critical system               to clients and orchestrate transaction commits. Resolvers check
+metadata and cluster-wide orchestration, and a data plane for trans-          for conflicts between transactions. LogServers act as replicated,
+action processing and data storage, as illustrated in Figure 1.               sharded, distributed persistent queues, where each queue stores
+                                                                              WAL data for a StorageServer.
+2.3.1 Control Plane The control plane is responsible for persist-
+                                                                                  The SS consists of a number of StorageServers for serving
+ing critical system metadata, i.e., the configuration of transac-
+                                                                              client reads, where each StorageServer stores a set of data shards,
+tion systems, on Coordinators. These Coordinators form a disk
+                                                                              i.e., contiguous key ranges. StorageServers are the majority of
+Paxos group [27] and select a singleton ClusterController. The
+                                                                              processes in the system, and together they form a distributed B-tree.
+ClusterController monitors all servers in the cluster and re-
+                                                                              Currently, the storage engine on each StorageServer is a modified
+cruits three singleton processes, Sequencer, DataDistributor,
+                                                                              version of SQLite [41], with enhancements that make range clears
+and Ratekeeper, which are re-recruited if they fail or crash. The
+                                                                              faster, defer deletion to a background task, and add support for
+Sequencer assigns read and commit versions to transactions. The
+                                                                              asynchronous programming.
+DataDistributor is responsible for monitoring failures and balanc-
+ing data among StorageServers. Ratekeeper provides overload                   2.3.3 Read-Write Separation and Scaling FDB’s design is decou-
+protection for the cluster.                                                   pled; processes are assigned different roles (e.g., Coordinators,
+StorageServers, Sequencer), and the database scales by expand-            transaction cannot commit, the client may choose to restart the
+ing the number of processes for each role. This separates the scaling     transaction from the beginning again.
+of client reads from client writes (i.e., transaction commits). Because      A Proxy commits a client transaction in three steps. First, the
+clients directly issue reads to sharded StorageServers, reads scale       Proxy contacts the Sequencer to obtain a commit version that is
+linearly with the number of StorageServers. Similarly, writes are         larger than any existing read versions or commit versions. The
+scaled by adding more processes to Proxies, Resolvers, and Log-           Sequencer chooses the commit version by advancing it at a rate of
+Servers in TS and LS. For this reason, MVCC data is stored in the         one million versions per second. Then, the Proxy sends the transac-
+SS, which is different from Deuteronomy [48, 51] that stores the          tion information to range-partitioned Resolvers, which implement
+MVCC data in TS. The singletons (e.g., ClusterController and              FDB’s optimistic concurrency control by checking for read-write
+Sequencer) and Coordinators on the control plane are not per-             conflicts. If all Resolvers return with no conflict, the transaction
+formance bottlenecks, because they only perform limited metadata          can proceed to the final commit stage. Otherwise, the Proxy marks
+operations.                                                               the transaction as aborted. Finally, committed transactions are sent
+                                                                          to a set of LogServers for persistence. A transaction is consid-
+2.3.4 Bootstrapping FDB has no external dependency on other               ered committed after all designated LogServers have replied to the
+services. All user data and most of the system metadata (keys             Proxy, which reports the committed version to the Sequencer (to
+that start with 0xFF prefix) are stored in StorageServers. The            ensure that later transactions’ read versions are after this commit)
+metadata about StorageServers is persisted in LogServers, and             and then replies to the client. At the same time, StorageServers
+the configuration of LS (i.e., information about LogServers) is           continuously pull mutation logs from LogServers and apply com-
+stored in all Coordinators. Using Coordinators as a disk Paxos            mitted updates to disks.
+group, servers attempt to become the ClusterController if one                In addition to the above read-write transactions, FDB also sup-
+does not exist. The newly elected ClusterController recruits a            ports read-only transactions and snapshot reads. A read-only trans-
+new Sequencer, which reads the configuration of old LS stored             action in FDB is both serializable (happens at the read version) and
+in Coordinators and spawns a new TS and LS. From the old LS,              performant (thanks to the MVCC), and the client can commit these
+Proxies recover system metadata, including information about all          transactions locally without contacting the database. This is partic-
+StorageServers. The Sequencer waits until the new TS finishes             ularly important because the majority of transactions are read-only.
+recovery (see Section 2.4.4), and then writes the new LS configura-       Snapshot reads in FDB selectively relax the isolation property of
+tion to all Coordinators. At this time, the new transaction system        a transaction by reducing conflicts, i.e., concurrent writes will not
+becomes ready to accept client transactions.                              conflict with snapshot reads.
+2.3.5 Reconfiguration Whenever there is a failure in the TS or
+LS, or a database configuration change, a reconfiguration process         2.4.2 Support Strict Serializability FDB implements Serializable
+brings the transaction management system to a new configuration,          Snapshot Isolation (SSI) by combining OCC with MVCC. Recall
+i.e., a clean state. Specifically, the Sequencer process monitors the     that a transaction 𝑇𝑥 gets both its read version and commit version
+health of Proxies, Resolvers, and LogServers. If any one of the           from Sequencer, where the read version is guaranteed to be no less
+monitored processes fails or the database configuration changes,          than any committed version when 𝑇𝑥 starts and the commit version
+the Sequencer process terminates. The ClusterController will              is larger than any existing read or commit versions. This commit
+detect the Sequencer failure event, then recruit a new Sequencer,         version defines a serial history for transactions and serves as Log
+which follows the above bootstrapping process to spawn the new TS         Sequence Number (LSN). Because 𝑇𝑥 observes the results of all
+and LS instance. In this way, transaction processing is divided into      previous committed transactions, FDB achieves strict serializability.
+epochs, where each epoch represents a generation of the transaction       To ensure there is no gaps between LSNs, the Sequencer returns the
+management system with its unique Sequencer process.                      previous commit version (i.e., previous LSN) with commit version.
+                                                                          A Proxy sends both LSN and previous LSN to Resolvers and Log-
+2.4    Transaction Management                                             Servers so that they can serially process transactions in the order
+In the following, we first describe the end-to-end transaction pro-       of LSNs. Similarly, StorageServers pull log data from LogServers
+cessing and strict serializability, then discuss transaction logging      in increasing LSNs as well.
+and recovery.                                                                 Algorithm 1 illustrates the lock-free conflict detection algorithm
+                                                                          on Resolvers. Specifically, each Resolver maintains a history
+2.4.1 End-to-end Transaction Processing As illustrated in Figure 1, a     𝑙𝑎𝑠𝑡𝐶𝑜𝑚𝑚𝑖𝑡 of recently modified key ranges by committed trans-
+client transaction starts by contacting one of the Proxies to obtain      actions, and their corresponding commit versions. The commit
+a read version (i.e., a timestamp). The Proxy then asks the Se-           request for 𝑇𝑥 comprises two sets: a set of modified key ranges 𝑅𝑤 ,
+quencer for a read version that is guaranteed to be no less than any      and a set of read key ranges 𝑅𝑟 , where a single key is converted
+previously issued transaction commit version, and this read version       to a single key range. The read set is checked against the modi-
+is sent back to the client. Then the client may issue multiple reads      fied key ranges of concurrent committed transactions (line 1—5),
+to StorageServers and obtain values at that specific read version.        which prevents phantom reads. If there are no read-write conflicts,
+Client writes are buffered locally without contacting the cluster.        Resolvers admit the transaction for commit and update the list
+At commit time, the client sends the transaction data, including          of modified key ranges with the write set (line 6—7). For snapshot
+the read and write sets (i.e., key ranges), to one of the Proxies         reads, they are not included in the set 𝑅𝑟 . In practice, 𝑙𝑎𝑠𝑡𝐶𝑜𝑚𝑚𝑖𝑡
+and waits for a commit or abort response from the Proxy. If the           is represented as a version-augmented probabilistic SkipList [56].
+   Unlike write-snapshot isolation [68], which assigns the times-                                                Client
+tamp after checking 𝑅𝑟 , FDB decides the commit version before the                                             set 'a' = 'b'
+
+conflict detection. This allows FDB to efficiently batch-process both
+version assignments and conflict detection. Our micro-benchmark
+                                                                             Shard Map                             Proxy
+shows that one single-threaded Resolver can easily handle 280K                                                                 Common Header
+TPS (each transaction reads a random key range and writes another            Keys 'a' - 'f': SS 1,4,6                          LSN:                     7
+random key range).                                                                                                             Previous LSN:            5
+                                                                                                                               Known Committed Version: 3
+
+                                                                                               set 'a' = 'b'                       set 'a' = 'b'   set 'a' = 'b'
+ Algorithm 1: Check conflicts for transaction 𝑇𝑥 .                            [ no data ]                       [ no data ]
+                                                                                               tag: 1,4,6                          tag: 1,4,6      tag: 1,4,6
+  Require :𝑙𝑎𝑠𝑡𝐶𝑜𝑚𝑚𝑖𝑡: a map of key range → last commit
+             version                                                         LogServer 0      LogServer 1      LogServer 2        LogServer 3      LogServer 4
+
+1 for each 𝑟𝑎𝑛𝑔𝑒 ∈ 𝑅𝑟 do
+2     𝑟𝑎𝑛𝑔𝑒𝑠 = 𝑙𝑎𝑠𝑡𝐶𝑜𝑚𝑚𝑖𝑡 .𝑖𝑛𝑡𝑒𝑟𝑠𝑒𝑐𝑡 (𝑟𝑎𝑛𝑔𝑒)                                 SS 0    SS 5     SS 1      SS 6   SS 2     SS 7      SS 3     SS 8    SS 4    SS 9
+
+3     for each 𝑟 ∈ 𝑟𝑎𝑛𝑔𝑒𝑠 do
+4         if 𝑙𝑎𝑠𝑡𝐶𝑜𝑚𝑚𝑖𝑡 [𝑟 ] > 𝑇𝑥 .𝑟𝑒𝑎𝑑𝑉 𝑒𝑟𝑠𝑖𝑜𝑛 then                     Figure 2: Proxy writes a client mutation to LogServers after
+5              return abort;                                             sequencing and resolution. Later, the mutation will be asyn-
+                                                                         chronously replicated to StorageServers.
+    // commit path
+6   for each 𝑟𝑎𝑛𝑔𝑒 ∈ 𝑅𝑤 do
+7       𝑙𝑎𝑠𝑡𝐶𝑜𝑚𝑚𝑖𝑡 [𝑟𝑎𝑛𝑔𝑒] = 𝑇𝑥 .𝑐𝑜𝑚𝑚𝑖𝑡𝑉 𝑒𝑟𝑠𝑖𝑜𝑛;                         obtained from the Sequencer, as well as the known committed
+8   return commit;                                                       version (KCV) of this Proxy. LogServers reply to the Proxy once
+                                                                         the log data is made durable, and the Proxy updates its KCV to the
+                                                                         LSN if all replica LogServers have replied and this LSN is larger
+    The entire key space is divided among Resolvers so that the          than the current KCV.
+above read-write conflict detection algorithm may be performed in           Shipping the redo log from the LS to the SS is not a part of
+parallel. A transaction can commit only when all Resolvers admit         the commit path and is performed in the background. In FDB,
+the transaction. Otherwise, the transaction is aborted. It is possible   StorageServers aggressively fetch redo logs from LogServers
+that an aborted transaction is admitted by a subset of Resolvers,        before they are durable on the LS, allowing very low latency for
+and they have already updated their history of 𝑙𝑎𝑠𝑡𝐶𝑜𝑚𝑚𝑖𝑡, which         serving multi-version reads. Figure 3 shows the time lag between
+may cause other transactions to conflict (i.e., a false positive). In    StorageServers and LogServers in one of our production clusters
+practice, this has not been an issue for our production workloads,       for a 12-hour period, where the 99.9 percentile of the average and
+because transactions’ key ranges usually fall into one Resolver.         maximum delay is 3.96 ms and 208.6 ms, respectively. Because this
+Additionally, because the modified keys expire after the MVCC            lag is small, when client read requests reach StorageServers, the
+window, the false positives are limited to only happen within the        requested version (i.e., the latest committed data) is usually already
+short MVCC window time (i.e., 5 seconds). Finally, the key ranges        available. If due to a small delay the data is not available to read
+of Resolvers are dynamically adjusted to balance their loads.            at a StorageServer replica, the client either waits for the data to
+    The OCC design of FDB avoids the complicated logic of acquiring      become available or issues a second request to another replica [32].
+and releasing (logical) locks, which greatly simplifies interactions     If both reads timed out, the client gets a retryable error to restart
+between the TS and the SS. The price paid for this simplification        the transaction.
+is to keep the recent commit history in Resolvers. Another draw-            Because the log data is already durable on LogServers, Storage-
+back is not guaranteeing that transactions will commit, a challenge      Servers can buffer updates in memory and only persist batches
+for OCC. Because of the nature of our multi-tenant production            of data to disks with a longer delay, thus improving I/O efficiency
+workload, the transaction conflict rate is very low (less than 1%)       by coalescing the updates. Aggressively pulling redo logs from
+and OCC works well. If a conflict happens, the client can simply         LogServers means that semi-committed updates, i.e., operations
+restart the transaction.                                                 in transactions that are aborted during recovery (e.g., due to Log-
+                                                                         Server failure), need to be rolled back (see Section 2.4.4).
+2.4.3 Logging Protocol After a Proxy decides to commit a transac-
+tion, the log message is broadcast to all LogServers. As illustrated     2.4.4 Transaction System Recovery Traditional database systems
+in Figure 2, the Proxy first consults its in-memory shard map to         often employ the ARIES recovery protocol [53], which depends on
+determine the StorageServers responsible for the modified key            a write-ahead log (WAL) and periodic, coarse-grained checkpoints.
+range. Then the Proxy attaches StorageServer tags 1, 4, and 6 to         During the recovery, the system processes redo log records from
+the mutation, where each tag has a preferred LogServer for storage.      the last checkpoint by re-applying them to the relevant data pages.
+In this example, tags 1 and 6 have the same preferred LogServer.         This will bring the database to a consistent state at the point of
+Note the mutation is only sent to the preferred LogServers (1            failure and in-flight transactions during the crash can be rolled back
+and 4) and an additional LogServer 3 to meet the replication re-         by executing the undo log records.
+quirements. All other LogServers receive an empty message body.             In FDB, the recovery is purposely made very cheap—there is
+The log message header includes both LSN and the previous LSN            no checkpoint, and no need to re-apply redo or undo log during
+                                                                                                                          Proxies
+
+                                                                                                                P1        P2   …      Pn
+                                                                                                                                                  Lm         KCVm          DVm
+
+                                 −1                                                                        (LSNa, KCVa)        (LSNb, KCVb)       …
+                            10
+
+
+
+
+   Storage Server Lag (s)
+                                                                                                                                                  L2               KCV2              DV2
+
+                                                                                                                                                  L1        KCV1               DV1
+                                                                                                          L1         L2        …        Lm
+                                                                                                                                                                      PEV RV
+                                                                                                                      LogServers                                                      Version
+                            10−2                                        Max storage lag
+                                                                        Average Storage Lag
+                                                                                                       Figure 4: An illustration of RV and PEV. On the left, a Proxy
+                                                                                                       sends redo logs to LogServers with a 𝐾𝐶𝑉 and the 𝐿𝑆𝑁 , and
+                                      08-13 02 08-13 04 08-13 06 08-13 08 08-13 10 08-13 12 08-13 14
+                                                                                                       LogServers keep the maximum 𝐾𝐶𝑉 received. On the right,
+                                                            Time of Day
+                                                                                                       recovery uses the maximum of 𝐾𝐶𝑉 s and the minimum of
+                                                                                                       𝐷𝑉 s on a set of LogServers as 𝑃𝐸𝑉 and 𝑅𝑉 , respectively.
+   Figure 3: The lag from StorageServers to LogServers.
+
+
+                                                                                                       each response contains the DV and KCV on that LogServer. As-
+recovery. This is possible because of a great simplifying principle of                                 sume the replication degree for LogServers is 𝑘. Once the Se-
+traditional databases: the redo log processing is the same as normal                                   quencer has received more than 𝑚 − 𝑘 replies 1 , the Sequencer
+log forward path. In FDB, StorageServers always pull logs from                                         knows the previous epoch has committed transactions up to the
+LogServers and apply them in the background, which essentially                                         maximum of all KCVs, which becomes the previous epoch’s end
+decouples redo log processing from the recovery. The recovery                                          version (PEV). All data before this version has been fully replicated.
+process starts by detecting a failure, recruits a new transaction                                      For current epoch, its start version is 𝑃𝐸𝑉 + 1 and the Sequencer
+system, and ends when old LogServers are no longer needed. The                                         chooses the minimum of all DVs to be the RV. Logs in the range
+new transaction system can even accept transactions before all the                                     of [𝑃𝐸𝑉 + 1, 𝑅𝑉 ] are copied from previous epoch’s LogServers
+data on old LogServers is processed, because the recovery only                                         to the current ones, for healing the replication degree in case of
+needs to find out the end of redo log and re-applying the log is                                       LogServer failures. The overhead of copying this range is very
+performed asynchronously by StorageServers.                                                            small because it only contains a few seconds’ log data.
+    For each epoch, the Sequencer executes recovery in several steps.                                     When Sequencer accepts new transactions, the first is a spe-
+First, the Sequencer reads the previous transaction system states                                      cial recovery transaction that informs StorageServers the RV so
+(i.e. configurations of the transaction system) from Coordinators                                      that they can roll back any data larger than RV. The current FDB
+and locks the coordinated states to prevent another Sequencer pro-                                     storage engine consists of an unversioned SQLite [41] B-tree and
+cess from recovering at the same time. Then the Sequencer recov-                                       in-memory multi-versioned redo log data. Only mutations leaving
+ers previous transaction system states, including the information                                      the MVCC window (i.e., committed data) are written to SQLite. The
+about all older LogServers, stops these LogServers from accept-                                        rollback is simply discarding in-memory multi-versioned data in
+ing transactions, and recruits a new set of Proxies, Resolvers,                                        StorageServers. Then StorageServers pull any data larger than
+and LogServers. After previous LogServers are stopped and a                                            version 𝑃𝐸𝑉 from new LogServers.
+new transaction system is recruited, the Sequencer then writes                                         2.5       Replication
+the coordinated states with current transaction system information.
+Finally, the Sequencer accepts new transaction commits.                                                FDB uses a combination of various replication strategies for differ-
+    Because Proxies and Resolvers are stateless, their recoveries                                      ent data to tolerate 𝑓 failures:
+have no extra work. In contrast, LogServers save the logs of com-                                              • Metadata replication. System metadata of the control plane
+mitted transactions, and we need to ensure all previously committed                                              is stored on Coordinators using Active Disk Paxos [27]. As
+transactions are durable and retrievable by StorageServers. That                                                 long as a quorum (i.e., majority) of Coordinators are live,
+is, for any transactions that the Proxies may have sent back a                                                   this metadata can be recovered.
+commit response, their logs are persisted in multiple LogServers                                               • Log replication. When a Proxy writes logs to LogServers,
+satisfying the configured replication degree.                                                                    each sharded log record is synchronously replicated on 𝑘 =
+    The essence of the recovery of old LogServers is to determine                                                𝑓 +1 LogServers. Only when all 𝑘 have replied with success-
+the end of redo log, i.e., a Recovery Version (RV). Rolling back undo                                            ful persistence can the Proxy send back the commit response
+log is essentially discarding any data after RV in the old LogServers                                            to the client. Failure of a LogServer results in a transaction
+and StorageServers. Figure 4 illustrates how RV is determined by                                                 system recovery (see Section 2.4.4).
+the Sequencer. Recall that a Proxy request to LogServers piggy-                                                • Storage replication. Every shard, i.e., a key range, is asyn-
+backs its KCV, the maximum LSN that this Proxy has committed.                                                    chronously replicated to 𝑘 = 𝑓 + 1 StorageServers, which
+Each LogServer keeps the maximum KCV received and a Durable
+Version (DV), which is the maximum persisted LSN. During a recov-                                      1 This 𝑚 − 𝑘 can be reduced to 𝑚/𝑘 by organizing LogServers into Copysets [29],
+ery, the Sequencer attempts to stop all 𝑚 old LogServers, where                                        i.e., one from each set, thus increasing fault tolerance.
+      is called a team. A StorageServer usually hosts a num-            In the FDB Record Layer [28], many aggregate indexes are main-
+      ber of shards so that its data is evenly distributed across       tained using atomic mutations, allowing concurrent, conflict-free
+      many teams. A failure of a StorageServer triggers Data-           updates, and the set-versionstamp operation is used to maintain
+      Distributor to move data from teams containing the failed         low-contention synchronization indices.
+      process to other healthy teams.
+                                                                        3    Geo-replication and failover
+   Note the storage team abstraction is more sophisticated than the
+                                                                                      Primary Region 1                          Standby Region 2
+Copyset policy [29]. Copyset reduces the chance of data loss during
+simultaneous process failures by assigning shards to a limited num-                                                    LogRouters
+ber of possible 𝑘-process groups. Otherwise, any 𝑘-process failure               TS                                      …
+can cause a higher probability of data loss. In our deployment, teams
+                                                                                 LS             LS            LS           LS
+need to consider multiple dimensions: each replica group needs to
+satisfy several constraints at the same time. For instance, a cluster            SS                                        SS
+can have a number of hosts and each host runs multiple processes.
+In this case, a failure can happen at the host level, affecting many            DC1          Satellite1   Satellite2      DC2          Satellite3   Satellite4
+
+processes. Thus, a replica group cannot place two processes on the
+same host. More generally, the placement needs to ensure at most        Figure 5: A two-region replication setup for an FDB cluster.
+one process in a replica group can be placed in a fault domain, e.g.,   Both regions have a data center and two satellite sites.
+racks or availability zones in a cloud environment.
+   To solve the above problem, we designed a hierarchical replica-         The main challenge of providing high availability during region
+tion policy to reduce the chance of data loss during simultaneous       failures is the trade-off of performance and consistency [12]. Syn-
+failures. Specifically, we construct the replica set at both host and   chronous cross-region replication provides strong consistency, but
+process levels and ensure that each process group belongs to a host     pays the cost of high latency. Conversely, asynchronous replication
+group that satisfies the fault domain requirement. This policy has      reduces latency by only persisting in the primary region, but may
+the benefits that data loss can only happen when all hosts in a se-     lose data when performing a region failover. FDB can be configured
+lected host group fail simultaneously; that is, when we experience      to perform either synchronous or asynchronous cross-region repli-
+concurrent failures in multiple fault domains. Otherwise, each team     cation. However, there is a third possibility that leverages multiple
+is guaranteed to have at least one process live and there is no data    availability zones within the same region, and provides a high level
+loss if any one of the fault domains remains available.                 of failure independence, notwithstanding the unlikely event of a
+                                                                        complete region outage. Our design (1) always avoids cross-region
+2.6    Other Optimizations                                              write latencies, as for asynchronous replication, (2) provides full
+                                                                        transaction durability, like synchronous replication, so long as there
+Transaction batching. To amortize the cost of committing transac-       is no simultaneous failure of multiple availability zones in a region,
+tions, the Proxy groups multiple transactions received from clients     (3) can do rapid and completely automatic failover between regions,
+into one batch, asks for a single commit version from the Sequencer,    (4) can be manually failed-over with the same guarantees as asyn-
+and sends the batch to Resolvers for conflict detection. The Proxy      chronous replication (providing A, C, and I of ACID but potentially
+then writes committed transactions in the batch to LogServers.          exhibiting a Durability failure) in the unlikely case of a simultane-
+The transaction batching reduces the number of calls to obtain a        ous total region failure, and (5) only requires full replicas of the
+commit version from the Sequencer, allowing Proxies to commit           database in the primary and secondary regions’ main availability
+tens of thousands of transactions per second without significantly      zones, not multiple replicas per region. The rest of this section is
+impacting the Sequencer’s performance. Additionally, the batch-         dedicated to this design.
+ing degree is adjusted dynamically, shrinking when the system is           Figure 5 illustrates the layout of a two-region replication of a
+lightly loaded to improve commit latency, and increasing when the       cluster. Both regions have a data center (DC) as well as one or
+system is busy in order to sustain high commit throughput.              more satellite sites. Satellites are located in close proximity to the
+   Atomic operations. FDB supports atomic operations such as            DC (in the same region) but are failure independent. The resource
+atomic add, bitwise “and” operation, compare-and-clear, and set-        requirements from satellites are insignificant as they only need to
+versionstamp. These atomic operations enable a transaction to write     store log replicas (i.e., a suffix of the redo logs), while data centers
+a data item without reading its value, saving a round-trip time to      host LS, SS, and (when primary) the TS. Control plane replicas (i.e.,
+the StorageServers. Atomic operations also eliminate read-write         coordinators) are deployed across three or more failure domains
+conflicts with other atomic operations on the same data item (only      (in some deployments utilizing an additional region), usually with
+write-read conflicts can still happen). This makes atomic operations    at least 9 replicas. Relying on majority quorums allows the con-
+ideal for operating on keys that are frequently modified, such as a     trol plane to tolerate one site (data center/satellite) failure and an
+key-value pair used as a counter. The set-versionstamp operation        additional replica failure.
+is another interesting optimization, which sets part of the key or         A typical deployment configuration is illustrated in Figure 5,
+part of the value to be the transaction’s commit version. This en-      depicting two regions with a data center and two satellites in each
+ables client applications to later read back the commit version and     region. One of the data centers (DC1), configured with a higher
+has been used to improve the performance of client-side caching.        priority compared to DC2, is designated as the primary (its region
+is denoted as the primary region, accordingly) and contains the               from primary satellites, which, due to the asynchronous replication,
+full TS, LS, and SS; DC2 in the secondary region has replicas of              may not have made it to DC2 prior to the failover. After the recovery,
+data with its own LS and SS. Reads can be served from storage                 if the failures in Region 1 are healed and its replication policy can
+replicas at both primary and secondary data centers (consistent               again be met, the cluster will automatically fail-back to have DC1
+reads do require obtaining a read version from the primary data               as the primary data center due to its higher priority. Alternatively,
+center). All client writes are forwarded to the primary region and            a different secondary region can be recruited.
+processed by Proxies in DC1, then synchronously persisted onto
+LogServers in DC1 and one or both satellite sites in the primary
+                                                                              4   Simulation Testing
+region (depending on the configuration), avoiding the cross-region
+WAN latency. The updates are then asynchronously replicated to
+DC2, where they are stored on multiple LS servers and eventually
+spread out to multiple StorageServers. LogRouters implement a
+special type of FDB role that facilitates cross-region data transfer.
+They were created to avoid redundant cross-region transfers of
+the same information. Instead, LogRouters transfer each log entry
+across WAN only once, and then deliver it to all relevant LS servers
+locally in DC2.
+    The cluster automatically fails-over to the secondary region if the
+primary data center becomes unavailable. Satellite failures could, in
+some cases, also result in a fail-over, but this decision is currently                 Figure 6: The FDB deterministic simulator.
+manual. When the fail-over happens, DC2 might not have a suffix of
+the log, which it proceeds to recover from the remaining log server              Testing and debugging distributed systems is a challenging and
+in the primary region. Next, we discuss several alternative satellite         inefficient process. This problem is particularly acute for FDB,
+configurations which provide different levels of fault-tolerance.             which offers a very strong concurrency control contract, any fail-
+    Satellite configuration can be specified per region. Each satellite       ure of which can produce almost arbitrary corruption in systems
+is given a static priority, which is considered relatively to other           layered on top. Accordingly, an ambitious approach to end-to-end
+satellites in the same region. FDB is usually configured to store             testing was adopted from the beginning of FDB ’s development: the
+multiple log replicas at each location. Three main alternatives are           real database software is run, together with randomized synthetic
+supported: (1) synchronously storing updates on all log replicas at           workloads and fault injection, in a deterministic discrete-event sim-
+the satellite with the highest priority in the region. In this case, if       ulation. The harsh simulated environment quickly provokes bugs
+the satellite fails, another satellite with the next priority is recruited    (including but not limited to distributed systems bugs) in the data-
+for the task, (2) synchronously storing updates on all replicas of two        base, and determinism guarantees that every bug found this way
+satellites with the highest priorities in the region. In this case, if a      can be reproduced, diagnosed, and fixed.
+satellite fails, it can be similarly replaced with a different satellite of      Deterministic simulator. FDB was built from the ground up to
+lower priority, or, if none available, fall back to option (1) of using a     make this testing approach possible. All database code is determin-
+single satellite. In either case, the secondary region isn’t impacted,        istic; accordingly multithreaded concurrency is avoided (instead,
+as it can continue to pull updates from remaining LogServers in               one database node is deployed per core). Figure 6 illustrates the
+the primary region. Finally, option (3) is similar to option (2) but          simulator process of FDB, where all sources of nondeterminism
+FDB only waits for one of the two satellites to make the mutations            and communication are abstracted, including network, disk, time,
+durable before considering a commit successful. In all cases, if no           and pseudo random number generator. FDB is written in Flow [4],
+satellites are available, only the LogServers in DC1 are used. With           a novel syntactic extension to C++ adding async/await-like concur-
+option 1 and 3, a single site (data center or satellite) failure can be       rency primitives. Flow provides the Actor programming model [13]
+tolerated, in addition to one or more LogServer failures (since the           that abstracts various actions of the FDB server process into a
+remaining locations have multiple log replicas). With option 2, two           number of actors that are scheduled by the Flow runtime library.
+site failures in addition to one or more LogServer failures can be            The simulator process is able to spawn multiple FDB servers that
+tolerated. In options 1 and 2, however, commit latency is sensitive           communicate with each other through a simulated network in a
+to the tail network latencies between the primary data center and             single discrete-event simulation. The production implementation
+its satellites, which means that option 3 is usually faster. The choice       is a simple shim to the relevant system calls.
+ultimately depends on the number of available satellite locations,               The simulator runs multiple workloads (also written in Flow) that
+their connectivity to the data center and the desired level of fault          communicate with simulated FDB servers through the simulated
+tolerance and availability.                                                   network. These workloads include fault injection instructions, mock
+    When DC1 in the primary region suddenly becomes unavailable,              applications, database configuration changes, and direct internal
+the cluster (with the help of Coordinators) detects the failure and           database functionality invocations. Workloads are composable to
+starts a new transaction management system in DC2. New Log-                   exercise various features and are reused to construct comprehensive
+Servers are recruited from satellites in the secondary region, in             test cases.
+accordance with the region’s replication policy. During recovery,                Test oracles. FDB uses a variety of test oracles to detect failures
+LogRouters in DC2 may need to fetch the last few seconds’ data                in simulation. Most of the synthetic workloads used in simulation
+have assertions built in to verify the contracts and properties of the
+                                                                                                       107
+                                                                                                                                                              103
+database (for example, by checking invariants in their data that can                                                    Writes
+
+
+
+                                                                                                                                     Client latencies in ms
+                                                                                                                        Reads
+
+
+                                                                               Operations per second
+only be maintained through transaction atomicity and isolation).                                                        Keys read
+                                                                                                                                                              102
+Assertions are used throughout the code-base to check properties                                       106
+
+
+                                                                                    (log scale)                                            (log scale)
+that can be verified “locally”. Properties like recoverability (eventual                                                                                      101              Avg. Reads
+                                                                                                                                                                               99.9
+availability) can be checked by returning the modeled hardware                                                                                                                 Avg. Commits
+                                                                                                                                                                               99.9
+
+environment (after a set of failures perhaps sufficient to break                                                                                              100
+                                                                                                       105
+                                                                                                                                                                    Timeline
+the database’s availability) to a state in which recovery should be                                          Timeline
+
+possible and verifying that the cluster eventually recovers.                       (a) Read and write operations.                   (b) The average and 99.9-percentile la-
+    Fault injection. The FDB simulator injects machine, rack, and                                                                   tency of client read and commit re-
+data-center level fail-stop failures and reboots, a variety of network                                                              quests.
+faults, partitions, and latency problems, disk behavior (e.g. the
+corruption of unsynchronized writes when machines reboot), and             Figure 7: Measurement from a production cluster for a
+randomizes event times. This variety of fault injection both tests the     month (hourly plots).
+database’s resilience to specific faults and increases the diversity
+of states in simulation. Fault injection distributions are carefully
+tuned to avoid driving the system into a small state-space caused          exceptionally rare bugs that have thus far eluded the testing process.
+by an excessive fault rate.                                                Since the search space is effectively infinite, simply running more
+    FDB itself cooperates with the simulation in making rare states        tests results in more code being covered and more potential bugs
+and events more common, through a high-level fault injection tech-         being found, in contrast to scripted functional or system testing.
+nique informally referred to as “buggification”. At many places in            Limitations. Simulation is not able to reliably detect perfor-
+its code-base, the simulation is given the opportunity to inject some      mance issues, such as an imperfect load balancing algorithm. It is
+unusual (but not contract-breaking) behavior such as unnecessarily         also unable to test third-party libraries or dependencies, or even
+returning an error from an operation that usually succeeds, inject-        first-party code not implemented in Flow. As a consequence, we
+ing a delay in an operation that is usually fast, choosing an unusual      have largely avoided taking dependencies on external systems. Fi-
+value for a tuning parameter, etc. This complements fault injection        nally, bugs in critical dependent systems, such as a filesystem or the
+at the network and hardware level. Randomization of tuning pa-             operating system, or misunderstandings of their contract, can lead
+rameters also ensures that specific performance tuning values do           to bugs in FDB. For example, several bugs have resulted from the
+not accidentally become necessary for correctness.                         true operating system contract being weaker than it was believed
+    Swarm testing [40] is extensively used to maximize the diversity       to be.
+of simulation runs. Each run uses a random cluster size and con-
+figuration, random workloads, random fault injection parameters,           5            Evaluation
+random tuning parameters, and enables and disables a different             We first measure the performance of a production geo-replicated
+random subset of buggification points. We have open-sourced the            FDB cluster. Then we study the scalability of FDB. Finally, we
+swarm testing framework for FDB [7].                                       provide some data on the time of reconfiguration.
+    Conditional coverage macros are used to evaluate and tune the
+effectiveness of the simulation. For example, a developer concerned        5.1                         Production Measurement
+that a new piece of code may rarely be invoked with a full buffer          The measurement was taken from one of Apple’s production geo-
+can add the line TEST( buffer.is_full() ); and analysis of                 replicated cluster described in Section 3. This cluster consists of a
+simulation results will tell them how many distinct simulation runs        total of 58 machines: both the primary DC and remote DC have
+achieved that condition. If the number is too low, or zero, they           25 machines, and two satellites in the primary region contain 4
+can add buggification, workload, or fault injection functionality to       machines each. This cluster is configured to use one satellite (6.5 ms
+ensure that scenario is adequately tested.                                 latency) for storing log data and utilize the other (65.2 ms latency)
+    Latency to bug discovery. Finding bugs quickly is important            running Coordinators. The network latency between primary DC
+both so that they are encountered in testing before production,            and remote DC is 60.6 ms. In total, there are 862 FDB processes
+and for engineering productivity (since bugs found immediately             running on these machines, with additional 55 spare processes
+in an individual commit can be trivially traced to that commit).           reserved for emergency usage. The cluster stores 292 TB data with a
+Discrete-event simulation can run arbitrarily faster than real-time        total of 464 SSD disks (8 per machine). An SSD disk is bound to either
+if CPU utilization within the simulation is low, as the simulator can      one LogServer or two StorageServer processes to maximize I/O
+fast-forward clock to the next event. Many distributed systems bugs        utilization. We measured client read operations at StorageServers
+take time to play out, and running simulations with long stretches         and write (or commit) operations at Proxies.
+of low utilization allows many more of these to be found per core             Traffic pattern. Figure 7a shows the traffic of the cluster in a
+second than in “real-world” end-to-end tests.                              month, which exhibits a clear diurnal pattern. The average numbers
+    Additionally, bugs can be found faster simply by running more          of read operations, write operations, and keys read are 390.4K,
+simulations in parallel. Randomized testing is embarrassingly par-         138.5K, and 1.467M, respectively. The number of keys read is several
+allel and FDB developers can and do “burst” the amount of testing          times the number of reads because many of them are range reads
+they do immediately before major releases, in the hopes of catching        that return values for multiple keys.
+                                                                                 107
+                                                                                                                                                    Reads                                                                   GetReadVersion
+                  104                                                                                                                         108
+                                                                                                                                                    Writes                                                           102    Read
+
+
+
+
+Throughput MBps
+                                                                                                                             Throughput Bps
+                                                                                                                                                                                                                            Commit
+
+
+
+                                                                  Operations/s                                                                                                                        Latency (ms)
+                                          Write (100)
+                                          Write (500)                                                                                         106
+                  10   3                  Read (100)                             106                                                                                                                                 101
+                                          Read (500)
+                                                                                                                                              104
+                                                                                                                                                                                                                     100
+                  102                                                                                     90/10 Read-Write
+                                                                                 105                                                          102        3            4          5                6
+                                                                                                                                                    10              10          10           10                              103          104         105   106
+                           4    6   8   12    16        20   24                        4   6   8   12    16      20     24
+                                                                                                                                                             Operations per second                                                 Operations per second
+                                        Machines                                                   Machines
+(a) Read and write throughput with 100                                                     (b) 90/10 Read-write.                                    (a) Throughput.                                                        (b) Average latency.
+and 500 operations per transaction.
+
+                                                                                                                             Figure 9: Throughput and average latency for different op-
+                                              Figure 8: Scalability test.                                                    eration rate on a 24-machine cluster configuration.
+
+
+   Latency. Figure 7b shows the average and 99.9-percentile of                                                                   Figure 8 illustrates the scalability test of FDB from 4 to 24 ma-
+client read and commit latencies. For reads, the average and 99.9-                                                           chines using 2 to 22 Proxies or LogServers. Figure 8a shows that
+percentile are about 1 and 19 ms, respectively. For commits, the                                                             the write throughput scales from 67 to 391 MBps (5.84X) for 100 op-
+average and 99.9-percentile are about 22 and 281 ms, respectively.                                                           erations per transaction (T100), and from 73 to 467 MBps (6.40X) for
+The commit latencies are higher than read latencies because com-                                                             500 operations per transaction (T500). Note the raw write through-
+mits always write to multiple disks in both primary DC and one                                                               put is three times higher, because each write is replicated three
+satellite. Note the average commit latency is lower than the WAN                                                             times to LogServers and StorageServers. LogServers are CPU
+latency of 60.6 ms, due to asynchronous replication to the remote                                                            saturated at the maximum write throughput. Read throughput in-
+region. The 99.9-percentile latencies are an order of magnitude                                                              creases from 2,946 to 10,096 MBps (3.43X) for T100, and from 5055
+higher than the average, because they are affected by multiple fac-                                                          to 21,830 MBps (4.32X) for T500, where StorageServers are satu-
+tors such as the variability in request load, queue length, replica                                                          rated. For both reads and writes, increasing the number operations
+performance, and transaction or key value sizes. Due to the multi-                                                           in a transaction boosts throughput. However, increasing operations
+tenancy nature of CloudKit [59], the average transaction conflict                                                            further (e.g. to 1000) doesn’t bring significant changes. Figure 8b
+rate is 0.73% during the month.                                                                                              shows the operations per second for 90/10 read-write traffic, which
+   Recovery and availability. In August 2020, there was only                                                                 increases from 593k to 2,779k (4.69X). In this case, Resolvers and
+one transaction system recovery, which took 8.61 seconds. This                                                               Proxies are CPU saturated.
+corresponds to five 9s availability.                                                                                             The above experiments study saturated performance. Figure 9
+                                                                                                                             illustrates the client performance on a 24-machine cluster with
+5.2                            Scalability Test                                                                              varying operation rate of 90/10 read-write load. This configuration
+The experiments were conducted on a test cluster of 27 machines                                                              has 2 Resolvers, 22 LogServers, 22 Proxies, and 336 Storage-
+in a single data center. Each machine has a 16-core 2.5 GHz Intel                                                            Servers. Figure 9a shows that the throughput scales linearly with
+Xeon CPU with hyper-threading enabled, 256 GB memory, 8 SSD                                                                  more operations per second (Ops) for both reads and writes. For
+disks, connected via 10 Gigabit Ethernet. Each machine runs 14                                                               latency, Figure 9b shows that when Ops is below 100k, the mean
+StorageServers on 7 SSD disks and reserves the other one SSD                                                                 latencies remain stable: about 0.35ms to read a key, 2ms to commit,
+for LogServer. In the experiments, we use the same number of                                                                 and 1ms to get a read version (GRV). Read is a single hop operation,
+Proxies and LogServers. The replication degrees for both Log-                                                                thus is faster than the two-hop GRV request. The commit request
+Servers and StorageServers are set to three.                                                                                 involves multiple hops and persistence to three LogServers, thus
+   We use a synthetic workload to evaluate the performance of FDB.                                                           higher latency than reads and GRVs. When Ops exceeds 100k, all
+Specifically, there are four types of transactions: 1) blind writes that                                                     these latencies increase because of more queuing time. At 2m Ops,
+update a configured number of random keys; 2) range reads that                                                               Resolvers and Proxies are saturated. Batching helps to sustain the
+fetch a configured number of continuous keys starting at a random                                                            throughput, but commit latency spike to 368ms due to saturation.
+key; 3) point reads that fetch 10 random keys; and 4) point writes
+that fetch 5 random keys and update another 5 random keys. We                                                                                                        1.0
+use blind writes and range reads to evaluate the write and read                                                                                                      0.8
+performance, respectively. The point reads and point writes are
+                                                                                                                                                                     0.6
+used together to evaluate the mixed read-write performance. For                                                                                                CDF
+instance, 90% reads and 10% writes (90/10 read-write) is constructed                                                                                                 0.4
+with 80% point reads and 20% point writes transactions. Each key                                                                                                     0.2
+is 16 bytes and the value size is uniformly distributed between 8                                                                                                    0.0
+                                                                                                                                                                           0         2         4      6        8                          10
+and 100 bytes (averaging 54 bytes). The database is pre-populated
+                                                                                                                                                                                         Recovery Duration (s)
+with data using the same size distribution. In the experiments, we
+make sure the dataset cannot be completely cached in the memory
+of StorageServers.                                                                                                           Figure 10: CDF plot for reconfiguration duration in seconds.
+5.3    Reconfiguration Duration                                           for more than 0.5M disk years without a single data corruption
+We collected 289 reconfiguration (i.e., transaction system recovery)      event. Additionally, we constantly perform data consistency checks
+traces from our production clusters that typically host hundreds of       by comparing replicas of data records and making sure they are
+TBs data. Because of the client-facing nature, short reconfiguration      the same. To this date, no inconsistent data replicas have ever been
+time is critical for the high availability of these clusters. Figure 10   found in our production clusters.
+illustrates the cumulative distribution function (CDF) of the recon-         What is hard to measure is the productivity improvements stem-
+figuration times. The median and 90-percentile are 3.08 and 5.28          ming from increased confidence in the testability of the system. On
+seconds, respectively. The reason for these short recovery times is       numerous occasions, the FDB team executed ambitious, ground-up
+that they are not bounded by the data or transaction log size, and        rewrites of major subsystems. Without simulation testing, many of
+are only related to the system metadata sizes. During the recovery,       these projects would have been deemed too risky or too difficult,
+read-write transactions were temporarily blocked and were retried         and not even attempted.
+after timeout. However, client reads were not impacted, because              The success of simulation has led us to continuously push the
+they are served by StorageServers. As a result, clients were often        boundary of what is amenable to simulation testing by eliminating
+unaware the cluster was unavailable for a few seconds. The causes         dependencies and reimplementing them ourselves in Flow. For
+of these reconfigurations include automatic failure recovery from         example, early versions of FDB depended on Apache Zookeeper
+software or hardware faults, software upgrades, database configu-         for coordination, which was deleted after real-world fault injection
+ration changes, and the manual mitigation of production issues by         found two independent bugs in Zookeeper (circa 2010) and was
+the Site Reliability Engineering (SRE) team.                              replaced by a de novo Paxos implementation written in Flow. No
+                                                                          production bugs have ever been reported since.
+6     Lessons Learned
+                                                                          6.3    Fast Recovery
+FDB has been under active development since 2009 and became an
+open source project under Apache license in 2018 [5]. This section        Fast recovery is not only useful for improving availability, but
+discusses our experience and lessons of FDB.                              also greatly simplifies the software upgrades and configuration
+                                                                          changes and makes them faster. Traditional wisdom of upgrading a
+6.1    Architecture Design                                                distributed system is to perform rolling upgrades so that rollback
+The divide-and-conquer design principle has proven to be an en-           is possible when something goes wrong. The duration of rolling
+abling force for flexible cloud deployment, making the database           upgrades can last from hours to days. In contrast, FoundationDB
+extensible as well as performant. First, separating the transaction       upgrades can be performed by restarting all processes at the same
+system from the storage layer enables greater flexibility in placing      time, which usually finishes within a few seconds. Because this
+and scaling compute and storage resources independently. Further,         upgrade path has been extensively tested in simulation, all up-
+operators are free to place heterogeneous roles of FDB on different       grades in Apple’s production clusters are performed in this way.
+server instance types, optimizing for performance and costs. Second,      Additionally, this upgrade path simplifies protocol compatibility
+the decoupling design makes it possible to extend the database func-      between different versions—we only need to make sure on-disk
+tionality, such as our ongoing work of supporting RocksDB [38]            data is compatible. There is no need to ensure the compatibility of
+as a drop-in replacement for the current SQLite engine. Finally,          RPC protocols between different software versions.
+many of the recent performance improvements are specializing                 An interesting discovery is that fast recovery sometimes can
+functionality as dedicated roles, e.g., separating DataDistributor        automatically heal latent bugs, which is similar to software rejuve-
+and Ratekeeper from Sequencer, adding storage cache, dividing             nation [42]. For instance, after we separated the DataDistributor
+Proxies into get-read-version proxy and commit proxy. This de-            role from the Sequencer, we were surprised to discover several
+sign pattern successfully allows new features and capabilities to be      unknown bugs in the DataDistributor. This is because before the
+added frequently.                                                         change, DataDistributor is restarted with Sequencer, which ef-
+                                                                          fectively reinitializes and heals the states of the DataDistributor.
+6.2    Simulation Testing                                                 After the separation, we made DataDistributor a long running
+Simulation testing has enabled FDB to maintain a very high de-            process independent of transaction system recovery (including
+velopment velocity with a small team by shortening the latency            Sequencer restart). As a result, the erroneous states of the Data-
+between a bug being introduced and a bug being found, and by              Distributor are never healed and cause test failures.
+allowing deterministic reproduction of issues. Adding additional
+logging, for instance, generally does not affect the deterministic        6.4    5s MVCC Window
+ordering of events, so an exact reproduction is guaranteed. The           FDB chooses a 5-second MVCC window to limit the memory usage
+productivity of this debugging approach is so much higher than            of the transaction system and storage servers, because the multi-
+normal production debugging, that in the rare circumstances when          version data is stored in the memory of Resolvers and Storage-
+a bug was first found “in the wild”, the debugging process was            Servers, which in turn restricts transaction sizes. From our experi-
+almost always first to improve the capabilities or the fidelity of the    ence, this 5s window is long enough for the majority of OLTP use
+simulation until the issue could be reproduced there, and only then       cases. If a transaction exceeds the time limit, it is often the case that
+to begin the normal debugging process.                                    the client application is doing something inefficient, e.g., issuing
+   Rigorous correctness testing via simulation makes FDB extremely        reads one by one instead of parallel reads. As a result, exceeding
+reliable. In the past several years, CloudKit [59] has deployed FDB       the time limit often exposes inefficiency in the application.
+   For some transactions that may span more than 5s, many can               these systems, FaRM [35, 36], and DrTM [26] exploit advanced
+be divided into smaller transactions. For instance, the continuous          hardware to improve transaction performance. FDB adopts an un-
+backup process of FDB will scan through the key space and create            bundled design with commodity hardware in mind.
+snapshots of key ranges. Because of the 5s limit, the scanning                 Recovery. Traditional database systems often choose to imple-
+process is divided into a number of smaller ranges so that each             ment a recovery protocol based on ARIES [53]. VoltDB [52] uses
+range can be performed within 5s. In fact, this is a common pattern:        command logging so that recovery starts from a checkpoint and
+one transaction creates a number of jobs and each job can be further        replays the commands in the log. NVRAM devices have been used
+divided or executed in a transaction. FDB has implemented such a            to reduce recovery time in [15, 36]. Amazon Aurora [66] decouples
+pattern in an abstraction called TaskBucket and the backup system           redo log processing from the database engine by leveraging smart
+heavily depends on it.                                                      storage, and only undo log is processed by the database engine.
+                                                                            RAMCloud [54] recovers in parallel redo logs on multiple machines.
+7   Related Work                                                            The recovery time for these systems is proportional to the log size.
+Key/value stores and NoSQL systems. BigTable [25], Dynamo [33],             In comparison, FDB completely decouples redo and undo log pro-
+PNUTS [30], MongoDB [10], CouchDB [2], Cassandra [45] do not                cessing from the recovery by a mindful separation of log servers
+provide ACID transactions. RAMCloud [54] is an in-memory key                and storage servers.
+value system that only supports single-object transactions. Google’s           Testing. Non-deterministic fault-injection has been widely used
+Percolator [55], Apache Tephra [11], and Omid [20, 58] layered              in the testing of distributed systems. Various approaches have in-
+transactional APIs atop key value stores with snapshot isolation.           cluded faults such as network partition [14], power failures [70], and
+FDB supports strict serializable ACID transactions on a scalable            storage faults [39]. Jepsen [3] is a commercial effort that has tested
+key-value store that has been used to support flexible schema and           a large number of distributed databases. All of these approaches
+richer queries [6, 28, 47]. Similar SQL-over-NoSQL architecture has         lack deterministic reproducibility. Model checking has also been
+been adopted in Hyder [19], Tell [49], and AIM [21].                        widely-applied to distributed systems [46, 69]. While model check-
+   Concurrency Control. Many systems [26, 31, 35, 36, 48, 50, 51,           ing can be more exhaustive than simulation, it can only verify the
+55, 62] use the time of acquiring all locks to establish the serial order   correctness of a model rather than of the actual implementation.
+among transactions and to guarantee atomicity and isolation. For            Finally there are numerous approaches to testing the correctness of
+instance, Spanner [31] uses True-time for determining the commit            database subsystems in the absence of faults, including the query
+timestamps when all locks are acquired. CockroachDB [62] uses the           engine [17, 57, 60] and concurrency control mechanism [63]. The
+hybrid-logical clock that is a combination of physical and logical          FDB deterministic simulation approach allows verification of data-
+time. Like FDB, a number of other systems [16, 19, 22, 34, 37, 58,          base invariants and other properties against the real database code,
+64] order transactions without locks. H-Store [61], Calvin [64],            together with deterministic reproducibility.
+Hekaton [34], and Omid [58] execute transactions in timestamp
+order. Hyder [19], Tango [16], and ACID-RAIN [37] use a shared
+                                                                            8   Conclusions
+log to establish ordering. Sprint [22] orders transactions with total-      This paper presents FoundationDB, a key value store designed for
+order multicast. FDB provides strict serializability by a lock-free         OLTP cloud services. The main idea is to decouple transaction
+concurrency control combining MVCC and OCC. The serial order                processing from logging and storage. Such an unbundled archi-
+is determined by a Sequencer.                                               tecture enables the separation and horizontal scaling of both read
+   Unbundled database systems. These databases separate trans-              and write handling. The transaction system combines OCC and
+action component (TC) from data component (DC) [11, 20, 23, 48–             MVCC to ensure strict serializability. The decoupling of logging and
+51, 58, 66, 67, 71]. Deuteronomy [48] creates virtual resources that        the determinism in transaction orders greatly simplify recovery by
+can be logically locked in the transaction system, where a DC knows         removing redo and undo log processing from the critical path, thus
+nothing about transactions, their commit or abort. Solar [71] com-          allowing unusually quick recovery time and improving availability.
+bines the benefits of scalable storage on a cluster of nodes with a         Finally, deterministic and randomized simulation has ensured the
+single server for transaction processing. Amazon Aurora [66, 67]            correctness of the database implementation. Our evaluation and
+simplifies database replication and recovery with shared storage.           experience with cloud workloads demonstrate FoundationDB can
+These systems use lock-based concurrency control. Tell [49] uses            meet challenging business requirements.
+advanced hardware to achieve high performance and implements
+                                                                            Acknowledgment
+snapshot isolation with a distributed MVCC protocol, while FDB
+uses commodity hardware with serializable isolation. In FDB, TC             We thank Ori Herrnstadt, Yichi Chiang, Henry Gray, Maggie Ma,
+is further decomposed into a number of dedicated roles and the              and all past and current contributors to the FoundationDB project,
+transaction logging is decoupled from TC. As a result, FDB chooses          as well as our SRE team, John Brownlee, Joshua McManus, Leonidas
+a lock-free concurrency management with a deterministic transac-            Tsampros, Shambugouda Annigeri, Tarun Chauhan, Veera Prasad
+tion order.                                                                 Battina, Amrita Singh, and Swetha Mundla at Apple. We thank
+   Bundled database systems. Traditional database systems have              anonymous reviewers, Nicholas Schiefer, and Zhe Wu for their
+tight coupling of the transaction component and data component.             helpful comments, and particularly our shepherd, Eliezer Levy.
+Silo [65] and Hekaton [34] have achieved high throughput using a
+single server for transaction processing. Many distributed databases
+partition data to scale out [24, 26, 31, 35, 36, 43, 61, 62, 64]. Among
+References                                                                                      [31] J. C. Corbett, J. Dean, M. Epstein, A. Fikes, C. Frost, J. Furman, S. Ghemawat,
+                                                                                                     A. Gubarev, C. Heiser, P. Hochschild, W. Hsieh, S. Kanthak, E. Kogan, H. Li,
+ [1] Couchbase. https://www.couchbase.com/.                                                          A. Lloyd, S. Melnik, D. Mwaura, D. Nagle, S. Quinlan, R. Rao, L. Rolig, Y. Saito,
+ [2] CouchDB. https://couchdb.apache.org/.                                                           M. Szymaniak, C. Taylor, R. Wang, and D. Woodford. Spanner: Google’s globally-
+ [3] Distributed system safety research. https://jepsen.io/.                                         distributed database. In 10th USENIX Symposium on Operating Systems Design and
+ [4] Flow. https://github.com/apple/foundationdb/tree/master/flow.                                   Implementation, pages 261–264, Hollywood, CA, Oct. 2012. USENIX Association.
+ [5] FoundationDB. https://github.com/apple/foundationdb.                                       [32] J. Dean and L. A. Barroso. The tail at scale. Communications of the ACM,
+ [6] FoundationDB Document Layer.                  https://github.com/FoundationDB/fdb-              56(2):74–80, Feb. 2013.
+     document-layer.                                                                            [33] G. DeCandia, D. Hastorun, M. Jampani, G. Kakulapati, A. Lakshman, A. Pilchin,
+ [7] FoundationDB Joshua. https://github.com/FoundationDB/fdb-joshua.                                S. Sivasubramanian, P. Vosshall, and W. Vogels. Dynamo: amazon’s highly
+ [8] Foundationdb storage adapter for janusgraph. https://github.com/JanusGraph/                     available key-value store. ACM SIGOPS Operating Systems Review, 41(6):205–220,
+     janusgraph-foundationdb.                                                                        2007.
+ [9] Janusgraph. https://janusgraph.org/.                                                       [34] C. Diaconu, C. Freedman, E. Ismert, P.-A. Larson, P. Mittal, R. Stonecipher,
+[10] MongoDB. https://www.mongodb.com/.                                                              N. Verma, and M. Zwilling. Hekaton: Sql server’s memory-optimized oltp engine.
+[11] Tephra: Transactions for Apache HBase. http://tephra.incubator.apache.org/.                     In Proceedings of the 2013 ACM SIGMOD International Conference on Management
+[12] D. Abadi. Consistency tradeoffs in modern distributed database system design:                   of Data, SIGMOD ’13, pages 1243–1254, New York, NY, USA, 2013.
+     Cap is only part of the story. Computer, 45(2):37–42, Feb. 2012.                           [35] A. Dragojević, D. Narayanan, O. Hodson, and M. Castro. Farm: Fast remote
+[13] G. Agha. Actors: A Model of Concurrent Computation in Distributed Systems. MIT                  memory. In Proceedings of the 11th USENIX Symposium on Networked Systems
+     Press, Cambridge, MA, USA, 1986.                                                                Design and Implementation, pages 401–414, Seattle, WA, USA, April 2014.
+[14] A. Alquraan, H. Takruri, M. Alfatafta, and S. Al-Kiswany. An analysis of network-          [36] A. Dragojević, D. Narayanan, E. B. Nightingale, M. Renzelmann, A. Shamis,
+     partitioning failures in cloud systems. In Proceedings of the 13th USENIX Con-                  A. Badam, and M. Castro. No compromises: Distributed transactions with con-
+     ference on Operating Systems Design and Implementation, OSDI’18, pages 51–68,                   sistency, availability, and performance. In Proceedings of the 25th Symposium on
+     Carlsbad, CA, USA, 2018. USENIX Association.                                                    Operating Systems Principles, SOSP ’15, pages 54–70, New York, NY, USA, 2015.
+[15] J. Arulraj, M. Perron, and A. Pavlo. Write-behind logging. Proceedings of the                   Association for Computing Machinery.
+     VLDB Endowment, 10:337–348, November 2016.                                                 [37] I. Eyal, K. P. Birman, I. Keidar, and R. van Renesse. Ordering transactions with
+[16] M. Balakrishnan, D. Malkhi, T. Wobber, M. Wu, V. Prabhakaran, M. Wei, J. D.                     prediction in distributed object stores. In LADIS, 2013.
+     Davis, S. Rao, T. Zou, and A. Zuck. Tango: Distributed data structures over a              [38] Facebook. Rocksdb. https://rocksdb.org.
+     shared log. In Proceedings of the Twenty-Fourth ACM Symposium on Operating                 [39] A. Ganesan, R. Alagappan, A. C. Arpaci-Dusseau, and R. H. Arpaci-Dusseau.
+     Systems Principles, pages 325–340, Farminton, PA, 2013.                                         Redundancy does not imply fault tolerance: Analysis of distributed storage reac-
+[17] H. Bati, L. Giakoumakis, S. Herbert, and A. Surna. A genetic approach for random                tions to single errors and corruptions. In Proceedings of the 15th Usenix Conference
+     testing of database systems. In Proceedings of the 33rd International Conference on             on File and Storage Technologies, FAST’17, pages 149–165, Santa clara, CA, USA,
+     Very Large Data Bases, VLDB ’07, pages 1243–1251, Vienna, Austria, 2007. VLDB                   2017. USENIX Association.
+     Endowment.                                                                                 [40] A. Groce, C. Zhang, E. Eide, Y. Chen, and J. Regehr. Swarm testing. In Proceedings
+[18] P. A. Bernstein, V. Hadzilacos, and N. Goodman. Concurrency Control and Recovery                of the 2012 International Symposium on Software Testing and Analysis, ISSTA 2012,
+     in Database Systems. Addison-Wesley, 1987.                                                      pages 78–88, Minneapolis, MN, USA, 2012. ACM.
+[19] P. A. Bernstein, C. W. Reid, and S. Das. Hyder - a transactional record manager            [41] R. D. Hipp. SQLite. https://www.sqlite.org/index.html, 2020.
+     for shared flash. In CIDR, 2011.                                                           [42] Y. Huang, C. Kintala, N. Kolettis, and N. D. Fulton. Software rejuvenation:
+[20] E. Bortnikov, E. Hillel, I. Keidar, I. Kelly, M. Morel, S. Paranjpye, F. Perez-Sorrosal,        analysis, module and applications. In Twenty-Fifth International Symposium on
+     and O. Shacham. Omid, reloaded: Scalable and highly-available transaction                       Fault-Tolerant Computing, pages 381–390, 1995.
+     processing. In 15th USENIX Conference on File and Storage Technologies (FAST 17),          [43] J. W. Josten, C. Mohan, I. Narang, and J. Z. Teng. Db2’s use of the coupling facility
+     pages 167–180, Santa Clara, CA, Feb. 2017. USENIX Association.                                  for data sharing. IBM Systems Journal, 36(2):327–351, 1997.
+[21] L. Braun, T. Etter, G. Gasparis, M. Kaufmann, D. Kossmann, D. Widmer, A. Avitzur,          [44] H. T. Kung and J. T. Robinson. On optimistic methods for concurrency control.
+     A. Iliopoulos, E. Levy, and N. Liang. Analytics in motion: High performance event-              ACM Transactions on Database Systems, 6(2):213–226, June 1981.
+     processing and real-time analytics in the same database. In Proceedings of the 2015        [45] A. Lakshman and P. Malik. Cassandra: structured storage system on a p2p
+     ACM SIGMOD International Conference on Management of Data, SIGMOD ’15,                          network. In Proceedings of the 28th ACM symposium on Principles of Distributed
+     page 251–264, New York, NY, USA, 2015. Association for Computing Machinery.                     Computing, page 5, Jan 2009.
+[22] L. Camargos, F. Pedone, and M. Wieloch.                   Sprint: A middleware for         [46] T. Leesatapornwongsa, M. Hao, P. Joshi, J. F. Lukman, and H. S. Gunawi. Samc:
+     high-performance transaction processing. In Proceedings of the 2nd ACM                          Semantic-aware model checking for fast discovery of deep bugs in cloud sys-
+     SIGOPS/EuroSys European Conference on Computer Systems 2007, pages 385–398,                     tems. In Proceedings of the 11th USENIX Conference on Operating Systems Design
+     Lisbon, Portugal, 2007.                                                                         and Implementation, OSDI’14, pages 399–414, Broomfield, CO, 2014. USENIX
+[23] W. Cao, Z. Liu, P. Wang, S. Chen, C. Zhu, S. Zheng, Y. Wang, and G. Ma. Polarfs:                Association.
+     An ultra-low latency and failure resilient distributed file system for shared storage      [47] K. Lev-Ari, Y. Tian, A. Shraer, C. Douglas, H. Fu, A. Andreev, K. Beranek, S. Dugas,
+     cloud database. Proceedings of the VLDB Endowment, 11(12):1849–1862, Aug. 2018.                 A. Grieser, and J. Hemmo. Quick: a queuing system in cloudkit. In Proceedings of
+[24] S. Chandrasekaran and R. Bamford. Shared cache - the future of parallel databases.              the 2021 International Conference on Management of Data, SIGMOD Conference
+     In Proceedings 19th International Conference on Data Engineering, pages 840–850,                2021, Xian, Shanxi, China, June 03 — 05, 2021. ACM, 2021.
+     2003.                                                                                      [48] J. Levandoski, D. Lomet, , and K. K. Zhao. Deuteronomy: Transaction sup-
+[25] F. Chang, J. Dean, S. Ghemawat, W. C. Hsieh, D. A. Wallach, M. Burrows, T. Chan-                port for cloud data. In Conference on Innovative Data Systems Research (CIDR).
+     dra, A. Fikes, and R. E. Gruber. Bigtable: A distributed storage system for struc-              www.crdrdb.org, January 2011.
+     tured data. In Proceedings of the 7th USENIX Symposium on Operating Systems                [49] S. Loesing, M. Pilman, T. Etter, and D. Kossmann. On the design and scalability of
+     Design and Implementation (OSDI’06), 2006.                                                      distributed shared-data databases. In SIGMOD Conference, pages 663–676. ACM,
+[26] H. Chen, R. Chen, X. Wei, J. Shi, Y. Chen, Z. Wang, B. Zang, and H. Guan. Fast                  2015.
+     in-memory transaction processing using rdma and htm. ACM Transactions on                   [50] D. Lomet, A. Fekete, G. Weikum, and M. J. Zwilling. Unbundling transaction
+     Computer Systems, 35(1), July 2017.                                                             services in the cloud. In Fourth Biennial Conference on Innovative Data Systems
+[27] G. Chockler and D. Malkhi. Active disk paxos with infinitely many processes.                    Research, Asilomar, CA, Jan. 2009.
+     In Proceedings of the Twenty-first Annual Symposium on Principles of Distributed           [51] D. Lomet and M. F. Mokbel. Locking key ranges with unbundled transaction
+     Computing, PODC’02, pages 78–87, New York, NY, USA, 2002. ACM.                                  services. Proceedings of the VLDB Endowment, 2(1):265–276, August 2009.
+[28] C. Chrysafis, B. Collins, S. Dugas, J. Dunkelberger, M. Ehsan, S. Gray, A. Grieser,        [52] N. Malviya, A. Weisberg, S. Madden, and M. Stonebraker. Rethinking main mem-
+     O. Herrnstadt, K. Lev-Ari, T. Lin, M. McMahon, N. Schiefer, and A. Shraer. Foun-                ory oltp recovery. In 2014 IEEE 30th International Conference on Data Engineering,
+     dationDB Record Layer: A Multi-Tenant Structured Datastore. In Proceedings                      pages 604–615, Chicago, IL, USA, March 2014.
+     of the 2019 International Conference on Management of Data, SIGMOD’19, pages               [53] C. Mohan, D. Haderle, B. G. Lindsay, H. Pirahesh, and P. M. Schwarz. Aries:
+     1787–1802, New York, NY, USA, 2019. ACM.                                                        A transaction recovery method supporting fine-granularity locking and partial
+[29] A. Cidon, S. Rumble, R. Stutsman, S. Katti, J. Ousterhout, and M. Rosenblum.                    rollbacks using write-ahead logging. ACM Transactions on Database Systems,
+     Copysets: Reducing the frequency of data loss in cloud storage. In Presented as                 17(1):94–162, 1992.
+     part of the 2013 USENIX Annual Technical Conference, pages 37–48, San Jose, CA,            [54] D. Ongaro, S. M. Rumble, R. Stutsman, J. Ousterhout, and M. Rosenblum. Fast
+     2013. USENIX.                                                                                   crash recovery in ramcloud. In Proceedings of the Twenty-Third ACM Symposium
+[30] B. F. Cooper, R. Ramakrishnan, U. Srivastava, A. Silberstein, P. Bohannon, H.-A.                on Operating Systems Principles, SOSP ’11, page 29–41, New York, NY, USA, 2011.
+     Jacobsen, N. Puz, D. Weaver, and R. Yerneni. PNUTS: Yahoo!’s hosted data serving                Association for Computing Machinery.
+     platform. Proceedings of the VLDB Endowment, 1(2):1277–1288, Aug. 2008.
+[55] D. Peng and F. Dabek. Large-scale incremental processing using distributed                   2020.
+     transactions and notifications. In Proceedings of the 9th USENIX Symposium on           [64] A. Thomson, T. Diamond, S.-C. Weng, K. Ren, P. Shao, and D. Abadi. Calvin: Fast
+     Operating Systems Design and Implementation, OSDI’10, pages 251–264, Vancou-                 distributed transactions for partitioned database systems. In Proceedings of the
+     ver, BC, Canada, 2010.                                                                       ACM SIGMOD International Conference on Management of Data, pages 1–12, May
+[56] W. Pugh. Skip lists: A probabilistic alternative to balanced trees. Communications           2012.
+     of the ACM, 33(6):668–676, 1990.                                                        [65] S. Tu, W. Zheng, E. Kohler, B. Liskov, and S. Madden. Speedy transactions
+[57] M. Rigger and Z. Su. Testing database engines via pivoted query synthesis. In                in multicore in-memory databases. In Proceedings of the Twenty-Fourth ACM
+     14th USENIX Symposium on Operating Systems Design and Implementation (OSDI                   Symposium on Operating Systems Principles, pages 18–32, Farminton, PA, 2013.
+     20), pages 667–682. USENIX Association, Nov. 2020.                                      [66] A. Verbitski, X. Bao, A. Gupta, D. Saha, M. Brahmadesam, K. Gupta, R. Mittal,
+[58] O. Shacham, Y. Gottesman, A. Bergman, E. Bortnikov, E. Hillel, and I. Keidar.                S. Krishnamurthy, S. Maurice, and T. Kharatishvili. Amazon aurora: Design con-
+     Taking omid to the clouds: Fast, scalable transactions for real-time cloud analytics.        siderations for high throughput cloud-native relational databases. In Proceedings
+     Proceedings of the VLDB Endowment, 11(12):1795–1808, Aug. 2018.                              of the 2017 ACM International Conference on Management of Data, SIGMOD ’17,
+[59] A. Shraer, A. Aybes, B. Davis, C. Chrysafis, D. Browning, E. Krugler, E. Stone,              pages 1041–1052, Chicago, IL, USA, May 2017.
+     H. Chandler, J. Farkas, J. Quinn, J. Ruben, M. Ford, M. McMahon, N. Williams,           [67] A. Verbitski, A. Gupta, D. Saha, J. Corey, K. Gupta, M. Brahmadesam, R. Mittal,
+     N. Favre-Felix, N. Sharma, O. Herrnstadt, P. Seligman, R. Pisolkar, S. Dugas,                S. Krishnamurthy, S. Maurice, T. Kharatishvilli, and X. Bao. Amazon aurora: On
+     S. Gray, S. Lu, S. Harkema, V. Kravtsov, V. Hong, Y. Tian, and W. L. Yih. Cloudkit:          avoiding distributed consensus for i/os, commits, and membership changes. In
+     Structured storage for mobile applications. Proceedings of the VLDB Endowment,               Proceedings of the 2018 International Conference on Management of Data, SIGMOD
+     11(5):540–552, Jan. 2018.                                                                    ’18, pages 789–796, 2018.
+[60] D. R. Slutz. Massive stochastic testing of SQL. In A. Gupta, O. Shmueli, and            [68] M. Yabandeh and D. Gómez Ferro. A Critique of Snapshot Isolation. In Proceedings
+     J. Widom, editors, VLDB’98, Proceedings of 24rd International Conference on Very             of the 7th ACM European Conference on Computer Systems, EuroSys’12, pages
+     Large Data Bases, August 24-27, 1998, New York City, New York, USA, pages 618–622.           155–168, Bern, Switzerland, 2012.
+     Morgan Kaufmann, 1998.                                                                  [69] J. Yang, T. Chen, M. Wu, Z. Xu, X. Liu, H. Lin, M. Yang, F. Long, L. Zhang, and
+[61] M. Stonebraker, S. Madden, D. J. Abadi, S. Harizopoulos, N. Hachem, and P. Hel-              L. Zhou. MODIST: transparent model checking of unmodified distributed systems.
+     land. The end of an architectural era: (it’s time for a complete rewrite). In                In Proceedings of the 6th USENIX Symposium on Networked Systems Design and
+     Proceedings of the 33rd International Conference on Very Large Data Bases, VLDB              Implementation, NSDI’09, pages 213–228, Boston, Massachusetts, 2009. USENIX
+     ’07, pages 1150–1160. VLDB Endowment, 2007.                                                  Association.
+[62] R. Taft, I. Sharif, A. Matei, N. VanBenschoten, J. Lewis, T. Grieger, K. Niemi,         [70] M. Zheng, J. Tucek, D. Huang, F. Qin, M. Lillibridge, E. S. Yang, B. W. Zhao,
+     A. Woods, A. Birzin, R. Poss, P. Bardea, A. Ranade, B. Darnell, B. Gruneir, J. Jaf-          and S. Singh. Torturing databases for fun and profit. In Proceedings of the 11th
+     fray, L. Zhang, and P. Mattis. Cockroachdb: The resilient geo-distributed SQL                USENIX Conference on Operating Systems Design and Implementation, OSDI’14,
+     database. In Proceedings of the 2020 International Conference on Management of               pages 449–464, Broomfield, CO, 2014. USENIX Association.
+     Data, SIGMOD, pages 1493–1509, Portland, OR, USA, June 2020. ACM.                       [71] T. Zhu, Z. Zhao, F. Li, W. Qian, A. Zhou, D. Xie, R. Stutsman, H. Li, and H. Hu. Solar:
+[63] C. Tan, C. Zhao, S. Mu, and M. Walfish. Cobra: Making transactional key-value                Towards a shared-everything database on distributed log-structured storage. In
+     stores verifiably serializable. In 14th USENIX Symposium on Operating Systems                USENIX Annual Technical Conference, pages 795–807. USENIX Association, 2018.
+     Design and Implementation (OSDI 20), pages 63–80. USENIX Association, Nov.
+

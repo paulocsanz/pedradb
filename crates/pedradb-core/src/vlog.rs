@@ -286,9 +286,8 @@ impl<F: EnvFile> ValueLog<F> {
     /// # Errors
     /// I/O.
     pub fn append(&mut self, data: &[u8]) -> Result<(u64, u32, u32)> {
-        let len = u32::try_from(data.len()).map_err(|_| {
-            CoreError::Internal("vlog value too large".into())
-        })?;
+        let len = u32::try_from(data.len())
+            .map_err(|_| CoreError::Internal("vlog value too large".into()))?;
         let crc = crc32c::crc32c(data);
         let offset = self.next_offset;
         Write::write_all(&mut self.file, &len.to_le_bytes())?;
@@ -317,10 +316,7 @@ impl<F: EnvFile> ValueLog<F> {
         open_path: &Path,
     ) -> PathBuf {
         if ptr.file_num == 0 {
-            let name = open_path
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or("");
+            let name = open_path.file_name().and_then(|n| n.to_str()).unwrap_or("");
             if name == VLOG_FILE_NAME || name == VLOG_NEW_NAME {
                 return open_path.to_path_buf();
             }
@@ -387,9 +383,8 @@ impl<F: EnvFile> ValueLog<F> {
         let mut remap = std::collections::HashMap::new();
         let mut next = MAGIC.len() as u64;
         for (old_off, data) in live {
-            let len = u32::try_from(data.len()).map_err(|_| {
-                CoreError::Internal("vlog value too large".into())
-            })?;
+            let len = u32::try_from(data.len())
+                .map_err(|_| CoreError::Internal("vlog value too large".into()))?;
             let crc = crc32c::crc32c(data);
             let new_off = next;
             body.extend_from_slice(&len.to_le_bytes());
@@ -447,9 +442,8 @@ impl<F: EnvFile> ValueLog<F> {
         let mut remap = std::collections::HashMap::new();
         let mut next = MAGIC.len() as u64;
         for (old_off, data) in live {
-            let len = u32::try_from(data.len()).map_err(|_| {
-                CoreError::Internal("vlog value too large".into())
-            })?;
+            let len = u32::try_from(data.len())
+                .map_err(|_| CoreError::Internal("vlog value too large".into()))?;
             let crc = crc32c::crc32c(data);
             let new_off = next;
             body.extend_from_slice(&len.to_le_bytes());
@@ -553,9 +547,8 @@ pub fn resolve_value_on<E: Env, F: EnvFile>(
     stored: Bytes,
 ) -> Result<Bytes> {
     if let Some(ptr) = decode_vlog_ptr(stored.as_ref()) {
-        let log = vlog.ok_or_else(|| {
-            CoreError::Internal("vlog ref present but value log not open".into())
-        })?;
+        let log = vlog
+            .ok_or_else(|| CoreError::Internal("vlog ref present but value log not open".into()))?;
         let dir = log.path.parent().unwrap_or_else(|| Path::new("."));
         log.read_ptr_on(env, dir, ptr, false)
     } else {
@@ -760,8 +753,8 @@ mod tests {
         drop(log);
         // Keep only first record live.
         let live = vec![(o1, Bytes::from(vec![1u8; 1000]))];
-        let (stats, remap) = ValueLog::<std::fs::File>::rewrite_live_to_new(&env, &dir, &live)
-            .unwrap();
+        let (stats, remap) =
+            ValueLog::<std::fs::File>::rewrite_live_to_new(&env, &dir, &live).unwrap();
         assert!(stats.bytes_after < before);
         assert_eq!(stats.live_records, 1);
         assert!(remap.contains_key(&o1));

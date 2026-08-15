@@ -1,0 +1,908 @@
+           HashKV: Enabling Efficient Updates
+               in KV Storage via Hashing
+Helen H. W. Chan, The Chinese University of Hong Kong; Yongkun Li, University of Science
+    and Technology of China; Patrick P. C. Lee, The Chinese University of Hong Kong;
+              Yinlong Xu, University of Science and Technology of China
+                  https://www.usenix.org/conference/atc18/presentation/chan
+
+
+
+
+           This paper is included in the Proceedings of the
+     2018 USENIX Annual Technical Conference (USENIX ATC ’18).
+                          July 11–13, 2018 • Boston, MA, USA
+                                  ISBN 978-1-939133-02-1
+
+
+
+
+                                               Open access to the Proceedings of the
+                                             2018 USENIX Annual Technical Conference
+                                                     is sponsored by USENIX.
+         HashKV: Enabling Efficient Updates in KV Storage via Hashing
+                Helen H. W. Chan† , Yongkun Li‡ , Patrick P. C. Lee† , Yinlong Xu‡
+    †
+      The Chinese University of Hong Kong ‡ University of Science and Technology of China
+
+Abstract                                                      drives (SSDs) [2, 27]), but also improves range scan
+                                                              performance by holding sorted KV pairs in each node.
+Persistent key-value (KV) stores mostly build on the
+                                                                 However, the LSM-tree incurs high I/O amplification
+Log-Structured Merge (LSM) tree for high write perfor-
+                                                              in both writes and reads. As the LSM-tree receives more
+mance, yet the LSM-tree suffers from the inherently high
+                                                              writes of KV pairs, it will trigger frequent compaction
+I/O amplification. KV separation mitigates I/O amplifi-
+                                                              operations, leading to tremendous extra I/Os due to
+cation by storing only keys in the LSM-tree and values
+                                                              rewrites across levels. Such write amplification can reach
+in separate storage. However, the current KV separation
+                                                              a factor of at least 50× [23, 39], which is detrimental
+design remains inefficient under update-intensive work-
+                                                              to both write performance and the endurance of SSDs
+loads due to its high garbage collection (GC) overhead in
+                                                              [2, 27]. Also, as the LSM-tree grows in size, reading the
+value storage. We propose HashKV, which aims for high
+                                                              KV pairs at lower levels incurs many disk accesses. Such
+update performance atop KV separation under update-
+                                                              read amplification can reach a factor of over 300× [23],
+intensive workloads. HashKV uses hash-based data
+                                                              leading to low read performance.
+grouping, which deterministically maps values to storage
+space so as to make both updates and GC efficient.               In order to mitigate the compaction overhead, many
+We further relax the restriction of such deterministic        research efforts focus on optimizing LSM-tree indexing
+mappings via simple but useful design extensions. We          (see §5). One approach is KV separation from WiscKey
+compare HashKV with state-of-the-art KV stores via            [23], in which keys and metadata are still stored in
+extensive testbed experiments, and show that HashKV           the LSM-tree, while values are separately stored in an
+achieves 4.6× throughput and 53.4% less write traffic         append-only circular log. The main idea of KV sepa-
+compared to the current KV separation design.                 ration is to reduce the LSM-tree size, while preserving
+                                                              the indexing feature of the LSM-tree for efficient in-
+                                                              serts/updates, individual key lookups, and range scans.
+1   Introduction
+                                                                 In this work, we argue that KV separation itself still
+Persistent key-value (KV) stores are an integral part         cannot fully achieve high performance under update-
+of modern large-scale storage infrastructures for storing     intensive workloads. The root cause is that the circular
+massive structured data (e.g., [4, 6, 10, 18]). While real-   log for value storage needs frequent garbage collection
+world KV storage workloads are mainly read-intensive          (GC) to reclaim the space from the KV pairs that are
+(e.g., the Get/Update ratio can reach 30:1 in Facebook’s      deleted or superseded by new updates. However, the GC
+Memcached workloads [3]), update-intensive workloads          overhead is actually expensive due to two constraints of
+are also dominant in many storage scenarios, including        the circular log. First, the circular log maintains a strict
+online transaction processing [37] and enterprise servers     GC order, as it always performs GC at the beginning
+[17]. For example, Yahoo! reports that its low-latency        of the log where the least recently written KV pairs are
+workloads increasingly move from reads to writes [33].        located. This can incur a large amount of unnecessary
+   Modern KV stores optimize the performance of writes        data relocation (e.g., when the least recently written KV
+(including inserts and updates) using the Log-Structured      pairs remain valid). Second, the GC operation needs to
+Merge (LSM) tree [29]. Its idea is to maintain sequential-    query the LSM-tree to check the validity of each KV pair.
+ity of random writes through a log-structured (append-        These queries have high latencies, especially when the
+only) design [31], while supporting efficient queries         LSM-tree becomes sizable under large workloads.
+including individual key lookups and range scans. In             We propose HashKV, a high-performance KV store
+a nutshell, the LSM-tree buffers written KV pairs and         tailored for update-intensive workloads. HashKV builds
+flushes them into a multi-level tree, in which each node      on KV separation and uses a novel hash-based data
+is a fixed-size file containing sorted KV pairs and their     grouping design for value storage. Its idea is to divide
+metadata. The recently written KV pairs are stored at         value storage into fixed-size partitions and deterministi-
+higher tree levels, and are merged with lower tree levels     cally map the value of each written KV pair to a partition
+via compaction. The LSM-tree design not only improves         by hashing its key. Hash-based data grouping supports
+write performance by avoiding small random updates            lightweight updates due to deterministic mapping. More
+(which are also harmful to the endurance of solid-state       importantly, it significantly mitigates GC overhead, since
+
+
+
+USENIX Association                                                2018 USENIX Annual Technical Conference           1007
+each GC operation not only has the flexibility to select a
+partition to reclaim space, but also eliminates the queries
+to the LSM-tree for checking the validity of KV pairs.
+   On the other hand, the deterministic nature of hash-
+based data grouping restricts where KV pairs are stored.
+Thus, we propose three novel design extensions to relax
+the restriction of hash-based data grouping: (i) dynamic
+reserved space allocation, which dynamically allocates
+reserved space for extra writes if their original hash parti-           Figure 1: Data organization in LevelDB.
+tions are full given the size limit; (ii) hotness awareness,
+which separates the storage of hot and cold KV pairs            level L0 as a file called SSTable. Each SSTable has a size
+to improve GC efficiency as inspired by existing SSD            of around 2 MiB and is also immutable. It stores indexing
+designs [19, 27]; and (iii) selective KV separation, which      metadata, a Bloom filter (for quickly checking if a KV
+keeps small-size KV pairs in entirety in the LSM-tree to        pair exists in the SSTable), and all sorted KV pairs.
+simplify lookups.                                                  If L0 is full, LevelDB flushes and merges its KV
+   We implement our HashKV prototype atop LevelDB               pairs into L1 via compaction; similarly, if L1 is full, its
+[15], and show via testbed experiments that HashKV              KV pairs are flushed and merged into L2 , and so on.
+achieves 4.6× throughput and 53.4% less write traffic           The compaction process comprises three steps. First, it
+compared to the circular log design in WiscKey under            reads out KV pairs in both Li and Li+1 into memory
+update-intensive workloads. Also, HashKV generally              (where i ≥ 0). Second, it sorts the valid KV pairs (i.e.,
+achieves higher throughput and significantly less write         newly inserted or updated) by keys and reorganizes them
+traffic compared to modern KV stores, such as LevelDB           into SSTables. It also discards all invalid KV pairs (i.e.,
+and RocksDB [12], in various cases.                             deleted or superseded by new updates). Finally, it writes
+   Our work makes a case of augmenting KV separation            back all SSTables with valid KV pairs to Li+1 . Note
+with a new value management design. While the key and           that all KV pairs in each level, except L0 , are sorted by
+metadata management of HashKV now builds on Lev-                keys. In L0 , LevelDB only keeps KV pairs sorted within
+elDB, it can also adopt other KV stores with new LSM            each SSTable, but not across SSTables. This improves
+tree designs (e.g., [30, 33, 35, 39, 41, 42]). How HashKV       performance of flushing from the MemTable to disk.
+affects the performance of various LSM-tree-based KV               To perform a key lookup, LevelDB searches from L0
+stores under KV separation is posed as future work. The         to Lk−1 and returns the first associated value found. In
+source code of HashKV is available for download at:             L0 , LevelDB searches all SSTables. In each level be-
+http://adslab.cse.cuhk.edu.hk/software/hashkv.                  tween L1 and Lk−1 , LevelDB first identifies a candidate
+                                                                SSTable and checks the Bloom filter in the candidate
+2   Motivation                                                  SSTable to determine if the KV pair exists. If so, Lev-
+We use LevelDB [15] as a representative example to              elDB reads the SSTable file and searches for the KV pair;
+explain the write and read amplification problems of            otherwise, it directly searches the lower levels.
+LSM-tree-based KV stores. We show how KV separation             Limitations: LevelDB achieves high random write per-
+[23] mitigates both write and read amplifications, yet it       formance via the LSM-tree-based design, but suffers
+still cannot fully achieve efficient updates.                   from both write and read amplifications. First, the com-
+                                                                paction process inevitably incurs extra reads and writes.
+2.1 LevelDB                                                     In the worst case, to merge one SSTable from Li−1 to
+LevelDB organizes KV pairs based on the LSM-tree                Li , it reads and sorts 10 SSTables, and writes back all
+[29], which transforms small random writes into sequen-         SSTables. Prior studies show that LevelDB can have an
+tial writes and hence maintains high write performance.         overall write amplification of at least 50× [23, 39], since
+Figure 1 illustrates the data organization in LevelDB. It       it may trigger more than one compaction to move a KV
+divides the storage space into k levels (where k > 1)           pair down multiple levels under large workloads.
+denoted by L0 , L1 , · · ·, Lk−1 . It configures the capacity      In addition, a lookup operation may search multiple
+of each level Li to be a multiple (e.g., 10×) of that of its    levels for a KV pair and incur multiple disk accesses.
+upper level Li−1 (where 1 ≤ i ≤ k − 1).                         The reason is that the search in each level needs to
+   For inserts or updates of KV pairs, LevelDB first stores     read the indexing metadata and the Bloom filter in the
+the new KV pairs in a fixed-size in-memory buffer called        associated SSTable. Although the Bloom filter is used,
+MemTable, which uses a skip-list to keep all buffered           it may introduce false positives. In this case, an SSTable
+KV pairs sorted by keys. When the MemTable is full,             is still unnecessarily read from disk even though the KV
+LevelDB makes it immutable and flushes it to disk at            pair actually does not exist. Thus, each lookup typically
+
+
+
+1008    2018 USENIX Annual Technical Conference                                                      USENIX Association
+incurs multiple disk accesses. Such read amplification                                        25   LevelDB      RocksDB       vLog
+
+
+
+
+                                                                        Write amplification
+further aggravates under large workloads, as the LSM-                                         20
+tree builds up in levels. Measurements show that the read                                     15
+
+amplification reaches over 300× in the worst case [23].                                       10
+                                                                                               5
+2.2 KV Separation                                                                              0
+                                                                                                             Load         Update
+KV separation, proposed by WiscKey [23], decouples the        Figure 2: Write amplifications of LevelDB, RocksDB,
+management of keys and values to mitigate both write          and vLog in the Load and Update phases.
+and read amplifications. The rationale is that storing val-
+ues in the LSM-tree is unnecessary for indexing. Thus,        of the LSM-tree, the LSM-tree is still sizable under large
+WiscKey stores only keys and metadata (e.g., key/value        workloads, and this aggravates the query cost.
+sizes, value locations, etc.) in the LSM-tree, while stor-       To validate the limitations of KV separation, we im-
+ing values in a separate append-only, circular log called     plement a KV store prototype based on vLog (see §3.8)
+vLog. KV separation effectively mitigates write and read      and evaluate its write amplification. We consider two
+amplifications of LevelDB as it significantly reduces the     phases: Load and Update. In the Load phase, we insert
+size of the LSM-tree, and hence both compaction and           40 GiB of 1-KiB KV pairs into vLog that is initially
+lookup overheads.                                             empty; in the Update phase, we issue 40 GiB of updates
+   Since vLog follows the log-structured design [31],         to the existing KV pairs based on a Zipf distribution with
+it is critical for KV separation to achieve lightweight       a Zipfian constant of 0.99. We provision 40 GiB of space
+garbage collection (GC) in vLog, i.e., to reclaim the         for vLog, and an additional 30% (12 GiB) of reserved
+free space from invalid values with limited overhead.         space. We also disable the write cache in our prototype
+Specifically, WiscKey tracks the vLog head and the vLog       (see §3.2). Figure 2 shows the write amplification results
+tail, which correspond to the end and the beginning of        of vLog in the Load and Update phases, in terms of
+vLog, respectively. It always inserts new values to the       the ratio of the total device write size to the actual
+vLog head. When it performs a GC operation, it reads a        write size due to inserts or updates. For comparison, we
+chunk of KV pairs from the vLog tail. It first queries the    also consider two modern KV stores, LevelDB [15] and
+LSM-tree to see if each KV pair is valid. It then discards    RocksDB [12], based on their default parameters. In the
+the values of invalid KV pairs, and writes back the valid     Load phase, vLog has sufficient space to hold all KV
+values to the vLog head. It finally updates the LSM-tree      pairs and does not trigger GC, so its write amplification is
+for the latest locations of the valid values. To support      only 1.6× due to KV separation. However, in the Update
+efficient LSM-tree queries during GC, WiscKey also            phase, the updates fill up the reserved space and start to
+stores the associated key and metadata together with the      trigger GC. We see that vLog has a write amplification
+value in vLog. Note that vLog is often over-provisioned       of 19.7×, which is close to LevelDB (19.1×) and higher
+with extra reserved space to mitigate GC overhead.            than RocksDB (7.9×).
+Limitations: While KV separation reduces compaction              To mitigate GC overhead in vLog, one approach is
+and lookup overheads, we argue that it suffers from the       to partition vLog into segments and choose the best
+substantial GC overhead in vLog. Also, the GC overhead        candidate segments that minimize GC overhead based
+becomes more severe if the reserved space is limited. The     on the cost-benefit policy or its variants [26, 31, 32].
+reasons are two-fold.                                         However, the hot and cold KV pairs can still be mixed
+   First, vLog can only reclaim space from its vLog tail      together in vLog, so the chosen segments for GC may
+due to its circular log design. This constraint may incur     still contain cold KV pairs that are unnecessarily moved.
+unnecessary data movements. In particular, real-world            To address the mixture of hot and cold data, a better
+KV storage often exhibits strong locality [3], in which       approach is to perform hot-cold data grouping as in
+a small portion of hot KV pairs are frequently updated,       SSD designs [19, 27], in which we separate the storage
+while the remaining cold KV pairs receive only few or         of hot and cold KV pairs into two regions and apply
+even no updates. Maintaining a strict sequential order in     GC to each region individually (more GC operations are
+vLog inevitably relocates cold KV pairs many times and        expected to be applied to the storage region for hot KV
+increases GC overhead.                                        pairs). However, the direct implementation of hot-cold
+   Also, each GC operation queries the LSM-tree to            data grouping inevitably increases the update latency in
+check the validity of each KV pair in the chunk at            KV separation. As a KV pair may be stored in either
+the vLog tail. Since the keys of the KV pairs may be          hot or cold regions, each update needs to first query the
+scattered across the entire LSM-tree, the query overhead      LSM-tree for the exact storage location of the KV pair.
+is high and increases the latency of the GC operation.        Thus, a key motivation of our work is to enable hotness
+Even though KV separation has already reduced the size        awareness without LSM-tree lookups.
+
+
+
+USENIX Association                                                2018 USENIX Annual Technical Conference                            1009
+3   HashKV Design
+HashKV is a persistent KV store that specifically targets
+update-intensive workloads. It improves the management
+of value storage atop KV separation to achieve high
+update performance. It supports standard KV operations:
+PUT (i.e., writing a KV pair), GET (i.e., retrieving the
+value of a key), DELETE (i.e., deleting a KV pair), and
+SCAN (i.e., retrieving the values of a range of keys).
+3.1 Main Idea
+                                                                          Figure 3: HashKV architecture.
+HashKV follows KV separation [23] by storing only
+keys and metadata in the LSM-tree for indexing KV             a log-structured storage layout. Our HashKV prototype
+pairs, while storing values in a separate area called the     (see §3.8) exploits both multi-threading and batch writes
+value store. Atop KV separation, HashKV introduces            to limit random write overhead.
+several core design elements to achieve efficient value
+storage management.                                           3.2 Storage Management
+• Hash-based data grouping: Recall that vLog incurs           Figure 3 depicts the architecture of HashKV. It divides
+   substantial GC overhead in value storage. Instead,         the logical address space of the value store into fixed-
+   HashKV maps values into fixed-size partitions in the       size units called main segments. Also, it over-provisions
+   value store by hashing the associated keys. This design    a fixed portion of reserved space, which is again divided
+   achieves: (i) partition isolation, in which all versions   into fixed-size units called log segments. Note that the
+   of value updates associated with the same key must         sizes of main segments and log segments may differ; by
+   be written to the same partition, and (ii) deterministic   default, we set them as 64 MiB and 1 MiB, respectively.
+   grouping, in which the partition where a value should         For each insert or update of a KV pair, HashKV
+   be stored is determined by hashing. We leverage this       hashes its key into one of the main segments. If the main
+   design to achieve flexible and lightweight GC.             segment is not full, HashKV stores the value in a log-
+• Dynamic reserved space allocation: Since we map             structured manner by appending the value to the end of
+   values into fixed-size partitions, one challenge is that   the main segment; on the other hand, if the main segment
+   a partition may receive more updates than it can hold.     is full, HashKV dynamically allocates a free log segment
+   HashKV allows a partition to grow dynamically be-          to store the extra values in a log-structured manner.
+   yond its size limit by allocating fractions of reserved    Again, it further allocates additional free log segments
+   space in the value store.                                  if the current log segment is full. We collectively call a
+• Hotness awareness: Due to deterministic grouping, a         main segment and all its associated log segments a seg-
+   partition may be filled with the values from a mix of      ment group. Also, HashKV updates the LSM-tree for the
+   hot and cold KV pairs, in which case a GC operation        latest value location. To keep track of the storage status
+   unnecessarily reads and writes back the values of          of the segment groups and segments, HashKV uses a
+   cold KV pairs. HashKV uses a tagging approach to           global in-memory segment table to store the current end
+   relocate the values of cold KV pairs to a different        position of each segment group for subsequent inserts or
+   storage area and separate the hot and cold KV pairs,       updates, as well as the list of log segments associated
+   so that we can apply GC to hot KV pairs only and           with each segment group. Our design ensures that each
+   avoid re-copying cold KV pairs.                            insert or update can be directly mapped to the correct
+• Selective KV separation: HashKV differentiates KV           write position without issuing LSM-tree lookups on the
+   pairs by their value sizes, such that the small-size KV    write path, thereby achieving high write performance.
+   pairs can be directly stored in the LSM-tree without       Also, the updates of the values associated with the same
+   KV separation. This saves the overhead of accessing        key must go to the same segment group, and this sim-
+   both the LSM-tree and the value store for small-size       plifies GC. For fault tolerance, HashKV checkpoints the
+   KV pairs, while the compaction overhead of storing         segment table to persistent storage.
+   the small-size KV pairs in the LSM-tree is limited.           To facilitate GC, HashKV also stores the key and
+Remarks: HashKV maintains a single LSM-tree for               metadata (e.g., key/value sizes) together with the value
+indexing (instead of hash-partitioning the LSM-tree as in     for each KV pair in the value store as in WiscKey [23]
+the value store) to preserve the ordering of keys and the     (see Figure 3). This enables a GC operation to quickly
+range scan performance. Since hash-based data grouping        identify the key associated with a value when it scans the
+spreads KV pairs across the value store, it incurs random     value store. However, our GC design inherently differs
+writes; in contrast, vLog maintains sequential writes with    from vLog used by WiscKey (see §3.3).
+
+
+
+1010   2018 USENIX Annual Technical Conference                                                    USENIX Association
+   To improve write performance, HashKV holds an in-            multiple versions of updates, the version that is nearest
+memory write cache to store the recently written KV             to the end of the segment group must be the latest one
+pairs, at the expense of degrading reliability. If the key of   and correspond to the valid KV pair, while other versions
+a new KV pair to be written is found in the write cache,        are invalid. Thus, the running time for each GC operation
+HashKV directly updates the value of the cached key             only depends on the size of the segment group that needs
+in-place without issuing the writes to the LSM-tree and         to be scanned. In contrast, the GC operation in vLog
+the value store. It can also return the KV pairs from the       reads a chunk of KV pairs from the vLog tail (see §2.2).
+write cache for reads. If the write cache is full, HashKV       It queries the LSM-tree (based on the keys stored along
+flushes all the cached KV pairs to the LSM-tree and             with the values) for the latest storage location of each KV
+the value store. Note that the write cache is an optional       pair in order to check if the KV pair is valid [23]. The
+component and can be disabled for reliability concerns.         overhead of querying the LSM-tree becomes substantial
+   HashKV supports hotness awareness by keeping cold            under large workloads.
+values in a separate cold data log (see §3.4). It also             During a GC operation on a segment group, HashKV
+addresses crash consistency by tracking the updates in          constructs a temporary in-memory hash table (indexed
+both write journal and GC journal (see §3.7).                   by keys) to buffer the addresses of the valid KV pairs
+                                                                being found in the segment group. As the key and address
+3.3 Garbage Collection (GC)                                     sizes are generally small and the number of KV pairs in a
+HashKV necessitates GC to reclaim the space occupied            segment group is limited, the hash table has limited size
+by invalid values in the value store. In HashKV, GC             and can be entirely stored in memory.
+operates in units of segment groups, and is triggered
+when the free log segments in the reserved space are            3.4 Hotness Awareness
+running out. At a high level, a GC operation first selects a    Hot-cold data separation improves GC performance in
+candidate segment group and identifies all valid KV pairs       log-structured storage (e.g., SSDs [19, 27]). In fact, the
+(i.e., the KV pairs of the latest version) in the group. It     current hash-based data grouping design realizes some
+then writes back all valid KV pairs to the main segment,        form of hot-cold data separation, since the updates of the
+or additional log segments if needed, in a log-structured       hot KV pairs must be hashed to the same segment group
+manner. It also releases any unused log segments that           and our current GC policy always chooses the segment
+can be later used by other segment groups. Finally, it          group that is likely to store the hot KV pairs (see §3.3).
+updates the latest value locations in the LSM-tree. Here,       However, it is inevitable that some cold KV pairs are
+the GC operation needs to address two issues: (i) which         hashed to the segment group selected for GC, leading to
+segment group should be selected for GC; and (ii) how           unnecessary data rewrites. Thus, a challenge is to fully
+the GC operation quickly identifies the valid KV pairs in       realize hot-cold data separation to further improve GC
+the selected segment group.                                     performance.
+   Unlike vLog, which requires the GC operation to                 HashKV relaxes the restriction of hash-based data
+follow a strict sequential order, HashKV can flexibly           grouping via a tagging approach (see Figure 4). Specif-
+choose which segment group to perform GC. It currently          ically, when HashKV performs a GC operation on a
+adopts a greedy approach and selects the segment group          segment group, it classifies each KV pair in the segment
+with the largest amount of writes. Our rationale is that        group as hot or cold. Currently, we treat the KV pairs
+the selected segment group typically holds the hot KV           that are updated at least once since their last inserts
+pairs that have many updates and hence has a large              as hot, or cold otherwise (more accurate hot-cold data
+amount of writes. Thus, selecting this segment group for        identification approaches [16] can be used). For the hot
+GC likely reclaims the most free space. To realize the          KV pairs, HashKV still writes back their latest versions
+greedy approach, HashKV tracks the amount of writes             to the same segment group via hashing. However, for the
+for each segment group in the in-memory segment table           cold KV pairs, it now writes their values to a separate
+(see §3.2), and uses a heap to quickly identify which           storage area, and keeps their metadata only (i.e., without
+segment group receives the largest amount of writes.            values) in the segment group. In addition, it adds a tag
+   To check the validity of KV pairs in the selected            in the metadata of each cold KV pair to indicate its
+segment group, HashKV sequentially scans the KV pairs           presence in the segment group. Thus, if a cold KV pair
+in the segment group without querying the LSM-tree              is later updated, we know directly from the tag (without
+(note that it also checks the write cache for any latest        querying the LSM-tree) that the cold KV pair has already
+KV pairs in the segment group). Since the KV pairs are          been stored, so that we can treat it as hot based on
+written to the segment group in a log-structured manner,        our classification policy; the tagged KV pair will also
+the KV pairs must be sequentially placed according to           become invalid. Finally, at the end of the GC operation,
+their order of being updated. For a KV pair that has            HashKV updates the latest value locations in the LSM-
+
+
+
+USENIX Association                                                  2018 USENIX Annual Technical Conference          1011
+                          (meta, key, value)                    in the LSM-tree, and issues a read-ahead request to each
+                        (meta (tagged), key)                    value (via posix fadvise). It then reads all values and
+                                   ...                          returns the sorted KV pairs.
+                        (meta (tagged), key)
+                                                                3.7 Crash Consistency
+                                 Segment
+                                                                Crashes can occur while HashKV issues writes to persis-
+            (meta, key, value)                                  tent storage. HashKV addresses crash consistency based
+                        Log (cold KV pairs)                     on metadata journaling and focuses on two aspects: (i)
+                                                                flushing the write cache and (ii) GC operations.
+              Figure 4: Tagging in HashKV.
+                                                                   Flushing the write cache involves writing the KV pairs
+tree, such that the locations of the cold KV pairs point to     to the value store and updating metadata in the LSM-tree.
+the separate area.                                              HashKV maintains a write journal to track each flushing
+   With tagging, HashKV avoids storing the values of            operation. It performs the following steps when flushing
+cold KV pairs in the segment group and rewriting them           the write cache: (i) flushing the cached KV pairs to the
+during GC. Also, tagging is only triggered during GC,           value store; (ii) appending metadata updates to the write
+and does not add extra overhead to the write path. Cur-         journal; (iii) writing a commit record to the journal end;
+rently, we implement the separate storage area for cold         (iv) updating keys and metadata in the LSM-tree; and
+KV pairs as an append-only log (called the cold data log)       (v) marking the flush operation free in the journal (the
+in the value store, and perform GC on the cold data log as      freed journaling records can be recycled later). If a crash
+in vLog. The cold data log can also be put in secondary         occurs after step (iii) completes, HashKV replays the
+storage with a larger capacity (e.g., hard disks) if the cold   updates in the write journal and ensures that the LSM-
+KV pairs are rarely accessed.                                   tree and the value store are consistent.
+                                                                   Handling crash consistency in GC operations is differ-
+3.5 Selective KV Separation                                     ent, as they may overwrite existing valid KV pairs. Thus,
+HashKV supports workloads with general value sizes.             we also need to protect existing valid KV pairs against
+Our rationale is that KV separation reduces compaction          crashes during GC. HashKV maintains a GC journal
+overhead especially for large-size KV pairs, yet its ben-       to track each GC operation. It performs the following
+efits for small-size KV pairs are limited, and it incurs        steps after identifying all valid KV pairs during a GC
+extra overhead of accessing both the LSM-tree and the           operation: (i) appending the valid KV pairs that are over-
+value store. Thus, we propose selective KV separation,          written as well as metadata updates to the GC journal; (ii)
+in which we still apply KV separation to KV pairs with          writing all valid KV pairs back to the segment group; (iii)
+large value sizes, while storing KV pairs with small value      updating the metadata in the LSM-tree; and (iv) marking
+sizes in entirety in the LSM-tree. A key challenge of           the GC operation free in the journal.
+selective KV separation is to choose the KV pair size           3.8 Implementation Details
+threshold of differentiating between small-size and large-
+size KV pairs (assuming that the key size remains fixed).       We prototype HashKV in C++ on Linux. We use Lev-
+We argue that the choice depends on the deployment              elDB v1.20 [15] for the LSM-tree. Our prototype con-
+environment. In practice, we can conduct performance            tains around 6.7K lines of code (without LevelDB).
+tests for different value sizes to see when the throughput      Storage organization: We currently deploy HashKV
+gain of selective KV separation becomes significant.            on a RAID array with multiple SSDs for high I/O per-
+                                                                formance. We create a software RAID volume using
+3.6 Range Scans                                                 mdadm [22], and mount the RAID volume as an Ext4
+One critical reason of using the LSM-tree for indexing          file system, on which we run both LevelDB and the
+is its efficient support of range scans. Since the LSM-         value store. In particular, HashKV manages the value
+tree stores and sorts KV pairs by keys, it can return the       store as a large file. It partitions the value store file into
+values of a range of keys via sequential reads. However,        two regions, one for main segments and another for log
+KV separation now stores values in separate storage             segments, according to the pre-configured segment sizes.
+space, so it incurs extra reads of values. In HashKV,           All segments are aligned in the value store file, such
+the values are scattered across different segment groups,       that the start offset of each main (resp. log) segment is a
+so range scans will trigger many random reads that              multiple of the main (resp. log) segment size. If hotness
+degrade performance. HashKV currently leverages the             awareness is enabled (see §3.4), HashKV adds a separate
+read-ahead mechanism to speed up range scans by                 region in the value store file for the cold data log. Also,
+prefetching values into the page cache. For each scan           to address crash consistency (see §3.7), HashKV uses
+request, HashKV iterates over the range of sorted keys          separate files to store both write and GC journals.
+
+
+
+1012    2018 USENIX Annual Technical Conference                                                        USENIX Association
+Multi-threading: HashKV implements multi-threading            4.1 Setup
+via threadpool [36] to boost I/O performance when             Testbed: We conduct our experiments on a machine
+flushing KV pairs in the write cache to different segments    running Ubuntu 14.04 LTS with Linux kernel 3.13.0. The
+(see §3.2) and retrieving segments from segment groups        machine is equipped with a quad-core Xeon E3-1240v2,
+in parallel during GC (see §3.3).                             16 GiB RAM, and seven Plextor M5 Pro 128 GiB SSDs.
+   To mitigate random write overhead due to determin-         We attach one SSD to the motherboard as the OS drive,
+istic grouping (see §3.1), HashKV implements batch            and attach six SSDs to the LSI SAS 9201-16i host bus
+writes. When HashKV flushes KV pairs in the write             adapter to form a RAID volume (with a chunk size of
+cache, it first identifies and buffers a number of KV         4 KiB) for the KV stores (see §3.8).
+pairs that are hashed to the same segment group in a          Default setup: For LevelDB, RocksDB, HyperLevelDB,
+batch, and then issues a sequential write (via a thread) to   and PebblesDB, we use their default parameters. We
+flush the batch. A larger batch size reduces random write     allow them to use all available capacity in our SSD RAID
+overhead, yet it also degrades parallelism. Currently, we     volume, so that their major overheads come from read
+configure a batch write threshold, such that after adding a   and write amplifications in the LSM-tree management.
+KV pair into a batch, if the batch size reaches or exceeds       For vLog, we configure it to read 64 MiB from the
+the batch size threshold, the batch will be flushed; in       vLog tail (see §2.2) in each GC operation. For HashKV,
+other words, HashKV directly flushes a KV pair if its         we set the main segment size as 64 MiB and the log seg-
+size is larger than the batch write threshold.                ment size as 1 MiB. Both vLog and HashKV are config-
+                                                              ured with 40 GiB of storage space and over-provisioned
+4   Evaluation                                                with 30% (or 12 GiB) of reserved space, while their key
+                                                              and metadata storage in LevelDB can use all available
+We compare via testbed experiments HashKV with sev-
+                                                              storage space. Here, we provision the storage space of
+eral state-of-the-art KV stores: LevelDB (v1.20) [15],
+                                                              vLog and HashKV to be close to the actual KV store
+RocksDB (v5.8) [12], HyperLevelDB [11], PebblesDB
+                                                              sizes of LevelDB and RocksDB based on our evaluation
+[30], and our own vLog implementation for KV sepa-
+                                                              (see Experiment 1).
+ration based on WiscKey [23]. For fair comparison, we
+                                                                 We mount the SSD RAID volume under RAID-0 (no
+build a unified framework to integrate such systems and
+                                                              fault tolerance) by default to maximize performance. All
+HashKV. Specifically, all written KV pairs are buffered
+                                                              KV stores run in asynchronous mode and are equipped
+in the write cache and flushed when the write cache
+                                                              with a write cache of size 64 MiB. For HashKV, we set
+is full. For LevelDB, RocksDB, HyperLevelDB, and
+                                                              the batch write threshold (see §3.8) to 4 KiB, and config-
+PebblesDB, we flush all KV pairs in entirety to them;
+                                                              ure 32 and 8 threads for write cache flushing and segment
+for vLog and HashKV, we flush keys and metadata to
+                                                              retrieval in GC, respectively. We disable selective KV
+LevelDB, and values (together with keys and metadata)
+                                                              separation, hotness awareness, and crash consistency in
+to the value store. We address the following questions:
+                                                              HashKV by default, except when we evaluate them.
+• How is the update performance of HashKV compared
+   to other KV stores under update-intensive workloads?       4.2 Performance Comparison
+   (Experiment 1)                                             We compare the performance of different KV stores
+• How do the reserved space size and RAID config-             under update-intensive workloads. Specifically, we gen-
+   urations affect the update performance of HashKV?          erate workloads using YCSB [7], and fix the size of each
+   (Experiments 2 and 3)                                      KV pair as 1 KiB, which consists of the 8-B metadata
+• What is the performance of HashKV under different           (including the key/value size fields and reserved infor-
+   workloads (e.g., varying KV pair sizes and range           mation), 24-B key, and 992-B value. We assume that
+   scans)? (Experiments 4 and 5)                              each KV store is initially empty. We first load 40 GiB
+• What are the performance gains of hotness awareness         of KV pairs (or 42 M inserts) into each KV store (call it
+   and selective KV separation? (Experiments 6 and 7)         Phase P0). We then repeatedly issue 40 GiB of updates
+• How does the crash consistency mechanism affect the         over the existing 40 GiB of KV pairs three times (call
+   update performance of HashKV? (Experiment 8)               them Phases P1, P2, and P3), accounting for 120 GiB or
+• How do parameter configurations (e.g., main segment         126 M updates in total. Updates in each phase follow a
+   size, log segment size, and write cache size) affect the   heavy-tailed Zipf distribution with a Zipfian constant of
+   update performance of HashKV? (Experiment 9)               0.99. We issue the requests to each KV store as fast as
+   In our technical report [5], we present results of ad-     possible to stress-test its performance.
+ditional experiments on the storage space usage, update          Note that vLog and HashKV do not trigger GC in P0.
+performance, and range scan performance of HashKV             In P1, when the reserved space becomes full after 12 GiB
+and state-of-the-art KV stores.                               of updates, both systems start to trigger GC; in both P2
+
+
+
+USENIX Association                                                2018 USENIX Annual Technical Conference         1013
+                                          LevelDB                    HyperLevelDB                               vLog                                                vLog    HashKV                                  vLog     HashKV
+                                          RocksDB                       PebblesDB                            HashKV                                  150                                                       2
+
+
+
+
+                                                                                                                                                                                          Write size (TiB)
+                                  240                                                                                                                125
+
+
+                                                                                                                                       Thpt (KOPS)
+                                                                                                                                                                                                             1.6
+                                  180                                                                                                                100
+
+
+
+                    Thpt (KOPS)
+                                                                                                                                                                                                             1.2
+                                  120                                                                                                                 75
+                                   80                                                                                                                 50                                                     0.8
+                                   60                                                                                                                 25                                                     0.4
+                                   40                                                                                                                  0                                                       0
+                                   20                                                                                                                           10 30 50 70 90                                     10 30 50 70 90
+                                    0                                                                                                                           Reserved space size (%)                            Reserved space size (%)
+                                P0         P1        P2        P3                                                                                               (a) Throughput                                (b) Total write size
+                    (a) Throughput (load phase: P0, update phases: P1 - P3)
+                                                                                                                                                                    Cache        Meta-Flush                             GC-Lookup
+                   1.5                                                                   140                                                                        Flush          GC-RW                                  Meta-GC
+
+
+
+
+Write size (TiB)
+                                                                                                                                                              100
+
+
+                                                                                                                                                Latency (%)
+                                                                                         120
+
+
+                                                                            Size (GiB)
+                    1                                                                    100                                                                   80
+                                                                                          80                                                                   60
+                                                                                          60                                                                   40
+                   0.5                                                                    40                                                                   20
+                                                                                          20                                                                    0
+                    0                                                                      0                                                                         VH VH VH VH VH VH VH VH VH
+                                                 HLDB         vLog    HKV                                    HLDB         vLog   HKV
+                                                                                                                                                                     10% 20% 30% 40% 50% 60% 70% 80% 90%
+                                    LDB    RDB          PDB                                      LDB   RDB          PDB
+                                                                                                                                                                             Reserved space size (%)
+                             (b) Total write size                                              (c) KV store size                                              (c) Latency breakdown (‘V’= vLog; ‘H’= HashKV)
+Figure 5: Experiment 1: Performance comparison of KV                                                                                    Figure 6: Experiment 2: Impact of reserved space size.
+stores under update-intensive workloads.
+
+                                                                                                                                       fragmented SSTables from the higher level to the lower
+and P3, updates are issued to the fully filled value store
+                                                                                                                                       level, without rewriting SSTables at the lower level [30].
+and will trigger GC frequently. We include both P2 and
+                                                                                                                                       Both HyperLevelDB and PebblesDB achieve at least
+P3 to ensure that the update performance is stable.
+                                                                                                                                       twice throughput of HashKV, while incurring lower
+Experiment 1 (Load and update performance):                                                                                            write sizes than HashKV. On the other hand, they incur
+We evaluate LevelDB (LDB), RocksDB (RDB), Hy-                                                                                          significant storage overhead, and their final KV store
+perLevelDB (HDB), PebblesDB (PDB), vLog, and                                                                                           sizes are 2.2× and 1.7× over HashKV, respectively. The
+HashKV (HKV), under update-intensive workloads. We                                                                                     main reason is that both HyperLevelDB and PebblesDB
+first compare LevelDB, RocksDB, vLog, and HashKV;                                                                                      compact only selected ranges of keys to reduce write am-
+later, we also include HyperLevelDB and PebblesDB                                                                                      plification, such that there may still remain many invalid
+into our comparison.                                                                                                                   KV pairs after compaction. They also trigger compaction
+   Figure 5(a) shows the performance of each phase. For                                                                                operations less frequently than LevelDB. Both factors
+vLog and HashKV, the throughput in the load phase is                                                                                   lead to high storage overhead. We provide more detailed
+higher than those in the update phases, as the latter is                                                                               analysis on the high storage costs of HyperLevelDB
+dominated by the GC overhead. In the load phase, the                                                                                   and PebblesDB in [5]. In the following experiments, we
+throughput of HashKV is 17.1× and 3.0× over LevelDB                                                                                    focus on LevelDB, RocksDB, vLog, and HashKV, as
+and RocksDB, respectively. HashKV’s throughput is                                                                                      they have comparable storage overhead.
+7.9% slower than vLog, due to random writes introduced                                                                                 Experiment 2 (Impact of reserved space): We study
+to distribute KV pairs via hashing. In the update phases,                                                                              the impact of reserved space size on the update per-
+the throughput of HashKV is 6.3-7.9×, 1.3-1.4×, and                                                                                    formance of vLog and HashKV. We vary the reserved
+3.7-4.6× over LevelDB, RocksDB, and vLog, respec-                                                                                      space size from 10% to 90% (of 40 GiB). Figure 6
+tively. LevelDB has the lowest throughput among all                                                                                    shows the performance in Phase P3, including the update
+KV stores due to significant compaction overhead, while                                                                                throughput, the total write size, and the latency break-
+vLog also suffers from high GC overhead.                                                                                               down. Both vLog and HashKV benefit from the increase
+   Figures 5(b) and 5(c) show the total write sizes and the                                                                            in reserved space. Nevertheless, HashKV achieves 3.1-
+KV store sizes of different KV stores after all load and                                                                               4.7× throughput of vLog and reduces the write size
+update requests are issued. HashKV reduces the total                                                                                   of vLog by 30.1-57.3% across different reserved space
+write sizes of LevelDB, RocksDB and vLog by 71.5%,                                                                                     sizes. As shown in Figure 6(c), the queries to the LSM-
+66.7%, and 49.6%, respectively. Also, they have very                                                                                   tree during GC incur substantial performance overhead
+similar KV store sizes.                                                                                                                to vLog. We observe that HashKV spends less time on
+   For HyperLevelDB and PebblesDB, both of them                                                                                        updating metadata during GC (“Meta-GC”) in the LSM-
+have high load and update throughput due to their low                                                                                  tree with the increasing reserved space size due to less
+compaction overhead. For example, PebblesDB appends                                                                                    frequent GC operations.
+
+
+
+1014                              2018 USENIX Annual Technical Conference                                                                                                                                          USENIX Association
+                 LevelDB           vLog                          LevelDB           vLog                          LevelDB                    vLog                             LevelDB            vLog
+                 RocksDB        HashKV                           RocksDB        HashKV                           RocksDB                 HashKV                             RocksDB          HashKV
+                  80                                              2                                          300                                                           3
+
+
+
+   Thpt (KOPS)                                Write size (TiB)                                Thpt (MiB/s)                                              Write size (TiB)
+                 60                                              1.5                                         200                                                           2
+                 40                                               1
+                                                                                                             100                                                           1
+                 20                                              0.5
+                                                                                                                       0                                                   0
+                  0                                               0                                                         256B 1KiB 4KiB 16KiB64KiB                          256B 1KiB 4KiB 16KiB 64KiB
+                       RAID-0 RAID-5 RAID-6                            RAID-0 RAID-5 RAID-6
+                                                                                                                                   KV pair size                                      KV pair size
+                      (a) Throughput                               (b) Total write size
+                                                                                                                             (a) Throughput                                    (b) Total write size
+Figure 7: Experiment 3: Different RAID configurations.
+                                                                                              Figure 8: Experiment 4: Performance of KV stores under
+                                                                                              different KV pair sizes.
+Experiment 3 (Impact of parity-based RAID): We
+evaluate the impact of the fault tolerance configuration of                                                                 800     LevelDB           vLog
+                                                                                                                                    RocksDB        HashKV
+RAID on the update performance of LevelDB, RocksDB,
+
+                                                                                                             Thpt (MiB/s)
+                                                                                                                            600
+vLog, and HashKV. We configure the RAID volume to
+                                                                                                                            400
+run two parity-based RAID schemes, RAID-5 (single-
+device fault tolerance) and RAID-6 (double-device fault                                                                     200
+tolerance). We include the results under RAID-0 for                                                                          0
+comparison. Figure 7 shows the throughput in Phase                                                                                256B     1KiB      4KiB       16KiB                      64KiB
+                                                                                                                                                   KV pair size
+P3 and the total write size. RocksDB and HashKV are
+more sensitive to RAID configurations (larger drops in                                        Figure 9: Experiment 5: Range scan performance of
+throughput), since their performance is write-dominated.                                      different KV stores.
+Nevertheless, the throughput of HashKV is higher than
+other KV stores under parity-based RAID schemes, e.g.,                                        spectively, for 4-KiB KV pairs. HashKV achieves 2.2-
+4.8×, 3.2×, and 2.7× over LevelDB, RocksDB, and                                               5.1× throughput over vLog for KV pair sizes between
+vLog, respectively, under RAID-6. The write sizes of KV                                       256 B and 4 KiB. The performance gap between vLog
+stores under RAID-5 and RAID-6 increase by around                                             and HashKV narrows as the KV pair size increases,
+20% and 50%, respectively, compared to RAID-0, which                                          since the size of the LSM-tree decreases with fewer KV
+match the amount of redundancy of the corresponding                                           pairs. Thus, the queries to the LSM-tree of vLog are less
+parity-based RAID schemes.                                                                    expensive. For 64-KiB KV pairs, HashKV has 10.7%
+                                                                                              less throughput than vLog.
+4.3 Performance under Different Workloads                                                        When the KV pair size increases, the total write sizes
+We now study the update and range scan performance of                                         of LevelDB and RocksDB increase due to the increasing
+HashKV for different KV pair sizes.                                                           compaction overhead, while those of HashKV and vLog
+Experiment 4 (Impact of KV pair size): We study the                                           decrease due to fewer KV pairs in the LSM-tree. Over-
+impact of KV pair sizes on the update performance of                                          all, HashKV reduces the total write sizes of LevelDB,
+KV stores. We vary the KV pair size from 256 B to                                             RocksDB, and vLog by 43.2-78.8%, 33.8-73.5%, and
+64 KiB. Specifically, we increase the KV pair size by                                         3.5-70.6%, respectively.
+increasing the value size and keeping the key size fixed                                      Experiment 5 (Range scans): We compare the range
+at 24 B. We also reduce the number of KV pairs loaded                                         scan performance of KV stores for different KV pair
+or updated, such that the total size of KV pairs is fixed at                                  sizes. Specifically, we first load 40 GiB of fixed-size
+40 GiB. Figure 8 shows the update performance of KV                                           KV pairs, and then issue scan requests whose start keys
+stores in Phase P3 versus the KV pair size. The through-                                      follow a Zipf distribution with a Zipfian constant of 0.99.
+put of LevelDB and RocksDB remains similar across                                             Each scan request reads 1 MiB of KV pairs, and the total
+most KV pair sizes, while the throughput of vLog and                                          scan size is 4 GiB. Figure 9 shows the results. HashKV
+HashKV increases as the KV pair size increases. Both                                          has similar scan performance to vLog across KV pair
+vLog and HashKV have lower throughput than LevelDB                                            sizes. However, HashKV has 70.0% and 36.3% lower
+and RocksDB when the KV pair size is 256 B, since                                             scan throughput than LevelDB for 256-B and 1-KiB KV
+the overhead of writing small values to the value store                                       pairs, respectively, mainly because HashKV needs to
+is more significant. Nevertheless, HashKV can benefit                                         issue reads to both the LSM-tree and the value store and
+from selective KV separation (see Experiment 7). As                                           there is also high overhead of retrieving small values
+the KV pair size increases, HashKV also sees increas-                                         from the value store via random reads. Nevertheless,
+ing throughput. For example, HashKV achieves 15.5×                                            for KV pairs of 4 KiB or larger, HashKV outperforms
+and 2.8× throughput over LevelDB and RocksDB, re-                                             LevelDB, e.g., by 94.2% for 4-KiB KV pairs. The lower
+
+
+
+USENIX Association                                                                                                   2018 USENIX Annual Technical Conference                                        1015
+              Disabled         Enabled                       Disabled        Enabled                   Disabled            Enabled                           Disabled           Enabled
+              150                                            600                                      150                                                   400
+
+
+
+Thpt (KOPS)                               Write size (TiB)
+                                                                                        Thpt (KOPS)                                      Write size (GiB)
+                                                                                                                                                            300
+              100                                            400                                      100
+                                                                                                                                                            200
+               50                                            200                                       50
+                                                                                                                                                            100
+                0                                              0                                        0                                                     0
+                                                                                                             1:2 1:1 2:1   1:2 1:1 2:1                            1:2 1:1 2:1   1:2 1:1 2:1
+                        0.90     0.99                                 0.90     0.99                           [40,1024]     [40,4096]                              [40,1024]     [40,4096]
+                       Zipfian constant                              Zipfian constant                        Ratio [KV pair sizes]                                Ratio [KV pair sizes]
+
+                    (a) Throughput                             (b) Total write size                         (a) Throughput                                    (b) Total write size
+
+                Figure 10: Experiment 6: Hotness awareness.                                           Figure 11: Experiment 7: Selective KV separation.
+
+                                                                                                                               Disabled Enabled
+scan performance for small KV pairs is also consistent
+                                                                                                        Throughput (KOPS)        58.0     54.3
+with that of WiscKey (see Figure 12 in [23]). Note that
+                                                                                                        Total write size (GiB)  454.6    473.7
+the read-ahead mechanism (see §3.6) is critical to en-
+abling HashKV to achieve high range scan performance.                                   Table 1: Experiment 8: Performance of HashKV with
+For example, the range scan throughput of HashKV                                        crash consistency disabled and enabled.
+increases by 81.0% for 256-B KV pairs compared to
+without read-ahead. We also evaluate the range scan
+                                                                                        Experiment 8 (Crash consistency): We study the im-
+performance of HashKV after we issue update-intensive
+                                                                                        pact of the crash consistency mechanism on the perfor-
+workloads in [5].
+                                                                                        mance of HashKV. Table 1 shows the results. When
+4.4 HashKV Features                                                                     the crash consistency mechanism is enabled, the update
+We study the two optimizations of HashKV, hotness                                       throughput of HashKV in Phase P3 reduces by 6.5%
+awareness and selective KV separation, and the crash                                    and the total write size increases by 4.2%, which shows
+consistency mechanism of HashKV. We report the                                          that the impact of crash consistency mechanism remains
+throughput in Phase P3 and the total write size. We con-                                limited. Note that we verify the correctness of the crash
+sider 20% of reserved space to show that the optimized                                  consistency mechanism by crashing HashKV via code
+performance of smaller reserved space can match the                                     injection and unexpected terminations during runtime.
+unoptimized performance of larger reserved space.
+                                                                                        4.5 Parameter Choices
+Experiment 6 (Hotness awareness): We evaluate the
+impact of hotness awareness on the update performance                                   We further study the impact of parameters, including
+of HashKV. We consider two Zipfian constants, 0.9                                       the main segment size, the log segment size, and the
+and 0.99, to capture different skewness in workloads.                                   write cache size on the update performance of HashKV.
+Figure 10 shows the results when hotness awareness                                      We vary one parameter in each test, and use the de-
+is disabled and enabled. When hotness awareness is                                      fault values for other parameters. We report the update
+enabled, the update throughput increases by 113.1% and                                  throughput in Phase P3 and the total write size. Here, we
+121.3%, while the write size reduces by 42.8% and                                       focus on 20% and 50% of reserved space.
+42.5%, for Zipfian constants 0.9 and 0.99, respectively.                                Experiment 9 (Impact of main segment size, log seg-
+Experiment 7 (Selective KV separation): We evaluate                                     ment size, and write cache size): We first consider the
+the impact of selective KV separation on the update                                     main segment size. Figures 12(a) and 12(d) show the
+performance of HashKV. We consider three ratios of                                      results versus the main segment size. When the main
+small-to-large KV pairs, including 1:2, 1:1, and 2:1. We                                segment size increases, the throughput of HashKV in-
+set the small KV pair size as 40 B, and the large KV                                    creases, while the total write size decreases. The reason
+pair size as 1 KiB or 4 KiB. Figure 11 shows the results                                is that there are fewer segment groups for larger main
+when selective KV separation is disabled or enabled.                                    segments, so each segment group receives more updates
+When selective KV separation is enabled, the through-                                   in general. Each GC operation can now reclaim more
+put increases by 23.2-118.0% and 19.2-52.1% when the                                    space from more updates, so the performance improves.
+large KV pair size is 1 KiB and 4 KiB, respectively. We                                 We see that the update performance of HashKV is more
+observe higher performance gain for workloads with a                                    sensitive to the main segment size under limited reserved
+higher ratio of small KV pairs, due to the high update                                  space. For example, the throughput increases by 52.5%
+overhead of small KV pairs stored under KV separation.                                  under 20% of reserved space, but 28.3% under 50% of
+Also, selective KV separation reduces the total write size                              reserved space, when the main segment size increases
+by 14.1-39.6% and 4.1-10.7% when the large KV pair                                      from 16 MiB to 256 MiB.
+size is 1 KiB and 4 KiB, respectively.                                                     We next consider the log segment size. Figures 12(b)
+
+
+
+1016                2018 USENIX Annual Technical Conference                                                                                                       USENIX Association
+                              20%     50%                                     20%      50%                                       20%        50%
+                   150                                              150                                               150                             ready sorted blocks of SSTables to allow lightweight
+
+Thpt (KOPS)                                      Thpt (KOPS)                                       Thpt (KOPS)
+                   100                                              100                                               100                             compaction overhead, at the expense of incurring frag-
+                   50                                               50                                                50                              mentation. LSM-trie [39] maintains a trie structure and
+                    0                                                 0                                                 0                             organizes KV pairs by hash-based buckets within each
+                         16   32    64 128 256                            256 512 1024 2048 4096                             4   16    32    64 128
+                     Main segment size (MiB)                              Log segment size (KiB)                            Write cache size (MiB)    SSTable. It also organizes large Bloom filters in clustered
+                                (a)                                              (b)                                               (c)                disk blocks for efficient I/O access. LWC-store [41]
+                   0.6        20%     50%                           0.6       20%      50%                            0.6        20%        50%       decouples data and metadata management in compaction
+
+Write size (TiB)                                 Write size (TiB)                                  Write size (TiB)
+                   0.5                                              0.5                                               0.5
+                   0.4                                              0.4                                               0.4                             by merging and sorting only the metadata in SSTables.
+                   0.3                                              0.3                                               0.3
+                   0.2                                              0.2                                               0.2
+                                                                                                                                                      SkipStore [42] pushes KV pairs across non-adjacent
+                   0.1
+                     0
+                                                                    0.1
+                                                                      0
+                                                                                                                      0.1
+                                                                                                                        0
+                                                                                                                                                      levels to reduce the number of levels traversed during
+                         16   32    64 128 256
+                     Main segment size (MiB)
+                                                                          256 512 1024 2048 4096
+                                                                          Log segment size (KiB)
+                                                                                                                             4   16    32    64 128
+                                                                                                                            Write cache size (MiB)
+                                                                                                                                                      compaction. PebblesDB [30] relaxes the restriction of
+                                (d)                                              (e)                                               (f)
+                                                                                                                                                      keeping disjoint key ranges in each level, and pushes par-
+                                                                                                                                                      tial SSTables across levels to limit compaction overhead.
+ Figure 12: Experiment 9: Throughput and total write size
+ of HashKV versus the main segment size ((a) and (d)),                                                                                                KV separation: WiscKey [23] employs KV separation
+ the log segment size ((b) and (e)), and the write cache                                                                                              to remove value compaction in the LSM-tree (see §2.2).
+ size ((c) and (f)).                                                                                                                                  Atlas [18] also applies KV separation in cloud storage,
+                                                                                                                                                      in which keys and metadata are stored in an LSM-tree
+                                                                                                                                                      that is replicated, while values are separately stored and
+ and 12(e) show the results versus the log segment size.                                                                                              erasure-coded for low-redundancy fault tolerance. Cocy-
+ We see that when the log segment size increases from                                                                                                 tus [43] is an in-memory KV store that separates keys
+ 256 KiB to 4 MiB, the throughput of HashKV drops                                                                                                     and values for replication and erasure coding, respec-
+ by 16.1%, while the write size increases by 10.4%                                                                                                    tively. HashKV also builds on KV separation, and takes
+ under 20% of reserved space. The reason is that the                                                                                                  one step further to address efficient value management.
+ utilization of log segments decreases as the log segment
+ size increases. Thus, each GC operation reclaims less                                                                                                Hash-based data organization: Distributed storage sys-
+ free space, and the performance drops. However, when                                                                                                 tems (e.g., [10, 24, 38]) use hash-based data placement
+ the reserved space size increases to 50%, we do not                                                                                                  to avoid centralized metadata lookups. NVMKV [25]
+ see significant performance differences, and both the                                                                                                also uses hashing to map KV pairs in physical address
+ throughput and the write size remain almost unchanged                                                                                                space. However, it assumes sparse address space to limit
+ across different log segment sizes.                                                                                                                  the overhead of resolving hash collisions, and incurs
+    We finally consider the write cache size. Figures 12(c)                                                                                           internal fragmentation for small-sized KV pairs. In con-
+ and 12(f) show the results versus the write cache size. As                                                                                           trast, HashKV does not cause internal fragmentation as
+ expected, the throughput of HashKV increases and the                                                                                                 it packs KV pairs in each main/log segment in a log-
+ total write size drops as the write cache size increases,                                                                                            structured manner. It also supports dynamic reserved
+ since a larger write cache can absorb more updates. For                                                                                              space allocation when the main segments become full.
+ example, under 20% of reserved space, the throughput
+ of HashKV increases by 29.1% and the total write size                                                                                                6   Conclusion
+ reduces by 16.3% when the write cache size increases
+ from 4 MiB to 64 MiB.                                                                                                                                This paper presents HashKV, which enables efficient
+                                                                                                                                                      updates in KV stores under update-intensive workloads.
+ 5                       Related Work                                                                                                                 Its novelty lies in leveraging hash-based data grouping
+                                                                                                                                                      for deterministic data organization so as to mitigate GC
+ General KV stores: Many KV store designs are pro-                                                                                                    overhead. We further enhance HashKV with several
+ posed for different types of storage backends, such as                                                                                               extensions including dynamic reserved space allocation,
+ DRAM [1, 13, 14, 21], commodity flash-based SSDs                                                                                                     hotness awareness, and selective KV separation. Testbed
+ [8,9,20,23], open-channel SSDs [34], and emerging non-                                                                                               experiments show that HashKV achieves high update
+ volatile memories [25, 40]. The above KV stores and                                                                                                  throughput and reduces the total write size.
+ HashKV are designed for a single server. They can serve
+ as building blocks of a distributed KV store (e.g., [28]).
+                                                                                                                                                      Acknowledgements
+ LSM-tree-based KV stores: Many studies modify the
+ LSM-tree design for improved compaction performance.                                                                                                 The work was supported by the Research Grants Council
+ bLSM [33] proposes a new merge scheduler to pre-                                                                                                     of Hong Kong (CRF C7036-15G) and National Nature
+ vent compaction from blocking writes, and uses Bloom                                                                                                 Science Foundation of China (61772484 and 61772486).
+ filters for efficient indexing. VT-Tree [35] stitches al-                                                                                            Yongkun Li is the corresponding author.
+
+
+
+ USENIX Association                                                                                                                                       2018 USENIX Annual Technical Conference          1017
+References                                                 [16] J.-W. Hsieh, T.-W. Kuo, and L.-P. Chang. Efficient
+ [1] Redis. http://redis.io.                                    Identification of Hot Data for Flash Memory Stor-
+                                                                age Systems. ACM Trans. on Storage, 2(1):22–40,
+ [2] N. Agrawal, V. Prabhakaran, T. Wobber, J. D.               Feb 2006.
+     Davis, M. Manasse, and R. Panigrahy. Design
+     Tradeoffs for SSD Performance. In Proc. of            [17] S. Kavalanekar, B. Worthington, Q. Zhang, and
+     USENIX ATC, 2008.                                          V. Sharda. Characterization of Storage Workload
+                                                                Traces from Production Windows Servers. In Proc.
+ [3] B. Atikoglu, Y. Xu, E. Frachtenberg, S. Jiang, and         of IEEE IISWC, 2008.
+     M. Paleczny. Workload Analysis of a Large-Scale
+     Key-Value Store. In Proc. of ACM SIGMETRICS,          [18] C. Lai, S. Jiang, L. Yang, S. Lin, G. Sun, Z. Hou,
+     2012.                                                      C. Cui, and J. Cong. Atlas: Baidu’s Key-value
+                                                                Storage System for Cloud Data. In Proc. of IEEE
+ [4] D. Beaver, S. Kumar, H. C. Li, J. Sobel, and P. Va-
+                                                                MSST, 2015.
+     jgel. Finding a Needle in Haystack: Facebook’s
+     Photo Storage. In Proc. of USENIX OSDI, 2010.         [19] J. Lee and J.-S. Kim. An Empirical Study of
+                                                                Hot/Cold Data Separation Policies in Solid State
+ [5] H. H. W. Chan, Y. Li, P. P. C. Lee, and Y. Xu.
+                                                                Drives (SSDs). In Proc. of ACM SYSTOR, 2013.
+     HashKV: Enabling Efficient Updates in KV Stor-
+     age via Hashing.     Technical report, CUHK,          [20] H. Lim, B. Fan, D. G. Andersen, and M. Kamin-
+     2018. http://www.cse.cuhk.edu.hk/~pclee/                   sky. SILT: A Memory-Efficient, High-Performance
+     www/pubs/tech_hashkv.pdf.                                  Key-Value Store. In Proc. of ACM SOSP, 2011.
+ [6] F. Chang, J. Dean, S. Ghemawat, W. C. Hsieh,          [21] H. Lim, D. Han, D. G. Andersen, and M. Kaminsky.
+     D. A. Wallach, M. Burrows, T. Chandra, A. Fikes,           MICA: A Holistic Approach to Fast In-Memory
+     and R. E. Gruber. Bigtable: A Distributed Storage          Key-Value Storage. In Proc. of USENIX NSDI,
+     System for Structured Data. In Proc. of USENIX             2014.
+     OSDI, 2006.
+                                                           [22] Linux Raid Wiki. RAID setup. https://raid.
+ [7] B. F. Cooper, A. Silberstein, E. Tam, R. Ramakr-           wiki.kernel.org/index.php/RAID_setup.
+     ishnan, and R. Sears. Benchmarking Cloud Serving
+     Systems with YCSB. In Proc. of ACM SoCC, 2010.        [23] L. Lu, T. S. Pillai, A. C. Arpaci-Dusseau, and R. H.
+                                                                Arpaci-Dusseau. WiscKey: Separating Keys from
+ [8] B. Debnath, S. Sengupta, and J. Li.        Flash-          Values in SSD-Conscious Storage. In Proc. of
+     Store: High Throughput Persistent Key-value Store.         USENIX FAST, 2016.
+     Proc. of VLDB Endowment, 3(1-2):1414–1425, Sep
+     2010.                                                 [24] J. MacCormick, N. Murphy, V. Ramasubramanian,
+                                                                U. Wieder, J. Yang, and L. Zhou. Kinesis: A
+ [9] B. Debnath, S. Sengupta, and J. Li. SkimpyStash:           New Approach to Replica Placement in Distributed
+     RAM Space Skimpy Key-value Store on Flash-                 Storage Systems. ACM Trans. on Storage, 4(4):11,
+     based Storage. In Proc. of ACM SIGMOD, 2011.               2009.
+[10] G. DeCandia, D. Hastorun, M. Jampani, G. Kakula-
+                                                           [25] L. Marmol, S. Sundararaman, N. Talagala,
+     pati, A. Lakshman, A. Pilchin, S. Sivasubramanian,
+                                                                and R. Rangaswami.      NVMKV: A Scalable,
+     P. Vosshall, and W. Vogels. Dynamo: Amazon’s
+                                                                Lightweight, FTL-aware Key-Value Store. In Prof.
+     Highly Available Key-value Store. In Proc. of ACM
+                                                                of USENIX ATC, 2015.
+     SOSP, 2007.
+                                                           [26] J. N. Matthews, D. Roselli, A. M. Costello, R. Y.
+[11] R. Escriva. HyperLevelDB. https://github.
+                                                                Wang, and T. E. Anderson. Improving the Perfor-
+     com/rescrv/HyperLevelDB/.
+                                                                mance of Log-Structured File Systems with Adap-
+[12] Facebook. RocksDB. https://rocksdb.org.                    tive Methods. In Proc. of ACM SOSP, 1997.
+[13] B. Fan, D. G. Andersen, and M. Kaminsky.              [27] C. Min, K. Kim, H. Cho, S.-W. Lee, and Y. I. Eom.
+     MemC3: Compact and Concurrent MemCache                     SFS: Random Write Considered Harmful in Solid
+     with Dumber Caching and Smarter Hashing. In                State Drives. In Proc. of USENIX FAST, 2012.
+     Proc. of USENIX NSDI, 2013.
+                                                           [28] R. Nishtala, H. Fugal, S. Grimm, M. Kwiatkowski,
+[14] B. Fitzpatrick. Distributed Caching with Mem-              H. Lee, H. C. Li, R. McElroy, M. Paleczny, D. Peek,
+     cached. Linux Journal, 2004(124), Aug 2004.                P. Saab, D. Stafford, T. Tung, and enkateshwaran
+[15] S. Ghemawat and J. Dean. LevelDB. https://                 Venkataramani. Scaling Memcache at Facebook.
+     leveldb.org.                                               In Proc. of USENIX NSDI, 2013.
+
+
+
+1018   2018 USENIX Annual Technical Conference                                                 USENIX Association
+[29] P. O’Neil, E. Cheng, D. Gawlick, and E. O’Neil.       sure Coding and Replication. In Proc. of USENIX
+     The Log-Structured Merge-Tree (LSM-tree). Acta        FAST, 2016.
+     Informatica, 33(4):351–385, 1996.
+[30] P. Raju, R. Kadekodi, V. Chidambaram, and
+     I. Abraham.      PebblesDB: Building Key-Value
+     Stores using Fragmented Log-Structured Merge
+     Trees. In Proc. of ACM SOSP, 2017.
+[31] M. Rosenblum and J. K. Ousterhout. The Design
+     and Implementation of a Log-structured File Sys-
+     tem. ACM Trans. on Computer Systems, 10(1):26–
+     52, Feb 1992.
+[32] S. M. Rumble, A. Kejriwal, and J. Ousterhout. Log-
+     structured Memory for DRAM-based Storage. In
+     Proc. of USENIX FAST, 2014.
+[33] R. Sears and R. Ramakrishnan. bLSM: A General
+     Purpose Log Structured Merge Tree. In Proc. of
+     ACM SIGMOD, 2012.
+[34] Z. Shen, F. Chen, Y. Jia, and Z. Shao. DIDACache:
+     A Deep Integration of Device and Application
+     for Flash Based Key-Value Caching. In Proc. of
+     USENIX FAST, 2017.
+[35] P. J. Shetty, R. P. Spillane, R. R. Malpani, B. An-
+     drews, J. Seyster, and E. Zadok.           Building
+     Workload-Independent Storage with VT-Trees. In
+     Proc. of USENIX FAST, 2013.
+[36] threadpool.                http://threadpool.
+     sourceforge.net/.
+[37] TPC. TPC-C is an On-Line Transaction Processing
+     Benchmark. http://www.tpc.org/tpcc/.
+[38] S. A. Weil, S. A. Brandt, E. L. Miller, D. D. E.
+     Long, and C. Maltzahn. Ceph: A Scalable, High-
+     Performance Distributed File System. In Proc. of
+     USENIX OSDI, 2006.
+[39] X. Wu, Y. Xu, Z. Shao, and S. Jiang. LSM-trie:
+     An LSM-tree-based Ultra-Large Key-Value Store
+     for Small Data. In Proc. of USENIX ATC, 2015.
+[40] F. Xia, D. Jiang, J. Xiong, and N. Sun. HiKV: A
+     Hybrid Index Key-Value Store for DRAM-NVM
+     Memory Systems. In Proc. of USENIX ATC, 2017.
+[41] T. Yao, J. Wan, P. Huang, X. He, Q. Gui, F. Wu,
+     and C. Xie. A Light-weight Compaction Tree to
+     Reduce I/O Amplification toward Efficient Key-
+     Value Stores. In Proc. of IEEE MSST, 2017.
+[42] Y. Yue, B. He, Y. Li, and W. Wang. Building an
+     Efficient Put-Intensive Key-Value Store with Skip-
+     Tree. IEEE Trans. on Parallel and Distributed
+     Systems, 28(4):961–973, Apr 2017.
+[43] H. Zhang, M. Dong, and H. Chen. Efficient and
+     Available In-memory KV-Store with Hybrid Era-
+
+
+
+USENIX Association                                         2018 USENIX Annual Technical Conference   1019
+

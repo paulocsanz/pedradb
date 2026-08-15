@@ -1,0 +1,31 @@
+# Pedra formal glue
+
+Not a prover. Refuses silent drift between the production kernel, the Verus
+twin, and the handler that is supposed to call the kernel.
+
+```sh
+./scripts/pedra_formal.sh           # same as --ci
+./scripts/pedra_formal.sh --ci      # lint + clones + twins + scripts + Stateright (no Verus)
+./scripts/pedra_formal.sh --all     # --ci plus Verus when installed (warn if the toolchain is missing)
+./scripts/pedra_formal.sh --strict  # also fail on catalog status=absent (missing twins)
+./scripts/pedra_formal.sh --verus-required
+./scripts/pedra_formal.sh --extract          # crate + lake + Charon if installed
+./scripts/pedra_formal.sh --extract-required
+./scripts/lean_vote.sh --required            # lake build Vote only
+```
+
+| Check | What it refuses |
+|-------|-----------------|
+| **lint** | A kernel whose `entry` is never called from the listed production file |
+| **clones** | Raft vs store copies of `recover_commit` / `ae_ack_success` drifting |
+| **twins** | Missing `twin_kind`; a **close** twin without the entry `fn`; kernel decision tokens (`==`, `0xff`, `WouldGrant`, …) missing from the Verus twin |
+| **scripts** | A `scripts/verus_*.sh` whose `SRC=` is not in `catalog.json` |
+| **models** | Stateright through `fields_model` / `pack_model` / `ship_model` / `scan_model` + EXPLODE `recover_choose` (production `fn`, plus AS-IS mutant) |
+| **extract** | Extract crate for `vote_kernel.rs` fails; `lake build Vote` skipped unless `lake` is installed; Charon skipped unless `--extract-required` |
+| **verus** | Twin no longer verifies (skipped if `verus` is not on the machine) |
+
+`twin_kind` is `close` (entry is in the twin), `atom` (smaller `atom` fn only), or `model` (same name, stand-in domain such as `u64` for `&[u8]`). A close twin that only proves a cartoon `fn` must be relabeled `atom`.
+
+`status: absent` is a recorded gap (script exists, twin file does not). None remain after the F59/F60/F62/F80/F83 twins.
+
+Catalog is the checklist. Adding a kernel means a row in `catalog.json` in the same change as the `fn`.

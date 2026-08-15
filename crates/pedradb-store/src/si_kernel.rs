@@ -12,6 +12,7 @@
 /// Order: live local leader ≻ participating ≻ self ≻ higher `applied`.
 /// Never “first id wins” (F42: partitioned `ids[0]` poisons hist).
 #[must_use]
+#[allow(clippy::too_many_arguments)] // arity locked to verus/si_reader.rs
 pub fn si_reader_beats(
     c_leader: bool,
     c_part: bool,
@@ -63,6 +64,7 @@ pub fn point_get_watermark_as_is(_range_applied: u64, global_seq: u64) -> u64 {
 
 /// AS-IS F42: first candidate always stays (ids[0] / first local).
 #[must_use]
+#[allow(clippy::too_many_arguments)] // arity locked to verus/si_reader.rs
 pub fn si_reader_beats_as_is(
     _c_leader: bool,
     _c_part: bool,
@@ -74,6 +76,41 @@ pub fn si_reader_beats_as_is(
     _b_applied: u64,
 ) -> bool {
     false
+}
+
+/// Decision for one snapshot read against the SI GC watermark (F168).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SnapshotRead {
+    /// Snapshot predates the GC floor; history for it may be pruned.
+    /// Serving a value (or absence) would be fabricated — fail closed.
+    TooOld,
+    /// Snapshot is at/above the floor entry (`watermark - 1`) and servable
+    /// from pruned history.
+    Serve,
+}
+
+/// F168 kernel: may a read at `snapshot` be served, or must it fail as
+/// `TransactionTooOld`?
+///
+/// `maybe_gc_versions` keeps one **floor** entry at `watermark - 1`, so the
+/// smallest servable snapshot is `watermark - 1`; anything strictly older has
+/// no covering entry and the old code answered `Ok(None)` — fabricated key
+/// absence for committed data. Overflow-free form: `watermark - 1 > snapshot`
+/// (`watermark == 0` and `snapshot == u64::MAX` never reject).
+#[must_use]
+pub fn snapshot_read_plan(snapshot: u64, watermark: u64) -> SnapshotRead {
+    if watermark.saturating_sub(1) > snapshot {
+        SnapshotRead::TooOld
+    } else {
+        SnapshotRead::Serve
+    }
+}
+
+/// AS-IS F168: every snapshot is "servable" — pruned history fabricates
+/// absence (`Ok(None)`) instead of `TransactionTooOld`.
+#[must_use]
+pub fn snapshot_read_plan_as_is(_snapshot: u64, _watermark: u64) -> SnapshotRead {
+    SnapshotRead::Serve
 }
 
 #[cfg(test)]
@@ -114,6 +151,29 @@ mod tests {
         assert_eq!(point_get_watermark(3, 99), 3);
         assert_eq!(point_get_watermark_as_is(3, 99), 99);
         assert!(point_get_watermark(3, 99) < point_get_watermark_as_is(3, 99));
+    }
+
+    #[test]
+    fn snapshot_plan_fails_closed_below_floor() {
+        use super::SnapshotRead;
+        // watermark 7 ⇒ floor at 6: snapshot 5 is TooOld, 6/7 serve.
+        assert_eq!(snapshot_read_plan(5, 7), SnapshotRead::TooOld);
+        assert_eq!(snapshot_read_plan(6, 7), SnapshotRead::Serve);
+        assert_eq!(snapshot_read_plan(7, 7), SnapshotRead::Serve);
+        // No GC yet: everything serves, including snapshot 0.
+        assert_eq!(snapshot_read_plan(0, 0), SnapshotRead::Serve);
+        assert_eq!(snapshot_read_plan(0, 1), SnapshotRead::Serve);
+        // Overflow edges: max snapshot / max watermark never reject.
+        assert_eq!(snapshot_read_plan(u64::MAX, u64::MAX), SnapshotRead::Serve);
+        assert_eq!(snapshot_read_plan(u64::MAX, 0), SnapshotRead::Serve);
+        assert_eq!(snapshot_read_plan(0, u64::MAX), SnapshotRead::TooOld);
+    }
+
+    /// F168 teeth: AS-IS serves the below-floor snapshot (fabricated absence).
+    #[test]
+    fn snapshot_plan_as_is_serves_everything() {
+        use super::SnapshotRead;
+        assert_eq!(snapshot_read_plan_as_is(0, u64::MAX), SnapshotRead::Serve);
     }
 
     #[test]

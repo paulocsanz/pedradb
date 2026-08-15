@@ -97,7 +97,7 @@ RFC §9: `T-HA-leader-loss`.
 | I-DCS-1..4 create/cas/replicate | `dcs_on_store_create_replicated` | pedradb-store |
 | I-DCS-4 partition | `dcs_create_fails_without_majority_under_partition` | pedradb-store |
 | I-DCS-5 heal/retry no brick | `dcs_create_not_committed_heal_retry_put_ok`; `dcs_create_not_committed_survives_reopen_without_installing_lock` | pedradb-store |
-| Apply idempotent Create | `command::tests::encode_round_trip_and_apply_cas`, `dcs_apply_cas_failed_does_not_stick_pipeline` | pedradb-dcs / store |
+| Apply idempotent Create (no overwrite) | `apply_create_does_not_overwrite_existing`, `bind_then_cas_takes_expired_lock_second_loses`, `dcs_apply_cas_failed_does_not_stick_pipeline`, `dcs_apply_create_does_not_steal_live_lock` | pedradb-dcs / store |
 
 RFC §9: `T-DCS-*`, `T-DCS-APPLY-*`.
 

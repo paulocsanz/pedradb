@@ -10,9 +10,11 @@
 //!
 //! # Limits (honest)
 //!
-//! - **Flush on the primary rotates/truncates the WAL.** After flush, a shipper
-//!   whose cursor points past the new file length returns [`ShipError::WalRotated`];
-//!   you must re-bootstrap the replica (copy SSTs/MANIFEST, or rebuild from snapshot).
+//! - **Flush on the primary rotates/truncates the WAL.** A shipper detects
+//!   this via a prefix stamp (F165): shrink past the cursor, rewritten prefix
+//!   (rotate-then-regrow), or a vanished file all return
+//!   [`ShipError::WalRotated`]; you must re-bootstrap the replica (copy
+//!   SSTs/MANIFEST, or rebuild from snapshot).
 //! - This is **not** Raft. For ordered multi-node apply of a shared log, see
 //!   `pedradb-apply`. WAL ship is for **asynchronous read replicas** of one writer.
 //! - The replica must not take local writes while shipping (single-writer primary).
@@ -22,6 +24,9 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
+pub mod ship_kernel;
+
+use ship_kernel::{pull_plan, PullPlan, SHIP_STAMP_BYTES};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
@@ -37,7 +42,9 @@ pub enum ShipError {
     #[error("io: {0}")]
     Io(#[from] std::io::Error),
     /// Primary WAL was truncated/replaced (flush/rotate); cursor is invalid.
-    #[error("WAL rotated or truncated (file len {file_len} < cursor {cursor}); re-bootstrap replica")]
+    #[error(
+        "WAL rotated or truncated (file len {file_len} < cursor {cursor}); re-bootstrap replica"
+    )]
     WalRotated {
         /// Current primary WAL length.
         file_len: u64,
@@ -65,6 +72,27 @@ pub struct WalShipper {
     offset: u64,
     /// Max bytes returned by a single pull (chunked ship).
     max_pull_bytes: u64,
+    /// Prefix stamp of the WAL when the cursor was established (F165 guard).
+    ///
+    /// `None` until the first non-empty pull (`from_start` on a fresh primary).
+    stamp: Option<Vec<u8>>,
+}
+
+/// Read the first `n` bytes of `path` (caller guarantees `n <= len`).
+///
+/// # Errors
+/// I/O.
+fn read_prefix_on<E: Env>(env: &E, path: &Path, n: u64) -> ShipResult<Vec<u8>> {
+    let n = usize::try_from(n).map_err(|_| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "prefix does not fit usize",
+        )
+    })?;
+    let mut f = env.open_read(path)?;
+    let mut buf = vec![0u8; n];
+    f.read_exact(&mut buf)?;
+    Ok(buf)
 }
 
 impl WalShipper {
@@ -85,8 +113,17 @@ impl WalShipper {
     /// Metadata I/O if the WAL exists but cannot be stat'd.
     pub fn follow_on<E: Env>(env: &E, primary_dir: impl AsRef<Path>) -> ShipResult<Self> {
         let wal_path = primary_dir.as_ref().join(WAL_FILE_NAME);
+        let mut stamp = None;
         let offset = if env.exists(&wal_path) {
-            env.metadata_len(&wal_path)?
+            let len = env.metadata_len(&wal_path)?;
+            if len > 0 {
+                stamp = Some(read_prefix_on(
+                    env,
+                    &wal_path,
+                    len.min(SHIP_STAMP_BYTES as u64),
+                )?);
+            }
+            len
         } else {
             0
         };
@@ -94,16 +131,22 @@ impl WalShipper {
             wal_path,
             offset,
             max_pull_bytes: DEFAULT_MAX_PULL_BYTES,
+            stamp,
         })
     }
 
     /// Ship from byte 0 (full WAL catch-up for a fresh replica).
+    ///
+    /// The prefix stamp is captured at the first non-empty pull: with the
+    /// cursor at 0 there is no gap to miss, so a rotation before the first
+    /// pull is not (and need not be) detected.
     #[must_use]
     pub fn from_start(primary_dir: impl AsRef<Path>) -> Self {
         Self {
             wal_path: primary_dir.as_ref().join(WAL_FILE_NAME),
             offset: 0,
             max_pull_bytes: DEFAULT_MAX_PULL_BYTES,
+            stamp: None,
         }
     }
 
@@ -143,7 +186,10 @@ impl WalShipper {
     /// included; replica recovery skips a truncated tail (same as crash).
     ///
     /// # Errors
-    /// I/O or [`ShipError::WalRotated`] if the file shrank (flush).
+    /// I/O or [`ShipError::WalRotated`] when the primary WAL no longer
+    /// continues the shipped stream: shrunk past the cursor, rewritten
+    /// prefix (flush rotates `CURRENT.log` in place, F165), or missing file
+    /// under an advanced cursor.
     pub fn pull(&mut self) -> ShipResult<Option<Vec<u8>>> {
         self.pull_on(&StdEnv)
     }
@@ -151,35 +197,51 @@ impl WalShipper {
     /// Like [`Self::pull`] with an explicit [`Env`].
     ///
     /// # Errors
-    /// I/O or [`ShipError::WalRotated`] if the file shrank (flush).
+    /// I/O or [`ShipError::WalRotated`] (shrink, prefix rewrite, vanished file).
     pub fn pull_on<E: Env>(&mut self, env: &E) -> ShipResult<Option<Vec<u8>>> {
-        if !env.exists(&self.wal_path) {
-            return Ok(None);
+        let (file_len, stamp_now) = if env.exists(&self.wal_path) {
+            let len = env.metadata_len(&self.wal_path)?;
+            if self.stamp.is_none() && len > 0 {
+                self.stamp = Some(read_prefix_on(
+                    env,
+                    &self.wal_path,
+                    len.min(SHIP_STAMP_BYTES as u64),
+                )?);
+            }
+            let stamp_now = match &self.stamp {
+                Some(then) => read_prefix_on(env, &self.wal_path, (then.len() as u64).min(len))?,
+                None => Vec::new(),
+            };
+            (Some(len), stamp_now)
+        } else {
+            (None, Vec::new())
+        };
+        match pull_plan(
+            file_len,
+            self.offset,
+            self.max_pull_bytes,
+            self.stamp.as_deref(),
+            &stamp_now,
+        ) {
+            PullPlan::Rotated { file_len, cursor } => {
+                Err(ShipError::WalRotated { file_len, cursor })
+            }
+            PullPlan::UpToDate => Ok(None),
+            PullPlan::Ship { bytes } => {
+                let take_usize = usize::try_from(bytes).map_err(|_| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::InvalidInput,
+                        "pull chunk does not fit usize",
+                    )
+                })?;
+                let mut f = env.open_read(&self.wal_path)?;
+                f.seek(SeekFrom::Start(self.offset))?;
+                let mut buf = vec![0u8; take_usize];
+                f.read_exact(&mut buf)?;
+                self.offset = self.offset.saturating_add(bytes);
+                Ok(Some(buf))
+            }
         }
-        let len = env.metadata_len(&self.wal_path)?;
-        if len < self.offset {
-            return Err(ShipError::WalRotated {
-                file_len: len,
-                cursor: self.offset,
-            });
-        }
-        if len == self.offset {
-            return Ok(None);
-        }
-        let remaining = len - self.offset;
-        let take = remaining.min(self.max_pull_bytes);
-        let take_usize = usize::try_from(take).map_err(|_| {
-            std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                "pull chunk does not fit usize",
-            )
-        })?;
-        let mut f = env.open_read(&self.wal_path)?;
-        f.seek(SeekFrom::Start(self.offset))?;
-        let mut buf = vec![0u8; take_usize];
-        f.read_exact(&mut buf)?;
-        self.offset = self.offset.saturating_add(take);
-        Ok(Some(buf))
     }
 }
 
@@ -415,27 +477,116 @@ mod tests {
         let mut db = open_primary(&primary);
         db.put(b"x", b"y").unwrap();
         let mut shipper = WalShipper::from_start(&primary);
-        // Drain current WAL so cursor is at EOF.
+        // Drain current WAL so cursor is at EOF (and the stamp is captured).
         let _ = shipper.pull().unwrap();
         db.flush().unwrap(); // truncates / replaces WAL
-        // Write something so file may be shorter or reset.
         db.put(b"after", b"z").unwrap();
         db.close().unwrap();
 
-        // Cursor likely past new file start; pull must report rotate or succeed
-        // only if file grew past old offset (unlikely after truncate).
+        // F165: even when the fresh file regrows past the stale cursor, the
+        // prefix stamp differs and pull must fail closed.
         match shipper.pull() {
             Err(ShipError::WalRotated { .. }) => {}
-            Ok(None) => {
-                // If implementation recreated WAL at same or larger size without
-                // shrinking below cursor, treat as non-fatal for this host FS.
-            }
-            Ok(Some(_)) => {
-                // Appended after recreate with larger offset path — ok.
-            }
-            Err(e) => panic!("unexpected {e:?}"),
+            other => panic!("expected WalRotated, got {other:?}"),
         }
         let _ = std::fs::remove_dir_all(&primary);
+    }
+
+    /// F165 REAL: rotate (flush) then regrow past the stale cursor. Length-only
+    /// detection returned `Ok(Some(misaligned bytes))` and the records below
+    /// the cursor were never shipped — a silently stale replica.
+    #[test]
+    fn rotation_regrow_past_cursor_fails_closed() {
+        let primary = temp_dir("f165");
+        let mut db = open_primary(&primary);
+        for i in 0..40u8 {
+            db.put([b'k', i], [b'v', i]).unwrap();
+        }
+        let mut shipper = WalShipper::follow(&primary).unwrap();
+        let cursor = shipper.offset();
+        assert!(cursor > 0, "pre-flush WAL must be non-empty");
+
+        db.flush().unwrap(); // rotate: CURRENT.log truncated to 0, same path
+        let len_after_flush = std::fs::metadata(primary.join(WAL_FILE_NAME))
+            .unwrap()
+            .len();
+        assert!(
+            len_after_flush < cursor,
+            "flush must rotate (truncate) the WAL for this hazard"
+        );
+        // Regrow the fresh log past the stale cursor (two rounds of writes).
+        for i in 0..40u8 {
+            db.put([b'j', i], [b'w', i]).unwrap();
+        }
+        for i in 0..40u8 {
+            db.put([b'm', i], [b'u', i]).unwrap();
+        }
+        let len_now = std::fs::metadata(primary.join(WAL_FILE_NAME))
+            .unwrap()
+            .len();
+        assert!(len_now > cursor, "regrow must pass the stale cursor");
+        match shipper.pull() {
+            Err(ShipError::WalRotated { .. }) => {}
+            Ok(Some(bytes)) => panic!(
+                "F165 AS-IS: shipped {} misaligned bytes; records below cursor {cursor} never shipped",
+                bytes.len()
+            ),
+            other => panic!("expected WalRotated, got {other:?}"),
+        }
+        db.close().unwrap();
+        let _ = std::fs::remove_dir_all(&primary);
+    }
+
+    /// F165: a WAL deleted under an advanced cursor must not read as "caught up".
+    #[test]
+    fn vanished_wal_under_cursor_fails_closed() {
+        let primary = temp_dir("f165-gone");
+        {
+            let mut db = open_primary(&primary);
+            db.put(b"a", b"1").unwrap();
+            db.close().unwrap();
+        }
+        let mut shipper = WalShipper::follow(&primary).unwrap();
+        assert!(shipper.offset() > 0);
+        std::fs::remove_file(primary.join(WAL_FILE_NAME)).unwrap();
+        match shipper.pull() {
+            Err(ShipError::WalRotated { .. }) => {}
+            Ok(None) => panic!("F165 AS-IS: vanished WAL silently reported up-to-date"),
+            other => panic!("expected WalRotated, got {other:?}"),
+        }
+        let _ = std::fs::remove_dir_all(&primary);
+    }
+
+    /// No false positive: rotation before the first `from_start` pull ships the
+    /// whole fresh log (cursor 0 has no gap to miss).
+    #[test]
+    fn from_start_after_rotation_ships_fresh_log() {
+        let primary = temp_dir("f165-fp");
+        let replica = temp_dir("f165-fp-r");
+        {
+            let mut db = open_primary(&primary);
+            for i in 0..10u8 {
+                db.put([b'k', i], [b'v', i]).unwrap();
+            }
+            db.flush().unwrap(); // rotate
+            for i in 0..10u8 {
+                db.put([b'j', i], [b'w', i]).unwrap();
+            }
+            db.close().unwrap();
+        }
+        let mut shipper = WalShipper::from_start(&primary);
+        catch_up(&mut shipper, &replica).unwrap();
+        let db = open_replica(&replica, true).unwrap();
+        for i in 0..10u8 {
+            assert_eq!(
+                db.get(&[b'j', i]).as_deref(),
+                Some([b'w', i].as_slice()),
+                "post-rotate key {i} must ship from a cursor-0 catch-up"
+            );
+        }
+        db.close().unwrap();
+        let _ = std::fs::remove_dir_all(&primary);
+        let _ = std::fs::remove_dir_all(&replica);
     }
 
     #[test]

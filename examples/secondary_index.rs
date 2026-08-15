@@ -19,7 +19,7 @@ fn upsert_user(db: &mut Db, id: &[u8], email: &[u8], payload: &[u8]) -> Result<(
     let mut tx = db.begin();
     tx.put(&pk, payload)?;
     tx.put(&idx, id)?;
-    tx.commit()
+    tx.commit().map(|_| ())
 }
 
 fn lookup_id_by_email(db: &Db, email: &[u8]) -> Option<Vec<u8>> {
@@ -39,7 +39,7 @@ fn main() -> Result<()> {
             auto_compact_sst_count: None,
             auto_compact_sst_bytes: None,
             exclusive: true,
-                large_value_threshold: None,
+            large_value_threshold: None,
         },
     )?;
 
@@ -57,7 +57,10 @@ fn main() -> Result<()> {
     assert!(db.get(b"u/99").is_none());
     assert!(lookup_id_by_email(&db, b"bad@ex.com").is_none());
 
-    println!("secondary index example ok (id={})", String::from_utf8_lossy(&id));
+    println!(
+        "secondary index example ok (id={})",
+        String::from_utf8_lossy(&id)
+    );
     db.close()?;
     let _ = std::fs::remove_dir_all(&dir);
     Ok(())

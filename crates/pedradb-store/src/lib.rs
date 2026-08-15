@@ -91,7 +91,8 @@ pub use layers::{
 pub use msg::PeerMsg;
 pub use si_kernel::{
     point_get_prefer_applied, point_get_prefer_applied_as_is, point_get_watermark,
-    point_get_watermark_as_is, si_reader_beats, si_reader_beats_as_is,
+    point_get_watermark_as_is, si_reader_beats, si_reader_beats_as_is, snapshot_read_plan,
+    snapshot_read_plan_as_is, SnapshotRead,
 };
 pub use snapshot_kernel::{
     snapshot_needs_txn_meta_clear, snapshot_needs_txn_meta_clear_as_is, snapshot_touches_user_key,
@@ -5670,8 +5671,22 @@ impl<E: Env> StoreCluster<E> {
     /// the caller's responsibility.
     ///
     /// # Errors
-    /// Store get errors for keys never versioned in this process.
+    /// [`StoreError::TransactionTooOld`] when `snapshot` predates the SI GC
+    /// floor (F168: pruned history must fail closed, not fabricate absence);
+    /// store get errors for keys never versioned in this process.
     pub fn get_at_version(&self, key: &[u8], snapshot: u64) -> Result<Option<Vec<u8>>> {
+        // F168: below the floor entry (`watermark - 1`) the pruned history has
+        // no covering version — the old path answered `Ok(None)`, silently
+        // reporting committed data as absent to an old snapshot.
+        if matches!(
+            si_kernel::snapshot_read_plan(snapshot, self.safe_watermark),
+            SnapshotRead::TooOld
+        ) {
+            return Err(StoreError::TransactionTooOld {
+                snapshot,
+                current: self.commit_generation,
+            });
+        }
         if let Some(hist) = self.key_history.get(key) {
             for (g, val) in hist.iter().rev() {
                 if *g <= snapshot {

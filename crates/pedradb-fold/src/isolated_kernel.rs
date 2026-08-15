@@ -9,18 +9,38 @@
 pub const ISOLATED_CHILD_SEP: u8 = b'/';
 
 /// `key` is this id, or a path child (`id || '/' || rest`).
+///
+/// Byte loop, not `starts_with` / `==` on slices: those extract to Aeneas
+/// axioms. Indexing after a length check is in the Lean std.
 #[must_use]
 pub fn isolated_id_matches(key: &[u8], id: &[u8]) -> bool {
-    if key == id {
-        return true;
+    if key.len() < id.len() {
+        return false;
     }
-    key.starts_with(id) && key.get(id.len()) == Some(&ISOLATED_CHILD_SEP)
+    let mut i = 0;
+    while i < id.len() {
+        if key[i] != id[i] {
+            return false;
+        }
+        i += 1;
+    }
+    key.len() == id.len() || key[i] == ISOLATED_CHILD_SEP
 }
 
-/// AS-IS F83: any `starts_with(id)` — `/vm/vm-a` matches `/vm/vm-ab`.
+/// AS-IS F83: any prefix match — `/vm/vm-a` matches `/vm/vm-ab`.
 #[must_use]
 pub fn isolated_id_matches_as_is(key: &[u8], id: &[u8]) -> bool {
-    key.starts_with(id)
+    if key.len() < id.len() {
+        return false;
+    }
+    let mut i = 0;
+    while i < id.len() {
+        if key[i] != id[i] {
+            return false;
+        }
+        i += 1;
+    }
+    true
 }
 
 /// After an exact id, a continuation byte is a child iff it is `'/'`.

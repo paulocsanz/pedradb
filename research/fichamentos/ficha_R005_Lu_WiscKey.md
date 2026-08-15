@@ -285,8 +285,8 @@ No texto (não a biblio inteira):
   (todo o §2.4); (4) comparar contra Rocks com compressão e tuning, não
   contra LevelDB 1.18 sem compressão em 840 EVO 2016.
 
-Fichas irmãs ainda inexistentes: R018 HashKV (GC local), R006 Monkey,
-R010 Rocks Experience, R088 Pillai (a propriedade de FS).
+Fichas irmãs: R006 Monkey (D4). Ainda inexistentes: R018 HashKV (GC
+local), R010 Rocks Experience, R088 Pillai (a propriedade de FS).
 
 ## Avaliação crítica
 

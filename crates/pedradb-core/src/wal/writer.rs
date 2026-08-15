@@ -10,7 +10,7 @@ use std::io::{Seek, Write};
 use crate::error::Result;
 
 use super::crc;
-use super::format::{BLOCK_SIZE, HEADER_SIZE, RecordType};
+use super::format::{RecordType, BLOCK_SIZE, HEADER_SIZE};
 
 /// A streaming WAL writer over any `Write + Seek` sink.
 ///
@@ -103,8 +103,8 @@ impl<W: Write + Seek> WalWriter<W> {
     /// Panics if `data.len()` exceeds `u16::MAX`, which is impossible by
     /// construction since fragments are bounded by a block's payload capacity.
     fn emit_physical_record(&mut self, rtype: RecordType, data: &[u8]) -> Result<()> {
-        let length_u16 = u16::try_from(data.len())
-            .expect("physical record fragment must fit in u16");
+        let length_u16 =
+            u16::try_from(data.len()).expect("physical record fragment must fit in u16");
 
         let checksum = crc::record_checksum(rtype as u8, length_u16, data);
 

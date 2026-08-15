@@ -1,8 +1,9 @@
 # Correlation — paper → Pedra / Montanha
 
-**Updated:** 2026-08-14
-**Status:** correlação; bloco “settled” = PDF no disco, **não** ficha D3
-ainda. Norma: [`../QUALIDADE.md`](../QUALIDADE.md).
+**Updated:** 2026-08-15
+**Status:** correlação. Settled **com ficha:** R005–R007, R010, R012–R014, R016–R018, R031, R041, R043–R045, R048. O resto da
+tabela “settled mappings” ainda é PDF-no-disco sem D3. Norma:
+[`../QUALIDADE.md`](../QUALIDADE.md).
 
 **Rule:** add a row only when the paper is `have-pdf` or `ficha`. Rows below that are only `listed` are *intended* mappings (hypotheses), grouped so the next reader knows where to look. Promote a row out of "intended" when the ficha lands.
 
@@ -19,11 +20,22 @@ Existing product analysis (not replaced by this file):
 | ID | Paper | Pedra target | Current decision |
 |----|-------|--------------|------------------|
 | R005 | WiscKey FAST'16 | `pedradb-core` vlog | **ficha D4.** Spill `SHIP` (L4). Rewrite GC `SHIP` (L5a). Incremental head/tail `OPEN` (L5). Drop WAL `REFUSE` (L5b). |
-| R006 | Monkey SIGMOD'17 | SST bloom FPR allocation | uniform Bloom shipped; Monkey allocation **not** shipped |
-| R007 | Dostoevsky SIGMOD'18 | compact policy | Lazy Leveling **do not ship** until measured |
+| R006 | Monkey SIGMOD'17 | SST bloom FPR allocation | **ficha D4.** L1 Bloom-por-SST `SHIP`. L2 FPR \(\propto n_i\) `MEASURE` (HDD 80% ≠ Pedra; \(L\le 4\)) |
+| R007 | Dostoevsky SIGMOD'18 | compact policy | **ficha D4.** L3 Lazy Leveling `REFUSE` (exige L2; short range piora; \(L\le 4\)) |
+| R010 | Rocks Experience FAST'21 | kernel / ops | **ficha D4.** L9 `SHIP`. Espaço>WA. L25–L27 `MEASURE` |
+| R018 | HashKV ATC'18 | `vlog` / 0028 | **ficha D4.** L19 hash-groups `MEASURE` (não P0). Fig. 2 19.7× mata tail como próximo GC. L4/L5b confirmados |
+| R012 | Compaction design space VLDB'21 | `compact_levels` | **ficha D4.** 4 primitivas. L35 LO+1 `MEASURE`. L36 menu `REFUSE`. L37 universal `REFUSE`. L38 agora na ficha R031 |
+| R031 | Lethe SIGMOD'20 | tombstone / compact | **ficha D4.** L38 FADE `MEASURE` (depois L35, com SLA). L43 KiWi `REFUSE` |
+| R013 | Spooky VLDB'22 | `compact_levels` | **ficha D4.** L11 Spooky `MEASURE` depois de L35. Full-do-par ≠ Full-de-\(L\) (50%) |
+| R014 | Endure VLDB'22 | knobs / RFC-0012 | **ficha D4.** L12 robust static `MEASURE` (0 knobs hoje). Sempre leveling. Sem tuner |
+| R016 | ADOC FAST'23 | flush / stall | **ficha D4.** L41 taxonomia MMO/L0O/RDO. L42 tuner `REFUSE`. Complementar a SILK |
+| R017 | SILK ATC'19 | flush / p99 | **ficha D4.** L41 stall names + flush>L0 `MEASURE`. Não scheduler completo |
 | R032 | Real-Time LSM / LASER | HTAP layout-in-LSM | projection / learner only; not a second primary |
-| R041 | Percolator OSDI'10 | Montanha TX | 2PC/OCC face; fichar against store 2PC |
-| R048 | TiDB VLDB'20 | Montanha + fold/HTAP | learner replica = fold/column path, not voter |
+| R041 | Percolator OSDI'10 | Montanha TX | **ficha D4.** L22/L23 `REFUSE`. OCC kernel > SI. Store 2PC ≠ Figs. 4–6 |
+| R043 | FoundationDB SIGMOD'21 | Montanha + DST | **ficha D4.** L9 layers. L28 swarm MEASURE. L29 role-split `REFUSE`. L30 5 s `REFUSE` |
+| R044 | Record Layer SIGMOD'19 | `-index` / `-sql` / recipes | **ficha D4.** L9 layers. L31 same-TX idx `SHIP`. L32 produto RL `REFUSE`. L33 VERSION `MEASURE`. L34 atomics `REFUSE` |
+| R045 | CockroachDB SIGMOD'20 | Montanha store / `-raft` | **ficha D4.** L9/L29 confirmados. L39 lease `MEASURE`. L40 HLC/intents CRDB `REFUSE` |
+| R048 | TiDB VLDB'20 | Montanha + fold/HTAP | **ficha D4.** L8 fold≠voter `SHIP`. L24 read-index no fold `REFUSE`. TiFlash ≠ fold |
 | R066 | HTAP survey 2024 | product shape | triangle is doctrine; see HTAP note §0 |
 | R068 | ByteHTAP VLDB'22 | layer 3 | composed vs converged: we pick named freshness |
 | R069 | veDB-HTAP VLDB'25 | layer 3 | same |
@@ -40,9 +52,7 @@ Use this as the reading order inside each crate. Details and URLs live in `CATAL
 
 | IDs | Why |
 |-----|-----|
-| R001 O'Neil LSM, R004 bLSM, R009–R012 Rocks experience + compaction space | vocabulary and the incumbent we are measured against |
-| R013 Spooky, R014–R015 Endure, R016 ADOC, R017 SILK | next compact / stall work after RFC-0014 |
-| R018 HashKV, R031 Lethe | vlog GC + deletes that must actually disappear |
+| R001 O'Neil LSM, R004 bLSM, R009 Rocks workloads | vocabulary and the incumbent we are measured against |
 | R022–R024 REMIX / Disco / GRF | range amp when `scan` is real |
 | R027–R028 EcoTune / How-to-grow | whether we ever add per-level T |
 | R029–R030 SplinterDB | NVMe-era alternative; steal ideas, not the Bε-tree, unless measured |
@@ -54,15 +64,15 @@ Use this as the reading order inside each crate. Details and URLs live in `CATAL
 
 | IDs | Why |
 |-----|-----|
-| R043 FDB, R087 MODIST | DST as a development method, not a tool add-on |
+| R043 FDB, R087 MODIST | **R043 ficha D4.** DST = método (sim do binário + seed). L28 MEASURE swarm |
 | R088 Pillai, R089 Alagappan | torn write + consensus recovery |
-| R010 RocksDB experience §testing | what production LSM teams actually test |
+| R010 Rocks Experience FAST'21 | **ficha D4.** L9 confirmado. Espaço>WA. L25 WAL-skip MEASURE; L26 file checksum; L27 user-ts |
 
 ### Montanha / `pedradb-store` / `pedradb-raft`
 
 | IDs | Why |
 |-----|-----|
-| R042 Spanner, R043 FDB, R045–R047 Cockroach 2020/22/25, R056 leases 2026 | unbundled TX, multi-region, leases |
+| R042 Spanner, R046–R047 Cockroach 2022/25, R056 leases 2026 | multi-region / serverless / leases — depois de L39 |
 | R041 Percolator | OCC + oracle + 2PC on KV |
 | R049–R050 OceanBase | LSM in a distributed RDBMS; intra-L0 compact |
 | R052 Raft, R053 Calvin | consensus vs deterministic apply |
@@ -72,8 +82,8 @@ Use this as the reading order inside each crate. Details and URLs live in `CATAL
 
 | IDs | Why |
 |-----|-----|
-| R044 Record Layer | indexes + records as KV projections |
-| R048 TiDB / TiFlash | learner materializer |
+| R044 Record Layer | **ficha D4.** indexes + records as KV projections in the same TX (L31). Not the Java RL product (L32) |
+| R048 TiDB / TiFlash | learner **papel** (não voter); materializer colunar + read-index **não** são o fold |
 | R090 Naiad | incremental fold vocabulary |
 | R054 Aurora, R055 Snowflake | log + layers / cloud disagg (product, not kernel) |
 | R066–R081 HTAP set | planner + projection, not SST flags |
@@ -83,8 +93,9 @@ Use this as the reading order inside each crate. Details and URLs live in `CATAL
 | Tension | Papers | What closes it |
 |---------|--------|----------------|
 | Monkey FPR vs uniform Bloom | R006 vs shipped RFC-0014 | bench + a DST that the allocator cannot lie about miss rate |
-| Lazy Leveling vs current whole-merge | R007 vs RFC-0012 | `baseline` write amp + space amp on one named workload |
-| Vlog GC algorithm | R005, R018 | a GC that never resurrects, measured on large-value soak |
+| Lazy Leveling vs current whole-merge | R007 vs RFC-0012 | **fechado L3 REFUSE** (ficha R007). Reabrir só com o gate da ficha |
+| Full-do-par vs file-granular LO+1 | R012 vs `compact_levels` | L35: WA/stall no `benches/baseline` com \(L=3\) |
+| Vlog GC algorithm | R005, R018 | **R018 D4:** tail = Fig. 2 19.7×. Hash groups L19 MEASURE. Rewrite/blobs ficam até soak nomeado perder |
 | LSM vs Splinter/Turtle hybrid | R029, R040 | only if we lose a published workload by a lot |
 | Compact-as-a-service | R059 | only after local compact is boring and correct |
 | Column-in-kernel vs learner | R032 vs R048 vs HTAP note | product RFC, not a compact patch |

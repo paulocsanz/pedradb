@@ -1,8 +1,9 @@
 //! PedraDB storage Env backed by **Linux io_uring** for write + fsync paths.
 //!
 //! # Why a separate crate
-//! `pedradb-core` is `#![forbid(unsafe_code)]`. Submitting SQEs requires `unsafe`,
-//! so the ring lives here. The engine still speaks only [`Env`] / [`EnvFile`].
+//! `pedradb-core` is `#![forbid(unsafe_code)]`. Submitting SQEs and calling
+//! `posix_fadvise` require `unsafe`, so they live here. The engine still
+//! speaks only [`Env`] / [`EnvFile`].
 //!
 //! # Platform
 //! - **Linux:** real `io_uring` for `write`, `fsync` / `fdatasync`.
@@ -31,7 +32,9 @@ use std::sync::Arc;
 
 #[cfg(target_os = "linux")]
 use parking_lot::Mutex;
-use pedradb_core::{Db, Env, EnvFile, OpenOptions as DbOpen, Result as CoreResult, StdEnv};
+use pedradb_core::{
+    AdviseKind, Db, Env, EnvFile, OpenOptions as DbOpen, Result as CoreResult, StdEnv,
+};
 
 /// Which I/O backend this env is using.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -133,11 +136,7 @@ impl IoUringEnv {
     ///
     /// # Errors
     /// Same as [`Db::open_with_env`].
-    pub fn open_db_with(
-        &self,
-        path: impl AsRef<Path>,
-        opts: DbOpen,
-    ) -> CoreResult<Db<Self>> {
+    pub fn open_db_with(&self, path: impl AsRef<Path>, opts: DbOpen) -> CoreResult<Db<Self>> {
         Db::open_with_env(path, opts, self.clone())
     }
 }
@@ -359,9 +358,7 @@ impl Env for IoUringEnv {
             if let Inner::Uring { ring } = &*self.inner {
                 let mut ring = ring.lock();
                 let fd = io_uring::types::Fd(dir.as_raw_fd());
-                let entry = io_uring::opcode::Fsync::new(fd)
-                    .build()
-                    .user_data(0xd1);
+                let entry = io_uring::opcode::Fsync::new(fd).build().user_data(0xd1);
                 // SAFETY: dir fd lives until wait returns.
                 unsafe {
                     ring.submission()
@@ -407,6 +404,37 @@ impl Env for IoUringEnv {
     fn metadata_len(&self, path: &Path) -> io::Result<u64> {
         Ok(fs::metadata(path)?.len())
     }
+
+    fn advise(&self, path: &Path, offset: u64, len: u64, kind: AdviseKind) -> io::Result<()> {
+        #[cfg(target_os = "linux")]
+        {
+            use std::os::unix::io::AsRawFd;
+            let f = File::open(path)?;
+            let advice = match kind {
+                AdviseKind::WillNeed => libc::POSIX_FADV_WILLNEED,
+                AdviseKind::DontNeed => libc::POSIX_FADV_DONTNEED,
+            };
+            // posix_fadvise returns 0 on success, errno-style code otherwise.
+            // SAFETY: `f` is open for the call; offset/len are best-effort hints.
+            let rc = unsafe {
+                libc::posix_fadvise(
+                    f.as_raw_fd(),
+                    i64::try_from(offset).unwrap_or(i64::MAX),
+                    i64::try_from(len).unwrap_or(0),
+                    advice,
+                )
+            };
+            if rc != 0 {
+                return Err(io::Error::from_raw_os_error(rc));
+            }
+            return Ok(());
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            let _ = (path, offset, len, kind);
+            Ok(())
+        }
+    }
 }
 
 #[cfg(test)]
@@ -432,10 +460,7 @@ mod tests {
         let b = env.backend();
         if io_uring_supported() {
             // Prefer IoUring; allow PosixFallback if kernel rejects ring.
-            assert!(matches!(
-                b,
-                IoBackend::IoUring | IoBackend::PosixFallback
-            ));
+            assert!(matches!(b, IoBackend::IoUring | IoBackend::PosixFallback));
         } else {
             assert_eq!(b, IoBackend::PosixFallback);
         }
@@ -455,7 +480,7 @@ mod tests {
                         auto_compact_sst_count: None,
                         auto_compact_sst_bytes: None,
                         exclusive: true,
-                large_value_threshold: None,
+                        large_value_threshold: None,
                     },
                 )
                 .unwrap();
@@ -495,6 +520,23 @@ mod tests {
         db.put(b"p", b"q").unwrap();
         assert_eq!(db.get(b"p").as_deref(), Some(b"q".as_ref()));
         db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn advise_is_best_effort() {
+        let dir = temp_dir();
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("blob.bin");
+        {
+            use std::io::Write;
+            let mut f = File::create(&path).unwrap();
+            f.write_all(&[0u8; 4096]).unwrap();
+            f.sync_all().unwrap();
+        }
+        let env = IoUringEnv::new().unwrap();
+        env.advise(&path, 0, 4096, AdviseKind::WillNeed).unwrap();
+        env.advise(&path, 0, 4096, AdviseKind::DontNeed).unwrap();
         let _ = fs::remove_dir_all(&dir);
     }
 }

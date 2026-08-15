@@ -19,3 +19,5 @@ thiserror.workspace = true
 
 [dev-dependencies]
 pedradb-sim.workspace = true
+# Same production isolated_kernel as in_prefixes (F83).
+stateright = "0.31"

@@ -4,8 +4,8 @@
 //! First run writes /host/h1/cap and prints cursor.
 //! Second run with same dir must not replay older seq (get still works).
 
-use pedradb_fold::{caixote_host_filter, follow_prefix, FoldStore, FoldUpdate, PedraFold};
 use pedradb_core::Db;
+use pedradb_fold::{caixote_host_filter, follow_prefix, FoldStore, FoldUpdate, PedraFold};
 use pedradb_journal::JournalConsumer;
 use std::env;
 use std::process::ExitCode;
@@ -51,12 +51,9 @@ fn main() -> ExitCode {
         }
     }
     let mut consumer = JournalConsumer { pin: pin0.seq() };
-    if let Err(e) = pedradb_fold::watch_applied_prefix(
-        &src_db,
-        &mut consumer,
-        &mut fold,
-        Some(&prefixes),
-    ) {
+    if let Err(e) =
+        pedradb_fold::watch_applied_prefix(&src_db, &mut consumer, &mut fold, Some(&prefixes))
+    {
         eprintln!("watch_applied: {e}");
         return ExitCode::from(1);
     }

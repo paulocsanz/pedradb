@@ -9,3 +9,7 @@ description = "Durable append-only stream over PedraDB (RFC-0010 P2.4 / JetStrea
 pedradb-core.workspace = true
 bytes.workspace = true
 thiserror.workspace = true
+
+[dev-dependencies]
+# Same production cursor_kernel as Stream::peek / ack (F54).
+stateright = "0.31"

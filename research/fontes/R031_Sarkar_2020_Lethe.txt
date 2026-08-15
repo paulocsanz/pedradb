@@ -1,0 +1,1262 @@
+Research 10: Storage and Indexing                                                                             SIGMOD ’20, June 14–19, 2020, Portland, OR, USA
+
+
+
+
+               Lethe: A Tunable Delete-Aware LSM Engine
+     Subhadeep Sarkar, Tarikul Islam Papon, Dimitris Staratzis, Manos Athanassoulis
+                                                                 Boston University
+                                                    {ssarkar1, papon, dstara, mathan}@bu.edu
+ABSTRACT                                                                                        State of the art             Lethe
+                                                                                                                                                                          state of the art +       † Leveled LSM-tree
+
+
+
+
+                                                                                                                                         avg. delete persistence cost
+                                                                                                                                                                           full compaction
+                                                                                                                                                                                                   ∗ Tiered LSM-tree
+                                                                                            Delete                          Memory
+Data-intensive applications fueled the evolution of log struc-                            persistence                       footprint
+                                                                                                                                                                                    Tuned RocksDB
+                                                                                                                                                                                                 †
+
+tured merge (LSM) based key-value engines that employ the                                                                                                                                             †
+out-of-place paradigm to support high ingestion rates with                               Update
+                                                                                          cost
+                                                                                                                                Lookup
+                                                                                                                                 cost
+                                                                                                                                                                                               RocksDB †
+                                                                                                                                                                                                 LevelDB
+                                                                                                                                                                                                               †
+low read/write interference. These benefits, however, come                                                                                                                                           WiredTiger
+                                                                                                                   Better                                                Lethe                            HBase∗
+at the cost of treating deletes as a second-class citizen. A delete                                                                                                                                         Cassandra∗
+
+inserts a tombstone that invalidates older instances of the                              (A) Space
+                                                                                           amplification
+                                                                                                                           Write
+                                                                                                                        amplification
+                                                                                                                                                                        (B) delete persistence latency
+deleted key. State-of-the-art LSM engines do not provide
+                                                                                        Figure 1: (A) Lethe strikes an optimal balance between
+guarantees as to how fast a tombstone will propagate to per-
+                                                                                        the latency/performance for timely delete persistence
+sist the deletion. Further, LSM engines only support deletion
+                                                                                        in LSM-trees, and (B) supports timely delete persis-
+on the sort key. To delete on another attribute (e.g., times-
+                                                                                        tence by navigating the latency/cost trade-off.
+tamp), the entire tree is read and re-written. We highlight
+that fast persistent deletion without affecting read perfor-
+mance is key to support: (i) streaming systems operating on                             stream processing, Internet of Things and 5G [18, 30]. Cloud-
+a window of data, (ii) privacy with latency guarantees on the                           based latency-sensitive applications like live video stream-
+right-to-be-forgotten, and (iii) en masse cloud deployment                              ing [40], real-time health monitoring [55], e-commerce trans-
+of data systems that makes storage a precious resource.                                 actions [39], social network analysis [59], and online gam-
+   To address these challenges, in this paper, we build a                               ing [49], generate large volumes of data at a high veloc-
+new key-value storage engine, Lethe, that uses a very small                             ity that requires hybrid transactional/analytical processing
+amount of additional metadata, a set of new delete-aware                                (HTAP) [7, 51, 54]. Thus, for the past decade, one of the main
+compaction policies, and a new physical data layout that                                data management research challenges has been to design
+weaves the sort and the delete key order. We show that Lethe                            data systems that can sustain fast data ingestion rate and
+supports any user-defined threshold for the delete persis-                              process queries at low latency [3, 9, 54]. To achieve this, mod-
+tence latency offering higher read throughput (1.17 − 1.4×)                             ern data stores reduce read/write interference by employing
+and lower space amplification (2.1 − 9.8×), with a modest                               out-of-place ingestion [11, 12, 21, 38, 44, 46, 56, 63].
+increase in write amplification (between 4% and 25%). In ad-                            LSM-based Key-Value Stores. The classical out-of-place
+dition, Lethe supports efficient range deletes on a secondary                           design is the log-structured merge (LSM) tree. LSM-trees
+delete key by dropping entire data pages without sacrificing                            buffer incoming data entries in main memory, and periodi-
+read performance nor employing a costly full tree merge.                                cally flush this buffer as an immutable sorted run on durable
+                                                                                        storage [21, 50, 53, 57, 64]. In turn, as more sorted runs accu-
+1     INTRODUCTION                                                                      mulate, they are iteratively sort-merged to form fewer yet
+Systems are Optimized for Fast Data Ingestion. Modern                                   larger sorted runs. This process, termed compaction, reduces
+data systems process an unprecedented amount of data gen-                               the number of sorted runs accessed during a read query
+erated by a variety of applications that include data analytics,                        with amortized merging cost. Every compaction sort-merges
+                                                                                        existing sorted runs from consecutive levels and discards
+Permission to make digital or hard copies of all or part of this work for
+                                                                                        any invalid entries. LSM-trees are adopted by several mod-
+personal or classroom use is granted without fee provided that copies are not
+made or distributed for profit or commercial advantage and that copies bear
+                                                                                        ern systems including LevelDB [36] and BigTable [17] at
+this notice and the full citation on the first page. Copyrights for components          Google, RocksDB [29] at Facebook, X-Engine [39] at Alibaba,
+of this work owned by others than ACM must be honored. Abstracting with                 Voldemort [48] at LinkedIn, Dynamo [25] at Amazon, Cas-
+credit is permitted. To copy otherwise, or republish, to post on servers or to          sandra [5], HBase [6], and Accumulo [4] at Apache, and
+redistribute to lists, requires prior specific permission and/or a fee. Request         bLSM [61] and cLSM [35] at Yahoo. Relational data systems
+permissions from permissions@acm.org.
+SIGMOD’20, June 14–19, 2020, Portland, OR, USA
+                                                                                        have been increasingly adopting LSM-style of updates. My-
+© 2020 Association for Computing Machinery.
+                                                                                        Rocks [28] uses RocksDB as storage engine and SQLite4 [62]
+ACM ISBN 978-1-4503-6735-6/20/06. . . $15.00                                            has experimented with LSM-trees in its storage layer, while
+https://doi.org/10.1145/3318464.3389757                                                 columnar systems use LSM-style updates [20, 44, 63, 70].
+
+
+
+
+                                                                                  893
+Research 10: Storage and Indexing                                                        SIGMOD ’20, June 14–19, 2020, Portland, OR, USA
+
+SIGMOD’20, June 14–19, 2020, Portland, OR, USA                   Subhadeep Sarkar, Tarikul Islam Papon, Dimitris Staratzis, Manos Athanassoulis
+
+
+The Challenge: Out-of-place Deletes. LSM engines use                       Why State of the Art is not Enough? LSM engines can-
+the out-of-place paradigm for any write operation, includ-                 not efficiently support EComp from the first scenario for
+ing ingestion (inserts), modification (updates), and deletion              two reasons. First, as deletes insert tombstones (retaining
+(deletes). As a result, a delete (update) is implemented by                the physical entries), they increase space amplification.
+inserting additional meta-data that logically invalidates the              Second, retaining superfluous entries in the tree adversely
+older target entries [16]. We refer to this process as logical             affects read performance because read queries have to
+deletes (updates). Both logical deletes and updates show a                 discard potentially large collections of invalid entries, which
+complex three-way trade-off [13], however, logical deletes                 further “pollute” the filter metadata [39], and increase write
+have wider implications in terms of (i) space amplification,               amplification because invalid entries are repeatedly com-
+(ii) read cost, (iii) write amplification, and (iv) privacy con-           pacted. Further, LSM engines are ill-suited for DComp from
+siderations, and hence, is the primary focus of this work.                 the second scenario because they cannot efficiently support a
+    In particular, a logical delete, inserts a tombstone that in-          range deletion in a delete key other than the sort key (termed
+validates all the older entries for a given key, with the expec-           secondary range deletes). Instead, they employ a full tree
+tation that, eventually, they will be persistently deleted. In             compaction, which causes an excessive number of waste-
+practice, the delete persistence latency is driven by (a) the sys-         ful I/Os while reading, merging, and re-writing the sorted
+tem design choices and (b) workload characteristics. Neither               files of the entire tree [39].
+can be fully controlled during execution, therefore, providing                Delete persistence latency. In order to be able to report that
+latency guarantees for persistent deletion in state-of-the-art             a delete persisted, the corresponding tombstone has to reach
+LSM engines is nearly impossible. In fact, LSM-trees have a                the last level of the tree through iterative compactions to
+potentially unbounded delete persistence latency. In order to              discard all invalidated entries. The time elapsed between the
+limit it, current designs employ a costly full-tree compaction             insertion of the tombstone in the tree and the completion of
+that interferes with read performance and write amplifica-                 the last-level compaction is termed delete persistence latency.
+tion, and results in performance unpredictability [39].                    LSM logical deletes do not provide delete persistence
+Deletes in LSM-trees. LSM-trees are employed as the stor-                  latency guarantees, hence EComp cannot offer such guar-
+age layer for relational systems [28], streaming systems [2,               antees to its users. In order to add a hard limit on delete
+41, 65], and pure key-value storage [52, 68]. As a result, an              persistence latency, current designs employ a costly full
+LSM delete operation may be triggered by various log-                      tree compaction as well.
+ical operations, not limited to user-driven deletes. For                      Deletion as privacy. Having unbounded delete persistence
+example, deletes are triggered by workloads that involve pe-               latency may lead to a breach of privacy. For example, it was
+riodic data migration [58], streaming operations on a running              recently reported that Twitter retains user messages years
+window [39, 43], or entail cleanup during data migration [58].             after they have been deleted, even after user accounts have
+In particular, dropping tables in an LSM-tree with multiple                been deactivated [67]. With the new data privacy protection
+column families is realized through a range delete opera-                  acts like GDPR [34] and CCPA [1], the end-to-end data life-
+tion [58]. Another frequent example is data collections sorted             cycle has new privacy challenges to address [26, 60]. With
+on creation timestamp. In that case, a classical out-of-place              user-rights, such as the right-to-be-forgotten coming into
+update is not enough since the key (timestamp) will also                   play, persistent deletion within a fixed threshold is critical.
+change. Hence, every update translates to a delete followed                           “Full tree compactions should be avoided.”
+by the insertion of the new version [15]. Below, we distill                In our interactions with engineers working on LSM-based
+the common concepts of two frequent delete use-cases.                      production systems, we learned that periodic deletes of a
+    Scenario 1: An e-commerce company EComp stores its                     large fraction of data based on timestamp are very frequent.
+order details sorted by order _id in an LSM-tree, and needs                To quote an engineer working on XEngine [39], “Applica-
+to delete the order history for a particular user. Within the              tions may keep data for different durations (e.g., 7 or 30 days)
+system, this delete request is translated to a set of point and            for their own purposes. But they all have this requirement
+range deletes on the sort key, i.e., order _id.                            for deletes every day. For example, they may keep data for
+    Scenario 2: A data company DComp stores its operational                30 days, and daily delete data that turned 31-days old, effec-
+data in an LSM-tree with document_id as the sort key. As                   tively purging 1/30 of the database every day.” This deletion
+most of the data are relevant only for D days, DComp wants                 is performed with a full tree compaction. To further quote
+to delete all data with a timestamp that is older than D days              the same team, “Forcing compactions to set a delete latency
+(and archive them). At the same time, DComp frequently ac-                 threshold, leads to significant increase in compaction frequency,
+cesses the documents using document_id, hence, the sort key                and the observed I/O utilization often peaks. This quickly intro-
+(document_id) is different from the delete key (timestamp).                duces performance pains.” For large data companies, deleting
+                                                                           1/7 or 1/30 of their database, accounts for several GBs or
+
+
+
+
+                                                                     894
+Research 10: Storage and Indexing                                                                      SIGMOD ’20, June 14–19, 2020, Portland, OR, USA
+
+Lethe: A Tunable Delete-Aware LSM Engine                                                                      SIGMOD’20, June 14–19, 2020, Portland, OR, USA
+
+
+TBs that is required to be persistently removed daily. The                                 deletes with a tunable balance between delete persistence
+current approach of employing full-tree compactions is sub-                                latency and the overall performance of the system.
+optimal as it (1) causes high latency spikes, and (2) increases                          • We demonstrate that Lethe offers delete latency guarantees,
+write amplification. The goal of this work is to address these                             having up to 1.4× higher read throughput. The higher read
+challenges while retaining the benefits of LSM design.                                     throughput is attributed to the significantly lower space
+The Solution: Lethe. We propose Lethe1 , a new LSM-based                                   amplification (up to 9.8× for only 10% deletes) because it
+key-value store that offers efficient deletes without compro-                              purges invalid entries faster. These benefits come at the
+mising the benefits of LSM-trees. Lethe pushes the boundary                                cost of 4%-25% higher write amplification.
+of the traditional LSM design space by adding delete persis-                             • Finally, we demonstrate that Lethe is the first LSM engine
+tence as a new design goal, and is able to meet user require-                              to support efficient secondary range deletes at the expense
+ments for delete persistence latency. Figures 1 (A) and (B)                                of increased read cost, and we show how to tune Lethe to
+show a qualitative comparison between state-of-the-art LSM                                 amortize this cost based on the workload.
+engines [5, 6, 29, 36, 68] and Lethe with respect to the effi-
+ciency and cost of timely persistent deletes. Lethe introduces
+two new LSM design components: FADE and KiWi.
+                                                                                         2    LSM BACKGROUND
+   FADE (Fast Deletion) is a new family of compaction strate-                            Basics. LSM-trees store key-value pairs, where a key refers
+gies that prioritize files for compaction based on (a) the num-                          to a unique object identifier, and the data associated with it, is
+ber of invalidated entries contained, (b) the age of the oldest                          referred to as value. For relational data, the primary key acts
+tombstone, and (c) the range overlap with other files. FADE                              as the key, and the remaining attributes in a tuple constitute
+uses this information to decide when to trigger a compaction                             the value. As entries are sorted and accessed by the key, we
+on which files, to purge invalid entries within a threshold.                             refer to it as the sort key. For an LSM-tree with L levels, we
+   KiWi (Key Weaving Storage Layout) is a new continuum                                  assume that its first level (Level 0) is an in-memory buffer
+of physical layouts that allows for tunable secondary range                              and the remaining levels (Level 1 to L − 1) are disk-resident.
+deletes without causing latency spikes, by introducing the                               We adopt notation from the literature [21, 50].
+notion of delete tiles. An LSM-tree level consists of several                            Buffering Inserts and Updates. Inserts, updates, or deletes
+sorted files that logically form a sorted run. KiWi augments                             are buffered in memory. A delete (update) to a key that exists
+the design of each file with several delete tiles, each contain-                         in the buffer, deletes (replaces) the older key in-place, oth-
+ing several data pages. A delete tile is sorted on the secondary                         erwise the delete (update) remains in memory to invalidate
+(delete) key, while each data page remains internally sorted                             any existing instances of the key on the disk-resident part
+on the sort key. Having Bloom filters at the page level, and                             of the tree. Once the buffer reaches its capacity, the entries
+fence pointers for both the sort key and the secondary delete                            are sorted by key to form an immutable sorted run and are
+key, KiWi facilitates secondary range deletes by dropping                                flushed to the first disk-level (Level 1). When a disk-level
+entire pages from the delete tiles, with a constant factor in-                           reaches its capacity, all runs within that level are sort-merged
+crease in false positives. Maintaining the pages sorted on                               and pushed to the next level. To bound the number of levels
+the sort key also means that once a page is in memory, read                              in a tree, runs are arranged in exponentially growing levels
+queries maintain the same efficiency as the state of the art.                            on disk. The capacity of Level i (i ≥ 1) is greater than that of
+   Putting everything together, Lethe is the first LSM engine                            Level i − 1 by a factor of T , termed the size ratio of the tree.
+to our knowledge that offers efficient deletes while improv-                             Compaction Policies: Leveling and Tiering. Classically,
+ing read performance, supports user-defined delete latency                               LSM-trees support two merging policies: leveling and tiering.
+thresholds, and enables practical secondary range deletes.                               In leveling, each level may have at most one run, and every
+Contributions. Our contributions are as follows:                                         time a run in Level i − 1 (i ≥ 1) is moved to Level i, it is
+• We analyze out-of-place deletes w.r.t. read performance,                               greedily sort-merged with the run from Level i, if it exists.
+  space and write amplification, and user privacy.                                       With tiering, every level must accumulate T runs before
+                                                                                         they are sort-merged. During a sort-merge (compaction),
+• We introduce FADE that bounds delete persistence latency
+                                                                                         entries with a matching key are consolidated and only the
+  without hurting performance and resource consumption.
+                                                                                         most recent valid entry is retained [27, 53]. Recently hybrid
+• We introduce Key Weaving Storage Layout, the first layout                              compaction policies fuse leveling and tiering in a single tree
+  that supports efficient secondary range deletes.                                       to strike a balance between the read and write throughput
+• We present the design of Lethe that integrates FADE and                                based on workload specifications [23, 24].
+  KiWi in a state-of-the-art LSM engine and enables fast                                    Partial Compaction. To amortize latency spikes from com-
+                                                                                         pactions in larger levels, state-of-the-art LSM engines orga-
+1 Lethe, the Greek mythological river of oblivion, signifies efficient deletion.         nize runs into smaller files, and perform compactions at the
+
+
+
+
+                                                                                   895
+Research 10: Storage and Indexing                                                        SIGMOD ’20, June 14–19, 2020, Portland, OR, USA
+
+SIGMOD’20, June 14–19, 2020, Portland, OR, USA                    Subhadeep Sarkar, Tarikul Islam Papon, Dimitris Staratzis, Manos Athanassoulis
+
+
+granularity of files instead of levels [27]. If Level i grows be-                                 (A) Leveling                    (B) Tiering
+
+yond a threshold, a compaction is triggered and one file from
+Level i is chosen to be partially compacted with files from
+Level i + 1 that have an overlapping key-range. Deciding
+which file to compact depends on the storage engine design.
+For instance, to optimize write throughput, we select files
+from Level i with minimal overlap with files in Level i + 1,
+to minimize both write amplification and compaction time.
+Querying LSM-Trees. A point lookup begins at the mem-
+ory buffer and traverses the tree from the smallest disk-level
+to the largest one. For tiering, within a level, a lookup moves           Figure 2: In an LSM-tree, for every tombstone, there
+from the most to the least recent tier. The lookup terminates             can be (A) one matching entry per level for leveling or
+when it finds the first matching entry. A range lookup returns            (B) one matching entry per tier per level (T per level)
+the most recent versions of the target keys by sort-merging               for tiering, where T = 3 in this example.
+the qualifying key ranges across all runs in the tree.
+Optimizing Lookups. Read performance is optimized us-                     range tombstones that are stored in a separate range tomb-
+ing Bloom filters (BFs) and fence pointers. In the worst case,            stone block within files [29]. During data access, a histogram
+a lookup needs to probe every run. To reduce this cost, LSM               storing deleted ranges is maintained in memory which has
+engines use one BF per run in main memory [21, 29]. Bloom                 to be accessed by every point query slowing down read ac-
+filters allow a lookup to skip probing a run altogether if the            cesses [15, 58]. Similar to point deletes, range deletes are
+filter-lookup returns negative. In practice, for efficient stor-          persisted when the files that contain them are compacted
+age, BFs are maintained at the granularity of files [27]. Fence           with the last level, leaving potentially unbounded persistence
+pointers store the smallest key per disk page in memory [21],             latency. Thus, in practice, a complete full tree compaction
+to quickly identify which page(s) to read for a lookup, and               is periodically employed to ensure delete persistence [39].
+perform up to one I/O per run for point lookups.                          During such compactions, all reads and writes to the data
+                                                                          store are stalled, which results in latency spikes.
+3     THE IMPACT OF DELETES                                               Persistence Latency. The latency for persisting a logical
+                                                                          delete depends on the workload and the data size. The middle
+We now describe the design space of deletes in LSM-trees.
+                                                                          part of Figure 3 illustrates the operation “delete all entries with
+3.1    Delete Design Space                                                ID = k”. Within the system, the operation inserts a tombstone,
+In LSM-trees an entry at Level i is always more recent than an            k∗ , that logically invalidates k. On disk, entries with key k
+entry with the same key at Level j, if j > i. LSM-trees exploit           may be located at any level between 1 and L. Thus, to ensure
+this to logically delete using tombstones that supersede older            delete persistence, k∗ must participate in L compactions, one
+entries with a matching key. The left part of Figure 3 shows              at each level of the tree. Since compactions are triggered
+a leveled LSM-tree, the structure of a key-value pair, and a              when a level reaches a nominal capacity, the rate of unique
+tombstone. A key-value contains typically many attributes                 insertions is effectively driving the compactions. The size of
+as part of the value, and a tombstone consists of the (deleted)           a level grows exponentially with T , therefore, a taller tree
+key and the tombstone flag.                                               requires exponentially more unique insertions to propagate
+                                                                          a tombstone to the last level. Hence, the delete persistence
+3.1.1 Primary Deletes. We discuss deletes on the sort key.                latency depends on (i) the rate of unique insertions and (ii)
+Point Deletes insert a tombstone against the key to be                    the current height of a tree.
+deleted (Figure 2). Within memory buffer, the tombstone                   Adversarial Workloads. Tombstones may be recycled in in-
+replaces in-place any older entry with a matching key. On                 termediate levels of the tree leading to unbounded delete per-
+disk, the tombstones are stored within a run in sorted or-                sistence latency and perpetual retention of invalid entries [15].
+der along with other key-value pairs. During compaction,                  For example, a workload that mostly modifies hot data (in
+a tombstone deletes older entries with the same key and is                the first few levels) will grow the tree very slowly, keeping its
+retained as there might be more (older) entries with the same             structure mostly static. Another example is a workload with
+delete key in subsequent compactions (Fig. 2). A tombstone                interleaved inserts and deletes, with the deletes issued on a
+is discarded during its compaction with the last level of the             few recently inserted entries that are at the smaller levels. In
+tree, making the logical delete persistent.                               both cases, a newly inserted tombstone may be recycled in
+Range Deletes in LSM-trees are common, however, they                      compactions high up the tree that consolidate entries rather
+cause performance problems. Range deletes generate special                than propagate towards the last level.
+
+
+
+
+                                                                    896
+Research 10: Storage and Indexing                                                                                                                           SIGMOD ’20, June 14–19, 2020, Portland, OR, USA
+
+Lethe: A Tunable Delete-Aware LSM Engine                                                                                                                               SIGMOD’20, June 14–19, 2020, Portland, OR, USA
+
+
+          LSM-tree internals                                                                        delete all entries with ID = k                                                 delete all entries with timestamp < D
+   Level 0                                                                                                                       !
+                                                                                                                                 L-1
+                                                                                                                                                                                                      entries in the same level are sorted on sort key
+                                                                                                                                        ti
+   Level 1                                                                               t1                                       i=1                                                                           File 1     File 2     File 3
+                                                                     k*
+                                                                              Dth                        Dth                    Dth                                  memory
+   Level 2
+                                                                                                               t1+t2                                                        disk
+                                                                          k                    k*
+   Level L-1                                                                                                                                                                                                     delete keys do not have any order
+                                                                                                     k                     k*
+    Level: sorted collection of immutable ﬁles
+         File 1         File 2          File 3                                                                                                                                     Entries qualiﬁng for a secondary range delete are
+                                                                                     k                         k                        k                                          scattered among diﬀerent pages of diﬀerent ﬁles
+         Page 1
+         Page 2
+         Page 3
+         Page 4                                                         Key k has two          k in Level 1 moved      Compacting k* with              k is persistently
+            File: collection of sorted pages                         matches — in Level        to Level 2 (due to      Level 2 removes the          deleted only after k*              To facilitate secondary range deletes all
+                                                                      1 and in Level L-1      compaction), before         matching key               is compacted with                 qualifying ﬁles must be read to memory
+                    Within page: entries are
+             Page 1 sorted on sort key                                                        k* moved to Level 1                                        the last level
+             k1    k2   k4 k6     k7 k9 k11 k21 k23
+                                                                        Out-of-place                                    Retaining invalid                                                    Results in read ampliﬁcation
+             1     0    1   1     1   1   0 1   1
+                                                                                              Compacting invalid       entries aﬀect read            Unbounded delete
+             T7         T51 T9    T62 T90   T5 T2                     deletes increases
+                                                                                              entries causes write       performance                persistence latency
+             zoo        boy all   job    car         tag nay
+                                                                     space ampliﬁcation
+                                                                                                  ampliﬁcation                                     ( t1+t2+…+tL-1 > Dth )
+                                               KEY     VALUE
+
+                                               ID        ﬂag                                                                                                                          All ﬁles read are then (i) compacted and (ii)
+                                                                          Q1: How to persist deletes in a time-bound fashion without aﬀecting                                                     written back to disk
+                              sort key               tombstone ﬂag
+           KEY           VALUE
+                                                                          the overall system performance and storing extra metadata?
+                                                                                                                                                                                   Results in (i) latency spikes and (ii) causes write
+           ID           ﬂag timestamp                     string                              Q2: How to facilitate secondary range deletes in a better                                                ampliﬁcation
+      sort key tombstone ﬂag delete key                                                       (eﬃcient) way without increasing metadata overhead?
+
+                                                                                    Figure 3: The design space of deletes in LSM-trees.
+3.1.2 Secondary Deletes. We refer to deletes based on an                                                                                3.2.1 Space Amplification. Deletes increase space ampli-
+attribute other than the sort key as secondary deletes. The                                                                             fication by (i) the tombstones and (ii) the invalidated entries
+most common type of secondary deletes is a secondary                                                                                    (for every key, there might be several invalid versions). Space
+range delete. Consider the operation “delete all entries that                                                                           amplification increases storage cost and the overhead for
+are older than D days”, similar to the second scenario from                                                                             data organization (sorting) and processing (read I/Os during
+the introduction. In the left part of Figure 3, we highlight the                                                                        compaction). Commercial databases often report space am-
+sort key (ID) and the delete key (timestamp) of a key-value                                                                             plification of about 11% [58], however, this corresponds to
+pair. As the entries in a tree are sorted on the sort key, an                                                                           T = 10, a single point in the vast design continuum.
+entry with a qualifying delete key may be anywhere in the                                                                               Analysis. Following prior work [23], we define space am-
+tree, and this delete pattern is not efficiently supported.                                                                             plification as the ratio between the size of superfluous en-
+3.1.3 Limitations of the State of the Art. In state-of-the-                                                                             tries and the size of the unique entries in the tree, samp =
+art LSM engines, deletes are considered as “second-class cit-                                                                            csize(N )−csize(U )
+                                                                                                                                              csize(U )      , where csize(N ) is the cumulative size of
+izens”. In practice, to ensure time-bounded persistence of                                                                              all entries and csize(U ) is the cumulative size of all unique
+logical deletes and to facilitate secondary range deletes, data                                                                         entries. Note that samp ∈ [0, ∞), and that if all inserted keys
+stores resort to periodic full-tree compaction [19, 39]. How-                                                                           are unique there is no space amplification.
+ever, this is an extremely expensive solution as it involves                                                                            Without Deletes. Assume a workload with inserts and up-
+superfluous disk I/Os, increases write amplification and re-                                                                            dates (but no deletes) for a leveled LSM-tree. In the worst
+sults in latency spikes. To reduce excessive I/Os, RocksDB                                                                              case, all entries in levels up to L − 1 can be updates for the
+implements a file selection policy based on the number of                                                                               entries in Level L, leading to space amplification O(1/T ). For
+tombstones [29]. This reduces the amount of invalid entries,                                                                            a tiered LSM-tree, the worst case is when the tiers of a level
+but it does not offer persistent delete latency guarantees.                                                                             overlap, and the first L − 1 levels contain updates for Level L.
+3.2         Implications of Out-of-place Deletes                                                                                        This leads to space amplification O(T ).
+                                                                                                                                        With Deletes. If the size of a tombstone is the same as the
+Next, we quantify the implications of out-of-place deletes on
+                                                                                                                                        size of a key-value entry, the asymptotic worst-case space
+read performance, and space and write amplification.
+                                                                                                                                        amplification remains the same as that with updates for lev-
+Model Details. We assume an LSM-tree with size ratio T ,                                                                                eling. However, in practice, a tombstone is orders of magni-
+that stores N entries across L + 1 levels. The size of the                                                                              tude smaller than a key-value entry. We introduce the tomb-
+memory buffer is M = P · B · E, where P is the number of disk                                                                           stone size ratio λ = size(t      ombs t one )
+                                                                                                                                                                                      ≈ size(k ey)+size(v al ue ) , where
+                                                                                                                                                                                               size(k ey)
+                                                                                                                                                                  size(k ey-v al ue )
+pages in the buffer, B is the number of entries per page, and                                                                           size(key) and size(value) is the average size of a key and
+E is the average size of an entry. The capacity of this tree                                                                            an entry, respectively. λ is bounded by (0, 1], and a smaller
+  ÍL
+is i=0  M · T i , where M · T i is the capacity of Level i. The                                                                         λ implies that a few bytes (for tombstones) can invalidate
+N entries inserted in the tree includes δp point tombstones                                                                             more bytes (for key-values)          and
+and δr range tombstones that have an average selective of σ .                                                                                                                  lead to larger space amplifi-
+                                                                                                                                                                (1−λ)·N +1
+                                                                                                                                                              
+                                                                                                                                        cation given by O            λ ·T       . For tiering, in the worst case,
+Table 1 shows all the parameters used in our modeling.
+
+
+
+
+                                                                                                                             897
+Research 10: Storage and Indexing                                                             SIGMOD ’20, June 14–19, 2020, Portland, OR, USA
+
+SIGMOD’20, June 14–19, 2020, Portland, OR, USA                   Subhadeep Sarkar, Tarikul Islam Papon, Dimitris Staratzis, Manos Athanassoulis
+
+
+tombstones in the recent-most tier can invalidate allentries               Sym.      Description                                            Reference value
+                                                   N
+                                                                               N      # of entries inserted in tree (including tombstones)   220 entries
+in that level, resulting in space amplification O 1−λ .                        T      size ratio of tree                                     10
+                                                                                L     number of tree-levels on disk with N entries           3 levels
+3.2.2 Read Performance. Point tombstones are hashed                             P     size of memory buffer in disk pages                    512 disk pages
+                                                                                B     number of entries in a disk page                       4 entries
+to the BFs the same way as valid keys, and thus, increase                       E     average size of a key-value entry                      1024 bytes
+the false positive rate (FPR) for the filters as well as the                   M      memory buffer size                                     16 MB
+I/O cost for point lookups. Also, deleted entries cause range                  δp     number of point deletes issued                         3 × 105 entries
+                                                                               δr     number of range deletes issued                         103 entries
+queries to scan invalid data before finding qualifying keys.                   σ      average selectivity of range deletes                   5 × 10−4
+Consider that a range delete with 0.5% selectivity over a                      Nδ     approx. # of entries after persisting deletes          -
+100GB database invalidates 500MB, which might have to be                        λ     tombstone size / average key-value size                0.1
+                                                                                I     ingestion rate of unique entries in tree               1024 entries/sec
+scanned (and discarded) during query execution.                                 s     selectivity of a long range lookup                     -
+Analysis: Point Lookups. A point lookup probes one (or                         Lδ     number of tree-levels on disk with N δ entries         -
+                                                                               m      total main memory allocated to BFs                     10 MB
+more) BF before performing any disk I/O. The FPR of a BF                        h     number of disk pages per delete tile                   16 disk pages
+depends on the number of bits allocated to the filter in the
+                                                                                                Table 1: Lethe parameters.
+memory (m) and the number of entries (N ) hashed into the
+                                        2
+filter, and is given by e −m/N ·(l n(2)) . For leveling, the aver-         and the increased protection of rights like the right-to-be-
+age worst-case point lookup cost on non-existing entries is                forgotten, data companies are legally obliged to persistently
+O(e −m/N ), and for tiering, the cost becomes O(T ·e −m/N ) [21].          delete data offering guarantees [26] and rethink the end-to-
+For lookups on existing entries, this cost increases by 1 as               end data lifecycle [60].
+the lookup has to probe at least one page. Since tombstones                Analysis. We define delete persistence latency as the worst-
+are hashed into the BFs, retaining tombstones and invalid                  case time required, following the insertion of a tombstone,
+entries increases their FPR, thus hurting point lookups.                   to ensure that the tree is void of any entry with a matching
+Analysis: Range Lookups. A range query on the sort key                     (older) key to that of the tombstone. This time depends on
+reads and merges all qualifying disk pages. The I/O cost of                the insertion rate of unique key-value entries (I ) and the
+a short range query accessing one page per level is O(L) for               height of the tree (L − 1), and is the time needed to insert the
+leveling and O(L · T ) for tiering. The I/O cost for long range            minimum number of unique keys that is sufficient to trigger
+lookups depends on the selectivity of the lookup range, and is             enough   compactions.
+                                                                                 L−1                For leveling, delete persistence     latency
+                                                                                                                     T L ·P ·B
+                                                                                                                              
+                                                                                 T
+O(s ·N /B) for leveling and O(s ·T ·N /B) for tiering. When an-            is O      I
+                                                                                       ·P ·B
+                                                                                               and for tiering is O      I       . This shows that
+swering range queries, tombstones and invalid entries have                 for an LSM-tree with large number of entries (T L ) that is
+to be read and discarded, slowing down the range queries.                  built by an update-intensive workload, the delete persistence
+3.2.3 Write Amplification. Before being consolidated, an                   latency can be remarkably high.
+invalid entry may participate in multiple compactions. Re-                 3.3       Implications of the Storage Layout
+peatedly compacting invalid entries increases write ampli-
+fication, which is particularly undesirable for installations              Every file of an LSM-tree is sorted using the sort key. While
+that the durable storage has limited write endurance [58].                 this supports read, update, and delete queries on the sort key
+                                                                           it cannot support operations on a secondary attribute.
+Analysis. We define write amplification, w amp as the ratio
+of the total bytes written on disk that correspond to unmod-               Secondary Range Deletes on a delete key that is different
+ified entries to the total bytes written corresponding to new              from the sort key can only be supported by eagerly per-
+                                        + )−csize(N )                      forming a full tree compaction, because there is no way to
+or modified entries, w amp = csize(N                  . N + is the
+                                      csize(N )                            identify the affected files. This stalls all write operations,
+number of all the entries written to disk including the entries
+                                                                           causing huge latency spikes. The cost incurred by a sec-
+re-written as unmodified after a compaction. For leveling,
+                                                                           ondary range delete depends on the total number of data
+every entry participates on average in T /2 compactions per
+                                                                           pages on disk, and is independent of the selectivity of the
+level which makes N + = N · L · T /2. For tiering, every entry
+                                                                           range delete operation. Irrespective of the merging strategy,
+is written on disk once per level, implying N + = N · L. Thus,
+                                                                           this cost is O(N /B), where B is the page size.
+w amp for leveled and tiered LSM-trees are given by O(L · T )
+and O(T ), respectively. Note that, as the data size increases,            4        PERSISTING DELETES: LETHE
+entries participate in more compactions unmodified includ-
+                                                                           Design Goals. Lethe aims (i) to provide persistence guaran-
+ing invalid entries further increasing write amplification.
+                                                                           tees for point and range deletes and (ii) to enable practical
+3.2.4 Persistence Latency and Data Privacy. The lack                       secondary range deletes. We achieve the first design goal
+of guarantees in persistence latency has severe implications               by introducing FADE, a family of delete-aware compaction
+on data privacy. With new data privacy protection acts [1, 34]             strategies. We achieve the second goal by introducing Key
+
+
+
+
+                                                                     898
+Research 10: Storage and Indexing                                                          SIGMOD ’20, June 14–19, 2020, Portland, OR, USA
+
+Lethe: A Tunable Delete-Aware LSM Engine                                                         SIGMOD’20, June 14–19, 2020, Portland, OR, USA
+
+
+Weaving Storage Layout, a new continuum of physical data                    the age of the oldest tombstone contained (amax ) and (ii) the
+layouts that arranges entries on disk in an interweaved fash-               estimated invalidation count (b) of the file tombstones. After
+ion based on both the sort and the delete key.                              every flush, a file is assigned with its current amax and b.
+                                                                                In practice, LSM-engines store file metadata including
+4.1    FADE                                                                 (i) the file creation timestamp, and (ii) the distribution of
+We first introduce the FADE family of compaction strategies                 the entries per file in the form of a histogram. For exam-
+that ensures that all tombstones are persisted within a delete              ple, RocksDB assigns a monotonically increasing insertion-
+persistence threshold (D t h ). D t h is typically specified by the         driven sequence number (seqnum) to all entries, and stores
+application or user [26, 60] as part of the service level agree-            the number of entries (num_entries) and point tombstones
+ment (SLA) that concerns the data retention policy. All data                (num_deletes) for every file. FADE takes advantage of this
+streams bound by the same data retention SLA, have the                      existing metadata. It uses seqnum to compute amax and uses
+same delete persistence latency.                                            num_entries and num_deletes to compute b. Thus, in prac-
+4.1.1 Overview. Compactions in LSM-trees influence their                    tice FADE leaves no metadata footprint.
+behavior by dictating their space amplification, write am-                  Computing amax . The amax of a file f , termed amax   f
+                                                                                                                                      , is the
+plification, point and range read performance, and delete                   age of the oldest (point or range) tombstone contained in a
+persistence latency. FADE uses additional information about                 file, and is calculated using the difference between the current
+the age of a file’s tombstones and the estimated invalidated                system time and time the oldest tombstone of that file was
+entries per tombstone to ensure that every tombstone will                   inserted in the memory buffer. File without tombstones have
+adhere to the user/application-provided D t h by assigning to               amax    = 0. Storing amax  requires one timestamp (8 bytes) per
+                                                                              f                   f
+every file a time-to-live (TTL). As long as D t h is respected,             file, a negligible overhead.
+FADE offers different strategies for secondary optimization                 Computing b . The estimated number of invalidated entries
+goals including minimizing write amplification, minimizing                  by the tombstones of a file f , termed bf , is calculated using
+space amplification, or maximizing system throughput.                       (i) the exact count of point tombstones in the file (pf ) and (ii)
+4.1.2 Time-to-Live. To ensure that all delete operations                    an estimation of the entries of the entire database invalidated
+issued on an LSM-tree are persisted before D t h , FADE prop-               by the range tombstones of the file (rd f ), as bf = pf + rd f . It
+agates each tombstone through all intermediate levels to                    is not possible to accurately calculate rd f without accessing
+the last level within that threshold from its insertion. FADE               the entire database, hence, we estimate this value using the
+achieves this by assigning a smaller TTL for every file in                  system-wide histograms that are already maintained by the
+                               ÍL−1
+every level di , such that i=0      di = D t h . A simple TTL allo-         data store. The value of bf is computed on-the-fly without
+cation is to use di = D t h /L. While this may guarantee that a             needing any additional metadata.
+tombstone reaches the last level within D t h , it also leads to            Updating amax and b . Similarly to all file metadata, amax
+increased compaction time and resource starvation as larger                 and b are first computed when a file is created after a buffer
+levels have exponentially more files, hence, a large number                 flush. Thereafter, for newly compacted files, amax and b are
+of files may exhaust their TTL simultaneously. Instead, we                  recomputed before they are written back to disk. When a
+assign exponentially increasing TTL per level to guarantee                  compaction simply moves a file from one disk level to the
+that files expire at a constant rate per time unit.                         next without physical sort-merging (i.e., when there are no
+Computing d i . For a tree with size ratio T , we set the TTL               overlapping keys), b remains unchanged and amax is recal-
+for level i to be di = T · di−1 , ∀i ∈ {1, L − 1} and d 0 =                 culated based on the time of the latest compaction. Note that
+D th · T TL−1−1−1 . Note that both the TTL and the capacity per             since all metadata is in memory, this does not cause an I/O.
+level increase exponentially for larger levels of the tree.                 4.1.4 Compaction Policies. Compactions ensure that both
+Updating di . For a given tree height every file is assigned                insert and read costs are amortized. For every compaction,
+a TTL depending on the level it is being compacted into.                    there are two policies to be decided: the compaction trigger
+As more data entries are inserted, the tree might grow in                   policy and the file selection policy. State-of-the-art LSM en-
+height. At that point, the TTLs throughout the tree have to                 gines initiate a compaction when a level is saturated (i.e.,
+be updated. The cost of calculating di is low, hence, FADE                  larger than a nominal size threshold) and either pick a file
+re-calculates di after every buffer flush. Step 1 in Figure 4 (A)           at random, or the one with the smallest overlap with the
+shows how to update di when a new level is added.                           subsequent level to minimize the merging cost.
+4.1.3 FADE Metadata. Tombstones for point deletes are                       Compaction Trigger. FADE augments the state-of-the-art
+stored along with valid key-value pairs, and range tomb-                    by triggering a compaction, not only when a level is satu-
+stones are stored in a separate block. In addition to the tomb-             rated, but also when a file has an expired TTL. FADE triggers
+stones, FADE requires the values of two metrics per file: (i)               a compaction in a level that has at least one file with expired
+
+
+
+
+                                                                      899
+Research 10: Storage and Indexing                                                                                          SIGMOD ’20, June 14–19, 2020, Portland, OR, USA
+
+SIGMOD’20, June 14–19, 2020, Portland, OR, USA                                                  Subhadeep Sarkar, Tarikul Islam Papon, Dimitris Staratzis, Manos Athanassoulis
+
+
+        setting environment                                                     FADE: enforcing a ﬁnite bound for delete persistence latency
+  after every ﬂush, perform the                          initial state*             selecting ﬁles for compaction                             performing compaction
+         following check
+                                                     Levels 1, 2, and 3       Levels 2 and 3 both        Level 2 has the ﬁle       After compaction,           All ﬁles with expired
+ //Update d[i] if a new level is added to the tree    all have ﬁles that        have ﬁles with              with highest           Level 3 has 2 ﬁles         TTL are compacted —
+ // T = size ratio; level_count = levels in tree     contain tombstone           expired TTL              tombstone count          with tombstones                 repeat routine
+ // D_th = delete persistence threshold                    a1                       a1                         a1                       a1                          a1
+ double x = D_th * T / pow ( T, level_count - 1 );          d1                       d1                         d1                       d1                          d1
+ if ( new_level_added ( ) ) {
+     for ( int i = 0; i < level_count; ++i ) {
+        d[i] = x * pow ( T, i );                            a2   d2                 a2    d2                   a2    d2
+        if ( i > 0 )                                                                                                                               a3    a3                    a3
+                                                                  a3                       a3                         a3
+            d[i] += d[i-1];                                                                                                                                               d3
+                                                                 d3                       d3                         d3                       d3    d3
+     }
+ }
+
+
+          tombstones
+                                                      Choose level that        Chose the ﬁle that        Initiate compaction      Initiate compaction          This ensures a ﬁnite
+         TTL-expired tombstones                        has ﬁles with            has the highest          with chosen ﬁle and      with the ﬁle that has       upper-bound for delete
+                                                        expired TTL            tombstone count            update age of ﬁles           expired TTL             persistence latency
+          logically deleted entries
+                                                     * timers are shown only for ﬁles containing tombstones
+Figure 4: FADE persists tombstones within the delete persistence threshold, thus, improving overall performance.
+TTL regardless of its saturation. If no TTL has expired, but a                                         entries. Thus, future compactions involve fewer invalidated
+level is saturated, a compaction in that level is triggered.                                           entries, leading to smaller write amplification which is com-
+File Selection. FADE decides which files to compact based                                              parable to the state of the art, as we show in Section 5.
+on the trigger that invoked it. It has three modes: (i) the                                            Read performance. FADE has a marginally positive ef-
+saturation-driven trigger and overlap-driven file selection (SO),                                      fect on read performance. By compacting invalidated en-
+which is similar to the state of the art and optimizes for write                                       tries and point tombstones, FADE reduces the number of
+amplification, (ii) the saturation-driven trigger and delete-                                          entries hashed in the BFs, leading to smaller overall FPR
+driven file selection (SD), which selects the file with the high-                                      for a given amount of available memory, hence, the cost for
+est b to ensure that as many tombstones as possible are                                                point lookups on existing and non-existing keys is improved
+compacted and to optimize for space amplification, and (iii)                                           asymptotically (Table 2). In the case that Nδ entries can be
+the delete-driven trigger and delete-driven file selection (DD),                                       stored in Lδ < L levels on disk, the lookup cost will benefit
+which selects a file with an expired tombstone to adhere to                                            by accessing fewer levels. Long range lookup cost is driven
+D th . A tie in SD and DD is broken by picking the file that                                           by the selectivity of the query, and this cost is lower for FADE
+contains the oldest tombstone, and a tie in SO by picking the                                          as timely persistence of deletes causes the query iterator to
+file with the most tombstones. In case of a tie among levels,                                          scan fewer invalidated entries.
+the smallest level is chosen for compaction to avoid write                                             Persistence Guarantees. FADE ensures that all tombstones
+stalls during compaction. For a tie among files of the same                                            inserted into an LSM-tree and flushed to the disk will always
+level, FADE chooses the file with the most tombstones.                                                 be compacted with the last level within the user-defined
+                                                                                                       D t h threshold. Any tombstone retained in the write-ahead
+4.1.5 Implications on Performance. FADE guarantees                                                     log (WAL) is consistently purged if the WAL is purged at a
+that all point and range tombstones are persisted by the time                                          periodicity that is shorter than D t h , which is typically the
+their lifetime reaches D t h (∀f , amax
+                                    f
+                                        < D t h ). We refer to the                                     case in practice. Otherwise, we use a dedicated routine that
+size of the tree as N and to the size of the tree that has all                                         checks all live WALs that are older than D t h , copies all live
+entries persisted within D t h as Nδ .                                                                 records to a new WAL, and discards the records in the older
+Space amplification. FADE removes tombstones and logi-                                                 WAL that made it to the disk.
+cally invalidated entries from the tree on a rolling basis by                                          Practical Values for D t h . The delete persistence threshold
+compacting them in a time-bound fashion. By doing so, it                                               of different applications vary widely. In commercial systems,
+diminishes the space amplification caused by out-of-place                                              LSM-engines are forced to perform a full tree compaction
+deletes, limiting samp to O(1/T ) for leveling and O(T ) for                                           every 7, 30, or 60 days based on the SLA requirements [39].
+tiering, even for a workload with deletes.                                                             Blind Deletes. A tombstone against a key that does not exist
+Write amplification. Ensuring delete persistence within                                                or is already invalidated causes a blind delete. Blind deletes
+D th , forces compactions on files with expired TTLs. There-                                           ingest tombstones against keys that do not exist in a tree,
+fore, during a workload execution, initially FADE leads to                                             and these superfluous tombstones affect the performance of
+momentary spikes in write amplification. The initial high                                              point and range queries [39]. To avoid blind deletes, FADE
+write amplification, however, is amortized over time. By ea-                                           probes the corresponding BF and inserts a tombstone only if
+gerly compacting tombstones, FADE purges most invalidated
+
+
+
+
+                                                                                                 900
+Research 10: Storage and Indexing                                                                                                                                SIGMOD ’20, June 14–19, 2020, Portland, OR, USA
+
+Lethe: A Tunable Delete-Aware LSM Engine                                                                                                                                SIGMOD’20, June 14–19, 2020, Portland, OR, USA
+
+                                            State-of-the-art [21, 23]                                 FADE                                  Key Weaving Storage Layout                                                        Lethe
+                  Metric
+                                           Leveling          Tiering                    Leveling                  Tiering                  Leveling            Tiering                                        Leveling                      Tiering
+Entries in tree                             O(N )                   O(N )               O(Nδ )        ▲          O(Nδ )          ▲         O(N )                  •         O(N )                  •         O(Nδ )           ▲            O(Nδ )           ▲
+Space amplification without deletes         O(1/T )                 O(T )              O(1/T )        •           O(T )          •        O(1/T )                 •         O(T )                  •         O(1/T )          •             O(T )           •
+                                            (1−λ)·N +1
+                                                                                                                                               
+                                                                       N                                                                    (1−λ)·N                               N
+Space amplification with deletes      O                          O                     O (1/T )                   O(T )               O                                   O                                  O(1/T )                        O(T )
+                                                                                                                                                                                       
+                                               λ ·T                   1−λ                             ▲                          ▲            λ ·T                •              1−λ               •                          ▲                             ▲
+Total bytes written to disk           O(N · E · L · T )        O(N · E · L)        O(Nδ · E · Lδ · T ) ▲     O(Nδ · E · Lδ )     ▲   O(N · E · L · T ) •                O(N · E · L)               •    O(Nδ · E · Lδ · T )   ▲        O(Nδ · E · Lδ )      ▲
+Write amplification                        O(L · T )                 O(L)              O(L · T )      •           O(L)           •        O(L · T )               •          O(L)                  •         O(L · T )        •             O(L)            •
+                                            L−1                    L                                                                   L−1                             L   
+                                            T                        T ·P ·B                                                               T                                    T ·P ·B
+Delete persistence latency             O         I
+                                                     ·P ·B
+                                                                O      I               O(D t h )      ▲         O(D t h )        ▲    O         I
+                                                                                                                                                    ·P ·B
+                                                                                                                                                                  •     O         I                •         O(D t h )        ▲            O(D th )         ▲
+
+Zero result point lookup cost             O(e −m/N )           O(e −m/N · T )         O(e −m/Nδ )     ▲      O(e −m/Nδ · T )     ▲    O(h · e −m/N )             ▼    O(h · e −m/N · T )           ▼      O(h · e −m/Nδ )     ♦       O(h · e −m/Nδ · T )   ♦
+Non-zero result point lookup cost           O(1)             O(1 + e −m/N · T )          O(1)         •    O(1 + e −m/Nδ · T ) ▲ O(1 + h · e −m/N ) ▼ O(1 + h · e −m/N · T ) ▼                          O(1 + h · e −m/Nδ )   ♦   O(1 + h · e −m/Nδ · T ) ♦
+Short range point lookup cost               O(L)                 O(L · T )              O(Lδ )        ▲        O(Lδ · T )        ▲        O(h · L)               ▼      O(h · L · T )              ▼        O(h · Lδ )        ♦         O(h · Lδ · T )      ♦
+Long range point lookup cost               O( s B·N )            O( T ·sB·N )          O( s ·N δ
+                                                                                             B )      ▲        O( T ·sB·Nδ )     ▲        O( s B·N )              •      O( T ·sB·N )              •         O( s ·N δ
+                                                                                                                                                                                                                   B )        ▲          O( T ·sB·Nδ )      ▲
+Insert/Update cost                         O( LB·T )                O( BL )            O( LδB·T )     ▲          O( LBδ )        ▲        O( LB·T )               •         O( BL )                •      O( LδB·T )       ▲      O( LBδ )        ▲
+                                                                                                                                                                                                               Nδ
+                                                                                                                                                                                                                                 O BN·hδ
+                                                                                                                                                                                                                                   
+                                                                                                                                                                                  N
+Secondary range delete cost                O(N /B)               O(N /B)               O(Nδ /B)            O(Nδ /B)                       O BN·h                            O                             O B ·h
+                                                                                                                                                                                       
+                                                                                                      ▲                    ▲                                     ▲               B ·h              ▲                       ♦                      ♦
+                                                                                                                                                                                                                                         
+Main memory footprint                   m + N · Bk              m + N · Bk        m + Nδ ·  k    c                k   c
+                                                                                            B + B ·P ▼ m + N δ · B + B ·P ▼          m+N ·             1
+                                                                                                                                                                       m+N ·             1
+                                                                                                                                                                                                   ▲ m + Nδ · Bk·h + Bc·P ♦ m + Nδ · Bk·h + Bc·P ♦
+                                                                                                                                                                                              
+                                                                                                                                                      B ·h       ▲                      B ·h
+
+
+       Table 2: Comparative analysis of state of the art and FADE (▲ = better, ▼ = worse, • = same, ♦ = tunable).
+
+the filter probe returns positive. This way, FADE drastically                                                                  it significantly affects lookup cost, once a page is fetched to
+reduces the number of blind deletes.                                                                                           memory. To facilitate quick in-memory searches within a
+4.2        Key Weaving Storage Layout (KiWi)                                                                                   page [66], we sort the entries of each page based on S.
+To facilitate secondary range deletes, we introduce KiWi, a                                                                    4.2.2 Facilitating Secondary Range Deletes. KiWi ex-
+continuum of physical storage layouts the arranges the data                                                                    ploits the fact that within a delete tile, the disk pages are
+on disk in an interweaved sorted order on the sort key and                                                                     sorted on the delete key. Hence, the entries targeted by a sec-
+delete key. KiWi supports secondary range deletes without                                                                      ondary range delete populate contiguous pages of each tile
+performing a full-tree compaction, at the cost of minimal                                                                      (in the general case of every tile of the tree). The benefit of
+extra metadata and a tunable penalty on read performance.                                                                      this approach is that these pages can be dropped without hav-
+4.2.1 The Layout. Figure 5 presents the internal structure                                                                     ing to be read and updated. Rather, they are removed from
+of KiWi. Essentially, KiWi adds one new layer in the storage                                                                   the otherwise immutable file and released to be reclaimed by
+layout of LSM trees. In particular, in addition to the levels                                                                  the underlying file system. We call this a full page drop. Pages
+of the tree, the files of a level, and the page of a file, we now                                                              containing entries at the edge of the delete range, might also
+introduce delete tiles that belong to a file and consist of pages.                                                             contain some valid entries. These pages are loaded and the
+In the following discussion, we use S to denote the sort key                                                                   valid entries are identified with a tight for-loop on D (since
+and D for the delete key.                                                                                                      they are sorted on S). The cost of reading and re-writing
+Level Layout. The structure of the levels remains the same                                                                     these pages is the I/O cost of secondary range deletes with
+as in state-of-the-art LSM trees. Every level is a collection                                                                  KiWi when compared with a full-tree compaction for the
+of files containing non-overlapping ranges of S. The order                                                                     state of the art. We call these partial page drops, and con-
+between files in a level follows S. Formally, if i < j, all entries                                                            stitute a small fraction of in-place editing, which is limited
+in file i have smaller S than those in file j.                                                                                 to zero or one page per delete tile. Subsequent compactions
+File Layout. The contents of the file are delete tiles, which                                                                  will create files and delete tiles with the pre-selected sizes.
+are collections of pages. Delete tiles contain non-overlapping                                                                 4.2.3 Tuning and Metadata. We now discuss the tuning
+ranges of S, hence from the perspective of the file, the order                                                                 knobs and the metadata of KiWi.
+of the delete tiles also follows S. Formally, if k < l, all entries                                                            Delete Tile Granularity. Every file contains a number of
+in delete tile k have smaller S than those in file l.                                                                          delete tiles, and each tile contains a number of pages. The
+Delete Tile Layout. Contrary to above, the pages of a delete                                                                   basic tuning knob of KiWi is the number of pages per delete
+tile are sorted on D. Formally, for p < q, page p of a given                                                                   tile (h), which affects the granularity of delete ranges that
+delete tile contains entries with smaller D than page q, while                                                                 can be supported. For a file with P disk pages, the number
+we have no information about S. Organizing the contents                                                                        of delete tiles per file is P/h. The smallest granularity of a
+of a tile ordered on the delete key D allows us to quickly                                                                     delete tile is when it consists of only a single disk page, i.e.,
+execute range deletes because the entries under deletion are                                                                   for h = 1. In fact, h = 1 creates the same layout as the state
+always clustered within contiguous pages of each tile, which                                                                   of the art, as all contents are sorted on S and every range
+can be dropped in their entirety.                                                                                              delete needs to update all data pages. As h increases, delete
+Page layout. The order of entries within each page does not                                                                    ranges with delete fraction close to 1/h will be executed
+affect the performance of secondary range deletes, however,                                                                    mostly by full drops. On the other hand, for higher h read
+
+
+
+
+                                                                                                                   901
+Research 10: Storage and Indexing                                                                                                                                                            SIGMOD ’20, June 14–19, 2020, Portland, OR, USA
+
+SIGMOD’20, June 14–19, 2020, Portland, OR, USA                                                                               Subhadeep Sarkar, Tarikul Islam Papon, Dimitris Staratzis, Manos Athanassoulis
+
+
+                                        delete tiles within a ﬁle are                                                          pages within a delete tile                                                                        entries within every page
+                                                sorted on S                                                                   are sorted on delete key (D)                                                                            are sorted on S
+  Level 1
+                                                                     File f                                                                                   Delete-tile 0                                                 Page 0
+  Level 2
+
+
+
+
+                                                                                                                                                                                                      pages have entries
+
+                                                                                                                                delete-tiles contain pages
+                                                                                               Smin = S1 : Smax = S99                                           Smin = S1 : Smax = S50                                      S1     S4    S6      S7    S9    S11         S23
+                                                                                               Dmin = D1 : Dmax = D90                                           Dmin = D2 : Dmin = D90                                      D7     D15 D9        D18 D10 D5              D2
+
+
+
+
+                                         ﬁles contain delete tiles
+                                                                                                                                                                                                                            zoo    boy   all     job   car   tag         nay
+
+
+
+
+                                                                     Delete-tile 1 Delete-tile 0
+ Level L-1
+                                                                                                                                                               Page 0
+                                                                                                   Smin = S1 : Smax = S50                                                   Smin = S1 : Smax = S23
+                                                                                                   Dmin = D2 : Dmax = D90                                                   Dmin = D2 : Dmax = D18
+
+                                                                                                    Page 0                                                                                                                  Page 1
+                                                                                                                                                               Page 1
+                                                                                                                                                                            Smin = S16 : Smax = S35
+      Level i                                                                                       Page h-1
+                                                                                                                                                                            Dmin = D21 : Dmax = D39                         S16 S19 S22 S24 S25 S26                      S35
+                                                                                                                                                                                                                            D31 D21 D25 D24 D39 D35                      D23
+
+                                                                                                                                                               Page 2
+                                                                                                                                                                            Smin = S13 : Smax = S43
+                                                                                                   Smin = S51 : Smax = S99                                                                                                  bat    may bun       car   joy   zoo         aim
+     File 0 File 1       File f                                                                    Dmin = D1 : Dmax = D75
+                                                                                                                                                                            Dmin = D40 : Dmax = D51
+
+                                                                                                    Page 0
+
+     ﬁles in a level are sorted                                                                                                                                                                                               S22                D25               bun
+
+                                                                                                                                                                 Page h-1
+                                                                                                    Page h-1                                                                Smin = S45 : Smax = S50
+           on sort key (S)                                                                                                                                                  Dmin = D82 : Dmax = D90
+                                                                                                                                                                                                                           sort key            delete key           value
+
+Figure 5: Key Weaving Storage Layout stores data in an interweaved fashion on the sort and delete key to facilitate
+efficient secondary range deletes without hurting read performance.
+performance is affected. The optimal decision for h depends                                                                                                  filters and the I/O cost associated with data movement to and
+on the workload (frequency of lookups and range deletes),                                                                                                    from disk. For non-zero result point queries, KiWi performs
+and the tuning (memory allocated to BFs and size ratio).                                                                                                     L · h/4 times more hash calculations compared to the state
+Bloom Filters and Fence Pointers. We next discuss Bloom                                                                                                      of the art, and L · h times in case of zero-result point queries.
+filters and fence pointers in the context of KiWi.                                                                                                           In practice, commercial LSM engines, such as RocksDB, use
+    Bloom filters. KiWi maintains BFs on S at the granularity                                                                                                only a single MurmurHash hash digest to calculate which
+of disk page. Maintaining separate BFs per page requires no                                                                                                  Bloom filter bits to set [58, 69]. This reduces the overall
+BF reconstruction for full page drops, and light-weight CPU                                                                                                  cost of hash calculation by almost one order of magnitude.
+cost for partial page drops. The same overall FPR is achieved                                                                                                We measured the time to hash a single 64-bit key using the
+with the same memory consumption when having one BF                                                                                                          MurmurHash to be 80ns, which is significantly smaller than
+per page, since a delete tile contains no duplicates [10].                                                                                                   the SSD access latency of 100µs. This allows Lethe to strike a
+    Fence pointers. KiWi maintains fence pointers on S that                                                                                                  navigable trade-off between the CPU and I/O costs, and for
+keep track of the smallest sort key for every delete tile. Fence                                                                                             the optimal value of h, Lethe achieves a significantly superior
+pointers on S, aided by the BFs, accelerate lookups. To sup-                                                                                                 overall performance as compared to the state of the art.
+port secondary range deletes, for every delete tile, KiWi
+maintains in memory a separate fence pointer structure on                                                                                                    4.2.5 Implications on Performance. KiWi offers a tun-
+D. We refer to this as delete fence pointers. The delete fence                                                                                               able trade-off between the cost for secondary range deletes
+pointers store the smallest D of every page enabling full                                                                                                    and that of lookups, but does not influence write performance
+page drops of the corresponding pages without loading and                                                                                                    (including space and write amplifications).
+searching the contents of a delete tile.                                                                                                                     Point Lookup. A point read follows the same search algo-
+Memory Overhead. While KiWi does not require any ad-                                                                                                         rithm as in the state of the art [22]. In every level, a lookup
+ditional memory for BFs, it maintains two fence pointer                                                                                                      searches the fence pointers (on S) to locate the delete tile
+structures – one on S per delete tile and one on D per page.                                                                                                 that may contain the search key. Once a delete tile is located,
+Since the state of the art maintains fence pointers on S per                                                                                                 the BF for each delete tile page is probed. If a probe returns
+page, the space overhead for KiWi is the additional metadata                                                                                                 positive, the page is read to memory and binary searched,
+per tile. Assuming sizeo f (S) and sizeo f (D) are the sizes in                                                                                              since the page is sorted on S. If the key is found, the query
+bytes for S and D respectively, the space overhead is:                                                                                                       terminates. If not, the I/O was due to a false positive, and
+                      KiW i mem − SoAmem =                                                                                                                   the next page of the tile is fetched. The I/O cost for a query
+        N · sizeo f (S) + N · sizeo f (D) − N · sizeo f (S) =                                                                                                on an existing entry is O(1 + h · e −m/N ) for leveling and
+       B ·h               B                 B
+    #delete_tiles · (sizeo f (S) + h · (sizeo f (D) − sizeo f (S)))
+                                                                                                                                                             O(1 + T · h · e −m/N ) for tiering. For a zero-result lookup the
+                                                                                                                                                             expected cost is O(h ·e −m/N ) and O(h ·e −m/N ·T ) respectively.
+Note that if sizeo f (S) = sizeo f (D) the overhead is only one                                                                                              Range Lookup. In general, a range lookup may span several
+sort key per tile, and if sizeo f (D) < sizeo f (S), KiWi might                                                                                              delete tiles spread in one or more consecutive files. KiWi
+lead to less overall size of metadata.                                                                                                                       affects the performance of range lookups only at the terminal
+4.2.4 CPU Overhead. KiWi navigates an intrinsic trade-                                                                                                       delete tiles that contain the bounds on the range – all delete
+off between the CPU cost for additional hashing for Bloom                                                                                                    tiles in between that are subsumed by the range always need
+
+
+
+
+                                                                                                                              902
+Research 10: Storage and Indexing                                                                                    SIGMOD ’20, June 14–19, 2020, Portland, OR, USA
+
+Lethe: A Tunable Delete-Aware LSM Engine                                                                                    SIGMOD’20, June 14–19, 2020, Portland, OR, USA
+
+
+to be read to memory. For the terminal delete tiles, the lookup                                       persistence threshold is specified as part of the data reten-
+needs to scan on average h/2 more pages per tile instead                                              tion SLA, and Lethe sets the TTL for the tree-levels to ensure
+of only the qualifying pages. Thus, the cost for short range                                          timely persistence.
+lookups for KiWi becomes O(h ·L) for leveling and O(h ·L ·T )                                            For a workload with secondary range deletes, Lethe tunes
+for tiering. For long range lookups, the increase in cost gets                                        the storage layout to find the optimal value for the delete tile
+amortized over the number of qualifying delete tiles, and                                             granularity using the frequency of read operations relative
+remains the same asymptotically, i.e., O( s B·N ) and O( T ·sB·N )                                    to the frequency of secondary range deletes. The optimal
+for leveling and tiering, respectively.                                                               value of h is given by solving Eq. 2 with respect to h.
+Secondary Range Lookups. With the interweaved layout,                                                                     N                   1
+KiWi can also support efficient range lookups on the delete                                                          h≤     ·                                              (3)
+                                                                                                                          B f E P Q +f P Q · F PR + f S RQ · L
+key. While state-of-the-art LSM engines need to maintain                                                                          fS R D            fS R D
+a secondary index on the delete key, they still pay a heavy                                             For example, for a 400GB database and 4KB page size, if
+cost for scanning across many scattered pages. KiWi utilizes                                          between two range deletes we execute 50M point queries of
+the ordering of the data on the delete key and can realize                                            any type, 10K short range queries, and have F PR ≈ 0.02 and
+secondary range queries at a much lower I/O cost.                                                     T = 10, using Eq. 3, we have the optimal value of h as:
+4.2.6 Navigable Design. A fundamental design goal for                                                                   400GB/4KB                           108
+KiWi is to navigate the trade-off between the cost of sec-                                            h≤                                              =               ≈ 102 .
+                                                                                                           5 · 107 · 2 · 10−2 + 104 · loд10 ( 400G B
+                                                                                                                                               4K B )
+                                                                                                                                                        106 + 8 · 104
+ondary range deletes and lookups. KiWi offers a navigable
+continuum of storage layouts that can be tuned to obtain the                                          Implementation. Lethe is implemented on top of RocksDB
+optimal value for h based on the workload characteristics
+                                                                                                      which is an open-source LSM-based key-value store widely
+and performance requirements. Assuming that the workload
+can be described by the fractions of (a) point queries with                                           used in the industry [27, 29]. The current implementation
+zero-result f EP Q , (b) point queries with non-zero result f P Q ,                                   of RocksDB is implemented as leveling (only Level 1 is im-
+(c) short range queries fS RQ , (d) long range queries f LRQ                                          plemented as tiered to avoid write-stalls) and has a fixed
+with selectivity s, (e) secondary range deletes fS RD , and (f)                                       size ratio (defaults to 10). We develop a new API for Lethe
+insertions f I , then we can compare the cost of this workload                                        to have fine-grained control on the infrastructure. The API
+for Lethe and the state of the art.                                                                   allows us to initiate compactions in RocksDB based on cus-
+       Cost Lethe ≤ Cost S oA ⇒ f E P Q · F P R · h + f P Q · (1 + ·F P R · h) +                      tom triggers and design custom file picking policies during
+f S RQ · L δ · h + f LRQ · s · N /B + f S R D · N /(B · h) + f I · loдT (N /B) ≤                      compactions. RocksDB already stores metadata for every file,
+           f E P Q · F P R + f P Q · (1 + ·F P R) + f S RQ · L · +f LRQ · s ·
+                                                                              N
+                                                                                +
+                                                                                                      which includes the number of entries and deletes per files.
+                                                                              B                       We further store aдe as the only additional information per
+                                             f S R D · N /B + f I · loдT (N /B) ⇒
+                                                                                                      file. The delete persistence threshold is taken as a user-input
+           (f E P Q + f P Q ) · F P R · h + f S RQ · L δ · h + f S R D · N /(B · h) ≤
+                              (f E P Q + f P Q ) · F P R + f S RQ · L + f S R D · N /B   (1)
+                                                                                                      at setup time and is used to dynamically set the level-TTLs.
+
+If we divide both sides of Eq. 1 with f S RD we will get the costs                                    5    EVALUATION
+with respect to the relative frequencies of each operation
+with respect to the range deletes.                                                                    We evaluate Lethe against state-of-the-art LSM-tree designs
+                                                                                                      for a range of workloads with deletes and different delete
+(1) ⇒ (f E P Q + f P Q )/f S R D · F P R · (h − 1) + f S RQ /f S R D · (L δ · h − L) ≤                persistence thresholds.
+                                           N /B · (h − 1)/h (assuming L δ ≈ L )
+                                                                                                      Experimental Setup. We use a server with two Intel Xeon
+                                   fE P Q + fP Q           f S RQ       N 1
+                                 ⇒
+                                       fS R D
+                                                  · FPR +
+                                                           fS R D
+                                                                  ·L ≤     ·
+                                                                         B h
+                                                                                          (2)         Gold 6230 2.1GHz processors each having 20 cores with
+                                                                                                      virtualization enabled and with 27.5MB L3 cache, 384GB of
+Using Eq. 2 we navigate the secondary range delete vs. lookup                                         RDIMM main memory at 2933MHz and 240GB SSD.
+performance trade-off to find the best layout.                                                        Default Setup. Unless otherwise mentioned the experimen-
+                                                                                                      tal setup consists of an initially empty database with inges-
+4.3       Lethe                                                                                       tion rate at 210 entries per second. The size of each entry is
+Lethe puts together the benefits of FADE and KiWi to bet-                                             1KB, and the entries are uniformly and randomly distributed
+ter support deletes in LSM-trees. For a given workload and                                            across the key domain and are inserted in random order. The
+a persistence delete latency threshold, Lethe offers maxi-                                            size of the memory buffer is 1MB (implemented as a skiplist).
+mal performance, by carefully tuning the cost of persistent                                           The size ratio for the database is set to 10, and for the Bloom
+deletes, and their impact on the overall performance of the                                           filters in memory, we use 10 bits per entry. To determine
+system. The key tuning knobs are (i) the delete persistence                                           the raw performance, write operations are considered to
+threshold (D th ) and (ii) delete tile granularity (h). The delete                                    have a lower priority than compactions. For all experiments
+
+
+
+
+                                                                                                903
+Research 10: Storage and Indexing                                                       SIGMOD ’20, June 14–19, 2020, Portland, OR, USA
+
+SIGMOD’20, June 14–19, 2020, Portland, OR, USA                  Subhadeep Sarkar, Tarikul Islam Papon, Dimitris Staratzis, Manos Athanassoulis
+
+
+performed, the implementation for Lethe differed from the                 After each experiment, Lethe was found to have fewer files
+RocksDB setup in terms of only the compaction trigger and                 on disk as compared to RocksDB. This is because, Lethe
+file picking policy. We have both block cache and direct I/O              compacts invalidated entries in a greedy manner, and for a
+enabled and the WAL disabled. Deletes are issued only on                  workload with even a small fraction (2%) of deletes, it reduces
+keys that have been inserted in the database and are uni-                 the number of compactions performed by 45%, as shown in
+formly distributed within the workload. We insert 1GB data                Figure 6 (B). However, while compacting files with expired
+in the database with compactions given a higher priority                  TTLs, the chosen file may overlap with a relatively higher
+than writes. The delete persistence threshold is set to 16.67%,           number of files from the target level, and thus Lethe compacts
+25%, and 50% of the experiment’s run-time. This experiment                4.5% more data when D t h is set as 50% of the experiment’s
+mimics the behavior of a long-running workload. The delete                run-time, as shown in Figure 6 (C).
+persistence threshold values chosen for experimentation are               Lethe Achieves Better Read Throughput. In this experi-
+representative of practical applications, where the threshold             ment, we show that Lethe offers a superior read performance
+is 2 months (16.67%), 3 months (25%), 6 months (50%), respec-             as compared to RocksDB. For this experiment, we populate
+tively, for a commercial database running for 1 year [26]. All            the database with 1GB data and then issue point lookups
+lookups are issued after the whole database is populated.                 on existing entries. Note that the lookups may be on entries
+Metrics. The compaction related performance metrics in-                   have been deleted by a tombstone after they were inserted.
+cluding (i) total number of compactions performed, (ii) total             With more deletes in the workload, the number of invalidated
+bytes compacted, (iii) number of tombstones present in a tree,            entries (including tombstones) hashed into the BFs increases.
+and the (iv) age of files containing tombstones are measured              Lethe purges these superfluous entries by persisting them
+by taking a snapshot of the database after the experiment.                in a time-bound manner, and thus, cleans up the BFs and
+Space and write amplification are then computed using the                 improves their FPR. A lookup on a persistently deleted key
+equations from Sections 3.2.1 and 3.2.3.                                  returns negative without performing a disk I/O to read a
+Workload. Given the lack of delete benchmarks, we de-                     tombstone. Overall, Figure 6 (D) shows that Lethe improves
+signed a synthetic workload generator, which produces a                   lookup performance by up to 17% for workloads with deletes.
+variation of YCSB Workload A, with 50% general updates                    Lethe Ensures Timely Delete Persistence. Figure 6 (E)
+and 50% point lookups. In our experiments, we vary the                    shows the distribution of the tombstones ages at the end
+percentage of deletes between 2% to 10% of the ingestion.                 of the experiment to demonstrate that Lethe ensures timely
+                                                                          persistent deletion. The X-axis shows the age of all files that
+5.1    Achieving Timely Delete Persistence                                contain tombstones, and the Y-axis shows the cumulative
+                                                                          number of tombstones at the instant of the snapshot with
+Lethe Reduces Space Amplification. We first show that                     the age corresponding to the X-axis value or smaller. The
+Lethe significantly reduces space amplification by persisting             goal of Lethe is to have fewer tombstones of smaller age
+deletes timely. We set up this experiment by varying the                  than the state of the art, with all tombstones having age
+percentage of deletes in a workload for both RocksDB and                  less than D t h We show that in comparison with RocksDB,
+Lethe, for three different delete persistence thresholds. The             Lethe persists between 40% and 80% more tombstones, and
+plot is shown in Figure 6 (A). For a workload with no deletes,            does so while honoring the delete persistence threshold. For
+the performances of Lethe and RocksDB are identical. This is              D t h = 50% of the experiment’s run-time, while RocksDB has
+because in the absence of deletes, Lethe performs compactions             ∼ 40, 000 tombstones (i.e., ∼ 40% of all tombstones inserted)
+triggered by level-saturation, choosing files with minimal                distributed among files that are older than D t h , Lethe persists
+overlap. In the presence of deletes, driven by the delete persis-         all deletes within the threshold.
+tence threshold (D t h ), Lethe compacts files more frequently
+                                                                          Write Amplification gets Amortized for Lethe. This ex-
+to ensure compliance with the threshold. It deletes the log-
+                                                                          periment demonstrates that the higher write amplification
+ically invalidated entries persistently, and in the process,
+                                                                          caused by the initial eager merging of Lethe is amortized over
+diminishes the space amplification in the database. Even
+                                                                          time. For Lethe, we set D t h to 60 seconds and take snapshots
+when D th is set to 50% of the workload execution duration,
+                                                                          at an interval of 180 seconds during the execution of the
+Lethe reduces space amplification by about 48%. For shorter
+                                                                          experiments. At every snapshot, we measure the cumulative
+D th , the improvements in space amplification are further
+                                                                          bytes written over the past intervals. We measure the same
+pronounced by Lethe.
+                                                                          metric for RockDB (that does not support setting a D t h ), and
+Lethe Performs Fewer Compactions. Figures 6 (B) and (C)                   use it to normalize the bytes written. We plot the normal-
+show that Lethe performs fewer compactions as compared to                 ized bytes written against time (across snapshots) in Figure
+RocksDB, but compacts more data during every compaction.                  6 (F). We observe that due to eager merging, Lethe writes
+Lethe performs compactions on a rolling basis based on D t h .
+
+
+
+
+                                                                    904
+Research 10: Storage and Indexing                                                                                                                                                                                                                            SIGMOD ’20, June 14–19, 2020, Portland, OR, USA
+
+Lethe: A Tunable Delete-Aware LSM Engine                                                                                                                                                                                                                               SIGMOD’20, June 14–19, 2020, Portland, OR, USA
+
+
+
+
+                                                                                                                                                                                                            total data written (GB)                                                                          read throughput (ops/s)
+                            0.05                                                                                            1500                                                                                                      24
+
+
+
+
+space amplification
+                                                RocksDB                                                                                                                                                                                                                                                                           1600
+
+
+
+
+                                                                                                      # compactions
+                            0.04                Lethe/16%
+                                                Lethe/25%                                                                                                                                                                             18                                                                                          1200
+                                                                                                                            1000
+                            0.03                Lethe/50%
+                                                                                                                                                                                                                                      12                                                                                               800
+                            0.02
+                                                                                                                                   500
+                            0.01                                                                                                                                                                                                      6                                                                                                400
+                                  0                                                                                                      0                                                                                            0                                                                                                     0
+                                      0         2          4                6              8     10                                           0       2    4      6          8     10                                                      0       2     4         6         8    10                                                             0        2       4        6      8        10
+                                          (A) % deletes in workload                                                                               (B) % deletes in workload                                                                  (C) % deletes in workload                                                                            (D) % deletes in workload
+
+
+
+
+   cumulative #tombstones                                                                               normalized bytes written
+                             50
+                                   x104                                                                                            1.5                                                                      0.15                                                                                                                       30
+                                                        Dth=16%   Dth=25%       Dth=50%
+
+
+
+
+                                                                                                                                                                                         avg latency (ms)                                                                                             % full page drops
+                             40
+                             30                                                                                                    1.0                                                                      0.10                                                                                                                       20
+                                                                                                                                                                                                                                                                                                                                                      h=1
+                             20                                                                                                                                                                                                                                write−RocksDB                                                                          h=4
+                                                                                                                                   0.5                                                                      0.05                                               mixed−RocksDB                                                           10             h=16
+                             10                                                                                                                      RocksDB                                                                                                   write−Lethe                                                                            h=64
+                                                                                                                                                     Lethe                                                                                                     mixed−Lethe
+                             0                                                                                                     0.0                                                                      0.00                                                                                                                       0
+                                                    90                  450               1800                                           180        360    540    720            900                                                   225         227       229       231       233                                                        0.01      0.02        0.03         0.04       0.05
+                                           (E) age of files (s)                                                                                        (F) time (s)                                                                   (G) data size in bytes (log scale)                                                                        (H) fraction of deleted entries
+
+
+
+
+    avg lookup cost (I/Os)                                                                            avg. I/Os per operation
+                                                                                                                                   40                                                                                                                                                                                                                                                       x
+                                                                                                                                                                         h=64                                                                                                                                                                             no correlation        cor = 1
+
+
+
+
+                                                                                                                                                                                                                                                                                       % of pages in tree
+                             1.5             Non−zero result lookup                                                                                 h=1
+
+
+
+
+                                                                                                                                                                                                                                                                                                                                                                                                range query cost
+                                                                                                                                                                                                                                                                                                                                                                                            x
+                                             Zero result lookup                                                                                     h=4                                                                                                                                                                                                       range delete
+                                                                                                                                   30                             h=16
+                                                                                                                                                    h=16                                                                                                                                                                                                      range query                   x
+                             1.0
+                                                                                          RocksDB                                                   h=64                                                                                                                                                                                                      full page drop
+                                                                                                                                   20                                                                                                                                                                                                                                                       x
+                                                                                                                                                           h=16
+                             0.5                                                                                                                    h=4                                                                                                                                                                                                                                     x
+                                                                                                                                   10 h=1
+                                                                                                                                                                                                                                                                                                                                                                                x
+                                                                                                                                                                                                                                                                                                                                                                                0.004
+                                                                                          RocksDB
+                             0.0                                                                                                    0                                                                                                                                                                                                                                          1x
+                                      1     2       4             8         16            32     64                                      0.01       0.02   0.03       0.04        0.05                                                 1       2    4    8    16 32 64 128                                                                  1     2   4       8 16 32 64 {1-64}
+                             (I) delete−tile granularity (log scale)                                                                         (J) fraction of deleted entries                                                                                                                                                                    (L) delete tile size (pages)
+
+Figure 6: Lethe improves space amplification (A) and performs fewer larger compactions (B, C) to persist deletes
+timely (E). In the process, it improves read throughput (D). The higher write amplification in Lethe gets amortized
+over time (F), which allows Lethe to scale similarly to RocksDB (G). (H) through (L) show Lethe’s ability to navigate
+the design space of storage layouts and choose the optimal delete tile size to strike a balance between the lookup
+and secondary range delete performance to maximize the overall throughput.
+
+1.4× more data compared to RocksDB in the first snapshot.                                                                                                                                                            initial increased write amplification of Lethe, its write la-
+However, by persisting invalid entries upfront, Lethe purges                                                                                                                                                         tency is 0.1-3% higher than that of RocksDB. For the mixed
+superfluous entries from the tree, and hence, compacts fewer                                                                                                                                                         workload, however, Lethe improves the average latency by
+entries during subsequent compactions. This reduces the                                                                                                                                                              0.5-4%. This improvement is primarily due to the higher read
+normalized writes by Lethe over time. At the end of the                                                                                                                                                              throughput achieved by Lethe, as shown in Figure 6 (D). For
+experiment, we observe that Lethe writes only 0.7% more                                                                                                                                                              smaller data sizes, most data entries are stored in memory or
+data as compared to RocksDB. In this experiment, we set                                                                                                                                                              the first disk level, which reduces read latency significantly.
+the D th to be 15× smaller than the experiment duration to
+model the worst case. In practice, insertions in LSM engines                                                                                                                                                          5.2                      Secondary Range Deletes
+continue for much longer (even perpetually) and D t h is set                                                                                                                                                          Next, we evaluate secondary range deletes on Lethe.
+to a small constant duration. In this scenario Lethe’s write                                                                                                                                                          Setup. Unless otherwise mentioned, the workload comprises
+amplification will be quickly amortized.                                                                                                                                                                              0.001% secondary range delete operations along with 1%
+Lethe Scales Similarly to the State of the Art. This ex-                                                                                                                                                              range queries and 50% point queries. Each file has 256 pages
+periment shows that Lethe and the state of the art follow                                                                                                                                                             and the size of every page is 4KB.
+the same performance trends as data volume grows. We                                                                                                                                                                  Lethe Achieves Superior Delete Performance. Figures
+set up this experiment with the default configuration, and                                                                                                                                                            6 (H) through (L) show that Lethe offers superior overall
+we vary data size. In addition to YCSB Workload A, which                                                                                                                                                              performance by storing the data on disk using KiWi. For
+is used to compute the mixed workload latency, we use a                                                                                                                                                               the first experiment, we vary the selectivity of a secondary
+write-only workload to measure write latency. Figure 6 (G),                                                                                                                                                           range delete operation, i.e., the fraction of the database that
+shows the average latency for both workloads with data                                                                                                                                                                is deleted, and measure the number of pages that can be fully
+size on the X-axis. We observe that the write latency for                                                                                                                                                             dropped during the operation. Full page drops do not require
+RocksDB and Lethe is not affected by data size. Due to the                                                                                                                                                            reading the page to memory, and thus, a higher value along
+
+
+
+
+                                                                                                                                                                                       905
+Research 10: Storage and Indexing                                                      SIGMOD ’20, June 14–19, 2020, Portland, OR, USA
+
+SIGMOD’20, June 14–19, 2020, Portland, OR, USA                 Subhadeep Sarkar, Tarikul Islam Papon, Dimitris Staratzis, Manos Athanassoulis
+
+
+the Y-axis is desirable. We repeat the experiment for different          between the sort and delete keys, the impact of the inter-
+delete tile granularity (h). As the selectivity of the secondary         weaved storage layout is prominent. As we increase h the
+range delete operation increases the number of full page                 range delete cost drops drastically (because a larger fraction
+drops decreases. This problem is further exacerbated for                 of pages can be fully dropped) at the expense of the cost of
+smaller delete tile granularity.                                         range queries. For the second workload, which has positive
+   Although a higher value for h is desirable for reducing               correlation between sort and delete key (≈1), delete tiles have
+the I/O requirement for secondary range deletes, it bears a              no impact on performance. For such a case, the classical LSM
+trade-off with the lookup performance, as shown in Figure                storage layout (i.e., h = 1) becomes optimal.
+6 (I). The cost of zero-result and non-zero result lookups
+increases linearly with an increase in the tile size. Thus, the          6   RELATED WORK
+optimal value for h is driven by the workload composition.               Deletion in Relational Systems. Past work on data dele-
+Choosing the Optimal Storage Layout. Figure 6 (J) shows                  tion on relational systems focuses on bulk deletes [14, 31, 47].
+Lethe’s ability to navigate the continuum of storage layout              Efficient bulk deletion relies on similar techniques as effi-
+and offer superior overall performance by determining the                cient reads: sorting or hashing data to quickly locate, and
+optimal storage layout. For a workload with a secondary                  ideally collocate, the entries to be deleted. Efficient deletion
+range delete to lookup ratio of 2 × 10−6 (i.e., 1 secondary              has also been studied in the context of spatial data [45] and
+range delete per 0.5M lookups), as the selectivity of the sec-           view maintenance [8]. Contrary to past work, Lethe aims to
+ondary range delete operation changes, the optimal way of                support a user-provided delete persistence latency threshold.
+storing data on disk changes. For selectivity 0.01%, the classi-         Self-Destructing Data. In addition, past research has pro-
+cal storage layout (with h = 1) provides optimal performance.            posed to automatically make data disappear when specific
+As the selectivity increases, the design choice changes, and             conditions are met. Vanish is a scheme that ensures that
+we observe that for selectivity 0.05% storing 64 disk pages              all copies of certain data become unreadable after a user-
+per delete tile (h = 64) attains the optimal performance.                specified time, without any specific action on the part of a
+Analyzing the CPU-I/O Trade-off. In this experiment, we                  user [32, 33]. Kersten [42] and Heinis [37] have proposed
+show the trade-off between the CPU and I/O costs for Lethe.              the concept of forgetting in data systems through biology-
+The workload for this experiment has 50% point queries and               inspired mechanisms as a way to better manage storage space
+1% range query with selectivity of 0.001%, 49% inserts, and              and for efficient data analysis capabilities, as the data gen-
+a single secondary range delete. We run this workload on a               eration trends continue to increase. Contrary to this, Lethe
+preloaded database of size ∼90GB (i.e., 210 inserts/sec for 24           supports timely data deletion that is set by users/applications.
+hours). We have a single secondary range delete operation
+that deletes 1/7th of the database (mimics the behavior of               7   CONCLUSION
+deleting all data older than 7 days). We measure the total               In this work, we show that state-of-the-art LSM-based key-
+time spent for hash computation for filter probes and the                value stores perform suboptimally for workloads with even
+total time spent for I/Os to the disk.                                   a small proportion of deletes, and that the delete persistence
+   Figure 6 (K) plots the total time spent in hashing and I/O            latency in these data stores are potentially unbounded. To
+access for both Lethe and RocksDB while varying delete tile              address this, we build Lethe, a new LSM-based engine that
+size. The embedded figure shows that the hashing cost in-                introduces a new family of compaction strategies FADE and
+creases linearly with h. However, as the time to hash entries            KiWi, a continuum of physical data storage layouts. FADE
+is 3 orders of magnitude smaller than the disk access latency            enforces delete persistence within a user-defined threshold
+and only point queries benefit from Bloom filters, the disk              while increasing read throughput and reducing space amplifi-
+access time dominates the workload execution time. By de-                cation, at the expense of a modest increase in write amplifica-
+sign, Lethe computes the optimal value of h, which in this               tion. KiWi offers efficient secondary range deletes, which can
+case is 8. For h = 8, the I/O cost for Lethe is 76% lower than           be tuned to outperform state of the art for a given workload.
+that in RocksDB. This comes at the price of a 5× increase                Acknowledgments. We thank the reviewers for their valu-
+in the hashing cost, which is completely hidden behind the               able feedback and researchers from Facebook for their useful
+massive benefits in total number of I/Os.                                remarks. We are particularly thankful to Xuntao Cheng from
+Effects of Correlation between Sort Key and Delete Key.                  Alibaba and Mark Callaghan from MongoDB for the valuable
+Figure 6 (L) shows the effect of correlation between the sort            discussions and concrete feedback. We also thank Zichen
+key and the delete key. We run this experiment for two work-             Zhu for helping with the experimentation. This work was
+loads. For the first workload, where there is no correlation             partially funded by NSF Grant No. IIS-1850202.
+
+
+
+
+                                                                   906
+Research 10: Storage and Indexing                                                                           SIGMOD ’20, June 14–19, 2020, Portland, OR, USA
+
+Lethe: A Tunable Delete-Aware LSM Engine                                                                            SIGMOD’20, June 14–19, 2020, Portland, OR, USA
+
+
+REFERENCES                                                                                      Proceedings of the USENIX Symposium on Operating Systems Design
+ [1] California Consumer Privacy Act of 2018. Assembly Bill No. 375, Chap-                      and Implementation (OSDI), pages 251–264, 2012.
+     ter 55, 2018.                                                                         [20] B. Dageville, T. Cruanes, M. Zukowski, V. Antonov, A. Avanes, J. Bock,
+ [2] T. Akidau, R. Bradshaw, C. Chambers, S. Chernyak, R. Fernández-                            J. Claybaugh, D. Engovatov, M. Hentschel, J. Huang, A. W. Lee, A. Mo-
+     Moctezuma, R. Lax, S. McVeety, D. Mills, F. Perry, E. Schmidt, and                         tivala, A. Q. Munir, S. Pelley, P. Povinec, G. Rahn, S. Triantafyllis, and
+     S. Whittle. The Dataflow Model: A Practical Approach to Balanc-                            P. Unterbrunner. The Snowflake Elastic Data Warehouse. In Proceed-
+     ing Correctness, Latency, and Cost in Massive-Scale, Unbounded,                            ings of the ACM SIGMOD International Conference on Management of
+     Out-of-Order Data Processing. Proceedings of the VLDB Endowment,                           Data, pages 215–226, 2016.
+     8(12):1792–1803, 2015.                                                                [21] N. Dayan, M. Athanassoulis, and S. Idreos. Monkey: Optimal Navigable
+ [3] I. Alagiannis, S. Idreos, and A. Ailamaki. H2O: A Hands-free Adaptive                      Key-Value Store. In Proceedings of the ACM SIGMOD International
+     Store. In Proceedings of the ACM SIGMOD International Conference on                        Conference on Management of Data, pages 79–94, 2017.
+     Management of Data, pages 1103–1114, 2014.                                            [22] N. Dayan, M. Athanassoulis, and S. Idreos. Optimal Bloom Filters
+ [4] Apache. Accumulo. https://accumulo.apache.org/.                                            and Adaptive Merging for LSM-Trees. ACM Transactions on Database
+ [5] Apache. Cassandra. http://cassandra.apache.org.                                            Systems (TODS), 43(4):16:1–16:48, 2018.
+ [6] Apache. HBase. http://hbase.apache.org/.                                              [23] N. Dayan and S. Idreos. Dostoevsky: Better Space-Time Trade-Offs for
+ [7] R. Appuswamy, M. Karpathiotakis, D. Porobic, and A. Ailamaki. The                          LSM-Tree Based Key-Value Stores via Adaptive Removal of Superfluous
+     Case For Heterogeneous HTAP. In Proceedings of the Biennial Confer-                        Merging. In Proceedings of the ACM SIGMOD International Conference
+     ence on Innovative Data Systems Research (CIDR), 2017.                                     on Management of Data, pages 505–520, 2018.
+ [8] C. Aravindan and P. Baumgartner. A Rational and Efficient Algorithm                   [24] N. Dayan and S. Idreos. The Log-Structured Merge-Bush & the Wacky
+     for View Deletion in Databases. In Proceedings of the International                        Continuum. In Proceedings of the ACM SIGMOD International Confer-
+     Symposium on Logic Programming (ILPS), pages 165–179, 1997.                                ence on Management of Data (SIGMOD), pages 449–466, 2019.
+ [9] J. Arulraj, A. Pavlo, and P. Menon. Bridging the Archipelago between                  [25] G. DeCandia, D. Hastorun, M. Jampani, G. Kakulapati, A. Lakshman,
+     Row-Stores and Column-Stores for Hybrid Workloads. In Proceedings                          A. Pilchin, S. Sivasubramanian, P. Vosshall, and W. Vogels. Dynamo:
+     of the ACM SIGMOD International Conference on Management of Data,                          Amazon’s Highly Available Key-value Store. ACM SIGOPS Operating
+     pages 583–598, 2016.                                                                       Systems Review, 41(6):205–220, 2007.
+[10] M. Athanassoulis and A. Ailamaki. BF-Tree: Approximate Tree Index-                    [26] A. Deshpande and A. Machanavajjhala. ACM SIGMOD Blog: Privacy
+     ing. Proceedings of the VLDB Endowment, 7(14):1881–1892, 2014.                             Challenges in the Post-GDPR World: A Data Management Perspective.
+[11] M. Athanassoulis, S. Chen, A. Ailamaki, P. B. Gibbons, and R. Stoica.                      http://wp.sigmod.org/?p=2554, 2018.
+     MaSM: Efficient Online Updates in Data Warehouses. In Proceedings                     [27] S. Dong, M. Callaghan, L. Galanis, D. Borthakur, T. Savor, and M. Strum.
+     of the ACM SIGMOD International Conference on Management of Data,                          Optimizing Space Amplification in RocksDB. In Proceedings of the
+     pages 865–876, 2011.                                                                       Biennial Conference on Innovative Data Systems Research (CIDR), 2017.
+[12] M. Athanassoulis, S. Chen, A. Ailamaki, P. B. Gibbons, and R. Stoica.                 [28] Facebook. MyRocks. http://myrocks.io/.
+     Online Updates on Data Warehouses via Judicious Use of Solid-State                    [29] Facebook. RocksDB. https://github.com/facebook/rocksdb.
+     Storage. ACM Transactions on Database Systems (TODS), 40(1), 2015.                    [30] Gartner. Gartner Says 8.4 Billion Connected “Things" Will Be in Use
+[13] M. Athanassoulis, M. S. Kester, L. M. Maas, R. Stoica, S. Idreos, A. Aila-                 in 2017, Up 31 Percent From 2016. https://tinyurl.com/Gartner2020,
+     maki, and M. Callaghan. Designing Access Methods: The RUM Con-                             2017.
+     jecture. In Proceedings of the International Conference on Extending                  [31] A. Gärtner, A. Kemper, D. Kossmann, and B. Zeller. Efficient Bulk
+     Database Technology (EDBT), pages 461–466, 2016.                                           Deletes in Relational Databases. In Proceedings of the IEEE International
+[14] B. Bhattacharjee, T. Malkemus, S. Lau, S. Mckeough, J.-A. Kirton, R. V.                    Conference on Data Engineering (ICDE), pages 183–192, 2001.
+     Boeschoten, and J. Kennedy. Efficient Bulk Deletes for Multi Dimen-                   [32] R. Geambasu, T. Kohno, A. A. Levy, and H. M. Levy. Vanish: Increasing
+     sionally Clustered Tables in DB2. In Proceedings of the International                      Data Privacy with Self-Destructing Data. In Proceedings of the USENIX
+     Conference on Very Large Data Bases (VLDB), pages 1197–1206, 2007.                         Security Symposium, pages 299–316, 2009.
+[15] M. Callaghan.           Deletes are fast and slow in an LSM.                          [33] R. Geambasu, A. A. Levy, T. Kohno, A. Krishnamurthy, and H. M. Levy.
+     http://smalldatum.blogspot.com/2020/01/deletes-are-fast-and-slow-in-                       Comet: An active distributed key-value store. In Proceedings of the
+     lsm.html, 2020.                                                                            USENIX Symposium on Operating Systems Design and Implementation
+[16] Z. Cao, S. Dong, S. Vemuri, and D. H. C. Du. Characterizing, Modeling,                     (OSDI), pages 323–336, 2010.
+     and Benchmarking RocksDB Key-Value Workloads at Facebook. In                          [34] M. Goddard. The EU General Data Protection Regulation (GDPR):
+     18th USENIX Conference on File and Storage Technologies (FAST 20),                         European Regulation that has a Global Impact. International Journal
+     pages 209–223, 2020.                                                                       of Market Research, 59(6):703–705, 2017.
+[17] F. Chang, J. Dean, S. Ghemawat, W. C. Hsieh, D. A. Wallach, M. Bur-                   [35] G. Golan-Gueta, E. Bortnikov, E. Hillel, and I. Keidar. Scaling Concur-
+     rows, T. Chandra, A. Fikes, and R. E. Gruber. Bigtable: A Distributed                      rent Log-Structured Data Stores. In Proceedings of the ACM European
+     Storage System for Structured Data. In Proceedings of the USENIX                           Conference on Computer Systems (EuroSys), pages 32:1–32:14, 2015.
+     Symposium on Operating Systems Design and Implementation (OSDI),                      [36] Google. LevelDB. https://github.com/google/leveldb/.
+     pages 205–218, 2006.                                                                  [37] T. Heinis and A. Ailamaki. Reconsolidating Data Structures. In Proceed-
+[18] Cisco. Cisco Global Cloud Index: Forecast and Methodology, 2016–2021.                      ings of the International Conference on Extending Database Technology
+     White Paper, 2018.                                                                         (EDBT), pages 665–670, 2015.
+[19] J. C. Corbett, J. Dean, M. Epstein, A. Fikes, C. Frost, J. J. Furman, S. Ghe-         [38] S. Héman, M. Zukowski, and N. J. Nes. Positional Update Handling
+     mawat, A. Gubarev, C. Heiser, P. Hochschild, W. C. Hsieh, S. Kanthak,                      in Column Stores. In Proceedings of the ACM SIGMOD International
+     E. Kogan, H. Li, A. Lloyd, S. Melnik, D. Mwaura, D. Nagle, S. Quin-                        Conference on Management of Data, pages 543–554, 2010.
+     lan, R. Rao, L. Rolig, Y. Saito, M. Szymaniak, C. Taylor, R. Wang, and                [39] G. Huang, X. Cheng, J. Wang, Y. Wang, D. He, T. Zhang, F. Li, S. Wang,
+     D. Woodford. Spanner: Google’s Globally-Distributed Database. In                           W. Cao, and Q. Li. X-Engine: An Optimized Storage Engine for Large-
+                                                                                                scale E-commerce Transaction Processing. In Proceedings of the ACM
+
+
+
+
+                                                                                     907
+Research 10: Storage and Indexing                                                                          SIGMOD ’20, June 14–19, 2020, Portland, OR, USA
+
+SIGMOD’20, June 14–19, 2020, Portland, OR, USA                                  Subhadeep Sarkar, Tarikul Islam Papon, Dimitris Staratzis, Manos Athanassoulis
+
+
+     SIGMOD International Conference on Management of Data, pages 651–                         Trans. Information Technology in Biomedicine, 14(3):613–621, 2010.
+     665, 2019.                                                                           [56] S. Papadopoulos, K. Datta, S. Madden, and T. Mattson. The TileDB
+[40] Y. Huang, T. Z. J. Fu, D.-M. Chiu, J. C. S. Lui, and C. Huang. Challenges,                Array Data Storage Manager. Proceedings of the VLDB Endowment,
+     design and analysis of a large-scale p2p-vod system. In Proceedings                       10(4):349–360, 2016.
+     of the ACM SIGCOMM 2008 Conference on Applications, Technologies,                    [57] P. Raju, R. Kadekodi, V. Chidambaram, and I. Abraham. PebblesDB:
+     Architectures, and Protocols for Computer Communications, Seattle, WA,                    Building Key-Value Stores using Fragmented Log-Structured Merge
+     USA, August 17-22, 2008, pages 375–388, 2008.                                             Trees. In Proceedings of the ACM Symposium on Operating Systems
+[41] F. Hueske. State TTL for Apache Flink: How to Limit the Lifetime of                       Principles (SOSP), pages 497–514, 2017.
+     State. Ververica, 2018.                                                              [58] RocksDB.         DeleteRange: A New Native RocksDB Operation.
+[42] M. L. Kersten. Big Data Space Fungus. In Proceedings of the Biennial                      https://rocksdb.org/blog/2018/11/21/delete-range.html, 2018.
+     Conference on Innovative Data Systems Research (CIDR), Gong show                     [59] T. Sakaki, M. Okazaki, and Y. Matsuo. Earthquake shakes Twitter
+     talk, 2015.                                                                               users: real-time event detection by social sensors. In Proceedings of the
+[43] S. Kulkarni, N. Bhagat, M. Fu, V. Kedigehalli, C. Kellogg, S. Mittal, J. M.               19th International Conference on World Wide Web, WWW 2010, Raleigh,
+     Patel, K. Ramasamy, and S. Taneja. Twitter Heron: Stream Processing                       North Carolina, USA, April 26-30, 2010, pages 851–860, 2010.
+     at Scale. In Proceedings of the ACM SIGMOD International Conference                  [60] S. Sarkar, J.-P. Banâtre, L. Rilling, and C. Morin. Towards Enforcement
+     on Management of Data, pages 239–250, 2015.                                               of the EU GDPR: Enabling Data Erasure. In Proceedings of the IEEE
+[44] A. Lamb, M. Fuller, and R. Varadarajan. The Vertica Analytic Database:                    International Conference of Internet of Things (iThings), pages 1–8, 2018.
+     C-Store 7 Years Later. Proceedings of the VLDB Endowment, 5(12):1790–                [61] R. Sears and R. Ramakrishnan. bLSM: A General Purpose Log Struc-
+     1801, 2012.                                                                               tured Merge Tree. In Proceedings of the ACM SIGMOD International
+[45] J.-T. Lee and G. G. Belford. An Efficient Object-based Algorithm for                      Conference on Management of Data, pages 217–228, 2012.
+     Spatial Searching, Insertion and Deletion. In Proceedings of the IEEE                [62] SQLite4. Online reference. https://sqlite.org/src4/.
+     International Conference on Data Engineering (ICDE), pages 40–47, 1992.              [63] M. Stonebraker, D. J. Abadi, A. Batkin, X. Chen, M. Cherniack, M. Fer-
+[46] Y. Li, B. He, J. Yang, Q. Luo, K. Yi, and R. J. Yang. Tree Indexing on Solid              reira, E. Lau, A. Lin, S. R. Madden, E. J. O’Neil, P. E. O’Neil, A. Rasin,
+     State Drives. Proceedings of the VLDB Endowment, 3(1-2):1195–1206,                        N. Tran, and S. Zdonik. C-Store: A Column-oriented DBMS. In Proceed-
+     2010.                                                                                     ings of the International Conference on Very Large Data Bases (VLDB),
+[47] T. Lilja, R. Saikkonen, S. Sippu, and E. Soisalon-Soininen. Online Bulk                   pages 553–564, 2005.
+     Deletion. In Proceedings of the IEEE International Conference on Data                [64] R. Thonangi and J. Yang. On Log-Structured Merge for Solid-State
+     Engineering (ICDE), pages 956–965, 2007.                                                  Drives. In Proceedings of the IEEE International Conference on Data
+[48] LinkedIn. Voldemort. http://www.project-voldemort.com.                                    Engineering (ICDE), pages 683–694, 2017.
+[49] H. Lu. Peer-to-Peer Support for Massively Multiplayer Games. In                      [65] Q.-C. To, J. Soto, and V. Markl. A Survey of State Management in Big
+     Proceedings IEEE INFOCOM 2004, The 23rd Annual Joint Conference of                        Data Processing Systems. CoRR, abs/1702.0, 2017.
+     the IEEE Computer and Communications Societies, Hong Kong, China,                    [66] P. Van Sandt, Y. Chronis, and J. M. Patel. Efficiently Searching In-
+     March 7-11, 2004, 2004.                                                                   Memory Sorted Arrays: Revenge of the Interpolation Search? In Pro-
+[50] C. Luo and M. J. Carey. LSM-based Storage Techniques: A Survey. The                       ceedings of the ACM SIGMOD International Conference on Management
+     VLDB Journal, 2019.                                                                       of Data, pages 36–53, 2019.
+[51] C. Mohan. Hybrid Transaction and Analytics Processing (HTAP): State                  [67] Z. Whittaker and N. Lomas. Even years later, Twitter doesn’t delete
+     of the Art. In Proceedings of the International Workshop on Business                      your direct messages. https://techcrunch.com/2019/02/15/twitter-direct-
+     Intelligence for the Real-Time Enterprise (BIRTE), 2016.                                  messages/, 2019.
+[52] MongoDB. Online reference. http://www.mongodb.com/.                                  [68] WiredTiger. Source Code. https://github.com/wiredtiger/wiredtiger.
+[53] P. E. O’Neil, E. Cheng, D. Gawlick, and E. J. O’Neil. The log-structured             [69] H. Zhang, H. Lim, V. Leis, D. G. Andersen, M. Kaminsky, K. Keeton,
+     merge-tree (LSM-tree). Acta Informatica, 33(4):351–385, 1996.                             and A. Pavlo. SuRF: Practical Range Query Filtering with Fast Succinct
+[54] F. Özcan, Y. Tian, and P. Tözün. Hybrid Transactional/Analytical                          Tries. In Proceedings of the ACM SIGMOD International Conference on
+     Processing: A Survey. In Proceedings of the ACM SIGMOD International                      Management of Data, pages 323–336, 2018.
+     Conference on Management of Data, pages 1771–1775, 2017.                             [70] M. Zukowski and P. A. Boncz. Vectorwise: Beyond Column Stores.
+[55] A. Pantelopoulos and N. G. Bourbakis. Prognosis: a wearable health-                       IEEE Data Engineering Bulletin, 35(1):21–27, 2012.
+     monitoring system for people at risk: methodology and modeling. IEEE
+
+
+
+
+                                                                                    908
+

@@ -39,7 +39,7 @@ pub mod vlog;
 pub mod wal;
 
 pub use batch::{WriteOp, WriteRecord, WRITE_RECORD_VERSION};
-pub use bloom::{BloomFilter, DEFAULT_BITS_PER_KEY};
+pub use bloom::{bloom_header_ok, bloom_header_ok_as_is, BloomFilter, DEFAULT_BITS_PER_KEY, MAX_K};
 pub use cache::{BlockCache, TableCache};
 pub use change_feed::{decode_changelog, ChangeEntry, ChangeKind, ChangeLog, CHANGELOG_FILE_NAME};
 pub use changelog_kernel::{

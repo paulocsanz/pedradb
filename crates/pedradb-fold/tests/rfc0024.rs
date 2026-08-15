@@ -238,7 +238,9 @@ fn caixote_host_filter_does_not_include_vm_id_prefix_sibling() {
         "child path under own vm should stay: {keys:?}"
     );
     assert!(
-        !keys.iter().any(|k| *k == b"/vm/vm-ab" || *k == b"/vm/vm-a2"),
+        !keys
+            .iter()
+            .any(|k| *k == b"/vm/vm-ab" || *k == b"/vm/vm-a2"),
         "vm-a filter included sibling vm id: {keys:?}"
     );
     assert!(
@@ -592,7 +594,9 @@ fn fold_range_includes_nul_prefixed_user_keys() {
     );
     // Fold meta must stay hidden.
     assert!(
-        !rows.iter().any(|(k, _)| k == b"\0fold/cursor" || k.starts_with(b"\0fold/keyset/")),
+        !rows
+            .iter()
+            .any(|(k, _)| k == b"\0fold/cursor" || k.starts_with(b"\0fold/keyset/")),
         "range leaked fold meta: {rows:?}"
     );
     let _ = std::fs::remove_dir_all(&dir);

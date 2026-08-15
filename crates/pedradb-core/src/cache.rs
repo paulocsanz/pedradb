@@ -243,7 +243,10 @@ mod tests {
         assert_eq!(cache.misses(), 1);
         assert_eq!(cache.hits(), 1);
         assert!(Arc::ptr_eq(&a, &b));
-        assert_eq!(a.get(b"k", 10), crate::memtable::Lookup::Found(Bytes::from_static(b"v")));
+        assert_eq!(
+            a.get(b"k", 10),
+            crate::memtable::Lookup::Found(Bytes::from_static(b"v"))
+        );
         let _ = std::fs::remove_file(&path);
     }
 

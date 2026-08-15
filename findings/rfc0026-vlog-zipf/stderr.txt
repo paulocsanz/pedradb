@@ -1,0 +1,6 @@
+   Compiling pedradb-core v0.1.0 (/Users/paulo/software/pedradb/crates/pedradb-core)
+    Finished `bench` profile [optimized + debuginfo] target(s) in 6.00s
+     Running benches/vlog_zipf.rs (target/release/deps/vlog_zipf-ce8c8707d13df373)
+pass 1: update=11784.8ms gc=86.3ms before=vlog file=16416008B live=8192000B records=2000 ratio=0.499 gc=0 sst_written=100678B after=vlog file=8208008B live=8192000B records=2000 ratio=0.998 gc=1 sst_written=136680B
+pass 2: update=19004.5ms gc=167.8ms before=vlog file=16416008B live=8192000B records=2000 ratio=0.499 gc=1 sst_written=206548B after=vlog file=8208008B live=8192000B records=2000 ratio=0.998 gc=2 sst_written=244606B
+pass 3: update=22336.0ms gc=115.8ms before=vlog file=16416008B live=8192000B records=2000 ratio=0.499 gc=2 sst_written=315972B after=vlog file=8208008B live=8192000B records=2000 ratio=0.998 gc=3 sst_written=355433B

@@ -161,7 +161,8 @@ impl SqlEngine {
         let vals = after_table[6..].trim();
         let (k, v) = parse_two_strings(vals)?;
         self.require_table(table)?;
-        self.db.put(Self::row_key(table, k.as_bytes()), v.as_bytes())?;
+        self.db
+            .put(Self::row_key(table, k.as_bytes()), v.as_bytes())?;
         Ok(QueryResult::Ok { rows_affected: 1 })
     }
 

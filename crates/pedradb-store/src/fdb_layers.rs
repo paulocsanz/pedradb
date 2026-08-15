@@ -251,12 +251,12 @@ impl IdempotentIndex {
             let dkey = Self::data_key(&key);
             if let Some(old) = tr.get(cluster, &dkey)? {
                 if old != value {
-                    tr.clear(&Self::idx_key(&old, &key))?;
+                    tr.clear(Self::idx_key(&old, &key))?;
                 }
             }
             tr.set(&dkey, &value)?;
             // Non-empty: Montanha `clear` is an empty-value tombstone (lab).
-            tr.set(&Self::idx_key(&value, &key), b"1")?;
+            tr.set(Self::idx_key(&value, &key), b"1")?;
             tr.commit(cluster)?;
             Ok(())
         })
@@ -717,11 +717,7 @@ mod tests {
         let hits = c
             .keys_in_range_at(&sa, end.as_deref().unwrap_or(&[]), c.read_version())
             .unwrap();
-        assert_eq!(
-            hits.len(),
-            1,
-            "prefix scan of seen_key(a) leaked: {hits:?}"
-        );
+        assert_eq!(hits.len(), 1, "prefix scan of seen_key(a) leaked: {hits:?}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

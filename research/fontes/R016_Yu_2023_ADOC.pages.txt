@@ -1,0 +1,1332 @@
+
+
+===== PAGE 1 =====
+   ADOC: Automatically Harmonizing Dataflow
+    Between Components in Log-Structured
+   Key-Value Stores for Improved Performance
+Jinghuan Yu, City University of Hong Kong; Sam H. Noh, UNIST & Virginia Tech;
+     Young-ri Choi, UNIST; Chun Jason Xue, City University of Hong Kong
+             https://www.usenix.org/conference/fast23/presentation/yu
+
+
+
+
+  This paper is included in the Proceedings of the
+        21st USENIX Conference on File and
+               Storage Technologies.
+                February 21–23, 2023 • Santa Clara, CA, USA
+                                978-1-939133-32-8
+
+
+                                           Open access to the Proceedings
+                                          of the 21st USENIX Conference on
+                                            File and Storage Technologies
+                                                   is sponsored by
+
+
+===== PAGE 2 =====
+             ADOC: Automatically Harmonizing Dataflow Between Components
+              in Log-Structured Key-Value Stores for Improved Performance
+
+                   Jinghuan Yu1            Sam H. Noh2,3             Young-ri Choi2                                                           Chun Jason Xue1
+                                                            ∗
+
+
+                           1 City University of Hong Kong                                     2 UNIST                                    3 Virginia Tech
+
+
+
+
+                             Abstract                                                                             400
+                                                                                                                            5.0 MB/s          15.0 MB/s         30.0 MB/s     No Rate Limits
+
+Log-Structure Merge-tree (LSM) based Key-Value (KV) sys-                                               PM         200
+tems are widely deployed. A widely acknowledged problem                                                                 0    250   500    0     250   500   0     250   500   0   250   500
+with LSM-KVs is write stalls, which refers to sudden perfor-
+
+
+
+
+                                                                        System Throughput (kOps/Sec)
+                                                                                                                            5.0 MB/s          15.0 MB/s         30.0 MB/s     No Rate Limits
+
+
+                                                                                                       NVMe SSD
+mance drops under heavy write pressure. Prior studies have                                                        400
+
+attributed write stalls to a particular cause such as a resource                                                  200
+
+shortage or a scheduling issue. In this paper, we conduct a                                                             0    250   500    0     250   500   0     250   500   0   250   500
+systematic study on the causes of write stalls by evaluating                                                                5.0 MB/s          15.0 MB/s         30.0 MB/s     No Rate Limits
+
+
+                                                                                                       SATA SSD
+                                                                                                                  400
+RocksDB with a variety of storage devices and show that
+                                                                                                                  200
+the conclusions that focus on the individual aspects, though
+valid, are not generally applicable. Through a thorough re-                                                             0    250   500    0     250   500   0     250   500   0   250   500
+                                                                                                                            5.0 MB/s          15.0 MB/s         30.0 MB/s     No Rate Limits
+view and further experiments with RocksDB, we show that
+
+                                                                                                       SATA HDD
+                                                                                                                  400
+data overflow, which refers to the rapid expansion of one or                                                      200
+more components in an LSM-KV system due to a surge in
+                                                                                                                        0    250   500    0     250   500   0     250   500   0   250   500
+data flow into one of the components, is able to explain the                                                                                      Elapsed Time (Sec)
+formation of write stalls. We contend that by balancing and
+                                                                       Figure 1: The figures show the throughput while running fill-
+harmonizing data flow among components, we will be able to
+                                                                       random with increasing write pressure (represented as num-
+reduce data overflow and thus, write stalls. As evidence, we
+                                                                       bers on top of each graph) and for different storage devices.
+propose a tuning framework called ADOC (Automatic Data
+                                                                       As writing pressure increases, system throughput on all de-
+Overflow Control) that automatically adjusts the system con-
+                                                                       vices shows patterns of sudden performance drop and even
+figurations, specifically, the number of threads and the batch
+                                                                       maintains long-term stalling states. Such significant perfor-
+size, to minimize data overflow in RocksDB. Our extensive
+                                                                       mance drops are referred to as the write stall phenomenon.
+experimental evaluations with RocksDB show that ADOC
+reduces the duration of write stalls by as much as 87.9%
+and improves performance by as much as 322.8% compared                 write-intensive workloads. These systems use background
+with the auto-tuned RocksDB. Compared to the manually                  data movements to persist cached data, trim the redundant
+optimized state-of-the-art SILK, ADOC achieves up to 66%               entries, and reshape the storage components to ensure IO
+higher throughput for the synthetic write-intensive workload           performance. LSM-KVs are used in products such as NoSQL
+that we used, while achieving comparable performance for               storage systems [17,25,41], data warehouses [52], time-series
+the real-world YCSB workloads. However, SILK has to use                databases [32] and embedded storage engine in RDBMS [15,
+over 20% more DRAM on average.                                         48]. Although LSM-KVs can provide higher write throughput,
+                                                                       they frequently encounter the write stall phenomenon when
+                                                                       facing high write pressure workloads [16, 46].
+1     Introduction                                                        The write stall phenomenon refers to the sudden drop in sys-
+                                                                       tem throughput as marked by the red lines in Figure 1, which
+LSM (Log-Structure Merge-tree based)-KV systems buffer
+                                                                       shows results for RocksDB running with write-intensive work-
+their random updates in a memory batch to leverage the disk’s
+                                                                       loads on a wide range of storage devices, from a traditional
+high sequential write performance characteristic to support
+                                                                       HDD to a modern state-of-the-art Intel Optane DC PMM per-
+    ∗ This work was done while at UNIST.                               sistent memory device (denoted PM). Based on this figure, we
+
+
+
+USENIX Association                                                 21st USENIX Conference on File and Storage Technologies                                                                65
+
+
+===== PAGE 3 =====
+identify two characteristics of the write stall phenomena: first,     there have been multiple novel LSM-KVs proposed more
+write stalls are universal, that is, they occur on all types of de-   recently [11, 43, 44, 58], they mostly concentrated on making
+vices, though they may be triggered under different conditions,       use of PM. As our target is a general-purpose LSM-KV that
+and second, write stalls are strongly device dependent, with          can accommodate all types of devices, we chose to compare
+their duration and rate of performance degradation influenced         it with SILK. Compared to SILK, ADOC achieves up to 66%
+by various factors such as device type and write intensity. As        higher throughput for the synthetic write-intensive workload
+a notable shortcoming of LSM-KV systems, the write stall              that we used, while achieving comparable performance for
+phenomenon has been the subject of extensive research and             the real-world YCSB workloads due to the higher read perfor-
+attention in recent years [7, 43, 45, 46, 50, 58, 60].                mance of SILK. However, SILK attains this performance at
+   This study presents ADOC (Automatic Data Overflow                  the expense of using 22.2% more main memory on average.
+Control), a framework with a goal of minimizing write stalls              The source code of ADOC is available online [3].
+by harmonizing the flow of data between LSM-KV compo-                 2 Background
+nents. To this end, we first perform an extensive experimental
+                                                                      2.1 Advanced Storage Devices
+study to analyze the occurrence pattern of write stalls. We find
+                                                                      Recent developments in storage technology have led to rev-
+that previous studies [7, 43, 45, 46, 50, 58, 60] are conducted
+                                                                      olutionary advances in storage media. Two kinds of storage
+with particular settings, which make their analysis difficult
+                                                                      media, NVMe SSD and Persistent Memory, have entered the
+to generalize. Many former studies conclude the cause of
+                                                                      public realm and have been widely studied.
+write stalls to be resource depletion, while we find that write
+                                                                      NVMe SSD: NVMe SSD refers to a class of SSD devices
+stalls are triggered even when the hardware resources are
+                                                                      that are linked to the host via the PCIe bus and communi-
+sufficient. This indicates that write stalls not only happen in
+                                                                      cate with the host using the NVMe (Non-Volatile Memory
+passive blocking situations, but also occur when the system
+                                                                      express) protocol. NVMe is a communication interface and
+proactively stalls the input stream in attempts to avoid further
+                                                                      drivers designed for PCIe-based SSDs aim for efficient per-
+performance loss. We find that popular LSM-KVs like Lev-
+                                                                      formance and interoperability. The command set in NVMe
+elDB and RocksDB already use active stalling strategies to
+                                                                      allows devices to directly communicate with the system CPU
+avoid “Disk Overflow”, which refers to the situation where
+                                                                      without an extra bus controller. Combined with the expanded
+flush or compaction jobs cannot keep up with the incoming
+                                                                      command queue, NVMe provides much higher parallelism
+write rate [28].
+                                                                      than conventional protocols like SATA and SAS.
+   Through deeper analysis, we find the source of write stalls
+                                                                      Persistent Memory: Persistent memory (PM), or non-volatile
+to be a more general form of disk overflow, which we refer
+                                                                      memory (NVM), is a persistent medium that provides byte-
+to as “data overflow.” Specifically, data overflow refers to the
+                                                                      addressability. The commercial PM product, Intel’s Optane
+rapid expansion of one or more components in an LSM-KV
+                                                                      DC PM, can be deployed in Memory mode, as expanded
+system due to a surge in data flow into one of the components.
+                                                                      memory, or App-direct mode, as a (block-device-like) storage
+   We categorize data overflows into three scenarios depend-          device. Optane DC PM uses 3D XPoint technology, which,
+ing on the component that forms the data overflow. We also            compared to traditional NVMe SSDs, offers lower write la-
+show how data overflow is able to explain the limitations that        tency, provides byte addressing, and does not require garbage
+could not be explained with earlier studies. Based on these           collection. However, as PM is attached to the memory bus, the
+observations, we design and implement ADOC, an automatic              IO processing of PM consumes more CPU resources. Also,
+tuning framework, to universally control and harmonize the            as the PM device has limited bandwidth compared to DRAM,
+data flow among LSM-KV components such that data over-                application bandwidth tends to quickly saturate as the number
+flow may be avoided. ADOC has the following four key fea-             of threads increases [33, 56]. While Intel has announced the
+tures: 1) it improves performance by reducing write stalls            discontinuation of their Optane storage products effectively
+through balanced use of resources; 2) it is a device transpar-        terminating 3D XPoint based products [20], other forms of
+ent solution that improves performance for a wide range of            NVM are still in development [35, 55]. Furthermore, we con-
+devices, from traditional HDDs to state-of-the-art SSDs and           tinue to see new developments such as CXL SSDs [35] that
+PM devices; 3) it is an automatic tuning system that does not         are expected to provide high-performing persistent storage
+require human intervention, and 4) it is highly portable as           similar to the Optane products.
+it can be implemented by the native interfaces of LSM-KV
+systems.
+                                                                      2.2    Architecture of LSM-KVs
+   Experimental results with RocksDB show that ADOC                   The majority of LSM-KVs follow the structure as that of
+reduces the duration of write stalls by as much as 87.9%              RocksDB [25], which is one of the most popular LSM-KVs
+in the best case and improves performance by as much as               in industry and has been used as the platform of choice in
+322.8% compared with the auto-tuned RocksDB, which takes              many prior academic studies [7, 11, 14, 49, 58]. The structure
+a similar auto-tuning approach of ADOC. We also compare               consists of three major components and two data movement
+ADOC with the state-of-the-art LSM-KV SILK [7]. While                 jobs to maintain these components as shown in Figure 2.
+
+
+
+66   21st USENIX Conference on File and Storage Technologies                                                  USENIX Association
+
+
+===== PAGE 4 =====
+  Incoming                                                                         Table 1: Specifications of Storage Devices.
+    Writes           Mark as
+          Active    Immutable   Immutable                                                                         Device    Sequential
+                                              Memory Component                 Device        Product Name
+         Memtable                Memtable                                                                        Capacity   Bandwidth
+                                 Flush                                          PM          Optane DC PMM        512 GB     2300 MB/s
+      Commit Log                               Disk Component
+                                                                             NVMe SSD      Samsung 970 PRO        1 TB      2700 MB/s
+         WAL        Level 0                 L0-L1 Compaction
+                                                                             SATA SSD        Intel DC S4500      960 GB      490 MB/s
+      MANIFEST      Level 1        É                    Compaction           SATA HDD    Seagate ST1000DM010      1 TB       210 MB/s
+                    Level 2                        É
+      CURRENT
+                      É
+         LOG        Level n                   É
+                                                                         is 20, while at 36 the input stream is stopped. This type of
+                                                                         control first appeared in LevelDB [17] but has been adopted
+        Figure 2: Architecture of RocksDB [15, 25, 48].
+                                                                         by most subsequent implementations that use a similar com-
+                                                                         paction strategy [4, 25, 49].
+   More specifically, the memory component caches
+                                                                            Pending Input Size (PS) stall: LSM-KVs also slow down
+the newest updates through an active and immutable
+                                                                         or stop the system when the pending input size of compaction
+Memtable [10, 17, 25, 41]. These Memtables are generally
+                                                                         jobs exceeds a certain threshold. Note that the pending input
+implemented with a skip list though other data structures
+                                                                         size not only refers to repeated and out-of-date entries in an
+such as a vector or hash table may be used. The commit
+                                                                         SSTable, but also includes all the entries within the SSTable
+log is the component that ensures system consistency. It is
+                                                                         that is pending compaction. In RocksDB, the default pend-
+used to recover data when the system reboots from system
+                                                                         ing compaction input size threshold for slowing down and
+failures. Finally, the disk component organizes the persisted
+                                                                         stopping the system is 64GB and 128GB, respectively. Prior
+data. Sorted String Tables (SSTable) that serve as the basic
+                                                                         studies have used the term “compaction pending bytes” for
+unit [46] are organized in a hierarchical manner in levels,
+                                                                         this value [25, 58], while, in this study, we use the term “re-
+starting from Level 0 to deeper (i.e., higher numbered) levels.
+                                                                         dundant data” instead. The aim of this control is to reduce
+   There are two types of background data movement jobs,
+                                                                         the total amount of redundant data [15, 26, 28] or to avoid
+flush and compaction. Flush moves the Immutable Memtable
+                                                                         disk bandwidth bursts when compaction jobs happen in deep
+from the memory component to the disk component turn-
+                                                                         levels [45, 50].
+ing it into an SSTable in Level 0. When the capacity of a
+level reaches a certain threshold, compaction is triggered to            3     Observations from Previous Studies
+merge SSTables in this level with SSTables in the next deeper            In this section, we use experimental observations with
+level to form a set of new SSTables at the deeper level. Since           RocksDB to revisit previous studies. While these earlier stud-
+LSM-KVs adopt out-of-place updates, there can be invali-                 ies provide valuable insight into the causes of write stalls, we
+dated redundant data in SSTables. Compaction has the effect              show that they are all limited in that these insights are not
+of removing some of these invalid redundant data.                        able to explain many of the experimental results.
+   Compaction can be further divided into Level 0-Level 1
+(L0-L1) compaction and deeper level compaction. L0-L1 com-               3.1     Experimental Settings
+paction is unique in that this activity cannot be executed in
+                                                                         The experiments in this section are conducted on a server
+parallel with other L0-L1 compaction activities. This is be-
+                                                                         that follows the recommended configuration for installing
+cause the SSTables in L0 can have overlapping keys as they
+                                                                         the Optane DC PMM. It has two Intel Xeon(R) Gold 6230
+are directly copied from the Immutable Memtable. In contrast,
+                                                                         processors with 2.10GHz frequency with a total of 40 cores
+all SSTables at each level for Level 1 and deeper never have
+                                                                         (20 cores each) and is equipped with 128GB DDR4 DRAM.
+overlapping key ranges. Hence, deeper level compactions can
+                                                                         We consider four different storage devices as listed in Ta-
+occur in parallel.
+                                                                         ble 1, which shows the device types, the producer and product
+2.3     Write Stall Issue                                                names, the capacity of the devices, and the sequential band-
+                                                                         width as specified by the manufacturer or reported in an earlier
+Previous studies have shown that the following three types of            study [29–31, 33].
+write stalls occur in modern LSM-KVs.                                       All experiments are run on Ubuntu 18.04 LTS, running
+   Memtable (MT) stall: This stall occurs when the memory                RocksDB 6.11 [24] compiled with CMake 3.10.2. We run
+component becomes full. For example, RocksDB sets the                    the fillrandom workload in db_bench [23] issuing uniformly
+number of Memtables to 2, and when both are filled up, the               distributed random writes in each scheme for one hour, a
+system input is simply stopped resulting in a stall. This is             time period sufficient to trigger all kinds of write stalls and
+known to be the most common case of write stalls [17, 41, 45].           maintain a trend in all devices. Each entry consists of a 16-
+   Level 0-Level 1 Compaction (L0) stall: Similarly to MT                byte key and a 1000-byte value. All experiments are evaluated
+stall, LSM-KVs will slow down or even stop the input stream              under peak throughput since write stalls occur only when the
+when the number of L0 files reaches the set threshold, result-           write pressure is high enough as shown in Figure 1. Write
+ing in stalls. In RocksDB, the default slow-down threshold               stalls are observed with an embedded event listener provided
+
+
+
+USENIX Association                                                   21st USENIX Conference on File and Storage Technologies             67
+
+
+===== PAGE 5 =====
+            Table 2: Summary of confirmations and limitations on conclusions made by existing studies on write stalls.
+   Original Conclusion                      Points we confirm                                                       Limitations we find
+  Resource Exhaustion        [C1]: High CPU utilization is a source of write                         [L1]: Continued increase beyond a certain num-
+  [7, 15, 34, 43, 51, 58,    stalls. Increasing background threads reduces                           ber of threads results in a continued decrease of
+  60]                        CPU utilization and hence, reduces write stalls                         (normalized) CPU utilization, but results in an
+                             [34, 43, 51, 60].                                                       increase in write stall duration. That is, reduced
+                             [C2]: Most devices show increased bandwidth                             CPU utilization does not result in reduced write
+                             usage and decreased CPU utilization when in-                            stalls.
+                             creasing the number of threads. The occur-                              [L2]: Even with high CPU utilization, simply
+                             rence of write stalls increases when the number                         by increasing the batch size, write stalls may be
+                             of threads exceeds a certain threshold [15].                            reduced. That is, CPU utilization and write stalls
+                             [C3]: As modern devices provide much higher                             do not correlate.
+                             bandwidth and parallelism, the stall occurrence                         [L3]: Modern devices can provide far more band-
+                             and duration on PM and NVMe SSD are much                                width than conventional devices, but write stalls
+                             lower than those on SATA devices [7, 43, 58].                           may still occur before its bandwidth capacity is
+                                                                                                     reached.
+  L0-L1      Compaction      [C4]: At early phases of execution, perfor-                             [L4]: Correspondence between performance
+  Data        Movement       mance troughs in NVMe SSD and PM match                                  troughs and L0-L1 compaction jobs diminishes
+  [7, 58]                    the occurrence of compaction [7, 58].                                   over time, especially in the multi-threaded envi-
+                                                                                                     ronment.
+  Deep Level Com-            [C5]: The processing rate of flush jobs de-                             [L5]: As the number of threads increases, the
+  paction Data Move-         crease when more threads are spawned for                                occurrence of PS stalls that are caused by slow
+  ment [45, 49, 50]          compaction jobs [45, 49, 50].                                           compaction decreases.
+
+with RocksDB. This listener provides basic information such                                           Stall Duration (64 MB)      Stall Occurrence (64 MB)
+                                                                                                      Stall Duration (512 MB)     Stall Occurrence (512 MB)
+as the total duration and the number of occurrences of each
+                                                                                                             PM                          NVMe SSD
+type of write stall. All experimental results obtained are the                              3k                                                                104
+average of three rounds of executions; the three rounds take
+
+
+                                                                     Stall Duration (sec)
+                                                                                            2k
+
+
+
+
+                                                                                                                                                                    Stall Occurrence
+                                                                                                                                                              103
+over 240 hours to execute.                                                                  1k
+                                                                                             0                                                                102
+   For the experiments, we mainly consider the impact of two                                              SATA SSD                       SATA HDD
+                                                                                                                                                              104
+parameters that have a strong effect on performance [13–15,                                 3k
+                                                                                            2k
+26]. The first is the number of threads that run concurrently in                            1k
+                                                                                                                                                              103
+
+the system, which determines the resources that are allocated                                0                                                                102
+                                                                                                 0    5     10     15      20 0     5      10     15     20
+to each thread such as CPU time and bandwidth. In RocksDB,                                                           Number of Threads
+in particular, by default, a quarter of the threads are allocated
+                                                                     Figure 3: Duration and occurrences of write stalls as the
+for flush jobs (rounded down), while the rest perform com-
+                                                                     number of threads is increased.
+paction. The second parameter is batch size, which is the size
+used for both Memtable and SSTable. This value is critical
+                                                                        Figure 3 shows the stall occurrences and duration as the
+for analyzing the behavior of LSM-KVs because 1) it con-
+                                                                     thread count increases. We observe that for PM and NVMe
+trols the scheduling pattern and input scale of background
+                                                                     SSD, the stall duration decreases as the thread count increases
+jobs [6, 7, 14, 43] and 2) it affects the data distribution at the
+                                                                     (more notably with PM) until up to six threads. Also, as shown
+various levels [11, 13, 14, 22].
+                                                                     in Figure 4, up to six threads, the CPU utilization (normalized
+3.2    Limitations of Existing Studies                               to the number of threads) remains relatively high for PM
+In this section, we discuss the limitations of earlier studies       and NVMe SSD. Just based on these observations, one could
+regarding write stalls. As we shall show, these studies tend to      conclude that the shortage of CPU resources, that is, high
+analyze the causes of write stalls in LSM-KV stores from a           CPU utilization, is the cause for write stalls (Table 2 [C1]).
+single component perspective. Through experimental obser-               However, we also observe from Figure 3 that write stall
+vations, which we discuss below and summarize in Table 2,            occurrences start to drop, while the duration increases slightly,
+we show that these conclusions cannot be fully generalized.          as the thread count increases beyond four (where CPU uti-
+Resource Exhaustion: Some earlier studies conclude that              lization decreases as shown in Figure 4) (Table 2 [L1]). This
+write stalls are caused by bandwidth congestion [7,45], while        characteristic is particularly evident in the two advanced de-
+others consider CPU limitation as the root cause [43, 58, 60].       vices with higher bandwidth and parallelism. Based on these
+We revisit these conclusions, starting with CPU utilization.         observations, our conclusion is that, while limited CPU capac-
+
+
+
+68    21st USENIX Conference on File and Storage Technologies                                                                             USENIX Association
+
+
+===== PAGE 6 =====
+                                                               64 MB         512 MB                                                               Write stalls align with the        Write stalls happen before
+                                                  PM                              NVMe SSD                                                      timing of L0-L1 compaction               L0-L1 compaction
+                         100
+
+
+
+
+CPU Utilization (%)
+
+
+
+                                                                                                                 System Throughput (kOps/Sec)
+                          10
+
+                                               SATA SSD                           SATA HDD
+                         100
+                          10
+
+                               0          5      10      15      20 0         5       10     15    20
+                                                              Number of Threads
+Figure 4: Comparison of normalized CPU utilization as
+threads are increased.
+                                          Average Usage          Peak Usage       Theoretical Bandwidth                                                                Elapsed Time (Sec)
+                               Device                   PM                            NVMe SSD
+                         Batch Size           64 MB            512 MB          64 MB          512 MB
+                             4000                                                                             (a) Experiments with 2 threads and 64 MB batch size. Left arrows
+                                                                                                              point to occurrences where L0-L1 compaction maps well with write
+
+
+
+
+Bandwidth Usage (MB/s)
+                                   1000
+                                                                                                              stalls, while right arrows point to occurrences where they do not
+                                 100                                                                          match.
+                               Device                 SATA SSD                        SATA HDD
+                         Batch Size           64 MB            512 MB          64 MB          512 MB
+                             4000
+
+
+
+
+                                                                                                               System Throughput (kOps/Sec)
+                                   1000
+
+
+                                    100
+                                          0   5 10 15 20 0    5 10 15 20 0    5 10 15 20 0   5 10 15 20
+                                                                 Number of Threads
+Figure 5: Comparison of bandwidth with an increasing num-
+ber of threads and different batch sizes. (Note that y-axis is
+log scale.)
+                                                                                                                                                                         Elapsed Time (Sec)
+ity may be the cause of write stalls for some scenarios, this is
+difficult to generalize.
+   Moreover, when the batch size is increased from 64MB                                                       (b) Experiments with 20 threads and 64 MB batch size. L0-L1 com-
+to 512MB in NVMe SSD and SATA SSD, even while CPU                                                             paction is triggered much more frequently than those in (a), and the
+utilization does not show significant changes (Figure 4), we                                                  occurrences of write stalls show no relation with the L0-L1 com-
+observe both duration and occurrence of write stalls decreases                                                paction jobs.
+(Figure 3). In the PM case, we observe that beyond six threads,                                               Figure 6: Timing of L0-L1 compaction and throughput for
+CPU utilization for 512MB batch size is lower than with                                                       the thread count of 2 and 20.
+64MB, yet the stall duration is actually higher, except with
+over 15 threads and beyond. From these observations, we                                                       devices should be under high write pressure for an elongated
+conclude that CPU utilization and write stall do not correlate                                                period. This should move the average bandwidth close to the
+well (Table 2 [L2]).                                                                                          theoretical value. However, we see in Figure 5 this is not so.
+   Other studies have pointed to the disk bandwidth limitation                                                L0-L1 Compaction Data Movement: SSTables in L0 are
+as the source of write stalls [7, 45, 58]. It is argued that with                                             unordered and their keys may overlap as they are generated by
+the increase in thread count the disk bandwidth will be over-                                                 flush jobs. Thus, L0-L1 compaction, which takes all L0 files as
+whelmed leading to the stall problem (Table 2 [C2] and [C3]).                                                 its input, cannot be parallelized with other L0-L1 compaction
+However, the following observations showing that the system                                                   jobs [16]. Former studies have taken this unique limitation as
+can be stalled even when disks are idle tell a different story.                                               the direct cause of write stalls [7, 58].
+    Observe the theoretical bandwidth limit, which is the peak                                                   We observe from Figure 6, which plots the process timing
+bandwidth observed when the device is flooded with requests                                                   of L0-L1 compaction with instantaneous throughput, that this
+generated from the FIO [2] tool with multiple threads, and the                                                earlier conclusion is partially true. Specifically, when running
+peak bandwidth used as the thread count increases in Figure 5.                                                with two threads (Figure 6(a)), initially, we observe system
+ Although for the HDD and SATA SSD the peak reaches the                                                       throughput dropping immediately as L0-L1 compaction is
+theoretical bandwidth limit, for the NVMe SSD and PM, a                                                       triggered, as designated by the dashed arrows on the left. This
+large idle bandwidth gap remains, indicating that write stalls                                                is the regularity observed by Yao et al. [58] (Table 2 [C4]).
+occur even if there is bandwidth to spare (Table 2 [L3]). In                                                  However, as the system continues to process the input stream,
+addition, if the write stall is due to insufficient bandwidth,                                                this correspondence disappears, as with the apparent misalign-
+
+
+
+USENIX Association                                                                                        21st USENIX Conference on File and Storage Technologies                                                 69
+
+
+===== PAGE 7 =====
+                                      Flush     L0-L1 Compaction       Deep Level Compaction                                                              MT Stall      L0 Stall      PS Stall
+
+
+
+
+                                                                                                Occurrence of Various Stalls
+                                              PM                         NVMe SSD                                                                    PM                              NVMe SSD
+                                     64MB            512MB            64MB          512MB                                      6000
+
+Occurrence of Flush
+                          104                                                                                                  3000
+                          102                                                                                                     0
+                                            SATA SSD                     SATA HDD                                                                 SATA SSD                           SATA HDD
+
+
+ and Compaction
+                                     64MB            512MB            64MB          512MB                                      6000
+                          104                                                                                                  3000
+                          102                                                                                                     0
+                                   5 10 15 20       5 10 15 20 5 10 15 20          5 10 15 20                                         0       5    10       15      20 0        5      10        15   20
+                                                       Number of Threads                                                                                         Number of Threads
+
+                                (a) Comparison of occurrence of background jobs.                (a) Occurrence of various write stalls while increasing the number
+                                      Flush        L0-L1 Compaction     Deep Level Compaction   of threads with 64 MB batches.
+                                              PM                         NVMe SSD                                                                         MT Stall      L0 Stall      PS Stall
+
+
+Average Processnig Rate
+
+
+
+
+                                                                                                Occurrence of Various Stalls
+                                     64MB            512MB            64MB          512MB                                                            PM                              NVMe SSD
+                          103                                                                                                  1000
+                          102                                                                                                   500
+                                            SATA SSD                         SATA HDD
+                                                                                                                                  0
+
+
+
+       (MB/Sec)
+                                     64MB            512MB            64MB          512MB                                                         SATA SSD                           SATA HDD
+                          103                                                                                                  1000
+                          102                                                                                                   500
+                                   5 10 15 20       5 10 15 20 5 10 15 20          5 10 15 20                                     0
+                                                       Number of Threads                                                              0       5    10       15      20 0        5      10        15   20
+                                                                                                                                                                 Number of Threads
+                                 (b) Average processing rate of background jobs.
+Figure 7: Comparison of occurrences of background jobs                                          (b) Occurrence of various write stalls while increasing the number
+(flush, L0-L1 compaction, and deep level compaction) and                                        of threads with 512 MB batches.
+their average processing rate as the number of threads and                                                                                Figure 8: Breakdown of various write stalls.
+batch size are increased, measured for one hour of execution.
+
+ments as designated by the dashed arrows on the right. More-                                    4.1                                   Data Overflow in Modern LSM-KVs
+over, when the thread count is increased to 20, as shown in
+                                                                                                Data overflow refers to the rapid expansion of one or more
+Figure 6(b), L0-L1 compaction occurs much more frequently
+                                                                                                components in an LSM-KV system due to a surge in data flow
+than for the 2-threaded case, while showing no evident map-
+                                                                                                into one of the components. It happens when the processing
+ping relation between the timing of L0-L1 compaction and
+                                                                                                rates of different background jobs do not match each other.
+write stalls (Table 2 [L4]).
+                                                                                                We identify three types of data overflow, namely, Memory
+Deep Level Compaction Data Movement: Yet another set
+                                                                                                Overflow, Level 0 Overflow, and Redundancy Overflow, as
+of earlier studies contend that the high resource consumption
+                                                                                                shown in Figure 9. We now describe these in more detail.
+of deep level compaction jobs that are competing with other
+                                                                                                Memory Overflow (MMO): MMO occurs when the system
+background jobs is the cause of write stalls [7, 45, 49, 50].
+                                                                                                input rate surpasses the Immutable Memtable flush rate. Con-
+Again, this is partially true, as increasing the number of
+                                                                                                sequently, as the Immutable Memtable cannot be flushed in
+threads does lead to more frequent compaction jobs, as shown
+                                                                                                time, there will not be enough space in the memory compo-
+in Figure 7(a), and the average processing rate of background
+                                                                                                nent to absorb new data. In most modern LSM-KVs, upon
+jobs decreases, as shown in Figure 7(b) (Table 2 [C5]).
+                                                                                                MMO, the system stops receiving input as there is no room
+   However, if the conflicting compaction jobs were the main
+                                                                                                to buffer the incoming updates. This results in an MT stall.
+source of write stalls, we should have observed the occur-
+rence of PS stalls increase just like how the slow flush rate                                   Level 0 Overflow (L0O): L0O occurs when the process-
+increased MT stalls. Instead, as we observe in Figure 8, the                                    ing rate of L0-L1 compaction is not able to match the flush
+occurrences of PS stall decrease as the number of threads                                       rate. This results in the number of SSTables in Level 0 to
+increases and the batch size increases, which is contrary to                                    rise. In modern LSM-KVs, the input stream is stopped or
+the earlier conclusion.                                                                         slowed when this value reaches a certain threshold so that the
+                                                                                                accumulated data may be consumed resulting in an L0 stall.
+4                         Data Overflow                                                         Redundancy Overflow (RDO): RDO occurs when the work-
+As seen from the previous section, earlier studies focus on                                     ing efficiency of compaction threads cannot match the rate
+individual aspects that could be the cause of write stalls. Our                                 in which redundant data is generated. In modern LSM-KVs,
+analysis of modern LSM-KVs reveals a more general source                                        when the size of redundant data reaches a threshold, the sys-
+of write stalls, that is, what we refer to as data overflow. In this                            tem will slow down or stop the input, and wait for the com-
+section, we explain the formation of data overflow and use                                      paction threads to clear out the accumulated redundancy. Such
+data overflows to explain the limitations observed in Section 3.                                action results in PS stalls.
+
+
+
+70                        21st USENIX Conference on File and Storage Technologies                                                                                                  USENIX Association
+
+
+===== PAGE 8 =====
+                                       Memory Overflow (MMO)
+       System Input
+                                                                                                                          (a) Number of L0 SSTs
+                                       happens when the input rate at
+
+
+                                                                                     kOps/Sec
+                                       Memtable is higher than the                                      20
+                                       flushing rate
+           Active         Immutable                                                                                    Number of L0 SSTs              L0 Stalls
+         MemTables        MemTables                Flush                                                 0
+
+  L0                                                                                                                     (b) Redundant Data Size
+
+ Level 0 Overflow (L0O) happens when the flushing                                                       50
+ rate is higher than the L0-L1 compaction rate                                       GB
+                                                                                                                       Redundant Data Size             PS Stall
+                                                           Redundancy                                    0
+  L1 Compaction Threshold Pending Bytes                    Overflow (RDO)
+         Compaction Threshold      Pending Bytes
+                                                           happens when the                                               (c) Resource Utilization
+  L2
+
+
+                                                                                     Utilization (%)
+                                                           redundant data
+                                                           generation rate is                          100             Disk Utilization       CPU Utilization
+  É
+                                                           higher than the
+  L7        Compaction Threshold       Pending Bytes       compaction rate
+                                                                                                         0
+                                                                                                             0   100       200       300        400          500
+  Figure 9: Data overflow scenarios in modern LSM-KVs.                                                                        Elapsed Time (Sec)
+
+4.2      Explaining the Unexplained                                                 Figure 10: System statistics (first 600 seconds) when run-
+                                                                                    ning the fillrandom workload with 4 background threads with
+In Section 3, we showed how conclusions made in earlier
+                                                                                    NVMe SSD, which shows the most occurrences of write stalls.
+studies could not explain the reason behind write stalls for
+some portions of the extensive experimental results that we                         enough CPU resources.
+had obtained (Table 2). Here, we present how such incon-                               Lastly, we show how RDO makes LSM-KVs stall when
+gruities can be explained with data overflow. To observe                            both CPU utilization is low and there is disk bandwidth to
+write stalls in this section, we make use of the LOG file that                      spare. Figure 10(b) shows how the redundant data tend to
+RocksDB provides. While the embedded listener used in the                           accumulate as the deep level compaction cannot keep pace
+previous section provides only basic information, the LOG                           with L0-L1 compaction. Eventually, RDO occurs when the
+file provides more detailed information of each write stall,                        redundant data size reaches 64GB, which is the default PS
+including the stall type, the limited input rate, and the exact                     stall threshold, at which point the system slows the input, rep-
+timestamp.                                                                          resented by the red lines. Note, however, that at these stall
+Resource Exhaustion: First, consider how write stalls oc-                           points, both the CPU and bandwidth utilization are low (and
+curred under low utilization of resources (3.2, Table 2 [L1],                       stable) as any other points in execution (Figure 10(c)), show-
+[L2] and [L3]). The key underlying reason is that all three                         ing how RDO can occur despite low resource usage.
+kinds of data overflow will stop or slow down the input before                      L0-L1 Compaction Data Movement: We next discuss why
+the system reaches the hardware limitation. Let us elaborate.                       L0-L1 compaction does not align with the occurrence of
+   Firstly, when the flush rate is not high enough to persist                       write stalls (Table 2 [L4]). First, consider the misalignment
+the incoming requests in time, MMO will stop the input. Fig-                        in Figure 6(a), when there are only two threads. In the early
+ure 7(b) shows that flush jobs are being allocated the least                        stages of execution, as data in the deeper level have not been
+bandwidth among the background jobs and thus, the aver-                             accumulated, L0-L1 compaction is easily assigned a thread.
+age flush rate monotonically decreases with the number of                           Hence, we see a nice alignment of the compaction with the
+threads. This is because as the number of threads increases,                        write stall. However, as execution continues, data starts to
+more threads are forced to share the limited bandwidth, re-                         accumulate and more deep level compaction requests get to
+sulting in less bandwidth being allocated to the flush threads.                     be made. With only a limited number of threads, this dwindles
+This results in the Immutable Memtable not being flushed                            the chance of L0-L1 compaction from being assigned a thread.
+fast enough, which is the most common reason for write stalls                       Thus, L0-L1 compaction and write stalls start to misalign.
+that occur in SATA HDD as well as other devices when there                             Now consider the situation when the number of threads
+are too many threads.                                                               is 20. Here, we have enough threads to always assign for
+   Secondly, L0O occurs as compaction of SSTables in L0                             L0-L1 compaction. However, with a large number of threads,
+cannot keep pace with flush jobs, resulting in the number                           bandwidth for flush jobs diminish, and thus, the processing
+of SSTables in L0 reaching its threshold, and thus, the in-                         rate of flush jobs becomes much lower (Figure 7(b)) causing
+put stream being stopped or slowed. As direct evidence, Fig-                        more frequent MMO (Figure 8). That is, the frequent write
+ure 10(a) shows how the occurrences of write stalls, marked                         stalls here are due to MT stalls, and L0O hardly occurs show-
+by the vertical blue lines, correspond to the peak in the num-                      ing no relation to the L0-L1 compaction jobs as shown in
+ber of L0 SST files. Since L0-L1 compaction jobs are not                            Figure 6(b).
+being executed in parallel, increasing the number of threads                        Deep Level Compaction Data Movement: Finally, while
+will not help in reducing L0O as the processing rate does                           earlier studies concluded that PS stalls increase with thread
+not increase. Hence, the system is stalled even when there is                       count, which was true for up to four threads, we also saw
+
+
+
+USENIX Association                                                              21st USENIX Conference on File and Storage Technologies                            71
+
+
+===== PAGE 9 =====
+ System                                                              the internal thread scheduling and IO process, ADOC does
+ Start
+                                                                     not disrupt the internal architecture of the LSM-KV system
+      Stable               State
+     Running              Detection                                  making it highly portable.
+                                         Adjust       Adjust Batch      In our current implementation in RocksDB, we make modi-
+                                        Threads           Size
+                                                                     fications to only two classes. One is the Options class, which
+                  N      Reach Stall?
+                                             Adjust Tuning
+                                                                     controls whether the ADOC tuner will be enabled or not
+                            Y      Y            Knobs                and records the instantaneous information of the system in a
+                           Stall the                                 shared C++ vector. The other is the tuner class itself, which
+                            Input
+                                                                     will periodically wake the tuner threads to perform tuning
+Figure 11: The solid black diagrams show the default control         actions. In total, we add around 300 lines of code (LOC) to
+flow of RocksDB. ADOC extends this with the red diagrams             implement ADOC with 250 LOC for the tuner and 50 LOC
+(including the dashed arrows) to adjust tuning knobs during          to collect system states.
+execution.                                                              We now discuss the triggering mechanism and the actions
+                                                                     that we employ to adjust these parameters. Recall that we
+the opposite as more threads were added (Figure 8 and Ta-            identified data overflow as the source of write stalls. Thus, for
+ble 2 [L5]). This can be explained with RDO. The initial             every time window Tw , ADOC monitors for data overflow and
+spike in PS stalls (up to four threads) shown in Figure 8 is         takes action accordingly as explained below. In our current
+due to the flush threads obtaining sufficient bandwidth. In          implementation, we set Tw to one second based on empirical
+addition, with this increase to four, occurrences of L0O are         observations; values larger are not agile enough to quickly
+decreased as more threads are allocated. This results in more        detect the overflows leading to deteriorated performance for
+data being crowded into the deeper levels and overwhelming           state-of-the-art high-performing storage devices, while values
+the processing rate of deep level compaction jobs. This results      smaller could incur overhead as well as lead to fluctuations
+in a significantly increase of PS stalls (Figure 8). However,        due to responding too quickly.
+beyond this threshold of 4 (for most cases), the flush rate          MMO: ADOC determines that MMO is occurring simply
+is reduced and consequently, the data redundancy rate also           when the active Memtable is filled before the Immutable
+diminishes. This results in less need to process deep level          Memtable gets flushed. Upon MMO detection, ADOC in-
+compaction jobs, which finally results in less RDO.                  creases the flush rate by reducing the number of threads,
+                                                                     which will have the effect of reserving more bandwidth for
+5    Automatic Data Overflow Control                                 the flush jobs, and increasing the batch size to increase the
+The goal of our study is to minimize (and eventually remove)         processing rate.
+the effects of write stalls on LSM-KVs. To this end, we de-          L0O: Determining whether L0O is occurring follows the
+velop a framework, which we call ADOC (Automatic Data                same logic as RocksDB, that is, when the number of L0 files
+Overflow Control), that controls the dataflow such that data         exceeds the threshold, which is 20 by default in RocksDB.
+overflow may be minimized. Dataflow is controlled by online          Upon L0O detection, ADOC will increase the number of
+tuning of the number of threads and the batch size as these          threads. This has the effect of improving the chance of L0-
+values have a strong influence on dataflow, as seen from dis-        L1 compaction being assigned a thread and decreasing the
+cussions in Section 4, and most LSM-KVs [15,48,52] provide           flush rate to ease the overflow. The batch size, in this case, is
+APIs to adjust these two values without rebooting the system.        unchanged as increasing it will increase the load on L0-L1
+   We develop ADOC under two principles. The first is device         compaction, and decreasing it will generate more L0 files,
+transparency. Instead of targeting optimizations to a partic-        both leading to more L0 stalls.
+ular storage device, as new storage devices will continue to         RDO: Like L0O, determining if RDO is occurring follows
+evolve [35, 54], ADOC should be able to tune itself to reduce        the same logic as RocksDB, that is, when the total redundant
+write stalls irrespective of the underlying storage device. For      data size exceeds the threshold, which is 64GB by default in
+this, ADOC monitors the flow of data amongst the compo-              RocksDB. Upon detection of RDO, ADOC will increase the
+nents independent of the specific performance parameters of          number of threads and decrease the batch size. The former
+the underlying device. Then, the thread count and batch size         is to increase the rate of deep level compaction (and also
+are adjusted to control the processing rate and scheduling           reduce flush rate) and the latter is to allow the scheduler to
+frequency of background jobs, thereby controlling the data           generate more fine-grained compaction jobs as small and
+flow within the LSM-KV.                                              dense compaction jobs can help improve the efficiency of
+   The second principle is ease of portability. As shown in Fig-     redundancy reduction.
+ure 11, the design of ADOC is a straightforward extension of            If multiple overflows are detected in Tw , we choose to
+the RocksDB control flow mechanism. Unlike MatrixKV and              handle the overflow in L0O, RDO, MMO order based on
+similar approaches [14,45,50,58] that change the compaction          our experimental observations. Also, when turning the tun-
+strategy or SILK [7] and auto-tuned RocksDB [39] that adjust         ing knobs, we take the approach used by the Additive In-
+
+
+
+72   21st USENIX Conference on File and Storage Technologies                                                   USENIX Association
+
+
+===== PAGE 10 =====
+                 Table 3: Schemes Evaluated                              (D for default). The second is SILK-P (P for paper), which
+      Name           Description                                         refers to SILK that runs with the same settings as mentioned
+      RocksDB-DF     RocksDB default setting                             in its original paper [7]. The configuration of SILK-P is of 4
+      RocksDB-AT     RocksDB with auto-tuner on                          background threads and 128MB batch size. The third con-
+      SILK-D         SILK with RocksDB default setting                   figuration is SILK-O (O for optimal), which we believe to
+      SILK-P         SILK setting set as in SILK paper [7]               be the best performing setting in our experimental platform,
+      SILK-O         SILK optimized to our setting (Section 3)           with 8 background threads and 512MB batch size, which were
+      ADOC           RocksDB that enables ADOC tuner                     obtained manually through exhaustive tuning attempts where
+                                                                         we considered ten (2, 4, 8,..., 18, 20) thread and two (256MB
+crease/Multiplicative Decrease (AIMD) algorithm [9], best                and 512MB) batch configurations. We did not consider batch
+known for its use in TCP congestion control [40]. The rea-               sizes 64MB and 128MB as when their results were observed
+son for using AIMD is the fitness between the algorithm and              for SILK-D and SILK-P, we found larger batches to be clearly
+ADOC’s working scenario, that is, gently increasing the tun-             better. In addition to the thread and batch size settings,
+ing knob to explore the suitable configuration and rapidly               the SILK implementation makes use of particular hard-coded
+removing the over-allocated resources to avoid resource com-             settings. One is the allocation of bandwidth that is hard-coded
+petition. In detail, we increase the number of threads by 2 and          into the db_bench tool. To faithfully configure our three ver-
+the batch size by 64MB, which is the default thread number               sions accordingly, we set the configuration flags such that a
+and batch size value of RocksDB, while when decreasing, the              quarter of the entire media bandwidth (Table 1) is reserved
+values are reduced by half. After the adjustment, the number             for compaction jobs while the rest is reserved for flush jobs.
+of threads that are allocated for flush jobs will also be adjusted       This ratio preserves the ratio used in the original paper. Addi-
+to a quarter of the total number, just as the default setting.           tionally, as in the original implementation, we disable L0O
+                                                                         by setting the number of L0 SST files threshold, which slows
+                                                                         the input stream when reached, to an extremely large value.
+6     Evaluation
+                                                                         6.2    Microbenchmark Performace
+6.1    Experiment Setups
+                                                                         In this section, we make use of the same microbenchmark
+Basic Settings: We use the same hardware and software se-                workload used in Section 3, that is, the db_bench random fill-
+tups as described in Section 3.1. For the basic setup, we follow         ing benchmark. We consider the three performance measures,
+that of SILK and set the maximum batch size to 512MB [7].                namely, the throughput, the stall duration, and 99th tail latency
+All schemes, including ADOC but excluding SILK, are based                for the first 3600 seconds of execution.
+on RocksDB v7.5.3, the latest version as of this submission.             Throughput: Figure 12 compares the system throughput for
+SILK is built based on RocksDB 5.7.1 (early 2018) and our                all the schemes that we consider. A few notable observations
+attempt to port SILK to more recent versions failed due to               can be made as follows. First, ADOC shows the best per-
+compatibility issues as considerable optimizations have been             formance over all devices. It shows 66.7%, 37.8%, 31.0%,
+made since RocksDB v6 [27]. Thus, all performance mea-                   and 55.1% higher average throughput over the next best per-
+surements for SILK are done on RocksDB v5.7.1. In one of                 forming scheme, SILK-O, for PM, NVMe SSD, SATA SSD,
+our experiments, we also show the results of ADOC ported                 and SATA HDD devices, respectively. Second, the three vari-
+on v5.7.1, which show some discrepancies with the results of             ations of SILK show performance in SILK-O, SILK-P, and
+v7.5.3, but overall, are quite similar in trend.                         SILK-D order. Among these, the best performing SILK-O
+Schemes Compared: The schemes that we evaluate are as                    does considerably better for high-end devices, but not much
+listed in Table 3. There are two settings of RocksDB, three set-         so for low-end devices. Most notably, we observe that the con-
+tings of SILK, and ADOC. For RocksDB, we have RocksDB-                   figuration of SILK, the best of which is not straightforward to
+DF with the default configuration, that is, two background               find, has a considerable effect on overall performance. Finally,
+working threads and 64MB batch size, and RocksDB-AT,                     RocksDB-DF and RocksDB-AT fare comparably with SILK-
+an auto-tuner enabled version. RocksDB-AT automatically                  D and SILK-P, but worse than SILK-O. While RocksDB-
+changes the threshold of the rate-limiter, which limits the              AT automatically decides the bandwidth usage of different
+number of IO operations generated by background threads [1]              background jobs [39], the results show that this is insuffi-
+based on the IO pressure of background threads. RocksDB-                 cient in bringing out the best performance. Consequently, we
+AT also adjusts the allocation rate of each thread based on the          find that RocksDB-AT performs better than RocksDB-DF for
+thread priority to avoid starving compaction jobs, which has             NVMe SSD and SATA SSD, which concurs with the fact
+lower priority than flush jobs.                                          that RocksDB is optimized for flash devices [11, 15, 25], but
+   As for SILK, the three different configurations are as fol-           performs worse for PM and SATA HDD. It is also limited in
+lows. The first is SILK that runs with the same configuration            that the user needs to provide the bandwidth information.
+as the default configuration, which we refer to as SILK-D                   For clarity, hereafter, we omit the results for RocksDB-DF
+
+
+
+USENIX Association                                                   21st USENIX Conference on File and Storage Technologies          73
+
+
+===== PAGE 11 =====
+                                            RocksDB-DF            RocksDB-AT                                                             SILK-D                     SILK-P                                                    SILK-O                      ADOC
+                                  300 avg:63.6 std_v:8.6       avg:50.0 std_v:0.3                                                  avg:46.9 std_v:0.4       avg:68.3 std_v:0.2                                  avg:126.9 std_v:0.0                avg:211.5 std_v:0.6
+
+
+
+
+   System Throughput (kOps/Sec)
+                                    0
+
+                                  300 avg:40.9 std_v:2.5       avg:47.2 std_v:1.1                                                  avg:35.9 std_v:6.8       avg:53.8 std_v:0.5                                  avg:85.1 std_v:5.3                 avg:117.4 std_v:3.4
+
+
+
+
+SATA     SATA     NVMe
+                                    0
+
+                                  300 avg:28.4 std_v:1.3       avg:32.3 std_v:1.4                                                  avg:22.3 std_v:3.2       avg:29.6 std_v:0.9                                  avg:53.0 std_v:1.2                 avg:69.5 std_v:9.8
+
+
+
+
+HDD      SSD       SSD       PM
+                                    0
+
+                                  300 avg:17.0 std_v:1.2       avg:14.3 std_v:0.5                                                  avg:11.5 std_v:1.0       avg:11.6 std_v:0.7                                  avg:19.0 std_v:4.0                 avg:29.5 std_v:5.8
+
+                                    0
+                                        0       2000          0          2000                                                      0       2000          0           2000                                     0                 2000               0        2000
+                                                                                                                                          Elapsed Time (Sec)
+Figure 12: The solid red lines represent the instantaneous throughput during a single run of 3600 seconds, while the dotted
+black lines represent the average throughput of this run. The numbers shown within the box are the average throughput and the
+standard deviation of the three runs for each case.
+                                        RocksDB-AT        SILK-P                                                                              CPU Utilization                                                               Compaction          Flush      Write To WAL
+                                           SILK-O       ADOC                                                                                  Disk Space Occupied
+
+
+
+
+                                                                                             Normalized Resource Usage (%)
+                                                                                                                                                                                                                                       PM                NVMe SSD
+                                    MT Stall     L0 Stall     PS Stall                                                                        Input Data Size
+                                                                                                                                                                                                                                    9k 56k M            7k 04k 82k 19k
+
+                                                                                                                                                                                                       Proportion of
+                                        PM             NVMe SSD                                                                          PM             NVMe SSD
+                         4k                                                                                                                                                                                                100 44     6    1    2M 34     3   3   7
+
+
+
+
+  Stall Duration (Sec)
+                                                                                                                             200                                       800
+
+
+
+
+                                                                                                                                                                             Input Data Size (GB)
+                                                                          Stall Occurrence
+                         2k                                          2k                                                                                                                                                     50
+                                                                                                                                                                       400
+                          0                                          0                                                                                                                                                               SATA SSD            SATA HDD
+                                                                                                                               0                                       0
+                                    SATA SSD           SATA HDD                                                                        SATA SSD         SATA HDD
+
+                                                                                                                                                                                                    Major Operations (%)
+                         4k                                                                                                  200                                       800                                                       3k 8k 3k 1k 6k 8k 8k 89k
+                                                                     2k                                                                                                                                                    100 28 20 28 59 16   8  7  1
+                         2k                                                                                                                                            400                                                  50
+                         0                                           0
+                                                                                                                               0                                  0
+                              Ro SIL SIL AD Ro SIL SIL AD                                                                          Ro SIL SIL AD Ro SIL SIL AD                                                                 Ro SIL SIL AD Ro SIL SIL AD
+                                cks K- K- OC ck                                                                                      cks K- K- OC cks K- K- OC
+                                   DB P     O        sD K-P K-O OC                                                                      DB   P  O       DB   P  O                                                                ck                 c
+                                                                                                                                                                                                                                    sD K-P K-O OC ksD K-P K-O OC
+                                     -AT               B-                                                                                  -A              -A                                                                         B-A              B-A
+                                                         AT                                                                                   T               T                                                                           T                T
+                                      Experiment Schemes                                                                                 Experiment Schemes                                                                            Experiment Schemes
+
+Figure 13: Stall duration (bar) and oc-                                                      Figure 14: Comparison of CPU utiliza-                                                                  Figure 15: Proportion of major opera-
+currences (lines).                                                                           tion, disk space occupied, and input data                                                              tion occurrences, with numbers repre-
+                                                                                             size with the fillrandom workload.                                                                     senting total occurrences.
+and SILK-D, the two low-performing schemes.                                                                                                              That is, the Disk Space Occupied results in Figure 14 show
+                                                                                                                                                        that despite ADOC processing a much higher volume of input
+Stall Duration: Figure 13 compares the write stall duration
+                                                                                                                                                        data, the system does not occupy significantly more space
+for the various schemes. The bars indicate the total stall time,
+                                                                                                                                                        compared to the other schemes. Even on the HDD, which
+while the scattered lines mark the average occurrences of the
+                                                                                                                                                        has the worst compaction performance, ADOC accepts 53.5%
+three different sources of write stalls.
+                                                                                                                                                        more input data than SILK-O, yet the disk space occupied is
+   ADOC reduces the stall duration compared to SILK-O for                                                                                               only 19.4% larger. However, we also see from Figure 14 that
+PM, SATA SSD, SATA HDD by 45.2%, 8.7%, and 10.3%,                                                                                                       this results in higher CPU utilization for ADOC. For example,
+respectively. However, for NVMe SSD, stalls seem to be                                                                                                  with HDD, ADOC spends 72.5% more CPU time than SILK-
+elongated by 1.5%. Looking at the sources of the stalls, we                                                                                             O. Figure 15 shows the breakdown of the major operations
+observe that for MT and L0O stalls, ADOC is the lowest. For                                                                                             for each scheme, with the total number of operations shown
+the PS stall, however, ADOC seems to be doing worse than                                                                                                on top of each bar. These numbers were obtained by sampling
+both SILK schemes, seemingly negating the reduction of the                                                                                              the call stack of RocksDB using the perf [5, 18] tool at 99Hz
+other stalls. However, one must take into consideration the fact                                                                                        sampling frequency. While not exact, these numbers provide
+that these are measurements taken for the same 3600 seconds.                                                                                            an estimate of the CPU time spent for the operations as have
+Since the throughput of ADOC is considerably higher than                                                                                                been used in other studies [8, 19, 61], as the CPU time will
+the other schemes, ADOC takes in much more data from                                                                                                    be proportional to the operation count. We observe that the
+the input stream, specifically, 66.9%, 46.9%, 46.5%, 53.5%                                                                                              proportion of each operation is relatively stable for schemes
+more data than SILK-O with PM, NVMe SSD, SATA SSD,                                                                                                      on each device. However, we also observe that the operation
+and SATA HDD, respectively, as shown by ‘Input Size’ in                                                                                                 count for ADOC is considerably higher than SILK-O for all
+Figure 14. This results in more data being accumulated into                                                                                             devices, with the largest difference being 143.6% higher with
+the deeper levels resulting in particularly higher PS stalls                                                                                            HDD. This is because ADOC accepts more input data than
+(Figure 13). Also, we observe that these additional PS stalls                                                                                           the other schemes, with the additional inputs generating more
+have a positive effect on the space amplification of the system.
+
+
+
+74                            21st USENIX Conference on File and Storage Technologies                                                                                                                                                            USENIX Association
+
+
+===== PAGE 12 =====
+                                                                                                               RocksDB-AT           SILK-P             SILK-O        ADOC             ADOC-5.7.1
+                      RocksDB-AT      SILK-P    SILK-O    ADOC
+                 PM        NVMe SSD        SATA SSD      SATA HDD                                                                         PM                                              PM
+      1000                                                                                                      Load        A         B            C         D         F                   E
+        20                                                                                              200                                                                      20
+        10                                                                                              100                                                                      10
+                               Experiment Schemes                                                         0                                                                       0
+                                                                                                                                     NVMe SSD                                           NVMe SSD
+
+
+
+
+                                                                         System Throughput (kOps/Sec)
+Figure 16: Average 99th tail latency in fillrandom workload.
+                                                                                                                Load        A         B            C         D         F                   E
+Table 4: Data distribution and the composition of request types                                         200                                                                      20
+for the six YCSB workloads. (RMW: read-modify-write)                                                    100                                                                      10
+                                                                                                          0                                                                       0
+        Workload      Distribution    Request Composition                                                                            SATA SSD                                           SATA SSD
+                                                                                                                Load        A         B            C         D         F                   E
+             A         Zipfian        50% Update 50% Read
+                                                                                                        200                                                                      20
+             B         Zipfian         95% Read 5% Update                                               100                                                                      10
+             C         Zipfian              100% Read                                                     0                                                                       0
+                                                                                                                                     SATA HDD                                           SATA HDD
+             D          latest          5% Insert 95% Read
+                                                                                                                Load        A         B            C         D         F                   E
+             E         uniform          5% Insert 95 %Seek                                              101                                                                      100
+             F         Zipfian        50% Read 50% RMW                                                  100
+                                                                                                                                                                                 10-1
+                                                                                                        10-1
+                                                                         Figure 17: Comparison of system throughput in different
+data movement jobs, and also because the occurrences are                 stages of YCSB workloads.
+correlated to the CPU utilization of the related functions [18].                                                        RocksDB-AT                 SILK-P           SILK-O         ADOC
+
+In addition, ADOC and SILK use different approaches to                                                                                                  PM
+reserve bandwidth for flush jobs. SILK puts the compaction                                                        A             B              C                D            E             F
+                                                                                                         2
+jobs to sleep when facing bandwidth congestion, while with                                               1
+ADOC there is at least one compaction job working at all                                                 0
+                                                                                                                                               NVMe SSD
+times. As a result, ADOC shows higher CPU utilization and
+                                                                                                                  A             B              C                D            E             F
+operation count than SILK.
+
+
+
+                                                                         Memory Budget (GB)
+                                                                                                         2
+                                                                                                         1
+                                                                                                         0
+Tail Latency: Figure 16 shows the 99th tail latency results                                                                                    SATA SSD
+obtained over 3600 seconds of execution. We observe that                                                          A             B              C                D            E             F
+both SILK schemes do well in terms of tail latency, which was                                            2
+                                                                                                         1
+the target performance measure of SILK. Compared to SILK-                                                0
+                                                                                                                                               SATA HDD
+O, ADOC does better for PM, but is higher by 70.1%, 131.2%,
+                                                                                                                  A             B              C                D            E             F
+and 242.9% for NVMe SSD, SATA SSD, and SATA HDD,                                                         2
+respectively. Again, however, we note that ADOC generates                                                1
+over twice the number of requests than SILK-P and 50%                                                    0
+                                                                                                                                          Experiment Schemes
+more than SILK-O, meaning that it faces edge cases (e.g.,                                                    Figure 18: Comparison of main memory footprint.
+foreground GC, conflict I/O request in half duplex bus, etc.)
+much more often leading to higher tail latency.                          forms 7.6% to 11.4% better over all the devices considered.
+                                                                         Comparing SILK-O and ADOC, the two gives-and-takes. For
+6.3      Macro Benchmark                                                 Load, a purely write workload, ADOC beats SILK-O. How-
+                                                                         ever, for workloads YCSB-A, -B, -C, and -F, SILK-O per-
+In this section, we consider real-world workloads using the              forms better. For YCSB-D and -E, the winner depends on the
+YCSB benchmark. The YCSB benchmark [12] is a popular                     device. Recall that the RocksDB versions on which SILK-
+benchmark tool that generates workloads following real-world             O and ADOC run differ. To remove the version effect, we
+data characteristics. We run the six workloads with character-           also run ADOC on RocksDB 5.7.1. These results, denoted,
+istics as shown in Table 4, executing them in the suggested              ADOC-5.7.1 in Figure 17, show that the version difference
+order [12, 49], that is, execute the loading stage first, followed       has some effect on ADOC performance, with the older ver-
+by the run stages A, B, C, D, and F. Then, we reload the data            sion performing better in the majority of run stages, most
+and execute workload E. We load 50M entries (10B keys and                notably for YCSB-A and -E on the HDD.
+1000B values) during the load stage and then execute each                   The main reason SILK-O does well, despite the fact that
+run stage for one hour.                                                  ADOC performs considerably better than SILK-O for writes
+   Figure 17 shows the throughput of all schemes. (Note that             as was shown with the microbenchmarks, may be attributed to
+there is a ADOC-5.7.1 scheme that has been added to the re-              the large memory usage. As shown in Figure 18, we find that
+sults. We elaborate on this later.) Comparing the auto-tuning            SILK-O uses as much as 76.8% more memory than ADOC.
+systems, RocksDB-AT and ADOC, we find that the latter per-               Larger memory allows more requests to be serviced from the
+
+
+
+USENIX Association                                                   21st USENIX Conference on File and Storage Technologies                                                                   75
+
+
+===== PAGE 13 =====
+                                        RocksDB-AT     SILK-P       SILK-O       ADOC
+                                                 Percentage of Found Entries
+
+
+
+
+Throughput (kOps/Sec)
+                                                                                                   Percentage of
+                                   PM           NVMe SSD         SATA SSD      SATA HDD
+                         300                                                                 40
+
+
+                                                                                                  Found Entries (%)
+                         200
+                                                                                             20
+                         100
+
+                           0                                                                 0
+                                                    Experiment Scheme
+
+Figure 19: Throughput for the read-while-writing workload.
+                                              Throughput             Bandwidth Utilization
+                                              Memory Footprint       CPU Utilization
+                                                             ADOC-T
+                                     PM            NVMe SSD          SATA SSD         SATA HDD
+
+
+
+
+Normalized Metrics (%)
+                         200
+                         100
+                          50
+
+                                                             ADOC-B
+                                     PM            NVMe SSD          SATA SSD         SATA HDD
+                         200
+                         100
+                                                                                                                          Figure 21: Tuning actions during one-hour execution.
+                          50
+
+Figure 20: Comparison of system throughput and resource                                                                  Figure 20 shows the throughput and resource usage of the
+consumption with different tuning knobs triggered, the values                                                         two schemes relative to ADOC initially set with the default
+shown are normalized to the value of ADOC.                                                                            values. Observing the throughput for ADOC-T, we see that
+                                                                                                                      it performs well for PM, but that the throughput deteriorates
+data buffered in memory benefiting not only read-intensive                                                            with slower devices. More specifically, since ADOC-T does
+but also update-intensive workloads like YCSB-A and -F.                                                               not adjust the batch size, its memory footprint is smaller, but
+   Finally, the tail latency results (not shown) do not reveal                                                        this comes at the price of performance. The disk bandwidth
+any surprises; overall, SILK-O does best, but gives-and-takes                                                         and CPU utilization are also high since the batch size is rela-
+between SILK-P and ADOC for particular workloads.                                                                     tively small, resulting in more frequent data movement.
+   In conclusion, the performance results show that SILK-O                                                               In contrast, we see that ADOC-B is almost the complete op-
+and ADOC are comparable. However, recall that for SILK,                                                               posite. It performs well for HDD, but throughput deteriorates
+performance varies considerably depending on the initial set-                                                         as the devices get more powerful. Since it does not increase
+ting and that the “optimal” SILK-O setting was manually                                                               the number of threads, the memory footprint, the CPU uti-
+obtained. This is in contrast to ADOC being an online tuning                                                          lization, and the bandwidth utilization are all relatively low
+system that does not need human intervention.                                                                         as fewer data movement jobs get triggered. That is, while
+    As a supplement to the macro benchmark, we also eval-                                                             resources are abundant, there are not enough workers to take
+uate the system under the read-while-writing workload in                                                              advantage of them. However, for the HDD where bandwidth
+db_bench that uses two threads, the reader and writer, to gener-                                                      is limited, having few threads allow these threads to make full
+ate 50M write and read requests, respectively. Note that as the                                                       use of the bandwidth incurring less write stalls.
+reader and writer are running concurrently, the reader thread                                                            Figure 21 shows how the number of threads and the batch
+may request entries that have not yet been persisted by the                                                           size are adjusted when only one parameter is considered with
+writer; we show the percentage of found entries along with the                                                        ADOC-T and ADOC-B, respectively, versus when both are
+throughput of the various schemes in Figure 19. The results                                                           considered with ADOC. The results show that tuning both
+show that ADOC achieves 5.2% to 45.3% higher throughput                                                               parameters together reduces the frequency and fluctuations of
+than SILK-O, and 95% to 135% higher than RocksDB-AT.                                                                  the adjustments resulting in a much more stable setting.
+                                                                                                                         In conclusion, we find that the number of threads and batch
+6.4                             Number of Threads versus Batch Size                                                   size have a complementing effect that stabilizes the tuning
+                                                                                                                      process, consequently resulting in better performance.
+Throughout our discussions, we considered the number of
+threads and batch size as our tuning parameters. In this section,
+we consider the effect of each parameter on ADOC. For this,                                                           7    Related Work
+we consider the fillrandom workload in Section 6.2 on two
+versions of ADOC, ADOC-T and ADOC-B, the former that                                                                  Write Stall Issues: LSM-KV experiences periodical perfor-
+only tunes the number of threads and the latter that only tunes                                                       mance drops when facing heavy writing pressure due to write
+the batch size.                                                                                                       stalls. SILK focuses on the long tail latency problem caused
+
+
+
+76                             21st USENIX Conference on File and Storage Technologies                                                                         USENIX Association
+
+
+===== PAGE 14 =====
+by write stalls. To remedy this problem, it adjusts the priorities       by the configuration setting. Monkey extrapolates the worst-
+of background threads and adds rate limiters to these back-              case scenarios for various operations and designs a configu-
+ground threads [7]. It ensures the L0-L1 compaction will be              ration tuning framework to tune memory allocation policies
+handled in a timely manner to avoid disk overflow. Other stud-           and read/write performance for specific workloads based on
+ies propose new scheduling strategies to align the background            these scenarios [13]. Dostoevsky further discusses the impact
+compaction jobs in different levels and align the start time of          of different compaction strategies and develops a mixed com-
+each compaction according to the available resources [45, 50].           paction strategy that determines the input according to the
+MatrixKV observes the shortcoming of the original SSTable                input level [14]. Rafiki [47] and TiKV [21] use offline train-
+format and points to the slow L0-L1 compaction as the root               ing methods such as Deep Neural Networks (DNN) to study
+cause of write stalls with PM devices [58]. It redesigns the             the best setting combination according to the performance
+format of SSTables for NVM and proposes a new compaction                 of the entire workload. They achieve better throughput but
+scheme between the first two levels, which they call column-             are limited to workload characteristics. Endure concludes that
+compaction. It also reduces the depth of LSM trees to reduce             the tuning method on the worst cases is the Nominal Tun-
+write amplification.                                                     ing Problem and provides a system that uses a robust tuning
+Deploying LSM-KVs on New Devices: Recent studies also                    method to improve the tuning effect when facing uncertain
+focus on the design of LSM-KVs to fit in new storage devices,            workloads [22].
+especially on PM. NoveLSM discusses several possible so-
+lutions that accelerate LSM-KV such as storing parts of the              8   Conclusion
+persisted component on PM [37]. It also proposes an in-place             In this paper, we studied the write stall phenomena in LSM-
+update solution to replace the compaction jobs in shallower              KVs by revisiting earlier studies. We showed that the con-
+levels. SLM-DB further takes advantage of PM by building                 clusions that focus on the individual aspects, though valid,
+a global B+-tree index in PM [36]. This global index helps               are not generally applicable. Through a thorough review and
+in organizing the entire DB into a single level and uses se-             further experiments on a modern LSM-KV, we showed that
+lective compaction to reduce write amplification. ListDB                 data overflow, which refers to the rapid expansion of one or
+deploys the entire LSM-KV in a DRAM-PM only system and                   more components in an LSM-KV system due to a surge in
+considers the NUMA sensitivity of PM and the overhead of                 data flow into one of the components, is able to explain the
+multiple copying of commit logs [38]. It develops a NUMA-                formation of write stalls. Our contention was that by balanc-
+aware skip list to replace SSTs. This saves the overhead of              ing and harmonizing data flow among components, we will
+merge-sorting in Memtables and entry copying commit logs.                be able to reduce data overflow and thus, write stalls.
+It also uses in-place updates to reduce bandwidth utilization
+                                                                            We proposed a tuning framework called ADOC (Automatic
+and the write amplification problem caused by conventional
+                                                                         Data Overflow Control) to adjust the system configurations
+compaction jobs.
+                                                                         rather than simply waiting for the overflowed data to be con-
+    Other approaches to improve LSM-KV systems have been                 sumed as is done by default in RocksDB. Experimental results
+proposed. In particular, as new devices with much higher                 with RocksDB showed that ADOC improves throughput by
+bandwidth and parallelism than conventional devices become               as much as 322.8% compared with the auto-tuned RocksDB,
+prevalent, software overhead becomes more significant, and               which takes a similar auto-tuning approach to ADOC. Com-
+thus, approaches to reduce this overhead have been made.                 pared to the manually optimized state-of-the-art SILK [4],
+P2KVS notices the long waiting time on WAL lock [44]. It                 ADOC achieves up to 66% higher throughput for the syn-
+adds an accessing layer that batches the incoming requests               thetic write-intensive workloads, while achieving comparable
+and dispatches them into different KV instances, efficiently in-         performance for the real-world YCSB workloads. However,
+creasing the scalability of LSM-KVs on NVMe SSD. Studies                 SILK attains this performance at the expense of using 22.2%
+such as KVell [43] and SpanDB [11] notice the high software              more main memory on average.
+overhead in conventional IO interfaces and replace the inter-
+faces with more efficient ones like libasync or SPDK [57].               Acknowledgement
+To further eliminate the high IO stack overhead, some of                 We would like to thank our shepherd Sudarsun Kannan and
+the studies try to reduce the duplicated operations between              the anonymous reviewers for their constructive comments
+devices and the LSM-KV. FlashKV and LOCS use Open                        that helped improve the paper. This research was supported
+Channel SSDs (OCSSD) to directly control the IO process                  by the MSIT (Ministry of Science and ICT), Korea, under
+of LSM-KVs from the user-level [53, 59]. Other studies like              the ITRC (Information Technology Research Center) sup-
+KVSSD and iLSM try to integrate LSM-KVs and the FTL                      port program (IITP-2022-2021-0-01817) supervised by the
+(Flash Translation Layer) of SSDs to bypass the IO stack and             IITP (Institute for Information Communications Technology
+achieve lower operation latency [42, 55].                                Planning Evaluation), and also partially supported by a grant
+Parameter Tuning of LSM-KVs: There are studies that no-                  from the Research Grants Council of the Hong Kong Special
+tice the performance of LSM-KVs can be strongly influenced               Administrative Region, China (Project No. CityU 11217020).
+
+
+
+USENIX Association                                                   21st USENIX Conference on File and Storage Technologies        77
+
+
+===== PAGE 15 =====
+References                                                     [12] Brian F. Cooper, Adam Silberstein, Erwin Tam, Raghu
+                                                                    Ramakrishnan, and Russell Sears. Benchmarking Cloud
+ [1] Auto-tuned rate limiter. http://rocksdb.org/blog/              Serving Systems with YCSB. page 143–154, New York,
+     2017/12/18/17-auto-tuned-rate-limiter.html.                    NY, USA, 2010.
+     Accessed on 2022-12-29.
+                                                               [13] Niv Dayan, Manos Athanassoulis, and Stratos Idreos.
+ [2] fio - flexible i/o tester. https://fio.readthedocs.
+                                                                    Monkey: Optimal Navigable Key-Value Store. In Pro-
+     io/en/latest/fio_doc.html. Accessed on 2022-01-
+                                                                    ceedings of the 2017 ACM International Conference on
+     07.
+                                                                    Management of Data, page 79–94, New York, NY, USA,
+ [3] Github - supermt/feat_7.11. https://github.com/                2017.
+     supermt/FEAT_7.11. Accessed on 2022-01-07.
+                                                               [14] Niv Dayan and Stratos Idreos. Dostoevsky: Better
+ [4] HyperLevelDB: A fork of LevelDB intended to meet               Space-Time Trade-Offs for LSM-Tree Based Key-Value
+     the needs of HyperDex while remaining compati-                 Stores via Adaptive Removal of Superfluous Merging.
+     ble with LevelDB. https://github.com/rescrv/                   In Proceedings of the 2018 International Conference
+     HyperLevelDB. Accessed on 2022-09-09.                          on Management of Data, page 505–520, New York, NY,
+ [5] Perf wiki. https://perf.wiki.kernel.org/index.                 USA, 2018.
+     php/Main_Page. Accessed on 2022-12-29.
+                                                               [15] Siying Dong, Andrew Kryczka, Yanqin Jin, and Michael
+ [6] Oana Balmau, Diego Didona, Rachid Guerraoui, Willy             Stumm. Evolution of Development Priorities in Key-
+     Zwaenepoel, Huapeng Yuan, Aashray Arora, Karan                 value Stores Serving Large-scale Applications: The
+     Gupta, and Pavan Konka. TRIAD: Creating Synergies              RocksDB Experience. In Proceedings of 19th USENIX
+     Between Memory, Disk and Log in Log Structured Key-            Conference on File and Storage Technologies (FAST 21),
+     Value Stores. In Proceedings of the 2017 USENIX An-            pages 33–49, 2021.
+     nual Technical Conference (USENIX ATC 17), pages
+     363–375, 2017.                                            [16] Facebook.     Leveled Compaction.        https:
+                                                                    //github.com/facebook/rocksdb/wiki/
+ [7] Oana Balmau, Florin Dinu, Willy Zwaenepoel, Karan
+                                                                    Leveled-Compaction. Accessed on 2022-09-09.
+     Gupta, Ravishankar Chandhiramoorthi, and Diego Di-
+     dona. SILK: Preventing Latency Spikes in Log-
+                                                               [17] Sanjay Ghemawat and Jeff Dean. Google: Leveldb.
+     Structured Merge Key-Value Stores. In Proceedings
+                                                                    https://github.com/google/leveldb, 2022. Ac-
+     of the 2019 USENIX Annual Technical Conference
+                                                                    cessed on 2022-09-09.
+     (USENIX ATC 19), pages 753–766, 2019.
+ [8] Atri Bhattacharyya, Uros Tesic, and Mathias Payer. Mi-    [18] Brendan Gregg. The flame graph: This visualization of
+     das: Systematic Kernel TOCTTOU Protection. In Pro-             software execution is a new necessity for performance
+     ceedings of 31st USENIX Security Symposium (USENIX             profiling and debugging. Queue, 14(2):91–110, mar
+     Security 22), pages 107–124, Boston, MA, August 2022.          2016.
+     USENIX Association.
+                                                               [19] Shashank Gugnani, Arjun Kashyap, and Xiaoyi Lu. Un-
+ [9] Lin Cai, Xuemin Shen, Jianping Pan, and Jon W. Mark.           derstanding the idiosyncrasies of real persistent memory.
+     Performance Analysis of TCP-friendly AIMD Algo-                Proc. VLDB Endow., 14(4):626–639, feb 2021.
+     rithms for Multimedia Applications. IEEE Transactions
+     on Multimedia, 7(2):339–355, 2005.                        [20] Tom’s Hardware.      Intel Kills Optane Memory
+[10] Fay Chang, Jeffrey Dean, Sanjay Ghemawat, Wilson C             Business, Pays $559 Million Inventory Write-
+     Hsieh, Deborah A Wallach, Mike Burrows, Tushar Chan-           Off.      https://www.tomshardware.com/news/
+     dra, Andrew Fikes, and Robert E Gruber. Bigtable: A            intel-kills-optane-memory-business-for-good.
+     Distributed Storage System for Structured Data. ACM            Accessed on 2022-09-09.
+     Transactions on Computer Systems (TOCS), 26(2):1–26,
+                                                               [21] Dongxu Huang, Qi Liu, Qiu Cui, Zhuhe Fang, Xiaoyu
+     2008.
+                                                                    Ma, Fei Xu, Li Shen, Liu Tang, Yuxing Zhou, Menglong
+[11] Hao Chen, Chaoyi Ruan, Cheng Li, Xiaosong Ma, and              Huang, Wan Wei, Cong Liu, Jian Zhang, Jianjun Li,
+     Yinlong Xu. SpanDB: A Fast, Cost-Effective LSM-tree            Xuelian Wu, Lingyu Song, Ruoxi Sun, Shuaipeng Yu,
+     Based KV Store on Hybrid Storage. In Proceedings of            Lei Zhao, Nicholas Cameron, Liquan Pei, and Xin Tang.
+     19th USENIX Conference on File and Storage Technolo-           TiDB: A Raft-Based HTAP Database. Proc. VLDB
+     gies (FAST 21), pages 17–32, 2021.                             Endow., 13(12):3072–3084, aug 2020.
+
+
+
+78   21st USENIX Conference on File and Storage Technologies                                           USENIX Association
+
+
+===== PAGE 16 =====
+[22] Andy Huynh, Harshal A. Chaudhari, Evimaria Terzi,          [34] Yichen Jia and Feng Chen. From Flash to 3D XPoint:
+     and Manos Athanassoulis. Endure: A Robust Tuning                Performance Bottlenecks and Potentials in RocksDB
+     Paradigm for LSM Trees Under Workload Uncertainty,              with Storage Evolution. In Proceedings of 2020 IEEE
+     2021.                                                           International Symposium on Performance Analysis of
+                                                                     Systems and Software (ISPASS), pages 192–201, 2020.
+[23] Facebook Inc.  Benchmarking tools | RocksDB.
+     https://github.com/facebook/rocksdb/wiki/                  [35] Myoungsoo Jung. Hello Bytes, Bye Blocks: PCIe Stor-
+     Benchmarking-tools. Accessed on 2022-09-09.                     age Meets Compute Express Link for Memory Expan-
+                                                                     sion (CXL-SSD). HotStorage ’22, page 45–51, 2022.
+[24] Facebook Inc. facebook/rocksdb. https://github.
+     com/facebook/rocksdb/tree/v6.11.4. Accessed                [36] Olzhas Kaiyrakhmet, Songyi Lee, Beomseok Nam,
+     on 2022-09-09.                                                  Sam H. Noh, and Young ri Choi. SLM-DB: Single-Level
+                                                                     Key-Value store with persistent memory. In Proceed-
+[25] Facebook Inc. RocksDB | A Persistent Key-Value store            ings of 17th USENIX Conference on File and Storage
+     | RocksDB. https://rocksdb.org/. Accessed on                    Technologies (FAST 19), pages 191–205, 2019.
+     2022-09-09.
+                                                                [37] Sudarsun Kannan, Nitish Bhat, Ada Gavrilovska, An-
+[26] Facebook Inc.       RocksDB Tuning Guide.                       drea Arpaci-Dusseau, and Remzi Arpaci-Dusseau. Re-
+     https://github.com/facebook/rocksdb/wiki/                       designing LSMs for Nonvolatile Memory with Nov-
+     RocksDB-Tuning-Guide. Accessed on 2022-09-09.                   eLSM. In Proceedings of 2018 USENIX Annual Tech-
+                                                                     nical Conference (USENIX ATC 18), pages 993–1005,
+[27] Facebook Inc.   rocksdb/HISTORY.MD.   https:                    2018.
+     //github.com/facebook/rocksdb/blob/main/
+                                                                [38] Wonbae Kim, Chanyeol Park, Dongui Kim, Hyeongjun
+     HISTORY.md. Accessed on 2022-09-09.
+                                                                     Park, Young ri Choi, Alan Sussman, and Beomseok
+[28] Facebook Inc. Write Stalls. https://github.com/                 Nam. ListDB: Union of Write-Ahead logs and persistent
+     facebook/rocksdb/wiki/Write-Stalls. Accessed                    SkipLists for incremental checkpointing on persistent
+     on 2022-09-09.                                                  memory. In 16th USENIX Symposium on Operating
+                                                                     Systems Design and Implementation (OSDI 22), pages
+[29] Intel Inc.  Intel SSD DC S4500 Series 960GB                     161–177, Carlsbad, CA, July 2022. USENIX Associa-
+     2.5in SATA 6Gbs 3D1 TLC Product Specifi-                        tion.
+     cations.       https://ark.intel.com/content/
+                                                                [39] Andrew Kryczka.    Auto-tuned Rate Limiter |
+     www/us/en/ark/products/series/120535/
+                                                                     RocksDB. https://rocksdb.org/blog/2017/12/
+     intel-ssd-dc-s4500-series.html.      Accessed
+                                                                     18/17-auto-tuned-rate-limiter.html. Accessed
+     on 2022-09-09.
+                                                                     on 2022-09-09.
+[30] Samsung Inc. 970 PRO | Consumer SSD | Sam-
+                                                                [40] Chengdi Lai, Ka-Cheong Leung, and Victor O.K. Li. De-
+     sung Semiconductor.      https://www.samsung.
+                                                                     sign and analysis of TCP AIMD in wireless networks.
+     com/semiconductor/minisite/ssd/product/
+                                                                     In Proceedings of Wireless Communications and Net-
+     consumer/970pro/. Accessed on 2022-09-09.
+                                                                     working Conference (WCNC), pages 1422–1427, 2013.
+[31] Seagate Inc.  BarraCuda Hard Drives.   https:              [41] Avinash Lakshman and Prashant Malik. Cassandra:
+     //www.seagate.com/products/hard-drives/                         A Decentralized Structured Storage System. SIGOPS
+     barracuda-hard-drive/, 2022.     Accessed on                    Oper. Syst. Rev., 44(2):35–40, apr 2010.
+     2022-09-09.
+                                                                [42] Chang-Gyu Lee, Hyeongu Kang, Donggyu Park, Sungy-
+[32] InfluxData. InfluxDB: Purpose-Built Open Source                 ong Park, Youngjae Kim, Jungki Noh, Woosuk Chung,
+     Time Series Database | InfluxData. https://www.                 and Kyoung Park. ilsm-ssd: An intelligent lsm-tree
+     influxdata.com/. Accessed on 2022-09-09.                        based key-value ssd for data analytics. In 2019 IEEE
+                                                                     27th International Symposium on Modeling, Analysis,
+[33] Joseph Izraelevitz, Jian Yang, Lu Zhang, Juno Kim,              and Simulation of Computer and Telecommunication
+     Xiao Liu, Amirsaman Memaripour, Yun Soh, Zixuan                 Systems (MASCOTS), pages 384–395, 2019.
+     Wang, Yi Xu, Subramanya Dulloor, Jishen Zhao, and
+     Steven Swanson. Basic Performance Measurements             [43] Baptiste Lepers, Oana Balmau, Karan Gupta, and Willy
+     of the Intel Optane DC Persistent Memory Module.                Zwaenepoel. KVell: the Design and Implementation of
+     https://arxiv.org/abs/1903.05714, 03 2019.                      a Fast Persistent Key-Value Store. In Proceedings of the
+
+
+
+USENIX Association                                          21st USENIX Conference on File and Storage Technologies       79
+
+
+===== PAGE 17 =====
+     27th ACM Symposium on Operating Systems Principles,            ’14, New York, NY, USA, 2014. Association for Com-
+     pages 447–461, 2019.                                           puting Machinery.
+[44] Ziyi Lu, Qiang Cao, Hong Jiang, Shucheng Wang, and        [54] Kan Wu, Andrea Arpaci-Dusseau, and Remzi Arpaci-
+     Yuanyuan Dong. P<sup>2</sup>KVS: A Portable 2-                 Dusseau. Towards an Unwritten Contract of Intel Op-
+     Dimensional Parallelizing Framework to Improve Scal-           tane SSD. In Proceedings of 11th USENIX Workshop
+     ability of Key-Value Stores on SSDs. page 575–591,             on Hot Topics in Storage and File Systems (HotStorage
+     2022.                                                          19), 2019.
+
+[45] Chen Luo and Michael J Carey. On performance stabil-      [55] Sung-Ming Wu, Kai-Hsiang Lin, and Li-Pin Chang.
+     ity in LSM-based storage systems (extended version).           KVSSD: Close integration of LSM trees and flash trans-
+     https://arxiv.org/abs/1906.09667, 2019.                        lation layer for write-efficient KV store. In 2018 Design,
+                                                                    Automation & Test in Europe Conference & Exhibition
+[46] Chen Luo and Michael J Carey. LSM-based storage                (DATE), pages 563–568, 2018.
+     techniques: a survey. The VLDB Journal, 29(1):393–
+     418, 2020.                                                [56] Jian Yang, Juno Kim, Morteza Hoseinzadeh, Joseph
+                                                                    Izraelevitz, and Steve Swanson. An Empirical Guide
+[47] Ashraf Mahgoub, Paul Wood, Sachandhan Ganesh, Sub-             to the Behavior and Use of Scalable Persistent Memory.
+     rata Mitra, Wolfgang Gerlach, Travis Harrison, Folker          In Proceedings of 18th USENIX Conference on File and
+     Meyer, Ananth Grama, Saurabh Bagchi, and Somali                Storage Technologies (FAST 20), pages 169–182, Santa
+     Chaterji. Rafiki: A Middleware for Parameter Tuning of         Clara, CA, 2020.
+     NoSQL Datastores for Dynamic Metagenomics Work-
+     loads. In Proceedings of the 18th ACM/IFIP/USENIX         [57] Ziye Yang, James R. Harris, Benjamin Walker, Daniel
+     Middleware Conference(Middleware ’17), page 28–40,             Verkamp, Changpeng Liu, Cunyin Chang, Gang Cao,
+     2017.                                                          Jonathan Stern, Vishal Verma, and Luse E. Paul. Spdk:
+                                                                    A development kit to build high performance storage
+[48] Yoshinori Matsunobu, Siying Dong, and Herman Lee.              applications. In Proceedings of 2017 IEEE Interna-
+     MyRocks: LSM-Tree Database Storage Engine Serving              tional Conference on Cloud Computing Technology and
+     Facebook’s Social Graph. Proceedings of the VLDB               Science (CloudCom), pages 154–161, 2017.
+     Endowment, 13(12):3217–3230, 2020.
+                                                               [58] Ting Yao, Yiwen Zhang, Jiguang Wan, Qiu Cui, Liu
+[49] Pandian Raju, Rohan Kadekodi, Vijay Chidambaram,               Tang, Hong Jiang, Changsheng Xie, and Xubin He. Ma-
+     and Ittai Abraham. PebblesDB: Building Key-Value               trixKV: Reducing Write Stalls and Write Amplification
+     Stores Using Fragmented Log-Structured Merge Trees.            in LSM-tree Based KV Stores with Matrix Container in
+     In Proceedings of the 26th Symposium on Operating              NVM. In Proceedings of 2020 USENIX Annual Techni-
+     Systems Principles(SOSP ’17), page 497–514, 2017.              cal Conference (USENIX ATC 20), pages 17–31, 2020.
+[50] Russell Sears and Raghu Ramakrishnan. bLSM: a gen-        [59] Jiacheng Zhang, Youyou Lu, Jiwu Shu, and Xiongjun
+     eral purpose log structured merge tree. In Proceedings         Qin. Flashkv: Accelerating kv performance with open-
+     of the 2012 ACM SIGMOD International Conference                channel ssds. ACM Trans. Embed. Comput. Syst., 16(5s),
+     on Management of Data, pages 217–228, 2012.                    sep 2017.
+[51] Xuan Sun, Jinghuan Yu, Zimeng Zhou, and Chun Jason        [60] Teng Zhang, Jianying Wang, Xuntao Cheng, Hao Xu,
+     Xue. FPGA-based Compaction Engine for Accelerating             Nanlong Yu, Gui Huang, Tieying Zhang, Dengcheng He,
+     LSM-tree Key-Value Stores. In Proceedings of 2020              Feifei Li, Wei Cao, Zhongdong Huang, and Jianling Sun.
+     IEEE 36th International Conference on Data Engineer-           FPGA-Accelerated Compactions for LSM-based Key-
+     ing (ICDE), pages 1261–1272, 2020.                             Value Store. In Proceedings of 18th USENIX Conference
+                                                                    on File and Storage Technologies (FAST 20), pages 225–
+[52] Mehul Nalin Vora. Hadoop-HBase for large-scale data.           237, Santa Clara, CA, 2020.
+     In Proceedings of 2011 International Conference on
+     Computer Science and Network Technology, pages 601–       [61] Zhizhou Zhang, Murali Krishna Ramanathan, Prithvi
+     605, 2011.                                                     Raj, Abhishek Parwal, Timothy Sherwood, and Milind
+                                                                    Chabbi. CRISP: Critical Path Analysis of Large-Scale
+[53] Peng Wang, Guangyu Sun, Song Jiang, Jian Ouyang,               Microservice Architectures. In Proceedings of 2022
+     Shiding Lin, Chen Zhang, and Jason Cong. An efficient          USENIX Annual Technical Conference (USENIX ATC
+     design and implementation of lsm-tree based key-value          22), pages 655–672, Carlsbad, CA, July 2022. USENIX
+     store on open-channel ssd. In Proceedings of the Ninth         Association.
+     European Conference on Computer Systems, EuroSys
+
+
+
+80   21st USENIX Conference on File and Storage Technologies                                            USENIX Association
+

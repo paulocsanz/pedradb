@@ -10,6 +10,10 @@ default = []
 # RFC-0018 P2.5: enable optional engine buggify hook bodies (still SeedRng-only).
 buggify = []
 
+# Kani proof harnesses live in-tree under #[cfg(kani)] (bloom T1–T4).
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(kani)'] }
+
 [dependencies]
 crc32c.workspace = true
 thiserror.workspace = true
@@ -18,8 +22,9 @@ bytes.workspace = true
 tracing.workspace = true
 lz4_flex.workspace = true
 
-[target.'cfg(target_os = "linux")'.dependencies]
-libc = "0.2"
+[dev-dependencies]
+# Same production recover_kernel as collect_all (F4 / F14).
+stateright = "0.31"
 
 [[bench]]
 name = "baseline"

@@ -89,8 +89,7 @@ pub fn resync_expired<E: Env>(
 ) -> Result<Vec<FoldUpdate>> {
     let mut live: BTreeSet<Vec<u8>> = BTreeSet::new();
     for e in db.changes_after(0) {
-        if !in_prefixes(e.key.as_ref(), prefixes)
-            || crate::follow::is_fold_meta_key(e.key.as_ref())
+        if !in_prefixes(e.key.as_ref(), prefixes) || crate::follow::is_fold_meta_key(e.key.as_ref())
         {
             continue;
         }

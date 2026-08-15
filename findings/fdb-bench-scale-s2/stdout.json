@@ -1,0 +1,105 @@
+elected leader=1 (from node 3) status=local=3 members=[1, 2, 3] r1:leader=1
+elected leader=1 (from node 1) status=local=1 members=[1, 2, 3] r1:leader=1 r2:leader=- r3:leader=- r4:leader=-
+elected leader=1 (from node 1) status=local=1 members=[1, 2, 3] r1:leader=- r2:leader=- r3:leader=- r4:leader=- r5:leader=1 r6:leader=- r7:leader=- r8:leader=-
+{
+  "bench": "montanha-fdb-shaped-v1",
+  "host": "unknown",
+  "suite": "scale",
+  "nodes": 3,
+  "payload_bytes": 64,
+  "n_default": 16,
+  "tx_keys": 8,
+  "multi_ranges": 4,
+  "threads": 4,
+  "warmup": 1,
+  "benches": [
+    {
+    "name": "S1_disjoint_put_r1",
+    "ranges": 1,
+    "keys": 16,
+    "keys_per_s": 2.076,
+    "wall_s": 7.7085,
+    "note": "RFC-0025 P2.2 / 0021 scale option A"
+  },
+    {
+    "name": "S1_disjoint_put_r2",
+    "ranges": 2,
+    "keys": 16,
+    "keys_per_s": 2.060,
+    "wall_s": 7.7670,
+    "note": "RFC-0025 P2.2 / 0021 scale option A"
+  },
+    {
+    "name": "S1_disjoint_put_r4",
+    "ranges": 4,
+    "keys": 16,
+    "keys_per_s": 1.902,
+    "wall_s": 8.4119,
+    "note": "RFC-0025 P2.2 / 0021 scale option A"
+  },
+    {
+    "name": "S1_disjoint_put_r8",
+    "ranges": 8,
+    "keys": 16,
+    "keys_per_s": 1.721,
+    "wall_s": 9.2964,
+    "note": "RFC-0025 P2.2 / 0021 scale option A"
+  },
+    {
+    "name": "S2_tcp_mt_put_r1_t1",
+    "ranges": 1,
+    "threads": 1,
+    "keys_ok": 4,
+    "keys_per_s": 3.561,
+    "wall_s": 1.1231,
+    "note": "multi-client multi-range; expect higher keys/s as ranges increase if leaders parallelize"
+  },
+    {
+    "name": "S2_tcp_mt_put_r4_t4",
+    "ranges": 4,
+    "threads": 4,
+    "keys_ok": 16,
+    "keys_per_s": 14.253,
+    "wall_s": 1.1226,
+    "note": "multi-client multi-range; expect higher keys/s as ranges increase if leaders parallelize"
+  },
+    {
+    "name": "S2_tcp_mt_put_r8_t4",
+    "ranges": 8,
+    "threads": 4,
+    "keys_ok": 16,
+    "keys_per_s": 7.216,
+    "wall_s": 2.2174,
+    "note": "multi-client multi-range; expect higher keys/s as ranges increase if leaders parallelize"
+  }
+  ],
+  "limitations": [
+    "In-process core suite: no real NIC (suite tcp adds real localhost TCP).",
+    "C1 Mutex multi-thread serializes StoreCluster — concurrent waiters, not parallel leaders.",
+    "D4 multi-thread TCP is the honest concurrent client path on one range.",
+    "FDB face path (A3) includes OCC bookkeeping; compare to A1 raw put for face overhead.",
+    "Multi-range TX (B2) exercises cross-range 2PC; expect cliff vs A4.",
+    "E1 mini-bt: model-checked random soak + multi-key + WW pairs (not full bindingtester).",
+    "E2 TCP multi-client: partitioned keys per thread + majority verify (true concurrent writers).",
+    "Not YCSB / not production FDB — see docs/montanha-vs-fdb-bench.md."
+  ],
+  "anomalies": [],
+  "vs_fdb": {
+    "claim": "not field peer",
+    "how_to_compare": "docs/montanha-vs-fdb-bench.md",
+    "fdb_workloads": [
+      "single key set/get (A1/A3/D1)",
+      "multi-key transaction (A4/D3)",
+      "get_range (A5)",
+      "clear_range (A6)",
+      "hot key conflicts (A7)",
+      "index+row TX (A8)",
+      "multi-shard / multi-range TX (B2)",
+      "multi-client TCP (D4)",
+      "random soak (E1)",
+      "TCP multi-client mini-bt (E2)"
+    ]
+  }
+}
+
+wrote findings/fdb-bench-scale-s2/fdb_shaped_bench.json

@@ -4704,6 +4704,57 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
     }
 
+    /// F167: an SST whose point keys all precede the scan window still carries a
+    /// range tombstone whose span reaches into the window. The whole-file
+    /// fast-reject in `entries_in_user_range` used only `smallest/largest` point
+    /// keys, so the tombstone was skipped and covered keys scanned as live while
+    /// point `get` correctly returned `None`.
+    #[test]
+    fn scan_applies_range_tombstone_from_earlier_file() {
+        let dir = temp_dir();
+        {
+            let mut db = Db::open_with(&dir, vlog_opts()).unwrap();
+            // File 1: point `k-e` at seq 1.
+            db.put(b"k-e", b"old").unwrap();
+            db.flush().unwrap();
+            // File 2: only entry is the range tombstone [k-b, k-f) at seq 2
+            // (start key k-b < k-e < end key k-f; the end key lives in the value,
+            // so the file's largest point key is k-b).
+            db.delete_range(b"k-b", b"k-f").unwrap();
+            db.flush().unwrap();
+
+            assert_eq!(db.get(b"k-e"), None, "point path applies the tombstone");
+
+            let scanned: Vec<_> = db
+                .range(
+                    std::ops::Bound::Included(&b"k-e"[..]),
+                    std::ops::Bound::Included(&b"k-g"[..]),
+                )
+                .into_iter()
+                .map(|(k, _)| k)
+                .collect();
+            assert!(
+                scanned.is_empty(),
+                "scan must apply the earlier-file tombstone, got {scanned:?}"
+            );
+            db.close().unwrap();
+        }
+        // Same disagreement after reopen (lazy tables take the same path).
+        let db = Db::open_with(&dir, vlog_opts()).unwrap();
+        assert_eq!(db.get(b"k-e"), None);
+        let scanned: Vec<_> = db
+            .range(
+                std::ops::Bound::Included(&b"k-e"[..]),
+                std::ops::Bound::Included(&b"k-g"[..]),
+            )
+            .into_iter()
+            .map(|(k, _)| k)
+            .collect();
+        assert!(scanned.is_empty(), "post-reopen scan got {scanned:?}");
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
     /// Tombstone in mem over SST put must survive flush.
     #[test]
     fn flush_preserves_delete_over_sst_put() {

@@ -92,7 +92,11 @@ impl KvStore for ModelStore {
     }
 
     fn snapshot(&self) -> Result<Snapshot, Self::Error> {
-        Ok(self.map.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
+        Ok(self
+            .map
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect())
     }
 }
 
@@ -116,7 +120,7 @@ impl PedraStore {
                     auto_compact_sst_count: None,
                     auto_compact_sst_bytes: None,
                     exclusive: true,
-                large_value_threshold: None,
+                    large_value_threshold: None,
                 },
             )?,
         })
@@ -231,10 +235,7 @@ pub fn diff_snapshots(left: &Snapshot, right: &Snapshot) -> Result<(), String> {
 ///
 /// # Errors
 /// PedraDB I/O or snapshot mismatch.
-pub fn assert_pedra_matches_model(
-    path: impl AsRef<Path>,
-    ops: &[Op],
-) -> Result<(), String> {
+pub fn assert_pedra_matches_model(path: impl AsRef<Path>, ops: &[Op]) -> Result<(), String> {
     let mut model = ModelStore::new();
     apply_ops(ops, &mut model).map_err(|e| format!("{e:?}"))?;
     let model_snap = model.snapshot().map_err(|e| format!("{e:?}"))?;

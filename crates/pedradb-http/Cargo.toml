@@ -10,3 +10,7 @@ pedradb-core.workspace = true
 pedradb-apply.workspace = true
 pedradb-dcs.workspace = true
 thiserror.workspace = true
+
+[dev-dependencies]
+# Same production fail_closed as handle_kv / read_req (F102 / F104 / F105).
+stateright = "0.31"

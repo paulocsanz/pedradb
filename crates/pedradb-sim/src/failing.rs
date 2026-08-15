@@ -140,7 +140,6 @@ impl FailState {
         }
         Ok(())
     }
-
 }
 
 /// Test [`Env`]: wraps an inner [`Env`] and injects faults.
@@ -270,13 +269,7 @@ impl<E: Env> FailingEnv<E> {
     }
 
     /// Arm fault on a specific op class after `after_ops` matching successes.
-    pub fn arm_op_class(
-        &self,
-        class: OpClass,
-        after_ops: u64,
-        transient: bool,
-        kind: FaultKind,
-    ) {
+    pub fn arm_op_class(&self, class: OpClass, after_ops: u64, transient: bool, kind: FaultKind) {
         self.set_op_class(class);
         self.arm_with_kind(after_ops, transient, kind);
     }

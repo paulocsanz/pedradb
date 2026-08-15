@@ -6,6 +6,8 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
+pub mod pin_kernel;
+
 use pedradb_core::{ChangeEntry, ChangeKind, Db, OpenOptions, Result, SequenceNumber, StdEnv};
 use std::path::Path;
 
@@ -30,8 +32,9 @@ impl JournalConsumer {
     /// fold `apply` returns (RFC-0024).
     pub fn catch_up(&mut self, db: &Db<StdEnv>) -> Vec<ChangeEntry> {
         let batch = self.peek(db);
-        if let Some(m) = batch.iter().map(|e| e.sequence).max() {
-            self.pin = m;
+        if pin_kernel::catch_up_pins_on_read() {
+            let batch_max = batch.iter().map(|e| e.sequence).max();
+            self.pin = pin_kernel::next_pin(self.pin, batch_max);
         }
         batch
     }
@@ -39,6 +42,8 @@ impl JournalConsumer {
     /// Poll durable changes after pin **without** advancing the pin.
     #[must_use]
     pub fn peek(&self, db: &Db<StdEnv>) -> Vec<ChangeEntry> {
+        debug_assert!(!pin_kernel::peek_pins_cursor());
+        debug_assert!(!pin_kernel::fold_pins_on_read());
         let last = db.last_sequence();
         db.changes_after(self.pin)
             .into_iter()
@@ -48,7 +53,7 @@ impl JournalConsumer {
 
     /// Persist pin only after the caller applied every revision `<= applied_through`.
     pub fn pin_after_apply(&mut self, applied_through: SequenceNumber) {
-        if applied_through > self.pin {
+        if pin_kernel::may_advance_pin(self.pin, applied_through) {
             self.pin = applied_through;
         }
     }

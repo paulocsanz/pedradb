@@ -189,22 +189,13 @@ mod tests {
 
     #[test]
     fn keep_same_index_term() {
-        assert_eq!(
-            ae_entry_action(2, 7, Some(7), 1, 5),
-            AeEntryAction::Keep
-        );
+        assert_eq!(ae_entry_action(2, 7, Some(7), 1, 5), AeEntryAction::Keep);
     }
 
     #[test]
     fn refuse_conflict_at_or_before_commit() {
-        assert_eq!(
-            ae_entry_action(1, 9, Some(3), 1, 5),
-            AeEntryAction::Refuse
-        );
-        assert_eq!(
-            ae_entry_action(1, 9, Some(3), 2, 5),
-            AeEntryAction::Refuse
-        );
+        assert_eq!(ae_entry_action(1, 9, Some(3), 1, 5), AeEntryAction::Refuse);
+        assert_eq!(ae_entry_action(1, 9, Some(3), 2, 5), AeEntryAction::Refuse);
     }
 
     #[test]
@@ -248,7 +239,10 @@ mod tests {
     #[test]
     fn as_is_swallows_persist_fail() {
         assert!(ae_ack_success_as_is(true, false));
-        assert_ne!(ae_ack_success(true, false), ae_ack_success_as_is(true, false));
+        assert_ne!(
+            ae_ack_success(true, false),
+            ae_ack_success_as_is(true, false)
+        );
     }
 
     #[test]

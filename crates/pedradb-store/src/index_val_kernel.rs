@@ -50,6 +50,7 @@ pub fn exact_value_children_as_is(val: &[u8]) -> (Vec<u8>, Vec<u8>) {
     exact_value_children(&len_pref_value_as_is(val))
 }
 
+#[cfg(test)]
 fn in_range(key: &[u8], start: &[u8], end: &[u8]) -> bool {
     key >= start && key < end
 }

@@ -1,0 +1,1205 @@
+
+
+===== PAGE 1 =====
+Industry 3: Cloud and Distributed Databases                                                  SIGMOD ’20, June 14–19, 2020, Portland, OR, USA
+
+
+
+
+            CockroachDB: The Resilient Geo-Distributed
+                         SQL Database
+     Rebecca Taft, Irfan Sharif, Andrei Matei, Nathan VanBenschoten, Jordan Lewis,
+    Tobias Grieger, Kai Niemi, Andy Woods, Anne Birzin, Raphael Poss, Paul Bardea,
+               Amruta Ranade, Ben Darnell, Bram Gruneir, Justin Jaffray,
+                              Lucy Zhang, and Peter Mattis
+                                                    sigmod2020@cockroachlabs.com
+                                                         Cockroach Labs, Inc.
+ABSTRACT
+   We live in an increasingly interconnected world, with
+many organizations operating across countries or even con-
+tinents. To serve their global user base, organizations are
+replacing their legacy DBMSs with cloud-based systems ca-
+pable of scaling OLTP workloads to millions of users.
+   CockroachDB is a scalable SQL DBMS that was built from
+the ground up to support these global OLTP workloads
+while maintaining high availability and strong consistency.
+Just like its namesake, CockroachDB is resilient to disasters
+through replication and automatic recovery mechanisms.
+   This paper presents the design of CockroachDB and its
+novel transaction model that supports consistent geo-distrib-                          Figure 1: A global CockroachDB cluster
+uted transactions on commodity hardware. We describe how
+CockroachDB replicates and distributes data to achieve fault                   ACM, New York, NY, USA, 17 pages. https://doi.org/10.1145/3318464.
+tolerance and high performance, as well as how its distributed                 3386134
+SQL layer automatically scales with the size of the database
+cluster while providing the standard SQL interface that users                  1    INTRODUCTION
+expect. Finally, we present a comprehensive performance                            Modern transaction processing workloads are increasingly
+evaluation and share a couple of case studies of CockroachDB                   geo-distributed. This trend is fueled by the desire of global
+users. We conclude by describing lessons learned while build-                  companies to not only build scalable applications, but also
+ing CockroachDB over the last five years.                                      control with fine-granularity where data resides for perfor-
+                                                                               mance and regulatory reasons.
+ACM Reference Format:
+Rebecca Taft, Irfan Sharif, Andrei Matei, Nathan VanBenschoten,
+                                                                                   Consider, for example, a large company with a core user
+Jordan Lewis, Tobias Grieger, Kai Niemi, Andy Woods, Anne Birzin,              base in Europe and Australia and a fast growing user base
+Raphael Poss, Paul Bardea, Amruta Ranade, Ben Darnell, Bram                    in the US. To power its global platform while reducing oper-
+Gruneir, Justin Jaffray, Lucy Zhang, and Peter Mattis. 2020. Cock-             ational costs, the company has made the strategic decision
+roachDB: The Resilient Geo-Distributed SQL Database. In Proceed-               to migrate to a cloud-based database management system
+ings of the 2020 ACM SIGMOD International Conference on Manage-                (DBMS). It has the following requirements: to comply with
+ment of Data (SIGMOD’20), June 14ś19, 2020, Portland, OR, USA.                 the EU’s General Data Protection Regulation (GDPR), per-
+                                                                               sonal data for its European users must be domiciled within
+                                                                               the EU. To avoid high latencies due to cross-continental com-
+                                                                               munication, data should reside close to the users accessing it
+                                                                               most frequently, and follow them (within regulatory limits)
+This work is licensed under a Creative Commons Attribution-ShareAlike
+International 4.0 License.
+                                                                               if they travel. Users expect an łalways onž experience, so the
+                                                                               DBMS must be fault tolerant, even surviving a full regional
+SIGMOD’20, June 14ś19, 2020, Portland, OR, USA
+© 2020 Copyright held by the owner/author(s).                                  failure. Finally, to avoid data anomalies and to simplify ap-
+ACM ISBN 978-1-4503-6735-6/20/06.                                              plication development, the DBMS must support SQL with
+https://doi.org/10.1145/3318464.3386134                                        serializable transactions.
+
+
+
+
+                                                                        1493
+
+
+===== PAGE 2 =====
+Industry 3: Cloud and Distributed Databases                                                  SIGMOD ’20, June 14–19, 2020, Portland, OR, USA
+
+SIGMOD’20, June 14ś19, 2020, Portland, OR, USA                                 R. Taft, I. Sharif, A. Matei, N. VanBenschoten, J. Lewis, T. Grieger et al.
+
+
+   CockroachDB (abbrev. CRDB) is a commercial DBMS de-                     the database provides fault tolerance and high availability
+signed to support all of the aforementioned requirements. As               through replication and strategic data placement. Section 3
+a case in point, the company described above is a real orga-               provides a deep-dive into CRDB’s transaction model. Sec-
+nization in the process of migrating their global platform to              tion 4 explains how we use timestamp ordering to achieve
+CRDB, and Fig. 1 shows the strategic vision for their CRDB                 strong consistency, even with loosely synchronized clocks
+deployment. In this paper, we present the design and imple-                on commodity hardware. Section 5 describes the SQL data
+mentation of CRDB and explain in detail the rationale for                  model, planning, execution, and schema changes. Section 6
+the decisions we made, as well as some lessons learned along               evaluates the performance of CRDB and contains two case
+the way. We explain how CRDB supports the requirements                     studies of CRDB usage. Section 7 summarizes our lessons
+of global companies such as the one above by focusing on                   learned while building CRDB. Section 8 describes related
+the following features:                                                    work, and Section 9 presents conclusions and future work.
+(1) Fault tolerance and high availability To provide fault
+                                                                           2     SYSTEM OVERVIEW
+    tolerance, CRDB maintains at least three replicas of every
+                                                                              This section begins with an overview of CRDB’s archi-
+    partition in the database across diverse geographic zones.
+                                                                           tecture in Section 2.1. Sections 2.2 and 2.3 describe how the
+    It maintains high availability through automatic recovery
+                                                                           system replicates and distributes data to provide fault toler-
+    mechanisms whenever a node fails.
+                                                                           ance, high availability, and geo-distributed partitioning.
+(2) Geo-distributed partitioning and replica placement
+    CRDB is horizontally scalable, automatically increasing                2.1      Architecture of CockroachDB
+    capacity and migrating data as nodes are added. By de-                    CRDB uses a standard shared-nothing [62] architecture,
+    fault it uses a set of heuristics for data placement (see              in which all nodes are used for both data storage and com-
+    Section 2.2.3), but it also allows users to control, at a fine         putation. A CRDB cluster consists of an arbitrary number
+    granularity, how data is partitioned across nodes and                  of nodes, which may be colocated in the same datacenter or
+    where replicas should be located. We will describe how                 spread across the globe. Clients can connect to any node in
+    users can use this feature for performance optimization                the cluster.
+    or as part of a data domiciling strategy.                                 Within a single node, CRDB has a layered architecture.
+(3) High-performance transactions CRDB’s novel trans-                      We now introduce each of the layers, including concepts and
+    action protocol supports performant geo-distributed trans-             terminology used throughout the paper.
+    actions that can span multiple partitions. It provides se-             2.1.1 SQL. At the highest level is the SQL layer, which is
+    rializable isolation using no specialized hardware; a stan-            the interface for all user interactions with the database. It
+    dard clock synchronization mechanism such as NTP is                    includes the parser, optimizer, and the SQL execution engine,
+    sufficient. As a result, CRDB can be run on off-the-shelf              which convert high-level SQL statements to low-level read
+    servers, including those of public and private clouds.                 and write requests to the underlying key-value (KV) store.
+CRDB is a production-grade system that was designed to                        In general, the SQL layer is not aware of how data is
+łmake data easyž, so in addition to the above, CRDB supports               partitioned or distributed, because the layers below present
+the SQL standard with a state-of-the-art query optimizer and               the abstraction of a single, monolithic KV store. Section 5 will
+distributed SQL execution engine. It also includes all the fea-            describe how certain queries break this abstraction, however,
+tures necessary for our users to run CRDB in production as a               for more efficient distributed SQL computation.
+system of record, including online schema changes, backup                  2.1.2 Transactional KV. Requests from the SQL layer are
+and restore, fast imports, JSON support, and integration with              passed to the Transactional KV layer that ensures atomic-
+external analytics systems.                                                ity of changes spanning multiple KV pairs. It is also largely
+   All of the source code of CRDB is available on GitHub [12].             responsible for CRDB’s isolation guarantees. These atom-
+The core features of the database are under a Business Source              icity and isolation guarantees will be described in detail in
+License (BSL), which converts to a fully open-source Apache                Sections 3 and 4.
+2.0 license after three years [13]. Additionally, CRDB is łcloud-          2.1.3 Distribution. This layer presents the abstraction of
+neutralž, meaning a single CRDB cluster can span an arbi-                  a monolithic logical key space ordered by key. All data is
+trary number of different public and private clouds. These                 addressable within this key space, whether it be system data
+two features enable users to mitigate the risks of vendor lock-            (used for internal data structures and metadata) or user data
+in, such as reliance on proprietary extensions of SQL [6, 23]              (SQL tables and indexes).
+or exposure to cloud provider outages [70].                                   CRDB uses range-partitioning on the keys to divide the
+   The remainder of the paper is organized as follows: In Sec-             data into contiguous ordered chunks of size ~64 MiB, that
+tion 2, we present an overview of CRDB, summarizing how                    are stored across the cluster. We call these chunks łRangesž.
+
+
+
+
+                                                                    1494
+
+
+===== PAGE 3 =====
+Industry 3: Cloud and Distributed Databases                                              SIGMOD ’20, June 14–19, 2020, Portland, OR, USA
+
+CockroachDB: The Resilient Geo-Distributed SQL Database                                        SIGMOD’20, June 14ś19, 2020, Portland, OR, USA
+
+
+Ordering between Ranges is maintained in a two-level index-                log entry. To prevent two replicas from acquiring leases
+ing structure inside a set of system Ranges, which are cached              overlapping in time, lease acquisition requests include a copy
+aggressively for fast key lookups. The Distribution layer is re-           of the lease believed to be valid at the time of request. As we
+sponsible for identifying which Ranges should handle which                 will discuss in Section 4, ensuring disjoint leases is essential
+subset of each query, and routes the subsets accordingly.                  for CRDB’s isolation guarantees.
+   Ranges are ~64 MiB because it is a size small enough to al-             2.2.2 Membership changes and automatic load (re)balancing.
+low Ranges to quickly move between nodes but large enough                  Nodes can be added to or removed from running CRDB
+to store a contiguous set of data likely to be accessed together.          clusters, and can fail temporarily or even permanently. CRDB
+Ranges start empty, grow, split when they get too large, and               treats all of these scenarios similarly: they all cause load to
+merge when they get too small. Ranges also split based on                  be redistributed across the new and/or remaining live nodes.
+load to reduce hotspots and imbalances in CPU usage.                          For short-term failures, CRDB uses Raft to operate seam-
+2.1.4 Replication. By default, each Range is replicated three              lessly as long as a majority of replicas remain available. Raft
+ways, with each replica stored on a different node. In Sec-                ensures the election of a new leader for the Raft group if
+tion 2.2, we describe how the Replication layer ensures dura-              the leader fails so that transactions can continue. Affected
+bility of modifications using consensus-based replication.                 replicas can rejoin their group once back online, and peers
+2.1.5 Storage. This is the bottommost level, and represents                help them catch up on missed updates by either (1) send-
+a local disk-backed KV store. It provides efficient writes and             ing a snapshot of the full Range data, or (2) sending a set
+range scans to enable performant SQL execution. At the                     of missing Raft log entries to be applied. The method used
+time of writing, we rely on RocksDB [54], which is well-                   is determined based on the number of writes that occurred
+documented elsewhere, and which we treat as a black box                    while the replica was unavailable.
+throughout the paper.                                                         For longer-term failures, CRDB automatically creates new
+                                                                           replicas of under-replicated Ranges (using the unaffected
+2.2    Fault Tolerance and High Availability                               replicas as sources), and determines placement as described
+   CRDB guarantees fault tolerance and high availability                   in the next section. The node liveness data and cluster metrics
+through replication of data (Section 2.2.1), automatic recov-              required to make this determination are disseminated across
+ery mechanisms in case of failure (Section 2.2.2), and strategic           the cluster using a peer-to-peer gossip protocol.
+data placement (Section 2.2.3).
+                                                                           2.2.3 Replica placement. CRDB has both manual and auto-
+2.2.1 Replication using Raft. CRDB uses the Raft consensus                 matic mechanisms to control replica placement.
+algorithm [46] for consistent replication. Replicas of a Range                To control placement manually, users configure individual
+form a Raft group, where each replica is either a long-lived               nodes in CRDB with a set of attributes. These attributes may
+leader coordinating all writes to the Raft group, or a follower.           specify node capability (such as specialized hardware, RAM,
+The unit of replication in CRDB is a command, which repre-                 disk type, etc.) and/or node locality (such as country, region,
+sents a sequence of low-level edits to be made to the storage              availability zone, etc.). When creating tables in the database,
+engine. Raft maintains a consistent, ordered log of updates                users can specify placement constraints and preferences as
+across a Range’s replicas, and each replica individually ap-               part of the schema of the table. For example, users may
+plies commands to the storage engine as Raft declares them                 include a łregionž column in a table, which can be used to
+to be committed to the Range’s log.                                        define the partitioning for the table and also map partitions
+   CRDB uses Range-level leases, where a single replica in                 to specific geographic regions.
+the Raft group (usually the Raft group leader) acts as the                    The other mechanism for replica placement is automatic:
+leaseholder. It is the only replica allowed to serve authori-              CRDB spreads replicas across failure domains (while adher-
+tative up-to-date reads or propose writes to the Raft group                ing to the specified constraints and preferences), to tolerate
+leader. Because all writes go through the leaseholder, reads               varying severities of failure modes (disk, rack, data center, or
+can bypass networking round trips required by Raft without                 region failures). CRDB also uses various heuristics to balance
+sacrificing consistency. Leases for user Ranges are tied to the            load and disk utilization.
+liveness of the node the leaseholder is on; to signal liveness,
+nodes heartbeat a special record in a system Range every 4.5               2.3    Data Placement Policies
+seconds. System Ranges in turn use expiration based leases                    CRDB’s replica and leaseholder placement mechanisms
+which must be renewed every 9 seconds. If a replica detects                allow for a wide range of possible data placement policies
+that the leaseholder is not live, it tries to acquire the lease.           that allow users to comply with data domiciling requirements
+   To ensure that only one replica holds a lease at a time,                and also make trade-offs between performance and fault
+lease acquisitions piggyback on Raft; replicas attempting to               tolerance. Some multi-region patterns we support are listed
+acquire a lease do so by committing a special lease acquisition            below.
+
+
+
+
+                                                                    1495
+
+
+===== PAGE 4 =====
+Industry 3: Cloud and Distributed Databases                                                SIGMOD ’20, June 14–19, 2020, Portland, OR, USA
+
+SIGMOD’20, June 14ś19, 2020, Portland, OR, USA                               R. Taft, I. Sharif, A. Matei, N. VanBenschoten, J. Lewis, T. Grieger et al.
+
+
+• Geo-Partitioned Replicas For data with geographic ac-                   Algorithm 1: Transaction Coordinator
+  cess locality, tables can be partitioned by access location            1  inflightOps ← ∅, txnTimestamp ← now()
+  with each partition (set of Ranges) pinned to a specific               2  for op ← KV operation received from SQL layer
+  region. This makes for fast intra-region reads and intra-               3      op.ts ← txnTimestamp
+  region writes, as well as survival of availability zone (AZ)            4      if op.commit
+  failures. Region-wide failures result in unavailability for             5           op.deps ← inflightOps
+  data localized to the region. This policy can also be used              6      else
+  for enforcing data domiciling requirements.                             7           op.deps ← { x ∈ inflightOps | x.key = op.key }
+• Geo-Partitioned Leaseholders Leaseholders for parti-                    8           inflightOps ← (inflightOps − op.deps) ∪ { op }
+  tions in a geo-partitioned table can be pinned to the region            9      resp ← SendToLeaseholder(op)
+  of access with the remaining replicas pinned to the remain-            10      if resp.ts > op.ts
+  ing regions. This policy enables fast intra-region reads and           11           if op.key unchanged over (txnTimestamp, resp.ts]
+  survival of regional failures, but comes at a cost of slower           12                txnTimestamp ← resp.ts
+  cross-region writes.                                                   13           else
+• Duplicated Indexes Like all other data in CRDB, Indexes                14                return transaction failed
+  are stored in Ranges that can be pinned to specific regions.           15      send resp to SQL layer
+  By duplicating indexes on a table and pinning each in-                 16      if op.commit
+  dex’s leaseholder to a specific region, the database can               17           asynchonously notify leaseholder to commit
+  serve fast local reads while retaining the ability to survive
+  regional failures. This comes with higher write amplifica-
+                                                                         the coordinator employs two important optimizations: Write
+  tion and slower cross-region writes, but is useful for data
+                                                                         Pipelining and Parallel Commits. Write Pipelining allows re-
+  that is infrequently updated or cannot be tied to specific
+                                                                         turning a result without waiting for the replication of the
+  geographies.
+                                                                         current operation, and Parallel Commits lets the commit
+3     TRANSACTIONS                                                       operation and the write pipeline replicate in parallel. Com-
+   CRDB transactions can span the entire key space, touching             bined, they allow many multi-statement SQL transactions to
+data resident across a distributed cluster while providing               complete with the latency of just one round of replication.
+ACID guarantees. CRDB uses a variation of multi-version                     To enable the aforementioned optimizations, the coordina-
+concurrency control (MVCC) to provide serializable isolation.            tor tracks operations which may not have fully replicated yet
+   We begin by providing an overview of the transaction                  (Line 1). It also maintains the transaction timestamp, which
+model in Section 3.1. Section 3.2 describes how we guarantee             is initialized to the current time but may move forward over
+transactional atomicity. In Sections 3.3 and 3.4, we describe            the course of the transaction. Since CRDB uses MVCC, the
+the concurrency control mechanisms that guarantee serializ-              timestamp selects the point at which the transaction per-
+able isolation. Finally, Section 3.5 gives an overview of how            forms its reads and writes (which, thereafter, are visible to
+follower replicas can serve consistent historical reads.                 other transactions).
+                                                                            Write Pipelining. Each operation includes the key that
+3.1    Overview                                                          must be read or updated, as well as metadata indicating if
+   A SQL transaction starts at the gateway node for the SQL              the transaction should commit with the current operation.
+connection. This node interactively receives from and re-                In case an operation does not attempt to commit (Line 6),
+sponds to the SQL client and acts as the transaction coor-               it’s possible to execute it immediately if it does not overlap
+dinator (orchestrating and ultimately committing/aborting                any earlier operation (Line 7). In this way, multiple opera-
+the associated transaction). Applications typically connect              tions on different keys can be łpipelinedž. If an operation
+to a geographically close gateway to minimize latency. In the            depends on an earlier in-flight operation, execution must
+following subsection, we describe the coordinator algorithm.             wait for the earlier operation to be replicated; such depen-
+3.1.1 Execution at the transaction coordinator. Algorithm 1              dencies introduce a łpipeline stallž. The pipelining logic is
+shows the high-level steps of the transaction from the per-              outlined in Algorithm 2 (discussed below), but relies on the
+spective of the coordinator. Over the course of the trans-               dependencies calculated here. Additionally, the coordinator
+action, the coordinator receives a series of requested KV                tracks the current operation as in-flight (Line 8).
+operations from the SQL layer (Line 2).                                     Next the coordinator sends the operation to the lease-
+   SQL requires that a response to the current operation must            holder for execution and waits for a response (Line 9). The
+be returned before the next operation is issued. To avoid                response may contain an incremented timestamp (Line 10),
+stalling the transaction while operations are being replicated,          which indicates that another transaction’s read forced the
+
+
+
+
+                                                                  1496
+
+
+===== PAGE 5 =====
+Industry 3: Cloud and Distributed Databases                                                 SIGMOD ’20, June 14–19, 2020, Portland, OR, USA
+
+CockroachDB: The Resilient Geo-Distributed SQL Database                                           SIGMOD’20, June 14ś19, 2020, Portland, OR, USA
+
+
+                         Parallel Commits     Two− Phase Commit               Algorithm 2: Leaseholder
+ Throughput   1500
+                                                                             1  Function Handle(op)
+              1000
+                                                                                   verify lease
+  (txns/ s)
+               500                                                           2
+                 0                                                            3    wait for latches on keys of { op } ∪ op.deps
+Latency
+               150                                                            4    verify writes in op.deps are replicated
+               100
+ (ms)           50                                                            5    if op is not read-only
+                 0                                                            6        push op.ts past highest read timestamp for op.key
+                     0   1         2           3           4      5
+                             Number of Secondary Indexes                      7    command, response ← evaluate op
+                                                                              8    response.ts ← op.ts
+   Figure 2: Performance impact of Parallel Commits
+                                                                              9    if not op.commit then
+                                                                             10        send response to coordinator
+leaseholder to adjust the operation timestamp. The coordina-                 11    if op is not read-only
+tor then tries to adjust the transaction timestamp to match.                 12        replicate and apply command
+This is achieved by verifying (via a round of RPCs) that re-                 13    release latches
+peating the previous reads in the transaction at the new                     14    if op.commit
+                                                                             15        send response to coordinator
+timestamp will return the same value (Lines 11 and 12). If
+not, the transaction fails (Lines 13 and 14) and may have to be              the table has one or more secondary indexes, since index
+retried. This mechanism is described in detail in Section 3.4.               updates require multi-Range transactions. This shows that
+   Parallel Commits. Now we consider what happens when                       even as transactions require cross-Range coordination, their
+the transaction wants to commit. Naively, it can only do so                  latency profiles remain constant.
+once all of its writes are known to have replicated, requiring               3.1.2 Execution at the leaseholder. When the leaseholder
+at least two sequential rounds of consensus. Instead, the Par-               receives an operation from the coordinator (Algorithm 2),
+allel Commits protocol employs a staging transaction status                  it first checks that its own lease is still valid (Line 2). Then
+which makes the true status of the transaction conditional                   it acquires latches on the keys of op and all the operations
+on whether all of its writes have been replicated. This avoids               op depends on (Line 3), thus providing mutual exclusion be-
+the extra round of consensus because the coordinator is free                 tween concurrent, overlapping requests. Next it verifies that
+to initiate the replication of the staging status in parallel                the operations op depends on have succeeded (Line 4). If it is
+with the verification of the outstanding writes, which are                   performing a write, it also ensures that the timestamp of op
+also being replicated (Line 5). Assuming both succeed, the                   is after any conflicting readers, incrementing it if necessary
+coordinator can immediately acknowledge the transaction                      (Lines 5 and 6), so as not to invalidate those transactions.
+as committed to the SQL layer (Line 15). Before terminating,                     Once the initial checks are complete, the leaseholder eval-
+the coordinator asynchronously records the transaction sta-                  uates the operation to determine what data modifications
+tus as being explicitly committed (Lines 16 and 17). This is                 are needed in the storage engine without actually making
+done for performance reasons, and is discussed in Section 3.2,               the changes (Line 7). This results in a low level command
+where we also explain how a staging record is resolved after                 detailing the necessary changes, as well as a response for the
+an untimely crash of the coordinator.                                        client (e.g., success in case of a write, or the value in case of a
+   We formally verified the safety properties of Parallel Com-               read). If this operation is not committing the transaction, the
+mits using TLA+ [36, 38]. Specifically we verified atomicity                 leaseholder can respond to the coordinator without waiting
+by asserting that every staging transaction was eventu-                      for replication (Lines 9 and 10). Write operations are then
+ally either explicitly committed or aborted, regardless of                   replicated. After consensus is reached, each replica applies
+coordinator failure, and no clients were told otherwise. We                  the command to its local storage engine (Lines 11 and 12).
+also verified durability by asserting that committed transac-                Finally, the leaseholder releases its latches and responds to
+tions stayed committed. The verification code is available on                the coordinator if it hasn’t already done so (Lines 13 to 15).
+GitHub [14].                                                                     Note that Algorithm 2 does not delve into any details about
+   To demonstrate the benefits of Parallel Commits empir-                    the various scenarios that may occur during the evaluation
+ically, we run a microbenchmark on three servers spread                      phase (Line 7). This is the period of time when a transaction
+across three regions. The workload consists of single-row                    may encounter uncommitted writes from other transactions
+writes to a table with ten columns and a variable number                     or writes so close in time to the transaction’s read timestamp
+of secondary indexes on those columns. Fig. 2 shows that                     that it is not possible to determine the correct order of trans-
+for this workload, Parallel Commits improves throughput                      actions. The next sections discuss these scenarios, and how
+by up to 72% and reduces p50 latency by up to 47% when                       CRDB guarantees both atomicity and serializable isolation.
+
+
+
+
+                                                                      1497
+
+
+===== PAGE 6 =====
+Industry 3: Cloud and Distributed Databases                                               SIGMOD ’20, June 14–19, 2020, Portland, OR, USA
+
+SIGMOD’20, June 14ś19, 2020, Portland, OR, USA                              R. Taft, I. Sharif, A. Matei, N. VanBenschoten, J. Lewis, T. Grieger et al.
+
+
+3.2    Atomicity Guarantees                                              3.3.2 Read-write conflicts. A write to a key at timestamp
+    An atomic commit for a transaction is achieved by consid-            ta cannot be performed if there’s already been a read on the
+ering all of its writes provisional until commit time. CRDB              same key at a higher timestamp tb >= ta . CRDB forces the
+calls these provisional values write intents. An intent is a             writing transaction to advance its commit timestamp past tb .
+regular MVCC KV pair, except that it is preceded by meta-                3.3.3 Write-write conflicts. A write running into an uncom-
+data indicating that what follows is an intent. This metadata            mitted intent with a lower timestamp will wait for the earlier
+points to a transaction record, which is a special key (unique           transaction to finalize (similar to write-read conflicts). If it
+per transaction) that stores the current disposition of the              runs into a committed value at a higher timestamp, it ad-
+transaction: pending, staging, committed or aborted. The                 vances its timestamp past it (similar to read-write conflicts).
+transaction record serves to atomically change the visibility            Write-write conflicts may also lead to deadlocks in cases
+of all the intents at once, and is durably stored in the same            where different transactions have written intents in differ-
+Range as the first write of the transaction (see Section 3.1             ent orders. CRDB employs a distributed deadlock-detection
+for the protocol details). For long-running transactions, the            algorithm to abort one transaction from a cycle of waiters.
+coordinator periodically heartbeats the transaction record
+                                                                         3.4     Read Refreshes
+in the pending state to assure contending transactions that
+                                                                             Certain types of conflicts described above require advanc-
+it is still making progress.
+                                                                         ing the commit timestamp of a transaction. To maintain seri-
+    Upon encountering an intent, a reader follows the indirec-
+                                                                         alizability, the read timestamp must be advanced to match
+tion and reads the intent’s transaction record. If the record
+                                                                         the commit timestamp.
+indicates that the transaction is committed, the reader con-
+                                                                             Advancing a transaction’s read timestamp from ta to tb >
+siders the intent as a regular value (and additionally deletes
+                                                                         ta is possible if we can prove that none of the data that the
+the intent metadata). If the transaction is aborted, the in-
+                                                                         transaction read at ta has been updated in the interval (ta , tb ].
+tent is ignored (and cleanup is performed to remove it). If
+                                                                         If the data has changed, the transaction needs to be restarted.
+the transaction is found to be pending (indicating that the
+                                                                         If no results from the transaction have been delivered to the
+transaction is still ongoing), then the reader blocks, waiting
+                                                                         client, CRDB retries the transaction internally1 . If results
+for it to finalize. If the coordinator node fails, contending
+                                                                         have been delivered, the client is informed to discard them
+transactions eventually detect that the transaction record
+                                                                         and restart the transaction.
+has expired, and mark it aborted. If the transaction is in
+                                                                             To determine whether the read timestamp can be ad-
+the staging state (which indicates that the transaction has
+                                                                         vanced, CRDB maintains the set of keys in the transaction’s
+either been committed or aborted, but the reader is unsure
+                                                                         read set (up to a memory budget). A łread refreshž request
+which), the reader attempts to abort the transaction by pre-
+                                                                         validates that the keys have not been updated in a given
+venting one of its writes from being replicated. If all writes
+                                                                         timestamp interval (Algorithm 1, Lines 11 to 14). This in-
+are already replicated, the transaction is in fact committed,
+                                                                         volves re-scanning the read set and checking whether any
+and is updated to reflect that.
+                                                                         MVCC values fall in the given interval. This process is equiv-
+3.3    Concurrency Control                                               alent to detecting the rw-antidependencies that PostgreSQL
+   As discussed in Section 3.1, CRDB is an MVCC system and               tracks for its implementation of SSI [8, 49]. Similar to Post-
+each transaction performs its reads and writes at its commit             greSQL, our implementation may allow false positives (forc-
+timestamp. This results in a total ordering of all transactions          ing a transaction to abort when not strictly necessary) to
+in the system, representing a serializable execution.                    avoid the overhead of maintaining a full dependency graph.
+   However, conflicts between transactions may require ad-                   Advancing the transaction’s read timestamp is also re-
+justments of the commit timestamp. We describe the situ-                 quired when a scan encounters an uncertain value: a value
+ations in which they arise below, and note that whenever                 whose timestamp makes it unclear if it falls in the reader’s
+the commit timestamp does change, the transaction typically              past or future (see Section 4.2). In this case we also attempt
+tries to prove that its prior reads remain valid at the new              to perform a refresh. Assuming it is successful, the value will
+timestamp (Section 3.4), in which case it can simply continue            now be returned by the read.
+forward at the updated timestamp.
+                                                                         3.5     Follower Reads
+3.3.1 Write-read conflicts. A read running into an uncom-
+                                                                           CRDB allows non-leaseholder replicas to serve requests
+mitted intent with a lower timestamp will wait for the ear-
+                                                                         for read-only queries with timestamps sufficiently in the
+lier transaction to finalize. Waiting is implemented using
+in-memory queue structures. A read running into an uncom-                1 CRDB increases the likelihood that a restarted transaction will succeed by
+mitted intent with a higher timestamp ignores the intent and
+                                                                         deferring the restart so the original transaction can first place write locks
+does not need to wait.                                                   (in the form of write intents) on the keys it intends to write to.
+
+
+
+
+                                                                  1498
+
+
+===== PAGE 7 =====
+Industry 3: Cloud and Distributed Databases                                             SIGMOD ’20, June 14–19, 2020, Portland, OR, USA
+
+CockroachDB: The Resilient Geo-Distributed SQL Database                                        SIGMOD’20, June 14ś19, 2020, Portland, OR, USA
+
+
+past through a special ‘AS OF SYSTEM TIME’ query modifier.                    HLC timestamps to each message that they send and use
+To enable this functionality safely, a non-leaseholder replica                HLC timestamps from each message that they receive to
+asked to perform a read at a given timestampT needs to know                   update their local clock.
+that no future writes can invalidate the read retroactively. It                  Capturing causal relationships between events on dif-
+also needs to ensure that it has all the data necessary to serve              ferent nodes is critical for enforcing invariants within
+the read. These conditions mean that if a follower read at                    CRDB. The most important of these is a lease disjoint-
+timestamp T is to be served, the leaseholder must no longer                   ness invariant similar to that in Spanner: for each Range,
+be accepting writes for timestamps T ′ ≤ T , and the follower                 each lease interval is disjoint from every other lease inter-
+must have caught up on the prefix of the Raft log affecting                   val. This is enforced on cooperative lease handoff with
+the MVCC snapshot at T .                                                      causality transfer through the HLC and is enforced on
+   To this end, each leaseholder tracks the timestamps of                     non-cooperative lease acquisition through a delay equal
+all incoming requests and periodically emits a closed times-                  to the maximum clock offset between lease intervals.
+tamp, the timestamp below which no further writes will be                 (2) HLCs provide strict monotonicity within and across
+accepted. Closed timestamps, alongside Raft log indexes at                    restarts on a single node. Within a continuous process,
+the time, are exchanged periodically between replicas. Fol-                   providing this property is trivial. Across restarts, this
+lower replicas use the state built up from received updates to                property is enforced by waiting out the maximum clock
+determine if they have all the data needed to serve consistent                offset upon process startup before serving any requests.
+reads at a given timestamp. For efficiency reasons the closed                    Strictly monotonic timestamp allocation ensures that
+timestamp and the corresponding log indexes are generated                     two causally dependent transactions originating from
+at the node level (as opposed to the Range level).                            the same node are given timestamps that reflect their
+   Every node keeps a record of its latency with all other                    ordering in real time.
+nodes in the system. When a node in the cluster receives a
+                                                                          (3) HLCs provide self-stabilization in the presence of iso-
+read request at a sufficiently old timestamp (closed times-
+                                                                              lated transient clock skew fluctuations. As stated above, a
+tamps typically trail current time by ~2 seconds), it forwards
+                                                                              node forwards its HLC upon its receipt of a network mes-
+the request to the closest node with a replica of the data.
+                                                                              sage. The effect of this is that given sufficient intra-cluster
+4     CLOCK SYNCHRONIZATION                                                   communication, HLCs across nodes tend to converge and
+  CRDB does not rely on specialized hardware for clock syn-                   stabilize even if their individual physical clocks diverge.
+chronization, so it can run on off-the-shelf servers in public                This provides no strong guarantees but can mask clock
+and private clouds with software-level clock synchronization                  synchronization errors in practice.
+services such as NTP or Amazon Time Sync Service.                         4.2    Uncertainty Intervals
+  In this section, we introduce the hybrid-logical clock scheme              We have already discussed how the transaction model in
+CRDB uses to talk about timestamp ordering (Section 4.1). We              CRDB provides serializable isolation between transactions.
+then discuss how this clock scheme allows loosely synchro-                However, serializability on its own says nothing about how
+nized clocks to efficiently provide single-key linearizability            transaction ordering in the system relates to the ordering in
+between transactions (Section 4.2). Finally, we explore the               real time. For that, we must talk about the consistency level
+behavior of CRDB when configurable clock synchronization                  that CRDB offers.
+bounds are violated (Section 4.3).                                           Under normal conditions, CRDB satisfies single-key lin-
+4.1    Hybrid-Logical Clocks                                              earizability for reads and writes. This means that every oper-
+   Each node within a CRDB cluster maintains a hybrid-                    ation on a given key appears to take place atomically and in
+logical clock (HLC) [20], which provides timestamps that are              some total linear order consistent with the real-time ordering
+a combination of physical and logical time. Physical time is              of those operations. Under single-key linearizability, stale
+based on a node’s coarsely-synchronized system clock, and                 read anomalies are not possible. This is true even with loosely
+logical time is based on Lamport’s clocks [37].                           synchronized clocks, as long as those clocks stay within the
+   HLCs within a CRDB deployment are configured with                      configured maximum clock offset from one another.
+a maximum allowable offset between their physical time                       Note that CRDB does not support strict serializability be-
+component and that of other HLCs in the cluster. This offset              cause there is no guarantee that the ordering of transactions
+configuration defaults to a conservative value of 500 ms.                 touching disjoint key sets will match their ordering in real
+Hybrid-logical clocks provide a few important properties:                 time. In practice, this is not a problem for applications un-
+                                                                          less there is an external low-latency communication channel
+(1) HLCs provide causality tracking through their logical                 between clients that could potentially impact activity on the
+    component upon each inter-node exchange. Nodes attach                 DBMS.
+
+
+
+
+                                                                   1499
+
+
+===== PAGE 8 =====
+Industry 3: Cloud and Distributed Databases                                                  SIGMOD ’20, June 14–19, 2020, Portland, OR, USA
+
+SIGMOD’20, June 14ś19, 2020, Portland, OR, USA                                 R. Taft, I. Sharif, A. Matei, N. VanBenschoten, J. Lewis, T. Grieger et al.
+
+
+   The single-key linearizability property is satisfied in CRDB                discussed earlier ensures that within a Range, each lease
+by tracking an uncertainty interval for each transaction,                      interval is disjoint from every other lease interval.
+within which the causal ordering between two transactions                  (2) Each write to a Range’s Raft log includes the sequence
+is indeterminate. Upon its creation, a transaction is given a                  number of the Range lease that it was proposed under.
+provisional commit timestamp commit_ts from the transac-                       Upon successful replication, the sequence number is
+tion coordinator’s local HLC and an uncertainty interval of                    checked against the currently active lease. If they do
+[commit_ts, commit_ts + max_offset].                                           not match, the write is rejected. Because lease changes
+   When a transaction encounters a value on a key at a times-                  for a Range are themselves written to the Range’s Raft
+tamp below its provisional commit timestamp, it trivially                      log, only a single leaseholder is ever able to make changes
+observes the value during reads and overwrites the value                       to a Range at a time. This is true even if multiple nodes
+at a higher timestamp during writes. This alone would sat-                     believe they hold a valid lease simultaneously.
+isfy single-key linearizability if transactions had access to a               These two safeguards ensure that a pair of leaseholders
+perfectly synchronized global clock.                                       that are active concurrently cannot serve requests that would
+   Without global synchronization, the uncertainty interval                violate serializable isolation. The first safeguard ensures that
+is needed because it is possible for a transaction to receive a            an incoming leaseholder cannot serve a write that invali-
+provisional commit timestamp up to the cluster’s max_offset                dates a read served by an outgoing leaseholder. The second
+earlier than a transaction that causally preceded this new                 safeguard ensures that an outgoing leaseholder cannot serve
+transaction in real time. When a transaction encounters a                  a write that invalidates a read or a write served by an incom-
+value on a key at a timestamp above its provisional commit                 ing leaseholder. Together, these safeguards ensure that even
+timestamp but within its uncertainty interval, it performs an              under severe clock skew that violates maximum clock offset
+uncertainty restart, moving its provisional commit timestamp               bounds, CRDB provides serializable isolation.
+above the uncertain value but keeping the upper bound of                      While isolation is maintained regardless of clock skew,
+its uncertainty interval fixed.                                            clock skew outside of the configured clock offset bounds
+   This corresponds to treating all values in a transaction’s              can result in violations of single-key linearizability between
+uncertainty window as past writes. As a result, the operations             causally-dependent transactions. This is possible if the trans-
+on each key performed by transactions take place in an order               actions are issued through different gateway nodes whose
+consistent with the real time ordering of those transactions.              clocks are skewed by more than the clock offset bounds. If
+4.3    Behavior under Clock Skew                                           the gateway node for the second transaction is assigned a
+   To this point, we have only considered the behavior of                  commit_ts more than max_offset below the timestamp of the
+CRDB when the configured maximum clock offset bounds                       first transaction, it is possible for values written by the first
+are respected. It is worth also considering the behavior of                transaction to be outside of the uncertainty interval of the
+the system when these clock offset bounds are violated.                    second. This would allow the second transaction to read keys
+   Within a single Range, consistency is maintained through                overlapping the write set of the first without actually observ-
+Raft. Raft does not have a clock dependency, so the order-                 ing the writes. Stale reads represent a violation of single-key
+ing of changes it constructs for a single Range will remain                linearizability and are only prevented when clocks remain
+linearizable regardless of clock skew. If all reads and writes             within offset bounds.
+were written to the Raft log, this would be enough to ensure                  To reduce the likelihood of stale reads, nodes periodically
+consistency under arbitrary clock skew. However, Range                     measure their clock’s offset from other nodes. If any node
+leases allow reads to be served from a leaseholder without                 exceeds the configured maximum offset by more than 80%
+going through Raft. This causes complications because under                compared to a majority of other nodes, it self-terminates.
+sufficient clock skew, it is possible for multiple nodes to think          5     SQL
+they each hold the lease for a given Range. Without extra
+                                                                              So far we have discussed the technical details of the Trans-
+protection, this could lead to conflicting operations being
+                                                                           actional KV layer and layers below, but all user interac-
+permitted on the two leaseholders, resulting in client-visible
+                                                                           tion with the database passes through the SQL layer. CRDB
+isolation anomalies.
+                                                                           supports much of the PostgreSQL dialect of ANSI standard
+   CRDB employs two safeguards to ensure that such situa-
+                                                                           SQL [51] with some extensions (e.g., needed to support the
+tions do not affect transaction isolation.
+                                                                           geo-distributed nature of the database).
+(1) Range leases contain a start and an end timestamp. A                      This section describes the SQL data model and how it
+    leaseholder cannot serve reads for MVCC timestamps                     maps to the layers below (Section 5.1), the technical details
+    above its lease interval or writes for MVCC timestamps                 of SQL planning and execution (Sections 5.2 and 5.3), and
+    outside its lease interval. The lease disjointness invariant           schema changes (Section 5.4).
+
+
+
+
+                                                                    1500
+
+
+===== PAGE 9 =====
+Industry 3: Cloud and Distributed Databases                                          SIGMOD ’20, June 14–19, 2020, Portland, OR, USA
+
+CockroachDB: The Resilient Geo-Distributed SQL Database                                    SIGMOD’20, June 14ś19, 2020, Portland, OR, USA
+
+
+5.1    SQL Data Model
+   Every SQL table and index is stored in one or more Ranges,
+as described in Section 2.1. Furthermore, all user data is
+stored in one or more ordered indexes, of which one is desig-
+nated as the łprimaryž index. The primary index is keyed on
+the primary key, and all other columns are stored in the value
+(primary keys are automatically generated if not explicitly
+specified by the schema). Secondary indexes are keyed on
+the index key, and store the primary key columns as well
+as any number of additional columns specified by the index
+schema. CRDB also supports hash indexes, which can help                   Figure 3: Physical plan for a distributed hash join
+avoid hot spots by distributing load across multiple Ranges.
+                                                                        an index idx(region, id) on a table t partitioned across
+5.2    Query Optimizer
+                                                                        two regions, east and west. In this case, the query SELECT
+   SQL query planning is performed by a Cascades-style [27]
+                                                                        * FROM t WHERE id = 5 can be rewritten as SELECT *
+query optimizer that uses over 200 transformation rules to
+                                                                        FROM t WHERE id = 5 AND (region = ’east’ OR region
+explore the space of possible query execution plans.
+                                                                        = ’west’), thus enabling use of the index. This is similar
+5.2.1 Optgen, a DSL for query transformations. Transforma-              to Oracle’s index skip scan [29], but filters are determined
+tion rules in CRDB are written in a domain-specific language            statically from the schema rather than from histograms.
+(DSL) called Optgen that provides an intuitive syntax for                  The optimizer also takes data distribution into account as
+defining, matching, and replacing operators in a query plan             part of its cost model. For some workloads, it may be ben-
+tree. Optgen compiles to Go so that the transformation rules            eficial to replicate a secondary index such that each region
+can integrate seamlessly with the rest of the CRDB code-                has its own copy (see Duplicated Indexes in Section 2.3). The
+base (all of CRDB, with the exception of the storage layer, is          optimizer minimizes cross-region data shuffling by assigning
+implemented in Go).                                                     a cost to each index replica based on how close it is to the
+   For example, consider a simple Optgen rule EliminateNot:             gateway node of a query.
+   [ EliminateNot , Normalize ]
+   ( Not ( Not $ i n p u t : ∗ ) ) => $ i n p u t
+                                                                        5.3    Query Planning and Execution
+                                                                           SQL query execution in CRDB is executed in one of two
+   It matches scalar expressions containing two nested NOT              modes: (1) gateway-only mode, in which the node that planned
+operators, and replaces them with the input to the inner NOT.           the query is responsible for all SQL processing for the query,
+Transformation rules for relational expressions are more                or (2) distributed mode, in which other nodes in the cluster
+complex (e.g. they can call out to arbitrary Go methods), but           participate in SQL processing. At the time of writing, only
+all have the same structure with a łmatch patternž and a                read-only queries can execute in distributed mode.
+logically equivalent łreplace patternž separated by an arrow.              Since the Distribution layer presents the abstraction of
+   EliminateNot is an example of a Normalization (rewrite)              a single, monolithic key space, the SQL layer can perform
+rule, in which the source expression is replaced with the               read and write operations for any Range on any node. This
+transformed expression. Exploration rules (such as join re-             allows SQL operators to behave identically whether planned
+ordering and join algorithm selection) preserve both expres-            in gateway-only or distributed mode.
+sions so that the optimizer can select whichever one has a                 The decision to distribute is made by a heuristic estimat-
+lower estimated cost. Consistent with the Cascades model,               ing the quantity of data that would need to be sent over the
+CRDB’s optimizer uses a unified search in which application             network. Queries that only read a small number of rows are
+of Normalization and Exploration rules are interleaved. The             executed in gateway-only mode. To produce a distributed
+generated code ensures that minimal memory is allocated                 query plan when necessary, CRDB performs a physical plan-
+for an operator until all applicable normalization rules have           ning stage that transforms the query optimizer’s plan into a
+been applied.                                                           directed acyclic graph (DAG) of physical SQL operators.
+5.2.2 Optimizer is distribution-aware. Many of CRDB’s trans-               Physical planning splits logical scan operations into mul-
+formation rules can be found in other state-of-the-art query            tiple TableReader operators, one for each node containing a
+optimizers, but some are specific to the geo-distributed and            Range read by the scan. Once the scans are segmented, the
+partitioned nature of CRDB. For example, the optimizer can              remaining logical operators are scheduled on the same nodes
+use information about a table’s partitioning to infer addi-             as the TableReaders, thus pushing down filters, joins, and
+tional filters and enable more selective index scans. Consider          aggregations as close to the physical data as possible.
+
+
+
+
+                                                                 1501
+
+
+===== PAGE 10 =====
+Industry 3: Cloud and Distributed Databases                                                                SIGMOD ’20, June 14–19, 2020, Portland, OR, USA
+
+SIGMOD’20, June 14ś19, 2020, Portland, OR, USA                                   R. Taft, I. Sharif, A. Matei, N. VanBenschoten, J. Lewis, T. Grieger et al.
+
+
+   Fig. 3 shows an example of a distributed hash join across
+                                                                          Throughput per vCPU
+                                                                                                                  ●   OLTP Inserts            OLTP Point Selects
+the primary indexes of two tables, a and b, on a 3 node cluster                                 5000                   Vertical Scaling       Horizontal Scaling
+                                                                                                4000
+in which node 2 holds the requested Ranges of b, but the                                        3000
+Ranges of a are split between nodes 1 and 3. The scanned                                        2000
+
+                                                                             (txns/ s/ vCPU)
+                                                                                                              ●        ●       ●          ●       ●       ●         ●     ●
+                                                                                                       ●
+                                                                                                1000
+data is shuffled by hash to all nodes involved in the scan,                                        0
+joined with a node-local hash join operator, and sent back                                             6      12       24     48    108 216              432       864   1728
+to the gateway node, which unions the results and returns                                                                     vCPUs (log scale)
+
+them to the SQL client. This kind of figure can be produced              Figure 4: Maximum throughput per vCPU for Sys-
+by the database for any query using the EXPLAIN(distsql)                 bench workloads with varying number of vCPUs
+command on the query.
+   Within a data stream, CRDB uses one of two different                  asynchronously transition to a new table schema at different
+execution engines depending on input cardinality and plan                times.
+complexity: a row-at-a-time engine or a vectorized engine.                  CRDB implements the solution used by F1 [52] by follow-
+                                                                         ing a protocol that decomposes each schema change into a
+5.3.1 Row-at-a-time execution engine. CRDB’s primary ex-
+                                                                         sequence of incremental changes. In this protocol, the addi-
+ecution engine is based on the Volcano [26] iterator model
+                                                                         tion of a secondary index requires two intermediate schema
+and processes a single row at a time. Every supported SQL
+                                                                         versions between the initial and final ones to ensure that the
+feature in CRDB is implemented in this execution engine,
+                                                                         index is being updated on writes across the entire cluster
+including joins, aggregations, sorts, window functions, etc.
+                                                                         before it becomes available for reads. If we enforce the in-
+5.3.2 Vectorized execution engine. CRDB can execute a sub-               variant that there are at most two successive versions of a
+set of SQL queries using a vectorized execution engine that              schema used in the cluster at all times, then the database will
+was inspired by MonetDB/X100 [7]. The vectorized engine                  remain in a consistent state throughout the schema change.
+operates on column-oriented batches of data instead of rows.
+   If the vectorized engine is chosen, data from disk is trans-          6                EVALUATION
+posed from row to column format as it is being read from                    This section evaluates the performance of CRDB along a
+CRDB’s KV layer, and transposed again from column to row                 number of axes. We begin by examining the scalability of
+format right before it is sent back to the end user. The over-           CRDB with various workload characteristics (Section 6.1).
+head of this process is minimal.                                         We follow with a study of CRDB’s performance in a multi-
+   In contrast to the row-at-a-time engine, operators imple-             region deployment under various disaster scenarios (Sec-
+mented in the vectorized engine are monomorphized on all                 tion 6.2). Next, we compare the performance of CRDB to
+SQL data types that they support to drastically reduce the               Spanner (Section 6.3). We conclude with several examples of
+interpreter overhead inherent in the row-at-a-time iterator              external CRDB usage (Section 6.4). Unless otherwise noted,
+model. Since CRDB is written in Go, which does not support               we use CRDB v19.2.2 in all experiments.
+generics with specialization, this monomorphization is done              6.1                    Scalability of CockroachDB
+using templated code generation.
+                                                                         6.1.1 Vertical and horizontal scalability. We evaluate the
+   All of CRDB’s vectorized operators can handle the pres-
+                                                                         vertical and horizontal scalability of CRDB on łembarrass-
+ence of a selection vector, a tightly-packed array of indices
+                                                                         ingly parallelž workloads by running two benchmarks from
+into the data columns that have not yet been filtered out
+                                                                         the Sysbench OLTP suite [33]. Fig. 4 shows that throughput
+by previous operators. The selection vector is used to avoid
+                                                                         per vCPU (for both reads and writes) stays nearly constant
+expensive physical removal of data after selection operators.
+                                                                         as the number of vCPUs increases. The left-hand side of the
+Complex operators such as merge joins use monomorphiza-
+                                                                         chart demonstrates vertical scalability, with experiments run
+tion to generate multiple inner loops depending on whether
+                                                                         on a three node cluster with varying AWS instance types
+a selection vector is present or not.
+                                                                         (c5d.large, c5d.xlarge, c5d.2xlarge, c5d.4xlarge, and
+   The optimizations described above result in a speedup of
+                                                                         c5d.9xlarge with 2, 4, 8, 16, and 36 vCPUs respectively).
+over two orders of magnitude for individual operators, and
+                                                                         The right-hand side of the chart demonstrates horizontal
+up to 4x on queries in the TPC-H [69] benchmark.
+                                                                         scalability, with experiments run on c5d.9xlarge instances
+5.4    Schema Changes                                                    with the cluster size varying from 3 to 48 nodes. All clusters
+  CRDB performs schema changes, such as the addition of                  span three AZs in us-east-1, and each point represents the
+columns or secondary indexes, using a protocol that allows               average over three runs. Each experiment uses 4 tables per
+tables to remain online (i.e., able to serve reads and writes)           node and 1,000,000 rows per table, resulting in ~38 GB of
+during the schema change, and allows different nodes to                  data on the 48 node cluster.
+
+
+
+
+                                                                  1502
+
+
+===== PAGE 11 =====
+Industry 3: Cloud and Distributed Databases                                                                                SIGMOD ’20, June 14–19, 2020, Portland, OR, USA
+
+CockroachDB: The Resilient Geo-Distributed SQL Database                                                                            SIGMOD’20, June 14ś19, 2020, Portland, OR, USA
+
+
+                                                1 Percentage of Remote        0%                                          Geo− Part. Leaseholders    Geo− Part. Replicas w/ Dup. Index
+                      Replication Factor        3                             10%                                         Geo− Part. Replicas        Unpartitioned
+                                            ●   5 New Order Transactions      100%
+                                                                                                          12000
+                                                                                                   tpmC
+
+
+
+ Maximum tpmC
+                100,000                                                                                        9000
+                 75,000                                                                                        6000
+
+                                                                                              p90 Latency
+                                                                               ●
+                 50,000                                                        ●                               8000
+                                                                               ●
+                                                     ●
+                 25,000                              ●                                                         2000
+                                                                                             (ms, log scale)
+                                      ●
+                               ●      ●
+                               ●
+                      0                                                                                         500
+                          1 3 6       12            24                        48                                      0               20              40             60
+                                                   Nodes                                                                                   Elapsed time (minutes)
+
+Figure 5: Maximum tpmC with varying % of remote                                             Figure 6: Multi-region cluster performance with vari-
+transactions, cluster sizes, and replication factors                                        ous placement policies and AZ/region failures
+
+                                                         Warehouses                           Amazon Aurora is a commercial database for OLTP work-
+                                           1,000         10,000     100,000                 loads that is also designed to be scalable and fault toler-
+                CockroachDB                                                                 ant [72]. In contrast to CRDB, single-master Aurora only
+                Max tpmC                 12,474         124,036      1,245,462
+                                                                                            achieves 7.3% efficiency with 10,000 warehouses [55]. AWS
+                Efficiency               97.0%          96.5%        98.8%
+                NewOrder p90 latency 39.8 ms            436.2 ms     486.5 ms               has not published TPC-C numbers for multi-master Au-
+                Machine type (AWS)       c5d.4xlarge c5d.4xlarge     c5d.9xlarge            rora [3].
+                Node count               3              15           81
+                Amazon Aurora [55]
+                                                                                            6.2                 Multi-region Availability and
+                Max tpmC                 12,582         9,406        -                                          Performance
+                Efficiency               97.8%          7.3%         -                         To illustrate the trade-offs made between performance
+                Latency, machine type, and node count not reported                          and fault tolerance by different data placement policies (Sec-
+Table 1: TPC-C benchmark environment and results                                            tion 2.3), we measure TPC-C 1,000 performance against a
+                                                                                            multi-region CRDB cluster as we induce AZ and region fail-
+6.1.2 Scalability with cross-node coordination. To evaluate                                 ures. This experiment uses 9 n1-standard-4 GCP machines
+the scalability of CRDB with varying amounts of cross-node                                  deployed across three regions in the US, in addition to work-
+coordination, we run TPC-C [68] with a variable percent-                                    load generators per region.
+age of remote warehouses in New Order transactions. Since                                      The periods between the dashed lines in Fig. 6 represent,
+replication also causes cross-node coordination, we addition-                               in order, an AZ failure and recovery, and a region-wide fail-
+ally vary the replication factor. Fig. 5 shows that in these                                ure and recovery. On failure, requests are routed to fallback
+experiments, the overhead of replication can reduce through-                                AZs (either in the same region or another, depending on the
+put by up to 48% for three replicas or 57% for five replicas,                               policy). Tables and indexes are partitioned by warehouse for
+and distributed transactions may further reduce through-                                    partitioned policies. For the duplicated indexes policy, the
+put by up to 46%. Despite these overheads, all workloads                                    read-only items table is replicated to every region.
+scale linearly with increasing cluster sizes. This experiment                                  We verify that all policies are able to tolerate AZ fail-
+uses n1-standard-4 GCP machines [25] (4 vCPUs each).                                        ures. The slight performance degradation during an AZ fail-
+Each point represents the average over three runs, where                                    ure is due to the remaining AZs being overloaded. Of the
+each run finds the maximum tpmC sustained for at least ten                                  four policies, only geo-partitioned leaseholders is tolerant
+minutes. Since throughput in TPC-C scales with data size,                                   to region-wide failures. This translates to a higher sustained
+the largest experiments shown here use 10,000 warehouses,                                   throughput during region-wide failures, but comes at a cost
+corresponding to 800 GB of data.                                                            of higher p90 latencies during stable operation and recov-
+6.1.3 TPC-C performance comparison with Amazon Aurora.                                      ery (compared to the geo-partitioned replicas variants). The
+To demonstrate scalability on an industry-standard bench-                                   slower recovery period is due to the primary region catching
+mark, we run TPC-C with 1,000, 10,000 and 100,000 ware-                                     up on missed writes. The performance degradation during
+houses on CRDB v19.2.0. As shown in Table 1, CRDB scales                                    region failures, depending on the policy, can be attributed
+to support up to 100,000 warehouses, corresponding to 50                                    to either blocked remote warehouse transactions, or clients
+billion rows and 8 TB of data, at near-maximum efficiency.                                  having to cross region boundaries to issue queries. Under
+All experiments comply with the TPC-C spec (including wait                                  stable conditions, the duplicated indexes policy maintains
+times and the use of foreign keys).                                                         the lowest p90 latencies.
+
+
+
+
+                                                                                     1503
+
+
+===== PAGE 12 =====
+Industry 3: Cloud and Distributed Databases                                                                                            SIGMOD ’20, June 14–19, 2020, Portland, OR, USA
+
+SIGMOD’20, June 14ś19, 2020, Portland, OR, USA                                                                           R. Taft, I. Sharif, A. Matei, N. VanBenschoten, J. Lewis, T. Grieger et al.
+
+
+                              CRDB 4 vCPUs   CRDB 16 vCPUs                                                           made this feasible. To survive regional failure, they opted
+                                                                                            Average
+                              CRDB 8 vCPUs   Spanner                                        95th Percentile          for the geo-partitioned leaseholders policy. Writes would
+                         60,000                                                             99th Percentile
+                                                                                                                     need to cross region boundaries to achieve quorum, but read
+
+
+
+ Throughput (txns/ s)
+                                                          3 Servers
+                         40,000                                                            Reads   Updates
+                                                                                                                     performance would be local.
+                         20,000
+
+
+                                                                       Latency (ms)
+                                                                                      10
+                              0                                                        8                             6.4.2 Global platform for an online gaming company. An
+                                                                                       6                             online gaming company processing 30-40 million financial
+                                                          15 Servers
+                        200,000                                                        4
+                        100,000                                                        2                             transactions per day was looking for a database for their
+                             0
+                                                                                       0
+                                                                                               r        r
+                                                                                                                     global platform. They had strict requirements on data com-
+                                  A   B C D E         F                                  DB nne RDB nne              pliance, consistency, performance and service availability.
+                                      YCSB Workload                                    CR Spa    C Sp a
+                                                                                                                     With their core user base in Europe and Australia, and a fast
+Figure 7: Throughput of CRDB and Spanner on YCSB                                                                     growing user base in the US, they sought to isolate failure do-
+A-F, Latency of CRDB and Spanner under light load                                                                    mains and pin user data to specific localities for compliance
+                                                                                                                     and low latencies.
+6.3                        Comparison with Spanner                                                                      CRDB’s architecture was a good fit for their requirements,
+   Fig. 7 compares CRDB’s performance against Cloud Span-                                                            and is now a strategic component in their long term roadmap.
+ner’s on the YCSB [16] benchmark suite2 . As Spanner is a                                                            Fig. 1 shows the vision for their CRDB deployment.
+managed service, it does not reveal its hardware configura-
+tion. We therefore compare against several CRDB configu-                                                             7     LESSONS LEARNED
+rations (4, 8 and 16 vCPUs per node). For reference, three                                                             This section details some lessons learned over the last five
+n2-standard-8 GCP VMs (8 vCPUs each) with local storage                                                              years of building CRDB and hardening it as a production-
+cost within 0.2% of a one łnodež Spanner instance (consisting                                                        grade system.
+of three replicas). In all tests, replicas are spread across three                                                   7.1      Raft Made Live
+AZs in a single region.                                                                                                 We initially chose Raft as the consensus algorithm for
+   For most YSCB workloads, CRDB shows significantly higher                                                          CRDB due to its supposed ease of use and the precise de-
+throughput. Both systems demonstrate horizontal scalability                                                          scription of its implementation [46]. In practice, we have
+as the cluster size increases. One exception is Workload A                                                           found there are several challenges in using Raft in a complex
+(update-heavy, zipfian distribution of keys), on which CRDB                                                          system like CRDB.
+does not scale well because of the workload’s high contention
+                                                                                                                     7.1.1 Reducing the Chatter. Raft leaders send periodic heart-
+profile3 . We also include a test of the latency of reads and
+                                                                                                                     beats to each follower to maintain their leadership. As a
+writes performed by YCSB under light load. CRDB shows
+                                                                                                                     large CRDB deployment may need to maintain hundreds of
+significantly lower latencies at all percentiles, which we at-
+                                                                                                                     thousands of consensus groups (one per Range), this commu-
+tribute in part to Spanner’s commit-wait. Latency results
+                                                                                                                     nication becomes expensive. To mitigate this overhead, we
+under heavy load are noisy but show a similar trend, so we
+                                                                                                                     made two changes to the basic protocol: (1) we coalesce the
+omit them due to space constraints.
+                                                                                                                     heartbeat messages into one per node to save on the per-RPC
+6.4                        Usage Case Studies                                                                        overhead, and (2) we pause Raft groups which have seen no
+   CRDB is used by thousands of organizations. In this sec-                                                          recent write activity.
+tion we outline two specific case studies of CRDB usage.                                                             7.1.2 Joint Consensus. Raft’s default membership change
+6.4.1 Virtual customer support agent for a telecom provider.                                                         protocol is simple to implement but allows for only a sin-
+A US-based telecom provider wanted to reduce its customer                                                            gle addition or removal of a member at a time. It turns out
+service costs by building a virtual agent to provide 24/7 sup-                                                       that this is problematic for availability guarantees during
+port to their customers. The agent relied on recording cus-                                                          rebalancing operations (i.e. moving a replica from one node
+tomer conversation metadata in a sessions database. The                                                              to another). For example, in a three-region deployment con-
+team chose CRDB for this system due to its strong consis-                                                            strained to one replica per region, rebalancing requires either
+tency, regional failure tolerance, and performance for geo-                                                          (1) temporarily dropping down to two replicas, or (2) tem-
+distributed clusters.                                                                                                porarily increasing to four replicas, with two in one region.
+   For financial reasons, the team deployed a multi-region                                                           Both intermediate configurations lose availability during a
+CRDB cluster split across their own on-prem data center                                                              single region outage.
+and AWS regions. CRDB’s support for hybrid deployments                                                                  To solve this problem, we implemented atomic replication
+2 We use the official YCSB generator[76] with Spanner and JDBC clients.
+                                                                                                                     changes (called Joint Consensus) as detailed in [46]. In Joint
+3 We expect significant improvement for such workloads with optional read                                            Consensus, an intermediate configuration exists, but requires
+locking upcoming in the 20.1 release.                                                                                instead the quorum of both the old and new majority for
+
+
+
+
+                                                                                                              1504
+
+
+===== PAGE 13 =====
+Industry 3: Cloud and Distributed Databases                                              SIGMOD ’20, June 14–19, 2020, Portland, OR, USA
+
+CockroachDB: The Resilient Geo-Distributed SQL Database                                         SIGMOD’20, June 14ś19, 2020, Portland, OR, USA
+
+
+writes; this means unavailability will result only if either the             Early versions of CRDB replicated requests received via
+old or new majority fails. The reconfiguration protocol used              the KV API directly and evaluated them locally on each
+by Apache ZooKeeper [59] is similar.                                      peer. That is, each request was: (1) proposed to raft (on the
+  We found that implementation of Joint Consensus was                     leaseholder), (2) evaluated (on each replica), and (3) applied
+not significantly more complex than the default protocol, so              (on each replica).
+we recommend that all production-grade Raft-based systems                    To maintain consistency, a Range’s replicas must contain
+use Joint Consensus instead.                                              identical data. Unfortunately, code changes in (2) and (3) were
+7.2    Removal of Snapshot Isolation                                      likely to introduce divergences between replicas running on
+                                                                          old and new versions of the system. To address this class
+   CRDB originally offered two isolation levels, SNAPSHOT
+                                                                          of problems, we moved the evaluation stage first, and now
+and SERIALIZABLE. We made SERIALIZABLE the default be-
+                                                                          propose the effect of an evaluated request, rather than the
+cause we believe that application developers should not have
+                                                                          request itself.
+to worry about write skew anomalies, and in our implemen-
+tation the performance advantage of the weaker isolation                  7.5    Follow the Workload
+level was small. Still, we wanted to make the option of snap-                łFollow the Workloadž is a mechanism we built to automat-
+shot isolation available for users who wanted to use it to                ically move leaseholders physically closer to users accessing
+minimize the need for transaction retries.                                the data. It was designed for workloads with shifting access
+   Since CRDB was primarily designed for SERIALIZABLE,                    localities where CRDB would attempt to dynamically opti-
+we initially expected that offering just snapshot isolation by            mize read latency, but we’ve found it to be rarely used in
+removing the check for write skews would be simple. How-                  practice. CRDB’s manual controls over replica placement
+ever, this proved not to be the case. The only safe mechanism             prove sufficient for most operators who can fine tune ac-
+to enforce strong consistency under snapshot isolation is pes-            cess patterns for expected workloads. Adaptive techniques
+simistic locking, via the explicit locking modifiers FOR SHARE            in databases [47] are difficult to get right for a general pur-
+and FOR UPDATE on queries. To guarantee strong consistency                pose system, and are either too aggressive or too slow to
+across concurrent mixed isolation levels, CRDB would need                 respond. Operators favor consistency in performance; the
+to introduce pessimistic locking for any row updates, even                unpredictability in this dynamic scheme hindered adoption.
+for SERIALIZABLE transactions. To avoid this pessimization
+of the common path, we opted to eschew true support for                   8     RELATED WORK
+SNAPSHOT, keeping it as an alias to SERIALIZABLE instead.                    Distributed transaction models. There has been a great
+                                                                          deal of work both in industry and in the literature to support
+7.3    Postgres Compatibility                                             distributed transactions with varying levels of consistency
+   We chose to adopt PostgreSQL’s SQL dialect and network                 and scalability. Over the years, many systems with reduced
+protocol in CRDB to capitalize on the ecosystem of client dri-            consistency levels have been proposed with the goal of over-
+vers. This choice initially boosted adoption and still results            coming the scalability challenges of traditional relational
+today in enhanced focus and decision-making in the engi-                  database systems [5, 15, 19, 32, 35, 44, 61, 64, 71]. For many
+neering team [50]. However, CRDB behaves differently from                 applications, however, isolation levels below serializable per-
+PostgreSQL in ways that require intervention in client-side               mit dangerous anomalies, which may manifest as security
+code. For example, clients must perform transaction retries               vulnerabilities [73]. CRDB was designed with the philosophy
+after an MVCC conflict and configure result paging. Reusing               that it is better to eliminate these anomalies altogether than
+PostgreSQL drivers as-is requires us to teach developers how              expect developers to handle them at the application level.
+to deploy CRDB-specific code at a higher level, anew in every                Spanner [4, 17] is a SQL system that provides the strongest
+application. This is a recurring source of friction which we              isolation level, strict serializability [30]. It achieves this by ac-
+had not anticipated. As a result, we are now considering the              quiring read locks in all read-write transactions and waiting
+gradual introduction of CRDB-specific client drivers.                     out the clock uncertainty window (the maximum clock offset
+7.4    Pitfalls of Version Upgrades                                       between nodes in the cluster) on every commit. CRDB’s trans-
+   A clear upgrade path between versions with near-zero-                  action protocol is significantly different from Spanner’s; it
+downtime is an indispensable property of a system that                    uses pessimistic write locks, but otherwise it is an optimistic
+prides itself on its operational simplicity. In CRDB, an up-              protocol with a łread refreshž mechanism that increases the
+grade consists of a rolling restart into the new binary. Run-             commit timestamp of a transaction if it observes a conflicting
+ning a mixed-version cluster introduces additional complex-               write within the clock uncertainty window. This approach
+ity into an already complex system and can potentially in-                provides serializable isolation and has lower latency than
+troduce serious bugs.                                                     Spanner’s protocol for workloads with low contention. It
+
+
+
+
+                                                                   1505
+
+
+===== PAGE 14 =====
+Industry 3: Cloud and Distributed Databases                                                 SIGMOD ’20, June 14–19, 2020, Portland, OR, USA
+
+SIGMOD’20, June 14ś19, 2020, Portland, OR, USA                                R. Taft, I. Sharif, A. Matei, N. VanBenschoten, J. Lewis, T. Grieger et al.
+
+
+may require more transaction retries for highly contended                 spanning three AZs, but until recently [3], a single failure
+workloads, however, and for this reason future versions of                could cause the database to become temporarily unavailable
+CRDB will include support for pessimistic read locks. Note                for writes. It can only be deployed on AWS. F1 [52, 60] is a
+that Spanner’s protocol is only practical in environments                 federated SQL query processing platform from Google, and
+where specialized hardware is available to bound the un-                  was a source of inspiration for CRDB’s distributed execution
+certainty window to a few milliseconds. CRDB’s protocol                   engine and online schema change infrastructure. F1 is not
+functions in any public or private cloud.                                 publicly available on GCP, but is used internally through-
+   Calvin [66], FaunaDB [22] and SLOG [53] provide strict se-             out Google. TiDB [67] is an open-source distributed SQL
+rializability, but because their deterministic execution frame-           DBMS that is compatible with the MySQL wire protocol and
+work requires the read/write sets up front, they do not sup-              is designed to support HTAP workloads. NuoDB [45] is a pro-
+port conversational SQL. H-Store [31] and VoltDB [63] are                 prietary NewSQL database that scales storage independently
+main-memory databases that support serializable isolation                 from the transaction and caching layer. Unlike CRDB, these
+and are optimized for partitionable workloads, but perform                systems are not optimized for geo-distributed workloads
+poorly on workloads with many cross-partition transac-                    and only support snapshot isolation. FoundationDB [24] is
+tions since distributed transactions are processed by a sin-              an open-source key-value store from Apple that supports
+gle thread [79]. L-Store [39] and G-Store [18] alleviate this             strictly serializable isolation. Apple’s FoundationDB Record
+problem by committing all transactions locally, but require               Layer [10] supports a subset of SQL.
+relocating data on-the-fly if it is not already colocated.
+   Recent work has explored minimizing the commit time                    9     CONCLUSION AND FUTURE OUTLOOK
+of geo-distributed transactions [21, 28, 34, 41ś43, 75, 78].                 CockroachDB is a source-available, scalable SQL database
+Similar to many of these approaches, CRDB can commit                      designed to łmake data easyž. Our novel transaction proto-
+transactions in one round-trip between data centers in the                col achieves serializable isolation at scale without the use
+common case, corresponding to one round-trip of distributed               of specialized hardware. Consensus-based replication pro-
+consensus. Unlike systems that require global consensus or                vides fault tolerance and high availability, as well as per-
+a single master region for ordering multi-partition trans-                formance optimizations for local reads from both the lease-
+actions [22, 53, 66], CRDB requires consensus only from                   holder (leader) and follower replicas. Geo-partitioning and
+partitions written in the transaction.                                    follow-the-workload features ensure that data is located clos-
+   Distributed data placement. Several papers have con-                   est to the users accessing it, minimizing latency due to WAN
+sidered how to place data in a geo-distributed cluster. Some [2,          round trip requests. Finally, CockroachDB’s SQL layer pro-
+9, 48, 58, 77] minimize transaction latency while maximizing              vides users the flexibility and familiarity of SQL, while still
+availability, adhering to fault tolerance requirements, and/or            taking advantage of the distributed nature of CockroachDB
+balancing load. Others [40, 74] minimize cost while adhering              for scalability and performance.
+to latency SLOs. CRDB gives users control by supporting                      CockroachDB is already providing value to thousands of
+different data placement policies.                                        organizations, but we are continuing to iterate on the design
+   Another body of work considers load-based re-partitioning              and improve the software with each release. Our upcom-
+and placement of data. Slicer [1] performs range partitioning             ing releases will include a completely redesigned storage
+of hashed keys, and splits/merges ranges based on load. Other             layer, geo-aware query optimizations, and numerous im-
+systems [56, 57, 65] support fine-grained repartitioning to               provements to other parts of the system. Looking further
+alleviate hot spots and/or colocate frequently co-accessed                ahead, we plan to improve support for operational automa-
+data. Similar to that work, CRDB range-partitions based on                tion, paving the way for a future in which databases can
+the original keys, resulting in better locality for range scans           be truly łserverlessž from a user’s perspective. We have al-
+than Slicer, but susceptibility to hot spots. To alleviate hot            ready released a fully managed service [11], but much work
+spots, it can also partition on hashed keys. Like Slicer, CRDB            remains to insulate users from the operational details. Dis-
+splits, merges, and moves Ranges to balance load.                         aggregated storage, on-demand scaling, and usage-based
+   Commercial Distributed OLTP DBMSs. CRDB is one                         pricing are just some of the areas we will need to develop.
+of many distributed DBMS offerings on the market today                    Making a geo-distributed database perform well in such an
+for OLTP workloads, each providing different features and                 environment is a problem ripe for independent research.
+consistency guarantees. Spanner, FaunaDB, and VoltDB, as                  We look forward to supporting and participating in it, and
+well as the various NoSQL systems were discussed above.                   furthering our mission to łmake data easyž.
+Amazon Aurora [72] is a distributed SQL DBMS which repli-
+cates by writing the database’s redo log to shared storage. It
+supports high availability of read requests with six replicas
+
+
+
+
+                                                                   1506
+
+
+===== PAGE 15 =====
+Industry 3: Cloud and Distributed Databases                                                            SIGMOD ’20, June 14–19, 2020, Portland, OR, USA
+
+CockroachDB: The Resilient Geo-Distributed SQL Database                                                       SIGMOD’20, June 14ś19, 2020, Portland, OR, USA
+
+
+REFERENCES                                                                                  In Proceedings of the 10th USENIX Conference on Operating Systems De-
+ [1] Atul Adya, Daniel Myers, Jon Howell, Jeremy Elson, Colin Meek,                         sign and Implementation (OSDI’12). USENIX Association, Berkeley, CA,
+     Vishesh Khemani, Stefan Fulger, Pan Gu, Lakshminath Bhuvanagiri,                       USA, 251ś264. http://dl.acm.org/citation.cfm?id=2387880.2387905
+     Jason Hunter, et al. 2016. Slicer: Auto-sharding for datacenter appli-            [18] Sudipto Das, Divyakant Agrawal, and Amr El Abbadi. 2010. G-store:
+     cations. In 12th USENIX Symposium on Operating Systems Design and                      a scalable data store for transactional multi key access in the cloud.
+     Implementation (OSDI 16). 739ś753.                                                     In Proceedings of the 1st ACM Symposium on Cloud Computing. ACM,
+ [2] Sharad Agarwal, John Dunagan, Navendu Jain, Stefan Saroiu, Alec Wol-                   163ś174.
+     man, and Habinder Bhogan. 2010. Volley: Automated data placement                  [19] Giuseppe DeCandia, Deniz Hastorun, Madan Jampani, Gunavardhan
+     for geo-distributed cloud services. (2010).                                            Kakulapati, Avinash Lakshman, Alex Pilchin, Swaminathan Sivasubra-
+ [3] Amazon Aurora Multi-Master. 2019. https://aws.amazon.com/about-                        manian, Peter Vosshall, and Werner Vogels. 2007. Dynamo: amazon’s
+     aws/whats-new/2019/08/amazon-aurora-multimaster-now-                                   highly available key-value store. In ACM SIGOPS operating systems
+     generally-available/.                                                                  review, Vol. 41. ACM, 205ś220.
+ [4] David F Bacon, Nathan Bales, Nico Bruno, Brian F Cooper, Adam                     [20] Murat Demirbas, Marcelo Leone, Bharadwaj Avva, Deepak Madeppa,
+     Dickinson, Andrew Fikes, Campbell Fraser, Andrey Gubarev, Milind                       and Sandeep Kulkarni. 2014. Logical physical clocks and consistent
+     Joshi, Eugene Kogan, et al. 2017. Spanner: Becoming a SQL system. In                   snapshots in globally distributed databases. (2014).
+     Proceedings of the 2017 ACM International Conference on Management                [21] Hua Fan and Wojciech Golab. 2019. Ocean vista: gossip-based visibility
+     of Data. 331ś343.                                                                      control for speedy geo-distributed transactions. Proceedings of the
+ [5] Peter Bailis, Ali Ghodsi, Joseph M Hellerstein, and Ion Stoica. 2013.                  VLDB Endowment 12, 11 (2019), 1471ś1484.
+     Bolt-on causal consistency. In Proceedings of the 2013 ACM SIGMOD                 [22] FaunaDB. [n.d.]. https://fauna.com/.
+     International Conference on Management of Data. ACM, 761ś772.                     [23] Steven Feuerstein and Bill Pribyl. 2005. Oracle pl/sql Programming.
+ [6] Itzik Ben-Gan. 2012. Microsoft SQL Server 2012 T-SQL Fundamentals.                     ł O’Reilly Media, Inc.ž.
+     Pearson Education.                                                                [24] FoundationDB. [n.d.]. https://www.foundationdb.org.
+ [7] Peter Boncz, Marcin Zukowski, and Niels Nes. 2005. MonetDB/X100:                  [25] Google Cloud. 2020. Machine Types. https://cloud.google.com/
+     Hyper-Pipelining Query Execution. Cidr 5 (2005), 225ś237.                              compute/docs/machine-types.
+ [8] Michael J. Cahill, Uwe Röhm, and Alan D. Fekete. 2008. Serializable Iso-          [26] Goetz Graefe. 1994. Volcano/spl minus/an extensible and parallel
+     lation for Snapshot Databases. In Proceedings of the 2008 ACM SIGMOD                   query evaluation system. IEEE Transactions on Knowledge and Data
+     International Conference on Management of Data (SIGMOD ’08). ACM,                      Engineering 6, 1 (1994), 120ś135.
+     New York, NY, USA, 729ś738. https://doi.org/10.1145/1376616.1376690               [27] Goetz Graefe. 1995. The cascades framework for query optimization.
+ [9] Aleksey Charapko, Ailidani Ailijiang, and Murat Demirbas. 2018.                        IEEE Data Eng. Bull. 18, 3 (1995), 19ś29.
+     Adapting to Access Locality via Live Data Migration in Globally Dis-              [28] Rachid Guerraoui and Jingjing Wang. 2017. How fast can a distributed
+     tributed Datastores. In 2018 IEEE International Conference on Big Data                 transaction commit?. In Proceedings of the 36th ACM SIGMOD-SIGACT-
+     (Big Data). IEEE, 3321ś3330.                                                           SIGAI Symposium on Principles of Database Systems. ACM, 107ś122.
+[10] Christos Chrysafis, Ben Collins, Scott Dugas, Jay Dunkelberger,                   [29] Tim Hall. [n.d.].      https://oracle-base.com/articles/9i/index-skip-
+     Moussa Ehsan, Scott Gray, Alec Grieser, Ori Herrnstadt, Kfir Lev-Ari,                  scanning.
+     Tao Lin, et al. 2019. FoundationDB Record Layer: A Multi-Tenant Struc-            [30] Maurice P Herlihy and Jeannette M Wing. 1990. Linearizability: A
+     tured Datastore. In Proceedings of the 2019 International Conference on                correctness condition for concurrent objects. ACM Transactions on
+     Management of Data. 1787ś1802.                                                         Programming Languages and Systems (TOPLAS) 12, 3 (1990), 463ś492.
+[11] CockroachCloud. [n.d.]. https://www.cockroachlabs.com/product/                    [31] Robert Kallman, Hideaki Kimura, Jonathan Natkins, Andrew Pavlo,
+     cockroachcloud.                                                                        Alexander Rasin, Stanley Zdonik, Evan PC Jones, Samuel Madden,
+[12] CockroachDB. [n.d.]. https://github.com/cockroachdb/cockroach.                         Michael Stonebraker, Yang Zhang, et al. 2008. H-store: a high-
+[13] CockroachDB. 2019. Business Source License. https://github.com/                        performance, distributed main memory transaction processing system.
+     cockroachdb/cockroach/tree/v19.2.0/licenses.                                           Proceedings of the VLDB Endowment 1, 2 (2008), 1496ś1499.
+[14] CockroachDB. 2019.          TLA+ Verification of Parallel Commits.                [32] Rusty Klophaus. 2010. Riak core: Building distributed applications
+     https://github.com/cockroachdb/cockroach/tree/master/docs/tla-                         without shared state. In ACM SIGPLAN Commercial Users of Functional
+     plus/ParallelCommits.                                                                  Programming. ACM, 14.
+[15] Brian F Cooper, Raghu Ramakrishnan, Utkarsh Srivastava, Adam Sil-                 [33] Alexey Kopytov. 2012. SysBench manual. http://imysql.com/wp-
+     berstein, Philip Bohannon, Hans-Arno Jacobsen, Nick Puz, Daniel                        content/uploads/2014/10/sysbench-manual.pdf. MySQL AB (2012).
+     Weaver, and Ramana Yerneni. 2008. PNUTS: Yahoo!’s hosted data                     [34] Tim Kraska, Gene Pang, Michael J Franklin, Samuel Madden, and Alan
+     serving platform. Proceedings of the VLDB Endowment 1, 2 (2008),                       Fekete. 2013. MDCC: Multi-data center consistency. In Proceedings of
+     1277ś1288.                                                                             the 8th ACM European Conference on Computer Systems. ACM, 113ś
+[16] Brian F Cooper, Adam Silberstein, Erwin Tam, Raghu Ramakrishnan,                       126.
+     and Russell Sears. 2010. Benchmarking cloud serving systems with                  [35] Avinash Lakshman and Prashant Malik. 2010. Cassandra: a decen-
+     YCSB. In Proceedings of the 1st ACM symposium on Cloud computing.                      tralized structured storage system. ACM SIGOPS Operating Systems
+     143ś154.                                                                               Review 44, 2 (2010), 35ś40.
+[17] James C. Corbett, Jeffrey Dean, Michael Epstein, Andrew Fikes, Christo-           [36] Leslie Lamport. [n.d.]. The TLA+ Home Page.            http://lamport.
+     pher Frost, J. J. Furman, Sanjay Ghemawat, Andrey Gubarev, Christo-                    azurewebsites.net/tla/tla.html
+     pher Heiser, Peter Hochschild, Wilson Hsieh, Sebastian Kanthak,                   [37] Leslie Lamport. 1978. Time, clocks, and the ordering of events in a
+     Eugene Kogan, Hongyi Li, Alexander Lloyd, Sergey Melnik, David                         distributed system. Commun. ACM 21, 7 (1978), 558ś565.
+     Mwaura, David Nagle, Sean Quinlan, Rajesh Rao, Lindsay Rolig, Ya-                 [38] Leslie Lamport. 1994. The temporal logic of actions. ACM Transactions
+     sushi Saito, Michal Szymaniak, Christopher Taylor, Ruth Wang, and                      on Programming Languages and Systems (TOPLAS) 16, 3 (1994), 872ś
+     Dale Woodford. 2012. Spanner: Google’s Globally-distributed Database.                  923.
+
+
+
+
+                                                                                1507
+
+
+===== PAGE 16 =====
+Industry 3: Cloud and Distributed Databases                                                             SIGMOD ’20, June 14–19, 2020, Portland, OR, USA
+
+SIGMOD’20, June 14ś19, 2020, Portland, OR, USA                                            R. Taft, I. Sharif, A. Matei, N. VanBenschoten, J. Lewis, T. Grieger et al.
+
+
+[39] Qian Lin, Pengfei Chang, Gang Chen, Beng Chin Ooi, Kian-Lee Tan,                  [58] Artyom Sharov, Alexander Shraer, Arif Merchant, and Murray Stokely.
+     and Zhengkui Wang. 2016. Towards a non-2pc transaction manage-                         2015. Take me to your leader!: online optimization of distributed
+     ment in distributed database systems. In Proceedings of the 2016 Inter-                storage configurations. Proceedings of the VLDB Endowment 8, 12
+     national Conference on Management of Data. ACM, 1659ś1674.                             (2015), 1490ś1501.
+[40] Guoxin Liu and Haiying Shen. 2017. Minimum-cost cloud storage                     [59] Alexander Shraer, Benjamin Reed, Dahlia Malkhi, and Flavio P Jun-
+     service across multiple cloud providers. IEEE/ACM Transactions on                      queira. 2012. Dynamic Reconfiguration of Primary/Backup Clusters.
+     Networking (TON) 25, 4 (2017), 2498ś2513.                                              In Presented as part of the 2012 USENIX Annual Technical Conference
+[41] Hatem Mahmoud, Faisal Nawab, Alexander Pucher, Divyakant                               (USENIX ATC 12). 425ś437.
+     Agrawal, and Amr El Abbadi. 2013. Low-latency multi-datacenter                    [60] Jeff Shute, Radek Vingralek, Bart Samwel, Ben Handy, Chad Whip-
+     databases using replicated commit. Proceedings of the VLDB Endow-                      key, Eric Rollins, Mircea Oancea, Kyle Littlefield, David Menestrina,
+     ment 6, 9 (2013), 661ś672.                                                             Stephan Ellner, et al. 2013. F1: A distributed SQL database that scales.
+[42] Faisal Nawab, Divyakant Agrawal, and Amr El Abbadi. 2018. Dpaxos:                      Proceedings of the VLDB Endowment 6, 11 (2013), 1068ś1079.
+     Managing data closer to users for low-latency and mobile applications.            [61] Kristina Spirovska, Diego Didona, and Willy Zwaenepoel. 2018. Wren:
+     In Proceedings of the 2018 International Conference on Management of                   Nonblocking reads in a partitioned transactional causally consistent
+     Data. ACM, 1221ś1236.                                                                  data store. In 2018 48th Annual IEEE/IFIP International Conference on
+[43] Faisal Nawab, Vaibhav Arora, Divyakant Agrawal, and Amr El Abbadi.                     Dependable Systems and Networks (DSN). IEEE, 1ś12.
+     2015. Minimizing commit latency of transactions in geo-replicated                 [62] Michael Stonebraker. 1986. The case for shared nothing. IEEE Database
+     data stores. In Proceedings of the 2015 ACM SIGMOD International                       Eng. Bull. 9, 1 (1986), 4ś9.
+     Conference on Management of Data. ACM, 1279ś1294.                                 [63] Michael Stonebraker and Ariel Weisberg. 2013. The VoltDB Main
+[44] Rajesh Nishtala, Hans Fugal, Steven Grimm, Marc Kwiatkowski, Her-                      Memory DBMS. IEEE Data Eng. Bull. 36, 2 (2013), 21ś27.
+     man Lee, Harry C Li, Ryan McElroy, Mike Paleczny, Daniel Peek,                    [64] Roshan Sumbaly, Jay Kreps, Lei Gao, Alex Feinberg, Chinmay Soman,
+     Paul Saab, et al. 2013. Scaling memcache at facebook. In Presented as                  and Sam Shah. 2012. Serving large-scale batch computed data with
+     part of the 10th USENIX Symposium on Networked Systems Design and                      project voldemort. In Proceedings of the 10th USENIX conference on File
+     Implementation (NSDI 13). 385ś398.                                                     and Storage Technologies. USENIX Association, 18ś18.
+[45] NuoDB. [n.d.]. https://www.nuodb.com.                                             [65] Rebecca Taft, Essam Mansour, Marco Serafini, Jennie Duggan, Aaron J
+[46] Diego Ongaro and John Ousterhout. 2014. In search of an understand-                    Elmore, Ashraf Aboulnaga, Andrew Pavlo, and Michael Stonebraker.
+     able consensus algorithm. In 2014 USENIX Annual Technical Conference                   2014. E-store: Fine-grained elastic partitioning for distributed trans-
+     (USENIX ATC 14). 305ś319.                                                              action processing systems. Proceedings of the VLDB Endowment 8, 3
+[47] Andrew Pavlo, Gustavo Angulo, Joy Arulraj, Haibin Lin, Jiexi Lin, Lin                  (2014), 245ś256.
+     Ma, Prashanth Menon, Todd C Mowry, Matthew Perron, Ian Quah,                      [66] Alexander Thomson, Thaddeus Diamond, Shu-Chun Weng, Kun Ren,
+     et al. 2017. Self-Driving Database Management Systems.. In CIDR,                       Philip Shao, and Daniel J Abadi. 2012. Calvin: fast distributed trans-
+     Vol. 4. 1.                                                                             actions for partitioned database systems. In Proceedings of the 2012
+[48] Fan Ping, Jeong-Hyon Hwang, XiaoHu Li, Chris McConnell, and Rohini                     ACM SIGMOD International Conference on Management of Data. ACM,
+     Vabbalareddy. 2011. Wide area placement of data replicas for fast and                  1ś12.
+     highly available data access. In Proceedings of the fourth international          [67] TiDB. [n.d.]. https://pingcap.com/en/.
+     workshop on Data-intensive distributed computing. ACM, 1ś8.                       [68] TPC-C. [n.d.]. http://www.tpc.org/tpcc/.
+[49] Dan RK Ports and Kevin Grittner. 2012. Serializable snapshot isolation            [69] TPC-H. [n.d.]. http://www.tpc.org/tpch/.
+     in PostgreSQL. Proceedings of the VLDB Endowment 5, 12 (2012), 1850ś              [70] Benjamin Treynor Sloss. 2019. An update on Sunday’s service dis-
+     1861.                                                                                  ruption. https://cloud.google.com/blog/topics/inside-google-cloud/an-
+[50] Raphael ‘kena’ Poss. 2018. The łPostgreSQLž in CockroachDB Ð Why?                      update-on-sundays-service-disruption.
+     (May 2018). https://dr-knz.net/postgresql-cockroachdb-why.html                    [71] Misha Tyulenev, Andy Schwerin, Asya Kamsky, Randolph Tan, Alyson
+[51] PostgreSQL. [n.d.]. https://www.postgresql.org/.                                       Cabral, and Jack Mulrow. 2019. Implementation of Cluster-wide Logical
+[52] Ian Rae, Eric Rollins, Jeff Shute, Sukhdeep Sodhi, and Radek Vingralek.                Clock and Causal Consistency in MongoDB. In Proceedings of the 2019
+     2013. Online, Asynchronous Schema Change in F1. VLDB 6, 11 (2013),                     International Conference on Management of Data. ACM, 636ś650.
+     1045ś1056.                                                                        [72] Alexandre Verbitski, Anurag Gupta, Debanjan Saha, Murali Brahmade-
+[53] Kun Ren, Dennis Li, and Daniel J Abadi. 2019. SLOG: serializable,                      sam, Kamal Gupta, Raman Mittal, Sailesh Krishnamurthy, Sandor Mau-
+     low-latency, geo-replicated transactions. Proceedings of the VLDB                      rice, Tengiz Kharatishvili, and Xiaofeng Bao. 2017. Amazon aurora:
+     Endowment 12, 11 (2019), 1747ś1761.                                                    Design considerations for high throughput cloud-native relational
+[54] RocksDB. [n.d.]. https://rocksdb.org/.                                                 databases. In Proceedings of the 2017 ACM International Conference on
+[55] Debanjan Saha, Gurmit Singh Ghatore, and Brandon O’Brien.                              Management of Data. ACM, 1041ś1052.
+     2017.         DAT202: Getting started with Amazon Aurora.                         [73] Todd Warszawski and Peter Bailis. 2017. ACIDRain: Concurrency-
+     https://www.slideshare.net/AmazonWebServices/dat202getting-                            related attacks on database-backed web applications. In Proceedings of
+     started-with-amazon-aurora/14. AWS re:Invent.                                          the 2017 ACM International Conference on Management of Data. ACM,
+[56] Marco Serafini, Essam Mansour, Ashraf Aboulnaga, Kenneth Salem,                        5ś20.
+     Taha Rafiq, and Umar Farooq Minhas. 2014. Accordion: Elastic scala-               [74] Zhe Wu, Michael Butkiewicz, Dorian Perkins, Ethan Katz-Bassett, and
+     bility for database systems supporting distributed transactions. Pro-                  Harsha V Madhyastha. 2013. Spanstore: Cost-effective geo-replicated
+     ceedings of the VLDB Endowment 7, 12 (2014), 1035ś1046.                                storage spanning multiple cloud services. In Proceedings of the Twenty-
+[57] Marco Serafini, Rebecca Taft, Aaron J Elmore, Andrew Pavlo, Ashraf                     Fourth ACM Symposium on Operating Systems Principles. ACM, 292ś
+     Aboulnaga, and Michael Stonebraker. 2016. Clay: Fine-grained adaptive                  308.
+     partitioning for general database schemas. Proceedings of the VLDB                [75] Xinan Yan, Linguan Yang, Hongbo Zhang, Xiayue Charles Lin, Bernard
+     Endowment 10, 4 (2016), 445ś456.                                                       Wong, Kenneth Salem, and Tim Brecht. 2018. Carousel: low-latency
+                                                                                            transaction processing for globally-distributed data. In Proceedings
+
+
+
+
+                                                                                1508
+
+
+===== PAGE 17 =====
+Industry 3: Cloud and Distributed Databases                                                        SIGMOD ’20, June 14–19, 2020, Portland, OR, USA
+
+CockroachDB: The Resilient Geo-Distributed SQL Database                                                   SIGMOD’20, June 14ś19, 2020, Portland, OR, USA
+
+
+     of the 2018 International Conference on Management of Data. ACM,                   with inconsistent replication. ACM Transactions on Computer Systems
+     231ś243.                                                                           (TOCS) 35, 4 (2018), 12.
+[76] YCSB. [n.d.]. https://ycsb.site.                                              [79] Tao Zhu, Zhuoyue Zhao, Feifei Li, Weining Qian, Aoying Zhou, Dong
+[77] Victor Zakhary, Faisal Nawab, Divy Agrawal, and Amr El Abbadi.                     Xie, Ryan Stutsman, Haining Li, and Huiqi Hu. 2018. Solar: towards a
+     2018. Global-Scale Placement of Transactional Data Stores.. In EDBT.               shared-everything database on distributed log-structured storage. In
+     385ś396.                                                                           2018 USENIX Annual Technical Conference (USENIX ATC 18). 795ś807.
+[78] Irene Zhang, Naveen Kr Sharma, Adriana Szekeres, Arvind Krishna-
+     murthy, and Dan RK Ports. 2018. Building consistent transactions
+
+
+
+
+                                                                            1509
+

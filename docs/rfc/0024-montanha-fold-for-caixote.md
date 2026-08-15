@@ -1,7 +1,7 @@
 # RFC-0024: Montanha Fold — Slipstream-class materializer for Caixote
 
 **Status:** done
-**Updated:** 2026-08-14
+**Updated:** 2026-08-15
 **Parents:** [RFC-0019](0019-local-primitive-for-platform-and-scylla-need.md) (CAS / seq / CHANGELOG) · [RFC-0017](0017-montanha-fdb-class-substrate.md) (Montanha SoR) · [RFC-0021](0021-montanha-fdb-tikv-parity-gaps.md)
 **Research:** [`../slipstream-and-quicksilver-learnings.md`](../slipstream-and-quicksilver-learnings.md) §10 · [`../../caixote/docs/research/quicksilver-slipstream-orchestration-scale.md`](../../../caixote/docs/research/quicksilver-slipstream-orchestration-scale.md)
 **First consumer:** Caixote (`caixote-api`, federation-api, procurador)
@@ -102,8 +102,8 @@ P0 ships the combinator + Pedra-backed fold + in-process Montanha follow. P1 wir
 | P0.4 | p0 | Crash/resume + host/VM fixture | done | `pedradb-fold` | 2026-08-14 |
 | P1.1 | p1 | Networked state-sync watch | done | `pedradb-fold` | 2026-08-14 |
 | P1.2 | p1 | CursorExpired + synthetic deletes | done | `pedradb-fold` | 2026-08-14 |
-| P1.3 | p1 | Federation intent/observed by seq | done | `seq_sync` + live `observed-fold.json` | 2026-08-14 |
-| P1.4 | p1 | One Caixote read path from fold | done | `procurador` fold_read | 2026-08-14 |
+| P1.3 | p1 | Federation intent/observed by seq | done | content-hash cursor; incremental must not persist | 2026-08-15 |
+| P1.4 | p1 | One Caixote read path from fold | done | HTTPS `lookup_request_route`; TCP/UDP `BackendFold` | 2026-08-15 |
 | P2.1 | p2 | Export/import artifact | done | `pedradb-fold` | 2026-08-14 |
 | P2.2 | p2 | Logical ship cursor | done | `pedradb-fold` | 2026-08-14 |
 | P2.3 | p2 | storage/relay/proxy roles | done | `pedradb-fold` | 2026-08-14 |

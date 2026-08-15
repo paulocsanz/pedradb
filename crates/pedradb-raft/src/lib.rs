@@ -403,9 +403,7 @@ pub struct AppendEntriesReply {
 
 fn handle_request_vote(node: &mut RaftNode, args: &RequestVoteArgs) -> RequestVoteReply {
     let meta = node.meta_dir.clone();
-    handle_request_vote_with_persist(node, args, |hard| {
-        persist_hard_state(meta.as_deref(), hard)
-    })
+    handle_request_vote_with_persist(node, args, |hard| persist_hard_state(meta.as_deref(), hard))
 }
 
 /// Persist hook used by the production RequestVote path and by DST injectors.
@@ -532,11 +530,7 @@ fn handle_append_entries(node: &mut RaftNode, args: &AppendEntriesArgs) -> Appen
 
     // Append / conflict resolve via ae_kernel (F16: never rewrite ≤ commit).
     for e in &args.entries {
-        let existing_term = node
-            .log
-            .iter()
-            .find(|x| x.index == e.index)
-            .map(|x| x.term);
+        let existing_term = node.log.iter().find(|x| x.index == e.index).map(|x| x.term);
         match ae_kernel::ae_entry_action(
             e.index,
             e.term,
@@ -627,7 +621,7 @@ impl RaftCluster {
                     auto_compact_sst_count: None,
                     auto_compact_sst_bytes: None,
                     exclusive: true,
-                large_value_threshold: None,
+                    large_value_threshold: None,
                 },
             )?;
             // Stagger timeouts slightly by id for deterministic elections.
@@ -816,7 +810,11 @@ impl RaftCluster {
         Ok(())
     }
 
-    fn broadcast_append(&mut self, leader_id: u64, client_entries: Vec<RaftLogEntry>) -> Result<()> {
+    fn broadcast_append(
+        &mut self,
+        leader_id: u64,
+        client_entries: Vec<RaftLogEntry>,
+    ) -> Result<()> {
         let peer_ids = self.ids.clone();
         // Append client entries to leader log first.
         if !client_entries.is_empty() {
@@ -932,11 +930,7 @@ impl RaftCluster {
                 })
                 .collect();
             matches.sort_unstable();
-            (
-                leader.hard.current_term,
-                leader.last_log_index(),
-                matches,
-            )
+            (leader.hard.current_term, leader.last_log_index(), matches)
         };
 
         // Largest N such that majority has match_index >= N and log[N].term == current.
@@ -969,13 +963,10 @@ impl RaftCluster {
         &mut self,
         kvs: impl IntoIterator<Item = (Vec<u8>, Vec<u8>)>,
     ) -> Result<u64> {
-        let leader_id = self.leader_id().ok_or(RaftError::NotLeader {
-            leader_hint: None,
-        })?;
-        let ops: Vec<BatchOp> = kvs
-            .into_iter()
-            .map(|(k, v)| BatchOp::put(k, v))
-            .collect();
+        let leader_id = self
+            .leader_id()
+            .ok_or(RaftError::NotLeader { leader_hint: None })?;
+        let ops: Vec<BatchOp> = kvs.into_iter().map(|(k, v)| BatchOp::put(k, v)).collect();
         let entry = {
             let leader = self.nodes.get(&leader_id).unwrap();
             let index = leader.last_log_index() + 1;
@@ -1116,7 +1107,7 @@ mod tests {
                     auto_compact_sst_count: None,
                     auto_compact_sst_bytes: None,
                     exclusive: true,
-                large_value_threshold: None,
+                    large_value_threshold: None,
                 },
             )
             .unwrap();
@@ -1217,7 +1208,7 @@ mod tests {
                     auto_compact_sst_count: None,
                     auto_compact_sst_bytes: None,
                     exclusive: true,
-                large_value_threshold: None,
+                    large_value_threshold: None,
                 },
             )
             .unwrap();
@@ -1536,12 +1527,7 @@ mod tests {
         let mut ok = false;
         for _ in 0..40 {
             ok = addrs.iter().all(|a| {
-                PeerClient::new(*a)
-                    .get(b"mp")
-                    .ok()
-                    .flatten()
-                    .as_deref()
-                    == Some(b"1".as_ref())
+                PeerClient::new(*a).get(b"mp").ok().flatten().as_deref() == Some(b"1".as_ref())
             });
             if ok {
                 break;
@@ -1594,12 +1580,7 @@ mod tests {
         let mut ok = false;
         for _ in 0..50 {
             ok = addrs.iter().all(|a| {
-                PeerClient::new(*a)
-                    .get(b"nk")
-                    .ok()
-                    .flatten()
-                    .as_deref()
-                    == Some(b"nv".as_ref())
+                PeerClient::new(*a).get(b"nk").ok().flatten().as_deref() == Some(b"nv".as_ref())
             });
             if ok {
                 break;

@@ -56,7 +56,7 @@ impl WatchHub {
             value: value.to_vec(),
             version,
         };
-        for (_, (pref, tx)) in &self.subs {
+        for (pref, tx) in self.subs.values() {
             if key.starts_with(pref.as_slice()) {
                 let _ = tx.try_send(ev.clone());
             }
@@ -364,7 +364,7 @@ pub fn olap_ingest(
     seq: u64,
     payload: &[u8],
 ) -> Result<()> {
-    cluster.put(&olap_event_key(stream, seq), payload)
+    cluster.put(olap_event_key(stream, seq), payload)
 }
 
 /// Read back a single ingested event (RO path from same SoR).
@@ -419,7 +419,7 @@ pub fn stream_publish(
     seq: u64,
     body: &[u8],
 ) -> Result<()> {
-    cluster.put(&subject_seq_key(b"stream/", subject, seq), body)
+    cluster.put(subject_seq_key(b"stream/", subject, seq), body)
 }
 
 /// Consume one message by seq (cursor external).
@@ -619,7 +619,7 @@ mod tests {
         c.put(b"r/b", b"2").unwrap();
         let mut tx = c.begin();
         let got = tx.get_range(&c, b"r/", b"r0").unwrap();
-        assert!(got.len() >= 1, "expected keys under r/");
+        assert!(!got.is_empty(), "expected keys under r/");
         // Concurrent write inside range.
         c.put(b"r/c", b"3").unwrap();
         tx.set(b"out", b"z").unwrap();
@@ -810,7 +810,7 @@ mod tests {
         assert!(uniq.len() >= 3, "need multi-range writers: {rids:?}");
         // Placement: split + merge adjacent (P1.2).
         let before = c.range_metas().len();
-        let (left, right) = c.split_range_at([0x40u8]).unwrap_or_else(|_| {
+        let (left, right) = c.split_range_at([0x40u8]).unwrap_or({
             // Already split keyspace may reject; force from single-range open path.
             (1, 2)
         });

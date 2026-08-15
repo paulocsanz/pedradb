@@ -8,3 +8,6 @@ description = "Change-feed journal canary (RFC-0020 P2.1 feed-watermark)"
 [dependencies]
 pedradb-core.workspace = true
 bytes.workspace = true
+
+[dev-dependencies]
+stateright = "0.31"

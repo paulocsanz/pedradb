@@ -158,7 +158,10 @@ fn snapshot_isolation_survives_reopen() {
     );
     let mut tx = c.begin();
     let snap = tx.snapshot_version();
-    assert!(snap >= 2, "begin after reopen must not reset to 0, snap={snap}");
+    assert!(
+        snap >= 2,
+        "begin after reopen must not reset to 0, snap={snap}"
+    );
     assert_eq!(
         tx.get(&c, b"sk").unwrap().as_deref(),
         Some(b"v1".as_ref()),
@@ -243,7 +246,9 @@ fn multi_range_tx_conflicts_with_range_read() {
     assert!(keys.len() >= 2);
     c.put(&keys[0], b"seed").unwrap();
     let mut tx = c.begin();
-    let _ = tx.get_range(&c, &keys[0][..keys[0].len().saturating_sub(0)], b"\xff").unwrap();
+    let _ = tx
+        .get_range(&c, &keys[0][..keys[0].len().saturating_sub(0)], b"\xff")
+        .unwrap();
     // Concurrent multi-range write that includes the seed key.
     c.commit_tx([
         (keys[0].as_slice(), b"other".as_slice()),
@@ -251,14 +256,15 @@ fn multi_range_tx_conflicts_with_range_read() {
     ])
     .unwrap();
     tx.set(b"zzz-out", b"1").unwrap();
-    let err = tx.commit(&mut c).expect_err("range OCC vs multi-range write");
+    let err = tx
+        .commit(&mut c)
+        .expect_err("range OCC vs multi-range write");
     assert!(
         matches!(err, StoreError::Conflict),
         "expected Conflict, got {err:?}"
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
-
 
 /// SI notes after commit_tx must not be sourced from a lagging `ids[0]` node.
 ///
@@ -275,7 +281,10 @@ fn note_tx_commit_reads_applied_not_lagging_first_node() {
     c.set_participating(1, false).unwrap();
     // Re-elect among 2/3 if needed.
     c.elect_all(120).unwrap();
-    assert!(c.range_leader(1).is_some_and(|l| l != 1), "leader must not be partitioned node");
+    assert!(
+        c.range_leader(1).is_some_and(|l| l != 1),
+        "leader must not be partitioned node"
+    );
     let gen_before = c.read_version();
     c.commit_tx([(b"k".as_slice(), b"new".as_slice())])
         .expect("majority commit without node 1");
@@ -317,7 +326,9 @@ fn changelog_after_skips_lagging_first_node() {
         .keys_in_range_at(b"/host/h1/", b"/host/h10", snap)
         .unwrap();
     assert!(
-        ranged.iter().any(|(k, v)| k.as_slice() == b"/host/h1/new" && v.as_slice() == b"v1"),
+        ranged
+            .iter()
+            .any(|(k, v)| k.as_slice() == b"/host/h1/new" && v.as_slice() == b"v1"),
         "get_range/keys_in_range_at used lagging node 1, missing new key: {ranged:?}"
     );
     // F72: default get() must not read lagging ids[0] either.
@@ -467,16 +478,14 @@ fn hist_bitrot_does_not_silent_wrong_old_snapshot() {
         let mut hk = b"\0store/hist/".to_vec();
         hk.extend_from_slice(b"hk");
         for nid in 1..=3u64 {
-            let mut db = Db::open_with(&dir.join(format!("store-node-{nid}")), opts).unwrap();
+            let mut db = Db::open_with(dir.join(format!("store-node-{nid}")), opts).unwrap();
             if let Some(raw) = db.get(&hk) {
                 let mut flipped = raw.to_vec();
                 if !flipped.is_empty() {
                     let i = flipped.len() / 2;
                     flipped[i] ^= 0xFF;
                     db.put(&hk, &flipped).unwrap();
-                } else {
                 }
-            } else {
             }
             drop(db);
         }
@@ -533,10 +542,7 @@ fn dcs_ttl_expired_stays_dead_after_reopen() {
             .dcs_create_ttl(&key, b"node-b", 500)
             .expect("expired lock must be reclaimable after reopen");
         assert!(rev >= 1);
-        assert_eq!(
-            c.dcs_get_on(2, &key).unwrap().unwrap().value,
-            b"node-b"
-        );
+        assert_eq!(c.dcs_get_on(2, &key).unwrap().unwrap().value, b"node-b");
         drop(c);
     }
     // Still-valid TTL must survive a crash (do not expire everything on open).
@@ -554,5 +560,46 @@ fn dcs_ttl_expired_stays_dead_after_reopen() {
             .expect("unexpired TTL lease must survive reopen");
         assert_eq!(kv.value.as_slice(), b"hold");
     }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// F168 repro: a snapshot below the GC watermark must fail closed
+/// (`TransactionTooOld`), not fabricate key absence. Before the fix,
+/// `get_at_version` returned `Ok(None)` once GC pruned the entries that
+/// covered the snapshot — an old TX silently observed committed data as
+/// deleted while reads were still being served.
+#[test]
+fn snapshot_below_watermark_fails_closed_not_absent() {
+    let dir = temp();
+    let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+    c.elect_all(80).unwrap();
+    c.put(b"f168", b"committed").unwrap();
+    let snapshot = c.read_version();
+    assert!(snapshot >= 1);
+    // Sanity: the snapshot reads the committed value before GC.
+    assert_eq!(
+        c.get_at_version(b"f168", snapshot).unwrap().as_deref(),
+        Some(b"committed".as_ref())
+    );
+    // Advance past VERSION_RETENTION (64) so GC prunes below the watermark.
+    for i in 0..70u32 {
+        c.put(format!("f168-churn-{i}").as_bytes(), b"x").unwrap();
+    }
+    assert!(
+        c.safe_watermark() > snapshot,
+        "GC must have advanced past the snapshot (wm={})",
+        c.safe_watermark()
+    );
+    let got = c.get_at_version(b"f168", snapshot);
+    match got {
+        Err(StoreError::TransactionTooOld { .. }) => {}
+        other => panic!(
+            "snapshot {} below watermark {} must be TransactionTooOld, got {:?}",
+            snapshot,
+            c.safe_watermark(),
+            other
+        ),
+    }
+    drop(c);
     let _ = std::fs::remove_dir_all(&dir);
 }

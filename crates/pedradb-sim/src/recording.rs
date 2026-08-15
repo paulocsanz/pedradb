@@ -141,9 +141,10 @@ pub struct RecordingFile {
 impl RecordingFile {
     fn with_rec<R>(&mut self, f: impl FnOnce(&mut FileRec) -> R) -> io::Result<R> {
         let mut img = self.image.borrow_mut();
-        let rec = img.files.get_mut(&self.path).ok_or_else(|| {
-            io::Error::new(io::ErrorKind::NotFound, "recording file missing")
-        })?;
+        let rec = img
+            .files
+            .get_mut(&self.path)
+            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "recording file missing"))?;
         Ok(f(rec))
     }
 }
@@ -223,9 +224,10 @@ impl Write for RecordingFile {
                 ));
             }
         }
-        let rec = img.files.get_mut(&self.path).ok_or_else(|| {
-            io::Error::new(io::ErrorKind::NotFound, "recording file missing")
-        })?;
+        let rec = img
+            .files
+            .get_mut(&self.path)
+            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "recording file missing"))?;
         let n = to_write.len();
         let pos = self.pos as usize;
         let dur_len = rec.durable.len();
@@ -465,7 +467,11 @@ mod tests {
         env.crash();
         // WAL file may be empty or partial — open must not invent the key.
         let db = Db::open_with_env(&dir, opts(), env).unwrap();
-        assert_eq!(db.get(b"k"), None, "lying fsync must not retain after crash");
+        assert_eq!(
+            db.get(b"k"),
+            None,
+            "lying fsync must not retain after crash"
+        );
     }
 
     #[test]

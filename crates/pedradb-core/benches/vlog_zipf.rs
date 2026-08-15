@@ -40,7 +40,8 @@ fn zipf_cdf(n: usize, s: f64) -> Vec<f64> {
 }
 
 fn zipf_sample(cdf: &[f64], u: f64) -> usize {
-    cdf.partition_point(|&p| p < u).min(cdf.len().saturating_sub(1))
+    cdf.partition_point(|&p| p < u)
+        .min(cdf.len().saturating_sub(1))
 }
 
 fn key_of(i: u64) -> [u8; 16] {

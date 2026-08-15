@@ -134,19 +134,14 @@ pub trait Env: Clone {
 
     /// Optional kernel readahead / cache-drop for `[offset, offset+len)` of `path`.
     ///
-    /// Default is a **no-op** (sim / non-Linux). Production [`StdEnv`] uses
-    /// `posix_fadvise` on Linux. Errors are best-effort — callers should not
-    /// fail the request on advise failure.
+    /// Default is a **no-op**. Linux `posix_fadvise` lives in `pedradb-io-uring`
+    /// (`IoUringEnv`) so this crate stays `#![forbid(unsafe_code)]`. Sim / DST
+    /// envs inherit the no-op. Errors are best-effort — callers must not fail
+    /// the request on advise failure.
     ///
     /// # Errors
     /// Underlying I/O when the platform implements the hint.
-    fn advise(
-        &self,
-        path: &Path,
-        offset: u64,
-        len: u64,
-        kind: AdviseKind,
-    ) -> io::Result<()> {
+    fn advise(&self, path: &Path, offset: u64, len: u64, kind: AdviseKind) -> io::Result<()> {
         let _ = (path, offset, len, kind);
         Ok(())
     }
@@ -231,42 +226,6 @@ impl Env for StdEnv {
     fn metadata_len(&self, path: &Path) -> io::Result<u64> {
         Ok(fs::metadata(path)?.len())
     }
-
-    fn advise(
-        &self,
-        path: &Path,
-        offset: u64,
-        len: u64,
-        kind: AdviseKind,
-    ) -> io::Result<()> {
-        #[cfg(target_os = "linux")]
-        {
-            use std::os::unix::io::AsRawFd;
-            let f = File::open(path)?;
-            let advice = match kind {
-                AdviseKind::WillNeed => libc::POSIX_FADV_WILLNEED,
-                AdviseKind::DontNeed => libc::POSIX_FADV_DONTNEED,
-            };
-            // posix_fadvise returns 0 on success, errno-style code otherwise.
-            let rc = unsafe {
-                libc::posix_fadvise(
-                    f.as_raw_fd(),
-                    i64::try_from(offset).unwrap_or(i64::MAX),
-                    i64::try_from(len).unwrap_or(0),
-                    advice,
-                )
-            };
-            if rc != 0 {
-                return Err(io::Error::from_raw_os_error(rc));
-            }
-            return Ok(());
-        }
-        #[cfg(not(target_os = "linux"))]
-        {
-            let _ = (path, offset, len, kind);
-            Ok(())
-        }
-    }
 }
 
 #[cfg(test)]
@@ -290,7 +249,7 @@ mod tests {
             f.write_all(&[0u8; 4096]).unwrap();
             f.sync_all().unwrap();
         }
-        // No-op platforms and Linux: must not panic; missing file may error on Linux open.
+        // StdEnv is always a no-op (Linux fadvise is IoUringEnv).
         StdEnv.advise(&path, 0, 4096, AdviseKind::WillNeed).unwrap();
         StdEnv.advise(&path, 0, 4096, AdviseKind::DontNeed).unwrap();
         let _ = fs::remove_dir_all(&dir);

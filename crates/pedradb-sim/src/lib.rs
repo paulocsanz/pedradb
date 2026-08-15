@@ -36,6 +36,8 @@ mod recording;
 
 pub use failing::{FailingEnv, FaultKind, OpClass};
 pub use failing_arc::FailingEnvArc;
+/// EXPLODE recover injection (byte-level `choose` on the WAL image).
+pub use pedradb_core::wal::recover_choose::RecoverChoice;
 pub use recording::{RecordingEnv, SyncPolicy};
 
 // DST / non-determinism primitives (implemented in core; sim is the usual import path).
@@ -68,9 +70,7 @@ impl FaultEnv {
             .map(|d| d.as_nanos())
             .unwrap_or(0);
         let i = N.fetch_add(1, Ordering::Relaxed);
-        let dir = parent
-            .as_ref()
-            .join(format!("pedradb-sim-{n}-{i}"));
+        let dir = parent.as_ref().join(format!("pedradb-sim-{n}-{i}"));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir)?;
         Ok(Self { dir })
@@ -130,6 +130,31 @@ impl FaultEnv {
         Ok(())
     }
 
+    /// EXPLODE `choose`: apply a named recover mutation to the on-disk WAL.
+    ///
+    /// Bytes + fsync of this write are the experiment setup, not the engine
+    /// contract. Reopen goes through production [`pedradb_core::wal::Wal::recover_on`].
+    ///
+    /// # Errors
+    /// Missing WAL, I/O, or a choice that does not fit the image.
+    pub fn choose_wal_recover(&self, choice: RecoverChoice) -> Result<()> {
+        use pedradb_core::wal::recover_choose::apply_recover_choice;
+        let p = self.wal_path();
+        if !p.exists() {
+            return Err(pedradb_core::CoreError::Internal(
+                "choose_wal_recover: WAL missing".into(),
+            ));
+        }
+        let mut buf = fs::read(&p)?;
+        if !apply_recover_choice(&mut buf, choice) {
+            return Err(pedradb_core::CoreError::Internal(
+                "choose_wal_recover: choice does not apply".into(),
+            ));
+        }
+        fs::write(&p, buf)?;
+        Ok(())
+    }
+
     /// Remove the environment directory.
     pub fn cleanup(self) {
         let _ = fs::remove_dir_all(&self.dir);
@@ -163,17 +188,12 @@ pub fn scenario_crash_after_sync_survives(parent: impl AsRef<Path>) -> Result<()
 ///
 /// # Errors
 /// DB I/O or truncation failure.
-pub fn scenario_truncated_tail_loses_unsynced_suffix(
-    parent: impl AsRef<Path>,
-) -> Result<()> {
+pub fn scenario_truncated_tail_loses_unsynced_suffix(parent: impl AsRef<Path>) -> Result<()> {
     let env = FaultEnv::new(parent)?;
     // Durable prefix.
     {
         let mut db = env.open(true)?;
-        db.apply_batch([
-            BatchOp::put(b"keep", b"1"),
-            BatchOp::put(b"keep2", b"2"),
-        ])?;
+        db.apply_batch([BatchOp::put(b"keep", b"1"), BatchOp::put(b"keep2", b"2")])?;
         db.close()?;
     }
     let prefix_len = env.wal_len()?;
@@ -223,7 +243,7 @@ mod tests {
             auto_compact_sst_count: None,
             auto_compact_sst_bytes: None,
             exclusive: true,
-                large_value_threshold: None,
+            large_value_threshold: None,
         }
     }
 
@@ -279,8 +299,9 @@ mod tests {
         ));
         let _ = fs::remove_dir_all(&dir);
         let host = DetHost::with_seed(FailingEnv::passing(), 0xC0FFEE);
-        host.clock()
-            .advance(std::time::Duration::from_millis(1 + host.rng().gen_range(9)));
+        host.clock().advance(std::time::Duration::from_millis(
+            1 + host.rng().gen_range(9),
+        ));
         let mut db = Db::open_with_host(&dir, opts(), &host).unwrap();
         db.put(b"via-host", b"ok").unwrap();
         assert_eq!(db.get(b"via-host").as_deref(), Some(b"ok".as_ref()));
@@ -607,7 +628,10 @@ mod tests {
                 .expect("CHANGELOG store must not gate durable put");
             env.disarm();
 
-            assert!(s2 > s1, "sequence must advance (no reuse after durable WAL)");
+            assert!(
+                s2 > s1,
+                "sequence must advance (no reuse after durable WAL)"
+            );
             assert_eq!(
                 db.get(b"b").as_deref(),
                 Some(b"2".as_ref()),
@@ -773,6 +797,97 @@ mod tests {
         scenario_truncated_tail_loses_unsynced_suffix(parent()).unwrap();
     }
 
+    #[test]
+    fn explode_choose_crc_fail_stops_reopen() {
+        let env = FaultEnv::new(parent()).unwrap();
+        {
+            let mut db = env.open(true).unwrap();
+            db.put(b"a", b"1").unwrap();
+            db.put(b"b", b"2").unwrap();
+            db.put(b"c", b"3").unwrap();
+            db.close().unwrap();
+        }
+        env.choose_wal_recover(RecoverChoice::FlipCrc { index: 1 })
+            .unwrap();
+        match env.open(true) {
+            Ok(_) => panic!("CRC choose must fail-stop open"),
+            Err(err) => {
+                assert!(
+                    matches!(err, pedradb_core::CoreError::Crc { .. })
+                        || err.to_string().contains("crc"),
+                    "CRC choose must fail-stop open, got {err}"
+                );
+            }
+        }
+        env.cleanup();
+    }
+
+    #[test]
+    fn explode_choose_length_not_silent_wrong() {
+        let env = FaultEnv::new(parent()).unwrap();
+        {
+            let mut db = env.open(true).unwrap();
+            db.put(b"a", b"1").unwrap();
+            db.put(b"b", b"2").unwrap();
+            db.put(b"c", b"3").unwrap();
+            db.close().unwrap();
+        }
+        env.choose_wal_recover(RecoverChoice::FlipLength { index: 1 })
+            .unwrap();
+        // Tiny Cursor WALs resync and keep the suffix (recover_choose sweep).
+        // A real Db WAL may hit a false alignment whose CRC fails — fail-stop.
+        // Either is fine. Silent empty / wrong `a` is not.
+        match env.open(true) {
+            Ok(db) => {
+                assert_eq!(
+                    db.get(b"a").as_deref(),
+                    Some(b"1".as_ref()),
+                    "durable prefix must survive length choose"
+                );
+                if let Some(v) = db.get(b"c") {
+                    assert_eq!(v.as_ref(), b"3", "suffix must not be silent-wrong");
+                }
+                let _ = db.close();
+            }
+            Err(err) => {
+                let msg = err.to_string();
+                assert!(
+                    matches!(err, pedradb_core::CoreError::Crc { .. })
+                        || matches!(err, pedradb_core::CoreError::Truncated(_))
+                        || msg.contains("length")
+                        || msg.contains("crc"),
+                    "length choose must fail-stop or resync, got {err}"
+                );
+            }
+        }
+        env.cleanup();
+    }
+
+    #[test]
+    fn explode_choose_orphan_fail_stops_reopen() {
+        let env = FaultEnv::new(parent()).unwrap();
+        {
+            let mut db = env.open(true).unwrap();
+            db.put(b"a", b"1").unwrap();
+            db.put(b"b", b"2").unwrap();
+            db.put(b"c", b"3").unwrap();
+            db.close().unwrap();
+        }
+        env.choose_wal_recover(RecoverChoice::ForgeOrphanMiddle { index: 1 })
+            .unwrap();
+        match env.open(true) {
+            Ok(_) => panic!("orphan choose must fail-stop open"),
+            Err(err) => {
+                let msg = err.to_string();
+                assert!(
+                    msg.contains("orphan") || msg.contains("crc"),
+                    "orphan choose must fail-stop open, got {msg}"
+                );
+            }
+        }
+        env.cleanup();
+    }
+
     /// Multi-key TX Ok under sync + process kill → both keys recovered (all-or-nothing).
     #[test]
     fn multi_key_tx_ok_survives_crash_reopen() {
@@ -912,10 +1027,7 @@ mod tests {
         );
         assert!(r.is_err(), "must inject");
         let err = r.err().unwrap();
-        assert!(
-            matches!(err, pedradb_core::CoreError::Io(_)),
-            "got {err:?}"
-        );
+        assert!(matches!(err, pedradb_core::CoreError::Io(_)), "got {err:?}");
         let _ = fs::remove_dir_all(&dir);
     }
 
@@ -1193,7 +1305,7 @@ mod tests {
             auto_compact_sst_count: None,
             auto_compact_sst_bytes: None,
             exclusive: true,
-                large_value_threshold: None,
+            large_value_threshold: None,
         };
         let big = vec![b'x'; 128];
 
@@ -1251,7 +1363,7 @@ mod tests {
             auto_compact_sst_count: None,
             auto_compact_sst_bytes: None,
             exclusive: true,
-                large_value_threshold: None,
+            large_value_threshold: None,
         };
 
         for n in 0..40u64 {
@@ -1500,9 +1612,7 @@ mod tests {
     /// RFC-0015 P0.2/P0.3: sync_dir failure under sync=true fails flush/MANIFEST path.
     #[test]
     fn sync_dir_fail_propagates_on_flush() {
-        use pedradb_core::{
-            Db, Env, EnvFile, OpenOptions, Result as CoreResult, StdEnv,
-        };
+        use pedradb_core::{Db, Env, EnvFile, OpenOptions, Result as CoreResult, StdEnv};
         use std::cell::Cell;
         use std::io::{self, Read, Seek, SeekFrom, Write};
         use std::path::Path;

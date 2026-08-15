@@ -47,12 +47,7 @@ fn start_cluster(tmp: &std::path::Path) -> Vec<Node> {
     let peers: Vec<(u64, SocketAddr)> = ports
         .iter()
         .enumerate()
-        .map(|(i, &p)| {
-            (
-                (i as u64) + 1,
-                format!("127.0.0.1:{p}").parse().unwrap(),
-            )
-        })
+        .map(|(i, &p)| ((i as u64) + 1, format!("127.0.0.1:{p}").parse().unwrap()))
         .collect();
     let peer_flags: Vec<String> = peers
         .iter()
@@ -152,10 +147,7 @@ fn tcp_3node_elect_put_majority() {
         if seen >= 2 {
             break;
         }
-        assert!(
-            Instant::now() < deadline,
-            "majority timeout seen={seen}"
-        );
+        assert!(Instant::now() < deadline, "majority timeout seen={seen}");
         thread::sleep(Duration::from_millis(50));
     }
 }
@@ -187,10 +179,7 @@ fn tcp_rewire_peer_map_without_ssh() {
         .unwrap()
         .success());
 
-    let list: Vec<(u64, String)> = nodes
-        .iter()
-        .map(|n| (n.id, n.addr.to_string()))
-        .collect();
+    let list: Vec<(u64, String)> = nodes.iter().map(|n| (n.id, n.addr.to_string())).collect();
     let mut client = pedradb_store::TcpClusterClient::new(list.iter().cloned());
     // Push the same map via TCP SetPeers to all nodes (self-service control plane).
     client.rewire_peer_map(&list).expect("rewire via TCP");
@@ -214,10 +203,7 @@ fn tcp_rewire_peer_map_without_ssh() {
 fn tcp_region_prefer_first_dial() {
     let tmp = tempfile_dir("tcp_region");
     let nodes = start_cluster(&tmp);
-    let list: Vec<(u64, String)> = nodes
-        .iter()
-        .map(|n| (n.id, n.addr.to_string()))
-        .collect();
+    let list: Vec<(u64, String)> = nodes.iter().map(|n| (n.id, n.addr.to_string())).collect();
     let mut client = pedradb_store::TcpClusterClient::new(list);
     client.set_region(1, "a");
     client.set_region(2, "a");
@@ -272,11 +258,7 @@ fn tcp_commit_tx_multi_key_majority() {
             }
         }
     }
-    assert!(
-        tid.is_some(),
-        "commit_tx failed: {:?}",
-        last_err
-    );
+    assert!(tid.is_some(), "commit_tx failed: {:?}", last_err);
 
     let deadline = Instant::now() + Duration::from_secs(15);
     loop {
@@ -366,10 +348,7 @@ fn tcp_put_batch_majority() {
         .status()
         .unwrap()
         .success());
-    let peers: Vec<(u64, String)> = nodes
-        .iter()
-        .map(|n| (n.id, n.addr.to_string()))
-        .collect();
+    let peers: Vec<(u64, String)> = nodes.iter().map(|n| (n.id, n.addr.to_string())).collect();
     let mut client = pedradb_store::TcpClusterClient::new(peers).with_max_attempts(48);
     let pairs: Vec<(Vec<u8>, Vec<u8>)> = (0..8u8)
         .map(|i| (format!("pb-{i}").into_bytes(), vec![i]))
@@ -432,13 +411,10 @@ fn tcp_etcd_need_create_cas_get() {
     let mut created = false;
     while Instant::now() < deadline && !created {
         for n in &nodes {
-            match pedradb_store::client_dcs_create(n.addr.to_string(), key, b"node-a") {
-                Ok(r) => {
-                    rev = r;
-                    created = true;
-                    break;
-                }
-                Err(_) => {}
+            if let Ok(r) = pedradb_store::client_dcs_create(n.addr.to_string(), key, b"node-a") {
+                rev = r;
+                created = true;
+                break;
             }
         }
         if !created {
@@ -463,13 +439,10 @@ fn tcp_etcd_need_create_cas_get() {
     let deadline = Instant::now() + Duration::from_secs(15);
     while Instant::now() < deadline && !cas_ok {
         for n in &nodes {
-            match pedradb_store::client_dcs_cas(n.addr.to_string(), key, b"node-a2", rev) {
-                Ok(r) => {
-                    rev2 = r;
-                    cas_ok = true;
-                    break;
-                }
-                Err(_) => {}
+            if let Ok(r) = pedradb_store::client_dcs_cas(n.addr.to_string(), key, b"node-a2", rev) {
+                rev2 = r;
+                cas_ok = true;
+                break;
             }
         }
         if !cas_ok {

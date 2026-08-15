@@ -315,7 +315,9 @@ fn cluster_dst_lossy_net_i_maj_holds() {
                 range_id, index, ..
             }) => {
                 pump_lossy(&mut c, 64, 10, &mut rng);
-                if c.finish_queued_propose(range_id, index, true).unwrap_or(false) {
+                if c.finish_queued_propose(range_id, index, true)
+                    .unwrap_or(false)
+                {
                     ok = true;
                     break;
                 }
@@ -368,12 +370,7 @@ fn membership_remove_add_catchup() {
 
     // Remove a follower (not leader if possible).
     let leader = c.range_leader(1).unwrap();
-    let victim = c
-        .node_ids()
-        .iter()
-        .copied()
-        .find(|&n| n != leader)
-        .unwrap();
+    let victim = c.node_ids().iter().copied().find(|&n| n != leader).unwrap();
     c.remove_member(victim).unwrap();
     assert!(!c.is_member(victim));
 
@@ -391,16 +388,8 @@ fn membership_remove_add_catchup() {
     let mut seen = false;
     for _ in 0..40 {
         c.tick().unwrap();
-        if c.get_on(victim, b"before")
-            .ok()
-            .flatten()
-            .as_deref()
-            == Some(b"1".as_ref())
-            || c.get_on(victim, b"after-rm")
-                .ok()
-                .flatten()
-                .as_deref()
-                == Some(b"2".as_ref())
+        if c.get_on(victim, b"before").ok().flatten().as_deref() == Some(b"1".as_ref())
+            || c.get_on(victim, b"after-rm").ok().flatten().as_deref() == Some(b"2".as_ref())
         {
             seen = true;
             break;
@@ -423,12 +412,7 @@ fn lagging_partition_heals_and_reads() {
     put_queued(&mut c, b"k0", b"v0");
 
     let leader = c.range_leader(1).unwrap();
-    let lag = c
-        .node_ids()
-        .iter()
-        .copied()
-        .find(|&n| n != leader)
-        .unwrap();
+    let lag = c.node_ids().iter().copied().find(|&n| n != leader).unwrap();
     c.set_participating(lag, false).unwrap();
 
     // Majority continues writing.
@@ -588,32 +572,30 @@ fn p21_disk_full_on_majority_blocks_commit() {
     // e3 stays healthy — minority alone must not majority-commit.
 
     let key = b"enospc/k";
-    let mut saw_fail = false;
-    for _ in 0..30 {
-        match c.put(key, b"should-not-maj") {
-            Ok(()) => {
-                // If Ok, require it was somehow durable on majority without ENOSPC peers —
-                // with 2/3 disks dead this should not happen; treat as soft fail to investigate.
-                pump(&mut c, 32);
-                if c.count_applied_eq(key, b"should-not-maj") >= 2 {
-                    panic!("majority applied while 2/3 disks ENOSPC");
-                }
-                // Ok but not majority-visible is still wrong for put contract; fail.
-                saw_fail = true;
-                break;
+    let saw_fail = match c.put(key, b"should-not-maj") {
+        Ok(()) => {
+            // If Ok, require it was somehow durable on majority without ENOSPC peers —
+            // with 2/3 disks dead this should not happen; treat as soft fail to investigate.
+            pump(&mut c, 32);
+            if c.count_applied_eq(key, b"should-not-maj") >= 2 {
+                panic!("majority applied while 2/3 disks ENOSPC");
             }
-            Err(StoreError::NotCommitted { .. })
-            | Err(StoreError::NotLeader { .. })
-            | Err(StoreError::Core(_))
-            | Err(StoreError::Msg(_)) => {
-                saw_fail = true;
-                pump(&mut c, 24);
-                break;
-            }
-            Err(e) => panic!("unexpected: {e}"),
+            // Ok but not majority-visible is still wrong for put contract; fail.
+            true
         }
-    }
-    assert!(saw_fail, "put must not quietly majority-succeed under ENOSPC majority");
+        Err(StoreError::NotCommitted { .. })
+        | Err(StoreError::NotLeader { .. })
+        | Err(StoreError::Core(_))
+        | Err(StoreError::Msg(_)) => {
+            pump(&mut c, 24);
+            true
+        }
+        Err(e) => panic!("unexpected: {e}"),
+    };
+    assert!(
+        saw_fail,
+        "put must not quietly majority-succeed under ENOSPC majority"
+    );
     // Never majority-applied the forbidden value.
     assert!(
         c.count_applied_eq(key, b"should-not-maj") < 2,

@@ -10,6 +10,10 @@
 >
 > Canonical follow-up (primaries + code, not this summary):
 > [`sqlite-object-storage-agents-and-pedradb.md`](sqlite-object-storage-agents-and-pedradb.md).
+> Tigris six-job / media-tier note (2026-08-15):
+> [`research/object-storage/06-tigris-and-media-tiers.md`](research/object-storage/06-tigris-and-media-tiers.md);
+> Montanha as the FDB seat:
+> [`research/object-storage/07-montanha-as-tigris-control-plane.md`](research/object-storage/07-montanha-as-tigris-control-plane.md).
 > The Rung-0 kernel exclusion still holds; do not use *this* file as the
 > map of the object-storage trend.
 

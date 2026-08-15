@@ -1,0 +1,955 @@
+          Endure: A Robust Tuning Paradigm for LSM Trees Under
+                          Workload Uncertainty
+            Andy Huynh                          Harshal A. Chaudhari                              Evimaria Terzi                 Manos Athanassoulis
+          Boston University                           Boston University                           Boston University                   Boston University
+          ndhuynh@bu.edu                               harshal@bu.edu                             evimaria@bu.edu                     mathan@bu.edu
+
+ABSTRACT
+Log-Structured Merge trees (LSM trees) are increasingly used as the
+storage engines behind several data systems, frequently deployed
+in the cloud. Similar to other database architectures, LSM trees
+consider information about the expected workload (e.g., reads vs.
+writes, point vs. range queries) to optimize their performance via
+tuning. However, operating in a shared infrastructure like the cloud
+comes with workload uncertainty due to the fast-evolving nature of
+modern applications. Systems with static tuning discount the vari-
+ability of such hybrid workloads and hence provide an inconsistent
+and overall suboptimal performance.
+                                                                                              Figure 1: LSM tree tunings and their performance on ob-
+   To address this problem, we introduce E����� – a new para-
+                                                                                              served workloads. While both workloads have a similar ratio
+digm for tuning LSM trees in the presence of workload uncertainty.
+                                                                                              of reads and writes, the uncertain workload has a higher per-
+Speci�cally, we focus on the impact of the choice of compaction
+                                                                                              centage of range queries causing the expected system tuning
+policies, size ratio, and memory allocation on the overall perfor-
+                                                                                              to experience a 2⇥ degradation in performance.
+mance. E����� considers a robust formulation of the throughput
+maximization problem and recommends a tuning that maximizes
+the worst-case throughput over the neighborhood of each expected                              used in the backend storage of modern key-value stores [59]. LSM
+workload. Additionally, an uncertainty tuning parameter controls                              trees o�er a high ingestion rate and fast reads, making them widely
+the size of this neighborhood, thereby allowing the output tun-                               adopted by systems such as RocksDB [31] at Facebook, LevelDB [33]
+ings to be conservative or optimistic. Through both model-based                               and BigTable [18] at Google, HBase [37], Cassandra [8] at Apache,
+and extensive experimental evaluations of E����� in the state-                                WiredTiger [80] at MongoDB, X-Engine [40] at Alibaba, and Dy-
+of-the-art LSM-based storage engine, RocksDB, we show that the                                namoDB [29] at Amazon.
+robust tuning methodology consistently outperforms classical tun-                                LSM trees store incoming data in a memory bu�er, which is
+ing strategies. The robust tunings output by E����� lead up to                                �ushed to storage when it is full and merged with earlier �ushed
+a 5⇥ improvement in throughput in the presence of uncertainty.                                bu�ers to form a collection of sorted runs with exponentially in-
+On the �ip side, E����� tunings have negligible performance loss                              creasing sizes [53]. Frequent merging of sorted runs leads to higher
+when the observed workload exactly matches the expected one.                                  merging costs but facilitates faster lookups (leveling). On the �ip
+                                                                                              side, lazy merging policies (tiering) trade lookup performance for
+PVLDB Reference Format:                                                                       lower merging costs [67].
+Andy Huynh, Harshal A. Chaudhari, Evimaria Terzi, and Manos
+                                                                                              Tuning LSM trees. As the number of applications relying on LSM-
+Athanassoulis. Endure: A Robust Tuning Paradigm for LSM Trees Under
+Workload Uncertainty. PVLDB, 15(8): 1605-1618, 2022.                                          based storage backends increases, the problem of performance tun-
+doi:10.14778/3529337.3529345                                                                  ing for LSM trees has garnered a lot of attention. A common assump-
+                                                                                              tion made by all these methods is that one has complete knowledge
+PVLDB Artifact Availability:                                                                  about the expected workload and the execution environment. Given
+The source code, data, and/or other artifacts have been made available at                     such knowledge, prior work optimizes memory allocation to Bloom
+https://github.com/BU-DiSC/endure.                                                            �lters across di�erent levels, memory distribution between the
+                                                                                              bu�ers and the Bloom �lters, and the choice of merging policies (i.e.,
+1    INTRODUCTION                                                                             leveling or tiering) [26]. Di�erent optimization objectives have led to
+Ubiquitous LSM-based Key-Value Stores. Log-Structured Merge                                   hybrid merging policies with more �ne-grained tunings [27, 28, 42],
+trees (LSM trees) are the most commonly deployed data structures                              optimized memory allocation strategies [14, 49, 51], variations of
+                                                                                              Bloom �lters [55, 83], new compaction routines [5, 52, 66, 67, 84],
+This work is licensed under the Creative Commons BY-NC-ND 4.0 International                   and exploitation of data characteristics [1, 64, 82].
+License. Visit https://creativecommons.org/licenses/by-nc-nd/4.0/ to view a copy of
+this license. For any use beyond those covered by this license, obtain permission by
+                                                                                              The Only Certainty is Uncertainty. Even when accurate infor-
+emailing info@vldb.org. Copyright is held by the owner/author(s). Publication rights          mation about the workload and underlying hardware is available,
+licensed to the VLDB Endowment.                                                               tuning data systems is a notoriously di�cult research problem
+Proceedings of the VLDB Endowment, Vol. 15, No. 8 ISSN 2150-8097.
+doi:10.14778/3529337.3529345                                                                  [19, 22, 73]. The explosive growth in the use of the cloud infras-
+                                                                                              tructure for data management [36, 48, 65] has exacerbated this
+
+
+
+
+                                                                                       1605
+problem due to increased uncertainty and variability in work-                    tuned for varying degrees of workload uncertainty, and is simple
+loads [23, 32, 38, 39, 57, 60, 63, 68–70, 81].                                   enough to be adopted by current state-of-the-art LSM storage
+An Example. Before describing our framework, we give an exam-                    engines (§4 and §5).
+ple that depicts how variation in observed workloads relative to               • We developed an uncertainty benchmark that can test the ro-
+the expected workload – used during tuning of the LSM tree-based                 bustness of current state-of-the-art database systems (§6).
+storage – leads to suboptimal performance. In Figure 1, the G-axis             • In our model-based analysis, we show that robust tunings from
+shows a sequence of workloads executed over an LSM-based en-                     E����� provide up to 5⇥ higher throughput when faced with
+gine, while the ~-axis shows the average disk accesses per workload.             uncertain workloads (§7).
+The experiment is split into three sessions – the �rst and the last            • We integrate and test E����� on RocksDB, a state-of-the-art
+sessions receive the expected workload, while the second session                 LSM storage engine, to show the feasibility of robust tuning
+receives a di�erent workload. Although it has the same reads vs.                 on commercial systems. We show E����� achieves up to 2.4⇥
+writes ratio as the expected workload, it has a higher percentage of             throughput speedups, our algorithm works regardless of data-
+short range queries in comparison to the point queries. The solid                base size (§8).
+black line shows the performance of a system tuned for the ex-
+                                                                               • To encourage reproducible research, we make our robust tuning
+pected workload. Note that the average I/Os increase dramatically
+                                                                                 framework publicly available [7].
+in the second session even though the amount of data being read
+is approximately the same. On the other hand, the blue line corre-
+sponds to each session having its ideal tuning, leading to only half           2   BACKGROUND ON LSM TREES
+as many I/Os per operation. Note that it is not feasible to continually        Basics. LSM trees use the out-of-place ingestion paradigm to store
+change tunings during execution, as it requires redistribution of the          key-value pairs. Writes, updates or deletes are placed in a memory
+allocated memory between di�erent components of the tree and                   bu�er. Once full, its contents are sorted based on the key, forming
+potentially changing its shape. Hence, we want to �nd a tuning that            an immutable sorted run, then �ushed to secondary storage. Sorted
+is close to optimal for both the expected and the observed workload.           runs are organized in levels. Thus for an LSM tree with ! disk-
+Our Work: Robust LSM Tree Tuning. To address this subopti-                     resident levels, we denote the memory bu�er as Level 0, and label
+mality caused by variations in the observed workload, we depart                the remaining levels in storage from 1 to !. The disk-resident sorted
+from the classical view of database tunings which assumes accu-                runs have exponentially increasing sizes via a tunable size ratio ) .
+rate knowledge about the expected workload. Rather, we introduce                  We denote the number of bits of main memory allocated to the
+E�����, a new robust tuning paradigm that incorporates expected                bu�er as < buf , which holds a number of entries with a �xed entry
+uncertainty into optimization and apply it to LSM trees.                       size ⇢. For example, in RocksDB the default bu�er size is < buf =
+    We formulate the R����� T����� problem that seeks an LSM                   64MB, and depending on the application, the entry size typically
+tree con�guration that maximizes the worst-case throughput over                varies between 64B and 1KB. This bu�er at Level 0 can be updated
+all the workloads in the neighborhood of an expected workload.                 in-place, however, runs in levels 1 and beyond are immutable. Each
+We use the notion of KL-divergence between probability distri-                 level 8 has a capacity threshold of () 1)) 8 1 · <⇢buf entries, thus,
+butions to de�ne the neighborhood size, implicitly assuming that               level capacities are exponentially increasing by a factor of ) . The
+the uncertain workloads would be contained in the neighborhood.                total number of levels ! for a given ) is
+As the KL-divergence boundary condition approaches zero, our
+problem becomes equivalent to the classical optimization problem
+                                                                                                           &      ✓           ◆'
+                                                                                                                      # ·⇢
+(henceforth referred to as the N������ T����� problem). More                                       !() ) = log)             +1 ,                 (1)
+                                                                                                                      < buf
+speci�cally, our approach uses as input the expected size of the un-
+certainty neighborhood, which dictates the qualitative characteris-
+                                                                               where # is the total number of entries across all levels [26, 55, 66].
+tics of the solution. Intuitively, the larger the size of the uncertainty
+neighborhood, the larger the workload discrepancy a robust tuning              Compaction Policies: Leveling and Tiering. Classically, LSM
+can accommodate. Leveraging work on robust optimization from                   trees support two merging policies: leveling and tiering. In leveling,
+the Operations Research community [10–12], we e�ciently solve                  each level may have at most one run, and every time a run in Level
+the R����� T����� problem and �nd the robust tuning for LSM                    8 1 (8 1) is moved to Level 8, it is greedily sort-merged (com-
+tree-based storage systems. A similar problem of using workload                paction) with the run from Level 8, if it exists. With tiering, every
+uncertainty while determining the physical design of column-stores             level must accumulate ) runs before they trigger a compaction.
+has been explored in prior work [58]. However, their methodol-                 During a compaction, entries with a matching key are consolidated
+ogy is not well suited for the LSM tuning problem. We provide                  and only the most recent valid entry is retained [30, 59]. Recently
+additional details regarding this in Section 9.                                hybrid compaction policies fuse leveling and tiering in a single tree
+                                                                               to strike a balance between the read and write throughput [27, 28].
+Contributions. To the best of our knowledge, our work presents
+the �rst systematic approach for robust tuning of LSM tree-based               LSM tree Operations. An LSM tree supports: (a) writes of new
+key-value stores under workload uncertainty. Our technical and                 key-value pairs, (b) point queries, and (c) range queries.
+practical contributions can be summarized as follows:                             Writes: All write operations are handled by a bu�er append. Once
+                                                                               the bu�er is full, a compaction is triggered. Any write may include
+• We incorporate workload uncertainty in LSM tuning and show                   either a new key-value pair, an existing key that updates its value,
+  how to �nd a robust tuning e�ciently. Our algorithm can be                   or a special entry that deletes an existing key.
+
+
+
+
+                                                                        1606
+   Point Queries: A point query searches for the value of a speci�c                     Table 1: Summary of problem notation
+unique key. It begins by looking at the memory bu�er, then traverses
+the tree from the smallest to the largest level. For tiering, at each            Type    Term    De�nition
+level a lookup moves from the most to the least recent tier. The              Design     < �lt   Memory allocated for Bloom �lters
+lookup then terminates when it �nds the �rst matching entry. Note                        < buf   Memory allocated for the write bu�er
+that a point query might return either an empty or a non-empty                            )      Size ratio between consecutive levels
+result. We di�erentiate the two because workloads with empty                              c      Compaction policy (tiering/leveling)
+point queries can be further optimized [26].                                  System      <      Total memory (�lters+bu�er) (< = < buf + < �lt )
+   Range Queries: A range lookup returns the most recent versions                         ⇢      Size of a key-value entry
+of the target keys by sort-merging all qualifying runs from the tree.                     ⌫      Number of entries that �t in a page
+Optimizing Lookups. Read performance is optimized using Bloom                             #      Total number of entries
+�lters and fence pointers. In the worst-case, a lookup needs to probe        Workload     I0     Percentage of zero-result point lookups
+every run. To reduce this cost, LSM engines use one Bloom �lter                           I1     Percentage of non-zero-result point lookups
+per run in main memory [26, 31]. Bloom �lters [13] are probabilis-                        @      Percentage of range queries
+tic membership test data structures that exhibit a false positive                         F      Percentage of writes
+5 as a function of the ratio between the memory allocated < �lt
+to them and the elements it indexes. In LSM trees, Bloom �lters
+allow a lookup to skip probing a run altogether if the �lter-lookup
+returns negative. In practice, for e�cient storage, Bloom �lters are       LSM Tree Con�guration. We use to denote the LSM tree tuning
+maintained at the granularity of �les [30]. Fence pointers store           con�guration which describes the values of the tunable parameters
+the smallest key per disk page in memory [26], to quickly identify         together := () , < �lt, c). Note that we only use the memory for
+which page(s) to read for a lookup, and perform up to one I/O per          Bloom �lters < �lt and not < buf , because the latter can be derived
+run for point lookups.                                                     using the former and total available memory: < buf = < < �lt .
+Tuning LSM Trees. Prior to this work, e�orts to systematically             Workload. The choice of the parameters in depends on the input
+tune LSM trees assume that the workload information and the exe-           (expected) workload, i.e., the fraction of empty lookups (I 0 ), non-
+cution environment are accurately known. Under that assumption,            empty lookups (I 1 ), range lookups (@), and write (F) queries within
+the main focus on LSM tuning has been on deciding how to allo-             an observation period. Such a period can be either de�ned either
+cate the available main memory between Bloom �lters and bu�er-             over a �xed time interval, or over a certain number of queries. Note
+ing [49, 51], while often the size ratio and the merging strategy was      that this workload representation is common for analyzing and
+also co-tuned [26] Such design decisions are common across in-             tuning LSM trees [26, 53]. Additionally, complex workloads (i.e.,
+dustry standard LSM-based engines such as Apache Cassandra [8],            SQL statements) generate access patterns on the storage engine and
+AsterixDB [6], RocksDB [31], and In�uxDB [47]. In addition, recent         can be broken down into the same basic operations. This mapping
+work has introduced new hybrid merging strategies [27, 28, 67],            of complex queries to basic operations is also common for perfor-
+and optimizations for faster data ingestion [54] and performance           mance tuning of LSM tree-based storage engines [17]. Therefore
+stability [52].                                                            a workload can be expressed as a vector w = (I 0, I 1, @, F) | 0 de-
+                                                                           scribing the proportions of the di�erent kinds of queries. Clearly,
+3     PROBLEM DEFINITIONS                                                  I 0 + I 1 + @ + F = 1 or alternatively: w| e = 1 where e denotes a
+                                                                           column vector of ones.
+In this section, we provide the formal problem de�nitions on how
+                                                                               Each type of query (non-empty lookups, empty lookups, range
+to choose the design parameters of an LSM tree. Before proceeding,
+                                                                           lookups and writes) has a di�erent cost, denoted as / 0 ( ), / 1 ( ),
+we give a brief introduction to our notation.
+                                                                           & ( ), , ( ), as there is a dependency between the cost of each
+                                                                           type of query and the design . For ease of notation, we use c( ) =
+3.1    Notation
+                                                                           (/ 0 ( ), / 1 ( ), & ( ),, ( )) | to denote the vector of the costs of
+As we discussed above, LSM trees have two types of parameters:             executing di�erent types of queries. Thus, given a speci�c con�gu-
+the design parameters that are changed primarly for performance,           ration ( ) and a workload (w), the expected cost for the workload
+and the system parameters that are given and therefore untunable.          can be computed as:
+Design Parameters. The design parameters we consider in this
+paper are the size ratio () ), the memory allocated to the Bloom            C(w, ) = w| c( ) = I 1 ·/ 0 ( )+I 0 ·/ 1 ( )+@·& ( )+F ·, ( ). (2)
+�lters (< �lt ), the memory allocated to the write bu�er (< buf ) and
+the compaction policy (c). These are ubiquitous design parameters          We present a summary of all of our notation in Table 1.
+and have been extensively studied as having the largest impact on
+performance [26, 53]. Therefore, we focus on these parameters in           3.2     The Nominal Tuning Problem
+order to de�ne a problem that is agnostic to the LSM engine used.          Traditionally, the designers have focused on �nding the con�gu-
+Recall that the policy refers to either leveling or tiering.               ration ⇤ that minimizes the total cost C(w, ⇤ ), for a given �xed
+System Parameters. A complex data structure like an LSM tree               workload w. We call this problem the N������ T����� problem,
+also has various system parameters and other non-tunable ones (e.g.,       de�ned as follows:
+total memory (<), data entry size ⇢, page size ⌫, data size # ).
+
+
+
+
+                                                                    1607
+   P������ 1 (N������ T�����). Given �xed w �nd the tuning
+con�guration of the LSM tree # such that
+                          # = arg min C(w,   ).                   (3)
+
+The nominal tuning problem described above captures the classical
+tuning paradigm. It uses a cost-model to �nd a system con�gura-
+tion that minimizes the cost given a speci�c workload and system
+environment. Speci�cally, prior tuning approaches for LSM trees
+solve the nominal tuning problem when proposing optimal memory
+allocation, and merging policies [26, 51].
+
+3.3    The Robust Tuning Problem                                               Figure 2: Workload uncertainty neighborhoods (Uw ), de-
+In this work, we attempt to compute high-performance con�gura-                 noted by the green shaded region, for two di�erent expected
+tions that minimize the expected cost of operation, as expressed               workloads (w) and d.
+in Equation (2), in the presence of uncertainty with respect to the
+expected workload.
+                                                                               solution for the primal, i.e., the original R����� T����� problem.
+   The N������ T����� problem assumes perfect information
+                                                                               The speci�cs of the methodology are described below:
+about the workload for which to tune the system. For example, we
+may assume that the input vector w represents the workload for                 De�ning the Uncertainty Region Uw . Recall that w is a probabil-
+which we optimize, while in practice, w is simply an estimate of               ity vector, i.e., w| e = 1. Thus, in order to de�ne the uncertainty re-
+what the workload will look like. Hence, the con�guration obtained             gion Uw , we use the Kullback-Leibler (KL) divergence function [50]
+by solving Problem 1 may result in high variability in the system              de�ned as follows:
+performance that will inevitably depend on the actual observed                    D��������� 1. The KL-divergence distance between two probabil-
+workload upon the deployment of the system.                                    ity distributions ?Æ = (? 1, · · · , ?< ) | 0 and @Æ = (@ 1, · · · , @< ) | 0
+   We capture this uncertainty by reformulating Problem 1 to take              is de�ned as,
+into account the variability that can be observed in the input work-                                                  ’<         ✓ ◆
+                                                                                                                                  ?8
+load. Given an expected workload w, we introduce the notion of                                         !(Æ ?, Æ@) =       ?8 log      .
+                                                                                                                                  @
+the uncertainty region of w, which we denote by Uw .                                                                  8=1           8
+   We can de�ne the robust version of Problem 1, under the as-                 Since our workloads are represented as probability distributions,
+sumption that there is uncertainty in the input workload as follows:           the KL-divergence is the most natural choice of distance between
+ P������ 2 (R����� T�����). Given w and uncertainty region                     them. One could use !? norms instead. However, calculating the !?
+Uw �nd the tuning con�guration of the LSM tree ' such that                     norm between workloads requires a summation of the ? th power
+                                                                               of di�erences in probabilities, which are extremely small values,
+                            =   arg min C( ŵ, )
+                      '                                                        which are not meaningful in this setting.
+                    s.t.,       ŵ 2 Uw .                         (4)             Using the KL-divergence we can now formalize the uncertainty
+                                                                               region around an expected workload w as follows,
+Note that the above problem de�nition intuitively states the follow-
+                                                                                        Uw = {ŵ 2 R4 | ŵ
+                                                                                           d
+ing: it recognizes that the input workload w will not be observed                                                0, ŵ| e = 1,   ! ( ŵ, w)  d }.      (5)
+exactly, and it assumes that any workload in Uw is possible. Then,             Here, d determines the maximum KL-divergence that is allowed
+it searches for the con�guration w that is best for the worst-case             between any workload ŵ in the uncertainty region and the input
+scenario among all those in Uw .                                               expected workload w. Note that the de�nition of the uncertainty
+    The challenge in solving R����� T����� is that one needs to                region takes as input the parameter d, which intuitively de�nes the
+explore all the workloads in the uncertainty region in order to solve          neighborhood around the expected workload. Figure 2 shows an ex-
+the problem. In the next section, we show that this is not necessary.          ample of the uncertainty region for d = 0.2 and expected workload
+In fact, by appropriately rewriting the problem de�nition we show              w0 = (25%, 25%, 25%, 25%), and for d = 2 and expected workload
+that we can solve Problem 2 in polynomial time.                                w1 = (97%, 1%, 1%, 1%). For this visualization, we combined the
+                                                                               two types of read queries (empty and non-empty) onto one axis.
+4     ALGORITHMS FOR ROBUST TUNING                                             Note that the shape of the uncertainty region is de�ned by the
+In this section, we discuss our solutions to the R����� T�����                 expected workload, the value of d, and the fact that all workloads
+problem. On a high level, the solution strategy is the following:              are restricted to be probability distributions. In terms of notation,
+                                                                                                                                     d
+�rst, we express the objective of the problem (as expressed in Equa-           d is required for de�ning the uncertainty region Uw . However, we
+tion (4)) as a standard continuous optimization problem. We then               drop the superscript notation unless required for context.
+take the dual of this problem and use existing results in robust               Rewriting of the ROBUST TUNING Problem (Primal). Using
+                                                                                                                                              d
+optimization to show: (8) the duality gap between the primal and               the above de�nition of the workload uncertainty region Uw , we
+the dual is zero, and (88) the dual problem is solvable in polynomial          are now ready to proceed to the solution of the R����� T�����
+time. Thus, the dual solution can be translated into the optimal               problem. For a given d, the problem de�nition, as captured by
+
+
+
+
+                                                                        1608
+Equation (4), can be rewritten as follows:                                        In our case, the cost function for the range queries is not convex
+                             min maxd ŵ c( ).
+                                            |
+                                                                  (6)          w.r.t. size ratio ) for the tiering policy. However, on account of its
+                                 ŵ2 Uw                                        smooth non-decreasing form, we are still able to �nd the global
+This rewrite captures the intuition that the optimization is done              minimum solution for
+                                                                                                  ⇢           ’ <           ✓          ◆
+over the worst-case scenario across all the workloads in the uncer-                                                           28 ( ) [
+                                                                                           min [ + d_ + _          F8 q ⇤ !              .       (10)
+tainty region Uw . Equation (6) can be rewritten by introducing an                         ,_ 0,[                                  _
+                                                                                                               8=1
+additional variable V 2 R, as follows:
+                                                                               This minimization problem can be solved using the Sequential
+                 min              V                                            Least Squares Quadratic Programming solver (SLSQP) included in
+                     V,
+                                                                               the popular Python optimization library SciPy [78]. Solving this
+                     s.t.,   ŵ| c( )  V       8ŵ 2 Uw .        (7)
+                                                                               problem outputs the values of the Lagrangian variables _ and [ and
+This reformulation allows us to remove the min max term in the                 most importantly the con�guration that optimizes the objective
+objective from Equation (6). The constraint in Equation (7) can be             of the R����� T����� problem – for input d. In terms of running
+equivalently expressed as,                                                     time, SLSQP solver outputs a robust tuning con�guration for a
+      V        max ŵ| c( )| ŵ 2 Uw                                           given input in less than a second.
+                ŵ                                                             Finding a Value for d. Since d is a robust tuning parameter, we also
+                    ⇢                  ’<          ✓ ◆
+                                                    F̂8                        provide a few heuristics for setting it. In the presence of historically
+          =    max ŵ| c( ) ŵ| e = 1,     F̂8 log      d .
+               ŵ 0                                 F 8                        observed workloads, a DBA may calculate d using the following
+                                       8=1
+                                                                               de�nition: that is, d is set to be the largest KL-divergence between
+Finally, the Lagrange function for the optimization on the right-
+                                                                               any observed workload and the corresponding workload average.
+hand side of the above equation is:
+                                                                               If the DBA does not have information about past workloads, they
+                                   ’<          ✓ ◆
+                                                F̂8                            may provide ranges for each query type; then, can sample work-
+   L ( ŵ, _, [) = ŵ| c( ) + d_ _     F̂8 log      + [ (1 ŵ| e),
+                                                F 8                            loads within those ranges and then calculate d using the de�niton
+                                   8=1
+                                                                               above to �nd an appropriate value. DBAs may instead provide two
+where _ and [ are the Lagrangian variables.                                    workloads, one that is expected during a normal observation pe-
+Formulating the Dual Problem. We can now express the dual                      riod, and another o�-period or unlikely workload. In this case, The
+objective as,                                                                  KL-divergence between these two workloads can be used as d.
+                    6(_, [) = max L ( ŵ, _, [),       (8)
+                                   ŵ 0
+which we need to minimize.
+                                                                               5     THE COST MODEL OF LSM TREES
+  Now we borrow the following result from [10],                                In this section, we provide the detailed cost model used in E�����
+                                                                               to accurately capture the behavior of an LSM tree. Following prior
+   L���� 4.1 ([10]). A con�guration is the optimal solution to the             work on LSM trees [26, 55], we focus on four types of operations:
+R����� T����� problem if and only if min[,_ 0 6(_, [)  V where                point queries that return an empty result, point queries that have a
+the minimum is attained for some value of _ 0.                                 match, range queries, and writes.
+   In other words, minimizing the dual objective 6(_, [) (as ex-
+pressed in Equation (8)) will lead to the optimal solution for the             5.1    Model Basics
+R����� T����� problem.                                                         When modeling the read cost of LSM trees, a key quantity to ac-
+Solving the Dual Optimization Problem Optimally. Formulat-                     curately capture is the amount of extra read I/Os that take place.
+ing the dual problem and using the results of Ben-Tal et al. [10], we          While Bloom �lters are used to minimize those, they allow for a
+have shown that the dual solution leads to the optimal solution for            small fraction of false positives. If the �lter returns negative, the
+the R����� T����� problem. Moreover, we can obtain the optimal                 target key does not exist in the run, and the lookup skips the access
+solution to the original R����� T����� problem in polynomial                   saving one I/O. If a �lter returns positive, then the target key may
+time, a consequence of the tractability of the dual objective.                 exist, so the lookup probes the run at a cost of one I/O. If the run
+   To solve the dual problem, we �rst simplify the dual objective              contains the correct key, the lookup terminates. Otherwise, we
+6(_, [) so that it takes the following form:                                   have a false positive and the lookup continues to probe the next run
+                                  ’:           ✓          ◆                    increasing the I/O cost of a lookup. The false positive rate (n) of a
+                                                 c8 ( ) [                      standard Bloom �lter designed to query n entries using a bit-array
+            6(_, [) = [ + d_ + _      F8 q ⇤ !              .      (9)
+                                  8=1
+                                                      _                        of size m is shown by [76] to be calculated as follows:
+                                                                                                                           2
+In Equation (9), q ⇤ ! (.) denotes the conjugate of KL-divergence
+                                                                                                                  m
+                                                                                                          n =4    n ·ln(2)     .
+function and c8 corresponds to the 8-th dimension of the cost vector
+                                                                               Note that the above equation assumes the use of an optimal number
+c( ) as de�ned in Section 3.1 – clearly in this case : = 4 as we have
+                                                                               of hash functions in the Bloom �lter [79].
+4 types of queries in our workload. Results of Ben-Tal et al. [10]
+                                                                                  Classically, LSM tree based key-value stores use the same number
+show that minimizing the dual function as described in Equation (9)
+                                                                               of bits-per-entry across
+                                                                                                     ⇣ all Bloom
+                                                                                                              ⌘ �lters. This means that a lookup
+is a convex optimization problem, and it can be solved optimally in
+polynomial time if and only if the cost function c( ) is convex in             probes on average $ 4 <�lt/# of the runs, where < �lt is the overall
+all its dimensions.                                                            amount of main memory allocated to the �lters. As < �lt approaches
+
+
+
+
+                                                                        1609
+                           ⇣          ⌘
+                                                                                                         () 2)
+0 or in�nity, the term $ 4 <�lt/# approaches 1 or 0 respectively.                  in an additional 2 · 58 () ) extra I/Os. Thus, we can compute the
+Here, we build on of the state-of-the-art Bloom �lter allocation                   non-empty point query cost as an expectation over the entry being
+strategy proposed in Monkey [26] that uses di�erent false positive                 found on any of the !() ) levels of the tree as follows:
+rates at di�erent levels of the LSM tree to o�er optimal memory                                   Õ! () ) () 1) ·) 8 1 <buf
+                                                                                                                             ✓
+                                                                                                                                 Õ
+                                                                                                                                              ◆
+                                                                                                8
+                                                                                                >
+allocation; for a size ratio ) , the false positive rate corresponding                          >
+                                                                                                >                      · ⇢ 1 + 89 =11 5 9 () ) ,       if c = leveling
+                                                                                                >
+                                                                                                >
+                                                                                                   8=1      # 5 () )
+                                                                                                >
+                                                                                                >                            ✓
+to the Bloom �lter at the level 8 is given by                                                   >
+                                                                                                <
+                                                                                       / 1 ( ) = Õ! () ) () 1) ·) 8 1 · <buf 1 + () 1) · Õ8 1 5 () )                     (14)
+                                                                                                >
+                                                                                                >
+                                                                                                >
+                                                                                                                                              9 =1 9
+                                                                                                                                    ◆
+                                                                                                   8=1      # 5 () )      ⇢
+                                     )                                                          >
+                                                                                                >
+                             )      ) 1          < �lt    2                                     >
+                                                                                                > Õ! () ) () 1) ·) 8 1
+                                                  # ln(2)                                       > 8=1                    () 2)
+                  58 () ) =            ·4             .               (11)                      :           # 5 () )
+                                                                                                                       + 2 · 58 () ) ,                 if c = tiering.
+                          ) ! () )+1 8
+Additionally, false positive rates for all levels satisfy 0  58 () )  1.         Range Queries Cost (&). A range query issues !() ) or !() )·() 1)
+It should be further noted that Monkey optimizes false positive                    disk seeks (one per run) for leveling and tiering respectively. Each
+rates at individual levels to minimize the worst-case average cost                 seek is followed by a sequential scan. The cumulative number of
+of empty point queries. Non-empty point query costs, being signi�-                 pages scanned over all runs is ( RQ · #⌫ , where ( RQ is the average
+cantly lower than those of empty point queries, are not considered                 proportion of all entries included in range lookups. Hence, the
+during the optimization process.                                                   overall range lookup cost & in terms of pages reads is as follows:
+LSM Tree Design & System Parameters. In Section 3.1 we in-
+                                                                                                  8
+                                                                                                  >
+troduced the key design and system parameters needed to model                                     <( RQ · #⌫ + !() ),
+                                                                                                  >                                          if c = leveling
+LSM tree performance. In addition to those parameters, there are                       &( ) =                                                        (15)
+                                                                                                >
+                                                                                                >( RQ · #⌫ + !() ) · () 1),       if c = tiering.
+two auxiliary and derived parameters we use in the cost model                                   :
+presented in this section: the potential storage asymmetry in reads                Write Cost (, ). We model worst-case writing cost assuming that
+and writes ( rw ) and the expected selectivity of range queries (( RQ ).           the vast majority of incoming entries do not overlap. This means
+                                                                                   that most entries will have to propagate through all levels of the
+5.2    The Cost Model                                                              LSM tree. Following the state-of-the-art write cost model, we as-
+In this section, we model the costs in terms of expected number of                 sume that every written item participated in ⇡ )) 1 and ⇡ ) 2 1
+I/O operations required for the ful�llment of the individual queries.              merges with tiering and leveling respectively. We multiply these
+Expected Empty Point Query Cost (/ 0 ). A point query that                         costs by !() ) since each entry gets merged across all levels, and
+returns an empty result will have visited all levels (and every sorted             we divide by the page size ⌫ to get the units in terms of I/Os. Since
+run of every level for tiering), and issues an I/O for every false                 LSM trees often employ solid-state storage that has an asymmetric
+positive result amongst the Bloom �lters. Therefore, the expected                  cost for reads and writes, we represent this storage asymmetry as
+number of I/Os per level depends on the Bloom �lter memory                           rw . For example, a device for which a write operation is twice as
+allocation at that level. Hence, Equation (12) expresses / 0 in terms              expensive as a read operation has rw = 2. The overall I/O cost is
+of the false positive rates at each level:                                         captured by Equation (16):
+                    8
+                    >        Õ! () )                                                            8
+                                                                                                > ! () ) () 1)
+                    < () 1) 8=1 58 () ), if c = leveling
+                    >                                                                           < ⌫ · 2 · (1 + rw ),
+                                                                                                >                                 if c = leveling
+                             Õ! () )                               (12)               ,( ) =                                                         (16)
+          /0 ( ) =
+                    >
+                    > () 1) 8=1                                                                 >
+                                                                                                > ! () ) · () 1) · (1 + rw ),     if c = tiering.
+                                     58 () ), if c = tiering.                                   : ⌫
+                    :                                                                                        )
+
+For leveling, each level has exactly one run, while with tiering, each             When ) is set to 2, tiering and leveling behave identically, so the
+level has up to () 1) runs. Each run at the same level in tiering                  two parts of the equation produce the same result.
+will have equal false positives rates on account of their equal sizes.             Total Expected Cost. The total expected operation cost, C(w, ),
+Expected Non-empty Point Query Cost (/ ). There are two                            is computed by weighing the empty point lookup cost / 0 ( ) from
+components to the expected non-empty point query cost. First, we                   Equation (12), the non-empty point lookup cost / ( ) from Equa-
+assume that the probability of a point query �nding a non-empty                    tion (14), the range lookup cost & ( ) from Equation (15), and the
+result in a level is proportional to the size of the level. Thus, the              write cost , ( ) from Equation (16) by their proportion in the
+probability of such a query being satis�ed on level 8 by a unit cost               workload represented by the terms I 0 , I, @ and F respectively (Note
+                          () 1) ·) 8 1                                             I 0 + I 1 + @ + F = 1). This is the exact computation of the cost done
+I/O operation is simply # () ) · <⇢buf , where # 5 () ) denotes the
+                            5                                                      in Equation (2) and in the de�nitions of the N������ T����� and
+number of entries in a tree completely full up to !() ) levels:                    R����� T����� problems (Equations (3) and (4) respectively).
+                              !’
+                               () )
+                                                          < buf
+                 # 5 () ) =           ()   1) · ) 8 1 ·         .    (13)          6     UNCERTAINTY BENCHMARK
+                                                           ⇢
+                              8=1                                                  In this section, we describe the uncertainty benchmark that we use
+Second, we assume that all levels preceding level 8 will trigger an                to evaluate the robust tuning con�gurations given by E�����, both
+I/O operations with a probability equivalent to the false positive                 analytically using the cost models, and empirically using RocksDB.
+rates of the Bloom �lters at those levels. Similarly to empty point                It consists of two primary components: (1) Expected workloads and,
+queries, the expected cost of such failed I/Os on preceding levels                 (2) Benchmark set of sampled workloads, described below.
+           Õ
+is simply 89=11 5 9 () ). In the case of tiering, we assume that on                Expected Workloads. We create robust tunings con�gurations
+average, the entry is found in the middle run of the level resulting               for 15 expected workloads encompassing di�erent proportions of
+
+
+
+
+                                                                            1610
+                    Table 2: Tested expected workloads.
+
+                                           Expected Workloads
+       F0     F1    F2    F3    F4    F5     F6    F7    F8     F9   F 10   F 11   F 12   F 13   F 14
+I0 :   25%    97%    1%   1%    1%    49%    49%   49%   1%     1%   1%     33%    33%    33%    1%
+I1 :   25%     1%   97%   1%    1%    49%    1%    1%    49%   49%   1%     33%    33%    1%     33%
+@:     25%     1%    1%   97%   1%     1%    49%    1%   49%    1%   49%    33%     1%    33%    33%
+F:     25%     1%    1%    1%   97%    1%     1%   49%    1%   49%   49%     1%    33%    33%    33%
+                    Unimodal                       Bimodal                         Trimodal
+
+
+
+
+query types. We catalog them into uniform, unimodal, bimodal, and
+trimodal categories based upon the dominant query types. While                                                 Figure 3: Average delta throughput F̂ ( # , ' ) for each cat-
+this breakdown of dominant queries is similar to benchmarks such                                               egory of expected workload.
+as YCSB, we provide a more comprehensive coverage of potential
+workloads. A minimum 1% of each query type is always included
+in every expected workload to ensure a �nite KL-divergence. A
+complete list of all expected workloads is in Table 2.                                                         con�guration 1 for a given workload w as follows,
+Benchmark Set of Sampled Workloads. We use the benchmark                                                                                       1/⇠ (w, 2 )   1/⇠ (w, 1 )
+set of 10K workloads B as a test dataset over which to evaluate                                                                w ( 1,   2) =
+                                                                                                                                                      1/⇠ (w, 1 )
+                                                                                                                                                                           .
+the tuning con�gurations. These con�gurations are generated as
+follows: �rst, we independently sample the number of queries cor-                                               w ( 1 , 2 ) > 0 implies that 2 outperforms 1 when executing a
+responding to each query type uniformly at random from a range                                                 workload w and vice versa when w ( 1, 2 ) < 0.
+(0, 10000) to obtain a 4-tuple of query counts. Next, we divide the                                            Throughput Range (⇥). While normalized delta throughput com-
+individual query counts by the total number of queries in the tuple                                            pares two di�erent tunings, we use the throughput range to evaluate
+to obtain a random workload that is added to the benchmark set.                                                an individual tuning w.r.t. the benchmark set B as follows,
+We use the actual query counts during the system experimentation                                                                               ✓                    ◆
+where we execute individual queries on the database.                                                                                                1          1
+                                                                                                                           ⇥ B ( ) = max                              .
+   This type of workload breakdown can commonly be seen in                                                                           w0 ,w1 2 B ⇠ (w0 , )  ⇠ (w1, )
+LSM trees as shown in a survey of workloads in Facebook’s own
+                                                                                                               ⇥ B ( ) intuitively captures the best and the worst-case outcomes
+pipeline [17]. The authors report that ZippyDB, a distributed KV
+                                                                                                               of the tuning . A smaller value of this metric implies higher con-
+store that uses RocksDB, experiences workloads with 78% gets, 19%
+                                                                                                               sistency in performance.
+writes, and 3% range reads. This breakdown is similar to workload
+11, and the exact workload is in the benchmark set B.
+   Note that while the same B is used to evaluate di�erent tun-                                                7.2    Experiment Design
+ings, it represents a di�erent distribution of KL-divergences for                                              To evaluate the performance of our proposed robust tuning ap-
+the corresponding expected workload associated with each tuning.                                               proach, we design a large-scale experiment comparing di�erent
+In the next two sections, we use our uncertainty benchmark to                                                  tunings over the sampled workloads in B using the analytical cost
+show that tuning with E����� achieves signi�cant performance                                                   model. For each of the expected workloads in Table 2, we obtain a
+improvement using both a model-based analysis (Section 7), and                                                 single nominal tuning con�guration ( # ) by solving the N������
+an experimental study (Section 8).                                                                             T����� problem. For 15 di�erent values of d in the range (0.0, 4.0)
+                                                                                                               with a step size of 0.25, we obtain a set of robust tuning con�gu-
+                                                                                                               rations ( ' ) by solving the R����� T����� problem. Finally, we
+7      MODEL-BASED EVALUATION
+                                                                                                               individually compare each of the robust tunings with the nominal
+We now present our detailed model-based study of E����� that                                                   over the 10,000 workloads in B to obtain over 2 million comparisons.
+uses more than 10000 di�erent noisy workloads for all 15 expected                                              While computing the costs, we assume that the database contains
+workloads, showing performance bene�t of up to 5⇥. In addition,                                                10 million entries each of size 1 KB. The analysis presented in the
+we show that E����� perfectly matches the classical tuning when                                                following sections assumes a total available memory of 10 GB. How-
+there is no uncertainty, that is when the observed workload always                                             ever, we exhaustively con�rmed that changing these parameters
+matches the expected one, and we pass this information to the                                                  does not qualitatively a�ect the outcomes of our experiment.
+robust tuner. Further, we provide recommendations on how to
+choose uncertainty parameters.
+                                                                                                               7.3    Results
+                                                                                                               Here, we present an analysis of the comparisons between the robust
+7.1          Evaluation Metrics                                                                                and the nominal tuning con�gurations. Using an o�-the-shelf global
+Normalized Delta Throughput ( ). De�ning throughput as the                                                     minimizer from the popular Python optimization library SciPy [78],
+reciprocal of the cost of executing a workload, we measure the                                                 we obtain both nominal and robust tunings with the runtime for
+normalized delta throughput of a con�guration 2 w.r.t. another                                                 the above experiment being less than 10 minutes.
+
+
+
+
+                                                                                                        1611
+          Figure 4: Impact of d on normalized delta throughput ŵ ( # , ' ) for tunings with expected workload w11 .
+
+
+
+
+             (a) Histograms of throughput 1/⇠ ( ŵ, ) for tunings with expected workload w11                    (b) Throughput range ⇥B ( )
+                                                   Figure 5: Impact of d on throughput.
+
+
+Comparison of Tunings. First, we address the question – is it               Impact of Tuning Parameter d. Next, we address the question –
+bene�cial to adopt robust tunings relative to the nominal tunings? In-      how does the uncertainty tuning parameter d impact the performance
+tuitively, it should be clear that the performance of nominally tuned       of the robust tunings? In Figure 4, we take a deep dive into the
+databases would degrade when the workloads being executed on                performance of robust tunings for an individual expected workload
+the database are signi�cantly di�erent from the expected workloads          for di�erent values of d. We observe that the robust tunings for d =
+used for tuning. In Figure 3, we present performance comparisons            0 i.e., zero uncertainty, are very close to the nominal tunings. As the
+between the robust and the nominal tunings for di�erent values of           value of d increases, its performance advantage over the nominal
+uncertainty parameter d. We observe that robust tunings provide             tuning for the observed workloads with higher KL-divergence w.r.t.
+substantial bene�t in terms of normalized delta throughput for              expected workload increases. Furthermore, the robustness of such
+unimodal, bimodal, and trimodal workloads. The normalized delta             con�gurations have logically sound explanations. The expected
+throughput ŵ ( # , ' ) shows over 95% improvement on average               workload in Figure 4 consists of just 1% writes. Hence, for low values
+over all ŵ 2 B for robust tunings with d 0.5, when the expected            of d, the robust tuning has higher size ratio leading to shallower
+workload used during tuning belongs to one of these categories. For         LSM trees to achieve good read performance. For higher values of
+uniform expected workload, we observe that the nominal tuning               d, the robust tunings anticipate an increasing percentage of write
+outperforms the robust tuning by a modest 5%.                               queries and hence limit the size ratio to achieve higher throughput.
+   Intuitively, unbalanced workloads result in over�t nominal tun-              In Figure 5, we show the impact of tuning parameter d on the
+ings. Hence, even small variations in the observed workload can             throughput range. In Figure 5a we plot a histogram of the nom-
+lead to signi�cant degradation in the throughput of such nominally          inal and robust throughputs for workload w11 . As the value of
+tuned databases. On the other hand, robust tunings by their very            d increases, the interval size between the lowest and the highest
+nature take into account such variations and comprehensively out-           throughputs for the robust tunings consistently decreases. We pro-
+perform the nominal tunings. In the case of the uniform expected            vide further evidence of this phenomenon in Figure 5b, by plotting
+workload w0 , a low value of d covers a larger area of possible             the decreasing throughput range ⇥ B ( ' ) averaged across all the
+workloads then that same value would in a di�erent workload as              expected workloads. Thus, robust tunings not only provide a higher
+evident in Figure 2. In this case, when tuned for high values of d,         average throughput over all ŵ 2 B, but they have a more consistent
+the robust tunings are unrealistically pessimistic and lose out some        performance (lower variance) compared to the nominal tunings.
+performance relative to the nominal tuning.
+
+
+
+
+                                                                     1612
+                                                                                average I/Os per query allows us to compare the e�ects of di�erent
+                                                                                tuning con�gurations, while simultaneously minimizing the e�ects
+                                                                                of extraneous factors on the database performance.
+
+                                                                                8.2    Experiment Design
+                                                                                To evaluate the performance of our proposed robust tuning ap-
+                                                                                proach, we create multiple instances of RocksDB using di�erent
+                                                                                tunings and empirically measure their performance by executing
+                                                                                workloads from the uncertainty benchmark B. To measure the
+                                                                                steady-state performance of the database, each instantiation is ini-
+Figure 6: Delta throughputs ŵ ( # , ' ) for d vs          ! ( ŵ, w).
+                                                                                tially bulk loaded with the exact same sequence of 10 million unique
+                                                                                key-value pairs each of size 1 KB. Each key-value entry has a 16-bit
+Choice of d. Now, we address the question – What is the appropriate             uniformly at random sampled key, with the remaining bits being
+choice for the value of uncertainty parameter d? In Figure 6, we ex-            allocated to a randomly generated value.
+plore the relationship between d and the KL-divergence ! ( ŵ, w)                  While evaluating the performance of the database, we sample a
+for ŵ 2 B, by making a contour plot of the corresponding nor-                  sequence of workloads from the benchmark set B. For each work-
+malized delta throughput ŵ ( # , ' ). We con�rm our intuition                  load, the observation period is set to 200,000 queries, therefore
+that nominal tunings compare favorably with our proposed robust                 each experiment issues a total of 6 million queries to the database.
+tunings only in two scenarios: (1) when the observed workloads are              Each sequence is cataloged into one of the categories — expected,
+extremely similar to the expected workload (close to zero observed              empty read, non-empty read, read, range, and write — based on the
+uncertainty), and (2) when the robust tunings assume extremely                  dominant query type in the workloads in the sequence. Speci�cally,
+low uncertainty with d < 0.2 while the observed variation is higher.            the expected session contains workloads with a KL-divergence less
+Based on this evidence, we propose the following rule of thumb:                 than 0.2 w.r.t. the expected workload used for tuning. In all other
+the maximum KL-divergence between any two pairs of observed                     sessions, the dominant query type encompasses 80% of the total
+workloads is a reasonable value of d in practice.                               queries in the session. The remaining 20% of queries may belong to
+                                                                                any of the query types. While generating keys of the queries to run
+8     SYSTEM-BASED EVALUATION                                                   on the database, we ensure that non-empty point reads query a key
+In this section, we deploy E����� as the tuner of the state-of-the-art          that exists in the database, while the empty point reads query a key
+LSM-based engine RocksDB, and we show that RocksDB achieves                     that is not present in the database but is sampled from the same
+up to 90% lower workload latency in the presence of uncertainty. We             domain. All range queries are generated with minimal selectivity
+further show that the tuning cost is negligible, and the e�ectiveness           ('& to act as short range queries reading on average zero to two
+of E����� is not a�ected by data size.                                          pages per level. Lastly, write queries consist of randomly generated
+                                                                                keys that are distinct from the existing keys in the database. Initial-
+8.1    Experimental Setup & Measurements                                        izing RocksDB and bulk loading requires 30 mins; the execution of
+                                                                                individual workloads takes on average 5 mins.
+Our server is con�gured with two Intel Xeon Gold 6230 processors,
+384 GB of main memory, a 1 TB Dell P4510 NVMe drive, Cen-
+tOS 7.9.2009, and a default page size of 4 KB. We use Facebook’s                8.3    Experimental Results
+RocksDB, a popular LSM tree-based storage system, to evaluate our               In this section, we replicate key insights from Section 7, evaluate sys-
+approach [31]. While RocksDB provides implementations of level-                 tem performance, and show that E����� scales with database size.
+ing and tiering policies, the system implements micro-optimizations             Due to space constraints, we present detailed results for expected
+not common across all LSM tree-based storage engines. Therefore,                workloads, w7 and w11 . However, Table 3 summarizes the normal-
+we use RocksDB’s event hooks to implement both classic leveling                 ized delta throughputs w ( # , ' ) for each expected workload in
+and tiering policies to benchmark the common compaction strate-                 B. The interested reader can �nd detailed plots for all workloads
+gies. Following the Monkey memory allocation scheme [26], we                    in the extended version of this work [41].
+allocate di�erent bits per element for Bloom �lters per level. To               Cost of Tuning. For every experiment, we solve for either the
+obtain an accurate count of block accesses we enable direct I/Os                nominal or the robust tuning prior to the experiments. Solving for
+for both queries and compaction and disable the block cache. The                nominal and robust tuning takes less than 10ms, which is negligible
+remaining parameters such as bu�er size are set by the tuning.                  w.r.t. workload execution time.
+Empirical Measurements. We use the internal RocksDB statistics                  Read Performance. We begin by examining the system perfor-
+module to measure the number of logical block accesses during                   mance and verifying that the model-predicted I/O and the system-
+reads, bytes �ushed during writes, and bytes read and written in                measured I/O match when considering read queries in Figures 7
+compactions. The number of logical blocks accessed during writes                and 8. In both �gures, we include the model-predicted I/Os per
+is calculated by dividing the number of bytes reported by the default           query (top), the I/Os per query measured on the system (middle),
+page size. To estimate the amortized cost of writes, we compute                 and the system latency (bottom), for both nominal and robust tun-
+the I/Os from compactions across all workloads of a session and                 ings across di�erent read sessions. Additionally, the total through-
+redistribute them across write queries. Our approach of measuring               put numbers in queries per second are reported at the end of the
+
+
+
+
+                                                                         1613
+Figure 7: System and model performance for robust and nominal tunings in a read-only query sequence. Here the tuning
+parameter d matches the observed value of ! ( ŵ, w7 ). Each session contains the label and average workload.
+
+
+
+
+   Figure 8: Read-only sequence where the observed workloads ŵ is close to the expected, hence d and                       ! ( ŵ, w11 ) deviate.
+
+
+system latency graph. The empirical measurements con�rm that                  from preceding workloads. From the write session of Figure 9, we
+the predicted performance bene�ts from the model translate to                 observe that the nominal tuning su�ers from high latency and I/O
+similar performance bene�ts in practice. Note that the discrepancy            cost. This is due to the large size ratio ) that creates a shallow tree
+observed between the relative performance between the nominal                 with extremely large levels which su�ers from a long stalls during
+and the robust tunings in the presence of range queries (session 2            compactions. Compare this to the robust tuning: the lower size
+in Figure 7) is due to the fence pointers in RocksDB. The analytical          ratio creates a tree with more stable performance for both I/Os per
+model does not account for fence pointers allowing the system to              query and query latency which leads to a higher overall throughput.
+completely skip a run, which may reduce the measured I/Os for                 Overall, we observe that the robust tuning reduces I/O and latency
+short range queries compared to the predicted I/Os.                           by up to 90%. Figures 7–9 con�rm that our analytical model can
+Write Performance. In presence of writes in Figure 9, the model               accurately capture the relative performance of di�erent tunings.
+is still predicting the disk accesses successfully and E����� leads           Robust Outperforms Nominal for Properly Selected d. In the
+to signi�cant performance bene�ts. Note that now the structure of             model evaluation (Figure 6), we showed that robust tuning out-
+the LSM tree is continually changing across all sessions due to the           performs the nominal tuning in the presence of uncertainty for
+compactions caused by write queries. For example, in Figure 9 the             tuning parameter d approximately greater than 0.2. This is further
+dip in measured I/Os and latency in the range-query session are               supported by all the system experiments described. Speci�cally,
+the result of empty levels being created via compactions triggered            Figures 7 and 9 show instances where the KL-divergence of the
+
+
+
+
+                                                                       1614
+    Figure 9: Sequence where d and                      ! ( ŵ, w11 ) closely match. Both system I/O and latency show reductions of up to 90%.
+
+
+Table 3: System measured normalized delta throughputs
+ w ( # , # ) and their respective tunings for experiments
+on all expected workloads in B with an optimally selected d.
+
+       Expected                = () , < �lt , c )
+     Workload (w)          #                        '          w( #,    ')
+          w0         (5.2, 3.5, L)       (5.1, 3.1, L)            0.0
+          w1         (5.7, 9.4, L)       (5.0, 4.2, L)            0.0
+          w2         (5.8, 5.3, L)       (5.0, 1.0, L)            0.1
+          w3         (100, 0.0, L)       (5.4, 1.0, L)            0.4
+          w4         (17, 3.2, T)        (4.6, 1.0, L)            1.5
+          w5         (5.5, 8.8, L)       (5.1, 3.9, L)            0.1
+          w6         (63, 4.8, L)        (8.2, 1.0, L)            0.8
+          w7         (8.4, 8.2, T)       (3.4, 1.0, L)            0.5
+          w8         (62, 0.0, L)        (8.0, 1.0, L)            0.6                Figure 10: Impact of database size on performance. All tun-
+          w9         (8.3, 6.9, T)       (3.3, 1.0, L)            0.8                ings use the same expected workload w11 with executed work-
+          w10        (5.0, 0.0, L)       (5.0, 1.0, L)            0.0                loads shown above each graph. Points at each power of 10
+          w11        (47, 4.7, L)        (11, 1.9, L)             1.4                show <1D 5 and the tuning (L for leveling, T for tiering).
+          w12        (6.2, 8.1, T)       (2.8, 3.1, L)            0.2
+          w13        (5.1, 3.5, L)       (5.0, 1.0, L)           -0.1
+          w14        (5.1, 0.0, L)       (5.0, 1.0, L)           -0.1                database. Each point in Figure 10 is calculated based on a series
+                                                                                     of workload sessions similar to the ones presented in Figures 8
+                                                                                     (9) for the left (right) part of Figure 10. All points use the same
+observed workload averaged across all the sessions w.r.t. the ex-                    expected workload, therefore the nominal and robust tunings are
+pected workload is close to the tuning parameter d. Additionally,                    the same across each graph. We observe that the robust and nominal
+we present results for all expected workloads in Table 3. Each entry                 tuning increase bu�er memory as the initial database size grows.
+in the table summarizes the total throughput after running the                       As a result, for all cases, the number of initial levels is the same
+same experimental setup presented in Figure 9. We observe that the                   regardless of the number of entries. This highlights the importance
+robust outperforms the nominal in 10 of our expected workloads,                      of the number of levels w.r.t performance. Finally, the performance
+with only 2 workloads where robust tuning does worse, however,                       gap between robust and nominal stays consistent as database size
+in these cases the reported throughputs are comparable. In each                      grows, showing that E����� is e�ective regardless of data size.
+of these experiments, the robust tuning outperforms the nominal
+resulting in up to a 90% reduction in latency and system I/O. Lastly,                8.4    Robustness is All You Need
+in Figure 8, the observed workloads are similar to the expected one                  One of the key challenges during the evaluation of tuning con�g-
+( ! ( ŵ, w11 ) < 0.2), resulting in a latency increase of 20%.                      urations in presence of uncertainty is the challenge in measuring
+ENDURE Scales with Data Size. To verify that E����� scales, we                       steady-state performance. In Section 8.3, we show that the cost-
+repeat the previous experiments, while varying the size of the initial               model can accurately predict the empirical measurements. In the
+
+
+
+
+                                                                              1615
+course of this study, using our model, we compared over 700 dif-          to accommodate shifting workloads [34, 35, 43, 71]. More recently
+ferent robust tunings with their nominal counterparts over the            the research community has focused on using machine learning
+uncertainty benchmark set B, leading to approximately 8.6 mil-            to learn the interplay of tuning knobs, and especially of the knobs
+lion comparisons. Robust tunings comprehensively outperform the           that are hard to analytically model to perform cost-based optimiza-
+nominal tunings in over 80% of these comparisons. We further              tion. This recent work on self-driving database systems [4, 56, 62]
+cross-validated the relative performance of the nominal and the           or self-designing database systems [42, 44–46] is exploiting new
+robust tunings in over 300 comparisons using RocksDB. The empir-          advancements in machine learning to tune database systems and
+ical measurements overwhelmingly con�rmed the validity of our             reduce the need for human intervention, however, they also yield
+analytical models, and the few instances of discrepancy in the scale      suboptimal results when the workload and resource availability
+of measured I/Os, such as the ones discussed in previous sections,        information is inaccurate.
+are easily explained based on the structure of the LSM tree.              Robust Database Physical Design. One of the key database tun-
+Leveling is “more” Robust than Tiering. One of the key take-              ing decisions is physical design, that is, the decision of which set
+aways of applying robust tuning to LSM trees is that leveling is          of auxiliary structures should be used to allow for the fastest ex-
+inherently more robust to perturbations in workloads when com-            ecution of future queries. Most of the existing systems use past
+pared to pure tiering. Note that this is evident from Table 3, where      workload information as a representative sample for future work-
+all robust tunings suggest leveling as the compaction policy. This        loads, which often leads to sub-optimal decisions when there is
+observation is in line with the industry practice of deploying lev-       signi�cant workload drift. Cli�guard [58] is the �rst attempt to use
+eling or hybrid leveling over pure tiering. Overall, based on our         unconstrained robust optimization to �nd a robust physical design.
+analytical and empirical results, the robust tuning should always         Their method is derived from Bertsimas et al. in [12], a numerical
+be employed when tuning an LSM tree, unless the future workload           optimization approach using alternating gradient ascent-descent to
+distribution is known with absolute certainty.                            optimize problems without closed-form objectives. In contrast to
+Discussion. While we have deployed and tested robust tuning               Cli�guard, E����� focuses on the LSM tree tuning problem which
+on LSM trees, the robust paradigm of E����� is a generalization           uses an analytical closed form objective in Equation (2). This allows
+of a minimization problem that is at the heart of any database            us to directly solve a Lagrangian dual problem instead of relying
+tuning problem. Hence, similar robust optimization approaches             upon numerical optimization techniques. Furthermore, we found
+can be applied to any database tuning problem assuming that the           that the approach in Cli�guard, when applied to our objective, fails
+underlying cost-model is known, and each cost-model component             to converge even after extensive hyperparameter search.
+is convex or can be accurately approximated by a convex surrogate.
+                                                                          10    CONCLUSION
+9   RELATED WORK                                                          In this work, we explored the impact of workload uncertainty on the
+                                                                          performance of LSM tree-based databases and introduced E�����,
+Tuning Data Systems. Database systems are notorious for having
+                                                                          a robust tuning paradigm that recommends optimal designs to mit-
+numerous tuning knobs. These tuning knobs control �ne-grained
+                                                                          igate any performance degradation in the presence of workload
+decisions (e.g., number of threads, amount of memory for bu�er-
+                                                                          uncertainty. We showed that in the presence of uncertainty, robust
+pool, storage size for logging) as well as basic architectural and
+                                                                          tunings increase database throughput compared to standard tunings
+physical design decisions about partitioning, index design, mate-
+                                                                          by up to 5⇥. Additionally, we provided evidence that our analytical
+rialized views that a�ect storage and access patterns, and query
+                                                                          model closely matches the behavior measured on a database system.
+execution [15, 21]. The database research community has developed
+                                                                          Through both model-based and extensive experimental evaluation
+several tools to deal with such tuning problems. These tools can be
+                                                                          of E����� within the state-of-the-art LSM-based storage engine,
+broadly classi�ed as o�ine workload analysis for index and views
+                                                                          RocksDB, we show that the robust tuning methodology consis-
+design [2, 3, 20, 24, 77, 85], and periodic online workload analy-
+                                                                          tently outperforms classical tuning strategies. E����� can be an
+sis [16, 68–70] to capture workload drift [39]. In addition, there
+                                                                          indispensable tool for database administrators to evaluate deployed
+has been research on reducing the magnitude of the search space
+                                                                          tunings’ performance as well as recommend optimal tunings in a
+of tuning [15, 25] and on deciding the optional data partitioning
+                                                                          few seconds without resorting to expensive database experiments.
+[9, 61, 72, 74, 75]. These approaches assume that the input informa-
+tion about resources and workload is accurate. When it is proved
+                                                                          ACKNOWLEDGEMENTS
+to be inaccurate, performance is typically severely impacted.
+Adaptive & Self-designing Data Systems. A �rst attempt to ad-             We would like to thank Josh Berkus for his valuable feedback. This
+dress this problem was the design of adaptive systems which had to        work is partially funded by IBM Ph.D. Fellowship Award, RedHat
+pay additional transition costs (e.g., when deploying a new tuning)       Incubation Award, NSF Grants – No. III-1813406, No. IIS-1850202,
+                                                                          No. III-1908510, and No. IIS-2144547.
+
+
+
+
+                                                                   1616
+REFERENCES                                                                                   [22] Surajit Chaudhuri and Gerhard Weikum. 2005. Foundations of automated data-
+ [1] Ildar Absalyamov, Michael J Carey, and Vassilis J Tsotras. 2018. Lightweight                 base tuning. In Proceedings of the ACM SIGMOD International Conference on
+     Cardinality Estimation in LSM-based Systems. In Proceedings of the ACM SIGMOD                Management of Data. 964–965. https://doi.org/10.1145/1066157.1066305
+     International Conference on Management of Data. 841–855. https://doi.org/               [23] Navraj Chohan, Claris Castillo, Mike Spreitzer, Malgorzata Steinder, Asser N
+     10.1145/3183713.3183761                                                                      Tantawi, and Chandra Krintz. 2010. See Spot Run: Using Spot Instances for
+ [2] Sanjay Agrawal, Surajit Chaudhuri, Lubor Kollár, Arunprasad P. Marathe,                      MapReduce Work�ows. In Proceedings of USENIX Workshop on Hot Topics in
+     Vivek R. Narasayya, and Manoj Syamala. 2004. Database Tuning Advisor for                     Cloud Computing (HotCloud).
+     Microsoft SQL Server 2005. In Proceedings of the International Conference on Very       [24] Benoit Dageville, Dinesh Das, Karl Dias, Khaled Yagoub, Mohamed Zait, and
+     Large Data Bases (VLDB). 1110–1121.                                                          Mohamed Ziauddin. 2004. Automatic SQL tuning in oracle 10g. In Proceedings
+ [3] Sanjay Agrawal, Surajit Chaudhuri, and Vivek R. Narasayya. 2000. Automated                   of the International Conference on Very Large Data Bases (VLDB). 1098–1109.
+     Selection of Materialized Views and Indexes in SQL Databases. In Proceedings of              http://dl.acm.org/citation.cfm?id=1316689.1316784
+     the International Conference on Very Large Data Bases (VLDB). 496–505. http:            [25] Debabrata Dash, Neoklis Polyzotis, and Anastasia Ailamaki. 2011. CoPhy: A
+     //dl.acm.org/citation.cfm?id=645926.671701                                                   Scalable, Portable, and Interactive Index Advisor for Large Workloads. Proceed-
+ [4] Dana Van Aken, Andrew Pavlo, Geo�rey J Gordon, and Bohan Zhang. 2017.                        ings of the VLDB Endowment 4, 6 (2011), 362–372. https://doi.org/10.14778/
+     Automatic Database Management System Tuning Through Large-scale Machine                      1978665.1978668
+     Learning. In Proceedings of the ACM SIGMOD International Conference on Man-             [26] Niv Dayan, Manos Athanassoulis, and Stratos Idreos. 2017. Monkey: Optimal
+     agement of Data. 1009–1024. https://doi.org/10.1145/3035918.3064029                          Navigable Key-Value Store. In Proceedings of the ACM SIGMOD International Con-
+ [5] Wail Y Alkowaileet, Sattam Alsubaiee, and Michael J Carey. 2020. An LSM-based                ference on Management of Data. 79–94. https://doi.org/10.1145/3035918.3064054
+     Tuple Compaction Framework for Apache AsterixDB. Proceedings of the VLDB                [27] Niv Dayan and Stratos Idreos. 2018. Dostoevsky: Better Space-Time Trade-O�s
+     Endowment 13, 9 (2020), 1388–1400. http://www.vldb.org/pvldb/vol13/p1388-                    for LSM-Tree Based Key-Value Stores via Adaptive Removal of Super�uous Merg-
+     alkowaileet.pdf                                                                              ing. In Proceedings of the ACM SIGMOD International Conference on Management
+ [6] Sattam Alsubaiee, Yasser Altowim, Hotham Altwaijry, Alexander Behm,                          of Data. 505–520. https://doi.org/10.1145/3183713.3196927
+     Vinayak R. Borkar, Yingyi Bu, Michael J. Carey, Inci Cetindil, Madhusudan Chee-         [28] Niv Dayan and Stratos Idreos. 2019. The Log-Structured Merge-Bush & the Wacky
+     langi, Khurram Faraaz, Eugenia Gabrielova, Raman Grover, Zachary Heilbron,                   Continuum. In Proceedings of the ACM SIGMOD International Conference on Man-
+     Young-Seok Kim, Chen Li, Guangqiang Li, Ji Mahn Ok, Nicola Onose, Pouria                     agement of Data (SIGMOD). 449–466. https://doi.org/10.1145/3299869.3319903
+     Pirzadeh, Vassilis J. Tsotras, Rares Vernica, Jian Wen, and Till Westmann. 2014.        [29] Giuseppe DeCandia, Deniz Hastorun, Madan Jampani, Gunavardhan Kakulapati,
+     AsterixDB: A Scalable, Open Source BDMS. Proceedings of the VLDB Endowment                   Avinash Lakshman, Alex Pilchin, Swaminathan Sivasubramanian, Peter Vosshall,
+     7, 14 (2014), 1905–1916. https://doi.org/10.14778/2733085.2733096                            and Werner Vogels. 2007. Dynamo: Amazon’s Highly Available Key-value Store.
+ [7] Andy Huynh, Harshal A. Chaudhari, Evimaria Terzi, and Manos Athanassoulis.                   ACM SIGOPS Operating Systems Review 41, 6 (2007), 205–220. https://doi.org/
+     2021. Robust LSM Tuning. https://github.com/BU-DiSC/endure                                   10.1145/1323293.1294281
+ [8] Apache. 2021. Cassandra. http://cassandra.apache.org (2021).                            [30] Siying Dong, Mark Callaghan, Leonidas Galanis, Dhruba Borthakur, Tony Savor,
+ [9] Manos Athanassoulis, Kenneth S. Bøgh, and Stratos Idreos. 2019. Optimal Column               and Michael Strum. 2017. Optimizing Space Ampli�cation in RocksDB. In Pro-
+     Layout for Hybrid Workloads. Proceedings of the VLDB Endowment 12, 13 (2019),                ceedings of the Biennial Conference on Innovative Data Systems Research (CIDR).
+     2393–2407.                                                                                   http://cidrdb.org/cidr2017/papers/p82-dong-cidr17.pdf
+[10] Aharon Ben-Tal, Dick den Hertog, Anja De Waegenaere, Bertrand Melenberg,                [31] Facebook. 2021. RocksDB. https://github.com/facebook/rocksdb (2021).
+     and Gijs Rennen. 2013. Robust Solutions of Optimization Problems A�ected                [32] Guilherme Galante and Luis Carlos Erpen De Bona. 2012. A Survey on Cloud
+     by Uncertain Probabilities. Management Science 59, 2 (2013), 341–357. https:                 Computing Elasticity. In Proceedings of the IEEE International Conference on Utility
+     //doi.org/10.1287/mnsc.1120.1641                                                             and Cloud Computing (UCC). 263–270. https://doi.org/10.1109/UCC.2012.30
+[11] Aharon Ben-Tal and Arkadi Nemirovski. 1998. Robust Convex Optimization.                 [33] Google. 2021. LevelDB. https://github.com/google/leveldb/ (2021).
+     Mathematics of Operations Research 23, 4 (1998), 769–805. https://doi.org/10.1287/      [34] Goetz Graefe and Harumi Kuno. 2010. Self-selecting, self-tuning, incrementally
+     moor.23.4.769                                                                                optimized indexes. In Proceedings of the International Conference on Extend-
+[12] Dimitris Bertsimas, Omid Nohadani, and Kwong Meng Teo. 2010. Robust Opti-                    ing Database Technology (EDBT). 371–381. http://dl.acm.org/citation.cfm?id=
+     mization for Unconstrained Simulation-Based Problems. Operations Research 58,                1739041.1739087
+     1 (2010), 161–178. https://doi.org/10.1287/opre.1090.0715                               [35] Goetz Graefe and Harumi A. Kuno. 2010. Adaptive indexing for relational keys.
+[13] Burton H Bloom. 1970. Space/Time Trade-o�s in Hash Coding with Allowable                     In Proceedings of the IEEE International Conference on Data Engineering Workshops
+     Errors. Commun. ACM 13, 7 (1970), 422–426. http://dl.acm.org/citation.cfm?id=                (ICDEW). 69–74.
+     362686.362692                                                                           [36] Brian Hayes. 2008. Cloud computing. Commun. ACM 51, 7 (2008), 9–11. https:
+[14] Edward Bortnikov, Anastasia Braginsky, Eshcar Hillel, Idit Keidar, and Gali                  //doi.org/10.1145/1364782.1364786
+     She�. 2018. Accordion: Better Memory Organization for LSM Key-Value                     [37] HBase. 2013. Online reference. http://hbase.apache.org/ (2013).
+     Stores. Proceedings of the VLDB Endowment 11, 12 (2018), 1863–1875. http:               [38] Nikolas Roman Herbst, Samuel Kounev, and Ralf H Reussner. 2013. Elastic-
+     //www.vldb.org/pvldb/vol11/p1863-bortnikov.pdf                                               ity in Cloud Computing: What It Is, and What It Is Not. In Proceedings of the
+[15] Nicolas Bruno and Surajit Chaudhuri. 2005. Automatic physical database tuning.               International Conference on Autonomic Computing (ICAC). 23–27.
+     In Proceedings of the ACM SIGMOD International Conference on Management of              [39] Marc Holze, Ali Haschimi, and Norbert Ritter. 2010. Towards workload-aware
+     Data. 227–238. https://doi.org/10.1145/1066157.1066184                                       self-management: Predicting signi�cant workload shifts. Proceedings of the IEEE
+[16] Nicolas Bruno and Surajit Chaudhuri. 2006. To Tune or not to Tune? A Light-                  International Conference on Data Engineering (ICDE) (2010), 111–116. https:
+     weight Physical Design Alerter. In Proceedings of the International Conference               //doi.org/10.1109/ICDEW.2010.5452738
+     on Very Large Data Bases (VLDB). 499–510. http://dl.acm.org/citation.cfm?id=            [40] Gui Huang, Xuntao Cheng, Jianying Wang, Yujie Wang, Dengcheng He, Tieying
+     1182635.1164171                                                                              Zhang, Feifei Li, Sheng Wang, Wei Cao, and Qiang Li. 2019. X-Engine: An
+[17] Zhichao Cao, Siying Dong, Sagar Vemuri, and David H C Du. 2020. Characteriz-                 Optimized Storage Engine for Large-scale E-commerce Transaction Processing.
+     ing, Modeling, and Benchmarking RocksDB Key-Value Workloads at Facebook.                     In Proceedings of the ACM SIGMOD International Conference on Management of
+     In Proceedings of the USENIX Conference on File and Storage Technologies (FAST).             Data. 651–665. https://doi.org/10.1145/3299869.3314041
+     209–223.                                                                                [41] Andy Huynh, Harshal A Chaudhari, Evimaria Terzi, and Manos Athanassoulis.
+[18] Fay Chang, Je�rey Dean, Sanjay Ghemawat, Wilson C. Hsieh, Deborah A. Wal-                    2021. Endure: A Robust Tuning Paradigm for LSM Trees Under Workload
+     lach, Mike Burrows, Tushar Chandra, Andrew Fikes, and Robert E. Gruber. 2006.                Uncertainty. CoRR 2110.13801 (2021). https://arxiv.org/abs/2110.13801
+     Bigtable: A Distributed Storage System for Structured Data. In Proceedings of           [42] Stratos Idreos, Niv Dayan, Wilson Qin, Mali Akmanalp, Sophie Hilgard, Andrew
+     the USENIX Symposium on Operating Systems Design and Implementation (OSDI).                  Ross, James Lennon, Varun Jain, Harshita Gupta, David Li, and Zichen Zhu. 2019.
+     205–218. http://dl.acm.org/citation.cfm?id=1267308.1267323                                   Design Continuums and the Path Toward Self-Designing Key-Value Stores that
+[19] Surajit Chaudhuri, Benoit Dageville, and Guy M Lohman. 2004. Self-Managing                   Know and Learn. In Proceedings of the Biennial Conference on Innovative Data
+     Technology in Database Management Systems. In Proceedings of the International               Systems Research (CIDR).
+     Conference on Very Large Data Bases (VLDB). 1243. https://doi.org/10.1016/B978-         [43] Stratos Idreos, Martin L. Kersten, and Stefan Manegold. 2007. Database Cracking.
+     012088469-8.50116-9                                                                          In Proceedings of the Biennial Conference on Innovative Data Systems Research
+[20] Surajit Chaudhuri and Vivek R. Narasayya. 1997. An E�cient Cost-Driven                       (CIDR).
+     Index Selection Tool for Microsoft SQL Server. In Proceedings of the Interna-           [44] Stratos Idreos and Tim Kraska. 2019. From Auto-tuning One Size Fits All to
+     tional Conference on Very Large Data Bases (VLDB). 146–155. http://dl.acm.org/               Self-designed and Learned Data-intensive Systems. In Proceedings of the ACM
+     citation.cfm?id=645923.673646                                                                SIGMOD International Conference on Management of Data.
+[21] Surajit Chaudhuri and Vivek R Narasayya. 1998. AutoAdmin ’What-if’ Index                [45] Stratos Idreos, Kostas Zoumpatianos, Manos Athanassoulis, Niv Dayan, Brian
+     Analysis Utility. In Proceedings of the ACM SIGMOD International Conference on               Hentschel, Michael S. Kester, Demi Guo, Lukas M. Maas, Wilson Qin, Abdul
+     Management of Data. 367–378. https://doi.org/10.1145/276304.276337                           Wasay, and Yiyou Sun. 2018. The Periodic Table of Data Structures. IEEE
+
+
+
+
+                                                                                      1617
+     Data Engineering Bulletin 41, 3 (2018), 64–75. http://sites.computer.org/debull/              2025. White Paper (2019).
+     A18sept/p64.pdf                                                                          [66] Subhadeep Sarkar, Tarikul Islam Papon, Dimitris Staratzis, and Manos Athanas-
+[46] Stratos Idreos, Kostas Zoumpatianos, Brian Hentschel, Michael S Kester, and                   soulis. 2020. Lethe: A Tunable Delete-Aware LSM Engine. In Proceedings of
+     Demi Guo. 2018. The Data Calculator: Data Structure Design and Cost Synthe-                   the ACM SIGMOD International Conference on Management of Data. 893–908.
+     sis from First Principles and Learned Cost Models. In Proceedings of the ACM                  https://doi.org/10.1145/3318464.3389757
+     SIGMOD International Conference on Management of Data. 535–550. https:                   [67] Subhadeep Sarkar, Dimitris Staratzis, Zichen Zhu, and Manos Athanassoulis. 2021.
+     //doi.org/10.1145/3183713.3199671                                                             Constructing and Analyzing the LSM Compaction Design Space. Proceedings
+[47] In�uxdata. 2021. In-memory indexing and the Time-Structured Merge Tree                        of the VLDB Endowment 14, 11 (2021), 2216–2229. http://vldb.org/pvldb/vol14/
+     (TSM). https://docs.in�uxdata.com/in�uxdb/v1.8/concepts/storage_engine/ (2021).               p2216-sarkar.pdf
+[48] Intel. 2011. Best Practices for Building an Enterprise Private Cloud. White Paper        [68] Karl Schnaitter, Serge Abiteboul, Tova Milo, and Neoklis Polyzotis. 2006. COLT:
+     (2011).                                                                                       Continuous On-Line Database Tuning. In Proceedings of the ACM SIGMOD Inter-
+[49] Taewoo Kim, Alexander Behm, Michael Blow, Vinayak Borkar, Yingyi Bu,                          national Conference on Management of Data. 793–795. https://doi.org/10.1145/
+     Michael J. Carey, Murtadha Hubail, Shiva Jahangiri, Jianfeng Jia, Chen Li, Chen               1142473.1142592
+     Luo, Ian Maxon, and Pouria Pirzadeh. 2020. Robust and e�cient memory man-                [69] Karl Schnaitter, Serge Abiteboul, Tova Milo, and Neoklis Polyzotis. 2007. On-Line
+     agement in Apache AsterixDB. Software - Practice and Experience 50, 7 (2020),                 Index Selection for Shifting Workloads. In Proceedings of the IEEE International
+     1114–1151. https://doi.org/10.1002/spe.2799                                                   Conference on Data Engineering Workshops (ICDEW). 459–468. https://doi.org/
+[50] Solomon Kullback and Richard A. Leibler. 1951. On Information and Su�ciency.                  10.1109/ICDEW.2007.4401029
+     The Annals of Mathematical Statistics 22, 1 (1951), 79–86. https://doi.org/10.1214/      [70] Karl Schnaitter and Neoklis Polyzotis. 2012. Semi-automatic index tuning. Pro-
+     aoms/1177729694                                                                               ceedings of the VLDB Endowment 5, 5 (2012), 478–489. https://doi.org/10.14778/
+[51] Chen Luo. 2020. Breaking Down Memory Walls in LSM-based Storage Systems.                      2140436.2140444
+     In Proceedings of the ACM SIGMOD International Conference on Management of               [71] Felix Martin Schuhknecht, Jens Dittrich, and Laurent Linden. 2018. Adaptive
+     Data. 2817–2819. https://doi.org/10.1145/3318464.3384399                                      Adaptive Indexing. In Proceedings of the IEEE International Conference on Data
+[52] Chen Luo and Michael J Carey. 2019. On Performance Stability in LSM-based                     Engineering (ICDE). 665–676. https://doi.org/10.1109/ICDE.2018.00066
+     Storage Systems. Proceedings of the VLDB Endowment 13, 4 (2019), 449–462.                [72] Marco Sera�ni, Rebecca Taft, Aaron J Elmore, Andrew Pavlo, Ashraf Aboulnaga,
+[53] Chen Luo and Michael J. Carey. 2020. LSM-based Storage Techniques: A Survey.                  and Michael Stonebraker. 2016. Clay: Fine-Grained Adaptive Partitioning for
+     The VLDB Journal 29, 1 (2020), 393–418. https://doi.org/10.1007/s00778-019-                   General Database Schemas. Proceedings of the VLDB Endowment 10, 4 (2016),
+     00555-y                                                                                       445–456. http://www.vldb.org/pvldb/vol10/p445-sera�ni.pdf
+[54] Chen Luo, Pinar Tözün, Yuanyuan Tian, Ronald Barber, Vijayshankar Raman, and             [73] Dennis E Shasha and Philippe Bonnet. 2002. Database Tuning: Principles, Ex-
+     Richard Sidle. 2019. Umzi: Uni�ed Multi-Zone Indexing for Large-Scale HTAP.                   periments, and Troubleshooting Techniques. In Proceedings of the International
+     In Proceedings of the International Conference on Extending Database Technology               Conference on Very Large Data Bases (VLDB).
+     (EDBT). 1–12. https://doi.org/10.5441/002/edbt.2019.02                                   [74] Liwen Sun, Michael J. Franklin, Sanjay Krishnan, and Reynold S. Xin. 2014.
+[55] Siqiang Luo, Subarna Chatterjee, Rafael Ketsetsidis, Niv Dayan, Wilson Qin, and               Fine-grained Partitioning for Aggressive Data Skipping. In Proceedings of the
+     Stratos Idreos. 2020. Rosetta: A Robust Space-Time Optimized Range Filter for                 ACM SIGMOD International Conference on Management of Data. 1115–1126.
+     Key-Value Stores. In Proceedings of the ACM SIGMOD International Conference                   https://doi.org/10.1145/2588555.2610515
+     on Management of Data. 2071–2086. https://doi.org/10.1145/3318464.3389731                [75] Liwen Sun, Michael J. Franklin, Jiannan Wang, and Eugene Wu. 2016. Skipping-
+[56] Lin Ma, Dana Van Aken, Ahmed Hefny, Gustavo Mezerhane, Andrew Pavlo, and                      oriented Partitioning for Columnar Layouts. Proceedings of the VLDB Endowment
+     Geo�rey J Gordon. 2018. Query-based Workload Forecasting for Self-Driving                     10, 4 (2016), 421–432. http://www.vldb.org/pvldb/vol10/p421-sun.pdf
+     Database Management Systems. In Proceedings of the ACM SIGMOD Interna-                   [76] Sasu Tarkoma, Christian Esteve Rothenberg, and Eemil Lagerspetz. 2012. The-
+     tional Conference on Management of Data. 631–645. https://doi.org/10.1145/                    ory and Practice of Bloom Filters for Distributed Systems. IEEE Communica-
+     3183713.3196908                                                                               tions Surveys & Tutorials 14, 1 (2012), 131–155. http://ieeexplore.ieee.org/xpl/
+[57] C Mohan. 2016. Hybrid Transaction and Analytics Processing (HTAP): State of                   login.jsp?arnumber=5751342
+     the Art. In Proceedings of the International Workshop on Business Intelligence for       [77] Gary Valentin, Michael Zuliani, Daniel C. Zilio, Guy M. Lohman, and Alan Skelley.
+     the Real-Time Enterprise (BIRTE).                                                             2000. DB2 Advisor: An Optimizer Smart Enough to Recommend its own Indexes.
+[58] Barzan Mozafari, Eugene Zhen Ye Goh, and Dong Young Yoon. 2015. Cli�Guard:                    In Proceedings of the IEEE International Conference on Data Engineering (ICDE).
+     A Principled Framework for Finding Robust Database Designs. In Proceedings of                 101–110. http://dx.doi.org/10.1109/ICDE.2000.839397
+     the ACM SIGMOD International Conference on Management of Data. 1167–1182.                [78] Pauli Virtanen, Ralf Gommers, Travis E Oliphant, Matt Haberland, Tyler Reddy,
+     https://doi.org/10.1145/2723372.2749454                                                       and et al. Cournapeau D. 2020. SciPy 1.0: Fundamental Algorithms for Scienti�c
+[59] Patrick E. O’Neil, Edward Cheng, Dieter Gawlick, and Elizabeth J. O’Neil. 1996.               Computing in Python. Nature Methods 17 (2020), 261–272. https://doi.org/
+     The log-structured merge-tree (LSM-tree). Acta Informatica 33, 4 (1996), 351–385.             10.1038/s41592-019-0686-2
+     http://dl.acm.org/citation.cfm?id=230823.230826                                          [79] Wikipedia contributors. 2021. Bloom �lter – Wikipedia, The Free Encyclopedia.
+[60] Fatma Özcan, Yuanyuan Tian, and Pinar Tözün. 2017. Hybrid Transac-                            https://en.wikipedia.org/w/index.php?title=Bloom_�lter. [Online; accessed
+     tional/Analytical Processing: A Survey. In Proceedings of the ACM SIGMOD                      8-June-2021].
+     International Conference on Management of Data. 1771–1775. https://doi.org/              [80] WiredTiger. 2021. Source Code. https://github.com/wiredtiger/wiredtiger (2021).
+     10.1145/3035918.3054784                                                                  [81] Rich Wolski, John Brevik, Ryan Chard, and Kyle Chard. 2017. Probabilistic
+[61] Stratos Papadomanolakis and Anastasia Ailamaki. 2004. AutoPart: Automat-                      guarantees of execution duration for Amazon spot instances. In Proceedings of
+     ing Schema Design for Large Scienti�c Databases Using Data Partitioning. In                   the International Conference for High Performance Computing, Networking, Storage
+     Proceedings of the International Conference on Scienti�c and Statistical Database             and Analysis (SC). 18:1—-18:11. https://doi.org/10.1145/3126908.3126953
+     Management (SSDBM). 383. https://doi.org/10.1109/SSDBM.2004.19                           [82] Lei Yang, Hong Wu, Tieying Zhang, Xuntao Cheng, Feifei Li, Lei Zou, Yujie
+[62] Andrew Pavlo, Gustavo Angulo, Joy Arulraj, Haibin Lin, Jiexi Lin, Lin Ma,                     Wang, Rongyao Chen, Jianying Wang, and Gui Huang. 2020. Leaper: A Learned
+     Prashanth Menon, Todd C Mowry, Matthew Perron, Ian Quah, Siddharth San-                       Prefetcher for Cache Invalidation in LSM-tree based Storage Engines. Proceedings
+     turkar, Anthony Tomasic, Skye Toor, Dana Van Aken, Ziqi Wang, Yingjun Wu,                     of the VLDB Endowment 13, 11 (2020), 1976–1989.
+     Ran Xian, and Tieying Zhang. 2017. Self-Driving Database Management Systems.             [83] Huanchen Zhang, Hyeontaek Lim, Viktor Leis, David G Andersen, Michael
+     In Proceedings of the Biennial Conference on Innovative Data Systems Research                 Kaminsky, Kimberly Keeton, and Andrew Pavlo. 2018. SuRF: Practical Range
+     (CIDR). http://cidrdb.org/cidr2017/papers/p42-pavlo-cidr17.pdf                                Query Filtering with Fast Succinct Tries. In Proceedings of the ACM SIGMOD
+[63] Massimo Pezzini, Donald Feinberg, Nigel Rayner, and Roxane Edjlali. 2014.                     International Conference on Management of Data. 323–336. https://doi.org/
+     Hybrid Transaction/Analytical Processing Will Foster Opportunities for Dra-                   10.1145/3183713.3196931
+     matic Business Innovation. https://www.gartner.com/doc/2657815/ (2014). https:           [84] Teng Zhang, Jianying Wang, Xuntao Cheng, Hao Xu, Nanlong Yu, Gui Huang,
+     //www.gartner.com/doc/2657815/                                                                Tieying Zhang, Dengcheng He, Feifei Li, Wei Cao, Zhongdong Huang, and
+[64] Kai Ren, Qing Zheng, Joy Arulraj, and Garth Gibson. 2017. SlimDB: A Space-                    Jianling Sun. 2020. FPGA-Accelerated Compactions for LSM-based Key-Value
+     E�cient Key-Value Storage Engine For Semi-Sorted Data. Proceedings of the VLDB                Store. In Proceedings of the USENIX Conference on File and Storage Technologies
+     Endowment 10, 13 (2017), 2037–2048. http://www.vldb.org/pvldb/vol10/p2037-                    (FAST). 225–237.
+     ren.pdf                                                                                  [85] Daniel C. Zilio, Jun Rao, Sam Lightstone, Guy M. Lohman, Adam Storm, Christian
+[65] Grand View Research. 2019. Private Cloud Server Market Size, Share & Trend                    Garcia-Arellano, and Scott Fadden. 2004. DB2 Design Advisor: Integrated Auto-
+     Analysis Report By Hosting Type (User Hosting, Provider Hosting), By Organi-                  matic Physical Database Design. In Proceedings of the International Conference on
+     zation Type (SME, Large Enterprise), By Region, And Segment Forecasts, 2019 -                 Very Large Data Bases (VLDB). 1087–1097. http://dl.acm.org/citation.cfm?id=
+                                                                                                   1316689.1316783
+
+
+
+
+                                                                                       1618
+

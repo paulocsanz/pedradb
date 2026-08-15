@@ -75,14 +75,8 @@ pub fn row_fully_indexed(
 ) -> bool {
     let id = id.as_ref();
     let has_row = db.get(&row_key(id)).is_some();
-    let has_name = db
-        .get(&idx_key(b"name", name.as_ref()))
-        .as_deref()
-        == Some(id);
-    let has_email = db
-        .get(&idx_key(b"email", email.as_ref()))
-        .as_deref()
-        == Some(id);
+    let has_name = db.get(&idx_key(b"name", name.as_ref())).as_deref() == Some(id);
+    let has_email = db.get(&idx_key(b"email", email.as_ref())).as_deref() == Some(id);
     has_row && has_name && has_email
 }
 
@@ -97,12 +91,8 @@ pub fn row_half_indexed(
     let id = id.as_ref();
     let bits = [
         db.get(&row_key(id)).is_some(),
-        db.get(&idx_key(b"name", name.as_ref()))
-            .as_deref()
-            == Some(id),
-        db.get(&idx_key(b"email", email.as_ref()))
-            .as_deref()
-            == Some(id),
+        db.get(&idx_key(b"name", name.as_ref())).as_deref() == Some(id),
+        db.get(&idx_key(b"email", email.as_ref())).as_deref() == Some(id),
     ];
     let n = bits.iter().filter(|b| **b).count();
     n > 0 && n < 3
@@ -202,8 +192,7 @@ pub fn workload_index_tx_crash(dir: impl AsRef<Path>) -> Result<WorkloadReport> 
             let id = [b'i', i];
             let name = [b'n', i];
             let email = [b'e', i];
-            if !row_fully_indexed(&db, id, name, email) || row_half_indexed(&db, id, name, email)
-            {
+            if !row_fully_indexed(&db, id, name, email) || row_half_indexed(&db, id, name, email) {
                 silent_wrong += 1;
             }
         }
@@ -270,7 +259,11 @@ mod tests {
             .into_iter()
             .map(|(k, _)| k.to_vec())
             .collect();
-        assert_eq!(hits, vec![a.clone()], "prefix scan leaked siblings: {hits:?}");
+        assert_eq!(
+            hits,
+            vec![a.clone()],
+            "prefix scan leaked siblings: {hits:?}"
+        );
         let _ = fs::remove_dir_all(&dir);
     }
 

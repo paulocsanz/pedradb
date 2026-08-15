@@ -360,7 +360,7 @@ Tests **must** exist under `pedradb-store` (and `pedradb-dcs` where apply semant
 
 | Test id | Must prove |
 |---------|------------|
-| `T-DCS-APPLY-create-idempotent` | Second apply Create with key present does not error hard (apply cursor safety); **client** pre-check still rejects create race |
+| `T-DCS-APPLY-create-idempotent` | Second apply Create with key present does not error hard and does **not** overwrite; **client** pre-check still rejects create race; TTL re-create is Cas-on-corpse |
 | `T-DCS-APPLY-cas-roundtrip` | encode/decode + cas path |
 
 ### 9.4 Quality gates
@@ -439,7 +439,7 @@ P1+ may add multi-process and fault-injection network tests; P0 does not require
 2. **L1 default plumbing:** range-partitioned Raft logs + apply to PedraDB; majority of **configured** membership.  
 3. **Client Ok ⇒ majority commit** of that entry before return.  
 4. **NotCommitted ⇒ discard** uncommitted client index on all peers (or equivalent that preserves I-MAJ-3/4).  
-5. **DCS apply:** Create/Cas(rev=0) apply must not permanently stall the Raft apply cursor if key already exists (idempotent apply); **client** pre-check remains strict.  
+5. **DCS apply:** Create/Cas(rev=0) apply must not permanently stall the Raft apply cursor if key already exists (idempotent apply — **no overwrite**); **client** pre-check remains strict. Re-create after TTL is `Cas` on the physical revision (`bind_absent_create`), not Create overwrite.  
 6. **Safe leader:** unique participating Leader role; else no Strong serve / no client propose.  
 7. **Meta keys:** document a prefix (e.g. `m/`) so DCS keys land in stable ranges; do not require separate consensus domain for P0.  
 8. **Forbid unsafe** in Montanha store crate.

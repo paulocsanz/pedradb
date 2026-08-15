@@ -21,6 +21,8 @@ use crate::error::Result;
 pub mod crc;
 pub mod format;
 pub mod reader;
+pub mod recover_choose;
+pub mod recover_kernel;
 pub mod writer;
 
 pub use reader::WalReader;
@@ -129,10 +131,7 @@ impl<F: EnvFile> Wal<F> {
     ///
     /// # Errors
     /// Read failure or CRC mismatch.
-    pub fn recover_on<E: Env<File = F>, P: AsRef<Path>>(
-        env: &E,
-        path: P,
-    ) -> Result<Vec<Vec<u8>>> {
+    pub fn recover_on<E: Env<File = F>, P: AsRef<Path>>(env: &E, path: P) -> Result<Vec<Vec<u8>>> {
         let file = env.open_read(path.as_ref())?;
         WalReader::new(BufReader::new(file)).collect_all()
     }

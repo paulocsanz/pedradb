@@ -11,6 +11,7 @@
 
 mod children_kernel;
 mod fields_kernel;
+mod pack_kernel;
 
 pub use children_kernel::{
     key_in_half_open, next_byte_in_packed_children, next_byte_in_packed_children_as_is,
@@ -21,6 +22,7 @@ pub use fields_kernel::{
     child_bytes_after, child_bytes_after_as_is, decode_fields, decode_pair_first_nul,
     encode_fields, encode_fields_as_is, field_kept, field_kept_as_is,
 };
+pub use pack_kernel::{pack_cut_tag, pack_cut_tag_as_is, PACK_CUT_SEP};
 
 use pedradb_store::{Result, StoreCluster, StoreError, Transaction};
 
@@ -100,8 +102,8 @@ impl Subspace {
     }
 
     fn push_component(buf: &mut Vec<u8>, part: &[u8]) {
-        buf.push(0x00);
-        let n = u32::try_from(part.len()).expect("component len fits u32");
+        buf.push(PACK_CUT_SEP);
+        let n = pack_cut_tag(u32::try_from(part.len()).expect("component len fits u32"));
         buf.extend_from_slice(&n.to_be_bytes());
         buf.extend_from_slice(part);
     }
@@ -1105,9 +1107,10 @@ mod tests {
             err.is_err(),
             "corrupt PQ seq must fail closed, not overwrite seq 0: {err:?}"
         );
-        let p0 = pq
-            .data
-            .pack(&[1u64.to_be_bytes().as_slice(), format!("{:020}", 0).as_bytes()]);
+        let p0 = pq.data.pack(&[
+            1u64.to_be_bytes().as_slice(),
+            format!("{:020}", 0).as_bytes(),
+        ]);
         assert_eq!(
             c.get(&p0).unwrap().as_deref(),
             Some(b"high".as_ref()),

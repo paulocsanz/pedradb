@@ -3,9 +3,7 @@
 //! Framing is self-describing (tag + fields). Production TCP can reuse the same
 //! codec; [`crate::StoreCluster::handle_inbound`] applies deliveries.
 
-use super::{
-    decode_entry, encode_bytes, encode_entry, take_bytes, LogRec, Result, StoreError,
-};
+use super::{decode_entry, encode_bytes, encode_entry, take_bytes, LogRec, Result, StoreError};
 
 /// Raft-ish peer RPC used by Montanha-Store multi-Raft ranges.
 ///

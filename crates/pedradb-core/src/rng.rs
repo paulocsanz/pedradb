@@ -83,7 +83,7 @@ impl SeedRng {
     }
 }
 
-/// Bijective-ish seed mix (SplitMix64 finalizer). Never returns 0.
+/// Bijective-ish seed mix (`SplitMix64` finalizer). Never returns 0.
 #[must_use]
 pub fn mix_seed(seed: u64) -> u64 {
     let mut z = seed.wrapping_add(0x9E37_79B9_7F4A_7C15);
@@ -91,7 +91,7 @@ pub fn mix_seed(seed: u64) -> u64 {
     z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
     z ^= z >> 31;
     if z == 0 {
-        0xA11CE_5EED_u64
+        0x000A_11CE_5EED_u64
     } else {
         z
     }

@@ -21,7 +21,7 @@
 //! - tag 17 PutBatch: u32 n + repeated (key, value) — range-grouped put_many (RFC-0025 P1.3)
 
 use crate::msg::PeerMsg;
-use crate::{Result, StoreError, validate_tx_pairs};
+use crate::{validate_tx_pairs, Result, StoreError};
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
 use std::time::Duration;
@@ -475,12 +475,7 @@ pub fn client_put(addr: impl AsRef<str>, key: &[u8], value: &[u8]) -> Result<()>
 pub fn client_get(addr: impl AsRef<str>, key: &[u8]) -> Result<Option<Vec<u8>>> {
     let mut s = connect_host(addr.as_ref(), Duration::from_secs(3))?;
     s.set_read_timeout(Some(Duration::from_secs(10))).ok();
-    write_frame(
-        &mut s,
-        &WireMsg::Get {
-            key: key.to_vec(),
-        },
-    )?;
+    write_frame(&mut s, &WireMsg::Get { key: key.to_vec() })?;
     match read_frame(&mut s)? {
         WireMsg::RespValue { value } => Ok(value),
         WireMsg::RespErr { message } => Err(StoreError::Msg(message)),
@@ -525,10 +520,7 @@ pub fn client_status(addr: impl AsRef<str>) -> Result<String> {
 ///
 /// # Errors
 /// Network, NotLeader, Conflict, size limits, protocol.
-pub fn client_commit_tx(
-    addr: impl AsRef<str>,
-    pairs: &[(Vec<u8>, Vec<u8>)],
-) -> Result<u64> {
+pub fn client_commit_tx(addr: impl AsRef<str>, pairs: &[(Vec<u8>, Vec<u8>)]) -> Result<u64> {
     validate_tx_pairs(pairs)?;
     let mut s = connect_host(addr.as_ref(), Duration::from_secs(3))?;
     s.set_read_timeout(Some(Duration::from_secs(20))).ok();
@@ -544,7 +536,9 @@ pub fn client_commit_tx(
             // Re-classify known StoreError displays when possible.
             Err(crate::client::classify_message(&message).into_store_err(&message))
         }
-        other => Err(StoreError::Msg(format!("unexpected commit_tx resp {other:?}"))),
+        other => Err(StoreError::Msg(format!(
+            "unexpected commit_tx resp {other:?}"
+        ))),
     }
 }
 
@@ -573,7 +567,9 @@ pub fn client_put_batch(addr: impl AsRef<str>, pairs: &[(Vec<u8>, Vec<u8>)]) -> 
         WireMsg::RespErr { message } => {
             Err(crate::client::classify_message(&message).into_store_err(&message))
         }
-        other => Err(StoreError::Msg(format!("unexpected put_batch resp {other:?}"))),
+        other => Err(StoreError::Msg(format!(
+            "unexpected put_batch resp {other:?}"
+        ))),
     }
 }
 
@@ -596,7 +592,9 @@ pub fn client_dcs_create(addr: impl AsRef<str>, key: &[u8], value: &[u8]) -> Res
         WireMsg::RespErr { message } => {
             Err(crate::client::classify_message(&message).into_store_err(&message))
         }
-        other => Err(StoreError::Msg(format!("unexpected dcs_create resp {other:?}"))),
+        other => Err(StoreError::Msg(format!(
+            "unexpected dcs_create resp {other:?}"
+        ))),
     }
 }
 
@@ -625,7 +623,9 @@ pub fn client_dcs_cas(
         WireMsg::RespErr { message } => {
             Err(crate::client::classify_message(&message).into_store_err(&message))
         }
-        other => Err(StoreError::Msg(format!("unexpected dcs_cas resp {other:?}"))),
+        other => Err(StoreError::Msg(format!(
+            "unexpected dcs_cas resp {other:?}"
+        ))),
     }
 }
 
@@ -636,16 +636,13 @@ pub fn client_dcs_cas(
 pub fn client_dcs_get(addr: impl AsRef<str>, key: &[u8]) -> Result<Option<Vec<u8>>> {
     let mut s = connect_host(addr.as_ref(), Duration::from_secs(3))?;
     s.set_read_timeout(Some(Duration::from_secs(10))).ok();
-    write_frame(
-        &mut s,
-        &WireMsg::DcsGet {
-            key: key.to_vec(),
-        },
-    )?;
+    write_frame(&mut s, &WireMsg::DcsGet { key: key.to_vec() })?;
     match read_frame(&mut s)? {
         WireMsg::RespValue { value } => Ok(value),
         WireMsg::RespErr { message } => Err(StoreError::Msg(message)),
-        other => Err(StoreError::Msg(format!("unexpected dcs_get resp {other:?}"))),
+        other => Err(StoreError::Msg(format!(
+            "unexpected dcs_get resp {other:?}"
+        ))),
     }
 }
 
@@ -701,7 +698,10 @@ mod tests {
     #[test]
     fn wire_put_batch_roundtrip() {
         let m = WireMsg::PutBatch {
-            pairs: vec![(b"a".to_vec(), b"1".to_vec()), (b"b".to_vec(), b"2".to_vec())],
+            pairs: vec![
+                (b"a".to_vec(), b"1".to_vec()),
+                (b"b".to_vec(), b"2".to_vec()),
+            ],
         };
         assert_eq!(WireMsg::decode(&m.encode()).unwrap(), m);
     }

@@ -292,7 +292,9 @@ fn main() {
             );
             let rev2 = EtcdNeedFace::cas(&mut c, b"lock/pg1", b"node-a2", rev).expect("cas");
             assert!(rev2 > rev);
-            let kv = EtcdNeedFace::get(&c, b"lock/pg1").expect("get").expect("kv");
+            let kv = EtcdNeedFace::get(&c, b"lock/pg1")
+                .expect("get")
+                .expect("kv");
             assert_eq!(kv.value.as_slice(), b"node-a2");
             let mut watched = 0u32;
             while rx.try_recv().is_ok() {

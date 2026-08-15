@@ -371,8 +371,7 @@ pub fn apply_dcs_command<E: Env>(db: &mut Db<E>, cmd: &DcsCommand) -> Result<u64
             // must wipe so create is not permanently blocked after a "delete"
             // that only looked at get_kv (F115 residual). True absence: no-op.
             let live = get_kv(db, key);
-            let has_physical =
-                db.get(&kv_key(key)).is_some() || db.get(&meta_key(key)).is_some();
+            let has_physical = db.get(&kv_key(key)).is_some() || db.get(&meta_key(key)).is_some();
             if live.is_none() && !has_physical {
                 return revision(db);
             }
@@ -618,9 +617,7 @@ mod tests {
         };
         let r1 = apply_dcs_command(&mut db, &put).unwrap();
         db.put(meta_key(b"a"), b"xx").unwrap();
-        let del = DcsCommand::Delete {
-            key: b"a".to_vec(),
-        };
+        let del = DcsCommand::Delete { key: b"a".to_vec() };
         let r2 = apply_dcs_command(&mut db, &del).unwrap();
         assert!(
             r2 > r1,

@@ -1,0 +1,1107 @@
+Industry 3: Data Platforms                                                                      SIGMOD ’19, June 30–July 5, 2019, Amsterdam, Netherlands
+
+
+
+
+                              FoundationDB Record Layer:
+                           A Multi-Tenant Structured Datastore
+       Christos Chrysafis, Ben Collins, Scott Dugas, Jay Dunkelberger, Moussa Ehsan,
+       Scott Gray, Alec Grieser, Ori Herrnstadt, Kfir Lev-Ari, Tao Lin, Mike McMahon,
+                             Nicholas Schiefer, Alexander Shraer
+                                                                             Apple, Inc.
+ABSTRACT                                                                                    1   INTRODUCTION
+The FoundationDB Record Layer is an open source library                                     Many applications require a scalable and highly available
+that provides a record-oriented data store with semantics                                   backend that provides durable storage. Developing and op-
+similar to a relational database implemented on top of Foun-                                erating such backends presents many challenges. First, the
+dationDB, an ordered, transactional key-value store. The                                    high volume of data collected by modern applications, cou-
+Record Layer provides a lightweight, highly extensible way                                  pled with the large number of users and high access rates,
+to store structured data. It offers schema management and a                                 requires smart partitioning and placement solutions for stor-
+rich set of query and indexing facilities, some of which are                                ing data to achieve horizontal scalability. Modern storage
+not usually found in traditional relational databases, such                                 systems must scale elastically in response to increases in
+as nested record types, indexes on commit versions, and in-                                 user demand for both storage capacity and computation. Sec-
+dexes that span multiple record types. The Record Layer is                                  ond, as systems become larger, formerly “rare” events such
+stateless and built for massive multi-tenancy, encapsulating                                as network, disk, and machine failures become everyday
+and isolating all of a tenant’s state, including indexes, into a                            occurrences. A core challenge of distributed systems is main-
+separate logical database. We demonstrate how the Record                                    taining system availability and durability in the face of these
+Layer is used by CloudKit, Apple’s cloud backend service, to                                problems. Third, many techniques for addressing scalabil-
+provide powerful abstractions to applications serving hun-                                  ity and availability challenges, such as eventual consistency,
+dreds of millions of users. CloudKit uses the Record Layer                                  create immense challenges for application developers. Im-
+to host billions of independent databases, many with a com-                                 plementing transactions in a distributed setting remains one
+mon schema. Features provided by the Record Layer enable                                    of the most challenging problems in distributed systems.
+CloudKit to provide richer APIs and stronger semantics with                                    Fourth, as stateful services grow, they must support the
+reduced maintenance overhead and improved scalability.                                      needs of many diverse users and applications. This multi-
+                                                                                            tenancy brings many challenges, including isolation, resource
+ACM Reference Format:                                                                       sharing, and elasticity in the face of growing load. Many data-
+Christos Chrysafis, Ben Collins, Scott Dugas, Jay Dunkelberger,                             base systems intermingle data from different tenants at both
+Moussa Ehsan, Scott Gray, Alec Grieser, Ori Herrnstadt, Kfir Lev-
+                                                                                            the compute and storage levels. Retrofitting resource iso-
+Ari, Tao Lin, Mike McMahon, Nicholas Schiefer, and Alexander Shraer.
+                                                                                            lation to such systems is challenging. Stateful services are
+2019. FoundationDB Record Layer: A Multi-Tenant Structured Data-
+store. In 2019 International Conference on Management of Data (SIG-                         especially difficult to scale elastically because state cannot
+MOD ’19), June 30-July 5, 2019, Amsterdam, Netherlands. ACM, New                            be partitioned arbitrarily. For example, data and indexes can-
+York, NY, USA, 16 pages. https://doi.org/10.1145/3299869.3314039                            not be stored on entirely separate storage clusters without
+                                                                                            sacrificing transactional updates, performance, or both.
+                                                                                               These problems must be addressed by any company of-
+Permission to make digital or hard copies of all or part of this work for                   fering stateful services. Yet despite decades of academic and
+personal or classroom use is granted without fee provided that copies                       industrial research, they are notoriously difficult to solve
+are not made or distributed for profit or commercial advantage and that
+copies bear this notice and the full citation on the first page. Copyrights
+                                                                                            correctly and require a high level of expertise and experi-
+for components of this work owned by others than the author(s) must                         ence. Big companies use in-house solutions, developed and
+be honored. Abstracting with credit is permitted. To copy otherwise, or                     evolved over many years by large teams of experts. Smaller
+republish, to post on servers or to redistribute to lists, requires prior specific          companies often have little choice but to pay larger cloud
+permission and/or a fee. Request permissions from permissions@acm.org.                      providers or sacrifice durability.
+SIGMOD ’19, June 30-July 5, 2019, Amsterdam, Netherlands
+                                                                                               FoundationDB [10] democratizes industrial-grade highly-
+© 2019 Copyright held by the owner/author(s). Publication rights licensed
+to ACM.
+                                                                                            available and consistent storage, making it freely available to
+ACM ISBN 978-1-4503-5643-5/19/06.                                                           anyone as an open source solution [11] and is currently used
+https://doi.org/10.1145/3299869.3314039                                                     in production at companies such as Apple, Snowflake, and
+
+
+
+
+                                                                                     1787
+Industry 3: Data Platforms                                                    SIGMOD ’19, June 30–July 5, 2019, Amsterdam, Netherlands
+
+
+
+
+Wavefront. While the semantics, performance, and reliability              data to another cluster as everything needed to interpret and
+of FoundationDB make it extremely useful, FoundationDB’s                  operate each record store is found in its key range.
+data model, an ordered mapping from binary keys to binary                     The Record Layer is used by multiple systems at Apple.
+values, is often insufficient for applications. Many of them              We demonstrate the power of the Record Layer at scale by de-
+need structured data storage, indexing capabilities, a query              scribing how CloudKit, Apple’s cloud backend service, uses
+language, and more. Without these, application developers                 it to provide strongly-consistent data storage for a large and
+are forced to reimplement common functionality, slowing                   diverse set of applications [43]. Using the Record Layer’s ab-
+development and introducing bugs.                                         stractions, CloudKit offers multi-tenancy at the extreme by
+   To address these challenges, we present the FoundationDB               maintaining independent record stores for each user of each
+Record Layer: an open source record-oriented data store built             application. As a result, we use the Record Layer on Foun-
+on top of FoundationDB with semantics similar to a relational             dationDB to host billions of independent databases sharing
+database [19, 20]. The Record Layer provides schema manage-               thousands of schemata. In the future, we envision that the
+ment, a rich set of query and indexing facilities, and a variety          Record Layer will be combined with other storage models,
+of features that leverage FoundationDB’s advanced capa-                   such as queues and graphs, leveraging FoundationDB as a
+bilities. It inherits FoundationDB’s strong ACID semantics,               general purpose storage engine to provide transactional con-
+reliability, and performance in a distributed setting. These              sistency across all these data models. In summary, this work
+lightweight abstractions allow for multi-tenancy at an ex-                makes the following contributions:
+tremely large scale: the Record Layer allows creating isolated            • An open source layer on top of FoundationDB with se-
+logical databases for each tenant—at Apple, it is used to man-                mantics akin to those of a relational database.
+age billions of such databases—all while providing familiar               • The record store abstraction and a suite of techniques
+features such as transactional index maintenance.                             to manipulate it, enabling billions of logical tenants to
+   The Record Layer represents structured values as Protocol                  operate independent databases in a FoundationDB cluster.
+Buffer [4] messages called records that include typed fields              • An extensible architecture allowing clients to customize
+and even nested records. Since an application’s schema in-                    core features including schema management and indexing.
+evitably changes over time, the Record Layer includes tools               • A lightweight design that provides rich features on top of
+for schema management and evolution. It also includes facili-                 the underlying key-value store.
+ties for planning and efficiently executing declarative queries
+using a variety of index types. The Record Layer leverages ad-            2   BACKGROUND ON FOUNDATIONDB
+vanced features of FoundationDB; for example, many aggre-                 FoundationDB is a distributed, ordered key-value store that
+gate indexes are maintained using FoundationDB’s atomic                   runs on clusters of commodity servers and provides ACID
+mutations, allowing concurrent, conflict-free updates. Be-                transactions over arbitrary sets of keys using optimistic con-
+yond its rich feature set, the Record Layer provides a large              currency control. Its architecture draws from the virtual
+set of extension points, allowing its clients to extend its               synchrony paradigm [23, 26] whereby FoundationDB is com-
+functionality even further. For example, client-defined index             posed of two logical clusters: one that stores data and pro-
+types can be seamlessly “plugged in” to the index maintainer              cesses transactions and another coordination cluster (run-
+and query planner. Similarly, record serialization supports               ning Active Disk Paxos [27]) that maintains membership and
+client-defined encryption and compression algorithms.                     configuration for the first cluster. This allows FoundationDB
+   The Record Layer supports multi-tenancy at scale through               to achieve high availability while requiring only F +1 storage
+two key architectural choices. First, the layer is completely             replicas to tolerate F failures [23]. FoundationDB is distin-
+stateless, so scaling the compute service is as easy as launch-           guished by its deterministic simulation testing framework
+ing more stateless instances. A stateless design means that               which can quickly simulate entire clusters under a variety
+load-balancers and routers need only consider where the                   of failure conditions in a single thread with complete deter-
+data are located rather than which compute servers can serve              minism. In the past year, we have run more than 250 million
+them. Furthermore, a stateless server has fewer resources                 simulations equivalent to more than 1870 years and 3.5 mil-
+that need to be apportioned among isolated clients. Second,               lion CPU-hours. This rigorous testing in simulation makes
+the layer achieves resource sharing and elasticity with its               FoundationDB extremely stable and allows its developers
+record store abstraction, which encapsulates the state of an              to introduce new features and releases in a rapid cadence,
+entire logical database, including serialized records, indexes,           unusual among similar strongly-consistent distributed—or
+and even operational state. Each record store is assigned                 even centralized—databases.
+a contiguous range of keys, ensuring that data belonging                     Layers. Unlike most databases, which bundle together a
+to different tenants is logically isolated. If needed, moving             storage engine, data model, and query language, forcing
+a tenant is as simple as copying the appropriate range of                 users to choose all three or none, FoundationDB takes a
+
+
+
+
+                                                                   1788
+Industry 3: Data Platforms                                                      SIGMOD ’19, June 30–July 5, 2019, Amsterdam, Netherlands
+
+
+
+
+modular approach: it provides a highly scalable, transac-                   key and value sizes (10kB for keys and 100kB for values)
+tional storage engine with a minimal yet carefully chosen                   with much smaller recommended sizes (32B for keys and
+set of features. For example, it provides no structured se-                 up to 10KB for values). Transactions are limited to 10MB,
+mantics, and each cluster provides a single, logical keyspace               including the key and value size of all keys written and the
+which it automatically partitions and replicates. Layers can                sizes of all keys in the read and write conflict ranges of the
+be constructed on top to provide various data models and                    commit. In production at Apple, with workloads generated
+other capabilities. Currently, the Record Layer is the most                 by CloudKit through the Record Layer, the median and 99th
+substantial layer built on FoundationDB.                                    percentile transaction sizes are approximately 7KB and 36KB,
+    Transactions and Semantics. FoundationDB provides ACID                  respectively. Keys are part of a single global keyspace, and
+multi-key transactions with strictly-serializable isolation, im-            it is up to applications to divide and manage that keyspace
+plemented using multi-version concurrency control (MVCC)                    with the help of several convenience APIs such as the tuple
+for reads and optimistic concurrency for writes. As a result,               and directory layers described next. FoundationDB supports
+neither reads nor writes are blocked by other readers or writ-              range reads based on the binary ordering of keys. Finally,
+ers. Instead, conflicting transactions fail at commit time and              range clear operations are supported and can be used to clear
+are usually retried by the client. Specifically, a client perform-          all keys in a certain range or starting with a certain prefix.
+ing a transaction obtains a read version, chosen as the latest                  Tuple and directory layers. Key ordering in FoundationDB
+database commit version, by performing a getReadVersion                     makes tuples a convenient and simple way to model data. The
+(GRV) call and performs reads at that version, effectively                  tuple layer, included within the FoundationDB client library,
+observing an instantaneous snapshot of the database. Trans-                 encodes tuples into keys such that the binary ordering of
+actions that contain writes can be committed only if none of                those keys preserves the ordering of tuples and the natural
+the values they read have been modified by another transac-                 ordering of typed tuple elements. In particular, a common
+tion since the transaction’s read version. Committed transac-               prefix of the tuple is serialized as a common byte prefix
+tions are written to disk on multiple cluster nodes and then                and defines a key subspace. For example, a client may store
+acknowledged to the client. FoundationDB executes opera-                    the tuple (state,city) and later read using a prefix like
+tions within a transaction in parallel, while preserving the                (state,*).
+program order of accesses to each key and guaranteeing that                     The directory layer provides an API for defining a log-
+a read following a write to the same key within a transaction               ical directory structure which maps potentially long-but-
+returns the written value. FoundationDB imposes a 5 second                  meaningful binary strings to short binary strings, reducing
+transaction time limit, which the Record Layer compensates                  the amount of space used by keys. For example, if all of an ap-
+for using techniques described in Section 4.                                plication’s keys are prefixed with its name, the prefix might
+    Besides create, read, update, and delete (CRUD) opera-                  be added to the directory layer. Internally, the directory layer
+tions, FoundationDB provides atomic read-modify-write op-                   assigns values to its entries using a sliding window alloca-
+erations on single keys (e.g., addition, min/max, etc.). Atomic             tion algorithm that concurrently allocates unique mappings
+operations occur within a transaction like other operations,                while keeping the allocated integers small.
+but they do not create read conflicts, so a concurrent change
+to that value would not cause the transaction to abort. For ex-
+ample, a counter incremented concurrently by many clients                   3   DESIGN GOALS AND PRINCIPLES
+would be best implemented using atomic addition.                            The Record Layer is designed to provide powerful abstrac-
+    FoundationDB allows clients to customize the default con-               tions for operations on structured data including transaction
+currency control behavior by trading off isolation semantics                processing, schema management, and query execution. It
+to reduce transaction conflicts. Snapshot reads do not cause                aims to provide this rich set of features in a massively multi-
+an abort even if the read key was overwritten by a later trans-             tenant environment where it must serve the needs of a great
+action. For example, a transaction may wish to read a value                 number of tenants with diverse storage and retrieval needs.
+that is monotonically increasing over time just to determine                For example, some tenants store and locally synchronize a
+if the value has reached some threshold. In this case, reading              small amount of data while others store large amounts of
+the value at a snapshot isolation level (or clearing the read               data and query it in complex ways.
+conflict range for the value’s key) would allow the transac-                   To illustrate this challenge concretely, Figure 3 shows the
+tion to see the state of the value, but it would not result in              distribution of the sizes of record stores used to store Cloud-
+conflicts with other transactions that may be modifying the                 Kit’s private databases [43]. Although the vast majority of
+value concurrently.                                                         databases are quite small, much of the data is stored in rela-
+    Keys, values, and order. Keys and values in FoundationDB                tively large databases. Furthermore, the data in the figure ex-
+are opaque binary values. FoundationDB imposes limits on                    cludes larger databases such as the “public” databases shared
+
+
+
+
+                                                                     1789
+Industry 3: Data Platforms                                                                                 SIGMOD ’19, June 30–July 5, 2019, Amsterdam, Netherlands
+
+
+
+
+across all users of an application, which can be terabytes in                                          For example, the Record Layer does not maintain any state
+size.                                                                                                  about the position of a cursor in memory; instead, the context
+   In the face of such a range of database sizes, it is tempting                                       needed to advance a cursor in a future request is serialized
+to provision and operate separate systems to store “small                                              and returned to the client as a continuation.
+data” and “big data.” However, such an approach poses both                                                 The stateless nature of the layer has three primary benefits,
+operational challenges and difficulties to application devel-                                          which we illustrate with the same example of streaming data
+opers, who must contend with varying semantics across                                                  from a cursor. First, it simplifies request routing: a request
+systems. Instead, the Record Layer offers the semantics of a                                           can be routed to any of the stateless servers even if it requests
+structured data store with massive multi-tenancy in mind by                                            more results from an existing cursor since there is no buffer
+providing features that serve the diverse needs of its tenants                                         on a particular server that needs to be accessed. Second, it
+and mechanisms to isolate them from each other.                                                        substantially simplifies the operation of the system at scale:
+                                                                                                       if the server encounters a problem, it can be safely restarted
+3.1                                     Design principles                                              without needing to transfer cursor state to another server.
+Achieving these goals required a variety of careful design                                             Lastly, storing state in FoundationDB ensures that all state
+decisions, some of which differ from traditional relational                                            has the same ACID semantics as the underlying key-value
+databases. This section highlights several of these principles.                                        store: we do not need separate facilities for verifying the
+   Statelessness. In many distributed databases, individual                                            integrity of our cursor-specific metadata.
+database servers maintain ephemeral, server-specific state,                                                Streaming model for queries. The Record Layer controls its
+such as memory and disk buffers, in addition to persistent                                             resource consumption by limiting its semantics to those that
+information such as data and indexes. In contrast, the Record                                          can be implemented on streams of records. For example, it
+Layer stores all of its state in FoundationDB or returns it                                            supports ordered queries (as in SQL’s ORDER BY clause) only
+to the client so that the layer itself is completely stateless.                                        when there is an available index supporting the requested
+                                                                                                       sort order. This approach enables supporting concurrent
+                                                                                                       workloads without requiring stateful memory pools in the
+                                1
+                                                                                                       server. This also reflects the layer’s general design philoso-
+
+
+
+ fraction of record stores
+                                                                                                       phy of preferring fast and predictable transaction processing
+                             10−2
+                                                                                                       over OLAP-style analytical queries.
+                                                                                                           Flexible schema. The atomic unit of data in the Record
+                             10−4
+                                                                                                       Layer is a record: a Protocol Buffer [4] message which is
+                                                                                                       serialized and stored in the underlying key-value space. This
+                             10−6
+                                                                                                       provides fast and efficient transaction processing on individ-
+                                1
+                                                                                                       ual records akin to a row-oriented relational database. Unlike
+
+
+
+ fraction of bytes stored
+                                                                                                       record tuples in the traditional relational model, these mes-
+                             10−2
+                                                                                                       sages can be highly structured; in addition to a variety of
+                                                                                                       complex data types, these messages support nesting of record
+                             10−4
+                                                                                                       types within a field and repeated instances of the same field.
+                             10−6
+                                                                                                       As a result, list and map data structures can be implemented
+                                    1         102      104                106
+                                                    size of record store (bytes)
+                                                                                   108   1010          within a single record. Because the Record Layer is designed
+                                                                                                       to support millions of independent databases with a common
+                                                                                                       schema, it stores metadata separately from the underlying
+Figure 1: Top: The distribution of record store sizes                                                  data so that the common metadata can be updated atomically
+for a 0.1% sample of CloudKit-managed record stores                                                    for all stores that use it.
+as a normalized histogram (blue) and cumulative den-                                                       Efficiency. Implemented as a library rather than an inde-
+sity function (orange). Notice that a substantial ma-                                                  pendent client/server system, the Record Layer can be em-
+jority of record stores contain fewer than 1 kilobytes                                                 bedded in its client, imposing few requirements on how the
+of record data. Bottom: The distribution of the total                                                  actual server is implemented. Since FoundationDB is most
+size of record stores of a particular size as a normal-                                                performant at high levels of concurrency, nearly all of the
+ized histogram (blue) and cumulative density func-                                                     Record Layer’s operations are implemented asynchronously
+tion (orange). The sample represents private databases                                                 and pipelined where possible. We also make extensive use of
+and excludes many large record stores such as public                                                   FoundationDB-specific features, such as controllable isola-
+databases. All sizes include primary record data and                                                   tion semantics, both within the layer’s implementation and
+exclude metadata and index entries.                                                                    exposed to clients via its API.
+
+
+
+
+                                                                                                1790
+Industry 3: Data Platforms                                                             SIGMOD ’19, June 30–July 5, 2019, Amsterdam, Netherlands
+
+
+
+
+                                   Metadata Store
+                                                                                   transaction, provides continuations to resume work, and
+                                      (Schema)                                     can be coupled with external throttling. On the data level,
+                                                                                   the keys of each record store start with a unique binary
+                 Application                              Application
+                                                                                   prefix which defines a FoundationDB subspace. All the record
+           Record Layer API                         Record Layer API
+                                                                                   store’s data is logically co-located within the subspace and
+                                                                                   the subspaces of different record stores do not overlap.
+      Record Store                           Record Store                             Primary keys and indexes are defined within the Record
+        record                                   record
+        record
+                         indexes
+                                                 record
+                                                                  indexes          Layer using key expressions, covered in detail in Appendix A.
+        record
+                        Metadata
+                                                 record
+                                                                 Metadata
+                                                                                   A key expression defines a logical path through a record;
+        record                                   record                            applying it to a record extracts record field values and pro-
+                                                                                   duces a tuple that becomes the primary key for the record
+                                                                                   or key of the index for which the expression is defined. Key
+Figure 2: Architecture of the Record Layer. The core                               expressions may produce multiple tuples, allowing indexes
+record store abstraction stores an entire logical data-                            to “fan out” and generate index entries for individual ele-
+base with a contiguous FoundationDB subspace, pro-                                 ments of nested and repeated fields. Since all record types
+viding logical isolation between tenants.                                          are interleaved, both queries and index definitions may span
+                                                                                   all types of records in a record store.
+   Extensibility. In the spirit of the FoundationDB’s layered                         To avoid exposing FoundationDB’s limits on key and value
+architecture, the Record Layer exposes a number of exten-                          sizes to clients, the Record Layer splits large records across a
+sion points through its API so that clients can extend its                         set of contiguous keys and splices them back together when
+functionality. For example, clients can easily define new in-                      deserializing split records. A special type of split, immedi-
+dex types, methods for maintaining those indexes, and rules                        ately preceding each record, holds the commit version of the
+that extend its query planner to use those indexes in plan-                        record’s last modification; it is returned with the record on ev-
+ning. This extensibility makes it easy to add features that                        ery read. The Record Layer supports pluggable serialization
+are left out of the Record Layer’s core, such as memory pool                       libraries, including optional compression and encryption of
+management and arbitrary sorting. Our implementation of                            stored records.
+CloudKit on top of the Record Layer (discussed in Section 8)                          The Record Layer provides APIs for storing, reading and
+makes substantial use of this extensibility with custom index                      deleting records, creating and deleting record stores and in-
+types, planner behavior, and schema management.                                    dexes in stores, scanning and querying records using the
+                                                                                   secondary indexes, updating record store metadata, manag-
+4   RECORD LAYER OVERVIEW                                                          ing a client application’s directory structure, and iteratively
+The Record Layer is primarily used as a library by stateless                       rebuilding indexes when they cannot be rebuilt as part of a
+backend servers that need to store structured data in Foun-                        single transaction.
+dationDB. It is used to store billions of logical databases,                          All Record Layer operations that provide a cursor over a
+called record stores, with thousands of schemata. Records in a                     stream of data, such as record scans, index scans, and queries,
+record store are Protocol Buffer messages and a record type                        support continuations. A continuation is an opaque binary
+is defined with a Protocol Buffer definition. A record type                        value that represents the starting position of the next avail-
+resembles a table in a traditional relational database in that                     able value in a cursor stream. Results are parceled to clients
+it defines the structure of multiple records of that type. How-                    along with the continuation, allowing them resume the oper-
+ever, unlike tables in a relational database, all record types                     ation by supplying the returned continuation when invoking
+within a record store are interleaved within the same extent.                      the operation again. This gives clients a way to control the it-
+The schema, also called the metadata, of a record store is                         eration without requiring the server to maintain state, and it
+a set of record types and index definitions on these types                         allows scan or query operations that exceed the transaction
+(see Section 6). Metadata is versioned and may be stored                           time limit to be split across multiple transactions.
+in FoundationDB or elsewhere (metadata management and                                 The Record Layer leverages details of FoundationDB’s
+evolution is discussed in Section 5). The record store is re-                      implementation to improve data access speed. For example,
+sponsible for storing raw records, indexes defined on the                          record prefetching asynchronously preloads records into the
+record fields, and the highest version of the metadata it was                      FoundationDB client’s read-your-write cache, but does not
+accessed with. This general architecture is shown in Figure 2.                     return them to the client application. When reading batches
+   Providing isolation between record stores is key for multi-                     of many records, this can potentially save a context switch
+tenancy. To facilitate resource isolation, the Record Layer                        and record deserialization. The Record Layer also includes
+tracks and enforces limits on resource consumption for each                        mechanisms to trade off consistency for performance, such as
+
+
+
+
+                                                                            1791
+Industry 3: Data Platforms                                                   SIGMOD ’19, June 30–July 5, 2019, Amsterdam, Netherlands
+
+
+
+
+snapshot reads. Similarly, the layer exposes FoundationDB’s                 The metadata is versioned in single-stream, non-branching,
+“causal-read-risky” flag, which causes getReadVersion to                 monotonically increasing fashion. Every record store tracks
+be faster at the risk of returning a slightly stale read ver-            the highest version it has been accessed with in a small
+sion during the rare case of a cluster reconfiguration. This is          header within a single key-value pair. When a record store
+usually an acceptable risk; for example, ZooKeeper’s “sync”              is opened, this header is read and the version compared with
+operation behaves similarly [38]. Furthermore, transactions              current metadata version.
+that modify state never return stale data since their reads are             Typically, the metadata will not have changed since the
+validated at commit time. Read version caching optimizes                 store was last opened, so these versions are the same. When
+getReadVersion further by completely avoiding communi-                   the version in the database is newer, a client has usually used
+cation with FoundationDB if a read version was “recently”                an out-of-date cache to obtain the current metadata. If the
+fetched from FoundationDB. Often, the client application                 version in the database is older, changes need to be applied.
+provides an acceptable staleness and the last seen commit                New records types and fields can be added by updating the
+version as transaction parameters; the Record Layer uses                 Protocol Buffer definition.
+a cached version as long as it is sufficiently recent and no                Adding indexes. An index on a new record type can be en-
+smaller than the version previously observed by the client.              abled immediately since there are no existing records of that
+This may result in reading stale data and may increase the               type. Adding an index to an existing record type, which might
+rate of failed transactions in transactions that modify state.           already have records in the record store, is more expensive
+Version caching is most useful for read-only transactions that           since it might require reindexing. Since records of different
+do not need to return the latest data and for low-concurrency            types may exist in the same key space, all the records need
+workloads where the abort rate is low.                                   to be scanned when building a new index. If there are very
+   To help clients organize their record stores in Founda-               few or no records, the index can be built right away within
+tionDB’s key space, the Record Layer provides a KeySpace                 a single transaction. If there are many existing records, the
+API which exposes the key space in a fashion similar to a                index cannot be built immediately because that might ex-
+filesystem directory structure. When writing data to Foun-               ceed the 5 second transaction time limit. Instead, the index
+dationDB, or when defining the location of a record store, a             is disabled and the reindexing proceeds as a background job
+path through this logical directory tree may be traced and               as described in Section 6.
+compiled into a tuple value that becomes a row key. The                     Metadata versioning. Occasionally, changes need to be
+KeySpace API ensures that all directories within the tree                made to the way that the Record Layer itself encodes data.
+are logically isolated and non-overlapping. Where appro-                 For this, the same database header that records the applica-
+priate, it uses the directory layer (described in Section 2) to          tion metadata version also records a storage format version,
+automatically convert directory names to small integers.                 which is updated at the same time. Updating may entail re-
+                                                                         formatting small amounts of data or, in some cases, enabling
+                                                                         a compatibility mode for old formats. We also maintain an
+5   METADATA MANAGEMENT                                                  “application version” for use by the client that can be used
+The Record Layer provides facilities for managing changes to             to track data evolution that is not captured by the metadata
+a record store’s metadata. Since one of its goals is to support          alone. For example, a nested record type might be promoted
+many databases that share a common schema, the Record                    to a top-level record type as part of data renormalization.
+Layer allows metadata to be stored in a separate keyspace                The application version allows checking for these changes
+from the data or even a separate storage system entirely. In             as part of opening the record store instead of implementing
+most deployments, this metadata is aggressively cached by                checks in the application code. If a series of such changes
+clients so that records can be interpreted without additional            occur, the version can also be used as a counter tracking how
+reads from the key-value store. This architecture allows low-            far along we are in applying the changes to the record store.
+overhead, per request, connections to a particular database.
+   Schema evolution. Since records are serialized into the               6   INDEX DEFINITION AND
+underlying key-value store as Protocol Buffer messages (pos-                 MAINTENANCE
+sibly after pre-processing steps, such as compression and                Record Layer indexes are durable data structures that support
+encryption), some basic data evolution properties are in-                efficient access to data, or possibly some function of the data,
+herited from Protocol Buffers: new fields can be added to a              and can be maintained in a streaming fashion, i.e., updated
+record type and appear as uninitialized in old records, and              incrementally when a record is inserted, updated, or deleted
+new record types can be added without interfering with old               using only the contents of that record. Index maintenance
+records. As a best practice, field numbers are never reused              occurs in the same transaction as the record change itself, en-
+and should be deprecated rather than removed altogether.                 suring that indexes are always consistent with the data. Our
+
+
+
+
+                                                                  1792
+Industry 3: Data Platforms                                                    SIGMOD ’19, June 30–July 5, 2019, Amsterdam, Netherlands
+
+
+
+
+ability to do this efficiently relies heavily on FoundationDB’s           maintainers (see Section 6). In this Section, we outline the
+fast multi-key transactions. Efficient index scans use Foun-              VALUE, Atomic Mutation and VERSION indexes. Appendix B
+dationDB’s range reads and rely on the lexicographic or-                  describes the RANK and TEXT index types, used for dynamic
+dering of stored keys. Each index is stored in a dedicated                order statistics and full-text indexing respectively.
+subspace within the record store so that indexes can be re-                  Unlike in traditional relational systems, indexes can span
+moved cheaply using FoundationDB’s range clear operation.                 multiple record types, in which case any fields referenced
+Indexes may be configured with one or more index filters,                 by the key expression must exist in all of the index’s record
+which allow records to be conditionally excluded from in-                 types. Such indexes allow for efficient searches across differ-
+dex maintenance, effectively creating a “sparse” index and                ent record types with a common set of search criteria.
+potentially reducing storage space and maintenance costs.                    VALUE Indexes. The default VALUE index type provides a
+   Index maintenance. Defining an index type requires imple-              standard mapping from index entry (a single field or a com-
+menting an index maintainer tasked with updating the index                bination of field values) to record primary key. Scanning the
+when records change. The Record Layer provides built-in in-               index can be used to satisfy many common predicates, e.g.,
+dex maintainers for a variety of index types (Section 7). The             to find all primary keys where an indexed field’s value is less
+index maintainer abstraction is directly exposed to clients,              than or equal to a given value.
+allowing them to define custom index types.                                  Atomic mutation indexes. Atomic mutation indexes are
+   When a record is saved, we first check if a record already             implemented using FoundationDB’s atomic mutations, de-
+exists with the same primary key. If so, registered index                 scribed in Section 2. These indexes are generally used to
+maintainers remove or update associated index entries for                 support aggregate statistics and queries. For example, the
+the old record, and the old record is deleted from the record             SUM index type stores the sum of a field’s value over all
+store. A range clear to delete the old record is necessary as             records in a record store, where the field is defined in the
+records can be split across multiple keys. Next, we insert the            index’s key expression. In this case, the index contains a
+new record into the record store. Finally, registered index               single entry, mapping the index subspace path to the sum
+maintainers insert or update any associated index entries                 value. The key expression could also include one or more
+for the new record. We use a variety of optimizations during              grouping fields, in which case the index contains a sum for
+index maintenance; for example, if an existing record and                 each value of the grouping field. While the maintenance of
+a new record are of the same type and some of the indexed                 such an index could be implemented by reading the current
+fields are the same, the unchanged indexes are not updated.               index value, updating it with a new value, and writing it back
+   Online index building. The Record Layer includes an on-                to the index, such an implementation would not scale, as any
+line index builder used to build or rebuild indexes in the                two concurrent record updates would necessarily conflict.
+background. To ensure that an index is not used before it is              Instead, the index is updated using FoundationDB’s atomic
+fully built, indexes begin in a write-only state where writes             mutations (e.g., the ADD mutation for the SUM index), which
+maintain the index but it cannot be used to satisfy queries.              do not conflict with other mutations.
+The index builder then scans the record store and instructs                  The Record Layer currently supports the following atomic
+the index maintainer for that index to update the index for               mutation index types, tracking different aggregate metrics:
+each encountered record. When the index build completes,                  • COUNT - number of records
+the index is marked as readable, the normal state where the               • COUNT UPDATES - num. times a field has been updated
+index is maintained by writes and usable by queries. Index                • COUNT NON NULL- num. records where a field isn’t null
+building is split into multiple transactions to reduce conflicts          • SUM - summation of a field’s value across all records
+with concurrent mutations and avoid transaction size limits.              • MAX (MIN) EVER - max (min) value ever assigned to a
+   Indexes are defined by an index type and a key expression,                field, over all records, since the index has been created
+which defines a function from a record to one or more tuples
+                                                                          Note that these indexes have a relatively low foot-print com-
+consumed by the index maintainer and used to form the index
+                                                                          pared to VALUE indexes as they only write a single key for
+key. The Record Layer includes a variety of key expressions
+                                                                          each grouping key, or, in its absence, a single key for each
+(see Appendix A) and allows clients to define custom ones.
+                                                                          record store. However, a small number of index keys that
+7   INDEX TYPES                                                           need to be updated on each write can lead to high write
+                                                                          traffic on those keys, causing high CPU and I/O usage for
+The type of an index determines which predicates it can be
+                                                                          the FoundationDB storage servers that hold them. This can
+used to evaluate. The Record Layer supports a variety of in-
+                                                                          also result in increased read latency for clients attempting
+dex types, many of which make use of specific FoundationDB
+                                                                          to read from these servers.
+features. Clients can define their own index types by imple-
+menting and registering custom key expressions and index
+
+
+
+
+                                                                   1793
+Industry 3: Data Platforms                                                                       SIGMOD ’19, June 30–July 5, 2019, Amsterdam, Netherlands
+
+
+
+
+          FoundationDB Key Space
+                                                                                                                        Device Service / Routing
+        cloudkit-keyspace
+
+           user 1                                            Metadata Store               CloudKit Service       CloudKit Service              CloudKit Service       CloudKit Service
+                                                                  (Schema)
+               application 1                                                              Record Layer            Record Layer                 Record Layer            Record Layer
+                                        record store
+
+                    data
+
+                       (zone1, rec1-primary-key)                                                      User 2                                          User 3
+                                                            User 1
+                       (zone1, rec2-primary-key)            record store: application 1               record store: application 1                      record store: application 3
+
+                                                               data       indexes     metadata           data       indexes         metadata              data       indexes     metadata
+                       (zone2, rec3-primary-key)
+
+
+                    index
+                                                            record store: application 4
+
+                                                               data       indexes     metadata
+                                                                                                      record store: application 3
+
+                                                                                                         data        indexes        metadata
+                                                                                                                                                       record store: application 4
+
+                                                                                                                                                          data       indexes     metadata
+                                                                                                                                                                                            …
+                                                            record store: application 7                                                                 record store:application 10
+               application 2                                   data       indexes     metadata                                                            data       indexes     metadata
+
+
+
+
+                                             Figure 3: CloudKit architecture using the Record Layer.
+   VERSION. VERSION indexes are similar to VALUE indexes in                                  Within CloudKit a given application is represented by
+that each has an index entry that maps to a primary key. How-                             a logical container, defined by a schema that specifies the
+ever, a VERSION index allows the index’s key expression to                                record types, typed fields, and indexes that are needed to
+include a special “version” field: a 12 byte value representing                           facilitate efficient record access and queries. The application
+the commit version of the last update to the indexed record.                              clients store records within named zones. Zones organize
+The version is guaranteed to be unique and monotonically                                  records into logical groups which can be selectively synced
+increasing with time within a single FoundationDB cluster.                                across client devices.
+The first 10 bytes are assigned by the FoundationDB servers                                  CloudKit assigns a unique FoundationDB subspace for
+upon commit, and only the last 2 bytes are assigned by the                                each user, and defines a record store within that subspace for
+Record Layer, using a counter maintained by the Record                                    each application accessed by the user. This means that Cloud-
+Layer per transaction. Since versions are assigned in this                                Kit is effectively maintaining (# users)×(# applications) logi-
+way for each record insert and update, each record stored in                              cal databases, each with their own records, indexes, and other
+the cluster has a unique version.                                                         metadata. CloudKit maintains billions of such databases.
+   Since the version is only known upon commit, it is not                                 When requests are received from client devices, they are
+included within the record’s Protocol Buffer representation.                              routed and load balanced across a pool of available CloudKit
+Instead, the Record Layer writes a mapping from the primary                               Service processes which access the appropriate Record Layer
+key of each record to its associated version in the keyspace                              record store and service the request.
+adjacent to the records so that both can be retrieved effi-                                  CloudKit translates the application schema into a Record
+ciently with a single range-read.                                                         Layer metadata definition and stores it in a metadata store
+   Version indexes expose the total ordering of operations                                (depicted in Figure 3). The metadata also includes attributes
+within a FoundationDB cluster. For example, a client can scan                             added by CloudKit such as system fields tracking record cre-
+a prefix of a version index and be sure that it can continue                              ation and modification time and the zone in which the record
+scanning from the same point and observe all the newly                                    was written. The zone name is added as a prefix to primary
+written data. The following section describes how CloudKit                                keys, allowing efficient per-zone access to records. In addi-
+uses this index type to implement change-tracking (sync).                                 tion to user-defined indexes, CloudKit maintains a number of
+                                                                                          “system” indexes, such as an index tracking the total record
+                                                                                          size by record type that is used for quota management.
+8   USE CASE: CLOUDKIT
+CloudKit [43] is Apple’s cloud backend service and applica-                               8.1        New CloudKit Capabilities
+tion development framework, providing much of the back-                                   CloudKit was initially implemented using Cassandra [6] as
+bone for storage, management, and synchronization of data                                 the underlying storage engine. To support atomic multi-
+across devices as well as sharing and collaboration between                               record operation batches within a zone, CloudKit uses Cas-
+users. We describe how CloudKit uses FoundationDB and the                                 sandra’s light-weight transactions [3]: all updates to the zone
+Record Layer, allowing it to support applications requiring                               are serialized using Cassandra’s compare-and-set (CAS) op-
+more advanced features such as the transactional indexing                                 erations on a dedicated per-zone update-counter. This im-
+and query capabilities described in this paper.                                           plementation suffices for many applications using CloudKit,
+
+
+
+
+                                                                                 1794
+Industry 3: Data Platforms                                                     SIGMOD ’19, June 30–July 5, 2019, Amsterdam, Netherlands
+
+
+
+
+                         Cassandra         Record Layer                  reduces operational costs by storing all data in one system.
+ Transactions          Within Zone        Within Cluster                 Our system uses FoundationDB’s key order to support prefix
+ Concurrency            Zone level          Record level                 matching with no additional overhead and n-gram searches
+ Zone size limit         Cassandra        FoundationDB                   that require only n key entries instead of the usual O(n2 )
+                    partition size (GBs)    cluster size                 keys needed to index all possible sub-strings. The system
+ Index Consistency        Eventual         Transactional                 also supports proximity and phrase search.
+ Indexes Stored            in Solr       in FoundationDB                    High-concurrency zones. With Cassandra, CloudKit main-
+Table 1: CloudKit on Cassandra and the Record Layer.                     tains a secondary “sync” index from the values of the per-
+                                                                         zone update-counter to changed records [43]. Scanning this
+but it has two scalability limitations. First, there is no con-          index allows CloudKit perform a sync operation that brings
+currency within a zone, even for operations making changes               a mobile device up-to-date with the latest changes to a zone.
+to different records. Second, multi-record atomic operations             The implementation of CloudKit using the Record Layer re-
+are scoped to a single Cassandra partition, which is limited             lies on FoundationDB’s concurrency control and no longer
+in size; furthermore, Cassandra’s performance deteriorates               maintains an update-counter that creates conflicts between
+as the size of a partition grows. The former is a concern for            otherwise non-conflicting transactions. To implement a sync
+collaborative applications, where data is shared among many              index, CloudKit leverages the total order on FoundationDB’s
+users or client devices. These limitations require application           commit versions by using a VERSION index, mapping ver-
+designers to carefully model their data and workload such                sions to record identifiers. To perform a sync, CloudKit sim-
+that records updated together reside in the same zone while              ply scans the VERSION index.
+making sure that zones do not grow too large and that the                   However, versions assigned by different FoundationDB
+rate of concurrent updates is minimized.                                 clusters are uncorrelated. This introduces a challenge when
+   The implementation of CloudKit on FoundationDB and                    migrating data from one cluster to another, e.g., when mov-
+the Record Layer addresses both issues, as summarized in                 ing users between clusters to improve load balancing and
+Table 1. Transactions are scoped to the entire database, al-             locality. The sync index must represent the order of updates
+lowing CloudKit zones to grow significantly larger than be-              across all clusters, so updates committed after the move must
+fore and supporting concurrent updates to different records              be sorted after updates committed before the move. CloudKit
+within a zone. Leveraging these new transactional capabil-               addresses this with an application-level per-user count of the
+ities, CloudKit now exposes interactive transactions to its              number of moves, called the incarnation. Initially, the incar-
+clients, specifically to other backend services that access              nation is 1, and it is incremented each time the user’s data is
+CloudKit through gRPC [2]. This simplifies the implementa-               moved to a different cluster. On every record update, we write
+tion of client applications and has enabled many new clients             the user’s current incarnation to the record’s header; these
+to use CloudKit.                                                         values are not modified during a move. The VERSION sync
+   Previously, only very few “system” indexes were main-                 index maps (incarnation, version) pairs to changed records,
+tained transactionally by CloudKit in Cassandra, whereas                 sorting the changes first by incarnation, then version.
+all user-defined secondary indexes were maintained in Solr.                 When deploying this implementation, we needed to han-
+Due to high access latencies, these indexes are updated asyn-            dle existing data with an associated update-counter value
+chronously, and queries that use them obtain an eventually               but no version. Instead of using business logic to combine
+consistent view of the data which requires application de-               the old and new sync indexes, we used the function key
+signers to work around perceived inconsistencies. With the               expression (see Section A) to make this migration opera-
+Record Layer, user-defined secondary indexes are maintained              tionally straightforward, transparent to the application, and
+transactionally with updates, so all queries return the latest           free of legacy code. Specifically, the VERSION index maps a
+data.                                                                    function of the incarnation, version, and update counter
+   Personalized full-text search. Users expect instant access            value to a changed record, where the function is (incarnation,
+to data they create such as emails, text messages, and notes.            version) if the record was last updated with the new method
+Often, indexed text and other data are interleaved, so trans-            and (0, update counter value) otherwise. This maintains the
+actional semantics are important. We implemented a per-                  order of records written using update counters and sorts all
+sonalized text indexing system using the TEXT index primi-               such records before records written with the new method.
+tives described in Appendix B that now serves millions of
+users. Unlike traditional search indexing systems, all updates           8.2     Client Resource Isolation
+are performed tranactionally, and no background jobs are                 CloudKit services a very large number of concurrent requests,
+needed to perform index updates and deletes. In addition to              and it is vital that no one client or application overwhelms the
+providing a consistent view of the data, this approach also              system or impacts the performance of others. A number of
+
+
+
+
+                                                                  1795
+Industry 3: Data Platforms                                                    SIGMOD ’19, June 30–July 5, 2019, Amsterdam, Netherlands
+
+
+
+
+Record Layer features were explicitly designed to ensure that             9   RELATED WORK
+individual requests consume a bounded amount of resources.                Traditional relational databases offer many features includ-
+    First, the Record Layer is designed to minimize the over-             ing structured storage, schema management, ACID trans-
+head of operations on top of the underlying key-value store.              actions, user-defined indexes, and SQL queries that make
+To illustrate this, we determined the median number of Foun-              use of these indexes with the help of a query planner and
+dationDB keys that were read or written while executing                   execution engine. These systems typically scale for read
+various common CloudKit operations. A query operation,                    workloads but were not designed to efficiently handle trans-
+which returns all records that match a given query, reads                 actional workloads on distributed data [37]. For example, in
+an average of ∼38.3 keys, of which ∼6.2 are not the records               shared-nothing database architectures cross-shard transac-
+or index entries themselves, for a total overhead of ∼15%.                tions and indexes are prohibitively expensive and careful
+Simple requests for individual records are comparatively ex-              data partitioning, a difficult task for a complex application,
+pensive, with an average of ∼13.3 key read of which ∼7.7                  is required. This led to research on automatic data partition-
+are not for record data. This reflects the general focus of               ing, e.g., [31, 40]. Shared-disk architectures are much more
+CloudKit on providing higher level services, such as queries              difficult to scale, primarily due to expensive cache coherence
+and synchronization over individual CRUD requests.                        and database page contention protocols [33].
+    For record save operations, it is more complicated to prop-              With the advent of Big Data, as well as to minimize costs,
+erly estimate the overhead. For one, write overhead is dom-               NoSQL datastores [13, 15, 25, 28, 32, 44] offer the other end of
+inated by the overhead of maintaining indexes, which de-                  the spectrum—excellent scalability but minimal semantics—
+pends on the number of indexes defined on the record’s type.              typically providing a key-value API with no schema, index-
+Furthermore, FoundationDB’s commit time for write transac-                ing, transactions, or queries. As a result, applications needed
+tions does not have a simple relationship with the number of              to re-implement many of the features provided by a relational
+writes. The FoundationDB client buffers writes locally until              database. To fill the void, middle-ground “NewSQL datas-
+commit time, when it ships all writes to the server along with            tores” appeared offering scalability as well as richer feature-
+the set of conflict ranges for the transaction. In practice, the          sets and semantics [7, 8, 10, 12, 18, 29]. For example, Google’s
+write performance depends substantially on the number of                  Spanner [29] supports ACID transactions, application-defined
+conflicts produced rather than simply the number of writes.               schema, and a SQL-based query language; secondary indexes
+On average, a CloudKit transaction writes ∼8.5 records and                and distributed queries were also added, more recently [21].
+makes ∼34.5 key writes associated with indexes, so the total              FoundationDB [10] takes a unique approach in the NewSQL
+index overhead is approximately ∼4 writes per record.                     space: it is highly scalable and provides ACID transactions,
+    Today, the Record Layer does not provide the ability to               but it offers a simple key-value API with no built-in data
+perform in-memory query operations, such as hash joins,                   model, indexing, or queries. This choice allowed Founda-
+grouping, aggregation, or sorts. Operations such as sorting               tionDB to build a powerful, stable and performant storage
+and joining must be assisted by appropriate index defini-                 engine without attempting to implement a one-size-fits-all
+tions. For example, efficient joins between records can be                solution. It was designed to be the foundation while layers
+facilitated by defining an index across multiple record types             built on top (implemented as client-side libraries) such as
+on common field names. While this does impose some addi-                  the Record Layer, provide higher-level abstractions.
+tional burden on the application developer, it ensures that                  Multiple systems implement transactions on top of under-
+the memory needed to complete a given request is limited to               lying NoSQL stores [9, 16, 22, 24, 34, 35, 41, 46]. The Record
+little more than the records accessed by the query. However,              Layer makes use of transactions exposed by FoundationDB
+this approach may require a potentially unbounded amount                  to implement structured storage, complete with secondary
+of I/O to implement a given query. For this, we leverage the              indexes, queries, and more. Like Google Percolator [41] the
+Record Layer’s ability to enforce limits on the total number              Record Layer is completely stateless, keeping all its metadata
+of records or bytes read while servicing a request. When one              in the underlying FoundationDB data store.
+of these limits is reached, the complete state of the opera-                 The Record Layer has unique first-class support for multi-
+tion is serialized and returned to the client as a continuation.          tenancy while most systems face the extreme challenge of
+The client may re-submit the operation with the continua-                 retrofittig it. Salesforce’s architecture [17] is similarly mo-
+tion to resume the operation. Because these operations are                tivated by the need to support multi-tenancy within the
+small, rate-based throttling mechanisms work more effec-                  database. For example, all data and metadata are sharded by
+tively. With these limits, continuations, and throttling, we              application, and query optimization considers statistics col-
+ensure that all clients make some progress even when the                  lected per application and user. The Record Layer takes multi-
+system comes under stress.                                                tenancy support further through built-in resource tracking
+
+
+
+
+                                                                   1796
+Industry 3: Data Platforms                                                  SIGMOD ’19, June 30–July 5, 2019, Amsterdam, Netherlands
+
+
+
+
+and isolation, a completely stateless design, and the record            work outstanding as possible. Therefore, the Record Layer
+store abstraction. For example, CloudKit faces a dual multi-            does much of its work asynchronously, pipelining it where
+tenancy challenge as it services many applications, each with           possible. However, the FoundationDB client is single-threaded,
+a very large user-base. Each record store encapsulates all              with only a single network thread that talks to the cluster.
+of a user’s data for one application, including indexes and             Earlier versions of the Java bindings completed futures in
+metadata. This choice makes it easy to scale the system to              the network thread, and the Record Layer used these for
+billions of users by simply adding more clusters and moving             its asynchronous work, creating a bottleneck in that thread.
+record stores to balance the load and improve locality.                 By minimizing the amount of work done in the network
+   While many storage systems include support for full-                 thread, we were able to get substantially better performance
+text search, most provide this support using a separate sys-            and minimimze apparent latency on complex operations by
+tem [14, 17, 43], such as Solr [1], with eventual-consistency           interacting with the key-value store in parallel.
+guarantees. In our experience with CloudKit, maintaining a                 Conflict ranges. In FoundationDB, a transaction conflict
+separate system for search is challenging; it has to be sepa-           occurs when some keys read by one transaction are concur-
+rately provisioned, maintained, and made highly-available               rently modified by another. The FoundationDB API gives full
+in concert with the database (e.g., with regards to fail-over           control over these potentially overlapping read- and write-
+decisions). MongoDB includes built-in support for full-text             conflict sets. One pattern is then to do a non-conflicting
+search, but indexes are not guaranteed to be consistent and             (snapshot) read of a range that potentially contains distin-
+so queries might not return all matching documents [5].                 guished keys and adding individual conflicts for only these
+   There is a broad literature on query optimization, starting          and not the unrelated keys found in the same range. Thus, the
+with the seminal work of Selinger et al. [42] on System R.              transaction depends only on what would invalidate its results.
+Since then, much of the focus has been on efficient search-             In the Record Layer, this technique is used for navigating
+space exploration. Most notably, Cascades [36] introduced               the skip list used for the rank index described in Appendix B.
+a clean rule-based architecture for structuring query plan-             Bugs due to incorrect manual conflict ranges are very hard
+ners and proposed operators and transformation rules that               to find, especially when mixed with business logic. For that
+are encapsulated as self-contained components. Cascades                 reason, layers should generally define abstractions, such as
+allows logically equivalent expressions to be grouped in                indexes, for such patterns rather than relying on individual
+the so-called Memo structure to eliminate redundant work.               client applications to relax isolation requirements.
+Recently, Greenplum’s Orca query optimizer [45] was devel-
+oped as a modern incarnation of Cascades’ principles. We
+are currently in the process of developing an optimizer that            10.2    Using the Record Layer in practice
+uses the proven principles of Cascades, paving the way for              Metadata change safety. The Protocol Buffer compiler gen-
+the development of a full cost-based optimizer (Appendix C).            erates methods for manipulating, parsing and writing mes-
+                                                                        sages, as well as static descriptor objects containing informa-
+10     LESSONS LEARNED                                                  tion about the message type, such as its fields and their types.
+                                                                        These descriptors could potentially be used to build Record
+The Record Layer’s success at Apple validates the useful-
+                                                                        Layer metadata in code. We do not recommend this approach
+ness of FoundationDB’s “layer” concept, where the core dis-
+                                                                        over explicitly persisting the metadata in a metadata store,
+tributed storage system provides a semantically simple data-
+                                                                        except for simple tests. One reason is that it is hard to atom-
+store upon which complex abstractions are built. This allows
+                                                                        ically update the metadata code used by multiple Record
+systems architects to choose the parts of the database that
+                                                                        Layer instances. For example, if one Record Layer instance
+they need without working around abstractions that they
+                                                                        runs a newer version of the code (with a newer descriptor),
+do not. Building layers, however, remains a complex engi-
+                                                                        writes records to a record store, then an instance running
+neering challenge. To our knowledge, the Record Layer is
+                                                                        the old version of the code attempts to read it, an authorita-
+deployed at a larger scale than any other FoundationDB layer.
+                                                                        tive metadata store (or communication between instances)
+We summarize some lessons learned building and operating
+                                                                        is needed to interpret the data. This method also makes it
+the Record Layer in the hope that they can be useful for both
+                                                                        harder to check that the schema evolution constraints (Sec-
+Record Layer adopters and developers of new layers.
+                                                                        tion 5) are preserved. We currently use descriptor objects to
+                                                                        generate new metadata to be stored in the metadata store.
+10.1    Building FoundationDB layers                                       Relational similarities. The Record Layer resembles a re-
+Asynchronous processing to hide latency. FoundationDB is                lational database but has sightly different semantics, which
+optimized for throughput and not individual operation la-               can surprise clients. For example, there is a single extent for
+tencies, meaning that effective use requires keeping as much            all record types because CloudKit has untyped foreign-key
+
+
+
+
+                                                                 1797
+Industry 3: Data Platforms                                                     SIGMOD ’19, June 30–July 5, 2019, Amsterdam, Netherlands
+
+
+
+
+references without a “table” association. By default, select-                Materialized views. Normal indexes are a projection of
+ing all records of a particular type requires a full scan that            record fields in a different order. COUNT, SUM, MIN, and MAX
+skips over records of other types or maintaining secondary                indexes maintain aggregates compactly and efficiently, avoid-
+indexes. For clients with a SQL-like table model, we now                  ing conflicts by using atomic mutations. Adding materialized
+support emulating separate extents for each record type by                views, which can synthesize data from multiple records at
+adding a type-specific prefix to the primary key.                         once, is a natural evolution that would benefit join queries,
+                                                                          among others. Adding support for materialized views to the
+10.3    Designing for multi-tenancy                                       key expressions API might also help the query planner rea-
+Multi-tenancy is remarkably difficult to add to an existing               son about whether an index can be used to satisfy a query.
+system. Hence, the Record Layer was built from the ground                    Higher layers. The Record Layer is close enough to a re-
+up to support massively multi-tenant use cases. We have                   lational database that it could support a subset or variant
+gained substantial advantages from a natively multi-tenant                of SQL, particularly once the query planner supports joins.
+design, including easier shard rebalancing between clusters               A higher level “SQL layer” could be implemented as a sep-
+and the ability to scale elastically. Our experience has led us           arate layer on top of the Record Layer without needing to
+to conclude that multi-tenancy is more pervasive than one                 work around choices made by lower-level layers. Similarly, a
+would initially think. Put another way, many applications                 higher layer could support OLAP-style analytics workloads.
+that do not explicitly host many different applications—as                12    CONCLUSIONS
+CloudKit does—can reap the benefits of a multi-tenant ar-
+                                                                          The FoundationDB Record Layer offers rich features sim-
+chitecture by partitioning data according to logical “tenants”
+                                                                          ilar to those of a relational database, including structured
+such as users, application functions, or some other entity.
+                                                                          schema, indexing, and declarative queries. Because it is built
+                                                                          on FounationDB, it inherits its ACID transactions, reliability,
+11     FUTURE DIRECTIONS                                                  and performance. The core record store abstraction encapsu-
+The Record Layer’s current feature set grew out of CloudKit’s             lates a database and makes it easy to operate the Record Layer
+need to support billions of small databases, each with few                in a massively multi-tenant environment. The Record Layer
+users, and all with careful resource constraints. As databases            offers deep extensibility, allowing clients to add features such
+grow in terms of data volume and number of concurrent                     as custom index types. At Apple, we leverage these capabil-
+users, the Record Layer may need to adapt and higher lay-                 ities to implement CloudKit, which uses the Record Layer
+ers will be developed to support these new workloads and                  to offer new features (e.g., transactional full-text indexing),
+more complex query capabilities. However, we aim to ensure                speed up key operations (e.g., with high-concurrency zones),
+that the layer always retains its support for lightweight and             and simplify application development (e.g., with interactive
+efficient deployments. We highlight several future directions:            transactions) across billions of databases.
+   Avoiding hotspots. As the number of clients simultaneously                In building and operating the Record Layer at scale, we
+accessing a given record store increases, checking the store              have made three key observations with broader applicability.
+header to confirm that the metadata has not changed may                   First, the Record Layer’s success validates FoundationDB’s
+create a hot key. A general way to address hotspots is to repli-          layered architecture in a large-scale system. Second, the
+cate data at different points of the keyspace, making it likely           Record Layer’s extensible design provides common function-
+that the copies are located on different storage nodes. For               ality while easily accommodating the customization needs of
+the particular case of metadata, where changes are relatively             complex clients. It is easy to envision other layers that extend
+infrequent, we could also alleviate hotspots with caching.                the Record Layer to provide rich, high-level functionality,
+However, when the metadata changes, such caches need to                   as CloudKit does. Lastly, we find that organizing applica-
+be invalidated, or, alternatively, an out-of-date cache needs             tions into logical “tenants”, which might be users, features,
+to be detected or tolerated.                                              or some other entity, is a powerful and practically useful way
+   Query operations. Some query operations are possible with              to structure a system and scale it to meet demand.
+less-than-perfect indexing but within the layer’s streaming
+model, such as a priority queue-based sort-with-small-limit               ACKNOWLEDGMENTS
+or a limited-size hash join. For certain workloads, it may                We thank Lyublena Antova and the anonymous reviewers
+be necessary to fully support intensive in-memory opera-                  for their insights and suggestions that helped us improve
+tions with spill-over to persistent storage. Such functionality           this paper. We are grateful to Mike Abbott, Bryan Davis,
+can be challenging at scale as it requires new forms of re-               Eric Krugler, and Amol Pattekar for their guidance and sup-
+source tracking and management and must be stateful for                   port. Finally, we thank Ben Collins, Evan Tschannen and the
+the duration of the query.                                                FoundationDB team at Apple for their expertise.
+
+
+
+
+                                                                   1798
+Industry 3: Data Platforms                                                                         SIGMOD ’19, June 30–July 5, 2019, Amsterdam, Netherlands
+
+
+
+
+REFERENCES                                                                                    [29] J. C. Corbett, J. Dean, M. Epstein, A. Fikes, C. Frost, J. J. Furman, S. Ghe-
+ [1] Apache Solr. http://lucene.apache.org/solr/.                                                  mawat, A. Gubarev, C. Heiser, P. Hochschild, W. Hsieh, S. Kanthak,
+ [2] gRPC: A high performance, open-source universal RPC framework.                                E. Kogan, H. Li, A. Lloyd, S. Melnik, D. Mwaura, D. Nagle, S. Quin-
+     https://grpc.io/.                                                                             lan, R. Rao, L. Rolig, Y. Saito, M. Szymaniak, C. Taylor, R. Wang, and
+ [3] Lightweight transactions in Cassandra 2.0. https://www.datastax.com/                          D. Woodford. Spanner: Google’s Globally Distributed Database. ACM
+     dev/blog/lightweight-transactions-in-cassandra-2-0.                                           Trans. Comput. Syst., 31(3):8:1–8:22, Aug. 2013.
+ [4] Protocol Buffers. https://developers.google.com/protocol-buffers/.                       [30] T. H. Cormen, C. E. Leiserson, R. L. Rivest, and C. Stein. Introduction
+ [5] MongoDB queries don’t always return all matching documents!                                   to Algorithms, Third Edition, chapter 14.1. The MIT Press, 2009.
+     https://blog.meteor.com/mongodb-queries-dont-always-return-all-                          [31] C. Curino, Y. Zhang, E. P. C. Jones, and S. Madden. Schism: a Workload-
+     matching-documents-654b6594a827, 2016.                                                        Driven Approach to Database Replication and Partitioning. PVLDB,
+ [6] Apache Cassandra, 2018.                                                                       3(1):48–57, 2010.
+ [7] Azure Cosmos DB. https://azure.microsoft.com/en-us/services/                             [32] G. DeCandia, D. Hastorun, M. Jampani, G. Kakulapati, A. Lakshman,
+     cosmos-db/, 2018.                                                                             A. Pilchin, S. Sivasubramanian, P. Vosshall, and W. Vogels. Dynamo:
+ [8] Cockroach Labs. https://www.cockroachlabs.com/, 2018.                                         amazon’s highly available key-value store. In Proceedings of the 21st
+ [9] CockroachDB. https://www.cockroachlabs.com/, 2018.                                            ACM Symposium on Operating Systems Principles 2007, SOSP 2007,
+[10] FoundationDB. https://www.foundationdb.org, 2018.                                             Stevenson, Washington, USA, October 14-17, 2007, pages 205–220, 2007.
+[11] FoundationDB source. https://github.com/apple/foundationdb, 2018.                        [33] D. DeWitt and J. Gray. Parallel Database Systems: The Future of High
+[12] MemSQL. https://www.memsql.com/, 2018.                                                        Performance Database Systems. Commun. ACM, 35(6), June 1992.
+[13] MongoDB. https://www.mongodb.com, 2018.                                                  [34] R. Escriva, B. Wong, and E. G. Sirer. Warp: Lightweight Multi-Key
+[14] Riak: Complex Query Support. http://basho.com/products/riak-kv/                               Transactions for Key-Value Stores. CoRR, abs/1509.07815, 2015.
+     complex-query-support, 2018.                                                             [35] D. G. Ferro, F. Junqueira, I. Kelly, B. Reed, and M. Yabandeh. Omid:
+[15] Riak KV. http://basho.com/products/riak-kv, 2018.                                             Lock-free transactional support for distributed data stores. In IEEE
+[16] Tephra: Transactions for Apache HBase. https://tephra.io, 2018.                               30th International Conference on Data Engineering, Chicago, ICDE 2014,
+[17] The Force.com Multitenant Architecture. http://www.developerforce.                            IL, USA, March 31 - April 4, 2014, pages 676–687, 2014.
+     com/media/ForcedotcomBookLibrary/Force.com_Multitenancy_                                 [36] G. Graefe. The Cascades Framework for Query Optimization. Data
+     WP_101508.pdf, 2018.                                                                          Engineering Bulletin, 18, 1995.
+[18] VoltDB. https://www.voltdb.com/, 2018.                                                   [37] J. Gray, P. Helland, P. O’Neil, and D. Shasha. The dangers of replication
+[19] Announcing the FoundationDB Record Layer.                       https://www.                  and a solution. In Proceedings of the 1996 ACM SIGMOD International
+     foundationdb.org/blog/announcing-record-layer/, 2019.                                         Conference on Management of Data, 1996.
+[20] FoundationDB Record Layer on GitHub.                     https://github.com/             [38] P. Hunt, M. Konar, F. P. Junqueira, and B. Reed. ZooKeeper: Wait-
+     foundationdb/fdb-record-layer, 2019.                                                          free Coordination for Internet-scale Systems. In 2010 USENIX Annual
+[21] D. F. Bacon, N. Bales, N. Bruno, B. F. Cooper, A. Dickinson, A. Fikes,                        Technical Conference, Boston, MA, USA, June 23-25, 2010, 2010.
+     C. Fraser, A. Gubarev, M. Joshi, E. Kogan, A. Lloyd, S. Melnik, R. Rao,                  [39] H. Melville. Moby Dick; or The Whale. http://www.gutenberg.org/files/
+     D. Shue, C. Taylor, M. van der Holst, and D. Woodford. Spanner:                               2701.
+     Becoming a sql system. In Proc. SIGMOD 2017, 2017.                                       [40] A. Pavlo, C. Curino, and S. Zdonik. Skew-aware Automatic Data-
+[22] J. Baker, C. Bond, J. C. Corbett, J. Furman, A. Khorlin, J. Larson, J.-M.                     base Partitioning in Shared-nothing, Parallel OLTP Systems. In Proc.
+     Leon, Y. Li, A. Lloyd, and V. Yushprakh. Megastore: Providing Scalable,                       SIGMOD 2012.
+     Highly Available Storage for Interactive Services. In Proceedings of the                 [41] D. Peng and F. Dabek. Large-scale Incremental Processing Using
+     Conference on Innovative Data system Research (CIDR), pages 223–234,                          Distributed Transactions and Notifications. In In the 9th USENIX
+     2011.                                                                                         Symposium on Operating Systems Design and Implementation, 2010.
+[23] K. Birman, D. Malkhi, and R. van Renesse. Virtually Synchronous                          [42] P. G. Selinger, M. M. Astrahan, D. D. Chamberlin, R. A. Lorie, and T. G.
+     Methodology for Dynamic Service Replication. Technical report, Mi-                            Price. Access Path Selection in a Relational Database Management Sys-
+     crosoft Research, 2010.                                                                       tem. In Proceedings of the 1979 ACM SIGMOD International Conference
+[24] E. Bortnikov, E. Hillel, I. Keidar, I. Kelly, M. Morel, S. Paranjpye, F. Perez-               on Management of Data, SIGMOD ’79, 1979.
+     Sorrosal, and O. Shacham. Omid, Reloaded: Scalable and Highly-                           [43] A. Shraer, A. Aybes, B. Davis, C. Chrysafis, D. Browning, E. Krugler,
+     Available Transaction Processing. In 15th USENIX Conference on File                           E. Stone, H. Chandler, J. Farkas, J. Quinn, J. Ruben, M. Ford, M. McMa-
+     and Storage Technologies, FAST 2017, Santa Clara, CA, USA, February                           hon, N. Williams, N. Favre-Felix, N. Sharma, O. Herrnstadt, P. Seligman,
+     27 - March 2, 2017, pages 167–180, 2017.                                                      R. Pisolkar, S. Dugas, S. Gray, S. Lu, S. Harkema, V. Kravtsov, V. Hong,
+[25] F. Chang, J. Dean, S. Ghemawat, W. C. Hsieh, D. A. Wallach, M. Bur-                           Y. Tian, and W. L. Yih. Cloudkit: Structured Storage for Mobile Appli-
+     rows, T. Chandra, A. Fikes, and R. E. Gruber. Bigtable: A Distributed                         cations. Proc. VLDB Endow., 11(5):540–552, Jan. 2018.
+     Storage System for Structured Data. In 7th USENIX Symposium on                           [44] S. Sivasubramanian. Amazon dynamoDB: a seamlessly scalable non-
+     Operating Systems Design and Implementation (OSDI), pages 205–218,                            relational database service. In Proceedings of the ACM SIGMOD Inter-
+     2006.                                                                                         national Conference on Management of Data, SIGMOD 2012, Scottsdale,
+[26] G. V. Chockler, I. Keidar, and R. Vitenberg. Group communication                              AZ, USA, May 20-24, 2012, pages 729–730, 2012.
+     specifications: a comprehensive study. ACM Comput. Surv., 33(4):427–                     [45] M. A. Soliman, L. Antova, V. Raghavan, A. El-Helw, Z. Gu, E. Shen,
+     469, 2001.                                                                                    G. C. Caragea, C. Garcia-Alvarado, F. Rahman, M. Petropoulos, F. Waas,
+[27] G. V. Chockler and D. Malkhi. Active Disk Paxos with infinitely many                          S. Narayanan, K. Krikellas, and R. Baldwin. Orca: A Modular Query
+     processes. Distributed Computing, 18(1):73–84, 2005.                                          Optimizer Architecture for Big Data. In Proc. SIGMOD 2014.
+[28] B. F. Cooper, R. Ramakrishnan, U. Srivastava, A. Silberstein, P. Bohan-                  [46] Z. Wei, G. Pierre, and C.-H. Chi. Cloudtps: Scalable transactions for
+     non, H. Jacobsen, N. Puz, D. Weaver, and R. Yerneni. PNUTS: Yahoo!’s                          web applications in the cloud. IEEE Transactions on Services Computing,
+     hosted data serving platform. PVLDB, 1(2):1277–1288, 2008.                                    5(4):525–539, 2012.
+
+
+
+
+                                                                                       1799
+Industry 3: Data Platforms                                                               SIGMOD ’19, June 30–July 5, 2019, Amsterdam, Netherlands
+
+
+
+                                                                                                       /“a”
+A    KEY EXPRESSIONS                                                               Layer 2: prefix/2
+                                                                                                        6
+
+Indexes are defined by an index type and a key expression                                              /“a”   /“b”              /“d”
+                                                                                   Layer 1: prefix/1
+                                                                                                        1      2                 3
+which defines a function from a record to one or more tuples
+consumed by the index maintainer and used to form the index                        Layer 0: prefix/0
+                                                                                                       /“a”   /“b”   /“c”       /“d”   /“e”   /“f”
+                                                                                                        1      1      1          1      1      1
+key. The Record Layer includes a variety of key expressions
+and also allows clients to define custom ones.                                     (a) Each contiguous key range used in by the skip-list is rep-
+   The simplest key expression is field. When evaluated                            resented by a blue line and prefixed with the leading prefix
+against the sample record in Figure 4, field ("id") yields                         of that subspace. Key-value pairs are shown as points on the
+                                                                                   keyspace line with a key and value (with a grey background).
+the tuple (1066). Unlike standard SQL columns, Protocol                                                /“a”
+                                                                                   Layer 2: prefix/2
+Buffer fields permit repeated fields and nested messages.                                               6
+
+Nested messages can be accessed through the nest key ex-                                          1
+
+pression. For example, field("parent").nest("a") yields
+                                                                                                       /“a”   /“b”              /“d”
+(1415). To support repeated fields, field expressions define                       Layer 1: prefix/1
+                                                                                                        1      2                 3
+
+an optional FanType parameter. For a repeated field, FanType                                      2
+
+of Concatenate produces a tuple with one entry containing
+                                                                                                       /“a”   /“b”   /“c”       /“d”   /“e”   /“f”
+a list of all values within the field, while Fanout produces a                     Layer 0: prefix/0
+                                                                                                        1      1      1          1      1      1
+separate tuple for each value. For example, field("elem",                                                                   3
+Concatenate)) yields (["first", "second", "third"]),
+                                                                                   (b) An example of finding the rank for set element "e". Scans
+and field("elem", Fanout)) yields three tuples: ("first"),
+                                                                                   of a range are shown with red arrows. (1) Scan the prefix/2
+("second"), and ("third").                                                         subspace and find only a, which comes before e. (2) Scan
+   To create compound indexes, multiple key expressions                            scan the prefix/1 subspace. Use the same-level fingers from
+can be concatenated. For example, concat(field("id"),                              (prefix,1,"a"), (prefix,1,"b"), contributing 1 and 2 to the
+field("parent").nest("b")) evaluates to the single tu-                             sum, respectively. The last set member found is d, which also
+ple (1066, "child"). If a sub-expression produce multiple                          comes before e. (3) Scan the prefix/0 subspace and find e.
+values, the compound expression will produce the tuples in                         During our scan, use the same-level finger (prefix,0,"d")
+the Cartesian product of the sub-expressions’ values.                              which contributes 1 to the sum, yielding a total rank of 4
+   The Record Layer also includes a variety of specialized                         (the lowest ordinal rank is 0).
+key expressions. For example, the record type key expression
+produces a value that is guaranteed to be unique for each                              Figure 5: An example RANK index with 6 elements.
+record type. When used in a primary key, this key expression
+allows users to treat record types like tables in a traditional                    index into multiple sub-indexes and can be used for indexing
+relational database. It can also be used to satisfy queries                        aggregations like SUM and COUNT. The KeyWithValue key ex-
+about record types, such as a query for the number of records                      pression has two sub-expressions, one of which is included
+of each type that are stored within the database. Another                          in the index entry’s key and the other of which is in the
+special key expression, version, is described in Section 7.                        entry’s value. Such indexes are used as covering indexes that
+   In addition to allowing client-defined key expressions, the                     satisfy queries without resolving the indexed record.
+Record Layer has function key expressions which allow for
+the execution of arbitrary, user-defined functions against
+                                                                                   B      RANK AND TEXT INDEX TYPES
+records and their constituent fields. Function key expres-
+sions are very powerful and allow users to define custom                           RANK indexes. The RANK index type provides efficient access
+sort orders for records, for example. The layer also includes                      to records by their ordinal rank (according to some key ex-
+groupBy key expressions which can be used to divide an                             pression) and conversely to determine the rank of a field’s
+                                                                                   value. For example, in an application implementing a leader-
+    message Example {
+                                   {
+                                                                                   board, finding a player’s position in the leaderboard could be
+     message Nested {
+      optional int64 a = 1;
+                                    "id": 1066,                                    implemented by determining their score’s rank using a RANK
+                                    "elem": ["first", "second", "third"],          index. Another example is an implementation of a scrollbar,
+      optional string b = 2;
+                                    "parent": {
+     }                                                                             where data (e.g., query results) is sorted according to some
+                                     "a": 1415,
+     optional int64 id = 1;
+                                     "b": "child"                                  field and the user can request to skip to the middle of a long
+     repeated string elem = 2;
+                                    }
+     optional Nested parent = 3;                                                   page of results, e.g., to the k-th result. Instead of linearly
+                                   }
+    }
+                                                                                   scanning until the k-th result is found, using continuations
+                                                                                   to restart the scan if it runs too long, the client can query for
+Figure 4: Example record definition and an example.                                the record with rank k and begin scanning there.
+
+
+
+
+                                                                            1800
+Industry 3: Data Platforms                                                      SIGMOD ’19, June 30–July 5, 2019, Amsterdam, Netherlands
+
+
+
+
+   Our implementation of the RANK index stores each in-                   ( p r e f i x , t o k e n 2 pk 3 ) → o f f s e t s 3
+dex entry in a probabilistic augmented skip-list (Cormen                  ( p r e f i x , t o k e n 3 , pk 4 ) → o f f s e t s 4
+et al. [30] describe a tree-based variant) persisted in Foun-             ( p r e f i x , t o k e n 3 , pk 5 ) → o f f s e t s 5
+dationDB such that each level has a distinct subspace prefix.             ( p r e f i x , t o k e n 3 , pk 6 ) → o f f s e t s 6
+Duplicate keys are avoided by attempting to read each key                 Note that the prefix is repeated in each key. While this is
+before inserting it. The lowest level of the skip-list includes           true for all indexes, the overhead is especially large for TEXT
+every index entry, and each higher level contains a sample of             indexes due to the large number of entries. To address this,
+entries in the level below it. For each level, each index entry           we reduce the number of index keys by “bunching” neigh-
+contains the number of entries in the set that are greater or             boring keys together so that for a given token, there might
+equal to it and less than the next entry in that level (all en-           be multiple primary keys included in one index entry. Below
+tries in the lowest level have the value 1). This is the number           is an example with a bunch size of 2, i.e., each index entry
+of entries skipped by following the skip-list “finger” between            represents up to two primary keys.
+one entry and the next. In practice, an explicit finger is not            ( p r e f i x , t o k e n 1 , pk 1 ) → [ o f f s e t s 1 , pk 2 , o f f s e t s 2 ]
+needed: the sort order maintained by FoundationDB achieves                ( p r e f i x , t o k e n 2 , pk 3 ) → [ o f f s e t s 3 ]
+the same purpose much more efficiently. Figure 5(a) includes              ( p r e f i x , t o k e n 3 , pk 4 ) → [ o f f s e t s 4 , pk 5 , o f f s e t s 5 ]
+a sample index representing a skip-list with six elements and             ( p r e f i x , t o k e n 3 , pk 6 ) → [ o f f s e t s 6 ]
+three levels.                                                                To insert a token t and primary key pk, we perform a
+   To determine the ordinal rank of an entry, a standard                  range scan and find the biggest key L that is less or equal to
+skip-list search is performed, starting from the highest level.           (prefix,t,pk) and the smallest key R greater than (prefix,
+Whenever the search uses a finger connecting two nodes on                 t,pk). We then place a new entry in L’ if the insertion does
+the same level, we accumulate the value of the first node,                not cause this entry to exceed the maximum bunch size. If it
+i.e., the number of nodes being skipped. An example of this               does, the biggest primary key in the bunch is removed (this
+computation is shown in Figure 5(b). The final sum repre-                 might be pk and its list of offsets) and is inserted in a new in-
+sents the rank. Given a rank, a similar algorithm is used to              dex key. If the size of R’s bunch is smaller than the maximum
+determine the corresponding index entry. A cumulative sum                 bunch size, the bunch is merged with the newly created one.
+is maintained and a range scan is performed at each level                 To delete the index entry for token t and primary key pk, the
+until following a finger would cause the sum to exceed the                index maintainer performs a range scan in descending order
+target rank, at which point the next level is scanned.                    from (prefix,t,pk). The first key returned is guaranteed
+   TEXT indexes. The TEXT index enables full-text queries                 to contain the data for t and pk. If pk is the only key in the
+on the contents of string fields. This includes simple to-                bunch, the entry is deleted. Otherwise, the entry is updated
+ken matching, token prefix matching, proximity search, and                such that pk and its offsets are removed from the bunch, and
+phrase search. The index stores tokens produced by a plug-                if pk appears in the index key, the key is updated to contain
+gable tokenizer using a text field as its input. Our inverted             the next primary key in the bunch.
+index implementation is logically equivalent to an ordered                   Inserting an entry requires reading two key-value pairs
+list of maps. Each map represents a postings list: it is associ-          and writing at most two (though usually only one). Deleting
+ated with a token (tokeni ) and the keys in the map are the               an entry requires reading and writing a single key-value pair.
+primary keys (pkj ) of records containing that token in the               This access locality gives index updates predictable latencies
+indexed text. Each value is a list of offsets in the text field           and resource consumption. However, certain write patterns
+containing that token expressed as the number of tokens                   can result in many index entries where bunches are only
+from the beginning of the field. To determine which records               partially filled. Currently, deletes do not attempt to merge
+contain a given token, a range scan can be performed on                   smaller bunches together, although the client can request
+the index prefixed by that token to produce a list of primary             compactions. Table 2 shows a worked calculation of the pos-
+keys, one for each record that contains that token. One can               sible space savings for this approach. To demonstrate space
+similarly find all records containing a token prefix. To filter           savings due to bunching, we used Melville’s Moby Dick [39],
+by token proximity or by phrase, the scan can examine the                 broken up into 233 ∼5 kilobyte documents. With whitespace
+relevant offset lists and filter out any record where the to-             tokenization, each document contains ∼431.8 unique tokens
+kens are not within a given distance from each other or do                (so the primary key can be represented using 3 bytes) each
+not appear in the correct order.                                          appearing an average of ∼2.1 times within the document
+   To store the TEXT index, we use one key for each token/pri-            and with an average length of ∼7.8 characters. For the cal-
+mary key pair, with the offset list in the value:                         culation, we use 10 bytes as the prefix size (smaller than the
+( p r e f i x , t o k e n 1 , pk 1 ) → o f f s e t s 1                    typical size we use in production). In practice, we find that
+( p r e f i x , t o k e n 1 , pk 2 ) → o f f s e t s 2                    this index required ∼4.9 kilobytes per document because not
+
+
+
+
+                                                                   1801
+Industry 3: Data Platforms                                                   SIGMOD ’19, June 30–July 5, 2019, Amsterdam, Netherlands
+
+
+
+
+                         No bunch       Bunch size 20                    with the additional benefit of allowing the client to modify
+                  Prefix 10 bytes          10 bytes                      the plan if necessary [45]. Like SQL PREPARE statements,
+                 Token 7.8 bytes           7.8 bytes                     queries (and thus, query plans) may have bound static argu-
+           Primary key    3 bytes           3 bytes                      ments (SARGS). In CloudKit we have leveraged this function-
+   Encoding overhead      2 bytes           2 bytes                      ality to implement CloudKit-specific planning behavior by
+               Key size 22.8 bytes        22.8 bytes                     combining multiple plans produced by the Record Layer and
+                 Offsets  3 bytes  2 bytes × 20 = 40 bytes               binding the output of one plan to an argument of another.
+          Primary keys       —     3 bytes × 19 = 57 bytes                  Cascades-style planner. We are currently evolving the Record
+              Value size  3 bytes          97 bytes                      Layer’s planner from an ad-hoc architecture to a Cascades-
+     Total size / entry 25.8 bytes       119.8 bytes                     style rule-based planner [36]. This new design supports deep
+     Approx. # entries     431.8       431.8/20 ≈ 21.6                   extensibility, including custom planning logic defined com-
+ Total size / document    11.1 kB           2.6 kB                       pletely outside the Record Layer by clients. Internally, we
+Table 2: Worked example illustrating the space sav-                      maintain a tree-structured intermediate representation (IR)
+ings provided by the bunched map.                                        of partially-planned queries that includes a variety of ex-
+                                                                         pressions, including both logical operations (such as a sort
+                                                                         order needed to perform an interaction of two indexes) and
+every bunch is actually filled. In fact, the average bunch size          physical operations (such as scans of indexes, unions of
+was ∼4.7, significantly lower than the maximum possible                  streams, and filters). We implement the planner’s function-
+because some words appear rarely in the text–some even                   ality through a rich set of planner rules, which match to
+only once. To optimize further, we could bunch across tokens.            particular structures in the IR tree, optionally inspect their
+An alternative would be to implement prefix compression                  properties, and produce equivalent expressions.
+in FoundationDB, but even then, there is per-key overhead                   Rules are automatically selected by the planner, but can be
+in both the index and FoundationDB’s internal B-tree data                organized into “phases”: for example, it is better to scan part
+structure, so using fewer keys is still beneficial.                      of an index than to filter all records. They are also meant to
+                                                                         be modular; several planner behaviors are implemented by
+C    QUERY PLANNING AND API                                              multiple rules acting in concert. While this architecture make
+The Record Layer has extensive facilities for executing declar-          the code base easier to understand, its key benefit is allowing
+ative queries on a record store. While the planning and exe-             complex planning behavior by combining the available rules.
+cution of declarative queries has been studied for decades,              The rule-based architecture allows clients, who may have
+the Record Layer makes certain unusual design decisions.                 defined custom query functions and indexes, to plug in rules
+   Extensible query API. The Record Layer has a fluent Java              for making use of that additional functionality. For example,
+API for querying the database by specifying the types of                 a client could implement a geospatial index, extend the query
+records that should be retrieved, Boolean predicates that the            API with custom functions for bounding box queries, and
+retrieved records must match, and a sort order specified by a            write custom rules to plan geospatial filters as scan of the
+key expression (see Appendix A). Both filter and sort specifi-           geospatial index, all while making use of built-in rules.
+cations can include “special functions” including aggregates,               Future directions. The experimental planner’s IR and rule
+cardinal rank, and full-text search operations like n-gram               execution system were designed to anticipate future needs.
+and phrase search. This query language is akin to an abstract            For example, the data structure used by the “expression”
+syntax tree for a SQL-like text-based query language exposed             intermediate representation currently stores only a single
+as an API, allowing consumers to directly interact with it in            expression at any time: this planner repeatedly rewrites the
+Java. Another layer on top of the Record Layer could provide             IR each time a rule is applied. However, it could be seamlessly
+translation from SQL or another query language.                          replaced by the compact Memo data structure [36] which
+   Query plans. While declarative queries are convenient for             succinctly represents a huge space of possible expressions.
+clients, they need to be transformed into concrete operations            The Memo structure replaces each node in the IR tree with
+such as index scans, union operations, and filters in order              a group of logically equivalent expressions. Each group can
+to execute the queries efficiently. The Record Layer’s query             then be treated as an optimization target where each member
+planner converts a declarative query specifying the records              of the group represents a possible variant of the group’s
+to return into an efficient combination of operations on the             logical operation. Memo allows optimization work for a small
+stream of records. The Record Layer exposes these query                  part of the query to be shared (or memoized) across many
+plans through the planner’s API, allowing its clients to cache           possible expressions. Adding the Memo structure paves the
+or otherwise manipulate query plans directly. This provides              way to a cost-based optimizer, which uses estimates of a cost
+functionality similar to that of a SQL PREPARE statement but             metric to choose from several possible plans.
+
+
+
+
+                                                                  1802
+

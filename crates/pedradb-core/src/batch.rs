@@ -219,9 +219,10 @@ impl<'a> Cursor<'a> {
     }
 
     fn read_slice(&mut self, len: usize) -> Result<&'a [u8]> {
-        let end = self.pos.checked_add(len).ok_or_else(|| {
-            CoreError::Internal("write record length overflow".into())
-        })?;
+        let end = self
+            .pos
+            .checked_add(len)
+            .ok_or_else(|| CoreError::Internal("write record length overflow".into()))?;
         if end > self.data.len() {
             return Err(CoreError::Internal(format!(
                 "write record truncated: need {len} bytes at pos {}",
@@ -277,9 +278,6 @@ mod tests {
         let mut raw = vec![WRITE_RECORD_VERSION];
         raw.extend_from_slice(&0x1000_0000u32.to_le_bytes()); // 268M ops, 5-byte payload
         let err = WriteRecord::decode(&raw).unwrap_err();
-        assert!(
-            err.to_string().contains("exceeds remaining"),
-            "got {err}"
-        );
+        assert!(err.to_string().contains("exceeds remaining"), "got {err}");
     }
 }

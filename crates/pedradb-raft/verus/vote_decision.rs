@@ -23,7 +23,10 @@ pub enum VoteDecision {
 
 /// Mirrors `can_vote`.
 pub open spec fn can_vote(voted_for: Option<u64>, candidate_id: u64) -> bool {
-    matches!(voted_for, None) || voted_for == Some(candidate_id)
+    match voted_for {
+        None => true,
+        Some(v) => v == candidate_id,
+    }
 }
 
 /// Mirrors `log_up_to_date` (Raft §5.4.1).
@@ -84,7 +87,10 @@ pub fn vote_decision(
     if candidate_term != current_term {
         return VoteDecision::Deny;
     }
-    let can = voted_for.is_none() || voted_for == Some(candidate_id);
+    let can = match voted_for {
+        None => true,
+        Some(v) => v == candidate_id,
+    };
     let up = candidate_last_log_term > last_log_term
         || (candidate_last_log_term == last_log_term
             && candidate_last_log_index >= last_log_index);
