@@ -1648,6 +1648,8 @@ pub struct StoreCluster<E: Env = StdEnv> {
     version_notes_through: HashMap<u64, u64>,
     /// In-process watch hub; notified after majority put/commit_tx (RFC-0022 P0.3).
     watch: WatchHub,
+    /// RFC-0025 P1.1: staged puts for [`Self::put_buffered`] / [`Self::flush_writes`].
+    write_coalesce: Vec<(Vec<u8>, Vec<u8>)>,
 }
 
 /// How many commit generations of version history to retain (RFC-0023 P0.4).
@@ -1786,6 +1788,7 @@ impl StoreCluster<StdEnv> {
             pending_version_notes: HashMap::new(),
             version_notes_through: HashMap::new(),
             watch: WatchHub::new(),
+            write_coalesce: Vec::new(),
         };
         cluster.recover_after_open();
         Ok(cluster)
@@ -1925,6 +1928,7 @@ impl<E: Env> StoreCluster<E> {
             pending_version_notes: HashMap::new(),
             version_notes_through: HashMap::new(),
             watch: WatchHub::new(),
+            write_coalesce: Vec::new(),
         };
         cluster.recover_after_open();
         Ok(cluster)
@@ -4262,6 +4266,72 @@ impl<E: Env> StoreCluster<E> {
                 si_gen: 0,
             }),
         )?;
+        Ok(())
+    }
+
+    /// Stage a put for later [`Self::flush_writes`] (RFC-0025 P1.1 group-commit style).
+    ///
+    /// Does **not** hit Raft until flush. Use for tight loops that can batch.
+    ///
+    /// # Errors
+    /// Reserved key / value size limits.
+    pub fn put_buffered(&mut self, key: impl AsRef<[u8]>, value: impl AsRef<[u8]>) -> Result<()> {
+        let key = key.as_ref().to_vec();
+        if is_reserved_store_key(&key) {
+            return Err(StoreError::Msg(
+                "key prefix reserved for store internal meta".into(),
+            ));
+        }
+        let value = value.as_ref().to_vec();
+        if value.len() > MAX_VALUE_BYTES {
+            return Err(StoreError::ValueTooLarge {
+                size: value.len(),
+                limit: MAX_VALUE_BYTES,
+            });
+        }
+        if self.write_coalesce.len() >= MAX_TX_KEYS {
+            return Err(StoreError::TransactionTooLarge {
+                size: self.write_coalesce.len() + 1,
+                limit: MAX_TX_KEYS,
+            });
+        }
+        self.write_coalesce.push((key, value));
+        Ok(())
+    }
+
+    /// Number of staged [`Self::put_buffered`] pairs not yet flushed.
+    #[must_use]
+    pub fn buffered_writes(&self) -> usize {
+        self.write_coalesce.len()
+    }
+
+    /// Flush staged puts via [`Self::put_many`] (one Raft batch per range).
+    ///
+    /// # Errors
+    /// Same as [`Self::put_many`].
+    pub fn flush_writes(&mut self) -> Result<()> {
+        if self.write_coalesce.is_empty() {
+            return Ok(());
+        }
+        let pairs = std::mem::take(&mut self.write_coalesce);
+        self.put_many(pairs)
+    }
+
+    /// Stage put and auto-flush when buffer reaches `max_batch` (or always if 1).
+    ///
+    /// # Errors
+    /// Reserved key / flush errors.
+    pub fn put_coalesce(
+        &mut self,
+        key: impl AsRef<[u8]>,
+        value: impl AsRef<[u8]>,
+        max_batch: usize,
+    ) -> Result<()> {
+        self.put_buffered(key, value)?;
+        let max = max_batch.max(1);
+        if self.write_coalesce.len() >= max {
+            self.flush_writes()?;
+        }
         Ok(())
     }
 
@@ -6740,6 +6810,30 @@ mod tests {
         }
         // Single range so all keys co-located.
         assert_eq!(c.locate(b"a").unwrap(), c.locate(b"c").unwrap());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0025 P1.1: buffered coalesce flushes as put_many.
+    #[test]
+    fn put_buffered_flush_coalesce() {
+        let dir = temp();
+        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        c.elect_all(60).unwrap();
+        for i in 0..8u8 {
+            c.put_buffered([b'b', i], [i]).unwrap();
+        }
+        assert_eq!(c.buffered_writes(), 8);
+        c.flush_writes().unwrap();
+        assert_eq!(c.buffered_writes(), 0);
+        for i in 0..8u8 {
+            assert!(c.count_applied_eq(&[b'b', i], &[i]) >= 2);
+        }
+        // Auto-flush every 4
+        for i in 0..8u8 {
+            c.put_coalesce([b'c', i], [i], 4).unwrap();
+        }
+        assert_eq!(c.buffered_writes(), 0);
+        assert!(c.count_applied_eq(b"c\x07", b"\x07") >= 2);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

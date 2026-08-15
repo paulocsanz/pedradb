@@ -617,8 +617,36 @@ fn worker_loop(
                 let _ = resp.send(r);
             }
             Ok(Work::Put { key, value, resp }) => {
-                let r = put_until_committed(id, &mut cluster, &peers, &key, &value, &rx);
-                let _ = resp.send(r.map_err(|e| e.to_string()));
+                // RFC-0025 P1.1: coalesce queued Puts into put_many (one Raft batch
+                // per range) so concurrent TCP clients share fsync/majority cost.
+                let mut batch: Vec<(Vec<u8>, Vec<u8>)> = vec![(key, value)];
+                let mut resps = vec![resp];
+                let mut deferred: Option<Work> = None;
+                while batch.len() < 64 {
+                    match rx.try_recv() {
+                        Ok(Work::Put {
+                            key: k,
+                            value: v,
+                            resp: r,
+                        }) => {
+                            batch.push((k, v));
+                            resps.push(r);
+                        }
+                        Ok(other) => {
+                            deferred = Some(other);
+                            break;
+                        }
+                        Err(_) => break,
+                    }
+                }
+                let r = put_many_until_committed(id, &mut cluster, &peers, &batch, &rx);
+                let msg = r.map_err(|e| e.to_string());
+                for resp in resps {
+                    let _ = resp.send(msg.clone());
+                }
+                if let Some(w) = deferred {
+                    service_nested(id, &mut cluster, &peers, w);
+                }
             }
             Ok(Work::Get { key, resp }) => {
                 let r = cluster
@@ -725,54 +753,78 @@ fn flush_outbound(
     }
 }
 
-/// Drive Queued put to majority while still servicing inbound peer RPCs on the
-/// same worker (nested recv) so AE replies are not blocked.
-fn put_until_committed(
+/// Drive put / put_many to majority (RFC-0025 P1.1 coalesce path).
+fn put_many_until_committed(
     self_id: u64,
     cluster: &mut StoreCluster,
     peers: &HashMap<u64, String>,
-    key: &[u8],
-    value: &[u8],
+    pairs: &[(Vec<u8>, Vec<u8>)],
     rx: &Receiver<Work>,
 ) -> Result<(), StoreError> {
-    match cluster.put(key, value) {
+    if pairs.is_empty() {
+        return Ok(());
+    }
+    if pairs.len() == 1 {
+        match cluster.put(&pairs[0].0, &pairs[0].1) {
+            Ok(()) => {
+                flush_outbound(self_id, cluster, peers);
+                return Ok(());
+            }
+            Err(StoreError::NotCommitted {
+                range_id, index, ..
+            }) => {
+                return finish_not_committed(
+                    self_id, cluster, peers, rx, range_id, index,
+                );
+            }
+            Err(e) => return Err(e),
+        }
+    }
+    match cluster.put_many(pairs.iter().map(|(k, v)| (k.as_slice(), v.as_slice()))) {
         Ok(()) => {
             flush_outbound(self_id, cluster, peers);
             Ok(())
         }
         Err(StoreError::NotCommitted {
             range_id, index, ..
-        }) => {
-            flush_outbound(self_id, cluster, peers);
-            let deadline = Instant::now() + Duration::from_secs(15);
-            while Instant::now() < deadline {
-                // Nested: process peer msgs while waiting for commit.
-                while let Ok(w) = rx.try_recv() {
-                    service_nested(self_id, cluster, peers, w);
-                }
-                if let Ok(true) = cluster.finish_queued_propose(range_id, index, false) {
-                    flush_outbound(self_id, cluster, peers);
-                    return Ok(());
-                }
-                let _ = cluster.tick();
-                flush_outbound(self_id, cluster, peers);
-                // Brief wait for peer TCP replies to enqueue Work.
-                match rx.recv_timeout(Duration::from_millis(10)) {
-                    Ok(w) => service_nested(self_id, cluster, peers, w),
-                    Err(mpsc::RecvTimeoutError::Timeout) => {}
-                    Err(mpsc::RecvTimeoutError::Disconnected) => break,
-                }
-            }
-            let commit = cluster.commit_index(self_id, range_id);
-            let _ = cluster.finish_queued_propose(range_id, index, true);
-            Err(StoreError::NotCommitted {
-                range_id,
-                index,
-                commit,
-            })
-        }
+        }) => finish_not_committed(self_id, cluster, peers, rx, range_id, index),
         Err(e) => Err(e),
     }
+}
+
+fn finish_not_committed(
+    self_id: u64,
+    cluster: &mut StoreCluster,
+    peers: &HashMap<u64, String>,
+    rx: &Receiver<Work>,
+    range_id: u64,
+    index: u64,
+) -> Result<(), StoreError> {
+    flush_outbound(self_id, cluster, peers);
+    let deadline = Instant::now() + Duration::from_secs(15);
+    while Instant::now() < deadline {
+        while let Ok(w) = rx.try_recv() {
+            service_nested(self_id, cluster, peers, w);
+        }
+        if let Ok(true) = cluster.finish_queued_propose(range_id, index, false) {
+            flush_outbound(self_id, cluster, peers);
+            return Ok(());
+        }
+        let _ = cluster.tick();
+        flush_outbound(self_id, cluster, peers);
+        match rx.recv_timeout(Duration::from_millis(10)) {
+            Ok(w) => service_nested(self_id, cluster, peers, w),
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+            Err(mpsc::RecvTimeoutError::Disconnected) => break,
+        }
+    }
+    let commit = cluster.commit_index(self_id, range_id);
+    let _ = cluster.finish_queued_propose(range_id, index, true);
+    Err(StoreError::NotCommitted {
+        range_id,
+        index,
+        commit,
+    })
 }
 
 /// Drive multi-key commit while servicing peer RPCs.

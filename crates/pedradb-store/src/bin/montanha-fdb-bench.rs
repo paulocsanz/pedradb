@@ -320,6 +320,27 @@ fn main() {
         progress!("A1c put_many done");
         let _ = pairs;
 
+        // A1d: put_buffered + flush (P1.1 group-commit style API)
+        let buf_n = n.min(64);
+        let t0 = Instant::now();
+        for i in 0..buf_n {
+            c.put_buffered(format!("buf-{i:04}").into_bytes(), &val)
+                .expect("buf");
+        }
+        c.flush_writes().expect("flush");
+        let wall = t0.elapsed();
+        benches.push(format!(
+            r#"{{
+    "name": "A1d_put_buffered_flush_{buf_n}",
+    "keys": {buf_n},
+    "keys_per_s": {kps:.3},
+    "wall_s": {ws:.4}
+  }}"#,
+            kps = buf_n as f64 / wall.as_secs_f64().max(1e-12),
+            ws = wall.as_secs_f64(),
+        ));
+        progress!("A1d buffered flush done");
+
         // A2 raw get
         let mut lats = Vec::with_capacity(n);
         let t0 = Instant::now();
