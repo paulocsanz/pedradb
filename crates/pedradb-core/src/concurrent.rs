@@ -246,6 +246,45 @@ impl<E: Env> ConcurrentDb<E> {
         self.inner.read().auto_reclaim()
     }
 
+    /// Blob rotate cap (see [`Db::set_vlog_rotate_bytes`]).
+    pub fn set_vlog_rotate_bytes(&self, bytes: Option<u64>) {
+        self.inner.write().set_vlog_rotate_bytes(bytes);
+    }
+
+    /// Scan prefetch window (see [`Db::set_scan_prefetch`]).
+    pub fn set_scan_prefetch(&self, n: usize) {
+        self.inner.write().set_scan_prefetch(n);
+    }
+
+    /// Current scan prefetch window.
+    #[must_use]
+    pub fn scan_prefetch(&self) -> usize {
+        self.inner.read().scan_prefetch()
+    }
+
+    /// Best-effort auto blob GC threshold (see [`Db::set_auto_blob_gc_min_ratio`]).
+    pub fn set_auto_blob_gc_min_ratio(&self, min_dead_ratio: Option<f64>) {
+        self.inner.write().set_auto_blob_gc_min_ratio(min_dead_ratio);
+    }
+
+    /// Current auto blob-GC threshold, if enabled.
+    #[must_use]
+    pub fn auto_blob_gc_min_ratio(&self) -> Option<f64> {
+        self.inner.read().auto_blob_gc_min_ratio()
+    }
+
+    /// Open snapshot pin count.
+    #[must_use]
+    pub fn snapshot_pin_count(&self) -> usize {
+        self.inner.read().snapshot_pin_count()
+    }
+
+    /// Active blob generation.
+    #[must_use]
+    pub fn blob_active(&self) -> u32 {
+        self.inner.read().blob_active()
+    }
+
     /// Fail closed when a snapshot is below the GC watermark.
     ///
     /// # Errors
@@ -1237,6 +1276,36 @@ mod tests {
             }
         }
         assert_eq!(miss2, 0, "lost keys after reopen");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Session setters for blob/GC are available without with_write.
+    #[test]
+    fn concurrent_blob_gc_setters() {
+        let dir = temp_dir();
+        let db = ConcurrentDb::open_with(
+            &dir,
+            OpenOptions {
+                sync: true,
+                auto_flush_bytes: None,
+                auto_compact_sst_count: None,
+                auto_compact_sst_bytes: None,
+                exclusive: true,
+                large_value_threshold: Some(512),
+            },
+        )
+        .unwrap();
+        assert_eq!(db.auto_blob_gc_min_ratio(), None);
+        db.set_auto_blob_gc_min_ratio(Some(0.5));
+        assert_eq!(db.auto_blob_gc_min_ratio(), Some(0.5));
+        db.set_vlog_rotate_bytes(Some(64 * 1024));
+        db.set_scan_prefetch(8);
+        assert_eq!(db.scan_prefetch(), 8);
+        assert_eq!(db.snapshot_pin_count(), 0);
+        let pin = db.pin_snapshot();
+        assert_eq!(db.snapshot_pin_count(), 1);
+        db.release_snapshot_pin(pin);
+        assert_eq!(db.snapshot_pin_count(), 0);
         let _ = fs::remove_dir_all(&dir);
     }
 

@@ -218,7 +218,11 @@ fn pitr_cmd(args: &[String]) -> std::process::ExitCode {
         let id: u64 = args[1].parse()?;
         let seq: u64 = args[2].parse()?;
         eng.restore_pitr(id, &args[3], Some(seq))?;
-        println!("pitr backup {id} to seq {seq} -> {}", args[3]);
+        let rep = inspect_format(&args[3])?;
+        println!(
+            "pitr backup {id} to seq {seq} -> {} earliest_readable={} ssts={}",
+            args[3], rep.earliest_readable_seq, rep.sst_count
+        );
         Ok(())
     })() {
         Ok(()) => std::process::ExitCode::SUCCESS,
