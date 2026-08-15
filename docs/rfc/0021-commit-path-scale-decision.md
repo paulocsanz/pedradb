@@ -47,7 +47,13 @@ Earlier s2c lab had higher r8 (~8.4 keys/s); **r8 is noisy** under thr≪ranges.
 
 `TcpClusterClient` now keeps a **per-range** leader map (`leaders_from_status` / NotLeader hints), optional **`active_range`** for partitioned writers, and `warm_leaders()`. Previously a single global prefer + “first `r*:leader`” status parse mis-routed multi-Raft puts after elect.
 
-Residual still holds: when **all range leaders elect onto one node**, multi-client multi-range collapses to one worker queue (no option-A win). r8 under load remains noisy.
+### Leader diversity (2026-08-15)
+
+**Root cause of colocation:** raft `election_timeout` was `4 + node_id` only → lowest node id timed out first on **every** range.
+
+**Fix:** per-`(node, range)` timeouts — preferred leader for range `r` is `members[(r-1) % n]` with shortest timeout; ring distance staggers the rest. API: `rebalance_range_leaders` if jitter still skews load; `leader_nodes()` for observability.
+
+Residual: r8 under load / HB tax can still look noisy; option A still prefers multi-client multi-range with **spread leaders**.
 
 Rationale:
 - Lab multi-Raft scales write capacity under concurrent partitioned clients (S2 r1→r4) **when leaders are spread**.

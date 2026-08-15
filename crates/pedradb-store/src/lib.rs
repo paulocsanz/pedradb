@@ -1305,8 +1305,13 @@ fn decode_log(buf: &[u8]) -> Result<Vec<LogRec>> {
     Ok(out)
 }
 
-fn load_range_peer<E: Env>(db: &Db<E>, range_id: u64, node_id: u64) -> Result<RangePeer> {
-    let mut peer = RangePeer::new(node_id);
+fn load_range_peer<E: Env>(
+    db: &Db<E>,
+    range_id: u64,
+    node_id: u64,
+    member_ids: &[u64],
+) -> Result<RangePeer> {
+    let mut peer = RangePeer::new(node_id, range_id, member_ids);
     if let Some(raw) = db.get(&raft_meta_key(range_id, "hard")) {
         let (term, voted) = decode_hard(&raw)?;
         peer.term = term;
@@ -1483,8 +1488,34 @@ struct RangePeer {
     disk_log_hi: u64,
 }
 
+/// Election timeout ticks for `(node_id, range_id)` given membership.
+///
+/// Preferred leader for range `r` is `members[(r-1) % n]` with the **shortest**
+/// timeout; others stagger by ring distance. Without members, fall back to a
+/// hash mix of node+range (still diversifies vs node-only).
+fn election_timeout_for(node_id: u64, range_id: u64, member_ids: &[u64]) -> u64 {
+    let mut sorted: Vec<u64> = member_ids.to_vec();
+    sorted.sort_unstable();
+    sorted.dedup();
+    if sorted.is_empty() {
+        // [4, 9] — independent of pure node_id so multi-range still spreads.
+        return 4 + ((node_id.wrapping_mul(5).wrapping_add(range_id.wrapping_mul(7))) % 6);
+    }
+    let n = sorted.len();
+    let pref = sorted[(range_id.saturating_sub(1) as usize) % n];
+    let pref_pos = sorted.iter().position(|&x| x == pref).unwrap_or(0);
+    let my_pos = sorted.iter().position(|&x| x == node_id).unwrap_or(0);
+    let dist = (my_pos + n - pref_pos) % n;
+    // Preferred = 3 ticks; next on ring = 4, …
+    3 + dist as u64
+}
+
 impl RangePeer {
-    fn new(node_id: u64) -> Self {
+    /// Build a follower peer. Election timeouts are **per-(node, range)** so that
+    /// multi-Raft leaders diversify across members instead of always electing the
+    /// lowest `node_id` on every range (option-A scale residual).
+    fn new(node_id: u64, range_id: u64, member_ids: &[u64]) -> Self {
+        let election_timeout = election_timeout_for(node_id, range_id, member_ids);
         Self {
             role: Role::Follower,
             term: 0,
@@ -1494,8 +1525,8 @@ impl RangePeer {
             snapshot_term: 0,
             commit: 0,
             applied: 0,
-            election_left: 4 + node_id,
-            election_timeout: 4 + node_id,
+            election_left: election_timeout,
+            election_timeout,
             hb_left: 2,
             next_index: HashMap::new(),
             match_index: HashMap::new(),
@@ -1758,9 +1789,12 @@ impl StoreCluster<StdEnv> {
         };
         let dir = parent.join(format!("store-node-{self_id}"));
         let db = Db::open_with_env(&dir, opts, StdEnv)?;
+        let mut ids: Vec<u64> = member_ids.to_vec();
+        ids.sort_unstable();
+        ids.dedup();
         let mut rmap = HashMap::new();
         for meta in &ranges {
-            rmap.insert(meta.id, load_range_peer(&db, meta.id, self_id)?);
+            rmap.insert(meta.id, load_range_peer(&db, meta.id, self_id, &ids)?);
         }
         let mut nodes = HashMap::new();
         nodes.insert(
@@ -1771,9 +1805,6 @@ impl StoreCluster<StdEnv> {
                 participating: true,
             },
         );
-        let mut ids: Vec<u64> = member_ids.to_vec();
-        ids.sort_unstable();
-        ids.dedup();
         let mut cluster = Self {
             nodes,
             ids,
@@ -1886,7 +1917,7 @@ impl<E: Env> StoreCluster<E> {
         let parent = parent.as_ref();
         let ranges = split_keyspace(n_ranges);
         let mut nodes = HashMap::new();
-        let mut ids = Vec::new();
+        let ids: Vec<u64> = (1..=n_nodes).collect();
         let opts = OpenOptions {
             sync: store_opts.pedra_sync,
             auto_flush_bytes: None,
@@ -1902,7 +1933,7 @@ impl<E: Env> StoreCluster<E> {
             let mut rmap = HashMap::new();
             for meta in &ranges {
                 // F26: restore durable raft meta (or empty peer on first open).
-                rmap.insert(meta.id, load_range_peer(&db, meta.id, id)?);
+                rmap.insert(meta.id, load_range_peer(&db, meta.id, id, &ids)?);
             }
             nodes.insert(
                 id,
@@ -1912,7 +1943,6 @@ impl<E: Env> StoreCluster<E> {
                     participating: true,
                 },
             );
-            ids.push(id);
         }
         let mut cluster = Self {
             nodes,
@@ -2580,6 +2610,68 @@ impl<E: Env> StoreCluster<E> {
             self.tick()?;
         }
         Err(StoreError::Msg("elect timeout".into()))
+    }
+
+    /// Distinct node ids that currently lead at least one range.
+    #[must_use]
+    pub fn leader_nodes(&self) -> Vec<u64> {
+        let mut set = std::collections::BTreeSet::new();
+        for r in &self.ranges {
+            if let Some(l) = self.range_leader(r.id) {
+                set.insert(l);
+            }
+        }
+        set.into_iter().collect()
+    }
+
+    /// If one node holds more ranges than `ceil(n_ranges / n_nodes)`, step down
+    /// excess leaders and re-elect (lab multi-Raft balance).
+    ///
+    /// Preferred after [`Self::elect_all`] when timeouts alone leave skew (jitter).
+    ///
+    /// # Errors
+    /// Elect timeout / step-down failures.
+    pub fn rebalance_range_leaders(&mut self, max_ticks: u64) -> Result<()> {
+        if self.ids.is_empty() || self.ranges.is_empty() {
+            return Ok(());
+        }
+        let n_nodes = self.ids.len() as u64;
+        let n_ranges = self.ranges.len() as u64;
+        let target = n_ranges.div_ceil(n_nodes).max(1);
+        // Up to n_ranges step-downs in the worst case.
+        for _ in 0..n_ranges {
+            let mut load: HashMap<u64, Vec<u64>> = HashMap::new();
+            for r in &self.ranges {
+                if let Some(l) = self.range_leader(r.id) {
+                    load.entry(l).or_default().push(r.id);
+                }
+            }
+            let Some((&hot, ranges)) = load
+                .iter()
+                .max_by_key(|(_, rs)| rs.len())
+                .map(|(k, v)| (k, v.clone()))
+            else {
+                break;
+            };
+            if ranges.len() as u64 <= target {
+                break;
+            }
+            // Step down a range that *should* prefer another node when possible.
+            let rid = ranges
+                .iter()
+                .copied()
+                .find(|&rid| {
+                    let mut sorted = self.ids.clone();
+                    sorted.sort_unstable();
+                    let pref = sorted[(rid.saturating_sub(1) as usize) % sorted.len()];
+                    pref != hot
+                })
+                .unwrap_or(ranges[0]);
+            let _ = self.step_down_range_leader(rid)?;
+            // Re-elect; preferred node for rid should win if still short-timeout.
+            self.elect_all(max_ticks)?;
+        }
+        Ok(())
     }
 
     fn tick_range(&mut self, rid: u64, ids: &[u64]) -> Result<()> {
@@ -4013,10 +4105,11 @@ impl<E: Env> StoreCluster<E> {
         self.ranges.sort_by_key(|r| r.id);
         // Install empty raft peers on every local node for the new range.
         let node_ids: Vec<u64> = self.nodes.keys().copied().collect();
+        let members = self.ids.clone();
         for nid in node_ids {
             let n = self.nodes.get_mut(&nid).unwrap();
             n.ranges
-                .insert(new_id, load_range_peer(&n.db, new_id, nid)?);
+                .insert(new_id, load_range_peer(&n.db, new_id, nid, &members)?);
         }
         // Elect leaders for both ranges after split.
         self.elect_all(120)?;
@@ -5697,6 +5790,48 @@ mod tests {
                 }
             })
             .collect()
+    }
+
+    #[test]
+    fn multi_range_election_timeouts_diversify_leaders() {
+        // Root cause of option-A residual: node-only timeouts → one node leads all ranges.
+        let dir = temp();
+        let mut c = StoreCluster::open(&dir, 3, 6).unwrap();
+        c.elect_all(200).unwrap();
+        let leaders: Vec<(u64, u64)> = c
+            .range_metas()
+            .iter()
+            .map(|r| (r.id, c.range_leader(r.id).expect("leader")))
+            .collect();
+        let distinct = c.leader_nodes();
+        assert!(
+            distinct.len() >= 2,
+            "expected ≥2 leader nodes after multi-range elect, got {distinct:?} map={leaders:?}"
+        );
+        // Preferred assignment for 3 nodes × 6 ranges is round-robin → all 3 nodes.
+        assert!(
+            distinct.len() >= 3 || {
+                c.rebalance_range_leaders(200).unwrap();
+                c.leader_nodes().len() >= 2
+            },
+            "rebalance should keep multi-node leadership; leaders={:?}",
+            c.leader_nodes()
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn election_timeout_for_round_robin_prefers_member() {
+        let members = [1u64, 2, 3];
+        // range 1 → prefer node 1 (timeout 3); node 2 = 4; node 3 = 5
+        assert_eq!(election_timeout_for(1, 1, &members), 3);
+        assert_eq!(election_timeout_for(2, 1, &members), 4);
+        assert_eq!(election_timeout_for(3, 1, &members), 5);
+        // range 2 → prefer node 2
+        assert_eq!(election_timeout_for(2, 2, &members), 3);
+        assert_eq!(election_timeout_for(1, 2, &members), 5); // dist ring: 1 is after 2→3→1 = 2 steps? 
+        // pref_pos=1 (node2), my_pos=0 (node1): dist = (0+3-1)%3 = 2 → timeout 5
+        assert_eq!(election_timeout_for(3, 2, &members), 4);
     }
 
     /// Pump Queued outbound via in-process delivery (simulates reliable Net).
