@@ -96,7 +96,6 @@ pub use tcp::{
     connect_host as tcp_connect_host, peer_wire, read_frame, resolve_host_port, write_frame,
     WireMsg,
 };
-
 /// Pedra open knobs under each Montanha node (RFC-0025 P0.1).
 ///
 /// Default matches historical `open` (WAL fsync on every durable write).
@@ -4307,14 +4306,28 @@ impl<E: Env> StoreCluster<E> {
 
     /// Flush staged puts via [`Self::put_many`] (one Raft batch per range).
     ///
+    /// F66: on failure the buffer is **kept** so the client can retry. (A prior
+    /// `mem::take` dropped staged pairs on any `put_many` error — silent loss.)
+    ///
+    /// Note: multi-range `put_many` is not atomic; a mid-list failure may leave
+    /// earlier ranges already committed. Retry re-puts those keys (idempotent
+    /// when values are unchanged).
+    ///
     /// # Errors
     /// Same as [`Self::put_many`].
     pub fn flush_writes(&mut self) -> Result<()> {
         if self.write_coalesce.is_empty() {
             return Ok(());
         }
-        let pairs = std::mem::take(&mut self.write_coalesce);
-        self.put_many(pairs)
+        // Clone so a failed put_many does not wipe the buffer (F66).
+        let snapshot: Vec<(Vec<u8>, Vec<u8>)> = self.write_coalesce.clone();
+        self.put_many(
+            snapshot
+                .iter()
+                .map(|(k, v)| (k.as_slice(), v.as_slice())),
+        )?;
+        self.write_coalesce.clear();
+        Ok(())
     }
 
     /// Stage put and auto-flush when buffer reaches `max_batch` (or always if 1).
@@ -6813,6 +6826,25 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+
+    /// RFC-0025 P2.3: strong leader read vs fast replica.
+    #[test]
+    fn get_strong_and_fast_replica_roundtrip() {
+        let dir = temp();
+        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        c.elect_all(60).unwrap();
+        c.put(b"rk", b"v1").unwrap();
+        assert_eq!(
+            c.get_strong(b"rk").unwrap().as_deref(),
+            Some(b"v1".as_ref())
+        );
+        assert_eq!(
+            c.get_fast_replica(b"rk").unwrap().as_deref(),
+            Some(b"v1".as_ref())
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// RFC-0025 P1.1: buffered coalesce flushes as put_many.
     #[test]
     fn put_buffered_flush_coalesce() {
@@ -6834,6 +6866,33 @@ mod tests {
         }
         assert_eq!(c.buffered_writes(), 0);
         assert!(c.count_applied_eq(b"c\x07", b"\x07") >= 2);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// F66: failed flush must not drop the coalesce buffer (silent loss).
+    #[test]
+    fn put_buffered_flush_keeps_buffer_on_error() {
+        let dir = temp();
+        // No elect → put_many/put_batch → NotLeader.
+        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        c.put_buffered(b"keep/me", b"v1").unwrap();
+        c.put_buffered(b"keep/me2", b"v2").unwrap();
+        assert_eq!(c.buffered_writes(), 2);
+        let err = c.flush_writes().expect_err("flush without leader");
+        assert!(
+            matches!(err, StoreError::NotLeader { .. }) || matches!(err, StoreError::Msg(_)),
+            "expected not-leader-ish error, got {err:?}"
+        );
+        assert_eq!(
+            c.buffered_writes(),
+            2,
+            "F66: flush error wiped staged puts (silent loss)"
+        );
+        // After elect, same buffer can still flush.
+        c.elect_all(50).unwrap();
+        c.flush_writes().unwrap();
+        assert_eq!(c.buffered_writes(), 0);
+        assert!(c.count_applied_eq(b"keep/me", b"v1") >= 2);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
