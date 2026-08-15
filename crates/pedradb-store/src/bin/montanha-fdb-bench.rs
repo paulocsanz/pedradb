@@ -241,6 +241,9 @@ fn main() {
 
     let mut benches = Vec::new();
     let mut notes = Vec::new();
+    // Aggregate Pedra L0/mem admission after core suites (WriteAdmissionSnap).
+    let mut admission_core_a: Option<String> = None;
+    let mut admission_core_b: Option<String> = None;
 
     macro_rules! progress {
         ($($t:tt)*) => {{
@@ -546,6 +549,7 @@ fn main() {
         ));
         progress!("A8 record index done");
 
+        admission_core_a = Some(c.write_admission_snap().to_json_object());
         drop(c);
     }
 
@@ -675,6 +679,7 @@ fn main() {
         ));
         progress!("B4 strong vs fast replica done");
 
+        admission_core_b = Some(c.write_admission_snap().to_json_object());
         drop(c);
     }
 
@@ -1496,6 +1501,8 @@ fn main() {
     if write_bp {
         notes.push("write_backpressure=1".into());
     }
+    let admission_a_json = admission_core_a.unwrap_or_else(|| "null".into());
+    let admission_b_json = admission_core_b.unwrap_or_else(|| "null".into());
     let notes_json = if notes.is_empty() {
         "[]".into()
     } else {
@@ -1515,6 +1522,8 @@ fn main() {
   "host": "{host}",
   "suite": "{suite}",
   "write_backpressure": {write_bp},
+  "admission_core_a": {admission_a_json},
+  "admission_core_b": {admission_b_json},
   "nodes": 3,
   "payload_bytes": {payload},
   "n_default": {n},
