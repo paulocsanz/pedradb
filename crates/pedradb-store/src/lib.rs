@@ -4511,7 +4511,7 @@ impl<E: Env> StoreCluster<E> {
         None
     }
 
-    /// Human-readable multi-host status (local id, leaders, membership).
+    /// Human-readable multi-host status (local id, leaders, membership, Pedra L0).
     #[must_use]
     pub fn status_text(&self) -> String {
         let local = self
@@ -4526,6 +4526,20 @@ impl<E: Env> StoreCluster<E> {
                 .map(|l| l.to_string())
                 .unwrap_or_else(|| "-".into());
             parts.push(format!("r{}:leader={lead}", r.id));
+        }
+        // Pedra engine pressure (ops / LB probes).
+        for id in &self.ids {
+            if let Some(n) = self.nodes.get(id) {
+                let s = n.db.stats();
+                parts.push(format!(
+                    "n{id}:l0={} stall={} pressure={} l0_lim={} mem_lim={}",
+                    s.l0_files,
+                    s.write_stall_count,
+                    s.write_pressure_count,
+                    s.write_stall_l0,
+                    s.write_stall_mem_bytes
+                ));
+            }
         }
         parts.join(" ")
     }
@@ -8333,6 +8347,18 @@ mod tests {
             Some(pedradb_core::L0_COMPACTION_TRIGGER)
         );
         assert!(n.db.write_stall_drain());
+        let st = c.status_text();
+        assert!(
+            st.contains("n1:l0=") && st.contains("l0_lim="),
+            "status should include Pedra L0 metrics: {st}"
+        );
+        assert!(
+            st.contains(&format!(
+                "l0_lim={}",
+                pedradb_core::L0_COMPACTION_TRIGGER.saturating_mul(2)
+            )),
+            "hard stall limit in status: {st}"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
