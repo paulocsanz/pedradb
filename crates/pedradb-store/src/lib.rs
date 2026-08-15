@@ -4992,6 +4992,35 @@ impl<E: Env> StoreCluster<E> {
         Ok(())
     }
 
+    /// Revert a range that already majority-committed `TxnCommit` (F47 / F139).
+    ///
+    /// Raft `TxnRevert` is required so remote peers that applied the commit see
+    /// the compensating entry. Force-local heals this process's Pedra copies.
+    ///
+    /// # Errors
+    /// Force-local revert failure, or raft propose failure even when local clear
+    /// succeeded (remotes may still hold the committed write).
+    fn revert_majority_committed_range(
+        &mut self,
+        rid: u64,
+        txn_id: u64,
+        keys: &[Vec<u8>],
+    ) -> Result<()> {
+        let raft = self.propose_on_range(
+            rid,
+            RangeEntry::TxnRevert {
+                txn_id,
+                keys: keys.to_vec(),
+            },
+        );
+        let local = self.force_local_clear_keys(txn_id, keys, true);
+        match (raft, local) {
+            (Ok(()), Ok(())) => Ok(()),
+            (_, Err(e)) => Err(e),
+            (Err(e), Ok(())) => Err(e),
+        }
+    }
+
     /// Try raft cleanup; always force-local clear so leaderless ranges cannot stick intents.
     ///
     /// # Errors
@@ -5064,19 +5093,17 @@ impl<E: Env> StoreCluster<E> {
                     let mut cleanup_err: Option<StoreError> = None;
                     for rid2 in &handle.ranges {
                         let akeys = Self::keys_for_range(handle, *rid2).to_vec();
-                        let clear = if committed.contains(rid2) {
-                            let _ = self.propose_on_range(
-                                *rid2,
-                                RangeEntry::TxnRevert {
-                                    txn_id: handle.id,
-                                    keys: akeys.clone(),
-                                },
-                            );
-                            self.force_local_clear_keys(handle.id, &akeys, true)
-                        } else {
+                        if committed.contains(rid2) {
+                            if let Err(ce) =
+                                self.revert_majority_committed_range(*rid2, handle.id, &akeys)
+                            {
+                                if cleanup_err.is_none() {
+                                    cleanup_err = Some(ce);
+                                }
+                            }
+                        } else if let Err(ce) =
                             self.cleanup_range_keys(*rid2, handle.id, &akeys, CleanupMode::Revert)
-                        };
-                        if let Err(ce) = clear {
+                        {
                             if cleanup_err.is_none() {
                                 cleanup_err = Some(ce);
                             }
@@ -5148,12 +5175,11 @@ impl<E: Env> StoreCluster<E> {
                 if is_reserved_store_key(k) {
                     continue;
                 }
-                // Missing pre → absent floor for SI note; present corrupt → skip
-                // as absent only after fail-closed decode would have errored on
-                // apply paths (F118). note_tx_commit is best-effort on reader.
+                // Missing pre → absent floor. Present corrupt → Err (F139),
+                // never unwrap_or(None) as a fake gen-0 tombstone.
                 let pre = match n.db.get(&txn_pre_key(handle.id, k)) {
                     None => None,
-                    Some(b) => decode_preimage(b.as_ref()).unwrap_or(None),
+                    Some(b) => decode_preimage(b.as_ref())?,
                 };
                 let val =
                     n.db.get(k)
@@ -9376,6 +9402,45 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// F139: raft TxnRevert fail after majority commit must surface (not only force-local).
+    #[test]
+    fn revert_majority_committed_surfaces_raft_fail() {
+        let dir = temp();
+        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        c.elect_all(80).unwrap();
+        c.put(b"u", b"old").unwrap();
+        let tid = 77u64;
+        // Simulate prepare preimage + materialised commit on all local peers.
+        for nid in c.ids.clone() {
+            let n = c.nodes.get_mut(&nid).unwrap();
+            n.db
+                .put(txn_pre_key(tid, b"u"), encode_preimage(Some(b"old")))
+                .unwrap();
+            n.db.put(b"u", b"new").unwrap();
+            n.db.put(txn_status_key(tid), b"prepared").unwrap();
+        }
+        // No leader → propose TxnRevert fails; force-local still restores preimage.
+        let rid = 1u64;
+        let _ = c.step_down_range_leader(rid);
+        assert!(c.range_leader(rid).is_none(), "need leaderless for raft fail");
+        let err = c.revert_majority_committed_range(rid, tid, &[b"u".to_vec()]);
+        assert!(
+            err.is_err(),
+            "F139: must surface raft revert fail even if local clear works: {err:?}"
+        );
+        assert!(
+            matches!(err, Err(StoreError::NotLeader { .. })),
+            "expected NotLeader, got {err:?}"
+        );
+        // Local clear still ran.
+        assert_eq!(
+            c.get_on(1, b"u").unwrap().as_deref(),
+            Some(b"old".as_ref()),
+            "force-local must still restore preimage"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// F134: fenced TxnCommit apply must re-fence after revert (not swallow put).
     #[test]
     fn apply_txn_commit_fenced_keeps_abort_status() {
@@ -9540,6 +9605,36 @@ mod tests {
             c.applied_index(nid, rid),
             applied0,
             "applied must not advance past a failed generation persist"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// F139: garbage 2PC preimage was treated as absent SI floor (unwrap_or None).
+    #[test]
+    fn note_tx_commit_rejects_corrupt_preimage_floor() {
+        let dir = temp();
+        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        c.elect_all(80).unwrap();
+        // Pedra-only preimage: key exists, RAM hist empty (no SI note yet).
+        for nid in c.ids.clone() {
+            if let Some(n) = c.nodes.get_mut(&nid) {
+                n.db.put(b"k", b"old").unwrap();
+            }
+        }
+        let h = c
+            .tx_start([(b"k".as_slice(), b"new".as_slice())])
+            .unwrap();
+        for nid in c.ids.clone() {
+            if let Some(n) = c.nodes.get_mut(&nid) {
+                n.db
+                    .put(&txn_pre_key(h.id, b"k"), b"\xffbad")
+                    .unwrap();
+            }
+        }
+        let err = c.tx_finish(&h);
+        assert!(
+            err.is_err(),
+            "corrupt preimage must fail SI note, not stamp absent floor: {err:?}"
         );
         let _ = std::fs::remove_dir_all(&dir);
     }
