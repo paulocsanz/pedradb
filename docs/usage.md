@@ -309,6 +309,7 @@ pedra stats <db>                          # sizes + earliest_readable / pins / a
 pedra compact <db>                        # leveled SST merge (history-preserving)
 pedra compact <db> --latest-only          # aggressive version GC (raises watermark)
 pedra reclaim <db>                        # pin-aware compact_reclaim (open-items §2.1)
+pedra inspect <db>                        # SST versions + earliest_readable (MANIFEST v4)
 pedra blob-gc <db>                        # list candidates
 pedra compact-blob <db> --auto [0.5]      # GC worst sealed (default θ=0.5)
 pedra compact-blob <db> <file_num>        # GC explicit id

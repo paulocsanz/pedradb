@@ -535,6 +535,10 @@ fn inspect_cmd(args: &[String]) -> std::process::ExitCode {
             println!("has_manifest={}", r.has_manifest);
             println!("sst_count={}", r.sst_count);
             println!("needs_migration={}", r.needs_migration);
+            println!(
+                "earliest_readable={} vlog_use_new={}",
+                r.earliest_readable_seq, r.vlog_use_new
+            );
             for (num, ver) in &r.sst_versions {
                 println!("  sst {num:06} version={ver}");
             }

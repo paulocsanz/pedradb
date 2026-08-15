@@ -3437,6 +3437,15 @@ impl<E: Env> Db<E> {
         let Some(theta) = self.auto_blob_gc_min_ratio else {
             return;
         };
+        // Cheap gate: multi-blob mode with only the active gen → nothing sealed.
+        // (Single-file `VALUES.vlog` / file 0 still runs — `compact_blob_auto` may
+        // rewrite it via `compact_vlog`.)
+        if self.blob_active > 0 {
+            let nums = vlog::list_blob_nums(&self.env, &self.dir);
+            if !nums.iter().any(|&n| n != self.blob_active) {
+                return;
+            }
+        }
         match self.compact_blob_auto(theta) {
             Ok(Some((num, st))) => {
                 tracing::info!(

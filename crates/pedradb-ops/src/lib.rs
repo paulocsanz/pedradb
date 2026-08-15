@@ -166,11 +166,7 @@ impl<E: Env> BackupEngine<E> {
             Self::write_catalog(&env, &root, &c)?;
             c
         };
-        Ok(Self {
-            root,
-            env,
-            catalog,
-        })
+        Ok(Self { root, env, catalog })
     }
 
     fn write_catalog(env: &E, root: &Path, c: &Catalog) -> Result<()> {
@@ -283,10 +279,7 @@ impl<E: Env> BackupEngine<E> {
             });
         }
         let seg_id = self.catalog.next_wal_seg;
-        let seg_path = self
-            .root
-            .join(WAL_DIR)
-            .join(format!("{seg_id:06}.warch"));
+        let seg_path = self.root.join(WAL_DIR).join(format!("{seg_id:06}.warch"));
         write_warch(&self.env, &seg_path, &to_ship)?;
         self.catalog.next_wal_seg = seg_id + 1;
         self.catalog.last_shipped_seq = max_seq;
@@ -567,6 +560,10 @@ pub struct FormatReport {
     pub sst_versions: Vec<(u64, u32)>,
     /// True if any SST is below current writer version or MANIFEST is legacy-only.
     pub needs_migration: bool,
+    /// Version-GC watermark from MANIFEST v4 (`0` if absent / legacy).
+    pub earliest_readable_seq: u64,
+    /// MANIFEST mid-vlog-GC flag (`VALUES.vlog.new` preferred).
+    pub vlog_use_new: bool,
 }
 
 /// Result of rewriting a DB to current on-disk formats.
@@ -597,8 +594,12 @@ pub fn inspect_format_env(env: &impl Env, path: impl AsRef<Path>) -> Result<Form
     let has_manifest = env.exists(&path.join(manifest::CURRENT_FILE));
     let mut sst_versions = Vec::new();
     let mut nums: Vec<u64> = Vec::new();
+    let mut earliest_readable_seq = 0u64;
+    let mut vlog_use_new = false;
     if let Some(vs) = manifest::load(env, path)? {
         nums = vs.sst_file_nums.clone();
+        earliest_readable_seq = vs.earliest_readable_seq;
+        vlog_use_new = vs.vlog_use_new;
     } else {
         for name in env.read_dir_names(path)? {
             if let Some(n) = manifest::parse_sst_name(&name) {
@@ -622,6 +623,8 @@ pub fn inspect_format_env(env: &impl Env, path: impl AsRef<Path>) -> Result<Form
         sst_count: sst_versions.len(),
         sst_versions,
         needs_migration,
+        earliest_readable_seq,
+        vlog_use_new,
     })
 }
 
@@ -663,7 +666,7 @@ pub fn migrate_to_latest_env(path: impl AsRef<Path>, env: impl Env) -> Result<Mi
             auto_compact_sst_count: None,
             auto_compact_sst_bytes: None,
             exclusive: true,
-                large_value_threshold: None,
+            large_value_threshold: None,
         },
         env.clone(),
     )?;
@@ -838,6 +841,7 @@ mod tests {
         }
         let rep = inspect_format(&data).unwrap();
         assert!(rep.sst_count >= 1);
+        assert!(rep.has_manifest);
         let m = migrate_to_latest(&data).unwrap();
         assert!(m.verified);
         assert!(m.last_sequence >= 20);
@@ -845,6 +849,32 @@ mod tests {
         assert_eq!(db.get(b"k\x00").as_deref(), Some(b"v\x00".as_ref()));
         db.verify_checksums().unwrap();
         db.close().unwrap();
+        let _ = std::fs::remove_dir_all(&data);
+    }
+
+    /// MANIFEST v4 watermark visible via inspect without opening a writer.
+    #[test]
+    fn inspect_reports_earliest_readable_after_reclaim() {
+        use pedradb_core::CompactOptions;
+        let data = temp();
+        {
+            let mut db = open_db(&data);
+            db.put(b"k", b"old").unwrap();
+            db.flush().unwrap();
+            db.put(b"k", b"new").unwrap();
+            db.flush().unwrap();
+            db.compact_with(CompactOptions::latest_only()).unwrap();
+            assert!(db.earliest_readable_sequence() > 0);
+            let floor = db.earliest_readable_sequence();
+            db.close().unwrap();
+            let rep = inspect_format(&data).unwrap();
+            assert_eq!(
+                rep.earliest_readable_seq, floor,
+                "inspect must read durable watermark without open"
+            );
+            assert!(rep.has_manifest);
+            assert!(!rep.vlog_use_new);
+        }
         let _ = std::fs::remove_dir_all(&data);
     }
 
