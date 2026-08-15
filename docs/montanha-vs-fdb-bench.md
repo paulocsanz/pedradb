@@ -34,6 +34,11 @@ MONTANHA_BENCH_SUITE=all MONTANHA_BENCH_N=100 MONTANHA_BENCH_THREADS=8 \
 # TCP + mini-bt only (faster loop on network path)
 MONTANHA_BENCH_SUITE=tcp,mini-bt MONTANHA_BENCH_N=40 \
   cargo run -p pedradb-store --release --bin montanha-fdb-bench -- findings/fdb-bench-tcp
+
+# Pedra L0 admission (pressure @ L0_TRIGGER, hard stall @ 2×) — lab A/B vs unconstrained
+MONTANHA_WRITE_BACKPRESSURE=1 MONTANHA_BENCH_SUITE=core MONTANHA_BENCH_N=50 \
+  cargo run -p pedradb-store --release --bin montanha-fdb-bench -- findings/fdb-bench-bp
+# same flag on montanha-scale-gate; report field write_backpressure: true|false
 ```
 
 Output: `findings/.../fdb_shaped_bench.json`
