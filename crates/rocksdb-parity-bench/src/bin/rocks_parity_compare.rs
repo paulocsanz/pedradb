@@ -62,8 +62,19 @@ fn main() {
     };
 
     // Ratio table: compat / rocksdb when both present; else null.
+    // Union of both suites — rows absent from a report stay null.
     let shapes = [
-        "ycsb_a", "ycsb_b", "ycsb_c", "ycsb_d", "ycsb_e", "ycsb_f",
+        "ycsb_a",
+        "ycsb_b",
+        "ycsb_c",
+        "ycsb_d",
+        "ycsb_e",
+        "ycsb_f",
+        "deps_apply_batch",
+        "deps_mvcc_latest",
+        "deps_scan",
+        "deps_raftlog",
+        "deps_cache_overwrite",
     ];
     let parity_floor: Option<f64> = std::env::var("ROCKS_PARITY_RATIO_FLOOR")
         .ok()

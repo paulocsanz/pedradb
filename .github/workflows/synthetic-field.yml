@@ -160,9 +160,9 @@ jobs:
           ROCKS_YCSB_OPS: "48"
         run: |
           cargo run -q --release -p rocksdb-parity-bench --bin rocks-parity-bench -- findings/rocks-parity-ci compat
-          python3 -c "import json; r=json.load(open('findings/rocks-parity-ci/rocks_parity_bench.json')); names=[b['name'] for b in r['benches']]; assert all(f'ycsb_{w}' in names for w in 'abcdef'), names; assert r['engine']=='compat' and r['sync'] is True, r"
+          python3 -c "import json; r=json.load(open('findings/rocks-parity-ci/rocks_parity_bench.json')); names=[b['name'] for b in r['benches']]; assert all(f'ycsb_{w}' in names for w in 'abcdef'), names; assert all(f'deps_{w}' in names for w in ('apply_batch','mvcc_latest','scan','raftlog','cache_overwrite')), names; assert r['engine']=='compat' and r['sync'] is True, r"
           ROCKS_PARITY_TEMPLATE=1 bash scripts/rocksdb_parity_v0.sh findings/rocks-parity-ci-e2e
-          python3 -c "import json; r=json.load(open('findings/rocks-parity-ci-e2e/compare/compare_report.json')); assert r['parity']['pass'] is None and r['parity']['shapes_with_peer']==0, r"
+          python3 -c "import json; r=json.load(open('findings/rocks-parity-ci-e2e/compare/compare_report.json')); assert r['parity']['pass'] is None and r['parity']['shapes_with_peer']==0, r; assert 'deps_apply_batch' in [x['shape'] for x in r['ratios']], r"
       - name: mini-bt soak (Pedra L0 write backpressure)
         env:
           MONTANHA_WRITE_BACKPRESSURE: "1"

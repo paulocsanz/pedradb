@@ -89,12 +89,12 @@ API surface). What this ships: the API-shaped substrate, the alias-swap
 mechanism, and the adversarial gates that any future swap work can run
 unchanged. **Do not** claim "TiKV on Pedra" from this.
 
-## Bench parity vs real RocksDB (YCSB A–F)
+## Bench parity vs real RocksDB (YCSB A–F + dependent shapes)
 
 `crates/rocksdb-parity-bench` runs the same six YCSB shapes as the Montanha
-FDB suite through **one generic runner** with two engine adapters, so the op
-schedule (rng seed, zipf CDF, read/insert/scan/RMW mix) cannot drift between
-engines:
+FDB suite (plus the `deps` suite above) through **one generic runner** with
+two engine adapters, so the op schedule (rng seed, zipf CDF,
+read/insert/scan/RMW mix) cannot drift between engines:
 
 - `compat` — `rocksdb-compat` on pedradb-core (single node, single client,
   WAL fsync before Ok).
@@ -152,10 +152,52 @@ sanctioned fix. Until that lands, `ROCKS_PARITY_RATIO_FLOOR` stays
 report-only (`none`) in `rocksdb_parity_v0.sh`; reads (ycsb_c) are the
 closest shape at 0.10–0.71×.
 
+## Dependent-shaped suite (`deps`, TiKV as the reference dependent)
+
+Beyond generic YCSB, the bench models the access patterns real RocksDB
+dependents issue (TiKV is the canonical one — and the reason this compat
+layer exists). CF layout mirrors TiKV's store: `default` (MVCC values),
+`write` (commit records), `lock`, plus `raftlog` for the raftdb instance.
+Shape provenance:
+
+| shape | Dependent pattern (TiKV source) | Op per iteration |
+|---|---|---|
+| `deps_apply_batch` | raftstore apply path: one ready = prewrite batch (lock+default) then commit batch (write+lock-del), across CFs (`raftstore::apply`) | 2 atomic multi-CF WriteBatches × `ROCKS_DEPS_BATCH` (default 32) txns |
+| `deps_mvcc_latest` | MVCC point read: `SeekForPrev(user_key_MAX)` on `write` CF, then value fetch in `default` (`txn::store`) | 1 reverse-seek + 1 point get |
+| `deps_scan` | coprocessor / MVCC-GC range scan over user keys in `write` | 1 scan ≤ 25 keys |
+| `deps_raftlog` | raftdb append: batched sequential log entries + trailing read (`raftstore::store::RaftApplyStorage`) | 1 batch × 16 entries + every 8th op 1 read |
+| `deps_cache_overwrite` | cache-style dependent: unbatched zipf overwrite of a fixed keyspace (worst case for per-write costs) | 1 unbatched put |
+
+The runner seeds 2 versions/record (batched prewrite+commit rounds), then
+runs the five shapes; op counters match exactly across engines (verified in
+smoke runs — the schedule cannot drift). Suite selection:
+`ROCKS_PARITY_SUITE=ycsb,deps` (default both; `deps` alone is fine).
+
+### Lab numbers, deps suite (2026-08-15, @863df07, records=1024 ops=200 batch=32, uniform)
+
+| shape | compat qps | rocksdb sync-per-write | ratio | rocksdb async-WAL |
+|---|---:|---:|---:|---:|
+| deps_apply_batch | 27 | 1,720 | **0.016** | 2,649 |
+| deps_mvcc_latest | 260 | 84,367 | **0.003** | 125,173 |
+| deps_scan | 508 | 104,943 | 0.005 | 81,699 |
+| deps_raftlog | 32 | 4,744 | 0.007 | 35,916 |
+| deps_cache_overwrite | 52 | 8,976 | 0.006 | 142,607 |
+
+**Second mechanism quantified:** `deps_mvcc_latest`/`deps_scan` sit ~600×
+below compat's own point-get throughput (ycsb_c: 156k qps) because the
+compat iterator is *eager* — every call materializes the whole CF snapshot
+(`Vec<(k,v)>`), so a latest-read pays a full keyspace copy plus reverse
+walk. That is gap #6 in the TiKV table below, now with a number attached.
+Batching helps where dependents batch (apply: 0.016 vs unbatched overwrite
+0.006 — the CHANGELOG store amortizes per batch), but per-write durability
+cost and eager iterators dominate. Same conclusion as the YCSB table:
+CHANGELOG batched store + lazy iterators are the two highest-leverage
+compat fixes.
+
 ## Reproduce
 
 ```bash
 cargo test -p rocksdb-compat                # API + adversarial suite
 cargo test -p rocksdb-compat --test adversarial -- --nocapture
-cargo test -p rocksdb-parity-bench          # harness determinism + compare extraction
+cargo test -p rocksdb-parity-bench          # harness determinism + deps suite on compat
 ```

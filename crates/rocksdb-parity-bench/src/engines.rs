@@ -1,0 +1,241 @@
+//! Engine adapters for the parity bench: `compat` (rocksdb-compat on
+//! pedradb-core) and `rocksdb` (real RocksDB via the rocksdb crate, feature
+//! `real`). Both implement the same [`Engine`] ops so the runner's schedule
+//! cannot drift between engines.
+
+use crate::{CfWrite, DEPS_CFS, Engine};
+use std::path::Path;
+
+/// rocksdb-compat on pedradb-core (always available). Single node, single
+/// client; WAL fsync before Ok.
+pub struct CompatEngine {
+    db: rocksdb_compat::DB,
+}
+
+impl CompatEngine {
+    pub fn open(path: &Path) -> Self {
+        let mut opts = rocksdb_compat::Options::default();
+        opts.create_if_missing(true);
+        let db = rocksdb_compat::DB::open_cf(&opts, path, DEPS_CFS).expect("compat open_cf");
+        Self { db }
+    }
+}
+
+impl Engine for CompatEngine {
+    fn label(&self) -> &'static str {
+        "compat"
+    }
+    fn durability(&self) -> &'static str {
+        "fsync-before-ok (pedradb-core WAL)"
+    }
+    fn sync(&self) -> bool {
+        true
+    }
+    fn put(&self, k: &[u8], v: &[u8]) -> bool {
+        self.db.put(k, v).is_ok()
+    }
+    fn get(&self, k: &[u8]) -> Result<Option<Vec<u8>>, ()> {
+        self.db.get(k).map_err(|_| ())
+    }
+    fn scan_count(&self, start: &[u8], end: &[u8], cap: usize) -> Result<usize, ()> {
+        let mut it = self
+            .db
+            .iterator(rocksdb_compat::IteratorMode::From(
+                start,
+                rocksdb_compat::Direction::Forward,
+            ))
+            .map_err(|_| ())?;
+        let mut n = 0;
+        while it.valid() && n < cap && it.key() < end {
+            n += 1;
+            it.next();
+        }
+        Ok(n)
+    }
+    fn put_cf(&self, cf: &str, k: &[u8], v: &[u8]) -> bool {
+        match self.db.cf_handle(cf) {
+            Some(h) => self.db.put_cf(&h, k, v).is_ok(),
+            None => false,
+        }
+    }
+    fn get_cf(&self, cf: &str, k: &[u8]) -> Result<Option<Vec<u8>>, ()> {
+        let h = self.db.cf_handle(cf).ok_or(())?;
+        self.db.get_cf(&h, k).map_err(|_| ())
+    }
+    fn batch(&self, ops: Vec<CfWrite>) -> bool {
+        let mut wb = rocksdb_compat::WriteBatch::new();
+        for op in ops {
+            let staged = match op {
+                CfWrite::Put { cf, k, v } => match self.db.cf_handle(cf) {
+                    Some(h) => {
+                        wb.put_cf(&h, k, v);
+                        true
+                    }
+                    None => false,
+                },
+                CfWrite::Delete { cf, k } => match self.db.cf_handle(cf) {
+                    Some(h) => {
+                        wb.delete_cf(&h, k);
+                        true
+                    }
+                    None => false,
+                },
+            };
+            if !staged {
+                return false;
+            }
+        }
+        self.db.write(&wb).is_ok()
+    }
+    fn latest_cf(&self, cf: &str, prefix: &[u8]) -> Result<Option<Vec<u8>>, ()> {
+        let h = self.db.cf_handle(cf).ok_or(())?;
+        let mut seek = prefix.to_vec();
+        seek.extend_from_slice(&u64::MAX.to_be_bytes());
+        let it = self
+            .db
+            .iterator_cf(
+                &h,
+                rocksdb_compat::IteratorMode::From(&seek, rocksdb_compat::Direction::Reverse),
+            )
+            .map_err(|_| ())?;
+        if it.valid() && it.key().starts_with(prefix) {
+            Ok(Some(it.key().to_vec()))
+        } else {
+            Ok(None)
+        }
+    }
+    fn scan_count_cf(&self, cf: &str, start: &[u8], end: &[u8], cap: usize) -> Result<usize, ()> {
+        let h = self.db.cf_handle(cf).ok_or(())?;
+        let mut it = self
+            .db
+            .iterator_cf(
+                &h,
+                rocksdb_compat::IteratorMode::From(start, rocksdb_compat::Direction::Forward),
+            )
+            .map_err(|_| ())?;
+        let mut n = 0;
+        while it.valid() && n < cap && it.key() < end {
+            n += 1;
+            it.next();
+        }
+        Ok(n)
+    }
+}
+
+/// Real RocksDB via the rocksdb crate (feature `real`). Durability is labeled:
+/// `sync` per write when `sync=true` (matched to Pedra's contract), else
+/// RocksDB's async-WAL default (reference run).
+#[cfg(feature = "real")]
+pub struct RocksEngine {
+    db: rocksdb::DB,
+    wopts: rocksdb::WriteOptions,
+    sync: bool,
+}
+
+#[cfg(feature = "real")]
+impl RocksEngine {
+    pub fn open(path: &Path, sync: bool) -> Self {
+        let mut opts = rocksdb::Options::default();
+        opts.create_if_missing(true);
+        opts.create_missing_column_families(true);
+        let db = rocksdb::DB::open_cf(&opts, path, DEPS_CFS).expect("rocksdb open_cf");
+        let mut wopts = rocksdb::WriteOptions::default();
+        wopts.set_sync(sync);
+        Self { db, wopts, sync }
+    }
+}
+
+#[cfg(feature = "real")]
+impl Engine for RocksEngine {
+    fn label(&self) -> &'static str {
+        "rocksdb"
+    }
+    fn durability(&self) -> &'static str {
+        if self.sync {
+            "sync-per-write (WriteOptions.sync=true)"
+        } else {
+            "async-wal (WriteOptions.sync=false, rocksdb default)"
+        }
+    }
+    fn sync(&self) -> bool {
+        self.sync
+    }
+    fn put(&self, k: &[u8], v: &[u8]) -> bool {
+        self.db.put_opt(k, v, &self.wopts).is_ok()
+    }
+    fn get(&self, k: &[u8]) -> Result<Option<Vec<u8>>, ()> {
+        self.db.get(k).map_err(|_| ())
+    }
+    fn scan_count(&self, start: &[u8], end: &[u8], cap: usize) -> Result<usize, ()> {
+        Ok(self
+            .db
+            .iterator(rocksdb::IteratorMode::From(
+                start,
+                rocksdb::Direction::Forward,
+            ))
+            .map_while(|r| r.ok())
+            .take(cap)
+            .take_while(|(k, _)| k.as_ref() < end)
+            .count())
+    }
+    fn put_cf(&self, cf: &str, k: &[u8], v: &[u8]) -> bool {
+        match self.db.cf_handle(cf) {
+            Some(h) => self.db.put_cf_opt(h, k, v, &self.wopts).is_ok(),
+            None => false,
+        }
+    }
+    fn get_cf(&self, cf: &str, k: &[u8]) -> Result<Option<Vec<u8>>, ()> {
+        let h = self.db.cf_handle(cf).ok_or(())?;
+        self.db.get_cf(h, k).map_err(|_| ())
+    }
+    fn batch(&self, ops: Vec<CfWrite>) -> bool {
+        let mut wb = rocksdb::WriteBatch::default();
+        for op in ops {
+            let staged = match op {
+                CfWrite::Put { cf, k, v } => match self.db.cf_handle(cf) {
+                    Some(h) => {
+                        wb.put_cf(h, k, v);
+                        true
+                    }
+                    None => false,
+                },
+                CfWrite::Delete { cf, k } => match self.db.cf_handle(cf) {
+                    Some(h) => {
+                        wb.delete_cf(h, k);
+                        true
+                    }
+                    None => false,
+                },
+            };
+            if !staged {
+                return false;
+            }
+        }
+        self.db.write_opt(wb, &self.wopts).is_ok()
+    }
+    fn latest_cf(&self, cf: &str, prefix: &[u8]) -> Result<Option<Vec<u8>>, ()> {
+        let h = self.db.cf_handle(cf).ok_or(())?;
+        let mut seek = prefix.to_vec();
+        seek.extend_from_slice(&u64::MAX.to_be_bytes());
+        Ok(self
+            .db
+            .iterator_cf(
+                h,
+                rocksdb::IteratorMode::From(&seek, rocksdb::Direction::Reverse),
+            )
+            .map_while(|r| r.ok())
+            .take(1)
+            .find(|(k, _)| k.starts_with(prefix))
+            .map(|(k, _)| k.to_vec()))
+    }
+    fn scan_count_cf(&self, cf: &str, start: &[u8], end: &[u8], cap: usize) -> Result<usize, ()> {
+        let h = self.db.cf_handle(cf).ok_or(())?;
+        Ok(self
+            .db
+            .iterator_cf(h, rocksdb::IteratorMode::From(start, rocksdb::Direction::Forward))
+            .map_while(|r| r.ok())
+            .take(cap)
+            .take_while(|(k, _)| k.as_ref() < end)
+            .count())
+    }
+}
