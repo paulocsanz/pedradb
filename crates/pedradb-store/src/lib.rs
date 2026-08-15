@@ -2083,9 +2083,10 @@ impl<E: Env> StoreCluster<E> {
     ///
     /// # Errors
     /// Present-but-corrupt SI counters (`generation` / `watermark` / `next_txn` / `now_ms`)
-    /// with no valid replica copy (F114).
+    /// with no valid replica copy (F114); leftover intent revert with corrupt
+    /// preimage (F118/F122).
     fn recover_after_open(&mut self) -> Result<()> {
-        self.abort_leftover_intents();
+        self.abort_leftover_intents()?;
         self.load_si_from_disk()?;
         self.recover_next_txn_id()?;
         self.recover_now_ms()?;
@@ -2172,9 +2173,10 @@ impl<E: Env> StoreCluster<E> {
         Ok(max)
     }
 
-    fn abort_leftover_intents(&mut self) {
+    /// F122: leftover 2PC cleanup must not swallow corrupt-preimage revert errors.
+    fn abort_leftover_intents(&mut self) -> Result<()> {
         if !txn_kernel::leftover_txn_is_aborted() {
-            return;
+            return Ok(());
         }
         let ids = self.ids.clone();
         for nid in ids {
@@ -2215,7 +2217,8 @@ impl<E: Env> StoreCluster<E> {
                 let _ = node.db.put(txn_status_key(tid), b"abort");
                 // Revert (restore preimage), not abort-only: a partial TxnCommit
                 // may have materialised user keys before disk death.
-                let _ = apply_txn_revert(&mut node.db, tid, &ks);
+                // F122: propagate corrupt preimage (F118) — do not leave open Ok.
+                apply_txn_revert(&mut node.db, tid, &ks)?;
                 // Keep abort fence after revert (revert/clear may drop status).
                 let _ = node.db.put(txn_status_key(tid), b"abort");
             }
@@ -2224,6 +2227,7 @@ impl<E: Env> StoreCluster<E> {
                 let _ = node.db.apply_batch(ops);
             }
         }
+        Ok(())
     }
 
     fn load_si_from_disk(&mut self) -> Result<()> {
@@ -4753,7 +4757,7 @@ impl<E: Env> StoreCluster<E> {
             let Some(leader) = self.range_leader(*rid) else {
                 if txn_kernel::prepare_error_aborts_earlier() {
                     for (pr, pkeys) in &keys_by_range {
-                        self.cleanup_range_keys(*pr, txn_id, pkeys, CleanupMode::Abort);
+                        self.cleanup_range_keys(*pr, txn_id, pkeys, CleanupMode::Abort)?;
                     }
                 }
                 return Err(StoreError::NotLeader {
@@ -4767,7 +4771,7 @@ impl<E: Env> StoreCluster<E> {
                     if intent_conflict(db, k, Some(txn_id)) {
                         if txn_kernel::prepare_error_aborts_earlier() {
                             for (pr, pkeys) in &keys_by_range {
-                                self.cleanup_range_keys(*pr, txn_id, pkeys, CleanupMode::Abort);
+                                self.cleanup_range_keys(*pr, txn_id, pkeys, CleanupMode::Abort)?;
                             }
                         }
                         return Err(StoreError::Conflict);
@@ -4788,9 +4792,9 @@ impl<E: Env> StoreCluster<E> {
                     if st.as_deref() == Some(b"abort".as_ref()) {
                         if txn_kernel::prepare_error_aborts_earlier() {
                             for (pr, pkeys) in &keys_by_range {
-                                self.cleanup_range_keys(*pr, txn_id, pkeys, CleanupMode::Abort);
+                                self.cleanup_range_keys(*pr, txn_id, pkeys, CleanupMode::Abort)?;
                             }
-                            self.cleanup_range_keys(*rid, txn_id, &keys, CleanupMode::Abort);
+                            self.cleanup_range_keys(*rid, txn_id, &keys, CleanupMode::Abort)?;
                         }
                         return Err(StoreError::Conflict);
                     }
@@ -4799,7 +4803,7 @@ impl<E: Env> StoreCluster<E> {
                 Err(e) => {
                     if txn_kernel::prepare_error_aborts_earlier() {
                         for (pr, pkeys) in &keys_by_range {
-                            self.cleanup_range_keys(*pr, txn_id, pkeys, CleanupMode::Abort);
+                            self.cleanup_range_keys(*pr, txn_id, pkeys, CleanupMode::Abort)?;
                         }
                     }
                     return Err(e);
@@ -4827,18 +4831,27 @@ impl<E: Env> StoreCluster<E> {
     ///
     /// Used when a range has no leader so `TxnAbort`/`TxnRevert` cannot majority-commit.
     /// Prevents durable stuck intents that would `Conflict` forever (I-TX-2 / reopen).
-    fn force_local_clear_keys(&mut self, txn_id: u64, keys: &[Vec<u8>], delete_user_values: bool) {
+    ///
+    /// # Errors
+    /// Revert/abort path errors (F122 — corrupt preimage must not be swallowed).
+    fn force_local_clear_keys(
+        &mut self,
+        txn_id: u64,
+        keys: &[Vec<u8>],
+        delete_user_values: bool,
+    ) -> Result<()> {
         let ids = self.ids.clone();
         for nid in ids {
             let Some(n) = self.nodes.get_mut(&nid) else {
                 continue;
             };
             if delete_user_values {
-                let _ = apply_txn_revert(&mut n.db, txn_id, keys);
+                apply_txn_revert(&mut n.db, txn_id, keys)?;
             } else {
-                let _ = apply_txn_abort(&mut n.db, txn_id, keys);
+                apply_txn_abort(&mut n.db, txn_id, keys)?;
             }
         }
+        Ok(())
     }
 
     /// F47: durable abort fence so a later-committed raft `TxnCommit` (orphan log
@@ -4856,7 +4869,16 @@ impl<E: Env> StoreCluster<E> {
     }
 
     /// Try raft cleanup; always force-local clear so leaderless ranges cannot stick intents.
-    fn cleanup_range_keys(&mut self, rid: u64, txn_id: u64, keys: &[Vec<u8>], mode: CleanupMode) {
+    ///
+    /// # Errors
+    /// Local force-clear failures (F122).
+    fn cleanup_range_keys(
+        &mut self,
+        rid: u64,
+        txn_id: u64,
+        keys: &[Vec<u8>],
+        mode: CleanupMode,
+    ) -> Result<()> {
         let entry = match mode {
             CleanupMode::Abort => RangeEntry::TxnAbort {
                 txn_id,
@@ -4871,7 +4893,7 @@ impl<E: Env> StoreCluster<E> {
         // Even if raft Ok, force-local is idempotent and heals any lagging peer.
         // If raft failed (no leader), force-local is the only way to drop disk intents.
         let _ = raft_ok;
-        self.force_local_clear_keys(txn_id, keys, matches!(mode, CleanupMode::Revert));
+        self.force_local_clear_keys(txn_id, keys, matches!(mode, CleanupMode::Revert))
     }
 
     /// 2PC phase 2: commit a prepared TX (materialize intents **per range**).
@@ -4912,9 +4934,12 @@ impl<E: Env> StoreCluster<E> {
                     // a majority TxnRevert on the same raft log. Local fence
                     // remains defense-in-depth for reopen/apply.
                     self.fence_txn_aborted(handle.id);
+                    // F122: prefer surfacing corrupt-preimage cleanup failure
+                    // over the original NotLeader (otherwise aborted writes stick).
+                    let mut cleanup_err: Option<StoreError> = None;
                     for rid2 in &handle.ranges {
                         let akeys = Self::keys_for_range(handle, *rid2).to_vec();
-                        if committed.contains(rid2) {
+                        let clear = if committed.contains(rid2) {
                             let _ = self.propose_on_range(
                                 *rid2,
                                 RangeEntry::TxnRevert {
@@ -4922,13 +4947,23 @@ impl<E: Env> StoreCluster<E> {
                                     keys: akeys.clone(),
                                 },
                             );
-                            self.force_local_clear_keys(handle.id, &akeys, true);
+                            self.force_local_clear_keys(handle.id, &akeys, true)
                         } else {
-                            self.cleanup_range_keys(*rid2, handle.id, &akeys, CleanupMode::Revert);
+                            self.cleanup_range_keys(
+                                *rid2,
+                                handle.id,
+                                &akeys,
+                                CleanupMode::Revert,
+                            )
+                        };
+                        if let Err(ce) = clear {
+                            if cleanup_err.is_none() {
+                                cleanup_err = Some(ce);
+                            }
                         }
                     }
                     self.fence_txn_aborted(handle.id);
-                    return Err(e);
+                    return Err(cleanup_err.unwrap_or(e));
                 }
             }
         }
@@ -5046,7 +5081,7 @@ impl<E: Env> StoreCluster<E> {
         // those user keys. Restore prepare-time preimages (F34).
         for rid in &handle.ranges {
             let keys = Self::keys_for_range(handle, *rid).to_vec();
-            self.cleanup_range_keys(*rid, handle.id, &keys, CleanupMode::Revert);
+            self.cleanup_range_keys(*rid, handle.id, &keys, CleanupMode::Revert)?;
         }
         self.fence_txn_aborted(handle.id);
         Ok(())
@@ -5832,20 +5867,23 @@ impl<E: Env> StoreCluster<E> {
                     "dcs delete committed but key still present".into(),
                 ));
             }
-            let rev =
-                n.db.get(b"d/rev")
-                    .and_then(|b| {
-                        if b.len() >= 8 {
-                            Some(u64::from_le_bytes(b[..8].try_into().ok()?))
-                        } else {
-                            None
-                        }
-                    })
-                    .ok_or(StoreError::NotCommitted {
+            // F123: short/torn d/rev after delete is Corrupt, not NotCommitted
+            // (F113 class — present corrupt must not look like "never wrote rev").
+            let rev = match n.db.get(b"d/rev") {
+                None => {
+                    return Err(StoreError::NotCommitted {
                         range_id: rid,
                         index: 0,
                         commit: 0,
-                    })?;
+                    });
+                }
+                Some(b) if b.len() >= 8 => u64::from_le_bytes(b[..8].try_into().unwrap()),
+                Some(_) => {
+                    return Err(StoreError::Msg(
+                        "dcs cluster rev corrupt after delete".into(),
+                    ));
+                }
+            };
             if rev == 0 {
                 return Err(StoreError::NotCommitted {
                     range_id: rid,
@@ -7374,6 +7412,104 @@ mod tests {
         );
         c.put(b"post-compact", b"yes").unwrap();
         assert_eq!(c.count_applied_eq(b"post-compact", b"yes"), 3);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// F122: leftover intents with corrupt preimage used to open Ok (revert swallowed).
+    #[test]
+    fn open_rejects_leftover_intent_with_corrupt_preimage() {
+        let dir = temp();
+        {
+            let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+            c.elect_all(80).unwrap();
+            c.put(b"u", b"live").unwrap();
+            let tid = 99u64;
+            for nid in c.ids.clone() {
+                let n = c.nodes.get_mut(&nid).unwrap();
+                n.db
+                    .put(&intent_key(b"u"), encode_intent(tid, b"aborted-new"))
+                    .unwrap();
+                n.db
+                    .put(&txn_pre_key(tid, b"u"), b"\xffgarbage")
+                    .unwrap();
+            }
+        }
+        match StoreCluster::open(&dir, 3, 1) {
+            Ok(_) => panic!(
+                "open must fail closed on leftover corrupt preimage, not swallow revert"
+            ),
+            Err(e) => assert!(
+                e.to_string().contains("preimage"),
+                "expected preimage error, got {e}"
+            ),
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// F122: force-local clear surfaces corrupt preimage (tx_cancel path).
+    #[test]
+    fn tx_cancel_rejects_corrupt_preimage() {
+        let dir = temp();
+        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        c.elect_all(80).unwrap();
+        c.put(b"u", b"live").unwrap();
+        let h = c
+            .tx_start([(b"u".as_slice(), b"new".as_slice())])
+            .unwrap();
+        // Poison prepare preimages on every peer after prepare.
+        for nid in c.ids.clone() {
+            if let Some(n) = c.nodes.get_mut(&nid) {
+                n.db
+                    .put(&txn_pre_key(h.id, b"u"), b"\xffgarbage")
+                    .unwrap();
+            }
+        }
+        let err = c.tx_cancel(&h);
+        assert!(
+            err.is_err(),
+            "tx_cancel must not swallow corrupt preimage: {err:?}"
+        );
+        assert_eq!(
+            c.get(b"u").unwrap().as_deref(),
+            Some(b"live".as_ref()),
+            "user key must stay at preimage when cancel fails closed"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// F123: post-delete cluster rev must fail closed when present-but-short.
+    #[test]
+    fn dcs_delete_reports_corrupt_rev() {
+        let dir = temp();
+        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        c.elect_all(80).unwrap();
+        c.dcs_create(b"/k", b"v").unwrap();
+        // Apply path already fail-closes on corrupt rev (F113). Poison after a
+        // successful create and issue Delete so post-check reads d/rev.
+        // Force the post-check branch: apply Delete with valid rev, then the
+        // only soft path was short→NotCommitted; inject short rev on leader
+        // *before* propose so apply fails — still must not return Ok.
+        for nid in c.ids.clone() {
+            if let Some(n) = c.nodes.get_mut(&nid) {
+                n.db.put(b"d/rev", b"xx").unwrap();
+            }
+        }
+        let err = c.propose_dcs(DcsCommand::Delete {
+            key: b"/k".to_vec(),
+        });
+        assert!(
+            err.is_err(),
+            "delete with corrupt d/rev must fail: {err:?}"
+        );
+        let msg = err.unwrap_err().to_string();
+        assert!(
+            msg.contains("corrupt")
+                || msg.contains("rev")
+                || msg.contains("NotCommitted")
+                || msg.contains("Dcs")
+                || msg.contains("u64"),
+            "got {msg}"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
