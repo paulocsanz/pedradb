@@ -45,7 +45,8 @@ pub use fail_closed::{
 };
 pub use form_kernel::{
     form_decode, form_decode_as_is, form_plus_byte, form_plus_byte_as_is, from_hex,
-    plus_before_percent,
+    plus_before_percent, query_u64_conflict, query_u64_conflict_as_is, query_values_conflict,
+    query_values_conflict_as_is,
 };
 pub use path_kernel::{
     origin_form_path, origin_form_path_as_is, path_after_authority, strip_authority_for_routing,
@@ -377,30 +378,60 @@ impl DcsServer {
     }
 }
 
-/// Parse an optional query integer. Missing → `None`. Present but unparseable → error (F105).
-fn query_u64(path: &str, key: &str) -> Result<Option<u64>> {
-    match query_param(path, key) {
-        None => Ok(None),
-        Some(s) => match s.parse() {
-            Ok(n) => Ok(Some(n)),
-            Err(_) if !present_bad_int_is_error() => Ok(None),
-            Err(_) => Err(HttpError::App(format!("bad {key}"))),
-        },
-    }
-}
-
-fn query_param(path: &str, key: &str) -> Option<String> {
-    let q = path.split_once('?')?.1;
+/// All decoded values for `key` (F101/F106). Empty if the name is absent.
+fn query_decoded_values(path: &str, key: &str) -> Vec<String> {
+    let Some(q) = path.split_once('?').map(|(_, q)| q) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
     for part in q.split('&') {
-        if let Some((k, v)) = part.split_once('=') {
-            // F106: names were compared raw; `?%6Bey=` missed `key`.
-            if form_decode(k) == key.as_bytes() {
-                // F101: form-urlencoded — `+` is space *before* `%HH`.
-                return Some(String::from_utf8_lossy(&form_decode(v)).into_owned());
-            }
+        let Some((k, v)) = part.split_once('=') else {
+            continue;
+        };
+        // F106: names were compared raw; `?%6Bey=` missed `key`.
+        if form_decode(k) == key.as_bytes() {
+            // F101: form-urlencoded — `+` is space *before* `%HH`.
+            out.push(String::from_utf8_lossy(&form_decode(v)).into_owned());
         }
     }
-    None
+    out
+}
+
+/// Parse an optional query integer. Missing → `None`. Present but unparseable → error (F105).
+/// F155: distinct repeats (`rev=1&rev=0`) used to take the first and CAS.
+fn query_u64(path: &str, key: &str) -> Result<Option<u64>> {
+    let mut seen: Option<u64> = None;
+    for s in query_decoded_values(path, key) {
+        let n = match s.parse() {
+            Ok(n) => n,
+            Err(_) if !present_bad_int_is_error() => continue,
+            Err(_) => return Err(HttpError::App(format!("bad {key}"))),
+        };
+        if let Some(prev) = seen {
+            if query_u64_conflict(prev, n) {
+                return Err(HttpError::App(format!("conflicting {key}")));
+            }
+        }
+        seen = Some(n);
+    }
+    Ok(seen)
+}
+
+/// F155: string query name with two distinct values (`key=a&key=b`) is 400.
+fn query_param_unique(path: &str, key: &str) -> Result<Option<String>> {
+    let vs = query_decoded_values(path, key);
+    if vs.is_empty() {
+        return Ok(None);
+    }
+    let refs: Vec<&str> = vs.iter().map(String::as_str).collect();
+    if query_values_conflict(&refs) {
+        return Err(HttpError::App(format!("conflicting {key}")));
+    }
+    Ok(Some(vs[0].clone()))
+}
+
+fn query_or_default(path: &str, key: &str, default: &str) -> Result<String> {
+    Ok(query_param_unique(path, key)?.unwrap_or_else(|| default.to_string()))
 }
 
 /// Origin-form path for routing (strip query; accept absolute / network-path forms).
@@ -499,8 +530,20 @@ fn handle_dcs(stream: &mut TcpStream, dcs: &Arc<Mutex<Dcs>>, auth: &Option<Strin
         return Ok(());
     }
     if po == "/dcs/leader" && method == "POST" {
-        let key = query_param(&path, "key").unwrap_or_else(|| "/leader".into());
-        let holder = query_param(&path, "holder").unwrap_or_else(|| "node".into());
+        let key = match query_or_default(&path, "key", "/leader") {
+            Ok(k) => k,
+            Err(e) => {
+                write_resp(stream, 400, "Bad Request", e.to_string().as_bytes())?;
+                return Ok(());
+            }
+        };
+        let holder = match query_or_default(&path, "holder", "node") {
+            Ok(h) => h,
+            Err(e) => {
+                write_resp(stream, 400, "Bad Request", e.to_string().as_bytes())?;
+                return Ok(());
+            }
+        };
         let ttl_ms = match query_u64(&path, "ttl_ms") {
             Ok(n) => n.unwrap_or(30_000),
             Err(e) => {
@@ -527,8 +570,20 @@ fn handle_dcs(stream: &mut TcpStream, dcs: &Arc<Mutex<Dcs>>, auth: &Option<Strin
         return Ok(());
     }
     if po == "/dcs/renew" && method == "POST" {
-        let key = query_param(&path, "key").unwrap_or_else(|| "/leader".into());
-        let holder = query_param(&path, "holder").unwrap_or_else(|| "node".into());
+        let key = match query_or_default(&path, "key", "/leader") {
+            Ok(k) => k,
+            Err(e) => {
+                write_resp(stream, 400, "Bad Request", e.to_string().as_bytes())?;
+                return Ok(());
+            }
+        };
+        let holder = match query_or_default(&path, "holder", "node") {
+            Ok(h) => h,
+            Err(e) => {
+                write_resp(stream, 400, "Bad Request", e.to_string().as_bytes())?;
+                return Ok(());
+            }
+        };
         let lease = match query_u64(&path, "lease") {
             Ok(n) => n.unwrap_or(0),
             Err(e) => {
@@ -822,6 +877,40 @@ mod tests {
         );
         let (c3, b3) = http_exchange(addr, "POST", "/dcs/leader?key=lock&holder=n1", b"").unwrap();
         assert_eq!(c3, 200, "omitted ttl_ms still defaults, {b3:?}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// F155: first `rev` used to win (`?rev=1&rev=0` CAS'd at 1 and overwrote).
+    /// Distinct repeated query ints must fail closed (same class as F88 CL).
+    #[test]
+    fn dcs_http_conflicting_rev_does_not_cas() {
+        let dir = temp("dcs-rev-conflict");
+        let addr = bind_ephemeral();
+        let srv = DcsServer::open(&dir).unwrap();
+        thread::spawn(move || {
+            let _ = srv.serve(addr);
+        });
+        thread::sleep(Duration::from_millis(100));
+        let (c0, b0) = http_exchange(addr, "PUT", "/dcs/kv/k?rev=0", b"v1").unwrap();
+        assert_eq!(c0, 200, "create, {b0:?}");
+        let (c1, b1) = http_exchange(addr, "PUT", "/dcs/kv/k?rev=1&rev=0", b"stolen").unwrap();
+        assert_eq!(
+            c1, 400,
+            "conflicting rev must 400, not CAS, got {c1} {b1:?}"
+        );
+        let (c2, body) = http_exchange(addr, "GET", "/dcs/kv/k", b"").unwrap();
+        assert_eq!(c2, 200, "GET after conflicting PUT, {body:?}");
+        let text = String::from_utf8_lossy(&body);
+        assert!(
+            text.contains("v1"),
+            "conflicting rev must not overwrite, body={text:?}"
+        );
+        assert!(
+            !text.contains("stolen"),
+            "stolen value must not land, body={text:?}"
+        );
+        let (c3, b3) = http_exchange(addr, "PUT", "/dcs/kv/k?rev=1&rev=1", b"v2").unwrap();
+        assert_eq!(c3, 200, "identical repeated rev is ok, {b3:?}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

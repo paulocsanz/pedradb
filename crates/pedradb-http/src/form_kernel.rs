@@ -65,6 +65,33 @@ pub fn form_decode(s: &str) -> Vec<u8> {
     out
 }
 
+/// F155: two decoded query values for the same name disagree.
+#[must_use]
+pub fn query_values_conflict(values: &[&str]) -> bool {
+    match values {
+        [] | [_] => false,
+        [first, rest @ ..] => rest.iter().any(|v| *v != *first),
+    }
+}
+
+/// AS-IS F155: first value always wins; never a conflict.
+#[must_use]
+pub fn query_values_conflict_as_is(_values: &[&str]) -> bool {
+    false
+}
+
+/// F155: parsed query ints disagree (`rev=1` then `rev=0`).
+#[must_use]
+pub fn query_u64_conflict(a: u64, b: u64) -> bool {
+    a != b
+}
+
+/// AS-IS F88-class: last/first wins, never reject.
+#[must_use]
+pub fn query_u64_conflict_as_is(_a: u64, _b: u64) -> bool {
+    false
+}
+
 /// AS-IS F101: `%HH` only (no `+` → space).
 #[must_use]
 pub fn form_decode_as_is(s: &str) -> Vec<u8> {
@@ -111,5 +138,17 @@ mod tests {
                 assert_eq!(form_plus_byte(c), form_plus_byte_as_is(c));
             }
         }
+    }
+
+    #[test]
+    fn f155_query_conflict() {
+        assert!(!query_values_conflict(&[]));
+        assert!(!query_values_conflict(&["1"]));
+        assert!(!query_values_conflict(&["1", "1"]));
+        assert!(query_values_conflict(&["1", "0"]));
+        assert!(!query_values_conflict_as_is(&["1", "0"]));
+        assert!(query_u64_conflict(1, 0));
+        assert!(!query_u64_conflict(1, 1));
+        assert!(!query_u64_conflict_as_is(1, 0));
     }
 }
