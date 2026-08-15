@@ -3,7 +3,7 @@
 use pedradb_core::{Db, OpenOptions};
 use pedradb_fold::{
     caixote_host_filter, cursor_expired, export_fold, fold_get_local, follow_prefix,
-    follow_store_prefix, import_fold, resume_window_ok, resync_expired, ship_pull,
+    follow_store_prefix, import_fold, last_per_key, resume_window_ok, resync_expired, ship_pull,
     state_sync_then_tail, watch_applied, watch_applied_prefix, FoldCursor, FoldRole, FoldStore,
     FoldUpdate, IntentObservedDelta, PedraFold, PrefixSet, SeqSyncState, WatchApplied,
 };
@@ -516,5 +516,108 @@ fn fold_range_includes_ff_suffix_keys() {
         !keys.contains(&outside.as_slice()),
         "must not leak sibling prefix: {keys:?}"
     );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// User keys that start with `0x00` are valid (FDB tuples / packed keys).
+/// `range_user` skipped every `\0…` key as fold meta, so get saw them and
+/// prefix range / resync did not.
+#[test]
+fn fold_range_includes_nul_prefixed_user_keys() {
+    let dir = temp();
+    let (_c, mut fold) = PedraFold::open(&dir.join("fold")).unwrap();
+    let nul_key = {
+        let mut k = vec![0x00];
+        k.extend_from_slice(b"user");
+        k
+    };
+    fold.apply(
+        &[FoldUpdate::Put {
+            key: nul_key.clone(),
+            value: b"v".to_vec(),
+            seq: 1,
+        }],
+        FoldCursor(1),
+    )
+    .unwrap();
+    assert_eq!(
+        fold.get(&nul_key).unwrap().as_deref(),
+        Some(b"v".as_ref()),
+        "point get must see 0x00-prefixed user key"
+    );
+    let rows = fold.range(&[0x00]).unwrap();
+    assert!(
+        rows.iter().any(|(k, v)| k == &nul_key && v == b"v"),
+        "0x00-prefixed user key missing from range (skipped as meta): {rows:?}"
+    );
+    // Fold meta must stay hidden.
+    assert!(
+        !rows.iter().any(|(k, _)| k == b"\0fold/cursor" || k.starts_with(b"\0fold/keyset/")),
+        "range leaked fold meta: {rows:?}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// CHANGELOG follow / last_per_key used raw prefix match, so `\0fold/cursor`
+/// and `\0fold/keyset/…` leaked into state-sync when the prefix was `0x00`.
+#[test]
+fn fold_changelog_sync_skips_fold_meta() {
+    let dir = temp();
+    let (_c, mut fold) = PedraFold::open(&dir.join("fold")).unwrap();
+    let nul_key = {
+        let mut k = vec![0x00];
+        k.extend_from_slice(b"user");
+        k
+    };
+    fold.apply(
+        &[FoldUpdate::Put {
+            key: nul_key.clone(),
+            value: b"v".to_vec(),
+            seq: 1,
+        }],
+        FoldCursor(1),
+    )
+    .unwrap();
+    let prefs = PrefixSet::one([0x00]);
+    let sync = last_per_key(fold.db_mut(), &prefs);
+    let keys: Vec<&[u8]> = sync.iter().map(FoldUpdate::key).collect();
+    assert!(
+        keys.iter().any(|k| *k == nul_key.as_slice()),
+        "state-sync must include 0x00 user key: {keys:?}"
+    );
+    assert!(
+        !keys.iter().any(|k| k.starts_with(b"\0fold/")),
+        "last_per_key leaked fold meta under 0x00 prefix: {keys:?}"
+    );
+    let tail = follow_prefix(fold.db_mut(), &prefs, FoldCursor(0));
+    assert!(
+        !tail.iter().any(|u| u.key().starts_with(b"\0fold/")),
+        "follow_prefix leaked fold meta: {tail:?}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// F69: applying a user key under `\0fold/` must fail (would clobber cursor).
+#[test]
+fn fold_rejects_reserved_meta_user_keys() {
+    let dir = temp();
+    let (_c, mut fold) = PedraFold::open(&dir.join("fold")).unwrap();
+    let err = fold
+        .apply(
+            &[FoldUpdate::Put {
+                key: b"\0fold/cursor".to_vec(),
+                value: b"evil".to_vec(),
+                seq: 1,
+            }],
+            FoldCursor(1),
+        )
+        .expect_err("must reject reserved fold meta key");
+    let msg = format!("{err}");
+    assert!(
+        msg.contains("reserved") || msg.contains("fold meta"),
+        "unexpected err: {msg}"
+    );
+    // Cursor must still be 0 / not corrupted by evil put.
+    assert_eq!(fold.cursor().0, 0);
     let _ = std::fs::remove_dir_all(&dir);
 }

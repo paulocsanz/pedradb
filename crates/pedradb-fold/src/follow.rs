@@ -43,6 +43,12 @@ pub fn in_prefixes(key: &[u8], set: &PrefixSet) -> bool {
     set.prefixes.iter().any(|p| key.starts_with(p))
 }
 
+/// Fold-internal meta (`\0fold/cursor`, `\0fold/keyset/…`). Not user data (F67/F68).
+#[must_use]
+pub(crate) fn is_fold_meta_key(key: &[u8]) -> bool {
+    key.starts_with(b"\0fold/")
+}
+
 /// CHANGELOG tail after `from`, filtered to `prefixes`.
 #[must_use]
 pub fn follow_prefix<E: Env>(
@@ -53,7 +59,11 @@ pub fn follow_prefix<E: Env>(
     let last = db.last_sequence();
     db.changes_after(from.0)
         .into_iter()
-        .filter(|e| e.sequence <= last && in_prefixes(e.key.as_ref(), prefixes))
+        .filter(|e| {
+            e.sequence <= last
+                && in_prefixes(e.key.as_ref(), prefixes)
+                && !is_fold_meta_key(e.key.as_ref())
+        })
         .map(entry_to_update)
         .collect()
 }
@@ -68,7 +78,7 @@ pub fn follow_store_prefix<E: Env>(
     cluster
         .changelog_after(from.0)
         .into_iter()
-        .filter(|e| in_prefixes(e.key.as_ref(), prefixes))
+        .filter(|e| in_prefixes(e.key.as_ref(), prefixes) && !is_fold_meta_key(e.key.as_ref()))
         .map(entry_to_update)
         .collect()
 }

@@ -84,6 +84,7 @@ pub fn watch_applied_prefix(
         .changes_after(consumer.pin)
         .into_iter()
         .filter(|e| e.sequence <= last)
+        .filter(|e| !crate::follow::is_fold_meta_key(e.key.as_ref()))
         .filter(|e| match prefixes {
             None => true,
             Some(p) => crate::follow::in_prefixes(e.key.as_ref(), p),

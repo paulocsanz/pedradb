@@ -5257,12 +5257,15 @@ impl<E: Env> StoreCluster<E> {
             })
     }
 
-    /// Get from a local node (prefer single-host local id; else first member).
+    /// Get LocalApplied from the freshest local PedraDB (F68).
     ///
-    /// Multi-host: reads the only local PedraDB. LocalApplied semantics.
+    /// Multi-node in-process: prefer [`Self::best_changelog_reader`] so a lagging
+    /// `ids[0]` is not the default read source (same class as F55/F62). Multi-host
+    /// single local: that node only.
     pub fn get(&self, key: &[u8]) -> Result<Option<Bytes>> {
         let id = self
-            .local_node_id()
+            .best_changelog_reader()
+            .or_else(|| self.local_node_id())
             .or_else(|| self.ids.first().copied())
             .ok_or_else(|| StoreError::Msg("empty".into()))?;
         self.get_on(id, key)

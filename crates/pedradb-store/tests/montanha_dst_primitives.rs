@@ -320,6 +320,12 @@ fn changelog_after_skips_lagging_first_node() {
         ranged.iter().any(|(k, v)| k.as_slice() == b"/host/h1/new" && v.as_slice() == b"v1"),
         "get_range/keys_in_range_at used lagging node 1, missing new key: {ranged:?}"
     );
+    // F68: default get() must not read lagging ids[0] either.
+    assert_eq!(
+        c.get(b"/host/h1/new").unwrap().as_deref(),
+        Some(b"v1".as_ref()),
+        "get() used lagging node 1, missing new key"
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }
 

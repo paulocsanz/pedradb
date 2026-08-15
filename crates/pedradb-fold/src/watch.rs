@@ -26,7 +26,10 @@ pub fn last_per_key<E: Env>(db: &Db<E>, prefixes: &PrefixSet) -> Vec<FoldUpdate>
     let last = db.last_sequence();
     let mut map: BTreeMap<Vec<u8>, FoldUpdate> = BTreeMap::new();
     for e in db.changes_after(0) {
-        if e.sequence > last || !in_prefixes(e.key.as_ref(), prefixes) {
+        if e.sequence > last
+            || !in_prefixes(e.key.as_ref(), prefixes)
+            || crate::follow::is_fold_meta_key(e.key.as_ref())
+        {
             continue;
         }
         let u = crate::follow::entry_to_update(e);
@@ -86,7 +89,9 @@ pub fn resync_expired<E: Env>(
 ) -> Result<Vec<FoldUpdate>> {
     let mut live: BTreeSet<Vec<u8>> = BTreeSet::new();
     for e in db.changes_after(0) {
-        if !in_prefixes(e.key.as_ref(), prefixes) {
+        if !in_prefixes(e.key.as_ref(), prefixes)
+            || crate::follow::is_fold_meta_key(e.key.as_ref())
+        {
             continue;
         }
         match e.kind {

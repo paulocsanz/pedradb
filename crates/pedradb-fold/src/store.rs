@@ -181,6 +181,12 @@ fn apply_inner<E: Env>(
     for u in batch {
         match u {
             FoldUpdate::Put { key, value, .. } => {
+                // F69: never accept user keys under `\0fold/` (would clobber cursor/keyset).
+                if crate::follow::is_fold_meta_key(key) {
+                    return Err(FoldError::TransientApply(
+                        "user key reserved for fold meta (\\0fold/)".into(),
+                    ));
+                }
                 ops.push(BatchOp::put(keyset_key(key), Bytes::new()));
                 if evict {
                     ops.push(BatchOp::put(key.as_slice(), Bytes::new()));
@@ -189,6 +195,11 @@ fn apply_inner<E: Env>(
                 }
             }
             FoldUpdate::Delete { key, .. } => {
+                if crate::follow::is_fold_meta_key(key) {
+                    return Err(FoldError::TransientApply(
+                        "user key reserved for fold meta (\\0fold/)".into(),
+                    ));
+                }
                 ops.push(BatchOp::delete(key.as_slice()));
                 ops.push(BatchOp::delete(keyset_key(key)));
             }
@@ -240,7 +251,9 @@ impl<E: Env> PedraFold<E> {
         );
         let mut out = Vec::new();
         for (k, v) in rows {
-            if k.starts_with(b"\0") {
+            // Only fold meta (`\0fold/cursor`, `\0fold/keyset/…`). User keys
+            // may start with 0x00 (FDB tuples) — F67.
+            if crate::follow::is_fold_meta_key(&k) {
                 continue;
             }
             out.push((k.to_vec(), v.to_vec()));
@@ -276,3 +289,5 @@ fn keyset_key(user: &[u8]) -> Vec<u8> {
     k.extend_from_slice(user);
     k
 }
+
+

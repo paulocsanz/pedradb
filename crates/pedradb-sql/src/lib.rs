@@ -15,7 +15,7 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
-use pedradb_core::{prefix_exclusive_end as prefix_successor, Db, OpenOptions, Result as CoreResult};
+use pedradb_core::{Db, OpenOptions, Result as CoreResult};
 use thiserror::Error;
 
 /// SQL execution errors.
@@ -103,24 +103,30 @@ impl SqlEngine {
         Err(SqlError::Parse(format!("unsupported: {s}")))
     }
 
+    fn push_len(buf: &mut Vec<u8>, part: &[u8]) {
+        let n = u32::try_from(part.len()).expect("len fits u32");
+        buf.extend_from_slice(&n.to_be_bytes());
+        buf.extend_from_slice(part);
+    }
+
     fn table_marker(table: &str) -> Vec<u8> {
-        let mut k = b"sql/table/".to_vec();
-        k.extend_from_slice(table.as_bytes());
+        // F71: not `sql/table/{name}` (prefix of longer names).
+        let mut k = b"sql/t".to_vec();
+        Self::push_len(&mut k, table.as_bytes());
         k
     }
 
     fn row_key(table: &str, user: &[u8]) -> Vec<u8> {
-        let mut k = b"sql/row/".to_vec();
-        k.extend_from_slice(table.as_bytes());
-        k.push(b'/');
-        k.extend_from_slice(user);
+        // F71: not `sql/row/{table}/{user}` slash join.
+        let mut k = b"sql/r".to_vec();
+        Self::push_len(&mut k, table.as_bytes());
+        Self::push_len(&mut k, user);
         k
     }
 
     fn row_prefix(table: &str) -> Vec<u8> {
-        let mut k = b"sql/row/".to_vec();
-        k.extend_from_slice(table.as_bytes());
-        k.push(b'/');
+        let mut k = b"sql/r".to_vec();
+        Self::push_len(&mut k, table.as_bytes());
         k
     }
 
@@ -223,21 +229,31 @@ impl SqlEngine {
     }
 
     fn scan_table(&self, prefix: &[u8]) -> Vec<Row> {
-        let end = prefix_successor(prefix);
+        // Exclusive end: after length-prefixed table component, next byte 0x00..0xff
+        // of user-len field. Using prefix_successor on the table prefix is wrong for
+        // length-prefix encoding — children are prefix||u32be(user)||user, so end is
+        // table_prefix with last length nibble... Use unbounded end after a max
+        // sentinel: table_prefix + 0xff,0xff,0xff,0xff (len=u32::MAX is impossible).
+        let mut end = prefix.to_vec();
+        end.extend_from_slice(&u32::MAX.to_be_bytes());
         let pairs = self.db.range(
             std::ops::Bound::Included(prefix),
-            match end.as_ref() {
-                Some(e) => std::ops::Bound::Excluded(e.as_slice()),
-                None => std::ops::Bound::Unbounded,
-            },
+            std::ops::Bound::Excluded(end.as_slice()),
         );
         let plen = prefix.len();
         pairs
             .into_iter()
             .filter_map(|(k, v)| {
-                let user = k.get(plen..)?.to_vec();
+                let rest = k.get(plen..)?;
+                if rest.len() < 4 {
+                    return None;
+                }
+                let n = u32::from_be_bytes(rest[0..4].try_into().ok()?) as usize;
+                if rest.len() != 4 + n {
+                    return None;
+                }
                 Some(Row {
-                    key: user,
+                    key: rest[4..].to_vec(),
                     value: v.to_vec(),
                 })
             })

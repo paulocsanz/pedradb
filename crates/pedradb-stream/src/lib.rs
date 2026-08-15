@@ -3,16 +3,22 @@
 //! JetStream-class **need**: ordered durable messages, consumer offset, retain
 //! by subject. Not NATS protocol — library API only.
 //!
-//! Layout:
-//! - `s/{stream}/meta` → next seq u64
-//! - `s/{stream}/m/{seq:020}` → payload
-//! - `s/{stream}/c/{consumer}` → last delivered seq u64
+//! Layout (F70 — length-prefixed stream name; not slash-joined):
+//! - `s/` + len(name) + name + `\0M` → next seq u64
+//! - `s/` + len(name) + name + `\0m` + `{seq:020}` → payload
+//! - `s/` + len(name) + name + `\0c` + len(consumer) + consumer → last acked seq
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
 use pedradb_core::{Db, OpenOptions, Result as CoreResult};
 use thiserror::Error;
+
+fn push_len_pref(buf: &mut Vec<u8>, part: &[u8]) {
+    let n = u32::try_from(part.len()).expect("component len fits u32");
+    buf.extend_from_slice(&n.to_be_bytes());
+    buf.extend_from_slice(part);
+}
 
 /// Stream errors.
 #[derive(Debug, Error)]
@@ -49,7 +55,7 @@ impl Stream {
     /// # Errors
     /// PedraDB open / meta init.
     pub fn open(path: impl AsRef<std::path::Path>, name: &str) -> Result<Self> {
-        if name.is_empty() || name.contains('/') {
+        if name.is_empty() {
             return Err(StreamError::Msg("bad stream name".into()));
         }
         let db = Db::open_with(
@@ -73,16 +79,33 @@ impl Stream {
         Ok(s)
     }
 
+    fn stream_ns(&self) -> Vec<u8> {
+        let mut k = b"s/".to_vec();
+        push_len_pref(&mut k, self.name.as_bytes());
+        k
+    }
+
     fn meta_key(&self) -> Vec<u8> {
-        format!("s/{}/meta", self.name).into_bytes()
+        let mut k = self.stream_ns();
+        k.push(0x00);
+        k.push(b'M');
+        k
     }
 
     fn msg_key(&self, seq: u64) -> Vec<u8> {
-        format!("s/{}/m/{seq:020}", self.name).into_bytes()
+        let mut k = self.stream_ns();
+        k.push(0x00);
+        k.push(b'm');
+        k.extend_from_slice(format!("{seq:020}").as_bytes());
+        k
     }
 
     fn consumer_key(&self, consumer: &str) -> Vec<u8> {
-        format!("s/{}/c/{consumer}", self.name).into_bytes()
+        let mut k = self.stream_ns();
+        k.push(0x00);
+        k.push(b'c');
+        push_len_pref(&mut k, consumer.as_bytes());
+        k
     }
 
     /// Last published sequence (0 if empty).
@@ -126,7 +149,7 @@ impl Stream {
     }
 
     fn load_consumer_seq(&self, consumer: &str) -> Result<u64> {
-        if consumer.is_empty() || consumer.contains('/') {
+        if consumer.is_empty() {
             return Err(StreamError::Msg("bad consumer name".into()));
         }
         Ok(self
@@ -273,4 +296,29 @@ mod tests {
         s.close().unwrap();
         let _ = std::fs::remove_dir_all(&dir);
     }
+    /// F70: slash names and prefix stream names must not share keys.
+    #[test]
+    fn stream_names_with_slash_are_isolated() {
+        let dir = temp();
+        {
+            let mut a = Stream::open(&dir, "a").unwrap();
+            a.publish(b"only-a").unwrap();
+            a.close().unwrap();
+        }
+        {
+            let mut ab = Stream::open(&dir, "a/b").unwrap();
+            ab.publish(b"child").unwrap();
+            assert_eq!(ab.last_seq(), 1);
+            assert_eq!(ab.get(1).unwrap().data, b"child");
+            ab.close().unwrap();
+        }
+        {
+            let a = Stream::open(&dir, "a").unwrap();
+            assert_eq!(a.last_seq(), 1, "stream a must not see a/b publishes");
+            assert_eq!(a.get(1).unwrap().data, b"only-a");
+            a.close().unwrap();
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
 }
