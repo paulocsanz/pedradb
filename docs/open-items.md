@@ -142,7 +142,10 @@ PedraDB do?
   before admit (no error); counter `write_pressure_count`. Typically n < hard.
 - **Mem (c):** `set_write_stall_mem_bytes(Some(b))` → [`CoreError::WriteStallMem`].
 - **Hard drain:** `set_write_stall_drain(true)` one drain before hard refuse.
-Default for all: **off**. Stats in `gc_line`. ConcurrentDb mirrors.
+Default for all: **off**. Convenience:
+`enable_write_backpressure_defaults()` → pressure @ `L0_COMPACTION_TRIGGER`,
+hard stall @ 2×, drain on. Stats: `l0_files` + stall/pressure in `gc_line`.
+ConcurrentDb mirrors.
 
 **Options (historical):**
 - **(a) Explicit stall:** block new writes until L0 is drained. Honest but harsh.

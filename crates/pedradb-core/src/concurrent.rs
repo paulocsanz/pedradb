@@ -303,6 +303,11 @@ impl<E: Env> ConcurrentDb<E> {
         self.inner.read().write_pressure_count()
     }
 
+    /// Pebble-shaped L0 backpressure defaults (see [`Db::enable_write_backpressure_defaults`]).
+    pub fn enable_write_backpressure_defaults(&self) {
+        self.inner.write().enable_write_backpressure_defaults();
+    }
+
     /// Blob rotate cap (see [`Db::set_vlog_rotate_bytes`]).
     pub fn set_vlog_rotate_bytes(&self, bytes: Option<u64>) {
         self.inner.write().set_vlog_rotate_bytes(bytes);

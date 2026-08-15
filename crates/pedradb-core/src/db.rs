@@ -181,6 +181,8 @@ pub struct DbStats {
     pub write_stall_mem_bytes: u64,
     /// Configured L0 soft-pressure threshold (`0` = disabled).
     pub write_pressure_l0: u64,
+    /// Current L0 SST file count (admission / stall observability).
+    pub l0_files: u64,
 }
 
 /// Per-blob GC stats for operator / auto-pick (RFC-0029 P1.1).
@@ -235,12 +237,13 @@ impl DbStats {
     #[must_use]
     pub fn gc_line(&self) -> String {
         format!(
-            "earliest_readable={} pins={} auto_reclaim={} compact={} auto_compact_fail={} write_stall={} pressure={} (l0_limit={} mem_limit={} pressure_l0={})",
+            "earliest_readable={} pins={} auto_reclaim={} compact={} auto_compact_fail={} l0={} write_stall={} pressure={} (l0_limit={} mem_limit={} pressure_l0={})",
             self.earliest_readable_seq,
             self.snapshot_pin_count,
             self.auto_reclaim,
             self.compact_count,
             self.auto_compact_failures,
+            self.l0_files,
             self.write_stall_count,
             self.write_pressure_count,
             self.write_stall_l0,
@@ -1096,6 +1099,18 @@ impl<E: Env> Db<E> {
         self.write_pressure_count
     }
 
+    /// Enable Pebble-shaped L0 backpressure defaults (open-items §2.3).
+    ///
+    /// - Soft pressure at [`L0_COMPACTION_TRIGGER`] (one drain, still admit)
+    /// - Hard stall at `2 × L0_COMPACTION_TRIGGER` with drain before refuse
+    ///
+    /// Mem stall remains off (configure separately). No artificial sleep.
+    pub fn enable_write_backpressure_defaults(&mut self) {
+        self.set_write_pressure_l0(Some(L0_COMPACTION_TRIGGER));
+        self.set_write_stall_l0(Some(L0_COMPACTION_TRIGGER.saturating_mul(2)));
+        self.set_write_stall_drain(true);
+    }
+
     /// One flush + leveled compact (shared by pressure and stall-drain).
     fn drain_l0_once(&mut self) {
         if !self.mem.is_empty() || self.imm.is_some() {
@@ -1496,6 +1511,7 @@ impl<E: Env> Db<E> {
             write_stall_l0: self.write_stall_l0.unwrap_or(0) as u64,
             write_stall_mem_bytes: self.write_stall_mem_bytes.unwrap_or(0) as u64,
             write_pressure_l0: self.write_pressure_l0.unwrap_or(0) as u64,
+            l0_files: self.level_file_count(0) as u64,
         }
     }
 
@@ -5511,6 +5527,29 @@ mod tests {
         assert_eq!(db.get(b"ok").as_deref(), Some(b"1".as_ref()));
         assert_eq!(db.write_stall_count(), stalls_before);
         assert!(db.sst_count() >= 1, "drain should have flushed");
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// enable_write_backpressure_defaults wires pressure + hard stall + drain.
+    #[test]
+    fn write_backpressure_defaults_preset() {
+        let dir = temp_dir();
+        let mut db = Db::open(&dir).unwrap();
+        db.enable_write_backpressure_defaults();
+        assert_eq!(db.write_pressure_l0(), Some(L0_COMPACTION_TRIGGER));
+        assert_eq!(
+            db.write_stall_l0(),
+            Some(L0_COMPACTION_TRIGGER.saturating_mul(2))
+        );
+        assert!(db.write_stall_drain());
+        // Empty DB admits writes under defaults.
+        db.put(b"k", b"v").unwrap();
+        assert_eq!(db.get(b"k").as_deref(), Some(b"v".as_ref()));
+        assert_eq!(db.stats().l0_files, 0);
+        db.flush().unwrap();
+        assert_eq!(db.stats().l0_files, 1);
+        assert!(db.stats().gc_line().contains("l0=1"));
         db.close().unwrap();
         let _ = fs::remove_dir_all(&dir);
     }
