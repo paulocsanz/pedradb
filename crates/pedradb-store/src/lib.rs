@@ -5175,28 +5175,28 @@ impl<E: Env> StoreCluster<E> {
                 if is_reserved_store_key(k) {
                     continue;
                 }
-                // Missing pre → absent floor. Present corrupt → Err (F139),
+                // Missing pre → absent floor. Present corrupt → Err (F140),
                 // never unwrap_or(None) as a fake gen-0 tombstone.
                 let pre = match n.db.get(&txn_pre_key(handle.id, k)) {
                     None => None,
                     Some(b) => decode_preimage(b.as_ref())?,
                 };
-                let val =
-                    n.db.get(k)
-                        .map(|b| b.to_vec())
-                        .or_else(|| n.db.get(&txn_pair_key(handle.id, k)).map(|b| b.to_vec()))
-                        .or_else(|| {
-                            n.db.get(&intent_key(k)).and_then(|raw| {
-                                decode_intent(&raw).ok().and_then(|(oid, v)| {
-                                    if oid == handle.id {
-                                        Some(v.to_vec())
-                                    } else {
-                                        None
-                                    }
-                                })
-                            })
-                        })
-                        .unwrap_or_default();
+                // F141: short/corrupt intent used as val fallback must not become
+                // empty (SI delete tombstone) via decode_intent.ok().
+                let val = if let Some(b) = n.db.get(k) {
+                    b.to_vec()
+                } else if let Some(b) = n.db.get(&txn_pair_key(handle.id, k)) {
+                    b.to_vec()
+                } else if let Some(raw) = n.db.get(&intent_key(k)) {
+                    let (oid, v) = decode_intent(&raw)?;
+                    if oid == handle.id {
+                        v.to_vec()
+                    } else {
+                        Vec::new()
+                    }
+                } else {
+                    Vec::new()
+                };
                 items.push((k.clone(), val, pre));
             }
         }
@@ -9609,7 +9609,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// F139: garbage 2PC preimage was treated as absent SI floor (unwrap_or None).
+    /// F140: garbage 2PC preimage was treated as absent SI floor (unwrap_or None).
     #[test]
     fn note_tx_commit_rejects_corrupt_preimage_floor() {
         let dir = temp();
@@ -9635,6 +9635,32 @@ mod tests {
         assert!(
             err.is_err(),
             "corrupt preimage must fail SI note, not stamp absent floor: {err:?}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// F141: short intent as val fallback became empty → SI delete tombstone.
+    #[test]
+    fn note_tx_commit_rejects_short_intent_value_fallback() {
+        let dir = temp();
+        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        c.elect_all(80).unwrap();
+        let h = c
+            .tx_start([(b"k".as_slice(), b"new".as_slice())])
+            .unwrap();
+        // Reader sees no live key / pair, only a short intent → old code
+        // decoded as None and stamped empty (SI delete).
+        for nid in c.ids.clone() {
+            if let Some(n) = c.nodes.get_mut(&nid) {
+                n.db.put(intent_key(b"k"), b"xxxx").unwrap();
+                n.db.delete(b"k").unwrap();
+                n.db.delete(&txn_pair_key(h.id, b"k")).unwrap();
+            }
+        }
+        let err = c.note_tx_commit(&h, c.read_version().max(1));
+        assert!(
+            err.is_err(),
+            "short intent val fallback must fail closed, not SI-delete: {err:?}"
         );
         let _ = std::fs::remove_dir_all(&dir);
     }
