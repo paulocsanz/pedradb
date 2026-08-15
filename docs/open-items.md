@@ -139,7 +139,8 @@ PedraDB do?
 **Answer (2026-08-15):** **(a) honest L0 stall**, opt-in.
 `Db::set_write_stall_l0(Some(n))` makes put/apply_batch/group_commit/TX·OCC
 commit fail with [`CoreError::WriteStall`] when L0 file count ≥ n (no sleep).
-Default **off**. Stats: `write_stall_count` / `gc_line`. ConcurrentDb setter
+Default **off**. Optional `set_write_stall_drain(true)`: one flush+compact
+attempt before refusing. Stats: `write_stall_count` / `gc_line`. ConcurrentDb
 mirrors. Soft slowdown (b) and memtable growth bound (c) still open.
 
 **Options (historical):**

@@ -258,6 +258,23 @@ impl<E: Env> ConcurrentDb<E> {
         self.inner.read().write_stall_l0()
     }
 
+    /// One compact drain before WriteStall (see [`Db::set_write_stall_drain`]).
+    pub fn set_write_stall_drain(&self, enabled: bool) {
+        self.inner.write().set_write_stall_drain(enabled);
+    }
+
+    /// Whether drain-before-stall is enabled.
+    #[must_use]
+    pub fn write_stall_drain(&self) -> bool {
+        self.inner.read().write_stall_drain()
+    }
+
+    /// Writes refused by L0 stall.
+    #[must_use]
+    pub fn write_stall_count(&self) -> u64 {
+        self.inner.read().write_stall_count()
+    }
+
     /// Blob rotate cap (see [`Db::set_vlog_rotate_bytes`]).
     pub fn set_vlog_rotate_bytes(&self, bytes: Option<u64>) {
         self.inner.write().set_vlog_rotate_bytes(bytes);

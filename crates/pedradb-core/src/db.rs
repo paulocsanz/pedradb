@@ -500,6 +500,8 @@ pub struct Db<E: Env = StdEnv> {
     auto_reclaim: bool,
     /// When `Some(n)`, refuse writes if L0 SST count ≥ n (open-items §2.3).
     write_stall_l0: Option<usize>,
+    /// When true with a stall limit: one flush+compact attempt before refusing.
+    write_stall_drain: bool,
     /// Count of writes refused by L0 stall.
     write_stall_count: u64,
     /// Open [`SnapshotPin`]s: pin id → sequence (open-items §2.1).
@@ -704,6 +706,7 @@ impl<E: Env> Db<E> {
             auto_blob_gc_min_ratio: None,
             auto_reclaim: false,
             write_stall_l0: None,
+            write_stall_drain: false,
             write_stall_count: 0,
             snapshot_pins: std::collections::BTreeMap::new(),
             next_snapshot_pin_id: 1,
@@ -1008,7 +1011,8 @@ impl<E: Env> Db<E> {
     /// `None` or `0` disables (default). When enabled, [`Self::put`] /
     /// [`Self::apply_batch`] / group commit fail with
     /// [`CoreError::WriteStall`] instead of letting L0 grow unbounded.
-    /// No sleep — honest signal; compact then retry.
+    /// No sleep — honest signal; compact then retry (or enable
+    /// [`Self::set_write_stall_drain`]).
     pub fn set_write_stall_l0(&mut self, limit: Option<usize>) {
         self.write_stall_l0 = limit.filter(|n| *n > 0);
     }
@@ -1017,6 +1021,20 @@ impl<E: Env> Db<E> {
     #[must_use]
     pub fn write_stall_l0(&self) -> Option<usize> {
         self.write_stall_l0
+    }
+
+    /// When stall limit is set: try one flush + leveled compact before refusing.
+    ///
+    /// Default **false** (immediate `WriteStall`). Enable for single-writer
+    /// embeds that prefer self-help drain over surfacing the error.
+    pub fn set_write_stall_drain(&mut self, enabled: bool) {
+        self.write_stall_drain = enabled;
+    }
+
+    /// Whether one compact drain is attempted before `WriteStall`.
+    #[must_use]
+    pub fn write_stall_drain(&self) -> bool {
+        self.write_stall_drain
     }
 
     /// Times a write was refused for L0 stall (observability).
@@ -3440,15 +3458,26 @@ impl<E: Env> Db<E> {
         let Some(limit) = self.write_stall_l0 else {
             return Ok(());
         };
-        let l0 = self.level_file_count(0);
-        if l0 >= limit {
-            self.write_stall_count = self.write_stall_count.saturating_add(1);
-            return Err(CoreError::WriteStall {
-                l0_files: l0,
-                limit,
-            });
+        let mut l0 = self.level_file_count(0);
+        if l0 < limit {
+            return Ok(());
         }
-        Ok(())
+        if self.write_stall_drain {
+            // One honest self-help pass — no sleep, no unbounded loop.
+            if !self.mem.is_empty() || self.imm.is_some() {
+                let _ = self.flush();
+            }
+            let _ = self.compact_with_ssts_only(CompactOptions::default());
+            l0 = self.level_file_count(0);
+            if l0 < limit {
+                return Ok(());
+            }
+        }
+        self.write_stall_count = self.write_stall_count.saturating_add(1);
+        Err(CoreError::WriteStall {
+            l0_files: l0,
+            limit,
+        })
     }
 
     pub(crate) fn maybe_auto_flush(&mut self) -> Result<()> {
@@ -5318,6 +5347,48 @@ mod tests {
             db.put(b"c", b"3").unwrap();
             assert_eq!(db.get(b"c").as_deref(), Some(b"3".as_ref()));
         }
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Drain-before-stall: one compact attempt can admit the write without error.
+    #[test]
+    fn write_stall_drain_admits_after_compact() {
+        let dir = temp_dir();
+        let mut db = Db::open_with(
+            &dir,
+            OpenOptions {
+                sync: true,
+                auto_flush_bytes: None,
+                auto_compact_sst_count: None,
+                auto_compact_sst_bytes: None,
+                exclusive: true,
+                large_value_threshold: None,
+            },
+        )
+        .unwrap();
+        // Build L0 without stall, then enable drain+limit.
+        for i in 0..3u8 {
+            db.put([b'k', i], [b'v', i]).unwrap();
+            db.flush().unwrap();
+        }
+        assert!(
+            db.level_file_count(0) >= 2,
+            "need L0>=2, got {}",
+            db.level_file_count(0)
+        );
+        db.set_write_stall_l0(Some(2));
+        db.set_write_stall_drain(true);
+        assert!(db.write_stall_drain());
+        let stalls_before = db.write_stall_count();
+        // Drain path should compact L0 down and accept the put.
+        db.put(b"ok", b"1").unwrap();
+        assert_eq!(db.get(b"ok").as_deref(), Some(b"1".as_ref()));
+        assert_eq!(
+            db.write_stall_count(),
+            stalls_before,
+            "drain should avoid WriteStall when compact reduces L0"
+        );
         db.close().unwrap();
         let _ = fs::remove_dir_all(&dir);
     }
