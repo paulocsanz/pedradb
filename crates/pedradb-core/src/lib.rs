@@ -45,9 +45,9 @@ pub use change_feed::{decode_changelog, ChangeEntry, ChangeKind, ChangeLog, CHAN
 pub use changelog_kernel::{changelog_needs_sst_rebuild, changelog_needs_sst_rebuild_as_is};
 pub use concurrent::ConcurrentDb;
 pub use db::{
-    copy_db_directory, read_checkpoint_meta, BatchOp, CheckpointMeta, CompactOptions, Db, DbStats,
-    OpenOptions, ScanProjection, Snapshot, WriteOptions, CHECKPOINT_META_FILE,
-    L0_COMPACTION_TRIGGER, MAX_LSM_LEVEL, WAL_FILE_NAME,
+    copy_db_directory, read_checkpoint_meta, BatchOp, BlobGcCandidate, CheckpointMeta,
+    CompactOptions, Db, DbStats, OpenOptions, ScanProjection, Snapshot, WriteOptions,
+    CHECKPOINT_META_FILE, L0_COMPACTION_TRIGGER, MAX_LSM_LEVEL, WAL_FILE_NAME,
 };
 pub use env::{Env, EnvFile, StdEnv};
 pub use error::{CoreError, Result};

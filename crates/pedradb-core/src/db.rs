@@ -167,6 +167,23 @@ pub struct DbStats {
     pub scan_prefetch_hits: u64,
 }
 
+/// Per-blob GC stats for operator / auto-pick (RFC-0029 P1.1).
+#[derive(Debug, Clone)]
+pub struct BlobGcCandidate {
+    /// Blob generation number (`0` = `VALUES.vlog`).
+    pub file_num: u32,
+    /// On-disk file size in bytes.
+    pub bytes: u64,
+    /// Sum of live record lengths still referenced by mem/imm/SST.
+    pub live_bytes: u64,
+    /// Count of live vlog records in this file.
+    pub live_records: u64,
+    /// `1.0 - live_bytes/bytes` (0 if empty file).
+    pub dead_ratio: f64,
+    /// True when this is the active append generation (auto GC skips).
+    pub is_active: bool,
+}
+
 impl DbStats {
     /// Live payload / on-disk vlog. `1.0` if there is no vlog file.
     ///
@@ -1792,6 +1809,91 @@ impl<E: Env> Db<E> {
         }
         self.vlog_gc_count = self.vlog_gc_count.saturating_add(1);
         Ok(())
+    }
+
+    /// Sealed blob files ranked by discardable ratio (highest first).
+    ///
+    /// Skips the active append generation (must rotate before GC). File 0
+    /// (`VALUES.vlog`) is included when present and not the sole active path.
+    ///
+    /// # Errors
+    /// I/O or CRC while sampling live pointers.
+    pub fn blob_gc_candidates(&self) -> Result<Vec<BlobGcCandidate>> {
+        let nums = vlog::list_blob_nums(&self.env, &self.dir);
+        let mut out = Vec::new();
+        for file_num in nums {
+            if file_num == self.blob_active && file_num != 0 {
+                // Active append gen: report but mark active (auto GC will skip).
+                let path = vlog::blob_path(&self.dir, file_num);
+                let bytes = self.env.metadata_len(&path).unwrap_or(0);
+                out.push(BlobGcCandidate {
+                    file_num,
+                    bytes,
+                    live_bytes: 0,
+                    live_records: 0,
+                    dead_ratio: 0.0,
+                    is_active: true,
+                });
+                continue;
+            }
+            if file_num == 0 && self.blob_active == 0 {
+                // Single-file mode: compact_vlog is the hammer; still report ratio.
+            }
+            let path = if file_num == 0 {
+                self.dir.join(VLOG_FILE_NAME)
+            } else {
+                vlog::blob_path(&self.dir, file_num)
+            };
+            let bytes = self.env.metadata_len(&path).unwrap_or(0);
+            let live = self.collect_vlog_live_for_file(file_num)?;
+            let live_bytes: u64 = live.iter().map(|(_, b)| b.len() as u64).sum();
+            let live_records = live.len() as u64;
+            let dead_ratio = if bytes == 0 {
+                0.0
+            } else {
+                1.0 - (live_bytes as f64 / bytes as f64)
+            };
+            out.push(BlobGcCandidate {
+                file_num,
+                bytes,
+                live_bytes,
+                live_records,
+                dead_ratio,
+                is_active: file_num == self.blob_active,
+            });
+        }
+        out.sort_by(|a, b| {
+            b.dead_ratio
+                .partial_cmp(&a.dead_ratio)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| b.bytes.cmp(&a.bytes))
+        });
+        Ok(out)
+    }
+
+    /// GC the sealed blob with highest dead ratio ≥ `min_dead_ratio` (RFC-0029 P1.1).
+    ///
+    /// Default θ in the RFC is **0.5**. Returns `Ok(None)` when no sealed file
+    /// qualifies (nothing to do). Operator can still call [`Self::compact_blob`]
+    /// with an explicit id.
+    ///
+    /// # Errors
+    /// Same as [`Self::compact_blob`].
+    pub fn compact_blob_auto(
+        &mut self,
+        min_dead_ratio: f64,
+    ) -> Result<Option<(u32, VlogRewriteStats)>> {
+        self.ensure_not_fenced()?;
+        let min = min_dead_ratio.clamp(0.0, 1.0);
+        let pick = self
+            .blob_gc_candidates()?
+            .into_iter()
+            .find(|c| !c.is_active && c.bytes > 0 && c.dead_ratio + f64::EPSILON >= min);
+        let Some(c) = pick else {
+            return Ok(None);
+        };
+        let st = self.compact_blob(c.file_num)?;
+        Ok(Some((c.file_num, st)))
     }
 
     /// GC one sealed blob generation (RFC-0029 P0.2).
@@ -3581,6 +3683,41 @@ mod tests {
         db.close().unwrap();
         let db = Db::open_with(&dir, vlog_opts()).unwrap();
         assert_eq!(db.get(b"a").as_deref(), Some(v2.as_slice()));
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn compact_blob_auto_picks_worst_ratio() {
+        let dir = temp_dir();
+        let v1 = vec![0xAAu8; 1800];
+        let v2 = vec![0xBBu8; 1800];
+        let mut db = Db::open_with(&dir, vlog_opts()).unwrap();
+        db.set_vlog_rotate_bytes(Some(3_500));
+        db.put(b"a", &v1).unwrap();
+        db.put(b"b", &v1).unwrap();
+        db.flush().unwrap();
+        // Overwrite creates dead space in the sealed gen after rotate.
+        db.put(b"a", &v2).unwrap();
+        db.put(b"c", &v2).unwrap();
+        db.flush().unwrap();
+        db.compact_with(CompactOptions::latest_only()).unwrap();
+        let cands = db.blob_gc_candidates().unwrap();
+        assert!(
+            cands.iter().any(|c| !c.is_active && c.dead_ratio > 0.0),
+            "expected sealed dead space: {cands:?}"
+        );
+        // θ = 0.0 → any sealed with bytes
+        let got = db.compact_blob_auto(0.0).unwrap();
+        assert!(got.is_some(), "auto GC should pick a sealed file");
+        let (num, st) = got.unwrap();
+        assert_ne!(num, db.blob_active());
+        assert!(st.bytes_after <= st.bytes_before);
+        assert_eq!(db.get(b"a").as_deref(), Some(v2.as_slice()));
+        assert_eq!(db.get(b"b").as_deref(), Some(v1.as_slice()));
+        // High θ → nothing left dirty enough
+        let none = db.compact_blob_auto(0.99).unwrap();
+        assert!(none.is_none() || none.as_ref().map(|(n, _)| *n) != Some(num));
         db.close().unwrap();
         let _ = fs::remove_dir_all(&dir);
     }
