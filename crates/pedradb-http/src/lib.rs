@@ -52,9 +52,10 @@ pub use form_kernel::{
     query_values_conflict_as_is,
 };
 pub use path_kernel::{
-    origin_form_path, origin_form_path_as_is, path_after_authority, strip_authority_for_routing,
-    strip_authority_for_routing_as_is, strip_http_authority, strip_uri_fragment,
-    strip_uri_fragment_as_is,
+    host_authority_mismatch, host_authority_mismatch_as_is, origin_form_path,
+    origin_form_path_as_is, path_after_authority, request_target_authority,
+    strip_authority_for_routing, strip_authority_for_routing_as_is, strip_http_authority,
+    strip_uri_fragment, strip_uri_fragment_as_is,
 };
 
 use std::io::{Read, Write};
@@ -159,6 +160,12 @@ fn read_req(stream: &mut TcpStream) -> Result<(String, String, Vec<u8>, Vec<(Str
     // F158: empty `Host:` counted as present.
     if http_version_requires_host(version) && !host.as_deref().is_some_and(host_value_ok) {
         return Err(HttpError::App("missing host".into()));
+    }
+    // F161: absolute-form / network-path authority must match Host (RFC 9112).
+    if let (Some(h), Some(auth)) = (host.as_deref(), request_target_authority(&path)) {
+        if host_authority_mismatch(h, auth) {
+            return Err(HttpError::App("host authority mismatch".into()));
+        }
     }
     // F159: unrecognized Expect must 417 (not ignore and store).
     if let Some((_, v)) = headers.iter().find(|(n, v)| n == "expect" && !expect_field_ok(v))
@@ -1920,6 +1927,127 @@ mod tests {
             put_code, 417,
             "Expect 100-continue + unknown must 417, got {put_code} {text:?}"
         );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// F161: RFC 9112 — absolute-form authority that disagrees with `Host`
+    /// used to be stripped and the PUT stored on this server.
+    #[test]
+    fn kv_http_absolute_form_host_mismatch_rejected() {
+        let dir = temp("abs-host");
+        let addr = bind_ephemeral();
+        let srv = KvServer::open(&dir).unwrap();
+        thread::spawn(move || {
+            let _ = srv.serve(addr);
+        });
+        thread::sleep(Duration::from_millis(100));
+        let mut stream = TcpStream::connect(addr).unwrap();
+        stream
+            .write_all(
+                b"PUT http://evil.example/kv/mis HTTP/1.1\r\nHost: localhost\r\nContent-Length: 2\r\n\r\nok",
+            )
+            .unwrap();
+        let _ = stream.shutdown(std::net::Shutdown::Write);
+        let mut resp = Vec::new();
+        let _ = stream.read_to_end(&mut resp);
+        let text = String::from_utf8_lossy(&resp);
+        let put_code = text
+            .lines()
+            .next()
+            .and_then(|l| l.split_whitespace().nth(1))
+            .and_then(|c| c.parse::<u16>().ok())
+            .unwrap_or(0);
+        assert_eq!(
+            put_code, 400,
+            "absolute-form vs Host mismatch must 400, got {put_code} {text:?}"
+        );
+        let (code, body) = http_exchange(addr, "GET", "/kv/mis", b"").unwrap();
+        assert_eq!(
+            code, 404,
+            "mismatched authority must not store, GET {code} {body:?}"
+        );
+
+        let mut stream = TcpStream::connect(addr).unwrap();
+        stream
+            .write_all(
+                b"PUT http://localhost/kv/okh HTTP/1.1\r\nHost: localhost\r\nContent-Length: 2\r\n\r\nok",
+            )
+            .unwrap();
+        let _ = stream.shutdown(std::net::Shutdown::Write);
+        let mut resp = Vec::new();
+        let _ = stream.read_to_end(&mut resp);
+        let text = String::from_utf8_lossy(&resp);
+        let put_code = text
+            .lines()
+            .next()
+            .and_then(|l| l.split_whitespace().nth(1))
+            .and_then(|c| c.parse::<u16>().ok())
+            .unwrap_or(0);
+        assert_eq!(
+            put_code, 200,
+            "matching absolute-form Host must work, {text:?}"
+        );
+        let (code, body) = http_exchange(addr, "GET", "/kv/okh", b"").unwrap();
+        assert_eq!((code, body.as_slice()), (200, b"ok".as_slice()));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// F161: F160 compared Host to the raw authority. `http://localhost:80`
+    /// + `Host: localhost` (default port) and `userinfo@host` 400'd.
+    #[test]
+    fn kv_http_absolute_form_default_port_matches_host() {
+        let dir = temp("abs-port");
+        let addr = bind_ephemeral();
+        let srv = KvServer::open(&dir).unwrap();
+        thread::spawn(move || {
+            let _ = srv.serve(addr);
+        });
+        thread::sleep(Duration::from_millis(100));
+        let mut stream = TcpStream::connect(addr).unwrap();
+        stream
+            .write_all(
+                b"PUT http://localhost:80/kv/dp HTTP/1.1\r\nHost: localhost\r\nContent-Length: 2\r\n\r\nok",
+            )
+            .unwrap();
+        let _ = stream.shutdown(std::net::Shutdown::Write);
+        let mut resp = Vec::new();
+        let _ = stream.read_to_end(&mut resp);
+        let text = String::from_utf8_lossy(&resp);
+        let put_code = text
+            .lines()
+            .next()
+            .and_then(|l| l.split_whitespace().nth(1))
+            .and_then(|c| c.parse::<u16>().ok())
+            .unwrap_or(0);
+        assert_eq!(
+            put_code, 200,
+            "default :80 must match Host without port, got {put_code} {text:?}"
+        );
+        let (code, body) = http_exchange(addr, "GET", "/kv/dp", b"").unwrap();
+        assert_eq!((code, body.as_slice()), (200, b"ok".as_slice()));
+
+        let mut stream = TcpStream::connect(addr).unwrap();
+        stream
+            .write_all(
+                b"PUT http://user:pass@localhost/kv/ui HTTP/1.1\r\nHost: localhost\r\nContent-Length: 2\r\n\r\nok",
+            )
+            .unwrap();
+        let _ = stream.shutdown(std::net::Shutdown::Write);
+        let mut resp = Vec::new();
+        let _ = stream.read_to_end(&mut resp);
+        let text = String::from_utf8_lossy(&resp);
+        let put_code = text
+            .lines()
+            .next()
+            .and_then(|l| l.split_whitespace().nth(1))
+            .and_then(|c| c.parse::<u16>().ok())
+            .unwrap_or(0);
+        assert_eq!(
+            put_code, 200,
+            "userinfo@host must match Host, got {put_code} {text:?}"
+        );
+        let (code, body) = http_exchange(addr, "GET", "/kv/ui", b"").unwrap();
+        assert_eq!((code, body.as_slice()), (200, b"ok".as_slice()));
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

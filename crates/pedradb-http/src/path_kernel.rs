@@ -14,15 +14,48 @@ pub fn path_after_authority(rest: &str) -> &str {
 /// Strip `http(s)://authority` (scheme case-insensitive — RFC 9110 / F145).
 #[must_use]
 pub fn strip_http_authority(target: &str) -> Option<&str> {
+    strip_http_authority_rest(target).map(path_after_authority)
+}
+
+/// Authority of an absolute-form or network-path target (`host[:port]`).
+#[must_use]
+pub fn request_target_authority(target: &str) -> Option<&str> {
+    let target = strip_uri_fragment(target);
+    let rest = if let Some(r) = strip_http_authority_rest(target) {
+        r
+    } else {
+        target.strip_prefix("//")?
+    };
+    let end = rest.find(['/', '?']).unwrap_or(rest.len());
+    let auth = &rest[..end];
+    if auth.is_empty() {
+        None
+    } else {
+        Some(auth)
+    }
+}
+
+fn strip_http_authority_rest(target: &str) -> Option<&str> {
     let b = target.as_bytes();
-    let rest = if b.len() >= 7 && b[..7].eq_ignore_ascii_case(b"http://") {
+    if b.len() >= 7 && b[..7].eq_ignore_ascii_case(b"http://") {
         Some(&target[7..])
     } else if b.len() >= 8 && b[..8].eq_ignore_ascii_case(b"https://") {
         Some(&target[8..])
     } else {
         None
-    };
-    rest.map(path_after_authority)
+    }
+}
+
+/// F161: Host and absolute-form / network-path authority disagree (RFC 9112).
+#[must_use]
+pub fn host_authority_mismatch(host: &str, authority: &str) -> bool {
+    !host.eq_ignore_ascii_case(authority)
+}
+
+/// AS-IS F161: never compare Host to the request-target authority.
+#[must_use]
+pub fn host_authority_mismatch_as_is(_host: &str, _authority: &str) -> bool {
+    false
 }
 
 /// RFC 3986: `#fragment` is not part of the request-target path or query.
@@ -94,6 +127,18 @@ mod tests {
         assert_eq!(origin_form_path("http://h/kv/x#f"), "/kv/x");
         assert_eq!(strip_uri_fragment("/dcs/kv/k?rev=0#x"), "/dcs/kv/k?rev=0");
         assert_eq!(strip_uri_fragment_as_is("/kv/x#f"), "/kv/x#f");
+        assert_eq!(
+            request_target_authority("http://evil.example/kv/x"),
+            Some("evil.example")
+        );
+        assert_eq!(
+            request_target_authority("//h:9/kv/x?q=1"),
+            Some("h:9")
+        );
+        assert_eq!(request_target_authority("/kv/x"), None);
+        assert!(host_authority_mismatch("localhost", "evil.example"));
+        assert!(!host_authority_mismatch("LocalHost", "localhost"));
+        assert!(!host_authority_mismatch_as_is("localhost", "evil.example"));
     }
 
     #[test]
