@@ -496,6 +496,8 @@ pub fn report_json<E: Engine>(e: &E, cfg: &Cfg, benches: &[String], suites: &str
         DEPS_CFS.join(", ")
     ));
     notes.push(format!("deps apply batch txns/commit: {}", cfg.batch));
+    let changelog_interval = env_usize("PEDRA_CHANGELOG_INTERVAL", 64);
+    notes.push(format!("changelog_interval={changelog_interval}"));
     let notes_json = notes
         .iter()
         .map(|n| format!("\"{n}\""))
@@ -507,6 +509,7 @@ pub fn report_json<E: Engine>(e: &E, cfg: &Cfg, benches: &[String], suites: &str
   "engine": "{engine}",
   "sync": {sync},
   "durability": "{durability}",
+  "changelog_interval": {changelog_interval},
   "status": "ok",
   "notes": [{notes_json}],
   "benches": [

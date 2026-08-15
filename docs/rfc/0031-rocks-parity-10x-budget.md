@@ -1,6 +1,6 @@
 # RFC-0031: Rocks parity budget — compat within 10× of real RocksDB
 
-**Status:** draft  
+**Status:** in-progress  
 **Updated:** 2026-08-15  
 **Parents:** [0019](0019-local-primitive-for-platform-and-scylla-need.md) (CHANGELOG é cache), [0025](0025-montanha-perf-parity-vs-peers.md) (perf parity method), [rocksdb-compat](../rocksdb-compat.md) (par + diagnóstico)
 
@@ -59,14 +59,28 @@ Baseline lab: ycsb @e5c6b80, deps @863df07, records=1024 ops=200 batch=32.
 | deps_raftlog | 4.744 | 474 | 32 | CHANGELOG/write |
 | deps_cache_overwrite | 8.976 | 898 | 52 | CHANGELOG/write |
 
-Expectativa mecânica: removendo o CHANGELOG do caminho crítico, um put fica ~append WAL + fsync + memtable (≈50–100 µs single-writer) → todos os shapes de escrita acima do floor com folga; resta o iterador nos shapes de leitura reversa/scan.
+Re-medida P0.1 (2026-08-15, worktree @origin/main + debounce, records=1024 ops=200 batch=32, `PEDRA_CHANGELOG_INTERVAL=64`):
+
+| shape | compat antes | compat P0.1 | rocksdb sync=1 (esta run) | ratio | ≥ floor RFC? |
+|---|---:|---:|---:|---:|---|
+| ycsb_a | 94 | **390** | 75.148 | 0.005 | não (floor 3.773) |
+| ycsb_b | 913 | **4.245** | 573.477 | 0.007 | não |
+| ycsb_c | 156.103 | 206.629 | 1.798.432 | 0.115 | **sim** |
+| ycsb_f | 110 | **352** | 81.454 | 0.004 | não |
+| deps_apply_batch | 27 | **78** | 7.219 | 0.011 | não |
+| deps_mvcc_latest | 260 | 813 | 378.549 | 0.002 | não (iterador) |
+| deps_cache_overwrite | 52 | **215** | 36.680 | 0.006 | não |
+
+Seed 1024 puts: 39.7 s → **6.5 s**. `interval=0` ycsb_a = 379 qps (p50 3.8 ms) ≈ interval 64 — CHANGELOG saiu do caminho crítico.
+
+Expectativa mecânica (rev. P0.1): o debounce remove as 2–3 barreiras extras do CHANGELOG. Residual medido com `PEDRA_CHANGELOG_INTERVAL=0` (zero stores no commit path) é **quase idêntico** ao default 64 — o que resta é **um** `File::sync_all` do WAL por write (~3.8 ms p50 em ycsb_a neste Mac; `std::fs::File::sync_all` = `F_FULLFSYNC`). RocksDB `WriteOptions.sync=true` usa `fsync`, não `F_FULLFSYNC` — classes de durabilidade diferentes. **Não** trocamos `sync_all` por `sync_data` para ganhar o bench (G1). Floor 0.1 não vira default até o residual de escrita cruzar (group commit já existe em `ConcurrentDb`; single-writer compat ainda é 1 fsync/put).
 
 ## Delivery slices (mandatory)
 
 ### P0 — must ship first (useful alone)
 
-- [ ] **P0.1** CHANGELOG store debounce inline (a cada N commits duráveis + flush + close; knob `PEDRA_CHANGELOG_INTERVAL`; sem thread) — status: `todo`
-- [ ] **P0.2** Re-medir ycsb+deps no par; se todos os shapes de escrita ≥ floor, virar default `ROCKS_PARITY_RATIO_FLOOR=0.1` no script de lab (template mode continua sem gate) — status: `todo`
+- [x] **P0.1** CHANGELOG store debounce inline (a cada N commits duráveis + flush + close + WAL rotate + checkpoint; knob `PEDRA_CHANGELOG_INTERVAL`; sem thread) — status: `done`
+- [ ] **P0.2** Re-medir ycsb+deps no par; se todos os shapes de escrita ≥ floor, virar default `ROCKS_PARITY_RATIO_FLOOR=0.1` no script de lab (template mode continua sem gate) — status: `todo` (re-medida feita; escritas ainda < floor — não virar)
 - [ ] **P0.3** RFC + Status vivo (este doc) — status: `done`
 
 ### P1 — next wave
@@ -77,19 +91,19 @@ Expectativa mecânica: removendo o CHANGELOG do caminho crítico, um put fica ~a
 ### P2 — later / polish
 
 - [ ] **P2.1** Tabela final @novo commit no `rocksdb-compat.md` + nota de orçamento (min_ratio global ≥ 0.1) — status: `todo`
-- [ ] **P2.2** Se algum shape ainda < floor com mecanismo novo identificado: abrir seção de follow-up com número (não engessar) — status: `todo`
+- [x] **P2.2** Se algum shape ainda < floor com mecanismo novo identificado: abrir seção de follow-up com número (não engessar) — status: `done` (residual = 1× WAL `sync_all`/`F_FULLFSYNC` ≈ 3.8 ms/put; interval=0 ≈ interval=64)
 
 ## Status (living — update with every PR)
 
 | ID | Band | Title | Status | Task / PR | Updated |
 |----|------|-------|--------|-----------|---------|
-| P0.1 | p0 | CHANGELOG debounce inline | todo | — | 2026-08-15 |
-| P0.2 | p0 | re-medida + floor 0.1 default (lab) | todo | — | 2026-08-15 |
+| P0.1 | p0 | CHANGELOG debounce inline | done | este commit | 2026-08-15 |
+| P0.2 | p0 | re-medida + floor 0.1 default (lab) | todo | re-medida: escritas < floor, gate fica report-only | 2026-08-15 |
 | P0.3 | p0 | RFC + status vivo | done | este doc | 2026-08-15 |
 | P1.1 | p1 | iterador janela bornada | todo | — | 2026-08-15 |
 | P1.2 | p1 | leituras ≥ floor + adversarial | todo | — | 2026-08-15 |
 | P2.1 | p2 | tabela final + nota de orçamento | todo | — | 2026-08-15 |
-| P2.2 | p2 | follow-up de shape remanescente | todo | — | 2026-08-15 |
+| P2.2 | p2 | follow-up de shape remanescente | done | residual WAL F_FULLFSYNC (não relaxar G1) | 2026-08-15 |
 
 ## Acceptance Criteria
 

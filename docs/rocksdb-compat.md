@@ -148,9 +148,25 @@ RocksDB's synced path is one WAL fsync (~26 µs here — APFS `fsync` is not
 F_FULLFSYNC, so RocksDB's sync-per-write is cheap on this lab box).
 RFC-0019 already allows batching: the on-disk CHANGELOG is a *cache* rebuilt
 from WAL and must never gate commit success — periodic/batched store is the
-sanctioned fix. Until that lands, `ROCKS_PARITY_RATIO_FLOOR` stays
-report-only (`none`) in `rocksdb_parity_v0.sh`; reads (ycsb_c) are the
-closest shape at 0.10–0.71×.
+sanctioned fix. **Shipped (RFC-0031 P0.1):** `PEDRA_CHANGELOG_INTERVAL`
+(default 64) debounces the cache store; flush / close / WAL rotate /
+checkpoint still persist. Seed 1024 puts 39.7 s → 6.5 s; ycsb_a 94 → 390
+qps. Residual with `interval=0` is the same (~3.8 ms p50) — one WAL
+`File::sync_all` (`F_FULLFSYNC` on macOS). RocksDB `sync=true` is `fsync`,
+not `F_FULLFSYNC`; we do **not** downgrade `sync_all` to win the bench (G1).
+`ROCKS_PARITY_RATIO_FLOOR` stays report-only until write shapes cross 0.1.
+See [RFC-0031](rfc/0031-rocks-parity-10x-budget.md).
+
+### Lab numbers after P0.1 debounce (2026-08-15, interval=64, same records/ops)
+
+| shape | compat qps | vs pré-P0.1 |
+|---|---:|---:|
+| ycsb_a | 390 | 4.1× |
+| ycsb_b | 4,245 | 4.6× |
+| ycsb_c | 206,629 | 1.3× (já era read-bound) |
+| ycsb_f | 352 | 3.2× |
+| deps_apply_batch | 78 | 2.9× |
+| deps_cache_overwrite | 215 | 4.1× |
 
 ## Dependent-shaped suite (`deps`, TiKV as the reference dependent)
 

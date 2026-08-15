@@ -42,7 +42,10 @@ pub use batch::{WriteOp, WriteRecord, WRITE_RECORD_VERSION};
 pub use bloom::{BloomFilter, DEFAULT_BITS_PER_KEY};
 pub use cache::{BlockCache, TableCache};
 pub use change_feed::{decode_changelog, ChangeEntry, ChangeKind, ChangeLog, CHANGELOG_FILE_NAME};
-pub use changelog_kernel::{changelog_needs_sst_rebuild, changelog_needs_sst_rebuild_as_is};
+pub use changelog_kernel::{
+    changelog_needs_sst_rebuild, changelog_needs_sst_rebuild_as_is, changelog_should_store,
+    changelog_should_store_as_is, DEFAULT_CHANGELOG_INTERVAL,
+};
 pub use concurrent::ConcurrentDb;
 pub use db::{
     copy_db_directory, read_checkpoint_meta, BatchOp, BlobGcCandidate, CheckpointMeta,

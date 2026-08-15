@@ -60,7 +60,9 @@ use bytes::Bytes;
 use crate::batch::{WriteOp, WriteRecord};
 use crate::cache::{BlockCache, TableCache};
 use crate::change_feed::{ChangeEntry, ChangeKind, ChangeLog};
-use crate::changelog_kernel::changelog_needs_sst_rebuild;
+use crate::changelog_kernel::{
+    changelog_needs_sst_rebuild, changelog_should_store, DEFAULT_CHANGELOG_INTERVAL,
+};
 use crate::env::{Env, EnvFile, StdEnv};
 use crate::error::{CoreError, Result};
 use crate::host::Host;
@@ -183,6 +185,11 @@ pub struct DbStats {
     pub write_pressure_l0: u64,
     /// Current L0 SST file count (admission / stall observability).
     pub l0_files: u64,
+    /// Durable-commit interval between CHANGELOG cache stores (RFC-0031). `0` = never
+    /// on the commit path (flush / close / checkpoint still persist).
+    pub changelog_interval: u64,
+    /// Successful CHANGELOG cache stores since open (RFC-0031 observability).
+    pub changelog_store_count: u64,
 }
 
 /// Per-blob GC stats for operator / auto-pick (RFC-0029 P1.1).
@@ -410,6 +417,14 @@ impl Default for OpenOptions {
     }
 }
 
+/// `PEDRA_CHANGELOG_INTERVAL` (RFC-0031). Invalid / unset → [`DEFAULT_CHANGELOG_INTERVAL`].
+fn changelog_interval_from_env() -> u64 {
+    std::env::var("PEDRA_CHANGELOG_INTERVAL")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(DEFAULT_CHANGELOG_INTERVAL)
+}
+
 /// What a range scan yields (RFC-0019 P1.2).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ScanProjection {
@@ -543,6 +558,13 @@ pub struct Db<E: Env = StdEnv> {
     vlog_gc_count: u64,
     /// Durable post-commit change log (RFC-0019 P0.3).
     change_log: ChangeLog,
+    /// Persist CHANGELOG at most every N durable commits (RFC-0031). `0` = never
+    /// on the commit path.
+    changelog_interval: u64,
+    /// Durable commits since the last CHANGELOG store.
+    commits_since_changelog: u64,
+    /// Successful CHANGELOG stores since open.
+    changelog_store_count: u64,
 }
 
 impl Db<StdEnv> {
@@ -739,6 +761,9 @@ impl<E: Env> Db<E> {
             compact_count: 0,
             vlog_gc_count: 0,
             change_log,
+            changelog_interval: changelog_interval_from_env(),
+            commits_since_changelog: 0,
+            changelog_store_count: 0,
         };
         db.maybe_rebuild_feed_from_live();
         Ok(db)
@@ -780,6 +805,54 @@ impl<E: Env> Db<E> {
     #[must_use]
     pub fn sst_count(&self) -> usize {
         self.ssts.len()
+    }
+
+    /// Persist CHANGELOG at most every `n` durable commits (RFC-0031).
+    ///
+    /// `0` disables the commit-path store (flush / close / checkpoint still
+    /// persist the cache). Does not change WAL fsync-before-Ok.
+    pub fn set_changelog_interval(&mut self, n: u64) -> &mut Self {
+        self.changelog_interval = n;
+        self
+    }
+
+    /// Configured CHANGELOG store interval (RFC-0031).
+    #[must_use]
+    pub fn changelog_interval(&self) -> u64 {
+        self.changelog_interval
+    }
+
+    /// Successful CHANGELOG cache stores since open.
+    #[must_use]
+    pub fn changelog_store_count(&self) -> u64 {
+        self.changelog_store_count
+    }
+
+    /// Force a CHANGELOG cache persist (flush / close / checkpoint / WAL rotate).
+    ///
+    /// Best-effort: a store error is logged and never surfaces as commit failure
+    /// (RFC-0019: on-disk CHANGELOG is a cache rebuilt from WAL).
+    fn persist_changelog_best_effort(&mut self) {
+        match self.change_log.store_on(&self.env, &self.dir) {
+            Ok(()) => {
+                self.changelog_store_count = self.changelog_store_count.saturating_add(1);
+                self.commits_since_changelog = 0;
+            }
+            Err(e) => {
+                tracing::warn!(
+                    error = %e,
+                    "CHANGELOG store failed; feed rebuilt on open"
+                );
+            }
+        }
+    }
+
+    /// Debounced persist after a durable (synced) commit (RFC-0031 P0.1).
+    fn maybe_persist_changelog_after_durable_commit(&mut self) {
+        self.commits_since_changelog = self.commits_since_changelog.saturating_add(1);
+        if changelog_should_store(self.commits_since_changelog, self.changelog_interval) {
+            self.persist_changelog_best_effort();
+        }
     }
 
     /// LSM level of each live SST (parallel to inventory order).
@@ -1512,6 +1585,8 @@ impl<E: Env> Db<E> {
             write_stall_mem_bytes: self.write_stall_mem_bytes.unwrap_or(0) as u64,
             write_pressure_l0: self.write_pressure_l0.unwrap_or(0) as u64,
             l0_files: self.level_file_count(0) as u64,
+            changelog_interval: self.changelog_interval,
+            changelog_store_count: self.changelog_store_count,
         }
     }
 
@@ -1677,6 +1752,8 @@ impl<E: Env> Db<E> {
         }
         // F46: CHANGELOG is the durable change-feed cache. After flush the WAL is
         // empty/rotated — omit CHANGELOG from the checkpoint → silent feed loss.
+        // RFC-0031: force a store so a checkpoint mid-debounce still copies the feed.
+        self.persist_changelog_best_effort();
         let chlog = self.dir.join(crate::change_feed::CHANGELOG_FILE_NAME);
         if self.env.exists(&chlog) {
             self.env
@@ -1940,6 +2017,9 @@ impl<E: Env> Db<E> {
     }
 
     fn rotate_wal_now(&mut self) -> Result<()> {
+        // WAL truncate drops the rebuild source for the CHANGELOG cache — persist
+        // first (RFC-0031; F53 last-per-key rebuild is the remaining safety net).
+        self.persist_changelog_best_effort();
         let wal_path = self.dir.join(WAL_FILE_NAME);
         let old = std::mem::replace(&mut self.wal, Wal::create_on(&self.env, &wal_path)?);
         old.close()?;
@@ -3059,7 +3139,7 @@ impl<E: Env> Db<E> {
             })
             .collect();
         self.change_log.replace_sorted(entries);
-        let _ = self.change_log.store_on(&self.env, &self.dir);
+        self.persist_changelog_best_effort();
     }
 
     /// Apply an ordered multi-op batch atomically (one WAL record, no OCC).
@@ -3159,6 +3239,8 @@ impl<E: Env> Db<E> {
     /// # Errors
     /// I/O from WAL flush or lock release.
     pub fn close(mut self) -> Result<()> {
+        // RFC-0031: close is a persist point for the CHANGELOG cache.
+        self.persist_changelog_best_effort();
         self.release_lock()?;
         // Flush in place — `Db` implements `Drop` (Env unlock), so we cannot move `wal`.
         self.wal.flush()
@@ -3300,12 +3382,8 @@ impl<E: Env> Db<E> {
         // so get and feed stay aligned and sequences are not rolled back.
         self.change_log.extend(feed_entries);
         if do_sync {
-            if let Err(e) = self.change_log.store_on(&self.env, &self.dir) {
-                tracing::warn!(
-                    error = %e,
-                    "CHANGELOG store failed after durable WAL; feed rebuilt on open"
-                );
-            }
+            // RFC-0031: debounce the cache store. WAL is already durable.
+            self.maybe_persist_changelog_after_durable_commit();
         }
         apply_record(&mut self.mem, &rec);
         Ok(())
@@ -3473,12 +3551,9 @@ impl<E: Env> Db<E> {
         }
         self.change_log.extend(feed_batch);
         if any_sync {
-            if let Err(e) = self.change_log.store_on(&self.env, &self.dir) {
-                tracing::warn!(
-                    error = %e,
-                    "group CHANGELOG store failed after durable WAL; feed rebuilt on open"
-                );
-            }
+            // One durable group commit = one tick of the debounce (not one per
+            // member) — group commit already amortizes WAL sync.
+            self.maybe_persist_changelog_after_durable_commit();
         }
 
         for (i, write_ops, last_seq) in appended {
@@ -7195,6 +7270,162 @@ mod tests {
             "rfc19_apply_soak_group_commit_evidence wal_sync_count={syncs} silent_wrong={wrong}"
         );
         drop(db);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0031 P0.1: N-1 durable commits do not persist the CHANGELOG cache;
+    /// reopen still sees every acked write (WAL is the durability source).
+    #[test]
+    fn changelog_debounce_n_minus_one_reopen_equivalent() {
+        let dir = temp_dir();
+        let chlog = dir.join(crate::change_feed::CHANGELOG_FILE_NAME);
+        {
+            let mut db = Db::open_with(
+                &dir,
+                OpenOptions {
+                    sync: true,
+                    auto_flush_bytes: None,
+                    auto_compact_sst_count: None,
+                    auto_compact_sst_bytes: None,
+                    exclusive: true,
+                    large_value_threshold: None,
+                },
+            )
+            .unwrap();
+            db.set_changelog_interval(64);
+            for i in 0..63u8 {
+                db.put([b'k', i], [b'v', i]).unwrap();
+            }
+            assert_eq!(db.changelog_store_count(), 0);
+            assert!(
+                !chlog.exists(),
+                "CHANGELOG must stay absent before the interval fires"
+            );
+            // In-process feed is complete (G7: read-your-writes does not need disk).
+            assert_eq!(db.changes_after(0).len(), 63);
+            // Drop without close — no persist point. WAL has every Ok write (G1).
+        }
+        let db = Db::open_with(
+            &dir,
+            OpenOptions {
+                sync: true,
+                auto_flush_bytes: None,
+                auto_compact_sst_count: None,
+                auto_compact_sst_bytes: None,
+                exclusive: true,
+                large_value_threshold: None,
+            },
+        )
+        .unwrap();
+        for i in 0..63u8 {
+            assert_eq!(
+                db.get(&[b'k', i]).as_deref(),
+                Some([b'v', i].as_slice()),
+                "reopen must recover key {i} from WAL"
+            );
+        }
+        assert_eq!(db.changes_after(0).len(), 63);
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0031 P0.1: the N-th durable commit persists the cache.
+    #[test]
+    fn changelog_debounce_nth_commit_stores() {
+        let dir = temp_dir();
+        let chlog = dir.join(crate::change_feed::CHANGELOG_FILE_NAME);
+        let mut db = Db::open_with(
+            &dir,
+            OpenOptions {
+                sync: true,
+                auto_flush_bytes: None,
+                auto_compact_sst_count: None,
+                auto_compact_sst_bytes: None,
+                exclusive: true,
+                large_value_threshold: None,
+            },
+        )
+        .unwrap();
+        db.set_changelog_interval(8);
+        for i in 0..7u8 {
+            db.put([b'k', i], [b'v', i]).unwrap();
+        }
+        assert_eq!(db.changelog_store_count(), 0);
+        assert!(!chlog.exists());
+        db.put(b"k7", b"v7").unwrap();
+        assert_eq!(db.changelog_store_count(), 1);
+        assert!(chlog.exists());
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0031 P0.1: interval 0 never stores on the commit path; flush and
+    /// close are persist points (WAL-truncate / operator close).
+    #[test]
+    fn changelog_interval_zero_stores_on_flush_and_close() {
+        let dir = temp_dir();
+        let chlog = dir.join(crate::change_feed::CHANGELOG_FILE_NAME);
+        {
+            let mut db = Db::open_with(
+                &dir,
+                OpenOptions {
+                    sync: true,
+                    auto_flush_bytes: None,
+                    auto_compact_sst_count: None,
+                    auto_compact_sst_bytes: None,
+                    exclusive: true,
+                    large_value_threshold: None,
+                },
+            )
+            .unwrap();
+            db.set_changelog_interval(0);
+            for i in 0..32u8 {
+                db.put([b'k', i], [b'v', i]).unwrap();
+            }
+            assert_eq!(db.changelog_store_count(), 0);
+            assert!(!chlog.exists());
+            db.flush().unwrap();
+            assert!(
+                db.changelog_store_count() >= 1,
+                "flush must persist CHANGELOG before WAL rotate"
+            );
+            assert!(chlog.exists());
+            db.close().unwrap();
+        }
+        let db = Db::open(&dir).unwrap();
+        assert_eq!(db.get(&[b'k', 0]).as_deref(), Some([b'v', 0].as_slice()));
+        assert_eq!(db.get(&[b'k', 31]).as_deref(), Some([b'v', 31].as_slice()));
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0031 P0.1: close persists even when the interval has not fired.
+    #[test]
+    fn changelog_close_persists_mid_debounce() {
+        let dir = temp_dir();
+        let chlog = dir.join(crate::change_feed::CHANGELOG_FILE_NAME);
+        {
+            let mut db = Db::open_with(
+                &dir,
+                OpenOptions {
+                    sync: true,
+                    auto_flush_bytes: None,
+                    auto_compact_sst_count: None,
+                    auto_compact_sst_bytes: None,
+                    exclusive: true,
+                    large_value_threshold: None,
+                },
+            )
+            .unwrap();
+            db.set_changelog_interval(64);
+            db.put(b"a", b"1").unwrap();
+            assert!(!chlog.exists());
+            db.close().unwrap();
+        }
+        assert!(chlog.exists(), "close must persist the CHANGELOG cache");
+        let db = Db::open(&dir).unwrap();
+        assert_eq!(db.get(b"a").as_deref(), Some(b"1".as_ref()));
+        db.close().unwrap();
         let _ = fs::remove_dir_all(&dir);
     }
 }
