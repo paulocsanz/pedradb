@@ -11,7 +11,7 @@
 //!   MONTANHA_BENCH_WARMUP     warmup ops discarded (default 20)
 //!   MONTANHA_BENCH_THREADS    concurrent client threads for C/T suites (default 4)
 //!   MONTANHA_BENCH_SUITE      comma list: core,threads,tcp,mini-bt,scale,all
-//!     (scale includes S1 sequential + S2 multi-client multi-range TCP)
+//!     (scale includes S1 sequential + S2 multi-client put + S3 multi-client PutBatch)
 //!
 //! Writes `fdb_shaped_bench.json` + human summary. Compare to FDB using the same
 //! workload shapes (see docs/montanha-vs-fdb-bench.md). Not a claim of field parity.
@@ -183,22 +183,25 @@ fn start_tcp_cluster(bin: &Path, tmp: &Path, n_ranges: u64) -> Vec<TcpNode> {
             thread::sleep(Duration::from_millis(40));
         }
     }
-    // elect: tick all nodes until status shows a leader
+    // elect-wait: every r*:leader set (multi-range-safe).
     let peer_flags: Vec<String> = nodes
         .iter()
         .flat_map(|n| vec!["--peer".into(), format!("{}={}", n.id, n.addr)])
         .collect();
-    let _ = Command::new(bin)
+    let st = Command::new(bin)
         .arg("elect-wait")
         .args(&peer_flags)
-        .status();
-    // Multi-range: elect every range leader (elect-wait alone may only settle r1).
-    let rounds = 80u32.saturating_add(n_ranges as u32 * 40);
-    for _ in 0..rounds {
+        .status()
+        .expect("spawn elect-wait");
+    if !st.success() {
+        panic!("elect-wait failed for {n_ranges} ranges");
+    }
+    // Brief settle after leaders appear (HB + apply catch-up).
+    for _ in 0..12 {
         for n in &nodes {
-            let _ = client_tick(n.addr.to_string(), 3);
+            let _ = client_tick(n.addr.to_string(), 2);
         }
-        thread::sleep(Duration::from_millis(15));
+        thread::sleep(Duration::from_millis(20));
     }
     nodes
 }
@@ -302,7 +305,7 @@ fn main() {
 
         // A1c: put_many (same as batch when one range)
         let many_n = n.min(64);
-        let mut pairs: Vec<(Vec<u8>, Vec<u8>)> = (0..many_n)
+        let pairs: Vec<(Vec<u8>, Vec<u8>)> = (0..many_n)
             .map(|i| (format!("many-{i:04}").into_bytes(), val.clone()))
             .collect();
         let t0 = Instant::now();
@@ -785,9 +788,94 @@ fn main() {
                 );
                 drop(nodes);
             }
+
+            // S3: multi-client multi-range PutBatch — amortize Raft+WAL per
+            // range while leaders run in parallel (RFC-0025 / option A + P1.3).
+            progress!("S3 multi-client multi-range TCP PutBatch…");
+            let batch_sz = 8usize;
+            // per-thread: enough keys for ≥2 batches; total keys ≈ thr * batches * batch_sz
+            let batches_per = (n.min(32) / n_threads.max(1)).max(2);
+            for &nr in &[1u64, 4, 8] {
+                let tmp = out.join(format!("tcp-scale-batch-r{nr}"));
+                let _ = std::fs::remove_dir_all(&tmp);
+                std::fs::create_dir_all(&tmp).unwrap();
+                let nodes = start_tcp_cluster(&bin, &tmp, nr);
+                let peers: Vec<(u64, String)> =
+                    nodes.iter().map(|n| (n.id, n.addr.to_string())).collect();
+                let thr = n_threads.max(1);
+                let step = (256u64 / nr.max(1)) as u8;
+                let peers_a = Arc::new(peers);
+                let val_a = Arc::new(val.clone());
+                let t0 = Instant::now();
+                let mut handles = Vec::new();
+                for tid in 0..thr {
+                    let peers = (*peers_a).clone();
+                    let v = Arc::clone(&val_a);
+                    let range_i = (tid as u64) % nr;
+                    let start_b = if range_i == 0 {
+                        0u8
+                    } else {
+                        (range_i as u8).saturating_mul(step)
+                    };
+                    handles.push(thread::spawn(move || {
+                        let mut cli = TcpClusterClient::new(peers).with_max_attempts(64);
+                        let mut ok_keys = 0u64;
+                        let mut ok_batches = 0u64;
+                        for b in 0..batches_per {
+                            let pairs: Vec<(Vec<u8>, Vec<u8>)> = (0..batch_sz)
+                                .map(|i| {
+                                    let mut k = vec![start_b, b't', b'b'];
+                                    k.extend_from_slice(
+                                        format!("-{tid:02}-{b:03}-{i:02}").as_bytes(),
+                                    );
+                                    (k, v.as_slice().to_vec())
+                                })
+                                .collect();
+                            for _ in 0..16 {
+                                if cli.put_batch(&pairs).is_ok() {
+                                    ok_keys += batch_sz as u64;
+                                    ok_batches += 1;
+                                    break;
+                                }
+                                thread::sleep(Duration::from_millis(20));
+                            }
+                        }
+                        (ok_keys, ok_batches)
+                    }));
+                }
+                let mut total_ok = 0u64;
+                let mut total_batches = 0u64;
+                for h in handles {
+                    let (k, b) = h.join().unwrap();
+                    total_ok += k;
+                    total_batches += b;
+                }
+                let wall = t0.elapsed();
+                let kps = total_ok as f64 / wall.as_secs_f64().max(1e-12);
+                let bps = total_batches as f64 / wall.as_secs_f64().max(1e-12);
+                benches.push(format!(
+                    r#"{{
+    "name": "S3_tcp_mt_put_batch_r{nr}_t{thr}_b{batch_sz}",
+    "ranges": {nr},
+    "threads": {thr},
+    "batch_sz": {batch_sz},
+    "keys_ok": {total_ok},
+    "batches_ok": {total_batches},
+    "keys_per_s": {kps:.3},
+    "batches_per_s": {bps:.3},
+    "wall_s": {ws:.4},
+    "note": "multi-client multi-range PutBatch; expect keys/s >> S2 as ranges+batch amortize"
+  }}"#,
+                    ws = wall.as_secs_f64(),
+                ));
+                progress!(
+                    "S3 ranges={nr} thr={thr} batch={batch_sz} ok_keys={total_ok} keys_per_s={kps:.2} batches_per_s={bps:.2}"
+                );
+                drop(nodes);
+            }
         } else {
-            notes.push("S2 skipped: montanha-tcp not found".into());
-            progress!("S2 skip: no montanha-tcp");
+            notes.push("S2/S3 skipped: montanha-tcp not found".into());
+            progress!("S2/S3 skip: no montanha-tcp");
         }
     }
 

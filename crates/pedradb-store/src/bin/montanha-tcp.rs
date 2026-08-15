@@ -52,6 +52,7 @@ fn main() {
              put:  --addr HOST:PORT --key K --value V [--peer id=addr...]\n\
              get:  --addr HOST:PORT --key K\n\
              status/tick: --addr HOST:PORT [--n N]\n\
+             elect-wait: --peer id=addr... (waits until every r*:leader is set)\n\
              smoke: --peer id=addr... (elect + put + get on real TCP cluster)\n\
              proxy: --listen ADDR --mode write|read|any --member host:dataPort[@healthPort]...\n\
              health HTTP: GET /ready /leader /follower /status on --health (default bind_port+79)"
@@ -1231,31 +1232,76 @@ fn cmd_set_peers(args: &[String]) {
     }
 }
 
+/// Parse all `rN:leader=X` tokens from status_text.
+/// Returns `(range_id, Some(leader)|None)` for each range mentioned.
+fn parse_range_leaders(status: &str) -> Vec<(u64, Option<u64>)> {
+    let mut out = Vec::new();
+    for part in status.split_whitespace() {
+        // r1:leader=2  or  r3:leader=-
+        let Some(rest) = part.strip_prefix('r') else {
+            continue;
+        };
+        let Some((rid_s, lead_s)) = rest.split_once(":leader=") else {
+            continue;
+        };
+        let Ok(rid) = rid_s.parse::<u64>() else {
+            continue;
+        };
+        let lead = if lead_s == "-" {
+            None
+        } else {
+            lead_s.parse::<u64>().ok()
+        };
+        out.push((rid, lead));
+    }
+    out
+}
+
+/// True when status lists ≥1 range and **every** range has a non-dash leader.
+fn all_ranges_have_leaders(status: &str) -> bool {
+    let leaders = parse_range_leaders(status);
+    !leaders.is_empty() && leaders.iter().all(|(_, l)| l.is_some())
+}
+
 fn cmd_elect_wait(args: &[String]) {
     let peers = flag_peers(args);
     if peers.is_empty() {
         eprintln!("need --peer");
         process::exit(2);
     }
-    let deadline = Instant::now() + Duration::from_secs(45);
+    // Multi-range: wait until **every** r*:leader is set (not just the first).
+    // Nodes auto-tick every 50ms; we also nudge ticks so election progresses
+    // even if the accept loop is idle under light load.
+    let deadline = Instant::now() + Duration::from_secs(60);
+    let mut last_st = String::new();
     while Instant::now() < deadline {
         for (&id, addr) in &peers {
+            let _ = client_tick(addr, 2);
             if let Ok(st) = client_status(addr) {
-                for part in st.split_whitespace() {
-                    if let Some(rest) = part.strip_prefix("r") {
-                        if let Some((_, lead)) = rest.split_once(":leader=") {
-                            if lead != "-" {
-                                println!("elected leader={lead} (from node {id}) status={st}");
-                                return;
-                            }
-                        }
-                    }
+                last_st = st.clone();
+                if all_ranges_have_leaders(&st) {
+                    let leaders = parse_range_leaders(&st);
+                    let summary: Vec<String> = leaders
+                        .iter()
+                        .map(|(r, l)| {
+                            format!(
+                                "r{}={}",
+                                r,
+                                l.map(|x| x.to_string()).unwrap_or_else(|| "-".into())
+                            )
+                        })
+                        .collect();
+                    println!(
+                        "elected all ranges ({}) from node {id} status={st}",
+                        summary.join(" ")
+                    );
+                    return;
                 }
             }
         }
-        thread::sleep(Duration::from_millis(150));
+        thread::sleep(Duration::from_millis(100));
     }
-    eprintln!("elect-wait timeout");
+    eprintln!("elect-wait timeout (need every r*:leader set); last status={last_st}");
     process::exit(1);
 }
 

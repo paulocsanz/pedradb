@@ -1,0 +1,136 @@
+{
+  "bench": "montanha-fdb-shaped-v1",
+  "host": "unknown",
+  "suite": "scale",
+  "nodes": 3,
+  "payload_bytes": 64,
+  "n_default": 16,
+  "tx_keys": 8,
+  "multi_ranges": 4,
+  "threads": 4,
+  "warmup": 20,
+  "benches": [
+    {
+    "name": "S1_disjoint_put_r1",
+    "ranges": 1,
+    "keys": 16,
+    "keys_per_s": 2.378,
+    "wall_s": 6.7297,
+    "note": "RFC-0025 P2.2 / 0021 scale option A"
+  },
+    {
+    "name": "S1_disjoint_put_r2",
+    "ranges": 2,
+    "keys": 16,
+    "keys_per_s": 2.261,
+    "wall_s": 7.0769,
+    "note": "RFC-0025 P2.2 / 0021 scale option A"
+  },
+    {
+    "name": "S1_disjoint_put_r4",
+    "ranges": 4,
+    "keys": 16,
+    "keys_per_s": 1.981,
+    "wall_s": 8.0752,
+    "note": "RFC-0025 P2.2 / 0021 scale option A"
+  },
+    {
+    "name": "S1_disjoint_put_r8",
+    "ranges": 8,
+    "keys": 16,
+    "keys_per_s": 2.084,
+    "wall_s": 7.6768,
+    "note": "RFC-0025 P2.2 / 0021 scale option A"
+  },
+    {
+    "name": "S2_tcp_mt_put_r1_t4",
+    "ranges": 1,
+    "threads": 4,
+    "keys_ok": 16,
+    "keys_per_s": 2.256,
+    "wall_s": 7.0908,
+    "note": "multi-client multi-range; expect higher keys/s as ranges increase if leaders parallelize"
+  },
+    {
+    "name": "S2_tcp_mt_put_r4_t4",
+    "ranges": 4,
+    "threads": 4,
+    "keys_ok": 16,
+    "keys_per_s": 4.017,
+    "wall_s": 3.9834,
+    "note": "multi-client multi-range; expect higher keys/s as ranges increase if leaders parallelize"
+  },
+    {
+    "name": "S2_tcp_mt_put_r8_t4",
+    "ranges": 8,
+    "threads": 4,
+    "keys_ok": 16,
+    "keys_per_s": 0.123,
+    "wall_s": 130.6106,
+    "note": "multi-client multi-range; expect higher keys/s as ranges increase if leaders parallelize"
+  },
+    {
+    "name": "S3_tcp_mt_put_batch_r1_t4_b8",
+    "ranges": 1,
+    "threads": 4,
+    "batch_sz": 8,
+    "keys_ok": 128,
+    "batches_ok": 16,
+    "keys_per_s": 3.154,
+    "batches_per_s": 0.394,
+    "wall_s": 40.5839,
+    "note": "multi-client multi-range PutBatch; expect keys/s >> S2 as ranges+batch amortize"
+  },
+    {
+    "name": "S3_tcp_mt_put_batch_r4_t4_b8",
+    "ranges": 4,
+    "threads": 4,
+    "batch_sz": 8,
+    "keys_ok": 128,
+    "batches_ok": 16,
+    "keys_per_s": 0.837,
+    "batches_per_s": 0.105,
+    "wall_s": 152.8370,
+    "note": "multi-client multi-range PutBatch; expect keys/s >> S2 as ranges+batch amortize"
+  },
+    {
+    "name": "S3_tcp_mt_put_batch_r8_t4_b8",
+    "ranges": 8,
+    "threads": 4,
+    "batch_sz": 8,
+    "keys_ok": 128,
+    "batches_ok": 16,
+    "keys_per_s": 0.455,
+    "batches_per_s": 0.057,
+    "wall_s": 281.5591,
+    "note": "multi-client multi-range PutBatch; expect keys/s >> S2 as ranges+batch amortize"
+  }
+  ],
+  "limitations": [
+    "In-process core suite: no real NIC (suite tcp adds real localhost TCP).",
+    "C1 Mutex multi-thread serializes StoreCluster — concurrent waiters, not parallel leaders.",
+    "D4 multi-thread TCP is the honest concurrent client path on one range.",
+    "FDB face path (A3) includes OCC bookkeeping; compare to A1 raw put for face overhead.",
+    "Multi-range TX (B2) exercises cross-range 2PC; expect cliff vs A4.",
+    "E1 mini-bt: model-checked random soak + multi-key + WW pairs (not full bindingtester).",
+    "E2 TCP multi-client: partitioned keys per thread + majority verify (true concurrent writers).",
+    "Not YCSB / not production FDB — see docs/montanha-vs-fdb-bench.md."
+  ],
+  "anomalies": [],
+  "vs_fdb": {
+    "claim": "not field peer",
+    "how_to_compare": "docs/montanha-vs-fdb-bench.md",
+    "fdb_workloads": [
+      "single key set/get (A1/A3/D1)",
+      "multi-key transaction (A4/D3)",
+      "get_range (A5)",
+      "clear_range (A6)",
+      "hot key conflicts (A7)",
+      "index+row TX (A8)",
+      "multi-shard / multi-range TX (B2)",
+      "multi-client TCP (D4)",
+      "random soak (E1)",
+      "TCP multi-client mini-bt (E2)"
+    ]
+  }
+}

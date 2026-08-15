@@ -54,7 +54,7 @@
 ### P2 — later / polish
 
 - [x] **P2.1** Optional FDB comparator (`montanha-fdb-compare`, template if no fdbcli) — status: `done`  
-- [x] **P2.2** Scale probe S1 (seq) + **S2 multi-client multi-range TCP** + reconfirm option A — status: `done`  
+- [x] **P2.2** Scale probe S1 (seq) + **S2 multi-client multi-range TCP** + **S3 PutBatch multi-client** + reconfirm option A — status: `done`  
 - [x] **P2.3** Read capacity doc + `get_strong`/`get_fast_replica` tests/bench B4 — status: `done`  
 
 ## Status (living — update with every PR)
@@ -69,7 +69,7 @@
 | P1.3 | p1 | TCP PutBatch wire | done | tag 17 + client | 2026-08-14 |
 | P1.4 | p1 | layer batch defaults | done | table_put/docs | 2026-08-14 |
 | P2.1 | p2 | FDB side comparator | done | montanha-fdb-compare | 2026-08-14 |
-| P2.2 | p2 | scale A vs B decision | done | suite scale + 0021 update | 2026-08-14 |
+| P2.2 | p2 | scale A vs B decision | done | S1/S2/S3 + elect-wait all-ranges + 0021 | 2026-08-14 |
 | P2.3 | p2 | strong RO capacity | done | montanha-read-capacity.md | 2026-08-14 |
 
 ## Acceptance Criteria

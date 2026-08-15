@@ -23,18 +23,29 @@
 |--------|--------|
 | 1–8 | ~0.9–2.1 (flat) |
 
-**S2 — 4 TCP clients, keys partitioned by range (N=16 total ok)**
+**S2 — 4 TCP clients, keys partitioned by range (N=16 total ok)** — re-run `findings/fdb-bench-scale-s3/` 2026-08-14
 
-| Ranges | keys/s | vs 1-range |
-|--------|--------|------------|
-| 1 | ~1.9 | 1× (hot leader) |
-| 4 | ~5.2 | **~2.7×** |
-| 8 | ~8.4 | **~4.3×** |
+| Ranges | keys/s | vs 1-range | notes |
+|--------|--------|------------|-------|
+| 1 | ~2.3 | 1× | hot leader |
+| 4 | ~4.0 | **~1.8×** | multi-client multi-range |
+| 8 | ~0.12 | cliff | 8 groups + thr=4; HB/retry tax (not a linear win) |
 
-**Read:** sequential client cannot exercise multi-leader parallelism. **Multi-client multi-range proves option A**: more ranges ⇒ higher aggregate put QPS when writers fan out. Artifact: `findings/fdb-bench-scale-s2c/`. Option B (unbundle) still not justified.
+Earlier s2c lab had higher r8 (~8.4 keys/s); **r8 is noisy** under thr≪ranges. Treat **r4 multi-client** as the stable option-A signal.
+
+**S3 — same topology, TCP `PutBatch` (batch=8, 4 thr, 128 keys)**
+
+| Ranges | keys/s | batches/s | notes |
+|--------|--------|-----------|-------|
+| 1 | ~3.2 | ~0.39 | **key amortization** vs S2 single-put (~2.3) |
+| 4 | ~0.84 | ~0.10 | concurrent PutBatch + colocated leaders hurts |
+| 8 | ~0.45 | ~0.06 | same residual as S2 r8 |
+
+**Read:** sequential client cannot exercise multi-leader parallelism. **S2 at 4 ranges proves option A** under multi-client. **S3 proves PutBatch key amortization on one range**; multi-range batch still needs better leader spread + less worker contention (residual, not flip to B). Artifacts: `findings/fdb-bench-scale-s2c/`, `findings/fdb-bench-scale-s3/`. Option B (unbundle) still not justified.
 
 Rationale:
-- Lab multi-Raft scales write capacity under concurrent partitioned clients.
+- Lab multi-Raft scales write capacity under concurrent partitioned clients (S2 r1→r4).
+- PutBatch is the right bulk path (S3 r1); multi-range batch needs more soak.
 - Unbundling (B) is higher cost until multi-client multi-range saturates CPU with amortised fsync.
 - Layers should shard by range prefix and open N writers (not one hot client).
 
