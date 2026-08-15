@@ -127,6 +127,10 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - name: scale option-A gate
         run: bash scripts/montanha_scale_gate_v0.sh findings/scale-gate-ci
+      - name: scale option-A gate (Pedra L0 write backpressure)
+        env:
+          MONTANHA_WRITE_BACKPRESSURE: "1"
+        run: bash scripts/montanha_scale_gate_v0.sh findings/scale-gate-ci-bp
       - name: mini-bt soak (in-process + TCP multi-client)
         run: cargo test -p pedradb-store --test mini_bt_soak -- --nocapture
       - name: fdb-compare (Montanha extract; FDB optional)
@@ -141,5 +145,6 @@ jobs:
           name: montanha-scale-compare
           path: |
             findings/scale-gate-ci/scale_report.json
+            findings/scale-gate-ci-bp/scale_report.json
             findings/fdb-compare-ci/compare_report.json
             findings/fdb-compare-ci/fdb_shaped_peer.template.json

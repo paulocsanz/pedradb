@@ -43,8 +43,10 @@ Last updated: 2026-08-14 (RFC-0024 done: Montanha fold for Caixote)
 | 11 | Streaming range / lazy blocks (RFC-0014 P1) | ✅ done | scan + lazy SST blocks + levels + lz4 | — |
 | 12 | Audit correctness fixes (RFC-0015) | ✅ done | fence, sync_dir, Env seams, compact stats, deny CI | — |
 
-**Next action:** Full bindingtester / Java RL only if requested; FDB **field** peer numbers need lab `fdbserver`. Value-store pick C (0029) done including CLI `compact-blob` / `blob-gc`.  
-**CI (2026-08-15):** `synthetic-field` job **montanha-scale-and-compare** — scale_gate + mini_bt_soak + fdb-compare template (no FDB required).  
+**Next action:** Full bindingtester / Java RL only if requested; FDB **field** peer numbers need lab `fdbserver`. Value-store pick C (0029) done including CLI `compact-blob` / `blob-gc` / `maintain`.  
+**CI:** `synthetic-field` **montanha-scale-and-compare** — scale_gate (± `MONTANHA_WRITE_BACKPRESSURE=1`) + mini_bt_soak + fdb-compare template (no FDB required).  
+**Shipped (admission):** Pedra L0/mem write stall + soft pressure; Montanha `StoreError::WriteStall*`; lab flags on scale-gate / fdb-bench / perf-gate / montanha-tcp.  
+
 **DST soak / FDB compare / scale S1–S10:** see prior notes + [montanha-vs-fdb-bench.md](montanha-vs-fdb-bench.md).  
 **Shipped Phase 1–3 + A–E continuum:** [montanha-fdb-phases.md](montanha-fdb-phases.md) — fdb-compat 12-step harness (`clear_range`), etcd multiproc + **TCP DCS wire**, `RecordTable` unique/multi-index, platform need faces (CP/OLAP/stream), F47–F49 residuals.  
 **Shipped (bench):** `montanha-fdb-bench` — FDB-shaped microbenches + TCP multi-client + mini-bt E1/E2 → `fdb_shaped_bench.json`; method in [montanha-vs-fdb-bench.md](montanha-vs-fdb-bench.md).  
