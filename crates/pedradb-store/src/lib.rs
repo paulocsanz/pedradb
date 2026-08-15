@@ -3775,9 +3775,11 @@ impl<E: Env> StoreCluster<E> {
                         .map(|p| p.commit)
                         .unwrap_or(0);
                     if !commit_kernel::propose_ack_ok(idx, commit_now) {
-                        // Best-effort: discard must not be blocked by dead disks
-                        // on a subset of peers (in-memory truncate still runs).
-                        let _ = self.discard_uncommitted_from(rid, leader, idx);
+                        // F129: surface leader discard failure (F128). Followers
+                        // remain best-effort inside discard_uncommitted_from.
+                        if let Err(de) = self.discard_uncommitted_from(rid, leader, idx) {
+                            return Err(de);
+                        }
                     }
                 }
             }
@@ -3872,8 +3874,9 @@ impl<E: Env> StoreCluster<E> {
                 .unwrap_or(0);
             if !commit_kernel::propose_ack_ok(idx, commit_now) {
                 if self.rpc_mode == RpcMode::Direct {
-                    // Best-effort discard under partial disk death (F47).
-                    let _ = self.discard_uncommitted_from(rid, leader, idx);
+                    // F129: if leader cannot durable-truncate the orphan, prefer
+                    // that error over a clean NotCommitted (orphan may reopen).
+                    self.discard_uncommitted_from(rid, leader, idx)?;
                 }
                 return Err(StoreError::NotCommitted {
                     range_id: rid,
@@ -4941,14 +4944,18 @@ impl<E: Env> StoreCluster<E> {
     /// entry after a failed `tx_finish` + heal/elect) cannot materialise user keys.
     ///
     /// [`apply_txn_commit`] treats status `abort` as no-op for the put path.
-    fn fence_txn_aborted(&mut self, txn_id: u64) {
+    ///
+    /// # Errors
+    /// F130: fence put failure must surface — a silent miss lets TxnCommit apply.
+    fn fence_txn_aborted(&mut self, txn_id: u64) -> Result<()> {
         let key = txn_status_key(txn_id);
         let ids = self.ids.clone();
         for nid in ids {
             if let Some(n) = self.nodes.get_mut(&nid) {
-                let _ = n.db.put(&key, b"abort");
+                n.db.put(&key, b"abort")?;
             }
         }
+        Ok(())
     }
 
     /// Try raft cleanup; always force-local clear so leaderless ranges cannot stick intents.
@@ -5016,7 +5023,10 @@ impl<E: Env> StoreCluster<E> {
                     // Ranges that already majority-committed TxnCommit must get
                     // a majority TxnRevert on the same raft log. Local fence
                     // remains defense-in-depth for reopen/apply.
-                    self.fence_txn_aborted(handle.id);
+                    // F130: fence failure must not be silent.
+                    if let Err(fe) = self.fence_txn_aborted(handle.id) {
+                        return Err(fe);
+                    }
                     // F122: prefer surfacing corrupt-preimage cleanup failure
                     // over the original NotLeader (otherwise aborted writes stick).
                     let mut cleanup_err: Option<StoreError> = None;
@@ -5040,7 +5050,9 @@ impl<E: Env> StoreCluster<E> {
                             }
                         }
                     }
-                    self.fence_txn_aborted(handle.id);
+                    if let Err(fe) = self.fence_txn_aborted(handle.id) {
+                        return Err(cleanup_err.unwrap_or(fe));
+                    }
                     return Err(cleanup_err.unwrap_or(e));
                 }
             }
@@ -5153,7 +5165,7 @@ impl<E: Env> StoreCluster<E> {
     /// Abort a prepared TX (drop intents on all peers, even without leaders).
     pub fn tx_cancel(&mut self, handle: &TxHandle) -> Result<()> {
         // F47: fence first so in-flight/uncommitted TxnCommit cannot apply later.
-        self.fence_txn_aborted(handle.id);
+        self.fence_txn_aborted(handle.id)?;
         // Revert (not abort-only): a failed `tx_finish` may have materialised
         // some ranges before disk death; abort would drop intents and leave
         // those user keys. Restore prepare-time preimages (F34).
@@ -5161,7 +5173,7 @@ impl<E: Env> StoreCluster<E> {
             let keys = Self::keys_for_range(handle, *rid).to_vec();
             self.cleanup_range_keys(*rid, handle.id, &keys, CleanupMode::Revert)?;
         }
-        self.fence_txn_aborted(handle.id);
+        self.fence_txn_aborted(handle.id)?;
         Ok(())
     }
 
@@ -8648,6 +8660,75 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// F129: propose path must surface discard failure (not only NotCommitted).
+    #[test]
+    fn put_not_committed_surfaces_discard_persist_fail() {
+        use pedradb_sim::{FailingEnv, SeedRng};
+        let dir = temp();
+        let e1 = FailingEnv::passing();
+        let e2 = FailingEnv::passing();
+        let e3 = FailingEnv::passing();
+        let mut c = StoreCluster::open_with_envs_rng(
+            &dir,
+            3,
+            1,
+            [e1.clone(), e2, e3],
+            SeedRng::new(0xF129),
+        )
+        .unwrap();
+        c.elect_all(120).unwrap();
+        for _ in 0..60 {
+            if c.range_leader(1) == Some(1) {
+                break;
+            }
+            let _ = c.step_down_range_leader(1);
+            let _ = c.tick();
+            let _ = c.elect_all(20);
+        }
+        assert_eq!(c.range_leader(1), Some(1));
+        // Minority: put cannot majority-commit → discard path runs.
+        c.set_participating(2, false).unwrap();
+        c.set_participating(3, false).unwrap();
+        // Propose persists the orphan (1 write); discard re-persists truncate (2nd).
+        // Arm remaining=1 → propose ok, discard fail → must not return clean NotCommitted.
+        e1.arm(1, true);
+        let err = c.put(b"orphan", b"x");
+        match err {
+            Err(StoreError::NotCommitted { .. }) => panic!(
+                "F129: discard persist fail must surface as disk error, not clean NotCommitted"
+            ),
+            Err(_) => {}
+            Ok(()) => panic!("put without majority must not Ok"),
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// F130: abort fence put failure must surface (not silent).
+    #[test]
+    fn fence_txn_aborted_persist_fail_is_err() {
+        use pedradb_sim::{FailingEnv, SeedRng};
+        let dir = temp();
+        let e1 = FailingEnv::passing();
+        let e2 = FailingEnv::passing();
+        let e3 = FailingEnv::passing();
+        let mut c = StoreCluster::open_with_envs_rng(
+            &dir,
+            3,
+            1,
+            [e1.clone(), e2, e3],
+            SeedRng::new(0xF130),
+        )
+        .unwrap();
+        c.elect_all(80).unwrap();
+        e1.arm_one_failure();
+        let err = c.fence_txn_aborted(42);
+        assert!(
+            err.is_err(),
+            "fence must fail closed when status put fails: {err:?}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// F128: leader discard of uncommitted index must durable-truncate its log.
     #[test]
     fn discard_uncommitted_leader_persist_fail_is_err() {
@@ -9252,6 +9333,51 @@ mod tests {
             })
             .count();
         assert!(n >= 2, "recreate must majority-replicate; seen={n}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// F129: persist_now_ms marked RAM persisted even when every replica put failed.
+    /// A later retry was skipped; reopen reloaded now_ms=0 and the expired lock
+    /// reanimated (F56 inverse).
+    #[test]
+    fn persist_now_ms_retries_after_all_replica_put_fail() {
+        use pedradb_sim::{FailingEnv, SeedRng};
+        let dir = temp();
+        let e1 = FailingEnv::passing();
+        let e2 = FailingEnv::passing();
+        let e3 = FailingEnv::passing();
+        let key = meta_key(b"ttl-lock");
+        {
+            let mut c = StoreCluster::open_with_envs_rng(
+                &dir,
+                3,
+                1,
+                [e1.clone(), e2.clone(), e3.clone()],
+                SeedRng::new(0xF129),
+            )
+            .unwrap();
+            c.set_ms_per_tick(0);
+            c.elect_all(80).unwrap();
+            c.dcs_create_ttl(&key, b"holder-a", 100).unwrap();
+            e1.arm_one_failure();
+            e2.arm_one_failure();
+            e3.arm_one_failure();
+            c.advance_now_ms(100);
+            assert!(
+                c.dcs_get_on(1, &key).unwrap().is_none(),
+                "RAM clock past deadline must hide the lock"
+            );
+            e1.disarm();
+            e2.disarm();
+            e3.disarm();
+            c.persist_now_ms();
+        }
+        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        c.elect_all(40).unwrap();
+        assert!(
+            c.dcs_get_on(1, &key).unwrap().is_none(),
+            "expired TTL must stay dead after reopen; now_ms must have been retried to disk"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
