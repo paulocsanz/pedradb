@@ -91,9 +91,9 @@ slice can be implemented.
   [`CoreError::SnapshotTooOld`](../crates/pedradb-core/src/error.rs) fail-closed
   (Montanha already maps store-level too-old to FDB `transaction_too_old`).
 
-**Still open:** auto-compact does **not** call `compact_reclaim` by default
-(would change latency/space for workloads that rely on long bare snapshots
-without pins).
+**Opt-in auto path:** `set_auto_reclaim(true)` makes threshold auto-compact use
+snapshot-safe reclaim (pin floor or last seq) and advance the too-old watermark.
+**Default remains off** (F20: bare `Snapshot` history preserved across auto-compact).
 
 **Options (historical):**
 - **(a) Stop-the-world pause:** scan all versions, remove those older than the

@@ -468,6 +468,9 @@ pub struct Db<E: Env = StdEnv> {
     /// When set, best-effort [`Self::compact_blob_auto`] after flush / latest_only
     /// compact (RFC-0026 residual: no bg thread — runs on write path).
     auto_blob_gc_min_ratio: Option<f64>,
+    /// When true, auto-compact uses snapshot-safe reclaim GC (open-items §2.1)
+    /// instead of history-preserving merge. Off by default (F20).
+    auto_reclaim: bool,
     /// Open [`SnapshotPin`]s: pin id → sequence (open-items §2.1).
     snapshot_pins: std::collections::BTreeMap<u64, SequenceNumber>,
     /// Next pin id (monotonic; never reused for this process open).
@@ -658,6 +661,7 @@ impl<E: Env> Db<E> {
             scan_prefetch: 4,
             prefetch_hits: AtomicU64::new(0),
             auto_blob_gc_min_ratio: None,
+            auto_reclaim: false,
             snapshot_pins: std::collections::BTreeMap::new(),
             next_snapshot_pin_id: 1,
             earliest_readable_seq: 0,
@@ -933,6 +937,27 @@ impl<E: Env> Db<E> {
     /// (no background thread — write-path only; RFC-0026 residual).
     pub fn set_auto_blob_gc_min_ratio(&mut self, min_dead_ratio: Option<f64>) {
         self.auto_blob_gc_min_ratio = min_dead_ratio.map(|r| r.clamp(0.0, 1.0));
+    }
+
+    /// Opt-in: auto-compact runs snapshot-safe version reclaim (open-items §2.1).
+    ///
+    /// When **on**, threshold auto-compact uses
+    /// [`CompactGcOptions::for_oldest_snapshot`] (oldest open [`SnapshotPin`], or
+    /// last sequence if none) and advances the too-old watermark. Bare
+    /// [`Snapshot`] tokens without pins become [`CoreError::SnapshotTooOld`] after
+    /// reclaim — use [`Self::pin_snapshot`] for long-lived reads.
+    ///
+    /// When **off** (default, F20): auto-compact only merges levels and keeps
+    /// all versions. Explicit reclaim remains [`Self::compact_reclaim`] /
+    /// [`CompactOptions::latest_only`].
+    pub fn set_auto_reclaim(&mut self, enabled: bool) {
+        self.auto_reclaim = enabled;
+    }
+
+    /// Whether auto-compact uses snapshot-safe reclaim GC.
+    #[must_use]
+    pub fn auto_reclaim(&self) -> bool {
+        self.auto_reclaim
     }
 
     /// Current auto blob-GC threshold, if enabled.
@@ -3357,10 +3382,22 @@ impl<E: Env> Db<E> {
             false
         };
         if count_hit || bytes_hit || l0_hit {
-            // F20: do **not** use latest_only here — that dropped historical versions
-            // and broke `get_at` / Snapshot for sequences still "open" in the app.
-            // Space-bound GC is explicit: `compact_with(CompactOptions::latest_only())`.
-            self.compact_with(CompactOptions::default())?;
+            if self.auto_reclaim {
+                // Opt-in §2.1: piggyback snapshot-safe GC on auto-compact.
+                // Already post-flush — SST-only; floor = oldest pin or last seq.
+                let oldest = self
+                    .oldest_pinned_sequence()
+                    .unwrap_or_else(|| self.last_sequence());
+                self.compact_with_ssts_only(CompactOptions {
+                    gc: crate::merge::CompactGcOptions::for_oldest_snapshot(oldest),
+                })?;
+            } else {
+                // F20: do **not** use latest_only here — that dropped historical
+                // versions and broke `get_at` / bare Snapshot for sequences still
+                // "open" in the app. Explicit reclaim: `compact_reclaim` /
+                // `latest_only`, or `set_auto_reclaim(true)`.
+                self.compact_with(CompactOptions::default())?;
+            }
             // Successful auto-compact clears the last-error slot (counter stays cumulative).
             self.last_auto_compact_error = None;
         }
@@ -5058,6 +5095,7 @@ mod tests {
             },
         )
         .unwrap();
+        assert!(!db.auto_reclaim());
         db.put(b"k", b"old").unwrap();
         let snap = db.snapshot();
         db.flush().unwrap();
@@ -5071,6 +5109,61 @@ mod tests {
             Some(b"old".as_ref()),
             "F20: auto-compact must not GC versions still visible at open snapshots"
         );
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Opt-in auto_reclaim: bare snap becomes SnapshotTooOld; pin is preserved.
+    #[test]
+    fn auto_reclaim_on_auto_compact() {
+        let dir = temp_dir();
+        let mut db = Db::open_with(
+            &dir,
+            OpenOptions {
+                sync: true,
+                auto_flush_bytes: None,
+                auto_compact_sst_count: Some(2),
+                auto_compact_sst_bytes: None,
+                exclusive: true,
+                large_value_threshold: None,
+            },
+        )
+        .unwrap();
+        db.set_auto_reclaim(true);
+        assert!(db.auto_reclaim());
+
+        db.put(b"k", b"old").unwrap();
+        let bare = db.snapshot();
+        let pin = db.pin_snapshot();
+        db.flush().unwrap();
+        db.put(b"k", b"new").unwrap();
+        db.flush().unwrap(); // auto-compact + reclaim with pin floor
+
+        assert_eq!(db.get(b"k").as_deref(), Some(b"new".as_ref()));
+        assert_eq!(
+            db.get_at(pin.snapshot(), b"k").unwrap().as_deref(),
+            Some(b"old".as_ref()),
+            "pin must survive auto_reclaim"
+        );
+        // Watermark at pin seq → bare snap at same seq still ok; below fails.
+        // After reclaim with pin at old, floor is pin.seq; bare equals pin so ok.
+        assert_eq!(
+            db.get_at(bare, b"k").unwrap().as_deref(),
+            Some(b"old".as_ref())
+        );
+
+        db.release_snapshot_pin(pin);
+        // Next reclaim without pins → watermark = last_seq; bare too old.
+        db.put(b"k", b"newer").unwrap();
+        db.flush().unwrap();
+        db.put(b"x", b"1").unwrap();
+        db.flush().unwrap();
+        let err = db.get_at(bare, b"k").unwrap_err();
+        assert!(
+            matches!(err, CoreError::SnapshotTooOld { .. }),
+            "bare snap after unpin+reclaim: {err:?}"
+        );
+        assert_eq!(db.get(b"k").as_deref(), Some(b"newer".as_ref()));
         db.close().unwrap();
         let _ = fs::remove_dir_all(&dir);
     }

@@ -215,6 +215,17 @@ impl<E: Env> ConcurrentDb<E> {
         self.inner.read().earliest_readable_sequence()
     }
 
+    /// Opt-in auto-compact reclaim (see [`Db::set_auto_reclaim`]).
+    pub fn set_auto_reclaim(&self, enabled: bool) {
+        self.inner.write().set_auto_reclaim(enabled);
+    }
+
+    /// Whether auto-compact uses snapshot-safe reclaim.
+    #[must_use]
+    pub fn auto_reclaim(&self) -> bool {
+        self.inner.read().auto_reclaim()
+    }
+
     /// Fail closed when a snapshot is below the GC watermark.
     ///
     /// # Errors
