@@ -3589,8 +3589,18 @@ impl<E: Env> StoreCluster<E> {
                     match_index: 0,
                 });
             }
+            // F144 residual of F127/F124: higher-term install used to call
+            // become_follower (RAM term bump + clear vote) then roll back only
+            // snap/commit/applied on persist fail — non-durable higher term stuck.
             if term > p.term {
-                p.become_follower(term);
+                if !durable_become_follower_if_newer(&mut n.db, range_id, p, term) {
+                    return Ok(PeerMsg::InstallSnapshotReply {
+                        range_id,
+                        term: p.term,
+                        success: false,
+                        match_index: 0,
+                    });
+                }
             } else {
                 p.role = Role::Follower;
                 p.election_left = p.election_timeout;
@@ -3610,6 +3620,8 @@ impl<E: Env> StoreCluster<E> {
             p.commit = p.commit.max(last_included_index);
             p.applied = p.applied.max(last_included_index);
             if let Err(e) = (|| -> Result<()> {
+                // Hard already durable when term was raised above; re-persist is
+                // cheap and covers same-term follower role path.
                 persist_hard_db(&mut n.db, range_id, p)?;
                 persist_snap_db(&mut n.db, range_id, p)?;
                 persist_log_db(&mut n.db, range_id, p)?;
@@ -3618,6 +3630,8 @@ impl<E: Env> StoreCluster<E> {
                 Ok(())
             })() {
                 // Roll back in-memory watermarks; leave user keys untouched.
+                // Term/vote already handled by durable_become_follower (durable
+                // higher term stays; non-durable bump was never applied).
                 p.snapshot_index = prev_snap_i;
                 p.snapshot_term = prev_snap_t;
                 p.log = prev_log;
@@ -8989,6 +9003,76 @@ mod tests {
             c.get_on(3, b"keep").unwrap().as_deref(),
             Some(b"v".as_ref()),
             "user key must survive failed install-snapshot persist"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// F144: higher-term install-snapshot must not leave a non-durable term bump
+    /// when raft meta persist fails (F127 residual on the install path).
+    #[test]
+    fn install_snapshot_higher_term_persist_fail_does_not_stick_term() {
+        use pedradb_sim::{FailingEnv, SeedRng};
+        let dir = temp();
+        let e1 = FailingEnv::passing();
+        let e2 = FailingEnv::passing();
+        let e3 = FailingEnv::passing();
+        let mut c = StoreCluster::open_with_envs_rng(
+            &dir,
+            3,
+            1,
+            [e1, e2, e3.clone()],
+            SeedRng::new(0xF144),
+        )
+        .unwrap();
+        c.elect_all(80).unwrap();
+        c.put(b"keep", b"v").unwrap();
+        let rid = c.locate(b"keep").unwrap();
+        let leader = c.range_leader(rid).unwrap();
+        let (peer_term, snap_i, snap_t) = {
+            let p = c.nodes.get(&3).unwrap().ranges.get(&rid).unwrap();
+            (p.term, p.applied.max(1), p.term.max(1))
+        };
+        let high = peer_term.saturating_add(5).max(2);
+        e3.arm_one_failure();
+        let reply = c
+            .on_install_snapshot(3, rid, high, leader, snap_i, snap_t, vec![])
+            .unwrap();
+        match reply {
+            PeerMsg::InstallSnapshotReply {
+                success: false,
+                term: reply_term,
+                ..
+            } => {
+                assert_eq!(
+                    reply_term, peer_term,
+                    "reply term must be pre-install term when hard bump fails"
+                );
+            }
+            other => panic!("expected success=false, got {other:?}"),
+        }
+        let after = c.nodes.get(&3).unwrap().ranges.get(&rid).unwrap().term;
+        assert_eq!(
+            after, peer_term,
+            "AS-IS stuck at non-durable higher term {high}; must stay {peer_term}, got {after}"
+        );
+        // Disk hard must match RAM (no reopen surprise).
+        let hard_raw = c
+            .nodes
+            .get(&3)
+            .unwrap()
+            .db
+            .get(&raft_meta_key(rid, "hard"));
+        if let Some(raw) = hard_raw {
+            let (disk_term, _) = decode_hard(raw.as_ref()).expect("hard decodes");
+            assert_eq!(
+                disk_term, peer_term,
+                "disk hard term must not advance without durable install"
+            );
+        }
+        assert_eq!(
+            c.get_on(3, b"keep").unwrap().as_deref(),
+            Some(b"v".as_ref()),
+            "user key must survive"
         );
         let _ = std::fs::remove_dir_all(&dir);
     }
