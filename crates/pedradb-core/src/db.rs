@@ -1530,13 +1530,18 @@ impl<E: Env> Db<E> {
             .chain(self.flush_read_pin.as_ref())
     }
 
-    /// After L0 install: rotate WAL if safe + opportunistic compact.
+    /// After L0 install: rotate WAL if safe + opportunistic compact / blob GC.
+    ///
+    /// Used by [`crate::concurrent::ConcurrentDb::flush`] so the dual-mem
+    /// pipeline matches single-threaded [`Self::flush`] post-steps
+    /// (auto-compact + optional auto blob GC).
     ///
     /// # Errors
     /// WAL rotate I/O.
     pub fn finish_flush_pipeline(&mut self) -> Result<()> {
         self.try_rotate_wal()?;
         self.run_auto_compact_best_effort();
+        self.run_auto_blob_gc_best_effort();
         Ok(())
     }
 

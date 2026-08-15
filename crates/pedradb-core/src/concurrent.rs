@@ -112,10 +112,8 @@ impl WriteGroup {
 
             // One write lock for the whole group: append all + one fsync + apply all.
             let mut guard = db.write();
-            let inputs: Vec<(Vec<BatchOp>, bool)> = batch
-                .iter()
-                .map(|p| (p.ops.clone(), p.do_sync))
-                .collect();
+            let inputs: Vec<(Vec<BatchOp>, bool)> =
+                batch.iter().map(|p| (p.ops.clone(), p.do_sync)).collect();
             let results = guard.group_commit(inputs);
             drop(guard);
 
@@ -196,11 +194,7 @@ impl<E: Env> ConcurrentDb<E> {
 
     /// Range collect (read lock).
     #[must_use]
-    pub fn range(
-        &self,
-        start: Bound<&[u8]>,
-        end: Bound<&[u8]>,
-    ) -> Vec<(Bytes, Bytes)> {
+    pub fn range(&self, start: Bound<&[u8]>, end: Bound<&[u8]>) -> Vec<(Bytes, Bytes)> {
         self.inner.read().range(start, end)
     }
 
@@ -208,11 +202,7 @@ impl<E: Env> ConcurrentDb<E> {
     ///
     /// Values are resolved through the value log when large-value pointers are present.
     #[must_use]
-    pub fn scan_collect(
-        &self,
-        start: Bound<&[u8]>,
-        end: Bound<&[u8]>,
-    ) -> Vec<(Bytes, Bytes)> {
+    pub fn scan_collect(&self, start: Bound<&[u8]>, end: Bound<&[u8]>) -> Vec<(Bytes, Bytes)> {
         self.inner
             .read()
             .scan(start, end)
@@ -276,11 +266,7 @@ impl<E: Env> ConcurrentDb<E> {
     ) -> Result<SequenceNumber> {
         let do_sync = self.resolve_sync(opts);
         self.writes
-            .submit(
-                &self.inner,
-                vec![BatchOp::put(key, value)],
-                do_sync,
-            )
+            .submit(&self.inner, vec![BatchOp::put(key, value)], do_sync)
     }
 
     /// Put only if key is absent (atomic under write lock; RFC-0019 CAS).
@@ -337,11 +323,7 @@ impl<E: Env> ConcurrentDb<E> {
     ///
     /// # Errors
     /// WAL I/O, bounds, or sequence exhaustion.
-    pub fn delete_range(
-        &self,
-        start: impl AsRef<[u8]>,
-        end: impl AsRef<[u8]>,
-    ) -> Result<()> {
+    pub fn delete_range(&self, start: impl AsRef<[u8]>, end: impl AsRef<[u8]>) -> Result<()> {
         let do_sync = self.resolve_sync(WriteOptions::default());
         self.writes
             .submit(
@@ -356,10 +338,7 @@ impl<E: Env> ConcurrentDb<E> {
     ///
     /// # Errors
     /// WAL I/O or sequence exhaustion.
-    pub fn apply_batch(
-        &self,
-        ops: impl IntoIterator<Item = BatchOp>,
-    ) -> Result<SequenceNumber> {
+    pub fn apply_batch(&self, ops: impl IntoIterator<Item = BatchOp>) -> Result<SequenceNumber> {
         let do_sync = self.resolve_sync(WriteOptions::default());
         let ops: Vec<_> = ops.into_iter().collect();
         self.writes.submit(&self.inner, ops, do_sync)
@@ -671,11 +650,7 @@ mod tests {
         for h in handles {
             h.join().unwrap();
         }
-        assert_eq!(
-            ok_count.load(Ordering::SeqCst),
-            1,
-            "exactly one CAS winner"
-        );
+        assert_eq!(ok_count.load(Ordering::SeqCst), 1, "exactly one CAS winner");
         assert_eq!(
             mismatch_count.load(Ordering::SeqCst),
             n - 1,
@@ -879,10 +854,7 @@ mod tests {
             Some(b"acked".as_ref()),
             "prepare_flush_imm must pin the taken table for readers"
         );
-        let ranged = db.range(
-            std::ops::Bound::Unbounded,
-            std::ops::Bound::Unbounded,
-        );
+        let ranged = db.range(std::ops::Bound::Unbounded, std::ops::Bound::Unbounded);
         assert!(
             ranged
                 .iter()
@@ -1117,7 +1089,12 @@ mod tests {
         names.sort();
         let mut stems = names.clone();
         stems.dedup();
-        eprintln!("ssts={} unique={} missing={}", names.len(), stems.len(), missing);
+        eprintln!(
+            "ssts={} unique={} missing={}",
+            names.len(),
+            stems.len(),
+            missing
+        );
         assert_eq!(stems.len(), names.len(), "duplicate SST files: {names:?}");
         assert_eq!(missing, 0, "lost keys after concurrent flush stress");
         // reopen durability
@@ -1135,4 +1112,64 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
     }
 
+    /// ConcurrentDb::flush → finish_flush_pipeline must run auto blob GC
+    /// (parity with single-threaded Db::flush).
+    #[test]
+    fn concurrent_flush_runs_auto_blob_gc() {
+        let dir = temp_dir();
+        let v1 = vec![0x11u8; 1800];
+        let v2 = vec![0x22u8; 1800];
+        let db = ConcurrentDb::open_with(
+            &dir,
+            OpenOptions {
+                sync: true,
+                auto_flush_bytes: None,
+                auto_compact_sst_count: None,
+                auto_compact_sst_bytes: None,
+                exclusive: true,
+                large_value_threshold: Some(512),
+            },
+        )
+        .unwrap();
+        db.with_write(|d| {
+            d.set_vlog_rotate_bytes(Some(3_500));
+        });
+        db.put(b"a", &v1).unwrap();
+        db.put(b"b", &v1).unwrap();
+        db.flush().unwrap();
+        db.put(b"a", &v2).unwrap();
+        db.put(b"c", &v2).unwrap();
+        db.flush().unwrap();
+        // Drop dead SST pointers without auto GC (auto still off).
+        db.compact_with(CompactOptions::latest_only()).unwrap();
+        let sealed_before: Vec<u32> = db.with_read(|d| {
+            d.blob_file_nums()
+                .into_iter()
+                .filter(|n| *n != d.blob_active())
+                .collect()
+        });
+        assert!(
+            !sealed_before.is_empty(),
+            "need a sealed blob for auto GC: {sealed_before:?}"
+        );
+        let gc_before = db.stats().vlog_gc_count;
+        // Enable auto and flush (empty mem still finishes the pipeline).
+        db.with_write(|d| d.set_auto_blob_gc_min_ratio(Some(0.0)));
+        db.flush().unwrap();
+        let sealed_after: Vec<u32> = db.with_read(|d| {
+            d.blob_file_nums()
+                .into_iter()
+                .filter(|n| *n != d.blob_active())
+                .collect()
+        });
+        assert!(
+            db.stats().vlog_gc_count > gc_before || sealed_after.len() < sealed_before.len(),
+            "ConcurrentDb::flush must run auto blob GC: before={sealed_before:?} after={sealed_after:?} gc_before={gc_before} gc={}",
+            db.stats().vlog_gc_count
+        );
+        assert_eq!(db.get(b"a").as_deref(), Some(v2.as_slice()));
+        assert_eq!(db.get(b"b").as_deref(), Some(v1.as_slice()));
+        assert_eq!(db.get(b"c").as_deref(), Some(v2.as_slice()));
+        let _ = fs::remove_dir_all(&dir);
+    }
 }
