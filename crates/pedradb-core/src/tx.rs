@@ -64,8 +64,7 @@ impl<'db, E: crate::env::Env> Transaction<'db, E> {
             return Ok(None);
         }
         // Use public get_at so vlog pointers resolve (RFC-0014 P2.2).
-        self.db
-            .get_at(crate::db::Snapshot::at(self.snapshot), key)
+        self.db.get_at(crate::db::Snapshot::at(self.snapshot), key)
     }
 
     /// Stage a put (visible to later `get` in this TX; durable only after commit).
@@ -112,6 +111,8 @@ impl<'db, E: crate::env::Env> Transaction<'db, E> {
         // Fail-closed before allocating sequences (open-items §2.1 (c)).
         self.db
             .ensure_snapshot_readable(crate::db::Snapshot::at(self.snapshot))?;
+        // L0 write stall (open-items §2.3) — same gate as put/apply_batch.
+        self.db.ensure_write_admitted()?;
         if self.staging.is_empty() {
             self.finished = true;
             return Ok(self.db.last_sequence());

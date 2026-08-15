@@ -247,6 +247,17 @@ impl<E: Env> ConcurrentDb<E> {
         self.inner.read().auto_reclaim()
     }
 
+    /// L0 write-stall threshold (see [`Db::set_write_stall_l0`]).
+    pub fn set_write_stall_l0(&self, limit: Option<usize>) {
+        self.inner.write().set_write_stall_l0(limit);
+    }
+
+    /// Current L0 write-stall threshold, if enabled.
+    #[must_use]
+    pub fn write_stall_l0(&self) -> Option<usize> {
+        self.inner.read().write_stall_l0()
+    }
+
     /// Blob rotate cap (see [`Db::set_vlog_rotate_bytes`]).
     pub fn set_vlog_rotate_bytes(&self, bytes: Option<u64>) {
         self.inner.write().set_vlog_rotate_bytes(bytes);

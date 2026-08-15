@@ -131,23 +131,23 @@ compaction to reclaim space.
 **Likely answer:** (a) + (c). BadgerDB and fjall both use online + segment-based.
 Needs study of their implementations.
 
-### 2.3 Backpressure strategy (Slice 7)
+### 2.3 Backpressure strategy (Slice 7) — **(a) partial shipped**
 
 **Question:** When write rate exceeds flush/compaction capacity, what does
 PedraDB do?
 
-**Context:** Pebble's lesson [P2] is: no artificial delays (they increase
-latency without benefit in open-loop). But something must bound the system.
+**Answer (2026-08-15):** **(a) honest L0 stall**, opt-in.
+`Db::set_write_stall_l0(Some(n))` makes put/apply_batch/group_commit/TX·OCC
+commit fail with [`CoreError::WriteStall`] when L0 file count ≥ n (no sleep).
+Default **off**. Stats: `write_stall_count` / `gc_line`. ConcurrentDb setter
+mirrors. Soft slowdown (b) and memtable growth bound (c) still open.
 
-**Options:**
+**Options (historical):**
 - **(a) Explicit stall:** block new writes until L0 is drained. Honest but harsh.
 - **(b) Adaptive admission control:** accept writes at the rate the system can
   sustain, reject excess with backpressure signal.
 - **(c) Let the MemTable grow:** unbounded MemTable, flush in background.
   Risk: OOM.
-
-**Likely answer:** (a) with configurable thresholds. Following Pebble's principle
-of honest stalls over silent degradation.
 
 ### 2.4 MemTable data structure (Slice 1)
 

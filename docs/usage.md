@@ -188,6 +188,7 @@ Full contract: rustdoc on `db` module. Audit fix backlog: [RFC-0015](rfc/0015-au
 | `get_at` / `range_at` / `try_scan_at` / `SnapshotTooOld` | History-dropping GC raises watermark (MANIFEST v4 durable); old snaps fail closed |
 | TX·OCC commit | Also refuse `SnapshotTooOld` if reclaim advanced past the TX snapshot |
 | `set_auto_reclaim(true)` | Opt-in: auto-compact piggybacks pin-aware reclaim (default off / F20) |
+| `set_write_stall_l0(Some(n))` | Opt-in: refuse writes with `WriteStall` when L0 ≥ n (default off; no sleep) |
 | `Db::create_checkpoint(dest)` | Point-in-time copy (flush + file set); openable as a DB |
 | `pedradb_ops::BackupEngine` | Local base backup, `ship_wal`, `restore` / `restore_pitr`, verify |
 | `pedradb_ops::migrate_to_latest` / `inspect_format` | Format inspect + rewrite SSTs/MANIFEST to current writer |

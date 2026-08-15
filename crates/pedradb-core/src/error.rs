@@ -73,14 +73,24 @@ pub enum CoreError {
     /// History required for `requested` may have been dropped by
     /// [`crate::db::Db::compact_reclaim`], `latest_only`, or an explicit GC floor.
     /// Montanha maps the store-level cousin to FDB `transaction_too_old`.
-    #[error(
-        "snapshot too old: requested sequence {requested}, earliest readable {earliest}"
-    )]
+    #[error("snapshot too old: requested sequence {requested}, earliest readable {earliest}")]
     SnapshotTooOld {
         /// Sequence the caller asked to read at.
         requested: crate::key::SequenceNumber,
         /// Lowest sequence still guaranteed readable after GC.
         earliest: crate::key::SequenceNumber,
+    },
+
+    /// Write refused because L0 has too many files (open-items §2.3 option a).
+    ///
+    /// Honest stall: no artificial delay. Caller should compact / wait for
+    /// auto-compact, then retry. Off by default (`set_write_stall_l0`).
+    #[error("write stall: L0 has {l0_files} files (limit {limit})")]
+    WriteStall {
+        /// Current L0 SST count.
+        l0_files: usize,
+        /// Configured stall threshold.
+        limit: usize,
     },
 }
 

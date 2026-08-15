@@ -130,6 +130,7 @@ impl<E: Env> OccTransaction<E> {
         db.with_write(|inner| {
             // Concurrent reclaim may have advanced the GC watermark past our snap.
             inner.ensure_snapshot_readable(crate::db::Snapshot::at(snapshot))?;
+            inner.ensure_write_admitted()?;
             // Validate: no version with seq > snapshot on any read or write key.
             for key in read_set.iter().chain(staging.keys()) {
                 if inner.key_has_write_after(key.as_ref(), snapshot) {

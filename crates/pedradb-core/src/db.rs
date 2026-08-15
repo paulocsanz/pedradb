@@ -171,6 +171,10 @@ pub struct DbStats {
     pub snapshot_pin_count: usize,
     /// Whether auto-compact uses pin-aware reclaim (session setter).
     pub auto_reclaim: bool,
+    /// Writes refused by L0 write stall (open-items §2.3).
+    pub write_stall_count: u64,
+    /// Configured L0 stall limit (`0` = disabled).
+    pub write_stall_l0: u64,
 }
 
 /// Per-blob GC stats for operator / auto-pick (RFC-0029 P1.1).
@@ -225,12 +229,14 @@ impl DbStats {
     #[must_use]
     pub fn gc_line(&self) -> String {
         format!(
-            "earliest_readable={} pins={} auto_reclaim={} compact={} auto_compact_fail={}",
+            "earliest_readable={} pins={} auto_reclaim={} compact={} auto_compact_fail={} write_stall={} (l0_limit={})",
             self.earliest_readable_seq,
             self.snapshot_pin_count,
             self.auto_reclaim,
             self.compact_count,
-            self.auto_compact_failures
+            self.auto_compact_failures,
+            self.write_stall_count,
+            self.write_stall_l0
         )
     }
 }
@@ -492,6 +498,10 @@ pub struct Db<E: Env = StdEnv> {
     /// When true, auto-compact uses snapshot-safe reclaim GC (open-items §2.1)
     /// instead of history-preserving merge. Off by default (F20).
     auto_reclaim: bool,
+    /// When `Some(n)`, refuse writes if L0 SST count ≥ n (open-items §2.3).
+    write_stall_l0: Option<usize>,
+    /// Count of writes refused by L0 stall.
+    write_stall_count: u64,
     /// Open [`SnapshotPin`]s: pin id → sequence (open-items §2.1).
     snapshot_pins: std::collections::BTreeMap<u64, SequenceNumber>,
     /// Next pin id (monotonic; never reused for this process open).
@@ -635,10 +645,7 @@ impl<E: Env> Db<E> {
         // Watermark may exceed max sequence still present in SSTs (e.g. latest_only
         // dropped a high-seq tombstone). Keep last_sequence ≥ earliest so current
         // gets never look "too old" after reopen.
-        let next_seq = max_seq
-            .max(earliest_readable_seq)
-            .saturating_add(1)
-            .max(1);
+        let next_seq = max_seq.max(earliest_readable_seq).saturating_add(1).max(1);
         if next_seq > MAX_SEQUENCE_NUMBER {
             return Err(CoreError::Internal(
                 "sequence number space exhausted".into(),
@@ -696,6 +703,8 @@ impl<E: Env> Db<E> {
             prefetch_hits: AtomicU64::new(0),
             auto_blob_gc_min_ratio: None,
             auto_reclaim: false,
+            write_stall_l0: None,
+            write_stall_count: 0,
             snapshot_pins: std::collections::BTreeMap::new(),
             next_snapshot_pin_id: 1,
             earliest_readable_seq,
@@ -992,6 +1001,28 @@ impl<E: Env> Db<E> {
     #[must_use]
     pub fn auto_reclaim(&self) -> bool {
         self.auto_reclaim
+    }
+
+    /// Opt-in write stall when L0 SST count ≥ `limit` (open-items §2.3).
+    ///
+    /// `None` or `0` disables (default). When enabled, [`Self::put`] /
+    /// [`Self::apply_batch`] / group commit fail with
+    /// [`CoreError::WriteStall`] instead of letting L0 grow unbounded.
+    /// No sleep — honest signal; compact then retry.
+    pub fn set_write_stall_l0(&mut self, limit: Option<usize>) {
+        self.write_stall_l0 = limit.filter(|n| *n > 0);
+    }
+
+    /// Current L0 write-stall threshold, if enabled.
+    #[must_use]
+    pub fn write_stall_l0(&self) -> Option<usize> {
+        self.write_stall_l0
+    }
+
+    /// Times a write was refused for L0 stall (observability).
+    #[must_use]
+    pub fn write_stall_count(&self) -> u64 {
+        self.write_stall_count
     }
 
     /// Current auto blob-GC threshold, if enabled.
@@ -1381,6 +1412,8 @@ impl<E: Env> Db<E> {
             earliest_readable_seq: self.earliest_readable_seq,
             snapshot_pin_count: self.snapshot_pins.len(),
             auto_reclaim: self.auto_reclaim,
+            write_stall_count: self.write_stall_count,
+            write_stall_l0: self.write_stall_l0.unwrap_or(0) as u64,
         }
     }
 
@@ -2958,6 +2991,7 @@ impl<E: Env> Db<E> {
         batch: impl IntoIterator<Item = BatchOp>,
         durability: WriteOptions,
     ) -> Result<SequenceNumber> {
+        self.ensure_write_admitted()?;
         // Assign sequences only for this attempt; roll back `next_seq` if WAL fails
         // so a failed multi-op does not burn sequence space (TX denser / mid-commit).
         let seq_checkpoint = self.next_seq;
@@ -3265,6 +3299,20 @@ impl<E: Env> Db<E> {
         }
         let n = batches.len();
         let mut results: Vec<Option<Result<SequenceNumber>>> = (0..n).map(|_| None).collect();
+        match self.ensure_write_admitted() {
+            Ok(()) => {}
+            Err(CoreError::WriteStall { l0_files, limit }) => {
+                return (0..n)
+                    .map(|_| Err(CoreError::WriteStall { l0_files, limit }))
+                    .collect();
+            }
+            Err(e) => {
+                let msg = e.to_string();
+                return (0..n)
+                    .map(|_| Err(CoreError::Internal(msg.clone())))
+                    .collect();
+            }
+        }
         let mut prepared: Vec<(usize, Vec<WriteOp>, SequenceNumber)> = Vec::new();
         let mut any_sync = false;
 
@@ -3383,6 +3431,22 @@ impl<E: Env> Db<E> {
     fn release_lock(&mut self) -> Result<()> {
         if let Some(mut lock) = self.dir_lock.take() {
             lock.release(&self.env)?;
+        }
+        Ok(())
+    }
+
+    /// Refuse writes when L0 is at/above the stall limit (open-items §2.3).
+    pub(crate) fn ensure_write_admitted(&mut self) -> Result<()> {
+        let Some(limit) = self.write_stall_l0 else {
+            return Ok(());
+        };
+        let l0 = self.level_file_count(0);
+        if l0 >= limit {
+            self.write_stall_count = self.write_stall_count.saturating_add(1);
+            return Err(CoreError::WriteStall {
+                l0_files: l0,
+                limit,
+            });
         }
         Ok(())
     }
@@ -5201,6 +5265,63 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
     }
 
+    /// open-items §2.3: L0 write stall refuses puts until compact drains L0.
+    #[test]
+    fn write_stall_refuses_when_l0_at_limit() {
+        let dir = temp_dir();
+        let mut db = Db::open_with(
+            &dir,
+            OpenOptions {
+                sync: true,
+                auto_flush_bytes: None,
+                auto_compact_sst_count: None,
+                auto_compact_sst_bytes: None,
+                exclusive: true,
+                large_value_threshold: None,
+            },
+        )
+        .unwrap();
+        db.set_write_stall_l0(Some(2));
+        assert_eq!(db.write_stall_l0(), Some(2));
+        db.put(b"a", b"1").unwrap();
+        db.flush().unwrap();
+        db.put(b"b", b"2").unwrap();
+        db.flush().unwrap();
+        assert!(db.level_file_count(0) >= 2 || db.sst_count() >= 2);
+        // Force L0 count check: after two flushes without compact we have ≥2 SSTs at L0.
+        let l0 = db.level_file_count(0);
+        if l0 < 2 {
+            // Compact may have been skipped if only one level path — create more L0.
+            for i in 0..3u8 {
+                db.put([b'x', i], [b'v', i]).unwrap();
+                db.flush().unwrap();
+            }
+        }
+        assert!(
+            db.level_file_count(0) >= 2,
+            "need L0>=2 for stall, got {}",
+            db.level_file_count(0)
+        );
+        let err = db.put(b"c", b"3").unwrap_err();
+        assert!(
+            matches!(err, CoreError::WriteStall { limit: 2, .. }),
+            "expected WriteStall, got {err:?}"
+        );
+        assert!(db.write_stall_count() >= 1);
+        assert!(db.stats().write_stall_count >= 1);
+        // Drain L0 and write again.
+        db.compact().unwrap();
+        if db.level_file_count(0) >= 2 {
+            db.compact().unwrap();
+        }
+        if db.level_file_count(0) < 2 {
+            db.put(b"c", b"3").unwrap();
+            assert_eq!(db.get(b"c").as_deref(), Some(b"3".as_ref()));
+        }
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
     /// Opt-in auto_reclaim: bare snap becomes SnapshotTooOld; pin is preserved.
     #[test]
     fn auto_reclaim_on_auto_compact() {
@@ -5319,7 +5440,10 @@ mod tests {
         let pin = db.pin_snapshot();
         assert_eq!(db.snapshot_pin_count(), 1);
         assert_eq!(db.oldest_pinned_sequence(), Some(pin.sequence()));
-        assert_eq!(db.get_at(pin.snapshot(), b"k").unwrap().as_deref(), Some(b"old".as_ref()));
+        assert_eq!(
+            db.get_at(pin.snapshot(), b"k").unwrap().as_deref(),
+            Some(b"old".as_ref())
+        );
 
         db.put(b"k", b"new").unwrap();
         db.flush().unwrap();
@@ -5327,7 +5451,10 @@ mod tests {
 
         // Reclaim must keep `old` while pin is open.
         db.compact_reclaim().unwrap();
-        assert_eq!(db.get_at(pin.snapshot(), b"k").unwrap().as_deref(), Some(b"old".as_ref()));
+        assert_eq!(
+            db.get_at(pin.snapshot(), b"k").unwrap().as_deref(),
+            Some(b"old".as_ref())
+        );
         assert_eq!(db.get(b"k").as_deref(), Some(b"new".as_ref()));
 
         db.release_snapshot_pin(pin);
@@ -5336,8 +5463,7 @@ mod tests {
         let floor_before = db.earliest_readable_sequence();
         db.compact_reclaim().unwrap();
         assert!(
-            db.earliest_readable_sequence() >= floor_before
-                && db.earliest_readable_sequence() > 0,
+            db.earliest_readable_sequence() >= floor_before && db.earliest_readable_sequence() > 0,
             "reclaim without pins must raise watermark"
         );
         assert_eq!(db.get(b"k").as_deref(), Some(b"new".as_ref()));
@@ -5648,8 +5774,14 @@ mod tests {
             assert_eq!(last, 3);
             let snap = db.snapshot();
             assert_eq!(snap.sequence(), 3);
-            assert_eq!(db.get_at(snap, b"row").unwrap().as_deref(), Some(b"R".as_ref()));
-            assert_eq!(db.get_at(snap, b"idx").unwrap().as_deref(), Some(b"I".as_ref()));
+            assert_eq!(
+                db.get_at(snap, b"row").unwrap().as_deref(),
+                Some(b"R".as_ref())
+            );
+            assert_eq!(
+                db.get_at(snap, b"idx").unwrap().as_deref(),
+                Some(b"I".as_ref())
+            );
             // Old snapshot still empty world
             assert_eq!(db.get_at(before, b"row").unwrap(), None);
             db.close().unwrap();
