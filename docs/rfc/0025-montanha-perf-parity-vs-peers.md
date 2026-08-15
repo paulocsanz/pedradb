@@ -1,6 +1,6 @@
 # RFC-0025: Montanha performance, ergonomics, efficiency & capacity vs peers
 
-**Status:** in-progress  
+**Status:** done (P0–P2 slices landed; continuous re-measure)  
 **Updated:** 2026-08-14  
 **Parents:** [0016](0016-pedradb-production-robustness.md), [0021](0021-montanha-fdb-tikv-parity-gaps.md), [0021-commit-path](0021-commit-path-scale-decision.md), [perf doctrine](../performance-ceiling-option-preservation-and-sled-layer.md), [bench method](../montanha-vs-fdb-bench.md)
 
@@ -53,9 +53,9 @@
 
 ### P2 — later / polish
 
-- [ ] **P2.1** Optional FDB-side JSON comparator when `FDB_CLUSTER_FILE` set — status: `todo`  
-- [ ] **P2.2** Commit-path scale flip (more ranges vs unbundle) numbers-backed — status: `todo`  
-- [ ] **P2.3** Read capacity: strong-read path + RO replica policy docs — status: `todo`  
+- [x] **P2.1** Optional FDB comparator (`montanha-fdb-compare`, template if no fdbcli) — status: `done`  
+- [x] **P2.2** Scale probe S1 ranges 1/2/4/8 + reconfirm option A — status: `done`  
+- [x] **P2.3** Read capacity doc + `get_strong`/`get_fast_replica` tests/bench B4 — status: `done`  
 
 ## Status (living — update with every PR)
 
@@ -68,9 +68,9 @@
 | P1.2 | p1 | raft log append cost | done | incremental log_e + log_hi | 2026-08-14 |
 | P1.3 | p1 | TCP PutBatch wire | done | tag 17 + client | 2026-08-14 |
 | P1.4 | p1 | layer batch defaults | done | table_put/docs | 2026-08-14 |
-| P2.1 | p2 | FDB side comparator | todo | — | 2026-08-14 |
-| P2.2 | p2 | scale A vs B decision | todo | — | 2026-08-14 |
-| P2.3 | p2 | strong RO capacity | todo | — | 2026-08-14 |
+| P2.1 | p2 | FDB side comparator | done | montanha-fdb-compare | 2026-08-14 |
+| P2.2 | p2 | scale A vs B decision | done | suite scale + 0021 update | 2026-08-14 |
+| P2.3 | p2 | strong RO capacity | done | montanha-read-capacity.md | 2026-08-14 |
 
 ## Acceptance Criteria
 

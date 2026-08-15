@@ -1,8 +1,8 @@
 # RFC-0021 P2.2 — Commit path scale decision (numbers-backed)
 
-**Status:** draft decision record  
-**Updated:** 2026-08-13  
-**Parent:** [0021-montanha-fdb-tikv-parity-gaps.md](0021-montanha-fdb-tikv-parity-gaps.md)
+**Status:** decision confirmed (lab 2026-08-14)  
+**Updated:** 2026-08-14  
+**Parent:** [0021-montanha-fdb-tikv-parity-gaps.md](0021-montanha-fdb-tikv-parity-gaps.md) · [0025](0025-montanha-perf-parity-vs-peers.md)
 
 ## Options
 
@@ -13,12 +13,23 @@
 
 ## Decision (v0, reversible)
 
-**Default: A** until P0.3/P1.6 benches show commit p99 or leader CPU cannot be fixed by range split + group commit on Pedra.
+**Default: A** (more multi-Raft ranges on monolithic peer). Reconfirmed 2026-08-14.
+
+### Lab numbers (`montanha-fdb-bench` suite `scale`, N=16 sequential client)
+
+| Ranges | keys/s (disjoint put) |
+|--------|------------------------|
+| 1 | ~1.7 |
+| 2 | ~1.9 |
+| 4 | ~2.2 |
+| 8 | ~1.5 |
+
+**Read:** single-threaded client does **not** get linear speedup from more ranges (serialized client + per-put majority still dominate). Option A still wins for **multi-writer** (one leader per range) when layers fan out concurrent clients — measure that next before B. Artifact: `findings/fdb-bench-scale/`.
 
 Rationale:
-- Lab already multi-Raft; PD/split (P1.2) is the natural next scale lever.
-- Unbundling (B) is higher cost and not justified without measured ceiling on A.
-- Revisit after `findings/perf-*/perf_report.json` and soak artifacts exist on representative hardware.
+- Lab already multi-Raft; PD/split is the natural next scale lever.
+- Unbundling (B) is higher cost and not justified while sequential put is fsync/Raft limited.
+- Revisit B only if multi-client multi-range saturates leader CPU with healthy fsync amortisation.
 
 ## Required inputs before flipping to B
 

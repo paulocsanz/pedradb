@@ -10,7 +10,7 @@
 //!   MONTANHA_BENCH_RANGES     range count for multi-range suite (default 4)
 //!   MONTANHA_BENCH_WARMUP     warmup ops discarded (default 20)
 //!   MONTANHA_BENCH_THREADS    concurrent client threads for C/T suites (default 4)
-//!   MONTANHA_BENCH_SUITE      comma list: core,threads,tcp,mini-bt,all (default core,threads,mini-bt)
+//!   MONTANHA_BENCH_SUITE      comma list: core,threads,tcp,mini-bt,scale,all
 //!
 //! Writes `fdb_shaped_bench.json` + human summary. Compare to FDB using the same
 //! workload shapes (see docs/montanha-vs-fdb-bench.md). Not a claim of field parity.
@@ -632,9 +632,89 @@ fn main() {
         ));
         progress!("B2 cross-range tx done fails={fails}");
 
+        // B4: strong vs fast replica read (RFC-0025 P2.3)
+        let k = range_keys[0].clone();
+        let mut kk = k.clone();
+        kk.extend_from_slice(b"-read");
+        c.put(&kk, b"rv").expect("seed read");
+        let mut lats_s = Vec::with_capacity(n.min(40));
+        let t0 = Instant::now();
+        for _ in 0..n.min(40) {
+            let t = Instant::now();
+            let _ = c.get_strong(&kk).expect("strong");
+            lats_s.push(ms(t));
+        }
+        benches.push(summarize(
+            "B4_get_strong",
+            n.min(40),
+            t0.elapsed(),
+            &mut lats_s,
+        ));
+        let mut lats_f = Vec::with_capacity(n.min(40));
+        let t0 = Instant::now();
+        for _ in 0..n.min(40) {
+            let t = Instant::now();
+            let _ = c.get_fast_replica(&kk).expect("fast");
+            lats_f.push(ms(t));
+        }
+        benches.push(summarize(
+            "B4_get_fast_replica",
+            n.min(40),
+            t0.elapsed(),
+            &mut lats_f,
+        ));
+        progress!("B4 strong vs fast replica done");
+
         drop(c);
     }
 
+    // ── Suite scale: disjoint put QPS vs range count (RFC-0025 P2.2) ──────
+    if suite_enabled("scale") {
+        progress!("S scale multi-range put probe…");
+        let scale_n = n.min(24).max(8);
+        for &nr in &[1u64, 2, 4, 8] {
+            let dir = out.join(format!("db-scale-r{nr}"));
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::create_dir_all(&dir).unwrap();
+            let mut c = StoreCluster::open(&dir, 3, nr).expect("open scale");
+            c.elect_all(200).expect("elect scale");
+            let metas = c.range_metas();
+            let bases: Vec<Vec<u8>> = metas
+                .iter()
+                .map(|r| {
+                    if r.start.is_empty() {
+                        vec![0x00, b's']
+                    } else {
+                        let mut k = r.start.clone();
+                        k.push(b's');
+                        k
+                    }
+                })
+                .collect();
+            let t0 = Instant::now();
+            for i in 0..scale_n {
+                let base = &bases[i % bases.len().max(1)];
+                let mut k = base.clone();
+                k.extend_from_slice(format!("-{i:04}").as_bytes());
+                c.put(&k, &val).expect("scale put");
+            }
+            let wall = t0.elapsed();
+            let kps = scale_n as f64 / wall.as_secs_f64().max(1e-12);
+            benches.push(format!(
+                r#"{{
+    "name": "S1_disjoint_put_r{nr}",
+    "ranges": {nr},
+    "keys": {scale_n},
+    "keys_per_s": {kps:.3},
+    "wall_s": {ws:.4},
+    "note": "RFC-0025 P2.2 / 0021 scale option A"
+  }}"#,
+                ws = wall.as_secs_f64(),
+            ));
+            progress!("S1 ranges={nr} keys_per_s={kps:.2}");
+            drop(c);
+        }
+    }
 
     // ── Suite C: multi-thread needs Send StoreCluster — use TCP suite D4 ─
     // StoreCluster holds SeedRng (Rc) and is !Send; concurrent clients = suite tcp.
