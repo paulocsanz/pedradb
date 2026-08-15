@@ -8,7 +8,7 @@ fn main() -> std::process::ExitCode {
     let args: Vec<String> = std::env::args().collect();
     if args.len() < 2 {
         eprintln!(
-            "usage: pedra <demo|wal|version|backup|restore|pitr|ship-wal|list-backups|verify-backup|inspect|stats|compact-vlog|compact-blob|blob-gc|migrate> [args...]"
+            "usage: pedra <demo|wal|version|backup|restore|pitr|ship-wal|list-backups|verify-backup|inspect|stats|compact|reclaim|compact-vlog|compact-blob|blob-gc|migrate> [args...]"
         );
         return std::process::ExitCode::from(2);
     }
@@ -27,6 +27,8 @@ fn main() -> std::process::ExitCode {
         "verify-backup" => verify_backup_cmd(&args[2..]),
         "inspect" => inspect_cmd(&args[2..]),
         "stats" => stats_cmd(&args[2..]),
+        "compact" => compact_cmd(&args[2..]),
+        "reclaim" => reclaim_cmd(&args[2..]),
         "compact-vlog" => compact_vlog_cmd(&args[2..]),
         "compact-blob" => compact_blob_cmd(&args[2..]),
         "blob-gc" => blob_gc_cmd(&args[2..]),
@@ -279,6 +281,20 @@ fn stats_cmd(args: &[String]) -> std::process::ExitCode {
             println!("last_sequence={}", s.last_sequence);
             println!("sst_count={} sst_bytes={}", s.sst_count, s.sst_bytes);
             println!("wal_bytes={} wal_syncs={}", s.wal_bytes, s.wal_sync_count);
+            println!(
+                "earliest_readable={} pins={} auto_reclaim={} auto_blob_gc={:?}",
+                db.earliest_readable_sequence(),
+                db.snapshot_pin_count(),
+                db.auto_reclaim(),
+                db.auto_blob_gc_min_ratio()
+            );
+            println!(
+                "compact_count={} auto_compact_failures={}",
+                s.compact_count, s.auto_compact_failures
+            );
+            if !s.last_auto_compact_error.is_empty() {
+                println!("last_auto_compact_error={}", s.last_auto_compact_error);
+            }
             println!("{}", s.vlog_line());
             println!(
                 "scan_prefetch={} blob_active={}",
@@ -294,6 +310,79 @@ fn stats_cmd(args: &[String]) -> std::process::ExitCode {
                 }
             }
             std::process::ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("error: {e}");
+            std::process::ExitCode::FAILURE
+        }
+    }
+}
+
+fn compact_cmd(args: &[String]) -> std::process::ExitCode {
+    // pedra compact <db>              — leveled merge (history-preserving)
+    // pedra compact <db> --latest-only — aggressive version GC
+    if args.is_empty() {
+        eprintln!("usage: pedra compact <db_path> [--latest-only]");
+        return std::process::ExitCode::from(2);
+    }
+    let latest = args.iter().any(|a| a == "--latest-only");
+    match open_live(&args[0]) {
+        Ok(mut db) => {
+            let before = db.earliest_readable_sequence();
+            let r = if latest {
+                db.compact_with(pedradb_core::CompactOptions::latest_only())
+            } else {
+                db.compact()
+            };
+            match r {
+                Ok(()) => {
+                    println!(
+                        "compact ok latest_only={latest} earliest_readable {} → {} sst_count={}",
+                        before,
+                        db.earliest_readable_sequence(),
+                        db.sst_count()
+                    );
+                    std::process::ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    eprintln!("error: {e}");
+                    std::process::ExitCode::FAILURE
+                }
+            }
+        }
+        Err(e) => {
+            eprintln!("error: {e}");
+            std::process::ExitCode::FAILURE
+        }
+    }
+}
+
+fn reclaim_cmd(args: &[String]) -> std::process::ExitCode {
+    // pedra reclaim <db> — pin-aware version GC (compact_reclaim)
+    if args.is_empty() {
+        eprintln!("usage: pedra reclaim <db_path>");
+        return std::process::ExitCode::from(2);
+    }
+    match open_live(&args[0]) {
+        Ok(mut db) => {
+            let before = db.earliest_readable_sequence();
+            let pins = db.snapshot_pin_count();
+            match db.compact_reclaim() {
+                Ok(()) => {
+                    println!(
+                        "reclaim ok pins={pins} earliest_readable {} → {} last_sequence={} sst_count={}",
+                        before,
+                        db.earliest_readable_sequence(),
+                        db.last_sequence(),
+                        db.sst_count()
+                    );
+                    std::process::ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    eprintln!("error: {e}");
+                    std::process::ExitCode::FAILURE
+                }
+            }
         }
         Err(e) => {
             eprintln!("error: {e}");

@@ -305,7 +305,10 @@ println!("{}", db.stats().vlog_line());
 **CLI (ops):**
 
 ```bash
-pedra stats <db>                          # vlog line + per-blob dead_ratio
+pedra stats <db>                          # sizes + earliest_readable / pins / auto_* + blobs
+pedra compact <db>                        # leveled SST merge (history-preserving)
+pedra compact <db> --latest-only          # aggressive version GC (raises watermark)
+pedra reclaim <db>                        # pin-aware compact_reclaim (open-items §2.1)
 pedra blob-gc <db>                        # list candidates
 pedra compact-blob <db> --auto [0.5]      # GC worst sealed (default θ=0.5)
 pedra compact-blob <db> <file_num>        # GC explicit id
