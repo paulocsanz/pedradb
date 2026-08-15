@@ -599,7 +599,7 @@ fn persist_si_hist_on_db<E: Env>(
     if hist.last().map(|(g, _)| *g) != Some(gen) {
         hist.push((gen, new_val.map(|v| v.to_vec())));
     }
-    db.put(&hk, &encode_hist(&hist))?;
+    db.put(&hk, encode_hist(&hist))?;
     Ok(())
 }
 
@@ -1297,7 +1297,7 @@ fn repair_si_hist_tip<E: Env>(db: &mut Db<E>, user_key: &[u8], live: Option<&[u8
     if let Some(last) = hist.last_mut() {
         last.1 = new_val;
     }
-    db.put(&hk, &encode_hist(&hist))?;
+    db.put(&hk, encode_hist(&hist))?;
     Ok(())
 }
 
@@ -1734,6 +1734,16 @@ struct StoreNode<E: Env = StdEnv> {
     participating: bool,
 }
 
+/// One SI/OCC hist step: `(generation, value)`. `None` = deleted.
+type HistStep = (u64, Option<Vec<u8>>);
+type HistChain = Vec<HistStep>;
+type KeyHistMap = HashMap<Vec<u8>, HistChain>;
+/// `(key, new_value, preimage)` staged for SI notes.
+type VersionNote = (Vec<u8>, Vec<u8>, Option<Vec<u8>>);
+/// `(range_id, log_index)` → `(si_gen, notes)`.
+type PendingNotes = HashMap<(u64, u64), (u64, Vec<VersionNote>)>;
+type RangeKvMap = HashMap<u64, Vec<KvPair>>;
+
 /// In-process multi-node multi-Raft store (Montanha-Store MVP).
 ///
 /// Generic over [`Env`] so DST can open every node on a shared `FailingEnv` /
@@ -1783,7 +1793,7 @@ pub struct StoreCluster<E: Env = StdEnv> {
     /// Per-key history: `(generation, value)` ordered ascending by generation.
     /// Generation `0` holds the pre-image before the first mutation in this process
     /// (RFC-0023 snapshot reads). Value `None` = deleted / absent.
-    key_history: HashMap<Vec<u8>, Vec<(u64, Option<Vec<u8>>)>>,
+    key_history: KeyHistMap,
     /// Snapshots strictly below this are too old (version GC watermark).
     safe_watermark: u64,
     /// Preimages + reserved SI gen staged at propose; flushed when log index
@@ -1791,7 +1801,7 @@ pub struct StoreCluster<E: Env = StdEnv> {
     /// Key: `(range_id, log_index)` → `(si_gen, items)`.
     /// F49: gen is reserved in `with_si_gen` so concurrent outstanding proposes
     /// never embed the same durable `si_gen`.
-    pending_version_notes: HashMap<(u64, u64), (u64, Vec<(Vec<u8>, Vec<u8>, Option<Vec<u8>>)>)>,
+    pending_version_notes: PendingNotes,
     /// Last log index per range already flushed into version history (idempotent).
     version_notes_through: HashMap<u64, u64>,
     /// In-process watch hub; notified after majority put/commit_tx (RFC-0022 P0.3).
@@ -2133,12 +2143,17 @@ impl<E: Env> StoreCluster<E> {
     }
 
     /// Durable `now_ms` so TTL expiry survives process death (F56).
+    ///
+    /// F131: only advance `persisted_now_ms` when at least one replica put
+    /// succeeded. Marking RAM-persisted after a total write miss skipped
+    /// retries; reopen then reloaded `now_ms=0` and reanimated expired locks.
     fn persist_now_ms(&mut self) {
         if self.now_ms <= self.persisted_now_ms {
             return;
         }
-        self.persist_u64_meta_all("now_ms", self.now_ms);
-        self.persisted_now_ms = self.now_ms;
+        if self.persist_u64_meta_all("now_ms", self.now_ms).is_ok() {
+            self.persisted_now_ms = self.now_ms;
+        }
     }
 
     /// Persist raft logs after load truncated any uncommitted suffix.
@@ -2164,14 +2179,26 @@ impl<E: Env> StoreCluster<E> {
         Ok(())
     }
 
-    fn persist_u64_meta_all(&mut self, kind: &str, n: u64) {
+    fn persist_u64_meta_all(&mut self, kind: &str, n: u64) -> Result<()> {
         let key = si_meta_key(kind);
         let val = encode_u64_meta(n);
         let ids = self.ids.clone();
+        let mut any_ok = false;
+        let mut last_err: Option<StoreError> = None;
         for nid in ids {
             if let Some(node) = self.nodes.get_mut(&nid) {
-                let _ = node.db.put(&key, &val);
+                match node.db.put(&key, &val) {
+                    Ok(()) => any_ok = true,
+                    Err(e) => last_err = Some(StoreError::from(e)),
+                }
             }
+        }
+        if any_ok {
+            Ok(())
+        } else {
+            Err(last_err.unwrap_or_else(|| {
+                StoreError::Msg(format!("si meta {kind}: persist failed on all replicas"))
+            }))
         }
     }
 
@@ -2244,18 +2271,19 @@ impl<E: Env> StoreCluster<E> {
                 }
             }
             for (tid, ks) in by_txn {
-                // F47: fence abort so raft replay of TxnCommit cannot re-materialise.
-                let _ = node.db.put(txn_status_key(tid), b"abort");
+                // F47/F130/F133: fence must be durable before/after revert — open
+                // recovery must not swallow put errors (same class as fence_txn_aborted).
+                node.db.put(txn_status_key(tid), b"abort")?;
                 // Revert (restore preimage), not abort-only: a partial TxnCommit
                 // may have materialised user keys before disk death.
                 // F122: propagate corrupt preimage (F118) — do not leave open Ok.
                 apply_txn_revert(&mut node.db, tid, &ks)?;
                 // Keep abort fence after revert (revert/clear may drop status).
-                let _ = node.db.put(txn_status_key(tid), b"abort");
+                node.db.put(txn_status_key(tid), b"abort")?;
             }
             if !garbage.is_empty() {
                 let ops: Vec<BatchOp> = garbage.into_iter().map(BatchOp::delete).collect();
-                let _ = node.db.apply_batch(ops);
+                node.db.apply_batch(ops)?;
             }
         }
         Ok(())
@@ -2264,7 +2292,7 @@ impl<E: Env> StoreCluster<E> {
     fn load_si_from_disk(&mut self) -> Result<()> {
         let meta_gen = self.load_u64_meta_max("generation")?;
         let meta_wm = self.load_u64_meta_max("watermark")?;
-        let mut best: HashMap<Vec<u8>, Vec<(u64, Option<Vec<u8>>)>> = HashMap::new();
+        let mut best: KeyHistMap = HashMap::new();
         // F119: present-but-corrupt hist on every replica used to be skipped →
         // SI snapshots evaporated. Track users that only had corrupt blobs.
         let mut corrupt_only: HashSet<Vec<u8>> = HashSet::new();
@@ -3777,9 +3805,7 @@ impl<E: Env> StoreCluster<E> {
                     if !commit_kernel::propose_ack_ok(idx, commit_now) {
                         // F129: surface leader discard failure (F128). Followers
                         // remain best-effort inside discard_uncommitted_from.
-                        if let Err(de) = self.discard_uncommitted_from(rid, leader, idx) {
-                            return Err(de);
-                        }
+                        self.discard_uncommitted_from(rid, leader, idx)?;
                     }
                 }
             }
@@ -4259,7 +4285,7 @@ impl<E: Env> StoreCluster<E> {
                         // Durable generation watermark on this replica (Raft-applied path).
                         let _ = node
                             .db
-                            .put(&si_meta_key("generation"), &encode_u64_meta(*si_gen));
+                            .put(si_meta_key("generation"), encode_u64_meta(*si_gen));
                     }
                 }
                 RangeEntry::TxnPrepare { txn_id, pairs } => {
@@ -4281,7 +4307,7 @@ impl<E: Env> StoreCluster<E> {
                         }
                         let _ = node
                             .db
-                            .put(&si_meta_key("generation"), &encode_u64_meta(*si_gen));
+                            .put(si_meta_key("generation"), encode_u64_meta(*si_gen));
                     }
                 }
                 RangeEntry::TxnAbort { txn_id, keys } => {
@@ -4303,7 +4329,7 @@ impl<E: Env> StoreCluster<E> {
                 if *si_gen > 0 {
                     let _ = node
                         .db
-                        .put(&si_meta_key("generation"), &encode_u64_meta(*si_gen));
+                        .put(si_meta_key("generation"), encode_u64_meta(*si_gen));
                 }
             }
             applied_to = rec.index;
@@ -4744,7 +4770,7 @@ impl<E: Env> StoreCluster<E> {
         &mut self,
         pairs: impl IntoIterator<Item = (impl AsRef<[u8]>, impl AsRef<[u8]>)>,
     ) -> Result<()> {
-        let mut by_range: HashMap<u64, Vec<(Vec<u8>, Vec<u8>)>> = HashMap::new();
+        let mut by_range: RangeKvMap = HashMap::new();
         let mut flat: Vec<(Vec<u8>, Vec<u8>)> = Vec::new();
         for (k, v) in pairs {
             let key = k.as_ref().to_vec();
@@ -4785,11 +4811,14 @@ impl<E: Env> StoreCluster<E> {
         Ok(())
     }
 
-    fn alloc_txn_id(&mut self) -> u64 {
+    /// Allocate the next txn id. Persist the issued id **before** advancing RAM
+    /// (F132). Swallowing persist after a RAM bump reused the id on reopen
+    /// once the finished TX no longer had `\0store/txn/` keys.
+    fn alloc_txn_id(&mut self) -> Result<u64> {
         let id = self.next_txn_id;
-        self.next_txn_id = self.next_txn_id.saturating_add(1).max(1);
-        self.persist_u64_meta_all("next_txn", id);
-        id
+        self.persist_u64_meta_all("next_txn", id)?;
+        self.next_txn_id = id.saturating_add(1).max(1);
+        Ok(id)
     }
 
     fn group_pairs_by_range(&self, pairs: &[KvPair]) -> Result<RangeGroups> {
@@ -4833,7 +4862,7 @@ impl<E: Env> StoreCluster<E> {
             return Err(StoreError::Msg("empty transaction".into()));
         }
         let groups = self.group_pairs_by_range(&owned)?;
-        let txn_id = self.alloc_txn_id();
+        let txn_id = self.alloc_txn_id()?;
         let mut keys_by_range: Vec<(u64, Vec<Vec<u8>>)> = Vec::new();
         for (rid, range_pairs) in &groups {
             let keys: Vec<Vec<u8>> = range_pairs.iter().map(|(k, _)| k.clone()).collect();
@@ -5024,9 +5053,7 @@ impl<E: Env> StoreCluster<E> {
                     // a majority TxnRevert on the same raft log. Local fence
                     // remains defense-in-depth for reopen/apply.
                     // F130: fence failure must not be silent.
-                    if let Err(fe) = self.fence_txn_aborted(handle.id) {
-                        return Err(fe);
-                    }
+                    self.fence_txn_aborted(handle.id)?;
                     // F122: prefer surfacing corrupt-preimage cleanup failure
                     // over the original NotLeader (otherwise aborted writes stick).
                     let mut cleanup_err: Option<StoreError> = None;
@@ -5101,7 +5128,7 @@ impl<E: Env> StoreCluster<E> {
     /// Per-range reads use [`Self::best_applied_reader`] so a lagging `ids[0]` cannot
     /// poison SI history after a majority commit that excluded that node (F42).
     fn note_tx_commit(&mut self, handle: &TxHandle, si_gen: u64) {
-        let mut items: Vec<(Vec<u8>, Vec<u8>, Option<Vec<u8>>)> = Vec::new();
+        let mut items: Vec<VersionNote> = Vec::new();
         for (rid, keys) in &handle.keys_by_range {
             let Some(nid) = self.best_applied_reader(*rid) else {
                 continue;
@@ -5292,7 +5319,7 @@ impl<E: Env> StoreCluster<E> {
     }
 
     /// Build version-note items for a client log entry (preimages at propose time).
-    fn preimages_for_entry(&self, entry: &RangeEntry) -> Vec<(Vec<u8>, Vec<u8>, Option<Vec<u8>>)> {
+    fn preimages_for_entry(&self, entry: &RangeEntry) -> Vec<VersionNote> {
         match entry {
             RangeEntry::Put { key, value, .. } => {
                 if is_reserved_store_key(key) {
@@ -5399,11 +5426,7 @@ impl<E: Env> StoreCluster<E> {
     ///
     /// When `reserved` is `Some(g)` use that SI generation (assigned at propose /
     /// `tx_finish`) without a second bump (F49). `None` allocates a new gen.
-    fn note_mutations_at(
-        &mut self,
-        reserved: Option<u64>,
-        items: &[(Vec<u8>, Vec<u8>, Option<Vec<u8>>)],
-    ) {
+    fn note_mutations_at(&mut self, reserved: Option<u64>, items: &[VersionNote]) {
         if items.is_empty() {
             return;
         }
@@ -6354,7 +6377,7 @@ mod tests {
     #[test]
     fn queued_double_propose_distinct_si_gens_survive_reopen() {
         let dir = temp();
-        let mut c = StoreCluster::open_with_rng(&dir, 3, 1, SeedRng::new(0xF49_51_01)).unwrap();
+        let mut c = StoreCluster::open_with_rng(&dir, 3, 1, SeedRng::new(0x0F49_5101)).unwrap();
         c.elect_all(80).unwrap();
         c.put(b"f48/a", b"old-a").unwrap();
         c.put(b"f48/b", b"old-b").unwrap();
@@ -6444,7 +6467,7 @@ mod tests {
         // reload SI only from apply-path hist gens (si_gen embedded in log).
         // Apply uses the stamped si_gen; collision ⇒ both keys share one gen.
         drop(c);
-        let mut c = StoreCluster::open_with_rng(&dir, 3, 1, SeedRng::new(0xF49_51_02)).unwrap();
+        let mut c = StoreCluster::open_with_rng(&dir, 3, 1, SeedRng::new(0x0F49_5102)).unwrap();
         c.elect_all(40).unwrap();
         // Happy-path reopen may be healed by persist_si_keys; the log stamp assert
         // above is the primary F49 gate. Still check SI if versions differ.
@@ -7516,9 +7539,9 @@ mod tests {
             let tid = 99u64;
             for nid in c.ids.clone() {
                 let n = c.nodes.get_mut(&nid).unwrap();
-                n.db.put(&intent_key(b"u"), encode_intent(tid, b"aborted-new"))
+                n.db.put(intent_key(b"u"), encode_intent(tid, b"aborted-new"))
                     .unwrap();
-                n.db.put(&txn_pre_key(tid, b"u"), b"\xffgarbage").unwrap();
+                n.db.put(txn_pre_key(tid, b"u"), b"\xffgarbage").unwrap();
             }
         }
         match StoreCluster::open(&dir, 3, 1) {
@@ -7544,7 +7567,7 @@ mod tests {
         // Poison prepare preimages on every peer after prepare.
         for nid in c.ids.clone() {
             if let Some(n) = c.nodes.get_mut(&nid) {
-                n.db.put(&txn_pre_key(h.id, b"u"), b"\xffgarbage").unwrap();
+                n.db.put(txn_pre_key(h.id, b"u"), b"\xffgarbage").unwrap();
             }
         }
         let err = c.tx_cancel(&h);
@@ -7614,19 +7637,19 @@ mod tests {
             for nid in c.ids.clone() {
                 let n = c.nodes.get_mut(&nid).unwrap();
                 // Base blob empty → load walks log_hi segments 1..=3.
-                n.db.put(&raft_meta_key(rid, "log"), encode_log(&[]))
+                n.db.put(raft_meta_key(rid, "log"), encode_log(&[]))
                     .unwrap();
-                n.db.put(&raft_meta_key(rid, "log_hi"), encode_u64_meta(3))
+                n.db.put(raft_meta_key(rid, "log_hi"), encode_u64_meta(3))
                     .unwrap();
-                n.db.put(&log_entry_key(rid, 1), encode_one_log_rec(&rec1))
+                n.db.put(log_entry_key(rid, 1), encode_one_log_rec(&rec1))
                     .unwrap();
                 // index 2 intentionally missing
-                n.db.put(&log_entry_key(rid, 3), encode_one_log_rec(&rec3))
+                n.db.put(log_entry_key(rid, 3), encode_one_log_rec(&rec3))
                     .unwrap();
                 // Keep commit/applied low so uncommitted-suffix trim is a no-op.
-                n.db.put(&raft_meta_key(rid, "commit"), encode_u64_meta(0))
+                n.db.put(raft_meta_key(rid, "commit"), encode_u64_meta(0))
                     .unwrap();
-                n.db.put(&raft_meta_key(rid, "applied"), encode_u64_meta(0))
+                n.db.put(raft_meta_key(rid, "applied"), encode_u64_meta(0))
                     .unwrap();
             }
         }
@@ -8634,21 +8657,10 @@ mod tests {
         };
         e3.arm_one_failure();
         let reply = c
-            .on_append_entries(
-                3,
-                rid,
-                term + 1,
-                1,
-                last_i,
-                last_t,
-                0,
-                vec![entry],
-            )
+            .on_append_entries(3, rid, term + 1, 1, last_i, last_t, 0, vec![entry])
             .unwrap();
         match reply {
-            PeerMsg::AppendEntriesReply {
-                success: false, ..
-            } => {}
+            PeerMsg::AppendEntriesReply { success: false, .. } => {}
             other => panic!("expected AE reject when hard persist fails: {other:?}"),
         }
         // Entry must not be in memory log (we never reached append).
@@ -9336,7 +9348,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// F129: persist_now_ms marked RAM persisted even when every replica put failed.
+    /// F131: persist_now_ms marked RAM persisted even when every replica put failed.
     /// A later retry was skipped; reopen reloaded now_ms=0 and the expired lock
     /// reanimated (F56 inverse).
     #[test]
@@ -9378,6 +9390,52 @@ mod tests {
             c.dcs_get_on(1, &key).unwrap().is_none(),
             "expired TTL must stay dead after reopen; now_ms must have been retried to disk"
         );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// F132: alloc_txn_id advanced RAM then swallowed persist. After a finished
+    /// TX, reopen reused the same id (F35 class).
+    #[test]
+    fn alloc_txn_id_persist_fail_does_not_reuse_id_after_reopen() {
+        use pedradb_sim::{FailingEnv, SeedRng};
+        let dir = temp();
+        let e1 = FailingEnv::passing();
+        let e2 = FailingEnv::passing();
+        let e3 = FailingEnv::passing();
+        let issued;
+        {
+            let mut c = StoreCluster::open_with_envs_rng(
+                &dir,
+                3,
+                1,
+                [e1.clone(), e2.clone(), e3.clone()],
+                SeedRng::new(0xF132),
+            )
+            .unwrap();
+            c.elect_all(80).unwrap();
+            let h1 = c.tx_start([(b"t1".as_slice(), b"a".as_slice())]).unwrap();
+            let id1 = h1.id;
+            c.tx_finish(&h1).unwrap();
+            e1.arm_one_failure();
+            e2.arm_one_failure();
+            e3.arm_one_failure();
+            match c.tx_start([(b"t2".as_slice(), b"b".as_slice())]) {
+                Ok(h2) => {
+                    issued = h2.id;
+                    c.tx_finish(&h2).unwrap();
+                }
+                Err(_) => issued = id1,
+            }
+        }
+        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        c.elect_all(40).unwrap();
+        let h3 = c.tx_start([(b"t3".as_slice(), b"c".as_slice())]).unwrap();
+        assert!(
+            h3.id > issued,
+            "reopen must not reuse txn id {issued} after persist miss, got {}",
+            h3.id
+        );
+        c.tx_cancel(&h3).unwrap();
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -9535,7 +9593,7 @@ mod tests {
     #[test]
     fn finish_queued_after_leader_failover_flushes_si_notes() {
         let dir = temp();
-        let mut c = StoreCluster::open_with_rng(&dir, 3, 1, SeedRng::new(0xF50_01)).unwrap();
+        let mut c = StoreCluster::open_with_rng(&dir, 3, 1, SeedRng::new(0x000F_5001)).unwrap();
         c.set_rpc_mode(RpcMode::Queued);
         elect_queued(&mut c, 120);
         put_queued(&mut c, b"seed", b"0");
@@ -9595,7 +9653,7 @@ mod tests {
     #[test]
     fn finish_queued_abort_earlier_does_not_orphan_later_put() {
         let dir = temp();
-        let mut c = StoreCluster::open_with_rng(&dir, 3, 1, SeedRng::new(0xF50_02)).unwrap();
+        let mut c = StoreCluster::open_with_rng(&dir, 3, 1, SeedRng::new(0x000F_5002)).unwrap();
         c.set_rpc_mode(RpcMode::Queued);
         elect_queued(&mut c, 120);
         put_queued(&mut c, b"a", b"0");
