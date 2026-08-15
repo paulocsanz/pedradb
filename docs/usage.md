@@ -194,7 +194,7 @@ Full contract: rustdoc on `db` module. Audit fix backlog: [RFC-0015](rfc/0015-au
 | CLI `pedra backup\|restore\|pitr\|ship-wal\|migrate\|inspect` | Ops suite from the command line |
 | `Db::stats()` → `DbStats` | Mem/SST/WAL + `gc_line()` (`earliest_readable`, pins, `auto_reclaim`) + vlog/amp counters |
 | `CheckpointMeta` | `last_sequence`, `sst_count`, `earliest_readable_seq` (PDBCKP02; v1 still readable) |
-| `ConcurrentDb` | Multi-thread handle: write group + dual-mem flush; `get_at`/`range_at`/`scan_collect_at` fail-closed on too-old snaps |
+| `ConcurrentDb` | Multi-thread: write group + dual-mem; snapshot get/range fail-closed; `compact_blob`/`compact_vlog`/`blob_gc_candidates` |
 | `ConcurrentDb::begin_occ` / `OccTransaction` | **OCC multi-writer** TX: conflict → `TransactionConflict` (RFC-0014 P2.1) |
 | `OpenOptions.large_value_threshold` | **Opt-in** (`None` default): spill large values to `VALUES.vlog` (WiscKey-shaped) |
 | `Db::compact_vlog()` | Crash-safe value-log GC rewrite (RFC-0016 P0.1); reclaim after overwrite/delete + SST version drop |

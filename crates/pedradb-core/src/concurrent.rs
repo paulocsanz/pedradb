@@ -30,14 +30,15 @@ use bytes::Bytes;
 use parking_lot::{Mutex, RwLock};
 
 use crate::db::{
-    BatchOp, CheckpointMeta, CompactOptions, Db, DbStats, OpenOptions, Snapshot, SnapshotPin,
-    WriteOptions,
+    BatchOp, BlobGcCandidate, CheckpointMeta, CompactOptions, Db, DbStats, OpenOptions, Snapshot,
+    SnapshotPin, WriteOptions,
 };
 use crate::env::{Env, StdEnv};
 use crate::error::{CoreError, Result};
 use crate::key::SequenceNumber;
 use crate::merge::{StreamingVisibleIter, VisibleKv};
 use crate::occ::OccTransaction;
+use crate::vlog::VlogRewriteStats;
 
 struct PendingWrite {
     ops: Vec<BatchOp>,
@@ -264,7 +265,9 @@ impl<E: Env> ConcurrentDb<E> {
 
     /// Best-effort auto blob GC threshold (see [`Db::set_auto_blob_gc_min_ratio`]).
     pub fn set_auto_blob_gc_min_ratio(&self, min_dead_ratio: Option<f64>) {
-        self.inner.write().set_auto_blob_gc_min_ratio(min_dead_ratio);
+        self.inner
+            .write()
+            .set_auto_blob_gc_min_ratio(min_dead_ratio);
     }
 
     /// Current auto blob-GC threshold, if enabled.
@@ -623,6 +626,50 @@ impl<E: Env> ConcurrentDb<E> {
     pub fn compact_for_reads(&self) -> Result<()> {
         let _flush = self.flush_lock.lock();
         self.inner.write().compact_for_reads()
+    }
+
+    /// Blob GC candidates (read lock).
+    ///
+    /// # Errors
+    /// Same as [`Db::blob_gc_candidates`].
+    pub fn blob_gc_candidates(&self) -> Result<Vec<BlobGcCandidate>> {
+        self.inner.read().blob_gc_candidates()
+    }
+
+    /// Sealed + active blob file numbers (read lock).
+    #[must_use]
+    pub fn blob_file_nums(&self) -> Vec<u32> {
+        self.inner.read().blob_file_nums()
+    }
+
+    /// GC one sealed blob generation (single-flight with flush).
+    ///
+    /// # Errors
+    /// Same as [`Db::compact_blob`].
+    pub fn compact_blob(&self, file_num: u32) -> Result<VlogRewriteStats> {
+        let _flush = self.flush_lock.lock();
+        self.inner.write().compact_blob(file_num)
+    }
+
+    /// Auto-pick worst sealed blob with dead_ratio ≥ `min_dead_ratio`.
+    ///
+    /// # Errors
+    /// Same as [`Db::compact_blob_auto`].
+    pub fn compact_blob_auto(
+        &self,
+        min_dead_ratio: f64,
+    ) -> Result<Option<(u32, VlogRewriteStats)>> {
+        let _flush = self.flush_lock.lock();
+        self.inner.write().compact_blob_auto(min_dead_ratio)
+    }
+
+    /// Full value-log rewrite (single-flight with flush).
+    ///
+    /// # Errors
+    /// Same as [`Db::compact_vlog`].
+    pub fn compact_vlog(&self) -> Result<VlogRewriteStats> {
+        let _flush = self.flush_lock.lock();
+        self.inner.write().compact_vlog()
     }
 
     /// Checkpoint (single-flight with flush — flushes first).
@@ -1276,6 +1323,44 @@ mod tests {
             }
         }
         assert_eq!(miss2, 0, "lost keys after reopen");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// compact_blob_auto / candidates work through ConcurrentDb (flush_lock).
+    #[test]
+    fn concurrent_compact_blob_auto_path() {
+        let dir = temp_dir();
+        let db = ConcurrentDb::open_with(
+            &dir,
+            OpenOptions {
+                sync: true,
+                auto_flush_bytes: None,
+                auto_compact_sst_count: None,
+                auto_compact_sst_bytes: None,
+                exclusive: true,
+                large_value_threshold: Some(512),
+            },
+        )
+        .unwrap();
+        db.set_vlog_rotate_bytes(Some(3_500));
+        let v1 = vec![0x11u8; 1800];
+        let v2 = vec![0x22u8; 1800];
+        db.put(b"a", &v1).unwrap();
+        db.put(b"b", &v1).unwrap();
+        db.flush().unwrap();
+        db.put(b"a", &v2).unwrap();
+        db.put(b"c", &v2).unwrap();
+        db.flush().unwrap();
+        db.compact_with(CompactOptions::latest_only()).unwrap();
+        let cands = db.blob_gc_candidates().unwrap();
+        assert!(
+            cands.iter().any(|c| !c.is_active && c.bytes > 0),
+            "expected sealed blob: {cands:?}"
+        );
+        let got = db.compact_blob_auto(0.0).unwrap();
+        assert!(got.is_some(), "auto should pick a sealed file");
+        assert_eq!(db.get(b"a").as_deref(), Some(v2.as_slice()));
+        assert_eq!(db.get(b"b").as_deref(), Some(v1.as_slice()));
         let _ = fs::remove_dir_all(&dir);
     }
 
