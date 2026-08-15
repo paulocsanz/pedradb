@@ -69,7 +69,7 @@ fn read_req(stream: &mut TcpStream) -> Result<(String, String, Vec<u8>, Vec<(Str
     let mut lines = head.lines();
     let req = lines.next().unwrap_or("");
     let mut parts = req.split_whitespace();
-    let method = parts.next().unwrap_or("").to_string();
+    let method = parts.next().unwrap_or("").to_ascii_uppercase();
     let path = parts.next().unwrap_or("/").to_string();
     let mut content_len = 0usize;
     let mut headers = Vec::new();
@@ -488,6 +488,24 @@ mod tests {
         let d = std::env::temp_dir().join(format!("pedradb-http-{tag}-{n}-{i}"));
         let _ = std::fs::remove_dir_all(&d);
         d
+    }
+
+    /// F79: HTTP methods must be case-insensitive (RFC 9110).
+    #[test]
+    fn kv_http_method_case_insensitive() {
+        let dir = temp("meth");
+        let addr = bind_ephemeral();
+        let srv = KvServer::open(&dir).unwrap();
+        thread::spawn(move || {
+            let _ = srv.serve(addr);
+        });
+        thread::sleep(Duration::from_millis(100));
+        let (code, _) = http_exchange(addr, "put", "/kv/case", b"ok").unwrap();
+        assert_eq!(code, 200, "lowercase put must work");
+        let (code, body) = http_exchange(addr, "get", "/kv/case", b"").unwrap();
+        assert_eq!(code, 200);
+        assert_eq!(body, b"ok");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

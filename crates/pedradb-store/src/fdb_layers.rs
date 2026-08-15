@@ -263,8 +263,9 @@ impl IdempotentIndex {
 
     /// Keys indexed under `value`.
     ///
-    /// Reverse keys are `IDX || value || 0x00 || user_key` (F61). A `'/'`
-    /// separator made `keys_for("red")` include value `"red/foo"`.
+    /// Reverse keys are `IDX || u32be(len(value)) || value || 0x00 || user_key`
+    /// (F78). F61 used `IDX || value || 0x00 || key`, which stopped slash
+    /// siblings (`red` ⊃ `red/foo`) but not NUL siblings (`red` ⊃ `red\0foo`).
     ///
     /// # Errors
     /// Store range errors.
@@ -280,22 +281,27 @@ impl IdempotentIndex {
             .collect())
     }
 
+    fn push_idx_value(buf: &mut Vec<u8>, value: &[u8]) {
+        let n = u32::try_from(value.len()).expect("index value len fits u32");
+        buf.extend_from_slice(&n.to_be_bytes());
+        buf.extend_from_slice(value);
+    }
+
     fn idx_key(value: &[u8], key: &[u8]) -> Vec<u8> {
         let mut idx = Self::IDX.to_vec();
-        idx.extend_from_slice(value);
+        Self::push_idx_value(&mut idx, value);
         idx.push(0x00);
         idx.extend_from_slice(key);
         idx
     }
 
-    /// `[IDX||value||0x00, IDX||value||0x01)` — exact value, any user key.
+    /// `[IDX||len||value||0x00, IDX||len||value||0x01)` — exact value, any user key.
     fn idx_children(value: &[u8]) -> (Vec<u8>, Vec<u8>) {
         let mut start = Self::IDX.to_vec();
-        start.extend_from_slice(value);
+        Self::push_idx_value(&mut start, value);
         start.push(0x00);
-        let mut end = Self::IDX.to_vec();
-        end.extend_from_slice(value);
-        end.push(0x01);
+        let mut end = start.clone();
+        *end.last_mut().unwrap() = 0x01;
         (start, end)
     }
 }
@@ -475,6 +481,43 @@ mod tests {
         assert!(
             got.iter().any(|k| k.as_slice() == nul_key),
             "NUL in value/key must round-trip: {got:?}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// F78: `IDX||value||0x00||key` is not injective on `value`.
+    ///
+    /// `keys_for("red")` scans `[IDX||red||0x00, IDX||red||0x01)`. Value
+    /// `red||0x00||foo` encodes as `IDX||red||0x00||foo||0x00||k2`, which
+    /// lives inside that interval — ghost user key `foo||0x00||k2`.
+    #[test]
+    fn idempotent_index_keys_for_does_not_include_nul_value_prefix_sibling() {
+        let dir = temp();
+        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        c.elect_all(80).unwrap();
+        IdempotentIndex::put(&mut c, b"k1", b"red").unwrap();
+        let long_val = [b'r', b'e', b'd', 0x00, b'f', b'o', b'o'];
+        IdempotentIndex::put(&mut c, b"k2", &long_val).unwrap();
+        assert_eq!(
+            IdempotentIndex::get(&c, b"k2").unwrap().as_deref(),
+            Some(long_val.as_slice())
+        );
+        let red = IdempotentIndex::keys_for(&c, b"red").unwrap();
+        assert!(
+            red.iter().any(|k| k.as_slice() == b"k1"),
+            "k1 missing under red: {red:?}"
+        );
+        assert!(
+            !red.iter().any(|k| k.as_slice() == b"k2"
+                || k.windows(3).any(|w| w == b"foo")
+                || k.contains(&0x00)),
+            "keys_for(red) included sibling value red\\0foo: {red:?}"
+        );
+        let long = IdempotentIndex::keys_for(&c, &long_val).unwrap();
+        assert_eq!(
+            long,
+            vec![b"k2".to_vec()],
+            "exact value red\\0foo: {long:?}"
         );
         let _ = std::fs::remove_dir_all(&dir);
     }

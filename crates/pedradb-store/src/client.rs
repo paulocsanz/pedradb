@@ -25,9 +25,9 @@
 //!
 //! # Retry policy (writes)
 //!
-//! 1. Prefer last-known leader id (cache).
-//! 2. On NotLeader with `leader: Some(id)` → switch prefer and retry once.
-//! 3. Else probe `status` on each peer; pick any `r*:leader=N` and retry.
+//! 1. Prefer **per-range** last-known leader (multi-Raft), else global prefer.
+//! 2. On NotLeader with `leader: Some(id)` → cache that range→leader and retry.
+//! 3. Else probe `status` on each peer; parse **all** `r*:leader=N` into the map.
 //! 4. Cap attempts; never invent a leader without a hint or status.
 //!
 //! Reads with linearizability must go to the leader (same routing as put).
@@ -516,23 +516,35 @@ fn parse_leader_hint(m: &str) -> Option<u64> {
             }
         }
     }
-    // status text: r1:leader=2
-    for part in m.split_whitespace() {
-        if let Some(rest) = part.strip_prefix("r") {
-            if let Some((_, lead)) = rest.split_once(":leader=") {
-                if lead != "-" {
-                    return lead.parse().ok();
-                }
-            }
-        }
-    }
-    None
+    // status text: first r*:leader=N (legacy single-range hint)
+    leaders_from_status(m).into_values().next()
 }
 
-/// Parse leader id from status_text (`r1:leader=N`).
+/// Parse all `rN:leader=M` tokens from status_text into range_id → node_id.
+#[must_use]
+pub fn leaders_from_status(status: &str) -> HashMap<u64, u64> {
+    let mut out = HashMap::new();
+    for part in status.split_whitespace() {
+        let Some(rest) = part.strip_prefix('r') else {
+            continue;
+        };
+        let Some((rid_s, lead_s)) = rest.split_once(":leader=") else {
+            continue;
+        };
+        if lead_s == "-" {
+            continue;
+        }
+        if let (Ok(rid), Ok(lid)) = (rid_s.parse::<u64>(), lead_s.parse::<u64>()) {
+            out.insert(rid, lid);
+        }
+    }
+    out
+}
+
+/// Parse leader id from status_text (`r1:leader=N`) — first range with a leader.
 #[must_use]
 pub fn leader_from_status(status: &str) -> Option<u64> {
-    parse_leader_hint(status)
+    leaders_from_status(status).into_values().next()
 }
 
 impl ClientClass {
@@ -585,8 +597,10 @@ pub struct TcpClusterClient {
     regions: HashMap<u64, String>,
     /// Prefer dialing peers in this region first (P2.6).
     prefer_region: Option<String>,
-    /// Last known leader (prefer first dial).
+    /// Last known leader for single-range / unknown-range ops.
     prefer: Option<u64>,
+    /// Multi-Raft: range_id → known leader node_id (from status / NotLeader).
+    leaders: HashMap<u64, u64>,
     /// Max put attempts across peers.
     max_attempts: u32,
 }
@@ -600,6 +614,7 @@ impl TcpClusterClient {
             regions: HashMap::new(),
             prefer_region: None,
             prefer: None,
+            leaders: HashMap::new(),
             max_attempts: 8,
         }
     }
@@ -621,16 +636,28 @@ impl TcpClusterClient {
         self.prefer_region = region.map(|r| r.into());
     }
 
-    /// Cached preferred leader.
+    /// Cached preferred leader (global; multi-range see [`Self::leader_for_range`]).
     #[must_use]
     pub fn preferred_leader(&self) -> Option<u64> {
         self.prefer
+    }
+
+    /// Cached leader for a range, if known.
+    #[must_use]
+    pub fn leader_for_range(&self, range_id: u64) -> Option<u64> {
+        self.leaders.get(&range_id).copied()
     }
 
     /// Current peer map (for tests / ops).
     #[must_use]
     pub fn peer_map(&self) -> &HashMap<u64, String> {
         &self.peers
+    }
+
+    /// Current per-range leader map (tests / observability).
+    #[must_use]
+    pub fn range_leaders(&self) -> &HashMap<u64, u64> {
+        &self.leaders
     }
 
     /// RFC-0021 P1.3: push dial map to **every** reachable peer via TCP `SetPeers`
@@ -665,8 +692,9 @@ impl TcpClusterClient {
         Ok(())
     }
 
-    /// Ordered dial list: preferred leader, then same-region, then others by id.
-    fn dial_order(&self) -> Vec<u64> {
+    /// Ordered dial list for optional range: that range's leader, else global prefer,
+    /// then same-region, then others by id.
+    fn dial_order_for(&self, range_id: Option<u64>) -> Vec<u64> {
         let mut ids: Vec<u64> = self.peers.keys().copied().collect();
         ids.sort_unstable();
         // Partition by region preference.
@@ -683,7 +711,10 @@ impl TcpClusterClient {
             ids = same;
             ids.extend(other);
         }
-        if let Some(p) = self.prefer {
+        let prefer_node = range_id
+            .and_then(|r| self.leaders.get(&r).copied())
+            .or(self.prefer);
+        if let Some(p) = prefer_node {
             if let Some(i) = ids.iter().position(|&x| x == p) {
                 ids.remove(i);
                 ids.insert(0, p);
@@ -692,25 +723,65 @@ impl TcpClusterClient {
         ids
     }
 
+    /// Ordered dial list: global prefer, then same-region, then others by id.
+    fn dial_order(&self) -> Vec<u64> {
+        self.dial_order_for(None)
+    }
+
     /// First dial candidate after region preference (tests / observability).
     #[must_use]
     pub fn first_dial_id(&self) -> Option<u64> {
         self.dial_order().into_iter().next()
     }
 
-    /// Refresh prefer from any peer that answers status.
-    fn refresh_leader_from_status(&mut self) {
-        for id in self.dial_order() {
+    /// Learn / refresh **all** range leaders from any peer that answers status.
+    pub fn warm_leaders(&mut self) {
+        self.refresh_leaders_from_status();
+    }
+
+    /// Record a range→leader mapping and update global prefer.
+    fn note_leader(&mut self, range_id: Option<u64>, leader: u64) {
+        if let Some(rid) = range_id {
+            self.leaders.insert(rid, leader);
+        }
+        self.prefer = Some(leader);
+    }
+
+    /// Refresh per-range leaders from any peer that answers status.
+    fn refresh_leaders_from_status(&mut self) {
+        let order: Vec<u64> = self.peers.keys().copied().collect();
+        for id in order {
             let Some(addr) = self.peers.get(&id) else {
                 continue;
             };
             if let Ok(st) = client_status(addr) {
-                if let Some(lead) = leader_from_status(&st) {
-                    self.prefer = Some(lead);
-                    return;
+                let map = leaders_from_status(&st);
+                if map.is_empty() {
+                    continue;
                 }
+                self.leaders.extend(map);
+                if self.prefer.is_none() {
+                    self.prefer = self.leaders.values().next().copied();
+                }
+                return;
             }
         }
+    }
+
+    /// Apply NotLeader / StaleLeader routing to caches; returns updated range hint.
+    fn on_not_leader(
+        &mut self,
+        range_id: Option<u64>,
+        leader: Option<u64>,
+        range_hint: Option<u64>,
+    ) -> Option<u64> {
+        let hint = range_id.or(range_hint);
+        if let Some(lid) = leader {
+            self.note_leader(hint, lid);
+        } else {
+            self.refresh_leaders_from_status();
+        }
+        hint
     }
 
     /// Put with NotLeader / unavailable retries.
@@ -721,10 +792,11 @@ impl TcpClusterClient {
         let deadline = Instant::now() + Duration::from_secs(15);
         let mut attempts = 0u32;
         let mut last = StoreError::Msg("no peers".into());
+        let mut range_hint: Option<u64> = None;
 
         while attempts < self.max_attempts && Instant::now() < deadline {
             attempts += 1;
-            let order = self.dial_order();
+            let order = self.dial_order_for(range_hint);
             for id in order {
                 let Some(addr) = self.peers.get(&id).cloned() else {
                     continue;
@@ -732,6 +804,9 @@ impl TcpClusterClient {
                 match client_put(&addr, key, value) {
                     Ok(()) => {
                         self.prefer = Some(id);
+                        if let Some(rid) = range_hint {
+                            self.leaders.insert(rid, id);
+                        }
                         return Ok(());
                     }
                     Err(e) => {
@@ -742,16 +817,12 @@ impl TcpClusterClient {
                             other => classify(other),
                         };
                         match class {
-                            ClientClass::NotLeader { leader, .. }
+                            ClientClass::NotLeader { range_id, leader }
                             | ClientClass::StaleLeader {
+                                range_id,
                                 live_leader: leader,
-                                ..
                             } => {
-                                if let Some(lid) = leader {
-                                    self.prefer = Some(lid);
-                                } else {
-                                    self.refresh_leader_from_status();
-                                }
+                                range_hint = self.on_not_leader(range_id, leader, range_hint);
                                 // Keep scanning remaining peers this round; outer loop reorders.
                                 continue;
                             }
@@ -768,7 +839,7 @@ impl TcpClusterClient {
             }
             // brief pause before re-probing
             std::thread::sleep(Duration::from_millis(20));
-            self.refresh_leader_from_status();
+            self.refresh_leaders_from_status();
         }
         Err(last)
     }
@@ -793,10 +864,11 @@ impl TcpClusterClient {
         let deadline = Instant::now() + Duration::from_secs(20);
         let mut attempts = 0u32;
         let mut last = StoreError::Msg("no peers".into());
+        let mut range_hint: Option<u64> = None;
 
         while attempts < self.max_attempts && Instant::now() < deadline {
             attempts += 1;
-            let order = self.dial_order();
+            let order = self.dial_order_for(range_hint);
             for id in order {
                 let Some(addr) = self.peers.get(&id).cloned() else {
                     continue;
@@ -804,6 +876,9 @@ impl TcpClusterClient {
                 match client_put_batch(&addr, pairs) {
                     Ok(()) => {
                         self.prefer = Some(id);
+                        if let Some(rid) = range_hint {
+                            self.leaders.insert(rid, id);
+                        }
                         return Ok(());
                     }
                     Err(e) => {
@@ -813,16 +888,12 @@ impl TcpClusterClient {
                             other => classify(other),
                         };
                         match class {
-                            ClientClass::NotLeader { leader, .. }
+                            ClientClass::NotLeader { range_id, leader }
                             | ClientClass::StaleLeader {
+                                range_id,
                                 live_leader: leader,
-                                ..
                             } => {
-                                if let Some(lid) = leader {
-                                    self.prefer = Some(lid);
-                                } else {
-                                    self.refresh_leader_from_status();
-                                }
+                                range_hint = self.on_not_leader(range_id, leader, range_hint);
                                 continue;
                             }
                             ClientClass::Unavailable(_) | ClientClass::NotCommitted { .. } => {
@@ -837,7 +908,7 @@ impl TcpClusterClient {
                 }
             }
             std::thread::sleep(Duration::from_millis(20));
-            self.refresh_leader_from_status();
+            self.refresh_leaders_from_status();
         }
         Err(last)
     }
@@ -851,10 +922,11 @@ impl TcpClusterClient {
         let deadline = Instant::now() + Duration::from_secs(20);
         let mut attempts = 0u32;
         let mut last = StoreError::Msg("no peers".into());
+        let mut range_hint: Option<u64> = None;
 
         while attempts < self.max_attempts && Instant::now() < deadline {
             attempts += 1;
-            let order = self.dial_order();
+            let order = self.dial_order_for(range_hint);
             for id in order {
                 let Some(addr) = self.peers.get(&id).cloned() else {
                     continue;
@@ -862,21 +934,20 @@ impl TcpClusterClient {
                 match client_commit_tx(&addr, pairs) {
                     Ok(tid) => {
                         self.prefer = Some(id);
+                        if let Some(rid) = range_hint {
+                            self.leaders.insert(rid, id);
+                        }
                         return Ok(tid);
                     }
                     Err(e) => {
                         last = e;
                         match classify(&last) {
-                            ClientClass::NotLeader { leader, .. }
+                            ClientClass::NotLeader { range_id, leader }
                             | ClientClass::StaleLeader {
+                                range_id,
                                 live_leader: leader,
-                                ..
                             } => {
-                                if let Some(lid) = leader {
-                                    self.prefer = Some(lid);
-                                } else {
-                                    self.refresh_leader_from_status();
-                                }
+                                range_hint = self.on_not_leader(range_id, leader, range_hint);
                                 break;
                             }
                             ClientClass::Unavailable(_) | ClientClass::NotCommitted { .. } => {
@@ -891,7 +962,7 @@ impl TcpClusterClient {
                 }
             }
             std::thread::sleep(Duration::from_millis(20));
-            self.refresh_leader_from_status();
+            self.refresh_leaders_from_status();
         }
         Err(last)
     }
@@ -939,6 +1010,29 @@ mod tests {
             Some(1)
         );
         assert_eq!(leader_from_status("r1:leader=-"), None);
+    }
+
+    #[test]
+    fn leaders_from_status_multi_range() {
+        let st = "local=3 members=[1, 2, 3] r1:leader=1 r2:leader=3 r3:leader=- r4:leader=2";
+        let m = leaders_from_status(st);
+        assert_eq!(m.get(&1), Some(&1));
+        assert_eq!(m.get(&2), Some(&3));
+        assert_eq!(m.get(&4), Some(&2));
+        assert!(!m.contains_key(&3));
+        // first non-dash still works for legacy helper
+        assert_eq!(leader_from_status(st), Some(1));
+    }
+
+    #[test]
+    fn dial_order_prefers_range_leader() {
+        let mut c = TcpClusterClient::new([(1, "a:1".into()), (2, "b:2".into()), (3, "c:3".into())]);
+        c.prefer = Some(1);
+        c.leaders.insert(4, 3);
+        let order = c.dial_order_for(Some(4));
+        assert_eq!(order.first().copied(), Some(3));
+        let order_global = c.dial_order_for(None);
+        assert_eq!(order_global.first().copied(), Some(1));
     }
 
     #[test]
