@@ -66,6 +66,7 @@ cargo run -p pedradb-store --release --bin montanha-perf-gate -- findings/perf-g
 | **S1** scale ranges sequential | disjoint put @ 1/2/4/8 ranges | single client (flat) |
 | **S2** scale multi-client multi-range | N TCP threads, key→range | **option A proof** |
 | **S3** multi-client multi-range PutBatch | N TCP threads × batch | batch amortize + multi-leader |
+| *(client)* per-range leader cache | `active_range` + `warm_leaders` | multi-Raft dial without wrong prefer |
 | **E1** mini-bindingtester | random set/clear/get/range + multi-key + WW | silent-wrong soak |
 | **E2** TCP multi-client mini-bt | N threads, partitioned keys, majority verify | concurrent writers |
 

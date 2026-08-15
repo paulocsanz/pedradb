@@ -46,6 +46,7 @@
 mod ae_ack_kernel;
 mod commit_kernel;
 mod compact_kernel;
+mod si_kernel;
 mod snapshot_kernel;
 mod txn_kernel;
 mod msg;
@@ -60,8 +61,8 @@ pub mod layers;
 pub mod tcp;
 
 pub use client::{
-    classify, classify_message, leader_from_status, ClientClass, PendingTx, SnapshotTx,
-    TcpClusterClient, Transaction, MAX_SNAPSHOT_LAG,
+    classify, classify_message, leader_from_status, leaders_from_status, ClientClass, PendingTx,
+    SnapshotTx, TcpClusterClient, Transaction, MAX_SNAPSHOT_LAG,
 };
 pub use fdb_compat::{
     run_phase1_bindingtester_subset, FdbDatabase, FdbError, FdbTransaction, Phase1HarnessReport,
@@ -84,6 +85,7 @@ pub use compact_kernel::{
     compact_index_floor, compact_ready, may_compact_through, may_compact_through_as_is,
     peer_counts_for_compact, peer_counts_for_compact_as_is,
 };
+pub use si_kernel::{si_reader_beats, si_reader_beats_as_is};
 pub use snapshot_kernel::{
     snapshot_needs_txn_meta_clear, snapshot_needs_txn_meta_clear_as_is,
     snapshot_touches_user_key, snapshot_touches_user_key_as_is,
@@ -4316,14 +4318,11 @@ impl<E: Env> StoreCluster<E> {
         self.write_coalesce.len()
     }
 
-    /// Flush staged puts via [`Self::put_many`] (one Raft batch per range).
+    /// Flush staged puts via [`Self::put_many`] (one Raft batch per range;
+    /// multi-range uses 2PC `commit_tx` — F77).
     ///
     /// F66: on failure the buffer is **kept** so the client can retry. (A prior
     /// `mem::take` dropped staged pairs on any `put_many` error — silent loss.)
-    ///
-    /// Note: multi-range `put_many` is not atomic; a mid-list failure may leave
-    /// earlier ranges already committed. Retry re-puts those keys (idempotent
-    /// when values are unchanged).
     ///
     /// # Errors
     /// Same as [`Self::put_many`].
@@ -4678,24 +4677,30 @@ impl<E: Env> StoreCluster<E> {
     /// Prefer the live range leader (just applied), else the participating peer with
     /// highest `applied`. Never default to a partitioned `ids[0]` (F42).
     fn best_applied_reader(&self, rid: u64) -> Option<u64> {
-        if let Some(lead) = self.range_leader(rid) {
-            if self.is_local_node(lead) && self.is_participating(lead) {
-                return Some(lead);
+        let lead = self.range_leader(rid).filter(|&l| {
+            self.is_local_node(l) && self.is_participating(l)
+        });
+        let self_id = self.local_node_id();
+        let mut best: Option<(u64, bool, bool, bool, u64)> = None;
+        for &nid in &self.ids {
+            if !self.is_local_node(nid) {
+                continue;
+            }
+            let c_lead = lead == Some(nid);
+            let c_part = self.is_participating(nid);
+            let c_self = self_id == Some(nid);
+            let c_app = self.applied_index(nid, rid);
+            match best {
+                None => best = Some((nid, c_lead, c_part, c_self, c_app)),
+                Some((_, bl, bp, bs, ba)) => {
+                    if si_kernel::si_reader_beats(c_lead, c_part, c_self, c_app, bl, bp, bs, ba)
+                    {
+                        best = Some((nid, c_lead, c_part, c_self, c_app));
+                    }
+                }
             }
         }
-        self.ids
-            .iter()
-            .copied()
-            .filter(|&nid| self.is_local_node(nid) && self.is_participating(nid))
-            .max_by_key(|&nid| self.applied_index(nid, rid))
-            .or_else(|| self.local_node_id())
-            .or_else(|| {
-                self.ids
-                    .iter()
-                    .copied()
-                    .filter(|&nid| self.is_local_node(nid))
-                    .max_by_key(|&nid| self.applied_index(nid, rid))
-            })
+        best.map(|(id, _, _, _, _)| id)
     }
 
     /// Record all keys of a finished 2PC TX under a **single** commit generation.
@@ -5158,10 +5163,11 @@ impl<E: Env> StoreCluster<E> {
             }
         }
         // Pedra scan for keys never recorded in this process history (e.g. after reopen).
-        // F62 / F55-class: never prefer lagging `ids[0]` — use the best changelog
-        // reader (max last_sequence among local participating nodes).
+        // F84: prefer per-range applied reader for `start`'s range (not global
+        // last_sequence). Fallback changelog / local for empty-cluster edge.
         let nid = self
-            .best_changelog_reader()
+            .best_reader_for_key(start)
+            .or_else(|| self.best_changelog_reader())
             .or_else(|| self.local_node_id())
             .or_else(|| self.ids.first().copied())
             .ok_or_else(|| StoreError::Msg("empty cluster".into()))?;
@@ -5263,43 +5269,56 @@ impl<E: Env> StoreCluster<E> {
     }
 
     fn best_changelog_reader(&self) -> Option<u64> {
-        self.ids
-            .iter()
-            .copied()
-            .filter(|&nid| self.is_local_node(nid) && self.is_participating(nid))
-            .max_by_key(|&nid| {
-                self.nodes
-                    .get(&nid)
-                    .map(|n| n.db.last_sequence())
-                    .unwrap_or(0)
-            })
-            .or_else(|| self.local_node_id())
-            .or_else(|| {
-                self.ids
-                    .iter()
-                    .copied()
-                    .filter(|&nid| self.is_local_node(nid))
-                    .max_by_key(|&nid| {
-                        self.nodes
-                            .get(&nid)
-                            .map(|n| n.db.last_sequence())
-                            .unwrap_or(0)
-                    })
-            })
+        let self_id = self.local_node_id();
+        let mut best: Option<(u64, bool, bool, bool, u64)> = None;
+        for &nid in &self.ids {
+            if !self.is_local_node(nid) {
+                continue;
+            }
+            let c_part = self.is_participating(nid);
+            let c_self = self_id == Some(nid);
+            let c_seq = self
+                .nodes
+                .get(&nid)
+                .map(|n| n.db.last_sequence())
+                .unwrap_or(0);
+            match best {
+                None => best = Some((nid, false, c_part, c_self, c_seq)),
+                Some((_, bl, bp, bs, ba)) => {
+                    if si_kernel::si_reader_beats(false, c_part, c_self, c_seq, bl, bp, bs, ba)
+                    {
+                        best = Some((nid, false, c_part, c_self, c_seq));
+                    }
+                }
+            }
+        }
+        best.map(|(id, _, _, _, _)| id)
     }
 
-    /// Get LocalApplied from the freshest local PedraDB (F72).
+    /// Get LocalApplied from the freshest local PedraDB for this key's range (F72/F84).
     ///
-    /// Multi-node in-process: prefer [`Self::best_changelog_reader`] so a lagging
-    /// `ids[0]` is not the default read source (same class as F55/F62). Multi-host
-    /// single local: that node only.
+    /// F72: never default to a lagging `ids[0]`. F84: prefer
+    /// [`Self::best_applied_reader`] for the key's range — global
+    /// [`Self::best_changelog_reader`] (max `last_sequence`) can pick a node
+    /// busy on another range that is still lagging on this key's range.
+    /// Multi-host single local: that node only.
     pub fn get(&self, key: &[u8]) -> Result<Option<Bytes>> {
         let id = self
-            .best_changelog_reader()
-            .or_else(|| self.local_node_id())
-            .or_else(|| self.ids.first().copied())
+            .best_reader_for_key(key)
             .ok_or_else(|| StoreError::Msg("empty".into()))?;
         self.get_on(id, key)
+    }
+
+    /// Best local node to serve a LocalApplied read of `key` (F84).
+    fn best_reader_for_key(&self, key: &[u8]) -> Option<u64> {
+        if let Ok(rid) = self.locate(key) {
+            if let Some(id) = self.best_applied_reader(rid) {
+                return Some(id);
+            }
+        }
+        self.best_changelog_reader()
+            .or_else(|| self.local_node_id())
+            .or_else(|| self.ids.first().copied())
     }
 
     /// Read with an explicit policy.
@@ -5564,15 +5583,13 @@ impl<E: Env> StoreCluster<E> {
         Ok(kv.mod_revision)
     }
 
-    /// DCS get on the freshest local replica (F73: not lagging `ids[0]`).
+    /// DCS get on the freshest local replica for this key's range (F73/F84).
     ///
     /// # Errors
     /// Empty cluster / unknown node.
     pub fn dcs_get(&self, key: &[u8]) -> Result<Option<KeyValue>> {
         let id = self
-            .best_changelog_reader()
-            .or_else(|| self.local_node_id())
-            .or_else(|| self.ids.first().copied())
+            .best_reader_for_key(key)
             .ok_or_else(|| StoreError::Msg("empty".into()))?;
         self.dcs_get_on(id, key)
     }
@@ -6888,6 +6905,35 @@ mod tests {
         assert_eq!(
             c.get_fast_replica(b"rk").unwrap().as_deref(),
             Some(b"v1".as_ref())
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// F84: multi-range `get` follows per-range applied reader (not global
+    /// last_sequence). Partitioning `ids[0]` must not hide a live key in range 2.
+    #[test]
+    fn get_multi_range_uses_per_range_applied_reader() {
+        let dir = temp();
+        let mut c = StoreCluster::open_with_rng(&dir, 3, 2, SeedRng::new(0xF84_0001)).unwrap();
+        c.elect_all(100).unwrap();
+        // Range 2 starts at 0x80 under a 2-way first-byte split.
+        let k1 = vec![0x90, b'x'];
+        assert_eq!(c.locate(&k1).unwrap(), 2, "key must land in range 2");
+        c.put(&k1, b"live").unwrap();
+        assert!(c.count_applied_eq(&k1, b"live") >= 2);
+        // Partition node 1 (historical default reader).
+        c.set_participating(1, false).unwrap();
+        assert_eq!(
+            c.get(&k1).unwrap().as_deref(),
+            Some(b"live".as_ref()),
+            "F84: get must use best applied for range 2, not lagging/global default"
+        );
+        let rid = c.locate(&k1).unwrap();
+        let best = c.best_applied_reader(rid).expect("best applied");
+        assert_ne!(best, 1, "best reader must not be partitioned node 1");
+        assert_eq!(
+            c.get(&k1).unwrap().as_deref(),
+            c.get_on(best, &k1).unwrap().as_deref()
         );
         let _ = std::fs::remove_dir_all(&dir);
     }

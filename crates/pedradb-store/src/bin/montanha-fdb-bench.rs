@@ -722,6 +722,7 @@ fn main() {
 
         // S2: multi-client multi-range (TCP) — true option-A scale probe.
         // Sequential S1 cannot prove multi-leader parallelism; concurrent clients can.
+        // Threads fixed by MONTANHA_BENCH_THREADS; map tid → range (hot range if thr>nr).
         if let Some(bin) = find_montanha_tcp() {
             progress!("S2 multi-client multi-range TCP…");
             let per = (n.min(24) / n_threads.max(1)).max(4);
@@ -732,7 +733,6 @@ fn main() {
                 let nodes = start_tcp_cluster(&bin, &tmp, nr);
                 let peers: Vec<(u64, String)> =
                     nodes.iter().map(|n| (n.id, n.addr.to_string())).collect();
-                // Fixed thread count; map thread → range by tid % nr (hot range if thr>nr).
                 let thr = n_threads.max(1);
                 let step = (256u64 / nr.max(1)) as u8;
                 let peers_a = Arc::new(peers);
@@ -748,8 +748,13 @@ fn main() {
                     } else {
                         (range_i as u8).saturating_mul(step)
                     };
+                    // range ids are 1-based; range_i 0 → r1, etc.
+                    let range_id = range_i + 1;
                     handles.push(thread::spawn(move || {
-                        let mut cli = TcpClusterClient::new(peers).with_max_attempts(64);
+                        let mut cli = TcpClusterClient::new(peers)
+                            .with_max_attempts(64)
+                            .with_active_range(range_id);
+                        cli.warm_leaders();
                         let mut ok = 0u64;
                         for i in 0..per {
                             let mut k = vec![start_b, b't'];
@@ -779,7 +784,7 @@ fn main() {
     "keys_ok": {total_ok},
     "keys_per_s": {kps:.3},
     "wall_s": {ws:.4},
-    "note": "multi-client multi-range; expect higher keys/s as ranges increase if leaders parallelize"
+    "note": "multi-client multi-range; active_range + per-range leader cache"
   }}"#,
                     ws = wall.as_secs_f64(),
                 ));
@@ -793,7 +798,6 @@ fn main() {
             // range while leaders run in parallel (RFC-0025 / option A + P1.3).
             progress!("S3 multi-client multi-range TCP PutBatch…");
             let batch_sz = 8usize;
-            // per-thread: enough keys for ≥2 batches; total keys ≈ thr * batches * batch_sz
             let batches_per = (n.min(32) / n_threads.max(1)).max(2);
             for &nr in &[1u64, 4, 8] {
                 let tmp = out.join(format!("tcp-scale-batch-r{nr}"));
@@ -817,8 +821,12 @@ fn main() {
                     } else {
                         (range_i as u8).saturating_mul(step)
                     };
+                    let range_id = range_i + 1;
                     handles.push(thread::spawn(move || {
-                        let mut cli = TcpClusterClient::new(peers).with_max_attempts(64);
+                        let mut cli = TcpClusterClient::new(peers)
+                            .with_max_attempts(64)
+                            .with_active_range(range_id);
+                        cli.warm_leaders();
                         let mut ok_keys = 0u64;
                         let mut ok_batches = 0u64;
                         for b in 0..batches_per {
@@ -864,7 +872,7 @@ fn main() {
     "keys_per_s": {kps:.3},
     "batches_per_s": {bps:.3},
     "wall_s": {ws:.4},
-    "note": "multi-client multi-range PutBatch; expect keys/s >> S2 as ranges+batch amortize"
+    "note": "multi-client multi-range PutBatch; active_range + per-range leader cache"
   }}"#,
                     ws = wall.as_secs_f64(),
                 ));

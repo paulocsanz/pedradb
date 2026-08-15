@@ -43,11 +43,17 @@ Earlier s2c lab had higher r8 (~8.4 keys/s); **r8 is noisy** under thr≪ranges.
 
 **Read:** sequential client cannot exercise multi-leader parallelism. **S2 at 4 ranges proves option A** under multi-client. **S3 proves PutBatch key amortization on one range**; multi-range batch still needs better leader spread + less worker contention (residual, not flip to B). Artifacts: `findings/fdb-bench-scale-s2c/`, `findings/fdb-bench-scale-s3/`. Option B (unbundle) still not justified.
 
+### Client routing (2026-08-15)
+
+`TcpClusterClient` now keeps a **per-range** leader map (`leaders_from_status` / NotLeader hints), optional **`active_range`** for partitioned writers, and `warm_leaders()`. Previously a single global prefer + “first `r*:leader`” status parse mis-routed multi-Raft puts after elect.
+
+Residual still holds: when **all range leaders elect onto one node**, multi-client multi-range collapses to one worker queue (no option-A win). r8 under load remains noisy.
+
 Rationale:
-- Lab multi-Raft scales write capacity under concurrent partitioned clients (S2 r1→r4).
-- PutBatch is the right bulk path (S3 r1); multi-range batch needs more soak.
+- Lab multi-Raft scales write capacity under concurrent partitioned clients (S2 r1→r4) **when leaders are spread**.
+- PutBatch is the right bulk path (S3 r1); multi-range batch needs more soak + leader diversity.
 - Unbundling (B) is higher cost until multi-client multi-range saturates CPU with amortised fsync.
-- Layers should shard by range prefix and open N writers (not one hot client).
+- Layers should shard by range prefix, open N writers, and pin clients to ranges (`with_active_range`).
 
 ## Required inputs before flipping to B
 
