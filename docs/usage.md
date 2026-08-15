@@ -183,7 +183,8 @@ Full contract: rustdoc on `db` module. Audit fix backlog: [RFC-0015](rfc/0015-au
 | `Db::range(start, end)` | Convenience scan → materialises a `Vec` (**OOM footgun** on large DBs; small-DB/tests only) |
 | `Db::range_limited(…, limit)` | **Preferred** for pagination — stop after N live keys |
 | `Db::scan` / `scan_at` | **Preferred** streaming merge for large ranges (bound memory) |
-| `Db::compact` / `compact_with` | Merge SSTs (tmp→rename); optional version GC |
+| `Db::compact` / `compact_with` / `compact_reclaim` | Merge SSTs (tmp→rename); optional version GC; pin-aware reclaim |
+| `Db::pin_snapshot` / `release_snapshot_pin` | Register/release read pin so `compact_reclaim` keeps history |
 | `Db::create_checkpoint(dest)` | Point-in-time copy (flush + file set); openable as a DB |
 | `pedradb_ops::BackupEngine` | Local base backup, `ship_wal`, `restore` / `restore_pitr`, verify |
 | `pedradb_ops::migrate_to_latest` / `inspect_format` | Format inspect + rewrite SSTs/MANIFEST to current writer |
@@ -201,7 +202,7 @@ Full contract: rustdoc on `db` module. Audit fix backlog: [RFC-0015](rfc/0015-au
 | `OpenOptions.auto_compact_sst_count` | After flush, compact when SST count ≥ N (`None` = off) |
 | `OpenOptions.auto_compact_sst_bytes` | After flush, compact when total SST bytes ≥ N (`None` = off) |
 | `OpenOptions.exclusive` | Default `true`: PID `LOCK` file (cross-process; same-PID re-open steals) |
-| `CompactOptions` / `CompactGcOptions` | `latest_only` or `min_sequence` watermark during compact |
+| `CompactOptions` / `CompactGcOptions` | `latest_only`, `min_sequence`, or `for_oldest_snapshot` (Rocks-style pin-safe) |
 | SST v3 | Block layout + on-disk Bloom; v1/v2 still readable |
 | MANIFEST / `CURRENT` | Live SST inventory rewritten on flush/compact; orphan SST GC on open |
 | `Db::last_sequence` / `sst_count` / `path` / `sync` / `close` | Introspection / shutdown |

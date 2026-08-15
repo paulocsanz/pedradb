@@ -309,6 +309,10 @@ impl BatchOp {
 }
 
 /// Read snapshot: sequence number visible to get/range (P2.3).
+///
+/// Cheap copy of a sequence. **Does not** register with the DB — version GC
+/// via [`Db::compact_reclaim`] will not preserve this unless you also hold a
+/// [`SnapshotPin`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Snapshot {
     /// Highest committed sequence included in this snapshot.
@@ -326,6 +330,30 @@ impl Snapshot {
     #[must_use]
     pub fn sequence(self) -> SequenceNumber {
         self.seq
+    }
+}
+
+/// Registered read pin that blocks snapshot-safe version GC below its sequence.
+///
+/// Create with [`Db::pin_snapshot`]; release with [`Db::release_snapshot_pin`]
+/// (or drop without release only if you accept blocked reclaim until process end).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct SnapshotPin {
+    id: u64,
+    seq: SequenceNumber,
+}
+
+impl SnapshotPin {
+    /// Sequence this pin protects.
+    #[must_use]
+    pub fn sequence(self) -> SequenceNumber {
+        self.seq
+    }
+
+    /// Read snapshot view of this pin.
+    #[must_use]
+    pub fn snapshot(self) -> Snapshot {
+        Snapshot::at(self.seq)
     }
 }
 
@@ -440,6 +468,10 @@ pub struct Db<E: Env = StdEnv> {
     /// When set, best-effort [`Self::compact_blob_auto`] after flush / latest_only
     /// compact (RFC-0026 residual: no bg thread — runs on write path).
     auto_blob_gc_min_ratio: Option<f64>,
+    /// Open [`SnapshotPin`]s: pin id → sequence (open-items §2.1).
+    snapshot_pins: std::collections::BTreeMap<u64, SequenceNumber>,
+    /// Next pin id (monotonic; never reused for this process open).
+    next_snapshot_pin_id: u64,
     /// Count of successful WAL `sync_all` (observability / group-commit tests).
     wal_sync_count: u64,
     /// Logical user-value bytes ingested.
@@ -623,6 +655,8 @@ impl<E: Env> Db<E> {
             scan_prefetch: 4,
             prefetch_hits: AtomicU64::new(0),
             auto_blob_gc_min_ratio: None,
+            snapshot_pins: std::collections::BTreeMap::new(),
+            next_snapshot_pin_id: 1,
             wal_sync_count: 0,
             bytes_ingested: 0,
             bytes_written_wal: 0,
@@ -704,11 +738,45 @@ impl<E: Env> Db<E> {
     }
 
     /// Capture a read snapshot of currently committed state (sequence export).
+    ///
+    /// Does **not** register a pin — use [`Self::pin_snapshot`] when you need
+    /// [`Self::compact_reclaim`] to preserve history for this sequence.
     #[must_use]
     pub fn snapshot(&self) -> Snapshot {
         Snapshot {
             seq: self.last_sequence(),
         }
+    }
+
+    /// Register a read pin at the current last sequence (open-items §2.1).
+    ///
+    /// [`Self::compact_reclaim`] will not drop versions still required for this
+    /// pin. Call [`Self::release_snapshot_pin`] when done.
+    pub fn pin_snapshot(&mut self) -> SnapshotPin {
+        let seq = self.last_sequence();
+        let id = self.next_snapshot_pin_id;
+        self.next_snapshot_pin_id = id.saturating_add(1);
+        self.snapshot_pins.insert(id, seq);
+        SnapshotPin { id, seq }
+    }
+
+    /// Drop a pin previously returned by [`Self::pin_snapshot`].
+    ///
+    /// Unknown ids are ignored (idempotent).
+    pub fn release_snapshot_pin(&mut self, pin: SnapshotPin) {
+        self.snapshot_pins.remove(&pin.id);
+    }
+
+    /// Minimum sequence among open pins, if any.
+    #[must_use]
+    pub fn oldest_pinned_sequence(&self) -> Option<SequenceNumber> {
+        self.snapshot_pins.values().copied().min()
+    }
+
+    /// Number of open snapshot pins (observability / tests).
+    #[must_use]
+    pub fn snapshot_pin_count(&self) -> usize {
+        self.snapshot_pins.len()
     }
 
     /// Point lookup at the latest committed sequence (MemTable ∪ SSTs).
@@ -1610,6 +1678,24 @@ impl<E: Env> Db<E> {
         self.compact_with_ssts_only(options)
     }
 
+    /// Snapshot-safe version GC piggybacked on compaction (open-items §2.1 option b).
+    ///
+    /// Uses the oldest open [`SnapshotPin`] as the Rocks-style GC floor. With no
+    /// pins, reclaims like latest-only (watermark = last sequence). Does **not**
+    /// change default auto-compact (F20 still preserves history for bare
+    /// [`Snapshot`] tokens).
+    ///
+    /// # Errors
+    /// I/O while flushing or rewriting SSTs.
+    pub fn compact_reclaim(&mut self) -> Result<()> {
+        let oldest = self
+            .oldest_pinned_sequence()
+            .unwrap_or_else(|| self.last_sequence());
+        self.compact_with(CompactOptions {
+            gc: crate::merge::CompactGcOptions::for_oldest_snapshot(oldest),
+        })
+    }
+
     /// Collapse write-burst history for read-heavy control-plane prefixes (RFC-0019 P2.2).
     ///
     /// Flushes the memtable, then rewrites **all** SST files into one with
@@ -1694,18 +1780,14 @@ impl<E: Env> Db<E> {
         }
         let Some(from) = from_level else {
             // Only files at MAX level: optional GC rewrite of all of them.
-            if options.gc.keep_only_latest || options.gc.min_sequence > 0 {
+            if options.gc.requests_gc() {
                 return self.compact_levels(MAX_LSM_LEVEL, MAX_LSM_LEVEL, options);
             }
             return Ok(());
         };
         let to = (from + 1).min(MAX_LSM_LEVEL);
         // Skip no-op when single file already at `to` and no GC requested.
-        if from == to
-            && self.ssts.len() == 1
-            && !options.gc.keep_only_latest
-            && options.gc.min_sequence == 0
-        {
+        if from == to && self.ssts.len() == 1 && !options.gc.requests_gc() {
             return Ok(());
         }
         self.compact_levels(from, to, options)
@@ -1730,8 +1812,7 @@ impl<E: Env> Db<E> {
         // Single file at target, no GC → nothing to do.
         if input_idxs.len() == 1
             && self.sst_levels[input_idxs[0]] == to_level
-            && !options.gc.keep_only_latest
-            && options.gc.min_sequence == 0
+            && !options.gc.requests_gc()
         {
             return Ok(());
         }
@@ -4923,6 +5004,37 @@ mod tests {
         let db = Db::open(&dir).unwrap();
         assert_eq!(db.get(b"k").as_deref(), Some(b"new".as_ref()));
         assert_eq!(db.get(b"gone"), None);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// open-items §2.1: pin_snapshot + compact_reclaim preserves get_at for the pin.
+    #[test]
+    fn compact_reclaim_respects_snapshot_pin() {
+        let dir = temp_dir();
+        let mut db = Db::open(&dir).unwrap();
+        db.put(b"k", b"old").unwrap();
+        db.flush().unwrap();
+        let pin = db.pin_snapshot();
+        assert_eq!(db.snapshot_pin_count(), 1);
+        assert_eq!(db.oldest_pinned_sequence(), Some(pin.sequence()));
+        assert_eq!(db.get_at(pin.snapshot(), b"k").as_deref(), Some(b"old".as_ref()));
+
+        db.put(b"k", b"new").unwrap();
+        db.flush().unwrap();
+        assert_eq!(db.get(b"k").as_deref(), Some(b"new".as_ref()));
+
+        // Reclaim must keep `old` while pin is open.
+        db.compact_reclaim().unwrap();
+        assert_eq!(db.get_at(pin.snapshot(), b"k").as_deref(), Some(b"old".as_ref()));
+        assert_eq!(db.get(b"k").as_deref(), Some(b"new".as_ref()));
+
+        db.release_snapshot_pin(pin);
+        assert_eq!(db.snapshot_pin_count(), 0);
+        // No pins → reclaim drops superseded history (latest-only watermark).
+        db.compact_reclaim().unwrap();
+        assert_eq!(db.get(b"k").as_deref(), Some(b"new".as_ref()));
+        // Bare snapshot at the old seq may no longer resolve if history was GC'd.
+        db.close().unwrap();
         let _ = fs::remove_dir_all(&dir);
     }
 

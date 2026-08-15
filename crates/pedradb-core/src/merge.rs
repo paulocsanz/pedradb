@@ -6,7 +6,7 @@
 //! merge path that does not require materialising the full keyspace first.
 
 use std::cmp::Ordering;
-use std::collections::{BinaryHeap, BTreeMap};
+use std::collections::{BTreeMap, BinaryHeap};
 use std::ops::Bound;
 
 use bytes::Bytes;
@@ -96,9 +96,9 @@ pub fn range_deleted(
     point_seq: SequenceNumber,
     tombstones: &[RangeTombstone],
 ) -> bool {
-    tombstones.iter().any(|t| {
-        t.covers(user_key) && t.sequence > point_seq
-    })
+    tombstones
+        .iter()
+        .any(|t| t.covers(user_key) && t.sequence > point_seq)
 }
 
 /// Merge version streams and return visible puts in user-key order.
@@ -369,14 +369,23 @@ fn bound_as_ref(b: &Bound<Bytes>) -> Bound<&[u8]> {
     }
 }
 
-/// Options for version GC during compaction (RFC-0009 P1.3).
+/// Options for version GC during compaction (RFC-0009 P1.3 / open-items §2.1).
 #[derive(Debug, Clone, Copy, Default)]
 pub struct CompactGcOptions {
-    /// Drop any version with `sequence < min_sequence`.
+    /// Drop any version with `sequence < min_sequence` (coarse floor).
     pub min_sequence: SequenceNumber,
     /// If true, keep only the newest remaining version per user key
     /// (and drop a lone tombstone so the key disappears).
     pub keep_only_latest: bool,
+    /// Rocks-style snapshot-safe GC: drop a superseded point version when the
+    /// **next newer** version of the same key has `sequence <= oldest_snapshot`.
+    ///
+    /// All open read pins at/after that sequence already see the newer version
+    /// (or something newer still). When `Some`, takes precedence over
+    /// [`Self::keep_only_latest`] for point-key retention.
+    ///
+    /// `Some(MAX)` / a high watermark with no open pins ≈ latest-only for values.
+    pub oldest_snapshot: Option<SequenceNumber>,
 }
 
 impl CompactGcOptions {
@@ -387,7 +396,27 @@ impl CompactGcOptions {
         Self {
             min_sequence: 0,
             keep_only_latest: true,
+            oldest_snapshot: None,
         }
+    }
+
+    /// Snapshot-safe piggyback GC (open-items §2.1 option b).
+    ///
+    /// `oldest` is the minimum sequence of open [`crate::db::SnapshotPin`]s,
+    /// or the DB's last sequence when none are open.
+    #[must_use]
+    pub fn for_oldest_snapshot(oldest: SequenceNumber) -> Self {
+        Self {
+            min_sequence: 0,
+            keep_only_latest: false,
+            oldest_snapshot: Some(oldest),
+        }
+    }
+
+    /// True when any GC rewrite is requested (not a pure merge).
+    #[must_use]
+    pub fn requests_gc(self) -> bool {
+        self.keep_only_latest || self.min_sequence > 0 || self.oldest_snapshot.is_some()
     }
 }
 
@@ -395,7 +424,7 @@ impl CompactGcOptions {
 ///
 /// Input may be unsorted; output is sorted by [`InternalKey`].
 /// Range tombstones are kept (when not GC'd) and applied to drop covered values
-/// when `keep_only_latest` is set.
+/// when [`CompactGcOptions::keep_only_latest`] is set.
 #[must_use]
 pub fn gc_compact_entries(
     entries: impl IntoIterator<Item = (InternalKey, Bytes)>,
@@ -412,6 +441,12 @@ pub fn gc_compact_entries(
             continue;
         }
         map.insert(ikey, value);
+    }
+
+    // Rocks-style snapshot-safe: walk each user key newest→oldest; drop an older
+    // version when its next-newer sibling has sequence ≤ oldest_snapshot.
+    if let Some(oldest) = gc.oldest_snapshot {
+        return gc_snapshot_safe(map, range_dels, oldest);
     }
 
     if !gc.keep_only_latest {
@@ -457,6 +492,55 @@ pub fn gc_compact_entries(
         }
     }
     // Drop range tombstones under latest_only (keys already gone).
+    out
+}
+
+/// Snapshot-safe point retention + pass-through range tombstones.
+fn gc_snapshot_safe(
+    map: BTreeMap<InternalKey, Bytes>,
+    range_dels: Vec<(InternalKey, Bytes)>,
+    oldest_snapshot: SequenceNumber,
+) -> Vec<(InternalKey, Bytes)> {
+    let mut out: Vec<(InternalKey, Bytes)> = Vec::new();
+    let mut iter = map.into_iter().peekable();
+    while let Some((ikey, value)) = iter.next() {
+        let user_key = ikey.user_key.clone();
+        // Collect all versions of this user key (already newest-first via Ord).
+        let mut versions = vec![(ikey, value)];
+        while let Some((next, _)) = iter.peek() {
+            if next.user_key == user_key {
+                versions.push(iter.next().expect("peeked"));
+            } else {
+                break;
+            }
+        }
+        // Newest always kept; each older drops when immediate newer.seq ≤ oldest.
+        let mut keep: Vec<(InternalKey, Bytes)> = Vec::with_capacity(versions.len());
+        for (ikey, value) in versions {
+            if keep.is_empty() {
+                keep.push((ikey, value));
+                continue;
+            }
+            let newer_seq = keep.last().expect("non-empty").0.sequence;
+            if newer_seq <= oldest_snapshot {
+                // All open snapshots ≥ oldest see `newer` (or something newer).
+                continue;
+            }
+            keep.push((ikey, value));
+        }
+        // Drop lone deletion when it is the only kept version and no snap needs
+        // an older value (newest is a tombstone and nothing older survived).
+        if keep.len() == 1 && keep[0].0.kind == ValueType::Deletion {
+            // Tombstone only needed if some open snap is ≥ tombstone seq and
+            // would otherwise see an older value we already dropped — if we
+            // dropped everything under it, snaps see NotFound either way.
+            // Safe to drop lone tombstones when nothing older remains.
+            keep.clear();
+        }
+        out.extend(keep);
+    }
+    out.extend(range_dels);
+    out.sort_by(|a, b| a.0.cmp(&b.0));
     out
 }
 
@@ -556,10 +640,35 @@ mod tests {
             CompactGcOptions {
                 min_sequence: 5,
                 keep_only_latest: false,
+                oldest_snapshot: None,
             },
         );
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].1.as_ref(), b"a5");
+    }
+
+    #[test]
+    fn gc_snapshot_safe_keeps_history_for_open_pin() {
+        // k@1 old, k@5 mid, k@10 new. Oldest pin at 5 → keep @10 and @5, drop @1.
+        let entries = vec![
+            (ik(b"k", 1, ValueType::Value), Bytes::from_static(b"v1")),
+            (ik(b"k", 5, ValueType::Value), Bytes::from_static(b"v5")),
+            (ik(b"k", 10, ValueType::Value), Bytes::from_static(b"v10")),
+        ];
+        let out = gc_compact_entries(entries, CompactGcOptions::for_oldest_snapshot(5));
+        assert_eq!(out.len(), 2);
+        assert_eq!(out[0].0.sequence, 10);
+        assert_eq!(out[0].1.as_ref(), b"v10");
+        assert_eq!(out[1].0.sequence, 5);
+        assert_eq!(out[1].1.as_ref(), b"v5");
+        // Pin at last write → only newest.
+        let entries = vec![
+            (ik(b"k", 1, ValueType::Value), Bytes::from_static(b"v1")),
+            (ik(b"k", 10, ValueType::Value), Bytes::from_static(b"v10")),
+        ];
+        let out = gc_compact_entries(entries, CompactGcOptions::for_oldest_snapshot(10));
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].1.as_ref(), b"v10");
     }
 
     #[test]
@@ -570,13 +679,7 @@ mod tests {
             (ik(b"c", 3, ValueType::Value), Bytes::from_static(b"3")),
             (ik(b"d", 4, ValueType::Value), Bytes::from_static(b"4")),
         ];
-        let got = visible_range_limited(
-            entries,
-            10,
-            Bound::Unbounded,
-            Bound::Unbounded,
-            Some(2),
-        );
+        let got = visible_range_limited(entries, 10, Bound::Unbounded, Bound::Unbounded, Some(2));
         assert_eq!(got.len(), 2);
         assert_eq!(got[0].key.as_ref(), b"a");
         assert_eq!(got[1].key.as_ref(), b"b");
@@ -588,7 +691,10 @@ mod tests {
             (ik(b"a", 1, ValueType::Value), Bytes::from_static(b"1")),
             (ik(b"b", 2, ValueType::Value), Bytes::from_static(b"2")),
             (ik(b"c", 3, ValueType::Value), Bytes::from_static(b"3")),
-            (ik(b"a", 4, ValueType::RangeDeletion), Bytes::from_static(b"c")),
+            (
+                ik(b"a", 4, ValueType::RangeDeletion),
+                Bytes::from_static(b"c"),
+            ),
         ];
         let got = visible_range(entries, 10, Bound::Unbounded, Bound::Unbounded);
         // [a,c) deleted → only c remains
@@ -614,14 +720,9 @@ mod tests {
             Bound::Unbounded,
             Bound::Unbounded,
         );
-        let stream: Vec<_> = StreamingVisibleIter::new(
-            vec![s1, s2],
-            10,
-            Bound::Unbounded,
-            Bound::Unbounded,
-            None,
-        )
-        .collect();
+        let stream: Vec<_> =
+            StreamingVisibleIter::new(vec![s1, s2], 10, Bound::Unbounded, Bound::Unbounded, None)
+                .collect();
         assert_eq!(stream, batch);
     }
 }

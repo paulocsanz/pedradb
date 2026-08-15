@@ -30,7 +30,8 @@ use bytes::Bytes;
 use parking_lot::{Mutex, RwLock};
 
 use crate::db::{
-    BatchOp, CheckpointMeta, CompactOptions, Db, DbStats, OpenOptions, Snapshot, WriteOptions,
+    BatchOp, CheckpointMeta, CompactOptions, Db, DbStats, OpenOptions, Snapshot, SnapshotPin,
+    WriteOptions,
 };
 use crate::env::{Env, StdEnv};
 use crate::error::{CoreError, Result};
@@ -186,10 +187,35 @@ impl<E: Env> ConcurrentDb<E> {
         self.inner.read().get(key)
     }
 
-    /// Snapshot (read lock).
+    /// Snapshot (read lock). Bare sequence — does not register a pin.
     #[must_use]
     pub fn snapshot(&self) -> Snapshot {
         self.inner.read().snapshot()
+    }
+
+    /// Register a snapshot pin (write lock; open-items §2.1).
+    pub fn pin_snapshot(&self) -> SnapshotPin {
+        self.inner.write().pin_snapshot()
+    }
+
+    /// Release a pin from [`Self::pin_snapshot`].
+    pub fn release_snapshot_pin(&self, pin: SnapshotPin) {
+        self.inner.write().release_snapshot_pin(pin);
+    }
+
+    /// Oldest open pin sequence, if any.
+    #[must_use]
+    pub fn oldest_pinned_sequence(&self) -> Option<SequenceNumber> {
+        self.inner.read().oldest_pinned_sequence()
+    }
+
+    /// Snapshot-safe compact reclaim (see [`Db::compact_reclaim`]).
+    ///
+    /// # Errors
+    /// I/O.
+    pub fn compact_reclaim(&self) -> Result<()> {
+        let _flush = self.flush_lock.lock();
+        self.inner.write().compact_reclaim()
     }
 
     /// Range collect (read lock).

@@ -74,19 +74,28 @@ These are questions where the general direction is known but the specific
 approach hasn't been finalized. Each needs a concrete decision before its target
 slice can be implemented.
 
-### 2.1 Version GC strategy (Slice 7)
+### 2.1 Version GC strategy (Slice 7) — **partial (b) shipped**
 
 **Question:** How does PedraDB reclaim old MVCC versions?
 
-**Options:**
+**Answer (2026-08-15):** **(b) piggyback** via `Db::compact_reclaim` +
+`CompactGcOptions::for_oldest_snapshot` (Rocks-style: drop a superseded version
+when the next newer has `seq <= oldest open pin`). Pins are explicit:
+`pin_snapshot` / `release_snapshot_pin` (also on `ConcurrentDb`). Bare
+`Snapshot` tokens still do **not** block GC (F20: auto-compact stays history-
+preserving).
+
+**Still open:** (c) "snapshot too old" safety valve; auto-compact does **not**
+call `compact_reclaim` by default (would change get_at contract for unpinned
+seqs).
+
+**Options (historical):**
 - **(a) Stop-the-world pause:** scan all versions, remove those older than the
   oldest active snapshot. Simple but causes latency spikes.
 - **(b) Incremental GC:** reclaim versions during compaction (piggyback). No
   pause but versions live longer.
 - **(c) "Snapshot too old" error:** like FDB — if a snapshot is too old, abort
   the transaction. Safety valve, not primary mechanism.
-
-**Likely answer:** (b) as primary + (c) as safety valve. Needs benchmarking.
 
 ### 2.2 Value-log GC strategy (Slice 7) — **resolved for P0**
 
@@ -95,8 +104,8 @@ VLG1 refs from mem/imm/SSTs → write `VALUES.vlog.new` → remap SST/mem pointe
 MANIFEST + adopt marker → promote. Threshold remains **opt-in off by default**.
 
 **Residual (partial):** `set_auto_blob_gc_min_ratio` runs best-effort
-`compact_blob_auto` after flush / `latest_only` (no bg thread). Background
-worker still open; tighter tombstone retention across levels still open.
+`compact_blob_auto` after flush / `latest_only` / ConcurrentDb
+`finish_flush_pipeline` (no bg thread). Background worker still open.
 
 **Context (historical):** Values are written append-only. When a key is overwritten or
 deleted, the old value becomes garbage. The value log needs periodic

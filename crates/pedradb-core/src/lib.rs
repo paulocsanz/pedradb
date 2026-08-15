@@ -46,7 +46,7 @@ pub use changelog_kernel::{changelog_needs_sst_rebuild, changelog_needs_sst_rebu
 pub use concurrent::ConcurrentDb;
 pub use db::{
     copy_db_directory, read_checkpoint_meta, BatchOp, BlobGcCandidate, CheckpointMeta,
-    CompactOptions, Db, DbStats, OpenOptions, ScanProjection, Snapshot, WriteOptions,
+    CompactOptions, Db, DbStats, OpenOptions, ScanProjection, Snapshot, SnapshotPin, WriteOptions,
     CHECKPOINT_META_FILE, L0_COMPACTION_TRIGGER, MAX_LSM_LEVEL, WAL_FILE_NAME,
 };
 pub use env::{AdviseKind, Env, EnvFile, StdEnv};
