@@ -187,12 +187,21 @@ pub fn lookup_secondary(
     Ok(cluster.get(&idx_key)?.map(|b| b.to_vec()))
 }
 
-/// Range of reverse keys for exact `index_val` (not slash/prefix siblings).
+/// Leading bytes of a reverse index key: first byte of `val` (range shard)
+/// then length-prefixed `val` (F80). Raw `val||0x00` leaked `val||0x00||foo`.
+fn table_index_val_prefix(val: &[u8]) -> Vec<u8> {
+    let mut k = Vec::with_capacity(5 + val.len());
+    k.push(val.first().copied().unwrap_or(0));
+    push_len_pref(&mut k, val);
+    k
+}
+
+/// Range of reverse keys for exact `index_val` (not slash/NUL prefix siblings).
 #[must_use]
 pub fn table_index_value_range(val: &[u8]) -> (Vec<u8>, Vec<u8>) {
-    let mut start = val.to_vec();
+    let mut start = table_index_val_prefix(val);
     start.push(0x00);
-    let mut end = val.to_vec();
+    let mut end = table_index_val_prefix(val);
     end.push(0x01);
     (start, end)
 }
@@ -218,17 +227,20 @@ pub fn table_row_key(table: &[u8], pk: &[u8]) -> Vec<u8> {
     k
 }
 
-/// Secondary index key: `{val}\0` + length-prefixed (`i`, table, col, pk).
+/// Secondary index key: shard-byte + length-prefixed `val` + `\0` +
+/// length-prefixed (`i`, table, col, pk).
 ///
 /// F64: slash-joined `i/{table}/{col}/{pk}` collided when any component
 /// contained `/` (e.g. table=`a` col=`b/c` pk=`d` vs table=`a/b` col=`c` pk=`d`).
+/// F80: leading raw `val||0x00` made `table_index_value_range("red")` include
+/// value `red||0x00||foo`. Length-prefix `val`; keep `val[0]` first so
+/// different values still split across first-byte ranges.
 ///
 /// Shards by indexed value so index partitions can also spread across ranges;
 /// maintaining row+index still uses multi-key TX (possibly cross-range).
 #[must_use]
 pub fn table_index_key(table: &[u8], col: &[u8], val: &[u8], pk: &[u8]) -> Vec<u8> {
-    let mut k = Vec::with_capacity(val.len() + table.len() + col.len() + pk.len() + 24);
-    k.extend_from_slice(val);
+    let mut k = table_index_val_prefix(val);
     k.push(0x00);
     push_len_pref(&mut k, b"i");
     push_len_pref(&mut k, table);
@@ -401,20 +413,21 @@ pub fn olap_list_at(
 /// `prefix || subject || 0x00 || {seq:020}` — F63.
 #[must_use]
 pub fn subject_seq_key(ns: &[u8], subject: &[u8], seq: u64) -> Vec<u8> {
-    let mut k = Vec::with_capacity(ns.len() + subject.len() + 1 + 20);
+    // F81: length-prefix subject (F63 used subject||0x00 which nests subject||0x00||…).
+    let mut k = Vec::with_capacity(ns.len() + subject.len() + 8 + 20);
     k.extend_from_slice(ns);
-    k.extend_from_slice(subject);
+    push_len_pref(&mut k, subject);
     k.push(0x00);
     k.extend_from_slice(format!("{seq:020}").as_bytes());
     k
 }
 
-/// Exact subject children: `[ns||subject||0x00, ns||subject||0x01)`.
+/// Exact subject children: `[ns||len||subject||0x00, ns||len||subject||0x01)`.
 #[must_use]
 pub fn subject_children_range(ns: &[u8], subject: &[u8]) -> (Vec<u8>, Vec<u8>) {
-    let mut start = Vec::with_capacity(ns.len() + subject.len() + 1);
+    let mut start = Vec::with_capacity(ns.len() + subject.len() + 8);
     start.extend_from_slice(ns);
-    start.extend_from_slice(subject);
+    push_len_pref(&mut start, subject);
     start.push(0x00);
     let mut end = start.clone();
     *end.last_mut().unwrap() = 0x01;
@@ -833,6 +846,44 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// F80: `table_index_value_range` claimed exact val via `[val||0x00, val||0x01)`.
+    /// Value `red||0x00||foo` encodes as `red||0x00||foo||0x00||…` and sorts
+    /// inside that interval (same class as F78 on IdempotentIndex).
+    #[test]
+    fn table_index_range_does_not_include_nul_value_prefix_sibling() {
+        let dir = temp();
+        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        c.elect_all(80).unwrap();
+        put_with_secondary_index(&mut c, b"t", b"1", b"email", b"red", b"row1").unwrap();
+        let long = [b'r', b'e', b'd', 0x00, b'f', b'o', b'o'];
+        put_with_secondary_index(&mut c, b"t", b"2", b"email", &long, b"row2").unwrap();
+        assert_eq!(
+            lookup_secondary(&c, b"t", b"email", &long, b"2")
+                .unwrap()
+                .as_deref(),
+            Some(b"2".as_ref())
+        );
+        let (start, end) = table_index_value_range(b"red");
+        let snap = c.read_version();
+        let got = c.keys_in_range_at(&start, &end, snap).unwrap();
+        let pks: Vec<&[u8]> = got.iter().map(|(_, v)| v.as_slice()).collect();
+        assert!(
+            pks.iter().any(|v| *v == b"1"),
+            "pk 1 missing under red: {got:?}"
+        );
+        assert!(
+            !pks.iter().any(|v| *v == b"2"),
+            "table_index_value_range(red) included sibling red\\0foo: {got:?}"
+        );
+        let (s2, e2) = table_index_value_range(&long);
+        let got2 = c.keys_in_range_at(&s2, &e2, snap).unwrap();
+        assert!(
+            got2.iter().any(|(_, v)| v.as_slice() == b"2"),
+            "exact red\\0foo must still list pk 2: {got2:?}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn tikv_face_n_writers_and_batch() {
         let dir = temp();
@@ -1084,4 +1135,26 @@ mod tests {
         assert_eq!(got[0].1.as_slice(), b"e");
         let _ = std::fs::remove_dir_all(&dir);
     }
+
+    /// F81: subject||0x00 nests subject||0x00||foo under stream_list_at(subject).
+    #[test]
+    fn stream_list_does_not_include_nul_subject_sibling() {
+        let dir = temp();
+        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        c.elect_all(90).unwrap();
+        stream_publish(&mut c, b"red", 1, b"only-red").unwrap();
+        let long = [b'r', b'e', b'd', 0x00, b'x'];
+        stream_publish(&mut c, &long, 1, b"nested").unwrap();
+        let listed = stream_list_at(&c, b"red", c.read_version()).unwrap();
+        assert_eq!(
+            listed,
+            vec![(1, b"only-red".to_vec())],
+            "stream_list_at(red) included subject red\\0x: {listed:?}"
+        );
+        let nested = stream_list_at(&c, &long, c.read_version()).unwrap();
+        assert_eq!(nested, vec![(1, b"nested".to_vec())]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+
 }
