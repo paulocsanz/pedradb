@@ -1452,6 +1452,33 @@ fn persist_hard_db<E: Env>(db: &mut Db<E>, range_id: u64, peer: &RangePeer) -> R
     Ok(())
 }
 
+/// F125/F127: raise `term` only when hard state is durable.
+///
+/// On persist failure: restore previous term/vote, force [`Role::Follower`] and
+/// clear `leader_id` so this process does not keep acting as leader of a
+/// superseded term (even though the higher term did not hit disk).
+fn durable_become_follower_if_newer<E: Env>(
+    db: &mut Db<E>,
+    range_id: u64,
+    peer: &mut RangePeer,
+    term: u64,
+) -> bool {
+    if term <= peer.term {
+        return true;
+    }
+    let prev_term = peer.term;
+    let prev_voted = peer.voted_for;
+    peer.become_follower(term);
+    if persist_hard_db(db, range_id, peer).is_ok() {
+        return true;
+    }
+    peer.term = prev_term;
+    peer.voted_for = prev_voted;
+    peer.role = Role::Follower;
+    peer.leader_id = None;
+    false
+}
+
 /// Persist raft log (RFC-0025 P1.2).
 ///
 /// Fast path: when the log only **grew** by contiguous new indices since
@@ -2090,7 +2117,7 @@ impl<E: Env> StoreCluster<E> {
         self.load_si_from_disk()?;
         self.recover_next_txn_id()?;
         self.recover_now_ms()?;
-        self.persist_truncated_logs();
+        self.persist_truncated_logs()?;
         Ok(())
     }
 
@@ -2115,7 +2142,10 @@ impl<E: Env> StoreCluster<E> {
     }
 
     /// Persist raft logs after load truncated any uncommitted suffix.
-    fn persist_truncated_logs(&mut self) {
+    ///
+    /// # Errors
+    /// Log persist failure (F128 — uncommitted suffix must not remain on disk).
+    fn persist_truncated_logs(&mut self) -> Result<()> {
         let ids = self.ids.clone();
         let range_ids: Vec<u64> = self.ranges.iter().map(|r| r.id).collect();
         for nid in ids {
@@ -2127,10 +2157,11 @@ impl<E: Env> StoreCluster<E> {
             };
             for rid in &range_ids {
                 if let Some(peer) = node.ranges.get_mut(rid) {
-                    let _ = persist_log_db(&mut node.db, *rid, peer);
+                    persist_log_db(&mut node.db, *rid, peer)?;
                 }
             }
         }
+        Ok(())
     }
 
     fn persist_u64_meta_all(&mut self, kind: &str, n: u64) {
@@ -3139,22 +3170,12 @@ impl<E: Env> StoreCluster<E> {
             });
         };
         // F125: never grant a vote (or advance term) unless hard state is durable.
-        // AS-IS: `let _ = persist_hard` then vote_granted=true → dual vote after crash.
-        if term > p.term {
-            let prev_term = p.term;
-            let prev_voted = p.voted_for;
-            let prev_role = p.role;
-            p.become_follower(term);
-            if persist_hard_db(&mut n.db, range_id, p).is_err() {
-                p.term = prev_term;
-                p.voted_for = prev_voted;
-                p.role = prev_role;
-                return Ok(PeerMsg::RequestVoteReply {
-                    range_id,
-                    term: p.term,
-                    vote_granted: false,
-                });
-            }
+        if !durable_become_follower_if_newer(&mut n.db, range_id, p, term) {
+            return Ok(PeerMsg::RequestVoteReply {
+                range_id,
+                term: p.term,
+                vote_granted: false,
+            });
         }
         let can = p.voted_for.is_none() || p.voted_for == Some(candidate_id);
         let up = last_log_term > p.last_term()
@@ -3196,8 +3217,9 @@ impl<E: Env> StoreCluster<E> {
                 return Ok(());
             };
             if term > p.term {
-                p.become_follower(term);
-                let _ = persist_hard_db(&mut n.db, range_id, p);
+                // F127: step-down hard state must be durable (or demote without
+                // keeping Candidate/Leader of the old term).
+                let _ = durable_become_follower_if_newer(&mut n.db, range_id, p, term);
                 self.election_votes.remove(&(range_id, p.term));
                 return Ok(());
             }
@@ -3272,8 +3294,16 @@ impl<E: Env> StoreCluster<E> {
             });
         }
         if term > p.term {
-            p.become_follower(term);
-            let _ = persist_hard_db(&mut n.db, range_id, p);
+            // F127: do not process AE under a non-durable higher term (log could
+            // persist while hard state stayed on the old term → reopen dual-vote).
+            if !durable_become_follower_if_newer(&mut n.db, range_id, p, term) {
+                return Ok(PeerMsg::AppendEntriesReply {
+                    range_id,
+                    term: p.term,
+                    success: false,
+                    match_index: 0,
+                });
+            }
         } else {
             p.role = Role::Follower;
             p.election_left = p.election_timeout;
@@ -3384,8 +3414,7 @@ impl<E: Env> StoreCluster<E> {
                 return Ok(());
             };
             if term > p.term {
-                p.become_follower(term);
-                let _ = persist_hard_db(&mut n.db, range_id, p);
+                let _ = durable_become_follower_if_newer(&mut n.db, range_id, p, term);
                 return Ok(());
             }
             if p.role != Role::Leader || p.term != term {
@@ -3641,8 +3670,7 @@ impl<E: Env> StoreCluster<E> {
             let n = self.nodes.get_mut(&leader).unwrap();
             let p = n.ranges.get_mut(&range_id).unwrap();
             if term > p.term {
-                p.become_follower(term);
-                let _ = persist_hard_db(&mut n.db, range_id, p);
+                let _ = durable_become_follower_if_newer(&mut n.db, range_id, p, term);
                 return Ok(());
             }
             if p.role != Role::Leader {
@@ -4039,13 +4067,21 @@ impl<E: Env> StoreCluster<E> {
             }
             // Always re-persist when we truncated (or even if empty retain matched —
             // propose already wrote the orphan index to disk on the leader).
-            // Best-effort under FailingEnv: in-memory truncate is the critical
-            // anti-orphan; a dead peer disk must not block discarding others (F47).
+            // F128: leader must fail closed so the orphan cannot reopen+heal.
+            // Followers stay best-effort (dead peer must not block the leader).
             if p.log.len() != before_len || nid == leader {
-                let _ = persist_log_db(&mut n.db, rid, p);
+                if nid == leader {
+                    persist_log_db(&mut n.db, rid, p)?;
+                } else {
+                    let _ = persist_log_db(&mut n.db, rid, p);
+                }
             }
             if applied_dirty {
-                let _ = persist_applied_db(&mut n.db, rid, p);
+                if nid == leader {
+                    persist_applied_db(&mut n.db, rid, p)?;
+                } else {
+                    let _ = persist_applied_db(&mut n.db, rid, p);
+                }
             }
         }
         self.drop_pending_version_notes_from(rid, from_index);
@@ -4996,12 +5032,7 @@ impl<E: Env> StoreCluster<E> {
                             );
                             self.force_local_clear_keys(handle.id, &akeys, true)
                         } else {
-                            self.cleanup_range_keys(
-                                *rid2,
-                                handle.id,
-                                &akeys,
-                                CleanupMode::Revert,
-                            )
+                            self.cleanup_range_keys(*rid2, handle.id, &akeys, CleanupMode::Revert)
                         };
                         if let Err(ce) = clear {
                             if cleanup_err.is_none() {
@@ -7473,18 +7504,15 @@ mod tests {
             let tid = 99u64;
             for nid in c.ids.clone() {
                 let n = c.nodes.get_mut(&nid).unwrap();
-                n.db
-                    .put(&intent_key(b"u"), encode_intent(tid, b"aborted-new"))
+                n.db.put(&intent_key(b"u"), encode_intent(tid, b"aborted-new"))
                     .unwrap();
-                n.db
-                    .put(&txn_pre_key(tid, b"u"), b"\xffgarbage")
-                    .unwrap();
+                n.db.put(&txn_pre_key(tid, b"u"), b"\xffgarbage").unwrap();
             }
         }
         match StoreCluster::open(&dir, 3, 1) {
-            Ok(_) => panic!(
-                "open must fail closed on leftover corrupt preimage, not swallow revert"
-            ),
+            Ok(_) => {
+                panic!("open must fail closed on leftover corrupt preimage, not swallow revert")
+            }
             Err(e) => assert!(
                 e.to_string().contains("preimage"),
                 "expected preimage error, got {e}"
@@ -7500,15 +7528,11 @@ mod tests {
         let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
         c.elect_all(80).unwrap();
         c.put(b"u", b"live").unwrap();
-        let h = c
-            .tx_start([(b"u".as_slice(), b"new".as_slice())])
-            .unwrap();
+        let h = c.tx_start([(b"u".as_slice(), b"new".as_slice())]).unwrap();
         // Poison prepare preimages on every peer after prepare.
         for nid in c.ids.clone() {
             if let Some(n) = c.nodes.get_mut(&nid) {
-                n.db
-                    .put(&txn_pre_key(h.id, b"u"), b"\xffgarbage")
-                    .unwrap();
+                n.db.put(&txn_pre_key(h.id, b"u"), b"\xffgarbage").unwrap();
             }
         }
         let err = c.tx_cancel(&h);
@@ -7544,10 +7568,7 @@ mod tests {
         let err = c.propose_dcs(DcsCommand::Delete {
             key: b"/k".to_vec(),
         });
-        assert!(
-            err.is_err(),
-            "delete with corrupt d/rev must fail: {err:?}"
-        );
+        assert!(err.is_err(), "delete with corrupt d/rev must fail: {err:?}");
         let msg = err.unwrap_err().to_string();
         assert!(
             msg.contains("corrupt")
@@ -7581,25 +7602,19 @@ mod tests {
             for nid in c.ids.clone() {
                 let n = c.nodes.get_mut(&nid).unwrap();
                 // Base blob empty → load walks log_hi segments 1..=3.
-                n.db
-                    .put(&raft_meta_key(rid, "log"), encode_log(&[]))
+                n.db.put(&raft_meta_key(rid, "log"), encode_log(&[]))
                     .unwrap();
-                n.db
-                    .put(&raft_meta_key(rid, "log_hi"), encode_u64_meta(3))
+                n.db.put(&raft_meta_key(rid, "log_hi"), encode_u64_meta(3))
                     .unwrap();
-                n.db
-                    .put(&log_entry_key(rid, 1), encode_one_log_rec(&rec1))
+                n.db.put(&log_entry_key(rid, 1), encode_one_log_rec(&rec1))
                     .unwrap();
                 // index 2 intentionally missing
-                n.db
-                    .put(&log_entry_key(rid, 3), encode_one_log_rec(&rec3))
+                n.db.put(&log_entry_key(rid, 3), encode_one_log_rec(&rec3))
                     .unwrap();
                 // Keep commit/applied low so uncommitted-suffix trim is a no-op.
-                n.db
-                    .put(&raft_meta_key(rid, "commit"), encode_u64_meta(0))
+                n.db.put(&raft_meta_key(rid, "commit"), encode_u64_meta(0))
                     .unwrap();
-                n.db
-                    .put(&raft_meta_key(rid, "applied"), encode_u64_meta(0))
+                n.db.put(&raft_meta_key(rid, "applied"), encode_u64_meta(0))
                     .unwrap();
             }
         }
@@ -8577,6 +8592,113 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// F127: AE under higher term must not proceed if hard state cannot persist.
+    #[test]
+    fn append_entries_hard_persist_fail_rejects() {
+        use pedradb_sim::{FailingEnv, SeedRng};
+        let dir = temp();
+        let e1 = FailingEnv::passing();
+        let e2 = FailingEnv::passing();
+        let e3 = FailingEnv::passing();
+        let mut c = StoreCluster::open_with_envs_rng(
+            &dir,
+            3,
+            1,
+            [e1, e2, e3.clone()],
+            SeedRng::new(0xF127),
+        )
+        .unwrap();
+        c.elect_all(80).unwrap();
+        c.put(b"k", b"v").unwrap();
+        let rid = 1u64;
+        let (term, last_i, last_t) = {
+            let p = c.nodes.get(&3).unwrap().ranges.get(&rid).unwrap();
+            (p.term, p.last_index(), p.last_term())
+        };
+        let entry = LogRec {
+            index: last_i + 1,
+            term: term + 1,
+            entry: RangeEntry::Noop,
+        };
+        e3.arm_one_failure();
+        let reply = c
+            .on_append_entries(
+                3,
+                rid,
+                term + 1,
+                1,
+                last_i,
+                last_t,
+                0,
+                vec![entry],
+            )
+            .unwrap();
+        match reply {
+            PeerMsg::AppendEntriesReply {
+                success: false, ..
+            } => {}
+            other => panic!("expected AE reject when hard persist fails: {other:?}"),
+        }
+        // Entry must not be in memory log (we never reached append).
+        let p3 = c.nodes.get(&3).unwrap().ranges.get(&rid).unwrap();
+        assert!(
+            p3.log.last().map(|e| e.index) != Some(last_i + 1),
+            "must not append under non-durable higher term"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// F128: leader discard of uncommitted index must durable-truncate its log.
+    #[test]
+    fn discard_uncommitted_leader_persist_fail_is_err() {
+        use pedradb_sim::{FailingEnv, SeedRng};
+        let dir = temp();
+        let e1 = FailingEnv::passing();
+        let e2 = FailingEnv::passing();
+        let e3 = FailingEnv::passing();
+        let mut c = StoreCluster::open_with_envs_rng(
+            &dir,
+            3,
+            1,
+            [e1.clone(), e2, e3],
+            SeedRng::new(0xF128),
+        )
+        .unwrap();
+        c.elect_all(120).unwrap();
+        for _ in 0..40 {
+            if c.range_leader(1) == Some(1) {
+                break;
+            }
+            let _ = c.step_down_range_leader(1);
+            let _ = c.tick();
+            let _ = c.elect_all(20);
+        }
+        assert_eq!(c.range_leader(1), Some(1));
+        c.put(b"k", b"v").unwrap();
+        let rid = 1u64;
+        // Append a fake uncommitted entry on the leader log past commit.
+        let cut = {
+            let n = c.nodes.get_mut(&1).unwrap();
+            let p = n.ranges.get_mut(&rid).unwrap();
+            let idx = p.last_index() + 1;
+            p.log.push(LogRec {
+                index: idx,
+                term: p.term,
+                entry: RangeEntry::Noop,
+            });
+            // Persist so disk has the orphan (what propose would have done).
+            persist_log_db(&mut n.db, rid, p).unwrap();
+            idx
+        };
+        e1.arm_one_failure();
+        let err = c.discard_uncommitted_from(rid, 1, cut);
+        assert!(
+            err.is_err(),
+            "leader must fail closed if discard cannot re-persist log: {err:?}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// F125: vote grant must not stick without durable hard state.
     #[test]
     fn request_vote_persist_fail_denies_grant() {
@@ -8713,9 +8835,7 @@ mod tests {
             .on_install_snapshot(3, rid, term, leader, snap_i, snap_t, vec![])
             .unwrap();
         match reply {
-            PeerMsg::InstallSnapshotReply {
-                success: false, ..
-            } => {}
+            PeerMsg::InstallSnapshotReply { success: false, .. } => {}
             other => panic!("expected success=false on persist fail, got {other:?}"),
         }
         assert_eq!(
