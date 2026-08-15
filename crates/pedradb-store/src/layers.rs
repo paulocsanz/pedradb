@@ -315,18 +315,21 @@ pub fn pks_one_per_range(cluster: &StoreCluster) -> Vec<Vec<u8>> {
 
 // ── OLAP RO projection (derive from SoR, no dual write) ────────────────────
 
-/// Append-only event under `olap/{stream}/{seq}` for analytical scan (writer = OLTP put).
+/// Key: `olap/{stream}\0{seq:020}` (F63: not `olap/{stream}/{seq}` — that
+/// nests subject `a/b` under prefix scan of `a`).
+#[must_use]
+pub fn olap_event_key(stream: &[u8], seq: u64) -> Vec<u8> {
+    subject_seq_key(b"olap/", stream, seq)
+}
+
+/// Append-only event for analytical scan (writer = OLTP put).
 pub fn olap_ingest(
     cluster: &mut StoreCluster,
     stream: &[u8],
     seq: u64,
     payload: &[u8],
 ) -> Result<()> {
-    let mut k = b"olap/".to_vec();
-    k.extend_from_slice(stream);
-    k.push(b'/');
-    k.extend_from_slice(format!("{seq:020}").as_bytes());
-    cluster.put(&k, payload)
+    cluster.put(&olap_event_key(stream, seq), payload)
 }
 
 /// Read back a single ingested event (RO path from same SoR).
@@ -335,27 +338,57 @@ pub fn olap_get(
     stream: &[u8],
     seq: u64,
 ) -> Result<Option<Vec<u8>>> {
-    let mut k = b"olap/".to_vec();
-    k.extend_from_slice(stream);
-    k.push(b'/');
-    k.extend_from_slice(format!("{seq:020}").as_bytes());
-    Ok(cluster.get(&k)?.map(|b| b.to_vec()))
+    Ok(cluster.get(&olap_event_key(stream, seq))?.map(|b| b.to_vec()))
+}
+
+/// Half-open range of all seqs under `stream` name (exact, not slash children).
+#[must_use]
+pub fn olap_stream_range(stream: &[u8]) -> (Vec<u8>, Vec<u8>) {
+    subject_children_range(b"olap/", stream)
+}
+
+/// List `(seq, payload)` under exact `stream` (not slash-prefix children).
+pub fn olap_list_at(
+    cluster: &StoreCluster,
+    stream: &[u8],
+    snapshot: u64,
+) -> Result<Vec<(u64, Vec<u8>)>> {
+    list_subject_at(cluster, b"olap/", stream, snapshot)
 }
 
 // ── Stream / NATS-need durable subject ─────────────────────────────────────
 
-/// Publish to durable subject `stream/{subject}/{seq}`.
+/// `prefix || subject || 0x00 || {seq:020}` — F63.
+#[must_use]
+pub fn subject_seq_key(ns: &[u8], subject: &[u8], seq: u64) -> Vec<u8> {
+    let mut k = Vec::with_capacity(ns.len() + subject.len() + 1 + 20);
+    k.extend_from_slice(ns);
+    k.extend_from_slice(subject);
+    k.push(0x00);
+    k.extend_from_slice(format!("{seq:020}").as_bytes());
+    k
+}
+
+/// Exact subject children: `[ns||subject||0x00, ns||subject||0x01)`.
+#[must_use]
+pub fn subject_children_range(ns: &[u8], subject: &[u8]) -> (Vec<u8>, Vec<u8>) {
+    let mut start = Vec::with_capacity(ns.len() + subject.len() + 1);
+    start.extend_from_slice(ns);
+    start.extend_from_slice(subject);
+    start.push(0x00);
+    let mut end = start.clone();
+    *end.last_mut().unwrap() = 0x01;
+    (start, end)
+}
+
+/// Publish to durable subject (key = `stream/{subject}\0{seq}`).
 pub fn stream_publish(
     cluster: &mut StoreCluster,
     subject: &[u8],
     seq: u64,
     body: &[u8],
 ) -> Result<()> {
-    let mut k = b"stream/".to_vec();
-    k.extend_from_slice(subject);
-    k.push(b'/');
-    k.extend_from_slice(format!("{seq:020}").as_bytes());
-    cluster.put(&k, body)
+    cluster.put(&subject_seq_key(b"stream/", subject, seq), body)
 }
 
 /// Consume one message by seq (cursor external).
@@ -364,11 +397,44 @@ pub fn stream_get(
     subject: &[u8],
     seq: u64,
 ) -> Result<Option<Vec<u8>>> {
-    let mut k = b"stream/".to_vec();
-    k.extend_from_slice(subject);
-    k.push(b'/');
-    k.extend_from_slice(format!("{seq:020}").as_bytes());
-    Ok(cluster.get(&k)?.map(|b| b.to_vec()))
+    Ok(cluster
+        .get(&subject_seq_key(b"stream/", subject, seq))?
+        .map(|b| b.to_vec()))
+}
+
+/// List bodies under exact `subject` (not slash-prefix children) at a snapshot.
+pub fn stream_list_at(
+    cluster: &StoreCluster,
+    subject: &[u8],
+    snapshot: u64,
+) -> Result<Vec<(u64, Vec<u8>)>> {
+    list_subject_at(cluster, b"stream/", subject, snapshot)
+}
+
+fn list_subject_at(
+    cluster: &StoreCluster,
+    ns: &[u8],
+    subject: &[u8],
+    snapshot: u64,
+) -> Result<Vec<(u64, Vec<u8>)>> {
+    let (start, end) = subject_children_range(ns, subject);
+    let pairs = cluster.keys_in_range_at(&start, &end, snapshot)?;
+    let mut out = Vec::new();
+    for (k, v) in pairs {
+        let Some(rest) = k.strip_prefix(start.as_slice()) else {
+            continue;
+        };
+        if rest.len() != 20 {
+            continue;
+        }
+        if let Ok(s) = std::str::from_utf8(rest) {
+            if let Ok(seq) = s.parse::<u64>() {
+                out.push((seq, v));
+            }
+        }
+    }
+    out.sort_by_key(|(s, _)| *s);
+    Ok(out)
 }
 
 // ── Scylla-need CP helper ──────────────────────────────────────────────────
@@ -790,6 +856,27 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// Old keys `olap/{stream}/{seq}` nested `events/extra` under prefix
+    /// `olap/events/`. Encoding is now `olap/{stream}\0{seq}`.
+    #[test]
+    fn olap_scan_does_not_include_slash_sibling_stream() {
+        let dir = temp();
+        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        c.elect_all(60).unwrap();
+        olap_ingest(&mut c, b"events", 1, b"e1").unwrap();
+        olap_ingest(&mut c, b"events/extra", 1, b"leak").unwrap();
+        stream_publish(&mut c, b"jobs", 1, b"j1").unwrap();
+        stream_publish(&mut c, b"jobs/extra", 1, b"jleak").unwrap();
+        let snap = c.read_version();
+        let ev = olap_list_at(&c, b"events", snap).unwrap();
+        assert_eq!(ev, vec![(1, b"e1".to_vec())], "olap events leaked sibling: {ev:?}");
+        let extra = olap_list_at(&c, b"events/extra", snap).unwrap();
+        assert_eq!(extra, vec![(1, b"leak".to_vec())]);
+        let jobs = stream_list_at(&c, b"jobs", snap).unwrap();
+        assert_eq!(jobs, vec![(1, b"j1".to_vec())], "stream jobs leaked sibling: {jobs:?}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn scylla_need_cp_put_watch() {
         let dir = temp();
@@ -859,6 +946,45 @@ mod tests {
         let rev2 = EtcdNeedFace::cas(&mut c, b"leader", b"n1b", rev).unwrap();
         assert!(rev2 > rev);
 
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// F63: `stream/{subj}/{seq}` nested `a/b` under prefix scan of subject `a`.
+    #[test]
+    fn stream_list_does_not_include_slash_child_subject() {
+        let dir = temp();
+        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        c.elect_all(90).unwrap();
+        stream_publish(&mut c, b"a", 1, b"only-a").unwrap();
+        stream_publish(&mut c, b"a/b", 1, b"child").unwrap();
+        assert_eq!(
+            stream_get(&c, b"a", 1).unwrap().as_deref(),
+            Some(b"only-a".as_ref())
+        );
+        assert_eq!(
+            stream_get(&c, b"a/b", 1).unwrap().as_deref(),
+            Some(b"child".as_ref())
+        );
+        let listed = stream_list_at(&c, b"a", c.read_version()).unwrap();
+        assert_eq!(
+            listed,
+            vec![(1, b"only-a".to_vec())],
+            "subject a listed slash-child a/b (old stream/a/ prefix): {listed:?}"
+        );
+        let child = stream_list_at(&c, b"a/b", c.read_version()).unwrap();
+        assert_eq!(child, vec![(1, b"child".to_vec())]);
+
+        // Same class for OLAP stream names.
+        olap_ingest(&mut c, b"ev", 1, b"e").unwrap();
+        olap_ingest(&mut c, b"ev/nested", 1, b"n").unwrap();
+        let (s0, s1) = olap_stream_range(b"ev");
+        let got = c.keys_in_range_at(&s0, &s1, c.read_version()).unwrap();
+        assert_eq!(
+            got.len(),
+            1,
+            "olap stream ev range included nested: {got:?}"
+        );
+        assert_eq!(got[0].1.as_slice(), b"e");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
