@@ -142,6 +142,18 @@ jobs:
         run: |
           cargo test -p rocksdb-compat
           cargo run -p rocksdb-compat-alias-smoke
+      - name: ycsb suite (FDB benchmark shapes)
+        env:
+          MONTANHA_YCSB_RECORDS: "128"
+          MONTANHA_YCSB_OPS: "48"
+        run: |
+          MONTANHA_BENCH_SUITE=ycsb cargo run -q -p pedradb-store --release --bin montanha-fdb-bench -- findings/ycsb-ci
+          python3 -c "import json; r=json.load(open('findings/ycsb-ci/fdb_shaped_bench.json')); names=[b['name'] for b in r['benches']]; assert all(f'ycsb_{w}' in names for w in 'abcdef'), names"
+      - name: parity compare template mode (ratio gate off in CI)
+        run: |
+          cargo run -q -p pedradb-store --release --bin montanha-fdb-compare -- \
+            findings/ycsb-ci/fdb_shaped_bench.json findings/fdb-parity-ci
+          python3 -c "import json; r=json.load(open('findings/fdb-parity-ci/compare_report.json')); assert 'parity' in r and 'ycsb_a' in [x['shape'] for x in r['ratios']], r; assert r['parity']['pass'] is None, r"
       - name: mini-bt soak (Pedra L0 write backpressure)
         env:
           MONTANHA_WRITE_BACKPRESSURE: "1"
@@ -162,5 +174,7 @@ jobs:
             findings/scale-gate-ci/scale_report.json
             findings/scale-gate-ci-bp/scale_report.json
             findings/bp-ab-ci/bp_ab_report.json
+            findings/ycsb-ci/fdb_shaped_bench.json
+            findings/fdb-parity-ci/compare_report.json
             findings/fdb-compare-ci/compare_report.json
             findings/fdb-compare-ci/fdb_shaped_peer.template.json

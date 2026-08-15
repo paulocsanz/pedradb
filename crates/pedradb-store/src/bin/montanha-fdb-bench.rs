@@ -88,6 +88,13 @@ fn ms(t: Instant) -> f64 {
     t.elapsed().as_secs_f64() * 1000.0
 }
 
+fn xorshift_bench(rng: &mut u64) -> u64 {
+    *rng ^= *rng << 13;
+    *rng ^= *rng >> 7;
+    *rng ^= *rng << 17;
+    *rng
+}
+
 fn suite_enabled(want: &str) -> bool {
     let s =
         std::env::var("MONTANHA_BENCH_SUITE").unwrap_or_else(|_| "core,threads,mini-bt,tcp".into());
@@ -680,6 +687,159 @@ fn main() {
         progress!("B4 strong vs fast replica done");
 
         admission_core_b = Some(c.write_admission_snap().to_json_object());
+        drop(c);
+    }
+
+    // ── Suite ycsb: FDB benchmark tool shapes (ycsb_a..ycsb_f) ────────────
+    if suite_enabled("ycsb") {
+        let records = env_usize("MONTANHA_YCSB_RECORDS", 1024).max(64);
+        let ycsb_ops = env_usize("MONTANHA_YCSB_OPS", n).max(32);
+        let ycsb_payload = env_usize("MONTANHA_YCSB_PAYLOAD", 100);
+        let zipfian = std::env::var("MONTANHA_YCSB_DIST")
+            .map(|s| s.eq_ignore_ascii_case("zipfian"))
+            .unwrap_or(false);
+        let dir = out.join("db-ycsb");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        progress!("YCSB open 3-node 1-range records={records} ops={ycsb_ops} dist={}", if zipfian { "zipfian" } else { "uniform" });
+        let mut c = open_cluster(&dir, 3, 1);
+        c.elect_all(200).expect("elect ycsb");
+
+        // Deterministic rng (same schedule every run; FDB side uses its own).
+        let mut rng = 0x5EED_0001_u64;
+        // Zipfian(theta=0.99) CDF over [0, records): sample via binary search.
+        let theta = 0.99_f64;
+        let zipf_cdf: Vec<f64> = {
+            let mut s = 0.0_f64;
+            let cdf = (0..records)
+                .map(|i| {
+                    s += 1.0 / (i as f64 + 1.0).powf(theta);
+                    s
+                })
+                .collect::<Vec<_>>();
+            let total = cdf.last().copied().unwrap_or(1.0);
+            cdf.into_iter().map(|v| v / total).collect()
+        };
+        let ykey = |i: usize| format!("ycsb/{i:06}").into_bytes();
+        let pick = |rng: &mut u64, latest: usize| -> usize {
+            if !zipfian || latest == 0 {
+                return (xorshift_bench(rng) % records as u64) as usize;
+            }
+            // zipf over recency window (D/E use "latest" style access)
+            let window = latest.min(records);
+            let u = (xorshift_bench(rng) >> 11) as f64 / (1u64 << 53) as f64;
+            let target = u * zipf_cdf[window - 1];
+            let idx = zipf_cdf[..window].partition_point(|&c| c < target);
+            (records - window) + idx.min(window - 1)
+        };
+
+        let yval = vec![b'y'; ycsb_payload];
+        // Seed the keyspace in batches (put_batch amortizes Raft+WAL).
+        let t0 = Instant::now();
+        let mut seeded = 0usize;
+        while seeded < records {
+            let take = (records - seeded).min(64);
+            let pairs: Vec<(Vec<u8>, Vec<u8>)> = (0..take)
+                .map(|j| (ykey(seeded + j), yval.clone()))
+                .collect();
+            c.put_batch(pairs.iter().map(|(k, v)| (k.as_slice(), v.as_slice())))
+                .expect("seed batch");
+            seeded += take;
+        }
+        progress!("YCSB seed {records} in {:.1}s", t0.elapsed().as_secs_f64());
+
+        // Per-workload runner: returns (latencies, updates, inserts, scans, errors).
+        let mut run_workload = |name: &str,
+                                read_pct: u64,
+                                insert_pct: u64,
+                                rmw: bool,
+                                scans: bool,
+                                c: &mut pedradb_store::StoreCluster<pedradb_core::StdEnv>| {
+            let mut lats = Vec::with_capacity(ycsb_ops);
+            let mut updates = 0u64;
+            let mut inserts = 0u64;
+            let mut scan_ops = 0u64;
+            let mut errors = 0u64;
+            let mut latest = records;
+            let t0 = Instant::now();
+            for _ in 0..ycsb_ops {
+                let t = Instant::now();
+                let roll = xorshift_bench(&mut rng) % 100;
+                if roll < read_pct {
+                    // read
+                    let i = pick(&mut rng, latest);
+                    if c.get(&ykey(i)).is_err() {
+                        errors += 1;
+                    }
+                } else if roll < read_pct + insert_pct {
+                    // insert (new key) → read-latest window grows
+                    let k = format!("ycsb/{latest:06}").into_bytes();
+                    if c.put(&k, &yval).is_ok() {
+                        latest += 1;
+                        inserts += 1;
+                    } else {
+                        errors += 1;
+                    }
+                } else if scans {
+                    // short range scan: [key(i), key(i+25)) window
+                    let i = pick(&mut rng, latest);
+                    let start = ykey(i);
+                    let mut end = ykey(i + 25);
+                    end.pop();
+                    end.push(b'~');
+                    let mut tr = c.begin();
+                    match tr.get_range(c, start.as_slice(), end.as_slice()) {
+                        Ok(_) => scan_ops += 1,
+                        Err(_) => errors += 1,
+                    }
+                } else if rmw {
+                    // read-modify-write in one TX
+                    let i = pick(&mut rng, latest);
+                    let k = ykey(i);
+                    let mut tr = c.begin();
+                    let got = tr.get(c, k.as_slice()).ok().flatten();
+                    let mut nv = yval.clone();
+                    if let Some(old) = &got {
+                        let last = nv.last_mut().unwrap();
+                        *last = old.last().copied().unwrap_or(b'x').wrapping_add(1);
+                    }
+                    tr.set(k.as_slice(), nv.as_slice()).expect("set rmw");
+                    match tr.commit(c) {
+                        Ok(_) => updates += 1,
+                        Err(_) => errors += 1,
+                    }
+                } else {
+                    // update
+                    let i = pick(&mut rng, latest);
+                    if c.put(&ykey(i), &yval).is_ok() {
+                        updates += 1;
+                    } else {
+                        errors += 1;
+                    }
+                }
+                lats.push(ms(t));
+            }
+            let wall = t0.elapsed();
+            benches.push(summarize(name, ycsb_ops, wall, &mut lats));
+            progress!(
+                "{name} done ops={ycsb_ops} updates={updates} inserts={inserts} scans={scan_ops} errors={errors}"
+            );
+            (updates, inserts, scan_ops, errors)
+        };
+
+        // FDB benchmark shapes: ycsb_a 50/50, b 95/5, c 100r, d 95r/5i(latest),
+        // e 95 scan/5i (zipfian), f 50 rmw.
+        run_workload("ycsb_a", 50, 0, false, false, &mut c);
+        run_workload("ycsb_b", 95, 0, false, false, &mut c);
+        run_workload("ycsb_c", 100, 0, false, false, &mut c);
+        run_workload("ycsb_d", 95, 5, false, false, &mut c);
+        run_workload("ycsb_e", 0, 5, false, true, &mut c);
+        run_workload("ycsb_f", 50, 0, true, false, &mut c);
+
+        notes.push(format!(
+            "ycsb records={records} ops={ycsb_ops} payload={ycsb_payload} dist={}",
+            if zipfian { "zipfian" } else { "uniform" }
+        ));
         drop(c);
     }
 

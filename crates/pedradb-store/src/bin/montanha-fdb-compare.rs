@@ -59,6 +59,11 @@ fn main() {
     } else {
         "unavailable".to_string()
     };
+    // Surface the peer's own status so a stub ("unavailable") is visible in the
+    // report instead of reading as a real lab run.
+    if let Some(peer_status) = peer_raw.as_deref().and_then(|s| extract_string_field(s, "status")) {
+        fdb_status = format!("peer_file:{peer_status}");
+    }
     let mut fdb_probe = "null".to_string();
 
     if let (Some(cluster), Some(cli)) = (fdb_cluster.as_ref(), fdbcli.as_ref()) {
@@ -104,7 +109,19 @@ fn main() {
         ("S3", "S3_tcp_mt_put_batch_r4"),
         ("S3_r8", "S3_tcp_mt_put_batch_r8"),
         ("A1b", "A1b"),
+        ("ycsb_a", "ycsb_a"),
+        ("ycsb_b", "ycsb_b"),
+        ("ycsb_c", "ycsb_c"),
+        ("ycsb_d", "ycsb_d"),
+        ("ycsb_e", "ycsb_e"),
+        ("ycsb_f", "ycsb_f"),
     ];
+    // Optional parity gate: MONTANHA_PARITY_RATIO_FLOOR=0.5 fails any real
+    // ratio below it (lab mode; CI template mode leaves it unset).
+    let parity_floor: Option<f64> = std::env::var("MONTANHA_PARITY_RATIO_FLOOR")
+        .ok()
+        .and_then(|s| s.parse().ok());
+    let mut real_ratios: Vec<f64> = Vec::new();
     for (i, (shape, prefer)) in shapes.iter().enumerate() {
         let m = extracted
             .iter()
@@ -116,8 +133,16 @@ fn main() {
             .or_else(|| fdb_extracted.iter().find(|(n, _)| n.contains(shape)));
         let m_kps = m.map(|(_, k)| *k);
         let f_kps = f.map(|(_, k)| *k);
-        let ratio = match (m_kps, f_kps) {
-            (Some(a), Some(b)) if b > 0.0 => format!("{:.3}", a / b),
+        let (ratio, ratio_v) = match (m_kps, f_kps) {
+            (Some(a), Some(b)) if b > 0.0 => {
+                let v = a / b;
+                real_ratios.push(v);
+                (format!("{v:.3}"), Some(v))
+            }
+            _ => ("null".into(), None),
+        };
+        let meets_floor = match (parity_floor, ratio_v) {
+            (Some(floor), Some(v)) => format!("{}", v >= floor),
             _ => "null".into(),
         };
         let m_s = m_kps
@@ -131,10 +156,28 @@ fn main() {
             ratios.push_str(",\n");
         }
         ratios.push_str(&format!(
-            r#"    {{"shape":"{shape}","montanha_name":"{m_name}","montanha_keys_per_s":{m_s},"fdb_keys_per_s":{f_s},"montanha_over_fdb":{ratio}}}"#
+            r#"    {{"shape":"{shape}","montanha_name":"{m_name}","montanha_keys_per_s":{m_s},"fdb_keys_per_s":{f_s},"montanha_over_fdb":{ratio},"meets_floor":{meets_floor}}}"#
         ));
     }
     ratios.push_str("\n  ]");
+
+    // Parity summary: only meaningful when a real peer produced ratios.
+    let parity = if let Some(floor) = parity_floor {
+        if real_ratios.is_empty() {
+            format!(
+                r#"{{"floor": {floor}, "shapes_with_peer": 0, "min_ratio": null, "pass": null, "note": "floor set but no peer ratios — template mode"}}"#
+            )
+        } else {
+            let min_r = real_ratios.iter().cloned().fold(f64::INFINITY, f64::min);
+            let pass = real_ratios.iter().all(|v| *v >= floor);
+            format!(
+                r#"{{"floor": {floor}, "shapes_with_peer": {}, "min_ratio": {min_r:.3}, "pass": {pass}}}"#,
+                real_ratios.len()
+            )
+        }
+    } else {
+        r#"{"floor": null, "shapes_with_peer": 0, "min_ratio": null, "pass": null, "note": "set MONTANHA_PARITY_RATIO_FLOOR to gate"}"#.into()
+    };
 
     let template = fdb_peer_template(&extracted);
 
@@ -170,6 +213,7 @@ fn main() {
     "how_to_fill": "1) Lab fdbserver. 2) scripts/fdb_side_shapes.sh or Python binding. 3) Write fdb_shaped_peer.json with same bench names + keys_per_s (+ optional write_backpressure). 4) MONTANHA_FDB_PEER=... montanha-fdb-compare. See docs/montanha-vs-fdb-bench.md"
   }},
   "ratios": {ratios},
+  "parity": {parity},
   "honesty": "Montanha numbers alone are not field parity. FDB side optional. Topology/durability must be labeled. write_backpressure is pass-through from Montanha/peer JSON (MONTANHA_WRITE_BACKPRESSURE lab flag)."
 }}
 "#,
@@ -186,6 +230,17 @@ fn main() {
         "wrote {} (fill keys_per_s then set MONTANHA_FDB_PEER)",
         tmpl.display()
     );
+    // Lab parity gate: floor set + real peer + any ratio below floor → nonzero.
+    if let Some(floor) = parity_floor {
+        if !real_ratios.is_empty() && !real_ratios.iter().all(|v| *v >= floor) {
+            eprintln!(
+                "parity gate FAILED: floor={floor} min_ratio={:.3} shapes={}",
+                real_ratios.iter().cloned().fold(f64::INFINITY, f64::min),
+                real_ratios.len()
+            );
+            std::process::exit(2);
+        }
+    }
 }
 
 fn extract_bool_field(raw: &str, field: &str) -> Option<bool> {
@@ -200,6 +255,15 @@ fn extract_bool_field(raw: &str, field: &str) -> Option<bool> {
     } else {
         None
     }
+}
+
+fn extract_string_field(raw: &str, field: &str) -> Option<String> {
+    let key = format!("\"{field}\"");
+    let i = raw.find(&key)?;
+    let rest = raw[i + key.len()..].trim_start().strip_prefix(':')?.trim_start();
+    let rest = rest.strip_prefix('"')?;
+    let end = rest.find('"')?;
+    Some(rest[..end].to_string())
 }
 
 fn bool_opt_json(v: Option<bool>) -> String {

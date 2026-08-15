@@ -77,6 +77,7 @@ cargo run -p pedradb-store --release --bin montanha-perf-gate -- findings/perf-g
 | **S1** scale ranges sequential | disjoint put @ 1/2/4/8 ranges | single client (flat) |
 | **S2** scale multi-client multi-range | N TCP threads, key→range | **option A proof** |
 | **S3** multi-client multi-range PutBatch | N TCP threads × batch | batch amortize + multi-leader |
+| **YCSB A–F** | FDB `benchmark` tool shapes | 50/50, 95/5, 100r, read-latest+insert, short scans, RMW |
 | *(client)* per-range leader cache | `active_range` + `warm_leaders` | multi-Raft dial without wrong prefer |
 | **E1** mini-bindingtester | random set/clear/get/range + multi-key + WW | silent-wrong soak |
 | **E2** TCP multi-client mini-bt | N threads, partitioned keys, majority verify | concurrent writers |
@@ -102,6 +103,28 @@ MONTANHA_FDB_PEER=findings/fdb-side-local/fdb_shaped_peer.json \
 Outputs: `compare_report.json` (montanha_metrics + ratios + pass-through
 `montanha_write_backpressure` / `fdb.write_backpressure` when present in JSON),
 `fdb_shaped_peer.template.json`.
+
+### YCSB parity workstream (shapes + gate)
+
+```bash
+# Montanha side — FDB benchmark tool shapes (ycsb_a..ycsb_f)
+MONTANHA_BENCH_SUITE=ycsb MONTANHA_YCSB_RECORDS=1024 MONTANHA_YCSB_OPS=200 \
+  MONTANHA_YCSB_PAYLOAD=100 MONTANHA_YCSB_DIST=zipfian \
+  cargo run -q -p pedradb-store --release --bin montanha-fdb-bench -- findings/ycsb-local
+
+# FDB side — same shapes, same names (official `benchmark` tool > python binding)
+FDB_CLUSTER_FILE=/path/fdb.cluster MONTANHA_YCSB_RECORDS=1024 MONTANHA_YCSB_OPS=200 \
+  bash scripts/fdb_side_ycsb.sh findings/fdb-side-ycsb
+
+# End-to-end with ratio gate (floor default 0.5; "none" = report-only)
+FDB_CLUSTER_FILE=/path/fdb.cluster bash scripts/montanha_fdb_parity_v0.sh findings/fdb-parity-local
+```
+
+Ratio rows gain `meets_floor` and the report gains a `parity` block
+(`floor`, `shapes_with_peer`, `min_ratio`, `pass`). Gate exits nonzero only
+when a floor is set **and** a real peer produced ratios — CI template mode
+(`parity.pass: null`) stays green. **Parity claim requires the lab FDB run**;
+Montanha-only numbers prove nothing about FDB.
 
 **Sample Montanha column (S10 scale, 2026-08-15 lab laptop):**
 
