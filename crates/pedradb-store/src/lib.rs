@@ -420,6 +420,36 @@ pub fn key_in_half_open(key: &[u8], start: &[u8], end: &[u8]) -> bool {
     key < end
 }
 
+/// Intersection of query `[q_start, q_end)` with a store range (F108).
+fn clip_query_to_range(q_start: &[u8], q_end: &[u8], r: &RangeMeta) -> Option<(Vec<u8>, Vec<u8>)> {
+    let r_before_q = !r.end.is_empty() && q_start >= r.end.as_slice();
+    let q_before_r = !q_end.is_empty() && r.start.as_slice() >= q_end;
+    if r_before_q || q_before_r {
+        return None;
+    }
+    let start = if q_start < r.start.as_slice() {
+        r.start.clone()
+    } else {
+        q_start.to_vec()
+    };
+    let end = match (q_end.is_empty(), r.end.is_empty()) {
+        (true, true) => Vec::new(),
+        (true, false) => r.end.clone(),
+        (false, true) => q_end.to_vec(),
+        (false, false) => {
+            if q_end <= r.end.as_slice() {
+                q_end.to_vec()
+            } else {
+                r.end.clone()
+            }
+        }
+    };
+    if !end.is_empty() && start.as_slice() >= end.as_slice() {
+        return None;
+    }
+    Some((start, end))
+}
+
 fn is_reserved_store_key(key: &[u8]) -> bool {
     key.starts_with(RAFT_META_PREFIX)
         || key.starts_with(INTENT_PREFIX)
@@ -2725,6 +2755,59 @@ impl<E: Env> StoreCluster<E> {
             self.elect_until_all_have_leaders(max_ticks)?;
         }
         Ok(())
+    }
+
+    /// Multiproc TCP: if **this** node is leader of more ranges than
+    /// `ceil(n_ranges / n_members)`, step down excess (prefer non-preferred ranges).
+    ///
+    /// Other members pick up leadership via election timeout (no in-process
+    /// `elect_all` — remote peers are not in `nodes`). Returns how many ranges
+    /// were stepped down.
+    ///
+    /// # Errors
+    /// Step-down failures.
+    pub fn rebalance_local_leaders(&mut self) -> Result<u32> {
+        let Some(self_id) = self.local_node_id() else {
+            return Ok(0);
+        };
+        if self.ids.is_empty() || self.ranges.is_empty() {
+            return Ok(0);
+        }
+        let n_nodes = self.ids.len() as u64;
+        let n_ranges = self.ranges.len() as u64;
+        let target = n_ranges.div_ceil(n_nodes).max(1);
+        let mut sorted_ids = self.ids.clone();
+        sorted_ids.sort_unstable();
+        let mut mine: Vec<u64> = self
+            .ranges
+            .iter()
+            .filter_map(|r| {
+                if self.node_thinks_leader(self_id, r.id) {
+                    Some(r.id)
+                } else {
+                    None
+                }
+            })
+            .collect();
+        // Step down ranges that prefer a *different* member first.
+        mine.sort_by_key(|&rid| {
+            let pref = sorted_ids[(rid.saturating_sub(1) as usize) % sorted_ids.len()];
+            if pref == self_id {
+                1u8
+            } else {
+                0u8
+            }
+        });
+        let mut stepped = 0u32;
+        while (mine.len() as u64) > target {
+            let rid = mine.remove(0);
+            if !self.node_thinks_leader(self_id, rid) {
+                continue;
+            }
+            let _ = self.step_down_range_leader(rid)?;
+            stepped = stepped.saturating_add(1);
+        }
+        Ok(stepped)
     }
 
     fn tick_range(&mut self, rid: u64, ids: &[u64]) -> Result<()> {
@@ -5252,25 +5335,56 @@ impl<E: Env> StoreCluster<E> {
                 key_set.insert(k.clone());
             }
         }
-        // Pedra scan for keys never recorded in this process history (e.g. after reopen).
-        // F84: prefer per-range applied reader for `start`'s range (not global
-        // last_sequence). Fallback changelog / local for empty-cluster edge.
-        let nid = self
-            .best_reader_for_key(start)
-            .or_else(|| self.best_changelog_reader())
-            .or_else(|| self.local_node_id())
-            .or_else(|| self.ids.first().copied())
-            .ok_or_else(|| StoreError::Msg("empty cluster".into()))?;
-        if let Some(n) = self.nodes.get(&nid) {
-            let start_b = Bound::Included(start);
-            let end_b = if end.is_empty() {
+        // Pedra scan: each overlapping store range on *that* range's applied
+        // reader (F108 / F84 residual). A single `best_reader_for_key(start)`
+        // missed keys in later ranges when that node lagged there.
+        let mut scanned = false;
+        for r in &self.ranges {
+            let Some((cs, ce)) = clip_query_to_range(start, end, r) else {
+                continue;
+            };
+            let Some(nid) = self
+                .best_applied_reader(r.id)
+                .or_else(|| self.best_reader_for_key(&cs))
+                .or_else(|| self.best_changelog_reader())
+            else {
+                continue;
+            };
+            let Some(n) = self.nodes.get(&nid) else {
+                continue;
+            };
+            scanned = true;
+            let start_b = Bound::Included(cs.as_slice());
+            let end_b = if ce.is_empty() {
                 Bound::Unbounded
             } else {
-                Bound::Excluded(end)
+                Bound::Excluded(ce.as_slice())
             };
             for (k, _) in n.db.range(start_b, end_b) {
                 if !is_reserved_store_key(&k) {
                     key_set.insert(k.to_vec());
+                }
+            }
+        }
+        if !scanned {
+            if let Some(nid) = self
+                .best_reader_for_key(start)
+                .or_else(|| self.best_changelog_reader())
+                .or_else(|| self.local_node_id())
+                .or_else(|| self.ids.first().copied())
+            {
+                if let Some(n) = self.nodes.get(&nid) {
+                    let start_b = Bound::Included(start);
+                    let end_b = if end.is_empty() {
+                        Bound::Unbounded
+                    } else {
+                        Bound::Excluded(end)
+                    };
+                    for (k, _) in n.db.range(start_b, end_b) {
+                        if !is_reserved_store_key(&k) {
+                            key_set.insert(k.to_vec());
+                        }
+                    }
                 }
             }
         }
@@ -5809,6 +5923,32 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// F108: a query spanning two store ranges must not depend on one node's
+    /// view of `start`'s range (F84 residual).
+    #[test]
+    fn keys_in_range_at_spans_ranges_after_first_node_partition() {
+        let dir = temp();
+        let mut c = StoreCluster::open(&dir, 3, 2).unwrap();
+        c.elect_all(120).unwrap();
+        let keys = keys_one_per_range(&c);
+        assert!(keys.len() >= 2, "need two ranges");
+        c.put(&keys[0], b"v0").unwrap();
+        c.set_participating(1, false).unwrap();
+        c.elect_all(120).unwrap();
+        c.put(&keys[1], b"v1").unwrap();
+        let snap = c.read_version();
+        let got = c.keys_in_range_at(&[], &[], snap).unwrap();
+        assert!(
+            got.iter().any(|(k, v)| k == &keys[0] && v.as_slice() == b"v0"),
+            "range-0 key missing after partition: {got:?}"
+        );
+        assert!(
+            got.iter().any(|(k, v)| k == &keys[1] && v.as_slice() == b"v1"),
+            "range-1 key missing (scan used start-range reader only): {got:?}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     fn keys_one_per_range(c: &StoreCluster) -> Vec<Vec<u8>> {
         c.range_metas()
             .iter()
@@ -5822,6 +5962,40 @@ mod tests {
                 }
             })
             .collect()
+    }
+
+    #[test]
+    fn rebalance_local_sheds_excess_leadership() {
+        let dir = temp();
+        // 1 local node of a 3-member config with 6 ranges — open_single_node style.
+        let mut c = StoreCluster::open_single_node(&dir, 1, &[1, 2, 3], 6).unwrap();
+        // Force local leadership on every range (multiproc-style overload).
+        let rids: Vec<u64> = c.range_metas().iter().map(|r| r.id).collect();
+        for rid in rids {
+            if let Some(n) = c.nodes.get_mut(&1) {
+                if let Some(p) = n.ranges.get_mut(&rid) {
+                    p.role = Role::Leader;
+                    p.leader_id = Some(1);
+                }
+            }
+        }
+        assert_eq!(
+            c.ranges
+                .iter()
+                .filter(|r| c.node_thinks_leader(1, r.id))
+                .count(),
+            6
+        );
+        let stepped = c.rebalance_local_leaders().unwrap();
+        // target = ceil(6/3)=2 → step down 4
+        assert_eq!(stepped, 4);
+        let left = c
+            .ranges
+            .iter()
+            .filter(|r| c.node_thinks_leader(1, r.id))
+            .count();
+        assert_eq!(left, 2);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

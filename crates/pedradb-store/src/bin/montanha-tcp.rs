@@ -618,6 +618,9 @@ fn worker_loop(
     // 50ms ticks: enough for elect/HB; lower dial rate over public TCP.
     let tick_every = Duration::from_millis(50);
     let mut last_tick = Instant::now();
+    // Every ~2s: shed excess local multi-Raft leadership (option-A hygiene).
+    let rebalance_every = Duration::from_secs(2);
+    let mut last_rebalance = Instant::now();
     loop {
         let timeout = tick_every.saturating_sub(last_tick.elapsed());
         match rx.recv_timeout(timeout) {
@@ -749,6 +752,17 @@ fn worker_loop(
             }
             flush_outbound(id, &mut cluster, &peers);
             last_tick = Instant::now();
+            if last_rebalance.elapsed() >= rebalance_every {
+                match cluster.rebalance_local_leaders() {
+                    Ok(n) if n > 0 => {
+                        eprintln!("rebalance_local stepped_down={n} node={id}");
+                        flush_outbound(id, &mut cluster, &peers);
+                    }
+                    Ok(_) => {}
+                    Err(e) => eprintln!("rebalance_local err: {e}"),
+                }
+                last_rebalance = Instant::now();
+            }
         }
     }
 }
