@@ -437,6 +437,9 @@ pub struct Db<E: Env = StdEnv> {
     scan_prefetch: usize,
     /// Windows of prefetch issued (observability).
     prefetch_hits: AtomicU64,
+    /// When set, best-effort [`Self::compact_blob_auto`] after flush / latest_only
+    /// compact (RFC-0026 residual: no bg thread — runs on write path).
+    auto_blob_gc_min_ratio: Option<f64>,
     /// Count of successful WAL `sync_all` (observability / group-commit tests).
     wal_sync_count: u64,
     /// Logical user-value bytes ingested.
@@ -619,6 +622,7 @@ impl<E: Env> Db<E> {
             blob_active,
             scan_prefetch: 4,
             prefetch_hits: AtomicU64::new(0),
+            auto_blob_gc_min_ratio: None,
             wal_sync_count: 0,
             bytes_ingested: 0,
             bytes_written_wal: 0,
@@ -802,6 +806,22 @@ impl<E: Env> Db<E> {
     #[must_use]
     pub fn scan_prefetch(&self) -> usize {
         self.scan_prefetch
+    }
+
+    /// Enable or disable best-effort blob GC after flush / `latest_only` compact.
+    ///
+    /// When `Some(θ)`, after those paths the engine calls
+    /// [`Self::compact_blob_auto`] with that θ (Titan-shaped default **0.5**).
+    /// Failures are logged and do **not** fail the flush/compact. Off by default
+    /// (no background thread — write-path only; RFC-0026 residual).
+    pub fn set_auto_blob_gc_min_ratio(&mut self, min_dead_ratio: Option<f64>) {
+        self.auto_blob_gc_min_ratio = min_dead_ratio.map(|r| r.clamp(0.0, 1.0));
+    }
+
+    /// Current auto blob-GC threshold, if enabled.
+    #[must_use]
+    pub fn auto_blob_gc_min_ratio(&self) -> Option<f64> {
+        self.auto_blob_gc_min_ratio
     }
 
     /// Active blob generation (`0` = single `VALUES.vlog`).
@@ -1342,6 +1362,7 @@ impl<E: Env> Db<E> {
         self.flush_imm_to_l0()?;
         self.try_rotate_wal()?;
         self.run_auto_compact_best_effort();
+        self.run_auto_blob_gc_best_effort();
         Ok(())
     }
 
@@ -1633,6 +1654,8 @@ impl<E: Env> Db<E> {
             }
         }
         self.compact_count = self.compact_count.saturating_add(1);
+        // latest_only rewrite — same auto-blob path as leveled compact.
+        self.run_auto_blob_gc_best_effort();
         Ok(())
     }
 
@@ -1755,6 +1778,10 @@ impl<E: Env> Db<E> {
             }
         }
         self.compact_count = self.compact_count.saturating_add(1);
+        if options.gc.keep_only_latest {
+            // Dead vlog pointers dropped — maybe reclaim sealed blobs.
+            self.run_auto_blob_gc_best_effort();
+        }
         Ok(())
     }
 
@@ -3146,6 +3173,32 @@ impl<E: Env> Db<E> {
         }
     }
 
+    /// Best-effort sealed-blob GC when [`Self::set_auto_blob_gc_min_ratio`] is set.
+    fn run_auto_blob_gc_best_effort(&mut self) {
+        let Some(theta) = self.auto_blob_gc_min_ratio else {
+            return;
+        };
+        match self.compact_blob_auto(theta) {
+            Ok(Some((num, st))) => {
+                tracing::info!(
+                    file = num,
+                    before = st.bytes_before,
+                    after = st.bytes_after,
+                    theta,
+                    "auto blob GC rewrote sealed generation"
+                );
+            }
+            Ok(None) => {}
+            Err(e) => {
+                tracing::warn!(
+                    error = %e,
+                    theta,
+                    "auto blob GC after flush/compact failed (caller still Ok)"
+                );
+            }
+        }
+    }
+
     /// Write MANIFEST + CURRENT for the live SST set (with levels).
     fn persist_manifest(&mut self) -> Result<()> {
         let mut nums = Vec::with_capacity(self.ssts.len());
@@ -3759,6 +3812,46 @@ mod tests {
     }
 
     #[test]
+    fn auto_blob_gc_runs_after_latest_only() {
+        let dir = temp_dir();
+        let v1 = vec![0x11u8; 1800];
+        let v2 = vec![0x22u8; 1800];
+        let mut db = Db::open_with(&dir, vlog_opts()).unwrap();
+        db.set_vlog_rotate_bytes(Some(3_500));
+        db.set_auto_blob_gc_min_ratio(Some(0.0));
+        assert_eq!(db.auto_blob_gc_min_ratio(), Some(0.0));
+        db.put(b"a", &v1).unwrap();
+        db.put(b"b", &v1).unwrap();
+        db.flush().unwrap();
+        db.put(b"a", &v2).unwrap();
+        db.put(b"c", &v2).unwrap();
+        db.flush().unwrap();
+        let sealed_before: Vec<u32> = db
+            .blob_file_nums()
+            .into_iter()
+            .filter(|n| *n != db.blob_active())
+            .collect();
+        assert!(!sealed_before.is_empty());
+        // latest_only drops dead SST pointers → auto GC should rewrite/drop sealed.
+        db.compact_with(CompactOptions::latest_only()).unwrap();
+        assert_eq!(db.get(b"a").as_deref(), Some(v2.as_slice()));
+        assert_eq!(db.get(b"b").as_deref(), Some(v1.as_slice()));
+        // At least one sealed gen should have been GC'd (file gone or fewer sealed).
+        let sealed_after: Vec<u32> = db
+            .blob_file_nums()
+            .into_iter()
+            .filter(|n| *n != db.blob_active())
+            .collect();
+        assert!(
+            db.stats().vlog_gc_count >= 1 || sealed_after.len() < sealed_before.len(),
+            "auto blob GC should run after latest_only: before={sealed_before:?} after={sealed_after:?} gc={}",
+            db.stats().vlog_gc_count
+        );
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn scan_prefetch_same_visible_kvs() {
         let dir = temp_dir();
         let payload = vec![0xCDu8; 1500];
@@ -3839,7 +3932,8 @@ mod tests {
             "default N=4 should stay competitive: rows={rows:?} best={best:?}"
         );
         // Persist measurement for the RFC (best-effort).
-        let out = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../findings/rfc0029-prefetch-n");
+        let out =
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../findings/rfc0029-prefetch-n");
         let _ = std::fs::create_dir_all(&out);
         let mut body = String::from(
             "{\n  \"bench\": \"scan_prefetch_n_window\",\n  \"keys\": 48,\n  \"value_bytes\": 2048,\n  \"rows\": [\n",

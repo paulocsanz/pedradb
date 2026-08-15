@@ -94,8 +94,9 @@ slice can be implemented.
 VLG1 refs from mem/imm/SSTs → write `VALUES.vlog.new` → remap SST/mem pointers →
 MANIFEST + adopt marker → promote. Threshold remains **opt-in off by default**.
 
-**Open residual:** automatic GC scheduling / background worker; tighter
-integration with `latest_only` SST GC (tombstone retention across levels).
+**Residual (partial):** `set_auto_blob_gc_min_ratio` runs best-effort
+`compact_blob_auto` after flush / `latest_only` (no bg thread). Background
+worker still open; tighter tombstone retention across levels still open.
 
 **Context (historical):** Values are written append-only. When a key is overwritten or
 deleted, the old value becomes garbage. The value log needs periodic

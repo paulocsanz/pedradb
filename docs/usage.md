@@ -314,6 +314,7 @@ pedra compact-vlog <db>                   # full rewrite hammer (file 0 / single
 | `compact_blob` refuses the **active** file | Rotate first, or use `compact_vlog` for file 0 |
 | `compact_blob` remaps only SSTs that mention that file | Other generations stay put |
 | `compact_blob_auto(θ)` skips active + low dead_ratio | Same knob shape as Titan `blob_file_discardable_ratio` (default 0.5) |
+| `set_auto_blob_gc_min_ratio(Some(0.5))` | After **flush** and **latest_only** compact, best-effort auto GC (no bg thread; fails open) |
 | Scan prefetch N default 4 (`set_scan_prefetch`) | Sequential Env reads + `advise(WillNeed)` on Linux; not magic 32 |
 | Checkpoint copies every `*.blob` | Pointers are not self-contained |
 | WAL stays | L5b `REFUSE` — do not drop the LSM WAL |
