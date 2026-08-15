@@ -8,7 +8,7 @@ fn main() -> std::process::ExitCode {
     let args: Vec<String> = std::env::args().collect();
     if args.len() < 2 {
         eprintln!(
-            "usage: pedra <demo|wal|version|backup|restore|pitr|ship-wal|list-backups|verify-backup|inspect|stats|migrate> [args...]"
+            "usage: pedra <demo|wal|version|backup|restore|pitr|ship-wal|list-backups|verify-backup|inspect|stats|compact-vlog|compact-blob|blob-gc|migrate> [args...]"
         );
         return std::process::ExitCode::from(2);
     }
@@ -27,6 +27,9 @@ fn main() -> std::process::ExitCode {
         "verify-backup" => verify_backup_cmd(&args[2..]),
         "inspect" => inspect_cmd(&args[2..]),
         "stats" => stats_cmd(&args[2..]),
+        "compact-vlog" => compact_vlog_cmd(&args[2..]),
+        "compact-blob" => compact_blob_cmd(&args[2..]),
+        "blob-gc" => blob_gc_cmd(&args[2..]),
         "migrate" => migrate_cmd(&args[2..]),
         other => {
             eprintln!("unknown command: {other}");
@@ -36,7 +39,10 @@ fn main() -> std::process::ExitCode {
 }
 
 fn demo_cmd(args: &[String]) -> std::process::ExitCode {
-    let path = args.first().map(String::as_str).unwrap_or("/tmp/pedra-demo");
+    let path = args
+        .first()
+        .map(String::as_str)
+        .unwrap_or("/tmp/pedra-demo");
     if let Err(e) = run_db_demo(path) {
         eprintln!("error: {e}");
         return std::process::ExitCode::FAILURE;
@@ -55,7 +61,8 @@ fn run_db_demo(path: &str) -> pedradb_core::Result<()> {
     println!("opened {path}");
     println!(
         "  u/1 = {:?}",
-        db.get(b"u/1").map(|b| String::from_utf8_lossy(&b).into_owned())
+        db.get(b"u/1")
+            .map(|b| String::from_utf8_lossy(&b).into_owned())
     );
     println!(
         "  idx/name/ada = {:?}",
@@ -65,7 +72,10 @@ fn run_db_demo(path: &str) -> pedradb_core::Result<()> {
     println!("  last_sequence = {}", db.last_sequence());
     db.close()?;
     let db2 = Db::open(path)?;
-    assert_eq!(db2.get(b"u/1").as_deref(), Some(br#"{"name":"ada"}"#.as_ref()));
+    assert_eq!(
+        db2.get(b"u/1").as_deref(),
+        Some(br#"{"name":"ada"}"#.as_ref())
+    );
     println!("reopen ok — multi-key TX still present");
     Ok(())
 }
@@ -110,7 +120,7 @@ fn open_live(path: &str) -> pedradb_core::Result<Db> {
             auto_compact_sst_count: None,
             auto_compact_sst_bytes: None,
             exclusive: true,
-                large_value_threshold: None,
+            large_value_threshold: None,
         },
     )
 }
@@ -155,9 +165,7 @@ fn ship_wal_cmd(args: &[String]) -> std::process::ExitCode {
         let ship = eng.ship_wal(&db)?;
         println!(
             "shipped records={} last_seq={} segment={:?}",
-            ship.records,
-            ship.last_shipped_sequence,
-            ship.segment
+            ship.records, ship.last_shipped_sequence, ship.segment
         );
         db.close()?;
         Ok(())
@@ -249,10 +257,7 @@ fn verify_backup_cmd(args: &[String]) -> std::process::ExitCode {
         let eng = BackupEngine::open(&args[0])?;
         let id: u64 = args[1].parse()?;
         let m = eng.verify_backup(id)?;
-        println!(
-            "ok id={id} seq={} ssts={}",
-            m.last_sequence, m.sst_count
-        );
+        println!("ok id={id} seq={} ssts={}", m.last_sequence, m.sst_count);
         Ok(())
     })() {
         Ok(()) => std::process::ExitCode::SUCCESS,
@@ -275,8 +280,155 @@ fn stats_cmd(args: &[String]) -> std::process::ExitCode {
             println!("sst_count={} sst_bytes={}", s.sst_count, s.sst_bytes);
             println!("wal_bytes={} wal_syncs={}", s.wal_bytes, s.wal_sync_count);
             println!("{}", s.vlog_line());
+            println!(
+                "scan_prefetch={} blob_active={}",
+                db.scan_prefetch(),
+                db.blob_active()
+            );
+            if let Ok(cands) = db.blob_gc_candidates() {
+                for c in cands {
+                    println!(
+                        "blob file={} bytes={} live={}B records={} dead_ratio={:.3} active={}",
+                        c.file_num, c.bytes, c.live_bytes, c.live_records, c.dead_ratio, c.is_active
+                    );
+                }
+            }
             std::process::ExitCode::SUCCESS
         }
+        Err(e) => {
+            eprintln!("error: {e}");
+            std::process::ExitCode::FAILURE
+        }
+    }
+}
+
+fn compact_vlog_cmd(args: &[String]) -> std::process::ExitCode {
+    if args.is_empty() {
+        eprintln!("usage: pedra compact-vlog <db_path>");
+        return std::process::ExitCode::from(2);
+    }
+    match open_live(&args[0]) {
+        Ok(mut db) => match db.compact_vlog() {
+            Ok(st) => {
+                println!(
+                    "compact_vlog before={}B after={}B live_records={}",
+                    st.bytes_before, st.bytes_after, st.live_records
+                );
+                println!("{}", db.stats().vlog_line());
+                std::process::ExitCode::SUCCESS
+            }
+            Err(e) => {
+                eprintln!("error: {e}");
+                std::process::ExitCode::FAILURE
+            }
+        },
+        Err(e) => {
+            eprintln!("error: {e}");
+            std::process::ExitCode::FAILURE
+        }
+    }
+}
+
+fn compact_blob_cmd(args: &[String]) -> std::process::ExitCode {
+    // pedra compact-blob <db> <file_num>
+    // pedra compact-blob <db> --auto [min_dead_ratio]
+    if args.len() < 2 {
+        eprintln!(
+            "usage: pedra compact-blob <db_path> <file_num>\n       pedra compact-blob <db_path> --auto [min_dead_ratio]"
+        );
+        return std::process::ExitCode::from(2);
+    }
+    let path = &args[0];
+    match open_live(path) {
+        Ok(mut db) => {
+            if args[1] == "--auto" {
+                let theta: f64 = args
+                    .get(2)
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(0.5);
+                match db.compact_blob_auto(theta) {
+                    Ok(Some((num, st))) => {
+                        println!(
+                            "compact_blob_auto file={} before={}B after={}B live_records={} theta={theta}",
+                            num, st.bytes_before, st.bytes_after, st.live_records
+                        );
+                        println!("{}", db.stats().vlog_line());
+                        std::process::ExitCode::SUCCESS
+                    }
+                    Ok(None) => {
+                        println!("compact_blob_auto: nothing to do (theta={theta})");
+                        std::process::ExitCode::SUCCESS
+                    }
+                    Err(e) => {
+                        eprintln!("error: {e}");
+                        std::process::ExitCode::FAILURE
+                    }
+                }
+            } else {
+                let Ok(num) = args[1].parse::<u32>() else {
+                    eprintln!("bad file_num: {}", args[1]);
+                    return std::process::ExitCode::from(2);
+                };
+                match db.compact_blob(num) {
+                    Ok(st) => {
+                        println!(
+                            "compact_blob file={} before={}B after={}B live_records={}",
+                            num, st.bytes_before, st.bytes_after, st.live_records
+                        );
+                        println!("{}", db.stats().vlog_line());
+                        std::process::ExitCode::SUCCESS
+                    }
+                    Err(e) => {
+                        eprintln!("error: {e}");
+                        std::process::ExitCode::FAILURE
+                    }
+                }
+            }
+        }
+        Err(e) => {
+            eprintln!("error: {e}");
+            std::process::ExitCode::FAILURE
+        }
+    }
+}
+
+fn blob_gc_cmd(args: &[String]) -> std::process::ExitCode {
+    // Alias: pedra blob-gc <db> [--auto [theta]]  (list candidates or auto)
+    if args.is_empty() {
+        eprintln!("usage: pedra blob-gc <db_path> [--auto [min_dead_ratio]]");
+        return std::process::ExitCode::from(2);
+    }
+    if args.get(1).map(String::as_str) == Some("--auto") {
+        let mut a = vec![args[0].clone(), "--auto".into()];
+        if let Some(t) = args.get(2) {
+            a.push(t.clone());
+        }
+        return compact_blob_cmd(&a);
+    }
+    match open_live(&args[0]) {
+        Ok(db) => match db.blob_gc_candidates() {
+            Ok(cands) => {
+                if cands.is_empty() {
+                    println!("no blob files");
+                }
+                for c in cands {
+                    println!(
+                        "file={} bytes={} live={}B records={} dead_ratio={:.3} active={}",
+                        c.file_num,
+                        c.bytes,
+                        c.live_bytes,
+                        c.live_records,
+                        c.dead_ratio,
+                        c.is_active
+                    );
+                }
+                std::process::ExitCode::SUCCESS
+            }
+            Err(e) => {
+                eprintln!("error: {e}");
+                std::process::ExitCode::FAILURE
+            }
+        },
         Err(e) => {
             eprintln!("error: {e}");
             std::process::ExitCode::FAILURE

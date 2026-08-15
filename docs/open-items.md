@@ -43,7 +43,7 @@ Last updated: 2026-08-14 (RFC-0024 done: Montanha fold for Caixote)
 | 11 | Streaming range / lazy blocks (RFC-0014 P1) | ✅ done | scan + lazy SST blocks + levels + lz4 | — |
 | 12 | Audit correctness fixes (RFC-0015) | ✅ done | fence, sync_dir, Env seams, compact stats, deny CI | — |
 
-**Next action:** Full bindingtester / Java RL only if requested; FDB **field** peer numbers need lab `fdbserver`.  
+**Next action:** Full bindingtester / Java RL only if requested; FDB **field** peer numbers need lab `fdbserver`. Value-store pick C (0029) done including CLI `compact-blob` / `blob-gc`.  
 **CI (2026-08-15):** `synthetic-field` job **montanha-scale-and-compare** — scale_gate + mini_bt_soak + fdb-compare template (no FDB required).  
 **DST soak / FDB compare / scale S1–S10:** see prior notes + [montanha-vs-fdb-bench.md](montanha-vs-fdb-bench.md).  
 **Shipped Phase 1–3 + A–E continuum:** [montanha-fdb-phases.md](montanha-fdb-phases.md) — fdb-compat 12-step harness (`clear_range`), etcd multiproc + **TCP DCS wire**, `RecordTable` unique/multi-index, platform need faces (CP/OLAP/stream), F47–F49 residuals.  

@@ -1,8 +1,8 @@
 # RFC-0026: Value-store evolution — menu (hypothetical)
 
-**Status:** in-progress
-**Updated:** 2026-08-14
-**Kind:** decision / menu. **Do not implement 0027–0029 together.** P0 measured; pick is **C** (see P0.3).
+**Status:** done (pick C + 0029 P0–P2 + CLI ops)
+**Updated:** 2026-08-15
+**Kind:** decision / menu. Pick **C** shipped as 0029. Do not start 0027/0028 without a new measured cliff.
 **Parents:** [0014](0014-rocks-pebble-redwood-maturity.md) P2.2 · [0016](0016-pedradb-production-robustness.md) P0.1 · [0012-research](0012-research-decisions.md)
 **Children (options):** [0027](0027-incremental-vlog-gc.md) · [0028](0028-hash-partitioned-value-store.md) · [0029](0029-blob-generations-and-scan-prefetch.md)
 **Research:** [R005 WiscKey D4](../../research/fichamentos/ficha_R005_Lu_WiscKey.md) · [R018 HashKV D4](../../research/fichamentos/ficha_R018_Chan_HashKV.md)
