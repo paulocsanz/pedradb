@@ -25,9 +25,23 @@ pub fn strip_http_authority(target: &str) -> Option<&str> {
     rest.map(path_after_authority)
 }
 
+/// RFC 3986: `#fragment` is not part of the request-target path or query.
+#[must_use]
+pub fn strip_uri_fragment(target: &str) -> &str {
+    target.split_once('#').map(|(a, _)| a).unwrap_or(target)
+}
+
+/// AS-IS F156: fragment stays in the path / last query value.
+#[must_use]
+pub fn strip_uri_fragment_as_is(target: &str) -> &str {
+    target
+}
+
 /// F91/F92: strip absolute-form / network-path, then the query string.
+/// F156: `#fragment` is not a path segment (same class as `?query` / F74).
 #[must_use]
 pub fn origin_form_path(target: &str) -> &str {
+    let target = strip_uri_fragment(target);
     let p = if let Some(p) = strip_http_authority(target) {
         p
     } else if let Some(rest) = target.strip_prefix("//") {
@@ -74,6 +88,12 @@ mod tests {
         // F145: scheme is case-insensitive (RFC 9110).
         assert_eq!(origin_form_path("Http://h/kv/x"), "/kv/x");
         assert_eq!(origin_form_path("HtTpS://h/kv/y?z=1"), "/kv/y");
+        // F156: fragment is not a path component.
+        assert_eq!(origin_form_path("/kv/x#frag"), "/kv/x");
+        assert_eq!(origin_form_path("/kv/x?y=1#f"), "/kv/x");
+        assert_eq!(origin_form_path("http://h/kv/x#f"), "/kv/x");
+        assert_eq!(strip_uri_fragment("/dcs/kv/k?rev=0#x"), "/dcs/kv/k?rev=0");
+        assert_eq!(strip_uri_fragment_as_is("/kv/x#f"), "/kv/x#f");
     }
 
     #[test]

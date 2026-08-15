@@ -50,7 +50,8 @@ pub use form_kernel::{
 };
 pub use path_kernel::{
     origin_form_path, origin_form_path_as_is, path_after_authority, strip_authority_for_routing,
-    strip_authority_for_routing_as_is, strip_http_authority,
+    strip_authority_for_routing_as_is, strip_http_authority, strip_uri_fragment,
+    strip_uri_fragment_as_is,
 };
 
 use std::io::{Read, Write};
@@ -380,6 +381,8 @@ impl DcsServer {
 
 /// All decoded values for `key` (F101/F106). Empty if the name is absent.
 fn query_decoded_values(path: &str, key: &str) -> Vec<String> {
+    // F156: `#fragment` after the query used to pollute the last value (`rev=0#x`).
+    let path = strip_uri_fragment(path);
     let Some(q) = path.split_once('?').map(|(_, q)| q) else {
         return Vec::new();
     };
@@ -999,8 +1002,7 @@ mod tests {
             put_code, 200,
             "valid Bearer must win over a dummy X-Pedra-Token, got {put_code} {text:?}"
         );
-        let (code, body) =
-            http_exchange_auth(addr, "GET", "/kv/sh", b"", Some("sekrit")).unwrap();
+        let (code, body) = http_exchange_auth(addr, "GET", "/kv/sh", b"", Some("sekrit")).unwrap();
         assert_eq!(code, 200, "GET after dual-header PUT, body={body:?}");
         assert_eq!(body, b"ok");
         let _ = std::fs::remove_dir_all(&dir);
@@ -1036,8 +1038,7 @@ mod tests {
             put_code, 200,
             "Bearer after Basic must authenticate, got {put_code} {text:?}"
         );
-        let (code, body) =
-            http_exchange_auth(addr, "GET", "/kv/ba", b"", Some("sekrit")).unwrap();
+        let (code, body) = http_exchange_auth(addr, "GET", "/kv/ba", b"", Some("sekrit")).unwrap();
         assert_eq!(code, 200, "GET after Basic+Bearer PUT, body={body:?}");
         assert_eq!(body, b"ok");
         let _ = std::fs::remove_dir_all(&dir);
@@ -1074,8 +1075,7 @@ mod tests {
             put_code, 200,
             "Bearer after scheme-only Authorization must authenticate, got {put_code} {text:?}"
         );
-        let (code, body) =
-            http_exchange_auth(addr, "GET", "/kv/so", b"", Some("sekrit")).unwrap();
+        let (code, body) = http_exchange_auth(addr, "GET", "/kv/so", b"", Some("sekrit")).unwrap();
         assert_eq!(code, 200, "GET after scheme-only+Bearer PUT, body={body:?}");
         assert_eq!(body, b"ok");
 
@@ -1143,8 +1143,7 @@ mod tests {
             put_code, 200,
             "later valid Bearer must authenticate, got {put_code} {text:?}"
         );
-        let (code, body) =
-            http_exchange_auth(addr, "GET", "/kv/wb", b"", Some("sekrit")).unwrap();
+        let (code, body) = http_exchange_auth(addr, "GET", "/kv/wb", b"", Some("sekrit")).unwrap();
         assert_eq!(code, 200, "GET after wrong+valid Bearer PUT, body={body:?}");
         assert_eq!(body, b"ok");
         let _ = std::fs::remove_dir_all(&dir);
@@ -1646,10 +1645,7 @@ mod tests {
             .read(&mut interim)
             .expect("server must send 100 Continue (AS-IS: client/server deadlock)");
         let head = String::from_utf8_lossy(&interim[..n]);
-        assert!(
-            head.contains("100"),
-            "expected 100 Continue, got {head:?}"
-        );
+        assert!(head.contains("100"), "expected 100 Continue, got {head:?}");
         stream.write_all(b"ok").unwrap();
         let _ = stream.shutdown(std::net::Shutdown::Write);
         let mut resp = Vec::new();
@@ -1668,6 +1664,46 @@ mod tests {
         let (code, body) = http_exchange(addr, "GET", "/kv/ex", b"").unwrap();
         assert_eq!(code, 200, "GET after Expect PUT, body={body:?}");
         assert_eq!(body, b"ok");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// F156: `#fragment` used to stay in the KV key (F74 sibling — `?` was
+    /// stripped, `#` was not). `PUT /kv/x#frag` then `GET /kv/x` 404'd.
+    #[test]
+    fn kv_http_fragment_not_part_of_key() {
+        let dir = temp("frag");
+        let addr = bind_ephemeral();
+        let srv = KvServer::open(&dir).unwrap();
+        thread::spawn(move || {
+            let _ = srv.serve(addr);
+        });
+        thread::sleep(Duration::from_millis(100));
+        let (code, _) = http_exchange(addr, "PUT", "/kv/x#frag", b"ok").unwrap();
+        assert_eq!(code, 200, "PUT with #fragment must route to /kv/x");
+        let (code, body) = http_exchange(addr, "GET", "/kv/x", b"").unwrap();
+        assert_eq!(code, 200, "GET /kv/x after PUT /kv/x#frag, body={body:?}");
+        assert_eq!(body, b"ok");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// F156: `?rev=0#ignored` used to parse rev as `0#ignored` → 400.
+    #[test]
+    fn dcs_http_fragment_after_query_does_not_break_rev() {
+        let dir = temp("dcs-frag");
+        let addr = bind_ephemeral();
+        let srv = DcsServer::open(&dir).unwrap();
+        thread::spawn(move || {
+            let _ = srv.serve(addr);
+        });
+        thread::sleep(Duration::from_millis(100));
+        let (c0, b0) = http_exchange(addr, "PUT", "/dcs/kv/k?rev=0#ignored", b"v1").unwrap();
+        assert_eq!(c0, 200, "rev=0#frag must still create, {b0:?}");
+        let (c1, body) = http_exchange(addr, "GET", "/dcs/kv/k", b"").unwrap();
+        assert_eq!(c1, 200, "GET after fragment query, {body:?}");
+        assert!(
+            String::from_utf8_lossy(&body).contains("v1"),
+            "create must land, body={body:?}"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
