@@ -798,6 +798,12 @@ impl<E: Env> ConcurrentDb<E> {
         self.inner.read().sst_count()
     }
 
+    /// Files at LSM `level` (read lock).
+    #[must_use]
+    pub fn level_file_count(&self, level: u32) -> usize {
+        self.inner.read().level_file_count(level)
+    }
+
     /// Max LSM level (read lock).
     #[must_use]
     pub fn max_level(&self) -> u32 {

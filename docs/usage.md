@@ -193,6 +193,7 @@ Full contract: rustdoc on `db` module. Audit fix backlog: [RFC-0015](rfc/0015-au
 | `set_write_stall_mem_bytes(Some(b))` | Opt-in: `WriteStallMem` when active mem ≥ b (default off) |
 | `set_write_stall_drain(true)` | One flush (+ L0 compact) before hard refuse (default false) |
 | `enable_write_backpressure_defaults()` | Pressure @ `L0_COMPACTION_TRIGGER`, hard @ 2×, drain on |
+| `StoreOpenOptions::with_write_backpressure()` | Montanha open applies Pedra L0 backpressure on every node |
 | `Db::create_checkpoint(dest)` | Point-in-time copy (flush + file set); openable as a DB |
 | `pedradb_ops::BackupEngine` | Local base backup, `ship_wal`, `restore` / `restore_pitr`, verify |
 | `pedradb_ops::migrate_to_latest` / `inspect_format` | Format inspect + rewrite SSTs/MANIFEST to current writer |

@@ -120,11 +120,18 @@ pub struct StoreOpenOptions {
     /// When `true` (default), Pedra fsyncs the WAL before Ok on put/batch.
     /// Set `false` only for **bulk load / capacity lab** — not crash-safe.
     pub pedra_sync: bool,
+    /// When `true`, enable Pedra L0 write backpressure defaults after open
+    /// (pressure @ L0 trigger, hard stall @ 2×, drain on). Default **false**
+    /// so lab/soak paths stay unconstrained unless opted in.
+    pub pedra_write_backpressure: bool,
 }
 
 impl Default for StoreOpenOptions {
     fn default() -> Self {
-        Self { pedra_sync: true }
+        Self {
+            pedra_sync: true,
+            pedra_write_backpressure: false,
+        }
     }
 }
 
@@ -132,7 +139,17 @@ impl StoreOpenOptions {
     /// Lab capacity mode: Pedra `sync=false` (faster, not durable on process crash).
     #[must_use]
     pub fn lab_capacity() -> Self {
-        Self { pedra_sync: false }
+        Self {
+            pedra_sync: false,
+            pedra_write_backpressure: false,
+        }
+    }
+
+    /// Production-shaped L0 admission (see [`Db::enable_write_backpressure_defaults`]).
+    #[must_use]
+    pub fn with_write_backpressure(mut self) -> Self {
+        self.pedra_write_backpressure = true;
+        self
     }
 }
 
@@ -2048,7 +2065,10 @@ impl<E: Env> StoreCluster<E> {
         for (i, env) in envs.into_iter().enumerate() {
             let id = (i as u64) + 1;
             let dir = parent.join(format!("store-node-{id}"));
-            let db = Db::open_with_env(&dir, opts, env)?;
+            let mut db = Db::open_with_env(&dir, opts, env)?;
+            if store_opts.pedra_write_backpressure {
+                db.enable_write_backpressure_defaults();
+            }
             let mut rmap = HashMap::new();
             for meta in &ranges {
                 // F26: restore durable raft meta (or empty peer on first open).
@@ -8199,6 +8219,28 @@ mod tests {
         c.put(b"lab", b"1").unwrap();
         assert!(c.count_applied_eq(b"lab", b"1") >= 2);
         let _ = std::fs::remove_dir_all(&dir2);
+    }
+
+    /// Pedra write backpressure defaults apply on every node when opted in.
+    #[test]
+    fn open_with_write_backpressure_enables_l0_stall() {
+        let dir = temp();
+        let opts = StoreOpenOptions::default().with_write_backpressure();
+        assert!(opts.pedra_write_backpressure);
+        let c = StoreCluster::open_with_options(&dir, 3, 1, opts).unwrap();
+        for id in &c.ids {
+            let n = c.nodes.get(id).expect("node");
+            assert_eq!(
+                n.db.write_pressure_l0(),
+                Some(pedradb_core::L0_COMPACTION_TRIGGER)
+            );
+            assert_eq!(
+                n.db.write_stall_l0(),
+                Some(pedradb_core::L0_COMPACTION_TRIGGER.saturating_mul(2))
+            );
+            assert!(n.db.write_stall_drain());
+        }
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// P1.1: index-style primary row + secondary key in one batch.
