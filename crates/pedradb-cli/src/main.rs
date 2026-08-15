@@ -8,7 +8,7 @@ fn main() -> std::process::ExitCode {
     let args: Vec<String> = std::env::args().collect();
     if args.len() < 2 {
         eprintln!(
-            "usage: pedra <demo|wal|version|backup|restore|pitr|ship-wal|list-backups|verify-backup|inspect|stats|compact|reclaim|compact-vlog|compact-blob|blob-gc|migrate> [args...]"
+            "usage: pedra <demo|wal|version|backup|restore|pitr|ship-wal|list-backups|verify-backup|inspect|stats|compact|reclaim|maintain|compact-vlog|compact-blob|blob-gc|migrate> [args...]"
         );
         return std::process::ExitCode::from(2);
     }
@@ -29,6 +29,7 @@ fn main() -> std::process::ExitCode {
         "stats" => stats_cmd(&args[2..]),
         "compact" => compact_cmd(&args[2..]),
         "reclaim" => reclaim_cmd(&args[2..]),
+        "maintain" => maintain_cmd(&args[2..]),
         "compact-vlog" => compact_vlog_cmd(&args[2..]),
         "compact-blob" => compact_blob_cmd(&args[2..]),
         "blob-gc" => blob_gc_cmd(&args[2..]),
@@ -389,6 +390,139 @@ fn reclaim_cmd(args: &[String]) -> std::process::ExitCode {
             std::process::ExitCode::FAILURE
         }
     }
+}
+
+/// Operator-side maintenance (open-items §2.2 residual: no bg thread in core).
+///
+/// ```text
+/// pedra maintain <db> [--blob-theta 0.5] [--no-reclaim] [--vlog] [--every SECS]
+/// ```
+///
+/// One pass: flush → optional compact_reclaim → compact_blob_auto(θ) → optional
+/// compact_vlog. With `--every N`, repeat every N seconds until SIGINT (cron
+/// substitute; still outside pedradb-core).
+fn maintain_cmd(args: &[String]) -> std::process::ExitCode {
+    if args.is_empty() {
+        eprintln!(
+            "usage: pedra maintain <db_path> [--blob-theta 0.5] [--no-reclaim] [--vlog] [--every SECS]"
+        );
+        return std::process::ExitCode::from(2);
+    }
+    let path = args[0].clone();
+    let mut blob_theta: f64 = 0.5;
+    let mut do_reclaim = true;
+    let mut do_vlog = false;
+    let mut every: Option<u64> = None;
+    let mut i = 1;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--blob-theta" => {
+                i += 1;
+                let Some(t) = args.get(i).and_then(|s| s.parse().ok()) else {
+                    eprintln!("usage: --blob-theta requires a number");
+                    return std::process::ExitCode::from(2);
+                };
+                blob_theta = t;
+            }
+            "--no-reclaim" => do_reclaim = false,
+            "--vlog" => do_vlog = true,
+            "--every" => {
+                i += 1;
+                let Some(secs) = args.get(i).and_then(|s| s.parse().ok()) else {
+                    eprintln!("usage: --every requires seconds ≥ 1");
+                    return std::process::ExitCode::from(2);
+                };
+                if secs == 0 {
+                    eprintln!("--every must be ≥ 1");
+                    return std::process::ExitCode::from(2);
+                }
+                every = Some(secs);
+            }
+            other => {
+                eprintln!("unknown flag: {other}");
+                return std::process::ExitCode::from(2);
+            }
+        }
+        i += 1;
+    }
+
+    let mut pass: u64 = 0;
+    loop {
+        pass = pass.saturating_add(1);
+        match maintain_once(&path, do_reclaim, do_vlog, blob_theta, pass) {
+            Ok(()) => {}
+            Err(code) => return code,
+        }
+        let Some(secs) = every else {
+            return std::process::ExitCode::SUCCESS;
+        };
+        println!("maintain: sleep {secs}s (pass={pass}, Ctrl-C to stop)");
+        std::thread::sleep(std::time::Duration::from_secs(secs));
+    }
+}
+
+fn maintain_once(
+    path: &str,
+    do_reclaim: bool,
+    do_vlog: bool,
+    blob_theta: f64,
+    pass: u64,
+) -> Result<(), std::process::ExitCode> {
+    let mut db = open_live(path).map_err(|e| {
+        eprintln!("error: {e}");
+        std::process::ExitCode::FAILURE
+    })?;
+    let early0 = db.earliest_readable_sequence();
+    db.flush().map_err(|e| {
+        eprintln!("error flush: {e}");
+        std::process::ExitCode::FAILURE
+    })?;
+    if do_reclaim {
+        db.compact_reclaim().map_err(|e| {
+            eprintln!("error reclaim: {e}");
+            std::process::ExitCode::FAILURE
+        })?;
+    }
+    let blob = db.compact_blob_auto(blob_theta).map_err(|e| {
+        eprintln!("error blob-gc: {e}");
+        std::process::ExitCode::FAILURE
+    })?;
+    let mut vlog_line = String::new();
+    if do_vlog {
+        match db.compact_vlog() {
+            Ok(st) => {
+                vlog_line = format!(
+                    " vlog_rewrite {}B→{}B",
+                    st.bytes_before, st.bytes_after
+                );
+            }
+            Err(e) => {
+                eprintln!("error compact-vlog: {e}");
+                return Err(std::process::ExitCode::FAILURE);
+            }
+        }
+    }
+    let blob_s = match blob {
+        Some((n, st)) => format!(
+            " blob_gc file={n} {}B→{}B",
+            st.bytes_before, st.bytes_after
+        ),
+        None => " blob_gc=skip".into(),
+    };
+    println!(
+        "maintain pass={pass} reclaim={do_reclaim} earliest {}→{} sst={}{}{} {}",
+        early0,
+        db.earliest_readable_sequence(),
+        db.sst_count(),
+        blob_s,
+        vlog_line,
+        db.stats().vlog_line()
+    );
+    db.close().map_err(|e| {
+        eprintln!("error close: {e}");
+        std::process::ExitCode::FAILURE
+    })?;
+    Ok(())
 }
 
 fn compact_vlog_cmd(args: &[String]) -> std::process::ExitCode {

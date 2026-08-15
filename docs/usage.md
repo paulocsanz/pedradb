@@ -310,6 +310,8 @@ pedra compact <db>                        # leveled SST merge (history-preservin
 pedra compact <db> --latest-only          # aggressive version GC (raises watermark)
 pedra reclaim <db>                        # pin-aware compact_reclaim (open-items §2.1)
 pedra inspect <db>                        # SST versions + earliest_readable (MANIFEST v4)
+pedra maintain <db> [--blob-theta 0.5] [--no-reclaim] [--vlog] [--every SECS]
+                                          # ops GC pass (no core bg thread); --every = loop
 pedra blob-gc <db>                        # list candidates
 pedra compact-blob <db> --auto [0.5]      # GC worst sealed (default θ=0.5)
 pedra compact-blob <db> <file_num>        # GC explicit id

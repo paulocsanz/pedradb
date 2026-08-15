@@ -112,7 +112,9 @@ MANIFEST + adopt marker → promote. Threshold remains **opt-in off by default**
 
 **Residual (partial):** `set_auto_blob_gc_min_ratio` runs best-effort
 `compact_blob_auto` after flush / `latest_only` / ConcurrentDb
-`finish_flush_pipeline` (no bg thread). Background worker still open.
+`finish_flush_pipeline` (no bg thread in core). **Operator bg substitute:**
+`pedra maintain <db> [--every SECS]` (flush + reclaim + blob θ; optional
+`--vlog`). Cron/loop lives outside the engine.
 
 **Context (historical):** Values are written append-only. When a key is overwritten or
 deleted, the old value becomes garbage. The value log needs periodic
