@@ -74,6 +74,33 @@ cargo run -p pedradb-store --release --bin montanha-perf-gate -- findings/perf-g
 
 Montanha numbers alone are not “vs FDB”. Run **matching shapes** on an FDB lab cluster and fill the table.
 
+### Compare harness (always works without FDB)
+
+```bash
+# Extract Montanha metrics + empty ratio table + peer template
+cargo run -p pedradb-store --release --bin montanha-fdb-compare -- \
+  findings/fdb-bench-scale-s10/fdb_shaped_bench.json findings/fdb-compare-local
+
+# Optional FDB lab (if fdbcli + cluster available)
+FDB_CLUSTER_FILE=/path/to/fdb.cluster ./scripts/fdb_side_shapes.sh findings/fdb-side-local
+MONTANHA_FDB_PEER=findings/fdb-side-local/fdb_shaped_peer.json \
+  cargo run -p pedradb-store --release --bin montanha-fdb-compare -- \
+  findings/fdb-bench-scale-s10/fdb_shaped_bench.json findings/fdb-compare-local
+```
+
+Outputs: `compare_report.json` (montanha_metrics + ratios), `fdb_shaped_peer.template.json`.
+
+**Sample Montanha column (S10 scale, 2026-08-15 lab laptop):**
+
+| ID | keys/s |
+|----|--------|
+| S2 r1 multi-client put | 5.81 |
+| S2 r4 | 2.47 |
+| S3 PutBatch r4 | 2.44 |
+| S3 PutBatch r8 | 2.73 |
+
+FDB column: fill via peer file on lab hardware (not present on this host).
+
 ### Suggested FDB side (sketch)
 
 1. Local `fdbserver` single process or 3 storage + 1 proxy (document topology).  

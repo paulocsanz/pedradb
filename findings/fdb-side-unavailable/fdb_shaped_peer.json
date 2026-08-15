@@ -1,0 +1,5 @@
+{
+  "bench": "fdb-side-peer",
+  "status": "unavailable",
+  "note": "Set FDB_CLUSTER_FILE and install fdbcli; re-run scripts/fdb_side_shapes.sh"
+}
