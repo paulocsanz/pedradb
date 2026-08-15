@@ -39,20 +39,27 @@ impl NaiveAllocator {
     /// Allocated-name prefix.
     pub const NAME_PREFIX: &'static [u8] = b"\x02";
 
+    /// Parse `NEXT` counter. Missing key → 0; present but corrupt → hard error (F109).
+    fn parse_next(raw: Option<Vec<u8>>) -> Result<u64> {
+        match raw {
+            None => Ok(0),
+            Some(raw) => {
+                let s = std::str::from_utf8(&raw)
+                    .map_err(|_| StoreError::Msg("allocator NEXT: bad utf8".into()))?;
+                s.parse::<u64>()
+                    .map_err(|_| StoreError::Msg("allocator NEXT: bad integer".into()))
+            }
+        }
+    }
+
     /// Allocate the next name (blind retry).
     ///
     /// # Errors
-    /// Store errors that are not retryable.
+    /// Store errors that are not retryable; corrupt `NEXT` (F109).
     pub fn allocate(cluster: &mut StoreCluster) -> Result<Vec<u8>> {
         retry_loop(|| {
             let mut tr = cluster.begin();
-            let raw = tr
-                .get(cluster, Self::NEXT)?
-                .unwrap_or_else(|| b"0".to_vec());
-            let n: u64 = std::str::from_utf8(&raw)
-                .ok()
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(0);
+            let n = Self::parse_next(tr.get(cluster, Self::NEXT)?)?;
             let name = {
                 let mut k = Self::NAME_PREFIX.to_vec();
                 k.extend_from_slice(format!("{n:016}").as_bytes());
@@ -100,7 +107,7 @@ impl SafeAllocator {
     /// Allocate or return the name already bound to `token`.
     ///
     /// # Errors
-    /// Store errors that are not retryable.
+    /// Store errors that are not retryable; corrupt `NEXT` (F109).
     pub fn allocate(cluster: &mut StoreCluster, token: &[u8]) -> Result<Vec<u8>> {
         let tok = token.to_vec();
         retry_loop(|| {
@@ -110,13 +117,8 @@ impl SafeAllocator {
                 let _ = tr.commit(cluster);
                 return Ok(existing);
             }
-            let raw = tr
-                .get(cluster, Self::NEXT)?
-                .unwrap_or_else(|| b"0".to_vec());
-            let n: u64 = std::str::from_utf8(&raw)
-                .ok()
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(0);
+            // F109: same fail-closed NEXT parse as NaiveAllocator.
+            let n = NaiveAllocator::parse_next(tr.get(cluster, Self::NEXT)?)?;
             let name = {
                 let mut k = Self::NAME_PREFIX.to_vec();
                 k.extend_from_slice(format!("{n:016}").as_bytes());
@@ -157,7 +159,7 @@ impl NaiveList {
         retry_loop(|| {
             let mut tr = cluster.begin();
             let raw = tr.get(cluster, Self::KEY)?.unwrap_or_default();
-            let mut items = decode_list(&raw);
+            let mut items = decode_list(&raw)?;
             items.push(item.clone());
             tr.set(Self::KEY, encode_list(&items))?;
             tr.commit(cluster)?;
@@ -168,12 +170,10 @@ impl NaiveList {
     /// Current items.
     ///
     /// # Errors
-    /// Store get errors.
+    /// Store get errors or corrupt list encoding (F107).
     pub fn items(cluster: &StoreCluster) -> Result<Vec<Vec<u8>>> {
         let mut tr = Transaction::at_version(cluster.read_version());
-        Ok(decode_list(
-            tr.get(cluster, Self::KEY)?.unwrap_or_default().as_slice(),
-        ))
+        decode_list(tr.get(cluster, Self::KEY)?.unwrap_or_default().as_slice())
     }
 }
 
@@ -211,7 +211,7 @@ impl SafeList {
                 return Ok(());
             }
             let raw = tr.get(cluster, Self::KEY)?.unwrap_or_default();
-            let mut items = decode_list(&raw);
+            let mut items = decode_list(&raw)?;
             items.push(item.clone());
             tr.set(Self::KEY, encode_list(&items))?;
             tr.set(&seen, b"1")?;
@@ -223,12 +223,10 @@ impl SafeList {
     /// Current items.
     ///
     /// # Errors
-    /// Store get errors.
+    /// Store get errors or corrupt list encoding (F107).
     pub fn items(cluster: &StoreCluster) -> Result<Vec<Vec<u8>>> {
         let mut tr = Transaction::at_version(cluster.read_version());
-        Ok(decode_list(
-            tr.get(cluster, Self::KEY)?.unwrap_or_default().as_slice(),
-        ))
+        decode_list(tr.get(cluster, Self::KEY)?.unwrap_or_default().as_slice())
     }
 }
 
@@ -348,24 +346,31 @@ fn encode_list(items: &[Vec<u8>]) -> Vec<u8> {
     out
 }
 
-fn decode_list(raw: &[u8]) -> Vec<Vec<u8>> {
+/// F107: truncated / corrupt list blobs used to return a *prefix* of items
+/// (`break` on bad hex or short payload). Append then persisted that prefix
+/// and dropped the tail — silent loss. Fail closed.
+fn decode_list(raw: &[u8]) -> Result<Vec<Vec<u8>>> {
+    if raw.is_empty() {
+        return Ok(Vec::new());
+    }
     let mut items = Vec::new();
     let mut i = 0;
-    while i + 8 <= raw.len() {
-        let Ok(nhex) = std::str::from_utf8(&raw[i..i + 8]) else {
-            break;
-        };
-        let Ok(n) = usize::from_str_radix(nhex, 16) else {
-            break;
-        };
+    while i < raw.len() {
+        if i + 8 > raw.len() {
+            return Err(StoreError::Msg("list decode: truncated length".into()));
+        }
+        let nhex = std::str::from_utf8(&raw[i..i + 8])
+            .map_err(|_| StoreError::Msg("list decode: bad length utf8".into()))?;
+        let n = usize::from_str_radix(nhex, 16)
+            .map_err(|_| StoreError::Msg("list decode: bad length hex".into()))?;
         i += 8;
         if i + n > raw.len() {
-            break;
+            return Err(StoreError::Msg("list decode: truncated item".into()));
         }
         items.push(raw[i..i + n].to_vec());
         i += n;
     }
-    items
+    Ok(items)
 }
 
 #[cfg(test)]
@@ -406,6 +411,42 @@ mod tests {
         let names = SafeAllocator::names(&c).unwrap();
         assert_eq!(names.len(), 1, "safe token must not leak a name: {names:?}");
         assert_eq!(n2, names[0]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// F109: garbage `NEXT` parsed as 0 and reused the first name slot.
+    #[test]
+    fn allocator_corrupt_next_does_not_reuse_name_zero() {
+        let dir = temp();
+        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        c.elect_all(80).unwrap();
+        let n0 = NaiveAllocator::allocate(&mut c).unwrap();
+        c.put(NaiveAllocator::NEXT, b"xxx").unwrap();
+        let err = NaiveAllocator::allocate(&mut c);
+        assert!(
+            err.is_err(),
+            "corrupt NEXT must fail closed, not reuse slot 0: {err:?}"
+        );
+        assert_eq!(
+            c.get(&n0).unwrap().as_deref(),
+            Some(b"allocated".as_ref()),
+            "first allocation must survive corrupt NEXT"
+        );
+        // Heal counter so SafeAllocator can prove the same contract on its path
+        // (Naive/Safe share NEXT key bytes in this recipe).
+        c.put(NaiveAllocator::NEXT, b"1").unwrap();
+        let s0 = SafeAllocator::allocate(&mut c, b"tok-0").unwrap();
+        c.put(SafeAllocator::NEXT, b"yyy").unwrap();
+        let err = SafeAllocator::allocate(&mut c, b"tok-1");
+        assert!(
+            err.is_err(),
+            "SafeAllocator corrupt NEXT must fail closed: {err:?}"
+        );
+        assert_eq!(
+            c.get(&s0).unwrap().as_deref(),
+            Some(b"tok-0".as_ref()),
+            "safe first name must survive"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -602,6 +643,31 @@ mod tests {
             vec![b"ab".to_vec()]
         );
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// F107: truncated tail used to decode as a silent prefix (lost last item).
+    #[test]
+    fn decode_list_rejects_truncated_tail() {
+        let raw = encode_list(&[b"aa".to_vec(), b"bb".to_vec()]);
+        assert_eq!(
+            decode_list(&raw).unwrap(),
+            vec![b"aa".to_vec(), b"bb".to_vec()]
+        );
+        assert!(
+            decode_list(b"").unwrap().is_empty(),
+            "empty blob is empty list"
+        );
+        let short = &raw[..raw.len() - 1];
+        assert!(
+            decode_list(short).is_err(),
+            "truncated list must fail closed, got {:?}",
+            decode_list(short)
+        );
+        let garbage = [raw.as_slice(), b"xx"].concat();
+        assert!(
+            decode_list(&garbage).is_err(),
+            "trailing garbage must fail closed"
+        );
     }
 
     #[test]

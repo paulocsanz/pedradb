@@ -854,6 +854,41 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
     }
 
+    /// F110: acked get/range stay visible after prepare takes the table off-lock.
+    #[test]
+    fn get_sees_acked_key_while_flush_imm_off_lock() {
+        let dir = temp_dir();
+        let db = open_sync(&dir);
+        db.put(b"k", b"acked").unwrap();
+        let (imm, num) = db.with_write(|d| {
+            let imm = d.prepare_flush_imm().unwrap().expect("imm");
+            let num = d.alloc_file_num();
+            (imm, num)
+        });
+        assert_eq!(
+            db.get(b"k").as_deref(),
+            Some(b"acked".as_ref()),
+            "prepare_flush_imm must pin the taken table for readers"
+        );
+        let ranged = db.range(
+            std::ops::Bound::Unbounded,
+            std::ops::Bound::Unbounded,
+        );
+        assert!(
+            ranged
+                .iter()
+                .any(|(k, v)| k.as_ref() == b"k" && v.as_ref() == b"acked"),
+            "range must also see pin during off-lock flush: {ranged:?}"
+        );
+        let (table, n, _) = db
+            .with_read(|d| d.write_memtable_to_l0_file_num(&imm, num))
+            .unwrap();
+        assert_eq!(n, num);
+        db.with_write(|d| d.install_l0_sst(table, num).unwrap());
+        assert_eq!(db.get(b"k").as_deref(), Some(b"acked".as_ref()));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
     /// F45: dual concurrent flush + failed restore must not drop another imm's data.
     ///
     /// Interleaving:

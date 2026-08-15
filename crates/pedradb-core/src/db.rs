@@ -377,6 +377,9 @@ pub struct Db<E: Env = StdEnv> {
     /// Immutable memtable being flushed (Rocks dual-memtable / pipeline).
     /// Reads consult `mem` then `imm` then SSTs. Writers only mutate `mem`.
     imm: Option<MemTable>,
+    /// Clone of the table taken by [`Self::prepare_flush_imm`] so readers still
+    /// see acked keys while SST I/O runs off the write lock.
+    flush_read_pin: Option<MemTable>,
     /// Immutable tables, oldest → newest within inventory order.
     ssts: Vec<SstTable>,
     /// LSM level for each entry in [`Self::ssts`] (parallel array; 0 = L0).
@@ -576,6 +579,7 @@ impl<E: Env> Db<E> {
             wal,
             mem,
             imm: None,
+            flush_read_pin: None,
             ssts,
             sst_levels,
             next_file_num,
@@ -711,7 +715,7 @@ impl<E: Env> Db<E> {
     #[must_use]
     pub fn key_has_write_after(&self, key: &[u8], snapshot: SequenceNumber) -> bool {
         use crate::key::ValueType;
-        for table in std::iter::once(&self.mem).chain(self.imm.as_ref()) {
+        for table in self.mem_layers() {
             for (ikey, value) in table.iter_internal() {
                 if ikey.sequence <= snapshot {
                     continue;
@@ -963,10 +967,10 @@ impl<E: Env> Db<E> {
         if snapshot == 0 {
             return StreamingVisibleIter::new(Vec::new(), 0, start, end, limit);
         }
-        let mut streams: Vec<Vec<(InternalKey, Bytes)>> = Vec::with_capacity(2 + self.ssts.len());
-        streams.push(self.memtable_stream(&self.mem, start, end, resolve_values));
-        if let Some(ref imm) = self.imm {
-            streams.push(self.memtable_stream(imm, start, end, resolve_values));
+        let mut streams: Vec<Vec<(InternalKey, Bytes)>> = Vec::with_capacity(3 + self.ssts.len());
+        // F110: include flush_read_pin so range/scan see acked keys during off-lock flush.
+        for table in self.mem_layers() {
+            streams.push(self.memtable_stream(table, start, end, resolve_values));
         }
         for table in &self.ssts {
             let mut s = table.entries_in_user_range(start, end);
@@ -1295,14 +1299,24 @@ impl<E: Env> Db<E> {
     /// [`CoreError::DurabilityFenced`].
     pub fn prepare_flush_imm(&mut self) -> Result<Option<MemTable>> {
         self.ensure_not_fenced()?;
-        if self.imm.is_some() {
+        let taken = if self.imm.is_some() {
             // Still flushing previous imm — caller should finish that first.
-            return Ok(self.imm.take());
+            self.imm.take()
+        } else if self.mem.is_empty() {
+            None
+        } else {
+            Some(std::mem::replace(&mut self.mem, MemTable::new()))
+        };
+        // Keep a read pin so get/scan still see acked keys during off-lock SST I/O.
+        if let Some(ref table) = taken {
+            self.flush_read_pin = Some(table.clone());
         }
-        if self.mem.is_empty() {
-            return Ok(None);
-        }
-        Ok(Some(std::mem::replace(&mut self.mem, MemTable::new())))
+        Ok(taken)
+    }
+
+    /// Drop the off-lock flush read pin (after a test wants the pre-fix hole).
+    pub fn clear_flush_read_pin(&mut self) {
+        self.flush_read_pin = None;
     }
 
     /// Reserve the next SST file number (must hold exclusive write lock).
@@ -1391,6 +1405,8 @@ impl<E: Env> Db<E> {
             self.next_file_num = prev_next;
             return Err(e);
         }
+        // SST now holds this pipeline's table; drop the read pin (not `imm` — F45).
+        self.flush_read_pin = None;
         Ok(())
     }
 
@@ -1399,6 +1415,7 @@ impl<E: Env> Db<E> {
     /// If another imm is already present (dual-flush race), fold this table's
     /// entries into the **active** mem so neither pipeline's data is dropped (F45).
     pub fn restore_imm(&mut self, imm: MemTable) {
+        self.flush_read_pin = None;
         if self.imm.is_some() {
             for (k, v) in imm.iter_internal() {
                 self.mem.insert(k.clone(), v.clone());
@@ -1411,13 +1428,20 @@ impl<E: Env> Db<E> {
     /// Active mem empty and no imm (safe to rotate WAL).
     #[must_use]
     pub fn mem_is_empty_for_rotate(&self) -> bool {
-        self.mem.is_empty() && self.imm.is_none()
+        self.mem.is_empty() && self.imm.is_none() && self.flush_read_pin.is_none()
     }
 
     /// Whether an immutable memtable is present.
     #[must_use]
     pub fn has_imm(&self) -> bool {
         self.imm.is_some()
+    }
+
+    /// Mem / imm / off-lock flush pin — every table `get`/`scan` must consult.
+    fn mem_layers(&self) -> impl Iterator<Item = &MemTable> {
+        std::iter::once(&self.mem)
+            .chain(self.imm.as_ref())
+            .chain(self.flush_read_pin.as_ref())
     }
 
     /// After L0 install: rotate WAL if safe + opportunistic compact.
@@ -2560,17 +2584,9 @@ impl<E: Env> Db<E> {
         let mut best_point: Lookup = Lookup::NotFound;
         let mut range_tombs = Vec::new();
 
-        Self::scan_mem_for_lookup(
-            &self.mem,
-            key,
-            snapshot,
-            &mut best_point_seq,
-            &mut best_point,
-            &mut range_tombs,
-        );
-        if let Some(ref imm) = self.imm {
+        for table in self.mem_layers() {
             Self::scan_mem_for_lookup(
-                imm,
+                table,
                 key,
                 snapshot,
                 &mut best_point_seq,
