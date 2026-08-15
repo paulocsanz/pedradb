@@ -43,12 +43,12 @@ Last updated: 2026-08-14 (RFC-0024 done: Montanha fold for Caixote)
 | 11 | Streaming range / lazy blocks (RFC-0014 P1) | ✅ done | scan + lazy SST blocks + levels + lz4 | — |
 | 12 | Audit correctness fixes (RFC-0015) | ✅ done | fence, sync_dir, Env seams, compact stats, deny CI | — |
 
-**Next action:** Full bindingtester / Java RL only if requested; FDB **field** peer numbers need lab `fdbserver` (compare harness ready).  
-**DST soak (2026-08-15):** scale_gate in sim volume; `findings/sim-volume-dst-20260815/` silent_wrong=0.  
-**FDB compare (2026-08-15):** `montanha-fdb-compare` v1 extracts Montanha metrics + ratio table + peer template; `scripts/fdb_side_shapes.sh` for optional fdbcli; sample S10 metrics in [montanha-vs-fdb-bench.md](montanha-vs-fdb-bench.md). No FDB install on this host → `fdb.status=unavailable` (expected).  
+**Next action:** Full bindingtester / Java RL only if requested; FDB **field** peer numbers need lab `fdbserver`.  
+**CI (2026-08-15):** `synthetic-field` job **montanha-scale-and-compare** — scale_gate + mini_bt_soak + fdb-compare template (no FDB required).  
+**DST soak / FDB compare / scale S1–S10:** see prior notes + [montanha-vs-fdb-bench.md](montanha-vs-fdb-bench.md).  
 **Shipped Phase 1–3 + A–E continuum:** [montanha-fdb-phases.md](montanha-fdb-phases.md) — fdb-compat 12-step harness (`clear_range`), etcd multiproc + **TCP DCS wire**, `RecordTable` unique/multi-index, platform need faces (CP/OLAP/stream), F47–F49 residuals.  
 **Shipped (bench):** `montanha-fdb-bench` — FDB-shaped microbenches + TCP multi-client + mini-bt E1/E2 → `fdb_shaped_bench.json`; method in [montanha-vs-fdb-bench.md](montanha-vs-fdb-bench.md).  
-**Shipped (CI mini-bt):** `cargo test -p pedradb-store --test mini_bt_soak` — in-process model soak + TCP multi-client majority verify.  
+**Shipped (CI mini-bt + scale gate):** mini_bt_soak + `montanha_scale_gate_v0` in synthetic-field CI.  
 **Shipped (perf parity RFC-0025 complete):** [0025](rfc/0025-montanha-perf-parity-vs-peers.md) — batch/coalesce/PutBatch/log append; **scale A confirmed** (S6–S10; S3 r8 thr=8 no hang, ~3.5× r1); elect-wait; per-range client; election diversity; multiproc rebalance; scoped tick; scale walls; thr≥min(nr,8); **read capacity**; **fdb-compare**.  
 **Shipped (recipes):** `montanha-fdb-recipes` — design recipes + SI/OCC + Record seed.  
 **Shipped (0023):** SI, Transaction, watermark, fdb_compat + c-api.  

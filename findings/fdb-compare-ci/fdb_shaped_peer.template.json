@@ -1,0 +1,67 @@
+{
+  "bench": "fdb-side-peer-template",
+  "topology": "TODO: label fdbserver layout",
+  "durability": "TODO: sync/storage class",
+  "benches": [
+    {
+      "name": "S1_disjoint_put_r1",
+      "keys_per_s": null,
+      "montanha_keys_per_s_ref": 2.001,
+      "note": "fill keys_per_s from FDB same shape"
+    },
+    {
+      "name": "S1_disjoint_put_r2",
+      "keys_per_s": null,
+      "montanha_keys_per_s_ref": 2.092,
+      "note": "fill keys_per_s from FDB same shape"
+    },
+    {
+      "name": "S1_disjoint_put_r4",
+      "keys_per_s": null,
+      "montanha_keys_per_s_ref": 1.991,
+      "note": "fill keys_per_s from FDB same shape"
+    },
+    {
+      "name": "S1_disjoint_put_r8",
+      "keys_per_s": null,
+      "montanha_keys_per_s_ref": 1.862,
+      "note": "fill keys_per_s from FDB same shape"
+    },
+    {
+      "name": "S2_tcp_mt_put_r1_t4",
+      "keys_per_s": null,
+      "montanha_keys_per_s_ref": 5.810,
+      "note": "fill keys_per_s from FDB same shape"
+    },
+    {
+      "name": "S2_tcp_mt_put_r4_t4",
+      "keys_per_s": null,
+      "montanha_keys_per_s_ref": 2.466,
+      "note": "fill keys_per_s from FDB same shape"
+    },
+    {
+      "name": "S2_tcp_mt_put_r8_t8",
+      "keys_per_s": null,
+      "montanha_keys_per_s_ref": 1.301,
+      "note": "fill keys_per_s from FDB same shape"
+    },
+    {
+      "name": "S3_tcp_mt_put_batch_r1_t4_b8",
+      "keys_per_s": null,
+      "montanha_keys_per_s_ref": 0.767,
+      "note": "fill keys_per_s from FDB same shape"
+    },
+    {
+      "name": "S3_tcp_mt_put_batch_r4_t4_b8",
+      "keys_per_s": null,
+      "montanha_keys_per_s_ref": 2.435,
+      "note": "fill keys_per_s from FDB same shape"
+    },
+    {
+      "name": "S3_tcp_mt_put_batch_r8_t8_b8",
+      "keys_per_s": null,
+      "montanha_keys_per_s_ref": 2.732,
+      "note": "fill keys_per_s from FDB same shape"
+    }
+  ]
+}

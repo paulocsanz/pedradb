@@ -10,6 +10,15 @@ on:
   workflow_dispatch:
 
 jobs:
+  formal-glue:
+    name: formal glue (lint + twins + Stateright)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: pedra_formal --ci
+        run: bash scripts/pedra_formal.sh --ci
+
   silent-wrong-gate:
     name: silent_wrong gate (P0.1)
     runs-on: ubuntu-latest
@@ -108,3 +117,29 @@ jobs:
           PEDRA_MONTA_MATRIX_ROUNDS: "1"
           PEDRA_MONTA_ROUNDS: "1"
         run: bash scripts/montanha_overnight_matrix.sh matrix-out
+
+  # RFC-0021 / 0025 — option-A scale hygiene + mini-bt + compare skeleton (no FDB required)
+  montanha-scale-and-compare:
+    name: Montanha scale gate + mini-bt + fdb-compare
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: scale option-A gate
+        run: bash scripts/montanha_scale_gate_v0.sh findings/scale-gate-ci
+      - name: mini-bt soak (in-process + TCP multi-client)
+        run: cargo test -p pedradb-store --test mini_bt_soak -- --nocapture
+      - name: fdb-compare (Montanha extract; FDB optional)
+        run: |
+          cargo run -p pedradb-store --release --bin montanha-fdb-compare -- \
+            findings/fdb-bench-scale-s10/fdb_shaped_bench.json findings/fdb-compare-ci
+          test -f findings/fdb-compare-ci/compare_report.json
+          test -f findings/fdb-compare-ci/fdb_shaped_peer.template.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: montanha-scale-compare
+          path: |
+            findings/scale-gate-ci/scale_report.json
+            findings/fdb-compare-ci/compare_report.json
+            findings/fdb-compare-ci/fdb_shaped_peer.template.json

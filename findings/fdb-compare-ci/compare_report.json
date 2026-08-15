@@ -1,0 +1,37 @@
+{
+  "compare": "montanha-fdb-shaped-v1",
+  "montanha_path": "findings/fdb-bench-scale-s10/fdb_shaped_bench.json",
+  "montanha_metrics": {
+    "S1_disjoint_put_r1": 2.001,
+    "S1_disjoint_put_r2": 2.092,
+    "S1_disjoint_put_r4": 1.991,
+    "S1_disjoint_put_r8": 1.862,
+    "S2_tcp_mt_put_r1_t4": 5.810,
+    "S2_tcp_mt_put_r4_t4": 2.466,
+    "S2_tcp_mt_put_r8_t8": 1.301,
+    "S3_tcp_mt_put_batch_r1_t4_b8": 0.767,
+    "S3_tcp_mt_put_batch_r4_t4_b8": 2.435,
+    "S3_tcp_mt_put_batch_r8_t8_b8": 2.732
+  },
+  "fdb": {
+    "status": "unavailable",
+    "cluster_file": null,
+    "fdbcli": null,
+    "peer_file": null,
+    "probe": null,
+    "how_to_fill": "1) Lab fdbserver. 2) scripts/fdb_side_shapes.sh or Python binding. 3) Write fdb_shaped_peer.json with same bench names + keys_per_s. 4) MONTANHA_FDB_PEER=... montanha-fdb-compare. See docs/montanha-vs-fdb-bench.md"
+  },
+  "ratios": [
+    {"shape":"A1","montanha_name":"","montanha_keys_per_s":null,"fdb_keys_per_s":null,"montanha_over_fdb":null},
+    {"shape":"A3","montanha_name":"","montanha_keys_per_s":null,"fdb_keys_per_s":null,"montanha_over_fdb":null},
+    {"shape":"A4","montanha_name":"","montanha_keys_per_s":null,"fdb_keys_per_s":null,"montanha_over_fdb":null},
+    {"shape":"B2","montanha_name":"","montanha_keys_per_s":null,"fdb_keys_per_s":null,"montanha_over_fdb":null},
+    {"shape":"D1","montanha_name":"","montanha_keys_per_s":null,"fdb_keys_per_s":null,"montanha_over_fdb":null},
+    {"shape":"D6","montanha_name":"","montanha_keys_per_s":null,"fdb_keys_per_s":null,"montanha_over_fdb":null},
+    {"shape":"S2","montanha_name":"S2_tcp_mt_put_r4_t4","montanha_keys_per_s":2.466,"fdb_keys_per_s":null,"montanha_over_fdb":null},
+    {"shape":"S3","montanha_name":"S3_tcp_mt_put_batch_r4_t4_b8","montanha_keys_per_s":2.435,"fdb_keys_per_s":null,"montanha_over_fdb":null},
+    {"shape":"S3_r8","montanha_name":"S3_tcp_mt_put_batch_r8_t8_b8","montanha_keys_per_s":2.732,"fdb_keys_per_s":null,"montanha_over_fdb":null},
+    {"shape":"A1b","montanha_name":"","montanha_keys_per_s":null,"fdb_keys_per_s":null,"montanha_over_fdb":null}
+  ],
+  "honesty": "Montanha numbers alone are not field parity. FDB side optional. Topology/durability must be labeled."
+}
