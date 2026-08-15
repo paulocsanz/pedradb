@@ -466,10 +466,20 @@ fn list_subject_at(
 
 // ── Scylla-need CP helper ──────────────────────────────────────────────────
 
+/// Storage key for Scylla-need CP helpers under `cp/`.
+///
+/// F99: raw `cp/ || key` made `cp/a` a byte-prefix of `cp/ab`. Length-prefix
+/// the app key after the fixed namespace.
+#[must_use]
+pub fn cp_key(key: &[u8]) -> Vec<u8> {
+    let mut k = b"cp/".to_vec();
+    k.extend_from_slice(&crate::len_pref_value(key));
+    k
+}
+
 /// High-level CP put under `cp/` with optional watch notify.
 pub fn cp_put(cluster: &mut StoreCluster, hub: &WatchHub, key: &[u8], value: &[u8]) -> Result<()> {
-    let mut k = b"cp/".to_vec();
-    k.extend_from_slice(key);
+    let k = cp_key(key);
     cluster.put(&k, value)?;
     hub.notify(&k, value, cluster.read_version());
     Ok(())
@@ -702,6 +712,32 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// F99: raw `cp/ || key` made `cp/a` a prefix of `cp/ab`.
+    #[test]
+    fn cp_key_not_prefix_of_sibling() {
+        let a = cp_key(b"a");
+        let ab = cp_key(b"ab");
+        assert!(
+            !ab.starts_with(&a),
+            "cp_key(a) must not prefix cp_key(ab): {a:?} vs {ab:?}"
+        );
+        let dir = temp();
+        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        c.elect_all(60).unwrap();
+        let hub = WatchHub::new();
+        cp_put(&mut c, &hub, b"a", b"va").unwrap();
+        cp_put(&mut c, &hub, b"ab", b"vab").unwrap();
+        assert_eq!(c.get(&a).unwrap().as_deref(), Some(b"va".as_ref()));
+        assert_eq!(c.get(&ab).unwrap().as_deref(), Some(b"vab".as_ref()));
+        let end = crate::prefix_exclusive_end(&a);
+        let hits = c
+            .keys_in_range_at(&a, end.as_deref().unwrap_or(&[]), c.read_version())
+            .unwrap();
+        assert_eq!(hits.len(), 1, "prefix scan of cp_key(a) leaked: {hits:?}");
+        let _ = hub;
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// F96: `m/ || key` made `m/a` a prefix of `m/ab` under half-open scans.
     #[test]
     fn etcd_need_full_key_not_prefix_of_sibling() {
@@ -711,11 +747,19 @@ mod tests {
         EtcdNeedFace::create(&mut c, b"a", b"va").unwrap();
         EtcdNeedFace::create(&mut c, b"ab", b"vab").unwrap();
         assert_eq!(
-            EtcdNeedFace::get(&c, b"a").unwrap().unwrap().value.as_slice(),
+            EtcdNeedFace::get(&c, b"a")
+                .unwrap()
+                .unwrap()
+                .value
+                .as_slice(),
             b"va"
         );
         assert_eq!(
-            EtcdNeedFace::get(&c, b"ab").unwrap().unwrap().value.as_slice(),
+            EtcdNeedFace::get(&c, b"ab")
+                .unwrap()
+                .unwrap()
+                .value
+                .as_slice(),
             b"vab"
         );
         let ka = EtcdNeedFace::full_key(b"a");
@@ -728,11 +772,7 @@ mod tests {
         let hits = c
             .keys_in_range_at(&ka, end.as_deref().unwrap_or(&[]), c.read_version())
             .unwrap();
-        assert_eq!(
-            hits.len(),
-            1,
-            "prefix scan of full_key(a) leaked: {hits:?}"
-        );
+        assert_eq!(hits.len(), 1, "prefix scan of full_key(a) leaked: {hits:?}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -1072,10 +1112,11 @@ mod tests {
         let ev = rx
             .recv_timeout(std::time::Duration::from_secs(2))
             .expect("cp watch");
-        assert_eq!(ev.key, b"cp/token/1");
+        let expected = cp_key(b"token/1");
+        assert_eq!(ev.key, expected);
         assert_eq!(ev.value, b"owner-a");
         assert_eq!(
-            c.get(b"cp/token/1").unwrap().as_deref(),
+            c.get(&expected).unwrap().as_deref(),
             Some(b"owner-a".as_ref())
         );
 

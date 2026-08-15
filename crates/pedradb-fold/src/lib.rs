@@ -10,6 +10,7 @@ mod applied;
 mod caixote;
 mod export;
 mod follow;
+mod isolated_kernel;
 mod roles;
 mod ship;
 mod store;
@@ -19,6 +20,10 @@ pub use applied::{watch_applied, watch_applied_prefix, WatchApplied};
 pub use caixote::{caixote_host_filter, fold_get_local, IntentObservedDelta, SeqSyncState};
 pub use export::{export_fold, import_fold};
 pub use follow::{follow_prefix, follow_store_prefix, in_prefixes, PrefixSet};
+pub use isolated_kernel::{
+    isolated_child_byte, isolated_child_byte_as_is, isolated_id_matches, isolated_id_matches_as_is,
+    ISOLATED_CHILD_SEP,
+};
 pub use roles::FoldRole;
 pub use ship::{ship_pull, FoldShip};
 pub use store::{FoldStore, PedraFold};

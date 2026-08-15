@@ -51,18 +51,14 @@ impl PrefixSet {
     }
 }
 
-fn isolated_match(key: &[u8], id: &[u8]) -> bool {
-    if key == id {
-        return true;
-    }
-    key.starts_with(id) && key.get(id.len()) == Some(&b'/')
-}
-
 /// Whether `key` is in any prefix of `set`.
 #[must_use]
 pub fn in_prefixes(key: &[u8], set: &PrefixSet) -> bool {
     set.prefixes.iter().any(|p| key.starts_with(p))
-        || set.isolated.iter().any(|id| isolated_match(key, id))
+        || set
+            .isolated
+            .iter()
+            .any(|id| crate::isolated_id_matches(key, id))
 }
 
 /// Fold-internal meta (`\0fold/cursor`, `\0fold/keyset/…`). Not user data (F67/F68).

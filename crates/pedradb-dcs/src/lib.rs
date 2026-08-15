@@ -120,15 +120,35 @@ pub struct Watch {
 
 const META_LEN: usize = 24;
 
+fn push_user_component(buf: &mut Vec<u8>, user: &[u8]) {
+    let n = u32::try_from(user.len()).expect("dcs user key len fits u32");
+    buf.extend_from_slice(&n.to_be_bytes());
+    buf.extend_from_slice(user);
+}
+
+/// Decode user after `d/k/` or `d/m/` (F98 length-prefix; legacy raw accepted).
+fn user_from_disk_suffix(rest: &[u8]) -> Option<Vec<u8>> {
+    if rest.len() >= 4 {
+        let n = u32::from_be_bytes(rest[0..4].try_into().ok()?) as usize;
+        if rest.len() == 4 + n {
+            return Some(rest[4..].to_vec());
+        }
+    }
+    // Pre-F98: raw user bytes after the fixed prefix.
+    Some(rest.to_vec())
+}
+
+/// F98: `d/k/ || u32be(len) || user` so `d/k/a` is not a byte-prefix of `d/k/ab`.
 pub(crate) fn kv_key(user: &[u8]) -> Vec<u8> {
     let mut k = b"d/k/".to_vec();
-    k.extend_from_slice(user);
+    push_user_component(&mut k, user);
     k
 }
 
+/// F98: `d/m/ || u32be(len) || user` (paired with [`kv_key`]).
 pub(crate) fn meta_key(user: &[u8]) -> Vec<u8> {
     let mut k = b"d/m/".to_vec();
-    k.extend_from_slice(user);
+    push_user_component(&mut k, user);
     k
 }
 
@@ -254,8 +274,10 @@ impl<C: Clock, E: Env> Dcs<C, E> {
             if let Ok((_, _, lease)) = decode_meta(&mv) {
                 if lease != 0 {
                     max_lease = max_lease.max(lease);
-                    if let Some(user) = mk.as_ref().strip_prefix(b"d/m/") {
-                        orphan_users.push(user.to_vec());
+                    if let Some(rest) = mk.as_ref().strip_prefix(b"d/m/") {
+                        if let Some(user) = user_from_disk_suffix(rest) {
+                            orphan_users.push(user);
+                        }
                     }
                 }
             }
@@ -455,8 +477,10 @@ impl<C: Clock, E: Env> Dcs<C, E> {
         for (mk, mv) in metas {
             if let Ok((_, _, lease)) = decode_meta(&mv) {
                 if lease == id {
-                    if let Some(user) = mk.as_ref().strip_prefix(b"d/m/") {
-                        to_delete.push(user.to_vec());
+                    if let Some(rest) = mk.as_ref().strip_prefix(b"d/m/") {
+                        if let Some(user) = user_from_disk_suffix(rest) {
+                            to_delete.push(user);
+                        }
                     }
                 }
             }
@@ -612,6 +636,45 @@ mod tests {
 
         dcs.delete(b"a").unwrap();
         assert!(dcs.get(b"a").is_none());
+        dcs.close().unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// F98: raw `d/k/||user` made `d/k/a` a prefix of `d/k/ab`.
+    #[test]
+    fn kv_meta_keys_not_prefix_of_sibling_user() {
+        let ka = kv_key(b"a");
+        let kab = kv_key(b"ab");
+        let ma = meta_key(b"a");
+        let mab = meta_key(b"ab");
+        assert!(
+            !kab.starts_with(&ka),
+            "kv_key(a) must not prefix kv_key(ab): {ka:?} vs {kab:?}"
+        );
+        assert!(
+            !mab.starts_with(&ma),
+            "meta_key(a) must not prefix meta_key(ab): {ma:?} vs {mab:?}"
+        );
+        let dir = temp_dir("pref");
+        let mut dcs = Dcs::open(&dir).unwrap();
+        dcs.put(b"a", b"va", 0).unwrap();
+        dcs.put(b"ab", b"vab", 0).unwrap();
+        assert_eq!(dcs.get(b"a").unwrap().value, b"va");
+        assert_eq!(dcs.get(b"ab").unwrap().value, b"vab");
+        // Disk scan of exact kv_key(a) half-open must not include ab.
+        let end = pedradb_core::prefix_exclusive_end(&ka);
+        let hits = dcs.db.range(
+            std::ops::Bound::Included(ka.as_slice()),
+            match end.as_deref() {
+                Some(e) => std::ops::Bound::Excluded(e),
+                None => std::ops::Bound::Unbounded,
+            },
+        );
+        assert_eq!(
+            hits.len(),
+            1,
+            "prefix scan of kv_key(a) leaked: {hits:?}"
+        );
         dcs.close().unwrap();
         let _ = std::fs::remove_dir_all(&dir);
     }

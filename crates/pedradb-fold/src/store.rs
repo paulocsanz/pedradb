@@ -284,10 +284,30 @@ impl FoldStore for PedraFold<StdEnv> {
     }
 }
 
+/// F97: `\\0fold/keyset/ || u32be(len) || user` so keyset(a) is not a
+/// byte-prefix of keyset(ab) under half-open scans.
 fn keyset_key(user: &[u8]) -> Vec<u8> {
     let mut k = KEYSET_PREFIX.to_vec();
+    let n = u32::try_from(user.len()).expect("fold keyset user len fits u32");
+    k.extend_from_slice(&n.to_be_bytes());
     k.extend_from_slice(user);
     k
 }
 
+#[cfg(test)]
+mod keyset_tests {
+    use super::*;
 
+    #[test]
+    fn keyset_key_not_prefix_of_sibling_user() {
+        let a = keyset_key(b"a");
+        let ab = keyset_key(b"ab");
+        assert!(
+            !ab.starts_with(&a),
+            "keyset_key(a) must not prefix keyset_key(ab): {a:?} vs {ab:?}"
+        );
+        assert_ne!(a, ab);
+        assert_ne!(keyset_key(b"a/b"), keyset_key(b"a"));
+        assert_ne!(keyset_key(b"a\0b"), keyset_key(b"a"));
+    }
+}
