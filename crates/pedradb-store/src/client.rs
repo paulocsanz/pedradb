@@ -117,12 +117,12 @@ pub fn classify(err: &StoreError) -> ClientClass {
             limit: *limit,
         },
         // Retryable after compact / flush — not a permanent limit.
-        StoreError::WriteStall { l0_files, limit } => ClientClass::Unavailable(format!(
-            "write stall L0={l0_files} limit={limit}"
-        )),
-        StoreError::WriteStallMem { mem_bytes, limit } => ClientClass::Unavailable(format!(
-            "write stall mem={mem_bytes}B limit={limit}B"
-        )),
+        StoreError::WriteStall { l0_files, limit } => {
+            ClientClass::Unavailable(format!("write stall L0={l0_files} limit={limit}"))
+        }
+        StoreError::WriteStallMem { mem_bytes, limit } => {
+            ClientClass::Unavailable(format!("write stall mem={mem_bytes}B limit={limit}B"))
+        }
         StoreError::Msg(m) => classify_message(m),
         other => ClientClass::Other(other.to_string()),
     }

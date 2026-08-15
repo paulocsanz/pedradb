@@ -399,6 +399,19 @@
         "crates/pedradb-store/src/lib.rs"
       ],
       "entry": "snapshot_read_plan"
+    },
+    {
+      "id": "fold_range",
+      "finding": "F169",
+      "twin_kind": "close",
+      "kernel": "crates/pedradb-fold/src/fold_kernel.rs",
+      "twin": "crates/pedradb-fold/verus/fold_range.rs",
+      "verus": "scripts/verus_fold_range.sh",
+      "callers": [
+        "crates/pedradb-fold/src/watch.rs",
+        "crates/pedradb-fold/src/store.rs"
+      ],
+      "entry": "fold_event_hides_key"
     }
   ],
   "clones": [
@@ -539,6 +552,10 @@
     {
       "crate": "pedradb-store",
       "test": "si_read_model"
+    },
+    {
+      "crate": "pedradb-fold",
+      "test": "fold_range_model"
     }
   ]
 }

@@ -9,6 +9,7 @@
 mod applied;
 mod caixote;
 mod export;
+mod fold_kernel;
 mod follow;
 mod isolated_kernel;
 mod roles;
@@ -19,6 +20,7 @@ mod watch;
 pub use applied::{watch_applied, watch_applied_prefix, WatchApplied};
 pub use caixote::{caixote_host_filter, fold_get_local, IntentObservedDelta, SeqSyncState};
 pub use export::{export_fold, import_fold};
+pub use fold_kernel::{fold_event_hides_key, fold_event_hides_key_as_is};
 pub use follow::{follow_prefix, follow_store_prefix, in_prefixes, PrefixSet};
 pub use isolated_kernel::{
     isolated_child_byte, isolated_child_byte_as_is, isolated_id_matches, isolated_id_matches_as_is,
@@ -71,6 +73,16 @@ pub enum FoldUpdate {
         /// Source sequence.
         seq: u64,
     },
+    /// Range tombstone `[start, end)` (F169). Dest apply expands to every
+    /// covered live key (plus keyset rows); last-per-key drops covered puts.
+    DeleteRange {
+        /// Inclusive start user key.
+        start: Vec<u8>,
+        /// Exclusive end user key.
+        end: Vec<u8>,
+        /// Source sequence.
+        seq: u64,
+    },
 }
 
 impl FoldUpdate {
@@ -78,7 +90,9 @@ impl FoldUpdate {
     #[must_use]
     pub fn seq(&self) -> u64 {
         match self {
-            Self::Put { seq, .. } | Self::Delete { seq, .. } => *seq,
+            Self::Put { seq, .. } | Self::Delete { seq, .. } | Self::DeleteRange { seq, .. } => {
+                *seq
+            }
         }
     }
 
@@ -87,6 +101,7 @@ impl FoldUpdate {
     pub fn key(&self) -> &[u8] {
         match self {
             Self::Put { key, .. } | Self::Delete { key, .. } => key,
+            Self::DeleteRange { start, .. } => start,
         }
     }
 }

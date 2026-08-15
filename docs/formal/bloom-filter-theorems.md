@@ -67,12 +67,18 @@ are possible."
 
 ## Bounds (Kani, documented)
 
+The first host run of the wider bounds (residual ≤ 32, 4 keys × 6 B,
+capacity ≤ 128, bpk ≤ 64, unwind 64) sat in CBMC > 1 h / 12 GB on T2
+and was killed. These are the bounds that the script actually runs:
+
 | Harness | Symbolic | Bound |
 |---------|----------|-------|
-| `decode_header_ok_yields_safe_filter` | header fields + payload | residual ≤ 32 B, unwind 64 |
-| `insert_then_may_contain_all_keys` | 4 keys × 6 B, capacity, bpk | capacity ≤ 128, bpk 1..=64, unwind 64 |
-| `encode_decode_roundtrip_preserves_filter` | 1 key × 6 B, capacity, bpk | same, unwind 64 |
-| `inactive_filter_never_rejects` | 1 key × 8 B | unwind 16 |
+| `decode_header_ok_yields_safe_filter` | header fields + payload | residual ≤ 8 B, k ≤ 8, unwind 24 |
+| `insert_then_may_contain_all_keys` | 1 key × 3 B, capacity, bpk | capacity ≤ 8, bpk 1..=10, unwind 16 |
+| `encode_decode_roundtrip_preserves_filter` | 1 key × 3 B, capacity, bpk | same, unwind 16 |
+| `inactive_filter_never_rejects` | 1 key × 4 B | unwind 8 |
 
-Unbounded T1 (model domain) is the Verus twin; unbounded structural T1 on
-production code is the Lean extract (P2).
+Unbounded T1 (model domain) is the Verus twin; the algebraic T1 core
+(`set_bit` then `test_bit` on the same index) on the production extract
+is the Lean file. Multi-key / larger filters stay with the exhaustive
+test + fuzz.

@@ -30,6 +30,54 @@ pub fn bloom_header_ok_as_is(nbits: u32, _k: u32, nbytes: u32, residual: u64) ->
     u64::from(nbytes) >= u64::from(nbits).div_ceil(8) && u64::from(nbytes) <= residual
 }
 
+/// Saturating `a * b` without `saturating_mul` (Aeneas extracts that as an axiom).
+fn saturating_product(a: usize, b: usize) -> usize {
+    if b != 0 && a > usize::MAX / b {
+        usize::MAX
+    } else {
+        a * b
+    }
+}
+
+fn at_least_64(x: usize) -> usize {
+    if x < 64 { 64 } else { x }
+}
+
+fn cap_u32(x: usize) -> u32 {
+    if x > u32::MAX as usize {
+        u32::MAX
+    } else {
+        #[allow(clippy::cast_possible_truncation)]
+        {
+            x as u32
+        }
+    }
+}
+
+/// `k ≈ bits_per_key * ln(2) ≈ bits_per_key * 0.69`, clamped to `[1, 30]`.
+fn k_from_bits_per_key(bits_per_key: usize) -> u32 {
+    let raw = if bits_per_key > usize::MAX / 69 {
+        30
+    } else {
+        (bits_per_key * 69) / 100
+    };
+    if raw < 1 {
+        1
+    } else if raw > 30 {
+        30
+    } else {
+        #[allow(clippy::cast_possible_truncation)]
+        {
+            raw as u32
+        }
+    }
+}
+
+/// `(nbits + 7) / 8` — same as `div_ceil(8)` for unsigned, axiom-free extract.
+fn nbytes_for_nbits(nbits: u32) -> usize {
+    (nbits as usize + 7) / 8
+}
+
 /// Double-hash Bloom filter (Kirsch–Mitzenmacher).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BloomFilter {
@@ -52,25 +100,32 @@ impl BloomFilter {
     }
 
     /// Whether this filter can reject keys (non-empty).
+    ///
+    /// RFC-0030 P2: `len() != 0` rather than `!is_empty()` — `Vec::is_empty`
+    /// extracts as an Aeneas axiom; `len` is in the Lean std.
     #[must_use]
     pub fn is_active(&self) -> bool {
-        self.nbits > 0 && self.k > 0 && !self.bits.is_empty()
+        #[allow(clippy::len_zero)]
+        {
+            self.nbits > 0 && self.k > 0 && self.bits.len() != 0
+        }
     }
 
     /// Build a filter sized for approximately `n_keys` insertions.
+    ///
+    /// RFC-0030 P2: no `saturating_mul` / `max` / `min` / `clamp` /
+    /// `try_from` / `div_ceil` — those extract as axioms or fail to
+    /// typecheck in Lean (`Ord.max.default`). The integer form is the
+    /// same: `nbits = min(max(n_keys * bpk, 64), u32::MAX)`,
+    /// `k = clamp((bpk * 69) / 100, 1, 30)`, `nbytes = (nbits + 7) / 8`.
     #[must_use]
     pub fn with_capacity(n_keys: usize, bits_per_key: usize) -> Self {
         if n_keys == 0 || bits_per_key == 0 {
             return Self::always_true();
         }
-        // Cap so nbits always fits in u32 (engine keys per SST are far below this).
-        let raw = n_keys.saturating_mul(bits_per_key).max(64);
-        let nbits = u32::try_from(raw.min(u32::MAX as usize)).unwrap_or(u32::MAX);
-        // k ≈ bits_per_key * ln(2) ≈ bits_per_key * 0.69 — integer form.
-        let k = u32::try_from((bits_per_key * 69) / 100)
-            .unwrap_or(1)
-            .clamp(1, 30);
-        let nbytes = (nbits as usize).div_ceil(8);
+        let nbits = cap_u32(at_least_64(saturating_product(n_keys, bits_per_key)));
+        let k = k_from_bits_per_key(bits_per_key);
+        let nbytes = nbytes_for_nbits(nbits);
         Self {
             bits: vec![0u8; nbytes],
             nbits,
@@ -262,69 +317,59 @@ pub fn may_contain_mut_hash_mismatch(f: &BloomFilter, key: &[u8]) -> bool {
 mod kani_proofs {
     use super::*;
 
-    /// T3 (bounded residual ≤ 32): every header in the F166-accepting domain
-    /// decodes without panicking, and querying any key never panics (all probe
-    /// indices stay in bounds).
+    /// T3 (residual ≤ 8, k ≤ 8): every header in that F166-accepting slice
+    /// decodes without panicking, and querying any 4-byte key never panics.
+    /// The unbounded `k ≤ MAX_K` half is the F166 Verus twin.
     #[kani::proof]
-    #[kani::unwind(64)]
+    #[kani::unwind(24)]
     fn decode_header_ok_yields_safe_filter() {
         let nbits: u32 = kani::any();
         let k: u32 = kani::any();
         let nbytes: u32 = kani::any();
         let payload_len: u32 = kani::any();
-        kani::assume(payload_len <= 32);
+        kani::assume(payload_len <= 8);
         kani::assume(nbytes >= 1 && nbytes <= payload_len);
         kani::assume(u64::from(nbytes) >= u64::from(nbits).div_ceil(8));
-        kani::assume((1..=MAX_K).contains(&k));
+        kani::assume((1..=8).contains(&k));
         let mut buf: Vec<u8> = Vec::with_capacity(12 + payload_len as usize);
         buf.extend_from_slice(&nbits.to_le_bytes());
         buf.extend_from_slice(&k.to_le_bytes());
         buf.extend_from_slice(&nbytes.to_le_bytes());
-        let payload: [u8; 32] = kani::any();
+        let payload: [u8; 8] = kani::any();
         buf.extend_from_slice(&payload[..payload_len as usize]);
         let f = BloomFilter::decode(&buf).expect("header-ok buffer must decode");
-        let key: [u8; 8] = kani::any();
+        let key: [u8; 4] = kani::any();
         let _ = f.may_contain(&key);
     }
 
-    /// T1 (keys ≤ 6 bytes, ≤ 4 keys, capacity ≤ 128, bpk 1..=64): after
-    /// inserting a symbolic key set, `may_contain` accepts every inserted key.
+    /// T1 (one key ≤ 3 bytes, capacity ≤ 8, bpk 1..=10): after inserting a
+    /// symbolic key, `may_contain` accepts it. Multi-key / larger filters
+    /// stay with the exhaustive test + Verus twin.
     #[kani::proof]
-    #[kani::unwind(64)]
+    #[kani::unwind(16)]
     fn insert_then_may_contain_all_keys() {
-        let keys: [[u8; 6]; 4] = kani::any();
-        let lens: [usize; 4] = kani::any();
-        for l in lens {
-            kani::assume(l <= 6);
-        }
-        let n: usize = kani::any();
-        kani::assume(n <= 4);
+        let key: [u8; 3] = kani::any();
+        let len: usize = kani::any();
+        kani::assume(len <= 3);
         let n_keys: usize = kani::any();
         let bpk: usize = kani::any();
-        kani::assume(n_keys <= 128 && bpk >= 1 && bpk <= 64);
+        kani::assume(n_keys <= 8 && bpk >= 1 && bpk <= 10);
         let mut f = BloomFilter::with_capacity(n_keys, bpk);
-        for i in 0..n {
-            f.insert(&keys[i][..lens[i]]);
-        }
-        for i in 0..n {
-            assert!(
-                f.may_contain(&keys[i][..lens[i]]),
-                "false negative for inserted key {i}"
-            );
-        }
+        f.insert(&key[..len]);
+        assert!(f.may_contain(&key[..len]), "false negative for inserted key");
     }
 
-    /// T2 (one symbolic key): `decode(encode(f))` reproduces the filter
-    /// (structural equality) and keeps the membership decision.
+    /// T2 (one key ≤ 3 bytes, same capacity bound): `decode(encode(f))`
+    /// reproduces the filter and keeps the membership decision.
     #[kani::proof]
-    #[kani::unwind(64)]
+    #[kani::unwind(16)]
     fn encode_decode_roundtrip_preserves_filter() {
-        let key: [u8; 6] = kani::any();
+        let key: [u8; 3] = kani::any();
         let len: usize = kani::any();
-        kani::assume(len <= 6);
+        kani::assume(len <= 3);
         let n_keys: usize = kani::any();
         let bpk: usize = kani::any();
-        kani::assume(n_keys <= 128 && bpk >= 1 && bpk <= 64);
+        kani::assume(n_keys <= 8 && bpk >= 1 && bpk <= 10);
         let mut f = BloomFilter::with_capacity(n_keys, bpk);
         f.insert(&key[..len]);
         let g = BloomFilter::decode(&f.encode()).expect("roundtrip must decode");
@@ -334,9 +379,9 @@ mod kani_proofs {
 
     /// T4: an inactive filter never rejects any key.
     #[kani::proof]
-    #[kani::unwind(16)]
+    #[kani::unwind(8)]
     fn inactive_filter_never_rejects() {
-        let key: [u8; 8] = kani::any();
+        let key: [u8; 4] = kani::any();
         assert!(BloomFilter::always_true().may_contain(&key));
         assert!(BloomFilter::with_capacity(0, DEFAULT_BITS_PER_KEY).may_contain(&key));
         assert!(BloomFilter::with_capacity(10, 0).may_contain(&key));
@@ -414,6 +459,25 @@ mod tests {
         // Header kernel AS-IS accepts it (teeth).
         assert!(bloom_header_ok_as_is(64, u32::MAX, 8, 8));
         assert!(!bloom_header_ok(64, u32::MAX, 8, 8));
+    }
+
+    /// RFC-0030: `with_capacity` rewrite (no max/clamp/div_ceil) matches
+    /// the previous integer form on the writer grid.
+    #[test]
+    fn with_capacity_matches_legacy_formula() {
+        for bits_per_key in 1..=64usize {
+            for n_keys in [1usize, 2, 7, 16, 64, 300] {
+                let f = BloomFilter::with_capacity(n_keys, bits_per_key);
+                let raw = n_keys.saturating_mul(bits_per_key).max(64);
+                let nbits = u32::try_from(raw.min(u32::MAX as usize)).unwrap_or(u32::MAX);
+                let k = u32::try_from((bits_per_key * 69) / 100)
+                    .unwrap_or(1)
+                    .clamp(1, 30);
+                assert_eq!(f.bit_count(), nbits, "n_keys={n_keys} bpk={bits_per_key}");
+                assert_eq!(f.hash_count(), k, "n_keys={n_keys} bpk={bits_per_key}");
+                assert_eq!(f.encode().len(), 12 + (nbits as usize).div_ceil(8));
+            }
+        }
     }
 
     /// F166 regression: every k produced by `with_capacity` decodes back.

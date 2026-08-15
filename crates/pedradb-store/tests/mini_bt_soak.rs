@@ -19,10 +19,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 /// Lab flag parity with scale-gate / fdb-bench / montanha-tcp.
 fn write_backpressure_enabled() -> bool {
-    std::env::var("MONTANHA_WRITE_BACKPRESSURE")
-        .ok()
-        .as_deref()
-        == Some("1")
+    std::env::var("MONTANHA_WRITE_BACKPRESSURE").ok().as_deref() == Some("1")
 }
 
 fn store_opts() -> StoreOpenOptions {

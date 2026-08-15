@@ -7,62 +7,62 @@ use vstd::prelude::*;
 
 verus! {
 
-pub open spec fn snapshot_read_spec(snapshot: u64, watermark: u64) -> bool {
-    // true = Serve, false = TooOld
+/// Same variants as production `si_kernel::SnapshotRead`.
+#[derive(PartialEq, Eq, Clone, Copy)]
+pub enum SnapshotRead {
+    TooOld,
+    Serve,
+}
+
+pub open spec fn snapshot_read_spec(snapshot: u64, watermark: u64) -> SnapshotRead {
     if watermark == 0 {
-        true
+        SnapshotRead::Serve
+    } else if watermark - 1 > snapshot {
+        SnapshotRead::TooOld
     } else {
-        snapshot + 1 >= watermark
+        SnapshotRead::Serve
     }
 }
 
 /// F168 kernel twin: reject a snapshot older than the GC floor
 /// (`watermark - 1`); everything else serves.
-pub fn snapshot_read_plan(snapshot: u64, watermark: u64) -> (serve: bool)
+pub fn snapshot_read_plan(snapshot: u64, watermark: u64) -> (r: SnapshotRead)
     ensures
-        serve == snapshot_read_spec(snapshot, watermark),
-        // TooOld is sound: the floor cannot cover the snapshot.
-        !serve ==> snapshot + 1 < watermark,
-        // Serve is never fabricated: some history entry (the floor at
-        // `watermark - 1`, or the gen-0 anchor when no GC ran) covers it.
-        serve ==> watermark == 0 || snapshot >= watermark - 1,
-        // Never overflow-rejects fresh reads at the top of the space.
-        snapshot == u64::MAX ==> serve,
+        r == snapshot_read_spec(snapshot, watermark),
+        r == (SnapshotRead::TooOld) ==> snapshot + 1 < watermark,
+        r == (SnapshotRead::Serve) ==> watermark == 0 || snapshot >= watermark - 1,
+        snapshot == u64::MAX ==> r == (SnapshotRead::Serve),
 {
     if watermark == 0 {
-        true
+        SnapshotRead::Serve
     } else if watermark - 1 > snapshot {
-        false
+        SnapshotRead::TooOld
     } else {
-        true
+        SnapshotRead::Serve
     }
 }
 
-/// AS-IS F168: always "serve" — pruned history answers fabricated absence.
-pub fn snapshot_read_plan_as_is(snapshot: u64, watermark: u64) -> (serve: bool)
-    ensures serve == true,
+/// AS-IS F168: always Serve — pruned history answers fabricated absence.
+pub fn snapshot_read_plan_as_is(_snapshot: u64, _watermark: u64) -> (r: SnapshotRead)
+    ensures
+        r == (SnapshotRead::Serve),
 {
-    let _ = snapshot;
-    let _ = watermark;
-    true
+    SnapshotRead::Serve
 }
 
 /// Teeth: in the F168 world (snapshot 1, watermark 7 — the repro), AS-IS
 /// serves a snapshot whose floor (6) does not cover it.
 proof fn lemma_as_is_serves_uncovered() {
-    // AS-IS serves unconditionally (ensures serve == true); the guarded spec
-    // rejects the repro world.
-    let guarded_spec = snapshot_read_spec(1, 7);
-    assert(guarded_spec == false); // 1 + 1 < 7
+    assert(snapshot_read_spec(1, 7) == SnapshotRead::TooOld); // 7 - 1 = 6 > 1
+    assert(snapshot_read_spec(6, 7) == SnapshotRead::Serve);
 }
 
-/// Non-vacuity: the floor semantics — snapshot exactly at `watermark - 1`
-/// serves (the floor entry is readable there).
+/// Non-vacuity: floor / overflow / no-GC.
 proof fn lemma_floor_boundary_serves() {
-    assert(snapshot_read_spec(6, 7)); // 6 + 1 >= 7
-    assert(!snapshot_read_spec(5, 7)); // 5 + 1 < 7
-    assert(snapshot_read_spec(0, 0)); // no GC ever ran
-    assert(snapshot_read_spec(u64::MAX, u64::MAX)); // no overflow reject
+    assert(snapshot_read_spec(6, 7) == SnapshotRead::Serve);
+    assert(snapshot_read_spec(5, 7) == SnapshotRead::TooOld);
+    assert(snapshot_read_spec(0, 0) == SnapshotRead::Serve);
+    assert(snapshot_read_spec(u64::MAX, u64::MAX) == SnapshotRead::Serve);
 }
 
 fn main() {}

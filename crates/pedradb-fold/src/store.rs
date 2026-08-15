@@ -161,6 +161,15 @@ impl<E: Env> PedraFold<E> {
     }
 }
 
+fn batch_op_hidden_by_range(op: &BatchOp, start: &[u8], end: &[u8]) -> bool {
+    match op {
+        BatchOp::Put { key, .. } | BatchOp::Delete { key } => {
+            crate::fold_event_hides_key(true, start, end, key.as_ref())
+        }
+        BatchOp::DeleteRange { .. } => false,
+    }
+}
+
 fn apply_inner<E: Env>(
     fold: &mut PedraFold<E>,
     batch: &[FoldUpdate],
@@ -202,6 +211,28 @@ fn apply_inner<E: Env>(
                 }
                 ops.push(BatchOp::delete(key.as_slice()));
                 ops.push(BatchOp::delete(keyset_key(key)));
+            }
+            FoldUpdate::DeleteRange { start, end, .. } => {
+                if crate::follow::is_fold_meta_key(start) || crate::follow::is_fold_meta_key(end) {
+                    return Err(FoldError::TransientApply(
+                        "user key reserved for fold meta (\\0fold/)".into(),
+                    ));
+                }
+                // Drop earlier same-batch puts/deletes that this range hides.
+                ops.retain(|op| !batch_op_hidden_by_range(op, start, end));
+                for (k, _) in fold.db.range(
+                    std::ops::Bound::Included(start.as_slice()),
+                    std::ops::Bound::Excluded(end.as_slice()),
+                ) {
+                    if crate::follow::is_fold_meta_key(&k) {
+                        continue;
+                    }
+                    if !crate::fold_event_hides_key(true, start, end, &k) {
+                        continue;
+                    }
+                    ops.push(BatchOp::delete(k.as_ref()));
+                    ops.push(BatchOp::delete(keyset_key(k.as_ref())));
+                }
             }
         }
     }

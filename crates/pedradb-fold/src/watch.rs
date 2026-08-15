@@ -25,6 +25,7 @@ pub fn resume_window_ok(pin: u64, first_sequence: u64) -> bool {
 pub fn last_per_key<E: Env>(db: &Db<E>, prefixes: &PrefixSet) -> Vec<FoldUpdate> {
     let last = db.last_sequence();
     let mut map: BTreeMap<Vec<u8>, FoldUpdate> = BTreeMap::new();
+    let mut ranges: Vec<FoldUpdate> = Vec::new();
     for e in db.changes_after(0) {
         if e.sequence > last
             || !in_prefixes(e.key.as_ref(), prefixes)
@@ -32,10 +33,27 @@ pub fn last_per_key<E: Env>(db: &Db<E>, prefixes: &PrefixSet) -> Vec<FoldUpdate>
         {
             continue;
         }
-        let u = crate::follow::entry_to_update(e);
-        map.insert(u.key().to_vec(), u);
+        match e.kind {
+            ChangeKind::DeleteRange => {
+                let start = e.key.as_ref();
+                let end = e.value.as_ref();
+                map.retain(|k, _| !crate::fold_event_hides_key(true, start, end, k));
+                ranges.push(crate::follow::entry_to_update(e));
+            }
+            ChangeKind::Delete => {
+                map.remove(e.key.as_ref());
+                let u = crate::follow::entry_to_update(e);
+                map.insert(u.key().to_vec(), u);
+            }
+            ChangeKind::Put => {
+                let u = crate::follow::entry_to_update(e);
+                map.insert(u.key().to_vec(), u);
+            }
+        }
     }
-    map.into_values().collect()
+    // Range tombstones first so dest apply drops covered keys before puts.
+    ranges.extend(map.into_values());
+    ranges
 }
 
 /// No-cursor: last-per-key then live tail after `max(seed seq)`.
@@ -94,8 +112,13 @@ pub fn resync_expired<E: Env>(
             continue;
         }
         match e.kind {
-            ChangeKind::Delete | ChangeKind::DeleteRange => {
+            ChangeKind::Delete => {
                 live.remove(e.key.as_ref());
+            }
+            ChangeKind::DeleteRange => {
+                live.retain(|k| {
+                    !crate::fold_event_hides_key(true, e.key.as_ref(), e.value.as_ref(), k)
+                });
             }
             ChangeKind::Put => {
                 live.insert(e.key.to_vec());

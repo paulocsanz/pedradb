@@ -83,9 +83,7 @@ impl Model for SiReadModel {
 
     fn properties(&self) -> Vec<Property<Self>> {
         vec![
-            Property::always("Inv-toold-sound", |_m, s: &St| {
-                !s.served_uncovered
-            }),
+            Property::always("Inv-toold-sound", |_m, s: &St| !s.served_uncovered),
             Property::sometimes("Inv-toold-non-vacuous", |_m, s: &St| s.decided),
         ]
     }

@@ -20,7 +20,7 @@ twin, and the handler that is supposed to call the kernel.
 | **clones** | Raft vs store copies of `recover_commit` / `ae_ack_success` drifting |
 | **twins** | Missing `twin_kind`; a **close** twin without the entry `fn`; kernel decision tokens (`==`, `0xff`, `WouldGrant`, …) missing from the Verus twin |
 | **scripts** | A `scripts/verus_*.sh` whose `SRC=` is not in `catalog.json` |
-| **models** | Stateright through `fields_model` / `pack_model` / `ship_model` / `scan_model` + EXPLODE `recover_choose` (production `fn`, plus AS-IS mutant) |
+| **models** | Stateright through `fields_model` / `pack_model` / `ship_model` / `scan_model` / `si_read_model` / `fold_range_model` + EXPLODE `recover_choose` (production `fn`, plus AS-IS mutant) |
 | **extract** | Extract crate for `vote_kernel.rs` fails; `lake build Vote` skipped unless `lake` is installed; Charon skipped unless `--extract-required` |
 | **verus** | Twin no longer verifies (skipped if `verus` is not on the machine) |
 

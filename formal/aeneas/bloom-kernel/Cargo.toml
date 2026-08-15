@@ -10,3 +10,6 @@ description = "Standalone crate whose [lib] path is production bloom.rs"
 
 [lib]
 path = "../../../crates/pedradb-core/src/bloom.rs"
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(kani)'] }

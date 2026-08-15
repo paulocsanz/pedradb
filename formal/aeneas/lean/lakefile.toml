@@ -17,3 +17,8 @@ name = "IsolatedKernel"
 
 [[lean_lib]]
 name = "Isolated"
+[[lean_lib]]
+name = "BloomKernel"
+
+[[lean_lib]]
+name = "Bloom"

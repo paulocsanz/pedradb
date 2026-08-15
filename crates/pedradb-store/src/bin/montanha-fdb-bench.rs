@@ -701,7 +701,10 @@ fn main() {
         let dir = out.join("db-ycsb");
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
-        progress!("YCSB open 3-node 1-range records={records} ops={ycsb_ops} dist={}", if zipfian { "zipfian" } else { "uniform" });
+        progress!(
+            "YCSB open 3-node 1-range records={records} ops={ycsb_ops} dist={}",
+            if zipfian { "zipfian" } else { "uniform" }
+        );
         let mut c = open_cluster(&dir, 3, 1);
         c.elect_all(200).expect("elect ycsb");
 
@@ -749,83 +752,84 @@ fn main() {
         progress!("YCSB seed {records} in {:.1}s", t0.elapsed().as_secs_f64());
 
         // Per-workload runner: returns (latencies, updates, inserts, scans, errors).
-        let mut run_workload = |name: &str,
-                                read_pct: u64,
-                                insert_pct: u64,
-                                rmw: bool,
-                                scans: bool,
-                                c: &mut pedradb_store::StoreCluster<pedradb_core::StdEnv>| {
-            let mut lats = Vec::with_capacity(ycsb_ops);
-            let mut updates = 0u64;
-            let mut inserts = 0u64;
-            let mut scan_ops = 0u64;
-            let mut errors = 0u64;
-            let mut latest = records;
-            let t0 = Instant::now();
-            for _ in 0..ycsb_ops {
-                let t = Instant::now();
-                let roll = xorshift_bench(&mut rng) % 100;
-                if roll < read_pct {
-                    // read
-                    let i = pick(&mut rng, latest);
-                    if c.get(&ykey(i)).is_err() {
-                        errors += 1;
-                    }
-                } else if roll < read_pct + insert_pct {
-                    // insert (new key) → read-latest window grows
-                    let k = format!("ycsb/{latest:06}").into_bytes();
-                    if c.put(&k, &yval).is_ok() {
-                        latest += 1;
-                        inserts += 1;
+        let mut run_workload =
+            |name: &str,
+             read_pct: u64,
+             insert_pct: u64,
+             rmw: bool,
+             scans: bool,
+             c: &mut pedradb_store::StoreCluster<pedradb_core::StdEnv>| {
+                let mut lats = Vec::with_capacity(ycsb_ops);
+                let mut updates = 0u64;
+                let mut inserts = 0u64;
+                let mut scan_ops = 0u64;
+                let mut errors = 0u64;
+                let mut latest = records;
+                let t0 = Instant::now();
+                for _ in 0..ycsb_ops {
+                    let t = Instant::now();
+                    let roll = xorshift_bench(&mut rng) % 100;
+                    if roll < read_pct {
+                        // read
+                        let i = pick(&mut rng, latest);
+                        if c.get(&ykey(i)).is_err() {
+                            errors += 1;
+                        }
+                    } else if roll < read_pct + insert_pct {
+                        // insert (new key) → read-latest window grows
+                        let k = format!("ycsb/{latest:06}").into_bytes();
+                        if c.put(&k, &yval).is_ok() {
+                            latest += 1;
+                            inserts += 1;
+                        } else {
+                            errors += 1;
+                        }
+                    } else if scans {
+                        // short range scan: [key(i), key(i+25)) window
+                        let i = pick(&mut rng, latest);
+                        let start = ykey(i);
+                        let mut end = ykey(i + 25);
+                        end.pop();
+                        end.push(b'~');
+                        let mut tr = c.begin();
+                        match tr.get_range(c, start.as_slice(), end.as_slice()) {
+                            Ok(_) => scan_ops += 1,
+                            Err(_) => errors += 1,
+                        }
+                    } else if rmw {
+                        // read-modify-write in one TX
+                        let i = pick(&mut rng, latest);
+                        let k = ykey(i);
+                        let mut tr = c.begin();
+                        let got = tr.get(c, k.as_slice()).ok().flatten();
+                        let mut nv = yval.clone();
+                        if let Some(old) = &got {
+                            let last = nv.last_mut().unwrap();
+                            *last = old.last().copied().unwrap_or(b'x').wrapping_add(1);
+                        }
+                        tr.set(k.as_slice(), nv.as_slice()).expect("set rmw");
+                        match tr.commit(c) {
+                            Ok(_) => updates += 1,
+                            Err(_) => errors += 1,
+                        }
                     } else {
-                        errors += 1;
+                        // update
+                        let i = pick(&mut rng, latest);
+                        if c.put(&ykey(i), &yval).is_ok() {
+                            updates += 1;
+                        } else {
+                            errors += 1;
+                        }
                     }
-                } else if scans {
-                    // short range scan: [key(i), key(i+25)) window
-                    let i = pick(&mut rng, latest);
-                    let start = ykey(i);
-                    let mut end = ykey(i + 25);
-                    end.pop();
-                    end.push(b'~');
-                    let mut tr = c.begin();
-                    match tr.get_range(c, start.as_slice(), end.as_slice()) {
-                        Ok(_) => scan_ops += 1,
-                        Err(_) => errors += 1,
-                    }
-                } else if rmw {
-                    // read-modify-write in one TX
-                    let i = pick(&mut rng, latest);
-                    let k = ykey(i);
-                    let mut tr = c.begin();
-                    let got = tr.get(c, k.as_slice()).ok().flatten();
-                    let mut nv = yval.clone();
-                    if let Some(old) = &got {
-                        let last = nv.last_mut().unwrap();
-                        *last = old.last().copied().unwrap_or(b'x').wrapping_add(1);
-                    }
-                    tr.set(k.as_slice(), nv.as_slice()).expect("set rmw");
-                    match tr.commit(c) {
-                        Ok(_) => updates += 1,
-                        Err(_) => errors += 1,
-                    }
-                } else {
-                    // update
-                    let i = pick(&mut rng, latest);
-                    if c.put(&ykey(i), &yval).is_ok() {
-                        updates += 1;
-                    } else {
-                        errors += 1;
-                    }
+                    lats.push(ms(t));
                 }
-                lats.push(ms(t));
-            }
-            let wall = t0.elapsed();
-            benches.push(summarize(name, ycsb_ops, wall, &mut lats));
-            progress!(
+                let wall = t0.elapsed();
+                benches.push(summarize(name, ycsb_ops, wall, &mut lats));
+                progress!(
                 "{name} done ops={ycsb_ops} updates={updates} inserts={inserts} scans={scan_ops} errors={errors}"
             );
-            (updates, inserts, scan_ops, errors)
-        };
+                (updates, inserts, scan_ops, errors)
+            };
 
         // FDB benchmark shapes: ycsb_a 50/50, b 95/5, c 100r, d 95r/5i(latest),
         // e 95 scan/5i (zipfian), f 50 rmw.

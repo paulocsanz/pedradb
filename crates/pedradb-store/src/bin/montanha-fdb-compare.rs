@@ -61,7 +61,10 @@ fn main() {
     };
     // Surface the peer's own status so a stub ("unavailable") is visible in the
     // report instead of reading as a real lab run.
-    if let Some(peer_status) = peer_raw.as_deref().and_then(|s| extract_string_field(s, "status")) {
+    if let Some(peer_status) = peer_raw
+        .as_deref()
+        .and_then(|s| extract_string_field(s, "status"))
+    {
         fdb_status = format!("peer_file:{peer_status}");
     }
     let mut fdb_probe = "null".to_string();
@@ -262,7 +265,10 @@ fn extract_bool_field(raw: &str, field: &str) -> Option<bool> {
 fn extract_string_field(raw: &str, field: &str) -> Option<String> {
     let key = format!("\"{field}\"");
     let i = raw.find(&key)?;
-    let rest = raw[i + key.len()..].trim_start().strip_prefix(':')?.trim_start();
+    let rest = raw[i + key.len()..]
+        .trim_start()
+        .strip_prefix(':')?
+        .trim_start();
     let rest = rest.strip_prefix('"')?;
     let end = rest.find('"')?;
     Some(rest[..end].to_string())

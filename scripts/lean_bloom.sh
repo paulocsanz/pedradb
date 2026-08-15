@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Check the Lean theorem over the Aeneas extract of vote_kernel.rs.
+# Check the Lean theorems over the Aeneas extract of bloom.rs (RFC-0030).
 # Requires elan toolchain leanprover/lean4:v4.31.0 (see formal/aeneas/PINS.md).
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -25,11 +25,11 @@ if [[ -z "$LAKE" ]]; then
   exit 0
 fi
 
-if [[ ! -f "$LEAN_DIR/Vote.lean" || ! -e "$LEAN_DIR/VoteKernel.lean" ]]; then
-  echo "FAIL  formal/aeneas/lean/{Vote,VoteKernel}.lean missing" >&2
+if [[ ! -f "$LEAN_DIR/Bloom.lean" || ! -e "$LEAN_DIR/BloomKernel.lean" ]]; then
+  echo "FAIL  formal/aeneas/lean/{Bloom,BloomKernel}.lean missing" >&2
   exit 1
 fi
 
 echo "      lake=$LAKE"
-(cd "$LEAN_DIR" && "$LAKE" build Vote Isolated Bloom)
-echo "ok    lean Vote + Isolated + Bloom"
+(cd "$LEAN_DIR" && "$LAKE" build Bloom)
+echo "ok    lean Bloom"

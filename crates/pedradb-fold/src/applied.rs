@@ -1,7 +1,7 @@
 //! Cursor-after-apply combinator (RFC-0024 P0.1).
 
 use crate::{FoldCursor, FoldStore, FoldUpdate, Result};
-use pedradb_core::{ChangeEntry, ChangeKind, Db, StdEnv};
+use pedradb_core::{ChangeEntry, Db, StdEnv};
 use pedradb_journal::JournalConsumer;
 
 /// Receive-then-apply loop: pin advances only after `store.apply` returns.
@@ -95,17 +95,7 @@ pub fn watch_applied_prefix(
     }
     let updates: Vec<FoldUpdate> = batch
         .iter()
-        .map(|e| match e.kind {
-            ChangeKind::Delete | ChangeKind::DeleteRange => FoldUpdate::Delete {
-                key: e.key.to_vec(),
-                seq: e.sequence,
-            },
-            ChangeKind::Put => FoldUpdate::Put {
-                key: e.key.to_vec(),
-                value: e.value.to_vec(),
-                seq: e.sequence,
-            },
-        })
+        .map(|e| crate::follow::entry_to_update(e.clone()))
         .collect();
     let high = updates.iter().map(FoldUpdate::seq).max().unwrap_or(0);
     store.apply(&updates, FoldCursor(high))?;

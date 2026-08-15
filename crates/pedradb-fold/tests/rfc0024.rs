@@ -665,3 +665,86 @@ fn fold_rejects_reserved_meta_user_keys() {
     assert_eq!(fold.cursor().0, 0);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// F169: a range tombstone must hide every covered key in last-per-key
+/// state-sync, not just the range-start key. Before the fix, `entry_to_update`
+/// mapped `DeleteRange` to a point delete of `e.key` (the start) and
+/// `last_per_key` last-write-wins per key, so a covered put survived as live.
+#[test]
+fn last_per_key_applies_range_tombstone_coverage() {
+    let dir = temp();
+    let src = dir.join("src");
+    let mut db = Db::open_with(&src, opts()).unwrap();
+    db.put(b"k-a", b"va").unwrap();
+    db.put(b"k-c", b"vc").unwrap();
+    db.put(b"k-e", b"ve").unwrap();
+    db.delete_range(b"k-b", b"k-d").unwrap();
+    assert_eq!(db.get(b"k-a").as_deref(), Some(b"va".as_ref()));
+    assert_eq!(
+        db.get(b"k-c"),
+        None,
+        "source hides k-c under the range tombstone"
+    );
+    assert_eq!(db.get(b"k-e").as_deref(), Some(b"ve".as_ref()));
+
+    let prefs = PrefixSet::one(b"k-");
+    let sync = last_per_key(&db, &prefs);
+    let live: Vec<&[u8]> = sync
+        .iter()
+        .filter(|u| matches!(u, FoldUpdate::Put { .. }))
+        .map(FoldUpdate::key)
+        .collect();
+    assert!(
+        !live.iter().any(|k| *k == b"k-c"),
+        "last_per_key must not resurrect k-c after delete_range [k-b, k-d); live={live:?}"
+    );
+    assert!(
+        live.iter().any(|k| *k == b"k-a"),
+        "k-a is outside the range and must stay"
+    );
+    assert!(
+        live.iter().any(|k| *k == b"k-e"),
+        "k-e is outside the range and must stay"
+    );
+
+    // Dest already holding the covered key must drop it on apply (tail / resume).
+    let (_c, mut fold) = PedraFold::open(&dir.join("fold")).unwrap();
+    fold.apply(
+        &[
+            FoldUpdate::Put {
+                key: b"k-a".to_vec(),
+                value: b"va".to_vec(),
+                seq: 1,
+            },
+            FoldUpdate::Put {
+                key: b"k-c".to_vec(),
+                value: b"vc".to_vec(),
+                seq: 2,
+            },
+            FoldUpdate::Put {
+                key: b"k-e".to_vec(),
+                value: b"ve".to_vec(),
+                seq: 3,
+            },
+        ],
+        FoldCursor(3),
+    )
+    .unwrap();
+    fold.apply(
+        &[FoldUpdate::DeleteRange {
+            start: b"k-b".to_vec(),
+            end: b"k-d".to_vec(),
+            seq: 4,
+        }],
+        FoldCursor(4),
+    )
+    .unwrap();
+    assert_eq!(fold.get(b"k-a").unwrap().as_deref(), Some(b"va".as_ref()));
+    assert_eq!(
+        fold.get(b"k-c").unwrap(),
+        None,
+        "dest apply of DeleteRange must drop covered k-c"
+    );
+    assert_eq!(fold.get(b"k-e").unwrap().as_deref(), Some(b"ve".as_ref()));
+    let _ = std::fs::remove_dir_all(&dir);
+}

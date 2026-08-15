@@ -434,6 +434,29 @@ def check_extract(
             r.fail(
                 f"aeneas SOURCE.isolated drifted (kernel {have[:12]}… vs stamp {want[:12]}…; re-run ./scripts/aeneas_isolated.sh)"
             )
+    bloom_lean = root / "formal/aeneas/out/lean/BloomKernel.lean"
+    if bloom_lean.is_file() and "def BloomFilter.may_contain" in bloom_lean.read_text(
+        encoding="utf-8"
+    ):
+        r.good("aeneas extract artifact has def BloomFilter.may_contain")
+    else:
+        r.gap(
+            "aeneas extract artifact BloomKernel.lean missing (run ./scripts/aeneas_bloom.sh)"
+        )
+    bloom_stamp = root / "formal/aeneas/out/SOURCE.bloom"
+    bloom_src = root / "crates/pedradb-core/src/bloom.rs"
+    if bloom_stamp.is_file() and bloom_src.is_file():
+        want = None
+        for line in bloom_stamp.read_text(encoding="utf-8").splitlines():
+            if line.startswith("sha256="):
+                want = line.split("=", 1)[1].strip()
+        have = hashlib.sha256(bloom_src.read_bytes()).hexdigest()
+        if want and have == want:
+            r.good("aeneas SOURCE.bloom sha256 matches bloom.rs")
+        elif want:
+            r.fail(
+                f"aeneas SOURCE.bloom drifted (kernel {have[:12]}… vs stamp {want[:12]}…; re-run ./scripts/aeneas_bloom.sh)"
+            )
     lean_script = root / "scripts/lean_vote.sh"
     p = subprocess.run(
         ["bash", str(lean_script)] + (["--required"] if charon_required else []),

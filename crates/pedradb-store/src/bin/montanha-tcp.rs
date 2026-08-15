@@ -215,17 +215,12 @@ fn cmd_node(args: &[String]) {
     }
 
     std::fs::create_dir_all(&data).ok();
-    let cluster = StoreCluster::open_single_node_with_options(
-        &data,
-        id,
-        &member_ids,
-        n_ranges,
-        store_opts,
-    )
-    .unwrap_or_else(|e| {
-        eprintln!("open_single_node: {e}");
-        process::exit(1);
-    });
+    let cluster =
+        StoreCluster::open_single_node_with_options(&data, id, &member_ids, n_ranges, store_opts)
+            .unwrap_or_else(|e| {
+                eprintln!("open_single_node: {e}");
+                process::exit(1);
+            });
 
     let (tx, rx) = mpsc::sync_channel::<Work>(256);
 

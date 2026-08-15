@@ -40,27 +40,12 @@ def U32.Insts.CoreFmtDisplay : core.fmt.Display Std.U32 := {
 @[rust_fun "core::hint::must_use"]
 axiom core.hint.must_use {T : Type} : T → Result T
 
-/-- [core::num::{usize}::saturating_mul]:
-    Source: '/rustc/library/core/src/num/uint_macros.rs', lines 2516:8-2516:60
-    Name pattern: [core::num::{usize}::saturating_mul]
-    Visibility: public -/
-@[rust_fun "core::num::{usize}::saturating_mul"]
-axiom core.num.Usize.saturating_mul
-  : Std.Usize → Std.Usize → Result Std.Usize
-
 /-- [core::num::{u64}::div_ceil]:
     Source: '/rustc/library/core/src/num/uint_macros.rs', lines 3755:8-3755:54
     Name pattern: [core::num::{u64}::div_ceil]
     Visibility: public -/
 @[rust_fun "core::num::{u64}::div_ceil"]
 axiom core.num.U64.div_ceil : Std.U64 → Std.U64 → Result Std.U64
-
-/-- [core::num::{usize}::div_ceil]:
-    Source: '/rustc/library/core/src/num/uint_macros.rs', lines 3755:8-3755:54
-    Name pattern: [core::num::{usize}::div_ceil]
-    Visibility: public -/
-@[rust_fun "core::num::{usize}::div_ceil"]
-axiom core.num.Usize.div_ceil : Std.Usize → Std.Usize → Result Std.Usize
 
 /-- [core::ops::range::{core::ops::range::RangeInclusive<Idx>}::contains]:
     Source: '/rustc/library/core/src/ops/range.rs', lines 522:4-525:44
@@ -107,14 +92,6 @@ def alloc.string.String.Insts.CoreConvertFromShared0Str : core.convert.From
   String Str := {
   «from» := alloc.string.String.Insts.CoreConvertFromShared0Str.from
 }
-
-/-- [alloc::vec::{alloc::vec::Vec<T>}::is_empty]:
-    Source: '/rustc/library/alloc/src/vec/mod.rs', lines 3085:4-3085:40
-    Name pattern: [alloc::vec::{alloc::vec::Vec<@T>}::is_empty]
-    Visibility: public -/
-@[rust_fun "alloc::vec::{alloc::vec::Vec<@T>}::is_empty"]
-axiom alloc.vec.Vec.is_empty
-  {T : Type} (A : Type) : alloc.vec.Vec T → Result Bool
 
 /-- [pedra_aeneas_bloom_kernel::DEFAULT_BITS_PER_KEY]
     Source: '../../../crates/pedradb-core/src/bloom.rs', lines 7:0-7:43
@@ -165,8 +142,57 @@ def bloom_header_ok_as_is
     ok (i3 <= residual)
   else ok false
 
+/-- [pedra_aeneas_bloom_kernel::saturating_product]:
+    Source: '../../../crates/pedradb-core/src/bloom.rs', lines 34:0-40:1 -/
+def saturating_product (a : Std.Usize) (b : Std.Usize) : Result Std.Usize := do
+  if b != 0#usize
+  then
+    let i ← core.num.Usize.MAX / b
+    if a > i
+    then ok core.num.Usize.MAX
+    else a * b
+  else a * b
+
+/-- [pedra_aeneas_bloom_kernel::at_least_64]:
+    Source: '../../../crates/pedradb-core/src/bloom.rs', lines 42:0-44:1 -/
+def at_least_64 (x : Std.Usize) : Result Std.Usize := do
+  if x < 64#usize
+  then ok 64#usize
+  else ok x
+
+/-- [pedra_aeneas_bloom_kernel::cap_u32]:
+    Source: '../../../crates/pedradb-core/src/bloom.rs', lines 46:0-55:1 -/
+def cap_u32 (x : Std.Usize) : Result Std.U32 := do
+  let i ← lift (UScalar.cast .Usize core.num.U32.MAX)
+  if x > i
+  then ok core.num.U32.MAX
+  else ok (UScalar.cast .U32 x)
+
+/-- [pedra_aeneas_bloom_kernel::k_from_bits_per_key]:
+    Source: '../../../crates/pedradb-core/src/bloom.rs', lines 58:0-74:1 -/
+def k_from_bits_per_key (bits_per_key : Std.Usize) : Result Std.U32 := do
+  let i ← core.num.Usize.MAX / 69#usize
+  let raw1 ←
+    if bits_per_key > i
+    then ok 30#usize
+    else do
+         let i1 ← bits_per_key * 69#usize
+         i1 / 100#usize
+  if raw1 < 1#usize
+  then ok 1#u32
+  else if raw1 > 30#usize
+       then ok 30#u32
+       else ok (UScalar.cast .U32 raw1)
+
+/-- [pedra_aeneas_bloom_kernel::nbytes_for_nbits]:
+    Source: '../../../crates/pedradb-core/src/bloom.rs', lines 77:0-79:1 -/
+def nbytes_for_nbits (nbits : Std.U32) : Result Std.Usize := do
+  let i ← lift (UScalar.cast .Usize nbits)
+  let i1 ← i + 7#usize
+  i1 / 8#usize
+
 /-- [pedra_aeneas_bloom_kernel::BloomFilter]
-    Source: '../../../crates/pedradb-core/src/bloom.rs', lines 35:0-41:1
+    Source: '../../../crates/pedradb-core/src/bloom.rs', lines 83:0-89:1
     Visibility: public -/
 structure BloomFilter where
   bits : alloc.vec.Vec Std.U8
@@ -174,7 +200,7 @@ structure BloomFilter where
   k : Std.U32
 
 /-- [pedra_aeneas_bloom_kernel::{impl core::fmt::Debug for pedra_aeneas_bloom_kernel::BloomFilter}::fmt]:
-    Source: '../../../crates/pedradb-core/src/bloom.rs', lines 34:9-34:14
+    Source: '../../../crates/pedradb-core/src/bloom.rs', lines 82:9-82:14
     Visibility: public -/
 def BloomFilter.Insts.CoreFmtDebug.fmt
   (self : BloomFilter) (f : core.fmt.Formatter) :
@@ -187,14 +213,14 @@ def BloomFilter.Insts.CoreFmtDebug.fmt
     "bits") dyn (toStr "nbits") dyn1 (toStr "k") dyn2
 
 /-- Trait implementation: [pedra_aeneas_bloom_kernel::{impl core::fmt::Debug for pedra_aeneas_bloom_kernel::BloomFilter}]
-    Source: '../../../crates/pedradb-core/src/bloom.rs', lines 34:9-34:14 -/
+    Source: '../../../crates/pedradb-core/src/bloom.rs', lines 82:9-82:14 -/
 @[reducible]
 def BloomFilter.Insts.CoreFmtDebug : core.fmt.Debug BloomFilter := {
   fmt := BloomFilter.Insts.CoreFmtDebug.fmt
 }
 
 /-- [pedra_aeneas_bloom_kernel::{impl core::clone::Clone for pedra_aeneas_bloom_kernel::BloomFilter}::clone]:
-    Source: '../../../crates/pedradb-core/src/bloom.rs', lines 34:16-34:21
+    Source: '../../../crates/pedradb-core/src/bloom.rs', lines 82:16-82:21
     Visibility: public -/
 def BloomFilter.Insts.CoreCloneClone.clone
   (self : BloomFilter) : Result BloomFilter := do
@@ -204,21 +230,21 @@ def BloomFilter.Insts.CoreCloneClone.clone
   ok { bits := v, nbits := i, k := i1 }
 
 /-- Trait implementation: [pedra_aeneas_bloom_kernel::{impl core::clone::Clone for pedra_aeneas_bloom_kernel::BloomFilter}]
-    Source: '../../../crates/pedradb-core/src/bloom.rs', lines 34:16-34:21 -/
+    Source: '../../../crates/pedradb-core/src/bloom.rs', lines 82:16-82:21 -/
 @[reducible]
 def BloomFilter.Insts.CoreCloneClone : core.clone.Clone BloomFilter := {
   clone := BloomFilter.Insts.CoreCloneClone.clone
 }
 
 /-- Trait implementation: [pedra_aeneas_bloom_kernel::{impl core::marker::StructuralPartialEq for pedra_aeneas_bloom_kernel::BloomFilter}]
-    Source: '../../../crates/pedradb-core/src/bloom.rs', lines 34:23-34:32 -/
+    Source: '../../../crates/pedradb-core/src/bloom.rs', lines 82:23-82:32 -/
 @[reducible]
 def BloomFilter.Insts.CoreMarkerStructuralPartialEq :
   core.marker.StructuralPartialEq BloomFilter := {
 }
 
 /-- [pedra_aeneas_bloom_kernel::{impl core::cmp::PartialEq<pedra_aeneas_bloom_kernel::BloomFilter> for pedra_aeneas_bloom_kernel::BloomFilter}::eq]:
-    Source: '../../../crates/pedradb-core/src/bloom.rs', lines 34:23-34:32
+    Source: '../../../crates/pedradb-core/src/bloom.rs', lines 82:23-82:32
     Visibility: public -/
 def BloomFilter.Insts.CoreCmpPartialEqBloomFilter.eq
   (self : BloomFilter) (other : BloomFilter) : Result Bool := do
@@ -232,7 +258,7 @@ def BloomFilter.Insts.CoreCmpPartialEqBloomFilter.eq
   else ok false
 
 /-- Trait implementation: [pedra_aeneas_bloom_kernel::{impl core::cmp::PartialEq<pedra_aeneas_bloom_kernel::BloomFilter> for pedra_aeneas_bloom_kernel::BloomFilter}]
-    Source: '../../../crates/pedradb-core/src/bloom.rs', lines 34:23-34:32 -/
+    Source: '../../../crates/pedradb-core/src/bloom.rs', lines 82:23-82:32 -/
 @[reducible]
 def BloomFilter.Insts.CoreCmpPartialEqBloomFilter : core.cmp.PartialEq
   BloomFilter BloomFilter := {
@@ -240,14 +266,14 @@ def BloomFilter.Insts.CoreCmpPartialEqBloomFilter : core.cmp.PartialEq
 }
 
 /-- [pedra_aeneas_bloom_kernel::{impl core::cmp::Eq for pedra_aeneas_bloom_kernel::BloomFilter}::assert_fields_are_eq]:
-    Source: '../../../crates/pedradb-core/src/bloom.rs', lines 34:34-34:36
+    Source: '../../../crates/pedradb-core/src/bloom.rs', lines 82:34-82:36
     Visibility: public -/
 def BloomFilter.Insts.CoreCmpEq.assert_fields_are_eq
   (self : BloomFilter) : Result Unit := do
   ok ()
 
 /-- Trait implementation: [pedra_aeneas_bloom_kernel::{impl core::cmp::Eq for pedra_aeneas_bloom_kernel::BloomFilter}]
-    Source: '../../../crates/pedradb-core/src/bloom.rs', lines 34:34-34:36 -/
+    Source: '../../../crates/pedradb-core/src/bloom.rs', lines 82:34-82:36 -/
 @[reducible]
 def BloomFilter.Insts.CoreCmpEq : core.cmp.Eq BloomFilter := {
   partialEqInst := BloomFilter.Insts.CoreCmpPartialEqBloomFilter
@@ -255,25 +281,25 @@ def BloomFilter.Insts.CoreCmpEq : core.cmp.Eq BloomFilter := {
 }
 
 /-- [pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::always_true]:
-    Source: '../../../crates/pedradb-core/src/bloom.rs', lines 46:4-52:5
+    Source: '../../../crates/pedradb-core/src/bloom.rs', lines 94:4-100:5
     Visibility: public -/
 def BloomFilter.always_true : Result BloomFilter := do
   ok { bits := (alloc.vec.Vec.new Std.U8), nbits := 0#u32, k := 0#u32 }
 
 /-- [pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::is_active]:
-    Source: '../../../crates/pedradb-core/src/bloom.rs', lines 56:4-58:5
+    Source: '../../../crates/pedradb-core/src/bloom.rs', lines 107:4-112:5
     Visibility: public -/
 def BloomFilter.is_active (self : BloomFilter) : Result Bool := do
   if self.nbits > 0#u32
   then
     if self.k > 0#u32
-    then let b ← alloc.vec.Vec.is_empty Global self.bits
-         ok (¬ b)
+    then let i := alloc.vec.Vec.len self.bits
+         ok (i != 0#usize)
     else ok false
   else ok false
 
 /-- [pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::with_capacity]:
-    Source: '../../../crates/pedradb-core/src/bloom.rs', lines 62:4-79:5
+    Source: '../../../crates/pedradb-core/src/bloom.rs', lines 122:4-134:5
     Visibility: public -/
 def BloomFilter.with_capacity
   (n_keys : Std.Usize) (bits_per_key : Std.Usize) : Result BloomFilter := do
@@ -283,25 +309,16 @@ def BloomFilter.with_capacity
     if bits_per_key = 0#usize
     then BloomFilter.always_true
     else
-      let i ← core.num.Usize.saturating_mul n_keys bits_per_key
-      let raw1 ← core.cmp.Ord.max.default core.cmp.OrdUsize i 64#usize
-      let i1 ← lift (UScalar.cast .Usize core.num.U32.MAX)
-      let i2 ← core.cmp.Ord.min.trait_default core.cmp.OrdUsize raw1 i1
-      let r ← core.convert.num.ptr_try_from_impls.TryFromU32Usize.try_from i2
-      let nbits ← core.result.Result.unwrap_or r core.num.U32.MAX
-      let i3 ← bits_per_key * 69#usize
-      let i4 ← i3 / 100#usize
-      let r1 ←
-        core.convert.num.ptr_try_from_impls.TryFromU32Usize.try_from i4
-      let i5 ← core.result.Result.unwrap_or r1 1#u32
-      let k ← core.cmp.impls.OrdU32.clamp i5 1#u32 30#u32
-      let i6 ← lift (UScalar.cast .Usize nbits)
-      let nbytes ← core.num.Usize.div_ceil i6 8#usize
+      let i ← saturating_product n_keys bits_per_key
+      let i1 ← at_least_64 i
+      let nbits ← cap_u32 i1
+      let k ← k_from_bits_per_key bits_per_key
+      let nbytes ← nbytes_for_nbits nbits
       let v ← alloc.vec.from_elem core.clone.CloneU8 0#u8 nbytes
       ok { bits := v, nbits, k }
 
 /-- [pedra_aeneas_bloom_kernel::fnv1a64_seed]: loop body 0:
-    Source: '../../../crates/pedradb-core/src/bloom.rs', lines 212:4-215:5 -/
+    Source: '../../../crates/pedradb-core/src/bloom.rs', lines 267:4-270:5 -/
 @[rust_loop_body]
 def fnv1a64_seed_loop.body
   (iter : core.slice.iter.Iter Std.U8) (hash : Std.U64) :
@@ -317,7 +334,7 @@ def fnv1a64_seed_loop.body
     ok (cont (iter1, hash2))
 
 /-- [pedra_aeneas_bloom_kernel::fnv1a64_seed]: loop 0:
-    Source: '../../../crates/pedradb-core/src/bloom.rs', lines 212:4-215:5 -/
+    Source: '../../../crates/pedradb-core/src/bloom.rs', lines 267:4-270:5 -/
 @[rust_loop]
 def fnv1a64_seed_loop
   (iter : core.slice.iter.Iter Std.U8) (hash : Std.U64) : Result Std.U64 := do
@@ -326,7 +343,7 @@ def fnv1a64_seed_loop
     (iter, hash)
 
 /-- [pedra_aeneas_bloom_kernel::fnv1a64_seed]:
-    Source: '../../../crates/pedradb-core/src/bloom.rs', lines 210:0-217:1 -/
+    Source: '../../../crates/pedradb-core/src/bloom.rs', lines 265:0-272:1 -/
 def fnv1a64_seed (data : Slice Std.U8) (seed : Std.U64) : Result Std.U64 := do
   let iter ←
     SharedSlice.Insts.CoreIterTraitsCollectIntoIteratorSharedIter.into_iter
@@ -334,12 +351,12 @@ def fnv1a64_seed (data : Slice Std.U8) (seed : Std.U64) : Result Std.U64 := do
   fnv1a64_seed_loop iter seed
 
 /-- [pedra_aeneas_bloom_kernel::fnv1a64]:
-    Source: '../../../crates/pedradb-core/src/bloom.rs', lines 206:0-208:1 -/
+    Source: '../../../crates/pedradb-core/src/bloom.rs', lines 261:0-263:1 -/
 def fnv1a64 (data : Slice Std.U8) : Result Std.U64 := do
   fnv1a64_seed data 14695981039346656037#u64
 
 /-- [pedra_aeneas_bloom_kernel::hash_pair]:
-    Source: '../../../crates/pedradb-core/src/bloom.rs', lines 196:0-204:1 -/
+    Source: '../../../crates/pedradb-core/src/bloom.rs', lines 251:0-259:1 -/
 def hash_pair (key : Slice Std.U8) : Result (Std.U64 × Std.U64) := do
   let h1 ← fnv1a64 key
   let h2 ← fnv1a64_seed key 11400714819323198485#u64
@@ -348,7 +365,7 @@ def hash_pair (key : Slice Std.U8) : Result (Std.U64 × Std.U64) := do
   else ok (h1, h2)
 
 /-- [pedra_aeneas_bloom_kernel::set_bit]:
-    Source: '../../../crates/pedradb-core/src/bloom.rs', lines 187:0-189:1 -/
+    Source: '../../../crates/pedradb-core/src/bloom.rs', lines 242:0-244:1 -/
 def set_bit (bits : Slice Std.U8) (i : Std.Usize) : Result (Slice Std.U8) := do
   let i1 ← i % 8#usize
   let i2 ← 1#u8 <<< i1
@@ -358,7 +375,7 @@ def set_bit (bits : Slice Std.U8) (i : Std.Usize) : Result (Slice Std.U8) := do
   Slice.update bits i3 i5
 
 /-- [pedra_aeneas_bloom_kernel::bit_index]:
-    Source: '../../../crates/pedradb-core/src/bloom.rs', lines 176:0-185:1 -/
+    Source: '../../../crates/pedradb-core/src/bloom.rs', lines 231:0-240:1 -/
 def bit_index (bit : Std.U64) : Result Std.Usize := do
   let i ← lift (core.convert.num.FromU64U32.from core.num.U32.MAX)
   if bit > i
@@ -367,7 +384,7 @@ def bit_index (bit : Std.U64) : Result Std.Usize := do
        ok (UScalar.cast .Usize i1)
 
 /-- [pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::insert]: loop body 0:
-    Source: '../../../crates/pedradb-core/src/bloom.rs', lines 88:8-91:9
+    Source: '../../../crates/pedradb-core/src/bloom.rs', lines 143:8-146:9
     Visibility: public -/
 @[rust_loop_body]
 def BloomFilter.insert_loop.body
@@ -392,7 +409,7 @@ def BloomFilter.insert_loop.body
     ok (cont (iter1, v1))
 
 /-- [pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::insert]: loop 0:
-    Source: '../../../crates/pedradb-core/src/bloom.rs', lines 88:8-91:9
+    Source: '../../../crates/pedradb-core/src/bloom.rs', lines 143:8-146:9
     Visibility: public -/
 @[rust_loop]
 def BloomFilter.insert_loop
@@ -405,7 +422,7 @@ def BloomFilter.insert_loop
     (iter, v)
 
 /-- [pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::insert]:
-    Source: '../../../crates/pedradb-core/src/bloom.rs', lines 82:4-92:5
+    Source: '../../../crates/pedradb-core/src/bloom.rs', lines 137:4-147:5
     Visibility: public -/
 def BloomFilter.insert
   (self : BloomFilter) (key : Slice Std.U8) : Result BloomFilter := do
@@ -421,7 +438,7 @@ def BloomFilter.insert
   else ok self
 
 /-- [pedra_aeneas_bloom_kernel::test_bit]:
-    Source: '../../../crates/pedradb-core/src/bloom.rs', lines 191:0-193:1 -/
+    Source: '../../../crates/pedradb-core/src/bloom.rs', lines 246:0-248:1 -/
 def test_bit (bits : Slice Std.U8) (i : Std.Usize) : Result Bool := do
   let i1 ← i / 8#usize
   let i2 ← Slice.index_usize bits i1
@@ -431,7 +448,7 @@ def test_bit (bits : Slice Std.U8) (i : Std.Usize) : Result Bool := do
   ok (i5 != 0#u8)
 
 /-- [pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::may_contain]: loop body 0:
-    Source: '../../../crates/pedradb-core/src/bloom.rs', lines 102:8-109:5
+    Source: '../../../crates/pedradb-core/src/bloom.rs', lines 157:8-164:5
     Visibility: public -/
 @[rust_loop_body]
 def BloomFilter.may_contain_loop.body
@@ -456,7 +473,7 @@ def BloomFilter.may_contain_loop.body
     else ok (done false)
 
 /-- [pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::may_contain]: loop 0:
-    Source: '../../../crates/pedradb-core/src/bloom.rs', lines 102:8-109:5
+    Source: '../../../crates/pedradb-core/src/bloom.rs', lines 157:8-164:5
     Visibility: public -/
 @[rust_loop]
 def BloomFilter.may_contain_loop
@@ -469,7 +486,7 @@ def BloomFilter.may_contain_loop
     iter
 
 /-- [pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::may_contain]:
-    Source: '../../../crates/pedradb-core/src/bloom.rs', lines 96:4-109:5
+    Source: '../../../crates/pedradb-core/src/bloom.rs', lines 151:4-164:5
     Visibility: public -/
 def BloomFilter.may_contain
   (self : BloomFilter) (key : Slice Std.U8) : Result Bool := do
@@ -483,7 +500,7 @@ def BloomFilter.may_contain
   else ok true
 
 /-- [pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::encode]:
-    Source: '../../../crates/pedradb-core/src/bloom.rs', lines 113:4-121:5
+    Source: '../../../crates/pedradb-core/src/bloom.rs', lines 168:4-176:5
     Visibility: public -/
 def BloomFilter.encode
   (self : BloomFilter) : Result (alloc.vec.Vec Std.U8) := do
@@ -506,7 +523,7 @@ def BloomFilter.encode
   alloc.vec.Vec.extend_from_slice core.clone.CloneU8 out3 s3
 
 /-- [pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::decode]:
-    Source: '../../../crates/pedradb-core/src/bloom.rs', lines 128:4-154:5
+    Source: '../../../crates/pedradb-core/src/bloom.rs', lines 183:4-209:5
     Visibility: public -/
 def BloomFilter.decode
   (buf : Slice Std.U8) : Result (core.result.Result BloomFilter String) := do
@@ -619,19 +636,19 @@ def BloomFilter.decode
                 ok (core.result.Result.Err s1)
 
 /-- [pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::bit_count]:
-    Source: '../../../crates/pedradb-core/src/bloom.rs', lines 158:4-160:5
+    Source: '../../../crates/pedradb-core/src/bloom.rs', lines 213:4-215:5
     Visibility: public -/
 def BloomFilter.bit_count (self : BloomFilter) : Result Std.U32 := do
   ok self.nbits
 
 /-- [pedra_aeneas_bloom_kernel::{pedra_aeneas_bloom_kernel::BloomFilter}::hash_count]:
-    Source: '../../../crates/pedradb-core/src/bloom.rs', lines 164:4-166:5
+    Source: '../../../crates/pedradb-core/src/bloom.rs', lines 219:4-221:5
     Visibility: public -/
 def BloomFilter.hash_count (self : BloomFilter) : Result Std.U32 := do
   ok self.k
 
 /-- [pedra_aeneas_bloom_kernel::may_contain_mut_extra_probe]: loop body 0:
-    Source: '../../../crates/pedradb-core/src/bloom.rs', lines 230:4-237:1
+    Source: '../../../crates/pedradb-core/src/bloom.rs', lines 285:4-292:1
     Visibility: public -/
 @[rust_loop_body]
 def may_contain_mut_extra_probe_loop.body
@@ -657,7 +674,7 @@ def may_contain_mut_extra_probe_loop.body
     else ok (done false)
 
 /-- [pedra_aeneas_bloom_kernel::may_contain_mut_extra_probe]: loop 0:
-    Source: '../../../crates/pedradb-core/src/bloom.rs', lines 230:4-237:1
+    Source: '../../../crates/pedradb-core/src/bloom.rs', lines 285:4-292:1
     Visibility: public -/
 @[rust_loop]
 def may_contain_mut_extra_probe_loop
@@ -670,7 +687,7 @@ def may_contain_mut_extra_probe_loop
     iter
 
 /-- [pedra_aeneas_bloom_kernel::may_contain_mut_extra_probe]:
-    Source: '../../../crates/pedradb-core/src/bloom.rs', lines 224:0-237:1
+    Source: '../../../crates/pedradb-core/src/bloom.rs', lines 279:0-292:1
     Visibility: public -/
 def may_contain_mut_extra_probe
   (f : BloomFilter) (key : Slice Std.U8) : Result Bool := do
@@ -684,7 +701,7 @@ def may_contain_mut_extra_probe
   else ok true
 
 /-- [pedra_aeneas_bloom_kernel::may_contain_mut_hash_mismatch]: loop body 0:
-    Source: '../../../crates/pedradb-core/src/bloom.rs', lines 250:4-257:1
+    Source: '../../../crates/pedradb-core/src/bloom.rs', lines 305:4-312:1
     Visibility: public -/
 @[rust_loop_body]
 def may_contain_mut_hash_mismatch_loop.body
@@ -709,7 +726,7 @@ def may_contain_mut_hash_mismatch_loop.body
     else ok (done false)
 
 /-- [pedra_aeneas_bloom_kernel::may_contain_mut_hash_mismatch]: loop 0:
-    Source: '../../../crates/pedradb-core/src/bloom.rs', lines 250:4-257:1
+    Source: '../../../crates/pedradb-core/src/bloom.rs', lines 305:4-312:1
     Visibility: public -/
 @[rust_loop]
 def may_contain_mut_hash_mismatch_loop
@@ -722,7 +739,7 @@ def may_contain_mut_hash_mismatch_loop
     iter
 
 /-- [pedra_aeneas_bloom_kernel::may_contain_mut_hash_mismatch]:
-    Source: '../../../crates/pedradb-core/src/bloom.rs', lines 243:0-257:1
+    Source: '../../../crates/pedradb-core/src/bloom.rs', lines 298:0-312:1
     Visibility: public -/
 def may_contain_mut_hash_mismatch
   (f : BloomFilter) (key : Slice Std.U8) : Result Bool := do

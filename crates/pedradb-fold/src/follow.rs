@@ -103,8 +103,13 @@ pub fn follow_store_prefix<E: Env>(
 
 pub(crate) fn entry_to_update(e: ChangeEntry) -> FoldUpdate {
     match e.kind {
-        ChangeKind::Delete | ChangeKind::DeleteRange => FoldUpdate::Delete {
+        ChangeKind::Delete => FoldUpdate::Delete {
             key: e.key.to_vec(),
+            seq: e.sequence,
+        },
+        ChangeKind::DeleteRange => FoldUpdate::DeleteRange {
+            start: e.key.to_vec(),
+            end: e.value.to_vec(),
             seq: e.sequence,
         },
         ChangeKind::Put => FoldUpdate::Put {

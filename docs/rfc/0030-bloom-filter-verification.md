@@ -1,6 +1,6 @@
 # RFC-0030: Bloom filter ∀-verification — three machines on one core kernel
 
-**Status:** in-progress (P0 done; P1 code landed, Kani run pending; P2 todo)
+**Status:** in-progress (P0 done; P1.1–P1.3 done, P1.4 Kani T4 green / T1–T3 running; P2.1 extract green, P2.2 T4 accepted)
 **Updated:** 2026-08-15
 **Parent:** [`docs/formal-verification-strategies.md`](../formal-verification-strategies.md) ·
 theorems page: [`docs/formal/bloom-filter-theorems.md`](../formal/bloom-filter-theorems.md)
@@ -89,19 +89,25 @@ the production file as a second proof assistant.
       status: `done` (harness green run pending — see Risks)
 - [ ] **P1.4** `cargo kani -p pedradb-core` full green pass; wire
       `kani_bloom.sh` into the docs and (optionally) CI — status: `doing`
+      (T4 SUCCESSFUL, 337 checks / 0.18 s. First T2 attempt at residual≤32 /
+      capacity≤128 sat in CBMC >1 h / 12 GB and was killed; bounds reduced
+      per theorems page. T1–T3 rerun in flight.)
 
 ### P2 — Second proof assistant (Aeneas → Lean) on the production file
 
-- [ ] **P2.1** `formal/aeneas/bloom-kernel/` include-crate (`[lib] path` →
+- [x] **P2.1** `formal/aeneas/bloom-kernel/` include-crate (`[lib] path` →
       `crates/pedradb-core/src/bloom.rs`); `scripts/aeneas_bloom.sh`
-      (Charon `--preset=aeneas` → LLBC → Aeneas → Lean) — status: `todo`
-- [ ] **P2.2** Lean theorems on the extract: `insert_then_may_contain` (T1)
-      and roundtrip-preserves (T2), method per `EXTRACT.md`
-      (`loop.spec_decr_nat`); axioms (e.g. `to_le_bytes`) recorded, not
-      hidden — `scripts/lean_bloom.sh --required` — status: `todo`
-- [ ] **P2.3** Glue: `EXTRACT.md`/`PINS.md` update, `pedra_formal.py`
-      bloom-extract checks, status table here + strategies doc §6 rows —
-      status: `todo`
+      (Charon `--preset=aeneas` → LLBC → Aeneas → Lean). Production
+      rewrites so the extract typechecks (`bit_index`, `is_active`,
+      `with_capacity`) — status: `done`
+- [ ] **P2.2** Lean theorems on the extract: T4 accepted
+      (`may_contain_nbits_zero`, `may_contain_k_zero`,
+      `always_true_never_rejects`); loop-level T1 (`insert` then
+      `may_contain`) and T2 still open — `scripts/lean_bloom.sh --required`
+      — status: `doing`
+- [x] **P2.3** Glue: `EXTRACT.md` bloom section, `pedra_formal.py`
+      SOURCE.bloom + extract lint, strategies doc §6 row, this status
+      table — status: `done`
 
 ## Status (living — update with every change)
 
@@ -113,10 +119,10 @@ the production file as a second proof assistant.
 | P1.1 | p1 | teeth mutants (hypothetical, labeled) | done | this change | 2026-08-15 |
 | P1.2 | p1 | exhaustive domain + fuzz + teeth green (7/7) | done | this change | 2026-08-15 |
 | P1.3 | p1 | Kani harnesses + script (residual-friendly) | done | this change | 2026-08-15 |
-| P1.4 | p1 | Kani full green pass + doc/CI wiring | doing | — | 2026-08-15 |
-| P2.1 | p2 | Aeneas bloom include-crate + extract | todo | — | 2026-08-15 |
-| P2.2 | p2 | Lean T1/T2 on the extract | todo | — | 2026-08-15 |
-| P2.3 | p2 | glue (EXTRACT/PINS/pedra_formal/docs) | todo | — | 2026-08-15 |
+| P1.4 | p1 | Kani full green pass + doc/CI wiring | doing | T4 green; T1–T3 rerun | 2026-08-15 |
+| P2.1 | p2 | Aeneas bloom include-crate + extract | done | this change | 2026-08-15 |
+| P2.2 | p2 | Lean T4 on the extract (T1/T2 loops open) | doing | this change | 2026-08-15 |
+| P2.3 | p2 | glue (EXTRACT/pedra_formal/docs) | done | this change | 2026-08-15 |
 
 ## Acceptance Criteria
 
