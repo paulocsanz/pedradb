@@ -22,7 +22,7 @@ pub use fields_kernel::{
     encode_fields, encode_fields_as_is, field_kept, field_kept_as_is,
 };
 
-use pedradb_store::{Result, StoreCluster, Transaction};
+use pedradb_store::{Result, StoreCluster, StoreError, Transaction};
 
 /// Live value? Empty bytes are treated as **cleared/tombstone** (FDB clear removes
 /// the key from ranges; Montanha stages empty puts — recipes filter them).
@@ -365,18 +365,26 @@ impl Queue {
         self.meta.pack(&[b"tail"])
     }
 
-    fn parse_u64(raw: Option<Vec<u8>>) -> u64 {
-        raw.and_then(|b| std::str::from_utf8(&b).ok().and_then(|s| s.parse().ok()))
-            .unwrap_or(0)
+    /// Missing counter → 0; present but non-integer → Err (F112, same class as F109).
+    fn parse_u64(raw: Option<Vec<u8>>) -> Result<u64> {
+        match raw {
+            None => Ok(0),
+            Some(raw) => {
+                let s = std::str::from_utf8(&raw)
+                    .map_err(|_| StoreError::Msg("queue counter: bad utf8".into()))?;
+                s.parse::<u64>()
+                    .map_err(|_| StoreError::Msg("queue counter: bad integer".into()))
+            }
+        }
     }
 
     /// Push to back.
     ///
     /// # Errors
-    /// Commit.
+    /// Commit or corrupt head/tail counter (F112).
     pub fn push(&self, cluster: &mut StoreCluster, value: &[u8]) -> Result<u64> {
         let mut tr = cluster.begin();
-        let tail = Self::parse_u64(tr.get(cluster, self.tail_key())?);
+        let tail = Self::parse_u64(tr.get(cluster, self.tail_key())?)?;
         let seq = tail;
         let item = self.data.pack(&[format!("{seq:020}").as_bytes()]);
         tr.set(&item, value)?;
@@ -390,11 +398,11 @@ impl Queue {
     /// Pop from front. Returns `None` if empty.
     ///
     /// # Errors
-    /// Commit.
+    /// Commit or corrupt head/tail counter (F112).
     pub fn pop(&self, cluster: &mut StoreCluster) -> Result<Option<Vec<u8>>> {
         let mut tr = cluster.begin();
-        let head = Self::parse_u64(tr.get(cluster, self.head_key())?);
-        let tail = Self::parse_u64(tr.get(cluster, self.tail_key())?);
+        let head = Self::parse_u64(tr.get(cluster, self.head_key())?)?;
+        let tail = Self::parse_u64(tr.get(cluster, self.tail_key())?)?;
         if head >= tail {
             // empty — commit empty read TX? no writes; skip commit
             return Ok(None);
@@ -410,11 +418,11 @@ impl Queue {
     /// Peek front without remove.
     ///
     /// # Errors
-    /// Store.
+    /// Store or corrupt head/tail counter (F112).
     pub fn peek(&self, cluster: &StoreCluster) -> Result<Option<Vec<u8>>> {
         let mut tr = Transaction::at_version(cluster.read_version());
-        let head = Self::parse_u64(tr.get(cluster, self.head_key())?);
-        let tail = Self::parse_u64(tr.get(cluster, self.tail_key())?);
+        let head = Self::parse_u64(tr.get(cluster, self.head_key())?)?;
+        let tail = Self::parse_u64(tr.get(cluster, self.tail_key())?)?;
         if head >= tail {
             return Ok(None);
         }
@@ -492,10 +500,8 @@ impl PriorityQueue {
     /// Commit.
     pub fn push(&self, cluster: &mut StoreCluster, priority: u64, value: &[u8]) -> Result<u64> {
         let mut tr = cluster.begin();
-        let seq = tr
-            .get(cluster, self.seq_meta.pack(&[b"n"]))?
-            .and_then(|b| std::str::from_utf8(&b).ok().and_then(|s| s.parse().ok()))
-            .unwrap_or(0u64);
+        // F112: corrupt seq counter must not wrap to 0 and collide.
+        let seq = Queue::parse_u64(tr.get(cluster, self.seq_meta.pack(&[b"n"]))?)?;
         let prio_bytes = priority.to_be_bytes();
         let seq_bytes = format!("{seq:020}");
         let k = self
@@ -1071,6 +1077,45 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// F112: garbage tail/seq parsed as 0 and overwrote the first item.
+    #[test]
+    fn queue_corrupt_tail_does_not_reuse_seq_zero() {
+        let (dir, mut c) = open3();
+        let q = Queue::new(b"jobs");
+        q.push(&mut c, b"first").unwrap();
+        let tail = q.tail_key();
+        c.put(&tail, b"xxx").unwrap();
+        let err = q.push(&mut c, b"second");
+        assert!(
+            err.is_err(),
+            "corrupt tail must fail closed, not overwrite seq 0: {err:?}"
+        );
+        let item0 = q.data.pack(&[format!("{:020}", 0).as_bytes()]);
+        assert_eq!(
+            c.get(&item0).unwrap().as_deref(),
+            Some(b"first".as_ref()),
+            "first queue item must survive corrupt tail"
+        );
+        let pq = PriorityQueue::new(b"tasks");
+        pq.push(&mut c, 1, b"high").unwrap();
+        let seqk = pq.seq_meta.pack(&[b"n"]);
+        c.put(&seqk, b"yyy").unwrap();
+        let err = pq.push(&mut c, 1, b"also-high");
+        assert!(
+            err.is_err(),
+            "corrupt PQ seq must fail closed, not overwrite seq 0: {err:?}"
+        );
+        let p0 = pq
+            .data
+            .pack(&[1u64.to_be_bytes().as_slice(), format!("{:020}", 0).as_bytes()]);
+        assert_eq!(
+            c.get(&p0).unwrap().as_deref(),
+            Some(b"high".as_ref()),
+            "first PQ item must survive corrupt seq"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn multimap_multi_values() {
         let (dir, mut c) = open3();
@@ -1209,8 +1254,8 @@ mod tests {
         let mut t2 = c.begin();
         // both try to pop
         let head_k = q.meta.pack(&[b"head"]);
-        let h1 = Queue::parse_u64(t1.get(&c, &head_k).unwrap());
-        let h2 = Queue::parse_u64(t2.get(&c, &head_k).unwrap());
+        let h1 = Queue::parse_u64(t1.get(&c, &head_k).unwrap()).unwrap();
+        let h2 = Queue::parse_u64(t2.get(&c, &head_k).unwrap()).unwrap();
         assert_eq!(h1, h2);
         let item = q.data.pack(&[format!("{h1:020}").as_bytes()]);
         let _ = t1.get(&c, &item).unwrap();

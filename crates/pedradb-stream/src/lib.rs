@@ -114,27 +114,32 @@ impl Stream {
         k
     }
 
-    /// Last published sequence (0 if empty).
+    /// Load durable last-seq. Missing meta → 0; present but short/corrupt → Err (F111).
+    fn load_last_seq(&self) -> Result<u64> {
+        match self.db.get(&self.meta_key()) {
+            None => Ok(0),
+            Some(b) if b.len() >= 8 => Ok(u64::from_le_bytes(
+                b[..8]
+                    .try_into()
+                    .map_err(|_| StreamError::Msg("stream meta: bad length".into()))?,
+            )),
+            Some(_) => Err(StreamError::Msg("stream meta: truncated last_seq".into())),
+        }
+    }
+
+    /// Last published sequence (0 if empty). Corrupt meta yields 0 for read-only
+    /// callers; prefer [`publish`] / paths that use [`Self::load_last_seq`].
     #[must_use]
     pub fn last_seq(&self) -> u64 {
-        self.db
-            .get(&self.meta_key())
-            .and_then(|b| {
-                if b.len() >= 8 {
-                    Some(u64::from_le_bytes(b[..8].try_into().ok()?))
-                } else {
-                    None
-                }
-            })
-            .unwrap_or(0)
+        self.load_last_seq().unwrap_or(0)
     }
 
     /// Append a message; returns assigned sequence. Durable before return.
     ///
     /// # Errors
-    /// I/O.
+    /// I/O or corrupt meta counter (F111 — refuse to re-issue seq 1 over live data).
     pub fn publish(&mut self, data: impl AsRef<[u8]>) -> Result<u64> {
-        let seq = self.last_seq() + 1;
+        let seq = self.load_last_seq()? + 1;
         let msg_k = self.msg_key(seq);
         let meta_k = self.meta_key();
         let mut tx = self.db.begin();
@@ -158,17 +163,16 @@ impl Stream {
         if consumer.is_empty() {
             return Err(StreamError::Msg("bad consumer name".into()));
         }
-        Ok(self
-            .db
-            .get(&self.consumer_key(consumer))
-            .and_then(|b| {
-                if b.len() >= 8 {
-                    Some(u64::from_le_bytes(b[..8].try_into().ok()?))
-                } else {
-                    None
-                }
-            })
-            .unwrap_or(0))
+        // F111: missing cursor → 0; present but short → hard error (not silent rewind).
+        match self.db.get(&self.consumer_key(consumer)) {
+            None => Ok(0),
+            Some(b) if b.len() >= 8 => Ok(u64::from_le_bytes(
+                b[..8]
+                    .try_into()
+                    .map_err(|_| StreamError::Msg("consumer cursor: bad length".into()))?,
+            )),
+            Some(_) => Err(StreamError::Msg("consumer cursor: truncated".into())),
+        }
     }
 
     /// Peek next message **without** advancing the cursor (at-least-once).
@@ -303,6 +307,35 @@ mod tests {
         s.close().unwrap();
         let _ = std::fs::remove_dir_all(&dir);
     }
+    /// F111: truncated last_seq meta used to become 0 → re-publish seq 1 overwrites.
+    #[test]
+    fn publish_rejects_truncated_last_seq_meta() {
+        let dir = temp();
+        let mut s = Stream::open(&dir, "events").unwrap();
+        assert_eq!(s.publish(b"a").unwrap(), 1);
+        assert_eq!(s.publish(b"b").unwrap(), 2);
+        s.db.put(s.meta_key(), b"xx").unwrap();
+        let err = s.publish(b"c");
+        assert!(
+            err.is_err(),
+            "corrupt meta must fail closed, not re-issue seq 1: {err:?}"
+        );
+        assert_eq!(
+            s.get(1).unwrap().data,
+            b"a",
+            "seq 1 must not be overwritten"
+        );
+        assert_eq!(s.get(2).unwrap().data, b"b");
+        s.db.put(s.consumer_key("c1"), b"yy").unwrap();
+        let err = s.peek("c1");
+        assert!(
+            err.is_err(),
+            "truncated consumer cursor must fail closed: {err:?}"
+        );
+        s.close().unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// F70: slash names and prefix stream names must not share keys.
     #[test]
     fn stream_names_with_slash_are_isolated() {
