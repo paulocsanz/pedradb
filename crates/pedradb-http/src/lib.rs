@@ -38,7 +38,8 @@ pub use cl_kernel::{
     short_body_vs_cl_is_error, short_body_vs_cl_is_error_as_is,
 };
 pub use fail_closed::{
-    expects_100_continue, expects_100_continue_as_is, header_break_end, header_break_end_as_is,
+    expect_field_ok, expect_field_ok_as_is, expectation_failed_status, expects_100_continue,
+    expects_100_continue_as_is, header_break_end, header_break_end_as_is,
     header_break_len, host_value_ok, host_value_ok_as_is, host_values_conflict,
     host_values_conflict_as_is, http_version_requires_host, http_version_requires_host_as_is,
     parse_error_status, parse_error_writes_status, parse_error_writes_status_as_is,
@@ -76,6 +77,9 @@ pub enum HttpError {
     /// App.
     #[error("{0}")]
     App(String),
+    /// RFC 9110 unrecognized `Expect` (F159).
+    #[error("{0}")]
+    ExpectationFailed(String),
 }
 
 /// Result.
@@ -156,6 +160,13 @@ fn read_req(stream: &mut TcpStream) -> Result<(String, String, Vec<u8>, Vec<(Str
     if http_version_requires_host(version) && !host.as_deref().is_some_and(host_value_ok) {
         return Err(HttpError::App("missing host".into()));
     }
+    // F159: unrecognized Expect must 417 (not ignore and store).
+    if let Some((_, v)) = headers.iter().find(|(n, v)| n == "expect" && !expect_field_ok(v))
+    {
+        return Err(HttpError::ExpectationFailed(format!(
+            "expectation failed: {v}"
+        )));
+    }
     // Cap body size (F8): previously Content-Length could force multi-GiB alloc.
     const MAX_BODY: usize = 16 * 1024 * 1024;
     if has_content_len && content_len > MAX_BODY {
@@ -202,6 +213,26 @@ fn read_req(stream: &mut TcpStream) -> Result<(String, String, Vec<u8>, Vec<(Str
         body.truncate(0);
     }
     Ok((method, path, body, headers))
+}
+
+fn write_wire_err(stream: &mut TcpStream, e: &HttpError) {
+    if !parse_error_writes_status() {
+        return;
+    }
+    match e {
+        HttpError::ExpectationFailed(msg) => {
+            let _ = write_resp(
+                stream,
+                expectation_failed_status(),
+                "Expectation Failed",
+                msg.as_bytes(),
+            );
+        }
+        _ => {
+            let msg = e.to_string();
+            let _ = write_resp(stream, parse_error_status(), "Bad Request", msg.as_bytes());
+        }
+    }
 }
 
 /// Extract bearer / X-Pedra-Token from headers.
@@ -307,10 +338,7 @@ fn handle_kv(
     let (method, path, body, headers) = match read_req(stream) {
         Ok(r) => r,
         Err(e) => {
-            if parse_error_writes_status() {
-                let msg = e.to_string();
-                let _ = write_resp(stream, parse_error_status(), "Bad Request", msg.as_bytes());
-            }
+            write_wire_err(stream, &e);
             return Err(e);
         }
     };
@@ -489,10 +517,7 @@ fn handle_dcs(stream: &mut TcpStream, dcs: &Arc<Mutex<Dcs>>, auth: &Option<Strin
     let (method, path, body, headers) = match read_req(stream) {
         Ok(r) => r,
         Err(e) => {
-            if parse_error_writes_status() {
-                let msg = e.to_string();
-                let _ = write_resp(stream, parse_error_status(), "Bad Request", msg.as_bytes());
-            }
+            write_wire_err(stream, &e);
             return Err(e);
         }
     };
@@ -1834,6 +1859,66 @@ mod tests {
         assert_eq!(
             code, 404,
             "empty-Host PUT must not store, GET {code} {body:?}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// F159: RFC 9110 — unrecognized `Expect` used to be ignored and the PUT
+    /// stored. Must be 417 and not write.
+    #[test]
+    fn kv_http_unknown_expect_rejected() {
+        let dir = temp("expect-unk");
+        let addr = bind_ephemeral();
+        let srv = KvServer::open(&dir).unwrap();
+        thread::spawn(move || {
+            let _ = srv.serve(addr);
+        });
+        thread::sleep(Duration::from_millis(100));
+        let mut stream = TcpStream::connect(addr).unwrap();
+        stream
+            .write_all(
+                b"PUT /kv/ue HTTP/1.0\r\nExpect: blah\r\nContent-Length: 2\r\nHost: localhost\r\n\r\nok",
+            )
+            .unwrap();
+        let _ = stream.shutdown(std::net::Shutdown::Write);
+        let mut resp = Vec::new();
+        let _ = stream.read_to_end(&mut resp);
+        let text = String::from_utf8_lossy(&resp);
+        let put_code = text
+            .lines()
+            .next()
+            .and_then(|l| l.split_whitespace().nth(1))
+            .and_then(|c| c.parse::<u16>().ok())
+            .unwrap_or(0);
+        assert_eq!(
+            put_code, 417,
+            "unknown Expect must 417, got {put_code} {text:?}"
+        );
+        let (code, body) = http_exchange(addr, "GET", "/kv/ue", b"").unwrap();
+        assert_eq!(
+            code, 404,
+            "unknown Expect must not store, GET {code} {body:?}"
+        );
+
+        let mut stream = TcpStream::connect(addr).unwrap();
+        stream
+            .write_all(
+                b"PUT /kv/ue2 HTTP/1.0\r\nExpect: 100-continue, foo\r\nContent-Length: 2\r\nHost: localhost\r\n\r\nok",
+            )
+            .unwrap();
+        let _ = stream.shutdown(std::net::Shutdown::Write);
+        let mut resp = Vec::new();
+        let _ = stream.read_to_end(&mut resp);
+        let text = String::from_utf8_lossy(&resp);
+        let put_code = text
+            .lines()
+            .next()
+            .and_then(|l| l.split_whitespace().nth(1))
+            .and_then(|c| c.parse::<u16>().ok())
+            .unwrap_or(0);
+        assert_eq!(
+            put_code, 417,
+            "Expect 100-continue + unknown must 417, got {put_code} {text:?}"
         );
         let _ = std::fs::remove_dir_all(&dir);
     }

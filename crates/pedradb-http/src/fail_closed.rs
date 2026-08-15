@@ -94,6 +94,27 @@ pub fn expects_100_continue_as_is(_value: &str) -> bool {
     false
 }
 
+/// F159: every Expect token is empty or `100-continue` (RFC 9110).
+#[must_use]
+pub fn expect_field_ok(value: &str) -> bool {
+    value.split(',').all(|t| {
+        let t = t.trim();
+        t.is_empty() || t.eq_ignore_ascii_case("100-continue")
+    })
+}
+
+/// AS-IS F159: unknown Expect is ignored.
+#[must_use]
+pub fn expect_field_ok_as_is(_value: &str) -> bool {
+    true
+}
+
+/// Status for an unrecognized expectation.
+#[must_use]
+pub fn expectation_failed_status() -> u16 {
+    417
+}
+
 /// F157: RFC 9112 — HTTP/1.1 (and later) request-line requires `Host`.
 #[must_use]
 pub fn http_version_requires_host(version: &str) -> bool {
@@ -192,6 +213,13 @@ mod tests {
         assert!(!expects_100_continue(""));
         assert!(!expects_100_continue("102-processing"));
         assert!(!expects_100_continue_as_is("100-continue"));
+        assert!(expect_field_ok("100-continue"));
+        assert!(expect_field_ok("100-Continue"));
+        assert!(expect_field_ok(""));
+        assert!(!expect_field_ok("blah"));
+        assert!(!expect_field_ok("100-continue, foo"));
+        assert!(expect_field_ok_as_is("blah"));
+        assert_eq!(expectation_failed_status(), 417);
     }
 
     #[test]
