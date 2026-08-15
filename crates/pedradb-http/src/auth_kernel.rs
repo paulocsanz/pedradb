@@ -18,6 +18,28 @@ pub fn ascii_lower(b: u8) -> u8 {
     }
 }
 
+/// ASCII uppercase (`a`–`z` → `A`–`Z`). F79 methods.
+#[must_use]
+pub fn ascii_upper(b: u8) -> u8 {
+    if b.is_ascii_lowercase() {
+        b.to_ascii_uppercase()
+    } else {
+        b
+    }
+}
+
+/// RFC 9110: method token compared in ASCII uppercase.
+#[must_use]
+pub fn normalize_http_method(m: &str) -> String {
+    m.to_ascii_uppercase()
+}
+
+/// AS-IS F79: raw request token (`put` ≠ `PUT`).
+#[must_use]
+pub fn normalize_http_method_as_is(m: &str) -> String {
+    m.to_string()
+}
+
 /// RFC 9110: scheme token equals `bearer` ignoring ASCII case.
 #[must_use]
 pub fn is_bearer_scheme(scheme: &str) -> bool {
@@ -73,5 +95,17 @@ mod tests {
             assert_eq!(ascii_lower(c), c + 32);
             assert_eq!(ascii_lower(c + 32), c + 32);
         }
+    }
+
+    #[test]
+    fn method_uppercases() {
+        assert_eq!(normalize_http_method("put"), "PUT");
+        assert_eq!(normalize_http_method("GET"), "GET");
+        assert_eq!(normalize_http_method_as_is("put"), "put");
+        assert_ne!(
+            normalize_http_method("put"),
+            normalize_http_method_as_is("put")
+        );
+        assert_eq!(ascii_upper(b'p'), b'P');
     }
 }

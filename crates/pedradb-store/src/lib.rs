@@ -2625,6 +2625,27 @@ impl<E: Env> StoreCluster<E> {
         Ok(())
     }
 
+    /// Tick a **single** range (election / HB / AE for that group only).
+    ///
+    /// Prefer this while waiting for majority on one put/batch so multi-Raft
+    /// idle ranges do not pay full HB/fsync tax on every poll (RFC-0021 scale residual).
+    /// Still advances logical time by one step.
+    ///
+    /// # Errors
+    /// Raft / I/O during that range's tick.
+    pub fn tick_range_id(&mut self, range_id: u64) -> Result<()> {
+        if !self.ranges.iter().any(|r| r.id == range_id) {
+            return Err(StoreError::Msg(format!("unknown range {range_id}")));
+        }
+        self.logical_now = self.logical_now.saturating_add(1);
+        self.now_ms = self.now_ms.saturating_add(self.ms_per_tick);
+        if self.has_ttl_leases && self.ms_per_tick > 0 {
+            self.persist_now_ms();
+        }
+        let ids = self.ids.clone();
+        self.tick_range(range_id, &ids)
+    }
+
     /// Elect leaders for all ranges (bounded ticks).
     pub fn elect_all(&mut self, max_ticks: u64) -> Result<()> {
         for _ in 0..max_ticks {
@@ -5724,7 +5745,7 @@ pub const META_PREFIX: &[u8] = b"m/";
 
 /// Build a meta key under `m/`.
 ///
-/// F100: raw `m/` || suffix made `m/a` a byte-prefix of `m/ab` (F96 only
+/// F103: raw `m/` || suffix made `m/a` a byte-prefix of `m/ab` (F96 only
 /// fixed [`layers::EtcdNeedFace`] `full_key`). Length-prefix the suffix.
 #[must_use]
 pub fn meta_key(suffix: &[u8]) -> Vec<u8> {
@@ -5752,7 +5773,7 @@ mod tests {
         d
     }
 
-    /// F100: `m/` || suffix made `m/a` a prefix of `m/ab` (F96 fixed EtcdNeedFace only).
+    /// F103: `m/` || suffix made `m/a` a prefix of `m/ab` (F96 fixed EtcdNeedFace only).
     #[test]
     fn meta_key_suffix_is_not_prefix_of_sibling() {
         let a = meta_key(b"a");

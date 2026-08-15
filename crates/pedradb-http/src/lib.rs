@@ -23,13 +23,19 @@
 
 mod auth_kernel;
 mod cl_kernel;
+mod path_kernel;
 
 pub use auth_kernel::{
-    ascii_lower, bearer_token_from_value, is_bearer_scheme, is_bearer_scheme_as_is,
+    ascii_lower, ascii_upper, bearer_token_from_value, is_bearer_scheme, is_bearer_scheme_as_is,
+    normalize_http_method, normalize_http_method_as_is,
 };
 pub use cl_kernel::{
     content_length_repeat_ok, content_length_repeat_ok_as_is, invalid_cl_as_zero,
     invalid_cl_as_zero_as_is, keep_body_without_cl, keep_body_without_cl_as_is,
+};
+pub use path_kernel::{
+    origin_form_path, origin_form_path_as_is, path_after_authority, strip_authority_for_routing,
+    strip_authority_for_routing_as_is, strip_http_authority,
 };
 
 use std::io::{Read, Write};
@@ -80,7 +86,7 @@ fn read_req(stream: &mut TcpStream) -> Result<(String, String, Vec<u8>, Vec<(Str
     let mut lines = head.lines();
     let req = lines.next().unwrap_or("");
     let mut parts = req.split_whitespace();
-    let method = parts.next().unwrap_or("").to_ascii_uppercase();
+    let method = normalize_http_method(parts.next().unwrap_or(""));
     let path = parts.next().unwrap_or("/").to_string();
     let mut content_len = 0usize;
     let mut has_content_len = false;
@@ -226,7 +232,16 @@ fn handle_kv(
     kv: &Arc<Mutex<KvService>>,
     auth: &Option<String>,
 ) -> Result<()> {
-    let (method, path, body, headers) = read_req(stream)?;
+    // F102: previously parse failures dropped the socket with no status line,
+    // so clients waiting for a response could hang until TCP close.
+    let (method, path, body, headers) = match read_req(stream) {
+        Ok(r) => r,
+        Err(e) => {
+            let msg = e.to_string();
+            let _ = write_resp(stream, 400, "Bad Request", msg.as_bytes());
+            return Err(e);
+        }
+    };
     if !authorize(&headers, auth) {
         return write_resp(stream, 401, "Unauthorized", b"auth required");
     }
@@ -315,7 +330,9 @@ fn query_param(path: &str, key: &str) -> Option<String> {
     for part in q.split('&') {
         if let Some((k, v)) = part.split_once('=') {
             if k == key {
-                return Some(String::from_utf8_lossy(&percent_decode(v)).into_owned());
+                // F101: form-urlencoded — `+` is space *before* `%HH`.
+                // `%2B` remains literal `+` (form_decode handles order).
+                return Some(String::from_utf8_lossy(&form_decode(v)).into_owned());
             }
         }
     }
@@ -328,28 +345,40 @@ fn query_param(path: &str, key: &str) -> Option<String> {
 /// `strip_prefix("/kv/")` then failed and every route 404'd.
 /// F92: network-path-reference `//host/kv/x` (no scheme) had the same miss.
 fn path_only(path: &str) -> &str {
-    let mut p = path;
-    // Absolute-form: scheme://authority/path?query
-    if let Some(rest) = p
-        .strip_prefix("http://")
-        .or_else(|| p.strip_prefix("https://"))
-        .or_else(|| p.strip_prefix("HTTP://"))
-        .or_else(|| p.strip_prefix("HTTPS://"))
-    {
-        p = rest.find('/').map(|i| &rest[i..]).unwrap_or("/");
-    } else if let Some(rest) = p.strip_prefix("//") {
-        // F92: network-path-reference //authority/path (no scheme)
-        p = rest.find('/').map(|i| &rest[i..]).unwrap_or("/");
-    }
-    p.split_once('?').map(|(a, _)| a).unwrap_or(p)
+    origin_form_path(path)
 }
 
 /// Decode `%HH` in a path segment (F75). Invalid sequences are left as-is.
+/// Does **not** treat `+` as space (that is form-urlencoded — [`form_decode`]).
 fn percent_decode(s: &str) -> Vec<u8> {
     let b = s.as_bytes();
     let mut out = Vec::with_capacity(b.len());
     let mut i = 0;
     while i < b.len() {
+        if b[i] == b'%' && i + 2 < b.len() {
+            if let (Some(h), Some(l)) = (from_hex(b[i + 1]), from_hex(b[i + 2])) {
+                out.push((h << 4) | l);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(b[i]);
+        i += 1;
+    }
+    out
+}
+
+/// Form-urlencoded decode for query values (F101): `+` → space, then `%HH`.
+fn form_decode(s: &str) -> Vec<u8> {
+    let b = s.as_bytes();
+    let mut out = Vec::with_capacity(b.len());
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] == b'+' {
+            out.push(b' ');
+            i += 1;
+            continue;
+        }
         if b[i] == b'%' && i + 2 < b.len() {
             if let (Some(h), Some(l)) = (from_hex(b[i + 1]), from_hex(b[i + 2])) {
                 out.push((h << 4) | l);
@@ -373,7 +402,15 @@ fn from_hex(c: u8) -> Option<u8> {
 }
 
 fn handle_dcs(stream: &mut TcpStream, dcs: &Arc<Mutex<Dcs>>, auth: &Option<String>) -> Result<()> {
-    let (method, path, body, headers) = read_req(stream)?;
+    // F102: same as handle_kv — fail closed with 400 on wire parse errors.
+    let (method, path, body, headers) = match read_req(stream) {
+        Ok(r) => r,
+        Err(e) => {
+            let msg = e.to_string();
+            let _ = write_resp(stream, 400, "Bad Request", msg.as_bytes());
+            return Err(e);
+        }
+    };
     if !authorize(&headers, auth) {
         return write_resp(stream, 401, "Unauthorized", b"auth required");
     }
@@ -636,6 +673,44 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// F101: query values are form-urlencoded — `+` is space. F76 only did `%HH`.
+    /// `key=hello+world` must be the same lock as `/dcs/kv/hello%20world`.
+    /// `%2B` stays a literal plus.
+    #[test]
+    fn dcs_http_query_plus_is_space() {
+        let dir = temp("dcs-plus");
+        let addr = bind_ephemeral();
+        let srv = DcsServer::open(&dir).unwrap();
+        thread::spawn(move || {
+            let _ = srv.serve(addr);
+        });
+        thread::sleep(Duration::from_millis(100));
+        let (c1, b1) = http_exchange(
+            addr,
+            "POST",
+            "/dcs/leader?key=hello+world&holder=n1&ttl_ms=8000",
+            b"",
+        )
+        .unwrap();
+        assert_eq!(c1, 200, "{b1:?}");
+        let (c2, body) = http_exchange(addr, "GET", "/dcs/kv/hello%20world", b"").unwrap();
+        assert_eq!(
+            c2, 200,
+            "query key=hello+world must be the same lock as /dcs/kv/hello%20world, body={body:?}"
+        );
+        let (c3, b3) = http_exchange(
+            addr,
+            "POST",
+            "/dcs/leader?key=plus%2Bsign&holder=n2&ttl_ms=8000",
+            b"",
+        )
+        .unwrap();
+        assert_eq!(c3, 200, "{b3:?}");
+        let (c4, _) = http_exchange(addr, "GET", "/dcs/kv/plus%2Bsign", b"").unwrap();
+        assert_eq!(c4, 200, "%2B must stay literal plus, not become space");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// F8: Content-Length must not force multi-GiB allocation / hang.
     #[test]
     fn rejects_oversized_content_length() {
@@ -794,6 +869,17 @@ mod tests {
         let _ = stream.shutdown(std::net::Shutdown::Write);
         let mut resp = Vec::new();
         let _ = stream.read_to_end(&mut resp);
+        let text = String::from_utf8_lossy(&resp);
+        let put_code = text
+            .lines()
+            .next()
+            .and_then(|l| l.split_whitespace().nth(1))
+            .and_then(|c| c.parse::<u16>().ok())
+            .unwrap_or(0);
+        assert_eq!(
+            put_code, 400,
+            "F102: bad Content-Length must return 400, got {put_code} {text:?}"
+        );
         let (code, body) = http_exchange(addr, "GET", "/kv/badcl", b"").unwrap();
         assert!(
             !(code == 200 && body.is_empty()),
