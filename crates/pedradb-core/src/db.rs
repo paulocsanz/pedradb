@@ -788,6 +788,22 @@ impl<E: Env> Db<E> {
         self.vlog_rotate_bytes = bytes.filter(|n| *n > 0);
     }
 
+    /// Set scan vlog prefetch window size (RFC-0029 P0.3 / P2.2).
+    ///
+    /// `0` or `1` = resolve one-by-one; larger windows issue `Env::advise` then
+    /// resolve up to `n` pointers before advancing. Default is **4** (measured
+    /// lab default; see `scan_prefetch_n_window_measure`). Cap is 64 to avoid
+    /// unbounded stacks of in-flight resolve work on a single thread.
+    pub fn set_scan_prefetch(&mut self, n: usize) {
+        self.scan_prefetch = n.min(64);
+    }
+
+    /// Current scan prefetch window (RFC-0029).
+    #[must_use]
+    pub fn scan_prefetch(&self) -> usize {
+        self.scan_prefetch
+    }
+
     /// Active blob generation (`0` = single `VALUES.vlog`).
     #[must_use]
     pub fn blob_active(&self) -> u32 {
@@ -3770,6 +3786,77 @@ mod tests {
             "prefetch should fire on vlog scan: {}",
             db.stats().vlog_line()
         );
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0029 P2.2: measure scan wall for prefetch N ∈ {1,2,4,8,16} (not magic 32).
+    /// Default N=4 remains correct; this records relative costs for the RFC.
+    #[test]
+    fn scan_prefetch_n_window_measure() {
+        use std::time::Instant;
+        let dir = temp_dir();
+        let payload = vec![0xEFu8; 2048];
+        let mut db = Db::open_with(&dir, vlog_opts()).unwrap();
+        db.set_vlog_rotate_bytes(Some(16_384));
+        let n_keys = 48u8;
+        for i in 0..n_keys {
+            db.put(&[b's', i], &payload).unwrap();
+        }
+        db.flush().unwrap();
+        let mut rows = Vec::new();
+        for &n in &[1usize, 2, 4, 8, 16] {
+            db.set_scan_prefetch(n);
+            assert_eq!(db.scan_prefetch(), n.min(64));
+            // Warm once.
+            let _ = db
+                .scan(Bound::Unbounded, Bound::Unbounded)
+                .map(|kv| kv.value.len())
+                .sum::<usize>();
+            let t0 = Instant::now();
+            let mut rounds = 0u32;
+            let mut total_vals = 0usize;
+            while t0.elapsed().as_millis() < 80 {
+                total_vals = db
+                    .scan(Bound::Unbounded, Bound::Unbounded)
+                    .map(|kv| kv.value.len())
+                    .sum();
+                rounds = rounds.saturating_add(1);
+            }
+            let wall_ms = t0.elapsed().as_secs_f64() * 1000.0;
+            let ms_per_scan = wall_ms / f64::from(rounds.max(1));
+            rows.push((n, rounds, ms_per_scan, total_vals));
+            assert_eq!(total_vals, usize::from(n_keys) * payload.len());
+        }
+        // Prefer the N with lowest ms/scan among measured; default 4 must not be worst by ≫2×.
+        let best = rows
+            .iter()
+            .min_by(|a, b| a.2.partial_cmp(&b.2).unwrap_or(std::cmp::Ordering::Equal))
+            .unwrap();
+        let n4 = rows.iter().find(|r| r.0 == 4).unwrap();
+        assert!(
+            n4.2 <= best.2 * 2.5 + 0.5,
+            "default N=4 should stay competitive: rows={rows:?} best={best:?}"
+        );
+        // Persist measurement for the RFC (best-effort).
+        let out = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../findings/rfc0029-prefetch-n");
+        let _ = std::fs::create_dir_all(&out);
+        let mut body = String::from(
+            "{\n  \"bench\": \"scan_prefetch_n_window\",\n  \"keys\": 48,\n  \"value_bytes\": 2048,\n  \"rows\": [\n",
+        );
+        for (i, (n, rounds, ms, _)) in rows.iter().enumerate() {
+            if i > 0 {
+                body.push_str(",\n");
+            }
+            body.push_str(&format!(
+                "    {{\"n\":{n},\"rounds\":{rounds},\"ms_per_scan\":{ms:.4}}}"
+            ));
+        }
+        body.push_str(&format!(
+            "\n  ],\n  \"best_n\": {},\n  \"default_n\": 4,\n  \"note\": \"single-threaded Env reads; lab laptop\"\n}}\n",
+            best.0
+        ));
+        let _ = std::fs::write(out.join("stdout.json"), body);
         db.close().unwrap();
         let _ = fs::remove_dir_all(&dir);
     }

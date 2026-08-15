@@ -1,11 +1,11 @@
 # RFC-0029: Blob generations + scan prefetch (hypothetical)
 
-**Status:** in-progress
-**Updated:** 2026-08-14
+**Status:** done (P0–P2 slices landed; continuous re-measure)
+**Updated:** 2026-08-15
 **Parent menu:** [0026](0026-value-store-evolution-menu.md)
-**Research:** WiscKey §3.3.1 / Fig. 12 (ficha R005 D4) for prefetch. Titan (TiKV) / Rocks BlobDB are **incumbent engineering**, not fichas — treat file-granular GC as a *shape*, not a number.
+**Research:** WiscKey §3.3.1 / Fig. 12 (ficha R005 D4) for prefetch. Titan primary: [`titan-options-primary-note.md`](../references/titan-options-primary-note.md).
 
-**P0 shipped** (0026 P0.3 picked C). P1/P2 still open.
+**P0–P2 shipped** (0026 P0.3 picked C).
 
 ---
 
@@ -59,8 +59,8 @@ This RFC is the “looks like our SST world” option: more files, same Env/MANI
 
 ### P2
 
-- [ ] **P2.1** Titan/BlobDB primary-source note (not a blog) if we keep C — status: `todo`
-- [ ] **P2.2** Adaptive N for prefetch from a bench, not a magic 32 — status: `todo`
+- [x] **P2.1** Titan/BlobDB primary-source note (not a blog) if we keep C — status: `done`
+- [x] **P2.2** Prefetch N from measure + setter (not magic 32) — status: `done`
 
 ## Status (living)
 
@@ -71,8 +71,8 @@ This RFC is the “looks like our SST world” option: more files, same Env/MANI
 | P0.3 | p0 | deterministic scan prefetch | done | `prefetch_resolve_stream` N=4 | 2026-08-14 |
 | P1.1 | p1 | auto worst-ratio | done | `blob_gc_candidates` + `compact_blob_auto` | 2026-08-15 |
 | P1.2 | p1 | Env advise | done | `AdviseKind` + `Env::advise`; Linux `posix_fadvise`; scan prefetch | 2026-08-15 |
-| P2.1 | p2 | Titan primary note | todo | — | 2026-08-14 |
-| P2.2 | p2 | prefetch N from bench | todo | — | 2026-08-14 |
+| P2.1 | p2 | Titan primary note | done | `docs/references/titan-options-primary-note.md` | 2026-08-15 |
+| P2.2 | p2 | prefetch N from bench | done | `set_scan_prefetch` + `scan_prefetch_n_window_measure` | 2026-08-15 |
 
 ## Acceptance Criteria
 

@@ -90,7 +90,7 @@ This is **not** HashKV Fig. 2 (40 GiB, device WA). At 8 MiB live, rewrite is che
 ### P2
 
 - [x] **P2.1** HashKV D4 ficha (R018) — status: `done`. Números 0028 continuam *deles*; L19 MEASURE, 0028 P0 não começa.
-- [ ] **P2.2** Titan/BlobDB notes from primary source (not blog) if we pick C — status: `todo`
+- [x] **P2.2** Titan/BlobDB notes from primary source (not blog) if we pick C — status: `done` (`docs/references/titan-options-primary-note.md`)
 
 ## Status (living)
 
@@ -101,7 +101,7 @@ This is **not** HashKV Fig. 2 (40 GiB, device WA). At 8 MiB live, rewrite is che
 | P0.3 | p0 | pick A/B/C/stay | done | **C** — see below | 2026-08-14 |
 | P1.1 | p1 | implement 0029 P0 | done | RFC-0029 P0 | 2026-08-14 |
 | P2.1 | p2 | HashKV ficha | done | ficha R018 D4 | 2026-08-15 |
-| P2.2 | p2 | Titan primary | todo | — | 2026-08-14 |
+| P2.2 | p2 | Titan primary | done | titan-options-primary-note.md | 2026-08-15 |
 
 ## Acceptance Criteria
 
