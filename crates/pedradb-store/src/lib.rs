@@ -3138,18 +3138,36 @@ impl<E: Env> StoreCluster<E> {
                 vote_granted: false,
             });
         };
+        // F125: never grant a vote (or advance term) unless hard state is durable.
+        // AS-IS: `let _ = persist_hard` then vote_granted=true → dual vote after crash.
         if term > p.term {
+            let prev_term = p.term;
+            let prev_voted = p.voted_for;
+            let prev_role = p.role;
             p.become_follower(term);
-            let _ = persist_hard_db(&mut n.db, range_id, p);
+            if persist_hard_db(&mut n.db, range_id, p).is_err() {
+                p.term = prev_term;
+                p.voted_for = prev_voted;
+                p.role = prev_role;
+                return Ok(PeerMsg::RequestVoteReply {
+                    range_id,
+                    term: p.term,
+                    vote_granted: false,
+                });
+            }
         }
         let can = p.voted_for.is_none() || p.voted_for == Some(candidate_id);
         let up = last_log_term > p.last_term()
             || (last_log_term == p.last_term() && last_log_index >= p.last_index());
-        let grant = term == p.term && can && up;
+        let mut grant = term == p.term && can && up;
         if grant {
+            let prev_voted = p.voted_for;
             p.voted_for = Some(candidate_id);
             p.election_left = p.election_timeout;
-            let _ = persist_hard_db(&mut n.db, range_id, p);
+            if persist_hard_db(&mut n.db, range_id, p).is_err() {
+                p.voted_for = prev_voted;
+                grant = false;
+            }
         }
         Ok(PeerMsg::RequestVoteReply {
             range_id,
@@ -3419,8 +3437,13 @@ impl<E: Env> StoreCluster<E> {
                 .count();
             if commit_kernel::may_commit_at(p.term_at(idx), p.term, count >= maj) {
                 if idx > p.commit {
+                    // F126: same class as AE leader_commit path — do not leave
+                    // memory commit ahead of durable meta (apply would race).
+                    let old_commit = p.commit;
                     p.commit = idx;
-                    let _ = persist_commit_db(&mut n.db, rid, p);
+                    if persist_commit_db(&mut n.db, rid, p).is_err() {
+                        p.commit = old_commit;
+                    }
                 }
                 break;
             }
@@ -8550,6 +8573,107 @@ mod tests {
         assert!(
             snap >= 1,
             "membership shrink should allow compact; snap={snap}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// F125: vote grant must not stick without durable hard state.
+    #[test]
+    fn request_vote_persist_fail_denies_grant() {
+        use pedradb_sim::{FailingEnv, SeedRng};
+        let dir = temp();
+        let e1 = FailingEnv::passing();
+        let e2 = FailingEnv::passing();
+        let e3 = FailingEnv::passing();
+        let mut c = StoreCluster::open_with_envs_rng(
+            &dir,
+            3,
+            1,
+            [e1, e2, e3.clone()],
+            SeedRng::new(0xF125),
+        )
+        .unwrap();
+        c.elect_all(80).unwrap();
+        let rid = 1u64;
+        let (term, last_i, last_t) = {
+            let p = c.nodes.get(&3).unwrap().ranges.get(&rid).unwrap();
+            (p.term, p.last_index(), p.last_term())
+        };
+        // Next hard-state write on peer 3 fails.
+        e3.arm_one_failure();
+        let reply = c
+            .on_request_vote(3, rid, term + 1, 1, last_i, last_t)
+            .unwrap();
+        match reply {
+            PeerMsg::RequestVoteReply {
+                vote_granted: false,
+                ..
+            } => {}
+            other => panic!("expected deny when hard persist fails, got {other:?}"),
+        }
+        // Peer 3 must not remember a vote that never hit disk.
+        let p3 = c.nodes.get(&3).unwrap().ranges.get(&rid).unwrap();
+        assert!(
+            p3.voted_for.is_none() || p3.term <= term,
+            "in-memory vote/term must not stick without durable hard: term={} voted={:?}",
+            p3.term,
+            p3.voted_for
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// F126: leader commit advance rolls back if commit meta persist fails.
+    #[test]
+    fn try_advance_commit_persist_fail_does_not_raise_commit() {
+        use pedradb_sim::{FailingEnv, SeedRng};
+        let dir = temp();
+        // Node 1 is preferred leader for range 1 in many elect schedules; pin env.
+        let e1 = FailingEnv::passing();
+        let e2 = FailingEnv::passing();
+        let e3 = FailingEnv::passing();
+        let mut c = StoreCluster::open_with_envs_rng(
+            &dir,
+            3,
+            1,
+            [e1.clone(), e2, e3],
+            SeedRng::new(0xF126),
+        )
+        .unwrap();
+        c.elect_all(120).unwrap();
+        c.put(b"k", b"v").unwrap();
+        let rid = 1u64;
+        // Prefer node 1 as leader for inject (shares e1).
+        for _ in 0..60 {
+            if c.range_leader(rid) == Some(1) {
+                break;
+            }
+            let cur = c.range_leader(rid);
+            if let Some(l) = cur {
+                let _ = c.step_down_range_leader(rid);
+                let _ = l;
+            }
+            let _ = c.tick();
+            let _ = c.elect_all(20);
+        }
+        assert_eq!(c.range_leader(rid), Some(1), "need leader=1 for e1 inject");
+        let before = c.commit_index(1, rid);
+        assert!(before >= 1);
+        let rolled = before.saturating_sub(1);
+        {
+            let n = c.nodes.get_mut(&1).unwrap();
+            let p = n.ranges.get_mut(&rid).unwrap();
+            let last = p.last_index();
+            p.commit = rolled;
+            for &pid in &c.ids {
+                p.match_index.insert(pid, last);
+            }
+        }
+        e1.arm_one_failure();
+        c.try_advance_commit(rid, 1).unwrap();
+        assert_eq!(
+            c.commit_index(1, rid),
+            rolled,
+            "commit must stay at pre-advance value when persist_commit fails"
         );
         let _ = std::fs::remove_dir_all(&dir);
     }
