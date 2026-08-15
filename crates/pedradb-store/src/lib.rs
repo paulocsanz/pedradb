@@ -3509,17 +3509,41 @@ impl<E: Env> StoreCluster<E> {
                 p.election_left = p.election_timeout;
             }
             p.leader_id = Some(leader_id);
-            // Install snapshot watermark and drop conflicting log prefix.
+            // F124: raft meta must be durable **before** wiping user keys.
+            // AS-IS swallowed persist errors then wiped + replied success — leader
+            // thought install worked while the follower lost keys without a snap.
+            let prev_snap_i = p.snapshot_index;
+            let prev_snap_t = p.snapshot_term;
+            let prev_log = p.log.clone();
+            let prev_commit = p.commit;
+            let prev_applied = p.applied;
             p.snapshot_index = last_included_index;
             p.snapshot_term = last_included_term;
             p.log.retain(|e| e.index > last_included_index);
             p.commit = p.commit.max(last_included_index);
             p.applied = p.applied.max(last_included_index);
-            let _ = persist_hard_db(&mut n.db, range_id, p);
-            let _ = persist_snap_db(&mut n.db, range_id, p);
-            let _ = persist_log_db(&mut n.db, range_id, p);
-            let _ = persist_commit_db(&mut n.db, range_id, p);
-            let _ = persist_applied_db(&mut n.db, range_id, p);
+            if let Err(e) = (|| -> Result<()> {
+                persist_hard_db(&mut n.db, range_id, p)?;
+                persist_snap_db(&mut n.db, range_id, p)?;
+                persist_log_db(&mut n.db, range_id, p)?;
+                persist_commit_db(&mut n.db, range_id, p)?;
+                persist_applied_db(&mut n.db, range_id, p)?;
+                Ok(())
+            })() {
+                // Roll back in-memory watermarks; leave user keys untouched.
+                p.snapshot_index = prev_snap_i;
+                p.snapshot_term = prev_snap_t;
+                p.log = prev_log;
+                p.commit = prev_commit;
+                p.applied = prev_applied;
+                let _ = e;
+                return Ok(PeerMsg::InstallSnapshotReply {
+                    range_id,
+                    term: p.term,
+                    success: false,
+                    match_index: 0,
+                });
+            }
         }
         // Replace applied **user** state for this range (F38/F40/F41):
         // - Wipe only non-reserved keys in [start,end) (never `\0store/*`).
@@ -8526,6 +8550,54 @@ mod tests {
         assert!(
             snap >= 1,
             "membership shrink should allow compact; snap={snap}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// F124: raft meta persist failure must not wipe user keys / reply success.
+    #[test]
+    fn install_snapshot_persist_fail_keeps_user_keys() {
+        use pedradb_sim::{FailingEnv, SeedRng};
+        let dir = temp();
+        let e1 = FailingEnv::passing();
+        let e2 = FailingEnv::passing();
+        let e3 = FailingEnv::passing();
+        let mut c = StoreCluster::open_with_envs_rng(
+            &dir,
+            3,
+            1,
+            [e1, e2, e3.clone()],
+            SeedRng::new(0xF124),
+        )
+        .unwrap();
+        c.elect_all(80).unwrap();
+        c.put(b"keep", b"v").unwrap();
+        assert_eq!(
+            c.get_on(3, b"keep").unwrap().as_deref(),
+            Some(b"v".as_ref())
+        );
+        // Empty export would wipe `keep` if install proceeded past meta persist.
+        let rid = c.locate(b"keep").unwrap();
+        let leader = c.range_leader(rid).unwrap();
+        let (term, snap_i, snap_t) = {
+            let p = c.nodes.get(&leader).unwrap().ranges.get(&rid).unwrap();
+            (p.term.max(1), p.applied.max(1), p.term.max(1))
+        };
+        // Next write(s) on peer 3 fail (raft meta persist).
+        e3.arm_one_failure();
+        let reply = c
+            .on_install_snapshot(3, rid, term, leader, snap_i, snap_t, vec![])
+            .unwrap();
+        match reply {
+            PeerMsg::InstallSnapshotReply {
+                success: false, ..
+            } => {}
+            other => panic!("expected success=false on persist fail, got {other:?}"),
+        }
+        assert_eq!(
+            c.get_on(3, b"keep").unwrap().as_deref(),
+            Some(b"v".as_ref()),
+            "user key must survive failed install-snapshot persist"
         );
         let _ = std::fs::remove_dir_all(&dir);
     }
