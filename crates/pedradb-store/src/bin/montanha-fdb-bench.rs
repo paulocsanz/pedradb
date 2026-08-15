@@ -764,19 +764,26 @@ fn main() {
                     };
                     handles.push(thread::spawn(move || {
                         let mut cli = TcpClusterClient::new(peers)
-                            .with_max_attempts(48)
+                            .with_max_attempts(8)
                             .with_active_range(range_id);
                         cli.warm_leaders();
+                        let deadline = Instant::now() + Duration::from_secs(45);
                         let mut ok = 0u64;
                         for i in 0..per {
+                            if Instant::now() >= deadline {
+                                break;
+                            }
                             let mut k = vec![start_b, b't'];
                             k.extend_from_slice(format!("-{tid:02}-{i:04}").as_bytes());
-                            for _ in 0..10 {
+                            for _ in 0..6 {
+                                if Instant::now() >= deadline {
+                                    break;
+                                }
                                 if cli.put(&k, &v).is_ok() {
                                     ok += 1;
                                     break;
                                 }
-                                thread::sleep(Duration::from_millis(12));
+                                thread::sleep(Duration::from_millis(10));
                             }
                         }
                         ok
@@ -796,7 +803,7 @@ fn main() {
     "keys_ok": {total_ok},
     "keys_per_s": {kps:.3},
     "wall_s": {ws:.4},
-    "note": "multi-client; thr→preferred-node range; tick_range_id put-wait"
+    "note": "multi-client; thr→preferred-node; 45s wall/worker"
   }}"#,
                     ws = wall.as_secs_f64(),
                 ));
@@ -835,12 +842,16 @@ fn main() {
                     };
                     handles.push(thread::spawn(move || {
                         let mut cli = TcpClusterClient::new(peers)
-                            .with_max_attempts(48)
+                            .with_max_attempts(8)
                             .with_active_range(range_id);
                         cli.warm_leaders();
+                        let deadline = Instant::now() + Duration::from_secs(60);
                         let mut ok_keys = 0u64;
                         let mut ok_batches = 0u64;
                         for b in 0..batches_per {
+                            if Instant::now() >= deadline {
+                                break;
+                            }
                             let pairs: Vec<(Vec<u8>, Vec<u8>)> = (0..batch_sz)
                                 .map(|i| {
                                     let mut k = vec![start_b, b't', b'b'];
@@ -850,13 +861,16 @@ fn main() {
                                     (k, v.as_slice().to_vec())
                                 })
                                 .collect();
-                            for _ in 0..12 {
+                            for _ in 0..6 {
+                                if Instant::now() >= deadline {
+                                    break;
+                                }
                                 if cli.put_batch(&pairs).is_ok() {
                                     ok_keys += batch_sz as u64;
                                     ok_batches += 1;
                                     break;
                                 }
-                                thread::sleep(Duration::from_millis(15));
+                                thread::sleep(Duration::from_millis(12));
                             }
                         }
                         (ok_keys, ok_batches)

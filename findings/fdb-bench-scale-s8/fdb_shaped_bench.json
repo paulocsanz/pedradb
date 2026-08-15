@@ -1,0 +1,124 @@
+{
+  "bench": "montanha-fdb-shaped-v1",
+  "host": "unknown",
+  "suite": "scale",
+  "nodes": 3,
+  "payload_bytes": 64,
+  "n_default": 12,
+  "tx_keys": 8,
+  "multi_ranges": 4,
+  "threads": 4,
+  "warmup": 20,
+  "benches": [
+    {
+    "name": "S1_disjoint_put_r1",
+    "ranges": 1,
+    "keys": 12,
+    "keys_per_s": 2.042,
+    "wall_s": 5.8759,
+    "note": "RFC-0025 P2.2 / 0021 scale option A"
+  },
+    {
+    "name": "S1_disjoint_put_r2",
+    "ranges": 2,
+    "keys": 12,
+    "keys_per_s": 1.855,
+    "wall_s": 6.4683,
+    "note": "RFC-0025 P2.2 / 0021 scale option A"
+  },
+    {
+    "name": "S1_disjoint_put_r4",
+    "ranges": 4,
+    "keys": 12,
+    "keys_per_s": 1.589,
+    "wall_s": 7.5527,
+    "note": "RFC-0025 P2.2 / 0021 scale option A"
+  },
+    {
+    "name": "S1_disjoint_put_r8",
+    "ranges": 8,
+    "keys": 12,
+    "keys_per_s": 1.455,
+    "wall_s": 8.2448,
+    "note": "RFC-0025 P2.2 / 0021 scale option A"
+  },
+    {
+    "name": "S2_tcp_mt_put_r1_t4",
+    "ranges": 1,
+    "threads": 4,
+    "keys_ok": 16,
+    "keys_per_s": 1.797,
+    "wall_s": 8.9024,
+    "note": "multi-client; thr→preferred-node; 45s wall/worker"
+  },
+    {
+    "name": "S2_tcp_mt_put_r4_t4",
+    "ranges": 4,
+    "threads": 4,
+    "keys_ok": 16,
+    "keys_per_s": 1.937,
+    "wall_s": 8.2592,
+    "note": "multi-client; thr→preferred-node; 45s wall/worker"
+  },
+    {
+    "name": "S2_tcp_mt_put_r8_t4",
+    "ranges": 8,
+    "threads": 4,
+    "keys_ok": 16,
+    "keys_per_s": 0.715,
+    "wall_s": 22.3684,
+    "note": "multi-client; thr→preferred-node; 45s wall/worker"
+  },
+    {
+    "name": "S3_tcp_mt_put_batch_r1_t4_b8",
+    "ranges": 1,
+    "threads": 4,
+    "batch_sz": 8,
+    "keys_ok": 96,
+    "batches_ok": 12,
+    "keys_per_s": 5.567,
+    "batches_per_s": 0.696,
+    "wall_s": 17.2451,
+    "note": "PutBatch r1+r4; thr→preferred-node range; no r8 hang residual"
+  },
+    {
+    "name": "S3_tcp_mt_put_batch_r4_t4_b8",
+    "ranges": 4,
+    "threads": 4,
+    "batch_sz": 8,
+    "keys_ok": 96,
+    "batches_ok": 12,
+    "keys_per_s": 5.101,
+    "batches_per_s": 0.638,
+    "wall_s": 18.8207,
+    "note": "PutBatch r1+r4; thr→preferred-node range; no r8 hang residual"
+  }
+  ],
+  "limitations": [
+    "In-process core suite: no real NIC (suite tcp adds real localhost TCP).",
+    "C1 Mutex multi-thread serializes StoreCluster — concurrent waiters, not parallel leaders.",
+    "D4 multi-thread TCP is the honest concurrent client path on one range.",
+    "FDB face path (A3) includes OCC bookkeeping; compare to A1 raw put for face overhead.",
+    "Multi-range TX (B2) exercises cross-range 2PC; expect cliff vs A4.",
+    "E1 mini-bt: model-checked random soak + multi-key + WW pairs (not full bindingtester).",
+    "E2 TCP multi-client: partitioned keys per thread + majority verify (true concurrent writers).",
+    "Not YCSB / not production FDB — see docs/montanha-vs-fdb-bench.md."
+  ],
+  "anomalies": [],
+  "vs_fdb": {
+    "claim": "not field peer",
+    "how_to_compare": "docs/montanha-vs-fdb-bench.md",
+    "fdb_workloads": [
+      "single key set/get (A1/A3/D1)",
+      "multi-key transaction (A4/D3)",
+      "get_range (A5)",
+      "clear_range (A6)",
+      "hot key conflicts (A7)",
+      "index+row TX (A8)",
+      "multi-shard / multi-range TX (B2)",
+      "multi-client TCP (D4)",
+      "random soak (E1)",
+      "TCP multi-client mini-bt (E2)"
+    ]
+  }
+}
