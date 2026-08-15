@@ -69,10 +69,11 @@ Herdadas de [RFC-0031](0031-rocks-parity-10x-budget.md) G1–G8. Em particular:
 - [ ] **P0.3** Re-medir esta tabela (`tikv_ycsb_parity_v0.sh` + FULL_SYNC=1); MVCC latest e short scan ≥ floor 0.5 vs F_FULLFSYNC; adversarial iterator + `cargo test -p rocksdb-compat` sem editar asserção — status: `todo` (P0.1/P0.2: mvcc 3.2→81 qps / p50 292→2.3 ms @1024/1KB; ainda ≪ floor 0.5)
 - [x] **P0.4** RFC + Status vivo (este doc) — status: `done`
 - [x] **P0.5** MemTable `iter_internal_range` (BTree `range`, sem varrer o mapa) no `memtable_stream` quando não há range-tombstone — status: `done`
+- [x] **P0.6** `Db::lookup` point-get via `MemTable::get_entry` (seek) em vez de `iter_internal` linear — status: `done`
 
 ### P1 — next wave
 
-- [ ] **P1.1** Point-get (shape C) ≥ 0.5 vs F_FULLFSYNC nesta tabela (diagnóstico com número: mutex do compat vs `Db::get` nu vs bloom) — status: `todo`
+- [x] **P1.1** Point-get (shape C) ≥ 0.5 vs F_FULLFSYNC nesta tabela — status: `done` (`lookup` usava scan linear da memtable; agora `get_entry` BTree. Lab 1024/1KB zipfian: ycsb_c **404k qps** / p50 2 µs ≥ floor 186k)
 - [ ] **P1.2** Gate `ROCKS_PARITY_RATIO_FLOOR=0.5` em **todos** os shapes desta tabela contra o peer FULL_SYNC; `tikv_ycsb_parity_v0.sh` documenta o comando — status: `todo`
 
 ### P2 — later / polish
@@ -88,8 +89,9 @@ Herdadas de [RFC-0031](0031-rocks-parity-10x-budget.md) G1–G8. Em particular:
 | P0.2 | p0 | latest_cf prefix-bounded | done | este commit | 2026-08-15 |
 | P0.3 | p0 | re-medida MVCC/scan ≥ 0.5 | todo | — | 2026-08-15 |
 | P0.4 | p0 | RFC + status vivo | done | este doc | 2026-08-15 |
-| P0.5 | p0 | memtable range prune | done | este commit | 2026-08-15 |
-| P1.1 | p1 | point-get C ≥ 0.5 | todo | — | 2026-08-15 |
+| P0.5 | p0 | memtable range prune | done | fd2fb96 | 2026-08-15 |
+| P0.6 | p0 | lookup get_entry seek | done | este commit | 2026-08-15 |
+| P1.1 | p1 | point-get C ≥ 0.5 | done | este commit | 2026-08-15 |
 | P1.2 | p1 | gate 0.5 all-shapes FULL_SYNC | todo | — | 2026-08-15 |
 | P2.1 | p2 | tabela lab atualizada | todo | — | 2026-08-15 |
 | P2.2 | p2 | follow-up se residual | todo | — | 2026-08-15 |

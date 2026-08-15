@@ -93,27 +93,58 @@ impl MemTable {
     /// Point lookup visible at `snapshot`.
     #[must_use]
     pub fn get(&self, user_key: &[u8], snapshot: SequenceNumber) -> Lookup {
+        self.get_entry(user_key, snapshot)
+            .map(|(_, look)| look)
+            .unwrap_or(Lookup::NotFound)
+    }
+
+    /// Like [`get`](Self::get) but also returns the winning version's sequence
+    /// (for layered merge in `Db::lookup` without a full memtable walk).
+    #[must_use]
+    pub fn get_entry(
+        &self,
+        user_key: &[u8],
+        snapshot: SequenceNumber,
+    ) -> Option<(SequenceNumber, Lookup)> {
         let probe = InternalKey::for_lookup(Bytes::copy_from_slice(user_key), snapshot);
-        let Some((ikey, value)) = self.map.range(probe..).next() else {
-            return Lookup::NotFound;
-        };
+        let (ikey, value) = self.map.range(probe..).next()?;
         if ikey.user_key.as_ref() != user_key {
-            return Lookup::NotFound;
+            return None;
         }
-        // Range starts at first key >= probe; ordering guarantees sequence <= snapshot
-        // for the same user key when we landed on this user key.
         debug_assert!(ikey.sequence <= snapshot);
-        match ikey.kind {
+        let look = match ikey.kind {
             ValueType::Deletion => Lookup::Deleted,
             ValueType::Value => {
-                // Check covering range tombstones with higher sequence.
                 if self.range_deleted(user_key, ikey.sequence, snapshot) {
                     Lookup::Deleted
                 } else {
                     Lookup::Found(value.clone())
                 }
             }
-            ValueType::RangeDeletion => Lookup::NotFound,
+            ValueType::RangeDeletion => return None,
+        };
+        Some((ikey.sequence, look))
+    }
+
+    /// Append range tombstones visible at `snapshot` (O(n) — only call when
+    /// [`Self::has_range_tombstones`] is true).
+    pub fn collect_range_tombstones(
+        &self,
+        snapshot: SequenceNumber,
+        out: &mut Vec<crate::merge::RangeTombstone>,
+    ) {
+        if self.range_tombstones == 0 {
+            return;
+        }
+        for (ikey, end) in &self.map {
+            if ikey.kind != ValueType::RangeDeletion || ikey.sequence > snapshot {
+                continue;
+            }
+            out.push(crate::merge::RangeTombstone {
+                start: ikey.user_key.clone(),
+                end: end.clone(),
+                sequence: ikey.sequence,
+            });
         }
     }
 

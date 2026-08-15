@@ -3312,28 +3312,13 @@ impl<E: Env> Db<E> {
         best_point: &mut Lookup,
         range_tombs: &mut Vec<crate::merge::RangeTombstone>,
     ) {
-        for (ikey, value) in table.iter_internal() {
-            if ikey.sequence > snapshot {
-                continue;
-            }
-            if ikey.kind == ValueType::RangeDeletion {
-                range_tombs.push(crate::merge::RangeTombstone {
-                    start: ikey.user_key.clone(),
-                    end: value.clone(),
-                    sequence: ikey.sequence,
-                });
-                continue;
-            }
-            if ikey.user_key.as_ref() != key {
-                continue;
-            }
-            if best_point_seq.is_none_or(|s| ikey.sequence > s) {
-                *best_point_seq = Some(ikey.sequence);
-                *best_point = match ikey.kind {
-                    ValueType::Value => Lookup::Found(value.clone()),
-                    ValueType::Deletion => Lookup::Deleted,
-                    ValueType::RangeDeletion => Lookup::NotFound,
-                };
+        // BTree seek — do not walk the whole memtable on every point get
+        // (RFC-0032: ycsb_c / layered lookup).
+        table.collect_range_tombstones(snapshot, range_tombs);
+        if let Some((seq, look)) = table.get_entry(key, snapshot) {
+            if best_point_seq.is_none_or(|s| seq > s) {
+                *best_point_seq = Some(seq);
+                *best_point = look;
             }
         }
     }
