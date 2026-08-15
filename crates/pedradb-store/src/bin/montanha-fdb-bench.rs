@@ -721,10 +721,9 @@ fn main() {
         }
 
         // S2: multi-client multi-range (TCP) — true option-A scale probe.
-        // Map thr → range preferring node (tid%3)+1 under election_timeout_for.
+        // thr ≥ min(nr,8) so r8 is not under-threaded; map thr→preferred-node range.
         if let Some(bin) = find_montanha_tcp() {
             progress!("S2 multi-client multi-range TCP…");
-            let per = (n.min(24) / n_threads.max(1)).max(4);
             let range_for = |tid: usize, nr: u64| -> u64 {
                 if nr <= 1 {
                     return 1;
@@ -744,12 +743,16 @@ fn main() {
                 let _ = std::fs::remove_dir_all(&tmp);
                 std::fs::create_dir_all(&tmp).unwrap();
                 let nodes = start_tcp_cluster(&bin, &tmp, nr);
+                // Cover ranges: at least one writer per range up to 8.
+                let thr = n_threads.max(1).max((nr as usize).min(8));
+                let per = (n.min(32) / thr.max(1)).max(2);
                 let peers: Vec<(u64, String)> =
                     nodes.iter().map(|n| (n.id, n.addr.to_string())).collect();
-                let thr = n_threads.max(1);
                 let step = (256u64 / nr.max(1)) as u8;
                 let peers_a = Arc::new(peers);
                 let val_a = Arc::new(val.clone());
+                // Brief settle so rebalance_local can shed colocated leaders.
+                thread::sleep(Duration::from_millis(500));
                 let t0 = Instant::now();
                 let mut handles = Vec::new();
                 for tid in 0..thr {
@@ -803,7 +806,7 @@ fn main() {
     "keys_ok": {total_ok},
     "keys_per_s": {kps:.3},
     "wall_s": {ws:.4},
-    "note": "multi-client; thr→preferred-node; 45s wall/worker"
+    "note": "thr≥min(nr,8); preferred-node map; rebalance settle; 45s wall"
   }}"#,
                     ws = wall.as_secs_f64(),
                 ));
@@ -813,21 +816,22 @@ fn main() {
                 drop(nodes);
             }
 
-            // S3 PutBatch: r1+r4 only (r8 hang residual under load).
+            // S3 PutBatch: r1+r4+r8 with thr≥min(nr,8) and 60s walls.
             progress!("S3 multi-client multi-range TCP PutBatch…");
             let batch_sz = 8usize;
-            let batches_per = (n.min(32) / n_threads.max(1)).max(2);
-            for &nr in &[1u64, 4] {
+            for &nr in &[1u64, 4, 8] {
                 let tmp = out.join(format!("tcp-scale-batch-r{nr}"));
                 let _ = std::fs::remove_dir_all(&tmp);
                 std::fs::create_dir_all(&tmp).unwrap();
                 let nodes = start_tcp_cluster(&bin, &tmp, nr);
+                let thr = n_threads.max(1).max((nr as usize).min(8));
+                let batches_per = (n.min(32) / thr.max(1)).max(2);
                 let peers: Vec<(u64, String)> =
                     nodes.iter().map(|n| (n.id, n.addr.to_string())).collect();
-                let thr = n_threads.max(1);
                 let step = (256u64 / nr.max(1)) as u8;
                 let peers_a = Arc::new(peers);
                 let val_a = Arc::new(val.clone());
+                thread::sleep(Duration::from_millis(500));
                 let t0 = Instant::now();
                 let mut handles = Vec::new();
                 for tid in 0..thr {
@@ -897,7 +901,7 @@ fn main() {
     "keys_per_s": {kps:.3},
     "batches_per_s": {bps:.3},
     "wall_s": {ws:.4},
-    "note": "PutBatch r1+r4; thr→preferred-node range; no r8 hang residual"
+    "note": "PutBatch thr≥min(nr,8); rebalance settle; 60s wall"
   }}"#,
                     ws = wall.as_secs_f64(),
                 ));
