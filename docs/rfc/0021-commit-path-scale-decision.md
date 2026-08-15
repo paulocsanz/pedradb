@@ -68,7 +68,7 @@ While waiting for majority on one put/batch, TCP used full `cluster.tick()` → 
 | S2 multi-client put | 0.77 | **1.36** | **~1.8×** |
 | S3 PutBatch | 3.03 | **7.76** | **~2.6×** |
 
-Option A **reconfirmed** under concurrent clients when leaders are spread **and** put-wait does not full-tick idle ranges.
+**S7** (`findings/fdb-bench-scale-s7/`): thr→preferred-node range map; `elect_all` rebalances; S3 drops r8. S2 r4 **1.38** keys/s (~9× noisy r1=0.15 on that run). Option A **reconfirmed** under concurrent clients when leaders are spread **and** put-wait does not full-tick idle ranges.
 
 Rationale:
 - Lab multi-Raft scales write capacity under concurrent partitioned clients (S2 r1→r4) **when leaders are spread**.
