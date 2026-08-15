@@ -138,6 +138,10 @@ jobs:
           test -f findings/bp-ab-ci/bp_ab_report.json
       - name: mini-bt soak (in-process + TCP multi-client)
         run: cargo test -p pedradb-store --test mini_bt_soak -- --nocapture
+      - name: rocksdb-compat adversarial (Pedra under rust-rocksdb API)
+        run: |
+          cargo test -p rocksdb-compat
+          cargo run -p rocksdb-compat-alias-smoke
       - name: mini-bt soak (Pedra L0 write backpressure)
         env:
           MONTANHA_WRITE_BACKPRESSURE: "1"

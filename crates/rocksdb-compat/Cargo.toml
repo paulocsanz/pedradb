@@ -1,0 +1,15 @@
+[package]
+name = "rocksdb-compat"
+description = "rust-rocksdb-shaped API subset on pedradb-core (compat lab; not drop-in TiKV)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+pedradb-core = { path = "../pedradb-core" }
+pedradb-sim = { path = "../pedradb-sim" }
+bytes = "1"
+
+[dev-dependencies]
+tempfile = "3"

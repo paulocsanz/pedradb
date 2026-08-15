@@ -21,7 +21,10 @@ members = [
     "crates/pedradb-journal",
     "crates/pedradb-fold",
     "crates/montanha-fdb-recipes",
+    "crates/rocksdb-compat",
+    "crates/rocksdb-compat-alias-smoke",
 ]
+exclude = ["formal/aeneas/vote-kernel", "formal/aeneas/isolated-kernel"]
 
 [workspace.package]
 version = "0.1.0"
