@@ -282,17 +282,8 @@ fn stats_cmd(args: &[String]) -> std::process::ExitCode {
             println!("last_sequence={}", s.last_sequence);
             println!("sst_count={} sst_bytes={}", s.sst_count, s.sst_bytes);
             println!("wal_bytes={} wal_syncs={}", s.wal_bytes, s.wal_sync_count);
-            println!(
-                "earliest_readable={} pins={} auto_reclaim={} auto_blob_gc={:?}",
-                db.earliest_readable_sequence(),
-                db.snapshot_pin_count(),
-                db.auto_reclaim(),
-                db.auto_blob_gc_min_ratio()
-            );
-            println!(
-                "compact_count={} auto_compact_failures={}",
-                s.compact_count, s.auto_compact_failures
-            );
+            println!("{}", s.gc_line());
+            println!("auto_blob_gc={:?}", db.auto_blob_gc_min_ratio());
             if !s.last_auto_compact_error.is_empty() {
                 println!("last_auto_compact_error={}", s.last_auto_compact_error);
             }

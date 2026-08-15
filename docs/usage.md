@@ -192,7 +192,8 @@ Full contract: rustdoc on `db` module. Audit fix backlog: [RFC-0015](rfc/0015-au
 | `pedradb_ops::BackupEngine` | Local base backup, `ship_wal`, `restore` / `restore_pitr`, verify |
 | `pedradb_ops::migrate_to_latest` / `inspect_format` | Format inspect + rewrite SSTs/MANIFEST to current writer |
 | CLI `pedra backup\|restore\|pitr\|ship-wal\|migrate\|inspect` | Ops suite from the command line |
-| `Db::stats()` → `DbStats` | Mem/SST/WAL sizes, cache hits, `wal_sync_count`, `vlog_*`, amp counters (`bytes_ingested` / `bytes_written_*` / `compact_count`) |
+| `Db::stats()` → `DbStats` | Mem/SST/WAL + `gc_line()` (`earliest_readable`, pins, `auto_reclaim`) + vlog/amp counters |
+| `CheckpointMeta` | `last_sequence`, `sst_count`, `earliest_readable_seq` (PDBCKP02; v1 still readable) |
 | `ConcurrentDb` | Multi-thread handle: **write group** amortizes fsync; dual-mem flush pipeline (not full Rocks multi-writer) |
 | `ConcurrentDb::begin_occ` / `OccTransaction` | **OCC multi-writer** TX: conflict → `TransactionConflict` (RFC-0014 P2.1) |
 | `OpenOptions.large_value_threshold` | **Opt-in** (`None` default): spill large values to `VALUES.vlog` (WiscKey-shaped) |

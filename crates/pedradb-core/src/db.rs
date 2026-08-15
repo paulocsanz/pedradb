@@ -165,6 +165,12 @@ pub struct DbStats {
     pub blob_files: u32,
     /// Scan windows that issued a vlog prefetch (RFC-0029 P0.3).
     pub scan_prefetch_hits: u64,
+    /// Version-GC watermark (MANIFEST v4; snaps below this are too old).
+    pub earliest_readable_seq: SequenceNumber,
+    /// Open [`SnapshotPin`] count (process-local; not durable).
+    pub snapshot_pin_count: usize,
+    /// Whether auto-compact uses pin-aware reclaim (session setter).
+    pub auto_reclaim: bool,
 }
 
 /// Per-blob GC stats for operator / auto-pick (RFC-0029 P1.1).
@@ -214,6 +220,19 @@ impl DbStats {
             self.bytes_written_sst
         )
     }
+
+    /// One-line version-GC / pin observability.
+    #[must_use]
+    pub fn gc_line(&self) -> String {
+        format!(
+            "earliest_readable={} pins={} auto_reclaim={} compact={} auto_compact_fail={}",
+            self.earliest_readable_seq,
+            self.snapshot_pin_count,
+            self.auto_reclaim,
+            self.compact_count,
+            self.auto_compact_failures
+        )
+    }
 }
 
 /// Metadata written next to a checkpoint (ops / restore tooling).
@@ -223,6 +242,8 @@ pub struct CheckpointMeta {
     pub last_sequence: SequenceNumber,
     /// Number of SST files copied.
     pub sst_count: usize,
+    /// Version-GC watermark at checkpoint time (MANIFEST v4 / open-items §2.1).
+    pub earliest_readable_seq: SequenceNumber,
 }
 
 /// File name for checkpoint metadata under the checkpoint directory.
@@ -1357,6 +1378,9 @@ impl<E: Env> Db<E> {
             blob_files: u32::try_from(vlog::list_blob_nums(&self.env, &self.dir).len())
                 .unwrap_or(u32::MAX),
             scan_prefetch_hits: self.prefetch_hits.load(Ordering::Relaxed),
+            earliest_readable_seq: self.earliest_readable_seq,
+            snapshot_pin_count: self.snapshot_pins.len(),
+            auto_reclaim: self.auto_reclaim,
         }
     }
 
@@ -1531,6 +1555,7 @@ impl<E: Env> Db<E> {
         let meta = CheckpointMeta {
             last_sequence: self.last_sequence(),
             sst_count: self.ssts.len(),
+            earliest_readable_seq: self.earliest_readable_seq,
         };
         write_checkpoint_meta(&self.env, dest, &meta)?;
         self.sync_dir_if_required(dest)?;
@@ -3499,9 +3524,11 @@ impl<E: Env> Db<E> {
 fn write_checkpoint_meta(env: &impl Env, dest: &Path, meta: &CheckpointMeta) -> Result<()> {
     let path = dest.join(CHECKPOINT_META_FILE);
     let mut body = Vec::new();
-    body.extend_from_slice(b"PDBCKP01");
+    // PDBCKP02: last_sequence + sst_count + earliest_readable_seq.
+    body.extend_from_slice(b"PDBCKP02");
     body.extend_from_slice(&meta.last_sequence.to_le_bytes());
     body.extend_from_slice(&(meta.sst_count as u64).to_le_bytes());
+    body.extend_from_slice(&meta.earliest_readable_seq.to_le_bytes());
     let crc = crc32c::crc32c(&body);
     body.extend_from_slice(&crc.to_le_bytes());
     let mut f = env.create(&path)?;
@@ -3511,6 +3538,8 @@ fn write_checkpoint_meta(env: &impl Env, dest: &Path, meta: &CheckpointMeta) -> 
 }
 
 /// Read [`CHECKPOINT_META_FILE`] written by [`Db::create_checkpoint`].
+///
+/// Accepts **PDBCKP02** (with watermark) and legacy **PDBCKP01** (`earliest=0`).
 ///
 /// # Errors
 /// Missing/corrupt meta or I/O.
@@ -3539,9 +3568,10 @@ pub fn read_checkpoint_meta(env: &impl Env, dir: impl AsRef<Path>) -> Result<Che
             "checkpoint meta CRC mismatch: stored {stored:#x} computed {computed:#x}"
         )));
     }
-    if &payload[0..8] != b"PDBCKP01" {
-        return Err(CoreError::Internal("bad checkpoint meta magic".into()));
+    if payload.len() < 8 {
+        return Err(CoreError::Internal("checkpoint meta too short".into()));
     }
+    let magic = &payload[0..8];
     let seq_arr: [u8; 8] = payload[8..16]
         .try_into()
         .map_err(|_| CoreError::Internal("checkpoint meta seq truncated".into()))?;
@@ -3555,9 +3585,30 @@ pub fn read_checkpoint_meta(env: &impl Env, dir: impl AsRef<Path>) -> Result<Che
             "checkpoint sst_count {sst_count_u64} does not fit usize"
         ))
     })?;
+    let earliest_readable_seq = if magic == b"PDBCKP02" {
+        if payload.len() < 32 {
+            return Err(CoreError::Internal(
+                "checkpoint meta v2 truncated (missing earliest_readable)".into(),
+            ));
+        }
+        let ear_arr: [u8; 8] = payload[24..32]
+            .try_into()
+            .map_err(|_| CoreError::Internal("checkpoint meta earliest truncated".into()))?;
+        u64::from_le_bytes(ear_arr)
+    } else if magic == b"PDBCKP01" {
+        if payload.len() != 24 {
+            return Err(CoreError::Internal(
+                "checkpoint meta v1 trailing garbage".into(),
+            ));
+        }
+        0
+    } else {
+        return Err(CoreError::Internal("bad checkpoint meta magic".into()));
+    };
     Ok(CheckpointMeta {
         last_sequence,
         sst_count,
+        earliest_readable_seq,
     })
 }
 
@@ -5691,10 +5742,13 @@ mod tests {
             let meta = db.create_checkpoint(&ckpt).unwrap();
             assert_eq!(meta.last_sequence, 2);
             assert!(meta.sst_count >= 1);
+            assert_eq!(meta.earliest_readable_seq, 0);
             assert!(
                 ckpt.join(CHECKPOINT_META_FILE).exists(),
                 "CHECKPOINT meta file must be written"
             );
+            let disk = read_checkpoint_meta(&StdEnv, &ckpt).unwrap();
+            assert_eq!(disk, meta);
             db.put(b"after", b"ckpt").unwrap();
             db.close().unwrap();
         }
@@ -5709,6 +5763,41 @@ mod tests {
             "writes after checkpoint must not appear in checkpoint"
         );
         restored.verify_checksums().unwrap();
+        restored.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+        let _ = fs::remove_dir_all(&ckpt);
+    }
+
+    /// PDBCKP02 carries earliest_readable; checkpoint open restores MANIFEST watermark.
+    #[test]
+    fn checkpoint_meta_records_gc_watermark() {
+        let dir = temp_dir();
+        let ckpt = temp_dir();
+        {
+            let mut db = Db::open(&dir).unwrap();
+            db.put(b"k", b"old").unwrap();
+            db.flush().unwrap();
+            db.put(b"k", b"new").unwrap();
+            db.flush().unwrap();
+            db.compact_with(CompactOptions::latest_only()).unwrap();
+            let floor = db.earliest_readable_sequence();
+            assert!(floor > 0);
+            let s = db.stats();
+            assert_eq!(s.earliest_readable_seq, floor);
+            assert!(s.gc_line().contains(&format!("earliest_readable={floor}")));
+            let meta = db.create_checkpoint(&ckpt).unwrap();
+            assert_eq!(meta.earliest_readable_seq, floor);
+            assert_eq!(
+                read_checkpoint_meta(&StdEnv, &ckpt)
+                    .unwrap()
+                    .earliest_readable_seq,
+                floor
+            );
+            db.close().unwrap();
+        }
+        let restored = Db::open(&ckpt).unwrap();
+        assert!(restored.earliest_readable_sequence() > 0);
+        assert_eq!(restored.get(b"k").as_deref(), Some(b"new".as_ref()));
         restored.close().unwrap();
         let _ = fs::remove_dir_all(&dir);
         let _ = fs::remove_dir_all(&ckpt);
