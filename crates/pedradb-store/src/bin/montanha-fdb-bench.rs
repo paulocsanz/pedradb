@@ -12,6 +12,7 @@
 //!   MONTANHA_BENCH_THREADS    concurrent client threads for C/T suites (default 4)
 //!   MONTANHA_BENCH_SUITE      comma list: core,threads,tcp,mini-bt,scale,all
 //!     (scale includes S1 sequential + S2 multi-client put + S3 multi-client PutBatch)
+//!   MONTANHA_WRITE_BACKPRESSURE=1  Pedra L0 pressure/stall defaults on open
 //!
 //! Writes `fdb_shaped_bench.json` + human summary. Compare to FDB using the same
 //! workload shapes (see docs/montanha-vs-fdb-bench.md). Not a claim of field parity.
@@ -20,7 +21,7 @@
 
 use pedradb_store::{
     client_dcs_create, client_dcs_get, client_get, client_status, client_tick, FdbDatabase,
-    StoreCluster, TcpClusterClient,
+    StoreCluster, StoreOpenOptions, TcpClusterClient,
 };
 use std::collections::BTreeMap;
 use std::net::SocketAddr;
@@ -35,6 +36,22 @@ fn env_usize(key: &str, default: usize) -> usize {
         .ok()
         .and_then(|s| s.parse().ok())
         .unwrap_or(default)
+}
+
+fn write_backpressure_enabled() -> bool {
+    std::env::var("MONTANHA_WRITE_BACKPRESSURE").ok().as_deref() == Some("1")
+}
+
+fn store_opts() -> StoreOpenOptions {
+    let mut opts = StoreOpenOptions::default();
+    if write_backpressure_enabled() {
+        opts = opts.with_write_backpressure();
+    }
+    opts
+}
+
+fn open_cluster(dir: &Path, n_nodes: u64, n_ranges: u64) -> StoreCluster {
+    StoreCluster::open_with_options(dir, n_nodes, n_ranges, store_opts()).expect("open cluster")
 }
 
 fn pct(sorted: &[f64], p: f64) -> f64 {
@@ -135,12 +152,7 @@ fn start_tcp_cluster(bin: &Path, tmp: &Path, n_ranges: u64) -> Vec<TcpNode> {
     let peers: Vec<(u64, SocketAddr)> = ports
         .iter()
         .enumerate()
-        .map(|(i, &p)| {
-            (
-                (i as u64) + 1,
-                format!("127.0.0.1:{p}").parse().unwrap(),
-            )
-        })
+        .map(|(i, &p)| ((i as u64) + 1, format!("127.0.0.1:{p}").parse().unwrap()))
         .collect();
     let peer_flags: Vec<String> = peers
         .iter()
@@ -242,7 +254,7 @@ fn main() {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         progress!("A open 3-node 1-range…");
-        let mut c = StoreCluster::open(&dir, 3, 1).expect("open r1");
+        let mut c = open_cluster(&dir, 3, 1);
         c.elect_all(150).expect("elect r1");
         progress!("A elect ok; warmup {warmup}");
 
@@ -414,12 +426,7 @@ fn main() {
             assert!(pairs.len() >= range_n / 2, "range thin");
             lats.push(ms(t));
         }
-        benches.push(summarize(
-            "A5_get_range_prefix",
-            n,
-            t0.elapsed(),
-            &mut lats,
-        ));
+        benches.push(summarize("A5_get_range_prefix", n, t0.elapsed(), &mut lats));
         progress!("A5 get_range done");
 
         // A6 clear_range cost: seed once outside the timer, measure clear+commit only.
@@ -484,9 +491,7 @@ fn main() {
                     // Should not both succeed on same key WW — count as anomaly
                     ok += 2;
                     ok_lats.push(ms(t));
-                    notes.push(format!(
-                        "A7 anomaly: both commits ok on hot key iter {i}"
-                    ));
+                    notes.push(format!("A7 anomaly: both commits ok on hot key iter {i}"));
                 }
                 (false, false) => {
                     aborts += 2;
@@ -550,7 +555,7 @@ fn main() {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         progress!("B open 3-node {n_ranges}-range…");
-        let mut c = StoreCluster::open(&dir, 3, n_ranges).expect("open multi");
+        let mut c = open_cluster(&dir, 3, n_ranges);
         c.elect_all(200).expect("elect multi");
         progress!("B elect ok");
 
@@ -593,7 +598,7 @@ fn main() {
 
         // B2 cross-range TX: one key in each of first min(4, ranges).
         // Cap low: 2PC+log is the cliff — enough samples for p50/p99, not soak.
-        let take = range_keys.len().min(4).max(2);
+        let take = range_keys.len().clamp(2, 4);
         let iters = n.min(12);
         let mut lats = Vec::with_capacity(iters);
         let mut fails = 0u64;
@@ -676,12 +681,12 @@ fn main() {
     // ── Suite scale: disjoint put QPS vs range count (RFC-0025 P2.2) ──────
     if suite_enabled("scale") {
         progress!("S scale multi-range put probe…");
-        let scale_n = n.min(24).max(8);
+        let scale_n = n.clamp(8, 24);
         for &nr in &[1u64, 2, 4, 8] {
             let dir = out.join(format!("db-scale-r{nr}"));
             let _ = std::fs::remove_dir_all(&dir);
             std::fs::create_dir_all(&dir).unwrap();
-            let mut c = StoreCluster::open(&dir, 3, nr).expect("open scale");
+            let mut c = open_cluster(&dir, 3, nr);
             c.elect_all(200).expect("elect scale");
             let metas = c.range_metas();
             let bases: Vec<Vec<u8>> = metas
@@ -810,9 +815,7 @@ fn main() {
   }}"#,
                     ws = wall.as_secs_f64(),
                 ));
-                progress!(
-                    "S2 ranges={nr} thr={thr} ok={total_ok} keys_per_s={kps:.2}"
-                );
+                progress!("S2 ranges={nr} thr={thr} ok={total_ok} keys_per_s={kps:.2}");
                 drop(nodes);
             }
 
@@ -1004,7 +1007,12 @@ fn main() {
                     }
                 }
                 if !lats.is_empty() {
-                    benches.push(summarize("D3_tcp_commit_tx_2k", cok, t0.elapsed(), &mut lats));
+                    benches.push(summarize(
+                        "D3_tcp_commit_tx_2k",
+                        cok,
+                        t0.elapsed(),
+                        &mut lats,
+                    ));
                 } else {
                     notes.push(format!("D3 tcp commit_tx: zero successes ({d3n} tries)"));
                 }
@@ -1054,7 +1062,9 @@ fn main() {
                         &mut all,
                     ));
                 } else {
-                    notes.push(format!("D4 tcp multi-thread put: zero successes (threads={n_threads})"));
+                    notes.push(format!(
+                        "D4 tcp multi-thread put: zero successes (threads={n_threads})"
+                    ));
                 }
                 progress!("D4 tcp multi-thread put ok={total_ok}");
 
@@ -1144,7 +1154,10 @@ fn main() {
                         kps = batch_sz as f64 / wall.as_secs_f64().max(1e-12),
                         ws = wall.as_secs_f64(),
                     ));
-                    progress!("D6 tcp put_batch ok keys_per_s={:.1}", batch_sz as f64 / wall.as_secs_f64().max(1e-12));
+                    progress!(
+                        "D6 tcp put_batch ok keys_per_s={:.1}",
+                        batch_sz as f64 / wall.as_secs_f64().max(1e-12)
+                    );
                 } else {
                     notes.push("D6 tcp put_batch failed".into());
                     progress!("D6 tcp put_batch FAILED");
@@ -1160,7 +1173,7 @@ fn main() {
         let dir = out.join("db-minib");
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
-        let mut c = StoreCluster::open(&dir, 3, 1).expect("open mini");
+        let mut c = open_cluster(&dir, 3, 1);
         c.elect_all(100).expect("elect mini");
         let mut model: BTreeMap<Vec<u8>, Vec<u8>> = BTreeMap::new();
         let ops = n.max(50) * 3;
@@ -1169,7 +1182,7 @@ fn main() {
         let mut commits_err = 0u64;
         let mut multi_ok = 0u64;
         let mut ww_ok = 0u64;
-        let mut rng = 0xFDB_B1_u64;
+        let mut rng = 0x000F_DBB1_u64;
         let mut next = || {
             rng ^= rng << 13;
             rng ^= rng >> 7;
@@ -1274,8 +1287,7 @@ fn main() {
                         }
                     }
                     for (mk, mv) in &model {
-                        if mk.starts_with(b"mb/")
-                            && !pairs.iter().any(|(k, v)| k == mk && v == mv)
+                        if mk.starts_with(b"mb/") && !pairs.iter().any(|(k, v)| k == mk && v == mv)
                         {
                             mismatches += 1;
                         }
@@ -1321,8 +1333,7 @@ fn main() {
                     let nodes = start_tcp_cluster(&bin, &tmp, 1);
                     let peers: Vec<(u64, String)> =
                         nodes.iter().map(|n| (n.id, n.addr.to_string())).collect();
-                    let addrs: Vec<String> =
-                        nodes.iter().map(|n| n.addr.to_string()).collect();
+                    let addrs: Vec<String> = nodes.iter().map(|n| n.addr.to_string()).collect();
                     let per = (n.max(20) / n_threads).max(8);
                     let peers_a = Arc::new(peers);
                     let mut handles = Vec::new();
@@ -1330,8 +1341,7 @@ fn main() {
                     for tid in 0..n_threads {
                         let peers = (*peers_a).clone();
                         handles.push(thread::spawn(move || {
-                            let mut cli =
-                                TcpClusterClient::new(peers).with_max_attempts(64);
+                            let mut cli = TcpClusterClient::new(peers).with_max_attempts(64);
                             let mut local: BTreeMap<Vec<u8>, Vec<u8>> = BTreeMap::new();
                             let mut ok = 0u64;
                             let mut err = 0u64;
@@ -1480,6 +1490,12 @@ fn main() {
     let host = std::env::var("HOSTNAME")
         .or_else(|_| std::env::var("HOST"))
         .unwrap_or_else(|_| "unknown".into());
+    let suite =
+        std::env::var("MONTANHA_BENCH_SUITE").unwrap_or_else(|_| "core,threads,mini-bt".into());
+    let write_bp = write_backpressure_enabled();
+    if write_bp {
+        notes.push("write_backpressure=1".into());
+    }
     let notes_json = if notes.is_empty() {
         "[]".into()
     } else {
@@ -1492,14 +1508,13 @@ fn main() {
                 .join(",")
         )
     };
-    let suite =
-        std::env::var("MONTANHA_BENCH_SUITE").unwrap_or_else(|_| "core,threads,mini-bt".into());
 
     let report = format!(
         r#"{{
   "bench": "montanha-fdb-shaped-v1",
   "host": "{host}",
   "suite": "{suite}",
+  "write_backpressure": {write_bp},
   "nodes": 3,
   "payload_bytes": {payload},
   "n_default": {n},
