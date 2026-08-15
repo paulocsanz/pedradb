@@ -57,6 +57,19 @@ Earlier s2c lab had higher r8 (~8.4 keys/s); **r8 is noisy** under thr≪ranges.
 
 **Throughput residual (same run, host loaded):** S2 r1 ~1.1 keys/s, r4 ~0.38, r8 ~0.08 — spread leaders did not restore s2c-era multi-range QPS. Remaining cliff is multi-Raft HB/fsync per group (and machine load), not leader colocation. Option A still default; re-measure on quiet hardware before flipping anything.
 
+### Put-path tick scope (2026-08-15)
+
+While waiting for majority on one put/batch, TCP used full `cluster.tick()` → **every** range HB/elect each poll (N× tax under multi-Raft). Now `tick_range_id(range)` + scoped `pump_ae` only drive the active group; background worker still full-ticks for liveness.
+
+**S6 lab (`findings/fdb-bench-scale-s6/`, N=12, thr=4)** with diversity + scoped ticks:
+
+| | r1 | r4 | r4/r1 |
+|--|----|----|-------|
+| S2 multi-client put | 0.77 | **1.36** | **~1.8×** |
+| S3 PutBatch | 3.03 | **7.76** | **~2.6×** |
+
+Option A **reconfirmed** under concurrent clients when leaders are spread **and** put-wait does not full-tick idle ranges.
+
 Rationale:
 - Lab multi-Raft scales write capacity under concurrent partitioned clients (S2 r1→r4) **when leaders are spread**.
 - PutBatch is the right bulk path (S3 r1); multi-range batch needs more soak + leader diversity.

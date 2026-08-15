@@ -47,7 +47,7 @@ Last updated: 2026-08-14 (RFC-0024 done: Montanha fold for Caixote)
 **Shipped Phase 1–3 + A–E continuum:** [montanha-fdb-phases.md](montanha-fdb-phases.md) — fdb-compat 12-step harness (`clear_range`), etcd multiproc + **TCP DCS wire**, `RecordTable` unique/multi-index, platform need faces (CP/OLAP/stream), F47–F49 residuals.  
 **Shipped (bench):** `montanha-fdb-bench` — FDB-shaped microbenches + TCP multi-client + mini-bt E1/E2 → `fdb_shaped_bench.json`; method in [montanha-vs-fdb-bench.md](montanha-vs-fdb-bench.md).  
 **Shipped (CI mini-bt):** `cargo test -p pedradb-store --test mini_bt_soak` — in-process model soak + TCP multi-client majority verify.  
-**Shipped (perf parity RFC-0025 complete):** [0025](rfc/0025-montanha-perf-parity-vs-peers.md) — batch/coalesce/PutBatch/log append; **scale A confirmed** (S2 r4 + S3 PutBatch r1); multi-range elect-wait; **per-range TCP leader cache**; **multi-Raft election timeout diversity** (no more node-1 wins all ranges); **read capacity**; **fdb-compare** harness.  
+**Shipped (perf parity RFC-0025 complete):** [0025](rfc/0025-montanha-perf-parity-vs-peers.md) — batch/coalesce/PutBatch/log append; **scale A confirmed** (S6: S2 r4 ~1.8×, S3 r4 ~2.6×); multi-range elect-wait; per-range client routing; **election timeout diversity**; **scoped `tick_range_id` on put-wait**; **read capacity**; **fdb-compare** harness.  
 **Shipped (recipes):** `montanha-fdb-recipes` — design recipes + SI/OCC + Record seed.  
 **Shipped (0023):** SI, Transaction, watermark, fdb_compat + c-api.  
 **Do not** claim FDB field peer, full bindingtester, production Record Layer, or drop-in etcd/Scylla/CH/NATS.  
@@ -276,6 +276,9 @@ new evidence.
 | [`tidb-vs-postgres-mysql.md`](tidb-vs-postgres-mysql.md) | TiDB vs Postgres vs MySQL monoliths — choice table + PedraDB quadrant |
 | [`sql-lessons-for-the-grail.md`](sql-lessons-for-the-grail.md) | Postgres/MySQL + Aurora/Neon (log-is-the-DB), Vitess/Citus (proxy+shard), Spanner (TrueTime) — cross-cutting lessons, Rung 1.5, WAL export Must |
 | [`object-storage-as-substrate-possibility.md`](object-storage-as-substrate-possibility.md) | SlateDB/WarpStream/turbopuffer; **scope superseded** — Tigris data-plane claim corrected; SST “not built” stale |
+| [`research/object-storage/06-tigris-and-media-tiers.md`](research/object-storage/06-tigris-and-media-tiers.md) | **2026-08-15:** Tigris = FDB brain + block bytes + six jobs; EC is job 5; media ≠ product name |
+| [`research/object-storage/07-montanha-as-tigris-control-plane.md`](research/object-storage/07-montanha-as-tigris-control-plane.md) | **2026-08-15:** Montanha can sit in the FDB seat; bytes stay out; Fold not 13 clusters |
+| [`references/tigris-architecture-primaries.md`](references/tigris-architecture-primaries.md) | Fetched extracts: architecture, small-object bench, Fly NVMe, snapshot/fork |
 | [`sqlite-object-storage-agents-and-pedradb.md`](sqlite-object-storage-agents-and-pedradb.md) | **Canonical 2026-08-12:** SQLite-VFS + object/block-on-object (mercado, não tese de agente); Pedra slots + deep gaps; primaries in `references/sqlite-object-storage-primaries.md` |
 | [`conversation-learnings-and-short-term-alignment.md`](conversation-learnings-and-short-term-alignment.md) | All conversation learnings + **conflict matrix vs P0** |
 | [`nats-need-replacement.md`](nats-need-replacement.md) | JetStream-class stream on PedraDB+Raft vs Core NATS; Jepsen 2.12.1 findings |

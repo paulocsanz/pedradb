@@ -431,9 +431,7 @@ fn is_reserved_store_key(key: &[u8]) -> bool {
 /// F100: length-prefix user under intent/hist/txn so `intent/a` is not a
 /// byte-prefix of `intent/ab` (same class as F89–F99).
 fn push_user_component(buf: &mut Vec<u8>, user: &[u8]) {
-    let n = u32::try_from(user.len()).expect("store user key len fits u32");
-    buf.extend_from_slice(&n.to_be_bytes());
-    buf.extend_from_slice(user);
+    buf.extend_from_slice(&len_pref_value(user));
 }
 
 /// Decode user after a fixed meta prefix (F100 length-prefix; legacy raw OK).
@@ -2147,9 +2145,7 @@ impl<E: Env> StoreCluster<E> {
         let mut best: HashMap<Vec<u8>, Vec<(u64, Option<Vec<u8>>)>> = HashMap::new();
         for node in self.nodes.values() {
             for (hk, raw) in scan_prefix(&node.db, HIST_PREFIX) {
-                let Some(user) = hk
-                    .strip_prefix(HIST_PREFIX)
-                    .and_then(user_from_meta_suffix)
+                let Some(user) = hk.strip_prefix(HIST_PREFIX).and_then(user_from_meta_suffix)
                 else {
                     continue;
                 };
@@ -5792,11 +5788,7 @@ mod tests {
         let end = pedradb_core::prefix_exclusive_end(&a);
         let snap = c.read_version();
         let hits = c
-            .keys_in_range_at(
-                &a,
-                end.as_deref().unwrap_or(&[]),
-                snap,
-            )
+            .keys_in_range_at(&a, end.as_deref().unwrap_or(&[]), snap)
             .unwrap();
         assert!(
             hits.iter().any(|(k, v)| k == &a && v.as_slice() == b"ha"),
@@ -5843,10 +5835,7 @@ mod tests {
             c.tick_range_id(rid).unwrap();
         }
         assert_eq!(c.get_strong(&k).unwrap().as_deref(), Some(b"v".as_ref()));
-        assert!(
-            c.tick_range_id(999).is_err(),
-            "unknown range must fail"
-        );
+        assert!(c.tick_range_id(999).is_err(), "unknown range must fail");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
