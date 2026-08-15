@@ -209,12 +209,13 @@ fn handle_kv(
     if !authorize(&headers, auth) {
         return write_resp(stream, 401, "Unauthorized", b"auth required");
     }
-    if let Some(key) = path.strip_prefix("/kv/") {
-        let key = key.as_bytes();
+    let po = path_only(&path);
+    if let Some(key) = po.strip_prefix("/kv/") {
+        let key = percent_decode(key);
         match method.as_str() {
             "GET" => {
                 let g = kv.lock().map_err(|e| HttpError::App(e.to_string()))?;
-                match g.get(key) {
+                match g.get(&key) {
                     Some(v) => write_resp(stream, 200, "OK", &v)?,
                     None => write_resp(stream, 404, "Not Found", b"")?,
                 }
@@ -289,12 +290,12 @@ impl DcsServer {
     }
 }
 
-fn query_param<'a>(path: &'a str, key: &str) -> Option<&'a str> {
+fn query_param(path: &str, key: &str) -> Option<String> {
     let q = path.split_once('?')?.1;
     for part in q.split('&') {
         if let Some((k, v)) = part.split_once('=') {
             if k == key {
-                return Some(v);
+                return Some(String::from_utf8_lossy(&percent_decode(v)).into_owned());
             }
         }
     }
@@ -303,6 +304,34 @@ fn query_param<'a>(path: &'a str, key: &str) -> Option<&'a str> {
 
 fn path_only(path: &str) -> &str {
     path.split_once('?').map(|(p, _)| p).unwrap_or(path)
+}
+
+/// Decode `%HH` in a path segment (F75). Invalid sequences are left as-is.
+fn percent_decode(s: &str) -> Vec<u8> {
+    let b = s.as_bytes();
+    let mut out = Vec::with_capacity(b.len());
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] == b'%' && i + 2 < b.len() {
+            if let (Some(h), Some(l)) = (from_hex(b[i + 1]), from_hex(b[i + 2])) {
+                out.push((h << 4) | l);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(b[i]);
+        i += 1;
+    }
+    out
+}
+
+fn from_hex(c: u8) -> Option<u8> {
+    match c {
+        b'0'..=b'9' => Some(c - b'0'),
+        b'a'..=b'f' => Some(c - b'a' + 10),
+        b'A'..=b'F' => Some(c - b'A' + 10),
+        _ => None,
+    }
 }
 
 fn handle_dcs(
@@ -316,11 +345,11 @@ fn handle_dcs(
     }
     let po = path_only(&path);
     if let Some(key) = po.strip_prefix("/dcs/kv/") {
-        let key = key.as_bytes();
+        let key = percent_decode(key);
         match method.as_str() {
             "GET" => {
                 let g = dcs.lock().map_err(|e| HttpError::App(e.to_string()))?;
-                match g.get(key) {
+                match g.get(&key) {
                     Some(kv) => {
                         let line = format!("{} {}\n", kv.mod_revision, String::from_utf8_lossy(&kv.value));
                         write_resp(stream, 200, "OK", line.as_bytes())?;
@@ -331,7 +360,7 @@ fn handle_dcs(
             "PUT" => {
                 let rev: u64 = query_param(&path, "rev").and_then(|s| s.parse().ok()).unwrap_or(0);
                 let mut g = dcs.lock().map_err(|e| HttpError::App(e.to_string()))?;
-                match g.cas(key, &body, rev, 0) {
+                match g.cas(&key, &body, rev, 0) {
                     Ok(new_rev) => {
                         write_resp(stream, 200, "OK", format!("{new_rev}\n").as_bytes())?
                     }
@@ -352,8 +381,8 @@ fn handle_dcs(
         return Ok(());
     }
     if po == "/dcs/leader" && method == "POST" {
-        let key = query_param(&path, "key").unwrap_or("/leader");
-        let holder = query_param(&path, "holder").unwrap_or("node");
+        let key = query_param(&path, "key").unwrap_or_else(|| "/leader".into());
+        let holder = query_param(&path, "holder").unwrap_or_else(|| "node".into());
         let ttl_ms: u64 = query_param(&path, "ttl_ms")
             .and_then(|s| s.parse().ok())
             .unwrap_or(30_000);
@@ -373,8 +402,8 @@ fn handle_dcs(
         return Ok(());
     }
     if po == "/dcs/renew" && method == "POST" {
-        let key = query_param(&path, "key").unwrap_or("/leader");
-        let holder = query_param(&path, "holder").unwrap_or("node");
+        let key = query_param(&path, "key").unwrap_or_else(|| "/leader".into());
+        let holder = query_param(&path, "holder").unwrap_or_else(|| "node".into());
         let lease: u64 = query_param(&path, "lease")
             .and_then(|s| s.parse().ok())
             .unwrap_or(0);
@@ -442,6 +471,13 @@ mod tests {
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};
 
+    fn bind_ephemeral() -> SocketAddr {
+        let l = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = l.local_addr().unwrap();
+        drop(l);
+        addr
+    }
+
     fn temp(tag: &str) -> std::path::PathBuf {
         static N: AtomicU64 = AtomicU64::new(0);
         let n = SystemTime::now()
@@ -457,8 +493,7 @@ mod tests {
     #[test]
     fn kv_http_put_get() {
         let dir = temp("kv");
-        let port = 19000 + (std::process::id() % 500) as u16;
-        let addr: SocketAddr = format!("127.0.0.1:{port}").parse().unwrap();
+        let addr = bind_ephemeral();
         let srv = KvServer::open(&dir).unwrap();
         thread::spawn(move || {
             let _ = srv.serve(addr);
@@ -469,14 +504,27 @@ mod tests {
         let (code, body) = http_exchange(addr, "GET", "/kv/hello", b"").unwrap();
         assert_eq!(code, 200);
         assert_eq!(body, b"world");
+        let (code, body) = http_exchange(addr, "GET", "/kv/hello?x=1", b"").unwrap();
+        assert_eq!(
+            code, 200,
+            "query string must not change the KV key, body={body:?}"
+        );
+        assert_eq!(body, b"world");
+        let (code, _) = http_exchange(addr, "PUT", "/kv/a%2Fb", b"slash").unwrap();
+        assert_eq!(code, 200);
+        let (code, body) = http_exchange(addr, "GET", "/kv/a/b", b"").unwrap();
+        assert_eq!(
+            code, 200,
+            "percent-decoded /kv/a%2Fb must be key a/b, body={body:?}"
+        );
+        assert_eq!(body, b"slash");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
     fn dcs_http_leader_race() {
         let dir = temp("dcs");
-        let port = 19500 + (std::process::id() % 500) as u16;
-        let addr: SocketAddr = format!("127.0.0.1:{port}").parse().unwrap();
+        let addr = bind_ephemeral();
         let srv = DcsServer::open(&dir).unwrap();
         thread::spawn(move || {
             let _ = srv.serve(addr);
@@ -501,12 +549,37 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// Query values must percent-decode (F75 only did the path).
+    #[test]
+    fn dcs_http_query_key_percent_decoded() {
+        let dir = temp("dcs-q");
+        let addr = bind_ephemeral();
+        let srv = DcsServer::open(&dir).unwrap();
+        thread::spawn(move || {
+            let _ = srv.serve(addr);
+        });
+        thread::sleep(Duration::from_millis(100));
+        let (c1, b1) = http_exchange(
+            addr,
+            "POST",
+            "/dcs/leader?key=a%2Fb&holder=n1&ttl_ms=8000",
+            b"",
+        )
+        .unwrap();
+        assert_eq!(c1, 200, "{b1:?}");
+        let (c2, body) = http_exchange(addr, "GET", "/dcs/kv/a/b", b"").unwrap();
+        assert_eq!(
+            c2, 200,
+            "query key=a%2Fb must be the same lock as /dcs/kv/a/b, body={body:?}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// F8: Content-Length must not force multi-GiB allocation / hang.
     #[test]
     fn rejects_oversized_content_length() {
         let dir = temp("clen");
-        let port = 20000 + (std::process::id() % 500) as u16;
-        let addr: SocketAddr = format!("127.0.0.1:{port}").parse().unwrap();
+        let addr = bind_ephemeral();
         let srv = KvServer::open(&dir).unwrap();
         thread::spawn(move || {
             let _ = srv.serve(addr);
@@ -539,8 +612,7 @@ mod tests {
     #[test]
     fn kv_http_requires_token_when_configured() {
         let dir = temp("auth");
-        let port = 20100 + (std::process::id() % 400) as u16;
-        let addr: SocketAddr = format!("127.0.0.1:{port}").parse().unwrap();
+        let addr = bind_ephemeral();
         let srv = KvServer::open_with_auth(&dir, Some("sekrit".into())).unwrap();
         thread::spawn(move || {
             let _ = srv.serve(addr);

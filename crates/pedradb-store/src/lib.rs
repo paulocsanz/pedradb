@@ -46,6 +46,7 @@
 mod ae_ack_kernel;
 mod commit_kernel;
 mod compact_kernel;
+mod snapshot_kernel;
 mod txn_kernel;
 mod msg;
 pub mod client;
@@ -83,10 +84,17 @@ pub use compact_kernel::{
     compact_index_floor, compact_ready, may_compact_through, may_compact_through_as_is,
     peer_counts_for_compact, peer_counts_for_compact_as_is,
 };
+pub use snapshot_kernel::{
+    snapshot_needs_txn_meta_clear, snapshot_needs_txn_meta_clear_as_is,
+    snapshot_touches_user_key, snapshot_touches_user_key_as_is,
+};
 pub use txn_kernel::{
-    discard_cut, discard_cut_as_is, revert_clears_status, revert_clears_status_as_is,
-    revert_user_action, revert_user_action_as_is, should_repair_si_hist,
-    should_repair_si_hist_as_is, txn_commit_action, txn_commit_action_as_is, RevertUserAction,
+    discard_cut, discard_cut_as_is, leftover_txn_is_aborted, leftover_txn_is_aborted_as_is,
+    next_txn_id_after, next_txn_id_as_is, prepare_error_aborts_earlier,
+    prepare_error_aborts_earlier_as_is, recover_si_generation, recover_si_generation_as_is,
+    revert_clears_status, revert_clears_status_as_is, revert_user_action, revert_user_action_as_is,
+    reserve_si_gen, reserve_si_gen_as_is, should_repair_si_hist, should_repair_si_hist_as_is,
+    txn_commit_action, txn_commit_action_as_is, unreserve_si_gen, RevertUserAction, SiGenReserve,
     TxnCommitAction,
 };
 pub use msg::PeerMsg;
@@ -2030,6 +2038,9 @@ impl<E: Env> StoreCluster<E> {
     }
 
     fn abort_leftover_intents(&mut self) {
+        if !txn_kernel::leftover_txn_is_aborted() {
+            return;
+        }
         let ids = self.ids.clone();
         for nid in ids {
             let Some(node) = self.nodes.get_mut(&nid) else {
@@ -2079,8 +2090,8 @@ impl<E: Env> StoreCluster<E> {
     }
 
     fn load_si_from_disk(&mut self) {
-        self.commit_generation = self.load_u64_meta_max("generation");
-        self.safe_watermark = self.load_u64_meta_max("watermark");
+        self.commit_generation = txn_kernel::recover_si_generation(self.load_u64_meta_max("generation"));
+        self.safe_watermark = txn_kernel::recover_si_generation(self.load_u64_meta_max("watermark"));
         let mut best: HashMap<Vec<u8>, Vec<(u64, Option<Vec<u8>>)>> = HashMap::new();
         for node in self.nodes.values() {
             for (hk, raw) in scan_prefix(&node.db, HIST_PREFIX) {
@@ -2121,7 +2132,7 @@ impl<E: Env> StoreCluster<E> {
                 }
             }
         }
-        self.next_txn_id = max_id.saturating_add(1).max(1);
+        self.next_txn_id = txn_kernel::next_txn_id_after(max_id);
     }
 
     fn persist_si_keys(&mut self, keys: &[Vec<u8>]) {
@@ -3130,7 +3141,7 @@ impl<E: Env> StoreCluster<E> {
         };
         let mut out = Vec::new();
         for (k, v) in n.db.range(start_b, end) {
-            if is_reserved_store_key(&k) {
+            if !snapshot_kernel::snapshot_touches_user_key(is_reserved_store_key(&k)) {
                 continue;
             }
             out.push((k.to_vec(), v.to_vec()));
@@ -3225,16 +3236,18 @@ impl<E: Env> StoreCluster<E> {
                 .range(start_b, end_b)
                 .into_iter()
                 .map(|(k, _)| k.to_vec())
-                .filter(|k| !is_reserved_store_key(k))
+                .filter(|k| snapshot_kernel::snapshot_touches_user_key(is_reserved_store_key(k)))
                 .collect();
             if !stale.is_empty() {
                 let ops: Vec<BatchOp> = stale.into_iter().map(BatchOp::delete).collect();
                 n.db.apply_batch(ops)?;
             }
             // Drop orphan intents / txn records for keys in this range (F40).
-            clear_range_txn_meta(&mut n.db, start.as_slice(), end.as_slice())?;
+            if snapshot_kernel::snapshot_needs_txn_meta_clear() {
+                clear_range_txn_meta(&mut n.db, start.as_slice(), end.as_slice())?;
+            }
             for (k, v) in &kv_pairs {
-                if is_reserved_store_key(k) {
+                if !snapshot_kernel::snapshot_touches_user_key(is_reserved_store_key(k)) {
                     continue;
                 }
                 n.db.put(k, v)?;
@@ -3344,9 +3357,8 @@ impl<E: Env> StoreCluster<E> {
                 p.log.pop();
                 // F49/F50: unreserve SI gen so a failed propose does not burn
                 // generations (and so retry can re-use the same logical slot).
-                if stamped_gen > 0 && self.commit_generation == stamped_gen {
-                    self.commit_generation = stamped_gen.saturating_sub(1);
-                }
+                self.commit_generation =
+                    txn_kernel::unreserve_si_gen(self.commit_generation, stamped_gen);
                 return Err(e);
             }
             if !note_items.is_empty() {
@@ -4446,8 +4458,10 @@ impl<E: Env> StoreCluster<E> {
             // F50: any failure after earlier ranges prepared must abort those intents.
             // `?` on missing leader previously returned without cleanup → immortal Conflict.
             let Some(leader) = self.range_leader(*rid) else {
-                for (pr, pkeys) in &keys_by_range {
-                    self.cleanup_range_keys(*pr, txn_id, pkeys, CleanupMode::Abort);
+                if txn_kernel::prepare_error_aborts_earlier() {
+                    for (pr, pkeys) in &keys_by_range {
+                        self.cleanup_range_keys(*pr, txn_id, pkeys, CleanupMode::Abort);
+                    }
                 }
                 return Err(StoreError::NotLeader {
                     range_id: *rid,
@@ -4458,8 +4472,10 @@ impl<E: Env> StoreCluster<E> {
                 let db = &self.nodes.get(&leader).unwrap().db;
                 for (k, _) in range_pairs {
                     if intent_conflict(db, k, Some(txn_id)) {
-                        for (pr, pkeys) in &keys_by_range {
-                            self.cleanup_range_keys(*pr, txn_id, pkeys, CleanupMode::Abort);
+                        if txn_kernel::prepare_error_aborts_earlier() {
+                            for (pr, pkeys) in &keys_by_range {
+                                self.cleanup_range_keys(*pr, txn_id, pkeys, CleanupMode::Abort);
+                            }
                         }
                         return Err(StoreError::Conflict);
                     }
@@ -4477,17 +4493,21 @@ impl<E: Env> StoreCluster<E> {
                     let db = &self.nodes.get(&leader).unwrap().db;
                     let st = db.get(&txn_status_key(txn_id));
                     if st.as_deref() == Some(b"abort".as_ref()) {
-                        for (pr, pkeys) in &keys_by_range {
-                            self.cleanup_range_keys(*pr, txn_id, pkeys, CleanupMode::Abort);
+                        if txn_kernel::prepare_error_aborts_earlier() {
+                            for (pr, pkeys) in &keys_by_range {
+                                self.cleanup_range_keys(*pr, txn_id, pkeys, CleanupMode::Abort);
+                            }
+                            self.cleanup_range_keys(*rid, txn_id, &keys, CleanupMode::Abort);
                         }
-                        self.cleanup_range_keys(*rid, txn_id, &keys, CleanupMode::Abort);
                         return Err(StoreError::Conflict);
                     }
                     keys_by_range.push((*rid, keys));
                 }
                 Err(e) => {
-                    for (pr, pkeys) in &keys_by_range {
-                        self.cleanup_range_keys(*pr, txn_id, pkeys, CleanupMode::Abort);
+                    if txn_kernel::prepare_error_aborts_earlier() {
+                        for (pr, pkeys) in &keys_by_range {
+                            self.cleanup_range_keys(*pr, txn_id, pkeys, CleanupMode::Abort);
+                        }
                     }
                     return Err(e);
                 }
@@ -4593,8 +4613,9 @@ impl<E: Env> StoreCluster<E> {
     /// (F37) so intermediate generations never observe a partial multi-range apply.
     pub fn tx_finish(&mut self, handle: &TxHandle) -> Result<()> {
         // Reserve one SI gen for the whole multi-range TX (F37 + F49).
-        self.commit_generation = self.commit_generation.saturating_add(1);
-        let si_gen = self.commit_generation;
+        let reserved = txn_kernel::reserve_si_gen(self.commit_generation);
+        self.commit_generation = reserved.next_current;
+        let si_gen = reserved.reserved;
         let mut committed: Vec<u64> = Vec::new();
         for rid in &handle.ranges {
             let keys = Self::keys_for_range(handle, *rid).to_vec();
@@ -4850,18 +4871,20 @@ impl<E: Env> StoreCluster<E> {
     fn with_si_gen(&mut self, entry: RangeEntry) -> RangeEntry {
         match entry {
             RangeEntry::Put { key, value, .. } => {
-                self.commit_generation = self.commit_generation.saturating_add(1);
+                let r = txn_kernel::reserve_si_gen(self.commit_generation);
+                self.commit_generation = r.next_current;
                 RangeEntry::Put {
                     key,
                     value,
-                    si_gen: self.commit_generation,
+                    si_gen: r.reserved,
                 }
             }
             RangeEntry::Batch { pairs, .. } => {
-                self.commit_generation = self.commit_generation.saturating_add(1);
+                let r = txn_kernel::reserve_si_gen(self.commit_generation);
+                self.commit_generation = r.next_current;
                 RangeEntry::Batch {
                     pairs,
-                    si_gen: self.commit_generation,
+                    si_gen: r.reserved,
                 }
             }
             other => other,
@@ -5531,6 +5554,19 @@ impl<E: Env> StoreCluster<E> {
         }
         let _ = watch_val;
         Ok(kv.mod_revision)
+    }
+
+    /// DCS get on the freshest local replica (F73: not lagging `ids[0]`).
+    ///
+    /// # Errors
+    /// Empty cluster / unknown node.
+    pub fn dcs_get(&self, key: &[u8]) -> Result<Option<KeyValue>> {
+        let id = self
+            .best_changelog_reader()
+            .or_else(|| self.local_node_id())
+            .or_else(|| self.ids.first().copied())
+            .ok_or_else(|| StoreError::Msg("empty".into()))?;
+        self.dcs_get_on(id, key)
     }
 
     /// DCS get on a node (**lease-aware** via [`Self::now_ms`]).

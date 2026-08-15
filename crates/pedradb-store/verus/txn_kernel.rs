@@ -159,4 +159,135 @@ proof fn lemma_as_is_skips_hist_repair()
 {
 }
 
+pub fn leftover_txn_is_aborted() -> (d: bool)
+    ensures
+        d,
+{
+    true
+}
+
+pub open spec fn leftover_txn_is_aborted_as_is() -> bool {
+    false
+}
+
+proof fn lemma_as_is_leaves_intents()
+    ensures
+        leftover_txn_is_aborted_as_is() == false,
+{
+}
+
+pub fn next_txn_id_after(max_seen: u64) -> (n: u64)
+    ensures
+        n == (if sat_add1(max_seen) > 1 {
+            sat_add1(max_seen)
+        } else {
+            1
+        }),
+        max_seen < u64::MAX ==> n > max_seen,
+        n >= 1,
+{
+    let s = if max_seen == u64::MAX {
+        max_seen
+    } else {
+        max_seen + 1
+    };
+    if s > 1 {
+        s
+    } else {
+        1
+    }
+}
+
+pub fn recover_si_generation(loaded_max: u64) -> (g: u64)
+    ensures
+        g == loaded_max,
+{
+    loaded_max
+}
+
+pub open spec fn recover_si_generation_as_is(_loaded: u64) -> u64 {
+    0
+}
+
+proof fn lemma_as_is_evaporates_si(loaded: u64)
+    requires
+        loaded > 0,
+    ensures
+        recover_si_generation_as_is(loaded) == 0,
+        recover_si_generation_as_is(loaded) != loaded,
+{
+}
+
+pub fn prepare_error_aborts_earlier() -> (d: bool)
+    ensures
+        d,
+{
+    true
+}
+
+pub open spec fn prepare_error_aborts_earlier_as_is() -> bool {
+    false
+}
+
+proof fn lemma_as_is_skips_prepare_abort()
+    ensures
+        prepare_error_aborts_earlier_as_is() == false,
+{
+}
+
+pub struct SiGenReserve {
+    pub next_current: u64,
+    pub reserved: u64,
+}
+
+pub fn reserve_si_gen(current: u64) -> (r: SiGenReserve)
+    ensures
+        r.next_current == sat_add1(current),
+        r.reserved == r.next_current,
+        current < u64::MAX ==> r.reserved > current,
+{
+    let n = if current == u64::MAX {
+        current
+    } else {
+        current + 1
+    };
+    SiGenReserve {
+        next_current: n,
+        reserved: n,
+    }
+}
+
+pub open spec fn reserve_si_gen_as_is(current: u64) -> (u64, u64) {
+    (current, sat_add1(current))
+}
+
+proof fn lemma_as_is_collides(current: u64)
+    requires
+        current < u64::MAX,
+    ensures
+        reserve_si_gen_as_is(current).0 == current,
+        reserve_si_gen_as_is(current).1 == current + 1,
+        ({
+            let again = reserve_si_gen_as_is(reserve_si_gen_as_is(current).0);
+            again.1 == reserve_si_gen_as_is(current).1
+        }),
+{
+}
+
+pub fn unreserve_si_gen(current: u64, stamped: u64) -> (n: u64)
+    ensures
+        (stamped > 0 && current == stamped) ==> n == (if stamped == 0 {
+            0
+        } else {
+            (stamped - 1) as u64
+        }),
+        !(stamped > 0 && current == stamped) ==> n == current,
+{
+    if stamped > 0 && current == stamped {
+        stamped - 1
+    } else {
+        current
+    }
+}
+
 } // verus!

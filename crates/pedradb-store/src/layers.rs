@@ -98,17 +98,14 @@ impl EtcdNeedFace {
         cluster.dcs_cas(&full, value, expected_rev)
     }
 
-    /// Get coordination key (LocalApplied; leadership-invisible — any local node).
+    /// Get coordination key (LocalApplied on the freshest local replica).
+    ///
+    /// F73: do not default to `ids[0]` — a partitioned node 1 misses majority creates.
     pub fn get(
         cluster: &StoreCluster,
         key: &[u8],
     ) -> Result<Option<pedradb_dcs::KeyValue>> {
-        let full = Self::full_key(key);
-        let id = cluster
-            .local_node_id()
-            .or_else(|| cluster.member_ids().first().copied())
-            .ok_or_else(|| crate::StoreError::Msg("empty cluster".into()))?;
-        cluster.dcs_get_on(id, &full)
+        cluster.dcs_get(&Self::full_key(key))
     }
 
     /// Get on an explicit node (tests / multiproc).
@@ -704,6 +701,25 @@ mod tests {
         assert!(saw >= 1, "expected watch events, saw={saw}");
         // Second create fails.
         assert!(EtcdNeedFace::create(&mut c, b"leader", b"n3").is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// `EtcdNeedFace::get` used `local_node_id().or(ids[0])` — in-process that
+    /// is node 1. After partitioning 1, a majority create is invisible (F72 class).
+    #[test]
+    fn etcd_need_get_skips_lagging_first_node() {
+        let dir = temp();
+        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        c.elect_all(80).unwrap();
+        c.set_participating(1, false).unwrap();
+        c.elect_all(120).unwrap();
+        assert!(c.range_leader(1).is_some_and(|l| l != 1));
+        let rev = EtcdNeedFace::create(&mut c, b"lock", b"holder").expect("majority create");
+        assert!(rev >= 1);
+        let kv = EtcdNeedFace::get(&c, b"lock")
+            .unwrap()
+            .expect("get used lagging node 1, missing live lock");
+        assert_eq!(kv.value.as_slice(), b"holder");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
