@@ -49,3 +49,16 @@ What this run *does* say:
 3. zipfian + 1 KB did not change the write story vs the earlier uniform/100 B run. It **destroyed** MVCC-latest (3 qps, p50 292 ms) because the eager iterator now copies a 4k×2-version 1 KB CF every seek.
 
 Published TiKV cluster numbers are not a Pedra target until there is a TiKV on Pedra. This pair is the honest engine-level answer today.
+
+## RFC-0033 P0.1/P0.2 remesure (2026-08-15, deps-only)
+
+Same knobs (4096/2000, zipfian, 1 KB). Compat only — no Rocks peer in this slice. After apply (64k txns, batch=32).
+
+| shape | after 0032 (`5cf09a9`) | after 0033 P0.1/P0.2 | note |
+|---|---:|---:|---|
+| deps_mvcc_latest | 124 qps / p50 1.9 ms | **899 qps / p50 0.90 ms** | `last_under_prefix`; still ≪ floor 37k |
+| deps_scan | 1,024 qps / p50 0.97 ms | 333 qps / p50 1.20 ms | p50 similar; qps tail (P0.3 still open) |
+
+Smoke 512/200 (smaller LSM): mvcc 5.4k qps / p50 0.15 ms · scan 9.1k qps / p50 0.077 ms.
+
+Guarantees: WAL `sync_all` unchanged. Per-layer scan cap **not** shipped (would hide live keys after a deleted prefix). Adversarial assertions unchanged.

@@ -79,7 +79,12 @@ impl MemTable {
     }
 
     /// Convenience: put `user_key → value` at `sequence`.
-    pub fn put(&mut self, user_key: impl Into<Bytes>, sequence: SequenceNumber, value: impl Into<Bytes>) {
+    pub fn put(
+        &mut self,
+        user_key: impl Into<Bytes>,
+        sequence: SequenceNumber,
+        value: impl Into<Bytes>,
+    ) {
         let key = InternalKey::new(user_key, sequence, ValueType::Value);
         self.insert(key, value.into());
     }
@@ -202,7 +207,7 @@ impl MemTable {
         &'a self,
         start: Bound<&'a [u8]>,
         end: Bound<&'a [u8]>,
-    ) -> impl Iterator<Item = (&'a InternalKey, &'a Bytes)> + 'a {
+    ) -> impl Iterator<Item = (&'a InternalKey, &'a Bytes)> + DoubleEndedIterator + 'a {
         use crate::key::MAX_SEQUENCE_NUMBER;
         // Smallest internal key for user `u` (newest, highest kind).
         let start_key = match start {
@@ -245,6 +250,49 @@ impl MemTable {
             (Some(k), true) => Bound::Excluded(k),
         };
         self.map.range((lo, hi))
+    }
+
+    /// Largest user key in `[prefix, before)` visible at `snapshot`.
+    ///
+    /// RFC-0033: reverse BTree walk of the prefix, then [`get_entry`] so a
+    /// newer tombstone on the same user key wins (InternalKey order is
+    /// seq-descending; a raw reverse walk would see the oldest version first).
+    /// `before` is an exclusive upper bound inside the prefix (retry after a
+    /// cross-layer tombstone). `None` means `prefix_succ`.
+    #[must_use]
+    pub fn last_visible_under_prefix(
+        &self,
+        prefix: &[u8],
+        snapshot: SequenceNumber,
+        before: Option<&[u8]>,
+    ) -> Option<(Bytes, Bytes)> {
+        let prefix_end = crate::prefix::prefix_exclusive_end(prefix);
+        let end_b = match (before, prefix_end.as_deref()) {
+            (Some(b), Some(p)) if b < p => Bound::Excluded(b),
+            (Some(b), None) => Bound::Excluded(b),
+            (_, Some(p)) => Bound::Excluded(p),
+            (_, None) => Bound::Unbounded,
+        };
+        let mut seen: Option<Bytes> = None;
+        for (ikey, _) in self
+            .iter_internal_range(Bound::Included(prefix), end_b)
+            .rev()
+        {
+            if ikey.kind == ValueType::RangeDeletion {
+                continue;
+            }
+            if !prefix.is_empty() && !ikey.user_key.starts_with(prefix) {
+                continue;
+            }
+            if seen.as_ref().is_some_and(|s| s == &ikey.user_key) {
+                continue;
+            }
+            seen = Some(ikey.user_key.clone());
+            if let Some((_, Lookup::Found(v))) = self.get_entry(ikey.user_key.as_ref(), snapshot) {
+                return Some((ikey.user_key.clone(), v));
+            }
+        }
+        None
     }
 
     /// Rewrite every stored value with `f` (used by value-log GC remapping).
@@ -401,7 +449,10 @@ mod tests {
 
         let at_1: Vec<_> = mt.iter_snapshot(1).collect();
         assert_eq!(at_1.len(), 3);
-        assert_eq!(at_1[1], (Bytes::from_static(b"b"), Bytes::from_static(b"vb")));
+        assert_eq!(
+            at_1[1],
+            (Bytes::from_static(b"b"), Bytes::from_static(b"vb"))
+        );
     }
 
     #[test]
@@ -414,7 +465,10 @@ mod tests {
             .range_snapshot(Bound::Included(b"b"), Bound::Excluded(b"d"), 1)
             .map(|(k, _)| k)
             .collect();
-        assert_eq!(mid, vec![Bytes::from_static(b"b"), Bytes::from_static(b"c")]);
+        assert_eq!(
+            mid,
+            vec![Bytes::from_static(b"b"), Bytes::from_static(b"c")]
+        );
     }
 
     #[test]
@@ -443,5 +497,58 @@ mod tests {
         assert!(mt.approx_memory_usage() >= 5 + 5 + 8);
         assert_eq!(mt.len(), 1);
         assert!(!mt.is_empty());
+    }
+
+    #[test]
+    fn last_visible_under_prefix_skips_deleted_tail() {
+        let mut mt = MemTable::new();
+        mt.put(b"p/a".as_slice(), 1, b"va".as_slice());
+        mt.put(b"p/b".as_slice(), 1, b"vb".as_slice());
+        mt.put(b"p/c".as_slice(), 1, b"vc".as_slice());
+        mt.delete(b"p/c".as_slice(), 2);
+        let (k, v) = mt
+            .last_visible_under_prefix(b"p/", 2, None)
+            .expect("live key under prefix");
+        assert_eq!(&k[..], b"p/b");
+        assert_eq!(&v[..], b"vb");
+        // Newer deletion is invisible at seq=1.
+        let (k1, v1) = mt
+            .last_visible_under_prefix(b"p/", 1, None)
+            .expect("old snapshot");
+        assert_eq!(&k1[..], b"p/c");
+        assert_eq!(&v1[..], b"vc");
+    }
+
+    #[test]
+    fn last_visible_under_prefix_newest_version_not_older() {
+        let mut mt = MemTable::new();
+        mt.put(b"u/1".as_slice(), 1, b"v1".as_slice());
+        mt.put(b"u/1".as_slice(), 2, b"v2".as_slice());
+        mt.put(b"u/1".as_slice(), 3, b"v3".as_slice());
+        mt.put(b"u/2".as_slice(), 4, b"other".as_slice());
+        let (k, v) = mt
+            .last_visible_under_prefix(b"u/1", 10, None)
+            .expect("latest of u/1");
+        assert_eq!(&k[..], b"u/1");
+        assert_eq!(&v[..], b"v3");
+        let (_, mid) = mt
+            .last_visible_under_prefix(b"u/1", 2, None)
+            .expect("mid snapshot");
+        assert_eq!(&mid[..], b"v2");
+    }
+
+    #[test]
+    fn last_visible_under_prefix_respects_before() {
+        let mut mt = MemTable::new();
+        mt.put(b"p/a".as_slice(), 1, b"va".as_slice());
+        mt.put(b"p/b".as_slice(), 1, b"vb".as_slice());
+        mt.put(b"p/c".as_slice(), 1, b"vc".as_slice());
+        let (k, _) = mt
+            .last_visible_under_prefix(b"p/", 1, Some(b"p/c"))
+            .expect("before p/c");
+        assert_eq!(&k[..], b"p/b");
+        assert!(mt
+            .last_visible_under_prefix(b"p/", 1, Some(b"p/a"))
+            .is_none());
     }
 }

@@ -16,11 +16,11 @@
 
 #![forbid(unsafe_code)]
 
-use pedradb_core::{BatchOp, CoreError, Db, Env, Snapshot as CoreSnapshot, StdEnv};
 use bytes::Bytes;
+use pedradb_core::{BatchOp, CoreError, Db, Env, ScanProjection, Snapshot as CoreSnapshot, StdEnv};
+use std::collections::VecDeque;
 use std::fmt;
 use std::ops::Bound;
-use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
 /// Compatibility error surface (rust-rocksdb exposes one opaque `Error`).
@@ -148,8 +148,6 @@ fn encoded_succ(enc: &[u8]) -> Option<Vec<u8>> {
     None
 }
 
-
-
 /// Atomic write batch (one Pedra `apply_batch` = all-or-nothing).
 #[derive(Debug, Default)]
 pub struct WriteBatch {
@@ -177,7 +175,13 @@ impl WriteBatch {
 
     /// Put into the default CF.
     pub fn put(&mut self, key: impl AsRef<[u8]>, value: impl AsRef<[u8]>) {
-        self.put_cf(&ColumnFamily { name: DEFAULT_CF.into() }, key, value);
+        self.put_cf(
+            &ColumnFamily {
+                name: DEFAULT_CF.into(),
+            },
+            key,
+            value,
+        );
     }
 
     /// Put into a named CF.
@@ -193,7 +197,12 @@ impl WriteBatch {
 
     /// Delete from the default CF.
     pub fn delete(&mut self, key: impl AsRef<[u8]>) {
-        self.delete_cf(&ColumnFamily { name: DEFAULT_CF.into() }, key);
+        self.delete_cf(
+            &ColumnFamily {
+                name: DEFAULT_CF.into(),
+            },
+            key,
+        );
     }
 
     /// Delete from a named CF.
@@ -440,7 +449,12 @@ impl<E: Env> Snapshot<'_, E> {
     /// # Errors
     /// Unknown CF or snapshot-too-old.
     pub fn iterator(&self, mode: IteratorMode) -> Result<DBIterator<E>> {
-        self.iterator_cf(&ColumnFamily { name: DEFAULT_CF.into() }, mode)
+        self.iterator_cf(
+            &ColumnFamily {
+                name: DEFAULT_CF.into(),
+            },
+            mode,
+        )
     }
 
     /// CF iterator pinned at the snapshot sequence.
@@ -644,7 +658,13 @@ impl<E: Env> DB<E> {
     /// # Errors
     /// WAL I/O or unknown CF.
     pub fn put(&self, key: impl AsRef<[u8]>, value: impl AsRef<[u8]>) -> Result<()> {
-        self.put_cf(&ColumnFamily { name: DEFAULT_CF.into() }, key, value)
+        self.put_cf(
+            &ColumnFamily {
+                name: DEFAULT_CF.into(),
+            },
+            key,
+            value,
+        )
     }
 
     /// Put into a named CF.
@@ -669,7 +689,12 @@ impl<E: Env> DB<E> {
     /// # Errors
     /// Pedra read errors.
     pub fn get(&self, key: impl AsRef<[u8]>) -> Result<Option<Vec<u8>>> {
-        self.get_cf(&ColumnFamily { name: DEFAULT_CF.into() }, key)
+        self.get_cf(
+            &ColumnFamily {
+                name: DEFAULT_CF.into(),
+            },
+            key,
+        )
     }
 
     /// Get from a named CF.
@@ -684,7 +709,12 @@ impl<E: Env> DB<E> {
             .map(|b| b.to_vec()))
     }
 
-    fn get_at(&self, snap: CoreSnapshot, cf: &str, key: impl AsRef<[u8]>) -> Result<Option<Vec<u8>>> {
+    fn get_at(
+        &self,
+        snap: CoreSnapshot,
+        cf: &str,
+        key: impl AsRef<[u8]>,
+    ) -> Result<Option<Vec<u8>>> {
         self.check_cf(cf)?;
         let guard = self.inner.lock().expect("db mutex");
         guard
@@ -698,7 +728,12 @@ impl<E: Env> DB<E> {
     /// # Errors
     /// WAL I/O or unknown CF.
     pub fn delete(&self, key: impl AsRef<[u8]>) -> Result<()> {
-        self.delete_cf(&ColumnFamily { name: DEFAULT_CF.into() }, key)
+        self.delete_cf(
+            &ColumnFamily {
+                name: DEFAULT_CF.into(),
+            },
+            key,
+        )
     }
 
     /// Delete from a named CF.
@@ -774,7 +809,12 @@ impl<E: Env> DB<E> {
     /// # Errors
     /// Pedra scan errors.
     pub fn iterator(&self, mode: IteratorMode) -> Result<DBIterator<E>> {
-        self.iterator_cf(&ColumnFamily { name: DEFAULT_CF.into() }, mode)
+        self.iterator_cf(
+            &ColumnFamily {
+                name: DEFAULT_CF.into(),
+            },
+            mode,
+        )
     }
 
     /// Iterator over a named CF at the latest sequence.
@@ -784,6 +824,59 @@ impl<E: Env> DB<E> {
     pub fn iterator_cf(&self, cf: &ColumnFamily, mode: IteratorMode) -> Result<DBIterator<E>> {
         let seq = self.inner.lock().expect("db mutex").last_sequence();
         scan_cf_at(&self.inner, &self.codec, &cf.name, mode, seq, &self.cfs)
+    }
+
+    /// Last user key in `cf` that starts with `prefix` (RFC-0033).
+    ///
+    /// Same visibility as `get` (newest live version, no tombstones). Does not
+    /// walk the prefix. WAL / fencing / accept-set unchanged.
+    ///
+    /// # Errors
+    /// Unknown CF or Pedra read errors.
+    pub fn last_key_with_prefix(
+        &self,
+        cf: &ColumnFamily,
+        prefix: impl AsRef<[u8]>,
+    ) -> Result<Option<Vec<u8>>> {
+        self.check_cf(&cf.name)?;
+        let encoded = self.codec.encode(&cf.name, prefix.as_ref());
+        let guard = self.inner.lock().expect("db mutex");
+        let seq = guard.last_sequence();
+        match guard.last_under_prefix(seq, &encoded)? {
+            Some(k) => Ok(Some(self.codec.decode(&cf.name, &k).to_vec())),
+            None => Ok(None),
+        }
+    }
+
+    /// Count live keys in `[start, end)` in `cf`, stopping at `limit` (RFC-0033).
+    ///
+    /// Key-only projection: same visibility as a forward iterator, no value
+    /// resolve. Used by deps_scan; does not change iterator value semantics.
+    ///
+    /// # Errors
+    /// Unknown CF or Pedra scan errors.
+    pub fn count_cf(
+        &self,
+        cf: &ColumnFamily,
+        start: impl AsRef<[u8]>,
+        end: impl AsRef<[u8]>,
+        limit: usize,
+    ) -> Result<usize> {
+        self.check_cf(&cf.name)?;
+        let lo = self.codec.encode(&cf.name, start.as_ref());
+        let hi = self.codec.encode(&cf.name, end.as_ref());
+        let guard = self.inner.lock().expect("db mutex");
+        let seq = guard.last_sequence();
+        let n = guard
+            .try_scan_at_projected(
+                seq,
+                Bound::Included(lo.as_slice()),
+                Bound::Excluded(hi.as_slice()),
+                Some(limit),
+                ScanProjection::KeyOnly,
+            )?
+            .count();
+        Ok(n)
     }
 
     /// Flush memtable to SST.
@@ -854,7 +947,9 @@ mod tests {
         assert_eq!(db.get_cf(&b, b"bk").unwrap().as_deref(), Some(&b"bv"[..]));
 
         // Atomicity: a failing batch applies nothing (unknown CF short-circuits).
-        let ghost = ColumnFamily { name: "ghost".into() };
+        let ghost = ColumnFamily {
+            name: "ghost".into(),
+        };
         let mut wb = WriteBatch::new();
         wb.put(b"staged", b"x");
         wb.put_cf(&ghost, b"gk", b"gv");
@@ -921,7 +1016,10 @@ mod tests {
         let raft = db.cf_handle("raft").unwrap();
         db.put_cf(&raft, b"log-1", b"r1").unwrap();
         db.put(b"log-1", b"d1").unwrap();
-        assert_eq!(db.get_cf(&raft, b"log-1").unwrap().as_deref(), Some(&b"r1"[..]));
+        assert_eq!(
+            db.get_cf(&raft, b"log-1").unwrap().as_deref(),
+            Some(&b"r1"[..])
+        );
         assert_eq!(db.get(b"log-1").unwrap().as_deref(), Some(&b"d1"[..]));
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -968,6 +1066,36 @@ mod tests {
         let last = last.expect("user 40 has versions");
         assert!(last.starts_with(&prefix));
         assert_eq!(&last[prefix.len()..], &3u64.to_be_bytes());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn last_key_with_prefix_and_count_cf() {
+        let dir = tmp("lastpref");
+        let db = DB::open_cf(&Options::new(), &dir, &["write"]).unwrap();
+        let cf = db.cf_handle("write").unwrap();
+        for u in 0..8u8 {
+            for ver in 1..=3u8 {
+                let mut k = format!("u/{u:02}").into_bytes();
+                k.extend_from_slice(&u64::from(ver).to_be_bytes());
+                db.put_cf(&cf, &k, [ver]).unwrap();
+            }
+        }
+        let prefix = b"u/03".as_slice();
+        let last = db
+            .last_key_with_prefix(&cf, prefix)
+            .unwrap()
+            .expect("user 03");
+        assert!(last.starts_with(prefix), "{last:?}");
+        assert_eq!(&last[prefix.len()..], &3u64.to_be_bytes());
+        db.delete_cf(&cf, &last).unwrap();
+        let prev = db
+            .last_key_with_prefix(&cf, prefix)
+            .unwrap()
+            .expect("older");
+        assert_eq!(&prev[prefix.len()..], &2u64.to_be_bytes());
+        let n = db.count_cf(&cf, b"u/00", b"u/05", 25).unwrap();
+        assert_eq!(n, 14); // 5 users × 3 vers − 1 delete
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -3,7 +3,7 @@
 //! `real`). Both implement the same [`Engine`] ops so the runner's schedule
 //! cannot drift between engines.
 
-use crate::{CfWrite, DEPS_CFS, Engine};
+use crate::{CfWrite, Engine, DEPS_CFS};
 use std::path::Path;
 
 /// rocksdb-compat on pedradb-core (always available). Single node, single
@@ -88,37 +88,13 @@ impl Engine for CompatEngine {
         self.db.write(&wb).is_ok()
     }
     fn latest_cf(&self, cf: &str, prefix: &[u8]) -> Result<Option<Vec<u8>>, ()> {
-        // RFC-0032 P0.2: last key in [prefix, prefix_succ) — do not reverse-scan the CF.
+        // RFC-0033: last_under_prefix — not a prefix walk.
         let h = self.db.cf_handle(cf).ok_or(())?;
-        let mut it = self
-            .db
-            .iterator_cf(
-                &h,
-                rocksdb_compat::IteratorMode::From(prefix, rocksdb_compat::Direction::Forward),
-            )
-            .map_err(|_| ())?;
-        let mut last = None;
-        while it.valid() && it.key().starts_with(prefix) {
-            last = Some(it.key().to_vec());
-            it.next();
-        }
-        Ok(last)
+        self.db.last_key_with_prefix(&h, prefix).map_err(|_| ())
     }
     fn scan_count_cf(&self, cf: &str, start: &[u8], end: &[u8], cap: usize) -> Result<usize, ()> {
         let h = self.db.cf_handle(cf).ok_or(())?;
-        let mut it = self
-            .db
-            .iterator_cf(
-                &h,
-                rocksdb_compat::IteratorMode::From(start, rocksdb_compat::Direction::Forward),
-            )
-            .map_err(|_| ())?;
-        let mut n = 0;
-        while it.valid() && n < cap && it.key() < end {
-            n += 1;
-            it.next();
-        }
-        Ok(n)
+        self.db.count_cf(&h, start, end, cap).map_err(|_| ())
     }
 }
 
@@ -276,7 +252,10 @@ impl Engine for RocksEngine {
         let h = self.db.cf_handle(cf).ok_or(())?;
         Ok(self
             .db
-            .iterator_cf(h, rocksdb::IteratorMode::From(start, rocksdb::Direction::Forward))
+            .iterator_cf(
+                h,
+                rocksdb::IteratorMode::From(start, rocksdb::Direction::Forward),
+            )
             .map_while(|r| r.ok())
             .take(cap)
             .take_while(|(k, _)| k.as_ref() < end)

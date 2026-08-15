@@ -1313,6 +1313,63 @@ impl<E: Env> Db<E> {
             .unwrap_or_else(|_| Vec::new())
     }
 
+    /// Largest user key that starts with `prefix` and is visible at `snapshot`.
+    ///
+    /// RFC-0033: per-layer last key in `[prefix, before)`, then confirm with
+    /// [`lookup`] so a newer tombstone in another layer cannot leak. Empty
+    /// prefix means the whole keyspace. Does not run `StreamingVisibleIter`
+    /// over the prefix. WAL / fencing / accept-set are untouched (read path).
+    ///
+    /// # Errors
+    /// [`CoreError::SnapshotTooOld`].
+    pub fn last_under_prefix(
+        &self,
+        snapshot: SequenceNumber,
+        prefix: &[u8],
+    ) -> Result<Option<Bytes>> {
+        self.ensure_snapshot_readable(Snapshot::at(snapshot))?;
+        if snapshot == 0 {
+            return Ok(None);
+        }
+        let mut before = crate::prefix::prefix_exclusive_end(prefix);
+        loop {
+            let mut cand: Option<Bytes> = None;
+            let mut consider = |k: Bytes| {
+                if !prefix.is_empty() && !k.starts_with(prefix) {
+                    return;
+                }
+                if let Some(h) = before.as_deref() {
+                    if k.as_ref() >= h {
+                        return;
+                    }
+                }
+                if cand.as_ref().is_none_or(|c| k.as_ref() > c.as_ref()) {
+                    cand = Some(k);
+                }
+            };
+            let hi = before.as_deref();
+            for table in self.mem_layers() {
+                if let Some((k, _)) = table.last_visible_under_prefix(prefix, snapshot, hi) {
+                    consider(k);
+                }
+            }
+            for table in &self.ssts {
+                if let Some((k, _)) = table.last_visible_under_prefix(prefix, snapshot, hi) {
+                    consider(k);
+                }
+            }
+            let Some(k) = cand else {
+                return Ok(None);
+            };
+            match self.lookup(k.as_ref(), snapshot) {
+                Lookup::Found(_) => return Ok(Some(k)),
+                Lookup::Deleted | Lookup::NotFound => {
+                    before = Some(k.to_vec());
+                }
+            }
+        }
+    }
+
     /// Range at `snapshot` with optional live-key `limit`.
     ///
     /// Uses the streaming merge path ([`Self::try_scan_at`]) so the full keyspace is
@@ -1444,6 +1501,9 @@ impl<E: Env> Db<E> {
         }
         let mut streams: Vec<Vec<(InternalKey, Bytes)>> = Vec::with_capacity(3 + self.ssts.len());
         // F110: include flush_read_pin so range/scan see acked keys during off-lock flush.
+        // Do not cap per-layer collection at `limit`: a tombstone covering the
+        // first N keys of one SST would hide live keys later in the same file
+        // (G2). `limit` is applied at merge emit in StreamingVisibleIter.
         for table in self.mem_layers() {
             streams.push(self.memtable_stream(table, start, end, resolve_values));
         }
@@ -1466,7 +1526,6 @@ impl<E: Env> Db<E> {
     ) -> Vec<(InternalKey, Bytes)> {
         let mut stream = Vec::new();
         if table.has_range_tombstones() {
-            // Covering tombstones may start outside `[start, end)`.
             for (k, v) in table.iter_internal() {
                 if k.kind == ValueType::RangeDeletion
                     || crate::merge::user_key_in_range(k.user_key.as_ref(), start, end)
@@ -5544,7 +5603,7 @@ mod tests {
         assert_eq!(db.write_stall_mem_bytes(), Some(64));
         let payload = vec![0xABu8; 40];
         db.put(b"a", &payload).unwrap(); // first write under/near limit
-        // Keep putting until stall (no drain).
+                                         // Keep putting until stall (no drain).
         let mut stalled = false;
         for i in 0..20u8 {
             match db.put([b'k', i], &payload) {
@@ -5653,7 +5712,11 @@ mod tests {
             db.write_pressure_count() > pressure_before,
             "expected pressure drain counter bump"
         );
-        assert_eq!(db.write_stall_count(), 0, "soft pressure must not hard-stall");
+        assert_eq!(
+            db.write_stall_count(),
+            0,
+            "soft pressure must not hard-stall"
+        );
         db.close().unwrap();
         let _ = fs::remove_dir_all(&dir);
     }
@@ -7417,6 +7480,97 @@ mod tests {
         assert!(chlog.exists(), "close must persist the CHANGELOG cache");
         let db = Db::open(&dir).unwrap();
         assert_eq!(db.get(b"a").as_deref(), Some(b"1".as_ref()));
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0033: last_under_prefix is the latest user key under the prefix,
+    /// not a neighbour, and matches `lookup` visibility (tombstone / snapshot).
+    #[test]
+    fn last_under_prefix_versions_and_tombstone() {
+        let dir = temp_dir();
+        let mut db = Db::open(&dir).unwrap();
+        for user in 0..8u32 {
+            for ver in 1..=3u64 {
+                let mut k = format!("u/{user:02}").into_bytes();
+                k.extend_from_slice(&ver.to_be_bytes());
+                db.put(&k, format!("v{ver}").as_bytes()).unwrap();
+            }
+        }
+        let snap = db.last_sequence();
+        let last = db
+            .last_under_prefix(snap, b"u/03")
+            .unwrap()
+            .expect("user 03");
+        assert!(last.starts_with(b"u/03"), "{last:?}");
+        assert!(!last.starts_with(b"u/04"), "must not leak neighbour");
+        assert_eq!(&last[last.len() - 8..], &3u64.to_be_bytes());
+
+        // Delete the latest version of u/03; previous version remains.
+        db.delete(&last).unwrap();
+        let snap2 = db.last_sequence();
+        let prev = db
+            .last_under_prefix(snap2, b"u/03")
+            .unwrap()
+            .expect("older version");
+        assert_eq!(&prev[prev.len() - 8..], &2u64.to_be_bytes());
+        // Snapshot mid: still sees the deleted latest.
+        let at_old = db
+            .last_under_prefix(snap, b"u/03")
+            .unwrap()
+            .expect("pinned");
+        assert_eq!(at_old, last);
+
+        db.flush().unwrap();
+        let after_flush = db
+            .last_under_prefix(db.last_sequence(), b"u/03")
+            .unwrap()
+            .expect("sst");
+        assert_eq!(after_flush, prev);
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn last_under_prefix_range_tombstone_skips_tail() {
+        let dir = temp_dir();
+        let mut db = Db::open(&dir).unwrap();
+        db.put(b"p/a", b"1").unwrap();
+        db.put(b"p/b", b"2").unwrap();
+        db.put(b"p/c", b"3").unwrap();
+        db.put(b"p/d", b"4").unwrap();
+        db.flush().unwrap();
+        db.delete_range(b"p/c", b"p/z").unwrap();
+        let last = db
+            .last_under_prefix(db.last_sequence(), b"p/")
+            .unwrap()
+            .expect("live tail");
+        assert_eq!(&last[..], b"p/b");
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn try_scan_at_limit_matches_prefix_of_unlimited() {
+        let dir = temp_dir();
+        let mut db = Db::open(&dir).unwrap();
+        for i in 0..80u32 {
+            db.put(format!("k{i:03}").as_bytes(), b"v").unwrap();
+        }
+        db.flush().unwrap();
+        let snap = db.last_sequence();
+        let all: Vec<_> = db
+            .try_scan_at(snap, Bound::Unbounded, Bound::Unbounded, None)
+            .unwrap()
+            .map(|kv| kv.key)
+            .collect();
+        let limited: Vec<_> = db
+            .try_scan_at(snap, Bound::Unbounded, Bound::Unbounded, Some(25))
+            .unwrap()
+            .map(|kv| kv.key)
+            .collect();
+        assert_eq!(limited.len(), 25);
+        assert_eq!(limited, all[..25]);
         db.close().unwrap();
         let _ = fs::remove_dir_all(&dir);
     }

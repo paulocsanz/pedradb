@@ -365,16 +365,13 @@ impl SstTable {
             }
             // Entire block is strictly before `user_key` if the next block starts
             // before `user_key` as well (sorted index).
-            if bi + 1 < self.index.len()
-                && self.index[bi + 1].first_user_key.as_ref() < user_key
-            {
+            if bi + 1 < self.index.len() && self.index[bi + 1].first_user_key.as_ref() < user_key {
                 continue;
             }
             let Ok(block) = self.decode_block(bi) else {
                 continue;
             };
-            if let Some((seq, look)) = Self::best_point_in_entry_slice(&block, user_key, snapshot)
-            {
+            if let Some((seq, look)) = Self::best_point_in_entry_slice(&block, user_key, snapshot) {
                 if best.as_ref().is_none_or(|(s, _)| seq > *s) {
                     best = Some((seq, look));
                 }
@@ -559,9 +556,8 @@ impl SstTable {
     }
 
     fn decode_v1(path: &Path, file_len: usize, c: &mut Cursor<'_>) -> Result<Self> {
-        let n = usize::try_from(c.read_u64()?).map_err(|_| {
-            CoreError::Internal("SST entry count does not fit usize".into())
-        })?;
+        let n = usize::try_from(c.read_u64()?)
+            .map_err(|_| CoreError::Internal("SST entry count does not fit usize".into()))?;
         check_sst_entry_count(n, file_len, path)?;
         let mut entries = Vec::with_capacity(n);
         let mut max_sequence = 0;
@@ -602,16 +598,14 @@ impl SstTable {
         expect_bloom: bool,
         compressed_blocks: bool,
     ) -> Result<Self> {
-        let n = usize::try_from(c.read_u64()?).map_err(|_| {
-            CoreError::Internal("SST entry count does not fit usize".into())
-        })?;
+        let n = usize::try_from(c.read_u64()?)
+            .map_err(|_| CoreError::Internal("SST entry count does not fit usize".into()))?;
         check_sst_entry_count(n, buf.len(), path)?;
         let max_sequence = c.read_u64()?;
         let num_blocks = c.read_u32()? as usize;
         check_sst_block_count(num_blocks, buf.len(), path)?;
-        let data_len = usize::try_from(c.read_u64()?).map_err(|_| {
-            CoreError::Internal("SST data_len overflow".into())
-        })?;
+        let data_len = usize::try_from(c.read_u64()?)
+            .map_err(|_| CoreError::Internal("SST data_len overflow".into()))?;
         let data_start = c.pos;
         let data_end = data_start
             .checked_add(data_len)
@@ -639,9 +633,8 @@ impl SstTable {
 
         let bloom = if expect_bloom {
             let rest = &buf[data_end + (ic.pos)..];
-            BloomFilter::decode(rest).map_err(|e| {
-                CoreError::Internal(format!("SST bloom in {}: {e}", path.display()))
-            })?
+            BloomFilter::decode(rest)
+                .map_err(|e| CoreError::Internal(format!("SST bloom in {}: {e}", path.display())))?
         } else {
             if !ic.is_empty() {
                 return Err(CoreError::Internal(format!(
@@ -773,6 +766,18 @@ impl SstTable {
         start: Bound<&[u8]>,
         end: Bound<&[u8]>,
     ) -> Vec<(InternalKey, Bytes)> {
+        self.entries_in_user_range_capped(start, end, None)
+    }
+
+    /// Like [`entries_in_user_range`] but stop after `max_user_keys` distinct
+    /// user keys (RFC-0033: `limit` cuts collection, not only emit).
+    #[must_use]
+    pub fn entries_in_user_range_capped(
+        &self,
+        start: Bound<&[u8]>,
+        end: Bound<&[u8]>,
+        max_user_keys: Option<usize>,
+    ) -> Vec<(InternalKey, Bytes)> {
         // Fast reject when the whole file is outside the range.
         if let (Some(lo), Some(hi)) = (
             self.smallest_user_key.as_deref(),
@@ -799,13 +804,29 @@ impl SstTable {
             for (k, v) in &self.range_tombstones {
                 out.push((k.clone(), v.clone()));
             }
+            let mut users = 0usize;
+            let mut last_user: Option<Bytes> = None;
+            let mut stop = false;
             for bi in self.blocks_overlapping_range(start, end) {
+                if stop {
+                    break;
+                }
                 if let Ok(block) = self.decode_block(bi) {
                     for (k, v) in block {
                         if k.kind == ValueType::RangeDeletion {
                             continue; // already added
                         }
                         if user_key_in_range(k.user_key.as_ref(), start, end) {
+                            if let Some(max) = max_user_keys {
+                                if last_user.as_ref().is_none_or(|u| u != &k.user_key) {
+                                    if users >= max {
+                                        stop = true;
+                                        break;
+                                    }
+                                    users += 1;
+                                    last_user = Some(k.user_key.clone());
+                                }
+                            }
                             out.push((k, v));
                         }
                     }
@@ -823,6 +844,111 @@ impl SstTable {
                     || user_key_in_range(ikey.user_key.as_ref(), start, end)
             })
             .collect()
+    }
+
+    /// Largest user key in `[prefix, before)` visible at `snapshot` (RFC-0033).
+    ///
+    /// Walks overlapping blocks from the back and confirms each candidate with
+    /// [`point_at`] so a newer deletion in this file cannot leak. `before` is
+    /// exclusive (`None` = `prefix_succ`). Does not materialise the file.
+    #[must_use]
+    pub fn last_visible_under_prefix(
+        &self,
+        prefix: &[u8],
+        snapshot: SequenceNumber,
+        before: Option<&[u8]>,
+    ) -> Option<(Bytes, Bytes)> {
+        let prefix_end = crate::prefix::prefix_exclusive_end(prefix);
+        let end_owned: Option<Vec<u8>> = match (before, prefix_end.as_deref()) {
+            (Some(b), Some(p)) if b < p => Some(b.to_vec()),
+            (Some(b), None) => Some(b.to_vec()),
+            (_, Some(p)) => Some(p.to_vec()),
+            (_, None) => None,
+        };
+        let end_b = match end_owned.as_deref() {
+            None => Bound::Unbounded,
+            Some(e) => Bound::Excluded(e),
+        };
+        let start_b = Bound::Included(prefix);
+        if let (Some(lo), Some(hi)) = (
+            self.smallest_user_key.as_deref(),
+            self.largest_user_key.as_deref(),
+        ) {
+            if !prefix.is_empty() && hi < prefix {
+                return None;
+            }
+            if let Some(e) = end_owned.as_deref() {
+                if lo >= e {
+                    return None;
+                }
+            }
+        }
+        let in_window = |uk: &[u8]| -> bool {
+            if !prefix.is_empty() && !uk.starts_with(prefix) {
+                return false;
+            }
+            match end_owned.as_deref() {
+                Some(e) => uk < e,
+                None => true,
+            }
+        };
+        let consider_user = |uk: &Bytes| -> Option<(Bytes, Bytes)> {
+            if !in_window(uk) {
+                return None;
+            }
+            match self.point_at(uk, snapshot) {
+                Some((seq, Lookup::Found(v))) if !self.range_deleted(uk, seq, snapshot) => {
+                    Some((uk.clone(), v))
+                }
+                _ => None,
+            }
+        };
+        if self.is_lazy() {
+            let mut blocks = self.blocks_overlapping_range(start_b, end_b);
+            blocks.sort_unstable();
+            for bi in blocks.into_iter().rev() {
+                let Ok(block) = self.decode_block(bi) else {
+                    continue;
+                };
+                let mut last: Option<Bytes> = None;
+                let mut users = Vec::new();
+                for (k, _) in block.iter().rev() {
+                    if k.kind == ValueType::RangeDeletion {
+                        continue;
+                    }
+                    if last.as_ref().is_some_and(|u| u == &k.user_key) {
+                        continue;
+                    }
+                    last = Some(k.user_key.clone());
+                    users.push(k.user_key.clone());
+                }
+                for uk in users {
+                    if let Some(hit) = consider_user(&uk) {
+                        return Some(hit);
+                    }
+                }
+            }
+            None
+        } else {
+            let mut last: Option<Bytes> = None;
+            let mut users = Vec::new();
+            for (k, _) in self.entries_cloned().into_iter().rev() {
+                if k.kind == ValueType::RangeDeletion {
+                    continue;
+                }
+                if last.as_ref().is_some_and(|u| u == &k.user_key) {
+                    continue;
+                }
+                last = Some(k.user_key.clone());
+                users.push(k.user_key);
+            }
+            for uk in users {
+                if let Some(hit) = consider_user(&uk) {
+                    return Some(hit);
+                }
+            }
+            None
+        }
     }
 
     /// Index blocks that may contain point keys in `[start, end)`.
@@ -852,11 +978,8 @@ impl SstTable {
                 out.push(i);
             }
         }
-        if out.is_empty() {
-            (0..self.index.len()).collect()
-        } else {
-            out
-        }
+        // Empty means no block intersects — do not decode the whole file.
+        out
     }
 }
 
@@ -866,9 +989,8 @@ fn decode_block_from_payload(
     compressed_blocks: bool,
     path: &Path,
 ) -> Result<Vec<(InternalKey, Bytes)>> {
-    let start = usize::try_from(h.offset).map_err(|_| {
-        CoreError::Internal("block offset overflow".into())
-    })?;
+    let start = usize::try_from(h.offset)
+        .map_err(|_| CoreError::Internal("block offset overflow".into()))?;
     let len = h.length as usize;
     let end = start
         .checked_add(len)
@@ -947,12 +1069,10 @@ fn read_entry(c: &mut Cursor<'_>) -> Result<(InternalKey, Bytes)> {
 
 fn encode_entry(ikey: &InternalKey, value: &Bytes) -> Result<Vec<u8>> {
     let enc = ikey.encode();
-    let ikey_len = u32::try_from(enc.len()).map_err(|_| {
-        CoreError::Internal("internal key too large for SST".into())
-    })?;
-    let val_len = u32::try_from(value.len()).map_err(|_| {
-        CoreError::Internal("value too large for SST".into())
-    })?;
+    let ikey_len = u32::try_from(enc.len())
+        .map_err(|_| CoreError::Internal("internal key too large for SST".into()))?;
+    let val_len = u32::try_from(value.len())
+        .map_err(|_| CoreError::Internal("value too large for SST".into()))?;
     let mut out = Vec::with_capacity(8 + enc.len() + value.len());
     out.extend_from_slice(&ikey_len.to_le_bytes());
     out.extend_from_slice(&enc);
@@ -1027,9 +1147,8 @@ pub fn write_sst_entries_on(
         }
         let compressed = lz4_flex::compress_prepend_size(block_buf);
         let offset = data.len() as u64;
-        let length = u32::try_from(compressed.len()).map_err(|_| {
-            CoreError::Internal("SST block too large".into())
-        })?;
+        let length = u32::try_from(compressed.len())
+            .map_err(|_| CoreError::Internal("SST block too large".into()))?;
         let first = block_first_user
             .take()
             .ok_or_else(|| CoreError::Internal("block missing first key".into()))?;
@@ -1052,10 +1171,7 @@ pub fn write_sst_entries_on(
         let same_user = block_last_user
             .as_ref()
             .is_some_and(|u| u.as_ref() == ikey.user_key.as_ref());
-        if !block_buf.is_empty()
-            && block_buf.len() + enc.len() > BLOCK_TARGET
-            && !same_user
-        {
+        if !block_buf.is_empty() && block_buf.len() + enc.len() > BLOCK_TARGET && !same_user {
             flush_block(&mut data, &mut block_buf, &mut block_first_user, &mut index)?;
         }
         if block_buf.is_empty() {
@@ -1070,18 +1186,15 @@ pub fn write_sst_entries_on(
     let mut body = Vec::new();
     body.extend_from_slice(SST_MAGIC);
     body.extend_from_slice(&SST_VERSION.to_le_bytes());
-    let n = u64::try_from(sorted.len()).map_err(|_| {
-        CoreError::Internal("too many SST entries".into())
-    })?;
+    let n = u64::try_from(sorted.len())
+        .map_err(|_| CoreError::Internal("too many SST entries".into()))?;
     body.extend_from_slice(&n.to_le_bytes());
     body.extend_from_slice(&max_sequence.to_le_bytes());
-    let num_blocks = u32::try_from(index.len()).map_err(|_| {
-        CoreError::Internal("too many SST blocks".into())
-    })?;
+    let num_blocks = u32::try_from(index.len())
+        .map_err(|_| CoreError::Internal("too many SST blocks".into()))?;
     body.extend_from_slice(&num_blocks.to_le_bytes());
-    let data_len = u64::try_from(data.len()).map_err(|_| {
-        CoreError::Internal("SST data too large".into())
-    })?;
+    let data_len =
+        u64::try_from(data.len()).map_err(|_| CoreError::Internal("SST data too large".into()))?;
     body.extend_from_slice(&data_len.to_le_bytes());
 
     let header_len = body.len() as u64;
@@ -1093,9 +1206,8 @@ pub fn write_sst_entries_on(
     for h in &index {
         body.extend_from_slice(&h.offset.to_le_bytes());
         body.extend_from_slice(&h.length.to_le_bytes());
-        let kl = u32::try_from(h.first_user_key.len()).map_err(|_| {
-            CoreError::Internal("user key too large".into())
-        })?;
+        let kl = u32::try_from(h.first_user_key.len())
+            .map_err(|_| CoreError::Internal("user key too large".into()))?;
         body.extend_from_slice(&kl.to_le_bytes());
         body.extend_from_slice(&h.first_user_key);
     }
@@ -1188,7 +1300,10 @@ mod tests {
         );
         // Point get must work without full materialize cache.
         assert!(table.entries.lock().is_none());
-        assert_eq!(table.get(b"b", 10), Lookup::Found(Bytes::from_static(b"vb")));
+        assert_eq!(
+            table.get(b"b", 10),
+            Lookup::Found(Bytes::from_static(b"vb"))
+        );
         assert!(
             table.entries.lock().is_none(),
             "point get must not force full materialize"
@@ -1198,7 +1313,10 @@ mod tests {
         assert!(!table.key_may_match(b"zzz-absent-key-xxxxxxxx"));
 
         let reopened = SstTable::open(&path).unwrap();
-        assert_eq!(reopened.get(b"b", 10), Lookup::Found(Bytes::from_static(b"vb")));
+        assert_eq!(
+            reopened.get(b"b", 10),
+            Lookup::Found(Bytes::from_static(b"vb"))
+        );
         assert!(reopened.block_for_user_key(b"b").is_some());
         assert!(reopened.has_bloom());
         let _ = std::fs::remove_file(&path);
@@ -1236,7 +1354,11 @@ mod tests {
         for i in 0..200u32 {
             let k = format!("k{i:04}");
             entries.push((
-                InternalKey::new(Bytes::copy_from_slice(k.as_bytes()), u64::from(i) + 1, ValueType::Value),
+                InternalKey::new(
+                    Bytes::copy_from_slice(k.as_bytes()),
+                    u64::from(i) + 1,
+                    ValueType::Value,
+                ),
                 Bytes::from(vec![0u8; 32]),
             ));
         }
