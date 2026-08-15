@@ -536,14 +536,18 @@ fn encode_preimage(present: Option<&[u8]>) -> Vec<u8> {
     }
 }
 
-fn decode_preimage(raw: &[u8]) -> Option<Option<Vec<u8>>> {
+/// Decode prepare-time preimage blob.
+///
+/// Tag `0` = key was absent; `1` + payload = restore value.
+/// Empty / unknown tag is **Err** (F118) — not "missing preimage".
+fn decode_preimage(raw: &[u8]) -> Result<Option<Vec<u8>>> {
     if raw.is_empty() {
-        return None;
+        return Err(StoreError::Msg("preimage empty".into()));
     }
     match raw[0] {
-        0 => Some(None),
-        1 => Some(Some(raw[1..].to_vec())),
-        _ => None,
+        0 => Ok(None),
+        1 => Ok(Some(raw[1..].to_vec())),
+        _ => Err(StoreError::Msg("preimage tag".into())),
     }
 }
 
@@ -573,6 +577,9 @@ fn apply_put_or_delete<E: Env>(db: &mut Db<E>, key: &[u8], value: &[u8]) -> Resu
 }
 
 /// Durable SI history row on this replica (written during Raft apply — same path as user data).
+///
+/// # Errors
+/// Present-but-corrupt hist blob (F117) — never rewrite as a fresh single-gen history.
 fn persist_si_hist_on_db<E: Env>(
     db: &mut Db<E>,
     user_key: &[u8],
@@ -580,10 +587,11 @@ fn persist_si_hist_on_db<E: Env>(
     new_val: Option<&[u8]>,
 ) -> Result<()> {
     let hk = hist_key(user_key);
-    let mut hist = db
-        .get(&hk)
-        .and_then(|b| decode_hist(b.as_ref()).ok())
-        .unwrap_or_default();
+    // F117: missing → empty chain; present corrupt → hard error (do not wipe).
+    let mut hist = match db.get(&hk) {
+        None => Vec::new(),
+        Some(b) => decode_hist(b.as_ref())?,
+    };
     // Avoid duplicate gen append on replay.
     if hist.last().map(|(g, _)| *g) != Some(gen) {
         hist.push((gen, new_val.map(|v| v.to_vec())));
@@ -1208,8 +1216,12 @@ fn apply_txn_revert<E: Env>(db: &mut Db<E>, txn_id: u64, keys: &[Vec<u8>]) -> Re
     let mut ops = Vec::new();
     let mut restored: Vec<(Vec<u8>, Option<Vec<u8>>)> = Vec::new();
     for u in keys {
-        let pre_raw = db.get(&txn_pre_key(txn_id, u));
-        let pre = pre_raw.as_ref().and_then(|b| decode_preimage(b.as_ref()));
+        // F118: missing pre key → LeaveUntouched; present corrupt → hard error
+        // (never treat garbage as "peer never prepared").
+        let pre = match db.get(&txn_pre_key(txn_id, u)) {
+            None => None,
+            Some(raw) => Some(decode_preimage(raw.as_ref())?),
+        };
         let had_pre = pre.is_some();
         let pre_was_absent = matches!(pre, Some(None));
         match txn_kernel::revert_user_action(had_pre, pre_was_absent) {
@@ -1256,10 +1268,14 @@ fn apply_txn_revert<E: Env>(db: &mut Db<E>, txn_id: u64, keys: &[Vec<u8>]) -> Re
 /// the aborted write after Pedra preimage restore.
 fn repair_si_hist_tip<E: Env>(db: &mut Db<E>, user_key: &[u8], live: Option<&[u8]>) -> Result<()> {
     let hk = hist_key(user_key);
-    let mut hist = match db.get(&hk).and_then(|b| decode_hist(b.as_ref()).ok()) {
-        Some(h) if !h.is_empty() => h,
-        _ => return Ok(()),
+    // F117: present corrupt hist must not look empty (no-op that leaves SI wrong).
+    let mut hist = match db.get(&hk) {
+        None => return Ok(()),
+        Some(b) => decode_hist(b.as_ref())?,
     };
+    if hist.is_empty() {
+        return Ok(());
+    }
     let tip_gen = hist.last().map(|(g, _)| *g).unwrap_or(0);
     if tip_gen == 0 {
         // Only the gen-0 preimage floor — leave it; nothing committed to unwind.
@@ -4936,10 +4952,13 @@ impl<E: Env> StoreCluster<E> {
                 if is_reserved_store_key(k) {
                     continue;
                 }
-                let pre =
-                    n.db.get(&txn_pre_key(handle.id, k))
-                        .and_then(|b| decode_preimage(b.as_ref()))
-                        .unwrap_or(None);
+                // Missing pre → absent floor for SI note; present corrupt → skip
+                // as absent only after fail-closed decode would have errored on
+                // apply paths (F118). note_tx_commit is best-effort on reader.
+                let pre = match n.db.get(&txn_pre_key(handle.id, k)) {
+                    None => None,
+                    Some(b) => decode_preimage(b.as_ref()).unwrap_or(None),
+                };
                 let val =
                     n.db.get(k)
                         .map(|b| b.to_vec())
@@ -6465,6 +6484,108 @@ mod tests {
         assert!(
             decode_hist(raw.as_ref()).is_err(),
             "bitrot must fail CRC, not decode silently"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// F117: corrupt hist used to decode as empty and get rewritten with one gen.
+    #[test]
+    fn persist_si_hist_rejects_corrupt_does_not_wipe() {
+        let dir = temp();
+        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        c.elect_all(80).unwrap();
+        c.put(b"h", b"v1").unwrap();
+        c.put(b"h", b"v2").unwrap();
+        let hk = hist_key(b"h");
+        let before = c.nodes.get(&1).unwrap().db.get(&hk).unwrap().to_vec();
+        assert!(decode_hist(&before).unwrap().len() >= 2);
+        // Poison hist on the leader apply path node(s).
+        for nid in c.ids.clone() {
+            if let Some(n) = c.nodes.get_mut(&nid) {
+                n.db.put(&hk, b"xx").unwrap();
+            }
+        }
+        let err = c.put(b"h", b"v3");
+        assert!(
+            err.is_err(),
+            "put must fail closed when hist is corrupt, not wipe: {err:?}"
+        );
+        // Hist blob still the poison (not a fresh single-gen rewrite).
+        for nid in c.ids.clone() {
+            let raw = c.nodes.get(&nid).unwrap().db.get(&hk).unwrap();
+            assert_eq!(
+                raw.as_ref(),
+                b"xx",
+                "corrupt hist must not be rewritten as a short valid chain"
+            );
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// F119: all-replica corrupt hist was skipped on open → SI snapshot evaporates.
+    #[test]
+    fn open_rejects_corrupt_si_hist_on_all_replicas() {
+        let dir = temp();
+        let g1;
+        {
+            let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+            c.elect_all(80).unwrap();
+            c.put(b"h", b"v1").unwrap();
+            g1 = c.read_version();
+            c.put(b"h", b"v2").unwrap();
+            assert_eq!(
+                c.get_at_version(b"h", g1).unwrap().as_deref(),
+                Some(b"v1".as_ref())
+            );
+            let hk = hist_key(b"h");
+            for nid in c.ids.clone() {
+                if let Some(n) = c.nodes.get_mut(&nid) {
+                    n.db.put(&hk, b"xx").unwrap();
+                }
+            }
+        }
+        match StoreCluster::open(&dir, 3, 1) {
+            Ok(c) => {
+                let got = c.get_at_version(b"h", g1).unwrap();
+                panic!(
+                    "corrupt hist on all replicas must fail open, not drop SI (get_at {g1}={got:?})"
+                );
+            }
+            Err(e) => assert!(
+                e.to_string().contains("si hist"),
+                "expected si hist error, got {e}"
+            ),
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// F118: present garbage preimage must not look like "peer never prepared".
+    #[test]
+    fn apply_txn_revert_rejects_corrupt_preimage() {
+        let dir = temp();
+        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        c.elect_all(80).unwrap();
+        c.put(b"u", b"live").unwrap();
+        let nid = c.ids[0];
+        let n = c.nodes.get_mut(&nid).unwrap();
+        let tid = 42u64;
+        n.db
+            .put(txn_pre_key(tid, b"u"), b"\xffgarbage")
+            .unwrap();
+        let err = apply_txn_revert(&mut n.db, tid, &[b"u".to_vec()]);
+        assert!(
+            err.is_err(),
+            "corrupt preimage must fail closed, not LeaveUntouched: {err:?}"
+        );
+        assert_eq!(
+            n.db.get(b"u").as_deref(),
+            Some(b"live".as_ref()),
+            "user key must not be wiped when preimage is garbage"
+        );
+        // Preimage still present (revert did not partial-delete and walk away).
+        assert!(
+            n.db.get(&txn_pre_key(tid, b"u")).is_some(),
+            "failed revert must not drop the preimage key"
         );
         let _ = std::fs::remove_dir_all(&dir);
     }
