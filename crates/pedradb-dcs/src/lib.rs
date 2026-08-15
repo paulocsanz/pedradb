@@ -428,10 +428,18 @@ impl<C: Clock, E: Env> Dcs<C, E> {
 
     /// Delete key; returns revision of delete, or `None` if absent.
     ///
+    /// F143 residual of F115: present-but-corrupt meta made [`get`] miss, so
+    /// delete used to `Ok(None)` while [`create`] still rejected — immortal
+    /// physical corpse. Explicit delete wipes raw `d/k/`+`d/m/` when either
+    /// is present even if meta does not decode.
+    ///
     /// # Errors
     /// I/O.
     pub fn delete(&mut self, key: &[u8]) -> Result<Option<u64>> {
-        if self.get(key).is_none() {
+        let live = self.get(key);
+        let has_physical = self.db.get(&kv_key(key)).is_some()
+            || self.db.get(&meta_key(key)).is_some();
+        if live.is_none() && !has_physical {
             return Ok(None);
         }
         let rev = self.bump_revision()?;
@@ -901,6 +909,37 @@ mod tests {
             Some(b"keep".as_ref()),
             "raw value must survive failed create"
         );
+        dcs.close().unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// F143: after F115, delete still treated corrupt meta as absent → immortal
+    /// corpse (create stays blocked forever). Explicit delete must wipe raw rows.
+    #[test]
+    fn delete_wipes_undecodable_meta_corpse() {
+        let dir = temp_dir("meta-delete-corrupt");
+        let mut dcs = Dcs::open(&dir).unwrap();
+        dcs.put(b"a", b"keep", 0).unwrap();
+        dcs.db.put(meta_key(b"a"), b"xx").unwrap();
+        assert!(dcs.get(b"a").is_none());
+        // AS-IS: Ok(None) and leave keep/xx. FIXED: Some(rev) + wipe.
+        let rev = dcs
+            .delete(b"a")
+            .expect("delete physical corpse must not error")
+            .expect("delete must report a revision, not Ok(None)");
+        assert!(rev >= 1, "delete must bump revision, got {rev}");
+        assert!(
+            dcs.db.get(&kv_key(b"a")).is_none(),
+            "raw value must be gone after delete"
+        );
+        assert!(
+            dcs.db.get(&meta_key(b"a")).is_none(),
+            "corrupt meta must be gone after delete"
+        );
+        // Create can bind again.
+        let r = dcs.create(b"a", b"fresh", 0).expect("create after wipe");
+        assert!(r > rev);
+        assert_eq!(dcs.get(b"a").unwrap().value, b"fresh");
         dcs.close().unwrap();
         let _ = std::fs::remove_dir_all(&dir);
     }

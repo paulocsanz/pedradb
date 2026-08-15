@@ -367,7 +367,13 @@ pub fn apply_dcs_command<E: Env>(db: &mut Db<E>, cmd: &DcsCommand) -> Result<u64
             put_new(db, key, value, *lease, create_hint)
         }
         DcsCommand::Delete { key } => {
-            if get_kv(db, key).is_none() {
+            // F143: corrupt meta / orphan value is physical presence. Apply
+            // must wipe so create is not permanently blocked after a "delete"
+            // that only looked at get_kv (F115 residual). True absence: no-op.
+            let live = get_kv(db, key);
+            let has_physical =
+                db.get(&kv_key(key)).is_some() || db.get(&meta_key(key)).is_some();
+            if live.is_none() && !has_physical {
                 return revision(db);
             }
             let rev = revision(db)? + 1;
@@ -597,6 +603,39 @@ mod tests {
             "apply Create must not overwrite corrupt-meta key: {err:?}"
         );
         assert_eq!(db.get(&kv_key(b"a")).as_deref(), Some(b"keep".as_ref()));
+        db.close().unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// F143: apply Delete must wipe corrupt-meta physical corpse (not no-op).
+    #[test]
+    fn apply_delete_wipes_undecodable_meta_corpse() {
+        let (dir, mut db) = temp_db();
+        let put = DcsCommand::Put {
+            key: b"a".to_vec(),
+            value: b"keep".to_vec(),
+            lease: 0,
+        };
+        let r1 = apply_dcs_command(&mut db, &put).unwrap();
+        db.put(meta_key(b"a"), b"xx").unwrap();
+        let del = DcsCommand::Delete {
+            key: b"a".to_vec(),
+        };
+        let r2 = apply_dcs_command(&mut db, &del).unwrap();
+        assert!(
+            r2 > r1,
+            "apply delete of corrupt corpse must advance rev ({r2} > {r1})"
+        );
+        assert!(db.get(&kv_key(b"a")).is_none(), "value wiped");
+        assert!(db.get(&meta_key(b"a")).is_none(), "meta wiped");
+        let create = DcsCommand::Create {
+            key: b"a".to_vec(),
+            value: b"fresh".to_vec(),
+            lease: 0,
+        };
+        let r3 = apply_dcs_command(&mut db, &create).unwrap();
+        assert!(r3 > r2);
+        assert_eq!(dcs_get(&db, b"a").unwrap().value, b"fresh");
         db.close().unwrap();
         let _ = std::fs::remove_dir_all(&dir);
     }
