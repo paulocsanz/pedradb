@@ -388,11 +388,13 @@ impl SstTable {
 
     /// Point version at `user_key` ≤ `snapshot` from data blocks (lazy or materialised).
     ///
-    /// A single user key can span **multiple** data blocks when the flush writer
-    /// splits mid-key (large multi-version memtables). We must scan every block
-    /// that may hold versions of `user_key` and take the newest visible one —
-    /// looking only at `block_for_user_key` (last block with `first_key` ≤ user)
-    /// returns a stale older version when newer versions sit in a prior block.
+    /// The current writer never splits a user key across blocks (see
+    /// `writer_never_splits_user_key_across_blocks`). Older files might; we
+    /// still load the O(1) candidate window via [`Self::blocks_for_point`]
+    /// (previous block + any run whose `first_user_key` equals `user_key`)
+    /// and take the newest visible version. A linear walk of the sparse
+    /// index was O(blocks) per get and dominated `deps_mvcc_latest` after
+    /// YCSB+deps compacted into one large L1.
     fn point_in_blocks<F>(
         &self,
         user_key: &[u8],
@@ -410,16 +412,7 @@ impl SstTable {
             return None;
         }
         let mut best: Option<(SequenceNumber, Lookup)> = None;
-        for bi in 0..self.index.len() {
-            let first = self.index[bi].first_user_key.as_ref();
-            if first > user_key {
-                break;
-            }
-            // Entire block is strictly before `user_key` if the next block starts
-            // before `user_key` as well (sorted index).
-            if bi + 1 < self.index.len() && self.index[bi + 1].first_user_key.as_ref() < user_key {
-                continue;
-            }
+        for bi in self.blocks_for_point(user_key) {
             let Some(block) = load(bi) else {
                 continue;
             };
@@ -430,6 +423,26 @@ impl SstTable {
             }
         }
         best
+    }
+
+    /// Blocks that can hold versions of `user_key` (O(log N + spans)).
+    ///
+    /// `index[i]` covers `[first_user_key[i], first_user_key[i+1])`. If an
+    /// older writer split mid-key, versions also sit in the previous block
+    /// and in any following run with `first_user_key == user_key`.
+    fn blocks_for_point(&self, user_key: &[u8]) -> std::ops::Range<usize> {
+        if self.index.is_empty() {
+            return 0..0;
+        }
+        let ge = self
+            .index
+            .partition_point(|h| h.first_user_key.as_ref() < user_key);
+        let start = ge.saturating_sub(1);
+        let mut end = ge;
+        while end < self.index.len() && self.index[end].first_user_key.as_ref() <= user_key {
+            end += 1;
+        }
+        start..end
     }
 
     /// Newest point version of `user_key` with `sequence <= snapshot` in a sorted entry slice.
@@ -626,16 +639,11 @@ impl SstTable {
         if self.index.is_empty() {
             return None;
         }
-        // Last block whose first_user_key <= user_key.
-        let mut best = 0usize;
-        for (i, h) in self.index.iter().enumerate() {
-            if h.first_user_key.as_ref() <= user_key {
-                best = i;
-            } else {
-                break;
-            }
-        }
-        Some(best)
+        // Last block whose first_user_key <= user_key (same as the linear scan).
+        let gt = self
+            .index
+            .partition_point(|h| h.first_user_key.as_ref() <= user_key);
+        Some(gt.saturating_sub(1))
     }
 
     /// Load an SST from disk (real filesystem).
@@ -1439,8 +1447,8 @@ pub fn write_sst_entries_on(
     // Load-bearing for `blocks_overlapping_range` — it treats
     // `index[i+1].first_user_key` as an exclusive bound on block i's user keys,
     // which only holds when all versions of a key live in a single block.
-    // `point_in_blocks` is hardened either way (F29); pinned by
-    // `writer_never_splits_user_key_across_blocks`.
+    // `point_in_blocks` still loads the previous block + equal-first run
+    // (F29, older files); pinned by `writer_never_splits_user_key_across_blocks`.
     let mut block_last_user: Option<Bytes> = None;
     for (ikey, value) in &sorted {
         let enc = encode_entry(ikey, value)?;
@@ -1735,6 +1743,44 @@ mod tests {
         );
         let bi = table.block_for_user_key(b"k0100").unwrap();
         assert!(bi < table.block_count());
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// A wide L1 (YCSB+deps compacted) used to decode O(blocks) per point get.
+    /// The sparse-index seek must stay O(log N + spans), not a linear walk.
+    #[test]
+    fn point_get_decodes_o1_blocks_on_wide_sst() {
+        let mut entries = Vec::new();
+        for i in 0..400u32 {
+            let k = format!("k{i:04}");
+            entries.push((
+                InternalKey::new(Bytes::copy_from_slice(k.as_bytes()), 1, ValueType::Value),
+                Bytes::from(vec![0u8; 1024]),
+            ));
+        }
+        let path = temp_path();
+        let table = write_sst_entries(&path, &entries).unwrap();
+        assert!(
+            table.block_count() > 50,
+            "need a wide index, got {}",
+            table.block_count()
+        );
+        for key in [b"k0000".as_slice(), b"k0200", b"k0399"] {
+            reset_sst_blocks_decoded();
+            assert_eq!(
+                table.get(key, 10),
+                Lookup::Found(Bytes::from(vec![0u8; 1024])),
+                "{}",
+                String::from_utf8_lossy(key)
+            );
+            let n = sst_blocks_decoded();
+            assert!(
+                n <= 2,
+                "point get of {} decoded {n} blocks (index {}), want ≤2",
+                String::from_utf8_lossy(key),
+                table.block_count()
+            );
+        }
         let _ = std::fs::remove_file(&path);
     }
 }

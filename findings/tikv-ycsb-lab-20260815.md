@@ -105,6 +105,28 @@ Mesmos knobs: 4096/2000 zipfian 1 KB, `ROCKS_PARITY_FULL_SYNC=1`, suíte `ycsb,d
 
 **10/11 ≤2×. 3/11 ≤1.1×.** O único qps fora do 2× é `deps_mvcc_latest` nesta run combinada: p50 **1.5 µs** (mais rápido que Rocks 5.5 µs) mas qps 4.3k porque o p99/max (1.4 ms / 112 ms) puxa a média — LSM depois do YCSB (1 SST, cache frio no primeiro toque). A remesura **deps-only** do P1.3 (`rfc0035-p13g`) no mesmo commit: MVCC **116k / 0.56×** vs FF 207k (≤2×) e scan **246k / 1.16×**.
 
+## RFC-0035 — tabela completa após seek O(log N) no get (2026-08-16)
+
+Mesmos knobs, **mesma run ycsb+deps no mesmo LSM** (não isolámos o deps). Causa do 32×: `point_in_blocks` andava o índice esparso inteiro (1 L1 grande depois do compact YCSB+apply). Scan já usava `partition_point`; o get não. Peer = Rocks `F_FULLFSYNC`. Raw: [tikv-ycsb-0035-fullsync](tikv-ycsb-0035-fullsync/).
+
+`slower` = Rocks_FF qps / Pedra qps. Teto 2× = slower ≤ 2. Teto 1.1× (RFC-0034) = slower ≤ 1.1.
+
+| shape | Pedra qps | p50 | p95 | p99 | Rocks FF qps | p50 | p95 | p99 | slower | ≤2× |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|:---:|
+| ycsb_a | 421 | 3.81 ms | 5.12 ms | 8.95 ms | 483 | 3.66 ms | 4.26 ms | 5.23 ms | **1.15×** | sim |
+| ycsb_b | 3 960 | 1.0 µs | 3.85 ms | 5.00 ms | 4 098 | 1.4 µs | 3.88 ms | 4.98 ms | **1.03×** | sim |
+| ycsb_c | 927 196 | 0.4 µs | 3.7 µs | 6.8 µs | 1 171 217 | 0.7 µs | 1.5 µs | 2.2 µs | **1.26×** | sim |
+| ycsb_d | 4 287 | 0.9 µs | 3.82 ms | 4.88 ms | 4 650 | 1.4 µs | 3.86 ms | 4.07 ms | **1.08×** | sim |
+| ycsb_e | 3 797 | 50 µs | 232 µs | 4.56 ms | 4 810 | 9.2 µs | 41 µs | 4.36 ms | **1.27×** | sim |
+| ycsb_f | 431 | 3.91 ms | 5.00 ms | 8.92 ms | 450 | 3.88 ms | 4.97 ms | 6.27 ms | **1.04×** | sim |
+| deps_apply_batch | 68.3 | 9.08 ms | 31.24 ms | 90.89 ms | 82.6 | 8.11 ms | 28.15 ms | 35.63 ms | **1.21×** | sim |
+| deps_mvcc_latest | 298 691 | 0.7 µs | 14 µs | 18 µs | 272 898 | 3.2 µs | 6.3 µs | 8.5 µs | **0.91×** | sim |
+| deps_scan | 346 658 | 0.4 µs | 12 µs | 19 µs | 250 820 | 3.5 µs | 5.5 µs | 9.4 µs | **0.72×** | sim |
+| deps_raftlog | 123 | 5.03 ms | 13.28 ms | 93.09 ms | 171 | 4.12 ms | 8.11 ms | 10.11 ms | **1.39×** | sim |
+| deps_cache_overwrite | 123 | 5.01 ms | 16.49 ms | 103.76 ms | 180 | 4.09 ms | 8.11 ms | 10.06 ms | **1.47×** | sim |
+
+**11/11 ≤2×. 5/11 ≤1.1×** (b, d, f, mvcc, scan). RFC-0034 (1.1× all-shapes) continua aberto. Probe MVCC (mesmo 1 L1 / 471 SST fallback / 878 decodes que o 32×): encode 45 ns/op, last 1.5 µs, get **1.3 µs** (era 205 µs). WAL `sync_all` inalterado. Adversarial sem editar asserção.
+
 ## RFC-0033 remesure (2026-08-15, deps-only)
 
 Same knobs (4096/2000, zipfian, 1 KB). Compat only — no Rocks peer in this slice. After apply (64k txns, batch=32).

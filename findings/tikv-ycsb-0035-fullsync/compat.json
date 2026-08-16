@@ -10,97 +10,97 @@
 {
     "name": "ycsb_a",
     "n": 2000,
-    "qps": 339.594,
-    "p50_ms": 3.7465,
-    "p95_ms": 7.3393,
-    "p99_ms": 14.1864,
-    "max_ms": 56.2490,
-    "wall_s": 5.8894
+    "qps": 421.310,
+    "p50_ms": 3.8130,
+    "p95_ms": 5.1153,
+    "p99_ms": 8.9541,
+    "max_ms": 48.0171,
+    "wall_s": 4.7471
   },
 {
     "name": "ycsb_b",
     "n": 2000,
-    "qps": 2814.129,
-    "p50_ms": 0.0023,
-    "p95_ms": 4.4316,
-    "p99_ms": 7.0059,
-    "max_ms": 27.4841,
-    "wall_s": 0.7107
+    "qps": 3959.667,
+    "p50_ms": 0.0010,
+    "p95_ms": 3.8496,
+    "p99_ms": 4.9967,
+    "max_ms": 17.9920,
+    "wall_s": 0.5051
   },
 {
     "name": "ycsb_c",
     "n": 2000,
-    "qps": 507866.729,
-    "p50_ms": 0.0005,
-    "p95_ms": 0.0087,
-    "p99_ms": 0.0127,
-    "max_ms": 0.1089,
-    "wall_s": 0.0039
+    "qps": 927196.099,
+    "p50_ms": 0.0004,
+    "p95_ms": 0.0037,
+    "p99_ms": 0.0068,
+    "max_ms": 0.1869,
+    "wall_s": 0.0022
   },
 {
     "name": "ycsb_d",
     "n": 2000,
-    "qps": 2161.536,
-    "p50_ms": 0.0023,
-    "p95_ms": 4.1798,
-    "p99_ms": 8.3522,
-    "max_ms": 46.8095,
-    "wall_s": 0.9253
+    "qps": 4286.917,
+    "p50_ms": 0.0009,
+    "p95_ms": 3.8211,
+    "p99_ms": 4.8801,
+    "max_ms": 17.0263,
+    "wall_s": 0.4665
   },
 {
     "name": "ycsb_e",
     "n": 2000,
-    "qps": 983.626,
-    "p50_ms": 0.0911,
-    "p95_ms": 4.9116,
-    "p99_ms": 15.5552,
-    "max_ms": 116.4048,
-    "wall_s": 2.0333
+    "qps": 3796.875,
+    "p50_ms": 0.0503,
+    "p95_ms": 0.2315,
+    "p99_ms": 4.5626,
+    "max_ms": 16.8468,
+    "wall_s": 0.5267
   },
 {
     "name": "ycsb_f",
     "n": 2000,
-    "qps": 301.430,
-    "p50_ms": 4.1151,
-    "p95_ms": 8.6310,
-    "p99_ms": 22.0488,
-    "max_ms": 43.1098,
-    "wall_s": 6.6350
+    "qps": 431.386,
+    "p50_ms": 3.9091,
+    "p95_ms": 4.9984,
+    "p99_ms": 8.9238,
+    "max_ms": 19.1270,
+    "wall_s": 4.6362
   },
 {
     "name": "deps_apply_batch",
     "n": 2000,
-    "qps": 43.714,
-    "p50_ms": 10.1376,
-    "p95_ms": 45.0339,
-    "p99_ms": 169.9210,
-    "max_ms": 4582.4956,
-    "wall_s": 45.7518
+    "qps": 68.298,
+    "p50_ms": 9.0831,
+    "p95_ms": 31.2432,
+    "p99_ms": 90.8912,
+    "max_ms": 678.8777,
+    "wall_s": 29.2835
   },
 {
     "name": "deps_mvcc_latest",
     "n": 2000,
-    "qps": 4313.678,
-    "p50_ms": 0.0015,
-    "p95_ms": 0.1248,
-    "p99_ms": 1.4328,
-    "max_ms": 111.8017,
-    "wall_s": 0.4636
+    "qps": 298691.358,
+    "p50_ms": 0.0007,
+    "p95_ms": 0.0140,
+    "p99_ms": 0.0182,
+    "max_ms": 0.2261,
+    "wall_s": 0.0067
   },
 {
     "name": "deps_mvcc_latest_split",
     "combined": true,
-    "probe": {"latest_ops":2000,"latest_mem_hit":303,"latest_sst_fallback":471,"latest_sst_probed":471,"scan_ops":0,"scan_sst_probed":0,"sst_count":1,"l0_files":0,"level1_files":1,"mem_entries":8128,"block_cache_hits":227,"block_cache_misses":878,"blocks_decoded":878,"get_mem_hit":302,"get_sst_fallback":472,"get_inline":774,"get_vlog":0,"mvcc_split_ops":2000,"mvcc_ns_encode":33173652,"mvcc_ns_last":17579250,"mvcc_ns_get":410538177,"mvcc_ns_copy":978881}
+    "probe": {"latest_ops":2000,"latest_mem_hit":303,"latest_sst_fallback":471,"latest_sst_probed":471,"scan_ops":0,"scan_sst_probed":0,"sst_count":1,"l0_files":0,"level1_files":1,"mem_entries":8128,"block_cache_hits":227,"block_cache_misses":878,"blocks_decoded":878,"get_mem_hit":302,"get_sst_fallback":472,"get_inline":774,"get_vlog":0,"mvcc_split_ops":2000,"mvcc_ns_encode":89576,"mvcc_ns_last":3046241,"mvcc_ns_get":2627708,"mvcc_ns_copy":230610}
   },
 {
     "name": "deps_scan",
     "n": 2000,
-    "qps": 121722.685,
-    "p50_ms": 0.0006,
-    "p95_ms": 0.0179,
-    "p99_ms": 0.0323,
-    "max_ms": 6.7244,
-    "wall_s": 0.0164
+    "qps": 346658.000,
+    "p50_ms": 0.0004,
+    "p95_ms": 0.0121,
+    "p99_ms": 0.0192,
+    "max_ms": 0.1086,
+    "wall_s": 0.0058
   },
 {
     "name": "deps_scan_probe",
@@ -109,22 +109,22 @@
 {
     "name": "deps_raftlog",
     "n": 2000,
-    "qps": 77.424,
-    "p50_ms": 4.9916,
-    "p95_ms": 9.9986,
-    "p99_ms": 132.9397,
-    "max_ms": 4951.4984,
-    "wall_s": 25.8318
+    "qps": 122.604,
+    "p50_ms": 5.0275,
+    "p95_ms": 13.2800,
+    "p99_ms": 93.0895,
+    "max_ms": 961.1304,
+    "wall_s": 16.3127
   },
 {
     "name": "deps_cache_overwrite",
     "n": 2000,
-    "qps": 106.929,
-    "p50_ms": 4.9617,
-    "p95_ms": 16.8987,
-    "p99_ms": 157.1643,
-    "max_ms": 464.2448,
-    "wall_s": 18.7041
+    "qps": 122.909,
+    "p50_ms": 5.0142,
+    "p95_ms": 16.4877,
+    "p99_ms": 103.7594,
+    "max_ms": 185.6154,
+    "wall_s": 16.2722
   }
   ]
 }
