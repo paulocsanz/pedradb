@@ -2261,9 +2261,11 @@ impl<E: Env> Db<E> {
         // on ConcurrentDb once this returns; single-threaded Db flushes imm next).
         self.imm = Some(std::mem::replace(&mut self.mem, MemTable::new()));
         self.flush_imm_to_l0()?;
-        self.try_rotate_wal()?;
-        self.run_auto_compact_best_effort();
-        self.run_auto_blob_gc_best_effort();
+        self.finish_flush_pipeline()?;
+        // Explicit flush: persist the cache even when interval is 0 (WAL gone).
+        if self.changelog_interval == 0 {
+            self.persist_changelog_best_effort();
+        }
         Ok(())
     }
 
@@ -2482,9 +2484,13 @@ impl<E: Env> Db<E> {
     }
 
     fn rotate_wal_now(&mut self) -> Result<()> {
-        // WAL truncate drops the rebuild source for the CHANGELOG cache — persist
-        // first (RFC-0031; F53 last-per-key rebuild is the remaining safety net).
-        self.persist_changelog_best_effort();
+        // WAL truncate drops the rebuild source for the CHANGELOG cache.
+        // Persist first when debounce is on. interval 0: skip on auto-flush
+        // (RFC-0036) — F53 SST rebuild covers crash+reopen; explicit flush
+        // / close still store.
+        if self.changelog_interval > 0 {
+            self.persist_changelog_best_effort();
+        }
         let wal_path = self.dir.join(WAL_FILE_NAME);
         let old = std::mem::replace(&mut self.wal, Wal::create_on(&self.env, &wal_path)?);
         old.close()?;
@@ -2631,6 +2637,23 @@ impl<E: Env> Db<E> {
         self.compact_levels(from, to, options)
     }
 
+    /// Promote L0 files into one new L1 file. Existing L1+ SSTs are left
+    /// untouched so a write burst does not rewrite the whole level (RFC-0036).
+    /// Visibility is unchanged: every version stays in some file.
+    fn compact_l0_into_l1(&mut self, options: CompactOptions) -> Result<()> {
+        let input_idxs: Vec<usize> = self
+            .sst_levels
+            .iter()
+            .enumerate()
+            .filter(|(_, &lvl)| lvl == 0)
+            .map(|(i, _)| i)
+            .collect();
+        if input_idxs.is_empty() {
+            return Ok(());
+        }
+        self.rewrite_ssts(input_idxs, 1, options)
+    }
+
     /// Merge all SSTs at `from_level` and `to_level` into one SST at `to_level`.
     fn compact_levels(
         &mut self,
@@ -2654,7 +2677,16 @@ impl<E: Env> Db<E> {
         {
             return Ok(());
         }
+        self.rewrite_ssts(input_idxs, to_level, options)
+    }
 
+    /// Rewrite `input_idxs` into one SST at `to_level`; keep every other file.
+    fn rewrite_ssts(
+        &mut self,
+        input_idxs: Vec<usize>,
+        to_level: u32,
+        options: CompactOptions,
+    ) -> Result<()> {
         let mut merged: Vec<(InternalKey, Bytes)> = Vec::new();
         for &i in &input_idxs {
             merged.extend(self.ssts[i].entries_cloned());
@@ -4131,9 +4163,25 @@ impl<E: Env> Db<E> {
             return Ok(());
         };
         if self.mem.approx_memory_usage() >= limit {
-            self.flush()?;
+            self.auto_flush_mem()?;
         }
         Ok(())
+    }
+
+    /// Auto-flush: same SST/WAL path as [`Self::flush`] but does not rewrite
+    /// the CHANGELOG cache when `changelog_interval == 0` (RFC-0036).
+    fn auto_flush_mem(&mut self) -> Result<()> {
+        self.ensure_not_fenced()?;
+        if self.imm.is_some() {
+            self.flush_imm_to_l0()?;
+        }
+        if self.mem.is_empty() {
+            self.try_rotate_wal()?;
+            return Ok(());
+        }
+        self.imm = Some(std::mem::replace(&mut self.mem, MemTable::new()));
+        self.flush_imm_to_l0()?;
+        self.finish_flush_pipeline()
     }
 
     /// Like [`maybe_auto_flush`] but never fails the caller (F18).
@@ -4160,10 +4208,23 @@ impl<E: Env> Db<E> {
         } else {
             false
         };
-        if count_hit || bytes_hit || l0_hit {
+        if l0_hit {
+            // Bounded work: L0 → one new L1. Do not absorb the existing L1
+            // (that rewrite grew with the DB and dominated apply/raftlog).
+            let opts = if self.auto_reclaim {
+                let oldest = self
+                    .oldest_pinned_sequence()
+                    .unwrap_or_else(|| self.last_sequence());
+                CompactOptions {
+                    gc: crate::merge::CompactGcOptions::for_oldest_snapshot(oldest),
+                }
+            } else {
+                CompactOptions::default()
+            };
+            self.compact_l0_into_l1(opts)?;
+            self.last_auto_compact_error = None;
+        } else if count_hit || bytes_hit {
             if self.auto_reclaim {
-                // Opt-in §2.1: piggyback snapshot-safe GC on auto-compact.
-                // Already post-flush — SST-only; floor = oldest pin or last seq.
                 let oldest = self
                     .oldest_pinned_sequence()
                     .unwrap_or_else(|| self.last_sequence());
@@ -4171,13 +4232,8 @@ impl<E: Env> Db<E> {
                     gc: crate::merge::CompactGcOptions::for_oldest_snapshot(oldest),
                 })?;
             } else {
-                // F20: do **not** use latest_only here — that dropped historical
-                // versions and broke `get_at` / bare Snapshot for sequences still
-                // "open" in the app. Explicit reclaim: `compact_reclaim` /
-                // `latest_only`, or `set_auto_reclaim(true)`.
                 self.compact_with(CompactOptions::default())?;
             }
-            // Successful auto-compact clears the last-error slot (counter stays cumulative).
             self.last_auto_compact_error = None;
         }
         Ok(())
@@ -5732,6 +5788,49 @@ mod tests {
             .map(|(k, _)| k.to_vec())
             .collect();
         assert_eq!(keys, vec![b"a".to_vec(), b"b".to_vec()]);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Auto-compact at L0 trigger promotes L0 only — the existing L1 file
+    /// is not rewritten (RFC-0036 apply/raftlog tail).
+    #[test]
+    fn auto_compact_l0_leaves_existing_l1() {
+        let dir = temp_dir();
+        let mut db = Db::open(&dir).unwrap();
+        for i in 0..L0_COMPACTION_TRIGGER {
+            db.put([b'a', i as u8], [b'1', i as u8]).unwrap();
+            db.flush().unwrap();
+        }
+        assert_eq!(db.level_file_count(0), 0, "L0 should have been promoted");
+        assert!(db.level_file_count(1) >= 1);
+        let first_l1 = db
+            .ssts
+            .iter()
+            .zip(db.sst_levels.iter())
+            .find(|(_, &lvl)| lvl == 1)
+            .map(|(t, _)| t.path().to_path_buf())
+            .expect("L1 file");
+        for i in 0..L0_COMPACTION_TRIGGER {
+            db.put([b'b', i as u8], [b'2', i as u8]).unwrap();
+            db.flush().unwrap();
+        }
+        assert_eq!(db.level_file_count(0), 0);
+        assert_eq!(db.level_file_count(1), 2, "old L1 plus one new L1");
+        assert!(
+            db.ssts.iter().any(|t| t.path() == first_l1.as_path()),
+            "first L1 must survive the second L0 compact"
+        );
+        assert_eq!(db.get(&[b'a', 0]).as_deref(), Some([b'1', 0].as_slice()));
+        assert_eq!(
+            db.get(&[b'b', (L0_COMPACTION_TRIGGER - 1) as u8])
+                .as_deref(),
+            Some([b'2', (L0_COMPACTION_TRIGGER - 1) as u8].as_slice())
+        );
+        db.close().unwrap();
+        let db = Db::open(&dir).unwrap();
+        assert_eq!(db.get(&[b'a', 0]).as_deref(), Some([b'1', 0].as_slice()));
+        assert_eq!(db.get(&[b'b', 0]).as_deref(), Some([b'2', 0].as_slice()));
+        db.close().unwrap();
         let _ = fs::remove_dir_all(&dir);
     }
 
@@ -7937,6 +8036,49 @@ mod tests {
         let db = Db::open(&dir).unwrap();
         assert_eq!(db.get(&[b'k', 0]).as_deref(), Some([b'v', 0].as_slice()));
         assert_eq!(db.get(&[b'k', 31]).as_deref(), Some([b'v', 31].as_slice()));
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0036: auto-flush with interval 0 must not rewrite CHANGELOG (apply tail).
+    /// Keys stay visible; reopen rebuilds from SST if the cache is absent.
+    #[test]
+    fn auto_flush_interval_zero_skips_changelog_store() {
+        let dir = temp_dir();
+        let chlog = dir.join(crate::change_feed::CHANGELOG_FILE_NAME);
+        {
+            let mut db = Db::open_with(
+                &dir,
+                OpenOptions {
+                    sync: true,
+                    auto_flush_bytes: Some(256),
+                    auto_compact_sst_count: None,
+                    auto_compact_sst_bytes: None,
+                    exclusive: true,
+                    large_value_threshold: None,
+                },
+            )
+            .unwrap();
+            db.set_changelog_interval(0);
+            for i in 0..64u8 {
+                db.put([b'k', i], vec![i; 64]).unwrap();
+            }
+            assert!(db.sst_count() >= 1, "auto-flush must have written SST");
+            assert_eq!(
+                db.changelog_store_count(),
+                0,
+                "auto-flush must not persist CHANGELOG when interval is 0"
+            );
+            assert!(!chlog.exists());
+            assert_eq!(db.get(&[b'k', 0]).as_deref(), Some(vec![0; 64].as_slice()));
+            db.close().unwrap();
+        }
+        let db = Db::open(&dir).unwrap();
+        assert_eq!(db.get(&[b'k', 0]).as_deref(), Some(vec![0; 64].as_slice()));
+        assert_eq!(
+            db.get(&[b'k', 63]).as_deref(),
+            Some(vec![63; 64].as_slice())
+        );
         db.close().unwrap();
         let _ = fs::remove_dir_all(&dir);
     }

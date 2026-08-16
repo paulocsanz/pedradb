@@ -3,89 +3,89 @@
   "engine": "rocksdb",
   "sync": true,
   "durability": "sync-per-write (WriteOptions.sync=true; fdatasync on this build)",
-  "changelog_interval": 64,
+  "changelog_interval": 0,
   "status": "ok",
-  "notes": ["ycsb records=4096 ops=2000 payload=1000 dist=zipfian", "engine=rocksdb durability=sync-per-write (WriteOptions.sync=true; fdatasync on this build)", "suites: ycsb,deps", "seed: one put per record (not timed)", "cfs: default + write, lock, raftlog (TiKV store shape; raftlog = raftdb)", "deps apply batch txns/commit: 32", "changelog_interval=64"],
+  "notes": ["ycsb records=4096 ops=2000 payload=1000 dist=zipfian", "engine=rocksdb durability=sync-per-write (WriteOptions.sync=true; fdatasync on this build)", "suites: ycsb,deps", "seed: one put per record (not timed)", "cfs: default + write, lock, raftlog (TiKV store shape; raftlog = raftdb)", "deps apply batch txns/commit: 32", "changelog_interval=0"],
   "benches": [
 {
     "name": "ycsb_a",
     "n": 2000,
-    "qps": 58582.952,
-    "p50_ms": 0.0221,
-    "p95_ms": 0.0475,
-    "p99_ms": 0.0600,
-    "max_ms": 0.2350,
-    "wall_s": 0.0341
+    "qps": 60707.392,
+    "p50_ms": 0.0215,
+    "p95_ms": 0.0454,
+    "p99_ms": 0.0499,
+    "max_ms": 0.0656,
+    "wall_s": 0.0329
   },
 {
     "name": "ycsb_b",
     "n": 2000,
-    "qps": 393242.752,
-    "p50_ms": 0.0008,
-    "p95_ms": 0.0235,
-    "p99_ms": 0.0461,
-    "max_ms": 0.0551,
-    "wall_s": 0.0051
+    "qps": 410603.844,
+    "p50_ms": 0.0007,
+    "p95_ms": 0.0244,
+    "p99_ms": 0.0424,
+    "max_ms": 0.0542,
+    "wall_s": 0.0049
   },
 {
     "name": "ycsb_c",
     "n": 2000,
-    "qps": 1408822.752,
+    "qps": 1440014.400,
     "p50_ms": 0.0006,
     "p95_ms": 0.0010,
-    "p99_ms": 0.0013,
-    "max_ms": 0.0023,
+    "p99_ms": 0.0012,
+    "max_ms": 0.0037,
     "wall_s": 0.0014
   },
 {
     "name": "ycsb_d",
     "n": 2000,
-    "qps": 404988.158,
+    "qps": 435105.817,
     "p50_ms": 0.0007,
-    "p95_ms": 0.0238,
-    "p99_ms": 0.0442,
-    "max_ms": 0.0870,
-    "wall_s": 0.0049
+    "p95_ms": 0.0225,
+    "p99_ms": 0.0422,
+    "max_ms": 0.0590,
+    "wall_s": 0.0046
   },
 {
     "name": "ycsb_e",
     "n": 2000,
-    "qps": 104754.317,
-    "p50_ms": 0.0073,
-    "p95_ms": 0.0229,
-    "p99_ms": 0.0480,
-    "max_ms": 0.0934,
-    "wall_s": 0.0191
+    "qps": 106871.621,
+    "p50_ms": 0.0072,
+    "p95_ms": 0.0151,
+    "p99_ms": 0.0437,
+    "max_ms": 0.0765,
+    "wall_s": 0.0187
   },
 {
     "name": "ycsb_f",
     "n": 2000,
-    "qps": 53040.315,
+    "qps": 55970.933,
     "p50_ms": 0.0247,
-    "p95_ms": 0.0499,
-    "p99_ms": 0.0594,
-    "max_ms": 0.9469,
-    "wall_s": 0.0377
+    "p95_ms": 0.0475,
+    "p99_ms": 0.0530,
+    "max_ms": 0.0952,
+    "wall_s": 0.0357
   },
 {
     "name": "deps_apply_batch",
     "n": 2000,
-    "qps": 4823.018,
-    "p50_ms": 0.1824,
-    "p95_ms": 0.2583,
-    "p99_ms": 1.0269,
-    "max_ms": 5.6933,
-    "wall_s": 0.4147
+    "qps": 4404.604,
+    "p50_ms": 0.1691,
+    "p95_ms": 0.1976,
+    "p99_ms": 0.2870,
+    "max_ms": 89.3035,
+    "wall_s": 0.4541
   },
 {
     "name": "deps_mvcc_latest",
     "n": 2000,
-    "qps": 297344.358,
-    "p50_ms": 0.0030,
-    "p95_ms": 0.0056,
-    "p99_ms": 0.0074,
-    "max_ms": 0.0568,
-    "wall_s": 0.0067
+    "qps": 311023.852,
+    "p50_ms": 0.0029,
+    "p95_ms": 0.0054,
+    "p99_ms": 0.0083,
+    "max_ms": 0.0582,
+    "wall_s": 0.0064
   },
 {
     "name": "deps_mvcc_latest_split",
@@ -95,12 +95,12 @@
 {
     "name": "deps_scan",
     "n": 2000,
-    "qps": 287277.238,
-    "p50_ms": 0.0033,
-    "p95_ms": 0.0042,
-    "p99_ms": 0.0047,
-    "max_ms": 0.0091,
-    "wall_s": 0.0070
+    "qps": 303194.901,
+    "p50_ms": 0.0032,
+    "p95_ms": 0.0036,
+    "p99_ms": 0.0039,
+    "max_ms": 0.0066,
+    "wall_s": 0.0066
   },
 {
     "name": "deps_scan_probe",
@@ -109,22 +109,22 @@
 {
     "name": "deps_raftlog",
     "n": 2000,
-    "qps": 5662.417,
-    "p50_ms": 0.1770,
-    "p95_ms": 0.2198,
-    "p99_ms": 0.5691,
-    "max_ms": 6.9353,
-    "wall_s": 0.3532
+    "qps": 3243.699,
+    "p50_ms": 0.0808,
+    "p95_ms": 0.3363,
+    "p99_ms": 5.7386,
+    "max_ms": 131.4306,
+    "wall_s": 0.6166
   },
 {
     "name": "deps_cache_overwrite",
     "n": 2000,
-    "qps": 23303.539,
-    "p50_ms": 0.0273,
-    "p95_ms": 0.0516,
-    "p99_ms": 0.0649,
-    "max_ms": 20.2375,
-    "wall_s": 0.0858
+    "qps": 25619.361,
+    "p50_ms": 0.0259,
+    "p95_ms": 0.0504,
+    "p99_ms": 0.0594,
+    "max_ms": 15.6028,
+    "wall_s": 0.0781
   }
   ]
 }

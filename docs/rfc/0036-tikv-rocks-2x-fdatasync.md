@@ -41,12 +41,13 @@ Não é “menos durável que o TiKV”. É a **mesma** classe. `F_FULLFSYNC` co
 
 - [x] **P0.1** RFC + Status vivo (este doc) — status: `done`
 - [x] **P0.2** `EnvFile::sync_data` = `fdatasync(2)` no Unix; WAL commit/group usa `sync_data`; fence inalterado — status: `done`
-- [ ] **P0.3** Remesura 11/11 ≥ 0.5 vs Rocks fd — status: `doing` (8/11; faltam apply / raftlog / overwrite-variância — compact inline)
+- [ ] **P0.3** Remesura 11/11 ≥ 0.5 vs Rocks fd — status: `doing` (10/11; apply 2.31× — compact L0 no writer)
 
 ### P1 — next wave
 
 - [ ] **P1.1** Gate `ROCKS_PARITY_RATIO_FLOOR=0.5` no script **sem** FULL_SYNC (todas as 11) — status: `todo`
 - [x] **P1.2** CHANGELOG fora do caminho do commit (interval 0; flush/close ainda persistem) — status: `done`
+- [x] **P1.3** Auto-compact L0-only (não absorve L1 existente); auto-flush não reescreve CHANGELOG — status: `done`
 
 ### P2 — later
 
@@ -58,9 +59,10 @@ Não é “menos durável que o TiKV”. É a **mesma** classe. `F_FULLFSYNC` co
 |----|------|-------|--------|-----------|---------|
 | P0.1 | p0 | RFC | done | este doc | 2026-08-16 |
 | P0.2 | p0 | WAL `fdatasync` + fence | done | `pedradb-posix` + commit `sync_data` | 2026-08-16 |
-| P0.3 | p0 | remesura 11/11 ≥ 0.5 vs fd | doing | 8/11; apply/raftlog compact inline | 2026-08-16 |
+| P0.3 | p0 | remesura 11/11 ≥ 0.5 vs fd | doing | 10/11; apply 2.31× L0 compact | 2026-08-16 |
 | P1.1 | p1 | gate 0.5 default Rocks | todo | — | 2026-08-16 |
 | P1.2 | p1 | CHANGELOG fora do commit | done | interval default 0 | 2026-08-16 |
+| P1.3 | p1 | L0-only compact + skip feed no auto-flush | done | apply 6.6× → 2.31× | 2026-08-16 |
 | P2.1 | p2 | FF report-only | todo | — | 2026-08-16 |
 
 ## Acceptance Criteria
