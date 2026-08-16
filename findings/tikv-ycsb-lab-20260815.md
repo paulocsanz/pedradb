@@ -127,6 +127,30 @@ Mesmos knobs, **mesma run ycsb+deps no mesmo LSM** (não isolámos o deps). Caus
 
 **11/11 ≤2×. 5/11 ≤1.1×** (b, d, f, mvcc, scan). RFC-0034 (1.1× all-shapes) continua aberto. Probe MVCC (mesmo 1 L1 / 471 SST fallback / 878 decodes que o 32×): encode 45 ns/op, last 1.5 µs, get **1.3 µs** (era 205 µs). WAL `sync_all` inalterado. Adversarial sem editar asserção.
 
+## RFC-0035 — vs Rocks padrão do TiKV (`fdatasync`, 2026-08-16)
+
+Mesmos knobs, run `ycsb,deps` combinada, `4ec565f`. Pedra = WAL `File::sync_all` (`F_FULLFSYNC` neste Mac). Peer = Rocks `WriteOptions.sync=true` **sem** `ROCKS_PARITY_FULL_SYNC` — `librocksdb-sys` desta build não define `HAVE_FULLFSYNC`, então o syscall é `fdatasync`. É a classe do TiKV `sync-log=true` em Linux (não é cluster 3-nós). Raw: [tikv-ycsb-0035-fdatasync](tikv-ycsb-0035-fdatasync/).
+
+`slower` = Rocks_fd qps / Pedra qps. **Não é gate.** 2× de escrita vs esta coluna, mantendo G1, é fisicamente impossível (~4 ms `F_FULLFSYNC` vs ~30 µs `fdatasync`). Leituras (C, MVCC, scan) não pagam sync — mesmo trabalho que vs FF.
+
+Seed 4096×1 KB: Pedra 17.5 s · Rocks fdatasync 0.2 s.
+
+| shape | paga WAL | Pedra qps | p50 | p95 | p99 | Rocks fd qps | p50 | p95 | p99 | slower |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| ycsb_a | sim | 431 | 3.74 ms | 5.10 ms | 8.09 ms | 15 730 | 27 µs | 132 µs | 483 µs | **37×** |
+| ycsb_b | 5% | 4 237 | 0.9 µs | 3.82 ms | 4.12 ms | 238 270 | 0.8 µs | 32 µs | 86 µs | **56×** |
+| ycsb_c | não | 900 411 | 0.4 µs | 3.5 µs | 5.8 µs | 1 249 219 | 0.7 µs | 1.3 µs | 1.8 µs | **1.39×** |
+| ycsb_d | 5% | 4 485 | 0.9 µs | 3.75 ms | 4.10 ms | 251 302 | 0.8 µs | 29 µs | 82 µs | **56×** |
+| ycsb_e | 5% | 3 870 | 49 µs | 238 µs | 4.51 ms | 21 122 | 8.0 µs | 37 µs | 142 µs | **5.5×** |
+| ycsb_f | sim | 432 | 3.83 ms | 4.99 ms | 8.91 ms | 37 544 | 27 µs | 84 µs | 125 µs | **87×** |
+| deps_apply_batch | sim | 72.4 | 8.07 ms | 30.90 ms | 97.42 ms | 5 017 | 186 µs | 269 µs | 407 µs | **69×** |
+| deps_mvcc_latest | não | 337 909 | 0.6 µs | 13 µs | 17 µs | 261 131 | 3.2 µs | 6.5 µs | 9.0 µs | **0.77×** |
+| deps_scan | não | 353 360 | 0.4 µs | 12 µs | 19 µs | 270 911 | 3.5 µs | 4.7 µs | 5.3 µs | **0.77×** |
+| deps_raftlog | sim | 145 | 4.05 ms | 12.54 ms | 89.58 ms | 3 965 | 123 µs | 220 µs | 805 µs | **27×** |
+| deps_cache_overwrite | sim | 148 | 4.12 ms | 13.17 ms | 104.53 ms | 28 141 | 29 µs | 60 µs | 93 µs | **191×** |
+
+Leituras puras: C **1.39×**; MVCC e scan **mais rápidos** que o Rocks fd (0.77×). Escritas 27–191× — o piso é o syscall, não o LSM. Gate oficial continua vs `F_FULLFSYNC` (tabela acima).
+
 ## RFC-0033 remesure (2026-08-15, deps-only)
 
 Same knobs (4096/2000, zipfian, 1 KB). Compat only — no Rocks peer in this slice. After apply (64k txns, batch=32).
