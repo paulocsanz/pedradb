@@ -2324,6 +2324,23 @@ impl<E: Env> Db<E> {
         Ok(())
     }
 
+    /// Rotate a full active mem into the imm slot **without** taking it out.
+    ///
+    /// Host workers (RFC-0037) stage here so `has_imm` stays true until
+    /// [`Self::prepare_flush_imm`]. Does nothing when imm is already occupied
+    /// (worker behind) — active mem may grow until the slot frees.
+    ///
+    /// # Errors
+    /// [`CoreError::DurabilityFenced`].
+    pub fn stage_flush_imm(&mut self) -> Result<bool> {
+        self.ensure_not_fenced()?;
+        if self.imm.is_some() || self.mem.is_empty() {
+            return Ok(false);
+        }
+        self.imm = Some(std::mem::replace(&mut self.mem, MemTable::new()));
+        Ok(true)
+    }
+
     /// Switch active mem → imm if free; returns taken imm for out-of-lock SST write.
     ///
     /// Used by [`ConcurrentDb`] to release the write lock during SST I/O.
@@ -2486,6 +2503,14 @@ impl<E: Env> Db<E> {
         std::iter::once(&self.mem)
             .chain(self.imm.as_ref())
             .chain(self.flush_read_pin.as_ref())
+    }
+
+    /// Rotate WAL after an off-lock L0 install when mem/imm/pin are idle.
+    ///
+    /// # Errors
+    /// WAL I/O.
+    pub fn try_rotate_wal_if_idle(&mut self) -> Result<()> {
+        self.try_rotate_wal()
     }
 
     /// After L0 install: rotate WAL if safe + opportunistic compact / blob GC.
@@ -4294,6 +4319,13 @@ impl<E: Env> Db<E> {
             return Ok(());
         };
         if self.mem.approx_memory_usage() >= limit {
+            if self.defer_auto_compact {
+                // Leave the table in `imm` for the host worker. Do not call
+                // `prepare_flush_imm` here — that takes the table out and
+                // `has_imm` goes false (291k mem / 0 SST in the P2.1 attempt).
+                let _ = self.stage_flush_imm()?;
+                return Ok(());
+            }
             self.auto_flush_mem()?;
         }
         Ok(())
@@ -6105,6 +6137,39 @@ mod tests {
         let db = Db::open(&dir).unwrap();
         assert_eq!(db.get(&[b'a', 0]).as_deref(), Some([b'1', 0].as_slice()));
         assert_eq!(db.get(b"zz").as_deref(), Some(b"live".as_slice()));
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn stage_flush_imm_leaves_has_imm_for_worker() {
+        let dir = temp_dir();
+        let mut db = Db::open_with(
+            &dir,
+            OpenOptions {
+                sync: false,
+                auto_flush_bytes: None,
+                auto_compact_sst_count: None,
+                auto_compact_sst_bytes: None,
+                exclusive: true,
+                large_value_threshold: None,
+            },
+        )
+        .unwrap();
+        db.set_defer_auto_compact(true);
+        for i in 0..32u8 {
+            db.put([b'k', i], vec![i; 128]).unwrap();
+        }
+        assert!(db.stage_flush_imm().unwrap());
+        assert!(db.has_imm(), "stage must leave the table in the imm slot");
+        assert_eq!(db.get(&[b'k', 0]).as_deref(), Some([0u8; 128].as_slice()));
+        let imm = db.prepare_flush_imm().unwrap().expect("take staged");
+        assert!(!db.has_imm());
+        let num = db.alloc_file_num();
+        let (table, _, _) = db.write_memtable_to_l0_file_num(&imm, num).unwrap();
+        db.install_l0_sst(table, num).unwrap();
+        assert_eq!(db.sst_count(), 1);
+        assert_eq!(db.get(&[b'k', 0]).as_deref(), Some([0u8; 128].as_slice()));
         db.close().unwrap();
         let _ = fs::remove_dir_all(&dir);
     }

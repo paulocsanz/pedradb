@@ -19,8 +19,8 @@
 use bytes::Bytes;
 use parking_lot::Mutex;
 use pedradb_core::{
-    BatchOp, CompactOptions, CoreError, Db, Env, Snapshot as CoreSnapshot, StdEnv,
-    L0_COMPACTION_TRIGGER,
+    write_sst_on, BatchOp, CompactOptions, CoreError, Db, Env, Snapshot as CoreSnapshot, SstTable,
+    StdEnv, L0_COMPACTION_TRIGGER,
 };
 use std::collections::VecDeque;
 use std::fmt;
@@ -627,10 +627,12 @@ impl DB<StdEnv> {
         cfs: &[&str],
     ) -> Result<Self> {
         let mut db = Self::open_cf_with_env(opts, path, cfs, StdEnv)?;
-        db.inner.lock().set_defer_auto_compact(true);
         let (tx, th) = spawn_compact_worker(Arc::clone(&db.inner), Arc::clone(&db.compact_gate));
-        db.compact_tx = tx;
-        db.compact_thread = th;
+        if th.is_some() {
+            db.inner.lock().set_defer_auto_compact(true);
+            db.compact_tx = tx;
+            db.compact_thread = th;
+        }
         Ok(db)
     }
 }
@@ -1036,15 +1038,81 @@ fn spawn_compact_worker(
     let handle = thread::Builder::new()
         .name("pedra-compat-compact".into())
         .spawn(move || loop {
-            match rx.recv_timeout(Duration::from_millis(50)) {
-                Ok(CompactCmd::Shutdown) | Err(RecvTimeoutError::Disconnected) => break,
+            match rx.recv_timeout(Duration::from_millis(20)) {
+                Ok(CompactCmd::Shutdown) | Err(RecvTimeoutError::Disconnected) => {
+                    while compat_flush_once(&inner) {}
+                    break;
+                }
                 Ok(CompactCmd::Run) | Err(RecvTimeoutError::Timeout) => {
+                    while compat_flush_once(&inner) {}
                     while compat_compact_once(&inner, &gate) {}
                 }
             }
         })
         .ok();
     (Some(tx), handle)
+}
+
+/// Drain one staged imm → L0. SST write does not hold the `Db` mutex.
+fn compat_flush_once(inner: &Mutex<Db<StdEnv>>) -> bool {
+    let prepared = {
+        let mut g = inner.lock();
+        if !g.has_imm() {
+            return false;
+        }
+        match g.prepare_flush_imm() {
+            Ok(Some(imm)) => {
+                let num = g.alloc_file_num();
+                let dir = g.path().to_path_buf();
+                let sync = g.default_write_sync();
+                Some((imm, num, dir, sync))
+            }
+            _ => None,
+        }
+    };
+    let Some((imm, file_num, dir, sync)) = prepared else {
+        return false;
+    };
+    let env = StdEnv;
+    let table = match write_imm_l0(&env, &dir, file_num, &imm, sync) {
+        Ok(t) => t,
+        Err(_) => {
+            inner.lock().restore_imm(imm);
+            return false;
+        }
+    };
+    let mut g = inner.lock();
+    if g.install_l0_sst(table, file_num).is_err() {
+        g.restore_imm(imm);
+        return false;
+    }
+    let _ = g.try_rotate_wal_if_idle();
+    true
+}
+
+fn write_imm_l0(
+    env: &StdEnv,
+    dir: &std::path::Path,
+    file_num: u64,
+    imm: &pedradb_core::MemTable,
+    sync: bool,
+) -> pedradb_core::Result<SstTable> {
+    let final_path = dir.join(format!("{file_num:06}.sst"));
+    let tmp_path = dir.join(format!("{file_num:06}.sst.tmp"));
+    match write_sst_on(env, &tmp_path, imm) {
+        Ok(table) => {
+            drop(table);
+            env.rename(&tmp_path, &final_path)?;
+            if sync {
+                let _ = env.sync_dir(dir);
+            }
+            SstTable::open_on(env, &final_path)
+        }
+        Err(e) => {
+            let _ = env.remove_file(&tmp_path);
+            Err(e)
+        }
+    }
 }
 
 /// One L0→L1 job. I/O runs without `Db` mutex (G5: failed write is not installed).
@@ -1080,6 +1148,36 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         d
+    }
+
+    #[test]
+    fn host_worker_flush_writes_sst_and_keeps_keys() {
+        let dir = tmp("worker-flush");
+        let db = DB::open_default(&dir).unwrap();
+        let payload = vec![b'x'; 2048];
+        for i in 0..3000u32 {
+            db.put(i.to_be_bytes(), &payload).unwrap();
+        }
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while std::time::Instant::now() < deadline {
+            if db.read_probe().sst_count >= 1 {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        assert!(
+            db.read_probe().sst_count >= 1,
+            "host worker must write L0, probe={:?}",
+            db.read_probe()
+        );
+        for i in [0u32, 1500, 2999] {
+            assert_eq!(
+                db.get(i.to_be_bytes()).unwrap().as_deref(),
+                Some(payload.as_slice()),
+                "acked key {i}"
+            );
+        }
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

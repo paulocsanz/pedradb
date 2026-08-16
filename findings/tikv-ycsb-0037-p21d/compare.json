@@ -1,0 +1,44 @@
+{
+  "compare": "rocks-parity-v1",
+  "compat_path": "findings/tikv-ycsb-0037-p21d/compat/rocks_parity_bench.json",
+  "compat": {
+    "engine": "compat (rocksdb-compat on pedradb-core, single node, single client)",
+    "sync": true,
+    "durability": "fdatasync-before-ok (pedradb-core WAL; RFC-0001/0036)",
+    "metrics": {
+    "deps_apply_batch": 3034.531,
+    "deps_cache_overwrite": 36146.783,
+    "deps_mvcc_latest": 513731.530,
+    "deps_raftlog": 13984.914,
+    "deps_scan": 131926.478,
+    "ycsb_a": 57236.275,
+    "ycsb_b": 374266.134,
+    "ycsb_c": 1240213.937,
+    "ycsb_d": 449459.211,
+    "ycsb_e": 146017.376,
+    "ycsb_f": 60398.478
+  }
+  },
+  "rocksdb": {
+    "status": "peer_file:ok",
+    "peer_file": "findings/tikv-ycsb-0037-p21d/rocks/rocks_parity_bench.json",
+    "sync": true,
+    "durability": "sync-per-write (WriteOptions.sync=true; fdatasync on this build)",
+    "how_to_fill": "1) cargo run -q --release -p rocksdb-parity-bench --features real --bin rocks-parity-bench -- <out> rocksdb  2) ROCKS_PARITY_PEER=<out>/rocks_parity_bench.json rocks-parity-compare  3) scripts/rocksdb_parity_v0.sh does both. See docs/rocksdb-compat.md"
+  },
+  "ratios": [
+    {"shape":"ycsb_a","compat_keys_per_s":57236.275,"rocksdb_keys_per_s":68033.477,"compat_over_rocksdb":0.841,"meets_floor":true},
+    {"shape":"ycsb_b","compat_keys_per_s":374266.134,"rocksdb_keys_per_s":431592.577,"compat_over_rocksdb":0.867,"meets_floor":true},
+    {"shape":"ycsb_c","compat_keys_per_s":1240213.937,"rocksdb_keys_per_s":1403631.898,"compat_over_rocksdb":0.884,"meets_floor":true},
+    {"shape":"ycsb_d","compat_keys_per_s":449459.211,"rocksdb_keys_per_s":446969.025,"compat_over_rocksdb":1.006,"meets_floor":true},
+    {"shape":"ycsb_e","compat_keys_per_s":146017.376,"rocksdb_keys_per_s":108242.680,"compat_over_rocksdb":1.349,"meets_floor":true},
+    {"shape":"ycsb_f","compat_keys_per_s":60398.478,"rocksdb_keys_per_s":61900.900,"compat_over_rocksdb":0.976,"meets_floor":true},
+    {"shape":"deps_apply_batch","compat_keys_per_s":3034.531,"rocksdb_keys_per_s":5620.135,"compat_over_rocksdb":0.540,"meets_floor":true},
+    {"shape":"deps_mvcc_latest","compat_keys_per_s":513731.530,"rocksdb_keys_per_s":299203.356,"compat_over_rocksdb":1.717,"meets_floor":true},
+    {"shape":"deps_scan","compat_keys_per_s":131926.478,"rocksdb_keys_per_s":291531.038,"compat_over_rocksdb":0.453,"meets_floor":false},
+    {"shape":"deps_raftlog","compat_keys_per_s":13984.914,"rocksdb_keys_per_s":5193.135,"compat_over_rocksdb":2.693,"meets_floor":true},
+    {"shape":"deps_cache_overwrite","compat_keys_per_s":36146.783,"rocksdb_keys_per_s":33016.398,"compat_over_rocksdb":1.095,"meets_floor":true}
+  ],
+  "parity": {"floor": 0.5, "shapes_with_peer": 11, "gated": 11, "min_ratio": 0.453, "pass": false},
+  "honesty": "Single-node, single-client lab bench through the rocksdb-compat API subset vs real RocksDB (rocksdb crate). Durability must be labeled: compat always fsyncs before Ok; the rocksdb peer defaults to sync-per-write (ROCKS_PARITY_SYNC=1) to match, 0 = its async-WAL default for reference. Not a distributed/field claim."
+}

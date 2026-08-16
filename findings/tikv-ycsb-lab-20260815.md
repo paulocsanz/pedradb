@@ -201,6 +201,26 @@ Worker `pedra-compat-compact` no compat (não no core). Flush **continua** no `p
 
 Apply **1 855 qps**, p50 176 µs, max **212 ms** — o mesmo sítio do P0.2. Probe depois do apply: `l0=4, l1=4` (o worker fundiu). vs Rocks desta run 2 785 = 0.67; vs Rocks limpo 5 576 ainda **3×**. O que resta no apply é o auto-flush de 4 MiB no mesmo thread. Tentativa de mandar o flush ao worker (revertida) deixou 291 k entradas no mem e 0 SST.
 
+## RFC-0037 — dual-mem flush no host worker (2026-08-16)
+
+`stage_flush_imm` no `put`; o worker escreve o SST. Oficial = **p21d** (Rocks apply limpo, max 4.8 ms). Raw: [tikv-ycsb-0037-p21d](tikv-ycsb-0037-p21d/). p21c (Rocks apply lento 2 747) também em [tikv-ycsb-0037-p21c](tikv-ycsb-0037-p21c/).
+
+| shape | Pedra qps | p50 | p95 | p99 | Rocks fd qps | p50 | p95 | p99 | slower | ≤2× |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|:---:|
+| ycsb_a | 57 236 | 20 µs | 46 µs | 62 µs | 68 033 | 19 µs | 43 µs | 48 µs | **1.19×** | sim |
+| ycsb_b | 374 266 | 0.4 µs | 20 µs | 40 µs | 431 593 | 0.8 µs | 21 µs | 40 µs | **1.15×** | sim |
+| ycsb_c | 1 240 214 | 0.3 µs | 3.2 µs | 6.0 µs | 1 403 632 | 0.6 µs | 1.0 µs | 1.3 µs | **1.13×** | sim |
+| ycsb_d | 449 459 | 0.4 µs | 20 µs | 39 µs | 446 969 | 0.7 µs | 20 µs | 40 µs | **0.99×** | sim |
+| ycsb_e | 146 017 | 5.9 µs | 21 µs | 42 µs | 108 243 | 7.1 µs | 18 µs | 41 µs | **0.74×** | sim |
+| ycsb_f | 60 398 | 21 µs | 46 µs | 51 µs | 61 901 | 21 µs | 46 µs | 50 µs | **1.02×** | sim |
+| deps_apply_batch | 3 035 | 177 µs | 245 µs | 2.63 ms | 5 620 | 169 µs | 201 µs | 257 µs | **1.85×** | sim |
+| deps_mvcc_latest | 513 732 | 0.6 µs | 7.8 µs | 21 µs | 299 203 | 3.0 µs | 5.7 µs | 8.0 µs | **0.58×** | sim |
+| deps_scan | 131 926 | 0.4 µs | 28 µs | 63 µs | 291 531 | 3.3 µs | 4.0 µs | 4.3 µs | **2.21×** | não |
+| deps_raftlog | 13 985 | 45 µs | 156 µs | 288 µs | 5 193 | 118 µs | 232 µs | 2.71 ms | **0.37×** | sim |
+| deps_cache_overwrite | 36 147 | 27 µs | 35 µs | 43 µs | 33 016 | 23 µs | 47 µs | 60 µs | **0.91×** | sim |
+
+**Apply ≤2× vs Rocks limpo** (0.54). Pedra apply 1.9 k → 3.0 k; max 221 ms → 26–184 ms. **10/11** nesta run: scan 2.21× (4 L0 + 2 L1 + 30 k mem). p21c scan 0.54 / apply 1.21× vs Rocks lento. WAL `fdatasync` antes do Ok.
+
 ## RFC-0033 remesure (2026-08-15, deps-only)
 
 Same knobs (4096/2000, zipfian, 1 KB). Compat only — no Rocks peer in this slice. After apply (64k txns, batch=32).

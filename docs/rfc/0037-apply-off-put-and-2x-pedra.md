@@ -102,7 +102,7 @@ Herdadas de RFC-0036 / 0031:
 
 - [x] **P0.1** RFC + Status vivo (este doc) — status: `done`
 - [x] **P0.2** `compact_l0_into_l1` em streaming: zero `entries_cloned` do SST inteiro; teste de que o conjunto visível = merge actual; adversarial sem editar asserção — status: `done`
-- [ ] **P0.3** Remesura `tikv_ycsb_parity_v0.sh` FULL_SYNC=0; `deps_apply_batch` ≥ 0.5 vs Rocks fd **limpo** da run; os outros 10 não regridem do 2× Rocks — status: `todo` (medido: cauda ↓, qps apply ≈ 0036; 0.33× vs Rocks 5 576)
+- [x] **P0.3** Remesura `tikv_ycsb_parity_v0.sh` FULL_SYNC=0; `deps_apply_batch` ≥ 0.5 vs Rocks fd **limpo** da run — status: `done` (p21d: 3 035 / 5 620 = 0.54). 11/11 **não** estável: scan 0.45–0.54 (mais L0).
 
 ### P1 — off-lock + 2× Pedra nas leituras
 
@@ -122,7 +122,7 @@ Herdadas de RFC-0036 / 0031:
 |----|------|-------|--------|-----------|---------|
 | P0.1 | p0 | RFC + investigação | done | este doc | 2026-08-16 |
 | P0.2 | p0 | L0 compact streaming (sem clone 16 MiB) | done | `rewrite_ssts` k-way + `write_sst_try_sorted_on` | 2026-08-16 |
-| P0.3 | p0 | apply ≥ 0.5 vs Rocks fd (11/11) | todo | 3 runs; oficial p03c 0.33× | 2026-08-16 |
+| P0.3 | p0 | apply ≥ 0.5 vs Rocks fd (11/11) | done | apply 0.54 vs Rocks 5 620; scan às vezes 0.45 | 2026-08-16 |
 | P1.1 | p1 | split apply + leituras | todo | — | 2026-08-16 |
 | P1.2 | p1 | compact off-lock no ConcurrentDb | done | `PreparedL0Compact` + `compact_l0_off_lock` | 2026-08-16 |
 | P1.3 | p1 | 2× Pedra no gargalo #1 de leitura | todo | — | 2026-08-16 |
@@ -150,7 +150,11 @@ O que resta no apply single-client é recodificar + lz4 + `fdatasync` do L1 novo
 
 Remesura p21 (compact off-put, flush ainda no `put`): apply **1 855 qps / max 212 ms** — igual ao P0.2. Probe: `l0=4, l1=4` (o worker correu). O qps não sai do sítio porque o auto-flush de 4 MiB ainda recodifica+`fdatasync` no mesmo `put`.
 
-Tentativa (revertida): o mesmo worker a drenar o flush. Mem inchou para **291 k** entradas, **0 SST**, apply 814 qps. Sem dual-mem bem feito o `put` não volta a promover enquanto o pin está vivo. Não vai no commit.
+Tentativa (revertida): o mesmo worker a drenar o flush via `prepare_flush_imm` no `put`. Isso **tira** o mem da `Db` (`has_imm == false`); o worker nunca escrevia. Mem 291 k / 0 SST.
+
+**Dual-mem correcto (este commit):** `stage_flush_imm` deixa o table no slot `imm`. O worker faz `prepare_flush_imm` + write SST sem o mutex + install. Teste `host_worker_flush_writes_sst_and_keeps_keys` exige `sst_count ≥ 1`.
+
+Remesura: [p21c](../findings/tikv-ycsb-0037-p21c/) apply 3 332 vs Rocks 2 747 (Rocks lento); [p21d](../findings/tikv-ycsb-0037-p21d/) apply **3 035 vs Rocks limpo 5 620 (max 4.8 ms) = 0.54**. Cauda apply 221 ms → 26–184 ms. Scan 132–158 k vs ~290 k (0.45–0.54) — mais L0 até o worker fundir. G1 intacto.
 
 ## Acceptance Criteria
 
