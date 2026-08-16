@@ -848,6 +848,31 @@ impl<E: Env> DB<E> {
         }
     }
 
+    /// Latest key under `prefix` in `last_cf`, then point-get that user key in
+    /// `get_cf` (RFC-0035 P1.1). One mutex — same visibility as the two calls.
+    ///
+    /// # Errors
+    /// Unknown CF or Pedra read errors.
+    pub fn last_prefix_then_get(
+        &self,
+        last_cf: &ColumnFamily,
+        prefix: impl AsRef<[u8]>,
+        get_cf: &ColumnFamily,
+    ) -> Result<Option<Vec<u8>>> {
+        self.check_cf(&last_cf.name)?;
+        self.check_cf(&get_cf.name)?;
+        let enc = self.codec.encode(&last_cf.name, prefix.as_ref());
+        let guard = self.inner.lock().expect("db mutex");
+        let seq = guard.last_sequence();
+        let Some(k) = guard.last_under_user_prefix(seq, &enc)? else {
+            return Ok(None);
+        };
+        let user = self.codec.decode(&last_cf.name, &k).to_vec();
+        Ok(guard
+            .get(&self.codec.encode(&get_cf.name, &user))
+            .map(|b| b.to_vec()))
+    }
+
     /// Count live keys in `[start, end)` in `cf`, stopping at `limit` (RFC-0033).
     ///
     /// Key-only projection: same visibility as a forward iterator, no value
@@ -1107,6 +1132,13 @@ mod tests {
         assert_eq!(&prev[prefix.len()..], &2u64.to_be_bytes());
         let n = db.count_cf(&cf, b"u/00", b"u/05", 25).unwrap();
         assert_eq!(n, 14); // 5 users × 3 vers − 1 delete
+        let def = db.cf_handle(DEFAULT_CF).unwrap();
+        db.put_cf(&def, &prev, b"val").unwrap();
+        let got = db
+            .last_prefix_then_get(&cf, prefix, &def)
+            .unwrap()
+            .expect("combined");
+        assert_eq!(got, b"val");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

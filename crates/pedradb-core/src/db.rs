@@ -221,6 +221,14 @@ pub struct ReadProbeSnap {
     pub block_cache_misses: u64,
     /// SST blocks actually decompressed on this thread since last reset.
     pub blocks_decoded: u64,
+    /// `lookup` answered from a mem layer (no SST probe).
+    pub get_mem_hit: u64,
+    /// `lookup` had to probe SSTs.
+    pub get_sst_fallback: u64,
+    /// `get` resolved an inline value (not a vlog pointer).
+    pub get_inline: u64,
+    /// `get` resolved a vlog pointer.
+    pub get_vlog: u64,
 }
 
 /// Per-blob GC stats for operator / auto-pick (RFC-0029 P1.1).
@@ -557,6 +565,10 @@ pub struct Db<E: Env = StdEnv> {
     latest_sst_probed: AtomicU64,
     scan_ops: AtomicU64,
     scan_sst_probed: AtomicU64,
+    get_mem_hit: AtomicU64,
+    get_sst_fallback: AtomicU64,
+    get_inline: AtomicU64,
+    get_vlog: AtomicU64,
     /// When set, best-effort [`Self::compact_blob_auto`] after flush / latest_only
     /// compact (RFC-0026 residual: no bg thread — runs on write path).
     auto_blob_gc_min_ratio: Option<f64>,
@@ -787,6 +799,10 @@ impl<E: Env> Db<E> {
             latest_sst_probed: AtomicU64::new(0),
             scan_ops: AtomicU64::new(0),
             scan_sst_probed: AtomicU64::new(0),
+            get_mem_hit: AtomicU64::new(0),
+            get_sst_fallback: AtomicU64::new(0),
+            get_inline: AtomicU64::new(0),
+            get_vlog: AtomicU64::new(0),
             auto_blob_gc_min_ratio: None,
             auto_reclaim: false,
             write_stall_l0: None,
@@ -854,6 +870,10 @@ impl<E: Env> Db<E> {
         self.latest_sst_probed.store(0, Ordering::Relaxed);
         self.scan_ops.store(0, Ordering::Relaxed);
         self.scan_sst_probed.store(0, Ordering::Relaxed);
+        self.get_mem_hit.store(0, Ordering::Relaxed);
+        self.get_sst_fallback.store(0, Ordering::Relaxed);
+        self.get_inline.store(0, Ordering::Relaxed);
+        self.get_vlog.store(0, Ordering::Relaxed);
         self.block_cache.reset_stats();
         crate::sst::reset_sst_blocks_decoded();
     }
@@ -875,6 +895,10 @@ impl<E: Env> Db<E> {
             block_cache_hits: self.block_cache.hits(),
             block_cache_misses: self.block_cache.misses(),
             blocks_decoded: crate::sst::sst_blocks_decoded() as u64,
+            get_mem_hit: self.get_mem_hit.load(Ordering::Relaxed),
+            get_sst_fallback: self.get_sst_fallback.load(Ordering::Relaxed),
+            get_inline: self.get_inline.load(Ordering::Relaxed),
+            get_vlog: self.get_vlog.load(Ordering::Relaxed),
         }
     }
 
@@ -1062,7 +1086,14 @@ impl<E: Env> Db<E> {
         }
         self.ensure_snapshot_readable(snap)?;
         Ok(match self.lookup(key, snap.seq) {
-            Lookup::Found(v) => self.resolve_stored_value(v).ok(),
+            Lookup::Found(v) => {
+                if vlog::decode_vlog_ptr(v.as_ref()).is_some() {
+                    self.get_vlog.fetch_add(1, Ordering::Relaxed);
+                } else {
+                    self.get_inline.fetch_add(1, Ordering::Relaxed);
+                }
+                self.resolve_stored_value(v).ok()
+            }
             Lookup::Deleted | Lookup::NotFound => None,
         })
     }
@@ -3480,7 +3511,16 @@ impl<E: Env> Db<E> {
                 &mut best_point,
                 &mut range_tombs,
             );
+            if let Some(seq) = best_point_seq {
+                // Newest mem layer with a point wins (single-writer). Skip SST.
+                self.get_mem_hit.fetch_add(1, Ordering::Relaxed);
+                return match best_point {
+                    Lookup::Found(_) if range_deleted(key, seq, &range_tombs) => Lookup::Deleted,
+                    other => other,
+                };
+            }
         }
+        self.get_sst_fallback.fetch_add(1, Ordering::Relaxed);
         for table in &self.ssts {
             // Open-time range tombstones (no full-table materialize).
             table.collect_range_tombstones(snapshot, &mut range_tombs);
@@ -8017,6 +8057,36 @@ mod tests {
         let p = db.read_probe();
         assert_eq!(p.scan_ops, 1);
         assert!(p.scan_sst_probed >= 1);
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn get_mem_hit_skips_sst_and_still_sees_flushed() {
+        let dir = temp_dir();
+        let mut db = Db::open(&dir).unwrap();
+        db.put(b"k", b"sst").unwrap();
+        db.flush().unwrap();
+        db.put(b"k", b"mem").unwrap();
+        db.reset_read_probe();
+        crate::sst::reset_sst_blocks_decoded();
+        assert_eq!(db.get(b"k").as_deref(), Some(b"mem".as_ref()));
+        let p = db.read_probe();
+        assert_eq!(p.get_mem_hit, 1);
+        assert_eq!(p.get_sst_fallback, 0);
+        assert_eq!(p.get_inline, 1);
+        assert_eq!(p.get_vlog, 0);
+        assert_eq!(crate::sst::sst_blocks_decoded(), 0);
+
+        db.delete(b"k").unwrap();
+        assert_eq!(db.get(b"k"), None);
+        db.flush().unwrap();
+        // After flush the delete is in SST; get must still hide the old put.
+        let db = {
+            db.close().unwrap();
+            Db::open(&dir).unwrap()
+        };
+        assert_eq!(db.get(b"k"), None);
         db.close().unwrap();
         let _ = fs::remove_dir_all(&dir);
     }

@@ -92,6 +92,18 @@ impl Engine for CompatEngine {
         let h = self.db.cf_handle(cf).ok_or(())?;
         self.db.last_key_with_prefix(&h, prefix).map_err(|_| ())
     }
+    fn latest_then_get_cf(
+        &self,
+        latest_cf: &str,
+        prefix: &[u8],
+        value_cf: &str,
+    ) -> Result<Option<Vec<u8>>, ()> {
+        let lh = self.db.cf_handle(latest_cf).ok_or(())?;
+        let gh = self.db.cf_handle(value_cf).ok_or(())?;
+        self.db
+            .last_prefix_then_get(&lh, prefix, &gh)
+            .map_err(|_| ())
+    }
     fn scan_count_cf(&self, cf: &str, start: &[u8], end: &[u8], cap: usize) -> Result<usize, ()> {
         let h = self.db.cf_handle(cf).ok_or(())?;
         self.db.count_cf(&h, start, end, cap).map_err(|_| ())
@@ -102,7 +114,7 @@ impl Engine for CompatEngine {
     fn read_probe_json(&self) -> Option<String> {
         let p = self.db.read_probe();
         Some(format!(
-            r#"{{"latest_ops":{lo},"latest_mem_hit":{mh},"latest_sst_fallback":{fb},"latest_sst_probed":{sp},"scan_ops":{so},"scan_sst_probed":{ssp},"sst_count":{sc},"l0_files":{l0},"level1_files":{l1},"mem_entries":{me},"block_cache_hits":{ch},"block_cache_misses":{cm},"blocks_decoded":{bd}}}"#,
+            r#"{{"latest_ops":{lo},"latest_mem_hit":{mh},"latest_sst_fallback":{fb},"latest_sst_probed":{sp},"scan_ops":{so},"scan_sst_probed":{ssp},"sst_count":{sc},"l0_files":{l0},"level1_files":{l1},"mem_entries":{me},"block_cache_hits":{ch},"block_cache_misses":{cm},"blocks_decoded":{bd},"get_mem_hit":{gm},"get_sst_fallback":{gs},"get_inline":{gi},"get_vlog":{gv}}}"#,
             lo = p.latest_ops,
             mh = p.latest_mem_hit,
             fb = p.latest_sst_fallback,
@@ -116,6 +128,10 @@ impl Engine for CompatEngine {
             ch = p.block_cache_hits,
             cm = p.block_cache_misses,
             bd = p.blocks_decoded,
+            gm = p.get_mem_hit,
+            gs = p.get_sst_fallback,
+            gi = p.get_inline,
+            gv = p.get_vlog,
         ))
     }
 }

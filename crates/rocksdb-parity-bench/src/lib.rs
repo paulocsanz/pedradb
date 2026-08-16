@@ -121,6 +121,19 @@ pub trait Engine {
     fn read_probe_json(&self) -> Option<String> {
         None
     }
+    /// Latest key under `prefix` in `latest_cf`, then get that key in `value_cf`.
+    /// Default is the two calls; compat uses one mutex.
+    fn latest_then_get_cf(
+        &self,
+        latest_cf: &str,
+        prefix: &[u8],
+        value_cf: &str,
+    ) -> Result<Option<Vec<u8>>, ()> {
+        match self.latest_cf(latest_cf, prefix)? {
+            Some(k) => self.get_cf(value_cf, &k),
+            None => Ok(None),
+        }
+    }
 }
 
 pub struct YcsbRunner {
@@ -274,28 +287,14 @@ impl YcsbRunner {
         //    write CF for the user prefix, then fetch the value in default.
         e.reset_read_probe();
         let mut lats = Vec::with_capacity(cfg_ops);
-        let mut latest_lats = Vec::with_capacity(cfg_ops);
-        let mut get_lats = Vec::with_capacity(cfg_ops);
         let (mut reads, mut errors) = (0u64, 0u64);
         let t0 = Instant::now();
         for _ in 0..cfg_ops {
             let t = Instant::now();
             let u = self.pick(&mut rng, records);
-            let t_latest = Instant::now();
-            let last = e.latest_cf("write", &ukey(u));
-            latest_lats.push(ms(t_latest));
-            match last {
-                Ok(Some(k)) => {
-                    let t_get = Instant::now();
-                    let g = e.get_cf("default", &k);
-                    get_lats.push(ms(t_get));
-                    match g {
-                        Ok(_) => reads += 1,
-                        Err(_) => errors += 1,
-                    }
-                }
-                Ok(None) => errors += 1,
-                Err(_) => errors += 1,
+            match e.latest_then_get_cf("write", &ukey(u), "default") {
+                Ok(Some(_)) => reads += 1,
+                Ok(None) | Err(()) => errors += 1,
             }
             lats.push(ms(t));
         }
@@ -305,24 +304,15 @@ impl YcsbRunner {
             t0.elapsed(),
             &mut lats,
         ));
-        latest_lats.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-        get_lats.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
         let probe = e.read_probe_json().unwrap_or_else(|| "null".into());
         blocks.push(format!(
             r#"{{
     "name": "deps_mvcc_latest_split",
-    "latest_p50_ms": {lp:.4},
-    "latest_p95_ms": {l95:.4},
-    "get_p50_ms": {gp:.4},
-    "get_p95_ms": {g95:.4},
+    "combined": true,
     "probe": {probe}
-  }}"#,
-            lp = pct(&latest_lats, 50.0),
-            l95 = pct(&latest_lats, 95.0),
-            gp = pct(&get_lats, 50.0),
-            g95 = pct(&get_lats, 95.0),
+  }}"#
         ));
-        eprintln!("[rocks-parity] deps_mvcc_latest done reads={reads} errors={errors} split latest_p50={:.4} get_p50={:.4}", pct(&latest_lats, 50.0), pct(&get_lats, 50.0));
+        eprintln!("[rocks-parity] deps_mvcc_latest done reads={reads} errors={errors}");
 
         // 3. deps_scan — short range scan over user keys in the write CF
         //    (coprocessor / GC range shape).

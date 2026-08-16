@@ -56,3 +56,11 @@ Next measurement inside that cut (do not skip): count how many of those gets res
 Scan 2× is a separate #1 (decode miss rate / L0 overlap). Do not start it until MVCC #1 has a number after P1.1.
 
 G1–G8: this finding is read-path only. No `sync_data`. No per-layer visibility cap.
+
+## P1.1 follow-up (get path)
+
+Shipped: (1) `lookup` returns on the first mem layer that has a point — skip SST (same G2 as `last_under_user_prefix`); (2) `last_prefix_then_get` one mutex; (3) counters `get_inline` / `get_vlog`.
+
+Clean remesure after (1), two-lock split still on: **get_vlog = 0 / get_inline = 2000**. The 1 KB value is **inline**, not vlog. `get_mem_hit` 1568 / 2000 (78%). get p50 **36 µs** (was 38 µs) — skipping SST on the hot path did **not** move p50. Combined one-lock remesure was noisy (3.1k qps); do not read it as a regression vs 9.5k.
+
+**P1.1 did not reach 2×.** Residual on the mem-hit get (~36 µs vs `ycsb_c` 5.7 µs): mutex + CF encode + `get_entry` on 14k mem + 1 KB copy, after a heavy apply. Next cut (P1.2) must explain those 36 µs (not invent vlog).
