@@ -29,25 +29,25 @@ Knobs iguais aos da tabela 0032: `scripts/tikv_ycsb_parity_v0.sh`, zipfian, 1 KB
 
 ## Orçamento (floor = 0.91 × Rocks FF da run)
 
-Números abaixo: peer FF e Pedra **escritas** da tabela `07bd443`; Pedra **MVCC/scan** de `af2c2d5` (deps-only, depois do apply). C/E/B/D a 4096 são o baseline velho — P0.2 substitui.
+Remesura P0.2 (`fbe39bf` tree, 4096/2000 zipfian 1 KB, `ROCKS_PARITY_FULL_SYNC=1`, [findings/tikv-ycsb-0034-fullsync](../findings/tikv-ycsb-0034-fullsync/)):
 
-| shape | Pedra (último número honesto) | Rocks FF | floor 0.91 | vs floor | nota |
-|---|---:|---:|---:|---|---|
-| ycsb_a | 329 | 339 | 308 | **já ≥** | um `sync_all` |
-| ycsb_b | 2 096 (velho) | 3 149 | 2 865 | ? remesura | 95% get |
-| ycsb_c | 14 909 (velho) / 404k @1024 | 373 178 | 339 192 | ? remesura 4096 | get não fsynca |
-| ycsb_d | 2 219 (velho) | 2 836 | 2 581 | ? remesura | 95% read-latest |
-| ycsb_e | 28 (velho) | 3 015 | 2 744 | ? remesura | janela 25 já existe |
-| ycsb_f | 345 | 332 | 302 | **já ≥** | RMW + um sync |
-| deps_apply_batch | 43 | 61 | 55 | ~1.3× curto | extra em volta do sync |
-| deps_mvcc_latest | **1 190** / p50 0.75 ms | 74 605 | 67 791 | ~57× curto | `last_under_prefix` + lookup |
-| deps_scan | **2 778** / p50 0.35 ms | 12 961 | 11 795 | ~4.2× curto | L0 sobrepostos |
-| deps_raftlog | 87 | 117 | 106 | ~1.2× curto | append + sync |
-| deps_cache_overwrite | 115 | 101 | 92 | **já ≥** | |
+`slower` = Rocks_FF / Pedra. Alvo 1.1× = slower ≤ 1.1 (ratio ≥ 0.91). **0 / 11 passam.**
 
-Já **dentro de 1.1×** vs FF (sem remesura): A, F, overwrite.  
-Quase (se a remesura não fechar): apply, raftlog.  
-Longe: MVCC, scan. C/E/B/D esperam P0.2.
+| shape | Pedra qps | p50 | Rocks FF qps | p50 | ratio | **mais lento** | 1.1× |
+|---|---:|---:|---:|---:|---:|---:|---|
+| ycsb_a | 401 | 3.58 ms | 449 | 3.60 ms | 0.893 | **1.12×** | não |
+| ycsb_b | 3 385 | 6.5 µs | 4 548 | 1.5 µs | 0.744 | **1.34×** | não |
+| ycsb_c | 152 728 | 5.7 µs | 1 224 864 | 0.7 µs | 0.125 | **8.0×** | não |
+| ycsb_d | 3 789 | 12 µs | 4 770 | 1.9 µs | 0.794 | **1.26×** | não |
+| ycsb_e | 2 280 | 0.19 ms | 4 942 | 9 µs | 0.461 | **2.17×** | não |
+| ycsb_f | 391 | 3.76 ms | 464 | 3.85 ms | 0.843 | **1.19×** | não |
+| deps_apply_batch | 66 | 9.09 ms | 83 | 8.78 ms | 0.798 | **1.25×** | não |
+| deps_mvcc_latest | 2 465 | 0.37 ms | 170 195 | 4.2 µs | 0.014 | **69×** | não |
+| deps_scan | 5 532 | 0.18 ms | 192 201 | 3.5 µs | 0.029 | **35×** | não |
+| deps_raftlog | 105 | 4.92 ms | 189 | 4.16 ms | 0.556 | **1.80×** | não |
+| deps_cache_overwrite | 124 | 4.54 ms | 218 | 4.08 ms | 0.567 | **1.76×** | não |
+
+Nada está “dentro”. A/F/overwrite da tabela velha (`07bd443`) **não** se repetiram neste peer (Rocks FF saiu mais rápido). Gate 0.91 em subconjunto verde = conjunto vazio — não ligar um gate mentiroso.
 
 ## Garantias invariáveis
 
@@ -66,8 +66,8 @@ Editar asserção existente para ficar verde é relaxação — volta para o des
 ### P0 — must ship first (útil sozinho)
 
 - [x] **P0.1** RFC + Status vivo: teto 1.1× em todos os shapes vs FF; fdatasync-write fora do gate — status: `done`
-- [ ] **P0.2** Remesura completa `tikv_ycsb_parity_v0.sh` + `ROCKS_PARITY_FULL_SYNC=1` (4096/2000 zipfian 1 KB); substituir as linhas velhas de B/C/D/E na tabela — status: `todo`
-- [ ] **P0.3** Gate `ROCKS_PARITY_RATIO_FLOOR=0.91` nos shapes que a remesura mostrar ≥ 0.91 (no mínimo A/F/overwrite); fail = exit 2 — status: `todo`
+- [x] **P0.2** Remesura completa `tikv_ycsb_parity_v0.sh` + `ROCKS_PARITY_FULL_SYNC=1` (4096/2000 zipfian 1 KB); substituir as linhas velhas de B/C/D/E na tabela — status: `done`
+- [ ] **P0.3** Gate `ROCKS_PARITY_RATIO_FLOOR=0.91` nos shapes que a remesura mostrar ≥ 0.91 — status: `todo` (remesura: **0/11**; não ligar gate vazio)
 
 ### P1 — escritas / mix que a remesura ainda deixar < 0.91
 
@@ -88,8 +88,8 @@ Editar asserção existente para ficar verde é relaxação — volta para o des
 | ID | Band | Title | Status | Task / PR | Updated |
 |----|------|-------|--------|-----------|---------|
 | P0.1 | p0 | RFC + teto 1.1× documentado | done | este doc | 2026-08-15 |
-| P0.2 | p0 | remesura completa 4096/2000 FF | todo | — | 2026-08-15 |
-| P0.3 | p0 | gate 0.91 nos já-verdes | todo | — | 2026-08-15 |
+| P0.2 | p0 | remesura completa 4096/2000 FF | done | findings/tikv-ycsb-0034-fullsync; **0/11** ≥ 0.91 | 2026-08-15 |
+| P0.3 | p0 | gate 0.91 nos já-verdes | todo | conjunto vazio — não ligar | 2026-08-15 |
 | P1.1 | p1 | conta extra além do sync_all | todo | — | 2026-08-15 |
 | P1.2 | p1 | apply + raftlog ≥ 0.91 | todo | — | 2026-08-15 |
 | P1.3 | p1 | B/D ≥ 0.91 se ainda falharem | todo | — | 2026-08-15 |

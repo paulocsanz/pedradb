@@ -50,6 +50,28 @@ What this run *does* say:
 
 Published TiKV cluster numbers are not a Pedra target until there is a TiKV on Pedra. This pair is the honest engine-level answer today.
 
+## RFC-0034 remesure — full pair vs F_FULLFSYNC (`af2c2d5`/`fbe39bf`)
+
+`scripts/tikv_ycsb_parity_v0.sh` + `ROCKS_PARITY_FULL_SYNC=1`, 4096/2000 zipfian 1 KB. Raw: [tikv-ycsb-0034-fullsync](tikv-ycsb-0034-fullsync/).
+
+`slower` = Rocks_FF qps / Pedra qps. Alvo 1.1× = slower ≤ 1.1. **Nenhum shape passa.**
+
+| shape | Pedra qps | Pedra p50 | Rocks FF qps | Rocks p50 | ratio | slower |
+|---|---:|---:|---:|---:|---:|---:|
+| ycsb_a | 401 | 3.58 ms | 449 | 3.60 ms | 0.893 | **1.12×** |
+| ycsb_b | 3 385 | 6.5 µs | 4 548 | 1.5 µs | 0.744 | **1.34×** |
+| ycsb_c | 152 728 | 5.7 µs | 1 224 864 | 0.7 µs | 0.125 | **8.0×** |
+| ycsb_d | 3 789 | 12 µs | 4 770 | 1.9 µs | 0.794 | **1.26×** |
+| ycsb_e | 2 280 | 0.19 ms | 4 942 | 9 µs | 0.461 | **2.17×** |
+| ycsb_f | 391 | 3.76 ms | 464 | 3.85 ms | 0.843 | **1.19×** |
+| deps_apply_batch | 66 | 9.09 ms | 83 | 8.78 ms | 0.798 | **1.25×** |
+| deps_mvcc_latest | 2 465 | 0.37 ms | 170 195 | 4.2 µs | 0.014 | **69×** |
+| deps_scan | 5 532 | 0.18 ms | 192 201 | 3.5 µs | 0.029 | **35×** |
+| deps_raftlog | 105 | 4.92 ms | 189 | 4.16 ms | 0.556 | **1.80×** |
+| deps_cache_overwrite | 124 | 4.54 ms | 218 | 4.08 ms | 0.567 | **1.76×** |
+
+Do not read the `07bd443` A/F/overwrite “≥ 1×” lines as current. This peer is faster; Pedra is not inside 1.1× on any row.
+
 ## RFC-0033 remesure (2026-08-15, deps-only)
 
 Same knobs (4096/2000, zipfian, 1 KB). Compat only — no Rocks peer in this slice. After apply (64k txns, batch=32).

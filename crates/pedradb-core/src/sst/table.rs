@@ -234,7 +234,36 @@ impl SstTable {
         if !self.bloom.may_contain(user_key) {
             return None;
         }
-        self.point_in_blocks(user_key, snapshot)
+        self.point_in_blocks(user_key, snapshot, |bi| {
+            self.decode_block(bi).ok().map(Arc::new)
+        })
+    }
+
+    /// Like [`point_at`] but loads blocks via `load` (caller may hit a block cache).
+    ///
+    /// Visibility is identical to [`point_at`]. Used by `Db::lookup` so zipfian
+    /// point-gets do not lz4-decode the same block on every seek.
+    pub fn point_at_with<F>(
+        &self,
+        user_key: &[u8],
+        snapshot: SequenceNumber,
+        load: F,
+    ) -> Option<(SequenceNumber, Lookup)>
+    where
+        F: FnMut(usize) -> Option<Arc<Vec<(InternalKey, Bytes)>>>,
+    {
+        if let (Some(lo), Some(hi)) = (
+            self.smallest_user_key.as_deref(),
+            self.largest_user_key.as_deref(),
+        ) {
+            if user_key < lo || user_key > hi {
+                return None;
+            }
+        }
+        if !self.bloom.may_contain(user_key) {
+            return None;
+        }
+        self.point_in_blocks(user_key, snapshot, load)
     }
 
     /// Highest sequence number present in this file.
@@ -304,7 +333,9 @@ impl SstTable {
         let mut point = Lookup::NotFound;
         let mut point_seq = 0u64;
         if self.bloom.may_contain(user_key) || self.has_range_tombstones() {
-            if let Some((seq, look)) = self.point_in_blocks(user_key, snapshot) {
+            if let Some((seq, look)) = self.point_in_blocks(user_key, snapshot, |bi| {
+                self.decode_block(bi).ok().map(Arc::new)
+            }) {
                 point_seq = seq;
                 point = look;
             }
@@ -361,11 +392,15 @@ impl SstTable {
     /// that may hold versions of `user_key` and take the newest visible one —
     /// looking only at `block_for_user_key` (last block with `first_key` ≤ user)
     /// returns a stale older version when newer versions sit in a prior block.
-    fn point_in_blocks(
+    fn point_in_blocks<F>(
         &self,
         user_key: &[u8],
         snapshot: SequenceNumber,
-    ) -> Option<(SequenceNumber, Lookup)> {
+        mut load: F,
+    ) -> Option<(SequenceNumber, Lookup)>
+    where
+        F: FnMut(usize) -> Option<Arc<Vec<(InternalKey, Bytes)>>>,
+    {
         if !self.is_lazy() {
             let block = self.materialize_entries().ok()?;
             return Self::best_point_in_entry_slice(&block, user_key, snapshot);
@@ -384,7 +419,7 @@ impl SstTable {
             if bi + 1 < self.index.len() && self.index[bi + 1].first_user_key.as_ref() < user_key {
                 continue;
             }
-            let Ok(block) = self.decode_block(bi) else {
+            let Some(block) = load(bi) else {
                 continue;
             };
             if let Some((seq, look)) = Self::best_point_in_entry_slice(&block, user_key, snapshot) {

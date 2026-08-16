@@ -3355,7 +3355,11 @@ impl<E: Env> Db<E> {
             // Open-time range tombstones (no full-table materialize).
             table.collect_range_tombstones(snapshot, &mut range_tombs);
             // Lazy single-block point probe (sequence-aware across layers).
-            if let Some((seq, look)) = table.point_at(key, snapshot) {
+            if let Some((seq, look)) = table.point_at_with(key, snapshot, |bi| {
+                Some(self.block_cache.get_or_insert_with(table.path(), bi, || {
+                    table.decode_block(bi).unwrap_or_default()
+                }))
+            }) {
                 if best_point_seq.is_none_or(|s| seq > s) {
                     best_point_seq = Some(seq);
                     best_point = look;
@@ -7658,6 +7662,33 @@ mod tests {
         assert_eq!(limited.len(), 5);
         assert_eq!(&limited[0][..], b"k010");
         assert_eq!(&limited[4][..], b"k014");
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0034: zipfian point-get must hit the block cache on the second seek.
+    #[test]
+    fn point_get_second_seek_hits_block_cache() {
+        let dir = temp_dir();
+        let mut db = Db::open(&dir).unwrap();
+        let payload = vec![b'y'; 256];
+        for i in 0..80u32 {
+            db.put(format!("k{i:03}").as_bytes(), &payload).unwrap();
+        }
+        db.flush().unwrap();
+        db.block_cache.clear();
+        crate::sst::reset_sst_blocks_decoded();
+        let k = b"k040";
+        assert!(db.get(k).is_some());
+        let first = crate::sst::sst_blocks_decoded();
+        assert!(first >= 1, "first get must decode a block");
+        crate::sst::reset_sst_blocks_decoded();
+        assert!(db.get(k).is_some());
+        assert_eq!(
+            crate::sst::sst_blocks_decoded(),
+            0,
+            "second get of the same key must not lz4-decode again"
+        );
         db.close().unwrap();
         let _ = fs::remove_dir_all(&dir);
     }
