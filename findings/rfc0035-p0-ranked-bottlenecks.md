@@ -130,3 +130,20 @@ Was (P1.3b): MVCC 4.4× / scan 29× (117 µs). `last` mean 13 µs → **1.5 µs*
 **2× still not met** (need ~125k MVCC / ~141k scan). Residual: MVCC get-on-fallback (~9 µs mean, 22% SST); scan 14 µs vs Rocks 3.3 µs is 3-stream merge/setup after the index tax is gone.
 
 G1–G8: read-path only. Adversarial green.
+
+## P1.3d follow-up (count path + 8192 block cache)
+
+Shipped: `Db::count_in_range` (no `VisibleKv` / value clone); SST streams skipped when file bounds miss; `BlockCache` 2048 → 8192.
+
+Clean remesure ([compat.json](rfc0035-p13d/compat.json) / [rocks-ff.json](rfc0035-p13d/rocks-ff.json)):
+
+| | Pedra | p50 | Rocks FF | p50 | slower (qps) |
+|---|---:|---:|---:|---:|---:|
+| `deps_mvcc_latest` | **104 541** | 1.2 µs | 243 488 | 3.4 µs | **2.3×** |
+| `deps_scan` | 54 240 | 14.2 µs | 261 716 | 3.5 µs | **4.8×** |
+
+Was (P1.3c): MVCC 2.8× / scan 5.5×. File-bound skip almost never fires (3 mixed-CF L0/L1 still overlap a write prefix). Scan p50 **unchanged** (~14 µs). MVCC moved on the larger cache (fallback get).
+
+**2× still not met** (need ~122k MVCC / ~131k scan). Residual unchanged in kind: 22% SST get + 3-stream scan setup.
+
+G1–G8: read-path only. Adversarial green.

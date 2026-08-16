@@ -688,7 +688,7 @@ impl<E: Env> Db<E> {
         manifest::cleanup_tmp_files(&env, &dir)?;
 
         let table_cache = TableCache::new(64);
-        let block_cache = BlockCache::new(2048);
+        let block_cache = BlockCache::new(8192);
         let (
             ssts,
             sst_levels,
@@ -1769,6 +1769,27 @@ impl<E: Env> Db<E> {
         }))
     }
 
+    /// Count live keys in `[start, end)` at `snapshot`, stopping at `limit`.
+    ///
+    /// Same visibility as [`Self::try_scan_at_projected`] with
+    /// [`ScanProjection::KeyOnly`] (no value resolve).
+    ///
+    /// # Errors
+    /// [`CoreError::SnapshotTooOld`].
+    pub fn count_in_range(
+        &self,
+        snapshot: SequenceNumber,
+        start: Bound<&[u8]>,
+        end: Bound<&[u8]>,
+        limit: Option<usize>,
+    ) -> Result<usize> {
+        self.ensure_snapshot_readable(Snapshot::at(snapshot))?;
+        if snapshot == 0 {
+            return Ok(0);
+        }
+        Ok(self.scan_at_raw(snapshot, start, end, limit, false).count())
+    }
+
     fn scan_at_raw(
         &self,
         snapshot: SequenceNumber,
@@ -1781,8 +1802,6 @@ impl<E: Env> Db<E> {
             return StreamingVisibleIter::new(Vec::new(), 0, start, end, limit);
         }
         self.scan_ops.fetch_add(1, Ordering::Relaxed);
-        self.scan_sst_probed
-            .fetch_add(self.ssts.len() as u64, Ordering::Relaxed);
         // Range tombstones first (G2): a covering delete whose start sits
         // before `start` must still hide keys in the window. Point streams
         // are lazy — later SST blocks are not decoded after `limit` emits.
@@ -1792,10 +1811,16 @@ impl<E: Env> Db<E> {
         for table in self.mem_layers() {
             table.collect_range_tombstones(snapshot, &mut range_dels);
             let pts = self.memtable_stream(table, start, end, snapshot, resolve_values);
-            streams.push(Box::new(pts.into_iter()));
+            if !pts.is_empty() {
+                streams.push(Box::new(pts.into_iter()));
+            }
         }
         for table in &self.ssts {
             table.collect_range_tombstones(snapshot, &mut range_dels);
+            if !table.overlaps_user_range(start, end) {
+                continue;
+            }
+            self.scan_sst_probed.fetch_add(1, Ordering::Relaxed);
             let cache = &self.block_cache;
             let path = table.path();
             let db = self;
@@ -1812,7 +1837,13 @@ impl<E: Env> Db<E> {
                     Some(cached)
                 }
             });
-            streams.push(Box::new(table.iter_user_range(start, end, snapshot, load)));
+            streams.push(Box::new(table.iter_user_range(
+                start,
+                end,
+                snapshot,
+                resolve_values,
+                load,
+            )));
         }
         StreamingVisibleIter::from_point_streams(streams, range_dels, snapshot, start, end, limit)
     }
@@ -1838,7 +1869,12 @@ impl<E: Env> Db<E> {
                 return;
             }
             *last = Some(k.user_key.clone());
-            stream.push((k.clone(), v.clone()));
+            let value = if resolve_values {
+                v.clone()
+            } else {
+                Bytes::new()
+            };
+            stream.push((k.clone(), value));
         };
         if table.has_range_tombstones() {
             for (k, v) in table.iter_internal() {
@@ -7978,6 +8014,24 @@ mod tests {
         assert_eq!(&got[0].1[..], &[10]);
         assert!(got.iter().all(|(k, _)| k.as_ref() != b"u/03"));
         assert_eq!(&got.last().expect("last").0[..], b"u/07");
+        let n = db
+            .count_in_range(
+                db.last_sequence(),
+                Bound::Included(b"u/00"),
+                Bound::Excluded(b"u/08"),
+                None,
+            )
+            .unwrap();
+        assert_eq!(n, got.len());
+        let capped = db
+            .count_in_range(
+                db.last_sequence(),
+                Bound::Included(b"u/00"),
+                Bound::Excluded(b"u/08"),
+                Some(3),
+            )
+            .unwrap();
+        assert_eq!(capped, 3);
         db.close().unwrap();
         let _ = fs::remove_dir_all(&dir);
     }

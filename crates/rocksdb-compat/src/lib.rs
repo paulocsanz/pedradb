@@ -18,7 +18,7 @@
 
 use bytes::Bytes;
 use parking_lot::Mutex;
-use pedradb_core::{BatchOp, CoreError, Db, Env, ScanProjection, Snapshot as CoreSnapshot, StdEnv};
+use pedradb_core::{BatchOp, CoreError, Db, Env, Snapshot as CoreSnapshot, StdEnv};
 use std::collections::VecDeque;
 use std::fmt;
 use std::ops::Bound;
@@ -922,20 +922,15 @@ impl<E: Env> DB<E> {
         limit: usize,
     ) -> Result<usize> {
         self.check_cf(&cf.name)?;
-        let lo = self.codec.encode(&cf.name, start.as_ref());
-        let hi = self.codec.encode(&cf.name, end.as_ref());
-        let guard = self.inner.lock();
-        let seq = guard.last_sequence();
-        let n = guard
-            .try_scan_at_projected(
-                seq,
-                Bound::Included(lo.as_slice()),
-                Bound::Excluded(hi.as_slice()),
-                Some(limit),
-                ScanProjection::KeyOnly,
-            )?
-            .count();
-        Ok(n)
+        self.codec.encode_with(&cf.name, start.as_ref(), |lo| {
+            self.codec.encode_with(&cf.name, end.as_ref(), |hi| {
+                let guard = self.inner.lock();
+                let seq = guard.last_sequence();
+                guard
+                    .count_in_range(seq, Bound::Included(lo), Bound::Excluded(hi), Some(limit))
+                    .map_err(Error::from)
+            })
+        })
     }
 
     /// Zero latest/scan probe counters (RFC-0035).

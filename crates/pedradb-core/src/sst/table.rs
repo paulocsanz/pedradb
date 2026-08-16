@@ -487,16 +487,40 @@ impl SstTable {
         decode_block_from_payload(&self.payload, h, self.compressed_blocks, &self.path)
     }
 
+    /// Whether this file's user-key bounds can meet `[start, end)`.
+    #[must_use]
+    pub fn overlaps_user_range(&self, start: Bound<&[u8]>, end: Bound<&[u8]>) -> bool {
+        let (Some(lo), Some(hi)) = (
+            self.smallest_user_key.as_deref(),
+            self.largest_user_key.as_deref(),
+        ) else {
+            return false;
+        };
+        let file_before_end = match end {
+            Bound::Unbounded => true,
+            Bound::Included(e) => lo <= e,
+            Bound::Excluded(e) => lo < e,
+        };
+        let file_after_start = match start {
+            Bound::Unbounded => true,
+            Bound::Included(s) => hi >= s,
+            Bound::Excluded(s) => hi > s,
+        };
+        file_before_end && file_after_start
+    }
+
     /// Point keys in `[start, end)`, one SST block at a time (RFC-0033 P0.3).
     ///
     /// `load` decodes block `i` (caller may hit [`crate::cache::BlockCache`]).
     /// Range tombstones are **not** yielded — collect them separately so a
     /// covering delete whose start sits outside the bound still applies.
+    /// `want_values` is false for key-only / count (no value clone).
     pub fn iter_user_range<'a>(
         &'a self,
         start: Bound<&[u8]>,
         end: Bound<&[u8]>,
         snapshot: SequenceNumber,
+        want_values: bool,
         load: Box<dyn FnMut(usize) -> Option<Arc<Vec<(InternalKey, Bytes)>>> + 'a>,
     ) -> SstRangeIter<'a> {
         let start_b = match start {
@@ -509,32 +533,18 @@ impl SstTable {
             Bound::Included(s) => Bound::Included(Bytes::copy_from_slice(s)),
             Bound::Excluded(s) => Bound::Excluded(Bytes::copy_from_slice(s)),
         };
-        if let (Some(lo), Some(hi)) = (
-            self.smallest_user_key.as_deref(),
-            self.largest_user_key.as_deref(),
-        ) {
-            let file_before_end = match end {
-                Bound::Unbounded => true,
-                Bound::Included(e) => lo <= e,
-                Bound::Excluded(e) => lo < e,
+        if !self.overlaps_user_range(start, end) {
+            return SstRangeIter {
+                current: None,
+                idx: 0,
+                blocks: Vec::new().into_iter(),
+                load,
+                start: start_b,
+                end: end_b,
+                snapshot,
+                skip_user: None,
+                want_values,
             };
-            let file_after_start = match start {
-                Bound::Unbounded => true,
-                Bound::Included(s) => hi >= s,
-                Bound::Excluded(s) => hi > s,
-            };
-            if !file_before_end || !file_after_start {
-                return SstRangeIter {
-                    current: None,
-                    idx: 0,
-                    blocks: Vec::new().into_iter(),
-                    load,
-                    start: start_b,
-                    end: end_b,
-                    snapshot,
-                    skip_user: None,
-                };
-            }
         }
         if self.is_lazy() {
             SstRangeIter {
@@ -546,6 +556,7 @@ impl SstTable {
                 end: end_b,
                 snapshot,
                 skip_user: None,
+                want_values,
             }
         } else {
             let leftover: Vec<_> = self
@@ -565,6 +576,7 @@ impl SstTable {
                 end: end_b,
                 snapshot,
                 skip_user: None,
+                want_values,
             }
         }
     }
@@ -1185,6 +1197,8 @@ pub struct SstRangeIter<'a> {
     snapshot: SequenceNumber,
     /// Newest visible version per user already yielded (skip older seqs).
     skip_user: Option<Bytes>,
+    /// When false, yield empty values (`KeyOnly` / count).
+    want_values: bool,
 }
 
 impl Iterator for SstRangeIter<'_> {
@@ -1217,7 +1231,12 @@ impl Iterator for SstRangeIter<'_> {
                     };
                     if user_key_in_range(k.user_key.as_ref(), start, end) {
                         self.skip_user = Some(k.user_key.clone());
-                        return Some((k.clone(), v.clone()));
+                        let value = if self.want_values {
+                            v.clone()
+                        } else {
+                            Bytes::new()
+                        };
+                        return Some((k.clone(), value));
                     }
                 }
             }
