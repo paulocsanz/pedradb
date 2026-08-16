@@ -241,6 +241,45 @@ impl<E: Env> ConcurrentDb<E> {
         self.inner.write().set_auto_reclaim(enabled);
     }
 
+    /// Skip inline auto-compact; host drains L0 (RFC-0037).
+    pub fn set_defer_auto_compact(&self, enabled: bool) {
+        self.inner.write().set_defer_auto_compact(enabled);
+    }
+
+    /// Whether flush leaves L0 for a host worker.
+    #[must_use]
+    pub fn defer_auto_compact(&self) -> bool {
+        self.inner.read().defer_auto_compact()
+    }
+
+    /// L0→L1 with SST write off the write lock (RFC-0037 P1.2).
+    ///
+    /// Prepare + install take the write lock; merge I/O does not. Puts may
+    /// group-commit while the output SST is written. Returns whether a job ran.
+    ///
+    /// # Errors
+    /// SST / MANIFEST I/O. Failed write does not publish; L0 stays.
+    pub fn compact_l0_off_lock(&self) -> Result<bool> {
+        let job = {
+            let mut g = self.inner.write();
+            if g.level_file_count(0) == 0 {
+                return Ok(false);
+            }
+            match g.prepare_l0_compact(CompactOptions::default())? {
+                None => return Ok(false),
+                Some(j) => j,
+            }
+        };
+        let table = match job.write() {
+            Ok(t) => t,
+            Err(e) => {
+                return Err(e);
+            }
+        };
+        self.inner.write().install_prepared_l0_compact(job, table)?;
+        Ok(true)
+    }
+
     /// Whether auto-compact uses snapshot-safe reclaim.
     #[must_use]
     pub fn auto_reclaim(&self) -> bool {
@@ -1626,6 +1665,33 @@ mod tests {
         assert_eq!(db.get(b"a").as_deref(), Some(v2.as_slice()));
         assert_eq!(db.get(b"b").as_deref(), Some(v1.as_slice()));
         assert_eq!(db.get(b"c").as_deref(), Some(v2.as_slice()));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn compact_l0_off_lock_keeps_puts_visible() {
+        let dir = temp_dir();
+        let db = ConcurrentDb::open_with(
+            &dir,
+            OpenOptions {
+                sync: false,
+                auto_flush_bytes: None,
+                auto_compact_sst_count: None,
+                auto_compact_sst_bytes: None,
+                exclusive: true,
+                large_value_threshold: None,
+            },
+        )
+        .unwrap();
+        db.set_defer_auto_compact(true);
+        for i in 0..crate::db::L0_COMPACTION_TRIGGER {
+            db.put([b'a', i as u8], [b'1', i as u8]).unwrap();
+            db.flush().unwrap();
+        }
+        assert!(db.compact_l0_off_lock().unwrap());
+        assert_eq!(db.get(&[b'a', 0]).as_deref(), Some([b'1', 0].as_slice()));
+        db.put(b"after", b"ok").unwrap();
+        assert_eq!(db.get(b"after").as_deref(), Some(b"ok".as_slice()));
         let _ = fs::remove_dir_all(&dir);
     }
 }

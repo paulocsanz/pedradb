@@ -107,12 +107,12 @@ Herdadas de RFC-0036 / 0031:
 ### P1 — off-lock + 2× Pedra nas leituras
 
 - [ ] **P1.1** Split de tempo no apply (flush vs `entries_cloned` vs encode SST vs MANIFEST) e no C/e/mvcc/scan (mutex / encode / ficheiros) — status: `todo`
-- [ ] **P1.2** Compact prepare/write/install off-lock em `ConcurrentDb` (mesmo molde do flush); `Db` single-thread continua sem thread — status: `todo`
+- [x] **P1.2** Compact prepare/write/install off-lock em `ConcurrentDb` (mesmo molde do flush); `Db` single-thread continua sem thread — status: `done`
 - [ ] **P1.3** O gargalo #1 do P1.1 nas **leituras** (C / e / mvcc / scan) até 2× o qps Pedra 0036; remesura — status: `todo`
 
 ### P2 — host worker + escritas 2× Pedra
 
-- [ ] **P2.1** Se P0.3 apply ainda < 0.5: fila de compact drenada por thread no **compat/store** (não no core); fence + L0 visível até install — status: `todo`
+- [x] **P2.1** Se P0.3 apply ainda < 0.5: fila de compact drenada por thread no **compat/store** (não no core); fence + L0 visível até install — status: `done`
 - [ ] **P2.2** 2× Pedra em A/F/overwrite: harness multi-cliente + `ConcurrentDb` group commit; **não** 2× A single-client — status: `todo`
 - [ ] **P2.3** Gate `ROCKS_PARITY_RATIO_FLOOR=0.5` nas 11 vs fd; tabela 2× Pedra nos 10 — status: `todo`
 
@@ -124,9 +124,9 @@ Herdadas de RFC-0036 / 0031:
 | P0.2 | p0 | L0 compact streaming (sem clone 16 MiB) | done | `rewrite_ssts` k-way + `write_sst_try_sorted_on` | 2026-08-16 |
 | P0.3 | p0 | apply ≥ 0.5 vs Rocks fd (11/11) | todo | 3 runs; oficial p03c 0.33× | 2026-08-16 |
 | P1.1 | p1 | split apply + leituras | todo | — | 2026-08-16 |
-| P1.2 | p1 | compact off-lock no ConcurrentDb | todo | — | 2026-08-16 |
+| P1.2 | p1 | compact off-lock no ConcurrentDb | done | `PreparedL0Compact` + `compact_l0_off_lock` | 2026-08-16 |
 | P1.3 | p1 | 2× Pedra no gargalo #1 de leitura | todo | — | 2026-08-16 |
-| P2.1 | p2 | worker host se P0 não chegar | todo | — | 2026-08-16 |
+| P2.1 | p2 | worker host se P0 não chegar | done | `rocksdb-compat` thread `pedra-compat-compact` | 2026-08-16 |
 | P2.2 | p2 | 2× Pedra A/F com N clientes | todo | — | 2026-08-16 |
 | P2.3 | p2 | gate 0.5 + tabela 2× Pedra | todo | — | 2026-08-16 |
 
@@ -144,7 +144,13 @@ Três runs FULL_SYNC=0, raw: [tikv-ycsb-0037-streaming](../findings/tikv-ycsb-00
 
 Pedra apply qps **não saiu do sítio** (~1 900, 0036 = 1 908). A cauda caiu (221 ms → 93–157 ms). Quando o Rocks apply está limpo (p03c, max 0.55 ms), o ratio é **0.33** — ainda 3× mais lento. p03/p03b “passam” 0.5 só porque o Rocks também compactou no put. G8: o oficial é p03c.
 
-O que resta no apply single-client é recodificar + lz4 + `fdatasync` do L1 novo **no mesmo `put`**. Streaming tirou o clone de 16 MiB; não tira o rewrite. P1.2 off-lock no mesmo thread não muda o qps do cliente único. **P2.1** (worker no compat/store) é o próximo que pode tirar o merge do apply.
+O que resta no apply single-client é recodificar + lz4 + `fdatasync` do L1 novo **no mesmo `put`**. Streaming tirou o clone de 16 MiB; não tira o rewrite. P1.2 off-lock no mesmo thread não muda o qps do cliente único.
+
+**P1.2 + P2.1:** `PreparedL0Compact` (prepare sob lock, `write` sem o `Db`, install sob lock). `rocksdb-compat` `open_cf` / `open_default` liga `defer_auto_compact` e um thread `pedra-compat-compact` que drena L0≥4. `open_cf_with_env` (FailingEnv) **não** cria thread. Write falhado não instala (G5); L0 fica até o install (G2). Sem thread no core (G6).
+
+Remesura p21 (compact off-put, flush ainda no `put`): apply **1 855 qps / max 212 ms** — igual ao P0.2. Probe: `l0=4, l1=4` (o worker correu). O qps não sai do sítio porque o auto-flush de 4 MiB ainda recodifica+`fdatasync` no mesmo `put`.
+
+Tentativa (revertida): o mesmo worker a drenar o flush. Mem inchou para **291 k** entradas, **0 SST**, apply 814 qps. Sem dual-mem bem feito o `put` não volta a promover enquanto o pin está vivo. Não vai no commit.
 
 ## Acceptance Criteria
 

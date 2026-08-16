@@ -195,6 +195,12 @@ K-way por bloco, sem `entries_cloned` do L0 inteiro. Mesmos knobs, peer Rocks fd
 
 **Ainda 10/11.** Apply qps ≈ 0036 (1 835 vs 1 908); max 221 ms → 105 ms. Três runs: Pedra apply 1 835–1 949; Rocks apply 2 791 / 3 623 / **5 576**. Só a terceira é limpa (Rocks max 0.55 ms). Streaming não tira o rewrite do put — P0.3 11/11 não fechou.
 
+## RFC-0037 P1.2/P2.1 — compact off-put no host (2026-08-16)
+
+Worker `pedra-compat-compact` no compat (não no core). Flush **continua** no `put`. Raw: [tikv-ycsb-0037-p21](tikv-ycsb-0037-p21/).
+
+Apply **1 855 qps**, p50 176 µs, max **212 ms** — o mesmo sítio do P0.2. Probe depois do apply: `l0=4, l1=4` (o worker fundiu). vs Rocks desta run 2 785 = 0.67; vs Rocks limpo 5 576 ainda **3×**. O que resta no apply é o auto-flush de 4 MiB no mesmo thread. Tentativa de mandar o flush ao worker (revertida) deixou 291 k entradas no mem e 0 SST.
+
 ## RFC-0033 remesure (2026-08-15, deps-only)
 
 Same knobs (4096/2000, zipfian, 1 KB). Compat only — no Rocks peer in this slice. After apply (64k txns, batch=32).

@@ -79,7 +79,7 @@ Swapping TiKV's storage engine means replacing its `engine_rocks` (wrapping
 | 6 | Iterator: lazy streaming with `seek_to_last`, upper/lower bounds, `next` on pinned SST iters | Eager `Vec` today; correctness equivalent, memory profile not | M |
 | 7 | Properties / statistics / tickers (`get_property_int_cf`, `RocksStatistics`) | ❌ (Pedra `DbStats` exists; no mapping layer) | M |
 | 8 | Manual compaction shapes (`compact_range_cf` with levels, bottommost) | Whole-merge only | M |
-| 9 | Concurrency: TiKV writes from many threads | Compat serializes on a mutex over single-writer `Db`; `ConcurrentDb` exists in core but is not wired here | M |
+| 9 | Concurrency: TiKV writes from many threads | Compat still serializes puts on a mutex over single-writer `Db`. L0 compact is drained by a host thread (`pedra-compat-compact`, RFC-0037 P2.1) after Ok; FailingEnv opens stay single-threaded. `ConcurrentDb` group-commit is not wired here | M |
 | 10 | `WAL tail` recovery policy / `manual_wal_flush`, raft-log WAL sync class | Partial (Pedra WAL semantics differ; SyncFail edge tested) | S–M |
 
 Honest verdict: a full TiKV build-and-run on this layer is a multi-session

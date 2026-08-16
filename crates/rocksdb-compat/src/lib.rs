@@ -18,12 +18,22 @@
 
 use bytes::Bytes;
 use parking_lot::Mutex;
-use pedradb_core::{BatchOp, CoreError, Db, Env, Snapshot as CoreSnapshot, StdEnv};
+use pedradb_core::{
+    BatchOp, CompactOptions, CoreError, Db, Env, Snapshot as CoreSnapshot, StdEnv,
+    L0_COMPACTION_TRIGGER,
+};
 use std::collections::VecDeque;
 use std::fmt;
 use std::ops::Bound;
+use std::sync::mpsc::{self, RecvTimeoutError, SyncSender};
 use std::sync::Arc;
-use std::time::Instant;
+use std::thread::{self, JoinHandle};
+use std::time::{Duration, Instant};
+
+enum CompactCmd {
+    Run,
+    Shutdown,
+}
 
 /// Compatibility error surface (rust-rocksdb exposes one opaque `Error`).
 #[derive(Debug, Clone)]
@@ -582,6 +592,11 @@ pub struct DB<E: Env = StdEnv> {
     inner: Arc<Mutex<Db<E>>>,
     cfs: Vec<String>,
     codec: KeyCodec,
+    /// Host compact worker (RFC-0037 P2.1). None when the caller injected Env
+    /// (adversarial FailingEnv stays single-threaded / deterministic).
+    compact_tx: Option<SyncSender<CompactCmd>>,
+    compact_thread: Option<JoinHandle<()>>,
+    compact_gate: Arc<Mutex<()>>,
 }
 
 impl DB<StdEnv> {
@@ -611,7 +626,12 @@ impl DB<StdEnv> {
         path: impl AsRef<std::path::Path>,
         cfs: &[&str],
     ) -> Result<Self> {
-        Self::open_cf_with_env(opts, path, cfs, StdEnv)
+        let mut db = Self::open_cf_with_env(opts, path, cfs, StdEnv)?;
+        db.inner.lock().set_defer_auto_compact(true);
+        let (tx, th) = spawn_compact_worker(Arc::clone(&db.inner), Arc::clone(&db.compact_gate));
+        db.compact_tx = tx;
+        db.compact_thread = th;
+        Ok(db)
     }
 }
 
@@ -621,6 +641,15 @@ impl<E: Env> DB<E> {
     /// # Errors
     /// Pedra open errors; duplicate CF names.
     pub fn open_cf_with_env(
+        opts: &Options,
+        path: impl AsRef<std::path::Path>,
+        cfs: &[&str],
+        env: E,
+    ) -> Result<Self> {
+        Self::open_cf_inner(opts, path, cfs, env)
+    }
+
+    fn open_cf_inner(
         opts: &Options,
         path: impl AsRef<std::path::Path>,
         cfs: &[&str],
@@ -650,7 +679,16 @@ impl<E: Env> DB<E> {
             inner: Arc::new(Mutex::new(db)),
             cfs: names,
             codec,
+            compact_tx: None,
+            compact_thread: None,
+            compact_gate: Arc::new(Mutex::new(())),
         })
+    }
+
+    fn notify_compact(&self) {
+        if let Some(tx) = &self.compact_tx {
+            let _ = tx.try_send(CompactCmd::Run);
+        }
     }
 
     /// Handle for a registered CF.
@@ -696,9 +734,12 @@ impl<E: Env> DB<E> {
     ) -> Result<()> {
         self.check_cf(&cf.name)?;
         let mut guard = self.inner.lock();
-        guard
+        let r = guard
             .put(self.codec.encode(&cf.name, key.as_ref()), value.as_ref())
-            .map_err(Error::from)
+            .map_err(Error::from);
+        drop(guard);
+        self.notify_compact();
+        r
     }
 
     /// Get from the default CF.
@@ -760,9 +801,12 @@ impl<E: Env> DB<E> {
     pub fn delete_cf(&self, cf: &ColumnFamily, key: impl AsRef<[u8]>) -> Result<()> {
         self.check_cf(&cf.name)?;
         let mut guard = self.inner.lock();
-        guard
+        let r = guard
             .delete(self.codec.encode(&cf.name, key.as_ref()))
-            .map_err(Error::from)
+            .map_err(Error::from);
+        drop(guard);
+        self.notify_compact();
+        r
     }
 
     /// Range-delete `[start, end)` in a named CF.
@@ -777,12 +821,15 @@ impl<E: Env> DB<E> {
     ) -> Result<()> {
         self.check_cf(&cf.name)?;
         let mut guard = self.inner.lock();
-        guard
+        let r = guard
             .delete_range(
                 self.codec.encode(&cf.name, start.as_ref()),
                 self.codec.encode(&cf.name, end.as_ref()),
             )
-            .map_err(Error::from)
+            .map_err(Error::from);
+        drop(guard);
+        self.notify_compact();
+        r
     }
 
     /// Apply a `WriteBatch` atomically (one Pedra batch = one WAL record group).
@@ -810,7 +857,10 @@ impl<E: Env> DB<E> {
             ops.push(encoded);
         }
         let mut guard = self.inner.lock();
-        guard.apply_batch(ops).map(|_| ()).map_err(Error::from)
+        let r = guard.apply_batch(ops).map(|_| ()).map_err(Error::from);
+        drop(guard);
+        self.notify_compact();
+        r
     }
 
     /// Sequence-pinned snapshot.
@@ -950,7 +1000,10 @@ impl<E: Env> DB<E> {
     /// Pedra flush errors (I/O).
     pub fn flush(&self) -> Result<()> {
         let mut guard = self.inner.lock();
-        guard.flush().map_err(Error::from)
+        let r = guard.flush().map_err(Error::from);
+        drop(guard);
+        self.notify_compact();
+        r
     }
 
     /// Manual compaction (whole merge).
@@ -958,9 +1011,64 @@ impl<E: Env> DB<E> {
     /// # Errors
     /// Pedra compaction errors.
     pub fn compact(&self) -> Result<()> {
+        let _gate = self.compact_gate.lock();
         let mut guard = self.inner.lock();
         guard.compact().map_err(Error::from)
     }
+}
+
+impl<E: Env> Drop for DB<E> {
+    fn drop(&mut self) {
+        if let Some(tx) = self.compact_tx.take() {
+            let _ = tx.send(CompactCmd::Shutdown);
+        }
+        if let Some(h) = self.compact_thread.take() {
+            let _ = h.join();
+        }
+    }
+}
+
+fn spawn_compact_worker(
+    inner: Arc<Mutex<Db<StdEnv>>>,
+    gate: Arc<Mutex<()>>,
+) -> (Option<SyncSender<CompactCmd>>, Option<JoinHandle<()>>) {
+    let (tx, rx) = mpsc::sync_channel(1);
+    let handle = thread::Builder::new()
+        .name("pedra-compat-compact".into())
+        .spawn(move || loop {
+            match rx.recv_timeout(Duration::from_millis(50)) {
+                Ok(CompactCmd::Shutdown) | Err(RecvTimeoutError::Disconnected) => break,
+                Ok(CompactCmd::Run) | Err(RecvTimeoutError::Timeout) => {
+                    while compat_compact_once(&inner, &gate) {}
+                }
+            }
+        })
+        .ok();
+    (Some(tx), handle)
+}
+
+/// One L0→L1 job. I/O runs without `Db` mutex (G5: failed write is not installed).
+fn compat_compact_once<E: Env>(inner: &Mutex<Db<E>>, gate: &Mutex<()>) -> bool {
+    let _gate = gate.lock();
+    let job = {
+        let mut g = inner.lock();
+        if g.level_file_count(0) < L0_COMPACTION_TRIGGER {
+            return false;
+        }
+        match g.prepare_l0_compact(CompactOptions::default()) {
+            Ok(Some(j)) => j,
+            _ => return false,
+        }
+    };
+    let table = match job.write() {
+        Ok(t) => t,
+        Err(_) => return false,
+    };
+    let mut g = inner.lock();
+    if g.install_prepared_l0_compact(job, table).is_err() {
+        return false;
+    }
+    g.level_file_count(0) >= L0_COMPACTION_TRIGGER
 }
 
 #[cfg(test)]
@@ -972,6 +1080,34 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         d
+    }
+
+    #[test]
+    fn host_worker_compacts_l0_without_hiding_keys() {
+        let dir = tmp("worker-l0");
+        let db = DB::open_default(&dir).unwrap();
+        // 4 MiB auto-flush is huge for this test — flush explicitly.
+        for i in 0..8u8 {
+            db.put([b'k', i], [b'v', i]).unwrap();
+            db.flush().unwrap();
+        }
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while std::time::Instant::now() < deadline {
+            let p = db.read_probe();
+            if p.l0_files < L0_COMPACTION_TRIGGER {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        assert!(
+            db.read_probe().l0_files < L0_COMPACTION_TRIGGER,
+            "host worker should drain L0, got {}",
+            db.read_probe().l0_files
+        );
+        for i in 0..8u8 {
+            assert_eq!(db.get(&[b'k', i]).unwrap().as_deref(), Some(&[b'v', i][..]));
+        }
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

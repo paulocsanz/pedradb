@@ -485,6 +485,42 @@ pub enum ScanProjection {
     KeyOnly,
 }
 
+/// L0 files snapshotted for an off-lock rewrite (RFC-0037 P1.2).
+///
+/// Inputs stay in the live inventory until [`Db::install_prepared_l0_compact`].
+/// [`Self::write`] does not need the `Db` write lock.
+pub struct PreparedL0Compact<E: Env> {
+    inputs: Vec<SstTable>,
+    file_num: u64,
+    gc: crate::merge::CompactGcOptions,
+    dir: PathBuf,
+    env: E,
+    sync: bool,
+}
+
+impl<E: Env> PreparedL0Compact<E> {
+    /// Paths of L0 files this job will replace.
+    #[must_use]
+    pub fn input_paths(&self) -> Vec<PathBuf> {
+        self.inputs.iter().map(|t| t.path().to_path_buf()).collect()
+    }
+
+    /// Merge inputs into a new SST (streaming when `gc` is default).
+    ///
+    /// # Errors
+    /// SST encode / I/O. On error the live L0 inventory is unchanged.
+    pub fn write(&self) -> Result<SstTable> {
+        write_merged_tables(
+            &self.env,
+            &self.dir,
+            self.file_num,
+            &self.inputs,
+            self.gc,
+            self.sync,
+        )
+    }
+}
+
 /// Options for [`Db::compact_with`] (RFC-0009 compaction / version GC).
 #[derive(Debug, Clone, Copy, Default)]
 pub struct CompactOptions {
@@ -597,6 +633,10 @@ pub struct Db<E: Env = StdEnv> {
     /// When true, auto-compact uses snapshot-safe reclaim GC (open-items §2.1)
     /// instead of history-preserving merge. Off by default (F20).
     auto_reclaim: bool,
+    /// When true, [`Self::finish_flush_pipeline`] does not compact. A host
+    /// worker (compat/store, not this crate) drains L0 via
+    /// [`Self::prepare_l0_compact`] (RFC-0037 P2.1). Default false.
+    defer_auto_compact: bool,
     /// When `Some(n)`, refuse writes if L0 SST count ≥ n (open-items §2.3).
     write_stall_l0: Option<usize>,
     /// When `Some(n)`, refuse writes if active mem ≈ ≥ n bytes (open-items §2.3 c).
@@ -838,6 +878,7 @@ impl<E: Env> Db<E> {
             mvcc_ns_copy: AtomicU64::new(0),
             auto_blob_gc_min_ratio: None,
             auto_reclaim: false,
+            defer_auto_compact: false,
             write_stall_l0: None,
             write_stall_mem_bytes: None,
             write_pressure_l0: None,
@@ -1265,6 +1306,17 @@ impl<E: Env> Db<E> {
         self.auto_reclaim
     }
 
+    /// Skip inline auto-compact after flush (RFC-0037). Host drains L0.
+    pub fn set_defer_auto_compact(&mut self, enabled: bool) {
+        self.defer_auto_compact = enabled;
+    }
+
+    /// Whether flush leaves L0 for a host worker to compact.
+    #[must_use]
+    pub fn defer_auto_compact(&self) -> bool {
+        self.defer_auto_compact
+    }
+
     /// Opt-in write stall when L0 SST count ≥ `limit` (open-items §2.3).
     ///
     /// `None` or `0` disables (default). When enabled, [`Self::put`] /
@@ -1581,14 +1633,17 @@ impl<E: Env> Db<E> {
                 return Ok(hit);
             }
         }
-        let out = if let Some(mem) = self.mem_layers().next() {
-            if let Some((k, _)) = mem.last_visible_under_prefix(prefix, snapshot, None) {
-                self.latest_mem_hit.fetch_add(1, Ordering::Relaxed);
-                Some(k)
-            } else {
-                self.latest_sst_fallback.fetch_add(1, Ordering::Relaxed);
-                self.last_under_user_prefix_sst(snapshot, prefix)?
+        let mut best: Option<Bytes> = None;
+        for table in self.mem_layers() {
+            if let Some((k, _)) = table.last_visible_under_prefix(prefix, snapshot, None) {
+                if best.as_ref().is_none_or(|b| k.as_ref() > b.as_ref()) {
+                    best = Some(k);
+                }
             }
+        }
+        let out = if let Some(k) = best {
+            self.latest_mem_hit.fetch_add(1, Ordering::Relaxed);
+            Some(k)
         } else {
             self.latest_sst_fallback.fetch_add(1, Ordering::Relaxed);
             self.last_under_user_prefix_sst(snapshot, prefix)?
@@ -2654,6 +2709,91 @@ impl<E: Env> Db<E> {
         self.rewrite_ssts(input_idxs, 1, options)
     }
 
+    /// Snapshot current L0 tables and reserve an output file number.
+    ///
+    /// Inputs stay readable. Call [`PreparedL0Compact::write`] without this
+    /// lock, then [`Self::install_prepared_l0_compact`].
+    ///
+    /// # Errors
+    /// None today (reservation cannot fail); `Result` for fence / I/O later.
+    pub fn prepare_l0_compact(
+        &mut self,
+        options: CompactOptions,
+    ) -> Result<Option<PreparedL0Compact<E>>> {
+        self.ensure_not_fenced()?;
+        let inputs: Vec<SstTable> = self
+            .ssts
+            .iter()
+            .zip(self.sst_levels.iter())
+            .filter(|(_, &lvl)| lvl == 0)
+            .map(|(t, _)| t.clone())
+            .collect();
+        if inputs.is_empty() {
+            return Ok(None);
+        }
+        let file_num = self.alloc_file_num();
+        Ok(Some(PreparedL0Compact {
+            inputs,
+            file_num,
+            gc: options.gc,
+            dir: self.dir.clone(),
+            env: self.env.clone(),
+            sync: self.sync,
+        }))
+    }
+
+    /// Publish a prepared L0→L1 SST. L0s flushed while `write` ran are kept.
+    ///
+    /// If every input path is already gone (another install won), the new file
+    /// is deleted and this is a no-op (G2: no duplicate live versions).
+    ///
+    /// # Errors
+    /// MANIFEST I/O. On error the new file is not installed; old L0s stay.
+    pub fn install_prepared_l0_compact(
+        &mut self,
+        job: PreparedL0Compact<E>,
+        new_table: SstTable,
+    ) -> Result<()> {
+        let input_paths: Vec<PathBuf> = job.input_paths();
+        let still_live = self
+            .ssts
+            .iter()
+            .any(|t| input_paths.iter().any(|p| t.path() == p.as_path()));
+        if !still_live {
+            let _ = self.env.remove_file(new_table.path());
+            return Ok(());
+        }
+        let old_paths = input_paths;
+        let mut keep_tables = Vec::new();
+        let mut keep_levels = Vec::new();
+        for (t, &lvl) in self.ssts.iter().zip(self.sst_levels.iter()) {
+            if old_paths.iter().any(|p| t.path() == p.as_path()) {
+                continue;
+            }
+            keep_tables.push(t.clone());
+            keep_levels.push(lvl);
+        }
+        self.note_sst_bytes_written(new_table.path());
+        self.table_cache.insert(Arc::new(new_table.clone()));
+        keep_tables.push(new_table);
+        keep_levels.push(1);
+        let prev_tables = std::mem::replace(&mut self.ssts, keep_tables);
+        let prev_levels = std::mem::replace(&mut self.sst_levels, keep_levels);
+        if job.gc.requests_gc() {
+            self.note_version_gc_watermark(job.gc);
+        }
+        if let Err(e) = self.persist_manifest() {
+            self.ssts = prev_tables;
+            self.sst_levels = prev_levels;
+            return Err(e);
+        }
+        for path in old_paths {
+            let _ = self.env.remove_file(&path);
+        }
+        self.compact_count = self.compact_count.saturating_add(1);
+        Ok(())
+    }
+
     /// Merge all SSTs at `from_level` and `to_level` into one SST at `to_level`.
     fn compact_levels(
         &mut self,
@@ -2688,36 +2828,9 @@ impl<E: Env> Db<E> {
         options: CompactOptions,
     ) -> Result<()> {
         let num = self.next_file_num;
-        let final_path = self.dir.join(format!("{num:06}.sst"));
-        let tmp_path = self.dir.join(format!("{num:06}.sst.tmp"));
-        // Default compact (no GC) streams one block per input — no 16 MiB
-        // `entries_cloned` + BTreeMap. GC still materializes (needs all
-        // versions of a user key before it can drop).
-        let new_table = if options.gc.requests_gc() {
-            let mut merged: Vec<(InternalKey, Bytes)> = Vec::new();
-            for &i in &input_idxs {
-                merged.extend(self.ssts[i].entries_cloned());
-            }
-            let merged = crate::merge::gc_compact_entries(merged, options.gc);
-            write_sst_entries_on(&self.env, &tmp_path, &merged)?
-        } else {
-            let bloom_hint: usize = input_idxs.iter().map(|&i| self.ssts[i].len()).sum();
-            let streams: Vec<_> = input_idxs
-                .iter()
-                .map(|&i| self.ssts[i].iter_internal_streaming())
-                .collect();
-            let mut merge = crate::merge::KwayInternalMerge::from_streams(streams)?;
-            write_sst_try_sorted_on(
-                &self.env,
-                &tmp_path,
-                std::iter::from_fn(|| merge.next_entry().transpose()),
-                bloom_hint,
-            )?
-        };
-        drop(new_table);
-        self.env.rename(&tmp_path, &final_path)?;
-        self.sync_dir_if_required(&self.dir)?;
-        let new_table = SstTable::open_on(&self.env, &final_path)?;
+        let tables: Vec<SstTable> = input_idxs.iter().map(|&i| self.ssts[i].clone()).collect();
+        let new_table =
+            write_merged_tables(&self.env, &self.dir, num, &tables, options.gc, self.sync)?;
         self.table_cache.insert(Arc::new(new_table.clone()));
         self.next_file_num = num + 1;
 
@@ -2735,12 +2848,13 @@ impl<E: Env> Db<E> {
                 keep_levels.push(lvl);
             }
         }
+        let new_path = new_table.path().to_path_buf();
         keep_tables.push(new_table);
         keep_levels.push(to_level);
         self.ssts = keep_tables;
         self.sst_levels = keep_levels;
 
-        if let Ok(len) = self.env.metadata_len(&final_path) {
+        if let Ok(len) = self.env.metadata_len(&new_path) {
             self.bytes_written_sst = self.bytes_written_sst.saturating_add(len);
         }
         // Raise GC watermark before MANIFEST install (durable across reopen).
@@ -2750,7 +2864,7 @@ impl<E: Env> Db<E> {
         self.persist_manifest()?;
 
         for path in old_paths {
-            if path != final_path {
+            if path != new_path {
                 let _ = self.env.remove_file(&path);
             }
         }
@@ -4258,6 +4372,9 @@ impl<E: Env> Db<E> {
 
     /// Run auto-compact after flush; record failures without failing the flush.
     fn run_auto_compact_best_effort(&mut self) {
+        if self.defer_auto_compact {
+            return;
+        }
         if let Err(e) = self.maybe_auto_compact() {
             self.auto_compact_failures = self.auto_compact_failures.saturating_add(1);
             self.last_auto_compact_error = Some(e.to_string());
@@ -4618,6 +4735,54 @@ fn load_ssts_scan<E: Env>(env: &E, dir: &Path) -> Result<(Vec<SstTable>, u64, Se
         tables.push(t);
     }
     Ok((tables, next_file_num, max_seq))
+}
+
+/// Merge `tables` into `{file_num:06}.sst` (RFC-0037 streaming when `!gc.requests_gc()`).
+fn write_merged_tables(
+    env: &impl Env,
+    dir: &Path,
+    file_num: u64,
+    tables: &[SstTable],
+    gc: crate::merge::CompactGcOptions,
+    do_sync_dir: bool,
+) -> Result<SstTable> {
+    let final_path = dir.join(format!("{file_num:06}.sst"));
+    let tmp_path = dir.join(format!("{file_num:06}.sst.tmp"));
+    let written = if gc.requests_gc() {
+        let mut merged: Vec<(InternalKey, Bytes)> = Vec::new();
+        for t in tables {
+            merged.extend(t.entries_cloned());
+        }
+        let merged = crate::merge::gc_compact_entries(merged, gc);
+        write_sst_entries_on(env, &tmp_path, &merged)
+    } else {
+        let bloom_hint: usize = tables.iter().map(SstTable::len).sum();
+        let streams: Vec<_> = tables
+            .iter()
+            .map(SstTable::iter_internal_streaming)
+            .collect();
+        let mut merge = crate::merge::KwayInternalMerge::from_streams(streams)?;
+        write_sst_try_sorted_on(
+            env,
+            &tmp_path,
+            std::iter::from_fn(|| merge.next_entry().transpose()),
+            bloom_hint,
+        )
+    };
+    match written {
+        Ok(table) => {
+            drop(table);
+            env.rename(&tmp_path, &final_path)?;
+            if do_sync_dir {
+                let _ = env.sync_dir(dir);
+            }
+            SstTable::open_on(env, &final_path)
+        }
+        Err(e) => {
+            let _ = env.remove_file(&tmp_path);
+            Err(e)
+        }
+    }
 }
 
 #[cfg(test)]
@@ -5899,6 +6064,47 @@ mod tests {
         assert_eq!(db.get(b"b").as_deref(), Some(b"b2".as_slice()));
         assert_eq!(db.get(b"c").as_deref(), Some(b"c1".as_slice()));
         assert_eq!(db.get(b"d").as_deref(), Some(b"d1".as_slice()));
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn prepare_write_install_l0_keeps_inputs_until_install() {
+        let dir = temp_dir();
+        let mut db = Db::open(&dir).unwrap();
+        db.set_defer_auto_compact(true);
+        for i in 0..L0_COMPACTION_TRIGGER {
+            db.put([b'a', i as u8], [b'1', i as u8]).unwrap();
+            db.flush().unwrap();
+        }
+        assert_eq!(db.level_file_count(0), L0_COMPACTION_TRIGGER);
+        let job = db
+            .prepare_l0_compact(CompactOptions::default())
+            .unwrap()
+            .expect("L0 job");
+        assert_eq!(
+            db.level_file_count(0),
+            L0_COMPACTION_TRIGGER,
+            "prepare must not hide L0"
+        );
+        db.put(b"zz", b"live").unwrap();
+        db.flush().unwrap();
+        let extra_l0 = db.level_file_count(0);
+        assert!(
+            extra_l0 > L0_COMPACTION_TRIGGER,
+            "flush during write stays L0"
+        );
+        let table = job.write().unwrap();
+        assert_eq!(db.level_file_count(0), extra_l0);
+        db.install_prepared_l0_compact(job, table).unwrap();
+        assert_eq!(db.level_file_count(0), 1, "L0 flushed during write kept");
+        assert!(db.level_file_count(1) >= 1);
+        assert_eq!(db.get(&[b'a', 0]).as_deref(), Some([b'1', 0].as_slice()));
+        assert_eq!(db.get(b"zz").as_deref(), Some(b"live".as_slice()));
+        db.close().unwrap();
+        let db = Db::open(&dir).unwrap();
+        assert_eq!(db.get(&[b'a', 0]).as_deref(), Some([b'1', 0].as_slice()));
+        assert_eq!(db.get(b"zz").as_deref(), Some(b"live".as_slice()));
         db.close().unwrap();
         let _ = fs::remove_dir_all(&dir);
     }

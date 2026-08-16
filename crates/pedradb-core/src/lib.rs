@@ -49,8 +49,9 @@ pub use changelog_kernel::{
 pub use concurrent::ConcurrentDb;
 pub use db::{
     copy_db_directory, read_checkpoint_meta, BatchOp, BlobGcCandidate, CheckpointMeta,
-    CompactOptions, Db, DbStats, OpenOptions, ReadProbeSnap, ScanProjection, Snapshot, SnapshotPin,
-    WriteOptions, CHECKPOINT_META_FILE, L0_COMPACTION_TRIGGER, MAX_LSM_LEVEL, WAL_FILE_NAME,
+    CompactOptions, Db, DbStats, OpenOptions, PreparedL0Compact, ReadProbeSnap, ScanProjection,
+    Snapshot, SnapshotPin, WriteOptions, CHECKPOINT_META_FILE, L0_COMPACTION_TRIGGER,
+    MAX_LSM_LEVEL, WAL_FILE_NAME,
 };
 pub use env::{AdviseKind, Env, EnvFile, StdEnv};
 pub use error::{CoreError, Result};
