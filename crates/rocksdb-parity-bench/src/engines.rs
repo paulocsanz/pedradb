@@ -96,6 +96,28 @@ impl Engine for CompatEngine {
         let h = self.db.cf_handle(cf).ok_or(())?;
         self.db.count_cf(&h, start, end, cap).map_err(|_| ())
     }
+    fn reset_read_probe(&self) {
+        self.db.reset_read_probe();
+    }
+    fn read_probe_json(&self) -> Option<String> {
+        let p = self.db.read_probe();
+        Some(format!(
+            r#"{{"latest_ops":{lo},"latest_mem_hit":{mh},"latest_sst_fallback":{fb},"latest_sst_probed":{sp},"scan_ops":{so},"scan_sst_probed":{ssp},"sst_count":{sc},"l0_files":{l0},"level1_files":{l1},"mem_entries":{me},"block_cache_hits":{ch},"block_cache_misses":{cm},"blocks_decoded":{bd}}}"#,
+            lo = p.latest_ops,
+            mh = p.latest_mem_hit,
+            fb = p.latest_sst_fallback,
+            sp = p.latest_sst_probed,
+            so = p.scan_ops,
+            ssp = p.scan_sst_probed,
+            sc = p.sst_count,
+            l0 = p.l0_files,
+            l1 = p.level1_files,
+            me = p.mem_entries,
+            ch = p.block_cache_hits,
+            cm = p.block_cache_misses,
+            bd = p.blocks_decoded,
+        ))
+    }
 }
 
 /// Real RocksDB via the rocksdb crate (feature `real`). Durability is labeled:

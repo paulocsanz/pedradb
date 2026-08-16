@@ -879,6 +879,17 @@ impl<E: Env> DB<E> {
         Ok(n)
     }
 
+    /// Zero latest/scan probe counters (RFC-0035).
+    pub fn reset_read_probe(&self) {
+        self.inner.lock().expect("db mutex").reset_read_probe();
+    }
+
+    /// Snapshot latest/scan counters + LSM shape (RFC-0035).
+    #[must_use]
+    pub fn read_probe(&self) -> pedradb_core::ReadProbeSnap {
+        self.inner.lock().expect("db mutex").read_probe()
+    }
+
     /// Flush memtable to SST.
     ///
     /// # Errors

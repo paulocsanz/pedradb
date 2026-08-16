@@ -60,8 +60,15 @@ impl Cfg {
 /// One op of an atomic multi-CF batch (TiKV raftstore apply shape).
 #[derive(Clone, Debug)]
 pub enum CfWrite {
-    Put { cf: &'static str, k: Vec<u8>, v: Vec<u8> },
-    Delete { cf: &'static str, k: Vec<u8> },
+    Put {
+        cf: &'static str,
+        k: Vec<u8>,
+        v: Vec<u8>,
+    },
+    Delete {
+        cf: &'static str,
+        k: Vec<u8>,
+    },
 }
 
 /// CF layout modeled on TiKV's store: `default` (MVCC values), `write`
@@ -108,6 +115,12 @@ pub trait Engine {
     fn latest_cf(&self, cf: &str, prefix: &[u8]) -> Result<Option<Vec<u8>>, ()>;
     /// `scan_count` for a named CF.
     fn scan_count_cf(&self, cf: &str, start: &[u8], end: &[u8], cap: usize) -> Result<usize, ()>;
+    /// RFC-0035: zero latest/scan counters (compat only; default no-op).
+    fn reset_read_probe(&self) {}
+    /// RFC-0035: JSON object of counters + LSM shape, or `None`.
+    fn read_probe_json(&self) -> Option<String> {
+        None
+    }
 }
 
 pub struct YcsbRunner {
@@ -172,14 +185,25 @@ impl YcsbRunner {
                 for j in 0..take {
                     let ts = round * records as u64 + (i + j) as u64 + 1;
                     vers[i + j] = ts;
-                    pre.push(CfWrite::Put { cf: "lock", k: ukey(i + j), v: b"l".to_vec() });
+                    pre.push(CfWrite::Put {
+                        cf: "lock",
+                        k: ukey(i + j),
+                        v: b"l".to_vec(),
+                    });
                     pre.push(CfWrite::Put {
                         cf: "default",
                         k: mvcc(i + j, ts),
                         v: yval.clone(),
                     });
-                    com.push(CfWrite::Put { cf: "write", k: mvcc(i + j, ts), v: b"c".to_vec() });
-                    com.push(CfWrite::Delete { cf: "lock", k: ukey(i + j) });
+                    com.push(CfWrite::Put {
+                        cf: "write",
+                        k: mvcc(i + j, ts),
+                        v: b"c".to_vec(),
+                    });
+                    com.push(CfWrite::Delete {
+                        cf: "lock",
+                        k: ukey(i + j),
+                    });
                 }
                 assert!(e.batch(std::mem::take(&mut pre)), "seed prewrite");
                 assert!(e.batch(std::mem::take(&mut com)), "seed commit");
@@ -210,10 +234,25 @@ impl YcsbRunner {
             let mut pre = Vec::with_capacity(batch * 2);
             let mut com = Vec::with_capacity(batch * 2);
             for &(u, ts) in &picks {
-                pre.push(CfWrite::Put { cf: "lock", k: ukey(u), v: b"l".to_vec() });
-                pre.push(CfWrite::Put { cf: "default", k: mvcc(u, ts), v: yval.clone() });
-                com.push(CfWrite::Put { cf: "write", k: mvcc(u, ts), v: b"c".to_vec() });
-                com.push(CfWrite::Delete { cf: "lock", k: ukey(u) });
+                pre.push(CfWrite::Put {
+                    cf: "lock",
+                    k: ukey(u),
+                    v: b"l".to_vec(),
+                });
+                pre.push(CfWrite::Put {
+                    cf: "default",
+                    k: mvcc(u, ts),
+                    v: yval.clone(),
+                });
+                com.push(CfWrite::Put {
+                    cf: "write",
+                    k: mvcc(u, ts),
+                    v: b"c".to_vec(),
+                });
+                com.push(CfWrite::Delete {
+                    cf: "lock",
+                    k: ukey(u),
+                });
             }
             let ok = e.batch(std::mem::take(&mut pre)) && e.batch(std::mem::take(&mut com));
             if ok {
@@ -223,32 +262,71 @@ impl YcsbRunner {
             }
             lats.push(ms(t));
         }
-        blocks.push(summarize("deps_apply_batch", cfg_ops, t0.elapsed(), &mut lats));
+        blocks.push(summarize(
+            "deps_apply_batch",
+            cfg_ops,
+            t0.elapsed(),
+            &mut lats,
+        ));
         eprintln!("[rocks-parity] deps_apply_batch done txns={txns} errors={errors}");
 
         // 2. deps_mvcc_latest — point read of the latest version: reverse-seek
         //    write CF for the user prefix, then fetch the value in default.
+        e.reset_read_probe();
         let mut lats = Vec::with_capacity(cfg_ops);
+        let mut latest_lats = Vec::with_capacity(cfg_ops);
+        let mut get_lats = Vec::with_capacity(cfg_ops);
         let (mut reads, mut errors) = (0u64, 0u64);
         let t0 = Instant::now();
         for _ in 0..cfg_ops {
             let t = Instant::now();
             let u = self.pick(&mut rng, records);
-            match e.latest_cf("write", &ukey(u)) {
-                Ok(Some(k)) => match e.get_cf("default", &k) {
-                    Ok(_) => reads += 1,
-                    Err(_) => errors += 1,
-                },
+            let t_latest = Instant::now();
+            let last = e.latest_cf("write", &ukey(u));
+            latest_lats.push(ms(t_latest));
+            match last {
+                Ok(Some(k)) => {
+                    let t_get = Instant::now();
+                    let g = e.get_cf("default", &k);
+                    get_lats.push(ms(t_get));
+                    match g {
+                        Ok(_) => reads += 1,
+                        Err(_) => errors += 1,
+                    }
+                }
                 Ok(None) => errors += 1,
                 Err(_) => errors += 1,
             }
             lats.push(ms(t));
         }
-        blocks.push(summarize("deps_mvcc_latest", cfg_ops, t0.elapsed(), &mut lats));
-        eprintln!("[rocks-parity] deps_mvcc_latest done reads={reads} errors={errors}");
+        blocks.push(summarize(
+            "deps_mvcc_latest",
+            cfg_ops,
+            t0.elapsed(),
+            &mut lats,
+        ));
+        latest_lats.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        get_lats.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        let probe = e.read_probe_json().unwrap_or_else(|| "null".into());
+        blocks.push(format!(
+            r#"{{
+    "name": "deps_mvcc_latest_split",
+    "latest_p50_ms": {lp:.4},
+    "latest_p95_ms": {l95:.4},
+    "get_p50_ms": {gp:.4},
+    "get_p95_ms": {g95:.4},
+    "probe": {probe}
+  }}"#,
+            lp = pct(&latest_lats, 50.0),
+            l95 = pct(&latest_lats, 95.0),
+            gp = pct(&get_lats, 50.0),
+            g95 = pct(&get_lats, 95.0),
+        ));
+        eprintln!("[rocks-parity] deps_mvcc_latest done reads={reads} errors={errors} split latest_p50={:.4} get_p50={:.4}", pct(&latest_lats, 50.0), pct(&get_lats, 50.0));
 
         // 3. deps_scan — short range scan over user keys in the write CF
         //    (coprocessor / GC range shape).
+        e.reset_read_probe();
         let mut lats = Vec::with_capacity(cfg_ops);
         let (mut scans, mut errors) = (0u64, 0u64);
         let t0 = Instant::now();
@@ -262,6 +340,13 @@ impl YcsbRunner {
             lats.push(ms(t));
         }
         blocks.push(summarize("deps_scan", cfg_ops, t0.elapsed(), &mut lats));
+        let probe = e.read_probe_json().unwrap_or_else(|| "null".into());
+        blocks.push(format!(
+            r#"{{
+    "name": "deps_scan_probe",
+    "probe": {probe}
+  }}"#
+        ));
         eprintln!("[rocks-parity] deps_scan done scans={scans} errors={errors}");
 
         // 4. deps_raftlog — raftdb append shape: batched sequential appends to
@@ -315,7 +400,12 @@ impl YcsbRunner {
             }
             lats.push(ms(t));
         }
-        blocks.push(summarize("deps_cache_overwrite", cfg_ops, t0.elapsed(), &mut lats));
+        blocks.push(summarize(
+            "deps_cache_overwrite",
+            cfg_ops,
+            t0.elapsed(),
+            &mut lats,
+        ));
         eprintln!("[rocks-parity] deps_cache_overwrite done writes={writes} errors={errors}");
 
         self.rng = rng;
@@ -565,7 +655,10 @@ mod tests {
         let lo = mvcc(3, 1);
         let hi = mvcc(3, 2);
         assert!(lo < hi, "same-user later version must sort after earlier");
-        assert!(ukey(3) < lo, "versioned row must sort after its user prefix");
+        assert!(
+            ukey(3) < lo,
+            "versioned row must sort after its user prefix"
+        );
         // Prefix containment: both versions share the user prefix.
         assert!(lo.starts_with(&ukey(3)) && hi.starts_with(&ukey(3)));
     }
@@ -588,12 +681,17 @@ mod tests {
         assert_eq!(
             blocks
                 .iter()
-                .map(|b| b.split("\"name\": \"").nth(1).and_then(|s| s.split('"').next()))
+                .map(|b| b
+                    .split("\"name\": \"")
+                    .nth(1)
+                    .and_then(|s| s.split('"').next()))
                 .collect::<Vec<_>>(),
             vec![
                 Some("deps_apply_batch"),
                 Some("deps_mvcc_latest"),
+                Some("deps_mvcc_latest_split"),
                 Some("deps_scan"),
+                Some("deps_scan_probe"),
                 Some("deps_raftlog"),
                 Some("deps_cache_overwrite"),
             ]

@@ -1,6 +1,6 @@
 # RFC-0035: MVCC latest + deps_scan to ≤2× vs Rocks FF — measure first
 
-**Status:** draft  
+**Status:** in-progress  
 **Updated:** 2026-08-16  
 **Parents:** [0033](0033-mvcc-scan-2x.md) (last_under_prefix, lazy scan), [0034](0034-rocks-parity-1.1x-all-shapes.md) (teto 1.1× all-shapes; estes dois ainda longe)
 
@@ -55,13 +55,13 @@ Editar asserção existente para ficar verde é relaxação.
 ### P0 — must ship first (útil sozinho: sabemos o quê atacar)
 
 - [x] **P0.1** RFC + Status vivo (este doc) — status: `done`
-- [ ] **P0.2** Contadores no read-path (ou no harness deps): SST tocados, blocos decodificados vs cache hit, mem-hit vs fallback SST no latest, `sst_count` / L0 / L1 no momento do op — status: `todo`
-- [ ] **P0.3** Split de tempo no op deps (`last_under_*` vs `get` default vs merge/scan emit), p50/p95, sem mudar o schedule — status: `todo`
-- [ ] **P0.4** Finding durável: ranking dos gargalos com número; escolhe o alvo do P1.1 — status: `todo`
+- [x] **P0.2** Contadores no read-path (ou no harness deps): SST tocados, blocos decodificados vs cache hit, mem-hit vs fallback SST no latest, `sst_count` / L0 / L1 no momento do op — status: `done`
+- [x] **P0.3** Split de tempo no op deps (`last_under_*` vs `get` default vs merge/scan emit), p50/p95, sem mudar o schedule — status: `done`
+- [x] **P0.4** Finding durável: ranking dos gargalos com número; escolhe o alvo do P1.1 — status: `done`
 
 ### P1 — um gargalo de cada vez (só o que o P0.4 ranqueou)
 
-- [ ] **P1.1** Cortar o #1 do finding; remesura deps vs FF — status: `todo`
+- [ ] **P1.1** Cortar `get_cf` 1 KB do default no path MVCC (37.5 µs p50; sozinho impede o 2×); remesura deps vs FF — status: `todo`
 - [ ] **P1.2** Se ainda > 2×: cortar o #2; remesura — status: `todo`
 - [ ] **P1.3** `deps_mvcc_latest` e `deps_scan` ≥ 0.5 × Rocks FF da run — status: `todo`
 
@@ -75,10 +75,10 @@ Editar asserção existente para ficar verde é relaxação.
 | ID | Band | Title | Status | Task / PR | Updated |
 |----|------|-------|--------|-----------|---------|
 | P0.1 | p0 | RFC + medida-primeiro | done | este doc | 2026-08-16 |
-| P0.2 | p0 | contadores SST/cache/mem-hit | todo | — | 2026-08-16 |
-| P0.3 | p0 | split de tempo no op deps | todo | — | 2026-08-16 |
-| P0.4 | p0 | finding ranqueado → alvo P1 | todo | — | 2026-08-16 |
-| P1.1 | p1 | cortar gargalo #1 | todo | espera P0.4 | 2026-08-16 |
+| P0.2 | p0 | contadores SST/cache/mem-hit | done | `ReadProbeSnap` + JSON no bench | 2026-08-16 |
+| P0.3 | p0 | split de tempo no op deps | done | `deps_mvcc_latest_split` latest vs get | 2026-08-16 |
+| P0.4 | p0 | finding ranqueado → alvo P1 | done | [rfc0035-p0-ranked-bottlenecks.md](../findings/rfc0035-p0-ranked-bottlenecks.md) | 2026-08-16 |
+| P1.1 | p1 | get_cf 1 KB no path MVCC | todo | finding #1 | 2026-08-16 |
 | P1.2 | p1 | cortar gargalo #2 se precisar | todo | espera P1.1 | 2026-08-16 |
 | P1.3 | p1 | MVCC+scan ≥ 0.5 vs FF | todo | — | 2026-08-16 |
 | P2.1 | p2 | redesign só com cliff medido | todo | — | 2026-08-16 |

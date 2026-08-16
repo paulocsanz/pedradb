@@ -192,6 +192,37 @@ pub struct DbStats {
     pub changelog_store_count: u64,
 }
 
+/// RFC-0035 P0: snapshot of latest/scan counters + LSM shape (no thread).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ReadProbeSnap {
+    /// `last_under_user_prefix` calls.
+    pub latest_ops: u64,
+    /// Newest-mem live hit (SST not probed).
+    pub latest_mem_hit: u64,
+    /// Fell through to full [`Db::last_under_prefix`].
+    pub latest_sst_fallback: u64,
+    /// SST files considered on fallback (sum; divide by fallback for mean).
+    pub latest_sst_probed: u64,
+    /// `scan_at_raw` calls.
+    pub scan_ops: u64,
+    /// SST files offered to the merge (sum).
+    pub scan_sst_probed: u64,
+    /// Live SST files now.
+    pub sst_count: usize,
+    /// L0 file count now.
+    pub l0_files: usize,
+    /// L1 file count now.
+    pub level1_files: usize,
+    /// Active memtable internal entries.
+    pub mem_entries: usize,
+    /// Block-cache hits since last reset.
+    pub block_cache_hits: u64,
+    /// Block-cache misses since last reset.
+    pub block_cache_misses: u64,
+    /// SST blocks actually decompressed on this thread since last reset.
+    pub blocks_decoded: u64,
+}
+
 /// Per-blob GC stats for operator / auto-pick (RFC-0029 P1.1).
 #[derive(Debug, Clone)]
 pub struct BlobGcCandidate {
@@ -519,6 +550,13 @@ pub struct Db<E: Env = StdEnv> {
     scan_prefetch: usize,
     /// Windows of prefetch issued (observability).
     prefetch_hits: AtomicU64,
+    /// RFC-0035 latest/scan counters.
+    latest_ops: AtomicU64,
+    latest_mem_hit: AtomicU64,
+    latest_sst_fallback: AtomicU64,
+    latest_sst_probed: AtomicU64,
+    scan_ops: AtomicU64,
+    scan_sst_probed: AtomicU64,
     /// When set, best-effort [`Self::compact_blob_auto`] after flush / latest_only
     /// compact (RFC-0026 residual: no bg thread — runs on write path).
     auto_blob_gc_min_ratio: Option<f64>,
@@ -743,6 +781,12 @@ impl<E: Env> Db<E> {
             blob_active,
             scan_prefetch: 4,
             prefetch_hits: AtomicU64::new(0),
+            latest_ops: AtomicU64::new(0),
+            latest_mem_hit: AtomicU64::new(0),
+            latest_sst_fallback: AtomicU64::new(0),
+            latest_sst_probed: AtomicU64::new(0),
+            scan_ops: AtomicU64::new(0),
+            scan_sst_probed: AtomicU64::new(0),
             auto_blob_gc_min_ratio: None,
             auto_reclaim: false,
             write_stall_l0: None,
@@ -799,6 +843,39 @@ impl<E: Env> Db<E> {
     #[must_use]
     pub fn last_sequence(&self) -> SequenceNumber {
         self.next_seq.saturating_sub(1)
+    }
+
+    /// Zero RFC-0035 latest/scan counters, block-cache stats, and the
+    /// thread-local decode counter.
+    pub fn reset_read_probe(&self) {
+        self.latest_ops.store(0, Ordering::Relaxed);
+        self.latest_mem_hit.store(0, Ordering::Relaxed);
+        self.latest_sst_fallback.store(0, Ordering::Relaxed);
+        self.latest_sst_probed.store(0, Ordering::Relaxed);
+        self.scan_ops.store(0, Ordering::Relaxed);
+        self.scan_sst_probed.store(0, Ordering::Relaxed);
+        self.block_cache.reset_stats();
+        crate::sst::reset_sst_blocks_decoded();
+    }
+
+    /// Snapshot of latest/scan counters + LSM shape (RFC-0035 P0).
+    #[must_use]
+    pub fn read_probe(&self) -> ReadProbeSnap {
+        ReadProbeSnap {
+            latest_ops: self.latest_ops.load(Ordering::Relaxed),
+            latest_mem_hit: self.latest_mem_hit.load(Ordering::Relaxed),
+            latest_sst_fallback: self.latest_sst_fallback.load(Ordering::Relaxed),
+            latest_sst_probed: self.latest_sst_probed.load(Ordering::Relaxed),
+            scan_ops: self.scan_ops.load(Ordering::Relaxed),
+            scan_sst_probed: self.scan_sst_probed.load(Ordering::Relaxed),
+            sst_count: self.ssts.len(),
+            l0_files: self.level_file_count(0),
+            level1_files: self.level_file_count(1),
+            mem_entries: self.mem.len(),
+            block_cache_hits: self.block_cache.hits(),
+            block_cache_misses: self.block_cache.misses(),
+            blocks_decoded: crate::sst::sst_blocks_decoded() as u64,
+        }
     }
 
     /// Number of SST files currently loaded.
@@ -1331,6 +1408,8 @@ impl<E: Env> Db<E> {
         if snapshot == 0 {
             return Ok(None);
         }
+        self.latest_sst_probed
+            .fetch_add(self.ssts.len() as u64, Ordering::Relaxed);
         let mut before = crate::prefix::prefix_exclusive_end(prefix);
         loop {
             let mut cand: Option<Bytes> = None;
@@ -1407,11 +1486,14 @@ impl<E: Env> Db<E> {
         if snapshot == 0 {
             return Ok(None);
         }
+        self.latest_ops.fetch_add(1, Ordering::Relaxed);
         if let Some(mem) = self.mem_layers().next() {
             if let Some((k, _)) = mem.last_visible_under_prefix(prefix, snapshot, None) {
+                self.latest_mem_hit.fetch_add(1, Ordering::Relaxed);
                 return Ok(Some(k));
             }
         }
+        self.latest_sst_fallback.fetch_add(1, Ordering::Relaxed);
         self.last_under_prefix(snapshot, prefix)
     }
 
@@ -1544,6 +1626,9 @@ impl<E: Env> Db<E> {
         if snapshot == 0 {
             return StreamingVisibleIter::new(Vec::new(), 0, start, end, limit);
         }
+        self.scan_ops.fetch_add(1, Ordering::Relaxed);
+        self.scan_sst_probed
+            .fetch_add(self.ssts.len() as u64, Ordering::Relaxed);
         // Range tombstones first (G2): a covering delete whose start sits
         // before `start` must still hide keys in the window. Point streams
         // are lazy — later SST blocks are not decoded after `limit` emits.
@@ -7887,6 +7972,51 @@ mod tests {
             .unwrap()
             .expect("flushed v3");
         assert_eq!(&prev[prev.len() - 8..], &3u64.to_be_bytes());
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn read_probe_counts_mem_hit_fallback_and_scan() {
+        let dir = temp_dir();
+        let mut db = Db::open(&dir).unwrap();
+        db.put(b"u/01\x00\x00\x00\x00\x00\x00\x00\x01", b"v")
+            .unwrap();
+        db.flush().unwrap();
+        db.reset_read_probe();
+        let _ = db
+            .last_under_user_prefix(db.last_sequence(), b"u/01")
+            .unwrap();
+        let p = db.read_probe();
+        assert_eq!(p.latest_ops, 1);
+        assert_eq!(p.latest_mem_hit, 0);
+        assert_eq!(p.latest_sst_fallback, 1);
+        assert!(p.latest_sst_probed >= 1);
+        assert!(p.sst_count >= 1);
+
+        db.put(b"u/01\x00\x00\x00\x00\x00\x00\x00\x02", b"v2")
+            .unwrap();
+        db.reset_read_probe();
+        let _ = db
+            .last_under_user_prefix(db.last_sequence(), b"u/01")
+            .unwrap();
+        let p = db.read_probe();
+        assert_eq!(p.latest_mem_hit, 1);
+        assert_eq!(p.latest_sst_fallback, 0);
+
+        db.reset_read_probe();
+        let _ = db
+            .try_scan_at(
+                db.last_sequence(),
+                Bound::Unbounded,
+                Bound::Unbounded,
+                Some(8),
+            )
+            .unwrap()
+            .count();
+        let p = db.read_probe();
+        assert_eq!(p.scan_ops, 1);
+        assert!(p.scan_sst_probed >= 1);
         db.close().unwrap();
         let _ = fs::remove_dir_all(&dir);
     }

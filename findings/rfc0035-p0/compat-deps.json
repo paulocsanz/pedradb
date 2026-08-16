@@ -1,0 +1,73 @@
+{
+  "bench": "rocks-parity-v1",
+  "engine": "compat",
+  "sync": true,
+  "durability": "fsync-before-ok (pedradb-core WAL)",
+  "changelog_interval": 64,
+  "status": "ok",
+  "notes": ["ycsb records=4096 ops=2000 payload=1000 dist=zipfian", "engine=compat durability=fsync-before-ok (pedradb-core WAL)", "suites: deps", "seed: one put per record (not timed)", "cfs: default + write, lock, raftlog (TiKV store shape; raftlog = raftdb)", "deps apply batch txns/commit: 32", "changelog_interval=64"],
+  "benches": [
+{
+    "name": "deps_apply_batch",
+    "n": 2000,
+    "qps": 93.258,
+    "p50_ms": 8.0181,
+    "p95_ms": 10.9997,
+    "p99_ms": 74.0348,
+    "max_ms": 594.7159,
+    "wall_s": 21.4459
+  },
+{
+    "name": "deps_mvcc_latest",
+    "n": 2000,
+    "qps": 9042.147,
+    "p50_ms": 0.0776,
+    "p95_ms": 0.3104,
+    "p99_ms": 0.3401,
+    "max_ms": 0.8321,
+    "wall_s": 0.2212
+  },
+{
+    "name": "deps_mvcc_latest_split",
+    "latest_p50_ms": 0.0389,
+    "latest_p95_ms": 0.2276,
+    "get_p50_ms": 0.0375,
+    "get_p95_ms": 0.0825,
+    "probe": {"latest_ops":2000,"latest_mem_hit":1574,"latest_sst_fallback":426,"latest_sst_probed":1278,"scan_ops":0,"scan_sst_probed":0,"sst_count":3,"l0_files":2,"level1_files":1,"mem_entries":14400,"block_cache_hits":1208,"block_cache_misses":1067,"blocks_decoded":1067}
+  },
+{
+    "name": "deps_scan",
+    "n": 2000,
+    "qps": 6163.996,
+    "p50_ms": 0.1601,
+    "p95_ms": 0.1923,
+    "p99_ms": 0.2656,
+    "max_ms": 0.4078,
+    "wall_s": 0.3245
+  },
+{
+    "name": "deps_scan_probe",
+    "probe": {"latest_ops":0,"latest_mem_hit":0,"latest_sst_fallback":0,"latest_sst_probed":0,"scan_ops":2000,"scan_sst_probed":6000,"sst_count":3,"l0_files":2,"level1_files":1,"mem_entries":14400,"block_cache_hits":1193,"block_cache_misses":5134,"blocks_decoded":5134}
+  },
+{
+    "name": "deps_raftlog",
+    "n": 2000,
+    "qps": 133.270,
+    "p50_ms": 4.0886,
+    "p95_ms": 14.3571,
+    "p99_ms": 89.7349,
+    "max_ms": 913.7166,
+    "wall_s": 15.0071
+  },
+{
+    "name": "deps_cache_overwrite",
+    "n": 2000,
+    "qps": 178.076,
+    "p50_ms": 4.0167,
+    "p95_ms": 5.0513,
+    "p99_ms": 93.8233,
+    "max_ms": 159.8360,
+    "wall_s": 11.2312
+  }
+  ]
+}
