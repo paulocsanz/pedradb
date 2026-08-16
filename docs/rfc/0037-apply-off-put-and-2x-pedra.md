@@ -1,6 +1,6 @@
 # RFC-0037: apply ≤2× vs Rocks fd + 2× Pedra on the other 10
 
-**Status:** draft  
+**Status:** in-progress  
 **Updated:** 2026-08-16  
 **Parents:** [0036](0036-tikv-rocks-2x-fdatasync.md) (WAL `fdatasync`, L0-only compact, 10/11), [0016](0016-pedradb-production-robustness.md) (ConcurrentDb dual-mem / off-lock flush)
 
@@ -101,8 +101,8 @@ Herdadas de RFC-0036 / 0031:
 ### P0 — must ship first (11/11 no cliente único)
 
 - [x] **P0.1** RFC + Status vivo (este doc) — status: `done`
-- [ ] **P0.2** `compact_l0_into_l1` em streaming: zero `entries_cloned` do SST inteiro; teste de que o conjunto visível = merge actual; adversarial sem editar asserção — status: `todo`
-- [ ] **P0.3** Remesura `tikv_ycsb_parity_v0.sh` FULL_SYNC=0; `deps_apply_batch` ≥ 0.5 vs Rocks fd da run; os outros 10 não regridem do 2× Rocks — status: `todo`
+- [x] **P0.2** `compact_l0_into_l1` em streaming: zero `entries_cloned` do SST inteiro; teste de que o conjunto visível = merge actual; adversarial sem editar asserção — status: `done`
+- [ ] **P0.3** Remesura `tikv_ycsb_parity_v0.sh` FULL_SYNC=0; `deps_apply_batch` ≥ 0.5 vs Rocks fd **limpo** da run; os outros 10 não regridem do 2× Rocks — status: `todo` (medido: cauda ↓, qps apply ≈ 0036; 0.33× vs Rocks 5 576)
 
 ### P1 — off-lock + 2× Pedra nas leituras
 
@@ -121,14 +121,30 @@ Herdadas de RFC-0036 / 0031:
 | ID | Band | Title | Status | Task / PR | Updated |
 |----|------|-------|--------|-----------|---------|
 | P0.1 | p0 | RFC + investigação | done | este doc | 2026-08-16 |
-| P0.2 | p0 | L0 compact streaming (sem clone 16 MiB) | todo | — | 2026-08-16 |
-| P0.3 | p0 | apply ≥ 0.5 vs Rocks fd (11/11) | todo | — | 2026-08-16 |
+| P0.2 | p0 | L0 compact streaming (sem clone 16 MiB) | done | `rewrite_ssts` k-way + `write_sst_try_sorted_on` | 2026-08-16 |
+| P0.3 | p0 | apply ≥ 0.5 vs Rocks fd (11/11) | todo | 3 runs; oficial p03c 0.33× | 2026-08-16 |
 | P1.1 | p1 | split apply + leituras | todo | — | 2026-08-16 |
 | P1.2 | p1 | compact off-lock no ConcurrentDb | todo | — | 2026-08-16 |
 | P1.3 | p1 | 2× Pedra no gargalo #1 de leitura | todo | — | 2026-08-16 |
 | P2.1 | p2 | worker host se P0 não chegar | todo | — | 2026-08-16 |
 | P2.2 | p2 | 2× Pedra A/F com N clientes | todo | — | 2026-08-16 |
 | P2.3 | p2 | gate 0.5 + tabela 2× Pedra | todo | — | 2026-08-16 |
+
+## P0.2 / P0.3 — o que a remesura mostrou
+
+`rewrite_ssts` default (sem GC) agora faz k-way `SstInternalStream` + `write_sst_try_sorted_on`. GC continua no clone. Testes: `kway_matches_gc_concat_default`, `compact_l0_streaming_matches_concat_and_keeps_tombstones`, `write_read_round_trip_v2` (cache de materialize fica vazio), adversarial compat sem editar asserção.
+
+Três runs FULL_SYNC=0, raw: [tikv-ycsb-0037-streaming](../findings/tikv-ycsb-0037-streaming/).
+
+| run | Pedra apply | max | Rocks apply | max | Pedra/Rocks |
+|---|---:|---:|---:|---:|---:|
+| p03 | 1 949 | 157 ms | 2 791 | 136 ms | 0.70 |
+| p03b | 1 937 | 93 ms | 3 623 | 32 ms | 0.54 |
+| **p03c** | **1 835** | **105 ms** | **5 576** | **0.55 ms** | **0.33** |
+
+Pedra apply qps **não saiu do sítio** (~1 900, 0036 = 1 908). A cauda caiu (221 ms → 93–157 ms). Quando o Rocks apply está limpo (p03c, max 0.55 ms), o ratio é **0.33** — ainda 3× mais lento. p03/p03b “passam” 0.5 só porque o Rocks também compactou no put. G8: o oficial é p03c.
+
+O que resta no apply single-client é recodificar + lz4 + `fdatasync` do L1 novo **no mesmo `put`**. Streaming tirou o clone de 16 MiB; não tira o rewrite. P1.2 off-lock no mesmo thread não muda o qps do cliente único. **P2.1** (worker no compat/store) é o próximo que pode tirar o merge do apply.
 
 ## Acceptance Criteria
 

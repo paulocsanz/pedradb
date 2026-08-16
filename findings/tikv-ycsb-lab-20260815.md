@@ -175,6 +175,26 @@ Mesmos knobs, ycsb+deps combinada. Peer = Rocks `fdatasync`. Raw: [tikv-ycsb-003
 
 **10/11 ≤2×.** apply p50 **empatado** com o Rocks (166 vs 169 µs); qps 2.31× por um compact L0 no writer (max 221 ms). G6 = sem thread. WAL sincado antes do Ok.
 
+## RFC-0037 P0.2 — L0 compact em streaming (2026-08-16)
+
+K-way por bloco, sem `entries_cloned` do L0 inteiro. Mesmos knobs, peer Rocks fd. Raw: [tikv-ycsb-0037-streaming](tikv-ycsb-0037-streaming/). Oficial = **p03c** (Rocks apply limpo).
+
+| shape | Pedra qps | p50 | p95 | p99 | Rocks fd qps | p50 | p95 | p99 | slower | ≤2× |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|:---:|
+| ycsb_a | 53 182 | 20 µs | 55 µs | 73 µs | 42 338 | 20 µs | 51 µs | 84 µs | **0.80×** | sim |
+| ycsb_b | 299 325 | 0.6 µs | 23 µs | 55 µs | 391 224 | 0.8 µs | 25 µs | 45 µs | **1.31×** | sim |
+| ycsb_c | 1 153 181 | 0.3 µs | 3.5 µs | 5.7 µs | 1 364 684 | 0.7 µs | 1.0 µs | 1.3 µs | **1.18×** | sim |
+| ycsb_d | 363 898 | 0.5 µs | 20 µs | 48 µs | 383 718 | 0.7 µs | 25 µs | 46 µs | **1.05×** | sim |
+| ycsb_e | 143 163 | 5.5 µs | 22 µs | 49 µs | 102 758 | 7.5 µs | 25 µs | 51 µs | **0.72×** | sim |
+| ycsb_f | 47 310 | 23 µs | 61 µs | 79 µs | 56 522 | 23 µs | 49 µs | 56 µs | **1.19×** | sim |
+| deps_apply_batch | 1 835 | 179 µs | 298 µs | 3.07 ms | 5 576 | 174 µs | 209 µs | 329 µs | **3.04×** | não |
+| deps_mvcc_latest | 411 727 | 0.5 µs | 9.8 µs | 20 µs | 302 113 | 2.9 µs | 5.8 µs | 9.4 µs | **0.73×** | sim |
+| deps_scan | 211 553 | 0.4 µs | 18 µs | 38 µs | 292 440 | 3.3 µs | 4.0 µs | 4.3 µs | **1.38×** | sim |
+| deps_raftlog | 5 136 | 46 µs | 88 µs | 251 µs | 4 568 | 83 µs | 182 µs | 2.90 ms | **0.89×** | sim |
+| deps_cache_overwrite | 36 693 | 26 µs | 40 µs | 56 µs | 30 649 | 24 µs | 49 µs | 57 µs | **0.84×** | sim |
+
+**Ainda 10/11.** Apply qps ≈ 0036 (1 835 vs 1 908); max 221 ms → 105 ms. Três runs: Pedra apply 1 835–1 949; Rocks apply 2 791 / 3 623 / **5 576**. Só a terceira é limpa (Rocks max 0.55 ms). Streaming não tira o rewrite do put — P0.3 11/11 não fechou.
+
 ## RFC-0033 remesure (2026-08-15, deps-only)
 
 Same knobs (4096/2000, zipfian, 1 KB). Compat only — no Rocks peer in this slice. After apply (64k txns, batch=32).

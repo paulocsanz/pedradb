@@ -185,6 +185,11 @@ impl SstTable {
         !self.payload.is_empty() && !self.index.is_empty()
     }
 
+    #[cfg(test)]
+    pub(crate) fn materialize_cache_filled(&self) -> bool {
+        self.entries.lock().is_some()
+    }
+
     /// Append range tombstones visible at `snapshot` into `out` (no full materialize).
     pub fn collect_range_tombstones(
         &self,
@@ -905,6 +910,19 @@ impl SstTable {
         self.entries_cloned().into_iter()
     }
 
+    /// Internal versions one block at a time (RFC-0037 compact). Does **not**
+    /// fill the materialize cache on a lazy table.
+    #[must_use]
+    pub fn iter_internal_streaming(&self) -> SstInternalStream<'_> {
+        SstInternalStream {
+            table: self,
+            block_i: 0,
+            block: None,
+            entry_i: 0,
+            failed: false,
+        }
+    }
+
     /// Clone all entries (for compaction merge). Materializes lazy tables.
     #[must_use]
     pub fn entries_cloned(&self) -> Vec<(InternalKey, Bytes)> {
@@ -1192,6 +1210,64 @@ impl SstTable {
     }
 }
 
+/// One-block-at-a-time internal scan (RFC-0037). Lazy tables stay unmaterialised.
+pub struct SstInternalStream<'a> {
+    table: &'a SstTable,
+    block_i: usize,
+    block: Option<Vec<(InternalKey, Bytes)>>,
+    entry_i: usize,
+    failed: bool,
+}
+
+impl crate::merge::CompactSource for SstInternalStream<'_> {
+    fn next_entry(&mut self) -> Result<Option<(InternalKey, Bytes)>> {
+        SstInternalStream::next_entry(self)
+    }
+}
+
+impl SstInternalStream<'_> {
+    /// Next internal entry, or `Err` on a corrupt block.
+    ///
+    /// # Errors
+    /// Block decode / CRC.
+    pub fn next_entry(&mut self) -> Result<Option<(InternalKey, Bytes)>> {
+        if self.failed {
+            return Ok(None);
+        }
+        loop {
+            if let Some(block) = &self.block {
+                if self.entry_i < block.len() {
+                    let e = block[self.entry_i].clone();
+                    self.entry_i += 1;
+                    return Ok(Some(e));
+                }
+            }
+            if !self.table.is_lazy() {
+                if self.block.is_some() {
+                    return Ok(None);
+                }
+                self.block = Some(self.table.entries_cloned());
+                self.entry_i = 0;
+                continue;
+            }
+            if self.block_i >= self.table.block_count() {
+                return Ok(None);
+            }
+            match self.table.decode_block(self.block_i) {
+                Ok(decoded) => {
+                    self.block_i += 1;
+                    self.entry_i = 0;
+                    self.block = Some(decoded);
+                }
+                Err(e) => {
+                    self.failed = true;
+                    return Err(e);
+                }
+            }
+        }
+    }
+}
+
 /// Lazy per-block SST range (RFC-0033 P0.3). Stops when the merge stops pulling.
 ///
 /// Holds an `Arc` of the cached block — does not clone the whole block per scan.
@@ -1401,21 +1477,51 @@ pub fn write_sst_entries_on(
     path: impl AsRef<Path>,
     entries: &[(InternalKey, Bytes)],
 ) -> Result<SstTable> {
-    let path = path.as_ref();
     let mut sorted: Vec<(InternalKey, Bytes)> = entries.to_vec();
     sorted.sort_by(|a, b| a.0.cmp(&b.0));
+    let n = sorted.len();
+    write_sst_sorted_on(env, path, sorted, n)
+}
 
-    let mut max_sequence = 0u64;
-    for (ikey, _) in &sorted {
-        max_sequence = max_sequence.max(ikey.sequence);
-    }
+/// Write an **already InternalKey-sorted** stream (RFC-0037). One entry in
+/// flight; bloom sized from `bloom_hint`. Does not clone the input set.
+///
+/// # Errors
+/// I/O, encode, or a corrupt/oversized field.
+pub fn write_sst_sorted_on(
+    env: &impl Env,
+    path: impl AsRef<Path>,
+    entries: impl IntoIterator<Item = (InternalKey, Bytes)>,
+    bloom_hint: usize,
+) -> Result<SstTable> {
+    write_sst_try_sorted_on(env, path, entries.into_iter().map(Ok), bloom_hint)
+}
 
-    let bloom = rebuild_bloom(&sorted);
+/// Like [`write_sst_sorted_on`] but the stream may fail mid-file (k-way decode).
+///
+/// # Errors
+/// Source error, I/O, encode, or a corrupt/oversized field.
+pub fn write_sst_try_sorted_on(
+    env: &impl Env,
+    path: impl AsRef<Path>,
+    entries: impl IntoIterator<Item = Result<(InternalKey, Bytes)>>,
+    bloom_hint: usize,
+) -> Result<SstTable> {
+    let path = path.as_ref();
+    let mut bloom = if bloom_hint == 0 {
+        BloomFilter::always_true()
+    } else {
+        BloomFilter::with_capacity(bloom_hint, DEFAULT_BITS_PER_KEY)
+    };
 
     let mut data = Vec::new();
     let mut index: Vec<BlockHandle> = Vec::new();
     let mut block_buf = Vec::new();
     let mut block_first_user: Option<Bytes> = None;
+    let mut block_last_user: Option<Bytes> = None;
+    let mut max_sequence = 0u64;
+    let mut n_entries = 0usize;
+    let mut last_bloom: Option<Bytes> = None;
 
     let flush_block = |data: &mut Vec<u8>,
                        block_buf: &mut Vec<u8>,
@@ -1442,16 +1548,17 @@ pub fn write_sst_entries_on(
         Ok(())
     };
 
-    // NEVER split a user key across blocks: the spill condition requires
-    // `!same_user`, so a key's versions (however large) stay in one block.
-    // Load-bearing for `blocks_overlapping_range` — it treats
-    // `index[i+1].first_user_key` as an exclusive bound on block i's user keys,
-    // which only holds when all versions of a key live in a single block.
-    // `point_in_blocks` still loads the previous block + equal-first run
-    // (F29, older files); pinned by `writer_never_splits_user_key_across_blocks`.
-    let mut block_last_user: Option<Bytes> = None;
-    for (ikey, value) in &sorted {
-        let enc = encode_entry(ikey, value)?;
+    // NEVER split a user key across blocks (same contract as write_sst_entries_on).
+    for item in entries {
+        let (ikey, value) = item?;
+        max_sequence = max_sequence.max(ikey.sequence);
+        n_entries = n_entries.saturating_add(1);
+        let uk = ikey.user_key.as_ref();
+        if last_bloom.as_ref().is_none_or(|p| p.as_ref() != uk) {
+            bloom.insert(uk);
+            last_bloom = Some(ikey.user_key.clone());
+        }
+        let enc = encode_entry(&ikey, &value)?;
         let same_user = block_last_user
             .as_ref()
             .is_some_and(|u| u.as_ref() == ikey.user_key.as_ref());
@@ -1470,8 +1577,8 @@ pub fn write_sst_entries_on(
     let mut body = Vec::new();
     body.extend_from_slice(SST_MAGIC);
     body.extend_from_slice(&SST_VERSION.to_le_bytes());
-    let n = u64::try_from(sorted.len())
-        .map_err(|_| CoreError::Internal("too many SST entries".into()))?;
+    let n =
+        u64::try_from(n_entries).map_err(|_| CoreError::Internal("too many SST entries".into()))?;
     body.extend_from_slice(&n.to_le_bytes());
     body.extend_from_slice(&max_sequence.to_le_bytes());
     let num_blocks = u32::try_from(index.len())
@@ -1596,7 +1703,30 @@ mod tests {
         assert_eq!(table.get(b"a", 1), Lookup::Found(Bytes::from_static(b"va")));
         assert!(!table.key_may_match(b"zzz-absent-key-xxxxxxxx"));
 
+        let streamed: Vec<_> = {
+            let mut s = table.iter_internal_streaming();
+            let mut out = Vec::new();
+            while let Some(e) = s.next_entry().unwrap() {
+                out.push(e);
+            }
+            out
+        };
+        assert_eq!(streamed, table.entries_cloned());
+        // Streaming must not fill the materialize cache.
+        drop(streamed);
+        // Re-open so the cache from entries_cloned() above is gone.
         let reopened = SstTable::open(&path).unwrap();
+        assert!(reopened.entries.lock().is_none());
+        let mut s = reopened.iter_internal_streaming();
+        let mut n = 0usize;
+        while s.next_entry().unwrap().is_some() {
+            n += 1;
+        }
+        assert_eq!(n, 3);
+        assert!(
+            reopened.entries.lock().is_none(),
+            "block-at-a-time compact must not materialize the SST"
+        );
         assert_eq!(
             reopened.get(b"b", 10),
             Lookup::Found(Bytes::from_static(b"vb"))

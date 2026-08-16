@@ -11,6 +11,7 @@ use std::ops::Bound;
 
 use bytes::Bytes;
 
+use crate::error::Result;
 use crate::key::{InternalKey, SequenceNumber, ValueType};
 
 /// One user-visible key/value after MVCC filtering.
@@ -563,6 +564,100 @@ fn gc_snapshot_safe(
     out
 }
 
+/// Head of one sorted internal stream (min-heap via reversed [`Ord`]).
+struct MergeHead {
+    key: InternalKey,
+    value: Bytes,
+    src: usize,
+}
+
+impl PartialEq for MergeHead {
+    fn eq(&self, other: &Self) -> bool {
+        self.key == other.key && self.src == other.src
+    }
+}
+impl Eq for MergeHead {}
+impl PartialOrd for MergeHead {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+impl Ord for MergeHead {
+    fn cmp(&self, other: &Self) -> Ordering {
+        other
+            .key
+            .cmp(&self.key)
+            .then_with(|| other.src.cmp(&self.src))
+    }
+}
+
+/// K-way merge of InternalKey-sorted streams (RFC-0037). Dedups identical keys.
+pub struct KwayInternalMerge<S> {
+    streams: Vec<S>,
+    heap: BinaryHeap<MergeHead>,
+    last: Option<InternalKey>,
+}
+
+/// Pull the next entry from a compact source.
+pub trait CompactSource {
+    /// Next internal pair.
+    ///
+    /// # Errors
+    /// Source decode / I/O.
+    fn next_entry(&mut self) -> Result<Option<(InternalKey, Bytes)>>;
+}
+
+impl CompactSource for std::vec::IntoIter<(InternalKey, Bytes)> {
+    fn next_entry(&mut self) -> Result<Option<(InternalKey, Bytes)>> {
+        Ok(Iterator::next(self))
+    }
+}
+
+impl<S: CompactSource> KwayInternalMerge<S> {
+    /// Seed the heap from each stream's first entry.
+    ///
+    /// # Errors
+    /// A source failed to decode its first block.
+    pub fn from_streams(mut streams: Vec<S>) -> Result<Self> {
+        let mut heap = BinaryHeap::new();
+        for src in 0..streams.len() {
+            if let Some((key, value)) = streams[src].next_entry()? {
+                heap.push(MergeHead { key, value, src });
+            }
+        }
+        Ok(Self {
+            streams,
+            heap,
+            last: None,
+        })
+    }
+
+    /// Next merged pair, skipping duplicate [`InternalKey`]s.
+    ///
+    /// # Errors
+    /// A source failed to decode.
+    pub fn next_entry(&mut self) -> Result<Option<(InternalKey, Bytes)>> {
+        loop {
+            let Some(head) = self.heap.pop() else {
+                return Ok(None);
+            };
+            match self.streams[head.src].next_entry()? {
+                Some((key, value)) => self.heap.push(MergeHead {
+                    key,
+                    value,
+                    src: head.src,
+                }),
+                None => {}
+            }
+            if self.last.as_ref() == Some(&head.key) {
+                continue;
+            }
+            self.last = Some(head.key.clone());
+            return Ok(Some((head.key, head.value)));
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -743,5 +838,40 @@ mod tests {
             StreamingVisibleIter::new(vec![s1, s2], 10, Bound::Unbounded, Bound::Unbounded, None)
                 .collect();
         assert_eq!(stream, batch);
+    }
+
+    #[test]
+    fn kway_matches_gc_concat_default() {
+        let s1 = vec![
+            (ik(b"a", 2, ValueType::Value), Bytes::from_static(b"a2")),
+            (ik(b"b", 1, ValueType::Value), Bytes::from_static(b"b1")),
+        ];
+        let s2 = vec![
+            (ik(b"a", 2, ValueType::Value), Bytes::from_static(b"a2")),
+            (ik(b"c", 1, ValueType::Value), Bytes::from_static(b"c1")),
+        ];
+        let s3 = vec![
+            (ik(b"a", 1, ValueType::Value), Bytes::from_static(b"a1")),
+            (ik(b"b", 3, ValueType::Deletion), Bytes::new()),
+            (
+                ik(b"x", 4, ValueType::RangeDeletion),
+                Bytes::from_static(b"z"),
+            ),
+        ];
+        let concat: Vec<_> = s1
+            .iter()
+            .chain(s2.iter())
+            .chain(s3.iter())
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+        let expected = gc_compact_entries(concat, CompactGcOptions::default());
+        let mut merge =
+            KwayInternalMerge::from_streams(vec![s1.into_iter(), s2.into_iter(), s3.into_iter()])
+                .unwrap();
+        let mut got = Vec::new();
+        while let Some(pair) = merge.next_entry().unwrap() {
+            got.push(pair);
+        }
+        assert_eq!(got, expected);
     }
 }

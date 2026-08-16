@@ -70,7 +70,7 @@ use crate::lock::DirLock;
 use crate::manifest::{self, VersionSet};
 use crate::memtable::{Lookup, MemTable};
 use crate::merge::{range_deleted, StreamingVisibleIter, VisibleKv};
-use crate::sst::{write_sst_entries_on, write_sst_on, SstTable};
+use crate::sst::{write_sst_entries_on, write_sst_on, write_sst_try_sorted_on, SstTable};
 use crate::tx::Transaction;
 use crate::vlog::{self, ValueLog, VlogRewriteStats, VLOG_FILE_NAME};
 use crate::wal::Wal;
@@ -2687,16 +2687,33 @@ impl<E: Env> Db<E> {
         to_level: u32,
         options: CompactOptions,
     ) -> Result<()> {
-        let mut merged: Vec<(InternalKey, Bytes)> = Vec::new();
-        for &i in &input_idxs {
-            merged.extend(self.ssts[i].entries_cloned());
-        }
-        let merged = crate::merge::gc_compact_entries(merged, options.gc);
-
         let num = self.next_file_num;
         let final_path = self.dir.join(format!("{num:06}.sst"));
         let tmp_path = self.dir.join(format!("{num:06}.sst.tmp"));
-        let new_table = write_sst_entries_on(&self.env, &tmp_path, &merged)?;
+        // Default compact (no GC) streams one block per input — no 16 MiB
+        // `entries_cloned` + BTreeMap. GC still materializes (needs all
+        // versions of a user key before it can drop).
+        let new_table = if options.gc.requests_gc() {
+            let mut merged: Vec<(InternalKey, Bytes)> = Vec::new();
+            for &i in &input_idxs {
+                merged.extend(self.ssts[i].entries_cloned());
+            }
+            let merged = crate::merge::gc_compact_entries(merged, options.gc);
+            write_sst_entries_on(&self.env, &tmp_path, &merged)?
+        } else {
+            let bloom_hint: usize = input_idxs.iter().map(|&i| self.ssts[i].len()).sum();
+            let streams: Vec<_> = input_idxs
+                .iter()
+                .map(|&i| self.ssts[i].iter_internal_streaming())
+                .collect();
+            let mut merge = crate::merge::KwayInternalMerge::from_streams(streams)?;
+            write_sst_try_sorted_on(
+                &self.env,
+                &tmp_path,
+                std::iter::from_fn(|| merge.next_entry().transpose()),
+                bloom_hint,
+            )?
+        };
         drop(new_table);
         self.env.rename(&tmp_path, &final_path)?;
         self.sync_dir_if_required(&self.dir)?;
@@ -5830,6 +5847,58 @@ mod tests {
         let db = Db::open(&dir).unwrap();
         assert_eq!(db.get(&[b'a', 0]).as_deref(), Some([b'1', 0].as_slice()));
         assert_eq!(db.get(&[b'b', 0]).as_deref(), Some([b'2', 0].as_slice()));
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Default L0 compact (no GC) keeps every version, including tombstones.
+    /// Streaming k-way must match `gc_compact_entries` on the concatenated inputs.
+    #[test]
+    fn compact_l0_streaming_matches_concat_and_keeps_tombstones() {
+        let dir = temp_dir();
+        let mut db = Db::open(&dir).unwrap();
+        db.put(b"a", b"a1").unwrap();
+        db.put(b"b", b"b1").unwrap();
+        db.put(b"c", b"c1").unwrap();
+        db.flush().unwrap();
+        db.put(b"b", b"b2").unwrap();
+        db.delete(b"a").unwrap();
+        db.put(b"d", b"d1").unwrap();
+        db.flush().unwrap();
+        assert_eq!(db.level_file_count(0), 2);
+        assert!(
+            db.ssts
+                .iter()
+                .zip(db.sst_levels.iter())
+                .filter(|(_, &lvl)| lvl == 0)
+                .all(|(t, _)| t.is_lazy() && !t.materialize_cache_filled()),
+            "L0 inputs must stay unmaterialized before compact"
+        );
+
+        let mut concat = Vec::new();
+        for (t, &lvl) in db.ssts.iter().zip(db.sst_levels.iter()) {
+            if lvl == 0 {
+                concat.extend(t.entries_cloned());
+            }
+        }
+        let expected =
+            crate::merge::gc_compact_entries(concat, crate::merge::CompactGcOptions::default());
+
+        db.compact_l0_into_l1(CompactOptions::default()).unwrap();
+        assert_eq!(db.level_file_count(0), 0);
+        assert_eq!(db.level_file_count(1), 1);
+        let l1 = db
+            .ssts
+            .iter()
+            .zip(db.sst_levels.iter())
+            .find(|(_, &lvl)| lvl == 1)
+            .map(|(t, _)| t)
+            .expect("L1");
+        assert_eq!(l1.entries_cloned(), expected);
+        assert_eq!(db.get(b"a"), None);
+        assert_eq!(db.get(b"b").as_deref(), Some(b"b2".as_slice()));
+        assert_eq!(db.get(b"c").as_deref(), Some(b"c1".as_slice()));
+        assert_eq!(db.get(b"d").as_deref(), Some(b"d1".as_slice()));
         db.close().unwrap();
         let _ = fs::remove_dir_all(&dir);
     }
