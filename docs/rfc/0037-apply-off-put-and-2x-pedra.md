@@ -102,19 +102,19 @@ Herdadas de RFC-0036 / 0031:
 
 - [x] **P0.1** RFC + Status vivo (este doc) — status: `done`
 - [x] **P0.2** `compact_l0_into_l1` em streaming: zero `entries_cloned` do SST inteiro; teste de que o conjunto visível = merge actual; adversarial sem editar asserção — status: `done`
-- [x] **P0.3** Remesura `tikv_ycsb_parity_v0.sh` FULL_SYNC=0; `deps_apply_batch` ≥ 0.5 vs Rocks fd **limpo** da run — status: `done` (p21d: 3 035 / 5 620 = 0.54). 11/11 **não** estável: scan 0.45–0.54 (mais L0).
+- [x] **P0.3** Remesura `tikv_ycsb_parity_v0.sh` FULL_SYNC=0; `deps_apply_batch` ≥ 0.5 vs Rocks fd **limpo** da run — status: `done` (p21d: 3 035 / 5 620 = 0.54). 11/11 **não** estava estável (scan 0.45–0.54); fechado no P1.3 (p13g: scan 0.61, 11/11, min 0.578).
 
 ### P1 — off-lock + 2× Pedra nas leituras
 
-- [ ] **P1.1** Split de tempo no apply (flush vs `entries_cloned` vs encode SST vs MANIFEST) e no C/e/mvcc/scan (mutex / encode / ficheiros) — status: `todo`
+- [x] **P1.1** Split de tempo no apply (flush vs `entries_cloned` vs encode SST vs MANIFEST) e no C/e/mvcc/scan (mutex / encode / ficheiros) — status: `done` (via `sample` em `examples/scan_profile.rs`: scan = 40–50% maquinaria do `count_cache` (LRU O(capacity) por insert + malloc por op) + clones por entrada no merge; apply não re-medido — p21d oficial)
 - [x] **P1.2** Compact prepare/write/install off-lock em `ConcurrentDb` (mesmo molde do flush); `Db` single-thread continua sem thread — status: `done`
-- [ ] **P1.3** O gargalo #1 do P1.1 nas **leituras** (C / e / mvcc / scan) até 2× o qps Pedra 0036; remesura — status: `todo`
+- [x] **P1.3** O gargalo #1 do P1.1 nas **leituras** (C / e / mvcc / scan) até 2× o qps Pedra 0036; remesura — status: `done` (deps_scan 131.9k → 177–194k; p13g oficial 0.61 vs Rocks 290k **limpo**; 3 mudanças: fim do tail-walk do `SstRangeIter`, `AnswerCache` FIFO O(1) + FxHash + chave stack, merge de count por referência)
 
 ### P2 — host worker + escritas 2× Pedra
 
 - [x] **P2.1** Se P0.3 apply ainda < 0.5: fila de compact drenada por thread no **compat/store** (não no core); fence + L0 visível até install — status: `done`
 - [ ] **P2.2** 2× Pedra em A/F/overwrite: harness multi-cliente + `ConcurrentDb` group commit; **não** 2× A single-client — status: `todo`
-- [ ] **P2.3** Gate `ROCKS_PARITY_RATIO_FLOOR=0.5` nas 11 vs fd; tabela 2× Pedra nos 10 — status: `todo`
+- [ ] **P2.3** Gate `ROCKS_PARITY_RATIO_FLOOR=0.5` nas 11 vs fd; tabela 2× Pedra nos 10 — status: `partial` (gate verde 11/11 em p13g, min 0.578; falta a tabela 2× Pedra vs 0036)
 
 ## Status (living — update with every PR)
 
@@ -123,9 +123,9 @@ Herdadas de RFC-0036 / 0031:
 | P0.1 | p0 | RFC + investigação | done | este doc | 2026-08-16 |
 | P0.2 | p0 | L0 compact streaming (sem clone 16 MiB) | done | `rewrite_ssts` k-way + `write_sst_try_sorted_on` | 2026-08-16 |
 | P0.3 | p0 | apply ≥ 0.5 vs Rocks fd (11/11) | done | apply 0.54 vs Rocks 5 620; scan às vezes 0.45 | 2026-08-16 |
-| P1.1 | p1 | split apply + leituras | todo | — | 2026-08-16 |
+| P1.1 | p1 | split apply + leituras | done | `sample` + `examples/scan_profile.rs` | 2026-08-16 |
 | P1.2 | p1 | compact off-lock no ConcurrentDb | done | `PreparedL0Compact` + `compact_l0_off_lock` | 2026-08-16 |
-| P1.3 | p1 | 2× Pedra no gargalo #1 de leitura | todo | — | 2026-08-16 |
+| P1.3 | p1 | 2× Pedra no gargalo #1 de leitura | done | `SstRangeIter` early-exit + `AnswerCache` O(1) + count por referência | 2026-08-16 |
 | P2.1 | p2 | worker host se P0 não chegar | done | `rocksdb-compat` thread `pedra-compat-compact` | 2026-08-16 |
 | P2.2 | p2 | 2× Pedra A/F com N clientes | todo | — | 2026-08-16 |
 | P2.3 | p2 | gate 0.5 + tabela 2× Pedra | todo | — | 2026-08-16 |

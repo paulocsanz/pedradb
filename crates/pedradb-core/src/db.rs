@@ -1877,14 +1877,14 @@ impl<E: Env> Db<E> {
         let latest = snapshot == self.last_sequence();
         let ck = count_cache_key(start, end, limit);
         if latest {
-            if let Some(n) = self.count_cache.get(&ck) {
+            if let Some(n) = self.count_cache.get(ck.as_slice()) {
                 self.scan_ops.fetch_add(1, Ordering::Relaxed);
                 return Ok(n);
             }
         }
-        let n = self.scan_at_raw(snapshot, start, end, limit, false).count();
+        let n = self.count_visible(snapshot, start, end, limit);
         if latest {
-            self.count_cache.insert(&ck, n);
+            self.count_cache.insert(ck.as_slice(), n);
         }
         Ok(n)
     }
@@ -1893,6 +1893,87 @@ impl<E: Env> Db<E> {
         self.point_cache.clear();
         self.last_prefix_cache.clear();
         self.count_cache.clear();
+    }
+
+    /// Distinct visible user keys in `[start, end)` at `snapshot`, capped at
+    /// `limit` (RFC-0037 P1.3). Borrowed-cursor merge — same visibility as
+    /// [`Self::scan_at_raw`] without materializing owned key clones per
+    /// entry (count windows walk every MVCC version).
+    fn count_visible(
+        &self,
+        snapshot: SequenceNumber,
+        start: Bound<&[u8]>,
+        end: Bound<&[u8]>,
+        limit: Option<usize>,
+    ) -> usize {
+        if snapshot == 0 {
+            return 0;
+        }
+        self.scan_ops.fetch_add(1, Ordering::Relaxed);
+        // Range tombstones first (G2), exactly like `scan_at_raw`.
+        let mut range_dels = Vec::new();
+        let mut cursors: Vec<CountCursor<'_>> = Vec::with_capacity(3 + self.ssts.len());
+        for table in self.mem_layers() {
+            table.collect_range_tombstones(snapshot, &mut range_dels);
+            cursors.push(CountCursor::Mem(MemCountCursor::new(
+                table, start, end, snapshot,
+            )));
+        }
+        for table in &self.ssts {
+            table.collect_range_tombstones(snapshot, &mut range_dels);
+            if !table.overlaps_user_range(start, end) {
+                continue;
+            }
+            self.scan_sst_probed.fetch_add(1, Ordering::Relaxed);
+            let cache = &self.block_cache;
+            let path = table.path();
+            let load: Box<
+                dyn FnMut(usize) -> Option<std::sync::Arc<Vec<(InternalKey, Bytes)>>> + '_,
+            > =
+                Box::new(move |bi| {
+                    Some(cache.get_or_insert_with(path, bi, || {
+                        table.decode_block(bi).unwrap_or_default()
+                    }))
+                });
+            cursors.push(CountCursor::Sst(SstCountCursor::new(
+                table, start, end, snapshot, load,
+            )));
+        }
+        let cap = limit.unwrap_or(usize::MAX);
+        let mut count = 0usize;
+        while count < cap {
+            // Min head across layers by InternalKey order (user asc, seq
+            // desc, kind desc) — the global newest version of that user.
+            let mut best: Option<usize> = None;
+            for (i, c) in cursors.iter().enumerate() {
+                let Some(h) = c.head() else { continue };
+                match best {
+                    None => best = Some(i),
+                    Some(b) => {
+                        if internal_less(h, cursors[b].head().expect("best head")) {
+                            best = Some(i);
+                        }
+                    }
+                }
+            }
+            let Some(bi) = best else { break };
+            let head = cursors[bi].head().expect("best head");
+            let user = head.user_key.clone();
+            let kind = head.kind;
+            let seq = head.sequence;
+            let visible = kind == ValueType::Value
+                && !crate::merge::range_deleted(user.as_ref(), seq, &range_dels);
+            if visible {
+                count += 1;
+            }
+            // Step every layer past this user (dedup across versions).
+            for c in cursors.iter_mut() {
+                if c.head().is_some_and(|h| h.user_key == user) {
+                    c.step_user(user.as_ref());
+                }
+            }
+        }
+        count
     }
 
     fn scan_at_raw(
@@ -4611,25 +4692,308 @@ pub fn copy_db_directory(
     Ok(())
 }
 
-fn count_cache_key(start: Bound<&[u8]>, end: Bound<&[u8]>, limit: Option<usize>) -> Vec<u8> {
-    let mut k = Vec::with_capacity(24);
-    let push = |k: &mut Vec<u8>, b: Bound<&[u8]>| match b {
-        Bound::Unbounded => k.push(0),
-        Bound::Included(s) => {
-            k.push(1);
-            k.extend_from_slice(&(s.len() as u32).to_le_bytes());
-            k.extend_from_slice(s);
+/// Count-cache key buffer: inline for the small windows real queries use,
+/// heap fallback for pathological bounds. Avoids a malloc per scan op.
+enum CountKeyBuf {
+    Inline { buf: [u8; 64], len: usize },
+    Heap(Vec<u8>),
+}
+
+impl CountKeyBuf {
+    fn as_slice(&self) -> &[u8] {
+        match self {
+            Self::Inline { buf, len } => &buf[..*len],
+            Self::Heap(v) => v,
         }
-        Bound::Excluded(s) => {
-            k.push(2);
-            k.extend_from_slice(&(s.len() as u32).to_le_bytes());
-            k.extend_from_slice(s);
+    }
+}
+
+impl AsRef<[u8]> for CountKeyBuf {
+    fn as_ref(&self) -> &[u8] {
+        self.as_slice()
+    }
+}
+
+/// InternalKey order (user asc, seq desc, kind desc) as a bare predicate.
+fn internal_less(a: &InternalKey, b: &InternalKey) -> bool {
+    a < b
+}
+
+/// One layer's borrowed stream for [`Db::count_visible`] (RFC-0037 P1.3).
+///
+/// `head()` is the next yieldable entry after filtering (kind, snapshot,
+/// window); `step_user` advances past every version of one user key.
+enum CountCursor<'a> {
+    Mem(MemCountCursor<'a>),
+    Sst(SstCountCursor<'a>),
+}
+
+impl CountCursor<'_> {
+    fn head(&self) -> Option<&InternalKey> {
+        match self {
+            Self::Mem(c) => c.head(),
+            Self::Sst(c) => c.head(),
+        }
+    }
+
+    fn step_user(&mut self, user: &[u8]) {
+        match self {
+            Self::Mem(c) => c.step_user(user),
+            Self::Sst(c) => c.step_user(user),
+        }
+    }
+}
+
+/// Memtable cursor over the bounded user window (versions newest-first).
+struct MemCountCursor<'a> {
+    it: Box<dyn Iterator<Item = (&'a InternalKey, &'a Bytes)> + 'a>,
+    head: Option<&'a InternalKey>,
+    snapshot: SequenceNumber,
+}
+
+impl<'a> MemCountCursor<'a> {
+    fn new(
+        table: &'a MemTable,
+        start: Bound<&'a [u8]>,
+        end: Bound<&'a [u8]>,
+        snapshot: SequenceNumber,
+    ) -> Self {
+        // Same two branches as the owned memtable stream: tombstone-bearing
+        // tables iterate everything (tombstone starts may precede the
+        // window), bounded range otherwise.
+        let it: Box<dyn Iterator<Item = (&'a InternalKey, &'a Bytes)> + 'a> =
+            if table.has_range_tombstones() {
+                Box::new(
+                    table
+                        .iter_internal()
+                        .filter(move |(k, _)| {
+                            crate::merge::user_key_in_range(k.user_key.as_ref(), start, end)
+                        })
+                        .map(|(k, v)| (k, v)),
+                )
+            } else {
+                Box::new(table.iter_internal_range(start, end))
+            };
+        let mut c = Self {
+            it,
+            head: None,
+            snapshot,
+        };
+        c.settle();
+        c
+    }
+
+    fn settle(&mut self) {
+        self.head = self
+            .it
+            .by_ref()
+            .find(|(k, _)| k.kind != ValueType::RangeDeletion && k.sequence <= self.snapshot)
+            .map(|(k, _)| k);
+    }
+
+    fn head(&self) -> Option<&InternalKey> {
+        self.head
+    }
+
+    fn step_user(&mut self, user: &[u8]) {
+        while self.head.is_some_and(|h| h.user_key.as_ref() == user) {
+            self.head = None;
+            self.settle();
+        }
+    }
+}
+
+/// SST cursor: walks only overlapping blocks (block cache) with the same
+/// filtering as `SstRangeIter`, minus the owned-key clone per yield.
+struct SstCountCursor<'a> {
+    current: Option<std::sync::Arc<Vec<(InternalKey, Bytes)>>>,
+    idx: usize,
+    blocks: std::vec::IntoIter<usize>,
+    load: Box<dyn FnMut(usize) -> Option<std::sync::Arc<Vec<(InternalKey, Bytes)>>> + 'a>,
+    /// `(bytes, inclusive)` bound pairs resolved once.
+    start: Option<(Bytes, bool)>,
+    end: Option<(Bytes, bool)>,
+    snapshot: SequenceNumber,
+    exhausted: bool,
+}
+
+impl<'a> SstCountCursor<'a> {
+    fn new(
+        table: &'a crate::sst::SstTable,
+        start: Bound<&[u8]>,
+        end: Bound<&[u8]>,
+        snapshot: SequenceNumber,
+        load: Box<dyn FnMut(usize) -> Option<std::sync::Arc<Vec<(InternalKey, Bytes)>>> + 'a>,
+    ) -> Self {
+        let start = match start {
+            Bound::Unbounded => None,
+            Bound::Included(s) => Some((Bytes::copy_from_slice(s), true)),
+            Bound::Excluded(s) => Some((Bytes::copy_from_slice(s), false)),
+        };
+        let end = match end {
+            Bound::Unbounded => None,
+            Bound::Included(e) => Some((Bytes::copy_from_slice(e), true)),
+            Bound::Excluded(e) => Some((Bytes::copy_from_slice(e), false)),
+        };
+        let mut c = Self {
+            current: None,
+            idx: 0,
+            blocks: if table.is_lazy() {
+                table
+                    .blocks_overlapping_range(start_bound_ref(&start), end_bound_ref(&end))
+                    .into_iter()
+            } else {
+                Vec::new().into_iter()
+            },
+            load,
+            start,
+            end,
+            snapshot,
+            exhausted: false,
+        };
+        if !table.is_lazy() {
+            // Eager tables: one synthetic "block" with the in-range leftover.
+            let leftover: Vec<_> = table
+                .entries_cloned()
+                .into_iter()
+                .filter(|(k, _)| {
+                    k.kind != ValueType::RangeDeletion
+                        && crate::merge::user_key_in_range(
+                            k.user_key.as_ref(),
+                            start_bound_ref(&c.start),
+                            end_bound_ref(&c.end),
+                        )
+                })
+                .collect();
+            c.current = Some(std::sync::Arc::new(leftover));
+            c.idx = 0;
+        }
+        c.settle();
+        c
+    }
+
+    fn settle(&mut self) {
+        loop {
+            if let Some(ref block) = self.current {
+                while self.idx < block.len() {
+                    let k = &block[self.idx].0;
+                    let uk = k.user_key.as_ref();
+                    let past_end = match &self.end {
+                        Some((e, true)) => uk > e.as_ref(),
+                        Some((e, false)) => uk >= e.as_ref(),
+                        None => false,
+                    };
+                    if past_end {
+                        self.exhausted = true;
+                        self.current = None;
+                        self.blocks = Vec::new().into_iter();
+                        return;
+                    }
+                    let before_start = match &self.start {
+                        Some((s, true)) => uk < s.as_ref(),
+                        Some((s, false)) => uk <= s.as_ref(),
+                        None => false,
+                    };
+                    let skip = before_start
+                        || k.kind == ValueType::RangeDeletion
+                        || k.sequence > self.snapshot;
+                    if skip {
+                        self.idx += 1;
+                        continue;
+                    }
+                    return; // head is block[self.idx]
+                }
+            }
+            let Some(bi) = self.blocks.next() else {
+                self.exhausted = true;
+                return;
+            };
+            self.current = (self.load)(bi);
+            self.idx = match (&self.current, &self.start) {
+                (Some(block), Some((s, true))) => {
+                    block.partition_point(|(k, _)| k.user_key.as_ref() < s.as_ref())
+                }
+                (Some(block), Some((s, false))) => {
+                    block.partition_point(|(k, _)| k.user_key.as_ref() <= s.as_ref())
+                }
+                _ => 0,
+            };
+        }
+    }
+
+    fn head(&self) -> Option<&InternalKey> {
+        if self.exhausted {
+            return None;
+        }
+        self.current
+            .as_ref()
+            .and_then(|b| b.get(self.idx))
+            .map(|(k, _)| k)
+    }
+
+    fn step_user(&mut self, user: &[u8]) {
+        while self.head().is_some_and(|h| h.user_key.as_ref() == user) {
+            self.idx += 1;
+            self.settle();
+        }
+    }
+}
+
+/// Rebuild `Bound<&[u8]>` views of the resolved start/end pairs.
+fn start_bound_ref(b: &Option<(Bytes, bool)>) -> Bound<&[u8]> {
+    match b {
+        None => Bound::Unbounded,
+        Some((s, true)) => Bound::Included(s.as_ref()),
+        Some((s, false)) => Bound::Excluded(s.as_ref()),
+    }
+}
+
+fn end_bound_ref(b: &Option<(Bytes, bool)>) -> Bound<&[u8]> {
+    match b {
+        None => Bound::Unbounded,
+        Some((e, true)) => Bound::Included(e.as_ref()),
+        Some((e, false)) => Bound::Excluded(e.as_ref()),
+    }
+}
+
+fn count_cache_key(start: Bound<&[u8]>, end: Bound<&[u8]>, limit: Option<usize>) -> CountKeyBuf {
+    let mut inline = [0u8; 64];
+    let mut heap: Option<Vec<u8>> = None;
+    let mut len = 0usize;
+    let mut push = |bytes: &[u8]| {
+        if let Some(h) = heap.as_mut() {
+            h.extend_from_slice(bytes);
+        } else if len + bytes.len() <= inline.len() {
+            inline[len..len + bytes.len()].copy_from_slice(bytes);
+            len += bytes.len();
+        } else {
+            let mut h = Vec::with_capacity(64);
+            h.extend_from_slice(&inline[..len]);
+            h.extend_from_slice(bytes);
+            heap = Some(h);
         }
     };
-    push(&mut k, start);
-    push(&mut k, end);
-    k.extend_from_slice(&limit.map(|n| n as u64).unwrap_or(u64::MAX).to_le_bytes());
-    k
+    let push_bound = |push: &mut dyn FnMut(&[u8]), b: Bound<&[u8]>| match b {
+        Bound::Unbounded => push(&[0]),
+        Bound::Included(s) => {
+            push(&[1]);
+            push(&(s.len() as u32).to_le_bytes());
+            push(s);
+        }
+        Bound::Excluded(s) => {
+            push(&[2]);
+            push(&(s.len() as u32).to_le_bytes());
+            push(s);
+        }
+    };
+    let mut p = |b: &[u8]| push(b);
+    push_bound(&mut p, start);
+    push_bound(&mut p, end);
+    p(&limit.map(|n| n as u64).unwrap_or(u64::MAX).to_le_bytes());
+    match heap {
+        Some(h) => CountKeyBuf::Heap(h),
+        None => CountKeyBuf::Inline { buf: inline, len },
+    }
 }
 
 fn apply_record(mem: &mut MemTable, rec: &WriteRecord) {
@@ -8919,6 +9283,74 @@ mod tests {
             )
             .unwrap();
         assert_eq!(n2, 3);
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0037 P1.3: the borrowed count merge must agree with the streaming
+    /// path on every window over a state with versions, deletes, range
+    /// tombstones, and data split across memtables and SSTs.
+    #[test]
+    fn count_borrowed_matches_streaming_all_windows() {
+        let dir = temp_dir();
+        let mut db = Db::open(&dir).unwrap();
+        // Deterministic schedule: puts (multi-version), point deletes, a
+        // range delete, then flushes to split layers, then more puts.
+        let mut x = 0x1357_9BDF_2468_ACE0_u64;
+        let mut step = || {
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            x
+        };
+        let key = |u: u8, ts: u64| {
+            let mut k = vec![b'k', b'/', u];
+            k.extend_from_slice(&ts.to_be_bytes());
+            k
+        };
+        for u in 0u8..32 {
+            for ts in 1..=4u64 {
+                db.put(&key(u, ts), b"v").unwrap();
+            }
+        }
+        for u in [3u8, 9, 17] {
+            db.delete(&key(u, 5)).unwrap();
+        }
+        db.flush().unwrap();
+        db.delete_range(&key(20, 0), &key(24, 0)).unwrap();
+        db.flush().unwrap();
+        for u in 32u8..48 {
+            db.put(&key(u, 1), b"v").unwrap();
+        }
+        // Assert: every [a, b) window × limit must match the streaming count.
+        for a in 0u8..50 {
+            for b in a..=50u8 {
+                for limit in [None, Some(1), Some(5), Some(1000)] {
+                    let start = key(a.min(49), 0);
+                    let end = key(b.min(49), 0);
+                    let snap = db.last_sequence();
+                    let fast = db.count_visible(
+                        snap,
+                        Bound::Included(start.as_slice()),
+                        Bound::Excluded(end.as_slice()),
+                        limit,
+                    );
+                    let slow = db
+                        .scan_at_raw(
+                            snap,
+                            Bound::Included(start.as_slice()),
+                            Bound::Excluded(end.as_slice()),
+                            limit,
+                            false,
+                        )
+                        .count();
+                    assert_eq!(
+                        fast, slow,
+                        "window [{a},{b}) limit {limit:?}: fast={fast} slow={slow}"
+                    );
+                }
+            }
+        }
         db.close().unwrap();
         let _ = fs::remove_dir_all(&dir);
     }

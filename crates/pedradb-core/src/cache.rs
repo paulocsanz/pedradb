@@ -270,17 +270,64 @@ pub struct AnswerCache<V> {
 /// Latest-snapshot point get (`None` = cached absence).
 pub type PointCache = AnswerCache<Option<Bytes>>;
 
+/// Fixed-key fast hash (fxhash-class). Cache keys are compared exactly on
+/// every hit, so a weak (non-DoS-resistant) hasher only trades speed for
+/// collisions inside the map — never correctness.
 #[derive(Debug, Default)]
-struct AnswerCacheInner<V> {
-    map: HashMap<Bytes, AnswerSlot<V>>,
-    tick: u64,
-    capacity: usize,
+pub(crate) struct FxHasher {
+    hash: u64,
 }
 
-#[derive(Debug, Clone)]
-struct AnswerSlot<V> {
-    value: V,
-    tick: u64,
+const FX_SEED: u64 = 0x517c_c1b7_2722_0a95;
+
+impl FxHasher {
+    fn combine(&mut self, word: u64) {
+        self.hash = (self.hash.rotate_left(5) ^ word).wrapping_mul(FX_SEED);
+    }
+}
+
+impl std::hash::Hasher for FxHasher {
+    fn write(&mut self, mut bytes: &[u8]) {
+        while bytes.len() >= 8 {
+            let (chunk, rest) = bytes.split_at(8);
+            self.combine(u64::from_le_bytes(chunk.try_into().unwrap()));
+            bytes = rest;
+        }
+        if bytes.len() >= 4 {
+            let (chunk, rest) = bytes.split_at(4);
+            self.combine(u32::from_le_bytes(chunk.try_into().unwrap()) as u64);
+            bytes = rest;
+        }
+        for &b in bytes {
+            self.combine(u64::from(b));
+        }
+    }
+    fn write_u8(&mut self, i: u8) {
+        self.combine(u64::from(i));
+    }
+    fn write_u32(&mut self, i: u32) {
+        self.combine(u64::from(i));
+    }
+    fn write_u64(&mut self, i: u64) {
+        self.combine(i);
+    }
+    fn write_usize(&mut self, i: usize) {
+        self.combine(i as u64);
+    }
+    fn finish(&self) -> u64 {
+        self.hash
+    }
+}
+
+type FxBuild = std::hash::BuildHasherDefault<FxHasher>;
+
+#[derive(Debug, Default)]
+struct AnswerCacheInner<V> {
+    map: std::collections::HashMap<Bytes, V, FxBuild>,
+    /// Insertion order for O(1) FIFO eviction (no full-map LRU scan per
+    /// insert — miss-heavy workloads insert on every op).
+    order: std::collections::VecDeque<Bytes>,
+    capacity: usize,
 }
 
 impl<V: Clone> AnswerCache<V> {
@@ -289,8 +336,8 @@ impl<V: Clone> AnswerCache<V> {
     pub fn new(capacity: usize) -> Self {
         Self {
             inner: Mutex::new(AnswerCacheInner {
-                map: HashMap::new(),
-                tick: 0,
+                map: std::collections::HashMap::default(),
+                order: std::collections::VecDeque::new(),
                 capacity,
             }),
         }
@@ -299,20 +346,11 @@ impl<V: Clone> AnswerCache<V> {
     /// `None` = miss.
     #[must_use]
     pub fn get(&self, key: &[u8]) -> Option<V> {
-        let mut g = self.inner.lock();
+        let g = self.inner.lock();
         if g.capacity == 0 {
             return None;
         }
-        let Some(slot) = g.map.get(key) else {
-            return None;
-        };
-        let value = slot.value.clone();
-        let tick = g.tick.saturating_add(1);
-        g.tick = tick;
-        if let Some(slot) = g.map.get_mut(key) {
-            slot.tick = tick;
-        }
-        Some(value)
+        g.map.get(key).cloned()
     }
 
     /// Store a latest-snapshot answer.
@@ -321,25 +359,27 @@ impl<V: Clone> AnswerCache<V> {
         if g.capacity == 0 {
             return;
         }
-        if g.map.len() >= g.capacity && !g.map.contains_key(key) {
-            let victim = g
-                .map
-                .iter()
-                .min_by_key(|(_, s)| s.tick)
-                .map(|(k, _)| k.clone());
-            if let Some(old) = victim {
+        if let Some(v) = g.map.get_mut(key) {
+            *v = value;
+            return;
+        }
+        if g.map.len() >= g.capacity {
+            // FIFO: drop the oldest inserted key (cloned below while `g` is
+            // still borrowed, then remove from the map).
+            if let Some(old) = g.order.pop_front() {
                 g.map.remove(&old);
             }
         }
-        let tick = g.tick.saturating_add(1);
-        g.tick = tick;
-        g.map
-            .insert(Bytes::copy_from_slice(key), AnswerSlot { value, tick });
+        let owned = Bytes::copy_from_slice(key);
+        g.order.push_back(owned.clone());
+        g.map.insert(owned, value);
     }
 
     /// Drop every entry (call after a write that can change latest visibility).
     pub fn clear(&self) {
-        self.inner.lock().map.clear();
+        let mut g = self.inner.lock();
+        g.map.clear();
+        g.order.clear();
     }
 }
 

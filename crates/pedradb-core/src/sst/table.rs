@@ -1162,7 +1162,11 @@ impl SstTable {
     /// O(log N + hits) via `partition_point` — a linear walk of the sparse
     /// index was ~µs×blocks and dominated `deps_scan` after decode went away
     /// (RFC-0035: thousands of 4 KiB blocks in one L0).
-    fn blocks_overlapping_range(&self, start: Bound<&[u8]>, end: Bound<&[u8]>) -> Vec<usize> {
+    pub(crate) fn blocks_overlapping_range(
+        &self,
+        start: Bound<&[u8]>,
+        end: Bound<&[u8]>,
+    ) -> Vec<usize> {
         if self.index.is_empty() {
             return Vec::new();
         }
@@ -1289,11 +1293,36 @@ impl Iterator for SstRangeIter<'_> {
     type Item = (InternalKey, Bytes);
 
     fn next(&mut self) -> Option<Self::Item> {
+        // Bounds hoisted out of the entry loop. Entries are sorted by user
+        // key, so the first key past `end` ends the iterator — no tail walk
+        // of a block whose remaining keys all exceed the window.
+        let start_b: Option<(&Bytes, bool)> = match &self.start {
+            Bound::Unbounded => None,
+            Bound::Included(s) => Some((s, true)),
+            Bound::Excluded(s) => Some((s, false)),
+        };
+        let end_b: Option<(&Bytes, bool)> = match &self.end {
+            Bound::Unbounded => None,
+            Bound::Included(e) => Some((e, true)),
+            Bound::Excluded(e) => Some((e, false)),
+        };
         loop {
             if let Some(ref block) = self.current {
                 while self.idx < block.len() {
                     let (k, v) = &block[self.idx];
                     self.idx += 1;
+                    let uk = k.user_key.as_ref();
+                    let past_end = match end_b {
+                        Some((e, true)) => uk > e.as_ref(),
+                        Some((e, false)) => uk >= e.as_ref(),
+                        None => false,
+                    };
+                    if past_end {
+                        // Sorted: nothing later can be in range.
+                        self.current = None;
+                        self.blocks = Vec::new().into_iter();
+                        return None;
+                    }
                     if k.kind == ValueType::RangeDeletion {
                         continue;
                     }
@@ -1303,25 +1332,21 @@ impl Iterator for SstRangeIter<'_> {
                     if self.skip_user.as_ref().is_some_and(|u| u == &k.user_key) {
                         continue;
                     }
-                    let start = match &self.start {
-                        Bound::Unbounded => Bound::Unbounded,
-                        Bound::Included(s) => Bound::Included(s.as_ref()),
-                        Bound::Excluded(s) => Bound::Excluded(s.as_ref()),
+                    let before_start = match start_b {
+                        Some((s, true)) => uk < s.as_ref(),
+                        Some((s, false)) => uk <= s.as_ref(),
+                        None => false,
                     };
-                    let end = match &self.end {
-                        Bound::Unbounded => Bound::Unbounded,
-                        Bound::Included(s) => Bound::Included(s.as_ref()),
-                        Bound::Excluded(s) => Bound::Excluded(s.as_ref()),
-                    };
-                    if user_key_in_range(k.user_key.as_ref(), start, end) {
-                        self.skip_user = Some(k.user_key.clone());
-                        let value = if self.want_values {
-                            v.clone()
-                        } else {
-                            Bytes::new()
-                        };
-                        return Some((k.clone(), value));
+                    if before_start {
+                        continue;
                     }
+                    self.skip_user = Some(k.user_key.clone());
+                    let value = if self.want_values {
+                        v.clone()
+                    } else {
+                        Bytes::new()
+                    };
+                    return Some((k.clone(), value));
                 }
             }
             let bi = self.blocks.next()?;
@@ -1665,11 +1690,15 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn temp_path() -> PathBuf {
+        // Nanos alone can collide across parallel test threads on coarse
+        // clocks; mix in a process-wide counter.
+        static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let n = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        std::env::temp_dir().join(format!("pedradb-sst-{n}.sst"))
+        let seq = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        std::env::temp_dir().join(format!("pedradb-sst-{n}-{seq}.sst"))
     }
 
     #[test]
@@ -1733,6 +1762,84 @@ mod tests {
         );
         assert!(reopened.block_for_user_key(b"b").is_some());
         assert!(reopened.has_bloom());
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// RFC-0037 P1.3: the range iterator must stop at the first key past
+    /// `end` instead of tail-walking the block — same results as full
+    /// filtering, no loads past the window's last block, fused after None.
+    #[test]
+    fn iter_user_range_stops_at_end_and_skips_tail_blocks() {
+        let payload = vec![b'x'; 256];
+        let mut entries = Vec::new();
+        for i in 0..200u32 {
+            let k = format!("k{i:03}");
+            // Two versions per user: newest (higher seq) sorts first.
+            entries.push((
+                InternalKey::new(
+                    Bytes::copy_from_slice(k.as_bytes()),
+                    u64::from(i) * 10 + 2,
+                    ValueType::Value,
+                ),
+                Bytes::copy_from_slice(b"new"),
+            ));
+            entries.push((
+                InternalKey::new(
+                    Bytes::copy_from_slice(k.as_bytes()),
+                    u64::from(i) * 10 + 1,
+                    ValueType::Value,
+                ),
+                Bytes::copy_from_slice(&payload),
+            ));
+        }
+        let path = temp_path();
+        let table = write_sst_entries(&path, &entries).unwrap();
+        assert!(table.block_count() >= 8);
+
+        let loads = std::cell::Cell::new(0usize);
+        let collect = |start, end| {
+            let mut out = Vec::new();
+            let load = |bi: usize| {
+                loads.set(loads.get() + 1);
+                table.decode_block(bi).ok().map(std::sync::Arc::new)
+            };
+            let mut it = table.iter_user_range(start, end, u64::MAX, false, Box::new(load));
+            while let Some((k, _)) = it.next() {
+                out.push(k.user_key.to_vec());
+            }
+            // Fused: stays None after the window ends.
+            assert!(it.next().is_none());
+            out
+        };
+
+        // Excluded end: newest visible per user, no older duplicates, and
+        // keys at/after the end never leak.
+        let got = collect(
+            Bound::Included(b"k050".as_ref()),
+            Bound::Excluded(b"k053".as_ref()),
+        );
+        assert_eq!(got, vec![b"k050", b"k051", b"k052"]);
+        let window_loads = loads.replace(0);
+        assert!(
+            window_loads <= 2,
+            "25-user window must not tail-walk blocks: {window_loads} loads"
+        );
+
+        // Included end with multiple versions of the last key: the newest
+        // version of k053 must still be yielded before termination.
+        let got = collect(
+            Bound::Included(b"k050".as_ref()),
+            Bound::Included(b"k053".as_ref()),
+        );
+        assert_eq!(got, vec![b"k050", b"k051", b"k052", b"k053"]);
+
+        // Window before every key in a later block still yields exactly the
+        // prefix (start-block seek, no loads past it).
+        let got = collect(
+            Bound::Included(b"k000".as_ref()),
+            Bound::Excluded(b"k002".as_ref()),
+        );
+        assert_eq!(got, vec![b"k000", b"k001"]);
         let _ = std::fs::remove_file(&path);
     }
 

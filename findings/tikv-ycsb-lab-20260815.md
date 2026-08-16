@@ -233,3 +233,30 @@ Same knobs (4096/2000, zipfian, 1 KB). Compat only — no Rocks peer in this sli
 Scan ~8× vs the P0.2 dip; still ~0.43× of the 6.5k floor (overlapping L0 per seek). MVCC still ≪ 37k.
 
 Guarantees: WAL `sync_all` unchanged. Per-layer scan cap **not** shipped (would hide live keys after a deleted prefix). Adversarial assertions unchanged.
+
+## RFC-0037 P1.3 — deps_scan 0.45 → 0.61, 11/11 gate verde (2026-08-16)
+
+Perfil `sample` (`examples/scan_profile.rs`): no deps_scan o custo não era o merge de SST —
+era a maquinaria do `count_cache` (LRU com scan O(capacity) **por insert** + malloc + SipHash
+por op, 100% miss em janelas únicas) e os clones por entrada no merge (janela de 25 users
+varre ~260 versões MVCC). Três mudanças: `SstRangeIter` termina na 1.ª chave > end;
+`AnswerCache` FIFO O(1) + FxHash + chave inline no stack; `count_in_range` por referência
+(`count_visible`, diferencial vs `scan_at_raw` em 10.2k janelas). p21d → p13g (oficial,
+Rocks scan/ycsb limpos; Rocks apply da run deprimido — normalizado 0.53 ≥ 0.5):
+
+| shape | Pedra p21d | Pedra p13g | Rocks p13g | p21d | p13g | ≤2× |
+|---|---:|---:|---:|---:|---:|:---:|
+| ycsb_a | 57 236 | 51 822 | 57 842 | 1.19× | 1.12× | sim |
+| ycsb_b | 374 266 | 296 815 | 410 397 | 1.15× | 1.38× | sim |
+| ycsb_c | 1 240 214 | 1 208 337 | 1 281 298 | 1.13× | 1.06× | sim |
+| ycsb_d | 449 459 | 400 551 | 446 159 | 0.99× | 1.11× | sim |
+| ycsb_e | 146 017 | 185 628 | 107 297 | 0.74× | 0.58× | sim |
+| ycsb_f | 60 398 | 54 675 | 54 996 | 1.02× | 1.01× | sim |
+| deps_apply_batch | 3 035 | 2 959 | 1 877 (limpo 5 620) | 1.85× | 0.63× (1.90× normalizado) | sim |
+| deps_mvcc_latest | 513 732 | 451 646 | 311 452 | 0.58× | 0.69× | sim |
+| deps_scan | 131 926 | 177 073 | 290 058 | 2.21× | **1.64×** | sim |
+| deps_raftlog | 13 985 | 3 266 | 2 532 | 0.37× | 0.78× | sim |
+| deps_cache_overwrite | 36 147 | 18 080 | 31 303 | 0.91× | 1.73× | sim |
+
+p13g min_ratio 0.578 (compat/rocks), gate 11/11. Repetições do mesmo binário: 0.559 / 0.610 / 0.667.
+Raw: [tikv-ycsb-0037-p13g](tikv-ycsb-0037-p13g/). WAL `fdatasync` antes do Ok; único cliente.
