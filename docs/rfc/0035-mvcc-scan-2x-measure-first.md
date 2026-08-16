@@ -63,7 +63,7 @@ Editar asserção existente para ficar verde é relaxação.
 
 - [x] **P1.1** Cortar `get_cf` 1 KB do default no path MVCC (37.5 µs p50; sozinho impede o 2×); remesura deps vs FF — status: `done` (mem-hit skip SST + um lock; **get é inline não vlog**; p50 get ~36 µs, 2× **não** atingido)
 - [x] **P1.2** Cortar os 36 µs do get na mem; remesura — status: `done` (MemTable por user-key + parking_lot + encode stack; p50 MVCC **2.0 µs**; 2× qps **não**)
-- [ ] **P1.3** `deps_mvcc_latest` e `deps_scan` ≥ 0.5 × Rocks FF da run — status: `todo` (fallback SST newest-first + LRU cache shipped; MVCC 4×, scan p50 ainda 131 µs sem decode)
+- [ ] **P1.3** `deps_mvcc_latest` e `deps_scan` ≥ 0.5 × Rocks FF da run — status: `todo` (scan emite 1 versão/user/camada; p50 117 µs — ainda > 2×)
 
 ### P2 — redesign só com cliff medido
 
@@ -80,7 +80,7 @@ Editar asserção existente para ficar verde é relaxação.
 | P0.4 | p0 | finding ranqueado → alvo P1 | done | [rfc0035-p0-ranked-bottlenecks.md](../findings/rfc0035-p0-ranked-bottlenecks.md) | 2026-08-16 |
 | P1.1 | p1 | get_cf 1 KB no path MVCC | done | mem-hit skip SST + 1 lock; get 100% inline; p50 ~36 µs; 2× não | 2026-08-16 |
 | P1.2 | p1 | cortar 36 µs do get na mem | done | borrowed mem get; p50 2.0 µs; qps 18.8k vs 252k FF = 13× | 2026-08-16 |
-| P1.3 | p1 | MVCC+scan ≥ 0.5 vs FF | todo | newest-first+LRU: MVCC 45k vs 187k FF = 4×; scan 6.2k / 131 µs (95% cache) | 2026-08-16 |
+| P1.3 | p1 | MVCC+scan ≥ 0.5 vs FF | todo | 51k vs 228k FF = 4.4×; scan 8.0k / 117 µs = 29× | 2026-08-16 |
 | P2.1 | p2 | redesign só com cliff medido | todo | — | 2026-08-16 |
 | P2.2 | p2 | gate 0.5 nestes dois shapes | todo | — | 2026-08-16 |
 

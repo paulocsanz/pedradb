@@ -98,3 +98,18 @@ Probes: SST files / fallback **2.08** (was 3.00); `get_sst_fallback` 432 (was 85
 **2× still not met** (need ~94k MVCC / ~136k scan). MVCC tail is the remaining 21% fallback (p95 192 µs). Scan p50 **did not move** (~131 µs) after decode went away — the leftover is merge/setup of 3 SST streams + mem materialize, not lz4. Next cut is that CPU path (or P2.1 cliff), not another cache bump.
 
 G1–G8: read-path only. `last_under_user_prefix` still MVCC-user-prefix only. Adversarial green.
+
+## P1.3b follow-up (one visible version per user per layer)
+
+Shipped: SST range + mem stream emit only the newest `seq ≤ snapshot` per user key in that layer (older versions are not cloned into the merge). G2 unchanged: a newer tombstone still wins; later users still appear (`scan_skips_older_versions_still_sees_later_users`).
+
+Clean remesure ([compat.json](rfc0035-p13b/compat.json) / [rocks-ff.json](rfc0035-p13b/rocks-ff.json)):
+
+| | Pedra | p50 | Rocks FF | p50 | slower (qps) |
+|---|---:|---:|---:|---:|---:|
+| `deps_mvcc_latest` | 51 366 | 1.3 µs | 227 934 | 3.5 µs | **4.4×** |
+| `deps_scan` | **7 991** | **117 µs** | 229 010 | 3.8 µs | **29×** (was 44× / 131 µs) |
+
+**2× still not met.** Scan p50 dropped only ~14 µs — walking the block (even without cloning every version) + 3-stream setup is still ~117 µs vs Rocks 3.8 µs. That is the measured cliff for this merge shape. Next is a different iterator (or P2.1), not another skip-versions pass.
+
+G1–G8: read-path only. Adversarial green.

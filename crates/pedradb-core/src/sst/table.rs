@@ -496,6 +496,7 @@ impl SstTable {
         &'a self,
         start: Bound<&[u8]>,
         end: Bound<&[u8]>,
+        snapshot: SequenceNumber,
         load: Box<dyn FnMut(usize) -> Option<Arc<Vec<(InternalKey, Bytes)>>> + 'a>,
     ) -> SstRangeIter<'a> {
         let start_b = match start {
@@ -530,6 +531,8 @@ impl SstTable {
                     load,
                     start: start_b,
                     end: end_b,
+                    snapshot,
+                    skip_user: None,
                 };
             }
         }
@@ -541,6 +544,8 @@ impl SstTable {
                 load,
                 start: start_b,
                 end: end_b,
+                snapshot,
+                skip_user: None,
             }
         } else {
             let leftover: Vec<_> = self
@@ -558,6 +563,8 @@ impl SstTable {
                 load,
                 start: start_b,
                 end: end_b,
+                snapshot,
+                skip_user: None,
             }
         }
     }
@@ -1151,6 +1158,9 @@ pub struct SstRangeIter<'a> {
     load: Box<dyn FnMut(usize) -> Option<Arc<Vec<(InternalKey, Bytes)>>> + 'a>,
     start: Bound<Bytes>,
     end: Bound<Bytes>,
+    snapshot: SequenceNumber,
+    /// Newest visible version per user already yielded (skip older seqs).
+    skip_user: Option<Bytes>,
 }
 
 impl Iterator for SstRangeIter<'_> {
@@ -1165,6 +1175,12 @@ impl Iterator for SstRangeIter<'_> {
                     if k.kind == ValueType::RangeDeletion {
                         continue;
                     }
+                    if k.sequence > self.snapshot {
+                        continue;
+                    }
+                    if self.skip_user.as_ref().is_some_and(|u| u == &k.user_key) {
+                        continue;
+                    }
                     let start = match &self.start {
                         Bound::Unbounded => Bound::Unbounded,
                         Bound::Included(s) => Bound::Included(s.as_ref()),
@@ -1176,6 +1192,7 @@ impl Iterator for SstRangeIter<'_> {
                         Bound::Excluded(s) => Bound::Excluded(s.as_ref()),
                     };
                     if user_key_in_range(k.user_key.as_ref(), start, end) {
+                        self.skip_user = Some(k.user_key.clone());
                         return Some((k.clone(), v.clone()));
                     }
                 }

@@ -1791,19 +1791,19 @@ impl<E: Env> Db<E> {
             Vec::with_capacity(3 + self.ssts.len());
         for table in self.mem_layers() {
             table.collect_range_tombstones(snapshot, &mut range_dels);
-            let pts = self.memtable_stream(table, start, end, resolve_values);
+            let pts = self.memtable_stream(table, start, end, snapshot, resolve_values);
             streams.push(Box::new(pts.into_iter()));
         }
         for table in &self.ssts {
             table.collect_range_tombstones(snapshot, &mut range_dels);
             let cache = &self.block_cache;
-            let path = table.path().to_path_buf();
+            let path = table.path();
             let db = self;
             let load: Box<
                 dyn FnMut(usize) -> Option<std::sync::Arc<Vec<(InternalKey, Bytes)>>> + '_,
             > = Box::new(move |bi| {
                 let cached = cache
-                    .get_or_insert_with(&path, bi, || table.decode_block(bi).unwrap_or_default());
+                    .get_or_insert_with(path, bi, || table.decode_block(bi).unwrap_or_default());
                 if resolve_values {
                     let mut entries = cached.as_ref().clone();
                     db.prefetch_resolve_stream(&mut entries);
@@ -1812,7 +1812,7 @@ impl<E: Env> Db<E> {
                     Some(cached)
                 }
             });
-            streams.push(Box::new(table.iter_user_range(start, end, load)));
+            streams.push(Box::new(table.iter_user_range(start, end, snapshot, load)));
         }
         StreamingVisibleIter::from_point_streams(streams, range_dels, snapshot, start, end, limit)
     }
@@ -1822,24 +1822,33 @@ impl<E: Env> Db<E> {
         table: &MemTable,
         start: Bound<&[u8]>,
         end: Bound<&[u8]>,
+        snapshot: SequenceNumber,
         resolve_values: bool,
     ) -> Vec<(InternalKey, Bytes)> {
         let mut stream = Vec::new();
+        let mut last: Option<Bytes> = None;
+        let push = |stream: &mut Vec<(InternalKey, Bytes)>,
+                    last: &mut Option<Bytes>,
+                    k: &InternalKey,
+                    v: &Bytes| {
+            if k.kind == ValueType::RangeDeletion || k.sequence > snapshot {
+                return;
+            }
+            if last.as_ref().is_some_and(|u| u == &k.user_key) {
+                return;
+            }
+            *last = Some(k.user_key.clone());
+            stream.push((k.clone(), v.clone()));
+        };
         if table.has_range_tombstones() {
             for (k, v) in table.iter_internal() {
-                if k.kind == ValueType::RangeDeletion {
-                    continue;
-                }
                 if crate::merge::user_key_in_range(k.user_key.as_ref(), start, end) {
-                    stream.push((k.clone(), v.clone()));
+                    push(&mut stream, &mut last, k, v);
                 }
             }
         } else {
             for (k, v) in table.iter_internal_range(start, end) {
-                if k.kind == ValueType::RangeDeletion {
-                    continue;
-                }
-                stream.push((k.clone(), v.clone()));
+                push(&mut stream, &mut last, k, v);
             }
         }
         if resolve_values {
@@ -7939,6 +7948,36 @@ mod tests {
             .collect();
         assert_eq!(limited.len(), 25);
         assert_eq!(limited, all[..25]);
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn scan_skips_older_versions_still_sees_later_users() {
+        let dir = temp_dir();
+        let mut db = Db::open(&dir).unwrap();
+        for u in 0..8u8 {
+            for ver in 1..=10u8 {
+                db.put(format!("u/{u:02}").as_bytes(), [ver]).unwrap();
+            }
+        }
+        db.flush().unwrap();
+        db.delete(b"u/03").unwrap();
+        let got: Vec<_> = db
+            .try_scan_at(
+                db.last_sequence(),
+                Bound::Included(b"u/00"),
+                Bound::Excluded(b"u/08"),
+                None,
+            )
+            .unwrap()
+            .map(|kv| (kv.key, kv.value))
+            .collect();
+        assert_eq!(got.len(), 7, "{got:?}");
+        assert_eq!(&got[0].0[..], b"u/00");
+        assert_eq!(&got[0].1[..], &[10]);
+        assert!(got.iter().all(|(k, _)| k.as_ref() != b"u/03"));
+        assert_eq!(&got.last().expect("last").0[..], b"u/07");
         db.close().unwrap();
         let _ = fs::remove_dir_all(&dir);
     }
