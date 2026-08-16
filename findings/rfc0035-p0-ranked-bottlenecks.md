@@ -147,3 +147,20 @@ Was (P1.3c): MVCC 2.8× / scan 5.5×. File-bound skip almost never fires (3 mixe
 **2× still not met** (need ~122k MVCC / ~131k scan). Residual unchanged in kind: 22% SST get + 3-stream scan setup.
 
 G1–G8: read-path only. Adversarial green.
+
+## P1.3e follow-up (block-cache hit O(1))
+
+Shipped: recency is a tick on the slot, not a `VecDeque` walk on every hit. Evict still scans for min-tick (miss path only). The 8192-entry touch-on-hit was O(capacity) and a plausible tax on `deps_scan` (3 hits/op).
+
+Clean remesure ([compat.json](rfc0035-p13e/compat.json) / [rocks-ff.json](rfc0035-p13e/rocks-ff.json)):
+
+| | Pedra | p50 | Rocks FF | p50 | slower (qps) |
+|---|---:|---:|---:|---:|---:|
+| `deps_mvcc_latest` | 100 860 | 1.3 µs | 243 603 | 3.4 µs | **2.4×** |
+| `deps_scan` | 51 714 | 13.3 µs | 259 771 | 3.5 µs | **5.0×** |
+
+Within noise of P1.3d (105k / 54k / 14 µs). The 14 µs scan p50 is **not** the LRU walk.
+
+**2× still not met.** Residual still 22% SST get + 3-stream setup. Next cut is that merge, not the cache.
+
+G1–G8: read-path only. Adversarial green.

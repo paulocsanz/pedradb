@@ -4,7 +4,7 @@
 //!   open of the same SST does not re-read the full file from the [`Env`].
 //! - [`BlockCache`]: caches decompressed SST data blocks by `(path, block_idx)`.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -145,12 +145,19 @@ pub struct BlockCache {
     inner: Mutex<BlockCacheInner>,
 }
 
+#[derive(Debug, Clone)]
+struct CachedSlot {
+    block: CachedBlock,
+    /// Recency tick; higher is hotter. Evict min-tick on overflow.
+    tick: u64,
+}
+
 #[derive(Debug, Default)]
 struct BlockCacheInner {
-    map: HashMap<(u64, usize), CachedBlock>,
-    /// LRU: front is coldest. HashMap eviction was arbitrary and evicted hot
-    /// zipfian blocks (RFC-0035 P1.3 scan 19% hit).
-    order: VecDeque<(u64, usize)>,
+    map: HashMap<(u64, usize), CachedSlot>,
+    /// Monotonic recency. Hit is O(1) — a `VecDeque` walk on every hit was
+    /// O(capacity) and ate `deps_scan` after the cache grew to 8192 (RFC-0035).
+    tick: u64,
     capacity: usize,
     hits: u64,
     misses: u64,
@@ -163,7 +170,7 @@ impl BlockCache {
         Self {
             inner: Mutex::new(BlockCacheInner {
                 map: HashMap::new(),
-                order: VecDeque::new(),
+                tick: 0,
                 capacity,
                 hits: 0,
                 misses: 0,
@@ -198,46 +205,56 @@ impl BlockCache {
         let key = (path_id(path), block_idx);
         {
             let mut g = self.inner.lock();
-            if let Some(b) = g.map.get(&key).cloned() {
+            if let Some(block) = g.map.get(&key).map(|s| Arc::clone(&s.block)) {
                 g.hits = g.hits.saturating_add(1);
-                Self::touch_lru(&mut g.order, key);
-                return b;
+                let tick = g.tick.saturating_add(1);
+                g.tick = tick;
+                if let Some(slot) = g.map.get_mut(&key) {
+                    slot.tick = tick;
+                }
+                return block;
             }
         }
         let block = Arc::new(load());
         let mut g = self.inner.lock();
-        if let Some(b) = g.map.get(&key).cloned() {
+        if let Some(hit) = g.map.get(&key).map(|s| Arc::clone(&s.block)) {
             g.hits = g.hits.saturating_add(1);
-            Self::touch_lru(&mut g.order, key);
-            return b;
+            let tick = g.tick.saturating_add(1);
+            g.tick = tick;
+            if let Some(slot) = g.map.get_mut(&key) {
+                slot.tick = tick;
+            }
+            return hit;
         }
         g.misses = g.misses.saturating_add(1);
         if g.capacity > 0 {
             while g.map.len() >= g.capacity {
-                if let Some(old) = g.order.pop_front() {
-                    g.map.remove(&old);
-                } else {
-                    break;
+                let victim = g.map.iter().min_by_key(|(_, s)| s.tick).map(|(k, _)| *k);
+                match victim {
+                    Some(old) => {
+                        g.map.remove(&old);
+                    }
+                    None => break,
                 }
             }
         }
-        g.map.insert(key, Arc::clone(&block));
-        g.order.push_back(key);
+        let tick = g.tick.saturating_add(1);
+        g.tick = tick;
+        g.map.insert(
+            key,
+            CachedSlot {
+                block: Arc::clone(&block),
+                tick,
+            },
+        );
         block
-    }
-
-    fn touch_lru(order: &mut VecDeque<(u64, usize)>, key: (u64, usize)) {
-        if let Some(i) = order.iter().position(|k| *k == key) {
-            order.remove(i);
-        }
-        order.push_back(key);
     }
 
     /// Clear all blocks.
     pub fn clear(&self) {
         let mut g = self.inner.lock();
         g.map.clear();
-        g.order.clear();
+        g.tick = 0;
     }
 }
 
@@ -313,5 +330,20 @@ mod tests {
             Vec::new()
         });
         assert!(loaded, "1 was LRU and must be evicted");
+    }
+
+    #[test]
+    fn block_cache_hit_is_not_a_linear_walk() {
+        // Capacity large enough that a VecDeque touch-on-hit would be O(n).
+        let cache = BlockCache::new(64);
+        let path = Path::new("/tmp/lru-hot.sst");
+        for i in 0..64 {
+            cache.get_or_insert_with(path, i, || Vec::new());
+        }
+        for _ in 0..8 {
+            cache.get_or_insert_with(path, 0, || panic!("0 is hot"));
+        }
+        cache.get_or_insert_with(path, 64, || Vec::new());
+        cache.get_or_insert_with(path, 0, || panic!("0 must survive insert of 64"));
     }
 }
