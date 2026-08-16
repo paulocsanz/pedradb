@@ -10,6 +10,7 @@ rust-version.workspace = true
 pedradb-core = { path = "../pedradb-core" }
 pedradb-sim = { path = "../pedradb-sim" }
 bytes = "1"
+parking_lot.workspace = true
 
 [dev-dependencies]
 tempfile = "3"

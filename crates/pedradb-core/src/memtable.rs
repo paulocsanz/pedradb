@@ -5,6 +5,7 @@
 //! a **snapshot sequence**: only entries with `sequence <= snapshot` are visible;
 //! the newest such entry wins (delete tombstone hides the key).
 
+use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::ops::Bound;
 
@@ -23,19 +24,43 @@ pub enum Lookup {
     NotFound,
 }
 
+/// One version of a user key (seq-desc, then kind-desc — same as [`InternalKey`]).
+#[derive(Debug, Clone)]
+struct Version {
+    key: InternalKey,
+    value: Bytes,
+}
+
 /// Sorted in-memory table of versioned keys.
 ///
+/// Keyed by user key so [`Self::get_entry`] is a borrowed `BTreeMap` lookup
+/// (RFC-0035 P1.2: no `InternalKey` / `Bytes` probe alloc on the hot get).
 /// Mutations are single-threaded for P0 (callers serialize writers). Reads may
 /// share a reference if the outer layer uses interior mutability carefully;
 /// this type itself is not synchronized.
 #[derive(Debug, Default, Clone)]
 pub struct MemTable {
-    /// Internal key → value (empty for deletions).
-    map: BTreeMap<InternalKey, Bytes>,
+    /// User key → versions newest-first.
+    map: BTreeMap<Bytes, Vec<Version>>,
     /// Approximate bytes for flush triggers (user key + value + trailer).
     approx_bytes: usize,
     /// Range-tombstone entries (full-map fallback on ranged scan when > 0).
     range_tombstones: usize,
+    /// Total internal versions (not distinct user keys).
+    entries: usize,
+}
+
+/// [`InternalKey`] order on `(seq, kind)` only (user key already equal).
+fn ver_cmp(
+    a_seq: SequenceNumber,
+    a_kind: ValueType,
+    b_seq: SequenceNumber,
+    b_kind: ValueType,
+) -> Ordering {
+    match b_seq.cmp(&a_seq) {
+        Ordering::Equal => b_kind.cmp(&a_kind),
+        o => o,
+    }
 }
 
 impl MemTable {
@@ -48,13 +73,13 @@ impl MemTable {
     /// Number of internal key entries (versions), not distinct user keys.
     #[must_use]
     pub fn len(&self) -> usize {
-        self.map.len()
+        self.entries
     }
 
     /// Whether no entries are stored.
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.map.is_empty()
+        self.entries == 0
     }
 
     /// Approximate memory used by keys and values (for flush thresholds).
@@ -67,14 +92,26 @@ impl MemTable {
     pub fn insert(&mut self, key: InternalKey, value: Bytes) {
         let entry_bytes = key.user_key.len() + value.len() + 8;
         let is_rd = key.kind == ValueType::RangeDeletion;
-        if let Some(old) = self.map.insert(key, value) {
-            // Replaced an identical internal key (unusual); adjust estimate.
-            self.approx_bytes = self.approx_bytes.saturating_sub(old.len());
-        } else {
-            self.approx_bytes = self.approx_bytes.saturating_add(entry_bytes);
-            if is_rd {
-                self.range_tombstones = self.range_tombstones.saturating_add(1);
-            }
+        let vers = self.map.entry(key.user_key.clone()).or_default();
+        let pos = vers.partition_point(|v| {
+            ver_cmp(v.key.sequence, v.key.kind, key.sequence, key.kind) == Ordering::Less
+        });
+        if pos < vers.len()
+            && vers[pos].key.sequence == key.sequence
+            && vers[pos].key.kind == key.kind
+        {
+            let old = std::mem::replace(&mut vers[pos].value, value);
+            self.approx_bytes = self
+                .approx_bytes
+                .saturating_sub(old.len())
+                .saturating_add(vers[pos].value.len());
+            return;
+        }
+        vers.insert(pos, Version { key, value });
+        self.entries = self.entries.saturating_add(1);
+        self.approx_bytes = self.approx_bytes.saturating_add(entry_bytes);
+        if is_rd {
+            self.range_tombstones = self.range_tombstones.saturating_add(1);
         }
     }
 
@@ -99,36 +136,34 @@ impl MemTable {
     #[must_use]
     pub fn get(&self, user_key: &[u8], snapshot: SequenceNumber) -> Lookup {
         self.get_entry(user_key, snapshot)
-            .map(|(_, look)| look)
-            .unwrap_or(Lookup::NotFound)
+            .map_or(Lookup::NotFound, |(_, look)| look)
     }
 
     /// Like [`get`](Self::get) but also returns the winning version's sequence
     /// (for layered merge in `Db::lookup` without a full memtable walk).
+    ///
+    /// Borrowed user-key lookup — does not allocate an [`InternalKey`] probe.
     #[must_use]
     pub fn get_entry(
         &self,
         user_key: &[u8],
         snapshot: SequenceNumber,
     ) -> Option<(SequenceNumber, Lookup)> {
-        let probe = InternalKey::for_lookup(Bytes::copy_from_slice(user_key), snapshot);
-        let (ikey, value) = self.map.range(probe..).next()?;
-        if ikey.user_key.as_ref() != user_key {
-            return None;
-        }
-        debug_assert!(ikey.sequence <= snapshot);
-        let look = match ikey.kind {
+        let vers = self.map.get(user_key)?;
+        let v = vers.iter().find(|v| v.key.sequence <= snapshot)?;
+        debug_assert_eq!(v.key.user_key.as_ref(), user_key);
+        let look = match v.key.kind {
             ValueType::Deletion => Lookup::Deleted,
             ValueType::Value => {
-                if self.range_deleted(user_key, ikey.sequence, snapshot) {
+                if self.range_deleted(user_key, v.key.sequence, snapshot) {
                     Lookup::Deleted
                 } else {
-                    Lookup::Found(value.clone())
+                    Lookup::Found(v.value.clone())
                 }
             }
             ValueType::RangeDeletion => return None,
         };
-        Some((ikey.sequence, look))
+        Some((v.key.sequence, look))
     }
 
     /// Append range tombstones visible at `snapshot` (O(n) — only call when
@@ -141,15 +176,17 @@ impl MemTable {
         if self.range_tombstones == 0 {
             return;
         }
-        for (ikey, end) in &self.map {
-            if ikey.kind != ValueType::RangeDeletion || ikey.sequence > snapshot {
-                continue;
+        for (uk, vers) in &self.map {
+            for v in vers {
+                if v.key.kind != ValueType::RangeDeletion || v.key.sequence > snapshot {
+                    continue;
+                }
+                out.push(crate::merge::RangeTombstone {
+                    start: uk.clone(),
+                    end: v.value.clone(),
+                    sequence: v.key.sequence,
+                });
             }
-            out.push(crate::merge::RangeTombstone {
-                start: ikey.user_key.clone(),
-                end: end.clone(),
-                sequence: ikey.sequence,
-            });
         }
     }
 
@@ -173,15 +210,20 @@ impl MemTable {
         point_seq: SequenceNumber,
         snapshot: SequenceNumber,
     ) -> bool {
-        for (ikey, end) in &self.map {
-            if ikey.kind != ValueType::RangeDeletion || ikey.sequence > snapshot {
-                continue;
-            }
-            if ikey.sequence > point_seq
-                && user_key >= ikey.user_key.as_ref()
-                && user_key < end.as_ref()
-            {
-                return true;
+        if self.range_tombstones == 0 {
+            return false;
+        }
+        for (uk, vers) in &self.map {
+            for v in vers {
+                if v.key.kind != ValueType::RangeDeletion || v.key.sequence > snapshot {
+                    continue;
+                }
+                if v.key.sequence > point_seq
+                    && user_key >= uk.as_ref()
+                    && user_key < v.value.as_ref()
+                {
+                    return true;
+                }
             }
         }
         false
@@ -189,7 +231,9 @@ impl MemTable {
 
     /// All internal versions in [`InternalKey`] order (for SST flush).
     pub fn iter_internal(&self) -> impl Iterator<Item = (&InternalKey, &Bytes)> + '_ {
-        self.map.iter()
+        self.map
+            .values()
+            .flat_map(|vers| vers.iter().map(|v| (&v.key, &v.value)))
     }
 
     /// Whether any range tombstone is stored (ranged scan must include them).
@@ -198,7 +242,7 @@ impl MemTable {
         self.range_tombstones > 0
     }
 
-    /// Internal versions with user key in `[start, end)` (BTree range, not a full scan).
+    /// Internal versions with user key in `[start, end)` (`BTree` range, not a full scan).
     ///
     /// Range tombstones whose start key sits outside the interval are **not**
     /// yielded — callers that must honor covering tombstones should fall back
@@ -207,58 +251,18 @@ impl MemTable {
         &'a self,
         start: Bound<&'a [u8]>,
         end: Bound<&'a [u8]>,
-    ) -> impl Iterator<Item = (&'a InternalKey, &'a Bytes)> + DoubleEndedIterator + 'a {
-        use crate::key::MAX_SEQUENCE_NUMBER;
-        // Smallest internal key for user `u` (newest, highest kind).
-        let start_key = match start {
-            Bound::Unbounded => None,
-            Bound::Included(s) => Some(InternalKey::new(
-                Bytes::copy_from_slice(s),
-                MAX_SEQUENCE_NUMBER,
-                ValueType::RangeDeletion,
-            )),
-            Bound::Excluded(s) => Some(InternalKey::new(
-                Bytes::copy_from_slice(s),
-                0,
-                ValueType::Deletion,
-            )),
-        };
-        // Largest internal key still in-range for user `u` (oldest, lowest kind).
-        let end_key = match end {
-            Bound::Unbounded => None,
-            Bound::Included(e) => Some(InternalKey::new(
-                Bytes::copy_from_slice(e),
-                0,
-                ValueType::Deletion,
-            )),
-            Bound::Excluded(e) => Some(InternalKey::new(
-                Bytes::copy_from_slice(e),
-                MAX_SEQUENCE_NUMBER,
-                ValueType::RangeDeletion,
-            )),
-        };
-        let start_excl = matches!(start, Bound::Excluded(_));
-        let end_excl = matches!(end, Bound::Excluded(_));
-        let lo = match (start_key.as_ref(), start_excl) {
-            (None, _) => Bound::Unbounded,
-            (Some(k), false) => Bound::Included(k),
-            (Some(k), true) => Bound::Excluded(k),
-        };
-        let hi = match (end_key.as_ref(), end_excl) {
-            (None, _) => Bound::Unbounded,
-            (Some(k), false) => Bound::Included(k),
-            (Some(k), true) => Bound::Excluded(k),
-        };
-        self.map.range((lo, hi))
+    ) -> impl Iterator<Item = (&'a InternalKey, &'a Bytes)> + 'a {
+        self.map
+            .range::<[u8], _>((start, end))
+            .flat_map(|(_, vers)| vers.iter().map(|v| (&v.key, &v.value)))
     }
 
     /// Largest user key in `[prefix, before)` visible at `snapshot`.
     ///
-    /// RFC-0033: reverse BTree walk of the prefix, then [`get_entry`] so a
-    /// newer tombstone on the same user key wins (InternalKey order is
-    /// seq-descending; a raw reverse walk would see the oldest version first).
-    /// `before` is an exclusive upper bound inside the prefix (retry after a
-    /// cross-layer tombstone). `None` means `prefix_succ`.
+    /// Reverse user-key walk of the prefix, then the newest version ≤ snapshot
+    /// (same visibility as [`get_entry`]). `before` is an exclusive upper bound
+    /// inside the prefix (retry after a cross-layer tombstone). `None` means
+    /// `prefix_succ`.
     #[must_use]
     pub fn last_visible_under_prefix(
         &self,
@@ -273,23 +277,22 @@ impl MemTable {
             (_, Some(p)) => Bound::Excluded(p),
             (_, None) => Bound::Unbounded,
         };
-        let mut seen: Option<Bytes> = None;
-        for (ikey, _) in self
-            .iter_internal_range(Bound::Included(prefix), end_b)
+        for (uk, vers) in self
+            .map
+            .range::<[u8], _>((Bound::Included(prefix), end_b))
             .rev()
         {
-            if ikey.kind == ValueType::RangeDeletion {
+            if !prefix.is_empty() && !uk.starts_with(prefix) {
                 continue;
             }
-            if !prefix.is_empty() && !ikey.user_key.starts_with(prefix) {
+            let Some(v) = vers.iter().find(|v| v.key.sequence <= snapshot) else {
                 continue;
-            }
-            if seen.as_ref().is_some_and(|s| s == &ikey.user_key) {
-                continue;
-            }
-            seen = Some(ikey.user_key.clone());
-            if let Some((_, Lookup::Found(v))) = self.get_entry(ikey.user_key.as_ref(), snapshot) {
-                return Some((ikey.user_key.clone(), v));
+            };
+            match v.key.kind {
+                ValueType::Value if !self.range_deleted(uk.as_ref(), v.key.sequence, snapshot) => {
+                    return Some((uk.clone(), v.value.clone()));
+                }
+                ValueType::Value | ValueType::Deletion | ValueType::RangeDeletion => {}
             }
         }
         None
@@ -300,14 +303,14 @@ impl MemTable {
     where
         F: FnMut(&Bytes) -> Bytes,
     {
-        let old = std::mem::take(&mut self.map);
         self.approx_bytes = 0;
-        self.range_tombstones = 0;
-        for (k, v) in old {
-            let new_v = f(&v);
-            let entry_bytes = k.user_key.len() + new_v.len() + 8;
-            self.approx_bytes = self.approx_bytes.saturating_add(entry_bytes);
-            self.map.insert(k, new_v);
+        for (uk, vers) in &mut self.map {
+            for v in vers {
+                v.value = f(&v.value);
+                self.approx_bytes = self
+                    .approx_bytes
+                    .saturating_add(uk.len() + v.value.len() + 8);
+            }
         }
     }
 
@@ -319,10 +322,7 @@ impl MemTable {
         &self,
         snapshot: SequenceNumber,
     ) -> impl Iterator<Item = (Bytes, Bytes)> + '_ {
-        SnapshotIter {
-            inner: self.map.iter().peekable(),
-            snapshot,
-        }
+        self.range_snapshot(Bound::Unbounded, Bound::Unbounded, snapshot)
     }
 
     /// Range over user keys at `snapshot` (`start` / `end` are user-key bounds).
@@ -332,58 +332,15 @@ impl MemTable {
         end: Bound<&'a [u8]>,
         snapshot: SequenceNumber,
     ) -> impl Iterator<Item = (Bytes, Bytes)> + 'a {
-        self.iter_snapshot(snapshot).filter(move |(uk, _)| {
-            let after_start = match start {
-                Bound::Unbounded => true,
-                Bound::Included(s) => uk.as_ref() >= s,
-                Bound::Excluded(s) => uk.as_ref() > s,
-            };
-            let before_end = match end {
-                Bound::Unbounded => true,
-                Bound::Included(e) => uk.as_ref() <= e,
-                Bound::Excluded(e) => uk.as_ref() < e,
-            };
-            after_start && before_end
-        })
-    }
-}
-
-/// Walk internal keys in order; emit one visible put per user key.
-struct SnapshotIter<'a> {
-    inner: std::iter::Peekable<std::collections::btree_map::Iter<'a, InternalKey, Bytes>>,
-    snapshot: SequenceNumber,
-}
-
-impl Iterator for SnapshotIter<'_> {
-    type Item = (Bytes, Bytes);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        while let Some((ikey, value)) = self.inner.next() {
-            if ikey.sequence > self.snapshot {
-                continue;
-            }
-            // Newest visible version for this user key (map order = newest first).
-            let user_key = ikey.user_key.clone();
-            let result = match ikey.kind {
-                ValueType::Value => {
-                    // SnapshotIter does not apply range dels; Db merge path does.
-                    Some((user_key.clone(), value.clone()))
+        self.map
+            .range::<[u8], _>((start, end))
+            .filter_map(move |(uk, vers)| {
+                let v = vers.iter().find(|v| v.key.sequence <= snapshot)?;
+                match v.key.kind {
+                    ValueType::Value => Some((uk.clone(), v.value.clone())),
+                    ValueType::Deletion | ValueType::RangeDeletion => None,
                 }
-                ValueType::Deletion | ValueType::RangeDeletion => None,
-            };
-            // Skip remaining versions of the same user key.
-            while let Some((next_key, _)) = self.inner.peek() {
-                if next_key.user_key == user_key {
-                    self.inner.next();
-                } else {
-                    break;
-                }
-            }
-            if let Some(item) = result {
-                return Some(item);
-            }
-        }
-        None
+            })
     }
 }
 
@@ -550,5 +507,25 @@ mod tests {
         assert!(mt
             .last_visible_under_prefix(b"p/", 1, Some(b"p/a"))
             .is_none());
+    }
+
+    #[test]
+    fn replace_same_internal_key_updates_value() {
+        let mut mt = MemTable::new();
+        mt.put(b"k".as_slice(), 1, b"old".as_slice());
+        mt.put(b"k".as_slice(), 1, b"new".as_slice());
+        assert_eq!(mt.len(), 1);
+        assert_eq!(mt.get(b"k", 1), Lookup::Found(Bytes::from_static(b"new")));
+    }
+
+    #[test]
+    fn get_entry_borrowed_same_as_versions() {
+        let mut mt = MemTable::new();
+        mt.put(b"user/1".as_slice(), 1, b"a".as_slice());
+        mt.put(b"user/1".as_slice(), 3, b"c".as_slice());
+        mt.put(b"user/2".as_slice(), 2, b"b".as_slice());
+        assert_eq!(mt.get_entry(b"user/1", 10).map(|(s, _)| s), Some(3));
+        assert_eq!(mt.get_entry(b"user/1", 2).map(|(s, _)| s), Some(1));
+        assert!(mt.get_entry(b"nope", 10).is_none());
     }
 }

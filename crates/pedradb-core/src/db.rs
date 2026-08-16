@@ -229,6 +229,16 @@ pub struct ReadProbeSnap {
     pub get_inline: u64,
     /// `get` resolved a vlog pointer.
     pub get_vlog: u64,
+    /// `last_prefix_then_get` ops that recorded an intra-lock split (RFC-0035 P1.2).
+    pub mvcc_split_ops: u64,
+    /// Sum of encode nanos across those ops.
+    pub mvcc_ns_encode: u64,
+    /// Sum of `last_under_user_prefix` nanos.
+    pub mvcc_ns_last: u64,
+    /// Sum of point-get nanos.
+    pub mvcc_ns_get: u64,
+    /// Sum of 1 KB `to_vec` nanos.
+    pub mvcc_ns_copy: u64,
 }
 
 /// Per-blob GC stats for operator / auto-pick (RFC-0029 P1.1).
@@ -569,6 +579,11 @@ pub struct Db<E: Env = StdEnv> {
     get_sst_fallback: AtomicU64,
     get_inline: AtomicU64,
     get_vlog: AtomicU64,
+    mvcc_split_ops: AtomicU64,
+    mvcc_ns_encode: AtomicU64,
+    mvcc_ns_last: AtomicU64,
+    mvcc_ns_get: AtomicU64,
+    mvcc_ns_copy: AtomicU64,
     /// When set, best-effort [`Self::compact_blob_auto`] after flush / latest_only
     /// compact (RFC-0026 residual: no bg thread — runs on write path).
     auto_blob_gc_min_ratio: Option<f64>,
@@ -803,6 +818,11 @@ impl<E: Env> Db<E> {
             get_sst_fallback: AtomicU64::new(0),
             get_inline: AtomicU64::new(0),
             get_vlog: AtomicU64::new(0),
+            mvcc_split_ops: AtomicU64::new(0),
+            mvcc_ns_encode: AtomicU64::new(0),
+            mvcc_ns_last: AtomicU64::new(0),
+            mvcc_ns_get: AtomicU64::new(0),
+            mvcc_ns_copy: AtomicU64::new(0),
             auto_blob_gc_min_ratio: None,
             auto_reclaim: false,
             write_stall_l0: None,
@@ -874,6 +894,11 @@ impl<E: Env> Db<E> {
         self.get_sst_fallback.store(0, Ordering::Relaxed);
         self.get_inline.store(0, Ordering::Relaxed);
         self.get_vlog.store(0, Ordering::Relaxed);
+        self.mvcc_split_ops.store(0, Ordering::Relaxed);
+        self.mvcc_ns_encode.store(0, Ordering::Relaxed);
+        self.mvcc_ns_last.store(0, Ordering::Relaxed);
+        self.mvcc_ns_get.store(0, Ordering::Relaxed);
+        self.mvcc_ns_copy.store(0, Ordering::Relaxed);
         self.block_cache.reset_stats();
         crate::sst::reset_sst_blocks_decoded();
     }
@@ -899,7 +924,21 @@ impl<E: Env> Db<E> {
             get_sst_fallback: self.get_sst_fallback.load(Ordering::Relaxed),
             get_inline: self.get_inline.load(Ordering::Relaxed),
             get_vlog: self.get_vlog.load(Ordering::Relaxed),
+            mvcc_split_ops: self.mvcc_split_ops.load(Ordering::Relaxed),
+            mvcc_ns_encode: self.mvcc_ns_encode.load(Ordering::Relaxed),
+            mvcc_ns_last: self.mvcc_ns_last.load(Ordering::Relaxed),
+            mvcc_ns_get: self.mvcc_ns_get.load(Ordering::Relaxed),
+            mvcc_ns_copy: self.mvcc_ns_copy.load(Ordering::Relaxed),
         }
+    }
+
+    /// RFC-0035 P1.2: accumulate intra-lock MVCC split (encode / last / get / copy).
+    pub fn record_mvcc_split(&self, ns_encode: u64, ns_last: u64, ns_get: u64, ns_copy: u64) {
+        self.mvcc_split_ops.fetch_add(1, Ordering::Relaxed);
+        self.mvcc_ns_encode.fetch_add(ns_encode, Ordering::Relaxed);
+        self.mvcc_ns_last.fetch_add(ns_last, Ordering::Relaxed);
+        self.mvcc_ns_get.fetch_add(ns_get, Ordering::Relaxed);
+        self.mvcc_ns_copy.fetch_add(ns_copy, Ordering::Relaxed);
     }
 
     /// Number of SST files currently loaded.

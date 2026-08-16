@@ -728,6 +728,7 @@ name = "rocksdb-compat"
 version = "0.1.0"
 dependencies = [
  "bytes",
+ "parking_lot",
  "pedradb-core",
  "pedradb-sim",
  "tempfile",

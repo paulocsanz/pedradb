@@ -64,3 +64,20 @@ Shipped: (1) `lookup` returns on the first mem layer that has a point — skip S
 Clean remesure after (1), two-lock split still on: **get_vlog = 0 / get_inline = 2000**. The 1 KB value is **inline**, not vlog. `get_mem_hit` 1568 / 2000 (78%). get p50 **36 µs** (was 38 µs) — skipping SST on the hot path did **not** move p50. Combined one-lock remesure was noisy (3.1k qps); do not read it as a regression vs 9.5k.
 
 **P1.1 did not reach 2×.** Residual on the mem-hit get (~36 µs vs `ycsb_c` 5.7 µs): mutex + CF encode + `get_entry` on 14k mem + 1 KB copy, after a heavy apply. Next cut (P1.2) must explain those 36 µs (not invent vlog).
+
+## P1.2 follow-up (36 µs mem-hit get)
+
+Shipped: (1) MemTable keyed by user key (`BTreeMap<Bytes, Vec<Version>>`) so `get_entry` is a borrowed lookup — no `InternalKey` / `Bytes::copy_from_slice` probe; (2) `parking_lot::Mutex` on compat; (3) stack `encode_with` + no extra `user.to_vec`; (4) intra-lock split `mvcc_ns_{encode,last,get,copy}`.
+
+Clean remesure ([compat.json](rfc0035-p12/compat.json) / [rocks-ff.json](rfc0035-p12/rocks-ff.json), 4096/2000 zipfian 1 KB, `ROCKS_PARITY_FULL_SYNC=1`, same run):
+
+| | Pedra | p50 | Rocks FF | p50 | slower (qps) |
+|---|---:|---:|---:|---:|---:|
+| `deps_mvcc_latest` | **18 826** | **2.0 µs** | 251 671 | 3.3 µs | **13×** |
+| `deps_scan` | 3 603 | 139 µs | 260 906 | 3.6 µs | 72× (p50 ~39×; not the P1.2 target) |
+
+Was (P1.1): MVCC 9 006 qps / 77 µs. p50 of the combined op is now **faster than Rocks**. Encode 57 ns/op, copy 235 ns/op — **not** the 36 µs. Get mean **10.5 µs** (was 36 µs p50). Last mean **42 µs** (79% mem-hit is µs; 21% SST fallback is the mean).
+
+**2× qps still not met** (need ~126k vs this peer). Remaining #1: **SST fallback 21%**, 3 files every miss, p95 265 µs vs Rocks p95 7 µs. That tail is why 2 µs p50 still yields only 19k qps. P1.3 = cut fallback, not another mem-hit micro-opt.
+
+G1–G8: read-path only. Visibility = `get_entry` / `lookup`. Adversarial compat green. No `sync_data`.

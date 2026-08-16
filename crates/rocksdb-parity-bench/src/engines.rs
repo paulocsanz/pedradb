@@ -114,7 +114,7 @@ impl Engine for CompatEngine {
     fn read_probe_json(&self) -> Option<String> {
         let p = self.db.read_probe();
         Some(format!(
-            r#"{{"latest_ops":{lo},"latest_mem_hit":{mh},"latest_sst_fallback":{fb},"latest_sst_probed":{sp},"scan_ops":{so},"scan_sst_probed":{ssp},"sst_count":{sc},"l0_files":{l0},"level1_files":{l1},"mem_entries":{me},"block_cache_hits":{ch},"block_cache_misses":{cm},"blocks_decoded":{bd},"get_mem_hit":{gm},"get_sst_fallback":{gs},"get_inline":{gi},"get_vlog":{gv}}}"#,
+            r#"{{"latest_ops":{lo},"latest_mem_hit":{mh},"latest_sst_fallback":{fb},"latest_sst_probed":{sp},"scan_ops":{so},"scan_sst_probed":{ssp},"sst_count":{sc},"l0_files":{l0},"level1_files":{l1},"mem_entries":{me},"block_cache_hits":{ch},"block_cache_misses":{cm},"blocks_decoded":{bd},"get_mem_hit":{gm},"get_sst_fallback":{gs},"get_inline":{gi},"get_vlog":{gv},"mvcc_split_ops":{so2},"mvcc_ns_encode":{ne},"mvcc_ns_last":{nl},"mvcc_ns_get":{ng},"mvcc_ns_copy":{nc}}}"#,
             lo = p.latest_ops,
             mh = p.latest_mem_hit,
             fb = p.latest_sst_fallback,
@@ -132,6 +132,11 @@ impl Engine for CompatEngine {
             gs = p.get_sst_fallback,
             gi = p.get_inline,
             gv = p.get_vlog,
+            so2 = p.mvcc_split_ops,
+            ne = p.mvcc_ns_encode,
+            nl = p.mvcc_ns_last,
+            ng = p.mvcc_ns_get,
+            nc = p.mvcc_ns_copy,
         ))
     }
 }

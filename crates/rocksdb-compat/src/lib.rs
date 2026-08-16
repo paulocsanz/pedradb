@@ -17,11 +17,13 @@
 #![forbid(unsafe_code)]
 
 use bytes::Bytes;
+use parking_lot::Mutex;
 use pedradb_core::{BatchOp, CoreError, Db, Env, ScanProjection, Snapshot as CoreSnapshot, StdEnv};
 use std::collections::VecDeque;
 use std::fmt;
 use std::ops::Bound;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use std::time::Instant;
 
 /// Compatibility error surface (rust-rocksdb exposes one opaque `Error`).
 #[derive(Debug, Clone)]
@@ -99,19 +101,34 @@ impl KeyCodec {
     }
 
     fn encode(&self, cf: &str, key: &[u8]) -> Vec<u8> {
+        self.encode_with(cf, key, <[u8]>::to_vec)
+    }
+
+    /// Encode into a stack buffer when the key fits (RFC-0035 P1.2).
+    fn encode_with<R>(&self, cf: &str, key: &[u8], f: impl FnOnce(&[u8]) -> R) -> R {
+        const STACK: usize = 192;
         let effective = if cf == DEFAULT_CF && self.default_raw {
             ""
         } else {
             cf
         };
         if effective.is_empty() {
-            return key.to_vec();
+            return f(key);
         }
-        let mut v = Vec::with_capacity(effective.len() + 1 + key.len());
-        v.extend_from_slice(effective.as_bytes());
-        v.push(0);
-        v.extend_from_slice(key);
-        v
+        let n = effective.len() + 1 + key.len();
+        if n <= STACK {
+            let mut buf = [0u8; STACK];
+            buf[..effective.len()].copy_from_slice(effective.as_bytes());
+            buf[effective.len()] = 0;
+            buf[effective.len() + 1..n].copy_from_slice(key);
+            f(&buf[..n])
+        } else {
+            let mut v = Vec::with_capacity(n);
+            v.extend_from_slice(effective.as_bytes());
+            v.push(0);
+            v.extend_from_slice(key);
+            f(&v)
+        }
     }
 
     fn decode<'a>(&self, cf: &str, encoded: &'a [u8]) -> &'a [u8] {
@@ -391,7 +408,7 @@ fn page_forward<E: Env>(
     end: Bound<&[u8]>,
     limit: usize,
 ) -> Result<Vec<(Vec<u8>, Vec<u8>)>> {
-    let db = inner.lock().expect("db mutex");
+    let db = inner.lock();
     let s = bound_as_ref(&start);
     Ok(db
         .range_at_limited(seq, s, end, Some(limit))?
@@ -409,7 +426,7 @@ fn page_last_n<E: Env>(
     end: Bound<Vec<u8>>,
     n: usize,
 ) -> Result<Vec<(Vec<u8>, Vec<u8>)>> {
-    let db = inner.lock().expect("db mutex");
+    let db = inner.lock();
     let e = bound_as_ref(&end);
     let mut ring: VecDeque<(Vec<u8>, Vec<u8>)> = VecDeque::with_capacity(n.saturating_add(1));
     for pair in db.try_scan_at(seq, start, e, None)? {
@@ -678,7 +695,7 @@ impl<E: Env> DB<E> {
         value: impl AsRef<[u8]>,
     ) -> Result<()> {
         self.check_cf(&cf.name)?;
-        let mut guard = self.inner.lock().expect("db mutex");
+        let mut guard = self.inner.lock();
         guard
             .put(self.codec.encode(&cf.name, key.as_ref()), value.as_ref())
             .map_err(Error::from)
@@ -703,10 +720,10 @@ impl<E: Env> DB<E> {
     /// Unknown CF or Pedra read errors.
     pub fn get_cf(&self, cf: &ColumnFamily, key: impl AsRef<[u8]>) -> Result<Option<Vec<u8>>> {
         self.check_cf(&cf.name)?;
-        let guard = self.inner.lock().expect("db mutex");
-        Ok(guard
-            .get(&self.codec.encode(&cf.name, key.as_ref()))
-            .map(|b| b.to_vec()))
+        self.codec.encode_with(&cf.name, key.as_ref(), |enc| {
+            let guard = self.inner.lock();
+            Ok(guard.get(enc).map(|b| b.to_vec()))
+        })
     }
 
     fn get_at(
@@ -716,7 +733,7 @@ impl<E: Env> DB<E> {
         key: impl AsRef<[u8]>,
     ) -> Result<Option<Vec<u8>>> {
         self.check_cf(cf)?;
-        let guard = self.inner.lock().expect("db mutex");
+        let guard = self.inner.lock();
         guard
             .get_at(snap, &self.codec.encode(cf, key.as_ref()))
             .map(|v| v.map(|b| b.to_vec()))
@@ -742,7 +759,7 @@ impl<E: Env> DB<E> {
     /// WAL I/O or unknown CF.
     pub fn delete_cf(&self, cf: &ColumnFamily, key: impl AsRef<[u8]>) -> Result<()> {
         self.check_cf(&cf.name)?;
-        let mut guard = self.inner.lock().expect("db mutex");
+        let mut guard = self.inner.lock();
         guard
             .delete(self.codec.encode(&cf.name, key.as_ref()))
             .map_err(Error::from)
@@ -759,7 +776,7 @@ impl<E: Env> DB<E> {
         end: impl AsRef<[u8]>,
     ) -> Result<()> {
         self.check_cf(&cf.name)?;
-        let mut guard = self.inner.lock().expect("db mutex");
+        let mut guard = self.inner.lock();
         guard
             .delete_range(
                 self.codec.encode(&cf.name, start.as_ref()),
@@ -792,14 +809,14 @@ impl<E: Env> DB<E> {
             };
             ops.push(encoded);
         }
-        let mut guard = self.inner.lock().expect("db mutex");
+        let mut guard = self.inner.lock();
         guard.apply_batch(ops).map(|_| ()).map_err(Error::from)
     }
 
     /// Sequence-pinned snapshot.
     #[must_use]
     pub fn snapshot(&self) -> Snapshot<'_, E> {
-        let guard = self.inner.lock().expect("db mutex");
+        let guard = self.inner.lock();
         let snap = guard.snapshot();
         Snapshot { db: self, snap }
     }
@@ -822,7 +839,7 @@ impl<E: Env> DB<E> {
     /// # Errors
     /// Unknown CF or Pedra scan errors.
     pub fn iterator_cf(&self, cf: &ColumnFamily, mode: IteratorMode) -> Result<DBIterator<E>> {
-        let seq = self.inner.lock().expect("db mutex").last_sequence();
+        let seq = self.inner.lock().last_sequence();
         scan_cf_at(&self.inner, &self.codec, &cf.name, mode, seq, &self.cfs)
     }
 
@@ -840,7 +857,7 @@ impl<E: Env> DB<E> {
     ) -> Result<Option<Vec<u8>>> {
         self.check_cf(&cf.name)?;
         let encoded = self.codec.encode(&cf.name, prefix.as_ref());
-        let guard = self.inner.lock().expect("db mutex");
+        let guard = self.inner.lock();
         let seq = guard.last_sequence();
         match guard.last_under_user_prefix(seq, &encoded)? {
             Some(k) => Ok(Some(self.codec.decode(&cf.name, &k).to_vec())),
@@ -861,16 +878,33 @@ impl<E: Env> DB<E> {
     ) -> Result<Option<Vec<u8>>> {
         self.check_cf(&last_cf.name)?;
         self.check_cf(&get_cf.name)?;
-        let enc = self.codec.encode(&last_cf.name, prefix.as_ref());
-        let guard = self.inner.lock().expect("db mutex");
-        let seq = guard.last_sequence();
-        let Some(k) = guard.last_under_user_prefix(seq, &enc)? else {
-            return Ok(None);
-        };
-        let user = self.codec.decode(&last_cf.name, &k).to_vec();
-        Ok(guard
-            .get(&self.codec.encode(&get_cf.name, &user))
-            .map(|b| b.to_vec()))
+        let t_enc0 = Instant::now();
+        self.codec
+            .encode_with(&last_cf.name, prefix.as_ref(), |enc| {
+                let ns_enc0 = u64::try_from(t_enc0.elapsed().as_nanos()).unwrap_or(u64::MAX);
+                let guard = self.inner.lock();
+                let seq = guard.last_sequence();
+                let t_last = Instant::now();
+                let Some(k) = guard.last_under_user_prefix(seq, enc)? else {
+                    return Ok(None);
+                };
+                let ns_last = u64::try_from(t_last.elapsed().as_nanos()).unwrap_or(u64::MAX);
+                let user = self.codec.decode(&last_cf.name, &k);
+                let t_enc1 = Instant::now();
+                self.codec.encode_with(&get_cf.name, user, |gk| {
+                    let ns_enc = ns_enc0.saturating_add(
+                        u64::try_from(t_enc1.elapsed().as_nanos()).unwrap_or(u64::MAX),
+                    );
+                    let t_get = Instant::now();
+                    let got = guard.get(gk);
+                    let ns_get = u64::try_from(t_get.elapsed().as_nanos()).unwrap_or(u64::MAX);
+                    let t_copy = Instant::now();
+                    let out = got.map(|b| b.to_vec());
+                    let ns_copy = u64::try_from(t_copy.elapsed().as_nanos()).unwrap_or(u64::MAX);
+                    guard.record_mvcc_split(ns_enc, ns_last, ns_get, ns_copy);
+                    Ok(out)
+                })
+            })
     }
 
     /// Count live keys in `[start, end)` in `cf`, stopping at `limit` (RFC-0033).
@@ -890,7 +924,7 @@ impl<E: Env> DB<E> {
         self.check_cf(&cf.name)?;
         let lo = self.codec.encode(&cf.name, start.as_ref());
         let hi = self.codec.encode(&cf.name, end.as_ref());
-        let guard = self.inner.lock().expect("db mutex");
+        let guard = self.inner.lock();
         let seq = guard.last_sequence();
         let n = guard
             .try_scan_at_projected(
@@ -906,13 +940,13 @@ impl<E: Env> DB<E> {
 
     /// Zero latest/scan probe counters (RFC-0035).
     pub fn reset_read_probe(&self) {
-        self.inner.lock().expect("db mutex").reset_read_probe();
+        self.inner.lock().reset_read_probe();
     }
 
     /// Snapshot latest/scan counters + LSM shape (RFC-0035).
     #[must_use]
     pub fn read_probe(&self) -> pedradb_core::ReadProbeSnap {
-        self.inner.lock().expect("db mutex").read_probe()
+        self.inner.lock().read_probe()
     }
 
     /// Flush memtable to SST.
@@ -920,7 +954,7 @@ impl<E: Env> DB<E> {
     /// # Errors
     /// Pedra flush errors (I/O).
     pub fn flush(&self) -> Result<()> {
-        let mut guard = self.inner.lock().expect("db mutex");
+        let mut guard = self.inner.lock();
         guard.flush().map_err(Error::from)
     }
 
@@ -929,7 +963,7 @@ impl<E: Env> DB<E> {
     /// # Errors
     /// Pedra compaction errors.
     pub fn compact(&self) -> Result<()> {
-        let mut guard = self.inner.lock().expect("db mutex");
+        let mut guard = self.inner.lock();
         guard.compact().map_err(Error::from)
     }
 }
@@ -1139,6 +1173,8 @@ mod tests {
             .unwrap()
             .expect("combined");
         assert_eq!(got, b"val");
+        let probe = db.read_probe();
+        assert_eq!(probe.mvcc_split_ops, 1);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
