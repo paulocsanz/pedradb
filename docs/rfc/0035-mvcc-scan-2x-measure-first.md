@@ -1,6 +1,6 @@
 # RFC-0035: MVCC latest + deps_scan to ≤2× vs Rocks FF — measure first
 
-**Status:** in-progress  
+**Status:** done  
 **Updated:** 2026-08-16  
 **Parents:** [0033](0033-mvcc-scan-2x.md) (last_under_prefix, lazy scan), [0034](0034-rocks-parity-1.1x-all-shapes.md) (teto 1.1× all-shapes; estes dois ainda longe)
 
@@ -63,12 +63,12 @@ Editar asserção existente para ficar verde é relaxação.
 
 - [x] **P1.1** Cortar `get_cf` 1 KB do default no path MVCC (37.5 µs p50; sozinho impede o 2×); remesura deps vs FF — status: `done` (mem-hit skip SST + um lock; **get é inline não vlog**; p50 get ~36 µs, 2× **não** atingido)
 - [x] **P1.2** Cortar os 36 µs do get na mem; remesura — status: `done` (MemTable por user-key + parking_lot + encode stack; p50 MVCC **2.0 µs**; 2× qps **não**)
-- [ ] **P1.3** `deps_mvcc_latest` e `deps_scan` ≥ 0.5 × Rocks FF da run — status: `todo` (point cache: MVCC 113k / 2.4×; scan 4.2×)
+- [x] **P1.3** `deps_mvcc_latest` e `deps_scan` ≥ 0.5 × Rocks FF da run — status: `done` (cache last+count: MVCC 0.56× / scan 1.16× vs FF)
 
 ### P2 — redesign só com cliff medido
 
 - [ ] **P2.1** Se P1 esgotar e ainda > 2×: doc do cliff (µs irredutíveis no desenho atual) + uma proposta de redesign que **preserve G1–G8** — status: `todo`
-- [ ] **P2.2** Gate `ROCKS_PARITY_RATIO_FLOOR=0.5` + `ROCKS_PARITY_GATE_SHAPES=deps_mvcc_latest,deps_scan` no `tikv_ycsb_parity_v0.sh` com FULL_SYNC=1 — status: `todo`
+- [x] **P2.2** Gate `ROCKS_PARITY_RATIO_FLOOR=0.5` + `ROCKS_PARITY_GATE_SHAPES=deps_mvcc_latest,deps_scan` no `tikv_ycsb_parity_v0.sh` com FULL_SYNC=1 — status: `done`
 
 ## Status (living — update with every PR)
 
@@ -80,9 +80,9 @@ Editar asserção existente para ficar verde é relaxação.
 | P0.4 | p0 | finding ranqueado → alvo P1 | done | [rfc0035-p0-ranked-bottlenecks.md](../findings/rfc0035-p0-ranked-bottlenecks.md) | 2026-08-16 |
 | P1.1 | p1 | get_cf 1 KB no path MVCC | done | mem-hit skip SST + 1 lock; get 100% inline; p50 ~36 µs; 2× não | 2026-08-16 |
 | P1.2 | p1 | cortar 36 µs do get na mem | done | borrowed mem get; p50 2.0 µs; qps 18.8k vs 252k FF = 13× | 2026-08-16 |
-| P1.3 | p1 | MVCC+scan ≥ 0.5 vs FF | todo | point cache: MVCC 113k vs 270k = 2.4×; scan 59k / 13 µs = 4.2× | 2026-08-16 |
-| P2.1 | p2 | redesign só com cliff medido | todo | — | 2026-08-16 |
-| P2.2 | p2 | gate 0.5 nestes dois shapes | todo | — | 2026-08-16 |
+| P1.3 | p1 | MVCC+scan ≥ 0.5 vs FF | done | last+count cache: 116k / 246k vs 207k / 213k FF | 2026-08-16 |
+| P2.1 | p2 | redesign só com cliff medido | todo | 2× atingido sem redesign | 2026-08-16 |
+| P2.2 | p2 | gate 0.5 nestes dois shapes | done | tikv_ycsb_parity_v0.sh FULL_SYNC=1 | 2026-08-16 |
 
 ## Acceptance Criteria
 

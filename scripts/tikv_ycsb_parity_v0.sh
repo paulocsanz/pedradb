@@ -27,6 +27,11 @@ export ROCKS_PARITY_SUITE="${ROCKS_PARITY_SUITE:-ycsb,deps}"
 export ROCKS_PARITY_SYNC="${ROCKS_PARITY_SYNC:-1}"
 FULL="${ROCKS_PARITY_FULL_SYNC:-0}"
 export ROCKS_PARITY_FULL_SYNC="$FULL"
+# RFC-0035 P2.2: MVCC+scan ≤2× vs same-class F_FULLFSYNC (do not gate ycsb C/E).
+if [ "$FULL" = "1" ]; then
+  export ROCKS_PARITY_RATIO_FLOOR="${ROCKS_PARITY_RATIO_FLOOR:-0.5}"
+  export ROCKS_PARITY_GATE_SHAPES="${ROCKS_PARITY_GATE_SHAPES:-deps_mvcc_latest,deps_scan}"
+fi
 
 echo "tikv_ycsb_parity_v0 → $OUT records=$ROCKS_YCSB_RECORDS ops=$ROCKS_YCSB_OPS payload=$ROCKS_YCSB_PAYLOAD dist=$ROCKS_YCSB_DIST full_sync=$FULL"
 cargo run -q --release -p rocksdb-parity-bench --bin rocks-parity-bench -- "$OUT/compat" compat

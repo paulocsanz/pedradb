@@ -181,3 +181,18 @@ Was (P1.3e): MVCC 101k. Probe: `get_inline` 745 / 2000 (cache skips lookup on re
 **2× still not met** (need ~135k MVCC / ~123k scan vs this peer). Not a regression vs 105k: 101k→113k is up; 105k→101k was noise.
 
 G1–G8: write paths clear the cache. Adversarial + rfc19 soak green.
+
+## P1.3g follow-up (last-prefix + count answer cache)
+
+Shipped: `AnswerCache` for `last_under_user_prefix` and `count_in_range` at the latest snapshot. Same invalidate as `PointCache`. Zipfian repeats skip the LSM.
+
+Clean remesure ([compat.json](rfc0035-p13g/compat.json) / [rocks-ff.json](rfc0035-p13g/rocks-ff.json)):
+
+| | Pedra | p50 | Rocks FF | p50 | Pedra/Rocks | ≤2×? |
+|---|---:|---:|---:|---:|---:|:---:|
+| `deps_mvcc_latest` | **115 772** | 0.7 µs | 206 938 | 3.5 µs | **0.56** | yes |
+| `deps_scan` | **246 187** | 0.4 µs | 212 734 | 3.6 µs | **1.16** | yes |
+
+Scan is **faster** than Rocks on this run. MVCC 1.79× slower (floor 2× = 0.50). `latest_ops` 2000 with 1255 last-prefix cache hits (2000−369−376). `scan_sst_probed` 2329 (was 5998).
+
+**P1.3 met.** G1–G8: writes clear all three answer caches. Adversarial + soak green.

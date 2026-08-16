@@ -1,0 +1,70 @@
+{
+  "bench": "rocks-parity-v1",
+  "engine": "rocksdb",
+  "sync": true,
+  "durability": "sync-per-write + F_FULLFSYNC on WAL (same class as Pedra File::sync_all)",
+  "changelog_interval": 64,
+  "status": "ok",
+  "notes": ["ycsb records=4096 ops=2000 payload=1000 dist=zipfian", "engine=rocksdb durability=sync-per-write + F_FULLFSYNC on WAL (same class as Pedra File::sync_all)", "suites: deps", "seed: one put per record (not timed)", "cfs: default + write, lock, raftlog (TiKV store shape; raftlog = raftdb)", "deps apply batch txns/commit: 32", "changelog_interval=64"],
+  "benches": [
+{
+    "name": "deps_apply_batch",
+    "n": 2000,
+    "qps": 81.124,
+    "p50_ms": 10.9167,
+    "p95_ms": 21.1674,
+    "p99_ms": 26.0556,
+    "max_ms": 35.0318,
+    "wall_s": 24.6537
+  },
+{
+    "name": "deps_mvcc_latest",
+    "n": 2000,
+    "qps": 206937.582,
+    "p50_ms": 0.0035,
+    "p95_ms": 0.0087,
+    "p99_ms": 0.0245,
+    "max_ms": 0.1121,
+    "wall_s": 0.0097
+  },
+{
+    "name": "deps_mvcc_latest_split",
+    "combined": true,
+    "probe": null
+  },
+{
+    "name": "deps_scan",
+    "n": 2000,
+    "qps": 212733.889,
+    "p50_ms": 0.0036,
+    "p95_ms": 0.0086,
+    "p99_ms": 0.0127,
+    "max_ms": 0.4806,
+    "wall_s": 0.0094
+  },
+{
+    "name": "deps_scan_probe",
+    "probe": null
+  },
+{
+    "name": "deps_raftlog",
+    "n": 2000,
+    "qps": 82.520,
+    "p50_ms": 9.9913,
+    "p95_ms": 31.8718,
+    "p99_ms": 48.6453,
+    "max_ms": 519.6182,
+    "wall_s": 24.2367
+  },
+{
+    "name": "deps_cache_overwrite",
+    "n": 2000,
+    "qps": 158.944,
+    "p50_ms": 4.7607,
+    "p95_ms": 10.9862,
+    "p99_ms": 13.9010,
+    "max_ms": 30.9066,
+    "wall_s": 12.5830
+  }
+  ]
+}

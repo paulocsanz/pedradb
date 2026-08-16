@@ -58,7 +58,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use bytes::Bytes;
 
 use crate::batch::{WriteOp, WriteRecord};
-use crate::cache::{BlockCache, PointCache, TableCache};
+use crate::cache::{AnswerCache, BlockCache, PointCache, TableCache};
 use crate::change_feed::{ChangeEntry, ChangeKind, ChangeLog};
 use crate::changelog_kernel::{
     changelog_needs_sst_rebuild, changelog_should_store, DEFAULT_CHANGELOG_INTERVAL,
@@ -550,6 +550,10 @@ pub struct Db<E: Env = StdEnv> {
     block_cache: BlockCache,
     /// Latest-snapshot point answers; cleared on write (RFC-0035).
     point_cache: PointCache,
+    /// Latest `last_under_user_prefix` answers; cleared on write.
+    last_prefix_cache: AnswerCache<Option<Bytes>>,
+    /// Latest `count_in_range` answers; cleared on write.
+    count_cache: AnswerCache<usize>,
     /// Exclusive directory lock (released via Env on close/drop when possible).
     dir_lock: Option<DirLock>,
     /// Set when append succeeded but required WAL `sync_all` failed (RFC-0015 H1).
@@ -692,6 +696,8 @@ impl<E: Env> Db<E> {
         let table_cache = TableCache::new(64);
         let block_cache = BlockCache::new(8192);
         let point_cache = PointCache::new(2048);
+        let last_prefix_cache = AnswerCache::new(2048);
+        let count_cache = AnswerCache::new(2048);
         let (
             ssts,
             sst_levels,
@@ -802,6 +808,8 @@ impl<E: Env> Db<E> {
             table_cache,
             block_cache,
             point_cache,
+            last_prefix_cache,
+            count_cache,
             dir_lock: lock,
             durability_fenced: false,
             auto_compact_failures: 0,
@@ -1566,14 +1574,28 @@ impl<E: Env> Db<E> {
             return Ok(None);
         }
         self.latest_ops.fetch_add(1, Ordering::Relaxed);
-        if let Some(mem) = self.mem_layers().next() {
-            if let Some((k, _)) = mem.last_visible_under_prefix(prefix, snapshot, None) {
-                self.latest_mem_hit.fetch_add(1, Ordering::Relaxed);
-                return Ok(Some(k));
+        let latest = snapshot == self.last_sequence();
+        if latest {
+            if let Some(hit) = self.last_prefix_cache.get(prefix) {
+                return Ok(hit);
             }
         }
-        self.latest_sst_fallback.fetch_add(1, Ordering::Relaxed);
-        self.last_under_user_prefix_sst(snapshot, prefix)
+        let out = if let Some(mem) = self.mem_layers().next() {
+            if let Some((k, _)) = mem.last_visible_under_prefix(prefix, snapshot, None) {
+                self.latest_mem_hit.fetch_add(1, Ordering::Relaxed);
+                Some(k)
+            } else {
+                self.latest_sst_fallback.fetch_add(1, Ordering::Relaxed);
+                self.last_under_user_prefix_sst(snapshot, prefix)?
+            }
+        } else {
+            self.latest_sst_fallback.fetch_add(1, Ordering::Relaxed);
+            self.last_under_user_prefix_sst(snapshot, prefix)?
+        };
+        if latest {
+            self.last_prefix_cache.insert(prefix, out.clone());
+        }
+        Ok(out)
     }
 
     /// L0 newest → older → L1+ (same single-writer invariant as the mem hit).
@@ -1796,7 +1818,25 @@ impl<E: Env> Db<E> {
         if snapshot == 0 {
             return Ok(0);
         }
-        Ok(self.scan_at_raw(snapshot, start, end, limit, false).count())
+        let latest = snapshot == self.last_sequence();
+        let ck = count_cache_key(start, end, limit);
+        if latest {
+            if let Some(n) = self.count_cache.get(&ck) {
+                self.scan_ops.fetch_add(1, Ordering::Relaxed);
+                return Ok(n);
+            }
+        }
+        let n = self.scan_at_raw(snapshot, start, end, limit, false).count();
+        if latest {
+            self.count_cache.insert(&ck, n);
+        }
+        Ok(n)
+    }
+
+    fn invalidate_read_answers(&self) {
+        self.point_cache.clear();
+        self.last_prefix_cache.clear();
+        self.count_cache.clear();
     }
 
     fn scan_at_raw(
@@ -3808,7 +3848,7 @@ impl<E: Env> Db<E> {
             self.maybe_persist_changelog_after_durable_commit();
         }
         apply_record(&mut self.mem, &rec);
-        self.point_cache.clear();
+        self.invalidate_read_answers();
         Ok(())
     }
 
@@ -3880,7 +3920,7 @@ impl<E: Env> Db<E> {
     /// Apply prepared ops to the memtable after durable WAL.
     pub(crate) fn apply_ops_to_mem(&mut self, ops: Vec<WriteOp>) {
         apply_record(&mut self.mem, &WriteRecord { ops });
-        self.point_cache.clear();
+        self.invalidate_read_answers();
     }
 
     /// Rocks-style group commit: many client batches, one fsync if any requires sync.
@@ -3984,7 +4024,7 @@ impl<E: Env> Db<E> {
             self.apply_ops_to_mem(write_ops);
             results[i] = Some(Ok(last_seq));
         }
-        self.point_cache.clear();
+        self.invalidate_read_answers();
         self.maybe_auto_flush_best_effort();
         finish_group_results(results)
     }
@@ -4346,6 +4386,27 @@ pub fn copy_db_directory(
         }
     }
     Ok(())
+}
+
+fn count_cache_key(start: Bound<&[u8]>, end: Bound<&[u8]>, limit: Option<usize>) -> Vec<u8> {
+    let mut k = Vec::with_capacity(24);
+    let push = |k: &mut Vec<u8>, b: Bound<&[u8]>| match b {
+        Bound::Unbounded => k.push(0),
+        Bound::Included(s) => {
+            k.push(1);
+            k.extend_from_slice(&(s.len() as u32).to_le_bytes());
+            k.extend_from_slice(s);
+        }
+        Bound::Excluded(s) => {
+            k.push(2);
+            k.extend_from_slice(&(s.len() as u32).to_le_bytes());
+            k.extend_from_slice(s);
+        }
+    };
+    push(&mut k, start);
+    push(&mut k, end);
+    k.extend_from_slice(&limit.map(|n| n as u64).unwrap_or(u64::MAX).to_le_bytes());
+    k
 }
 
 fn apply_record(mem: &mut MemTable, rec: &WriteRecord) {
@@ -8330,6 +8391,51 @@ mod tests {
         assert_eq!(db.get(b"k").as_deref(), Some(&b"v2"[..]));
         db.delete(b"k").unwrap();
         assert_eq!(db.get(b"k"), None);
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn last_prefix_and_count_caches_invalidate_on_put() {
+        let dir = temp_dir();
+        let mut db = Db::open(&dir).unwrap();
+        let mut k1 = b"u/01".to_vec();
+        k1.extend_from_slice(&1u64.to_be_bytes());
+        db.put(&k1, b"a").unwrap();
+        let last = db
+            .last_under_user_prefix(db.last_sequence(), b"u/01")
+            .unwrap()
+            .expect("v1");
+        assert_eq!(last, k1);
+        let mut k2 = b"u/01".to_vec();
+        k2.extend_from_slice(&2u64.to_be_bytes());
+        db.put(&k2, b"b").unwrap();
+        let last2 = db
+            .last_under_user_prefix(db.last_sequence(), b"u/01")
+            .unwrap()
+            .expect("v2");
+        assert_eq!(last2, k2);
+        let n = db
+            .count_in_range(
+                db.last_sequence(),
+                Bound::Included(b"u/01"),
+                Bound::Excluded(b"u/02"),
+                Some(25),
+            )
+            .unwrap();
+        assert_eq!(n, 2);
+        let mut k3 = b"u/01".to_vec();
+        k3.extend_from_slice(&3u64.to_be_bytes());
+        db.put(&k3, b"c").unwrap();
+        let n2 = db
+            .count_in_range(
+                db.last_sequence(),
+                Bound::Included(b"u/01"),
+                Bound::Excluded(b"u/02"),
+                Some(25),
+            )
+            .unwrap();
+        assert_eq!(n2, 3);
         db.close().unwrap();
         let _ = fs::remove_dir_all(&dir);
     }

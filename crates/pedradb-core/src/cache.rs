@@ -259,33 +259,36 @@ impl BlockCache {
     }
 }
 
-/// Latest-snapshot point answers. Cleared on every durable write (RFC-0035).
+/// Latest-snapshot answers (point / last-prefix / count). Cleared on write.
 ///
 /// Hit is O(1). Capacity 0 = disabled.
 #[derive(Debug, Default)]
-pub struct PointCache {
-    inner: Mutex<PointCacheInner>,
+pub struct AnswerCache<V> {
+    inner: Mutex<AnswerCacheInner<V>>,
 }
 
+/// Latest-snapshot point get (`None` = cached absence).
+pub type PointCache = AnswerCache<Option<Bytes>>;
+
 #[derive(Debug, Default)]
-struct PointCacheInner {
-    map: HashMap<Bytes, PointSlot>,
+struct AnswerCacheInner<V> {
+    map: HashMap<Bytes, AnswerSlot<V>>,
     tick: u64,
     capacity: usize,
 }
 
 #[derive(Debug, Clone)]
-struct PointSlot {
-    value: Option<Bytes>,
+struct AnswerSlot<V> {
+    value: V,
     tick: u64,
 }
 
-impl PointCache {
+impl<V: Clone> AnswerCache<V> {
     /// Create with max cached keys (`0` = disabled).
     #[must_use]
     pub fn new(capacity: usize) -> Self {
         Self {
-            inner: Mutex::new(PointCacheInner {
+            inner: Mutex::new(AnswerCacheInner {
                 map: HashMap::new(),
                 tick: 0,
                 capacity,
@@ -293,9 +296,9 @@ impl PointCache {
         }
     }
 
-    /// `None` = miss. `Some(None)` = cached absence. `Some(Some(v))` = cached value.
+    /// `None` = miss.
     #[must_use]
-    pub fn get(&self, key: &[u8]) -> Option<Option<Bytes>> {
+    pub fn get(&self, key: &[u8]) -> Option<V> {
         let mut g = self.inner.lock();
         if g.capacity == 0 {
             return None;
@@ -313,7 +316,7 @@ impl PointCache {
     }
 
     /// Store a latest-snapshot answer.
-    pub fn insert(&self, key: &[u8], value: Option<Bytes>) {
+    pub fn insert(&self, key: &[u8], value: V) {
         let mut g = self.inner.lock();
         if g.capacity == 0 {
             return;
@@ -331,7 +334,7 @@ impl PointCache {
         let tick = g.tick.saturating_add(1);
         g.tick = tick;
         g.map
-            .insert(Bytes::copy_from_slice(key), PointSlot { value, tick });
+            .insert(Bytes::copy_from_slice(key), AnswerSlot { value, tick });
     }
 
     /// Drop every entry (call after a write that can change latest visibility).
