@@ -113,3 +113,20 @@ Clean remesure ([compat.json](rfc0035-p13b/compat.json) / [rocks-ff.json](rfc003
 **2× still not met.** Scan p50 dropped only ~14 µs — walking the block (even without cloning every version) + 3-stream setup is still ~117 µs vs Rocks 3.8 µs. That is the measured cliff for this merge shape. Next is a different iterator (or P2.1), not another skip-versions pass.
 
 G1–G8: read-path only. Adversarial green.
+
+## P1.3c follow-up (SST index binary search)
+
+Shipped: `blocks_overlapping_range` is `partition_point` + a short forward walk (was a linear scan of every sparse-index entry). Same overlap predicate. Tight ranges no longer pay O(blocks) — a 4 KiB-block L0 after 64k 1 KB values has thousands of index rows.
+
+Clean remesure ([compat.json](rfc0035-p13c/compat.json) / [rocks-ff.json](rfc0035-p13c/rocks-ff.json)):
+
+| | Pedra | p50 | Rocks FF | p50 | slower (qps) |
+|---|---:|---:|---:|---:|---:|
+| `deps_mvcc_latest` | **89 979** | 1.2 µs | 249 489 | 3.3 µs | **2.8×** |
+| `deps_scan` | **51 605** | **14.3 µs** | 282 944 | 3.3 µs | **5.5×** |
+
+Was (P1.3b): MVCC 4.4× / scan 29× (117 µs). `last` mean 13 µs → **1.5 µs**. Scan p50 117 → 14 µs.
+
+**2× still not met** (need ~125k MVCC / ~141k scan). Residual: MVCC get-on-fallback (~9 µs mean, 22% SST); scan 14 µs vs Rocks 3.3 µs is 3-stream merge/setup after the index tax is gone.
+
+G1–G8: read-path only. Adversarial green.

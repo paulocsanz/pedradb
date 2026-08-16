@@ -1120,31 +1120,55 @@ impl SstTable {
     ///
     /// Conservative: block `i` covers keys from `first_user_key[i]` up to
     /// `first_user_key[i+1]` (exclusive), or +∞ for the last block.
+    ///
+    /// O(log N + hits) via `partition_point` — a linear walk of the sparse
+    /// index was ~µs×blocks and dominated `deps_scan` after decode went away
+    /// (RFC-0035: thousands of 4 KiB blocks in one L0).
     fn blocks_overlapping_range(&self, start: Bound<&[u8]>, end: Bound<&[u8]>) -> Vec<usize> {
         if self.index.is_empty() {
             return Vec::new();
         }
+        let start_i = match start {
+            Bound::Unbounded => 0,
+            Bound::Included(s) | Bound::Excluded(s) => {
+                // First block with `first_user_key > s` is the successor;
+                // the previous block is the one that may contain `s`.
+                let succ = self
+                    .index
+                    .partition_point(|h| h.first_user_key.as_ref() <= s);
+                succ.saturating_sub(1)
+            }
+        };
         let mut out = Vec::new();
-        for (i, h) in self.index.iter().enumerate() {
-            let block_lo = h.first_user_key.as_ref();
-            let block_hi_excl = self.index.get(i + 1).map(|n| n.first_user_key.as_ref());
-            // block range [block_lo, block_hi_excl) intersects [start, end)?
-            let ends_after_start = match start {
-                Bound::Unbounded => true,
-                Bound::Included(s) => block_hi_excl.is_none_or(|hi| hi > s),
-                Bound::Excluded(s) => block_hi_excl.is_none_or(|hi| hi > s),
-            };
+        for i in start_i..self.index.len() {
+            let block_lo = self.index[i].first_user_key.as_ref();
             let starts_before_end = match end {
                 Bound::Unbounded => true,
                 Bound::Included(e) => block_lo <= e,
                 Bound::Excluded(e) => block_lo < e,
             };
-            if ends_after_start && starts_before_end {
+            if !starts_before_end {
+                break;
+            }
+            let block_hi_excl = self.index.get(i + 1).map(|n| n.first_user_key.as_ref());
+            let ends_after_start = match start {
+                Bound::Unbounded => true,
+                Bound::Included(s) | Bound::Excluded(s) => block_hi_excl.is_none_or(|hi| hi > s),
+            };
+            if ends_after_start {
                 out.push(i);
             }
         }
-        // Empty means no block intersects — do not decode the whole file.
         out
+    }
+
+    #[cfg(test)]
+    pub(crate) fn overlapping_blocks_for_test(
+        &self,
+        start: Bound<&[u8]>,
+        end: Bound<&[u8]>,
+    ) -> Vec<usize> {
+        self.blocks_overlapping_range(start, end)
     }
 }
 
@@ -1578,6 +1602,57 @@ mod tests {
         assert_eq!(mid.len(), 5);
         assert_eq!(mid[0].0.user_key.as_ref(), b"k05");
         assert_eq!(mid[4].0.user_key.as_ref(), b"k09");
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn overlapping_blocks_is_log_not_full_index() {
+        let payload = vec![b'x'; 256];
+        let mut entries = Vec::new();
+        for i in 0..200u32 {
+            let k = format!("k{i:03}");
+            entries.push((
+                InternalKey::new(
+                    Bytes::copy_from_slice(k.as_bytes()),
+                    u64::from(i) + 1,
+                    ValueType::Value,
+                ),
+                Bytes::copy_from_slice(&payload),
+            ));
+        }
+        let path = temp_path();
+        let table = write_sst_entries(&path, &entries).unwrap();
+        assert!(
+            table.block_count() >= 8,
+            "need a multi-block file, got {}",
+            table.block_count()
+        );
+        let hit = table.overlapping_blocks_for_test(
+            Bound::Included(b"k050".as_ref()),
+            Bound::Excluded(b"k055".as_ref()),
+        );
+        assert!(
+            !hit.is_empty() && hit.len() <= 3,
+            "tight range must not scan the whole index: {hit:?} / {}",
+            table.block_count()
+        );
+        let got = table.entries_in_user_range(
+            Bound::Included(b"k050".as_ref()),
+            Bound::Excluded(b"k055".as_ref()),
+        );
+        assert_eq!(got.len(), 5);
+        assert_eq!(got[0].0.user_key.as_ref(), b"k050");
+        let none = table.overlapping_blocks_for_test(
+            Bound::Included(b"zzz".as_ref()),
+            Bound::Excluded(b"zzzz".as_ref()),
+        );
+        assert!(
+            none.is_empty() || {
+                // last block is [kN, +∞); a seek past all keys may name it, but
+                // it must not return the whole file.
+                none.len() == 1 && none[0] + 1 == table.block_count()
+            }
+        );
         let _ = std::fs::remove_file(&path);
     }
 
