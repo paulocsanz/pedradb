@@ -842,7 +842,7 @@ impl<E: Env> DB<E> {
         let encoded = self.codec.encode(&cf.name, prefix.as_ref());
         let guard = self.inner.lock().expect("db mutex");
         let seq = guard.last_sequence();
-        match guard.last_under_prefix(seq, &encoded)? {
+        match guard.last_under_user_prefix(seq, &encoded)? {
             Some(k) => Ok(Some(self.codec.decode(&cf.name, &k).to_vec())),
             None => Ok(None),
         }

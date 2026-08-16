@@ -72,6 +72,17 @@ Published TiKV cluster numbers are not a Pedra target until there is a TiKV on P
 
 Do not read the `07bd443` A/F/overwrite “≥ 1×” lines as current. This peer is faster; Pedra is not inside 1.1× on any row.
 
+## RFC-0033 / 2× on MVCC + deps_scan (2026-08-16)
+
+Same knobs, deps-only after apply, Rocks FF peer ~160k / ~165k qps.
+
+| shape | `eaa4adf` (0034 remesura) | after mem-hit `last_under_user_prefix` + no block clone | Rocks FF | slower | 2×? |
+|---|---:|---:|---:|---:|---|
+| deps_mvcc_latest | 2 465 / 69× | **9 006 / p50 77 µs** | 159 790 / 5.4 µs | **18×** | não |
+| deps_scan | 5 532 / 35× | **6 117 / p50 162 µs** | 164 889 / 5.7 µs | **27×** | não |
+
+WAL `sync_all` unchanged. `last_under_user_prefix` only skips SST when newest mem already has a live key of that user (MVCC suffix). Tombstone of the latest still falls back to full `last_under_prefix` + lookup (tested). Scan iterates `Arc` blocks (no 4 KB clone). Residual: overlapping L0 last_visible/merge when the key is not in mem.
+
 ## RFC-0033 remesure (2026-08-15, deps-only)
 
 Same knobs (4096/2000, zipfian, 1 KB). Compat only — no Rocks peer in this slice. After apply (64k txns, batch=32).

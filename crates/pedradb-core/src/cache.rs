@@ -19,6 +19,13 @@ use crate::sst::SstTable;
 /// Shared decoded block payload.
 pub type CachedBlock = Arc<Vec<(InternalKey, Bytes)>>;
 
+fn path_id(path: &Path) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    path.hash(&mut h);
+    h.finish()
+}
+
 /// LRU-ish table cache (capacity-capped; eviction drops arbitrary entries when full).
 #[derive(Debug, Default)]
 pub struct TableCache {
@@ -140,7 +147,7 @@ pub struct BlockCache {
 
 #[derive(Debug, Default)]
 struct BlockCacheInner {
-    map: HashMap<(PathBuf, usize), CachedBlock>,
+    map: HashMap<(u64, usize), CachedBlock>,
     capacity: usize,
     hits: u64,
     misses: u64,
@@ -184,7 +191,7 @@ impl BlockCache {
     where
         F: FnOnce() -> Vec<(InternalKey, Bytes)>,
     {
-        let key = (path.to_path_buf(), block_idx);
+        let key = (path_id(path), block_idx);
         {
             let mut g = self.inner.lock();
             if let Some(b) = g.map.get(&key).cloned() {

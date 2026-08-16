@@ -234,7 +234,7 @@ impl SstTable {
         if !self.bloom.may_contain(user_key) {
             return None;
         }
-        self.point_in_blocks(user_key, snapshot, |bi| {
+        self.point_in_blocks(user_key, snapshot, &mut |bi| {
             self.decode_block(bi).ok().map(Arc::new)
         })
     }
@@ -263,7 +263,8 @@ impl SstTable {
         if !self.bloom.may_contain(user_key) {
             return None;
         }
-        self.point_in_blocks(user_key, snapshot, load)
+        let mut load = load;
+        self.point_in_blocks(user_key, snapshot, &mut load)
     }
 
     /// Highest sequence number present in this file.
@@ -333,7 +334,7 @@ impl SstTable {
         let mut point = Lookup::NotFound;
         let mut point_seq = 0u64;
         if self.bloom.may_contain(user_key) || self.has_range_tombstones() {
-            if let Some((seq, look)) = self.point_in_blocks(user_key, snapshot, |bi| {
+            if let Some((seq, look)) = self.point_in_blocks(user_key, snapshot, &mut |bi| {
                 self.decode_block(bi).ok().map(Arc::new)
             }) {
                 point_seq = seq;
@@ -396,7 +397,7 @@ impl SstTable {
         &self,
         user_key: &[u8],
         snapshot: SequenceNumber,
-        mut load: F,
+        load: &mut F,
     ) -> Option<(SequenceNumber, Lookup)>
     where
         F: FnMut(usize) -> Option<Arc<Vec<(InternalKey, Bytes)>>>,
@@ -495,7 +496,7 @@ impl SstTable {
         &'a self,
         start: Bound<&[u8]>,
         end: Bound<&[u8]>,
-        load: Box<dyn FnMut(usize) -> Vec<(InternalKey, Bytes)> + 'a>,
+        load: Box<dyn FnMut(usize) -> Option<Arc<Vec<(InternalKey, Bytes)>>> + 'a>,
     ) -> SstRangeIter<'a> {
         let start_b = match start {
             Bound::Unbounded => Bound::Unbounded,
@@ -523,7 +524,8 @@ impl SstTable {
             };
             if !file_before_end || !file_after_start {
                 return SstRangeIter {
-                    leftover: Vec::new().into_iter(),
+                    current: None,
+                    idx: 0,
                     blocks: Vec::new().into_iter(),
                     load,
                     start: start_b,
@@ -533,24 +535,25 @@ impl SstTable {
         }
         if self.is_lazy() {
             SstRangeIter {
-                leftover: Vec::new().into_iter(),
+                current: None,
+                idx: 0,
                 blocks: self.blocks_overlapping_range(start, end).into_iter(),
                 load,
                 start: start_b,
                 end: end_b,
             }
         } else {
-            let leftover = self
+            let leftover: Vec<_> = self
                 .entries_cloned()
                 .into_iter()
                 .filter(|(k, _)| {
                     k.kind != ValueType::RangeDeletion
                         && user_key_in_range(k.user_key.as_ref(), start, end)
                 })
-                .collect::<Vec<_>>()
-                .into_iter();
+                .collect();
             SstRangeIter {
-                leftover,
+                current: Some(Arc::new(leftover)),
+                idx: 0,
                 blocks: Vec::new().into_iter(),
                 load,
                 start: start_b,
@@ -972,9 +975,9 @@ impl SstTable {
 
     /// Largest user key in `[prefix, before)` visible at `snapshot` (RFC-0033).
     ///
-    /// Walks overlapping blocks from the back and confirms each candidate with
-    /// [`point_at`] so a newer deletion in this file cannot leak. `before` is
-    /// exclusive (`None` = `prefix_succ`). Does not materialise the file.
+    /// Walks overlapping blocks from the back. Newest version is taken from the
+    /// already-loaded block when possible so a newer deletion in this file
+    /// cannot leak. `before` is exclusive (`None` = `prefix_succ`).
     #[must_use]
     pub fn last_visible_under_prefix(
         &self,
@@ -982,6 +985,22 @@ impl SstTable {
         snapshot: SequenceNumber,
         before: Option<&[u8]>,
     ) -> Option<(Bytes, Bytes)> {
+        self.last_visible_under_prefix_with(prefix, snapshot, before, |bi| {
+            self.decode_block(bi).ok().map(Arc::new)
+        })
+    }
+
+    /// Like [`last_visible_under_prefix`] with a block loader (block cache).
+    pub fn last_visible_under_prefix_with<F>(
+        &self,
+        prefix: &[u8],
+        snapshot: SequenceNumber,
+        before: Option<&[u8]>,
+        mut load: F,
+    ) -> Option<(Bytes, Bytes)>
+    where
+        F: FnMut(usize) -> Option<Arc<Vec<(InternalKey, Bytes)>>>,
+    {
         let prefix_end = crate::prefix::prefix_exclusive_end(prefix);
         let end_owned: Option<Vec<u8>> = match (before, prefix_end.as_deref()) {
             (Some(b), Some(p)) if b < p => Some(b.to_vec()),
@@ -1016,47 +1035,62 @@ impl SstTable {
                 None => true,
             }
         };
-        let consider_user = |uk: &Bytes| -> Option<(Bytes, Bytes)> {
-            if !in_window(uk) {
-                return None;
-            }
-            match self.point_at(uk, snapshot) {
-                Some((seq, Lookup::Found(v))) if !self.range_deleted(uk, seq, snapshot) => {
-                    Some((uk.clone(), v))
+        let decide =
+            |uk: &Bytes, block: &[(InternalKey, Bytes)]| -> Option<Option<(Bytes, Bytes)>> {
+                if !in_window(uk) {
+                    return Some(None);
                 }
-                _ => None,
-            }
-        };
+                match Self::best_point_in_entry_slice(block, uk, snapshot) {
+                    Some((seq, Lookup::Found(v))) if !self.range_deleted(uk, seq, snapshot) => {
+                        Some(Some((uk.clone(), v)))
+                    }
+                    Some((_, Lookup::Deleted)) => Some(None),
+                    _ => None, // versions may sit in another block
+                }
+            };
         if self.is_lazy() {
             let mut blocks = self.blocks_overlapping_range(start_b, end_b);
             blocks.sort_unstable();
             for bi in blocks.into_iter().rev() {
-                let Ok(block) = self.decode_block(bi) else {
+                let Some(block) = load(bi) else {
                     continue;
                 };
-                let mut last: Option<Bytes> = None;
-                let mut users = Vec::new();
-                for (k, _) in block.iter().rev() {
+                // Seek to `prefix` then walk only in-window users (typically
+                // 2–3 MVCC versions). Do not reverse-scan the rest of the block.
+                let start_i = block.partition_point(|(k, _)| k.user_key.as_ref() < prefix);
+                let mut users: Vec<Bytes> = Vec::new();
+                for (k, _) in &block[start_i..] {
+                    if !in_window(&k.user_key) {
+                        break;
+                    }
                     if k.kind == ValueType::RangeDeletion {
                         continue;
                     }
-                    if last.as_ref().is_some_and(|u| u == &k.user_key) {
-                        continue;
+                    if users.last().is_none_or(|u| u != &k.user_key) {
+                        users.push(k.user_key.clone());
                     }
-                    last = Some(k.user_key.clone());
-                    users.push(k.user_key.clone());
                 }
-                for uk in users {
-                    if let Some(hit) = consider_user(&uk) {
-                        return Some(hit);
+                for uk in users.into_iter().rev() {
+                    match decide(&uk, &block) {
+                        Some(Some(hit)) => return Some(hit),
+                        Some(None) => continue,
+                        None => match self.point_in_blocks(&uk, snapshot, &mut load) {
+                            Some((seq, Lookup::Found(v)))
+                                if !self.range_deleted(&uk, seq, snapshot) =>
+                            {
+                                return Some((uk, v));
+                            }
+                            _ => continue,
+                        },
                     }
                 }
             }
             None
         } else {
+            let entries = self.entries_cloned();
             let mut last: Option<Bytes> = None;
             let mut users = Vec::new();
-            for (k, _) in self.entries_cloned().into_iter().rev() {
+            for (k, _) in entries.iter().rev() {
                 if k.kind == ValueType::RangeDeletion {
                     continue;
                 }
@@ -1064,10 +1098,10 @@ impl SstTable {
                     continue;
                 }
                 last = Some(k.user_key.clone());
-                users.push(k.user_key);
+                users.push(k.user_key.clone());
             }
             for uk in users {
-                if let Some(hit) = consider_user(&uk) {
+                if let Some(Some(hit)) = decide(&uk, &entries) {
                     return Some(hit);
                 }
             }
@@ -1108,10 +1142,13 @@ impl SstTable {
 }
 
 /// Lazy per-block SST range (RFC-0033 P0.3). Stops when the merge stops pulling.
+///
+/// Holds an `Arc` of the cached block — does not clone the whole block per scan.
 pub struct SstRangeIter<'a> {
-    leftover: std::vec::IntoIter<(InternalKey, Bytes)>,
+    current: Option<Arc<Vec<(InternalKey, Bytes)>>>,
+    idx: usize,
     blocks: std::vec::IntoIter<usize>,
-    load: Box<dyn FnMut(usize) -> Vec<(InternalKey, Bytes)> + 'a>,
+    load: Box<dyn FnMut(usize) -> Option<Arc<Vec<(InternalKey, Bytes)>>> + 'a>,
     start: Bound<Bytes>,
     end: Bound<Bytes>,
 }
@@ -1121,27 +1158,39 @@ impl Iterator for SstRangeIter<'_> {
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
-            if let Some((k, v)) = self.leftover.next() {
-                if k.kind == ValueType::RangeDeletion {
-                    continue;
+            if let Some(ref block) = self.current {
+                while self.idx < block.len() {
+                    let (k, v) = &block[self.idx];
+                    self.idx += 1;
+                    if k.kind == ValueType::RangeDeletion {
+                        continue;
+                    }
+                    let start = match &self.start {
+                        Bound::Unbounded => Bound::Unbounded,
+                        Bound::Included(s) => Bound::Included(s.as_ref()),
+                        Bound::Excluded(s) => Bound::Excluded(s.as_ref()),
+                    };
+                    let end = match &self.end {
+                        Bound::Unbounded => Bound::Unbounded,
+                        Bound::Included(s) => Bound::Included(s.as_ref()),
+                        Bound::Excluded(s) => Bound::Excluded(s.as_ref()),
+                    };
+                    if user_key_in_range(k.user_key.as_ref(), start, end) {
+                        return Some((k.clone(), v.clone()));
+                    }
                 }
-                let start = match &self.start {
-                    Bound::Unbounded => Bound::Unbounded,
-                    Bound::Included(s) => Bound::Included(s.as_ref()),
-                    Bound::Excluded(s) => Bound::Excluded(s.as_ref()),
-                };
-                let end = match &self.end {
-                    Bound::Unbounded => Bound::Unbounded,
-                    Bound::Included(s) => Bound::Included(s.as_ref()),
-                    Bound::Excluded(s) => Bound::Excluded(s.as_ref()),
-                };
-                if user_key_in_range(k.user_key.as_ref(), start, end) {
-                    return Some((k, v));
-                }
-                continue;
             }
             let bi = self.blocks.next()?;
-            self.leftover = (self.load)(bi).into_iter();
+            self.current = (self.load)(bi);
+            self.idx = match (&self.current, &self.start) {
+                (Some(block), Bound::Included(s)) => {
+                    block.partition_point(|(k, _)| k.user_key.as_ref() < s.as_ref())
+                }
+                (Some(block), Bound::Excluded(s)) => {
+                    block.partition_point(|(k, _)| k.user_key.as_ref() <= s.as_ref())
+                }
+                _ => 0,
+            };
         }
     }
 }

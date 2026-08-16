@@ -1348,19 +1348,34 @@ impl<E: Env> Db<E> {
                 }
             };
             let hi = before.as_deref();
-            for table in self.mem_layers() {
+            let mut newest_mem_last: Option<Bytes> = None;
+            for (i, table) in self.mem_layers().enumerate() {
                 if let Some((k, _)) = table.last_visible_under_prefix(prefix, snapshot, hi) {
+                    if i == 0 {
+                        newest_mem_last = Some(k.clone());
+                    }
                     consider(k);
                 }
             }
             for table in &self.ssts {
-                if let Some((k, _)) = table.last_visible_under_prefix(prefix, snapshot, hi) {
+                if let Some((k, _)) =
+                    table.last_visible_under_prefix_with(prefix, snapshot, hi, |bi| {
+                        Some(self.block_cache.get_or_insert_with(table.path(), bi, || {
+                            table.decode_block(bi).unwrap_or_default()
+                        }))
+                    })
+                {
                     consider(k);
                 }
             }
             let Some(k) = cand else {
                 return Ok(None);
             };
+            // Newest mem already applied get_entry; an older layer cannot hide
+            // a newer live key (G2). Skip the second full LSM walk.
+            if newest_mem_last.as_ref() == Some(&k) {
+                return Ok(Some(k));
+            }
             match self.lookup(k.as_ref(), snapshot) {
                 Lookup::Found(_) => return Ok(Some(k)),
                 Lookup::Deleted | Lookup::NotFound => {
@@ -1368,6 +1383,36 @@ impl<E: Env> Db<E> {
                 }
             }
         }
+    }
+
+    /// Last live key under an **MVCC user prefix** (`user || version`).
+    ///
+    /// If the newest memtable has a live key under `prefix`, that is the
+    /// latest write (single-writer; newer suffixes are assigned in mem).
+    /// Older layers cannot hold a bytewise-larger live key of the same user.
+    /// When mem misses, falls through to [`last_under_prefix`] (full merge +
+    /// lookup) so a flushed version + mem tombstone still resolves.
+    ///
+    /// Do **not** use this for a prefix that spans many users (`"u/"`): an
+    /// older layer may hold a larger sibling. WAL / fencing unchanged.
+    ///
+    /// # Errors
+    /// [`CoreError::SnapshotTooOld`].
+    pub fn last_under_user_prefix(
+        &self,
+        snapshot: SequenceNumber,
+        prefix: &[u8],
+    ) -> Result<Option<Bytes>> {
+        self.ensure_snapshot_readable(Snapshot::at(snapshot))?;
+        if snapshot == 0 {
+            return Ok(None);
+        }
+        if let Some(mem) = self.mem_layers().next() {
+            if let Some((k, _)) = mem.last_visible_under_prefix(prefix, snapshot, None) {
+                return Ok(Some(k));
+            }
+        }
+        self.last_under_prefix(snapshot, prefix)
     }
 
     /// Range at `snapshot` with optional live-key `limit`.
@@ -1515,19 +1560,19 @@ impl<E: Env> Db<E> {
             let cache = &self.block_cache;
             let path = table.path().to_path_buf();
             let db = self;
-            let load: Box<dyn FnMut(usize) -> Vec<(InternalKey, Bytes)> + '_> =
-                Box::new(move |bi| {
-                    let mut entries = cache
-                        .get_or_insert_with(&path, bi, || {
-                            table.decode_block(bi).unwrap_or_default()
-                        })
-                        .as_ref()
-                        .clone();
-                    if resolve_values {
-                        db.prefetch_resolve_stream(&mut entries);
-                    }
-                    entries
-                });
+            let load: Box<
+                dyn FnMut(usize) -> Option<std::sync::Arc<Vec<(InternalKey, Bytes)>>> + '_,
+            > = Box::new(move |bi| {
+                let cached = cache
+                    .get_or_insert_with(&path, bi, || table.decode_block(bi).unwrap_or_default());
+                if resolve_values {
+                    let mut entries = cached.as_ref().clone();
+                    db.prefetch_resolve_stream(&mut entries);
+                    Some(std::sync::Arc::new(entries))
+                } else {
+                    Some(cached)
+                }
+            });
             streams.push(Box::new(table.iter_user_range(start, end, load)));
         }
         StreamingVisibleIter::from_point_streams(streams, range_dels, snapshot, start, end, limit)
@@ -7740,6 +7785,108 @@ mod tests {
             0,
             "second get of the same key must not lz4-decode again"
         );
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// MVCC latest / deps_scan: second seek of the same prefix/range is cache-only.
+    #[test]
+    fn last_under_prefix_and_scan_second_seek_are_cached() {
+        let dir = temp_dir();
+        let mut db = Db::open(&dir).unwrap();
+        let payload = vec![b'z'; 256];
+        for user in 0..40u32 {
+            for ver in 1..=3u64 {
+                let mut k = format!("u/{user:02}").into_bytes();
+                k.extend_from_slice(&ver.to_be_bytes());
+                db.put(&k, &payload).unwrap();
+            }
+        }
+        db.flush().unwrap();
+        let snap = db.last_sequence();
+        db.block_cache.clear();
+        crate::sst::reset_sst_blocks_decoded();
+        let last = db
+            .last_under_prefix(snap, b"u/10")
+            .unwrap()
+            .expect("user 10");
+        assert!(last.starts_with(b"u/10"));
+        let first = crate::sst::sst_blocks_decoded();
+        assert!(first >= 1, "first latest must decode");
+        crate::sst::reset_sst_blocks_decoded();
+        let last2 = db.last_under_prefix(snap, b"u/10").unwrap();
+        assert_eq!(last2.as_deref(), Some(last.as_ref()));
+        assert_eq!(
+            crate::sst::sst_blocks_decoded(),
+            0,
+            "second latest must hit the block cache"
+        );
+
+        db.block_cache.clear();
+        crate::sst::reset_sst_blocks_decoded();
+        let n = db
+            .try_scan_at(
+                snap,
+                Bound::Included(b"u/10".as_ref()),
+                Bound::Excluded(b"u/15".as_ref()),
+                Some(25),
+            )
+            .unwrap()
+            .count();
+        assert!(n > 0);
+        let scan_first = crate::sst::sst_blocks_decoded();
+        crate::sst::reset_sst_blocks_decoded();
+        let n2 = db
+            .try_scan_at(
+                snap,
+                Bound::Included(b"u/10".as_ref()),
+                Bound::Excluded(b"u/15".as_ref()),
+                Some(25),
+            )
+            .unwrap()
+            .count();
+        assert_eq!(n2, n);
+        assert_eq!(
+            crate::sst::sst_blocks_decoded(),
+            0,
+            "second limited scan must not re-decode (first decoded {scan_first})"
+        );
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn last_under_user_prefix_mem_hit_skips_sst_and_tombstone_still_falls_back() {
+        let dir = temp_dir();
+        let mut db = Db::open(&dir).unwrap();
+        for ver in 1..=3u64 {
+            let mut k = b"u/01".to_vec();
+            k.extend_from_slice(&ver.to_be_bytes());
+            db.put(&k, b"v").unwrap();
+        }
+        db.flush().unwrap();
+        let mut k4 = b"u/01".to_vec();
+        k4.extend_from_slice(&4u64.to_be_bytes());
+        db.put(&k4, b"v4").unwrap();
+        db.block_cache.clear();
+        crate::sst::reset_sst_blocks_decoded();
+        let got = db
+            .last_under_user_prefix(db.last_sequence(), b"u/01")
+            .unwrap()
+            .expect("mem latest");
+        assert_eq!(got, k4);
+        assert_eq!(
+            crate::sst::sst_blocks_decoded(),
+            0,
+            "newest mem live key must not probe SST"
+        );
+
+        db.delete(&k4).unwrap();
+        let prev = db
+            .last_under_user_prefix(db.last_sequence(), b"u/01")
+            .unwrap()
+            .expect("flushed v3");
+        assert_eq!(&prev[prev.len() - 8..], &3u64.to_be_bytes());
         db.close().unwrap();
         let _ = fs::remove_dir_all(&dir);
     }
