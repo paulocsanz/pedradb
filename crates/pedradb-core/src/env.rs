@@ -147,9 +147,21 @@ pub trait Env: Clone {
     }
 }
 
+/// POSIX `fdatasync(2)` on the data of `file`.
+///
+/// On Apple, [`File::sync_data`] is `fcntl(F_FULLFSYNC)` (~5 ms here). RocksDB
+/// / TiKV `WriteOptions.sync` call libc `fdatasync` (~30–50 µs). WAL commit
+/// uses this so the barrier class matches the peer (RFC-0001 / RFC-0036).
+///
+/// # Errors
+/// Underlying I/O.
+pub fn fdatasync_file(file: &File) -> io::Result<()> {
+    pedradb_posix::fdatasync_file(file)
+}
+
 impl EnvFile for File {
     fn sync_data(&mut self) -> io::Result<()> {
-        File::sync_data(self)
+        fdatasync_file(self)
     }
 
     fn sync_all(&mut self) -> io::Result<()> {
@@ -199,7 +211,8 @@ impl Env for StdEnv {
 
     fn sync_dir(&self, path: &Path) -> io::Result<()> {
         let dir = File::open(path)?;
-        dir.sync_all()
+        // Same class as WAL/SST (RFC-0036): Apple File::sync_all is F_FULLFSYNC.
+        fdatasync_file(&dir)
     }
 
     fn read_dir_names(&self, path: &Path) -> io::Result<Vec<String>> {
@@ -252,6 +265,23 @@ mod tests {
         // StdEnv is always a no-op (Linux fadvise is IoUringEnv).
         StdEnv.advise(&path, 0, 4096, AdviseKind::WillNeed).unwrap();
         StdEnv.advise(&path, 0, 4096, AdviseKind::DontNeed).unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn fdatasync_file_flushes_without_error() {
+        let dir = std::env::temp_dir().join(format!(
+            "pedra-fdatasync-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("wal.bin");
+        let mut f = File::create(&path).unwrap();
+        f.write_all(b"pedra").unwrap();
+        fdatasync_file(&f).unwrap();
         let _ = fs::remove_dir_all(&dir);
     }
 }

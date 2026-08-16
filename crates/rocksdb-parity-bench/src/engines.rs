@@ -7,7 +7,7 @@ use crate::{CfWrite, Engine, DEPS_CFS};
 use std::path::Path;
 
 /// rocksdb-compat on pedradb-core (always available). Single node, single
-/// client; WAL fsync before Ok.
+/// client; WAL `fdatasync` before Ok (RFC-0001 / RFC-0036).
 pub struct CompatEngine {
     db: rocksdb_compat::DB,
 }
@@ -26,7 +26,7 @@ impl Engine for CompatEngine {
         "compat"
     }
     fn durability(&self) -> &'static str {
-        "fsync-before-ok (pedradb-core WAL)"
+        "fdatasync-before-ok (pedradb-core WAL; RFC-0001/0036)"
     }
     fn sync(&self) -> bool {
         true
@@ -38,19 +38,9 @@ impl Engine for CompatEngine {
         self.db.get(k).map_err(|_| ())
     }
     fn scan_count(&self, start: &[u8], end: &[u8], cap: usize) -> Result<usize, ()> {
-        let mut it = self
-            .db
-            .iterator(rocksdb_compat::IteratorMode::From(
-                start,
-                rocksdb_compat::Direction::Forward,
-            ))
-            .map_err(|_| ())?;
-        let mut n = 0;
-        while it.valid() && n < cap && it.key() < end {
-            n += 1;
-            it.next();
-        }
-        Ok(n)
+        // Same visibility as a forward iterator; KeyOnly count (RFC-0033).
+        let h = self.db.cf_handle(rocksdb_compat::DEFAULT_CF).ok_or(())?;
+        self.db.count_cf(&h, start, end, cap).map_err(|_| ())
     }
     fn put_cf(&self, cf: &str, k: &[u8], v: &[u8]) -> bool {
         match self.db.cf_handle(cf) {

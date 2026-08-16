@@ -1564,7 +1564,7 @@ mod tests {
         db.put(b"a", b"1").unwrap();
         assert!(!db.is_durability_fenced());
 
-        // SyncFail: writes land; next sync_all (put path) fails after append.
+        // SyncFail: writes land; next sync_data (put path) fails after append.
         env.arm_with_kind(0, false, FaultKind::SyncFail);
         let err = db.put(b"b", b"2").unwrap_err();
         assert!(

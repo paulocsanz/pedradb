@@ -431,6 +431,7 @@ dependencies = [
  "crc32c",
  "lz4_flex",
  "parking_lot",
+ "pedradb-posix",
  "stateright",
  "thiserror",
  "tracing",
@@ -531,6 +532,10 @@ dependencies = [
  "pedradb-core",
  "rocksdb",
 ]
+
+[[package]]
+name = "pedradb-posix"
+version = "0.1.0"
 
 [[package]]
 name = "pedradb-raft"

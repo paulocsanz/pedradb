@@ -151,6 +151,30 @@ Seed 4096×1 KB: Pedra 17.5 s · Rocks fdatasync 0.2 s.
 
 Leituras puras: C **1.39×**; MVCC e scan **mais rápidos** que o Rocks fd (0.77×). Escritas 27–191× — o piso é o syscall, não o LSM. Gate oficial continua vs `F_FULLFSYNC` (tabela acima).
 
+## RFC-0036 — WAL `fdatasync` vs Rocks padrão do TiKV (2026-08-16)
+
+Pedra no Ok agora chama `fdatasync(2)` de verdade (`pedradb-posix`; no Apple o `File::sync_data` da std é `F_FULLFSYNC`). WAL **ainda sinca antes do Ok**. Fence se o sync falha. SST/MANIFEST/CHANGELOG/dir na mesma classe. CHANGELOG não reescreve no put (interval 0; flush/close persistem). Adversarial sem editar asserção.
+
+Mesmos knobs, ycsb+deps combinada. Peer = Rocks `WriteOptions.sync=true` / `fdatasync`. Raw: [tikv-ycsb-0036-fdatasync](tikv-ycsb-0036-fdatasync/).
+
+`slower` = Rocks_fd / Pedra. Teto 2× = slower ≤ 2.
+
+| shape | Pedra qps | p50 | p95 | p99 | Rocks fd qps | p50 | p95 | p99 | slower | ≤2× |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|:---:|
+| ycsb_a | 59 677 | 20 µs | 46 µs | 55 µs | 58 583 | 22 µs | 48 µs | 60 µs | **0.98×** | sim |
+| ycsb_b | 365 358 | 0.5 µs | 21 µs | 41 µs | 393 243 | 0.8 µs | 24 µs | 46 µs | **1.08×** | sim |
+| ycsb_c | 1 166 549 | 0.3 µs | 3.3 µs | 5.6 µs | 1 408 823 | 0.6 µs | 1.0 µs | 1.3 µs | **1.21×** | sim |
+| ycsb_d | 420 003 | 0.4 µs | 21 µs | 42 µs | 404 988 | 0.7 µs | 24 µs | 44 µs | **0.96×** | sim |
+| ycsb_e | 159 148 | 5.2 µs | 19 µs | 43 µs | 104 754 | 7.3 µs | 23 µs | 48 µs | **0.66×** | sim |
+| ycsb_f | 32 688 | 24 µs | 63 µs | 309 µs | 53 040 | 25 µs | 50 µs | 59 µs | **1.62×** | sim |
+| deps_apply_batch | 730 | 158 µs | 250 µs | 5.91 ms | 4 823 | 182 µs | 258 µs | 1.03 ms | **6.6×** | não |
+| deps_mvcc_latest | 343 016 | 0.6 µs | 13 µs | 16 µs | 297 344 | 3.0 µs | 5.6 µs | 7.4 µs | **0.87×** | sim |
+| deps_scan | 381 585 | 0.3 µs | 11 µs | 18 µs | 287 277 | 3.3 µs | 4.2 µs | 4.7 µs | **0.75×** | sim |
+| deps_raftlog | 886 | 45 µs | 82 µs | 240 µs | 5 662 | 177 µs | 220 µs | 569 µs | **6.4×** | não |
+| deps_cache_overwrite | 9 800 | 27 µs | 39 µs | 56 µs | 23 304 | 27 µs | 52 µs | 65 µs | **2.38×** | não |
+
+**8/11 ≤2×.** apply/raftlog: p50 **melhor** que o Rocks; qps cai no compact inline (max 468 ms / 874 ms). G6 = sem thread no core, compact no writer. overwrite 2.38× nesta run (run anterior 0.83× — cauda). WAL ainda sincado antes do Ok.
+
 ## RFC-0033 remesure (2026-08-15, deps-only)
 
 Same knobs (4096/2000, zipfian, 1 KB). Compat only — no Rocks peer in this slice. After apply (64k txns, batch=32).

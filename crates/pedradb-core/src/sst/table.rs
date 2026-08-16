@@ -1503,7 +1503,7 @@ pub fn write_sst_entries_on(
     {
         let mut file = env.create(path)?;
         file.write_all(&body)?;
-        file.sync_all()?;
+        file.sync_data()?;
     }
 
     SstTable::open_on(env, path)

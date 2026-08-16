@@ -319,7 +319,7 @@ pub fn store<E: Env>(env: &E, dir: &Path, vs: &VersionSet, sync: bool) -> Result
     {
         let mut f = env.create(&man_tmp)?;
         f.write_all(&payload)?;
-        f.sync_all()?;
+        f.sync_data()?;
     }
     env.rename(&man_tmp, &man_final)?;
 
@@ -328,7 +328,7 @@ pub fn store<E: Env>(env: &E, dir: &Path, vs: &VersionSet, sync: bool) -> Result
         let mut f = env.create(&cur_tmp)?;
         f.write_all(man_name.as_bytes())?;
         f.write_all(b"\n")?;
-        f.sync_all()?;
+        f.sync_data()?;
     }
     env.rename(&cur_tmp, &dir.join(CURRENT_FILE))?;
 

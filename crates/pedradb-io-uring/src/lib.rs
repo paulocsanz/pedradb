@@ -293,7 +293,7 @@ impl EnvFile for IoUringFile {
                 return self.uring_fsync(true);
             }
         }
-        self.file.sync_data()
+        pedradb_core::env::fdatasync_file(&self.file)
     }
 
     fn sync_all(&mut self) -> io::Result<()> {

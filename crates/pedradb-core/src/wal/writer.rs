@@ -200,6 +200,6 @@ mod tests {
         let mut writer = WalWriter::new(Cursor::new(Vec::new())).unwrap();
         writer.add_record(b"").unwrap();
         let buf = writer.into_inner().into_inner();
-        assert_eq!(collect_records(&buf), vec![Vec::new()]);
+        assert_eq!(collect_records(&buf), vec![Vec::<u8>::new()]);
     }
 }

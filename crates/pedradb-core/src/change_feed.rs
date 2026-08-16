@@ -220,7 +220,8 @@ impl ChangeLog {
         {
             let mut f = env.create(&tmp)?;
             f.write_all(&body)?;
-            f.sync_all()?;
+            // Cache (RFC-0019): same barrier class as WAL, not Apple F_FULLFSYNC.
+            f.sync_data()?;
         }
         // Atomic replace: rename overwrites existing path on the same filesystem.
         env.rename(&tmp, &path)?;

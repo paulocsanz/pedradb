@@ -1,0 +1,9 @@
+[package]
+name = "pedradb-posix"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "POSIX fdatasync(2) for PedraDB (core stays forbid(unsafe_code))"
+rust-version.workspace = true
+
+[dependencies]

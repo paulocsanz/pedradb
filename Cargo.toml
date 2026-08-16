@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
+    "crates/pedradb-posix",
     "crates/pedradb-core",
     "crates/pedradb-sim",
     "crates/pedradb-oracle",
@@ -35,6 +36,7 @@ rust-version = "1.75"
 
 [workspace.dependencies]
 # Internal
+pedradb-posix = { path = "crates/pedradb-posix" }
 pedradb-core = { path = "crates/pedradb-core" }
 pedradb-sim = { path = "crates/pedradb-sim" }
 pedradb-oracle = { path = "crates/pedradb-oracle" }

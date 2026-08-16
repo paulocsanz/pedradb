@@ -8,9 +8,10 @@
 //! With default [`OpenOptions::sync`] = `true`:
 //!
 //! - Successful [`Db::put`], [`Db::delete`], and [`Transaction::commit`](crate::tx::Transaction::commit)
-//!   return only after the WAL record is appended and **`fsync`/`sync_all` completes**.
+//!   return only after the WAL record is appended and **`fdatasync` completes**
+//!   (RFC-0001 O1 / RFC-0036; same class as Rocks/TiKV `WriteOptions.sync`).
 //! - After that `Ok`, a **process crash** (kill -9) must not lose the write if the OS
-//!   and disk honor fsync. Reopen replays complete WAL records into the MemTable and
+//!   and disk honor `fdatasync`. Reopen replays complete WAL records into the MemTable and
 //!   loads SST files.
 //! - A crash **during** append may leave a truncated trailing record; recovery **skips**
 //!   it (no partial TX visible). Multi-key commit is one WAL record → all-or-nothing.
@@ -18,7 +19,7 @@
 //! - [`OpenOptions::sync`] = `false` is for bulk load/benches only: process crash may
 //!   still retain OS-buffered data; **power loss can lose recent acks** (JetStream/Jepsen lesson).
 //! - **`Err` after a required WAL sync does not mean “record absent on disk”** (uncertain):
-//!   append may have succeeded while `sync_all` failed. The open handle is then
+//!   append may have succeeded while `sync_data` failed. The open handle is then
 //!   **durability-fenced** ([`CoreError::DurabilityFenced`]) — further writes refuse until
 //!   `close` + `open` (recover rebuilds mem from WAL).
 //! - When `sync=true`, **`Env::sync_dir` failures** on flush SST publish, MANIFEST/`CURRENT`
@@ -60,9 +61,7 @@ use bytes::Bytes;
 use crate::batch::{WriteOp, WriteRecord};
 use crate::cache::{AnswerCache, BlockCache, PointCache, TableCache};
 use crate::change_feed::{ChangeEntry, ChangeKind, ChangeLog};
-use crate::changelog_kernel::{
-    changelog_needs_sst_rebuild, changelog_should_store, DEFAULT_CHANGELOG_INTERVAL,
-};
+use crate::changelog_kernel::{changelog_needs_sst_rebuild, changelog_should_store};
 use crate::env::{Env, EnvFile, StdEnv};
 use crate::error::{CoreError, Result};
 use crate::host::Host;
@@ -90,8 +89,9 @@ pub const WAL_FILE_NAME: &str = "CURRENT.log";
 /// Options for [`Db::open`].
 #[derive(Debug, Clone, Copy)]
 pub struct OpenOptions {
-    /// When true (default), each successful `put`/`delete`/`commit` syncs the WAL
-    /// before returning (RFC-0001 O1). Overridable per write via [`WriteOptions`].
+    /// When true (default), each successful `put`/`delete`/`commit` `fdatasync`s
+    /// the WAL before returning (RFC-0001 O1 / RFC-0036). Overridable per write
+    /// via [`WriteOptions`].
     pub sync: bool,
     /// When MemTable approximate size reaches this many bytes, flush to SST.
     /// `None` or `0` disables auto-flush (manual [`Db::flush`] only).
@@ -145,7 +145,7 @@ pub struct DbStats {
     pub auto_compact_failures: u64,
     /// Most recent auto-compact error after flush (empty if never failed).
     pub last_auto_compact_error: String,
-    /// WAL `sync_all` calls (group commit amortizes this under concurrent writers).
+    /// WAL `sync_data` calls (group commit amortizes this under concurrent writers).
     pub wal_sync_count: u64,
     /// On-disk size of `VALUES.vlog` (0 if absent).
     pub vlog_bytes: u64,
@@ -466,12 +466,13 @@ impl Default for OpenOptions {
     }
 }
 
-/// `PEDRA_CHANGELOG_INTERVAL` (RFC-0031). Invalid / unset → [`DEFAULT_CHANGELOG_INTERVAL`].
+/// `PEDRA_CHANGELOG_INTERVAL` (RFC-0031). Unset → `0` (never on the commit
+/// path; flush/close still persist). The cache is rebuilt from WAL (RFC-0019).
 fn changelog_interval_from_env() -> u64 {
     std::env::var("PEDRA_CHANGELOG_INTERVAL")
         .ok()
         .and_then(|s| s.parse().ok())
-        .unwrap_or(DEFAULT_CHANGELOG_INTERVAL)
+        .unwrap_or(0)
 }
 
 /// What a range scan yields (RFC-0019 P1.2).
@@ -3693,7 +3694,7 @@ impl<E: Env> Db<E> {
     /// I/O from fsync, or [`CoreError::DurabilityFenced`].
     pub fn sync(&mut self) -> Result<()> {
         self.ensure_not_fenced()?;
-        self.wal.sync_all()
+        self.wal.sync_data()
     }
 
     /// Close the WAL and release the directory lock via [`Env`] when held.
@@ -3832,7 +3833,7 @@ impl<E: Env> Db<E> {
         self.wal.append_record(&encoded)?;
         let do_sync = durability.sync.unwrap_or(self.sync);
         if do_sync {
-            if let Err(e) = self.wal.sync_all() {
+            if let Err(e) = self.wal.sync_data() {
                 self.durability_fenced = true;
                 return Err(e);
             }
@@ -3906,10 +3907,10 @@ impl<E: Env> Db<E> {
         self.wal.append_record(&encoded)
     }
 
-    /// One WAL fsync for a group of already-appended records.
+    /// One WAL `fdatasync` for a group of already-appended records.
     pub(crate) fn wal_sync_group(&mut self) -> Result<()> {
         self.ensure_not_fenced()?;
-        if let Err(e) = self.wal.sync_all() {
+        if let Err(e) = self.wal.sync_data() {
             self.durability_fenced = true;
             return Err(e);
         }

@@ -50,7 +50,7 @@ pub enum CoreError {
     #[error("corrupt manifest: {0}")]
     CorruptManifest(String),
 
-    /// A required WAL `sync_all` failed after append; this `Db` refuses further
+    /// A required WAL `sync_data` failed after append; this `Db` refuses further
     /// writes until `close` + `open` (reopen rebuilds mem from WAL).
     ///
     /// The original failure may still have left a complete record on disk

@@ -21,6 +21,7 @@ parking_lot.workspace = true
 bytes.workspace = true
 tracing.workspace = true
 lz4_flex.workspace = true
+pedradb-posix.workspace = true
 
 [dev-dependencies]
 # Same production recover_kernel as collect_all (F4 / F14).
