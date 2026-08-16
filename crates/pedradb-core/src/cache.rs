@@ -4,7 +4,7 @@
 //!   open of the same SST does not re-read the full file from the [`Env`].
 //! - [`BlockCache`]: caches decompressed SST data blocks by `(path, block_idx)`.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -148,6 +148,9 @@ pub struct BlockCache {
 #[derive(Debug, Default)]
 struct BlockCacheInner {
     map: HashMap<(u64, usize), CachedBlock>,
+    /// LRU: front is coldest. HashMap eviction was arbitrary and evicted hot
+    /// zipfian blocks (RFC-0035 P1.3 scan 19% hit).
+    order: VecDeque<(u64, usize)>,
     capacity: usize,
     hits: u64,
     misses: u64,
@@ -160,6 +163,7 @@ impl BlockCache {
         Self {
             inner: Mutex::new(BlockCacheInner {
                 map: HashMap::new(),
+                order: VecDeque::new(),
                 capacity,
                 hits: 0,
                 misses: 0,
@@ -196,24 +200,44 @@ impl BlockCache {
             let mut g = self.inner.lock();
             if let Some(b) = g.map.get(&key).cloned() {
                 g.hits = g.hits.saturating_add(1);
+                Self::touch_lru(&mut g.order, key);
                 return b;
             }
         }
         let block = Arc::new(load());
         let mut g = self.inner.lock();
+        if let Some(b) = g.map.get(&key).cloned() {
+            g.hits = g.hits.saturating_add(1);
+            Self::touch_lru(&mut g.order, key);
+            return b;
+        }
         g.misses = g.misses.saturating_add(1);
-        if g.capacity > 0 && g.map.len() >= g.capacity && !g.map.contains_key(&key) {
-            if let Some(k) = g.map.keys().next().cloned() {
-                g.map.remove(&k);
+        if g.capacity > 0 {
+            while g.map.len() >= g.capacity {
+                if let Some(old) = g.order.pop_front() {
+                    g.map.remove(&old);
+                } else {
+                    break;
+                }
             }
         }
         g.map.insert(key, Arc::clone(&block));
+        g.order.push_back(key);
         block
+    }
+
+    fn touch_lru(order: &mut VecDeque<(u64, usize)>, key: (u64, usize)) {
+        if let Some(i) = order.iter().position(|k| *k == key) {
+            order.remove(i);
+        }
+        order.push_back(key);
     }
 
     /// Clear all blocks.
     pub fn clear(&self) {
-        self.inner.lock().map.clear();
+        let mut g = self.inner.lock();
+        g.map.clear();
+        g.order.clear();
     }
 }
 
@@ -271,5 +295,23 @@ mod tests {
         let b2 = cache.get_or_insert_with(path, 0, || panic!("should not load"));
         assert_eq!(cache.hits(), 1);
         assert!(Arc::ptr_eq(&b1, &b2));
+    }
+
+    #[test]
+    fn block_cache_lru_evicts_coldest_not_arbitrary() {
+        let cache = BlockCache::new(2);
+        let path = Path::new("/tmp/lru.sst");
+        cache.get_or_insert_with(path, 0, || Vec::new());
+        cache.get_or_insert_with(path, 1, || Vec::new());
+        // Touch 0 so 1 is coldest.
+        cache.get_or_insert_with(path, 0, || panic!("0 must stay"));
+        cache.get_or_insert_with(path, 2, || Vec::new());
+        cache.get_or_insert_with(path, 0, || panic!("0 was hot and must remain"));
+        let mut loaded = false;
+        cache.get_or_insert_with(path, 1, || {
+            loaded = true;
+            Vec::new()
+        });
+        assert!(loaded, "1 was LRU and must be evicted");
     }
 }

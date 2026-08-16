@@ -688,7 +688,7 @@ impl<E: Env> Db<E> {
         manifest::cleanup_tmp_files(&env, &dir)?;
 
         let table_cache = TableCache::new(64);
-        let block_cache = BlockCache::new(256);
+        let block_cache = BlockCache::new(2048);
         let (
             ssts,
             sst_levels,
@@ -1564,7 +1564,91 @@ impl<E: Env> Db<E> {
             }
         }
         self.latest_sst_fallback.fetch_add(1, Ordering::Relaxed);
-        self.last_under_prefix(snapshot, prefix)
+        self.last_under_user_prefix_sst(snapshot, prefix)
+    }
+
+    /// L0 newest → older → L1+ (same single-writer invariant as the mem hit).
+    fn sst_indices_newest_first(&self) -> Vec<usize> {
+        let mut idx: Vec<usize> = (0..self.ssts.len()).collect();
+        idx.sort_by(|&a, &b| {
+            let la = self.sst_levels.get(a).copied().unwrap_or(0);
+            let lb = self.sst_levels.get(b).copied().unwrap_or(0);
+            match la.cmp(&lb) {
+                std::cmp::Ordering::Equal => b.cmp(&a),
+                o => o,
+            }
+        });
+        idx
+    }
+
+    /// SST fallback for an MVCC user prefix: first file (newest) with a live
+    /// key wins. Older files cannot hold a bytewise-larger suffix (same
+    /// contract as the mem hit). A newer tombstone of that exact key still
+    /// falls through (`before` retry).
+    fn last_under_user_prefix_sst(
+        &self,
+        snapshot: SequenceNumber,
+        prefix: &[u8],
+    ) -> Result<Option<Bytes>> {
+        let order = self.sst_indices_newest_first();
+        let mut before = crate::prefix::prefix_exclusive_end(prefix);
+        loop {
+            let mut cand: Option<Bytes> = None;
+            let mut cand_from = 0usize;
+            for (i, &sst_i) in order.iter().enumerate() {
+                let table = &self.ssts[sst_i];
+                self.latest_sst_probed.fetch_add(1, Ordering::Relaxed);
+                if let Some((k, _)) = table.last_visible_under_prefix_with(
+                    prefix,
+                    snapshot,
+                    before.as_deref(),
+                    |bi| {
+                        Some(self.block_cache.get_or_insert_with(table.path(), bi, || {
+                            table.decode_block(bi).unwrap_or_default()
+                        }))
+                    },
+                ) {
+                    cand = Some(k);
+                    cand_from = i;
+                    break;
+                }
+            }
+            let Some(k) = cand else {
+                return Ok(None);
+            };
+            if self.user_prefix_hidden_by_newer(snapshot, k.as_ref(), &order[..cand_from]) {
+                before = Some(k.to_vec());
+                continue;
+            }
+            return Ok(Some(k));
+        }
+    }
+
+    /// Newer mem / L0 has a point tombstone (or newer point) for `key`.
+    fn user_prefix_hidden_by_newer(
+        &self,
+        snapshot: SequenceNumber,
+        key: &[u8],
+        newer_sst: &[usize],
+    ) -> bool {
+        for table in self.mem_layers() {
+            match table.get_entry(key, snapshot) {
+                Some((_, Lookup::Deleted)) => return true,
+                Some((_, Lookup::Found(_))) => return false,
+                Some((_, Lookup::NotFound)) | None => {}
+            }
+        }
+        for &sst_i in newer_sst {
+            let table = &self.ssts[sst_i];
+            if let Some((_, look)) = table.point_at_with(key, snapshot, |bi| {
+                Some(self.block_cache.get_or_insert_with(table.path(), bi, || {
+                    table.decode_block(bi).unwrap_or_default()
+                }))
+            }) {
+                return matches!(look, Lookup::Deleted);
+            }
+        }
+        false
     }
 
     /// Range at `snapshot` with optional live-key `limit`.
@@ -3560,19 +3644,19 @@ impl<E: Env> Db<E> {
             }
         }
         self.get_sst_fallback.fetch_add(1, Ordering::Relaxed);
-        for table in &self.ssts {
-            // Open-time range tombstones (no full-table materialize).
+        // Newest file with a point wins (L0 before L1). Older files cannot
+        // hide a newer point; a newer tombstone is seen first.
+        for sst_i in self.sst_indices_newest_first() {
+            let table = &self.ssts[sst_i];
             table.collect_range_tombstones(snapshot, &mut range_tombs);
-            // Lazy single-block point probe (sequence-aware across layers).
             if let Some((seq, look)) = table.point_at_with(key, snapshot, |bi| {
                 Some(self.block_cache.get_or_insert_with(table.path(), bi, || {
                     table.decode_block(bi).unwrap_or_default()
                 }))
             }) {
-                if best_point_seq.is_none_or(|s| seq > s) {
-                    best_point_seq = Some(seq);
-                    best_point = look;
-                }
+                best_point_seq = Some(seq);
+                best_point = look;
+                break;
             }
         }
 
@@ -8126,6 +8210,33 @@ mod tests {
             Db::open(&dir).unwrap()
         };
         assert_eq!(db.get(b"k"), None);
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn last_under_user_prefix_older_l0_still_visible() {
+        let dir = temp_dir();
+        let mut db = Db::open(&dir).unwrap();
+        let mut k1 = b"u/01".to_vec();
+        k1.extend_from_slice(&1u64.to_be_bytes());
+        db.put(&k1, b"a").unwrap();
+        db.flush().unwrap();
+        let mut k2 = b"u/02".to_vec();
+        k2.extend_from_slice(&1u64.to_be_bytes());
+        db.put(&k2, b"b").unwrap();
+        db.flush().unwrap();
+        assert!(db.sst_count() >= 2);
+        let got = db
+            .last_under_user_prefix(db.last_sequence(), b"u/01")
+            .unwrap()
+            .expect("older L0");
+        assert_eq!(got, k1);
+        let got2 = db
+            .last_under_user_prefix(db.last_sequence(), b"u/02")
+            .unwrap()
+            .expect("newer L0");
+        assert_eq!(got2, k2);
         db.close().unwrap();
         let _ = fs::remove_dir_all(&dir);
     }

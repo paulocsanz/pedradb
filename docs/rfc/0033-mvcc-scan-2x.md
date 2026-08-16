@@ -87,7 +87,7 @@ Herdadas de RFC-0031/0032. Em especial:
 | P1.1 | p1 | SST skip blocos past end | done | `blocks_overlapping_range` already exclusive-end | 2026-08-15 |
 | P1.2 | p1 | gate 0.5 mvcc+scan | todo | — | 2026-08-15 |
 | P2.1 | p2 | tabela lab | todo | — | 2026-08-15 |
-| P2.2 | p2 | follow-up se residual | doing | 2026-08-16 P1.2: MVCC **13×** qps (18.8k / 252k FF; p50 2.0 µs), scan p50 ~139 µs — ainda > 2×; residual = SST fallback | 2026-08-16 |
+| P2.2 | p2 | follow-up se residual | doing | 2026-08-16 P1.3 cut: MVCC **4.1×** (45k / 187k FF), scan p50 131 µs @ 95% cache — ainda > 2× | 2026-08-16 |
 
 ## Acceptance Criteria
 

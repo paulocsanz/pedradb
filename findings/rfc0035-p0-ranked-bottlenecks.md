@@ -81,3 +81,20 @@ Was (P1.1): MVCC 9 006 qps / 77 µs. p50 of the combined op is now **faster th
 **2× qps still not met** (need ~126k vs this peer). Remaining #1: **SST fallback 21%**, 3 files every miss, p95 265 µs vs Rocks p95 7 µs. That tail is why 2 µs p50 still yields only 19k qps. P1.3 = cut fallback, not another mem-hit micro-opt.
 
 G1–G8: read-path only. Visibility = `get_entry` / `lookup`. Adversarial compat green. No `sync_data`.
+
+## P1.3 follow-up (SST fallback + scan cache)
+
+Shipped: (1) `last_under_user_prefix` / `lookup` walk SST **newest-first** and stop at the first live point (same single-writer invariant as the mem hit; newer tombstone still `before`-retries); (2) `BlockCache` is LRU (was HashMap `keys().next()`) and default 256 → 2048.
+
+Clean remesure ([compat.json](rfc0035-p13/compat.json) / [rocks-ff.json](rfc0035-p13/rocks-ff.json), same knobs, same run):
+
+| | Pedra | p50 | Rocks FF | p50 | slower (qps) |
+|---|---:|---:|---:|---:|---:|
+| `deps_mvcc_latest` | **45 277** | **1.5 µs** | 187 050 | 3.4 µs | **4.1×** |
+| `deps_scan` | 6 212 | 131 µs | 272 937 | 3.4 µs | 44× |
+
+Probes: SST files / fallback **2.08** (was 3.00); `get_sst_fallback` 432 (was 858). Scan block cache **95% hit** (6016/311), **0.16** decodes/op (was 2.57 / 19%). last mean 13 µs, get mean 8 µs.
+
+**2× still not met** (need ~94k MVCC / ~136k scan). MVCC tail is the remaining 21% fallback (p95 192 µs). Scan p50 **did not move** (~131 µs) after decode went away — the leftover is merge/setup of 3 SST streams + mem materialize, not lz4. Next cut is that CPU path (or P2.1 cliff), not another cache bump.
+
+G1–G8: read-path only. `last_under_user_prefix` still MVCC-user-prefix only. Adversarial green.
