@@ -41,7 +41,7 @@ Não é “menos durável que o TiKV”. É a **mesma** classe. `F_FULLFSYNC` co
 
 - [x] **P0.1** RFC + Status vivo (este doc) — status: `done`
 - [x] **P0.2** `EnvFile::sync_data` = `fdatasync(2)` no Unix; WAL commit/group usa `sync_data`; fence inalterado — status: `done`
-- [ ] **P0.3** Remesura 11/11 ≥ 0.5 vs Rocks fd — status: `doing` (10/11; apply 2.31× — compact L0 no writer)
+- [ ] **P0.3** Remesura 11/11 ≥ 0.5 vs Rocks fd — status: `doing` (10/11; apply 2.31× → [RFC-0037](0037-apply-off-put-and-2x-pedra.md))
 
 ### P1 — next wave
 
