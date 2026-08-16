@@ -58,7 +58,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use bytes::Bytes;
 
 use crate::batch::{WriteOp, WriteRecord};
-use crate::cache::{BlockCache, TableCache};
+use crate::cache::{BlockCache, PointCache, TableCache};
 use crate::change_feed::{ChangeEntry, ChangeKind, ChangeLog};
 use crate::changelog_kernel::{
     changelog_needs_sst_rebuild, changelog_should_store, DEFAULT_CHANGELOG_INTERVAL,
@@ -548,6 +548,8 @@ pub struct Db<E: Env = StdEnv> {
     table_cache: TableCache,
     /// Decompressed block cache (hit stats for read path).
     block_cache: BlockCache,
+    /// Latest-snapshot point answers; cleared on write (RFC-0035).
+    point_cache: PointCache,
     /// Exclusive directory lock (released via Env on close/drop when possible).
     dir_lock: Option<DirLock>,
     /// Set when append succeeded but required WAL `sync_all` failed (RFC-0015 H1).
@@ -689,6 +691,7 @@ impl<E: Env> Db<E> {
 
         let table_cache = TableCache::new(64);
         let block_cache = BlockCache::new(8192);
+        let point_cache = PointCache::new(2048);
         let (
             ssts,
             sst_levels,
@@ -798,6 +801,7 @@ impl<E: Env> Db<E> {
             auto_compact_sst_bytes: opts.auto_compact_sst_bytes.filter(|n| *n > 0),
             table_cache,
             block_cache,
+            point_cache,
             dir_lock: lock,
             durability_fenced: false,
             auto_compact_failures: 0,
@@ -1111,7 +1115,12 @@ impl<E: Env> Db<E> {
     pub fn get(&self, key: &[u8]) -> Option<Bytes> {
         // Latest snapshot is always ≥ watermark when watermark is raised from
         // last_sequence / pin floor after GC; fall back to None only on fence.
-        self.get_at(self.snapshot(), key).ok().flatten()
+        if let Some(cached) = self.point_cache.get(key) {
+            return cached;
+        }
+        let got = self.get_at(self.snapshot(), key).ok().flatten();
+        self.point_cache.insert(key, got.clone());
+        got
     }
 
     /// Point lookup at an explicit [`Snapshot`].
@@ -3799,6 +3808,7 @@ impl<E: Env> Db<E> {
             self.maybe_persist_changelog_after_durable_commit();
         }
         apply_record(&mut self.mem, &rec);
+        self.point_cache.clear();
         Ok(())
     }
 
@@ -3870,6 +3880,7 @@ impl<E: Env> Db<E> {
     /// Apply prepared ops to the memtable after durable WAL.
     pub(crate) fn apply_ops_to_mem(&mut self, ops: Vec<WriteOp>) {
         apply_record(&mut self.mem, &WriteRecord { ops });
+        self.point_cache.clear();
     }
 
     /// Rocks-style group commit: many client batches, one fsync if any requires sync.
@@ -3973,6 +3984,7 @@ impl<E: Env> Db<E> {
             self.apply_ops_to_mem(write_ops);
             results[i] = Some(Ok(last_seq));
         }
+        self.point_cache.clear();
         self.maybe_auto_flush_best_effort();
         finish_group_results(results)
     }
@@ -8302,6 +8314,21 @@ mod tests {
             db.close().unwrap();
             Db::open(&dir).unwrap()
         };
+        assert_eq!(db.get(b"k"), None);
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn point_cache_invalidates_on_put() {
+        let dir = temp_dir();
+        let mut db = Db::open(&dir).unwrap();
+        db.put(b"k", b"v1").unwrap();
+        assert_eq!(db.get(b"k").as_deref(), Some(&b"v1"[..]));
+        assert_eq!(db.get(b"k").as_deref(), Some(&b"v1"[..]));
+        db.put(b"k", b"v2").unwrap();
+        assert_eq!(db.get(b"k").as_deref(), Some(&b"v2"[..]));
+        db.delete(b"k").unwrap();
         assert_eq!(db.get(b"k"), None);
         db.close().unwrap();
         let _ = fs::remove_dir_all(&dir);

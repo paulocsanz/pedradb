@@ -164,3 +164,20 @@ Within noise of P1.3d (105k / 54k / 14 µs). The 14 µs scan p50 is **not** the 
 **2× still not met.** Residual still 22% SST get + 3-stream setup. Next cut is that merge, not the cache.
 
 G1–G8: read-path only. Adversarial green.
+
+## P1.3f follow-up (latest-snapshot point cache)
+
+Shipped: `PointCache` on `Db::get` (2048 keys). Invalidated on `commit_ops_with` / `group_commit` / `apply_ops_to_mem` (G2: soak was red until group-commit cleared it). `get_at` at an old snapshot is not cached.
+
+Clean remesure ([compat.json](rfc0035-p13f/compat.json) / [rocks-ff.json](rfc0035-p13f/rocks-ff.json)):
+
+| | Pedra | p50 | Rocks FF | p50 | slower (qps) |
+|---|---:|---:|---:|---:|---:|
+| `deps_mvcc_latest` | **113 427** | 1.1 µs | 269 777 | 3.1 µs | **2.4×** |
+| `deps_scan` | 58 567 | 13.0 µs | 246 431 | 3.6 µs | **4.2×** |
+
+Was (P1.3e): MVCC 101k. Probe: `get_inline` 745 / 2000 (cache skips lookup on repeats); `get_sst_fallback` 378 (was 432). Zipfian repeats hit; first-touch tail still decodes (p95 72 µs).
+
+**2× still not met** (need ~135k MVCC / ~123k scan vs this peer). Not a regression vs 105k: 101k→113k is up; 105k→101k was noise.
+
+G1–G8: write paths clear the cache. Adversarial + rfc19 soak green.

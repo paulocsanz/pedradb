@@ -3,6 +3,7 @@
 //! - [`TableCache`]: reuses decoded [`SstTable`] handles by path so a second
 //!   open of the same SST does not re-read the full file from the [`Env`].
 //! - [`BlockCache`]: caches decompressed SST data blocks by `(path, block_idx)`.
+//! - [`PointCache`]: latest-snapshot point-get answers (invalidated on write).
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -258,6 +259,87 @@ impl BlockCache {
     }
 }
 
+/// Latest-snapshot point answers. Cleared on every durable write (RFC-0035).
+///
+/// Hit is O(1). Capacity 0 = disabled.
+#[derive(Debug, Default)]
+pub struct PointCache {
+    inner: Mutex<PointCacheInner>,
+}
+
+#[derive(Debug, Default)]
+struct PointCacheInner {
+    map: HashMap<Bytes, PointSlot>,
+    tick: u64,
+    capacity: usize,
+}
+
+#[derive(Debug, Clone)]
+struct PointSlot {
+    value: Option<Bytes>,
+    tick: u64,
+}
+
+impl PointCache {
+    /// Create with max cached keys (`0` = disabled).
+    #[must_use]
+    pub fn new(capacity: usize) -> Self {
+        Self {
+            inner: Mutex::new(PointCacheInner {
+                map: HashMap::new(),
+                tick: 0,
+                capacity,
+            }),
+        }
+    }
+
+    /// `None` = miss. `Some(None)` = cached absence. `Some(Some(v))` = cached value.
+    #[must_use]
+    pub fn get(&self, key: &[u8]) -> Option<Option<Bytes>> {
+        let mut g = self.inner.lock();
+        if g.capacity == 0 {
+            return None;
+        }
+        let Some(slot) = g.map.get(key) else {
+            return None;
+        };
+        let value = slot.value.clone();
+        let tick = g.tick.saturating_add(1);
+        g.tick = tick;
+        if let Some(slot) = g.map.get_mut(key) {
+            slot.tick = tick;
+        }
+        Some(value)
+    }
+
+    /// Store a latest-snapshot answer.
+    pub fn insert(&self, key: &[u8], value: Option<Bytes>) {
+        let mut g = self.inner.lock();
+        if g.capacity == 0 {
+            return;
+        }
+        if g.map.len() >= g.capacity && !g.map.contains_key(key) {
+            let victim = g
+                .map
+                .iter()
+                .min_by_key(|(_, s)| s.tick)
+                .map(|(k, _)| k.clone());
+            if let Some(old) = victim {
+                g.map.remove(&old);
+            }
+        }
+        let tick = g.tick.saturating_add(1);
+        g.tick = tick;
+        g.map
+            .insert(Bytes::copy_from_slice(key), PointSlot { value, tick });
+    }
+
+    /// Drop every entry (call after a write that can change latest visibility).
+    pub fn clear(&self) {
+        self.inner.lock().map.clear();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -330,6 +412,18 @@ mod tests {
             Vec::new()
         });
         assert!(loaded, "1 was LRU and must be evicted");
+    }
+
+    #[test]
+    fn point_cache_hit_and_clear() {
+        let c = PointCache::new(4);
+        assert!(c.get(b"k").is_none());
+        c.insert(b"k", Some(Bytes::from_static(b"v")));
+        assert_eq!(c.get(b"k").unwrap().as_deref(), Some(&b"v"[..]));
+        c.insert(b"missing", None);
+        assert_eq!(c.get(b"missing"), Some(None));
+        c.clear();
+        assert!(c.get(b"k").is_none());
     }
 
     #[test]
