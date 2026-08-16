@@ -83,6 +83,28 @@ Same knobs, deps-only after apply, Rocks FF peer ~160k / ~165k qps.
 
 WAL `sync_all` unchanged. `last_under_user_prefix` only skips SST when newest mem already has a live key of that user (MVCC suffix). Tombstone of the latest still falls back to full `last_under_prefix` + lookup (tested). Scan iterates `Arc` blocks (no 4 KB clone). Residual: overlapping L0 last_visible/merge when the key is not in mem.
 
+## RFC-0035 — tabela completa vs F_FULLFSYNC (`58084ba`, 2026-08-16)
+
+Mesmos knobs: 4096/2000 zipfian 1 KB, `ROCKS_PARITY_FULL_SYNC=1`, suíte `ycsb,deps` **na mesma run**. Peer = Rocks `sync` + `F_FULLFSYNC` nos `*.log`. Raw: [tikv-ycsb-0035-fullsync](tikv-ycsb-0035-fullsync/).
+
+`slower` = Rocks_FF qps / Pedra qps. Teto 2× = slower ≤ 2. Teto 1.1× (RFC-0034) = slower ≤ 1.1.
+
+| shape | Pedra qps | Pedra p50 | Rocks FF qps | Rocks p50 | ratio | slower | ≤2× | ≤1.1× |
+|---|---:|---:|---:|---:|---:|---:|:---:|:---:|
+| ycsb_a | 340 | 3.75 ms | 455 | 3.68 ms | 0.746 | **1.34×** | sim | não |
+| ycsb_b | 2 814 | 2.3 µs | 3 644 | 2.7 µs | 0.772 | **1.29×** | sim | não |
+| ycsb_c | 507 867 | 0.5 µs | 593 303 | 1.2 µs | 0.856 | **1.17×** | sim | não |
+| ycsb_d | 2 162 | 2.3 µs | 3 819 | 2.6 µs | 0.566 | **1.77×** | sim | não |
+| ycsb_e | 984 | 91 µs | 1 166 | 17 µs | 0.844 | **1.19×** | sim | não |
+| ycsb_f | 301 | 4.12 ms | 284 | 3.94 ms | 1.060 | **0.94×** | sim | sim |
+| deps_apply_batch | 43.7 | 10.14 ms | 84.8 | 10.10 ms | 0.516 | **1.94×** | sim | não |
+| deps_mvcc_latest | 4 314 | 1.5 µs | 138 058 | 5.5 µs | 0.031 | **32×** | não | não |
+| deps_scan | 121 723 | 0.6 µs | 102 789 | 5.3 µs | 1.184 | **0.84×** | sim | sim |
+| deps_raftlog | 77.4 | 4.99 ms | 115.6 | 9.02 ms | 0.670 | **1.49×** | sim | não |
+| deps_cache_overwrite | 107 | 4.96 ms | 104 | 9.91 ms | 1.028 | **0.97×** | sim | sim |
+
+**10/11 ≤2×. 3/11 ≤1.1×.** O único qps fora do 2× é `deps_mvcc_latest` nesta run combinada: p50 **1.5 µs** (mais rápido que Rocks 5.5 µs) mas qps 4.3k porque o p99/max (1.4 ms / 112 ms) puxa a média — LSM depois do YCSB (1 SST, cache frio no primeiro toque). A remesura **deps-only** do P1.3 (`rfc0035-p13g`) no mesmo commit: MVCC **116k / 0.56×** vs FF 207k (≤2×) e scan **246k / 1.16×**.
+
 ## RFC-0033 remesure (2026-08-15, deps-only)
 
 Same knobs (4096/2000, zipfian, 1 KB). Compat only — no Rocks peer in this slice. After apply (64k txns, batch=32).
