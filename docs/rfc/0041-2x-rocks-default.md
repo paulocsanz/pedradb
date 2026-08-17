@@ -58,7 +58,7 @@
 
 ### P1 — escritas ≥ 2× default
 
-- [ ] **P1.1** `deps_apply_batch_mc4` e `deps_raftlog_mc4` ≥ 2.0 vs default da run — status: `doing`
+- [ ] **P1.1** `deps_apply_batch_mc4` e `deps_raftlog_mc4` ≥ 2.0 vs default da run — status: `doing` (MANIFEST `fsync` fora do write lock + skip catch-up em batch ≥16 ops; **ainda < 2.0** — [p11](../../findings/rfc0041-p11/README.md))
 - [ ] **P1.2** `ycsb_a` / `ycsb_f` / `deps_cache_overwrite` (1c e `_mc4` se existirem) ≥ 2.0 vs default — status: `todo`
 - [ ] **P1.3** `deps_apply_batch` e `deps_raftlog` **1 cliente** ≥ 2.0 vs default — status: `todo`
 
@@ -75,7 +75,7 @@
 | P0.1 | p0 | RFC | done | este doc | 2026-08-17 |
 | P0.2 | p0 | remesura 11+MC vs default | done | findings/rfc0041-p02 | 2026-08-17 |
 | P0.3 | p0 | floor 2.0 nas que já passam | todo | conjunto vazio | 2026-08-17 |
-| P1.1 | p1 | apply/raftlog MC ≥ 2× | doing | — | 2026-08-17 |
+| P1.1 | p1 | apply/raftlog MC ≥ 2× | doing | MANIFEST off-lock; still <2.0 | 2026-08-17 |
 | P1.2 | p1 | A/F/overwrite ≥ 2× | todo | — | 2026-08-17 |
 | P1.3 | p1 | apply/raftlog 1c ≥ 2× | todo | — | 2026-08-17 |
 | P2.1 | p2 | scan/E ≥ 2× | todo | — | 2026-08-17 |

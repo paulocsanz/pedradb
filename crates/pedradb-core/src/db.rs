@@ -2604,19 +2604,9 @@ impl<E: Env> Db<E> {
     /// # Errors
     /// MANIFEST I/O (rolls back inventory).
     pub fn install_l0_sst(&mut self, table: SstTable, file_num: u64) -> Result<()> {
-        self.note_sst_bytes_written(table.path());
-        self.table_cache.insert(Arc::new(table.clone()));
-        let prev_next = self.next_file_num;
-        // Pre-allocated: next already > file_num. Exclusive peek path: advance.
-        if self.next_file_num <= file_num {
-            self.next_file_num = file_num.saturating_add(1);
-        }
-        self.ssts.push(table);
-        self.sst_levels.push(0);
+        let undo = self.apply_l0_install(table, file_num);
         if let Err(e) = self.persist_manifest() {
-            let _ = self.ssts.pop();
-            let _ = self.sst_levels.pop();
-            self.next_file_num = prev_next;
+            self.undo_l0_install(undo);
             return Err(e);
         }
         // SST now holds this pipeline's table; drop the read pin (not `imm` — F45).
@@ -2932,37 +2922,12 @@ impl<E: Env> Db<E> {
         job: PreparedL0Compact<E>,
         new_table: SstTable,
     ) -> Result<()> {
-        let input_paths: Vec<PathBuf> = job.input_paths();
-        let still_live = self
-            .ssts
-            .iter()
-            .any(|t| input_paths.iter().any(|p| t.path() == p.as_path()));
-        if !still_live {
-            let _ = self.env.remove_file(new_table.path());
+        let Some(undo) = self.apply_prepared_l0_compact(job, new_table) else {
             return Ok(());
-        }
-        let old_paths = input_paths;
-        let mut keep_tables = Vec::new();
-        let mut keep_levels = Vec::new();
-        for (t, &lvl) in self.ssts.iter().zip(self.sst_levels.iter()) {
-            if old_paths.iter().any(|p| t.path() == p.as_path()) {
-                continue;
-            }
-            keep_tables.push(t.clone());
-            keep_levels.push(lvl);
-        }
-        self.note_sst_bytes_written(new_table.path());
-        self.table_cache.insert(Arc::new(new_table.clone()));
-        keep_tables.push(new_table);
-        keep_levels.push(1);
-        let prev_tables = std::mem::replace(&mut self.ssts, keep_tables);
-        let prev_levels = std::mem::replace(&mut self.sst_levels, keep_levels);
-        if job.gc.requests_gc() {
-            self.note_version_gc_watermark(job.gc);
-        }
+        };
+        let old_paths = undo.old_paths().to_vec();
         if let Err(e) = self.persist_manifest() {
-            self.ssts = prev_tables;
-            self.sst_levels = prev_levels;
+            self.undo_prepared_l0_compact(undo);
             return Err(e);
         }
         for path in old_paths {
@@ -4621,6 +4586,10 @@ impl<E: Env> Db<E> {
 
     /// Write MANIFEST + CURRENT for the live SST set (with levels).
     fn persist_manifest(&mut self) -> Result<()> {
+        self.take_manifest_persist()?.write()
+    }
+
+    fn version_set_now(&self) -> Result<VersionSet> {
         let mut nums = Vec::with_capacity(self.ssts.len());
         for table in &self.ssts {
             let name = table
@@ -4642,9 +4611,150 @@ impl<E: Env> Db<E> {
             earliest_readable_seq: self.earliest_readable_seq,
         };
         vs.normalize_levels();
-        manifest::install_next(&self.env, &self.dir, &mut vs, self.sync)?;
+        Ok(vs)
+    }
+
+    /// Reserve the next MANIFEST number and snapshot the job so the caller can
+    /// `fsync` MANIFEST/`CURRENT` **without** the Db write lock (RFC-0041 P1.1).
+    ///
+    /// WAL rotate must wait until [`ManifestPersist::write`] succeeds.
+    pub fn take_manifest_persist(&mut self) -> Result<ManifestPersist<E>> {
+        let mut vs = self.version_set_now()?;
+        vs.manifest_file_num = vs.manifest_file_num.saturating_add(1).max(1);
         self.manifest_file_num = vs.manifest_file_num;
-        Ok(())
+        Ok(ManifestPersist {
+            env: self.env.clone(),
+            dir: self.dir.clone(),
+            vs,
+            sync: self.sync,
+        })
+    }
+
+    /// Push a flushed L0 SST into the in-memory inventory (no MANIFEST I/O).
+    pub fn apply_l0_install(&mut self, table: SstTable, file_num: u64) -> L0InstallUndo {
+        let undo = L0InstallUndo {
+            prev_next: self.next_file_num,
+            prev_manifest: self.manifest_file_num,
+        };
+        self.note_sst_bytes_written(table.path());
+        self.table_cache.insert(Arc::new(table.clone()));
+        if self.next_file_num <= file_num {
+            self.next_file_num = file_num.saturating_add(1);
+        }
+        self.ssts.push(table);
+        self.sst_levels.push(0);
+        undo
+    }
+
+    /// Undo [`Self::apply_l0_install`] after a failed off-lock MANIFEST persist.
+    pub fn undo_l0_install(&mut self, undo: L0InstallUndo) {
+        let _ = self.ssts.pop();
+        let _ = self.sst_levels.pop();
+        self.next_file_num = undo.prev_next;
+        self.manifest_file_num = undo.prev_manifest;
+    }
+
+    /// In-memory half of [`Self::install_prepared_l0_compact`] (no MANIFEST I/O).
+    ///
+    /// Returns `None` when another install already dropped the inputs (no-op).
+    pub fn apply_prepared_l0_compact(
+        &mut self,
+        job: PreparedL0Compact<E>,
+        new_table: SstTable,
+    ) -> Option<L0CompactUndo> {
+        let input_paths: Vec<PathBuf> = job.input_paths();
+        let still_live = self
+            .ssts
+            .iter()
+            .any(|t| input_paths.iter().any(|p| t.path() == p.as_path()));
+        if !still_live {
+            let _ = self.env.remove_file(new_table.path());
+            return None;
+        }
+        let old_paths = input_paths;
+        let mut keep_tables = Vec::new();
+        let mut keep_levels = Vec::new();
+        for (t, &lvl) in self.ssts.iter().zip(self.sst_levels.iter()) {
+            if old_paths.iter().any(|p| t.path() == p.as_path()) {
+                continue;
+            }
+            keep_tables.push(t.clone());
+            keep_levels.push(lvl);
+        }
+        self.note_sst_bytes_written(new_table.path());
+        self.table_cache.insert(Arc::new(new_table.clone()));
+        keep_tables.push(new_table);
+        keep_levels.push(1);
+        let prev_tables = std::mem::replace(&mut self.ssts, keep_tables);
+        let prev_levels = std::mem::replace(&mut self.sst_levels, keep_levels);
+        let prev_manifest = self.manifest_file_num;
+        if job.gc.requests_gc() {
+            self.note_version_gc_watermark(job.gc);
+        }
+        Some(L0CompactUndo {
+            prev_tables,
+            prev_levels,
+            prev_manifest,
+            old_paths,
+        })
+    }
+
+    /// Undo [`Self::apply_prepared_l0_compact`] after a failed MANIFEST persist.
+    pub fn undo_prepared_l0_compact(&mut self, undo: L0CompactUndo) {
+        self.ssts = undo.prev_tables;
+        self.sst_levels = undo.prev_levels;
+        self.manifest_file_num = undo.prev_manifest;
+    }
+
+    /// Env handle (host compact deletes retired L0s after off-lock persist).
+    #[must_use]
+    pub fn env(&self) -> &E {
+        &self.env
+    }
+
+    /// Count a successful L0→L1 install (off-lock persist path).
+    pub fn note_l0_compact(&mut self) {
+        self.compact_count = self.compact_count.saturating_add(1);
+    }
+}
+
+/// Off-lock MANIFEST/`CURRENT` write (RFC-0041 P1.1).
+pub struct ManifestPersist<E: Env> {
+    env: E,
+    dir: PathBuf,
+    vs: VersionSet,
+    sync: bool,
+}
+
+impl<E: Env> ManifestPersist<E> {
+    /// `fsync` MANIFEST + CURRENT. Does not touch `Db`.
+    ///
+    /// # Errors
+    /// Env I/O.
+    pub fn write(self) -> Result<()> {
+        manifest::store(&self.env, &self.dir, &self.vs, self.sync)
+    }
+}
+
+/// Rollback token for [`Db::apply_l0_install`].
+pub struct L0InstallUndo {
+    prev_next: u64,
+    prev_manifest: u64,
+}
+
+/// Rollback token for [`Db::apply_prepared_l0_compact`].
+pub struct L0CompactUndo {
+    prev_tables: Vec<SstTable>,
+    prev_levels: Vec<u32>,
+    prev_manifest: u64,
+    old_paths: Vec<PathBuf>,
+}
+
+impl L0CompactUndo {
+    /// SST paths replaced by the compact (delete only after MANIFEST is durable).
+    #[must_use]
+    pub fn old_paths(&self) -> &[PathBuf] {
+        &self.old_paths
     }
 }
 

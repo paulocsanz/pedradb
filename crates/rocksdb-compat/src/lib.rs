@@ -1084,7 +1084,7 @@ fn compat_compact_once<E: Env>(inner: &ConcurrentDb<E>, gate: &Mutex<()>) -> boo
         Ok(t) => t,
         Err(_) => return false,
     };
-    if !inner.with_write(|db| db.install_prepared_l0_compact(job, table).is_ok()) {
+    if !inner.install_prepared_l0_off_lock(job, table) {
         return false;
     }
     inner.with_read(|db| db.level_file_count(0)) >= L0_COMPACTION_TRIGGER

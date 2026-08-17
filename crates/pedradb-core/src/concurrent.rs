@@ -32,8 +32,8 @@ use bytes::Bytes;
 use parking_lot::{Condvar, Mutex, RwLock};
 
 use crate::db::{
-    BatchOp, BlobGcCandidate, CheckpointMeta, CompactOptions, Db, DbStats, OpenOptions, Snapshot,
-    SnapshotPin, WriteOptions,
+    BatchOp, BlobGcCandidate, CheckpointMeta, CompactOptions, Db, DbStats, OpenOptions,
+    PreparedL0Compact, Snapshot, SnapshotPin, WriteOptions,
 };
 use crate::env::{Env, StdEnv};
 use crate::error::{CoreError, Result};
@@ -85,6 +85,12 @@ const CATCHUP_WINDOW_DEFAULT: Duration = Duration::from_micros(50);
 /// How long after the last concurrent submit the lone-writer fast path stays
 /// disabled (see `last_multi_ns`). 250 µs covers apply pre→com on this box.
 const MULTI_HOLD: Duration = Duration::from_micros(250);
+
+/// Skip the catch-up wait when the drained group already has this many user
+/// ops (apply = 64, raftlog = 16). Waiting 50 µs then costs more than one
+/// `fdatasync` and serializes more CPU under the write lock (RFC-0041 P1.1).
+/// Small puts (YCSB A/F) still wait so they can share an fsync.
+const CATCHUP_SKIP_OPS: usize = 16;
 
 struct WriteGroupState {
     pending: VecDeque<PendingWrite>,
@@ -215,7 +221,11 @@ impl WriteGroup {
             // No-op when every active writer is already queued — a lone
             // client never waits.
             let window = Duration::from_micros(self.catchup_window_us.load(Ordering::Relaxed));
-            if !window.is_zero() && batch.len() < self.active.load(Ordering::Relaxed) {
+            let batch_ops: usize = batch.iter().map(|p| p.ops.len()).sum();
+            if !window.is_zero()
+                && batch_ops < CATCHUP_SKIP_OPS
+                && batch.len() < self.active.load(Ordering::Relaxed)
+            {
                 let deadline = Instant::now() + window;
                 let mut g = self.queue.lock();
                 while batch.len() < self.active.load(Ordering::Relaxed) {
@@ -257,6 +267,9 @@ pub struct ConcurrentDb<E: Env = StdEnv> {
     /// Single-flight flush/compact pipeline (F45): dual concurrent `prepare_flush_imm`
     /// + failed `restore_imm` could otherwise race on the one imm slot.
     flush_lock: Arc<Mutex<()>>,
+    /// Serializes MANIFEST/`CURRENT` persist so flush + compact cannot tear
+    /// `CURRENT` when I/O runs off the Db write lock (RFC-0041 P1.1).
+    persist_lock: Arc<Mutex<()>>,
     /// Cached [`OpenOptions::sync`]; never mutates after open.
     default_sync: Arc<AtomicBool>,
 }
@@ -288,6 +301,7 @@ impl<E: Env> ConcurrentDb<E> {
             inner: Arc::new(RwLock::new(db)),
             writes: Arc::new(WriteGroup::new()),
             flush_lock: Arc::new(Mutex::new(())),
+            persist_lock: Arc::new(Mutex::new(())),
             default_sync: Arc::new(AtomicBool::new(default_sync)),
         }
     }
@@ -693,6 +707,7 @@ impl<E: Env> ConcurrentDb<E> {
             inner,
             writes: _,
             flush_lock: _,
+            persist_lock: _,
             default_sync: _,
         } = self;
         match Arc::try_unwrap(inner) {
@@ -943,12 +958,76 @@ impl<E: Env> ConcurrentDb<E> {
                 return false;
             }
         };
-        let mut g = self.inner.write();
-        if g.install_l0_sst(table, file_num).is_err() {
+        // Install mem + snapshot MANIFEST under the write lock; fsync MANIFEST
+        // off-lock so apply/raftlog are not parked on two extra fdatasyncs
+        // (RFC-0041 P1.1). WAL rotate waits until persist succeeds.
+        let persist = {
+            let mut g = self.inner.write();
+            let undo = g.apply_l0_install(table, file_num);
+            match g.take_manifest_persist() {
+                Ok(job) => (undo, job),
+                Err(_) => {
+                    g.undo_l0_install(undo);
+                    g.restore_imm(imm);
+                    return false;
+                }
+            }
+        };
+        let (undo, job) = persist;
+        let wrote = {
+            let _persist = self.persist_lock.lock();
+            job.write()
+        };
+        if wrote.is_err() {
+            let mut g = self.inner.write();
+            g.undo_l0_install(undo);
             g.restore_imm(imm);
             return false;
         }
+        let mut g = self.inner.write();
+        g.clear_flush_read_pin();
         let _ = g.try_rotate_wal_if_idle();
+        true
+    }
+
+    /// Publish a prepared L0→L1 compact: mem install under the write lock,
+    /// MANIFEST `fsync` off-lock (RFC-0041 P1.1).
+    #[must_use]
+    pub fn install_prepared_l0_off_lock(
+        &self,
+        job: PreparedL0Compact<E>,
+        table: crate::sst::SstTable,
+    ) -> bool {
+        let staged = {
+            let mut g = self.inner.write();
+            let Some(undo) = g.apply_prepared_l0_compact(job, table) else {
+                return true;
+            };
+            let old_paths = undo.old_paths().to_vec();
+            match g.take_manifest_persist() {
+                Ok(persist) => Some((undo, persist, old_paths)),
+                Err(_) => {
+                    g.undo_prepared_l0_compact(undo);
+                    return false;
+                }
+            }
+        };
+        let Some((undo, persist, old_paths)) = staged else {
+            return true;
+        };
+        let wrote = {
+            let _p = self.persist_lock.lock();
+            persist.write()
+        };
+        let mut g = self.inner.write();
+        if wrote.is_err() {
+            g.undo_prepared_l0_compact(undo);
+            return false;
+        }
+        for path in old_paths {
+            let _ = g.env().remove_file(&path);
+        }
+        g.note_l0_compact();
         true
     }
 
@@ -1475,6 +1554,73 @@ mod tests {
             "groups={groups} should be < {}",
             n * 2
         );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0041 P1.1: apply-sized batches skip catch-up; drain_imm persists
+    /// MANIFEST off the write lock; keys survive reopen.
+    #[test]
+    fn large_batch_skips_catchup_and_flush_reopens() {
+        let dir = temp_dir();
+        let db = ConcurrentDb::open_with(
+            &dir,
+            OpenOptions {
+                sync: true,
+                auto_flush_bytes: Some(8 * 1024),
+                auto_compact_sst_count: None,
+                auto_compact_sst_bytes: None,
+                exclusive: true,
+                large_value_threshold: None,
+            },
+        )
+        .unwrap();
+        db.set_defer_auto_compact(true);
+        let payload = vec![b'p'; 200];
+        let n_clients = 4usize;
+        let batch = 16usize;
+        let barrier = Arc::new(std::sync::Barrier::new(n_clients));
+        std::thread::scope(|s| {
+            for c in 0..n_clients {
+                let db = &db;
+                let payload = &payload;
+                let barrier = &barrier;
+                s.spawn(move || {
+                    barrier.wait();
+                    let mut ops = Vec::with_capacity(batch);
+                    for i in 0..batch {
+                        let mut k = vec![b'k', c as u8];
+                        k.extend_from_slice(&(i as u32).to_be_bytes());
+                        ops.push(BatchOp::put(k, payload.as_slice()));
+                    }
+                    db.apply_batch(ops).unwrap();
+                });
+            }
+        });
+        while db.drain_imm_once() {}
+        for c in 0..n_clients {
+            for i in 0..batch {
+                let mut k = vec![b'k', c as u8];
+                k.extend_from_slice(&(i as u32).to_be_bytes());
+                assert_eq!(
+                    db.get(&k).as_deref(),
+                    Some(payload.as_slice()),
+                    "live c={c} i={i}"
+                );
+            }
+        }
+        drop(db);
+        let re = ConcurrentDb::open(&dir).unwrap();
+        for c in 0..n_clients {
+            for i in 0..batch {
+                let mut k = vec![b'k', c as u8];
+                k.extend_from_slice(&(i as u32).to_be_bytes());
+                assert_eq!(
+                    re.get(&k).as_deref(),
+                    Some(payload.as_slice()),
+                    "reopen c={c} i={i}"
+                );
+            }
+        }
         let _ = fs::remove_dir_all(&dir);
     }
 
