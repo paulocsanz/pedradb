@@ -110,10 +110,15 @@ impl InternalKey {
     #[must_use]
     pub fn encode(&self) -> Bytes {
         let mut buf = Vec::with_capacity(self.user_key.len() + 8);
-        buf.extend_from_slice(&self.user_key);
-        let packed = pack_sequence_and_type(self.sequence, self.kind);
-        buf.extend_from_slice(&packed.to_be_bytes());
+        self.encode_into(&mut buf);
         Bytes::from(buf)
+    }
+
+    /// Append `user_key || trailer_be` onto `out` (SST flush; no extra alloc).
+    pub fn encode_into(&self, out: &mut Vec<u8>) {
+        out.extend_from_slice(&self.user_key);
+        let packed = pack_sequence_and_type(self.sequence, self.kind);
+        out.extend_from_slice(&packed.to_be_bytes());
     }
 
     /// Decode `user_key || trailer_be`.

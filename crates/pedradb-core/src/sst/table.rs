@@ -1448,18 +1448,16 @@ fn read_entry(c: &mut Cursor<'_>) -> Result<(InternalKey, Bytes)> {
     Ok((ikey, value))
 }
 
-fn encode_entry(ikey: &InternalKey, value: &Bytes) -> Result<Vec<u8>> {
-    let enc = ikey.encode();
-    let ikey_len = u32::try_from(enc.len())
+fn encode_entry_into(ikey: &InternalKey, value: &[u8], out: &mut Vec<u8>) -> Result<()> {
+    let ikey_len = u32::try_from(ikey.user_key.len().saturating_add(8))
         .map_err(|_| CoreError::Internal("internal key too large for SST".into()))?;
     let val_len = u32::try_from(value.len())
         .map_err(|_| CoreError::Internal("value too large for SST".into()))?;
-    let mut out = Vec::with_capacity(8 + enc.len() + value.len());
     out.extend_from_slice(&ikey_len.to_le_bytes());
-    out.extend_from_slice(&enc);
+    ikey.encode_into(out);
     out.extend_from_slice(&val_len.to_le_bytes());
     out.extend_from_slice(value);
-    Ok(out)
+    Ok(())
 }
 
 /// Write `mem` contents to a new SST at `path` (syncs file).
@@ -1489,14 +1487,15 @@ pub fn write_sst_on_with(
     mem: &MemTable,
     sync: bool,
 ) -> Result<SstTable> {
-    let entries: Vec<(InternalKey, Bytes)> = mem
-        .iter_internal()
-        .map(|(k, v)| (k.clone(), v.clone()))
-        .collect();
-    let mut sorted = entries;
-    sorted.sort_by(|a, b| a.0.cmp(&b.0));
-    let n = sorted.len();
-    write_sst_try_sorted_with(env, path, sorted.into_iter().map(Ok), n, sync)
+    // MemTable is already InternalKey-ordered (user key asc, seq desc).
+    // Do not collect+sort a 64 MiB snapshot — that was the apply tail.
+    write_sst_try_sorted_with(
+        env,
+        path,
+        mem.iter_internal().map(|(k, v)| Ok((k.clone(), v.clone()))),
+        mem.len(),
+        sync,
+    )
 }
 
 /// Write pre-sorted (or sortable) internal entries to SST v2 (block + index).
@@ -1567,7 +1566,7 @@ pub fn write_sst_try_sorted_on(
     entries: impl IntoIterator<Item = Result<(InternalKey, Bytes)>>,
     bloom_hint: usize,
 ) -> Result<SstTable> {
-    write_sst_try_sorted_body(env, path, entries, bloom_hint, true)
+    write_sst_try_sorted_with(env, path, entries, bloom_hint, true)
 }
 
 fn write_sst_try_sorted_body(
@@ -1592,6 +1591,7 @@ fn write_sst_try_sorted_body(
     let mut max_sequence = 0u64;
     let mut n_entries = 0usize;
     let mut last_bloom: Option<Bytes> = None;
+    let mut enc_scratch = Vec::new();
 
     let flush_block = |data: &mut Vec<u8>,
                        block_buf: &mut Vec<u8>,
@@ -1628,58 +1628,64 @@ fn write_sst_try_sorted_body(
             bloom.insert(uk);
             last_bloom = Some(ikey.user_key.clone());
         }
-        let enc = encode_entry(&ikey, &value)?;
-        let same_user = block_last_user
-            .as_ref()
-            .is_some_and(|u| u.as_ref() == ikey.user_key.as_ref());
-        if !block_buf.is_empty() && block_buf.len() + enc.len() > BLOCK_TARGET && !same_user {
+        enc_scratch.clear();
+        encode_entry_into(&ikey, &value, &mut enc_scratch)?;
+        let same_user = block_last_user.as_ref().is_some_and(|u| u.as_ref() == uk);
+        if !block_buf.is_empty() && block_buf.len() + enc_scratch.len() > BLOCK_TARGET && !same_user
+        {
             flush_block(&mut data, &mut block_buf, &mut block_first_user, &mut index)?;
         }
         if block_buf.is_empty() {
             block_first_user = Some(ikey.user_key.clone());
         }
-        block_buf.extend_from_slice(&enc);
+        block_buf.extend_from_slice(&enc_scratch);
         block_last_user = Some(ikey.user_key.clone());
     }
     flush_block(&mut data, &mut block_buf, &mut block_first_user, &mut index)?;
 
-    // Header: magic version num_entries max_seq num_blocks data_len
-    let mut body = Vec::new();
-    body.extend_from_slice(SST_MAGIC);
-    body.extend_from_slice(&SST_VERSION.to_le_bytes());
+    // Header: magic version num_entries max_seq num_blocks data_len (fixed 40 B)
+    let mut header = Vec::with_capacity(40);
+    header.extend_from_slice(SST_MAGIC);
+    header.extend_from_slice(&SST_VERSION.to_le_bytes());
     let n =
         u64::try_from(n_entries).map_err(|_| CoreError::Internal("too many SST entries".into()))?;
-    body.extend_from_slice(&n.to_le_bytes());
-    body.extend_from_slice(&max_sequence.to_le_bytes());
+    header.extend_from_slice(&n.to_le_bytes());
+    header.extend_from_slice(&max_sequence.to_le_bytes());
     let num_blocks = u32::try_from(index.len())
         .map_err(|_| CoreError::Internal("too many SST blocks".into()))?;
-    body.extend_from_slice(&num_blocks.to_le_bytes());
+    header.extend_from_slice(&num_blocks.to_le_bytes());
     let data_len =
         u64::try_from(data.len()).map_err(|_| CoreError::Internal("SST data too large".into()))?;
-    body.extend_from_slice(&data_len.to_le_bytes());
+    header.extend_from_slice(&data_len.to_le_bytes());
 
-    let header_len = body.len() as u64;
+    let header_len = header.len() as u64;
     for h in &mut index {
         h.offset += header_len;
     }
 
-    body.extend_from_slice(&data);
+    let mut index_bytes = Vec::new();
     for h in &index {
-        body.extend_from_slice(&h.offset.to_le_bytes());
-        body.extend_from_slice(&h.length.to_le_bytes());
+        index_bytes.extend_from_slice(&h.offset.to_le_bytes());
+        index_bytes.extend_from_slice(&h.length.to_le_bytes());
         let kl = u32::try_from(h.first_user_key.len())
             .map_err(|_| CoreError::Internal("user key too large".into()))?;
-        body.extend_from_slice(&kl.to_le_bytes());
-        body.extend_from_slice(&h.first_user_key);
+        index_bytes.extend_from_slice(&kl.to_le_bytes());
+        index_bytes.extend_from_slice(&h.first_user_key);
     }
+    let bloom_bytes = bloom.encode();
 
-    body.extend_from_slice(&bloom.encode());
+    let mut file_crc = crc32c::crc32c(&header);
+    file_crc = crc32c::crc32c_append(file_crc, &data);
+    file_crc = crc32c::crc32c_append(file_crc, &index_bytes);
+    file_crc = crc32c::crc32c_append(file_crc, &bloom_bytes);
 
-    let file_crc = crc32c::crc32c(&body);
-    body.extend_from_slice(&file_crc.to_le_bytes());
     {
         let mut file = env.create(path)?;
-        file.write_all(&body)?;
+        file.write_all(&header)?;
+        file.write_all(&data)?;
+        file.write_all(&index_bytes)?;
+        file.write_all(&bloom_bytes)?;
+        file.write_all(&file_crc.to_le_bytes())?;
         if sync {
             file.sync_data()?;
         }
@@ -2001,6 +2007,41 @@ mod tests {
             .map(|(ik, _)| ik.sequence)
             .collect();
         assert_eq!(k_seqs, (1..=12).rev().collect::<Vec<_>>());
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// L0 flush streams the BTree in InternalKey order — no collect+sort.
+    /// Reverse insert order must still round-trip every key (RFC-0041).
+    #[test]
+    fn memtable_stream_flush_roundtrip_unsorted_inserts() {
+        let mut mem = MemTable::new();
+        for i in (0..80u32).rev() {
+            let k = format!("k{i:03}");
+            mem.put(
+                Bytes::copy_from_slice(k.as_bytes()),
+                u64::from(i) + 1,
+                Bytes::from(vec![i as u8; 64]),
+            );
+        }
+        mem.delete(Bytes::from_static(b"k010"), 200);
+        let path = temp_path();
+        let table = write_sst_on_with(&StdEnv, &path, &mem, false).unwrap();
+        assert_eq!(table.len(), mem.len());
+        for i in 0..80u32 {
+            let k = format!("k{i:03}");
+            let got = table.get(k.as_bytes(), 10_000);
+            if i == 10 {
+                assert_eq!(got, Lookup::Deleted, "k010 tombstone");
+            } else {
+                assert_eq!(got, Lookup::Found(Bytes::from(vec![i as u8; 64])), "{k}");
+            }
+        }
+        // Re-open must accept the incremental CRC trailer.
+        let re = SstTable::open(&path).unwrap();
+        assert_eq!(
+            re.get(b"k000", 10_000),
+            Lookup::Found(Bytes::from(vec![0; 64]))
+        );
         let _ = std::fs::remove_file(&path);
     }
 
