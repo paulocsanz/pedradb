@@ -30,5 +30,8 @@ Do **not** enable `ROCKS_PARITY_RATIO_FLOOR=2.0` (the binary gates all 16).
 YCSB A 1c is now **qps-consistent with p50**: Pedra ~53 k, p50 26.4 µs,
 max 0.2–0.3 ms (tails gone). 2× Rocks A (~260–400 k) is still above
 `1/t_fd`. apply p50 is the isolated floor; qps still dies on one
-64 MiB SST `fsync` mid-apply (max 43–138 ms). Next: do not drain imm
-while writers are active (cap 512 MiB so a nonstop writer still flushes).
+64 MiB SST `fsync` mid-apply (max 43–138 ms).
+
+Skip-imm-drain-while-busy was tried and **rejected**: mem BTree grew
+(~129 k entries), apply_mc4 fell to **279** qps. Worker still drains
+imm; only L0 compact waits for write idle.

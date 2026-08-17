@@ -1037,7 +1037,11 @@ impl<E: Env> DB<E> {
     /// # Errors
     /// Pedra flush errors (I/O).
     pub fn flush(&self) -> Result<()> {
+        // Serialize with the host L0 worker: compact deletes retired files
+        // and must not race an in-flight L0 install (ENOENT on put/flush).
+        let _gate = self.compact_gate.lock();
         let r = self.inner.flush().map_err(Error::from);
+        drop(_gate);
         self.notify_compact();
         r
     }
@@ -1078,18 +1082,12 @@ fn spawn_compact_worker(
                     break;
                 }
                 Ok(CompactCmd::Run) | Err(RecvTimeoutError::Timeout) => {
-                    // Imm→L0 SST `fsync` is tens–hundreds of ms (64 MiB). Doing
-                    // it in an apply/raftlog gap is the remaining write tail.
-                    // Flush only when writers idle, or mem is past 8× the
-                    // Rocks 64 MiB buffer so a nonstop writer cannot grow
-                    // forever (RFC-0041 P1.1).
-                    const FORCE_FLUSH_BYTES: usize = 512 * 1024 * 1024;
-                    let idle = inner.writes_idle_for(Duration::from_millis(5));
-                    let mem = inner.with_read(|db| db.stats().mem_approx_bytes);
-                    if idle || mem >= FORCE_FLUSH_BYTES {
-                        while inner.drain_imm_once() {}
-                    }
-                    if idle {
+                    // Always drain imm so the memtable stays at write_buffer
+                    // (skipping it grew BTree to 100k+ entries and apply_mc4
+                    // fell to ~280 qps). L0 rewrite only after the burst
+                    // idles — drain-to-0 *during* apply cut apply_mc4 3.5k→1k.
+                    while inner.drain_imm_once() {}
+                    if inner.writes_idle_for(Duration::from_millis(5)) {
                         while compat_compact_once(&inner, &gate, &drain_all) {}
                     }
                 }
