@@ -1,0 +1,54 @@
+{
+  "compare": "rocks-parity-v1",
+  "compat_path": "findings/rfc0041-p11/late1/compat/rocks_parity_bench.json",
+  "compat": {
+    "engine": "compat (rocksdb-compat on pedradb-core, single node, single client)",
+    "sync": true,
+    "durability": "fdatasync-before-ok (pedradb-core WAL; RFC-0001/0036)",
+    "metrics": {
+    "deps_apply_batch": 3033.884,
+    "deps_apply_batch_mc4": 2553.450,
+    "deps_cache_overwrite": 10670.672,
+    "deps_cache_overwrite_mc4": 23228.469,
+    "deps_mvcc_latest": 322656.521,
+    "deps_raftlog": 14796.853,
+    "deps_raftlog_mc4": 5611.323,
+    "deps_scan": 92040.245,
+    "ycsb_a": 37659.080,
+    "ycsb_a_mc4": 25328.201,
+    "ycsb_b": 240620.811,
+    "ycsb_c": 1087991.296,
+    "ycsb_d": 166729.190,
+    "ycsb_e": 149169.306,
+    "ycsb_f": 31952.561,
+    "ycsb_f_mc4": 39647.370
+  }
+  },
+  "rocksdb": {
+    "status": "peer_file:ok",
+    "peer_file": "findings/rfc0041-p11/late1/rocks/rocks_parity_bench.json",
+    "sync": false,
+    "durability": "async-wal (WriteOptions.sync=false, rocksdb default)",
+    "how_to_fill": "1) cargo run -q --release -p rocksdb-parity-bench --features real --bin rocks-parity-bench -- <out> rocksdb  2) ROCKS_PARITY_PEER=<out>/rocks_parity_bench.json rocks-parity-compare  3) scripts/rocksdb_parity_v0.sh does both. See docs/rocksdb-compat.md"
+  },
+  "ratios": [
+    {"shape":"ycsb_a","compat_keys_per_s":37659.080,"rocksdb_keys_per_s":267564.506,"compat_over_rocksdb":0.141,"meets_floor":null},
+    {"shape":"ycsb_b","compat_keys_per_s":240620.811,"rocksdb_keys_per_s":374523.068,"compat_over_rocksdb":0.642,"meets_floor":null},
+    {"shape":"ycsb_c","compat_keys_per_s":1087991.296,"rocksdb_keys_per_s":767987.516,"compat_over_rocksdb":1.417,"meets_floor":null},
+    {"shape":"ycsb_d","compat_keys_per_s":166729.190,"rocksdb_keys_per_s":978453.476,"compat_over_rocksdb":0.170,"meets_floor":null},
+    {"shape":"ycsb_e","compat_keys_per_s":149169.306,"rocksdb_keys_per_s":111006.524,"compat_over_rocksdb":1.344,"meets_floor":null},
+    {"shape":"ycsb_f","compat_keys_per_s":31952.561,"rocksdb_keys_per_s":265426.523,"compat_over_rocksdb":0.120,"meets_floor":null},
+    {"shape":"deps_apply_batch","compat_keys_per_s":3033.884,"rocksdb_keys_per_s":4494.316,"compat_over_rocksdb":0.675,"meets_floor":null},
+    {"shape":"deps_mvcc_latest","compat_keys_per_s":322656.521,"rocksdb_keys_per_s":205101.910,"compat_over_rocksdb":1.573,"meets_floor":null},
+    {"shape":"deps_scan","compat_keys_per_s":92040.245,"rocksdb_keys_per_s":198411.045,"compat_over_rocksdb":0.464,"meets_floor":null},
+    {"shape":"deps_raftlog","compat_keys_per_s":14796.853,"rocksdb_keys_per_s":26340.672,"compat_over_rocksdb":0.562,"meets_floor":null},
+    {"shape":"deps_cache_overwrite","compat_keys_per_s":10670.672,"rocksdb_keys_per_s":95718.777,"compat_over_rocksdb":0.111,"meets_floor":null},
+    {"shape":"ycsb_a_mc4","compat_keys_per_s":25328.201,"rocksdb_keys_per_s":123919.175,"compat_over_rocksdb":0.204,"meets_floor":null},
+    {"shape":"ycsb_f_mc4","compat_keys_per_s":39647.370,"rocksdb_keys_per_s":163847.691,"compat_over_rocksdb":0.242,"meets_floor":null},
+    {"shape":"deps_cache_overwrite_mc4","compat_keys_per_s":23228.469,"rocksdb_keys_per_s":45385.307,"compat_over_rocksdb":0.512,"meets_floor":null},
+    {"shape":"deps_apply_batch_mc4","compat_keys_per_s":2553.450,"rocksdb_keys_per_s":2539.240,"compat_over_rocksdb":1.006,"meets_floor":null},
+    {"shape":"deps_raftlog_mc4","compat_keys_per_s":5611.323,"rocksdb_keys_per_s":13626.904,"compat_over_rocksdb":0.412,"meets_floor":null}
+  ],
+  "parity": {"floor": null, "shapes_with_peer": 16, "min_ratio": null, "pass": null, "note": "set ROCKS_PARITY_RATIO_FLOOR to gate"},
+  "honesty": "Single-node lab bench: rocksdb-compat (Pedra, fdatasync before Ok) vs real RocksDB default (WriteOptions.sync=false). Official peer is Rocks **default**, not a matched-sync peer. ROCKS_PARITY_SYNC=1 is an extra same-class column only. Pedra keeps the stronger durability and still has to beat default Rocks. Not a distributed/field claim."
+}

@@ -4309,74 +4309,125 @@ impl<E: Env> Db<E> {
         &mut self,
         batches: Vec<(Vec<BatchOp>, bool)>,
     ) -> Vec<Result<SequenceNumber>> {
-        if batches.is_empty() {
-            return Vec::new();
+        match self.group_start(batches) {
+            Ok(g) => self.group_finish(g),
+            Err(results) => results,
         }
+    }
+
+    /// Prepare + WAL append (no fsync). Caller may [`Self::group_absorb`] more
+    /// members that arrived during this work, then [`Self::group_finish`].
+    pub(crate) fn group_start(
+        &mut self,
+        batches: Vec<(Vec<BatchOp>, bool)>,
+    ) -> std::result::Result<GroupInFlight, Vec<Result<SequenceNumber>>> {
         let n = batches.len();
-        let mut results: Vec<Option<Result<SequenceNumber>>> = (0..n).map(|_| None).collect();
+        let mut g = GroupInFlight {
+            results: (0..n).map(|_| None).collect(),
+            appended: Vec::new(),
+            any_sync: false,
+            next_i: n,
+            failed: false,
+        };
+        if n == 0 {
+            return Ok(g);
+        }
+        if let Err(results) = self.group_admit(n) {
+            return Err(results);
+        }
+        self.group_prepare_append(&mut g, batches, 0);
+        Ok(g)
+    }
+
+    /// Append members that queued after [`Self::group_start`] (no extra wait).
+    pub(crate) fn group_absorb(
+        &mut self,
+        g: &mut GroupInFlight,
+        batches: Vec<(Vec<BatchOp>, bool)>,
+    ) {
+        if g.failed || batches.is_empty() {
+            return;
+        }
+        let base = g.next_i;
+        g.next_i = base.saturating_add(batches.len());
+        g.results
+            .resize_with(g.next_i, || None::<Result<SequenceNumber>>);
+        self.group_prepare_append(g, batches, base);
+    }
+
+    fn group_admit(&mut self, n: usize) -> std::result::Result<(), Vec<Result<SequenceNumber>>> {
         match self.ensure_write_admitted() {
-            Ok(()) => {}
-            Err(CoreError::WriteStall { l0_files, limit }) => {
-                return (0..n)
-                    .map(|_| Err(CoreError::WriteStall { l0_files, limit }))
-                    .collect();
-            }
-            Err(CoreError::WriteStallMem { mem_bytes, limit }) => {
-                return (0..n)
-                    .map(|_| Err(CoreError::WriteStallMem { mem_bytes, limit }))
-                    .collect();
-            }
+            Ok(()) => Ok(()),
+            Err(CoreError::WriteStall { l0_files, limit }) => Err((0..n)
+                .map(|_| Err(CoreError::WriteStall { l0_files, limit }))
+                .collect()),
+            Err(CoreError::WriteStallMem { mem_bytes, limit }) => Err((0..n)
+                .map(|_| Err(CoreError::WriteStallMem { mem_bytes, limit }))
+                .collect()),
             Err(e) => {
                 let msg = e.to_string();
-                return (0..n)
+                Err((0..n)
                     .map(|_| Err(CoreError::Internal(msg.clone())))
-                    .collect();
+                    .collect())
             }
         }
-        let mut prepared: Vec<(usize, Vec<WriteOp>, SequenceNumber)> = Vec::new();
-        let mut any_sync = false;
+    }
 
-        for (i, (ops, do_sync)) in batches.into_iter().enumerate() {
+    fn group_prepare_append(
+        &mut self,
+        g: &mut GroupInFlight,
+        batches: Vec<(Vec<BatchOp>, bool)>,
+        index_base: usize,
+    ) {
+        let mut prepared: Vec<(usize, Vec<WriteOp>, SequenceNumber)> = Vec::new();
+        for (off, (ops, do_sync)) in batches.into_iter().enumerate() {
+            let i = index_base + off;
             if ops.is_empty() {
-                results[i] = Some(Ok(self.last_sequence()));
+                g.results[i] = Some(Ok(self.last_sequence()));
                 continue;
             }
             match self.prepare_write_ops(ops) {
                 Ok((write_ops, last_seq)) => {
                     if do_sync {
-                        any_sync = true;
+                        g.any_sync = true;
                     }
                     prepared.push((i, write_ops, last_seq));
                 }
-                Err(e) => results[i] = Some(Err(e)),
+                Err(e) => g.results[i] = Some(Err(e)),
             }
         }
-
-        // One WAL `write` for the whole group: encode each member's record,
-        // then a single append. All-or-nothing — a failed write fails every
-        // member that had reached this point (fail-closed, mem not applied).
+        if prepared.is_empty() {
+            return;
+        }
         let mut encoded: Vec<Vec<u8>> = Vec::with_capacity(prepared.len());
         for (_, write_ops, _) in &prepared {
             let mut buf = Vec::new();
             crate::batch::encode_ops(write_ops, &mut buf);
             encoded.push(buf);
         }
-        let appended: Vec<(usize, Vec<WriteOp>, SequenceNumber)>;
-        {
-            let refs: Vec<&[u8]> = encoded.iter().map(|v| v.as_slice()).collect();
-            if let Err(e) = self.wal_append_encoded_group(&refs) {
-                let msg = e.to_string();
-                for (i, _, _) in &prepared {
-                    results[*i] = Some(Err(CoreError::Internal(format!(
-                        "group wal append failed: {msg}"
-                    ))));
-                }
-                return finish_group_results(results);
+        let refs: Vec<&[u8]> = encoded.iter().map(|v| v.as_slice()).collect();
+        if let Err(e) = self.wal_append_encoded_group(&refs) {
+            let msg = e.to_string();
+            for (i, _, _) in &prepared {
+                g.results[*i] = Some(Err(CoreError::Internal(format!(
+                    "group wal append failed: {msg}"
+                ))));
             }
-            appended = prepared;
+            g.failed = true;
+            return;
         }
+        g.appended.extend(prepared);
+    }
 
-        if appended.is_empty() {
+    pub(crate) fn group_finish(&mut self, g: GroupInFlight) -> Vec<Result<SequenceNumber>> {
+        let GroupInFlight {
+            mut results,
+            appended,
+            any_sync,
+            failed,
+            ..
+        } = g;
+        if failed || appended.is_empty() {
             return finish_group_results(results);
         }
 
@@ -4388,14 +4439,10 @@ impl<E: Env> Db<E> {
                         "group wal sync failed: {msg}"
                     ))));
                 }
-                // Fence already set inside wal_sync_group; do not apply mem.
                 return finish_group_results(results);
             }
         }
 
-        // RFC-0019: same feed seam as commit_ops_with. After WAL is durable,
-        // CHANGELOG store is best-effort (not a commit gate); always apply mem.
-        // interval=0 skips the in-memory vec (RFC-0041 P1.1).
         if !self.feed_is_lazy() {
             let mut feed_batch: Vec<ChangeEntry> = Vec::new();
             for (_, write_ops, _) in &appended {
@@ -4406,8 +4453,6 @@ impl<E: Env> Db<E> {
             self.change_log.extend(feed_batch);
         }
         if any_sync {
-            // One durable group commit = one tick of the debounce (not one per
-            // member) — group commit already amortizes WAL sync.
             self.maybe_persist_changelog_after_durable_commit();
         }
 
@@ -4415,10 +4460,18 @@ impl<E: Env> Db<E> {
             self.apply_ops_to_mem(write_ops);
             results[i] = Some(Ok(last_seq));
         }
-        self.invalidate_read_answers();
         self.maybe_auto_flush_best_effort();
         finish_group_results(results)
     }
+}
+
+/// In-flight group commit (append done, fsync/apply pending).
+pub(crate) struct GroupInFlight {
+    results: Vec<Option<Result<SequenceNumber>>>,
+    appended: Vec<(usize, Vec<WriteOp>, SequenceNumber)>,
+    any_sync: bool,
+    next_i: usize,
+    failed: bool,
 }
 
 fn finish_group_results(

@@ -1,0 +1,54 @@
+{
+  "compare": "rocks-parity-v1",
+  "compat_path": "findings/rfc0041-p11/late3/compat/rocks_parity_bench.json",
+  "compat": {
+    "engine": "compat (rocksdb-compat on pedradb-core, single node, single client)",
+    "sync": true,
+    "durability": "fdatasync-before-ok (pedradb-core WAL; RFC-0001/0036)",
+    "metrics": {
+    "deps_apply_batch": 1960.994,
+    "deps_apply_batch_mc4": 3038.950,
+    "deps_cache_overwrite": 8777.846,
+    "deps_cache_overwrite_mc4": 11048.711,
+    "deps_mvcc_latest": 505294.986,
+    "deps_raftlog": 8841.127,
+    "deps_raftlog_mc4": 5618.535,
+    "deps_scan": 169634.090,
+    "ycsb_a": 35550.026,
+    "ycsb_a_mc4": 34541.463,
+    "ycsb_b": 283200.878,
+    "ycsb_c": 1134537.418,
+    "ycsb_d": 268312.316,
+    "ycsb_e": 107436.144,
+    "ycsb_f": 31787.090,
+    "ycsb_f_mc4": 37957.424
+  }
+  },
+  "rocksdb": {
+    "status": "peer_file:ok",
+    "peer_file": "findings/rfc0041-p11/late3/rocks/rocks_parity_bench.json",
+    "sync": false,
+    "durability": "async-wal (WriteOptions.sync=false, rocksdb default)",
+    "how_to_fill": "1) cargo run -q --release -p rocksdb-parity-bench --features real --bin rocks-parity-bench -- <out> rocksdb  2) ROCKS_PARITY_PEER=<out>/rocks_parity_bench.json rocks-parity-compare  3) scripts/rocksdb_parity_v0.sh does both. See docs/rocksdb-compat.md"
+  },
+  "ratios": [
+    {"shape":"ycsb_a","compat_keys_per_s":35550.026,"rocksdb_keys_per_s":364403.864,"compat_over_rocksdb":0.098,"meets_floor":null},
+    {"shape":"ycsb_b","compat_keys_per_s":283200.878,"rocksdb_keys_per_s":945365.887,"compat_over_rocksdb":0.300,"meets_floor":null},
+    {"shape":"ycsb_c","compat_keys_per_s":1134537.418,"rocksdb_keys_per_s":1236189.446,"compat_over_rocksdb":0.918,"meets_floor":null},
+    {"shape":"ycsb_d","compat_keys_per_s":268312.316,"rocksdb_keys_per_s":820372.810,"compat_over_rocksdb":0.327,"meets_floor":null},
+    {"shape":"ycsb_e","compat_keys_per_s":107436.144,"rocksdb_keys_per_s":73813.221,"compat_over_rocksdb":1.456,"meets_floor":null},
+    {"shape":"ycsb_f","compat_keys_per_s":31787.090,"rocksdb_keys_per_s":108441.733,"compat_over_rocksdb":0.293,"meets_floor":null},
+    {"shape":"deps_apply_batch","compat_keys_per_s":1960.994,"rocksdb_keys_per_s":5986.721,"compat_over_rocksdb":0.328,"meets_floor":null},
+    {"shape":"deps_mvcc_latest","compat_keys_per_s":505294.986,"rocksdb_keys_per_s":202757.502,"compat_over_rocksdb":2.492,"meets_floor":null},
+    {"shape":"deps_scan","compat_keys_per_s":169634.090,"rocksdb_keys_per_s":213306.804,"compat_over_rocksdb":0.795,"meets_floor":null},
+    {"shape":"deps_raftlog","compat_keys_per_s":8841.127,"rocksdb_keys_per_s":35995.635,"compat_over_rocksdb":0.246,"meets_floor":null},
+    {"shape":"deps_cache_overwrite","compat_keys_per_s":8777.846,"rocksdb_keys_per_s":131161.517,"compat_over_rocksdb":0.067,"meets_floor":null},
+    {"shape":"ycsb_a_mc4","compat_keys_per_s":34541.463,"rocksdb_keys_per_s":99048.362,"compat_over_rocksdb":0.349,"meets_floor":null},
+    {"shape":"ycsb_f_mc4","compat_keys_per_s":37957.424,"rocksdb_keys_per_s":127816.456,"compat_over_rocksdb":0.297,"meets_floor":null},
+    {"shape":"deps_cache_overwrite_mc4","compat_keys_per_s":11048.711,"rocksdb_keys_per_s":66171.415,"compat_over_rocksdb":0.167,"meets_floor":null},
+    {"shape":"deps_apply_batch_mc4","compat_keys_per_s":3038.950,"rocksdb_keys_per_s":2914.856,"compat_over_rocksdb":1.043,"meets_floor":null},
+    {"shape":"deps_raftlog_mc4","compat_keys_per_s":5618.535,"rocksdb_keys_per_s":14702.029,"compat_over_rocksdb":0.382,"meets_floor":null}
+  ],
+  "parity": {"floor": null, "shapes_with_peer": 16, "min_ratio": null, "pass": null, "note": "set ROCKS_PARITY_RATIO_FLOOR to gate"},
+  "honesty": "Single-node lab bench: rocksdb-compat (Pedra, fdatasync before Ok) vs real RocksDB default (WriteOptions.sync=false). Official peer is Rocks **default**, not a matched-sync peer. ROCKS_PARITY_SYNC=1 is an extra same-class column only. Pedra keeps the stronger durability and still has to beat default Rocks. Not a distributed/field claim."
+}

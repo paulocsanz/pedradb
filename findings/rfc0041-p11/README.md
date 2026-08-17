@@ -16,6 +16,8 @@ mechanism, **not** the 2×.
 3. **`changelog_interval=0` no longer appends `ChangeEntry` on every write.**
    Watchers rebuild from WAL (full history) or last-per-key after rotate.
    Flush/close still persist. This was growing a million-entry `Vec` on apply.
+4. **Late-join:** after the first WAL append, absorb writers already in the
+   queue and share one `fdatasync` (no extra wait). Isolated avg_group 1.93.
 
 ## Isolated split (`apply_profile`, 400 apply-ops, quiet run)
 
@@ -67,7 +69,19 @@ Same harness as P0.2. Median of `run{1,2,3}/compare`. **0/16 ≥ 2.0.**
 
 apply_mc4 Pedra qps 3.1 k → 3.6 k; Rocks this set is 7.8 k (P0.2 Rocks was 3.7 k — noisy peer). Ratio down, absolute Pedra up a little. raftlog_mc4 Pedra 9.5 k → 11.3 k.
 
-P1.1 stays `doing`. Next: service time toward the 110 µs floor (writes still serialize on the Db lock).
+## Late-join (same slice)
+
+After `group_start` appends the first drain, the leader **absorbs anyone
+already queued** and shares **one** fsync — no extra 50 µs wait. Isolated
+`apply_profile` MC4: `avg_group` 1.21 → **1.93**.
+
+Official remesura `late{1,2,3}` (YCSB prefix, 3 runs) is **noisy** (both
+engines slower than `run{1,2,3}`). Median apply_mc4 **1.01** vs a Rocks that
+fell to 2.9 k qps; Pedra 2.8 k (below the quieter 3.6 k). raftlog_mc4 0.41.
+**0/16 ≥ 2.0.** Do not read the 1.01 as a product win.
+
+P1.1 stays `doing`. Next: WAL `fsync` off the write lock (flush during fd)
+and cut serialized CPU toward 110 µs.
 
 ## Tests
 

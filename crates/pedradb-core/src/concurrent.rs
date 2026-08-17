@@ -239,13 +239,34 @@ impl WriteGroup {
                 drop(g);
             }
 
-            // One write lock for the whole group: append all + one fsync + apply all.
+            // One write lock: append + absorb anyone who queued during
+            // prepare (no extra wait) + one fsync + apply (RFC-0041 P1.1).
             let mut guard = db.write();
             let inputs: Vec<(Vec<BatchOp>, bool)> = batch
                 .iter_mut()
                 .map(|p| (std::mem::take(&mut p.ops), p.do_sync))
                 .collect();
-            let results = guard.group_commit(inputs);
+            let results = match guard.group_start(inputs) {
+                Err(results) => results,
+                Ok(mut inflight) => {
+                    loop {
+                        let mut extra: Vec<PendingWrite> = {
+                            let mut q = self.queue.lock();
+                            if q.pending.is_empty() {
+                                break;
+                            }
+                            q.pending.drain(..).collect()
+                        };
+                        let more: Vec<(Vec<BatchOp>, bool)> = extra
+                            .iter_mut()
+                            .map(|p| (std::mem::take(&mut p.ops), p.do_sync))
+                            .collect();
+                        guard.group_absorb(&mut inflight, more);
+                        batch.extend(extra);
+                    }
+                    guard.group_finish(inflight)
+                }
+            };
             drop(guard);
             self.batches.fetch_add(1, Ordering::Relaxed);
             self.batch_ops
@@ -254,7 +275,6 @@ impl WriteGroup {
             for (pending, result) in batch.into_iter().zip(results) {
                 let _ = pending.reply.send(result);
             }
-            // Loop: more work may have arrived while we held the Db lock.
         }
     }
 }
