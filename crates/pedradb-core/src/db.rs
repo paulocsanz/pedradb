@@ -685,7 +685,7 @@ pub struct Db<E: Env = StdEnv> {
     /// [`CoreError::SnapshotTooOld`] (open-items §2.1 (c)). `0` = no floor.
     earliest_readable_seq: SequenceNumber,
     /// Count of successful WAL `sync_all` (observability / group-commit tests).
-    wal_sync_count: u64,
+    wal_sync_count: AtomicU64,
     /// Logical user-value bytes ingested.
     bytes_ingested: u64,
     /// Approximate WAL payload bytes written.
@@ -947,7 +947,7 @@ impl<E: Env> Db<E> {
             snapshot_pins: std::collections::BTreeMap::new(),
             next_snapshot_pin_id: 1,
             earliest_readable_seq,
-            wal_sync_count: 0,
+            wal_sync_count: AtomicU64::new(0),
             bytes_ingested: 0,
             bytes_written_wal: 0,
             bytes_written_sst: 0,
@@ -973,7 +973,7 @@ impl<E: Env> Db<E> {
     /// Number of successful WAL fsyncs since open (group-commit amortization metric).
     #[must_use]
     pub fn wal_sync_count(&self) -> u64 {
-        self.wal_sync_count
+        self.wal_sync_count.load(Ordering::Relaxed)
     }
 
     /// Whether this handle refused further writes after a failed required WAL sync.
@@ -2307,7 +2307,7 @@ impl<E: Env> Db<E> {
             block_cache_misses: self.block_cache.misses(),
             auto_compact_failures: self.auto_compact_failures,
             last_auto_compact_error: self.last_auto_compact_error.clone().unwrap_or_default(),
-            wal_sync_count: self.wal_sync_count,
+            wal_sync_count: self.wal_sync_count.load(Ordering::Relaxed),
             vlog_bytes,
             vlog_live_bytes,
             vlog_live_records,
@@ -4414,7 +4414,7 @@ impl<E: Env> Db<E> {
                 self.durability_fenced = true;
                 return Err(e);
             }
-            self.wal_sync_count = self.wal_sync_count.saturating_add(1);
+            self.note_wal_sync();
         }
         // In-memory change feed after durable WAL. CHANGELOG on disk is a cache:
         // never gate commit success on a second fsync/rename (RFC-0019) — reopen
@@ -4497,7 +4497,7 @@ impl<E: Env> Db<E> {
             self.durability_fenced = true;
             return Err(e);
         }
-        self.wal_sync_count = self.wal_sync_count.saturating_add(1);
+        self.note_wal_sync();
         Ok(())
     }
 
@@ -4530,8 +4530,8 @@ impl<E: Env> Db<E> {
         self.durability_fenced = true;
     }
 
-    pub(crate) fn note_wal_sync(&mut self) {
-        self.wal_sync_count = self.wal_sync_count.saturating_add(1);
+    pub(crate) fn note_wal_sync(&self) {
+        self.wal_sync_count.fetch_add(1, Ordering::Relaxed);
     }
 
     /// Rocks-style group commit: many client batches, one fsync if any requires sync.

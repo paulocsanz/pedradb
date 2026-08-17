@@ -335,10 +335,10 @@ impl WriteGroup {
         let wal = guard.wal_arc();
         drop(guard);
         let sync_err = wal.lock().sync_data().err();
-        let mut guard = db.write();
         if let Some(e) = sync_err {
-            guard.fence_durability();
-            guard.end_commit();
+            let mut g = db.write();
+            g.fence_durability();
+            g.end_commit();
             return results
                 .into_iter()
                 .map(|r| match r {
@@ -347,9 +347,11 @@ impl WriteGroup {
                 })
                 .collect();
         }
-        guard.note_wal_sync();
-        guard.publish_sequence(pub_seq);
-        guard.end_commit();
+        // Success: no write lock after fd (worker/park must not delay Ok).
+        let g = db.read();
+        g.note_wal_sync();
+        g.publish_sequence(pub_seq);
+        g.end_commit();
         results
     }
 }
@@ -1958,6 +1960,24 @@ mod tests {
             db.stats().wal_bytes,
             wal_before,
             "fold is not an L0; rotate must wait (G1)"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// After Ok the write lock is free so the host can park without waiting
+    /// on a post-fd apply/publish lock (RFC-0041).
+    #[test]
+    fn put_ok_does_not_hold_write_lock() {
+        let dir = temp_dir();
+        let db = open_sync(&dir);
+        db.put(b"k", b"v").unwrap();
+        let t0 = Instant::now();
+        db.with_write(|d| {
+            assert_eq!(d.get(b"k").as_deref(), Some(&b"v"[..]));
+        });
+        assert!(
+            t0.elapsed() < Duration::from_millis(50),
+            "Ok must return the write lock before the caller continues"
         );
         let _ = fs::remove_dir_all(&dir);
     }
