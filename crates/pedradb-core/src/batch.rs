@@ -173,19 +173,36 @@ impl WriteRecord {
 
 /// Encode `ops` as one logical WAL payload (RFC-0040: no extra `WriteRecord` clone).
 pub fn encode_ops(ops: &[WriteOp], out: &mut Vec<u8>) {
-    out.reserve(1 + 4 + ops.iter().map(op_encoded_len).sum::<usize>());
-    out.push(WRITE_RECORD_VERSION);
-    out.extend_from_slice(&(u32::try_from(ops.len()).unwrap_or(u32::MAX)).to_le_bytes());
+    // One resize, then indexed copies — apply_mc4 is 64 ops / ~32 KiB of
+    // values; per-field `extend_from_slice` was a write-lock cost (RFC-0041).
+    let n = 1 + 4 + ops.iter().map(op_encoded_len).sum::<usize>();
+    let start = out.len();
+    out.resize(start + n, 0);
+    let buf = &mut out[start..];
+    let mut i = 0;
+    buf[i] = WRITE_RECORD_VERSION;
+    i += 1;
+    buf[i..i + 4].copy_from_slice(&(u32::try_from(ops.len()).unwrap_or(u32::MAX)).to_le_bytes());
+    i += 4;
     for op in ops {
-        out.push(op.kind.as_u8());
-        out.extend_from_slice(&op.sequence.to_le_bytes());
-        let key_len = u32::try_from(op.key.len()).unwrap_or(u32::MAX);
-        out.extend_from_slice(&key_len.to_le_bytes());
-        out.extend_from_slice(&op.key);
-        let val_len = u32::try_from(op.value.len()).unwrap_or(u32::MAX);
-        out.extend_from_slice(&val_len.to_le_bytes());
-        out.extend_from_slice(&op.value);
+        buf[i] = op.kind.as_u8();
+        i += 1;
+        buf[i..i + 8].copy_from_slice(&op.sequence.to_le_bytes());
+        i += 8;
+        let kl = u32::try_from(op.key.len()).unwrap_or(u32::MAX);
+        buf[i..i + 4].copy_from_slice(&kl.to_le_bytes());
+        i += 4;
+        let k = op.key.len();
+        buf[i..i + k].copy_from_slice(&op.key);
+        i += k;
+        let vl = u32::try_from(op.value.len()).unwrap_or(u32::MAX);
+        buf[i..i + 4].copy_from_slice(&vl.to_le_bytes());
+        i += 4;
+        let v = op.value.len();
+        buf[i..i + v].copy_from_slice(&op.value);
+        i += v;
     }
+    debug_assert_eq!(i, n);
 }
 
 fn op_encoded_len(o: &WriteOp) -> usize {
@@ -283,6 +300,29 @@ mod tests {
         let decoded = WriteRecord::decode(&rec.encode()).unwrap();
         assert!(decoded.ops.is_empty());
         assert_eq!(decoded.max_sequence(), None);
+    }
+
+    #[test]
+    fn encode_ops_fat_apply_round_trip() {
+        let ops: Vec<_> = (0..64u32)
+            .map(|i| {
+                WriteOp::put(
+                    u64::from(i) + 1,
+                    Bytes::copy_from_slice(&i.to_le_bytes()),
+                    vec![b'v'; 64],
+                )
+            })
+            .collect();
+        let mut a = Vec::new();
+        encode_ops(&ops, &mut a);
+        let decoded = WriteRecord::decode(&a).unwrap();
+        assert_eq!(decoded.ops.len(), 64);
+        assert_eq!(decoded.ops[0], ops[0]);
+        assert_eq!(decoded.ops[63], ops[63]);
+        let mut b = vec![0xDE, 0xAD];
+        encode_ops(&ops, &mut b);
+        assert_eq!(&b[0..2], &[0xDE, 0xAD]);
+        assert_eq!(&b[2..], a.as_slice());
     }
 
     /// F13: huge op count must fail-stop before multi-GiB allocation.
