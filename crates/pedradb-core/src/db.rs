@@ -572,7 +572,9 @@ pub struct Db<E: Env = StdEnv> {
     /// Flushed mems with **no L0 SST yet**. WAL still covers them (G1);
     /// rotate is blocked until the host materializes files. Park is a move
     /// (no BTree clone) so apply does not pay lz4 mid-burst (RFC-0041).
-    parked_unflushed: Vec<MemTable>,
+    /// `Arc` so pairwise fold can snapshot two tables without cloning the
+    /// BTree under the read lock (parkfold MVCC max 16 ms was that clone).
+    parked_unflushed: Vec<Arc<MemTable>>,
     /// Flushed pins waiting to be folded (cheap push on the write path).
     retired_pending: Vec<MemTable>,
     /// Single BTree of flushed versions (built off-lock when writers idle).
@@ -2749,7 +2751,7 @@ impl<E: Env> Db<E> {
         std::iter::once(&self.mem)
             .chain(self.imm.as_ref())
             .chain(self.flush_read_pin.as_ref())
-            .chain(self.parked_unflushed.iter().rev())
+            .chain(self.parked_unflushed.iter().rev().map(|t| t.as_ref()))
     }
 
     /// Take the existing imm without cloning a flush pin (park path).
@@ -2760,14 +2762,14 @@ impl<E: Env> Db<E> {
     /// Park a flushed mem with no SST file. WAL still covers it (G1).
     pub fn push_parked_unflushed(&mut self, table: MemTable) {
         if !table.is_empty() {
-            self.parked_unflushed.push(table);
+            self.parked_unflushed.push(Arc::new(table));
         }
     }
 
     /// Oldest parked table (for idle materialize). Leaves it in place for reads.
     #[must_use]
     pub fn parked_front(&self) -> Option<&MemTable> {
-        self.parked_unflushed.first()
+        self.parked_unflushed.first().map(|t| t.as_ref())
     }
 
     /// Pop the oldest parked table after its L0 exists.
@@ -2775,7 +2777,8 @@ impl<E: Env> Db<E> {
         if self.parked_unflushed.is_empty() {
             None
         } else {
-            Some(self.parked_unflushed.remove(0))
+            let arc = self.parked_unflushed.remove(0);
+            Some(Arc::try_unwrap(arc).unwrap_or_else(|a| (*a).clone()))
         }
     }
 
@@ -2783,6 +2786,34 @@ impl<E: Env> Db<E> {
     #[must_use]
     pub fn parked_unflushed_count(&self) -> usize {
         self.parked_unflushed.len()
+    }
+
+    /// Cheap `Arc` snapshot of the two oldest parked tables. Fold deep-clones
+    /// off the Db lock, then [`Self::replace_oldest_parked_pair`].
+    #[must_use]
+    pub fn parked_oldest_pair_arcs(&self) -> Option<(Arc<MemTable>, Arc<MemTable>)> {
+        if self.parked_unflushed.len() < 2 {
+            return None;
+        }
+        Some((
+            Arc::clone(&self.parked_unflushed[0]),
+            Arc::clone(&self.parked_unflushed[1]),
+        ))
+    }
+
+    /// Replace the two oldest parked tables with one folded union.
+    pub fn replace_oldest_parked_pair(&mut self, built: MemTable) {
+        if self.parked_unflushed.len() < 2 {
+            if !built.is_empty() {
+                self.parked_unflushed.push(Arc::new(built));
+            }
+            return;
+        }
+        self.parked_unflushed.remove(0);
+        self.parked_unflushed.remove(0);
+        if !built.is_empty() {
+            self.parked_unflushed.insert(0, Arc::new(built));
+        }
     }
 
     /// Keep `mem` as a point/MVCC cache covering one newly installed L0.

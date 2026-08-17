@@ -1076,23 +1076,43 @@ fn spawn_compact_worker(
     let (tx, rx) = mpsc::sync_channel(1);
     let handle = thread::Builder::new()
         .name("pedra-compat-compact".into())
-        .spawn(move || loop {
-            match rx.recv_timeout(Duration::from_millis(5)) {
-                Ok(CompactCmd::Shutdown) | Err(RecvTimeoutError::Disconnected) => {
-                    while inner.park_imm_once() {}
-                    while inner.materialize_parked_once() {}
-                    while inner.drain_imm_once() {}
-                    break;
-                }
-                Ok(CompactCmd::Run) | Err(RecvTimeoutError::Timeout) => {
-                    // Drain imm → L0 during writes (no parked BTrees).
-                    // 1 ms idle fired compact in apply_mc4 gaps (p50 ~1.8
-                    // ms; fat20 apply_mc4 0.9 k). 5 ms idle stays.
-                    while inner.drain_imm_once() {}
-                    if inner.writes_idle_for(Duration::from_millis(5)) {
-                        let _ = inner.persist_unsynced_l0s_off_lock();
-                        let _ = inner.rotate_wal_if_writers_idle();
-                        while compat_compact_once(&inner, &gate) {}
+        .spawn(move || {
+            let poll = Duration::from_millis(5);
+            // wake2: 2 ms idle + adaptive wait still left L0=21–24 at
+            // scan (rewrite of ~20 files cannot finish in MVCC). Park
+            // during writes (no lz4); fold pairwise into one BTree so
+            // scan/count merge mem, not 20 L0s. Materialize+compact only
+            // after a long idle so MVCC/scan do not pay SST I/O (host
+            // tests wait 5–10 s). Skip fold while apply_mc4 is multi
+            // (incrfold apply 1.25 → 0.67).
+            let persist_idle = Duration::from_millis(200);
+            let fold_multi_hold = Duration::from_millis(2);
+            let mut wait = poll;
+            loop {
+                match rx.recv_timeout(wait) {
+                    Ok(CompactCmd::Shutdown) | Err(RecvTimeoutError::Disconnected) => {
+                        while inner.park_imm_once() {}
+                        while inner.fold_parked_once_off_lock() {}
+                        while inner.materialize_parked_once() {}
+                        while inner.drain_imm_once() {}
+                        break;
+                    }
+                    Ok(CompactCmd::Run) | Err(RecvTimeoutError::Timeout) => {
+                        while inner.park_imm_once() {}
+                        let may_fold =
+                            inner.writes_active() <= 1 && !inner.recently_multi(fold_multi_hold);
+                        if may_fold && inner.parked_unflushed_count() >= 2 {
+                            let _ = inner.fold_parked_once_off_lock();
+                        }
+                        if inner.writes_idle_for(persist_idle) {
+                            while inner.materialize_parked_once() {}
+                            let _ = inner.persist_unsynced_l0s_off_lock();
+                            let _ = inner.rotate_wal_if_writers_idle();
+                            while compat_compact_once(&inner, &gate) {}
+                            wait = poll;
+                        } else {
+                            wait = poll;
+                        }
                     }
                 }
             }

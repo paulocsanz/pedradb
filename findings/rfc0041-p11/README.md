@@ -183,6 +183,17 @@ avg_group 1.73, apply_mc4 **1.47 k**. Skip restored.
 [`okidle/`](okidle/README.md): **0/16**. apply_mc4 1.13 (2.1 k). Scan
 0.26 (L0 stayed high). Clock is correct; FLOOR off.
 
+## 2 ms adaptive idle (rejected)
+
+[`wake2/`](wake2/README.md): **0/16**. Scan **0.205** (L0=21–24). Compact
+of ~20 L0s cannot finish in the MVCC/scan window. FLOOR off.
+
+## Park + pairwise fold
+
+[`parkfold/`](parkfold/README.md): clone under read lock **rejected**
+(MVCC max 16 ms). [`parkfold2/`](parkfold2/README.md): **2/16** (scan
+**2.209**, E **2.064**). apply_mc4 **1.687** (Pedra 4.3 k). FLOOR off.
+
 
 
 

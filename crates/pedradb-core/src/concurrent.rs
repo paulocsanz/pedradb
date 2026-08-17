@@ -776,6 +776,84 @@ impl<E: Env> ConcurrentDb<E> {
         WriteGroup::now_ns().saturating_sub(last) >= idle.as_nanos() as u64
     }
 
+    /// How long until [`Self::writes_idle_for`] becomes true, if not already.
+    ///
+    /// Host worker uses this so L0 compact can start ~2 ms after the last Ok
+    /// (okidle waited a full 5 ms poll and left L0=20–22 at scan) without
+    /// treating a long apply as idle the instant it returns.
+    #[must_use]
+    pub fn writes_until_idle(&self, idle: Duration) -> Option<Duration> {
+        if self.writes_idle_for(idle) {
+            return None;
+        }
+        if self.writes.active.load(Ordering::Relaxed) > 0 || self.inner.read().commit_inflight() > 0
+        {
+            return Some(idle);
+        }
+        let last = {
+            let c = self.writes.last_complete_ns.load(Ordering::Relaxed);
+            if c == 0 {
+                self.writes.last_submit_ns.load(Ordering::Relaxed)
+            } else {
+                c
+            }
+        };
+        if last == 0 {
+            return None;
+        }
+        let ago = WriteGroup::now_ns().saturating_sub(last);
+        let need = idle.as_nanos() as u64;
+        if ago >= need {
+            return None;
+        }
+        Some(Duration::from_nanos(need - ago))
+    }
+
+    /// Writers currently inside `submit` (group or lone).
+    #[must_use]
+    pub fn writes_active(&self) -> usize {
+        self.writes.active.load(Ordering::Relaxed)
+    }
+
+    /// True when `active > 1` was seen within `hold` (apply_mc4 gaps).
+    #[must_use]
+    pub fn recently_multi(&self, hold: Duration) -> bool {
+        let last = self.writes.last_multi_ns.load(Ordering::Relaxed);
+        if last == 0 {
+            return false;
+        }
+        WriteGroup::now_ns().saturating_sub(last) < hold.as_nanos() as u64
+    }
+
+    /// Parked mems that still have no L0 file.
+    #[must_use]
+    pub fn parked_unflushed_count(&self) -> usize {
+        self.inner.read().parked_unflushed_count()
+    }
+
+    /// Merge the two oldest parked mems into one BTree off the write lock.
+    ///
+    /// Originals stay visible until the swap (G2). Host worker folds during
+    /// 1-client / idle ticks so scan merges one BTree instead of ~20 L0s
+    /// (wake2 compact never finished before scan). Does not fold while
+    /// apply_mc4 is multi-writer — that was incrfold (apply 1.25 → 0.67).
+    #[must_use]
+    pub fn fold_parked_once_off_lock(&self) -> bool {
+        let pair = {
+            let g = self.inner.read();
+            g.parked_oldest_pair_arcs()
+        };
+        let Some((a, b)) = pair else {
+            return false;
+        };
+        // Deep clone + absorb off the Db lock so MVCC/scan are not stalled
+        // for the BTree copy (parkfold run1/3 MVCC max 16–18 ms).
+        let mut built = (*a).clone();
+        built.absorb((*b).clone());
+        self.inner.write().replace_oldest_parked_pair(built);
+        true
+    }
+
     /// Write-group catch-up window (RFC-0037 P2.2). Default 50 µs
     /// (`PEDRA_CATCHUP_US` overrides at open). The leader holds a group open
     /// up to this long for writers that are in flight but not yet queued, so
@@ -1814,6 +1892,57 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
     }
 
+    /// Pairwise parked fold: two tables become one, no SST, both keys stay
+    /// on get + scan, WAL rotate still waits (G1).
+    #[test]
+    fn fold_parked_once_merges_two_tables_and_keeps_scan() {
+        let dir = temp_dir();
+        let db = open_sync(&dir);
+        db.set_defer_auto_compact(true);
+        db.put(b"k", vec![b'v'; 64]).unwrap();
+        assert!(db.with_write(|d| d.stage_flush_imm()).unwrap());
+        assert!(db.park_imm_once());
+        db.put(b"j", vec![b'w'; 64]).unwrap();
+        assert!(db.with_write(|d| d.stage_flush_imm()).unwrap());
+        assert!(db.park_imm_once());
+        assert_eq!(db.parked_unflushed_count(), 2);
+        assert_eq!(db.sst_count(), 0);
+        assert!(db.fold_parked_once_off_lock());
+        assert_eq!(
+            db.parked_unflushed_count(),
+            1,
+            "pair collapses to one BTree"
+        );
+        assert_eq!(db.sst_count(), 0, "fold must not write SST");
+        assert!(
+            !db.fold_parked_once_off_lock(),
+            "single parked table is a no-op"
+        );
+        assert_eq!(db.get(b"k").as_deref(), Some(&[b'v'; 64][..]));
+        assert_eq!(db.get(b"j").as_deref(), Some(&[b'w'; 64][..]));
+        let scanned = db.scan_collect(std::ops::Bound::Unbounded, std::ops::Bound::Unbounded);
+        assert!(
+            scanned
+                .iter()
+                .any(|(k, v)| k.as_ref() == b"k" && v.as_ref() == [b'v'; 64]),
+            "scan must see first parked key after fold"
+        );
+        assert!(
+            scanned
+                .iter()
+                .any(|(k, v)| k.as_ref() == b"j" && v.as_ref() == [b'w'; 64]),
+            "scan must see second parked key after fold"
+        );
+        let wal_before = db.stats().wal_bytes;
+        db.rotate_wal_if_writers_idle().unwrap();
+        assert_eq!(
+            db.stats().wal_bytes,
+            wal_before,
+            "fold is not an L0; rotate must wait (G1)"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
     /// Off-lock L0 persist: SST+MANIFEST hold the key if WAL is deleted.
     #[test]
     fn persist_unsynced_off_lock_makes_sst_sufficient() {
@@ -2098,6 +2227,20 @@ mod tests {
         assert!(
             !db.writes_idle_for(Duration::from_millis(1)),
             "idle clock is last Ok, not submit start of a long apply"
+        );
+        let rem = db.writes_until_idle(Duration::from_millis(2));
+        assert!(
+            rem.is_some_and(|d| d > Duration::ZERO && d <= Duration::from_millis(2)),
+            "until_idle after a just-acked apply must be a short remaining wait, got {rem:?}"
+        );
+        std::thread::sleep(Duration::from_millis(3));
+        assert!(
+            db.writes_idle_for(Duration::from_millis(2)),
+            "2 ms after last Ok the host may start L0 compact"
+        );
+        assert!(
+            db.writes_until_idle(Duration::from_millis(2)).is_none(),
+            "until_idle is None once idle"
         );
         drop(db);
         let re = open_sync(&dir);
