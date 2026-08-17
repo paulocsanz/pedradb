@@ -899,6 +899,22 @@ impl<E: Env> ConcurrentDb<E> {
         self.inner.read().has_imm()
     }
 
+    /// Rotate a full active mem into imm when over the flush cap (no BTree spill).
+    ///
+    /// Host calls this after a write burst (`!recently_multi`) so apply does
+    /// not stage on the Ok path.
+    #[must_use]
+    pub fn try_stage_if_full(&self) -> bool {
+        let mut g = self.inner.write();
+        let Some(limit) = g.auto_flush_threshold() else {
+            return false;
+        };
+        if g.active_mem_usage() < limit {
+            return false;
+        }
+        g.stage_flush_imm().unwrap_or(false)
+    }
+
     /// Merge the two oldest parked mems into one BTree off the write lock.
     ///
     /// Originals stay visible until the swap (G2). Host worker folds during
@@ -2194,6 +2210,21 @@ mod tests {
         assert_eq!(re.get(b"a").as_deref(), Some(&b"1"[..]));
         assert_eq!(re.get(b"b").as_deref(), Some(&b"2"[..]));
         assert_eq!(re.get(b"c").as_deref(), Some(&b"3"[..]));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn fat_apply_get_uses_tail_index_without_stage() {
+        let dir = temp_dir();
+        let db = open_sync(&dir);
+        let mut ops = Vec::with_capacity(64);
+        for i in 0..64u32 {
+            let k = format!("k{i:04}");
+            ops.push(BatchOp::put(k.into_bytes(), b"v".to_vec()));
+        }
+        db.apply_batch(ops).unwrap();
+        assert_eq!(db.get(b"k0000").as_deref(), Some(&b"v"[..]));
+        assert_eq!(db.get(b"k0063").as_deref(), Some(&b"v"[..]));
         let _ = fs::remove_dir_all(&dir);
     }
 

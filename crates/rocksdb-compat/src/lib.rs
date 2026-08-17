@@ -1128,6 +1128,9 @@ fn spawn_compact_worker(
                         break;
                     }
                     Ok(CompactCmd::Run) | Err(RecvTimeoutError::Timeout) => {
+                        if !inner.recently_multi(fold_multi_hold) {
+                            let _ = inner.try_stage_if_full();
+                        }
                         while inner.park_imm_once() {}
                         let may_fold =
                             inner.writes_active() <= 1 && !inner.recently_multi(fold_multi_hold);

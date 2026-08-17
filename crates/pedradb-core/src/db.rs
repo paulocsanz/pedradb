@@ -70,7 +70,7 @@ use crate::lock::DirLock;
 use crate::manifest::{self, VersionSet};
 use crate::memtable::{Lookup, MemTable};
 use crate::merge::{range_deleted, StreamingVisibleIter, VisibleKv};
-use crate::sst::{write_sst_entries_on, write_sst_on_with, write_sst_try_sorted_on, SstTable};
+use crate::sst::{write_l0_sst, write_sst_entries_on, write_sst_try_sorted_on, SstTable};
 use crate::tx::Transaction;
 use crate::vlog::{self, ValueLog, VlogRewriteStats, VLOG_FILE_NAME};
 use crate::wal::Wal;
@@ -2534,7 +2534,6 @@ impl<E: Env> Db<E> {
         }
         // Switch: active → imm; new empty active (writers can continue after return
         // on ConcurrentDb once this returns; single-threaded Db flushes imm next).
-        self.mem.spill_tail();
         self.imm = Some(std::mem::replace(&mut self.mem, MemTable::new()));
         self.flush_imm_to_l0()?;
         self.finish_flush_pipeline()?;
@@ -2558,7 +2557,6 @@ impl<E: Env> Db<E> {
         if self.imm.is_some() || self.mem.is_empty() {
             return Ok(false);
         }
-        self.mem.spill_tail();
         self.imm = Some(std::mem::replace(&mut self.mem, MemTable::new()));
         Ok(true)
     }
@@ -2577,12 +2575,10 @@ impl<E: Env> Db<E> {
         } else if self.mem.is_empty() {
             None
         } else {
-            self.mem.spill_tail();
             Some(std::mem::replace(&mut self.mem, MemTable::new()))
         };
         // Keep a read pin so get/scan still see acked keys during off-lock SST I/O.
-        if let Some(mut table) = taken {
-            table.spill_tail();
+        if let Some(table) = taken {
             self.flush_read_pin = Some(table.clone());
             Ok(Some(table))
         } else {
@@ -2668,7 +2664,7 @@ impl<E: Env> Db<E> {
         // L0 is not WAL-durable until rotate: skip file `fdatasync` here.
         // `sync` only dir-syncs after rename (used by tests that want the
         // name visible); the file bytes stay lazy.
-        match write_sst_on_with(env, &tmp_path, imm, false) {
+        match write_l0_sst(env, &tmp_path, imm, false) {
             Ok(table) => {
                 drop(table);
                 env.rename(&tmp_path, &final_path)?;
@@ -2769,6 +2765,18 @@ impl<E: Env> Db<E> {
         self.imm.is_some()
     }
 
+    /// Active memtable approximate bytes (host stages when this hits the flush cap).
+    #[must_use]
+    pub fn active_mem_usage(&self) -> usize {
+        self.mem.approx_memory_usage()
+    }
+
+    /// Configured auto-flush threshold, if any.
+    #[must_use]
+    pub fn auto_flush_threshold(&self) -> Option<usize> {
+        self.auto_flush_bytes
+    }
+
     /// Mem / imm / pin / parked (no SST yet) / folded retired / pending pins.
     fn mem_layers(&self) -> impl Iterator<Item = &MemTable> {
         self.scan_mem_layers()
@@ -2787,9 +2795,7 @@ impl<E: Env> Db<E> {
 
     /// Take the existing imm without cloning a flush pin (park path).
     pub fn take_imm_no_pin(&mut self) -> Option<MemTable> {
-        let mut t = self.imm.take()?;
-        t.spill_tail();
-        Some(t)
+        self.imm.take()
     }
 
     /// Park a flushed mem with no SST file. WAL still covers it (G1).
@@ -4889,7 +4895,6 @@ impl<E: Env> Db<E> {
             self.try_rotate_wal()?;
             return Ok(());
         }
-        self.mem.spill_tail();
         self.imm = Some(std::mem::replace(&mut self.mem, MemTable::new()));
         self.flush_imm_to_l0()?;
         self.finish_flush_pipeline()

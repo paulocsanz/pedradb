@@ -8,6 +8,7 @@
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::ops::Bound;
+use std::sync::{Arc, Mutex};
 
 use bytes::Bytes;
 
@@ -141,19 +142,36 @@ impl<'a> Iterator for MemInternalIter<'a> {
 /// Mutations are single-threaded for P0 (callers serialize writers). Reads may
 /// share a reference if the outer layer uses interior mutability carefully;
 /// this type itself is not synchronized.
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default)]
 pub struct MemTable {
     /// User key → versions newest-first (inline first version).
     map: BTreeMap<Bytes, Versions>,
-    /// Recent inserts not yet in `map` (RFC-0041: apply Ok path is O(1) push;
-    /// [`Self::spill_tail`] runs at stage/park, off the per-write BTree).
+    /// Recent inserts not yet in `map` (RFC-0041: apply Ok path is O(1) push).
     tail: Vec<Version>,
+    /// Newest tail index per user key (point/MVCC without a linear tail walk).
+    tail_idx: BTreeMap<Bytes, usize>,
+    /// Cached InternalKey order of `tail` (invalidated on insert).
+    tail_ord: Mutex<Option<Arc<Vec<u32>>>>,
     /// Approximate bytes for flush triggers (user key + value + trailer).
     approx_bytes: usize,
     /// Range-tombstone entries (full-map fallback on ranged scan when > 0).
     range_tombstones: usize,
     /// Total internal versions (not distinct user keys).
     entries: usize,
+}
+
+impl Clone for MemTable {
+    fn clone(&self) -> Self {
+        Self {
+            map: self.map.clone(),
+            tail: self.tail.clone(),
+            tail_idx: self.tail_idx.clone(),
+            tail_ord: Mutex::new(None),
+            approx_bytes: self.approx_bytes,
+            range_tombstones: self.range_tombstones,
+            entries: self.entries,
+        }
+    }
 }
 
 /// [`InternalKey`] order on `(seq, kind)` only (user key already equal).
@@ -204,12 +222,16 @@ impl MemTable {
         !self.tail.is_empty()
     }
 
-    /// Spill when the tail would make point/scan walks linear (YCSB A/F).
-    /// Fat apply batches stay under this so Ok stays O(1) push per op.
-    const TAIL_SPILL: usize = 512;
+    fn invalidate_tail_ord(&self) {
+        if let Ok(mut g) = self.tail_ord.lock() {
+            *g = None;
+        }
+    }
 
-    /// Fold [`Self::tail`] into the BTree (stage/park/scan-prep).
+    /// Fold [`Self::tail`] into the BTree (SST write / fold / tests).
     pub fn spill_tail(&mut self) {
+        self.invalidate_tail_ord();
+        self.tail_idx.clear();
         let tail = std::mem::take(&mut self.tail);
         for v in tail {
             let entry_bytes = v.key.user_key.len() + v.value.len() + 8;
@@ -270,10 +292,9 @@ impl MemTable {
         if is_rd {
             self.range_tombstones = self.range_tombstones.saturating_add(1);
         }
+        self.invalidate_tail_ord();
+        self.tail_idx.insert(key.user_key.clone(), self.tail.len());
         self.tail.push(Version { key, value });
-        if self.tail.len() >= Self::TAIL_SPILL {
-            self.spill_tail();
-        }
     }
 
     fn insert_map(&mut self, key: InternalKey, value: Bytes) {
@@ -423,13 +444,19 @@ impl MemTable {
     }
 
     fn tail_best(&self, user_key: &[u8], snapshot: SequenceNumber) -> Option<&Version> {
+        let Some(&i) = self.tail_idx.get(user_key) else {
+            return None;
+        };
+        let newest = &self.tail[i];
+        if newest.key.sequence <= snapshot {
+            return Some(newest);
+        }
         let mut best: Option<&Version> = None;
         for v in &self.tail {
             if v.key.user_key.as_ref() != user_key || v.key.sequence > snapshot {
                 continue;
             }
-            let better = best.is_none_or(|b| version_newer(v, b));
-            if better {
+            if best.is_none_or(|b| version_newer(v, b)) {
                 best = Some(v);
             }
         }
@@ -553,17 +580,34 @@ impl MemTable {
         if self.tail.is_empty() {
             return MemInternalIter::Map(map);
         }
-        let mut tail: Vec<(&InternalKey, &Bytes)> = self
-            .tail
+        let order = self.cached_tail_order();
+        let tail: Vec<(&InternalKey, &Bytes)> = order
             .iter()
-            .filter(|v| crate::merge::user_key_in_range(v.key.user_key.as_ref(), start, end))
-            .map(|v| (&v.key, &v.value))
+            .filter_map(|&i| {
+                let v = &self.tail[i as usize];
+                if crate::merge::user_key_in_range(v.key.user_key.as_ref(), start, end) {
+                    Some((&v.key, &v.value))
+                } else {
+                    None
+                }
+            })
             .collect();
-        tail.sort_unstable_by(|a, b| a.0.cmp(b.0));
         MemInternalIter::Merge(MemInternalMerge {
             map: map.peekable(),
             tail: tail.into_iter().peekable(),
         })
+    }
+
+    fn cached_tail_order(&self) -> Arc<Vec<u32>> {
+        let mut g = self.tail_ord.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(arc) = g.as_ref() {
+            return Arc::clone(arc);
+        }
+        let mut idx: Vec<u32> = (0..self.tail.len() as u32).collect();
+        idx.sort_unstable_by(|&a, &b| self.tail[a as usize].key.cmp(&self.tail[b as usize].key));
+        let arc = Arc::new(idx);
+        *g = Some(Arc::clone(&arc));
+        arc
     }
 
     /// Concrete (no `dyn`) range cursor — count/scan hot path.
@@ -604,21 +648,12 @@ impl MemTable {
             .filter(|(uk, _)| prefix.is_empty() || uk.starts_with(prefix))
             .map(|(uk, _)| uk.clone())
             .collect();
-        for v in &self.tail {
-            let uk = v.key.user_key.as_ref();
-            if !prefix.is_empty() && !uk.starts_with(prefix) {
-                continue;
-            }
-            let in_lo = uk >= prefix;
-            let in_hi = match end_b {
-                Bound::Included(h) => uk <= h,
-                Bound::Excluded(h) => uk < h,
-                Bound::Unbounded => true,
-            };
-            if in_lo && in_hi {
-                keys.push(v.key.user_key.clone());
-            }
-        }
+        keys.extend(
+            self.tail_idx
+                .range::<[u8], _>((Bound::Included(prefix), end_b))
+                .filter(|(uk, _)| prefix.is_empty() || uk.starts_with(prefix))
+                .map(|(uk, _)| uk.clone()),
+        );
         keys.sort();
         keys.dedup();
         for uk in keys.into_iter().rev() {
@@ -971,21 +1006,31 @@ mod tests {
     }
 
     #[test]
-    fn tail_auto_spills_at_threshold() {
+    fn tail_index_get_does_not_need_spill() {
         let mut mt = MemTable::new();
-        for i in 0..MemTable::TAIL_SPILL {
+        for i in 0..2000u32 {
             mt.put(
-                Bytes::copy_from_slice(&(i as u64).to_le_bytes()),
-                i as u64 + 1,
+                Bytes::copy_from_slice(&i.to_le_bytes()),
+                u64::from(i) + 1,
                 b"v".as_slice(),
             );
         }
-        assert!(!mt.has_tail());
-        assert_eq!(mt.len(), MemTable::TAIL_SPILL);
+        assert!(mt.has_tail());
+        assert!(mt.map.is_empty());
+        assert_eq!(mt.len(), 2000);
         assert_eq!(
-            mt.get(&0u64.to_le_bytes(), MemTable::TAIL_SPILL as u64),
+            mt.get(&0u32.to_le_bytes(), 2000),
             Lookup::Found(Bytes::from_static(b"v"))
         );
+        assert_eq!(
+            mt.get(&1999u32.to_le_bytes(), 2000),
+            Lookup::Found(Bytes::from_static(b"v"))
+        );
+        let (k, v) = mt
+            .last_visible_under_prefix(&1999u32.to_le_bytes(), 2000, None)
+            .expect("indexed last");
+        assert_eq!(&k[..], &1999u32.to_le_bytes());
+        assert_eq!(&v[..], b"v");
     }
 
     #[test]
