@@ -58,7 +58,7 @@
 
 ### P1 — escritas ≥ 2× default
 
-- [ ] **P1.1** `deps_apply_batch_mc4` e `deps_raftlog_mc4` ≥ 2.0 vs default da run — status: `doing` (WAL encode_ops one-resize; raftlog catch-up; remesura espera caixa quieta. parkfold2 still best official apply_mc4 4.3 k)
+- [ ] **P1.1** `deps_apply_batch_mc4` e `deps_raftlog_mc4` ≥ 2.0 vs default da run — status: `doing` (fat apply skips 64 key clones for point-cache; remesura espera caixa quieta. parkfold2 still best official 4.3 k)
 - [ ] **P1.2** `ycsb_a` / `ycsb_f` / `deps_cache_overwrite` (1c e `_mc4` se existirem) ≥ 2.0 vs default — status: `todo` (**teto medido:** fd p50 ≈ 24 µs ⇒ `1/t_fd` ≈ 41 k; parkfold2 A **34.6 k / 0.12×**. 2× Rocks A ~200–400 k está acima de um fd/Ok. Sem largar G1/peer/shapes; FLOOR off até o owner mudar a regra)
 - [ ] **P1.3** `deps_apply_batch` e `deps_raftlog` **1 cliente** ≥ 2.0 vs default — status: `todo`
 

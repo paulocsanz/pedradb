@@ -54,7 +54,7 @@
 use std::collections::BTreeMap;
 use std::ops::Bound;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 
 use bytes::Bytes;
 
@@ -615,6 +615,8 @@ pub struct Db<E: Env = StdEnv> {
     point_cache: PointCache,
     /// User keys applied since last publish (point-cache drop, not a gen bump).
     dirty_points: Mutex<Vec<Bytes>>,
+    /// Fat apply / range-delete: publish must gen-bump, not per-key inval.
+    point_cache_reset: AtomicBool,
     /// Latest `last_under_user_prefix` answers; cleared on write.
     last_prefix_cache: AnswerCache<Option<Bytes>>,
     /// Latest `count_in_range` answers; cleared on write.
@@ -912,6 +914,7 @@ impl<E: Env> Db<E> {
             last_prefix_cache,
             count_cache,
             dirty_points: Mutex::new(Vec::new()),
+            point_cache_reset: AtomicBool::new(false),
             dir_lock: lock,
             durability_fenced: false,
             auto_compact_failures: 0,
@@ -1022,20 +1025,15 @@ impl<E: Env> Db<E> {
     }
 
     fn note_dirty_points(&self, ops: &[WriteOp]) {
-        let mut ranged = false;
-        let mut g = self.dirty_points.lock();
-        for op in ops {
-            if op.kind == ValueType::RangeDeletion {
-                ranged = true;
-                break;
-            }
-            g.push(op.key.clone());
-        }
-        drop(g);
-        if ranged {
-            self.point_cache.clear();
+        if ops.len() > 32 || ops.iter().any(|op| op.kind == ValueType::RangeDeletion) {
+            // Fat apply / range: gen-bump at publish. Do not clone 64 keys
+            // under the write lock just to discard them (RFC-0041 apply_mc4).
+            self.point_cache_reset.store(true, Ordering::Relaxed);
             self.dirty_points.lock().clear();
+            return;
         }
+        let mut g = self.dirty_points.lock();
+        g.extend(ops.iter().map(|op| op.key.clone()));
     }
 
     /// Zero RFC-0035 latest/scan counters, block-cache stats, and the
@@ -2034,10 +2032,11 @@ impl<E: Env> Db<E> {
     }
 
     fn invalidate_read_answers(&self) {
+        let reset = self.point_cache_reset.swap(false, Ordering::Relaxed);
         let keys = std::mem::take(&mut *self.dirty_points.lock());
         // Do not insert WriteOp.value: large values are vlog pointers.
         // Fat apply gen-bumps; small writes drop only the dirty keys.
-        if keys.len() > 32 || keys.is_empty() {
+        if reset || keys.len() > 32 || keys.is_empty() {
             self.point_cache.clear();
         } else {
             for k in keys {

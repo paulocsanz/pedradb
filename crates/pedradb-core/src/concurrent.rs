@@ -2085,6 +2085,19 @@ mod tests {
         .unwrap();
         assert_eq!(db.get(b"a").as_deref(), Some(&b"1"[..]));
         assert_eq!(db.get(b"b").as_deref(), Some(&b"2"[..]));
+        // 64-op apply skips per-key dirty clones and gen-bumps at publish.
+        db.put(b"hot", b"old").unwrap();
+        assert_eq!(db.get(b"hot").as_deref(), Some(&b"old"[..]));
+        let mut fat = vec![BatchOp::put(b"hot".as_slice(), b"new".as_slice())];
+        for i in 0..63u8 {
+            fat.push(BatchOp::put([b'x', i], [b'v', i]));
+        }
+        db.apply_batch(fat).unwrap();
+        assert_eq!(
+            db.get(b"hot").as_deref(),
+            Some(&b"new"[..]),
+            "fat apply must not leave a stale point-cache hit"
+        );
         let _ = fs::remove_dir_all(&dir);
     }
 
