@@ -1,0 +1,23 @@
+schedule: records=4096 ops=2000 payload=1000B zipf theta=0.99 (same as rocksdb-parity-bench)
+pedradb-core(sync)           ycsb_a   qps=    29896 p50=   0.004ms p99=   0.212ms
+pedradb-core(sync)           ycsb_c   qps=  2535658 p50=   0.000ms p99=   0.001ms
+pedradb-core(sync)           ycsb_f   qps=    37842 p50=   0.003ms p99=   0.129ms
+rocksdb(sync=true)           ycsb_a   qps=    37907 p50=   0.011ms p99=   0.179ms
+rocksdb(sync=true)           ycsb_c   qps=   899247 p50=   0.001ms p99=   0.005ms
+rocksdb(sync=true)           ycsb_f   qps=    21503 p50=   0.007ms p99=   0.250ms
+rocksdb(sync=false)          ycsb_a   qps=   279750 p50=   0.003ms p99=   0.022ms
+rocksdb(sync=false)          ycsb_c   qps=   836820 p50=   0.001ms p99=   0.003ms
+rocksdb(sync=false)          ycsb_f   qps=   268046 p50=   0.003ms p99=   0.019ms
+fjall(default)               ycsb_a   qps=   520557 p50=   0.001ms p99=   0.010ms
+fjall(default)               ycsb_c   qps=  1450765 p50=   0.001ms p99=   0.002ms
+fjall(default)               ycsb_f   qps=   386564 p50=   0.002ms p99=   0.021ms
+fjall(sync/op)               ycsb_a   qps=      372 p50=   0.188ms p99=  10.533ms
+fjall(sync/op)               ycsb_c   qps=   912513 p50=   0.001ms p99=   0.003ms
+fjall(sync/op)               ycsb_f   qps=      329 p50=   0.676ms p99=  13.943ms
+sled(default)                ycsb_a   qps=   322228 p50=   0.002ms p99=   0.030ms
+sled(default)                ycsb_c   qps=   747140 p50=   0.001ms p99=   0.002ms
+sled(default)                ycsb_f   qps=   152673 p50=   0.001ms p99=   0.004ms
+
+thread 'main' (227036845) panicked at src/main.rs:278:46:
+called `Result::unwrap()` on an `Err` value: Storage(Io(Os { code: 21, kind: IsADirectory, message: "Is a directory" }))
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace

@@ -1,0 +1,25 @@
+schedule: records=4096 ops=2000 payload=1000B zipf theta=0.99 (same as rocksdb-parity-bench)
+pedradb-core(sync)           ycsb_a   qps=    33308 p50=   0.005ms p99=   0.196ms
+pedradb-core(sync)           ycsb_c   qps=  2355019 p50=   0.000ms p99=   0.002ms
+pedradb-core(sync)           ycsb_f   qps=    33956 p50=   0.003ms p99=   0.145ms
+rocksdb(sync=true)           ycsb_a   qps=    42286 p50=   0.006ms p99=   0.124ms
+rocksdb(sync=true)           ycsb_c   qps=   820485 p50=   0.001ms p99=   0.004ms
+rocksdb(sync=true)           ycsb_f   qps=    35114 p50=   0.004ms p99=   0.132ms
+rocksdb(sync=false)          ycsb_a   qps=   248865 p50=   0.003ms p99=   0.018ms
+rocksdb(sync=false)          ycsb_c   qps=   692111 p50=   0.001ms p99=   0.004ms
+rocksdb(sync=false)          ycsb_f   qps=   185194 p50=   0.004ms p99=   0.029ms
+fjall(default)               ycsb_a   qps=   449623 p50=   0.001ms p99=   0.012ms
+fjall(default)               ycsb_c   qps=  1822254 p50=   0.000ms p99=   0.001ms
+fjall(default)               ycsb_f   qps=   427762 p50=   0.001ms p99=   0.011ms
+fjall(sync/op)               ycsb_a   qps=      341 p50=   0.229ms p99=  13.324ms
+fjall(sync/op)               ycsb_c   qps=   346811 p50=   0.001ms p99=   0.004ms
+fjall(sync/op)               ycsb_f   qps=      371 p50=   0.112ms p99=   9.977ms
+sled(default)                ycsb_a   qps=   432378 p50=   0.001ms p99=   0.016ms
+sled(default)                ycsb_c   qps=   994530 p50=   0.001ms p99=   0.003ms
+sled(default)                ycsb_f   qps=  1062652 p50=   0.001ms p99=   0.002ms
+redb(Immediate)              ycsb_a   qps=      420 p50=   0.062ms p99=   8.223ms
+redb(Immediate)              ycsb_c   qps=   626673 p50=   0.001ms p99=   0.006ms
+redb(Immediate)              ycsb_f   qps=      344 p50=   0.467ms p99=  18.490ms
+redb(Eventual)               ycsb_a   qps=     2010 p50=   0.034ms p99=   5.143ms
+redb(Eventual)               ycsb_c   qps=   666158 p50=   0.001ms p99=   0.004ms
+redb(Eventual)               ycsb_f   qps=     2956 p50=   0.024ms p99=   1.742ms
