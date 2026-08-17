@@ -4168,14 +4168,6 @@ impl<E: Env> Db<E> {
     }
 
     /// Append one logical WAL record without fsync (group-commit leader path).
-    pub(crate) fn wal_append_ops(&mut self, ops: Vec<WriteOp>) -> Result<()> {
-        self.ensure_not_fenced()?;
-        let rec = WriteRecord { ops };
-        let encoded = rec.encode();
-        self.bytes_written_wal = self.bytes_written_wal.saturating_add(encoded.len() as u64);
-        self.wal.append_record(&encoded)
-    }
-
     /// Append already-encoded records with **one** WAL `write` (RFC-0037 P2.2:
     /// per-member `write` syscalls cost more than the group `fdatasync`).
     pub(crate) fn wal_append_encoded_group(&mut self, records: &[&[u8]]) -> Result<()> {
@@ -4268,7 +4260,7 @@ impl<E: Env> Db<E> {
                 .encode(),
             );
         }
-        let mut appended: Vec<(usize, Vec<WriteOp>, SequenceNumber)> = Vec::new();
+        let appended: Vec<(usize, Vec<WriteOp>, SequenceNumber)>;
         {
             let refs: Vec<&[u8]> = encoded.iter().map(|v| v.as_slice()).collect();
             if let Err(e) = self.wal_append_encoded_group(&refs) {

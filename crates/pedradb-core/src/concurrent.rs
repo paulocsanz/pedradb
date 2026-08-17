@@ -69,14 +69,10 @@ struct WriteGroup {
     batch_ops: AtomicU64,
 }
 
-/// How long a leader holds a group open for known-active writers that have not
-/// reached the queue yet (RFC-0037 P2.2). Measured on the bench box: a parked
-/// follower needs ~30–100 µs to wake and resubmit, while one fsync window is
-/// ~30 µs — without this window arrivals stagger one group per fsync
-/// (group_size ≈ 1.1 at 4 clients). Bounded per group so a stuck writer costs
-/// at most one window, and skipped entirely when `active == batch.len()`
-/// (single-client workloads pay nothing).
-/// Default catch-up window (see [`WriteGroup::catchup_window`]).
+/// Default catch-up window (see [`WriteGroup::catchup_window`]). Measured on
+/// the bench box: a parked follower needs ~30–100 µs to wake and resubmit,
+/// while one fsync window is ~30 µs — without holding groups open, arrivals
+/// stagger one group per fsync (group_size ≈ 1.1 at 4 clients; ≈ 3 with it).
 const CATCHUP_WINDOW_DEFAULT: Duration = Duration::from_micros(50);
 
 struct WriteGroupState {
@@ -166,9 +162,7 @@ impl WriteGroup {
             // (measured: without it, 4 clients group ≈ 1.1 writes/fsync).
             // No-op when every active writer is already queued — a lone
             // client never waits.
-            if !self.catchup_window.is_zero()
-                && batch.len() < self.active.load(Ordering::Relaxed)
-            {
+            if !self.catchup_window.is_zero() && batch.len() < self.active.load(Ordering::Relaxed) {
                 let deadline = Instant::now() + self.catchup_window;
                 let mut g = self.queue.lock();
                 while batch.len() < self.active.load(Ordering::Relaxed) {
@@ -189,7 +183,8 @@ impl WriteGroup {
             let results = guard.group_commit(inputs);
             drop(guard);
             self.batches.fetch_add(1, Ordering::Relaxed);
-            self.batch_ops.fetch_add(batch.len() as u64, Ordering::Relaxed);
+            self.batch_ops
+                .fetch_add(batch.len() as u64, Ordering::Relaxed);
 
             for (pending, result) in batch.into_iter().zip(results) {
                 let _ = pending.reply.send(result);
@@ -1189,6 +1184,15 @@ mod tests {
             "expected group commit to amortize fsyncs: syncs={syncs} puts={n}"
         );
         assert!(syncs >= 1, "at least one fsync for durable puts");
+        // Diagnostics agree: every put submitted, all inside led groups, and
+        // group commits covered multiple puts on average.
+        let (submits, _queued, groups, group_ops) = db.write_group_stats();
+        assert_eq!(submits, n as u64);
+        assert_eq!(group_ops, n as u64);
+        assert!(
+            groups < n as u64,
+            "groups={groups} should amortize over {n}"
+        );
         // All keys present and durable on reopen.
         for i in 0..n {
             let k = [b'k', u8::try_from(i).expect("n fits u8")];

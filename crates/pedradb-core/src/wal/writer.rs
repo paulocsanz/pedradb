@@ -72,9 +72,8 @@ impl<W: Write + Seek> WalWriter<W> {
         if datas.is_empty() {
             return Ok(());
         }
-        let mut buf: Vec<u8> = Vec::with_capacity(
-            datas.iter().map(|d| d.len() + HEADER_SIZE * 2).sum(),
-        );
+        let mut buf: Vec<u8> =
+            Vec::with_capacity(datas.iter().map(|d| d.len() + HEADER_SIZE * 2).sum());
         for data in datas {
             self.fragment_into(data, &mut buf);
         }
@@ -225,5 +224,50 @@ mod tests {
         writer.add_record(b"").unwrap();
         let buf = writer.into_inner().into_inner();
         assert_eq!(collect_records(&buf), vec![Vec::<u8>::new()]);
+    }
+
+    #[test]
+    fn add_records_matches_sequential_add_record_bytes() {
+        // RFC-0037 P2.2 group append: one `write` for many records must
+        // produce the exact byte stream of appending them one by one.
+        let records: Vec<Vec<u8>> = (0..40)
+            .map(|i| {
+                let len = match i % 4 {
+                    0 => 0,
+                    1 => 10,
+                    2 => 300,
+                    _ => super::super::format::BLOCK_SIZE + 777, // spans blocks
+                };
+                vec![(i % 251) as u8; len]
+            })
+            .collect();
+
+        let mut seq = WalWriter::new(Cursor::new(Vec::new())).unwrap();
+        for r in &records {
+            seq.add_record(r).unwrap();
+        }
+        let mut grouped = WalWriter::new(Cursor::new(Vec::new())).unwrap();
+        let refs: Vec<&[u8]> = records.iter().map(|r| r.as_slice()).collect();
+        grouped.add_records(&refs).unwrap();
+        // Chunked in odd-sized calls too: same total stream.
+        let mut chunked = WalWriter::new(Cursor::new(Vec::new())).unwrap();
+        for chunk in records.chunks(3) {
+            let refs: Vec<&[u8]> = chunk.iter().map(|r| r.as_slice()).collect();
+            chunked.add_records(&refs).unwrap();
+        }
+
+        let seq_bytes = seq.into_inner().into_inner();
+        assert_eq!(grouped.into_inner().into_inner(), seq_bytes);
+        assert_eq!(chunked.into_inner().into_inner(), seq_bytes);
+    }
+
+    #[test]
+    fn add_records_reads_back_through_reader() {
+        let mut writer = WalWriter::new(Cursor::new(Vec::new())).unwrap();
+        let records: Vec<Vec<u8>> = (0..10).map(|i| format!("grp-{i}").into_bytes()).collect();
+        let refs: Vec<&[u8]> = records.iter().map(|r| r.as_slice()).collect();
+        writer.add_records(&refs).unwrap();
+        let buf = writer.into_inner().into_inner();
+        assert_eq!(collect_records(&buf), records);
     }
 }

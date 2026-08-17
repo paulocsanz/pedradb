@@ -113,7 +113,7 @@ Herdadas de RFC-0036 / 0031:
 ### P2 — host worker + escritas 2× Pedra
 
 - [x] **P2.1** Se P0.3 apply ainda < 0.5: fila de compact drenada por thread no **compat/store** (não no core); fence + L0 visível até install — status: `done`
-- [ ] **P2.2** 2× Pedra em A/F/overwrite: harness multi-cliente + `ConcurrentDb` group commit; **não** 2× A single-client — status: `todo`
+- [x] **P2.2** 2× Pedra em A/F/overwrite: harness multi-cliente + `ConcurrentDb` group commit; **não** 2× A single-client — status: `done` (MC4 parity ≥0.5 vs Rocks nas 3 shapes em 3 repetições; catch-up window no `WriteGroup` + 1 `write` WAL por grupo)
 - [ ] **P2.3** Gate `ROCKS_PARITY_RATIO_FLOOR=0.5` nas 11 vs fd; tabela 2× Pedra nos 10 — status: `partial` (gate verde 11/11 em p13g, min 0.578; falta a tabela 2× Pedra vs 0036)
 
 ## Status (living — update with every PR)
@@ -127,7 +127,7 @@ Herdadas de RFC-0036 / 0031:
 | P1.2 | p1 | compact off-lock no ConcurrentDb | done | `PreparedL0Compact` + `compact_l0_off_lock` | 2026-08-16 |
 | P1.3 | p1 | 2× Pedra no gargalo #1 de leitura | done | `SstRangeIter` early-exit + `AnswerCache` O(1) + count por referência | 2026-08-16 |
 | P2.1 | p2 | worker host se P0 não chegar | done | `rocksdb-compat` thread `pedra-compat-compact` | 2026-08-16 |
-| P2.2 | p2 | 2× Pedra A/F com N clientes | todo | — | 2026-08-16 |
+| P2.2 | p2 | 2× Pedra A/F com N clientes | done | `run_clients`+`ROCKS_PARITY_CLIENTS`; catch-up window (grupo 1.1→3.2 @4cl); WAL 1 `write`/grupo | 2026-08-16 |
 | P2.3 | p2 | gate 0.5 + tabela 2× Pedra | todo | — | 2026-08-16 |
 
 ## P0.2 / P0.3 — o que a remesura mostrou

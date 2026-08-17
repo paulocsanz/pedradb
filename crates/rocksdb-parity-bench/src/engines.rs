@@ -182,7 +182,13 @@ impl Engine for ConcurrentEngine {
     fn latest_cf(&self, _cf: &str, _prefix: &[u8]) -> Result<Option<Vec<u8>>, ()> {
         Err(())
     }
-    fn scan_count_cf(&self, _cf: &str, _start: &[u8], _end: &[u8], _cap: usize) -> Result<usize, ()> {
+    fn scan_count_cf(
+        &self,
+        _cf: &str,
+        _start: &[u8],
+        _end: &[u8],
+        _cap: usize,
+    ) -> Result<usize, ()> {
         Err(())
     }
 }

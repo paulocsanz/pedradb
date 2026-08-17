@@ -518,9 +518,8 @@ impl YcsbRunner {
                         let barrier = barrier.clone();
                         let yval = yval.clone();
                         s.spawn(move || {
-                            let mut rng = 0x5EED_0001_u64
-                                .wrapping_mul((c as u64) + 0x9E37)
-                                ^ (c as u64);
+                            let mut rng =
+                                0x5EED_0001_u64.wrapping_mul((c as u64) + 0x9E37) ^ (c as u64);
                             let mut lats = Vec::with_capacity(cfg_ops);
                             let mut errors = 0u64;
                             barrier.wait();

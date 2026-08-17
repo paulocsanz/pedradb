@@ -260,3 +260,40 @@ Rocks scan/ycsb limpos; Rocks apply da run deprimido — normalizado 0.53 ≥ 0.
 
 p13g min_ratio 0.578 (compat/rocks), gate 11/11. Repetições do mesmo binário: 0.559 / 0.610 / 0.667.
 Raw: [tikv-ycsb-0037-p13g](tikv-ycsb-0037-p13g/). WAL `fdatasync` antes do Ok; único cliente.
+
+## RFC-0037 P2.2 — multi-cliente: group commit agrupa, parity MC4 ≥ 0.5 vs Rocks (2026-08-16)
+
+Harness: `ROCKS_PARITY_CLIENTS=N` no `rocks-parity-bench` (`run_clients`: 3 shapes — ycsb_a,
+ycsb_f, deps_cache_overwrite — `thread::scope`, barrier start, rng por cliente; bloco
+`{shape}_mc{N}` com `clients`/`errors`) + engine `concurrent` (`ConcurrentDb`). fdatasync class
+(FULL_SYNC=0), 4096 rec/2000 ops/1000 B/zipfian, mesmo schedule por construção.
+
+Diagnóstico em 3 passos (`examples/group_profile.rs`, diag no `write_group_stats`):
+1. Sem janela: 4 clientes agrupam **1.09** writes/fsync apesar de 87% dos submits parquearem
+   atrás de líder ativo — o wake de cv (~30–100 µs, p90 102 µs) excede a janela de fsync
+   (~30 µs); chegadas escadinham 1 por grupo. 8 clientes: 3.12.
+2. **Catch-up window** no `WriteGroup`: líder segura o grupo aberto (≤50 µs, default;
+   `PEDRA_CATCHUP_US`) enquanto `active > batch.len()` (escritores contados mas não
+   enfileirados = acordando entre ops). Grupo 1.09 → **3.0–3.3** @4 cl (janelas 5–75 µs
+   dão o mesmo agrupamento). Single-client não espera (`active == batch.len()`).
+3. `sample` no líder @100 B: o ciclo vira **~25–34 µs por `write()` WAL** × N membros —
+   syscall por membro custa mais que o fdatasync do grupo (13 µs). Fix:
+   `WalWriter::add_records`/`Db::wal_append_encoded_group` — fragmenta todos os records do
+   grupo em 1 buffer, **1 `write` por grupo** (byte stream idêntico, teste diferencial).
+   `deps_cache_overwrite_mc4` 1.12× Rocks na run1.
+
+MC4 (4 clientes), oficial `tikv_ycsb_parity_v0.sh` + `ROCKS_PARITY_CLIENTS=4`, 3 repetições
+(máquina oscilante — ratios são o estável):
+
+| run | ycsb_a_mc4 | ycsb_f_mc4 | deps_cache_overwrite_mc4 |
+|---|---|---|---|
+| 1 | 49.1k/81.6k = **0.60** | 40.8k/74.3k = **0.55** | 25.7k/23.0k = **1.12** |
+| 2 | 51.8k/99.9k = **0.52** | 42.4k/82.5k = **0.51** | 30.1k/52.0k = **0.58** |
+| 3 | 23.3k/33.8k = **0.69** | 55.0k/79.1k = **0.70** | 32.7k/51.7k = **0.63** |
+
+9/9 shapes ≥ 0.5 (par ad-hoc anterior à janela+1-write: 0.55/0.47/0.42). Gate single-client
+11/11 segue verde (run3 min 0.834; run1 deprimida por load — scan 0.449 → 0.76/0.84 nas
+repetições, banda conhecida). G1 intacto: append→fdatasync→reply por grupo; append do grupo
+all-or-nothing (falha fecha o grupo inteiro, mem não aplicada). Crédito honesto: qps absoluto
+não escala 2× single-client — o alvo declarado do P2.2 era parity multi-cliente, alcançada;
+spin puro testado e rejeitado (rouba CPU do líder, 17k qps). Raw: [tikv-ycsb-0037-p22-mc4](tikv-ycsb-0037-p22-mc4/) (JSONs por run; DBs não retidos).
