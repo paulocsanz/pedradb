@@ -8,7 +8,7 @@
 
 - Pedra no Ok **sempre** `fdatasync` (G1). Rocks default (`sync=false`) não. Isso **não** é um teto: o piso é por **ack/grupo**, não por chave.
 - Arquitetura que paga um fd e mesmo assim passa o async: group commit (N ops / 1 fd), pipeline (encodar o próximo grupo enquanto o líder sinca), **uma** cópia do payload até o WAL, compact/flush fora do Ok, scan sem setup de 20 µs.
-- Hoje o write path copia o payload **duas vezes** além do inevitável (encode lógico → `Vec`, depois `WalWriter` junta header+payload noutro `Vec`) e o `apply_record` clona `Bytes` outra vez para a mem. O `count` abre cada SST com `Box<dyn FnMut>` + bounds em `Bytes`.
+- **P0 shipped (`92eef56`):** `encode_into` + scratch no `WalWriter`; `WriteOp` move para a mem; count SST sem `Box<dyn>` e sem `user_key.clone()` por passo. Ainda há um memcpy lógico → frame (CRC precisa dos bytes). Bounds do cursor SST ainda viram `Bytes`.
 - Coluna **async é obrigatória** em toda remesura (pedido permanente do dono). 5× vs sync continua no RFC-0039; este RFC é o ganho contra o Rocks que as pessoas correm.
 
 ## Problems This Solves
@@ -77,3 +77,76 @@
 - Fundir os dois `write()` do apply num só fd (muda o schedule).
 - 5× vs sync (RFC-0039).
 - Thread no `pedradb-core`.
+
+## Next run (handoff)
+
+Abrir isto primeiro. Não reabrir a discussão “fd always-on impede ganhar do async” — o piso é por ack/grupo. Coluna **async obrigatória** em toda remesura. G1/G4/G6/G8.
+
+### Ordem (não pular P1.1)
+
+1. **RFC-0040 P1.1 — medir MC vs async + sync** (a fatia que falta de verdade).  
+   `YcsbRunner::run_clients` só faz `ycsb_a` / `ycsb_f` / `deps_cache_overwrite`. **Não há apply nem raftlog multi-cliente.**  
+   - Estender o harness: N=4 threads, barrier, cada uma corre o mesmo mix de `run_deps` (apply = 2 `batch()`, raftlog = 16 puts + get/8).  
+   - `CompatEngine` já tem `batch` / `put_cf` / `get_cf`.  
+   - Três runs na **mesma** caixa, mediana de ≥3:  
+     `compat` (fd always) · `rocksdb` `ROCKS_PARITY_SYNC=1` · `rocksdb` `ROCKS_PARITY_SYNC=0`.  
+     `ROCKS_PARITY_CLIENTS=4`.  
+   - Finding: `findings/rfc0040-p11/` com as **três** colunas + p50/p95 (qps sozinho nesta caixa é ruído OrbStack).  
+   - Se `compat / rocks_async` em apply ou raftlog MC **≥ 1.0** → P1.2 não mexe no group. Se **< 1.0** → P1.2 (catch-up / um `write` WAL por grupo — já existe o caminho; medir `write_group_stats` antes de chutar).
+
+2. **RFC-0040 P2.1 — scan ≥ async** (async = sync nas leituras).  
+   Residual conhecido (run5, pré-P0.3): p50 0.3 µs (cache) / **p95 22 µs vs Rocks 5 µs**; 7 SST, 2.7 sondados/scan.  
+   Próximo código: menos L0 no colo do scan (worker drena até `< L0_COMPACTION_TRIGGER` depois do apply — a corrida é o que deixa L0=4); `SstCountCursor` ainda copia bounds para `Bytes` (`db.rs` `SstCountCursor::new`). Não relabel L0→L1 sem rewrite (0037 partiu o scan).
+
+3. **RFC-0039 P0.2 — no mesmo dia da remesura.**  
+   Medir `fdatasync` p50 isolado nesta caixa. Split apply: encode / mem / fd / flush. Se `2 × fd > Rocks_sync_avg / 5`, o 5× apply vs **sync** não cabe — gravar o piso, **não** relabelar o alvo. Raftlog 5× vs sync é o mais plausível (1 fd + matar cauda).
+
+4. **RFC-0040 P2.2** só se P1.1 MC ainda perder do async: pipeline encode∥fsync no **host** (`rocksdb-compat`), nunca no core.
+
+### Comandos
+
+```bash
+# sync peer (default do script)
+ROCKS_PARITY_FULL_SYNC=0 ROCKS_PARITY_SYNC=1 ROCKS_PARITY_CLIENTS=4 \
+  scripts/tikv_ycsb_parity_v0.sh findings/rfc0040-p11/sync
+
+# async peer — o script hoje só corre rocks com SYNC=1; segunda passagem:
+ROCKS_PARITY_SYNC=0 cargo run -q --release -p rocksdb-parity-bench --features real \
+  --bin rocks-parity-bench -- findings/rfc0040-p11/async rocksdb
+
+# testes antes de claim
+cargo fmt -p pedradb-core -p rocksdb-compat -p rocksdb-parity-bench
+cargo test --release -p pedradb-core --lib concurrent -- --test-threads=1
+cargo test --release -p rocksdb-compat --test adversarial -- --test-threads=1
+cargo test --release -p pedradb-core --lib count_borrowed_matches
+cargo test --release -p pedradb-core --lib rfc19_change_feed_puts
+git push origin HEAD:main   # todo claim vai com push
+```
+
+O script `tikv_ycsb_parity_v0.sh` **não** corre a coluna async sozinho — a próxima run tem de acrescentar o terceiro `cargo run` (ou um wrapper). `rocks-parity-compare` hoje compara um par; a tabela de 3 colunas é o finding, não o gate JSON antigo.
+
+### Ficheiros
+
+| o quê | onde |
+|---|---|
+| MC A/F/ovr (já existe) | `crates/rocksdb-parity-bench/src/lib.rs` `run_clients` |
+| MC apply/raftlog (falta) | mesmo ficheiro; `run_deps` é o molde single-client |
+| engine compat | `crates/rocksdb-parity-bench/src/engines.rs` `CompatEngine` |
+| group / catch-up | `crates/pedradb-core/src/concurrent.rs` `WriteGroup` |
+| count / SST cursor | `crates/pedradb-core/src/db.rs` `count_visible`, `SstCountCursor` |
+| encode WAL | `crates/pedradb-core/src/batch.rs` `encode_ops`; `wal/mod.rs` `append_write_ops` |
+| baseline quieto | `findings/tikv-ycsb-concurrent-compat/README.md` (run5, pré-P0 CPU) |
+
+### Não fazer
+
+- Skip `fdatasync` / fundir os 2 `write()` do apply.  
+- Thread no `pedradb-core`.  
+- Relabel L0→L1 sem rewrite.  
+- Julgar uma run de qps (max 10–200 ms mata YCSB C). Mediana + p50/p95.  
+- Vender 5× sync como “mais rápido que o Rocks”.  
+- Subagent com modelo mais forte que a sessão.
+
+### Flakes conhecidos
+
+- `scan_prefetch_n_window_measure` (timing; passa isolado).  
+- `checkpoint_during_off_lock_flush_keeps_acked` (~1 em 5).

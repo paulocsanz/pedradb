@@ -3,7 +3,8 @@
 **Status:** draft  
 **Updated:** 2026-08-17  
 **Parents:** [0037](0037-apply-off-put-and-2x-pedra.md) (apply off-put, host worker, gate 0.5), [0036](0036-tikv-rocks-2x-fdatasync.md) (WAL `fdatasync` = classe TiKV), [0031](0031-rocks-parity-10x-budget.md) (G1–G8)  
-**Sibling:** [0040](0040-fsync-always-beats-rocks-async.md) (ganhar do Rocks **async** com fd always-on)
+**Sibling:** [0040](0040-fsync-always-beats-rocks-async.md) (ganhar do Rocks **async** com fd always-on)  
+**Next run:** [0040-next-run](0040-next-run.md) (P1.1 MC + 0039 P0.2 no mesmo dia)
 
 ## Background
 
