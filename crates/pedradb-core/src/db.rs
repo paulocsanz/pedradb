@@ -613,7 +613,7 @@ pub struct Db<E: Env = StdEnv> {
     block_cache: BlockCache,
     /// Latest-snapshot point answers; per-key inval on write (RFC-0035 / 0041).
     point_cache: PointCache,
-    /// User keys applied since last publish (point-cache inval, not a gen bump).
+    /// User keys applied since last publish (point-cache drop, not a gen bump).
     dirty_points: Mutex<Vec<Bytes>>,
     /// Latest `last_under_user_prefix` answers; cleared on write.
     last_prefix_cache: AnswerCache<Option<Bytes>>,
@@ -764,9 +764,11 @@ impl<E: Env> Db<E> {
 
         let table_cache = TableCache::new(64);
         let block_cache = BlockCache::new(8192);
-        let point_cache = PointCache::new(2048);
-        let last_prefix_cache = AnswerCache::new(2048);
-        let count_cache = AnswerCache::new(2048);
+        // Official YCSB records=4096 (zipfian). 2048 FIFO + sequential load
+        // evicted the hot low IDs; C then started cold (parkfold2 C 1.6×).
+        let point_cache = PointCache::new(8192);
+        let last_prefix_cache = AnswerCache::new(8192);
+        let count_cache = AnswerCache::new(8192);
         let (
             ssts,
             sst_levels,
@@ -2033,9 +2035,8 @@ impl<E: Env> Db<E> {
 
     fn invalidate_read_answers(&self) {
         let keys = std::mem::take(&mut *self.dirty_points.lock());
-        // Fat apply (64+) would pay 64 hash removes; gen bump is cheaper and
-        // those shapes do not reuse the point cache. YCSB 1-key writes keep
-        // the rest of the zipfian working set.
+        // Do not insert WriteOp.value: large values are vlog pointers.
+        // Fat apply gen-bumps; small writes drop only the dirty keys.
         if keys.len() > 32 || keys.is_empty() {
             self.point_cache.clear();
         } else {
