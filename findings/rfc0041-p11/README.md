@@ -166,6 +166,12 @@ held; idle dump of every parked L0 **rejected** (MVCC 2.04 → 1.07).
 [`scansst/`](scansst/README.md): **1/16 ≥ 2.0** (MVCC **2.580**). Scan
 **1.15** (retire2 was 0.27). apply_mc4 0.96. FLOOR off.
 
+## Park + incremental idle (rejected)
+
+[`idleinc/`](idleinc/README.md): **0/16**. apply_mc4 Pedra 2.9 k; scan
+**0.24**. [`b4c1/`](b4c1/README.md): **1/16** MVCC 2.66; scan **0.28**
+(L0=24). Worker stays scansst.
+
 
 
 

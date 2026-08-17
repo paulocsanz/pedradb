@@ -1,0 +1,54 @@
+{
+  "compare": "rocks-parity-v1",
+  "compat_path": "/var/folders/q_/5tskc6890_z2pk73666wb_m40000gn/T/grok-goal-3773645572dc/implementer/idleinc/run2/compat/rocks_parity_bench.json",
+  "compat": {
+    "engine": "compat (rocksdb-compat on pedradb-core, single node, single client)",
+    "sync": true,
+    "durability": "fdatasync-before-ok (pedradb-core WAL; RFC-0001/0036)",
+    "metrics": {
+    "deps_apply_batch": 4221.703,
+    "deps_apply_batch_mc4": 2947.901,
+    "deps_cache_overwrite": 8295.270,
+    "deps_cache_overwrite_mc4": 12770.003,
+    "deps_mvcc_latest": 369176.835,
+    "deps_raftlog": 3865.674,
+    "deps_raftlog_mc4": 3988.026,
+    "deps_scan": 55535.822,
+    "ycsb_a": 35741.783,
+    "ycsb_a_mc4": 24967.026,
+    "ycsb_b": 179755.084,
+    "ycsb_c": 1748380.126,
+    "ycsb_d": 191359.323,
+    "ycsb_e": 114026.711,
+    "ycsb_f": 31150.849,
+    "ycsb_f_mc4": 17324.144
+  }
+  },
+  "rocksdb": {
+    "status": "peer_file:ok",
+    "peer_file": "/var/folders/q_/5tskc6890_z2pk73666wb_m40000gn/T/grok-goal-3773645572dc/implementer/idleinc/run2/rocks/rocks_parity_bench.json",
+    "sync": false,
+    "durability": "async-wal (WriteOptions.sync=false, rocksdb default)",
+    "how_to_fill": "1) cargo run -q --release -p rocksdb-parity-bench --features real --bin rocks-parity-bench -- <out> rocksdb  2) ROCKS_PARITY_PEER=<out>/rocks_parity_bench.json rocks-parity-compare  3) scripts/rocksdb_parity_v0.sh does both. See docs/rocksdb-compat.md"
+  },
+  "ratios": [
+    {"shape":"ycsb_a","compat_keys_per_s":35741.783,"rocksdb_keys_per_s":317916.603,"compat_over_rocksdb":0.112,"meets_floor":null},
+    {"shape":"ycsb_b","compat_keys_per_s":179755.084,"rocksdb_keys_per_s":634299.827,"compat_over_rocksdb":0.283,"meets_floor":null},
+    {"shape":"ycsb_c","compat_keys_per_s":1748380.126,"rocksdb_keys_per_s":507576.596,"compat_over_rocksdb":3.445,"meets_floor":null},
+    {"shape":"ycsb_d","compat_keys_per_s":191359.323,"rocksdb_keys_per_s":593288.366,"compat_over_rocksdb":0.323,"meets_floor":null},
+    {"shape":"ycsb_e","compat_keys_per_s":114026.711,"rocksdb_keys_per_s":67372.771,"compat_over_rocksdb":1.692,"meets_floor":null},
+    {"shape":"ycsb_f","compat_keys_per_s":31150.849,"rocksdb_keys_per_s":204229.261,"compat_over_rocksdb":0.153,"meets_floor":null},
+    {"shape":"deps_apply_batch","compat_keys_per_s":4221.703,"rocksdb_keys_per_s":5926.052,"compat_over_rocksdb":0.712,"meets_floor":null},
+    {"shape":"deps_mvcc_latest","compat_keys_per_s":369176.835,"rocksdb_keys_per_s":226991.129,"compat_over_rocksdb":1.626,"meets_floor":null},
+    {"shape":"deps_scan","compat_keys_per_s":55535.822,"rocksdb_keys_per_s":228609.521,"compat_over_rocksdb":0.243,"meets_floor":null},
+    {"shape":"deps_raftlog","compat_keys_per_s":3865.674,"rocksdb_keys_per_s":38364.704,"compat_over_rocksdb":0.101,"meets_floor":null},
+    {"shape":"deps_cache_overwrite","compat_keys_per_s":8295.270,"rocksdb_keys_per_s":82054.928,"compat_over_rocksdb":0.101,"meets_floor":null},
+    {"shape":"ycsb_a_mc4","compat_keys_per_s":24967.026,"rocksdb_keys_per_s":45608.929,"compat_over_rocksdb":0.547,"meets_floor":null},
+    {"shape":"ycsb_f_mc4","compat_keys_per_s":17324.144,"rocksdb_keys_per_s":118515.737,"compat_over_rocksdb":0.146,"meets_floor":null},
+    {"shape":"deps_cache_overwrite_mc4","compat_keys_per_s":12770.003,"rocksdb_keys_per_s":134488.626,"compat_over_rocksdb":0.095,"meets_floor":null},
+    {"shape":"deps_apply_batch_mc4","compat_keys_per_s":2947.901,"rocksdb_keys_per_s":1491.906,"compat_over_rocksdb":1.976,"meets_floor":null},
+    {"shape":"deps_raftlog_mc4","compat_keys_per_s":3988.026,"rocksdb_keys_per_s":10597.730,"compat_over_rocksdb":0.376,"meets_floor":null}
+  ],
+  "parity": {"floor": null, "shapes_with_peer": 16, "min_ratio": null, "pass": null, "note": "set ROCKS_PARITY_RATIO_FLOOR to gate"},
+  "honesty": "Single-node lab bench: rocksdb-compat (Pedra, fdatasync before Ok) vs real RocksDB default (WriteOptions.sync=false). Official peer is Rocks **default**, not a matched-sync peer. ROCKS_PARITY_SYNC=1 is an extra same-class column only. Pedra keeps the stronger durability and still has to beat default Rocks. Not a distributed/field claim."
+}

@@ -1085,11 +1085,10 @@ fn spawn_compact_worker(
                     break;
                 }
                 Ok(CompactCmd::Run) | Err(RecvTimeoutError::Timeout) => {
-                    // Drain imm → L0 during writes (retire2 apply_mc4 1.45 /
-                    // MVCC 3.08). Park-only + dump-all idle: 0/16 (parknosst).
-                    // 1 L0/tick mid-apply: apply_mc4 0.68 (onel0). Fold every
-                    // tick: apply_mc4 0.67 (incrfold). Scan/count read L0
-                    // SSTs, not the retired BTree chain. Compact still idle.
+                    // Drain imm → L0 during writes (scansst MVCC 2.58 /
+                    // scan 1.15). Park-during-writes (idleinc) scan 0.24.
+                    // One compact/tick (b4c1) left L0=24 and scan 0.28.
+                    // Idle `while` still drains leftover L0s.
                     while inner.drain_imm_once() {}
                     if inner.writes_idle_for(Duration::from_millis(5)) {
                         let _ = inner.persist_unsynced_l0s_off_lock();

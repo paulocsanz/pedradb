@@ -1776,6 +1776,27 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
     }
 
+    /// One idle tick materializes one parked mem, not the whole pile.
+    #[test]
+    fn materialize_parked_once_is_one_file() {
+        let dir = temp_dir();
+        let db = open_sync(&dir);
+        db.set_defer_auto_compact(true);
+        db.put(b"k", vec![b'v'; 64]).unwrap();
+        assert!(db.with_write(|d| d.stage_flush_imm()).unwrap());
+        assert!(db.park_imm_once());
+        db.put(b"j", vec![b'w'; 64]).unwrap();
+        assert!(db.with_write(|d| d.stage_flush_imm()).unwrap());
+        assert!(db.park_imm_once());
+        assert_eq!(db.with_read(|d| d.parked_unflushed_count()), 2);
+        assert!(db.materialize_parked_once());
+        assert_eq!(db.with_read(|d| d.parked_unflushed_count()), 1);
+        assert_eq!(db.sst_count(), 1);
+        assert_eq!(db.get(b"k").as_deref(), Some(&[b'v'; 64][..]));
+        assert_eq!(db.get(b"j").as_deref(), Some(&[b'w'; 64][..]));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
     /// Off-lock L0 persist: SST+MANIFEST hold the key if WAL is deleted.
     #[test]
     fn persist_unsynced_off_lock_makes_sst_sufficient() {
