@@ -44,7 +44,7 @@
 
 ### P1 — amortizar o fd contra async
 
-- [ ] **P1.1** Harness MC (N=4) apply + raftlog vs Rocks **async** e vs sync; publicar as duas razões — status: `todo`
+- [x] **P1.1** Harness MC (N=4) apply + raftlog vs Rocks **async** e vs sync; publicar as duas razões — status: `done` (`run_deps_clients`; finding [rfc0040-p11](../findings/rfc0040-p11/README.md): apply MC mediana **0.93×** async, raftlog MC 0.61× / run1 1.57×)
 - [ ] **P1.2** Se P1.1 apply_async < 1.0: janela de group já medida; só então mexer no catch-up / um `write` WAL — status: `todo`
 
 ### P2 — scan vs async + pipeline
@@ -59,7 +59,7 @@
 | P0.1 | p0 | RFC | done | este doc | 2026-08-17 |
 | P0.2 | p0 | encode_into + scratch + move-to-mem | done | este commit | 2026-08-17 |
 | P0.3 | p0 | count cursor sem Box / sem clone | done | este commit | 2026-08-17 |
-| P1.1 | p1 | MC vs async+sync | todo | — | 2026-08-17 |
+| P1.1 | p1 | MC vs async+sync | done | `run_deps_clients` + findings/rfc0040-p11 | 2026-08-17 |
 | P1.2 | p1 | group se P1.1 < 1 | todo | — | 2026-08-17 |
 | P2.1 | p2 | scan ≥ async | todo | — | 2026-08-17 |
 | P2.2 | p2 | pipeline host | todo | — | 2026-08-17 |

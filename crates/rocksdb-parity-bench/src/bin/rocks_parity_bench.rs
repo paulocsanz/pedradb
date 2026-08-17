@@ -108,6 +108,10 @@ fn run_and_report<E: Engine + Sync>(e: &E, cfg: &Cfg, suites: &str, out: &Path) 
     }
     if suites_enabled("deps") {
         benches.extend(r.run_deps(e));
+        let clients = rocksdb_parity_bench::env_usize("ROCKS_PARITY_CLIENTS", 1);
+        if clients >= 2 {
+            benches.extend(r.run_deps_clients(e, clients));
+        }
     }
 
     let ts = SystemTime::now()

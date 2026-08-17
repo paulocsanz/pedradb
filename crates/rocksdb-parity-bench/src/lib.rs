@@ -567,6 +567,163 @@ impl YcsbRunner {
         }
         blocks
     }
+
+    /// RFC-0040 P1.1: multi-client apply + raftlog (group-commit vs Rocks async).
+    ///
+    /// Per-client schedules, barrier start. Apply versions use a shared
+    /// `AtomicU64` so (user, ts) stays unique. Raftlog keys are
+    /// `raftlog/{client}/{idx}` so clients do not collide.
+    pub fn run_deps_clients<E: Engine + Sync>(&self, e: &E, clients: usize) -> Vec<String> {
+        assert!(clients >= 2, "multi-client harness needs >= 2 clients");
+        let cfg_ops = self.cfg.ops;
+        let records = self.cfg.records;
+        let batch = self.cfg.batch;
+        let yval = std::sync::Arc::new(vec![b'd'; self.cfg.payload]);
+        let ts_src = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(1_000_000));
+        let mut blocks = Vec::with_capacity(2);
+
+        // deps_apply_batch_mcN
+        {
+            let barrier = std::sync::Arc::new(std::sync::Barrier::new(clients));
+            let t0 = Instant::now();
+            let mut lats = Vec::with_capacity(cfg_ops * clients);
+            let mut errors = 0u64;
+            std::thread::scope(|s| {
+                let handles: Vec<_> = (0..clients)
+                    .map(|c| {
+                        let barrier = barrier.clone();
+                        let yval = yval.clone();
+                        let ts_src = ts_src.clone();
+                        s.spawn(move || {
+                            let mut rng =
+                                0xA11A_0001_u64.wrapping_mul((c as u64) + 0x9E37) ^ (c as u64);
+                            let mut lats = Vec::with_capacity(cfg_ops);
+                            let mut errors = 0u64;
+                            barrier.wait();
+                            for _ in 0..cfg_ops {
+                                let t = Instant::now();
+                                let mut pre = Vec::with_capacity(batch * 2);
+                                let mut com = Vec::with_capacity(batch * 2);
+                                for _ in 0..batch {
+                                    let u = self.pick(&mut rng, records);
+                                    let ts =
+                                        ts_src.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                                    pre.push(CfWrite::Put {
+                                        cf: "lock",
+                                        k: ukey(u),
+                                        v: b"l".to_vec(),
+                                    });
+                                    pre.push(CfWrite::Put {
+                                        cf: "default",
+                                        k: mvcc(u, ts),
+                                        v: yval.as_ref().clone(),
+                                    });
+                                    com.push(CfWrite::Put {
+                                        cf: "write",
+                                        k: mvcc(u, ts),
+                                        v: b"c".to_vec(),
+                                    });
+                                    com.push(CfWrite::Delete {
+                                        cf: "lock",
+                                        k: ukey(u),
+                                    });
+                                }
+                                let ok = e.batch(pre) && e.batch(com);
+                                if !ok {
+                                    errors += 1;
+                                }
+                                lats.push(ms(t));
+                            }
+                            (lats, errors)
+                        })
+                    })
+                    .collect();
+                for h in handles {
+                    let (mut l, err) = h.join().expect("apply client");
+                    errors += err;
+                    lats.append(&mut l);
+                }
+            });
+            let name = format!("deps_apply_batch_mc{clients}");
+            blocks.push(summarize_mc(
+                &name,
+                cfg_ops * clients,
+                t0.elapsed(),
+                &mut lats,
+                clients,
+                errors,
+            ));
+            eprintln!(
+                "[rocks-parity] deps_apply_batch mc{clients} done ops={} errors={errors}",
+                cfg_ops * clients
+            );
+        }
+
+        // deps_raftlog_mcN
+        {
+            let barrier = std::sync::Arc::new(std::sync::Barrier::new(clients));
+            let t0 = Instant::now();
+            let mut lats = Vec::with_capacity(cfg_ops * clients);
+            let mut errors = 0u64;
+            std::thread::scope(|s| {
+                let handles: Vec<_> = (0..clients)
+                    .map(|c| {
+                        let barrier = barrier.clone();
+                        let yval = yval.clone();
+                        s.spawn(move || {
+                            let mut lats = Vec::with_capacity(cfg_ops);
+                            let mut errors = 0u64;
+                            let mut idx = 0u64;
+                            barrier.wait();
+                            for op in 0..cfg_ops {
+                                let t = Instant::now();
+                                let mut wb = Vec::with_capacity(16);
+                                for _ in 0..16 {
+                                    idx += 1;
+                                    wb.push(CfWrite::Put {
+                                        cf: "raftlog",
+                                        k: format!("raftlog/{c}/{idx:08}").into_bytes(),
+                                        v: yval.as_ref().clone(),
+                                    });
+                                }
+                                let ok = e.batch(wb);
+                                if !ok {
+                                    errors += 1;
+                                }
+                                if op % 8 == 0 && idx > 1 {
+                                    let k = format!("raftlog/{c}/{:08}", idx - 1);
+                                    if e.get_cf("raftlog", k.as_bytes()).is_err() {
+                                        errors += 1;
+                                    }
+                                }
+                                lats.push(ms(t));
+                            }
+                            (lats, errors)
+                        })
+                    })
+                    .collect();
+                for h in handles {
+                    let (mut l, err) = h.join().expect("raftlog client");
+                    errors += err;
+                    lats.append(&mut l);
+                }
+            });
+            let name = format!("deps_raftlog_mc{clients}");
+            blocks.push(summarize_mc(
+                &name,
+                cfg_ops * clients,
+                t0.elapsed(),
+                &mut lats,
+                clients,
+                errors,
+            ));
+            eprintln!(
+                "[rocks-parity] deps_raftlog mc{clients} done ops={} errors={errors}",
+                cfg_ops * clients
+            );
+        }
+        blocks
+    }
 }
 
 pub fn ykey(i: usize) -> Vec<u8> {
@@ -798,6 +955,43 @@ mod tests {
             assert!(conc.get(&ykey(0)).is_ok());
             assert!(conc.get(b"c/000000").is_ok());
         }
+    }
+
+    /// RFC-0040 P1.1: apply + raftlog MC on compat (group commit / ConcurrentDb).
+    #[test]
+    fn multi_client_deps_apply_raftlog_on_compat() {
+        let dir = tempfile::tempdir().unwrap();
+        let e = crate::engines::CompatEngine::open(dir.path());
+        let cfg = Cfg {
+            records: 64,
+            ops: 24,
+            payload: 16,
+            zipfian: false,
+            batch: 4,
+        };
+        let mut r = YcsbRunner::new(cfg);
+        let _ = r.run_deps(&e);
+        let blocks = r.run_deps_clients(&e, 3);
+        let names: Vec<_> = blocks
+            .iter()
+            .map(|b| {
+                b.split("\"name\": \"")
+                    .nth(1)
+                    .and_then(|s| s.split('"').next())
+            })
+            .collect();
+        assert_eq!(
+            names,
+            vec![Some("deps_apply_batch_mc3"), Some("deps_raftlog_mc3")]
+        );
+        for b in &blocks {
+            assert!(b.contains("\"clients\": 3"), "{b}");
+            assert!(b.contains("\"errors\": 0"), "{b}");
+        }
+        assert!(e
+            .get_cf("raftlog", b"raftlog/0/00000001")
+            .unwrap()
+            .is_some());
     }
 
     #[test]
