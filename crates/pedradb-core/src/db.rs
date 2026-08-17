@@ -569,9 +569,12 @@ pub struct Db<E: Env = StdEnv> {
     /// Clone of the table taken by [`Self::prepare_flush_imm`] so readers still
     /// see acked keys while SST I/O runs off the write lock.
     flush_read_pin: Option<MemTable>,
-    /// Flushed memtables kept for reads until the matching L0 is compacted
-    /// (RFC-0041). Newest last. Not a durability source — SST+WAL cover.
-    retired_mems: Vec<MemTable>,
+    /// Flushed pins waiting to be folded (cheap push on the write path).
+    retired_pending: Vec<MemTable>,
+    /// Single BTree of flushed versions (built off-lock when writers idle).
+    retired_fold: MemTable,
+    /// How many L0 files the retired cache covers (pending + fold).
+    retired_l0s: usize,
     /// Cached [`Self::sst_indices_newest_first`] (L0 newest → L1+).
     sst_order_newest: Vec<usize>,
     /// Reused WAL encode buffers for group commit (RFC-0041 apply CPU).
@@ -875,7 +878,9 @@ impl<E: Env> Db<E> {
             mem,
             imm: None,
             flush_read_pin: None,
-            retired_mems: Vec::new(),
+            retired_pending: Vec::new(),
+            retired_fold: MemTable::new(),
+            retired_l0s: 0,
             sst_order_newest: Vec::new(),
             encode_bufs: Vec::new(),
             ssts,
@@ -1736,12 +1741,15 @@ impl<E: Env> Db<E> {
         self.sst_order_newest = idx;
     }
 
-    /// Drop retired read memtables that no longer have a matching L0.
+    /// Drop the retired read cache when no L0 remains to cover.
     fn sync_retired_to_l0(&mut self) {
         let l0 = self.level_file_count(0);
-        if self.retired_mems.len() > l0 {
-            let extra = self.retired_mems.len() - l0;
-            self.retired_mems.drain(..extra);
+        if l0 == 0 {
+            self.retired_pending.clear();
+            self.retired_fold = MemTable::new();
+            self.retired_l0s = 0;
+        } else if self.retired_l0s > l0 {
+            self.retired_l0s = l0;
         }
     }
 
@@ -2547,19 +2555,34 @@ impl<E: Env> Db<E> {
         self.flush_read_pin = None;
     }
 
-    /// Keep the flush pin as a read layer until its L0 is compacted.
+    /// Park the flush pin for later off-lock fold (no BTree merge here).
     pub fn retire_flush_pin(&mut self) {
         if let Some(pin) = self.flush_read_pin.take() {
             if !pin.is_empty() {
-                self.retired_mems.push(pin);
+                self.retired_pending.push(pin);
+                self.retired_l0s = self.retired_l0s.saturating_add(1);
             }
         }
     }
 
-    /// Retired flushed memtables still serving reads (tests / probes).
+    /// Take pending pins so the host can fold them without the write lock.
+    pub fn take_retired_pending(&mut self) -> Vec<MemTable> {
+        std::mem::take(&mut self.retired_pending)
+    }
+
+    /// Install a fold built off-lock (union of pending pins).
+    pub fn install_retired_fold(&mut self, built: MemTable) {
+        if self.retired_fold.is_empty() {
+            self.retired_fold = built;
+        } else {
+            self.retired_fold.absorb(built);
+        }
+    }
+
+    /// How many L0 files the retired cache covers (tests / probes).
     #[must_use]
     pub fn retired_mem_count(&self) -> usize {
-        self.retired_mems.len()
+        self.retired_l0s
     }
 
     /// Rotate WAL even if [`Self::flush_read_pin`] is live (pre-fix hole).
@@ -2703,17 +2726,18 @@ impl<E: Env> Db<E> {
         self.imm.is_some()
     }
 
-    /// Mem / imm / off-lock flush pin / retired L0 mems — get/scan consult all.
+    /// Mem / imm / pin / folded retired index (or pending pins before fold).
     fn mem_layers(&self) -> impl Iterator<Item = &MemTable> {
         std::iter::once(&self.mem)
             .chain(self.imm.as_ref())
             .chain(self.flush_read_pin.as_ref())
-            .chain(self.retired_mems.iter().rev())
+            .chain((!self.retired_fold.is_empty()).then_some(&self.retired_fold))
+            .chain(self.retired_pending.iter().rev())
     }
 
-    /// SST files that are not fully covered by a retired memtable (scan/count).
+    /// SST files that are not fully covered by the retired fold (scan/count).
     fn sst_tables_not_retired(&self) -> impl Iterator<Item = &SstTable> {
-        let retired = self.retired_mems.len();
+        let retired = self.retired_l0s;
         let mut l0_seen = 0usize;
         self.ssts
             .iter()

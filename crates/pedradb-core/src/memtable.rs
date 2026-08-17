@@ -109,6 +109,22 @@ impl MemTable {
         self.approx_bytes
     }
 
+    /// Move every version from `other` into `self` (retired L0 fold).
+    pub fn absorb(&mut self, other: Self) {
+        if self.is_empty() {
+            *self = other;
+            return;
+        }
+        if other.is_empty() {
+            return;
+        }
+        for (_, vers) in other.map {
+            for v in vers {
+                self.insert(v.key, v.value);
+            }
+        }
+    }
+
     /// Insert a put or deletion. Does not assign sequence numbers — caller does.
     pub fn insert(&mut self, key: InternalKey, value: Bytes) {
         let entry_bytes = key.user_key.len() + value.len() + 8;
@@ -494,6 +510,18 @@ mod tests {
         assert!(mt.approx_memory_usage() >= 5 + 5 + 8);
         assert_eq!(mt.len(), 1);
         assert!(!mt.is_empty());
+    }
+
+    #[test]
+    fn absorb_moves_versions_into_one_table() {
+        let mut a = MemTable::new();
+        a.put(b"a".as_slice(), 1, b"va".as_slice());
+        let mut b = MemTable::new();
+        b.put(b"b".as_slice(), 2, b"vb".as_slice());
+        a.absorb(b);
+        assert_eq!(a.len(), 2);
+        assert_eq!(a.get(b"a", 2), Lookup::Found(Bytes::from_static(b"va")));
+        assert_eq!(a.get(b"b", 2), Lookup::Found(Bytes::from_static(b"vb")));
     }
 
     #[test]

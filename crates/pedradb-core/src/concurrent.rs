@@ -1078,6 +1078,22 @@ impl<E: Env> ConcurrentDb<E> {
         self.inner.write().try_rotate_wal_if_idle()
     }
 
+    /// Merge parked flush pins into one retired BTree **off** the write lock.
+    ///
+    /// Drain only pushes pins (apply must not absorb under the write lock).
+    /// Call when writers are idle so scan/MVCC see one layer.
+    pub fn fold_retired_pending_off_lock(&self) {
+        let pending = self.inner.write().take_retired_pending();
+        if pending.is_empty() {
+            return;
+        }
+        let mut built = crate::memtable::MemTable::new();
+        for pin in pending {
+            built.absorb(pin);
+        }
+        self.inner.write().install_retired_fold(built);
+    }
+
     /// `fdatasync` pending L0s + persist MANIFEST without holding the write lock.
     ///
     /// WAL is kept (mem may still hold keys). Compact can then rewrite L0
@@ -1589,18 +1605,29 @@ mod tests {
         db.put(b"k", vec![b'v'; 64]).unwrap();
         assert!(db.with_write(|d| d.stage_flush_imm()).unwrap());
         assert!(db.drain_imm_once());
+        db.put(b"j", vec![b'w'; 64]).unwrap();
+        assert!(db.with_write(|d| d.stage_flush_imm()).unwrap());
+        assert!(db.drain_imm_once());
         assert_eq!(
             db.with_read(|d| d.retired_mem_count()),
-            1,
-            "drain must retire the flush pin"
+            2,
+            "each drain parks one L0 pin"
         );
+        db.fold_retired_pending_off_lock();
         assert_eq!(db.get(b"k").as_deref(), Some(&[b'v'; 64][..]));
+        assert_eq!(db.get(b"j").as_deref(), Some(&[b'w'; 64][..]));
         let scanned = db.scan_collect(std::ops::Bound::Unbounded, std::ops::Bound::Unbounded);
         assert!(
             scanned
                 .iter()
                 .any(|(k, v)| k.as_ref() == b"k" && v.as_ref() == [b'v'; 64]),
-            "scan must see retired-mem key without the covering L0"
+            "scan must see first folded key without the covering L0"
+        );
+        assert!(
+            scanned
+                .iter()
+                .any(|(k, v)| k.as_ref() == b"j" && v.as_ref() == [b'w'; 64]),
+            "scan must see second folded key in the same index"
         );
         let wal_before = db.stats().wal_bytes;
         db.rotate_wal_if_writers_idle().unwrap();

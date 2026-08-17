@@ -141,7 +141,11 @@ MVCC probe L0=**23** — idle compact cannot finish in a 5 ms MVCC window.
 
 [`retire2/`](retire2/README.md): **1/16 ≥ 2.0** (MVCC **3.08**). apply_mc4
 **1.45**. Scan 0.27 — `scan_sst_probed=0` but many retired BTrees.
-FLOOR off.
+
+## Park + idle fold
+
+[`foldidle/`](foldidle/README.md): **1/16 ≥ 2.0** (E **2.29**). Drain parks
+pins; fold off-lock when idle. Absorb-on-write-lock rejected. FLOOR off.
 
 
 

@@ -1089,6 +1089,9 @@ fn spawn_compact_worker(
                     // apply cut official apply 1c 1.25→0.36 (buf4c).
                     while inner.drain_imm_once() {}
                     if inner.writes_idle_for(Duration::from_millis(5)) {
+                        // Fold parked L0 mems into one BTree off the write lock
+                        // so scan/MVCC do not merge one table per L0.
+                        inner.fold_retired_pending_off_lock();
                         // SST fsync + MANIFEST off the write lock so scan/C
                         // are not blocked on a multi-MiB fd. WAL rotate still
                         // waits for empty mem (G1).

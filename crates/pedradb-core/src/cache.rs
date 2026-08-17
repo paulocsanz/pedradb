@@ -323,11 +323,13 @@ type FxBuild = std::hash::BuildHasherDefault<FxHasher>;
 
 #[derive(Debug, Default)]
 struct AnswerCacheInner<V> {
-    map: std::collections::HashMap<Bytes, V, FxBuild>,
+    map: std::collections::HashMap<Bytes, (u64, V), FxBuild>,
     /// Insertion order for O(1) FIFO eviction (no full-map LRU scan per
     /// insert — miss-heavy workloads insert on every op).
     order: std::collections::VecDeque<Bytes>,
     capacity: usize,
+    /// Bumped on [`AnswerCache::clear`] so stale entries miss without a walk.
+    gen: u64,
 }
 
 impl<V: Clone> AnswerCache<V> {
@@ -339,6 +341,7 @@ impl<V: Clone> AnswerCache<V> {
                 map: std::collections::HashMap::default(),
                 order: std::collections::VecDeque::new(),
                 capacity,
+                gen: 0,
             }),
         }
     }
@@ -350,7 +353,10 @@ impl<V: Clone> AnswerCache<V> {
         if g.capacity == 0 {
             return None;
         }
-        g.map.get(key).cloned()
+        match g.map.get(key) {
+            Some((gen, v)) if *gen == g.gen => Some(v.clone()),
+            _ => None,
+        }
     }
 
     /// Store a latest-snapshot answer.
@@ -359,7 +365,9 @@ impl<V: Clone> AnswerCache<V> {
         if g.capacity == 0 {
             return;
         }
-        if let Some(v) = g.map.get_mut(key) {
+        let now = g.gen;
+        if let Some((gen, v)) = g.map.get_mut(key) {
+            *gen = now;
             *v = value;
             return;
         }
@@ -372,14 +380,18 @@ impl<V: Clone> AnswerCache<V> {
         }
         let owned = Bytes::copy_from_slice(key);
         g.order.push_back(owned.clone());
-        g.map.insert(owned, value);
+        g.map.insert(owned, (now, value));
     }
 
-    /// Drop every entry (call after a write that can change latest visibility).
+    /// Invalidate every entry without walking the map (write path).
     pub fn clear(&self) {
         let mut g = self.inner.lock();
-        g.map.clear();
-        g.order.clear();
+        g.gen = g.gen.wrapping_add(1);
+        if g.gen == 0 {
+            g.map.clear();
+            g.order.clear();
+            g.gen = 1;
+        }
     }
 }
 
