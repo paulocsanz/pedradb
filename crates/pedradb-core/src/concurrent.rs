@@ -45,7 +45,9 @@ use crate::vlog::VlogRewriteStats;
 struct PendingWrite {
     ops: Vec<BatchOp>,
     do_sync: bool,
-    reply: SyncSender<Result<SequenceNumber>>,
+    /// `None` for the group leader — `lead` returns that result directly
+    /// so the leader skips an mpsc hop (RFC-0041 apply_mc4).
+    reply: Option<SyncSender<Result<SequenceNumber>>>,
 }
 
 struct WriteGroup {
@@ -175,36 +177,38 @@ impl WriteGroup {
             return result;
         }
 
-        let (tx, rx) = mpsc::sync_channel(1);
-        let become_leader = {
+        let (reply, rx) = {
             let mut g = self.queue.lock();
-            g.pending.push_back(PendingWrite {
-                ops,
-                do_sync,
-                reply: tx,
-            });
             let leader = !g.leader_active;
             if leader {
                 g.leader_active = true;
+                g.pending.push_back(PendingWrite {
+                    ops,
+                    do_sync,
+                    reply: None,
+                });
+                (None, None)
             } else {
-                // A leader may be holding its catch-up window open for us.
+                let (tx, rx) = mpsc::sync_channel(1);
+                g.pending.push_back(PendingWrite {
+                    ops,
+                    do_sync,
+                    reply: Some(tx),
+                });
                 self.arrived.notify_all();
+                (Some(()), Some(rx))
             }
-            leader
         };
-        if !become_leader {
+        let r = if reply.is_none() {
+            self.lead(db)
+        } else {
             self.queued.fetch_add(1, Ordering::Relaxed);
-        }
-
-        if become_leader {
-            self.lead(db);
-        }
-
-        let r = rx.recv().unwrap_or_else(|_| {
-            Err(CoreError::Internal(
-                "write group leader dropped reply channel".into(),
-            ))
-        });
+            rx.expect("follower has recv").recv().unwrap_or_else(|_| {
+                Err(CoreError::Internal(
+                    "write group leader dropped reply channel".into(),
+                ))
+            })
+        };
         self.active.fetch_sub(1, Ordering::Relaxed);
         self.mark_complete();
         r
@@ -215,13 +219,18 @@ impl WriteGroup {
             .store(Self::now_ns(), Ordering::Relaxed);
     }
 
-    fn lead<E: Env>(&self, db: &RwLock<Db<E>>) {
+    fn lead<E: Env>(&self, db: &RwLock<Db<E>>) -> Result<SequenceNumber> {
+        let mut leader_result: Option<Result<SequenceNumber>> = None;
         loop {
             let mut batch: Vec<PendingWrite> = {
                 let mut g = self.queue.lock();
                 if g.pending.is_empty() {
                     g.leader_active = false;
-                    return;
+                    return leader_result.unwrap_or_else(|| {
+                        Err(CoreError::Internal(
+                            "write group leader had no member result".into(),
+                        ))
+                    });
                 }
                 g.pending.drain(..).collect()
             };
@@ -287,7 +296,12 @@ impl WriteGroup {
                 .fetch_add(batch.len() as u64, Ordering::Relaxed);
 
             for (pending, result) in batch.into_iter().zip(results) {
-                let _ = pending.reply.send(result);
+                match pending.reply {
+                    None => leader_result = Some(result),
+                    Some(tx) => {
+                        let _ = tx.send(result);
+                    }
+                }
             }
         }
     }
@@ -2234,6 +2248,38 @@ mod tests {
         // Knob takes effect again after re-enabling.
         db.set_write_group_catchup_window(Duration::from_micros(1234));
         assert_eq!(db.write_group_catchup_window(), Duration::from_micros(1234));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Leader returns its own result without an mpsc hop; followers still
+    /// wait and every key is visible + durable (RFC-0041).
+    #[test]
+    fn leader_result_skips_mpsc_and_followers_see_keys() {
+        let dir = temp_dir();
+        let db = Arc::new(open_sync(&dir));
+        let n = 8usize;
+        let barrier = Arc::new(std::sync::Barrier::new(n));
+        std::thread::scope(|s| {
+            for i in 0..n {
+                let db = Arc::clone(&db);
+                let barrier = Arc::clone(&barrier);
+                s.spawn(move || {
+                    barrier.wait();
+                    let k = [b'L', u8::try_from(i).expect("n fits u8")];
+                    db.put(k, b"v").unwrap();
+                });
+            }
+        });
+        for i in 0..n {
+            let k = [b'L', u8::try_from(i).expect("n fits u8")];
+            assert_eq!(db.get(&k).as_deref(), Some(&b"v"[..]), "live {i}");
+        }
+        drop(db);
+        let re = open_sync(&dir);
+        for i in 0..n {
+            let k = [b'L', u8::try_from(i).expect("n fits u8")];
+            assert_eq!(re.get(&k).as_deref(), Some(&b"v"[..]), "reopen {i}");
+        }
         let _ = fs::remove_dir_all(&dir);
     }
 
