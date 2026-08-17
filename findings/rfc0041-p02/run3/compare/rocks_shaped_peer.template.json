@@ -1,0 +1,104 @@
+{
+  "bench": "rocks-side-peer-template",
+  "engine": "rocksdb",
+  "sync": false,
+  "durability": "async-wal (WriteOptions.sync=false, rocksdb default)",
+  "benches": [
+    {
+      "name": "deps_apply_batch",
+      "qps": null,
+      "compat_qps_ref": 2536.645,
+      "note": "fill qps from real RocksDB same shape"
+    },
+    {
+      "name": "deps_apply_batch_mc4",
+      "qps": null,
+      "compat_qps_ref": 3290.652,
+      "note": "fill qps from real RocksDB same shape"
+    },
+    {
+      "name": "deps_cache_overwrite",
+      "qps": null,
+      "compat_qps_ref": 25198.451,
+      "note": "fill qps from real RocksDB same shape"
+    },
+    {
+      "name": "deps_cache_overwrite_mc4",
+      "qps": null,
+      "compat_qps_ref": 32996.670,
+      "note": "fill qps from real RocksDB same shape"
+    },
+    {
+      "name": "deps_mvcc_latest",
+      "qps": null,
+      "compat_qps_ref": 217606.167,
+      "note": "fill qps from real RocksDB same shape"
+    },
+    {
+      "name": "deps_raftlog",
+      "qps": null,
+      "compat_qps_ref": 15423.491,
+      "note": "fill qps from real RocksDB same shape"
+    },
+    {
+      "name": "deps_raftlog_mc4",
+      "qps": null,
+      "compat_qps_ref": 9890.468,
+      "note": "fill qps from real RocksDB same shape"
+    },
+    {
+      "name": "deps_scan",
+      "qps": null,
+      "compat_qps_ref": 136109.588,
+      "note": "fill qps from real RocksDB same shape"
+    },
+    {
+      "name": "ycsb_a",
+      "qps": null,
+      "compat_qps_ref": 22340.347,
+      "note": "fill qps from real RocksDB same shape"
+    },
+    {
+      "name": "ycsb_a_mc4",
+      "qps": null,
+      "compat_qps_ref": 27726.140,
+      "note": "fill qps from real RocksDB same shape"
+    },
+    {
+      "name": "ycsb_b",
+      "qps": null,
+      "compat_qps_ref": 175374.492,
+      "note": "fill qps from real RocksDB same shape"
+    },
+    {
+      "name": "ycsb_c",
+      "qps": null,
+      "compat_qps_ref": 618445.062,
+      "note": "fill qps from real RocksDB same shape"
+    },
+    {
+      "name": "ycsb_d",
+      "qps": null,
+      "compat_qps_ref": 162450.837,
+      "note": "fill qps from real RocksDB same shape"
+    },
+    {
+      "name": "ycsb_e",
+      "qps": null,
+      "compat_qps_ref": 100520.611,
+      "note": "fill qps from real RocksDB same shape"
+    },
+    {
+      "name": "ycsb_f",
+      "qps": null,
+      "compat_qps_ref": 34758.655,
+      "note": "fill qps from real RocksDB same shape"
+    },
+    {
+      "name": "ycsb_f_mc4",
+      "qps": null,
+      "compat_qps_ref": 33548.990,
+      "note": "fill qps from real RocksDB same shape"
+    }
+  ]
+}

@@ -1,6 +1,6 @@
 # RFC-0041: Pedra ≥ **2×** RocksDB **default** em todo o harness
 
-**Status:** draft  
+**Status:** in-progress  
 **Updated:** 2026-08-17  
 **Parents:** [0040](0040-fsync-always-beats-rocks-async.md) (peer = Rocks default; group/sticky), [AGENTS.md](../../AGENTS.md) (única vitória = vs `sync=false`)
 
@@ -10,18 +10,20 @@
 - Pedido: **sempre** pelo menos **2×** esse Rocks — `compat_qps / rocks_default_qps ≥ 2.0` em **cada** shape do harness, mediana de ≥3 runs. Não é 2× o Rocks sync. Não é “empatar.”
 - Harness: `scripts/tikv_ycsb_parity_v0.sh` (já default `ROCKS_PARITY_SYNC=0`) + MC quando `ROCKS_PARITY_CLIENTS=4`.
 - Shapes: YCSB A–F, apply, MVCC, scan, raftlog, overwrite (1 cliente) **e** A/F/overwrite/apply/raftlog `_mc4`.
-- Onde estamos vs default (deps, mediana [rfc0040-p11](../findings/rfc0040-p11/README.md); YCSB A–F ainda **sem** remesura oficial pós-`SYNC=0`):
+- Oficial vs default (mediana 3 runs, [rfc0041-p02](../../findings/rfc0041-p02/README.md); `fdatasync` isolado p50 **25.7 µs** ≈ 38.9 k qps/fd):
 
-| shape | vs default agora | 2× pede |
+| shape | vs default | 2× pede |
 |---|---:|---|
-| mvcc | 1.65 | +~20% |
-| scan qps | 0.76 (p50 já ganha) | ~2.6× o qps atual |
-| apply MC4 | 0.93 | ~2.2× |
-| apply 1c | 0.42 | ~4.8× |
-| raftlog 1c / MC4 | 0.55 / 0.61 | ~3–4× |
-| YCSB A/F 1c | não medido neste peer; historicamente ≪1 | remesura P0.2 |
+| ycsb_e | 0.91 | ~2.2× o qps atual |
+| apply MC4 | 0.89 | ~2.3× |
+| mvcc | 0.79 | ~2.5× |
+| ycsb_c | 0.78 (p50 já ganha) | ~2.6× |
+| raftlog MC4 | 0.53 | ~3.8× |
+| scan qps | 0.50 (p50 já ganha) | ~4.0× |
+| apply 1c | 0.39 | ~5.1× |
+| YCSB A/F 1c | 0.056 / 0.073 | teto 1/fd ≪ 2× Rocks |
 
-- 2× num put 1 cliente com um `fdatasync` por Ok só fecha se o Rocks default for mais lento que `2 / t_fd`. Se P0.2 mostrar que não é, o slice 1c de escrita **fica `todo`** — não se muda o alvo nem se troca o peer.
+- 2× num put 1 cliente com um `fdatasync` por Ok **não fecha** nesta caixa: Rocks A ~398 k, 2× = 797 k, `1/t_fd` ≈ 39 k. P1.2/P1.3 1c **ficam `todo`** — não se muda o alvo nem se troca o peer. apply_mc4 **não** é o fd (p50 852 µs, fd 26 µs).
 
 ## Problems This Solves
 
@@ -51,12 +53,12 @@
 ### P0 — must ship first (número oficial em todas as shapes)
 
 - [x] **P0.1** RFC + Status vivo (este doc) — status: `done`
-- [ ] **P0.2** Remesura 11 + `_mc4` vs `ROCKS_PARITY_SYNC=0` apenas; p50/p95/qps; `fdatasync` isolado; finding `findings/rfc0041-p02/` — status: `todo`
-- [ ] **P0.3** Ligar `ROCKS_PARITY_RATIO_FLOOR=2.0` no script **só** nas shapes que P0.2 já mostrar ≥ 2.0 (não ligar gate vazio) — status: `todo`
+- [x] **P0.2** Remesura 11 + `_mc4` vs `ROCKS_PARITY_SYNC=0` apenas; p50/p95/qps; `fdatasync` isolado; finding `findings/rfc0041-p02/` — status: `done` (**0/16 ≥ 2.0**; apply_mc4 0.89; A 1c 0.056 ≪ 1/fd)
+- [ ] **P0.3** Ligar `ROCKS_PARITY_RATIO_FLOOR=2.0` no script **só** nas shapes que P0.2 já mostrar ≥ 2.0 (não ligar gate vazio) — status: `todo` (conjunto vazio; não ligar)
 
 ### P1 — escritas ≥ 2× default
 
-- [ ] **P1.1** `deps_apply_batch_mc4` e `deps_raftlog_mc4` ≥ 2.0 vs default da run — status: `todo`
+- [ ] **P1.1** `deps_apply_batch_mc4` e `deps_raftlog_mc4` ≥ 2.0 vs default da run — status: `doing`
 - [ ] **P1.2** `ycsb_a` / `ycsb_f` / `deps_cache_overwrite` (1c e `_mc4` se existirem) ≥ 2.0 vs default — status: `todo`
 - [ ] **P1.3** `deps_apply_batch` e `deps_raftlog` **1 cliente** ≥ 2.0 vs default — status: `todo`
 
@@ -71,9 +73,9 @@
 | ID | Band | Title | Status | Task / PR | Updated |
 |----|------|-------|--------|-----------|---------|
 | P0.1 | p0 | RFC | done | este doc | 2026-08-17 |
-| P0.2 | p0 | remesura 11+MC vs default | todo | — | 2026-08-17 |
-| P0.3 | p0 | floor 2.0 nas que já passam | todo | — | 2026-08-17 |
-| P1.1 | p1 | apply/raftlog MC ≥ 2× | todo | — | 2026-08-17 |
+| P0.2 | p0 | remesura 11+MC vs default | done | findings/rfc0041-p02 | 2026-08-17 |
+| P0.3 | p0 | floor 2.0 nas que já passam | todo | conjunto vazio | 2026-08-17 |
+| P1.1 | p1 | apply/raftlog MC ≥ 2× | doing | — | 2026-08-17 |
 | P1.2 | p1 | A/F/overwrite ≥ 2× | todo | — | 2026-08-17 |
 | P1.3 | p1 | apply/raftlog 1c ≥ 2× | todo | — | 2026-08-17 |
 | P2.1 | p2 | scan/E ≥ 2× | todo | — | 2026-08-17 |

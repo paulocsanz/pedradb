@@ -92,6 +92,11 @@ fn main() {
         "deps_scan",
         "deps_raftlog",
         "deps_cache_overwrite",
+        "ycsb_a_mc4",
+        "ycsb_f_mc4",
+        "deps_cache_overwrite_mc4",
+        "deps_apply_batch_mc4",
+        "deps_raftlog_mc4",
     ];
     let parity_floor: Option<f64> = std::env::var("ROCKS_PARITY_RATIO_FLOOR")
         .ok()
