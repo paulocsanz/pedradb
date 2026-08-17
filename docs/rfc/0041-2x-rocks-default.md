@@ -58,7 +58,7 @@
 
 ### P1 — escritas ≥ 2× default
 
-- [ ] **P1.1** `deps_apply_batch_mc4` e `deps_raftlog_mc4` ≥ 2.0 vs default da run — status: `doing` (stream SST; streamsst **3/16**, apply_mc4 **0.74** — [streamsst](../../findings/rfc0041-p11/streamsst/README.md))
+- [ ] **P1.1** `deps_apply_batch_mc4` e `deps_raftlog_mc4` ≥ 2.0 vs default da run — status: `doing` (WAL rotate só idle; L0 sem lz4)
 - [ ] **P1.2** `ycsb_a` / `ycsb_f` / `deps_cache_overwrite` (1c e `_mc4` se existirem) ≥ 2.0 vs default — status: `todo`
 - [ ] **P1.3** `deps_apply_batch` e `deps_raftlog` **1 cliente** ≥ 2.0 vs default — status: `todo`
 
@@ -75,7 +75,7 @@
 | P0.1 | p0 | RFC | done | este doc | 2026-08-17 |
 | P0.2 | p0 | remesura 11+MC vs default | done | findings/rfc0041-p02 | 2026-08-17 |
 | P0.3 | p0 | floor 2.0 nas que já passam | todo | 3/16 (C/E/scan); sem gate parcial | 2026-08-17 |
-| P1.1 | p1 | apply/raftlog MC ≥ 2× | doing | stream L0 SST write | 2026-08-17 |
+| P1.1 | p1 | apply/raftlog MC ≥ 2× | doing | idle WAL rotate + L0 v3 | 2026-08-17 |
 | P1.2 | p1 | A/F/overwrite ≥ 2× | todo | A 0.16 (53k / fd) | 2026-08-17 |
 | P1.3 | p1 | apply/raftlog 1c ≥ 2× | todo | apply 0.79 | 2026-08-17 |
 | P2.1 | p2 | scan/E ≥ 2× | done | E 4.26 scan 18 | 2026-08-17 |

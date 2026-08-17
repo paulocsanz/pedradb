@@ -21,12 +21,10 @@ use bytes::Bytes;
 use parking_lot::Mutex;
 use pedradb_core::{
     BatchOp, CompactOptions, ConcurrentDb, CoreError, Env, Snapshot as CoreSnapshot, StdEnv,
-    L0_COMPACTION_TRIGGER,
 };
 use std::collections::VecDeque;
 use std::fmt;
 use std::ops::Bound;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError, SyncSender};
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
@@ -1072,7 +1070,6 @@ fn spawn_compact_worker(
     gate: Arc<Mutex<()>>,
 ) -> (Option<SyncSender<CompactCmd>>, Option<JoinHandle<()>>) {
     let (tx, rx) = mpsc::sync_channel(1);
-    let drain_all = Arc::new(AtomicBool::new(false));
     let handle = thread::Builder::new()
         .name("pedra-compat-compact".into())
         .spawn(move || loop {
@@ -1088,7 +1085,11 @@ fn spawn_compact_worker(
                     // idles — drain-to-0 *during* apply cut apply_mc4 3.5k→1k.
                     while inner.drain_imm_once() {}
                     if inner.writes_idle_for(Duration::from_millis(5)) {
-                        while compat_compact_once(&inner, &gate, &drain_all) {}
+                        // SST fsync + WAL rotate only after the write burst
+                        // idles — drain with empty active mem used to pay a
+                        // 64 MiB fd mid-apply (RFC-0041).
+                        let _ = inner.rotate_wal_if_writers_idle();
+                        while compat_compact_once(&inner, &gate) {}
                     }
                 }
             }
@@ -1098,22 +1099,13 @@ fn spawn_compact_worker(
 }
 
 /// One L0→L1 job. I/O runs without the write lock (G5: failed write is not installed).
-fn compat_compact_once<E: Env>(
-    inner: &ConcurrentDb<E>,
-    gate: &Mutex<()>,
-    drain_all: &AtomicBool,
-) -> bool {
-    // Start a drain when L0 hits the trigger; then keep going until L0 is
-    // empty so C/E/scan do not sit on leftover files.
+fn compat_compact_once<E: Env>(inner: &ConcurrentDb<E>, gate: &Mutex<()>) -> bool {
+    // Only invoked when writers are idle — drain every leftover L0 so a
+    // mid-loop compact that hits L0=0 cannot leave a sub-trigger remnant.
     let l0 = inner.with_read(|db| db.level_file_count(0));
     if l0 == 0 {
-        drain_all.store(false, Ordering::Relaxed);
         return false;
     }
-    if l0 < L0_COMPACTION_TRIGGER && !drain_all.load(Ordering::Relaxed) {
-        return false;
-    }
-    drain_all.store(true, Ordering::Relaxed);
     let _gate = gate.lock();
     let job = inner.with_write(|db| {
         if db.level_file_count(0) == 0 {

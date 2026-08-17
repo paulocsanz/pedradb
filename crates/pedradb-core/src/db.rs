@@ -70,7 +70,7 @@ use crate::lock::DirLock;
 use crate::manifest::{self, VersionSet};
 use crate::memtable::{Lookup, MemTable};
 use crate::merge::{range_deleted, StreamingVisibleIter, VisibleKv};
-use crate::sst::{write_sst_entries_on, write_sst_on_with, write_sst_try_sorted_on, SstTable};
+use crate::sst::{write_l0_sst, write_sst_entries_on, write_sst_try_sorted_on, SstTable};
 use crate::tx::Transaction;
 use crate::vlog::{self, ValueLog, VlogRewriteStats, VLOG_FILE_NAME};
 use crate::wal::Wal;
@@ -2560,7 +2560,7 @@ impl<E: Env> Db<E> {
         // L0 is not WAL-durable until rotate: skip file `fdatasync` here.
         // `sync` only dir-syncs after rename (used by tests that want the
         // name visible); the file bytes stay lazy.
-        match write_sst_on_with(env, &tmp_path, imm, false) {
+        match write_l0_sst(env, &tmp_path, imm, false) {
             Ok(table) => {
                 drop(table);
                 env.rename(&tmp_path, &final_path)?;

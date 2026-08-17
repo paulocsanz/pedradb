@@ -1489,12 +1489,35 @@ pub fn write_sst_on_with(
 ) -> Result<SstTable> {
     // MemTable is already InternalKey-ordered (user key asc, seq desc).
     // Do not collect+sort a 64 MiB snapshot — that was the apply tail.
-    write_sst_try_sorted_with(
+    write_sst_try_sorted_opts(
         env,
         path,
         mem.iter_internal().map(|(k, v)| Ok((k.clone(), v.clone()))),
         mem.len(),
         sync,
+        true,
+    )
+}
+
+/// L0 flush: same as [`write_sst_on_with`] but **uncompressed** (SST v3).
+///
+/// Skip 64 MiB of lz4 on the apply tail; L0→L1 compact still writes v4.
+///
+/// # Errors
+/// I/O failures.
+pub fn write_l0_sst(
+    env: &impl Env,
+    path: impl AsRef<Path>,
+    mem: &MemTable,
+    sync: bool,
+) -> Result<SstTable> {
+    write_sst_try_sorted_opts(
+        env,
+        path,
+        mem.iter_internal().map(|(k, v)| Ok((k.clone(), v.clone()))),
+        mem.len(),
+        sync,
+        false,
     )
 }
 
@@ -1553,7 +1576,18 @@ pub fn write_sst_try_sorted_with(
     bloom_hint: usize,
     sync: bool,
 ) -> Result<SstTable> {
-    write_sst_try_sorted_body(env, path, entries, bloom_hint, sync)
+    write_sst_try_sorted_opts(env, path, entries, bloom_hint, sync, true)
+}
+
+fn write_sst_try_sorted_opts(
+    env: &impl Env,
+    path: impl AsRef<Path>,
+    entries: impl IntoIterator<Item = Result<(InternalKey, Bytes)>>,
+    bloom_hint: usize,
+    sync: bool,
+    compress: bool,
+) -> Result<SstTable> {
+    write_sst_try_sorted_body(env, path, entries, bloom_hint, sync, compress)
 }
 
 /// Like [`write_sst_sorted_on`] but the stream may fail mid-file (k-way decode).
@@ -1575,6 +1609,7 @@ fn write_sst_try_sorted_body(
     entries: impl IntoIterator<Item = Result<(InternalKey, Bytes)>>,
     bloom_hint: usize,
     sync: bool,
+    compress: bool,
 ) -> Result<SstTable> {
     let path = path.as_ref();
     let mut bloom = if bloom_hint == 0 {
@@ -1601,14 +1636,18 @@ fn write_sst_try_sorted_body(
         if block_buf.is_empty() {
             return Ok(());
         }
-        let compressed = lz4_flex::compress_prepend_size(block_buf);
+        let payload = if compress {
+            lz4_flex::compress_prepend_size(block_buf)
+        } else {
+            std::mem::take(block_buf)
+        };
         let offset = data.len() as u64;
-        let length = u32::try_from(compressed.len())
+        let length = u32::try_from(payload.len())
             .map_err(|_| CoreError::Internal("SST block too large".into()))?;
         let first = block_first_user
             .take()
             .ok_or_else(|| CoreError::Internal("block missing first key".into()))?;
-        data.extend_from_slice(&compressed);
+        data.extend_from_slice(&payload);
         block_buf.clear();
         index.push(BlockHandle {
             offset,
@@ -1646,7 +1685,12 @@ fn write_sst_try_sorted_body(
     // Header: magic version num_entries max_seq num_blocks data_len (fixed 40 B)
     let mut header = Vec::with_capacity(40);
     header.extend_from_slice(SST_MAGIC);
-    header.extend_from_slice(&SST_VERSION.to_le_bytes());
+    let version = if compress {
+        SST_VERSION
+    } else {
+        SST_VERSION_V3
+    };
+    header.extend_from_slice(&version.to_le_bytes());
     let n =
         u64::try_from(n_entries).map_err(|_| CoreError::Internal("too many SST entries".into()))?;
     header.extend_from_slice(&n.to_le_bytes());
@@ -2042,6 +2086,22 @@ mod tests {
             re.get(b"k000", 10_000),
             Lookup::Found(Bytes::from(vec![0; 64]))
         );
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn uncompressed_l0_roundtrip() {
+        let mut mem = MemTable::new();
+        mem.put(Bytes::from_static(b"a"), 1, Bytes::from_static(b"va"));
+        mem.put(Bytes::from_static(b"b"), 2, Bytes::from_static(b"vb"));
+        let path = temp_path();
+        let table = write_l0_sst(&StdEnv, &path, &mem, false).unwrap();
+        assert_eq!(
+            table.get(b"a", 10),
+            Lookup::Found(Bytes::from_static(b"va"))
+        );
+        let re = SstTable::open(&path).unwrap();
+        assert_eq!(re.get(b"b", 10), Lookup::Found(Bytes::from_static(b"vb")));
         let _ = std::fs::remove_file(&path);
     }
 

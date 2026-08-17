@@ -1054,15 +1054,28 @@ impl<E: Env> ConcurrentDb<E> {
                 return false;
             }
         };
-        // In-memory L0 only. SST `fdatasync` + MANIFEST wait for WAL rotate
-        // (mem/imm idle) so apply is not charged a 64 MiB file fd (RFC-0041).
+        // In-memory L0 only. Do **not** rotate here: after a stage the
+        // active mem is empty, so try_rotate would fsync the new 64 MiB
+        // SST + MANIFEST mid-apply (224 ms tail, RFC-0041 streamsst).
+        // The host worker rotates only when `writes_idle_for`.
         {
             let mut g = self.inner.write();
             g.apply_l0_install(table, file_num);
             g.clear_flush_read_pin();
-            let _ = g.try_rotate_wal_if_idle();
         }
         true
+    }
+
+    /// Persist pending L0s + MANIFEST and rotate WAL when no writer is in
+    /// flight. No-op if mem/imm still hold acked keys (G1).
+    ///
+    /// # Errors
+    /// SST / MANIFEST / WAL I/O.
+    pub fn rotate_wal_if_writers_idle(&self) -> Result<()> {
+        if !self.writes_idle_for(Duration::ZERO) {
+            return Ok(());
+        }
+        self.inner.write().try_rotate_wal_if_idle()
     }
 
     /// Publish a prepared L0→L1 compact: mem install under the write lock,
@@ -1484,6 +1497,40 @@ mod tests {
         db.put(b"c", b"tiny").unwrap();
         assert!(!db.drain_imm_once());
         assert_eq!(db.get(b"c").as_deref(), Some(&b"tiny"[..]));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Host drain must not rotate WAL (SST fsync + MANIFEST) just because
+    /// active mem is empty after a stage — that was the apply 224 ms tail.
+    #[test]
+    fn drain_imm_does_not_rotate_wal() {
+        let dir = temp_dir();
+        let db = open_sync(&dir);
+        db.set_defer_auto_compact(true);
+        db.put(b"k", vec![b'v'; 64]).unwrap();
+        assert!(db.with_write(|d| d.stage_flush_imm()).unwrap());
+        let wal_before = db.stats().wal_bytes;
+        assert!(wal_before > 32, "put must have appended WAL");
+        assert!(db.drain_imm_once());
+        let wal_after = db.stats().wal_bytes;
+        assert_eq!(
+            wal_after, wal_before,
+            "drain must keep WAL; rotate is idle-only"
+        );
+        assert_eq!(db.get(b"k").as_deref(), Some(&[b'v'; 64][..]));
+        db.rotate_wal_if_writers_idle().unwrap();
+        assert!(
+            db.stats().wal_bytes < wal_before,
+            "idle rotate may replace WAL"
+        );
+        drop(db);
+        // After rotate, SST+MANIFEST hold the key even if WAL is gone.
+        let wal = dir.join(crate::db::WAL_FILE_NAME);
+        if wal.exists() {
+            let _ = fs::remove_file(&wal);
+        }
+        let re = open_sync(&dir);
+        assert_eq!(re.get(b"k").as_deref(), Some(&[b'v'; 64][..]));
         let _ = fs::remove_dir_all(&dir);
     }
 
