@@ -73,9 +73,12 @@ struct WriteGroup {
     /// from 4 clients share fsyncs instead of each taking the lone-writer
     /// path between the two `write()`s (RFC-0040 P1.2).
     last_multi_ns: AtomicU64,
-    /// Last `submit` entry (ns). Host compact waits for this to go idle so
-    /// L0 rewrite does not run in the gaps of an apply/raftlog burst.
+    /// Last `submit` entry (ns).
     last_submit_ns: AtomicU64,
+    /// Last `submit` **return** (ns). Host compact must wait on this, not
+    /// `last_submit_ns`: an apply_mc4 batch of 5–14 ms would look idle
+    /// under a 5 ms last-submit rule the instant it returns (RFC-0041).
+    last_complete_ns: AtomicU64,
 }
 
 /// Default catch-up window (see [`ConcurrentDb::set_write_group_catchup_window`]).
@@ -122,6 +125,7 @@ impl WriteGroup {
             batch_ops: AtomicU64::new(0),
             last_multi_ns: AtomicU64::new(0),
             last_submit_ns: AtomicU64::new(0),
+            last_complete_ns: AtomicU64::new(0),
         }
     }
 
@@ -167,6 +171,7 @@ impl WriteGroup {
             self.batches.fetch_add(1, Ordering::Relaxed);
             self.batch_ops.fetch_add(1, Ordering::Relaxed);
             self.active.fetch_sub(1, Ordering::Relaxed);
+            self.mark_complete();
             return result;
         }
 
@@ -201,7 +206,13 @@ impl WriteGroup {
             ))
         });
         self.active.fetch_sub(1, Ordering::Relaxed);
+        self.mark_complete();
         r
+    }
+
+    fn mark_complete(&self) {
+        self.last_complete_ns
+            .store(Self::now_ns(), Ordering::Relaxed);
     }
 
     fn lead<E: Env>(&self, db: &RwLock<Db<E>>) {
@@ -742,8 +753,9 @@ impl<E: Env> ConcurrentDb<E> {
     }
 
     /// True when no writer is in `submit` / group `fdatasync` and the last
-    /// submit is older than `idle`. Host compact uses this so L0 rewrite
-    /// does not start in a 5 ms poll gap of an apply burst (RFC-0041 P1.1).
+    /// Ok is older than `idle`. Uses submit **return** time so a long
+    /// apply batch (p95 5–14 ms) is not treated as idle the moment it
+    /// returns (RFC-0041: last-submit idle started compact in apply gaps).
     #[must_use]
     pub fn writes_idle_for(&self, idle: Duration) -> bool {
         if self.writes.active.load(Ordering::Relaxed) > 0 {
@@ -752,7 +764,12 @@ impl<E: Env> ConcurrentDb<E> {
         if self.inner.read().commit_inflight() > 0 {
             return false;
         }
-        let last = self.writes.last_submit_ns.load(Ordering::Relaxed);
+        let last = self.writes.last_complete_ns.load(Ordering::Relaxed);
+        let last = if last == 0 {
+            self.writes.last_submit_ns.load(Ordering::Relaxed)
+        } else {
+            last
+        };
         if last == 0 {
             return true;
         }
@@ -2071,6 +2088,16 @@ mod tests {
         assert!(
             db.writes_idle_for(Duration::from_millis(1)),
             "1 ms idle is true a few ms after the last Ok"
+        );
+        // A fat apply that itself lasts >1 ms must not look idle at Ok
+        // (last-submit clock would fire; last-complete must not).
+        let fat: Vec<_> = (0..64u16)
+            .map(|i| BatchOp::put(i.to_be_bytes(), vec![b'x'; 1024]))
+            .collect();
+        db.apply_batch(fat).unwrap();
+        assert!(
+            !db.writes_idle_for(Duration::from_millis(1)),
+            "idle clock is last Ok, not submit start of a long apply"
         );
         drop(db);
         let re = open_sync(&dir);

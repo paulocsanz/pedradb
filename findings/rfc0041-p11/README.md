@@ -178,6 +178,12 @@ held; idle dump of every parked L0 **rejected** (MVCC 2.04 → 1.07).
 gaps (Pedra 1.2 k). [`fat20b/`](fat20b/README.md): 20 µs fat hold
 avg_group 1.73, apply_mc4 **1.47 k**. Skip restored.
 
+## Idle = last Ok
+
+[`okidle/`](okidle/README.md): **0/16**. apply_mc4 1.13 (2.1 k). Scan
+0.26 (L0 stayed high). Clock is correct; FLOOR off.
+
+
 
 
 

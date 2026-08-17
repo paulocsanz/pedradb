@@ -59,7 +59,7 @@
 ### P1 — escritas ≥ 2× default
 
 - [ ] **P1.1** `deps_apply_batch_mc4` e `deps_raftlog_mc4` ≥ 2.0 vs default da run — status: `doing` (scansst apply_mc4 **0.96**; idleinc/b4c1 rejected)
-- [ ] **P1.2** `ycsb_a` / `ycsb_f` / `deps_cache_overwrite` (1c e `_mc4` se existirem) ≥ 2.0 vs default — status: `todo`
+- [ ] **P1.2** `ycsb_a` / `ycsb_f` / `deps_cache_overwrite` (1c e `_mc4` se existirem) ≥ 2.0 vs default — status: `todo` (1c A/F/overwrite: `1/t_fd` ≈ 43 k; 2× Rocks A pede ~400 k+. Alvo e peer **não** mudam; FLOOR fica off até as 16)
 - [ ] **P1.3** `deps_apply_batch` e `deps_raftlog` **1 cliente** ≥ 2.0 vs default — status: `todo`
 
 ### P2 — leituras ≥ 2× default
@@ -74,9 +74,9 @@
 |----|------|-------|--------|-----------|---------|
 | P0.1 | p0 | RFC | done | este doc | 2026-08-17 |
 | P0.2 | p0 | remesura 11+MC vs default | done | findings/rfc0041-p02 | 2026-08-17 |
-| P0.3 | p0 | floor 2.0 nas que já passam | todo | scansst 1/16; fat20/fat20b rejected | 2026-08-17 |
-| P1.1 | p1 | apply/raftlog MC ≥ 2× | doing | fat20b apply_mc4 0.89 (1.5 k) rejected | 2026-08-17 |
-| P1.2 | p1 | A/F/overwrite ≥ 2× | todo | A 0.10 (29k / fd) | 2026-08-17 |
+| P0.3 | p0 | floor 2.0 nas que já passam | todo | okidle 0/16; sem gate | 2026-08-17 |
+| P1.1 | p1 | apply/raftlog MC ≥ 2× | doing | okidle apply_mc4 1.13 | 2026-08-17 |
+| P1.2 | p1 | A/F/overwrite ≥ 2× | todo | 1c A 0.07; 1/t_fd ≈ 42 k | 2026-08-17 |
 | P1.3 | p1 | apply/raftlog 1c ≥ 2× | todo | apply 0.43 | 2026-08-17 |
 | P2.1 | p2 | scan/E ≥ 2× | doing | scan **1.15**; E 0.91 | 2026-08-17 |
 | P2.2 | p2 | C/B/D/MVCC ≥ 2× | doing | C 1.52; MVCC **2.58** | 2026-08-17 |
