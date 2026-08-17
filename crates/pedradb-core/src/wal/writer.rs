@@ -89,6 +89,28 @@ impl<W: Write + Seek> WalWriter<W> {
         Ok(())
     }
 
+    pub(crate) fn take_frame(&mut self) -> Vec<u8> {
+        let mut frame = std::mem::take(&mut self.frame);
+        frame.clear();
+        frame
+    }
+
+    pub(crate) fn restore_frame(&mut self, frame: Vec<u8>) {
+        self.frame = frame;
+    }
+
+    pub(crate) fn fragment_record(&mut self, data: &[u8], buf: &mut Vec<u8>) {
+        buf.reserve(data.len() + 2 * HEADER_SIZE);
+        self.fragment_into(data, buf);
+    }
+
+    pub(crate) fn write_frame(&mut self, buf: &[u8]) -> Result<()> {
+        if !buf.is_empty() {
+            self.out.write_all(buf)?;
+        }
+        Ok(())
+    }
+
     /// Fragmentation state machine shared by [`Self::add_record`] (direct
     /// write) and [`Self::add_records`] (staged buffer).
     fn fragment_into(&mut self, data: &[u8], buf: &mut Vec<u8>) {
@@ -267,6 +289,29 @@ mod tests {
         let seq_bytes = seq.into_inner().into_inner();
         assert_eq!(grouped.into_inner().into_inner(), seq_bytes);
         assert_eq!(chunked.into_inner().into_inner(), seq_bytes);
+    }
+
+    #[test]
+    fn fragment_record_write_frame_matches_add_records() {
+        let records: Vec<Vec<u8>> = vec![
+            b"short".to_vec(),
+            vec![0xcd; super::super::format::BLOCK_SIZE + 50],
+            b"".to_vec(),
+        ];
+        let mut grouped = WalWriter::new(Cursor::new(Vec::new())).unwrap();
+        let refs: Vec<&[u8]> = records.iter().map(|r| r.as_slice()).collect();
+        grouped.add_records(&refs).unwrap();
+        let mut framed = WalWriter::new(Cursor::new(Vec::new())).unwrap();
+        let mut frame = framed.take_frame();
+        for r in &records {
+            framed.fragment_record(r, &mut frame);
+        }
+        framed.write_frame(&frame).unwrap();
+        framed.restore_frame(frame);
+        assert_eq!(
+            framed.into_inner().into_inner(),
+            grouped.into_inner().into_inner()
+        );
     }
 
     #[test]
