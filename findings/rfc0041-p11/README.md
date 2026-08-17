@@ -172,6 +172,12 @@ held; idle dump of every parked L0 **rejected** (MVCC 2.04 → 1.07).
 **0.24**. [`b4c1/`](b4c1/README.md): **1/16** MVCC 2.66; scan **0.28**
 (L0=24). Worker stays scansst.
 
+## Fat catch-up / 1 ms idle (rejected)
+
+[`fat20/`](fat20/README.md): **0/16**. 1 ms idle compact in apply_mc4
+gaps (Pedra 1.2 k). [`fat20b/`](fat20b/README.md): 20 µs fat hold
+avg_group 1.73, apply_mc4 **1.47 k**. Skip restored.
+
 
 
 

@@ -90,9 +90,9 @@ const CATCHUP_WINDOW_DEFAULT: Duration = Duration::from_micros(50);
 const MULTI_HOLD: Duration = Duration::from_micros(250);
 
 /// Skip the catch-up wait when the drained group already has this many user
-/// ops (apply = 64, raftlog = 16). Waiting 50 µs then costs more than one
-/// `fdatasync` and serializes more CPU under the write lock (RFC-0041 P1.1).
-/// Small puts (YCSB A/F) still wait so they can share an fsync.
+/// ops (apply = 64, raftlog = 16). A 20 µs fat hold (fat20b) raised
+/// avg_group 1.54→1.73 and cut apply_mc4 2.1 k→1.5 k. Small YCSB puts
+/// still wait so they can share an fsync.
 const CATCHUP_SKIP_OPS: usize = 16;
 
 struct WriteGroupState {
@@ -1969,8 +1969,9 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
     }
 
-    /// RFC-0041 P1.1: apply-sized batches skip catch-up; drain_imm persists
-    /// MANIFEST off the write lock; keys survive reopen.
+    /// RFC-0041 P1.1: apply-sized batches skip the long catch-up; late-join
+    /// still shares a `fdatasync` when clients are already queued; drain_imm
+    /// persists; keys survive reopen.
     #[test]
     fn large_batch_skips_catchup_and_flush_reopens() {
         let dir = temp_dir();
@@ -2009,6 +2010,18 @@ mod tests {
             }
         });
         while db.drain_imm_once() {}
+        let (submits, _, groups, group_ops) = db.write_group_stats();
+        assert_eq!(submits, n_clients as u64);
+        assert_eq!(group_ops, n_clients as u64);
+        assert!(
+            groups < n_clients as u64,
+            "fat-batch short catch-up must share fsyncs: groups={groups} clients={n_clients}"
+        );
+        assert!(
+            db.wal_sync_count() < n_clients as u64,
+            "fat batches must amortize fdatasync: syncs={} clients={n_clients}",
+            db.wal_sync_count()
+        );
         for c in 0..n_clients {
             for i in 0..batch {
                 let mut k = vec![b'k', c as u8];
@@ -2048,6 +2061,16 @@ mod tests {
         assert!(
             db.writes_idle_for(Duration::ZERO),
             "no writer in flight after sequential puts return"
+        );
+        db.put([b'z'], [b'1']).unwrap();
+        assert!(
+            !db.writes_idle_for(Duration::from_millis(1)),
+            "1 ms idle must not fire immediately after a submit (apply gaps)"
+        );
+        std::thread::sleep(Duration::from_millis(3));
+        assert!(
+            db.writes_idle_for(Duration::from_millis(1)),
+            "1 ms idle is true a few ms after the last Ok"
         );
         drop(db);
         let re = open_sync(&dir);

@@ -1085,10 +1085,9 @@ fn spawn_compact_worker(
                     break;
                 }
                 Ok(CompactCmd::Run) | Err(RecvTimeoutError::Timeout) => {
-                    // Drain imm → L0 during writes (scansst MVCC 2.58 /
-                    // scan 1.15). Park-during-writes (idleinc) scan 0.24.
-                    // One compact/tick (b4c1) left L0=24 and scan 0.28.
-                    // Idle `while` still drains leftover L0s.
+                    // Drain imm → L0 during writes (no parked BTrees).
+                    // 1 ms idle fired compact in apply_mc4 gaps (p50 ~1.8
+                    // ms; fat20 apply_mc4 0.9 k). 5 ms idle stays.
                     while inner.drain_imm_once() {}
                     if inner.writes_idle_for(Duration::from_millis(5)) {
                         let _ = inner.persist_unsynced_l0s_off_lock();
