@@ -107,8 +107,13 @@ After trigger, keep compacting until L0==0. Official remesura
 
 ## Stream L0 SST write
 
-[`streamsst/`](streamsst/README.md): **3/16 ≥ 2.0** (C/E/MVCC). apply_mc4
-still ~1.8 k. FLOOR not enabled.
+[`streamsst/`](streamsst/README.md): **3/16 ≥ 2.0** (C/E/MVCC).
+
+## Idle rotate + uncompressed L0
+
+[`idlerot/`](idlerot/README.md): uncompressed L0 **rejected** (apply_mc4
+0.74 → 0.46). Idle-only WAL rotate kept. FLOOR not enabled.
+
 
 
 
