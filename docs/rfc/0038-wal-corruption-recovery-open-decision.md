@@ -66,21 +66,33 @@ O que a pesquisa confirma/contra-argumenta:
 - **Problem:** não existe modo de recuperação *contabilizado*: ou fail-stop, ou (inexistente)
   perda silenciosa — faltam os dois pontos intermediários honestos.
 
-## Proposed Solution (decisão pendente — não implementar antes de escolher)
+## Refinamento pós-discussão (2026-08-16) — o argumento "disco morrendo" invertido
 
-Opções em mesa:
+Discussão com o dono derrubou o argumento mais fraco do fail-stop: *"bitrot anuncia disco
+morrendo, então parar é feature"*. Se o disco está mesmo morrendo, (a) reportar não conserta
+física nenhuma, (b) o `Db::open` fechado **bloqueia a evacuação** do prefixo são, (c) nenhum
+modo local recupera o que ficou ilegível. Três classes de corrupção mid-WAL e por que o
+evento único não discrimina:
 
-- **A. Manter fail-stop + heal por réplica (CRDB-style).** Sem mudança no core; Montanha
-  majority re-heala o nó. Custo: exige replicação pronta; single-node segue exigindo humano.
-- **B. Primitiva PIT contabilizada (a favorita da pesquisa).** `OpenOptions::wal_recovery`:
-  `FailStop` (default, atual) | `PointInTime { on_loss: callback/return }` — trunca na
-  primeira corrupção, **quarentena o sufixo** (arquivo à parte, não apaga), e devolve
-  relatório: bytes/records descartados, intervalo de seq perdido, offset. Perda vira
-  evento explícito, nunca silêncio. Réplica/PITR usa o relatório para re-aplicar.
-- **C. Ferramenta de salvage offline** (analógico `ldb repair`/`RepairDB`): binário `pedra
-  salvage` best-effort, nunca no caminho de open.
+| classe | causa | disco | resposta certa |
+|---|---|---|---|
+| cauda rasgada | power loss / cache não-durável | são | auto (já feito, kernel) |
+| corrupto **isolado** | raio cósmico / controladora / bug | são | PIT contabilizado + quarentena |
+| **progressiva** | mídia morrendo | ruim | **evacuar**, nunca "tolerar e seguir" |
 
-B não muda default nem quebra G8 (perda declarada ≠ perda silenciosa). A e B se compõem.
+A classe progressiva só se revela **no tempo** (eventos repetidos, EIO, SMART). Logo: a
+decisão tolerar×parar não é modo de open, é **política de escalonamento com histórico**.
+Opções atualizadas:
+
+- **A.** fail-stop + heal por réplica (CRDB) — inalterada.
+- **B1.** PIT contabilizado **servindo**: prefixo + quarentena + relatório; writes seguem. Risco: em disco progressivo, cada restart perde mais — só defensável com D.
+- **B2.** PIT contabilizado **modo evacuação**: abre **read-only** (ou writes recusados), prefixo legível para o orquestrador drenar/replicar; nunca "seguir servindo às cegas".
+- **C.** salvage offline — inalterada.
+- **D. (novo) Journal de corrupção + escalonamento**: arquivo append-only por DB registrando todo evento (offset, intervalo de seq, bytes, modo, timestamp). Política: ≥N eventos ou qualquer EIO → open recusa **em qualquer modo** → evacuação. É o discriminador isolado×progressivo que o evento único não dá.
+
+Síntese: **D é pré-requisito de qualquer modo tolerante**; B2 é o caminho de evacuação que o
+fail-stop puro bloqueia; B1 só com D. A primitiva de heal (réplica re-semeando o intervalo de
+seq do relatório; PITR para single-node) consome o mesmo relatório.
 
 ## Delivery slices (mandatory)
 
@@ -92,14 +104,16 @@ B não muda default nem quebra G8 (perda declarada ≠ perda silenciosa). A e B 
 
 ### P1 — decisão (bloqueado em escolha do dono)
 
-- [ ] **P1.1** Decidir A/B/C (ou composição B+A) — status: `todo` (parked)
-- [ ] **P1.2** Se B: desenho da API (`wal_recovery`, tipo do relatório, quarentena) — status: `todo`
+- [ ] **P1.1** Decidir composição (candidata da discussão: **D + B2 primeiro**, B1 só depois de D medido em frota; A quando Montanha majority existir) — status: `todo` (parked)
+- [ ] **P1.2** Desenho da API: `wal_recovery` (`FailStop` | `PointInTimeReported`), tipo do relatório de perda, quarentena (`WAL.corrupt-<n>`), formato do journal de corrupção (D) — status: `todo`
 
 ### P2 — implementação (só após P1)
 
-- [ ] **P2.1** Modo escolhido + painel EXPLODE re-run (toda injeção → fail-stop **ou**
-  truncamento contabilizado; nunca divergência silenciosa) — status: `todo`
-- [ ] **P2.2** Integração heal: réplica/PITR consumindo o relatório — status: `todo`
+- [ ] **P2.1** D (journal + escalonamento) primeiro; depois o modo escolhido + painel EXPLODE
+  re-run (toda injeção → fail-stop **ou** truncamento contabilizado **ou** recusa por
+  escalonamento; nunca divergência silenciosa) — status: `todo`
+- [ ] **P2.2** B2 (evacuação read-only do prefixo) + heal: réplica/PITR consumindo o
+  relatório — status: `todo`
 
 ## Status (living — update with every PR)
 
