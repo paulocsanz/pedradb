@@ -4624,7 +4624,7 @@ impl<E: Env> Db<E> {
         }
     }
 
-    /// WAL-append [`GroupInFlight::pending`] WriteOps (one write, no fsync).
+    /// Encode [`GroupInFlight::pending`] into the WAL frame (no `write` syscall).
     fn group_append_ops(&mut self, g: &mut GroupInFlight) {
         if g.failed || g.pending.is_empty() {
             return;
@@ -4642,7 +4642,7 @@ impl<E: Env> Db<E> {
         }
         let refs: Vec<&[crate::batch::WriteOp]> =
             g.pending.iter().map(|(_, ops, _)| ops.as_slice()).collect();
-        match self.wal.lock().append_write_op_batches(&refs) {
+        match self.wal.lock().encode_write_op_batches(&refs) {
             Ok(n) => {
                 self.bytes_written_wal = self.bytes_written_wal.saturating_add(n);
                 g.appended.extend(g.pending.drain(..));
@@ -4661,6 +4661,10 @@ impl<E: Env> Db<E> {
     }
 
     pub(crate) fn group_finish(&mut self, g: GroupInFlight) -> Vec<Result<SequenceNumber>> {
+        if let Err(e) = self.wal.lock().write_pending_frame() {
+            self.durability_fenced = true;
+            return g.fail_sync(e);
+        }
         if g.needs_sync() {
             if let Err(e) = self.wal_sync_group() {
                 return g.fail_sync(e);

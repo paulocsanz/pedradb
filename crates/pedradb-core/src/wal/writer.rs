@@ -90,9 +90,7 @@ impl<W: Write + Seek> WalWriter<W> {
     }
 
     pub(crate) fn take_frame(&mut self) -> Vec<u8> {
-        let mut frame = std::mem::take(&mut self.frame);
-        frame.clear();
-        frame
+        std::mem::take(&mut self.frame)
     }
 
     pub(crate) fn restore_frame(&mut self, frame: Vec<u8>) {
@@ -289,6 +287,22 @@ mod tests {
         let seq_bytes = seq.into_inner().into_inner();
         assert_eq!(grouped.into_inner().into_inner(), seq_bytes);
         assert_eq!(chunked.into_inner().into_inner(), seq_bytes);
+    }
+
+    #[test]
+    fn two_fragment_passes_one_write_recovers_both() {
+        let mut w = WalWriter::new(Cursor::new(Vec::new())).unwrap();
+        let mut frame = w.take_frame();
+        w.fragment_record(b"first", &mut frame);
+        w.restore_frame(frame);
+        let mut frame = w.take_frame();
+        w.fragment_record(b"second", &mut frame);
+        w.write_frame(&frame).unwrap();
+        w.restore_frame(Vec::new());
+        assert_eq!(
+            collect_records(&w.into_inner().into_inner()),
+            vec![b"first".to_vec(), b"second".to_vec()]
+        );
     }
 
     #[test]

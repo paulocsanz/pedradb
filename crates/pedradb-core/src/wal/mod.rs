@@ -130,15 +130,15 @@ impl<F: EnvFile> Wal<F> {
         self.writer.add_records(datas)
     }
 
-    /// Encode each batch as one logical record and append with **one** `write`.
+    /// Encode each batch into the pending WAL frame (no `write` syscall).
     ///
-    /// Same on-disk bytes as `encode_ops` + [`Self::append_records`]. Reuses
-    /// the WAL logical scratch so group commit does not keep a payload `Vec`
-    /// per member (RFC-0041 apply CPU).
+    /// Caller must [`Self::write_pending_frame`] before `fdatasync` so the
+    /// Db write lock is not held across the write (RFC-0041). Same bytes as
+    /// `encode_ops` + [`Self::append_records`].
     ///
     /// # Errors
-    /// Same as [`Self::append_records`].
-    pub fn append_write_op_batches(&mut self, batches: &[&[crate::batch::WriteOp]]) -> Result<u64> {
+    /// None today (encode is infallible); `Result` matches the append path.
+    pub fn encode_write_op_batches(&mut self, batches: &[&[crate::batch::WriteOp]]) -> Result<u64> {
         if batches.is_empty() {
             return Ok(0);
         }
@@ -150,10 +150,19 @@ impl<F: EnvFile> Wal<F> {
             n = n.saturating_add(self.logical.len() as u64);
             self.writer.fragment_record(&self.logical, &mut frame);
         }
-        let wrote = self.writer.write_frame(&frame);
         self.writer.restore_frame(frame);
-        wrote?;
         Ok(n)
+    }
+
+    /// Write the frame built by [`Self::encode_write_op_batches`] (one `write`).
+    ///
+    /// # Errors
+    /// Underlying file write.
+    pub fn write_pending_frame(&mut self) -> Result<()> {
+        let frame = self.writer.take_frame();
+        let r = self.writer.write_frame(&frame);
+        self.writer.restore_frame(Vec::new());
+        r
     }
 
     /// Flush + `fdatasync` (sync data only).

@@ -368,29 +368,36 @@ impl WriteGroup {
                 batch.extend(extra);
             }
         }
-        if !need_sync {
-            guard.publish_sequence(pub_seq);
-            guard.end_commit();
-            return results;
-        }
         let wal = guard.wal_arc();
         drop(guard);
-        let sync_err = wal.lock().sync_data().err();
-        if let Some(e) = sync_err {
+        let io_err = {
+            let mut w = wal.lock();
+            w.write_pending_frame().err().or_else(|| {
+                if need_sync {
+                    w.sync_data().err()
+                } else {
+                    None
+                }
+            })
+        };
+        if let Some(e) = io_err {
             let mut g = db.write();
             g.fence_durability();
             g.end_commit();
             return results
                 .into_iter()
                 .map(|r| match r {
-                    Ok(_) => Err(CoreError::Internal(format!("group wal sync failed: {e}"))),
+                    Ok(_) => Err(CoreError::Internal(format!(
+                        "group wal write/sync failed: {e}"
+                    ))),
                     Err(err) => Err(err),
                 })
                 .collect();
         }
-        // Success: no write lock after fd (worker/park must not delay Ok).
         let g = db.read();
-        g.note_wal_sync();
+        if need_sync {
+            g.note_wal_sync();
+        }
         g.publish_sequence(pub_seq);
         g.end_commit();
         results
