@@ -1050,6 +1050,13 @@ impl<E: Env> Db<E> {
     /// Best-effort: a store error is logged and never surfaces as commit failure
     /// (RFC-0019: on-disk CHANGELOG is a cache rebuilt from WAL).
     fn persist_changelog_best_effort(&mut self) {
+        if self.feed_is_lazy() && self.change_log.max_sequence().unwrap_or(0) < self.last_sequence()
+        {
+            let entries = self.collect_feed_from_live();
+            if !entries.is_empty() {
+                self.change_log.replace_sorted(entries);
+            }
+        }
         match self.change_log.store_on(&self.env, &self.dir) {
             Ok(()) => {
                 self.changelog_store_count = self.changelog_store_count.saturating_add(1);
@@ -3851,23 +3858,70 @@ impl<E: Env> Db<E> {
         to_seq: SequenceNumber,
     ) -> Result<Vec<ChangeEntry>> {
         let to = to_seq.min(self.last_sequence());
+        if self.feed_is_lazy() {
+            return Ok(self
+                .lazy_feed_entries()
+                .into_iter()
+                .filter(|e| e.sequence > from_seq && e.sequence <= to)
+                .collect());
+        }
         Ok(self.change_log.changes_in(from_seq, to))
     }
 
     /// All durable changes with `sequence > from_seq` (tail / watch catch-up).
     #[must_use]
     pub fn changes_after(&self, from_seq: SequenceNumber) -> Vec<ChangeEntry> {
-        self.change_log
-            .changes_after(from_seq.min(self.last_sequence()))
+        let from = from_seq.min(self.last_sequence());
+        if self.feed_is_lazy() {
+            return self
+                .lazy_feed_entries()
+                .into_iter()
+                .filter(|e| e.sequence > from)
+                .collect();
+        }
+        self.change_log.changes_after(from)
     }
 
-    /// When CHANGELOG is missing after flush (WAL already truncated), rebuild a
-    /// last-per-key feed from MemTable ∪ SSTs so fold/journal are not empty.
-    fn maybe_rebuild_feed_from_live(&mut self) {
-        let feed_empty = self.change_log.max_sequence().unwrap_or(0) == 0;
-        if !changelog_needs_sst_rebuild(feed_empty, self.last_sequence()) {
-            return;
+    /// `changelog_interval == 0`: do not grow an in-memory ChangeEntry vec on
+    /// every write (RFC-0039 P0.3 / RFC-0041 P1.1). Watchers rebuild last-per-key
+    /// from mem+SST; flush/close still persist.
+    fn feed_is_lazy(&self) -> bool {
+        self.changelog_interval == 0
+    }
+
+    /// Full WAL history when the log is still live; last-per-key after rotate.
+    fn lazy_feed_entries(&self) -> Vec<ChangeEntry> {
+        let from_wal = self.collect_feed_from_wal();
+        if !from_wal.is_empty() {
+            return from_wal;
         }
+        if !self.change_log.is_empty() {
+            return self.change_log.changes_after(0);
+        }
+        self.collect_feed_from_live()
+    }
+
+    fn collect_feed_from_wal(&self) -> Vec<ChangeEntry> {
+        let path = self.dir.join(WAL_FILE_NAME);
+        if !self.env.exists(&path) {
+            return Vec::new();
+        }
+        let Ok((records, _)) = crate::wal::Wal::<E::File>::recover_span_on(&self.env, &path) else {
+            return Vec::new();
+        };
+        let mut out = Vec::new();
+        for raw in records {
+            let Ok(rec) = WriteRecord::decode(&raw) else {
+                break;
+            };
+            for op in rec.ops {
+                out.push(ChangeEntry::from_write_op(&op));
+            }
+        }
+        out
+    }
+
+    fn collect_feed_from_live(&self) -> Vec<ChangeEntry> {
         let mut latest: BTreeMap<Bytes, (InternalKey, Bytes)> = BTreeMap::new();
         let consider = |map: &mut BTreeMap<Bytes, (InternalKey, Bytes)>,
                         ik: InternalKey,
@@ -3890,10 +3944,7 @@ impl<E: Env> Db<E> {
                 consider(&mut latest, ik, v);
             }
         }
-        if latest.is_empty() {
-            return;
-        }
-        let entries: Vec<ChangeEntry> = latest
+        latest
             .into_values()
             .map(|(ik, v)| {
                 let value = self.resolve_stored_value(v.clone()).unwrap_or(v);
@@ -3908,7 +3959,20 @@ impl<E: Env> Db<E> {
                     value,
                 }
             })
-            .collect();
+            .collect()
+    }
+
+    /// When CHANGELOG is missing after flush (WAL already truncated), rebuild a
+    /// last-per-key feed from MemTable ∪ SSTs so fold/journal are not empty.
+    fn maybe_rebuild_feed_from_live(&mut self) {
+        let feed_empty = self.change_log.max_sequence().unwrap_or(0) == 0;
+        if !changelog_needs_sst_rebuild(feed_empty, self.last_sequence()) {
+            return;
+        }
+        let entries = self.collect_feed_from_live();
+        if entries.is_empty() {
+            return;
+        }
         self.change_log.replace_sorted(entries);
         self.persist_changelog_best_effort();
     }
@@ -4147,8 +4211,12 @@ impl<E: Env> Db<E> {
         // rebuilds missing entries from WAL. Always apply mem once WAL is durable
         // so get and feed stay aligned and sequences are not rolled back.
         // Bytes::clone is a refcount — payload is not memcpy'd again.
-        self.change_log
-            .extend(records.iter().map(ChangeEntry::from_write_op));
+        // interval=0: do not grow a million-entry Vec on the apply path
+        // (RFC-0041 P1.1); changes() rebuilds last-per-key from live tables.
+        if !self.feed_is_lazy() {
+            self.change_log
+                .extend(records.iter().map(ChangeEntry::from_write_op));
+        }
         if do_sync {
             // RFC-0031: debounce the cache store. WAL is already durable.
             self.maybe_persist_changelog_after_durable_commit();
@@ -4327,13 +4395,16 @@ impl<E: Env> Db<E> {
 
         // RFC-0019: same feed seam as commit_ops_with. After WAL is durable,
         // CHANGELOG store is best-effort (not a commit gate); always apply mem.
-        let mut feed_batch: Vec<ChangeEntry> = Vec::new();
-        for (_, write_ops, _) in &appended {
-            for op in write_ops {
-                feed_batch.push(ChangeEntry::from_write_op(op));
+        // interval=0 skips the in-memory vec (RFC-0041 P1.1).
+        if !self.feed_is_lazy() {
+            let mut feed_batch: Vec<ChangeEntry> = Vec::new();
+            for (_, write_ops, _) in &appended {
+                for op in write_ops {
+                    feed_batch.push(ChangeEntry::from_write_op(op));
+                }
             }
+            self.change_log.extend(feed_batch);
         }
-        self.change_log.extend(feed_batch);
         if any_sync {
             // One durable group commit = one tick of the debounce (not one per
             // member) — group commit already amortizes WAL sync.
@@ -9089,6 +9160,11 @@ mod tests {
             }
             assert_eq!(db.changelog_store_count(), 0);
             assert!(!chlog.exists());
+            assert_eq!(
+                db.changes_after(0).len(),
+                32,
+                "lazy feed still answers last-per-key from mem"
+            );
             db.flush().unwrap();
             assert!(
                 db.changelog_store_count() >= 1,

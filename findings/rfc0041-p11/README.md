@@ -13,6 +13,9 @@ mechanism, **not** the 2×.
 2. **Catch-up wait skipped when the drained group already has ≥ 16 user ops**
    (apply = 64, raftlog = 16). The 50 µs window is longer than one `fdatasync`
    on this box (25.7 µs) and was serializing more CPU. Small YCSB puts still wait.
+3. **`changelog_interval=0` no longer appends `ChangeEntry` on every write.**
+   Watchers rebuild from WAL (full history) or last-per-key after rotate.
+   Flush/close still persist. This was growing a million-entry `Vec` on apply.
 
 ## Isolated split (`apply_profile`, 400 apply-ops, quiet run)
 
@@ -34,21 +37,22 @@ near that floor. A 338 µs p50 is a ~3 k serialized ceiling.
 
 ## Probe (deps suite only, not the official 16-shape prefix)
 
-`ROCKS_PARITY_SUITE=deps ROCKS_PARITY_CLIENTS=4 ROCKS_PARITY_SYNC=0`
-→ `findings/rfc0041-p11/probe1/`.
+`ROCKS_PARITY_SUITE=deps ROCKS_PARITY_CLIENTS=4 ROCKS_PARITY_SYNC=0`.
 
-| shape | Pedra qps | Rocks default | ratio | Pedra p50 |
+| | apply MC4 Pedra | vs Rocks | raftlog MC4 Pedra | vs Rocks |
 |---|---:|---:|---:|---:|
-| apply 1c | 3 377 | 6 983 | 0.48 | 171 µs |
-| **apply MC4** | 3 695 | 9 283 | **0.40** | 338 µs |
-| raftlog MC4 | 10 682 | 26 676 | 0.40 | 108 µs |
+| P0.2 official (YCSB prefix) | 3 120 | 0.89 | 9 499 | 0.53 |
+| probe1 (MANIFEST + skip catch-up) | 3 695 | 0.40* | 10 682 | 0.40* |
+| **probe2 (+ skip ChangeEntry)** | **5 486** | **0.88** | **22 198** | **1.17** |
 
-avg_group 1.21 (catch-up skipped). apply_mc4 max 332 ms — one tail still
-eats the qps. Rocks on this clean deps-only run is much faster than the
-official P0.2 Rocks (3.7 k) because P0.2 runs YCSB first on the same DB.
+\*probe1 Rocks apply_mc4 was an outlier 9.3 k; probe2 Rocks 6.2 k / 19 k.
 
-P1.1 stays `doing`. Next: cut group-commit service toward the 110 µs floor
-(WAL fd off the write lock with a flush barrier; keep LSM from blocking Ok).
+Skipping the in-memory feed vec (interval=0) is the qps move: apply_mc4
++48 % vs probe1, raftlog_mc4 **>2×** our P0.2 self. Still **< 2.0** vs
+this Rocks. apply_mc4 max still ~400 ms.
+
+P1.1 stays `doing`. Official 16-shape remesura is next; then cut the
+remaining serialized CPU toward the 110 µs floor.
 
 ## Tests
 
