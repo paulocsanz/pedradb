@@ -58,7 +58,7 @@
 
 ### P1 — escritas ≥ 2× default
 
-- [ ] **P1.1** `deps_apply_batch_mc4` e `deps_raftlog_mc4` ≥ 2.0 vs default da run — status: `doing` (scansst apply_mc4 **0.96**; idleinc/b4c1 rejected)
+- [ ] **P1.1** `deps_apply_batch_mc4` e `deps_raftlog_mc4` ≥ 2.0 vs default da run — status: `doing` (okidle apply_mc4 **1.13**; 1c A/F 2× still above 1/t_fd)
 - [ ] **P1.2** `ycsb_a` / `ycsb_f` / `deps_cache_overwrite` (1c e `_mc4` se existirem) ≥ 2.0 vs default — status: `todo` (1c A/F/overwrite: `1/t_fd` ≈ 43 k; 2× Rocks A pede ~400 k+. Alvo e peer **não** mudam; FLOOR fica off até as 16)
 - [ ] **P1.3** `deps_apply_batch` e `deps_raftlog` **1 cliente** ≥ 2.0 vs default — status: `todo`
 
