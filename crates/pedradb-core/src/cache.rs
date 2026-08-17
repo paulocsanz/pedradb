@@ -393,6 +393,11 @@ impl<V: Clone> AnswerCache<V> {
             g.gen = 1;
         }
     }
+
+    /// Drop one key so other latest-snapshot hits stay (YCSB B/D 95/5).
+    pub fn invalidate(&self, key: &[u8]) {
+        self.inner.lock().map.remove(key);
+    }
 }
 
 #[cfg(test)]
@@ -479,6 +484,16 @@ mod tests {
         assert_eq!(c.get(b"missing"), Some(None));
         c.clear();
         assert!(c.get(b"k").is_none());
+    }
+
+    #[test]
+    fn point_cache_invalidate_one_keeps_other() {
+        let c = PointCache::new(8);
+        c.insert(b"a", Some(Bytes::from_static(b"1")));
+        c.insert(b"b", Some(Bytes::from_static(b"2")));
+        c.invalidate(b"a");
+        assert!(c.get(b"a").is_none());
+        assert_eq!(c.get(b"b").unwrap().as_deref(), Some(&b"2"[..]));
     }
 
     #[test]

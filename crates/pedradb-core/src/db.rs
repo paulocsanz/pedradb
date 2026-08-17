@@ -611,8 +611,10 @@ pub struct Db<E: Env = StdEnv> {
     table_cache: TableCache,
     /// Decompressed block cache (hit stats for read path).
     block_cache: BlockCache,
-    /// Latest-snapshot point answers; cleared on write (RFC-0035).
+    /// Latest-snapshot point answers; per-key inval on write (RFC-0035 / 0041).
     point_cache: PointCache,
+    /// User keys applied since last publish (point-cache inval, not a gen bump).
+    dirty_points: Mutex<Vec<Bytes>>,
     /// Latest `last_under_user_prefix` answers; cleared on write.
     last_prefix_cache: AnswerCache<Option<Bytes>>,
     /// Latest `count_in_range` answers; cleared on write.
@@ -907,6 +909,7 @@ impl<E: Env> Db<E> {
             point_cache,
             last_prefix_cache,
             count_cache,
+            dirty_points: Mutex::new(Vec::new()),
             dir_lock: lock,
             durability_fenced: false,
             auto_compact_failures: 0,
@@ -1014,6 +1017,23 @@ impl<E: Env> Db<E> {
             }
         }
         self.invalidate_read_answers();
+    }
+
+    fn note_dirty_points(&self, ops: &[WriteOp]) {
+        let mut ranged = false;
+        let mut g = self.dirty_points.lock();
+        for op in ops {
+            if op.kind == ValueType::RangeDeletion {
+                ranged = true;
+                break;
+            }
+            g.push(op.key.clone());
+        }
+        drop(g);
+        if ranged {
+            self.point_cache.clear();
+            self.dirty_points.lock().clear();
+        }
     }
 
     /// Zero RFC-0035 latest/scan counters, block-cache stats, and the
@@ -2012,7 +2032,17 @@ impl<E: Env> Db<E> {
     }
 
     fn invalidate_read_answers(&self) {
-        self.point_cache.clear();
+        let keys = std::mem::take(&mut *self.dirty_points.lock());
+        // Fat apply (64+) would pay 64 hash removes; gen bump is cheaper and
+        // those shapes do not reuse the point cache. YCSB 1-key writes keep
+        // the rest of the zipfian working set.
+        if keys.len() > 32 || keys.is_empty() {
+            self.point_cache.clear();
+        } else {
+            for k in keys {
+                self.point_cache.invalidate(&k);
+            }
+        }
         self.last_prefix_cache.clear();
         self.count_cache.clear();
     }
@@ -4505,6 +4535,7 @@ impl<E: Env> Db<E> {
 
     /// Apply prepared ops to the memtable after durable WAL.
     pub(crate) fn apply_ops_to_mem(&mut self, ops: Vec<WriteOp>) {
+        self.note_dirty_points(&ops);
         apply_ops_owned(&mut self.mem, ops);
         self.publish_sequence(self.last_sequence());
     }
@@ -4726,6 +4757,7 @@ impl<E: Env> Db<E> {
         }
 
         for (i, write_ops, last_seq) in appended {
+            self.note_dirty_points(&write_ops);
             apply_ops_owned(&mut self.mem, write_ops);
             results[i] = Some(Ok(last_seq));
         }
