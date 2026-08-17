@@ -114,6 +114,29 @@ After trigger, keep compacting until L0==0. Official remesura
 [`idlerot/`](idlerot/README.md): uncompressed L0 **rejected** (apply_mc4
 0.74 → 0.46). Idle-only WAL rotate kept. FLOOR not enabled.
 
+## Idle rotate + lz4 L0 (uncompressed reverted)
+
+[`idlerot2/`](idlerot2/README.md): **2/16 ≥ 2.0** (E 2.926, MVCC 2.394).
+apply_mc4 0.676 (Pedra 1 649). C 1.79. scan 0.95. FLOOR not enabled.
+
+WAL-archive rotate was considered and **rejected**: isolated POSIX
+`fdatasync` p50 is flat from 4 KiB to 64 MiB (~55–60 µs). A large
+`CURRENT.log` is not the apply tail.
+
+Isolated apply 2000×(pre+com), defer, drain every 16: **4 MiB 2251 qps**
+vs **64 MiB drain 1228** (last100 4.2 ms — the 64 MiB SST write). Compat
+default `write_buffer_size` returns to 4 MiB (Pedra core default).
+Unsynced L0 `fdatasync` + MANIFEST run off the write lock when idle.
+
+## 4 MiB official remesura
+
+[`buf4/`](buf4/README.md): **1/16 ≥ 2.0** (MVCC 2.082). apply 1c **1.245**
+(Pedra 2.7 k), apply_mc4 **1.167** (Pedra 3.1 k). E 1.92 (lost 2×).
+MVCC probe L0=**23** — idle compact cannot finish in a 5 ms MVCC window.
+
+[`buf4c/`](buf4c/README.md): compact-at-trigger during writes **rejected**
+(apply 1c 1.25 → 0.36). L0 went to 0–3; apply paid the rewrite.
+
 
 
 

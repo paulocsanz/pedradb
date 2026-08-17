@@ -4799,21 +4799,43 @@ impl<E: Env> Db<E> {
     /// Env I/O.
     pub fn fsync_unsynced_ssts(&mut self) -> Result<()> {
         let paths = std::mem::take(&mut self.unsynced_ssts);
-        for path in &paths {
-            if !self.env.exists(path) {
+        if let Err(e) = Self::fsync_sst_paths(&self.env, &self.dir, &paths, self.sync) {
+            self.unsynced_ssts.extend(paths);
+            return Err(e);
+        }
+        Ok(())
+    }
+
+    /// Take the unsynced L0 list so the caller can `fdatasync` off the write lock.
+    pub fn take_unsynced_ssts(&mut self) -> Vec<PathBuf> {
+        std::mem::take(&mut self.unsynced_ssts)
+    }
+
+    /// Put unsynced L0 paths back after a failed off-lock `fdatasync`.
+    pub fn restore_unsynced_ssts(&mut self, paths: Vec<PathBuf>) {
+        self.unsynced_ssts.extend(paths);
+    }
+
+    /// How many L0 files still need a durability `fdatasync`.
+    #[must_use]
+    pub fn unsynced_sst_count(&self) -> usize {
+        self.unsynced_ssts.len()
+    }
+
+    /// `fdatasync` these SST paths (no `Db` lock). Used by the host worker.
+    ///
+    /// # Errors
+    /// Env I/O.
+    pub fn fsync_sst_paths(env: &E, dir: &Path, paths: &[PathBuf], sync_dir: bool) -> Result<()> {
+        for path in paths {
+            if !env.exists(path) {
                 continue;
             }
-            let mut f = self.env.open_read(path)?;
-            if let Err(e) = f.sync_data() {
-                self.unsynced_ssts.extend(paths);
-                return Err(e.into());
-            }
+            let mut f = env.open_read(path)?;
+            f.sync_data()?;
         }
-        if self.sync && !paths.is_empty() {
-            if let Err(e) = self.env.sync_dir(&self.dir) {
-                self.unsynced_ssts.extend(paths);
-                return Err(e.into());
-            }
+        if sync_dir && !paths.is_empty() {
+            env.sync_dir(dir)?;
         }
         Ok(())
     }

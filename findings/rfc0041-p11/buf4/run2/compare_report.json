@@ -1,0 +1,54 @@
+{
+  "compare": "rocks-parity-v1",
+  "compat_path": "/tmp/pedra-buf4/run2/compat/rocks_parity_bench.json",
+  "compat": {
+    "engine": "compat (rocksdb-compat on pedradb-core, single node, single client)",
+    "sync": true,
+    "durability": "fdatasync-before-ok (pedradb-core WAL; RFC-0001/0036)",
+    "metrics": {
+    "deps_apply_batch": 2732.916,
+    "deps_apply_batch_mc4": 4071.557,
+    "deps_cache_overwrite": 21856.152,
+    "deps_cache_overwrite_mc4": 21282.914,
+    "deps_mvcc_latest": 395546.854,
+    "deps_raftlog": 8761.319,
+    "deps_raftlog_mc4": 5496.801,
+    "deps_scan": 131394.891,
+    "ycsb_a": 40681.310,
+    "ycsb_a_mc4": 32568.615,
+    "ycsb_b": 259761.344,
+    "ycsb_c": 1108852.133,
+    "ycsb_d": 292784.702,
+    "ycsb_e": 154004.601,
+    "ycsb_f": 21892.157,
+    "ycsb_f_mc4": 28045.431
+  }
+  },
+  "rocksdb": {
+    "status": "peer_file:ok",
+    "peer_file": "/tmp/pedra-buf4/run2/rocks/rocks_parity_bench.json",
+    "sync": false,
+    "durability": "async-wal (WriteOptions.sync=false, rocksdb default)",
+    "how_to_fill": "1) cargo run -q --release -p rocksdb-parity-bench --features real --bin rocks-parity-bench -- <out> rocksdb  2) ROCKS_PARITY_PEER=<out>/rocks_parity_bench.json rocks-parity-compare  3) scripts/rocksdb_parity_v0.sh does both. See docs/rocksdb-compat.md"
+  },
+  "ratios": [
+    {"shape":"ycsb_a","compat_keys_per_s":40681.310,"rocksdb_keys_per_s":370207.548,"compat_over_rocksdb":0.110,"meets_floor":null},
+    {"shape":"ycsb_b","compat_keys_per_s":259761.344,"rocksdb_keys_per_s":926229.952,"compat_over_rocksdb":0.280,"meets_floor":null},
+    {"shape":"ycsb_c","compat_keys_per_s":1108852.133,"rocksdb_keys_per_s":1000834.195,"compat_over_rocksdb":1.108,"meets_floor":null},
+    {"shape":"ycsb_d","compat_keys_per_s":292784.702,"rocksdb_keys_per_s":979272.234,"compat_over_rocksdb":0.299,"meets_floor":null},
+    {"shape":"ycsb_e","compat_keys_per_s":154004.601,"rocksdb_keys_per_s":100904.147,"compat_over_rocksdb":1.526,"meets_floor":null},
+    {"shape":"ycsb_f","compat_keys_per_s":21892.157,"rocksdb_keys_per_s":164353.163,"compat_over_rocksdb":0.133,"meets_floor":null},
+    {"shape":"deps_apply_batch","compat_keys_per_s":2732.916,"rocksdb_keys_per_s":4449.933,"compat_over_rocksdb":0.614,"meets_floor":null},
+    {"shape":"deps_mvcc_latest","compat_keys_per_s":395546.854,"rocksdb_keys_per_s":190013.986,"compat_over_rocksdb":2.082,"meets_floor":null},
+    {"shape":"deps_scan","compat_keys_per_s":131394.891,"rocksdb_keys_per_s":260841.213,"compat_over_rocksdb":0.504,"meets_floor":null},
+    {"shape":"deps_raftlog","compat_keys_per_s":8761.319,"rocksdb_keys_per_s":26210.330,"compat_over_rocksdb":0.334,"meets_floor":null},
+    {"shape":"deps_cache_overwrite","compat_keys_per_s":21856.152,"rocksdb_keys_per_s":94352.788,"compat_over_rocksdb":0.232,"meets_floor":null},
+    {"shape":"ycsb_a_mc4","compat_keys_per_s":32568.615,"rocksdb_keys_per_s":95060.047,"compat_over_rocksdb":0.343,"meets_floor":null},
+    {"shape":"ycsb_f_mc4","compat_keys_per_s":28045.431,"rocksdb_keys_per_s":84253.835,"compat_over_rocksdb":0.333,"meets_floor":null},
+    {"shape":"deps_cache_overwrite_mc4","compat_keys_per_s":21282.914,"rocksdb_keys_per_s":54155.886,"compat_over_rocksdb":0.393,"meets_floor":null},
+    {"shape":"deps_apply_batch_mc4","compat_keys_per_s":4071.557,"rocksdb_keys_per_s":2955.974,"compat_over_rocksdb":1.377,"meets_floor":null},
+    {"shape":"deps_raftlog_mc4","compat_keys_per_s":5496.801,"rocksdb_keys_per_s":13503.648,"compat_over_rocksdb":0.407,"meets_floor":null}
+  ],
+  "parity": {"floor": null, "shapes_with_peer": 16, "min_ratio": null, "pass": null, "note": "set ROCKS_PARITY_RATIO_FLOOR to gate"},
+  "honesty": "Single-node lab bench: rocksdb-compat (Pedra, fdatasync before Ok) vs real RocksDB default (WriteOptions.sync=false). Official peer is Rocks **default**, not a matched-sync peer. ROCKS_PARITY_SYNC=1 is an extra same-class column only. Pedra keeps the stronger durability and still has to beat default Rocks. Not a distributed/field claim."
+}

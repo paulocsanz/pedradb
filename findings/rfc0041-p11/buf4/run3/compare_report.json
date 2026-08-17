@@ -1,0 +1,54 @@
+{
+  "compare": "rocks-parity-v1",
+  "compat_path": "/tmp/pedra-buf4/run3/compat/rocks_parity_bench.json",
+  "compat": {
+    "engine": "compat (rocksdb-compat on pedradb-core, single node, single client)",
+    "sync": true,
+    "durability": "fdatasync-before-ok (pedradb-core WAL; RFC-0001/0036)",
+    "metrics": {
+    "deps_apply_batch": 2375.370,
+    "deps_apply_batch_mc4": 1598.497,
+    "deps_cache_overwrite": 25237.668,
+    "deps_cache_overwrite_mc4": 14708.541,
+    "deps_mvcc_latest": 124941.762,
+    "deps_raftlog": 5037.299,
+    "deps_raftlog_mc4": 4455.664,
+    "deps_scan": 59085.941,
+    "ycsb_a": 28474.598,
+    "ycsb_a_mc4": 25593.472,
+    "ycsb_b": 169485.536,
+    "ycsb_c": 765098.941,
+    "ycsb_d": 151248.747,
+    "ycsb_e": 86020.425,
+    "ycsb_f": 20424.411,
+    "ycsb_f_mc4": 30487.921
+  }
+  },
+  "rocksdb": {
+    "status": "peer_file:ok",
+    "peer_file": "/tmp/pedra-buf4/run3/rocks/rocks_parity_bench.json",
+    "sync": false,
+    "durability": "async-wal (WriteOptions.sync=false, rocksdb default)",
+    "how_to_fill": "1) cargo run -q --release -p rocksdb-parity-bench --features real --bin rocks-parity-bench -- <out> rocksdb  2) ROCKS_PARITY_PEER=<out>/rocks_parity_bench.json rocks-parity-compare  3) scripts/rocksdb_parity_v0.sh does both. See docs/rocksdb-compat.md"
+  },
+  "ratios": [
+    {"shape":"ycsb_a","compat_keys_per_s":28474.598,"rocksdb_keys_per_s":155143.488,"compat_over_rocksdb":0.184,"meets_floor":null},
+    {"shape":"ycsb_b","compat_keys_per_s":169485.536,"rocksdb_keys_per_s":212413.802,"compat_over_rocksdb":0.798,"meets_floor":null},
+    {"shape":"ycsb_c","compat_keys_per_s":765098.941,"rocksdb_keys_per_s":1034527.350,"compat_over_rocksdb":0.740,"meets_floor":null},
+    {"shape":"ycsb_d","compat_keys_per_s":151248.747,"rocksdb_keys_per_s":956918.569,"compat_over_rocksdb":0.158,"meets_floor":null},
+    {"shape":"ycsb_e","compat_keys_per_s":86020.425,"rocksdb_keys_per_s":44896.696,"compat_over_rocksdb":1.916,"meets_floor":null},
+    {"shape":"ycsb_f","compat_keys_per_s":20424.411,"rocksdb_keys_per_s":199262.728,"compat_over_rocksdb":0.102,"meets_floor":null},
+    {"shape":"deps_apply_batch","compat_keys_per_s":2375.370,"rocksdb_keys_per_s":846.741,"compat_over_rocksdb":2.805,"meets_floor":null},
+    {"shape":"deps_mvcc_latest","compat_keys_per_s":124941.762,"rocksdb_keys_per_s":224589.773,"compat_over_rocksdb":0.556,"meets_floor":null},
+    {"shape":"deps_scan","compat_keys_per_s":59085.941,"rocksdb_keys_per_s":145825.302,"compat_over_rocksdb":0.405,"meets_floor":null},
+    {"shape":"deps_raftlog","compat_keys_per_s":5037.299,"rocksdb_keys_per_s":6470.950,"compat_over_rocksdb":0.778,"meets_floor":null},
+    {"shape":"deps_cache_overwrite","compat_keys_per_s":25237.668,"rocksdb_keys_per_s":26530.403,"compat_over_rocksdb":0.951,"meets_floor":null},
+    {"shape":"ycsb_a_mc4","compat_keys_per_s":25593.472,"rocksdb_keys_per_s":70495.477,"compat_over_rocksdb":0.363,"meets_floor":null},
+    {"shape":"ycsb_f_mc4","compat_keys_per_s":30487.921,"rocksdb_keys_per_s":94794.264,"compat_over_rocksdb":0.322,"meets_floor":null},
+    {"shape":"deps_cache_overwrite_mc4","compat_keys_per_s":14708.541,"rocksdb_keys_per_s":36251.449,"compat_over_rocksdb":0.406,"meets_floor":null},
+    {"shape":"deps_apply_batch_mc4","compat_keys_per_s":1598.497,"rocksdb_keys_per_s":2575.725,"compat_over_rocksdb":0.621,"meets_floor":null},
+    {"shape":"deps_raftlog_mc4","compat_keys_per_s":4455.664,"rocksdb_keys_per_s":14313.670,"compat_over_rocksdb":0.311,"meets_floor":null}
+  ],
+  "parity": {"floor": null, "shapes_with_peer": 16, "min_ratio": null, "pass": null, "note": "set ROCKS_PARITY_RATIO_FLOOR to gate"},
+  "honesty": "Single-node lab bench: rocksdb-compat (Pedra, fdatasync before Ok) vs real RocksDB default (WriteOptions.sync=false). Official peer is Rocks **default**, not a matched-sync peer. ROCKS_PARITY_SYNC=1 is an extra same-class column only. Pedra keeps the stronger durability and still has to beat default Rocks. Not a distributed/field claim."
+}

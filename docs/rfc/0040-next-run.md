@@ -4,6 +4,6 @@ Handoff operacional: **[RFC-0040 § Next run](0040-fsync-always-beats-rocks-asyn
 
 **P1.1 + P1.2 feitos.** Apply MC mediana 0.93× async (p11); sticky sobe `avg_group` 1.1→1.55 e **não** fecha ≥1.0 de forma estável ([p12](../findings/rfc0040-p12/README.md)). Catch-up 200 µs piora qps.
 
-Alvo de produto passou a **RFC-0041**: ≥ **2×** Rocks default. streamsst **3/16**. Uncompressed L0 rejected (apply_mc4 0.46). Idle WAL rotate kept. FLOOR off.
+Alvo de produto passou a **RFC-0041**: ≥ **2×** Rocks default. buf4 **1/16** (MVCC 2.08; apply 1c 1.25 / mc4 1.17). 4 MiB buffer kept; compact-while-busy rejected (buf4c apply 0.36). WAL archive rejected (`fdatasync` p50 flat). FLOOR off.
 
 **Peer oficial = Rocks default (`sync=false`).** Pedra mantém `fdatasync` e **mesmo assim** tem de ganhar. “Contrato diferente” não é desculpa nem critério de vitória. `SYNC=1` é coluna extra. Sem skip de sync, sem thread no core.

@@ -62,8 +62,12 @@ pub type Result<T> = std::result::Result<T, Error>;
 pub struct Options {
     /// Whether to create the database directory when absent.
     pub create_if_missing: bool,
-    /// Memtable flush threshold (RocksDB `write_buffer_size`, default 64 MiB).
+    /// Memtable flush threshold (Pedra `auto_flush_bytes`, default 4 MiB).
     /// `0` disables auto-flush (manual [`DB::flush`] only).
+    ///
+    /// Isolated apply (2000× pre+com): 4 MiB + drain **2251** qps vs 64 MiB
+    /// drain **1228** (one 64 MiB SST write at the end). 64 MiB matched Rocks
+    /// `write_buffer_size` and lost apply (RFC-0041).
     pub write_buffer_size: usize,
 }
 
@@ -71,13 +75,13 @@ impl Default for Options {
     fn default() -> Self {
         Self {
             create_if_missing: false,
-            write_buffer_size: 64 * 1024 * 1024,
+            write_buffer_size: 4 * 1024 * 1024,
         }
     }
 }
 
 impl Options {
-    /// New default options (64 MiB write buffer, matching RocksDB).
+    /// New default options (4 MiB write buffer — Pedra core default).
     #[must_use]
     pub fn new() -> Self {
         Self::default()
@@ -1079,15 +1083,16 @@ fn spawn_compact_worker(
                     break;
                 }
                 Ok(CompactCmd::Run) | Err(RecvTimeoutError::Timeout) => {
-                    // Always drain imm so the memtable stays at write_buffer
-                    // (skipping it grew BTree to 100k+ entries and apply_mc4
-                    // fell to ~280 qps). L0 rewrite only after the burst
-                    // idles — drain-to-0 *during* apply cut apply_mc4 3.5k→1k.
+                    // Drain imm so the memtable stays at write_buffer (4 MiB
+                    // isolated apply 2251 qps; 64 MiB drain 1228). L0 rewrite
+                    // only after the burst idles — compact-at-trigger *during*
+                    // apply cut official apply 1c 1.25→0.36 (buf4c).
                     while inner.drain_imm_once() {}
                     if inner.writes_idle_for(Duration::from_millis(5)) {
-                        // SST fsync + WAL rotate only after the write burst
-                        // idles — drain with empty active mem used to pay a
-                        // 64 MiB fd mid-apply (RFC-0041).
+                        // SST fsync + MANIFEST off the write lock so scan/C
+                        // are not blocked on a multi-MiB fd. WAL rotate still
+                        // waits for empty mem (G1).
+                        let _ = inner.persist_unsynced_l0s_off_lock();
                         let _ = inner.rotate_wal_if_writers_idle();
                         while compat_compact_once(&inner, &gate) {}
                     }
@@ -1140,6 +1145,11 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         d
+    }
+
+    #[test]
+    fn default_write_buffer_is_4_mib() {
+        assert_eq!(Options::new().write_buffer_size, 4 * 1024 * 1024);
     }
 
     #[test]

@@ -1078,6 +1078,51 @@ impl<E: Env> ConcurrentDb<E> {
         self.inner.write().try_rotate_wal_if_idle()
     }
 
+    /// `fdatasync` pending L0s + persist MANIFEST without holding the write lock.
+    ///
+    /// WAL is kept (mem may still hold keys). Compact can then rewrite L0
+    /// without paying a 4–64 MiB fd under the write lock mid-scan (RFC-0041).
+    ///
+    /// # Errors
+    /// SST / MANIFEST I/O.
+    pub fn persist_unsynced_l0s_off_lock(&self) -> Result<()> {
+        let prepared = {
+            let mut g = self.inner.write();
+            if g.unsynced_sst_count() == 0 {
+                return Ok(());
+            }
+            let paths = g.take_unsynced_ssts();
+            let (env, dir, sync) = g.l0_write_ctx();
+            Some((paths, env, dir, sync))
+        };
+        let Some((paths, env, dir, sync)) = prepared else {
+            return Ok(());
+        };
+        if let Err(e) = Db::fsync_sst_paths(&env, &dir, &paths, sync) {
+            self.inner.write().restore_unsynced_ssts(paths);
+            return Err(e);
+        }
+        let persist = {
+            let mut g = self.inner.write();
+            match g.take_manifest_persist() {
+                Ok(p) => p,
+                Err(e) => {
+                    g.restore_unsynced_ssts(paths);
+                    return Err(e);
+                }
+            }
+        };
+        let wrote = {
+            let _p = self.persist_lock.lock();
+            persist.write()
+        };
+        if let Err(e) = wrote {
+            self.inner.write().restore_unsynced_ssts(paths);
+            return Err(e);
+        }
+        Ok(())
+    }
+
     /// Publish a prepared L0→L1 compact: mem install under the write lock,
     /// MANIFEST `fsync` off-lock (RFC-0041 P1.1).
     #[must_use]
@@ -1525,6 +1570,29 @@ mod tests {
         );
         drop(db);
         // After rotate, SST+MANIFEST hold the key even if WAL is gone.
+        let wal = dir.join(crate::db::WAL_FILE_NAME);
+        if wal.exists() {
+            let _ = fs::remove_file(&wal);
+        }
+        let re = open_sync(&dir);
+        assert_eq!(re.get(b"k").as_deref(), Some(&[b'v'; 64][..]));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Off-lock L0 persist: SST+MANIFEST hold the key if WAL is deleted.
+    #[test]
+    fn persist_unsynced_off_lock_makes_sst_sufficient() {
+        let dir = temp_dir();
+        let db = open_sync(&dir);
+        db.set_defer_auto_compact(true);
+        db.put(b"k", vec![b'v'; 64]).unwrap();
+        assert!(db.with_write(|d| d.stage_flush_imm()).unwrap());
+        assert!(db.drain_imm_once());
+        assert!(db.with_read(|d| d.unsynced_sst_count()) >= 1);
+        db.persist_unsynced_l0s_off_lock().unwrap();
+        assert_eq!(db.with_read(|d| d.unsynced_sst_count()), 0);
+        assert_eq!(db.get(b"k").as_deref(), Some(&[b'v'; 64][..]));
+        drop(db);
         let wal = dir.join(crate::db::WAL_FILE_NAME);
         if wal.exists() {
             let _ = fs::remove_file(&wal);
