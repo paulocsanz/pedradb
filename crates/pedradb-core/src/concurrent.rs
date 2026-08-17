@@ -279,8 +279,6 @@ impl WriteGroup {
                         guard.group_absorb(&mut inflight, more);
                         batch.extend(extra);
                     }
-                    // fdatasync off the write lock so flush/readers proceed.
-                    // Ok still waits (G1). Rotate is blocked via commit_inflight.
                     Self::finish_group_off_lock(db, guard, inflight)
                 }
             };
@@ -2033,8 +2031,30 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
     }
 
+    /// Two sequential groups: WAL seq order is preserved so reopen (and
+    /// the change-feed max-seq check) sees every key.
+    #[test]
+    fn two_groups_reopen_sees_all_keys() {
+        let dir = temp_dir();
+        let db = open_sync(&dir);
+        db.apply_batch([
+            BatchOp::put(b"a".as_slice(), b"1".as_slice()),
+            BatchOp::put(b"b".as_slice(), b"2".as_slice()),
+        ])
+        .unwrap();
+        db.apply_batch([BatchOp::put(b"c".as_slice(), b"3".as_slice())])
+            .unwrap();
+        assert!(db.wal_sync_count() >= 2, "each group fdatasyncs (G1)");
+        drop(db);
+        let re = open_sync(&dir);
+        assert_eq!(re.get(b"a").as_deref(), Some(&b"1"[..]));
+        assert_eq!(re.get(b"b").as_deref(), Some(&b"2"[..]));
+        assert_eq!(re.get(b"c").as_deref(), Some(&b"3"[..]));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
     /// Park must be able to take the write lock while a fat group is
-    /// encoding off it (RFC-0041: do not delay park).
+    /// `fdatasync`ing off it (RFC-0041: do not delay park).
     #[test]
     fn park_imm_runs_during_fat_apply() {
         let dir = temp_dir();
@@ -2088,7 +2108,7 @@ mod tests {
         writer.join().unwrap();
         assert!(
             parked >= 1 || db.parked_unflushed_count() >= 1,
-            "host must park while encode runs off the write lock"
+            "host must park while the leader fdatasyncs off the write lock"
         );
         let _ = fs::remove_dir_all(&dir);
     }

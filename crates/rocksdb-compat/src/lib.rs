@@ -136,6 +136,27 @@ impl KeyCodec {
         self.encode_with(cf, key, <[u8]>::to_vec)
     }
 
+    /// Append `cf\\0key` onto `pool` and freeze a shared `Bytes` (one backing
+    /// alloc per `write()` instead of one malloc per op).
+    fn encode_pooled(&self, cf: &str, key: &[u8], pool: &mut bytes::BytesMut) -> Bytes {
+        let effective = if cf == DEFAULT_CF && self.default_raw {
+            ""
+        } else {
+            cf
+        };
+        if effective.is_empty() {
+            pool.reserve(key.len());
+            pool.extend_from_slice(key);
+            return pool.split_to(key.len()).freeze();
+        }
+        let n = effective.len() + 1 + key.len();
+        pool.reserve(n);
+        pool.extend_from_slice(effective.as_bytes());
+        pool.extend_from_slice(&[0]);
+        pool.extend_from_slice(key);
+        pool.split_to(n).freeze()
+    }
+
     /// Encode into a stack buffer when the key fits (RFC-0035 P1.2).
     fn encode_with<R>(&self, cf: &str, key: &[u8], f: impl FnOnce(&[u8]) -> R) -> R {
         const STACK: usize = 192;
@@ -865,26 +886,35 @@ impl<E: Env> DB<E> {
     /// # Errors
     /// WAL I/O; nothing partially applied on error.
     pub fn write(&self, batch: &WriteBatch) -> Result<()> {
-        let mut ops = Vec::with_capacity(batch.ops.len());
-        for (cf, op) in &batch.ops {
-            let name = cf.as_deref().unwrap_or(DEFAULT_CF);
-            self.check_cf(name)?;
-            let encoded = match op {
-                BatchOp::Put { key, value } => BatchOp::Put {
-                    key: Bytes::from(self.codec.encode(name, key)),
-                    value: value.clone(),
-                },
-                BatchOp::Delete { key } => BatchOp::Delete {
-                    key: Bytes::from(self.codec.encode(name, key)),
-                },
-                BatchOp::DeleteRange { start, end } => BatchOp::DeleteRange {
-                    start: Bytes::from(self.codec.encode(name, start)),
-                    end: Bytes::from(self.codec.encode(name, end)),
-                },
-            };
-            ops.push(encoded);
+        thread_local! {
+            static KEY_POOL: std::cell::RefCell<bytes::BytesMut> =
+                std::cell::RefCell::new(bytes::BytesMut::with_capacity(8 * 1024));
         }
-        let r = self.inner.apply_batch(ops).map(|_| ()).map_err(Error::from);
+        let r = KEY_POOL.with(|pool| {
+            let mut pool = pool.borrow_mut();
+            // Outstanding Bytes from the last batch may still sit in the
+            // memtable; reserve will allocate a fresh unique buffer then.
+            let mut ops = Vec::with_capacity(batch.ops.len());
+            for (cf, op) in &batch.ops {
+                let name = cf.as_deref().unwrap_or(DEFAULT_CF);
+                self.check_cf(name)?;
+                let encoded = match op {
+                    BatchOp::Put { key, value } => BatchOp::Put {
+                        key: self.codec.encode_pooled(name, key, &mut pool),
+                        value: value.clone(),
+                    },
+                    BatchOp::Delete { key } => BatchOp::Delete {
+                        key: self.codec.encode_pooled(name, key, &mut pool),
+                    },
+                    BatchOp::DeleteRange { start, end } => BatchOp::DeleteRange {
+                        start: self.codec.encode_pooled(name, start, &mut pool),
+                        end: self.codec.encode_pooled(name, end, &mut pool),
+                    },
+                };
+                ops.push(encoded);
+            }
+            self.inner.apply_batch(ops).map(|_| ()).map_err(Error::from)
+        });
         self.notify_compact();
         r
     }
@@ -1168,6 +1198,35 @@ mod tests {
     #[test]
     fn default_write_buffer_is_4_mib() {
         assert_eq!(Options::new().write_buffer_size, 4 * 1024 * 1024);
+    }
+
+    #[test]
+    fn write_batch_pooled_cf_keys_survive_later_writes() {
+        let dir = tmp("pool-keys");
+        let mut opts = Options::new();
+        opts.create_if_missing(true);
+        let db = DB::open_cf(&opts, &dir, &["default", "write", "lock"]).unwrap();
+        let lock = db.cf_handle("lock").unwrap();
+        let write = db.cf_handle("write").unwrap();
+        let mut first = WriteBatch::new();
+        first.put_cf(&lock, b"keep", b"l1");
+        first.put_cf(&write, b"keep", b"w1");
+        db.write(&first).unwrap();
+        for i in 0..256u32 {
+            let mut wb = WriteBatch::new();
+            wb.put_cf(&lock, i.to_be_bytes(), b"lx");
+            wb.put_cf(&write, i.to_be_bytes(), b"wx");
+            db.write(&wb).unwrap();
+        }
+        assert_eq!(
+            db.get_cf(&lock, b"keep").unwrap().as_deref(),
+            Some(&b"l1"[..])
+        );
+        assert_eq!(
+            db.get_cf(&write, b"keep").unwrap().as_deref(),
+            Some(&b"w1"[..])
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

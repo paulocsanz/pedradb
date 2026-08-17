@@ -31,10 +31,48 @@ struct Version {
     value: Bytes,
 }
 
+/// One or more versions of a user key. The first put is inline so apply /
+/// YCSB / raftlog (almost all distinct keys) do not heap-allocate a `Vec`
+/// per key (RFC-0041 P1.1 write CPU).
+#[derive(Debug, Clone)]
+enum Versions {
+    One(Version),
+    Many(Vec<Version>),
+}
+
+impl Versions {
+    fn as_slice(&self) -> &[Version] {
+        match self {
+            Self::One(v) => std::slice::from_ref(v),
+            Self::Many(vs) => vs.as_slice(),
+        }
+    }
+
+    fn as_mut_slice(&mut self) -> &mut [Version] {
+        match self {
+            Self::One(v) => std::slice::from_mut(v),
+            Self::Many(vs) => vs.as_mut_slice(),
+        }
+    }
+
+    fn iter(&self) -> std::slice::Iter<'_, Version> {
+        self.as_slice().iter()
+    }
+}
+
+impl<'a> IntoIterator for &'a Versions {
+    type Item = &'a Version;
+    type IntoIter = std::slice::Iter<'a, Version>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+
 /// Borrowed walk of `BTreeMap` user-key range, newest-first versions per key.
 /// Concrete so count/scan do not `Box<dyn Iterator>` on every refill.
 pub(crate) struct MemInternalRange<'a> {
-    users: std::collections::btree_map::Range<'a, Bytes, Vec<Version>>,
+    users: std::collections::btree_map::Range<'a, Bytes, Versions>,
     cur: std::slice::Iter<'a, Version>,
 }
 
@@ -61,8 +99,8 @@ impl<'a> Iterator for MemInternalRange<'a> {
 /// this type itself is not synchronized.
 #[derive(Debug, Default, Clone)]
 pub struct MemTable {
-    /// User key → versions newest-first.
-    map: BTreeMap<Bytes, Vec<Version>>,
+    /// User key → versions newest-first (inline first version).
+    map: BTreeMap<Bytes, Versions>,
     /// Approximate bytes for flush triggers (user key + value + trailer).
     approx_bytes: usize,
     /// Range-tombstone entries (full-map fallback on ranged scan when > 0).
@@ -119,8 +157,13 @@ impl MemTable {
             return;
         }
         for (_, vers) in other.map {
-            for v in vers {
-                self.insert(v.key, v.value);
+            match vers {
+                Versions::One(v) => self.insert(v.key, v.value),
+                Versions::Many(vs) => {
+                    for v in vs {
+                        self.insert(v.key, v.value);
+                    }
+                }
             }
         }
     }
@@ -129,35 +172,79 @@ impl MemTable {
     pub fn insert(&mut self, key: InternalKey, value: Bytes) {
         let entry_bytes = key.user_key.len() + value.len() + 8;
         let is_rd = key.kind == ValueType::RangeDeletion;
-        let vers = self.map.entry(key.user_key.clone()).or_default();
-        if vers.is_empty() {
-            vers.push(Version { key, value });
-            self.entries = self.entries.saturating_add(1);
-            self.approx_bytes = self.approx_bytes.saturating_add(entry_bytes);
-            if is_rd {
-                self.range_tombstones = self.range_tombstones.saturating_add(1);
+        match self.map.entry(key.user_key.clone()) {
+            std::collections::btree_map::Entry::Vacant(e) => {
+                e.insert(Versions::One(Version { key, value }));
+                self.entries = self.entries.saturating_add(1);
+                self.approx_bytes = self.approx_bytes.saturating_add(entry_bytes);
+                if is_rd {
+                    self.range_tombstones = self.range_tombstones.saturating_add(1);
+                }
             }
-            return;
+            std::collections::btree_map::Entry::Occupied(mut e) => {
+                if Self::insert_into(e.get_mut(), key, value, entry_bytes, &mut self.approx_bytes) {
+                    self.entries = self.entries.saturating_add(1);
+                    if is_rd {
+                        self.range_tombstones = self.range_tombstones.saturating_add(1);
+                    }
+                }
+            }
         }
-        let pos = vers.partition_point(|v| {
-            ver_cmp(v.key.sequence, v.key.kind, key.sequence, key.kind) == Ordering::Less
-        });
-        if pos < vers.len()
-            && vers[pos].key.sequence == key.sequence
-            && vers[pos].key.kind == key.kind
-        {
-            let old = std::mem::replace(&mut vers[pos].value, value);
-            self.approx_bytes = self
-                .approx_bytes
-                .saturating_sub(old.len())
-                .saturating_add(vers[pos].value.len());
-            return;
-        }
-        vers.insert(pos, Version { key, value });
-        self.entries = self.entries.saturating_add(1);
-        self.approx_bytes = self.approx_bytes.saturating_add(entry_bytes);
-        if is_rd {
-            self.range_tombstones = self.range_tombstones.saturating_add(1);
+    }
+
+    /// Returns true when a new version was added (false on same-seq replace).
+    fn insert_into(
+        vers: &mut Versions,
+        key: InternalKey,
+        value: Bytes,
+        entry_bytes: usize,
+        approx_bytes: &mut usize,
+    ) -> bool {
+        match vers {
+            Versions::One(existing) => {
+                if existing.key.sequence == key.sequence && existing.key.kind == key.kind {
+                    let old = std::mem::replace(&mut existing.value, value);
+                    *approx_bytes = approx_bytes
+                        .saturating_sub(old.len())
+                        .saturating_add(existing.value.len());
+                    return false;
+                }
+                let older_first = ver_cmp(
+                    existing.key.sequence,
+                    existing.key.kind,
+                    key.sequence,
+                    key.kind,
+                ) == Ordering::Less;
+                let Versions::One(old) = std::mem::replace(vers, Versions::Many(Vec::new())) else {
+                    unreachable!("just matched One");
+                };
+                let newer = Version { key, value };
+                *vers = Versions::Many(if older_first {
+                    vec![old, newer]
+                } else {
+                    vec![newer, old]
+                });
+                *approx_bytes = approx_bytes.saturating_add(entry_bytes);
+                true
+            }
+            Versions::Many(list) => {
+                let pos = list.partition_point(|v| {
+                    ver_cmp(v.key.sequence, v.key.kind, key.sequence, key.kind) == Ordering::Less
+                });
+                if pos < list.len()
+                    && list[pos].key.sequence == key.sequence
+                    && list[pos].key.kind == key.kind
+                {
+                    let old = std::mem::replace(&mut list[pos].value, value);
+                    *approx_bytes = approx_bytes
+                        .saturating_sub(old.len())
+                        .saturating_add(list[pos].value.len());
+                    return false;
+                }
+                list.insert(pos, Version { key, value });
+                *approx_bytes = approx_bytes.saturating_add(entry_bytes);
+                true
+            }
         }
     }
 
@@ -361,7 +448,7 @@ impl MemTable {
     {
         self.approx_bytes = 0;
         for (uk, vers) in &mut self.map {
-            for v in vers {
+            for v in vers.as_mut_slice() {
                 v.value = f(&v.value);
                 self.approx_bytes = self
                     .approx_bytes
@@ -595,5 +682,28 @@ mod tests {
         assert_eq!(mt.get_entry(b"user/1", 10).map(|(s, _)| s), Some(3));
         assert_eq!(mt.get_entry(b"user/1", 2).map(|(s, _)| s), Some(1));
         assert!(mt.get_entry(b"nope", 10).is_none());
+    }
+
+    #[test]
+    fn first_put_stays_one_then_promotes() {
+        let mut mt = MemTable::new();
+        mt.put(b"k".as_slice(), 1, b"v1".as_slice());
+        assert!(matches!(
+            mt.map.get(b"k".as_slice()),
+            Some(Versions::One(_))
+        ));
+        mt.put(b"k".as_slice(), 3, b"v3".as_slice());
+        mt.put(b"k".as_slice(), 2, b"v2".as_slice());
+        match mt.map.get(b"k".as_slice()) {
+            Some(Versions::Many(vs)) => {
+                assert_eq!(vs.len(), 3);
+                assert_eq!(vs[0].key.sequence, 3);
+                assert_eq!(vs[1].key.sequence, 2);
+                assert_eq!(vs[2].key.sequence, 1);
+            }
+            other => panic!("expected Many, got {other:?}"),
+        }
+        assert_eq!(mt.get(b"k", 10), Lookup::Found(Bytes::from_static(b"v3")));
+        assert_eq!(mt.get(b"k", 2), Lookup::Found(Bytes::from_static(b"v2")));
     }
 }
