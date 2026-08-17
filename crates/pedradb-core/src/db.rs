@@ -569,6 +569,13 @@ pub struct Db<E: Env = StdEnv> {
     /// Clone of the table taken by [`Self::prepare_flush_imm`] so readers still
     /// see acked keys while SST I/O runs off the write lock.
     flush_read_pin: Option<MemTable>,
+    /// Flushed memtables kept for reads until the matching L0 is compacted
+    /// (RFC-0041). Newest last. Not a durability source — SST+WAL cover.
+    retired_mems: Vec<MemTable>,
+    /// Cached [`Self::sst_indices_newest_first`] (L0 newest → L1+).
+    sst_order_newest: Vec<usize>,
+    /// Reused WAL encode buffers for group commit (RFC-0041 apply CPU).
+    encode_bufs: Vec<Vec<u8>>,
     /// Immutable tables, oldest → newest within inventory order.
     ssts: Vec<SstTable>,
     /// LSM level for each entry in [`Self::ssts`] (parallel array; 0 = L0).
@@ -868,6 +875,9 @@ impl<E: Env> Db<E> {
             mem,
             imm: None,
             flush_read_pin: None,
+            retired_mems: Vec::new(),
+            sst_order_newest: Vec::new(),
+            encode_bufs: Vec::new(),
             ssts,
             sst_levels,
             next_file_num,
@@ -932,6 +942,7 @@ impl<E: Env> Db<E> {
             changelog_store_count: 0,
             unsynced_ssts: Vec::new(),
         };
+        db.rebuild_sst_order();
         db.maybe_rebuild_feed_from_live();
         Ok(db)
     }
@@ -1685,12 +1696,13 @@ impl<E: Env> Db<E> {
                 return Ok(hit);
             }
         }
+        // Newest layer first (active → imm → pin → retired newest). The first
+        // hit is the latest write of this user (RFC-0041 retired L0 cache).
         let mut best: Option<Bytes> = None;
         for table in self.mem_layers() {
             if let Some((k, _)) = table.last_visible_under_prefix(prefix, snapshot, None) {
-                if best.as_ref().is_none_or(|b| k.as_ref() > b.as_ref()) {
-                    best = Some(k);
-                }
+                best = Some(k);
+                break;
             }
         }
         let out = if let Some(k) = best {
@@ -1707,7 +1719,11 @@ impl<E: Env> Db<E> {
     }
 
     /// L0 newest → older → L1+ (same single-writer invariant as the mem hit).
-    fn sst_indices_newest_first(&self) -> Vec<usize> {
+    fn sst_indices_newest_first(&self) -> &[usize] {
+        &self.sst_order_newest
+    }
+
+    fn rebuild_sst_order(&mut self) {
         let mut idx: Vec<usize> = (0..self.ssts.len()).collect();
         idx.sort_by(|&a, &b| {
             let la = self.sst_levels.get(a).copied().unwrap_or(0);
@@ -1717,7 +1733,21 @@ impl<E: Env> Db<E> {
                 o => o,
             }
         });
-        idx
+        self.sst_order_newest = idx;
+    }
+
+    /// Drop retired read memtables that no longer have a matching L0.
+    fn sync_retired_to_l0(&mut self) {
+        let l0 = self.level_file_count(0);
+        if self.retired_mems.len() > l0 {
+            let extra = self.retired_mems.len() - l0;
+            self.retired_mems.drain(..extra);
+        }
+    }
+
+    fn note_sst_inventory_changed(&mut self) {
+        self.rebuild_sst_order();
+        self.sync_retired_to_l0();
     }
 
     /// SST fallback for an MVCC user prefix: first file (newest) with a live
@@ -1729,7 +1759,7 @@ impl<E: Env> Db<E> {
         snapshot: SequenceNumber,
         prefix: &[u8],
     ) -> Result<Option<Bytes>> {
-        let order = self.sst_indices_newest_first();
+        let order = self.sst_order_newest.clone();
         let mut before = crate::prefix::prefix_exclusive_end(prefix);
         loop {
             let mut cand: Option<Bytes> = None;
@@ -1974,7 +2004,7 @@ impl<E: Env> Db<E> {
                 table, start, end, snapshot,
             )));
         }
-        for table in &self.ssts {
+        for table in self.sst_tables_not_retired() {
             table.collect_range_tombstones(snapshot, &mut range_dels);
             if !table.overlaps_user_range(start, end) {
                 continue;
@@ -2068,7 +2098,7 @@ impl<E: Env> Db<E> {
                 streams.push(Box::new(pts.into_iter()));
             }
         }
-        for table in &self.ssts {
+        for table in self.sst_tables_not_retired() {
             table.collect_range_tombstones(snapshot, &mut range_dels);
             if !table.overlaps_user_range(start, end) {
                 continue;
@@ -2517,6 +2547,21 @@ impl<E: Env> Db<E> {
         self.flush_read_pin = None;
     }
 
+    /// Keep the flush pin as a read layer until its L0 is compacted.
+    pub fn retire_flush_pin(&mut self) {
+        if let Some(pin) = self.flush_read_pin.take() {
+            if !pin.is_empty() {
+                self.retired_mems.push(pin);
+            }
+        }
+    }
+
+    /// Retired flushed memtables still serving reads (tests / probes).
+    #[must_use]
+    pub fn retired_mem_count(&self) -> usize {
+        self.retired_mems.len()
+    }
+
     /// Rotate WAL even if [`Self::flush_read_pin`] is live (pre-fix hole).
     ///
     /// Production [`Self::try_rotate_wal`] must refuse while a pin holds the
@@ -2627,7 +2672,7 @@ impl<E: Env> Db<E> {
         // In-memory only. MANIFEST + SST `fdatasync` wait for WAL rotate so a
         // write burst is not charged one extra fd per 64 MiB flush (RFC-0041).
         let _undo = self.apply_l0_install(table, file_num);
-        self.flush_read_pin = None;
+        self.retire_flush_pin();
         Ok(())
     }
 
@@ -2658,11 +2703,31 @@ impl<E: Env> Db<E> {
         self.imm.is_some()
     }
 
-    /// Mem / imm / off-lock flush pin — every table `get`/`scan` must consult.
+    /// Mem / imm / off-lock flush pin / retired L0 mems — get/scan consult all.
     fn mem_layers(&self) -> impl Iterator<Item = &MemTable> {
         std::iter::once(&self.mem)
             .chain(self.imm.as_ref())
             .chain(self.flush_read_pin.as_ref())
+            .chain(self.retired_mems.iter().rev())
+    }
+
+    /// SST files that are not fully covered by a retired memtable (scan/count).
+    fn sst_tables_not_retired(&self) -> impl Iterator<Item = &SstTable> {
+        let retired = self.retired_mems.len();
+        let mut l0_seen = 0usize;
+        self.ssts
+            .iter()
+            .zip(self.sst_levels.iter())
+            .filter_map(move |(t, &lvl)| {
+                if lvl == 0 {
+                    let i = l0_seen;
+                    l0_seen += 1;
+                    if i < retired {
+                        return None;
+                    }
+                }
+                Some(t)
+            })
     }
 
     /// Rotate WAL after an off-lock L0 install when mem/imm/pin are idle.
@@ -3021,6 +3086,7 @@ impl<E: Env> Db<E> {
         keep_levels.push(to_level);
         self.ssts = keep_tables;
         self.sst_levels = keep_levels;
+        self.note_sst_inventory_changed();
 
         if let Ok(len) = self.env.metadata_len(&new_path) {
             self.bytes_written_sst = self.bytes_written_sst.saturating_add(len);
@@ -3270,11 +3336,13 @@ impl<E: Env> Db<E> {
         let prev_levels = std::mem::replace(&mut self.sst_levels, new_levels);
         let prev_next = self.next_file_num;
         self.next_file_num = next_file_num;
+        self.note_sst_inventory_changed();
 
         if let Err(e) = self.persist_manifest() {
             self.ssts = prev_ssts;
             self.sst_levels = prev_levels;
             self.next_file_num = prev_next;
+            self.note_sst_inventory_changed();
             let _ = self.env.remove_file(&vlog::blob_path(&self.dir, dest_num));
             return Err(e);
         }
@@ -3488,12 +3556,14 @@ impl<E: Env> Db<E> {
         let prev_next = self.next_file_num;
         self.next_file_num = next_file_num;
         self.vlog_use_new = true;
+        self.note_sst_inventory_changed();
 
         if let Err(e) = self.persist_manifest() {
             self.ssts = prev_ssts;
             self.sst_levels = prev_levels;
             self.next_file_num = prev_next;
             self.vlog_use_new = false;
+            self.note_sst_inventory_changed();
             let _ = self
                 .env
                 .remove_file(&self.dir.join(crate::vlog::VLOG_NEW_NAME));
@@ -4129,7 +4199,7 @@ impl<E: Env> Db<E> {
         self.get_sst_fallback.fetch_add(1, Ordering::Relaxed);
         // Newest file with a point wins (L0 before L1). Older files cannot
         // hide a newer point; a newer tombstone is seen first.
-        for sst_i in self.sst_indices_newest_first() {
+        for &sst_i in self.sst_indices_newest_first() {
             let table = &self.ssts[sst_i];
             table.collect_range_tombstones(snapshot, &mut range_tombs);
             if let Some((seq, look)) = table.point_at_with(key, snapshot, |bi| {
@@ -4444,14 +4514,17 @@ impl<E: Env> Db<E> {
         if prepared.is_empty() {
             return;
         }
-        let mut encoded: Vec<Vec<u8>> = Vec::with_capacity(prepared.len());
-        for (_, write_ops, _) in &prepared {
-            let mut buf = Vec::new();
-            crate::batch::encode_ops(write_ops, &mut buf);
-            encoded.push(buf);
+        let mut encoded = std::mem::take(&mut self.encode_bufs);
+        encoded.resize_with(prepared.len(), Vec::new);
+        for (slot, (_, write_ops, _)) in encoded.iter_mut().zip(prepared.iter()) {
+            slot.clear();
+            crate::batch::encode_ops(write_ops, slot);
         }
+        encoded.truncate(prepared.len());
         let refs: Vec<&[u8]> = encoded.iter().map(|v| v.as_slice()).collect();
-        if let Err(e) = self.wal_append_encoded_group(&refs) {
+        let append_err = self.wal_append_encoded_group(&refs).err();
+        self.encode_bufs = encoded;
+        if let Some(e) = append_err {
             let msg = e.to_string();
             for (i, _, _) in &prepared {
                 g.results[*i] = Some(Err(CoreError::Internal(format!(
@@ -4895,6 +4968,7 @@ impl<E: Env> Db<E> {
         self.unsynced_ssts.push(table.path().to_path_buf());
         self.ssts.push(table);
         self.sst_levels.push(0);
+        self.note_sst_inventory_changed();
         undo
     }
 
@@ -4908,6 +4982,7 @@ impl<E: Env> Db<E> {
         let _ = self.sst_levels.pop();
         self.next_file_num = undo.prev_next;
         self.manifest_file_num = undo.prev_manifest;
+        self.note_sst_inventory_changed();
     }
 
     /// In-memory half of [`Self::install_prepared_l0_compact`] (no MANIFEST I/O).
@@ -4949,6 +5024,7 @@ impl<E: Env> Db<E> {
         }
         self.unsynced_ssts
             .retain(|p| !old_paths.iter().any(|o| o == p));
+        self.note_sst_inventory_changed();
         Some(L0CompactUndo {
             prev_tables,
             prev_levels,
@@ -4962,6 +5038,7 @@ impl<E: Env> Db<E> {
         self.ssts = undo.prev_tables;
         self.sst_levels = undo.prev_levels;
         self.manifest_file_num = undo.prev_manifest;
+        self.note_sst_inventory_changed();
     }
 
     /// Env handle (host compact deletes retired L0s after off-lock persist).

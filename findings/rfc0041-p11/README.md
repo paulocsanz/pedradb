@@ -137,6 +137,12 @@ MVCC probe L0=**23** — idle compact cannot finish in a 5 ms MVCC window.
 [`buf4c/`](buf4c/README.md): compact-at-trigger during writes **rejected**
 (apply 1c 1.25 → 0.36). L0 went to 0–3; apply paid the rewrite.
 
+## Retired L0 memtables
+
+[`retire2/`](retire2/README.md): **1/16 ≥ 2.0** (MVCC **3.08**). apply_mc4
+**1.45**. Scan 0.27 — `scan_sst_probed=0` but many retired BTrees.
+FLOOR off.
+
 
 
 

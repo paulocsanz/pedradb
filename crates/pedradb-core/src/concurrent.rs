@@ -1061,7 +1061,7 @@ impl<E: Env> ConcurrentDb<E> {
         {
             let mut g = self.inner.write();
             g.apply_l0_install(table, file_num);
-            g.clear_flush_read_pin();
+            g.retire_flush_pin();
         }
         true
     }
@@ -1574,6 +1574,54 @@ mod tests {
         if wal.exists() {
             let _ = fs::remove_file(&wal);
         }
+        let re = open_sync(&dir);
+        assert_eq!(re.get(b"k").as_deref(), Some(&[b'v'; 64][..]));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Flushed mem stays on the read path until L0 compact; WAL rotate is
+    /// still allowed (retired is a cache, SST+WAL are the source).
+    #[test]
+    fn retired_mem_serves_reads_and_does_not_block_rotate() {
+        let dir = temp_dir();
+        let db = open_sync(&dir);
+        db.set_defer_auto_compact(true);
+        db.put(b"k", vec![b'v'; 64]).unwrap();
+        assert!(db.with_write(|d| d.stage_flush_imm()).unwrap());
+        assert!(db.drain_imm_once());
+        assert_eq!(
+            db.with_read(|d| d.retired_mem_count()),
+            1,
+            "drain must retire the flush pin"
+        );
+        assert_eq!(db.get(b"k").as_deref(), Some(&[b'v'; 64][..]));
+        let scanned = db.scan_collect(std::ops::Bound::Unbounded, std::ops::Bound::Unbounded);
+        assert!(
+            scanned
+                .iter()
+                .any(|(k, v)| k.as_ref() == b"k" && v.as_ref() == [b'v'; 64]),
+            "scan must see retired-mem key without the covering L0"
+        );
+        let wal_before = db.stats().wal_bytes;
+        db.rotate_wal_if_writers_idle().unwrap();
+        assert!(
+            db.stats().wal_bytes < wal_before,
+            "retired mem must not block idle WAL rotate"
+        );
+        assert_eq!(db.get(b"k").as_deref(), Some(&[b'v'; 64][..]));
+        db.compact().unwrap();
+        assert_eq!(
+            db.with_read(|d| d.level_file_count(0)),
+            0,
+            "compact must drain L0"
+        );
+        assert_eq!(
+            db.with_read(|d| d.retired_mem_count()),
+            0,
+            "retired cache must drop with L0"
+        );
+        assert_eq!(db.get(b"k").as_deref(), Some(&[b'v'; 64][..]));
+        drop(db);
         let re = open_sync(&dir);
         assert_eq!(re.get(b"k").as_deref(), Some(&[b'v'; 64][..]));
         let _ = fs::remove_dir_all(&dir);
