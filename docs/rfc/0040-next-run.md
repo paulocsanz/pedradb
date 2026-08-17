@@ -4,6 +4,6 @@ Handoff operacional: **[RFC-0040 § Next run](0040-fsync-always-beats-rocks-asyn
 
 **P1.1 + P1.2 feitos.** Apply MC mediana 0.93× async (p11); sticky sobe `avg_group` 1.1→1.55 e **não** fecha ≥1.0 de forma estável ([p12](../findings/rfc0040-p12/README.md)). Catch-up 200 µs piora qps.
 
-Fazer a seguir: **P2.1 scan** (p50 já ganha do async; qps morre com L0=4–9). Depois P2.2 pipeline encode∥fsync no host se apply MC ainda for o alvo.
+Alvo de produto passou a **RFC-0041**: ≥ **2×** Rocks default em todas as shapes. P0.2 do 0041 = remesura 11+MC4 só vs `SYNC=0`.
 
 **Peer oficial = Rocks default (`sync=false`).** Pedra mantém `fdatasync` e **mesmo assim** tem de ganhar. “Contrato diferente” não é desculpa nem critério de vitória. `SYNC=1` é coluna extra. Sem skip de sync, sem thread no core.

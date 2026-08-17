@@ -15,3 +15,6 @@ Pedra still `fdatasync`s before Ok. That is the product: more durability
 
 `rocks-parity-compare` **exits 2** if the peer JSON has `sync: true`
 (unless `ROCKS_PARITY_ALLOW_SYNC_PEER=1`).
+
+Product floor (RFC-0041): every official shape ≥ **2×** that default peer
+(`compat_qps / rocks_default_qps ≥ 2.0`). Sync-peer ratios are not a win.
