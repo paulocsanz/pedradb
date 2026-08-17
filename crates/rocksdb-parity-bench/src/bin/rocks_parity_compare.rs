@@ -317,7 +317,7 @@ fn metrics_to_json(m: &BTreeMap<String, f64>) -> String {
 }
 
 fn peer_template(compat: &BTreeMap<String, f64>) -> String {
-    let mut s = String::from("{\n  \"bench\": \"rocks-side-peer-template\",\n  \"engine\": \"rocksdb\",\n  \"sync\": true,\n  \"durability\": \"sync-per-write (WriteOptions.sync=true)\",\n  \"benches\": [\n");
+    let mut s = String::from("{\n  \"bench\": \"rocks-side-peer-template\",\n  \"engine\": \"rocksdb\",\n  \"sync\": false,\n  \"durability\": \"async-wal (WriteOptions.sync=false, rocksdb default)\",\n  \"benches\": [\n");
     for (i, (name, ckps)) in compat.iter().enumerate() {
         if i > 0 {
             s.push_str(",\n");
