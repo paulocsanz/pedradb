@@ -42,7 +42,7 @@ struct RecoverModel {
 impl RecoverModel {
     fn collect(&self, kind: RecoverKind, prefix_n: u64, can_skip: bool, skips: u64) -> RecoverAct {
         if self.fixed {
-            recover_collect_act(kind, prefix_n, can_skip, skips)
+            recover_collect_act(kind, prefix_n, can_skip, skips, false)
         } else {
             recover_collect_act_as_is(kind, prefix_n, can_skip, skips)
         }

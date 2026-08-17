@@ -1,4 +1,5 @@
-//! `rocksdb-compat` — rust-rocksdb-shaped API subset implemented on **pedradb-core**.
+//! `rocksdb-compat` — rust-rocksdb-shaped API subset implemented on
+//! **pedradb-core** [`ConcurrentDb`](pedradb_core::ConcurrentDb).
 //!
 //! Goal: let small rust-rocksdb-dependent programs swap
 //! `rocksdb = { package = "rocksdb-compat", path = ... }` and run, then feed the
@@ -19,8 +20,8 @@
 use bytes::Bytes;
 use parking_lot::Mutex;
 use pedradb_core::{
-    write_sst_on, BatchOp, CompactOptions, CoreError, Db, Env, Snapshot as CoreSnapshot, SstTable,
-    StdEnv, L0_COMPACTION_TRIGGER,
+    BatchOp, CompactOptions, ConcurrentDb, CoreError, Env, Snapshot as CoreSnapshot, StdEnv,
+    L0_COMPACTION_TRIGGER,
 };
 use std::collections::VecDeque;
 use std::fmt;
@@ -287,7 +288,7 @@ pub struct DBIterator<E: Env = StdEnv> {
     items: Vec<(Vec<u8>, Vec<u8>)>,
     idx: usize,
     reverse: bool,
-    inner: Arc<Mutex<Db<E>>>,
+    inner: ConcurrentDb<E>,
     codec: KeyCodec,
     cf: String,
     seq: pedradb_core::SequenceNumber,
@@ -410,7 +411,7 @@ impl<E: Env> DBIterator<E> {
 }
 
 fn page_forward<E: Env>(
-    inner: &Arc<Mutex<Db<E>>>,
+    inner: &ConcurrentDb<E>,
     codec: &KeyCodec,
     cf: &str,
     seq: pedradb_core::SequenceNumber,
@@ -418,17 +419,19 @@ fn page_forward<E: Env>(
     end: Bound<&[u8]>,
     limit: usize,
 ) -> Result<Vec<(Vec<u8>, Vec<u8>)>> {
-    let db = inner.lock();
     let s = bound_as_ref(&start);
-    Ok(db
-        .range_at_limited(seq, s, end, Some(limit))?
-        .into_iter()
-        .map(|(k, v)| (codec.decode(cf, &k).to_vec(), v.to_vec()))
-        .collect())
+    inner
+        .with_read(|db| db.range_at_limited(seq, s, end, Some(limit)))
+        .map_err(Error::from)
+        .map(|rows| {
+            rows.into_iter()
+                .map(|(k, v)| (codec.decode(cf, &k).to_vec(), v.to_vec()))
+                .collect()
+        })
 }
 
 fn page_last_n<E: Env>(
-    inner: &Arc<Mutex<Db<E>>>,
+    inner: &ConcurrentDb<E>,
     codec: &KeyCodec,
     cf: &str,
     seq: pedradb_core::SequenceNumber,
@@ -436,16 +439,21 @@ fn page_last_n<E: Env>(
     end: Bound<Vec<u8>>,
     n: usize,
 ) -> Result<Vec<(Vec<u8>, Vec<u8>)>> {
-    let db = inner.lock();
     let e = bound_as_ref(&end);
-    let mut ring: VecDeque<(Vec<u8>, Vec<u8>)> = VecDeque::with_capacity(n.saturating_add(1));
-    for pair in db.try_scan_at(seq, start, e, None)? {
-        if ring.len() == n {
-            ring.pop_front();
-        }
-        ring.push_back((codec.decode(cf, &pair.key).to_vec(), pair.value.to_vec()));
-    }
-    Ok(ring.into_iter().collect())
+    inner
+        .with_read(|db| {
+            // Iterator borrows the Db — consume the ring window under the guard.
+            let mut ring: VecDeque<(Vec<u8>, Vec<u8>)> =
+                VecDeque::with_capacity(n.saturating_add(1));
+            for pair in db.try_scan_at(seq, start, e, None)? {
+                if ring.len() == n {
+                    ring.pop_front();
+                }
+                ring.push_back((codec.decode(cf, &pair.key).to_vec(), pair.value.to_vec()));
+            }
+            Ok::<Vec<(Vec<u8>, Vec<u8>)>, CoreError>(ring.into_iter().collect())
+        })
+        .map_err(Error::from)
 }
 
 /// Read snapshot (sequence-pinned point + iterator reads).
@@ -512,7 +520,7 @@ fn cf_bounds(codec: &KeyCodec, cf: &str) -> (Bound<Vec<u8>>, Bound<Vec<u8>>) {
 }
 
 fn scan_cf_at<E: Env>(
-    inner: &Arc<Mutex<Db<E>>>,
+    inner: &ConcurrentDb<E>,
     codec: &KeyCodec,
     cf: &str,
     mode: IteratorMode,
@@ -577,7 +585,7 @@ fn scan_cf_at<E: Env>(
         items,
         idx,
         reverse,
-        inner: Arc::clone(inner),
+        inner: inner.clone(),
         codec: codec.clone(),
         cf: cf.to_string(),
         seq,
@@ -587,9 +595,13 @@ fn scan_cf_at<E: Env>(
     })
 }
 
-/// rust-rocksdb-shaped database on top of a Pedra `Db`.
+/// rust-rocksdb-shaped database on top of a Pedra `ConcurrentDb`.
+///
+/// Writes join the Rocks-style write group (one leader takes the write lock
+/// per group: appends + a single fdatasync + apply); reads take RwLock read
+/// guards; the host compact worker reuses the core staged flush pipeline.
 pub struct DB<E: Env = StdEnv> {
-    inner: Arc<Mutex<Db<E>>>,
+    inner: ConcurrentDb<E>,
     cfs: Vec<String>,
     codec: KeyCodec,
     /// Host compact worker (RFC-0037 P2.1). None when the caller injected Env
@@ -627,9 +639,9 @@ impl DB<StdEnv> {
         cfs: &[&str],
     ) -> Result<Self> {
         let mut db = Self::open_cf_with_env(opts, path, cfs, StdEnv)?;
-        let (tx, th) = spawn_compact_worker(Arc::clone(&db.inner), Arc::clone(&db.compact_gate));
+        let (tx, th) = spawn_compact_worker(db.inner.clone(), Arc::clone(&db.compact_gate));
         if th.is_some() {
-            db.inner.lock().set_defer_auto_compact(true);
+            db.inner.set_defer_auto_compact(true);
             db.compact_tx = tx;
             db.compact_thread = th;
         }
@@ -675,10 +687,10 @@ impl<E: Env> DB<E> {
             }
             names.push((*c).to_string());
         }
-        let db = Db::open_with_env(dir, pedradb_core::OpenOptions::default(), env)?;
+        let db = ConcurrentDb::open_with_env(dir, pedradb_core::OpenOptions::default(), env)?;
         let codec = KeyCodec::new(&names);
         Ok(Self {
-            inner: Arc::new(Mutex::new(db)),
+            inner: db,
             cfs: names,
             codec,
             compact_tx: None,
@@ -735,11 +747,8 @@ impl<E: Env> DB<E> {
         value: impl AsRef<[u8]>,
     ) -> Result<()> {
         self.check_cf(&cf.name)?;
-        let mut guard = self.inner.lock();
-        let r = guard
-            .put(self.codec.encode(&cf.name, key.as_ref()), value.as_ref())
-            .map_err(Error::from);
-        drop(guard);
+        let encoded = self.codec.encode(&cf.name, key.as_ref());
+        let r = self.inner.put(encoded, value.as_ref()).map_err(Error::from);
         self.notify_compact();
         r
     }
@@ -764,8 +773,7 @@ impl<E: Env> DB<E> {
     pub fn get_cf(&self, cf: &ColumnFamily, key: impl AsRef<[u8]>) -> Result<Option<Vec<u8>>> {
         self.check_cf(&cf.name)?;
         self.codec.encode_with(&cf.name, key.as_ref(), |enc| {
-            let guard = self.inner.lock();
-            Ok(guard.get(enc).map(|b| b.to_vec()))
+            Ok(self.inner.with_read(|db| db.get(enc)).map(|b| b.to_vec()))
         })
     }
 
@@ -776,10 +784,9 @@ impl<E: Env> DB<E> {
         key: impl AsRef<[u8]>,
     ) -> Result<Option<Vec<u8>>> {
         self.check_cf(cf)?;
-        let guard = self.inner.lock();
-        guard
-            .get_at(snap, &self.codec.encode(cf, key.as_ref()))
-            .map(|v| v.map(|b| b.to_vec()))
+        let encoded = self.codec.encode(cf, key.as_ref());
+        self.inner
+            .with_read(|db| db.get_at(snap, &encoded).map(|v| v.map(|b| b.to_vec())))
             .map_err(Error::from)
     }
 
@@ -802,11 +809,8 @@ impl<E: Env> DB<E> {
     /// WAL I/O or unknown CF.
     pub fn delete_cf(&self, cf: &ColumnFamily, key: impl AsRef<[u8]>) -> Result<()> {
         self.check_cf(&cf.name)?;
-        let mut guard = self.inner.lock();
-        let r = guard
-            .delete(self.codec.encode(&cf.name, key.as_ref()))
-            .map_err(Error::from);
-        drop(guard);
+        let encoded = self.codec.encode(&cf.name, key.as_ref());
+        let r = self.inner.delete(encoded).map_err(Error::from);
         self.notify_compact();
         r
     }
@@ -822,14 +826,9 @@ impl<E: Env> DB<E> {
         end: impl AsRef<[u8]>,
     ) -> Result<()> {
         self.check_cf(&cf.name)?;
-        let mut guard = self.inner.lock();
-        let r = guard
-            .delete_range(
-                self.codec.encode(&cf.name, start.as_ref()),
-                self.codec.encode(&cf.name, end.as_ref()),
-            )
-            .map_err(Error::from);
-        drop(guard);
+        let lo = self.codec.encode(&cf.name, start.as_ref());
+        let hi = self.codec.encode(&cf.name, end.as_ref());
+        let r = self.inner.delete_range(lo, hi).map_err(Error::from);
         self.notify_compact();
         r
     }
@@ -858,9 +857,7 @@ impl<E: Env> DB<E> {
             };
             ops.push(encoded);
         }
-        let mut guard = self.inner.lock();
-        let r = guard.apply_batch(ops).map(|_| ()).map_err(Error::from);
-        drop(guard);
+        let r = self.inner.apply_batch(ops).map(|_| ()).map_err(Error::from);
         self.notify_compact();
         r
     }
@@ -868,8 +865,7 @@ impl<E: Env> DB<E> {
     /// Sequence-pinned snapshot.
     #[must_use]
     pub fn snapshot(&self) -> Snapshot<'_, E> {
-        let guard = self.inner.lock();
-        let snap = guard.snapshot();
+        let snap = self.inner.snapshot();
         Snapshot { db: self, snap }
     }
 
@@ -891,7 +887,7 @@ impl<E: Env> DB<E> {
     /// # Errors
     /// Unknown CF or Pedra scan errors.
     pub fn iterator_cf(&self, cf: &ColumnFamily, mode: IteratorMode) -> Result<DBIterator<E>> {
-        let seq = self.inner.lock().last_sequence();
+        let seq = self.inner.last_sequence();
         scan_cf_at(&self.inner, &self.codec, &cf.name, mode, seq, &self.cfs)
     }
 
@@ -909,12 +905,13 @@ impl<E: Env> DB<E> {
     ) -> Result<Option<Vec<u8>>> {
         self.check_cf(&cf.name)?;
         let encoded = self.codec.encode(&cf.name, prefix.as_ref());
-        let guard = self.inner.lock();
-        let seq = guard.last_sequence();
-        match guard.last_under_user_prefix(seq, &encoded)? {
-            Some(k) => Ok(Some(self.codec.decode(&cf.name, &k).to_vec())),
-            None => Ok(None),
-        }
+        self.inner
+            .with_read(|db| {
+                let seq = db.last_sequence();
+                db.last_under_user_prefix(seq, &encoded)
+                    .map(|k| k.map(|k| self.codec.decode(&cf.name, &k).to_vec()))
+            })
+            .map_err(Error::from)
     }
 
     /// Latest key under `prefix` in `last_cf`, then point-get that user key in
@@ -934,27 +931,29 @@ impl<E: Env> DB<E> {
         self.codec
             .encode_with(&last_cf.name, prefix.as_ref(), |enc| {
                 let ns_enc0 = u64::try_from(t_enc0.elapsed().as_nanos()).unwrap_or(u64::MAX);
-                let guard = self.inner.lock();
-                let seq = guard.last_sequence();
-                let t_last = Instant::now();
-                let Some(k) = guard.last_under_user_prefix(seq, enc)? else {
-                    return Ok(None);
-                };
-                let ns_last = u64::try_from(t_last.elapsed().as_nanos()).unwrap_or(u64::MAX);
-                let user = self.codec.decode(&last_cf.name, &k);
-                let t_enc1 = Instant::now();
-                self.codec.encode_with(&get_cf.name, user, |gk| {
-                    let ns_enc = ns_enc0.saturating_add(
-                        u64::try_from(t_enc1.elapsed().as_nanos()).unwrap_or(u64::MAX),
-                    );
-                    let t_get = Instant::now();
-                    let got = guard.get(gk);
-                    let ns_get = u64::try_from(t_get.elapsed().as_nanos()).unwrap_or(u64::MAX);
-                    let t_copy = Instant::now();
-                    let out = got.map(|b| b.to_vec());
-                    let ns_copy = u64::try_from(t_copy.elapsed().as_nanos()).unwrap_or(u64::MAX);
-                    guard.record_mvcc_split(ns_enc, ns_last, ns_get, ns_copy);
-                    Ok(out)
+                self.inner.with_read(|db| {
+                    let seq = db.last_sequence();
+                    let t_last = Instant::now();
+                    let Some(k) = db.last_under_user_prefix(seq, enc)? else {
+                        return Ok(None);
+                    };
+                    let ns_last = u64::try_from(t_last.elapsed().as_nanos()).unwrap_or(u64::MAX);
+                    let user = self.codec.decode(&last_cf.name, &k);
+                    let t_enc1 = Instant::now();
+                    self.codec.encode_with(&get_cf.name, user, |gk| {
+                        let ns_enc = ns_enc0.saturating_add(
+                            u64::try_from(t_enc1.elapsed().as_nanos()).unwrap_or(u64::MAX),
+                        );
+                        let t_get = Instant::now();
+                        let got = db.get(gk);
+                        let ns_get = u64::try_from(t_get.elapsed().as_nanos()).unwrap_or(u64::MAX);
+                        let t_copy = Instant::now();
+                        let out = got.map(|b| b.to_vec());
+                        let ns_copy =
+                            u64::try_from(t_copy.elapsed().as_nanos()).unwrap_or(u64::MAX);
+                        db.record_mvcc_split(ns_enc, ns_last, ns_get, ns_copy);
+                        Ok(out)
+                    })
                 })
             })
     }
@@ -976,10 +975,16 @@ impl<E: Env> DB<E> {
         self.check_cf(&cf.name)?;
         self.codec.encode_with(&cf.name, start.as_ref(), |lo| {
             self.codec.encode_with(&cf.name, end.as_ref(), |hi| {
-                let guard = self.inner.lock();
-                let seq = guard.last_sequence();
-                guard
-                    .count_in_range(seq, Bound::Included(lo), Bound::Excluded(hi), Some(limit))
+                self.inner
+                    .with_read(|db| {
+                        let seq = db.last_sequence();
+                        db.count_in_range(
+                            seq,
+                            Bound::Included(lo),
+                            Bound::Excluded(hi),
+                            Some(limit),
+                        )
+                    })
                     .map_err(Error::from)
             })
         })
@@ -987,23 +992,21 @@ impl<E: Env> DB<E> {
 
     /// Zero latest/scan probe counters (RFC-0035).
     pub fn reset_read_probe(&self) {
-        self.inner.lock().reset_read_probe();
+        self.inner.with_read(|db| db.reset_read_probe());
     }
 
     /// Snapshot latest/scan counters + LSM shape (RFC-0035).
     #[must_use]
     pub fn read_probe(&self) -> pedradb_core::ReadProbeSnap {
-        self.inner.lock().read_probe()
+        self.inner.with_read(|db| db.read_probe())
     }
 
-    /// Flush memtable to SST.
+    /// Flush memtable to SST (staged pipeline; SST I/O off the write lock).
     ///
     /// # Errors
     /// Pedra flush errors (I/O).
     pub fn flush(&self) -> Result<()> {
-        let mut guard = self.inner.lock();
-        let r = guard.flush().map_err(Error::from);
-        drop(guard);
+        let r = self.inner.flush().map_err(Error::from);
         self.notify_compact();
         r
     }
@@ -1014,8 +1017,7 @@ impl<E: Env> DB<E> {
     /// Pedra compaction errors.
     pub fn compact(&self) -> Result<()> {
         let _gate = self.compact_gate.lock();
-        let mut guard = self.inner.lock();
-        guard.compact().map_err(Error::from)
+        self.inner.compact().map_err(Error::from)
     }
 }
 
@@ -1031,7 +1033,7 @@ impl<E: Env> Drop for DB<E> {
 }
 
 fn spawn_compact_worker(
-    inner: Arc<Mutex<Db<StdEnv>>>,
+    inner: ConcurrentDb<StdEnv>,
     gate: Arc<Mutex<()>>,
 ) -> (Option<SyncSender<CompactCmd>>, Option<JoinHandle<()>>) {
     let (tx, rx) = mpsc::sync_channel(1);
@@ -1040,11 +1042,11 @@ fn spawn_compact_worker(
         .spawn(move || loop {
             match rx.recv_timeout(Duration::from_millis(20)) {
                 Ok(CompactCmd::Shutdown) | Err(RecvTimeoutError::Disconnected) => {
-                    while compat_flush_once(&inner) {}
+                    while inner.drain_imm_once() {}
                     break;
                 }
                 Ok(CompactCmd::Run) | Err(RecvTimeoutError::Timeout) => {
-                    while compat_flush_once(&inner) {}
+                    while inner.drain_imm_once() {}
                     while compat_compact_once(&inner, &gate) {}
                 }
             }
@@ -1053,90 +1055,33 @@ fn spawn_compact_worker(
     (Some(tx), handle)
 }
 
-/// Drain one staged imm → L0. SST write does not hold the `Db` mutex.
-fn compat_flush_once(inner: &Mutex<Db<StdEnv>>) -> bool {
-    let prepared = {
-        let mut g = inner.lock();
-        if !g.has_imm() {
-            return false;
-        }
-        match g.prepare_flush_imm() {
-            Ok(Some(imm)) => {
-                let num = g.alloc_file_num();
-                let dir = g.path().to_path_buf();
-                let sync = g.default_write_sync();
-                Some((imm, num, dir, sync))
-            }
-            _ => None,
-        }
-    };
-    let Some((imm, file_num, dir, sync)) = prepared else {
-        return false;
-    };
-    let env = StdEnv;
-    let table = match write_imm_l0(&env, &dir, file_num, &imm, sync) {
-        Ok(t) => t,
-        Err(_) => {
-            inner.lock().restore_imm(imm);
-            return false;
-        }
-    };
-    let mut g = inner.lock();
-    if g.install_l0_sst(table, file_num).is_err() {
-        g.restore_imm(imm);
+/// One L0→L1 job. I/O runs without the write lock (G5: failed write is not installed).
+fn compat_compact_once<E: Env>(inner: &ConcurrentDb<E>, gate: &Mutex<()>) -> bool {
+    // Idle poll: do not take the write lock (or the compact gate) just to
+    // observe L0 — that stalls every reader every 20 ms.
+    if inner.with_read(|db| db.level_file_count(0)) < L0_COMPACTION_TRIGGER {
         return false;
     }
-    let _ = g.try_rotate_wal_if_idle();
-    true
-}
-
-fn write_imm_l0(
-    env: &StdEnv,
-    dir: &std::path::Path,
-    file_num: u64,
-    imm: &pedradb_core::MemTable,
-    sync: bool,
-) -> pedradb_core::Result<SstTable> {
-    let final_path = dir.join(format!("{file_num:06}.sst"));
-    let tmp_path = dir.join(format!("{file_num:06}.sst.tmp"));
-    match write_sst_on(env, &tmp_path, imm) {
-        Ok(table) => {
-            drop(table);
-            env.rename(&tmp_path, &final_path)?;
-            if sync {
-                let _ = env.sync_dir(dir);
-            }
-            SstTable::open_on(env, &final_path)
-        }
-        Err(e) => {
-            let _ = env.remove_file(&tmp_path);
-            Err(e)
-        }
-    }
-}
-
-/// One L0→L1 job. I/O runs without `Db` mutex (G5: failed write is not installed).
-fn compat_compact_once<E: Env>(inner: &Mutex<Db<E>>, gate: &Mutex<()>) -> bool {
     let _gate = gate.lock();
-    let job = {
-        let mut g = inner.lock();
-        if g.level_file_count(0) < L0_COMPACTION_TRIGGER {
-            return false;
+    let job = inner.with_write(|db| {
+        if db.level_file_count(0) < L0_COMPACTION_TRIGGER {
+            return None;
         }
-        match g.prepare_l0_compact(CompactOptions::default()) {
-            Ok(Some(j)) => j,
-            _ => return false,
-        }
+        db.prepare_l0_compact(CompactOptions::default())
+            .ok()
+            .flatten()
+    });
+    let Some(job) = job else {
+        return false;
     };
     let table = match job.write() {
         Ok(t) => t,
         Err(_) => return false,
     };
-    let mut g = inner.lock();
-    if g.install_prepared_l0_compact(job, table).is_err() {
+    if !inner.with_write(|db| db.install_prepared_l0_compact(job, table).is_ok()) {
         return false;
     }
-    g.level_file_count(0) >= L0_COMPACTION_TRIGGER
+    inner.with_read(|db| db.level_file_count(0)) >= L0_COMPACTION_TRIGGER
 }
 
 #[cfg(test)]

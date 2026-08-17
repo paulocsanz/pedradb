@@ -7,7 +7,20 @@
 
 ## What shipped
 
-`crates/rocksdb-compat` — a rust-rocksdb-shaped API on top of `pedradb-core`:
+`crates/rocksdb-compat` — a rust-rocksdb-shaped API on top of
+`pedradb-core::ConcurrentDb`:
+
+- **Writes** join the Rocks-style write group (one leader: appends + one
+  `fdatasync` + apply). A lone client takes the single-writer fast path
+  (`apply_batch_with`, no channel hop) so sequential benches stay on the
+  same fsync-before-Ok cost as `Db::put`.
+- **Reads** take `RwLock` read guards (point get, prefix latest, count,
+  iterator refill). Composite reads (`last_prefix_then_get`, `count_cf`)
+  stay under one guard.
+- **Host compact worker** (StdEnv `open_cf` only) drains imm via
+  `ConcurrentDb::drain_imm_once` and runs L0→L1 off the write lock.
+  `open_cf_with_env` stays worker-free so `FailingEnv` campaigns remain
+  single-threaded / deterministic.
 
 | rust-rocksdb API | Compat | Notes |
 |---|---|---|

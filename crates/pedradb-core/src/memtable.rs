@@ -31,6 +31,27 @@ struct Version {
     value: Bytes,
 }
 
+/// Borrowed walk of `BTreeMap` user-key range, newest-first versions per key.
+/// Concrete so count/scan do not `Box<dyn Iterator>` on every refill.
+pub(crate) struct MemInternalRange<'a> {
+    users: std::collections::btree_map::Range<'a, Bytes, Vec<Version>>,
+    cur: std::slice::Iter<'a, Version>,
+}
+
+impl<'a> Iterator for MemInternalRange<'a> {
+    type Item = (&'a InternalKey, &'a Bytes);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            if let Some(v) = self.cur.next() {
+                return Some((&v.key, &v.value));
+            }
+            let (_, vers) = self.users.next()?;
+            self.cur = vers.iter();
+        }
+    }
+}
+
 /// Sorted in-memory table of versioned keys.
 ///
 /// Keyed by user key so [`Self::get_entry`] is a borrowed `BTreeMap` lookup
@@ -252,9 +273,19 @@ impl MemTable {
         start: Bound<&'a [u8]>,
         end: Bound<&'a [u8]>,
     ) -> impl Iterator<Item = (&'a InternalKey, &'a Bytes)> + 'a {
-        self.map
-            .range::<[u8], _>((start, end))
-            .flat_map(|(_, vers)| vers.iter().map(|v| (&v.key, &v.value)))
+        self.iter_internal_range_cursor(start, end)
+    }
+
+    /// Concrete (no `dyn`) range cursor — count/scan hot path.
+    pub(crate) fn iter_internal_range_cursor<'a>(
+        &'a self,
+        start: Bound<&'a [u8]>,
+        end: Bound<&'a [u8]>,
+    ) -> MemInternalRange<'a> {
+        MemInternalRange {
+            users: self.map.range::<[u8], _>((start, end)),
+            cur: [].iter(),
+        }
     }
 
     /// Largest user key in `[prefix, before)` visible at `snapshot`.

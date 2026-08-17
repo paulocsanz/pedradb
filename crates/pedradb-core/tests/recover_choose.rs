@@ -112,7 +112,7 @@ fn as_is_policy_still_has_teeth() {
         recover_collect_act, recover_collect_act_as_is, RecoverAct, RecoverKind,
     };
     assert_eq!(
-        recover_collect_act(RecoverKind::Crc, 1, true, 1),
+        recover_collect_act(RecoverKind::Crc, 1, true, 1, false),
         RecoverAct::FailStop
     );
     assert_eq!(
@@ -120,7 +120,7 @@ fn as_is_policy_still_has_teeth() {
         RecoverAct::Resync
     );
     assert_eq!(
-        recover_collect_act(RecoverKind::Truncated, 0, false, 0),
+        recover_collect_act(RecoverKind::Truncated, 0, false, 0, false),
         RecoverAct::FailStop
     );
     assert_eq!(

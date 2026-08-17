@@ -1950,6 +1950,9 @@ impl<E: Env> Db<E> {
         let mut cursors: Vec<CountCursor<'_>> = Vec::with_capacity(3 + self.ssts.len());
         for table in self.mem_layers() {
             table.collect_range_tombstones(snapshot, &mut range_dels);
+            if table.is_empty() {
+                continue;
+            }
             cursors.push(CountCursor::Mem(MemCountCursor::new(
                 table, start, end, snapshot,
             )));
@@ -2506,9 +2509,48 @@ impl<E: Env> Db<E> {
         n
     }
 
+    /// Snapshot of what off-lock L0 write needs (`Env` is [`Clone`]).
+    #[must_use]
+    pub fn l0_write_ctx(&self) -> (E, PathBuf, bool) {
+        (self.env.clone(), self.dir.clone(), self.sync)
+    }
+
+    /// Write `imm` to `{num:06}.sst` without borrowing `Db` (caller drops the lock).
+    ///
+    /// # Errors
+    /// SST I/O.
+    pub fn write_imm_l0_file(
+        env: &E,
+        dir: &Path,
+        sync: bool,
+        imm: &MemTable,
+        num: u64,
+    ) -> Result<(SstTable, u64, PathBuf)> {
+        let final_path = dir.join(format!("{num:06}.sst"));
+        let tmp_path = dir.join(format!("{num:06}.sst.tmp"));
+        match write_sst_on(env, &tmp_path, imm) {
+            Ok(table) => {
+                drop(table);
+                env.rename(&tmp_path, &final_path)?;
+                if sync {
+                    env.sync_dir(dir)?;
+                }
+                let table = SstTable::open_on(env, &final_path)?;
+                Ok((table, num, final_path))
+            }
+            Err(e) => {
+                let _ = env.remove_file(&tmp_path);
+                let _ = env.remove_file(&final_path);
+                Err(e)
+            }
+        }
+    }
+
     /// Write `imm` to L0 using a **pre-allocated** file number (no Db write lock).
     ///
     /// Prefer [`Self::alloc_file_num`] under the write lock, then this for I/O.
+    /// Holding `&self` across this call (a read lock) **blocks writers** —
+    /// use [`Self::l0_write_ctx`] + [`Self::write_imm_l0_file`] instead.
     ///
     /// # Errors
     /// SST I/O.
@@ -2517,24 +2559,7 @@ impl<E: Env> Db<E> {
         imm: &MemTable,
         num: u64,
     ) -> Result<(SstTable, u64, PathBuf)> {
-        let final_path = self.dir.join(format!("{num:06}.sst"));
-        let tmp_path = self.dir.join(format!("{num:06}.sst.tmp"));
-        match write_sst_on(&self.env, &tmp_path, imm) {
-            Ok(table) => {
-                drop(table);
-                self.env.rename(&tmp_path, &final_path)?;
-                if self.sync {
-                    self.env.sync_dir(&self.dir)?;
-                }
-                let table = SstTable::open_on(&self.env, &final_path)?;
-                Ok((table, num, final_path))
-            }
-            Err(e) => {
-                let _ = self.env.remove_file(&tmp_path);
-                let _ = self.env.remove_file(&final_path);
-                Err(e)
-            }
-        }
+        Self::write_imm_l0_file(&self.env, &self.dir, self.sync, imm, num)
     }
 
     /// Write `imm` to a new L0 SST (exclusive path: peeks `next_file_num`, no bump).
@@ -4798,9 +4823,27 @@ impl CountCursor<'_> {
 
 /// Memtable cursor over the bounded user window (versions newest-first).
 struct MemCountCursor<'a> {
-    it: Box<dyn Iterator<Item = (&'a InternalKey, &'a Bytes)> + 'a>,
+    it: MemCountIter<'a>,
     head: Option<&'a InternalKey>,
     snapshot: SequenceNumber,
+}
+
+enum MemCountIter<'a> {
+    /// Common path: concrete BTree range (no `dyn`).
+    Range(crate::memtable::MemInternalRange<'a>),
+    /// Rare: range tombstones whose start sits outside the window.
+    Filter(Box<dyn Iterator<Item = (&'a InternalKey, &'a Bytes)> + 'a>),
+}
+
+impl<'a> Iterator for MemCountIter<'a> {
+    type Item = (&'a InternalKey, &'a Bytes);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            Self::Range(it) => it.next(),
+            Self::Filter(it) => it.next(),
+        }
+    }
 }
 
 impl<'a> MemCountCursor<'a> {
@@ -4813,19 +4856,18 @@ impl<'a> MemCountCursor<'a> {
         // Same two branches as the owned memtable stream: tombstone-bearing
         // tables iterate everything (tombstone starts may precede the
         // window), bounded range otherwise.
-        let it: Box<dyn Iterator<Item = (&'a InternalKey, &'a Bytes)> + 'a> =
-            if table.has_range_tombstones() {
-                Box::new(
-                    table
-                        .iter_internal()
-                        .filter(move |(k, _)| {
-                            crate::merge::user_key_in_range(k.user_key.as_ref(), start, end)
-                        })
-                        .map(|(k, v)| (k, v)),
-                )
-            } else {
-                Box::new(table.iter_internal_range(start, end))
-            };
+        let it = if table.has_range_tombstones() {
+            MemCountIter::Filter(Box::new(
+                table
+                    .iter_internal()
+                    .filter(move |(k, _)| {
+                        crate::merge::user_key_in_range(k.user_key.as_ref(), start, end)
+                    })
+                    .map(|(k, v)| (k, v)),
+            ))
+        } else {
+            MemCountIter::Range(table.iter_internal_range_cursor(start, end))
+        };
         let mut c = Self {
             it,
             head: None,

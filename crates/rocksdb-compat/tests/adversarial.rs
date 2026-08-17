@@ -7,8 +7,8 @@
 //!   of the model (Ok'd writes may be missing only if their fsync failed), and
 //!   every durable value must equal the model value (no silent-wrong).
 
-use pedradb_sim::{FaultKind, FailingEnv};
-use rocksdb_compat::{DB, Direction, IteratorMode, Options, WriteBatch};
+use pedradb_sim::{FailingEnv, FaultKind};
+use rocksdb_compat::{Direction, IteratorMode, Options, WriteBatch, DB};
 use std::collections::BTreeMap;
 
 type Model = BTreeMap<Vec<u8>, Vec<u8>>;
@@ -34,7 +34,10 @@ fn admit(acc: &mut Accept, key: &[u8], outcome: Option<Vec<u8>>, certain: bool) 
 }
 
 fn admit_range_delete(acc: &mut Accept, a: &[u8], b: &[u8], certain: bool) {
-    let covered: Vec<Vec<u8>> = acc.range(a.to_vec()..b.to_vec()).map(|(k, _)| k.clone()).collect();
+    let covered: Vec<Vec<u8>> = acc
+        .range(a.to_vec()..b.to_vec())
+        .map(|(k, _)| k.clone())
+        .collect();
     for k in covered {
         admit(acc, &k, None, certain);
     }
@@ -68,11 +71,7 @@ fn scan_all(db: &DB<pedradb_sim::FailingEnv>) -> Vec<(Vec<u8>, Vec<u8>)> {
     out
 }
 
-fn run_campaign(
-    seed: u64,
-    kind: Option<FaultKind>,
-    ops: usize,
-) -> (Model, Model, u64, u64) {
+fn run_campaign(seed: u64, kind: Option<FaultKind>, ops: usize) -> (Model, Model, u64, u64) {
     let tag = match kind {
         None => "camp-io",
         Some(FaultKind::SyncFail) => "camp-sync",
@@ -83,13 +82,7 @@ fn run_campaign(
     // Open healthy (from_seed budget would fire during open's own I/O), then arm
     // the fault schedule on the shared Rc state via the env clone.
     let env = FailingEnv::passing();
-    let db = DB::open_cf_with_env(
-        &Options::new(),
-        &dir,
-        &["raft"],
-        env.clone(),
-    )
-    .expect("open");
+    let db = DB::open_cf_with_env(&Options::new(), &dir, &["raft"], env.clone()).expect("open");
     let kind = kind.unwrap_or(FaultKind::IoError);
     env.arm_with_kind(FailingEnv::seed_to_fail_after(seed), false, kind);
 
@@ -164,8 +157,10 @@ fn run_campaign(
                 let b = format!("k{:03}", 20 + xorshift(&mut rng) % 20).into_bytes();
                 match db.delete_range_cf(&db.cf_handle("default").unwrap(), &a, &b) {
                     Ok(()) => {
-                        let ks: Vec<Vec<u8>> =
-                            model.range(a.clone()..b.clone()).map(|(k, _)| k.clone()).collect();
+                        let ks: Vec<Vec<u8>> = model
+                            .range(a.clone()..b.clone())
+                            .map(|(k, _)| k.clone())
+                            .collect();
                         for k in &ks {
                             model.remove(k);
                         }
@@ -224,12 +219,7 @@ fn run_campaign(
     // Reopen on a healed env. ShortWrite may leave a torn WAL record; Pedra is
     // fail-closed there (CRC stops open — operator repairs), which is the
     // intended integrity contract, not a regression.
-    let reopened = DB::open_cf_with_env(
-        &Options::new(),
-        &dir,
-        &["raft"],
-        FailingEnv::passing(),
-    );
+    let reopened = DB::open_cf_with_env(&Options::new(), &dir, &["raft"], FailingEnv::passing());
     let db2 = match reopened {
         Ok(db) => db,
         Err(e) => {
@@ -257,7 +247,11 @@ fn run_campaign(
     for (k, allowed) in accept.iter().chain(raft_accept.iter()) {
         let universe: &Model = if k.starts_with(b"r") && k.len() == 4 {
             // keys are "kNNN" (default) vs "rNNN" (raft) in this harness
-            if durable.contains_key(k) { &durable } else { &raft_durable }
+            if durable.contains_key(k) {
+                &durable
+            } else {
+                &raft_durable
+            }
         } else if durable.contains_key(k) {
             &durable
         } else {
@@ -358,7 +352,11 @@ fn adversarial_iterator_positioning() {
         let dir = tmp("iterpos", seed);
         let env = FailingEnv::passing();
         let db = DB::open_cf_with_env(&Options::new(), &dir, &[], env.clone()).expect("open");
-        env.arm_with_kind(FailingEnv::seed_to_fail_after(seed), false, FaultKind::IoError);
+        env.arm_with_kind(
+            FailingEnv::seed_to_fail_after(seed),
+            false,
+            FaultKind::IoError,
+        );
         let mut model: Model = BTreeMap::new();
         let mut rng = 0xBEEF ^ seed;
         for _ in 0..64 {

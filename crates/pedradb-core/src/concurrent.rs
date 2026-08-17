@@ -23,7 +23,7 @@
 use std::collections::VecDeque;
 use std::ops::Bound;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, SyncSender};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -112,9 +112,28 @@ impl WriteGroup {
         ops: Vec<BatchOp>,
         do_sync: bool,
     ) -> Result<SequenceNumber> {
-        let (tx, rx) = mpsc::sync_channel(1);
         self.active.fetch_add(1, Ordering::Relaxed);
         self.submits.fetch_add(1, Ordering::Relaxed);
+
+        // Lone writer (parity bench, sequential client): skip the mpsc hop
+        // and the group-commit clone. Same fsync-before-Ok via apply_batch_with.
+        // `active == 1` after our increment ⇒ no other submit is in flight,
+        // so no live leader / queued follower (the leader holds `active`
+        // until after `lead` returns). Concurrent writers see > 1.
+        if self.active.load(Ordering::Relaxed) == 1 {
+            let durability = if do_sync {
+                WriteOptions::sync()
+            } else {
+                WriteOptions::no_sync()
+            };
+            let result = db.write().apply_batch_with(ops, durability);
+            self.batches.fetch_add(1, Ordering::Relaxed);
+            self.batch_ops.fetch_add(1, Ordering::Relaxed);
+            self.active.fetch_sub(1, Ordering::Relaxed);
+            return result;
+        }
+
+        let (tx, rx) = mpsc::sync_channel(1);
         let become_leader = {
             let mut g = self.queue.lock();
             g.pending.push_back(PendingWrite {
@@ -206,6 +225,8 @@ pub struct ConcurrentDb<E: Env = StdEnv> {
     /// Single-flight flush/compact pipeline (F45): dual concurrent `prepare_flush_imm`
     /// + failed `restore_imm` could otherwise race on the one imm slot.
     flush_lock: Arc<Mutex<()>>,
+    /// Cached [`OpenOptions::sync`]; never mutates after open.
+    default_sync: Arc<AtomicBool>,
 }
 
 impl ConcurrentDb<StdEnv> {
@@ -222,11 +243,7 @@ impl ConcurrentDb<StdEnv> {
     /// # Errors
     /// Same as [`Db::open_with`].
     pub fn open_with(path: impl AsRef<Path>, opts: OpenOptions) -> Result<Self> {
-        Ok(Self {
-            inner: Arc::new(RwLock::new(Db::open_with(path, opts)?)),
-            writes: Arc::new(WriteGroup::new()),
-            flush_lock: Arc::new(Mutex::new(())),
-        })
+        Ok(Self::from_db(Db::open_with(path, opts)?))
     }
 }
 
@@ -234,10 +251,12 @@ impl<E: Env> ConcurrentDb<E> {
     /// Wrap an existing `Db`.
     #[must_use]
     pub fn from_db(db: Db<E>) -> Self {
+        let default_sync = db.default_write_sync();
         Self {
             inner: Arc::new(RwLock::new(db)),
             writes: Arc::new(WriteGroup::new()),
             flush_lock: Arc::new(Mutex::new(())),
+            default_sync: Arc::new(AtomicBool::new(default_sync)),
         }
     }
 
@@ -246,11 +265,7 @@ impl<E: Env> ConcurrentDb<E> {
     /// # Errors
     /// Same as [`Db::open_with_env`].
     pub fn open_with_env(path: impl AsRef<Path>, opts: OpenOptions, env: E) -> Result<Self> {
-        Ok(Self {
-            inner: Arc::new(RwLock::new(Db::open_with_env(path, opts, env)?)),
-            writes: Arc::new(WriteGroup::new()),
-            flush_lock: Arc::new(Mutex::new(())),
-        })
+        Ok(Self::from_db(Db::open_with_env(path, opts, env)?))
     }
 
     /// Point get (read lock).
@@ -646,6 +661,7 @@ impl<E: Env> ConcurrentDb<E> {
             inner,
             writes: _,
             flush_lock: _,
+            default_sync: _,
         } = self;
         match Arc::try_unwrap(inner) {
             Ok(lock) => lock.into_inner().close(),
@@ -659,7 +675,7 @@ impl<E: Env> ConcurrentDb<E> {
 
     fn resolve_sync(&self, opts: WriteOptions) -> bool {
         opts.sync
-            .unwrap_or_else(|| self.inner.read().default_write_sync())
+            .unwrap_or_else(|| self.default_sync.load(Ordering::Relaxed))
     }
 
     /// Put via write group (may share fsync with concurrent writers).
@@ -818,18 +834,17 @@ impl<E: Env> ConcurrentDb<E> {
                     None => None,
                     Some(imm) => {
                         let num = g.alloc_file_num();
-                        Some((imm, num))
+                        let (env, dir, sync) = g.l0_write_ctx();
+                        Some((imm, num, env, dir, sync))
                     }
                 }
             };
-            let Some((imm, file_num)) = prepared else {
+            let Some((imm, file_num, env, dir, sync)) = prepared else {
                 break;
             };
-            // Heavy I/O without write lock — other threads group-commit freely.
-            let write_result = {
-                let g = self.inner.read();
-                g.write_memtable_to_l0_file_num(&imm, file_num)
-            };
+            // Heavy I/O with **no** Db lock — a read guard here would block
+            // writers for the whole SST write (parking_lot RwLock).
+            let write_result = Db::write_imm_l0_file(&env, &dir, sync, &imm, file_num);
             let table = match write_result {
                 Ok((t, n, _)) => {
                     debug_assert_eq!(n, file_num);
@@ -852,6 +867,57 @@ impl<E: Env> ConcurrentDb<E> {
         let mut g = self.inner.write();
         g.finish_flush_pipeline()?;
         Ok(())
+    }
+
+    /// Drain **one existing** immutable memtable → L0 without forcing an
+    /// active→imm switch (host compact-worker shape, RFC-0037 P2.1).
+    ///
+    /// Staged like [`Self::flush`] — prepare + install under short write
+    /// locks, SST I/O (`tmp` + rename + `sync_dir`) off-lock — and
+    /// single-flight with it via the flush lock (F45: one imm in flight).
+    /// Returns whether a step ran, so host workers loop until `false`.
+    #[must_use]
+    pub fn drain_imm_once(&self) -> bool {
+        // Cheap no-op: a write lock here every poll (20 ms) stalls every
+        // reader on the idle path. Check under a read guard first.
+        if !self.inner.read().has_imm() {
+            return false;
+        }
+        let _flush = self.flush_lock.lock();
+        let prepared = {
+            let mut g = self.inner.write();
+            if !g.has_imm() {
+                return false;
+            }
+            match g.prepare_flush_imm() {
+                Ok(Some(imm)) => {
+                    let num = g.alloc_file_num();
+                    let (env, dir, sync) = g.l0_write_ctx();
+                    Some((imm, num, env, dir, sync))
+                }
+                _ => None,
+            }
+        };
+        let Some((imm, file_num, env, dir, sync)) = prepared else {
+            return false;
+        };
+        let table = match Db::write_imm_l0_file(&env, &dir, sync, &imm, file_num) {
+            Ok((t, n, _)) => {
+                debug_assert_eq!(n, file_num);
+                t
+            }
+            Err(_) => {
+                self.inner.write().restore_imm(imm);
+                return false;
+            }
+        };
+        let mut g = self.inner.write();
+        if g.install_l0_sst(table, file_num).is_err() {
+            g.restore_imm(imm);
+            return false;
+        }
+        let _ = g.try_rotate_wal_if_idle();
+        true
     }
 
     /// Compact: flush pipeline first, then compact under write lock.
@@ -1191,6 +1257,43 @@ mod tests {
                 assert!(re.get(&[b'c', t, i]).is_some());
             }
         }
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Host-worker drain: only an existing imm is written; active mem stays.
+    #[test]
+    fn drain_imm_once_writes_existing_imm_only() {
+        let dir = temp_dir();
+        let db = ConcurrentDb::open_with(
+            &dir,
+            OpenOptions {
+                sync: true,
+                auto_flush_bytes: Some(256),
+                auto_compact_sst_count: None,
+                auto_compact_sst_bytes: None,
+                exclusive: true,
+                large_value_threshold: None,
+            },
+        )
+        .unwrap();
+        db.set_defer_auto_compact(true);
+        let payload = vec![b'x'; 200];
+        db.put(b"a", &payload).unwrap();
+        db.put(b"b", &payload).unwrap();
+        // Two ~200 B puts trip 256 B auto-flush → stage_flush_imm.
+        assert!(
+            db.with_read(|d| d.has_imm()),
+            "auto-flush under defer must leave an imm"
+        );
+        assert!(db.drain_imm_once(), "worker must drain that imm");
+        assert!(!db.with_read(|d| d.has_imm()));
+        assert!(db.sst_count() >= 1);
+        assert_eq!(db.get(b"a").as_deref(), Some(payload.as_slice()));
+        assert_eq!(db.get(b"b").as_deref(), Some(payload.as_slice()));
+        // No imm and small active mem: drain is a no-op.
+        db.put(b"c", b"tiny").unwrap();
+        assert!(!db.drain_imm_once());
+        assert_eq!(db.get(b"c").as_deref(), Some(&b"tiny"[..]));
         let _ = fs::remove_dir_all(&dir);
     }
 
