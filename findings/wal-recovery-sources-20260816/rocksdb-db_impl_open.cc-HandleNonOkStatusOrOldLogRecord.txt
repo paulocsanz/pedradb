@@ -1,0 +1,39 @@
+    // version of the code.
+    return status;
+  }
+
+  if (immutable_db_options_.wal_recovery_mode ==
+      WALRecoveryMode::kSkipAnyCorruptedRecords) {
+    // We should ignore all errors unconditionally
+    return Status::OK();
+  } else if (immutable_db_options_.wal_recovery_mode ==
+             WALRecoveryMode::kPointInTimeRecovery) {
+    if (status.IsIOError()) {
+      ROCKS_LOG_ERROR(immutable_db_options_.info_log,
+                      "IOError during point-in-time reading log #%" PRIu64
+                      " seq #%" PRIu64
+                      ". %s. This likely mean loss of synced WAL, "
+                      "thus recovery fails.",
+                      wal_number, *next_sequence, status.ToString().c_str());
+      return status;
+    }
+    // We should ignore the error but not continue replaying
+    *old_log_record = false;
+    *stop_replay_for_corruption = true;
+    // TODO(hx235): have a single source of corrupted WAL number once we
+    // consolidate the statuses
+    uint64_t reporter_corrupted_wal_number = reporter.GetCorruptedLogNumber();
+    *corrupted_wal_number = reporter_corrupted_wal_number != kMaxSequenceNumber
+                                ? reporter_corrupted_wal_number
+                                : wal_number;
+    if (corrupted_wal_found != nullptr) {
+      *corrupted_wal_found = true;
+    }
+    return Status::OK();
+  } else {
+    assert(immutable_db_options_.wal_recovery_mode ==
+               WALRecoveryMode::kTolerateCorruptedTailRecords ||
+           immutable_db_options_.wal_recovery_mode ==
+               WALRecoveryMode::kAbsoluteConsistency);
+    return status;
+  }

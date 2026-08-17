@@ -1,0 +1,15 @@
+      immutable_db_options_.wal_recovery_mode ==
+          WALRecoveryMode::kSkipAnyCorruptedRecords) {
+    reporter->status = nullptr;
+  } else {
+    reporter->status = reporter_status;
+  }
+  // We intentially make log::Reader do checksumming even if
+  // paranoid_checks==false so that corruptions cause entire commits
+  // to be skipped instead of propagating bad information (like overly
+  // large sequence numbers).
+  reader.reset(new log::Reader(
+      immutable_db_options_.info_log, std::move(file_reader), reporter,
+      true /*checksum*/, wal_number,
+      immutable_db_options_.track_and_verify_wals, stop_replay_for_corruption,
+      min_wal_number, predecessor_wal_info));

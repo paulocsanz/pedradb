@@ -1,0 +1,15 @@
+		//
+		// Parse the batch header.
+		h, ok := batchrepr.ReadHeader(r.recordBuf.Bytes())
+		if !ok {
+			// Failed to read the batch header because the record was smaller
+			// than the length of a batch header. This is unexpected. The record
+			// envelope successfully decoded and the checkums of the individual
+			// record fragment(s) validated, so the writer truly wrote an
+			// invalid batch. During Open WAL recovery treats this as
+			// corruption. We could return the record to the caller, allowing
+			// the caller to interpret it as corruption, but it seems safer to
+			// be explicit and surface the corruption error here.
+			return nil, h, r.off, base.CorruptionErrorf("pebble: corrupt log file logNum=%d, logNameIndex=%s: invalid batch",
+				r.Num, errors.Safe(r.segments[r.currIndex].logNameIndex))
+		}
