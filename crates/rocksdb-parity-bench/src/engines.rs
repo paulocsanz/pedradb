@@ -98,6 +98,9 @@ impl Engine for CompatEngine {
         let h = self.db.cf_handle(cf).ok_or(())?;
         self.db.count_cf(&h, start, end, cap).map_err(|_| ())
     }
+    fn write_group_stats(&self) -> Option<(u64, u64, u64, u64)> {
+        Some(self.db.write_group_stats())
+    }
     fn reset_read_probe(&self) {
         self.db.reset_read_probe();
     }

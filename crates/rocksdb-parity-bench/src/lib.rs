@@ -121,6 +121,10 @@ pub trait Engine {
     fn read_probe_json(&self) -> Option<String> {
         None
     }
+    /// Write-group stats when the engine is ConcurrentDb-backed.
+    fn write_group_stats(&self) -> Option<(u64, u64, u64, u64)> {
+        None
+    }
     /// Latest key under `prefix` in `latest_cf`, then get that key in `value_cf`.
     /// Default is the two calls; compat uses one mutex.
     fn latest_then_get_cf(
@@ -657,6 +661,16 @@ impl YcsbRunner {
                 "[rocks-parity] deps_apply_batch mc{clients} done ops={} errors={errors}",
                 cfg_ops * clients
             );
+            if let Some((sub, queued, groups, gops)) = e.write_group_stats() {
+                let avg = if groups == 0 {
+                    0.0
+                } else {
+                    gops as f64 / groups as f64
+                };
+                eprintln!(
+                    "[rocks-parity] write_group submits={sub} queued={queued} groups={groups} ops={gops} avg_group={avg:.2}"
+                );
+            }
         }
 
         // deps_raftlog_mcN

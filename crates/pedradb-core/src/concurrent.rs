@@ -68,6 +68,11 @@ struct WriteGroup {
     queued: AtomicU64,
     batches: AtomicU64,
     batch_ops: AtomicU64,
+    /// Last time `active > 1` (ns, `WriteGroup::now_ns`). Fast path stays
+    /// off for [`MULTI_HOLD`] after a concurrent burst so apply's pre+com
+    /// from 4 clients share fsyncs instead of each taking the lone-writer
+    /// path between the two `write()`s (RFC-0040 P1.2).
+    last_multi_ns: AtomicU64,
 }
 
 /// Default catch-up window (see [`ConcurrentDb::set_write_group_catchup_window`]).
@@ -76,6 +81,10 @@ struct WriteGroup {
 /// arrivals stagger one group per fsync (group_size ≈ 1.1 at 4 clients; ≈ 3
 /// with it).
 const CATCHUP_WINDOW_DEFAULT: Duration = Duration::from_micros(50);
+
+/// How long after the last concurrent submit the lone-writer fast path stays
+/// disabled (see `last_multi_ns`). 250 µs covers apply pre→com on this box.
+const MULTI_HOLD: Duration = Duration::from_micros(250);
 
 struct WriteGroupState {
     pending: VecDeque<PendingWrite>,
@@ -102,7 +111,24 @@ impl WriteGroup {
             queued: AtomicU64::new(0),
             batches: AtomicU64::new(0),
             batch_ops: AtomicU64::new(0),
+            last_multi_ns: AtomicU64::new(0),
         }
+    }
+
+    fn now_ns() -> u64 {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_nanos() as u64)
+            .unwrap_or(0)
+    }
+
+    fn recently_concurrent(&self) -> bool {
+        let last = self.last_multi_ns.load(Ordering::Relaxed);
+        if last == 0 {
+            return false;
+        }
+        Self::now_ns().saturating_sub(last) < MULTI_HOLD.as_nanos() as u64
     }
 
     /// Enqueue `ops` and either lead a group commit or wait for the leader.
@@ -115,12 +141,16 @@ impl WriteGroup {
         self.active.fetch_add(1, Ordering::Relaxed);
         self.submits.fetch_add(1, Ordering::Relaxed);
 
+        let active = self.active.load(Ordering::Relaxed);
+        if active > 1 {
+            self.last_multi_ns.store(Self::now_ns(), Ordering::Relaxed);
+        }
+
         // Lone writer (parity bench, sequential client): skip the mpsc hop
         // and the group-commit clone. Same fsync-before-Ok via apply_batch_with.
-        // `active == 1` after our increment ⇒ no other submit is in flight,
-        // so no live leader / queued follower (the leader holds `active`
-        // until after `lead` returns). Concurrent writers see > 1.
-        if self.active.load(Ordering::Relaxed) == 1 {
+        // Stay off this path for MULTI_HOLD after a concurrent burst so
+        // apply's second write() still joins the group (RFC-0040 P1.2).
+        if active == 1 && !self.recently_concurrent() {
             let durability = if do_sync {
                 WriteOptions::sync()
             } else {
@@ -201,8 +231,10 @@ impl WriteGroup {
 
             // One write lock for the whole group: append all + one fsync + apply all.
             let mut guard = db.write();
-            let inputs: Vec<(Vec<BatchOp>, bool)> =
-                batch.iter().map(|p| (p.ops.clone(), p.do_sync)).collect();
+            let inputs: Vec<(Vec<BatchOp>, bool)> = batch
+                .iter_mut()
+                .map(|p| (std::mem::take(&mut p.ops), p.do_sync))
+                .collect();
             let results = guard.group_commit(inputs);
             drop(guard);
             self.batches.fetch_add(1, Ordering::Relaxed);
@@ -1405,6 +1437,44 @@ mod tests {
             let k = [b'k', u8::try_from(i).expect("n fits u8")];
             assert_eq!(re.get(&k).as_deref(), Some(b"v".as_ref()), "reopen key {i}");
         }
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0040 P1.2: two sequential puts per client after a burst must not
+    /// all take the lone-writer fast path (that would be 2N fsyncs).
+    #[test]
+    fn sticky_concurrent_groups_second_write() {
+        let dir = temp_dir();
+        let db = Arc::new(open_sync(&dir));
+        let n = 8usize;
+        let barrier = Arc::new(std::sync::Barrier::new(n));
+        let mut handles = Vec::new();
+        for i in 0..n {
+            let db = Arc::clone(&db);
+            let barrier = Arc::clone(&barrier);
+            handles.push(thread::spawn(move || {
+                barrier.wait();
+                db.put([b'a', i as u8], b"1").unwrap();
+                db.put([b'b', i as u8], b"2").unwrap();
+            }));
+        }
+        for h in handles {
+            h.join().unwrap();
+        }
+        let syncs = db.wal_sync_count();
+        let (submits, _, groups, group_ops) = db.write_group_stats();
+        assert_eq!(submits, (n * 2) as u64);
+        assert_eq!(group_ops, (n * 2) as u64);
+        assert!(
+            syncs < (n * 2) as u64,
+            "second write per client must share fsyncs: syncs={syncs} puts={}",
+            n * 2
+        );
+        assert!(
+            groups < (n * 2) as u64,
+            "groups={groups} should be < {}",
+            n * 2
+        );
         let _ = fs::remove_dir_all(&dir);
     }
 

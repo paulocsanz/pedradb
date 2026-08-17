@@ -1001,6 +1001,12 @@ impl<E: Env> DB<E> {
         self.inner.with_read(|db| db.read_probe())
     }
 
+    /// Write-group diagnostics (RFC-0040 P1.2): submits / queued / groups / ops.
+    #[must_use]
+    pub fn write_group_stats(&self) -> (u64, u64, u64, u64) {
+        self.inner.write_group_stats()
+    }
+
     /// Flush memtable to SST (staged pipeline; SST I/O off the write lock).
     ///
     /// # Errors
