@@ -288,7 +288,10 @@ impl WriteGroup {
                         guard.group_absorb(&mut inflight, more);
                         batch.extend(extra);
                     }
-                    Self::finish_group_off_lock(db, guard, inflight)
+                    Self::finish_group_off_lock(db, guard, inflight, Some(&mut batch), || {
+                        let mut q = self.queue.lock();
+                        q.pending.drain(..).collect()
+                    })
                 }
             };
             self.batches.fetch_add(1, Ordering::Relaxed);
@@ -319,7 +322,7 @@ impl WriteGroup {
                     "lone writer missing admit result".into(),
                 ))
             }),
-            Ok(inflight) => Self::finish_group_off_lock(db, guard, inflight)
+            Ok(inflight) => Self::finish_group_off_lock(db, guard, inflight, None, || Vec::new())
                 .into_iter()
                 .next()
                 .unwrap_or_else(|| {
@@ -330,17 +333,41 @@ impl WriteGroup {
         }
     }
 
-    /// Apply mem under the write lock, drop it for WAL `fdatasync`, then
-    /// publish the snapshot (G1: Ok and default `get` wait for fd).
+    /// Apply mem under the write lock, absorb anyone who queued during that
+    /// apply (same fd, no extra wait), drop the lock for WAL `fdatasync`,
+    /// then publish (G1: Ok and default `get` wait for fd).
     fn finish_group_off_lock<E: Env>(
         db: &RwLock<Db<E>>,
         mut guard: parking_lot::RwLockWriteGuard<'_, Db<E>>,
         inflight: crate::db::GroupInFlight,
+        mut batch: Option<&mut Vec<PendingWrite>>,
+        mut drain: impl FnMut() -> Vec<PendingWrite>,
     ) -> Vec<Result<SequenceNumber>> {
-        let need_sync = inflight.needs_sync();
-        let pub_seq = inflight.max_appended_seq();
+        let mut need_sync = inflight.needs_sync();
+        let mut pub_seq = inflight.max_appended_seq();
         guard.begin_commit();
-        let results = guard.group_apply(inflight);
+        let mut results = guard.group_apply(inflight);
+        if let Some(batch) = batch.as_mut() {
+            loop {
+                let mut extra = drain();
+                if extra.is_empty() {
+                    break;
+                }
+                let more: Vec<(Vec<BatchOp>, bool)> = extra
+                    .iter_mut()
+                    .map(|p| (std::mem::take(&mut p.ops), p.do_sync))
+                    .collect();
+                match guard.group_start(more) {
+                    Err(r) => results.extend(r),
+                    Ok(inf) => {
+                        need_sync |= inf.needs_sync();
+                        pub_seq = pub_seq.max(inf.max_appended_seq());
+                        results.extend(guard.group_apply(inf));
+                    }
+                }
+                batch.extend(extra);
+            }
+        }
         if !need_sync {
             guard.publish_sequence(pub_seq);
             guard.end_commit();
@@ -2093,6 +2120,51 @@ mod tests {
             Some(&b"c"[..]),
             "reopen must see fat apply"
         );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Fat batches skip the catch-up wait; members that queue while the
+    /// leader applies still share one `fdatasync` (post-apply absorb).
+    #[test]
+    fn fat_apply_late_join_after_apply_shares_fsync() {
+        let dir = temp_dir();
+        let db = Arc::new(open_sync(&dir));
+        let n = 4usize;
+        let barrier = Arc::new(std::sync::Barrier::new(n));
+        std::thread::scope(|s| {
+            for c in 0..n {
+                let db = Arc::clone(&db);
+                let barrier = Arc::clone(&barrier);
+                s.spawn(move || {
+                    let ops: Vec<_> = (0..64u16)
+                        .map(|k| {
+                            let mut key = vec![b'J', c as u8];
+                            key.extend_from_slice(&k.to_be_bytes());
+                            BatchOp::put(key, vec![b'x'; 32])
+                        })
+                        .collect();
+                    barrier.wait();
+                    db.apply_batch(ops).unwrap();
+                });
+            }
+        });
+        assert!(
+            db.wal_sync_count() < n as u64,
+            "post-apply join must share fdatasync: syncs={} clients={n}",
+            db.wal_sync_count()
+        );
+        assert!(db.wal_sync_count() >= 1, "G1: at least one fdatasync");
+        drop(db);
+        let re = open_sync(&dir);
+        for c in 0..n {
+            let mut key = vec![b'J', c as u8];
+            key.extend_from_slice(&0u16.to_be_bytes());
+            assert_eq!(
+                re.get(&key).as_deref(),
+                Some(&[b'x'; 32][..]),
+                "reopen c={c}"
+            );
+        }
         let _ = fs::remove_dir_all(&dir);
     }
 
