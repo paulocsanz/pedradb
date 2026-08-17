@@ -39,12 +39,12 @@ def qps(doc):
 c, s, a = load("compat"), load("rocks-sync"), load("rocks-async")
 cq, sq, aq = qps(c), qps(s), qps(a)
 names = [n for n in cq if n in sq and n in aq]
-print(f"engine compat sync={c.get('sync')}  rocks-sync={s.get('sync')}  rocks-async={a.get('sync')}")
-print(f"{'shape':28s}  pedra     p50    rocks_sync  p50    vs_sync  rocks_async  p50    vs_async")
+print(f"OFFICIAL peer = rocks default (sync=false). Pedra still fdatasyncs.")
+print(f"{'shape':28s}  pedra     p50    rocks_default  p50    vs_default  rocks_sync  p50    vs_sync")
 for n in names:
     p, rs, ra = cq[n], sq[n], aq[n]
+    vs_def = p["qps"] / ra["qps"] if ra["qps"] else float("nan")
     vs_s = p["qps"] / rs["qps"] if rs["qps"] else float("nan")
-    vs_a = p["qps"] / ra["qps"] if ra["qps"] else float("nan")
-    print(f"{n:28s}  {p['qps']:8.0f}  {p['p50_ms']:6.3f}  {rs['qps']:10.0f}  {rs['p50_ms']:6.3f}  {vs_s:6.2f}x  {ra['qps']:11.0f}  {ra['p50_ms']:6.3f}  {vs_a:6.2f}x")
+    print(f"{n:28s}  {p['qps']:8.0f}  {p['p50_ms']:6.3f}  {ra['qps']:13.0f}  {ra['p50_ms']:6.3f}  {vs_def:6.2f}x  {rs['qps']:10.0f}  {rs['p50_ms']:6.3f}  {vs_s:6.2f}x")
 PY
 echo "tikv_ycsb_parity_mc_async OK → $OUT"

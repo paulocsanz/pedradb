@@ -51,6 +51,21 @@ fn main() {
         .as_deref()
         .and_then(|s| extract_string_field(s, "durability"));
 
+    // Official peer is Rocks default (sync=false). A sync=true peer is not a win.
+    if peer_sync == Some(true)
+        && std::env::var("ROCKS_PARITY_ALLOW_SYNC_PEER")
+            .ok()
+            .as_deref()
+            != Some("1")
+    {
+        eprintln!(
+            "rocks-parity-compare: peer has sync=true — that is NOT the official Rocks default. \
+             Re-run the rocks side with ROCKS_PARITY_SYNC=0. \
+             Override only with ROCKS_PARITY_ALLOW_SYNC_PEER=1."
+        );
+        std::process::exit(2);
+    }
+
     // Surface the peer's own status so a stub ("unavailable") is visible in
     // the report instead of reading as a real run.
     let peer_status = match (&peer_raw, peer_path.as_ref()) {
