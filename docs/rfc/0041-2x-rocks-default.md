@@ -64,7 +64,7 @@
 
 ### P2 — leituras ≥ 2× default
 
-- [ ] **P2.1** `deps_scan` e `ycsb_e` ≥ 2.0 (L0 drenado; p95 do miss) — status: `doing` (inval E **2.20**; scan med **1.52** — parkfold2 scan 2.21 was the clean hit)
+- [ ] **P2.1** `deps_scan` e `ycsb_e` ≥ 2.0 (L0 drenado; p95 do miss) — status: `doing` (map+tail merge iter so E/scan do not sort the whole mem; inval E **2.20**; scan med **1.52** — parkfold2 scan 2.21 was the clean hit)
 - [ ] **P2.2** `ycsb_c` / `b` / `d` / `deps_mvcc_latest` ≥ 2.0 — status: `doing` (C 1.52; MVCC **2.58**)
 - [ ] **P2.3** Gate 2.0 em **todas** as shapes do harness; script default `SYNC=0` `FLOOR=2.0` — status: `todo`
 
@@ -78,7 +78,7 @@
 | P1.1 | p1 | apply/raftlog MC ≥ 2× | doing | memtable tail O(1) insert; remesura pending (load) | 2026-08-17 |
 | P1.2 | p1 | A/F/overwrite ≥ 2× | todo | teto 1/t_fd ≈ 41 k; A 0.12; FLOOR off | 2026-08-17 |
 | P1.3 | p1 | apply/raftlog 1c ≥ 2× | todo | inval apply 0.87 | 2026-08-17 |
-| P2.1 | p2 | scan/E ≥ 2× | doing | E **2.20**; scan med 1.52 | 2026-08-17 |
+| P2.1 | p2 | scan/E ≥ 2× | doing | merge iter (no full-mem sort); E 2.20; scan med 1.52 | 2026-08-17 |
 | P2.2 | p2 | C/B/D/MVCC ≥ 2× | doing | C 1.64; MVCC **2.97** | 2026-08-17 |
 | P2.3 | p2 | gate 2.0 em todas | todo | — | 2026-08-17 |
 

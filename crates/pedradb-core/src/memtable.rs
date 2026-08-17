@@ -76,6 +76,19 @@ pub(crate) struct MemInternalRange<'a> {
     cur: std::slice::Iter<'a, Version>,
 }
 
+/// Merge of the sorted BTree with a **sorted tail** (O(tail log tail), not
+/// O((map+tail) log) — YCSB E/scan must not sort the whole memtable).
+pub(crate) struct MemInternalMerge<'a> {
+    map: std::iter::Peekable<MemInternalRange<'a>>,
+    tail: std::iter::Peekable<std::vec::IntoIter<(&'a InternalKey, &'a Bytes)>>,
+}
+
+/// Map-only or map+tail merge. Returned by [`MemTable::iter_internal_range`].
+pub(crate) enum MemInternalIter<'a> {
+    Map(MemInternalRange<'a>),
+    Merge(MemInternalMerge<'a>),
+}
+
 impl<'a> Iterator for MemInternalRange<'a> {
     type Item = (&'a InternalKey, &'a Bytes);
 
@@ -86,6 +99,37 @@ impl<'a> Iterator for MemInternalRange<'a> {
             }
             let (_, vers) = self.users.next()?;
             self.cur = vers.iter();
+        }
+    }
+}
+
+impl<'a> Iterator for MemInternalMerge<'a> {
+    type Item = (&'a InternalKey, &'a Bytes);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match (self.map.peek(), self.tail.peek()) {
+            (None, None) => None,
+            (Some(_), None) => self.map.next(),
+            (None, Some(_)) => self.tail.next(),
+            (Some(m), Some(t)) => match m.0.cmp(t.0) {
+                Ordering::Less => self.map.next(),
+                Ordering::Greater => self.tail.next(),
+                Ordering::Equal => {
+                    let _ = self.map.next();
+                    self.tail.next()
+                }
+            },
+        }
+    }
+}
+
+impl<'a> Iterator for MemInternalIter<'a> {
+    type Item = (&'a InternalKey, &'a Bytes);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            Self::Map(it) => it.next(),
+            Self::Merge(it) => it.next(),
         }
     }
 }
@@ -478,21 +522,7 @@ impl MemTable {
 
     /// All internal versions in [`InternalKey`] order (for SST flush).
     pub fn iter_internal(&self) -> impl Iterator<Item = (&InternalKey, &Bytes)> + '_ {
-        if self.tail.is_empty() {
-            return Box::new(
-                self.map
-                    .values()
-                    .flat_map(|vers| vers.iter().map(|v| (&v.key, &v.value))),
-            ) as Box<dyn Iterator<Item = (&InternalKey, &Bytes)> + '_>;
-        }
-        let mut items: Vec<_> = self
-            .map
-            .values()
-            .flat_map(|vers| vers.iter().map(|v| (&v.key, &v.value)))
-            .chain(self.tail.iter().map(|v| (&v.key, &v.value)))
-            .collect();
-        items.sort_by(|a, b| a.0.cmp(b.0));
-        Box::new(items.into_iter()) as Box<dyn Iterator<Item = (&InternalKey, &Bytes)> + '_>
+        self.iter_internal_iter(Bound::Unbounded, Bound::Unbounded)
     }
 
     /// Whether any range tombstone is stored (ranged scan must include them).
@@ -511,15 +541,29 @@ impl MemTable {
         start: Bound<&'a [u8]>,
         end: Bound<&'a [u8]>,
     ) -> impl Iterator<Item = (&'a InternalKey, &'a Bytes)> + 'a {
+        self.iter_internal_iter(start, end)
+    }
+
+    pub(crate) fn iter_internal_iter<'a>(
+        &'a self,
+        start: Bound<&'a [u8]>,
+        end: Bound<&'a [u8]>,
+    ) -> MemInternalIter<'a> {
+        let map = self.iter_internal_range_cursor(start, end);
         if self.tail.is_empty() {
-            return Box::new(self.iter_internal_range_cursor(start, end))
-                as Box<dyn Iterator<Item = (&'a InternalKey, &'a Bytes)> + 'a>;
+            return MemInternalIter::Map(map);
         }
-        Box::new(
-            self.iter_internal().filter(move |(k, _)| {
-                crate::merge::user_key_in_range(k.user_key.as_ref(), start, end)
-            }),
-        ) as Box<dyn Iterator<Item = (&'a InternalKey, &'a Bytes)> + 'a>
+        let mut tail: Vec<(&InternalKey, &Bytes)> = self
+            .tail
+            .iter()
+            .filter(|v| crate::merge::user_key_in_range(v.key.user_key.as_ref(), start, end))
+            .map(|v| (&v.key, &v.value))
+            .collect();
+        tail.sort_unstable_by(|a, b| a.0.cmp(b.0));
+        MemInternalIter::Merge(MemInternalMerge {
+            map: map.peekable(),
+            tail: tail.into_iter().peekable(),
+        })
     }
 
     /// Concrete (no `dyn`) range cursor — count/scan hot path.
@@ -625,25 +669,21 @@ impl MemTable {
         end: Bound<&'a [u8]>,
         snapshot: SequenceNumber,
     ) -> impl Iterator<Item = (Bytes, Bytes)> + 'a {
-        let mut keys: Vec<Bytes> = self
-            .map
-            .range::<[u8], _>((start, end))
-            .map(|(uk, _)| uk.clone())
-            .collect();
-        if !self.tail.is_empty() {
-            for v in &self.tail {
-                if crate::merge::user_key_in_range(v.key.user_key.as_ref(), start, end) {
-                    keys.push(v.key.user_key.clone());
-                }
+        let mut out = Vec::new();
+        let mut last: Option<Bytes> = None;
+        for (k, v) in self.iter_internal_iter(start, end) {
+            if k.sequence > snapshot {
+                continue;
             }
-            keys.sort();
-            keys.dedup();
+            if last.as_ref().is_some_and(|u| u == &k.user_key) {
+                continue;
+            }
+            last = Some(k.user_key.clone());
+            if k.kind == ValueType::Value {
+                out.push((k.user_key.clone(), v.clone()));
+            }
         }
-        keys.into_iter()
-            .filter_map(move |uk| match self.get_entry(&uk, snapshot) {
-                Some((_, Lookup::Found(val))) => Some((uk, val)),
-                _ => None,
-            })
+        out.into_iter()
     }
 }
 
@@ -945,6 +985,35 @@ mod tests {
         assert_eq!(
             mt.get(&0u64.to_le_bytes(), MemTable::TAIL_SPILL as u64),
             Lookup::Found(Bytes::from_static(b"v"))
+        );
+    }
+
+    #[test]
+    fn merge_iter_sees_map_and_tail_in_internal_order() {
+        let mut mt = MemTable::new();
+        for k in [b"a" as &[u8], b"b", b"c", b"d"] {
+            mt.put(k, 1, b"v1".as_slice());
+        }
+        mt.spill_tail();
+        mt.put(b"b".as_slice(), 2, b"v2".as_slice());
+        mt.put(b"e".as_slice(), 3, b"v3".as_slice());
+        let got: Vec<(Vec<u8>, u64)> = mt
+            .iter_internal_range(Bound::Included(b"b"), Bound::Excluded(b"e"))
+            .map(|(k, _)| (k.user_key.to_vec(), k.sequence))
+            .collect();
+        assert_eq!(
+            got,
+            vec![
+                (b"b".to_vec(), 2),
+                (b"b".to_vec(), 1),
+                (b"c".to_vec(), 1),
+                (b"d".to_vec(), 1),
+            ]
+        );
+        let snap: Vec<_> = mt.iter_snapshot(10).map(|(k, v)| (k, v)).collect();
+        assert_eq!(
+            snap.last().map(|(k, v)| (&k[..], &v[..])),
+            Some((&b"e"[..], &b"v3"[..]))
         );
     }
 }

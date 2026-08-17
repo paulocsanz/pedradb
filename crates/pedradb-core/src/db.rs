@@ -5434,8 +5434,8 @@ struct MemCountCursor<'a> {
 }
 
 enum MemCountIter<'a> {
-    /// Common path: concrete BTree range (no `dyn`).
-    Range(crate::memtable::MemInternalRange<'a>),
+    /// Common path: concrete BTree range or map+tail merge (no `dyn`).
+    Range(crate::memtable::MemInternalIter<'a>),
     /// Rare: range tombstones whose start sits outside the window.
     Filter(Box<dyn Iterator<Item = (&'a InternalKey, &'a Bytes)> + 'a>),
 }
@@ -5461,7 +5461,7 @@ impl<'a> MemCountCursor<'a> {
         // Same two branches as the owned memtable stream: tombstone-bearing
         // tables iterate everything (tombstone starts may precede the
         // window), bounded range otherwise.
-        let it = if table.has_range_tombstones() || table.has_tail() {
+        let it = if table.has_range_tombstones() {
             MemCountIter::Filter(Box::new(
                 table
                     .iter_internal()
@@ -5471,7 +5471,7 @@ impl<'a> MemCountCursor<'a> {
                     .map(|(k, v)| (k, v)),
             ))
         } else {
-            MemCountIter::Range(table.iter_internal_range_cursor(start, end))
+            MemCountIter::Range(table.iter_internal_iter(start, end))
         };
         let mut c = Self {
             it,
