@@ -3,9 +3,9 @@
 //! [`ConcurrentDb`] wraps [`Db`] in a [`parking_lot::RwLock`]:
 //! - readers (`get` / `range` / `scan` / `stats`) take a **read** lock;
 //! - writers (`put` / `delete` / `apply_batch`) **join a write group**: one leader
-//!   holds the write lock, appends every queued WAL record, performs **one**
-//!   `fsync` for the group (if any member requested sync), applies all memtables,
-//!   then wakes waiters.
+//!   holds the write lock, appends every queued WAL record, applies memtables,
+//!   performs **one** `fsync` off that lock (if any member requested sync),
+//!   then publishes the snapshot and wakes waiters (G1: Ok waits for fd).
 //!
 //! # Flush / compact (fine write lock — RFC-0016 P1.2–P1.3)
 //!
@@ -316,31 +316,39 @@ impl WriteGroup {
         }
     }
 
-    /// Drop the write lock across WAL `fdatasync`; apply mem after Ok-path sync.
+    /// Apply mem under the write lock, drop it for WAL `fdatasync`, then
+    /// publish the snapshot (G1: Ok and default `get` wait for fd).
     fn finish_group_off_lock<E: Env>(
         db: &RwLock<Db<E>>,
-        guard: parking_lot::RwLockWriteGuard<'_, Db<E>>,
+        mut guard: parking_lot::RwLockWriteGuard<'_, Db<E>>,
         inflight: crate::db::GroupInFlight,
     ) -> Vec<Result<SequenceNumber>> {
         let need_sync = inflight.needs_sync();
+        let pub_seq = inflight.max_appended_seq();
         guard.begin_commit();
+        let results = guard.group_apply(inflight);
+        if !need_sync {
+            guard.publish_sequence(pub_seq);
+            guard.end_commit();
+            return results;
+        }
         let wal = guard.wal_arc();
         drop(guard);
-        let sync_err = if need_sync {
-            wal.lock().sync_data().err()
-        } else {
-            None
-        };
+        let sync_err = wal.lock().sync_data().err();
         let mut guard = db.write();
-        let results = if let Some(e) = sync_err {
+        if let Some(e) = sync_err {
             guard.fence_durability();
-            inflight.fail_sync(e)
-        } else {
-            if need_sync {
-                guard.note_wal_sync();
-            }
-            guard.group_apply(inflight)
-        };
+            guard.end_commit();
+            return results
+                .into_iter()
+                .map(|r| match r {
+                    Ok(_) => Err(CoreError::Internal(format!("group wal sync failed: {e}"))),
+                    Err(err) => Err(err),
+                })
+                .collect();
+        }
+        guard.note_wal_sync();
+        guard.publish_sequence(pub_seq);
         guard.end_commit();
         results
     }
@@ -726,6 +734,12 @@ impl<E: Env> ConcurrentDb<E> {
     #[must_use]
     pub fn last_sequence(&self) -> SequenceNumber {
         self.inner.read().last_sequence()
+    }
+
+    /// Durable/published sequence default reads observe (read lock).
+    #[must_use]
+    pub fn visible_sequence(&self) -> SequenceNumber {
+        self.inner.read().visible_sequence()
     }
 
     /// WAL fsync count since open (group commit amortization metric).
@@ -1945,6 +1959,23 @@ mod tests {
             wal_before,
             "fold is not an L0; rotate must wait (G1)"
         );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// After Ok, default snapshot equals the assigned sequence (publish
+    /// happens after `fdatasync`, G1).
+    #[test]
+    fn get_after_ok_sees_published_seq() {
+        let dir = temp_dir();
+        let db = open_sync(&dir);
+        db.put(b"k", b"v").unwrap();
+        assert_eq!(
+            db.snapshot().sequence(),
+            db.last_sequence(),
+            "Ok must publish the assigned seq"
+        );
+        assert_eq!(db.visible_sequence(), db.last_sequence());
+        assert_eq!(db.get(b"k").as_deref(), Some(&b"v"[..]));
         let _ = fs::remove_dir_all(&dir);
     }
 

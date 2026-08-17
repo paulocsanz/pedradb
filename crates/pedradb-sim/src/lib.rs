@@ -1609,6 +1609,48 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
     }
 
+    /// ConcurrentDb group path: apply-before-fd must not make the failed
+    /// write visible in-process (published_seq stays behind).
+    #[test]
+    fn concurrent_sync_fail_does_not_publish() {
+        use pedradb_core::{ConcurrentDb, CoreError, OpenOptions};
+
+        let dir = parent().join(format!(
+            "pedradb-cenc-fence-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        let env = FailingEnv::passing();
+        let opts = OpenOptions {
+            sync: true,
+            auto_flush_bytes: None,
+            auto_compact_sst_count: None,
+            auto_compact_sst_bytes: None,
+            exclusive: true,
+            large_value_threshold: None,
+        };
+        let db = ConcurrentDb::open_with_env(&dir, opts, env.clone()).unwrap();
+        db.put(b"a", b"1").unwrap();
+        env.arm_with_kind(0, false, FaultKind::SyncFail);
+        let err = db.put(b"b", b"2").unwrap_err();
+        assert!(
+            matches!(err, CoreError::Io(_))
+                || err.to_string().contains("sync")
+                || err.to_string().contains("group wal sync"),
+            "expected sync err, got {err:?}"
+        );
+        assert!(
+            db.get(b"b").is_none(),
+            "unpublished apply must stay invisible after fd fail"
+        );
+        assert_eq!(db.get(b"a").as_deref(), Some(b"1".as_ref()));
+        drop(db);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
     /// RFC-0015 P0.2/P0.3: sync_dir failure under sync=true fails flush/MANIFEST path.
     #[test]
     fn sync_dir_fail_propagates_on_flush() {

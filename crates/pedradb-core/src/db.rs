@@ -601,6 +601,10 @@ pub struct Db<E: Env = StdEnv> {
     vlog_use_new: bool,
     /// Next sequence to assign (1-based; 0 means “no writes yet”).
     next_seq: SequenceNumber,
+    /// Highest sequence default reads may observe. Assigned (`next_seq-1`)
+    /// may be ahead while mem is applied but WAL `fdatasync` has not finished
+    /// (G1: Ok and `get` wait for publish after fd).
+    published_seq: AtomicU64,
     sync: bool,
     auto_flush_bytes: Option<usize>,
     auto_compact_sst_count: Option<usize>,
@@ -896,6 +900,7 @@ impl<E: Env> Db<E> {
             manifest_file_num,
             vlog_use_new,
             next_seq,
+            published_seq: AtomicU64::new(next_seq.saturating_sub(1)),
             sync: opts.sync,
             auto_flush_bytes: opts.auto_flush_bytes.filter(|n| *n > 0),
             auto_compact_sst_count: opts.auto_compact_sst_count.filter(|n| *n > 0),
@@ -989,6 +994,29 @@ impl<E: Env> Db<E> {
     #[must_use]
     pub fn last_sequence(&self) -> SequenceNumber {
         self.next_seq.saturating_sub(1)
+    }
+
+    /// Latest sequence default reads may observe (durable or no-sync apply).
+    #[must_use]
+    pub fn visible_sequence(&self) -> SequenceNumber {
+        self.published_seq.load(Ordering::Acquire)
+    }
+
+    /// Publish `seq` as visible and drop read caches (after WAL is durable).
+    pub(crate) fn publish_sequence(&self, seq: SequenceNumber) {
+        let mut cur = self.published_seq.load(Ordering::Relaxed);
+        while seq > cur {
+            match self.published_seq.compare_exchange_weak(
+                cur,
+                seq,
+                Ordering::Release,
+                Ordering::Relaxed,
+            ) {
+                Ok(_) => break,
+                Err(actual) => cur = actual,
+            }
+        }
+        self.invalidate_read_answers();
     }
 
     /// Zero RFC-0035 latest/scan counters, block-cache stats, and the
@@ -1149,7 +1177,7 @@ impl<E: Env> Db<E> {
     #[must_use]
     pub fn snapshot(&self) -> Snapshot {
         Snapshot {
-            seq: self.last_sequence(),
+            seq: self.visible_sequence(),
         }
     }
 
@@ -1158,7 +1186,7 @@ impl<E: Env> Db<E> {
     /// [`Self::compact_reclaim`] will not drop versions still required for this
     /// pin. Call [`Self::release_snapshot_pin`] when done.
     pub fn pin_snapshot(&mut self) -> SnapshotPin {
-        let seq = self.last_sequence();
+        let seq = self.visible_sequence();
         let id = self.next_snapshot_pin_id;
         self.next_snapshot_pin_id = id.saturating_add(1);
         self.snapshot_pins.insert(id, seq);
@@ -1568,7 +1596,7 @@ impl<E: Env> Db<E> {
     #[must_use]
     pub fn range(&self, start: Bound<&[u8]>, end: Bound<&[u8]>) -> Vec<(Bytes, Bytes)> {
         // Latest sequence is always ≥ the GC watermark.
-        self.range_at_limited(self.last_sequence(), start, end, None)
+        self.range_at_limited(self.visible_sequence(), start, end, None)
             .unwrap_or_else(|_| Vec::new())
     }
 
@@ -1601,7 +1629,7 @@ impl<E: Env> Db<E> {
         end: Bound<&[u8]>,
         limit: Option<usize>,
     ) -> Vec<(Bytes, Bytes)> {
-        self.range_at_limited(self.last_sequence(), start, end, limit)
+        self.range_at_limited(self.visible_sequence(), start, end, limit)
             .unwrap_or_else(|_| Vec::new())
     }
 
@@ -1702,7 +1730,7 @@ impl<E: Env> Db<E> {
             return Ok(None);
         }
         self.latest_ops.fetch_add(1, Ordering::Relaxed);
-        let latest = snapshot == self.last_sequence();
+        let latest = snapshot == self.visible_sequence();
         if latest {
             if let Some(hit) = self.last_prefix_cache.get(prefix) {
                 return Ok(hit);
@@ -1879,7 +1907,7 @@ impl<E: Env> Db<E> {
         end: Bound<&[u8]>,
         projection: ScanProjection,
     ) -> impl Iterator<Item = VisibleKv> + '_ {
-        self.scan_at_projected(self.last_sequence(), start, end, None, projection)
+        self.scan_at_projected(self.visible_sequence(), start, end, None, projection)
     }
 
     /// Streaming range at `snapshot` with optional live-key `limit`.
@@ -1971,7 +1999,7 @@ impl<E: Env> Db<E> {
         if snapshot == 0 {
             return Ok(0);
         }
-        let latest = snapshot == self.last_sequence();
+        let latest = snapshot == self.visible_sequence();
         let ck = count_cache_key(start, end, limit);
         if latest {
             if let Some(n) = self.count_cache.get(ck.as_slice()) {
@@ -4476,7 +4504,7 @@ impl<E: Env> Db<E> {
     /// Apply prepared ops to the memtable after durable WAL.
     pub(crate) fn apply_ops_to_mem(&mut self, ops: Vec<WriteOp>) {
         apply_ops_owned(&mut self.mem, ops);
-        self.invalidate_read_answers();
+        self.publish_sequence(self.last_sequence());
     }
 
     /// Shared WAL handle for off-lock `fdatasync` (ConcurrentDb group leader).
@@ -4642,7 +4670,10 @@ impl<E: Env> Db<E> {
                 return g.fail_sync(e);
             }
         }
-        self.group_apply(g)
+        let pub_seq = g.max_appended_seq();
+        let results = self.group_apply(g);
+        self.publish_sequence(pub_seq);
+        results
     }
 
     /// Mem apply + feed after WAL is durable. No fsync (RFC-0041: leader may
@@ -4684,9 +4715,8 @@ impl<E: Env> Db<E> {
             apply_ops_owned(&mut self.mem, write_ops);
             results[i] = Some(Ok(last_seq));
         }
-        // One gen-bump for the whole group (apply_ops_to_mem would lock
-        // three caches per member — 4-client apply_mc4 is 12 bumps/group).
-        self.invalidate_read_answers();
+        // Caches bump on [`Self::publish_sequence`] after WAL is durable so
+        // a failed fd cannot leave a stale miss for an unpublished key.
         self.maybe_auto_flush_best_effort();
         finish_group_results(results)
     }
@@ -4707,6 +4737,14 @@ pub(crate) struct GroupInFlight {
 impl GroupInFlight {
     pub(crate) fn needs_sync(&self) -> bool {
         self.any_sync && !self.failed && !self.appended.is_empty()
+    }
+
+    pub(crate) fn max_appended_seq(&self) -> SequenceNumber {
+        self.appended
+            .iter()
+            .map(|(_, _, seq)| *seq)
+            .max()
+            .unwrap_or(0)
     }
 
     pub(crate) fn pending_len(&self) -> usize {

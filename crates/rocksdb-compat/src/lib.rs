@@ -944,7 +944,7 @@ impl<E: Env> DB<E> {
     /// # Errors
     /// Unknown CF or Pedra scan errors.
     pub fn iterator_cf(&self, cf: &ColumnFamily, mode: IteratorMode) -> Result<DBIterator<E>> {
-        let seq = self.inner.last_sequence();
+        let seq = self.inner.visible_sequence();
         scan_cf_at(&self.inner, &self.codec, &cf.name, mode, seq, &self.cfs)
     }
 
@@ -964,7 +964,7 @@ impl<E: Env> DB<E> {
         let encoded = self.codec.encode(&cf.name, prefix.as_ref());
         self.inner
             .with_read(|db| {
-                let seq = db.last_sequence();
+                let seq = db.visible_sequence();
                 db.last_under_user_prefix(seq, &encoded)
                     .map(|k| k.map(|k| self.codec.decode(&cf.name, &k).to_vec()))
             })
@@ -989,7 +989,7 @@ impl<E: Env> DB<E> {
             .encode_with(&last_cf.name, prefix.as_ref(), |enc| {
                 let ns_enc0 = u64::try_from(t_enc0.elapsed().as_nanos()).unwrap_or(u64::MAX);
                 self.inner.with_read(|db| {
-                    let seq = db.last_sequence();
+                    let seq = db.visible_sequence();
                     let t_last = Instant::now();
                     let Some(k) = db.last_under_user_prefix(seq, enc)? else {
                         return Ok(None);
@@ -1034,7 +1034,7 @@ impl<E: Env> DB<E> {
             self.codec.encode_with(&cf.name, end.as_ref(), |hi| {
                 self.inner
                     .with_read(|db| {
-                        let seq = db.last_sequence();
+                        let seq = db.visible_sequence();
                         db.count_in_range(
                             seq,
                             Bound::Included(lo),
