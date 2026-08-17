@@ -58,7 +58,7 @@
 
 ### P1 — escritas ≥ 2× default
 
-- [ ] **P1.1** `deps_apply_batch_mc4` e `deps_raftlog_mc4` ≥ 2.0 vs default da run — status: `doing` (MANIFEST off-lock + skip catch-up + skip `ChangeEntry` quando interval=0; probe2 apply_mc4 **0.88** / raftlog_mc4 **1.17** — [p11](../../findings/rfc0041-p11/README.md))
+- [ ] **P1.1** `deps_apply_batch_mc4` e `deps_raftlog_mc4` ≥ 2.0 vs default da run — status: `doing` (mecanismo shipped; remesura oficial apply_mc4 **0.58** / raftlog_mc4 **0.49**, E **1.56**, MVCC **1.44** — [p11](../../findings/rfc0041-p11/README.md))
 - [ ] **P1.2** `ycsb_a` / `ycsb_f` / `deps_cache_overwrite` (1c e `_mc4` se existirem) ≥ 2.0 vs default — status: `todo`
 - [ ] **P1.3** `deps_apply_batch` e `deps_raftlog` **1 cliente** ≥ 2.0 vs default — status: `todo`
 

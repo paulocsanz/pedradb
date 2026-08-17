@@ -1,0 +1,54 @@
+{
+  "compare": "rocks-parity-v1",
+  "compat_path": "findings/rfc0041-p11/run1/compat/rocks_parity_bench.json",
+  "compat": {
+    "engine": "compat (rocksdb-compat on pedradb-core, single node, single client)",
+    "sync": true,
+    "durability": "fdatasync-before-ok (pedradb-core WAL; RFC-0001/0036)",
+    "metrics": {
+    "deps_apply_batch": 4884.659,
+    "deps_apply_batch_mc4": 4763.127,
+    "deps_cache_overwrite": 32743.406,
+    "deps_cache_overwrite_mc4": 36462.901,
+    "deps_mvcc_latest": 648657.555,
+    "deps_raftlog": 22762.613,
+    "deps_raftlog_mc4": 9053.875,
+    "deps_scan": 322162.821,
+    "ycsb_a": 56527.182,
+    "ycsb_a_mc4": 73415.207,
+    "ycsb_b": 349701.276,
+    "ycsb_c": 1313880.889,
+    "ycsb_d": 415009.482,
+    "ycsb_e": 197974.875,
+    "ycsb_f": 55239.082,
+    "ycsb_f_mc4": 67473.988
+  }
+  },
+  "rocksdb": {
+    "status": "peer_file:ok",
+    "peer_file": "findings/rfc0041-p11/run1/rocks/rocks_parity_bench.json",
+    "sync": false,
+    "durability": "async-wal (WriteOptions.sync=false, rocksdb default)",
+    "how_to_fill": "1) cargo run -q --release -p rocksdb-parity-bench --features real --bin rocks-parity-bench -- <out> rocksdb  2) ROCKS_PARITY_PEER=<out>/rocks_parity_bench.json rocks-parity-compare  3) scripts/rocksdb_parity_v0.sh does both. See docs/rocksdb-compat.md"
+  },
+  "ratios": [
+    {"shape":"ycsb_a","compat_keys_per_s":56527.182,"rocksdb_keys_per_s":400463.897,"compat_over_rocksdb":0.141,"meets_floor":null},
+    {"shape":"ycsb_b","compat_keys_per_s":349701.276,"rocksdb_keys_per_s":942895.869,"compat_over_rocksdb":0.371,"meets_floor":null},
+    {"shape":"ycsb_c","compat_keys_per_s":1313880.889,"rocksdb_keys_per_s":1346045.386,"compat_over_rocksdb":0.976,"meets_floor":null},
+    {"shape":"ycsb_d","compat_keys_per_s":415009.482,"rocksdb_keys_per_s":1119142.200,"compat_over_rocksdb":0.371,"meets_floor":null},
+    {"shape":"ycsb_e","compat_keys_per_s":197974.875,"rocksdb_keys_per_s":123708.476,"compat_over_rocksdb":1.600,"meets_floor":null},
+    {"shape":"ycsb_f","compat_keys_per_s":55239.082,"rocksdb_keys_per_s":344743.362,"compat_over_rocksdb":0.160,"meets_floor":null},
+    {"shape":"deps_apply_batch","compat_keys_per_s":4884.659,"rocksdb_keys_per_s":7616.057,"compat_over_rocksdb":0.641,"meets_floor":null},
+    {"shape":"deps_mvcc_latest","compat_keys_per_s":648657.555,"rocksdb_keys_per_s":276293.964,"compat_over_rocksdb":2.348,"meets_floor":null},
+    {"shape":"deps_scan","compat_keys_per_s":322162.821,"rocksdb_keys_per_s":279008.126,"compat_over_rocksdb":1.155,"meets_floor":null},
+    {"shape":"deps_raftlog","compat_keys_per_s":22762.613,"rocksdb_keys_per_s":36089.059,"compat_over_rocksdb":0.631,"meets_floor":null},
+    {"shape":"deps_cache_overwrite","compat_keys_per_s":32743.406,"rocksdb_keys_per_s":141880.871,"compat_over_rocksdb":0.231,"meets_floor":null},
+    {"shape":"ycsb_a_mc4","compat_keys_per_s":73415.207,"rocksdb_keys_per_s":194068.382,"compat_over_rocksdb":0.378,"meets_floor":null},
+    {"shape":"ycsb_f_mc4","compat_keys_per_s":67473.988,"rocksdb_keys_per_s":219625.107,"compat_over_rocksdb":0.307,"meets_floor":null},
+    {"shape":"deps_cache_overwrite_mc4","compat_keys_per_s":36462.901,"rocksdb_keys_per_s":127606.038,"compat_over_rocksdb":0.286,"meets_floor":null},
+    {"shape":"deps_apply_batch_mc4","compat_keys_per_s":4763.127,"rocksdb_keys_per_s":8223.078,"compat_over_rocksdb":0.579,"meets_floor":null},
+    {"shape":"deps_raftlog_mc4","compat_keys_per_s":9053.875,"rocksdb_keys_per_s":27986.115,"compat_over_rocksdb":0.324,"meets_floor":null}
+  ],
+  "parity": {"floor": null, "shapes_with_peer": 16, "min_ratio": null, "pass": null, "note": "set ROCKS_PARITY_RATIO_FLOOR to gate"},
+  "honesty": "Single-node lab bench: rocksdb-compat (Pedra, fdatasync before Ok) vs real RocksDB default (WriteOptions.sync=false). Official peer is Rocks **default**, not a matched-sync peer. ROCKS_PARITY_SYNC=1 is an extra same-class column only. Pedra keeps the stronger durability and still has to beat default Rocks. Not a distributed/field claim."
+}

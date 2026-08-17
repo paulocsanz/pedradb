@@ -51,8 +51,23 @@ Skipping the in-memory feed vec (interval=0) is the qps move: apply_mc4
 +48 % vs probe1, raftlog_mc4 **>2×** our P0.2 self. Still **< 2.0** vs
 this Rocks. apply_mc4 max still ~400 ms.
 
-P1.1 stays `doing`. Official 16-shape remesura is next; then cut the
-remaining serialized CPU toward the 110 µs floor.
+## Official 16-shape remesura (YCSB prefix + MC4, 3 runs)
+
+Same harness as P0.2. Median of `run{1,2,3}/compare`. **0/16 ≥ 2.0.**
+
+| shape | P0.2 | P1.1 | Pedra qps | Rocks qps |
+|---|---:|---:|---:|---:|
+| ycsb_e | 0.91 | **1.56** | 190 624 | 123 121 |
+| deps_mvcc_latest | 0.79 | **1.44** | 438 100 | 297 794 |
+| ycsb_c | 0.78 | 0.92 | 1 313 881 | 1 390 458 |
+| apply 1c | 0.39 | 0.64 | 4 885 | 7 616 |
+| **apply_mc4** | **0.89** | **0.58** | 3 584 | 7 793 |
+| raftlog_mc4 | 0.53 | 0.49 | 11 320 | 23 143 |
+| ycsb_a | 0.056 | 0.13 | 53 323 | 400 464 |
+
+apply_mc4 Pedra qps 3.1 k → 3.6 k; Rocks this set is 7.8 k (P0.2 Rocks was 3.7 k — noisy peer). Ratio down, absolute Pedra up a little. raftlog_mc4 Pedra 9.5 k → 11.3 k.
+
+P1.1 stays `doing`. Next: service time toward the 110 µs floor (writes still serialize on the Db lock).
 
 ## Tests
 
