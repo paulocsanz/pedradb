@@ -4403,8 +4403,7 @@ impl<E: Env> Db<E> {
             // RFC-0031: debounce the cache store. WAL is already durable.
             self.maybe_persist_changelog_after_durable_commit();
         }
-        apply_ops_owned(&mut self.mem, records);
-        self.invalidate_read_answers();
+        self.apply_ops_to_mem(records);
         Ok(())
     }
 
@@ -4676,9 +4675,12 @@ impl<E: Env> Db<E> {
         }
 
         for (i, write_ops, last_seq) in appended {
-            self.apply_ops_to_mem(write_ops);
+            apply_ops_owned(&mut self.mem, write_ops);
             results[i] = Some(Ok(last_seq));
         }
+        // One gen-bump for the whole group (apply_ops_to_mem would lock
+        // three caches per member — 4-client apply_mc4 is 12 bumps/group).
+        self.invalidate_read_answers();
         self.maybe_auto_flush_best_effort();
         finish_group_results(results)
     }

@@ -831,6 +831,12 @@ impl<E: Env> ConcurrentDb<E> {
         self.inner.read().parked_unflushed_count()
     }
 
+    /// Whether an immutable memtable is waiting for the host to park/drain.
+    #[must_use]
+    pub fn has_imm(&self) -> bool {
+        self.inner.read().has_imm()
+    }
+
     /// Merge the two oldest parked mems into one BTree off the write lock.
     ///
     /// Originals stay visible until the swap (G2). Host worker folds during
@@ -1707,6 +1713,7 @@ mod tests {
             db.with_read(|d| d.has_imm()),
             "auto-flush under defer must leave an imm"
         );
+        assert!(db.has_imm(), "has_imm is the host notify predicate");
         assert!(db.drain_imm_once(), "worker must drain that imm");
         assert!(!db.with_read(|d| d.has_imm()));
         assert!(db.sst_count() >= 1);
@@ -1939,6 +1946,89 @@ mod tests {
             db.stats().wal_bytes,
             wal_before,
             "fold is not an L0; rotate must wait (G1)"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Group apply must bump the point-cache generation once so a get after
+    /// a multi-member group is not a stale hit (RFC-0041 apply_mc4 path).
+    #[test]
+    fn group_apply_invalidates_point_cache() {
+        let dir = temp_dir();
+        let db = open_sync(&dir);
+        db.put(b"k", b"old").unwrap();
+        assert_eq!(db.get(b"k").as_deref(), Some(&b"old"[..]));
+        db.apply_batch([BatchOp::put(b"k".as_slice(), b"new".as_slice())])
+            .unwrap();
+        assert_eq!(
+            db.get(b"k").as_deref(),
+            Some(&b"new"[..]),
+            "point cache must miss after group apply"
+        );
+        db.apply_batch([
+            BatchOp::put(b"a".as_slice(), b"1".as_slice()),
+            BatchOp::put(b"b".as_slice(), b"2".as_slice()),
+        ])
+        .unwrap();
+        assert_eq!(db.get(b"a").as_deref(), Some(&b"1"[..]));
+        assert_eq!(db.get(b"b").as_deref(), Some(&b"2"[..]));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Four clients each apply a fat pre+com pair; every key is visible and
+    /// WAL-durable (G1). Host is not notified per write — grouping still
+    /// amortizes fsyncs.
+    #[test]
+    fn four_client_fat_apply_is_durable_without_per_write_wakeup() {
+        let dir = temp_dir();
+        let db = Arc::new(open_sync(&dir));
+        let n_clients = 4usize;
+        let n_ops = 8usize;
+        std::thread::scope(|s| {
+            for c in 0..n_clients {
+                let db = Arc::clone(&db);
+                s.spawn(move || {
+                    for i in 0..n_ops {
+                        let mut pre = Vec::with_capacity(32);
+                        let mut com = Vec::with_capacity(32);
+                        for k in 0..16u16 {
+                            let mut key = vec![b'p', c as u8];
+                            key.extend_from_slice(&(i as u16).to_be_bytes());
+                            key.extend_from_slice(&k.to_be_bytes());
+                            pre.push(BatchOp::put(key.clone(), vec![b'v'; 64]));
+                            com.push(BatchOp::put(key, b"c".as_slice()));
+                        }
+                        db.apply_batch(pre).unwrap();
+                        db.apply_batch(com).unwrap();
+                    }
+                });
+            }
+        });
+        assert!(
+            db.wal_sync_count() >= 1,
+            "fat apply must still fdatasync (G1)"
+        );
+        for c in 0..n_clients {
+            for i in 0..n_ops {
+                let mut key = vec![b'p', c as u8];
+                key.extend_from_slice(&(i as u16).to_be_bytes());
+                key.extend_from_slice(&0u16.to_be_bytes());
+                assert_eq!(
+                    db.get(&key).as_deref(),
+                    Some(&b"c"[..]),
+                    "missing apply c={c} i={i}"
+                );
+            }
+        }
+        drop(db);
+        let re = open_sync(&dir);
+        let mut key = vec![b'p', 0];
+        key.extend_from_slice(&0u16.to_be_bytes());
+        key.extend_from_slice(&0u16.to_be_bytes());
+        assert_eq!(
+            re.get(&key).as_deref(),
+            Some(&b"c"[..]),
+            "reopen must see fat apply"
         );
         let _ = fs::remove_dir_all(&dir);
     }
