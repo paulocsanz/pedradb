@@ -192,7 +192,9 @@ of ~20 L0s cannot finish in the MVCC/scan window. FLOOR off.
 
 [`parkfold/`](parkfold/README.md): clone under read lock **rejected**
 (MVCC max 16 ms). [`parkfold2/`](parkfold2/README.md): **2/16** (scan
-**2.209**, E **2.064**). apply_mc4 **1.687** (Pedra 4.3 k). FLOOR off.
+**2.209**, E **2.064**). apply_mc4 **1.687** (Pedra 4.3 k).
+[`fold50/`](fold50/README.md): 50 ms fold hold **rejected** (apply_mc4
+4.3 k → 3 k; scan 2.21 → 1.0). FLOOR off.
 
 
 
