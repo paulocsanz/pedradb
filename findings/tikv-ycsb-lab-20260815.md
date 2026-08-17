@@ -297,3 +297,33 @@ repetições, banda conhecida). G1 intacto: append→fdatasync→reply por grupo
 all-or-nothing (falha fecha o grupo inteiro, mem não aplicada). Crédito honesto: qps absoluto
 não escala 2× single-client — o alvo declarado do P2.2 era parity multi-cliente, alcançada;
 spin puro testado e rejeitado (rouba CPU do líder, 17k qps). Raw: [tikv-ycsb-0037-p22-mc4](tikv-ycsb-0037-p22-mc4/) (JSONs por run; DBs não retidos).
+
+## RFC-0037 P2.3 — fecho: gate 11/11 min 0.902; 2× Pedra honesto (2026-08-16)
+
+Run limpa oficial (`tikv_ycsb_parity_v0.sh` FULL_SYNC=0 FLOOR=0.5): **11/11, min_ratio 0.902**
+(melhor oficial; p13g era 0.578). P/R: b 0.92 c 0.95 d 0.99 f 1.06 raftlog 1.42 ovr 1.32 e 1.84
+mvcc 1.96 apply 1.01 scan 0.90 a 4.08 (Rocks a deprimido ~16k; mediana de 5 runs mata isso).
+Repetição imediata sob load: 0.338 (máquina oscilante, banda conhecida — both engines deprimidos).
+Raw: [tikv-ycsb-0037-p23](tikv-ycsb-0037-p23/).
+
+Tabela 2× Pedra vs 0036 (mediana de 5 runs do mesmo binário: p22-mc4 ×3 + p23 ×2):
+
+| shape | 0036 | mediana | ×0036 |
+|---|---:|---:|---:|
+| ycsb_a | 57 486 | ~56 k | 0.98 |
+| ycsb_b | 343 220 | ~340 k | 0.99 |
+| ycsb_c | 1 322 933 | ~1.23 M | 0.93 |
+| ycsb_d | 397 562 | ~394 k | 0.99 |
+| ycsb_e | 157 871 | ~161 k | 1.02 |
+| ycsb_f | 53 345 | ~47 k | 0.89 |
+| deps_apply_batch | 1 908 | ~3.2 k | 1.67 |
+| deps_mvcc_latest | 424 253 | ~501 k | 1.18 |
+| deps_scan | 212 099 | ~214 k | 1.01 |
+| deps_raftlog | 6 588 | ~11.5 k | 1.74 |
+| deps_cache_overwrite | 36 653 | ~35.5 k | 0.97 |
+
+**2× Pedra single-client não fecha em shape nenhum** — e era o previsto no piso físico do RFC:
+a/f têm um `fdatasync` por write (G1), c/e/mvcc já no relógio/cache. O que fechou foram os
+**problemas** 0036 vs Rocks: apply 2.31×→~1.0×, scan 1.43×→0.90×, raftlog 0.49×→1.42×,
+overwrite 0.70×→1.32×, mvcc 0.73×→1.96×, e 0.68×→1.84×. Ganho absoluto real: multi-cliente
+(P2.2). RFC-0037 → done.

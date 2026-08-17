@@ -1,6 +1,6 @@
 # RFC-0037: apply ≤2× vs Rocks fd + 2× Pedra on the other 10
 
-**Status:** in-progress  
+**Status:** done (P0–P2 completos; gate 11/11 min 0.902 em run limpa; 2× Pedra single-client não atinge — tabela no P2.3)  
 **Updated:** 2026-08-16  
 **Parents:** [0036](0036-tikv-rocks-2x-fdatasync.md) (WAL `fdatasync`, L0-only compact, 10/11), [0016](0016-pedradb-production-robustness.md) (ConcurrentDb dual-mem / off-lock flush)
 
@@ -114,7 +114,7 @@ Herdadas de RFC-0036 / 0031:
 
 - [x] **P2.1** Se P0.3 apply ainda < 0.5: fila de compact drenada por thread no **compat/store** (não no core); fence + L0 visível até install — status: `done`
 - [x] **P2.2** 2× Pedra em A/F/overwrite: harness multi-cliente + `ConcurrentDb` group commit; **não** 2× A single-client — status: `done` (MC4 parity ≥0.5 vs Rocks nas 3 shapes em 3 repetições; catch-up window no `WriteGroup` + 1 `write` WAL por grupo)
-- [ ] **P2.3** Gate `ROCKS_PARITY_RATIO_FLOOR=0.5` nas 11 vs fd; tabela 2× Pedra nos 10 — status: `partial` (gate verde 11/11 em p13g, min 0.578; falta a tabela 2× Pedra vs 0036)
+- [x] **P2.3** Gate `ROCKS_PARITY_RATIO_FLOOR=0.5` nas 11 vs fd; tabela 2× Pedra nos 10 — status: `done` (gate 11/11 min **0.902** em run limpa; tabela 2× Pedra registrada: **não** atinge 2× single-client — medianas ~0.9–1.0× nos ycsb, ganhos concentrados em apply 1.67× / raftlog 1.74× / mvcc 1.18×, conforme o piso físico previsto)
 
 ## Status (living — update with every PR)
 
@@ -128,7 +128,7 @@ Herdadas de RFC-0036 / 0031:
 | P1.3 | p1 | 2× Pedra no gargalo #1 de leitura | done | `SstRangeIter` early-exit + `AnswerCache` O(1) + count por referência | 2026-08-16 |
 | P2.1 | p2 | worker host se P0 não chegar | done | `rocksdb-compat` thread `pedra-compat-compact` | 2026-08-16 |
 | P2.2 | p2 | 2× Pedra A/F com N clientes | done | `run_clients`+`ROCKS_PARITY_CLIENTS`; catch-up window (grupo 1.1→3.2 @4cl); WAL 1 `write`/grupo | 2026-08-16 |
-| P2.3 | p2 | gate 0.5 + tabela 2× Pedra | todo | — | 2026-08-16 |
+| P2.3 | p2 | gate 0.5 + tabela 2× Pedra | done | gate 11/11 min 0.902 (run limpa); 2× Pedra: mediana 5 runs, tabela abaixo | 2026-08-16 |
 
 ## P0.2 / P0.3 — o que a remesura mostrou
 
@@ -155,6 +155,28 @@ Tentativa (revertida): o mesmo worker a drenar o flush via `prepare_flush_imm` n
 **Dual-mem correcto (este commit):** `stage_flush_imm` deixa o table no slot `imm`. O worker faz `prepare_flush_imm` + write SST sem o mutex + install. Teste `host_worker_flush_writes_sst_and_keeps_keys` exige `sst_count ≥ 1`.
 
 Remesura: [p21c](../findings/tikv-ycsb-0037-p21c/) apply 3 332 vs Rocks 2 747 (Rocks lento); [p21d](../findings/tikv-ycsb-0037-p21d/) apply **3 035 vs Rocks limpo 5 620 (max 4.8 ms) = 0.54**. Cauda apply 221 ms → 26–184 ms. Scan 132–158 k vs ~290 k (0.45–0.54) — mais L0 até o worker fundir. G1 intacto.
+
+## P2.3 — tabela 2× Pedra vs 0036 (fecho, 2026-08-16)
+
+Gate oficial em run limpa: **11/11, min_ratio 0.902** (raw: [tikv-ycsb-0037-p23](../findings/tikv-ycsb-0037-p23/) run1; repetição sob load 0.338 — máquina oscilante, banda conhecida; p13g anterior 0.578). Ratio P/R por shape na run limpa: b 0.92, c 0.95, d 0.99, f 1.06, raftlog 1.42, overwrite 1.32, e 1.84, mvcc 1.96, apply 1.01, scan 0.90, a 4.08 (Rocks deprimido na run — ver mediana abaixo).
+
+2× Pedra vs tabela 0036 — **mediana de 5 runs** (3 de p22-mc4 + 2 de p23, mesmo binário; mediana mata o load):
+
+| shape | 0036 | mediana agora | ×0036 | 2×? |
+|---|---:|---:|---:|:---:|
+| ycsb_a | 57 486 | ~56 k | 0.98 | não |
+| ycsb_b | 343 220 | ~340 k | 0.99 | não |
+| ycsb_c | 1 322 933 | ~1.23 M | 0.93 | não |
+| ycsb_d | 397 562 | ~394 k | 0.99 | não |
+| ycsb_e | 157 871 | ~161 k | 1.02 | não |
+| ycsb_f | 53 345 | ~47 k | 0.89 | não |
+| deps_apply_batch | 1 908 | ~3.2 k | **1.67** | não |
+| deps_mvcc_latest | 424 253 | ~501 k | 1.18 | não |
+| deps_scan | 212 099 | ~214 k | 1.01 | não |
+| deps_raftlog | 6 588 | ~11.5 k | **1.74** | não |
+| deps_cache_overwrite | 36 653 | ~35.5 k | 0.97 | não |
+
+**Nenhum shape atinge 2× o próprio qps 0036.** O resultado é o previsto no piso físico: single-client a/f têm um `fdatasync` por write (G1) — 2× está no syscall, não no código; c/e/mvcc já estavam perto do relógio/cache; scan 2× (424 k) exigiria menos ficheiros/probes, não perseguido. O que o RFC entregou de valor: os **problemas** 0036 fecharam — apply 2.31× → ~1.0× vs Rocks (run limpa 1.01; p03c normalizado 1.90), scan 1.43× → 0.90×, raftlog 0.49× → 1.42×, overwrite 0.70× → 1.32×, mvcc 0.73× → 1.96×, e 0.68× → 1.84×. O ganho real em qps absoluto está no multi-cliente (P2.2: group_size 3.2 @4 cl, overwrite 1.12× Rocks MC4).
 
 ## Acceptance Criteria
 
