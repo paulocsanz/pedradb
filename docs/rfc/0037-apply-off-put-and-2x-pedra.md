@@ -127,7 +127,7 @@ Herdadas de RFC-0036 / 0031:
 | P1.2 | p1 | compact off-lock no ConcurrentDb | done | `PreparedL0Compact` + `compact_l0_off_lock` | 2026-08-16 |
 | P1.3 | p1 | 2× Pedra no gargalo #1 de leitura | done | `SstRangeIter` early-exit + `AnswerCache` O(1) + count por referência | 2026-08-16 |
 | P2.1 | p2 | worker host se P0 não chegar | done | `rocksdb-compat` thread `pedra-compat-compact` | 2026-08-16 |
-| P2.2 | p2 | 2× Pedra A/F com N clientes | done | `run_clients`+`ROCKS_PARITY_CLIENTS`; catch-up window (grupo 1.1→3.2 @4cl); WAL 1 `write`/grupo | 2026-08-16 |
+| P2.2 | p2 | 2× Pedra A/F com N clientes | done | `run_clients`+`ROCKS_PARITY_CLIENTS`; catch-up window (grupo 1.1→3.2 @4cl) + knob público `set_write_group_catchup_window` (modo latência: ZERO; +15% qps / −28% p90 / p99 +110 µs com 50 µs); WAL 1 `write`/grupo | 2026-08-16 |
 | P2.3 | p2 | gate 0.5 + tabela 2× Pedra | done | gate 11/11 min 0.902 (run limpa); 2× Pedra: mediana 5 runs, tabela abaixo | 2026-08-16 |
 
 ## P0.2 / P0.3 — o que a remesura mostrou

@@ -58,9 +58,10 @@ struct WriteGroup {
     /// counted here but absent from the queue are waking between ops — exactly
     /// the stragglers the catch-up window waits for.
     active: AtomicUsize,
-    /// Catch-up window length; `PEDRA_CATCHUP_US` overrides for lab sweeps
-    /// (0 disables). See [`CATCHUP_WINDOW_DEFAULT`] for the measured basis.
-    catchup_window: Duration,
+    /// Catch-up window length in µs (RFC-0037 P2.2): `0` disables. Runtime
+    /// knob via [`ConcurrentDb::set_write_group_catchup_window`];
+    /// `PEDRA_CATCHUP_US` seeds the default for lab sweeps.
+    catchup_window_us: AtomicU64,
     /// Diagnostics (RFC-0037 P2.2): submits total / queued-behind-leader /
     /// groups led / ops inside led groups.
     submits: AtomicU64,
@@ -69,10 +70,11 @@ struct WriteGroup {
     batch_ops: AtomicU64,
 }
 
-/// Default catch-up window (see [`WriteGroup::catchup_window`]). Measured on
-/// the bench box: a parked follower needs ~30–100 µs to wake and resubmit,
-/// while one fsync window is ~30 µs — without holding groups open, arrivals
-/// stagger one group per fsync (group_size ≈ 1.1 at 4 clients; ≈ 3 with it).
+/// Default catch-up window (see [`ConcurrentDb::set_write_group_catchup_window`]).
+/// Measured on the bench box: a parked follower needs ~30–100 µs to wake and
+/// resubmit, while one fsync window is ~30 µs — without holding groups open,
+/// arrivals stagger one group per fsync (group_size ≈ 1.1 at 4 clients; ≈ 3
+/// with it).
 const CATCHUP_WINDOW_DEFAULT: Duration = Duration::from_micros(50);
 
 struct WriteGroupState {
@@ -90,11 +92,12 @@ impl WriteGroup {
             }),
             arrived: Condvar::new(),
             active: AtomicUsize::new(0),
-            catchup_window: std::env::var("PEDRA_CATCHUP_US")
-                .ok()
-                .and_then(|v| v.parse::<u64>().ok())
-                .map(Duration::from_micros)
-                .unwrap_or(CATCHUP_WINDOW_DEFAULT),
+            catchup_window_us: AtomicU64::new(
+                std::env::var("PEDRA_CATCHUP_US")
+                    .ok()
+                    .and_then(|v| v.parse::<u64>().ok())
+                    .unwrap_or(CATCHUP_WINDOW_DEFAULT.as_micros() as u64),
+            ),
             submits: AtomicU64::new(0),
             queued: AtomicU64::new(0),
             batches: AtomicU64::new(0),
@@ -162,8 +165,9 @@ impl WriteGroup {
             // (measured: without it, 4 clients group ≈ 1.1 writes/fsync).
             // No-op when every active writer is already queued — a lone
             // client never waits.
-            if !self.catchup_window.is_zero() && batch.len() < self.active.load(Ordering::Relaxed) {
-                let deadline = Instant::now() + self.catchup_window;
+            let window = Duration::from_micros(self.catchup_window_us.load(Ordering::Relaxed));
+            if !window.is_zero() && batch.len() < self.active.load(Ordering::Relaxed) {
+                let deadline = Instant::now() + window;
                 let mut g = self.queue.lock();
                 while batch.len() < self.active.load(Ordering::Relaxed) {
                     let now = Instant::now();
@@ -585,6 +589,29 @@ impl<E: Env> ConcurrentDb<E> {
             self.writes.batches.load(Ordering::Relaxed),
             self.writes.batch_ops.load(Ordering::Relaxed),
         )
+    }
+
+    /// Write-group catch-up window (RFC-0037 P2.2). Default 50 µs
+    /// (`PEDRA_CATCHUP_US` overrides at open). The leader holds a group open
+    /// up to this long for writers that are in flight but not yet queued, so
+    /// they share one `fdatasync` instead of each forcing one.
+    ///
+    /// **Latency mode:** `Duration::ZERO` disables the wait — groups close as
+    /// soon as the queue drains (group_size drops toward 1 per fsync; each op
+    /// saves up to one window of added latency). Only affects multi-writer
+    /// workloads; a lone writer never waits either way.
+    #[must_use]
+    pub fn write_group_catchup_window(&self) -> Duration {
+        Duration::from_micros(self.writes.catchup_window_us.load(Ordering::Relaxed))
+    }
+
+    /// Set the catch-up window (see [`Self::write_group_catchup_window`]).
+    /// Takes effect on the next group; concurrent leaders observe it relaxed.
+    pub fn set_write_group_catchup_window(&self, window: Duration) {
+        let micros = window.as_micros().min(u64::MAX as u128) as u64;
+        self.writes
+            .catchup_window_us
+            .store(micros, Ordering::Relaxed);
     }
 
     /// Group fsync for prior `WriteOptions::no_sync` writes (write lock).
@@ -1157,6 +1184,55 @@ mod tests {
     }
 
     /// Group commit: N concurrent sync puts share fewer fsyncs than N.
+    /// Catch-up window knob: defaults to 50 µs, ZERO disables waiting, and
+    /// writes stay correct (visible + durable) with it disabled.
+    #[test]
+    fn catchup_window_knob_roundtrip_and_latency_mode() {
+        let dir = temp_dir();
+        let db = open_sync(&dir);
+        assert_eq!(db.write_group_catchup_window(), CATCHUP_WINDOW_DEFAULT);
+
+        // Latency mode: no group is ever held open for stragglers.
+        db.set_write_group_catchup_window(Duration::ZERO);
+        assert_eq!(db.write_group_catchup_window(), Duration::ZERO);
+        let n = 8usize;
+        let barrier = Arc::new(std::sync::Barrier::new(n));
+        let mut handles = Vec::new();
+        for i in 0..n {
+            let db = db.clone();
+            let barrier = Arc::clone(&barrier);
+            handles.push(thread::spawn(move || {
+                barrier.wait();
+                for j in 0..4u8 {
+                    db.put(
+                        [u8::try_from(i).expect("n fits u8"), j],
+                        [u8::try_from(i).expect("n fits u8"), j, 7],
+                    )
+                    .unwrap();
+                }
+            }));
+        }
+        for h in handles {
+            h.join().unwrap();
+        }
+        for i in 0..n {
+            for j in 0..4u8 {
+                let k = [u8::try_from(i).expect("n fits u8"), j];
+                let v = [u8::try_from(i).expect("n fits u8"), j, 7];
+                assert_eq!(db.get(&k).as_deref(), Some(v.as_ref()));
+            }
+        }
+        let (submits, _queued, groups, group_ops) = db.write_group_stats();
+        assert_eq!(submits, (n * 4) as u64);
+        assert_eq!(group_ops, (n * 4) as u64);
+        assert!(groups >= 1 && groups <= (n * 4) as u64);
+
+        // Knob takes effect again after re-enabling.
+        db.set_write_group_catchup_window(Duration::from_micros(1234));
+        assert_eq!(db.write_group_catchup_window(), Duration::from_micros(1234));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn group_commit_amortizes_wal_syncs() {
         let dir = temp_dir();

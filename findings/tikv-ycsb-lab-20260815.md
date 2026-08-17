@@ -327,3 +327,21 @@ a/f têm um `fdatasync` por write (G1), c/e/mvcc já no relógio/cache. O que fe
 **problemas** 0036 vs Rocks: apply 2.31×→~1.0×, scan 1.43×→0.90×, raftlog 0.49×→1.42×,
 overwrite 0.70×→1.32×, mvcc 0.73×→1.96×, e 0.68×→1.84×. Ganho absoluto real: multi-cliente
 (P2.2). RFC-0037 → done.
+
+## RFC-0037 P2.2 (follow-up) — knob público de latência no catch-up window (2026-08-16)
+
+`ConcurrentDb::set_write_group_catchup_window(Duration)` / getter (default 50 µs;
+`PEDRA_CATCHUP_US` semeia no open; `Duration::ZERO` = modo latência, grupo fecha assim que a
+fila drena). Teste: round-trip do knob + corretude com janela zero (chaves visíveis/duráveis,
+`write_group_stats` consistente).
+
+A/B intercalado (6 pares, 4 clientes, 1000 B, `group_profile`, medianas):
+
+| modo | qps | group_size | p50 | p90 | p99 |
+|---|---:|---:|---:|---:|---:|
+| off (0 µs) | 23.3 k | 1.10 | 124 µs | 253 µs | 800 µs |
+| on (50 µs) | **26.7 k** | 3.20 | 120 µs | **183 µs** | 912 µs |
+
+Leitura honesta: a janela **melhora** qps (+15%) e p90 (−28%, menos fsyncs na fila) e custa
+~+110 µs no p99 (o op-flag espera ≤1 janela + um fsync agrupado maior). p50 inalterado —
+cliente único nunca espera. Modo latência = `set_write_group_catchup_window(Duration::ZERO)`.
