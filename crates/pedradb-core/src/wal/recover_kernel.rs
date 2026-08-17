@@ -5,7 +5,15 @@
 //! torn writes, and fsync are **caller + axiom**.
 //!
 //! Named decisions (the ones that were `SilentWrong` when inverted):
-//! - length / torn / unknown-type may **resync**; CRC and orphan **fail-stop**
+//! - length / torn / unknown-type may **resync**; orphan **fail-stop**s
+//! - CRC at a **fresh alignment** (right after a valid record boundary)
+//!   **fail-stops** — that is a real record with a bad checksum (G8)
+//! - CRC observed *during* a resync walk is garbage of the damaged region, not
+//!   evidence of disk corruption: the walk continues and either re-anchors on
+//!   the next CRC-valid record or stops at EOF keeping the prefix. Without
+//!   this, a torn tail whose partial payload contains a plausible (type,
+//!   length) window fail-stops as Crc — and with RFC-0038 D three routine
+//!   crashes would brick the DB
 //! - first-record torn on an otherwise empty prefix is **fail-stop**, not a
 //!   silent empty WAL (F4)
 //! - orphan `Middle` / `Last` is **fail-stop**, not clean EOF (F14)
@@ -24,7 +32,8 @@ pub enum RecoverKind {
     Record,
     /// Clean end of log (`Ok(None)`).
     CleanEof,
-    /// Header parsed, payload cut by a short final block.
+    /// Header parsed, payload cut by a short final block — either a torn tail
+    /// at EOF or a mid-file length bitrot whose declared payload overruns EOF.
     Truncated,
     /// Length exceeds max payload or remainder of a full block.
     LengthCorrupt,
@@ -112,7 +121,8 @@ impl FragKind {
     }
 }
 
-/// F4: length / framing / unknown type may resync. CRC and orphan do not.
+/// F4: length / framing / unknown type may resync. CRC (fresh alignment) and
+/// orphan do not.
 #[must_use]
 pub fn is_length_resyncable(kind: RecoverKind) -> bool {
     matches!(
@@ -131,12 +141,17 @@ pub fn is_length_resyncable_as_is(kind: RecoverKind) -> bool {
 /// What `collect_all` does after one `read_record` outcome.
 ///
 /// `consecutive_skips` is the count **including** this skip when `can_skip`.
+/// `in_resync` says whether the current alignment sits inside an ongoing
+/// garbage walk (started by a resyncable framing error); a CRC there is the
+/// walk's own garbage, not a corrupted real record, so it keeps resyncing
+/// instead of fail-stopping.
 #[must_use]
 pub fn recover_collect_act(
     kind: RecoverKind,
     prefix_n: u64,
     can_skip: bool,
     consecutive_skips: u64,
+    in_resync: bool,
 ) -> RecoverAct {
     match kind {
         RecoverKind::Record => RecoverAct::KeepRecord,
@@ -152,6 +167,16 @@ pub fn recover_collect_act(
                 RecoverAct::FailStop
             } else {
                 RecoverAct::Resync
+            }
+        }
+        RecoverKind::Crc if in_resync => {
+            if can_skip {
+                RecoverAct::Resync
+            } else if prefix_n == 0 {
+                RecoverAct::FailStop
+            } else {
+                // Walk ran to EOF on garbage: torn tail — keep the prefix.
+                RecoverAct::KeepPrefix
             }
         }
         RecoverKind::Crc | RecoverKind::OrphanFragment | RecoverKind::Other => RecoverAct::FailStop,
@@ -266,9 +291,33 @@ mod tests {
     }
 
     #[test]
+    fn crc_fail_stops_at_fresh_alignment_but_walks_during_resync() {
+        // Fresh alignment: a real record with a bad checksum — G8 fail-stop.
+        assert_eq!(
+            recover_collect_act(RecoverKind::Crc, 3, true, 0, false),
+            RecoverAct::FailStop
+        );
+        // Inside a garbage walk: the CRC is the walk's own garbage.
+        assert_eq!(
+            recover_collect_act(RecoverKind::Crc, 3, true, 0, true),
+            RecoverAct::Resync
+        );
+        // Walk at EOF exhausted keeps the prefix (torn tail re-anchoring late).
+        assert_eq!(
+            recover_collect_act(RecoverKind::Crc, 3, false, 0, true),
+            RecoverAct::KeepPrefix
+        );
+        // Walk at EOF exhausted with no prefix still fail-stops (F4).
+        assert_eq!(
+            recover_collect_act(RecoverKind::Crc, 0, false, 0, true),
+            RecoverAct::FailStop
+        );
+    }
+
+    #[test]
     fn f4_empty_torn_is_fail_stop_not_silent_eof() {
         assert_eq!(
-            recover_collect_act(RecoverKind::Truncated, 0, false, 0),
+            recover_collect_act(RecoverKind::Truncated, 0, false, 0, false),
             RecoverAct::FailStop
         );
         assert_eq!(
@@ -276,7 +325,7 @@ mod tests {
             RecoverAct::Stop
         );
         assert_eq!(
-            recover_collect_act(RecoverKind::LengthCorrupt, 0, false, 0),
+            recover_collect_act(RecoverKind::LengthCorrupt, 0, false, 0, false),
             RecoverAct::FailStop
         );
         assert_eq!(
@@ -288,7 +337,7 @@ mod tests {
     #[test]
     fn torn_after_prefix_keeps_prefix() {
         assert_eq!(
-            recover_collect_act(RecoverKind::Truncated, 1, false, 0),
+            recover_collect_act(RecoverKind::Truncated, 1, false, 0, false),
             RecoverAct::KeepPrefix
         );
     }
@@ -296,11 +345,11 @@ mod tests {
     #[test]
     fn crc_and_orphan_fail_stop() {
         assert_eq!(
-            recover_collect_act(RecoverKind::Crc, 3, true, 0),
+            recover_collect_act(RecoverKind::Crc, 3, true, 0, false),
             RecoverAct::FailStop
         );
         assert_eq!(
-            recover_collect_act(RecoverKind::OrphanFragment, 3, true, 0),
+            recover_collect_act(RecoverKind::OrphanFragment, 3, true, 0, false),
             RecoverAct::FailStop
         );
         assert_eq!(
@@ -312,11 +361,17 @@ mod tests {
     #[test]
     fn resync_budget() {
         assert_eq!(
-            recover_collect_act(RecoverKind::Truncated, 1, true, MAX_CONSECUTIVE_SKIPS),
+            recover_collect_act(RecoverKind::Truncated, 1, true, MAX_CONSECUTIVE_SKIPS, true),
             RecoverAct::Resync
         );
         assert_eq!(
-            recover_collect_act(RecoverKind::Truncated, 1, true, MAX_CONSECUTIVE_SKIPS + 1),
+            recover_collect_act(
+                RecoverKind::Truncated,
+                1,
+                true,
+                MAX_CONSECUTIVE_SKIPS + 1,
+                true
+            ),
             RecoverAct::FailStop
         );
     }
@@ -384,34 +439,49 @@ mod tests {
             for prefix_n in [0u64, 1, 7] {
                 for can_skip in [false, true] {
                     for skips in [0u64, 1, MAX_CONSECUTIVE_SKIPS, MAX_CONSECUTIVE_SKIPS + 1] {
-                        let d = recover_collect_act(kind, prefix_n, can_skip, skips);
-                        match kind {
-                            RecoverKind::Record => assert_eq!(d, RecoverAct::KeepRecord),
-                            RecoverKind::CleanEof => assert_eq!(d, RecoverAct::Stop),
-                            RecoverKind::Crc | RecoverKind::OrphanFragment | RecoverKind::Other => {
-                                assert_eq!(d, RecoverAct::FailStop);
-                            }
-                            RecoverKind::Truncated
-                            | RecoverKind::LengthCorrupt
-                            | RecoverKind::UnknownType => {
-                                if !can_skip {
-                                    if prefix_n == 0 {
+                        for in_resync in [false, true] {
+                            let d = recover_collect_act(kind, prefix_n, can_skip, skips, in_resync);
+                            match kind {
+                                RecoverKind::Record => {
+                                    assert_eq!(d, RecoverAct::KeepRecord)
+                                }
+                                RecoverKind::CleanEof => assert_eq!(d, RecoverAct::Stop),
+                                RecoverKind::Crc => {
+                                    if !in_resync {
+                                        assert_eq!(d, RecoverAct::FailStop);
+                                    } else if can_skip {
+                                        assert_eq!(d, RecoverAct::Resync);
+                                    } else if prefix_n == 0 {
                                         assert_eq!(d, RecoverAct::FailStop);
                                     } else {
                                         assert_eq!(d, RecoverAct::KeepPrefix);
                                     }
-                                } else if skips > MAX_CONSECUTIVE_SKIPS {
+                                }
+                                RecoverKind::OrphanFragment | RecoverKind::Other => {
                                     assert_eq!(d, RecoverAct::FailStop);
-                                } else {
-                                    assert_eq!(d, RecoverAct::Resync);
+                                }
+                                RecoverKind::Truncated
+                                | RecoverKind::LengthCorrupt
+                                | RecoverKind::UnknownType => {
+                                    if !can_skip {
+                                        if prefix_n == 0 {
+                                            assert_eq!(d, RecoverAct::FailStop);
+                                        } else {
+                                            assert_eq!(d, RecoverAct::KeepPrefix);
+                                        }
+                                    } else if skips > MAX_CONSECUTIVE_SKIPS {
+                                        assert_eq!(d, RecoverAct::FailStop);
+                                    } else {
+                                        assert_eq!(d, RecoverAct::Resync);
+                                    }
                                 }
                             }
+                            n += 1;
                         }
-                        n += 1;
                     }
                 }
             }
         }
-        assert_eq!(n, 8 * 3 * 2 * 4);
+        assert_eq!(n, 8 * 3 * 2 * 4 * 2);
     }
 }

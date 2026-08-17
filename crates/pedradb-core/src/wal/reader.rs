@@ -34,6 +34,9 @@ pub struct WalReader<R> {
     scratch: Vec<u8>,
     /// Byte offset in the stream where the current block started.
     block_start_offset: u64,
+    /// Stream offset just past the last record yielded by [`Self::collect_all`]
+    /// — the last known-good append point (0 when nothing was recovered).
+    last_good_offset: u64,
 }
 
 impl<R: Read> WalReader<R> {
@@ -47,6 +50,7 @@ impl<R: Read> WalReader<R> {
             block_cursor: 0,
             scratch: Vec::new(),
             block_start_offset: 0,
+            last_good_offset: 0,
         }
     }
 }
@@ -63,6 +67,7 @@ impl<R: Read + Seek> WalReader<R> {
         src.seek(SeekFrom::Start(block_start))?;
         let mut reader = Self::new(src);
         reader.block_start_offset = block_start;
+        reader.last_good_offset = offset;
         if !reader.read_next_block()? {
             return Ok(reader);
         }
@@ -238,12 +243,26 @@ impl<R: Read> WalReader<R> {
 }
 
 impl<R: Read> WalReader<R> {
+    /// Stream offset just past the last record recovered by
+    /// [`Self::collect_all`] — the last known-good append point. When recovery
+    /// stopped early (torn tail / resynced framing damage) this is where the
+    /// WAL should be truncated before new appends land, so a second crash
+    /// never replays the damaged region as if it were records.
+    #[must_use]
+    pub fn last_good_offset(&self) -> u64 {
+        self.last_good_offset
+    }
+}
+
+impl<R: Read> WalReader<R> {
     /// Collect every remaining record into a `Vec`.
     ///
     /// Policy is [`recover_collect_act`] (F4 / F14 / CRC):
     /// - Clean EOF → stop.
     /// - Truncated / length / unknown type → resync one byte (mid-WAL length bitrot).
-    /// - CRC and orphan fragment → **fail-stop** (do not resync).
+    /// - CRC at a fresh alignment and orphan fragment → **fail-stop** (do not resync).
+    /// - CRC during a resync walk is the walk's own garbage: keep walking; at
+    ///   EOF keep the prefix (torn tail), never journal it as disk corruption.
     /// - Resync at true EOF with a prefix → keep the prefix (torn tail).
     /// - Resync at true EOF with an empty prefix → fail-stop (F4 empty WAL).
     ///
@@ -252,12 +271,16 @@ impl<R: Read> WalReader<R> {
     pub fn collect_all(&mut self) -> Result<Vec<Vec<u8>>> {
         let mut out = Vec::new();
         let mut consecutive_skips = 0u64;
+        // Inside an ongoing garbage walk? A CRC there is the walk's own
+        // garbage (RFC-0038 D), not a corrupted real record.
+        let mut in_resync = false;
 
         loop {
             let outcome = self.read_record();
             let kind = recover_kind_from_read(&outcome);
             let prefix_n = out.len() as u64;
-            let can_skip = if is_length_resyncable(kind) {
+            let can_skip = if is_length_resyncable(kind) || (in_resync && kind == RecoverKind::Crc)
+            {
                 self.skip_byte_for_resync()?
             } else {
                 false
@@ -268,11 +291,14 @@ impl<R: Read> WalReader<R> {
                 consecutive_skips
             };
 
-            match recover_collect_act(kind, prefix_n, can_skip, skips) {
+            match recover_collect_act(kind, prefix_n, can_skip, skips, in_resync) {
                 RecoverAct::KeepRecord => match outcome {
                     Ok(Some(rec)) => {
                         out.push(rec);
                         consecutive_skips = 0;
+                        // A CRC-valid record re-anchors the alignment.
+                        in_resync = false;
+                        self.last_good_offset = self.current_record_stream_offset();
                     }
                     _ => {
                         return Err(CoreError::Internal(
@@ -281,7 +307,10 @@ impl<R: Read> WalReader<R> {
                     }
                 },
                 RecoverAct::Stop | RecoverAct::KeepPrefix => break,
-                RecoverAct::Resync => consecutive_skips = skips,
+                RecoverAct::Resync => {
+                    consecutive_skips = skips;
+                    in_resync = true;
+                }
                 RecoverAct::FailStop => {
                     return match outcome {
                         Err(e) => Err(e),

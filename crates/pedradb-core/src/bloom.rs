@@ -40,7 +40,11 @@ fn saturating_product(a: usize, b: usize) -> usize {
 }
 
 fn at_least_64(x: usize) -> usize {
-    if x < 64 { 64 } else { x }
+    if x < 64 {
+        64
+    } else {
+        x
+    }
 }
 
 fn cap_u32(x: usize) -> u32 {

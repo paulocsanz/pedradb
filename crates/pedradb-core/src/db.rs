@@ -756,16 +756,30 @@ impl<E: Env> Db<E> {
         if env.exists(&wal_path) {
             // Tiny WAL + Truncated(0): failed first append after rotate (or crash
             // before any complete record). Tolerate empty so SSTs still load (F6).
-            // Large WAL + Truncated(0): bitrot of the first record — fail-stop (F4).
-            let records = match Wal::recover_on(&env, &wal_path) {
+            // Large WAL + Truncated(0): bitrot of the first record — fail-stop (F4),
+            // journaled for escalation (RFC-0038 D: repeated events refuse open).
+            let (records, last_good) = match Wal::recover_span_on(&env, &wal_path) {
                 Ok(r) => r,
                 Err(CoreError::Truncated(0)) => {
                     let len = env.metadata_len(&wal_path).unwrap_or(0);
                     if len < 64 {
-                        Vec::new()
+                        (Vec::new(), 0)
                     } else {
-                        return Err(CoreError::Truncated(0));
+                        return Err(crate::corrupt::escalate_or_fail(
+                            &env,
+                            &dir,
+                            "truncated_head",
+                            0,
+                            CoreError::Truncated(0),
+                        ));
                     }
+                }
+                Err(e @ CoreError::Crc { offset, .. }) => {
+                    // Mid-WAL bitflip: fail-stop (silent skip is G8-forbidden),
+                    // journaled; the Nth event escalates (RFC-0038 D).
+                    return Err(crate::corrupt::escalate_or_fail(
+                        &env, &dir, "crc", offset, e,
+                    ));
                 }
                 Err(e) => return Err(e),
             };
@@ -790,6 +804,15 @@ impl<E: Env> Db<E> {
             }
             if change_log.max_sequence().unwrap_or(0) > feed_max {
                 change_log.store_on(&env, &dir)?;
+            }
+            // RFC-0038 D: cut a torn tail to the last known-good offset so
+            // new appends never sit on top of the damaged region (re-opening
+            // would then fail-stop on its garbage as if it were records).
+            let wal_len = env.metadata_len(&wal_path).unwrap_or(0);
+            if wal_len > last_good {
+                let mut wal_file = env.open_append(&wal_path)?;
+                wal_file.set_len(last_good)?;
+                wal_file.sync_data()?;
             }
         }
 
@@ -1496,10 +1519,16 @@ impl<E: Env> Db<E> {
     /// — fine for small DBs and tests, an **OOM footgun** on large keyspaces.
     /// Prefer [`Self::range_limited`] or streaming [`Self::scan`] / [`Self::scan_at`]
     /// for pagination and large scans.
+    #[deprecated(
+        since = "0.1.0",
+        note = "materialises the whole interval into RAM (OOM footgun on large DBs); \
+                use `scan`/`scan_at` for streaming or `range_limited`/`range_at_limited` \
+                for a bounded collect"
+    )]
     #[must_use]
     pub fn range(&self, start: Bound<&[u8]>, end: Bound<&[u8]>) -> Vec<(Bytes, Bytes)> {
         // Latest sequence is always ≥ the GC watermark.
-        self.range_at(self.last_sequence(), start, end)
+        self.range_at_limited(self.last_sequence(), start, end, None)
             .unwrap_or_else(|_| Vec::new())
     }
 
@@ -1507,6 +1536,12 @@ impl<E: Env> Db<E> {
     ///
     /// # Errors
     /// [`CoreError::SnapshotTooOld`] if `snapshot` is below the version-GC watermark.
+    #[deprecated(
+        since = "0.1.0",
+        note = "materialises the whole interval into RAM (OOM footgun on large DBs); \
+                use `scan_at`/`try_scan_at` for streaming or `range_at_limited` \
+                for a bounded collect"
+    )]
     pub fn range_at(
         &self,
         snapshot: SequenceNumber,
@@ -5228,6 +5263,121 @@ mod tests {
         }
     }
 
+    fn sync_opts() -> OpenOptions {
+        OpenOptions {
+            sync: true,
+            auto_flush_bytes: None,
+            auto_compact_sst_count: None,
+            auto_compact_sst_bytes: None,
+            exclusive: true,
+            large_value_threshold: None,
+        }
+    }
+
+    /// RFC-0038 D: a mid-WAL CRC flip is fail-stop (unchanged), journaled,
+    /// and the Nth recorded event escalates — then a repaired/replaced WAL
+    /// opens normally (evacuation path stays open).
+    #[test]
+    fn wal_crc_corruption_journals_then_escalates_then_recovers() {
+        let dir = temp_dir();
+        let wal = dir.join(WAL_FILE_NAME);
+        {
+            let mut db = Db::open_with(&dir, sync_opts()).unwrap();
+            for i in 0..8 {
+                db.put(format!("k{i:02}").as_bytes(), &[7u8; 120]).unwrap();
+            }
+        }
+        assert!(wal.exists());
+
+        // Isolated bitflip in a payload region (header is 7 bytes).
+        let mut bytes = fs::read(&wal).unwrap();
+        bytes[30] ^= 0xFF;
+        fs::write(&wal, &bytes).unwrap();
+
+        for attempt in 1..crate::corrupt::CORRUPTION_ESCALATION_EVENTS {
+            let err = match Db::open_with(&dir, sync_opts()) {
+                Ok(_) => panic!("attempt {attempt}: corrupted WAL must not open"),
+                Err(e) => e,
+            };
+            assert!(
+                matches!(err, CoreError::Crc { .. }),
+                "attempt {attempt}: {err:?}"
+            );
+        }
+        assert_eq!(
+            fs::read_to_string(dir.join(crate::corrupt::CORRUPTLOG_NAME))
+                .unwrap()
+                .lines()
+                .count() as u32,
+            crate::corrupt::CORRUPTION_ESCALATION_EVENTS - 1
+        );
+
+        // Nth event escalates with the journal count.
+        let err = match Db::open_with(&dir, sync_opts()) {
+            Ok(_) => panic!("escalation must refuse open"),
+            Err(e) => e,
+        };
+        match err {
+            CoreError::CorruptionEscalated { events, limit } => {
+                assert_eq!(events, crate::corrupt::CORRUPTION_ESCALATION_EVENTS);
+                assert_eq!(limit, crate::corrupt::CORRUPTION_ESCALATION_EVENTS);
+            }
+            other => panic!("expected escalation, got {other:?}"),
+        }
+        let journal = fs::read_to_string(dir.join(crate::corrupt::CORRUPTLOG_NAME)).unwrap();
+        assert!(journal.lines().all(|l| l.contains("\tcrc\t")));
+
+        // Escalation never bricks a clean directory: replace the WAL, open fine.
+        fs::remove_file(&wal).unwrap();
+        let mut db = Db::open_with(&dir, sync_opts()).unwrap();
+        db.put(b"after", b"repair").unwrap();
+        assert_eq!(db.get(b"after").as_deref(), Some(&b"repair"[..]));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0038 D: routine torn tails (crash mid-append) never journal —
+    /// they auto-recover and must not count toward escalation. The WAL is
+    /// truncated to the last good record so later appends never replay the
+    /// torn region.
+    #[test]
+    fn torn_tail_does_not_journal() {
+        let dir = temp_dir();
+        let wal = dir.join(WAL_FILE_NAME);
+        {
+            let mut db = Db::open_with(&dir, sync_opts()).unwrap();
+            for i in 0..8 {
+                db.put(format!("k{i:02}").as_bytes(), &[7u8; 120]).unwrap();
+            }
+        }
+        // Tear the tail mid-record (resyncable).
+        let len = fs::metadata(&wal).unwrap().len() as usize;
+        let mut bytes = fs::read(&wal).unwrap();
+        bytes.truncate(len - 5);
+        fs::write(&wal, &bytes).unwrap();
+
+        let torn_len = fs::metadata(&wal).unwrap().len();
+        let mut db = Db::open_with(&dir, sync_opts()).unwrap();
+        assert!(db.get(b"k00").is_some(), "prefix survives torn tail");
+        assert!(!dir.join(crate::corrupt::CORRUPTLOG_NAME).exists());
+        // The torn region must be cut: WAL shrinks to the last good record.
+        assert!(
+            fs::metadata(&wal).unwrap().len() < torn_len,
+            "WAL must be truncated to last good offset"
+        );
+        // Writing after recovery, then re-opening, must stay clean — the
+        // damaged tail is gone, not buried under new records. k07 was the
+        // torn record: dropped (never distinguishable from an unacked write),
+        // so the durable prefix is k00..=k06.
+        db.put(b"after", b"recovered").unwrap();
+        drop(db);
+        let db = Db::open_with(&dir, sync_opts()).unwrap();
+        assert_eq!(db.get(b"after").as_deref(), Some(b"recovered".as_ref()));
+        assert_eq!(db.get(b"k06").as_deref(), Some(&[7u8; 120][..]));
+        assert_eq!(db.get(b"k07"), None);
+        assert!(!dir.join(crate::corrupt::CORRUPTLOG_NAME).exists());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
     /// RFC-0014 P2.2: large values spill to VALUES.vlog; reopen resolves.
     #[test]
     fn large_value_vlog_put_get_reopen() {
@@ -5789,9 +5939,10 @@ mod tests {
             assert_eq!(db.get(b"k-e"), None, "point path applies the tombstone");
 
             let scanned: Vec<_> = db
-                .range(
+                .range_limited(
                     std::ops::Bound::Included(&b"k-e"[..]),
                     std::ops::Bound::Included(&b"k-g"[..]),
+                    None,
                 )
                 .into_iter()
                 .map(|(k, _)| k)
@@ -5806,9 +5957,10 @@ mod tests {
         let db = Db::open_with(&dir, vlog_opts()).unwrap();
         assert_eq!(db.get(b"k-e"), None);
         let scanned: Vec<_> = db
-            .range(
+            .range_limited(
                 std::ops::Bound::Included(&b"k-e"[..]),
                 std::ops::Bound::Included(&b"k-g"[..]),
+                None,
             )
             .into_iter()
             .map(|(k, _)| k)
@@ -6337,13 +6489,13 @@ mod tests {
         db.put(b"b", b"2b").unwrap(); // newer in mem
         db.delete(b"c").unwrap();
 
-        let mid = db.range(Bound::Included(b"b"), Bound::Excluded(b"d"));
+        let mid = db.range_limited(Bound::Included(b"b"), Bound::Excluded(b"d"), None);
         assert_eq!(mid.len(), 1);
         assert_eq!(mid[0].0.as_ref(), b"b");
         assert_eq!(mid[0].1.as_ref(), b"2b");
 
         let all: Vec<_> = db
-            .range(Bound::Unbounded, Bound::Unbounded)
+            .range_limited(Bound::Unbounded, Bound::Unbounded, None)
             .into_iter()
             .map(|(k, _)| k.to_vec())
             .collect();
@@ -6364,10 +6516,10 @@ mod tests {
             db.put(b"a", b"1b").unwrap();
             db.flush().unwrap();
             assert!(db.sst_count() >= 2);
-            let before: Vec<_> = db.range(Bound::Unbounded, Bound::Unbounded);
+            let before: Vec<_> = db.range_limited(Bound::Unbounded, Bound::Unbounded, None);
             db.compact().unwrap();
             assert_eq!(db.sst_count(), 1);
-            let after: Vec<_> = db.range(Bound::Unbounded, Bound::Unbounded);
+            let after: Vec<_> = db.range_limited(Bound::Unbounded, Bound::Unbounded, None);
             assert_eq!(before, after);
             assert_eq!(db.get(b"a").as_deref(), Some(b"1b".as_ref()));
             assert_eq!(db.get(b"b").as_deref(), Some(b"2".as_ref()));
@@ -6378,7 +6530,7 @@ mod tests {
         assert_eq!(db.get(b"a").as_deref(), Some(b"1b".as_ref()));
         assert_eq!(db.get(b"b").as_deref(), Some(b"2".as_ref()));
         let keys: Vec<_> = db
-            .range(Bound::Unbounded, Bound::Unbounded)
+            .range_limited(Bound::Unbounded, Bound::Unbounded, None)
             .into_iter()
             .map(|(k, _)| k.to_vec())
             .collect();
@@ -7260,7 +7412,7 @@ mod tests {
         );
         // Range path must not silently look empty.
         let err = db
-            .range_at(old_seq, Bound::Unbounded, Bound::Unbounded)
+            .range_at_limited(old_seq, Bound::Unbounded, Bound::Unbounded, None)
             .unwrap_err();
         assert!(
             matches!(err, CoreError::SnapshotTooOld { .. }),
@@ -7275,7 +7427,7 @@ mod tests {
             "try_scan_at too old: {err:?}"
         );
         // Latest range still works.
-        let live = db.range(Bound::Unbounded, Bound::Unbounded);
+        let live = db.range_limited(Bound::Unbounded, Bound::Unbounded, None);
         assert_eq!(live.len(), 1);
         assert_eq!(live[0].1.as_ref(), b"new");
         db.close().unwrap();
@@ -7924,7 +8076,7 @@ mod tests {
         assert_eq!(db.get(b"b").as_deref(), Some(b"2".as_ref()));
         assert_eq!(db.get(b"c").as_deref(), Some(b"3".as_ref()));
         let ranged: Vec<_> = db
-            .range(Bound::Unbounded, Bound::Unbounded)
+            .range_limited(Bound::Unbounded, Bound::Unbounded, None)
             .into_iter()
             .map(|(k, _)| k)
             .collect();
@@ -8168,7 +8320,7 @@ mod tests {
         assert_eq!(db.get(b"e").as_deref(), Some(b"v".as_ref()));
         assert_eq!(db.get(b"f").as_deref(), Some(b"v".as_ref()));
         let live: Vec<_> = db
-            .range(Bound::Unbounded, Bound::Unbounded)
+            .range_limited(Bound::Unbounded, Bound::Unbounded, None)
             .into_iter()
             .map(|(k, _)| k[0])
             .collect();
@@ -8179,7 +8331,7 @@ mod tests {
         assert_eq!(db.get(b"b"), None);
         assert_eq!(db.get(b"a").as_deref(), Some(b"v".as_ref()));
         // After latest_only GC, covered keys should not remain as live values.
-        let after: Vec<_> = db.range(Bound::Unbounded, Bound::Unbounded);
+        let after: Vec<_> = db.range_limited(Bound::Unbounded, Bound::Unbounded, None);
         assert_eq!(after.len(), 3);
         db.close().unwrap();
         let db = Db::open(&dir).unwrap();
@@ -8297,7 +8449,7 @@ mod tests {
                 let _ = db.compact();
             }
             let mut out: Vec<(Vec<u8>, Vec<u8>)> = db
-                .range(Bound::Unbounded, Bound::Unbounded)
+                .range_limited(Bound::Unbounded, Bound::Unbounded, None)
                 .into_iter()
                 .map(|(k, v)| (k.to_vec(), v.to_vec()))
                 .collect();

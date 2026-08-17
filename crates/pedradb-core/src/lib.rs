@@ -20,6 +20,7 @@ pub mod cache;
 pub mod change_feed;
 pub mod changelog_kernel;
 pub mod concurrent;
+pub mod corrupt;
 pub mod db;
 pub mod env;
 pub mod error;

@@ -147,6 +147,25 @@ impl<F: EnvFile> Wal<F> {
         WalReader::new(BufReader::new(file)).collect_all()
     }
 
+    /// Like [`Self::recover_on`] but also returns the stream offset just past
+    /// the last recovered record — the last known-good append point. Callers
+    /// that keep appending to an existing WAL should truncate it to this
+    /// offset (via `EnvFile::set_len`) when it is below EOF, so the damaged /
+    /// torn region is never re-read as records.
+    ///
+    /// # Errors
+    /// Read failure or CRC mismatch.
+    pub fn recover_span_on<E: Env<File = F>, P: AsRef<Path>>(
+        env: &E,
+        path: P,
+    ) -> Result<(Vec<Vec<u8>>, u64)> {
+        let file = env.open_read(path.as_ref())?;
+        let mut reader = WalReader::new(BufReader::new(file));
+        let records = reader.collect_all()?;
+        let end = reader.last_good_offset();
+        Ok((records, end))
+    }
+
     /// Replay complete logical records starting at byte `offset` via `env`.
     ///
     /// # Errors

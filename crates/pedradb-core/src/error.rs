@@ -25,6 +25,24 @@ pub enum CoreError {
     #[error("wal truncated record at offset {0}")]
     Truncated(u64),
 
+    /// Repeated fail-stop WAL corruption at open: the corruption journal hit
+    /// its escalation limit (RFC-0038 option D). A single CRC event cannot
+    /// tell isolated bitflip from dying media; only history can. The Nth
+    /// recorded event refuses open — in every recovery mode — so the node is
+    /// evacuated instead of silently serving from failing hardware.
+    ///
+    /// A clean WAL still opens (repair/evacuate, then reopen).
+    #[error(
+        "corruption escalation: {events} fail-stop wal events recorded (limit {limit}); \
+         repair/replace the WAL or evacuate — see CORRUPTLOG in the db directory"
+    )]
+    CorruptionEscalated {
+        /// Events now recorded in `CORRUPTLOG`.
+        events: u32,
+        /// Escalation threshold that fired.
+        limit: u32,
+    },
+
     /// An internal invariant was violated.
     #[error("internal error: {0}")]
     Internal(String),

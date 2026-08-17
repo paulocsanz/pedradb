@@ -1,7 +1,7 @@
 # RFC: 0038 — Recuperação de WAL corrompido: fail-stop × self-heal (DECISÃO EM ABERTO)
 
-**Status:** draft (parked — decisão pendente; este doc é a pesquisa + espaço de opções)
-**Updated:** 2026-08-16
+**Status:** in-progress (P0/P2.1 done; P1.1 decisão do dono pendente)
+**Updated:** 2026-08-17
 **Parents:** [0037](0037-apply-off-put-and-2x-pedra.md), garantias G1/G8; kernel [`recover_kernel`](../crates/pedradb-core/src/wal/recover_kernel.rs)
 
 ## Background — o que cada um faz (fontes primárias, verificadas 2026-08-16)
@@ -94,6 +94,32 @@ Síntese: **D é pré-requisito de qualquer modo tolerante**; B2 é o caminho de
 fail-stop puro bloqueia; B1 só com D. A primitiva de heal (réplica re-semeando o intervalo de
 seq do relatório; PITR para single-node) consome o mesmo relatório.
 
+## Refinamento pós-implementação de D (2026-08-17) — o painel adversarial achou dois buracos
+
+Implementar D (journal + escalada) expôs que o journal honesto exige distinguir **garbage do
+próprio resync** de **corrupção real de disco**; sem isso, D briquaria DBs saudáveis:
+
+1. **CRC durante um resync-walk é lixo do walk, não evidência de disco ruim.** Cauda rasgada
+   cujo payload parcial contém uma janela (type,length) plausível fabrica um header falso
+   durante o byte-walk de resync → CRC mismatch. No kernel antigo (CRC = fail-stop sempre,
+   mesmo em walk), isso (a) derrubava um open que deveria auto-recuperar e (b) com D,
+   **jornava** um evento "crc" — três crashes de rotina = `CorruptionEscalated` em DB são.
+   Correção: CRC em **alinhamento limpo** (logo após registro válido) continua fail-stop
+   **com journal** (G8 intacto); CRC **dentro do walk** continua andando e, no EOF, mantém o
+   prefixo **sem journal** (semântica kEof do log_reader.cc: "assume the writer died in the
+   middle. Don't report a corruption").
+2. **Torn tail recuperado precisa ser truncado no open.** `Wal::append_on` anexava depois da
+   região rasgada; o próximo open relia o lixo enterrado como se fossem registros → Crc em
+   alinhamento limpo → fail-stop **com journal** (o crash de rotina nº 2 já jorna). Correção:
+   `Db::open` agora trunca o WAL para `last_good_offset` (o fim do último registro CRC-válido
+   recuperado) via `EnvFile::set_len` + `sync_data` antes de reabrir para append.
+
+Achados verificados por teste end-to-end (`db::tests::torn_tail_does_not_journal`,
+`db::tests::wal_crc_corruption_journals_then_escalates_then_recovers`): cauda rasgada abre,
+serve o prefixo, escreve, reabre, **nunca cria `CORRUPTLOG`**; bitflip isolado fail-stoppa e
+jorna em toda tentativa; o 3º evento recusa open em qualquer modo; WAL reparado/substituído
+abre limpo (escalação nunca briqua diretório são).
+
 ## Delivery slices (mandatory)
 
 ### P0 — pesquisa verificada (este doc)
@@ -109,9 +135,16 @@ seq do relatório; PITR para single-node) consome o mesmo relatório.
 
 ### P2 — implementação (só após P1)
 
-- [ ] **P2.1** D (journal + escalonamento) primeiro; depois o modo escolhido + painel EXPLODE
-  re-run (toda injeção → fail-stop **ou** truncamento contabilizado **ou** recusa por
-  escalonamento; nunca divergência silenciosa) — status: `todo`
+- [x] **P2.1** D (journal + escalonamento) primeiro — status: `done` (2026-08-17)
+  - `crates/pedradb-core/src/corrupt.rs`: journal append-only (`CORRUPTLOG`: ts, kind, offset),
+    `escalate_or_fail` — só fail-stops jornam (crc, truncated_head); caudas rasgadas nunca.
+  - `CoreError::CorruptionEscalated` no 3º evento (`CORRUPTION_ESCALATION_EVENTS`), recusa
+    open em qualquer modo; reparo/substituição do WAL reseta (journal fica, contagem conta
+    eventos — decisões de limpeza ficam para P1.2).
+  - Refinamentos obrigatórios achados pelos testes (seção acima): CRC-em-walk não jorna;
+    truncamento para `last_good_offset` no open.
+  - Painel EXPLODE re-run fica para o modo escolhido em P1.1 (o painel de enumeração já
+    existe em `wal::recover_choose`).
 - [ ] **P2.2** B2 (evacuação read-only do prefixo) + heal: réplica/PITR consumindo o
   relatório — status: `todo`
 
@@ -123,7 +156,7 @@ seq do relatório; PITR para single-node) consome o mesmo relatório.
 | P0.2 | p0 | opções + correção de registro | done | este doc | 2026-08-16 |
 | P1.1 | p1 | decidir A/B/C | todo | — | 2026-08-16 |
 | P1.2 | p1 | desenho da API do modo B | todo | — | 2026-08-16 |
-| P2.1 | p2 | implementar + EXPLODE | todo | — | 2026-08-16 |
+| P2.1 | p2 | implementar D (+ refinamentos) | done | corrupt.rs + kernel/reader/truncate + testes | 2026-08-17 |
 | P2.2 | p2 | heal por réplica/PITR | todo | — | 2026-08-16 |
 
 ## Acceptance Criteria
