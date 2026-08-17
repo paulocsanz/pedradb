@@ -2534,6 +2534,7 @@ impl<E: Env> Db<E> {
         }
         // Switch: active → imm; new empty active (writers can continue after return
         // on ConcurrentDb once this returns; single-threaded Db flushes imm next).
+        self.mem.spill_tail();
         self.imm = Some(std::mem::replace(&mut self.mem, MemTable::new()));
         self.flush_imm_to_l0()?;
         self.finish_flush_pipeline()?;
@@ -2557,6 +2558,7 @@ impl<E: Env> Db<E> {
         if self.imm.is_some() || self.mem.is_empty() {
             return Ok(false);
         }
+        self.mem.spill_tail();
         self.imm = Some(std::mem::replace(&mut self.mem, MemTable::new()));
         Ok(true)
     }
@@ -2575,13 +2577,17 @@ impl<E: Env> Db<E> {
         } else if self.mem.is_empty() {
             None
         } else {
+            self.mem.spill_tail();
             Some(std::mem::replace(&mut self.mem, MemTable::new()))
         };
         // Keep a read pin so get/scan still see acked keys during off-lock SST I/O.
-        if let Some(ref table) = taken {
+        if let Some(mut table) = taken {
+            table.spill_tail();
             self.flush_read_pin = Some(table.clone());
+            Ok(Some(table))
+        } else {
+            Ok(None)
         }
-        Ok(taken)
     }
 
     /// Drop the off-lock flush read pin (after a test wants the pre-fix hole).
@@ -2781,7 +2787,9 @@ impl<E: Env> Db<E> {
 
     /// Take the existing imm without cloning a flush pin (park path).
     pub fn take_imm_no_pin(&mut self) -> Option<MemTable> {
-        self.imm.take()
+        let mut t = self.imm.take()?;
+        t.spill_tail();
+        Some(t)
     }
 
     /// Park a flushed mem with no SST file. WAL still covers it (G1).
@@ -4881,6 +4889,7 @@ impl<E: Env> Db<E> {
             self.try_rotate_wal()?;
             return Ok(());
         }
+        self.mem.spill_tail();
         self.imm = Some(std::mem::replace(&mut self.mem, MemTable::new()));
         self.flush_imm_to_l0()?;
         self.finish_flush_pipeline()
@@ -5452,7 +5461,7 @@ impl<'a> MemCountCursor<'a> {
         // Same two branches as the owned memtable stream: tombstone-bearing
         // tables iterate everything (tombstone starts may precede the
         // window), bounded range otherwise.
-        let it = if table.has_range_tombstones() {
+        let it = if table.has_range_tombstones() || table.has_tail() {
             MemCountIter::Filter(Box::new(
                 table
                     .iter_internal()
@@ -5719,17 +5728,10 @@ fn apply_record(mem: &mut MemTable, rec: &WriteRecord) {
 /// RFC-0040: move `WriteOp` Bytes into the memtable (no extra payload memcpy).
 fn apply_ops_owned(mem: &mut MemTable, ops: Vec<WriteOp>) {
     for op in ops {
-        match op.kind {
-            ValueType::Value => {
-                mem.put(op.key, op.sequence, op.value);
-            }
-            ValueType::Deletion => {
-                mem.delete(op.key, op.sequence);
-            }
-            ValueType::RangeDeletion => {
-                mem.delete_range(op.key, op.value, op.sequence);
-            }
-        }
+        mem.insert(
+            crate::key::InternalKey::new(op.key, op.sequence, op.kind),
+            op.value,
+        );
     }
 }
 

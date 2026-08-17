@@ -101,6 +101,9 @@ impl<'a> Iterator for MemInternalRange<'a> {
 pub struct MemTable {
     /// User key → versions newest-first (inline first version).
     map: BTreeMap<Bytes, Versions>,
+    /// Recent inserts not yet in `map` (RFC-0041: apply Ok path is O(1) push;
+    /// [`Self::spill_tail`] runs at stage/park, off the per-write BTree).
+    tail: Vec<Version>,
     /// Approximate bytes for flush triggers (user key + value + trailer).
     approx_bytes: usize,
     /// Range-tombstone entries (full-map fallback on ranged scan when > 0).
@@ -110,6 +113,10 @@ pub struct MemTable {
 }
 
 /// [`InternalKey`] order on `(seq, kind)` only (user key already equal).
+fn version_newer(a: &Version, b: &Version) -> bool {
+    a.key.sequence > b.key.sequence || (a.key.sequence == b.key.sequence && a.key.kind > b.key.kind)
+}
+
 fn ver_cmp(
     a_seq: SequenceNumber,
     a_kind: ValueType,
@@ -147,8 +154,35 @@ impl MemTable {
         self.approx_bytes
     }
 
+    /// Whether any insert is still in the unsorted tail.
+    #[must_use]
+    pub fn has_tail(&self) -> bool {
+        !self.tail.is_empty()
+    }
+
+    /// Spill when the tail would make point/scan walks linear (YCSB A/F).
+    /// Fat apply batches stay under this so Ok stays O(1) push per op.
+    const TAIL_SPILL: usize = 512;
+
+    /// Fold [`Self::tail`] into the BTree (stage/park/scan-prep).
+    pub fn spill_tail(&mut self) {
+        let tail = std::mem::take(&mut self.tail);
+        for v in tail {
+            let entry_bytes = v.key.user_key.len() + v.value.len() + 8;
+            let is_rd = v.key.kind == ValueType::RangeDeletion;
+            self.entries = self.entries.saturating_sub(1);
+            self.approx_bytes = self.approx_bytes.saturating_sub(entry_bytes);
+            if is_rd {
+                self.range_tombstones = self.range_tombstones.saturating_sub(1);
+            }
+            self.insert_map(v.key, v.value);
+        }
+    }
+
     /// Move every version from `other` into `self` (retired L0 fold).
-    pub fn absorb(&mut self, other: Self) {
+    pub fn absorb(&mut self, mut other: Self) {
+        self.spill_tail();
+        other.spill_tail();
         if self.is_empty() {
             *self = other;
             return;
@@ -158,10 +192,10 @@ impl MemTable {
         }
         for (_, vers) in other.map {
             match vers {
-                Versions::One(v) => self.insert(v.key, v.value),
+                Versions::One(v) => self.insert_map(v.key, v.value),
                 Versions::Many(vs) => {
                     for v in vs {
-                        self.insert(v.key, v.value);
+                        self.insert_map(v.key, v.value);
                     }
                 }
             }
@@ -170,6 +204,35 @@ impl MemTable {
 
     /// Insert a put or deletion. Does not assign sequence numbers — caller does.
     pub fn insert(&mut self, key: InternalKey, value: Bytes) {
+        let entry_bytes = key.user_key.len() + value.len() + 8;
+        let is_rd = key.kind == ValueType::RangeDeletion;
+        // Consecutive same-seq replace only (O(1)). apply_mc4 keys are distinct;
+        // a full tail scan would be O(n²) and slower than the BTree we replaced.
+        if let Some(v) = self.tail.last_mut() {
+            if v.key.sequence == key.sequence
+                && v.key.kind == key.kind
+                && v.key.user_key == key.user_key
+            {
+                let old = std::mem::replace(&mut v.value, value);
+                self.approx_bytes = self
+                    .approx_bytes
+                    .saturating_sub(old.len())
+                    .saturating_add(v.value.len());
+                return;
+            }
+        }
+        self.entries = self.entries.saturating_add(1);
+        self.approx_bytes = self.approx_bytes.saturating_add(entry_bytes);
+        if is_rd {
+            self.range_tombstones = self.range_tombstones.saturating_add(1);
+        }
+        self.tail.push(Version { key, value });
+        if self.tail.len() >= Self::TAIL_SPILL {
+            self.spill_tail();
+        }
+    }
+
+    fn insert_map(&mut self, key: InternalKey, value: Bytes) {
         let entry_bytes = key.user_key.len() + value.len() + 8;
         let is_rd = key.kind == ValueType::RangeDeletion;
         match self.map.entry(key.user_key.clone()) {
@@ -282,8 +345,24 @@ impl MemTable {
         user_key: &[u8],
         snapshot: SequenceNumber,
     ) -> Option<(SequenceNumber, Lookup)> {
-        let vers = self.map.get(user_key)?;
-        let v = vers.iter().find(|v| v.key.sequence <= snapshot)?;
+        let from_tail = self.tail_best(user_key, snapshot);
+        let from_map = self
+            .map
+            .get(user_key)
+            .and_then(|vers| vers.iter().find(|v| v.key.sequence <= snapshot));
+        // Equal (seq, kind): tail was inserted later (same-seq replace after spill).
+        let v = match (from_tail, from_map) {
+            (Some(t), Some(m)) => {
+                if version_newer(m, t) {
+                    m
+                } else {
+                    t
+                }
+            }
+            (Some(t), None) => t,
+            (None, Some(m)) => m,
+            (None, None) => return None,
+        };
         debug_assert_eq!(v.key.user_key.as_ref(), user_key);
         let look = match v.key.kind {
             ValueType::Deletion => Lookup::Deleted,
@@ -297,6 +376,20 @@ impl MemTable {
             ValueType::RangeDeletion => return None,
         };
         Some((v.key.sequence, look))
+    }
+
+    fn tail_best(&self, user_key: &[u8], snapshot: SequenceNumber) -> Option<&Version> {
+        let mut best: Option<&Version> = None;
+        for v in &self.tail {
+            if v.key.user_key.as_ref() != user_key || v.key.sequence > snapshot {
+                continue;
+            }
+            let better = best.is_none_or(|b| version_newer(v, b));
+            if better {
+                best = Some(v);
+            }
+        }
+        best
     }
 
     /// Append range tombstones visible at `snapshot` (O(n) — only call when
@@ -320,6 +413,16 @@ impl MemTable {
                     sequence: v.key.sequence,
                 });
             }
+        }
+        for v in &self.tail {
+            if v.key.kind != ValueType::RangeDeletion || v.key.sequence > snapshot {
+                continue;
+            }
+            out.push(crate::merge::RangeTombstone {
+                start: v.key.user_key.clone(),
+                end: v.value.clone(),
+                sequence: v.key.sequence,
+            });
         }
     }
 
@@ -359,14 +462,37 @@ impl MemTable {
                 }
             }
         }
+        for v in &self.tail {
+            if v.key.kind != ValueType::RangeDeletion || v.key.sequence > snapshot {
+                continue;
+            }
+            if v.key.sequence > point_seq
+                && user_key >= v.key.user_key.as_ref()
+                && user_key < v.value.as_ref()
+            {
+                return true;
+            }
+        }
         false
     }
 
     /// All internal versions in [`InternalKey`] order (for SST flush).
     pub fn iter_internal(&self) -> impl Iterator<Item = (&InternalKey, &Bytes)> + '_ {
-        self.map
+        if self.tail.is_empty() {
+            return Box::new(
+                self.map
+                    .values()
+                    .flat_map(|vers| vers.iter().map(|v| (&v.key, &v.value))),
+            ) as Box<dyn Iterator<Item = (&InternalKey, &Bytes)> + '_>;
+        }
+        let mut items: Vec<_> = self
+            .map
             .values()
             .flat_map(|vers| vers.iter().map(|v| (&v.key, &v.value)))
+            .chain(self.tail.iter().map(|v| (&v.key, &v.value)))
+            .collect();
+        items.sort_by(|a, b| a.0.cmp(b.0));
+        Box::new(items.into_iter()) as Box<dyn Iterator<Item = (&InternalKey, &Bytes)> + '_>
     }
 
     /// Whether any range tombstone is stored (ranged scan must include them).
@@ -385,7 +511,15 @@ impl MemTable {
         start: Bound<&'a [u8]>,
         end: Bound<&'a [u8]>,
     ) -> impl Iterator<Item = (&'a InternalKey, &'a Bytes)> + 'a {
-        self.iter_internal_range_cursor(start, end)
+        if self.tail.is_empty() {
+            return Box::new(self.iter_internal_range_cursor(start, end))
+                as Box<dyn Iterator<Item = (&'a InternalKey, &'a Bytes)> + 'a>;
+        }
+        Box::new(
+            self.iter_internal().filter(move |(k, _)| {
+                crate::merge::user_key_in_range(k.user_key.as_ref(), start, end)
+            }),
+        ) as Box<dyn Iterator<Item = (&'a InternalKey, &'a Bytes)> + 'a>
     }
 
     /// Concrete (no `dyn`) range cursor — count/scan hot path.
@@ -420,22 +554,32 @@ impl MemTable {
             (_, Some(p)) => Bound::Excluded(p),
             (_, None) => Bound::Unbounded,
         };
-        for (uk, vers) in self
+        let mut keys: Vec<Bytes> = self
             .map
             .range::<[u8], _>((Bound::Included(prefix), end_b))
-            .rev()
-        {
+            .filter(|(uk, _)| prefix.is_empty() || uk.starts_with(prefix))
+            .map(|(uk, _)| uk.clone())
+            .collect();
+        for v in &self.tail {
+            let uk = v.key.user_key.as_ref();
             if !prefix.is_empty() && !uk.starts_with(prefix) {
                 continue;
             }
-            let Some(v) = vers.iter().find(|v| v.key.sequence <= snapshot) else {
-                continue;
+            let in_lo = uk >= prefix;
+            let in_hi = match end_b {
+                Bound::Included(h) => uk <= h,
+                Bound::Excluded(h) => uk < h,
+                Bound::Unbounded => true,
             };
-            match v.key.kind {
-                ValueType::Value if !self.range_deleted(uk.as_ref(), v.key.sequence, snapshot) => {
-                    return Some((uk.clone(), v.value.clone()));
-                }
-                ValueType::Value | ValueType::Deletion | ValueType::RangeDeletion => {}
+            if in_lo && in_hi {
+                keys.push(v.key.user_key.clone());
+            }
+        }
+        keys.sort();
+        keys.dedup();
+        for uk in keys.into_iter().rev() {
+            if let Some((_, Lookup::Found(val))) = self.get_entry(&uk, snapshot) {
+                return Some((uk, val));
             }
         }
         None
@@ -454,6 +598,12 @@ impl MemTable {
                     .approx_bytes
                     .saturating_add(uk.len() + v.value.len() + 8);
             }
+        }
+        for v in &mut self.tail {
+            v.value = f(&v.value);
+            self.approx_bytes = self
+                .approx_bytes
+                .saturating_add(v.key.user_key.len() + v.value.len() + 8);
         }
     }
 
@@ -475,14 +625,24 @@ impl MemTable {
         end: Bound<&'a [u8]>,
         snapshot: SequenceNumber,
     ) -> impl Iterator<Item = (Bytes, Bytes)> + 'a {
-        self.map
+        let mut keys: Vec<Bytes> = self
+            .map
             .range::<[u8], _>((start, end))
-            .filter_map(move |(uk, vers)| {
-                let v = vers.iter().find(|v| v.key.sequence <= snapshot)?;
-                match v.key.kind {
-                    ValueType::Value => Some((uk.clone(), v.value.clone())),
-                    ValueType::Deletion | ValueType::RangeDeletion => None,
+            .map(|(uk, _)| uk.clone())
+            .collect();
+        if !self.tail.is_empty() {
+            for v in &self.tail {
+                if crate::merge::user_key_in_range(v.key.user_key.as_ref(), start, end) {
+                    keys.push(v.key.user_key.clone());
                 }
+            }
+            keys.sort();
+            keys.dedup();
+        }
+        keys.into_iter()
+            .filter_map(move |uk| match self.get_entry(&uk, snapshot) {
+                Some((_, Lookup::Found(val))) => Some((uk, val)),
+                _ => None,
             })
     }
 }
@@ -688,12 +848,14 @@ mod tests {
     fn first_put_stays_one_then_promotes() {
         let mut mt = MemTable::new();
         mt.put(b"k".as_slice(), 1, b"v1".as_slice());
+        mt.spill_tail();
         assert!(matches!(
             mt.map.get(b"k".as_slice()),
             Some(Versions::One(_))
         ));
         mt.put(b"k".as_slice(), 3, b"v3".as_slice());
         mt.put(b"k".as_slice(), 2, b"v2".as_slice());
+        mt.spill_tail();
         match mt.map.get(b"k".as_slice()) {
             Some(Versions::Many(vs)) => {
                 assert_eq!(vs.len(), 3);
@@ -705,5 +867,84 @@ mod tests {
         }
         assert_eq!(mt.get(b"k", 10), Lookup::Found(Bytes::from_static(b"v3")));
         assert_eq!(mt.get(b"k", 2), Lookup::Found(Bytes::from_static(b"v2")));
+    }
+
+    #[test]
+    fn get_sees_tail_before_spill() {
+        let mut mt = MemTable::new();
+        mt.put(b"a".as_slice(), 1, b"va".as_slice());
+        mt.put(b"b".as_slice(), 2, b"vb".as_slice());
+        assert!(mt.has_tail());
+        assert!(mt.map.is_empty());
+        assert_eq!(mt.get(b"a", 2), Lookup::Found(Bytes::from_static(b"va")));
+        assert_eq!(mt.get(b"b", 2), Lookup::Found(Bytes::from_static(b"vb")));
+        mt.spill_tail();
+        assert!(!mt.has_tail());
+        assert_eq!(mt.get(b"a", 2), Lookup::Found(Bytes::from_static(b"va")));
+        assert_eq!(mt.len(), 2);
+    }
+
+    #[test]
+    fn tail_delete_after_spill_hides_map_put() {
+        let mut mt = MemTable::new();
+        mt.put(b"k".as_slice(), 1, b"v".as_slice());
+        mt.spill_tail();
+        mt.delete(b"k".as_slice(), 2);
+        assert_eq!(mt.get(b"k", 2), Lookup::Deleted);
+        let snap: Vec<_> = mt.iter_snapshot(2).collect();
+        assert!(snap.is_empty(), "{snap:?}");
+        let (k, v) = mt
+            .last_visible_under_prefix(b"k", 2, None)
+            .map_or((Bytes::new(), Bytes::new()), |x| x);
+        assert!(
+            mt.last_visible_under_prefix(b"k", 2, None).is_none(),
+            "deleted key still visible as {k:?}={v:?}"
+        );
+    }
+
+    #[test]
+    fn same_seq_replace_after_spill_prefers_tail() {
+        let mut mt = MemTable::new();
+        mt.put(b"k".as_slice(), 1, b"old".as_slice());
+        mt.spill_tail();
+        mt.put(b"k".as_slice(), 1, b"new".as_slice());
+        assert_eq!(mt.get(b"k", 1), Lookup::Found(Bytes::from_static(b"new")));
+    }
+
+    #[test]
+    fn fat_apply_stays_in_tail() {
+        let mut mt = MemTable::new();
+        for i in 0..64u32 {
+            mt.put(
+                Bytes::copy_from_slice(&i.to_le_bytes()),
+                u64::from(i) + 1,
+                b"v".as_slice(),
+            );
+        }
+        assert!(mt.has_tail());
+        assert!(mt.map.is_empty());
+        assert_eq!(mt.len(), 64);
+        assert_eq!(
+            mt.get(&1u32.to_le_bytes(), 64),
+            Lookup::Found(Bytes::from_static(b"v"))
+        );
+    }
+
+    #[test]
+    fn tail_auto_spills_at_threshold() {
+        let mut mt = MemTable::new();
+        for i in 0..MemTable::TAIL_SPILL {
+            mt.put(
+                Bytes::copy_from_slice(&(i as u64).to_le_bytes()),
+                i as u64 + 1,
+                b"v".as_slice(),
+            );
+        }
+        assert!(!mt.has_tail());
+        assert_eq!(mt.len(), MemTable::TAIL_SPILL);
+        assert_eq!(
+            mt.get(&0u64.to_le_bytes(), MemTable::TAIL_SPILL as u64),
+            Lookup::Found(Bytes::from_static(b"v"))
+        );
     }
 }
