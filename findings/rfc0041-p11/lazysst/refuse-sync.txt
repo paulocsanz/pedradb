@@ -1,0 +1,1 @@
+rocks-parity-compare: peer has sync=true — that is NOT the official Rocks default. Re-run the rocks side with ROCKS_PARITY_SYNC=0. Override only with ROCKS_PARITY_ALLOW_SYNC_PEER=1.

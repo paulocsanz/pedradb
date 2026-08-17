@@ -58,7 +58,7 @@
 
 ### P1 — escritas ≥ 2× default
 
-- [ ] **P1.1** `deps_apply_batch_mc4` e `deps_raftlog_mc4` ≥ 2.0 vs default da run — status: `doing` (L0 write sem `fdatasync` até rotate do WAL; idle64 apply_mc4 **0.94**)
+- [ ] **P1.1** `deps_apply_batch_mc4` e `deps_raftlog_mc4` ≥ 2.0 vs default da run — status: `doing` (L0 sem fd até rotate; lazysst **2/16**, apply_mc4 **0.79** — [lazysst](../../findings/rfc0041-p11/lazysst/README.md))
 - [ ] **P1.2** `ycsb_a` / `ycsb_f` / `deps_cache_overwrite` (1c e `_mc4` se existirem) ≥ 2.0 vs default — status: `todo`
 - [ ] **P1.3** `deps_apply_batch` e `deps_raftlog` **1 cliente** ≥ 2.0 vs default — status: `todo`
 

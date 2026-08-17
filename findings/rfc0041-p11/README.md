@@ -100,8 +100,12 @@ After trigger, keep compacting until L0==0. Official remesura
 ## 64 MiB buffer + idle-only L0 compact
 
 [`idle64/`](idle64/README.md): **3/16 ≥ 2.0** (C 2.43, E 4.26, scan 18).
-YCSB A 1c 14 k → **53 k** (max 0.2 ms). apply_mc4 still ~2 k — one 64 MiB
-SST `fsync` mid-apply. Next: skip imm drain while writers are active.
+
+## L0 without SST fsync until WAL rotate
+
+[`lazysst/`](lazysst/README.md): **2/16 ≥ 2.0**. apply_mc4 still ~1.8 k —
+the 64 MiB encode/write remains, not the file fd. FLOOR not enabled.
+
 
 ## Tests
 
