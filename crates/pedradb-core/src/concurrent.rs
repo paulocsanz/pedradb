@@ -94,11 +94,11 @@ const CATCHUP_WINDOW_DEFAULT: Duration = Duration::from_micros(50);
 /// disabled (see `last_multi_ns`). 250 µs covers apply pre→com on this box.
 const MULTI_HOLD: Duration = Duration::from_micros(250);
 
-/// Skip the catch-up wait when the drained group already has this many user
-/// ops (apply = 64, raftlog = 16). A 20 µs fat hold (fat20b) raised
-/// avg_group 1.54→1.73 and cut apply_mc4 2.1 k→1.5 k. Small YCSB puts
-/// still wait so they can share an fsync.
-const CATCHUP_SKIP_OPS: usize = 16;
+/// Skip the catch-up wait only for apply-sized batches (64 ops). Raftlog is
+/// 16 ops — skipping at 16 left `deps_raftlog_mc4` at ~0.6–0.8× (one fd per
+/// client). A 20 µs hold on 64-op apply (fat20b) cut apply_mc4; do not wait
+/// on apply. YCSB 1-op puts still wait so they share an fsync.
+const CATCHUP_SKIP_OPS: usize = 32;
 
 struct WriteGroupState {
     pending: VecDeque<PendingWrite>,
@@ -2492,8 +2492,8 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
     }
 
-    /// RFC-0041 P1.1: apply-sized batches skip the long catch-up; late-join
-    /// still shares a `fdatasync` when clients are already queued; drain_imm
+    /// RFC-0041 P1.1: raftlog-sized (16) batches still catch-up so 4 clients
+    /// share a `fdatasync`; apply-sized (64) skip the wait. drain_imm
     /// persists; keys survive reopen.
     #[test]
     fn large_batch_skips_catchup_and_flush_reopens() {
