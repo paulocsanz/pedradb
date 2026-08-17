@@ -1963,18 +1963,12 @@ impl<E: Env> Db<E> {
                 continue;
             }
             self.scan_sst_probed.fetch_add(1, Ordering::Relaxed);
-            let cache = &self.block_cache;
-            let path = table.path();
-            let load: Box<
-                dyn FnMut(usize) -> Option<std::sync::Arc<Vec<(InternalKey, Bytes)>>> + '_,
-            > =
-                Box::new(move |bi| {
-                    Some(cache.get_or_insert_with(path, bi, || {
-                        table.decode_block(bi).unwrap_or_default()
-                    }))
-                });
             cursors.push(CountCursor::Sst(SstCountCursor::new(
-                table, start, end, snapshot, load,
+                table,
+                start,
+                end,
+                snapshot,
+                &self.block_cache,
             )));
         }
         let cap = limit.unwrap_or(usize::MAX);
@@ -1996,19 +1990,37 @@ impl<E: Env> Db<E> {
             }
             let Some(bi) = best else { break };
             let head = cursors[bi].head().expect("best head");
-            let user = head.user_key.clone();
             let kind = head.kind;
             let seq = head.sequence;
-            let visible = kind == ValueType::Value
-                && !crate::merge::range_deleted(user.as_ref(), seq, &range_dels);
+            // Stack copy of the user key so we can step cursors without
+            // cloning `Bytes` (RFC-0040 P0.3). Bench keys fit in 192 B.
+            const STACK: usize = 192;
+            let ulen = head.user_key.len();
+            let visible = if ulen <= STACK {
+                let mut buf = [0u8; STACK];
+                buf[..ulen].copy_from_slice(head.user_key.as_ref());
+                let user = &buf[..ulen];
+                let vis = kind == ValueType::Value
+                    && !crate::merge::range_deleted(user, seq, &range_dels);
+                for c in cursors.iter_mut() {
+                    if c.head().is_some_and(|h| h.user_key.as_ref() == user) {
+                        c.step_user(user);
+                    }
+                }
+                vis
+            } else {
+                let user = head.user_key.clone();
+                let vis = kind == ValueType::Value
+                    && !crate::merge::range_deleted(user.as_ref(), seq, &range_dels);
+                for c in cursors.iter_mut() {
+                    if c.head().is_some_and(|h| h.user_key == user) {
+                        c.step_user(user.as_ref());
+                    }
+                }
+                vis
+            };
             if visible {
                 count += 1;
-            }
-            // Step every layer past this user (dedup across versions).
-            for c in cursors.iter_mut() {
-                if c.head().is_some_and(|h| h.user_key == user) {
-                    c.step_user(user.as_ref());
-                }
             }
         }
         count
@@ -4151,15 +4163,12 @@ impl<E: Env> Db<E> {
         durability: WriteOptions,
     ) -> Result<()> {
         self.ensure_not_fenced()?;
-        let feed_entries: Vec<ChangeEntry> =
-            records.iter().map(ChangeEntry::from_write_op).collect();
-        let rec = WriteRecord { ops: records };
         // Append then sync: if either fails, caller rolls back sequence; mem not applied.
         // RFC-0015 H1: if append OK and required sync fails, fence so later fsyncs
         // cannot silently publish an unacked prefix while in-process mem diverges.
-        let encoded = rec.encode();
-        self.bytes_written_wal = self.bytes_written_wal.saturating_add(encoded.len() as u64);
-        self.wal.append_record(&encoded)?;
+        // RFC-0040: encode into WAL scratch (one payload memcpy), then move ops to mem.
+        let n = self.wal.append_write_ops(&records)?;
+        self.bytes_written_wal = self.bytes_written_wal.saturating_add(n);
         let do_sync = durability.sync.unwrap_or(self.sync);
         if do_sync {
             if let Err(e) = self.wal.sync_data() {
@@ -4172,12 +4181,14 @@ impl<E: Env> Db<E> {
         // never gate commit success on a second fsync/rename (RFC-0019) — reopen
         // rebuilds missing entries from WAL. Always apply mem once WAL is durable
         // so get and feed stay aligned and sequences are not rolled back.
-        self.change_log.extend(feed_entries);
+        // Bytes::clone is a refcount — payload is not memcpy'd again.
+        self.change_log
+            .extend(records.iter().map(ChangeEntry::from_write_op));
         if do_sync {
             // RFC-0031: debounce the cache store. WAL is already durable.
             self.maybe_persist_changelog_after_durable_commit();
         }
-        apply_record(&mut self.mem, &rec);
+        apply_ops_owned(&mut self.mem, records);
         self.invalidate_read_answers();
         Ok(())
     }
@@ -4250,7 +4261,7 @@ impl<E: Env> Db<E> {
 
     /// Apply prepared ops to the memtable after durable WAL.
     pub(crate) fn apply_ops_to_mem(&mut self, ops: Vec<WriteOp>) {
-        apply_record(&mut self.mem, &WriteRecord { ops });
+        apply_ops_owned(&mut self.mem, ops);
         self.invalidate_read_answers();
     }
 
@@ -4313,12 +4324,9 @@ impl<E: Env> Db<E> {
         // member that had reached this point (fail-closed, mem not applied).
         let mut encoded: Vec<Vec<u8>> = Vec::with_capacity(prepared.len());
         for (_, write_ops, _) in &prepared {
-            encoded.push(
-                WriteRecord {
-                    ops: write_ops.clone(),
-                }
-                .encode(),
-            );
+            let mut buf = Vec::new();
+            crate::batch::encode_ops(write_ops, &mut buf);
+            encoded.push(buf);
         }
         let appended: Vec<(usize, Vec<WriteOp>, SequenceNumber)>;
         {
@@ -4897,13 +4905,27 @@ impl<'a> MemCountCursor<'a> {
     }
 }
 
+/// Concrete SST block loader (RFC-0040: no `Box<dyn>` per scan).
+struct SstBlockLoad<'a> {
+    cache: &'a crate::cache::BlockCache,
+    table: &'a crate::sst::SstTable,
+}
+
+impl SstBlockLoad<'_> {
+    fn load(&self, bi: usize) -> Option<std::sync::Arc<Vec<(InternalKey, Bytes)>>> {
+        Some(self.cache.get_or_insert_with(self.table.path(), bi, || {
+            self.table.decode_block(bi).unwrap_or_default()
+        }))
+    }
+}
+
 /// SST cursor: walks only overlapping blocks (block cache) with the same
 /// filtering as `SstRangeIter`, minus the owned-key clone per yield.
 struct SstCountCursor<'a> {
     current: Option<std::sync::Arc<Vec<(InternalKey, Bytes)>>>,
     idx: usize,
     blocks: std::vec::IntoIter<usize>,
-    load: Box<dyn FnMut(usize) -> Option<std::sync::Arc<Vec<(InternalKey, Bytes)>>> + 'a>,
+    load: SstBlockLoad<'a>,
     /// `(bytes, inclusive)` bound pairs resolved once.
     start: Option<(Bytes, bool)>,
     end: Option<(Bytes, bool)>,
@@ -4917,7 +4939,7 @@ impl<'a> SstCountCursor<'a> {
         start: Bound<&[u8]>,
         end: Bound<&[u8]>,
         snapshot: SequenceNumber,
-        load: Box<dyn FnMut(usize) -> Option<std::sync::Arc<Vec<(InternalKey, Bytes)>>> + 'a>,
+        cache: &'a crate::cache::BlockCache,
     ) -> Self {
         let start = match start {
             Bound::Unbounded => None,
@@ -4939,7 +4961,7 @@ impl<'a> SstCountCursor<'a> {
             } else {
                 Vec::new().into_iter()
             },
-            load,
+            load: SstBlockLoad { cache, table },
             start,
             end,
             snapshot,
@@ -5002,7 +5024,7 @@ impl<'a> SstCountCursor<'a> {
                 self.exhausted = true;
                 return;
             };
-            self.current = (self.load)(bi);
+            self.current = self.load.load(bi);
             self.idx = match (&self.current, &self.start) {
                 (Some(block), Some((s, true))) => {
                     block.partition_point(|(k, _)| k.user_key.as_ref() < s.as_ref())
@@ -5101,6 +5123,23 @@ fn apply_record(mem: &mut MemTable, rec: &WriteRecord) {
             }
             ValueType::RangeDeletion => {
                 mem.delete_range(op.key.clone(), op.value.clone(), op.sequence);
+            }
+        }
+    }
+}
+
+/// RFC-0040: move `WriteOp` Bytes into the memtable (no extra payload memcpy).
+fn apply_ops_owned(mem: &mut MemTable, ops: Vec<WriteOp>) {
+    for op in ops {
+        match op.kind {
+            ValueType::Value => {
+                mem.put(op.key, op.sequence, op.value);
+            }
+            ValueType::Deletion => {
+                mem.delete(op.key, op.sequence);
+            }
+            ValueType::RangeDeletion => {
+                mem.delete_range(op.key, op.value, op.sequence);
             }
         }
     }

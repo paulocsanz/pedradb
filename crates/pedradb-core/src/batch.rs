@@ -105,19 +105,13 @@ impl WriteRecord {
     #[must_use]
     pub fn encode(&self) -> Vec<u8> {
         let mut out = Vec::with_capacity(estimate_size(self));
-        out.push(WRITE_RECORD_VERSION);
-        out.extend_from_slice(&(u32::try_from(self.ops.len()).unwrap_or(u32::MAX)).to_le_bytes());
-        for op in &self.ops {
-            out.push(op.kind.as_u8());
-            out.extend_from_slice(&op.sequence.to_le_bytes());
-            let key_len = u32::try_from(op.key.len()).unwrap_or(u32::MAX);
-            out.extend_from_slice(&key_len.to_le_bytes());
-            out.extend_from_slice(&op.key);
-            let val_len = u32::try_from(op.value.len()).unwrap_or(u32::MAX);
-            out.extend_from_slice(&val_len.to_le_bytes());
-            out.extend_from_slice(&op.value);
-        }
+        self.encode_into(&mut out);
         out
+    }
+
+    /// Encode into `out` (does not clear it). Same bytes as [`Self::encode`].
+    pub fn encode_into(&self, out: &mut Vec<u8>) {
+        encode_ops(&self.ops, out);
     }
 
     /// Decode a payload produced by [`Self::encode`].
@@ -177,13 +171,29 @@ impl WriteRecord {
     }
 }
 
+/// Encode `ops` as one logical WAL payload (RFC-0040: no extra `WriteRecord` clone).
+pub fn encode_ops(ops: &[WriteOp], out: &mut Vec<u8>) {
+    out.reserve(1 + 4 + ops.iter().map(op_encoded_len).sum::<usize>());
+    out.push(WRITE_RECORD_VERSION);
+    out.extend_from_slice(&(u32::try_from(ops.len()).unwrap_or(u32::MAX)).to_le_bytes());
+    for op in ops {
+        out.push(op.kind.as_u8());
+        out.extend_from_slice(&op.sequence.to_le_bytes());
+        let key_len = u32::try_from(op.key.len()).unwrap_or(u32::MAX);
+        out.extend_from_slice(&key_len.to_le_bytes());
+        out.extend_from_slice(&op.key);
+        let val_len = u32::try_from(op.value.len()).unwrap_or(u32::MAX);
+        out.extend_from_slice(&val_len.to_le_bytes());
+        out.extend_from_slice(&op.value);
+    }
+}
+
+fn op_encoded_len(o: &WriteOp) -> usize {
+    1 + 8 + 4 + o.key.len() + 4 + o.value.len()
+}
+
 fn estimate_size(rec: &WriteRecord) -> usize {
-    1 + 4
-        + rec
-            .ops
-            .iter()
-            .map(|o| 1 + 8 + 4 + o.key.len() + 4 + o.value.len())
-            .sum::<usize>()
+    1 + 4 + rec.ops.iter().map(op_encoded_len).sum::<usize>()
 }
 
 /// Minimal little-endian cursor for decoding (no external dep).
@@ -251,6 +261,9 @@ mod tests {
         let decoded = WriteRecord::decode(&encoded).unwrap();
         assert_eq!(decoded, rec);
         assert_eq!(decoded.max_sequence(), Some(2));
+        let mut into = Vec::new();
+        rec.encode_into(&mut into);
+        assert_eq!(into, encoded);
     }
 
     #[test]

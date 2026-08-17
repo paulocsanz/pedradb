@@ -35,6 +35,8 @@ pub use writer::WalWriter;
 /// directly over a `Cursor`.
 pub struct Wal<F: EnvFile = <StdEnv as Env>::File> {
     writer: WalWriter<F>,
+    /// Reused logical-record encode buffer (RFC-0040).
+    logical: Vec<u8>,
 }
 
 impl Wal<<StdEnv as Env>::File> {
@@ -80,6 +82,7 @@ impl<F: EnvFile> Wal<F> {
         let file = env.create(path.as_ref())?;
         Ok(Self {
             writer: WalWriter::new(file)?,
+            logical: Vec::new(),
         })
     }
 
@@ -91,6 +94,7 @@ impl<F: EnvFile> Wal<F> {
         let file = env.open_append(path.as_ref())?;
         Ok(Self {
             writer: WalWriter::new(file)?,
+            logical: Vec::new(),
         })
     }
 
@@ -101,6 +105,18 @@ impl<F: EnvFile> Wal<F> {
     /// Returns [`std::io::Error`] propagated from the underlying file.
     pub fn append_record(&mut self, data: &[u8]) -> Result<()> {
         self.writer.add_record(data)
+    }
+
+    /// Encode `ops` into the reused logical scratch and append (one memcpy).
+    ///
+    /// # Errors
+    /// Same as [`Self::append_record`].
+    pub fn append_write_ops(&mut self, ops: &[crate::batch::WriteOp]) -> Result<u64> {
+        self.logical.clear();
+        crate::batch::encode_ops(ops, &mut self.logical);
+        let n = self.logical.len() as u64;
+        self.writer.add_record(&self.logical)?;
+        Ok(n)
     }
 
     /// Append several logical records with **one** `write` (group commit).

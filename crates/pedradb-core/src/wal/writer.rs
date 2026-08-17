@@ -20,6 +20,8 @@ pub struct WalWriter<W> {
     out: W,
     /// Bytes consumed within the current 32 KiB block.
     block_offset: usize,
+    /// Reused framing buffer (RFC-0040: no per-record malloc of the payload).
+    frame: Vec<u8>,
 }
 
 impl<W: Write + Seek> WalWriter<W> {
@@ -42,6 +44,7 @@ impl<W: Write + Seek> WalWriter<W> {
         Ok(Self {
             out,
             block_offset: pos % BLOCK_SIZE,
+            frame: Vec::new(),
         })
     }
 
@@ -54,9 +57,12 @@ impl<W: Write + Seek> WalWriter<W> {
     /// Never in practice; `block_offset` is an internal invariant kept below
     /// `BLOCK_SIZE`. The `checked_sub` guards against a logic regression.
     pub fn add_record(&mut self, data: &[u8]) -> Result<()> {
-        let mut buf: Vec<u8> = Vec::with_capacity(data.len() + 2 * HEADER_SIZE);
-        self.fragment_into(data, &mut buf);
-        self.out.write_all(&buf)?;
+        let mut frame = std::mem::take(&mut self.frame);
+        frame.clear();
+        frame.reserve(data.len() + 2 * HEADER_SIZE);
+        self.fragment_into(data, &mut frame);
+        self.out.write_all(&frame)?;
+        self.frame = frame;
         Ok(())
     }
 
@@ -72,12 +78,14 @@ impl<W: Write + Seek> WalWriter<W> {
         if datas.is_empty() {
             return Ok(());
         }
-        let mut buf: Vec<u8> =
-            Vec::with_capacity(datas.iter().map(|d| d.len() + HEADER_SIZE * 2).sum());
+        let mut frame = std::mem::take(&mut self.frame);
+        frame.clear();
+        frame.reserve(datas.iter().map(|d| d.len() + HEADER_SIZE * 2).sum());
         for data in datas {
-            self.fragment_into(data, &mut buf);
+            self.fragment_into(data, &mut frame);
         }
-        self.out.write_all(&buf)?;
+        self.out.write_all(&frame)?;
+        self.frame = frame;
         Ok(())
     }
 
