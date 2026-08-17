@@ -103,8 +103,13 @@ After trigger, keep compacting until L0==0. Official remesura
 
 ## L0 without SST fsync until WAL rotate
 
-[`lazysst/`](lazysst/README.md): **2/16 ≥ 2.0**. apply_mc4 still ~1.8 k —
-the 64 MiB encode/write remains, not the file fd. FLOOR not enabled.
+[`lazysst/`](lazysst/README.md): **2/16 ≥ 2.0**.
+
+## Stream L0 SST write
+
+[`streamsst/`](streamsst/README.md): **3/16 ≥ 2.0** (C/E/MVCC). apply_mc4
+still ~1.8 k. FLOOR not enabled.
+
 
 
 ## Tests
