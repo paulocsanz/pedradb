@@ -112,10 +112,11 @@ read/insert/scan/RMW mix) cannot drift between engines:
 - `compat` — `rocksdb-compat` on pedradb-core (single node, single client,
   WAL fsync before Ok).
 - `rocksdb` — real RocksDB via the `rocksdb` crate (feature `real`, matching
-  the `pedradb-oracle` pin 0.22 / librocksdb-sys 8.10, no compression codecs
-  — payload is random bytes). Durability is labeled: default
-  `ROCKS_PARITY_SYNC=1` (sync per write, matched to Pedra's contract);
-  `ROCKS_PARITY_SYNC=0` runs RocksDB's async-WAL default as a reference.
+  the `pedradb-oracle` pin 0.22 / librocksdb-sys 8.10). **Official peer =
+  Rocks default** (`WriteOptions.sync=false`, `ROCKS_PARITY_SYNC=0`). Pedra
+  still `fdatasync`s before Ok. That is the point: more durability **and**
+  beat default Rocks. `ROCKS_PARITY_SYNC=1` is an extra same-class column,
+  never the win condition.
 
 ```bash
 # compat side

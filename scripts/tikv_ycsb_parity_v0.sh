@@ -24,7 +24,9 @@ export ROCKS_YCSB_OPS="${ROCKS_YCSB_OPS:-2000}"
 export ROCKS_YCSB_PAYLOAD="${ROCKS_YCSB_PAYLOAD:-1000}"
 export ROCKS_YCSB_DIST="${ROCKS_YCSB_DIST:-zipfian}"
 export ROCKS_PARITY_SUITE="${ROCKS_PARITY_SUITE:-ycsb,deps}"
-export ROCKS_PARITY_SYNC="${ROCKS_PARITY_SYNC:-1}"
+# Official peer = Rocks **default** (async WAL). Pedra still fdatasyncs.
+# SYNC=1 is optional same-class column, not the win condition.
+export ROCKS_PARITY_SYNC="${ROCKS_PARITY_SYNC:-0}"
 FULL="${ROCKS_PARITY_FULL_SYNC:-0}"
 export ROCKS_PARITY_FULL_SYNC="$FULL"
 # RFC-0035 P2.2: MVCC+scan ≤2× vs same-class F_FULLFSYNC (do not gate ycsb C/E).

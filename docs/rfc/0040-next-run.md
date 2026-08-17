@@ -6,4 +6,4 @@ Handoff operacional: **[RFC-0040 § Next run](0040-fsync-always-beats-rocks-asyn
 
 Fazer a seguir: **P2.1 scan** (p50 já ganha do async; qps morre com L0=4–9). Depois P2.2 pipeline encode∥fsync no host se apply MC ainda for o alvo.
 
-Não reabrir: fd always-on *pode* ganhar do async (piso = ack/grupo). Coluna async obrigatória. Sem skip de sync, sem thread no core.
+**Peer oficial = Rocks default (`sync=false`).** Pedra mantém `fdatasync` e **mesmo assim** tem de ganhar. “Contrato diferente” não é desculpa nem critério de vitória. `SYNC=1` é coluna extra. Sem skip de sync, sem thread no core.

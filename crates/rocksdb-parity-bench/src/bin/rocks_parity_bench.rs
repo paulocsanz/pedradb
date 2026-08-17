@@ -8,7 +8,8 @@
 //!   suites: ROCKS_PARITY_SUITE (default "ycsb,deps"; csv, "all" = both)
 //!
 //! Env: ROCKS_YCSB_RECORDS/OPS/PAYLOAD/DIST (uniform|zipfian), ROCKS_DEPS_BATCH
-//! (ops per apply commit), ROCKS_PARITY_SYNC (rocksdb engine only; 1 = sync per
+//! (ops per apply commit), ROCKS_PARITY_SYNC (rocksdb engine only; **0 = default
+//! Rocks async WAL — official peer**; 1 = sync-per-write, same-class column).
 //! write to match Pedra fsync-before-Ok).
 //!
 //! Writes <out_dir>/rocks_parity_bench.json.
@@ -64,7 +65,7 @@ fn main() {
         "rocksdb" => {
             #[cfg(feature = "real")]
             {
-                let sync = rocksdb_parity_bench::env_usize("ROCKS_PARITY_SYNC", 1) != 0;
+                let sync = rocksdb_parity_bench::env_usize("ROCKS_PARITY_SYNC", 0) != 0;
                 let e = rocksdb_parity_bench::engines::RocksEngine::open(&dbdir, sync);
                 run_and_report(&e, &cfg, suites, &out);
             }

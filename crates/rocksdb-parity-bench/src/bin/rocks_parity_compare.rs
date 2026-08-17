@@ -16,9 +16,9 @@ use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 fn main() {
-    let compat_json = std::env::args().nth(1).unwrap_or_else(|| {
-        "findings/rocks-parity-local/compat/rocks_parity_bench.json".into()
-    });
+    let compat_json = std::env::args()
+        .nth(1)
+        .unwrap_or_else(|| "findings/rocks-parity-local/compat/rocks_parity_bench.json".into());
     let out = std::env::args()
         .nth(2)
         .map(PathBuf::from)
@@ -44,7 +44,9 @@ fn main() {
         .as_ref()
         .map(|s| extract_metrics(s))
         .unwrap_or_default();
-    let peer_sync = peer_raw.as_deref().and_then(|s| extract_bool_field(s, "sync"));
+    let peer_sync = peer_raw
+        .as_deref()
+        .and_then(|s| extract_bool_field(s, "sync"));
     let peer_durability = peer_raw
         .as_deref()
         .and_then(|s| extract_string_field(s, "durability"));
@@ -185,12 +187,16 @@ fn main() {
   }},
   "ratios": {ratios},
   "parity": {parity},
-  "honesty": "Single-node, single-client lab bench through the rocksdb-compat API subset vs real RocksDB (rocksdb crate). Durability must be labeled: compat always fsyncs before Ok; the rocksdb peer defaults to sync-per-write (ROCKS_PARITY_SYNC=1) to match, 0 = its async-WAL default for reference. Not a distributed/field claim."
+  "honesty": "Single-node lab bench: rocksdb-compat (Pedra, fdatasync before Ok) vs real RocksDB default (WriteOptions.sync=false). Official peer is Rocks **default**, not a matched-sync peer. ROCKS_PARITY_SYNC=1 is an extra same-class column only. Pedra keeps the stronger durability and still has to beat default Rocks. Not a distributed/field claim."
 }}
 "#,
         cj = compat_json,
-        cd = compat_durability.map(|s| format!("\"{s}\"")).unwrap_or_else(|| "null".into()),
-        pd = peer_durability.map(|s| format!("\"{s}\"")).unwrap_or_else(|| "null".into()),
+        cd = compat_durability
+            .map(|s| format!("\"{s}\""))
+            .unwrap_or_else(|| "null".into()),
+        pd = peer_durability
+            .map(|s| format!("\"{s}\""))
+            .unwrap_or_else(|| "null".into()),
         compat_metrics_json = metrics_to_json(&compat_metrics),
     );
 
@@ -234,7 +240,10 @@ fn extract_bool_field(raw: &str, field: &str) -> Option<bool> {
 fn extract_string_field(raw: &str, field: &str) -> Option<String> {
     let key = format!("\"{field}\"");
     let i = raw.find(&key)?;
-    let rest = raw[i + key.len()..].trim_start().strip_prefix(':')?.trim_start();
+    let rest = raw[i + key.len()..]
+        .trim_start()
+        .strip_prefix(':')?
+        .trim_start();
     let rest = rest.strip_prefix('"')?;
     let end = rest.find('"')?;
     Some(rest[..end].to_string())
@@ -345,6 +354,9 @@ mod tests {
     #[test]
     fn peer_status_from_stub() {
         let stub = r#"{"status":"unavailable","benches":[{"name":"ycsb_a","qps":null}]}"#;
-        assert_eq!(extract_string_field(stub, "status").as_deref(), Some("unavailable"));
+        assert_eq!(
+            extract_string_field(stub, "status").as_deref(),
+            Some("unavailable")
+        );
     }
 }

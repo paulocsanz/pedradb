@@ -9,7 +9,7 @@
 - Pedra no Ok **sempre** `fdatasync` (G1). Rocks default (`sync=false`) não. Isso **não** é um teto: o piso é por **ack/grupo**, não por chave.
 - Arquitetura que paga um fd e mesmo assim passa o async: group commit (N ops / 1 fd), pipeline (encodar o próximo grupo enquanto o líder sinca), **uma** cópia do payload até o WAL, compact/flush fora do Ok, scan sem setup de 20 µs.
 - **P0 shipped (`92eef56`):** `encode_into` + scratch no `WalWriter`; `WriteOp` move para a mem; count SST sem `Box<dyn>` e sem `user_key.clone()` por passo. Ainda há um memcpy lógico → frame (CRC precisa dos bytes). Bounds do cursor SST ainda viram `Bytes`.
-- Coluna **async é obrigatória** em toda remesura (pedido permanente do dono). 5× vs sync continua no RFC-0039; este RFC é o ganho contra o Rocks que as pessoas correm.
+- **Peer oficial = Rocks default (`sync=false`).** Toda remesura, todo gate, todo “ganhámos” é contra esse peer. Pedra continua com `fdatasync` before Ok. Mais segurança e mais performance ao mesmo tempo — não “classe diferente então não conta.” `SYNC=1` é coluna extra (RFC-0039).
 
 ## Problems This Solves
 

@@ -8,7 +8,8 @@
 #   ROCKS_PARITY_GATE_SHAPES  csv of shapes the floor applies to (default all;
 #                             writes: ycsb_a,ycsb_b,ycsb_d,ycsb_f,deps_apply_batch,deps_raftlog,deps_cache_overwrite)
 #   ROCKS_PARITY_TEMPLATE     "1" skips the real side (CI mode; ratios stay null)
-#   ROCKS_PARITY_SYNC         1 = WriteOptions.sync (default), 0 = async WAL
+#   ROCKS_PARITY_SYNC         0 = Rocks default async WAL (official peer)
+#                             1 = sync-per-write (same-class column only)
 #   ROCKS_PARITY_FULL_SYNC    1 = F_FULLFSYNC on Rocks WAL (same class as Pedra)
 #   ROCKS_YCSB_*              shared knobs (records/ops/payload/dist)
 set -euo pipefail
@@ -25,7 +26,7 @@ else
   export ROCKS_PARITY_RATIO_FLOOR="$FLOOR"
 fi
 
-echo "rocksdb_parity_v0 → $OUT floor=$FLOOR template=${ROCKS_PARITY_TEMPLATE:-0} sync=${ROCKS_PARITY_SYNC:-1}"
+echo "rocksdb_parity_v0 → $OUT floor=$FLOOR template=${ROCKS_PARITY_TEMPLATE:-0} sync=${ROCKS_PARITY_SYNC:-0}"
 cargo run -q --release -p rocksdb-parity-bench --bin rocks-parity-bench -- "$OUT/compat" compat
 
 if [[ "${ROCKS_PARITY_TEMPLATE:-0}" == "1" ]]; then

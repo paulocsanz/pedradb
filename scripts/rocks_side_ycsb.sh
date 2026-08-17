@@ -5,7 +5,8 @@
 #   scripts/rocks_side_ycsb.sh [out_dir]
 # Env:
 #   ROCKS_YCSB_*     shared knobs (records/ops/payload/dist) — same as compat side
-#   ROCKS_PARITY_SYNC  1 (default) = WriteOptions.sync (fdatasync on this rust build)
+#   ROCKS_PARITY_SYNC  0 (default) = Rocks default async WAL (official peer)
+#                    1 = sync-per-write (same-class column only)
 #                    0 = RocksDB async-WAL default (reference run, label differs)
 #   ROCKS_PARITY_FULL_SYNC  1 = also File::sync_all each *.log (F_FULLFSYNC; same
 #                    class as Pedra). Default 0. This is the RFC-0031 2× peer.
@@ -18,7 +19,7 @@ OUT="${1:-$ROOT/findings/rocks-side-ycsb-$(date -u +%Y%m%dT%H%M%SZ)}"
 mkdir -p "$OUT"
 PEER="$OUT/rocks_shaped_peer.json"
 
-SYNC="${ROCKS_PARITY_SYNC:-1}"
+SYNC="${ROCKS_PARITY_SYNC:-0}"
 echo "rocks_side_ycsb → $OUT sync=$SYNC records=${ROCKS_YCSB_RECORDS:-1024} ops=${ROCKS_YCSB_OPS:-200}"
 
 if cargo run -q --release -p rocksdb-parity-bench --features real --bin rocks-parity-bench -- \
