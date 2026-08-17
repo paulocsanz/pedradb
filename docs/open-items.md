@@ -200,6 +200,55 @@ range) but O(ranges) memory, which is typically much smaller.
 
 ---
 
+### 2.6 Error/fence policy granularity — **open (production footgun #1)**
+
+**Question:** After a durability fence or fail-stop corruption, who decides what
+happens next — and can the blast radius be smaller than the whole DB?
+
+**Context:** The kernel is deliberately fail-stop (never silent-wrong). Today
+that is all-or-nothing: a failed required WAL sync fences the handle (reopen is
+the only path), and mid-WAL corruption fails open; with CORRUPTLOG escalation
+(RFC-0038) repeated events refuse open outright. The smallest local failure
+(an ENOSPC blip, one corrupt record) takes the entire database down. Full
+comparison table and rationale: `docs/rocksdb-vs-pedradb-guarantees.md` §4.
+
+Battle-tested systems expose policy because availability under **partial**
+failure is a production requirement — nobody wants a whole DB down because one
+region corrupted. RocksDB does this with severities, listeners, auto-resume and
+`DB::Resume()` (its real flaw is the untyped escape hatch `paranoid_checks=false`,
+not the flexibility).
+
+**Options:**
+- **(a) Keep binary fence (status quo):** minimal silent-wrong risk, maximum
+  blast radius. Acceptable while the only consumers are Montanha nodes (the
+  cluster is the manager: failover/redirect already exists).
+- **(b) Assisted resume:** `recover_from_fence()` — engine does close+reopen
+  internally (equivalent of RocksDB `Resume()`). Smallest RFC, no policy risk.
+- **(c) Typed operator policy:** severity enum (retryable/hard/fatal) +
+  explicit opt-in recovery modes (quarantine corrupted file and serve the rest,
+  point-in-time replay with a report of what was dropped). Listener hook on the
+  `Host` seam so DST can replay manager decisions deterministically.
+- **(d) Untyped escape hatch (RocksDB `paranoid_checks=false` shape):**
+  forbidden by doctrine — continuing to write without acknowledging the
+  uncertain outcome re-opens the silent-wrong door.
+
+**Constraint (non-negotiable):** kernel mechanism stays fail-closed by default;
+every relaxation is opt-in, typed, and the manager must acknowledge uncertainty
+before continuing. Fence floor unchanged.
+
+**Verdict (2026-08-17): not inherently wrong — evaluation deferred.** PedraDB is
+a primitive; a kernel must not guess availability policy, so fence-everything
+and hand the decision to the manager is the correct posture for this layer (the
+same reason LevelDB/SQLite return errors instead of deciding). Today the manager
+is Montanha (cluster failover). This stays open as a **future evaluation
+triggered by demand** — when a real single-process production consumer needs a
+blast radius smaller than the whole DB — not as immediate debt.
+
+**Likely answer:** (b) then (c). (b) ships first (small, contract-safe);
+(c) follows once a real single-process consumer needs quarantine semantics.
+
+---
+
 ## 3. Research items still pending
 
 | # | Item | Status | Notes |

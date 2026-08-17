@@ -151,7 +151,7 @@ impl KvStore for PedraStore {
     fn snapshot(&self) -> Result<Snapshot, Self::Error> {
         Ok(self
             .db
-            .range(Bound::Unbounded, Bound::Unbounded)
+            .range_limited(Bound::Unbounded, Bound::Unbounded, None)
             .into_iter()
             .map(|(k, v)| (k.to_vec(), v.to_vec()))
             .collect())

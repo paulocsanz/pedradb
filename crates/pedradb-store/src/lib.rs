@@ -651,7 +651,7 @@ fn scan_prefix<E: Env>(db: &Db<E>, prefix: &[u8]) -> Vec<(Vec<u8>, Vec<u8>)> {
         Some(e) => Bound::Excluded(e),
         None => Bound::Unbounded,
     };
-    db.range(start, end)
+    db.range_limited(start, end, None)
         .into_iter()
         .map(|(k, v)| (k.to_vec(), v.to_vec()))
         .collect()
@@ -3711,7 +3711,7 @@ impl<E: Env> StoreCluster<E> {
             Bound::Included(start)
         };
         let mut out = Vec::new();
-        for (k, v) in n.db.range(start_b, end) {
+        for (k, v) in n.db.range_limited(start_b, end, None) {
             if !snapshot_kernel::snapshot_touches_user_key(is_reserved_store_key(&k)) {
                 continue;
             }
@@ -3842,7 +3842,7 @@ impl<E: Env> StoreCluster<E> {
             };
             let stale: Vec<Vec<u8>> = n
                 .db
-                .range(start_b, end_b)
+                .range_limited(start_b, end_b, None)
                 .into_iter()
                 .map(|(k, _)| k.to_vec())
                 .filter(|k| snapshot_kernel::snapshot_touches_user_key(is_reserved_store_key(k)))
@@ -5883,7 +5883,7 @@ impl<E: Env> StoreCluster<E> {
             } else {
                 Bound::Excluded(ce.as_slice())
             };
-            for (k, _) in n.db.range(start_b, end_b) {
+            for (k, _) in n.db.range_limited(start_b, end_b, None) {
                 if !is_reserved_store_key(&k) {
                     key_set.insert(k.to_vec());
                 }
@@ -5903,7 +5903,7 @@ impl<E: Env> StoreCluster<E> {
                     } else {
                         Bound::Excluded(end)
                     };
-                    for (k, _) in n.db.range(start_b, end_b) {
+                    for (k, _) in n.db.range_limited(start_b, end_b, None) {
                         if !is_reserved_store_key(&k) {
                             key_set.insert(k.to_vec());
                         }

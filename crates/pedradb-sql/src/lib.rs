@@ -237,9 +237,10 @@ impl SqlEngine {
         // sentinel: table_prefix + 0xff,0xff,0xff,0xff (len=u32::MAX is impossible).
         let mut end = prefix.to_vec();
         end.extend_from_slice(&u32::MAX.to_be_bytes());
-        let pairs = self.db.range(
+        let pairs = self.db.range_limited(
             std::ops::Bound::Included(prefix),
             std::ops::Bound::Excluded(end.as_slice()),
+            None,
         );
         let plen = prefix.len();
         pairs

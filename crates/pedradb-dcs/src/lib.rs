@@ -267,9 +267,10 @@ impl<C: Clock, E: Env> Dcs<C, E> {
         //   2) even without create, get() would re-serve the dead holder's value.
         // Fix: never reuse ids that appear in meta, and drop orphaned leased keys
         // so HA can re-acquire immediately (etcd-class fail-safe for non-durable TTL).
-        let metas = db.range(
+        let metas = db.range_limited(
             std::ops::Bound::Included(b"d/m/".as_slice()),
             std::ops::Bound::Excluded(b"d/m0".as_slice()),
+            None,
         );
         let mut max_lease = 0u64;
         let mut orphan_users: Vec<Vec<u8>> = Vec::new();
@@ -487,9 +488,10 @@ impl<C: Clock, E: Env> Dcs<C, E> {
     pub fn revoke_lease(&mut self, id: u64) -> Result<()> {
         self.leases.remove(&id);
         // Scan all keys with d/m/ prefix for lease id.
-        let metas = self.db.range(
+        let metas = self.db.range_limited(
             std::ops::Bound::Included(b"d/m/".as_slice()),
             std::ops::Bound::Excluded(b"d/m0".as_slice()),
+            None,
         );
         let mut to_delete = Vec::new();
         for (mk, mv) in metas {
@@ -681,12 +683,13 @@ mod tests {
         assert_eq!(dcs.get(b"ab").unwrap().value, b"vab");
         // Disk scan of exact kv_key(a) half-open must not include ab.
         let end = pedradb_core::prefix_exclusive_end(&ka);
-        let hits = dcs.db.range(
+        let hits = dcs.db.range_limited(
             std::ops::Bound::Included(ka.as_slice()),
             match end.as_deref() {
                 Some(e) => std::ops::Bound::Excluded(e),
                 None => std::ops::Bound::Unbounded,
             },
+            None,
         );
         assert_eq!(hits.len(), 1, "prefix scan of kv_key(a) leaked: {hits:?}");
         dcs.close().unwrap();

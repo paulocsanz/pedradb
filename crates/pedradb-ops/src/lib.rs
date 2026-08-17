@@ -961,7 +961,7 @@ mod tests {
 
         let restored = open_db(&rest);
         // Restore must not invent unacked keys; every restored KV ⊆ acked model.
-        for (k, v) in restored.range(std::ops::Bound::Unbounded, std::ops::Bound::Unbounded) {
+        for (k, v) in restored.range_limited(std::ops::Bound::Unbounded, std::ops::Bound::Unbounded, None) {
             let expect = acked.get(k.as_ref());
             assert!(
                 expect.is_some(),

@@ -180,7 +180,7 @@ Full contract: rustdoc on `db` module. Audit fix backlog: [RFC-0015](rfc/0015-au
 | `tx.get` / `put` / `delete` | Staging + snapshot reads |
 | `tx.commit` / `tx.abort` | Multi-key atomic / discard |
 | `Db::flush` | MemTable → new `.sst`, rotate WAL (P1.1); auto-compact failures do **not** fail flush (see `DbStats.auto_compact_failures`) |
-| `Db::range(start, end)` | Convenience scan → materialises a `Vec` (**OOM footgun** on large DBs; small-DB/tests only) |
+| `Db::range(start, end)` | **Deprecated** — materialises a `Vec` (**OOM footgun** on large DBs); use `scan` (streaming) or `range_limited` |
 | `Db::range_limited(…, limit)` | **Preferred** for pagination — stop after N live keys |
 | `Db::scan` / `scan_at` | **Preferred** streaming merge for large ranges (bound memory) |
 | `Db::compact` / `compact_with` / `compact_reclaim` | Merge SSTs (tmp→rename); optional version GC; pin-aware reclaim |

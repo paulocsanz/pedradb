@@ -220,9 +220,10 @@ fn apply_inner<E: Env>(
                 }
                 // Drop earlier same-batch puts/deletes that this range hides.
                 ops.retain(|op| !batch_op_hidden_by_range(op, start, end));
-                for (k, _) in fold.db.range(
+                for (k, _) in fold.db.range_limited(
                     std::ops::Bound::Included(start.as_slice()),
                     std::ops::Bound::Excluded(end.as_slice()),
+                    None,
                 ) {
                     if crate::follow::is_fold_meta_key(&k) {
                         continue;
@@ -273,12 +274,13 @@ impl<E: Env> PedraFold<E> {
         }
         let start = prefix.to_vec();
         let end_owned = prefix_exclusive_end(prefix);
-        let rows = self.db.range(
+        let rows = self.db.range_limited(
             std::ops::Bound::Included(start.as_slice()),
             match end_owned.as_deref() {
                 Some(e) => std::ops::Bound::Excluded(e),
                 None => std::ops::Bound::Unbounded,
             },
+            None,
         );
         let mut out = Vec::new();
         for (k, v) in rows {

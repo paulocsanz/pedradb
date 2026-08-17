@@ -249,12 +249,13 @@ mod tests {
         // Prefix scan of exact row_key("a") must not include "ab".
         let end = pedradb_core::prefix_exclusive_end(&a);
         let hits: Vec<_> = db
-            .range(
+            .range_limited(
                 std::ops::Bound::Included(a.as_slice()),
                 match end.as_deref() {
                     Some(e) => std::ops::Bound::Excluded(e),
                     None => std::ops::Bound::Unbounded,
                 },
+                None,
             )
             .into_iter()
             .map(|(k, _)| k.to_vec())

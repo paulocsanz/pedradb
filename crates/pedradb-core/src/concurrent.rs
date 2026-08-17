@@ -477,22 +477,33 @@ impl<E: Env> ConcurrentDb<E> {
     }
 
     /// Range collect at latest (read lock).
+    #[deprecated(
+        since = "0.1.0",
+        note = "materialises the whole interval into RAM (OOM footgun on large DBs); \
+                use `scan`/`scan_collect` for streaming or `range_limited` \
+                for a bounded collect"
+    )]
     #[must_use]
     pub fn range(&self, start: Bound<&[u8]>, end: Bound<&[u8]>) -> Vec<(Bytes, Bytes)> {
-        self.inner.read().range(start, end)
+        self.range_limited(start, end, None)
     }
 
     /// Range at snapshot (read lock).
     ///
     /// # Errors
     /// [`CoreError::SnapshotTooOld`].
+    #[deprecated(
+        since = "0.1.0",
+        note = "materialises the whole interval into RAM (OOM footgun on large DBs); \
+                use `scan_at` for streaming or `range_at_limited` for a bounded collect"
+    )]
     pub fn range_at(
         &self,
         snapshot: SequenceNumber,
         start: Bound<&[u8]>,
         end: Bound<&[u8]>,
     ) -> Result<Vec<(Bytes, Bytes)>> {
-        self.inner.read().range_at(snapshot, start, end)
+        self.range_at_limited(snapshot, start, end, None)
     }
 
     /// Bounded range at latest (read lock).
@@ -1380,7 +1391,7 @@ mod tests {
             Some(b"acked".as_ref()),
             "prepare_flush_imm must pin the taken table for readers"
         );
-        let ranged = db.range(std::ops::Bound::Unbounded, std::ops::Bound::Unbounded);
+        let ranged = db.range_limited(std::ops::Bound::Unbounded, std::ops::Bound::Unbounded, None);
         assert!(
             ranged
                 .iter()
@@ -1756,7 +1767,7 @@ mod tests {
             "get_at: {err:?}"
         );
         let err = db
-            .range_at(old.sequence(), Bound::Unbounded, Bound::Unbounded)
+            .range_at_limited(old.sequence(), Bound::Unbounded, Bound::Unbounded, None)
             .unwrap_err();
         assert!(
             matches!(err, CoreError::SnapshotTooOld { .. }),
@@ -1770,7 +1781,7 @@ mod tests {
             "scan_collect_at: {err:?}"
         );
         assert_eq!(db.get(b"k").as_deref(), Some(b"new".as_ref()));
-        let live = db.range(Bound::Unbounded, Bound::Unbounded);
+        let live = db.range_limited(Bound::Unbounded, Bound::Unbounded, None);
         assert_eq!(live.len(), 1);
         let _ = fs::remove_dir_all(&dir);
     }
