@@ -1054,35 +1054,14 @@ impl<E: Env> ConcurrentDb<E> {
                 return false;
             }
         };
-        // Install mem + snapshot MANIFEST under the write lock; fsync MANIFEST
-        // off-lock so apply/raftlog are not parked on two extra fdatasyncs
-        // (RFC-0041 P1.1). WAL rotate waits until persist succeeds.
-        let persist = {
+        // In-memory L0 only. SST `fdatasync` + MANIFEST wait for WAL rotate
+        // (mem/imm idle) so apply is not charged a 64 MiB file fd (RFC-0041).
+        {
             let mut g = self.inner.write();
-            let undo = g.apply_l0_install(table, file_num);
-            match g.take_manifest_persist() {
-                Ok(job) => (undo, job),
-                Err(_) => {
-                    g.undo_l0_install(undo);
-                    g.restore_imm(imm);
-                    return false;
-                }
-            }
-        };
-        let (undo, job) = persist;
-        let wrote = {
-            let _persist = self.persist_lock.lock();
-            job.write()
-        };
-        if wrote.is_err() {
-            let mut g = self.inner.write();
-            g.undo_l0_install(undo);
-            g.restore_imm(imm);
-            return false;
+            g.apply_l0_install(table, file_num);
+            g.clear_flush_read_pin();
+            let _ = g.try_rotate_wal_if_idle();
         }
-        let mut g = self.inner.write();
-        g.clear_flush_read_pin();
-        let _ = g.try_rotate_wal_if_idle();
         true
     }
 
@@ -1100,6 +1079,10 @@ impl<E: Env> ConcurrentDb<E> {
                 return true;
             };
             let old_paths = undo.old_paths().to_vec();
+            if g.fsync_unsynced_ssts().is_err() {
+                g.undo_prepared_l0_compact(undo);
+                return false;
+            }
             match g.take_manifest_persist() {
                 Ok(persist) => Some((undo, persist, old_paths)),
                 Err(_) => {

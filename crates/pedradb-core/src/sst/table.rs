@@ -1475,11 +1475,28 @@ pub fn write_sst(path: impl AsRef<Path>, mem: &MemTable) -> Result<SstTable> {
 /// # Errors
 /// I/O failures.
 pub fn write_sst_on(env: &impl Env, path: impl AsRef<Path>, mem: &MemTable) -> Result<SstTable> {
+    write_sst_on_with(env, path, mem, true)
+}
+
+/// [`write_sst_on`] with explicit file-`fdatasync`. `sync = false` is the L0
+/// flush path: the WAL still covers the keys until rotate.
+///
+/// # Errors
+/// I/O failures.
+pub fn write_sst_on_with(
+    env: &impl Env,
+    path: impl AsRef<Path>,
+    mem: &MemTable,
+    sync: bool,
+) -> Result<SstTable> {
     let entries: Vec<(InternalKey, Bytes)> = mem
         .iter_internal()
         .map(|(k, v)| (k.clone(), v.clone()))
         .collect();
-    write_sst_entries_on(env, path, &entries)
+    let mut sorted = entries;
+    sorted.sort_by(|a, b| a.0.cmp(&b.0));
+    let n = sorted.len();
+    write_sst_try_sorted_with(env, path, sorted.into_iter().map(Ok), n, sync)
 }
 
 /// Write pre-sorted (or sortable) internal entries to SST v2 (block + index).
@@ -1522,6 +1539,24 @@ pub fn write_sst_sorted_on(
     write_sst_try_sorted_on(env, path, entries.into_iter().map(Ok), bloom_hint)
 }
 
+/// Like [`write_sst_try_sorted_on`] with an explicit file-`fdatasync` switch.
+///
+/// L0 flush passes `sync = false` and fsyncs the file only when the WAL that
+/// still covers those keys is about to rotate (RFC-0041). Compact/checkpoint
+/// keep `sync = true`.
+///
+/// # Errors
+/// Source error, I/O, encode, or a corrupt/oversized field.
+pub fn write_sst_try_sorted_with(
+    env: &impl Env,
+    path: impl AsRef<Path>,
+    entries: impl IntoIterator<Item = Result<(InternalKey, Bytes)>>,
+    bloom_hint: usize,
+    sync: bool,
+) -> Result<SstTable> {
+    write_sst_try_sorted_body(env, path, entries, bloom_hint, sync)
+}
+
 /// Like [`write_sst_sorted_on`] but the stream may fail mid-file (k-way decode).
 ///
 /// # Errors
@@ -1531,6 +1566,16 @@ pub fn write_sst_try_sorted_on(
     path: impl AsRef<Path>,
     entries: impl IntoIterator<Item = Result<(InternalKey, Bytes)>>,
     bloom_hint: usize,
+) -> Result<SstTable> {
+    write_sst_try_sorted_body(env, path, entries, bloom_hint, true)
+}
+
+fn write_sst_try_sorted_body(
+    env: &impl Env,
+    path: impl AsRef<Path>,
+    entries: impl IntoIterator<Item = Result<(InternalKey, Bytes)>>,
+    bloom_hint: usize,
+    sync: bool,
 ) -> Result<SstTable> {
     let path = path.as_ref();
     let mut bloom = if bloom_hint == 0 {
@@ -1635,7 +1680,9 @@ pub fn write_sst_try_sorted_on(
     {
         let mut file = env.create(path)?;
         file.write_all(&body)?;
-        file.sync_data()?;
+        if sync {
+            file.sync_data()?;
+        }
     }
 
     SstTable::open_on(env, path)

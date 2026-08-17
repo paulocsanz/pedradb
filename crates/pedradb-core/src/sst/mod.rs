@@ -16,7 +16,7 @@ pub use scan_kernel::{
 };
 pub use table::{
     reset_sst_blocks_decoded, sst_blocks_decoded, write_sst, write_sst_entries,
-    write_sst_entries_on, write_sst_on, write_sst_sorted_on, write_sst_try_sorted_on,
-    SstInternalStream, SstRangeIter, SstTable, SST_VERSION, SST_VERSION_V1, SST_VERSION_V2,
-    SST_VERSION_V3,
+    write_sst_entries_on, write_sst_on, write_sst_on_with, write_sst_sorted_on,
+    write_sst_try_sorted_on, write_sst_try_sorted_with, SstInternalStream, SstRangeIter, SstTable,
+    SST_VERSION, SST_VERSION_V1, SST_VERSION_V2, SST_VERSION_V3,
 };

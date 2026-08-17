@@ -70,7 +70,7 @@ use crate::lock::DirLock;
 use crate::manifest::{self, VersionSet};
 use crate::memtable::{Lookup, MemTable};
 use crate::merge::{range_deleted, StreamingVisibleIter, VisibleKv};
-use crate::sst::{write_sst_entries_on, write_sst_on, write_sst_try_sorted_on, SstTable};
+use crate::sst::{write_sst_entries_on, write_sst_on_with, write_sst_try_sorted_on, SstTable};
 use crate::tx::Transaction;
 use crate::vlog::{self, ValueLog, VlogRewriteStats, VLOG_FILE_NAME};
 use crate::wal::Wal;
@@ -573,6 +573,10 @@ pub struct Db<E: Env = StdEnv> {
     ssts: Vec<SstTable>,
     /// LSM level for each entry in [`Self::ssts`] (parallel array; 0 = L0).
     sst_levels: Vec<u32>,
+    /// L0 files written without `fdatasync`. Must be synced before WAL rotate
+    /// or any MANIFEST publish (RFC-0041). Crash before that is recovered
+    /// from WAL; `gc_orphan_ssts` drops the unsynced files.
+    unsynced_ssts: Vec<PathBuf>,
     /// Next SST file number (`000001.sst`, …).
     next_file_num: u64,
     /// Last written MANIFEST file number (0 = none yet).
@@ -926,6 +930,7 @@ impl<E: Env> Db<E> {
             changelog_interval: changelog_interval_from_env(),
             commits_since_changelog: 0,
             changelog_store_count: 0,
+            unsynced_ssts: Vec::new(),
         };
         db.maybe_rebuild_feed_from_live();
         Ok(db)
@@ -2552,7 +2557,10 @@ impl<E: Env> Db<E> {
     ) -> Result<(SstTable, u64, PathBuf)> {
         let final_path = dir.join(format!("{num:06}.sst"));
         let tmp_path = dir.join(format!("{num:06}.sst.tmp"));
-        match write_sst_on(env, &tmp_path, imm) {
+        // L0 is not WAL-durable until rotate: skip file `fdatasync` here.
+        // `sync` only dir-syncs after rename (used by tests that want the
+        // name visible); the file bytes stay lazy.
+        match write_sst_on_with(env, &tmp_path, imm, false) {
             Ok(table) => {
                 drop(table);
                 env.rename(&tmp_path, &final_path)?;
@@ -2616,12 +2624,9 @@ impl<E: Env> Db<E> {
     /// # Errors
     /// MANIFEST I/O (rolls back inventory).
     pub fn install_l0_sst(&mut self, table: SstTable, file_num: u64) -> Result<()> {
-        let undo = self.apply_l0_install(table, file_num);
-        if let Err(e) = self.persist_manifest() {
-            self.undo_l0_install(undo);
-            return Err(e);
-        }
-        // SST now holds this pipeline's table; drop the read pin (not `imm` — F45).
+        // In-memory only. MANIFEST + SST `fdatasync` wait for WAL rotate so a
+        // write burst is not charged one extra fd per 64 MiB flush (RFC-0041).
+        let _undo = self.apply_l0_install(table, file_num);
         self.flush_read_pin = None;
         Ok(())
     }
@@ -2722,6 +2727,10 @@ impl<E: Env> Db<E> {
     }
 
     fn rotate_wal_now(&mut self) -> Result<()> {
+        // SST + MANIFEST must be durable before the WAL that covers those
+        // keys is discarded (G1). L0 flush skips file fsync; this is the pay
+        // point.
+        self.persist_manifest_durable()?;
         // WAL truncate drops the rebuild source for the CHANGELOG cache.
         // Persist first when debounce is on. interval 0: skip on auto-flush
         // (RFC-0036) — F53 SST rebuild covers crash+reopen; explicit flush
@@ -4768,8 +4777,45 @@ impl<E: Env> Db<E> {
     }
 
     /// Write MANIFEST + CURRENT for the live SST set (with levels).
+    ///
+    /// `fdatasync`s any L0 that was written without sync first so CURRENT
+    /// never points at a torn file (RFC-0041).
     fn persist_manifest(&mut self) -> Result<()> {
+        self.fsync_unsynced_ssts()?;
         self.take_manifest_persist()?.write()
+    }
+
+    /// Public wrapper: SST `fdatasync` + MANIFEST before WAL rotate / checkpoint.
+    ///
+    /// # Errors
+    /// SST / MANIFEST I/O.
+    pub fn persist_manifest_durable(&mut self) -> Result<()> {
+        self.persist_manifest()
+    }
+
+    /// `fdatasync` L0 files that were written without sync (RFC-0041).
+    ///
+    /// # Errors
+    /// Env I/O.
+    pub fn fsync_unsynced_ssts(&mut self) -> Result<()> {
+        let paths = std::mem::take(&mut self.unsynced_ssts);
+        for path in &paths {
+            if !self.env.exists(path) {
+                continue;
+            }
+            let mut f = self.env.open_read(path)?;
+            if let Err(e) = f.sync_data() {
+                self.unsynced_ssts.extend(paths);
+                return Err(e.into());
+            }
+        }
+        if self.sync && !paths.is_empty() {
+            if let Err(e) = self.env.sync_dir(&self.dir) {
+                self.unsynced_ssts.extend(paths);
+                return Err(e.into());
+            }
+        }
+        Ok(())
     }
 
     fn version_set_now(&self) -> Result<VersionSet> {
@@ -4824,6 +4870,7 @@ impl<E: Env> Db<E> {
         if self.next_file_num <= file_num {
             self.next_file_num = file_num.saturating_add(1);
         }
+        self.unsynced_ssts.push(table.path().to_path_buf());
         self.ssts.push(table);
         self.sst_levels.push(0);
         undo
@@ -4831,6 +4878,10 @@ impl<E: Env> Db<E> {
 
     /// Undo [`Self::apply_l0_install`] after a failed off-lock MANIFEST persist.
     pub fn undo_l0_install(&mut self, undo: L0InstallUndo) {
+        if let Some(t) = self.ssts.last() {
+            let p = t.path().to_path_buf();
+            self.unsynced_ssts.retain(|x| x != &p);
+        }
         let _ = self.ssts.pop();
         let _ = self.sst_levels.pop();
         self.next_file_num = undo.prev_next;
@@ -4874,6 +4925,8 @@ impl<E: Env> Db<E> {
         if job.gc.requests_gc() {
             self.note_version_gc_watermark(job.gc);
         }
+        self.unsynced_ssts
+            .retain(|p| !old_paths.iter().any(|o| o == p));
         Some(L0CompactUndo {
             prev_tables,
             prev_levels,
@@ -8006,6 +8059,60 @@ mod tests {
         let db = Db::open(&dir).unwrap();
         assert_eq!(db.sst_count(), 1);
         assert_eq!(db.get(b"k").as_deref(), Some(b"v".as_ref()));
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// L0 install without WAL rotate: SST is not in MANIFEST. Crash that
+    /// tears the file is recovered from WAL (G1).
+    #[test]
+    fn unsynced_l0_torn_sst_recovers_from_wal() {
+        let dir = temp_dir();
+        let sst_path;
+        {
+            let mut db = Db::open(&dir).unwrap();
+            db.put(b"a", b"1").unwrap();
+            assert!(db.stage_flush_imm().unwrap());
+            let imm = db.prepare_flush_imm().unwrap().expect("staged imm");
+            let num = db.alloc_file_num();
+            let (table, _, path) = db.write_memtable_to_l0_file_num(&imm, num).unwrap();
+            sst_path = path;
+            db.apply_l0_install(table, num);
+            db.clear_flush_read_pin();
+            db.put(b"c", b"3").unwrap();
+            std::mem::forget(db);
+        }
+        assert!(sst_path.exists(), "L0 file was written");
+        fs::write(&sst_path, b"torn").unwrap();
+        let db = Db::open(&dir).unwrap();
+        assert_eq!(db.get(b"a").as_deref(), Some(b"1".as_ref()), "WAL replay");
+        assert_eq!(db.get(b"c").as_deref(), Some(b"3".as_ref()));
+        assert!(
+            !sst_path.exists() || db.sst_count() == 0,
+            "torn L0 must not be live inventory (orphan GC or unused)"
+        );
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// After flush+rotate, SST+MANIFEST are enough: deleting the WAL must
+    /// not lose acked keys (rotate fsync'd the L0 first).
+    #[test]
+    fn flush_rotate_makes_sst_sufficient_without_wal() {
+        let dir = temp_dir();
+        {
+            let mut db = Db::open(&dir).unwrap();
+            db.put(b"k", b"v").unwrap();
+            db.flush().unwrap();
+            db.close().unwrap();
+        }
+        let wal = dir.join(WAL_FILE_NAME);
+        if wal.exists() {
+            fs::remove_file(&wal).unwrap();
+        }
+        let db = Db::open(&dir).unwrap();
+        assert_eq!(db.get(b"k").as_deref(), Some(b"v".as_ref()));
+        assert!(db.sst_count() >= 1);
         db.close().unwrap();
         let _ = fs::remove_dir_all(&dir);
     }
