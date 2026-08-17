@@ -59,7 +59,7 @@
 ### P1 — escritas ≥ 2× default
 
 - [ ] **P1.1** `deps_apply_batch_mc4` e `deps_raftlog_mc4` ≥ 2.0 vs default da run — status: `doing` (enc1hop same-hop encode-off-lock **rejected** apply_mc4 654–1841; parkfold2 still best Pedra 4.3 k)
-- [ ] **P1.2** `ycsb_a` / `ycsb_f` / `deps_cache_overwrite` (1c e `_mc4` se existirem) ≥ 2.0 vs default — status: `todo` (1c A/F/overwrite: `1/t_fd` ≈ 43 k; 2× Rocks A pede ~400 k+. Alvo e peer **não** mudam; FLOOR fica off até as 16)
+- [ ] **P1.2** `ycsb_a` / `ycsb_f` / `deps_cache_overwrite` (1c e `_mc4` se existirem) ≥ 2.0 vs default — status: `todo` (**teto medido:** fd p50 ≈ 24 µs ⇒ `1/t_fd` ≈ 41 k; parkfold2 A **34.6 k / 0.12×**. 2× Rocks A ~200–400 k está acima de um fd/Ok. Sem largar G1/peer/shapes; FLOOR off até o owner mudar a regra)
 - [ ] **P1.3** `deps_apply_batch` e `deps_raftlog` **1 cliente** ≥ 2.0 vs default — status: `todo`
 
 ### P2 — leituras ≥ 2× default
@@ -76,7 +76,7 @@
 | P0.2 | p0 | remesura 11+MC vs default | done | findings/rfc0041-p02 | 2026-08-17 |
 | P0.3 | p0 | floor 2.0 nas que já passam | todo | inval 3/16; scan med 1.52; sem gate | 2026-08-17 |
 | P1.1 | p1 | apply/raftlog MC ≥ 2× | doing | enc1hop rejected (apply 654–1841) | 2026-08-17 |
-| P1.2 | p1 | A/F/overwrite ≥ 2× | todo | 1c A 0.15; 1/t_fd ≈ 39 k | 2026-08-17 |
+| P1.2 | p1 | A/F/overwrite ≥ 2× | todo | teto 1/t_fd ≈ 41 k; A 0.12; FLOOR off | 2026-08-17 |
 | P1.3 | p1 | apply/raftlog 1c ≥ 2× | todo | inval apply 0.87 | 2026-08-17 |
 | P2.1 | p2 | scan/E ≥ 2× | doing | E **2.20**; scan med 1.52 | 2026-08-17 |
 | P2.2 | p2 | C/B/D/MVCC ≥ 2× | doing | C 1.64; MVCC **2.97** | 2026-08-17 |

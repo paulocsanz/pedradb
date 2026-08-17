@@ -2373,7 +2373,11 @@ mod tests {
         for i in 0..8u8 {
             db.put([b'l', i], [b'v', i]).unwrap();
         }
-        assert!(db.wal_sync_count() >= 8, "each lone put must fdatasync");
+        assert_eq!(
+            db.wal_sync_count(),
+            8,
+            "G1: exactly one WAL fdatasync per 1-client Ok (ceiling for ycsb_a/f)"
+        );
         assert!(
             db.writes_idle_for(Duration::ZERO),
             "no writer in flight after sequential puts return"

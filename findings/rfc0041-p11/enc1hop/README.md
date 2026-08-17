@@ -1,24 +1,26 @@
 # RFC-0041 — encode+append off the write lock, same hop count (rejected)
 
-2026-08-17. Incomplete remesura; **rejected on isolated + partial official
-numbers**. Do not enable FLOOR. Worker stays parkfold2.
+2026-08-17. Official 16-shape, `ROCKS_PARITY_SYNC=0`, median of 3
+(`enc1hop/run{1,2,3}`). JSONs only. Peers `sync: false`.
 
 ## Hypothesis
 
 `encoff` (encode off lock + second absorb pass) cut apply_mc4 4.3 k → 1.7 k.
 Retry with the **same lock-hop count** as today: prepare under the write lock,
 encode+WAL-append off it, `fdatasync`, apply. No second absorb pass.
-`append_order` kept WAL seq for two sequential groups.
 
 ## Result
 
-**Rejected.** apply_mc4 Pedra **654 / (run2 incomplete) / 1841**. YCSB A
-dropped to 7.9 k (70 ms tails). Seed 2.3 s (was ~0.2 s). Dropping the write
-lock for encode+append + the extra `append_order` mutex costs more than it
-returns; parkfold2 stays at **4.3 k**.
+**Rejected. 0/16 ≥ 2.0 on a clean read of Pedra qps.** apply_mc4 Pedra
+**654 / 1670 / 1841** (med **1670**) vs parkfold2 **4271**. YCSB A run1
+**7921** (70 ms tails). Reverted to `group_start` + late-join absorb +
+`finish_group_off_lock`. FLOOR off.
 
-Reverted to `group_start` + late-join absorb + `finish_group_off_lock`
-(`fdatasync` off lock, apply after). Leftover prepare-only APIs removed.
+| shape | run1 | run2 | run3 | med ratio | Pedra med |
+|---|---:|---:|---:|---:|---:|
+| apply_mc4 | 0.586 | 1.030 | 1.805 | 1.030 | 1 670 |
+| ycsb_a | 0.099 | 0.169 | 0.191 | 0.169 | 22 662 |
+| ycsb_e | 1.850 | 1.886 | 2.852 | 1.886 | 154 719 |
+| deps_scan | 0.860 | 3.099 | 3.213 | 3.099 | 181 528 |
 
-G1 unchanged (fd before Ok). No official 16-shape JSON — do not treat 654
-as a product median.
+G1 unchanged. Do not read run3 apply_mc4 1.81 as a win (Pedra 1.8 k, weak Rocks).
