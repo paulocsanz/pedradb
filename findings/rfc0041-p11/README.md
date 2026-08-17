@@ -91,6 +91,18 @@ Official remesura after this (`implementer/run{1,2,3}`): **0/16 ≥ 2.0**.
 Closest: MVCC 1.71, E 1.51, apply_mc4 0.81. YCSB A 0.051 — 1/fd p50
 **22.2 µs** ≈ 45 k qps; Rocks A ~200–370 k; 2× A is above one fd/Ok.
 
+## L0 drain-to-0 (same slice, rejected as a write-path win)
+
+After trigger, keep compacting until L0==0. Official remesura
+[`l0drain/`](l0drain/README.md): **0/16 ≥ 2.0**. apply_mc4 Pedra **3.5 k →
+1.0 k** (worker rewrite in apply gaps).
+
+## 64 MiB buffer + idle-only L0 compact
+
+[`idle64/`](idle64/README.md): **3/16 ≥ 2.0** (C 2.43, E 4.26, scan 18).
+YCSB A 1c 14 k → **53 k** (max 0.2 ms). apply_mc4 still ~2 k — one 64 MiB
+SST `fsync` mid-apply. Next: skip imm drain while writers are active.
+
 ## Tests
 
 `large_batch_skips_catchup_and_flush_reopens`; ConcurrentDb flush/group;

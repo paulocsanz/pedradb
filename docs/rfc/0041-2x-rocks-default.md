@@ -54,18 +54,18 @@
 
 - [x] **P0.1** RFC + Status vivo (este doc) — status: `done`
 - [x] **P0.2** Remesura 11 + `_mc4` vs `ROCKS_PARITY_SYNC=0` apenas; p50/p95/qps; `fdatasync` isolado; finding `findings/rfc0041-p02/` — status: `done` (**0/16 ≥ 2.0**; apply_mc4 0.89; A 1c 0.056 ≪ 1/fd)
-- [ ] **P0.3** Ligar `ROCKS_PARITY_RATIO_FLOOR=2.0` no script **só** nas shapes que P0.2 já mostrar ≥ 2.0 (não ligar gate vazio) — status: `todo` (conjunto vazio; não ligar)
+- [ ] **P0.3** Ligar `ROCKS_PARITY_RATIO_FLOOR=2.0` no script **só** nas shapes que P0.2 já mostrar ≥ 2.0 (não ligar gate vazio) — status: `todo` (C/E/scan já ≥ 2.0 na mediana idle64; o binário gata **todas** as 16 — não ligar até as 16)
 
 ### P1 — escritas ≥ 2× default
 
-- [ ] **P1.1** `deps_apply_batch_mc4` e `deps_raftlog_mc4` ≥ 2.0 vs default da run — status: `doing` (fd do grupo fora do write lock; remesura **0/16 ≥ 2.0** — [p11](../../findings/rfc0041-p11/README.md))
+- [ ] **P1.1** `deps_apply_batch_mc4` e `deps_raftlog_mc4` ≥ 2.0 vs default da run — status: `doing` (idle64 apply_mc4 **0.94** — [idle64](../../findings/rfc0041-p11/idle64/README.md); imm drain só idle / 512 MiB)
 - [ ] **P1.2** `ycsb_a` / `ycsb_f` / `deps_cache_overwrite` (1c e `_mc4` se existirem) ≥ 2.0 vs default — status: `todo`
 - [ ] **P1.3** `deps_apply_batch` e `deps_raftlog` **1 cliente** ≥ 2.0 vs default — status: `todo`
 
 ### P2 — leituras ≥ 2× default
 
-- [ ] **P2.1** `deps_scan` e `ycsb_e` ≥ 2.0 (L0 drenado; p95 do miss) — status: `todo`
-- [ ] **P2.2** `ycsb_c` / `b` / `d` / `deps_mvcc_latest` ≥ 2.0 — status: `todo`
+- [x] **P2.1** `deps_scan` e `ycsb_e` ≥ 2.0 (L0 drenado; p95 do miss) — status: `done` (idle64 mediana E **4.26**, scan **17.98**; Pedra scan 310–595 k, L0=0)
+- [ ] **P2.2** `ycsb_c` / `b` / `d` / `deps_mvcc_latest` ≥ 2.0 — status: `doing` (C **2.43**; MVCC 1.90; B/D < 1)
 - [ ] **P2.3** Gate 2.0 em **todas** as shapes do harness; script default `SYNC=0` `FLOOR=2.0` — status: `todo`
 
 ## Status (living — update with every PR)
@@ -74,12 +74,12 @@
 |----|------|-------|--------|-----------|---------|
 | P0.1 | p0 | RFC | done | este doc | 2026-08-17 |
 | P0.2 | p0 | remesura 11+MC vs default | done | findings/rfc0041-p02 | 2026-08-17 |
-| P0.3 | p0 | floor 2.0 nas que já passam | todo | conjunto vazio | 2026-08-17 |
-| P1.1 | p1 | apply/raftlog MC ≥ 2× | doing | fd off write lock; 0/16 | 2026-08-17 |
-| P1.2 | p1 | A/F/overwrite ≥ 2× | todo | — | 2026-08-17 |
-| P1.3 | p1 | apply/raftlog 1c ≥ 2× | todo | — | 2026-08-17 |
-| P2.1 | p2 | scan/E ≥ 2× | todo | — | 2026-08-17 |
-| P2.2 | p2 | C/B/D/MVCC ≥ 2× | todo | — | 2026-08-17 |
+| P0.3 | p0 | floor 2.0 nas que já passam | todo | 3/16 (C/E/scan); sem gate parcial | 2026-08-17 |
+| P1.1 | p1 | apply/raftlog MC ≥ 2× | doing | 64MiB+idle; apply_mc4 0.94 | 2026-08-17 |
+| P1.2 | p1 | A/F/overwrite ≥ 2× | todo | A 0.16 (53k / fd) | 2026-08-17 |
+| P1.3 | p1 | apply/raftlog 1c ≥ 2× | todo | apply 0.79 | 2026-08-17 |
+| P2.1 | p2 | scan/E ≥ 2× | done | E 4.26 scan 18 | 2026-08-17 |
+| P2.2 | p2 | C/B/D/MVCC ≥ 2× | doing | C 2.43; MVCC 1.90 | 2026-08-17 |
 | P2.3 | p2 | gate 2.0 em todas | todo | — | 2026-08-17 |
 
 ## Acceptance Criteria

@@ -4320,6 +4320,12 @@ impl<E: Env> Db<E> {
         self.commit_inflight.fetch_sub(1, Ordering::Release);
     }
 
+    /// WAL appends whose `fdatasync`/mem-apply has not finished.
+    #[must_use]
+    pub fn commit_inflight(&self) -> usize {
+        self.commit_inflight.load(Ordering::Acquire)
+    }
+
     pub(crate) fn fence_durability(&mut self) {
         self.durability_fenced = true;
     }

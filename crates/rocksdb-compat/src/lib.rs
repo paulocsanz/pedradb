@@ -26,6 +26,7 @@ use pedradb_core::{
 use std::collections::VecDeque;
 use std::fmt;
 use std::ops::Bound;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError, SyncSender};
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
@@ -59,14 +60,26 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 /// Open options (builder subset). `create_if_missing` mirrors rust-rocksdb;
 /// Pedra always requires the directory to be creatable.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct Options {
     /// Whether to create the database directory when absent.
     pub create_if_missing: bool,
+    /// Memtable flush threshold (RocksDB `write_buffer_size`, default 64 MiB).
+    /// `0` disables auto-flush (manual [`DB::flush`] only).
+    pub write_buffer_size: usize,
+}
+
+impl Default for Options {
+    fn default() -> Self {
+        Self {
+            create_if_missing: false,
+            write_buffer_size: 64 * 1024 * 1024,
+        }
+    }
 }
 
 impl Options {
-    /// New default options (nothing enabled).
+    /// New default options (64 MiB write buffer, matching RocksDB).
     #[must_use]
     pub fn new() -> Self {
         Self::default()
@@ -75,6 +88,12 @@ impl Options {
     /// Builder: create the DB directory when missing.
     pub fn create_if_missing(&mut self, v: bool) -> &mut Self {
         self.create_if_missing = v;
+        self
+    }
+
+    /// Builder: memtable flush threshold in bytes. Rocks default is 64 MiB.
+    pub fn set_write_buffer_size(&mut self, n: usize) -> &mut Self {
+        self.write_buffer_size = n;
         self
     }
 }
@@ -687,7 +706,13 @@ impl<E: Env> DB<E> {
             }
             names.push((*c).to_string());
         }
-        let db = ConcurrentDb::open_with_env(dir, pedradb_core::OpenOptions::default(), env)?;
+        let mut core_opts = pedradb_core::OpenOptions::default();
+        core_opts.auto_flush_bytes = if opts.write_buffer_size == 0 {
+            None
+        } else {
+            Some(opts.write_buffer_size)
+        };
+        let db = ConcurrentDb::open_with_env(dir, core_opts, env)?;
         let codec = KeyCodec::new(&names);
         Ok(Self {
             inner: db,
@@ -1043,17 +1068,30 @@ fn spawn_compact_worker(
     gate: Arc<Mutex<()>>,
 ) -> (Option<SyncSender<CompactCmd>>, Option<JoinHandle<()>>) {
     let (tx, rx) = mpsc::sync_channel(1);
+    let drain_all = Arc::new(AtomicBool::new(false));
     let handle = thread::Builder::new()
         .name("pedra-compat-compact".into())
         .spawn(move || loop {
-            match rx.recv_timeout(Duration::from_millis(20)) {
+            match rx.recv_timeout(Duration::from_millis(5)) {
                 Ok(CompactCmd::Shutdown) | Err(RecvTimeoutError::Disconnected) => {
                     while inner.drain_imm_once() {}
                     break;
                 }
                 Ok(CompactCmd::Run) | Err(RecvTimeoutError::Timeout) => {
-                    while inner.drain_imm_once() {}
-                    while compat_compact_once(&inner, &gate) {}
+                    // Imm→L0 SST `fsync` is tens–hundreds of ms (64 MiB). Doing
+                    // it in an apply/raftlog gap is the remaining write tail.
+                    // Flush only when writers idle, or mem is past 8× the
+                    // Rocks 64 MiB buffer so a nonstop writer cannot grow
+                    // forever (RFC-0041 P1.1).
+                    const FORCE_FLUSH_BYTES: usize = 512 * 1024 * 1024;
+                    let idle = inner.writes_idle_for(Duration::from_millis(5));
+                    let mem = inner.with_read(|db| db.stats().mem_approx_bytes);
+                    if idle || mem >= FORCE_FLUSH_BYTES {
+                        while inner.drain_imm_once() {}
+                    }
+                    if idle {
+                        while compat_compact_once(&inner, &gate, &drain_all) {}
+                    }
                 }
             }
         })
@@ -1062,15 +1100,25 @@ fn spawn_compact_worker(
 }
 
 /// One L0→L1 job. I/O runs without the write lock (G5: failed write is not installed).
-fn compat_compact_once<E: Env>(inner: &ConcurrentDb<E>, gate: &Mutex<()>) -> bool {
-    // Idle poll: do not take the write lock (or the compact gate) just to
-    // observe L0 — that stalls every reader every 20 ms.
-    if inner.with_read(|db| db.level_file_count(0)) < L0_COMPACTION_TRIGGER {
+fn compat_compact_once<E: Env>(
+    inner: &ConcurrentDb<E>,
+    gate: &Mutex<()>,
+    drain_all: &AtomicBool,
+) -> bool {
+    // Start a drain when L0 hits the trigger; then keep going until L0 is
+    // empty so C/E/scan do not sit on leftover files.
+    let l0 = inner.with_read(|db| db.level_file_count(0));
+    if l0 == 0 {
+        drain_all.store(false, Ordering::Relaxed);
         return false;
     }
+    if l0 < L0_COMPACTION_TRIGGER && !drain_all.load(Ordering::Relaxed) {
+        return false;
+    }
+    drain_all.store(true, Ordering::Relaxed);
     let _gate = gate.lock();
     let job = inner.with_write(|db| {
-        if db.level_file_count(0) < L0_COMPACTION_TRIGGER {
+        if db.level_file_count(0) == 0 {
             return None;
         }
         db.prepare_l0_compact(CompactOptions::default())
@@ -1087,7 +1135,7 @@ fn compat_compact_once<E: Env>(inner: &ConcurrentDb<E>, gate: &Mutex<()>) -> boo
     if !inner.install_prepared_l0_off_lock(job, table) {
         return false;
     }
-    inner.with_read(|db| db.level_file_count(0)) >= L0_COMPACTION_TRIGGER
+    inner.with_read(|db| db.level_file_count(0)) > 0
 }
 
 #[cfg(test)]
@@ -1107,7 +1155,10 @@ mod tests {
     #[test]
     fn host_worker_flush_writes_sst_and_keeps_keys() {
         let dir = tmp("worker-flush");
-        let db = DB::open_default(&dir).unwrap();
+        let mut opts = Options::new();
+        opts.create_if_missing(true);
+        opts.set_write_buffer_size(256 * 1024);
+        let db = DB::open(&opts, &dir).unwrap();
         let payload = vec![b'x'; 2048];
         for i in 0..3000u32 {
             db.put(i.to_be_bytes(), &payload).unwrap();
@@ -1146,14 +1197,15 @@ mod tests {
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
         while std::time::Instant::now() < deadline {
             let p = db.read_probe();
-            if p.l0_files < L0_COMPACTION_TRIGGER {
+            if p.l0_files == 0 {
                 break;
             }
             std::thread::sleep(std::time::Duration::from_millis(20));
         }
-        assert!(
-            db.read_probe().l0_files < L0_COMPACTION_TRIGGER,
-            "host worker should drain L0, got {}",
+        assert_eq!(
+            db.read_probe().l0_files,
+            0,
+            "host worker should drain every L0, got {}",
             db.read_probe().l0_files
         );
         for i in 0..8u8 {

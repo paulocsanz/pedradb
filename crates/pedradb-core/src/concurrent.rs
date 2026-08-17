@@ -73,6 +73,9 @@ struct WriteGroup {
     /// from 4 clients share fsyncs instead of each taking the lone-writer
     /// path between the two `write()`s (RFC-0040 P1.2).
     last_multi_ns: AtomicU64,
+    /// Last `submit` entry (ns). Host compact waits for this to go idle so
+    /// L0 rewrite does not run in the gaps of an apply/raftlog burst.
+    last_submit_ns: AtomicU64,
 }
 
 /// Default catch-up window (see [`ConcurrentDb::set_write_group_catchup_window`]).
@@ -118,6 +121,7 @@ impl WriteGroup {
             batches: AtomicU64::new(0),
             batch_ops: AtomicU64::new(0),
             last_multi_ns: AtomicU64::new(0),
+            last_submit_ns: AtomicU64::new(0),
         }
     }
 
@@ -146,23 +150,20 @@ impl WriteGroup {
     ) -> Result<SequenceNumber> {
         self.active.fetch_add(1, Ordering::Relaxed);
         self.submits.fetch_add(1, Ordering::Relaxed);
+        self.last_submit_ns.store(Self::now_ns(), Ordering::Relaxed);
 
         let active = self.active.load(Ordering::Relaxed);
         if active > 1 {
             self.last_multi_ns.store(Self::now_ns(), Ordering::Relaxed);
         }
 
-        // Lone writer (parity bench, sequential client): skip the mpsc hop
-        // and the group-commit clone. Same fsync-before-Ok via apply_batch_with.
+        // Lone writer (parity bench, sequential client): skip the mpsc hop.
+        // WAL append under the write lock, `fdatasync` off it (same as the
+        // group leader) so the host worker can drain imm during the fd.
         // Stay off this path for MULTI_HOLD after a concurrent burst so
         // apply's second write() still joins the group (RFC-0040 P1.2).
         if active == 1 && !self.recently_concurrent() {
-            let durability = if do_sync {
-                WriteOptions::sync()
-            } else {
-                WriteOptions::no_sync()
-            };
-            let result = db.write().apply_batch_with(ops, durability);
+            let result = Self::lone_commit(db, ops, do_sync);
             self.batches.fetch_add(1, Ordering::Relaxed);
             self.batch_ops.fetch_add(1, Ordering::Relaxed);
             self.active.fetch_sub(1, Ordering::Relaxed);
@@ -269,27 +270,7 @@ impl WriteGroup {
                     }
                     // fdatasync off the write lock so flush/readers proceed.
                     // Ok still waits (G1). Rotate is blocked via commit_inflight.
-                    let need_sync = inflight.needs_sync();
-                    guard.begin_commit();
-                    let wal = guard.wal_arc();
-                    drop(guard);
-                    let sync_err = if need_sync {
-                        wal.lock().sync_data().err()
-                    } else {
-                        None
-                    };
-                    let mut guard = db.write();
-                    let results = if let Some(e) = sync_err {
-                        guard.fence_durability();
-                        inflight.fail_sync(e)
-                    } else {
-                        if need_sync {
-                            guard.note_wal_sync();
-                        }
-                        guard.group_apply(inflight)
-                    };
-                    guard.end_commit();
-                    results
+                    Self::finish_group_off_lock(db, guard, inflight)
                 }
             };
             self.batches.fetch_add(1, Ordering::Relaxed);
@@ -300,6 +281,59 @@ impl WriteGroup {
                 let _ = pending.reply.send(result);
             }
         }
+    }
+
+    /// Sequential client: one batch, `fdatasync` off the write lock (G1).
+    fn lone_commit<E: Env>(
+        db: &RwLock<Db<E>>,
+        ops: Vec<BatchOp>,
+        do_sync: bool,
+    ) -> Result<SequenceNumber> {
+        let mut guard = db.write();
+        match guard.group_start(vec![(ops, do_sync)]) {
+            Err(mut results) => results.pop().unwrap_or_else(|| {
+                Err(CoreError::Internal(
+                    "lone writer missing admit result".into(),
+                ))
+            }),
+            Ok(inflight) => Self::finish_group_off_lock(db, guard, inflight)
+                .into_iter()
+                .next()
+                .unwrap_or_else(|| {
+                    Err(CoreError::Internal(
+                        "lone writer missing commit result".into(),
+                    ))
+                }),
+        }
+    }
+
+    /// Drop the write lock across WAL `fdatasync`; apply mem after Ok-path sync.
+    fn finish_group_off_lock<E: Env>(
+        db: &RwLock<Db<E>>,
+        guard: parking_lot::RwLockWriteGuard<'_, Db<E>>,
+        inflight: crate::db::GroupInFlight,
+    ) -> Vec<Result<SequenceNumber>> {
+        let need_sync = inflight.needs_sync();
+        guard.begin_commit();
+        let wal = guard.wal_arc();
+        drop(guard);
+        let sync_err = if need_sync {
+            wal.lock().sync_data().err()
+        } else {
+            None
+        };
+        let mut guard = db.write();
+        let results = if let Some(e) = sync_err {
+            guard.fence_durability();
+            inflight.fail_sync(e)
+        } else {
+            if need_sync {
+                guard.note_wal_sync();
+            }
+            guard.group_apply(inflight)
+        };
+        guard.end_commit();
+        results
     }
 }
 
@@ -705,6 +739,24 @@ impl<E: Env> ConcurrentDb<E> {
             self.writes.batches.load(Ordering::Relaxed),
             self.writes.batch_ops.load(Ordering::Relaxed),
         )
+    }
+
+    /// True when no writer is in `submit` / group `fdatasync` and the last
+    /// submit is older than `idle`. Host compact uses this so L0 rewrite
+    /// does not start in a 5 ms poll gap of an apply burst (RFC-0041 P1.1).
+    #[must_use]
+    pub fn writes_idle_for(&self, idle: Duration) -> bool {
+        if self.writes.active.load(Ordering::Relaxed) > 0 {
+            return false;
+        }
+        if self.inner.read().commit_inflight() > 0 {
+            return false;
+        }
+        let last = self.writes.last_submit_ns.load(Ordering::Relaxed);
+        if last == 0 {
+            return true;
+        }
+        WriteGroup::now_ns().saturating_sub(last) >= idle.as_nanos() as u64
     }
 
     /// Write-group catch-up window (RFC-0037 P2.2). Default 50 µs
@@ -1664,6 +1716,31 @@ mod tests {
                     "reopen c={c} i={i}"
                 );
             }
+        }
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Sequential 1-client path also `fdatasync`s off the write lock (G1).
+    #[test]
+    fn off_lock_lone_fsync_is_durable_on_reopen() {
+        let dir = temp_dir();
+        let db = open_sync(&dir);
+        for i in 0..8u8 {
+            db.put([b'l', i], [b'v', i]).unwrap();
+        }
+        assert!(db.wal_sync_count() >= 8, "each lone put must fdatasync");
+        assert!(
+            db.writes_idle_for(Duration::ZERO),
+            "no writer in flight after sequential puts return"
+        );
+        drop(db);
+        let re = open_sync(&dir);
+        for i in 0..8u8 {
+            assert_eq!(
+                re.get(&[b'l', i]).as_deref(),
+                Some(&[b'v', i][..]),
+                "reopen must see acked lone put {i}"
+            );
         }
         let _ = fs::remove_dir_all(&dir);
     }

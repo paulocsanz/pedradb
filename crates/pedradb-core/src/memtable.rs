@@ -114,6 +114,15 @@ impl MemTable {
         let entry_bytes = key.user_key.len() + value.len() + 8;
         let is_rd = key.kind == ValueType::RangeDeletion;
         let vers = self.map.entry(key.user_key.clone()).or_default();
+        if vers.is_empty() {
+            vers.push(Version { key, value });
+            self.entries = self.entries.saturating_add(1);
+            self.approx_bytes = self.approx_bytes.saturating_add(entry_bytes);
+            if is_rd {
+                self.range_tombstones = self.range_tombstones.saturating_add(1);
+            }
+            return;
+        }
         let pos = vers.partition_point(|v| {
             ver_cmp(v.key.sequence, v.key.kind, key.sequence, key.kind) == Ordering::Less
         });
