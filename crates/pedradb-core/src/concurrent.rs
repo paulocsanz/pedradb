@@ -2033,6 +2033,66 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
     }
 
+    /// Park must be able to take the write lock while a fat group is
+    /// encoding off it (RFC-0041: do not delay park).
+    #[test]
+    fn park_imm_runs_during_fat_apply() {
+        let dir = temp_dir();
+        let db = Arc::new(
+            ConcurrentDb::open_with(
+                &dir,
+                OpenOptions {
+                    sync: true,
+                    auto_flush_bytes: Some(8 * 1024),
+                    auto_compact_sst_count: None,
+                    auto_compact_sst_bytes: None,
+                    exclusive: true,
+                    large_value_threshold: None,
+                },
+            )
+            .unwrap(),
+        );
+        db.set_defer_auto_compact(true);
+        let stop = Arc::new(AtomicUsize::new(0));
+        let writer = {
+            let db = Arc::clone(&db);
+            let stop = Arc::clone(&stop);
+            thread::spawn(move || {
+                for i in 0..80u16 {
+                    if stop.load(Ordering::Relaxed) > 0 {
+                        break;
+                    }
+                    let ops: Vec<_> = (0..64u16)
+                        .map(|k| {
+                            let mut key = i.to_be_bytes().to_vec();
+                            key.extend_from_slice(&k.to_be_bytes());
+                            BatchOp::put(key, vec![b'x'; 128])
+                        })
+                        .collect();
+                    db.apply_batch(ops).unwrap();
+                }
+            })
+        };
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        let mut parked = 0usize;
+        while std::time::Instant::now() < deadline {
+            if db.has_imm() && db.park_imm_once() {
+                parked = parked.saturating_add(1);
+            }
+            if parked >= 1 {
+                break;
+            }
+            thread::yield_now();
+        }
+        stop.store(1, Ordering::Relaxed);
+        writer.join().unwrap();
+        assert!(
+            parked >= 1 || db.parked_unflushed_count() >= 1,
+            "host must park while encode runs off the write lock"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
     /// Off-lock L0 persist: SST+MANIFEST hold the key if WAL is deleted.
     #[test]
     fn persist_unsynced_off_lock_makes_sst_sufficient() {

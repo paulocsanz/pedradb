@@ -197,7 +197,8 @@ of ~20 L0s cannot finish in the MVCC/scan window. FLOOR off.
 4.3 k → 3 k; scan 2.21 → 1.0). [`nowake/`](nowake/README.md) and
 [`parkonly/`](parkonly/README.md) **rejected**. [`inval/`](inval/README.md):
 one cache bump/group; 3/16 (apply_mc4 2.05 vs weak Rocks; Pedra 3.3 k).
-FLOOR off.
+[`encoff/`](encoff/README.md): encode off the write lock **rejected**
+(apply_mc4 4.3 k → 1.7 k). FLOOR off.
 
 
 

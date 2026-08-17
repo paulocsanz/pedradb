@@ -4532,6 +4532,7 @@ impl<E: Env> Db<E> {
         let n = batches.len();
         let mut g = GroupInFlight {
             results: (0..n).map(|_| None).collect(),
+            pending: Vec::new(),
             appended: Vec::new(),
             any_sync: false,
             next_i: n,
@@ -4543,7 +4544,11 @@ impl<E: Env> Db<E> {
         if let Err(results) = self.group_admit(n) {
             return Err(results);
         }
-        self.group_prepare_append(&mut g, batches, 0);
+        self.group_prepare(&mut g, batches, 0);
+        let mut bufs = std::mem::take(&mut self.encode_bufs);
+        g.encode_pending_from(0, &mut bufs);
+        self.group_append_pending(&mut g, &bufs);
+        self.encode_bufs = bufs;
         Ok(g)
     }
 
@@ -4560,7 +4565,12 @@ impl<E: Env> Db<E> {
         g.next_i = base.saturating_add(batches.len());
         g.results
             .resize_with(g.next_i, || None::<Result<SequenceNumber>>);
-        self.group_prepare_append(g, batches, base);
+        let from = g.pending_len();
+        self.group_prepare(g, batches, base);
+        let mut bufs = std::mem::take(&mut self.encode_bufs);
+        g.encode_pending_from(from, &mut bufs);
+        self.group_append_pending(g, &bufs);
+        self.encode_bufs = bufs;
     }
 
     fn group_admit(&mut self, n: usize) -> std::result::Result<(), Vec<Result<SequenceNumber>>> {
@@ -4581,13 +4591,12 @@ impl<E: Env> Db<E> {
         }
     }
 
-    fn group_prepare_append(
+    fn group_prepare(
         &mut self,
         g: &mut GroupInFlight,
         batches: Vec<(Vec<BatchOp>, bool)>,
         index_base: usize,
     ) {
-        let mut prepared: Vec<(usize, Vec<WriteOp>, SequenceNumber)> = Vec::new();
         for (off, (ops, do_sync)) in batches.into_iter().enumerate() {
             let i = index_base + off;
             if ops.is_empty() {
@@ -4599,35 +4608,32 @@ impl<E: Env> Db<E> {
                     if do_sync {
                         g.any_sync = true;
                     }
-                    prepared.push((i, write_ops, last_seq));
+                    g.pending.push((i, write_ops, last_seq));
                 }
                 Err(e) => g.results[i] = Some(Err(e)),
             }
         }
-        if prepared.is_empty() {
+    }
+
+    /// WAL-append already-encoded [`GroupInFlight::pending`] (no fsync).
+    pub(crate) fn group_append_pending(&mut self, g: &mut GroupInFlight, encoded: &[Vec<u8>]) {
+        if g.failed || g.pending.is_empty() {
             return;
         }
-        let mut encoded = std::mem::take(&mut self.encode_bufs);
-        encoded.resize_with(prepared.len(), Vec::new);
-        for (slot, (_, write_ops, _)) in encoded.iter_mut().zip(prepared.iter()) {
-            slot.clear();
-            crate::batch::encode_ops(write_ops, slot);
-        }
-        encoded.truncate(prepared.len());
+        debug_assert_eq!(encoded.len(), g.pending.len());
         let refs: Vec<&[u8]> = encoded.iter().map(|v| v.as_slice()).collect();
-        let append_err = self.wal_append_encoded_group(&refs).err();
-        self.encode_bufs = encoded;
-        if let Some(e) = append_err {
+        if let Err(e) = self.wal_append_encoded_group(&refs) {
             let msg = e.to_string();
-            for (i, _, _) in &prepared {
+            for (i, _, _) in &g.pending {
                 g.results[*i] = Some(Err(CoreError::Internal(format!(
                     "group wal append failed: {msg}"
                 ))));
             }
             g.failed = true;
+            g.pending.clear();
             return;
         }
-        g.appended.extend(prepared);
+        g.appended.extend(g.pending.drain(..));
     }
 
     pub(crate) fn group_finish(&mut self, g: GroupInFlight) -> Vec<Result<SequenceNumber>> {
@@ -4686,9 +4692,12 @@ impl<E: Env> Db<E> {
     }
 }
 
-/// In-flight group commit (append done, fsync/apply pending).
+/// In-flight group commit (prepare / encode / append / apply).
 pub(crate) struct GroupInFlight {
     results: Vec<Option<Result<SequenceNumber>>>,
+    /// Seq-assigned ops not yet WAL-appended (ConcurrentDb encodes these
+    /// without the Db write lock).
+    pending: Vec<(usize, Vec<WriteOp>, SequenceNumber)>,
     appended: Vec<(usize, Vec<WriteOp>, SequenceNumber)>,
     any_sync: bool,
     next_i: usize,
@@ -4698,6 +4707,25 @@ pub(crate) struct GroupInFlight {
 impl GroupInFlight {
     pub(crate) fn needs_sync(&self) -> bool {
         self.any_sync && !self.failed && !self.appended.is_empty()
+    }
+
+    pub(crate) fn pending_len(&self) -> usize {
+        self.pending.len()
+    }
+
+    /// Encode `pending[from..]` into `bufs` (no Db lock).
+    pub(crate) fn encode_pending_from(&self, from: usize, bufs: &mut Vec<Vec<u8>>) {
+        if self.pending.len() <= from {
+            return;
+        }
+        if bufs.len() < self.pending.len() {
+            bufs.resize_with(self.pending.len(), Vec::new);
+        }
+        for i in from..self.pending.len() {
+            bufs[i].clear();
+            crate::batch::encode_ops(&self.pending[i].1, &mut bufs[i]);
+        }
+        bufs.truncate(self.pending.len());
     }
 
     pub(crate) fn fail_sync(mut self, e: impl std::fmt::Display) -> Vec<Result<SequenceNumber>> {
