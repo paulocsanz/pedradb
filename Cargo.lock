@@ -750,6 +750,7 @@ dependencies = [
 name = "rocksdb-parity-bench"
 version = "0.1.0"
 dependencies = [
+ "pedradb-core",
  "rocksdb",
  "rocksdb-compat",
  "tempfile",

@@ -4176,6 +4176,15 @@ impl<E: Env> Db<E> {
         self.wal.append_record(&encoded)
     }
 
+    /// Append already-encoded records with **one** WAL `write` (RFC-0037 P2.2:
+    /// per-member `write` syscalls cost more than the group `fdatasync`).
+    pub(crate) fn wal_append_encoded_group(&mut self, records: &[&[u8]]) -> Result<()> {
+        self.ensure_not_fenced()?;
+        let n: u64 = records.iter().map(|r| r.len() as u64).sum();
+        self.bytes_written_wal = self.bytes_written_wal.saturating_add(n);
+        self.wal.append_records(records)
+    }
+
     /// One WAL `fdatasync` for a group of already-appended records.
     pub(crate) fn wal_sync_group(&mut self) -> Result<()> {
         self.ensure_not_fenced()?;
@@ -4247,15 +4256,31 @@ impl<E: Env> Db<E> {
             }
         }
 
-        let mut appended: Vec<(usize, Vec<WriteOp>, SequenceNumber)> = Vec::new();
-        for (i, write_ops, last_seq) in prepared {
-            match self.wal_append_ops(write_ops.clone()) {
-                Ok(()) => appended.push((i, write_ops, last_seq)),
-                Err(e) => {
-                    results[i] = Some(Err(e));
-                    break;
+        // One WAL `write` for the whole group: encode each member's record,
+        // then a single append. All-or-nothing — a failed write fails every
+        // member that had reached this point (fail-closed, mem not applied).
+        let mut encoded: Vec<Vec<u8>> = Vec::with_capacity(prepared.len());
+        for (_, write_ops, _) in &prepared {
+            encoded.push(
+                WriteRecord {
+                    ops: write_ops.clone(),
                 }
+                .encode(),
+            );
+        }
+        let mut appended: Vec<(usize, Vec<WriteOp>, SequenceNumber)> = Vec::new();
+        {
+            let refs: Vec<&[u8]> = encoded.iter().map(|v| v.as_slice()).collect();
+            if let Err(e) = self.wal_append_encoded_group(&refs) {
+                let msg = e.to_string();
+                for (i, _, _) in &prepared {
+                    results[*i] = Some(Err(CoreError::Internal(format!(
+                        "group wal append failed: {msg}"
+                    ))));
+                }
+                return finish_group_results(results);
             }
+            appended = prepared;
         }
 
         if appended.is_empty() {

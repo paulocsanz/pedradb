@@ -131,6 +131,62 @@ impl Engine for CompatEngine {
     }
 }
 
+/// pedradb-core `ConcurrentDb` with Rocks-style group commit on the write
+/// path (RFC-0037 P2.2). YCSB-subset adapter: the multi-client harness only
+/// uses default-CF put/get/rmw — CF methods are unimplemented and return
+/// errors rather than silently degrading.
+pub struct ConcurrentEngine {
+    db: pedradb_core::concurrent::ConcurrentDb<pedradb_core::StdEnv>,
+}
+
+impl ConcurrentEngine {
+    pub fn open(path: &Path) -> Self {
+        let db = pedradb_core::concurrent::ConcurrentDb::open(path)
+            .expect("concurrent open (sync WAL default)");
+        Self { db }
+    }
+}
+
+impl Engine for ConcurrentEngine {
+    fn label(&self) -> &'static str {
+        "concurrent"
+    }
+    fn durability(&self) -> &'static str {
+        "fdatasync-before-ok via ConcurrentDb write group (leader fsyncs once per group)"
+    }
+    fn sync(&self) -> bool {
+        true
+    }
+    fn put(&self, k: &[u8], v: &[u8]) -> bool {
+        self.db.put(k, v).is_ok()
+    }
+    fn get(&self, k: &[u8]) -> Result<Option<Vec<u8>>, ()> {
+        Ok(self.db.get(k).map(|b| b.to_vec()))
+    }
+    fn scan_count(&self, start: &[u8], end: &[u8], cap: usize) -> Result<usize, ()> {
+        use std::ops::Bound;
+        let got = self
+            .db
+            .scan_collect(Bound::Included(start), Bound::Excluded(end));
+        Ok(got.len().min(cap))
+    }
+    fn put_cf(&self, _cf: &str, _k: &[u8], _v: &[u8]) -> bool {
+        false
+    }
+    fn get_cf(&self, _cf: &str, _k: &[u8]) -> Result<Option<Vec<u8>>, ()> {
+        Err(())
+    }
+    fn batch(&self, _ops: Vec<CfWrite>) -> bool {
+        false
+    }
+    fn latest_cf(&self, _cf: &str, _prefix: &[u8]) -> Result<Option<Vec<u8>>, ()> {
+        Err(())
+    }
+    fn scan_count_cf(&self, _cf: &str, _start: &[u8], _end: &[u8], _cap: usize) -> Result<usize, ()> {
+        Err(())
+    }
+}
+
 /// Real RocksDB via the rocksdb crate (feature `real`). Durability is labeled:
 /// `sync` per write when `sync=true` (matched to Pedra's contract), else
 /// RocksDB's async-WAL default (reference run).

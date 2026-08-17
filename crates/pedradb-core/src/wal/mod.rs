@@ -103,6 +103,17 @@ impl<F: EnvFile> Wal<F> {
         self.writer.add_record(data)
     }
 
+    /// Append several logical records with **one** `write` (group commit).
+    ///
+    /// Byte stream identical to [`Self::append_record`] per record; all
+    /// records land or none do (single write).
+    ///
+    /// # Errors
+    /// Returns [`std::io::Error`] propagated from the underlying file.
+    pub fn append_records(&mut self, datas: &[&[u8]]) -> Result<()> {
+        self.writer.add_records(datas)
+    }
+
     /// Flush + `fdatasync` (sync data only).
     ///
     /// # Errors

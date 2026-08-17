@@ -54,6 +54,37 @@ impl<W: Write + Seek> WalWriter<W> {
     /// Never in practice; `block_offset` is an internal invariant kept below
     /// `BLOCK_SIZE`. The `checked_sub` guards against a logic regression.
     pub fn add_record(&mut self, data: &[u8]) -> Result<()> {
+        let mut buf: Vec<u8> = Vec::with_capacity(data.len() + 2 * HEADER_SIZE);
+        self.fragment_into(data, &mut buf);
+        self.out.write_all(&buf)?;
+        Ok(())
+    }
+
+    /// Append several logical records with **one** `write` on the sink.
+    ///
+    /// Produces a byte stream identical to `add_record` per record (RFC-0037
+    /// P2.2: per-member WAL `write` syscalls on the bench box cost more than
+    /// the group `fdatasync`, capping multi-client throughput).
+    ///
+    /// # Errors
+    /// Returns [`std::io::Error`] propagated from the single underlying write.
+    pub fn add_records(&mut self, datas: &[&[u8]]) -> Result<()> {
+        if datas.is_empty() {
+            return Ok(());
+        }
+        let mut buf: Vec<u8> = Vec::with_capacity(
+            datas.iter().map(|d| d.len() + HEADER_SIZE * 2).sum(),
+        );
+        for data in datas {
+            self.fragment_into(data, &mut buf);
+        }
+        self.out.write_all(&buf)?;
+        Ok(())
+    }
+
+    /// Fragmentation state machine shared by [`Self::add_record`] (direct
+    /// write) and [`Self::add_records`] (staged buffer).
+    fn fragment_into(&mut self, data: &[u8], buf: &mut Vec<u8>) {
         let mut left = data.len();
         let mut begin = true;
         let mut off = 0usize;
@@ -67,7 +98,7 @@ impl<W: Write + Seek> WalWriter<W> {
             // and continue in a fresh block.
             if leftover < HEADER_SIZE {
                 let pad = [0u8; HEADER_SIZE];
-                self.out.write_all(&pad[..leftover])?;
+                buf.extend_from_slice(&pad[..leftover]);
                 self.block_offset = 0;
             }
 
@@ -85,7 +116,7 @@ impl<W: Write + Seek> WalWriter<W> {
                 RecordType::Middle
             };
 
-            self.emit_physical_record(rtype, &data[off..off + fragment_len])?;
+            self.push_physical_record(rtype, &data[off..off + fragment_len], buf);
             off += fragment_len;
             left -= fragment_len;
             begin = false;
@@ -94,15 +125,10 @@ impl<W: Write + Seek> WalWriter<W> {
                 break;
             }
         }
-        Ok(())
     }
 
-    /// Emit a single physical record (header + payload fragment).
-    ///
-    /// # Panics
-    /// Panics if `data.len()` exceeds `u16::MAX`, which is impossible by
-    /// construction since fragments are bounded by a block's payload capacity.
-    fn emit_physical_record(&mut self, rtype: RecordType, data: &[u8]) -> Result<()> {
+    /// Header+payload emit into a staging buffer (no I/O).
+    fn push_physical_record(&mut self, rtype: RecordType, data: &[u8], buf: &mut Vec<u8>) {
         let length_u16 =
             u16::try_from(data.len()).expect("physical record fragment must fit in u16");
 
@@ -113,11 +139,9 @@ impl<W: Write + Seek> WalWriter<W> {
         header[4..6].copy_from_slice(&length_u16.to_le_bytes());
         header[6] = rtype as u8;
 
-        let length = usize::from(length_u16);
-        self.out.write_all(&header)?;
-        self.out.write_all(data)?;
-        self.block_offset += HEADER_SIZE + length;
-        Ok(())
+        buf.extend_from_slice(&header);
+        buf.extend_from_slice(data);
+        self.block_offset += HEADER_SIZE + usize::from(length_u16);
     }
 
     /// Flush buffered writes to the OS. Does **not** fsync — use a file

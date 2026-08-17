@@ -23,11 +23,13 @@
 use std::collections::VecDeque;
 use std::ops::Bound;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, SyncSender};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use bytes::Bytes;
-use parking_lot::{Mutex, RwLock};
+use parking_lot::{Condvar, Mutex, RwLock};
 
 use crate::db::{
     BatchOp, BlobGcCandidate, CheckpointMeta, CompactOptions, Db, DbStats, OpenOptions, Snapshot,
@@ -49,7 +51,33 @@ struct PendingWrite {
 struct WriteGroup {
     /// Queued client writes waiting for a leader group.
     queue: Mutex<WriteGroupState>,
+    /// Signalled whenever a writer pushes onto the queue, so a leader holding
+    /// its catch-up window open can absorb the arrival immediately.
+    arrived: Condvar,
+    /// Submits currently in flight (`submit` entry → reply consumed). Writers
+    /// counted here but absent from the queue are waking between ops — exactly
+    /// the stragglers the catch-up window waits for.
+    active: AtomicUsize,
+    /// Catch-up window length; `PEDRA_CATCHUP_US` overrides for lab sweeps
+    /// (0 disables). See [`CATCHUP_WINDOW_DEFAULT`] for the measured basis.
+    catchup_window: Duration,
+    /// Diagnostics (RFC-0037 P2.2): submits total / queued-behind-leader /
+    /// groups led / ops inside led groups.
+    submits: AtomicU64,
+    queued: AtomicU64,
+    batches: AtomicU64,
+    batch_ops: AtomicU64,
 }
+
+/// How long a leader holds a group open for known-active writers that have not
+/// reached the queue yet (RFC-0037 P2.2). Measured on the bench box: a parked
+/// follower needs ~30–100 µs to wake and resubmit, while one fsync window is
+/// ~30 µs — without this window arrivals stagger one group per fsync
+/// (group_size ≈ 1.1 at 4 clients). Bounded per group so a stuck writer costs
+/// at most one window, and skipped entirely when `active == batch.len()`
+/// (single-client workloads pay nothing).
+/// Default catch-up window (see [`WriteGroup::catchup_window`]).
+const CATCHUP_WINDOW_DEFAULT: Duration = Duration::from_micros(50);
 
 struct WriteGroupState {
     pending: VecDeque<PendingWrite>,
@@ -64,6 +92,17 @@ impl WriteGroup {
                 pending: VecDeque::new(),
                 leader_active: false,
             }),
+            arrived: Condvar::new(),
+            active: AtomicUsize::new(0),
+            catchup_window: std::env::var("PEDRA_CATCHUP_US")
+                .ok()
+                .and_then(|v| v.parse::<u64>().ok())
+                .map(Duration::from_micros)
+                .unwrap_or(CATCHUP_WINDOW_DEFAULT),
+            submits: AtomicU64::new(0),
+            queued: AtomicU64::new(0),
+            batches: AtomicU64::new(0),
+            batch_ops: AtomicU64::new(0),
         }
     }
 
@@ -75,6 +114,8 @@ impl WriteGroup {
         do_sync: bool,
     ) -> Result<SequenceNumber> {
         let (tx, rx) = mpsc::sync_channel(1);
+        self.active.fetch_add(1, Ordering::Relaxed);
+        self.submits.fetch_add(1, Ordering::Relaxed);
         let become_leader = {
             let mut g = self.queue.lock();
             g.pending.push_back(PendingWrite {
@@ -82,28 +123,35 @@ impl WriteGroup {
                 do_sync,
                 reply: tx,
             });
-            if g.leader_active {
-                false
-            } else {
+            let leader = !g.leader_active;
+            if leader {
                 g.leader_active = true;
-                true
+            } else {
+                // A leader may be holding its catch-up window open for us.
+                self.arrived.notify_all();
             }
+            leader
         };
+        if !become_leader {
+            self.queued.fetch_add(1, Ordering::Relaxed);
+        }
 
         if become_leader {
             self.lead(db);
         }
 
-        rx.recv().unwrap_or_else(|_| {
+        let r = rx.recv().unwrap_or_else(|_| {
             Err(CoreError::Internal(
                 "write group leader dropped reply channel".into(),
             ))
-        })
+        });
+        self.active.fetch_sub(1, Ordering::Relaxed);
+        r
     }
 
     fn lead<E: Env>(&self, db: &RwLock<Db<E>>) {
         loop {
-            let batch: Vec<PendingWrite> = {
+            let mut batch: Vec<PendingWrite> = {
                 let mut g = self.queue.lock();
                 if g.pending.is_empty() {
                     g.leader_active = false;
@@ -112,12 +160,36 @@ impl WriteGroup {
                 g.pending.drain(..).collect()
             };
 
+            // Catch-up window (RFC-0037 P2.2): writers counted in `active`
+            // but not yet queued are waking between ops. Hold the group open
+            // for them so they share this fsync instead of each forcing one
+            // (measured: without it, 4 clients group ≈ 1.1 writes/fsync).
+            // No-op when every active writer is already queued — a lone
+            // client never waits.
+            if !self.catchup_window.is_zero()
+                && batch.len() < self.active.load(Ordering::Relaxed)
+            {
+                let deadline = Instant::now() + self.catchup_window;
+                let mut g = self.queue.lock();
+                while batch.len() < self.active.load(Ordering::Relaxed) {
+                    let now = Instant::now();
+                    if now >= deadline {
+                        break;
+                    }
+                    let _timed_out = self.arrived.wait_for(&mut g, deadline - now);
+                    batch.extend(g.pending.drain(..));
+                }
+                drop(g);
+            }
+
             // One write lock for the whole group: append all + one fsync + apply all.
             let mut guard = db.write();
             let inputs: Vec<(Vec<BatchOp>, bool)> =
                 batch.iter().map(|p| (p.ops.clone(), p.do_sync)).collect();
             let results = guard.group_commit(inputs);
             drop(guard);
+            self.batches.fetch_add(1, Ordering::Relaxed);
+            self.batch_ops.fetch_add(batch.len() as u64, Ordering::Relaxed);
 
             for (pending, result) in batch.into_iter().zip(results) {
                 let _ = pending.reply.send(result);
@@ -502,6 +574,22 @@ impl<E: Env> ConcurrentDb<E> {
     #[must_use]
     pub fn wal_sync_count(&self) -> u64 {
         self.inner.read().wal_sync_count()
+    }
+
+    /// Write-group diagnostics (RFC-0037 P2.2): `(submits, queued_behind_leader,
+    /// groups_committed, ops_in_groups)`.
+    ///
+    /// `ops_in_groups / groups_committed` is the achieved average group size;
+    /// `queued_behind_leader / submits` says how often a submitter found a
+    /// leader already active (parked instead of leading).
+    #[must_use]
+    pub fn write_group_stats(&self) -> (u64, u64, u64, u64) {
+        (
+            self.writes.submits.load(Ordering::Relaxed),
+            self.writes.queued.load(Ordering::Relaxed),
+            self.writes.batches.load(Ordering::Relaxed),
+            self.writes.batch_ops.load(Ordering::Relaxed),
+        )
     }
 
     /// Group fsync for prior `WriteOptions::no_sync` writes (write lock).

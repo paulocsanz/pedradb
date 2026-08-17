@@ -8,6 +8,7 @@ rust-version.workspace = true
 
 [dependencies]
 rocksdb-compat = { path = "../rocksdb-compat" }
+pedradb-core = { path = "../pedradb-core" }
 rocksdb = { version = "0.22", optional = true, default-features = false }
 
 [dev-dependencies]

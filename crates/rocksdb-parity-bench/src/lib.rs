@@ -487,6 +487,87 @@ impl YcsbRunner {
         );
         block
     }
+
+    /// RFC-0037 P2.2: multi-client A/F/overwrite shapes over a fixed seeded
+    /// keyspace (no inserts — the window growth would be racy). `clients`
+    /// threads, independent per-client schedules from the same zipf CDF,
+    /// barrier-aligned start. Each client runs `cfg.ops` ops; block `n` is
+    /// the aggregate. Same op mix as the single-client rows so the two are
+    /// directly comparable.
+    pub fn run_clients<E: Engine + Sync>(&self, e: &E, clients: usize) -> Vec<String> {
+        assert!(clients >= 2, "multi-client harness needs >= 2 clients");
+        let cfg_ops = self.cfg.ops;
+        let records = self.cfg.records;
+        let payload = self.cfg.payload;
+        let yval = std::sync::Arc::new(vec![b'y'; payload]);
+        let mut blocks = Vec::new();
+        // (name, read_pct, rmw, overwrite) — mirrors run()/run_deps mixes.
+        let shapes: [(&str, u64, bool, bool); 3] = [
+            ("ycsb_a", 50, false, false),
+            ("ycsb_f", 50, true, false),
+            ("deps_cache_overwrite", 0, false, true),
+        ];
+        for (name, read_pct, rmw, overwrite) in shapes {
+            let barrier = std::sync::Arc::new(std::sync::Barrier::new(clients));
+            let t0 = Instant::now();
+            let mut lats = Vec::with_capacity(cfg_ops * clients);
+            let mut errors = 0u64;
+            std::thread::scope(|s| {
+                let handles: Vec<_> = (0..clients)
+                    .map(|c| {
+                        let barrier = barrier.clone();
+                        let yval = yval.clone();
+                        s.spawn(move || {
+                            let mut rng = 0x5EED_0001_u64
+                                .wrapping_mul((c as u64) + 0x9E37)
+                                ^ (c as u64);
+                            let mut lats = Vec::with_capacity(cfg_ops);
+                            let mut errors = 0u64;
+                            barrier.wait();
+                            for _ in 0..cfg_ops {
+                                let t = Instant::now();
+                                let u = self.pick(&mut rng, records);
+                                let ok = if overwrite {
+                                    e.put(format!("c/{u:06}").as_bytes(), &yval)
+                                } else if xorshift(&mut rng) % 100 < read_pct {
+                                    e.get(&ykey(u)).is_ok()
+                                } else if rmw {
+                                    e.rmw(&ykey(u), &yval)
+                                } else {
+                                    e.put(&ykey(u), &yval)
+                                };
+                                if !ok {
+                                    errors += 1;
+                                }
+                                lats.push(ms(t));
+                            }
+                            (lats, errors)
+                        })
+                    })
+                    .collect();
+                for h in handles {
+                    let (mut l, err) = h.join().expect("client thread");
+                    errors += err;
+                    lats.append(&mut l);
+                }
+            });
+            let wall = t0.elapsed();
+            let block = summarize_mc(
+                &format!("{name}_mc{clients}"),
+                cfg_ops * clients,
+                wall,
+                &mut lats,
+                clients,
+                errors,
+            );
+            eprintln!(
+                "[rocks-parity] {name} mc{clients} done ops={} errors={errors}",
+                cfg_ops * clients
+            );
+            blocks.push(block);
+        }
+        blocks
+    }
 }
 
 pub fn ykey(i: usize) -> Vec<u8> {
@@ -544,6 +625,23 @@ fn summarize(name: &str, n: usize, wall: Duration, lats_ms: &mut [f64]) -> Strin
         p95 = pct(lats_ms, 95.0),
         p99 = pct(lats_ms, 99.0),
         max = lats_ms.last().copied().unwrap_or(0.0),
+    )
+}
+
+/// `summarize` plus `"clients"` and `"errors"` fields (RFC-0037 P2.2
+/// multi-client blocks).
+fn summarize_mc(
+    name: &str,
+    n: usize,
+    wall: Duration,
+    lats_ms: &mut [f64],
+    clients: usize,
+    errors: u64,
+) -> String {
+    let block = summarize(name, n, wall, lats_ms);
+    block.replace(
+        "\"wall_s\"",
+        &format!("\"clients\": {clients},\n    \"errors\": {errors},\n    \"wall_s\""),
     )
 }
 
@@ -655,6 +753,54 @@ mod tests {
 
     // Deps suite end-to-end on the compat engine (seed + five shapes run,
     // MVCC latest read finds the newest version, value reachable in default).
+    /// RFC-0037 P2.2: multi-client blocks run on both the compat engine and
+    /// the ConcurrentDb (group commit) engine with zero errors, and every
+    /// written key stays readable afterwards.
+    #[test]
+    fn multi_client_shapes_on_compat_and_concurrent() {
+        let cfg = Cfg {
+            records: 64,
+            ops: 32,
+            payload: 16,
+            zipfian: false,
+            batch: 8,
+        };
+        for dir in [tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap()] {
+            let compat = crate::engines::CompatEngine::open(dir.path());
+            let mut r = YcsbRunner::new(cfg.clone());
+            r.seed(&compat);
+            let blocks = r.run_clients(&compat, 3);
+            assert_eq!(
+                blocks
+                    .iter()
+                    .map(|b| b
+                        .split("\"name\": \"")
+                        .nth(1)
+                        .and_then(|s| s.split('"').next()))
+                    .collect::<Vec<_>>(),
+                vec![
+                    Some("ycsb_a_mc3"),
+                    Some("ycsb_f_mc3"),
+                    Some("deps_cache_overwrite_mc3")
+                ]
+            );
+            for b in &blocks {
+                assert!(b.contains("\"clients\": 3"), "{b}");
+                assert!(b.contains("\"errors\": 0"), "{b}");
+            }
+            assert!(compat.get(&ykey(0)).unwrap().is_some());
+
+            let cdir = tempfile::tempdir().unwrap();
+            let conc = crate::engines::ConcurrentEngine::open(cdir.path());
+            let mut r2 = YcsbRunner::new(cfg.clone());
+            r2.seed(&conc);
+            let blocks2 = r2.run_clients(&conc, 3);
+            assert_eq!(blocks2.len(), 3);
+            assert!(conc.get(&ykey(0)).is_ok());
+            assert!(conc.get(b"c/000000").is_ok());
+        }
+    }
+
     #[test]
     fn deps_suite_on_compat_engine() {
         let dir = tempfile::tempdir().unwrap();

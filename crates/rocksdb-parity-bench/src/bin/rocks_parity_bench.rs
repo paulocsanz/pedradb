@@ -53,6 +53,14 @@ fn main() {
             let e = rocksdb_parity_bench::engines::CompatEngine::open(&dbdir);
             run_and_report(&e, &cfg, suites, &out);
         }
+        "concurrent" => {
+            if suites_enabled("deps") {
+                eprintln!("engine 'concurrent' is ycsb-only (CF ops unimplemented; RFC-0037 P2.2)");
+                std::process::exit(1);
+            }
+            let e = rocksdb_parity_bench::engines::ConcurrentEngine::open(&dbdir);
+            run_and_report(&e, &cfg, suites, &out);
+        }
         "rocksdb" => {
             #[cfg(feature = "real")]
             {
@@ -74,7 +82,7 @@ fn main() {
     }
 }
 
-fn run_and_report<E: Engine>(e: &E, cfg: &Cfg, suites: &str, out: &Path) {
+fn run_and_report<E: Engine + Sync>(e: &E, cfg: &Cfg, suites: &str, out: &Path) {
     let mut r = YcsbRunner::new(cfg.clone());
     let mut benches = Vec::new();
     if suites_enabled("ycsb") {
@@ -93,6 +101,10 @@ fn run_and_report<E: Engine>(e: &E, cfg: &Cfg, suites: &str, out: &Path) {
             r.run(e, "ycsb_e", 0, 5, false, true),
             r.run(e, "ycsb_f", 50, 0, true, false),
         ]);
+        let clients = rocksdb_parity_bench::env_usize("ROCKS_PARITY_CLIENTS", 1);
+        if clients >= 2 {
+            benches.extend(r.run_clients(e, clients));
+        }
     }
     if suites_enabled("deps") {
         benches.extend(r.run_deps(e));
