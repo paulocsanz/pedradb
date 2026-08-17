@@ -80,8 +80,16 @@ engines slower than `run{1,2,3}`). Median apply_mc4 **1.01** vs a Rocks that
 fell to 2.9 k qps; Pedra 2.8 k (below the quieter 3.6 k). raftlog_mc4 0.41.
 **0/16 ≥ 2.0.** Do not read the 1.01 as a product win.
 
-P1.1 stays `doing`. Next: WAL `fsync` off the write lock (flush during fd)
-and cut serialized CPU toward 110 µs.
+## Off-lock WAL `fdatasync` (same slice)
+
+Group leader appends under the write lock, then `fdatasync`s via a shared
+`Mutex<Wal>` **without** that lock; mem apply waits for the fd (G1). WAL
+rotate is blocked while `commit_inflight > 0`. Test:
+`off_lock_group_fsync_is_durable_on_reopen`.
+
+Official remesura after this (`implementer/run{1,2,3}`): **0/16 ≥ 2.0**.
+Closest: MVCC 1.71, E 1.51, apply_mc4 0.81. YCSB A 0.051 — 1/fd p50
+**22.2 µs** ≈ 45 k qps; Rocks A ~200–370 k; 2× A is above one fd/Ok.
 
 ## Tests
 

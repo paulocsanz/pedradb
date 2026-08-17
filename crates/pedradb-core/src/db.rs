@@ -54,7 +54,7 @@
 use std::collections::BTreeMap;
 use std::ops::Bound;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
 use bytes::Bytes;
 
@@ -556,7 +556,11 @@ impl CompactOptions {
 pub struct Db<E: Env = StdEnv> {
     dir: PathBuf,
     env: E,
-    wal: Wal<E::File>,
+    /// Shared so ConcurrentDb can `fdatasync` without the Db write lock
+    /// (RFC-0041 P1.1). Rotate waits for [`Self::commit_inflight`] == 0.
+    wal: Arc<Mutex<Wal<E::File>>>,
+    /// Group-commit appends in flight (not yet applied). Blocks WAL rotate.
+    commit_inflight: AtomicUsize,
     /// Active memtable (new writes).
     mem: MemTable,
     /// Immutable memtable being flushed (Rocks dual-memtable / pipeline).
@@ -816,11 +820,11 @@ impl<E: Env> Db<E> {
             }
         }
 
-        let wal = if env.exists(&wal_path) {
+        let wal = Arc::new(Mutex::new(if env.exists(&wal_path) {
             Wal::append_on(&env, &wal_path)?
         } else {
             Wal::create_on(&env, &wal_path)?
-        };
+        }));
 
         // Watermark may exceed max sequence still present in SSTs (e.g. latest_only
         // dropped a high-seq tombstone). Keep last_sequence ≥ earliest so current
@@ -856,6 +860,7 @@ impl<E: Env> Db<E> {
             dir,
             env,
             wal,
+            commit_inflight: AtomicUsize::new(0),
             mem,
             imm: None,
             flush_read_pin: None,
@@ -2707,6 +2712,9 @@ impl<E: Env> Db<E> {
     /// pin (and an in-flight SST). Truncating WAL here leaves a checkpoint or
     /// crash with nothing to replay.
     fn try_rotate_wal(&mut self) -> Result<()> {
+        if self.commit_inflight.load(Ordering::Acquire) > 0 {
+            return Ok(());
+        }
         if !self.mem_is_empty_for_rotate() {
             return Ok(());
         }
@@ -2722,7 +2730,8 @@ impl<E: Env> Db<E> {
             self.persist_changelog_best_effort();
         }
         let wal_path = self.dir.join(WAL_FILE_NAME);
-        let old = std::mem::replace(&mut self.wal, Wal::create_on(&self.env, &wal_path)?);
+        let new = Wal::create_on(&self.env, &wal_path)?;
+        let old = std::mem::replace(&mut *self.wal.lock(), new);
         old.close()?;
         self.sync_dir_if_required(&self.dir)?;
         Ok(())
@@ -4064,7 +4073,7 @@ impl<E: Env> Db<E> {
     /// I/O from fsync, or [`CoreError::DurabilityFenced`].
     pub fn sync(&mut self) -> Result<()> {
         self.ensure_not_fenced()?;
-        self.wal.sync_data()
+        self.wal.lock().sync_data()
     }
 
     /// Close the WAL and release the directory lock via [`Env`] when held.
@@ -4078,7 +4087,7 @@ impl<E: Env> Db<E> {
         self.persist_changelog_best_effort();
         self.release_lock()?;
         // Flush in place — `Db` implements `Drop` (Env unlock), so we cannot move `wal`.
-        self.wal.flush()
+        self.wal.lock().flush()
     }
 
     /// Lookup visible version at `snapshot` across mem + imm + SSTs.
@@ -4196,11 +4205,11 @@ impl<E: Env> Db<E> {
         // RFC-0015 H1: if append OK and required sync fails, fence so later fsyncs
         // cannot silently publish an unacked prefix while in-process mem diverges.
         // RFC-0040: encode into WAL scratch (one payload memcpy), then move ops to mem.
-        let n = self.wal.append_write_ops(&records)?;
+        let n = self.wal.lock().append_write_ops(&records)?;
         self.bytes_written_wal = self.bytes_written_wal.saturating_add(n);
         let do_sync = durability.sync.unwrap_or(self.sync);
         if do_sync {
-            if let Err(e) = self.wal.sync_data() {
+            if let Err(e) = self.wal.lock().sync_data() {
                 self.durability_fenced = true;
                 return Err(e);
             }
@@ -4278,13 +4287,13 @@ impl<E: Env> Db<E> {
         self.ensure_not_fenced()?;
         let n: u64 = records.iter().map(|r| r.len() as u64).sum();
         self.bytes_written_wal = self.bytes_written_wal.saturating_add(n);
-        self.wal.append_records(records)
+        self.wal.lock().append_records(records)
     }
 
     /// One WAL `fdatasync` for a group of already-appended records.
     pub(crate) fn wal_sync_group(&mut self) -> Result<()> {
         self.ensure_not_fenced()?;
-        if let Err(e) = self.wal.sync_data() {
+        if let Err(e) = self.wal.lock().sync_data() {
             self.durability_fenced = true;
             return Err(e);
         }
@@ -4296,6 +4305,27 @@ impl<E: Env> Db<E> {
     pub(crate) fn apply_ops_to_mem(&mut self, ops: Vec<WriteOp>) {
         apply_ops_owned(&mut self.mem, ops);
         self.invalidate_read_answers();
+    }
+
+    /// Shared WAL handle for off-lock `fdatasync` (ConcurrentDb group leader).
+    pub(crate) fn wal_arc(&self) -> Arc<Mutex<Wal<E::File>>> {
+        Arc::clone(&self.wal)
+    }
+
+    pub(crate) fn begin_commit(&self) {
+        self.commit_inflight.fetch_add(1, Ordering::Release);
+    }
+
+    pub(crate) fn end_commit(&self) {
+        self.commit_inflight.fetch_sub(1, Ordering::Release);
+    }
+
+    pub(crate) fn fence_durability(&mut self) {
+        self.durability_fenced = true;
+    }
+
+    pub(crate) fn note_wal_sync(&mut self) {
+        self.wal_sync_count = self.wal_sync_count.saturating_add(1);
     }
 
     /// Rocks-style group commit: many client batches, one fsync if any requires sync.
@@ -4420,6 +4450,17 @@ impl<E: Env> Db<E> {
     }
 
     pub(crate) fn group_finish(&mut self, g: GroupInFlight) -> Vec<Result<SequenceNumber>> {
+        if g.needs_sync() {
+            if let Err(e) = self.wal_sync_group() {
+                return g.fail_sync(e);
+            }
+        }
+        self.group_apply(g)
+    }
+
+    /// Mem apply + feed after WAL is durable. No fsync (RFC-0041: leader may
+    /// have `fdatasync`'d off the write lock).
+    pub(crate) fn group_apply(&mut self, g: GroupInFlight) -> Vec<Result<SequenceNumber>> {
         let GroupInFlight {
             mut results,
             appended,
@@ -4427,20 +4468,16 @@ impl<E: Env> Db<E> {
             failed,
             ..
         } = g;
-        if failed || appended.is_empty() {
+        if failed {
+            for (i, _, _) in &appended {
+                if results[*i].is_none() {
+                    results[*i] = Some(Err(CoreError::Internal("group wal append failed".into())));
+                }
+            }
             return finish_group_results(results);
         }
-
-        if any_sync {
-            if let Err(e) = self.wal_sync_group() {
-                let msg = e.to_string();
-                for (i, _, _) in &appended {
-                    results[*i] = Some(Err(CoreError::Internal(format!(
-                        "group wal sync failed: {msg}"
-                    ))));
-                }
-                return finish_group_results(results);
-            }
+        if appended.is_empty() {
+            return finish_group_results(results);
         }
 
         if !self.feed_is_lazy() {
@@ -4472,6 +4509,22 @@ pub(crate) struct GroupInFlight {
     any_sync: bool,
     next_i: usize,
     failed: bool,
+}
+
+impl GroupInFlight {
+    pub(crate) fn needs_sync(&self) -> bool {
+        self.any_sync && !self.failed && !self.appended.is_empty()
+    }
+
+    pub(crate) fn fail_sync(mut self, e: impl std::fmt::Display) -> Vec<Result<SequenceNumber>> {
+        let msg = e.to_string();
+        for (i, _, _) in &self.appended {
+            self.results[*i] = Some(Err(CoreError::Internal(format!(
+                "group wal sync failed: {msg}"
+            ))));
+        }
+        finish_group_results(self.results)
+    }
 }
 
 fn finish_group_results(

@@ -247,7 +247,10 @@ impl WriteGroup {
                 .map(|p| (std::mem::take(&mut p.ops), p.do_sync))
                 .collect();
             let results = match guard.group_start(inputs) {
-                Err(results) => results,
+                Err(results) => {
+                    drop(guard);
+                    results
+                }
                 Ok(mut inflight) => {
                     loop {
                         let mut extra: Vec<PendingWrite> = {
@@ -264,10 +267,31 @@ impl WriteGroup {
                         guard.group_absorb(&mut inflight, more);
                         batch.extend(extra);
                     }
-                    guard.group_finish(inflight)
+                    // fdatasync off the write lock so flush/readers proceed.
+                    // Ok still waits (G1). Rotate is blocked via commit_inflight.
+                    let need_sync = inflight.needs_sync();
+                    guard.begin_commit();
+                    let wal = guard.wal_arc();
+                    drop(guard);
+                    let sync_err = if need_sync {
+                        wal.lock().sync_data().err()
+                    } else {
+                        None
+                    };
+                    let mut guard = db.write();
+                    let results = if let Some(e) = sync_err {
+                        guard.fence_durability();
+                        inflight.fail_sync(e)
+                    } else {
+                        if need_sync {
+                            guard.note_wal_sync();
+                        }
+                        guard.group_apply(inflight)
+                    };
+                    guard.end_commit();
+                    results
                 }
             };
-            drop(guard);
             self.batches.fetch_add(1, Ordering::Relaxed);
             self.batch_ops
                 .fetch_add(batch.len() as u64, Ordering::Relaxed);
@@ -1640,6 +1664,41 @@ mod tests {
                     "reopen c={c} i={i}"
                 );
             }
+        }
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0041: group `fdatasync` runs off the Db write lock; Ok still waits
+    /// and reopen sees every acked key (G1).
+    #[test]
+    fn off_lock_group_fsync_is_durable_on_reopen() {
+        let dir = temp_dir();
+        let db = Arc::new(open_sync(&dir));
+        let n = 8usize;
+        let barrier = Arc::new(std::sync::Barrier::new(n));
+        std::thread::scope(|s| {
+            for i in 0..n {
+                let db = Arc::clone(&db);
+                let barrier = Arc::clone(&barrier);
+                s.spawn(move || {
+                    barrier.wait();
+                    let k = [b'd', i as u8];
+                    db.put(k, b"dur").unwrap();
+                });
+            }
+        });
+        assert!(db.wal_sync_count() >= 1, "leader must fdatasync before Ok");
+        for i in 0..n {
+            assert_eq!(db.get(&[b'd', i as u8]).as_deref(), Some(&b"dur"[..]));
+        }
+        drop(db);
+        let re = open_sync(&dir);
+        for i in 0..n {
+            assert_eq!(
+                re.get(&[b'd', i as u8]).as_deref(),
+                Some(&b"dur"[..]),
+                "reopen must see acked put {i}"
+            );
         }
         let _ = fs::remove_dir_all(&dir);
     }
