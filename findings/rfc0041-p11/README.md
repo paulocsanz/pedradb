@@ -147,6 +147,25 @@ MVCC probe L0=**23** — idle compact cannot finish in a 5 ms MVCC window.
 [`foldidle/`](foldidle/README.md): **1/16 ≥ 2.0** (E **2.29**). Drain parks
 pins; fold off-lock when idle. Absorb-on-write-lock rejected. FLOOR off.
 
+## Incremental fold every tick
+
+[`incrfold/`](incrfold/README.md): **1/16 ≥ 2.0** (MVCC **2.044**). Fold
+during writes **rejected** (apply_mc4 1.25 → 0.67). Scan 0.94. FLOOR off.
+
+## Park without SST (dump-all idle)
+
+[`parknosst/`](parknosst/README.md): **0/16 ≥ 2.0**. Apply_mc4 **1.22**
+held; idle dump of every parked L0 **rejected** (MVCC 2.04 → 1.07).
+
+## One L0 per tick
+
+[`onel0/`](onel0/README.md): **0/16 ≥ 2.0**. apply_mc4 **0.68** rejected.
+
+## Drain + scan via SST
+
+[`scansst/`](scansst/README.md): **1/16 ≥ 2.0** (MVCC **2.580**). Scan
+**1.15** (retire2 was 0.27). apply_mc4 0.96. FLOOR off.
+
 
 
 

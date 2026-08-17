@@ -1079,22 +1079,19 @@ fn spawn_compact_worker(
         .spawn(move || loop {
             match rx.recv_timeout(Duration::from_millis(5)) {
                 Ok(CompactCmd::Shutdown) | Err(RecvTimeoutError::Disconnected) => {
+                    while inner.park_imm_once() {}
+                    while inner.materialize_parked_once() {}
                     while inner.drain_imm_once() {}
                     break;
                 }
                 Ok(CompactCmd::Run) | Err(RecvTimeoutError::Timeout) => {
-                    // Drain imm so the memtable stays at write_buffer (4 MiB
-                    // isolated apply 2251 qps; 64 MiB drain 1228). L0 rewrite
-                    // only after the burst idles — compact-at-trigger *during*
-                    // apply cut official apply 1c 1.25→0.36 (buf4c).
+                    // Drain imm → L0 during writes (retire2 apply_mc4 1.45 /
+                    // MVCC 3.08). Park-only + dump-all idle: 0/16 (parknosst).
+                    // 1 L0/tick mid-apply: apply_mc4 0.68 (onel0). Fold every
+                    // tick: apply_mc4 0.67 (incrfold). Scan/count read L0
+                    // SSTs, not the retired BTree chain. Compact still idle.
                     while inner.drain_imm_once() {}
                     if inner.writes_idle_for(Duration::from_millis(5)) {
-                        // Fold parked L0 mems into one BTree off the write lock
-                        // so scan/MVCC do not merge one table per L0.
-                        inner.fold_retired_pending_off_lock();
-                        // SST fsync + MANIFEST off the write lock so scan/C
-                        // are not blocked on a multi-MiB fd. WAL rotate still
-                        // waits for empty mem (G1).
                         let _ = inner.persist_unsynced_l0s_off_lock();
                         let _ = inner.rotate_wal_if_writers_idle();
                         while compat_compact_once(&inner, &gate) {}

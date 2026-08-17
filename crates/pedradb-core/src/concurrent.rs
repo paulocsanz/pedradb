@@ -1066,6 +1066,69 @@ impl<E: Env> ConcurrentDb<E> {
         true
     }
 
+    /// Stage an existing imm into [`Db::parked_unflushed`] with **no SST I/O**.
+    ///
+    /// Host worker uses this during a write burst so apply does not pay lz4
+    /// encode of every 4 MiB table (RFC-0041). WAL still covers the keys;
+    /// [`Self::rotate_wal_if_writers_idle`] no-ops until
+    /// [`Self::materialize_parked_once`] writes the files.
+    #[must_use]
+    pub fn park_imm_once(&self) -> bool {
+        if !self.inner.read().has_imm() {
+            return false;
+        }
+        let _flush = self.flush_lock.lock();
+        let mut g = self.inner.write();
+        if !g.has_imm() {
+            return false;
+        }
+        let Some(imm) = g.take_imm_no_pin() else {
+            return false;
+        };
+        g.push_parked_unflushed(imm);
+        true
+    }
+
+    /// Write **one** parked mem to L0 (idle path). Leaves the table on the
+    /// read path until the file is installed, then keeps it as a point/MVCC
+    /// cache. Returns whether a file was written.
+    #[must_use]
+    pub fn materialize_parked_once(&self) -> bool {
+        if self.inner.read().parked_unflushed_count() == 0 {
+            return false;
+        }
+        let _flush = self.flush_lock.lock();
+        let prepared = {
+            let mut g = self.inner.write();
+            let Some(front) = g.parked_front() else {
+                return false;
+            };
+            // Clone only on the idle path so readers keep the original.
+            let imm = front.clone();
+            let num = g.alloc_file_num();
+            let (env, dir, sync) = g.l0_write_ctx();
+            Some((imm, num, env, dir, sync))
+        };
+        let Some((imm, file_num, env, dir, sync)) = prepared else {
+            return false;
+        };
+        let table = match Db::write_imm_l0_file(&env, &dir, sync, &imm, file_num) {
+            Ok((t, n, _)) => {
+                debug_assert_eq!(n, file_num);
+                t
+            }
+            Err(_) => return false,
+        };
+        {
+            let mut g = self.inner.write();
+            g.apply_l0_install(table, file_num);
+            if let Some(orig) = g.take_oldest_parked() {
+                g.retire_mem_as_l0_cache(orig);
+            }
+        }
+        true
+    }
+
     /// Persist pending L0s + MANIFEST and rotate WAL when no writer is in
     /// flight. No-op if mem/imm still hold acked keys (G1).
     ///
@@ -1081,7 +1144,7 @@ impl<E: Env> ConcurrentDb<E> {
     /// Merge parked flush pins into one retired BTree **off** the write lock.
     ///
     /// Drain only pushes pins (apply must not absorb under the write lock).
-    /// Call when writers are idle so scan/MVCC see one layer.
+    /// Safe during a write burst: absorb does not hold the Db write lock.
     pub fn fold_retired_pending_off_lock(&self) {
         let pending = self.inner.write().take_retired_pending();
         if pending.is_empty() {
@@ -1613,6 +1676,18 @@ mod tests {
             2,
             "each drain parks one L0 pin"
         );
+        // Scan uses L0 SSTs, not the retired BTree chain (retire2 qps tail).
+        let pre_fold = db.scan_collect(std::ops::Bound::Unbounded, std::ops::Bound::Unbounded);
+        assert!(
+            pre_fold
+                .iter()
+                .any(|(k, v)| k.as_ref() == b"k" && v.as_ref() == [b'v'; 64]),
+            "scan must see keys via L0 SST before fold"
+        );
+        assert!(
+            !db.writes_idle_for(Duration::from_secs(1)),
+            "fold must work with a recent submit, not only after a long idle"
+        );
         db.fold_retired_pending_off_lock();
         assert_eq!(db.get(b"k").as_deref(), Some(&[b'v'; 64][..]));
         assert_eq!(db.get(b"j").as_deref(), Some(&[b'w'; 64][..]));
@@ -1649,6 +1724,53 @@ mod tests {
         );
         assert_eq!(db.get(b"k").as_deref(), Some(&[b'v'; 64][..]));
         drop(db);
+        let re = open_sync(&dir);
+        assert_eq!(re.get(b"k").as_deref(), Some(&[b'v'; 64][..]));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Park moves imm off the live table with no SST; WAL still covers the
+    /// key (G1). Rotate must wait until materialize writes the file.
+    #[test]
+    fn park_imm_blocks_rotate_until_materialized() {
+        let dir = temp_dir();
+        let db = open_sync(&dir);
+        db.set_defer_auto_compact(true);
+        db.put(b"k", vec![b'v'; 64]).unwrap();
+        assert!(db.with_write(|d| d.stage_flush_imm()).unwrap());
+        assert!(db.park_imm_once());
+        assert_eq!(db.with_read(|d| d.parked_unflushed_count()), 1);
+        assert_eq!(db.sst_count(), 0, "park must not write an SST");
+        assert_eq!(db.get(b"k").as_deref(), Some(&[b'v'; 64][..]));
+        let scanned = db.scan_collect(std::ops::Bound::Unbounded, std::ops::Bound::Unbounded);
+        assert!(
+            scanned
+                .iter()
+                .any(|(k, v)| k.as_ref() == b"k" && v.as_ref() == [b'v'; 64]),
+            "scan must see parked keys that have no SST yet"
+        );
+        let wal_before = db.stats().wal_bytes;
+        db.rotate_wal_if_writers_idle().unwrap();
+        assert_eq!(
+            db.stats().wal_bytes,
+            wal_before,
+            "rotate must wait for parked mems to become L0 (G1)"
+        );
+        assert!(db.materialize_parked_once());
+        assert_eq!(db.with_read(|d| d.parked_unflushed_count()), 0);
+        assert!(db.sst_count() >= 1);
+        assert_eq!(db.get(b"k").as_deref(), Some(&[b'v'; 64][..]));
+        db.persist_unsynced_l0s_off_lock().unwrap();
+        db.rotate_wal_if_writers_idle().unwrap();
+        assert!(
+            db.stats().wal_bytes < wal_before,
+            "after materialize, idle rotate may replace WAL"
+        );
+        drop(db);
+        let wal = dir.join(crate::db::WAL_FILE_NAME);
+        if wal.exists() {
+            let _ = fs::remove_file(&wal);
+        }
         let re = open_sync(&dir);
         assert_eq!(re.get(b"k").as_deref(), Some(&[b'v'; 64][..]));
         let _ = fs::remove_dir_all(&dir);

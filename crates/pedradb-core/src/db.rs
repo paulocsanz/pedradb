@@ -569,6 +569,10 @@ pub struct Db<E: Env = StdEnv> {
     /// Clone of the table taken by [`Self::prepare_flush_imm`] so readers still
     /// see acked keys while SST I/O runs off the write lock.
     flush_read_pin: Option<MemTable>,
+    /// Flushed mems with **no L0 SST yet**. WAL still covers them (G1);
+    /// rotate is blocked until the host materializes files. Park is a move
+    /// (no BTree clone) so apply does not pay lz4 mid-burst (RFC-0041).
+    parked_unflushed: Vec<MemTable>,
     /// Flushed pins waiting to be folded (cheap push on the write path).
     retired_pending: Vec<MemTable>,
     /// Single BTree of flushed versions (built off-lock when writers idle).
@@ -878,6 +882,7 @@ impl<E: Env> Db<E> {
             mem,
             imm: None,
             flush_read_pin: None,
+            parked_unflushed: Vec::new(),
             retired_pending: Vec::new(),
             retired_fold: MemTable::new(),
             retired_l0s: 0,
@@ -2003,7 +2008,9 @@ impl<E: Env> Db<E> {
         // Range tombstones first (G2), exactly like `scan_at_raw`.
         let mut range_dels = Vec::new();
         let mut cursors: Vec<CountCursor<'_>> = Vec::with_capacity(3 + self.ssts.len());
-        for table in self.mem_layers() {
+        // Live + parked-without-SST only. Retired BTrees are a point/MVCC
+        // cache; their L0 files are in `ssts` (retire2 scan died merging them).
+        for table in self.scan_mem_layers() {
             table.collect_range_tombstones(snapshot, &mut range_dels);
             if table.is_empty() {
                 continue;
@@ -2012,7 +2019,7 @@ impl<E: Env> Db<E> {
                 table, start, end, snapshot,
             )));
         }
-        for table in self.sst_tables_not_retired() {
+        for table in self.ssts.iter() {
             table.collect_range_tombstones(snapshot, &mut range_dels);
             if !table.overlaps_user_range(start, end) {
                 continue;
@@ -2099,14 +2106,14 @@ impl<E: Env> Db<E> {
         let mut range_dels = Vec::new();
         let mut streams: Vec<crate::merge::LayerStream<'_>> =
             Vec::with_capacity(3 + self.ssts.len());
-        for table in self.mem_layers() {
+        for table in self.scan_mem_layers() {
             table.collect_range_tombstones(snapshot, &mut range_dels);
             let pts = self.memtable_stream(table, start, end, snapshot, resolve_values);
             if !pts.is_empty() {
                 streams.push(Box::new(pts.into_iter()));
             }
         }
-        for table in self.sst_tables_not_retired() {
+        for table in self.ssts.iter() {
             table.collect_range_tombstones(snapshot, &mut range_dels);
             if !table.overlaps_user_range(start, end) {
                 continue;
@@ -2717,7 +2724,10 @@ impl<E: Env> Db<E> {
     /// Active mem empty and no imm (safe to rotate WAL).
     #[must_use]
     pub fn mem_is_empty_for_rotate(&self) -> bool {
-        self.mem.is_empty() && self.imm.is_none() && self.flush_read_pin.is_none()
+        self.mem.is_empty()
+            && self.imm.is_none()
+            && self.flush_read_pin.is_none()
+            && self.parked_unflushed.is_empty()
     }
 
     /// Whether an immutable memtable is present.
@@ -2726,32 +2736,61 @@ impl<E: Env> Db<E> {
         self.imm.is_some()
     }
 
-    /// Mem / imm / pin / folded retired index (or pending pins before fold).
+    /// Mem / imm / pin / parked (no SST yet) / folded retired / pending pins.
     fn mem_layers(&self) -> impl Iterator<Item = &MemTable> {
-        std::iter::once(&self.mem)
-            .chain(self.imm.as_ref())
-            .chain(self.flush_read_pin.as_ref())
+        self.scan_mem_layers()
             .chain((!self.retired_fold.is_empty()).then_some(&self.retired_fold))
             .chain(self.retired_pending.iter().rev())
     }
 
-    /// SST files that are not fully covered by the retired fold (scan/count).
-    fn sst_tables_not_retired(&self) -> impl Iterator<Item = &SstTable> {
-        let retired = self.retired_l0s;
-        let mut l0_seen = 0usize;
-        self.ssts
-            .iter()
-            .zip(self.sst_levels.iter())
-            .filter_map(move |(t, &lvl)| {
-                if lvl == 0 {
-                    let i = l0_seen;
-                    l0_seen += 1;
-                    if i < retired {
-                        return None;
-                    }
-                }
-                Some(t)
-            })
+    /// Layers that have no covering SST: live mems + parked-unflushed.
+    /// Scan/count use these plus **all** SST files (not the retired BTrees).
+    fn scan_mem_layers(&self) -> impl Iterator<Item = &MemTable> {
+        std::iter::once(&self.mem)
+            .chain(self.imm.as_ref())
+            .chain(self.flush_read_pin.as_ref())
+            .chain(self.parked_unflushed.iter().rev())
+    }
+
+    /// Take the existing imm without cloning a flush pin (park path).
+    pub fn take_imm_no_pin(&mut self) -> Option<MemTable> {
+        self.imm.take()
+    }
+
+    /// Park a flushed mem with no SST file. WAL still covers it (G1).
+    pub fn push_parked_unflushed(&mut self, table: MemTable) {
+        if !table.is_empty() {
+            self.parked_unflushed.push(table);
+        }
+    }
+
+    /// Oldest parked table (for idle materialize). Leaves it in place for reads.
+    #[must_use]
+    pub fn parked_front(&self) -> Option<&MemTable> {
+        self.parked_unflushed.first()
+    }
+
+    /// Pop the oldest parked table after its L0 exists.
+    pub fn take_oldest_parked(&mut self) -> Option<MemTable> {
+        if self.parked_unflushed.is_empty() {
+            None
+        } else {
+            Some(self.parked_unflushed.remove(0))
+        }
+    }
+
+    /// How many flushed mems still lack an L0 file.
+    #[must_use]
+    pub fn parked_unflushed_count(&self) -> usize {
+        self.parked_unflushed.len()
+    }
+
+    /// Keep `mem` as a point/MVCC cache covering one newly installed L0.
+    pub fn retire_mem_as_l0_cache(&mut self, mem: MemTable) {
+        if !mem.is_empty() {
+            self.retired_pending.push(mem);
+            self.retired_l0s = self.retired_l0s.saturating_add(1);
+        }
     }
 
     /// Rotate WAL after an off-lock L0 install when mem/imm/pin are idle.

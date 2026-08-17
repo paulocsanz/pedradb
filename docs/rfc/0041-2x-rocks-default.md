@@ -58,14 +58,14 @@
 
 ### P1 — escritas ≥ 2× default
 
-- [ ] **P1.1** `deps_apply_batch_mc4` e `deps_raftlog_mc4` ≥ 2.0 vs default da run — status: `doing` (foldidle apply_mc4 **1.25**; fold-on-write rejected)
+- [ ] **P1.1** `deps_apply_batch_mc4` e `deps_raftlog_mc4` ≥ 2.0 vs default da run — status: `doing` (scansst apply_mc4 **0.96**; incrfold/parknosst/onel0 rejected)
 - [ ] **P1.2** `ycsb_a` / `ycsb_f` / `deps_cache_overwrite` (1c e `_mc4` se existirem) ≥ 2.0 vs default — status: `todo`
 - [ ] **P1.3** `deps_apply_batch` e `deps_raftlog` **1 cliente** ≥ 2.0 vs default — status: `todo`
 
 ### P2 — leituras ≥ 2× default
 
-- [ ] **P2.1** `deps_scan` e `ycsb_e` ≥ 2.0 (L0 drenado; p95 do miss) — status: `doing` (idlerot2 E **2.93**; scan **0.95**)
-- [ ] **P2.2** `ycsb_c` / `b` / `d` / `deps_mvcc_latest` ≥ 2.0 — status: `doing` (C **2.43**; MVCC 1.90; B/D < 1)
+- [ ] **P2.1** `deps_scan` e `ycsb_e` ≥ 2.0 (L0 drenado; p95 do miss) — status: `doing` (scansst scan **1.15**; E 0.91)
+- [ ] **P2.2** `ycsb_c` / `b` / `d` / `deps_mvcc_latest` ≥ 2.0 — status: `doing` (C 1.52; MVCC **2.58**)
 - [ ] **P2.3** Gate 2.0 em **todas** as shapes do harness; script default `SYNC=0` `FLOOR=2.0` — status: `todo`
 
 ## Status (living — update with every PR)
@@ -74,12 +74,12 @@
 |----|------|-------|--------|-----------|---------|
 | P0.1 | p0 | RFC | done | este doc | 2026-08-17 |
 | P0.2 | p0 | remesura 11+MC vs default | done | findings/rfc0041-p02 | 2026-08-17 |
-| P0.3 | p0 | floor 2.0 nas que já passam | todo | foldidle 1/16 (E 2.29); sem gate | 2026-08-17 |
-| P1.1 | p1 | apply/raftlog MC ≥ 2× | doing | foldidle apply_mc4 1.25 | 2026-08-17 |
-| P1.2 | p1 | A/F/overwrite ≥ 2× | todo | A 0.09 (28k / fd) | 2026-08-17 |
-| P1.3 | p1 | apply/raftlog 1c ≥ 2× | todo | apply 0.45 | 2026-08-17 |
-| P2.1 | p2 | scan/E ≥ 2× | doing | E **2.29**; scan 0.68 | 2026-08-17 |
-| P2.2 | p2 | C/B/D/MVCC ≥ 2× | doing | C 1.47; MVCC 1.31 | 2026-08-17 |
+| P0.3 | p0 | floor 2.0 nas que já passam | todo | scansst 1/16 (MVCC 2.58); sem gate | 2026-08-17 |
+| P1.1 | p1 | apply/raftlog MC ≥ 2× | doing | scansst apply_mc4 0.96 | 2026-08-17 |
+| P1.2 | p1 | A/F/overwrite ≥ 2× | todo | A 0.10 (29k / fd) | 2026-08-17 |
+| P1.3 | p1 | apply/raftlog 1c ≥ 2× | todo | apply 0.43 | 2026-08-17 |
+| P2.1 | p2 | scan/E ≥ 2× | doing | scan **1.15**; E 0.91 | 2026-08-17 |
+| P2.2 | p2 | C/B/D/MVCC ≥ 2× | doing | C 1.52; MVCC **2.58** | 2026-08-17 |
 | P2.3 | p2 | gate 2.0 em todas | todo | — | 2026-08-17 |
 
 ## Acceptance Criteria
