@@ -84,10 +84,20 @@ pub(crate) struct MemInternalMerge<'a> {
     tail: std::iter::Peekable<std::vec::IntoIter<(&'a InternalKey, &'a Bytes)>>,
 }
 
+/// Snapshot-aware merge: BTree range + `tail_idx` range (newest tail version
+/// per user key). O(log n + hits) — a parked 4 MiB tail must not be walked
+/// per count/scan (RFC-0041 deps_scan regression).
+pub(crate) struct MemInternalIdx<'a> {
+    map: std::iter::Peekable<MemInternalRange<'a>>,
+    idx: std::iter::Peekable<std::collections::btree_map::Range<'a, Bytes, usize>>,
+    tail: &'a [Version],
+}
+
 /// Map-only or map+tail merge. Returned by [`MemTable::iter_internal_range`].
 pub(crate) enum MemInternalIter<'a> {
     Map(MemInternalRange<'a>),
     Merge(MemInternalMerge<'a>),
+    Idx(MemInternalIdx<'a>),
 }
 
 impl<'a> Iterator for MemInternalRange<'a> {
@@ -124,6 +134,33 @@ impl<'a> Iterator for MemInternalMerge<'a> {
     }
 }
 
+impl<'a> Iterator for MemInternalIdx<'a> {
+    type Item = (&'a InternalKey, &'a Bytes);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let tail_item = self
+            .idx
+            .peek()
+            .map(|(_, &i)| (&self.tail[i].key, &self.tail[i].value));
+        match (self.map.peek(), tail_item) {
+            (None, None) => None,
+            (Some(_), None) => self.map.next(),
+            (None, Some(_)) => {
+                let (_, &i) = self.idx.next()?;
+                Some((&self.tail[i].key, &self.tail[i].value))
+            }
+            (Some(m), Some(t)) => {
+                if t.0 < m.0 {
+                    let (_, &i) = self.idx.next()?;
+                    Some((&self.tail[i].key, &self.tail[i].value))
+                } else {
+                    self.map.next()
+                }
+            }
+        }
+    }
+}
+
 impl<'a> Iterator for MemInternalIter<'a> {
     type Item = (&'a InternalKey, &'a Bytes);
 
@@ -131,6 +168,7 @@ impl<'a> Iterator for MemInternalIter<'a> {
         match self {
             Self::Map(it) => it.next(),
             Self::Merge(it) => it.next(),
+            Self::Idx(it) => it.next(),
         }
     }
 }
@@ -150,6 +188,9 @@ pub struct MemTable {
     tail: Vec<Version>,
     /// Newest tail index per user key (point/MVCC without a linear tail walk).
     tail_idx: BTreeMap<Bytes, usize>,
+    /// Highest sequence in `tail` (fast-path guard: snapshot ≥ it ⇒ only the
+    /// newest version per key can be visible).
+    tail_max_seq: SequenceNumber,
     /// Cached InternalKey order of `tail` (invalidated on insert).
     tail_ord: Mutex<Option<Arc<Vec<u32>>>>,
     /// Approximate bytes for flush triggers (user key + value + trailer).
@@ -166,6 +207,7 @@ impl Clone for MemTable {
             map: self.map.clone(),
             tail: self.tail.clone(),
             tail_idx: self.tail_idx.clone(),
+            tail_max_seq: self.tail_max_seq,
             tail_ord: Mutex::new(None),
             approx_bytes: self.approx_bytes,
             range_tombstones: self.range_tombstones,
@@ -232,6 +274,7 @@ impl MemTable {
     pub fn spill_tail(&mut self) {
         self.invalidate_tail_ord();
         self.tail_idx.clear();
+        self.tail_max_seq = 0;
         let tail = std::mem::take(&mut self.tail);
         for v in tail {
             let entry_bytes = v.key.user_key.len() + v.value.len() + 8;
@@ -293,6 +336,7 @@ impl MemTable {
             self.range_tombstones = self.range_tombstones.saturating_add(1);
         }
         self.invalidate_tail_ord();
+        self.tail_max_seq = self.tail_max_seq.max(key.sequence);
         self.tail_idx.insert(key.user_key.clone(), self.tail.len());
         self.tail.push(Version { key, value });
     }
@@ -598,6 +642,27 @@ impl MemTable {
         })
     }
 
+    /// Snapshot-aware range walk for **latest-snapshot** count/scan: the tail
+    /// side comes from `tail_idx` (BTree range, newest version per user key),
+    /// never a linear tail scan. Older snapshots fall back to
+    /// [`Self::iter_internal_iter`] (all versions, sorted merge).
+    pub(crate) fn iter_internal_iter_at<'a>(
+        &'a self,
+        start: Bound<&'a [u8]>,
+        end: Bound<&'a [u8]>,
+        snapshot: SequenceNumber,
+    ) -> MemInternalIter<'a> {
+        if self.tail.is_empty() || snapshot < self.tail_max_seq {
+            return self.iter_internal_iter(start, end);
+        }
+        let map = self.iter_internal_range_cursor(start, end);
+        MemInternalIter::Idx(MemInternalIdx {
+            map: map.peekable(),
+            idx: self.tail_idx.range::<[u8], _>((start, end)).peekable(),
+            tail: &self.tail,
+        })
+    }
+
     fn cached_tail_order(&self) -> Arc<Vec<u32>> {
         let mut g = self.tail_ord.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(arc) = g.as_ref() {
@@ -706,7 +771,7 @@ impl MemTable {
     ) -> impl Iterator<Item = (Bytes, Bytes)> + 'a {
         let mut out = Vec::new();
         let mut last: Option<Bytes> = None;
-        for (k, v) in self.iter_internal_iter(start, end) {
+        for (k, v) in self.iter_internal_iter_at(start, end, snapshot) {
             if k.sequence > snapshot {
                 continue;
             }
@@ -1060,5 +1125,44 @@ mod tests {
             snap.last().map(|(k, v)| (&k[..], &v[..])),
             Some((&b"e"[..], &b"v3"[..]))
         );
+    }
+
+    #[test]
+    fn idx_range_walk_matches_spilled_on_latest_snapshot() {
+        let mut mt = MemTable::new();
+        // Everything in the tail (parked apply table — no spill on stage).
+        for i in 0..2000u32 {
+            mt.put(
+                Bytes::copy_from_slice(&i.to_be_bytes()),
+                u64::from(i) + 1,
+                b"v".as_slice(),
+            );
+        }
+        assert!(mt.has_tail() && mt.map.is_empty());
+        let got: Vec<Vec<u8>> = mt
+            .range_snapshot(
+                Bound::Included(&100u32.to_be_bytes()),
+                Bound::Excluded(&130u32.to_be_bytes()),
+                2000,
+            )
+            .map(|(k, _)| k.to_vec())
+            .collect();
+        let expect: Vec<Vec<u8>> = (100u32..130).map(|i| i.to_be_bytes().to_vec()).collect();
+        assert_eq!(got, expect);
+        // Snapshot below the tail max falls back and still sees old versions.
+        mt.put(
+            Bytes::copy_from_slice(&150u32.to_be_bytes()),
+            5000,
+            b"new".as_slice(),
+        );
+        let old: Vec<_> = mt
+            .range_snapshot(
+                Bound::Included(&150u32.to_be_bytes()),
+                Bound::Excluded(&151u32.to_be_bytes()),
+                2000,
+            )
+            .collect();
+        assert_eq!(old.len(), 1);
+        assert_eq!(&old[0].1[..], b"v");
     }
 }

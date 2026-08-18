@@ -64,7 +64,7 @@
 
 ### P2 — leituras ≥ 2× default
 
-- [ ] **P2.1** `deps_scan` e `ycsb_e` ≥ 2.0 (L0 drenado; p95 do miss) — status: `doing` (map+tail merge iter so E/scan do not sort the whole mem; inval E **2.20**; scan med **1.52** — parkfold2 scan 2.21 was the clean hit)
+- [ ] **P2.1** `deps_scan` e `ycsb_e` ≥ 2.0 (L0 drenado; p95 do miss) — status: `doing` (2521579 regressiu: parked tails faziam count varrer ~20k entradas/op (scan 0.07–0.17). Fix: `tail_idx` range walk quando snapshot ≥ tail_max. deps-only: scan 4.4 k → **437 k**)
 - [ ] **P2.2** `ycsb_c` / `b` / `d` / `deps_mvcc_latest` ≥ 2.0 — status: `doing` (point cache 8192 so 4096-key YCSB working set fits; per-key inval. Do not cache raw WriteOp — vlog ptr. C 1.52; MVCC **2.58**)
 - [ ] **P2.3** Gate 2.0 em **todas** as shapes do harness; script default `SYNC=0` `FLOOR=2.0` — status: `todo`
 

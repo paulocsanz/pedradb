@@ -2238,7 +2238,7 @@ impl<E: Env> Db<E> {
                 }
             }
         } else {
-            for (k, v) in table.iter_internal_range(start, end) {
+            for (k, v) in table.iter_internal_iter_at(start, end, snapshot) {
                 push(&mut stream, &mut last, k, v);
             }
         }
@@ -5508,7 +5508,7 @@ impl<'a> MemCountCursor<'a> {
                     .map(|(k, v)| (k, v)),
             ))
         } else {
-            MemCountIter::Range(table.iter_internal_iter(start, end))
+            MemCountIter::Range(table.iter_internal_iter_at(start, end, snapshot))
         };
         let mut c = Self {
             it,
