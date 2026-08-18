@@ -134,7 +134,8 @@ impl<F: EnvFile> Wal<F> {
     ///
     /// Caller must [`Self::write_pending_frame`] before `fdatasync` so the
     /// Db write lock is not held across the write (RFC-0041). Same bytes as
-    /// `encode_ops` + [`Self::append_records`].
+    /// `encode_ops` + [`Self::append_records`]. RFC-0042 P1.3: fields go
+    /// straight into the frame (no logical scratch pass).
     ///
     /// # Errors
     /// None today (encode is infallible); `Result` matches the append path.
@@ -145,10 +146,8 @@ impl<F: EnvFile> Wal<F> {
         let mut frame = self.writer.take_frame();
         let mut n = 0u64;
         for ops in batches {
-            self.logical.clear();
-            crate::batch::encode_ops(ops, &mut self.logical);
-            n = n.saturating_add(self.logical.len() as u64);
-            self.writer.fragment_record(&self.logical, &mut frame);
+            n = n.saturating_add(crate::batch::encoded_len(ops) as u64);
+            self.writer.fragment_encoded(ops, &mut frame);
         }
         self.writer.restore_frame(frame);
         Ok(n)

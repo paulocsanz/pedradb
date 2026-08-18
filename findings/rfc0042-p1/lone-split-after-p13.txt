@@ -1,0 +1,14 @@
+lone split — append (unique keys) (n=3000):
+  start   (lock+prepare+encode)     0.66 µs    0.7%
+  apply   (memtable)                0.68 µs    0.7%
+  io      (write+fdatasync)       98.65 µs   98.5%
+  publish (visibility)             0.18 µs    0.2%
+  total/op   100.16 µs  (wall 101.08 µs)  → ceiling 9984 qps
+lone split — overwrite (512 hot keys) (n=3000):
+  start   (lock+prepare+encode)     4.47 µs    4.2%
+  apply   (memtable)                1.08 µs    1.0%
+  io      (write+fdatasync)       99.51 µs   94.3%
+  publish (visibility)             0.45 µs    0.4%
+  total/op   105.51 µs  (wall 107.66 µs)  → ceiling 9477 qps
+wal fd ema after run: 24.2 µs
+raw write(1 KiB)+fdatasync: p50 37.2 µs  p90 116.2 µs  p99 949.7 µs  mean 97.5 µs  (n=2000)

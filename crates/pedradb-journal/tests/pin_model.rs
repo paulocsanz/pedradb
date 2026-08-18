@@ -3,9 +3,7 @@
 //! Fold path: peek → apply → `pin_after_apply`. Peek must not move the pin.
 //! AS-IS `peek_pins_cursor` pins on receipt → pin can exceed applied.
 
-use pedradb_journal::pin_kernel::{
-    may_advance_pin, peek_pins_cursor, peek_pins_cursor_as_is,
-};
+use pedradb_journal::pin_kernel::{may_advance_pin, peek_pins_cursor, peek_pins_cursor_as_is};
 use stateright::{Checker, Model, Property};
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]

@@ -97,9 +97,21 @@ impl<W: Write + Seek> WalWriter<W> {
         self.frame = frame;
     }
 
+    /// Scratch path (`data` → frame) — production encode goes through
+    /// [`Self::fragment_encoded`]; kept as the byte-identity oracle for tests.
+    #[cfg(test)]
     pub(crate) fn fragment_record(&mut self, data: &[u8], buf: &mut Vec<u8>) {
         buf.reserve(data.len() + 2 * HEADER_SIZE);
-        self.fragment_into(data, buf);
+        self.fragment_from(&mut SliceSource(data), buf);
+    }
+
+    /// RFC-0042 P1.3: fragment the [`crate::batch::encode_ops`] encoding of
+    /// `ops` straight into `buf` — byte-identical to
+    /// `fragment_record(&encode_ops(ops))` without the intermediate logical
+    /// buffer (one full-record copy per group member saved).
+    pub(crate) fn fragment_encoded(&mut self, ops: &[crate::batch::WriteOp], buf: &mut Vec<u8>) {
+        buf.reserve(crate::batch::encoded_len(ops) + 2 * HEADER_SIZE);
+        self.fragment_from(&mut EncodedOpsSource::new(ops), buf);
     }
 
     pub(crate) fn write_frame(&mut self, buf: &[u8]) -> Result<()> {
@@ -112,9 +124,12 @@ impl<W: Write + Seek> WalWriter<W> {
     /// Fragmentation state machine shared by [`Self::add_record`] (direct
     /// write) and [`Self::add_records`] (staged buffer).
     fn fragment_into(&mut self, data: &[u8], buf: &mut Vec<u8>) {
-        let mut left = data.len();
+        self.fragment_from(&mut SliceSource(data), buf);
+    }
+
+    fn fragment_from(&mut self, src: &mut dyn RecordSource, buf: &mut Vec<u8>) {
+        let mut left = src.total_len();
         let mut begin = true;
-        let mut off = 0usize;
 
         loop {
             let leftover = BLOCK_SIZE
@@ -143,8 +158,13 @@ impl<W: Write + Seek> WalWriter<W> {
                 RecordType::Middle
             };
 
-            self.push_physical_record(rtype, &data[off..off + fragment_len], buf);
-            off += fragment_len;
+            // Stage the payload first: the crc needs the contiguous bytes,
+            // and a source may produce them field by field.
+            let hdr_pos = buf.len();
+            buf.resize(hdr_pos + HEADER_SIZE + fragment_len, 0);
+            src.read_exact_into(&mut buf[hdr_pos + HEADER_SIZE..]);
+            self.patch_physical_record(rtype, fragment_len, hdr_pos, buf);
+
             left -= fragment_len;
             begin = false;
 
@@ -154,20 +174,26 @@ impl<W: Write + Seek> WalWriter<W> {
         }
     }
 
-    /// Header+payload emit into a staging buffer (no I/O).
-    fn push_physical_record(&mut self, rtype: RecordType, data: &[u8], buf: &mut Vec<u8>) {
+    /// Patch the physical-record header (crc + length + type) in front of the
+    /// staged payload at `hdr_pos` (RFC-0042 P1.3 in-place emit).
+    fn patch_physical_record(
+        &mut self,
+        rtype: RecordType,
+        payload_len: usize,
+        hdr_pos: usize,
+        buf: &mut [u8],
+    ) {
         let length_u16 =
-            u16::try_from(data.len()).expect("physical record fragment must fit in u16");
+            u16::try_from(payload_len).expect("physical record fragment must fit in u16");
 
-        let checksum = crc::record_checksum(rtype as u8, length_u16, data);
+        let checksum = crc::record_checksum(rtype as u8, length_u16, &buf[hdr_pos + HEADER_SIZE..]);
 
         let mut header = [0u8; HEADER_SIZE];
         header[0..4].copy_from_slice(&checksum.to_le_bytes());
         header[4..6].copy_from_slice(&length_u16.to_le_bytes());
         header[6] = rtype as u8;
+        buf[hdr_pos..hdr_pos + HEADER_SIZE].copy_from_slice(&header);
 
-        buf.extend_from_slice(&header);
-        buf.extend_from_slice(data);
         self.block_offset += HEADER_SIZE + usize::from(length_u16);
     }
 
@@ -201,10 +227,261 @@ impl<W: Write + Seek> WalWriter<W> {
     }
 }
 
+/// Byte source of one logical record for [`WalWriter::fragment_from`]
+/// (RFC-0042 P1.3: `encode_ops` into a scratch `Vec` followed by
+/// `fragment_record` copied every record twice; a source feeds the
+/// fragmentation state machine directly, one copy).
+trait RecordSource {
+    fn total_len(&self) -> usize;
+    /// Fill `dst` completely with the next `dst.len()` bytes of the record.
+    fn read_exact_into(&mut self, dst: &mut [u8]);
+}
+
+struct SliceSource<'a>(&'a [u8]);
+
+impl RecordSource for SliceSource<'_> {
+    fn total_len(&self) -> usize {
+        self.0.len()
+    }
+
+    fn read_exact_into(&mut self, dst: &mut [u8]) {
+        let n = dst.len();
+        dst.copy_from_slice(&self.0[..n]);
+        self.0 = &self.0[n..];
+    }
+}
+
+/// Yields exactly the [`crate::batch::encode_ops`] encoding of `ops`, field by
+/// field, so no intermediate logical buffer is needed.
+struct EncodedOpsSource<'a> {
+    ops: &'a [crate::batch::WriteOp],
+    head: [u8; 5],
+    /// `false` until the 5-byte `head` has been fully consumed.
+    head_done: bool,
+    idx: usize,
+    /// 0 = kind+seq+klen preamble, 1 = key, 2 = vlen, 3 = value, 4 = done.
+    stage: u8,
+    preamble: [u8; 13],
+    vlen: [u8; 4],
+    off: usize,
+}
+
+impl<'a> EncodedOpsSource<'a> {
+    fn new(ops: &'a [crate::batch::WriteOp]) -> Self {
+        let count = u32::try_from(ops.len()).unwrap_or(u32::MAX);
+        let mut head = [0u8; 5];
+        head[0] = crate::batch::WRITE_RECORD_VERSION;
+        head[1..5].copy_from_slice(&count.to_le_bytes());
+        Self {
+            ops,
+            head,
+            head_done: false,
+            idx: 0,
+            stage: 4,
+            preamble: [0; 13],
+            vlen: [0; 4],
+            off: 0,
+        }
+    }
+
+    fn enter_op(&mut self) {
+        if self.idx >= self.ops.len() {
+            self.stage = 4;
+            return;
+        }
+        let op = &self.ops[self.idx];
+        self.preamble[0] = op.kind.as_u8();
+        self.preamble[1..9].copy_from_slice(&op.sequence.to_le_bytes());
+        let kl = u32::try_from(op.key.len()).unwrap_or(u32::MAX);
+        self.preamble[9..13].copy_from_slice(&kl.to_le_bytes());
+        let vl = u32::try_from(op.value.len()).unwrap_or(u32::MAX);
+        self.vlen.copy_from_slice(&vl.to_le_bytes());
+        self.stage = 0;
+        self.off = 0;
+    }
+
+    /// Current contiguous run of encoded bytes (skips empty fields).
+    fn current(&mut self) -> &[u8] {
+        loop {
+            if !self.head_done {
+                return &self.head[self.off..];
+            }
+            match self.stage {
+                0 => return &self.preamble[self.off..],
+                1 => {
+                    let key = &self.ops[self.idx].key;
+                    if key.is_empty() {
+                        self.stage = 2;
+                        self.off = 0;
+                        continue;
+                    }
+                    return &key[self.off..];
+                }
+                2 => return &self.vlen[self.off..],
+                3 => {
+                    let value = &self.ops[self.idx].value;
+                    if value.is_empty() {
+                        self.off = 0;
+                        self.idx += 1;
+                        if self.idx < self.ops.len() {
+                            self.enter_op();
+                        } else {
+                            self.stage = 4;
+                        }
+                        continue;
+                    }
+                    return &value[self.off..];
+                }
+                _ => {
+                    if self.idx >= self.ops.len() {
+                        return &[];
+                    }
+                    self.enter_op();
+                }
+            }
+        }
+    }
+
+    fn advance(&mut self, taken: usize) {
+        if !self.head_done {
+            self.off += taken;
+            if self.off == self.head.len() {
+                self.head_done = true;
+                self.off = 0;
+                if self.idx < self.ops.len() {
+                    self.enter_op();
+                }
+            }
+            return;
+        }
+        match self.stage {
+            0 | 2 => {
+                self.off += taken;
+                let end = if self.stage == 0 {
+                    self.preamble.len()
+                } else {
+                    self.vlen.len()
+                };
+                if self.off == end {
+                    self.off = 0;
+                    self.stage += 1;
+                }
+            }
+            1 => {
+                self.off += taken;
+                if self.off == self.ops[self.idx].key.len() {
+                    self.off = 0;
+                    self.stage = 2;
+                }
+            }
+            3 => {
+                self.off += taken;
+                if self.off == self.ops[self.idx].value.len() {
+                    self.off = 0;
+                    self.idx += 1;
+                    if self.idx < self.ops.len() {
+                        self.enter_op();
+                    } else {
+                        self.stage = 4;
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+impl RecordSource for EncodedOpsSource<'_> {
+    fn total_len(&self) -> usize {
+        crate::batch::encoded_len(self.ops)
+    }
+
+    fn read_exact_into(&mut self, dst: &mut [u8]) {
+        let mut filled = 0;
+        while filled < dst.len() {
+            let run = self.current();
+            assert!(
+                !run.is_empty(),
+                "EncodedOpsSource exhausted before record end"
+            );
+            let take = (dst.len() - filled).min(run.len());
+            dst[filled..filled + take].copy_from_slice(&run[..take]);
+            self.advance(take);
+            filled += take;
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::io::Cursor;
+
+    /// RFC-0042 P1.3: the direct-to-frame source must emit byte-identical
+    /// frames to the scratch path `fragment_record(&encode_ops(ops))`,
+    /// across fragment topologies (empty, single-block, exact block
+    /// multiples, multi-block) and a mid-block starting offset.
+    #[test]
+    fn fragment_encoded_matches_scratch_path_bytes() {
+        use crate::batch::WriteOp;
+        use bytes::Bytes;
+
+        let b = BLOCK_SIZE;
+        let cases: Vec<Vec<WriteOp>> = vec![
+            vec![],
+            vec![WriteOp::put(1, Bytes::from_static(b"k"), Bytes::new())],
+            vec![WriteOp::put(1, Bytes::from_static(b"k"), Bytes::from_static(b"v"))],
+            vec![
+                WriteOp::put(7, Bytes::from_static(b"abc"), Bytes::from(vec![0xa5; b + 50])),
+                WriteOp::delete(8, Bytes::from_static(b"gone")),
+                WriteOp::put(
+                    9,
+                    Bytes::from(vec![0x11; b]),
+                    Bytes::from(vec![0x22; 2 * b + 11]),
+                ),
+            ],
+            vec![
+                WriteOp::put(1, Bytes::from_static(b"empty-key"), Bytes::from_static(b"x")),
+                WriteOp::put(2, Bytes::new(), Bytes::from_static(b"empty-key-value")),
+                WriteOp::put(3, Bytes::from_static(b"both"), Bytes::new()),
+            ],
+        ];
+
+        for start_offset in [0usize, 11, b - 3, b - 1].into_iter().chain(1..=40) {
+            for ops in &cases {
+                let scratch = WalWriter::new(Cursor::new(Vec::new())).unwrap();
+                let direct = WalWriter::new(Cursor::new(Vec::new())).unwrap();
+                // Skip: fresh writers share block state; align both to the
+                // same mid-block offset by fragmenting a filler record first.
+                let (mut scratch, mut direct) = (scratch, direct);
+                if start_offset > 0 {
+                    let filler = vec![0xee; start_offset];
+                    let mut sf = scratch.take_frame();
+                    scratch.fragment_record(&filler, &mut sf);
+                    scratch.restore_frame(sf);
+                    let mut df = direct.take_frame();
+                    direct.fragment_record(&filler, &mut df);
+                    direct.restore_frame(df);
+                }
+                let mut logical = Vec::new();
+                crate::batch::encode_ops(ops, &mut logical);
+                let mut sf = scratch.take_frame();
+                scratch.fragment_record(&logical, &mut sf);
+                scratch.write_frame(&sf).unwrap();
+                scratch.restore_frame(sf);
+                let mut df = direct.take_frame();
+                direct.fragment_encoded(ops, &mut df);
+                direct.write_frame(&df).unwrap();
+                direct.restore_frame(df);
+                assert_eq!(
+                    scratch.into_inner().into_inner(),
+                    direct.into_inner().into_inner(),
+                    "offset={start_offset} ops_len={}",
+                    crate::batch::encoded_len(ops)
+                );
+            }
+        }
+    }
 
     fn collect_records(buf: &[u8]) -> Vec<Vec<u8>> {
         let mut reader = super::super::reader::WalReader::new(buf);

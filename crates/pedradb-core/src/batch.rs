@@ -175,7 +175,7 @@ impl WriteRecord {
 pub fn encode_ops(ops: &[WriteOp], out: &mut Vec<u8>) {
     // One resize, then indexed copies — apply_mc4 is 64 ops / ~32 KiB of
     // values; per-field `extend_from_slice` was a write-lock cost (RFC-0041).
-    let n = 1 + 4 + ops.iter().map(op_encoded_len).sum::<usize>();
+    let n = encoded_len(ops);
     let start = out.len();
     out.resize(start + n, 0);
     let buf = &mut out[start..];
@@ -203,6 +203,12 @@ pub fn encode_ops(ops: &[WriteOp], out: &mut Vec<u8>) {
         i += v;
     }
     debug_assert_eq!(i, n);
+}
+
+/// Encoded size of `ops` under [`encode_ops`] — RFC-0042 P1.3: lets the WAL
+/// fragment the record straight into the frame, skipping the scratch copy.
+pub(crate) fn encoded_len(ops: &[WriteOp]) -> usize {
+    1 + 4 + ops.iter().map(op_encoded_len).sum::<usize>()
 }
 
 fn op_encoded_len(o: &WriteOp) -> usize {

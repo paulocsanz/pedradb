@@ -1,0 +1,16 @@
+    Finished `release` profile [optimized + debuginfo] target(s) in 0.07s
+     Running `target/release/examples/lone_split 3000`
+lone split — append (unique keys) (n=3000):
+  start   (lock+prepare+encode)     0.50 µs    0.8%
+  apply   (memtable)                0.39 µs    0.7%
+  io      (write+fdatasync)       58.59 µs   98.3%
+  publish (visibility)             0.12 µs    0.2%
+  total/op    59.61 µs  (wall 60.28 µs)  → ceiling 16777 qps
+lone split — overwrite (512 hot keys) (n=3000):
+  start   (lock+prepare+encode)     1.11 µs    1.2%
+  apply   (memtable)                0.64 µs    0.7%
+  io      (write+fdatasync)       88.32 µs   97.7%
+  publish (visibility)             0.37 µs    0.4%
+  total/op    90.44 µs  (wall 91.69 µs)  → ceiling 11057 qps
+wal fd ema after run: 29.8 µs
+raw write(1 KiB)+fdatasync: p50 32.2 µs  p90 66.8 µs  p99 206.7 µs  mean 62.1 µs  (n=2000)

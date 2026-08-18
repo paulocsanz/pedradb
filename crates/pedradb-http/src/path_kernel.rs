@@ -164,10 +164,7 @@ mod tests {
             request_target_authority("http://evil.example/kv/x"),
             Some("evil.example")
         );
-        assert_eq!(
-            request_target_authority("//h:9/kv/x?q=1"),
-            Some("h:9")
-        );
+        assert_eq!(request_target_authority("//h:9/kv/x?q=1"), Some("h:9"));
         assert_eq!(request_target_authority("/kv/x"), None);
         assert!(host_authority_mismatch("localhost", "evil.example"));
         assert!(!host_authority_mismatch("LocalHost", "localhost"));

@@ -310,7 +310,12 @@ fn stats_cmd(args: &[String]) -> std::process::ExitCode {
                 for c in cands {
                     println!(
                         "blob file={} bytes={} live={}B records={} dead_ratio={:.3} active={}",
-                        c.file_num, c.bytes, c.live_bytes, c.live_records, c.dead_ratio, c.is_active
+                        c.file_num,
+                        c.bytes,
+                        c.live_bytes,
+                        c.live_records,
+                        c.dead_ratio,
+                        c.is_active
                     );
                 }
             }
@@ -495,10 +500,7 @@ fn maintain_once(
     if do_vlog {
         match db.compact_vlog() {
             Ok(st) => {
-                vlog_line = format!(
-                    " vlog_rewrite {}B→{}B",
-                    st.bytes_before, st.bytes_after
-                );
+                vlog_line = format!(" vlog_rewrite {}B→{}B", st.bytes_before, st.bytes_after);
             }
             Err(e) => {
                 eprintln!("error compact-vlog: {e}");
@@ -507,10 +509,7 @@ fn maintain_once(
         }
     }
     let blob_s = match blob {
-        Some((n, st)) => format!(
-            " blob_gc file={n} {}B→{}B",
-            st.bytes_before, st.bytes_after
-        ),
+        Some((n, st)) => format!(" blob_gc file={n} {}B→{}B", st.bytes_before, st.bytes_after),
         None => " blob_gc=skip".into(),
     };
     println!(
@@ -569,10 +568,7 @@ fn compact_blob_cmd(args: &[String]) -> std::process::ExitCode {
     match open_live(path) {
         Ok(mut db) => {
             if args[1] == "--auto" {
-                let theta: f64 = args
-                    .get(2)
-                    .and_then(|s| s.parse().ok())
-                    .unwrap_or(0.5);
+                let theta: f64 = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(0.5);
                 match db.compact_blob_auto(theta) {
                     Ok(Some((num, st))) => {
                         println!(

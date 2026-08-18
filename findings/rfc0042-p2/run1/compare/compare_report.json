@@ -1,0 +1,54 @@
+{
+  "compare": "rocks-parity-v1",
+  "compat_path": "/Users/paulo/software/pedradb/findings/rfc0042-p2/run1/compat/rocks_parity_bench.json",
+  "compat": {
+    "engine": "compat (rocksdb-compat on pedradb-core, single node, single client)",
+    "sync": true,
+    "durability": "fdatasync-before-ok (pedradb-core WAL; RFC-0001/0036)",
+    "metrics": {
+    "deps_apply_batch": 2011.921,
+    "deps_apply_batch_mc4": 2047.361,
+    "deps_cache_overwrite": 8211.047,
+    "deps_cache_overwrite_mc4": 9509.201,
+    "deps_mvcc_latest": 265331.166,
+    "deps_raftlog": 5004.125,
+    "deps_raftlog_mc4": 6479.154,
+    "deps_scan": 439391.443,
+    "ycsb_a": 30308.196,
+    "ycsb_a_mc4": 11958.695,
+    "ycsb_b": 41694.354,
+    "ycsb_c": 845055.664,
+    "ycsb_d": 115898.357,
+    "ycsb_e": 70550.883,
+    "ycsb_f": 11186.141,
+    "ycsb_f_mc4": 12646.701
+  }
+  },
+  "rocksdb": {
+    "status": "peer_file:ok",
+    "peer_file": "/Users/paulo/software/pedradb/findings/rfc0042-p2/run1/rocks/rocks_parity_bench.json",
+    "sync": false,
+    "durability": "async-wal (WriteOptions.sync=false, rocksdb default)",
+    "how_to_fill": "1) cargo run -q --release -p rocksdb-parity-bench --features real --bin rocks-parity-bench -- <out> rocksdb  2) ROCKS_PARITY_PEER=<out>/rocks_parity_bench.json rocks-parity-compare  3) scripts/rocksdb_parity_v0.sh does both. See docs/rocksdb-compat.md"
+  },
+  "ratios": [
+    {"shape":"ycsb_a","compat_keys_per_s":30308.196,"rocksdb_keys_per_s":40020.210,"compat_over_rocksdb":0.757,"meets_floor":null},
+    {"shape":"ycsb_b","compat_keys_per_s":41694.354,"rocksdb_keys_per_s":176369.440,"compat_over_rocksdb":0.236,"meets_floor":null},
+    {"shape":"ycsb_c","compat_keys_per_s":845055.664,"rocksdb_keys_per_s":1195754.593,"compat_over_rocksdb":0.707,"meets_floor":null},
+    {"shape":"ycsb_d","compat_keys_per_s":115898.357,"rocksdb_keys_per_s":136082.583,"compat_over_rocksdb":0.852,"meets_floor":null},
+    {"shape":"ycsb_e","compat_keys_per_s":70550.883,"rocksdb_keys_per_s":25595.850,"compat_over_rocksdb":2.756,"meets_floor":null},
+    {"shape":"ycsb_f","compat_keys_per_s":11186.141,"rocksdb_keys_per_s":118198.944,"compat_over_rocksdb":0.095,"meets_floor":null},
+    {"shape":"deps_apply_batch","compat_keys_per_s":2011.921,"rocksdb_keys_per_s":2554.875,"compat_over_rocksdb":0.787,"meets_floor":null},
+    {"shape":"deps_mvcc_latest","compat_keys_per_s":265331.166,"rocksdb_keys_per_s":182088.550,"compat_over_rocksdb":1.457,"meets_floor":null},
+    {"shape":"deps_scan","compat_keys_per_s":439391.443,"rocksdb_keys_per_s":153514.515,"compat_over_rocksdb":2.862,"meets_floor":null},
+    {"shape":"deps_raftlog","compat_keys_per_s":5004.125,"rocksdb_keys_per_s":8469.716,"compat_over_rocksdb":0.591,"meets_floor":null},
+    {"shape":"deps_cache_overwrite","compat_keys_per_s":8211.047,"rocksdb_keys_per_s":27956.502,"compat_over_rocksdb":0.294,"meets_floor":null},
+    {"shape":"ycsb_a_mc4","compat_keys_per_s":11958.695,"rocksdb_keys_per_s":58249.405,"compat_over_rocksdb":0.205,"meets_floor":null},
+    {"shape":"ycsb_f_mc4","compat_keys_per_s":12646.701,"rocksdb_keys_per_s":51108.659,"compat_over_rocksdb":0.247,"meets_floor":null},
+    {"shape":"deps_cache_overwrite_mc4","compat_keys_per_s":9509.201,"rocksdb_keys_per_s":27137.521,"compat_over_rocksdb":0.350,"meets_floor":null},
+    {"shape":"deps_apply_batch_mc4","compat_keys_per_s":2047.361,"rocksdb_keys_per_s":1064.501,"compat_over_rocksdb":1.923,"meets_floor":null},
+    {"shape":"deps_raftlog_mc4","compat_keys_per_s":6479.154,"rocksdb_keys_per_s":4972.629,"compat_over_rocksdb":1.303,"meets_floor":null}
+  ],
+  "parity": {"floor": null, "shapes_with_peer": 16, "min_ratio": null, "pass": null, "note": "set ROCKS_PARITY_RATIO_FLOOR to gate"},
+  "honesty": "Single-node lab bench: rocksdb-compat (Pedra, fdatasync before Ok) vs real RocksDB default (WriteOptions.sync=false). Official peer is Rocks **default**, not a matched-sync peer. ROCKS_PARITY_SYNC=1 is an extra same-class column only. Pedra keeps the stronger durability and still has to beat default Rocks. Not a distributed/field claim."
+}

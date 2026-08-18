@@ -2,7 +2,7 @@
 //! Building and running it demonstrates the rust-rocksdb→pedradb substitution
 //! mechanism (see docs/rocksdb-compat.md — lab foundation, not drop-in TiKV).
 
-use rocksdb::{DB, Direction, IteratorMode, Options, WriteBatch};
+use rocksdb::{Direction, IteratorMode, Options, WriteBatch, DB};
 
 fn main() {
     let dir = std::env::temp_dir().join(format!("rdbcompat-alias-{}", std::process::id()));
@@ -22,7 +22,10 @@ fn main() {
     db.write(&wb).expect("delete batch");
 
     assert_eq!(db.get(b"kv/1").unwrap(), None);
-    assert_eq!(db.get_cf(&raft, b"log/1").unwrap().as_deref(), Some(&b"term1"[..]));
+    assert_eq!(
+        db.get_cf(&raft, b"log/1").unwrap().as_deref(),
+        Some(&b"term1"[..])
+    );
 
     db.put(b"kv/2", b"v2").unwrap();
     let it = db.iterator(IteratorMode::Start).unwrap();

@@ -18,10 +18,9 @@
 use pedradb_http::{
     expect_field_ok, expect_field_ok_as_is, expects_100_continue, expects_100_continue_as_is,
     header_break_end, header_break_end_as_is, host_value_ok, host_value_ok_as_is,
-    http_version_requires_host,
-    http_version_requires_host_as_is, parse_error_status, parse_error_writes_status,
-    parse_error_writes_status_as_is, present_bad_int_is_error, present_bad_int_is_error_as_is,
-    reject_transfer_encoding, reject_transfer_encoding_as_is,
+    http_version_requires_host, http_version_requires_host_as_is, parse_error_status,
+    parse_error_writes_status, parse_error_writes_status_as_is, present_bad_int_is_error,
+    present_bad_int_is_error_as_is, reject_transfer_encoding, reject_transfer_encoding_as_is,
 };
 use stateright::{Checker, Model, Property};
 

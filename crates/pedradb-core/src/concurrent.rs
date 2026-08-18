@@ -81,14 +81,30 @@ struct WriteGroup {
     /// `last_submit_ns`: an apply_mc4 batch of 5–14 ms would look idle
     /// under a 5 ms last-submit rule the instant it returns (RFC-0041).
     last_complete_ns: AtomicU64,
+    /// RFC-0042 P0.2: cumulative lone-writer phase timings (ns) —
+    /// `[group_start (lock+prepare+encode), apply (mem), wal io
+    /// (write+fdatasync), publish]` — over `lone_count` commits.
+    lone_phase_ns: [AtomicU64; 4],
+    lone_count: AtomicU64,
+    /// RFC-0042 P1.1: EMA (7/8 old + 1/8 sample) of the last successful WAL
+    /// `fdatasync` duration (ns); `0` = no sample yet (see
+    /// [`WriteGroup::fd_ema`]).
+    fd_ema_ns: AtomicU64,
+    /// RFC-0042 P1.1: total ns leaders spent in the catch-up wait, and how
+    /// many groups entered it (diagnostics for the bound).
+    catchup_wait_ns: AtomicU64,
+    catchup_waits: AtomicU64,
 }
 
 /// Default catch-up window (see [`ConcurrentDb::set_write_group_catchup_window`]).
-/// Measured on the bench box: a parked follower needs ~30–100 µs to wake and
-/// resubmit, while one fsync window is ~30 µs — without holding groups open,
-/// arrivals stagger one group per fsync (group_size ≈ 1.1 at 4 clients; ≈ 3
-/// with it).
-const CATCHUP_WINDOW_DEFAULT: Duration = Duration::from_micros(50);
+/// RFC-0042 P1.2 sweep (official protocol, 5 configs × 3 runs): any window
+/// ≥ fd/2 groups equally (`avg_group` ≈ 1.45 — the P1.1 bound caps the wait)
+/// and waiting did not pay for throughput — `PEDRA_CATCHUP_US=0` had the best
+/// median on every `_mc4` gate shape (absorb-only grouping, `avg_group` 1.19).
+/// RFC-0041's own quiet-box probe agreed (catch-up 0: 217 µs vs 50: 244 µs
+/// per apply-op). Default off; set `PEDRA_CATCHUP_US` to opt in (bound then
+/// caps the wait at fd_ema/2).
+const CATCHUP_WINDOW_DEFAULT: Duration = Duration::ZERO;
 
 /// How long after the last concurrent submit the lone-writer fast path stays
 /// disabled (see `last_multi_ns`). 250 µs covers apply pre→com on this box.
@@ -99,6 +115,28 @@ const MULTI_HOLD: Duration = Duration::from_micros(250);
 /// client). A 20 µs hold on 64-op apply (fat20b) cut apply_mc4; do not wait
 /// on apply. YCSB 1-op puts still wait so they share an fsync.
 const CATCHUP_SKIP_OPS: usize = 32;
+
+/// Seed for the fd EMA before the first real `fdatasync` sample (RFC-0042
+/// P1.1): isolated p50 on the bench box is 22–26 µs (RFC-0041 P0.2).
+const WAL_FD_SEED: Duration = Duration::from_micros(25);
+
+/// RFC-0042 P1.1 — break-even bound for the catch-up window: the leader may
+/// hold a group open for at most `min(window, fd_ema / 2)`. Waiting longer
+/// than half a `fdatasync` costs the writers already queued more wall-clock
+/// than the fd share the extra member would save. `None` = do not wait: the
+/// knob is off (`window == 0`, `PEDRA_CATCHUP_US=0`) or every active writer
+/// is already inside the batch (`batch_len >= active`).
+fn catchup_wait_bound(
+    window: Duration,
+    fd_ema: Duration,
+    batch_len: usize,
+    active: usize,
+) -> Option<Duration> {
+    if window.is_zero() || batch_len >= active {
+        return None;
+    }
+    Some(window.min(fd_ema / 2))
+}
 
 struct WriteGroupState {
     pending: VecDeque<PendingWrite>,
@@ -128,6 +166,16 @@ impl WriteGroup {
             last_multi_ns: AtomicU64::new(0),
             last_submit_ns: AtomicU64::new(0),
             last_complete_ns: AtomicU64::new(0),
+            lone_phase_ns: [
+                AtomicU64::new(0),
+                AtomicU64::new(0),
+                AtomicU64::new(0),
+                AtomicU64::new(0),
+            ],
+            lone_count: AtomicU64::new(0),
+            fd_ema_ns: AtomicU64::new(0),
+            catchup_wait_ns: AtomicU64::new(0),
+            catchup_waits: AtomicU64::new(0),
         }
     }
 
@@ -145,6 +193,34 @@ impl WriteGroup {
             return false;
         }
         Self::now_ns().saturating_sub(last) < MULTI_HOLD.as_nanos() as u64
+    }
+
+    /// Recent WAL `fdatasync` duration (EMA); `WAL_FD_SEED` until the first
+    /// real sample lands (RFC-0042 P1.1).
+    fn fd_ema(&self) -> Duration {
+        let ns = self.fd_ema_ns.load(Ordering::Relaxed);
+        Duration::from_nanos(if ns == 0 {
+            WAL_FD_SEED.as_nanos() as u64
+        } else {
+            ns
+        })
+    }
+
+    fn update_fd_ema(&self, sample_ns: u64) {
+        let prev = self.fd_ema_ns.load(Ordering::Relaxed);
+        let next = if prev == 0 {
+            sample_ns
+        } else {
+            (prev.saturating_mul(7).saturating_add(sample_ns)) / 8
+        };
+        self.fd_ema_ns.store(next, Ordering::Relaxed);
+    }
+
+    fn record_lone(&self, phase_ns: [u64; 4]) {
+        for (slot, v) in self.lone_phase_ns.iter().zip(phase_ns) {
+            slot.fetch_add(v, Ordering::Relaxed);
+        }
+        self.lone_count.fetch_add(1, Ordering::Relaxed);
     }
 
     /// Enqueue `ops` and either lead a group commit or wait for the leader.
@@ -169,7 +245,7 @@ impl WriteGroup {
         // Stay off this path for MULTI_HOLD after a concurrent burst so
         // apply's second write() still joins the group (RFC-0040 P1.2).
         if active == 1 && !self.recently_concurrent() {
-            let result = Self::lone_commit(db, ops, do_sync);
+            let result = Self::lone_commit(self, db, ops, do_sync);
             self.batches.fetch_add(1, Ordering::Relaxed);
             self.batch_ops.fetch_add(1, Ordering::Relaxed);
             self.active.fetch_sub(1, Ordering::Relaxed);
@@ -239,25 +315,31 @@ impl WriteGroup {
             // but not yet queued are waking between ops. Hold the group open
             // for them so they share this fsync instead of each forcing one
             // (measured: without it, 4 clients group ≈ 1.1 writes/fsync).
-            // No-op when every active writer is already queued — a lone
-            // client never waits.
+            // RFC-0042 P1.1: the hold is bounded by break-even — at most
+            // `min(window, fd_ema/2)` — so a straggler that never arrives
+            // cannot burn more than half an fd of everyone's latency.
             let window = Duration::from_micros(self.catchup_window_us.load(Ordering::Relaxed));
             let batch_ops: usize = batch.iter().map(|p| p.ops.len()).sum();
-            if !window.is_zero()
-                && batch_ops < CATCHUP_SKIP_OPS
-                && batch.len() < self.active.load(Ordering::Relaxed)
-            {
-                let deadline = Instant::now() + window;
-                let mut g = self.queue.lock();
-                while batch.len() < self.active.load(Ordering::Relaxed) {
-                    let now = Instant::now();
-                    if now >= deadline {
-                        break;
+            let active = self.active.load(Ordering::Relaxed);
+            if batch_ops < CATCHUP_SKIP_OPS {
+                if let Some(bound) = catchup_wait_bound(window, self.fd_ema(), batch.len(), active)
+                {
+                    let t_wait = Instant::now();
+                    let deadline = t_wait + bound;
+                    let mut g = self.queue.lock();
+                    while batch.len() < self.active.load(Ordering::Relaxed) {
+                        let now = Instant::now();
+                        if now >= deadline {
+                            break;
+                        }
+                        let _timed_out = self.arrived.wait_for(&mut g, deadline - now);
+                        batch.extend(g.pending.drain(..));
                     }
-                    let _timed_out = self.arrived.wait_for(&mut g, deadline - now);
-                    batch.extend(g.pending.drain(..));
+                    drop(g);
+                    self.catchup_wait_ns
+                        .fetch_add(t_wait.elapsed().as_nanos() as u64, Ordering::Relaxed);
+                    self.catchup_waits.fetch_add(1, Ordering::Relaxed);
                 }
-                drop(g);
             }
 
             // One write lock: append + absorb anyone who queued during
@@ -288,10 +370,10 @@ impl WriteGroup {
                         guard.group_absorb(&mut inflight, more);
                         batch.extend(extra);
                     }
-                    Self::finish_group_off_lock(db, guard, inflight, Some(&mut batch), || {
+                    Self::finish_group_off_lock(self, db, guard, inflight, Some(&mut batch), || {
                         let mut q = self.queue.lock();
                         q.pending.drain(..).collect()
-                    })
+                    }, None)
                 }
             };
             self.batches.fetch_add(1, Ordering::Relaxed);
@@ -310,41 +392,67 @@ impl WriteGroup {
     }
 
     /// Sequential client: one batch, `fdatasync` off the write lock (G1).
+    /// RFC-0042 P0.2: accumulates the phase split into `group.lone_phase_ns`.
     fn lone_commit<E: Env>(
+        group: &WriteGroup,
         db: &RwLock<Db<E>>,
         ops: Vec<BatchOp>,
         do_sync: bool,
     ) -> Result<SequenceNumber> {
+        let t_start = Instant::now();
         let mut guard = db.write();
         match guard.group_start(vec![(ops, do_sync)]) {
-            Err(mut results) => results.pop().unwrap_or_else(|| {
-                Err(CoreError::Internal(
-                    "lone writer missing admit result".into(),
-                ))
-            }),
-            Ok(inflight) => Self::finish_group_off_lock(db, guard, inflight, None, || Vec::new())
+            Err(mut results) => {
+                group.record_lone([t_start.elapsed().as_nanos() as u64, 0, 0, 0]);
+                results.pop().unwrap_or_else(|| {
+                    Err(CoreError::Internal(
+                        "lone writer missing admit result".into(),
+                    ))
+                })
+            }
+            Ok(inflight) => {
+                let mut phases = [t_start.elapsed().as_nanos() as u64, 0, 0, 0];
+                let out = Self::finish_group_off_lock(
+                    group,
+                    db,
+                    guard,
+                    inflight,
+                    None,
+                    || Vec::new(),
+                    Some(&mut phases),
+                )
                 .into_iter()
                 .next()
                 .unwrap_or_else(|| {
                     Err(CoreError::Internal(
                         "lone writer missing commit result".into(),
                     ))
-                }),
+                });
+                group.record_lone(phases);
+                out
+            }
         }
     }
 
     /// Apply mem under the write lock, absorb anyone who queued during that
     /// apply (same fd, no extra wait), drop the lock for WAL `fdatasync`,
     /// then publish (G1: Ok and default `get` wait for fd).
+    ///
+    /// RFC-0042: records the real `fdatasync` duration into the group's fd
+    /// EMA; when `lone` is set, fills `[apply, io, publish]` phase timings.
+    #[allow(clippy::too_many_arguments)]
     fn finish_group_off_lock<E: Env>(
+        group: &WriteGroup,
         db: &RwLock<Db<E>>,
         mut guard: parking_lot::RwLockWriteGuard<'_, Db<E>>,
         inflight: crate::db::GroupInFlight,
         mut batch: Option<&mut Vec<PendingWrite>>,
         mut drain: impl FnMut() -> Vec<PendingWrite>,
+        mut lone: Option<&mut [u64; 4]>,
     ) -> Vec<Result<SequenceNumber>> {
         let mut need_sync = inflight.needs_sync();
         let mut pub_seq = inflight.max_appended_seq();
+        let t_apply = Instant::now();
         guard.begin_commit();
         let mut results = guard.group_apply(inflight);
         if let Some(batch) = batch.as_mut() {
@@ -368,18 +476,30 @@ impl WriteGroup {
                 batch.extend(extra);
             }
         }
+        let apply_ns = t_apply.elapsed().as_nanos() as u64;
         let wal = guard.wal_arc();
         drop(guard);
+        let t_io = Instant::now();
         let io_err = {
             let mut w = wal.lock();
             w.write_pending_frame().err().or_else(|| {
                 if need_sync {
-                    w.sync_data().err()
+                    let t_fd = Instant::now();
+                    let r = w.sync_data().err();
+                    if r.is_none() {
+                        group.update_fd_ema(t_fd.elapsed().as_nanos() as u64);
+                    }
+                    r
                 } else {
                     None
                 }
             })
         };
+        let io_ns = t_io.elapsed().as_nanos() as u64;
+        if let Some(l) = lone.as_mut() {
+            l[1] = apply_ns;
+            l[2] = io_ns;
+        }
         if let Some(e) = io_err {
             let mut g = db.write();
             g.fence_durability();
@@ -394,12 +514,17 @@ impl WriteGroup {
                 })
                 .collect();
         }
+        let t_publish = Instant::now();
         let g = db.read();
         if need_sync {
             g.note_wal_sync();
         }
         g.publish_sequence(pub_seq);
         g.end_commit();
+        let publish_ns = t_publish.elapsed().as_nanos() as u64;
+        if let Some(l) = lone {
+            l[3] = publish_ns;
+        }
         results
     }
 }
@@ -819,6 +944,40 @@ impl<E: Env> ConcurrentDb<E> {
             self.writes.queued.load(Ordering::Relaxed),
             self.writes.batches.load(Ordering::Relaxed),
             self.writes.batch_ops.load(Ordering::Relaxed),
+        )
+    }
+
+    /// Lone-writer phase split (RFC-0042 P0.2): `(commits, [start, apply,
+    /// io, publish])` in cumulative ns. `start` = write lock + prepare +
+    /// WAL encode; `apply` = memtable apply; `io` = WAL `write` +
+    /// `fdatasync`; `publish` = visibility publish after the fd.
+    #[must_use]
+    pub fn lone_path_split(&self) -> (u64, [u64; 4]) {
+        (
+            self.writes.lone_count.load(Ordering::Relaxed),
+            [
+                self.writes.lone_phase_ns[0].load(Ordering::Relaxed),
+                self.writes.lone_phase_ns[1].load(Ordering::Relaxed),
+                self.writes.lone_phase_ns[2].load(Ordering::Relaxed),
+                self.writes.lone_phase_ns[3].load(Ordering::Relaxed),
+            ],
+        )
+    }
+
+    /// Recent WAL `fdatasync` duration (EMA; seeded from the box baseline
+    /// until the first commit, RFC-0042 P1.1).
+    #[must_use]
+    pub fn wal_fd_ema(&self) -> Duration {
+        self.writes.fd_ema()
+    }
+
+    /// Catch-up wait diagnostics (RFC-0042 P1.1): `(total_ns, groups)` that
+    /// leaders spent holding groups open for stragglers.
+    #[must_use]
+    pub fn catchup_wait_stats(&self) -> (u64, u64) {
+        (
+            self.writes.catchup_wait_ns.load(Ordering::Relaxed),
+            self.writes.catchup_waits.load(Ordering::Relaxed),
         )
     }
 
@@ -2385,6 +2544,237 @@ mod tests {
         // Knob takes effect again after re-enabling.
         db.set_write_group_catchup_window(Duration::from_micros(1234));
         assert_eq!(db.write_group_catchup_window(), Duration::from_micros(1234));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0042 P1.1 — pure break-even policy for the catch-up window.
+    #[test]
+    fn catchup_bound_policy() {
+        let w = Duration::from_micros(50);
+        let fd = Duration::from_micros(25);
+        // Knob off (PEDRA_CATCHUP_US=0) never waits.
+        assert_eq!(catchup_wait_bound(Duration::ZERO, fd, 1, 2), None);
+        // Every active writer already queued: nothing to wait for.
+        assert_eq!(catchup_wait_bound(w, fd, 2, 2), None);
+        assert_eq!(catchup_wait_bound(w, fd, 3, 2), None);
+        // Break-even: fd/2 caps the configured window.
+        assert_eq!(
+            catchup_wait_bound(w, fd, 1, 2),
+            Some(Duration::from_nanos(12_500))
+        );
+        assert_eq!(
+            catchup_wait_bound(w, fd, 1, 8),
+            Some(Duration::from_nanos(12_500))
+        );
+        // The window stays the ceiling when the fd is much slower.
+        assert_eq!(
+            catchup_wait_bound(w, Duration::from_millis(5), 1, 2),
+            Some(w)
+        );
+        assert_eq!(
+            catchup_wait_bound(Duration::from_micros(10), fd, 1, 4),
+            Some(Duration::from_micros(10))
+        );
+    }
+
+    /// Test env whose file `fdatasync` sleeps a configurable time: makes the
+    /// WAL fd slow deterministically for the catch-up bound test (no faults).
+    #[derive(Clone)]
+    struct SlowFdEnv {
+        sleep_us: Arc<AtomicU64>,
+    }
+
+    struct SlowFdFile {
+        file: std::fs::File,
+        sleep_us: Arc<AtomicU64>,
+    }
+
+    impl std::io::Read for SlowFdFile {
+        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+            self.file.read(buf)
+        }
+    }
+
+    impl std::io::Write for SlowFdFile {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.file.write(buf)
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            self.file.flush()
+        }
+    }
+
+    impl std::io::Seek for SlowFdFile {
+        fn seek(&mut self, pos: std::io::SeekFrom) -> std::io::Result<u64> {
+            self.file.seek(pos)
+        }
+    }
+
+    impl crate::env::EnvFile for SlowFdFile {
+        fn sync_data(&mut self) -> std::io::Result<()> {
+            let us = self.sleep_us.load(Ordering::Relaxed);
+            if us > 0 {
+                thread::sleep(Duration::from_micros(us));
+            }
+            crate::env::fdatasync_file(&self.file)
+        }
+
+        fn sync_all(&mut self) -> std::io::Result<()> {
+            std::fs::File::sync_all(&self.file)
+        }
+
+        fn set_len(&mut self, len: u64) -> std::io::Result<()> {
+            self.file.set_len(len)
+        }
+
+        fn len(&mut self) -> std::io::Result<u64> {
+            use std::io::Seek;
+            let pos = self.file.stream_position()?;
+            let end = self.file.seek(std::io::SeekFrom::End(0))?;
+            self.file.seek(std::io::SeekFrom::Start(pos))?;
+            Ok(end)
+        }
+    }
+
+    impl Env for SlowFdEnv {
+        type File = SlowFdFile;
+
+        fn create_dir_all(&self, path: &Path) -> std::io::Result<()> {
+            StdEnv.create_dir_all(path)
+        }
+
+        fn create(&self, path: &Path) -> std::io::Result<Self::File> {
+            Ok(SlowFdFile {
+                file: StdEnv.create(path)?,
+                sleep_us: Arc::clone(&self.sleep_us),
+            })
+        }
+
+        fn open_append(&self, path: &Path) -> std::io::Result<Self::File> {
+            Ok(SlowFdFile {
+                file: StdEnv.open_append(path)?,
+                sleep_us: Arc::clone(&self.sleep_us),
+            })
+        }
+
+        fn open_read(&self, path: &Path) -> std::io::Result<Self::File> {
+            Ok(SlowFdFile {
+                file: StdEnv.open_read(path)?,
+                sleep_us: Arc::clone(&self.sleep_us),
+            })
+        }
+
+        fn sync_dir(&self, path: &Path) -> std::io::Result<()> {
+            StdEnv.sync_dir(path)
+        }
+
+        fn read_dir_names(&self, path: &Path) -> std::io::Result<Vec<String>> {
+            StdEnv.read_dir_names(path)
+        }
+
+        fn remove_file(&self, path: &Path) -> std::io::Result<()> {
+            StdEnv.remove_file(path)
+        }
+
+        fn rename(&self, from: &Path, to: &Path) -> std::io::Result<()> {
+            StdEnv.rename(from, to)
+        }
+
+        fn exists(&self, path: &Path) -> bool {
+            StdEnv.exists(path)
+        }
+
+        fn metadata_len(&self, path: &Path) -> std::io::Result<u64> {
+            StdEnv.metadata_len(path)
+        }
+    }
+
+    /// RFC-0042 P1.1 — a leader holding its group open for a straggler that
+    /// is mid-`fdatasync` must give up after `fd_ema/2`, not the configured
+    /// window. With the window at 500 ms and a 200 ms fd the recorded wait
+    /// stays far below 100 ms (old fixed-window policy: ≈ the whole fd).
+    /// End-to-end put latency is not the contract: the WAL mutex serializes
+    /// the two commits regardless (single WAL file, G1), and the recorded
+    /// wait includes scheduler overrun on a loaded box.
+    #[test]
+    fn catchup_wait_bounded_by_half_fd() {
+        let dir = temp_dir();
+        let sleep_us = Arc::new(AtomicU64::new(0));
+        let env = SlowFdEnv {
+            sleep_us: Arc::clone(&sleep_us),
+        };
+        let opts = OpenOptions {
+            sync: true,
+            auto_flush_bytes: None,
+            auto_compact_sst_count: None,
+            auto_compact_sst_bytes: None,
+            exclusive: true,
+            large_value_threshold: None,
+        };
+        let db = ConcurrentDb::open_with_env(&dir, opts.clone(), env.clone()).unwrap();
+        db.set_write_group_catchup_window(Duration::from_millis(500));
+
+        // One real (fast) lone commit seeds the fd EMA from a true sample.
+        db.put(b"warm", b"v").unwrap();
+        assert!(db.wal_fd_ema() > Duration::ZERO);
+        assert!(
+            db.wal_fd_ema() < Duration::from_millis(10),
+            "seeded fd ema should be µs-class, got {:?}",
+            db.wal_fd_ema()
+        );
+        assert_eq!(db.catchup_wait_stats(), (0, 0));
+
+        // fd now costs ≥ 200 ms. A enters a lone commit; wait until it is
+        // provably mid-commit, then B submits — B leads a group and the
+        // catch-up wait engages for a straggler (A) that is counted in
+        // `active` but can never queue.
+        sleep_us.store(200_000, Ordering::Relaxed);
+        let db_a = db.clone();
+        let a = thread::spawn(move || db_a.put(b"a", b"va").unwrap());
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while db.with_read(|d| d.commit_inflight()) == 0 {
+            assert!(Instant::now() < deadline, "A never entered its commit");
+            thread::sleep(Duration::from_micros(100));
+        }
+        db.put(b"b", b"vb").unwrap();
+        sleep_us.store(0, Ordering::Relaxed);
+        a.join().unwrap();
+
+        // The wait ran and honored the fd/2 bound, not the 500 ms window:
+        // old policy waits ≈ A's whole 200 ms fd; the bound is µs-class
+        // plus scheduler overrun (ms-class on a loaded box).
+        let (wait_ns, waits) = db.catchup_wait_stats();
+        assert!(waits >= 1, "catch-up wait never engaged");
+        let per_wait = wait_ns / waits;
+        assert!(
+            Duration::from_nanos(per_wait) < Duration::from_millis(100),
+            "catch-up wait ignored the fd/2 bound: {per_wait} ns over {waits} waits"
+        );
+
+        // The EMA absorbed the slow fd samples (mechanism feeds the bound).
+        assert!(
+            db.wal_fd_ema() > Duration::from_millis(1),
+            "fd ema should reflect the 200 ms syncs, got {:?}",
+            db.wal_fd_ema()
+        );
+
+        // G1/G2 intact: both writes visible live and durable on reopen.
+        assert_eq!(db.get(b"warm").as_deref(), Some(b"v".as_ref()));
+        assert_eq!(db.get(b"a").as_deref(), Some(b"va".as_ref()));
+        assert_eq!(db.get(b"b").as_deref(), Some(b"vb".as_ref()));
+        drop(db);
+        let re = ConcurrentDb::open_with_env(
+            &dir,
+            OpenOptions {
+                sync: false,
+                ..opts
+            },
+            env,
+        )
+        .unwrap();
+        assert_eq!(re.get(b"warm").as_deref(), Some(b"v".as_ref()));
+        assert_eq!(re.get(b"a").as_deref(), Some(b"va".as_ref()));
+        assert_eq!(re.get(b"b").as_deref(), Some(b"vb".as_ref()));
         let _ = fs::remove_dir_all(&dir);
     }
 

@@ -39,12 +39,11 @@ pub use cl_kernel::{
 };
 pub use fail_closed::{
     expect_field_ok, expect_field_ok_as_is, expectation_failed_status, expects_100_continue,
-    expects_100_continue_as_is, header_break_end, header_break_end_as_is,
-    header_break_len, host_value_ok, host_value_ok_as_is, host_values_conflict,
-    host_values_conflict_as_is, http_version_requires_host, http_version_requires_host_as_is,
-    parse_error_status, parse_error_writes_status, parse_error_writes_status_as_is,
-    present_bad_int_is_error, present_bad_int_is_error_as_is, reject_transfer_encoding,
-    reject_transfer_encoding_as_is,
+    expects_100_continue_as_is, header_break_end, header_break_end_as_is, header_break_len,
+    host_value_ok, host_value_ok_as_is, host_values_conflict, host_values_conflict_as_is,
+    http_version_requires_host, http_version_requires_host_as_is, parse_error_status,
+    parse_error_writes_status, parse_error_writes_status_as_is, present_bad_int_is_error,
+    present_bad_int_is_error_as_is, reject_transfer_encoding, reject_transfer_encoding_as_is,
 };
 pub use form_kernel::{
     form_decode, form_decode_as_is, form_plus_byte, form_plus_byte_as_is, from_hex,
@@ -169,7 +168,9 @@ fn read_req(stream: &mut TcpStream) -> Result<(String, String, Vec<u8>, Vec<(Str
         }
     }
     // F159: unrecognized Expect must 417 (not ignore and store).
-    if let Some((_, v)) = headers.iter().find(|(n, v)| n == "expect" && !expect_field_ok(v))
+    if let Some((_, v)) = headers
+        .iter()
+        .find(|(n, v)| n == "expect" && !expect_field_ok(v))
     {
         return Err(HttpError::ExpectationFailed(format!(
             "expectation failed: {v}"
@@ -1008,10 +1009,7 @@ mod tests {
             "bare ?rev must 400, not create as rev=0, got {c1} {b1:?}"
         );
         let (c2, body) = http_exchange(addr, "GET", "/dcs/kv/k", b"").unwrap();
-        assert_eq!(
-            c2, 404,
-            "bare ?rev must not store, GET {c2} {body:?}"
-        );
+        assert_eq!(c2, 404, "bare ?rev must not store, GET {c2} {body:?}");
         let (c3, b3) = http_exchange(addr, "PUT", "/dcs/kv/k?rev=0", b"v1").unwrap();
         assert_eq!(c3, 200, "explicit rev=0 still creates, {b3:?}");
         let _ = std::fs::remove_dir_all(&dir);
@@ -1028,13 +1026,8 @@ mod tests {
             let _ = srv.serve(addr);
         });
         thread::sleep(Duration::from_millis(100));
-        let (c1, b1) = http_exchange(
-            addr,
-            "POST",
-            "/dcs/leader?key&holder=n1&ttl_ms=8000",
-            b"",
-        )
-        .unwrap();
+        let (c1, b1) =
+            http_exchange(addr, "POST", "/dcs/leader?key&holder=n1&ttl_ms=8000", b"").unwrap();
         assert_eq!(
             c1, 400,
             "bare ?key must 400, not lock /leader or empty, got {c1} {b1:?}"
