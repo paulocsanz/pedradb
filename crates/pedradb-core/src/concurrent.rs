@@ -417,6 +417,8 @@ pub struct ConcurrentDb<E: Env = StdEnv> {
     persist_lock: Arc<Mutex<()>>,
     /// Cached [`OpenOptions::sync`]; never mutates after open.
     default_sync: Arc<AtomicBool>,
+    /// Shared point cache — a hit needs no Db read lock (YCSB C).
+    point_cache: Arc<crate::cache::PointCache>,
 }
 
 impl ConcurrentDb<StdEnv> {
@@ -442,12 +444,14 @@ impl<E: Env> ConcurrentDb<E> {
     #[must_use]
     pub fn from_db(db: Db<E>) -> Self {
         let default_sync = db.default_write_sync();
+        let point_cache = db.point_cache_handle();
         Self {
             inner: Arc::new(RwLock::new(db)),
             writes: Arc::new(WriteGroup::new()),
             flush_lock: Arc::new(Mutex::new(())),
             persist_lock: Arc::new(Mutex::new(())),
             default_sync: Arc::new(AtomicBool::new(default_sync)),
+            point_cache,
         }
     }
 
@@ -459,9 +463,13 @@ impl<E: Env> ConcurrentDb<E> {
         Ok(Self::from_db(Db::open_with_env(path, opts, env)?))
     }
 
-    /// Point get (read lock).
+    /// Point get. A point-cache hit answers without the Db read lock
+    /// (misses fall through to the locked path, which fills the cache).
     #[must_use]
     pub fn get(&self, key: &[u8]) -> Option<Bytes> {
+        if let Some(v) = self.point_cache.get(key) {
+            return v;
+        }
         self.inner.read().get(key)
     }
 
@@ -984,6 +992,7 @@ impl<E: Env> ConcurrentDb<E> {
             flush_lock: _,
             persist_lock: _,
             default_sync: _,
+            point_cache: _,
         } = self;
         match Arc::try_unwrap(inner) {
             Ok(lock) => lock.into_inner().close(),

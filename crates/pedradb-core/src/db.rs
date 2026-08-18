@@ -612,7 +612,9 @@ pub struct Db<E: Env = StdEnv> {
     /// Decompressed block cache (hit stats for read path).
     block_cache: BlockCache,
     /// Latest-snapshot point answers; per-key inval on write (RFC-0035 / 0041).
-    point_cache: PointCache,
+    /// `Arc` so [`crate::concurrent::ConcurrentDb`] answers a hit without the
+    /// Db read lock (YCSB C hit path).
+    point_cache: Arc<PointCache>,
     /// User keys applied since last publish (point-cache drop, not a gen bump).
     dirty_points: Mutex<Vec<Bytes>>,
     /// Fat apply / range-delete: publish must gen-bump, not per-key inval.
@@ -768,7 +770,7 @@ impl<E: Env> Db<E> {
         let block_cache = BlockCache::new(8192);
         // Official YCSB records=4096 (zipfian). 2048 FIFO + sequential load
         // evicted the hot low IDs; C then started cold (parkfold2 C 1.6×).
-        let point_cache = PointCache::new(8192);
+        let point_cache = Arc::new(PointCache::new(8192));
         let last_prefix_cache = AnswerCache::new(8192);
         let count_cache = AnswerCache::new(8192);
         let (
@@ -1005,6 +1007,12 @@ impl<E: Env> Db<E> {
     #[must_use]
     pub fn visible_sequence(&self) -> SequenceNumber {
         self.published_seq.load(Ordering::Acquire)
+    }
+
+    /// Shared point-cache handle (ConcurrentDb hit path, no Db read lock).
+    #[must_use]
+    pub fn point_cache_handle(&self) -> Arc<PointCache> {
+        Arc::clone(&self.point_cache)
     }
 
     /// Publish `seq` as visible and drop read caches (after WAL is durable).
