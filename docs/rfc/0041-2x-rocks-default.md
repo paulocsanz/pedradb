@@ -58,14 +58,14 @@
 
 ### P1 — escritas ≥ 2× default
 
-- [ ] **P1.1** `deps_apply_batch_mc4` e `deps_raftlog_mc4` ≥ 2.0 vs default da run — status: `doing` (fat apply skips 64 key clones for point-cache; remesura espera caixa quieta. parkfold2 still best official 4.3 k)
+- [ ] **P1.1** `deps_apply_batch_mc4` e `deps_raftlog_mc4` ≥ 2.0 vs default da run — status: `doing` (head2 mediana: apply_mc4 **1.771** (Pedra 7.5 k), raftlog_mc4 **1.962** (29.7 k); apply 1c 0.89, raftlog 1c 0.92. Faltam ~12% / ~2%)
 - [ ] **P1.2** `ycsb_a` / `ycsb_f` / `deps_cache_overwrite` (1c e `_mc4` se existirem) ≥ 2.0 vs default — status: `todo` (**teto medido:** fd p50 ≈ 24 µs ⇒ `1/t_fd` ≈ 41 k; parkfold2 A **34.6 k / 0.12×**. 2× Rocks A ~200–400 k está acima de um fd/Ok. Sem largar G1/peer/shapes; FLOOR off até o owner mudar a regra)
 - [ ] **P1.3** `deps_apply_batch` e `deps_raftlog` **1 cliente** ≥ 2.0 vs default — status: `todo`
 
 ### P2 — leituras ≥ 2× default
 
-- [ ] **P2.1** `deps_scan` e `ycsb_e` ≥ 2.0 (L0 drenado; p95 do miss) — status: `doing` (2521579 regressiu: parked tails faziam count varrer ~20k entradas/op (scan 0.07–0.17). Fix: `tail_idx` range walk quando snapshot ≥ tail_max. deps-only: scan 4.4 k → **437 k**)
-- [ ] **P2.2** `ycsb_c` / `b` / `d` / `deps_mvcc_latest` ≥ 2.0 — status: `doing` (point cache 8192 so 4096-key YCSB working set fits; per-key inval. Do not cache raw WriteOp — vlog ptr. C 1.52; MVCC **2.58**)
+- [ ] **P2.1** `deps_scan` e `ycsb_e` ≥ 2.0 (L0 drenado; p95 do miss) — status: `doing` (head2: **E 2.551 ✓**, scan **1.597** (426 k vs 271 k). tail_idx fix recuperou scan de 0.087)
+- [ ] **P2.2** `ycsb_c` / `b` / `d` / `deps_mvcc_latest` ≥ 2.0 — status: `doing` (head2: **MVCC 2.527 ✓**, C **1.685**; B 0.45 / D 0.52 têm 5% writes 1c = fd-bound)
 - [ ] **P2.3** Gate 2.0 em **todas** as shapes do harness; script default `SYNC=0` `FLOOR=2.0` — status: `todo`
 
 ## Status (living — update with every PR)
@@ -74,12 +74,12 @@
 |----|------|-------|--------|-----------|---------|
 | P0.1 | p0 | RFC | done | este doc | 2026-08-17 |
 | P0.2 | p0 | remesura 11+MC vs default | done | findings/rfc0041-p02 | 2026-08-17 |
-| P0.3 | p0 | floor 2.0 nas que já passam | todo | inval 3/16; scan med 1.52; sem gate | 2026-08-17 |
-| P1.1 | p1 | apply/raftlog MC ≥ 2× | doing | encode_ops one-resize; raftlog catch-up; remesura pending | 2026-08-17 |
-| P1.2 | p1 | A/F/overwrite ≥ 2× | todo | teto 1/t_fd ≈ 41 k; A 0.12; FLOOR off | 2026-08-17 |
-| P1.3 | p1 | apply/raftlog 1c ≥ 2× | todo | inval apply 0.87 | 2026-08-17 |
-| P2.1 | p2 | scan/E ≥ 2× | doing | merge iter (no full-mem sort); E 2.20; scan med 1.52 | 2026-08-17 |
-| P2.2 | p2 | C/B/D/MVCC ≥ 2× | doing | point cache 8192 + per-key inval; C 1.64 | 2026-08-17 |
+| P0.3 | p0 | floor 2.0 nas que já passam | todo | head2 2/16 (E, MVCC); sem gate | 2026-08-18 |
+| P1.1 | p1 | apply/raftlog MC ≥ 2× | doing | apply_mc4 1.771 / raftlog_mc4 1.962 (head2) | 2026-08-18 |
+| P1.2 | p1 | A/F/overwrite ≥ 2× | todo | teto 1/t_fd ≈ 41 k; head2 A 0.22; FLOOR off | 2026-08-18 |
+| P1.3 | p1 | apply/raftlog 1c ≥ 2× | todo | head2 apply 0.89 / raftlog 0.92 | 2026-08-18 |
+| P2.1 | p2 | scan/E ≥ 2× | doing | E 2.551 ✓; scan 1.597 (head2) | 2026-08-18 |
+| P2.2 | p2 | C/B/D/MVCC ≥ 2× | doing | MVCC 2.527 ✓; C 1.685; B/D write-bound | 2026-08-18 |
 | P2.3 | p2 | gate 2.0 em todas | todo | — | 2026-08-17 |
 
 ## Acceptance Criteria
