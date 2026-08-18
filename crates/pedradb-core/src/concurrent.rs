@@ -1279,11 +1279,11 @@ impl<E: Env> ConcurrentDb<E> {
         let _flush = self.flush_lock.lock();
         let prepared = {
             let mut g = self.inner.write();
-            let Some(front) = g.parked_front() else {
+            // Arc snapshot: the table stays immutable once parked (fold swaps
+            // pairs wholesale), so the SST write needs no deep clone.
+            let Some(imm) = g.parked_front_arc() else {
                 return false;
             };
-            // Clone only on the idle path so readers keep the original.
-            let imm = front.clone();
             let num = g.alloc_file_num();
             let (env, dir, sync) = g.l0_write_ctx();
             Some((imm, num, env, dir, sync))
@@ -1299,10 +1299,15 @@ impl<E: Env> ConcurrentDb<E> {
             Err(_) => return false,
         };
         {
+            let expect = Arc::as_ptr(&imm);
             let mut g = self.inner.write();
             g.apply_l0_install(table, file_num);
-            if let Some(orig) = g.take_oldest_parked() {
-                g.retire_mem_as_l0_cache(orig);
+            let popped = g.take_oldest_parked_matching(expect);
+            drop(imm);
+            if let Some(popped) = popped {
+                // Only this Arc remains (fold cannot run under the lock).
+                let owned = Arc::try_unwrap(popped).unwrap_or_else(|a| (*a).clone());
+                g.retire_mem_as_l0_cache(owned);
             }
         }
         true

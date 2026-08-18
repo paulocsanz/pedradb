@@ -2841,6 +2841,14 @@ impl<E: Env> Db<E> {
         self.parked_unflushed.first().map(|t| t.as_ref())
     }
 
+    /// Cheap `Arc` snapshot of the oldest parked table. Materialize streams
+    /// from this **off** the Db write lock — a deep `MemTable::clone` there
+    /// held the lock for a 4 MiB memcpy (apply_mc4 p99 stalls, RFC-0041).
+    #[must_use]
+    pub fn parked_front_arc(&self) -> Option<Arc<MemTable>> {
+        self.parked_unflushed.first().map(Arc::clone)
+    }
+
     /// Pop the oldest parked table after its L0 exists.
     pub fn take_oldest_parked(&mut self) -> Option<MemTable> {
         if self.parked_unflushed.is_empty() {
@@ -2849,6 +2857,21 @@ impl<E: Env> Db<E> {
             let arc = self.parked_unflushed.remove(0);
             Some(Arc::try_unwrap(arc).unwrap_or_else(|a| (*a).clone()))
         }
+    }
+
+    /// Pop the oldest parked table **only if** it is still `expect` (by
+    /// pointer). A concurrent fold may have swapped the front; the caller's
+    /// L0 then covers data still held by the folded union, which stays.
+    #[must_use]
+    pub fn take_oldest_parked_matching(
+        &mut self,
+        expect: *const MemTable,
+    ) -> Option<Arc<MemTable>> {
+        let front = self.parked_unflushed.first()?;
+        if !std::ptr::eq(Arc::as_ptr(front), expect) {
+            return None;
+        }
+        Some(self.parked_unflushed.remove(0))
     }
 
     /// How many flushed mems still lack an L0 file.
