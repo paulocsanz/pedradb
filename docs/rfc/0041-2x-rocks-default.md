@@ -58,7 +58,7 @@
 
 ### P1 — escritas ≥ 2× default
 
-- [ ] **P1.1** `deps_apply_batch_mc4` e `deps_raftlog_mc4` ≥ 2.0 vs default da run — status: `doing` (head2 mediana: apply_mc4 **1.771** (Pedra 7.5 k), raftlog_mc4 **1.962** (29.7 k); apply 1c 0.89, raftlog 1c 0.92. Faltam ~12% / ~2%)
+- [ ] **P1.1** `deps_apply_batch_mc4` e `deps_raftlog_mc4` ≥ 2.0 vs default da run — status: `doing` (head3: **apply_mc4 2.788 ✓** (8.3 k, materialize sem clone no lock); raftlog_mc4 **1.792**; apply 1c 1.30; raftlog 1c 0.99)
 - [ ] **P1.2** `ycsb_a` / `ycsb_f` / `deps_cache_overwrite` (1c e `_mc4` se existirem) ≥ 2.0 vs default — status: `todo` (**teto medido:** fd p50 ≈ 24 µs ⇒ `1/t_fd` ≈ 41 k; parkfold2 A **34.6 k / 0.12×**. 2× Rocks A ~200–400 k está acima de um fd/Ok. Sem largar G1/peer/shapes; FLOOR off até o owner mudar a regra)
 - [ ] **P1.3** `deps_apply_batch` e `deps_raftlog` **1 cliente** ≥ 2.0 vs default — status: `todo`
 
@@ -74,12 +74,12 @@
 |----|------|-------|--------|-----------|---------|
 | P0.1 | p0 | RFC | done | este doc | 2026-08-17 |
 | P0.2 | p0 | remesura 11+MC vs default | done | findings/rfc0041-p02 | 2026-08-17 |
-| P0.3 | p0 | floor 2.0 nas que já passam | todo | head2 2/16 (E, MVCC); sem gate | 2026-08-18 |
-| P1.1 | p1 | apply/raftlog MC ≥ 2× | doing | apply_mc4 1.771 / raftlog_mc4 1.962 (head2) | 2026-08-18 |
+| P0.3 | p0 | floor 2.0 nas que já passam | todo | head3 3/16 (apply_mc4, MVCC, E); sem gate | 2026-08-18 |
+| P1.1 | p1 | apply/raftlog MC ≥ 2× | doing | apply_mc4 **2.788 ✓**; raftlog_mc4 1.792 (head3) | 2026-08-18 |
 | P1.2 | p1 | A/F/overwrite ≥ 2× | todo | teto 1/t_fd ≈ 41 k; head2 A 0.22; FLOOR off | 2026-08-18 |
 | P1.3 | p1 | apply/raftlog 1c ≥ 2× | todo | head2 apply 0.89 / raftlog 0.92 | 2026-08-18 |
-| P2.1 | p2 | scan/E ≥ 2× | doing | E 2.551 ✓; scan 1.597 (head2) | 2026-08-18 |
-| P2.2 | p2 | C/B/D/MVCC ≥ 2× | doing | MVCC 2.527 ✓; C 1.685; B/D write-bound | 2026-08-18 |
+| P2.1 | p2 | scan/E ≥ 2× | doing | E **2.121 ✓**; scan 1.790 (head3) | 2026-08-18 |
+| P2.2 | p2 | C/B/D/MVCC ≥ 2× | doing | MVCC **2.342 ✓**; C 1.796; B/D write-bound (head3) | 2026-08-18 |
 | P2.3 | p2 | gate 2.0 em todas | todo | — | 2026-08-17 |
 
 ## Acceptance Criteria
