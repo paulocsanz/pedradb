@@ -1,0 +1,92 @@
+{
+  "bench": "rocks-side-peer-template",
+  "engine": "rocksdb",
+  "sync": false,
+  "durability": "async-wal (WriteOptions.sync=false, rocksdb default)",
+  "benches": [
+    {
+      "name": "arango_doc_crud",
+      "qps": null,
+      "compat_qps_ref": 2829.707,
+      "note": "fill qps from real RocksDB same shape"
+    },
+    {
+      "name": "arango_traversal",
+      "qps": null,
+      "compat_qps_ref": 11301.947,
+      "note": "fill qps from real RocksDB same shape"
+    },
+    {
+      "name": "bluestore_omap_read",
+      "qps": null,
+      "compat_qps_ref": 45136.877,
+      "note": "fill qps from real RocksDB same shape"
+    },
+    {
+      "name": "bluestore_omap_write",
+      "qps": null,
+      "compat_qps_ref": 1592.164,
+      "note": "fill qps from real RocksDB same shape"
+    },
+    {
+      "name": "flink_window_state",
+      "qps": null,
+      "compat_qps_ref": 3327.899,
+      "note": "fill qps from real RocksDB same shape"
+    },
+    {
+      "name": "kafka_changelog_flush",
+      "qps": null,
+      "compat_qps_ref": 230.203,
+      "note": "fill qps from real RocksDB same shape"
+    },
+    {
+      "name": "nebula_get_neighbors",
+      "qps": null,
+      "compat_qps_ref": 980952.839,
+      "note": "fill qps from real RocksDB same shape"
+    },
+    {
+      "name": "nebula_insert_edge",
+      "qps": null,
+      "compat_qps_ref": 1134.822,
+      "note": "fill qps from real RocksDB same shape"
+    },
+    {
+      "name": "oxigraph_spo_lookup",
+      "qps": null,
+      "compat_qps_ref": 860261.304,
+      "note": "fill qps from real RocksDB same shape"
+    },
+    {
+      "name": "oxigraph_triple_put",
+      "qps": null,
+      "compat_qps_ref": 767.235,
+      "note": "fill qps from real RocksDB same shape"
+    },
+    {
+      "name": "rockstore_widecol_rw",
+      "qps": null,
+      "compat_qps_ref": 9329.111,
+      "note": "fill qps from real RocksDB same shape"
+    },
+    {
+      "name": "solana_shred_append",
+      "qps": null,
+      "compat_qps_ref": 3051.688,
+      "note": "fill qps from real RocksDB same shape"
+    },
+    {
+      "name": "solana_trailing_read",
+      "qps": null,
+      "compat_qps_ref": 46601.489,
+      "note": "fill qps from real RocksDB same shape"
+    },
+    {
+      "name": "venice_fanout_get",
+      "qps": null,
+      "compat_qps_ref": 2793.498,
+      "note": "fill qps from real RocksDB same shape"
+    }
+  ]
+}

@@ -1,0 +1,26 @@
+{
+  "bench": "rocks-side-peer-template",
+  "engine": "rocksdb",
+  "sync": false,
+  "durability": "async-wal (WriteOptions.sync=false, rocksdb default)",
+  "benches": [
+    {
+      "name": "qs_batch_write",
+      "qps": null,
+      "compat_qps_ref": 17930.506,
+      "note": "fill qps from real RocksDB same shape"
+    },
+    {
+      "name": "qs_hot_get",
+      "qps": null,
+      "compat_qps_ref": 146555.492,
+      "note": "fill qps from real RocksDB same shape"
+    },
+    {
+      "name": "qs_neg_lookup",
+      "qps": null,
+      "compat_qps_ref": 2085958.164,
+      "note": "fill qps from real RocksDB same shape"
+    }
+  ]
+}

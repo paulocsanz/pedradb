@@ -1,0 +1,20 @@
+{
+  "bench": "rocks-side-peer-template",
+  "engine": "rocksdb",
+  "sync": false,
+  "durability": "async-wal (WriteOptions.sync=false, rocksdb default)",
+  "benches": [
+    {
+      "name": "oxigraph_spo_lookup",
+      "qps": null,
+      "compat_qps_ref": 597096.737,
+      "note": "fill qps from real RocksDB same shape"
+    },
+    {
+      "name": "oxigraph_triple_put",
+      "qps": null,
+      "compat_qps_ref": 6748.313,
+      "note": "fill qps from real RocksDB same shape"
+    }
+  ]
+}

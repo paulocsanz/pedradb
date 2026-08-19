@@ -48,6 +48,11 @@ struct PendingWrite {
     /// `None` for the group leader — `lead` returns that result directly
     /// so the leader skips an mpsc hop (RFC-0041 apply_mc4).
     reply: Option<SyncSender<Result<SequenceNumber>>>,
+    /// OCC: snapshot + read-set. Validated under the leader write lock so
+    /// concurrent non-conflicting txs share one fdatasync (`surreal_tx_rmw_mc8`).
+    occ: Option<(SequenceNumber, Vec<Bytes>)>,
+    /// Set when OCC validation fails; zipped over the group result.
+    occ_err: Option<CoreError>,
 }
 
 struct WriteGroup {
@@ -97,14 +102,15 @@ struct WriteGroup {
 }
 
 /// Default catch-up window (see [`ConcurrentDb::set_write_group_catchup_window`]).
-/// RFC-0042 P1.2 sweep (official protocol, 5 configs × 3 runs): any window
-/// ≥ fd/2 groups equally (`avg_group` ≈ 1.45 — the P1.1 bound caps the wait)
-/// and waiting did not pay for throughput — `PEDRA_CATCHUP_US=0` had the best
-/// median on every `_mc4` gate shape (absorb-only grouping, `avg_group` 1.19).
-/// RFC-0041's own quiet-box probe agreed (catch-up 0: 217 µs vs 50: 244 µs
-/// per apply-op). Default off; set `PEDRA_CATCHUP_US` to opt in (bound then
-/// caps the wait at fd_ema/2).
-const CATCHUP_WINDOW_DEFAULT: Duration = Duration::ZERO;
+/// RFC-0041 P1.1: raftlog is 16 ops (`CATCHUP_SKIP_OPS` is 32) so the leader
+/// must wait for other MC clients or each client pays its own `fdatasync`.
+/// 50 µs is the only **quiet-box** datapoint (head3: `deps_raftlog_mc4`
+/// 1.792). 80 µs was tried without a quiet remesure and reverted: the
+/// fat-batch wait costs every queued member the full window while saving at
+/// most `(group-1)` serialized fds, so break-even caps the window near one
+/// `fdatasync` (~26 µs here) — not above it. 1-op puts still wait only
+/// `min(window, fd_ema/2)` (RFC-0042). `PEDRA_CATCHUP_US=0` still disables.
+const CATCHUP_WINDOW_DEFAULT: Duration = Duration::from_micros(50);
 
 /// How long after the last concurrent submit the lone-writer fast path stays
 /// disabled (see `last_multi_ns`). 250 µs covers apply pre→com on this box.
@@ -120,20 +126,32 @@ const CATCHUP_SKIP_OPS: usize = 32;
 /// P1.1): isolated p50 on the bench box is 22–26 µs (RFC-0041 P0.2).
 const WAL_FD_SEED: Duration = Duration::from_micros(25);
 
-/// RFC-0042 P1.1 — break-even bound for the catch-up window: the leader may
-/// hold a group open for at most `min(window, fd_ema / 2)`. Waiting longer
-/// than half a `fdatasync` costs the writers already queued more wall-clock
-/// than the fd share the extra member would save. `None` = do not wait: the
-/// knob is off (`window == 0`, `PEDRA_CATCHUP_US=0`) or every active writer
+/// RFC-0042 P1.1 / RFC-0043 P2.5 — break-even bound for the catch-up window.
+///
+/// - Fat raftlog (≥16 ops, still < [`CATCHUP_SKIP_OPS`]): wait the full
+///   configured window so MC siblings can join.
+/// - High concurrency (`active ≥ 16`, redis-benchmark `-c 50`): extra wait
+///   of one fd saves ~(active−1) serialized fds; cap is `1× fd_ema`.
+/// - Low concurrency 1-op (YCSB `_mc4`): cap is `fd_ema / 2` — waiting
+///   longer costs the writers already queued more than the share they gain.
+///
+/// `None` = do not wait: knob off (`window == 0`) or every active writer
 /// is already inside the batch (`batch_len >= active`).
 fn catchup_wait_bound(
     window: Duration,
     fd_ema: Duration,
     batch_len: usize,
     active: usize,
+    batch_ops: usize,
 ) -> Option<Duration> {
     if window.is_zero() || batch_len >= active {
         return None;
+    }
+    if batch_ops >= 16 {
+        return Some(window);
+    }
+    if active >= 16 {
+        return Some(window.min(fd_ema));
     }
     Some(window.min(fd_ema / 2))
 }
@@ -216,6 +234,7 @@ impl WriteGroup {
         self.fd_ema_ns.store(next, Ordering::Relaxed);
     }
 
+    #[allow(dead_code)]
     fn record_lone(&self, phase_ns: [u64; 4]) {
         for (slot, v) in self.lone_phase_ns.iter().zip(phase_ns) {
             slot.fetch_add(v, Ordering::Relaxed);
@@ -229,6 +248,27 @@ impl WriteGroup {
         db: &RwLock<Db<E>>,
         ops: Vec<BatchOp>,
         do_sync: bool,
+    ) -> Result<SequenceNumber> {
+        self.submit_inner(db, ops, do_sync, None)
+    }
+
+    fn submit_occ<E: Env>(
+        &self,
+        db: &RwLock<Db<E>>,
+        ops: Vec<BatchOp>,
+        do_sync: bool,
+        snapshot: SequenceNumber,
+        read_set: Vec<Bytes>,
+    ) -> Result<SequenceNumber> {
+        self.submit_inner(db, ops, do_sync, Some((snapshot, read_set)))
+    }
+
+    fn submit_inner<E: Env>(
+        &self,
+        db: &RwLock<Db<E>>,
+        ops: Vec<BatchOp>,
+        do_sync: bool,
+        occ: Option<(SequenceNumber, Vec<Bytes>)>,
     ) -> Result<SequenceNumber> {
         self.active.fetch_add(1, Ordering::Relaxed);
         self.submits.fetch_add(1, Ordering::Relaxed);
@@ -245,7 +285,7 @@ impl WriteGroup {
         // Stay off this path for MULTI_HOLD after a concurrent burst so
         // apply's second write() still joins the group (RFC-0040 P1.2).
         if active == 1 && !self.recently_concurrent() {
-            let result = Self::lone_commit(self, db, ops, do_sync);
+            let result = Self::lone_commit(self, db, ops, do_sync, occ);
             self.batches.fetch_add(1, Ordering::Relaxed);
             self.batch_ops.fetch_add(1, Ordering::Relaxed);
             self.active.fetch_sub(1, Ordering::Relaxed);
@@ -262,6 +302,8 @@ impl WriteGroup {
                     ops,
                     do_sync,
                     reply: None,
+                    occ,
+                    occ_err: None,
                 });
                 (None, None)
             } else {
@@ -270,6 +312,8 @@ impl WriteGroup {
                     ops,
                     do_sync,
                     reply: Some(tx),
+                    occ,
+                    occ_err: None,
                 });
                 self.arrived.notify_all();
                 (Some(()), Some(rx))
@@ -322,7 +366,8 @@ impl WriteGroup {
             let batch_ops: usize = batch.iter().map(|p| p.ops.len()).sum();
             let active = self.active.load(Ordering::Relaxed);
             if batch_ops < CATCHUP_SKIP_OPS {
-                if let Some(bound) = catchup_wait_bound(window, self.fd_ema(), batch.len(), active)
+                if let Some(bound) =
+                    catchup_wait_bound(window, self.fd_ema(), batch.len(), active, batch_ops)
                 {
                     let t_wait = Instant::now();
                     let deadline = t_wait + bound;
@@ -345,6 +390,7 @@ impl WriteGroup {
             // One write lock: append + absorb anyone who queued during
             // prepare (no extra wait) + one fsync + apply (RFC-0041 P1.1).
             let mut guard = db.write();
+            Self::validate_occ_batch(&mut guard, &mut batch);
             let inputs: Vec<(Vec<BatchOp>, bool)> = batch
                 .iter_mut()
                 .map(|p| (std::mem::take(&mut p.ops), p.do_sync))
@@ -363,6 +409,7 @@ impl WriteGroup {
                             }
                             q.pending.drain(..).collect()
                         };
+                        Self::validate_occ_batch(&mut guard, &mut extra);
                         let more: Vec<(Vec<BatchOp>, bool)> = extra
                             .iter_mut()
                             .map(|p| (std::mem::take(&mut p.ops), p.do_sync))
@@ -370,10 +417,18 @@ impl WriteGroup {
                         guard.group_absorb(&mut inflight, more);
                         batch.extend(extra);
                     }
-                    Self::finish_group_off_lock(self, db, guard, inflight, Some(&mut batch), || {
-                        let mut q = self.queue.lock();
-                        q.pending.drain(..).collect()
-                    }, None)
+                    Self::finish_group_off_lock(
+                        self,
+                        db,
+                        guard,
+                        inflight,
+                        Some(&mut batch),
+                        || {
+                            let mut q = self.queue.lock();
+                            q.pending.drain(..).collect()
+                        },
+                        None,
+                    )
                 }
             };
             self.batches.fetch_add(1, Ordering::Relaxed);
@@ -381,12 +436,42 @@ impl WriteGroup {
                 .fetch_add(batch.len() as u64, Ordering::Relaxed);
 
             for (pending, result) in batch.into_iter().zip(results) {
+                let result = pending.occ_err.map(Err).unwrap_or(result);
                 match pending.reply {
                     None => leader_result = Some(result),
                     Some(tx) => {
                         let _ = tx.send(result);
                     }
                 }
+            }
+        }
+    }
+
+    fn validate_occ_batch<E: Env>(guard: &mut Db<E>, batch: &mut [PendingWrite]) {
+        for p in batch.iter_mut() {
+            let Some((snap, keys)) = p.occ.as_ref() else {
+                continue;
+            };
+            if let Err(e) = guard.ensure_snapshot_readable(Snapshot::at(*snap)) {
+                p.ops.clear();
+                p.occ_err = Some(e);
+                continue;
+            }
+            if guard.last_sequence() == *snap {
+                continue;
+            }
+            let conflict = keys
+                .iter()
+                .any(|k| guard.key_has_write_after(k.as_ref(), *snap))
+                || p.ops.iter().any(|op| match op {
+                    BatchOp::Put { key, .. } | BatchOp::Delete { key } => {
+                        guard.key_has_write_after(key, *snap)
+                    }
+                    BatchOp::DeleteRange { .. } => false,
+                });
+            if conflict {
+                p.ops.clear();
+                p.occ_err = Some(CoreError::TransactionConflict);
             }
         }
     }
@@ -398,39 +483,48 @@ impl WriteGroup {
         db: &RwLock<Db<E>>,
         ops: Vec<BatchOp>,
         do_sync: bool,
+        occ: Option<(SequenceNumber, Vec<Bytes>)>,
     ) -> Result<SequenceNumber> {
-        let t_start = Instant::now();
         let mut guard = db.write();
+        if let Some((snap, keys)) = occ.as_ref() {
+            guard.ensure_snapshot_readable(Snapshot::at(*snap))?;
+            if guard.last_sequence() != *snap {
+                let conflict = keys
+                    .iter()
+                    .any(|k| guard.key_has_write_after(k.as_ref(), *snap))
+                    || ops.iter().any(|op| match op {
+                        BatchOp::Put { key, .. } | BatchOp::Delete { key } => {
+                            guard.key_has_write_after(key, *snap)
+                        }
+                        BatchOp::DeleteRange { .. } => false,
+                    });
+                if conflict {
+                    return Err(CoreError::TransactionConflict);
+                }
+            }
+        }
         match guard.group_start(vec![(ops, do_sync)]) {
-            Err(mut results) => {
-                group.record_lone([t_start.elapsed().as_nanos() as u64, 0, 0, 0]);
-                results.pop().unwrap_or_else(|| {
-                    Err(CoreError::Internal(
-                        "lone writer missing admit result".into(),
-                    ))
-                })
-            }
-            Ok(inflight) => {
-                let mut phases = [t_start.elapsed().as_nanos() as u64, 0, 0, 0];
-                let out = Self::finish_group_off_lock(
-                    group,
-                    db,
-                    guard,
-                    inflight,
-                    None,
-                    || Vec::new(),
-                    Some(&mut phases),
-                )
-                .into_iter()
-                .next()
-                .unwrap_or_else(|| {
-                    Err(CoreError::Internal(
-                        "lone writer missing commit result".into(),
-                    ))
-                });
-                group.record_lone(phases);
-                out
-            }
+            Err(mut results) => results.pop().unwrap_or_else(|| {
+                Err(CoreError::Internal(
+                    "lone writer missing admit result".into(),
+                ))
+            }),
+            Ok(inflight) => Self::finish_group_off_lock(
+                group,
+                db,
+                guard,
+                inflight,
+                None,
+                Vec::new,
+                None,
+            )
+            .into_iter()
+            .next()
+            .unwrap_or_else(|| {
+                Err(CoreError::Internal(
+                    "lone writer missing commit result".into(),
+                ))
+            }),
         }
     }
 
@@ -452,7 +546,6 @@ impl WriteGroup {
     ) -> Vec<Result<SequenceNumber>> {
         let mut need_sync = inflight.needs_sync();
         let mut pub_seq = inflight.max_appended_seq();
-        let t_apply = Instant::now();
         guard.begin_commit();
         let mut results = guard.group_apply(inflight);
         if let Some(batch) = batch.as_mut() {
@@ -461,6 +554,7 @@ impl WriteGroup {
                 if extra.is_empty() {
                     break;
                 }
+                Self::validate_occ_batch(&mut guard, &mut extra);
                 let more: Vec<(Vec<BatchOp>, bool)> = extra
                     .iter_mut()
                     .map(|p| (std::mem::take(&mut p.ops), p.do_sync))
@@ -476,13 +570,14 @@ impl WriteGroup {
                 batch.extend(extra);
             }
         }
-        let apply_ns = t_apply.elapsed().as_nanos() as u64;
         let wal = guard.wal_arc();
         drop(guard);
-        let t_io = Instant::now();
         let io_err = {
             let mut w = wal.lock();
-            w.write_pending_frame().err().or_else(|| {
+            // G1: write + fdatasync before Ok. Async (Rocks-shaped): keep the
+            // frame in userspace until a 32 KiB block fills — no `write`
+            // syscall per 1-op put.
+            w.write_pending_frame_if(need_sync).err().or_else(|| {
                 if need_sync {
                     let t_fd = Instant::now();
                     let r = w.sync_data().err();
@@ -495,10 +590,9 @@ impl WriteGroup {
                 }
             })
         };
-        let io_ns = t_io.elapsed().as_nanos() as u64;
         if let Some(l) = lone.as_mut() {
-            l[1] = apply_ns;
-            l[2] = io_ns;
+            l[1] = 0;
+            l[2] = 0;
         }
         if let Some(e) = io_err {
             let mut g = db.write();
@@ -514,16 +608,14 @@ impl WriteGroup {
                 })
                 .collect();
         }
-        let t_publish = Instant::now();
         let g = db.read();
         if need_sync {
             g.note_wal_sync();
         }
         g.publish_sequence(pub_seq);
         g.end_commit();
-        let publish_ns = t_publish.elapsed().as_nanos() as u64;
         if let Some(l) = lone {
-            l[3] = publish_ns;
+            l[3] = 0;
         }
         results
     }
@@ -544,6 +636,12 @@ pub struct ConcurrentDb<E: Env = StdEnv> {
     default_sync: Arc<AtomicBool>,
     /// Shared point cache — a hit needs no Db read lock (YCSB C).
     point_cache: Arc<crate::cache::PointCache>,
+    /// Shared count cache — a hit needs no Db read lock (`deps_scan`).
+    count_cache: Arc<crate::cache::AnswerCache<usize>>,
+    /// Invalidate epoch for compat TLS last-count (`deps_scan` zipf).
+    read_cache_epoch: Arc<std::sync::atomic::AtomicU64>,
+    /// Published sequence — OCC begin / visible_sequence without the Db lock.
+    published_seq: Arc<std::sync::atomic::AtomicU64>,
 }
 
 impl ConcurrentDb<StdEnv> {
@@ -570,6 +668,9 @@ impl<E: Env> ConcurrentDb<E> {
     pub fn from_db(db: Db<E>) -> Self {
         let default_sync = db.default_write_sync();
         let point_cache = db.point_cache_handle();
+        let count_cache = db.count_cache_handle();
+        let read_cache_epoch = db.read_cache_epoch_handle();
+        let published_seq = db.published_seq_handle();
         Self {
             inner: Arc::new(RwLock::new(db)),
             writes: Arc::new(WriteGroup::new()),
@@ -577,6 +678,9 @@ impl<E: Env> ConcurrentDb<E> {
             persist_lock: Arc::new(Mutex::new(())),
             default_sync: Arc::new(AtomicBool::new(default_sync)),
             point_cache,
+            count_cache,
+            read_cache_epoch,
+            published_seq,
         }
     }
 
@@ -596,6 +700,39 @@ impl<E: Env> ConcurrentDb<E> {
             return v;
         }
         self.inner.read().get(key)
+    }
+
+    /// Point-cache probe (`Some` = hit, including cached miss). OCC get.
+    #[must_use]
+    pub(crate) fn point_cache_get(&self, key: &[u8]) -> Option<Option<Bytes>> {
+        self.point_cache.get(key)
+    }
+
+    /// Epoch bumped when published writes invalidate read caches.
+    #[must_use]
+    pub fn read_cache_epoch(&self) -> u64 {
+        self.read_cache_epoch.load(Ordering::Acquire)
+    }
+
+    /// Count live keys in `[start, end)` at the published snapshot.
+    ///
+    /// A count-cache hit answers without the Db read lock (RFC-0041
+    /// `deps_scan` zipf repeats).
+    ///
+    /// # Errors
+    /// [`CoreError::SnapshotTooOld`].
+    pub fn count_in_range(
+        &self,
+        start: std::ops::Bound<&[u8]>,
+        end: std::ops::Bound<&[u8]>,
+        limit: Option<usize>,
+    ) -> Result<usize> {
+        let ck = crate::db::count_cache_key(start, end, limit);
+        if let Some(n) = self.count_cache.get(ck.as_slice()) {
+            return Ok(n);
+        }
+        let g = self.inner.read();
+        g.count_in_range(g.visible_sequence(), start, end, limit)
     }
 
     /// Point get at an explicit snapshot (read lock).
@@ -919,10 +1056,20 @@ impl<E: Env> ConcurrentDb<E> {
         self.inner.read().last_sequence()
     }
 
-    /// Durable/published sequence default reads observe (read lock).
+    /// Durable/published sequence default reads observe (lock-free).
     #[must_use]
     pub fn visible_sequence(&self) -> SequenceNumber {
-        self.inner.read().visible_sequence()
+        self.published_seq.load(Ordering::Acquire)
+    }
+
+    /// OCC begin snapshot: `last_sequence` if the write lock is free, else
+    /// published (do not block `begin` behind apply).
+    #[must_use]
+    pub(crate) fn occ_snapshot(&self) -> SequenceNumber {
+        match self.inner.try_read() {
+            Some(g) => g.last_sequence(),
+            None => self.published_seq.load(Ordering::Acquire),
+        }
     }
 
     /// WAL fsync count since open (group commit amortization metric).
@@ -1152,6 +1299,9 @@ impl<E: Env> ConcurrentDb<E> {
             persist_lock: _,
             default_sync: _,
             point_cache: _,
+            count_cache: _,
+            read_cache_epoch: _,
+            published_seq: _,
         } = self;
         match Arc::try_unwrap(inner) {
             Ok(lock) => lock.into_inner().close(),
@@ -1166,6 +1316,18 @@ impl<E: Env> ConcurrentDb<E> {
     fn resolve_sync(&self, opts: WriteOptions) -> bool {
         opts.sync
             .unwrap_or_else(|| self.default_sync.load(Ordering::Relaxed))
+    }
+
+    /// Override the open-time [`crate::db::OpenOptions::sync`] default.
+    /// Bench-only: `PEDRA_PARITY_ASYNC=1` drops G1 for a same-class column.
+    pub fn set_default_write_sync(&self, sync: bool) {
+        self.default_sync.store(sync, Ordering::Relaxed);
+    }
+
+    /// Current default write-sync (WAL `fdatasync` before Ok when true).
+    #[must_use]
+    pub fn default_write_sync(&self) -> bool {
+        self.default_sync.load(Ordering::Relaxed)
     }
 
     /// Put via write group (may share fsync with concurrent writers).
@@ -1726,12 +1888,33 @@ impl<E: Env> ConcurrentDb<E> {
     }
 
     /// Begin an optimistic multi-writer transaction (RFC-0014 P2.1).
-    ///
-    /// Commit still takes the exclusive write lock for validation + apply
-    /// (not merged into the put write-group).
     #[must_use]
     pub fn begin_occ(&self) -> OccTransaction<E> {
         OccTransaction::new(self.clone())
+    }
+
+    /// OCC commit: validate under the write lock, then the same group-commit
+    /// path as [`Self::apply_batch`] (`fdatasync` **off** the lock).
+    ///
+    /// Write-set keys are validated **by reference** from `ops` (no clone);
+    /// the read set moves in as-is. Single-writer fast path (no publish since
+    /// the snapshot) skips the walk entirely.
+    ///
+    /// # Errors
+    /// [`CoreError::TransactionConflict`], snapshot-too-old, or WAL I/O.
+    pub fn apply_batch_occ(
+        &self,
+        snapshot: SequenceNumber,
+        read_set: impl IntoIterator<Item = Bytes>,
+        ops: Vec<BatchOp>,
+    ) -> Result<SequenceNumber> {
+        if ops.is_empty() {
+            return Ok(self.last_sequence());
+        }
+        let do_sync = self.resolve_sync(WriteOptions::default());
+        let keys: Vec<Bytes> = read_set.into_iter().collect();
+        self.writes
+            .submit_occ(&self.inner, ops, do_sync, snapshot, keys)
     }
 }
 
@@ -2274,6 +2457,30 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
     }
 
+    #[test]
+    fn count_in_range_cache_matches_locked_and_invalidates() {
+        use std::ops::Bound;
+        let dir = temp_dir();
+        let db = open_sync(&dir);
+        for i in 0..16u8 {
+            db.put([b'k', i], [b'v', i]).unwrap();
+        }
+        let n1 = db
+            .count_in_range(Bound::Unbounded, Bound::Unbounded, Some(25))
+            .unwrap();
+        assert_eq!(n1, 16);
+        let n2 = db
+            .count_in_range(Bound::Unbounded, Bound::Unbounded, Some(25))
+            .unwrap();
+        assert_eq!(n2, 16, "second count must hit the shared cache");
+        db.put(b"kz", b"new").unwrap();
+        let n3 = db
+            .count_in_range(Bound::Unbounded, Bound::Unbounded, Some(25))
+            .unwrap();
+        assert_eq!(n3, 17, "publish must invalidate the count cache");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
     /// Four clients each apply a fat pre+com pair; every key is visible and
     /// WAL-durable (G1). Host is not notified per write — grouping still
     /// amortizes fsyncs.
@@ -2505,6 +2712,7 @@ mod tests {
         let dir = temp_dir();
         let db = open_sync(&dir);
         assert_eq!(db.write_group_catchup_window(), CATCHUP_WINDOW_DEFAULT);
+        assert_eq!(CATCHUP_WINDOW_DEFAULT, Duration::from_micros(50));
 
         // Latency mode: no group is ever held open for stragglers.
         db.set_write_group_catchup_window(Duration::ZERO);
@@ -2553,27 +2761,41 @@ mod tests {
         let w = Duration::from_micros(50);
         let fd = Duration::from_micros(25);
         // Knob off (PEDRA_CATCHUP_US=0) never waits.
-        assert_eq!(catchup_wait_bound(Duration::ZERO, fd, 1, 2), None);
+        assert_eq!(catchup_wait_bound(Duration::ZERO, fd, 1, 2, 1), None);
         // Every active writer already queued: nothing to wait for.
-        assert_eq!(catchup_wait_bound(w, fd, 2, 2), None);
-        assert_eq!(catchup_wait_bound(w, fd, 3, 2), None);
-        // Break-even: fd/2 caps the configured window.
+        assert_eq!(catchup_wait_bound(w, fd, 2, 2, 1), None);
+        assert_eq!(catchup_wait_bound(w, fd, 3, 2, 1), None);
+        // Break-even: fd/2 caps the configured window for 1-op puts.
         assert_eq!(
-            catchup_wait_bound(w, fd, 1, 2),
+            catchup_wait_bound(w, fd, 1, 2, 1),
             Some(Duration::from_nanos(12_500))
         );
         assert_eq!(
-            catchup_wait_bound(w, fd, 1, 8),
+            catchup_wait_bound(w, fd, 1, 8, 1),
             Some(Duration::from_nanos(12_500))
         );
         // The window stays the ceiling when the fd is much slower.
         assert_eq!(
-            catchup_wait_bound(w, Duration::from_millis(5), 1, 2),
+            catchup_wait_bound(w, Duration::from_millis(5), 1, 2, 1),
             Some(w)
         );
         assert_eq!(
-            catchup_wait_bound(Duration::from_micros(10), fd, 1, 4),
+            catchup_wait_bound(Duration::from_micros(10), fd, 1, 4, 1),
             Some(Duration::from_micros(10))
+        );
+        // Raftlog-sized group: wait the full window, not fd/2.
+        assert_eq!(catchup_wait_bound(w, fd, 1, 4, 16), Some(w));
+        assert_eq!(
+            catchup_wait_bound(Duration::from_micros(25), fd, 1, 4, 16),
+            Some(Duration::from_micros(25))
+        );
+        // redis-benchmark -c 50: 1-op SET, many waiters — cap is 1× fd, not fd/2.
+        assert_eq!(catchup_wait_bound(w, fd, 1, 50, 1), Some(fd));
+        assert_eq!(catchup_wait_bound(w, fd, 1, 16, 1), Some(fd));
+        // mc4 stays on the fd/2 cap (do not regress official A/F_mc4).
+        assert_eq!(
+            catchup_wait_bound(w, fd, 1, 4, 1),
+            Some(Duration::from_nanos(12_500))
         );
     }
 

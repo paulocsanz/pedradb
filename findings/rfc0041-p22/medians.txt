@@ -1,0 +1,8 @@
+# DIRTY load~232. Official = rfc0041-p11/head3. Do not gate on these.
+ycsb_c                           2.405  (0.58, 2.41, 2.71)  compat~1.80M rocks~666k
+deps_scan                        1.618  (7.12, 1.28, 1.62)
+deps_raftlog_mc4                 0.701  (0.87, 0.70, 0.33)
+deps_apply_batch                 0.692
+deps_raftlog                     0.680
+peers: sync:false (3/3)
+C/scan/raftlog_mc4 quiet-box ≥2.0: NOT established

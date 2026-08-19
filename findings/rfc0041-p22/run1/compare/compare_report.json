@@ -1,0 +1,59 @@
+{
+  "compare": "rocks-parity-v1",
+  "compat_path": "/Users/paulo/software/pedradb/findings/rfc0041-p22/run1/compat/rocks_parity_bench.json",
+  "compat": {
+    "engine": "compat (rocksdb-compat on pedradb-core, single node, single client)",
+    "sync": true,
+    "durability": "fdatasync-before-ok (pedradb-core WAL; RFC-0001/0036)",
+    "metrics": {
+    "deps_apply_batch": 1557.567,
+    "deps_apply_batch_mc4": 2250.815,
+    "deps_cache_overwrite": 12195.147,
+    "deps_cache_overwrite_mc4": 11051.485,
+    "deps_lock_prewrite": 5845.124,
+    "deps_mvcc_latest": 350232.029,
+    "deps_raftlog": 7316.119,
+    "deps_raftlog_mc4": 5583.092,
+    "deps_scan": 327084.654,
+    "ycsb_a": 11907.576,
+    "ycsb_a_mc4": 15536.663,
+    "ycsb_b": 150931.527,
+    "ycsb_c": 308641.975,
+    "ycsb_d": 34511.171,
+    "ycsb_e": 16628.220,
+    "ycsb_f": 29024.399,
+    "ycsb_f_mc4": 10479.471
+  }
+  },
+  "rocksdb": {
+    "status": "peer_file:ok",
+    "peer_file": "/Users/paulo/software/pedradb/findings/rfc0041-p22/run1/rocks/rocks_parity_bench.json",
+    "sync": false,
+    "durability": "async-wal (WriteOptions.sync=false, rocksdb default)",
+    "how_to_fill": "1) cargo run -q --release -p rocksdb-parity-bench --features real --bin rocks-parity-bench -- <out> rocksdb  2) ROCKS_PARITY_PEER=<out>/rocks_parity_bench.json rocks-parity-compare  3) scripts/rocksdb_parity_v0.sh does both. See docs/rocksdb-compat.md"
+  },
+  "ratios": [
+    {"shape":"ycsb_a","compat_keys_per_s":11907.576,"rocksdb_keys_per_s":113924.677,"compat_over_rocksdb":0.105,"meets_floor":null},
+    {"shape":"ycsb_b","compat_keys_per_s":150931.527,"rocksdb_keys_per_s":78205.445,"compat_over_rocksdb":1.930,"meets_floor":null},
+    {"shape":"ycsb_c","compat_keys_per_s":308641.975,"rocksdb_keys_per_s":528471.396,"compat_over_rocksdb":0.584,"meets_floor":null},
+    {"shape":"ycsb_d","compat_keys_per_s":34511.171,"rocksdb_keys_per_s":481661.694,"compat_over_rocksdb":0.072,"meets_floor":null},
+    {"shape":"ycsb_e","compat_keys_per_s":16628.220,"rocksdb_keys_per_s":81722.297,"compat_over_rocksdb":0.203,"meets_floor":null},
+    {"shape":"ycsb_f","compat_keys_per_s":29024.399,"rocksdb_keys_per_s":32046.104,"compat_over_rocksdb":0.906,"meets_floor":null},
+    {"shape":"deps_apply_batch","compat_keys_per_s":1557.567,"rocksdb_keys_per_s":2250.954,"compat_over_rocksdb":0.692,"meets_floor":null},
+    {"shape":"deps_mvcc_latest","compat_keys_per_s":350232.029,"rocksdb_keys_per_s":18813.341,"compat_over_rocksdb":18.616,"meets_floor":null},
+    {"shape":"deps_scan","compat_keys_per_s":327084.654,"rocksdb_keys_per_s":45947.040,"compat_over_rocksdb":7.119,"meets_floor":null},
+    {"shape":"deps_raftlog","compat_keys_per_s":7316.119,"rocksdb_keys_per_s":9378.764,"compat_over_rocksdb":0.780,"meets_floor":null},
+    {"shape":"deps_cache_overwrite","compat_keys_per_s":12195.147,"rocksdb_keys_per_s":36636.579,"compat_over_rocksdb":0.333,"meets_floor":null},
+    {"shape":"ycsb_a_mc4","compat_keys_per_s":15536.663,"rocksdb_keys_per_s":52891.790,"compat_over_rocksdb":0.294,"meets_floor":null},
+    {"shape":"ycsb_f_mc4","compat_keys_per_s":10479.471,"rocksdb_keys_per_s":65380.843,"compat_over_rocksdb":0.160,"meets_floor":null},
+    {"shape":"deps_cache_overwrite_mc4","compat_keys_per_s":11051.485,"rocksdb_keys_per_s":53315.991,"compat_over_rocksdb":0.207,"meets_floor":null},
+    {"shape":"deps_apply_batch_mc4","compat_keys_per_s":2250.815,"rocksdb_keys_per_s":1054.876,"compat_over_rocksdb":2.134,"meets_floor":null},
+    {"shape":"deps_raftlog_mc4","compat_keys_per_s":5583.092,"rocksdb_keys_per_s":6414.497,"compat_over_rocksdb":0.870,"meets_floor":null},
+    {"shape":"deps_lock_prewrite","compat_keys_per_s":5845.124,"rocksdb_keys_per_s":1887.776,"compat_over_rocksdb":3.096,"meets_floor":null},
+    {"shape":"qs_hot_get","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"qs_neg_lookup","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"qs_batch_write","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null}
+  ],
+  "parity": {"floor": null, "shapes_with_peer": 17, "min_ratio": null, "pass": null, "note": "set ROCKS_PARITY_RATIO_FLOOR to gate"},
+  "honesty": "Single-node lab bench: rocksdb-compat (Pedra, fdatasync before Ok) vs real RocksDB default (WriteOptions.sync=false). Official peer is Rocks **default**, not a matched-sync peer. ROCKS_PARITY_SYNC=1 is an extra same-class column only. Pedra keeps the stronger durability and still has to beat default Rocks. Not a distributed/field claim."
+}

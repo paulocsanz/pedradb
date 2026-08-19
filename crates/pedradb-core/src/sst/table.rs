@@ -196,6 +196,9 @@ impl SstTable {
         snapshot: SequenceNumber,
         out: &mut Vec<crate::merge::RangeTombstone>,
     ) {
+        if self.range_tombstones.is_empty() {
+            return;
+        }
         for (ikey, end) in &self.range_tombstones {
             if ikey.sequence > snapshot {
                 continue;
@@ -366,7 +369,7 @@ impl SstTable {
         }
     }
 
-    fn has_range_tombstones(&self) -> bool {
+    pub(crate) fn has_range_tombstones(&self) -> bool {
         !self.range_tombstones.is_empty()
     }
 

@@ -1,0 +1,7 @@
+# DIRTY load~107-153. Official = rfc0041-p11/head3.
+ycsb_c                           0.469
+deps_scan                        1.042
+deps_raftlog_mc4                 0.250
+avg_group 1.36 / 1.36 / 1.42
+peers: sync:false
+quiet-box ≥2.0: NOT established

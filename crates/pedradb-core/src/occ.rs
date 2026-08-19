@@ -42,7 +42,10 @@ pub struct OccTransaction<E: Env = crate::env::StdEnv> {
 
 impl<E: Env> OccTransaction<E> {
     pub(crate) fn new(db: ConcurrentDb<E>) -> Self {
-        let snapshot = db.last_sequence();
+        // Prefer last_sequence when the write lock is free (sees just-applied
+        // versions). If a commit holds the write lock, don't stall — snapshot
+        // at published_seq (lock-free).
+        let snapshot = db.occ_snapshot();
         Self {
             db,
             snapshot,
@@ -72,6 +75,15 @@ impl<E: Env> OccTransaction<E> {
         }
         if self.snapshot == 0 {
             return Ok(None);
+        }
+        // Same double-checked point-cache hit as `get_at`, without the Db
+        // read lock (OCC rmw under concurrency was stalling on apply).
+        if self.db.visible_sequence() == self.snapshot {
+            if let Some(v) = self.db.point_cache_get(key) {
+                if self.db.visible_sequence() == self.snapshot {
+                    return Ok(v);
+                }
+            }
         }
         // Use get_at so VLG1 pointers resolve (same as single-writer Transaction).
         self.db
@@ -127,28 +139,17 @@ impl<E: Env> OccTransaction<E> {
         let db = self.db.clone();
         self.finished = true;
 
-        db.with_write(|inner| {
-            // Concurrent reclaim may have advanced the GC watermark past our snap.
-            inner.ensure_snapshot_readable(crate::db::Snapshot::at(snapshot))?;
-            inner.ensure_write_admitted()?;
-            // Validate: no version with seq > snapshot on any read or write key.
-            for key in read_set.iter().chain(staging.keys()) {
-                if inner.key_has_write_after(key.as_ref(), snapshot) {
-                    return Err(CoreError::TransactionConflict);
-                }
-            }
-
-            let mut ops = Vec::with_capacity(staging.len());
-            for (key, stage) in staging {
-                match stage {
-                    Stage::Put(value) => ops.push(BatchOp::Put { key, value }),
-                    Stage::Delete => ops.push(BatchOp::Delete { key }),
-                }
-            }
-            // apply_batch_with assigns sequences and commits one WAL record.
-            inner.apply_batch_with(ops, durability)?;
-            Ok(())
-        })
+        // No upfront key clones: `apply_batch_occ` validates the write set by
+        // reference from `ops` and only walks it when a publish actually raced.
+        let mut ops = Vec::with_capacity(staging.len());
+        for (key, stage) in staging {
+            ops.push(match stage {
+                Stage::Put(value) => BatchOp::Put { key, value },
+                Stage::Delete => BatchOp::Delete { key },
+            });
+        }
+        let _ = durability; // G1: ConcurrentDb resolve_sync still fsyncs.
+        db.apply_batch_occ(snapshot, read_set, ops).map(|_| ())
     }
 
     /// Discard staged changes.
@@ -258,6 +259,31 @@ mod tests {
         }
         assert_eq!(db.get(b"a").as_deref(), Some(b"1".as_ref()));
         assert_eq!(db.get(b"b").as_deref(), Some(b"2".as_ref()));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// `get_at` fast path: snapshot == published may serve from the point
+    /// cache; once a newer version is published (and the cache refilled with
+    /// it), the older snapshot must not see it — and commit conflicts.
+    #[test]
+    fn occ_get_at_snapshot_is_stable_across_publish_and_cache_refill() {
+        let dir = temp_dir();
+        let db = open_cdb(&dir);
+        db.put(b"k", b"v0").unwrap();
+        // Fill the point cache with the latest value.
+        assert_eq!(db.get(b"k").as_deref(), Some(b"v0".as_ref()));
+
+        let mut tx = db.begin_occ(); // snapshot == published
+        assert_eq!(tx.get(b"k").unwrap().as_deref(), Some(b"v0".as_ref()));
+        tx.put(b"k2", b"w").unwrap(); // writer tx: commit validates the read set
+
+        // Publish a newer version and refill the cache with it.
+        db.put(b"k", b"v1").unwrap();
+        assert_eq!(db.get(b"k").as_deref(), Some(b"v1".as_ref()));
+
+        // TX still reads its own snapshot, not the refilled cache.
+        assert_eq!(tx.get(b"k").unwrap().as_deref(), Some(b"v0".as_ref()));
+        assert!(matches!(tx.commit(), Err(CoreError::TransactionConflict)));
         let _ = fs::remove_dir_all(&dir);
     }
 

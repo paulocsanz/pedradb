@@ -62,6 +62,10 @@ impl<W: Write + Seek> WalWriter<W> {
         frame.reserve(data.len() + 2 * HEADER_SIZE);
         self.fragment_into(data, &mut frame);
         self.out.write_all(&frame)?;
+        // Do not leave the just-written bytes in `frame` — `Wal::sync_data`
+        // drains staged frames from `encode_write_op_batches`. Re-emitting
+        // this buffer would duplicate the record (same seq) on recover.
+        frame.clear();
         self.frame = frame;
         Ok(())
     }
@@ -85,6 +89,7 @@ impl<W: Write + Seek> WalWriter<W> {
             self.fragment_into(data, &mut frame);
         }
         self.out.write_all(&frame)?;
+        frame.clear();
         self.frame = frame;
         Ok(())
     }
@@ -110,8 +115,20 @@ impl<W: Write + Seek> WalWriter<W> {
     /// `fragment_record(&encode_ops(ops))` without the intermediate logical
     /// buffer (one full-record copy per group member saved).
     pub(crate) fn fragment_encoded(&mut self, ops: &[crate::batch::WriteOp], buf: &mut Vec<u8>) {
-        buf.reserve(crate::batch::encoded_len(ops) + 2 * HEADER_SIZE);
-        self.fragment_from(&mut EncodedOpsSource::new(ops), buf);
+        self.fragment_encoded_len(ops, buf);
+    }
+
+    /// Encode + fragment; returns the logical record length (one `encoded_len`).
+    pub(crate) fn fragment_encoded_len(
+        &mut self,
+        ops: &[crate::batch::WriteOp],
+        buf: &mut Vec<u8>,
+    ) -> usize {
+        let mut src = EncodedOpsSource::new(ops);
+        let n = src.total;
+        buf.reserve(n + 2 * HEADER_SIZE);
+        self.fragment_from(&mut src, buf);
+        n
     }
 
     pub(crate) fn write_frame(&mut self, buf: &[u8]) -> Result<()> {
@@ -264,6 +281,7 @@ struct EncodedOpsSource<'a> {
     preamble: [u8; 13],
     vlen: [u8; 4],
     off: usize,
+    total: usize,
 }
 
 impl<'a> EncodedOpsSource<'a> {
@@ -281,6 +299,7 @@ impl<'a> EncodedOpsSource<'a> {
             preamble: [0; 13],
             vlen: [0; 4],
             off: 0,
+            total: crate::batch::encoded_len(ops),
         }
     }
 
@@ -393,7 +412,7 @@ impl<'a> EncodedOpsSource<'a> {
 
 impl RecordSource for EncodedOpsSource<'_> {
     fn total_len(&self) -> usize {
-        crate::batch::encoded_len(self.ops)
+        self.total
     }
 
     fn read_exact_into(&mut self, dst: &mut [u8]) {
@@ -430,9 +449,17 @@ mod tests {
         let cases: Vec<Vec<WriteOp>> = vec![
             vec![],
             vec![WriteOp::put(1, Bytes::from_static(b"k"), Bytes::new())],
-            vec![WriteOp::put(1, Bytes::from_static(b"k"), Bytes::from_static(b"v"))],
+            vec![WriteOp::put(
+                1,
+                Bytes::from_static(b"k"),
+                Bytes::from_static(b"v"),
+            )],
             vec![
-                WriteOp::put(7, Bytes::from_static(b"abc"), Bytes::from(vec![0xa5; b + 50])),
+                WriteOp::put(
+                    7,
+                    Bytes::from_static(b"abc"),
+                    Bytes::from(vec![0xa5; b + 50]),
+                ),
                 WriteOp::delete(8, Bytes::from_static(b"gone")),
                 WriteOp::put(
                     9,
@@ -441,7 +468,11 @@ mod tests {
                 ),
             ],
             vec![
-                WriteOp::put(1, Bytes::from_static(b"empty-key"), Bytes::from_static(b"x")),
+                WriteOp::put(
+                    1,
+                    Bytes::from_static(b"empty-key"),
+                    Bytes::from_static(b"x"),
+                ),
                 WriteOp::put(2, Bytes::new(), Bytes::from_static(b"empty-key-value")),
                 WriteOp::put(3, Bytes::from_static(b"both"), Bytes::new()),
             ],

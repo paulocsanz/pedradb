@@ -146,21 +146,43 @@ impl<F: EnvFile> Wal<F> {
         let mut frame = self.writer.take_frame();
         let mut n = 0u64;
         for ops in batches {
-            n = n.saturating_add(crate::batch::encoded_len(ops) as u64);
-            self.writer.fragment_encoded(ops, &mut frame);
+            n = n.saturating_add(self.writer.fragment_encoded_len(ops, &mut frame) as u64);
         }
         self.writer.restore_frame(frame);
         Ok(n)
     }
 
-    /// Write the frame built by [`Self::encode_write_op_batches`] (one `write`).
+    /// Write the frame built by [`Self::encode_write_op_batches`].
+    ///
+    /// Always hits the file (G1 / close / `Db::sync`). Prefer
+    /// [`Self::write_pending_frame_if`] on the async put path.
     ///
     /// # Errors
     /// Underlying file write.
     pub fn write_pending_frame(&mut self) -> Result<()> {
-        let frame = self.writer.take_frame();
+        self.write_pending_frame_if(true)
+    }
+
+    /// Stage WAL bytes in userspace until a full block (Rocks-shaped async:
+    /// no `write` syscall per 1-op put). `force` writes immediately.
+    ///
+    /// Keeps the frame allocation across calls (do not `Vec::new()` each put).
+    ///
+    /// # Errors
+    /// Underlying file write when a flush is triggered.
+    pub fn write_pending_frame_if(&mut self, force: bool) -> Result<()> {
+        let mut frame = self.writer.take_frame();
+        if frame.is_empty() {
+            self.writer.restore_frame(frame);
+            return Ok(());
+        }
+        if !force && frame.len() < crate::wal::format::BLOCK_SIZE {
+            self.writer.restore_frame(frame);
+            return Ok(());
+        }
         let r = self.writer.write_frame(&frame);
-        self.writer.restore_frame(Vec::new());
+        frame.clear();
+        self.writer.restore_frame(frame);
         r
     }
 
@@ -169,6 +191,7 @@ impl<F: EnvFile> Wal<F> {
     /// # Errors
     /// Returns [`std::io::Error`] propagated from flush or `sync_data`.
     pub fn sync_data(&mut self) -> Result<()> {
+        self.write_pending_frame()?;
         self.writer.flush()?;
         self.writer.inner_mut().sync_data()?;
         Ok(())
@@ -179,6 +202,7 @@ impl<F: EnvFile> Wal<F> {
     /// # Errors
     /// Returns [`std::io::Error`] propagated from flush or `fsync`.
     pub fn sync_all(&mut self) -> Result<()> {
+        self.write_pending_frame()?;
         self.writer.flush()?;
         self.writer.inner_mut().sync_all()?;
         Ok(())
@@ -242,6 +266,7 @@ impl<F: EnvFile> Wal<F> {
     /// # Errors
     /// Returns [`std::io::Error`] if flushing fails.
     pub fn flush(&mut self) -> Result<()> {
+        self.write_pending_frame()?;
         self.writer.flush()
     }
 

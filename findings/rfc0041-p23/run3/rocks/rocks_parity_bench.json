@@ -1,0 +1,200 @@
+{
+  "bench": "rocks-parity-v1",
+  "engine": "rocksdb",
+  "sync": false,
+  "durability": "async-wal (WriteOptions.sync=false, rocksdb default)",
+  "changelog_interval": 0,
+  "status": "ok",
+  "notes": ["ycsb records=4096 ops=2000 payload=1000 dist=zipfian", "engine=rocksdb durability=async-wal (WriteOptions.sync=false, rocksdb default)", "suites: ycsb,deps", "seed: one put per record (not timed)", "cfs: default + write, lock, raftlog (TiKV store shape; raftlog = raftdb)", "deps apply batch txns/commit: 32", "changelog_interval=0"],
+  "benches": [
+{
+    "name": "ycsb_a",
+    "n": 2000,
+    "qps": 102894.552,
+    "p50_ms": 0.0032,
+    "p95_ms": 0.0127,
+    "p99_ms": 0.0288,
+    "max_ms": 3.8157,
+    "wall_s": 0.0194
+  },
+{
+    "name": "ycsb_b",
+    "n": 2000,
+    "qps": 545553.737,
+    "p50_ms": 0.0011,
+    "p95_ms": 0.0039,
+    "p99_ms": 0.0133,
+    "max_ms": 0.1946,
+    "wall_s": 0.0037
+  },
+{
+    "name": "ycsb_c",
+    "n": 2000,
+    "qps": 612354.122,
+    "p50_ms": 0.0010,
+    "p95_ms": 0.0019,
+    "p99_ms": 0.0036,
+    "max_ms": 0.4734,
+    "wall_s": 0.0033
+  },
+{
+    "name": "ycsb_d",
+    "n": 2000,
+    "qps": 770725.384,
+    "p50_ms": 0.0010,
+    "p95_ms": 0.0031,
+    "p99_ms": 0.0086,
+    "max_ms": 0.0243,
+    "wall_s": 0.0026
+  },
+{
+    "name": "ycsb_e",
+    "n": 2000,
+    "qps": 20322.751,
+    "p50_ms": 0.0125,
+    "p95_ms": 0.0341,
+    "p99_ms": 0.1324,
+    "max_ms": 14.7196,
+    "wall_s": 0.0984
+  },
+{
+    "name": "ycsb_f",
+    "n": 2000,
+    "qps": 188869.291,
+    "p50_ms": 0.0041,
+    "p95_ms": 0.0150,
+    "p99_ms": 0.0316,
+    "max_ms": 0.1112,
+    "wall_s": 0.0106
+  },
+{
+    "name": "ycsb_a_mc4",
+    "n": 8000,
+    "qps": 41853.135,
+    "p50_ms": 0.0033,
+    "p95_ms": 0.0157,
+    "p99_ms": 0.4445,
+    "max_ms": 20.9799,
+    "clients": 4,
+    "errors": 0,
+    "wall_s": 0.1911
+  },
+{
+    "name": "ycsb_f_mc4",
+    "n": 8000,
+    "qps": 20467.870,
+    "p50_ms": 0.0047,
+    "p95_ms": 0.2990,
+    "p99_ms": 5.5781,
+    "max_ms": 19.9220,
+    "clients": 4,
+    "errors": 0,
+    "wall_s": 0.3909
+  },
+{
+    "name": "deps_cache_overwrite_mc4",
+    "n": 8000,
+    "qps": 33020.203,
+    "p50_ms": 0.0045,
+    "p95_ms": 0.0522,
+    "p99_ms": 1.3709,
+    "max_ms": 18.9962,
+    "clients": 4,
+    "errors": 0,
+    "wall_s": 0.2423
+  },
+{
+    "name": "deps_apply_batch",
+    "n": 2000,
+    "qps": 1482.705,
+    "p50_ms": 0.1595,
+    "p95_ms": 1.9375,
+    "p99_ms": 9.7866,
+    "max_ms": 107.1875,
+    "wall_s": 1.3489
+  },
+{
+    "name": "deps_mvcc_latest",
+    "n": 2000,
+    "qps": 31501.562,
+    "p50_ms": 0.0055,
+    "p95_ms": 0.0113,
+    "p99_ms": 0.0415,
+    "max_ms": 41.7614,
+    "wall_s": 0.0635
+  },
+{
+    "name": "deps_mvcc_latest_split",
+    "combined": true,
+    "probe": null
+  },
+{
+    "name": "deps_scan",
+    "n": 2000,
+    "qps": 24958.182,
+    "p50_ms": 0.0049,
+    "p95_ms": 0.0082,
+    "p99_ms": 0.0260,
+    "max_ms": 46.7705,
+    "wall_s": 0.0801
+  },
+{
+    "name": "deps_scan_probe",
+    "probe": null
+  },
+{
+    "name": "deps_raftlog",
+    "n": 2000,
+    "qps": 9330.525,
+    "p50_ms": 0.0201,
+    "p95_ms": 0.0952,
+    "p99_ms": 0.9074,
+    "max_ms": 43.9682,
+    "wall_s": 0.2144
+  },
+{
+    "name": "deps_cache_overwrite",
+    "n": 2000,
+    "qps": 175998.240,
+    "p50_ms": 0.0035,
+    "p95_ms": 0.0077,
+    "p99_ms": 0.0123,
+    "max_ms": 1.5337,
+    "wall_s": 0.0114
+  },
+{
+    "name": "deps_lock_prewrite",
+    "n": 2000,
+    "qps": 2777.965,
+    "p50_ms": 0.0959,
+    "p95_ms": 0.4155,
+    "p99_ms": 6.4882,
+    "max_ms": 66.1511,
+    "wall_s": 0.7200
+  },
+{
+    "name": "deps_apply_batch_mc4",
+    "n": 8000,
+    "qps": 1262.512,
+    "p50_ms": 0.9870,
+    "p95_ms": 16.0030,
+    "p99_ms": 35.9734,
+    "max_ms": 73.0405,
+    "clients": 4,
+    "errors": 0,
+    "wall_s": 6.3366
+  },
+{
+    "name": "deps_raftlog_mc4",
+    "n": 8000,
+    "qps": 4368.045,
+    "p50_ms": 0.0431,
+    "p95_ms": 5.4369,
+    "p99_ms": 15.7658,
+    "max_ms": 53.8473,
+    "clients": 4,
+    "errors": 0,
+    "wall_s": 1.8315
+  }
+  ]
+}

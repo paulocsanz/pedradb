@@ -1,0 +1,20 @@
+{
+  "bench": "rocks-side-peer-template",
+  "engine": "rocksdb",
+  "sync": false,
+  "durability": "async-wal (WriteOptions.sync=false, rocksdb default)",
+  "benches": [
+    {
+      "name": "rockstore_widecol_rw",
+      "qps": null,
+      "compat_qps_ref": 39151.266,
+      "note": "fill qps from real RocksDB same shape"
+    },
+    {
+      "name": "venice_fanout_get",
+      "qps": null,
+      "compat_qps_ref": 39908.675,
+      "note": "fill qps from real RocksDB same shape"
+    }
+  ]
+}

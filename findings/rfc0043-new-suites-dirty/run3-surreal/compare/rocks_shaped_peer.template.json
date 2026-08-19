@@ -1,0 +1,38 @@
+{
+  "bench": "rocks-side-peer-template",
+  "engine": "rocksdb",
+  "sync": false,
+  "durability": "async-wal (WriteOptions.sync=false, rocksdb default)",
+  "benches": [
+    {
+      "name": "surreal_tx_batch",
+      "qps": null,
+      "compat_qps_ref": 1070.233,
+      "note": "fill qps from real RocksDB same shape"
+    },
+    {
+      "name": "surreal_tx_get",
+      "qps": null,
+      "compat_qps_ref": 927554.299,
+      "note": "fill qps from real RocksDB same shape"
+    },
+    {
+      "name": "surreal_tx_put",
+      "qps": null,
+      "compat_qps_ref": 3812.886,
+      "note": "fill qps from real RocksDB same shape"
+    },
+    {
+      "name": "surreal_tx_rmw",
+      "qps": null,
+      "compat_qps_ref": 5541.172,
+      "note": "fill qps from real RocksDB same shape"
+    },
+    {
+      "name": "surreal_tx_scan",
+      "qps": null,
+      "compat_qps_ref": 169256.059,
+      "note": "fill qps from real RocksDB same shape"
+    }
+  ]
+}

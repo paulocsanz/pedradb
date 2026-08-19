@@ -1,0 +1,11 @@
+# RFC-0041 p21 — DIRTY (load ~120). Not official. Official = rfc0041-p11/head3.
+ycsb_c                           1.470  (1.47, 1.32, 2.43)
+deps_scan                        1.235  (1.24, 0.19, 18.35)
+deps_raftlog_mc4                 0.532  (0.44, 0.90, 0.53)
+deps_apply_batch                 0.927  (0.66, 1.19, 0.93)
+deps_raftlog                     0.563  (1.00, 0.42, 0.56)
+deps_apply_batch_mc4             1.728  (1.88, 1.73, 1.56)
+deps_mvcc_latest                 4.826  (4.83, 38.95, 2.42)
+ycsb_e                           0.849  (1.08, 0.44, 0.85)
+>=2.0 on C/scan/raftlog_mc4: NO
+peers: sync:false (3/3)

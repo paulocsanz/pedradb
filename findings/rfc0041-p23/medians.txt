@@ -1,0 +1,7 @@
+# DIRTY load~228. Official = rfc0041-p11/head3.
+ycsb_c                           0.900  (0.73, 0.90, 1.55)
+deps_scan                        1.674  (1.67, 1.40, 6.86)
+deps_raftlog_mc4                 0.562  (0.25, 0.56, 0.73)
+avg_group 1.38 / 1.42 / 1.41  (was 1.19–1.21 with window 0)
+peers: sync:false
+quiet-box ≥2.0: NOT established

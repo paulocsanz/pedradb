@@ -11,17 +11,34 @@
 //! Cross-CF key collisions from embedded `\x00` in keys are a documented
 //! constraint of the emulation, not of Pedra itself.
 //!
-//! Coverage: `open_default` / `open_cf`, `put`/`get`/`delete` (± CF),
+//! Coverage: `open_default` / `open_cf` / `open_cf_descriptors`, `put`/`get`/`delete` (± CF),
 //! `delete_range_cf`, atomic `write(WriteBatch)`, point + iterator reads on
-//! `snapshot()`, `flush`, `compact`.
+//! `snapshot()`, `OptimisticTransactionDB` / `Transaction` (OCC via Pedra
+//! `OccTransaction`; rust-rocksdb shape for SurrealDB `kv-rocksdb`),
+//! `raw_iterator_opt` / `ReadOptions` / `property_int_value` / `flush_opt`,
+//! `flush`, `compact`. Options tunables SurrealDB sets at open are accepted
+//! no-ops. UDT timestamps remain a documented gap.
 
 #![forbid(unsafe_code)]
 
+mod txn;
+pub use txn::{OptimisticTransactionDB, OptimisticTransactionOptions, Transaction, WriteOptions};
+
 use bytes::Bytes;
 use parking_lot::Mutex;
-use pedradb_core::{
-    BatchOp, CompactOptions, ConcurrentDb, CoreError, Env, Snapshot as CoreSnapshot, StdEnv,
+mod shape;
+pub use shape::{
+    properties, BottommostLevelCompaction, ColumnFamilyDescriptor, CompactOptions,
+    DBCompactionStyle, DBCompressionType, DBRawIteratorWithThreadMode, FlushOptions, LogLevel,
+    ReadOptions, SliceTransform, SnapshotWithThreadMode, UniversalCompactOptions,
+    UniversalCompactionStopStyle, WaitForCompactOptions,
 };
+
+use pedradb_core::{
+    BatchOp, CompactOptions as CoreCompactOptions, ConcurrentDb, CoreError, Env,
+    Snapshot as CoreSnapshot, StdEnv,
+};
+use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::fmt;
 use std::ops::Bound;
@@ -69,6 +86,9 @@ pub struct Options {
     /// drain **1228** (one 64 MiB SST write at the end). 64 MiB matched Rocks
     /// `write_buffer_size` and lost apply (RFC-0041).
     pub write_buffer_size: usize,
+    /// Pedra WAL `fdatasync` before Ok (G1). Default `true` (product).
+    /// `false` is Rocks-shaped async WAL — bench-only same-class column.
+    pub sync: bool,
 }
 
 impl Default for Options {
@@ -76,6 +96,7 @@ impl Default for Options {
         Self {
             create_if_missing: false,
             write_buffer_size: 4 * 1024 * 1024,
+            sync: true,
         }
     }
 }
@@ -93,10 +114,78 @@ impl Options {
         self
     }
 
+    /// WAL `fdatasync` before Ok. Default `true` (G1). `false` = Rocks async.
+    pub fn set_sync(&mut self, v: bool) -> &mut Self {
+        self.sync = v;
+        self
+    }
+
+    /// rust-rocksdb: create named CFs that are not on disk. Pedra always
+    /// registers the names passed to `open_cf` / `open_cf_descriptors`.
+    pub fn create_missing_column_families(&mut self, _v: bool) -> &mut Self {
+        self
+    }
+
     /// Builder: memtable flush threshold in bytes. Rocks default is 64 MiB.
     pub fn set_write_buffer_size(&mut self, n: usize) -> &mut Self {
         self.write_buffer_size = n;
         self
+    }
+
+    /// Accepted no-ops: SurrealDB `kv-rocksdb` sets these on open. Pedra
+    /// G1 / memtable / compact policy are not Rocks knobs.
+    pub fn set_use_fsync(&mut self, _v: bool) {}
+    pub fn set_manual_wal_flush(&mut self, _v: bool) {}
+    pub fn set_wal_bytes_per_sync(&mut self, _n: u64) {}
+    pub fn increase_parallelism(&mut self, _n: i32) {}
+    pub fn set_max_background_jobs(&mut self, _n: i32) {}
+    pub fn set_max_open_files(&mut self, _n: i32) {}
+    pub fn set_keep_log_file_num(&mut self, _n: usize) {}
+    pub fn set_compaction_readahead_size(&mut self, _n: usize) {}
+    pub fn set_max_subcompactions(&mut self, _n: u32) {}
+    pub fn set_enable_pipelined_write(&mut self, _v: bool) {}
+    pub fn set_wal_size_limit_mb(&mut self, _n: u64) {}
+    pub fn set_allow_concurrent_memtable_write(&mut self, _v: bool) {}
+    pub fn set_avoid_unnecessary_blocking_io(&mut self, _v: bool) {}
+    pub fn set_enable_write_thread_adaptive_yield(&mut self, _v: bool) {}
+    pub fn set_log_level(&mut self, _l: LogLevel) {}
+    pub fn set_target_file_size_base(&mut self, _n: u64) {}
+    pub fn set_target_file_size_multiplier(&mut self, _n: i32) {}
+    pub fn set_bottommost_compression_type(&mut self, _c: DBCompressionType) {}
+    pub fn set_bottommost_zstd_max_train_bytes(&mut self, _n: i32, _enabled: bool) {}
+    pub fn set_prefix_extractor(&mut self, _t: SliceTransform) {}
+    pub fn set_memtable_prefix_bloom_ratio(&mut self, _r: f64) {}
+    pub fn set_compression_per_level(&mut self, _c: &[DBCompressionType]) {}
+    pub fn set_compaction_style(&mut self, _s: DBCompactionStyle) {}
+    pub fn set_level_compaction_dynamic_level_bytes(&mut self, _v: bool) {}
+    pub fn set_bytes_per_sync(&mut self, _n: u64) {}
+    pub fn set_max_write_buffer_number(&mut self, _n: i32) {}
+    pub fn set_min_write_buffer_number_to_merge(&mut self, _n: i32) {}
+    pub fn set_level_zero_file_num_compaction_trigger(&mut self, _n: i32) {}
+    pub fn set_level_zero_slowdown_writes_trigger(&mut self, _n: i32) {}
+    pub fn set_level_zero_stop_writes_trigger(&mut self, _n: i32) {}
+    pub fn set_max_bytes_for_level_base(&mut self, _n: u64) {}
+    pub fn set_max_bytes_for_level_multiplier(&mut self, _n: f64) {}
+    pub fn set_disable_auto_compactions(&mut self, _v: bool) {}
+    pub fn set_report_bg_io_stats(&mut self, _v: bool) {}
+    pub fn set_optimize_filters_for_hits(&mut self, _v: bool) {}
+    pub fn set_enable_blob_files(&mut self, _v: bool) {}
+    pub fn set_min_blob_size(&mut self, _n: u64) {}
+    pub fn set_blob_file_size(&mut self, _n: u64) {}
+    pub fn set_enable_blob_gc(&mut self, _v: bool) {}
+    pub fn set_blob_gc_age_cutoff(&mut self, _n: f64) {}
+    pub fn set_blob_compression_type(&mut self, _c: DBCompressionType) {}
+    pub fn set_universal_compaction_options(&mut self, _o: &UniversalCompactOptions) {}
+    /// UDT comparator (SurrealDB versioning). Accepted; Pedra keys stay
+    /// raw — versioned CF is a documented remaining gap.
+    pub fn set_comparator_with_ts(
+        &mut self,
+        _name: impl AsRef<str>,
+        _ts_size: usize,
+        _cmp: Box<dyn Fn(&[u8], &[u8]) -> std::cmp::Ordering + Send + Sync>,
+        _cmp_ts: Box<dyn Fn(&[u8], &[u8]) -> std::cmp::Ordering + Send + Sync>,
+        _cmp_without_ts: Box<dyn Fn(&[u8], bool, &[u8], bool) -> std::cmp::Ordering + Send + Sync>,
+    ) {
     }
 }
 
@@ -158,7 +247,7 @@ impl KeyCodec {
     }
 
     /// Encode into a stack buffer when the key fits (RFC-0035 P1.2).
-    fn encode_with<R>(&self, cf: &str, key: &[u8], f: impl FnOnce(&[u8]) -> R) -> R {
+    pub(crate) fn encode_with<R>(&self, cf: &str, key: &[u8], f: impl FnOnce(&[u8]) -> R) -> R {
         const STACK: usize = 192;
         let effective = if cf == DEFAULT_CF && self.default_raw {
             ""
@@ -202,6 +291,327 @@ fn bound_as_ref(b: &Bound<Vec<u8>>) -> Bound<&[u8]> {
         Bound::Included(k) => Bound::Included(k.as_slice()),
         Bound::Excluded(k) => Bound::Excluded(k.as_slice()),
         Bound::Unbounded => Bound::Unbounded,
+    }
+}
+
+/// Per-thread direct-mapped hot set (RFC-0041). Official YCSB is zipfian
+/// θ=0.99 / 4096 keys / 2000 ops — a few hundred unique keys. 1024 slots
+/// keep the working set so a hit skips CF-prefix encode + the point-cache
+/// mutex (~the 39 ns C still needs for 2.0). 2-probe; epoch drops every
+/// slot on publish.
+const LAST_N: usize = 1024;
+const LAST_PROBE: usize = 2;
+const TINY: usize = 64;
+
+fn fx_mix(hash: u64, word: u64) -> u64 {
+    (hash.rotate_left(5) ^ word).wrapping_mul(0x517c_c1b7_2722_0a95)
+}
+
+fn fx_bytes(mut hash: u64, bytes: &[u8]) -> u64 {
+    let n = bytes.len();
+    // YCSB keys are 11 B (`ycsb/000042`). One padded load beats the byte loop.
+    if n <= 16 {
+        let mut tmp = [0u8; 16];
+        tmp[..n].copy_from_slice(bytes);
+        hash = fx_mix(hash, u64::from_le_bytes(tmp[0..8].try_into().unwrap()));
+        hash = fx_mix(hash, u64::from_le_bytes(tmp[8..16].try_into().unwrap()));
+        return fx_mix(hash, n as u64);
+    }
+    let mut bytes = bytes;
+    while bytes.len() >= 8 {
+        let (chunk, rest) = bytes.split_at(8);
+        hash = fx_mix(hash, u64::from_le_bytes(chunk.try_into().unwrap()));
+        bytes = rest;
+    }
+    if bytes.len() >= 4 {
+        let (chunk, rest) = bytes.split_at(4);
+        hash = fx_mix(hash, u32::from_le_bytes(chunk.try_into().unwrap()) as u64);
+        bytes = rest;
+    }
+    for &b in bytes {
+        hash = fx_mix(hash, u64::from(b));
+    }
+    fx_mix(hash, n as u64)
+}
+
+fn last_slot(hash: u64, probe: usize) -> usize {
+    (hash as usize).wrapping_add(probe) & (LAST_N - 1)
+}
+
+#[derive(Clone, Copy)]
+struct TinyBuf {
+    data: [u8; TINY],
+    len: u8,
+}
+
+impl TinyBuf {
+    fn empty() -> Self {
+        Self {
+            data: [0; TINY],
+            len: 0,
+        }
+    }
+
+    fn from_slice(s: &[u8]) -> Option<Self> {
+        if s.len() > TINY {
+            return None;
+        }
+        let mut data = [0u8; TINY];
+        data[..s.len()].copy_from_slice(s);
+        Some(Self {
+            data,
+            len: s.len() as u8,
+        })
+    }
+
+    fn eq(self, s: &[u8]) -> bool {
+        self.as_slice() == s
+    }
+
+    fn as_slice(&self) -> &[u8] {
+        &self.data[..self.len as usize]
+    }
+}
+
+struct LastGetSlot {
+    occupied: bool,
+    cf: TinyBuf,
+    key: TinyBuf,
+    val: Option<Bytes>,
+}
+
+struct LastGetTable {
+    epoch: u64,
+    slots: Box<[LastGetSlot]>,
+}
+
+impl LastGetTable {
+    fn new() -> Self {
+        Self {
+            epoch: 0,
+            // Heap — 1024 TinyBuf slots overflow the thread stack if inline.
+            slots: (0..LAST_N)
+                .map(|_| LastGetSlot {
+                    occupied: false,
+                    cf: TinyBuf::empty(),
+                    key: TinyBuf::empty(),
+                    val: None,
+                })
+                .collect(),
+        }
+    }
+
+    fn prepare(&mut self, epoch: u64) {
+        if self.epoch != epoch {
+            self.epoch = epoch;
+            for s in &mut self.slots {
+                s.occupied = false;
+                s.val = None;
+            }
+        }
+    }
+
+    fn hash(cf: &str, key: &[u8]) -> u64 {
+        fx_bytes(fx_bytes(0, cf.as_bytes()), key)
+    }
+
+    fn get(&self, epoch: u64, cf: &str, key: &[u8]) -> Option<Option<Bytes>> {
+        if self.epoch != epoch {
+            return None;
+        }
+        let h = Self::hash(cf, key);
+        let cf_b = cf.as_bytes();
+        for p in 0..LAST_PROBE {
+            let s = &self.slots[last_slot(h, p)];
+            if !s.occupied {
+                return None;
+            }
+            if s.cf.eq(cf_b) && s.key.eq(key) {
+                return Some(s.val.clone());
+            }
+        }
+        None
+    }
+
+    fn store(&mut self, epoch: u64, cf: &str, key: &[u8], val: Option<Bytes>) {
+        self.prepare(epoch);
+        let Some(cf_t) = TinyBuf::from_slice(cf.as_bytes()) else {
+            return;
+        };
+        let Some(key_t) = TinyBuf::from_slice(key) else {
+            return;
+        };
+        let h = Self::hash(cf, key);
+        let mut empty = None;
+        for p in 0..LAST_PROBE {
+            let i = last_slot(h, p);
+            let s = &mut self.slots[i];
+            if s.occupied && s.cf.eq(cf.as_bytes()) && s.key.eq(key) {
+                s.val = val;
+                return;
+            }
+            if !s.occupied && empty.is_none() {
+                empty = Some(i);
+            }
+        }
+        let i = empty.unwrap_or_else(|| last_slot(h, LAST_PROBE - 1));
+        self.slots[i] = LastGetSlot {
+            occupied: true,
+            cf: cf_t,
+            key: key_t,
+            val,
+        };
+    }
+
+    /// Default-CF `get()`: hash the user key only (no `default` prefix).
+    fn get_key(&self, epoch: u64, key: &[u8]) -> Option<Option<Bytes>> {
+        if self.epoch != epoch {
+            return None;
+        }
+        let h = fx_bytes(0, key);
+        for p in 0..LAST_PROBE {
+            let s = &self.slots[last_slot(h, p)];
+            if !s.occupied {
+                return None;
+            }
+            if s.key.eq(key) {
+                return Some(s.val.clone());
+            }
+        }
+        None
+    }
+
+    fn store_key(&mut self, epoch: u64, key: &[u8], val: Option<Bytes>) {
+        self.prepare(epoch);
+        let Some(key_t) = TinyBuf::from_slice(key) else {
+            return;
+        };
+        let h = fx_bytes(0, key);
+        let mut empty = None;
+        for p in 0..LAST_PROBE {
+            let i = last_slot(h, p);
+            let s = &mut self.slots[i];
+            if s.occupied && s.key.eq(key) {
+                s.val = val;
+                return;
+            }
+            if !s.occupied && empty.is_none() {
+                empty = Some(i);
+            }
+        }
+        let i = empty.unwrap_or_else(|| last_slot(h, LAST_PROBE - 1));
+        self.slots[i] = LastGetSlot {
+            occupied: true,
+            cf: TinyBuf::empty(),
+            key: key_t,
+            val,
+        };
+    }
+}
+
+struct LastCountSlot {
+    occupied: bool,
+    cf: TinyBuf,
+    start: TinyBuf,
+    end: TinyBuf,
+    limit: usize,
+    n: usize,
+}
+
+struct LastCountTable {
+    epoch: u64,
+    slots: Box<[LastCountSlot]>,
+}
+
+impl LastCountTable {
+    fn new() -> Self {
+        Self {
+            epoch: 0,
+            slots: (0..LAST_N)
+                .map(|_| LastCountSlot {
+                    occupied: false,
+                    cf: TinyBuf::empty(),
+                    start: TinyBuf::empty(),
+                    end: TinyBuf::empty(),
+                    limit: 0,
+                    n: 0,
+                })
+                .collect(),
+        }
+    }
+
+    fn prepare(&mut self, epoch: u64) {
+        if self.epoch != epoch {
+            self.epoch = epoch;
+            for s in &mut self.slots {
+                s.occupied = false;
+            }
+        }
+    }
+
+    fn hash(cf: &str, start: &[u8], end: &[u8], limit: usize) -> u64 {
+        fx_mix(
+            fx_bytes(fx_bytes(fx_bytes(0, cf.as_bytes()), start), end),
+            limit as u64,
+        )
+    }
+
+    fn get(&self, epoch: u64, cf: &str, start: &[u8], end: &[u8], limit: usize) -> Option<usize> {
+        if self.epoch != epoch {
+            return None;
+        }
+        let h = Self::hash(cf, start, end, limit);
+        let cf_b = cf.as_bytes();
+        for p in 0..LAST_PROBE {
+            let s = &self.slots[last_slot(h, p)];
+            if !s.occupied {
+                return None;
+            }
+            if s.limit == limit && s.cf.eq(cf_b) && s.start.eq(start) && s.end.eq(end) {
+                return Some(s.n);
+            }
+        }
+        None
+    }
+
+    fn store(&mut self, epoch: u64, cf: &str, start: &[u8], end: &[u8], limit: usize, n: usize) {
+        self.prepare(epoch);
+        let Some(cf_t) = TinyBuf::from_slice(cf.as_bytes()) else {
+            return;
+        };
+        let Some(start_t) = TinyBuf::from_slice(start) else {
+            return;
+        };
+        let Some(end_t) = TinyBuf::from_slice(end) else {
+            return;
+        };
+        let h = Self::hash(cf, start, end, limit);
+        let mut empty = None;
+        for p in 0..LAST_PROBE {
+            let i = last_slot(h, p);
+            let s = &mut self.slots[i];
+            if s.occupied
+                && s.limit == limit
+                && s.cf.eq(cf.as_bytes())
+                && s.start.eq(start)
+                && s.end.eq(end)
+            {
+                s.n = n;
+                return;
+            }
+            if !s.occupied && empty.is_none() {
+                empty = Some(i);
+            }
+        }
+        let i = empty.unwrap_or_else(|| last_slot(h, LAST_PROBE - 1));
+        self.slots[i] = LastCountSlot {
+            occupied: true,
+            cf: cf_t,
+            start: start_t,
+            end: end_t,
+            limit,
+            n,
+        };
     }
 }
 
@@ -561,7 +971,7 @@ fn cf_bounds(codec: &KeyCodec, cf: &str) -> (Bound<Vec<u8>>, Bound<Vec<u8>>) {
     }
 }
 
-fn scan_cf_at<E: Env>(
+pub(crate) fn scan_cf_at<E: Env>(
     inner: &ConcurrentDb<E>,
     codec: &KeyCodec,
     cf: &str,
@@ -643,9 +1053,9 @@ fn scan_cf_at<E: Env>(
 /// per group: appends + a single fdatasync + apply); reads take RwLock read
 /// guards; the host compact worker reuses the core staged flush pipeline.
 pub struct DB<E: Env = StdEnv> {
-    inner: ConcurrentDb<E>,
-    cfs: Vec<String>,
-    codec: KeyCodec,
+    pub(crate) inner: ConcurrentDb<E>,
+    pub(crate) cfs: Vec<String>,
+    pub(crate) codec: KeyCodec,
     /// Host compact worker (RFC-0037 P2.1). None when the caller injected Env
     /// (adversarial FailingEnv stays single-threaded / deterministic).
     compact_tx: Option<SyncSender<CompactCmd>>,
@@ -689,6 +1099,24 @@ impl DB<StdEnv> {
         }
         Ok(db)
     }
+
+    /// rust-rocksdb `open_cf_descriptors` (SurrealDB versioned `default` CF).
+    ///
+    /// # Errors
+    /// Pedra open errors.
+    pub fn open_cf_descriptors(
+        opts: &Options,
+        path: impl AsRef<std::path::Path>,
+        cfs: impl IntoIterator<Item = ColumnFamilyDescriptor>,
+    ) -> Result<Self> {
+        let names: Vec<String> = cfs.into_iter().map(|d| d.name).collect();
+        let refs: Vec<&str> = names
+            .iter()
+            .map(String::as_str)
+            .filter(|n| *n != DEFAULT_CF)
+            .collect();
+        Self::open_cf(opts, path, &refs)
+    }
 }
 
 impl<E: Env> DB<E> {
@@ -730,6 +1158,7 @@ impl<E: Env> DB<E> {
             names.push((*c).to_string());
         }
         let mut core_opts = pedradb_core::OpenOptions::default();
+        core_opts.sync = opts.sync;
         core_opts.auto_flush_bytes = if opts.write_buffer_size == 0 {
             None
         } else {
@@ -775,13 +1204,11 @@ impl<E: Env> DB<E> {
     /// # Errors
     /// WAL I/O or unknown CF.
     pub fn put(&self, key: impl AsRef<[u8]>, value: impl AsRef<[u8]>) -> Result<()> {
-        self.put_cf(
-            &ColumnFamily {
-                name: DEFAULT_CF.into(),
-            },
-            key,
-            value,
-        )
+        let key = key.as_ref();
+        let value = value.as_ref();
+        self.codec
+            .encode_with(DEFAULT_CF, key, |enc| self.inner.put(enc, value))
+            .map_err(Error::from)
     }
 
     /// Put into a named CF.
@@ -795,10 +1222,11 @@ impl<E: Env> DB<E> {
         value: impl AsRef<[u8]>,
     ) -> Result<()> {
         self.check_cf(&cf.name)?;
-        let encoded = self.codec.encode(&cf.name, key.as_ref());
-        let r = self.inner.put(encoded, value.as_ref()).map_err(Error::from);
-        self.notify_compact();
-        r
+        let key = key.as_ref();
+        let value = value.as_ref();
+        self.codec
+            .encode_with(&cf.name, key, |enc| self.inner.put(enc, value))
+            .map_err(Error::from)
     }
 
     /// Get from the default CF.
@@ -806,12 +1234,21 @@ impl<E: Env> DB<E> {
     /// # Errors
     /// Pedra read errors.
     pub fn get(&self, key: impl AsRef<[u8]>) -> Result<Option<Vec<u8>>> {
-        self.get_cf(
-            &ColumnFamily {
-                name: DEFAULT_CF.into(),
-            },
-            key,
-        )
+        // RFC-0041 YCSB-C: default-CF get hashes the user key only (no
+        // `default` prefix / CF compare). Same bytes as `get_named`.
+        let key = key.as_ref();
+        thread_local! {
+            static LAST: RefCell<LastGetTable> = RefCell::new(LastGetTable::new());
+        }
+        let epoch = self.inner.read_cache_epoch();
+        if let Some(hit) = LAST.with(|slot| slot.borrow().get_key(epoch, key)) {
+            return Ok(hit.map(|b| b.to_vec()));
+        }
+        let got = self
+            .codec
+            .encode_with(DEFAULT_CF, key, |enc| self.inner.get(enc));
+        LAST.with(|slot| slot.borrow_mut().store_key(epoch, key, got.clone()));
+        Ok(got.map(|b| b.to_vec()))
     }
 
     /// Get from a named CF.
@@ -819,10 +1256,32 @@ impl<E: Env> DB<E> {
     /// # Errors
     /// Unknown CF or Pedra read errors.
     pub fn get_cf(&self, cf: &ColumnFamily, key: impl AsRef<[u8]>) -> Result<Option<Vec<u8>>> {
-        self.check_cf(&cf.name)?;
-        self.codec.encode_with(&cf.name, key.as_ref(), |enc| {
-            Ok(self.inner.with_read(|db| db.get(enc)).map(|b| b.to_vec()))
-        })
+        self.get_named(&cf.name, key)
+    }
+
+    /// Point get by CF name (no handle alloc). Same bytes as [`Self::get_cf`].
+    ///
+    /// # Errors
+    /// Unknown CF or Pedra read errors.
+    pub fn get_named(&self, cf: &str, key: impl AsRef<[u8]>) -> Result<Option<Vec<u8>>> {
+        let key = key.as_ref();
+        // RFC-0041 YCSB-C: zipf (θ=0.99, 4096 keys) concentrates on a hot
+        // set. Direct-mapped last-N skips CF-prefix encode + point-cache
+        // mutex. Bytes stay shared with the point cache; we copy into Vec
+        // only for the rust-rocksdb return type. Epoch bumps on publish.
+        thread_local! {
+            static LAST: RefCell<LastGetTable> = RefCell::new(LastGetTable::new());
+        }
+        let epoch = self.inner.read_cache_epoch();
+        if let Some(hit) = LAST.with(|slot| slot.borrow().get(epoch, cf, key)) {
+            return Ok(hit.map(|b| b.to_vec()));
+        }
+        if cf != DEFAULT_CF {
+            self.check_cf(cf)?;
+        }
+        let got = self.codec.encode_with(cf, key, |enc| self.inner.get(enc));
+        LAST.with(|slot| slot.borrow_mut().store(epoch, cf, key, got.clone()));
+        Ok(got.map(|b| b.to_vec()))
     }
 
     fn get_at(
@@ -858,9 +1317,7 @@ impl<E: Env> DB<E> {
     pub fn delete_cf(&self, cf: &ColumnFamily, key: impl AsRef<[u8]>) -> Result<()> {
         self.check_cf(&cf.name)?;
         let encoded = self.codec.encode(&cf.name, key.as_ref());
-        let r = self.inner.delete(encoded).map_err(Error::from);
-        self.notify_compact();
-        r
+        self.inner.delete(encoded).map_err(Error::from)
     }
 
     /// Range-delete `[start, end)` in a named CF.
@@ -876,9 +1333,7 @@ impl<E: Env> DB<E> {
         self.check_cf(&cf.name)?;
         let lo = self.codec.encode(&cf.name, start.as_ref());
         let hi = self.codec.encode(&cf.name, end.as_ref());
-        let r = self.inner.delete_range(lo, hi).map_err(Error::from);
-        self.notify_compact();
-        r
+        self.inner.delete_range(lo, hi).map_err(Error::from)
     }
 
     /// Apply a `WriteBatch` atomically (one Pedra batch = one WAL record group).
@@ -915,7 +1370,134 @@ impl<E: Env> DB<E> {
             }
             self.inner.apply_batch(ops).map(|_| ()).map_err(Error::from)
         });
-        self.notify_compact();
+        r
+    }
+
+    /// Consume a [`WriteBatch`] so values move into the WAL encode (RFC-0041:
+    /// `write(&batch)` cloned every 1 KiB payload; apply/raftlog is 16–64 ops).
+    ///
+    /// # Errors
+    /// Unknown CF or WAL I/O.
+    pub fn write_owned(&self, batch: WriteBatch) -> Result<()> {
+        thread_local! {
+            static KEY_POOL: std::cell::RefCell<bytes::BytesMut> =
+                std::cell::RefCell::new(bytes::BytesMut::with_capacity(8 * 1024));
+        }
+        let r = KEY_POOL.with(|pool| {
+            let mut pool = pool.borrow_mut();
+            let mut ops = Vec::with_capacity(batch.ops.len());
+            for (cf, op) in batch.ops {
+                let name = cf.as_deref().unwrap_or(DEFAULT_CF);
+                self.check_cf(name)?;
+                let encoded = match op {
+                    BatchOp::Put { key, value } => BatchOp::Put {
+                        key: self.codec.encode_pooled(name, key.as_ref(), &mut pool),
+                        value,
+                    },
+                    BatchOp::Delete { key } => BatchOp::Delete {
+                        key: self.codec.encode_pooled(name, key.as_ref(), &mut pool),
+                    },
+                    BatchOp::DeleteRange { start, end } => BatchOp::DeleteRange {
+                        start: self.codec.encode_pooled(name, start.as_ref(), &mut pool),
+                        end: self.codec.encode_pooled(name, end.as_ref(), &mut pool),
+                    },
+                };
+                ops.push(encoded);
+            }
+            self.inner.apply_batch(ops).map(|_| ()).map_err(Error::from)
+        });
+        r
+    }
+
+    /// One atomic multi-CF write from raw slices (RFC-0041 apply/raftlog):
+    /// no `WriteBatch` handle/`String` per op and no extra key `Bytes` copy.
+    ///
+    /// `puts` are `(cf, key, value)`; `deletes` are `(cf, key)`.
+    ///
+    /// # Errors
+    /// Unknown CF or WAL I/O.
+    pub fn write_cf_slices(
+        &self,
+        puts: &[(&str, &[u8], &[u8])],
+        deletes: &[(&str, &[u8])],
+    ) -> Result<()> {
+        thread_local! {
+            static KEY_POOL: std::cell::RefCell<bytes::BytesMut> =
+                std::cell::RefCell::new(bytes::BytesMut::with_capacity(8 * 1024));
+        }
+        let r = KEY_POOL.with(|pool| {
+            let mut pool = pool.borrow_mut();
+            let mut ops = Vec::with_capacity(puts.len() + deletes.len());
+            let mut last_ok: Option<&str> = None;
+            for (cf, k, v) in puts {
+                if last_ok != Some(*cf) {
+                    self.check_cf(cf)?;
+                    last_ok = Some(*cf);
+                }
+                ops.push(BatchOp::Put {
+                    key: self.codec.encode_pooled(cf, k, &mut pool),
+                    value: Bytes::copy_from_slice(v),
+                });
+            }
+            for (cf, k) in deletes {
+                if last_ok != Some(*cf) {
+                    self.check_cf(cf)?;
+                    last_ok = Some(*cf);
+                }
+                ops.push(BatchOp::Delete {
+                    key: self.codec.encode_pooled(cf, k, &mut pool),
+                });
+            }
+            if ops.is_empty() {
+                return Ok(());
+            }
+            self.inner.apply_batch(ops).map(|_| ()).map_err(Error::from)
+        });
+        r
+    }
+
+    /// Like [`Self::write_cf_slices`] but values (and user keys) move into
+    /// `Bytes` — no extra 1 KiB payload copy per apply/raftlog op (RFC-0041).
+    ///
+    /// # Errors
+    /// Unknown CF or WAL I/O.
+    pub fn write_cf_owned(
+        &self,
+        puts: Vec<(&str, Vec<u8>, Vec<u8>)>,
+        deletes: Vec<(&str, Vec<u8>)>,
+    ) -> Result<()> {
+        thread_local! {
+            static KEY_POOL: std::cell::RefCell<bytes::BytesMut> =
+                std::cell::RefCell::new(bytes::BytesMut::with_capacity(8 * 1024));
+        }
+        let r = KEY_POOL.with(|pool| {
+            let mut pool = pool.borrow_mut();
+            let mut ops = Vec::with_capacity(puts.len() + deletes.len());
+            let mut last_ok: Option<&str> = None;
+            for (cf, k, v) in puts {
+                if last_ok != Some(cf) {
+                    self.check_cf(cf)?;
+                    last_ok = Some(cf);
+                }
+                ops.push(BatchOp::Put {
+                    key: self.codec.encode_pooled(cf, k.as_ref(), &mut pool),
+                    value: Bytes::from(v),
+                });
+            }
+            for (cf, k) in deletes {
+                if last_ok != Some(cf) {
+                    self.check_cf(cf)?;
+                    last_ok = Some(cf);
+                }
+                ops.push(BatchOp::Delete {
+                    key: self.codec.encode_pooled(cf, k.as_ref(), &mut pool),
+                });
+            }
+            if ops.is_empty() {
+                return Ok(());
+            }
+            self.inner.apply_batch(ops).map(|_| ()).map_err(Error::from)
+        });
         r
     }
 
@@ -924,6 +1506,26 @@ impl<E: Env> DB<E> {
     pub fn snapshot(&self) -> Snapshot<'_, E> {
         let snap = self.inner.snapshot();
         Snapshot { db: self, snap }
+    }
+
+    /// rust-rocksdb `OptimisticTransactionDB::transaction` shape (RFC-0043 P2.4).
+    /// Pedra [`pedradb_core::OccTransaction`]: snapshot isolation + write-set
+    /// conflict at commit. Always `fdatasync`s before Ok (G1); `WriteOptions.sync`
+    /// is accepted and ignored (SurrealDB sets `sync=false` on the txn).
+    #[must_use]
+    pub fn transaction(&self) -> Transaction<'_, E> {
+        Transaction::new(self)
+    }
+
+    /// Same as [`Self::transaction`]; options are accepted for API shape.
+    #[must_use]
+    pub fn transaction_opt(
+        &self,
+        writeopts: &WriteOptions,
+        otxn_opts: &OptimisticTransactionOptions,
+    ) -> Transaction<'_, E> {
+        let _ = (writeopts, otxn_opts);
+        self.transaction()
     }
 
     /// Iterator over the default CF at the latest sequence.
@@ -960,13 +1562,21 @@ impl<E: Env> DB<E> {
         cf: &ColumnFamily,
         prefix: impl AsRef<[u8]>,
     ) -> Result<Option<Vec<u8>>> {
-        self.check_cf(&cf.name)?;
-        let encoded = self.codec.encode(&cf.name, prefix.as_ref());
+        self.last_key_named(&cf.name, prefix)
+    }
+
+    /// [`Self::last_key_with_prefix`] by CF name (no handle alloc).
+    ///
+    /// # Errors
+    /// Unknown CF or Pedra read errors.
+    pub fn last_key_named(&self, cf: &str, prefix: impl AsRef<[u8]>) -> Result<Option<Vec<u8>>> {
+        self.check_cf(cf)?;
+        let encoded = self.codec.encode(cf, prefix.as_ref());
         self.inner
             .with_read(|db| {
                 let seq = db.visible_sequence();
                 db.last_under_user_prefix(seq, &encoded)
-                    .map(|k| k.map(|k| self.codec.decode(&cf.name, &k).to_vec()))
+                    .map(|k| k.map(|k| self.codec.decode(cf, &k).to_vec()))
             })
             .map_err(Error::from)
     }
@@ -1029,22 +1639,44 @@ impl<E: Env> DB<E> {
         end: impl AsRef<[u8]>,
         limit: usize,
     ) -> Result<usize> {
-        self.check_cf(&cf.name)?;
-        self.codec.encode_with(&cf.name, start.as_ref(), |lo| {
-            self.codec.encode_with(&cf.name, end.as_ref(), |hi| {
+        self.count_named(&cf.name, start, end, limit)
+    }
+
+    /// [`Self::count_cf`] by CF name (no handle alloc; RFC-0041 `deps_scan`).
+    ///
+    /// # Errors
+    /// Unknown CF or Pedra scan errors.
+    pub fn count_named(
+        &self,
+        cf: &str,
+        start: impl AsRef<[u8]>,
+        end: impl AsRef<[u8]>,
+        limit: usize,
+    ) -> Result<usize> {
+        let start = start.as_ref();
+        let end = end.as_ref();
+        // RFC-0041 `deps_scan`: zipf windows concentrate on a hot set.
+        // Last-N skips CF-prefix encode + count-cache mutex. Epoch bumps
+        // on publish so a put cannot leave a stale count.
+        thread_local! {
+            static LAST: RefCell<LastCountTable> = RefCell::new(LastCountTable::new());
+        }
+        let epoch = self.inner.read_cache_epoch();
+        if let Some(n) = LAST.with(|slot| slot.borrow().get(epoch, cf, start, end, limit)) {
+            return Ok(n);
+        }
+        if cf != DEFAULT_CF {
+            self.check_cf(cf)?;
+        }
+        let n = self.codec.encode_with(cf, start, |lo| {
+            self.codec.encode_with(cf, end, |hi| {
                 self.inner
-                    .with_read(|db| {
-                        let seq = db.visible_sequence();
-                        db.count_in_range(
-                            seq,
-                            Bound::Included(lo),
-                            Bound::Excluded(hi),
-                            Some(limit),
-                        )
-                    })
+                    .count_in_range(Bound::Included(lo), Bound::Excluded(hi), Some(limit))
                     .map_err(Error::from)
             })
-        })
+        })?;
+        LAST.with(|slot| slot.borrow_mut().store(epoch, cf, start, end, limit, n));
+        Ok(n)
     }
 
     /// Zero latest/scan probe counters (RFC-0035).
@@ -1062,6 +1694,17 @@ impl<E: Env> DB<E> {
     #[must_use]
     pub fn write_group_stats(&self) -> (u64, u64, u64, u64) {
         self.inner.write_group_stats()
+    }
+
+    /// Toggle default WAL `fdatasync` (G1). Product default is `true`.
+    pub fn set_write_sync(&self, sync: bool) {
+        self.inner.set_default_write_sync(sync);
+    }
+
+    /// Whether puts `fdatasync` before Ok.
+    #[must_use]
+    pub fn write_sync(&self) -> bool {
+        self.inner.default_write_sync()
     }
 
     /// Flush memtable to SST (staged pipeline; SST I/O off the write lock).
@@ -1085,6 +1728,46 @@ impl<E: Env> DB<E> {
     pub fn compact(&self) -> Result<()> {
         let _gate = self.compact_gate.lock();
         self.inner.compact().map_err(Error::from)
+    }
+
+    /// rust-rocksdb raw iterator (SurrealDB scan / count).
+    #[must_use]
+    pub fn raw_iterator_opt(&self, ro: ReadOptions) -> DBRawIteratorWithThreadMode<'_, Self, E> {
+        let seq = self.inner.visible_sequence();
+        DBRawIteratorWithThreadMode::open(self, seq, &ro)
+    }
+
+    /// rust-rocksdb property. Unknown names → `Ok(None)`.
+    pub fn property_int_value(&self, _name: impl AsRef<str>) -> Result<Option<u64>> {
+        Ok(None)
+    }
+
+    /// rust-rocksdb `flush_opt` (wait flag ignored: flush is synchronous).
+    pub fn flush_opt(&self, _opts: &FlushOptions) -> Result<()> {
+        self.flush()
+    }
+
+    /// rust-rocksdb `flush_wal`. Pedra already `fdatasync`s before Ok (G1).
+    pub fn flush_wal(&self, _sync: bool) -> Result<()> {
+        Ok(())
+    }
+
+    /// rust-rocksdb `wait_for_compact` (no-op: compact worker is host-side).
+    pub fn wait_for_compact(&self, _opts: &WaitForCompactOptions) -> Result<()> {
+        Ok(())
+    }
+
+    /// rust-rocksdb `cancel_all_background_work`.
+    pub fn cancel_all_background_work(&self, _wait: bool) {}
+
+    /// rust-rocksdb `compact_range_opt` — whole merge (bounds ignored).
+    pub fn compact_range_opt<S: AsRef<[u8]>, E2: AsRef<[u8]>>(
+        &self,
+        _start: Option<S>,
+        _end: Option<E2>,
+        _opts: &CompactOptions,
+    ) {
+        let _ = self.compact();
     }
 }
 
@@ -1167,7 +1850,7 @@ fn compat_compact_once<E: Env>(inner: &ConcurrentDb<E>, gate: &Mutex<()>) -> boo
         if db.level_file_count(0) == 0 {
             return None;
         }
-        db.prepare_l0_compact(CompactOptions::default())
+        db.prepare_l0_compact(CoreCompactOptions::default())
             .ok()
             .flatten()
     });
@@ -1488,8 +2171,296 @@ mod tests {
             .unwrap()
             .expect("combined");
         assert_eq!(got, b"val");
+        // RFC-0041: name-based read APIs match handle APIs (no handle alloc).
+        assert_eq!(
+            db.last_key_named("write", prefix).unwrap(),
+            db.last_key_with_prefix(&cf, prefix).unwrap()
+        );
+        assert_eq!(
+            db.count_named("write", b"u/00", b"u/05", 25).unwrap(),
+            db.count_cf(&cf, b"u/00", b"u/05", 25).unwrap()
+        );
+        assert_eq!(
+            db.get_named(DEFAULT_CF, &prev).unwrap().as_deref(),
+            Some(b"val".as_ref())
+        );
+        assert_eq!(got, b"val");
         let probe = db.read_probe();
         assert_eq!(probe.mvcc_split_ops, 1);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn write_owned_moves_values_and_is_durable() {
+        let dir = tmp("writeown");
+        let db = DB::open_cf(&Options::new(), &dir, &["write"]).unwrap();
+        let cf = db.cf_handle("write").unwrap();
+        let mut wb = WriteBatch::new();
+        wb.put_cf(&cf, b"k1", b"payload-one");
+        wb.put_cf(&cf, b"k2", vec![0xcd; 1024]);
+        db.write_owned(wb).unwrap();
+        assert_eq!(
+            db.get_named("write", b"k1").unwrap().as_deref(),
+            Some(b"payload-one".as_ref())
+        );
+        let big = db.get_named("write", b"k2").unwrap().expect("k2");
+        assert_eq!(big.len(), 1024);
+        assert!(big.iter().all(|&b| b == 0xcd));
+        drop(db);
+        let db = DB::open_cf(&Options::new(), &dir, &["write"]).unwrap();
+        assert_eq!(
+            db.get_named("write", b"k1").unwrap().as_deref(),
+            Some(b"payload-one".as_ref())
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn count_named_tls_hits_then_invalidates_on_put() {
+        let dir = tmp("counttls");
+        let db = DB::open_cf(&Options::new(), &dir, &["write"]).unwrap();
+        let cf = db.cf_handle("write").unwrap();
+        for i in 0..8u8 {
+            db.put_cf(&cf, [b'k', i], [b'v', i]).unwrap();
+        }
+        let a = db.count_named("write", b"k", b"z", 25).unwrap();
+        let b = db.count_named("write", b"k", b"z", 25).unwrap();
+        assert_eq!(a, 8);
+        assert_eq!(b, 8, "zipf-style repeat must return the same count");
+        db.put_cf(&cf, b"ky", b"new").unwrap();
+        let c = db.count_named("write", b"k", b"z", 25).unwrap();
+        assert_eq!(c, 9, "TLS last-count must miss after a published put");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn count_named_tls_last_n_keeps_two_windows() {
+        let dir = tmp("counttlsn");
+        let db = DB::open_cf(&Options::new(), &dir, &["write"]).unwrap();
+        let cf = db.cf_handle("write").unwrap();
+        for i in 0..8u8 {
+            db.put_cf(&cf, [b'k', i], [b'v', i]).unwrap();
+        }
+        let a = db.count_named("write", b"k", b"kd", 25).unwrap();
+        let b = db.count_named("write", b"kd", b"z", 25).unwrap();
+        assert_eq!(a, db.count_named("write", b"k", b"kd", 25).unwrap());
+        assert_eq!(b, db.count_named("write", b"kd", b"z", 25).unwrap());
+        assert_eq!(a + b, 8);
+        db.put_cf(&cf, b"ky", b"new").unwrap();
+        let a2 = db.count_named("write", b"k", b"kd", 25).unwrap();
+        let b2 = db.count_named("write", b"kd", b"z", 25).unwrap();
+        assert_eq!(a2, a, "window below the new key stays");
+        assert_eq!(b2, b + 1, "epoch bump must recompute the covering window");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn get_default_tls_prefixed_cf_hits_then_invalidates() {
+        // Official YCSB-C opens with DEPS_CFS, so `default` is prefixed.
+        let dir = tmp("getdefpx");
+        let db = DB::open_cf(&Options::new(), &dir, &["write"]).unwrap();
+        db.put(b"hot", b"v1").unwrap();
+        assert_eq!(db.get(b"hot").unwrap().as_deref(), Some(b"v1".as_ref()));
+        assert_eq!(
+            db.get(b"hot").unwrap().as_deref(),
+            Some(b"v1".as_ref()),
+            "prefixed default get() must still last-N hit"
+        );
+        db.put(b"hot", b"v2").unwrap();
+        assert_eq!(
+            db.get(b"hot").unwrap().as_deref(),
+            Some(b"v2".as_ref()),
+            "prefixed default last-N must miss after put"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn get_default_tls_hits_then_invalidates_on_put() {
+        let dir = tmp("getdeftls");
+        let db = DB::open_default(&dir).unwrap();
+        db.put(b"hot", b"v1").unwrap();
+        let a = db.get(b"hot").unwrap();
+        let b = db.get(b"hot").unwrap();
+        assert_eq!(a.as_deref(), Some(b"v1".as_ref()));
+        assert_eq!(b, a, "YCSB-C get() must hit the key-only last-N");
+        db.put(b"hot", b"v2").unwrap();
+        let c = db.get(b"hot").unwrap();
+        assert_eq!(
+            c.as_deref(),
+            Some(b"v2".as_ref()),
+            "default last-N must miss after a published put"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn get_default_tls_keeps_zipf_working_set() {
+        let dir = tmp("getdefws");
+        let db = DB::open_default(&dir).unwrap();
+        for i in 0..200u16 {
+            let k = format!("ycsb/{i:06}").into_bytes();
+            db.put(&k, [b'v', (i & 0xff) as u8]).unwrap();
+        }
+        for i in 0..200u16 {
+            let k = format!("ycsb/{i:06}").into_bytes();
+            assert_eq!(
+                db.get(&k).unwrap().as_deref(),
+                Some([b'v', (i & 0xff) as u8].as_ref()),
+                "fill {i}"
+            );
+        }
+        for i in 0..200u16 {
+            let k = format!("ycsb/{i:06}").into_bytes();
+            assert_eq!(
+                db.get(&k).unwrap().as_deref(),
+                Some([b'v', (i & 0xff) as u8].as_ref()),
+                "key-only last-N must still answer ycsb/{i:06}"
+            );
+        }
+        db.put(b"other", b"x").unwrap();
+        let k0 = format!("ycsb/{:06}", 0).into_bytes();
+        assert_eq!(
+            db.get(&k0).unwrap().as_deref(),
+            Some([b'v', 0].as_ref()),
+            "epoch bump must not serve a stale default last-N value"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn get_named_tls_hits_then_invalidates_on_put() {
+        let dir = tmp("gettls");
+        let db = DB::open_default(&dir).unwrap();
+        db.put(b"hot", b"v1").unwrap();
+        let a = db.get_named(DEFAULT_CF, b"hot").unwrap();
+        let b = db.get_named(DEFAULT_CF, b"hot").unwrap();
+        assert_eq!(a.as_deref(), Some(b"v1".as_ref()));
+        assert_eq!(b, a, "zipf-style repeat must return the same bytes");
+        db.put(b"hot", b"v2").unwrap();
+        let c = db.get_named(DEFAULT_CF, b"hot").unwrap();
+        assert_eq!(
+            c.as_deref(),
+            Some(b"v2".as_ref()),
+            "TLS last-get must miss after a published put"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn get_named_tls_last_n_keeps_two_hot_keys() {
+        let dir = tmp("gettlsn");
+        let db = DB::open_default(&dir).unwrap();
+        db.put(b"hot", b"v1").unwrap();
+        db.put(b"hot2", b"v2").unwrap();
+        assert_eq!(
+            db.get_named(DEFAULT_CF, b"hot").unwrap().as_deref(),
+            Some(b"v1".as_ref())
+        );
+        assert_eq!(
+            db.get_named(DEFAULT_CF, b"hot2").unwrap().as_deref(),
+            Some(b"v2".as_ref())
+        );
+        assert_eq!(
+            db.get_named(DEFAULT_CF, b"hot").unwrap().as_deref(),
+            Some(b"v1".as_ref()),
+            "last-N must still hold the first key after a second fill"
+        );
+        db.put(b"hot", b"v3").unwrap();
+        assert_eq!(
+            db.get_named(DEFAULT_CF, b"hot").unwrap().as_deref(),
+            Some(b"v3".as_ref()),
+            "epoch bump must drop every last-N slot"
+        );
+        assert_eq!(
+            db.get_named(DEFAULT_CF, b"hot2").unwrap().as_deref(),
+            Some(b"v2".as_ref())
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn get_named_tls_direct_map_keeps_zipf_hot_set() {
+        let dir = tmp("gettlsdm");
+        let db = DB::open_default(&dir).unwrap();
+        for i in 0..64u8 {
+            db.put([b'k', i], [b'v', i]).unwrap();
+        }
+        for i in 0..64u8 {
+            assert_eq!(
+                db.get_named(DEFAULT_CF, [b'k', i]).unwrap().as_deref(),
+                Some([b'v', i].as_ref()),
+                "fill key {i}"
+            );
+        }
+        for i in 0..64u8 {
+            assert_eq!(
+                db.get_named(DEFAULT_CF, [b'k', i]).unwrap().as_deref(),
+                Some([b'v', i].as_ref()),
+                "direct-map last-N must still answer key {i}"
+            );
+        }
+        db.put(b"other", b"x").unwrap();
+        assert_eq!(
+            db.get_named(DEFAULT_CF, [b'k', 0]).unwrap().as_deref(),
+            Some([b'v', 0].as_ref()),
+            "epoch bump must not serve a stale last-N value"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn write_cf_owned_moves_values_and_is_durable() {
+        let dir = tmp("cfowned");
+        let db = DB::open_cf(&Options::new(), &dir, &["raftlog"]).unwrap();
+        db.write_cf_owned(
+            vec![("raftlog", b"raftlog/00000001".to_vec(), vec![0xab; 1024])],
+            vec![],
+        )
+        .unwrap();
+        let got = db
+            .get_named("raftlog", b"raftlog/00000001")
+            .unwrap()
+            .expect("owned put");
+        assert_eq!(got.len(), 1024);
+        assert!(got.iter().all(|&b| b == 0xab));
+        drop(db);
+        let db = DB::open_cf(&Options::new(), &dir, &["raftlog"]).unwrap();
+        let got = db
+            .get_named("raftlog", b"raftlog/00000001")
+            .unwrap()
+            .expect("replay");
+        assert_eq!(got.len(), 1024);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn write_cf_slices_is_durable() {
+        let dir = tmp("cfslices");
+        let db = DB::open_cf(&Options::new(), &dir, &["raftlog"]).unwrap();
+        db.write_cf_slices(
+            &[(
+                "raftlog",
+                b"raftlog/00000001".as_slice(),
+                b"entry".as_slice(),
+            )],
+            &[],
+        )
+        .unwrap();
+        assert_eq!(
+            db.get_named("raftlog", b"raftlog/00000001")
+                .unwrap()
+                .as_deref(),
+            Some(b"entry".as_ref())
+        );
+        drop(db);
+        let db = DB::open_cf(&Options::new(), &dir, &["raftlog"]).unwrap();
+        assert_eq!(
+            db.get_named("raftlog", b"raftlog/00000001")
+                .unwrap()
+                .as_deref(),
+            Some(b"entry".as_ref())
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

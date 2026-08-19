@@ -1,0 +1,20 @@
+{
+  "bench": "rocks-side-peer-template",
+  "engine": "rocksdb",
+  "sync": false,
+  "durability": "async-wal (WriteOptions.sync=false, rocksdb default)",
+  "benches": [
+    {
+      "name": "arango_doc_crud",
+      "qps": null,
+      "compat_qps_ref": 50655.408,
+      "note": "fill qps from real RocksDB same shape"
+    },
+    {
+      "name": "arango_traversal",
+      "qps": null,
+      "compat_qps_ref": 725667.551,
+      "note": "fill qps from real RocksDB same shape"
+    }
+  ]
+}

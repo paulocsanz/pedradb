@@ -51,8 +51,15 @@ fn main() {
         .as_deref()
         .and_then(|s| extract_string_field(s, "durability"));
 
-    // Official peer is Rocks default (sync=false). A sync=true peer is not a win.
+    // Official cartaz: Rocks default (sync=false). A blanket sync=true peer
+    // is not a win — unless this run is host-default (MyRocks commit-sync /
+    // Surreal sync=every), which is the upper DB's own factory setting.
+    let peer_policy = peer_raw
+        .as_deref()
+        .and_then(|s| extract_string_field(s, "peer_policy"));
+    let host_default = peer_policy.as_deref() == Some("host-default");
     if peer_sync == Some(true)
+        && !host_default
         && std::env::var("ROCKS_PARITY_ALLOW_SYNC_PEER")
             .ok()
             .as_deref()
@@ -61,6 +68,7 @@ fn main() {
         eprintln!(
             "rocks-parity-compare: peer has sync=true — that is NOT the official Rocks default. \
              Re-run the rocks side with ROCKS_PARITY_SYNC=0. \
+             Host-default MyRocks/Surreal sets peer_policy=host-default. \
              Override only with ROCKS_PARITY_ALLOW_SYNC_PEER=1."
         );
         std::process::exit(2);
@@ -80,24 +88,9 @@ fn main() {
 
     // Ratio table: compat / rocksdb when both present; else null.
     // Union of both suites — rows absent from a report stay null.
-    let shapes = [
-        "ycsb_a",
-        "ycsb_b",
-        "ycsb_c",
-        "ycsb_d",
-        "ycsb_e",
-        "ycsb_f",
-        "deps_apply_batch",
-        "deps_mvcc_latest",
-        "deps_scan",
-        "deps_raftlog",
-        "deps_cache_overwrite",
-        "ycsb_a_mc4",
-        "ycsb_f_mc4",
-        "deps_cache_overwrite_mc4",
-        "deps_apply_batch_mc4",
-        "deps_raftlog_mc4",
-    ];
+    // RFC-0043: COMPARE_SHAPES only grows. Never delete a shape to lift min_ratio.
+    // High-level gate set (ROCKS_PARITY_GATE_SHAPES) is a subset; canaries stay.
+    let shapes = rocksdb_parity_bench::COMPARE_SHAPES;
     let parity_floor: Option<f64> = std::env::var("ROCKS_PARITY_RATIO_FLOOR")
         .ok()
         .filter(|s| s != "none")
@@ -153,6 +146,25 @@ fn main() {
     }
     ratios.push_str("\n  ]");
 
+    let anomalies = rocksdb_parity_bench::peer_anomalies(&peer_metrics);
+    let anomalies_json = if anomalies.is_empty() {
+        "[]".to_string()
+    } else {
+        format!(
+            "[{}]",
+            anomalies
+                .iter()
+                .map(|s| format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\"")))
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    };
+    if !anomalies.is_empty() {
+        for a in &anomalies {
+            eprintln!("rocks-parity-compare: peer anomaly: {a}");
+        }
+    }
+
     // Parity summary: only meaningful when a real peer produced ratios.
     let shapes_with_peer = real_ratios.len();
     let parity = if let Some(floor) = parity_floor {
@@ -206,6 +218,7 @@ fn main() {
     "how_to_fill": "1) cargo run -q --release -p rocksdb-parity-bench --features real --bin rocks-parity-bench -- <out> rocksdb  2) ROCKS_PARITY_PEER=<out>/rocks_parity_bench.json rocks-parity-compare  3) scripts/rocksdb_parity_v0.sh does both. See docs/rocksdb-compat.md"
   }},
   "ratios": {ratios},
+  "peer_anomalies": {anomalies_json},
   "parity": {parity},
   "honesty": "Single-node lab bench: rocksdb-compat (Pedra, fdatasync before Ok) vs real RocksDB default (WriteOptions.sync=false). Official peer is Rocks **default**, not a matched-sync peer. ROCKS_PARITY_SYNC=1 is an extra same-class column only. Pedra keeps the stronger durability and still has to beat default Rocks. Not a distributed/field claim."
 }}
@@ -240,6 +253,12 @@ fn main() {
             );
             std::process::exit(2);
         }
+    }
+    if !anomalies.is_empty()
+        && std::env::var("ROCKS_PARITY_FAIL_PEER_ANOMALY").as_deref() == Ok("1")
+    {
+        eprintln!("parity gate FAILED: peer_anomalies={}", anomalies.len());
+        std::process::exit(2);
     }
 }
 
@@ -378,5 +397,15 @@ mod tests {
             extract_string_field(stub, "status").as_deref(),
             Some("unavailable")
         );
+    }
+
+    #[test]
+    fn peer_anomalies_flag_incoherent_rmw() {
+        let mut peer = std::collections::BTreeMap::new();
+        peer.insert("surreal_tx_put".into(), 3072.0);
+        peer.insert("surreal_tx_rmw".into(), 5009.0);
+        let a = rocksdb_parity_bench::peer_anomalies(&peer);
+        assert_eq!(a.len(), 1);
+        assert!(a[0].contains("rmw ⊃ put"));
     }
 }

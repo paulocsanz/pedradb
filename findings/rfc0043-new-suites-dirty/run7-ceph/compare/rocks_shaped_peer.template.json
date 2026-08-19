@@ -1,0 +1,20 @@
+{
+  "bench": "rocks-side-peer-template",
+  "engine": "rocksdb",
+  "sync": false,
+  "durability": "async-wal (WriteOptions.sync=false, rocksdb default)",
+  "benches": [
+    {
+      "name": "bluestore_omap_read",
+      "qps": null,
+      "compat_qps_ref": 193332.447,
+      "note": "fill qps from real RocksDB same shape"
+    },
+    {
+      "name": "bluestore_omap_write",
+      "qps": null,
+      "compat_qps_ref": 7596.726,
+      "note": "fill qps from real RocksDB same shape"
+    }
+  ]
+}

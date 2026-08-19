@@ -1,0 +1,32 @@
+{
+  "bench": "rocks-parity-v1",
+  "engine": "rocksdb",
+  "sync": false,
+  "peer_policy": "rocks-default",
+  "durability": "async-wal (WriteOptions.sync=false, rocksdb default)",
+  "changelog_interval": 0,
+  "status": "ok",
+  "notes": ["ycsb records=4096 ops=2000 payload=1024 dist=zipfian", "engine=rocksdb durability=async-wal (WriteOptions.sync=false, rocksdb default)", "suites: nebula", "seed: one put per record (not timed)", "cfs: default + write, lock, raftlog (TiKV store shape; raftlog = raftdb)", "deps apply batch txns/commit: 32", "changelog_interval=0", "peer_policy=rocks-default", "host-default write sync: kvrocks=false myrocks=true surreal=true"],
+  "benches": [
+{
+    "name": "nebula_get_neighbors",
+    "n": 2000,
+    "qps": 248731.717,
+    "p50_ms": 0.0027,
+    "p95_ms": 0.0049,
+    "p99_ms": 0.0070,
+    "max_ms": 1.4928,
+    "wall_s": 0.0080
+  },
+{
+    "name": "nebula_insert_edge",
+    "n": 2000,
+    "qps": 8315.363,
+    "p50_ms": 0.0763,
+    "p95_ms": 0.1781,
+    "p99_ms": 0.6219,
+    "max_ms": 9.8872,
+    "wall_s": 0.2405
+  }
+  ]
+}

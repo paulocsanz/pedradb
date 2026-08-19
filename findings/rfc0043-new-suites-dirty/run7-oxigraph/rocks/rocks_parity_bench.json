@@ -1,0 +1,32 @@
+{
+  "bench": "rocks-parity-v1",
+  "engine": "rocksdb",
+  "sync": false,
+  "peer_policy": "rocks-default",
+  "durability": "async-wal (WriteOptions.sync=false, rocksdb default)",
+  "changelog_interval": 0,
+  "status": "ok",
+  "notes": ["ycsb records=4096 ops=2000 payload=1024 dist=zipfian", "engine=rocksdb durability=async-wal (WriteOptions.sync=false, rocksdb default)", "suites: oxigraph", "seed: one put per record (not timed)", "cfs: default + write, lock, raftlog (TiKV store shape; raftlog = raftdb)", "deps apply batch txns/commit: 32", "changelog_interval=0", "peer_policy=rocks-default", "host-default write sync: kvrocks=false myrocks=true surreal=true"],
+  "benches": [
+{
+    "name": "oxigraph_spo_lookup",
+    "n": 2000,
+    "qps": 956708.921,
+    "p50_ms": 0.0009,
+    "p95_ms": 0.0019,
+    "p99_ms": 0.0027,
+    "max_ms": 0.0080,
+    "wall_s": 0.0021
+  },
+{
+    "name": "oxigraph_triple_put",
+    "n": 2000,
+    "qps": 6744.172,
+    "p50_ms": 0.0788,
+    "p95_ms": 0.2796,
+    "p99_ms": 1.3532,
+    "max_ms": 14.9249,
+    "wall_s": 0.2966
+  }
+  ]
+}

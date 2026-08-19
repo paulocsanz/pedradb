@@ -1,0 +1,32 @@
+{
+  "bench": "rocks-parity-v1",
+  "engine": "rocksdb",
+  "sync": false,
+  "peer_policy": "rocks-default",
+  "durability": "async-wal (WriteOptions.sync=false, rocksdb default)",
+  "changelog_interval": 0,
+  "status": "ok",
+  "notes": ["ycsb records=4096 ops=2000 payload=1024 dist=zipfian", "engine=rocksdb durability=async-wal (WriteOptions.sync=false, rocksdb default)", "suites: arango", "seed: one put per record (not timed)", "cfs: default + write, lock, raftlog (TiKV store shape; raftlog = raftdb)", "deps apply batch txns/commit: 32", "changelog_interval=0", "peer_policy=rocks-default", "host-default write sync: kvrocks=false myrocks=true surreal=true"],
+  "benches": [
+{
+    "name": "arango_doc_crud",
+    "n": 2000,
+    "qps": 371123.476,
+    "p50_ms": 0.0022,
+    "p95_ms": 0.0078,
+    "p99_ms": 0.0100,
+    "max_ms": 0.0366,
+    "wall_s": 0.0054
+  },
+{
+    "name": "arango_traversal",
+    "n": 2000,
+    "qps": 252084.963,
+    "p50_ms": 0.0037,
+    "p95_ms": 0.0053,
+    "p99_ms": 0.0072,
+    "max_ms": 0.0813,
+    "wall_s": 0.0079
+  }
+  ]
+}

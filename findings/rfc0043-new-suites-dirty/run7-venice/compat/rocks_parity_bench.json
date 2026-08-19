@@ -1,0 +1,32 @@
+{
+  "bench": "rocks-parity-v1",
+  "engine": "compat",
+  "sync": true,
+  "peer_policy": "rocks-default",
+  "durability": "fdatasync-before-ok (pedradb-core WAL; RFC-0001/0036)",
+  "changelog_interval": 0,
+  "status": "ok",
+  "notes": ["ycsb records=4096 ops=2000 payload=1024 dist=zipfian", "engine=compat durability=fdatasync-before-ok (pedradb-core WAL; RFC-0001/0036)", "suites: venice", "seed: one put per record (not timed)", "cfs: default + write, lock, raftlog (TiKV store shape; raftlog = raftdb)", "deps apply batch txns/commit: 32", "changelog_interval=0", "peer_policy=rocks-default", "host-default write sync: kvrocks=false myrocks=true surreal=true"],
+  "benches": [
+{
+    "name": "venice_fanout_get",
+    "n": 2000,
+    "qps": 39908.675,
+    "p50_ms": 0.0197,
+    "p95_ms": 0.0393,
+    "p99_ms": 0.0614,
+    "max_ms": 4.9050,
+    "wall_s": 0.0501
+  },
+{
+    "name": "rockstore_widecol_rw",
+    "n": 2000,
+    "qps": 39151.266,
+    "p50_ms": 0.0332,
+    "p95_ms": 0.0488,
+    "p99_ms": 0.0737,
+    "max_ms": 3.5048,
+    "wall_s": 0.0511
+  }
+  ]
+}

@@ -1,0 +1,20 @@
+{
+  "bench": "rocks-side-peer-template",
+  "engine": "rocksdb",
+  "sync": false,
+  "durability": "async-wal (WriteOptions.sync=false, rocksdb default)",
+  "benches": [
+    {
+      "name": "nebula_get_neighbors",
+      "qps": null,
+      "compat_qps_ref": 579682.085,
+      "note": "fill qps from real RocksDB same shape"
+    },
+    {
+      "name": "nebula_insert_edge",
+      "qps": null,
+      "compat_qps_ref": 7654.258,
+      "note": "fill qps from real RocksDB same shape"
+    }
+  ]
+}

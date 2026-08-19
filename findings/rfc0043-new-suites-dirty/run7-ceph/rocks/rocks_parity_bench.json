@@ -1,0 +1,32 @@
+{
+  "bench": "rocks-parity-v1",
+  "engine": "rocksdb",
+  "sync": true,
+  "peer_policy": "host-default",
+  "durability": "host-default (MyRocks commit-sync / Surreal sync=every; not official Rocks async)",
+  "changelog_interval": 0,
+  "status": "ok",
+  "notes": ["ycsb records=4096 ops=2000 payload=1024 dist=zipfian", "engine=rocksdb durability=host-default (MyRocks commit-sync / Surreal sync=every; not official Rocks async)", "suites: ceph", "seed: one put per record (not timed)", "cfs: default + write, lock, raftlog (TiKV store shape; raftlog = raftdb)", "deps apply batch txns/commit: 32", "changelog_interval=0", "peer_policy=host-default", "host-default write sync: kvrocks=false myrocks=true surreal=true"],
+  "benches": [
+{
+    "name": "bluestore_omap_write",
+    "n": 2000,
+    "qps": 6375.752,
+    "p50_ms": 0.1251,
+    "p95_ms": 0.2118,
+    "p99_ms": 0.6333,
+    "max_ms": 7.7846,
+    "wall_s": 0.3137
+  },
+{
+    "name": "bluestore_omap_read",
+    "n": 2000,
+    "qps": 41893.700,
+    "p50_ms": 0.0181,
+    "p95_ms": 0.0363,
+    "p99_ms": 0.0773,
+    "max_ms": 1.7896,
+    "wall_s": 0.0477
+  }
+  ]
+}

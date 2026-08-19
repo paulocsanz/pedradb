@@ -1,0 +1,62 @@
+{
+  "bench": "rocks-parity-v1",
+  "engine": "rocksdb",
+  "sync": true,
+  "peer_policy": "host-default",
+  "durability": "host-default (MyRocks commit-sync / Surreal sync=every; OptimisticTransactionDB)",
+  "changelog_interval": 0,
+  "status": "ok",
+  "notes": ["ycsb records=4096 ops=2000 payload=1024 dist=zipfian", "engine=rocksdb durability=host-default (MyRocks commit-sync / Surreal sync=every; OptimisticTransactionDB)", "suites: surreal", "seed: one put per record (not timed)", "cfs: default + write, lock, raftlog (TiKV store shape; raftlog = raftdb)", "deps apply batch txns/commit: 32", "changelog_interval=0", "peer_policy=host-default", "host-default write sync: kvrocks=false myrocks=true surreal=true"],
+  "benches": [
+{
+    "name": "surreal_tx_get",
+    "n": 2000,
+    "qps": 3232.590,
+    "p50_ms": 0.0355,
+    "p95_ms": 0.0825,
+    "p99_ms": 8.6433,
+    "max_ms": 47.4386,
+    "wall_s": 0.6187
+  },
+{
+    "name": "surreal_tx_put",
+    "n": 2000,
+    "qps": 3072.248,
+    "p50_ms": 0.0377,
+    "p95_ms": 0.0873,
+    "p99_ms": 11.2323,
+    "max_ms": 28.8736,
+    "wall_s": 0.6510
+  },
+{
+    "name": "surreal_tx_rmw",
+    "n": 2000,
+    "qps": 5009.125,
+    "p50_ms": 0.0398,
+    "p95_ms": 0.0728,
+    "p99_ms": 3.6846,
+    "max_ms": 45.5191,
+    "wall_s": 0.3993
+  },
+{
+    "name": "surreal_tx_scan",
+    "n": 2000,
+    "qps": 2297.424,
+    "p50_ms": 0.0560,
+    "p95_ms": 0.1335,
+    "p99_ms": 10.2625,
+    "max_ms": 91.1954,
+    "wall_s": 0.8705
+  },
+{
+    "name": "surreal_tx_batch",
+    "n": 2000,
+    "qps": 823.584,
+    "p50_ms": 0.1302,
+    "p95_ms": 7.5637,
+    "p99_ms": 21.0353,
+    "max_ms": 105.5341,
+    "wall_s": 2.4284
+  }
+  ]
+}

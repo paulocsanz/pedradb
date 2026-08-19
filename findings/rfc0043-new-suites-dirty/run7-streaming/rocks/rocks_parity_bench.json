@@ -1,0 +1,32 @@
+{
+  "bench": "rocks-parity-v1",
+  "engine": "rocksdb",
+  "sync": false,
+  "peer_policy": "rocks-default",
+  "durability": "async-wal (WriteOptions.sync=false, rocksdb default)",
+  "changelog_interval": 0,
+  "status": "ok",
+  "notes": ["ycsb records=4096 ops=2000 payload=1024 dist=zipfian", "engine=rocksdb durability=async-wal (WriteOptions.sync=false, rocksdb default)", "suites: streaming", "seed: one put per record (not timed)", "cfs: default + write, lock, raftlog (TiKV store shape; raftlog = raftdb)", "deps apply batch txns/commit: 32", "changelog_interval=0", "peer_policy=rocks-default", "host-default write sync: kvrocks=false myrocks=true surreal=true"],
+  "benches": [
+{
+    "name": "flink_window_state",
+    "n": 2000,
+    "qps": 54550.352,
+    "p50_ms": 0.0142,
+    "p95_ms": 0.0317,
+    "p99_ms": 0.0558,
+    "max_ms": 0.8822,
+    "wall_s": 0.0367
+  },
+{
+    "name": "kafka_changelog_flush",
+    "n": 2000,
+    "qps": 130.511,
+    "p50_ms": 1.2149,
+    "p95_ms": 57.9408,
+    "p99_ms": 104.8472,
+    "max_ms": 165.9707,
+    "wall_s": 15.3244
+  }
+  ]
+}

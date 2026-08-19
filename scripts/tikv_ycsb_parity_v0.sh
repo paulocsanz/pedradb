@@ -29,7 +29,15 @@ export ROCKS_PARITY_SUITE="${ROCKS_PARITY_SUITE:-ycsb,deps}"
 export ROCKS_PARITY_SYNC="${ROCKS_PARITY_SYNC:-0}"
 FULL="${ROCKS_PARITY_FULL_SYNC:-0}"
 export ROCKS_PARITY_FULL_SYNC="$FULL"
-# RFC-0035 P2.2: MVCC+scan ≤2× vs same-class F_FULLFSYNC (do not gate ycsb C/E).
+# RFC-0035 P2.2: MVCC+scan vs same-class F_FULLFSYNC (do not gate ycsb C/E).
+# RFC-0041 P0.3: FLOOR=2.0 *wiring* is ready. Do **not** default it on
+# SYNC=0: head3 median-passers (apply_mc4 / MVCC / E) each miss 2.0 on
+# ≥1 of the 3 official runs (apply_mc4 run1=1.30, MVCC run3=1.62, E
+# run3=0.93). Opt in:
+#   ROCKS_PARITY_RATIO_FLOOR=2.0 \
+#   ROCKS_PARITY_GATE_SHAPES=deps_apply_batch_mc4,deps_mvcc_latest,ycsb_e
+# P2.3 (gate every official shape) stays off until 1c write can close.
+# All 16 shapes always stay in compare_report.json.
 if [ "$FULL" = "1" ]; then
   export ROCKS_PARITY_RATIO_FLOOR="${ROCKS_PARITY_RATIO_FLOOR:-0.5}"
   export ROCKS_PARITY_GATE_SHAPES="${ROCKS_PARITY_GATE_SHAPES:-deps_mvcc_latest,deps_scan}"

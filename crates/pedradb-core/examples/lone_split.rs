@@ -70,12 +70,14 @@ fn main() {
     drop(db);
     let _ = fs::remove_dir_all(&dir);
 
-    let delta = |a: &[u64; 4], b: &[u64; 4]| [
-        a[0].saturating_sub(b[0]),
-        a[1].saturating_sub(b[1]),
-        a[2].saturating_sub(b[2]),
-        a[3].saturating_sub(b[3]),
-    ];
+    let delta = |a: &[u64; 4], b: &[u64; 4]| {
+        [
+            a[0].saturating_sub(b[0]),
+            a[1].saturating_sub(b[1]),
+            a[2].saturating_sub(b[2]),
+            a[3].saturating_sub(b[3]),
+        ]
+    };
     print_pass(
         "append (unique keys)",
         n1 - n0,
@@ -90,7 +92,10 @@ fn main() {
         overwrite_wall,
         iters,
     );
-    println!("wal fd ema after run: {ema:.1} µs", ema = fd_ema.as_secs_f64() * 1e6);
+    println!(
+        "wal fd ema after run: {ema:.1} µs",
+        ema = fd_ema.as_secs_f64() * 1e6
+    );
 
     // Isolated fd floor: 1 KiB write + fdatasync on a raw file, same box.
     let raw_dir = std::env::temp_dir().join(format!(
@@ -138,8 +143,14 @@ fn print_pass(label: &str, n: u64, split: &[u64; 4], wall: std::time::Duration, 
         "  start   (lock+prepare+encode) {start:8.2} µs  {p1:5.1}%",
         p1 = 100.0 * start / total
     );
-    println!("  apply   (memtable)            {apply:8.2} µs  {p2:5.1}%", p2 = 100.0 * apply / total);
-    println!("  io      (write+fdatasync)    {io:8.2} µs  {p3:5.1}%", p3 = 100.0 * io / total);
+    println!(
+        "  apply   (memtable)            {apply:8.2} µs  {p2:5.1}%",
+        p2 = 100.0 * apply / total
+    );
+    println!(
+        "  io      (write+fdatasync)    {io:8.2} µs  {p3:5.1}%",
+        p3 = 100.0 * io / total
+    );
     println!(
         "  publish (visibility)         {publish:8.2} µs  {p4:5.1}%",
         p4 = 100.0 * publish / total

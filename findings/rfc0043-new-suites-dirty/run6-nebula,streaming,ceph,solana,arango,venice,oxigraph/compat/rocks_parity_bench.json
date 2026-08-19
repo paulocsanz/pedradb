@@ -1,0 +1,152 @@
+{
+  "bench": "rocks-parity-v1",
+  "engine": "compat",
+  "sync": true,
+  "peer_policy": "host-default",
+  "durability": "fdatasync-before-ok (pedradb-core WAL; RFC-0001/0036)",
+  "changelog_interval": 0,
+  "status": "ok",
+  "notes": ["ycsb records=4096 ops=2000 payload=1024 dist=zipfian", "engine=compat durability=fdatasync-before-ok (pedradb-core WAL; RFC-0001/0036)", "suites: nebula,streaming,ceph,solana,arango,venice,oxigraph", "seed: one put per record (not timed)", "cfs: default + write, lock, raftlog (TiKV store shape; raftlog = raftdb)", "deps apply batch txns/commit: 32", "changelog_interval=0", "peer_policy=host-default", "host-default write sync: kvrocks=false myrocks=true surreal=true"],
+  "benches": [
+{
+    "name": "nebula_get_neighbors",
+    "n": 2000,
+    "qps": 980952.839,
+    "p50_ms": 0.0003,
+    "p95_ms": 0.0018,
+    "p99_ms": 0.0033,
+    "max_ms": 0.3406,
+    "wall_s": 0.0020
+  },
+{
+    "name": "nebula_insert_edge",
+    "n": 2000,
+    "qps": 1134.822,
+    "p50_ms": 0.0845,
+    "p95_ms": 4.9997,
+    "p99_ms": 17.1709,
+    "max_ms": 52.3848,
+    "wall_s": 1.7624
+  },
+{
+    "name": "flink_window_state",
+    "n": 2000,
+    "qps": 3327.899,
+    "p50_ms": 0.0482,
+    "p95_ms": 0.2799,
+    "p99_ms": 7.5451,
+    "max_ms": 34.2598,
+    "wall_s": 0.6010
+  },
+{
+    "name": "kafka_changelog_flush",
+    "n": 2000,
+    "qps": 230.203,
+    "p50_ms": 0.6988,
+    "p95_ms": 20.7171,
+    "p99_ms": 40.7890,
+    "max_ms": 129.9742,
+    "wall_s": 8.6880
+  },
+{
+    "name": "bluestore_omap_write",
+    "n": 2000,
+    "qps": 1592.164,
+    "p50_ms": 0.0713,
+    "p95_ms": 1.2438,
+    "p99_ms": 17.4222,
+    "max_ms": 69.6319,
+    "wall_s": 1.2562
+  },
+{
+    "name": "bluestore_omap_read",
+    "n": 2000,
+    "qps": 45136.877,
+    "p50_ms": 0.0012,
+    "p95_ms": 0.0517,
+    "p99_ms": 0.1160,
+    "max_ms": 10.1975,
+    "wall_s": 0.0443
+  },
+{
+    "name": "solana_shred_append",
+    "n": 2000,
+    "qps": 3051.688,
+    "p50_ms": 0.0522,
+    "p95_ms": 0.1825,
+    "p99_ms": 5.2290,
+    "max_ms": 90.5281,
+    "wall_s": 0.6554
+  },
+{
+    "name": "solana_trailing_read",
+    "n": 2000,
+    "qps": 46601.489,
+    "p50_ms": 0.0004,
+    "p95_ms": 0.0402,
+    "p99_ms": 0.0701,
+    "max_ms": 20.1487,
+    "wall_s": 0.0429
+  },
+{
+    "name": "arango_doc_crud",
+    "n": 2000,
+    "qps": 2829.707,
+    "p50_ms": 0.0189,
+    "p95_ms": 0.5545,
+    "p99_ms": 7.9740,
+    "max_ms": 59.4540,
+    "wall_s": 0.7068
+  },
+{
+    "name": "arango_traversal",
+    "n": 2000,
+    "qps": 11301.947,
+    "p50_ms": 0.0009,
+    "p95_ms": 0.0895,
+    "p99_ms": 0.3474,
+    "max_ms": 55.4782,
+    "wall_s": 0.1770
+  },
+{
+    "name": "venice_fanout_get",
+    "n": 2000,
+    "qps": 2793.498,
+    "p50_ms": 0.0237,
+    "p95_ms": 0.0841,
+    "p99_ms": 4.8870,
+    "max_ms": 84.5442,
+    "wall_s": 0.7159
+  },
+{
+    "name": "rockstore_widecol_rw",
+    "n": 2000,
+    "qps": 9329.111,
+    "p50_ms": 0.0359,
+    "p95_ms": 0.2263,
+    "p99_ms": 1.1476,
+    "max_ms": 30.0829,
+    "wall_s": 0.2144
+  },
+{
+    "name": "oxigraph_spo_lookup",
+    "n": 2000,
+    "qps": 860261.304,
+    "p50_ms": 0.0007,
+    "p95_ms": 0.0024,
+    "p99_ms": 0.0040,
+    "max_ms": 0.1199,
+    "wall_s": 0.0023
+  },
+{
+    "name": "oxigraph_triple_put",
+    "n": 2000,
+    "qps": 767.235,
+    "p50_ms": 0.1013,
+    "p95_ms": 7.1595,
+    "p99_ms": 19.7812,
+    "max_ms": 53.5579,
+    "wall_s": 2.6068
+  }
+  ]
+}

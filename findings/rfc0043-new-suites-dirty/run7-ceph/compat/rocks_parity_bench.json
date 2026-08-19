@@ -1,0 +1,32 @@
+{
+  "bench": "rocks-parity-v1",
+  "engine": "compat",
+  "sync": true,
+  "peer_policy": "host-default",
+  "durability": "fdatasync-before-ok (pedradb-core WAL; RFC-0001/0036)",
+  "changelog_interval": 0,
+  "status": "ok",
+  "notes": ["ycsb records=4096 ops=2000 payload=1024 dist=zipfian", "engine=compat durability=fdatasync-before-ok (pedradb-core WAL; RFC-0001/0036)", "suites: ceph", "seed: one put per record (not timed)", "cfs: default + write, lock, raftlog (TiKV store shape; raftlog = raftdb)", "deps apply batch txns/commit: 32", "changelog_interval=0", "peer_policy=host-default", "host-default write sync: kvrocks=false myrocks=true surreal=true"],
+  "benches": [
+{
+    "name": "bluestore_omap_write",
+    "n": 2000,
+    "qps": 7596.726,
+    "p50_ms": 0.0987,
+    "p95_ms": 0.1586,
+    "p99_ms": 0.6062,
+    "max_ms": 7.5508,
+    "wall_s": 0.2633
+  },
+{
+    "name": "bluestore_omap_read",
+    "n": 2000,
+    "qps": 193332.447,
+    "p50_ms": 0.0010,
+    "p95_ms": 0.0155,
+    "p99_ms": 0.0351,
+    "max_ms": 0.3972,
+    "wall_s": 0.0103
+  }
+  ]
+}

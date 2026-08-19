@@ -1,0 +1,86 @@
+{
+  "bench": "rocks-side-peer-template",
+  "engine": "rocksdb",
+  "sync": false,
+  "durability": "async-wal (WriteOptions.sync=false, rocksdb default)",
+  "benches": [
+    {
+      "name": "kvrocks_get",
+      "qps": null,
+      "compat_qps_ref": 1466991.948,
+      "note": "fill qps from real RocksDB same shape"
+    },
+    {
+      "name": "kvrocks_pipelined_set",
+      "qps": null,
+      "compat_qps_ref": 372.994,
+      "note": "fill qps from real RocksDB same shape"
+    },
+    {
+      "name": "kvrocks_scan",
+      "qps": null,
+      "compat_qps_ref": 102378.163,
+      "note": "fill qps from real RocksDB same shape"
+    },
+    {
+      "name": "kvrocks_set",
+      "qps": null,
+      "compat_qps_ref": 435.107,
+      "note": "fill qps from real RocksDB same shape"
+    },
+    {
+      "name": "linkbench_mix",
+      "qps": null,
+      "compat_qps_ref": 3852.635,
+      "note": "fill qps from real RocksDB same shape"
+    },
+    {
+      "name": "myrocks_point_select",
+      "qps": null,
+      "compat_qps_ref": 266218.532,
+      "note": "fill qps from real RocksDB same shape"
+    },
+    {
+      "name": "myrocks_read_only",
+      "qps": null,
+      "compat_qps_ref": 127931.429,
+      "note": "fill qps from real RocksDB same shape"
+    },
+    {
+      "name": "myrocks_write_tx",
+      "qps": null,
+      "compat_qps_ref": 788.789,
+      "note": "fill qps from real RocksDB same shape"
+    },
+    {
+      "name": "surreal_tx_batch",
+      "qps": null,
+      "compat_qps_ref": 17.775,
+      "note": "fill qps from real RocksDB same shape"
+    },
+    {
+      "name": "surreal_tx_get",
+      "qps": null,
+      "compat_qps_ref": 200835.980,
+      "note": "fill qps from real RocksDB same shape"
+    },
+    {
+      "name": "surreal_tx_put",
+      "qps": null,
+      "compat_qps_ref": 267.164,
+      "note": "fill qps from real RocksDB same shape"
+    },
+    {
+      "name": "surreal_tx_rmw",
+      "qps": null,
+      "compat_qps_ref": 272.956,
+      "note": "fill qps from real RocksDB same shape"
+    },
+    {
+      "name": "surreal_tx_scan",
+      "qps": null,
+      "compat_qps_ref": 16721.359,
+      "note": "fill qps from real RocksDB same shape"
+    }
+  ]
+}

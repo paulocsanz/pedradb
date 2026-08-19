@@ -284,6 +284,42 @@ mod tests {
         fdatasync_file(&f).unwrap();
         let _ = fs::remove_dir_all(&dir);
     }
+
+    /// RFC-0041 P1.2: a lone 1-op write that `fdatasync`s before Ok cannot
+    /// reach 2× Rocks **async** YCSB-A on this class of disk. head3 Rocks A
+    /// is 201_917 qps; 2.0× needs ≤ 2.48 µs/op. One real `fdatasync` is
+    /// tens of µs. This is the shipped G1 primitive, not a mock.
+    #[test]
+    fn rfc0041_one_fdatasync_cannot_hit_2x_rocks_default_ycsb_a() {
+        use std::time::{Duration, Instant};
+        let dir = std::env::temp_dir().join(format!(
+            "pedra-fd-ceiling-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("wal.bin");
+        let mut f = File::create(&path).unwrap();
+        let payload = [0xab_u8; 1024];
+        let mut samples = Vec::with_capacity(300);
+        for _ in 0..300 {
+            f.write_all(&payload).unwrap();
+            let t = Instant::now();
+            fdatasync_file(&f).unwrap();
+            samples.push(t.elapsed());
+        }
+        samples.sort();
+        let p50 = samples[samples.len() / 2];
+        // 1 / 201_917 / 2  (head3 rocks ycsb_a × 2.0)
+        let budget_2x_a = Duration::from_nanos(2_476);
+        assert!(
+            p50 > budget_2x_a,
+            "fdatasync p50 {p50:?} ≤ {budget_2x_a:?} — P1.2 1c A would be open on this box"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
 }
 
 /// Helper: join dir + name (avoids pulling [`PathBuf`] logic into every caller).

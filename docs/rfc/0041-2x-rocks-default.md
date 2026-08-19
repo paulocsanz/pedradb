@@ -1,8 +1,9 @@
 # RFC-0041: Pedra ≥ **2×** RocksDB **default** em todo o harness
 
 **Status:** in-progress  
-**Updated:** 2026-08-17  
-**Parents:** [0040](0040-fsync-always-beats-rocks-async.md) (peer = Rocks default; group/sticky), [AGENTS.md](../../AGENTS.md) (única vitória = vs `sync=false`)
+**Updated:** 2026-08-18  
+**Parents:** [0040](0040-fsync-always-beats-rocks-async.md) (peer = Rocks default; group/sticky), [AGENTS.md](../../AGENTS.md) (única vitória = vs `sync=false`)  
+**Children:** [0043](0043-high-level-2x-expanding-benches.md) (2× no subconjunto *alto nível* + catálogo que só cresce; 1c write continua aqui)
 
 ## Background
 
@@ -54,18 +55,18 @@
 
 - [x] **P0.1** RFC + Status vivo (este doc) — status: `done`
 - [x] **P0.2** Remesura 11 + `_mc4` vs `ROCKS_PARITY_SYNC=0` apenas; p50/p95/qps; `fdatasync` isolado; finding `findings/rfc0041-p02/` — status: `done` (**0/16 ≥ 2.0**; apply_mc4 0.89; A 1c 0.056 ≪ 1/fd)
-- [ ] **P0.3** Ligar `ROCKS_PARITY_RATIO_FLOOR=2.0` no script **só** nas shapes que P0.2 já mostrar ≥ 2.0 (não ligar gate vazio) — status: `todo` (C/E/scan já ≥ 2.0 na mediana idle64; o binário gata **todas** as 16 — não ligar até as 16)
+- [x] **P0.3** Ligar `ROCKS_PARITY_RATIO_FLOOR=2.0` no script **só** nas shapes que P0.2 já mostrar ≥ 2.0 (não ligar gate vazio) — status: `done` (wiring + receita no script; **default off**: 0/16 shapes ≥ 2.0 em *todas* as 3 runs do head3; `GATE_SHAPES` documentado)
 
 ### P1 — escritas ≥ 2× default
 
-- [ ] **P1.1** `deps_apply_batch_mc4` e `deps_raftlog_mc4` ≥ 2.0 vs default da run — status: `doing` (head3: **apply_mc4 2.788 ✓** (8.3 k, materialize sem clone no lock); raftlog_mc4 **1.792**; apply 1c 1.30; raftlog 1c 0.99)
-- [ ] **P1.2** `ycsb_a` / `ycsb_f` / `deps_cache_overwrite` (1c e `_mc4` se existirem) ≥ 2.0 vs default — status: `todo` (**teto medido:** fd p50 ≈ 24 µs ⇒ `1/t_fd` ≈ 41 k; parkfold2 A **34.6 k / 0.12×**. 2× Rocks A ~200–400 k está acima de um fd/Ok. Sem largar G1/peer/shapes; FLOOR off até o owner mudar a regra)
-- [ ] **P1.3** `deps_apply_batch` e `deps_raftlog` **1 cliente** ≥ 2.0 vs default — status: `todo`
+- [ ] **P1.1** `deps_apply_batch_mc4` e `deps_raftlog_mc4` ≥ 2.0 vs default da run — status: `doing` (head3: **apply_mc4 2.788 ✓**; raftlog_mc4 **1.792**. Catch-up 50 µs (único dado quieto; 80 µs revertido sem remesura); `write_cf_owned` + WAL 1× `encoded_len`. Remesura só caixa quieta)
+- [ ] **P1.2** `ycsb_a` / `ycsb_f` / `deps_cache_overwrite` (1c e `_mc4` se existirem) ≥ 2.0 vs default — status: `todo` (teto **afirmado no código**: `rfc0041_one_fdatasync_cannot_hit_2x_rocks_default_ycsb_a` — p50 `fdatasync` > 2.48 µs = 2× head3 Rocks A. Sem largar G1/peer/shapes isto não fecha)
+- [ ] **P1.3** `deps_apply_batch` e `deps_raftlog` **1 cliente** ≥ 2.0 vs default — status: `todo` (mesmo `write_cf_owned`; official ainda head3 1.30 / 0.99)
 
 ### P2 — leituras ≥ 2× default
 
-- [ ] **P2.1** `deps_scan` e `ycsb_e` ≥ 2.0 (L0 drenado; p95 do miss) — status: `doing` (head2: **E 2.551 ✓**, scan **1.597** (426 k vs 271 k). tail_idx fix recuperou scan de 0.087)
-- [ ] **P2.2** `ycsb_c` / `b` / `d` / `deps_mvcc_latest` ≥ 2.0 — status: `doing` (head2: **MVCC 2.527 ✓**, C **1.685**; B 0.45 / D 0.52 têm 5% writes 1c = fd-bound)
+- [ ] **P2.1** `deps_scan` e `ycsb_e` ≥ 2.0 (L0 drenado; p95 do miss) — status: `doing` (head3 scan **1.790**. TLS last-1024 count is `&self` on hit; no quiet remesure)
+- [ ] **P2.2** `ycsb_c` / `b` / `d` / `deps_mvcc_latest` ≥ 2.0 — status: `doing` (head3 C **1.796**. Hit path `borrow()` + short-key hash; no quiet remesure)
 - [ ] **P2.3** Gate 2.0 em **todas** as shapes do harness; script default `SYNC=0` `FLOOR=2.0` — status: `todo`
 
 ## Status (living — update with every PR)
@@ -74,12 +75,12 @@
 |----|------|-------|--------|-----------|---------|
 | P0.1 | p0 | RFC | done | este doc | 2026-08-17 |
 | P0.2 | p0 | remesura 11+MC vs default | done | findings/rfc0041-p02 | 2026-08-17 |
-| P0.3 | p0 | floor 2.0 nas que já passam | todo | head3 3/16 (apply_mc4, MVCC, E); sem gate | 2026-08-18 |
-| P1.1 | p1 | apply/raftlog MC ≥ 2× | doing | apply_mc4 **2.788 ✓**; raftlog_mc4 1.792 (head3) | 2026-08-18 |
-| P1.2 | p1 | A/F/overwrite ≥ 2× | todo | teto 1/t_fd ≈ 41 k; head2 A 0.22; FLOOR off | 2026-08-18 |
-| P1.3 | p1 | apply/raftlog 1c ≥ 2× | todo | head2 apply 0.89 / raftlog 0.92 | 2026-08-18 |
-| P2.1 | p2 | scan/E ≥ 2× | doing | E **2.121 ✓**; scan 1.790 (head3) | 2026-08-18 |
-| P2.2 | p2 | C/B/D/MVCC ≥ 2× | doing | MVCC **2.342 ✓**; C 1.796; B/D write-bound (head3) | 2026-08-18 |
+| P0.3 | p0 | floor 2.0 nas que já passam | done | wiring; default off (scatter) | 2026-08-18 |
+| P1.1 | p1 | apply/raftlog MC ≥ 2× | doing | apply_mc4 **2.788 ✓**; raftlog_mc4 1.792 (head3). WAL one `encoded_len` | 2026-08-18 |
+| P1.2 | p1 | A/F/overwrite ≥ 2× | todo | env.rs fd-ceiling test; 1c físico | 2026-08-18 |
+| P1.3 | p1 | apply/raftlog 1c ≥ 2× | todo | head3 apply 1.30 / raftlog 0.99; owned batch | 2026-08-18 |
+| P2.1 | p2 | scan/E ≥ 2× | doing | head3 E 2.121 / scan 1.790; count hit is `&self` | 2026-08-18 |
+| P2.2 | p2 | C/B/D/MVCC ≥ 2× | doing | head3 C 1.796; get hit `borrow()` + short hash | 2026-08-18 |
 | P2.3 | p2 | gate 2.0 em todas | todo | — | 2026-08-17 |
 
 ## Acceptance Criteria

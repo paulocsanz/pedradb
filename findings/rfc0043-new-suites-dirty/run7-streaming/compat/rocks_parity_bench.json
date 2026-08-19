@@ -1,0 +1,32 @@
+{
+  "bench": "rocks-parity-v1",
+  "engine": "compat",
+  "sync": true,
+  "peer_policy": "rocks-default",
+  "durability": "fdatasync-before-ok (pedradb-core WAL; RFC-0001/0036)",
+  "changelog_interval": 0,
+  "status": "ok",
+  "notes": ["ycsb records=4096 ops=2000 payload=1024 dist=zipfian", "engine=compat durability=fdatasync-before-ok (pedradb-core WAL; RFC-0001/0036)", "suites: streaming", "seed: one put per record (not timed)", "cfs: default + write, lock, raftlog (TiKV store shape; raftlog = raftdb)", "deps apply batch txns/commit: 32", "changelog_interval=0", "peer_policy=rocks-default", "host-default write sync: kvrocks=false myrocks=true surreal=true"],
+  "benches": [
+{
+    "name": "flink_window_state",
+    "n": 2000,
+    "qps": 9527.933,
+    "p50_ms": 0.0525,
+    "p95_ms": 0.1753,
+    "p99_ms": 0.9150,
+    "max_ms": 9.8057,
+    "wall_s": 0.2099
+  },
+{
+    "name": "kafka_changelog_flush",
+    "n": 2000,
+    "qps": 1230.255,
+    "p50_ms": 0.5604,
+    "p95_ms": 1.7571,
+    "p99_ms": 4.8483,
+    "max_ms": 18.6606,
+    "wall_s": 1.6257
+  }
+  ]
+}

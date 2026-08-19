@@ -1,0 +1,32 @@
+{
+  "bench": "rocks-parity-v1",
+  "engine": "compat",
+  "sync": true,
+  "peer_policy": "rocks-default",
+  "durability": "fdatasync-before-ok (pedradb-core WAL; RFC-0001/0036)",
+  "changelog_interval": 0,
+  "status": "ok",
+  "notes": ["ycsb records=4096 ops=2000 payload=1024 dist=zipfian", "engine=compat durability=fdatasync-before-ok (pedradb-core WAL; RFC-0001/0036)", "suites: solana", "seed: one put per record (not timed)", "cfs: default + write, lock, raftlog (TiKV store shape; raftlog = raftdb)", "deps apply batch txns/commit: 32", "changelog_interval=0", "peer_policy=rocks-default", "host-default write sync: kvrocks=false myrocks=true surreal=true"],
+  "benches": [
+{
+    "name": "solana_shred_append",
+    "n": 2000,
+    "qps": 3087.991,
+    "p50_ms": 0.2596,
+    "p95_ms": 0.6760,
+    "p99_ms": 1.8120,
+    "max_ms": 7.1118,
+    "wall_s": 0.6477
+  },
+{
+    "name": "solana_trailing_read",
+    "n": 2000,
+    "qps": 368468.323,
+    "p50_ms": 0.0004,
+    "p95_ms": 0.0037,
+    "p99_ms": 0.0068,
+    "max_ms": 1.0436,
+    "wall_s": 0.0054
+  }
+  ]
+}

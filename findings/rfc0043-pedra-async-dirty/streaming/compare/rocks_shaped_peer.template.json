@@ -1,0 +1,20 @@
+{
+  "bench": "rocks-side-peer-template",
+  "engine": "rocksdb",
+  "sync": false,
+  "durability": "async-wal (WriteOptions.sync=false, rocksdb default)",
+  "benches": [
+    {
+      "name": "flink_window_state",
+      "qps": null,
+      "compat_qps_ref": 70144.878,
+      "note": "fill qps from real RocksDB same shape"
+    },
+    {
+      "name": "kafka_changelog_flush",
+      "qps": null,
+      "compat_qps_ref": 1468.895,
+      "note": "fill qps from real RocksDB same shape"
+    }
+  ]
+}

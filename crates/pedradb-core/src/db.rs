@@ -602,7 +602,7 @@ pub struct Db<E: Env = StdEnv> {
     /// Highest sequence default reads may observe. Assigned (`next_seq-1`)
     /// may be ahead while mem is applied but WAL `fdatasync` has not finished
     /// (G1: Ok and `get` wait for publish after fd).
-    published_seq: AtomicU64,
+    published_seq: Arc<AtomicU64>,
     sync: bool,
     auto_flush_bytes: Option<usize>,
     auto_compact_sst_count: Option<usize>,
@@ -622,7 +622,11 @@ pub struct Db<E: Env = StdEnv> {
     /// Latest `last_under_user_prefix` answers; cleared on write.
     last_prefix_cache: AnswerCache<Option<Bytes>>,
     /// Latest `count_in_range` answers; cleared on write.
-    count_cache: AnswerCache<usize>,
+    /// `Arc` so ConcurrentDb can hit without the Db read lock (`deps_scan`).
+    count_cache: Arc<AnswerCache<usize>>,
+    /// Bumped in [`Self::invalidate_read_answers`]. Compat TLS last-count
+    /// (`deps_scan` zipf) checks this without encoding or locking the cache.
+    read_cache_epoch: Arc<AtomicU64>,
     /// Exclusive directory lock (released via Env on close/drop when possible).
     dir_lock: Option<DirLock>,
     /// Set when append succeeded but required WAL `sync_all` failed (RFC-0015 H1).
@@ -772,7 +776,7 @@ impl<E: Env> Db<E> {
         // evicted the hot low IDs; C then started cold (parkfold2 C 1.6×).
         let point_cache = Arc::new(PointCache::new(8192));
         let last_prefix_cache = AnswerCache::new(8192);
-        let count_cache = AnswerCache::new(8192);
+        let count_cache = Arc::new(AnswerCache::new(8192));
         let (
             ssts,
             sst_levels,
@@ -905,7 +909,7 @@ impl<E: Env> Db<E> {
             manifest_file_num,
             vlog_use_new,
             next_seq,
-            published_seq: AtomicU64::new(next_seq.saturating_sub(1)),
+            published_seq: Arc::new(AtomicU64::new(next_seq.saturating_sub(1))),
             sync: opts.sync,
             auto_flush_bytes: opts.auto_flush_bytes.filter(|n| *n > 0),
             auto_compact_sst_count: opts.auto_compact_sst_count.filter(|n| *n > 0),
@@ -915,6 +919,7 @@ impl<E: Env> Db<E> {
             point_cache,
             last_prefix_cache,
             count_cache,
+            read_cache_epoch: Arc::new(AtomicU64::new(1)),
             dirty_points: Mutex::new(Vec::new()),
             point_cache_reset: AtomicBool::new(false),
             dir_lock: lock,
@@ -1013,6 +1018,24 @@ impl<E: Env> Db<E> {
     #[must_use]
     pub fn point_cache_handle(&self) -> Arc<PointCache> {
         Arc::clone(&self.point_cache)
+    }
+
+    /// Shared count-cache handle (ConcurrentDb `deps_scan` hit, no Db lock).
+    #[must_use]
+    pub fn count_cache_handle(&self) -> Arc<AnswerCache<usize>> {
+        Arc::clone(&self.count_cache)
+    }
+
+    /// Shared invalidate epoch for TLS last-count / last-get (RFC-0041).
+    #[must_use]
+    pub fn read_cache_epoch_handle(&self) -> Arc<AtomicU64> {
+        Arc::clone(&self.read_cache_epoch)
+    }
+
+    /// Published sequence handle (ConcurrentDb OCC begin, no Db lock).
+    #[must_use]
+    pub fn published_seq_handle(&self) -> Arc<AtomicU64> {
+        Arc::clone(&self.published_seq)
     }
 
     /// Publish `seq` as visible and drop read caches (after WAL is durable).
@@ -1299,6 +1322,19 @@ impl<E: Env> Db<E> {
             return Ok(None);
         }
         self.ensure_snapshot_readable(snap)?;
+        // Snapshot == published: the point cache already answers at exactly
+        // this seq (it only ever holds latest-published values; publish
+        // invalidates dirty keys before new inserts can refill them).
+        // Double-checked `published_seq`: a racing publish bumps it before any
+        // newer value can enter the cache, so the recheck rejects the hit and
+        // falls to the full walk (OCC rmw reads become cache hits).
+        if self.published_seq.load(Ordering::Acquire) == snap.seq {
+            if let Some(v) = self.point_cache.get(key) {
+                if self.published_seq.load(Ordering::Acquire) == snap.seq {
+                    return Ok(v);
+                }
+            }
+        }
         Ok(match self.lookup(key, snap.seq) {
             Lookup::Found(v) => {
                 if vlog::decode_vlog_ptr(v.as_ref()).is_some() {
@@ -1318,33 +1354,33 @@ impl<E: Env> Db<E> {
     /// (F30: a concurrent `delete_range` that covers a read/write key must conflict).
     #[must_use]
     pub fn key_has_write_after(&self, key: &[u8], snapshot: SequenceNumber) -> bool {
-        use crate::key::ValueType;
+        // Point lookup per layer (not a full memtable walk). Range tombs
+        // only when the layer actually has any (OCC 1c / Surreal commit).
         for table in self.mem_layers() {
-            for (ikey, value) in table.iter_internal() {
-                if ikey.sequence <= snapshot {
-                    continue;
-                }
-                if ikey.user_key.as_ref() == key {
+            if let Some((seq, _)) = table.get_entry(key, MAX_SEQUENCE_NUMBER) {
+                if seq > snapshot {
                     return true;
                 }
-                // Range tombstone `[start, end)` covers key even when start != key.
-                if ikey.kind == ValueType::RangeDeletion {
-                    let start = ikey.user_key.as_ref();
-                    let end = value.as_ref();
-                    if crate::merge::range_tombstone_covers(start, end, key) {
+            }
+            if table.has_range_tombstones() {
+                let mut tombs = Vec::new();
+                table.collect_range_tombstones(MAX_SEQUENCE_NUMBER, &mut tombs);
+                for t in tombs {
+                    if t.sequence > snapshot && t.covers(key) {
                         return true;
                     }
                 }
             }
         }
         for table in &self.ssts {
-            // point_at ignores range tombstones; any newer point/del counts.
             if let Some((seq, _)) = table.point_at(key, MAX_SEQUENCE_NUMBER) {
                 if seq > snapshot {
                     return true;
                 }
             }
-            // Any newer range tombstone that **covers** this key (not only start==key).
+            if !table.has_range_tombstones() {
+                continue;
+            }
             let mut tombs = Vec::new();
             table.collect_range_tombstones(MAX_SEQUENCE_NUMBER, &mut tombs);
             for t in tombs {
@@ -2053,6 +2089,7 @@ impl<E: Env> Db<E> {
         }
         self.last_prefix_cache.clear();
         self.count_cache.clear();
+        self.read_cache_epoch.fetch_add(1, Ordering::Release);
     }
 
     /// Distinct visible user keys in `[start, end)` at `snapshot`, capped at
@@ -2076,7 +2113,9 @@ impl<E: Env> Db<E> {
         // Live + parked-without-SST only. Retired BTrees are a point/MVCC
         // cache; their L0 files are in `ssts` (retire2 scan died merging them).
         for table in self.scan_mem_layers() {
-            table.collect_range_tombstones(snapshot, &mut range_dels);
+            if table.has_range_tombstones() {
+                table.collect_range_tombstones(snapshot, &mut range_dels);
+            }
             if table.is_empty() {
                 continue;
             }
@@ -2104,15 +2143,19 @@ impl<E: Env> Db<E> {
             // Min head across layers by InternalKey order (user asc, seq
             // desc, kind desc) — the global newest version of that user.
             let mut best: Option<usize> = None;
+            let mut best_h: Option<&crate::key::InternalKey> = None;
             for (i, c) in cursors.iter().enumerate() {
                 let Some(h) = c.head() else { continue };
-                match best {
-                    None => best = Some(i),
-                    Some(b) => {
-                        if internal_less(h, cursors[b].head().expect("best head")) {
-                            best = Some(i);
-                        }
+                match best_h {
+                    None => {
+                        best = Some(i);
+                        best_h = Some(h);
                     }
+                    Some(bh) if internal_less(h, bh) => {
+                        best = Some(i);
+                        best_h = Some(h);
+                    }
+                    _ => {}
                 }
             }
             let Some(bi) = best else { break };
@@ -2128,7 +2171,8 @@ impl<E: Env> Db<E> {
                 buf[..ulen].copy_from_slice(head.user_key.as_ref());
                 let user = &buf[..ulen];
                 let vis = kind == ValueType::Value
-                    && !crate::merge::range_deleted(user, seq, &range_dels);
+                    && (range_dels.is_empty()
+                        || !crate::merge::range_deleted(user, seq, &range_dels));
                 for c in cursors.iter_mut() {
                     if c.head().is_some_and(|h| h.user_key.as_ref() == user) {
                         c.step_user(user);
@@ -2138,7 +2182,8 @@ impl<E: Env> Db<E> {
             } else {
                 let user = head.user_key.clone();
                 let vis = kind == ValueType::Value
-                    && !crate::merge::range_deleted(user.as_ref(), seq, &range_dels);
+                    && (range_dels.is_empty()
+                        || !crate::merge::range_deleted(user.as_ref(), seq, &range_dels));
                 for c in cursors.iter_mut() {
                     if c.head().is_some_and(|h| h.user_key == user) {
                         c.step_user(user.as_ref());
@@ -3082,6 +3127,9 @@ impl<E: Env> Db<E> {
         let old_paths: Vec<PathBuf> = self.ssts.iter().map(|t| t.path().to_path_buf()).collect();
         self.ssts = vec![new_table];
         self.sst_levels = vec![MAX_LSM_LEVEL];
+        // Same as every other inventory swap: rebuild `sst_order_newest`
+        // before reads resume (stale indices panic `lookup`).
+        self.note_sst_inventory_changed();
 
         if let Ok(len) = self.env.metadata_len(&final_path) {
             self.bytes_written_sst = self.bytes_written_sst.saturating_add(len);
@@ -4737,7 +4785,7 @@ impl<E: Env> Db<E> {
     }
 
     pub(crate) fn group_finish(&mut self, g: GroupInFlight) -> Vec<Result<SequenceNumber>> {
-        if let Err(e) = self.wal.lock().write_pending_frame() {
+        if let Err(e) = self.wal.lock().write_pending_frame_if(g.needs_sync()) {
             self.durability_fenced = true;
             return g.fail_sync(e);
         }
@@ -5444,13 +5492,13 @@ pub fn copy_db_directory(
 
 /// Count-cache key buffer: inline for the small windows real queries use,
 /// heap fallback for pathological bounds. Avoids a malloc per scan op.
-enum CountKeyBuf {
+pub(crate) enum CountKeyBuf {
     Inline { buf: [u8; 64], len: usize },
     Heap(Vec<u8>),
 }
 
 impl CountKeyBuf {
-    fn as_slice(&self) -> &[u8] {
+    pub(crate) fn as_slice(&self) -> &[u8] {
         match self {
             Self::Inline { buf, len } => &buf[..*len],
             Self::Heap(v) => v,
@@ -5591,9 +5639,8 @@ struct SstCountCursor<'a> {
     idx: usize,
     blocks: std::vec::IntoIter<usize>,
     load: SstBlockLoad<'a>,
-    /// `(bytes, inclusive)` bound pairs resolved once.
-    start: Option<(Bytes, bool)>,
-    end: Option<(Bytes, bool)>,
+    start: Bound<&'a [u8]>,
+    end: Bound<&'a [u8]>,
     snapshot: SequenceNumber,
     exhausted: bool,
 }
@@ -5601,28 +5648,16 @@ struct SstCountCursor<'a> {
 impl<'a> SstCountCursor<'a> {
     fn new(
         table: &'a crate::sst::SstTable,
-        start: Bound<&[u8]>,
-        end: Bound<&[u8]>,
+        start: Bound<&'a [u8]>,
+        end: Bound<&'a [u8]>,
         snapshot: SequenceNumber,
         cache: &'a crate::cache::BlockCache,
     ) -> Self {
-        let start = match start {
-            Bound::Unbounded => None,
-            Bound::Included(s) => Some((Bytes::copy_from_slice(s), true)),
-            Bound::Excluded(s) => Some((Bytes::copy_from_slice(s), false)),
-        };
-        let end = match end {
-            Bound::Unbounded => None,
-            Bound::Included(e) => Some((Bytes::copy_from_slice(e), true)),
-            Bound::Excluded(e) => Some((Bytes::copy_from_slice(e), false)),
-        };
         let mut c = Self {
             current: None,
             idx: 0,
             blocks: if table.is_lazy() {
-                table
-                    .blocks_overlapping_range(start_bound_ref(&start), end_bound_ref(&end))
-                    .into_iter()
+                table.blocks_overlapping_range(start, end).into_iter()
             } else {
                 Vec::new().into_iter()
             },
@@ -5639,11 +5674,7 @@ impl<'a> SstCountCursor<'a> {
                 .into_iter()
                 .filter(|(k, _)| {
                     k.kind != ValueType::RangeDeletion
-                        && crate::merge::user_key_in_range(
-                            k.user_key.as_ref(),
-                            start_bound_ref(&c.start),
-                            end_bound_ref(&c.end),
-                        )
+                        && crate::merge::user_key_in_range(k.user_key.as_ref(), start, end)
                 })
                 .collect();
             c.current = Some(std::sync::Arc::new(leftover));
@@ -5659,10 +5690,10 @@ impl<'a> SstCountCursor<'a> {
                 while self.idx < block.len() {
                     let k = &block[self.idx].0;
                     let uk = k.user_key.as_ref();
-                    let past_end = match &self.end {
-                        Some((e, true)) => uk > e.as_ref(),
-                        Some((e, false)) => uk >= e.as_ref(),
-                        None => false,
+                    let past_end = match self.end {
+                        Bound::Unbounded => false,
+                        Bound::Included(e) => uk > e,
+                        Bound::Excluded(e) => uk >= e,
                     };
                     if past_end {
                         self.exhausted = true;
@@ -5670,10 +5701,10 @@ impl<'a> SstCountCursor<'a> {
                         self.blocks = Vec::new().into_iter();
                         return;
                     }
-                    let before_start = match &self.start {
-                        Some((s, true)) => uk < s.as_ref(),
-                        Some((s, false)) => uk <= s.as_ref(),
-                        None => false,
+                    let before_start = match self.start {
+                        Bound::Unbounded => false,
+                        Bound::Included(s) => uk < s,
+                        Bound::Excluded(s) => uk <= s,
                     };
                     let skip = before_start
                         || k.kind == ValueType::RangeDeletion
@@ -5690,12 +5721,12 @@ impl<'a> SstCountCursor<'a> {
                 return;
             };
             self.current = self.load.load(bi);
-            self.idx = match (&self.current, &self.start) {
-                (Some(block), Some((s, true))) => {
-                    block.partition_point(|(k, _)| k.user_key.as_ref() < s.as_ref())
+            self.idx = match (&self.current, self.start) {
+                (Some(block), Bound::Included(s)) => {
+                    block.partition_point(|(k, _)| k.user_key.as_ref() < s)
                 }
-                (Some(block), Some((s, false))) => {
-                    block.partition_point(|(k, _)| k.user_key.as_ref() <= s.as_ref())
+                (Some(block), Bound::Excluded(s)) => {
+                    block.partition_point(|(k, _)| k.user_key.as_ref() <= s)
                 }
                 _ => 0,
             };
@@ -5720,24 +5751,11 @@ impl<'a> SstCountCursor<'a> {
     }
 }
 
-/// Rebuild `Bound<&[u8]>` views of the resolved start/end pairs.
-fn start_bound_ref(b: &Option<(Bytes, bool)>) -> Bound<&[u8]> {
-    match b {
-        None => Bound::Unbounded,
-        Some((s, true)) => Bound::Included(s.as_ref()),
-        Some((s, false)) => Bound::Excluded(s.as_ref()),
-    }
-}
-
-fn end_bound_ref(b: &Option<(Bytes, bool)>) -> Bound<&[u8]> {
-    match b {
-        None => Bound::Unbounded,
-        Some((e, true)) => Bound::Included(e.as_ref()),
-        Some((e, false)) => Bound::Excluded(e.as_ref()),
-    }
-}
-
-fn count_cache_key(start: Bound<&[u8]>, end: Bound<&[u8]>, limit: Option<usize>) -> CountKeyBuf {
+pub(crate) fn count_cache_key(
+    start: Bound<&[u8]>,
+    end: Bound<&[u8]>,
+    limit: Option<usize>,
+) -> CountKeyBuf {
     let mut inline = [0u8; 64];
     let mut heap: Option<Vec<u8>> = None;
     let mut len = 0usize;
@@ -7501,6 +7519,43 @@ mod tests {
         for i in 0..10u8 {
             assert_eq!(db.get(&[b'x', i]).as_deref(), Some(b"v".as_ref()));
         }
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Async WAL (OpenOptions.sync=false): 1-op puts stay in the userspace
+    /// frame until a 32 KiB block or close — Rocks-shaped, no `write`/put.
+    #[test]
+    fn async_puts_stage_wal_until_close() {
+        let dir = temp_dir();
+        {
+            let mut db = Db::open_with(
+                &dir,
+                OpenOptions {
+                    sync: false,
+                    auto_flush_bytes: None,
+                    auto_compact_sst_count: None,
+                    auto_compact_sst_bytes: None,
+                    exclusive: true,
+                    large_value_threshold: None,
+                },
+            )
+            .unwrap();
+            for i in 0..20u8 {
+                db.put([b'a', i], b"xxxxxxxx").unwrap();
+            }
+            let wal = dir.join(WAL_FILE_NAME);
+            let n = fs::metadata(&wal).map(|m| m.len()).unwrap_or(0);
+            assert!(
+                n < crate::wal::format::BLOCK_SIZE as u64,
+                "async 1-op put must not write() every record; CURRENT.log={n}"
+            );
+            db.close().unwrap();
+        }
+        let db = Db::open(&dir).unwrap();
+        for i in 0..20u8 {
+            assert_eq!(db.get(&[b'a', i]).as_deref(), Some(b"xxxxxxxx".as_ref()));
+        }
+        db.close().unwrap();
         let _ = fs::remove_dir_all(&dir);
     }
 
