@@ -1,5 +1,22 @@
 # RFC-0044 P1 — kvrocks async/async (dirty)
 
+## `kvrocks-l14/` — same-run na melhor janela da sessão (load ~14)
+
+| shape | Pedra | Rocks | ratio | nota |
+|---|---:|---:|---:|---|
+| set_mc50 | 292 k | 32 k | **9.24** | Rocks doente (p50 0.43 ms, max 20 ms) |
+| SET 1c | 1.67 M | 296 k | **5.66** | Rocks no nível saudável; **crossing real** |
+| scan | 688 k | 49 k | **14.0** | — |
+| GET | 3.38 M | 800 k | 4.22 | Rocks GET baixo de novo (saudável ~1.7 M) |
+| blob | 153 k | 50 k | 3.03 | melhor que 1.62; copies de 16 KB dominam |
+| pipeline | 38 k | 40 k | **0.96** | p50 Pedra 4.4 µs vs 22 µs; cauda `write()` 4 ms decide o wall |
+
+Pipeline p50 continua 5× melhor que o Rocks; o wall é um punhado de
+`write()`s de 64 KiB que pararam 1–4 ms (disco sujo). Na `kvrocks-64k`
+(load ~14, disco calmo) foi **11.3×**. mc50 9.24 usa peer doente — vs
+Rocks saudável (54–92 k) fica 3.2–5.4. **Not official.** Arbitro = 3×
+quieta (P2.1).
+
 ## `kvrocks-merge/` + A/B — merge de escritores async (P0.5): **negativo**
 
 Hipótese: agrupar os escritores async num líder (um encode + um

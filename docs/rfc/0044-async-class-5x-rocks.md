@@ -41,6 +41,10 @@ estrito que o Rocks e empatava o qps.
 | `ycsb_f` | 295 k | 239 k | 1.24 | não |
 | `ycsb_b` | 1.23 M | 1.01 M | 1.21 | não |
 
+Melhor janela da sessão (load ~14, `kvrocks-l14/`): SET **5.66**,
+mc50 **9.24** (peer doente), scan 14.0, GET 4.22, blob 3.03,
+pipeline **0.96** (cauda de `write()` no disco sujo; p50 segue 5× melhor).
+
 - Mecânica já na árvore: `commit_async_ops` faz **`write()` antes do Ok**,
   sem `fdatasync` (não acked em userspace); compact worker **não** acorda
   por put; CF `default` raw se a suíte não precisa de CFs nomeadas;
@@ -121,15 +125,17 @@ Não fecha (e não se mente):
 - [x] **P0.4** buffer async 64 KiB (Rocks file writer), não 1 MiB —
       status: `done` (`ASYNC_WAL_BUFFER`; testes 64 KiB + tail no close)
 - [ ] **P0.5** `kvrocks_set_mc50` ≥ 5.0 async/async — status: `doing`
-      (64 KiB **3.38** full-suite; same-window mc50-only **4.41** mediana;
-      merge de escritores async testado e **rejeitado** — ver abaixo)
+      (64 KiB 3.38 full; mesma-run l14 **9.24** mas peer doente 32 k —
+      vs saudável 54–92 k fica 3.2–5.4; merge rejeitado — ver abaixo)
 
 ### P1 — o resto do kvrocks ≥ 5×
 
 - [x] **P1.1** `kvrocks_pipelined_set` ≥ 5.0 — status: `done`
-      (64 KiB **11.3**)
+      (64 KiB **11.3**; janela com disco sujo derruba o wall para 0.96
+      por cauda de `write()` 1–4 ms — p50 4.4 µs vs 22 µs segue 5× melhor)
 - [ ] **P1.2** `kvrocks_set` / `kvrocks_blob_set` ≥ 5.0 — status: `doing`
-      (SET 3.86 full / **6.91** same-run `kvrocks-merge/`; blob 1.62 / 2.30)
+      (SET **5.66** mesma-run l14 vs Rocks saudável 296 k — crossing
+      sujo, confirmar na quieta; blob 1.62 / 2.30 / 3.03)
 - [ ] **P1.3** `kvrocks_get` ≥ 5.0 — status: `todo`
       (1.67 same-run vs Rocks saudável 1.78 M; p50 &lt; 50 ns, o wall é cauda)
 
@@ -150,9 +156,9 @@ Não fecha (e não se mente):
 | P0.2 | p0 | knob async; write() no Ok | done | sem userspace ack | 2026-08-19 |
 | P0.3 | p0 | `commit_async_ops` | done | sem group no async | 2026-08-19 |
 | P0.4 | p0 | buffer async 64 KiB | done | `ASYNC_WAL_BUFFER` | 2026-08-19 |
-| P0.5 | p0 | set_mc50 ≥ 5× async | doing | 3.38 full / 4.41 mc50-only; merge rejeitado | 2026-08-19 |
-| P1.1 | p1 | pipeline ≥ 5× | done | 11.3 @ 64 KiB | 2026-08-19 |
-| P1.2 | p1 | set / blob ≥ 5× | doing | SET 6.91 same-run; blob 2.30 | 2026-08-19 |
+| P0.5 | p0 | set_mc50 ≥ 5× async | doing | l14 9.24 (peer doente); vs são 3.2–5.4 | 2026-08-19 |
+| P1.1 | p1 | pipeline ≥ 5× | done | 11.3; p50 5× melhor que o wall | 2026-08-19 |
+| P1.2 | p1 | set / blob ≥ 5× | doing | SET 5.66 l14 (Rocks são); blob 3.03 | 2026-08-19 |
 | P1.3 | p1 | get ≥ 5× | todo | 1.67 same-run; p50 <50 ns | 2026-08-19 |
 | P2.1 | p2 | quiet 3× | todo | findings/rfc0044-p2 | 2026-08-19 |
 | P2.2 | p2 | ycsb A–F ≥ 5× async | doing | E 3.89; F 1.24 @ 64 KiB | 2026-08-19 |
