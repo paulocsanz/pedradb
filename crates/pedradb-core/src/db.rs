@@ -55,6 +55,7 @@ use std::collections::BTreeMap;
 use std::ops::Bound;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::time::Instant;
 
 use bytes::Bytes;
 
@@ -322,6 +323,28 @@ pub struct CheckpointMeta {
 
 /// File name for checkpoint metadata under the checkpoint directory.
 pub const CHECKPOINT_META_FILE: &str = "CHECKPOINT";
+
+/// RFC-0045 P0.1: per-phase write-path timings, opt-in via
+/// `PEDRA_WRITE_PHASE_STATS=1` (bench/diagnostics only). Atomics keep the
+/// hot path lock-free; when the env is unset the `Db` holds `None` and the
+/// only cost is one branch per commit. Not a product feature.
+#[derive(Debug, Default)]
+pub struct WritePhaseStats {
+    /// `commit_async_ops` invocations timed.
+    pub commits: AtomicU64,
+    /// `prepare_write_ops` (seq alloc, large-value spill, WriteOp build).
+    pub prepare_ns: AtomicU64,
+    /// WAL encode + append (`encode_write_op_batches` + pending write()).
+    pub wal_ns: AtomicU64,
+    /// Dirty-point note + `apply_ops_owned` (BTree insert).
+    pub mem_ns: AtomicU64,
+    /// `publish_sequence` (CAS + cache invalidation).
+    pub publish_ns: AtomicU64,
+    /// `maybe_auto_flush_best_effort`.
+    pub flush_check_ns: AtomicU64,
+    /// `ConcurrentDb` bypass: time blocked acquiring the Db write lock.
+    pub lock_wait_ns: AtomicU64,
+}
 
 /// Per-write durability / batching knobs (RFC-0009 P0.1).
 #[derive(Debug, Clone, Copy, Default)]
@@ -628,6 +651,8 @@ pub struct Db<E: Env = StdEnv> {
     /// Bumped in [`Self::invalidate_read_answers`]. Compat TLS last-count
     /// (`deps_scan` zipf) checks this without encoding or locking the cache.
     read_cache_epoch: Arc<AtomicU64>,
+    /// RFC-0045 P0.1 phase timings (`PEDRA_WRITE_PHASE_STATS=1`).
+    phase_stats: Option<Arc<WritePhaseStats>>,
     /// Exclusive directory lock (released via Env on close/drop when possible).
     dir_lock: Option<DirLock>,
     /// Set when append succeeded but required WAL `sync_all` failed (RFC-0015 H1).
@@ -921,6 +946,8 @@ impl<E: Env> Db<E> {
             last_prefix_cache,
             count_cache,
             read_cache_epoch: Arc::new(AtomicU64::new(1)),
+            phase_stats: std::env::var_os("PEDRA_WRITE_PHASE_STATS")
+                .map(|_| Arc::new(WritePhaseStats::default())),
             dirty_points: Mutex::new(Vec::new()),
             point_cache_reset: AtomicBool::new(false),
             dir_lock: lock,
@@ -1037,6 +1064,13 @@ impl<E: Env> Db<E> {
     #[must_use]
     pub fn published_seq_handle(&self) -> Arc<AtomicU64> {
         Arc::clone(&self.published_seq)
+    }
+
+    /// RFC-0045 P0.1: shared write-phase timings when
+    /// `PEDRA_WRITE_PHASE_STATS=1` was set at open (`None` otherwise).
+    #[must_use]
+    pub fn write_phase_stats(&self) -> Option<Arc<WritePhaseStats>> {
+        self.phase_stats.clone()
     }
 
     /// Publish `seq` as visible and drop read caches (after WAL is durable).
@@ -4649,17 +4683,44 @@ impl<E: Env> Db<E> {
     /// next flush / close (Rocks `sync=false`).
     pub(crate) fn commit_async_ops(&mut self, batch: Vec<BatchOp>) -> Result<SequenceNumber> {
         self.ensure_write_admitted()?;
+        let st = self.phase_stats.clone();
+        let t0 = st.as_ref().map(|_| Instant::now());
         let (ops, seq) = self.prepare_write_ops(batch)?;
+        if let (Some(st), Some(t0)) = (st.as_ref(), t0) {
+            st.prepare_ns
+                .fetch_add(t0.elapsed().as_nanos() as u64, Ordering::Relaxed);
+        }
         {
+            let t1 = st.as_ref().map(|_| Instant::now());
             let mut w = self.wal.lock();
             let sl = ops.as_slice();
             w.encode_write_op_batches(&[sl])?;
             w.write_pending_frame_if(false)?;
+            if let (Some(st), Some(t1)) = (st.as_ref(), t1) {
+                st.wal_ns
+                    .fetch_add(t1.elapsed().as_nanos() as u64, Ordering::Relaxed);
+            }
         }
+        let t2 = st.as_ref().map(|_| Instant::now());
         self.note_dirty_points(&ops);
         apply_ops_owned(&mut self.mem, ops);
+        if let (Some(st), Some(t2)) = (st.as_ref(), t2) {
+            st.mem_ns
+                .fetch_add(t2.elapsed().as_nanos() as u64, Ordering::Relaxed);
+        }
+        let t3 = st.as_ref().map(|_| Instant::now());
         self.publish_sequence(seq);
+        if let (Some(st), Some(t3)) = (st.as_ref(), t3) {
+            st.publish_ns
+                .fetch_add(t3.elapsed().as_nanos() as u64, Ordering::Relaxed);
+        }
+        let t4 = st.as_ref().map(|_| Instant::now());
         self.maybe_auto_flush_best_effort();
+        if let (Some(st), Some(t4)) = (st.as_ref(), t4) {
+            st.flush_check_ns
+                .fetch_add(t4.elapsed().as_nanos() as u64, Ordering::Relaxed);
+            st.commits.fetch_add(1, Ordering::Relaxed);
+        }
         Ok(seq)
     }
 

@@ -101,6 +101,9 @@ struct WriteGroup {
     catchup_waits: AtomicU64,
     /// RFC-0044 P0.5: merge concurrent async writers into one group.
     async_group: bool,
+    /// RFC-0045 P0.1: lock-wait accumulation for the async bypass
+    /// (`PEDRA_WRITE_PHASE_STATS=1`); `None` when the env is unset.
+    phase_stats: Option<Arc<crate::db::WritePhaseStats>>,
 }
 
 /// Default catch-up window (see [`ConcurrentDb::set_write_group_catchup_window`]).
@@ -211,6 +214,7 @@ impl WriteGroup {
                     _ => None,
                 })
                 .unwrap_or(ASYNC_GROUP_DEFAULT),
+            phase_stats: None,
         }
     }
 
@@ -322,7 +326,13 @@ impl WriteGroup {
         // Rocks shape instead: every async writer takes the write lock
         // itself (no mpsc, no leader dependency).
         if occ.is_none() && !do_sync && !self.async_group {
-            let result = db.write().commit_async_ops(ops);
+            let t0 = self.phase_stats.as_ref().map(|_| Instant::now());
+            let mut guard = db.write();
+            if let (Some(st), Some(t0)) = (self.phase_stats.as_ref(), t0) {
+                st.lock_wait_ns
+                    .fetch_add(t0.elapsed().as_nanos() as u64, Ordering::Relaxed);
+            }
+            let result = guard.commit_async_ops(ops);
             self.batches.fetch_add(1, Ordering::Relaxed);
             self.batch_ops.fetch_add(1, Ordering::Relaxed);
             self.active.fetch_sub(1, Ordering::Relaxed);
@@ -705,9 +715,12 @@ impl<E: Env> ConcurrentDb<E> {
         let count_cache = db.count_cache_handle();
         let read_cache_epoch = db.read_cache_epoch_handle();
         let published_seq = db.published_seq_handle();
+        let phase_stats = db.write_phase_stats();
+        let mut writes = WriteGroup::new();
+        writes.phase_stats = phase_stats;
         Self {
             inner: Arc::new(RwLock::new(db)),
-            writes: Arc::new(WriteGroup::new()),
+            writes: Arc::new(writes),
             flush_lock: Arc::new(Mutex::new(())),
             persist_lock: Arc::new(Mutex::new(())),
             default_sync: Arc::new(AtomicBool::new(default_sync)),
@@ -1355,6 +1368,13 @@ impl<E: Env> ConcurrentDb<E> {
     /// Bench-only: `PEDRA_PARITY_ASYNC=1` drops G1 for a same-class column.
     pub fn set_default_write_sync(&self, sync: bool) {
         self.default_sync.store(sync, Ordering::Relaxed);
+    }
+
+    /// RFC-0045 P0.1: shared write-phase timings when
+    /// `PEDRA_WRITE_PHASE_STATS=1` was set at open (`None` otherwise).
+    #[must_use]
+    pub fn write_phase_stats(&self) -> Option<Arc<crate::db::WritePhaseStats>> {
+        self.writes.phase_stats.clone()
     }
 
     /// Current default write-sync (WAL `fdatasync` before Ok when true).
