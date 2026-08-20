@@ -67,9 +67,9 @@ Não usar Rocks doente. Números abaixo = Pedra vs Rocks saudável (`kvrocks/` +
 |---|---:|---|---|
 | scan | **50×** | — | KeyOnly + TLS; fecha |
 | pipeline | **11.3×** | — | intern+v2+64 KiB; fecha |
-| SET 1c | **3.86×** | +30% | 64 KiB (era 1.29 cada-put / 2.61 @ 32) |
+| SET 1c | **3.86×** | +30% | same-run sujo `kvrocks-merge/` **6.91** (1.47 M vs 212 k) — arbitro é a quieta 3× (P2.1) |
 | mc50 | **3.38×** | +48% | merge de líder testado: **0.19× vs bypass** (A/B 5 rounds, `kvrocks-merge/`); handoff de lock é o teto |
-| blob | **1.62×** | 4×16 KB no buffer | recuperou do 0.85 @ 32 KiB |
+| blob | **1.62×** | 4×16 KB no buffer | same-run `kvrocks-merge/` 2.30 — copies de 16 KB dominam |
 | A / F | 2.18 / 1.24 | put+get | F ainda RMW |
 
 Não fecha (e não se mente):
@@ -129,9 +129,9 @@ Não fecha (e não se mente):
 - [x] **P1.1** `kvrocks_pipelined_set` ≥ 5.0 — status: `done`
       (64 KiB **11.3**)
 - [ ] **P1.2** `kvrocks_set` / `kvrocks_blob_set` ≥ 5.0 — status: `doing`
-      (SET **3.86**; blob **1.62**)
+      (SET 3.86 full / **6.91** same-run `kvrocks-merge/`; blob 1.62 / 2.30)
 - [ ] **P1.3** `kvrocks_get` ≥ 5.0 — status: `todo`
-      (1.11 same-run)
+      (1.67 same-run vs Rocks saudável 1.78 M; p50 &lt; 50 ns, o wall é cauda)
 
 ### P2 — YCSB + quiet 3×
 
@@ -152,8 +152,8 @@ Não fecha (e não se mente):
 | P0.4 | p0 | buffer async 64 KiB | done | `ASYNC_WAL_BUFFER` | 2026-08-19 |
 | P0.5 | p0 | set_mc50 ≥ 5× async | doing | 3.38 full / 4.41 mc50-only; merge rejeitado | 2026-08-19 |
 | P1.1 | p1 | pipeline ≥ 5× | done | 11.3 @ 64 KiB | 2026-08-19 |
-| P1.2 | p1 | set / blob ≥ 5× | doing | SET 3.86; blob 1.62 | 2026-08-19 |
-| P1.3 | p1 | get ≥ 5× | todo | 1.11 | 2026-08-19 |
+| P1.2 | p1 | set / blob ≥ 5× | doing | SET 6.91 same-run; blob 2.30 | 2026-08-19 |
+| P1.3 | p1 | get ≥ 5× | todo | 1.67 same-run; p50 <50 ns | 2026-08-19 |
 | P2.1 | p2 | quiet 3× | todo | findings/rfc0044-p2 | 2026-08-19 |
 | P2.2 | p2 | ycsb A–F ≥ 5× async | doing | E 3.89; F 1.24 @ 64 KiB | 2026-08-19 |
 | P2.3 | p2 | script não default 5× | done | tikv_ycsb_parity_v0.sh | 2026-08-19 |
