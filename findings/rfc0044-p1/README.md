@@ -1,5 +1,32 @@
 # RFC-0044 P1 — kvrocks async/async (dirty)
 
+## `get-longwindow/` — GET em janela longa (P1.3): **4.4–5.5× vs peer são**
+
+`ROCKS_PARITY_ONLY=kvrocks_get`, 20 M ops (default da suíte = 2 000),
+load ~14, Rocks **saudável** (1.56–1.62 M qps, p50 0.5 µs):
+
+| run | Pedra | ratio vs Rocks 1.62 M/1.56 M |
+|---|---:|---:|
+| base r1 | 8.41 M | 5.20 |
+| base r2 | 7.06 M | 4.54 |
+| revert-check | 8.64 M | 5.3 |
+
+A janela de 2 000 ops da suíte **subestima** o GET dos dois, mas
+desproporcionalmente o Pedra (cold start do point-cache + overhead fixo).
+Medição no lado do engine: `Instant::now`+`elapsed` custa **62 ns/op
+dentro da janela** para os dois engines — em op de ~130 ns medido isso
+comprime o ratio do mais rápido (engine ~70 ns vs Rocks ~500 ns ≈ 7×
+real → 4.5–5.2 medido).
+
+Front array direto (1024 slots, fingerprint-first) no `AnswerCache`:
+**negativo** — 7.68/6.92 M vs base 8.41/7.06 M. Com chave de 8 B e mapa
+quente, lock+hash+probe+clone-RC dominam por igual nos dois caminhos;
+trocar só o probe não move. Revertido; JSONs `compat-front-*`.
+
+P1.3 no oficial (full-suite, 2 000 ops) segue 3.97†. Conclusão: o 5× do
+GET é questão de janela de medição + peer são tanto quanto de engine.
+Árbitro: P2.1 (quieta 3×).
+
 ## `kvrocks-l14/` — same-run na melhor janela da sessão (load ~14)
 
 | shape | Pedra | Rocks | ratio | nota |

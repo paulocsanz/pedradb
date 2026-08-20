@@ -136,8 +136,10 @@ Não fecha (e não se mente):
 - [ ] **P1.2** `kvrocks_set` / `kvrocks_blob_set` ≥ 5.0 — status: `doing`
       (SET **5.66** mesma-run l14 vs Rocks saudável 296 k — crossing
       sujo, confirmar na quieta; blob 1.62 / 2.30 / 3.03)
-- [ ] **P1.3** `kvrocks_get` ≥ 5.0 — status: `todo`
-      (1.67 same-run vs Rocks saudável 1.78 M; p50 &lt; 50 ns, o wall é cauda)
+- [ ] **P1.3** `kvrocks_get` ≥ 5.0 — status: `doing`
+      (full-suite 2 000 ops 3.97†; **janela longa 20 M ops 4.4–5.5× vs
+      peer são** `get-longwindow/`; harness 62 ns/op comprime o ratio do
+      Pedra; árbitro P2.1)
 
 ### P2 — YCSB + quiet 3×
 
@@ -159,7 +161,7 @@ Não fecha (e não se mente):
 | P0.5 | p0 | set_mc50 ≥ 5× async | doing | l14 9.24 (peer doente); vs são 3.2–5.4 | 2026-08-19 |
 | P1.1 | p1 | pipeline ≥ 5× | done | 11.3; p50 5× melhor que o wall | 2026-08-19 |
 | P1.2 | p1 | set / blob ≥ 5× | doing | SET 5.66 l14 (Rocks são); blob 3.03 | 2026-08-19 |
-| P1.3 | p1 | get ≥ 5× | todo | 1.67 same-run; p50 <50 ns | 2026-08-19 |
+| P1.3 | p1 | get ≥ 5× | doing | longa 20M ops 4.4–5.5× vs são | 2026-08-20 |
 | P2.1 | p2 | quiet 3× | todo | findings/rfc0044-p2 | 2026-08-19 |
 | P2.2 | p2 | ycsb A–F ≥ 5× async | doing | E 3.89; F 1.24 @ 64 KiB | 2026-08-19 |
 | P2.3 | p2 | script não default 5× | done | tikv_ycsb_parity_v0.sh | 2026-08-19 |
