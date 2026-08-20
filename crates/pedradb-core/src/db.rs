@@ -4619,8 +4619,9 @@ impl<E: Env> Db<E> {
         self.publish_sequence(self.last_sequence());
     }
 
-    /// Async commit (no fdatasync, no write-group). WAL bytes stay staged
-    /// until the async buffer fills — Rocks-shaped `sync=false`.
+    /// Async commit: encode WAL, `write()` at 64 KiB (Rocks file writer),
+    /// no `fdatasync`, no write-group. Tail &lt; 64 KiB may sit until the
+    /// next flush / close (Rocks `sync=false`).
     pub(crate) fn commit_async_ops(&mut self, batch: Vec<BatchOp>) -> Result<SequenceNumber> {
         self.ensure_write_admitted()?;
         let (ops, seq) = self.prepare_write_ops(batch)?;
@@ -7557,10 +7558,11 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
     }
 
-    /// Async WAL (OpenOptions.sync=false): 1-op puts stay in the userspace
-    /// frame until a 32 KiB block or close — Rocks-shaped, no `write`/put.
+    /// Async WAL (`sync=false`): Ok after `write()`, not `fdatasync`. Process
+    /// crash must still recover (Rocks `WriteOptions.sync=false`). Power loss
+    /// may lose recent acks.
     #[test]
-    fn async_puts_stage_wal_until_close() {
+    fn async_puts_are_in_wal_without_fsync() {
         let dir = temp_dir();
         {
             let mut db = Db::open_with(
@@ -7581,10 +7583,11 @@ mod tests {
             let wal = dir.join(WAL_FILE_NAME);
             let n = fs::metadata(&wal).map(|m| m.len()).unwrap_or(0);
             assert!(
-                n < crate::wal::format::BLOCK_SIZE as u64,
-                "async 1-op put must not write() every record; CURRENT.log={n}"
+                n > 0,
+                "async Ok must have write()d the WAL (got CURRENT.log={n})"
             );
-            db.close().unwrap();
+            // Drop without `sync()` — no fdatasync. Reopen must still see puts.
+            drop(db);
         }
         let db = Db::open(&dir).unwrap();
         for i in 0..20u8 {

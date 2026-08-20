@@ -99,6 +99,8 @@ struct WriteGroup {
     /// many groups entered it (diagnostics for the bound).
     catchup_wait_ns: AtomicU64,
     catchup_waits: AtomicU64,
+    /// RFC-0044 P0.5: merge concurrent async writers into one group.
+    async_group: bool,
 }
 
 /// Default catch-up window (see [`ConcurrentDb::set_write_group_catchup_window`]).
@@ -115,6 +117,15 @@ const CATCHUP_WINDOW_DEFAULT: Duration = Duration::from_micros(50);
 /// How long after the last concurrent submit the lone-writer fast path stays
 /// disabled (see `last_multi_ns`). 250 µs covers apply pre→com on this box.
 const MULTI_HOLD: Duration = Duration::from_micros(250);
+
+/// RFC-0044 P0.5: merge concurrent async writers into one group frame/`write()`
+/// (leader encodes for all members, no catch-up wait). **Default off** — A/B
+/// on the bench box (findings/rfc0044-p1, 5 paired rounds) the single leader
+/// is a scheduling single point of failure under 50 threads / 12 CPUs:
+/// merge 44–106 k qps vs bypass 311–636 k. The bypass (every writer takes
+/// the write lock itself — the Rocks shape) is the default;
+/// `PEDRA_ASYNC_GROUP=1` re-enables the merge for quiet-box experiments.
+const ASYNC_GROUP_DEFAULT: bool = false;
 
 /// Skip the catch-up wait only for apply-sized batches (64 ops). Raftlog is
 /// 16 ops — skipping at 16 left `deps_raftlog_mc4` at ~0.6–0.8× (one fd per
@@ -192,6 +203,14 @@ impl WriteGroup {
             fd_ema_ns: AtomicU64::new(0),
             catchup_wait_ns: AtomicU64::new(0),
             catchup_waits: AtomicU64::new(0),
+            async_group: std::env::var("PEDRA_ASYNC_GROUP")
+                .ok()
+                .and_then(|v| match v.as_str() {
+                    "0" | "false" => Some(false),
+                    "1" | "true" => Some(true),
+                    _ => None,
+                })
+                .unwrap_or(ASYNC_GROUP_DEFAULT),
         }
     }
 
@@ -282,20 +301,28 @@ impl WriteGroup {
         // group leader) so the host worker can drain imm during the fd.
         // Stay off this path for MULTI_HOLD after a concurrent burst so
         // apply's second write() still joins the group (RFC-0040 P1.2).
-        //
-        // Async 1-op (`do_sync=false`, kvrocks_set_mc50): grouping cannot
-        // amortize an fsync that does not happen — catch-up only added wait.
-        // Same shape as Rocks: N threads, one write lock, no mpsc.
-        if occ.is_none() && !do_sync {
-            let result = db.write().commit_async_ops(ops);
+        // Lone async (`do_sync=false`) takes the leaner `commit_async_ops`.
+        if occ.is_none() && active == 1 && !self.recently_concurrent() {
+            let result = if do_sync {
+                Self::lone_commit(self, db, ops, do_sync, occ)
+            } else {
+                db.write().commit_async_ops(ops)
+            };
             self.batches.fetch_add(1, Ordering::Relaxed);
             self.batch_ops.fetch_add(1, Ordering::Relaxed);
             self.active.fetch_sub(1, Ordering::Relaxed);
             self.mark_complete();
             return result;
         }
-        if occ.is_none() && (active == 1 && !self.recently_concurrent()) {
-            let result = Self::lone_commit(self, db, ops, do_sync, occ);
+
+        // Concurrent writers — sync or async — join the group. Async
+        // members are merged into one frame and one `write()` at 64 KiB
+        // (RFC-0044 P0.5); `lead` skips the catch-up wait when no member
+        // syncs (there is no fd to share). `PEDRA_ASYNC_GROUP=0` keeps the
+        // Rocks shape instead: every async writer takes the write lock
+        // itself (no mpsc, no leader dependency).
+        if occ.is_none() && !do_sync && !self.async_group {
+            let result = db.write().commit_async_ops(ops);
             self.batches.fetch_add(1, Ordering::Relaxed);
             self.batch_ops.fetch_add(1, Ordering::Relaxed);
             self.active.fetch_sub(1, Ordering::Relaxed);
@@ -375,7 +402,11 @@ impl WriteGroup {
             let window = Duration::from_micros(self.catchup_window_us.load(Ordering::Relaxed));
             let batch_ops: usize = batch.iter().map(|p| p.ops.len()).sum();
             let active = self.active.load(Ordering::Relaxed);
-            if batch_ops < CATCHUP_SKIP_OPS {
+            // Async-only group (RFC-0044 P0.5): no fd to share, so the
+            // catch-up hold is pure latency — the merge (one encode pass,
+            // one `write()` at 64 KiB) is the whole win.
+            let any_sync = batch.iter().any(|p| p.do_sync);
+            if any_sync && batch_ops < CATCHUP_SKIP_OPS {
                 if let Some(bound) =
                     catchup_wait_bound(window, self.fd_ema(), batch.len(), active, batch_ops)
                 {
@@ -578,9 +609,8 @@ impl WriteGroup {
         drop(guard);
         let io_err = {
             let mut w = wal.lock();
-            // G1: write + fdatasync before Ok. Async (Rocks-shaped): keep the
-            // frame in userspace until a 32 KiB block fills — no `write`
-            // syscall per 1-op put.
+            // G1: write + fdatasync before Ok. Async: write() at 64 KiB
+            // (Rocks WritableFileWriter); no fdatasync.
             w.write_pending_frame_if(need_sync).err().or_else(|| {
                 if need_sync {
                     let t_fd = Instant::now();
@@ -1942,6 +1972,190 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("pedradb-concurrent-{n}"));
         let _ = fs::remove_dir_all(&dir);
         dir
+    }
+
+    #[test]
+    fn async_tail_below_64kib_recovers_on_close_without_fsync() {
+        let dir = temp_dir();
+        {
+            let db = ConcurrentDb::open_with(
+                &dir,
+                OpenOptions {
+                    sync: false,
+                    auto_flush_bytes: None,
+                    auto_compact_sst_count: None,
+                    auto_compact_sst_bytes: None,
+                    exclusive: true,
+                    large_value_threshold: None,
+                },
+            )
+            .unwrap();
+            // 8 × 1 KiB ≪ 64 KiB: no write() required until close.
+            let payload = vec![b'y'; 1024];
+            for i in 0..8u8 {
+                db.put_with([b't', i], &payload, WriteOptions::no_sync())
+                    .unwrap();
+            }
+            db.close().unwrap();
+        }
+        let db = ConcurrentDb::open(&dir).unwrap();
+        let payload = vec![b'y'; 1024];
+        for i in 0..8u8 {
+            assert_eq!(
+                db.get(&[b't', i]).as_deref(),
+                Some(payload.as_slice()),
+                "close must drain async tail without fsync, t/{i}"
+            );
+        }
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn async_ok_write_wal_without_fsync_survives_reopen() {
+        let dir = temp_dir();
+        {
+            let db = ConcurrentDb::open_with(
+                &dir,
+                OpenOptions {
+                    sync: false,
+                    auto_flush_bytes: None,
+                    auto_compact_sst_count: None,
+                    auto_compact_sst_bytes: None,
+                    exclusive: true,
+                    large_value_threshold: None,
+                },
+            )
+            .unwrap();
+            // 80 × 1 KiB fills the 64 KiB Rocks-shaped async buffer.
+            let payload = vec![b'x'; 1024];
+            for i in 0..80u16 {
+                let k = [(i >> 8) as u8, i as u8];
+                db.put_with(k, &payload, WriteOptions::no_sync()).unwrap();
+            }
+            let n = fs::metadata(dir.join(crate::db::WAL_FILE_NAME))
+                .map(|m| m.len())
+                .unwrap_or(0);
+            assert!(
+                n >= crate::wal::format::ASYNC_WAL_BUFFER as u64,
+                "async must write() at 64 KiB, got {n}"
+            );
+            db.close().unwrap();
+        }
+        let db = ConcurrentDb::open(&dir).unwrap();
+        let payload = vec![b'x'; 1024];
+        for i in 0..80u16 {
+            let k = [(i >> 8) as u8, i as u8];
+            assert_eq!(
+                db.get(&k).as_deref(),
+                Some(payload.as_slice()),
+                "lost async put {i} after close without fsync"
+            );
+        }
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn async_concurrent_writers_recover() {
+        let dir = temp_dir();
+        const THREADS: u8 = 8;
+        const PER: u8 = 24; // 8 × 24 × ~1 KiB ≫ 64 KiB async buffer
+        {
+            let db = ConcurrentDb::open_with(
+                &dir,
+                OpenOptions {
+                    sync: false,
+                    auto_flush_bytes: None,
+                    auto_compact_sst_count: None,
+                    auto_compact_sst_bytes: None,
+                    exclusive: true,
+                    large_value_threshold: None,
+                },
+            )
+            .unwrap();
+            let payload = vec![b'm'; 1024];
+            // Concurrent async writers: default = per-writer `commit_async_ops`
+            // (Rocks shape; RFC-0044 P0.5 A/B killed the single-leader merge).
+            // `PEDRA_ASYNC_GROUP=1` routes them through the group instead.
+            // Both paths must encode before Ok and recover after close with
+            // no `fdatasync` anywhere.
+            std::thread::scope(|s| {
+                for t in 0..THREADS {
+                    let db = &db;
+                    let payload = &payload;
+                    s.spawn(move || {
+                        for i in 0..PER {
+                            db.put_with([b'g', t, i], payload, WriteOptions::no_sync())
+                                .unwrap();
+                        }
+                    });
+                }
+            });
+            db.close().unwrap();
+        }
+        let db = ConcurrentDb::open(&dir).unwrap();
+        let payload = vec![b'm'; 1024];
+        for t in 0..THREADS {
+            for i in 0..PER {
+                assert_eq!(
+                    db.get(&[b'g', t, i]).as_deref(),
+                    Some(payload.as_slice()),
+                    "lost concurrent async put t{t}/{i}"
+                );
+            }
+        }
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn async_and_sync_concurrent_writers_recover() {
+        let dir = temp_dir();
+        const PER: u8 = 16; // each thread 16 × 1 KiB; sync member forces fd
+        {
+            let db = ConcurrentDb::open_with(
+                &dir,
+                OpenOptions {
+                    sync: false,
+                    auto_flush_bytes: None,
+                    auto_compact_sst_count: None,
+                    auto_compact_sst_bytes: None,
+                    exclusive: true,
+                    large_value_threshold: None,
+                },
+            )
+            .unwrap();
+            let payload = vec![b's'; 1024];
+            std::thread::scope(|s| {
+                let async_t = s.spawn(|| {
+                    for i in 0..PER {
+                        db.put_with([b'h', 0, i], &payload, WriteOptions::no_sync()).unwrap();
+                    }
+                });
+                let sync_t = s.spawn(|| {
+                    for i in 0..PER {
+                        db.put_with([b'h', 1, i], &payload, WriteOptions::sync()).unwrap();
+                    }
+                });
+                async_t.join().unwrap();
+                sync_t.join().unwrap();
+            });
+            db.close().unwrap();
+        }
+        let db = ConcurrentDb::open(&dir).unwrap();
+        let payload = vec![b's'; 1024];
+        for t in 0..2u8 {
+            for i in 0..PER {
+                assert_eq!(
+                    db.get(&[b'h', t, i]).as_deref(),
+                    Some(payload.as_slice()),
+                    "lost mixed-group put t{t}/{i}"
+                );
+            }
+        }
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]

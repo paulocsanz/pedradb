@@ -1,10 +1,92 @@
 # RFC-0044 P1 — kvrocks async/async (dirty)
 
+## `kvrocks-merge/` + A/B — merge de escritores async (P0.5): **negativo**
+
+Hipótese: agrupar os escritores async num líder (um encode + um
+`write()` por grupo, sem espera de catch-up) fecharia o 5× do mc50.
+A/B pareado (mesma carga, alternando `PEDRA_ASYNC_GROUP` 1/0,
+`ROCKS_PARITY_ONLY=kvrocks_set_mc50`, 5 rounds):
+
+| round | merge qps | bypass qps | merge/bypass |
+|---|---:|---:|---:|
+| 1 | 106 k | 434 k | 0.24 |
+| 2 | 102 k | 636 k | 0.16 |
+| 3 | 69 k | 526 k | 0.13 |
+| 4 | 44 k | 433 k | 0.10 |
+| 5 | 84 k | 311 k | 0.27 |
+
+**Mediana 0.19× — 5× pior.** Com 50 threads em 12 CPUs sujas, o líder é
+ponto único de agendamento: seguido parado = todos parados (p50 merge
+~200 µs vs bypass 0.6–1.3 µs). O bypass (N threads + um write lock, o
+formato Rocks) é o default; o merge fica atrás de `PEDRA_ASYNC_GROUP=1`
+para reteste em caixa quieta.
+
+Same-window bypass vs Rocks (mc50-only, 3 rounds pareados):
+Pedra 351–377 k (p50 0.7 µs), Rocks 70–92 k (p50 128–366 µs),
+**ratio 4.0–5.0, mediana 4.41**. Full-suite (kvrocks-64k): 3.38. O gap
+restante é handoff de lock sob oversubscription + caixa suja — arbitro
+honesto é a remesura quieta (P2.1). JSONs: `kvrocks-merge/` (full
+same-run compat+rocks) e os rounds A/B em `kvrocks-merge/ab/`.
+
+## `kvrocks-64k/` + `ycsb-64k/` — `ASYNC_WAL_BUFFER` 64 KiB
+
+Rocks `writable_file_max_buffer_size`. Encode antes do Ok. `write()` ao
+encher 64 KiB. G1 intocado. Não é 1 MiB.
+
+| shape | ratio @ 64 KiB | @ 32 KiB | cada `write()` |
+|---|---:|---:|---:|
+| scan | **50.0** | 41 | 50 |
+| pipeline | **11.3** | 8.55 | 4.99 |
+| SET 1c | **3.86** | 2.61 | 1.29 |
+| mc50 | **3.38** | 3.40 | 1.00 |
+| blob | **1.62** | 0.85 | 1.96 |
+| GET | 3.97† | 1.17 | 1.11 |
+| ycsb A | 2.18 | — | 1.03 |
+| ycsb F | 1.24 | — | 0.92 |
+
+† Rocks GET 888 k nesta run (baixo). JSON em `kvrocks-64k/compare/`.
+
+
 **Not official. Not the product. Not “we beat Rocks.”**
 
 Column: Pedra `PEDRA_PARITY_ASYNC=1` vs Rocks `WriteOptions.sync=false`.
 Mix: 4096 / 2000 / 1 KB / zipfian / `ROCKS_DEPS_BATCH=32`.
 G1 default is unchanged.
+
+## `kvrocks-write/` + `ycsb-write/` — contrato certo (`write()` no Ok)
+
+Load 14–25 / 12 CPUs. Async = `write()`, **sem** `fdatasync`. Os 5× de
+SET/pipeline/blob em `kvrocks3/`–`kvrocks4/` **não valem** (acked em
+userspace). JSON: `kvrocks-write/compare/compare_report.json`.
+
+| shape | Pedra | Rocks | ratio |
+|---|---:|---:|---:|
+| scan | 1.15 M | 23 k | **49.8** |
+| pipeline | 75 k | 15 k | **4.99** |
+| ycsb_e | 594 k | 122 k | **4.85** |
+| ycsb_c | 5.84 M | 1.61 M | 3.63 |
+| blob | 76 k | 39 k | 1.96 |
+| ycsb_d | 2.37 M | 1.27 M | 1.86 |
+| ycsb_b | 2.15 M | 1.21 M | 1.78 |
+| SET 1c | 229 k | 178 k | 1.29 |
+| GET | 1.88 M | 1.69 M | 1.11 |
+| ycsb_a | 440 k | 426 k | 1.03 |
+| set_mc50 | 73 k | 73 k | **0.997** |
+| ycsb_f | 308 k | 336 k | **0.92** |
+
+## `kvrocks-32k/` — `write()` a cada bloco WAL 32 KiB (Rocks-shaped)
+
+Não é 1 MiB. Ops já encoded no frame. Crash de processo pode perder o
+tail &lt; 32 KiB (classe Rocks `WritableFileWriter`).
+
+| shape | write() cada put | 32 KiB block |
+|---|---:|---:|
+| SET 1c | 1.29 | **2.61** |
+| set_mc50 | 1.00 | **3.40** |
+| pipeline | 4.99 | **8.55** |
+| blob 16 KB | 1.96 | **0.85** (2 blobs enchem o bloco) |
+| GET | 1.11 | 1.17 |
+| scan | 49.8 | 41.2 |
 
 ## `kvrocks/` — first remesure (shared-Bytes pipeline only)
 
@@ -72,36 +154,6 @@ Rocks nesta run está **sano** no SET/pipeline (248 k / 12.8 k), ao contrário d
 
 Pipeline e blob fecham o piso contra o peer saudável. SET 1c falta ~4% (981 k vs 1.02 M).
 GET 5× é cauda, não p50. SCAN 35 ms = uma parada na caixa suja — não reescrever o 33× anterior.
-
-## `kvrocks4/` + `ycsb/` — get_probe + ytab no YCSB
-
-Load 14–25 / 12 CPUs. Ainda dirty.
-
-Kvrocks vs Rocks `kvrocks/` (peer 205 k SET / 11.3 k pipeline):
-
-| shape | Pedra | this Rocks | this | vsH | ≥5 vsH? |
-|---|---:|---:|---:|---:|:---:|
-| set | **1.02 M** | 139 k | 7.37† | **5.00** | **sim** |
-| pipeline | 112 k | 15.2 k | **7.39** | **9.92** | **sim** |
-| blob | 808 k | 54.3 k | **14.9** | **16.6** | **sim** |
-| scan | 321 k | 23.0 k | **13.9** | **15.5** | **sim** |
-| mc50 | 264 k | 77.1 k | 3.43 | 4.76 | p0 5.07 |
-| get | 3.78 M | 1.65 M | 2.29 | 3.44 | não |
-
-† Rocks SET 139 k vs 205 k saudável — o 7.37 não é o close; o 5.00 vsH é.
-
-YCSB same-run (os dois com ytab/`get_probe`):
-
-| shape | Pedra | Rocks | ratio | vs x5b Rocks |
-|---|---:|---:|---:|---:|
-| A | 683 k | 372 k | 1.84 | 2.32 |
-| B | 1.19 M | 1.11 M | 1.07 | 1.47 |
-| C | 2.66 M | 1.58 M | 1.69 | 3.81 |
-| D | 1.79 M | 1.23 M | 1.46 | 3.55 |
-| E | 435 k | 111 k | 3.91 | 5.92 |
-| F | 549 k | 297 k | 1.85 | 2.22 |
-
-Rocks também acelerou com keys fora da janela; same-run E caiu de 5.61 (x5b) para 3.91. P2.2 não fecha nesta caixa.
 
 ## `kvrocks4/` + `ycsb/` — get_probe + ytab no YCSB
 

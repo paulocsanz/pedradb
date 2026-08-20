@@ -21,23 +21,32 @@
 - Lab sujo
   ([rfc0043-pedra-async-dirty](../../findings/rfc0043-pedra-async-dirty/)):
 
-| shape | x5b | kvrocks4 vs Rocks `kvrocks/` | ≥5×? |
-|---|---:|---:|---|
-| `kvrocks_pipelined_set` | 1.56 | **9.9** | **sim** |
-| `kvrocks_blob_set` | 1.96 | **16.6** | **sim** |
-| `kvrocks_scan` | **44** | **15.5** | **sim** |
-| `kvrocks_set` 1c | 2.14 | **5.00** | **sim** |
-| `kvrocks_set_mc50` | **5.07** | 4.76 | p0 done |
-| `kvrocks_get` | 1.43 | 3.44 (p50 <50 ns) | não |
-| ycsb E | **5.61** | 3.91 same-run / 5.9 vs x5b Rocks | harness mudou |
-| ycsb A/B/C/D/F | 1.6–2.6 | A 1.84 C 1.69 F 1.85 same-run | P2.2 |
+Contrato async = encode + `write()` aos **64 KiB** (Rocks file writer),
+sem `fdatasync`. Lab sujo `findings/rfc0044-p1/kvrocks-64k/` + `ycsb-64k/`.
+Acked em userspace 1 MiB = **inválido**. `write()` em todo o put era mais
+estrito que o Rocks e empatava o qps.
 
-- Mecânica já na árvore: WAL stage 1 MiB quando `!need_sync`;
-  `commit_async_ops` (sem mpsc/catch-up); compact worker **não** acorda
+| shape | Pedra | Rocks | ratio | ≥5×? |
+|---|---:|---:|---:|:---:|
+| `kvrocks_scan` | 1.02 M | 20 k | **50.0** | **sim** |
+| `kvrocks_pipelined_set` | 131 k | 12 k | **11.3** | **sim** |
+| `kvrocks_get` | 3.53 M | 0.89 M | 3.97 | não (peer GET baixo) |
+| `kvrocks_set` | 717 k | 186 k | 3.86 | não |
+| `ycsb_e` | 346 k | 89 k | 3.89 | não |
+| `kvrocks_set_mc50` | 200 k | 59 k | 3.38 | não |
+| `ycsb_a` | 757 k | 347 k | 2.18 | não |
+| `ycsb_d` | 1.61 M | 840 k | 1.92 | não |
+| `ycsb_c` | 2.75 M | 1.48 M | 1.86 | não |
+| `kvrocks_blob_set` | 50 k | 31 k | 1.62 | não |
+| `ycsb_f` | 295 k | 239 k | 1.24 | não |
+| `ycsb_b` | 1.23 M | 1.01 M | 1.21 | não |
+
+- Mecânica já na árvore: `commit_async_ops` faz **`write()` antes do Ok**,
+  sem `fdatasync` (não acked em userspace); compact worker **não** acorda
   por put; CF `default` raw se a suíte não precisa de CFs nomeadas;
   memtable do bench 256 MiB (sem flush na janela medida);
-  WAL v2 omite payload internado repetido; `insert_many`;
-  `get_probe` sem `to_vec`.
+  WAL v2 omite payload internado repetido *dentro do mesmo batch*;
+  `insert_many`; `get_probe` sem `to_vec`.
 
 ## Problems This Solves
 
@@ -56,20 +65,22 @@ Não usar Rocks doente. Números abaixo = Pedra vs Rocks saudável (`kvrocks/` +
 
 | shape | hoje (kvrocks3 vs Rocks saudável) | Pedra precisa | o que falta |
 |---|---:|---|---|
-| pipeline | **9.9–11.8×** | — | P1.1 fechou |
-| blob | **16–21×** | — | P1.2 fechou |
-| set 1c | **5.00×** vs Rocks `kvrocks/` | — | P1.2 fechou |
-| scan | **15.5×** (kvrocks4) | — | stall 35 ms foi dirty |
-| mc50 | 4.76–5.07 | quiet | P0 5.07 |
-| get | 3.44× (p50 <50 ns) | wall=p50 | cauda; P1.3 |
-| ycsb E | 3.91 same-run / 5.9 vs x5b Rocks | +28% same-run | Rocks também ganhou ytab |
-| ycsb A/F | 1.84 / 1.85 same-run | put+get 1c | epoch bump mata TLS |
-| ycsb B/C/D | 1.07 / 1.69 / 1.46 | get | Rocks `get_pinned` também subiu |
+| scan | **50×** | — | KeyOnly + TLS; fecha |
+| pipeline | **11.3×** | — | intern+v2+64 KiB; fecha |
+| SET 1c | **3.86×** | +30% | 64 KiB (era 1.29 cada-put / 2.61 @ 32) |
+| mc50 | **3.38×** | +48% | merge de líder testado: **0.19× vs bypass** (A/B 5 rounds, `kvrocks-merge/`); handoff de lock é o teto |
+| blob | **1.62×** | 4×16 KB no buffer | recuperou do 0.85 @ 32 KiB |
+| A / F | 2.18 / 1.24 | put+get | F ainda RMW |
 
 Não fecha (e não se mente):
 
 - 5× GET **copiando** 1 KB para o cliente a 5.5 M qps (~5.5 GB/s) — o canary é lookup (`get_probe`), como Rocks `get_pinned`.
 - 5× 1-op **G1** vs Rocks async — teto `1/t_fd` (RFC-0041).
+- Merge de escritores async num líder único — A/B pareado
+  (`findings/rfc0044-p1/kvrocks-merge/`): **0.19× vs bypass**. Em 50
+  threads / 12 CPUs o líder é ponto único de agendamento. O código fica
+  atrás de `PEDRA_ASYNC_GROUP=1` (default off) para reteste em caixa
+  quieta; o produto é o bypass (N threads + um write lock, formato Rocks).
 - Arena / skip-list C++ — só se coalesce+harness saturarem BTree (out of scope).
 
 ## Proposed Solution
@@ -79,8 +90,10 @@ Não fecha (e não se mente):
    o Rocks.”
 2. Async 1-op / batch: `commit_async_ops` (lock, encode, mem, stage WAL).
    Group commit fica para quem `do_sync=true`.
-3. WAL async: um `write()` por ~1 MiB, não por SET (blocos físicos 32 KiB
-   intactos). `close`/`sync` drenam.
+3. WAL async = Rocks `sync=false`: encode no frame, `write()` aos
+   **64 KiB** (`ASYNC_WAL_BUFFER` = `writable_file_max_buffer_size`).
+   Não 1 MiB. Não ops por encode. Tail &lt; 64 KiB até o próximo flush /
+   close. Sem `fdatasync`. Blocos físicos continuam 32 KiB.
 4. Gate: `ROCKS_PARITY_RATIO_FLOOR=5` nas shapes da coluna async quando
    `PEDRA_PARITY_ASYNC=1`. Compare recusa misturar G1 com “5× oficial.”
 5. O que já ≥5× **fica** no relatório; o que falta entra como `todo`,
@@ -102,27 +115,30 @@ Não fecha (e não se mente):
 - [x] **P0.1** RFC + status viva (este doc) — status: `done`
 - [x] **P0.2** `PEDRA_PARITY_ASYNC=1` + `set_write_sync` no compat;
       WAL `write_pending_frame_if`; teste
-      `async_puts_stage_wal_until_close` — status: `done`
+      `async_puts_are_in_wal_without_fsync` — status: `done`
 - [x] **P0.3** `commit_async_ops` (sem write-group no async 1-op/batch);
       compact não notifica por put — status: `done`
-- [x] **P0.4** `kvrocks_set_mc50` ≥ 5.0 async/async (x5b **5.07**, sujo)
-      — status: `done` (quiet 3× = P2.1)
+- [x] **P0.4** buffer async 64 KiB (Rocks file writer), não 1 MiB —
+      status: `done` (`ASYNC_WAL_BUFFER`; testes 64 KiB + tail no close)
+- [ ] **P0.5** `kvrocks_set_mc50` ≥ 5.0 async/async — status: `doing`
+      (64 KiB **3.38** full-suite; same-window mc50-only **4.41** mediana;
+      merge de escritores async testado e **rejeitado** — ver abaixo)
 
 ### P1 — o resto do kvrocks ≥ 5×
 
 - [x] **P1.1** `kvrocks_pipelined_set` ≥ 5.0 — status: `done`
-      (kvrocks3 **10.5** this / **11.8** vs Rocks `kvrocks/`)
-- [x] **P1.2** `kvrocks_set` / `kvrocks_blob_set` ≥ 5.0 — status: `done`
-      (kvrocks4 set **5.00** vs Rocks `kvrocks/`; blob **16.6**)
-- [ ] **P1.3** `kvrocks_get` ≥ 5.0 — status: `doing`
-      (3.44× vs saudável; p50 <50 ns, wall=cauda)
+      (64 KiB **11.3**)
+- [ ] **P1.2** `kvrocks_set` / `kvrocks_blob_set` ≥ 5.0 — status: `doing`
+      (SET **3.86**; blob **1.62**)
+- [ ] **P1.3** `kvrocks_get` ≥ 5.0 — status: `todo`
+      (1.11 same-run)
 
 ### P2 — YCSB + quiet 3×
 
 - [ ] **P2.1** Remesura 3× quieta `findings/rfc0044-p2/`; não gravar
       mediana suja como oficial 0041 — status: `todo`
 - [ ] **P2.2** ycsb A–F ≥ 5.0 na coluna async — status: `doing`
-      (`get_probe`+ytab; same-run A 1.84 C 1.69 E 3.91 F 1.85)
+      (64 KiB: E 3.89; A 2.18; F 1.24)
 - [x] **P2.3** Script: `PEDRA_PARITY_ASYNC=1` + `FLOOR=5` **não** é o
       default do `tikv_ycsb_parity_v0.sh` — status: `done`
 
@@ -131,19 +147,24 @@ Não fecha (e não se mente):
 | ID | Band | Title | Status | Task / PR | Updated |
 |----|------|-------|--------|-----------|---------|
 | P0.1 | p0 | RFC + status viva | done | este doc | 2026-08-19 |
-| P0.2 | p0 | knob async + WAL stage | done | `write_pending_frame_if` | 2026-08-19 |
+| P0.2 | p0 | knob async; write() no Ok | done | sem userspace ack | 2026-08-19 |
 | P0.3 | p0 | `commit_async_ops` | done | sem group no async | 2026-08-19 |
-| P0.4 | p0 | set_mc50 ≥ 5× async | done | x5b 5.07 sujo | 2026-08-19 |
-| P1.1 | p1 | pipeline ≥ 5× | done | kvrocks3 10.5 / 11.8 saudável | 2026-08-19 |
-| P1.2 | p1 | set / blob ≥ 5× | done | kvrocks4 set 5.00 / blob 16.6 | 2026-08-19 |
-| P1.3 | p1 | get ≥ 5× | doing | 3.44×; p50 <50 ns | 2026-08-19 |
+| P0.4 | p0 | buffer async 64 KiB | done | `ASYNC_WAL_BUFFER` | 2026-08-19 |
+| P0.5 | p0 | set_mc50 ≥ 5× async | doing | 3.38 full / 4.41 mc50-only; merge rejeitado | 2026-08-19 |
+| P1.1 | p1 | pipeline ≥ 5× | done | 11.3 @ 64 KiB | 2026-08-19 |
+| P1.2 | p1 | set / blob ≥ 5× | doing | SET 3.86; blob 1.62 | 2026-08-19 |
+| P1.3 | p1 | get ≥ 5× | todo | 1.11 | 2026-08-19 |
 | P2.1 | p2 | quiet 3× | todo | findings/rfc0044-p2 | 2026-08-19 |
-| P2.2 | p2 | ycsb A–F ≥ 5× async | doing | get_probe+ytab; E 3.91 same-run | 2026-08-19 |
+| P2.2 | p2 | ycsb A–F ≥ 5× async | doing | E 3.89; F 1.24 @ 64 KiB | 2026-08-19 |
 | P2.3 | p2 | script não default 5× | done | tikv_ycsb_parity_v0.sh | 2026-08-19 |
 
 ## Acceptance Criteria
 
-- **Tests:** `async_puts_stage_wal_until_close`;
+- **Tests:** `async_puts_are_in_wal_without_fsync`;
+  `async_ok_write_wal_without_fsync_survives_reopen`;
+  `async_tail_below_64kib_recovers_on_close_without_fsync`;
+  `async_concurrent_writers_recover`;
+  `async_and_sync_concurrent_writers_recover`;
   `interned_pipeline_batch_recovers_after_close`;
   `v2_reuses_interned_value_bytes`;
   `fragment_encoded_matches_scratch_path_bytes` (inclui interned);
@@ -162,3 +183,4 @@ Não fecha (e não se mente):
 - 5× no 1-op **G1** vs Rocks async (teto `1/t_fd`; RFC-0041 P1.2).
 - Trocar o peer oficial para `sync=true`.
 - Arena/skip-list C++ (follow-up se P1.1–P1.3 saturarem memcpy+BTree).
+- Buffer async 1 MiB / Ok sem encode (rejeitado: pior que Rocks).

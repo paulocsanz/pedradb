@@ -681,132 +681,167 @@ impl YcsbRunner {
             let _ = e.get(&ktab[i]);
         }
 
+        // RFC-0044 P0.5 A/B tool: `ROCKS_PARITY_ONLY=csv` runs a subset of
+        // shapes. Filtering changes the rng stream and db state, so filtered
+        // runs are for experiments only — never official tables.
+        let only: Option<Vec<String>> = std::env::var("ROCKS_PARITY_ONLY")
+            .ok()
+            .map(|s| {
+                s.split(',')
+                    .map(str::trim)
+                    .filter(|x| !x.is_empty())
+                    .map(String::from)
+                    .collect()
+            });
+        let want = |name: &str| only.as_ref().map_or(true, |v| v.iter().any(|x| x == name));
+
         // Materialise the zipf stream before the timed window so the ratio
         // is LSM/CPU, not `format!` (RFC-0044 P1 — same schedule both engines).
-        let get_idx: Vec<usize> = (0..cfg_ops)
-            .map(|_| self.pick(&mut rng, records))
-            .collect();
-        let set_idx: Vec<usize> = (0..cfg_ops)
-            .map(|_| self.pick(&mut rng, records))
-            .collect();
+        let get_idx: Vec<usize> = if want("kvrocks_get") {
+            (0..cfg_ops).map(|_| self.pick(&mut rng, records)).collect()
+        } else {
+            Vec::new()
+        };
+        let set_idx: Vec<usize> = if want("kvrocks_set") {
+            (0..cfg_ops).map(|_| self.pick(&mut rng, records)).collect()
+        } else {
+            Vec::new()
+        };
         let mut pipe: Vec<Vec<Vec<u8>>> = Vec::with_capacity(cfg_ops);
-        for _ in 0..cfg_ops {
-            let mut keys = Vec::with_capacity(batch);
-            for _ in 0..batch {
-                keys.push(ktab[self.pick(&mut rng, records)].clone());
+        if want("kvrocks_pipelined_set") {
+            for _ in 0..cfg_ops {
+                let mut keys = Vec::with_capacity(batch);
+                for _ in 0..batch {
+                    keys.push(ktab[self.pick(&mut rng, records)].clone());
+                }
+                pipe.push(keys);
             }
-            pipe.push(keys);
         }
-        let scan_idx: Vec<usize> = (0..cfg_ops)
-            .map(|_| self.pick(&mut rng, records))
-            .collect();
+        let scan_idx: Vec<usize> = if want("kvrocks_scan") {
+            (0..cfg_ops).map(|_| self.pick(&mut rng, records)).collect()
+        } else {
+            Vec::new()
+        };
 
         // kvrocks_get — redis-benchmark GET (1-op canary).
-        let mut lats = Vec::with_capacity(cfg_ops);
-        let (mut gets, mut errors) = (0u64, 0u64);
-        let t0 = Instant::now();
-        for &u in &get_idx {
-            let t = Instant::now();
-            match e.get_probe(&ktab[u]) {
-                Ok(_) => gets += 1,
-                Err(()) => errors += 1,
+        if want("kvrocks_get") {
+            let mut lats = Vec::with_capacity(cfg_ops);
+            let (mut gets, mut errors) = (0u64, 0u64);
+            let t0 = Instant::now();
+            for &u in &get_idx {
+                let t = Instant::now();
+                match e.get_probe(&ktab[u]) {
+                    Ok(_) => gets += 1,
+                    Err(()) => errors += 1,
+                }
+                lats.push(ms(t));
             }
-            lats.push(ms(t));
+            blocks.push(summarize("kvrocks_get", cfg_ops, t0.elapsed(), &mut lats));
+            eprintln!("[rocks-parity] kvrocks_get done gets={gets} errors={errors}");
         }
-        blocks.push(summarize("kvrocks_get", cfg_ops, t0.elapsed(), &mut lats));
-        eprintln!("[rocks-parity] kvrocks_get done gets={gets} errors={errors}");
 
         // kvrocks_set — redis-benchmark SET (1-op canary).
-        let mut lats = Vec::with_capacity(cfg_ops);
-        let (mut sets, mut errors) = (0u64, 0u64);
-        let t0 = Instant::now();
-        for &u in &set_idx {
-            let t = Instant::now();
-            if e.put(&ktab[u], &yval) {
-                sets += 1;
-            } else {
-                errors += 1;
+        if want("kvrocks_set") {
+            let mut lats = Vec::with_capacity(cfg_ops);
+            let (mut sets, mut errors) = (0u64, 0u64);
+            let t0 = Instant::now();
+            for &u in &set_idx {
+                let t = Instant::now();
+                if e.put(&ktab[u], &yval) {
+                    sets += 1;
+                } else {
+                    errors += 1;
+                }
+                lats.push(ms(t));
             }
-            lats.push(ms(t));
+            blocks.push(summarize("kvrocks_set", cfg_ops, t0.elapsed(), &mut lats));
+            eprintln!("[rocks-parity] kvrocks_set done sets={sets} errors={errors}");
         }
-        blocks.push(summarize("kvrocks_set", cfg_ops, t0.elapsed(), &mut lats));
-        eprintln!("[rocks-parity] kvrocks_set done sets={sets} errors={errors}");
 
         // kvrocks_pipelined_set — pipeline of `batch` SETs → 1 WriteBatch (HL).
-        let mut lats = Vec::with_capacity(cfg_ops);
-        let (mut puts, mut errors) = (0u64, 0u64);
-        let t0 = Instant::now();
-        for keys in &pipe {
-            let t = Instant::now();
-            if e.batch_put_same("default", keys, &yval) {
-                puts += batch as u64;
-            } else {
-                errors += 1;
+        if want("kvrocks_pipelined_set") {
+            let mut lats = Vec::with_capacity(cfg_ops);
+            let (mut puts, mut errors) = (0u64, 0u64);
+            let t0 = Instant::now();
+            for keys in &pipe {
+                let t = Instant::now();
+                if e.batch_put_same("default", keys, &yval) {
+                    puts += batch as u64;
+                } else {
+                    errors += 1;
+                }
+                lats.push(ms(t));
             }
-            lats.push(ms(t));
+            blocks.push(summarize(
+                "kvrocks_pipelined_set",
+                cfg_ops,
+                t0.elapsed(),
+                &mut lats,
+            ));
+            eprintln!("[rocks-parity] kvrocks_pipelined_set done puts={puts} errors={errors}");
         }
-        blocks.push(summarize(
-            "kvrocks_pipelined_set",
-            cfg_ops,
-            t0.elapsed(),
-            &mut lats,
-        ));
-        eprintln!("[rocks-parity] kvrocks_pipelined_set done puts={puts} errors={errors}");
 
         // kvrocks_scan — Redis SCAN COUNT=25 over a window (HL).
-        let mut lats = Vec::with_capacity(cfg_ops);
-        let (mut scans, mut errors) = (0u64, 0u64);
-        let t0 = Instant::now();
-        for &u in &scan_idx {
-            let t = Instant::now();
-            match e.scan_count(&ktab[u], &ktab[u + 25], 25) {
-                Ok(_) => scans += 1,
-                Err(_) => errors += 1,
+        if want("kvrocks_scan") {
+            let mut lats = Vec::with_capacity(cfg_ops);
+            let (mut scans, mut errors) = (0u64, 0u64);
+            let t0 = Instant::now();
+            for &u in &scan_idx {
+                let t = Instant::now();
+                match e.scan_count(&ktab[u], &ktab[u + 25], 25) {
+                    Ok(_) => scans += 1,
+                    Err(_) => errors += 1,
+                }
+                lats.push(ms(t));
             }
-            lats.push(ms(t));
+            blocks.push(summarize("kvrocks_scan", cfg_ops, t0.elapsed(), &mut lats));
+            eprintln!("[rocks-parity] kvrocks_scan done scans={scans} errors={errors}");
         }
-        blocks.push(summarize("kvrocks_scan", cfg_ops, t0.elapsed(), &mut lats));
-        eprintln!("[rocks-parity] kvrocks_scan done scans={scans} errors={errors}");
 
         // kvrocks_blob_set — Kvrocks BlobDB-sized value (16 KiB; their post
         // cites 10–50 KB). Independent keyspace so the 1 KB SET path stays
         // the redis-benchmark canary.
-        let blob = vec![b'B'; 16 * 1024];
-        let blob_n = records.min(256);
-        for i in 0..blob_n {
-            let _ = e.put(&bkey(i), &blob);
-        }
-        // `pick(blob_n)` is zipf over the last `blob_n` of `records` (same
-        // as before pregen) — not `0..blob_n`.
-        let blob_keys: Vec<Vec<u8>> = (0..cfg_ops)
-            .map(|_| bkey(self.pick(&mut rng, blob_n)))
-            .collect();
-        let mut lats = Vec::with_capacity(cfg_ops);
-        let (mut sets, mut errors) = (0u64, 0u64);
-        let t0 = Instant::now();
-        for k in &blob_keys {
-            let t = Instant::now();
-            if e.put(k, &blob) {
-                sets += 1;
-            } else {
-                errors += 1;
+        if want("kvrocks_blob_set") {
+            let blob = vec![b'B'; 16 * 1024];
+            let blob_n = records.min(256);
+            for i in 0..blob_n {
+                let _ = e.put(&bkey(i), &blob);
             }
-            lats.push(ms(t));
+            // `pick(blob_n)` is zipf over the last `blob_n` of `records` (same
+            // as before pregen) — not `0..blob_n`.
+            let blob_keys: Vec<Vec<u8>> = (0..cfg_ops)
+                .map(|_| bkey(self.pick(&mut rng, blob_n)))
+                .collect();
+            let mut lats = Vec::with_capacity(cfg_ops);
+            let (mut sets, mut errors) = (0u64, 0u64);
+            let t0 = Instant::now();
+            for k in &blob_keys {
+                let t = Instant::now();
+                if e.put(k, &blob) {
+                    sets += 1;
+                } else {
+                    errors += 1;
+                }
+                lats.push(ms(t));
+            }
+            blocks.push(summarize(
+                "kvrocks_blob_set",
+                cfg_ops,
+                t0.elapsed(),
+                &mut lats,
+            ));
+            eprintln!("[rocks-parity] kvrocks_blob_set done sets={sets} errors={errors}");
         }
-        blocks.push(summarize(
-            "kvrocks_blob_set",
-            cfg_ops,
-            t0.elapsed(),
-            &mut lats,
-        ));
-        eprintln!("[rocks-parity] kvrocks_blob_set done sets={sets} errors={errors}");
 
         self.rng = rng;
-        // redis-benchmark default concurrency: 50 SET connections, no
-        // pipeline. The 1-client kvrocks_set above is the G1 canary (1 fd per
-        // SET — its ratio vs the async peer is durability-skewed by physics).
-        // Here the write group shares one fdatasync across waiting writers.
-        blocks.extend(self.run_kvrocks_set_clients(e, 50));
+        // kvrocks_set_mc50 — see comment below the shapes.
+        if want("kvrocks_set_mc50") {
+            // redis-benchmark default concurrency: 50 SET connections, no
+            // pipeline. The 1-client kvrocks_set above is the G1 canary (1 fd per
+            // SET — its ratio vs the async peer is durability-skewed by physics).
+            // Here the write group shares one fdatasync across waiting writers.
+            blocks.extend(self.run_kvrocks_set_clients(e, 50));
+        }
         blocks
     }
 
