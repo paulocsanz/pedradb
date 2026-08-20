@@ -89,6 +89,11 @@ pub struct Options {
     /// Pedra WAL `fdatasync` before Ok (G1). Default `true` (product).
     /// `false` is Rocks-shaped async WAL — bench-only same-class column.
     pub sync: bool,
+    /// Version GC on auto-compact (Pedra `auto_reclaim`): drops versions
+    /// older than the oldest open snapshot pin, like RocksDB compaction
+    /// dropping unpinned obsolete versions. Default `false` — Pedra product
+    /// default keeps all versions (RFC-0009 F20).
+    pub auto_reclaim: bool,
 }
 
 impl Default for Options {
@@ -97,6 +102,7 @@ impl Default for Options {
             create_if_missing: false,
             write_buffer_size: 4 * 1024 * 1024,
             sync: true,
+            auto_reclaim: false,
         }
     }
 }
@@ -1174,6 +1180,9 @@ impl<E: Env> DB<E> {
             Some(opts.write_buffer_size)
         };
         let db = ConcurrentDb::open_with_env(dir, core_opts, env)?;
+        if opts.auto_reclaim {
+            db.set_auto_reclaim(true);
+        }
         let codec = KeyCodec::new(&names);
         Ok(Self {
             inner: db,
@@ -1738,6 +1747,13 @@ impl<E: Env> DB<E> {
         self.inner.with_read(|db| db.reset_read_probe());
     }
 
+    /// Version-GC watermark; advances when reclaim GC drops versions
+    /// (see [`pedradb_core::Db::earliest_readable_sequence`]).
+    #[must_use]
+    pub fn earliest_readable_sequence(&self) -> pedradb_core::SequenceNumber {
+        self.inner.earliest_readable_sequence()
+    }
+
     /// Snapshot latest/scan counters + LSM shape (RFC-0035).
     #[must_use]
     pub fn read_probe(&self) -> pedradb_core::ReadProbeSnap {
@@ -1904,9 +1920,19 @@ fn compat_compact_once<E: Env>(inner: &ConcurrentDb<E>, gate: &Mutex<()>) -> boo
         if db.level_file_count(0) == 0 {
             return None;
         }
-        db.prepare_l0_compact(CoreCompactOptions::default())
-            .ok()
-            .flatten()
+        // Mirror core `maybe_auto_compact`: honor `auto_reclaim` with
+        // pin-aware GC (Rocks-shaped retention); default keeps history.
+        let opts = if db.auto_reclaim() {
+            let oldest = db
+                .oldest_pinned_sequence()
+                .unwrap_or_else(|| db.last_sequence());
+            CoreCompactOptions {
+                gc: pedradb_core::merge::CompactGcOptions::for_oldest_snapshot(oldest),
+            }
+        } else {
+            CoreCompactOptions::default()
+        };
+        db.prepare_l0_compact(opts).ok().flatten()
     });
     let Some(job) = job else {
         return false;
@@ -1938,6 +1964,48 @@ mod tests {
     #[test]
     fn default_write_buffer_is_4_mib() {
         assert_eq!(Options::new().write_buffer_size, 4 * 1024 * 1024);
+    }
+
+    #[test]
+    fn auto_reclaim_worker_gcs_versions() {
+        // RFC-0044 P2.2: with `auto_reclaim`, the host compact worker must
+        // use pin-aware GC (the deferred auto-compact path), not the
+        // history-preserving default merge. Without it the GC watermark
+        // never advances and hot-key version piles survive compaction.
+        let dir = tmp("autoreclaim");
+        let mut opts = Options::new();
+        opts.create_if_missing(true);
+        // Small buffer → several flushes → L0 → worker compacts when idle.
+        opts.write_buffer_size = 64 * 1024;
+        opts.auto_reclaim = true;
+        let db = DB::open_cf(&opts, &dir, &[]).unwrap();
+        let before = db.earliest_readable_sequence();
+        let n = 2000;
+        for i in 0..n {
+            db.put(b"hot", vec![b'v'; 100])
+                .and_then(|_| db.put(b"hot2", format!("{i:08}").as_bytes()))
+                .unwrap();
+        }
+        let mut advanced = false;
+        for _ in 0..40 {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            if db.earliest_readable_sequence() > before {
+                advanced = true;
+                break;
+            }
+        }
+        assert!(
+            advanced,
+            "auto_reclaim worker must advance the GC watermark (before={before})"
+        );
+        // Latest version still readable after GC.
+        assert!(db.get(b"hot").unwrap().is_some());
+        assert_eq!(
+            db.get(b"hot2").unwrap().as_deref(),
+            Some(format!("{:08}", n - 1).as_bytes())
+        );
+        drop(db);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

@@ -21,10 +21,22 @@ impl CompatEngine {
         // Larger than any timed suite's write volume (mc50 100k×1 KiB) so
         // auto-flush does not run in the measured window. Rocks default is
         // 64 MiB — 4 MiB was flushing ~25× during set_mc50.
-        opts.write_buffer_size = 256 * 1024 * 1024;
+        // `ROCKS_PARITY_COMPAT_MEMTABLE` (bytes) overrides for long-window
+        // experiments that want the same flush pressure as Rocks default.
+        opts.write_buffer_size = std::env::var("ROCKS_PARITY_COMPAT_MEMTABLE")
+            .ok()
+            .and_then(|v| v.parse::<u64>().ok())
+            .unwrap_or(256 * 1024 * 1024) as usize;
         // Bench-only same-class column. Product default remains G1 (fsync).
         if std::env::var("PEDRA_PARITY_ASYNC").as_deref() == Ok("1") {
             opts.set_sync(false);
+        }
+        // `ROCKS_PARITY_AUTO_RECLAIM=1`: Rocks-shaped retention for
+        // long-window experiments (auto-compact GCs unpinned obsolete
+        // versions, like RocksDB). Default off = Pedra product default
+        // (keep all versions) — official columns never set this.
+        if crate::env_usize("ROCKS_PARITY_AUTO_RECLAIM", 0) != 0 {
+            opts.auto_reclaim = true;
         }
         // Only register extra CFs when a suite needs them. Named CFs force
         // `default\0` prefix on every ycsb/kvrocks key; Rocks default CF does not.
