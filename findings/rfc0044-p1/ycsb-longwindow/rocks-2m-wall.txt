@@ -1,0 +1,10 @@
+03:54:41 start (load ~12-16/12 CPUs, NSS fuzzers all session)
+03:54:46 ycsb_a done ops=2000000 updates=1000173
+03:54:48 ycsb_b done ops=2000000 updates=100302
+03:54:50 ycsb_c done ops=2000000
+03:54:52 ycsb_d done ops=2000000 inserts=99379
+04:12:44 ycsb_e done ops=2000000 inserts=99348 scans=1900652
+04:12:50 ycsb_f done ops=2000000 updates=999490
+
+E timed window = 2M/16550 qps ~= 121 s; wall gap D->E = 17m52s
+(pre-t0 ytab build of 2M keys + dirty-box memory churn).

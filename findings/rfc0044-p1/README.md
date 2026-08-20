@@ -1,5 +1,58 @@
 # RFC-0044 P1 — kvrocks async/async (dirty)
 
+## `ycsb-longwindow/` — ycsb 2M ops: cliff de retenção de versões no E (P2.2)
+
+400k pareado (64 MiB nos dois): A 3.81 / B 5.94 / C 10.09 / D 6.04 /
+**E 15.41** / F 2.13 (`compat-400k.json` + `rocks-400k.json`). Em 2M ops
+o E do Pedra **não completa** (>80 min, morto); Rocks completa degradado.
+
+Mesma janela 2M (load 12–16 suja, fuzzers a sessão inteira):
+
+| 2M ops, 64 MiB | Pedra default | Pedra 256 MiB (tudo na memtable) | Rocks sync=false |
+|---|---:|---:|---:|
+| ycsb_e | **não completa** (>80 min) | 461 k | 16.5 k (121 s de scans; 79× abaixo do próprio B/C) |
+| A/B/C/D | completam em ~3 s total | — | A 409 k / B 1.10 M / C 1.31 M / D 1.08 M |
+
+Mecanismo (probe `e-stall-probe.txt` no db travado; código confirmado):
+
+1. **Retenção**: ycsb_a (2M ops, 50% update, zipf θ=0.99 sobre 1024
+   chaves) empilha ~140k versões na chave mais quente. Auto-compact do
+   Pedra default **não faz GC** (F20, contrato); o do Rocks descarta
+   versões sem pin.
+2. **Count anda nas versões**: `count_visible` → `CountCursor::step_user`
+   → `SstCountCursor::settle` anda **todas** as versões MVCC da janela
+   (RFC-0037). Scan frio da janela mais quente: **2.3 ms**; após
+   `compact_for_reads` (3.1 s): **0.002 ms — ~1000×**. Point get na
+   mesma chave: 2.7 µs (caminho de ponto não é o problema).
+3. **Amplificador**: `publish_sequence` → `invalidate_read_answers` faz
+   `count_cache.clear()` **inteiro a cada publish** (db.rs ~2090). Os 5%
+   de inserts do E (chaves ≥1024, fora de toda janela escaneada) limpam
+   o cache a cada ~19 scans ⇒ ~1.9M scans frios. Invalidação por faixa
+   (range-aware) mataria o amplificador sem tocar retenção — follow-up
+   em aberto, não feito.
+
+Fix: `ROCKS_PARITY_AUTO_RECLAIM=1` (Options.auto_reclaim do compat →
+`set_auto_reclaim`: GC pin-aware no auto-compact **e no compact worker**
+— o worker usava `CompactOptions::default()` e ignorava o flag; corrigido
+junto). **Não é default do produto; colunas oficiais nunca setam.**
+2M same-window com reclaim (dirty, mesma janela do Rocks acima):
+
+| shape | Pedra reclaim | Rocks | ratio |
+|---|---:|---:|---:|
+| A | 1.49 M | 409 k | 3.64 |
+| B | 5.54 M | 1.10 M | **5.01** |
+| C | 9.07 M | 1.31 M | **6.91** |
+| D | 5.86 M | 1.08 M | **5.41** |
+| E | **235 k** (9 s) | 16.5 k (121 s) | **14.22** |
+| F | 551 k | 347 k | 1.59 |
+
+E: de ">80 min sem completar" para 9 s. JSON: `compat-2m-reclaim.json`.
+
+Nota honesta: a concentração é artefato do bench (records=1024 com 2M
+ops = ~2000 ops/chave); a suíte oficial (2000 ops) não encosta no cliff.
+Mas a classe do problema é real: overwrite quente + scan curto com
+retenção default é O(versões retidas), e Rocks tem GC por default.
+
 ## `get-longwindow/` — GET em janela longa (P1.3): **4.4–5.5× vs peer são**
 
 `ROCKS_PARITY_ONLY=kvrocks_get`, 20 M ops (default da suíte = 2 000),

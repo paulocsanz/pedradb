@@ -146,7 +146,16 @@ Não fecha (e não se mente):
 - [ ] **P2.1** Remesura 3× quieta `findings/rfc0044-p2/`; não gravar
       mediana suja como oficial 0041 — status: `todo`
 - [ ] **P2.2** ycsb A–F ≥ 5.0 na coluna async — status: `doing`
-      (64 KiB: E 3.89; A 2.18; F 1.24)
+      (400k pareado: B 5.94 C 10.09 D 6.04 E **15.41**; A 3.81, F 2.13.
+      Em 2M ops o E trava por **retenção de versões** — ycsb_a empilha
+      ~140k versões na chave mais quente, auto-compact default não faz
+      GC (F20), count anda todas as versões e o count-cache é limpo
+      inteiro a cada publish; scan frio 2.3 ms → 0.002 ms após GC
+      (~1000×). Rocks degrada mas completa (16.5k qps). Fix experimental
+      `ROCKS_PARITY_AUTO_RECLAIM=1` (GC pin-aware, forma Rocks — nunca
+      em coluna oficial): E completa em 9 s (**235k qps, 14.2×** o Rocks
+      da mesma janela); B 5.01 C 6.91 D 5.41; A 3.64, F 1.59 ainda
+      <5. `ycsb-longwindow/`)
 - [x] **P2.3** Script: `PEDRA_PARITY_ASYNC=1` + `FLOOR=5` **não** é o
       default do `tikv_ycsb_parity_v0.sh` — status: `done`
 
@@ -163,7 +172,7 @@ Não fecha (e não se mente):
 | P1.2 | p1 | set / blob ≥ 5× | doing | SET 5.66 l14 (Rocks são); blob 3.03 | 2026-08-19 |
 | P1.3 | p1 | get ≥ 5× | doing | longa 20M ops 4.4–5.5× vs são | 2026-08-20 |
 | P2.1 | p2 | quiet 3× | todo | findings/rfc0044-p2 | 2026-08-19 |
-| P2.2 | p2 | ycsb A–F ≥ 5× async | doing | E 3.89; F 1.24 @ 64 KiB | 2026-08-19 |
+| P2.2 | p2 | ycsb A–F ≥ 5× async | doing | 400k: E 15.4 B 5.9 C 10.1 D 6.0, A 3.8 F 2.1; cliff retenção 2M mapeado+fix `auto_reclaim` (E 14.2×) | 2026-08-20 |
 | P2.3 | p2 | script não default 5× | done | tikv_ycsb_parity_v0.sh | 2026-08-19 |
 
 ## Acceptance Criteria

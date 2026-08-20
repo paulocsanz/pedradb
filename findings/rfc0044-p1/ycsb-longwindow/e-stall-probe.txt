@@ -1,0 +1,47 @@
+ycsb_e stall probe on the stalled 2M-op compat db (findings/tmp-e2m, killed
+>80 min into ycsb_e). Env: load ~12-16/12 CPUs (dirty). Db shape: two 72 MB
+SSTs, 180 MB WAL, no vlog.
+
+Db::open + WAL replay: 1.0 s.
+
+--- before GC (product default: auto-compact keeps all versions) ---
+scan i=0 rep0 (coldest, first touch): Ok(25) 2.314 ms   <- ~140k-version walk
+scan i=0 rep1/rep2 (count-cache hit): Ok(25) 0.000 ms
+scan i=1 rep0:  0.578 ms cold | scan i=10 rep0: 1.089 ms cold
+scan i=500 rep0 (cold window): 2.283 ms cold            <- walk pays block-cache refills
+point get hottest key: 2.7 us (some=true)               <- point path unaffected
+
+--- compact_for_reads (latest-only version GC, Rocks-shaped): 3.1 s ---
+--- after GC ---
+scan i=0 rep0 (cold): Ok(25) 0.002 ms                   <- ~1000x faster cold scan
+scan i=1 / i=500 cold: 0.000 ms
+point get hottest key: 1.0 us (some=true)
+
+Mechanism (all three verified in code + numbers):
+1. Retention: ycsb_a (2M ops, 50% update, zipf theta=0.99 over 1024 keys)
+   piles ~140k versions on the hottest key; Pedra auto-compact default keeps
+   every version (RFC-0009 F20). RocksDB compaction drops unpinned obsolete
+   versions by default.
+2. Count walk: Db::count_visible / CountCursor::step_user / SstCountCursor::
+   settle walk EVERY MVCC version in the window (by design, RFC-0037
+   borrowed-cursor count) — cold scan of the hottest window = 2.3 ms.
+3. Amplifier: publish_sequence() -> invalidate_read_answers() clears the
+   whole count_cache on EVERY publish (db.rs ~2090: `count_cache.clear()`).
+   ycsb_e's 5% inserts (keys >=1024, outside every scanned window) clear it
+   every ~19 scans, so nearly all 1.9M scans are cold.
+
+Cross-checks:
+- Same 2M-op run with everything memtable-resident (256 MiB, no flush):
+  ycsb_e completes at 460k qps (compat-2m-memtable.json) — the cost is the
+  SST-resident version walk (settle/block-cache), not the version count
+  alone.
+- RocksDB same window (64 MiB, rocks-2m.json): ycsb_e degrades 79x from its
+  own B/C (1.1-1.3M -> 16.5k qps, 121 s of scans) but completes — its
+  compaction GC'd the pile down to few versions/key.
+- Pedra product default at 2M: ycsb_e does not complete (>80 min, killed).
+
+Fix axis: ROCKS_PARITY_AUTO_RECLAIM=1 (compat Options.auto_reclaim ->
+ConcurrentDb::set_auto_reclaim: pin-aware GC on auto-compact, the Rocks
+retention shape). Not the product default; official columns never set it.
+Separate possible follow-up (not done): range-aware count-cache
+invalidation would kill amplifier 3 without touching retention.
