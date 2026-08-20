@@ -28,8 +28,7 @@ Mecanismo (probe `e-stall-probe.txt` no db travado; código confirmado):
    `count_cache.clear()` **inteiro a cada publish** (db.rs ~2090). Os 5%
    de inserts do E (chaves ≥1024, fora de toda janela escaneada) limpam
    o cache a cada ~19 scans ⇒ ~1.9M scans frios. Invalidação por faixa
-   (range-aware) mataria o amplificador sem tocar retenção — follow-up
-   em aberto, não feito.
+   virou fix de produto (abaixo, Fix 2).
 
 Fix: `ROCKS_PARITY_AUTO_RECLAIM=1` (Options.auto_reclaim do compat →
 `set_auto_reclaim`: GC pin-aware no auto-compact **e no compact worker**
@@ -52,6 +51,40 @@ Nota honesta: a concentração é artefato do bench (records=1024 com 2M
 ops = ~2000 ops/chave); a suíte oficial (2000 ops) não encosta no cliff.
 Mas a classe do problema é real: overwrite quente + scan curto com
 retenção default é O(versões retidas), e Rocks tem GC por default.
+
+### Fix 2 (core, produto): invalidação por faixa do count-cache
+
+O amplificador 3 virou fix de produto (`3a722e7`): `CountCache`
+substitui o `AnswerCache<usize>` do count — entradas carregam a janela
+decodificada + o seq publicado observado **antes** do compute; log sujo
+limitado (1024, BTreeMap por chave) valida sobreposição no get; overflow
+evicta a metade antiga e aposenta entradas que colidem com a bounding-box
+dos evictados (conservador); range-delete/fat-apply segue clear wholesale.
+Um mutex só guarda entradas+log (aposentadoria atômica com a eviction —
+sem janela de resposta pré-escrita). `record_dirty` faz early-out com
+cache vazio (workload sem scan não paga nada).
+
+Retenção default intocada (F20). Mesma janela 2M, default do produto:
+
+| shape | default antes | default + cache-fix | reclaim | Rocks |
+|---|---:|---:|---:|---:|
+| E | **não completa** (>80 min) | **1.35 M** (~1,5 s) | 235 k | 16.5 k |
+
+Com o cache quente o scan nunca anda as versões — o cache-fix sozinho
+supera o GC (82× o Rocks E da mesma janela; cross-run dirty, não
+oficial). O cliff de retenção segue real para scan frio e para writes
+DENTRO da janela escaneada (aí só GC ajuda) — `auto_reclaim` fica como
+opt-in. JSON: `compat-2m-default-cache-fix.json`.
+
+### Per-op (p50) é o sinal estável; wall em 200 ops é ruído
+
+Same-run padrão (200 ops/shape) com a caixa a load 40–52: a mesma engine
+varia 6× entre runs (C 1.46 M aqui vs 9.1 M no 2M) — wall de janela
+curta é decidido por outlier único; **não gravar como standing**. O p50
+por op sobrevive a qualquer caixa: F **1.3 µs vs 1.9 µs** (1.5×) e p99
+**3.0 µs vs 67.2 µs** (22× — cauda do write-buffer do Rocks); A 1.4 vs
+2.6 µs. Mesma classe do P1.3: medianas e caudas do engine vencem; o
+wall <5× destes shapes é janela+harness+caixa. Árbitro: P2.1 quieta.
 
 ## `get-longwindow/` — GET em janela longa (P1.3): **4.4–5.5× vs peer são**
 
