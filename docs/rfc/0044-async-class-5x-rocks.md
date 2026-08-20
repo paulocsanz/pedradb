@@ -144,7 +144,10 @@ Não fecha (e não se mente):
 ### P2 — YCSB + quiet 3×
 
 - [ ] **P2.1** Remesura 3× quieta `findings/rfc0044-p2/`; não gravar
-      mediana suja como oficial 0041 — status: `todo`
+      mediana suja como oficial 0041 — status: `doing`
+      (baseline hot-box gravado 2026-08-20, load 149–154: **E ≥5 nos
+      3 rounds** mesmo a load 150 (CountCache); F estável 1.2–2.1;
+      demais oscilam demais para chamar. Quieta <10 segue o árbitro)
 - [ ] **P2.2** ycsb A–F ≥ 5.0 na coluna async — status: `doing`
       (400k pareado: B 5.94 C 10.09 D 6.04 E **15.41**; A 3.81, F 2.13.
       Em 2M ops o E travava por **retenção de versões** — mapeado em 3
@@ -171,7 +174,7 @@ Não fecha (e não se mente):
 | P1.1 | p1 | pipeline ≥ 5× | done | 11.3; p50 5× melhor que o wall | 2026-08-19 |
 | P1.2 | p1 | set / blob ≥ 5× | doing | SET 5.66 l14 (Rocks são); blob 3.03 | 2026-08-19 |
 | P1.3 | p1 | get ≥ 5× | doing | longa 20M ops 4.4–5.5× vs são | 2026-08-20 |
-| P2.1 | p2 | quiet 3× | todo | findings/rfc0044-p2 | 2026-08-19 |
+| P2.1 | p2 | quiet 3× | doing | hot-box baseline gravado (load ~150): E ≥5 nos 3 rounds; quieta <10 = árbitro | 2026-08-20 |
 | P2.2 | p2 | ycsb A–F ≥ 5× async | doing | E: cliff mapeado + cache por faixa no core (default completa 2M a 1.35M qps); A/F/D <5 — árbitro P2.1 | 2026-08-20 |
 | P2.3 | p2 | script não default 5× | done | tikv_ycsb_parity_v0.sh | 2026-08-19 |
 

@@ -1,0 +1,80 @@
+{
+  "bench": "rocks-side-peer-template",
+  "engine": "rocksdb",
+  "sync": false,
+  "durability": "async-wal (WriteOptions.sync=false, rocksdb default)",
+  "benches": [
+    {
+      "name": "deps_apply_batch",
+      "qps": null,
+      "compat_qps_ref": 6349.505,
+      "note": "fill qps from real RocksDB same shape"
+    },
+    {
+      "name": "deps_cache_overwrite",
+      "qps": null,
+      "compat_qps_ref": 545002.491,
+      "note": "fill qps from real RocksDB same shape"
+    },
+    {
+      "name": "deps_lock_prewrite",
+      "qps": null,
+      "compat_qps_ref": 9062.924,
+      "note": "fill qps from real RocksDB same shape"
+    },
+    {
+      "name": "deps_mvcc_latest",
+      "qps": null,
+      "compat_qps_ref": 348938.625,
+      "note": "fill qps from real RocksDB same shape"
+    },
+    {
+      "name": "deps_raftlog",
+      "qps": null,
+      "compat_qps_ref": 12117.656,
+      "note": "fill qps from real RocksDB same shape"
+    },
+    {
+      "name": "deps_scan",
+      "qps": null,
+      "compat_qps_ref": 389165.023,
+      "note": "fill qps from real RocksDB same shape"
+    },
+    {
+      "name": "ycsb_a",
+      "qps": null,
+      "compat_qps_ref": 1041056.673,
+      "note": "fill qps from real RocksDB same shape"
+    },
+    {
+      "name": "ycsb_b",
+      "qps": null,
+      "compat_qps_ref": 2913859.042,
+      "note": "fill qps from real RocksDB same shape"
+    },
+    {
+      "name": "ycsb_c",
+      "qps": null,
+      "compat_qps_ref": 4786120.251,
+      "note": "fill qps from real RocksDB same shape"
+    },
+    {
+      "name": "ycsb_d",
+      "qps": null,
+      "compat_qps_ref": 3322722.772,
+      "note": "fill qps from real RocksDB same shape"
+    },
+    {
+      "name": "ycsb_e",
+      "qps": null,
+      "compat_qps_ref": 1115189.607,
+      "note": "fill qps from real RocksDB same shape"
+    },
+    {
+      "name": "ycsb_f",
+      "qps": null,
+      "compat_qps_ref": 500364.891,
+      "note": "fill qps from real RocksDB same shape"
+    }
+  ]
+}
