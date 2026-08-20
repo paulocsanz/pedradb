@@ -4270,8 +4270,23 @@ impl<E: Env> Db<E> {
             }
         }
         for sst in &self.ssts {
-            for (ik, v) in sst.iter_internal() {
-                consider(&mut latest, ik, v);
+            // Streaming keeps L0 lazy (`entries_cloned` filled the
+            // materialize cache on every explicit flush and broke the
+            // lazy-input invariant of streaming L0 compact).
+            let mut stream = sst.iter_internal_streaming();
+            loop {
+                match stream.next_entry() {
+                    Ok(Some((ik, v))) => consider(&mut latest, ik, v),
+                    Ok(None) => break,
+                    Err(e) => {
+                        tracing::warn!(
+                            error = %e,
+                            table = %sst.path().display(),
+                            "CHANGELOG feed rebuild: corrupt SST skipped (feed rebuilt on open)"
+                        );
+                        break;
+                    }
+                }
             }
         }
         latest
