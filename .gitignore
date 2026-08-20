@@ -1,4 +1,5 @@
 /target
+**/target/
 **/*.rs.bk
 *.log
 /tmp
@@ -10,3 +11,9 @@
 !/research/fontes/README.md
 !/research/fontes/**/*.txt
 !/research/fontes/**/*.md
+
+# Bench leftover engines. Keep JSON/MD/TXT reports; never commit DBs.
+# GitHub rejects files over 100MB; SST dumps from parity runs are hundreds of MB.
+**/*.sst
+**/db-compat/
+**/db-rocksdb/
