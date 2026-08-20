@@ -18,6 +18,11 @@ tempfile = "3"
 # Builds the real-RocksDB engine adapter (rocksdb crate, bundled C++ build).
 real = ["dep:rocksdb"]
 
+[[test]]
+name = "compat_vs_rocks"
+path = "tests/compat_vs_rocks.rs"
+required-features = ["real"]
+
 [[bin]]
 name = "rocks-parity-bench"
 path = "src/bin/rocks_parity_bench.rs"

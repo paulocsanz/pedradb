@@ -130,10 +130,8 @@ const WAL_FD_SEED: Duration = Duration::from_micros(25);
 ///
 /// - Fat raftlog (≥16 ops, still < [`CATCHUP_SKIP_OPS`]): wait the full
 ///   configured window so MC siblings can join.
-/// - High concurrency (`active ≥ 16`, redis-benchmark `-c 50`): extra wait
-///   of one fd saves ~(active−1) serialized fds; cap is `1× fd_ema`.
-/// - Low concurrency 1-op (YCSB `_mc4`): cap is `fd_ema / 2` — waiting
-///   longer costs the writers already queued more than the share they gain.
+/// - High concurrency (`active ≥ 16`): full configured window.
+/// - Low concurrency 1-op (YCSB `_mc4`): cap is `fd_ema / 2`.
 ///
 /// `None` = do not wait: knob off (`window == 0`) or every active writer
 /// is already inside the batch (`batch_len >= active`).
@@ -151,7 +149,7 @@ fn catchup_wait_bound(
         return Some(window);
     }
     if active >= 16 {
-        return Some(window.min(fd_ema));
+        return Some(window);
     }
     Some(window.min(fd_ema / 2))
 }
@@ -284,7 +282,19 @@ impl WriteGroup {
         // group leader) so the host worker can drain imm during the fd.
         // Stay off this path for MULTI_HOLD after a concurrent burst so
         // apply's second write() still joins the group (RFC-0040 P1.2).
-        if active == 1 && !self.recently_concurrent() {
+        //
+        // Async 1-op (`do_sync=false`, kvrocks_set_mc50): grouping cannot
+        // amortize an fsync that does not happen — catch-up only added wait.
+        // Same shape as Rocks: N threads, one write lock, no mpsc.
+        if occ.is_none() && !do_sync {
+            let result = db.write().commit_async_ops(ops);
+            self.batches.fetch_add(1, Ordering::Relaxed);
+            self.batch_ops.fetch_add(1, Ordering::Relaxed);
+            self.active.fetch_sub(1, Ordering::Relaxed);
+            self.mark_complete();
+            return result;
+        }
+        if occ.is_none() && (active == 1 && !self.recently_concurrent()) {
             let result = Self::lone_commit(self, db, ops, do_sync, occ);
             self.batches.fetch_add(1, Ordering::Relaxed);
             self.batch_ops.fetch_add(1, Ordering::Relaxed);
@@ -509,22 +519,16 @@ impl WriteGroup {
                     "lone writer missing admit result".into(),
                 ))
             }),
-            Ok(inflight) => Self::finish_group_off_lock(
-                group,
-                db,
-                guard,
-                inflight,
-                None,
-                Vec::new,
-                None,
-            )
-            .into_iter()
-            .next()
-            .unwrap_or_else(|| {
-                Err(CoreError::Internal(
-                    "lone writer missing commit result".into(),
-                ))
-            }),
+            Ok(inflight) => {
+                Self::finish_group_off_lock(group, db, guard, inflight, None, Vec::new, None)
+                    .into_iter()
+                    .next()
+                    .unwrap_or_else(|| {
+                        Err(CoreError::Internal(
+                            "lone writer missing commit result".into(),
+                        ))
+                    })
+            }
         }
     }
 
@@ -1940,6 +1944,42 @@ mod tests {
         dir
     }
 
+    #[test]
+    fn async_1ops_coalesce_and_recover() {
+        let dir = temp_dir();
+        let payload = vec![b'k'; 256];
+        {
+            let db = ConcurrentDb::open_with(
+                &dir,
+                OpenOptions {
+                    sync: false,
+                    auto_flush_bytes: None,
+                    auto_compact_sst_count: None,
+                    auto_compact_sst_bytes: None,
+                    exclusive: true,
+                    large_value_threshold: None,
+                },
+            )
+            .unwrap();
+            for i in 0..40u8 {
+                db.put_with([b'q', i], &payload, WriteOptions::no_sync())
+                    .unwrap();
+            }
+            db.sync().unwrap();
+            db.close().unwrap();
+        }
+        let db = ConcurrentDb::open(&dir).unwrap();
+        for i in 0..40u8 {
+            assert_eq!(
+                db.get(&[b'q', i]).as_deref(),
+                Some(payload.as_slice()),
+                "key q/{i}"
+            );
+        }
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
     fn open_sync(dir: &std::path::Path) -> ConcurrentDb {
         ConcurrentDb::open_with(
             dir,
@@ -2789,9 +2829,9 @@ mod tests {
             catchup_wait_bound(Duration::from_micros(25), fd, 1, 4, 16),
             Some(Duration::from_micros(25))
         );
-        // redis-benchmark -c 50: 1-op SET, many waiters — cap is 1× fd, not fd/2.
-        assert_eq!(catchup_wait_bound(w, fd, 1, 50, 1), Some(fd));
-        assert_eq!(catchup_wait_bound(w, fd, 1, 16, 1), Some(fd));
+        // redis-benchmark -c 50 / 16: full window (async 1-op skips grouping).
+        assert_eq!(catchup_wait_bound(w, fd, 1, 50, 1), Some(w));
+        assert_eq!(catchup_wait_bound(w, fd, 1, 16, 1), Some(w));
         // mc4 stays on the fd/2 cap (do not regress official A/F_mc4).
         assert_eq!(
             catchup_wait_bound(w, fd, 1, 4, 1),

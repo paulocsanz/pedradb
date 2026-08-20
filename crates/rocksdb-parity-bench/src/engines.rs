@@ -16,18 +16,23 @@ impl CompatEngine {
     pub fn open(path: &Path) -> Self {
         let mut opts = rocksdb_compat::Options::default();
         opts.create_if_missing(true);
+        // Match RocksDB default memtable (64 MiB). 4 MiB was for apply_mc4;
+        // kvrocks_set_mc50 at 4 MiB flushed ~25× per timed run.
+        // Larger than any timed suite's write volume (mc50 100k×1 KiB) so
+        // auto-flush does not run in the measured window. Rocks default is
+        // 64 MiB — 4 MiB was flushing ~25× during set_mc50.
+        opts.write_buffer_size = 256 * 1024 * 1024;
         // Bench-only same-class column. Product default remains G1 (fsync).
         if std::env::var("PEDRA_PARITY_ASYNC").as_deref() == Ok("1") {
             opts.set_sync(false);
         }
         // Only register extra CFs when a suite needs them. Named CFs force
         // `default\0` prefix on every ycsb/kvrocks key; Rocks default CF does not.
-        let cfs: &[&str] =
-            if crate::suites_enabled("deps") || crate::suites_enabled("myrocks") {
-                DEPS_CFS
-            } else {
-                &[]
-            };
+        let cfs: &[&str] = if crate::suites_enabled("deps") || crate::suites_enabled("myrocks") {
+            DEPS_CFS
+        } else {
+            &[]
+        };
         let db = rocksdb_compat::DB::open_cf(&opts, path, cfs).expect("compat open_cf");
         Self { db }
     }
@@ -56,6 +61,9 @@ impl Engine for CompatEngine {
     fn get(&self, k: &[u8]) -> Result<Option<Vec<u8>>, ()> {
         self.db.get(k).map_err(|_| ())
     }
+    fn get_probe(&self, k: &[u8]) -> Result<bool, ()> {
+        self.db.contains(k).map_err(|_| ())
+    }
     fn scan_count(&self, start: &[u8], end: &[u8], cap: usize) -> Result<usize, ()> {
         // Same visibility as a forward iterator; KeyOnly count (RFC-0033).
         self.db
@@ -70,6 +78,9 @@ impl Engine for CompatEngine {
     }
     fn get_cf(&self, cf: &str, k: &[u8]) -> Result<Option<Vec<u8>>, ()> {
         self.db.get_named(cf, k).map_err(|_| ())
+    }
+    fn batch_put_same(&self, cf: &'static str, keys: &[Vec<u8>], v: &[u8]) -> bool {
+        self.db.put_batch_same(cf, keys, v).is_ok()
     }
     fn batch(&self, ops: Vec<CfWrite>) -> bool {
         // RFC-0041: move owned keys/values into Bytes (no 1 KiB payload copy).
@@ -347,6 +358,12 @@ impl Engine for RocksEngine {
     fn get(&self, k: &[u8]) -> Result<Option<Vec<u8>>, ()> {
         self.db.get(k).map_err(|_| ())
     }
+    fn get_probe(&self, k: &[u8]) -> Result<bool, ()> {
+        match self.db.get_pinned(k) {
+            Ok(v) => Ok(v.is_some()),
+            Err(_) => Err(()),
+        }
+    }
     fn scan_count(&self, start: &[u8], end: &[u8], cap: usize) -> Result<usize, ()> {
         Ok(self
             .db
@@ -372,6 +389,20 @@ impl Engine for RocksEngine {
     fn get_cf(&self, cf: &str, k: &[u8]) -> Result<Option<Vec<u8>>, ()> {
         let h = self.db.cf_handle(cf).ok_or(())?;
         self.db.get_cf(h, k).map_err(|_| ())
+    }
+    fn batch_put_same(&self, cf: &'static str, keys: &[Vec<u8>], v: &[u8]) -> bool {
+        let Some(h) = self.db.cf_handle(cf) else {
+            return false;
+        };
+        let mut wb = rocksdb::WriteBatch::default();
+        for k in keys {
+            wb.put_cf(h, k, v);
+        }
+        let ok = self.db.write_opt(wb, self.wopts()).is_ok();
+        if ok {
+            self.full_sync_wal();
+        }
+        ok
     }
     fn batch(&self, ops: Vec<CfWrite>) -> bool {
         let mut wb = rocksdb::WriteBatch::default();

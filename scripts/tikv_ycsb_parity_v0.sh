@@ -37,6 +37,8 @@ export ROCKS_PARITY_FULL_SYNC="$FULL"
 #   ROCKS_PARITY_RATIO_FLOOR=2.0 \
 #   ROCKS_PARITY_GATE_SHAPES=deps_apply_batch_mc4,deps_mvcc_latest,ycsb_e
 # P2.3 (gate every official shape) stays off until 1c write can close.
+# RFC-0044: PEDRA_PARITY_ASYNC=1 + ROCKS_PARITY_RATIO_FLOOR=5 is the
+# same-class column, **not** the default of this script (cartaz = G1).
 # All 16 shapes always stay in compare_report.json.
 if [ "$FULL" = "1" ]; then
   export ROCKS_PARITY_RATIO_FLOOR="${ROCKS_PARITY_RATIO_FLOOR:-0.5}"

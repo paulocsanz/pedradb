@@ -26,8 +26,15 @@ use bytes::Bytes;
 use crate::error::{CoreError, Result};
 use crate::key::{SequenceNumber, ValueType};
 
-/// Current logical record format version.
+/// Current logical record format version (full key+value per op).
 pub const WRITE_RECORD_VERSION: u8 = 1;
+
+/// Same layout as v1, plus `kind | 0x80` = reuse previous op's value bytes
+/// (RFC-0044 P1.1: interned pipeline payload is stored once per WAL record).
+pub const WRITE_RECORD_VERSION_V2: u8 = 2;
+
+/// OR'd into the kind byte when the value is omitted (v2 only).
+pub(crate) const KIND_REUSE_PREV: u8 = 0x80;
 
 /// One put or delete inside a write record.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -121,15 +128,20 @@ impl WriteRecord {
     pub fn decode(bytes: &[u8]) -> Result<Self> {
         let mut cur = Cursor::new(bytes);
         let version = cur.read_u8()?;
-        if version != WRITE_RECORD_VERSION {
+        if version != WRITE_RECORD_VERSION && version != WRITE_RECORD_VERSION_V2 {
             return Err(CoreError::Internal(format!(
                 "unsupported write record version: {version}"
             )));
         }
         let count_raw = cur.read_u32()?;
         // F13: refuse multi-GiB `with_capacity` from a bit-flipped / hostile count
-        // (same class as SST F2). Min op = kind+seq+key_len+val_len headers (17).
-        let min_op: usize = 1 + 8 + 4 + 4;
+        // (same class as SST F2). Min op = kind+seq+key_len+val_len headers (17);
+        // v2 reuse ops omit val_len+value (13).
+        let min_op: usize = if version == WRITE_RECORD_VERSION_V2 {
+            1 + 8 + 4
+        } else {
+            1 + 8 + 4 + 4
+        };
         let rem = bytes.len().saturating_sub(cur.pos);
         let max_ops = rem / min_op;
         if count_raw as usize > max_ops {
@@ -138,17 +150,27 @@ impl WriteRecord {
             )));
         }
         let count = count_raw as usize;
-        let mut ops = Vec::with_capacity(count);
+        let mut ops: Vec<WriteOp> = Vec::with_capacity(count);
         for _ in 0..count {
             let kind_byte = cur.read_u8()?;
-            let kind = ValueType::from_u8(kind_byte).ok_or_else(|| {
+            let reuse = version == WRITE_RECORD_VERSION_V2 && kind_byte & KIND_REUSE_PREV != 0;
+            let kind = ValueType::from_u8(kind_byte & 0x7f).ok_or_else(|| {
                 CoreError::Internal(format!("unknown write op kind: {kind_byte:#04x}"))
             })?;
             let sequence = cur.read_u64()?;
             let key_len = cur.read_u32()? as usize;
             let key = Bytes::copy_from_slice(cur.read_slice(key_len)?);
-            let val_len = cur.read_u32()? as usize;
-            let value = Bytes::copy_from_slice(cur.read_slice(val_len)?);
+            let value = if reuse {
+                let Some(prev) = ops.last() else {
+                    return Err(CoreError::Internal(
+                        "v2 value-reuse with no previous op".into(),
+                    ));
+                };
+                prev.value.clone()
+            } else {
+                let val_len = cur.read_u32()? as usize;
+                Bytes::copy_from_slice(cur.read_slice(val_len)?)
+            };
             ops.push(WriteOp {
                 kind,
                 sequence,
@@ -171,21 +193,39 @@ impl WriteRecord {
     }
 }
 
+/// Consecutive interned values share a `Bytes` pointer (RFC-0044 P1.1).
+pub(crate) fn value_ptr_eq(a: &WriteOp, b: &WriteOp) -> bool {
+    !a.value.is_empty()
+        && a.value.len() == b.value.len()
+        && std::ptr::eq(a.value.as_ptr(), b.value.as_ptr())
+}
+
+/// v2 when at least one op can omit a repeated interned payload.
+pub(crate) fn record_uses_v2(ops: &[WriteOp]) -> bool {
+    ops.windows(2).any(|w| value_ptr_eq(&w[0], &w[1]))
+}
+
 /// Encode `ops` as one logical WAL payload (RFC-0040: no extra `WriteRecord` clone).
 pub fn encode_ops(ops: &[WriteOp], out: &mut Vec<u8>) {
     // One resize, then indexed copies — apply_mc4 is 64 ops / ~32 KiB of
     // values; per-field `extend_from_slice` was a write-lock cost (RFC-0041).
     let n = encoded_len(ops);
+    let v2 = record_uses_v2(ops);
     let start = out.len();
     out.resize(start + n, 0);
     let buf = &mut out[start..];
     let mut i = 0;
-    buf[i] = WRITE_RECORD_VERSION;
+    buf[i] = if v2 {
+        WRITE_RECORD_VERSION_V2
+    } else {
+        WRITE_RECORD_VERSION
+    };
     i += 1;
     buf[i..i + 4].copy_from_slice(&(u32::try_from(ops.len()).unwrap_or(u32::MAX)).to_le_bytes());
     i += 4;
-    for op in ops {
-        buf[i] = op.kind.as_u8();
+    for (idx, op) in ops.iter().enumerate() {
+        let reuse = v2 && idx > 0 && value_ptr_eq(&ops[idx - 1], op);
+        buf[i] = op.kind.as_u8() | if reuse { KIND_REUSE_PREV } else { 0 };
         i += 1;
         buf[i..i + 8].copy_from_slice(&op.sequence.to_le_bytes());
         i += 8;
@@ -195,6 +235,9 @@ pub fn encode_ops(ops: &[WriteOp], out: &mut Vec<u8>) {
         let k = op.key.len();
         buf[i..i + k].copy_from_slice(&op.key);
         i += k;
+        if reuse {
+            continue;
+        }
         let vl = u32::try_from(op.value.len()).unwrap_or(u32::MAX);
         buf[i..i + 4].copy_from_slice(&vl.to_le_bytes());
         i += 4;
@@ -208,7 +251,19 @@ pub fn encode_ops(ops: &[WriteOp], out: &mut Vec<u8>) {
 /// Encoded size of `ops` under [`encode_ops`] — RFC-0042 P1.3: lets the WAL
 /// fragment the record straight into the frame, skipping the scratch copy.
 pub(crate) fn encoded_len(ops: &[WriteOp]) -> usize {
-    1 + 4 + ops.iter().map(op_encoded_len).sum::<usize>()
+    let v2 = record_uses_v2(ops);
+    1 + 4
+        + ops
+            .iter()
+            .enumerate()
+            .map(|(i, o)| {
+                if v2 && i > 0 && value_ptr_eq(&ops[i - 1], o) {
+                    1 + 8 + 4 + o.key.len()
+                } else {
+                    op_encoded_len(o)
+                }
+            })
+            .sum::<usize>()
 }
 
 fn op_encoded_len(o: &WriteOp) -> usize {
@@ -338,5 +393,25 @@ mod tests {
         raw.extend_from_slice(&0x1000_0000u32.to_le_bytes()); // 268M ops, 5-byte payload
         let err = WriteRecord::decode(&raw).unwrap_err();
         assert!(err.to_string().contains("exceeds remaining"), "got {err}");
+    }
+
+    /// RFC-0044 P1.1: interned payload is stored once (v2), recovers as N copies.
+    #[test]
+    fn v2_reuses_interned_value_bytes() {
+        let val = Bytes::from(vec![b'p'; 1024]);
+        let ops = vec![
+            WriteOp::put(1, b"k0".as_slice(), val.clone()),
+            WriteOp::put(2, b"k1".as_slice(), val.clone()),
+            WriteOp::put(3, b"k2".as_slice(), val.clone()),
+        ];
+        assert!(record_uses_v2(&ops));
+        let v1_len = 1 + 4 + 3 * op_encoded_len(&ops[0]);
+        let n = encoded_len(&ops);
+        assert!(n < v1_len, "v2 {n} should beat v1 {v1_len}");
+        let mut raw = Vec::new();
+        encode_ops(&ops, &mut raw);
+        assert_eq!(raw[0], WRITE_RECORD_VERSION_V2);
+        let decoded = WriteRecord::decode(&raw).unwrap();
+        assert_eq!(decoded.ops, ops);
     }
 }

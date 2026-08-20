@@ -3,7 +3,8 @@
 **Status:** in-progress  
 **Updated:** 2026-08-18  
 **Parents:** [0040](0040-fsync-always-beats-rocks-async.md) (peer = Rocks default; group/sticky), [AGENTS.md](../../AGENTS.md) (única vitória = vs `sync=false`)  
-**Children:** [0043](0043-high-level-2x-expanding-benches.md) (2× no subconjunto *alto nível* + catálogo que só cresce; 1c write continua aqui)
+**Children:** [0043](0043-high-level-2x-expanding-benches.md) (2× no subconjunto *alto nível* + catálogo que só cresce; 1c write continua aqui),
+[0044](0044-async-class-5x-rocks.md) (coluna **async/async** piso 5×; não é o cartaz G1)
 
 ## Background
 

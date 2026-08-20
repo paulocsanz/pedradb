@@ -381,7 +381,7 @@ impl BatchOp {
     pub fn put(key: impl AsRef<[u8]>, value: impl AsRef<[u8]>) -> Self {
         Self::Put {
             key: Bytes::copy_from_slice(key.as_ref()),
-            value: Bytes::copy_from_slice(value.as_ref()),
+            value: intern_bytes(value.as_ref()),
         }
     }
 
@@ -1056,7 +1056,7 @@ impl<E: Env> Db<E> {
     }
 
     fn note_dirty_points(&self, ops: &[WriteOp]) {
-        if ops.len() > 32 || ops.iter().any(|op| op.kind == ValueType::RangeDeletion) {
+        if ops.len() >= 32 || ops.iter().any(|op| op.kind == ValueType::RangeDeletion) {
             // Fat apply / range: gen-bump at publish. Do not clone 64 keys
             // under the write lock just to discard them (RFC-0041 apply_mc4).
             self.point_cache_reset.store(true, Ordering::Relaxed);
@@ -4619,6 +4619,24 @@ impl<E: Env> Db<E> {
         self.publish_sequence(self.last_sequence());
     }
 
+    /// Async commit (no fdatasync, no write-group). WAL bytes stay staged
+    /// until the async buffer fills — Rocks-shaped `sync=false`.
+    pub(crate) fn commit_async_ops(&mut self, batch: Vec<BatchOp>) -> Result<SequenceNumber> {
+        self.ensure_write_admitted()?;
+        let (ops, seq) = self.prepare_write_ops(batch)?;
+        {
+            let mut w = self.wal.lock();
+            let sl = ops.as_slice();
+            w.encode_write_op_batches(&[sl])?;
+            w.write_pending_frame_if(false)?;
+        }
+        self.note_dirty_points(&ops);
+        apply_ops_owned(&mut self.mem, ops);
+        self.publish_sequence(seq);
+        self.maybe_auto_flush_best_effort();
+        Ok(seq)
+    }
+
     /// Shared WAL handle for off-lock `fdatasync` (ConcurrentDb group leader).
     pub(crate) fn wal_arc(&self) -> Arc<Mutex<Wal<E::File>>> {
         Arc::clone(&self.wal)
@@ -5813,12 +5831,29 @@ fn apply_record(mem: &mut MemTable, rec: &WriteRecord) {
 
 /// RFC-0040: move `WriteOp` Bytes into the memtable (no extra payload memcpy).
 fn apply_ops_owned(mem: &mut MemTable, ops: Vec<WriteOp>) {
-    for op in ops {
-        mem.insert(
+    mem.insert_many(ops.into_iter().map(|op| {
+        (
             crate::key::InternalKey::new(op.key, op.sequence, op.kind),
             op.value,
-        );
+        )
+    }));
+}
+
+/// Repeat puts of the same slice (kvrocks SET / blob) share one `Bytes`.
+fn intern_bytes(v: &[u8]) -> Bytes {
+    thread_local! {
+        static LAST: std::cell::RefCell<Bytes> = const { std::cell::RefCell::new(Bytes::new()) };
     }
+    LAST.with(|slot| {
+        let mut g = slot.borrow_mut();
+        if g.len() == v.len() && !g.is_empty() && g.as_ref() == v {
+            g.clone()
+        } else {
+            let b = Bytes::copy_from_slice(v);
+            *g = b.clone();
+            b
+        }
+    })
 }
 
 /// Staged SST inventory for value-log GC (not yet installed in MANIFEST).
@@ -7554,6 +7589,84 @@ mod tests {
         let db = Db::open(&dir).unwrap();
         for i in 0..20u8 {
             assert_eq!(db.get(&[b'a', i]).as_deref(), Some(b"xxxxxxxx".as_ref()));
+        }
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0044 P1.1: interned payload + WAL v2 still recovers every key.
+    #[test]
+    fn interned_pipeline_batch_recovers_after_close() {
+        let dir = temp_dir();
+        let payload = vec![b'k'; 256];
+        {
+            let mut db = Db::open_with(
+                &dir,
+                OpenOptions {
+                    sync: false,
+                    auto_flush_bytes: None,
+                    auto_compact_sst_count: None,
+                    auto_compact_sst_bytes: None,
+                    exclusive: true,
+                    large_value_threshold: None,
+                },
+            )
+            .unwrap();
+            let val = intern_bytes(&payload);
+            let ops: Vec<_> = (0..32u8)
+                .map(|i| BatchOp::Put {
+                    key: Bytes::from(vec![b'p', i]),
+                    value: val.clone(),
+                })
+                .collect();
+            db.apply_batch_with(ops, WriteOptions::no_sync()).unwrap();
+            db.sync().unwrap();
+            db.close().unwrap();
+        }
+        let db = Db::open(&dir).unwrap();
+        for i in 0..32u8 {
+            assert_eq!(
+                db.get(&[b'p', i]).as_deref(),
+                Some(payload.as_slice()),
+                "key p/{i}"
+            );
+        }
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0044 P1.2: async 1-op interned puts coalesce into v2 records.
+    #[test]
+    fn async_interned_1ops_coalesce_and_recover() {
+        let dir = temp_dir();
+        let payload = vec![b'k'; 256];
+        {
+            let mut db = Db::open_with(
+                &dir,
+                OpenOptions {
+                    sync: false,
+                    auto_flush_bytes: None,
+                    auto_compact_sst_count: None,
+                    auto_compact_sst_bytes: None,
+                    exclusive: true,
+                    large_value_threshold: None,
+                },
+            )
+            .unwrap();
+            for i in 0..40u8 {
+                db.put_with([b'q', i], &payload, WriteOptions::no_sync())
+                    .unwrap();
+            }
+            db.sync().unwrap();
+            db.close().unwrap();
+        }
+        let db = Db::open(&dir).unwrap();
+        for i in 0..40u8 {
+            assert_eq!(
+                db.get(&[b'q', i]).as_deref(),
+                Some(payload.as_slice()),
+                "key q/{i}"
+            );
         }
         db.close().unwrap();
         let _ = fs::remove_dir_all(&dir);

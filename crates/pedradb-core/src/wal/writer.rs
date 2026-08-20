@@ -114,6 +114,7 @@ impl<W: Write + Seek> WalWriter<W> {
     /// `ops` straight into `buf` — byte-identical to
     /// `fragment_record(&encode_ops(ops))` without the intermediate logical
     /// buffer (one full-record copy per group member saved).
+    #[cfg(test)]
     pub(crate) fn fragment_encoded(&mut self, ops: &[crate::batch::WriteOp], buf: &mut Vec<u8>) {
         self.fragment_encoded_len(ops, buf);
     }
@@ -282,13 +283,20 @@ struct EncodedOpsSource<'a> {
     vlen: [u8; 4],
     off: usize,
     total: usize,
+    v2: bool,
+    reuse: bool,
 }
 
 impl<'a> EncodedOpsSource<'a> {
     fn new(ops: &'a [crate::batch::WriteOp]) -> Self {
         let count = u32::try_from(ops.len()).unwrap_or(u32::MAX);
+        let v2 = crate::batch::record_uses_v2(ops);
         let mut head = [0u8; 5];
-        head[0] = crate::batch::WRITE_RECORD_VERSION;
+        head[0] = if v2 {
+            crate::batch::WRITE_RECORD_VERSION_V2
+        } else {
+            crate::batch::WRITE_RECORD_VERSION
+        };
         head[1..5].copy_from_slice(&count.to_le_bytes());
         Self {
             ops,
@@ -300,6 +308,8 @@ impl<'a> EncodedOpsSource<'a> {
             vlen: [0; 4],
             off: 0,
             total: crate::batch::encoded_len(ops),
+            v2,
+            reuse: false,
         }
     }
 
@@ -309,14 +319,42 @@ impl<'a> EncodedOpsSource<'a> {
             return;
         }
         let op = &self.ops[self.idx];
-        self.preamble[0] = op.kind.as_u8();
+        self.reuse =
+            self.v2 && self.idx > 0 && crate::batch::value_ptr_eq(&self.ops[self.idx - 1], op);
+        self.preamble[0] = op.kind.as_u8()
+            | if self.reuse {
+                crate::batch::KIND_REUSE_PREV
+            } else {
+                0
+            };
         self.preamble[1..9].copy_from_slice(&op.sequence.to_le_bytes());
         let kl = u32::try_from(op.key.len()).unwrap_or(u32::MAX);
         self.preamble[9..13].copy_from_slice(&kl.to_le_bytes());
-        let vl = u32::try_from(op.value.len()).unwrap_or(u32::MAX);
-        self.vlen.copy_from_slice(&vl.to_le_bytes());
+        if !self.reuse {
+            let vl = u32::try_from(op.value.len()).unwrap_or(u32::MAX);
+            self.vlen.copy_from_slice(&vl.to_le_bytes());
+        }
         self.stage = 0;
         self.off = 0;
+    }
+
+    fn next_op(&mut self) {
+        self.off = 0;
+        self.idx += 1;
+        if self.idx < self.ops.len() {
+            self.enter_op();
+        } else {
+            self.stage = 4;
+        }
+    }
+
+    fn finish_key_field(&mut self) {
+        self.off = 0;
+        if self.reuse {
+            self.next_op();
+        } else {
+            self.stage = 2;
+        }
     }
 
     /// Current contiguous run of encoded bytes (skips empty fields).
@@ -330,23 +368,26 @@ impl<'a> EncodedOpsSource<'a> {
                 1 => {
                     let key = &self.ops[self.idx].key;
                     if key.is_empty() {
-                        self.stage = 2;
-                        self.off = 0;
+                        self.finish_key_field();
                         continue;
                     }
                     return &key[self.off..];
                 }
-                2 => return &self.vlen[self.off..],
+                2 => {
+                    if self.reuse {
+                        self.next_op();
+                        continue;
+                    }
+                    return &self.vlen[self.off..];
+                }
                 3 => {
+                    if self.reuse {
+                        self.next_op();
+                        continue;
+                    }
                     let value = &self.ops[self.idx].value;
                     if value.is_empty() {
-                        self.off = 0;
-                        self.idx += 1;
-                        if self.idx < self.ops.len() {
-                            self.enter_op();
-                        } else {
-                            self.stage = 4;
-                        }
+                        self.next_op();
                         continue;
                     }
                     return &value[self.off..];
@@ -389,20 +430,13 @@ impl<'a> EncodedOpsSource<'a> {
             1 => {
                 self.off += taken;
                 if self.off == self.ops[self.idx].key.len() {
-                    self.off = 0;
-                    self.stage = 2;
+                    self.finish_key_field();
                 }
             }
             3 => {
                 self.off += taken;
                 if self.off == self.ops[self.idx].value.len() {
-                    self.off = 0;
-                    self.idx += 1;
-                    if self.idx < self.ops.len() {
-                        self.enter_op();
-                    } else {
-                        self.stage = 4;
-                    }
+                    self.next_op();
                 }
             }
             _ => {}
@@ -476,6 +510,14 @@ mod tests {
                 WriteOp::put(2, Bytes::new(), Bytes::from_static(b"empty-key-value")),
                 WriteOp::put(3, Bytes::from_static(b"both"), Bytes::new()),
             ],
+            {
+                let shared = Bytes::from(vec![0x5a; 1024]);
+                vec![
+                    WriteOp::put(1, Bytes::from_static(b"p0"), shared.clone()),
+                    WriteOp::put(2, Bytes::from_static(b"p1"), shared.clone()),
+                    WriteOp::put(3, Bytes::from_static(b"p2"), shared),
+                ]
+            },
         ];
 
         for start_offset in [0usize, 11, b - 3, b - 1].into_iter().chain(1..=40) {

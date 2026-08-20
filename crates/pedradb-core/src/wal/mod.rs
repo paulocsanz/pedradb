@@ -37,6 +37,9 @@ pub struct Wal<F: EnvFile = <StdEnv as Env>::File> {
     writer: WalWriter<F>,
     /// Reused logical-record encode buffer (RFC-0040).
     logical: Vec<u8>,
+    /// Async 1-op puts of an interned payload wait here until 32 ops or a
+    /// force-write, then encode as one v2 record (RFC-0044 P1.2).
+    pending: Vec<crate::batch::WriteOp>,
 }
 
 impl Wal<<StdEnv as Env>::File> {
@@ -83,6 +86,7 @@ impl<F: EnvFile> Wal<F> {
         Ok(Self {
             writer: WalWriter::new(file)?,
             logical: Vec::new(),
+            pending: Vec::new(),
         })
     }
 
@@ -95,6 +99,7 @@ impl<F: EnvFile> Wal<F> {
         Ok(Self {
             writer: WalWriter::new(file)?,
             logical: Vec::new(),
+            pending: Vec::new(),
         })
     }
 
@@ -143,13 +148,40 @@ impl<F: EnvFile> Wal<F> {
         if batches.is_empty() {
             return Ok(0);
         }
-        let mut frame = self.writer.take_frame();
         let mut n = 0u64;
         for ops in batches {
-            n = n.saturating_add(self.writer.fragment_encoded_len(ops, &mut frame) as u64);
+            if ops.is_empty() {
+                continue;
+            }
+            if !self.can_coalesce(ops) {
+                n = n.saturating_add(self.flush_pending_ops());
+            }
+            self.pending.extend_from_slice(ops);
+            if self.pending.len() >= 32 {
+                n = n.saturating_add(self.flush_pending_ops());
+            }
         }
-        self.writer.restore_frame(frame);
         Ok(n)
+    }
+
+    fn can_coalesce(&self, ops: &[crate::batch::WriteOp]) -> bool {
+        match (self.pending.last(), ops.first()) {
+            (None, _) => true,
+            (Some(last), Some(first)) => crate::batch::value_ptr_eq(last, first),
+            _ => true,
+        }
+    }
+
+    /// Encode `pending` as one logical record into the userspace frame.
+    fn flush_pending_ops(&mut self) -> u64 {
+        if self.pending.is_empty() {
+            return 0;
+        }
+        let ops = std::mem::take(&mut self.pending);
+        let mut frame = self.writer.take_frame();
+        let n = self.writer.fragment_encoded_len(&ops, &mut frame) as u64;
+        self.writer.restore_frame(frame);
+        n
     }
 
     /// Write the frame built by [`Self::encode_write_op_batches`].
@@ -171,12 +203,18 @@ impl<F: EnvFile> Wal<F> {
     /// # Errors
     /// Underlying file write when a flush is triggered.
     pub fn write_pending_frame_if(&mut self, force: bool) -> Result<()> {
+        if force {
+            self.flush_pending_ops();
+        }
         let mut frame = self.writer.take_frame();
         if frame.is_empty() {
             self.writer.restore_frame(frame);
             return Ok(());
         }
-        if !force && frame.len() < crate::wal::format::BLOCK_SIZE {
+        // Rocks-shaped async: userspace buffer (~1 MiB), not a write() per
+        // put/batch. Physical records still fragment at BLOCK_SIZE.
+        const ASYNC_STAGE: usize = 1024 * 1024;
+        if !force && frame.len() < ASYNC_STAGE {
             self.writer.restore_frame(frame);
             return Ok(());
         }

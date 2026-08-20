@@ -341,6 +341,42 @@ impl MemTable {
         self.tail.push(Version { key, value });
     }
 
+    /// Batch insert: one `tail_ord` invalidate (RFC-0044 P1.1 pipeline).
+    pub fn insert_many(&mut self, items: impl IntoIterator<Item = (InternalKey, Bytes)>) {
+        let iter = items.into_iter();
+        self.tail.reserve(iter.size_hint().0);
+        let mut any = false;
+        for (key, value) in iter {
+            let entry_bytes = key.user_key.len() + value.len() + 8;
+            let is_rd = key.kind == ValueType::RangeDeletion;
+            if let Some(v) = self.tail.last_mut() {
+                if v.key.sequence == key.sequence
+                    && v.key.kind == key.kind
+                    && v.key.user_key == key.user_key
+                {
+                    let old = std::mem::replace(&mut v.value, value);
+                    self.approx_bytes = self
+                        .approx_bytes
+                        .saturating_sub(old.len())
+                        .saturating_add(v.value.len());
+                    continue;
+                }
+            }
+            self.entries = self.entries.saturating_add(1);
+            self.approx_bytes = self.approx_bytes.saturating_add(entry_bytes);
+            if is_rd {
+                self.range_tombstones = self.range_tombstones.saturating_add(1);
+            }
+            self.tail_max_seq = self.tail_max_seq.max(key.sequence);
+            self.tail_idx.insert(key.user_key.clone(), self.tail.len());
+            self.tail.push(Version { key, value });
+            any = true;
+        }
+        if any {
+            self.invalidate_tail_ord();
+        }
+    }
+
     fn insert_map(&mut self, key: InternalKey, value: Bytes) {
         let entry_bytes = key.user_key.len() + value.len() + 8;
         let is_rd = key.kind == ValueType::RangeDeletion;
@@ -887,6 +923,33 @@ mod tests {
         assert!(!mt.has_range_tombstones());
         mt.delete_range(b"a".as_slice(), b"z".as_slice(), 3);
         assert!(mt.has_range_tombstones());
+    }
+
+    #[test]
+    fn insert_many_matches_insert() {
+        let mut a = MemTable::new();
+        let mut b = MemTable::new();
+        let items = [
+            (
+                InternalKey::new(Bytes::from_static(b"k0"), 1, ValueType::Value),
+                Bytes::from_static(b"v0"),
+            ),
+            (
+                InternalKey::new(Bytes::from_static(b"k1"), 2, ValueType::Value),
+                Bytes::from_static(b"v1"),
+            ),
+            (
+                InternalKey::new(Bytes::from_static(b"k2"), 3, ValueType::Value),
+                Bytes::from_static(b"v2"),
+            ),
+        ];
+        for (k, v) in items.clone() {
+            a.insert(k, v);
+        }
+        b.insert_many(items);
+        assert_eq!(a.len(), b.len());
+        assert_eq!(a.get(b"k1", 3), b.get(b"k1", 3));
+        assert_eq!(a.approx_memory_usage(), b.approx_memory_usage());
     }
 
     #[test]

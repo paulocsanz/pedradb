@@ -5,6 +5,7 @@
 **Parents:** [0041](0041-2x-rocks-default.md) (piso 2.0 nas 16; 1c write continua teto),
 [0042](0042-0.8x-rocks-default-write-shapes.md) (group/catch-up; não apaga 1c),
 [AGENTS.md](../../AGENTS.md) (peer = `sync=false`)
+**Children:** [0044](0044-async-class-5x-rocks.md) (5× same-class async; G1 intocado)
 
 ## Background
 

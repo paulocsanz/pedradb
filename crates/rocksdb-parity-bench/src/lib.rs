@@ -154,6 +154,10 @@ pub trait Engine {
     fn sync(&self) -> bool;
     fn put(&self, k: &[u8], v: &[u8]) -> bool;
     fn get(&self, k: &[u8]) -> Result<Option<Vec<u8>>, ()>;
+    /// Lookup without materializing the value (kvrocks GET canary).
+    fn get_probe(&self, k: &[u8]) -> Result<bool, ()> {
+        Ok(self.get(k)?.is_some())
+    }
     /// Count keys in `[start, end)` up to `cap` (short range scan).
     fn scan_count(&self, start: &[u8], end: &[u8], cap: usize) -> Result<usize, ()>;
     /// Read-modify-write: bump last payload byte based on the current value,
@@ -178,6 +182,19 @@ pub trait Engine {
     fn get_cf(&self, cf: &str, k: &[u8]) -> Result<Option<Vec<u8>>, ()>;
     /// One atomic multi-CF WriteBatch (TiKV apply-ready shape).
     fn batch(&self, ops: Vec<CfWrite>) -> bool;
+    /// Pipeline of puts of the **same** payload (redis SET pipeline).
+    /// Default clones `v` per key; compat interned `Bytes` (refcount).
+    fn batch_put_same(&self, cf: &'static str, keys: &[Vec<u8>], v: &[u8]) -> bool {
+        let mut wb = Vec::with_capacity(keys.len());
+        for k in keys {
+            wb.push(CfWrite::Put {
+                cf,
+                k: k.clone(),
+                v: v.to_vec(),
+            });
+        }
+        self.batch(wb)
+    }
     /// Latest-version KEY for `prefix` in `cf`: reverse-seek from
     /// `prefix || u64::MAX` and take the first entry still under the prefix
     /// (TiKV MVCC latest read; the returned key carries the version suffix).
@@ -653,24 +670,44 @@ impl YcsbRunner {
         let mut blocks = Vec::with_capacity(4);
 
         // Untimed Redis-string keyspace (independent of ycsb/).
+        let ktab: Vec<Vec<u8>> = (0..records + 25).map(kkey).collect();
         for i in 0..records {
-            assert!(e.put(&kkey(i), &yval), "kvrocks seed {i}");
+            assert!(e.put(&ktab[i], &yval), "kvrocks seed {i}");
         }
         // Warm the read path (seed already auto-flushes at 4 MiB). An extra
         // `flush()` here sent every later SET to a fresh mem+SST and
         // tanked kvrocks_set / pipeline.
         for i in 0..records {
-            let _ = e.get(&kkey(i));
+            let _ = e.get(&ktab[i]);
         }
+
+        // Materialise the zipf stream before the timed window so the ratio
+        // is LSM/CPU, not `format!` (RFC-0044 P1 — same schedule both engines).
+        let get_idx: Vec<usize> = (0..cfg_ops)
+            .map(|_| self.pick(&mut rng, records))
+            .collect();
+        let set_idx: Vec<usize> = (0..cfg_ops)
+            .map(|_| self.pick(&mut rng, records))
+            .collect();
+        let mut pipe: Vec<Vec<Vec<u8>>> = Vec::with_capacity(cfg_ops);
+        for _ in 0..cfg_ops {
+            let mut keys = Vec::with_capacity(batch);
+            for _ in 0..batch {
+                keys.push(ktab[self.pick(&mut rng, records)].clone());
+            }
+            pipe.push(keys);
+        }
+        let scan_idx: Vec<usize> = (0..cfg_ops)
+            .map(|_| self.pick(&mut rng, records))
+            .collect();
 
         // kvrocks_get — redis-benchmark GET (1-op canary).
         let mut lats = Vec::with_capacity(cfg_ops);
         let (mut gets, mut errors) = (0u64, 0u64);
         let t0 = Instant::now();
-        for _ in 0..cfg_ops {
+        for &u in &get_idx {
             let t = Instant::now();
-            let u = self.pick(&mut rng, records);
-            match e.get(&kkey(u)) {
+            match e.get_probe(&ktab[u]) {
                 Ok(_) => gets += 1,
                 Err(()) => errors += 1,
             }
@@ -683,10 +720,9 @@ impl YcsbRunner {
         let mut lats = Vec::with_capacity(cfg_ops);
         let (mut sets, mut errors) = (0u64, 0u64);
         let t0 = Instant::now();
-        for _ in 0..cfg_ops {
+        for &u in &set_idx {
             let t = Instant::now();
-            let u = self.pick(&mut rng, records);
-            if e.put(&kkey(u), &yval) {
+            if e.put(&ktab[u], &yval) {
                 sets += 1;
             } else {
                 errors += 1;
@@ -700,18 +736,9 @@ impl YcsbRunner {
         let mut lats = Vec::with_capacity(cfg_ops);
         let (mut puts, mut errors) = (0u64, 0u64);
         let t0 = Instant::now();
-        for _ in 0..cfg_ops {
+        for keys in &pipe {
             let t = Instant::now();
-            let mut wb = Vec::with_capacity(batch);
-            for _ in 0..batch {
-                let u = self.pick(&mut rng, records);
-                wb.push(CfWrite::Put {
-                    cf: "default",
-                    k: kkey(u),
-                    v: yval.clone(),
-                });
-            }
-            if e.batch(std::mem::take(&mut wb)) {
+            if e.batch_put_same("default", keys, &yval) {
                 puts += batch as u64;
             } else {
                 errors += 1;
@@ -730,10 +757,9 @@ impl YcsbRunner {
         let mut lats = Vec::with_capacity(cfg_ops);
         let (mut scans, mut errors) = (0u64, 0u64);
         let t0 = Instant::now();
-        for _ in 0..cfg_ops {
+        for &u in &scan_idx {
             let t = Instant::now();
-            let u = self.pick(&mut rng, records);
-            match e.scan_count(&kkey(u), &kkey(u + 25), 25) {
+            match e.scan_count(&ktab[u], &ktab[u + 25], 25) {
                 Ok(_) => scans += 1,
                 Err(_) => errors += 1,
             }
@@ -746,17 +772,21 @@ impl YcsbRunner {
         // cites 10–50 KB). Independent keyspace so the 1 KB SET path stays
         // the redis-benchmark canary.
         let blob = vec![b'B'; 16 * 1024];
-        for i in 0..records.min(256) {
+        let blob_n = records.min(256);
+        for i in 0..blob_n {
             let _ = e.put(&bkey(i), &blob);
         }
-        let blob_n = records.min(256);
+        // `pick(blob_n)` is zipf over the last `blob_n` of `records` (same
+        // as before pregen) — not `0..blob_n`.
+        let blob_keys: Vec<Vec<u8>> = (0..cfg_ops)
+            .map(|_| bkey(self.pick(&mut rng, blob_n)))
+            .collect();
         let mut lats = Vec::with_capacity(cfg_ops);
         let (mut sets, mut errors) = (0u64, 0u64);
         let t0 = Instant::now();
-        for _ in 0..cfg_ops {
+        for k in &blob_keys {
             let t = Instant::now();
-            let u = self.pick(&mut rng, blob_n);
-            if e.put(&bkey(u), &blob) {
+            if e.put(k, &blob) {
                 sets += 1;
             } else {
                 errors += 1;
@@ -1755,6 +1785,10 @@ impl YcsbRunner {
         for i in 0..self.cfg.records {
             assert!(e.put(&ykey(i), &val), "seed put {i}");
         }
+        // Same as kvrocks: warm TLS / point-cache before the timed window.
+        for i in 0..self.cfg.records {
+            let _ = e.get(&ykey(i));
+        }
     }
 
     /// Run one workload; returns the bench JSON block (same schema as the
@@ -1773,6 +1807,7 @@ impl YcsbRunner {
         let records = self.cfg.records;
         let payload = self.cfg.payload;
         let yval = vec![b'y'; payload];
+        let ytab: Vec<Vec<u8>> = (0..records + cfg_ops + 25).map(ykey).collect();
         let mut lats = Vec::with_capacity(cfg_ops);
         let mut updates = 0u64;
         let mut inserts = 0u64;
@@ -1786,13 +1821,12 @@ impl YcsbRunner {
             let roll = xorshift(&mut rng) % 100;
             if roll < read_pct {
                 let i = self.pick(&mut rng, latest);
-                if e.get(&ykey(i)).is_err() {
+                if e.get_probe(&ytab[i]).is_err() {
                     errors += 1;
                 }
             } else if roll < read_pct + insert_pct {
                 // insert (new key) → read-latest window grows
-                let k = format!("ycsb/{latest:06}").into_bytes();
-                if e.put(&k, &yval) {
+                if e.put(&ytab[latest], &yval) {
                     latest += 1;
                     inserts += 1;
                 } else {
@@ -1801,17 +1835,17 @@ impl YcsbRunner {
             } else if scans {
                 // short range scan: [key(i), key(i)+25) window, capped at 25
                 let i = self.pick(&mut rng, latest);
-                let start = ykey(i);
-                let mut end = ykey(i + 25);
+                let start = ytab[i].as_slice();
+                let mut end = ytab[i + 25].clone();
                 end.pop();
                 end.push(b'~');
-                match e.scan_count(&start, &end, 25) {
+                match e.scan_count(start, &end, 25) {
                     Ok(_) => scan_ops += 1,
                     Err(_) => errors += 1,
                 }
             } else if rmw {
                 let i = self.pick(&mut rng, latest);
-                if e.rmw(&ykey(i), &yval) {
+                if e.rmw(&ytab[i], &yval) {
                     updates += 1;
                 } else {
                     errors += 1;
@@ -1819,7 +1853,7 @@ impl YcsbRunner {
             } else {
                 // update
                 let i = self.pick(&mut rng, latest);
-                if e.put(&ykey(i), &yval) {
+                if e.put(&ytab[i], &yval) {
                     updates += 1;
                 } else {
                     errors += 1;
@@ -1848,6 +1882,7 @@ impl YcsbRunner {
         let records = self.cfg.records;
         let payload = self.cfg.payload;
         let yval = std::sync::Arc::new(vec![b'y'; payload]);
+        let ytab = std::sync::Arc::new((0..records).map(ykey).collect::<Vec<Vec<u8>>>());
         let mut blocks = Vec::new();
         // (name, read_pct, rmw, overwrite) — mirrors run()/run_deps mixes.
         let shapes: [(&str, u64, bool, bool); 3] = [
@@ -1865,6 +1900,7 @@ impl YcsbRunner {
                     .map(|c| {
                         let barrier = barrier.clone();
                         let yval = yval.clone();
+                        let ytab = ytab.clone();
                         s.spawn(move || {
                             let mut rng =
                                 0x5EED_0001_u64.wrapping_mul((c as u64) + 0x9E37) ^ (c as u64);
@@ -1877,11 +1913,11 @@ impl YcsbRunner {
                                 let ok = if overwrite {
                                     e.put(format!("c/{u:06}").as_bytes(), &yval)
                                 } else if xorshift(&mut rng) % 100 < read_pct {
-                                    e.get(&ykey(u)).is_ok()
+                                    e.get_probe(&ytab[u]).is_ok()
                                 } else if rmw {
-                                    e.rmw(&ykey(u), &yval)
+                                    e.rmw(&ytab[u], &yval)
                                 } else {
-                                    e.put(&ykey(u), &yval)
+                                    e.put(&ytab[u], &yval)
                                 };
                                 if !ok {
                                     errors += 1;

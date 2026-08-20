@@ -133,3 +133,39 @@ need extra CFs.
 
 Pipeline **>1**. 5× on 1-op put **not** reached (need ~750k vs 150k;
 CPU of encode+mem+lock). Scan is already >5×. Not official (G1 off).
+
+## mc50-fast — `kvrocks_set_mc50` wins
+
+Async 1-op no longer goes through write-group/mpsc/catch-up (nothing to
+amortize without fsync). `commit_one_async`: write lock, encode, mem,
+stage WAL, unlock.
+
+`mc50-fast/` (kvrocks host-default = both async, dirty):
+
+| shape | ratio | qps P / R |
+|---|---:|---|
+| **kvrocks_set_mc50** | **3.11** | 212k / 68k |
+| kvrocks_set 1c | **6.89** | 606k / 88k |
+| pipeline | **1.36** | |
+| get | 3.37 | |
+| scan | 9.33 | |
+| blob | 2.30 | |
+
+## x5b — 256 MiB memtable + 1 MiB WAL stage (async vs async)
+
+No auto-flush in the timed window. `set_mc50` crosses **5×**. Pipeline
+stays ~1.6× (CPU of 32× encode+BTree vs Rocks WriteBatch). Get/blob/A–F
+win but not 5× — that would be ~3–6M qps point-get / ~55k batch-ops.
+
+| shape | ratio |
+|---|---:|
+| kvrocks_set_mc50 | **5.07** |
+| kvrocks_scan | **44.1** |
+| ycsb_e | **5.61** |
+| kvrocks_set | 2.14 |
+| pipeline | **1.56** |
+| get | 1.43 |
+| blob | 1.96 |
+| ycsb_a/b/c/d/f | 1.6–2.6 |
+
+Raw: `x5b/kvrocks/`, `x5b/ycsb/`. Still not official G1.

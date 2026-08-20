@@ -246,6 +246,15 @@ impl KeyCodec {
         pool.split_to(n).freeze()
     }
 
+    /// Default-CF raw: copy user key; otherwise `cf\\0key` via the pool.
+    fn encode_owned(&self, cf: &str, key: &[u8], pool: &mut bytes::BytesMut) -> Bytes {
+        if cf == DEFAULT_CF && self.default_raw {
+            Bytes::copy_from_slice(key)
+        } else {
+            self.encode_pooled(cf, key, pool)
+        }
+    }
+
     /// Encode into a stack buffer when the key fits (RFC-0035 P1.2).
     pub(crate) fn encode_with<R>(&self, cf: &str, key: &[u8], f: impl FnOnce(&[u8]) -> R) -> R {
         const STACK: usize = 192;
@@ -1251,6 +1260,26 @@ impl<E: Env> DB<E> {
         Ok(got.map(|b| b.to_vec()))
     }
 
+    /// Point lookup without copying the value to `Vec` (RFC-0044 P1.3 GET).
+    ///
+    /// # Errors
+    /// Pedra read errors.
+    pub fn contains(&self, key: impl AsRef<[u8]>) -> Result<bool> {
+        let key = key.as_ref();
+        thread_local! {
+            static LAST: RefCell<LastGetTable> = RefCell::new(LastGetTable::new());
+        }
+        let epoch = self.inner.read_cache_epoch();
+        if let Some(hit) = LAST.with(|slot| slot.borrow().get_key(epoch, key)) {
+            return Ok(hit.is_some());
+        }
+        let got = self
+            .codec
+            .encode_with(DEFAULT_CF, key, |enc| self.inner.get(enc));
+        LAST.with(|slot| slot.borrow_mut().store_key(epoch, key, got.clone()));
+        Ok(got.is_some())
+    }
+
     /// Get from a named CF.
     ///
     /// # Errors
@@ -1499,6 +1528,31 @@ impl<E: Env> DB<E> {
             self.inner.apply_batch(ops).map(|_| ()).map_err(Error::from)
         });
         r
+    }
+
+    /// N puts of the same payload: one `Bytes` allocation, N refcount clones
+    /// (RFC-0044 P1.1 pipeline).
+    ///
+    /// # Errors
+    /// Unknown CF or WAL I/O.
+    pub fn put_batch_same(&self, cf: &str, keys: &[Vec<u8>], v: &[u8]) -> Result<()> {
+        self.check_cf(cf)?;
+        let val = Bytes::copy_from_slice(v);
+        thread_local! {
+            static KEY_POOL: std::cell::RefCell<bytes::BytesMut> =
+                std::cell::RefCell::new(bytes::BytesMut::with_capacity(8 * 1024));
+        }
+        KEY_POOL.with(|pool| {
+            let mut pool = pool.borrow_mut();
+            let mut ops = Vec::with_capacity(keys.len());
+            for k in keys {
+                ops.push(BatchOp::Put {
+                    key: self.codec.encode_owned(cf, k.as_slice(), &mut pool),
+                    value: val.clone(),
+                });
+            }
+            self.inner.apply_batch(ops).map(|_| ()).map_err(Error::from)
+        })
     }
 
     /// Sequence-pinned snapshot.
@@ -1884,6 +1938,37 @@ mod tests {
     #[test]
     fn default_write_buffer_is_4_mib() {
         assert_eq!(Options::new().write_buffer_size, 4 * 1024 * 1024);
+    }
+
+    #[test]
+    fn contains_matches_get_without_copying() {
+        let dir = tmp("contains");
+        let mut opts = Options::new();
+        opts.create_if_missing(true);
+        let db = DB::open(&opts, &dir).unwrap();
+        db.put(b"k", b"v").unwrap();
+        assert!(db.contains(b"k").unwrap());
+        assert!(!db.contains(b"missing").unwrap());
+        assert_eq!(db.get(b"k").unwrap().as_deref(), Some(&b"v"[..]));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn put_batch_same_interns_and_reads_back() {
+        let dir = tmp("batch-same");
+        let mut opts = Options::new();
+        opts.create_if_missing(true);
+        let db = DB::open(&opts, &dir).unwrap();
+        let v = vec![b'x'; 128];
+        let keys: Vec<Vec<u8>> = (0..32).map(|i| format!("k/{i:06}").into_bytes()).collect();
+        db.put_batch_same("default", &keys, &v).unwrap();
+        assert_eq!(db.get(b"k/000000").unwrap().as_deref(), Some(v.as_slice()));
+        assert_eq!(db.get(b"k/000031").unwrap().as_deref(), Some(v.as_slice()));
+        db.flush().unwrap();
+        drop(db);
+        let db = DB::open(&opts, &dir).unwrap();
+        assert_eq!(db.get(b"k/000015").unwrap().as_deref(), Some(v.as_slice()));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
