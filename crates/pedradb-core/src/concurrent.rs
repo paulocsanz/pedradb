@@ -101,6 +101,9 @@ struct WriteGroup {
     catchup_waits: AtomicU64,
     /// RFC-0044 P0.5: merge concurrent async writers into one group.
     async_group: bool,
+    /// RFC-0045 P0.2: bounded spin before parking on the bypass write lock
+    /// (`PEDRA_WRITE_SPIN`, default 0 = park immediately).
+    write_spin: AtomicUsize,
     /// RFC-0045 P0.1: lock-wait accumulation for the async bypass
     /// (`PEDRA_WRITE_PHASE_STATS=1`); `None` when the env is unset.
     phase_stats: Option<Arc<crate::db::WritePhaseStats>>,
@@ -214,6 +217,12 @@ impl WriteGroup {
                     _ => None,
                 })
                 .unwrap_or(ASYNC_GROUP_DEFAULT),
+            write_spin: AtomicUsize::new(
+                std::env::var("PEDRA_WRITE_SPIN")
+                    .ok()
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(0),
+            ),
             phase_stats: None,
         }
     }
@@ -327,7 +336,25 @@ impl WriteGroup {
         // itself (no mpsc, no leader dependency).
         if occ.is_none() && !do_sync && !self.async_group {
             let t0 = self.phase_stats.as_ref().map(|_| Instant::now());
-            let mut guard = db.write();
+            // RFC-0045 P0.2: bounded spin-then-park (`PEDRA_WRITE_SPIN`).
+            // Default 0 = plain park (current shape). P0 measured the 50-thread
+            // bypass spending ~99% of writer time blocked on this lock (avg
+            // wait ~344 µs vs ~2 µs hold) — if spinning moves qps, the gap is
+            // the park/unpark convoy, not CPU.
+            let spins = self.write_spin.load(Ordering::Relaxed);
+            let mut guard = if spins > 0 {
+                let mut g = None;
+                for _ in 0..spins {
+                    if let Some(acquired) = db.try_write() {
+                        g = Some(acquired);
+                        break;
+                    }
+                    std::hint::spin_loop();
+                }
+                g.unwrap_or_else(|| db.write())
+            } else {
+                db.write()
+            };
             if let (Some(st), Some(t0)) = (self.phase_stats.as_ref(), t0) {
                 st.lock_wait_ns
                     .fetch_add(t0.elapsed().as_nanos() as u64, Ordering::Relaxed);

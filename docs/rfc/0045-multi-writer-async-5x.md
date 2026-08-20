@@ -64,48 +64,53 @@
 
 ### P0 — profile pareado + microbench de decisão
 
-- [ ] **P0.1** Instrumentação por fase do `commit_async_ops` (lock wait /
-      prepare / wal / mem / publish) atrás de feature flag de bench; nenhum
-      custo no caminho default — status: `todo`
-- [ ] **P0.2** Microbench pareado N∈{4,12,50} threads × {bypass atual,
-      encode-fora-do-lock protótipo} na mesma caixa quieta; número decide o
-      P1 — status: `todo`
-- [ ] **P0.3** Profile do `deps_lock_prewrite` (perf/Instruments ou contadores
-      por fase); classificar os 6% (CF routing vs key encode vs allocs vs
-      ruído — runs 1.40/0.94/0.77 sugerem variância alta) — status: `todo`
+- [x] **P0.1** Instrumentação por fase do `commit_async_ops` (`PEDRA_WRITE_PHASE_STATS`)
+      + lock-wait no bypass — status: `done` (d5549d5)
+- [x] **P0.2** Microbench N-threads (probe `multiwriter_probe`; bench-shaped
+      50×2000) — status: `done`
+      (**veredito**: hold 1.6 µs = wal 0.8 + mem 0.5 + publish 0.25 +
+      prepare 0.13; wait médio 175 µs; 1c 1.05 M vs 50c 266 k; spin
+      falsificado; **P1.1 falsificado como alavanca** — prepare é 8% do hold)
+- [x] **P0.3** `deps_lock_prewrite` — status: `done`
+      (**isolado 2.28/2.26/2.09 — a shape ganha ≥2×; o 0.94 do árbitro é
+      efeito do contexto da suíte v0** (mesmo processo/db depois das demais
+      shapes). P1.2 vira bissecção de contexto)
+      Finding: `findings/rfc0045-p0/` (dirty box, números de mecanismo)
 
-### P1 — seção crítica curta (o que o P0 mandar)
+### P1 — o que o P0 deixou vivo (P1.1 original falsificado)
 
-- [ ] **P1.1** `prepare_write_ops` fora do write lock com equivalência de
-      bytes do WAL (teste `encode_offlock_matches_lock_path`); lock cobre
-      seq+append+publish — status: `todo`
-- [ ] **P1.2** Fix do mecanismo dominante do lock_prewrite apontado pelo
-      P0.3; alvo ≥ 1.0 na árbitro quieto 3× — status: `todo`
-- [ ] **P1.3** Remesura quieto 3× (P2.1 bar: load < 10): mc50 e
-      lock_prewrite; sem regressão em SET/GET/pipeline/E (mediana e p50) —
+- [ ] **P1.1** ~~prepare fora do write lock~~ — status: `done (negativo)`
+      (P0.2: prepare = 0.13 µs de hold 1.6 µs = 8%; mover não move o qps.
+      Registrado como negativo com número; não implementar)
+- [ ] **P1.2** Bissecção do contexto da suíte que flipa `deps_lock_prewrite`
+      (2.2× isolado → 0.94 in-suite): rodar prefixos crescentes do v0 antes
+      da shape até o sinal virar; profile do caso flipado — status: `todo`
+- [ ] **P1.3** Remesura quieto 3× (P2.1 bar): mc50 e lock_prewrite; sem
+      regressão em SET/GET/pipeline/E — status: `todo`
+
+### P2 — concorrência de memtable (o alvo medido do 5×; promoted)
+
+- [ ] **P2.1** Memtable apply fora da seção crítica (hold 1.6 → ≤1.1 µs;
+      ceiling 640 k → 900 k): per-writer staging + apply paralelo pós-WAL
+      (shape Rocks) ou estrutura concorrente; A/B pareado vs BTree atual —
       status: `todo`
-
-### P2 — concorrência de memtable (só se P1 não fechar 5×)
-
-- [ ] **P2.1** Protótipo memtable de insert concorrente (WAL serializado,
-      apply paralelo; `tail_ord` por shard); A/B pareado vs BTree atual —
-      status: `todo`
-- [ ] **P2.2** Reteste `PEDRA_ASYNC_GROUP=1` em caixa quieta (falsificação
-      0.19× foi a load 14–50; se o líder ganhar quieto, reabrir como opção) —
-      status: `todo`
+- [ ] **P2.2** Handoff sem park-convoy (wait 175 µs vs hold 1.6 µs é o 2.4×
+      entre 266 k e o ceiling): fila leader-follower **sem catch-up wait**
+      (diferente do merge falsificado 0.19×, que esperava); protótipo
+      env-gated — status: `todo`
 
 ## Status (living — update with every PR)
 
 | ID | Band | Title | Status | Task / PR | Updated |
 |----|------|-------|--------|-----------|---------|
-| P0.1 | p0 | instrumentação por fase do bypass | todo | — | 2026-08-20 |
-| P0.2 | p0 | microbench N-threads encode-offlock | todo | — | 2026-08-20 |
-| P0.3 | p0 | profile lock_prewrite | todo | — | 2026-08-20 |
-| P1.1 | p1 | prepare fora do lock + teste equivalência | todo | — | 2026-08-20 |
-| P1.2 | p1 | fix lock_prewrite ≥ 1.0 | todo | — | 2026-08-20 |
+| P0.1 | p0 | instrumentação por fase do bypass | done | d5549d5 | 2026-08-20 |
+| P0.2 | p0 | microbench N-threads (probe) | done | hold 1.6 µs, wait 175 µs; spin falsificado | 2026-08-20 |
+| P0.3 | p0 | lock_prewrite isolado vs in-suite | done | 2.2× isolado / 0.94 in-suite | 2026-08-20 |
+| P1.1 | p1 | prepare off-lock | done (negativo) | 8% do hold; P0.2 | 2026-08-20 |
+| P1.2 | p1 | bissecção do contexto v0 | todo | — | 2026-08-20 |
 | P1.3 | p1 | remesura quieto 3× sem regressão | todo | — | 2026-08-20 |
-| P2.1 | p2 | memtable insert concorrente | todo | — | 2026-08-20 |
-| P2.2 | p2 | reteste async-group quieto | todo | — | 2026-08-20 |
+| P2.1 | p2 | memtable apply fora da seção crítica | todo | alvo medido: hold ≤1.1 µs | 2026-08-20 |
+| P2.2 | p2 | handoff sem park-convoy | todo | wait 175 µs é o 2.4× do gap | 2026-08-20 |
 
 ## Acceptance Criteria
 
