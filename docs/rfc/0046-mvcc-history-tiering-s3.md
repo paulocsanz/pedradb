@@ -1,0 +1,154 @@
+# RFC-0046: história MVCC fora do SSD — retention default + tier em object storage (S3)
+
+**Status:** draft
+**Updated:** 2026-08-20
+**Parents:** [0009](0009-rocksdb-class-engine.md) (F20 retention),
+[0044](0044-async-class-5x-rocks.md) (E/cliff de retenção),
+[0045](0045-multi-writer-async-5x.md)
+[AGENTS.md](../../AGENTS.md) (colunas oficiais medem o default do produto)
+
+## Background
+
+- Hoje o default do produto **retém todas as versões** (F20): MVCC,
+  change-feed (`changes(from,to]`) e PITR por seq são de graça *em
+  capacidade*, mas o **custo de storage cai no SSD local** — disco cresce
+  ~O(volume total de writes), não O(live set). Medido no próprio bench:
+  2M ops sobre 1024 chaves (~1 GB lógico) viraram 2 SSTs de 72 MB + WAL de
+  180 MB, enquanto o Rocks default compacta para ≈ live set.
+- O cliff do E (RFC-0044 P2.2) é a mesma doença em leitura: scan frio é
+  O(versões retidas). `auto_reclaim` (opt-in, d9abd6f) já existe como
+  mecanismo de GC pin-aware; `compact_for_reads` como operação manual;
+  checkpoint/backup com verify, PITR por seq e ship-wal já existem.
+- Concorrência: toda plataforma séria mora o PITR em storage barato
+  (WAL archive em S3 no Postgres/cloud; snapshot+WAL em S3 no
+  MongoDB/Atlas; TiDB PITR em S3/NFS) e mantém o disco local ≈ live set +
+  janela curta. Cassandra tem precedente de **retenção default**
+  (`gc_grace_seconds` = 10 dias): o default do produto é bounded, não
+  "tudo para sempre" *(conhecimento estabelecido, não fonte primária
+  desta sessão)*.
+- Sem S3 habilitado, o produto atual é **insustentável em prod** (disco
+  cresce sem borne). Este RFC fecha os dois casos: sem S3 (retenção
+  bounded + arquivo local com cap) e com S3 (tier de história em object
+  storage, PITR de lá).
+
+## Problems This Solves
+
+- **Problem:** disco cresce O(writes) com retention default — não
+  sustentável sem operação manual; "PITR de graça" custa SSD caro.
+- **Problem:** scan frio O(versões) (cliff do E) é a face de leitura da
+  mesma decisão; retention bounded fecha a classe estruturalmente, não
+  só via cache.
+- **Problem:** histórico que sai do SSD hoje não tem destino barato; PITR
+  depende do que sobrou no disco local.
+- **Problem:** a história só é restaurável se houver backup rodando —
+  hoje é disciplina do operador, não produto.
+
+## Garantias invariáveis
+
+| # | Garantia | Este RFC |
+|---|---|---|
+| G2 | CRC fail-closed / never silent-wrong | tier e archive entram no verify; GC nunca destrói silenciosamente |
+| GC-fail-closed | watermark + `SnapshotTooOld` (erro tipificado) | retention bounded **é** o watermark movendo; pins respeitados |
+| F20 | retenção total possível | continua existindo — vira **opt-in explícito**, não default |
+| G1 | `fdatasync` antes do Ok | intocada |
+| G6 | sem thread no core | upload/tier roda no host (compat/montanha), não no core |
+| — | shape não some (0043) | catálogo intocado; colunas oficiais passam a medir o **novo default** (P0.4 re-árbitro) |
+
+## Proposed Solution
+
+1. **Retention default bounded**: `OpenOptions::history_horizon` —
+   `HistoryHorizon::All` (F20, opt-in explícito) ou
+   `HistoryHorizon::Window(d)` (default do produto; `d` decidido no P0 com
+   remesura — strawman 24 h). O auto-compact GC'ia versões mais velhas que
+   o horizonte **depois de arquivá-las** (P0.2), pin-aware como o
+   `auto_reclaim` atual. SSD = live set + janela.
+2. **Arquivo local bounded** (funciona **sem S3**): antes do GC, as
+   versões saem para um archive local (ship-wal/history SST) com cap e
+   rotação — PITR local por seq continua, limitado pelo cap; estouro do
+   cap avança o watermark (o mais velho vira `SnapshotTooOld`), nunca
+   destrói silenciosamente.
+3. **Tier em object storage**: destino alternativo/adicional do archive —
+   S3-class via seam `Env` (bytes content-addressed + CRC), upload no
+   host, retry/resume de crash. PITR restaura do tier (restore-time), como
+   o mercado faz.
+4. **Leitura do tier é P2** (lazy): P1 é restore-only — igual aos
+   concorrentes.
+
+## Delivery slices (mandatory)
+
+### P0 — retention sustentável sem S3
+
+- [ ] **P0.1** `OpenOptions::history_horizon` (`All` | `Window(d)`) +
+      default `Window(d)` (d decidido aqui, com número na mesa); F20 vira
+      `All` explícito; doc de produto atualizada (o que o default promete:
+      MVCC dentro da janela, PITR via archive) — status: `todo`
+- [ ] **P0.2** Archive local antes do GC (history SST/ship-wal contínuo,
+      cap + rotação, watermark avança no estouro com `SnapshotTooOld`
+      tipificado; GC pin-aware reutiliza `CompactGcOptions`) — status: `todo`
+- [ ] **P0.3** Testes: GC respeita pin (`snapshot_pinned_survives_horizon`);
+      estouro de cap avança watermark sem destruir pin; crash no meio do
+      archive → reopen consistente; PITR local por seq dentro da janela —
+      status: `todo`
+- [ ] **P0.4** Re-árbitro quieto 3× com o novo default (colunas oficiais
+      0041 medem o default do produto): E/scan/A–D + regressão G1;
+      expectativa: cliff do E some estruturalmente (retenção), CountCache
+      segue no caminho quente — status: `todo`
+
+### P1 — tier S3 (história barata e PITR de lá)
+
+- [ ] **P1.1** Destino object storage no seam `Env` (S3-class; content-addressed
+      + CRC; testes com MemEnv/FailingEnv — sem rede em teste de unidade) —
+      status: `todo`
+- [ ] **P1.2** Pipeline de upload no host: archive → tier, retry/resume
+      de crash, verify de bytes no destino; backpressure se o tier cai
+      (pausa o GC, nunca destrói o que não subiu) — status: `todo`
+- [ ] **P1.3** Restore drill do tier: destrói local, restaura em seq
+      arbitrária dentro do horizonte, verify (teste e2e nomeado
+      `pitr_restore_from_object_storage`) — status: `todo`
+- [ ] **P1.4** `pedra` CLI: `archive status` / `restore --seq` — status: `todo`
+
+### P2 — polish
+
+- [ ] **P2.1** Leitura lazy do tier (snapshot mais velho que a janela
+      local servido do tier, não só restore) — status: `todo`
+- [ ] **P2.2** Métricas (bytes locais vs tier, idade do archive, uploads
+      pendentes) + limiter de banda — status: `todo`
+
+## Status (living — update with every PR)
+
+| ID | Band | Title | Status | Task / PR | Updated |
+|----|------|-------|--------|-----------|---------|
+| P0.1 | p0 | history_horizon + default bounded | todo | — | 2026-08-20 |
+| P0.2 | p0 | archive local bounded + GC pin-aware | todo | — | 2026-08-20 |
+| P0.3 | p0 | testes pin/cap/crash/PITR local | todo | — | 2026-08-20 |
+| P0.4 | p0 | re-árbitro quieto com novo default | todo | — | 2026-08-20 |
+| P1.1 | p1 | Env→S3 + testes seam | todo | — | 2026-08-20 |
+| P1.2 | p1 | upload pipeline + backpressure | todo | — | 2026-08-20 |
+| P1.3 | p1 | restore drill do tier | todo | — | 2026-08-20 |
+| P1.4 | p1 | CLI archive/restore | todo | — | 2026-08-20 |
+| P2.1 | p2 | leitura lazy do tier | todo | — | 2026-08-20 |
+| P2.2 | p2 | métricas + banda | todo | — | 2026-08-20 |
+
+## Acceptance Criteria
+
+- **Tests:** `snapshot_pinned_survives_horizon`;
+  `archive_cap_overflow_advances_watermark_not_silent`;
+  `archive_crash_mid_upload_reopens_consistent`;
+  `pitr_restore_from_object_storage` (MemEnv-backed e2e);
+  `history_horizon_all_keeps_all_versions` (F20 opt-in re-verde);
+  suítes adversariais existentes sem editar asserção.
+- **Telemetry:** `findings/rfc0046-*/` com o re-árbitro do P0.4 (quieto
+  3×, colunas oficiais) + sizing de disco antes/depois (live set + janela)
+  num workload de overwrite.
+- **Documentation:** este RFC; `docs/usage.md` (novo default);
+  `docs/certainty-vs-availability.md` (requisitos operacionais por
+  garantia); RFC-0044 P2.2 nota (cliff fecha por retention, não só cache).
+- **Screenshots:** none — backend-only.
+
+## Out of scope
+
+- Mudar G1 ou o peer oficial (0041).
+- Object-store-first engine (não-goal permanente do `positioning.md`; o
+  tier é *destino de história*, não substrato do kernel).
+- Replicação/multi-node (Montanha).
+- Lazy read do tier antes do P2 (P1 é restore-only, como o mercado).
