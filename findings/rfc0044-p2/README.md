@@ -1,5 +1,72 @@
 # RFC-0044 P2 — async column remeasure
 
+## QUIET ARBITER (P2.1) — 2026-08-20 16:53–16:55, load 9.4/12
+
+User killed the fuzzers; battery auto-fired when 1-min load < 10
+(`loads.txt`: reached 9.4 at 16:53:22; user's `caixote-api` + system
+daemons still resident ~4 CPUs — quiet by the P2.1 bar, recorded as
+such). Full battery: 3× v0 (ycsb+deps), 3× kvrocks default, 1×
+kvrocks 2M long-window, all paired `PEDRA_PARITY_ASYNC=1` vs Rocks
+`sync=false`.
+
+### v0 (ycsb+deps), median of 3 rounds
+
+| shape | med | runs | ≥5? |
+|---|---:|---|:---:|
+| ycsb_e | **10.55** | 10.55 / 12.76 / 10.47 | **sim (3/3)** |
+| ycsb_c | 3.84 | 3.87 / 3.84 / 3.76 | não |
+| deps_cache_overwrite | 3.43 | 3.48 / 3.12 / 3.43 | não |
+| ycsb_d | 3.02 | 3.02 / 3.59 / 3.02 | não |
+| ycsb_b | 2.93 | 2.93 / 3.35 / 2.93 | não |
+| ycsb_a | 2.88 | 2.59 / 5.80 / 2.88 | não (1 outlier) |
+| deps_scan | 1.96 | 1.96 / 1.96 / 1.93 | não |
+| deps_mvcc_latest | 1.67 | 1.62 / 1.69 / 1.67 | não |
+| ycsb_f | 1.66 | 1.66 / 2.85 / 1.45 | não |
+| deps_raftlog | 1.51 | 1.24 / 1.51 / 2.31 | não |
+| deps_apply_batch | 1.41 | 1.62 / 1.41 / 1.35 | não |
+| deps_lock_prewrite | 0.94 | 1.40 / 0.94 / 0.77 | **abaixo de 1** |
+
+### kvrocks default window, median of 3 rounds
+
+| shape | Pedra | Rocks | ratio | runs |
+|---|---:|---:|---:|---|
+| scan | 809 k | 109 k | **7.39** | 7.62 / 7.26 / 7.45 |
+| set | 1.84 M | 399 k | 4.61 | 4.59 / 4.47 / 4.99 |
+| blob_set | 194 k | 96 k | 2.02 | 2.47 / 1.80 / 2.02 |
+| pipelined_set | 116 k | 56 k | 2.05 | 4.35 / 2.05 / 1.74 |
+| get | 3.82 M | 2.38 M | 1.61 | 1.73 / 1.51 / 1.64 |
+| set_mc50 | 307 k | 152 k | **2.02** | 2.13 / 1.92 / 1.88 |
+
+### kvrocks 2M long window, same-run
+
+| shape | Pedra | Rocks | ratio | p50 |
+|---|---:|---:|---:|---|
+| set | 1.83 M | 338 k | **5.41** | 0.4 µs vs 2.5 µs |
+| get | 11.6 M | 2.52 M | 4.61 | 0.0 µs vs 0.4 µs |
+| pipelined_set | 166 k | 39 k | 4.22 | 4.0 µs vs 23.2 µs |
+
+### Verdicts (the arbiter's word)
+
+- **Fecham ≥5 consistentes: `ycsb_e` (10.5–12.8, 3/3 em toda condição
+  testada) e `kvrocks_scan` (7.4–8.5).**
+- **Cruzam na janela longa quieta mas ficam ~4.2–4.6 na curta/curta:
+  SET (5.41 longo / 4.61 curto), e straddle entre janelas: GET
+  (4.61 quieta / 5.50 a load 100), pipeline (4.22 / 5.86).** p50
+  sempre 5–6× melhor (0.4 vs 2.5 µs; 4.0 vs 23 µs) — o wall é cauda.
+- **Não fecham: mc50 2.02, blob 2.02, F 1.66, A 2.88, B 2.93, C 3.84,
+  D 3.02, deps 0.94–3.43.**
+- **P0.5 (mc50) NÃO fecha vs peer são**: os 3.38–9.24 anteriores eram
+  Rocks doente sob carga (55 k); quieto e saudável o Rocks faz 152 k e
+  o ratio real é ~2.0. O bypass/grupo já é o formato certo (merge
+  rejeitado 0.19×); o gap é outro mecanismo.
+- `deps_lock_prewrite` abaixo de 1 (0.94 med) — único shape perdendo.
+
+**Standing P2.1 verdict: só E e scan fecham ≥5 amplamente; SET cruza
+em janela longa quieta; GET/pipeline straddle 4.2–5.9; o resto está
+1.0–3.8.** O piso ≥5 de RFC-0044 para *todos* os shapes não está
+alcançado na caixa quieta — registrado sem maquiagem. JSONs:
+`quiet/{run1..3,kvrocks-r1..3,kvlong-2m}/`, `loads.txt`.
+
 ## Hot-box baseline (user-ordered) — 2026-08-20 15:16–15:19
 
 3 paired rounds via `scripts/tikv_ycsb_parity_v0.sh`

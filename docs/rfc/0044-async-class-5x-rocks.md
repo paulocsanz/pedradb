@@ -125,41 +125,39 @@ Não fecha (e não se mente):
 - [x] **P0.4** buffer async 64 KiB (Rocks file writer), não 1 MiB —
       status: `done` (`ASYNC_WAL_BUFFER`; testes 64 KiB + tail no close)
 - [ ] **P0.5** `kvrocks_set_mc50` ≥ 5.0 async/async — status: `doing`
-      (64 KiB 3.38 full; mesma-run l14 **9.24** mas peer doente 32 k —
-      vs saudável 54–92 k fica 3.2–5.4; merge rejeitado — ver abaixo)
+      (**veredito quieto: 2.02** vs peer são 152 k — os 3.4–9.2
+      anteriores eram Rocks doente sob carga (55 k); merge rejeitado
+      0.19×; o gap é outro mecanismo, não handoff de grupo)
 
 ### P1 — o resto do kvrocks ≥ 5×
 
-- [x] **P1.1** `kvrocks_pipelined_set` ≥ 5.0 — status: `done`
-      (64 KiB **11.3**; janela com disco sujo derruba o wall para 0.96
-      por cauda de `write()` 1–4 ms — p50 4.4 µs vs 22 µs segue 5× melhor)
+- [ ] **P1.1** `kvrocks_pipelined_set` ≥ 5.0 — status: `doing`
+      (reaberto pelo árbitro quieto: **straddle 4.22–5.86** entre
+      janelas — 11.3 @ 64 KiB e 5.86 @ 2M load ~100, mas 4.22 @ 2M
+      quieto; p50 4.0 µs vs 23 µs segue ~6× melhor. Não é ≥5 estável)
 - [ ] **P1.2** `kvrocks_set` / `kvrocks_blob_set` ≥ 5.0 — status: `doing`
-      (SET **5.66** mesma-run l14 vs Rocks saudável 296 k — crossing
-      sujo, confirmar na quieta; blob 1.62 / 2.30 / 3.03)
+      (SET **cruza na quieta longa: 5.41** @ 2M quieto, p50 0.4 µs vs
+      2.5 µs; curta 4.61. Blob **2.02** quieto — longe; copies de 16 KB
+      dominam)
 - [ ] **P1.3** `kvrocks_get` ≥ 5.0 — status: `doing`
-      (**duas janelas longas independentes ≥5**: 20 M ops 4.4–5.5×
-      (`get-longwindow/`) e 2 M ops same-run **5.50** a load ~100
-      (`rfc0044-p2/kvrocks-long/`); suíte 2 000 ops 3.97† — janela
-      curta comprime; árbitro P2.1 quieta)
+      (straddle: 20 M ops 4.4–5.5; 2 M load ~100 **5.50**; 2 M quieto
+      **4.61** com Rocks são a 2.5 M — p50 0.0 µs vs 0.4 µs. Não é ≥5
+      estável; janela curta 1.61)
 
 ### P2 — YCSB + quiet 3×
 
-- [ ] **P2.1** Remesura 3× quieta `findings/rfc0044-p2/`; não gravar
-      mediana suja como oficial 0041 — status: `doing`
-      (baseline hot-box gravado 2026-08-20, load 149–154: **E ≥5 nos
-      3 rounds** mesmo a load 150 (CountCache); F estável 1.2–2.1;
-      demais oscilam demais para chamar. Quieta <10 segue o árbitro)
+- [x] **P2.1** Remesura 3× quieta `findings/rfc0044-p2/` — status: `done`
+      (**árbitro executado a load 9.4**: fecham ≥5 consistentes **E
+      (10.5–12.8)** e **scan (7.4)**; SET cruza na longa quieta (5.41);
+      GET/pipeline straddle 4.2–5.9; mc50/blob ~2.0; F 1.66; A–D
+      2.9–3.8; `deps_lock_prewrite` 0.94. Piso ≥5 para todos **não**
+      alcançado — registrado sem maquiagem em `rfc0044-p2/quiet/`)
 - [ ] **P2.2** ycsb A–F ≥ 5.0 na coluna async — status: `doing`
-      (400k pareado: B 5.94 C 10.09 D 6.04 E **15.41**; A 3.81, F 2.13.
-      Em 2M ops o E travava por **retenção de versões** — mapeado em 3
-      causas (F20 sem GC; count anda as versões; count-cache limpo inteiro
-      a cada publish). **Fix de produto (cache por faixa)**: `CountCache`
-      com log sujo indexado — default do produto agora completa o E 2M
-      em ~1,5 s a **1.35 M qps** (82× o Rocks da mesma janela, dirty
-      cross-run). GC pin-aware fica como opt-in
-      `ROCKS_PARITY_AUTO_RECLAIM=1` (nunca em coluna oficial) para scan
-      frio / writes dentro da janela. A 1.94 / F 1.33 / D 3.39 seguem
-      <5 na janela suja — árbitro P2.1. `ycsb-longwindow/`)
+      (quieto 3×: **E fecha 10.5 med (3/3 ≥5 em toda condição) — P2.2
+      parcial E fechado**; A 2.88 B 2.93 C 3.84 D 3.02 F 1.66 não
+      fecham no wall (p50/p99 do F 1.5×/22× melhores). Cliff do E no 2M
+      mapeado e fixado no produto (CountCache); `auto_reclaim` opt-in.
+      `ycsb-longwindow/` + `rfc0044-p2/quiet/`)
 - [x] **P2.3** Script: `PEDRA_PARITY_ASYNC=1` + `FLOOR=5` **não** é o
       default do `tikv_ycsb_parity_v0.sh` — status: `done`
 
@@ -171,12 +169,12 @@ Não fecha (e não se mente):
 | P0.2 | p0 | knob async; write() no Ok | done | sem userspace ack | 2026-08-19 |
 | P0.3 | p0 | `commit_async_ops` | done | sem group no async | 2026-08-19 |
 | P0.4 | p0 | buffer async 64 KiB | done | `ASYNC_WAL_BUFFER` | 2026-08-19 |
-| P0.5 | p0 | set_mc50 ≥ 5× async | doing | l14 9.24 (peer doente); vs são 3.2–5.4 | 2026-08-19 |
-| P1.1 | p1 | pipeline ≥ 5× | done | 11.3; p50 5× melhor que o wall | 2026-08-19 |
-| P1.2 | p1 | set / blob ≥ 5× | doing | SET 5.66 l14 (Rocks são); blob 3.03 | 2026-08-19 |
-| P1.3 | p1 | get ≥ 5× | doing | 2 janelas longas: 20M 4.4–5.5; 2M same-run **5.50** | 2026-08-20 |
-| P2.1 | p2 | quiet 3× | doing | hot-box baseline gravado (load ~150): E ≥5 nos 3 rounds; quieta <10 = árbitro | 2026-08-20 |
-| P2.2 | p2 | ycsb A–F ≥ 5× async | doing | E: cliff mapeado + cache por faixa no core (default completa 2M a 1.35M qps); A/F/D <5 — árbitro P2.1 | 2026-08-20 |
+| P0.5 | p0 | set_mc50 ≥ 5× async | doing | quieto: **2.02 vs peer são** — não fecha; 3.4–9.2 eram peer doente | 2026-08-20 |
+| P1.1 | p1 | pipeline ≥ 5× | doing | reaberto: straddle 4.22 (quieto 2M) – 5.86; p50 ~6× | 2026-08-20 |
+| P1.2 | p1 | set / blob ≥ 5× | doing | SET **5.41 quieto 2M** (cruza); blob 2.02 | 2026-08-20 |
+| P1.3 | p1 | get ≥ 5× | doing | straddle 4.61 (quieto) – 5.50; p50 0.0 vs 0.4 µs | 2026-08-20 |
+| P2.1 | p2 | quiet 3× | **done** | **árbitro @ load 9.4**: E 10.5 e scan 7.4 fecham; SET 5.41 longo; resto 0.94–3.8 | 2026-08-20 |
+| P2.2 | p2 | ycsb A–F ≥ 5× async | doing | E fechado (10.5 quieto, 3/3 toda condição); A–F demais 1.7–3.8 no wall | 2026-08-20 |
 | P2.3 | p2 | script não default 5× | done | tikv_ycsb_parity_v0.sh | 2026-08-19 |
 
 ## Acceptance Criteria
