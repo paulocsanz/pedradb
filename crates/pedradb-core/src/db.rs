@@ -621,9 +621,10 @@ pub struct Db<E: Env = StdEnv> {
     point_cache_reset: AtomicBool,
     /// Latest `last_under_user_prefix` answers; cleared on write.
     last_prefix_cache: AnswerCache<Option<Bytes>>,
-    /// Latest `count_in_range` answers; cleared on write.
+    /// Latest `count_in_range` answers; range-aware invalidation
+    /// (`CountCache`) so writes outside a window keep it hot.
     /// `Arc` so ConcurrentDb can hit without the Db read lock (`deps_scan`).
-    count_cache: Arc<AnswerCache<usize>>,
+    count_cache: Arc<crate::cache::CountCache>,
     /// Bumped in [`Self::invalidate_read_answers`]. Compat TLS last-count
     /// (`deps_scan` zipf) checks this without encoding or locking the cache.
     read_cache_epoch: Arc<AtomicU64>,
@@ -776,7 +777,7 @@ impl<E: Env> Db<E> {
         // evicted the hot low IDs; C then started cold (parkfold2 C 1.6×).
         let point_cache = Arc::new(PointCache::new(8192));
         let last_prefix_cache = AnswerCache::new(8192);
-        let count_cache = Arc::new(AnswerCache::new(8192));
+        let count_cache = Arc::new(crate::cache::CountCache::new(8192));
         let (
             ssts,
             sst_levels,
@@ -1022,7 +1023,7 @@ impl<E: Env> Db<E> {
 
     /// Shared count-cache handle (ConcurrentDb `deps_scan` hit, no Db lock).
     #[must_use]
-    pub fn count_cache_handle(&self) -> Arc<AnswerCache<usize>> {
+    pub fn count_cache_handle(&self) -> Arc<crate::cache::CountCache> {
         Arc::clone(&self.count_cache)
     }
 
@@ -1052,7 +1053,7 @@ impl<E: Env> Db<E> {
                 Err(actual) => cur = actual,
             }
         }
-        self.invalidate_read_answers();
+        self.invalidate_read_answers(seq);
     }
 
     fn note_dirty_points(&self, ops: &[WriteOp]) {
@@ -2061,21 +2062,23 @@ impl<E: Env> Db<E> {
             return Ok(0);
         }
         let latest = snapshot == self.visible_sequence();
-        let ck = count_cache_key(start, end, limit);
         if latest {
-            if let Some(n) = self.count_cache.get(ck.as_slice()) {
+            if let Some(n) = self.count_cache.get(start, end, limit) {
                 self.scan_ops.fetch_add(1, Ordering::Relaxed);
                 return Ok(n);
             }
         }
+        // `snapshot` (== visible sequence here) read BEFORE computing: any
+        // write published after the answer carries a strictly greater
+        // sequence, so the dirty-log check in `CountCache::get` sees it.
         let n = self.count_visible(snapshot, start, end, limit);
         if latest {
-            self.count_cache.insert(ck.as_slice(), n);
+            self.count_cache.insert(start, end, limit, n, snapshot);
         }
         Ok(n)
     }
 
-    fn invalidate_read_answers(&self) {
+    fn invalidate_read_answers(&self, seq: SequenceNumber) {
         let reset = self.point_cache_reset.swap(false, Ordering::Relaxed);
         let keys = std::mem::take(&mut *self.dirty_points.lock());
         // Do not insert WriteOp.value: large values are vlog pointers.
@@ -2083,12 +2086,19 @@ impl<E: Env> Db<E> {
         if reset || keys.len() > 32 || keys.is_empty() {
             self.point_cache.clear();
         } else {
-            for k in keys {
-                self.point_cache.invalidate(&k);
+            for k in &keys {
+                self.point_cache.invalidate(k);
             }
         }
+        // Count answers are window-scoped: range-check the dirty keys
+        // instead of clearing every window (RFC-0044 `ycsb-longwindow`).
+        // Fat apply / range deletion / unknown dirt still clear wholesale.
+        if reset || keys.is_empty() {
+            self.count_cache.clear();
+        } else {
+            self.count_cache.record_dirty(seq, &keys);
+        }
         self.last_prefix_cache.clear();
-        self.count_cache.clear();
         self.read_cache_epoch.fetch_add(1, Ordering::Release);
     }
 
@@ -10105,6 +10115,45 @@ mod tests {
             )
             .unwrap();
         assert_eq!(capped, 3);
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0044 `ycsb-longwindow`: count answers are window-scoped — writes
+    /// outside the window must not cold the cache (the old wholesale
+    /// `clear()` per publish made ycsb_e's 5% inserts cold every ~19 scans).
+    #[test]
+    fn count_cache_survives_writes_outside_window() {
+        let dir = temp_dir();
+        let mut db = Db::open(&dir).unwrap();
+        let win = |db: &Db| {
+            db.count_in_range(
+                db.visible_sequence(),
+                Bound::Included(&b"u/00"[..]),
+                Bound::Excluded(&b"u/10"[..]),
+                None,
+            )
+            .unwrap()
+        };
+        for i in 0..10u32 {
+            db.put(format!("u/{i:02}").as_bytes(), b"v").unwrap();
+        }
+        assert_eq!(win(&db), 10);
+        assert_eq!(win(&db), 10); // second read takes the cache path
+        // ycsb_e shape: inserts land above every scanned window.
+        for i in 0..2000u32 {
+            db.put(format!("u/9{i:03}").as_bytes(), b"v").unwrap();
+        }
+        assert_eq!(win(&db), 10);
+        // New key inside the window invalidates (count grows).
+        db.put(b"u/05a", b"v").unwrap();
+        assert_eq!(win(&db), 11);
+        // Point delete inside the window invalidates (count shrinks).
+        db.delete(b"u/05a").unwrap();
+        assert_eq!(win(&db), 10);
+        // Range deletion is untrackable: wholesale clear, still correct.
+        db.delete_range(b"u/05", b"u/06").unwrap();
+        assert_eq!(win(&db), 9);
         db.close().unwrap();
         let _ = fs::remove_dir_all(&dir);
     }

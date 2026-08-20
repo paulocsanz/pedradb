@@ -671,7 +671,7 @@ pub struct ConcurrentDb<E: Env = StdEnv> {
     /// Shared point cache — a hit needs no Db read lock (YCSB C).
     point_cache: Arc<crate::cache::PointCache>,
     /// Shared count cache — a hit needs no Db read lock (`deps_scan`).
-    count_cache: Arc<crate::cache::AnswerCache<usize>>,
+    count_cache: Arc<crate::cache::CountCache>,
     /// Invalidate epoch for compat TLS last-count (`deps_scan` zipf).
     read_cache_epoch: Arc<std::sync::atomic::AtomicU64>,
     /// Published sequence — OCC begin / visible_sequence without the Db lock.
@@ -761,8 +761,7 @@ impl<E: Env> ConcurrentDb<E> {
         end: std::ops::Bound<&[u8]>,
         limit: Option<usize>,
     ) -> Result<usize> {
-        let ck = crate::db::count_cache_key(start, end, limit);
-        if let Some(n) = self.count_cache.get(ck.as_slice()) {
+        if let Some(n) = self.count_cache.get(start, end, limit) {
             return Ok(n);
         }
         let g = self.inner.read();

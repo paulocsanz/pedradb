@@ -259,9 +259,10 @@ impl BlockCache {
     }
 }
 
-/// Latest-snapshot answers (point / last-prefix / count). Cleared on write.
+/// Latest-snapshot answers (point / last-prefix). Cleared on write.
 ///
-/// Hit is O(1). Capacity 0 = disabled.
+/// Hit is O(1). Capacity 0 = disabled. (Count answers moved to
+/// [`CountCache`] — range-aware invalidation.)
 #[derive(Debug, Default)]
 pub struct AnswerCache<V> {
     inner: Mutex<AnswerCacheInner<V>>,
@@ -400,6 +401,237 @@ impl<V: Clone> AnswerCache<V> {
     }
 }
 
+/// One side of a cached count window: `None` = unbounded,
+/// `Some((key, included))` = `Bound::Included`/`Excluded(key)`.
+type CountSide = Option<(Bytes, bool)>;
+
+fn count_side(b: std::ops::Bound<&[u8]>) -> CountSide {
+    match b {
+        std::ops::Bound::Unbounded => None,
+        std::ops::Bound::Included(s) => Some((Bytes::copy_from_slice(s), true)),
+        std::ops::Bound::Excluded(s) => Some((Bytes::copy_from_slice(s), false)),
+    }
+}
+
+/// Latest-snapshot `count_in_range` answers with range-aware invalidation.
+///
+/// A distinct-key count over a window only changes when a key INSIDE the
+/// window is written; writes elsewhere leave it valid. Entries carry the
+/// published sequence observed BEFORE the answer was computed, and
+/// [`CountCache::record_dirty`] tracks written keys in a bounded log
+/// (newest sequence per key). A hit is served only when no tracked write
+/// newer than the entry touches its window — RFC-0044 `ycsb-longwindow`:
+/// the previous wholesale `clear()` on every publish made the 5% inserts
+/// of `ycsb_e` cold every ~19 scans while scans walked retained versions.
+///
+/// Anything untrackable (range deletions, fat applies, dirty-log overflow)
+/// retires entries conservatively: overflow evicts the oldest half of the
+/// log and drops every entry overlapping the evicted keys' bounding box.
+///
+/// One mutex guards entries AND the dirty log: retirement must be atomic
+/// with eviction (a get that validated against the truncated log could
+/// otherwise serve a pre-write answer after the write published).
+#[derive(Debug, Default)]
+pub struct CountCache {
+    state: Mutex<CountCacheState>,
+}
+
+#[derive(Debug, Default)]
+struct CountCacheState {
+    map: std::collections::HashMap<Bytes, CountEntry, FxBuild>,
+    /// Insertion order for O(1) FIFO eviction.
+    order: std::collections::VecDeque<Bytes>,
+    capacity: usize,
+    dirty: CountDirty,
+}
+
+#[derive(Debug, Clone)]
+struct CountEntry {
+    start: CountSide,
+    end: CountSide,
+    /// Published sequence observed before the answer was computed: any
+    /// write published after it carries a strictly greater sequence.
+    seq: u64,
+    n: usize,
+}
+
+impl CountEntry {
+    /// Conservative overlap with the bounding box `[lo, hi]` of evicted
+    /// dirty keys (loose on Included/Excluded edges — extra retirement is
+    /// safe, missed retirement is not).
+    fn overlaps_box(&self, lo: &[u8], hi: &[u8]) -> bool {
+        let starts_before_hi = self
+            .start
+            .as_ref()
+            .is_none_or(|(s, _)| s.as_ref() <= hi);
+        let ends_after_lo = self.end.as_ref().is_none_or(|(e, _)| e.as_ref() >= lo);
+        starts_before_hi && ends_after_lo
+    }
+}
+
+/// Bounded dirty-key log: publish order for eviction, key order for the
+/// get-time overlap check.
+#[derive(Debug, Default)]
+struct CountDirty {
+    order: std::collections::VecDeque<(u64, Box<[u8]>)>,
+    by_key: std::collections::BTreeMap<Box<[u8]>, u64>,
+    capacity: usize,
+}
+
+/// Dirty-log capacity; overflow evicts down to half (RFC-0044 amplifier).
+const COUNT_DIRTY_CAP: usize = 1024;
+
+impl CountDirty {
+    /// Any tracked write with `seq > entry_seq` whose key lies in
+    /// `[start, end)`? O(log n + overlapping hits).
+    fn overlaps_newer_than(
+        &self,
+        start: std::ops::Bound<&[u8]>,
+        end: std::ops::Bound<&[u8]>,
+        entry_seq: u64,
+    ) -> bool {
+        self.by_key
+            .range::<[u8], _>((start, end))
+            .any(|(_, &s)| s > entry_seq)
+    }
+}
+
+impl CountCache {
+    /// Create with max cached windows (`0` = disabled).
+    #[must_use]
+    pub fn new(capacity: usize) -> Self {
+        Self {
+            state: Mutex::new(CountCacheState {
+                map: std::collections::HashMap::default(),
+                order: std::collections::VecDeque::new(),
+                capacity,
+                dirty: CountDirty {
+                    order: std::collections::VecDeque::new(),
+                    by_key: std::collections::BTreeMap::new(),
+                    capacity: COUNT_DIRTY_CAP,
+                },
+            }),
+        }
+    }
+
+    /// `None` = miss (absent, retired, or invalidated by a newer write
+    /// inside the window). Validity is checked against the dirty log, so
+    /// a hit never serves a pre-write answer.
+    #[must_use]
+    pub fn get(
+        &self,
+        start: std::ops::Bound<&[u8]>,
+        end: std::ops::Bound<&[u8]>,
+        limit: Option<usize>,
+    ) -> Option<usize> {
+        let ck = crate::db::count_cache_key(start, end, limit);
+        let g = self.state.lock();
+        if g.capacity == 0 {
+            return None;
+        }
+        let e = g.map.get(ck.as_slice())?;
+        if g.dirty.overlaps_newer_than(start, end, e.seq) {
+            return None;
+        }
+        Some(e.n)
+    }
+
+    /// Store a latest-snapshot answer computed while `seq` was the visible
+    /// sequence (read BEFORE computing, so later writes compare strictly
+    /// greater).
+    pub fn insert(
+        &self,
+        start: std::ops::Bound<&[u8]>,
+        end: std::ops::Bound<&[u8]>,
+        limit: Option<usize>,
+        n: usize,
+        seq: u64,
+    ) {
+        let ck = crate::db::count_cache_key(start, end, limit);
+        let mut g = self.state.lock();
+        if g.capacity == 0 {
+            return;
+        }
+        let entry = CountEntry {
+            start: count_side(start),
+            end: count_side(end),
+            seq,
+            n,
+        };
+        if let Some(e) = g.map.get_mut(ck.as_slice()) {
+            *e = entry;
+            return;
+        }
+        if g.map.len() >= g.capacity {
+            if let Some(old) = g.order.pop_front() {
+                g.map.remove(&old);
+            }
+        }
+        let owned = Bytes::copy_from_slice(ck.as_slice());
+        g.order.push_back(owned.clone());
+        g.map.insert(owned, entry);
+    }
+
+    /// Record the keys of one publish. Overflow evicts the oldest half of
+    /// the log and retires entries overlapping the evicted keys' box —
+    /// atomically, so no get can validate against the truncated log first.
+    pub fn record_dirty(&self, seq: u64, keys: &[Bytes]) {
+        let mut g = self.state.lock();
+        if g.map.is_empty() {
+            // Nothing cached to invalidate; past writes can never matter to
+            // a future entry (its seq is observed at compute time).
+            return;
+        }
+        let d = &mut g.dirty;
+        if d.capacity == 0 {
+            return;
+        }
+        for k in keys {
+            d.order.push_back((seq, Box::from(k.as_ref())));
+            d.by_key.insert(Box::from(k.as_ref()), seq);
+        }
+        if d.order.len() <= d.capacity {
+            return;
+        }
+        let keep = d.capacity / 2;
+        let mut lo: Option<Box<[u8]>> = None;
+        let mut hi: Option<Box<[u8]>> = None;
+        while d.order.len() > keep {
+            let Some((s, k)) = d.order.pop_front() else {
+                break;
+            };
+            if d.by_key.get(&k) == Some(&s) {
+                d.by_key.remove(&k);
+            }
+            lo = Some(match lo {
+                Some(cur) if cur.as_ref() <= k.as_ref() => cur,
+                _ => k.clone(),
+            });
+            hi = Some(match hi {
+                Some(cur) if cur.as_ref() >= k.as_ref() => cur,
+                _ => k,
+            });
+        }
+        if let Some((lo, hi)) = lo.zip(hi) {
+            let inner = &mut *g;
+            inner
+                .map
+                .retain(|_, e| !e.overlaps_box(lo.as_ref(), hi.as_ref()));
+            let map = &inner.map;
+            inner.order.retain(|k| map.contains_key(k));
+        }
+    }
+
+    /// Wholesale drop (range deletion / fat apply / unknown dirt).
+    pub fn clear(&self) {
+        let mut g = self.state.lock();
+        g.map.clear();
+        g.order.clear();
+        g.dirty.order.clear();
+        g.dirty.by_key.clear();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -509,5 +741,46 @@ mod tests {
         }
         cache.get_or_insert_with(path, 64, || Vec::new());
         cache.get_or_insert_with(path, 0, || panic!("0 must survive insert of 64"));
+    }
+
+    #[test]
+    fn count_cache_invalidates_only_overlapping_writes() {
+        use std::ops::Bound;
+        let c = CountCache::new(8);
+        let (s, e) = (Bound::Included(&b"k"[..]), Bound::Excluded(&b"m"[..]));
+        assert!(c.get(s, e, Some(25)).is_none());
+        c.insert(s, e, Some(25), 3, 1);
+        assert_eq!(c.get(s, e, Some(25)), Some(3));
+        // Writes outside the window keep the cached answer.
+        c.record_dirty(2, &[Bytes::from_static(b"a")]);
+        c.record_dirty(3, &[Bytes::from_static(b"zz")]);
+        assert_eq!(c.get(s, e, Some(25)), Some(3));
+        // A strictly newer write inside the window invalidates.
+        c.record_dirty(4, &[Bytes::from_static(b"key05")]);
+        assert!(c.get(s, e, Some(25)).is_none());
+        // An answer computed AFTER that write (seq == write seq) is valid.
+        c.insert(s, e, Some(25), 4, 4);
+        assert_eq!(c.get(s, e, Some(25)), Some(4));
+        c.clear();
+        assert!(c.get(s, e, Some(25)).is_none());
+    }
+
+    #[test]
+    fn count_cache_overflow_retires_only_overlapping_boxes() {
+        use std::ops::Bound;
+        let c = CountCache::new(8);
+        let (s, e) = (Bound::Included(&b"k"[..]), Bound::Excluded(&b"m"[..]));
+        c.insert(s, e, Some(25), 3, 1);
+        // More writes than the dirty-log cap, all far above the window:
+        // evicted-key boxes stay disjoint, the entry survives.
+        for i in 0..(COUNT_DIRTY_CAP + 2) {
+            c.record_dirty(2 + i as u64, &[Bytes::from(format!("zz{i:06}"))]);
+        }
+        assert_eq!(c.get(s, e, Some(25)), Some(3));
+        // Same flood with keys inside the window: boxes overlap, entry dies.
+        for i in 0..(COUNT_DIRTY_CAP + 2) {
+            c.record_dirty(4000 + i as u64, &[Bytes::from(format!("key{i:06}"))]);
+        }
+        assert!(c.get(s, e, Some(25)).is_none());
     }
 }
