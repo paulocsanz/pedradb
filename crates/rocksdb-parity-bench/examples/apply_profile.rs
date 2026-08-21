@@ -190,6 +190,7 @@ fn main() {
     let mut single = Db::open_with(
         dir3,
         OpenOptions {
+            wal_recovery: Default::default(),
             sync: true,
             auto_flush_bytes: None,
             auto_compact_sst_count: None,
@@ -237,6 +238,7 @@ fn main() {
     let mut single2 = Db::open_with(
         dir4,
         OpenOptions {
+            wal_recovery: Default::default(),
             sync: false,
             auto_flush_bytes: None,
             auto_compact_sst_count: None,

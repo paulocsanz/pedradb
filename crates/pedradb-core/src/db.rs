@@ -87,6 +87,35 @@ pub const L0_COMPACTION_TRIGGER: usize = 4;
 /// Default WAL file name inside the DB directory.
 pub const WAL_FILE_NAME: &str = "CURRENT.log";
 
+/// WAL recovery policy at open (RFC-0047 P0.2).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum WalRecovery {
+    /// Product default: a mid-WAL integrity failure (CRC, orphan) fails the
+    /// open — never silent-wrong (G2). Journaled for CORRUPTLOG escalation.
+    #[default]
+    FailClosed,
+    /// Rocks-shaped `kPointInTimeRecovery`: recover every complete record
+    /// before the damage, report the discarded suffix via
+    /// [`Db::last_recovery_report`], and keep serving. The event is still
+    /// journaled; escalation (RFC-0038) refuses the open **in this mode too**.
+    PointInTime,
+}
+
+/// What a [`WalRecovery::PointInTime`] open discarded (RFC-0047 P0.2).
+/// Reported, never silently skipped. Record count is not included: the
+/// damaged region cannot be parsed honestly.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecoveryReport {
+    /// Journal kind of the event (`"crc"`, `"truncated_head"`).
+    pub kind: &'static str,
+    /// Stream offset where the failing record began.
+    pub corrupt_offset: u64,
+    /// Last known-good append offset (the recovered prefix ends here).
+    pub good_through_offset: u64,
+    /// `file_len - good_through_offset`: bytes after the recoverable point.
+    pub discarded_bytes: u64,
+}
+
 /// Options for [`Db::open`].
 #[derive(Debug, Clone, Copy)]
 pub struct OpenOptions {
@@ -94,6 +123,9 @@ pub struct OpenOptions {
     /// the WAL before returning (RFC-0001 O1 / RFC-0036). Overridable per write
     /// via [`WriteOptions`].
     pub sync: bool,
+    /// WAL recovery mode at open (RFC-0047). Default [`WalRecovery::FailClosed`];
+    /// [`WalRecovery::PointInTime`] is the Rocks-shaped drop-in profile.
+    pub wal_recovery: WalRecovery,
     /// When MemTable approximate size reaches this many bytes, flush to SST.
     /// `None` or `0` disables auto-flush (manual [`Db::flush`] only).
     pub auto_flush_bytes: Option<usize>,
@@ -479,6 +511,7 @@ impl Default for OpenOptions {
     fn default() -> Self {
         Self {
             sync: true,
+            wal_recovery: WalRecovery::FailClosed,
             // 4 MiB default encourages SST creation under load without manual flush.
             auto_flush_bytes: Some(4 * 1024 * 1024),
             auto_compact_sst_count: None,
@@ -653,6 +686,9 @@ pub struct Db<E: Env = StdEnv> {
     read_cache_epoch: Arc<AtomicU64>,
     /// RFC-0045 P0.1 phase timings (`PEDRA_WRITE_PHASE_STATS=1`).
     phase_stats: Option<Arc<WritePhaseStats>>,
+    /// RFC-0047 P0.2: set when a [`WalRecovery::PointInTime`] open discarded
+    /// a damaged WAL suffix (reported, never silently skipped).
+    last_recovery: Option<RecoveryReport>,
     /// Exclusive directory lock (released via Env on close/drop when possible).
     dir_lock: Option<DirLock>,
     /// Set when append succeeded but required WAL `sync_all` failed (RFC-0015 H1).
@@ -816,12 +852,17 @@ impl<E: Env> Db<E> {
         let wal_path = dir.join(WAL_FILE_NAME);
         let mut mem = MemTable::new();
         let mut change_log = ChangeLog::load_on(&env, &dir)?;
+        // RFC-0047 P0.2: set when a PointInTime open discards a WAL suffix.
+        let mut point_in_time_report: Option<RecoveryReport> = None;
 
         if env.exists(&wal_path) {
             // Tiny WAL + Truncated(0): failed first append after rotate (or crash
             // before any complete record). Tolerate empty so SSTs still load (F6).
             // Large WAL + Truncated(0): bitrot of the first record — fail-stop (F4),
             // journaled for escalation (RFC-0038 D: repeated events refuse open).
+            // RFC-0047 P0.2: in PointInTime mode the event is still journaled and
+            // escalation still refuses the open; otherwise the decoded prefix is
+            // served and the discarded suffix is reported (never silently skipped).
             let (records, last_good) = match Wal::recover_span_on(&env, &wal_path) {
                 Ok(r) => r,
                 Err(CoreError::Truncated(0)) => {
@@ -829,21 +870,55 @@ impl<E: Env> Db<E> {
                     if len < 64 {
                         (Vec::new(), 0)
                     } else {
-                        return Err(crate::corrupt::escalate_or_fail(
+                        let escalated = crate::corrupt::escalate_or_fail(
                             &env,
                             &dir,
                             "truncated_head",
                             0,
                             CoreError::Truncated(0),
-                        ));
+                        );
+                        if opts.wal_recovery == WalRecovery::PointInTime
+                            && !matches!(escalated, CoreError::CorruptionEscalated { .. })
+                        {
+                            // Re-walk collecting the decoded prefix; the
+                            // stopping error is the same head error that
+                            // routed us here (first error is deterministic).
+                            let (records, last_good, _prefix_err) =
+                                Wal::recover_prefix_span_on(&env, &wal_path)?;
+                            point_in_time_report = Some(RecoveryReport {
+                                kind: "truncated_head",
+                                corrupt_offset: 0,
+                                good_through_offset: last_good,
+                                discarded_bytes: len.saturating_sub(last_good),
+                            });
+                            (records, last_good)
+                        } else {
+                            return Err(escalated);
+                        }
                     }
                 }
                 Err(e @ CoreError::Crc { offset, .. }) => {
                     // Mid-WAL bitflip: fail-stop (silent skip is G8-forbidden),
                     // journaled; the Nth event escalates (RFC-0038 D).
-                    return Err(crate::corrupt::escalate_or_fail(
-                        &env, &dir, "crc", offset, e,
-                    ));
+                    let escalated = crate::corrupt::escalate_or_fail(&env, &dir, "crc", offset, e);
+                    if opts.wal_recovery == WalRecovery::PointInTime
+                        && !matches!(escalated, CoreError::CorruptionEscalated { .. })
+                    {
+                        let (records, last_good, _prefix_err) =
+                            Wal::recover_prefix_span_on(&env, &wal_path)?;
+                        point_in_time_report = Some(RecoveryReport {
+                            kind: "crc",
+                            corrupt_offset: offset,
+                            good_through_offset: last_good,
+                            discarded_bytes: env
+                                .metadata_len(&wal_path)
+                                .unwrap_or(0)
+                                .saturating_sub(last_good),
+                        });
+                        (records, last_good)
+                    } else {
+                        return Err(escalated);
+                    }
                 }
                 Err(e) => return Err(e),
             };
@@ -948,6 +1023,7 @@ impl<E: Env> Db<E> {
             read_cache_epoch: Arc::new(AtomicU64::new(1)),
             phase_stats: std::env::var_os("PEDRA_WRITE_PHASE_STATS")
                 .map(|_| Arc::new(WritePhaseStats::default())),
+            last_recovery: point_in_time_report,
             dirty_points: Mutex::new(Vec::new()),
             point_cache_reset: AtomicBool::new(false),
             dir_lock: lock,
@@ -1071,6 +1147,13 @@ impl<E: Env> Db<E> {
     #[must_use]
     pub fn write_phase_stats(&self) -> Option<Arc<WritePhaseStats>> {
         self.phase_stats.clone()
+    }
+
+    /// RFC-0047 P0.2: what a [`WalRecovery::PointInTime`] open discarded
+    /// (`None` = nothing discarded / [`WalRecovery::FailClosed`] mode).
+    #[must_use]
+    pub fn last_recovery_report(&self) -> Option<&RecoveryReport> {
+        self.last_recovery.as_ref()
     }
 
     /// Publish `seq` as visible and drop read caches (after WAL is durable).
@@ -6139,6 +6222,7 @@ mod tests {
             auto_compact_sst_bytes: None,
             exclusive: true,
             large_value_threshold: Some(512),
+            wal_recovery: WalRecovery::FailClosed,
         }
     }
 
@@ -6150,6 +6234,16 @@ mod tests {
             auto_compact_sst_bytes: None,
             exclusive: true,
             large_value_threshold: None,
+            wal_recovery: WalRecovery::FailClosed,
+        }
+    }
+
+    /// RFC-0047 P0.2: same as [`sync_opts`] but with the Rocks-shaped
+    /// drop-in recovery profile (compat default).
+    fn pit_opts() -> OpenOptions {
+        OpenOptions {
+            wal_recovery: WalRecovery::PointInTime,
+            ..sync_opts()
         }
     }
 
@@ -6253,6 +6347,157 @@ mod tests {
         assert_eq!(db.get(b"after").as_deref(), Some(b"recovered".as_ref()));
         assert_eq!(db.get(b"k06").as_deref(), Some(&[7u8; 120][..]));
         assert_eq!(db.get(b"k07"), None);
+        assert!(!dir.join(crate::corrupt::CORRUPTLOG_NAME).exists());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0047 P0.2: in PointInTime mode a mid-WAL CRC flip recovers the
+    /// decoded prefix, reports the discarded suffix (never silently), cuts
+    /// the WAL at the last good record, and still journals the event. The
+    /// recovery is terminal: a fail-closed reopen of the same directory is
+    /// clean.
+    #[test]
+    fn point_in_time_recovers_prefix_and_reports() {
+        use crate::wal::recover_choose::{apply_recover_choice, RecoverChoice};
+
+        let dir = temp_dir();
+        let wal = dir.join(WAL_FILE_NAME);
+        {
+            let mut db = Db::open_with(&dir, sync_opts()).unwrap();
+            for i in 0..8 {
+                db.put(format!("k{i:02}").as_bytes(), &[7u8; 120]).unwrap();
+            }
+        }
+        // FlipCrc at physical record 3 (middle of the WAL) via the
+        // recover_choose injector — the sweep harness drives the real reader.
+        let mut bytes = fs::read(&wal).unwrap();
+        assert!(apply_recover_choice(
+            &mut bytes,
+            RecoverChoice::FlipCrc { index: 3 }
+        ));
+        fs::write(&wal, &bytes).unwrap();
+
+        let db = Db::open_with(&dir, pit_opts()).unwrap();
+        for i in 0..3 {
+            assert_eq!(db.get(format!("k{i:02}").as_bytes()).as_deref(), Some(&[7u8; 120][..]));
+        }
+        for i in 3..8 {
+            assert_eq!(db.get(format!("k{i:02}").as_bytes()), None, "k{i:02} is in the discarded suffix");
+        }
+        let report = db.last_recovery_report().expect("PointInTime must report the discard");
+        assert_eq!(report.kind, "crc");
+        assert!(report.good_through_offset > 0);
+        assert_eq!(
+            report.corrupt_offset, report.good_through_offset,
+            "prefix ends exactly where the corrupt record began"
+        );
+        assert!(report.discarded_bytes > 0);
+        let journal =
+            fs::read_to_string(dir.join(crate::corrupt::CORRUPTLOG_NAME)).unwrap();
+        assert_eq!(journal.lines().count(), 1);
+        assert!(journal.lines().all(|l| l.contains("\tcrc\t")));
+        let good_through = report.good_through_offset;
+        drop(db);
+        // The corrupt suffix is physically cut: reopen fail-closed, clean.
+        let wal_len = fs::metadata(&wal).unwrap().len();
+        assert_eq!(wal_len, good_through);
+        let db = Db::open_with(&dir, sync_opts()).unwrap();
+        assert!(db.last_recovery_report().is_none());
+        assert_eq!(db.get(b"k02").as_deref(), Some(&[7u8; 120][..]));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0047 P0.2: CORRUPTLOG escalation (RFC-0038 D) refuses the open in
+    /// *every* mode — PointInTime never buys its way past the 3rd event. The
+    /// WAL self-heals on each PointInTime recovery (suffix cut), so the
+    /// corruption must be re-injected per attempt (persistent bitrot).
+    #[test]
+    fn escalation_refuses_in_every_mode() {
+        use crate::wal::recover_choose::{apply_recover_choice, RecoverChoice};
+
+        let dir = temp_dir();
+        let wal = dir.join(WAL_FILE_NAME);
+        {
+            let mut db = Db::open_with(&dir, sync_opts()).unwrap();
+            for i in 0..12 {
+                db.put(format!("k{i:02}").as_bytes(), &[7u8; 120]).unwrap();
+            }
+        }
+        // Each successful PointInTime open cuts the corrupt suffix, so flip a
+        // middle record of whatever survives: 12 -> 8 -> 4 records, then the
+        // 3rd journaled event must escalate even in PointInTime mode.
+        for (attempt, index) in [8usize, 4].iter().enumerate() {
+            let mut bytes = fs::read(&wal).unwrap();
+            assert!(apply_recover_choice(
+                &mut bytes,
+                RecoverChoice::FlipCrc { index: *index }
+            ));
+            fs::write(&wal, &bytes).unwrap();
+            let db = match Db::open_with(&dir, pit_opts()) {
+                Ok(db) => db,
+                Err(e) => panic!("attempt {}: PointInTime must recover the prefix, got {e:?}", attempt + 1),
+            };
+            assert!(db.last_recovery_report().is_some());
+            let journal =
+                fs::read_to_string(dir.join(crate::corrupt::CORRUPTLOG_NAME)).unwrap();
+            assert_eq!(journal.lines().count() as u32, attempt as u32 + 1);
+            drop(db);
+        }
+        let mut bytes = fs::read(&wal).unwrap();
+        assert!(apply_recover_choice(
+            &mut bytes,
+            RecoverChoice::FlipCrc { index: 1 }
+        ));
+        fs::write(&wal, &bytes).unwrap();
+        let err = match Db::open_with(&dir, pit_opts()) {
+            Ok(_) => panic!("escalation must refuse open even in PointInTime mode"),
+            Err(e) => e,
+        };
+        match err {
+            CoreError::CorruptionEscalated { events, limit } => {
+                assert_eq!(events, crate::corrupt::CORRUPTION_ESCALATION_EVENTS);
+                assert_eq!(limit, crate::corrupt::CORRUPTION_ESCALATION_EVENTS);
+            }
+            other => panic!("expected escalation, got {other:?}"),
+        }
+        let journal = fs::read_to_string(dir.join(crate::corrupt::CORRUPTLOG_NAME)).unwrap();
+        assert!(journal.lines().all(|l| l.contains("\tcrc\t")));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0047 P0.2: a routine torn tail (crash mid-append) is unchanged by
+    /// PointInTime mode — auto-recovered, not journaled, and *not* a
+    /// RecoveryReport (a tear is a crash artifact, not a corruption event;
+    /// reporting it would be crying wolf).
+    #[test]
+    fn torn_tail_unchanged_prefix_only() {
+        let dir = temp_dir();
+        let wal = dir.join(WAL_FILE_NAME);
+        {
+            let mut db = Db::open_with(&dir, sync_opts()).unwrap();
+            for i in 0..8 {
+                db.put(format!("k{i:02}").as_bytes(), &[7u8; 120]).unwrap();
+            }
+        }
+        let len = fs::metadata(&wal).unwrap().len() as usize;
+        let mut bytes = fs::read(&wal).unwrap();
+        bytes.truncate(len - 5);
+        fs::write(&wal, &bytes).unwrap();
+
+        let mut db = Db::open_with(&dir, pit_opts()).unwrap();
+        for i in 0..7 {
+            assert_eq!(db.get(format!("k{i:02}").as_bytes()).as_deref(), Some(&[7u8; 120][..]));
+        }
+        assert_eq!(db.get(b"k07"), None, "torn record is dropped");
+        assert!(
+            db.last_recovery_report().is_none(),
+            "routine torn tail is not a reported corruption event"
+        );
+        assert!(!dir.join(crate::corrupt::CORRUPTLOG_NAME).exists());
+        db.put(b"after", b"recovered").unwrap();
+        drop(db);
+        let db = Db::open_with(&dir, sync_opts()).unwrap();
+        assert_eq!(db.get(b"after").as_deref(), Some(b"recovered".as_ref()));
         assert!(!dir.join(crate::corrupt::CORRUPTLOG_NAME).exists());
         let _ = fs::remove_dir_all(&dir);
     }
@@ -6889,6 +7134,7 @@ mod tests {
             let mut db = Db::open_with(
                 &dir,
                 OpenOptions {
+                    wal_recovery: Default::default(),
                     sync: true,
                     auto_flush_bytes: Some(8 * 1024),
                     auto_compact_sst_count: Some(4),
@@ -6952,6 +7198,7 @@ mod tests {
             let db = Db::open_with(
                 &dir,
                 OpenOptions {
+                    wal_recovery: Default::default(),
                     sync: true,
                     auto_flush_bytes: None,
                     auto_compact_sst_count: None,
@@ -7050,6 +7297,7 @@ mod tests {
             let mut db = Db::open_with(
                 &dir,
                 OpenOptions {
+                    wal_recovery: Default::default(),
                     sync: false,
                     auto_flush_bytes: None,
                     auto_compact_sst_count: None,
@@ -7171,6 +7419,7 @@ mod tests {
             let mut db = Db::open_with(
                 &dir,
                 OpenOptions {
+                    wal_recovery: Default::default(),
                     sync: true,
                     auto_flush_bytes: None,
                     auto_compact_sst_count: None,
@@ -7559,6 +7808,7 @@ mod tests {
         let mut db = Db::open_with(
             &dir,
             OpenOptions {
+                wal_recovery: Default::default(),
                 sync: false,
                 auto_flush_bytes: None,
                 auto_compact_sst_count: None,
@@ -7592,6 +7842,7 @@ mod tests {
         let mut db = Db::open_with(
             &dir,
             OpenOptions {
+                wal_recovery: Default::default(),
                 sync: true,
                 auto_flush_bytes: Some(200),
                 auto_compact_sst_count: None,
@@ -7621,6 +7872,7 @@ mod tests {
             let mut db = Db::open_with(
                 &dir,
                 OpenOptions {
+                    wal_recovery: Default::default(),
                     sync: true,
                     auto_flush_bytes: None,
                     auto_compact_sst_count: None,
@@ -7654,6 +7906,7 @@ mod tests {
             let mut db = Db::open_with(
                 &dir,
                 OpenOptions {
+                    wal_recovery: Default::default(),
                     sync: false,
                     auto_flush_bytes: None,
                     auto_compact_sst_count: None,
@@ -7692,6 +7945,7 @@ mod tests {
             let mut db = Db::open_with(
                 &dir,
                 OpenOptions {
+                    wal_recovery: Default::default(),
                     sync: false,
                     auto_flush_bytes: None,
                     auto_compact_sst_count: None,
@@ -7733,6 +7987,7 @@ mod tests {
             let mut db = Db::open_with(
                 &dir,
                 OpenOptions {
+                    wal_recovery: Default::default(),
                     sync: false,
                     auto_flush_bytes: None,
                     auto_compact_sst_count: None,
@@ -7767,6 +8022,7 @@ mod tests {
         let mut db = Db::open_with(
             &dir,
             OpenOptions {
+                wal_recovery: Default::default(),
                 sync: true,
                 auto_flush_bytes: None,
                 auto_compact_sst_count: Some(3),
@@ -7904,6 +8160,7 @@ mod tests {
         let mut db = Db::open_with_env(
             &dir,
             OpenOptions {
+                wal_recovery: Default::default(),
                 sync: true,
                 auto_flush_bytes: None,
                 auto_compact_sst_count: Some(2),
@@ -7953,6 +8210,7 @@ mod tests {
         let mut db = Db::open_with(
             &dir,
             OpenOptions {
+                wal_recovery: Default::default(),
                 sync: true,
                 auto_flush_bytes: None,
                 auto_compact_sst_count: Some(2),
@@ -7987,6 +8245,7 @@ mod tests {
         let mut db = Db::open_with(
             &dir,
             OpenOptions {
+                wal_recovery: Default::default(),
                 sync: true,
                 auto_flush_bytes: None,
                 auto_compact_sst_count: None,
@@ -8044,6 +8303,7 @@ mod tests {
         let mut db = Db::open_with(
             &dir,
             OpenOptions {
+                wal_recovery: Default::default(),
                 sync: true,
                 auto_flush_bytes: None, // no auto flush — mem grows
                 auto_compact_sst_count: None,
@@ -8089,6 +8349,7 @@ mod tests {
         let mut db = Db::open_with(
             &dir,
             OpenOptions {
+                wal_recovery: Default::default(),
                 sync: true,
                 auto_flush_bytes: None,
                 auto_compact_sst_count: None,
@@ -8142,6 +8403,7 @@ mod tests {
         let mut db = Db::open_with(
             &dir,
             OpenOptions {
+                wal_recovery: Default::default(),
                 sync: true,
                 auto_flush_bytes: None,
                 auto_compact_sst_count: None,
@@ -8183,6 +8445,7 @@ mod tests {
         let mut db = Db::open_with(
             &dir,
             OpenOptions {
+                wal_recovery: Default::default(),
                 sync: true,
                 auto_flush_bytes: None,
                 auto_compact_sst_count: None,
@@ -8225,6 +8488,7 @@ mod tests {
         let mut db = Db::open_with(
             &dir,
             OpenOptions {
+                wal_recovery: Default::default(),
                 sync: true,
                 auto_flush_bytes: None,
                 auto_compact_sst_count: Some(2),
@@ -8591,6 +8855,7 @@ mod tests {
     fn exclusive_false_skips_lock_file() {
         let dir = temp_dir();
         let opts = OpenOptions {
+            wal_recovery: Default::default(),
             sync: true,
             auto_flush_bytes: None,
             auto_compact_sst_count: None,
@@ -8894,6 +9159,7 @@ mod tests {
             let mut db = Db::open_with(
                 &dir,
                 OpenOptions {
+                    wal_recovery: Default::default(),
                     sync: true,
                     auto_flush_bytes: None,
                     auto_compact_sst_count: None,
@@ -8912,6 +9178,7 @@ mod tests {
         let restored = Db::open_with(
             &ckpt,
             OpenOptions {
+                wal_recovery: Default::default(),
                 sync: true,
                 auto_flush_bytes: None,
                 auto_compact_sst_count: None,
@@ -8981,6 +9248,7 @@ mod tests {
             let mut db = Db::open_with(
                 &dir,
                 OpenOptions {
+                    wal_recovery: Default::default(),
                     sync: true,
                     auto_flush_bytes: None,
                     auto_compact_sst_count: None,
@@ -9022,6 +9290,7 @@ mod tests {
         let restored = Db::open_with(
             &ckpt,
             OpenOptions {
+                wal_recovery: Default::default(),
                 sync: true,
                 auto_flush_bytes: None,
                 auto_compact_sst_count: None,
@@ -9086,6 +9355,7 @@ mod tests {
         let mut db = Db::open_with(
             &dir,
             OpenOptions {
+                wal_recovery: Default::default(),
                 sync: true,
                 auto_flush_bytes: None,
                 auto_compact_sst_count: None,
@@ -9156,6 +9426,7 @@ mod tests {
         let mut db = Db::open_with(
             &dir,
             OpenOptions {
+                wal_recovery: Default::default(),
                 sync: false,
                 auto_flush_bytes: Some(64 * 1024),
                 auto_compact_sst_count: None,
@@ -9220,6 +9491,7 @@ mod tests {
         let mut db = Db::open_with(
             &dir,
             OpenOptions {
+                wal_recovery: Default::default(),
                 sync: false,
                 auto_flush_bytes: None,
                 auto_compact_sst_count: None,
@@ -9297,6 +9569,7 @@ mod tests {
             let mut db = Db::open_with(
                 &dir,
                 OpenOptions {
+                    wal_recovery: Default::default(),
                     sync: true,
                     auto_flush_bytes: None,
                     auto_compact_sst_count: None,
@@ -9462,6 +9735,7 @@ mod tests {
             let mut db = Db::open_with(
                 dir,
                 OpenOptions {
+                    wal_recovery: Default::default(),
                     sync: true,
                     auto_flush_bytes: Some(64),
                     auto_compact_sst_count: if auto { Some(2) } else { None },
@@ -9762,6 +10036,7 @@ mod tests {
             crate::ConcurrentDb::open_with(
                 &dir,
                 OpenOptions {
+                    wal_recovery: Default::default(),
                     sync: true,
                     auto_flush_bytes: Some(8 * 1024),
                     auto_compact_sst_count: None,
@@ -9847,6 +10122,7 @@ mod tests {
             let mut db = Db::open_with(
                 &dir,
                 OpenOptions {
+                    wal_recovery: Default::default(),
                     sync: true,
                     auto_flush_bytes: None,
                     auto_compact_sst_count: None,
@@ -9872,6 +10148,7 @@ mod tests {
         let db = Db::open_with(
             &dir,
             OpenOptions {
+                wal_recovery: Default::default(),
                 sync: true,
                 auto_flush_bytes: None,
                 auto_compact_sst_count: None,
@@ -9901,6 +10178,7 @@ mod tests {
         let mut db = Db::open_with(
             &dir,
             OpenOptions {
+                wal_recovery: Default::default(),
                 sync: true,
                 auto_flush_bytes: None,
                 auto_compact_sst_count: None,
@@ -9933,6 +10211,7 @@ mod tests {
             let mut db = Db::open_with(
                 &dir,
                 OpenOptions {
+                    wal_recovery: Default::default(),
                     sync: true,
                     auto_flush_bytes: None,
                     auto_compact_sst_count: None,
@@ -9978,6 +10257,7 @@ mod tests {
             let mut db = Db::open_with(
                 &dir,
                 OpenOptions {
+                    wal_recovery: Default::default(),
                     sync: true,
                     auto_flush_bytes: Some(256),
                     auto_compact_sst_count: None,
@@ -10020,6 +10300,7 @@ mod tests {
             let mut db = Db::open_with(
                 &dir,
                 OpenOptions {
+                    wal_recovery: Default::default(),
                     sync: true,
                     auto_flush_bytes: None,
                     auto_compact_sst_count: None,

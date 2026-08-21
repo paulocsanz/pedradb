@@ -154,8 +154,27 @@ pub struct Options {
     /// Version GC on auto-compact (Pedra `auto_reclaim`): drops versions
     /// older than the oldest open snapshot pin, like RocksDB compaction
     /// dropping unpinned obsolete versions. Default `false` — Pedra product
-    /// default keeps all versions (RFC-0009 F20).
+    /// default keeps all versions (RFC-0009 F20). RFC-0047 P0.3 flips this
+    /// default to the Rocks storage profile for the drop-in.
     pub auto_reclaim: bool,
+    /// WAL recovery at open (RFC-0047 P0.2). Rust-rocksdb
+    /// `WalRecoveryMode`-shaped; drop-in default is
+    /// [`WalRecoveryMode::PointInTime`] (serve the prefix, report the
+    /// discard). The kernel default is fail-closed.
+    pub wal_recovery: WalRecoveryMode,
+}
+
+/// WAL recovery mode at open (rust-rocksdb `WalRecoveryMode` subset).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum WalRecoveryMode {
+    /// Rocks `kPointInTimeRecovery`-shaped: recover every complete record
+    /// before the damage and keep serving; the discarded suffix is
+    /// reported via [`DB::last_recovery_report`]. Repeated corruption
+    /// still escalates (open refused) — CORRUPTLOG is not bypassed.
+    #[default]
+    PointInTime,
+    /// Pedra kernel default: mid-WAL integrity failure fails the open.
+    FailClosed,
 }
 
 impl Default for Options {
@@ -165,6 +184,7 @@ impl Default for Options {
             write_buffer_size: 4 * 1024 * 1024,
             sync: true,
             auto_reclaim: false,
+            wal_recovery: WalRecoveryMode::PointInTime,
         }
     }
 }
@@ -1248,6 +1268,10 @@ impl<E: Env> DB<E> {
         }
         let mut core_opts = pedradb_core::OpenOptions::default();
         core_opts.sync = opts.sync;
+        core_opts.wal_recovery = match opts.wal_recovery {
+            WalRecoveryMode::PointInTime => pedradb_core::WalRecovery::PointInTime,
+            WalRecoveryMode::FailClosed => pedradb_core::WalRecovery::FailClosed,
+        };
         core_opts.auto_flush_bytes = if opts.write_buffer_size == 0 {
             None
         } else {
@@ -1894,6 +1918,15 @@ impl<E: Env> DB<E> {
         self.flush()
     }
 
+    /// RFC-0047 P0.2: what the last open discarded under
+    /// [`WalRecoveryMode::PointInTime`] — Rocks-shaped availability with a
+    /// typed, honest report (`None` = clean open). Repeated corruption that
+    /// trips the CORRUPTLOG escalation limit refuses the open instead.
+    #[must_use]
+    pub fn last_recovery_report(&self) -> Option<pedradb_core::RecoveryReport> {
+        self.inner.last_recovery_report()
+    }
+
     /// rust-rocksdb `flush_wal`. Pedra already `fdatasync`s before Ok (G1).
     pub fn flush_wal(&self, _sync: bool) -> Result<()> {
         Ok(())
@@ -2073,6 +2106,41 @@ mod tests {
         assert_eq!(stall.kind(), ErrorKind::WriteStall);
         // The message survives for logs (rust-rocksdb-shaped opaque Error).
         assert!(fenced.to_string().contains("fenced"));
+    }
+
+    #[test]
+    fn compat_default_recovers_point_in_time_and_reports() {
+        // RFC-0047 P0.2: the compat face defaults to the Rocks-shaped
+        // recovery profile (kPointInTimeRecovery) — a corrupted WAL suffix
+        // is discarded, the prefix is served, and the discard is reported.
+        // Never silently skipped (G2 kernel floor intact underneath).
+        use pedradb_core::wal::recover_choose::{apply_recover_choice, RecoverChoice};
+
+        let dir = tmp("pit-default");
+        let mut opts = Options::new();
+        opts.create_if_missing(true);
+        {
+            let db = DB::open(&opts, &dir).unwrap();
+            for i in 0..8 {
+                db.put(format!("k{i:02}").as_bytes(), &[7u8; 120]).unwrap();
+            }
+        }
+        let wal = dir.join(pedradb_core::WAL_FILE_NAME);
+        let mut bytes = std::fs::read(&wal).unwrap();
+        assert!(apply_recover_choice(
+            &mut bytes,
+            RecoverChoice::FlipCrc { index: 3 }
+        ));
+        std::fs::write(&wal, &bytes).unwrap();
+
+        let db = DB::open(&opts, &dir).unwrap();
+        assert_eq!(db.get(b"k02").unwrap().as_deref(), Some(&[7u8; 120][..]));
+        assert_eq!(db.get(b"k03").unwrap(), None, "suffix after the flip is discarded");
+        let report = db.last_recovery_report().expect("compat default must report");
+        assert_eq!(report.kind, "crc");
+        assert!(report.discarded_bytes > 0);
+        assert_eq!(report.corrupt_offset, report.good_through_offset);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

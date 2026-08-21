@@ -67,6 +67,7 @@ impl Stream {
         let db = Db::open_with(
             path,
             OpenOptions {
+                wal_recovery: Default::default(),
                 sync: true,
                 auto_flush_bytes: None,
                 auto_compact_sst_count: None,

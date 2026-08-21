@@ -63,6 +63,7 @@ fn open(dir: &str, auto_flush: Option<usize>, defer: bool) -> ConcurrentDb {
     let db = ConcurrentDb::open_with(
         dir,
         OpenOptions {
+            wal_recovery: Default::default(),
             sync: true,
             auto_flush_bytes: auto_flush,
             auto_compact_sst_count: None,

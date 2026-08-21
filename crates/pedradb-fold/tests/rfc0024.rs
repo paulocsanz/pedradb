@@ -36,6 +36,7 @@ fn opts() -> OpenOptions {
         auto_compact_sst_bytes: None,
         exclusive: true,
         large_value_threshold: None,
+        wal_recovery: Default::default(),
     }
 }
 

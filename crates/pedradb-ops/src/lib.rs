@@ -334,6 +334,7 @@ impl<E: Env> BackupEngine<E> {
         let db = Db::open_with_env(
             &path,
             OpenOptions {
+                wal_recovery: Default::default(),
                 sync: false,
                 auto_flush_bytes: None,
                 auto_compact_sst_count: None,
@@ -479,6 +480,7 @@ impl<E: Env> BackupEngine<E> {
         let db = Db::open_with_env(
             dest,
             OpenOptions {
+                wal_recovery: Default::default(),
                 sync: true,
                 auto_flush_bytes: None,
                 auto_compact_sst_count: None,
@@ -665,6 +667,7 @@ pub fn migrate_to_latest_env(path: impl AsRef<Path>, env: impl Env) -> Result<Mi
     let mut db = Db::open_with_env(
         path,
         OpenOptions {
+            wal_recovery: Default::default(),
             sync: true,
             auto_flush_bytes: None,
             auto_compact_sst_count: None,
@@ -720,6 +723,7 @@ mod tests {
         Db::open_with(
             path,
             OpenOptions {
+                wal_recovery: Default::default(),
                 sync: true,
                 auto_flush_bytes: None,
                 auto_compact_sst_count: None,

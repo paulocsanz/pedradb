@@ -75,6 +75,7 @@ impl<E: Env> PedraFold<E> {
             auto_compact_sst_bytes: None,
             exclusive: true,
             large_value_threshold: None,
+            wal_recovery: Default::default(),
         };
         let db = Db::open_with_env(path, opts, env)?;
         let cursor = match db.get(CURSOR_KEY) {

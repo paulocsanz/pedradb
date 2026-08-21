@@ -34,6 +34,7 @@ fn main() -> Result<()> {
     let mut db = Db::open_with(
         &dir,
         OpenOptions {
+            wal_recovery: Default::default(),
             sync: true,
             auto_flush_bytes: Some(1024 * 1024),
             auto_compact_sst_count: None,

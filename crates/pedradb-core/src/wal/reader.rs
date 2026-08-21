@@ -269,6 +269,19 @@ impl<R: Read> WalReader<R> {
     /// # Errors
     /// See [`WalReader::read_record`]; resync exhaustion.
     pub fn collect_all(&mut self) -> Result<Vec<Vec<u8>>> {
+        let (out, err) = self.collect_prefix_all();
+        match err {
+            Some(e) => Err(e),
+            None => Ok(out),
+        }
+    }
+
+    /// RFC-0047 P0.2: like [`Self::collect_all`] but instead of discarding
+    /// the decoded prefix on a fail-stop (CRC / orphan) observation, returns
+    /// it together with the error that stopped collection (`None` = clean
+    /// end of log). Point-in-time recovery serves the prefix and reports
+    /// the discard; it never turns a fail-stop into a silent skip.
+    pub fn collect_prefix_all(&mut self) -> (Vec<Vec<u8>>, Option<CoreError>) {
         let mut out = Vec::new();
         let mut consecutive_skips = 0u64;
         // Inside an ongoing garbage walk? A CRC there is the walk's own
@@ -281,7 +294,10 @@ impl<R: Read> WalReader<R> {
             let prefix_n = out.len() as u64;
             let can_skip = if is_length_resyncable(kind) || (in_resync && kind == RecoverKind::Crc)
             {
-                self.skip_byte_for_resync()?
+                match self.skip_byte_for_resync() {
+                    Ok(v) => v,
+                    Err(e) => return (out, Some(e)),
+                }
             } else {
                 false
             };
@@ -301,9 +317,12 @@ impl<R: Read> WalReader<R> {
                         self.last_good_offset = self.current_record_stream_offset();
                     }
                     _ => {
-                        return Err(CoreError::Internal(
-                            "WAL recover KeepRecord without a record".into(),
-                        ));
+                        return (
+                            out,
+                            Some(CoreError::Internal(
+                                "WAL recover KeepRecord without a record".into(),
+                            )),
+                        );
                     }
                 },
                 RecoverAct::Stop | RecoverAct::KeepPrefix => break,
@@ -312,16 +331,19 @@ impl<R: Read> WalReader<R> {
                     in_resync = true;
                 }
                 RecoverAct::FailStop => {
-                    return match outcome {
-                        Err(e) => Err(e),
-                        Ok(_) => Err(CoreError::Internal(
-                            "WAL recover fail-stop on clean read".into(),
-                        )),
-                    };
+                    return (
+                        out,
+                        match outcome {
+                            Err(e) => Some(e),
+                            Ok(_) => Some(CoreError::Internal(
+                                "WAL recover fail-stop on clean read".into(),
+                            )),
+                        },
+                    );
                 }
             }
         }
-        Ok(out)
+        (out, None)
     }
 
     /// Advance one byte past a bad physical header so the next
