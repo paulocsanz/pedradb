@@ -1,6 +1,6 @@
 # RFC-0047: rocksdb-compat como substituto completo — perfil de retenção e de falha do RocksDB na face compat (kernel segue fail-closed)
 
-**Status:** draft
+**Status:** done
 **Updated:** 2026-08-21
 **Parents:** [0046](0046-mvcc-history-tiering-s3.md) (retenção default),
 [0045](0045-multi-writer-async-5x.md),
@@ -95,26 +95,26 @@
       medida via `ROCKS_PARITY_RETENTION=product|rocks` (default
       `product`) para que a virada de default do compat **não** mude
       silenciosamente as colunas oficiais; nota no README do bench —
-      status: `done` (este commit)
+      status: `done` (83399bc)
 
 ### P1 — recover do fence (o "segue servindo" do lado do write)
 
 - [x] **P1.1** Core `recover_from_fence()` assistido (close+replay+reopen)
       devolvendo relatório tipado do range in-flight; compat
-      `DB::resume()` em cima — status: `done` (este commit)
+      `DB::resume()` em cima — status: `done` (b0d4e51)
 - [x] **P1.2** Auto-resume só para classe transitória (ENOSPC-like) via
       seam `Host`; default `manual` para o resto (paridade de perfil com
       as severidades do Rocks, sem flag sem tipagem) — status: `done`
-      (este commit)
+      (c1b2237)
 
 ### P2 — superfície de política
 
 - [x] **P2.1** Listeners/severidades no compat
       (equivalente `BackgroundErrorReason`-shaped) + tabela doc
       knob-RocksDB → comportamento-compat (inclusive as divergências) —
-      status: `done` (este commit)
+      status: `done` (aeb10f0)
 - [x] **P2.2** `docs/usage.md`: seção "drop-in divergences" (sync default,
-      escalada CORRUPTLOG, G1) — status: `done` (este commit)
+      escalada CORRUPTLOG, G1) — status: `done` (f371a8c)
 
 ## Status (living — update with every PR)
 
@@ -125,8 +125,8 @@
 | P0.3 | p0 | compat auto_reclaim=true + bench pin | done | 83399bc | 2026-08-21 |
 | P1.1 | p1 | recover_from_fence + DB::resume() | done | b0d4e51 | 2026-08-21 |
 | P1.2 | p1 | auto-resume transitório via Host | done | c1b2237 | 2026-08-21 |
-| P2.1 | p2 | listeners/severidades + tabela de knobs | done | este commit | 2026-08-21 |
-| P2.2 | p2 | docs "drop-in divergences" | done | este commit | 2026-08-21 |
+| P2.1 | p2 | listeners/severidades + tabela de knobs | done | aeb10f0 | 2026-08-21 |
+| P2.2 | p2 | docs "drop-in divergences" | done | f371a8c | 2026-08-21 |
 
 ## Acceptance Criteria
 
