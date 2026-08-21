@@ -124,11 +124,46 @@ pub struct RecoveryReport {
 pub struct FenceReport {
     /// The WAL write/sync I/O error that tripped the fence.
     pub io_error: String,
+    /// Typed retryability class (RFC-0047 P1.2): hosts program auto-resume
+    /// on this, never on parsing strings.
+    pub class: FenceClass,
     /// First sequence not confirmed durable at fence time.
     pub uncertain_from: SequenceNumber,
     /// Last assigned sequence at fence time (inclusive). Empty in-flight
     /// range when `uncertain_from > uncertain_through`.
     pub uncertain_through: SequenceNumber,
+}
+
+/// Retryability class of a durability fence (RFC-0047 P1.2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FenceClass {
+    /// Heals on its own (ENOSPC freed, EINTR): auto-resume is reasonable.
+    Transient,
+    /// Will not heal by retrying (dead disk, EACCES): manual resume only.
+    Persistent,
+    /// Non-I/O kernel error (vlog promote class): no classification — manual.
+    Unknown,
+}
+
+impl FenceClass {
+    /// Classify a WAL write/sync I/O error.
+    #[must_use]
+    pub fn of_io(kind: std::io::ErrorKind) -> Self {
+        match kind {
+            std::io::ErrorKind::StorageFull | std::io::ErrorKind::Interrupted => Self::Transient,
+            _ => Self::Persistent,
+        }
+    }
+
+    /// Classify a kernel error (vlog promote class fences): I/O errors by
+    /// kind, everything else `Unknown` (manual resume only).
+    #[must_use]
+    pub fn of_core(err: &CoreError) -> Self {
+        match err {
+            CoreError::Io(e) => Self::of_io(e.kind()),
+            _ => Self::Unknown,
+        }
+    }
 }
 
 /// Typed outcome of [`Db::recover_from_fence`] (close+replay+reopen,
@@ -3577,7 +3612,7 @@ impl<E: Env> Db<E> {
                         }
                         Err(e) => {
                             self.vlog = Some(Mutex::new(new_log));
-                            self.fence_durability(&e);
+                            self.fence_durability(&e, FenceClass::of_core(&e));
                             return Err(e);
                         }
                     }
@@ -3588,14 +3623,14 @@ impl<E: Env> Db<E> {
             Err(e) => {
                 // Rename may or may not have completed; never leave vlog=None.
                 let _ = self.replace_vlog_handle(self.vlog_use_new);
-                self.fence_durability(&e);
+                self.fence_durability(&e, FenceClass::of_core(&e));
                 return Err(e);
             }
         }
         self.vlog_use_new = false;
         if let Err(e) = self.persist_manifest() {
             // Primary is live; flag false in memory. Fence so callers reopen.
-            self.fence_durability(&e);
+            self.fence_durability(&e, FenceClass::of_core(&e));
             return Err(e);
         }
         self.vlog_gc_count = self.vlog_gc_count.saturating_add(1);
@@ -4932,11 +4967,16 @@ impl<E: Env> Db<E> {
         self.commit_inflight.load(Ordering::Acquire)
     }
 
-    pub(crate) fn fence_durability(&mut self, io_error: impl std::fmt::Display) {
+    pub(crate) fn fence_durability(
+        &mut self,
+        io_error: impl std::fmt::Display,
+        class: FenceClass,
+    ) {
         if self.fence_report.is_none() {
             let published = self.published_seq.load(Ordering::Acquire);
             self.fence_report = Some(FenceReport {
                 io_error: io_error.to_string(),
+                class,
                 uncertain_from: published.saturating_add(1),
                 uncertain_through: self.last_sequence(),
             });

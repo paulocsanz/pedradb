@@ -410,3 +410,49 @@ fn compat_resume_reports_uncertain_range() {
     db.resume().expect("resume on healthy db");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// RFC-0047 P1.2: auto-resume only for the Transient class (ENOSPC-like);
+/// Persistent stays manual. `try_auto_resume` is the exact tick the host
+/// compact worker runs when `auto_resume_transient` is on.
+#[test]
+fn compat_auto_resume_transient_only() {
+    use pedradb_sim::OpClass;
+
+    assert!(
+        Options::default().auto_resume_transient,
+        "drop-in default: transient fences auto-resume (Rocks-shaped)"
+    );
+
+    // (a) ENOSPC write failure → Transient → auto tick resumes.
+    let dir = tmp("resume-eno", 0x4748);
+    let env = FailingEnv::passing();
+    let db = DB::open_cf_with_env(&Options::new(), &dir, &[], env.clone()).expect("open");
+    db.put(b"a", b"1").expect("put");
+    env.arm_op_class(OpClass::Write, 0, true, FaultKind::StorageFull);
+    assert!(db.put(b"b", b"2").is_err(), "ENOSPC write failure fences");
+    assert!(db.try_auto_resume().expect("auto tick"), "transient auto-resumes");
+    let rec = db.last_fence_recovery().expect("report recorded");
+    assert_eq!(rec.fence.class, pedradb_core::FenceClass::Transient);
+    assert!(rec.lost_writes);
+    db.put(b"c", b"3").expect("put after auto-resume");
+    assert_eq!(db.get(b"c").unwrap().as_deref(), Some(&b"3"[..]));
+    let _ = std::fs::remove_dir_all(&dir);
+
+    // (b) Generic write failure → Persistent → auto tick is a no-op,
+    // manual `resume()` still works.
+    let dir = tmp("resume-io", 0x4749);
+    let env = FailingEnv::passing();
+    let db = DB::open_cf_with_env(&Options::new(), &dir, &[], env.clone()).expect("open");
+    db.put(b"a", b"1").expect("put");
+    env.arm_op_class(OpClass::Write, 0, true, FaultKind::IoError);
+    assert!(db.put(b"b", b"2").is_err(), "write failure fences");
+    assert!(
+        !db.try_auto_resume().expect("auto tick"),
+        "persistent fences never auto-resume"
+    );
+    assert!(db.put(b"x", b"y").is_err(), "still fenced (manual only)");
+    db.resume().expect("manual resume");
+    assert!(db.last_fence_recovery().is_some());
+    db.put(b"c", b"3").expect("put after manual resume");
+    let _ = std::fs::remove_dir_all(&dir);
+}

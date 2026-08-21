@@ -159,6 +159,13 @@ pub struct Options {
     /// all versions, PITR grátis) as an explicit opt-out for hosts that
     /// want it.
     pub auto_reclaim: bool,
+    /// RFC-0047 P1.2: auto-resume a durability fence whose typed class is
+    /// `Transient` (ENOSPC-like — heals on its own), via the host compact
+    /// worker. Every other class stays **manual** ([`DB::resume`]) — never
+    /// an untyped flag; the recovery outcome is always on
+    /// [`DB::last_fence_recovery`]. Default `true` (Rocks-shaped
+    /// background-error profile).
+    pub auto_resume_transient: bool,
     /// WAL recovery at open (RFC-0047 P0.2). Rust-rocksdb
     /// `WalRecoveryMode`-shaped; drop-in default is
     /// [`WalRecoveryMode::PointInTime`] (serve the prefix, report the
@@ -186,6 +193,7 @@ impl Default for Options {
             write_buffer_size: 4 * 1024 * 1024,
             sync: true,
             auto_reclaim: true,
+            auto_resume_transient: true,
             wal_recovery: WalRecoveryMode::PointInTime,
         }
     }
@@ -1164,7 +1172,11 @@ pub struct DB<E: Env = StdEnv> {
     compact_thread: Option<JoinHandle<()>>,
     compact_gate: Arc<Mutex<()>>,
     /// Last [`DB::resume`] outcome after a durability fence (RFC-0047 P1.1).
-    fence_recovery: Mutex<Option<pedradb_core::FenceRecovery>>,
+    /// `Arc`-shared with the host compact worker (P1.2 auto-resume writes
+    /// here too).
+    fence_recovery: Arc<Mutex<Option<pedradb_core::FenceRecovery>>>,
+    /// RFC-0047 P1.2: worker auto-resumes Transient-class fences.
+    auto_resume_transient: bool,
 }
 
 impl DB<StdEnv> {
@@ -1195,7 +1207,12 @@ impl DB<StdEnv> {
         cfs: &[&str],
     ) -> Result<Self> {
         let mut db = Self::open_cf_with_env(opts, path, cfs, StdEnv)?;
-        let (tx, th) = spawn_compact_worker(db.inner.clone(), Arc::clone(&db.compact_gate));
+        let (tx, th) = spawn_compact_worker(
+            db.inner.clone(),
+            Arc::clone(&db.compact_gate),
+            db.auto_resume_transient,
+            Arc::clone(&db.fence_recovery),
+        );
         if th.is_some() {
             db.inner.set_defer_auto_compact(true);
             db.compact_tx = tx;
@@ -1293,7 +1310,8 @@ impl<E: Env> DB<E> {
             compact_tx: None,
             compact_thread: None,
             compact_gate: Arc::new(Mutex::new(())),
-            fence_recovery: Mutex::new(None),
+            fence_recovery: Arc::new(Mutex::new(None)),
+            auto_resume_transient: opts.auto_resume_transient,
         })
     }
 
@@ -1943,19 +1961,35 @@ impl<E: Env> DB<E> {
     /// Reopen I/O or a still-in-flight commit — the DB is then unusable;
     /// drop it.
     pub fn resume(&self) -> Result<()> {
-        match self.inner.recover_from_fence() {
-            Ok(None) => Ok(()),
-            Ok(Some(rec)) => {
-                *self.fence_recovery.lock() = Some(rec);
-                Ok(())
-            }
-            Err(e) => Err(e.into()),
-        }
+        compat_resume(&self.inner, &self.fence_recovery)
     }
 
-    /// Outcome of the last successful [`Self::resume`] after a durability
-    /// fence (RFC-0047 P1.1): which sequences were in flight and whether
-    /// the reopen proved them lost.
+    /// RFC-0047 P1.2: one auto-resume tick — exactly what the host compact
+    /// worker runs when [`Options::auto_resume_transient`] is on. Resumes
+    /// only a `Transient`-class fence (ENOSPC-like); every other class (and
+    /// a healthy DB) is `Ok(false)` = stays manual. Hosts driving their own
+    /// tick (no compat worker) can call this directly.
+    ///
+    /// # Errors
+    /// Reopen I/O — same contract as [`Self::resume`].
+    pub fn try_auto_resume(&self) -> Result<bool> {
+        if !self.inner.is_durability_fenced() {
+            return Ok(false);
+        }
+        let transient = self
+            .inner
+            .fence_report()
+            .is_some_and(|r| r.class == pedradb_core::FenceClass::Transient);
+        if !transient {
+            return Ok(false);
+        }
+        compat_resume(&self.inner, &self.fence_recovery)?;
+        Ok(true)
+    }
+
+    /// Outcome of the last successful resume after a durability fence
+    /// (manual [`Self::resume`] or P1.2 auto-resume): which sequences were
+    /// in flight and whether the reopen proved them lost.
     #[must_use]
     pub fn last_fence_recovery(&self) -> Option<pedradb_core::FenceRecovery> {
         self.fence_recovery.lock().clone()
@@ -1996,9 +2030,26 @@ impl<E: Env> Drop for DB<E> {
     }
 }
 
+/// Shared resume path (manual [`DB::resume`] and the P1.2 auto tick).
+fn compat_resume<E: Env>(
+    inner: &ConcurrentDb<E>,
+    sink: &Mutex<Option<pedradb_core::FenceRecovery>>,
+) -> Result<()> {
+    match inner.recover_from_fence() {
+        Ok(None) => Ok(()),
+        Ok(Some(rec)) => {
+            *sink.lock() = Some(rec);
+            Ok(())
+        }
+        Err(e) => Err(e.into()),
+    }
+}
+
 fn spawn_compact_worker(
     inner: ConcurrentDb<StdEnv>,
     gate: Arc<Mutex<()>>,
+    auto_resume_transient: bool,
+    fence_sink: Arc<Mutex<Option<pedradb_core::FenceRecovery>>>,
 ) -> (Option<SyncSender<CompactCmd>>, Option<JoinHandle<()>>) {
     let (tx, rx) = mpsc::sync_channel(1);
     let handle = thread::Builder::new()
@@ -2025,6 +2076,16 @@ fn spawn_compact_worker(
                         break;
                     }
                     Ok(CompactCmd::Run) | Err(RecvTimeoutError::Timeout) => {
+                        // RFC-0047 P1.2: auto-resume a Transient-class fence
+                        // (ENOSPC-like); other classes stay manual.
+                        if auto_resume_transient && inner.is_durability_fenced() {
+                            let transient = inner
+                                .fence_report()
+                                .is_some_and(|r| r.class == pedradb_core::FenceClass::Transient);
+                            if transient {
+                                let _ = compat_resume(&inner, &fence_sink);
+                            }
+                        }
                         if !inner.recently_multi(fold_multi_hold) {
                             let _ = inner.try_stage_if_full();
                         }

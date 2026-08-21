@@ -667,7 +667,7 @@ impl WriteGroup {
         }
         if let Some(e) = io_err {
             let mut g = db.write();
-            g.fence_durability(&e);
+            g.fence_durability(&e, crate::db::FenceClass::of_core(&e));
             g.end_commit();
             return results
                 .into_iter()
@@ -1409,6 +1409,21 @@ impl<E: Env> ConcurrentDb<E> {
     #[must_use]
     pub fn last_recovery_report(&self) -> Option<crate::db::RecoveryReport> {
         self.inner.read().last_recovery_report().cloned()
+    }
+
+    /// RFC-0047 P1.2: whether the kernel is currently durability-fenced
+    /// (host auto-resume policy polls this; typed class via
+    /// [`Self::fence_report`]).
+    #[must_use]
+    pub fn is_durability_fenced(&self) -> bool {
+        self.inner.read().is_durability_fenced()
+    }
+
+    /// RFC-0047 P1.1/P1.2: the first fence's report (I/O error, retryability
+    /// class, uncertain range), if this Db was ever fenced.
+    #[must_use]
+    pub fn fence_report(&self) -> Option<crate::db::FenceReport> {
+        self.inner.read().fence_report().cloned()
     }
 
     /// RFC-0047 P1.1: assisted close+replay+reopen after a durability
@@ -2774,6 +2789,8 @@ mod tests {
         inner: StdEnv,
         fail_write: std::rc::Rc<std::cell::Cell<bool>>,
         fail_sync: std::rc::Rc<std::cell::Cell<bool>>,
+        /// ErrorKind of the injected write failure (default: Other).
+        write_kind: std::rc::Rc<std::cell::Cell<std::io::ErrorKind>>,
     }
 
     impl FenceEnv {
@@ -2782,6 +2799,7 @@ mod tests {
                 inner: StdEnv,
                 fail_write: std::rc::Rc::new(std::cell::Cell::new(false)),
                 fail_sync: std::rc::Rc::new(std::cell::Cell::new(false)),
+                write_kind: std::rc::Rc::new(std::cell::Cell::new(std::io::ErrorKind::Other)),
             }
         }
     }
@@ -2799,7 +2817,10 @@ mod tests {
     impl std::io::Write for FenceFile {
         fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
             if self.env.fail_write.replace(false) {
-                return Err(std::io::Error::other("injected wal write failure"));
+                return Err(std::io::Error::new(
+                    self.env.write_kind.get(),
+                    "injected wal write failure",
+                ));
             }
             self.inner.write(buf)
         }
@@ -2903,6 +2924,11 @@ mod tests {
         assert_eq!(rec.replayed_through, 2, "replay ends at the durable prefix");
         assert!(rec.lost_writes);
         assert!(!rec.fence.io_error.is_empty());
+        assert_eq!(
+            rec.fence.class,
+            crate::db::FenceClass::Persistent,
+            "generic write failure is not retryable"
+        );
         // Resumed: healthy, the lost write stays lost, new writes land.
         db.put(b"d", b"4").unwrap();
         assert_eq!(db.get(b"d").as_deref(), Some(&b"4"[..]));
@@ -2929,6 +2955,25 @@ mod tests {
         assert_eq!(rec.replayed_through, 2, "frame reached the file before the sync error");
         assert!(!rec.lost_writes);
         assert_eq!(db.get(b"b").as_deref(), Some(&b"2"[..]));
+        drop(db);
+        let _ = fs::remove_dir_all(&dir);
+
+        // (C) ENOSPC write failure → typed Transient class (RFC-0047 P1.2:
+        // the class a host auto-resume policy programs on).
+        let dir = temp_dir();
+        let env = FenceEnv::new();
+        env.write_kind.set(std::io::ErrorKind::StorageFull);
+        let db = ConcurrentDb::open_with_env(&dir, OpenOptions::default(), env.clone()).unwrap();
+        db.put(b"a", b"1").unwrap();
+        env.fail_write.set(true);
+        assert!(db.put(b"b", b"2").is_err(), "injected ENOSPC write failure");
+        let report = db.fence_report().expect("fenced");
+        assert_eq!(report.class, crate::db::FenceClass::Transient);
+        assert!(db.is_durability_fenced());
+        let rec = db.recover_from_fence().unwrap().expect("fenced");
+        assert!(rec.lost_writes);
+        db.put(b"c", b"3").unwrap();
+        assert_eq!(db.get(b"c").as_deref(), Some(&b"3"[..]));
         drop(db);
         let _ = fs::remove_dir_all(&dir);
     }
