@@ -118,6 +118,16 @@ read/insert/scan/RMW mix) cannot drift between engines:
   beat default Rocks. `ROCKS_PARITY_SYNC=1` is an extra same-class column,
   never the win condition.
 
+**Retention pin (RFC-0047 P0.3):** the compat drop-in now defaults to the
+Rocks storage profile (`auto_reclaim=true` — auto-compact GCs unpinned
+obsolete versions). The bench pins what each column measures so the flip
+never silently changes official numbers: `ROCKS_PARITY_RETENTION=product`
+(default) forces Pedra product retention (keep all versions, RFC-0009 F20 —
+what every official column has measured); `ROCKS_PARITY_RETENTION=rocks`
+measures the drop-in profile. Invalid values or mixing with the legacy
+`ROCKS_PARITY_AUTO_RECLAIM=1` exit 2 instead of benching an ambiguous
+retention.
+
 ```bash
 # compat side
 cargo run -q --release -p rocksdb-parity-bench -- findings/rocks-parity-local/compat compat

@@ -78,24 +78,24 @@
 
 ### P0 — substituto com o mesmo perfil de storage e de open
 
-- [ ] **P0.1** `Error::kind()` tipado no compat
+- [x] **P0.1** `Error::kind()` tipado no compat
       (`Fenced | Corruption{..} | CorruptionEscalated | Io | Invalid |
       Other`) preservando o Display; testes de mapeamento `CoreError →
-      kind` — status: `todo`
-- [ ] **P0.2** Core `OpenOptions::wal_recovery: FailClosed (default) |
+      kind` — status: `done` (31b1482)
+- [x] **P0.2** Core `OpenOptions::wal_recovery: FailClosed (default) |
       PointInTime`: no PointInTime, `collect_all` recupera o prefixo até
       `last_good_offset` e devolve `RecoveryReport` (offset da corrupção,
       registros/bytes descartados); **CORRUPTLOG ainda registra o evento**;
       escalada (3º evento) recusa o open mesmo em PointInTime. Compat
       default = PointInTime. Testes com as injeções de
       `wal/recover_choose.rs` (FlipCrc no meio → prefixo + report) —
-      status: `todo`
-- [ ] **P0.3** Compat `Options.auto_reclaim` default **`true`** (perfil
+      status: `done` (95418de)
+- [x] **P0.3** Compat `Options.auto_reclaim` default **`true`** (perfil
       Rocks: live set + pins); F20 = opt-out; bench pina a retenção
       medida via `ROCKS_PARITY_RETENTION=product|rocks` (default
       `product`) para que a virada de default do compat **não** mude
       silenciosamente as colunas oficiais; nota no README do bench —
-      status: `todo`
+      status: `done` (este commit)
 
 ### P1 — recover do fence (o "segue servindo" do lado do write)
 
@@ -121,7 +121,7 @@
 |----|------|-------|--------|-----------|---------|
 | P0.1 | p0 | Error::kind() tipado no compat | done | 31b1482 | 2026-08-21 |
 | P0.2 | p0 | wal_recovery PointInTime + report + escalada | done | 95418de | 2026-08-21 |
-| P0.3 | p0 | compat auto_reclaim=true + bench pin | todo | — | 2026-08-21 |
+| P0.3 | p0 | compat auto_reclaim=true + bench pin | done | este commit | 2026-08-21 |
 | P1.1 | p1 | recover_from_fence + DB::resume() | todo | — | 2026-08-21 |
 | P1.2 | p1 | auto-resume transitório via Host | todo | — | 2026-08-21 |
 | P2.1 | p2 | listeners/severidades + tabela de knobs | todo | — | 2026-08-21 |

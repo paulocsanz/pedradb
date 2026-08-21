@@ -153,9 +153,11 @@ pub struct Options {
     pub sync: bool,
     /// Version GC on auto-compact (Pedra `auto_reclaim`): drops versions
     /// older than the oldest open snapshot pin, like RocksDB compaction
-    /// dropping unpinned obsolete versions. Default `false` — Pedra product
-    /// default keeps all versions (RFC-0009 F20). RFC-0047 P0.3 flips this
-    /// default to the Rocks storage profile for the drop-in.
+    /// dropping unpinned obsolete versions. Default **`true`** (RFC-0047
+    /// P0.3): the drop-in ships the Rocks storage profile — disk ≈ live
+    /// set + pins. `false` is the Pedra kernel default (RFC-0009 F20: keep
+    /// all versions, PITR grátis) as an explicit opt-out for hosts that
+    /// want it.
     pub auto_reclaim: bool,
     /// WAL recovery at open (RFC-0047 P0.2). Rust-rocksdb
     /// `WalRecoveryMode`-shaped; drop-in default is
@@ -183,7 +185,7 @@ impl Default for Options {
             create_if_missing: false,
             write_buffer_size: 4 * 1024 * 1024,
             sync: true,
-            auto_reclaim: false,
+            auto_reclaim: true,
             wal_recovery: WalRecoveryMode::PointInTime,
         }
     }
@@ -2141,6 +2143,79 @@ mod tests {
         assert!(report.discarded_bytes > 0);
         assert_eq!(report.corrupt_offset, report.good_through_offset);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn auto_reclaim_default_matches_rocks_profile() {
+        // RFC-0047 P0.3: the drop-in default is the Rocks storage profile —
+        // unpinned obsolete versions are GCed on auto-compact (disk ≈ live
+        // set + pins). Same overwrite workload A/B: default vs F20 opt-out
+        // must diverge exactly on retained history.
+        assert!(
+            Options::default().auto_reclaim,
+            "drop-in default must be the Rocks storage profile"
+        );
+        fn dir_size(dir: &std::path::Path) -> u64 {
+            let mut total = 0;
+            for entry in std::fs::read_dir(dir).unwrap() {
+                let p = entry.unwrap().path();
+                if p.is_dir() {
+                    total += dir_size(&p);
+                } else {
+                    total += std::fs::metadata(&p).unwrap().len();
+                }
+            }
+            total
+        }
+        let run = |tag: &str, reclaim: Option<bool>| -> u64 {
+            let dir = tmp(tag);
+            let mut opts = Options::new();
+            opts.create_if_missing(true);
+            // Small buffer so flush+auto-compact run inside the workload.
+            opts.write_buffer_size = 64 * 1024;
+            if let Some(v) = reclaim {
+                opts.auto_reclaim = v;
+            }
+            // Inline auto-compact path (no worker): deterministic — the
+            // worker path with reclaim is covered by
+            // `auto_reclaim_worker_gcs_versions`. Explicit per-round flush
+            // drives L0 past the compaction trigger (on this path staging
+            // is the host's job, RFC-0037 P2.1).
+            let db =
+                DB::open_cf_with_env(&opts, &dir, &[], pedradb_core::StdEnv).unwrap();
+            // Deterministic incompressible values (xorshift): F20 retention
+            // keeps every round's bytes; reclaim keeps only the live set.
+            let mut seed = 0x5EED_0047_u64;
+            let mut value = vec![0u8; 1024];
+            for _round in 0..20u64 {
+                for byte in value.iter_mut() {
+                    seed ^= seed << 13;
+                    seed ^= seed >> 7;
+                    seed ^= seed << 17;
+                    *byte = seed as u8;
+                }
+                for i in 0..10 {
+                    // Same 10 keys every round (overwrites): retention, not
+                    // live-set growth, is what must diverge.
+                    db.put(format!("k{i:02}").as_bytes(), &value).unwrap();
+                }
+                db.flush().unwrap();
+            }
+            drop(db);
+            dir_size(&dir)
+        };
+        let live_set_bytes = 10 * 1024;
+        let written_bytes = 20 * live_set_bytes;
+        let default_size = run("reclaim-default", None);
+        let f20_size = run("reclaim-f20", Some(false));
+        assert!(
+            default_size * 3 < f20_size,
+            "default (reclaim) {default_size}B must be far below F20 {f20_size}B"
+        );
+        assert!(
+            default_size < written_bytes / 2,
+            "default retention must bound disk near the live set ({default_size}B for {live_set_bytes}B live)"
+        );
     }
 
     #[test]

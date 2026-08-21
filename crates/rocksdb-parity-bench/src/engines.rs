@@ -31,13 +31,34 @@ impl CompatEngine {
         if std::env::var("PEDRA_PARITY_ASYNC").as_deref() == Ok("1") {
             opts.set_sync(false);
         }
-        // `ROCKS_PARITY_AUTO_RECLAIM=1`: Rocks-shaped retention for
-        // long-window experiments (auto-compact GCs unpinned obsolete
-        // versions, like RocksDB). Default off = Pedra product default
-        // (keep all versions) — official columns never set this.
+        // `ROCKS_PARITY_RETENTION` (RFC-0047 P0.3): pin the retention the
+        // column measures, so the compat default flip (auto_reclaim=true)
+        // never silently changes official numbers. `product` (default) =
+        // Pedra product retention — keep all versions (RFC-0009 F20), what
+        // every official column has measured. `rocks` = RocksDB storage
+        // profile (drop-in default): auto-compact GCs unpinned obsolete
+        // versions. Legacy `ROCKS_PARITY_AUTO_RECLAIM=1` == `rocks`.
+        let retention = std::env::var("ROCKS_PARITY_RETENTION").unwrap_or_else(|_| "product".into());
+        let mut reclaim = match retention.as_str() {
+            "product" => false,
+            "rocks" => true,
+            other => {
+                eprintln!(
+                    "ROCKS_PARITY_RETENTION={other}: invalid (want product|rocks) — refusing to bench an ambiguous retention"
+                );
+                std::process::exit(2);
+            }
+        };
         if crate::env_usize("ROCKS_PARITY_AUTO_RECLAIM", 0) != 0 {
-            opts.auto_reclaim = true;
+            if retention == "product" {
+                eprintln!(
+                    "ROCKS_PARITY_RETENTION=product conflicts with ROCKS_PARITY_AUTO_RECLAIM=1 — refusing ambiguous retention"
+                );
+                std::process::exit(2);
+            }
+            reclaim = true;
         }
+        opts.auto_reclaim = reclaim;
         // Only register extra CFs when a suite needs them. Named CFs force
         // `default\0` prefix on every ycsb/kvrocks key; Rocks default CF does not.
         let cfs: &[&str] = if crate::suites_enabled("deps") || crate::suites_enabled("myrocks") {
