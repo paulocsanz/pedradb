@@ -99,9 +99,9 @@
 
 ### P1 — recover do fence (o "segue servindo" do lado do write)
 
-- [ ] **P1.1** Core `recover_from_fence()` assistido (close+replay+reopen)
+- [x] **P1.1** Core `recover_from_fence()` assistido (close+replay+reopen)
       devolvendo relatório tipado do range in-flight; compat
-      `DB::resume()` em cima — status: `todo`
+      `DB::resume()` em cima — status: `done` (este commit)
 - [ ] **P1.2** Auto-resume só para classe transitória (ENOSPC-like) via
       seam `Host`; default `manual` para o resto (paridade de perfil com
       as severidades do Rocks, sem flag sem tipagem) — status: `todo`
@@ -122,7 +122,7 @@
 | P0.1 | p0 | Error::kind() tipado no compat | done | 31b1482 | 2026-08-21 |
 | P0.2 | p0 | wal_recovery PointInTime + report + escalada | done | 95418de | 2026-08-21 |
 | P0.3 | p0 | compat auto_reclaim=true + bench pin | done | 83399bc | 2026-08-21 |
-| P1.1 | p1 | recover_from_fence + DB::resume() | todo | — | 2026-08-21 |
+| P1.1 | p1 | recover_from_fence + DB::resume() | done | este commit | 2026-08-21 |
 | P1.2 | p1 | auto-resume transitório via Host | todo | — | 2026-08-21 |
 | P2.1 | p2 | listeners/severidades + tabela de knobs | todo | — | 2026-08-21 |
 | P2.2 | p2 | docs "drop-in divergences" | todo | — | 2026-08-21 |

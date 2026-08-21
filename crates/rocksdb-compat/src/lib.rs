@@ -1163,6 +1163,8 @@ pub struct DB<E: Env = StdEnv> {
     compact_tx: Option<SyncSender<CompactCmd>>,
     compact_thread: Option<JoinHandle<()>>,
     compact_gate: Arc<Mutex<()>>,
+    /// Last [`DB::resume`] outcome after a durability fence (RFC-0047 P1.1).
+    fence_recovery: Mutex<Option<pedradb_core::FenceRecovery>>,
 }
 
 impl DB<StdEnv> {
@@ -1291,6 +1293,7 @@ impl<E: Env> DB<E> {
             compact_tx: None,
             compact_thread: None,
             compact_gate: Arc::new(Mutex::new(())),
+            fence_recovery: Mutex::new(None),
         })
     }
 
@@ -1927,6 +1930,35 @@ impl<E: Env> DB<E> {
     #[must_use]
     pub fn last_recovery_report(&self) -> Option<pedradb_core::RecoveryReport> {
         self.inner.last_recovery_report()
+    }
+
+    /// rust-rocksdb `DB::resume`: recover from a background durability
+    /// fence (fsync failure class) via close+replay+reopen (RFC-0047 P1.1).
+    /// `Ok(())` also when nothing was fenced (defensive resume, like
+    /// Rocks). The typed outcome — uncertain sequence range and whether the
+    /// replay proved writes lost — is on [`Self::last_fence_recovery`]:
+    /// never a silent "as if nothing happened".
+    ///
+    /// # Errors
+    /// Reopen I/O or a still-in-flight commit — the DB is then unusable;
+    /// drop it.
+    pub fn resume(&self) -> Result<()> {
+        match self.inner.recover_from_fence() {
+            Ok(None) => Ok(()),
+            Ok(Some(rec)) => {
+                *self.fence_recovery.lock() = Some(rec);
+                Ok(())
+            }
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    /// Outcome of the last successful [`Self::resume`] after a durability
+    /// fence (RFC-0047 P1.1): which sequences were in flight and whether
+    /// the reopen proved them lost.
+    #[must_use]
+    pub fn last_fence_recovery(&self) -> Option<pedradb_core::FenceRecovery> {
+        self.fence_recovery.lock().clone()
     }
 
     /// rust-rocksdb `flush_wal`. Pedra already `fdatasync`s before Ok (G1).

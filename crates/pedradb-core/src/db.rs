@@ -116,6 +116,34 @@ pub struct RecoveryReport {
     pub discarded_bytes: u64,
 }
 
+/// What a durability fence caught in flight (RFC-0047 P1.1). Sequences in
+/// `uncertain_from..=uncertain_through` were assigned (and possibly WAL
+/// buffered) but never confirmed durable — after resume they may or may
+/// not be there (G5: the report never pretends to know).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FenceReport {
+    /// The WAL write/sync I/O error that tripped the fence.
+    pub io_error: String,
+    /// First sequence not confirmed durable at fence time.
+    pub uncertain_from: SequenceNumber,
+    /// Last assigned sequence at fence time (inclusive). Empty in-flight
+    /// range when `uncertain_from > uncertain_through`.
+    pub uncertain_through: SequenceNumber,
+}
+
+/// Typed outcome of [`Db::recover_from_fence`] (close+replay+reopen,
+/// RFC-0047 P1.1): the fence's uncertain range plus where the durable
+/// replay actually landed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FenceRecovery {
+    /// The fence being recovered from (first fence wins).
+    pub fence: FenceReport,
+    /// Last sequence the replayed durable state reached.
+    pub replayed_through: SequenceNumber,
+    /// Some in-flight writes were not durable after reopen.
+    pub lost_writes: bool,
+}
+
 /// Options for [`Db::open`].
 #[derive(Debug, Clone, Copy)]
 pub struct OpenOptions {
@@ -693,6 +721,10 @@ pub struct Db<E: Env = StdEnv> {
     dir_lock: Option<DirLock>,
     /// Set when append succeeded but required WAL `sync_all` failed (RFC-0015 H1).
     durability_fenced: bool,
+    /// First fence wins (RFC-0047 P1.1): I/O error + uncertain range.
+    fence_report: Option<FenceReport>,
+    /// Options this Db opened with (RFC-0047 P1.1: resume reopens with them).
+    open_opts: OpenOptions,
     /// Auto-compact failures after successful flush (RFC-0015 M4 / P2.2).
     auto_compact_failures: u64,
     /// Last auto-compact error message (cleared only on successful auto-compact).
@@ -1028,6 +1060,8 @@ impl<E: Env> Db<E> {
             point_cache_reset: AtomicBool::new(false),
             dir_lock: lock,
             durability_fenced: false,
+            fence_report: None,
+            open_opts: opts,
             auto_compact_failures: 0,
             last_auto_compact_error: None,
             large_value_threshold,
@@ -3543,7 +3577,7 @@ impl<E: Env> Db<E> {
                         }
                         Err(e) => {
                             self.vlog = Some(Mutex::new(new_log));
-                            self.durability_fenced = true;
+                            self.fence_durability(&e);
                             return Err(e);
                         }
                     }
@@ -3554,14 +3588,14 @@ impl<E: Env> Db<E> {
             Err(e) => {
                 // Rename may or may not have completed; never leave vlog=None.
                 let _ = self.replace_vlog_handle(self.vlog_use_new);
-                self.durability_fenced = true;
+                self.fence_durability(&e);
                 return Err(e);
             }
         }
         self.vlog_use_new = false;
         if let Err(e) = self.persist_manifest() {
             // Primary is live; flag false in memory. Fence so callers reopen.
-            self.durability_fenced = true;
+            self.fence_durability(&e);
             return Err(e);
         }
         self.vlog_gc_count = self.vlog_gc_count.saturating_add(1);
@@ -4539,6 +4573,78 @@ impl<E: Env> Db<E> {
         self.wal.lock().sync_data()
     }
 
+    /// The first fence's report, if this Db was ever durability-fenced
+    /// (RFC-0047 P1.1). Present even after [`Self::recover_from_fence`].
+    #[must_use]
+    pub fn fence_report(&self) -> Option<&FenceReport> {
+        self.fence_report.as_ref()
+    }
+
+    /// RFC-0047 P1.1: assisted close+replay+reopen after a durability
+    /// fence. The kernel stays fail-closed (writes refused); this is the
+    /// one-call evacuation: reopen rebuilds from WAL/MANIFEST and the
+    /// typed [`FenceRecovery`] says which in-flight sequences were
+    /// uncertain and whether the replay proved them lost (G5: the report
+    /// never pretends to know).
+    ///
+    /// `Ok(None)` = not fenced (no-op, nothing touched). On `Err` this Db
+    /// stays unusable (lock released, writes refused) — drop it.
+    ///
+    /// Shared answer caches (point/count/epoch, published watermark — the
+    /// ones a [`crate::concurrent::ConcurrentDb`] caches) are carried over:
+    /// cleared and re-adopted so the reopened Db invalidates them going
+    /// forward (never a stale hit after lost writes).
+    ///
+    /// # Errors
+    /// Reopen I/O (old shell already closed and lock released).
+    pub fn recover_from_fence(&mut self) -> Result<Option<FenceRecovery>> {
+        let Some(fence) = self.fence_report.clone() else {
+            return Ok(None);
+        };
+        let dir = self.dir.clone();
+        let opts = self.open_opts;
+        let env = self.env.clone();
+        let point_cache = Arc::clone(&self.point_cache);
+        let count_cache = Arc::clone(&self.count_cache);
+        let read_cache_epoch = Arc::clone(&self.read_cache_epoch);
+        let published_seq = Arc::clone(&self.published_seq);
+        // Detach the old shell: persist what we can, release the dir lock
+        // (Drop then has nothing left to release). Do NOT flush the WAL —
+        // the uncertain tail is exactly what the replay must adjudicate.
+        self.persist_changelog_best_effort();
+        self.release_lock()?;
+        let mut db = match Db::open_with_env(&dir, opts, env) {
+            Ok(db) => db,
+            Err(e) => {
+                // Shell stays fenced with the lock released: writes keep
+                // refusing; the host must drop this Db.
+                return Err(e);
+            }
+        };
+        // Adopt the carried handles into the reopened Db: caches cleared
+        // (async-acked values the replay may prove undurable must not be
+        // hits), epoch bumped (TLS invalidation), published watermark kept
+        // — then re-published up to the replayed durable state so a
+        // resumed default read observes exactly what a fresh reopen would.
+        point_cache.clear();
+        count_cache.clear();
+        read_cache_epoch.fetch_add(1, Ordering::Release);
+        db.point_cache = point_cache;
+        db.count_cache = count_cache;
+        db.read_cache_epoch = read_cache_epoch;
+        db.published_seq = published_seq;
+        let replayed_through = db.last_sequence();
+        db.publish_sequence(replayed_through);
+        let lost_writes = fence.uncertain_from <= fence.uncertain_through
+            && replayed_through < fence.uncertain_through;
+        *self = db;
+        Ok(Some(FenceRecovery {
+            fence,
+            replayed_through,
+            lost_writes,
+        }))
+    }
+
     /// Close the WAL and release the directory lock via [`Env`] when held.
     ///
     /// Prefer this over bare `drop` so unlock is fault-injectable (RFC-0015 H3).
@@ -4826,7 +4932,15 @@ impl<E: Env> Db<E> {
         self.commit_inflight.load(Ordering::Acquire)
     }
 
-    pub(crate) fn fence_durability(&mut self) {
+    pub(crate) fn fence_durability(&mut self, io_error: impl std::fmt::Display) {
+        if self.fence_report.is_none() {
+            let published = self.published_seq.load(Ordering::Acquire);
+            self.fence_report = Some(FenceReport {
+                io_error: io_error.to_string(),
+                uncertain_from: published.saturating_add(1),
+                uncertain_through: self.last_sequence(),
+            });
+        }
         self.durability_fenced = true;
     }
 

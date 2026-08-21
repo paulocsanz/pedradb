@@ -667,7 +667,7 @@ impl WriteGroup {
         }
         if let Some(e) = io_err {
             let mut g = db.write();
-            g.fence_durability();
+            g.fence_durability(&e);
             g.end_commit();
             return results
                 .into_iter()
@@ -1411,6 +1411,34 @@ impl<E: Env> ConcurrentDb<E> {
         self.inner.read().last_recovery_report().cloned()
     }
 
+    /// RFC-0047 P1.1: assisted close+replay+reopen after a durability
+    /// fence (kernel [`crate::db::Db::recover_from_fence`] does the swap;
+    /// the shared caches/published watermark are carried over, so this
+    /// handle and its session write-sync policy stay valid).
+    /// `Ok(None)` = not fenced (no-op). Write-group phase diagnostics keep
+    /// pointing at the pre-fence stats (diagnostic only).
+    ///
+    /// # Errors
+    /// Drain timeout (a commit is still in flight) or reopen I/O — then
+    /// the Db is unusable; drop this handle.
+    pub fn recover_from_fence(&self) -> Result<Option<crate::db::FenceRecovery>> {
+        if !self.inner.read().is_durability_fenced() {
+            return Ok(None);
+        }
+        // Post-fence commits fail fast at ensure_not_fenced; bounded drain
+        // so the reopen never races a mid-write WAL handle.
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while self.inner.read().commit_inflight() > 0 {
+            if Instant::now() > deadline {
+                return Err(CoreError::Internal(
+                    "commit_batch still in flight at recover_from_fence".into(),
+                ));
+            }
+            std::thread::sleep(Duration::from_micros(200));
+        }
+        self.inner.write().recover_from_fence()
+    }
+
     /// Current default write-sync (WAL `fdatasync` before Ok when true).
     #[must_use]
     pub fn default_write_sync(&self) -> bool {
@@ -2018,11 +2046,14 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn temp_dir() -> std::path::PathBuf {
+        use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
+        static N: AtomicU64 = AtomicU64::new(0);
         let n = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let dir = std::env::temp_dir().join(format!("pedradb-concurrent-{n}"));
+        let i = N.fetch_add(1, AtomicOrdering::Relaxed);
+        let dir = std::env::temp_dir().join(format!("pedradb-concurrent-{n}-{i}"));
         let _ = fs::remove_dir_all(&dir);
         dir
     }
@@ -2732,6 +2763,173 @@ mod tests {
         );
         assert_eq!(db.visible_sequence(), db.last_sequence());
         assert_eq!(db.get(b"k").as_deref(), Some(&b"v"[..]));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0047 P1.1 test env: one-shot WAL write / sync failures. The full
+    /// `FailingEnv` lives in pedradb-sim (not a core dependency); this is
+    /// the minimal fault surface the fence path needs.
+    #[derive(Clone)]
+    struct FenceEnv {
+        inner: StdEnv,
+        fail_write: std::rc::Rc<std::cell::Cell<bool>>,
+        fail_sync: std::rc::Rc<std::cell::Cell<bool>>,
+    }
+
+    impl FenceEnv {
+        fn new() -> Self {
+            Self {
+                inner: StdEnv,
+                fail_write: std::rc::Rc::new(std::cell::Cell::new(false)),
+                fail_sync: std::rc::Rc::new(std::cell::Cell::new(false)),
+            }
+        }
+    }
+
+    struct FenceFile {
+        inner: fs::File,
+        env: FenceEnv,
+    }
+
+    impl std::io::Read for FenceFile {
+        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+            self.inner.read(buf)
+        }
+    }
+    impl std::io::Write for FenceFile {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            if self.env.fail_write.replace(false) {
+                return Err(std::io::Error::other("injected wal write failure"));
+            }
+            self.inner.write(buf)
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            self.inner.flush()
+        }
+    }
+    impl std::io::Seek for FenceFile {
+        fn seek(&mut self, pos: std::io::SeekFrom) -> std::io::Result<u64> {
+            self.inner.seek(pos)
+        }
+    }
+    impl crate::env::EnvFile for FenceFile {
+        fn sync_data(&mut self) -> std::io::Result<()> {
+            if self.env.fail_sync.replace(false) {
+                return Err(std::io::Error::other("injected wal sync failure"));
+            }
+            self.inner.sync_data()
+        }
+        fn sync_all(&mut self) -> std::io::Result<()> {
+            if self.env.fail_sync.replace(false) {
+                return Err(std::io::Error::other("injected wal sync failure"));
+            }
+            self.inner.sync_all()
+        }
+        fn set_len(&mut self, len: u64) -> std::io::Result<()> {
+            self.inner.set_len(len)
+        }
+        fn len(&mut self) -> std::io::Result<u64> {
+            Ok(self.inner.metadata()?.len())
+        }
+    }
+
+    impl crate::env::Env for FenceEnv {
+        type File = FenceFile;
+        fn create_dir_all(&self, path: &std::path::Path) -> std::io::Result<()> {
+            self.inner.create_dir_all(path)
+        }
+        fn create(&self, path: &std::path::Path) -> std::io::Result<Self::File> {
+            Ok(FenceFile {
+                inner: self.inner.create(path)?,
+                env: self.clone(),
+            })
+        }
+        fn open_append(&self, path: &std::path::Path) -> std::io::Result<Self::File> {
+            Ok(FenceFile {
+                inner: self.inner.open_append(path)?,
+                env: self.clone(),
+            })
+        }
+        fn open_read(&self, path: &std::path::Path) -> std::io::Result<Self::File> {
+            Ok(FenceFile {
+                inner: self.inner.open_read(path)?,
+                env: self.clone(),
+            })
+        }
+        fn sync_dir(&self, path: &std::path::Path) -> std::io::Result<()> {
+            self.inner.sync_dir(path)
+        }
+        fn read_dir_names(&self, path: &std::path::Path) -> std::io::Result<Vec<String>> {
+            self.inner.read_dir_names(path)
+        }
+        fn remove_file(&self, path: &std::path::Path) -> std::io::Result<()> {
+            self.inner.remove_file(path)
+        }
+        fn rename(&self, from: &std::path::Path, to: &std::path::Path) -> std::io::Result<()> {
+            self.inner.rename(from, to)
+        }
+        fn exists(&self, path: &std::path::Path) -> bool {
+            self.inner.exists(path)
+        }
+        fn metadata_len(&self, path: &std::path::Path) -> std::io::Result<u64> {
+            self.inner.metadata_len(path)
+        }
+    }
+
+    /// RFC-0047 P1.1: a durability fence refuses writes and
+    /// `recover_from_fence()` (close+replay+reopen) reports the uncertain
+    /// in-flight range. Two adjudications: (A) the WAL write itself failed
+    /// → the write is lost; (B) the write landed but the sync failed → the
+    /// uncertain write is actually there (the ack-vs-durability gap the
+    /// report makes visible). Never silent in either direction.
+    #[test]
+    fn resume_after_fence_reports_uncertain_range() {
+        // (A) write fails → fence → resume proves the write lost.
+        let dir = temp_dir();
+        let env = FenceEnv::new();
+        let db = ConcurrentDb::open_with_env(&dir, OpenOptions::default(), env.clone()).unwrap();
+        db.put(b"a", b"1").unwrap();
+        db.put(b"b", b"2").unwrap();
+        assert_eq!(db.visible_sequence(), 2);
+        env.fail_write.set(true);
+        assert!(db.put(b"c", b"3").is_err(), "injected WAL write failure");
+        assert!(
+            matches!(db.put(b"x", b"y"), Err(CoreError::DurabilityFenced)),
+            "post-fence writes must refuse"
+        );
+        let rec = db.recover_from_fence().unwrap().expect("fenced");
+        assert_eq!(rec.fence.uncertain_from, 3);
+        assert_eq!(rec.fence.uncertain_through, 3);
+        assert_eq!(rec.replayed_through, 2, "replay ends at the durable prefix");
+        assert!(rec.lost_writes);
+        assert!(!rec.fence.io_error.is_empty());
+        // Resumed: healthy, the lost write stays lost, new writes land.
+        db.put(b"d", b"4").unwrap();
+        assert_eq!(db.get(b"d").as_deref(), Some(&b"4"[..]));
+        assert_eq!(db.get(b"c"), None);
+        assert_eq!(db.get(b"a").as_deref(), Some(&b"1"[..]));
+        assert_eq!(db.get(b"b").as_deref(), Some(&b"2"[..]));
+        // Not fenced anymore: a second recover is a no-op.
+        assert!(db.recover_from_fence().unwrap().is_none());
+        drop(db);
+        let _ = fs::remove_dir_all(&dir);
+
+        // (B) sync fails after the write landed → the uncertain write IS
+        // there after resume (client saw Err; report explains).
+        let dir = temp_dir();
+        let env = FenceEnv::new();
+        let db = ConcurrentDb::open_with_env(&dir, OpenOptions::default(), env.clone()).unwrap();
+        db.put(b"a", b"1").unwrap();
+        assert_eq!(db.visible_sequence(), 1);
+        env.fail_sync.set(true);
+        assert!(db.put(b"b", b"2").is_err(), "injected WAL sync failure");
+        let rec = db.recover_from_fence().unwrap().expect("fenced");
+        assert_eq!(rec.fence.uncertain_from, 2);
+        assert_eq!(rec.fence.uncertain_through, 2);
+        assert_eq!(rec.replayed_through, 2, "frame reached the file before the sync error");
+        assert!(!rec.lost_writes);
+        assert_eq!(db.get(b"b").as_deref(), Some(&b"2"[..]));
+        drop(db);
         let _ = fs::remove_dir_all(&dir);
     }
 

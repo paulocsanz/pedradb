@@ -380,3 +380,33 @@ fn adversarial_iterator_positioning() {
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
+
+/// RFC-0047 P1.1: `DB::resume()` after a durability fence (WAL write fails
+/// → fence) reopens and reports the typed uncertain range — the lost write
+/// stays lost, the DB is writable again, and nothing is silent.
+#[test]
+fn compat_resume_reports_uncertain_range() {
+    use pedradb_sim::OpClass;
+
+    let dir = tmp("resume", 0x4747);
+    let env = FailingEnv::passing();
+    let db = DB::open_cf_with_env(&Options::new(), &dir, &[], env.clone()).expect("open");
+    db.put(b"a", b"1").expect("put");
+    // One-shot failure on the next file write = the WAL frame write.
+    env.arm_op_class(OpClass::Write, 0, true, FaultKind::IoError);
+    assert!(db.put(b"b", b"2").is_err(), "injected WAL write failure fences");
+    db.resume().expect("resume after fence");
+    let rec = db.last_fence_recovery().expect("typed fence report");
+    assert_eq!(rec.fence.uncertain_from, 2);
+    assert_eq!(rec.fence.uncertain_through, 2);
+    assert_eq!(rec.replayed_through, 1);
+    assert!(rec.lost_writes, "the write never reached the WAL");
+    assert_eq!(db.get(b"a").unwrap().as_deref(), Some(&b"1"[..]));
+    assert_eq!(db.get(b"b").unwrap(), None);
+    // Resumed DB is writable again (fence cleared by the reopen).
+    db.put(b"c", b"3").expect("put after resume");
+    assert_eq!(db.get(b"c").unwrap().as_deref(), Some(&b"3"[..]));
+    // Defensive resume on a healthy DB is a no-op Ok.
+    db.resume().expect("resume on healthy db");
+    let _ = std::fs::remove_dir_all(&dir);
+}
