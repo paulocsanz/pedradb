@@ -123,9 +123,21 @@
 
 ### P1 — tier S3 (história barata e PITR de lá)
 
-- [ ] **P1.1** Destino object storage no seam `Env` (S3-class; content-addressed
-      + CRC; testes com MemEnv/FailingEnv — sem rede em teste de unidade) —
-      status: `todo`
+- [x] **P1.1** Destino object storage no seam `Env` — `history::RemoteTier`
+      (superfície **pública** p/ o host; G6: upload roda no host, o core só
+      dá o seam): objetos imutáveis content-addressed
+      `seg-<len>-<crc32c>.hist` com dedup **verificada por read-back**
+      (colisão de nome = erro tipado `CorruptHistory`, nunca bytes errados
+      silenciosos); segmento é walkado e CRC-verificado por record **antes**
+      de sair da máquina; manifestos como gerações imutáveis
+      `MANIFEST-<n>` + ponteiro `LATEST` reescrito por upload (object
+      store não tem rename; LATEST torcido → walk-back para a geração
+      íntegra mais nova); puts idempotentes (base do retry/resume do
+      P1.2). Testes sem rede (`MapEnv` em memória + `FaultyEnv` de
+      create): endereçamento+idempotência, recusa de segmento local
+      corrupto (nada sobe), colisão fail-closed, gerações+walk-back,
+      falha de I/O sem objeto parcial + retry completa, round-trip de
+      leitura — status: `done` (cc760e5)
 - [ ] **P1.2** Pipeline de upload no host: archive → tier, retry/resume
       de crash, verify de bytes no destino; backpressure se o tier cai
       (pausa o GC, nunca destrói o que não subiu) — status: `todo`
@@ -149,7 +161,7 @@
 | P0.2 | p0 | archive local bounded + GC pin-aware | **done** | b68f9a1 (+docs neste commit) | 2026-08-21 |
 | P0.3 | p0 | testes pin/cap/crash/PITR local | **done** | b68f9a1 (+docs neste commit) | 2026-08-21 |
 | P0.4 | p0 | re-árbitro quieto com novo default | todo | gated: load < 10 | 2026-08-21 |
-| P1.1 | p1 | Env→S3 + testes seam | todo | — | 2026-08-20 |
+| P1.1 | p1 | Env→S3 + testes seam | **done** | cc760e5 | 2026-08-21 |
 | P1.2 | p1 | upload pipeline + backpressure | todo | — | 2026-08-20 |
 | P1.3 | p1 | restore drill do tier | todo | — | 2026-08-20 |
 | P1.4 | p1 | CLI archive/restore | todo | — | 2026-08-20 |
