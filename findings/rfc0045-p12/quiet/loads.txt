@@ -1,0 +1,9 @@
+GATE-PASS load=10,00 19:04:15
+round big-r1 start load=10,00
+round big-r1 end load=10,00
+round big-r2 start load=10,00
+round big-r2 end load=15,00
+round big-r3 start load=15,00
+round big-r3 end load=15,00
+round small-c start load=15,00
+round small-c end load=15,00

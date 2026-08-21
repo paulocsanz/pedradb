@@ -72,9 +72,10 @@
       prepare 0.13; wait médio 175 µs; 1c 1.05 M vs 50c 266 k; spin
       falsificado; **P1.1 falsificado como alavanca** — prepare é 8% do hold)
 - [x] **P0.3** `deps_lock_prewrite` — status: `done`
-      (**isolado 2.28/2.26/2.09 — a shape ganha ≥2×; o 0.94 do árbitro é
-      efeito do contexto da suíte v0** (mesmo processo/db depois das demais
-      shapes). P1.2 vira bissecção de contexto)
+      (**2.28/2.26/2.09 no config small — mas os runs eram suíte completa,
+      não isolados** (JSONs têm as 14 shapes); o 0.94 do árbitro foi
+      big-config com stalls de cauda 20–130 ms — ver P1.2, que refutou
+      contexto/config/commit como causa)
       Finding: `findings/rfc0045-p0/` (dirty box, números de mecanismo)
 
 ### P1 — o que o P0 deixou vivo (P1.1 original falsificado)
@@ -82,9 +83,17 @@
 - [ ] **P1.1** ~~prepare fora do write lock~~ — status: `done (negativo)`
       (P0.2: prepare = 0.13 µs de hold 1.6 µs = 8%; mover não move o qps.
       Registrado como negativo com número; não implementar)
-- [ ] **P1.2** Bissecção do contexto da suíte que flipa `deps_lock_prewrite`
+- [x] **P1.2** Bissecção do contexto da suíte que flipa `deps_lock_prewrite`
       (2.2× isolado → 0.94 in-suite): rodar prefixos crescentes do v0 antes
-      da shape até o sinal virar; profile do caso flipado — status: `todo`
+      da shape até o sinal virar; profile do caso flipado — status: `done`
+      (premissa corrigida: os runs "isolados" eram suíte completa — o
+      contraste era config. Eixos de config bissecionados (nenhum flipa);
+      controle no próprio commit do árbitro 04c7aa2 (1.80–2.38, sem
+      stalls — não é código); perfil do caso flipado: p50 1.6–1.7× melhor
+      sempre, o 0.94 era cauda 20–130 ms de uma janela de 2 min, não
+      reproduz em 9 rounds. Stalls sem causa mecânica fechada — reabrir
+      instrumentando park/fold do worker se `max_ms` voltar a explodir.
+      `findings/rfc0045-p12/`)
 - [ ] **P1.3** Remesura quieto 3× (P2.1 bar): mc50 e lock_prewrite; sem
       regressão em SET/GET/pipeline/E — status: `todo`
 
@@ -107,7 +116,7 @@
 | P0.2 | p0 | microbench N-threads (probe) | done | hold 1.6 µs, wait 175 µs; spin falsificado | 2026-08-20 |
 | P0.3 | p0 | lock_prewrite isolado vs in-suite | done | 2.2× isolado / 0.94 in-suite | 2026-08-20 |
 | P1.1 | p1 | prepare off-lock | done (negativo) | 8% do hold; P0.2 | 2026-08-20 |
-| P1.2 | p1 | bissecção do contexto v0 | todo | — | 2026-08-20 |
+| P1.2 | p1 | bissecção do contexto v0 | done | premissa corrigida: era config+janela de stalls, não contexto; 9 rounds sem flip | 2026-08-21 |
 | P1.3 | p1 | remesura quieto 3× sem regressão | todo | — | 2026-08-20 |
 | P2.1 | p2 | memtable apply fora da seção crítica | todo | alvo medido: hold ≤1.1 µs | 2026-08-20 |
 | P2.2 | p2 | handoff sem park-convoy | todo | wait 175 µs é o 2.4× do gap | 2026-08-20 |

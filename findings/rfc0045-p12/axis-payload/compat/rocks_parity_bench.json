@@ -1,0 +1,141 @@
+{
+  "bench": "rocks-parity-v1",
+  "engine": "compat",
+  "sync": false,
+  "peer_policy": "rocks-default",
+  "durability": "async-wal (PEDRA_PARITY_ASYNC=1; WAL write, no fdatasync — NOT G1, not official)",
+  "changelog_interval": 0,
+  "status": "ok",
+  "notes": ["ycsb records=1024 ops=200 payload=1000 dist=uniform", "engine=compat durability=async-wal (PEDRA_PARITY_ASYNC=1; WAL write, no fdatasync — NOT G1, not official)", "suites: ycsb,deps", "seed: one put per record (not timed)", "cfs: default + write, lock, raftlog (TiKV store shape; raftlog = raftdb)", "deps apply batch txns/commit: 32", "changelog_interval=0", "peer_policy=rocks-default", "host-default write sync: kvrocks=false myrocks=true surreal=true"],
+  "benches": [
+{
+    "name": "ycsb_a",
+    "n": 200,
+    "qps": 690746.075,
+    "p50_ms": 0.0008,
+    "p95_ms": 0.0015,
+    "p99_ms": 0.0244,
+    "max_ms": 0.0358,
+    "wall_s": 0.0003
+  },
+{
+    "name": "ycsb_b",
+    "n": 200,
+    "qps": 3490888.780,
+    "p50_ms": 0.0001,
+    "p95_ms": 0.0008,
+    "p99_ms": 0.0014,
+    "max_ms": 0.0149,
+    "wall_s": 0.0001
+  },
+{
+    "name": "ycsb_c",
+    "n": 200,
+    "qps": 7619047.619,
+    "p50_ms": 0.0001,
+    "p95_ms": 0.0003,
+    "p99_ms": 0.0004,
+    "max_ms": 0.0005,
+    "wall_s": 0.0000
+  },
+{
+    "name": "ycsb_d",
+    "n": 200,
+    "qps": 5100999.796,
+    "p50_ms": 0.0000,
+    "p95_ms": 0.0008,
+    "p99_ms": 0.0010,
+    "max_ms": 0.0025,
+    "wall_s": 0.0000
+  },
+{
+    "name": "ycsb_e",
+    "n": 200,
+    "qps": 709428.662,
+    "p50_ms": 0.0012,
+    "p95_ms": 0.0019,
+    "p99_ms": 0.0027,
+    "max_ms": 0.0466,
+    "wall_s": 0.0003
+  },
+{
+    "name": "ycsb_f",
+    "n": 200,
+    "qps": 758653.390,
+    "p50_ms": 0.0013,
+    "p95_ms": 0.0021,
+    "p99_ms": 0.0043,
+    "max_ms": 0.0155,
+    "wall_s": 0.0003
+  },
+{
+    "name": "deps_apply_batch",
+    "n": 200,
+    "qps": 18711.847,
+    "p50_ms": 0.0485,
+    "p95_ms": 0.0915,
+    "p99_ms": 0.1471,
+    "max_ms": 0.4933,
+    "wall_s": 0.0107
+  },
+{
+    "name": "deps_mvcc_latest",
+    "n": 200,
+    "qps": 664544.554,
+    "p50_ms": 0.0015,
+    "p95_ms": 0.0021,
+    "p99_ms": 0.0032,
+    "max_ms": 0.0057,
+    "wall_s": 0.0003
+  },
+{
+    "name": "deps_mvcc_latest_split",
+    "combined": true,
+    "probe": {"latest_ops":200,"latest_mem_hit":180,"latest_sst_fallback":0,"latest_sst_probed":0,"scan_ops":0,"scan_sst_probed":0,"sst_count":0,"l0_files":0,"level1_files":0,"mem_entries":35045,"block_cache_hits":0,"block_cache_misses":0,"blocks_decoded":0,"get_mem_hit":180,"get_sst_fallback":0,"get_inline":180,"get_vlog":0,"mvcc_split_ops":200,"mvcc_ns_encode":8587,"mvcc_ns_last":141373,"mvcc_ns_get":69130,"mvcc_ns_copy":23538}
+  },
+{
+    "name": "deps_scan",
+    "n": 200,
+    "qps": 476994.553,
+    "p50_ms": 0.0022,
+    "p95_ms": 0.0030,
+    "p99_ms": 0.0036,
+    "max_ms": 0.0088,
+    "wall_s": 0.0004
+  },
+{
+    "name": "deps_scan_probe",
+    "probe": {"latest_ops":0,"latest_mem_hit":0,"latest_sst_fallback":0,"latest_sst_probed":0,"scan_ops":177,"scan_sst_probed":0,"sst_count":0,"l0_files":0,"level1_files":0,"mem_entries":35045,"block_cache_hits":0,"block_cache_misses":0,"blocks_decoded":0,"get_mem_hit":0,"get_sst_fallback":0,"get_inline":0,"get_vlog":0,"mvcc_split_ops":0,"mvcc_ns_encode":0,"mvcc_ns_last":0,"mvcc_ns_get":0,"mvcc_ns_copy":0}
+  },
+{
+    "name": "deps_raftlog",
+    "n": 200,
+    "qps": 75279.947,
+    "p50_ms": 0.0092,
+    "p95_ms": 0.0218,
+    "p99_ms": 0.0615,
+    "max_ms": 0.0764,
+    "wall_s": 0.0027
+  },
+{
+    "name": "deps_cache_overwrite",
+    "n": 200,
+    "qps": 1157742.402,
+    "p50_ms": 0.0006,
+    "p95_ms": 0.0009,
+    "p99_ms": 0.0104,
+    "max_ms": 0.0147,
+    "wall_s": 0.0002
+  },
+{
+    "name": "deps_lock_prewrite",
+    "n": 200,
+    "qps": 29204.362,
+    "p50_ms": 0.0325,
+    "p95_ms": 0.0439,
+    "p99_ms": 0.0771,
+    "max_ms": 0.4546,
+    "wall_s": 0.0068
+  }
+  ]
+}
