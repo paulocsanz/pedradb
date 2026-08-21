@@ -1,6 +1,7 @@
 # RFC-0046: história MVCC fora do SSD — retention default + tier em object storage (S3)
 
-**Status:** in-progress (P0.1–P0.3 done; P0.4 gated em caixa quieta)
+**Status:** in-progress (P0.1–P0.3 + P1.1–P1.4 done; P0.4 gated em caixa
+quieta; P2 aberto)
 **Updated:** 2026-08-21
 **Parents:** [0009](0009-rocksdb-class-engine.md) (F20 retention),
 [0044](0044-async-class-5x-rocks.md) (E/cliff de retenção),
@@ -164,7 +165,12 @@
       local, restaura full (estado no cutoff do archive + MVCC em seq
       arbitrária), restaura em seq 20 exato, e bytes remotos corrompidos
       → erro tipado, nunca restore silencioso errado — status: `done`
-- [ ] **P1.4** `pedra` CLI: `archive status` / `restore --seq` — status: `todo`
+- [x] **P1.4** `pedra` CLI: `pedra archive status <remote_root>` (roll-up
+      do manifesto íntegro mais novo: segmentos, bytes, range de seq,
+      archive floor, próxima geração; vazio/lixo → mensagem graciosa,
+      walk-back do LATEST se aplica) e `pedra archive restore
+      <remote_root> <dest> [target_seq]` (drill P1.3 do shell; sem seq =
+      prefixo arquivado completo) — status: `done`
 
 ### P2 — polish
 
@@ -184,7 +190,7 @@
 | P1.1 | p1 | Env→S3 + testes seam | **done** | cc760e5 | 2026-08-21 |
 | P1.2 | p1 | upload pipeline + backpressure | **done** | b548a5e | 2026-08-21 |
 | P1.3 | p1 | restore drill do tier | **done** | c429acb | 2026-08-21 |
-| P1.4 | p1 | CLI archive/restore | todo | — | 2026-08-20 |
+| P1.4 | p1 | CLI archive/restore | **done** | 751e9d4 | 2026-08-21 |
 | P2.1 | p2 | leitura lazy do tier | todo | — | 2026-08-20 |
 | P2.2 | p2 | métricas + banda | todo | — | 2026-08-20 |
 
