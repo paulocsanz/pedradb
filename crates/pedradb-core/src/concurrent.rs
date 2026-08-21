@@ -104,6 +104,13 @@ struct WriteGroup {
     /// RFC-0045 P0.2: bounded spin before parking on the bypass write lock
     /// (`PEDRA_WRITE_SPIN`, default 0 = park immediately).
     write_spin: AtomicUsize,
+    /// RFC-0045 P2.2: fair handoff on the bypass write lock
+    /// (`PEDRA_WRITE_FAIR=1`, default off). Unfair release wakes every
+    /// waiter per commit (measured herd at 50 writers: avg lock wait
+    /// 175 µs vs 1.6 µs hold); fair acquire + `unlock_fair` hands the
+    /// lock directly to the next waiter — one wake per handoff, no
+    /// convoy. Prototype lever; the quiet arbiter decides.
+    write_fair: bool,
     /// RFC-0045 P0.1: lock-wait accumulation for the async bypass
     /// (`PEDRA_WRITE_PHASE_STATS=1`); `None` when the env is unset.
     phase_stats: Option<Arc<crate::db::WritePhaseStats>>,
@@ -223,6 +230,14 @@ impl WriteGroup {
                     .and_then(|v| v.parse().ok())
                     .unwrap_or(0),
             ),
+            write_fair: std::env::var("PEDRA_WRITE_FAIR")
+                .ok()
+                .and_then(|v| match v.as_str() {
+                    "1" | "true" => Some(true),
+                    "0" | "false" => Some(false),
+                    _ => None,
+                })
+                .unwrap_or(false),
             phase_stats: None,
         }
     }
@@ -341,8 +356,16 @@ impl WriteGroup {
             // bypass spending ~99% of writer time blocked on this lock (avg
             // wait ~344 µs vs ~2 µs hold) — if spinning moves qps, the gap is
             // the park/unpark convoy, not CPU.
+            // RFC-0045 P2.2: `PEDRA_WRITE_FAIR=1` releases the bypass lock
+            // with a direct handoff to the next waiter (`unlock_fair` —
+            // lock_api 0.4 has no fair acquire; the fair release is the
+            // herd killer: the handed-off token blocks barging, so one
+            // directed wake per commit instead of wake-all + 49 re-parks).
+            let fair = self.write_fair;
             let spins = self.write_spin.load(Ordering::Relaxed);
-            let mut guard = if spins > 0 {
+            let mut guard = if fair {
+                db.write()
+            } else if spins > 0 {
                 let mut g = None;
                 for _ in 0..spins {
                     if let Some(acquired) = db.try_write() {
@@ -360,6 +383,11 @@ impl WriteGroup {
                     .fetch_add(t0.elapsed().as_nanos() as u64, Ordering::Relaxed);
             }
             let result = guard.commit_async_ops(ops);
+            if fair {
+                parking_lot::RwLockWriteGuard::unlock_fair(guard);
+            } else {
+                drop(guard);
+            }
             self.batches.fetch_add(1, Ordering::Relaxed);
             self.batch_ops.fetch_add(1, Ordering::Relaxed);
             self.active.fetch_sub(1, Ordering::Relaxed);
