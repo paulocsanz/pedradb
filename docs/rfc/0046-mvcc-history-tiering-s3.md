@@ -138,9 +138,19 @@
       corrupto (nada sobe), colisão fail-closed, gerações+walk-back,
       falha de I/O sem objeto parcial + retry completa, round-trip de
       leitura — status: `done` (cc760e5)
-- [ ] **P1.2** Pipeline de upload no host: archive → tier, retry/resume
-      de crash, verify de bytes no destino; backpressure se o tier cai
-      (pausa o GC, nunca destrói o que não subiu) — status: `todo`
+- [x] **P1.2** Pipeline de upload: `Db::set_remote_history(env, root)`
+      (opt-in do host; uploads rodam inline no caminho do auto-compact —
+      sem thread nova no core, G6) — a cada rodada de archive:
+      segmentos selados → `put_segment` idempotente (retry/resume grátis
+      por content-addressing), depois a geração de manifesto;
+      **backpressure**: tier caído → a rodada de GC inteira pausa
+      (merge history-preserving) e o cap local **segura** segmentos não
+      subidos (disco local cresce — tradeoff documentado; nunca destrói o
+      que não subiu); verify de bytes no destino = read-back CRC do P1.1;
+      `upload_history_now()` expõe o passo p/ o host/CLI. Testes:
+      outage pausa GC (earliest parado) e recupera; cap segura não-subidos
+      durante outage e libera após upload; resume cross-reopen é
+      idempotente (AlreadyPresent, nada re-escrito) — status: `done`
 - [ ] **P1.3** Restore drill do tier: destrói local, restaura em seq
       arbitrária dentro do horizonte, verify (teste e2e nomeado
       `pitr_restore_from_object_storage`) — status: `todo`
@@ -162,7 +172,7 @@
 | P0.3 | p0 | testes pin/cap/crash/PITR local | **done** | b68f9a1 (+docs neste commit) | 2026-08-21 |
 | P0.4 | p0 | re-árbitro quieto com novo default | todo | gated: load < 10 | 2026-08-21 |
 | P1.1 | p1 | Env→S3 + testes seam | **done** | cc760e5 | 2026-08-21 |
-| P1.2 | p1 | upload pipeline + backpressure | todo | — | 2026-08-20 |
+| P1.2 | p1 | upload pipeline + backpressure | **done** | b548a5e | 2026-08-21 |
 | P1.3 | p1 | restore drill do tier | todo | — | 2026-08-20 |
 | P1.4 | p1 | CLI archive/restore | todo | — | 2026-08-20 |
 | P2.1 | p2 | leitura lazy do tier | todo | — | 2026-08-20 |

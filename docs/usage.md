@@ -178,6 +178,7 @@ Full contract: rustdoc on `db` module. Audit fix backlog: [RFC-0015](rfc/0015-au
 | Archive I/O error | **Fail-closed**: that GC round is skipped (history-preserving merge); nothing is dropped unarchived |
 | F20 — keep every version, forever | Explicit opt-in: `HistoryHorizon::All` (what the kernel did before 2026-08-21) |
 | `set_auto_reclaim(true)` | Different profile: latest-only, **no archive** (Rocks storage profile — disk ≈ live set + pins) |
+| `set_remote_history(env, root)` | Opt-in (RFC-0046 P1.2): mirror the archive to an object-storage-shaped destination through any `Env`. Uploads run inline on the auto-compact path; **while the destination is down, GC pauses and the local cap holds un-uploaded segments** — backpressure grows local disk rather than destroy history that never shipped. Puts are idempotent (content-addressed), so retry/resume across crashes is free. |
 
 Short-lived processes never trip the horizon: the cutoff is wall-clock
 (`Env::unix_millis`, sampled), so a fresh DB GCs nothing until writes actually
