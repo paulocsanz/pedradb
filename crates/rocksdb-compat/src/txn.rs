@@ -316,9 +316,10 @@ impl<'a, E: Env> Transaction<'a, E> {
     pub fn commit(self) -> Result<()> {
         let occ = self.occ.into_inner();
         occ.commit().map_err(|e| match e {
-            CoreError::TransactionConflict => {
-                Error("Busy: transaction conflict: key changed since snapshot".into())
-            }
+            CoreError::TransactionConflict => Error {
+                msg: "Busy: transaction conflict: key changed since snapshot".into(),
+                kind: crate::ErrorKind::TransactionConflict,
+            },
             other => Error::from(other),
         })
     }

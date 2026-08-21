@@ -52,13 +52,56 @@ enum CompactCmd {
     Shutdown,
 }
 
+/// Machine-readable class of a compat [`Error`] (RFC-0047 P0.1).
+///
+/// rust-rocksdb exposes one opaque `Error`; a drop-in host still needs to
+/// program availability policy, so the kind survives the string.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ErrorKind {
+    /// Write refused after a failed required WAL sync (`CoreError::DurabilityFenced`).
+    /// Outcome of the failed write is uncertain; `resume()`/reopen recovers.
+    Fenced,
+    /// WAL/SST integrity failure (CRC and friends).
+    Corruption,
+    /// Repeated corruption tripped the CORRUPTLOG escalation limit — open is
+    /// refused in every recovery mode (RFC-0038).
+    CorruptionEscalated,
+    /// Filesystem I/O failure.
+    Io,
+    /// OCC conflict (`TransactionConflict`).
+    TransactionConflict,
+    /// CAS precondition failed.
+    CasMismatch,
+    /// Snapshot older than the version-GC watermark.
+    SnapshotTooOld,
+    /// L0/memtable write stall.
+    WriteStall,
+    /// The directory is already open elsewhere.
+    AlreadyOpen,
+    /// Caller-side misuse (unknown column family, bad path, …).
+    InvalidArgument,
+    /// Anything else.
+    Other,
+}
+
 /// Compatibility error surface (rust-rocksdb exposes one opaque `Error`).
 #[derive(Debug, Clone)]
-pub struct Error(String);
+pub struct Error {
+    msg: String,
+    kind: ErrorKind,
+}
+
+impl Error {
+    /// Stable class of this error for host-side policy (RFC-0047 P0.1).
+    #[must_use]
+    pub fn kind(&self) -> ErrorKind {
+        self.kind
+    }
+}
 
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.0)
+        f.write_str(&self.msg)
     }
 }
 
@@ -66,7 +109,26 @@ impl std::error::Error for Error {}
 
 impl From<CoreError> for Error {
     fn from(e: CoreError) -> Self {
-        Self(e.to_string())
+        let kind = match &e {
+            CoreError::DurabilityFenced => ErrorKind::Fenced,
+            CoreError::Crc { .. }
+            | CoreError::Truncated(_)
+            | CoreError::CorruptManifest(_) => ErrorKind::Corruption,
+            CoreError::CorruptionEscalated { .. } => ErrorKind::CorruptionEscalated,
+            CoreError::Io(_) => ErrorKind::Io,
+            CoreError::TransactionConflict => ErrorKind::TransactionConflict,
+            CoreError::CasMismatch => ErrorKind::CasMismatch,
+            CoreError::SnapshotTooOld { .. } => ErrorKind::SnapshotTooOld,
+            CoreError::WriteStall { .. } | CoreError::WriteStallMem { .. } => ErrorKind::WriteStall,
+            CoreError::AlreadyOpen { .. } => ErrorKind::AlreadyOpen,
+            CoreError::Internal(_) | CoreError::TransactionFinished | CoreError::Transaction(_) => {
+                ErrorKind::Other
+            }
+        };
+        Self {
+            msg: e.to_string(),
+            kind,
+        }
     }
 }
 
@@ -995,7 +1057,10 @@ pub(crate) fn scan_cf_at<E: Env>(
     known: &[String],
 ) -> Result<DBIterator<E>> {
     if cf != DEFAULT_CF && !known.iter().any(|c| c == cf) {
-        return Err(Error(format!("column family not found: {cf}")));
+        return Err(Error {
+            msg: format!("column family not found: {cf}"),
+            kind: ErrorKind::InvalidArgument,
+        });
     }
     let (cf_start, cf_end) = cf_bounds(codec, cf);
     let (items, idx, reverse) = match mode {
@@ -1157,10 +1222,16 @@ impl<E: Env> DB<E> {
         let dir = path.as_ref();
         if !dir.exists() {
             if !opts.create_if_missing {
-                return Err(Error(format!("db path missing: {}", dir.display())));
+                return Err(Error {
+                    msg: format!("db path missing: {}", dir.display()),
+                    kind: ErrorKind::InvalidArgument,
+                });
             }
             std::fs::create_dir_all(dir)
-                .map_err(|e| Error(format!("mkdir {}: {e}", dir.display())))?;
+                .map_err(|e| Error {
+                    msg: format!("mkdir {}: {e}", dir.display()),
+                    kind: ErrorKind::Io,
+                })?;
         }
         let mut names = vec![DEFAULT_CF.to_string()];
         for c in cfs {
@@ -1168,7 +1239,10 @@ impl<E: Env> DB<E> {
                 continue;
             }
             if names.iter().any(|n| n == c) {
-                return Err(Error(format!("duplicate column family: {c}")));
+                return Err(Error {
+                    msg: format!("duplicate column family: {c}"),
+                    kind: ErrorKind::InvalidArgument,
+                });
             }
             names.push((*c).to_string());
         }
@@ -1213,7 +1287,10 @@ impl<E: Env> DB<E> {
         if cf == DEFAULT_CF || self.cfs.iter().any(|c| c == cf) {
             Ok(())
         } else {
-            Err(Error(format!("column family not found: {cf}")))
+            Err(Error {
+                msg: format!("column family not found: {cf}"),
+                kind: ErrorKind::InvalidArgument,
+            })
         }
     }
 
@@ -1964,6 +2041,38 @@ mod tests {
     #[test]
     fn default_write_buffer_is_4_mib() {
         assert_eq!(Options::new().write_buffer_size, 4 * 1024 * 1024);
+    }
+
+    #[test]
+    fn compat_error_kinds_map_core() {
+        // RFC-0047 P0.1: a drop-in host programs policy on the kind, not
+        // on parsing Display strings.
+        use super::{Error, ErrorKind};
+        let fenced: Error = CoreError::DurabilityFenced.into();
+        assert_eq!(fenced.kind(), ErrorKind::Fenced);
+        let crc: Error = CoreError::Crc {
+            offset: 42,
+            expected: 1,
+            found: 2,
+        }
+        .into();
+        assert_eq!(crc.kind(), ErrorKind::Corruption);
+        let escalated: Error = CoreError::CorruptionEscalated {
+            events: 3,
+            limit: 3,
+        }
+        .into();
+        assert_eq!(escalated.kind(), ErrorKind::CorruptionEscalated);
+        let conflict: Error = CoreError::TransactionConflict.into();
+        assert_eq!(conflict.kind(), ErrorKind::TransactionConflict);
+        let stall: Error = CoreError::WriteStall {
+            l0_files: 99,
+            limit: 4,
+        }
+        .into();
+        assert_eq!(stall.kind(), ErrorKind::WriteStall);
+        // The message survives for logs (rust-rocksdb-shaped opaque Error).
+        assert!(fenced.to_string().contains("fenced"));
     }
 
     #[test]
