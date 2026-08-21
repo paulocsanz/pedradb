@@ -137,7 +137,6 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 /// Open options (builder subset). `create_if_missing` mirrors rust-rocksdb;
 /// Pedra always requires the directory to be creatable.
-#[derive(Debug, Clone)]
 pub struct Options {
     /// Whether to create the database directory when absent.
     pub create_if_missing: bool,
@@ -166,6 +165,11 @@ pub struct Options {
     /// [`DB::last_fence_recovery`]. Default `true` (Rocks-shaped
     /// background-error profile).
     pub auto_resume_transient: bool,
+    /// RFC-0047 P2.1: `on_background_error` listener — fired when the
+    /// engine durability-fences (the Pedra background-error class), by the
+    /// host compact worker within one poll tick. `None` (default) = no
+    /// listener.
+    pub background_error_listener: Option<BackgroundErrorListener>,
     /// WAL recovery at open (RFC-0047 P0.2). Rust-rocksdb
     /// `WalRecoveryMode`-shaped; drop-in default is
     /// [`WalRecoveryMode::PointInTime`] (serve the prefix, report the
@@ -186,6 +190,23 @@ pub enum WalRecoveryMode {
     FailClosed,
 }
 
+impl fmt::Debug for Options {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Options")
+            .field("create_if_missing", &self.create_if_missing)
+            .field("write_buffer_size", &self.write_buffer_size)
+            .field("sync", &self.sync)
+            .field("auto_reclaim", &self.auto_reclaim)
+            .field("auto_resume_transient", &self.auto_resume_transient)
+            .field("wal_recovery", &self.wal_recovery)
+            .field(
+                "background_error_listener",
+                &self.background_error_listener.is_some(),
+            )
+            .finish()
+    }
+}
+
 impl Default for Options {
     fn default() -> Self {
         Self {
@@ -194,10 +215,47 @@ impl Default for Options {
             sync: true,
             auto_reclaim: true,
             auto_resume_transient: true,
+            background_error_listener: None,
             wal_recovery: WalRecoveryMode::PointInTime,
         }
     }
 }
+
+/// Retryability class of a durability fence mirrored from the kernel
+/// (RFC-0047 P1.2): hosts program auto-resume on the class, never on
+/// parsing strings. Maps to the RocksDB background-error severity split:
+/// `Transient` ≈ retryable/soft (ENOSPC-like), the rest ≈ hard.
+pub type FenceClass = pedradb_core::FenceClass;
+
+/// RFC-0047 P2.1: RocksDB `EventListener::on_background_error`-shaped
+/// payload. Pedra has one background-failure class — the durability fence
+/// (WAL write/sync failure, vlog promote failure) — reported here with
+/// its typed severity.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BackgroundError {
+    /// The engine is fenced (every other field describes why).
+    pub kind: ErrorKind,
+    /// Retryability severity ([`FenceClass`]).
+    pub class: FenceClass,
+    /// The I/O error that tripped the fence (for logs).
+    pub message: String,
+}
+
+impl BackgroundError {
+    pub(crate) fn from_fence(report: &pedradb_core::FenceReport) -> Self {
+        Self {
+            kind: ErrorKind::Fenced,
+            class: report.class,
+            message: report.io_error.clone(),
+        }
+    }
+}
+
+/// RFC-0047 P2.1: `on_background_error` listener. Fired by the host
+/// compact worker within one poll tick (~5 ms) of a fence — never on the
+/// calling thread of the failed write (that caller already got the typed
+/// error). See [`Options::background_error_listener`].
+pub type BackgroundErrorListener = Arc<dyn Fn(BackgroundError) + Send + Sync>;
 
 impl Options {
     /// New default options (4 MiB write buffer — Pedra core default).
@@ -209,6 +267,16 @@ impl Options {
     /// Builder: create the DB directory when missing.
     pub fn create_if_missing(&mut self, v: bool) -> &mut Self {
         self.create_if_missing = v;
+        self
+    }
+
+    /// Builder: RFC-0047 P2.1 `on_background_error` listener (fired by the
+    /// host compact worker on a durability fence).
+    pub fn set_background_error_listener(
+        &mut self,
+        listener: BackgroundErrorListener,
+    ) -> &mut Self {
+        self.background_error_listener = Some(listener);
         self
     }
 
@@ -1212,6 +1280,7 @@ impl DB<StdEnv> {
             Arc::clone(&db.compact_gate),
             db.auto_resume_transient,
             Arc::clone(&db.fence_recovery),
+            opts.background_error_listener.clone(),
         );
         if th.is_some() {
             db.inner.set_defer_auto_compact(true);
@@ -2050,6 +2119,7 @@ fn spawn_compact_worker(
     gate: Arc<Mutex<()>>,
     auto_resume_transient: bool,
     fence_sink: Arc<Mutex<Option<pedradb_core::FenceRecovery>>>,
+    background_error_listener: Option<BackgroundErrorListener>,
 ) -> (Option<SyncSender<CompactCmd>>, Option<JoinHandle<()>>) {
     let (tx, rx) = mpsc::sync_channel(1);
     let handle = thread::Builder::new()
@@ -2066,6 +2136,8 @@ fn spawn_compact_worker(
             let persist_idle = Duration::from_millis(200);
             let fold_multi_hold = Duration::from_millis(2);
             let mut wait = poll;
+            // RFC-0047 P2.1: fire on_background_error once per fence.
+            let mut fence_notified = false;
             loop {
                 match rx.recv_timeout(wait) {
                     Ok(CompactCmd::Shutdown) | Err(RecvTimeoutError::Disconnected) => {
@@ -2076,9 +2148,20 @@ fn spawn_compact_worker(
                         break;
                     }
                     Ok(CompactCmd::Run) | Err(RecvTimeoutError::Timeout) => {
+                        let fenced = inner.is_durability_fenced();
+                        if fenced && !fence_notified {
+                            if let (Some(listener), Some(report)) =
+                                (background_error_listener.as_ref(), inner.fence_report())
+                            {
+                                listener(BackgroundError::from_fence(&report));
+                            }
+                            fence_notified = true;
+                        } else if !fenced {
+                            fence_notified = false;
+                        }
                         // RFC-0047 P1.2: auto-resume a Transient-class fence
                         // (ENOSPC-like); other classes stay manual.
-                        if auto_resume_transient && inner.is_durability_fenced() {
+                        if auto_resume_transient && fenced {
                             let transient = inner
                                 .fence_report()
                                 .is_some_and(|r| r.class == pedradb_core::FenceClass::Transient);
@@ -2309,6 +2392,31 @@ mod tests {
             default_size < written_bytes / 2,
             "default retention must bound disk near the live set ({default_size}B for {live_set_bytes}B live)"
         );
+    }
+
+    #[test]
+    fn background_error_listener_maps_fence_report() {
+        // RFC-0047 P2.1: the on_background_error payload is typed (kind +
+        // severity class), default off, builder-installed.
+        let report = pedradb_core::FenceReport {
+            io_error: "injected ENOSPC".into(),
+            class: pedradb_core::FenceClass::Transient,
+            uncertain_from: 7,
+            uncertain_through: 9,
+        };
+        let bg = BackgroundError::from_fence(&report);
+        assert_eq!(bg.kind, ErrorKind::Fenced);
+        assert_eq!(bg.class, FenceClass::Transient);
+        assert_eq!(bg.message, "injected ENOSPC");
+        assert!(Options::default().background_error_listener.is_none());
+        let fired = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let sink = Arc::clone(&fired);
+        let mut opts = Options::new();
+        opts.set_background_error_listener(Arc::new(move |_| {
+            sink.store(true, std::sync::atomic::Ordering::Release);
+        }));
+        (opts.background_error_listener.as_ref().unwrap())(bg);
+        assert!(fired.load(std::sync::atomic::Ordering::Acquire));
     }
 
     #[test]

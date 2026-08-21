@@ -102,6 +102,28 @@ API surface). What this ships: the API-shaped substrate, the alias-swap
 mechanism, and the adversarial gates that any future swap work can run
 unchanged. **Do not** claim "TiKV on Pedra" from this.
 
+## Knob map: RocksDB → compat behavior (RFC-0047 P2.1)
+
+The drop-in contract is not just the API table above — the *operational*
+knobs need a stated counterpart. Kernel stays fail-closed; these knobs are
+the compat face. Divergences are deliberate and listed, not accidental.
+
+| RocksDB | Compat | Behavior / divergence |
+|---|---|---|
+| `WriteOptions::sync` (default `false`) | `Options::sync` (default **`true`**) | **Divergence (the product):** the drop-in `fdatasync`s before Ok — more durable *and* faster than the Rocks default people run. `set_sync(false)` gives the exact async-WAL shape. |
+| Compaction GCs unpinned obsolete versions | `Options::auto_reclaim` (default **`true`**, RFC-0047 P0.3) | Same storage profile: disk ≈ live set + pins. `false` opts into Pedra F20 full history (PITR) — an option Rocks does not have. |
+| `WalRecoveryMode::PointInTimeRecovery` (default) | `Options::wal_recovery = PointInTime` (default) | Serves the clean prefix; the discarded suffix is **reported** (`DB::last_recovery_report`), never guessed. Kernel default stays `FailClosed`. |
+| `kAbsoluteConsistency` / `kSkipAnyCorruptedRecords` | `FailClosed` / — | `FailClosed` refuses the open on mid-WAL damage. Skip-any is **absent on purpose**: silent-wrong is banned (G2). |
+| `DB::Resume()` after a background error | `DB::resume()` (RFC-0047 P1.1) | Close+replay+reopen, typed outcome on `DB::last_fence_recovery` (`uncertain_from..=uncertain_through`, `lost_writes`). `Ok(())` when nothing was fenced (defensive resume). |
+| Rocks auto-retries soft/retryable bg errors | `Options::auto_resume_transient` (default **`true`**, P1.2) | Auto-resume **only** for `FenceClass::Transient` (ENOSPC-like); `Persistent`/`Unknown` stay manual — never an untyped retry flag. |
+| `EventListener::on_background_error(reason)` | `Options::set_background_error_listener` (P2.1) | Fired once per fence within one worker poll tick, before auto-resume. Payload `BackgroundError { kind: Fenced, class, message }`; `reason` severity maps to `class` (Transient ≈ retryable/soft, rest ≈ hard). Default off. |
+| `flush_wal(true)` | no-op `Ok(())` | Pedra already `fdatasync`s before Ok (G1) — there is nothing extra to flush. |
+
+Every other `set_*` builder (`set_use_fsync`, `increase_parallelism`,
+`set_max_background_jobs`, level-tuning, compression, bloom, …) is accepted
+and **inert**: single-node engine, no level structure to tune — a Rocks
+program compiles unchanged, it just does not buy anything there.
+
 ## Bench parity vs real RocksDB (YCSB A–F + dependent shapes)
 
 `crates/rocksdb-parity-bench` runs the same six YCSB shapes as the Montanha
