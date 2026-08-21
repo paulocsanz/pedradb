@@ -175,11 +175,14 @@ Full contract: rustdoc on `db` module. Audit fix backlog: [RFC-0015](rfc/0015-au
 | MVCC / `get_at` / change feed | Full fidelity **inside the window** (pins always win, even past it) |
 | Older than the window | Auto-compact **archives first** (CRC'd segments under `history/`), then drops — disk ≈ live set + window + archive cap |
 | Cap overflow | Oldest archive segments dropped, readable watermark advances — old snaps fail with typed `SnapshotTooOld`, **never a silent destroy** |
+| Below the watermark (`get_at`) | **Lazy tier read** (RFC-0046 P2.1): point reads older than the window fall back to the archive — local segments first, remote mirror second. A decisive record (newest put/delete/range-delete ≤ snap) answers; a no-match answers `None` only when retained coverage provably spans the request, else `SnapshotTooOld` (never-written and dropped are indistinguishable). v0 cost: every retained segment is CRC-walked per read (no key index yet); scans stay fail-closed. |
 | Archive I/O error | **Fail-closed**: that GC round is skipped (history-preserving merge); nothing is dropped unarchived |
 | F20 — keep every version, forever | Explicit opt-in: `HistoryHorizon::All` (what the kernel did before 2026-08-21) |
 | `set_auto_reclaim(true)` | Different profile: latest-only, **no archive** (Rocks storage profile — disk ≈ live set + pins) |
 | `set_remote_history(env, root)` | Opt-in (RFC-0046 P1.2): mirror the archive to an object-storage-shaped destination through any `Env`. Uploads run inline on the auto-compact path; **while the destination is down, GC pauses and the local cap holds un-uploaded segments** — backpressure grows local disk rather than destroy history that never shipped. Puts are idempotent (content-addressed), so retry/resume across crashes is free. |
 | `pedradb_ops::restore_history_from_remote` | Restore (RFC-0046 P1.3) from the remote tier alone after losing the machine: replays the **archived prefix** (versions aged past the horizon) into a fresh database at an arbitrary seq, per-record CRC verified, corrupt bytes fail closed. The newest in-window tail is the WAL-ship path (`restore_with_increments`) — same split as Postgres base+WAL PITR. |
+| `set_upload_bandwidth(bytes_per_round)` | Opt-in (RFC-0046 P2.2): cap how many segment bytes one upload step ships (`None` = unlimited). Un-shipped segments stay pending and the cap holds them — bounded upload bandwidth is paid for with local disk while the backlog drains. No manifest ships while segments are missing at the destination. |
+| `history_stats()` | Metrics roll-up (RFC-0046 P2.2): local segments/bytes, archive floor, GC watermark, pending uploads, remote mirror summary (segments/bytes/seq range/next generation) and age of the last archive pass. Remote reads propagate errors (fail-closed). |
 
 Short-lived processes never trip the horizon: the cutoff is wall-clock
 (`Env::unix_millis`, sampled), so a fresh DB GCs nothing until writes actually

@@ -1,7 +1,7 @@
 # RFC-0046: história MVCC fora do SSD — retention default + tier em object storage (S3)
 
-**Status:** in-progress (P0.1–P0.3 + P1.1–P1.4 done; P0.4 gated em caixa
-quieta; P2 aberto)
+**Status:** in-progress (P0.1–P0.3 + P1 + P2.1–P2.2 done; só falta P0.4,
+gated em caixa quieta)
 **Updated:** 2026-08-21
 **Parents:** [0009](0009-rocksdb-class-engine.md) (F20 retention),
 [0044](0044-async-class-5x-rocks.md) (E/cliff de retenção),
@@ -174,10 +174,27 @@ quieta; P2 aberto)
 
 ### P2 — polish
 
-- [ ] **P2.1** Leitura lazy do tier (snapshot mais velho que a janela
-      local servido do tier, não só restore) — status: `todo`
-- [ ] **P2.2** Métricas (bytes locais vs tier, idade do archive, uploads
-      pendentes) + limiter de banda — status: `todo`
+- [x] **P2.1** Leitura lazy do tier (snapshot mais velho que a janela
+      local servido do tier, não só restore) — `get_at` abaixo do
+      watermark cai para o tier: segmentos locais primeiro, espelho
+      remoto segundo (o remoto retém o que o cap local já derrubou).
+      Registro decisivo (put/delete/range-delete mais novo com
+      `seq ≤ snap`) responde mesmo com buracos de cobertura; sem
+      registro, `None` só quando a cobertura retida prova cobrir
+      `[1, snap]` sem drops (never-written vs dropped são
+      indistinguíveis — fail-closed `SnapshotTooOld`). Custo v0: cada
+      segmento retido é CRC-walked por leitura (sem índice de chaves
+      ainda); scans continuam fail-closed. Bytes remotos corrompidos →
+      `CorruptHistory` tipado — status: `done`
+- [x] **P2.2** Métricas (bytes locais vs tier, idade do archive, uploads
+      pendentes) + limiter de banda — `history_stats()` roll-up
+      (segmentos/bytes locais, archive floor, watermark, pending
+      uploads, sumário remoto, idade da última passada de archive);
+      `set_upload_bandwidth(bytes_por_rodada)` limita bytes enviados
+      por upload step e **não** envia manifesto enquanto faltam
+      segmentos no destino (o remoto nunca lista o que não tem);
+      backlog drena idempotente, cap segura o não-enviado — status:
+      `done`
 
 ## Status (living — update with every PR)
 
@@ -191,8 +208,8 @@ quieta; P2 aberto)
 | P1.2 | p1 | upload pipeline + backpressure | **done** | b548a5e | 2026-08-21 |
 | P1.3 | p1 | restore drill do tier | **done** | c429acb | 2026-08-21 |
 | P1.4 | p1 | CLI archive/restore | **done** | 751e9d4 | 2026-08-21 |
-| P2.1 | p2 | leitura lazy do tier | todo | — | 2026-08-20 |
-| P2.2 | p2 | métricas + banda | todo | — | 2026-08-20 |
+| P2.1 | p2 | leitura lazy do tier | **done** | `eea769d` | 2026-08-21 |
+| P2.2 | p2 | métricas + banda | **done** | `eea769d` | 2026-08-21 |
 
 ## Acceptance Criteria
 

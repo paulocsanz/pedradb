@@ -94,7 +94,7 @@ cercado vira failover, e certeza-vs-disponibilidade é política do cluster.
 |---|---|---|
 | Write acked sobrevive a power loss (G1) | **Sim** | nada |
 | Nunca ler errado (fail-closed em corrupção) | Sim, mas **cara**: nó parado | failover (Montanha) **ou** PITR/backup (RFC-0046) **ou** tolerância a downtime manual |
-| História/MVCC/PITR | **Sustentável desde 2026-08-21** (RFC-0046 P0): retention default bounded (`Window(24 h)`) + archive local com cap e watermark tipificado — disco ≈ live set + janela | horizon/archive já no kernel; S3 (P1) deixa a história barata e sobrevive a perder o disco local |
+| História/MVCC/PITR | **Sustentável desde 2026-08-21** (RFC-0046 P0+P2.1): retention default bounded (`Window(24 h)`) + archive local com cap e watermark tipificado; leituras abaixo do watermark caem para o tier (local → espelho remoto) | horizon/archive/lazy-read já no kernel; S3 (P1) deixa a história barata e sobrevive a perder o disco local |
 | Fence após fsync falho | Sim (cerca) | reopen; política de severidade tipada é a evolução (abaixo) |
 
 ## 5. Veredito
