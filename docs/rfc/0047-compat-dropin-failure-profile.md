@@ -113,8 +113,8 @@
       (equivalente `BackgroundErrorReason`-shaped) + tabela doc
       knob-RocksDB → comportamento-compat (inclusive as divergências) —
       status: `done` (este commit)
-- [ ] **P2.2** `docs/usage.md`: seção "drop-in divergences" (sync default,
-      escalada CORRUPTLOG, G1) — status: `todo`
+- [x] **P2.2** `docs/usage.md`: seção "drop-in divergences" (sync default,
+      escalada CORRUPTLOG, G1) — status: `done` (este commit)
 
 ## Status (living — update with every PR)
 
@@ -126,7 +126,7 @@
 | P1.1 | p1 | recover_from_fence + DB::resume() | done | b0d4e51 | 2026-08-21 |
 | P1.2 | p1 | auto-resume transitório via Host | done | c1b2237 | 2026-08-21 |
 | P2.1 | p2 | listeners/severidades + tabela de knobs | done | este commit | 2026-08-21 |
-| P2.2 | p2 | docs "drop-in divergences" | todo | — | 2026-08-21 |
+| P2.2 | p2 | docs "drop-in divergences" | done | este commit | 2026-08-21 |
 
 ## Acceptance Criteria
 

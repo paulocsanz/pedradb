@@ -448,6 +448,27 @@ Prefixes (`u/`, `idx/`) are application convention — not a kernel feature (FDB
 
 ---
 
+## Drop-in divergences (rocksdb-compat, RFC-0047)
+
+Swapping `rocksdb` for `rocksdb-compat` compiles to the same API, but four
+behaviors differ on purpose. Everything else on the compat face is
+Rocks-shaped: PointInTime WAL recovery (with a report), compaction-GC
+retention, `resume()`, transient auto-resume, background-error listener.
+Full knob map: [rocksdb-compat.md](rocksdb-compat.md#knob-map-rocksdb--compat-behavior-rfc-0047-p21).
+
+| # | Divergence | Why |
+|---|---|---|
+| 1 | **Writes are synced by default.** `Options::sync` defaults to `true` (Pedra `fdatasync`s before Ok, G1); Rocks defaults to async WAL. `set_sync(false)` restores the exact Rocks shape. | Durability is the product — and it is still faster than the Rocks default people run. |
+| 2 | **Repeated corruption refuses the open — in every recovery mode.** A torn WAL tail recovers as a clean prefix (same as Rocks); damage **mid-WAL** in the default PointInTime mode serves the prefix **and reports the discard** (`DB::last_recovery_report`). But the third CORRUPTLOG event (RFC-0038) refuses the open even in PointInTime. | Fail-closed escalation is the integrity floor (G2) — the policy knob cannot buy silence. |
+| 3 | **A failed WAL sync fences the writer** (`ErrorKind::Fenced`) instead of continuing silently. Recovery is explicit: `DB::resume()` (close+replay+reopen) returns the uncertain sequence range and whether writes were lost; `auto_resume_transient` (default on) self-heals only ENOSPC-class fences. | Rocks' fsync-failure handling assumes the write can be retried in place; Pedra reports the uncertainty (`uncertain_from..=uncertain_through`) instead of guessing. |
+| 4 | **Full history is an opt-out, not the default.** The compat face defaults to `auto_reclaim: true` (Rocks storage profile: disk ≈ live set + pins). Pedra F20 (keep every version — free PITR) is the kernel default and an explicit opt-out on the compat face. | A drop-in must match the disk profile the operator expects; F20 stays one flag away. |
+
+Official bench columns are unaffected: `rocksdb-parity-bench` pins retention
+with `ROCKS_PARITY_RETENTION=product|rocks` (default `product`) — the compat
+default flip changed no official number.
+
+---
+
 ## Limits (honest P0)
 
 - Data lives in **MemTable + WAL + SSTs** after `flush`; call `compact` to merge SSTs.  
