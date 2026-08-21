@@ -2,13 +2,13 @@
 
 use pedradb_core::wal::Wal;
 use pedradb_core::{Db, OpenOptions};
-use pedradb_ops::{inspect_format, migrate_to_latest, BackupEngine};
+use pedradb_ops::{inspect_format, migrate_to_latest, restore_history_from_remote, BackupEngine};
 
 fn main() -> std::process::ExitCode {
     let args: Vec<String> = std::env::args().collect();
     if args.len() < 2 {
         eprintln!(
-            "usage: pedra <demo|wal|version|backup|restore|pitr|ship-wal|list-backups|verify-backup|inspect|stats|compact|reclaim|maintain|compact-vlog|compact-blob|blob-gc|migrate> [args...]"
+            "usage: pedra <demo|wal|version|backup|restore|pitr|ship-wal|list-backups|verify-backup|archive|inspect|stats|compact|reclaim|maintain|compact-vlog|compact-blob|blob-gc|migrate> [args...]"
         );
         return std::process::ExitCode::from(2);
     }
@@ -25,6 +25,7 @@ fn main() -> std::process::ExitCode {
         "pitr" => pitr_cmd(&args[2..]),
         "list-backups" => list_backups_cmd(&args[2..]),
         "verify-backup" => verify_backup_cmd(&args[2..]),
+        "archive" => archive_cmd(&args[2..]),
         "inspect" => inspect_cmd(&args[2..]),
         "stats" => stats_cmd(&args[2..]),
         "compact" => compact_cmd(&args[2..]),
@@ -205,6 +206,69 @@ fn restore_cmd(args: &[String]) -> std::process::ExitCode {
         Err(e) => {
             eprintln!("error: {e}");
             std::process::ExitCode::FAILURE
+        }
+    }
+}
+
+/// RFC-0046 P1.4: remote history-tier inspection and restore.
+fn archive_cmd(args: &[String]) -> std::process::ExitCode {
+    // pedra archive status <remote_root>
+    // pedra archive restore <remote_root> <dest> [target_seq]
+    match args.first().map(String::as_str) {
+        Some("status") if args.len() >= 2 => {
+            match (|| -> Result<(), Box<dyn std::error::Error>> {
+                let tier = pedradb_core::history::RemoteTier::new(&args[1]);
+                match tier.latest_summary(&pedradb_core::StdEnv)? {
+                    Some(s) => println!(
+                        "segments={} bytes={} seq_range={}-{} archive_floor={} next_generation={}",
+                        s.segments, s.bytes, s.from_seq, s.through_seq, s.archive_floor,
+                        s.next_generation
+                    ),
+                    None => println!("no manifest — remote tier is empty"),
+                }
+                Ok(())
+            })() {
+                Ok(()) => std::process::ExitCode::SUCCESS,
+                Err(e) => {
+                    eprintln!("error: {e}");
+                    std::process::ExitCode::FAILURE
+                }
+            }
+        }
+        Some("restore") if args.len() >= 3 => {
+            match (|| -> Result<(), Box<dyn std::error::Error>> {
+                let target = match args.get(3) {
+                    Some(s) => Some(s.parse::<u64>()?),
+                    None => None,
+                };
+                let rep = restore_history_from_remote(
+                    &pedradb_core::StdEnv,
+                    &args[1],
+                    &args[2],
+                    target,
+                )?;
+                println!(
+                    "restored {} segments / {} records -> {} last_sequence={} (target={:?})",
+                    rep.segments,
+                    rep.records,
+                    args[2],
+                    rep.last_sequence,
+                    target
+                );
+                Ok(())
+            })() {
+                Ok(()) => std::process::ExitCode::SUCCESS,
+                Err(e) => {
+                    eprintln!("error: {e}");
+                    std::process::ExitCode::FAILURE
+                }
+            }
+        }
+        _ => {
+            eprintln!(
+                "usage: pedra archive status <remote_root> | pedra archive restore <remote_root> <dest> [target_seq]"
+            );
+            std::process::ExitCode::from(2)
         }
     }
 }

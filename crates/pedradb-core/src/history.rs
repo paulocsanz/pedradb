@@ -413,6 +413,24 @@ pub struct RemoteSegment {
     pub bytes: u64,
 }
 
+/// Roll-up of the newest intact remote manifest (status output,
+/// RFC-0046 P1.4).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RemoteSummary {
+    /// Live segment objects listed by the manifest.
+    pub segments: usize,
+    /// Total archived bytes.
+    pub bytes: u64,
+    /// Lowest seq covered (0 when empty).
+    pub from_seq: u64,
+    /// Highest seq covered (0 when empty).
+    pub through_seq: u64,
+    /// Highest seq whose local history was already dropped for cap.
+    pub archive_floor: u64,
+    /// Next immutable manifest generation id.
+    pub next_generation: u64,
+}
+
 /// RFC-0046 P1.1: object-storage-shaped mirror of the local history tier,
 /// reached only through the `Env` seam (no network in unit tests — the
 /// destination is any `Env`; an S3-class binding is a host-side `Env` impl).
@@ -552,6 +570,23 @@ impl RemoteTier {
                 bytes: s.bytes,
             })
             .collect())
+    }
+
+    /// Roll-up of the newest intact remote manifest for status output
+    /// (`None` when the tier holds no manifest).
+    pub fn latest_summary<E: Env>(&self, env: &E) -> Result<Option<RemoteSummary>> {
+        let Some(bytes) = self.latest_manifest(env)? else {
+            return Ok(None);
+        };
+        let manifest = Manifest::decode(&bytes)?;
+        Ok(Some(RemoteSummary {
+            segments: manifest.segs.len(),
+            bytes: manifest.segs.iter().map(|s| s.bytes).sum(),
+            from_seq: manifest.segs.front().map(|s| s.from_seq).unwrap_or(0),
+            through_seq: manifest.segs.back().map(|s| s.through_seq).unwrap_or(0),
+            archive_floor: manifest.archive_floor,
+            next_generation: manifest.next_id,
+        }))
     }
 
     /// Newest intact manifest generation: `LATEST` if it parses and its
