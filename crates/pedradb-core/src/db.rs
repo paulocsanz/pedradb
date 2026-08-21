@@ -725,6 +725,15 @@ impl CompactOptions {
 ///
 /// [`Db`] itself is single-threaded (`&mut` for writes). Use [`ConcurrentDb`] for
 /// multi-thread access with a coarse mutex/rwlock.
+/// RFC-0046 P1.2 remote mirror destination: any `Env` + a
+/// [`crate::history::RemoteTier`] root inside it.
+struct RemoteHistory<E: Env> {
+    env: E,
+    tier: crate::history::RemoteTier,
+}
+
+/// [`Db`] itself is single-threaded (`&mut` for writes). Use [`ConcurrentDb`] for
+/// multi-thread access with a coarse mutex/rwlock.
 pub struct Db<E: Env = StdEnv> {
     dir: PathBuf,
     env: E,
@@ -884,6 +893,14 @@ pub struct Db<E: Env = StdEnv> {
     /// RFC-0046 P0.2 local history tier (archive-before-GC). Opened at open;
     /// the manifest floor feeds `earliest_readable_seq` across reopens.
     history_tier: Option<crate::history::HistoryTier>,
+    /// RFC-0046 P1.2 remote history mirror (opt-in via
+    /// [`Self::set_remote_history`]). Uploads run inline on the auto-compact
+    /// path the host opted into; a failing tier pauses GC (backpressure —
+    /// never drop what has not uploaded).
+    remote_history: Option<RemoteHistory<E>>,
+    /// Local segment ids verified present at the remote tier (P1.2). Lost on
+    /// reopen — the first upload step repairs it idempotently.
+    uploaded_history_segs: std::collections::HashSet<u64>,
     /// Count of successful WAL `sync_all` (observability / group-commit tests).
     wal_sync_count: AtomicU64,
     /// Logical user-value bytes ingested.
@@ -1199,6 +1216,8 @@ impl<E: Env> Db<E> {
             seq_times: Mutex::new(std::collections::VecDeque::new()),
             seq_time_counter: AtomicU64::new(0),
             history_tier: None,
+            remote_history: None,
+            uploaded_history_segs: std::collections::HashSet::new(),
             wal_sync_count: AtomicU64::new(0),
             bytes_ingested: 0,
             bytes_written_wal: 0,
@@ -1639,18 +1658,80 @@ impl<E: Env> Db<E> {
             }
         }
         self.archive_flush_chunk(&mut chunk)?;
+        // Upload pass (P1.2): ship every sealed segment + the manifest
+        // generation BEFORE the cap may drop anything — the cap then only
+        // reclaims segments verified present at the remote tier.
+        self.upload_history_step()?;
         // Cap: drop oldest segments; advance the readable floor (typed
         // SnapshotTooOld below it). A pin holds everything at/below it.
         let pin = self.oldest_pinned_sequence();
         let cap = self.history.cap_bytes;
+        let uploaded = if self.remote_history.is_some() {
+            Some(self.uploaded_history_segs.clone())
+        } else {
+            None
+        };
         let env = self.env.clone();
         let tier = self
             .history_tier
             .as_mut()
             .expect("history tier opened at open()");
-        let archive_floor = tier.enforce_cap(&env, pin, cap)?;
+        let archive_floor = tier.enforce_cap(&env, pin, cap, uploaded.as_ref())?;
         self.raise_earliest_readable(archive_floor);
         Ok(())
+    }
+
+    /// RFC-0046 P1.2: opt in to mirroring the history tier to a remote
+    /// (object-storage-shaped) destination reached through any `Env`.
+    /// Uploads then run inline on the auto-compact path after each archive
+    /// pass, before the cap may reclaim anything: while the destination is
+    /// unreachable, GC **pauses** (history-preserving) and the local cap
+    /// holds un-uploaded segments — backpressure never destroys what has
+    /// not shipped. Puts are idempotent, so retries/resume are free.
+    pub fn set_remote_history(&mut self, env: E, root: impl Into<PathBuf>) {
+        self.remote_history = Some(RemoteHistory {
+            env,
+            tier: crate::history::RemoteTier::new(root),
+        });
+    }
+
+    /// Run one remote upload pass now (RFC-0046 P1.2). Returns the report;
+    /// no-op (empty report) when no remote tier is configured.
+    ///
+    /// # Errors
+    /// Remote I/O (fail-closed: caller decides; the auto-compact path
+    /// reacts by pausing GC).
+    pub fn upload_history_now(&mut self) -> Result<crate::history::UploadReport> {
+        self.upload_history_step()
+    }
+
+    fn upload_history_step(&mut self) -> Result<crate::history::UploadReport> {
+        let mut report = crate::history::UploadReport::default();
+        let Some(remote) = self.remote_history.as_ref() else {
+            return Ok(report);
+        };
+        let (remote_env, tier_root) = (remote.env.clone(), remote.tier.clone());
+        let ids = self
+            .history_tier
+            .as_ref()
+            .map(|t| t.segment_ids())
+            .unwrap_or_default();
+        for id in ids {
+            let path = crate::history::HistoryTier::segment_path(&self.dir, id);
+            match tier_root.put_segment(&remote_env, &self.env, &path)? {
+                crate::history::PutStatus::Uploaded => report.segments_uploaded += 1,
+                crate::history::PutStatus::AlreadyPresent => {
+                    report.segments_already_present += 1
+                }
+            }
+            self.uploaded_history_segs.insert(id);
+        }
+        if let Some(tier) = self.history_tier.as_ref() {
+            let bytes = tier.manifest_bytes();
+            let generation = tier.remote_generation();
+            report.manifest = Some(tier_root.put_manifest(&remote_env, &bytes, generation)?);
+        }
+        Ok(report)
     }
 
     fn archive_note(
@@ -11368,11 +11449,32 @@ mod tests {
     struct ClockEnv {
         t: std::rc::Rc<std::cell::Cell<u64>>,
         fail_create: std::rc::Rc<std::cell::Cell<bool>>,
+        /// P1.2: fail `create` only under this prefix (remote tier outage
+        /// with a healthy local disk), shared across clones.
+        fail_prefix: Option<std::rc::Rc<(PathBuf, std::rc::Rc<std::cell::Cell<bool>>)>>,
     }
 
     impl ClockEnv {
         fn new(t: std::rc::Rc<std::cell::Cell<u64>>) -> Self {
-            Self { t, fail_create: std::rc::Rc::new(std::cell::Cell::new(false)) }
+            Self {
+                t,
+                fail_create: std::rc::Rc::new(std::cell::Cell::new(false)),
+                fail_prefix: None,
+            }
+        }
+        fn with_fail_prefix(
+            t: std::rc::Rc<std::cell::Cell<u64>>,
+            prefix: PathBuf,
+        ) -> (Self, std::rc::Rc<std::cell::Cell<bool>>) {
+            let flag = std::rc::Rc::new(std::cell::Cell::new(false));
+            (
+                Self {
+                    t,
+                    fail_create: std::rc::Rc::new(std::cell::Cell::new(false)),
+                    fail_prefix: Some(std::rc::Rc::new((prefix, std::rc::Rc::clone(&flag)))),
+                },
+                flag,
+            )
         }
         fn unix_millis_impl(&self) -> u64 {
             self.t.get()
@@ -11392,6 +11494,12 @@ mod tests {
             // so the test isolates the mid-archive crash, not a dead disk.
             if self.fail_create.get() && p.extension().is_some_and(|e| e == "hist") {
                 return Err(std::io::Error::other("injected archive failure"));
+            }
+            if let Some(rp) = &self.fail_prefix {
+                let (prefix, flag) = (rp.0.clone(), std::rc::Rc::clone(&rp.1));
+                if flag.get() && p.starts_with(&prefix) {
+                    return Err(std::io::Error::other("injected remote outage"));
+                }
             }
             StdEnv.create(p)
         }
@@ -11596,7 +11704,11 @@ mod tests {
         );
         fail.set(false);
         drop(db);
-        let env2 = ClockEnv { t: std::rc::Rc::clone(&clock), fail_create: fail };
+        let env2 = ClockEnv {
+            t: std::rc::Rc::clone(&clock),
+            fail_create: fail,
+            fail_prefix: None,
+        };
         let db2 = Db::open_with_env(&dir, horizon_opts(1_000, 1 << 30), env2).unwrap();
         assert_eq!(db2.get(b"k").as_deref(), Some(&b"v39"[..]));
         assert_eq!(
@@ -11626,6 +11738,137 @@ mod tests {
             db.get_at(Snapshot::at(2), b"k").unwrap().as_deref(),
             Some(&b"v1"[..])
         );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    // ---- RFC-0046 P1.2: remote upload pipeline + backpressure ----
+
+    #[test]
+    fn remote_backpressure_pauses_gc_until_uploaded() {
+        // While the remote tier is down, the GC round pauses entirely
+        // (history-preserving) — earliest stays put; once the destination
+        // recovers, the same workload GCs and the mirror is complete.
+        let dir = temp_dir();
+        let remote_root = dir.join("remote");
+        let clock = std::rc::Rc::new(std::cell::Cell::new(1_000_000u64));
+        let (env, outage) = ClockEnv::with_fail_prefix(std::rc::Rc::clone(&clock), remote_root.clone());
+        let mut db = Db::open_with_env(&dir, horizon_opts(1_000, 1 << 30), env.clone()).unwrap();
+        db.set_remote_history(env.clone(), remote_root.clone());
+        for i in 0..40u32 {
+            db.put(b"k", format!("v{i:08}").as_bytes()).unwrap();
+        }
+        outage.set(true);
+        clock.set(1_000_000 + 60_000);
+        db.flush().unwrap();
+        assert_eq!(
+            db.earliest_readable_sequence(),
+            0,
+            "remote outage must pause GC (backpressure), not just the upload"
+        );
+        outage.set(false);
+        db.put(b"k", b"tail").unwrap();
+        db.flush().unwrap();
+        assert!(
+            db.earliest_readable_sequence() > 0,
+            "recovered destination must let GC proceed"
+        );
+        db.close().unwrap();
+        // The mirror is complete and self-describing.
+        let remote = crate::history::RemoteTier::new(&remote_root);
+        let names: Vec<String> = StdEnv
+            .read_dir_names(&remote_root)
+            .unwrap()
+            .into_iter()
+            .filter(|n| n.starts_with("seg-"))
+            .collect();
+        assert!(!names.is_empty(), "segments must be mirrored");
+        assert!(remote.latest_manifest(&StdEnv).unwrap().is_some());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn remote_cap_holds_unuploaded_then_releases() {
+        // Cap overflow with the destination down must NOT drop un-uploaded
+        // segments (disk grows — the documented backpressure tradeoff);
+        // after recovery the cap reclaims the uploaded ones.
+        let dir = temp_dir();
+        let remote_root = dir.join("remote");
+        let clock = std::rc::Rc::new(std::cell::Cell::new(1_000_000u64));
+        let (env, outage) = ClockEnv::with_fail_prefix(std::rc::Rc::clone(&clock), remote_root.clone());
+        let mut db = Db::open_with_env(&dir, horizon_opts(1_000, 2_048), env.clone()).unwrap();
+        db.set_remote_history(env.clone(), remote_root.clone());
+        outage.set(true);
+        for round in 0..3u32 {
+            for i in 0..20u32 {
+                db.put(b"k", format!("r{round}v{i:08}").as_bytes()).unwrap();
+            }
+            clock.set(1_000_000 + 60_000 + (round as u64) * 60_000);
+            db.flush().unwrap();
+        }
+        let held = db.history_tier.as_ref().unwrap().bytes();
+        assert!(
+            held > 2_048,
+            "cap must hold un-uploaded segments during the outage (held {held}B)"
+        );
+        assert_eq!(
+            db.earliest_readable_sequence(),
+            0,
+            "nothing may be reclaimed while un-uploaded"
+        );
+        outage.set(false);
+        db.put(b"k", b"tail").unwrap();
+        db.flush().unwrap();
+        assert!(
+            db.history_tier.as_ref().unwrap().bytes() <= 2_048,
+            "after recovery the cap reclaims uploaded segments"
+        );
+        assert!(db.earliest_readable_sequence() > 0);
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn remote_upload_resumes_across_reopen() {
+        // Crash/resume: segments sealed before a failure re-upload as
+        // AlreadyPresent after reopen (idempotent content addressing), the
+        // manifest generation advances, and nothing is re-written.
+        let dir = temp_dir();
+        let remote_root = dir.join("remote");
+        let clock = std::rc::Rc::new(std::cell::Cell::new(1_000_000u64));
+        {
+            let (env, outage) =
+                ClockEnv::with_fail_prefix(std::rc::Rc::clone(&clock), remote_root.clone());
+            let mut db = Db::open_with_env(&dir, horizon_opts(1_000, 1 << 30), env.clone()).unwrap();
+            db.set_remote_history(env.clone(), remote_root.clone());
+            outage.set(true);
+            for i in 0..20u32 {
+                db.put(b"k", format!("v{i:08}").as_bytes()).unwrap();
+            }
+            clock.set(1_000_000 + 60_000);
+            db.flush().unwrap(); // archives locally, upload fails, GC paused
+            db.close().unwrap();
+        }
+        {
+            let (env, _outage) =
+                ClockEnv::with_fail_prefix(std::rc::Rc::clone(&clock), remote_root.clone());
+            let mut db = Db::open_with_env(&dir, horizon_opts(1_000, 1 << 30), env.clone()).unwrap();
+            db.set_remote_history(env.clone(), remote_root.clone());
+            for i in 20..40u32 {
+                db.put(b"k", format!("v{i:08}").as_bytes()).unwrap();
+            }
+            clock.set(1_000_000 + 120_000);
+            db.flush().unwrap();
+            let report = db.upload_history_now().unwrap();
+            assert_eq!(report.segments_uploaded, 0, "everything already shipped inline");
+            assert!(
+                report.segments_already_present >= 1,
+                "resume must be idempotent, not a re-upload"
+            );
+            assert!(db.earliest_readable_sequence() > 0, "GC resumed");
+            db.close().unwrap();
+        }
+        let remote = crate::history::RemoteTier::new(&remote_root);
+        assert!(remote.latest_manifest(&StdEnv).unwrap().is_some());
         let _ = fs::remove_dir_all(&dir);
     }
 }

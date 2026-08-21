@@ -213,12 +213,18 @@ impl HistoryTier {
 
     /// Drop oldest segments above `cap_bytes` (0 = unbounded). An open pin
     /// (`pin_floor` = oldest pinned seq) holds every segment at/below it.
+    /// `hold` (P1.2, remote tier configured) additionally holds every
+    /// segment whose id is NOT in `uploaded` — backpressure: the cap is a
+    /// soft target while the remote tier is down; local disk grows rather
+    /// than destroy history that never uploaded. `None` = local-only P0
+    /// semantics (cap drops freely, watermark advances typed).
     /// Returns the archive floor after enforcement (monotonic).
     pub(crate) fn enforce_cap<E: Env>(
         &mut self,
         env: &E,
         pin_floor: Option<u64>,
         cap_bytes: u64,
+        uploaded: Option<&std::collections::HashSet<u64>>,
     ) -> Result<u64> {
         if cap_bytes == 0 {
             return Ok(self.manifest.archive_floor);
@@ -232,6 +238,11 @@ impl HistoryTier {
             if let Some(pin) = pin_floor {
                 if pin <= front.through_seq {
                     break;
+                }
+            }
+            if let Some(uploaded) = uploaded {
+                if !uploaded.contains(&front.id) {
+                    break; // not verified at the remote tier — keep it
                 }
             }
             let _ = env.remove_file(&dir.join(format!("seg-{:08}.hist", front.id)));
@@ -256,15 +267,23 @@ impl HistoryTier {
 
     /// Encode the manifest (P1.1: the remote tier uploads these bytes as an
     /// immutable generation object).
-    #[allow(dead_code)] // consumed by the P1.2 host upload pipeline (RFC-0046)
     pub(crate) fn manifest_bytes(&self) -> Vec<u8> {
         self.manifest.encode()
     }
 
     /// Next immutable manifest generation id for the remote tier.
-    #[allow(dead_code)] // consumed by the P1.2 host upload pipeline (RFC-0046)
     pub(crate) fn remote_generation(&self) -> u64 {
         self.manifest.next_id
+    }
+
+    /// Ids of live local segments, oldest-first (P1.2 upload pass input).
+    pub(crate) fn segment_ids(&self) -> Vec<u64> {
+        self.manifest.segs.iter().map(|s| s.id).collect()
+    }
+
+    /// Path of one local segment file.
+    pub(crate) fn segment_path(db_root: &Path, id: u64) -> PathBuf {
+        db_root.join("history").join(format!("seg-{id:08}.hist"))
     }
 }
 
@@ -277,13 +296,29 @@ pub enum PutStatus {
     AlreadyPresent,
 }
 
+/// Report of one remote upload pass (RFC-0046 P1.2).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct UploadReport {
+    /// Segments written at the destination this pass.
+    pub segments_uploaded: usize,
+    /// Segments already present (read-back verified) — resume is free.
+    pub segments_already_present: usize,
+    /// Manifest generation upload outcome (`None` = nothing to ship).
+    pub manifest: Option<PutStatus>,
+}
+
 /// One record as stored in a history segment (wire form: `u32 klen, key,
 /// u32 vlen, val, u64 seq, u8 kind, u32 crc32c` over everything before it).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HistoryRecord {
+    /// User key bytes.
     pub key: Vec<u8>,
+    /// Stored value bytes (deletes carry an empty payload; the kind
+    /// discriminates).
     pub val: Vec<u8>,
+    /// Publish sequence of the version.
     pub seq: u64,
+    /// 0 = value, 1 = delete, 2 = range delete.
     pub kind: u8,
 }
 
