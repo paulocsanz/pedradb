@@ -901,6 +901,12 @@ pub struct Db<E: Env = StdEnv> {
     /// Local segment ids verified present at the remote tier (P1.2). Lost on
     /// reopen — the first upload step repairs it idempotently.
     uploaded_history_segs: std::collections::HashSet<u64>,
+    /// RFC-0046 P2.2: max segment bytes one upload step may ship (`None` =
+    /// unlimited). Leftover segments stay pending; the cap holds them.
+    upload_bandwidth: Option<u64>,
+    /// Unix-ms of the last archive pass this open (P2.2 age metric;
+    /// in-memory — `None` after reopen until the next pass).
+    last_archive_millis: Option<u64>,
     /// Count of successful WAL `sync_all` (observability / group-commit tests).
     wal_sync_count: AtomicU64,
     /// Logical user-value bytes ingested.
@@ -1218,6 +1224,8 @@ impl<E: Env> Db<E> {
             history_tier: None,
             remote_history: None,
             uploaded_history_segs: std::collections::HashSet::new(),
+            upload_bandwidth: None,
+            last_archive_millis: None,
             wal_sync_count: AtomicU64::new(0),
             bytes_ingested: 0,
             bytes_written_wal: 0,
@@ -1711,20 +1719,32 @@ impl<E: Env> Db<E> {
             return Ok(report);
         };
         let (remote_env, tier_root) = (remote.env.clone(), remote.tier.clone());
-        let ids = self
+        let budget = self.upload_bandwidth;
+        let metas = self
             .history_tier
             .as_ref()
-            .map(|t| t.segment_ids())
+            .map(|t| t.segment_metas())
             .unwrap_or_default();
-        for id in ids {
-            let path = crate::history::HistoryTier::segment_path(&self.dir, id);
+        let mut shipped: u64 = 0;
+        for m in metas {
+            // P2.2 bandwidth limiter: once this round's byte budget is
+            // spent, stop — and ship no manifest either, so the remote
+            // never lists a segment it does not hold. The next step
+            // resumes from the un-uploaded ids (puts are idempotent).
+            if budget.is_some_and(|b| shipped >= b) {
+                return Ok(report);
+            }
+            let path = crate::history::HistoryTier::segment_path(&self.dir, m.id);
             match tier_root.put_segment(&remote_env, &self.env, &path)? {
-                crate::history::PutStatus::Uploaded => report.segments_uploaded += 1,
+                crate::history::PutStatus::Uploaded => {
+                    report.segments_uploaded += 1;
+                    shipped += m.bytes;
+                }
                 crate::history::PutStatus::AlreadyPresent => {
                     report.segments_already_present += 1
                 }
             }
-            self.uploaded_history_segs.insert(id);
+            self.uploaded_history_segs.insert(m.id);
         }
         if let Some(tier) = self.history_tier.as_ref() {
             let bytes = tier.manifest_bytes();
@@ -1732,6 +1752,50 @@ impl<E: Env> Db<E> {
             report.manifest = Some(tier_root.put_manifest(&remote_env, &bytes, generation)?);
         }
         Ok(report)
+    }
+
+    /// RFC-0046 P2.2: bound how many segment bytes one upload step may ship
+    /// (`None` = unlimited, the default). Un-shipped segments stay pending
+    /// (see [`Self::history_stats`]) and the local cap holds them — the
+    /// documented backpressure tradeoff: bounded upload bandwidth is paid
+    /// for with local disk while the backlog drains.
+    pub fn set_upload_bandwidth(&mut self, bytes_per_round: Option<u64>) {
+        self.upload_bandwidth = bytes_per_round;
+    }
+
+    /// RFC-0046 P2.2: local tier, remote mirror, upload backlog and archive
+    /// age in one roll-up.
+    ///
+    /// # Errors
+    /// Remote I/O when a mirror is configured (the summary reads the
+    /// destination's manifest — fail-closed, not a silent `None`).
+    pub fn history_stats(&self) -> Result<crate::history::HistoryStats> {
+        let mut stats = crate::history::HistoryStats {
+            earliest_readable: self.earliest_readable_seq,
+            ..Default::default()
+        };
+        if let Some(tier) = self.history_tier.as_ref() {
+            stats.local_segments = tier.segment_metas().len();
+            stats.local_bytes = tier.bytes();
+            stats.archive_floor = tier.archive_floor();
+        }
+        if self.remote_history.is_some() {
+            stats.pending_uploads = self
+                .history_tier
+                .as_ref()
+                .map(|t| t.segment_ids())
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|id| !self.uploaded_history_segs.contains(id))
+                .count();
+        }
+        if let Some(remote) = self.remote_history.as_ref() {
+            stats.remote = remote.tier.latest_summary(&remote.env)?;
+        }
+        stats.last_archive_age_millis = self
+            .last_archive_millis
+            .map(|t| self.env.unix_millis().saturating_sub(t));
+        Ok(stats)
     }
 
     fn archive_note(
@@ -1768,6 +1832,7 @@ impl<E: Env> Db<E> {
             .as_mut()
             .expect("history tier opened at open()");
         tier.archive_stream(&env, chunk.drain(..))?;
+        self.last_archive_millis = Some(env.unix_millis());
         Ok(())
     }
 
@@ -1799,13 +1864,17 @@ impl<E: Env> Db<E> {
     /// Point lookup at an explicit [`Snapshot`].
     ///
     /// # Errors
-    /// [`CoreError::SnapshotTooOld`] if `snap` is below the version-GC watermark
-    /// (history may have been dropped by reclaim / `latest_only`).
+    /// [`CoreError::SnapshotTooOld`] if history for `snap` was dropped and
+    /// no tier copy can decide the key (RFC-0046 P2.1: below-watermark
+    /// point reads fall back to the history tier — local segments first,
+    /// remote mirror second — and only fail when that history is gone).
     pub fn get_at(&self, snap: Snapshot, key: &[u8]) -> Result<Option<Bytes>> {
         if snap.seq == 0 {
             return Ok(None);
         }
-        self.ensure_snapshot_readable(snap)?;
+        if snap.seq < self.earliest_readable_seq {
+            return self.get_at_from_archive(snap, key);
+        }
         // Snapshot == published: the point cache already answers at exactly
         // this seq (it only ever holds latest-published values; publish
         // invalidates dirty keys before new inserts can refill them).
@@ -1830,6 +1899,110 @@ impl<E: Env> Db<E> {
             }
             Lookup::Deleted | Lookup::NotFound => None,
         })
+    }
+
+    /// RFC-0046 P2.1: point read below the version-GC watermark, served
+    /// lazy from the history tier (local segments first, the remote mirror
+    /// second — it retains what the local cap already dropped).
+    ///
+    /// A decisive record (newest put/delete/range-delete at `seq ≤ snap`)
+    /// answers even when coverage has gaps. A no-match answers `None` only
+    /// when the retained segments provably cover `[1, snap]` with nothing
+    /// dropped — otherwise fail-closed [`CoreError::SnapshotTooOld`]
+    /// (never-written and dropped are indistinguishable). v0 cost: every
+    /// retained segment is CRC-walked per read (no key index yet).
+    fn get_at_from_archive(&self, snap: Snapshot, key: &[u8]) -> Result<Option<Bytes>> {
+        let too_old = || CoreError::SnapshotTooOld {
+            requested: snap.seq,
+            earliest: self.earliest_readable_seq,
+        };
+        let Some(tier) = self.history_tier.as_ref() else {
+            return Err(too_old());
+        };
+        // Candidate segments: the local manifest plus (content-addressed
+        // dedup by name) everything the remote manifest still lists.
+        let mut cands: Vec<(u64, u64, String, Option<u64>)> = tier
+            .segment_metas()
+            .into_iter()
+            .map(|m| (m.from_seq, m.through_seq, m.name, Some(m.id)))
+            .collect();
+        if let Some(remote) = self.remote_history.as_ref() {
+            for seg in remote.tier.latest_segments(&remote.env)? {
+                if !cands.iter().any(|(_, _, name, _)| *name == seg.name) {
+                    cands.push((seg.from_seq, seg.through_seq, seg.name, None));
+                }
+            }
+        }
+        let mut best: Option<crate::history::HistoryRecord> = None;
+        let mut missing_below_snap = false;
+        for (from, through, name, local_id) in &cands {
+            if *from > snap.seq {
+                continue; // cannot hold a record this snapshot can see
+            }
+            let bytes = match local_id.map(|id| tier.read_local_segment(&self.env, id)) {
+                Some(Ok(Some(bytes))) => Some(bytes),
+                Some(Ok(None)) | None => None,
+                Some(Err(e)) => return Err(e),
+            };
+            let bytes = match bytes {
+                Some(bytes) => Some(bytes),
+                // Local copy absent: fall back to the remote mirror. A
+                // missing object is a coverage gap (fail-closed below);
+                // anything else (corrupt read-back) propagates typed.
+                None => match self.remote_history.as_ref() {
+                    Some(remote) => match remote.tier.read_segment(&remote.env, name) {
+                        Ok(bytes) => Some(bytes),
+                        Err(CoreError::Io(e))
+                            if e.kind() == std::io::ErrorKind::NotFound =>
+                        {
+                            missing_below_snap = true;
+                            None
+                        }
+                        Err(e) => return Err(e),
+                    },
+                    None => {
+                        missing_below_snap = true;
+                        None
+                    }
+                },
+            };
+            let Some(bytes) = bytes else { continue };
+            let records = crate::history::walk_segment_records(&bytes)?;
+            if let Some(rec) = crate::history::decide_at(&records, key, snap.seq) {
+                if best.as_ref().map_or(true, |b| rec.seq > b.seq) {
+                    best = Some(rec.clone());
+                }
+            }
+        }
+        if let Some(rec) = best {
+            return Ok(match rec.kind {
+                0 => Some(Bytes::from(rec.val)),
+                _ => None, // delete / range delete covering the key
+            });
+        }
+        // No deciding record. `None` is provable only when the retained
+        // segments cover [1, snap] contiguously and the cap never dropped
+        // anything at/below snap (archive_floor is the drop high-water).
+        if missing_below_snap || tier.archive_floor() > snap.seq {
+            return Err(too_old());
+        }
+        let mut spans: Vec<(u64, u64)> = cands.iter().map(|(f, t, _, _)| (*f, *t)).collect();
+        spans.sort_unstable();
+        let mut covered_to = 1u64;
+        for (from, through) in spans {
+            if from > covered_to {
+                return Err(too_old()); // gap below snap
+            }
+            covered_to = covered_to.max(through + 1);
+            if covered_to > snap.seq {
+                break;
+            }
+        }
+        if covered_to > snap.seq {
+            Ok(None)
+        } else {
+            Err(too_old())
+        }
     }
 
     /// Whether any version of `key` has `sequence > snapshot` (OCC conflict probe).
@@ -11577,16 +11750,25 @@ mod tests {
             db.put(b"k", format!("v{i}").as_bytes()).unwrap();
         }
         // Age the newest sample too, then GC again — the watermark must
-        // pass the released pin's seq.
+        // pass the released pin's seq. P2.1: below the watermark the read
+        // falls back to the retained tier and still answers; true loss
+        // (cap drop without a mirror) stays SnapshotTooOld (cap test).
         clock.set(1_000_000 + 180_000);
         db.flush().unwrap();
         assert!(
-            matches!(
-                db.get_at(Snapshot::at(pinned_seq), b"k"),
-                Err(CoreError::SnapshotTooOld { .. })
-            ),
-            "released pin below the watermark fails closed (earliest={})",
+            db.earliest_readable_sequence() > pinned_seq,
+            "watermark must pass the released pin (earliest={})",
             db.earliest_readable_sequence()
+        );
+        assert_eq!(
+            db.get_at(Snapshot::at(pinned_seq), b"k").unwrap().as_deref(),
+            Some(&b"v39"[..]),
+            "below-watermark read serves from the retained tier (P2.1)"
+        );
+        assert_eq!(
+            db.get_at(Snapshot::at(pinned_seq), b"never-written").unwrap(),
+            None,
+            "anchored coverage proves never-written (P2.1)"
         );
         let _ = fs::remove_dir_all(&dir);
     }
@@ -11616,14 +11798,18 @@ mod tests {
     #[test]
     fn archive_cap_overflow_advances_watermark_not_silent() {
         // RFC-0046 P0.3: cap overflow drops the oldest archive segments and
-        // advances the readable watermark — old snaps become SnapshotTooOld
-        // (typed), latest reads unaffected; a pin holds its segment.
+        // advances the readable watermark — old snaps fail typed once the
+        // history is really gone (P2.1 serves it while any copy remains:
+        // the re-archive duplicate keeps [1..cutoff] readable until the cap
+        // evicts every copy — hence a cap small enough to empty the tier).
+        // Latest reads unaffected; a pin holds its segment.
         let dir = temp_dir();
         let clock = std::rc::Rc::new(std::cell::Cell::new(1_000_000u64));
         let env = ClockEnv::new(std::rc::Rc::clone(&clock));
-        // Cap small enough that one archive round overflows it.
-        let mut db = Db::open_with_env(&dir, horizon_opts(1_000, 2_048), env).unwrap();
-        for i in 0..40u32 {
+        // 100 publishes push the sampled cutoff to 96 (~3 KB archived per
+        // pass); the 512 B cap evicts every segment covering seq 1.
+        let mut db = Db::open_with_env(&dir, horizon_opts(1_000, 512), env).unwrap();
+        for i in 0..100u32 {
             db.put(b"k", format!("v{i:08}").as_bytes()).unwrap();
         }
         clock.set(1_000_000 + 60_000);
@@ -11633,27 +11819,36 @@ mod tests {
             "cap overflow must advance the watermark, got {}",
             db.earliest_readable_sequence()
         );
+        assert!(
+            db.history_tier
+                .as_ref()
+                .map(|t| t.segment_metas().is_empty())
+                .unwrap_or(false),
+            "every copy of the old segments must be evicted (P2.1 serves retained copies)"
+        );
         assert!(matches!(
             db.get_at(Snapshot::at(1), b"k"),
             Err(CoreError::SnapshotTooOld { .. })
         ));
-        assert_eq!(db.get(b"k").as_deref(), Some(&b"v00000039"[..]));
+        assert_eq!(db.get(b"k").as_deref(), Some(&b"v00000099"[..]));
         assert!(
             db.history_tier
                 .as_ref()
-                .map(|t| t.bytes() <= 2_048)
+                .map(|t| t.bytes() <= 512)
                 .unwrap_or(false),
             "cap must bound archived bytes, got {}",
             db.history_tier.as_ref().map(|t| t.bytes()).unwrap_or(0)
         );
         // The advanced watermark is durable: reopen re-raises it from the
-        // archive manifest floor.
-        let floor = db.earliest_readable_sequence();
+        // archive manifest floor (the in-memory watermark may sit one above
+        // it from the GC floor — the manifest floor is the durable part).
+        let durable_floor = db.history_tier.as_ref().unwrap().archive_floor();
+        assert!(durable_floor > 1);
         db.close().unwrap();
         let mut db = Db::open(&dir).unwrap();
         assert!(
-            db.earliest_readable_sequence() >= floor,
-            "reopen must keep the cap-advanced watermark ({} < {floor})",
+            db.earliest_readable_sequence() >= durable_floor,
+            "reopen must keep the cap-advanced watermark ({} < {durable_floor})",
             db.earliest_readable_sequence()
         );
         assert!(matches!(
@@ -11869,6 +12064,190 @@ mod tests {
         }
         let remote = crate::history::RemoteTier::new(&remote_root);
         assert!(remote.latest_manifest(&StdEnv).unwrap().is_some());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    // ---- RFC-0046 P2.1: lazy tier read below the watermark ----
+
+    #[test]
+    fn lazy_tier_read_below_watermark_local() {
+        // Below the GC watermark, point reads fall back to the retained
+        // local tier: exact versions, deletes, range deletes, and an
+        // anchored never-written `None`. Nothing was dropped, so coverage
+        // is provable.
+        let dir = temp_dir();
+        let clock = std::rc::Rc::new(std::cell::Cell::new(1_000_000u64));
+        let env = ClockEnv::new(std::rc::Rc::clone(&clock));
+        let mut db = Db::open_with_env(&dir, horizon_opts(1_000, 1 << 30), env).unwrap();
+        for i in 0..40u32 {
+            db.put(b"k", format!("v{i:02}").as_bytes()).unwrap();
+        }
+        db.put(b"d", b"gone").unwrap(); // seq 41
+        db.delete(b"d").unwrap(); // seq 42
+        db.put(b"r", b"ranged").unwrap(); // seq 43
+        db.delete_range(b"r", b"s").unwrap(); // seq 44
+        // Filler past the next 32-publish sample so the horizon cutoff
+        // (sampled every 32 publishes) passes the deletes too.
+        for i in 0..40u32 {
+            db.put(b"f", format!("f{i:02}").as_bytes()).unwrap();
+        }
+        clock.set(1_000_000 + 60_000);
+        db.flush().unwrap();
+        assert!(
+            db.earliest_readable_sequence() > 44,
+            "everything must be below the watermark (earliest={})",
+            db.earliest_readable_sequence()
+        );
+        assert_eq!(
+            db.get_at(Snapshot::at(1), b"k").unwrap().as_deref(),
+            Some(&b"v00"[..]),
+            "oldest archived version reads from the tier"
+        );
+        assert_eq!(
+            db.get_at(Snapshot::at(20), b"k").unwrap().as_deref(),
+            Some(&b"v19"[..])
+        );
+        assert_eq!(
+            db.get_at(Snapshot::at(41), b"d").unwrap().as_deref(),
+            Some(&b"gone"[..]),
+            "before its delete, d is visible"
+        );
+        assert_eq!(db.get_at(Snapshot::at(42), b"d").unwrap(), None);
+        assert_eq!(
+            db.get_at(Snapshot::at(43), b"r").unwrap().as_deref(),
+            Some(&b"ranged"[..]),
+            "before the range delete, r is visible"
+        );
+        assert_eq!(
+            db.get_at(Snapshot::at(44), b"r").unwrap(),
+            None,
+            "covering range delete decides from the tier"
+        );
+        assert_eq!(
+            db.get_at(Snapshot::at(44), b"never-written").unwrap(),
+            None,
+            "anchored coverage proves never-written"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn lazy_tier_read_survives_local_cap_via_remote() {
+        // After the local cap drops uploaded segments, below-watermark
+        // reads are served from the remote mirror; corrupt remote bytes
+        // fail closed with the typed error, never a wrong answer.
+        let dir = temp_dir();
+        let remote_root = dir.join("remote");
+        let clock = std::rc::Rc::new(std::cell::Cell::new(1_000_000u64));
+        let env = ClockEnv::new(std::rc::Rc::clone(&clock));
+        let mut db =
+            Db::open_with_env(&dir, horizon_opts(1_000, 2_048), env.clone()).unwrap();
+        db.set_remote_history(env.clone(), remote_root.clone());
+        // 100 publishes: the sampled cutoff reaches 96, so one archive
+        // pass ships ~95 records (~3 KB) — past the 2 KB cap, forcing a
+        // local drop of the uploaded segment (the remote keeps it).
+        for i in 0..100u32 {
+            db.put(b"k", format!("v{i:08}").as_bytes()).unwrap();
+        }
+        clock.set(1_000_000 + 60_000);
+        db.flush().unwrap();
+        assert!(
+            db.history_tier.as_ref().unwrap().archive_floor() > 1,
+            "the cap must have dropped local segments (floor={})",
+            db.history_tier.as_ref().unwrap().archive_floor()
+        );
+        assert!(
+            db.earliest_readable_sequence() > 1,
+            "watermark past the oldest snap (earliest={})",
+            db.earliest_readable_sequence()
+        );
+        assert_eq!(
+            db.get_at(Snapshot::at(1), b"k").unwrap().as_deref(),
+            Some(&b"v00000000"[..]),
+            "dropped-locally segment serves from the remote mirror"
+        );
+        assert_eq!(
+            db.get_at(Snapshot::at(20), b"k").unwrap().as_deref(),
+            Some(&b"v00000019"[..])
+        );
+        // Corrupt every mirrored segment object: any read below the
+        // watermark must fail closed with the typed history error.
+        for entry in fs::read_dir(&remote_root).unwrap() {
+            let path = entry.unwrap().path();
+            if path.extension().and_then(|e| e.to_str()) != Some("hist") {
+                continue;
+            }
+            let mut bytes = fs::read(&path).unwrap();
+            let mid = bytes.len() / 2;
+            bytes[mid] ^= 0xff;
+            fs::write(&path, bytes).unwrap();
+        }
+        assert!(
+            matches!(
+                db.get_at(Snapshot::at(1), b"k"),
+                Err(CoreError::CorruptHistory(_))
+            ),
+            "corrupt remote history fails closed, typed"
+        );
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    // ---- RFC-0046 P2.2: bandwidth limiter + metrics ----
+
+    #[test]
+    fn upload_bandwidth_limits_rounds_then_completes() {
+        // A byte budget ships at most one segment per upload step and —
+        // critically — ships no manifest while segments are missing at the
+        // destination. The backlog drains step by step; the cap holds the
+        // un-uploaded segments until then (backpressure), and stats see it.
+        let dir = temp_dir();
+        let remote_root = dir.join("remote");
+        let clock = std::rc::Rc::new(std::cell::Cell::new(1_000_000u64));
+        let (env, outage) = ClockEnv::with_fail_prefix(std::rc::Rc::clone(&clock), remote_root.clone());
+        let mut db = Db::open_with_env(&dir, horizon_opts(1_000, 2_048), env.clone()).unwrap();
+        db.set_remote_history(env.clone(), remote_root.clone());
+        outage.set(true);
+        for round in 0..3u32 {
+            for i in 0..20u32 {
+                db.put(b"k", format!("r{round}v{i:08}").as_bytes()).unwrap();
+            }
+            clock.set(1_000_000 + 60_000 + (round as u64) * 60_000);
+            db.flush().unwrap();
+        }
+        let stats = db.history_stats().unwrap();
+        assert!(stats.local_segments >= 2, "backlog built up (segs={})", stats.local_segments);
+        assert_eq!(stats.pending_uploads, stats.local_segments);
+        assert!(stats.last_archive_age_millis.is_some());
+        outage.set(false);
+        db.set_upload_bandwidth(Some(1)); // one segment per step, effectively
+        while db.history_stats().unwrap().pending_uploads > 0 {
+            let report = db.upload_history_now().unwrap();
+            let stats = db.history_stats().unwrap();
+            if stats.pending_uploads > 0 {
+                assert_eq!(
+                    report.manifest, None,
+                    "no manifest may ship while segments are still missing"
+                );
+            } else {
+                assert!(
+                    report.manifest.is_some(),
+                    "the completing step ships the manifest"
+                );
+            }
+        }
+        let stats = db.history_stats().unwrap();
+        assert_eq!(stats.pending_uploads, 0);
+        let remote = stats.remote.expect("remote summary");
+        assert!(remote.segments >= 2, "mirror complete ({})", remote.segments);
+        assert!(remote.bytes >= stats.local_bytes);
+        // With the backlog drained, a flush lets the cap reclaim again.
+        db.put(b"k", b"tail").unwrap();
+        clock.set(1_000_000 + 300_000);
+        db.flush().unwrap();
+        assert!(db.history_tier.as_ref().unwrap().bytes() <= 2_048);
+        assert!(db.earliest_readable_sequence() > 0, "GC resumed");
+        db.close().unwrap();
         let _ = fs::remove_dir_all(&dir);
     }
 }

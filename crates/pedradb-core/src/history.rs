@@ -291,9 +291,33 @@ impl HistoryTier {
     }
 
     /// Live archived bytes.
-    #[cfg_attr(not(test), allow(dead_code))] // test + P1.2 sizing metrics
     pub(crate) fn bytes(&self) -> u64 {
         self.manifest.segs.iter().map(|s| s.bytes).sum()
+    }
+
+    /// Manifest entries of live local segments, oldest-first (P2.1 lazy
+    /// read + P2.2 metrics input).
+    pub(crate) fn segment_metas(&self) -> Vec<SegmentMeta> {
+        self.manifest.segs.iter().cloned().collect()
+    }
+
+    /// Bytes of one local segment file, `None` when absent (cap-dropped or
+    /// never sealed). Corrupt-but-present is the caller's CRC walk to catch.
+    pub(crate) fn read_local_segment<E: Env>(
+        &self,
+        env: &E,
+        id: u64,
+    ) -> Result<Option<Vec<u8>>> {
+        let path = Self::segment_path(&self.root, id);
+        match env.open_read(&path) {
+            Ok(mut f) => {
+                let mut buf = Vec::new();
+                f.read_to_end(&mut buf)?;
+                Ok(Some(buf))
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(e.into()),
+        }
     }
 
     /// Encode the manifest (P1.1: the remote tier uploads these bytes as an
@@ -397,6 +421,50 @@ pub fn walk_segment_records(bytes: &[u8]) -> Result<Vec<HistoryRecord>> {
         out.push(HistoryRecord { key, val, seq, kind });
     }
     Ok(out)
+}
+
+/// RFC-0046 P2.1: newest record that decides `key`'s visibility at `seq` —
+/// exact puts/deletes (`kind` 0/1, `record.key == key`) and range deletes
+/// (`kind` 2, `key` stored as the range start with the end in `val`).
+/// Records arrive in archive order, not seq order — the max-seq match wins.
+pub(crate) fn decide_at<'a>(
+    records: &'a [HistoryRecord],
+    key: &[u8],
+    seq: u64,
+) -> Option<&'a HistoryRecord> {
+    records
+        .iter()
+        .filter(|r| r.seq <= seq)
+        .filter(|r| match r.kind {
+            2 => r.key.as_slice() <= key && key < r.val.as_slice(),
+            _ => r.key == key,
+        })
+        .max_by_key(|r| r.seq)
+}
+
+/// RFC-0046 P2.2: history-tier roll-up (local + remote + upload backlog).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct HistoryStats {
+    /// Segments live in the local tier.
+    pub local_segments: usize,
+    /// Bytes live in the local tier.
+    pub local_bytes: u64,
+    /// Highest seq the local cap already dropped (0 = nothing dropped).
+    pub archive_floor: u64,
+    /// Lowest sequence still guaranteed readable in-DB (the GC watermark;
+    /// below it reads go through the tier, P2.1).
+    pub earliest_readable: u64,
+    /// Local segments not yet verified at the remote tier (0 when no
+    /// remote is configured). Non-zero means the cap is holding them
+    /// (backpressure — local disk grows until uploads catch up).
+    pub pending_uploads: usize,
+    /// Remote mirror roll-up (`None` = no remote configured or nothing
+    /// shipped yet). Reading it touches the destination; errors propagate
+    /// (fail-closed).
+    pub remote: Option<RemoteSummary>,
+    /// Milliseconds since the last archive pass this open (`None` until
+    /// the first one — in-memory, resets on reopen).
+    pub last_archive_age_millis: Option<u64>,
 }
 
 /// One segment as listed by the remote manifest (restore input,
