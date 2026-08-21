@@ -124,7 +124,7 @@
 | P0.2 | p0 | wal_recovery PointInTime + report + escalada | done | 95418de | 2026-08-21 |
 | P0.3 | p0 | compat auto_reclaim=true + bench pin | done | 83399bc | 2026-08-21 |
 | P1.1 | p1 | recover_from_fence + DB::resume() | done | b0d4e51 | 2026-08-21 |
-| P1.2 | p1 | auto-resume transitório via Host | done | este commit | 2026-08-21 |
+| P1.2 | p1 | auto-resume transitório via Host | done | c1b2237 | 2026-08-21 |
 | P2.1 | p2 | listeners/severidades + tabela de knobs | todo | — | 2026-08-21 |
 | P2.2 | p2 | docs "drop-in divergences" | todo | — | 2026-08-21 |
 
