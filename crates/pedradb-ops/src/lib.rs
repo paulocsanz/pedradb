@@ -31,7 +31,7 @@ use pedradb_core::manifest::{self, VersionSet};
 use pedradb_core::wal::Wal;
 use pedradb_core::{
     copy_db_directory, read_checkpoint_meta, CheckpointMeta, CoreError, Db, Env, EnvFile,
-    OpenOptions, SequenceNumber, StdEnv, WriteRecord, WAL_FILE_NAME,
+    OpenOptions, SequenceNumber, StdEnv, WriteOp, WriteRecord, WAL_FILE_NAME,
 };
 
 /// Ops-layer error (wraps core + structured messages).
@@ -504,6 +504,92 @@ impl<E: Env> BackupEngine<E> {
         db.close()?;
         Ok(())
     }
+}
+
+/// Report of a history-tier restore (RFC-0046 P1.3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HistoryRestoreReport {
+    /// Remote segments replayed.
+    pub segments: usize,
+    /// History records applied (post target filter).
+    pub records: usize,
+    /// `last_sequence` of the restored database.
+    pub last_sequence: SequenceNumber,
+}
+
+/// Restore a database from the remote history tier (RFC-0046 P1.3):
+/// destroys nothing here — reads the newest intact remote manifest,
+/// streams every listed segment (per-record CRC verified), and replays the
+/// versions up to `target_sequence` (`None` = all) into a fresh WAL at
+/// `dest` in sequence order, so recovery rebuilds the database with the
+/// original sequences. Open the result with `Db::open`.
+///
+/// Every record is CRC-verified at replay: corrupt bytes anywhere in the
+/// chain are a typed error, never a silent wrong restore.
+///
+/// # Errors
+/// Remote I/O, corrupt manifest/segment, or WAL write failure.
+pub fn restore_history_from_remote<E: Env>(
+    env: &E,
+    remote_root: impl AsRef<Path>,
+    dest: impl AsRef<Path>,
+    target_sequence: Option<SequenceNumber>,
+) -> Result<HistoryRestoreReport> {
+    let tier = pedradb_core::history::RemoteTier::new(remote_root.as_ref());
+    let segs = tier.latest_segments(env)?;
+    if segs.is_empty() {
+        return Err(OpsError::Msg(
+            "remote history tier has no manifest — nothing to restore".into(),
+        ));
+    }
+    let mut ops: Vec<WriteOp> = Vec::new();
+    for seg in &segs {
+        let bytes = tier.read_segment(env, &seg.name)?;
+        for r in pedradb_core::history::walk_segment_records(&bytes)? {
+            if target_sequence.is_some_and(|t| r.seq > t) {
+                continue;
+            }
+            ops.push(match r.kind {
+                1 => WriteOp::delete(r.seq, r.key),
+                2 => WriteOp::delete_range(r.seq, r.key, r.val),
+                _ => WriteOp::put(r.seq, r.key, r.val),
+            });
+        }
+    }
+    ops.sort_by_key(|o| o.sequence);
+    let dest = dest.as_ref();
+    env.create_dir_all(dest)?;
+    let wal_path = dest.join(WAL_FILE_NAME);
+    {
+        let mut wal = Wal::create_on(env, &wal_path)?;
+        for chunk in ops.chunks(256) {
+            wal.append_write_ops(chunk)?;
+        }
+        wal.sync_all()?;
+        wal.close()?;
+    }
+    env.sync_dir(dest)?;
+    let db = Db::open_with_env(
+        dest,
+        OpenOptions {
+            history: Default::default(),
+            wal_recovery: Default::default(),
+            sync: true,
+            auto_flush_bytes: None,
+            auto_compact_sst_count: None,
+            auto_compact_sst_bytes: None,
+            exclusive: true,
+            large_value_threshold: None,
+        },
+        env.clone(),
+    )?;
+    let report = HistoryRestoreReport {
+        segments: segs.len(),
+        records: ops.len(),
+        last_sequence: db.last_sequence(),
+    };
+    db.close()?;
+    Ok(report)
 }
 
 fn write_warch(env: &impl Env, path: &Path, records: &[Vec<u8>]) -> Result<()> {
@@ -992,5 +1078,106 @@ mod tests {
         let _ = std::fs::remove_dir_all(&data);
         let _ = std::fs::remove_dir_all(&bak);
         let _ = std::fs::remove_dir_all(&rest);
+    }
+
+    /// RFC-0046 P1.3 e2e: destroy the local database, restore from the
+    /// remote history tier at an arbitrary seq inside the horizon, verify
+    /// values and MVCC, and prove corrupt remote bytes fail the restore.
+    #[test]
+    fn pitr_restore_from_object_storage() {
+        use pedradb_core::{HistoryHorizon, HistoryOptions, Snapshot};
+        let data = temp();
+        let remote = temp();
+        {
+            let mut db = Db::open_with(
+                &data,
+                OpenOptions {
+                    history: HistoryOptions {
+                        horizon: HistoryHorizon::Window(std::time::Duration::from_millis(1)),
+                        cap_bytes: 1 << 30,
+                    },
+                    wal_recovery: Default::default(),
+                    sync: true,
+                    auto_flush_bytes: None,
+                    auto_compact_sst_count: Some(1),
+                    auto_compact_sst_bytes: None,
+                    exclusive: true,
+                    large_value_threshold: None,
+                },
+            )
+            .unwrap();
+            db.set_remote_history(StdEnv, &remote);
+            for i in 0..40u32 {
+                db.put(b"k", format!("v{i:02}").as_bytes()).unwrap();
+            }
+            // Let every sample age past the 1 ms horizon, then one archive
+            // round: segment → upload → GC.
+            std::thread::sleep(std::time::Duration::from_millis(3));
+            db.flush().unwrap();
+            assert!(
+                db.earliest_readable_sequence() > 0,
+                "aging + archive round must advance the GC floor"
+            );
+            db.close().unwrap();
+        }
+        // Destroy the local database — the remote tier is all that remains.
+        std::fs::remove_dir_all(&data).unwrap();
+
+        // Full restore: the remote history tier holds the ARCHIVED PREFIX —
+        // every version aged past the horizon. The newest in-window tail
+        // lived in local SSTs/WAL (destroyed with the machine); covering it
+        // is the WAL-ship path (`restore_with_increments`), as in Postgres
+        // base+WAL PITR. So "all" = the state at the archive cutoff.
+        let dest = temp();
+        let report = restore_history_from_remote(&StdEnv, &remote, &dest, None).unwrap();
+        assert_eq!(report.segments, 1);
+        let cutoff = report.last_sequence;
+        assert!(cutoff >= 31, "aging must archive nearly everything: {cutoff}");
+        let db = open_db(&dest);
+        let expect = format!("v{:02}", cutoff - 1).into_bytes();
+        assert_eq!(db.get(b"k").as_deref(), Some(expect.as_ref()));
+        assert_eq!(
+            db.get_at(Snapshot::at(15), b"k").unwrap().as_deref(),
+            Some(b"v14".as_ref()),
+            "MVCC at an arbitrary in-window seq survives the round trip"
+        );
+        db.close().unwrap();
+
+        // Point-in-time restore at seq 20 (v19 is the state at that seq).
+        let dest2 = temp();
+        let pitr = restore_history_from_remote(&StdEnv, &remote, &dest2, Some(20)).unwrap();
+        assert_eq!(pitr.last_sequence, 20);
+        assert_eq!(pitr.records, 20);
+        let db = open_db(&dest2);
+        assert_eq!(db.get(b"k").as_deref(), Some(b"v19".as_ref()));
+        db.close().unwrap();
+
+        // Corrupt one remote segment byte → restore fails closed (typed).
+        let seg: PathBuf = std::fs::read_dir(&remote)
+            .unwrap()
+            .map(|e| e.unwrap().path())
+            .find(|p| {
+                p.file_name()
+                    .is_some_and(|n| n.to_string_lossy().starts_with("seg-"))
+            })
+            .expect("remote segment object");
+        let mut bytes = std::fs::read(&seg).unwrap();
+        let mid = bytes.len() / 2;
+        bytes[mid] ^= 0xff;
+        std::fs::write(&seg, &bytes).unwrap();
+        let dest3 = temp();
+        let err = restore_history_from_remote(&StdEnv, &remote, &dest3, None);
+        assert!(
+            matches!(
+                err,
+                Err(OpsError::Core(CoreError::CorruptHistory(_)))
+            ),
+            "corrupt remote bytes must fail the restore closed: {err:?}"
+        );
+
+        let _ = std::fs::remove_dir_all(&remote);
+        let _ = std::fs::remove_dir_all(&dest);
+        let _ = std::fs::remove_dir_all(&dest2);
+        let _ = std::fs::remove_dir_all(&dest3);
     }
 }

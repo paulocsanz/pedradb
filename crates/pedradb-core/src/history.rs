@@ -16,10 +16,13 @@ use std::collections::VecDeque;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
-/// One archived segment (manifest entry; file at `history/seg-{id:08}.hist`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// One archived segment (manifest entry; file at `history/seg-{id:08}.hist`,
+/// mirrored remotely under its content-addressed `name`).
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SegmentMeta {
     pub id: u64,
+    /// Content-addressed remote object name (`seg-<len>-<crc32c>.hist`).
+    pub name: String,
     pub from_seq: u64,
     pub through_seq: u64,
     pub bytes: u64,
@@ -41,14 +44,16 @@ struct Manifest {
 
 impl Manifest {
     fn encode(&self) -> Vec<u8> {
-        let mut b = Vec::with_capacity(28 + self.segs.len() * 32);
+        let mut b = Vec::with_capacity(28 + self.segs.len() * 40);
         b.extend_from_slice(b"PHST");
-        b.extend_from_slice(&1u32.to_le_bytes());
+        b.extend_from_slice(&2u32.to_le_bytes());
         b.extend_from_slice(&self.next_id.to_le_bytes());
         b.extend_from_slice(&self.archive_floor.to_le_bytes());
         b.extend_from_slice(&(self.segs.len() as u32).to_le_bytes());
         for s in &self.segs {
             b.extend_from_slice(&s.id.to_le_bytes());
+            b.extend_from_slice(&(s.name.len() as u32).to_le_bytes());
+            b.extend_from_slice(s.name.as_bytes());
             b.extend_from_slice(&s.from_seq.to_le_bytes());
             b.extend_from_slice(&s.through_seq.to_le_bytes());
             b.extend_from_slice(&s.bytes.to_le_bytes());
@@ -63,7 +68,7 @@ impl Manifest {
         if buf.len() < 32 || &buf[0..4] != b"PHST" {
             return Err(bad());
         }
-        if u32::from_le_bytes(buf[4..8].try_into().unwrap()) != 1 {
+        if u32::from_le_bytes(buf[4..8].try_into().unwrap()) != 2 {
             return Err(bad());
         }
         let body_len = buf.len() - 4;
@@ -77,17 +82,30 @@ impl Manifest {
         let mut segs = VecDeque::with_capacity(n);
         let mut off = 28;
         for _ in 0..n {
-            if off + 32 > body_len {
+            let g = |off: &mut usize| -> Result<u64> {
+                if *off + 8 > body_len {
+                    return Err(bad());
+                }
+                let v = u64::from_le_bytes(buf[*off..*off + 8].try_into().unwrap());
+                *off += 8;
+                Ok(v)
+            };
+            let id = g(&mut off)?;
+            if off + 4 > body_len {
                 return Err(bad());
             }
-            let g = |o: usize| u64::from_le_bytes(buf[o..o + 8].try_into().unwrap());
-            segs.push_back(SegmentMeta {
-                id: g(off),
-                from_seq: g(off + 8),
-                through_seq: g(off + 16),
-                bytes: g(off + 24),
-            });
-            off += 32;
+            let nlen =
+                u32::from_le_bytes(buf[off..off + 4].try_into().unwrap()) as usize;
+            off += 4;
+            if off + nlen + 24 > body_len {
+                return Err(bad());
+            }
+            let name = String::from_utf8_lossy(&buf[off..off + nlen]).into_owned();
+            off += nlen;
+            let from_seq = g(&mut off)?;
+            let through_seq = g(&mut off)?;
+            let bytes = g(&mut off)?;
+            segs.push_back(SegmentMeta { id, name, from_seq, through_seq, bytes });
         }
         Ok(Self { next_id, segs, archive_floor })
     }
@@ -192,7 +210,20 @@ impl HistoryTier {
     ) -> Result<()> {
         f.sync_all()?;
         drop(f);
-        self.manifest.segs.push_back(SegmentMeta { id, from_seq: from, through_seq: through, bytes });
+        // Content-addressed name (remote mirror object identity): read the
+        // sealed bytes back once and hash them.
+        let path = self.root.join("history").join(format!("seg-{id:08}.hist"));
+        let mut rf = env.open_read(&path)?;
+        let mut buf = Vec::with_capacity(bytes as usize);
+        std::io::Read::read_to_end(&mut rf, &mut buf)?;
+        let name = RemoteTier::segment_name(&buf);
+        self.manifest.segs.push_back(SegmentMeta {
+            id,
+            name,
+            from_seq: from,
+            through_seq: through,
+            bytes,
+        });
         self.persist(env)
     }
 
@@ -232,7 +263,7 @@ impl HistoryTier {
         let mut total: u64 = self.manifest.segs.iter().map(|s| s.bytes).sum();
         let dir = self.root.join("history");
         while total > cap_bytes {
-            let Some(front) = self.manifest.segs.front().copied() else { break };
+            let Some(front) = self.manifest.segs.front().cloned() else { break };
             // A pin at/below the segment's top holds it — stop (fail-closed
             // toward keeping history, never toward dropping pinned data).
             if let Some(pin) = pin_floor {
@@ -368,6 +399,20 @@ pub fn walk_segment_records(bytes: &[u8]) -> Result<Vec<HistoryRecord>> {
     Ok(out)
 }
 
+/// One segment as listed by the remote manifest (restore input,
+/// RFC-0046 P1.3).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RemoteSegment {
+    /// Content-addressed object name under the tier root.
+    pub name: String,
+    /// Lowest publish seq covered.
+    pub from_seq: u64,
+    /// Highest publish seq covered.
+    pub through_seq: u64,
+    /// Segment size in bytes.
+    pub bytes: u64,
+}
+
 /// RFC-0046 P1.1: object-storage-shaped mirror of the local history tier,
 /// reached only through the `Env` seam (no network in unit tests — the
 /// destination is any `Env`; an S3-class binding is a host-side `Env` impl).
@@ -488,6 +533,25 @@ impl RemoteTier {
 
     fn manifest_name(n: u64) -> String {
         format!("MANIFEST-{n:016}")
+    }
+
+    /// Segments of the newest intact remote manifest, oldest-first.
+    /// Empty when the remote tier holds no manifest yet.
+    pub fn latest_segments<E: Env>(&self, env: &E) -> Result<Vec<RemoteSegment>> {
+        let Some(bytes) = self.latest_manifest(env)? else {
+            return Ok(Vec::new());
+        };
+        let manifest = Manifest::decode(&bytes)?;
+        Ok(manifest
+            .segs
+            .into_iter()
+            .map(|s| RemoteSegment {
+                name: s.name,
+                from_seq: s.from_seq,
+                through_seq: s.through_seq,
+                bytes: s.bytes,
+            })
+            .collect())
     }
 
     /// Newest intact manifest generation: `LATEST` if it parses and its
