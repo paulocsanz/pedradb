@@ -106,7 +106,13 @@
 - [ ] **P2.2** Handoff sem park-convoy (wait 175 µs vs hold 1.6 µs é o 2.4×
       entre 266 k e o ceiling): fila leader-follower **sem catch-up wait**
       (diferente do merge falsificado 0.19×, que esperava); protótipo
-      env-gated — status: `todo`
+      env-gated — status: `doing`
+      (**fair handoff falsificado** 2026-08-21, `findings/rfc0045-p22/`:
+      `PEDRA_WRITE_FAIR=1` 8/8 rounds pares 2–3.5× pior em qps e
+      lock_wait 3–4× pior — o barging injusto é load-shedding, handoff
+      direto encadeia latência de wake. Espaço de lock-flags da
+      parking_lot/lock_api 0.4 varrido: park injusto > spin > fair;
+      direção restante = batching leader-follower sem catch-up)
 
 ## Status (living — update with every PR)
 
@@ -119,7 +125,7 @@
 | P1.2 | p1 | bissecção do contexto v0 | done | premissa corrigida: era config+janela de stalls, não contexto; 9 rounds sem flip | 2026-08-21 |
 | P1.3 | p1 | remesura quieto 3× sem regressão | todo | — | 2026-08-20 |
 | P2.1 | p2 | memtable apply fora da seção crítica | todo | alvo medido: hold ≤1.1 µs | 2026-08-20 |
-| P2.2 | p2 | handoff sem park-convoy | todo | wait 175 µs é o 2.4× do gap | 2026-08-20 |
+| P2.2 | p2 | handoff sem park-convoy | doing | fair handoff falsificado (8/8, rfc0045-p22); resta batching sem catch-up | 2026-08-21 |
 
 ## Acceptance Criteria
 
