@@ -1,0 +1,7 @@
+profile_ab: live_set_bytes=10240 written_bytes=204800
+profile_ab: auto_reclaim=true  final_disk=22355B  full_scan=51us  keys=10
+profile_ab: auto_reclaim=false final_disk=209347B  full_scan=63us  keys=10
+profile_ab: disk_ratio_f20_over_reclaim=9.4x
+recovery_report: kind=crc
+recovery_report: corrupt_offset=456 good_through_offset=456 discarded_bytes=760
+recovery_report: prefix k02 visible=true suffix k03 discarded=true
