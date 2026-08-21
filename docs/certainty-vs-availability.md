@@ -94,7 +94,7 @@ cercado vira failover, e certeza-vs-disponibilidade é política do cluster.
 |---|---|---|
 | Write acked sobrevive a power loss (G1) | **Sim** | nada |
 | Nunca ler errado (fail-closed em corrupção) | Sim, mas **cara**: nó parado | failover (Montanha) **ou** PITR/backup (RFC-0046) **ou** tolerância a downtime manual |
-| História/MVCC/PITR | **Hoje: não sustentável** (disco O(writes)) | horizon bounded + archive (RFC-0046 P0) — S3 deixa barato, sem S3 fica bounded no SSD |
+| História/MVCC/PITR | **Sustentável desde 2026-08-21** (RFC-0046 P0): retention default bounded (`Window(24 h)`) + archive local com cap e watermark tipificado — disco ≈ live set + janela | horizon/archive já no kernel; S3 (P1) deixa a história barata e sobrevive a perder o disco local |
 | Fence após fsync falho | Sim (cerca) | reopen; política de severidade tipada é a evolução (abaixo) |
 
 ## 5. Veredito
@@ -120,9 +120,12 @@ cercado vira failover, e certeza-vs-disponibilidade é política do cluster.
    backup nem réplica**, a posição 2(b) deixa de ser suficiente e um modo
    leniente *declarado* (estilo point-in-time com relatório do descartado)
    passa a ser requisito de produto — decisão de roadmap, não de kernel.
-4. O que **não** se sustenta hoje de jeito nenhum: retenção default
-   ilimitada no SSD. Isso é bug de sustentabilidade, não posição
-   filosófica — RFC-0046 P0 fecha.
+4. O que **não** se sustentava até 2026-08-21: retenção default
+   ilimitada no SSD. Era bug de sustentabilidade, não posição
+   filosófica — **fechado pelo RFC-0046 P0** (horizon bounded
+   default `Window(24 h)` + archive local com cap; estouro do cap
+   avança o watermark com `SnapshotTooOld` tipificado, nunca
+   destrói silenciosamente; F20 vira opt-in `HistoryHorizon::All`).
 
 ## 6. Fontes
 

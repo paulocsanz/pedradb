@@ -157,6 +157,11 @@ Não fecha (e não se mente):
       parcial E fechado**; A 2.88 B 2.93 C 3.84 D 3.02 F 1.66 não
       fecham no wall (p50/p99 do F 1.5×/22× melhores). Cliff do E no 2M
       mapeado e fixado no produto (CountCache); `auto_reclaim` opt-in.
+      **Nota (2026-08-21, RFC-0046 P0): o cliff do E também fecha
+      estruturalmente por retention — o default do kernel agora é
+      `Window(24 h)` bounded + archive (versões velhas saem do SSD,
+      scan frio volta a O(live set + janela)), não só via CountCache
+      no caminho quente. Re-árbitro oficial: RFC-0046 P0.4.**
       `ycsb-longwindow/` + `rfc0044-p2/quiet/`)
 - [x] **P2.3** Script: `PEDRA_PARITY_ASYNC=1` + `FLOOR=5` **não** é o
       default do `tikv_ycsb_parity_v0.sh` — status: `done`

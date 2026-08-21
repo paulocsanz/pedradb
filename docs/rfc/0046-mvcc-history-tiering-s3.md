@@ -1,7 +1,7 @@
 # RFC-0046: história MVCC fora do SSD — retention default + tier em object storage (S3)
 
-**Status:** draft
-**Updated:** 2026-08-20
+**Status:** in-progress (P0.1–P0.3 done; P0.4 gated em caixa quieta)
+**Updated:** 2026-08-21
 **Parents:** [0009](0009-rocksdb-class-engine.md) (F20 retention),
 [0044](0044-async-class-5x-rocks.md) (E/cliff de retenção),
 [0045](0045-multi-writer-async-5x.md)
@@ -78,21 +78,48 @@
 
 ### P0 — retention sustentável sem S3
 
-- [ ] **P0.1** `OpenOptions::history_horizon` (`All` | `Window(d)`) +
-      default `Window(d)` (d decidido aqui, com número na mesa); F20 vira
-      `All` explícito; doc de produto atualizada (o que o default promete:
-      MVCC dentro da janela, PITR via archive) — status: `todo`
-- [ ] **P0.2** Archive local antes do GC (history SST/ship-wal contínuo,
-      cap + rotação, watermark avança no estouro com `SnapshotTooOld`
-      tipificado; GC pin-aware reutiliza `CompactGcOptions`) — status: `todo`
-- [ ] **P0.3** Testes: GC respeita pin (`snapshot_pinned_survives_horizon`);
-      estouro de cap avança watermark sem destruir pin; crash no meio do
-      archive → reopen consistente; PITR local por seq dentro da janela —
-      status: `todo`
+- [x] **P0.1** `OpenOptions::history` (`HistoryOptions { horizon, cap_bytes }`,
+      `HistoryHorizon::All | Window(Duration)`) + default do produto
+      **`Window(24 h)` com cap 1 GiB** (24 h: janela de PITR "de graça" no
+      SSD sem replicar o `gc_grace` de 10 d do Cassandra — disco ≈ live set +
+      janela; cap 1 GiB borneia o archive local sem S3); F20 vira `All`
+      explícito; sampling seq×tempo a cada 32 publishes (`Env::unix_millis`
+      seam, determinístico em teste); doc de produto: `docs/usage.md`
+      §"History retention — bounded by default". Nota bench: runs curtos
+      (< 24 h de wall clock) nunca envelhecem amostras além da janela → cutoff 0
+      → comportamento F20 dentro do bench; colunas oficiais só mudam no
+      re-árbitro P0.4 com janela longa — status: `done`
+- [x] **P0.2** Archive local antes do GC: `history/seg-*.hist` (streaming,
+      8192 records/segmento, CRC32c por record), `history/MANIFEST` (magic
+      PHST, tmp+rename, manifest-is-truth — crash deixa no máximo arquivo
+      não referenciado, removido no próximo open); cap + rotação (estouro
+      derruba segmentos mais velhos e avança o watermark com
+      `SnapshotTooOld` tipificado — nunca destrói silenciosamente; pin
+      segura o segmento); GC pin-aware reutiliza
+      `CompactGcOptions::for_oldest_snapshot`; **fail-closed**: erro de
+      archive pula a rodada de GC (merge history-preserving). Tier lazy:
+      `history/` só materializa no primeiro archive (dir de DB/checkpoint
+      restaurado continua flat). **Perfis separados**: `auto_reclaim=true`
+      é reclaim puro **sem archive** (perfil Rocks da face compat,
+      RFC-0047 divergência 4 — o teste `auto_reclaim_default_matches_rocks_profile`
+      pegou o over-archive e fechou); archive só quando o floor vem do
+      horizon — status: `done`
+- [x] **P0.3** Testes: `snapshot_pinned_survives_horizon` (pin sobrevive a
+      aging+GC; release + novo envelhecimento → `SnapshotTooOld`);
+      `pitr_local_by_seq_within_window`; `archive_cap_overflow_advances_watermark_not_silent`
+      (watermark avança, latest intacto, pin segura, bytes ≤ cap);
+      `archive_crash_mid_upload_reopens_consistent` (fault `.hist` → GC
+      pulada, história intacta, reopen consistente);
+      `history_horizon_all_keeps_all_versions` (F20 opt-in re-verde).
+      Duas regressões reais pegas pela bateria e fechadas: backup/restore
+      quebrava com o novo subdir (`copy_db_directory` tratava diretório
+      como arquivo — `metadata_len` é `Ok` em dir no macOS; agora
+      `Env::is_dir` pula dir de verdade) e o over-archive do perfil
+      Rocks (acima) — status: `done`
 - [ ] **P0.4** Re-árbitro quieto 3× com o novo default (colunas oficiais
       0041 medem o default do produto): E/scan/A–D + regressão G1;
       expectativa: cliff do E some estruturalmente (retenção), CountCache
-      segue no caminho quente — status: `todo`
+      segue no caminho quente — status: `todo` (gated: load < 10)
 
 ### P1 — tier S3 (história barata e PITR de lá)
 
@@ -118,10 +145,10 @@
 
 | ID | Band | Title | Status | Task / PR | Updated |
 |----|------|-------|--------|-----------|---------|
-| P0.1 | p0 | history_horizon + default bounded | todo | — | 2026-08-20 |
-| P0.2 | p0 | archive local bounded + GC pin-aware | todo | — | 2026-08-20 |
-| P0.3 | p0 | testes pin/cap/crash/PITR local | todo | — | 2026-08-20 |
-| P0.4 | p0 | re-árbitro quieto com novo default | todo | — | 2026-08-20 |
+| P0.1 | p0 | history_horizon + default bounded | **done** | b68f9a1 (+docs neste commit) | 2026-08-21 |
+| P0.2 | p0 | archive local bounded + GC pin-aware | **done** | b68f9a1 (+docs neste commit) | 2026-08-21 |
+| P0.3 | p0 | testes pin/cap/crash/PITR local | **done** | b68f9a1 (+docs neste commit) | 2026-08-21 |
+| P0.4 | p0 | re-árbitro quieto com novo default | todo | gated: load < 10 | 2026-08-21 |
 | P1.1 | p1 | Env→S3 + testes seam | todo | — | 2026-08-20 |
 | P1.2 | p1 | upload pipeline + backpressure | todo | — | 2026-08-20 |
 | P1.3 | p1 | restore drill do tier | todo | — | 2026-08-20 |

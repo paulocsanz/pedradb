@@ -167,6 +167,24 @@ Full contract: rustdoc on `db` module. Audit fix backlog: [RFC-0015](rfc/0015-au
 
 ---
 
+## History retention — bounded by default (RFC-0046 P0)
+
+| Setting | Behavior |
+|---------|----------|
+| **Default** (`OpenOptions { history: HistoryOptions::default(), .. }`) | `HistoryHorizon::Window(24 h)`, archive cap **1 GiB** |
+| MVCC / `get_at` / change feed | Full fidelity **inside the window** (pins always win, even past it) |
+| Older than the window | Auto-compact **archives first** (CRC'd segments under `history/`), then drops — disk ≈ live set + window + archive cap |
+| Cap overflow | Oldest archive segments dropped, readable watermark advances — old snaps fail with typed `SnapshotTooOld`, **never a silent destroy** |
+| Archive I/O error | **Fail-closed**: that GC round is skipped (history-preserving merge); nothing is dropped unarchived |
+| F20 — keep every version, forever | Explicit opt-in: `HistoryHorizon::All` (what the kernel did before 2026-08-21) |
+| `set_auto_reclaim(true)` | Different profile: latest-only, **no archive** (Rocks storage profile — disk ≈ live set + pins) |
+
+Short-lived processes never trip the horizon: the cutoff is wall-clock
+(`Env::unix_millis`, sampled), so a fresh DB GCs nothing until writes actually
+age out. Restore/checkpoint dirs stay flat until the first archive round.
+
+---
+
 ## API surface (P0)
 
 | API | Notes |
@@ -187,7 +205,7 @@ Full contract: rustdoc on `db` module. Audit fix backlog: [RFC-0015](rfc/0015-au
 | `Db::pin_snapshot` / `release_snapshot_pin` | Register/release read pin so `compact_reclaim` keeps history |
 | `get_at` / `range_at` / `try_scan_at` / `SnapshotTooOld` | History-dropping GC raises watermark (MANIFEST v4 durable); old snaps fail closed |
 | TX·OCC commit | Also refuse `SnapshotTooOld` if reclaim advanced past the TX snapshot |
-| `set_auto_reclaim(true)` | Opt-in: auto-compact piggybacks pin-aware reclaim (default off / F20) |
+| `set_auto_reclaim(true)` | Opt-in: auto-compact piggybacks pin-aware reclaim, latest-only **without archive** (default off → bounded 24 h window, see [History retention](#history-retention--bounded-by-default-rfc-0046-p0)) |
 | `set_write_stall_l0(Some(n))` | Opt-in: `WriteStall` when L0 ≥ n (default off; no sleep) |
 | `set_write_pressure_l0(Some(n))` | Soft: one flush+compact when L0 ≥ n, then admit (no error) |
 | `set_write_stall_mem_bytes(Some(b))` | Opt-in: `WriteStallMem` when active mem ≥ b (default off) |
@@ -461,7 +479,7 @@ Full knob map: [rocksdb-compat.md](rocksdb-compat.md#knob-map-rocksdb--compat-be
 | 1 | **Writes are synced by default.** `Options::sync` defaults to `true` (Pedra `fdatasync`s before Ok, G1); Rocks defaults to async WAL. `set_sync(false)` restores the exact Rocks shape. | Durability is the product — and it is still faster than the Rocks default people run. |
 | 2 | **Repeated corruption refuses the open — in every recovery mode.** A torn WAL tail recovers as a clean prefix (same as Rocks); damage **mid-WAL** in the default PointInTime mode serves the prefix **and reports the discard** (`DB::last_recovery_report`). But the third CORRUPTLOG event (RFC-0038) refuses the open even in PointInTime. | Fail-closed escalation is the integrity floor (G2) — the policy knob cannot buy silence. |
 | 3 | **A failed WAL sync fences the writer** (`ErrorKind::Fenced`) instead of continuing silently. Recovery is explicit: `DB::resume()` (close+replay+reopen) returns the uncertain sequence range and whether writes were lost; `auto_resume_transient` (default on) self-heals only ENOSPC-class fences. | Rocks' fsync-failure handling assumes the write can be retried in place; Pedra reports the uncertainty (`uncertain_from..=uncertain_through`) instead of guessing. |
-| 4 | **Full history is an opt-out, not the default.** The compat face defaults to `auto_reclaim: true` (Rocks storage profile: disk ≈ live set + pins). Pedra F20 (keep every version — free PITR) is the kernel default and an explicit opt-out on the compat face. | A drop-in must match the disk profile the operator expects; F20 stays one flag away. |
+| 4 | **The storage-profile default is the Rocks shape.** The compat face defaults to `auto_reclaim: true` (disk ≈ live set + pins, **no archive**). The Pedra kernel default is bounded history — `Window(24 h)` + local archive with cap (RFC-0046), `auto_reclaim: false` on the compat face — and unbounded F20 is `HistoryHorizon::All`, explicit everywhere. | A drop-in must match the disk profile the operator expects; Pedra's bounded-history default and F20 each stay one flag away. |
 
 Official bench columns are unaffected: `rocksdb-parity-bench` pins retention
 with `ROCKS_PARITY_RETENTION=product|rocks` (default `product`) — the compat
