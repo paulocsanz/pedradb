@@ -110,7 +110,12 @@ cercado vira failover, e certeza-vs-disponibilidade é política do cluster.
    (severidades retryable/hard/fatal + hook no seam `Host` + modos de
    recovery declarados — a direção já desenhada no guarantees doc §4),
    nunca uma flag que continua escrevendo sem reconhecer incerteza (isso
-   recriaria o `paranoid_checks=false` sem tipagem).
+   recriaria o `paranoid_checks=false` sem tipagem). **Concretizado em
+   2026-08-21: o primeiro host é o próprio `rocksdb-compat` —
+   [RFC-0047](rfc/0047-compat-dropin-failure-profile.md) dá à face
+   drop-in o perfil de falha do RocksDB (PointInTime + `resume()`,
+   tipados e reportados, escalada CORRUPTLOG preservada) sem tocar o
+   piso fail-closed do kernel.**
 3. **Se um dia o consumidor dominante for embedded single-process sem
    backup nem réplica**, a posição 2(b) deixa de ser suficiente e um modo
    leniente *declarado* (estilo point-in-time com relatório do descartado)
