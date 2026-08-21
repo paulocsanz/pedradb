@@ -13,7 +13,7 @@ use crate::env::{Env, EnvFile};
 use crate::error::{CoreError, Result};
 use crate::wal::crc::crc32c;
 use std::collections::VecDeque;
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
 /// One archived segment (manifest entry; file at `history/seg-{id:08}.hist`).
@@ -249,7 +249,676 @@ impl HistoryTier {
     }
 
     /// Live archived bytes.
+    #[cfg_attr(not(test), allow(dead_code))] // test + P1.2 sizing metrics
     pub(crate) fn bytes(&self) -> u64 {
         self.manifest.segs.iter().map(|s| s.bytes).sum()
+    }
+
+    /// Encode the manifest (P1.1: the remote tier uploads these bytes as an
+    /// immutable generation object).
+    #[allow(dead_code)] // consumed by the P1.2 host upload pipeline (RFC-0046)
+    pub(crate) fn manifest_bytes(&self) -> Vec<u8> {
+        self.manifest.encode()
+    }
+
+    /// Next immutable manifest generation id for the remote tier.
+    #[allow(dead_code)] // consumed by the P1.2 host upload pipeline (RFC-0046)
+    pub(crate) fn remote_generation(&self) -> u64 {
+        self.manifest.next_id
+    }
+}
+
+/// Outcome of uploading one object to the remote tier.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PutStatus {
+    /// Object written and synced at the destination.
+    Uploaded,
+    /// Identical content already present (read-back verified).
+    AlreadyPresent,
+}
+
+/// One record as stored in a history segment (wire form: `u32 klen, key,
+/// u32 vlen, val, u64 seq, u8 kind, u32 crc32c` over everything before it).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HistoryRecord {
+    pub key: Vec<u8>,
+    pub val: Vec<u8>,
+    pub seq: u64,
+    pub kind: u8,
+}
+
+/// Walk every record of a serialized segment, verifying the per-record CRC.
+/// Returns the records; corrupt or truncated input is a typed error
+/// (fail-closed — used both before upload and at restore time).
+pub fn walk_segment_records(bytes: &[u8]) -> Result<Vec<HistoryRecord>> {
+    let bad = |why: &str| CoreError::CorruptHistory(format!("segment record {why}"));
+    let mut out = Vec::new();
+    let mut off = 0usize;
+    while off < bytes.len() {
+        let start = off;
+        let rd_u32 = |off: &mut usize| -> Result<u32> {
+            if *off + 4 > bytes.len() {
+                return Err(bad("truncated header"));
+            }
+            let v = u32::from_le_bytes(bytes[*off..*off + 4].try_into().unwrap());
+            *off += 4;
+            Ok(v)
+        };
+        let klen = rd_u32(&mut off)? as usize;
+        if off + klen > bytes.len() {
+            return Err(bad("truncated key"));
+        }
+        let key = bytes[off..off + klen].to_vec();
+        off += klen;
+        let vlen = rd_u32(&mut off)? as usize;
+        if off + vlen > bytes.len() {
+            return Err(bad("truncated value"));
+        }
+        let val = bytes[off..off + vlen].to_vec();
+        off += vlen;
+        if off + 8 + 1 + 4 > bytes.len() {
+            return Err(bad("truncated tail"));
+        }
+        let seq = u64::from_le_bytes(bytes[off..off + 8].try_into().unwrap());
+        off += 8;
+        let kind = bytes[off];
+        off += 1;
+        let stored = u32::from_le_bytes(bytes[off..off + 4].try_into().unwrap());
+        off += 4;
+        if crc32c(&bytes[start..off - 4]) != stored {
+            return Err(bad("crc mismatch"));
+        }
+        out.push(HistoryRecord { key, val, seq, kind });
+    }
+    Ok(out)
+}
+
+/// RFC-0046 P1.1: object-storage-shaped mirror of the local history tier,
+/// reached only through the `Env` seam (no network in unit tests — the
+/// destination is any `Env`; an S3-class binding is a host-side `Env` impl).
+///
+/// Layout under `root`:
+/// - `seg-<len:016x>-<crc32c:08x>.hist` — immutable, content-addressed
+///   segment objects. Dedup is **read-back verified**: a name hit with
+///   different bytes is a typed collision error, never silent wrong data.
+/// - `MANIFEST-<n:016>` — immutable manifest generations (`n` = local
+///   `next_id`).
+/// - `LATEST` — tiny pointer (`MANIFEST-<n:016>\n<crc32c of that manifest>`)
+///   rewritten per upload. Object stores have no rename; a torn `LATEST`
+///   makes the reader fall back to the newest intact generation.
+#[derive(Debug, Clone)]
+pub struct RemoteTier {
+    root: PathBuf,
+}
+
+impl RemoteTier {
+    /// Remote tier rooted at `root` (created lazily on first upload).
+    pub fn new(root: impl Into<PathBuf>) -> Self {
+        Self { root: root.into() }
+    }
+
+    /// Content-addressed object name for segment `bytes`.
+    pub fn segment_name(bytes: &[u8]) -> String {
+        format!("seg-{:016x}-{:08x}.hist", bytes.len() as u64, crc32c(bytes))
+    }
+
+    fn segment_path(&self, name: &str) -> PathBuf {
+        self.root.join(name)
+    }
+
+    /// Upload one sealed local segment. The bytes are walked and CRC-verified
+    /// **before** anything leaves the machine (corrupt history never
+    /// uploads), then written `create + write_all + sync_all` with a synced
+    /// directory. Idempotent: identical content already present is a
+    /// read-back-verified no-op (P1.2 retry/resume builds on this).
+    pub fn put_segment<R: Env, L: Env>(
+        &self,
+        remote_env: &R,
+        local_env: &L,
+        local_path: &Path,
+    ) -> Result<PutStatus> {
+        let mut f = local_env.open_read(local_path)?;
+        let mut bytes = Vec::new();
+        std::io::Read::read_to_end(&mut f, &mut bytes)?;
+        walk_segment_records(&bytes)?;
+        let name = Self::segment_name(&bytes);
+        let dest = self.segment_path(&name);
+        if remote_env.exists(&dest) {
+            let mut rf = remote_env.open_read(&dest)?;
+            let mut have = Vec::new();
+            std::io::Read::read_to_end(&mut rf, &mut have)?;
+            if have.len() == bytes.len() && crc32c(&have) == crc32c(&bytes) {
+                return Ok(PutStatus::AlreadyPresent);
+            }
+            return Err(CoreError::CorruptHistory(format!(
+                "remote name collision at {name}: read-back differs"
+            )));
+        }
+        remote_env.create_dir_all(&self.root)?;
+        {
+            let mut out = remote_env.create(&dest)?;
+            out.write_all(&bytes)?;
+            out.sync_all()?;
+        }
+        remote_env.sync_dir(&self.root)?;
+        Ok(PutStatus::Uploaded)
+    }
+
+    /// Read back one segment object (restore path; the caller replays via
+    /// [`walk_segment_records`]).
+    pub fn read_segment<E: Env>(&self, env: &E, name: &str) -> Result<Vec<u8>> {
+        let mut f = env.open_read(&self.segment_path(name))?;
+        let mut buf = Vec::new();
+        std::io::Read::read_to_end(&mut f, &mut buf)?;
+        Ok(buf)
+    }
+
+    /// Upload manifest `bytes` as immutable generation `n`, then point
+    /// `LATEST` at it. A crash between the two leaves the previous
+    /// `LATEST` — the next upload repairs; readers fall back.
+    pub fn put_manifest<E: Env>(
+        &self,
+        env: &E,
+        bytes: &[u8],
+        n: u64,
+    ) -> Result<PutStatus> {
+        env.create_dir_all(&self.root)?;
+        let gen = self.segment_path(&Self::manifest_name(n));
+        let status = if env.exists(&gen) {
+            let mut f = env.open_read(&gen)?;
+            let mut have = Vec::new();
+            std::io::Read::read_to_end(&mut f, &mut have)?;
+            if have == bytes {
+                PutStatus::AlreadyPresent
+            } else {
+                return Err(CoreError::CorruptHistory(format!(
+                    "remote manifest generation {n} exists with different bytes"
+                )));
+            }
+        } else {
+            let mut f = env.create(&gen)?;
+            f.write_all(bytes)?;
+            f.sync_all()?;
+            PutStatus::Uploaded
+        };
+        let latest = format!("{}\n{:08x}", Self::manifest_name(n), crc32c(bytes));
+        {
+            let mut f = env.create(&self.segment_path("LATEST"))?;
+            f.write_all(latest.as_bytes())?;
+            f.sync_all()?;
+        }
+        env.sync_dir(&self.root)?;
+        Ok(status)
+    }
+
+    fn manifest_name(n: u64) -> String {
+        format!("MANIFEST-{n:016}")
+    }
+
+    /// Newest intact manifest generation: `LATEST` if it parses and its
+    /// target decodes; otherwise the highest-numbered intact generation;
+    /// `None` when the remote tier is empty.
+    pub fn latest_manifest<E: Env>(&self, env: &E) -> Result<Option<Vec<u8>>> {
+        let latest = self.segment_path("LATEST");
+        if env.exists(&latest) {
+            if let Ok(mut f) = env.open_read(&latest) {
+                let mut buf = String::new();
+                if f
+                    .read_to_string(&mut buf)
+                    .is_ok_and(|_| !buf.is_empty())
+                {
+                    if let Some((name, _crc)) = buf.trim_end().split_once('\n') {
+                        let p = self.segment_path(name);
+                        if env.exists(&p) {
+                            if let Ok(mut mf) = env.open_read(&p) {
+                                let mut mb = Vec::new();
+                                if std::io::Read::read_to_end(&mut mf, &mut mb).is_ok()
+                                    && Manifest::decode(&mb).is_ok()
+                                {
+                                    return Ok(Some(mb));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            // Torn/garbage LATEST — fall through to generation walk-back.
+        }
+        let mut gens: Vec<String> = env
+            .read_dir_names(&self.root)
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|n| n.starts_with("MANIFEST-"))
+            .collect();
+        gens.sort();
+        while let Some(name) = gens.pop() {
+            let p = self.segment_path(&name);
+            if let Ok(mut mf) = env.open_read(&p) {
+                let mut mb = Vec::new();
+                if std::io::Read::read_to_end(&mut mf, &mut mb).is_ok()
+                    && Manifest::decode(&mb).is_ok()
+                {
+                    return Ok(Some(mb));
+                }
+            }
+        }
+        Ok(None)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::cell::{Cell, RefCell};
+    use std::collections::BTreeMap;
+    use std::rc::Rc;
+
+    /// In-memory `Env` (flat namespace, dir names derived from parents).
+    /// Writes commit to the map on sync and on drop.
+    #[derive(Clone, Default)]
+    struct MapEnv {
+        files: Rc<RefCell<BTreeMap<PathBuf, Vec<u8>>>>,
+    }
+
+    struct MapFile {
+        files: Rc<RefCell<BTreeMap<PathBuf, Vec<u8>>>>,
+        path: PathBuf,
+        buf: Vec<u8>,
+        pos: usize,
+    }
+
+    impl MapFile {
+        fn commit(&self) {
+            self.files
+                .borrow_mut()
+                .insert(self.path.clone(), self.buf.clone());
+        }
+    }
+
+    impl Drop for MapFile {
+        fn drop(&mut self) {
+            self.commit();
+        }
+    }
+
+    impl std::io::Read for MapFile {
+        fn read(&mut self, out: &mut [u8]) -> std::io::Result<usize> {
+            let n = out.len().min(self.buf.len().saturating_sub(self.pos));
+            out[..n].copy_from_slice(&self.buf[self.pos..self.pos + n]);
+            self.pos += n;
+            Ok(n)
+        }
+    }
+
+    impl std::io::Seek for MapFile {
+        fn seek(&mut self, to: std::io::SeekFrom) -> std::io::Result<u64> {
+            let p: i64 = match to {
+                std::io::SeekFrom::Start(s) => s as i64,
+                std::io::SeekFrom::Current(d) => self.pos as i64 + d,
+                std::io::SeekFrom::End(d) => self.buf.len() as i64 + d,
+            };
+            self.pos = p.max(0) as usize;
+            Ok(self.pos as u64)
+        }
+    }
+
+    impl std::io::Write for MapFile {
+        fn write(&mut self, data: &[u8]) -> std::io::Result<usize> {
+            if self.pos > self.buf.len() {
+                self.buf.resize(self.pos, 0);
+            }
+            let end = self.pos + data.len();
+            if end > self.buf.len() {
+                self.buf.resize(end, 0);
+            }
+            self.buf[self.pos..end].copy_from_slice(data);
+            self.pos = end;
+            Ok(data.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl EnvFile for MapFile {
+        fn sync_data(&mut self) -> std::io::Result<()> {
+            self.commit();
+            Ok(())
+        }
+        fn sync_all(&mut self) -> std::io::Result<()> {
+            self.commit();
+            Ok(())
+        }
+        fn set_len(&mut self, len: u64) -> std::io::Result<()> {
+            self.buf.resize(len as usize, 0);
+            self.pos = self.pos.min(self.buf.len());
+            self.commit();
+            Ok(())
+        }
+        fn len(&mut self) -> std::io::Result<u64> {
+            Ok(self.buf.len() as u64)
+        }
+    }
+
+    impl Env for MapEnv {
+        type File = MapFile;
+        fn create_dir_all(&self, _path: &Path) -> std::io::Result<()> {
+            Ok(())
+        }
+        fn create(&self, path: &Path) -> std::io::Result<Self::File> {
+            self.files.borrow_mut().remove(path);
+            Ok(MapFile {
+                files: Rc::clone(&self.files),
+                path: path.to_path_buf(),
+                buf: Vec::new(),
+                pos: 0,
+            })
+        }
+        fn open_append(&self, path: &Path) -> std::io::Result<Self::File> {
+            let buf = self.files.borrow().get(path).cloned().unwrap_or_default();
+            let pos = buf.len();
+            Ok(MapFile {
+                files: Rc::clone(&self.files),
+                path: path.to_path_buf(),
+                buf,
+                pos,
+            })
+        }
+        fn open_read(&self, path: &Path) -> std::io::Result<Self::File> {
+            let buf = self.files.borrow().get(path).cloned().ok_or_else(|| {
+                std::io::Error::new(std::io::ErrorKind::NotFound, "missing")
+            })?;
+            Ok(MapFile {
+                files: Rc::clone(&self.files),
+                path: path.to_path_buf(),
+                buf,
+                pos: 0,
+            })
+        }
+        fn sync_dir(&self, _path: &Path) -> std::io::Result<()> {
+            Ok(())
+        }
+        fn read_dir_names(&self, path: &Path) -> std::io::Result<Vec<String>> {
+            let names = self
+                .files
+                .borrow()
+                .keys()
+                .filter(|p| p.parent() == Some(path))
+                .filter_map(|p| p.file_name())
+                .map(|n| n.to_string_lossy().into_owned())
+                .collect();
+            Ok(names)
+        }
+        fn remove_file(&self, path: &Path) -> std::io::Result<()> {
+            self.files
+                .borrow_mut()
+                .remove(path)
+                .map(|_| ())
+                .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "missing"))
+        }
+        fn rename(&self, from: &Path, to: &Path) -> std::io::Result<()> {
+            let mut files = self.files.borrow_mut();
+            match files.remove(from) {
+                Some(b) => {
+                    files.insert(to.to_path_buf(), b);
+                    Ok(())
+                }
+                None => Err(std::io::Error::new(std::io::ErrorKind::NotFound, "missing")),
+            }
+        }
+        fn exists(&self, path: &Path) -> bool {
+            self.files.borrow().contains_key(path)
+        }
+        fn metadata_len(&self, path: &Path) -> std::io::Result<u64> {
+            self.files
+                .borrow()
+                .get(path)
+                .map(|b| b.len() as u64)
+                .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "missing"))
+        }
+    }
+
+    /// `FailingEnv` role: one-shot create faults against a `MapEnv`.
+    #[derive(Clone)]
+    struct FaultyEnv {
+        inner: MapEnv,
+        fail_create: Rc<Cell<bool>>,
+    }
+
+    impl FaultyEnv {
+        fn new(inner: MapEnv) -> Self {
+            Self { inner, fail_create: Rc::new(Cell::new(false)) }
+        }
+    }
+
+    impl Env for FaultyEnv {
+        type File = MapFile;
+        fn create_dir_all(&self, p: &Path) -> std::io::Result<()> {
+            self.inner.create_dir_all(p)
+        }
+        fn create(&self, p: &Path) -> std::io::Result<Self::File> {
+            if self.fail_create.get() {
+                return Err(std::io::Error::other("injected create failure"));
+            }
+            self.inner.create(p)
+        }
+        fn open_append(&self, p: &Path) -> std::io::Result<Self::File> {
+            self.inner.open_append(p)
+        }
+        fn open_read(&self, p: &Path) -> std::io::Result<Self::File> {
+            self.inner.open_read(p)
+        }
+        fn sync_dir(&self, p: &Path) -> std::io::Result<()> {
+            self.inner.sync_dir(p)
+        }
+        fn read_dir_names(&self, p: &Path) -> std::io::Result<Vec<String>> {
+            self.inner.read_dir_names(p)
+        }
+        fn remove_file(&self, p: &Path) -> std::io::Result<()> {
+            self.inner.remove_file(p)
+        }
+        fn rename(&self, f: &Path, t: &Path) -> std::io::Result<()> {
+            self.inner.rename(f, t)
+        }
+        fn exists(&self, p: &Path) -> bool {
+            self.inner.exists(p)
+        }
+        fn metadata_len(&self, p: &Path) -> std::io::Result<u64> {
+            self.inner.metadata_len(p)
+        }
+    }
+
+    fn temp_root(tag: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!(
+            "pedradb-hist-{tag}-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::remove_dir_all(&d);
+        d
+    }
+
+    /// Local tier with three archived versions of `k` (real files on disk).
+    fn seeded_tier(tag: &str) -> (PathBuf, HistoryTier) {
+        let root = temp_root(tag);
+        let mut tier = HistoryTier::open(&crate::env::StdEnv, &root).unwrap();
+        let records = vec![
+            (b"k".to_vec(), b"v1".to_vec(), 1u64, 0u8),
+            (b"k".to_vec(), b"v2".to_vec(), 2, 0),
+            (b"k".to_vec(), b"v3".to_vec(), 3, 0),
+        ];
+        tier.archive_stream(&crate::env::StdEnv, records.into_iter()).unwrap();
+        (root, tier)
+    }
+
+    fn only_segment_path(root: &Path) -> PathBuf {
+        let dir = root.join("history");
+        let segs: Vec<String> = std::fs::read_dir(&dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .filter(|n| n.starts_with("seg-") && n.ends_with(".hist"))
+            .collect();
+        assert_eq!(segs.len(), 1, "seeded tier archives one segment");
+        dir.join(&segs[0])
+    }
+
+    fn remote_objects(map: &MapEnv) -> Vec<String> {
+        map.read_dir_names(Path::new("/remote")).unwrap()
+    }
+
+    const REMOTE: &str = "/remote";
+
+    #[test]
+    fn remote_segment_put_content_addressed_and_idempotent() {
+        let (root, _tier) = seeded_tier("ca");
+        let seg = only_segment_path(&root);
+        let remote = RemoteTier::new(REMOTE);
+        let map = MapEnv::default();
+        let first = remote.put_segment(&map, &crate::env::StdEnv, &seg).unwrap();
+        assert_eq!(first, PutStatus::Uploaded);
+        let second = remote.put_segment(&map, &crate::env::StdEnv, &seg).unwrap();
+        assert_eq!(second, PutStatus::AlreadyPresent);
+        let objects: Vec<String> =
+            remote_objects(&map).into_iter().filter(|n| n.starts_with("seg-")).collect();
+        assert_eq!(objects.len(), 1, "idempotent put must not duplicate objects");
+        let bytes = std::fs::read(&seg).unwrap();
+        assert_eq!(objects[0], RemoteTier::segment_name(&bytes));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn remote_segment_put_refuses_corrupt_local() {
+        let (root, _tier) = seeded_tier("corrupt");
+        let seg = only_segment_path(&root);
+        let mut bytes = std::fs::read(&seg).unwrap();
+        // Flip a byte inside the first record body (past the header).
+        bytes[10] ^= 0xff;
+        std::fs::write(&seg, &bytes).unwrap();
+        let remote = RemoteTier::new(REMOTE);
+        let map = MapEnv::default();
+        let err = remote.put_segment(&map, &crate::env::StdEnv, &seg);
+        assert!(
+            matches!(err, Err(CoreError::CorruptHistory(_))),
+            "corrupt local segment must fail-closed before upload"
+        );
+        assert!(
+            remote_objects(&map).iter().all(|n| !n.starts_with("seg-")),
+            "nothing may be uploaded from a corrupt segment"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn remote_segment_name_collision_fails_closed() {
+        let (root, _tier) = seeded_tier("coll");
+        let seg = only_segment_path(&root);
+        let bytes = std::fs::read(&seg).unwrap();
+        let map = MapEnv::default();
+        // Plant different bytes under the content-addressed name.
+        let name = RemoteTier::segment_name(&bytes);
+        {
+            let mut f = map.create(Path::new(REMOTE).join(&name).as_path()).unwrap();
+            f.write_all(b"different bytes entirely").unwrap();
+            f.sync_all().unwrap();
+        }
+        let remote = RemoteTier::new(REMOTE);
+        let err = remote.put_segment(&map, &crate::env::StdEnv, &seg);
+        assert!(
+            matches!(err, Err(CoreError::CorruptHistory(_))),
+            "read-back mismatch must be a typed collision error"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn remote_manifest_generations_latest_and_walkback() {
+        let (root, mut tier) = seeded_tier("mani");
+        let remote = RemoteTier::new(REMOTE);
+        let map = MapEnv::default();
+        let m1 = tier.manifest_bytes();
+        let n1 = tier.remote_generation();
+        assert_eq!(remote.put_manifest(&map, &m1, n1).unwrap(), PutStatus::Uploaded);
+        // Re-put same generation: idempotent.
+        assert_eq!(
+            remote.put_manifest(&map, &m1, n1).unwrap(),
+            PutStatus::AlreadyPresent
+        );
+        assert_eq!(remote.latest_manifest(&map).unwrap(), Some(m1.clone()));
+        // A second, newer generation becomes LATEST.
+        tier.archive_stream(
+            &crate::env::StdEnv,
+            vec![(b"k".to_vec(), b"v4".to_vec(), 4, 0)].into_iter(),
+        )
+        .unwrap();
+        let m2 = tier.manifest_bytes();
+        let n2 = tier.remote_generation();
+        remote.put_manifest(&map, &m2, n2).unwrap();
+        assert_eq!(remote.latest_manifest(&map).unwrap(), Some(m2.clone()));
+        // Torn LATEST (garbage pointer) → walk back to newest intact gen.
+        {
+            let mut f = map.create(Path::new(REMOTE).join("LATEST").as_path()).unwrap();
+            f.write_all(b"garbage").unwrap();
+            f.sync_all().unwrap();
+        }
+        assert_eq!(
+            remote.latest_manifest(&map).unwrap(),
+            Some(m2.clone()),
+            "torn LATEST falls back to the newest intact generation"
+        );
+        // Newest generation unreadable → previous generation still serves.
+        map.remove_file(Path::new(REMOTE).join(format!("MANIFEST-{n2:016}")).as_path())
+            .unwrap();
+        assert_eq!(remote.latest_manifest(&map).unwrap(), Some(m1));
+        // Empty remote tier.
+        let empty = MapEnv::default();
+        assert_eq!(remote.latest_manifest(&empty).unwrap(), None);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn remote_put_fails_closed_and_resumes() {
+        let (root, _tier) = seeded_tier("resume");
+        let seg = only_segment_path(&root);
+        let map = MapEnv::default();
+        let faulty = FaultyEnv::new(map.clone());
+        faulty.fail_create.set(true);
+        let remote = RemoteTier::new(REMOTE);
+        assert!(remote.put_segment(&faulty, &crate::env::StdEnv, &seg).is_err());
+        assert!(
+            remote_objects(&map).iter().all(|n| !n.starts_with("seg-")),
+            "failed upload leaves no partial object"
+        );
+        faulty.fail_create.set(false);
+        assert_eq!(
+            remote.put_segment(&faulty, &crate::env::StdEnv, &seg).unwrap(),
+            PutStatus::Uploaded,
+            "retry after the fault clears resumes and completes"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn remote_read_segment_round_trips_records() {
+        let (root, _tier) = seeded_tier("rt");
+        let seg = only_segment_path(&root);
+        let bytes = std::fs::read(&seg).unwrap();
+        let remote = RemoteTier::new(REMOTE);
+        let map = MapEnv::default();
+        remote.put_segment(&map, &crate::env::StdEnv, &seg).unwrap();
+        let back = remote
+            .read_segment(&map, &RemoteTier::segment_name(&bytes))
+            .unwrap();
+        assert_eq!(back, bytes);
+        let records = walk_segment_records(&back).unwrap();
+        assert_eq!(records.len(), 3);
+        assert_eq!(records[0].key.as_slice(), b"k");
+        assert_eq!(records[0].val.as_slice(), b"v1");
+        assert_eq!(records[0].seq, 1);
+        assert_eq!(records[2].seq, 3);
+        assert!(walk_segment_records(b"").unwrap().is_empty());
+        assert!(walk_segment_records(&bytes[..bytes.len() - 1]).is_err());
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

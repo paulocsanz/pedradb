@@ -68,6 +68,12 @@ pub enum CoreError {
     #[error("corrupt manifest: {0}")]
     CorruptManifest(String),
 
+    /// History-tier segment / remote object is unreadable or fails its CRC
+    /// (RFC-0046): fail-closed — never upload, serve, or replay corrupt
+    /// history bytes.
+    #[error("corrupt history: {0}")]
+    CorruptHistory(String),
+
     /// A required WAL `sync_data` failed after append; this `Db` refuses further
     /// writes until `close` + `open` (reopen rebuilds mem from WAL).
     ///
