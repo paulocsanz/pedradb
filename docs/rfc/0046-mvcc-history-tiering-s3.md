@@ -151,9 +151,19 @@
       outage pausa GC (earliest parado) e recupera; cap segura não-subidos
       durante outage e libera após upload; resume cross-reopen é
       idempotente (AlreadyPresent, nada re-escrito) — status: `done`
-- [ ] **P1.3** Restore drill do tier: destrói local, restaura em seq
-      arbitrária dentro do horizonte, verify (teste e2e nomeado
-      `pitr_restore_from_object_storage`) — status: `todo`
+- [x] **P1.3** Restore drill do tier: `pedradb_ops::restore_history_from_remote`
+      (manifesto v2 carrega o nome content-addressed de cada segmento —
+      `RemoteTier::latest_segments`); lê o manifesto íntegro mais novo,
+      faz stream de cada segmento com CRC por record verificado no replay,
+      e regrava as versões ≤ target num WAL novo **em ordem de seq** —
+      a recuperação existente reconstrói o DB com as sequências originais.
+      Semântica honesta: o tier restaura o **prefixo arquivado** (versões
+      que envelheceram além do horizonte); a cauda in-window é do
+      WAL-ship (`restore_with_increments`) — o mesmo split base+WAL do
+      PITR do Postgres. E2e `pitr_restore_from_object_storage`: destrói o
+      local, restaura full (estado no cutoff do archive + MVCC em seq
+      arbitrária), restaura em seq 20 exato, e bytes remotos corrompidos
+      → erro tipado, nunca restore silencioso errado — status: `done`
 - [ ] **P1.4** `pedra` CLI: `archive status` / `restore --seq` — status: `todo`
 
 ### P2 — polish
@@ -173,7 +183,7 @@
 | P0.4 | p0 | re-árbitro quieto com novo default | todo | gated: load < 10 | 2026-08-21 |
 | P1.1 | p1 | Env→S3 + testes seam | **done** | cc760e5 | 2026-08-21 |
 | P1.2 | p1 | upload pipeline + backpressure | **done** | b548a5e | 2026-08-21 |
-| P1.3 | p1 | restore drill do tier | todo | — | 2026-08-20 |
+| P1.3 | p1 | restore drill do tier | **done** | c429acb | 2026-08-21 |
 | P1.4 | p1 | CLI archive/restore | todo | — | 2026-08-20 |
 | P2.1 | p2 | leitura lazy do tier | todo | — | 2026-08-20 |
 | P2.2 | p2 | métricas + banda | todo | — | 2026-08-20 |
