@@ -55,7 +55,7 @@ use std::collections::BTreeMap;
 use std::ops::Bound;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use bytes::Bytes;
 
@@ -206,6 +206,58 @@ pub struct OpenOptions {
     /// opt-in; under update-heavy large-value workloads call [`Db::compact_vlog`]
     /// (RFC-0016 P0.1) or the log only grows.
     pub large_value_threshold: Option<usize>,
+    /// MVCC history retention (RFC-0046). Default [`HistoryOptions::default`]:
+    /// a 24 h horizon — superseded versions older than the horizon are
+    /// archived to a capped local history tier and then GCed (pin-aware).
+    /// `HistoryHorizon::All` (F20) is the explicit opt-out.
+    pub history: HistoryOptions,
+}
+
+/// MVCC history horizon (RFC-0046 P0.1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HistoryHorizon {
+    /// F20: keep every version forever (the pre-0046 product default).
+    /// Explicit opt-in — disk grows O(total writes).
+    All,
+    /// Keep versions published within the window. The newest (live) version
+    /// of a key is kept regardless of age; superseded versions older than
+    /// the window are archived (P0.2) then GCed pin-aware. Reads/pins below
+    /// the GC watermark fail closed with [`CoreError::SnapshotTooOld`].
+    Window(Duration),
+}
+
+impl Default for HistoryHorizon {
+    /// RFC-0046 P0.1 decision: **24 h**. Matches the RFC strawman; the
+    /// horizon's job is bounding the SSD tier (live set + one day of
+    /// history), while PITR beyond the window goes through the archive
+    /// (restore-time, like the market). Cassandra's 10-day `gc_grace`
+    /// exists for multi-node tombstone replay windows — not this engine's
+    /// constraint.
+    fn default() -> Self {
+        Self::Window(Duration::from_secs(24 * 60 * 60))
+    }
+}
+
+/// Retention/history options (RFC-0046 P0).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HistoryOptions {
+    /// Horizon (default [`HistoryHorizon::default`] = 24 h window).
+    pub horizon: HistoryHorizon,
+    /// Cap of the local history tier in bytes (default 1 GiB). When the cap
+    /// overflows, the oldest archive segments are dropped and the GC
+    /// watermark advances (older snaps become [`CoreError::SnapshotTooOld`])
+    /// — never a silent destroy; an open pin holds its segment.
+    /// `0` = unbounded (no cap enforcement).
+    pub cap_bytes: u64,
+}
+
+impl Default for HistoryOptions {
+    fn default() -> Self {
+        Self {
+            horizon: HistoryHorizon::default(),
+            cap_bytes: 1 << 30,
+        }
+    }
 }
 
 /// Lightweight observability snapshot (RocksDB `GetProperty`-class).
@@ -581,6 +633,7 @@ impl Default for OpenOptions {
             auto_compact_sst_bytes: None,
             exclusive: true,
             large_value_threshold: None,
+            history: HistoryOptions::default(),
         }
     }
 }
@@ -821,6 +874,16 @@ pub struct Db<E: Env = StdEnv> {
     /// Version-GC watermark: snapshots with `seq < earliest_readable_seq` are
     /// [`CoreError::SnapshotTooOld`] (open-items §2.1 (c)). `0` = no floor.
     earliest_readable_seq: SequenceNumber,
+    /// RFC-0046 retention options as opened (horizon + archive cap).
+    history: HistoryOptions,
+    /// Sampled `(published seq, unix_ms)` pairs for the horizon cutoff
+    /// (RFC-0046 P0.1). Empty while the horizon is `All`.
+    seq_times: Mutex<std::collections::VecDeque<(SequenceNumber, u64)>>,
+    /// Publishes since the last seq/time sample (amortizes the clock read).
+    seq_time_counter: AtomicU64,
+    /// RFC-0046 P0.2 local history tier (archive-before-GC). Opened at open;
+    /// the manifest floor feeds `earliest_readable_seq` across reopens.
+    history_tier: Option<crate::history::HistoryTier>,
     /// Count of successful WAL `sync_all` (observability / group-commit tests).
     wal_sync_count: AtomicU64,
     /// Logical user-value bytes ingested.
@@ -1132,6 +1195,10 @@ impl<E: Env> Db<E> {
             snapshot_pins: std::collections::BTreeMap::new(),
             next_snapshot_pin_id: 1,
             earliest_readable_seq,
+            history: opts.history,
+            seq_times: Mutex::new(std::collections::VecDeque::new()),
+            seq_time_counter: AtomicU64::new(0),
+            history_tier: None,
             wal_sync_count: AtomicU64::new(0),
             bytes_ingested: 0,
             bytes_written_wal: 0,
@@ -1146,6 +1213,11 @@ impl<E: Env> Db<E> {
         };
         db.rebuild_sst_order();
         db.maybe_rebuild_feed_from_live();
+        // RFC-0046 P0.2: restore the archive floor across reopens (a cap
+        // overflow in a previous life must keep failing old snaps closed).
+        let tier = crate::history::HistoryTier::open(&db.env, &db.dir)?;
+        db.raise_earliest_readable(tier.archive_floor());
+        db.history_tier = Some(tier);
         Ok(db)
     }
 
@@ -1237,6 +1309,22 @@ impl<E: Env> Db<E> {
             ) {
                 Ok(_) => break,
                 Err(actual) => cur = actual,
+            }
+        }
+        // RFC-0046 P0.1: sample (seq, time) every 32 publishes while a window
+        // horizon is active — the cutoff only needs ±32-seq granularity.
+        if !matches!(self.history.horizon, HistoryHorizon::All) {
+            if self.seq_time_counter.fetch_add(1, Ordering::Relaxed) % 32 == 0 {
+                let t = self.env.unix_millis();
+                let mut ring = self.seq_times.lock();
+                ring.push_back((seq, t));
+                // Keep 2× the horizon of samples (bounds memory).
+                if let HistoryHorizon::Window(d) = self.history.horizon {
+                    let keep = t.saturating_sub(2 * d.as_millis() as u64);
+                    while ring.len() > 2 && ring.front().is_some_and(|&(_, t0)| t0 < keep) {
+                        ring.pop_front();
+                    }
+                }
             }
         }
         self.invalidate_read_answers(seq);
@@ -1472,6 +1560,134 @@ impl<E: Env> Db<E> {
         if floor > self.earliest_readable_seq {
             self.earliest_readable_seq = floor;
         }
+    }
+
+    /// RFC-0046 P0.1: highest published sequence at or before
+    /// `now − horizon` (`None` while the horizon is `All` or nothing has aged
+    /// out yet). Versions older than this cutoff are archive-then-GC
+    /// candidates on the next auto-compact.
+    #[must_use]
+    pub fn horizon_cutoff_sequence(&self) -> Option<SequenceNumber> {
+        let d = match self.history.horizon {
+            HistoryHorizon::All => return None,
+            HistoryHorizon::Window(d) => d,
+        };
+        let target = self.env.unix_millis().saturating_sub(d.as_millis() as u64);
+        let ring = self.seq_times.lock();
+        let mut cut: SequenceNumber = 0;
+        for &(seq, t) in ring.iter() {
+            if t <= target {
+                cut = cut.max(seq);
+            }
+        }
+        (cut > 0).then_some(cut)
+    }
+
+    /// GC decision for auto-compact (RFC-0046 P0.1): `None` =
+    /// history-preserving merge this round. Two sources, two profiles:
+    /// `auto_reclaim` (operator opt-in, latest-only — the Rocks storage
+    /// profile on the compat face) drops to the pin floor **without
+    /// archiving** (a reclaim keeps nothing); otherwise the window horizon
+    /// bounds it — the product default (`Window(24 h)`) GCs only what has
+    /// aged out, pin-aware, and archives what leaves (P0.2). Returns
+    /// `(floor, archive_first)`.
+    fn auto_gc_floor(&self) -> Option<(SequenceNumber, bool)> {
+        let pin_or_last = self
+            .oldest_pinned_sequence()
+            .unwrap_or_else(|| self.last_sequence());
+        if self.auto_reclaim {
+            return Some((pin_or_last, false));
+        }
+        self.horizon_cutoff_sequence()
+            .map(|cutoff| (pin_or_last.min(cutoff), true))
+    }
+
+    /// RFC-0046 P0.2: archive every local version with `seq < floor` —
+    /// exactly the set the following GC compact may drop — then enforce the
+    /// cap. Fail-closed: on error the caller skips GC; history is never
+    /// dropped unarchived. Known v0 wart: a GC round re-archives versions
+    /// whose SST this round's compaction does not rewrite (duplicates are
+    /// harmless for replay and age out at the cap; per-segment coverage
+    /// tracking is the P1 follow-up).
+    fn archive_history_below(&mut self, floor: SequenceNumber) -> Result<()> {
+        const CHUNK: usize = 4096;
+        let mut chunk: Vec<(Vec<u8>, Vec<u8>, u64, u8)> = Vec::with_capacity(CHUNK);
+        {
+            for (ik, v) in self.mem.iter_internal() {
+                self.archive_note(&mut chunk, floor, &ik, &v);
+            }
+            if let Some(ref imm) = self.imm {
+                for (ik, v) in imm.iter_internal() {
+                    self.archive_note(&mut chunk, floor, &ik, &v);
+                }
+            }
+        }
+        self.archive_flush_chunk(&mut chunk)?;
+        let sst_count = self.ssts.len();
+        for i in 0..sst_count {
+            {
+                let mut stream = self.ssts[i].iter_internal_streaming();
+                loop {
+                    match stream.next_entry() {
+                        Ok(Some((ik, v))) => self.archive_note(&mut chunk, floor, &ik, &v),
+                        Ok(None) | Err(_) => break,
+                    }
+                }
+            }
+            if chunk.len() >= CHUNK {
+                self.archive_flush_chunk(&mut chunk)?;
+            }
+        }
+        self.archive_flush_chunk(&mut chunk)?;
+        // Cap: drop oldest segments; advance the readable floor (typed
+        // SnapshotTooOld below it). A pin holds everything at/below it.
+        let pin = self.oldest_pinned_sequence();
+        let cap = self.history.cap_bytes;
+        let env = self.env.clone();
+        let tier = self
+            .history_tier
+            .as_mut()
+            .expect("history tier opened at open()");
+        let archive_floor = tier.enforce_cap(&env, pin, cap)?;
+        self.raise_earliest_readable(archive_floor);
+        Ok(())
+    }
+
+    fn archive_note(
+        &self,
+        chunk: &mut Vec<(Vec<u8>, Vec<u8>, u64, u8)>,
+        floor: SequenceNumber,
+        ik: &InternalKey,
+        stored: &Bytes,
+    ) {
+        if ik.sequence >= floor {
+            return;
+        }
+        let val = self
+            .resolve_stored_value(stored.clone())
+            .unwrap_or_else(|_| stored.clone());
+        let kind = match ik.kind {
+            ValueType::Value => 0,
+            ValueType::Deletion => 1,
+            ValueType::RangeDeletion => 2,
+        };
+        chunk.push((ik.user_key.to_vec(), val.to_vec(), ik.sequence, kind));
+    }
+
+    fn archive_flush_chunk(
+        &mut self,
+        chunk: &mut Vec<(Vec<u8>, Vec<u8>, u64, u8)>,
+    ) -> Result<()> {
+        if chunk.is_empty() {
+            return Ok(());
+        }
+        let env = self.env.clone();
+        let tier = self
+            .history_tier
+            .as_mut()
+            .expect("history tier opened at open()");
+        tier.archive_stream(&env, chunk.drain(..))?;
+        Ok(())
     }
 
     /// After a compact that ran version GC, advance the too-old watermark.
@@ -5380,28 +5596,49 @@ impl<E: Env> Db<E> {
         if l0_hit {
             // Bounded work: L0 → one new L1. Do not absorb the existing L1
             // (that rewrite grew with the DB and dominated apply/raftlog).
-            let opts = if self.auto_reclaim {
-                let oldest = self
-                    .oldest_pinned_sequence()
-                    .unwrap_or_else(|| self.last_sequence());
-                CompactOptions {
-                    gc: crate::merge::CompactGcOptions::for_oldest_snapshot(oldest),
+            // RFC-0046 P0.2: horizon-derived GC archives first; an archive
+            // failure keeps the history-preserving merge (never drop
+            // unarchived). `auto_reclaim` floors skip the archive (reclaim
+            // keeps nothing — Rocks storage profile, RFC-0047 divergence 4).
+            let opts = match self.auto_gc_floor() {
+                Some((floor, true)) => {
+                    if let Err(e) = self.archive_history_below(floor) {
+                        self.last_auto_compact_error = Some(e.to_string());
+                        CompactOptions::default()
+                    } else {
+                        CompactOptions {
+                            gc: crate::merge::CompactGcOptions::for_oldest_snapshot(floor),
+                        }
+                    }
                 }
-            } else {
-                CompactOptions::default()
+                Some((floor, false)) => CompactOptions {
+                    gc: crate::merge::CompactGcOptions::for_oldest_snapshot(floor),
+                },
+                None => CompactOptions::default(),
             };
             self.compact_l0_into_l1(opts)?;
             self.last_auto_compact_error = None;
         } else if count_hit || bytes_hit {
-            if self.auto_reclaim {
-                let oldest = self
-                    .oldest_pinned_sequence()
-                    .unwrap_or_else(|| self.last_sequence());
-                self.compact_with_ssts_only(CompactOptions {
-                    gc: crate::merge::CompactGcOptions::for_oldest_snapshot(oldest),
-                })?;
-            } else {
-                self.compact_with(CompactOptions::default())?;
+            // RFC-0046 P0.2 (same fail-closed archive rule as the L0 path).
+            match self.auto_gc_floor() {
+                Some((floor, true)) => {
+                    if let Err(e) = self.archive_history_below(floor) {
+                        self.last_auto_compact_error = Some(e.to_string());
+                        self.compact_with(CompactOptions::default())?;
+                    } else {
+                        self.compact_with_ssts_only(CompactOptions {
+                            gc: crate::merge::CompactGcOptions::for_oldest_snapshot(floor),
+                        })?;
+                    }
+                }
+                Some((floor, false)) => {
+                    self.compact_with_ssts_only(CompactOptions {
+                        gc: crate::merge::CompactGcOptions::for_oldest_snapshot(floor),
+                    })?;
+                }
+                None => {
+                    self.compact_with(CompactOptions::default())?;
+                }
             }
             self.last_auto_compact_error = None;
         }
@@ -5824,7 +6061,12 @@ pub fn copy_db_directory(
         }
         let from = src.join(&name);
         let to = dest.join(&name);
-        // Skip nested dirs for base layout (checkpoints are flat).
+        // Skip nested dirs for base layout (checkpoints are flat; the local
+        // history tier re-materializes on open). `metadata_len` succeeds on
+        // directories on some platforms, so test dir-ness explicitly.
+        if env.is_dir(&from).unwrap_or(false) {
+            continue;
+        }
         if env.metadata_len(&from).is_ok() {
             env.copy_file(&from, &to)?;
         }
@@ -6370,6 +6612,7 @@ mod tests {
 
     fn vlog_opts() -> OpenOptions {
         OpenOptions {
+            history: Default::default(),
             sync: true,
             auto_flush_bytes: None,
             auto_compact_sst_count: None,
@@ -6382,6 +6625,7 @@ mod tests {
 
     fn sync_opts() -> OpenOptions {
         OpenOptions {
+            history: Default::default(),
             sync: true,
             auto_flush_bytes: None,
             auto_compact_sst_count: None,
@@ -7288,6 +7532,7 @@ mod tests {
             let mut db = Db::open_with(
                 &dir,
                 OpenOptions {
+                    history: Default::default(),
                     wal_recovery: Default::default(),
                     sync: true,
                     auto_flush_bytes: Some(8 * 1024),
@@ -7352,6 +7597,7 @@ mod tests {
             let db = Db::open_with(
                 &dir,
                 OpenOptions {
+                    history: Default::default(),
                     wal_recovery: Default::default(),
                     sync: true,
                     auto_flush_bytes: None,
@@ -7451,6 +7697,7 @@ mod tests {
             let mut db = Db::open_with(
                 &dir,
                 OpenOptions {
+                    history: Default::default(),
                     wal_recovery: Default::default(),
                     sync: false,
                     auto_flush_bytes: None,
@@ -7573,6 +7820,7 @@ mod tests {
             let mut db = Db::open_with(
                 &dir,
                 OpenOptions {
+                    history: Default::default(),
                     wal_recovery: Default::default(),
                     sync: true,
                     auto_flush_bytes: None,
@@ -7962,6 +8210,7 @@ mod tests {
         let mut db = Db::open_with(
             &dir,
             OpenOptions {
+                history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: false,
                 auto_flush_bytes: None,
@@ -7996,6 +8245,7 @@ mod tests {
         let mut db = Db::open_with(
             &dir,
             OpenOptions {
+                history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
                 auto_flush_bytes: Some(200),
@@ -8026,6 +8276,7 @@ mod tests {
             let mut db = Db::open_with(
                 &dir,
                 OpenOptions {
+                    history: Default::default(),
                     wal_recovery: Default::default(),
                     sync: true,
                     auto_flush_bytes: None,
@@ -8060,6 +8311,7 @@ mod tests {
             let mut db = Db::open_with(
                 &dir,
                 OpenOptions {
+                    history: Default::default(),
                     wal_recovery: Default::default(),
                     sync: false,
                     auto_flush_bytes: None,
@@ -8099,6 +8351,7 @@ mod tests {
             let mut db = Db::open_with(
                 &dir,
                 OpenOptions {
+                    history: Default::default(),
                     wal_recovery: Default::default(),
                     sync: false,
                     auto_flush_bytes: None,
@@ -8141,6 +8394,7 @@ mod tests {
             let mut db = Db::open_with(
                 &dir,
                 OpenOptions {
+                    history: Default::default(),
                     wal_recovery: Default::default(),
                     sync: false,
                     auto_flush_bytes: None,
@@ -8176,6 +8430,7 @@ mod tests {
         let mut db = Db::open_with(
             &dir,
             OpenOptions {
+                history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
                 auto_flush_bytes: None,
@@ -8314,6 +8569,7 @@ mod tests {
         let mut db = Db::open_with_env(
             &dir,
             OpenOptions {
+                history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
                 auto_flush_bytes: None,
@@ -8364,6 +8620,7 @@ mod tests {
         let mut db = Db::open_with(
             &dir,
             OpenOptions {
+                history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
                 auto_flush_bytes: None,
@@ -8399,6 +8656,7 @@ mod tests {
         let mut db = Db::open_with(
             &dir,
             OpenOptions {
+                history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
                 auto_flush_bytes: None,
@@ -8457,6 +8715,7 @@ mod tests {
         let mut db = Db::open_with(
             &dir,
             OpenOptions {
+                history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
                 auto_flush_bytes: None, // no auto flush — mem grows
@@ -8503,6 +8762,7 @@ mod tests {
         let mut db = Db::open_with(
             &dir,
             OpenOptions {
+                history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
                 auto_flush_bytes: None,
@@ -8557,6 +8817,7 @@ mod tests {
         let mut db = Db::open_with(
             &dir,
             OpenOptions {
+                history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
                 auto_flush_bytes: None,
@@ -8599,6 +8860,7 @@ mod tests {
         let mut db = Db::open_with(
             &dir,
             OpenOptions {
+                history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
                 auto_flush_bytes: None,
@@ -8642,6 +8904,7 @@ mod tests {
         let mut db = Db::open_with(
             &dir,
             OpenOptions {
+                history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
                 auto_flush_bytes: None,
@@ -9009,6 +9272,7 @@ mod tests {
     fn exclusive_false_skips_lock_file() {
         let dir = temp_dir();
         let opts = OpenOptions {
+            history: Default::default(),
             wal_recovery: Default::default(),
             sync: true,
             auto_flush_bytes: None,
@@ -9313,6 +9577,7 @@ mod tests {
             let mut db = Db::open_with(
                 &dir,
                 OpenOptions {
+                    history: Default::default(),
                     wal_recovery: Default::default(),
                     sync: true,
                     auto_flush_bytes: None,
@@ -9332,6 +9597,7 @@ mod tests {
         let restored = Db::open_with(
             &ckpt,
             OpenOptions {
+                history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
                 auto_flush_bytes: None,
@@ -9402,6 +9668,7 @@ mod tests {
             let mut db = Db::open_with(
                 &dir,
                 OpenOptions {
+                    history: Default::default(),
                     wal_recovery: Default::default(),
                     sync: true,
                     auto_flush_bytes: None,
@@ -9444,6 +9711,7 @@ mod tests {
         let restored = Db::open_with(
             &ckpt,
             OpenOptions {
+                history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
                 auto_flush_bytes: None,
@@ -9509,6 +9777,7 @@ mod tests {
         let mut db = Db::open_with(
             &dir,
             OpenOptions {
+                history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
                 auto_flush_bytes: None,
@@ -9580,6 +9849,7 @@ mod tests {
         let mut db = Db::open_with(
             &dir,
             OpenOptions {
+                history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: false,
                 auto_flush_bytes: Some(64 * 1024),
@@ -9645,6 +9915,7 @@ mod tests {
         let mut db = Db::open_with(
             &dir,
             OpenOptions {
+                history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: false,
                 auto_flush_bytes: None,
@@ -9723,6 +9994,7 @@ mod tests {
             let mut db = Db::open_with(
                 &dir,
                 OpenOptions {
+                    history: Default::default(),
                     wal_recovery: Default::default(),
                     sync: true,
                     auto_flush_bytes: None,
@@ -9889,6 +10161,7 @@ mod tests {
             let mut db = Db::open_with(
                 dir,
                 OpenOptions {
+                    history: Default::default(),
                     wal_recovery: Default::default(),
                     sync: true,
                     auto_flush_bytes: Some(64),
@@ -10190,6 +10463,7 @@ mod tests {
             crate::ConcurrentDb::open_with(
                 &dir,
                 OpenOptions {
+                    history: Default::default(),
                     wal_recovery: Default::default(),
                     sync: true,
                     auto_flush_bytes: Some(8 * 1024),
@@ -10276,6 +10550,7 @@ mod tests {
             let mut db = Db::open_with(
                 &dir,
                 OpenOptions {
+                    history: Default::default(),
                     wal_recovery: Default::default(),
                     sync: true,
                     auto_flush_bytes: None,
@@ -10302,6 +10577,7 @@ mod tests {
         let db = Db::open_with(
             &dir,
             OpenOptions {
+                history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
                 auto_flush_bytes: None,
@@ -10332,6 +10608,7 @@ mod tests {
         let mut db = Db::open_with(
             &dir,
             OpenOptions {
+                history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
                 auto_flush_bytes: None,
@@ -10365,6 +10642,7 @@ mod tests {
             let mut db = Db::open_with(
                 &dir,
                 OpenOptions {
+                    history: Default::default(),
                     wal_recovery: Default::default(),
                     sync: true,
                     auto_flush_bytes: None,
@@ -10411,6 +10689,7 @@ mod tests {
             let mut db = Db::open_with(
                 &dir,
                 OpenOptions {
+                    history: Default::default(),
                     wal_recovery: Default::default(),
                     sync: true,
                     auto_flush_bytes: Some(256),
@@ -10454,6 +10733,7 @@ mod tests {
             let mut db = Db::open_with(
                 &dir,
                 OpenOptions {
+                    history: Default::default(),
                     wal_recovery: Default::default(),
                     sync: true,
                     auto_flush_bytes: None,
@@ -11077,6 +11357,275 @@ mod tests {
             .expect("newer L0");
         assert_eq!(got2, k2);
         db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    // ---- RFC-0046 P0.1–P0.3: history horizon + local archive ----
+
+    /// StdEnv + injectable wall clock (+ optional fail-`create` fault for the
+    /// crash-mid-archive test). Delegates every file op to `StdEnv`.
+    #[derive(Clone)]
+    struct ClockEnv {
+        t: std::rc::Rc<std::cell::Cell<u64>>,
+        fail_create: std::rc::Rc<std::cell::Cell<bool>>,
+    }
+
+    impl ClockEnv {
+        fn new(t: std::rc::Rc<std::cell::Cell<u64>>) -> Self {
+            Self { t, fail_create: std::rc::Rc::new(std::cell::Cell::new(false)) }
+        }
+        fn unix_millis_impl(&self) -> u64 {
+            self.t.get()
+        }
+    }
+
+    impl Env for ClockEnv {
+        type File = <StdEnv as Env>::File;
+        fn unix_millis(&self) -> u64 {
+            self.unix_millis_impl()
+        }
+        fn create_dir_all(&self, p: &Path) -> std::io::Result<()> {
+            StdEnv.create_dir_all(p)
+        }
+        fn create(&self, p: &Path) -> std::io::Result<Self::File> {
+            // Fault scoped to archive segments: flush/SST writes stay healthy
+            // so the test isolates the mid-archive crash, not a dead disk.
+            if self.fail_create.get() && p.extension().is_some_and(|e| e == "hist") {
+                return Err(std::io::Error::other("injected archive failure"));
+            }
+            StdEnv.create(p)
+        }
+        fn open_append(&self, p: &Path) -> std::io::Result<Self::File> {
+            StdEnv.open_append(p)
+        }
+        fn open_read(&self, p: &Path) -> std::io::Result<Self::File> {
+            StdEnv.open_read(p)
+        }
+        fn sync_dir(&self, p: &Path) -> std::io::Result<()> {
+            StdEnv.sync_dir(p)
+        }
+        fn read_dir_names(&self, p: &Path) -> std::io::Result<Vec<String>> {
+            StdEnv.read_dir_names(p)
+        }
+        fn remove_file(&self, p: &Path) -> std::io::Result<()> {
+            StdEnv.remove_file(p)
+        }
+        fn rename(&self, a: &Path, b: &Path) -> std::io::Result<()> {
+            StdEnv.rename(a, b)
+        }
+        fn exists(&self, p: &Path) -> bool {
+            StdEnv.exists(p)
+        }
+        fn metadata_len(&self, p: &Path) -> std::io::Result<u64> {
+            StdEnv.metadata_len(p)
+        }
+    }
+
+    fn horizon_opts(window_ms: u64, cap_bytes: u64) -> OpenOptions {
+        OpenOptions {
+            history: HistoryOptions {
+                horizon: HistoryHorizon::Window(Duration::from_millis(window_ms)),
+                cap_bytes,
+            },
+            sync: true,
+            auto_flush_bytes: None,
+            auto_compact_sst_count: Some(1),
+            auto_compact_sst_bytes: None,
+            exclusive: true,
+            large_value_threshold: None,
+            wal_recovery: WalRecovery::FailClosed,
+        }
+    }
+
+    #[test]
+    fn snapshot_pinned_survives_horizon() {
+        // RFC-0046 P0.3: the horizon GC is pin-aware — a pinned seq keeps
+        // its view across aging + archive + GC; after release, the same seq
+        // fails closed with SnapshotTooOld (typed, never silent).
+        let dir = temp_dir();
+        let clock = std::rc::Rc::new(std::cell::Cell::new(1_000_000u64));
+        let env = ClockEnv::new(std::rc::Rc::clone(&clock));
+        let mut db = Db::open_with_env(&dir, horizon_opts(1_000, 1 << 30), env).unwrap();
+        for i in 0..40u32 {
+            db.put(b"k", format!("v{i}").as_bytes()).unwrap();
+        }
+        let pin = db.pin_snapshot();
+        assert_eq!(
+            db.get_at(pin.snapshot(), b"k").unwrap().as_deref(),
+            Some(&b"v39"[..])
+        );
+        clock.set(1_000_000 + 60_000); // way past the 1 s window
+        db.flush().unwrap(); // flush → auto-compact → archive + horizon GC
+        assert_eq!(
+            db.get_at(pin.snapshot(), b"k").unwrap().as_deref(),
+            Some(&b"v39"[..]),
+            "pinned snapshot survives horizon GC"
+        );
+        assert_eq!(db.get(b"k").as_deref(), Some(&b"v39"[..]));
+        let pinned_seq = pin.sequence();
+        db.release_snapshot_pin(pin);
+        clock.set(1_000_000 + 120_000);
+        for i in 40..80u32 {
+            db.put(b"k", format!("v{i}").as_bytes()).unwrap();
+        }
+        // Age the newest sample too, then GC again — the watermark must
+        // pass the released pin's seq.
+        clock.set(1_000_000 + 180_000);
+        db.flush().unwrap();
+        assert!(
+            matches!(
+                db.get_at(Snapshot::at(pinned_seq), b"k"),
+                Err(CoreError::SnapshotTooOld { .. })
+            ),
+            "released pin below the watermark fails closed (earliest={})",
+            db.earliest_readable_sequence()
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn pitr_local_by_seq_within_window() {
+        // RFC-0046 P0.3: PITR by seq within the window is served by the
+        // local tier without any pin — nothing inside the horizon is GCed.
+        let dir = temp_dir();
+        let clock = std::rc::Rc::new(std::cell::Cell::new(1_000_000u64));
+        let env = ClockEnv::new(std::rc::Rc::clone(&clock));
+        let mut db = Db::open_with_env(&dir, horizon_opts(60_000, 1 << 30), env).unwrap();
+        for i in 0..40u32 {
+            db.put(b"k", format!("v{i}").as_bytes()).unwrap();
+        }
+        let mid = Snapshot::at(20);
+        clock.set(1_000_000 + 30_000); // still inside the 60 s window
+        db.flush().unwrap();
+        assert_eq!(
+            db.get_at(mid, b"k").unwrap().as_deref(),
+            Some(&b"v19"[..]),
+            "within-window seq reads its version"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn archive_cap_overflow_advances_watermark_not_silent() {
+        // RFC-0046 P0.3: cap overflow drops the oldest archive segments and
+        // advances the readable watermark — old snaps become SnapshotTooOld
+        // (typed), latest reads unaffected; a pin holds its segment.
+        let dir = temp_dir();
+        let clock = std::rc::Rc::new(std::cell::Cell::new(1_000_000u64));
+        let env = ClockEnv::new(std::rc::Rc::clone(&clock));
+        // Cap small enough that one archive round overflows it.
+        let mut db = Db::open_with_env(&dir, horizon_opts(1_000, 2_048), env).unwrap();
+        for i in 0..40u32 {
+            db.put(b"k", format!("v{i:08}").as_bytes()).unwrap();
+        }
+        clock.set(1_000_000 + 60_000);
+        db.flush().unwrap();
+        assert!(
+            db.earliest_readable_sequence() > 1,
+            "cap overflow must advance the watermark, got {}",
+            db.earliest_readable_sequence()
+        );
+        assert!(matches!(
+            db.get_at(Snapshot::at(1), b"k"),
+            Err(CoreError::SnapshotTooOld { .. })
+        ));
+        assert_eq!(db.get(b"k").as_deref(), Some(&b"v00000039"[..]));
+        assert!(
+            db.history_tier
+                .as_ref()
+                .map(|t| t.bytes() <= 2_048)
+                .unwrap_or(false),
+            "cap must bound archived bytes, got {}",
+            db.history_tier.as_ref().map(|t| t.bytes()).unwrap_or(0)
+        );
+        // The advanced watermark is durable: reopen re-raises it from the
+        // archive manifest floor.
+        let floor = db.earliest_readable_sequence();
+        db.close().unwrap();
+        let mut db = Db::open(&dir).unwrap();
+        assert!(
+            db.earliest_readable_sequence() >= floor,
+            "reopen must keep the cap-advanced watermark ({} < {floor})",
+            db.earliest_readable_sequence()
+        );
+        assert!(matches!(
+            db.get_at(Snapshot::at(1), b"k"),
+            Err(CoreError::SnapshotTooOld { .. })
+        ));
+
+        // With a pin, the cap cannot take the pinned segment away.
+        let dir2 = temp_dir();
+        let clock2 = std::rc::Rc::new(std::cell::Cell::new(1_000_000u64));
+        let env2 = ClockEnv::new(std::rc::Rc::clone(&clock2));
+        let mut db2 = Db::open_with_env(&dir2, horizon_opts(1_000, 2_048), env2).unwrap();
+        for i in 0..40u32 {
+            db2.put(b"k", format!("v{i:08}").as_bytes()).unwrap();
+        }
+        let pin = db2.pin_snapshot();
+        clock2.set(1_000_000 + 60_000);
+        db2.flush().unwrap();
+        assert_eq!(
+            db2.get_at(pin.snapshot(), b"k").unwrap().as_deref(),
+            Some(&b"v00000039"[..]),
+            "pin holds its archive segment against the cap"
+        );
+        let _ = fs::remove_dir_all(&dir);
+        let _ = fs::remove_dir_all(&dir2);
+    }
+
+    #[test]
+    fn archive_crash_mid_upload_reopens_consistent() {
+        // RFC-0046 P0.3: an I/O failure mid-archive skips the GC round
+        // (fail-closed: never drop unarchived) and the DB reopens with all
+        // history intact.
+        let dir = temp_dir();
+        let clock = std::rc::Rc::new(std::cell::Cell::new(1_000_000u64));
+        let env = ClockEnv::new(std::rc::Rc::clone(&clock));
+        let fail = std::rc::Rc::clone(&env.fail_create);
+        let mut db = Db::open_with_env(&dir, horizon_opts(1_000, 1 << 30), env.clone()).unwrap();
+        for i in 0..40u32 {
+            db.put(b"k", format!("v{i}").as_bytes()).unwrap();
+        }
+        clock.set(1_000_000 + 60_000);
+        fail.set(true); // every archive-segment create now fails
+        db.flush().unwrap(); // flush ok; GC round skipped (archive failed)
+        assert_eq!(
+            db.get_at(Snapshot::at(2), b"k").unwrap().as_deref(),
+            Some(&b"v1"[..]),
+            "GC skipped: unarchived history stays local"
+        );
+        fail.set(false);
+        drop(db);
+        let env2 = ClockEnv { t: std::rc::Rc::clone(&clock), fail_create: fail };
+        let db2 = Db::open_with_env(&dir, horizon_opts(1_000, 1 << 30), env2).unwrap();
+        assert_eq!(db2.get(b"k").as_deref(), Some(&b"v39"[..]));
+        assert_eq!(
+            db2.get_at(Snapshot::at(2), b"k").unwrap().as_deref(),
+            Some(&b"v1"[..])
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn history_horizon_all_keeps_all_versions() {
+        // RFC-0046 P0.3: F20 is the explicit opt-out — `All` keeps every
+        // version across aging + compaction (re-green of the old default).
+        let dir = temp_dir();
+        let clock = std::rc::Rc::new(std::cell::Cell::new(1_000_000u64));
+        let env = ClockEnv::new(std::rc::Rc::clone(&clock));
+        let mut opts = horizon_opts(1_000, 1 << 30);
+        opts.history.horizon = HistoryHorizon::All;
+        let mut db = Db::open_with_env(&dir, opts, env).unwrap();
+        for i in 0..40u32 {
+            db.put(b"k", format!("v{i}").as_bytes()).unwrap();
+        }
+        clock.set(1_000_000 + 60_000);
+        db.flush().unwrap();
+        assert_eq!(db.earliest_readable_sequence(), 0, "All never GCs");
+        assert_eq!(
+            db.get_at(Snapshot::at(2), b"k").unwrap().as_deref(),
+            Some(&b"v1"[..])
+        );
         let _ = fs::remove_dir_all(&dir);
     }
 }

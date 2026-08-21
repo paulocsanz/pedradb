@@ -70,6 +70,7 @@ impl SqlEngine {
         let db = Db::open_with(
             path,
             OpenOptions {
+                history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
                 auto_flush_bytes: None,

@@ -475,6 +475,7 @@ mod tests {
                 .open_db_with(
                     &dir,
                     OpenOptions {
+                        history: Default::default(),
                         wal_recovery: Default::default(),
                         sync: true,
                         auto_flush_bytes: None,

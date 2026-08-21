@@ -429,6 +429,7 @@ mod tests {
         let db = Db::open_with(
             &d,
             OpenOptions {
+                history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
                 auto_flush_bytes: None,

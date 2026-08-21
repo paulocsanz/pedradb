@@ -2080,6 +2080,7 @@ mod tests {
             let db = ConcurrentDb::open_with(
                 &dir,
                 OpenOptions {
+                    history: Default::default(),
                     wal_recovery: Default::default(),
                     sync: false,
                     auto_flush_bytes: None,
@@ -2118,6 +2119,7 @@ mod tests {
             let db = ConcurrentDb::open_with(
                 &dir,
                 OpenOptions {
+                    history: Default::default(),
                     wal_recovery: Default::default(),
                     sync: false,
                     auto_flush_bytes: None,
@@ -2166,6 +2168,7 @@ mod tests {
             let db = ConcurrentDb::open_with(
                 &dir,
                 OpenOptions {
+                    history: Default::default(),
                     wal_recovery: Default::default(),
                     sync: false,
                     auto_flush_bytes: None,
@@ -2219,6 +2222,7 @@ mod tests {
             let db = ConcurrentDb::open_with(
                 &dir,
                 OpenOptions {
+                    history: Default::default(),
                     wal_recovery: Default::default(),
                     sync: false,
                     auto_flush_bytes: None,
@@ -2269,6 +2273,7 @@ mod tests {
             let db = ConcurrentDb::open_with(
                 &dir,
                 OpenOptions {
+                    history: Default::default(),
                     wal_recovery: Default::default(),
                     sync: false,
                     auto_flush_bytes: None,
@@ -2302,6 +2307,7 @@ mod tests {
         ConcurrentDb::open_with(
             dir,
             OpenOptions {
+                history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
                 auto_flush_bytes: None,
@@ -2322,6 +2328,7 @@ mod tests {
         let db = ConcurrentDb::open_with(
             &dir,
             OpenOptions {
+                history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
                 auto_flush_bytes: None,
@@ -2346,6 +2353,7 @@ mod tests {
         let db = ConcurrentDb::open_with(
             &dir,
             OpenOptions {
+                history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: false,
                 auto_flush_bytes: None,
@@ -2490,6 +2498,7 @@ mod tests {
         let db = ConcurrentDb::open_with(
             &dir,
             OpenOptions {
+                history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
                 auto_flush_bytes: Some(256),
@@ -3189,6 +3198,7 @@ mod tests {
             ConcurrentDb::open_with(
                 &dir,
                 OpenOptions {
+                    history: Default::default(),
                     wal_recovery: Default::default(),
                     sync: true,
                     auto_flush_bytes: Some(8 * 1024),
@@ -3486,6 +3496,7 @@ mod tests {
             sleep_us: Arc::clone(&sleep_us),
         };
         let opts = OpenOptions {
+            history: Default::default(),
             wal_recovery: Default::default(),
             sync: true,
             auto_flush_bytes: None,
@@ -3638,6 +3649,7 @@ mod tests {
         let re = ConcurrentDb::open_with(
             &dir,
             OpenOptions {
+                history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
                 auto_flush_bytes: None,
@@ -3702,6 +3714,7 @@ mod tests {
         let db = ConcurrentDb::open_with(
             &dir,
             OpenOptions {
+                history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
                 auto_flush_bytes: Some(8 * 1024),
@@ -3878,6 +3891,7 @@ mod tests {
         let db = ConcurrentDb::open_with(
             &dir,
             OpenOptions {
+                history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
                 auto_flush_bytes: None,
@@ -3918,6 +3932,7 @@ mod tests {
         let db = ConcurrentDb::open_with(
             &dir,
             OpenOptions {
+                history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: false,
                 auto_flush_bytes: None,
@@ -3993,6 +4008,7 @@ mod tests {
         let restored = ConcurrentDb::open_with(
             &dest,
             OpenOptions {
+                history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
                 auto_flush_bytes: None,
@@ -4226,6 +4242,7 @@ mod tests {
         let db = ConcurrentDb::open_with(
             &dir,
             OpenOptions {
+                history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
                 auto_flush_bytes: None,
@@ -4265,6 +4282,7 @@ mod tests {
         let db = ConcurrentDb::open_with(
             &dir,
             OpenOptions {
+                history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
                 auto_flush_bytes: None,
@@ -4314,6 +4332,7 @@ mod tests {
         let db = ConcurrentDb::open_with(
             &dir,
             OpenOptions {
+                history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
                 auto_flush_bytes: None,
@@ -4369,6 +4388,7 @@ mod tests {
         let db = ConcurrentDb::open_with(
             &dir,
             OpenOptions {
+                history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
                 auto_flush_bytes: None,
@@ -4427,6 +4447,7 @@ mod tests {
         let db = ConcurrentDb::open_with(
             &dir,
             OpenOptions {
+                history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: false,
                 auto_flush_bytes: None,

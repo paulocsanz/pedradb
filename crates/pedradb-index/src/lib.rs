@@ -118,6 +118,7 @@ pub struct WorkloadReport {
 pub fn workload_index_tx_crash(dir: impl AsRef<Path>) -> Result<WorkloadReport> {
     let dir = dir.as_ref();
     let opts = OpenOptions {
+        history: Default::default(),
         wal_recovery: Default::default(),
         sync: true,
         auto_flush_bytes: None,

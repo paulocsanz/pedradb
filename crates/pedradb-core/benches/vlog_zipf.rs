@@ -68,6 +68,7 @@ fn main() {
     let mut db = Db::open_with(
         &dir,
         OpenOptions {
+            history: Default::default(),
             wal_recovery: Default::default(),
             sync: false,
             auto_flush_bytes: Some(256 * 1024),

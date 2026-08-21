@@ -69,6 +69,7 @@ impl<E: Env> PedraFold<E> {
     /// Pedra open.
     pub fn open_role_env(path: &Path, role: FoldRole, env: E) -> Result<(FoldCursor, Self)> {
         let opts = OpenOptions {
+            history: Default::default(),
             sync: true,
             auto_flush_bytes: None,
             auto_compact_sst_count: None,

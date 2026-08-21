@@ -90,6 +90,7 @@ impl FaultEnv {
         Db::open_with(
             &self.dir,
             DbOpen {
+                history: Default::default(),
                 sync,
                 auto_flush_bytes: None,
                 auto_compact_sst_count: None,
@@ -239,6 +240,7 @@ mod tests {
 
     fn opts() -> OpenOptions {
         OpenOptions {
+            history: Default::default(),
             wal_recovery: Default::default(),
             sync: true,
             auto_flush_bytes: None,
@@ -360,6 +362,7 @@ mod tests {
         let big_c = vec![0xCCu8; 2048];
 
         let vlog_opts = OpenOptions {
+            history: Default::default(),
             wal_recovery: Default::default(),
             sync: true,
             auto_flush_bytes: None,
@@ -497,6 +500,7 @@ mod tests {
         let mut silent_wrong = 0u64;
 
         let vlog_opts = OpenOptions {
+            history: Default::default(),
             wal_recovery: Default::default(),
             sync: true,
             auto_flush_bytes: Some(16 * 1024),
@@ -611,6 +615,7 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
         let env = FailingEnv::passing();
         let opts = OpenOptions {
+            history: Default::default(),
             wal_recovery: Default::default(),
             sync: true,
             auto_flush_bytes: None,
@@ -724,6 +729,7 @@ mod tests {
         let mut model: HashMap<Vec<u8>, Vec<u8>> = HashMap::new();
         let mut silent_wrong = 0u64;
         let opts = OpenOptions {
+            history: Default::default(),
             wal_recovery: Default::default(),
             sync: true,
             auto_flush_bytes: Some(8 * 1024),
@@ -951,6 +957,7 @@ mod tests {
         let mut db = Db::open_with_env(
             &dir,
             OpenOptions {
+                history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
                 auto_flush_bytes: None,
@@ -984,6 +991,7 @@ mod tests {
         let db = Db::open_with_env(
             &dir,
             OpenOptions {
+                history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
                 auto_flush_bytes: None,
@@ -1024,6 +1032,7 @@ mod tests {
         let r = Db::open_with_env(
             &dir,
             OpenOptions {
+                history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
                 auto_flush_bytes: None,
@@ -1058,6 +1067,7 @@ mod tests {
         let mut db = Db::open_with_env(
             &dir,
             OpenOptions {
+                history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
                 auto_flush_bytes: None,
@@ -1084,6 +1094,7 @@ mod tests {
         let db = Db::open_with_env(
             &dir,
             OpenOptions {
+                history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
                 auto_flush_bytes: None,
@@ -1121,6 +1132,7 @@ mod tests {
         let mut db = Db::open_with_env(
             &dir,
             OpenOptions {
+                history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
                 auto_flush_bytes: None,
@@ -1154,6 +1166,7 @@ mod tests {
         let db = Db::open_with_env(
             &dir,
             OpenOptions {
+                history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
                 auto_flush_bytes: None,
@@ -1199,6 +1212,7 @@ mod tests {
         let r = Db::open_with_env(
             &dir,
             OpenOptions {
+                history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
                 auto_flush_bytes: None,
@@ -1230,6 +1244,7 @@ mod tests {
         let r = Db::open_with_env(
             &dir,
             OpenOptions {
+                history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
                 auto_flush_bytes: None,
@@ -1267,6 +1282,7 @@ mod tests {
         let mut db = Db::open_with_env(
             &dir,
             OpenOptions {
+                history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
                 auto_flush_bytes: None,
@@ -1294,6 +1310,7 @@ mod tests {
         let db = Db::open_with_env(
             &dir,
             OpenOptions {
+                history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
                 auto_flush_bytes: None,
@@ -1317,6 +1334,7 @@ mod tests {
         use pedradb_core::{Db, OpenOptions};
 
         let opts = OpenOptions {
+            history: Default::default(),
             wal_recovery: Default::default(),
             sync: true,
             auto_flush_bytes: Some(64),
@@ -1376,6 +1394,7 @@ mod tests {
         use pedradb_core::{Db, OpenOptions};
 
         let opts = OpenOptions {
+            history: Default::default(),
             wal_recovery: Default::default(),
             sync: true,
             auto_flush_bytes: None,
@@ -1570,6 +1589,7 @@ mod tests {
         let mut db = Db::open_with_env(
             &dir,
             OpenOptions {
+                history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
                 auto_flush_bytes: None,
@@ -1606,6 +1626,7 @@ mod tests {
         let db = Db::open_with_env(
             &dir,
             OpenOptions {
+                history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
                 auto_flush_bytes: None,
@@ -1646,6 +1667,7 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
         let env = FailingEnv::passing();
         let opts = OpenOptions {
+            history: Default::default(),
             wal_recovery: Default::default(),
             sync: true,
             auto_flush_bytes: None,
@@ -1786,6 +1808,7 @@ mod tests {
         let mut db = Db::open_with_env(
             &dir,
             OpenOptions {
+                history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
                 auto_flush_bytes: None,
@@ -1810,6 +1833,7 @@ mod tests {
         let db: CoreResult<Db<_>> = Db::open_with_env(
             &dir,
             OpenOptions {
+                history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
                 auto_flush_bytes: None,
@@ -1932,6 +1956,7 @@ mod tests {
         let db = Db::open_with_env(
             &dir,
             OpenOptions {
+                history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
                 auto_flush_bytes: None,

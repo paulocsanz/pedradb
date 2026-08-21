@@ -324,6 +324,7 @@ impl KvService {
         let db = Db::open_with(
             path,
             OpenOptions {
+                history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
                 auto_flush_bytes: None,
@@ -414,6 +415,7 @@ mod tests {
         Db::open_with(
             dir,
             OpenOptions {
+                history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
                 auto_flush_bytes: None,

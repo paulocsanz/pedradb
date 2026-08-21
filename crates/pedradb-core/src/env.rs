@@ -58,6 +58,15 @@ pub enum AdviseKind {
 /// `Clone` so flush/open paths can hold a copy alongside open file handles
 /// (test impls share interior fault state via `Rc`/`Arc`).
 pub trait Env: Clone {
+    /// Wall clock, milliseconds since Unix epoch (RFC-0046 history horizon).
+    /// Default = real system time; tests override for deterministic expiry.
+    fn unix_millis(&self) -> u64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0)
+    }
+
     /// Open file handle type.
     type File: EnvFile;
 
@@ -117,6 +126,14 @@ pub trait Env: Clone {
     /// # Errors
     /// Underlying I/O.
     fn metadata_len(&self, path: &Path) -> io::Result<u64>;
+
+    /// Whether `path` is a directory (missing = `Ok(false)`).
+    ///
+    /// # Errors
+    /// Underlying I/O.
+    fn is_dir(&self, path: &Path) -> io::Result<bool> {
+        Ok(fs::metadata(path).map(|m| m.is_dir()).unwrap_or(false))
+    }
 
     /// Copy `from` → `to` (create/truncate dest), then fsync dest.
     ///

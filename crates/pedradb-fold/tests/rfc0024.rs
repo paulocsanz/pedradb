@@ -30,6 +30,7 @@ fn temp() -> PathBuf {
 
 fn opts() -> OpenOptions {
     OpenOptions {
+        history: Default::default(),
         sync: true,
         auto_flush_bytes: None,
         auto_compact_sst_count: None,

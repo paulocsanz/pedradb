@@ -495,6 +495,7 @@ impl NetworkNode {
         let db = Db::open_with(
             data_dir,
             OpenOptions {
+                history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
                 auto_flush_bytes: None,

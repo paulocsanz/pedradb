@@ -35,6 +35,7 @@ pub struct SeedTrial {
 
 fn durable_opts() -> OpenOptions {
     OpenOptions {
+        history: Default::default(),
         wal_recovery: Default::default(),
         sync: true,
         auto_flush_bytes: None,
@@ -350,6 +351,7 @@ pub fn run_volume_soak_ops(
     // no_sync puts + periodic sync so 10k/100k finish in CI time; crash durability
     // remains covered by seed-mode soaks and lease/index canaries.
     let opts = OpenOptions {
+        history: Default::default(),
         wal_recovery: Default::default(),
         sync: false,
         auto_flush_bytes: Some(256 * 1024),

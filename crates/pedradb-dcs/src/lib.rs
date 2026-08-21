@@ -235,6 +235,7 @@ impl<C: Clock, E: Env> Dcs<C, E> {
         let db = Db::open_with_env(
             path,
             OpenOptions {
+                history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
                 auto_flush_bytes: None,

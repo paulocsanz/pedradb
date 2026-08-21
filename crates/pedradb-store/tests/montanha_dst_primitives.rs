@@ -468,6 +468,7 @@ fn hist_bitrot_does_not_silent_wrong_old_snapshot() {
     // a good hist. CRC reject on all → key absent from key_history.
     {
         let opts = OpenOptions {
+            history: Default::default(),
             wal_recovery: Default::default(),
             sync: true,
             auto_flush_bytes: None,

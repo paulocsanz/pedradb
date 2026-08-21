@@ -313,6 +313,7 @@ pub fn open_replica(replica_dir: impl AsRef<Path>, exclusive: bool) -> CoreResul
     Db::open_with(
         replica_dir,
         DbOpen {
+            history: Default::default(),
             sync: true,
             auto_flush_bytes: None,
             auto_compact_sst_count: None,
@@ -363,6 +364,7 @@ mod tests {
         Db::open_with(
             dir,
             OpenOptions {
+                history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
                 auto_flush_bytes: None, // keep data in WAL for ship
