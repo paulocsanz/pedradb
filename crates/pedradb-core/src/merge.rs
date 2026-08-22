@@ -406,6 +406,15 @@ pub struct CompactGcOptions {
     ///
     /// `Some(MAX)` / a high watermark with no open pins ≈ latest-only for values.
     pub oldest_snapshot: Option<SequenceNumber>,
+    /// Whether the compaction input covers **every** live SST down to the
+    /// bottom level (F177). Dropping a point tombstone or a range tombstone
+    /// is only visibility-safe when no older version of the key can survive
+    /// in a file outside the input — i.e. only on a bottommost rewrite. A
+    /// partial compaction (e.g. L0 → L1 leaving existing L1+ untouched) must
+    /// keep tombstones, or the older version below resurrects after the
+    /// merge (and durably, after reopen). Callers set this; default `false`
+    /// keeps tombstones.
+    pub bottommost: bool,
 }
 
 impl CompactGcOptions {
@@ -417,6 +426,7 @@ impl CompactGcOptions {
             min_sequence: 0,
             keep_only_latest: true,
             oldest_snapshot: None,
+            bottommost: false,
         }
     }
 
@@ -430,6 +440,7 @@ impl CompactGcOptions {
             min_sequence: 0,
             keep_only_latest: false,
             oldest_snapshot: Some(oldest),
+            bottommost: false,
         }
     }
 
@@ -463,10 +474,10 @@ pub fn gc_compact_entries(
         map.insert(ikey, value);
     }
 
-    // Rocks-style snapshot-safe: walk each user key newest→oldest; drop an older
+    // Snapshot-safe: walk each user key newest→oldest; drop an older
     // version when its next-newer sibling has sequence ≤ oldest_snapshot.
     if let Some(oldest) = gc.oldest_snapshot {
-        return gc_snapshot_safe(map, range_dels, oldest);
+        return gc_snapshot_safe(map, range_dels, oldest, gc.bottommost);
     }
 
     if !gc.keep_only_latest {
@@ -498,6 +509,10 @@ pub fn gc_compact_entries(
                     Some((ikey, value))
                 }
             }
+            // F177: a newest point Deletion must survive a partial
+            // compaction — an older version can live below the input.
+            // Only a bottommost rewrite may collapse it away.
+            ValueType::Deletion if !gc.bottommost => Some((ikey, value)),
             ValueType::Deletion | ValueType::RangeDeletion => None,
         };
         while let Some((next, _)) = iter.peek() {
@@ -511,8 +526,16 @@ pub fn gc_compact_entries(
             out.push(pair);
         }
     }
-    // Drop range tombstones under latest_only (keys already gone).
-    out
+    // Drop range tombstones under bottommost latest_only (keys already gone
+    // everywhere). A partial rewrite keeps them: they still hide versions in
+    // files outside the input (F177).
+    if gc.bottommost {
+        out
+    } else {
+        out.extend(range_dels);
+        out.sort_by(|a, b| a.0.cmp(&b.0));
+        out
+    }
 }
 
 /// Snapshot-safe point retention + pass-through range tombstones.
@@ -520,6 +543,7 @@ fn gc_snapshot_safe(
     map: BTreeMap<InternalKey, Bytes>,
     range_dels: Vec<(InternalKey, Bytes)>,
     oldest_snapshot: SequenceNumber,
+    bottommost: bool,
 ) -> Vec<(InternalKey, Bytes)> {
     let mut out: Vec<(InternalKey, Bytes)> = Vec::new();
     let mut iter = map.into_iter().peekable();
@@ -550,7 +574,11 @@ fn gc_snapshot_safe(
         }
         // Drop lone deletion when it is the only kept version and no snap needs
         // an older value (newest is a tombstone and nothing older survived).
-        if keep.len() == 1 && keep[0].0.kind == ValueType::Deletion {
+        // F177: only on a bottommost rewrite — in a partial compaction an
+        // older version of the key can live in a file outside the input
+        // (e.g. existing L1+ untouched by compact_l0_into_l1); dropping the
+        // tombstone there resurrects that version (durably, after reopen).
+        if bottommost && keep.len() == 1 && keep[0].0.kind == ValueType::Deletion {
             // Tombstone only needed if some open snap is ≥ tombstone seq and
             // would otherwise see an older value we already dropped — if we
             // dropped everything under it, snaps see NotFound either way.
@@ -737,10 +765,59 @@ mod tests {
             (ik(b"b", 2, ValueType::Value), Bytes::from_static(b"b2")),
             (ik(b"b", 4, ValueType::Deletion), Bytes::new()),
         ];
-        let out = gc_compact_entries(entries, CompactGcOptions::latest_only());
+        // Full-DB rewrite profile: bottommost → collapse tombstones.
+        let gc = CompactGcOptions {
+            bottommost: true,
+            ..CompactGcOptions::latest_only()
+        };
+        let out = gc_compact_entries(entries, gc);
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].0.user_key.as_ref(), b"a");
         assert_eq!(out[0].1.as_ref(), b"a3");
+    }
+
+    /// F177: a partial compaction (input does not cover every level) must
+    /// KEEP point tombstones and range tombstones — dropping them lets an
+    /// older version in a file outside the input resurrect.
+    #[test]
+    fn gc_keeps_tombstones_when_not_bottommost() {
+        let entries = vec![
+            (ik(b"a", 1, ValueType::Value), Bytes::from_static(b"a1")),
+            (ik(b"a", 3, ValueType::Value), Bytes::from_static(b"a3")),
+            (ik(b"b", 2, ValueType::Value), Bytes::from_static(b"b2")),
+            (ik(b"b", 4, ValueType::Deletion), Bytes::new()),
+            (
+                ik(b"c", 5, ValueType::Value),
+                Bytes::from_static(b"c5"),
+            ),
+            (
+                ik(b"c", 6, ValueType::RangeDeletion),
+                Bytes::from_static(b"z"),
+            ),
+        ];
+        // latest_only, partial input: b's newest is a Deletion → keep the
+        // tombstone; the range del passes through instead of being dropped.
+        let out = gc_compact_entries(entries.clone(), CompactGcOptions::latest_only());
+        let kinds: Vec<(&[u8], u64, ValueType)> = out
+            .iter()
+            .map(|(k, _)| (k.user_key.as_ref(), k.sequence, k.kind))
+            .collect();
+        assert!(
+            kinds.contains(&(&b"b"[..], 4, ValueType::Deletion)),
+            "partial latest_only must keep the point tombstone: {kinds:?}"
+        );
+        assert!(
+            kinds.contains(&(&b"c"[..], 6, ValueType::RangeDeletion)),
+            "partial latest_only must keep the range tombstone: {kinds:?}"
+        );
+        // Same for the snapshot-safe profile: lone point tombstone survives.
+        let out =
+            gc_compact_entries(entries, CompactGcOptions::for_oldest_snapshot(u64::MAX));
+        assert!(
+            out.iter()
+                .any(|(k, _)| k.user_key.as_ref() == b"b" && k.kind == ValueType::Deletion),
+            "partial for_oldest_snapshot must keep the lone tombstone"
+        );
     }
 
     #[test]
@@ -755,6 +832,7 @@ mod tests {
                 min_sequence: 5,
                 keep_only_latest: false,
                 oldest_snapshot: None,
+                bottommost: false,
             },
         );
         assert_eq!(out.len(), 1);

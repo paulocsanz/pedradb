@@ -864,6 +864,10 @@ pub struct Db<E: Env = StdEnv> {
     /// `Arc` so pairwise fold can snapshot two tables without cloning the
     /// BTree under the read lock (parkfold MVCC max 16 ms was that clone).
     parked_unflushed: Vec<Arc<MemTable>>,
+    /// F174: pair an in-flight fold cloned; the swap only proceeds while
+    /// these are still the two oldest (a concurrent materialize may have
+    /// installed the front as an L0 and popped it during the off-lock build).
+    fold_pair_expected: Option<(Arc<MemTable>, Arc<MemTable>)>,
     /// Flushed pins waiting to be folded (cheap push on the write path).
     retired_pending: Vec<MemTable>,
     /// Single BTree of flushed versions (built off-lock when writers idle).
@@ -1135,7 +1139,44 @@ impl<E: Env> Db<E> {
             // escalation still refuses the open; otherwise the decoded prefix is
             // served and the discarded suffix is reported (never silently skipped).
             let (records, last_good) = match Wal::recover_span_on(&env, &wal_path) {
-                Ok(r) => r,
+                Ok((records, last_good, resync_origin)) => {
+                    if let Some(origin) = resync_origin {
+                        // F171: a resync walk skipped damaged bytes and a
+                        // later record re-anchored — the skipped region is
+                        // lost from the recovered set. FailClosed refuses
+                        // (never silent-wrong); PointInTime journals, reports
+                        // and serves the recovered prefix.
+                        let escalated = crate::corrupt::escalate_or_fail(
+                            &env,
+                            &dir,
+                            "resync",
+                            origin,
+                            CoreError::Internal(
+                                "WAL resync skipped damaged region mid-log".into(),
+                            ),
+                        );
+                        if opts.wal_recovery == WalRecovery::PointInTime
+                            && !matches!(escalated, CoreError::CorruptionEscalated { .. })
+                        {
+                            let (records, last_good, _err, _resync) =
+                                Wal::recover_prefix_span_on(&env, &wal_path)?;
+                            point_in_time_report = Some(RecoveryReport {
+                                kind: "resync",
+                                corrupt_offset: origin,
+                                good_through_offset: last_good,
+                                discarded_bytes: env
+                                    .metadata_len(&wal_path)
+                                    .unwrap_or(0)
+                                    .saturating_sub(last_good),
+                            });
+                            (records, last_good)
+                        } else {
+                            return Err(escalated);
+                        }
+                    } else {
+                        (records, last_good)
+                    }
+                }
                 Err(CoreError::Truncated(0)) => {
                     let len = env.metadata_len(&wal_path).unwrap_or(0);
                     if len < 64 {
@@ -1154,7 +1195,7 @@ impl<E: Env> Db<E> {
                             // Re-walk collecting the decoded prefix; the
                             // stopping error is the same head error that
                             // routed us here (first error is deterministic).
-                            let (records, last_good, _prefix_err) =
+                            let (records, last_good, _prefix_err, _resync) =
                                 Wal::recover_prefix_span_on(&env, &wal_path)?;
                             point_in_time_report = Some(RecoveryReport {
                                 kind: "truncated_head",
@@ -1175,7 +1216,7 @@ impl<E: Env> Db<E> {
                     if opts.wal_recovery == WalRecovery::PointInTime
                         && !matches!(escalated, CoreError::CorruptionEscalated { .. })
                     {
-                        let (records, last_good, _prefix_err) =
+                        let (records, last_good, _prefix_err, _resync) =
                             Wal::recover_prefix_span_on(&env, &wal_path)?;
                         point_in_time_report = Some(RecoveryReport {
                             kind: "crc",
@@ -1191,8 +1232,52 @@ impl<E: Env> Db<E> {
                         return Err(escalated);
                     }
                 }
+                Err(e @ CoreError::WalZeroHeader { offset }) => {
+                    // F170: zero header at a fresh alignment with a non-zero
+                    // tail — corruption, never padding. Journaled (RFC-0038)
+                    // so repeated events escalate; PointInTime serves the
+                    // decoded prefix and reports the discard.
+                    let escalated =
+                        crate::corrupt::escalate_or_fail(&env, &dir, "zero_header", offset, e);
+                    if opts.wal_recovery == WalRecovery::PointInTime
+                        && !matches!(escalated, CoreError::CorruptionEscalated { .. })
+                    {
+                        let (records, last_good, _prefix_err, _resync) =
+                            Wal::recover_prefix_span_on(&env, &wal_path)?;
+                        point_in_time_report = Some(RecoveryReport {
+                            kind: "zero_header",
+                            corrupt_offset: offset,
+                            good_through_offset: last_good,
+                            discarded_bytes: env
+                                .metadata_len(&wal_path)
+                                .unwrap_or(0)
+                                .saturating_sub(last_good),
+                        });
+                        (records, last_good)
+                    } else {
+                        return Err(escalated);
+                    }
+                }
                 Err(e) => return Err(e),
             };
+            // RFC-0048 P1.1: mid-log resync damage cannot be healed by the
+            // tail-cut below (the damage sits before `last_good` after a
+            // re-anchor) — PointInTime rewrites the WAL from the recovered
+            // records so the next open, even fail-closed, is clean.
+            if point_in_time_report
+                .as_ref()
+                .is_some_and(|r| r.kind == "resync")
+            {
+                let repair = dir.join(format!("{WAL_FILE_NAME}.repair"));
+                let mut w = Wal::create_on(&env, &repair)?;
+                for raw in &records {
+                    w.append_record(raw)?;
+                }
+                w.sync_data()?;
+                drop(w);
+                env.rename(&repair, &wal_path)?;
+                env.sync_dir(&dir)?;
+            }
             let feed_max = change_log.max_sequence().unwrap_or(0);
             for raw in records {
                 let rec = WriteRecord::decode(&raw)?;
@@ -1271,6 +1356,7 @@ impl<E: Env> Db<E> {
             imm: None,
             flush_read_pin: None,
             parked_unflushed: Vec::new(),
+            fold_pair_expected: None,
             retired_pending: Vec::new(),
             retired_fold: MemTable::new(),
             retired_l0s: 0,
@@ -1784,11 +1870,11 @@ impl<E: Env> Db<E> {
         let mut chunk: Vec<(Vec<u8>, Vec<u8>, u64, u8)> = Vec::with_capacity(CHUNK);
         {
             for (ik, v) in self.mem.iter_internal() {
-                self.archive_note(&mut chunk, floor, &ik, &v);
+                self.archive_note(&mut chunk, floor, &ik, &v)?;
             }
             if let Some(ref imm) = self.imm {
                 for (ik, v) in imm.iter_internal() {
-                    self.archive_note(&mut chunk, floor, &ik, &v);
+                    self.archive_note(&mut chunk, floor, &ik, &v)?;
                 }
             }
         }
@@ -1799,8 +1885,14 @@ impl<E: Env> Db<E> {
                 let mut stream = self.ssts[i].iter_internal_streaming();
                 loop {
                     match stream.next_entry() {
-                        Ok(Some((ik, v))) => self.archive_note(&mut chunk, floor, &ik, &v),
-                        Ok(None) | Err(_) => break,
+                        Ok(Some((ik, v))) => self.archive_note(&mut chunk, floor, &ik, &v)?,
+                        Ok(None) => break,
+                        // F176: a stream error must abort the archive — the
+                        // GC compact that follows this call drops everything
+                        // below `floor`; treating the error as a clean EOF
+                        // destroys the un-archived remainder (violates the
+                        // fail-closed contract in this method's doc).
+                        Err(e) => return Err(e),
                     }
                 }
             }
@@ -1961,19 +2053,22 @@ impl<E: Env> Db<E> {
         floor: SequenceNumber,
         ik: &InternalKey,
         stored: &Bytes,
-    ) {
+    ) -> Result<()> {
         if ik.sequence >= floor {
-            return;
+            return Ok(());
         }
-        let val = self
-            .resolve_stored_value(stored.clone())
-            .unwrap_or_else(|_| stored.clone());
+        // F176: a failed vlog resolve must abort the archive — falling back
+        // to the raw stored bytes would archive the vlog POINTER as the
+        // value, and the GC below would then destroy the only good copy
+        // (replay serves pointer bytes as the value).
+        let val = self.resolve_stored_value(stored.clone())?;
         let kind = match ik.kind {
             ValueType::Value => 0,
             ValueType::Deletion => 1,
             ValueType::RangeDeletion => 2,
         };
         chunk.push((ik.user_key.to_vec(), val.to_vec(), ik.sequence, kind));
+        Ok(())
     }
 
     fn archive_flush_chunk(
@@ -2724,16 +2819,31 @@ impl<E: Env> Db<E> {
         }
         // Newest layer first (active → imm → pin → retired newest). The first
         // hit is the latest write of this user (RFC-0041 retired L0 cache).
-        let mut best: Option<Bytes> = None;
-        for table in self.mem_layers() {
+        let mut best: Option<(Bytes, bool)> = None;
+        for (i, table) in self.mem_layers().enumerate() {
             if let Some((k, _)) = table.last_visible_under_prefix(prefix, snapshot, None) {
-                best = Some(k);
+                best = Some((k, i == 0));
                 break;
             }
         }
-        let out = if let Some(k) = best {
+        let out = if let Some((k, from_newest_mem)) = best {
             self.latest_mem_hit.fetch_add(1, Ordering::Relaxed);
-            Some(k)
+            if from_newest_mem {
+                // `get_entry` already merged this newest layer (range
+                // tombstones included); nothing newer can hide it.
+                Some(k)
+            } else {
+                // Older mem layer: a newer layer's range tombstone must
+                // still be allowed to hide the candidate (F172) — confirm
+                // with the full point merge before accepting.
+                match self.lookup(k.as_ref(), snapshot) {
+                    Lookup::Found(_) => Some(k),
+                    Lookup::Deleted | Lookup::NotFound => {
+                        self.latest_sst_fallback.fetch_add(1, Ordering::Relaxed);
+                        self.last_under_user_prefix_sst(snapshot, prefix)?
+                    }
+                }
+            }
         } else {
             self.latest_sst_fallback.fetch_add(1, Ordering::Relaxed);
             self.last_under_user_prefix_sst(snapshot, prefix)?
@@ -2792,8 +2902,7 @@ impl<E: Env> Db<E> {
         let mut before = crate::prefix::prefix_exclusive_end(prefix);
         loop {
             let mut cand: Option<Bytes> = None;
-            let mut cand_from = 0usize;
-            for (i, &sst_i) in order.iter().enumerate() {
+            for &sst_i in order.iter() {
                 let table = &self.ssts[sst_i];
                 self.latest_sst_probed.fetch_add(1, Ordering::Relaxed);
                 if let Some((k, _)) = table.last_visible_under_prefix_with(
@@ -2807,47 +2916,28 @@ impl<E: Env> Db<E> {
                     },
                 ) {
                     cand = Some(k);
-                    cand_from = i;
                     break;
                 }
             }
             let Some(k) = cand else {
                 return Ok(None);
             };
-            if self.user_prefix_hidden_by_newer(snapshot, k.as_ref(), &order[..cand_from]) {
-                before = Some(k.to_vec());
-                continue;
+            // Confirm with the full point merge (same ruler as
+            // `last_under_prefix`): a range tombstone in a newer SST — or an
+            // older mem layer's put under a newer layer's tombstone — must
+            // hide the candidate. `point_at` alone misses RangeDeletion
+            // entries (F172).
+            match self.lookup(k.as_ref(), snapshot) {
+                Lookup::Found(_) => return Ok(Some(k)),
+                Lookup::Deleted | Lookup::NotFound => {
+                    before = Some(k.to_vec());
+                    continue;
+                }
             }
-            return Ok(Some(k));
         }
     }
 
     /// Newer mem / L0 has a point tombstone (or newer point) for `key`.
-    fn user_prefix_hidden_by_newer(
-        &self,
-        snapshot: SequenceNumber,
-        key: &[u8],
-        newer_sst: &[usize],
-    ) -> bool {
-        for table in self.mem_layers() {
-            match table.get_entry(key, snapshot) {
-                Some((_, Lookup::Deleted)) => return true,
-                Some((_, Lookup::Found(_))) => return false,
-                Some((_, Lookup::NotFound)) | None => {}
-            }
-        }
-        for &sst_i in newer_sst {
-            let table = &self.ssts[sst_i];
-            if let Some((_, look)) = table.point_at_with(key, snapshot, |bi| {
-                Some(self.block_cache.get_or_insert_with(table.path(), bi, || {
-                    table.decode_block(bi).unwrap_or_default()
-                }))
-            }) {
-                return matches!(look, Lookup::Deleted);
-            }
-        }
-        false
-    }
 
     /// Range at `snapshot` with optional live-key `limit`.
     ///
@@ -3524,6 +3614,20 @@ impl<E: Env> Db<E> {
                 .copy_file(&chlog, &dest.join(crate::change_feed::CHANGELOG_FILE_NAME))?;
         }
 
+        // F175: after horizon GC, archived versions exist only in `history/`
+        // (tier MANIFEST + `seg-*.hist` + `seg-*.bloom` sidecars) — the read
+        // path serves them via the archive fallback. A checkpoint that omits
+        // the tier restores a copy that answers `SnapshotTooOld` where the
+        // source served archived data.
+        let hist = self.dir.join("history");
+        if self.env.is_dir(&hist).unwrap_or(false) {
+            let dest_hist = dest.join("history");
+            self.env.create_dir_all(&dest_hist)?;
+            for name in self.env.read_dir_names(&hist)? {
+                self.env.copy_file(&hist.join(&name), &dest_hist.join(&name))?;
+            }
+        }
+
         let meta = CheckpointMeta {
             last_sequence: self.last_sequence(),
             sst_count: self.ssts.len(),
@@ -3803,9 +3907,13 @@ impl<E: Env> Db<E> {
 
     /// Mem / imm / pin / parked (no SST yet) / folded retired / pending pins.
     fn mem_layers(&self) -> impl Iterator<Item = &MemTable> {
+        // F184: the fold is the union of drained pins — always the OLDEST
+        // retired layer. Pins parked after that drain are newer, and
+        // first-hit lookups ("newest layer wins") must consult them before
+        // the fold, or a post-fold rewrite is served stale.
         self.scan_mem_layers()
-            .chain((!self.retired_fold.is_empty()).then_some(&self.retired_fold))
             .chain(self.retired_pending.iter().rev())
+            .chain((!self.retired_fold.is_empty()).then_some(&self.retired_fold))
     }
 
     /// Layers that have no covering SST: live mems + parked-unflushed.
@@ -3874,32 +3982,45 @@ impl<E: Env> Db<E> {
         self.parked_unflushed.len()
     }
 
-    /// Cheap `Arc` snapshot of the two oldest parked tables. Fold deep-clones
-    /// off the Db lock, then [`Self::replace_oldest_parked_pair`].
-    #[must_use]
-    pub fn parked_oldest_pair_arcs(&self) -> Option<(Arc<MemTable>, Arc<MemTable>)> {
+    /// Cheap `Arc` snapshot of the two oldest parked tables, recorded as
+    /// the in-flight fold pair (validated at swap time — F174). Fold
+    /// deep-clones off the Db lock, then [`Self::replace_oldest_parked_pair`].
+    pub fn parked_oldest_pair_arcs(&mut self) -> Option<(Arc<MemTable>, Arc<MemTable>)> {
         if self.parked_unflushed.len() < 2 {
             return None;
         }
-        Some((
+        let pair = (
             Arc::clone(&self.parked_unflushed[0]),
             Arc::clone(&self.parked_unflushed[1]),
-        ))
+        );
+        self.fold_pair_expected = Some((Arc::clone(&pair.0), Arc::clone(&pair.1)));
+        Some(pair)
     }
 
-    /// Replace the two oldest parked tables with one folded union.
-    pub fn replace_oldest_parked_pair(&mut self, built: MemTable) {
-        if self.parked_unflushed.len() < 2 {
-            if !built.is_empty() {
-                self.parked_unflushed.push(Arc::new(built));
-            }
-            return;
+    /// Replace the two oldest parked tables with one folded union — **only
+    /// if they are still the exact pair** [`Self::parked_oldest_pair_arcs`]
+    /// handed out (F174). A concurrent `materialize_parked_once` may have
+    /// installed the front as an L0 and popped it while the fold built the
+    /// union off-lock; removing "whatever is oldest now" would drop the
+    /// table behind it from the read path. A stale union is discarded
+    /// (its data is either in the new L0 or still parked). Returns whether
+    /// the swap happened.
+    pub fn replace_oldest_parked_pair(&mut self, built: MemTable) -> bool {
+        let Some((a, b)) = self.fold_pair_expected.take() else {
+            return false;
+        };
+        let still_pair = self.parked_unflushed.len() >= 2
+            && Arc::ptr_eq(&self.parked_unflushed[0], &a)
+            && Arc::ptr_eq(&self.parked_unflushed[1], &b);
+        if !still_pair {
+            return false;
         }
         self.parked_unflushed.remove(0);
         self.parked_unflushed.remove(0);
         if !built.is_empty() {
             self.parked_unflushed.insert(0, Arc::new(built));
         }
+        true
     }
 
     /// Keep `mem` as a point/MVCC cache covering one newly installed L0.
@@ -4006,6 +4127,12 @@ impl<E: Env> Db<E> {
             self.persist_changelog_best_effort();
         }
         let wal_path = self.dir.join(WAL_FILE_NAME);
+        // F182: drain the old handle's pending async frame BEFORE
+        // `create_on` truncates the inode. POSIX does not reset the old fd's
+        // offset, so `close()` after the truncate would write the frame at
+        // the pre-truncate offset — a sparse zero hole that makes reopen
+        // fail-stop (`WalZeroHeader`) although L0+MANIFEST are intact.
+        self.wal.lock().flush()?;
         let new = Wal::create_on(&self.env, &wal_path)?;
         let old = std::mem::replace(&mut *self.wal.lock(), new);
         old.close()?;
@@ -4112,11 +4239,14 @@ impl<E: Env> Db<E> {
             return Ok(());
         }
         // Merge every live SST (any level) with latest-only GC into one file at Lmax.
+        // Full-DB rewrite: bottommost — tombstones may be collapsed (F177).
         let mut merged: Vec<(InternalKey, Bytes)> = Vec::new();
         for t in &self.ssts {
             merged.extend(t.entries_cloned());
         }
-        let merged = crate::merge::gc_compact_entries(merged, CompactOptions::latest_only().gc);
+        let mut gc = CompactOptions::latest_only().gc;
+        gc.bottommost = true;
+        let merged = crate::merge::gc_compact_entries(merged, gc);
 
         let num = self.next_file_num;
         let final_path = self.dir.join(format!("{num:06}.sst"));
@@ -4308,6 +4438,15 @@ impl<E: Env> Db<E> {
         options: CompactOptions,
     ) -> Result<()> {
         let num = self.next_file_num;
+        // F177: tombstone dropping is only visibility-safe when this rewrite
+        // covers **every** live SST — otherwise an older version in a file
+        // outside the input resurrects once the tombstone is dropped. The
+        // landing level is irrelevant: if the input is the whole DB, the
+        // output is the whole DB. Partial rewrites keep tombstones.
+        let bottommost = input_idxs.len() == self.ssts.len();
+        let mut gc = options.gc;
+        gc.bottommost = bottommost;
+        let options = CompactOptions { gc, ..options };
         let tables: Vec<SstTable> = input_idxs.iter().map(|&i| self.ssts[i].clone()).collect();
         let new_table =
             write_merged_tables(&self.env, &self.dir, num, &tables, options.gc, self.sync)?;
@@ -4331,8 +4470,16 @@ impl<E: Env> Db<E> {
         let new_path = new_table.path().to_path_buf();
         keep_tables.push(new_table);
         keep_levels.push(to_level);
-        self.ssts = keep_tables;
-        self.sst_levels = keep_levels;
+        let prev_tables = std::mem::replace(&mut self.ssts, keep_tables);
+        let prev_levels = std::mem::replace(&mut self.sst_levels, keep_levels);
+        // F173: the durable state only changes once the MANIFEST install
+        // below succeeds — snapshot everything mutated before it (except
+        // `next_file_num`, whose number stays burned like the off-lock L0
+        // path) so a failed install rolls the whole compact back instead of
+        // leaving a raised GC watermark + swapped inventory that the next
+        // manifest write (e.g. a later flush) would install durably.
+        let prev_manifest_file_num = self.manifest_file_num;
+        let prev_earliest = self.earliest_readable_seq;
         self.note_sst_inventory_changed();
 
         if let Ok(len) = self.env.metadata_len(&new_path) {
@@ -4342,7 +4489,14 @@ impl<E: Env> Db<E> {
         if options.gc.requests_gc() {
             self.note_version_gc_watermark(options.gc);
         }
-        self.persist_manifest()?;
+        if let Err(e) = self.persist_manifest() {
+            self.ssts = prev_tables;
+            self.sst_levels = prev_levels;
+            self.manifest_file_num = prev_manifest_file_num;
+            self.earliest_readable_seq = prev_earliest;
+            self.note_sst_inventory_changed();
+            return Err(e);
+        }
 
         for path in old_paths {
             if path != new_path {
@@ -5275,11 +5429,23 @@ impl<E: Env> Db<E> {
     /// [`CoreError::CorruptValue`] via [`Self::collect_feed_from_live`].
     fn lazy_feed_entries(&self) -> Result<Vec<ChangeEntry>> {
         let from_wal = self.collect_feed_from_wal();
+        // F183: the WAL tail only covers writes since the last rotate. Keys
+        // already flushed to SST + persisted CHANGELOG were silently dropped
+        // by the WAL-first short-circuit (`put A; flush; put B` → feed `[B]`).
+        // Union instead: flush-time last-per-key cache + newer WAL ops, in
+        // sequence order.
+        if !self.change_log.is_empty() {
+            let mut out = self.change_log.changes_after(0);
+            if from_wal.is_empty() {
+                return Ok(out);
+            }
+            let cutoff = out.last().map(|e| e.sequence).unwrap_or(0);
+            out.extend(from_wal.into_iter().filter(|e| e.sequence > cutoff));
+            out.sort_by_key(|e| e.sequence);
+            return Ok(out);
+        }
         if !from_wal.is_empty() {
             return Ok(from_wal);
-        }
-        if !self.change_log.is_empty() {
-            return Ok(self.change_log.changes_after(0));
         }
         self.collect_feed_from_live()
     }
@@ -5289,7 +5455,7 @@ impl<E: Env> Db<E> {
         if !self.env.exists(&path) {
             return Vec::new();
         }
-        let Ok((records, _)) = crate::wal::Wal::<E::File>::recover_span_on(&self.env, &path) else {
+        let Ok((records, _, _resync)) = crate::wal::Wal::<E::File>::recover_span_on(&self.env, &path) else {
             return Vec::new();
         };
         let mut out = Vec::new();
@@ -5359,6 +5525,11 @@ impl<E: Env> Db<E> {
                 value,
             });
         }
+        // Hardening (B2, latent): last-per-key comes out in user-key order,
+        // not sequence order. Every current caller re-sorts via
+        // `replace_sorted`, but the feed contract is non-decreasing sequence
+        // (watcher cursors) — enforce it at the source.
+        out.sort_by_key(|e| e.sequence);
         Ok(out)
     }
 
@@ -6573,6 +6744,7 @@ impl<E: Env> Db<E> {
         let prev_tables = std::mem::replace(&mut self.ssts, keep_tables);
         let prev_levels = std::mem::replace(&mut self.sst_levels, keep_levels);
         let prev_manifest = self.manifest_file_num;
+        let prev_earliest = self.earliest_readable_seq;
         if job.gc.requests_gc() {
             self.note_version_gc_watermark(job.gc);
         }
@@ -6583,6 +6755,7 @@ impl<E: Env> Db<E> {
             prev_tables,
             prev_levels,
             prev_manifest,
+            prev_earliest,
             old_paths,
         })
     }
@@ -6592,6 +6765,10 @@ impl<E: Env> Db<E> {
         self.ssts = undo.prev_tables;
         self.sst_levels = undo.prev_levels;
         self.manifest_file_num = undo.prev_manifest;
+        // F173: the GC watermark was raised before the failed install too —
+        // restore it or live snapshots die with `SnapshotTooOld` and the next
+        // manifest write installs the failed GC durably.
+        self.earliest_readable_seq = undo.prev_earliest;
         self.note_sst_inventory_changed();
     }
 
@@ -6636,6 +6813,7 @@ pub struct L0CompactUndo {
     prev_tables: Vec<SstTable>,
     prev_levels: Vec<u32>,
     prev_manifest: u64,
+    prev_earliest: SequenceNumber,
     old_paths: Vec<PathBuf>,
 }
 
@@ -6768,10 +6946,19 @@ pub fn copy_db_directory(
         }
         let from = src.join(&name);
         let to = dest.join(&name);
-        // Skip nested dirs for base layout (checkpoints are flat; the local
-        // history tier re-materializes on open). `metadata_len` succeeds on
-        // directories on some platforms, so test dir-ness explicitly.
+        // Skip nested dirs for base layout (checkpoints are flat; unknown
+        // dirs re-materialize on open). `history` is the exception: it is
+        // the only copy of archived versions after horizon GC (F175).
+        // `metadata_len` succeeds on directories on some platforms, so test
+        // dir-ness explicitly.
         if env.is_dir(&from).unwrap_or(false) {
+            if name == "history" {
+                let dest_hist = dest.join(&name);
+                env.create_dir_all(&dest_hist)?;
+                for seg in env.read_dir_names(&from)? {
+                    env.copy_file(&from.join(&seg), &dest_hist.join(&seg))?;
+                }
+            }
             continue;
         }
         if env.metadata_len(&from).is_ok() {
@@ -7509,6 +7696,123 @@ mod tests {
         let db = Db::open_with(&dir, sync_opts()).unwrap();
         assert!(db.last_recovery_report().is_none());
         assert_eq!(db.get(b"k02").as_deref(), Some(&[7u8; 120][..]));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// F171: a length bitrot mid-log is resyncable — the walk re-anchors on
+    /// later records, so PointInTime serves prefix + re-anchored suffix while
+    /// REPORTING the skipped region (kind `resync`), and fail-closed reopens
+    /// keep refusing until the damage is repaired (it sits mid-log; the
+    /// tail-cut that heals CRC suffixes cannot heal it).
+    #[test]
+    fn point_in_time_reports_resync_reanchor() {
+        let dir = temp_dir();
+        let wal = dir.join(WAL_FILE_NAME);
+        {
+            let mut db = Db::open_with(&dir, sync_opts()).unwrap();
+            for i in 0..8 {
+                db.put(format!("k{i:02}").as_bytes(), &[7u8; 120]).unwrap();
+            }
+        }
+        // Oversize k02's length (high byte |= 0xff): exceeds max payload →
+        // resyncable LengthCorrupt, and the walk re-anchors on k03.
+        let mut bytes = fs::read(&wal).unwrap();
+        {
+            // Full non-fragmented records: walk two headers by their lengths.
+            let rec_len =
+                |buf: &[u8], h: usize| 7 + u16::from_le_bytes([buf[h + 4], buf[h + 5]]) as usize;
+            let h1 = rec_len(&bytes, 0);
+            let k02 = h1 + rec_len(&bytes, h1);
+            assert!(k02 + 5 < bytes.len());
+            bytes[k02 + 5] ^= 0xff;
+        }
+        fs::write(&wal, &bytes).unwrap();
+
+        let db = Db::open_with(&dir, pit_opts()).unwrap();
+        assert_eq!(db.get(b"k00").as_deref(), Some(&[7u8; 120][..]));
+        assert_eq!(db.get(b"k01").as_deref(), Some(&[7u8; 120][..]));
+        assert_eq!(db.get(b"k02"), None, "damaged record is dropped");
+        for i in 3..8 {
+            assert_eq!(
+                db.get(format!("k{i:02}").as_bytes()).as_deref(),
+                Some(&[7u8; 120][..]),
+                "k{i:02} re-anchored after the walk"
+            );
+        }
+        let report = db
+            .last_recovery_report()
+            .expect("PointInTime must report the resync");
+        assert_eq!(report.kind, "resync");
+        assert!(report.corrupt_offset > 0);
+        let journal = fs::read_to_string(dir.join(crate::corrupt::CORRUPTLOG_NAME)).unwrap();
+        assert!(journal.lines().all(|l| l.contains("\tresync\t")));
+        drop(db);
+        // RFC-0048 P1.1: the PointInTime open rewrote the WAL from the
+        // recovered records (the damage sat mid-log; a tail-cut could not
+        // remove it) — a fail-closed reopen is now clean, keeps the
+        // re-anchored suffix and still drops the damaged record.
+        let db = Db::open_with(&dir, sync_opts()).unwrap();
+        assert!(db.last_recovery_report().is_none());
+        assert_eq!(db.get(b"k00").as_deref(), Some(&[7u8; 120][..]));
+        assert_eq!(db.get(b"k02"), None);
+        assert_eq!(db.get(b"k07").as_deref(), Some(&[7u8; 120][..]));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// F170/P1.2: a zero header mid-block at a fresh alignment is corruption
+    /// (the writer only pads `< HEADER_SIZE` zero bytes). Fail-closed opens
+    /// journal it (RFC-0038 escalation counts it) and refuse; PointInTime
+    /// serves the decoded prefix, reports the discard and heals by tail-cut.
+    #[test]
+    fn zero_header_journals_and_pit_reports() {
+        let dir = temp_dir();
+        let wal = dir.join(WAL_FILE_NAME);
+        {
+            let mut db = Db::open_with(&dir, sync_opts()).unwrap();
+            for i in 0..8 {
+                db.put(format!("k{i:02}").as_bytes(), &[7u8; 120]).unwrap();
+            }
+        }
+        let mut bytes = fs::read(&wal).unwrap();
+        {
+            let rec_len =
+                |buf: &[u8], h: usize| 7 + u16::from_le_bytes([buf[h + 4], buf[h + 5]]) as usize;
+            let h1 = rec_len(&bytes, 0);
+            let k02 = h1 + rec_len(&bytes, h1);
+            // Zero k02's CRC-irrelevant length+type bytes: later records in
+            // the same block stay intact (non-zero tail after the header).
+            assert!(k02 + 6 < bytes.len());
+            bytes[k02 + 4] = 0;
+            bytes[k02 + 5] = 0;
+            bytes[k02 + 6] = 0;
+        }
+        fs::write(&wal, &bytes).unwrap();
+
+        // Fail-closed: refuse + journal with the exact corruption kind.
+        let err = match Db::open_with(&dir, sync_opts()) {
+            Err(e) => e,
+            Ok(_) => panic!("fail-closed open must refuse a zero header mid-block"),
+        };
+        assert!(matches!(err, CoreError::WalZeroHeader { .. }), "got {err:?}");
+        let journal = fs::read_to_string(dir.join(crate::corrupt::CORRUPTLOG_NAME)).unwrap();
+        assert!(
+            journal.lines().any(|l| l.contains("\tzero_header\t")),
+            "journal must record the zero_header event: {journal}"
+        );
+
+        // PointInTime: serve the prefix, report the discard, heal by cut.
+        let db = Db::open_with(&dir, pit_opts()).unwrap();
+        assert_eq!(db.get(b"k00").as_deref(), Some(&[7u8; 120][..]));
+        assert_eq!(db.get(b"k01").as_deref(), Some(&[7u8; 120][..]));
+        for i in 2..8 {
+            assert_eq!(db.get(format!("k{i:02}").as_bytes()), None, "k{i:02} discarded");
+        }
+        let report = db.last_recovery_report().expect("PointInTime must report");
+        assert_eq!(report.kind, "zero_header");
+        drop(db);
+        let db = Db::open_with(&dir, sync_opts()).unwrap();
+        assert!(db.last_recovery_report().is_none());
+        assert_eq!(db.get(b"k00").as_deref(), Some(&[7u8; 120][..]));
         let _ = fs::remove_dir_all(&dir);
     }
 

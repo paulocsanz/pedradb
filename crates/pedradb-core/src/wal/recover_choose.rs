@@ -42,15 +42,35 @@ pub enum RecoverChoice {
         /// 0-based physical record.
         index: usize,
     },
+    /// Append `bytes` of pure zeros (prealloc / post-crash padding shape).
+    /// A zero tail is legitimate padding — the reader must recover every
+    /// record and stop cleanly (F170 kept this distinct from a *live* zero
+    /// header).
+    ZeroTail {
+        /// How many trailing zero bytes to append.
+        bytes: usize,
+    },
+    /// Zero the length+type of record `index` while its payload (and any
+    /// later records) stay live in the same block — the F170 shape the
+    /// AS-IS reader swallowed as block padding, losing the rest of the log.
+    ForgeZeroHeaderAlive {
+        /// 0-based physical record.
+        index: usize,
+    },
 }
 
 /// Bounded EXPLODE panel for a WAL with `n_records` physical Full records.
 #[must_use]
 pub fn explode_choices(n_records: usize) -> Vec<RecoverChoice> {
-    let mut out = vec![RecoverChoice::Clean, RecoverChoice::TearTail { bytes: 5 }];
+    let mut out = vec![
+        RecoverChoice::Clean,
+        RecoverChoice::TearTail { bytes: 5 },
+        RecoverChoice::ZeroTail { bytes: 1024 },
+    ];
     for index in 0..n_records {
         out.push(RecoverChoice::FlipCrc { index });
         out.push(RecoverChoice::FlipLength { index });
+        out.push(RecoverChoice::ForgeZeroHeaderAlive { index });
         if index > 0 {
             out.push(RecoverChoice::ForgeOrphanMiddle { index });
             out.push(RecoverChoice::ForgeUnknownType { index });
@@ -114,6 +134,25 @@ pub fn apply_recover_choice(buf: &mut Vec<u8>, choice: RecoverChoice) -> bool {
             buf[h + 6] = 0x7f;
             true
         }
+        RecoverChoice::ZeroTail { bytes } => {
+            buf.extend(std::iter::repeat_n(0u8, bytes));
+            true
+        }
+        RecoverChoice::ForgeZeroHeaderAlive { index } => {
+            let Some((h, len, _)) = nth_phys(buf, index) else {
+                return false;
+            };
+            // Length + type zeroed; CRC bytes stay — the zero-header check
+            // fires before either is consulted. The record's own payload
+            // (and later records) remain as the live bytes after it.
+            if h + HEADER_SIZE + len > buf.len() {
+                return false;
+            }
+            buf[h + 4] = 0;
+            buf[h + 5] = 0;
+            buf[h + 6] = 0;
+            true
+        }
     }
 }
 
@@ -121,13 +160,14 @@ pub fn apply_recover_choice(buf: &mut Vec<u8>, choice: RecoverChoice) -> bool {
 #[must_use]
 pub fn injected_kind(choice: RecoverChoice) -> Option<RecoverKind> {
     match choice {
-        RecoverChoice::Clean => None,
+        RecoverChoice::Clean | RecoverChoice::ZeroTail { .. } => None,
         RecoverChoice::TearTail { .. } | RecoverChoice::FlipLength { .. } => {
             Some(RecoverKind::Truncated)
         }
         RecoverChoice::FlipCrc { .. } => Some(RecoverKind::Crc),
         RecoverChoice::ForgeOrphanMiddle { .. } => Some(RecoverKind::OrphanFragment),
         RecoverChoice::ForgeUnknownType { .. } => Some(RecoverKind::UnknownType),
+        RecoverChoice::ForgeZeroHeaderAlive { .. } => Some(RecoverKind::ZeroHeaderTail),
     }
 }
 
@@ -148,11 +188,11 @@ pub enum ChooseExpect {
 #[must_use]
 pub fn choose_expect(choice: RecoverChoice) -> ChooseExpect {
     match choice {
-        RecoverChoice::Clean => ChooseExpect::AllRecords,
+        RecoverChoice::Clean | RecoverChoice::ZeroTail { .. } => ChooseExpect::AllRecords,
         RecoverChoice::TearTail { .. } => ChooseExpect::PrefixOnly,
-        RecoverChoice::FlipCrc { .. } | RecoverChoice::ForgeOrphanMiddle { .. } => {
-            ChooseExpect::FailStop
-        }
+        RecoverChoice::FlipCrc { .. }
+        | RecoverChoice::ForgeOrphanMiddle { .. }
+        | RecoverChoice::ForgeZeroHeaderAlive { .. } => ChooseExpect::FailStop,
         RecoverChoice::FlipLength { .. } | RecoverChoice::ForgeUnknownType { .. } => {
             ChooseExpect::Resync
         }
@@ -230,9 +270,34 @@ mod tests {
         let c = explode_choices(3);
         assert!(c.contains(&RecoverChoice::Clean));
         assert!(c.contains(&RecoverChoice::TearTail { bytes: 5 }));
+        assert!(c.contains(&RecoverChoice::ZeroTail { bytes: 1024 }));
         assert!(c.contains(&RecoverChoice::FlipCrc { index: 0 }));
+        assert!(c.contains(&RecoverChoice::ForgeZeroHeaderAlive { index: 0 }));
+        assert!(c.contains(&RecoverChoice::ForgeZeroHeaderAlive { index: 2 }));
         assert!(c.contains(&RecoverChoice::ForgeOrphanMiddle { index: 1 }));
         assert!(!c.contains(&RecoverChoice::ForgeOrphanMiddle { index: 0 }));
-        assert_eq!(c.len(), 2 + 3 * 2 + 2 * 2);
+        // 3 base + per-record (crc, length, zero-header-alive) + mid-only (orphan, unknown)
+        assert_eq!(c.len(), 3 + 3 * 3 + 2 * 2);
+    }
+
+    #[test]
+    fn new_kinds_map_to_their_contract() {
+        assert_eq!(
+            injected_kind(RecoverChoice::ZeroTail { bytes: 64 }),
+            None,
+            "pure zero tail is padding, not a fault"
+        );
+        assert_eq!(
+            injected_kind(RecoverChoice::ForgeZeroHeaderAlive { index: 1 }),
+            Some(RecoverKind::ZeroHeaderTail)
+        );
+        assert_eq!(
+            choose_expect(RecoverChoice::ZeroTail { bytes: 64 }),
+            ChooseExpect::AllRecords
+        );
+        assert_eq!(
+            choose_expect(RecoverChoice::ForgeZeroHeaderAlive { index: 1 }),
+            ChooseExpect::FailStop
+        );
     }
 }

@@ -21,8 +21,18 @@ fn write_records(recs: &[&[u8]]) -> Vec<u8> {
     w.into_inner().into_inner()
 }
 
-fn collect(buf: Vec<u8>) -> Result<Vec<Vec<u8>>, CoreError> {
-    WalReader::new(Cursor::new(buf)).collect_all()
+/// Collect through a reader instance kept alive so the sweep can also
+/// assert the F171 resync re-anchor report (`resync_origin`).
+fn collect_with_reader(
+    buf: Vec<u8>,
+) -> (Result<Vec<Vec<u8>>, CoreError>, WalReader<Cursor<Vec<u8>>>) {
+    let mut r = WalReader::new(Cursor::new(buf));
+    let (out, err) = r.collect_prefix_all();
+    let res = match err {
+        Some(e) => Err(e),
+        None => Ok(out),
+    };
+    (res, r)
 }
 
 #[test]
@@ -36,7 +46,9 @@ fn explode_sweep_three_records() {
             apply_recover_choice(&mut buf, choice),
             "choice {choice:?} must apply to a 3-record WAL"
         );
-        let got = collect(buf);
+        // Reader instance kept alive so the F171 re-anchor report can be
+        // asserted alongside the record outcome.
+        let (got, reader) = collect_with_reader(buf);
         match (choose_expect(choice), got) {
             (ChooseExpect::AllRecords, Ok(out)) => {
                 assert_eq!(
@@ -46,7 +58,12 @@ fn explode_sweep_three_records() {
                         b"second".to_vec(),
                         b"third-overwrite".to_vec()
                     ],
-                    "clean image"
+                    "clean image (incl. pure zero tail = padding, not corruption)"
+                );
+                // F171: nothing was skipped — no re-anchor origin.
+                assert!(
+                    reader.resync_origin().is_none(),
+                    "{choice:?} must not report a resync origin"
                 );
             }
             (ChooseExpect::FailStop, Err(e)) => match choice {
@@ -58,6 +75,12 @@ fn explode_sweep_three_records() {
                     assert!(
                         msg.contains("orphan") || msg.contains("crc"),
                         "orphan/crc fail-stop, got {msg}"
+                    );
+                }
+                RecoverChoice::ForgeZeroHeaderAlive { .. } => {
+                    assert!(
+                        matches!(e, CoreError::WalZeroHeader { .. }),
+                        "F170: live zero header must fail-stop typed, got {e}"
                     );
                 }
                 other => panic!("unexpected fail-stop choice {other:?}: {e}"),
@@ -92,6 +115,26 @@ fn explode_sweep_three_records() {
                         "mid-WAL resync must keep the durable prefix ({choice:?})"
                     ),
                 }
+                // F171 re-anchor report: a damaged record followed by more
+                // records re-anchors the walk (origin set); damage on the
+                // LAST record walks to EOF — that is a torn tail, origin
+                // must stay clean so fail-closed callers don't refuse it.
+                let (.., is_last) = match choice {
+                    RecoverChoice::FlipLength { index }
+                    | RecoverChoice::ForgeUnknownType { index } => (index, index + 1 == recs.len()),
+                    other => panic!("unexpected resync choice {other:?}"),
+                };
+                if is_last {
+                    assert!(
+                        reader.resync_origin().is_none(),
+                        "{choice:?}: torn-tail walk must not report a re-anchor origin"
+                    );
+                } else {
+                    assert!(
+                        reader.resync_origin().is_some(),
+                        "{choice:?}: walk re-anchored on a later record — origin must be reported"
+                    );
+                }
             }
             (ChooseExpect::Resync, Err(e)) => {
                 // First-record length/type bitrot may exhaust resync with no
@@ -125,6 +168,16 @@ fn as_is_policy_still_has_teeth() {
     );
     assert_eq!(
         recover_collect_act_as_is(RecoverKind::Truncated, 0, false, 0),
+        RecoverAct::Stop
+    );
+    // F170 teeth: the live zero header fail-stops typed; the AS-IS mutant
+    // swallowed the rest of the block as padding (Stop = silent prefix loss).
+    assert_eq!(
+        recover_collect_act(RecoverKind::ZeroHeaderTail, 1, false, 0, false),
+        RecoverAct::FailStop
+    );
+    assert_eq!(
+        recover_collect_act_as_is(RecoverKind::ZeroHeaderTail, 1, false, 0),
         RecoverAct::Stop
     );
 }

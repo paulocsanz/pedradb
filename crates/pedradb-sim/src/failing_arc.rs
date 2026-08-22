@@ -234,6 +234,12 @@ impl Env for FailingEnvArc {
         self.state.gate(false)?;
         self.inner.metadata_len(path)
     }
+
+    /// F5: route through the seam so a wrapped non-Std env decides.
+    fn is_dir(&self, path: &Path) -> io::Result<bool> {
+        self.state.gate(false)?;
+        self.inner.is_dir(path)
+    }
 }
 
 #[cfg(test)]

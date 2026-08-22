@@ -155,16 +155,22 @@ impl SliceTransform {
     }
 }
 
-/// rust-rocksdb `ReadOptions`. Iterate bounds are honoured; the rest is
-/// accepted (snapshot is already pinned on the `Transaction`).
+/// rust-rocksdb `ReadOptions`. Iterate bounds are honoured; the snapshot is
+/// honoured by `DB::raw_iterator_opt` when attached via `set_snapshot`
+/// (F180 — was a no-op and the iterator read latest, leaking post-snapshot
+/// writes into a "pinned" scan).
 #[derive(Debug, Clone, Default)]
 pub struct ReadOptions {
     pub lower: Option<Vec<u8>>,
     pub upper: Option<Vec<u8>>,
+    /// Sequence pinned by `set_snapshot` (`None` = read latest).
+    pub(crate) snap: Option<pedradb_core::SequenceNumber>,
 }
 
 impl ReadOptions {
-    pub fn set_snapshot<D>(&mut self, _snap: &SnapshotWithThreadMode<'_, D>) {}
+    pub fn set_snapshot<D>(&mut self, snap: &SnapshotWithThreadMode<'_, D>) {
+        self.snap = Some(snap.seq);
+    }
     pub fn set_async_io(&mut self, _v: bool) {}
     pub fn fill_cache(&mut self, _v: bool) {}
     pub fn set_verify_checksums(&mut self, _v: bool) {}
@@ -206,6 +212,10 @@ pub struct DBRawIteratorWithThreadMode<'a, D, E: Env = StdEnv> {
     seq: pedradb_core::SequenceNumber,
     lower: Option<Vec<u8>>,
     upper: Option<Vec<u8>>,
+    /// Whether the windowed iterator is currently walking reverse (fix C2):
+    /// `next` must always ascend, so from a reverse position it re-seeks
+    /// forward instead of decrementing the window.
+    rev: bool,
     _d: PhantomData<fn(&'a D) -> &'a D>,
 }
 
@@ -217,6 +227,7 @@ impl<'a, D, E: Env> DBRawIteratorWithThreadMode<'a, D, E> {
             seq,
             lower: ro.lower.clone(),
             upper: ro.upper.clone(),
+            rev: true,
             _d: PhantomData,
         };
         it.seek_to_first();
@@ -259,16 +270,26 @@ impl<'a, D, E: Env> DBRawIteratorWithThreadMode<'a, D, E> {
     /// Seek first key (honours lower bound).
     pub fn seek_to_first(&mut self) {
         let start = self.lower.clone();
+        self.rev = false;
         self.reopen(match start.as_deref() {
             Some(k) => IteratorMode::From(k, Direction::Forward),
             None => IteratorMode::Start,
         });
     }
 
-    /// Seek last key (honours upper bound).
+    /// Seek last key (honours upper bound — F181: the bound is exclusive,
+    /// so position on the last key **below** it, walking back instead of
+    /// invalidating).
     pub fn seek_to_last(&mut self) {
-        self.reopen(IteratorMode::End);
-        self.skip_past_upper();
+        self.rev = true;
+        match self.upper.clone() {
+            Some(hi) => {
+                self.reopen(IteratorMode::From(&hi, Direction::Reverse));
+                self.step_prev_past_upper();
+                self.clamp_to_lower();
+            }
+            None => self.reopen(IteratorMode::End),
+        }
     }
 
     /// Seek ≥ `key`.
@@ -280,28 +301,56 @@ impl<'a, D, E: Env> DBRawIteratorWithThreadMode<'a, D, E> {
         };
         // Need owned to avoid borrow of self.lower while reopen takes &self.
         let owned = start.to_vec();
+        self.rev = false;
         self.reopen(IteratorMode::From(&owned, Direction::Forward));
         self.skip_past_upper();
     }
 
-    /// Seek ≤ `key`.
+    /// Seek ≤ `key` (honours lower bound — fix C3; honours the exclusive
+    /// upper bound by stepping previous past any key ≥ it — F181).
     pub fn seek_for_prev<K: AsRef<[u8]>>(&mut self, key: K) {
         let owned = key.as_ref().to_vec();
+        self.rev = true;
         self.reopen(IteratorMode::From(&owned, Direction::Reverse));
+        self.step_prev_past_upper();
+        self.clamp_to_lower();
     }
 
-    /// Next key.
+    /// Next key (ascending, regardless of how positioned — fix C2).
     pub fn next(&mut self) {
+        if self.rev {
+            // Re-seek forward from the current key (inclusive), then advance
+            // one so the net move is "next ascending key".
+            let cur = self.key().map(<[u8]>::to_vec);
+            if let Some(k) = cur {
+                let owned = match &self.lower {
+                    Some(lo) if k.as_slice() < lo.as_slice() => lo.as_slice().to_vec(),
+                    _ => k,
+                };
+                self.reopen(IteratorMode::From(&owned, Direction::Forward));
+                self.rev = false;
+                if self.valid() && self.key() == Some(owned.as_slice()) {
+                    if let Some(it) = self.inner.as_mut() {
+                        it.next();
+                    }
+                }
+                self.skip_past_upper();
+            } else {
+                self.inner = None;
+            }
+            return;
+        }
         if let Some(it) = self.inner.as_mut() {
             it.next();
         }
         self.skip_past_upper();
     }
 
-    /// Previous key.
+    /// Previous key (descending; honours lower bound — fix C3).
     pub fn prev(&mut self) {
         // Our windowed iterator only walks one direction per open. Re-seek
         // from the current key in reverse.
+        self.rev = true;
         let cur = self.key().map(<[u8]>::to_vec);
         if let Some(k) = cur {
             self.reopen(IteratorMode::From(&k, Direction::Reverse));
@@ -310,7 +359,21 @@ impl<'a, D, E: Env> DBRawIteratorWithThreadMode<'a, D, E> {
                     it.next();
                 }
             }
+            self.clamp_to_lower();
         } else {
+            self.inner = None;
+        }
+    }
+
+    fn clamp_to_lower(&mut self) {
+        let Some(lo) = self.lower.clone() else {
+            return;
+        };
+        if self
+            .inner
+            .as_ref()
+            .is_some_and(|it| it.valid() && it.key() < lo.as_slice())
+        {
             self.inner = None;
         }
     }
@@ -325,6 +388,26 @@ impl<'a, D, E: Env> DBRawIteratorWithThreadMode<'a, D, E> {
             .is_some_and(|it| it.valid() && it.key() >= hi.as_slice())
         {
             self.inner = None;
+        }
+    }
+
+    /// Reverse-positioned walk below an exclusive upper bound (F181): while
+    /// the current key is ≥ the bound, step to the previous key (reverse
+    /// iteration) instead of invalidating — `seek_to_last`/`seek_for_prev`
+    /// must land on the last key inside `[lower, upper)`.
+    fn step_prev_past_upper(&mut self) {
+        let Some(hi) = self.upper.clone() else {
+            return;
+        };
+        while self
+            .inner
+            .as_ref()
+            .is_some_and(|it| it.valid() && it.key() >= hi.as_slice())
+        {
+            match self.inner.as_mut() {
+                Some(it) => it.next(), // reverse mode: steps to the previous key
+                None => break,
+            }
         }
     }
 

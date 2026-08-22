@@ -815,7 +815,9 @@ impl MemTable {
                 continue;
             }
             last = Some(k.user_key.clone());
-            if k.kind == ValueType::Value {
+            if k.kind == ValueType::Value
+                && !self.range_deleted(&k.user_key, k.sequence, snapshot)
+            {
                 out.push((k.user_key.clone(), v.clone()));
             }
         }

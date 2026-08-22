@@ -25,6 +25,15 @@ pub enum CoreError {
     #[error("wal truncated record at offset {0}")]
     Truncated(u64),
 
+    /// A zero type+len WAL header at a fresh alignment with non-zero bytes
+    /// after it (F170). The writer only ever pads `< HEADER_SIZE` zero
+    /// bytes, so this shape is corruption, never padding or prealloc.
+    #[error("wal zero-length header mid-block with non-zero tail at offset {offset}")]
+    WalZeroHeader {
+        /// Byte offset where the zero header began.
+        offset: u64,
+    },
+
     /// Repeated fail-stop WAL corruption at open: the corruption journal hit
     /// its escalation limit (RFC-0038 option D). A single CRC event cannot
     /// tell isolated bitflip from dying media; only history can. The Nth
@@ -73,6 +82,12 @@ pub enum CoreError {
     /// history bytes.
     #[error("corrupt history: {0}")]
     CorruptHistory(String),
+
+    /// A value-log record (large value) failed its CRC / length check or its
+    /// backing file cannot satisfy the pointer: fail-closed — reads surface
+    /// this as an error (or fail-stop on Option-shaped APIs), never a miss.
+    #[error("corrupt value log: {0}")]
+    CorruptValue(String),
 
     /// A required WAL `sync_data` failed after append; this `Db` refuses further
     /// writes until `close` + `open` (reopen rebuilds mem from WAL).

@@ -36,7 +36,7 @@ pub use shape::{
 
 use pedradb_core::{
     BatchOp, CompactOptions as CoreCompactOptions, ConcurrentDb, CoreError, Env,
-    Snapshot as CoreSnapshot, StdEnv,
+    Snapshot as CoreSnapshot, SnapshotPin, StdEnv,
 };
 use std::cell::RefCell;
 use std::collections::VecDeque;
@@ -119,8 +119,10 @@ impl From<CoreError> for Error {
             CoreError::DurabilityFenced => ErrorKind::Fenced,
             CoreError::Crc { .. }
             | CoreError::Truncated(_)
+            | CoreError::WalZeroHeader { .. }
             | CoreError::CorruptManifest(_)
-            | CoreError::CorruptHistory(_) => ErrorKind::Corruption,
+            | CoreError::CorruptHistory(_)
+            | CoreError::CorruptValue(_) => ErrorKind::Corruption,
             CoreError::CorruptionEscalated { .. } => ErrorKind::CorruptionEscalated,
             CoreError::Io(_) => ErrorKind::Io,
             CoreError::TransactionConflict => ErrorKind::TransactionConflict,
@@ -922,6 +924,9 @@ pub struct DBIterator<E: Env = StdEnv> {
     cf_start: Bound<Vec<u8>>,
     cf_end: Bound<Vec<u8>>,
     exhausted: bool,
+    /// Last refill error (fix C6 hardening): a failed window refill no
+    /// longer vanishes — `status()` reports it instead of a silent truncation.
+    err: Option<Error>,
 }
 
 impl<E: Env> DBIterator<E> {
@@ -979,6 +984,17 @@ impl<E: Env> DBIterator<E> {
         out
     }
 
+    /// Last refill error, if a window refill failed (fix C6 hardening).
+    pub fn status(&self) -> Result<()> {
+        match &self.err {
+            Some(e) => Err(Error {
+                msg: e.msg.clone(),
+                kind: e.kind,
+            }),
+            None => Ok(()),
+        }
+    }
+
     fn invalidate(&mut self) {
         self.exhausted = true;
         self.idx = if self.reverse {
@@ -1008,7 +1024,11 @@ impl<E: Env> DBIterator<E> {
                 self.items = page;
                 self.idx = 0;
             }
-            _ => self.invalidate(),
+            Ok(_) => self.invalidate(),
+            Err(e) => {
+                self.err = Some(e);
+                self.invalidate();
+            }
         }
     }
 
@@ -1032,7 +1052,11 @@ impl<E: Env> DBIterator<E> {
                 self.idx = page.len() - 1;
                 self.items = page;
             }
-            _ => self.invalidate(),
+            Ok(_) => self.invalidate(),
+            Err(e) => {
+                self.err = Some(e);
+                self.invalidate();
+            }
         }
     }
 }
@@ -1087,6 +1111,9 @@ fn page_last_n<E: Env>(
 pub struct Snapshot<'a, E: Env = StdEnv> {
     db: &'a DB<E>,
     snap: CoreSnapshot,
+    /// GC pin (fix C5/C6): a live rust-rocksdb-shaped snapshot must stay
+    /// readable; `auto_reclaim` GC honours the pin until Drop.
+    pin: SnapshotPin,
 }
 
 impl<E: Env> Snapshot<'_, E> {
@@ -1132,6 +1159,12 @@ impl<E: Env> Snapshot<'_, E> {
             self.snap.sequence(),
             &self.db.cfs,
         )
+    }
+}
+
+impl<E: Env> Drop for Snapshot<'_, E> {
+    fn drop(&mut self) {
+        self.db.inner.release_snapshot_pin(self.pin);
     }
 }
 
@@ -1222,6 +1255,7 @@ pub(crate) fn scan_cf_at<E: Env>(
         cf_start,
         cf_end,
         exhausted,
+        err: None,
     })
 }
 
@@ -1377,7 +1411,6 @@ impl<E: Env> DB<E> {
         let cache_epoch_base = CACHE_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed) << 32;
         Ok(Self {
             inner: db,
-            cache_epoch_base,
             cfs: names,
             codec,
             compact_tx: None,
@@ -1385,6 +1418,7 @@ impl<E: Env> DB<E> {
             compact_gate: Arc::new(Mutex::new(())),
             fence_recovery: Arc::new(Mutex::new(None)),
             auto_resume_transient: opts.auto_resume_transient,
+            cache_epoch_base,
         })
     }
 
@@ -1755,11 +1789,14 @@ impl<E: Env> DB<E> {
         })
     }
 
-    /// Sequence-pinned snapshot.
+    /// Sequence-pinned snapshot (fix C5/C6: registers a GC pin, released on
+    /// Drop — a live snapshot stays readable under `auto_reclaim`, matching
+    /// rust-rocksdb where a snapshot is valid until dropped).
     #[must_use]
     pub fn snapshot(&self) -> Snapshot<'_, E> {
         let snap = self.inner.snapshot();
-        Snapshot { db: self, snap }
+        let pin = self.inner.pin_snapshot();
+        Snapshot { db: self, snap, pin }
     }
 
     /// rust-rocksdb `OptimisticTransactionDB::transaction` shape (RFC-0043 P2.4).
@@ -1991,10 +2028,12 @@ impl<E: Env> DB<E> {
         self.inner.compact().map_err(Error::from)
     }
 
-    /// rust-rocksdb raw iterator (SurrealDB scan / count).
+    /// rust-rocksdb raw iterator (SurrealDB scan / count). An attached
+    /// `ReadOptions::set_snapshot` pins the reads at that sequence (F180);
+    /// without one it reads the latest visible sequence.
     #[must_use]
     pub fn raw_iterator_opt(&self, ro: ReadOptions) -> DBRawIteratorWithThreadMode<'_, Self, E> {
-        let seq = self.inner.visible_sequence();
+        let seq = ro.snap.unwrap_or_else(|| self.inner.visible_sequence());
         DBRawIteratorWithThreadMode::open(self, seq, &ro)
     }
 

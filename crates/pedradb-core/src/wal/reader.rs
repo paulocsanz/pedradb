@@ -37,6 +37,14 @@ pub struct WalReader<R> {
     /// Stream offset just past the last record yielded by [`Self::collect_all`]
     /// — the last known-good append point (0 when nothing was recovered).
     last_good_offset: u64,
+    /// F171 (pending): offset where the current resync walk began; promoted to
+    /// `resync_origin` only if a later CRC-valid record re-anchors the log.
+    pending_resync: Option<u64>,
+    /// F171 (sticky): a resync walk skipped damaged bytes AND a later record
+    /// re-anchored — the skipped region is lost from the recovered set and
+    /// fail-closed callers must refuse the log (routine torn tails that walk
+    /// to EOF without re-anchoring never set this).
+    resync_origin: Option<u64>,
 }
 
 impl<R: Read> WalReader<R> {
@@ -51,6 +59,8 @@ impl<R: Read> WalReader<R> {
             scratch: Vec::new(),
             block_start_offset: 0,
             last_good_offset: 0,
+            pending_resync: None,
+            resync_origin: None,
         }
     }
 }
@@ -107,9 +117,19 @@ impl<R: Read> WalReader<R> {
             let length =
                 decode_length([self.block[header_offset + 4], self.block[header_offset + 5]]);
 
-            // A zero type + zero length header is block padding (or prealloc).
+            // A zero type + zero length header is block padding (or prealloc)
+            // — legitimate only when the rest of the block is zero. A zero
+            // header followed by live bytes is corruption and must fail
+            // closed instead of silently swallowing the block's records.
             if rtype_byte == RecordType::Zero as u8 && length == 0 {
-                // Skip the remainder of this block.
+                if self.block[self.block_cursor + HEADER_SIZE..self.block_end]
+                    .iter()
+                    .any(|&b| b != 0)
+                {
+                    return Err(CoreError::WalZeroHeader {
+                        offset: self.current_record_stream_offset(),
+                    });
+                }
                 self.block_cursor = self.block_end;
                 continue;
             }
@@ -252,6 +272,15 @@ impl<R: Read> WalReader<R> {
     pub fn last_good_offset(&self) -> u64 {
         self.last_good_offset
     }
+
+    /// F171: `Some(offset)` when a resync walk skipped damaged bytes and a
+    /// later CRC-valid record re-anchored the log — the skipped region is
+    /// lost from the recovered set and fail-closed callers must refuse it.
+    /// `None` on a clean log or a plain torn tail (no re-anchor).
+    #[must_use]
+    pub fn resync_origin(&self) -> Option<u64> {
+        self.resync_origin
+    }
 }
 
 impl<R: Read> WalReader<R> {
@@ -292,7 +321,8 @@ impl<R: Read> WalReader<R> {
             let outcome = self.read_record();
             let kind = recover_kind_from_read(&outcome);
             let prefix_n = out.len() as u64;
-            let can_skip = if is_length_resyncable(kind) || (in_resync && kind == RecoverKind::Crc)
+            let can_skip = if is_length_resyncable(kind)
+                || (in_resync && matches!(kind, RecoverKind::Crc | RecoverKind::ZeroHeaderTail))
             {
                 match self.skip_byte_for_resync() {
                     Ok(v) => v,
@@ -310,6 +340,14 @@ impl<R: Read> WalReader<R> {
             match recover_collect_act(kind, prefix_n, can_skip, skips, in_resync) {
                 RecoverAct::KeepRecord => match outcome {
                     Ok(Some(rec)) => {
+                        if in_resync {
+                            // F171: this record re-anchored the log after a
+                            // walk that skipped damaged bytes — the skipped
+                            // region is lost; keep the earliest origin.
+                            if let Some(p) = self.pending_resync.take() {
+                                self.resync_origin = self.resync_origin.or(Some(p));
+                            }
+                        }
                         out.push(rec);
                         consecutive_skips = 0;
                         // A CRC-valid record re-anchors the alignment.
@@ -325,8 +363,16 @@ impl<R: Read> WalReader<R> {
                         );
                     }
                 },
-                RecoverAct::Stop | RecoverAct::KeepPrefix => break,
+                RecoverAct::Stop | RecoverAct::KeepPrefix => {
+                    // Walk ended without re-anchoring (torn tail at EOF):
+                    // the skipped bytes are the torn region, not lost data.
+                    self.pending_resync = None;
+                    break;
+                }
                 RecoverAct::Resync => {
+                    if !in_resync && self.pending_resync.is_none() {
+                        self.pending_resync = Some(self.current_record_stream_offset());
+                    }
                     consecutive_skips = skips;
                     in_resync = true;
                 }
@@ -375,6 +421,7 @@ fn recover_kind(err: &CoreError) -> RecoverKind {
     match err {
         CoreError::Truncated(_) => RecoverKind::Truncated,
         CoreError::Crc { .. } => RecoverKind::Crc,
+        CoreError::WalZeroHeader { .. } => RecoverKind::ZeroHeaderTail,
         CoreError::Internal(msg) => {
             if msg.contains("orphan") {
                 RecoverKind::OrphanFragment

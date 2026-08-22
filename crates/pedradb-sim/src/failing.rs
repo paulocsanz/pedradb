@@ -478,6 +478,13 @@ impl<E: Env> Env for FailingEnv<E> {
         self.state.gate_class(OpClass::Meta)?;
         self.inner.metadata_len(path)
     }
+
+    /// F5: route through the seam so a wrapped non-Std env decides, and the
+    /// Meta fault class can inject here like any other metadata op.
+    fn is_dir(&self, path: &Path) -> io::Result<bool> {
+        self.state.gate_class(OpClass::Meta)?;
+        self.inner.is_dir(path)
+    }
 }
 
 #[cfg(test)]

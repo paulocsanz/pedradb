@@ -129,10 +129,19 @@ pub trait Env: Clone {
 
     /// Whether `path` is a directory (missing = `Ok(false)`).
     ///
+    /// Default consults the **host filesystem** — override if this `Env` is
+    /// not backed by it (an in-memory or remote env deciding via the real fs
+    /// is a silent seam bypass, audit F5). Only `NotFound` maps to
+    /// `Ok(false)`; other errors propagate.
+    ///
     /// # Errors
-    /// Underlying I/O.
+    /// Underlying I/O other than `NotFound`.
     fn is_dir(&self, path: &Path) -> io::Result<bool> {
-        Ok(fs::metadata(path).map(|m| m.is_dir()).unwrap_or(false))
+        match fs::metadata(path) {
+            Ok(m) => Ok(m.is_dir()),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(false),
+            Err(e) => Err(e),
+        }
     }
 
     /// Copy `from` → `to` (create/truncate dest), then fsync dest.

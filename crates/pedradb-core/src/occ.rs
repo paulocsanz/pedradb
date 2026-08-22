@@ -114,6 +114,25 @@ impl<E: Env> OccTransaction<E> {
         Ok(())
     }
 
+    /// Staged writes, user-key sorted: `(key, Some(value))` = put,
+    /// `(key, None)` = delete. Read-your-own-writes overlay for scan/count
+    /// surfaces (compat `Transaction::scan_count`); non-consuming.
+    #[must_use]
+    pub fn staged_entries(&self) -> Vec<(Bytes, Option<Bytes>)> {
+        self.staging
+            .iter()
+            .map(|(k, s)| {
+                (
+                    k.clone(),
+                    match s {
+                        Stage::Put(v) => Some(v.clone()),
+                        Stage::Delete => None,
+                    },
+                )
+            })
+            .collect()
+    }
+
     /// Validate OCC then commit (one WAL record under the write lock).
     ///
     /// # Errors
@@ -130,7 +149,26 @@ impl<E: Env> OccTransaction<E> {
         self.ensure_open()?;
         if self.staging.is_empty() {
             self.finished = true;
-            return Ok(());
+            if self.read_set.is_empty() {
+                return Ok(());
+            }
+            // Read-only commits still honour the documented read-set contract:
+            // conflict on concurrent writes to keys this TX read (occ.rs
+            // header), and `SnapshotTooOld` once GC moved past the snapshot.
+            let read_set = mem::take(&mut self.read_set);
+            let snapshot = self.snapshot;
+            let db = self.db.clone();
+            return db.with_write(|guard| {
+                guard.ensure_snapshot_readable(crate::db::Snapshot::at(snapshot))?;
+                if guard.last_sequence() != snapshot
+                    && read_set
+                        .iter()
+                        .any(|k| guard.key_has_write_after(k.as_ref(), snapshot))
+                {
+                    return Err(CoreError::TransactionConflict);
+                }
+                Ok(())
+            });
         }
 
         let staging = mem::take(&mut self.staging);

@@ -43,6 +43,11 @@ pub enum RecoverKind {
     OrphanFragment,
     /// Stored CRC ≠ recomputed CRC.
     Crc,
+    /// Zero type+len header at fresh alignment with non-zero bytes after it
+    /// (F170): the writer only pads `< HEADER_SIZE` zero bytes, so this is
+    /// corruption, not padding. Inside a resync walk it is the walk's own
+    /// garbage alignment and keeps walking.
+    ZeroHeaderTail,
     /// I/O or other internal — always fail-stop.
     Other,
 }
@@ -179,11 +184,25 @@ pub fn recover_collect_act(
                 RecoverAct::KeepPrefix
             }
         }
-        RecoverKind::Crc | RecoverKind::OrphanFragment | RecoverKind::Other => RecoverAct::FailStop,
+        RecoverKind::ZeroHeaderTail if in_resync => {
+            if can_skip {
+                RecoverAct::Resync
+            } else if prefix_n == 0 {
+                RecoverAct::FailStop
+            } else {
+                // Same torn-tail shape as Crc above, reached mid-walk.
+                RecoverAct::KeepPrefix
+            }
+        }
+        RecoverKind::Crc
+        | RecoverKind::ZeroHeaderTail
+        | RecoverKind::OrphanFragment
+        | RecoverKind::Other => RecoverAct::FailStop,
     }
 }
 
 /// AS-IS F4 + CRC `SilentWrong`: torn/length look like clean EOF; CRC resyncs.
+/// F170 AS-IS: a zero header swallowed the rest of the block — also CleanEof.
 #[must_use]
 pub fn recover_collect_act_as_is(
     kind: RecoverKind,
@@ -196,7 +215,8 @@ pub fn recover_collect_act_as_is(
         RecoverKind::CleanEof
         | RecoverKind::Truncated
         | RecoverKind::LengthCorrupt
-        | RecoverKind::UnknownType => RecoverAct::Stop,
+        | RecoverKind::UnknownType
+        | RecoverKind::ZeroHeaderTail => RecoverAct::Stop,
         RecoverKind::Crc => RecoverAct::Resync,
         RecoverKind::OrphanFragment | RecoverKind::Other => RecoverAct::FailStop,
     }
@@ -432,6 +452,7 @@ mod tests {
             RecoverKind::UnknownType,
             RecoverKind::OrphanFragment,
             RecoverKind::Crc,
+            RecoverKind::ZeroHeaderTail,
             RecoverKind::Other,
         ];
         let mut n = 0u32;
@@ -446,7 +467,7 @@ mod tests {
                                     assert_eq!(d, RecoverAct::KeepRecord)
                                 }
                                 RecoverKind::CleanEof => assert_eq!(d, RecoverAct::Stop),
-                                RecoverKind::Crc => {
+                                RecoverKind::Crc | RecoverKind::ZeroHeaderTail => {
                                     if !in_resync {
                                         assert_eq!(d, RecoverAct::FailStop);
                                     } else if can_skip {
@@ -482,6 +503,6 @@ mod tests {
                 }
             }
         }
-        assert_eq!(n, 8 * 3 * 2 * 4 * 2);
+        assert_eq!(n, (kinds.len() as u32) * 3 * 2 * 4 * 2);
     }
 }

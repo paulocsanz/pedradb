@@ -324,13 +324,19 @@ type FxBuild = std::hash::BuildHasherDefault<FxHasher>;
 
 #[derive(Debug, Default)]
 struct AnswerCacheInner<V> {
-    map: std::collections::HashMap<Bytes, (u64, V), FxBuild>,
+    map: std::collections::HashMap<Bytes, (u64, u64, V), FxBuild>,
     /// Insertion order for O(1) FIFO eviction (no full-map LRU scan per
-    /// insert — miss-heavy workloads insert on every op).
-    order: std::collections::VecDeque<Bytes>,
+    /// insert — miss-heavy workloads insert on every op). Each slot carries
+    /// the map entry's insertion epoch; a pop only evicts on epoch match, so
+    /// ghosts (`invalidate` removes from `map` only) and stale duplicates of
+    /// re-inserted keys are skipped — F178: a blind pop freed nothing (cache
+    /// grew past capacity) or removed the live re-inserted entry.
+    order: std::collections::VecDeque<(Bytes, u64)>,
     capacity: usize,
     /// Bumped on [`AnswerCache::clear`] so stale entries miss without a walk.
     gen: u64,
+    /// Monotonic insertion epoch (FIFO pop correctness, F178).
+    epoch: u64,
 }
 
 impl<V: Clone> AnswerCache<V> {
@@ -343,6 +349,7 @@ impl<V: Clone> AnswerCache<V> {
                 order: std::collections::VecDeque::new(),
                 capacity,
                 gen: 0,
+                epoch: 0,
             }),
         }
     }
@@ -355,7 +362,7 @@ impl<V: Clone> AnswerCache<V> {
             return None;
         }
         match g.map.get(key) {
-            Some((gen, v)) if *gen == g.gen => Some(v.clone()),
+            Some((gen, _, v)) if *gen == g.gen => Some(v.clone()),
             _ => None,
         }
     }
@@ -367,21 +374,28 @@ impl<V: Clone> AnswerCache<V> {
             return;
         }
         let now = g.gen;
-        if let Some((gen, v)) = g.map.get_mut(key) {
+        if let Some((gen, _, v)) = g.map.get_mut(key) {
             *gen = now;
             *v = value;
             return;
         }
         if g.map.len() >= g.capacity {
-            // FIFO: drop the oldest inserted key (cloned below while `g` is
-            // still borrowed, then remove from the map).
-            if let Some(old) = g.order.pop_front() {
-                g.map.remove(&old);
+            // FIFO: drop the oldest inserted live key. Pop until the slot's
+            // epoch matches the map entry (F178: ghosts from `invalidate`
+            // and stale duplicates of re-inserted keys free nothing / would
+            // evict the live re-insert — skip them).
+            while let Some((old, epoch)) = g.order.pop_front() {
+                if g.map.get(&old).is_some_and(|&(_, e, _)| e == epoch) {
+                    g.map.remove(&old);
+                    break;
+                }
             }
         }
+        let epoch = g.epoch;
+        g.epoch = g.epoch.wrapping_add(1);
         let owned = Bytes::copy_from_slice(key);
-        g.order.push_back(owned.clone());
-        g.map.insert(owned, (now, value));
+        g.order.push_back((owned.clone(), epoch));
+        g.map.insert(owned, (now, epoch, value));
     }
 
     /// Invalidate every entry without walking the map (write path).

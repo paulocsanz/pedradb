@@ -35,6 +35,10 @@ harness = false
 name = "vlog_zipf"
 harness = false
 
+[[bench]]
+name = "fsync_amortization"
+harness = false
+
 [[example]]
 name = "secondary_index"
 path = "../../examples/secondary_index.rs"

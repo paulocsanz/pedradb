@@ -1176,12 +1176,17 @@ impl SstTable {
         let start_i = match start {
             Bound::Unbounded => 0,
             Bound::Included(s) | Bound::Excluded(s) => {
-                // First block with `first_user_key > s` is the successor;
-                // the previous block is the one that may contain `s`.
-                let succ = self
+                // Symmetric with `blocks_for_point`: under a mid-key user-key
+                // split (an older or future writer format — the current
+                // writer never splits, see `writer_never_splits_user_key_`
+                // `across_blocks`), the block BEFORE the first block whose
+                // `first_user_key == s` can still hold trailing versions of
+                // `s`. Partition on `< s` (not `<= s`) so that previous
+                // block stays in the window.
+                let ge = self
                     .index
-                    .partition_point(|h| h.first_user_key.as_ref() <= s);
-                succ.saturating_sub(1)
+                    .partition_point(|h| h.first_user_key.as_ref() < s);
+                ge.saturating_sub(1)
             }
         };
         let mut out = Vec::new();
@@ -1198,7 +1203,12 @@ impl SstTable {
             let block_hi_excl = self.index.get(i + 1).map(|n| n.first_user_key.as_ref());
             let ends_after_start = match start {
                 Bound::Unbounded => true,
-                Bound::Included(s) | Bound::Excluded(s) => block_hi_excl.is_none_or(|hi| hi > s),
+                // `hi == s` means the next block starts at `s`; this block
+                // may hold trailing versions of `s` from a mid-key split —
+                // keep it (same window rule as `blocks_for_point`).
+                Bound::Included(s) | Bound::Excluded(s) => {
+                    block_hi_excl.is_none_or(|hi| hi >= s)
+                }
             };
             if ends_after_start {
                 out.push(i);
@@ -2055,6 +2065,87 @@ mod tests {
             .collect();
         assert_eq!(k_seqs, (1..=12).rev().collect::<Vec<_>>());
         let _ = std::fs::remove_file(&path);
+    }
+
+    /// P2.2 (RFC-0048): `blocks_overlapping_range` must window a scan start
+    /// the same way `blocks_for_point` windows a get — the previous block
+    /// plus the equal-key run — so a mid-key user-key split (an older or
+    /// future writer format) cannot make a scan starting exactly at the
+    /// split key miss the newest versions parked in the previous block.
+    #[test]
+    fn blocks_overlapping_range_defends_mid_key_split_like_point() {
+        let bh = |offset: u64, length: u32, first: &[u8]| BlockHandle {
+            offset,
+            length,
+            first_user_key: Bytes::copy_from_slice(first),
+        };
+        // Hand-built sparse index emulating a writer that split `k` across
+        // blocks: block 0 = [a@1, k@5, k@3], block 1 = [k@2, z@1].
+        let index = vec![bh(0, 16, b"a"), bh(16, 16, b"k")];
+        let entries = vec![
+            (
+                InternalKey::new(Bytes::copy_from_slice(b"a"), 1, ValueType::Value),
+                Bytes::from_static(b"av"),
+            ),
+            (
+                InternalKey::new(Bytes::copy_from_slice(b"k"), 5, ValueType::Value),
+                Bytes::from_static(b"kv5"),
+            ),
+            (
+                InternalKey::new(Bytes::copy_from_slice(b"k"), 3, ValueType::Value),
+                Bytes::from_static(b"kv3"),
+            ),
+            (
+                InternalKey::new(Bytes::copy_from_slice(b"k"), 2, ValueType::Value),
+                Bytes::from_static(b"kv2"),
+            ),
+            (
+                InternalKey::new(Bytes::copy_from_slice(b"z"), 1, ValueType::Value),
+                Bytes::from_static(b"zv"),
+            ),
+        ];
+        let table = SstTable {
+            path: PathBuf::from("/tmp/hand-made-mid-key-split.sst"),
+            payload: Arc::from(vec![]),
+            compressed_blocks: false,
+            entries: Arc::new(Mutex::new(Some(entries))),
+            range_tombstones: Vec::new(),
+            num_entries: 5,
+            max_sequence: 5,
+            index,
+            bloom: BloomFilter::always_true(),
+            smallest_user_key: Some(Bytes::copy_from_slice(b"a")),
+            largest_user_key: Some(Bytes::copy_from_slice(b"z")),
+        };
+
+        // Reference: the point path already defends the split.
+        assert_eq!(table.blocks_for_point(b"k"), 0..2);
+
+        // Prova: a scan starting exactly at the split key must include
+        // block 0 (k@5, k@3) — AS-IS windowed on `first <= k` and returned
+        // only [1], silently dropping the newest versions of `k`.
+        let got = table.blocks_overlapping_range(Bound::Included(&b"k"[..]), Bound::Unbounded);
+        assert_eq!(
+            got, vec![0, 1],
+            "mid-key split: scan at `k` must see block 0 like the point path"
+        );
+
+        // Controls — identical window when no split is involved.
+        assert_eq!(
+            table.blocks_overlapping_range(Bound::Included(&b"m"[..]), Bound::Unbounded),
+            vec![1],
+            "m sits inside block 1 only"
+        );
+        assert_eq!(
+            table.blocks_overlapping_range(Bound::Included(&b"b"[..]), Bound::Unbounded),
+            vec![0, 1],
+            "b..∞ spans both blocks (k and z are past b)"
+        );
+        assert_eq!(
+            table.blocks_overlapping_range(Bound::Unbounded, Bound::Included(&b"k"[..])),
+            vec![0, 1],
+            "range ending at k covers both k blocks"
+        );
     }
 
     /// L0 flush streams the BTree in InternalKey order — no collect+sort.

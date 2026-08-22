@@ -1,0 +1,9 @@
+   Compiling pedradb-core v0.1.0 (/Users/paulo/software/pedradb/crates/pedradb-core)
+    Finished `bench` profile [optimized + debuginfo] target(s) in 39.99s
+     Running benches/fsync_amortization.rs (target/release/deps/fsync_amortization-bd81a0fe4bc1540c)
+shape            :      ops/s    wall   real WAL fdatasyncs  amortization
+lone_sync_1c   :        138 ops/s   14.454s  real_wal_fdatasyncs=  2000  ops/fsync=1.00
+group_sync_ 2c :        268 ops/s    7.452s  real_wal_fdatasyncs=  1079  ops/fsync=1.85
+group_sync_ 4c :        319 ops/s    6.271s  real_wal_fdatasyncs=   831  ops/fsync=2.41
+group_sync_ 8c :        774 ops/s    2.585s  real_wal_fdatasyncs=   443  ops/fsync=4.51
+lone_async_1c  :     459510 ops/s    0.004s  real_wal_fdatasyncs=     1  ops/fsync=2000.00

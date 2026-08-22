@@ -7,6 +7,16 @@
 //! on the `Transaction` and `commit()`. Conflict at commit is Rocks
 //! `Busy`. We map Pedra `TransactionConflict` to that string.
 //!
+//! OCC read-set policy (RFC-0048 P1.4): `get`/`get_cf` record the key in
+//! the read set and `commit()` validates it — read-only commits included
+//! (F168). Real Rocks `Transaction::NewIterator` also tracks every key its
+//! iterator yields; our `scan_count`/`raw_iterator_opt` read at the txn
+//! snapshot but are **untracked**: a commit after a concurrent overwrite of
+//! a key that was only seen through a scan still reports `Ok`. Reads that
+//! need conflict detection must `get` the key (guard-key pattern); scan
+//! reads are advisory. Bounded scan tracking is the P2 follow-up if a
+//! caller needs scan-wide OCC.
+//!
 //! Compile-shape (RFC-0043 P2.4): `open_cf_descriptors`, `ReadOptions`,
 //! `raw_iterator_opt`, `property_int_value`, `flush_opt`/`flush_wal`,
 //! `compact_range_opt`. Prefix extractor / UDT comparator are accepted
@@ -247,7 +257,13 @@ impl<'a, E: Env> Transaction<'a, E> {
         self.occ.lock().delete(enc).map_err(Error::from)
     }
 
-    /// Count live keys in `[start, end)` at the txn snapshot (no own-write overlay).
+    /// Count live keys in `[start, end)` at the txn snapshot **with the
+    /// txn's own staged writes overlaid** (rust-rocksdb `Transaction` reads
+    /// see the uncommitted write batch — F179: a staged put must count, a
+    /// staged delete must not).
+    ///
+    /// Untracked OCC read (see module policy): the count is snapshot-pinned
+    /// but the scanned keys do not enter the read set.
     ///
     /// # Errors
     /// Snapshot-too-old or Pedra scan.
@@ -257,18 +273,43 @@ impl<'a, E: Env> Transaction<'a, E> {
         end: impl AsRef<[u8]>,
         cap: usize,
     ) -> Result<usize> {
-        let snap = self.occ.lock().snapshot();
+        let (snap, staged) = {
+            let g = self.occ.lock();
+            (g.snapshot(), g.staged_entries())
+        };
         let lo = self.encode(DEFAULT_CF, start.as_ref());
         let hi = self.encode(DEFAULT_CF, end.as_ref());
         self.db
             .inner
             .with_read(|db| {
-                db.count_in_range(
+                let mut n = db.count_in_range(
                     snap,
                     Bound::Included(lo.as_slice()),
                     Bound::Excluded(hi.as_slice()),
                     Some(cap),
-                )
+                )?;
+                for (key, val) in &staged {
+                    let k: &[u8] = &key[..];
+                    if k < lo.as_slice() || k >= hi.as_slice() {
+                        continue;
+                    }
+                    let at_snap = db
+                        .get_at(pedradb_core::db::Snapshot::at(snap), k)?
+                        .is_some();
+                    match val {
+                        Some(_) => {
+                            if !at_snap {
+                                n += 1;
+                            }
+                        }
+                        None => {
+                            if at_snap {
+                                n = n.saturating_sub(1);
+                            }
+                        }
+                    }
+                }
+                Ok::<usize, pedradb_core::error::CoreError>(n.min(cap))
             })
             .map_err(Error::from)
     }
@@ -286,6 +327,10 @@ impl<'a, E: Env> Transaction<'a, E> {
     }
 
     /// rust-rocksdb raw iterator at this txn's snapshot (SurrealDB scan).
+    ///
+    /// Untracked OCC read (see module policy): unlike Rocks
+    /// `Transaction::NewIterator`, keys yielded here do not enter the read
+    /// set — a later `commit()` does not conflict on them.
     #[must_use]
     pub fn raw_iterator_opt(
         &self,
@@ -412,8 +457,13 @@ mod tests {
         let tx = db.transaction();
         db.put(b"k", b"new").unwrap();
         assert_eq!(tx.get(b"k").unwrap().as_deref(), Some(&b"old"[..]));
-        // Read-only commit is fine (empty write set).
-        tx.commit().unwrap();
+        // Read-only commits validate the read set (occ.rs contract): the
+        // concurrent overwrite of the key this tx read must surface as Busy.
+        let err = tx.commit().unwrap_err();
+        assert!(
+            err.to_string().contains("Busy") || err.to_string().contains("conflict"),
+            "{err}"
+        );
         assert_eq!(db.get(b"k").unwrap().as_deref(), Some(&b"new"[..]));
         let _ = std::fs::remove_dir_all(&dir);
     }

@@ -1339,7 +1339,7 @@ impl<E: Env> ConcurrentDb<E> {
     #[must_use]
     pub fn fold_parked_once_off_lock(&self) -> bool {
         let pair = {
-            let g = self.inner.read();
+            let mut g = self.inner.write();
             g.parked_oldest_pair_arcs()
         };
         let Some((a, b)) = pair else {
@@ -1349,8 +1349,9 @@ impl<E: Env> ConcurrentDb<E> {
         // for the BTree copy (parkfold run1/3 MVCC max 16–18 ms).
         let mut built = (*a).clone();
         built.absorb((*b).clone());
-        self.inner.write().replace_oldest_parked_pair(built);
-        true
+        // F174: the swap only lands if the front pair is still (a, b) —
+        // a concurrent materialize may have drained it while we built.
+        self.inner.write().replace_oldest_parked_pair(built)
     }
 
     /// Write-group catch-up window (RFC-0037 P2.2). Default 50 µs

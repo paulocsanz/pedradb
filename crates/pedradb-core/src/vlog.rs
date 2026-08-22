@@ -220,7 +220,10 @@ impl<F: EnvFile> ValueLog<F> {
             Write::write_all(&mut f, MAGIC)?;
             f.sync_all()?;
             drop(f);
-            let _ = env.sync_dir(dir);
+            // F4: the dirent must be durable before WAL pointers to this
+            // generation can be acked — a swallowed failure here can lose the
+            // *filename* while the payload was synced.
+            env.sync_dir(dir)?;
         }
         Self::open_path(env, path)
     }
@@ -249,6 +252,8 @@ impl<F: EnvFile> ValueLog<F> {
             Write::write_all(&mut f, MAGIC)?;
             f.sync_all()?;
             drop(f);
+            // F4: same dirent-durability rule as blob creation above.
+            env.sync_dir(dir)?;
             return Self::open_path(env, main);
         }
         Self::open_path(env, path)
@@ -375,9 +380,10 @@ impl<F: EnvFile> ValueLog<F> {
             0
         };
         let newp = dir.join(VLOG_NEW_NAME);
-        if env.exists(&newp) {
-            env.remove_file(&newp)?;
-        }
+        // F3: never `remove_file` the staging path first — `create` truncates
+        // in place (same contract `Wal::create_on` relies on), so there is no
+        // window with no `.new` under a live `vlog_use_new`. Callers guarantee
+        // the file is not live (un-promoted rounds are promoted before this).
         let mut body = Vec::new();
         body.extend_from_slice(MAGIC);
         let mut remap = std::collections::HashMap::new();
@@ -400,9 +406,9 @@ impl<F: EnvFile> ValueLog<F> {
             Write::write_all(&mut f, &body)?;
             f.sync_all()?;
         }
-        if let Ok(()) = env.sync_dir(dir) {
-            // best-effort dir sync
-        }
+        // F4: the rewritten `.new` dirent must be durable before MANIFEST can
+        // commit `vlog_use_new` — propagate instead of best-effort.
+        env.sync_dir(dir)?;
         let stats = VlogRewriteStats {
             bytes_before,
             bytes_after: body.len() as u64,
@@ -467,7 +473,9 @@ impl<F: EnvFile> ValueLog<F> {
             Write::write_all(&mut f, &body)?;
             f.sync_all()?;
         }
-        let _ = env.sync_dir(dir);
+        // F4: propagate — the new blob generation's dirent precedes the
+        // MANIFEST commit that makes its pointers authoritative.
+        env.sync_dir(dir)?;
         Ok((
             VlogRewriteStats {
                 bytes_before,
@@ -493,7 +501,9 @@ impl<F: EnvFile> ValueLog<F> {
         // destination atomically; remove-then-rename left a window with no vlog
         // file (and a failed rename after remove lost the primary).
         env.rename(&newp, &main)?;
-        let _ = env.sync_dir(dir);
+        // F4: propagate — a promote whose rename is not yet durable must not
+        // report success (MANIFEST clear follows; reopen reconciles either way).
+        env.sync_dir(dir)?;
         // Best-effort clear legacy adopt marker from older builds.
         let adopt = dir.join(VLOG_ADOPT_NAME);
         if env.exists(&adopt) {
@@ -517,21 +527,21 @@ fn read_record_at<E: Env>(
     let stored_len = u32::from_le_bytes([hdr[0], hdr[1], hdr[2], hdr[3]]);
     let stored_crc = u32::from_le_bytes([hdr[4], hdr[5], hdr[6], hdr[7]]);
     if stored_len != len {
-        return Err(CoreError::Internal(format!(
-            "vlog len mismatch at {offset}: stored {stored_len} expect {len}"
+        return Err(CoreError::CorruptValue(format!(
+            "len mismatch at {offset}: stored {stored_len} expect {len}"
         )));
     }
     if stored_crc != expect_crc {
-        return Err(CoreError::Internal(format!(
-            "vlog crc mismatch at {offset}"
+        return Err(CoreError::CorruptValue(format!(
+            "crc mismatch at {offset}"
         )));
     }
     let mut buf = vec![0u8; len as usize];
     f.read_exact(&mut buf)?;
     let got = crc32c::crc32c(&buf);
     if got != expect_crc {
-        return Err(CoreError::Internal(format!(
-            "vlog data crc mismatch at {offset}"
+        return Err(CoreError::CorruptValue(format!(
+            "data crc mismatch at {offset}"
         )));
     }
     Ok(Bytes::from(buf))

@@ -1,0 +1,201 @@
+{
+  "bench": "rocks-parity-v1",
+  "engine": "rocksdb",
+  "sync": false,
+  "peer_policy": "rocks-default",
+  "durability": "async-wal (WriteOptions.sync=false, rocksdb default)",
+  "changelog_interval": 0,
+  "status": "ok",
+  "notes": ["ycsb records=1024 ops=30000 payload=1000 dist=zipfian", "engine=rocksdb durability=async-wal (WriteOptions.sync=false, rocksdb default)", "suites: ycsb,deps", "seed: one put per record (not timed)", "cfs: default + write, lock, raftlog (TiKV store shape; raftlog = raftdb)", "deps apply batch txns/commit: 32", "changelog_interval=0", "peer_policy=rocks-default", "host-default write sync: kvrocks=false myrocks=true surreal=true"],
+  "benches": [
+{
+    "name": "ycsb_a",
+    "n": 30000,
+    "qps": 443782.879,
+    "p50_ms": 0.0023,
+    "p95_ms": 0.0061,
+    "p99_ms": 0.0075,
+    "max_ms": 0.4335,
+    "wall_s": 0.0676
+  },
+{
+    "name": "ycsb_b",
+    "n": 30000,
+    "qps": 750887.775,
+    "p50_ms": 0.0007,
+    "p95_ms": 0.0027,
+    "p99_ms": 0.0063,
+    "max_ms": 3.0920,
+    "wall_s": 0.0400
+  },
+{
+    "name": "ycsb_c",
+    "n": 30000,
+    "qps": 1556723.098,
+    "p50_ms": 0.0006,
+    "p95_ms": 0.0009,
+    "p99_ms": 0.0010,
+    "max_ms": 0.0127,
+    "wall_s": 0.0193
+  },
+{
+    "name": "ycsb_d",
+    "n": 30000,
+    "qps": 1238177.111,
+    "p50_ms": 0.0006,
+    "p95_ms": 0.0023,
+    "p99_ms": 0.0055,
+    "max_ms": 0.0277,
+    "wall_s": 0.0242
+  },
+{
+    "name": "ycsb_e",
+    "n": 30000,
+    "qps": 46981.878,
+    "p50_ms": 0.0216,
+    "p95_ms": 0.0256,
+    "p99_ms": 0.0509,
+    "max_ms": 3.7208,
+    "wall_s": 0.6385
+  },
+{
+    "name": "ycsb_f",
+    "n": 30000,
+    "qps": 297989.193,
+    "p50_ms": 0.0032,
+    "p95_ms": 0.0086,
+    "p99_ms": 0.0117,
+    "max_ms": 0.4525,
+    "wall_s": 0.1007
+  },
+{
+    "name": "ycsb_a_mc4",
+    "n": 120000,
+    "qps": 126031.616,
+    "p50_ms": 0.0033,
+    "p95_ms": 0.1134,
+    "p99_ms": 0.3422,
+    "max_ms": 10.9834,
+    "clients": 4,
+    "errors": 0,
+    "wall_s": 0.9521
+  },
+{
+    "name": "ycsb_f_mc4",
+    "n": 120000,
+    "qps": 130931.194,
+    "p50_ms": 0.0049,
+    "p95_ms": 0.1090,
+    "p99_ms": 0.1738,
+    "max_ms": 3.9693,
+    "clients": 4,
+    "errors": 0,
+    "wall_s": 0.9165
+  },
+{
+    "name": "deps_cache_overwrite_mc4",
+    "n": 120000,
+    "qps": 75367.586,
+    "p50_ms": 0.0425,
+    "p95_ms": 0.1215,
+    "p99_ms": 0.1841,
+    "max_ms": 17.5519,
+    "clients": 4,
+    "errors": 0,
+    "wall_s": 1.5922
+  },
+{
+    "name": "deps_apply_batch",
+    "n": 30000,
+    "qps": 7054.484,
+    "p50_ms": 0.1252,
+    "p95_ms": 0.1823,
+    "p99_ms": 0.4794,
+    "max_ms": 16.0857,
+    "wall_s": 4.2526
+  },
+{
+    "name": "deps_mvcc_latest",
+    "n": 30000,
+    "qps": 252957.407,
+    "p50_ms": 0.0038,
+    "p95_ms": 0.0055,
+    "p99_ms": 0.0070,
+    "max_ms": 0.0470,
+    "wall_s": 0.1186
+  },
+{
+    "name": "deps_mvcc_latest_split",
+    "combined": true,
+    "probe": null
+  },
+{
+    "name": "deps_scan",
+    "n": 30000,
+    "qps": 251222.793,
+    "p50_ms": 0.0038,
+    "p95_ms": 0.0052,
+    "p99_ms": 0.0063,
+    "max_ms": 0.0996,
+    "wall_s": 0.1194
+  },
+{
+    "name": "deps_scan_probe",
+    "probe": null
+  },
+{
+    "name": "deps_raftlog",
+    "n": 30000,
+    "qps": 43437.905,
+    "p50_ms": 0.0154,
+    "p95_ms": 0.0192,
+    "p99_ms": 0.0422,
+    "max_ms": 47.0911,
+    "wall_s": 0.6906
+  },
+{
+    "name": "deps_cache_overwrite",
+    "n": 30000,
+    "qps": 219793.035,
+    "p50_ms": 0.0029,
+    "p95_ms": 0.0073,
+    "p99_ms": 0.0087,
+    "max_ms": 4.2923,
+    "wall_s": 0.1365
+  },
+{
+    "name": "deps_lock_prewrite",
+    "n": 30000,
+    "qps": 8924.053,
+    "p50_ms": 0.0708,
+    "p95_ms": 0.1573,
+    "p99_ms": 0.3631,
+    "max_ms": 247.3922,
+    "wall_s": 3.3617
+  },
+{
+    "name": "deps_apply_batch_mc4",
+    "n": 120000,
+    "qps": 4779.293,
+    "p50_ms": 0.6454,
+    "p95_ms": 1.7866,
+    "p99_ms": 4.8187,
+    "max_ms": 86.9440,
+    "clients": 4,
+    "errors": 0,
+    "wall_s": 25.1083
+  },
+{
+    "name": "deps_raftlog_mc4",
+    "n": 120000,
+    "qps": 20749.706,
+    "p50_ms": 0.1038,
+    "p95_ms": 0.3156,
+    "p99_ms": 1.5624,
+    "max_ms": 76.8160,
+    "clients": 4,
+    "errors": 0,
+    "wall_s": 5.7832
+  }
+  ]
+}

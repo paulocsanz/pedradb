@@ -240,12 +240,12 @@ impl<F: EnvFile> Wal<F> {
     pub fn recover_span_on<E: Env<File = F>, P: AsRef<Path>>(
         env: &E,
         path: P,
-    ) -> Result<(Vec<Vec<u8>>, u64)> {
+    ) -> Result<(Vec<Vec<u8>>, u64, Option<u64>)> {
         let file = env.open_read(path.as_ref())?;
         let mut reader = WalReader::new(BufReader::new(file));
         let records = reader.collect_all()?;
         let end = reader.last_good_offset();
-        Ok((records, end))
+        Ok((records, end, reader.resync_origin()))
     }
 
     /// RFC-0047 P0.2: point-in-time recovery probe — returns the decoded
@@ -258,12 +258,12 @@ impl<F: EnvFile> Wal<F> {
     pub fn recover_prefix_span_on<E: Env<File = F>, P: AsRef<Path>>(
         env: &E,
         path: P,
-    ) -> Result<(Vec<Vec<u8>>, u64, Option<CoreError>)> {
+    ) -> Result<(Vec<Vec<u8>>, u64, Option<CoreError>, Option<u64>)> {
         let file = env.open_read(path.as_ref())?;
         let mut reader = WalReader::new(BufReader::new(file));
         let (records, err) = reader.collect_prefix_all();
         let end = reader.last_good_offset();
-        Ok((records, end, err))
+        Ok((records, end, err, reader.resync_origin()))
     }
 
     /// Replay complete logical records starting at byte `offset` via `env`.

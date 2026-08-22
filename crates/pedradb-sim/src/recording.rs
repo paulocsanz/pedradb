@@ -398,6 +398,12 @@ impl Env for RecordingEnv {
         Ok(())
     }
 
+    /// F5: decide from the in-memory image, not the host filesystem — the
+    /// trait default would silently bypass this Env.
+    fn is_dir(&self, path: &Path) -> io::Result<bool> {
+        Ok(self.image.borrow().dirs.contains(path))
+    }
+
     fn rename(&self, from: &Path, to: &Path) -> io::Result<()> {
         let mut img = self.image.borrow_mut();
         let rec = img
