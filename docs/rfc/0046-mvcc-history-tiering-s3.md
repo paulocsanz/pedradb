@@ -317,7 +317,15 @@ só falta P0.4, gated em caixa quieta)
       Testes: `bloom_sidecar_prunes_overlapping_key_ranges` (o caso que o
       P2.5 não poda), `bloom_sidecar_range_delete_intervals_sound`,
       `bloom_sidecar_missing_or_corrupt_never_prunes` (fail-open +
-      cleanup de órfão) — status: `done`
+      cleanup de órfão) — status: `done`. **Medido**
+      (`findings/rfc0046-p26/`, exemplo `rfc0046_p26_bloom_ab`): o caso
+      pontual que só o P2.6 poda é a chave nunca escrita dentro do
+      coverage de todo segmento (o stream é ordenado por chave — a prova
+      de `None` precisa de todos os candidatos): 41 segmentos, perna
+      sidecar 39,5 µs/read vs walk 2 169 µs/read (**55×**; bytes 331 KiB
+      vs 23,4 MiB por leitura; sidecar = 1,4% do archive), caixa suja
+      load≈41 — a razão é a alegação; ambas as pernas responderam `None`
+      (cross-check do fail-open).
 
 ## Status (living — update with every PR)
 
@@ -337,7 +345,7 @@ só falta P0.4, gated em caixa quieta)
 | P2.3 | p2 | fallback LSM abaixo do watermark (wart cap×sobrevivente) | **done** | `get_at_below_watermark_lsm` + teste | 2026-08-21 |
 | P2.4 | p2 | change feed fail-closed abaixo do watermark | **done** | `changes` check + teste | 2026-08-21 |
 | P2.5 | p2 | índice por segmento do archive (custo de leitura) | **done** | manifesto v3 key-range rd-aware + 3 testes | 2026-08-21 |
-| P2.6 | p2 | bloom por segmento (ranges sobrepostos) | **done** | sidecar `seg-*.bloom` fail-open + 3 testes | 2026-08-21 |
+| P2.6 | p2 | bloom por segmento (ranges sobrepostos) | **done** | sidecar `seg-*.bloom` fail-open + 3 testes + A/B 55× (p26) | 2026-08-21 |
 
 ## Acceptance Criteria
 

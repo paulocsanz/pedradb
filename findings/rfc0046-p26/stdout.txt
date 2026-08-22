@@ -1,0 +1,7 @@
+# 2026-08-21 23:48:40 load1=41.38
+p26_ab: segments=41 archive=24548251B sidecars=41 (1.4% of archive) snap.seq=8176 earliest_readable=138977
+p26_ab: phase 0: sidecar=     39.5 us/read  walk=   2366.5 us/read  ratio=60.0x
+p26_ab: phase 1: sidecar=     51.6 us/read  walk=   2169.4 us/read  ratio=42.1x
+p26_ab: phase 2: sidecar=     71.1 us/read  walk=   2379.6 us/read  ratio=33.5x
+p26_ab: BEST sidecar=39.5 us/read  walk=2169.4 us/read  ratio=55.0x  (bytes/read: walk≈23.4 MiB vs sidecar≈331 KiB)
+# exit=0 2026-08-21 23:49:51 load1=41.70
