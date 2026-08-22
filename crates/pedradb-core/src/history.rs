@@ -465,6 +465,10 @@ pub struct HistoryStats {
     /// Milliseconds since the last archive pass this open (`None` until
     /// the first one — in-memory, resets on reopen).
     pub last_archive_age_millis: Option<u64>,
+    /// Horizon `(seq, time)` samples currently held (RFC-0046 P0.1).
+    /// Hard-bounded by `HORIZON_SAMPLE_RING_CAP` — long windows under
+    /// sustained writes must not grow memory without bound.
+    pub seq_time_samples: usize,
 }
 
 /// One segment as listed by the remote manifest (restore input,

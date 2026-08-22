@@ -89,7 +89,16 @@ P0.4, gated em caixa quieta)
       §"History retention — bounded by default". Nota bench: runs curtos
       (< 24 h de wall clock) nunca envelhecem amostras além da janela → cutoff 0
       → comportamento F20 dentro do bench; colunas oficiais só mudam no
-      re-árbitro P0.4 com janela longa — status: `done`
+      re-árbitro P0.4 com janela longa. **Hardening pós-review (mesma
+      data): cap duro no ring de amostras** — a regra temporal (2× janela)
+      limita o *span*, não a *contagem*: janela longa sob escrita
+      sustentada crescia a memória sem bound (1 amostra/32 publishes; 24 h
+      a 10k w/s ≈ 54 M amostras ≈ 864 MB) e o scan do cutoff era O(ring)
+      por flush. `HORIZON_SAMPLE_RING_CAP = 4096` (granularidade do cutoff
+      vira janela/4096 ≈ 21 s — ruído contra 24 h; drop-oldest só atrasa o
+      cutoff, nunca adianta) + drain das amostras consumidas no próprio
+      cutoff; `history_stats().seq_time_samples` expõe o tamanho. Teste
+      `horizon_sample_ring_hard_capped_and_drained` — status: `done`
 - [x] **P0.2** Archive local antes do GC: `history/seg-*.hist` (streaming,
       8192 records/segmento, CRC32c por record), `history/MANIFEST` (magic
       PHST, tmp+rename, manifest-is-truth — crash deixa no máximo arquivo

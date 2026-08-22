@@ -84,6 +84,13 @@ pub const MAX_LSM_LEVEL: u32 = 3;
 /// When L0 file count reaches this, auto-compact merges L0 → L1 (subset compact).
 pub const L0_COMPACTION_TRIGGER: usize = 4;
 
+/// Hard cap on horizon `(seq, time)` samples (RFC-0046 P0.1). The time-based
+/// keep rule bounds the *span* (2× the window) but not the *count* — one
+/// sample per 32 publishes would grow unbounded on a long window under
+/// sustained writes. At the cap the cutoff granularity is `window / cap`
+/// (24 h / 4096 ≈ 21 s of writes) — noise against a 24 h horizon.
+pub const HORIZON_SAMPLE_RING_CAP: usize = 4096;
+
 /// Default WAL file name inside the DB directory.
 pub const WAL_FILE_NAME: &str = "CURRENT.log";
 
@@ -1369,12 +1376,20 @@ impl<E: Env> Db<E> {
                 let t = self.env.unix_millis();
                 let mut ring = self.seq_times.lock();
                 ring.push_back((seq, t));
-                // Keep 2× the horizon of samples (bounds memory).
+                // Keep 2× the horizon of samples, and a hard count cap:
+                // the time rule alone bounds the *span*, not the *count* —
+                // a long window (default 24 h) under sustained writes would
+                // otherwise grow the ring without bound (one sample per 32
+                // publishes). Dropping oldest only coarsens the cutoff
+                // (it lags), never advances it — retention stays safe.
                 if let HistoryHorizon::Window(d) = self.history.horizon {
                     let keep = t.saturating_sub(2 * d.as_millis() as u64);
                     while ring.len() > 2 && ring.front().is_some_and(|&(_, t0)| t0 < keep) {
                         ring.pop_front();
                     }
+                }
+                while ring.len() > HORIZON_SAMPLE_RING_CAP {
+                    ring.pop_front();
                 }
             }
         }
@@ -1627,11 +1642,20 @@ impl<E: Env> Db<E> {
             HistoryHorizon::Window(d) => d,
         };
         let target = self.env.unix_millis().saturating_sub(d.as_millis() as u64);
-        let ring = self.seq_times.lock();
+        let mut ring = self.seq_times.lock();
         let mut cut: SequenceNumber = 0;
         for &(seq, t) in ring.iter() {
             if t <= target {
                 cut = cut.max(seq);
+            }
+        }
+        // Shed consumed samples (strictly below the returned cutoff): they
+        // can never raise the cutoff again, and the cutoff is monotone —
+        // losing them after a clock regression only makes the horizon lag
+        // (keeps more history), never GC early.
+        if cut > 0 {
+            while ring.front().is_some_and(|&(s, _)| s < cut) {
+                ring.pop_front();
             }
         }
         (cut > 0).then_some(cut)
@@ -1822,6 +1846,7 @@ impl<E: Env> Db<E> {
         stats.last_archive_age_millis = self
             .last_archive_millis
             .map(|t| self.env.unix_millis().saturating_sub(t));
+        stats.seq_time_samples = self.seq_times.lock().len();
         Ok(stats)
     }
 
@@ -2666,6 +2691,10 @@ impl<E: Env> Db<E> {
     ///
     /// # Errors
     /// [`CoreError::SnapshotTooOld`] if `snapshot` is below the version-GC watermark.
+    ///
+    /// # Panics
+    /// Fail-stop on a corrupt vlog payload (F1): the resolving stream refuses
+    /// to serve corruption as an absent or empty key.
     pub fn range_at_limited(
         &self,
         snapshot: SequenceNumber,
@@ -2673,13 +2702,10 @@ impl<E: Env> Db<E> {
         end: Bound<&[u8]>,
         limit: Option<usize>,
     ) -> Result<Vec<(Bytes, Bytes)>> {
-        // F1: a corrupt vlog payload surfaces as Err; silently skipping the
-        // entry would hide corruption as an absent key.
-        let mut out = Vec::new();
-        for VisibleKv { key, value } in self.try_scan_at(snapshot, start, end, limit)? {
-            out.push((key, self.resolve_stored_value(value)?));
-        }
-        Ok(out)
+        Ok(self
+            .try_scan_at(snapshot, start, end, limit)?
+            .map(|VisibleKv { key, value }| (key, value))
+            .collect())
     }
 
     /// Streaming range scan at the latest snapshot (public bound-memory path).
@@ -3050,7 +3076,7 @@ impl<E: Env> Db<E> {
     /// Single-threaded: each window issues up to N `Env` reads then continues.
     /// Before resolving a window, best-effort [`Env::advise`] `WillNeed` on each
     /// vlog pointer range (RFC-0029 P1.2). Order of `stream` is unchanged.
-    /// Missing/corrupt values become empty bytes (same as [`Self::resolve_stream_value`]).
+    /// A corrupt payload fail-stops via [`Self::resolve_stream_value`] (F1).
     fn prefetch_resolve_stream(&self, stream: &mut [(InternalKey, Bytes)]) {
         let n = self.scan_prefetch.max(1);
         let mut i = 0;
@@ -12210,6 +12236,43 @@ mod tests {
                 Err(CoreError::SnapshotTooOld { .. })
             ),
             "never-written below the watermark stays fail-closed (no silent None)"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn horizon_sample_ring_hard_capped_and_drained() {
+        // RFC-0046 P0.1: the (seq, time) sample ring must be bounded in
+        // COUNT, not just span — a long window under sustained writes
+        // would otherwise grow memory without bound (one sample per 32
+        // publishes; 24 h at 10k w/s ≈ 54 M samples). Consumed samples
+        // (below the returned cutoff) are shed on read.
+        let dir = temp_dir();
+        let clock = std::rc::Rc::new(std::cell::Cell::new(1_000_000u64));
+        let env = ClockEnv::new(std::rc::Rc::clone(&clock));
+        // 1 h window: nothing ages during the write phase.
+        let mut opts = horizon_opts(3_600_000, 1 << 30);
+        opts.auto_compact_sst_count = None;
+        let mut db = Db::open_with_env(&dir, opts, env).unwrap();
+        let n = 400_000u64; // → 12 500 samples uncapped
+        for i in 0..n {
+            db.publish_sequence(i + 1);
+            clock.set(1_000_000 + i); // +1 ms per publish: 400 s of sim time
+        }
+        let samples = db.history_stats().unwrap().seq_time_samples;
+        assert!(
+            samples <= HORIZON_SAMPLE_RING_CAP,
+            "sample ring must be hard-capped (got {samples}, cap {HORIZON_SAMPLE_RING_CAP})"
+        );
+        // Age everything past the window: the cutoff still answers and the
+        // consumed prefix drains.
+        clock.set(1_000_000 + 7_200_000);
+        let cut = db.horizon_cutoff_sequence().expect("cutoff after aging");
+        assert!(cut > n - 1_000, "cutoff covers the aged writes (got {cut})");
+        let drained = db.history_stats().unwrap().seq_time_samples;
+        assert!(
+            drained <= 1,
+            "consumed samples drain on read (got {drained})"
         );
         let _ = fs::remove_dir_all(&dir);
     }
