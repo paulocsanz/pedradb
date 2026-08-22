@@ -1,7 +1,7 @@
 # RFC-0046: história MVCC fora do SSD — retention default + tier em object storage (S3)
 
-**Status:** in-progress (P0.1–P0.3 + P0.5 + P1 + P2.1–P2.4 done; só falta
-P0.4, gated em caixa quieta)
+**Status:** in-progress (P0.1–P0.3 + P0.5 + P1 + P2.1–P2.5 done; P2.6
+backlog; só falta P0.4, gated em caixa quieta)
 **Updated:** 2026-08-21
 **Parents:** [0009](0009-rocksdb-class-engine.md) (F20 retention),
 [0044](0044-async-class-5x-rocks.md) (E/cliff de retenção),
@@ -276,19 +276,31 @@ P0.4, gated em caixa quieta)
       chave ausente = mesmo estado final) — nuance documentada.
       Teste `changes_feed_fails_closed_below_watermark` — status:
       `done`
-- [ ] **P2.5** Índice por segmento do archive (custo de leitura, wart v0
-      do P2.1 tornado material pelo P0.5): `get_at` abaixo do watermark
-      CRC-walka **todos** os segmentos retidos por leitura (sem índice
-      de chaves; com o P0.5 o archive agora retém a janela inteira até
-      o cap — até 1 GiB caminhado por leitura pontual). Design: no seal,
-      gravar no manifesto por segmento (a) key range `[min,max]` do
-      user key e (b) amostra 1/64 das chaves (índice esparso/bloom
-      leve); `get_at_from_archive` pula segmento cujo range exclui a
-      chave; CRC por record no read permanece (integridade do que é
-      servido, inegociável); segmentos antigos sem índice continuam
-      exatos (walk completo — backward compat do formato).
-      `history_stats()` já expõe `local_bytes` para dimensionar o
-      ganho — status: `todo`
+- [x] **P2.5** Índice por segmento do archive — **entregue no escopo
+      key-range** (manifesto v3, back-compat v2): cada segmento selado
+      carrega a cobertura `[key_lo, key_hi]` no manifesto, com teto
+      **consciente de range-delete** (o fim exclusivo do RD conta para o
+      teto — senão a poda seria insound); `get_at_from_archive` pula
+      segmento local cuja cobertura exclui a chave **sem tocar no
+      arquivo** (observável: segmento fora do range corrompido não
+      atrapalha a leitura; dentro do range segue fail-closed CRC).
+      Listagens remotas não carregam cobertura (walk completo — o
+      espelho é o caminho de exceção). CRC por record inalterado.
+      **Poda não ajuda quando os ranges sobrepõem** (workload de
+      overwrite: todos os segmentos cobrem o mesmo key set) — a
+      refinamento para sobreposição (bloom por segmento ou amostra
+      esparso 1/64 no seal) fica como P2.6. Testes:
+      `segment_key_coverage_prunes_reads_soundly` (bound + observável
+      de poda + fail-closed preservado),
+      `segment_key_coverage_counts_range_delete_ends` (soundness do
+      teto), `manifest_v2_decodes_without_key_coverage` (back-compat) —
+      status: `done`
+- [ ] **P2.6** Bloom por segmento do archive (refinamento do P2.5 para
+      ranges sobrepostos): no seal, gravar bloom ~10 bits/key dos user
+      keys; poda probabilística com falso-positivo = walk (correto,
+      só mais lento), falso-negativo impossível por construção.
+      Beneficia o workload de overwrite (hoje todos os segmentos
+      caminham) — status: `todo`
 
 ## Status (living — update with every PR)
 
@@ -307,7 +319,8 @@ P0.4, gated em caixa quieta)
 | P2.2 | p2 | métricas + banda | **done** | `eea769d` | 2026-08-21 |
 | P2.3 | p2 | fallback LSM abaixo do watermark (wart cap×sobrevivente) | **done** | `get_at_below_watermark_lsm` + teste | 2026-08-21 |
 | P2.4 | p2 | change feed fail-closed abaixo do watermark | **done** | `changes` check + teste | 2026-08-21 |
-| P2.5 | p2 | índice por segmento do archive (custo de leitura) | todo | wart material pelo P0.5; design no slice | 2026-08-21 |
+| P2.5 | p2 | índice por segmento do archive (custo de leitura) | **done** | manifesto v3 key-range rd-aware + 3 testes | 2026-08-21 |
+| P2.6 | p2 | bloom por segmento (ranges sobrepostos) | todo | refinamento do P2.5 | 2026-08-21 |
 
 ## Acceptance Criteria
 

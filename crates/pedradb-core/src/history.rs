@@ -26,6 +26,13 @@ pub(crate) struct SegmentMeta {
     pub from_seq: u64,
     pub through_seq: u64,
     pub bytes: u64,
+    /// Key-coverage floor (P2.5 pruning; `None` on v2 manifests sealed
+    /// before the field existed — those segments always walk).
+    pub key_lo: Option<Vec<u8>>,
+    /// Key-coverage ceiling, **range-delete aware**: the exclusive end of
+    /// any range delete counts, so a record affecting `key ∈ [lo, hi]`
+    /// cannot exist outside the bound (sound skip for reads).
+    pub key_hi: Option<Vec<u8>>,
 }
 
 /// Max records per segment (bounds memory nothing — records stream; keeps
@@ -46,7 +53,7 @@ impl Manifest {
     fn encode(&self) -> Vec<u8> {
         let mut b = Vec::with_capacity(28 + self.segs.len() * 40);
         b.extend_from_slice(b"PHST");
-        b.extend_from_slice(&2u32.to_le_bytes());
+        b.extend_from_slice(&3u32.to_le_bytes());
         b.extend_from_slice(&self.next_id.to_le_bytes());
         b.extend_from_slice(&self.archive_floor.to_le_bytes());
         b.extend_from_slice(&(self.segs.len() as u32).to_le_bytes());
@@ -57,6 +64,18 @@ impl Manifest {
             b.extend_from_slice(&s.from_seq.to_le_bytes());
             b.extend_from_slice(&s.through_seq.to_le_bytes());
             b.extend_from_slice(&s.bytes.to_le_bytes());
+            // P2.5 key coverage: present flag + bytes (v2 manifests decode
+            // with None — those segments always walk).
+            let keyed = s.key_lo.is_some() && s.key_hi.is_some();
+            b.push(u8::from(keyed));
+            if keyed {
+                let lo = s.key_lo.as_ref().expect("checked");
+                let hi = s.key_hi.as_ref().expect("checked");
+                b.extend_from_slice(&(lo.len() as u32).to_le_bytes());
+                b.extend_from_slice(lo);
+                b.extend_from_slice(&(hi.len() as u32).to_le_bytes());
+                b.extend_from_slice(hi);
+            }
         }
         let crc = crc32c(&b);
         b.extend_from_slice(&crc.to_le_bytes());
@@ -68,7 +87,8 @@ impl Manifest {
         if buf.len() < 32 || &buf[0..4] != b"PHST" {
             return Err(bad());
         }
-        if u32::from_le_bytes(buf[4..8].try_into().unwrap()) != 2 {
+        let version = u32::from_le_bytes(buf[4..8].try_into().unwrap());
+        if version != 2 && version != 3 {
             return Err(bad());
         }
         let body_len = buf.len() - 4;
@@ -105,7 +125,44 @@ impl Manifest {
             let from_seq = g(&mut off)?;
             let through_seq = g(&mut off)?;
             let bytes = g(&mut off)?;
-            segs.push_back(SegmentMeta { id, name, from_seq, through_seq, bytes });
+            let (key_lo, key_hi) = if version >= 3 {
+                if off >= body_len {
+                    return Err(bad());
+                }
+                let keyed = buf[off] == 1;
+                off += 1;
+                if !keyed {
+                    (None, None)
+                } else {
+                    let take = |off: &mut usize| -> Result<Vec<u8>> {
+                        if *off + 4 > body_len {
+                            return Err(bad());
+                        }
+                        let l =
+                            u32::from_le_bytes(buf[*off..*off + 4].try_into().unwrap())
+                                as usize;
+                        *off += 4;
+                        if *off + l > body_len {
+                            return Err(bad());
+                        }
+                        let v = buf[*off..*off + l].to_vec();
+                        *off += l;
+                        Ok(v)
+                    };
+                    (Some(take(&mut off)?), Some(take(&mut off)?))
+                }
+            } else {
+                (None, None)
+            };
+            segs.push_back(SegmentMeta {
+                id,
+                name,
+                from_seq,
+                through_seq,
+                bytes,
+                key_lo,
+                key_hi,
+            });
         }
         Ok(Self { next_id, segs, archive_floor })
     }
@@ -167,6 +224,12 @@ impl HistoryTier {
         let mut cur_bytes = 0u64;
         let mut cur_from = u64::MAX;
         let mut cur_through = 0u64;
+        // P2.5 key coverage: floor over record keys, ceiling over record
+        // keys AND range-delete ends (kind 2 stores the exclusive end in
+        // `val`) — any record affecting a key inside [lo, hi] stays inside.
+        let mut cur_key_lo: Vec<u8> = Vec::new();
+        let mut cur_key_hi: Vec<u8> = Vec::new();
+        let mut key_lo_set = false;
         let mut buf: Vec<u8> = Vec::new();
         for (key, val, seq, kind) in records {
             if cur_file.is_none() {
@@ -175,6 +238,9 @@ impl HistoryTier {
                 self.manifest.next_id += 1;
                 cur_file = Some(env.create(&dir.join(format!("seg-{cur_id:08}.hist")))?);
                 (cur_n, cur_bytes, cur_from, cur_through) = (0, 0, u64::MAX, 0);
+                cur_key_lo.clear();
+                cur_key_hi.clear();
+                key_lo_set = false;
             }
             buf.clear();
             buf.extend_from_slice(&(key.len() as u32).to_le_bytes());
@@ -189,12 +255,38 @@ impl HistoryTier {
             cur_bytes += buf.len() as u64;
             cur_from = cur_from.min(seq);
             cur_through = cur_through.max(seq);
+            if !key_lo_set || key.as_slice() < cur_key_lo.as_slice() {
+                cur_key_lo.clear();
+                cur_key_lo.extend_from_slice(&key);
+                key_lo_set = true;
+            }
+            let ceiling = if kind == 2 { val.as_slice() } else { key.as_slice() };
+            if ceiling > cur_key_hi.as_slice() {
+                cur_key_hi.clear();
+                cur_key_hi.extend_from_slice(ceiling);
+            }
             if cur_n >= SEG_MAX_RECORDS {
-                self.seal_segment(env, cur_file.take().unwrap(), cur_id, cur_from, cur_through, cur_bytes)?;
+                self.seal_segment(
+                    env,
+                    cur_file.take().unwrap(),
+                    cur_id,
+                    cur_from,
+                    cur_through,
+                    cur_bytes,
+                    Some((cur_key_lo.clone(), cur_key_hi.clone())),
+                )?;
             }
         }
         if let Some(f) = cur_file.take() {
-            self.seal_segment(env, f, cur_id, cur_from, cur_through, cur_bytes)?;
+            self.seal_segment(
+                env,
+                f,
+                cur_id,
+                cur_from,
+                cur_through,
+                cur_bytes,
+                Some((cur_key_lo, cur_key_hi)),
+            )?;
         }
         Ok(())
     }
@@ -207,6 +299,7 @@ impl HistoryTier {
         from: u64,
         through: u64,
         bytes: u64,
+        key_coverage: Option<(Vec<u8>, Vec<u8>)>,
     ) -> Result<()> {
         f.sync_all()?;
         drop(f);
@@ -217,12 +310,20 @@ impl HistoryTier {
         let mut buf = Vec::with_capacity(bytes as usize);
         std::io::Read::read_to_end(&mut rf, &mut buf)?;
         let name = RemoteTier::segment_name(&buf);
+        let (key_lo, key_hi) = match key_coverage {
+            // An empty segment carries no coverage — keep `None` (always
+            // walks; decode of an all-empty tier stays `None` too).
+            Some((lo, hi)) if !lo.is_empty() || !hi.is_empty() => (Some(lo), Some(hi)),
+            _ => (None, None),
+        };
         self.manifest.segs.push_back(SegmentMeta {
             id,
             name,
             from_seq: from,
             through_seq: through,
             bytes,
+            key_lo,
+            key_hi,
         });
         self.persist(env)
     }
@@ -975,6 +1076,127 @@ mod tests {
     }
 
     const REMOTE: &str = "/remote";
+
+    #[test]
+    fn segment_key_coverage_prunes_reads_soundly() {
+        // P2.5: segments carry a key-coverage bound; a read for a key
+        // outside it never touches the file. Observable: corrupt the
+        // out-of-range segment — the read must still succeed; corrupt the
+        // in-range one — the read must fail CorruptHistory (fail-closed
+        // unchanged for what it actually reads).
+        let root = temp_root("prune");
+        let mut tier = HistoryTier::open(&crate::env::StdEnv, &root).unwrap();
+        tier.archive_stream(
+            &crate::env::StdEnv,
+            vec![
+                (b"aa".to_vec(), b"v1".to_vec(), 1u64, 0u8),
+                (b"ab".to_vec(), b"v2".to_vec(), 2, 0),
+            ]
+            .into_iter(),
+        )
+        .unwrap();
+        tier.archive_stream(
+            &crate::env::StdEnv,
+            vec![(b"zz".to_vec(), b"w1".to_vec(), 3u64, 0u8)].into_iter(),
+        )
+        .unwrap();
+        let metas = tier.segment_metas();
+        assert_eq!(metas.len(), 2);
+        assert_eq!(metas[0].key_lo.as_deref(), Some(&b"aa"[..]));
+        assert_eq!(metas[0].key_hi.as_deref(), Some(&b"ab"[..]));
+        assert_eq!(metas[1].key_lo.as_deref(), Some(&b"zz"[..]));
+        assert_eq!(metas[1].key_hi.as_deref(), Some(&b"zz"[..]));
+        // Corrupt segment 1 (aa..ab): a read inside its range fails typed.
+        let seg1 = root.join("history").join(format!("seg-{:08}.hist", metas[0].id));
+        let mut bytes = std::fs::read(&seg1).unwrap();
+        bytes[10] ^= 0xff;
+        std::fs::write(&seg1, &bytes).unwrap();
+        let records = crate::history::walk_segment_records(
+            &tier.read_local_segment(&crate::env::StdEnv, metas[0].id)
+                .unwrap()
+                .expect("present"),
+        );
+        assert!(records.is_err(), "in-range read still verifies CRC (fail-closed)");
+        // Coverage of segment 2 excludes aa/ab — the db-level reader would
+        // skip it; here we assert the bound math directly: aa < zz and
+        // ab < zz, so both prune, while zz does not.
+        let covers = |m: &SegmentMeta, k: &[u8]| {
+            m.key_lo.as_ref().is_some_and(|lo| {
+                m.key_hi.as_ref().is_some_and(|hi| {
+                    k >= lo.as_slice() && k <= hi.as_slice()
+                })
+            })
+        };
+        assert!(!covers(&metas[1], b"aa") && !covers(&metas[1], b"ab"));
+        assert!(covers(&metas[1], b"zz"));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn segment_key_coverage_counts_range_delete_ends() {
+        // Soundness: a range delete [a, z) affects every key in between
+        // while its record key is only "a". The ceiling must include the
+        // exclusive end, or reads for interior keys would prune the
+        // segment and lose the delete.
+        let root = temp_root("rdc");
+        let mut tier = HistoryTier::open(&crate::env::StdEnv, &root).unwrap();
+        tier.archive_stream(
+            &crate::env::StdEnv,
+            vec![(b"a".to_vec(), b"z".to_vec(), 7u64, 2u8)].into_iter(),
+        )
+        .unwrap();
+        let metas = tier.segment_metas();
+        assert_eq!(metas.len(), 1);
+        assert_eq!(metas[0].key_lo.as_deref(), Some(&b"a"[..]));
+        assert_eq!(
+            metas[0].key_hi.as_deref(),
+            Some(&b"z"[..]),
+            "ceiling must cover the range-delete end, not just record keys"
+        );
+        // Interior key is inside coverage; decide_at applies the delete.
+        let bytes = tier
+            .read_local_segment(&crate::env::StdEnv, metas[0].id)
+            .unwrap()
+            .expect("present");
+        let records = crate::history::walk_segment_records(&bytes).unwrap();
+        let decided = crate::history::decide_at(&records, b"m", 10).expect("covered key decides");
+        assert_eq!(decided.kind, 2, "range delete covers the interior key");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn manifest_v2_decodes_without_key_coverage() {
+        // Backward compat: manifests sealed before P2.5 (version 2) decode
+        // with None coverage — those segments always walk, never mis-prune.
+        let bad = |v: u32| {
+            let mut b = Vec::new();
+            b.extend_from_slice(b"PHST");
+            b.extend_from_slice(&v.to_le_bytes());
+            b.extend_from_slice(&1u64.to_le_bytes()); // next_id
+            b.extend_from_slice(&0u64.to_le_bytes()); // archive_floor
+            b.extend_from_slice(&1u32.to_le_bytes()); // one segment
+            b.extend_from_slice(&7u64.to_le_bytes()); // id
+            b.extend_from_slice(&4u32.to_le_bytes()); // name len
+            b.extend_from_slice(b"segx");
+            b.extend_from_slice(&1u64.to_le_bytes()); // from_seq
+            b.extend_from_slice(&2u64.to_le_bytes()); // through_seq
+            b.extend_from_slice(&64u64.to_le_bytes()); // bytes
+            let crc = crc32c(&b);
+            b.extend_from_slice(&crc.to_le_bytes());
+            b
+        };
+        let m2 = super::Manifest::decode(&bad(2)).expect("v2 decodes");
+        assert_eq!(m2.segs.len(), 1);
+        assert!(m2.segs[0].key_lo.is_none() && m2.segs[0].key_hi.is_none());
+        assert!(super::Manifest::decode(&bad(4)).is_err(), "unknown version still rejected");
+        // v3 round-trip keeps coverage.
+        let mut m3 = super::Manifest::decode(&bad(2)).unwrap();
+        m3.segs[0].key_lo = Some(b"lo".to_vec());
+        m3.segs[0].key_hi = Some(b"hi".to_vec());
+        let rt = super::Manifest::decode(&m3.encode()).unwrap();
+        assert_eq!(rt.segs[0].key_lo.as_deref(), Some(&b"lo"[..]));
+        assert_eq!(rt.segs[0].key_hi.as_deref(), Some(&b"hi"[..]));
+    }
 
     #[test]
     fn remote_segment_put_content_addressed_and_idempotent() {

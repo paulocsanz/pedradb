@@ -1998,23 +1998,40 @@ impl<E: Env> Db<E> {
         };
         // Candidate segments: the local manifest plus (content-addressed
         // dedup by name) everything the remote manifest still lists.
-        let mut cands: Vec<(u64, u64, String, Option<u64>)> = tier
-            .segment_metas()
-            .into_iter()
-            .map(|m| (m.from_seq, m.through_seq, m.name, Some(m.id)))
-            .collect();
+        // Local entries carry the P2.5 key-coverage bound (range-delete
+        // aware) — segments whose bound excludes the key are skipped
+        // without a walk; remote listings have no bound (always walk).
+        #[allow(clippy::type_complexity)]
+        let mut cands: Vec<(u64, u64, String, Option<u64>, Option<(Vec<u8>, Vec<u8>)>)> =
+            tier.segment_metas()
+                .into_iter()
+                .map(|m| {
+                    (
+                        m.from_seq,
+                        m.through_seq,
+                        m.name,
+                        Some(m.id),
+                        m.key_lo.zip(m.key_hi),
+                    )
+                })
+                .collect();
         if let Some(remote) = self.remote_history.as_ref() {
             for seg in remote.tier.latest_segments(&remote.env)? {
-                if !cands.iter().any(|(_, _, name, _)| *name == seg.name) {
-                    cands.push((seg.from_seq, seg.through_seq, seg.name, None));
+                if !cands.iter().any(|(_, _, name, _, _)| *name == seg.name) {
+                    cands.push((seg.from_seq, seg.through_seq, seg.name, None, None));
                 }
             }
         }
         let mut best: Option<crate::history::HistoryRecord> = None;
         let mut missing_below_snap = false;
-        for (from, _, name, local_id) in &cands {
+        for (from, _, name, local_id, coverage) in &cands {
             if *from > snap.seq {
                 continue; // cannot hold a record this snapshot can see
+            }
+            if let Some((lo, hi)) = coverage {
+                if key < lo.as_slice() || key > hi.as_slice() {
+                    continue; // outside the segment's key coverage — sound skip
+                }
             }
             let bytes = match local_id.map(|id| tier.read_local_segment(&self.env, id)) {
                 Some(Ok(Some(bytes))) => Some(bytes),
@@ -2063,7 +2080,7 @@ impl<E: Env> Db<E> {
         if missing_below_snap || tier.archive_floor() > snap.seq {
             return Err(too_old());
         }
-        let mut spans: Vec<(u64, u64)> = cands.iter().map(|(f, t, _, _)| (*f, *t)).collect();
+        let mut spans: Vec<(u64, u64)> = cands.iter().map(|(f, t, _, _, _)| (*f, *t)).collect();
         spans.sort_unstable();
         let mut covered_to = 1u64;
         for (from, through) in spans {
