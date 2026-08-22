@@ -78,6 +78,11 @@ rocks() { # $1 out  $2 suite(optional)  $3 only(optional)
 }
 
 for r in 1 2 3; do
+  # p34 quiet method: n=2000 per shape. The bench binary defaults to a
+  # 200-op smoke — v1 of this script measured the official rounds at
+  # that size by accident; that execution was discarded (see the
+  # findings README).
+  export ROCKS_YCSB_OPS=2000
   echo "=== round $r g1-compat $(date +%H:%M:%S) load1=$(load1) ===" >> "$LOG"
   compat "$OUT/r$r/g1/compat" 0 || echo "ROUND-DISCARDED r$r g1" >> "$LOG"
   rm -rf "$OUT/r$r/g1/compat/db-compat"
