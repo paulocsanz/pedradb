@@ -1,7 +1,7 @@
 # RFC-0046: história MVCC fora do SSD — retention default + tier em object storage (S3)
 
-**Status:** in-progress (P0.1–P0.3 + P0.5 + P1 + P2.1–P2.5 done; P2.6
-backlog; só falta P0.4, gated em caixa quieta)
+**Status:** in-progress (P0.1–P0.3 + P0.5 + P1 + P2.1–P2.6 done;
+só falta P0.4, gated em caixa quieta)
 **Updated:** 2026-08-21
 **Parents:** [0009](0009-rocksdb-class-engine.md) (F20 retention),
 [0044](0044-async-class-5x-rocks.md) (E/cliff de retenção),
@@ -295,12 +295,29 @@ backlog; só falta P0.4, gated em caixa quieta)
       `segment_key_coverage_counts_range_delete_ends` (soundness do
       teto), `manifest_v2_decodes_without_key_coverage` (back-compat) —
       status: `done`
-- [ ] **P2.6** Bloom por segmento do archive (refinamento do P2.5 para
-      ranges sobrepostos): no seal, gravar bloom ~10 bits/key dos user
-      keys; poda probabilística com falso-positivo = walk (correto,
-      só mais lento), falso-negativo impossível por construção.
-      Beneficia o workload de overwrite (hoje todos os segmentos
-      caminham) — status: `todo`
+- [x] **P2.6** Bloom por segmento do archive — **entregue como sidecar**
+      `history/seg-<id>.bloom` (não no manifesto: com 1 GiB de cap e
+      segmentos de 128 KB são ~8k segmentos; blooms no manifesto o
+      inflariam para dezenas de MB): reusa o `BloomFilter` do kernel
+      (~10 bits/key, ~1% FP), escrito e fsyncado **antes** do manifesto
+      persistir no seal (manifesto implica sidecar durável; crash no
+      meio = sidecar órfão, removido no open junto dos `.hist` órfãos;
+      cap drop remove o sidecar junto). Range deletes não entram no
+      bloom (intervalo não é enumerável) — viajam como **intervalos
+      explícitos** no sidecar: chave é podável só com bloom negativo E
+      nenhum intervalo cobrindo (sound). **Fail-open por construção**:
+      sidecar ausente (segmento pré-P2.6), corrompido (CRC do corpo) ou
+      truncado → leitura como "pode afetar" (walk) — filtro danificado
+      nunca poda. Falso-positivo = walk (só mais lento). Espelho remoto
+      segue walk (sem sidecar no objeto). Layout:
+      `PHB1|ver|bloom.encode()|rd_count|intervals|body_len|crc32c(body)`.
+      A leitura pula o walk do segmento (MBs) lendo só o sidecar
+      (~10 KB); a prova de cobertura `None` continua usando a lista de
+      candidatos (spans de seq) — skips não afetam disponibilidade.
+      Testes: `bloom_sidecar_prunes_overlapping_key_ranges` (o caso que o
+      P2.5 não poda), `bloom_sidecar_range_delete_intervals_sound`,
+      `bloom_sidecar_missing_or_corrupt_never_prunes` (fail-open +
+      cleanup de órfão) — status: `done`
 
 ## Status (living — update with every PR)
 
@@ -320,7 +337,7 @@ backlog; só falta P0.4, gated em caixa quieta)
 | P2.3 | p2 | fallback LSM abaixo do watermark (wart cap×sobrevivente) | **done** | `get_at_below_watermark_lsm` + teste | 2026-08-21 |
 | P2.4 | p2 | change feed fail-closed abaixo do watermark | **done** | `changes` check + teste | 2026-08-21 |
 | P2.5 | p2 | índice por segmento do archive (custo de leitura) | **done** | manifesto v3 key-range rd-aware + 3 testes | 2026-08-21 |
-| P2.6 | p2 | bloom por segmento (ranges sobrepostos) | todo | refinamento do P2.5 | 2026-08-21 |
+| P2.6 | p2 | bloom por segmento (ranges sobrepostos) | **done** | sidecar `seg-*.bloom` fail-open + 3 testes | 2026-08-21 |
 
 ## Acceptance Criteria
 

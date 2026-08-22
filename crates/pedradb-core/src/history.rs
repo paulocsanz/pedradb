@@ -195,9 +195,14 @@ impl HistoryTier {
             let live: std::collections::HashSet<u64> =
                 manifest.segs.iter().map(|s| s.id).collect();
             for name in env.read_dir_names(&dir).unwrap_or_default() {
-                if let Some(id) = name
-                    .strip_prefix("seg-")
-                    .and_then(|s| s.strip_suffix(".hist"))
+                // Both segment data (.hist) and P2.6 bloom sidecars (.bloom)
+                // without a manifest entry are crash leftovers (manifest is
+                // the truth).
+                let stem = name
+                    .strip_suffix(".hist")
+                    .or_else(|| name.strip_suffix(".bloom"));
+                if let Some(id) = stem
+                    .and_then(|s| s.strip_prefix("seg-"))
                     .and_then(|s| s.parse::<u64>().ok())
                 {
                     if !live.contains(&id) {
@@ -230,6 +235,12 @@ impl HistoryTier {
         let mut cur_key_lo: Vec<u8> = Vec::new();
         let mut cur_key_hi: Vec<u8> = Vec::new();
         let mut key_lo_set = false;
+        // P2.6 bloom sidecar: point-record keys + range-delete intervals,
+        // collected per segment and written at seal. Point keys feed the
+        // bloom; range deletes cannot (an interval is not enumerable), so
+        // they ride as explicit intervals — pruning stays sound.
+        let mut cur_point_keys: Vec<Vec<u8>> = Vec::new();
+        let mut cur_range_dels: Vec<(Vec<u8>, Vec<u8>)> = Vec::new();
         let mut buf: Vec<u8> = Vec::new();
         for (key, val, seq, kind) in records {
             if cur_file.is_none() {
@@ -241,6 +252,8 @@ impl HistoryTier {
                 cur_key_lo.clear();
                 cur_key_hi.clear();
                 key_lo_set = false;
+                cur_point_keys.clear();
+                cur_range_dels.clear();
             }
             buf.clear();
             buf.extend_from_slice(&(key.len() as u32).to_le_bytes());
@@ -265,6 +278,11 @@ impl HistoryTier {
                 cur_key_hi.clear();
                 cur_key_hi.extend_from_slice(ceiling);
             }
+            if kind == 2 {
+                cur_range_dels.push((key, val));
+            } else {
+                cur_point_keys.push(key);
+            }
             if cur_n >= SEG_MAX_RECORDS {
                 self.seal_segment(
                     env,
@@ -274,6 +292,8 @@ impl HistoryTier {
                     cur_through,
                     cur_bytes,
                     Some((cur_key_lo.clone(), cur_key_hi.clone())),
+                    std::mem::take(&mut cur_point_keys),
+                    std::mem::take(&mut cur_range_dels),
                 )?;
             }
         }
@@ -286,6 +306,8 @@ impl HistoryTier {
                 cur_through,
                 cur_bytes,
                 Some((cur_key_lo, cur_key_hi)),
+                cur_point_keys,
+                cur_range_dels,
             )?;
         }
         Ok(())
@@ -300,9 +322,15 @@ impl HistoryTier {
         through: u64,
         bytes: u64,
         key_coverage: Option<(Vec<u8>, Vec<u8>)>,
+        point_keys: Vec<Vec<u8>>,
+        range_dels: Vec<(Vec<u8>, Vec<u8>)>,
     ) -> Result<()> {
         f.sync_all()?;
         drop(f);
+        // P2.6: bloom sidecar — synced BEFORE the manifest persists, so a
+        // manifest-referenced segment always has its sidecar durable (a
+        // crash between the two leaves an orphan sidecar, removed at open).
+        self.write_bloom_sidecar(env, id, &point_keys, &range_dels)?;
         // Content-addressed name (remote mirror object identity): read the
         // sealed bytes back once and hash them.
         let path = self.root.join("history").join(format!("seg-{id:08}.hist"));
@@ -326,6 +354,131 @@ impl HistoryTier {
             key_hi,
         });
         self.persist(env)
+    }
+
+    /// P2.6: write `history/seg-{id:08}.bloom`. Layout: magic `PHB1` +
+    /// version u32 | body | footer (body_len u64 + crc32c(body) u32).
+    /// Body: `BloomFilter::encode()` (self-framed) + rd_count u32 +
+    /// intervals (len-prefixed start/end). Covers point keys by bloom and
+    /// range deletes explicitly — a key is provably unaffected only when
+    /// the bloom says absent AND no interval covers it.
+    fn write_bloom_sidecar<E: Env>(
+        &self,
+        env: &E,
+        id: u64,
+        point_keys: &[Vec<u8>],
+        range_dels: &[(Vec<u8>, Vec<u8>)],
+    ) -> Result<()> {
+        let mut bloom = crate::bloom::BloomFilter::with_capacity(
+            point_keys.len(),
+            crate::bloom::DEFAULT_BITS_PER_KEY,
+        );
+        for k in point_keys {
+            bloom.insert(k);
+        }
+        let mut body = bloom.encode();
+        body.extend_from_slice(&(range_dels.len() as u32).to_le_bytes());
+        for (start, end) in range_dels {
+            body.extend_from_slice(&(start.len() as u32).to_le_bytes());
+            body.extend_from_slice(start);
+            body.extend_from_slice(&(end.len() as u32).to_le_bytes());
+            body.extend_from_slice(end);
+        }
+        let path = self.root.join("history").join(format!("seg-{id:08}.bloom"));
+        let mut out = Vec::with_capacity(8 + body.len() + 12);
+        out.extend_from_slice(b"PHB1");
+        out.extend_from_slice(&1u32.to_le_bytes());
+        out.extend_from_slice(&body);
+        out.extend_from_slice(&(body.len() as u64).to_le_bytes());
+        out.extend_from_slice(&crc32c(&body).to_le_bytes());
+        let mut f = env.create(&path)?;
+        f.write_all(&out)?;
+        f.sync_all()?;
+        Ok(())
+    }
+
+    /// P2.6: `false` ⇒ the segment provably cannot decide `key` (bloom
+    /// negative and no range-delete interval covers it) — safe to skip the
+    /// record walk. Anything else — missing sidecar (pre-P2.6 segment),
+    /// corrupt sidecar, I/O error — returns `true` (walk): a damaged
+    /// filter must never prune. `Err` propagates only from unexpected
+    /// read failures, and even then the caller treats it as "walk".
+    pub(crate) fn segment_may_affect<E: Env>(&self, env: &E, id: u64, key: &[u8]) -> bool {
+        let path = self.root.join("history").join(format!("seg-{id:08}.bloom"));
+        let Ok(mut f) = env.open_read(&path) else {
+            return true; // no sidecar — cannot prune
+        };
+        let mut buf = Vec::new();
+        if f.read_to_end(&mut buf).is_err() {
+            return true;
+        }
+        Self::sidecar_may_affect(&buf, key)
+    }
+
+    /// Pure parse of a bloom sidecar (test surface). Fails open to `true`.
+    fn sidecar_may_affect(buf: &[u8], key: &[u8]) -> bool {
+        let footer_len = 12usize;
+        if buf.len() < 8 + footer_len || &buf[0..4] != b"PHB1" {
+            return true;
+        }
+        if u32::from_le_bytes(buf[4..8].try_into().unwrap()) != 1 {
+            return true;
+        }
+        let body_len = u64::from_le_bytes(
+            buf[buf.len() - footer_len..buf.len() - 4].try_into().unwrap(),
+        ) as usize;
+        if body_len + 8 + footer_len != buf.len() {
+            return true;
+        }
+        let body = &buf[8..8 + body_len];
+        let crc = u32::from_le_bytes(buf[buf.len() - 4..].try_into().unwrap());
+        if crc32c(body) != crc {
+            return true; // corrupt sidecar — never prune
+        }
+        // Bloom blob is self-framed: nbits/k/nbytes then bits.
+        if body.len() < 12 {
+            return true;
+        }
+        let nbytes = u32::from_le_bytes(body[8..12].try_into().unwrap()) as usize;
+        let bloom_end = 12 + nbytes;
+        if bloom_end + 4 > body.len() {
+            return true;
+        }
+        let bloom = match crate::bloom::BloomFilter::decode(&body[..bloom_end]) {
+            Ok(b) => b,
+            Err(_) => return true,
+        };
+        if bloom.may_contain(key) {
+            return true;
+        }
+        let mut off = bloom_end;
+        let rd_count =
+            u32::from_le_bytes(body[off..off + 4].try_into().unwrap()) as usize;
+        off += 4;
+        for _ in 0..rd_count {
+            if off + 4 > body.len() {
+                return true; // truncated interval list — fail open
+            }
+            let sl = u32::from_le_bytes(body[off..off + 4].try_into().unwrap()) as usize;
+            off += 4;
+            if off + sl + 4 > body.len() {
+                return true;
+            }
+            let start = &body[off..off + sl];
+            off += sl;
+            let el = u32::from_le_bytes(body[off..off + 4].try_into().unwrap()) as usize;
+            off += 4;
+            if off + el > body.len() {
+                return true;
+            }
+            let end = &body[off..off + el];
+            off += el;
+            // Range delete hides [start, end): affects keys in it.
+            if key >= start && key < end {
+                return true;
+            }
+        }
+        false
     }
 
     fn persist<E: Env>(&mut self, env: &E) -> Result<()> {
@@ -378,6 +531,7 @@ impl HistoryTier {
                 }
             }
             let _ = env.remove_file(&dir.join(format!("seg-{:08}.hist", front.id)));
+            let _ = env.remove_file(&dir.join(format!("seg-{:08}.bloom", front.id)));
             total -= front.bytes;
             self.manifest.archive_floor = self.manifest.archive_floor.max(front.through_seq + 1);
             self.manifest.segs.pop_front();
@@ -1196,6 +1350,117 @@ mod tests {
         let rt = super::Manifest::decode(&m3.encode()).unwrap();
         assert_eq!(rt.segs[0].key_lo.as_deref(), Some(&b"lo"[..]));
         assert_eq!(rt.segs[0].key_hi.as_deref(), Some(&b"hi"[..]));
+    }
+
+    #[test]
+    fn bloom_sidecar_prunes_overlapping_key_ranges() {
+        // P2.6: the case the P2.5 manifest bound can't prune — segments
+        // whose key ranges overlap (overwrite workloads). The bloom must
+        // answer "cannot affect" for a key inside the overlap but in no
+        // segment, and "may affect" for keys actually present.
+        let root = temp_root("blm");
+        let mut tier = HistoryTier::open(&crate::env::StdEnv, &root).unwrap();
+        tier.archive_stream(
+            &crate::env::StdEnv,
+            vec![
+                (b"aa".to_vec(), b"v1".to_vec(), 1u64, 0u8),
+                (b"ab".to_vec(), b"v2".to_vec(), 2, 0),
+            ]
+            .into_iter(),
+        )
+        .unwrap();
+        tier.archive_stream(
+            &crate::env::StdEnv,
+            vec![
+                (b"aa".to_vec(), b"v3".to_vec(), 3u64, 0u8),
+                (b"ab".to_vec(), b"v4".to_vec(), 4, 0),
+            ]
+            .into_iter(),
+        )
+        .unwrap();
+        let metas = tier.segment_metas();
+        assert_eq!(metas.len(), 2, "two overlapping segments");
+        // Overlapping manifest coverage (P2.5 can't prune either).
+        assert!(metas.iter().all(|m| m.key_lo.as_deref() == Some(&b"aa"[..])));
+        for m in &metas {
+            assert!(
+                root.join("history")
+                    .join(format!("seg-{:08}.bloom", m.id))
+                    .exists(),
+                "seal writes the bloom sidecar"
+            );
+            assert!(!tier.segment_may_affect(&crate::env::StdEnv, m.id, b"az"));
+            assert!(tier.segment_may_affect(&crate::env::StdEnv, m.id, b"aa"));
+            assert!(tier.segment_may_affect(&crate::env::StdEnv, m.id, b"ab"));
+        }
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn bloom_sidecar_range_delete_intervals_sound() {
+        // A range delete [a, z) decides every interior key while its record
+        // key is only "a": the sidecar keeps explicit intervals, so interior
+        // keys are never pruned and outside keys are.
+        let root = temp_root("blrd");
+        let mut tier = HistoryTier::open(&crate::env::StdEnv, &root).unwrap();
+        tier.archive_stream(
+            &crate::env::StdEnv,
+            vec![
+                (b"b".to_vec(), b"v".to_vec(), 1u64, 0u8),
+                (b"a".to_vec(), b"z".to_vec(), 2, 2), // RD [a, z)
+                (b"zz".to_vec(), b"w".to_vec(), 3, 0),
+            ]
+            .into_iter(),
+        )
+        .unwrap();
+        let m = &tier.segment_metas()[0];
+        assert!(tier.segment_may_affect(&crate::env::StdEnv, m.id, b"m"));
+        assert!(tier.segment_may_affect(&crate::env::StdEnv, m.id, b"y"));
+        assert!(!tier.segment_may_affect(&crate::env::StdEnv, m.id, b"zzz"));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn bloom_sidecar_missing_or_corrupt_never_prunes() {
+        // Fail-open by construction: a damaged or absent sidecar must read
+        // as "may affect" (walk). Also: an orphan sidecar (no manifest
+        // entry) is removed at open.
+        let root = temp_root("blx");
+        let mut tier = HistoryTier::open(&crate::env::StdEnv, &root).unwrap();
+        tier.archive_stream(
+            &crate::env::StdEnv,
+            vec![(b"k".to_vec(), b"v".to_vec(), 1u64, 0u8)].into_iter(),
+        )
+        .unwrap();
+        let id = tier.segment_metas()[0].id;
+        let sidecar = root.join("history").join(format!("seg-{id:08}.bloom"));
+        // Missing → walk.
+        std::fs::remove_file(&sidecar).unwrap();
+        assert!(tier.segment_may_affect(&crate::env::StdEnv, id, b"unrelated"));
+        // Corrupt body (flip a byte inside the bloom bits) → walk.
+        tier.archive_stream(
+            &crate::env::StdEnv,
+            vec![(b"k".to_vec(), b"v".to_vec(), 2u64, 0u8)].into_iter(),
+        )
+        .unwrap();
+        let id2 = tier.segment_metas()[1].id;
+        let sc2 = root.join("history").join(format!("seg-{id2:08}.bloom"));
+        let mut bytes = std::fs::read(&sc2).unwrap();
+        // Flip a byte inside the body region (past the 8-byte header,
+        // before the 12-byte footer).
+        bytes[13] ^= 0xff;
+        std::fs::write(&sc2, &bytes).unwrap();
+        assert!(tier.segment_may_affect(&crate::env::StdEnv, id2, b"unrelated"));
+        // Orphan sidecar (id not in the manifest) → removed at the next
+        // open; live sidecars survive it.
+        drop(tier);
+        let orphan = root.join("history").join("seg-99999999.bloom");
+        std::fs::write(&orphan, b"junk").unwrap();
+        let reopened = HistoryTier::open(&crate::env::StdEnv, &root).unwrap();
+        assert!(!orphan.exists(), "orphan sidecar cleaned at open");
+        assert!(sc2.exists(), "live sidecar kept at open");
+        let _ = reopened;
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

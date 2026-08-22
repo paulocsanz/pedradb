@@ -2033,6 +2033,15 @@ impl<E: Env> Db<E> {
                     continue; // outside the segment's key coverage — sound skip
                 }
             }
+            // P2.6 bloom sidecar: skip the record walk when the segment
+            // provably cannot decide this key (helps the overlapping-key
+            // case the manifest bound can't prune). Coverage spans below
+            // still use `cands`, so the None-proof is unaffected by skips.
+            if let Some(id) = local_id {
+                if !tier.segment_may_affect(&self.env, *id, key) {
+                    continue;
+                }
+            }
             let bytes = match local_id.map(|id| tier.read_local_segment(&self.env, id)) {
                 Some(Ok(Some(bytes))) => Some(bytes),
                 Some(Ok(None)) | None => None,
