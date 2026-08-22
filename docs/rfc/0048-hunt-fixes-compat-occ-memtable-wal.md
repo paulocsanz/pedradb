@@ -88,6 +88,13 @@
 - [x] **W4.4** core: `Manifest::decode` aloca `n×104B` antes de validar corpo (manifest remoto de 36 B reserva ~446 GB; morte por abort/OOM em overcommit estrito) — F199, rejeição `n > (body_len-28)/36` pré-alocação; k27 = guarda local / RED em host Linux (malloc ≤1 TB aceito como VA neste macOS — sonda documentada) — status: `done` (NEEDS-LINUX-ENV)
 - Backlog da wave 2 encerrado: manifest#3 ✅ F196, concurrent#4 ✅ F197, concurrent#3 ✅ F198, history LOW ✅ F199.
 
+### W5 — wave 5 "vai" (2026-08-22; superfícies novas: fold-GC do a28637a, pedradb-io-uring, tx/occ via subagentes)
+- [x] **W5.1** core: `gc_below_floor` aplicava regra por-chave a RANGE tombstone — "superseded na própria start key" não decide um tombstone (esconde versões de OUTRAS chaves; versões mais velhas sobrevivem ao GC e SSTs de baixo podem ter dado coberto) → tombstone vivo derrubado, `get` ressuscita valor deletado — F200, drain do fold-GC conserva `RangeDeletion` (só bottommost compact descarta); k28 RED→GREEN + ctl (sem supersede / GC off) — status: `done`
+- [x] **W5.2** core: `compact_reclaim` + `auto_gc_floor` usavam `oldest_pinned_sequence().unwrap_or(last_sequence())` — cegos ao `occ_registry` que o core `begin_occ` alimenta → snapshot de TX OCC aberta varrido (SnapshotTooOld) nos caminhos manual E auto — F201, `ConcurrentDb::from_db` compartilha o Arc do registry no `Db`; floors fazem `min(pin, oldest bound occ)`; k29/k29b RED (via stash)→GREEN + ctl — status: `done`
+- [x] **W5.3** io-uring: `Seek for IoUringFile` delegava ao offset do KERNEL e o gravava no cursor sombra — fd O_APPEND de `open_append` abre em offset 0 mesmo com bytes → `WalWriter::new` via `stream_position()` calculava `block_offset=0` em TODO reopen: registro Full cruza a fronteira de 32 KiB e o reader fail-closed o rejeita (no Linux uring o pwrite em `pos`=0 ainda SOBRESCREVE o WAL do byte 0 — NEEDS-LINUX-ENV) — F202, `Seek` resolve contra o cursor sombra (`Start`/`Current` locais, `End` delegado); k30 contrato (0 vs 5) + k30b vítima WAL (k2 perdido) + ctl StdEnv — status: `done`
+- [x] **W5.4** io-uring: `completion().next()` às cegas adota CQE órfão de operação cujo `submit_and_wait` falhou (ex. EINTR pós-submit) — resultado errado atribuído à op seguinte (avanço duplo do cursor, falso Ok de sync) — F203, `wait_tagged_cqe` casa `user_data` (0x77/0x5f/0xd1) e drena órfãos; compilação do caminho Linux verificada por `cargo check --target x86_64-unknown-linux-gnu` — status: `done` (NEEDS-LINUX-ENV, precedente F199/F195)
+- Refutados na onda (dead ends com análise): fadvise overflow→"até EOF" (equivalente ao clampe; único caller passa u32), trunc `as u32` em write >4 GiB (escrita parcial é contrato de `Write`), EINTR no fdatasync (propagar Err é correto); tx/occ: skip de commit com `last_sequence()==snap` defendido pela write lock.
+
 ## Status (living — update with every PR)
 
 | ID | Band | Title | Status | Task / PR | Updated |
@@ -129,12 +136,16 @@
 | W4.2 | w4 | leader panic não engalha writes (F197) | done | `concurrent.rs` + `FaultKind::Panic` no sim; k25 | 2026-08-22 |
 | W4.3 | w4 | point-cache fill revalida published (F198) | done | `db.rs` (`get` fill + `publish_sequence`); k26 | 2026-08-22 |
 | W4.4 | w4 | contagem do manifest remoto validada (F199) | done | `history.rs`; k27 guarda (NEEDS-LINUX-ENV) | 2026-08-22 |
+| W5.1 | w5 | fold-GC conserva range tombstone (F200) | done | `memtable.rs`; k28 + ctl | 2026-08-22 |
+| W5.2 | w5 | reclaim/auto-GC honra occ_registry (F201) | done | `db.rs`/`concurrent.rs`; k29/k29b + ctl | 2026-08-22 |
+| W5.3 | w5 | io-uring Seek pelo cursor sombra (F202) | done | `pedradb-io-uring/src/lib.rs`; k30/k30b + ctl StdEnv | 2026-08-22 |
+| W5.4 | w5 | CQE casado por user_data (F203) | done | `pedradb-io-uring/src/lib.rs` (NEEDS-LINUX-ENV) | 2026-08-22 |
 
 ## Acceptance Criteria
 
-- **Tests:** `pedradb-core --lib` (390 passando — incluindo `point_in_time_reports_resync_reanchor`, `zero_header_journals_and_pit_reports`, `torn_tail_*`, theorem do recover kernel, sweep `explode` com os kinds novos e a simetria de blocos), `rocksdb-compat` (40+7, incl. `txn_snapshot_hides_later_writes` atualizado), harness `compat_hunt` (**21**, c1..c14 + controles) + `core_hunt` (**39**, k1..k4b + k7..k27 + controles + diferencial k22) + oracle `wal_crc_flip_is_fail_stop_or_clean` — todos verdes com os fixes; os de hunt falham sem eles (F196–F198 demonstrados RED→GREEN; F199 guarda local condicionada a host Linux).
+- **Tests:** `pedradb-core --lib` (390 passando — incluindo `point_in_time_reports_resync_reanchor`, `zero_header_journals_and_pit_reports`, `torn_tail_*`, theorem do recover kernel, sweep `explode` com os kinds novos e a simetria de blocos), `pedradb-io-uring` (5/5), `rocksdb-compat` (40+7), harness `compat_hunt` (**21**, c1..c14 + controles) + `core_hunt` (**47**, k1..k30 + controles + diferencial k22) + oracle `wal_crc_flip_is_fail_stop_or_clean` — todos verdes com os fixes; os de hunt falham sem eles (F196–F198, F200–F202 demonstrados RED→GREEN; F199/F203 guardas/fixes condicionados a host Linux conforme fichas).
 - **Telemetry / Analytics:** none — correção de corretude; o `CORRUPTLOG` (RFC-0038) recebe eventos `resync` e `zero_header` (P1.2).
-- **Documentation:** este RFC + fichas F165–F199 em `determinismo/pedradb-dst/findings/` (+ dead ends F189/sst registrados) + LEDGER do hunt 2026-08-21/22 (waves 1–4) + patches `core-hunt-20260822.patch` (waves 1–3) e `core-hunt-20260822-wave4.patch` (delta da wave 4).
+- **Documentation:** este RFC + fichas F165–F203 em `determinismo/pedradb-dst/findings/` (+ dead ends F189/sst/io-uring registrados) + LEDGER do hunt 2026-08-21/22 (waves 1–5) + patches `core-hunt-20260822.patch` (waves 1–3), `core-hunt-20260822-wave4.patch` (delta da wave 4) e `core-hunt-20260822-wave5.patch` (delta da wave 5).
 - **Screenshots:** backend-only.
 
 ## Out of scope

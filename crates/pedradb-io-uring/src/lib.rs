@@ -199,11 +199,7 @@ impl IoUringFile {
                 .map_err(|e| io::Error::other(format!("io_uring sq full: {e}")))?;
         }
         ring.submit_and_wait(1)?;
-        let cqe = ring
-            .completion()
-            .next()
-            .ok_or_else(|| io::Error::other("io_uring missing cqe"))?;
-        let res = cqe.result();
+        let res = wait_tagged_cqe(&mut ring, 0x77)?;
         if res < 0 {
             return Err(io::Error::from_raw_os_error(-res));
         }
@@ -235,11 +231,7 @@ impl IoUringFile {
                 .map_err(|e| io::Error::other(format!("io_uring sq full: {e}")))?;
         }
         ring.submit_and_wait(1)?;
-        let cqe = ring
-            .completion()
-            .next()
-            .ok_or_else(|| io::Error::other("io_uring missing cqe"))?;
-        let res = cqe.result();
+        let res = wait_tagged_cqe(&mut ring, 0x5f)?;
         if res < 0 {
             return Err(io::Error::from_raw_os_error(-res));
         }
@@ -249,6 +241,27 @@ impl IoUringFile {
 
 #[cfg(target_os = "linux")]
 use std::os::unix::io::AsRawFd;
+
+/// Wait for OUR completion, matched by its `user_data` tag (F203).
+///
+/// `submit_and_wait` can fail (e.g. `EINTR`) after the SQE was already
+/// submitted: the kernel still completes the op and leaves a stale CQE in
+/// the ring. Taking `completion().next()` blindly lets the next operation
+/// adopt that stale result as its own (wrong `res`, double cursor advance).
+/// Drain CQEs until the tag matches, waiting for more when only stale ones
+/// were queued.
+#[cfg(target_os = "linux")]
+fn wait_tagged_cqe(ring: &mut io_uring::IoUring, tag: u64) -> io::Result<i32> {
+    loop {
+        while let Some(cqe) = ring.completion().next() {
+            if cqe.user_data() == tag {
+                return Ok(cqe.result());
+            }
+            // Stale CQE from an op whose caller already saw the submit error.
+        }
+        ring.submit_and_wait(1)?;
+    }
+}
 
 impl Read for IoUringFile {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
@@ -280,7 +293,24 @@ impl Write for IoUringFile {
 
 impl Seek for IoUringFile {
     fn seek(&mut self, pos: SeekFrom) -> io::Result<u64> {
-        self.pos = self.file.seek(pos)?;
+        // F202: all I/O on this handle goes through the shadow cursor
+        // (`self.pos`: uring pwrites at it; the POSIX fallback seeks the fd to
+        // it first), so Seek must resolve against `self.pos` too. Delegating
+        // to `self.file` reads the kernel fd offset, which pwrite-style I/O
+        // never advances — and an `open_append` fd (O_APPEND) starts at 0
+        // even on a non-empty file, so `stream_position()` returned 0 and
+        // clobbered the correct cursor, corrupting WAL block framing on
+        // every reopen (`WalWriter::new` derives its in-block offset from it).
+        let new = match pos {
+            SeekFrom::Start(n) => n,
+            // End is absolute w.r.t. file length; the kernel offset is
+            // irrelevant, so delegating is safe here.
+            SeekFrom::End(n) => self.file.seek(SeekFrom::End(n))?,
+            SeekFrom::Current(n) => self.pos.checked_add_signed(n).ok_or_else(|| {
+                io::Error::new(io::ErrorKind::InvalidInput, "invalid seek (cursor underflow)")
+            })?,
+        };
+        self.pos = new;
         Ok(self.pos)
     }
 }
@@ -366,11 +396,7 @@ impl Env for IoUringEnv {
                         .map_err(|e| io::Error::other(format!("io_uring sq full: {e}")))?;
                 }
                 ring.submit_and_wait(1)?;
-                let cqe = ring
-                    .completion()
-                    .next()
-                    .ok_or_else(|| io::Error::other("io_uring missing cqe"))?;
-                let res = cqe.result();
+                let res = wait_tagged_cqe(&mut ring, 0xd1)?;
                 if res < 0 {
                     return Err(io::Error::from_raw_os_error(-res));
                 }

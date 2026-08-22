@@ -959,6 +959,12 @@ pub struct Db<E: Env = StdEnv> {
     dir_lock: Option<DirLock>,
     /// Set when append succeeded but required WAL `sync_all` failed (RFC-0015 H1).
     durability_fenced: bool,
+    /// Live OCC transaction snapshot lower bounds (F201): `ConcurrentDb`
+    /// shares its registry here so `compact_reclaim` / auto-compact GC
+    /// floors cannot pass an open transaction's snapshot. `None` on a bare
+    /// `Db` (OCC lives on `ConcurrentDb`; `tx::Transaction` is single-writer
+    /// `&mut self` and cannot overlap a reclaim).
+    occ_floor_registry: Option<Arc<Mutex<std::collections::BTreeMap<u64, SequenceNumber>>>>,
     /// First fence wins (RFC-0047 P1.1): I/O error + uncertain range.
     fence_report: Option<FenceReport>,
     /// Options this Db opened with (RFC-0047 P1.1: resume reopens with them).
@@ -1417,6 +1423,7 @@ impl<E: Env> Db<E> {
             dir_lock: lock,
             durability_fenced: false,
             fence_report: None,
+            occ_floor_registry: None,
             open_opts: opts,
             auto_compact_failures: 0,
             last_auto_compact_error: None,
@@ -1498,6 +1505,28 @@ impl<E: Env> Db<E> {
     #[must_use]
     pub fn wal_sync_count(&self) -> u64 {
         self.wal_sync_count.load(Ordering::Relaxed)
+    }
+
+    /// Share `ConcurrentDb`'s OCC snapshot registry so GC floors honor open
+    /// transactions (F201). Called once at `ConcurrentDb` construction.
+    pub(crate) fn set_occ_floor_registry(
+        &mut self,
+        registry: Arc<Mutex<std::collections::BTreeMap<u64, SequenceNumber>>>,
+    ) {
+        self.occ_floor_registry = Some(registry);
+    }
+
+    /// Oldest live OCC snapshot bound (`None` when no transaction is open or
+    /// this `Db` has no registry). F201: reclaim/auto-compact floors take
+    /// `min(pin floor, this)` — a fold with GC must not drop a version an
+    /// open transaction can still read.
+    fn occ_registry_floor(&self) -> Option<SequenceNumber> {
+        self.occ_floor_registry
+            .as_ref()?
+            .lock()
+            .values()
+            .copied()
+            .min()
     }
 
     /// Whether this handle refused further writes after a failed required WAL sync.
@@ -1917,6 +1946,11 @@ impl<E: Env> Db<E> {
         let pin_or_last = self
             .oldest_pinned_sequence()
             .unwrap_or_else(|| self.last_sequence());
+        // F201: an open OCC transaction holds the floor even without a pin.
+        let pin_or_last = match self.occ_registry_floor() {
+            Some(occ) => pin_or_last.min(occ),
+            None => pin_or_last,
+        };
         if self.auto_reclaim {
             return Some((pin_or_last, false));
         }
@@ -4255,6 +4289,11 @@ impl<E: Env> Db<E> {
         let oldest = self
             .oldest_pinned_sequence()
             .unwrap_or_else(|| self.last_sequence());
+        // F201: honor open OCC transactions (same floor rule as auto-GC).
+        let oldest = match self.occ_registry_floor() {
+            Some(occ) => oldest.min(occ),
+            None => oldest,
+        };
         self.compact_with(CompactOptions {
             gc: crate::merge::CompactGcOptions::for_oldest_snapshot(oldest),
         })

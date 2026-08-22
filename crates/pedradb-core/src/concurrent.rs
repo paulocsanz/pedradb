@@ -815,6 +815,11 @@ impl<E: Env> ConcurrentDb<E> {
         let phase_stats = db.write_phase_stats();
         let mut writes = WriteGroup::new();
         writes.phase_stats = phase_stats;
+        // F201: share the OCC registry into the Db so reclaim / auto-compact
+        // GC floors cannot pass an open transaction's snapshot.
+        let occ_registry = Arc::new(Mutex::new(std::collections::BTreeMap::new()));
+        let mut db = db;
+        db.set_occ_floor_registry(Arc::clone(&occ_registry));
         Self {
             inner: Arc::new(RwLock::new(db)),
             writes: Arc::new(writes),
@@ -826,7 +831,7 @@ impl<E: Env> ConcurrentDb<E> {
             read_cache_epoch,
             published_seq,
             fold_gc: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            occ_registry: Arc::new(Mutex::new(std::collections::BTreeMap::new())),
+            occ_registry,
             occ_next_id: Arc::new(std::sync::atomic::AtomicU64::new(1)),
         }
     }

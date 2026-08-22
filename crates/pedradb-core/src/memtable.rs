@@ -97,12 +97,12 @@ impl<'a> Iterator for VersIterMut<'a> {
 }
 
 /// Counters for versions dropped by fold-GC (keeps `entries` /
-/// `approx_bytes` / `range_tombstones` exact).
+/// `approx_bytes` exact — range tombstones are never dropped, see F200 in
+/// `gc_below_floor`).
 #[derive(Default)]
 struct Dropped {
     versions: usize,
     bytes: usize,
-    range_del: usize,
 }
 
 impl<'a> IntoIterator for &'a Versions {
@@ -473,7 +473,6 @@ impl MemTable {
                 }
                 self.entries = self.entries.saturating_sub(dropped.versions);
                 self.approx_bytes = self.approx_bytes.saturating_sub(dropped.bytes);
-                self.range_tombstones = self.range_tombstones.saturating_sub(dropped.range_del);
             }
         }
     }
@@ -612,10 +611,21 @@ impl MemTable {
         if keep + 1 >= list.len() {
             return;
         }
-        for v in list.drain(keep + 1..) {
+        // F200: a range tombstone hides every OLDER key in its range, not
+        // just its own start key — the per-key "newest ≤ floor" rule cannot
+        // decide it (older versions of other keys survive this GC, and older
+        // SSTs may still hold covered data). Only a bottommost compaction
+        // may drop one. Keep every `RangeDeletion`; the drained suffix was
+        // oldest-first, so pushing the survivors back in iteration order
+        // preserves the global newest-first ordering.
+        let suffix: Vec<Version> = list.drain(keep + 1..).collect();
+        for v in suffix {
+            if v.key.kind == ValueType::RangeDeletion {
+                list.push_back(v);
+                continue;
+            }
             dropped.versions += 1;
             dropped.bytes += v.key.user_key.len() + v.value.len() + 8;
-            dropped.range_del += usize::from(v.key.kind == ValueType::RangeDeletion);
         }
     }
 
