@@ -867,7 +867,11 @@ mod tests {
                     matches!(err, pedradb_core::CoreError::Crc { .. })
                         || matches!(err, pedradb_core::CoreError::Truncated(_))
                         || msg.contains("length")
-                        || msg.contains("crc"),
+                        || msg.contains("crc")
+                        // F171: a resync that skipped damaged mid-log bytes
+                        // fail-stops the open with this typed internal error
+                        // (journaled for escalation) — fail-stop is in-contract.
+                        || msg.contains("WAL resync skipped damaged region"),
                     "length choose must fail-stop or resync, got {err}"
                 );
             }

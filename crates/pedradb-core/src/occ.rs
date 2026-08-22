@@ -35,6 +35,9 @@ enum Stage {
 pub struct OccTransaction<E: Env = crate::env::StdEnv> {
     db: ConcurrentDb<E>,
     snapshot: SequenceNumber,
+    /// Fold-GC registration for this TX's snapshot (see
+    /// [`ConcurrentDb::occ_register_snapshot`]); released on drop.
+    floor_id: u64,
     read_set: BTreeSet<Bytes>,
     staging: BTreeMap<Bytes, Stage>,
     finished: bool,
@@ -44,11 +47,14 @@ impl<E: Env> OccTransaction<E> {
     pub(crate) fn new(db: ConcurrentDb<E>) -> Self {
         // Prefer last_sequence when the write lock is free (sees just-applied
         // versions). If a commit holds the write lock, don't stall — snapshot
-        // at published_seq (lock-free).
+        // at published_seq (lock-free). Either way the registry lower bound
+        // is installed first so fold-GC cannot pass this TX's snapshot.
+        let floor_id = db.occ_register_snapshot();
         let snapshot = db.occ_snapshot();
         Self {
             db,
             snapshot,
+            floor_id,
             read_set: BTreeSet::new(),
             staging: BTreeMap::new(),
             finished: false,
@@ -209,6 +215,7 @@ impl<E: Env> OccTransaction<E> {
 impl<E: Env> Drop for OccTransaction<E> {
     fn drop(&mut self) {
         self.finished = true;
+        self.db.occ_unregister_snapshot(self.floor_id);
     }
 }
 

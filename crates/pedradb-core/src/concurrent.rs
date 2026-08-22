@@ -741,6 +741,19 @@ pub struct ConcurrentDb<E: Env = StdEnv> {
     read_cache_epoch: Arc<std::sync::atomic::AtomicU64>,
     /// Published sequence — OCC begin / visible_sequence without the Db lock.
     published_seq: Arc<std::sync::atomic::AtomicU64>,
+    /// Snapshot-list version GC during parked folds (rust-rocksdb `Snapshot`
+    /// semantics). Default off — the core keeps every version (F20) until
+    /// the history-tier GC runs (archive-before-GC). The compat layer turns
+    /// it on: Rocks parity drops superseded versions below the oldest live
+    /// reader (pin / OCC begin), which also bounds parked-fold memory.
+    fold_gc: Arc<std::sync::atomic::AtomicBool>,
+    /// Live OCC transaction snapshots (id → lower-bound sequence). A fold
+    /// with GC must not drop a version an open transaction can still read:
+    /// entries register a published lower bound **before** the txn reads its
+    /// snapshot, so a fold that did not see the entry cannot have a floor
+    /// above it (published is monotone).
+    occ_registry: Arc<Mutex<std::collections::BTreeMap<u64, SequenceNumber>>>,
+    occ_next_id: Arc<std::sync::atomic::AtomicU64>,
 }
 
 impl ConcurrentDb<StdEnv> {
@@ -783,6 +796,9 @@ impl<E: Env> ConcurrentDb<E> {
             count_cache,
             read_cache_epoch,
             published_seq,
+            fold_gc: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            occ_registry: Arc::new(Mutex::new(std::collections::BTreeMap::new())),
+            occ_next_id: Arc::new(std::sync::atomic::AtomicU64::new(1)),
         }
     }
 
@@ -1336,11 +1352,22 @@ impl<E: Env> ConcurrentDb<E> {
     /// 1-client / idle ticks so scan merges one BTree instead of ~20 L0s
     /// (wake2 compact never finished before scan). Does not fold while
     /// apply_mc4 is multi-writer — that was incrfold (apply 1.25 → 0.67).
+    ///
+    /// With [`Self::set_fold_version_gc`] on, superseded versions below
+    /// `min(oldest pin, oldest OCC snapshot, published)` are dropped
+    /// (rust-rocksdb snapshot-list semantics) and the GC watermark ratchets
+    /// to the floor — reads below it fail `SnapshotTooOld`, never
+    /// silent-wrong. Every read at or above the floor is exact: the keep-set
+    /// is `{seq > floor} ∪ {newest ≤ floor}` per key.
     #[must_use]
     pub fn fold_parked_once_off_lock(&self) -> bool {
-        let pair = {
+        let gc = self.fold_gc_enabled();
+        let (pair, floor) = {
             let mut g = self.inner.write();
-            g.parked_oldest_pair_arcs()
+            (
+                g.parked_oldest_pair_arcs(),
+                gc.then(|| self.fold_floor_locked(&g)),
+            )
         };
         let Some((a, b)) = pair else {
             return false;
@@ -1348,10 +1375,64 @@ impl<E: Env> ConcurrentDb<E> {
         // Deep clone + absorb off the Db lock so MVCC/scan are not stalled
         // for the BTree copy (parkfold run1/3 MVCC max 16–18 ms).
         let mut built = (*a).clone();
-        built.absorb((*b).clone());
+        built.absorb_with_floor((*b).clone(), floor);
         // F174: the swap only lands if the front pair is still (a, b) —
         // a concurrent materialize may have drained it while we built.
-        self.inner.write().replace_oldest_parked_pair(built)
+        let mut g = self.inner.write();
+        let landed = g.replace_oldest_parked_pair(built);
+        if landed {
+            if let Some(f) = floor {
+                g.raise_earliest_readable(f);
+            }
+        }
+        landed
+    }
+
+    /// Enable/disable snapshot-list version GC during parked folds
+    /// (see [`Self::fold_parked_once_off_lock`]). Off by default.
+    pub fn set_fold_version_gc(&self, on: bool) {
+        self.fold_gc
+            .store(on, std::sync::atomic::Ordering::Release);
+    }
+
+    /// Whether fold version GC is on.
+    #[must_use]
+    pub fn fold_gc_enabled(&self) -> bool {
+        self.fold_gc.load(std::sync::atomic::Ordering::Acquire)
+    }
+
+    /// GC floor under the Db write lock: `min(oldest pin, oldest OCC
+    /// snapshot, published)`. Registered readers (pins, OCC) are exact; the
+    /// `published` term covers un-pinned readers created after this fold
+    /// (their snapshot ≥ published ⇒ keep-set answers them exactly).
+    fn fold_floor_locked(&self, g: &Db<E>) -> SequenceNumber {
+        let mut floor = g.visible_sequence();
+        if let Some(p) = g.oldest_pinned_sequence() {
+            floor = floor.min(p);
+        }
+        if let Some(o) = self.occ_registry.lock().values().copied().min() {
+            floor = floor.min(o);
+        }
+        floor
+    }
+
+    /// Register an OCC snapshot lower bound **before** the caller reads its
+    /// snapshot sequence: a fold that does not see this entry cannot have a
+    /// floor above `published` at that time, and every snapshot the caller
+    /// can subsequently read is ≥ that published sequence (monotone). Returns
+    /// the id for [`Self::occ_unregister_snapshot`].
+    pub(crate) fn occ_register_snapshot(&self) -> u64 {
+        let id = self
+            .occ_next_id
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let bound = self.published_seq.load(std::sync::atomic::Ordering::Acquire);
+        self.occ_registry.lock().insert(id, bound);
+        id
+    }
+
+    /// Drop a registration from [`Self::occ_register_snapshot`] (idempotent).
+    pub(crate) fn occ_unregister_snapshot(&self, id: u64) {
+        self.occ_registry.lock().remove(&id);
     }
 
     /// Write-group catch-up window (RFC-0037 P2.2). Default 50 µs
@@ -1404,6 +1485,9 @@ impl<E: Env> ConcurrentDb<E> {
             count_cache: _,
             read_cache_epoch: _,
             published_seq: _,
+            fold_gc: _,
+            occ_registry: _,
+            occ_next_id: _,
         } = self;
         match Arc::try_unwrap(inner) {
             Ok(lock) => lock.into_inner().close(),
@@ -2730,6 +2814,131 @@ mod tests {
         assert_eq!(db.sst_count(), 1);
         assert_eq!(db.get(b"k").as_deref(), Some(&[b'v'; 64][..]));
         assert_eq!(db.get(b"j").as_deref(), Some(&[b'w'; 64][..]));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Fold version GC off (core default): every superseded version survives
+    /// a parked fold (F20 keep-history).
+    #[test]
+    fn fold_without_gc_keeps_every_version() {
+        let dir = temp_dir();
+        let db = open_sync(&dir);
+        db.set_defer_auto_compact(true);
+        for round in 0..2u64 {
+            for i in 0..50u64 {
+                db.put(b"hot", format!("r{round}i{i}").into_bytes()).unwrap();
+            }
+            assert!(db.with_write(|d| d.stage_flush_imm()).unwrap());
+            assert!(db.park_imm_once());
+        }
+        assert_eq!(db.parked_unflushed_count(), 2);
+        assert!(db.fold_parked_once_off_lock());
+        // All 100 versions still readable at their snapshot seqs.
+        assert_eq!(db.with_read(|d| d.count_mem_versions(b"hot")), 100);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Fold version GC on (rust-rocksdb snapshot-list semantics): superseded
+    /// versions below the floor collapse, current reads stay exact, and the
+    /// read below the floor fails closed (SnapshotTooOld), never silent-wrong.
+    #[test]
+    fn fold_with_gc_collapses_below_floor() {
+        let dir = temp_dir();
+        let db = open_sync(&dir);
+        db.set_defer_auto_compact(true);
+        for round in 0..2u64 {
+            for i in 0..50u64 {
+                db.put(b"hot", format!("r{round}i{i}").into_bytes()).unwrap();
+            }
+            assert!(db.with_write(|d| d.stage_flush_imm()).unwrap());
+            assert!(db.park_imm_once());
+        }
+        db.set_fold_version_gc(true);
+        assert!(db.fold_parked_once_off_lock());
+        assert_eq!(
+            db.with_read(|d| d.count_mem_versions(b"hot")),
+            1,
+            "no pins/OCC: only the newest version survives"
+        );
+        assert_eq!(
+            db.get(b"hot").as_deref(),
+            Some(&b"r1i49"[..]),
+            "current read is exact after GC"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// A pin taken before the fold keeps every version it can read; the
+    /// watermark never passes an open pin.
+    #[test]
+    fn fold_with_gc_respects_open_pin() {
+        let dir = temp_dir();
+        let db = open_sync(&dir);
+        db.set_defer_auto_compact(true);
+        for i in 0..50u64 {
+            db.put(b"hot", format!("v{i}").into_bytes()).unwrap();
+        }
+        let pinned_seq = db.with_read(|d| d.visible_sequence());
+        let pin = db.inner.write().pin_snapshot();
+        for i in 50..100u64 {
+            db.put(b"hot", format!("v{i}").into_bytes()).unwrap();
+        }
+        for round in 0..2u64 {
+            for i in 0..50u64 {
+                db.put(
+                    b"filler",
+                    format!("f{round}i{i}").into_bytes(),
+                )
+                .unwrap();
+            }
+            assert!(db.with_write(|d| d.stage_flush_imm()).unwrap());
+            assert!(db.park_imm_once());
+        }
+        db.set_fold_version_gc(true);
+        assert!(db.fold_parked_once_off_lock());
+        // Version at (or below) the pin is the newest-≤-floor: kept.
+        let got = db
+            .get_at(crate::db::Snapshot::at(pinned_seq), b"hot")
+            .unwrap();
+        assert_eq!(got.as_deref(), Some(&b"v49"[..]), "pin read is exact");
+        drop(pin);
+        // With the pin gone the next fold can collapse under it.
+        assert!(db.fold_parked_once_off_lock() || db.parked_unflushed_count() < 2);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// An open OCC transaction holds the fold-GC floor: its snapshot reads
+    /// stay exact while it is live.
+    #[test]
+    fn fold_with_gc_respects_open_occ_transaction() {
+        let dir = temp_dir();
+        let db = open_sync(&dir);
+        db.set_defer_auto_compact(true);
+        for i in 0..50u64 {
+            db.put(b"hot", format!("v{i}").into_bytes()).unwrap();
+        }
+        let mut tx = db.begin_occ();
+        let tx_snapshot = tx.snapshot();
+        for i in 50..100u64 {
+            db.put(b"hot", format!("v{i}").into_bytes()).unwrap();
+        }
+        for round in 0..2u64 {
+            for i in 0..50u64 {
+                db.put(b"filler", format!("f{round}i{i}").into_bytes())
+                    .unwrap();
+            }
+            assert!(db.with_write(|d| d.stage_flush_imm()).unwrap());
+            assert!(db.park_imm_once());
+        }
+        db.set_fold_version_gc(true);
+        assert!(db.fold_parked_once_off_lock());
+        let got = tx.get(b"hot").unwrap();
+        assert_eq!(
+            got.as_deref(),
+            Some(&b"v49"[..]),
+            "OCC read at its snapshot is exact across a GC fold"
+        );
+        tx.abort();
         let _ = fs::remove_dir_all(&dir);
     }
 

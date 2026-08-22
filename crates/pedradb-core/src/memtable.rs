@@ -6,7 +6,7 @@
 //! the newest such entry wins (delete tombstone hides the key).
 
 use std::cmp::Ordering;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 use std::ops::Bound;
 use std::sync::{Arc, Mutex};
 
@@ -35,35 +35,79 @@ struct Version {
 /// One or more versions of a user key. The first put is inline so apply /
 /// YCSB / raftlog (almost all distinct keys) do not heap-allocate a `Vec`
 /// per key (RFC-0041 P1.1 write CPU).
+///
+/// `Many` holds versions newest-first and is a `VecDeque`: the common insert
+/// (a newer version) lands at index 0, which is O(1) front space on a
+/// deque — the `Vec` shape paid a full memmove per hot-key overwrite
+/// (one parked-fold core burned in `insert_map`, ycsb_a profile 2026-08-22).
 #[derive(Debug, Clone)]
 enum Versions {
     One(Version),
-    Many(Vec<Version>),
+    Many(std::collections::VecDeque<Version>),
+}
+
+/// Concrete per-version iterator (no `Box<dyn>` on the scan/count refill).
+enum VersIter<'a> {
+    One(Option<&'a Version>),
+    Many(std::collections::vec_deque::Iter<'a, Version>),
+}
+
+impl<'a> Iterator for VersIter<'a> {
+    type Item = &'a Version;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            Self::One(v) => v.take(),
+            Self::Many(it) => it.next(),
+        }
+    }
 }
 
 impl Versions {
-    fn as_slice(&self) -> &[Version] {
+    fn iter(&self) -> VersIter<'_> {
         match self {
-            Self::One(v) => std::slice::from_ref(v),
-            Self::Many(vs) => vs.as_slice(),
+            Self::One(v) => VersIter::One(Some(v)),
+            Self::Many(vs) => VersIter::Many(vs.iter()),
         }
     }
 
-    fn as_mut_slice(&mut self) -> &mut [Version] {
+    fn iter_mut(&mut self) -> VersIterMut<'_> {
         match self {
-            Self::One(v) => std::slice::from_mut(v),
-            Self::Many(vs) => vs.as_mut_slice(),
+            Self::One(v) => VersIterMut::One(Some(v)),
+            Self::Many(vs) => VersIterMut::Many(vs.iter_mut()),
         }
     }
+}
 
-    fn iter(&self) -> std::slice::Iter<'_, Version> {
-        self.as_slice().iter()
+/// Mutable counterpart of [`VersIter`] (value-log remap walks every version).
+enum VersIterMut<'a> {
+    One(Option<&'a mut Version>),
+    Many(std::collections::vec_deque::IterMut<'a, Version>),
+}
+
+impl<'a> Iterator for VersIterMut<'a> {
+    type Item = &'a mut Version;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            Self::One(v) => v.take(),
+            Self::Many(it) => it.next(),
+        }
     }
+}
+
+/// Counters for versions dropped by fold-GC (keeps `entries` /
+/// `approx_bytes` / `range_tombstones` exact).
+#[derive(Default)]
+struct Dropped {
+    versions: usize,
+    bytes: usize,
+    range_del: usize,
 }
 
 impl<'a> IntoIterator for &'a Versions {
     type Item = &'a Version;
-    type IntoIter = std::slice::Iter<'a, Version>;
+    type IntoIter = VersIter<'a>;
 
     fn into_iter(self) -> Self::IntoIter {
         self.iter()
@@ -74,7 +118,7 @@ impl<'a> IntoIterator for &'a Versions {
 /// Concrete so count/scan do not `Box<dyn Iterator>` on every refill.
 pub(crate) struct MemInternalRange<'a> {
     users: std::collections::btree_map::Range<'a, Bytes, Versions>,
-    cur: std::slice::Iter<'a, Version>,
+    cur: VersIter<'a>,
 }
 
 /// Merge of the sorted BTree with a **sorted tail** (O(tail log tail), not
@@ -272,6 +316,13 @@ impl MemTable {
 
     /// Fold [`Self::tail`] into the BTree (SST write / fold / tests).
     pub fn spill_tail(&mut self) {
+        self.spill_tail_with_gc(None);
+    }
+
+    /// [`Self::spill_tail`] with version GC: drops superseded versions below
+    /// `floor` (Rocks-style snapshot-list GC — rust-rocksdb `Snapshot` pins
+    /// are the reader contract). `None` keeps every version (core default).
+    pub fn spill_tail_with_gc(&mut self, floor: Option<SequenceNumber>) {
         self.invalidate_tail_ord();
         self.tail_idx.clear();
         self.tail_max_seq = 0;
@@ -284,14 +335,22 @@ impl MemTable {
             if is_rd {
                 self.range_tombstones = self.range_tombstones.saturating_sub(1);
             }
-            self.insert_map(v.key, v.value);
+            self.insert_map_gc(v.key, v.value, floor);
         }
     }
 
     /// Move every version from `other` into `self` (retired L0 fold).
-    pub fn absorb(&mut self, mut other: Self) {
-        self.spill_tail();
-        other.spill_tail();
+    pub fn absorb(&mut self, other: Self) {
+        self.absorb_with_floor(other, None);
+    }
+
+    /// [`Self::absorb`] with version GC under `floor` (see
+    /// [`Self::spill_tail_with_gc`]). The dropped set is exactly
+    /// `{seq ≤ floor} \ {newest ≤ floor}` — every read at or above the floor
+    /// still sees its exact version.
+    pub fn absorb_with_floor(&mut self, mut other: Self, floor: Option<SequenceNumber>) {
+        self.spill_tail_with_gc(floor);
+        other.spill_tail_with_gc(floor);
         if self.is_empty() {
             *self = other;
             return;
@@ -301,10 +360,15 @@ impl MemTable {
         }
         for (_, vers) in other.map {
             match vers {
-                Versions::One(v) => self.insert_map(v.key, v.value),
+                Versions::One(v) => self.insert_map_gc(v.key, v.value, floor),
+                // Oldest-first: every incoming version is newer than the
+                // versions already merged for its key, so the binary search
+                // lands at index 0 — O(1) deque front inserts. Newest-first
+                // would land at a growing index and shift O(k) per insert
+                // (the quadratic the 2026-08-22 ycsb_a profile caught).
                 Versions::Many(vs) => {
-                    for v in vs {
-                        self.insert_map(v.key, v.value);
+                    for v in vs.into_iter().rev() {
+                        self.insert_map_gc(v.key, v.value, floor);
                     }
                 }
             }
@@ -377,7 +441,9 @@ impl MemTable {
         }
     }
 
-    fn insert_map(&mut self, key: InternalKey, value: Bytes) {
+    /// `insert_map` with optional version-GC floor (see
+    /// [`Self::spill_tail_with_gc`]).
+    fn insert_map_gc(&mut self, key: InternalKey, value: Bytes, floor: Option<SequenceNumber>) {
         let entry_bytes = key.user_key.len() + value.len() + 8;
         let is_rd = key.kind == ValueType::RangeDeletion;
         match self.map.entry(key.user_key.clone()) {
@@ -390,12 +456,24 @@ impl MemTable {
                 }
             }
             std::collections::btree_map::Entry::Occupied(mut e) => {
-                if Self::insert_into(e.get_mut(), key, value, entry_bytes, &mut self.approx_bytes) {
+                let mut dropped = Dropped::default();
+                if Self::insert_into(
+                    e.get_mut(),
+                    key,
+                    value,
+                    entry_bytes,
+                    &mut self.approx_bytes,
+                    floor,
+                    &mut dropped,
+                ) {
                     self.entries = self.entries.saturating_add(1);
                     if is_rd {
                         self.range_tombstones = self.range_tombstones.saturating_add(1);
                     }
                 }
+                self.entries = self.entries.saturating_sub(dropped.versions);
+                self.approx_bytes = self.approx_bytes.saturating_sub(dropped.bytes);
+                self.range_tombstones = self.range_tombstones.saturating_sub(dropped.range_del);
             }
         }
     }
@@ -407,6 +485,8 @@ impl MemTable {
         value: Bytes,
         entry_bytes: usize,
         approx_bytes: &mut usize,
+        floor: Option<SequenceNumber>,
+        dropped: &mut Dropped,
     ) -> bool {
         match vers {
             Versions::One(existing) => {
@@ -417,42 +497,125 @@ impl MemTable {
                         .saturating_add(existing.value.len());
                     return false;
                 }
-                let older_first = ver_cmp(
+                let existing_newer = ver_cmp(
                     existing.key.sequence,
                     existing.key.kind,
                     key.sequence,
                     key.kind,
                 ) == Ordering::Less;
-                let Versions::One(old) = std::mem::replace(vers, Versions::Many(Vec::new())) else {
+                let Versions::One(old) = std::mem::replace(vers, Versions::Many(VecDeque::new()))
+                else {
                     unreachable!("just matched One");
                 };
-                let newer = Version { key, value };
-                *vers = Versions::Many(if older_first {
-                    vec![old, newer]
+                let mut list = VecDeque::new();
+                if existing_newer {
+                    list.push_back(old);
+                    list.push_back(Version { key, value });
                 } else {
-                    vec![newer, old]
-                });
+                    list.push_back(Version { key, value });
+                    list.push_back(old);
+                }
                 *approx_bytes = approx_bytes.saturating_add(entry_bytes);
+                if let Some(f) = floor {
+                    Self::gc_below_floor(&mut list, f, dropped);
+                }
+                *vers = if list.is_empty() {
+                    // Both versions fell below the floor — impossible (the
+                    // inserted version is kept), but keep the shape honest.
+                    Versions::Many(VecDeque::new())
+                } else if list.len() == 1 {
+                    let mut it = list.into_iter();
+                    Versions::One(it.next().expect("len checked"))
+                } else {
+                    Versions::Many(list)
+                };
                 true
             }
-            Versions::Many(list) => {
-                let pos = list.partition_point(|v| {
-                    ver_cmp(v.key.sequence, v.key.kind, key.sequence, key.kind) == Ordering::Less
-                });
-                if pos < list.len()
-                    && list[pos].key.sequence == key.sequence
-                    && list[pos].key.kind == key.kind
+            Versions::Many(slot) => {
+                // Take the deque out so `vers` can be reassigned at the end
+                // (a GC'd or replaced pair collapses back to `One`).
+                let mut list = std::mem::take(slot);
+                let mut added = true;
+                // Newest-first list: the incoming version is newer than the
+                // front (the common overwrite) → insert at 0, O(1) on a deque.
+                let newer = |list: &VecDeque<Version>, i: usize| {
+                    ver_cmp(
+                        list[i].key.sequence,
+                        list[i].key.kind,
+                        key.sequence,
+                        key.kind,
+                    ) == Ordering::Less
+                };
+                let (mut lo, mut hi) = (0usize, list.len());
+                while lo < hi {
+                    let mid = lo + (hi - lo) / 2;
+                    if newer(&list, mid) {
+                        lo = mid + 1;
+                    } else {
+                        hi = mid;
+                    }
+                }
+                if lo < list.len()
+                    && list[lo].key.sequence == key.sequence
+                    && list[lo].key.kind == key.kind
                 {
-                    let old = std::mem::replace(&mut list[pos].value, value);
+                    let old = std::mem::replace(&mut list[lo].value, value);
                     *approx_bytes = approx_bytes
                         .saturating_sub(old.len())
-                        .saturating_add(list[pos].value.len());
-                    return false;
+                        .saturating_add(list[lo].value.len());
+                    added = false;
+                } else {
+                    list.insert(lo, Version { key, value });
+                    *approx_bytes = approx_bytes.saturating_add(entry_bytes);
                 }
-                list.insert(pos, Version { key, value });
-                *approx_bytes = approx_bytes.saturating_add(entry_bytes);
-                true
+                if let Some(f) = floor {
+                    Self::gc_below_floor(&mut list, f, dropped);
+                }
+                *vers = if list.len() == 1 {
+                    let mut it = list.into_iter();
+                    Versions::One(it.next().expect("len checked"))
+                } else {
+                    Versions::Many(list)
+                };
+                added
             }
+        }
+    }
+
+    /// Keep `{seq > floor} ∪ {newest ≤ floor}` (plus same-seq siblings) in a
+    /// newest-first version list, counting what was dropped. Reads at any
+    /// sequence ≥ floor still resolve exactly; reads below fail closed via
+    /// the caller's watermark ratchet (never silent-wrong).
+    fn gc_below_floor(
+        list: &mut VecDeque<Version>,
+        floor: SequenceNumber,
+        dropped: &mut Dropped,
+    ) {
+        // First index with sequence ≤ floor ([0, idx) all newer than floor).
+        let (mut lo, mut hi) = (0usize, list.len());
+        while lo < hi {
+            let mid = lo + (hi - lo) / 2;
+            if list[mid].key.sequence > floor {
+                lo = mid + 1;
+            } else {
+                hi = mid;
+            }
+        }
+        if lo == list.len() {
+            return; // every version is newer than the floor
+        }
+        // Keep the whole same-sequence group at the boundary (kind ordering).
+        let mut keep = lo;
+        while keep + 1 < list.len() && list[keep + 1].key.sequence == list[lo].key.sequence {
+            keep += 1;
+        }
+        if keep + 1 >= list.len() {
+            return;
+        }
+        for v in list.drain(keep + 1..) {
+            dropped.versions += 1;
+            dropped.bytes += v.key.user_key.len() + v.value.len() + 8;
+            dropped.range_del += usize::from(v.key.kind == ValueType::RangeDeletion);
         }
     }
 
@@ -719,7 +882,7 @@ impl MemTable {
     ) -> MemInternalRange<'a> {
         MemInternalRange {
             users: self.map.range::<[u8], _>((start, end)),
-            cur: [].iter(),
+            cur: VersIter::One(None),
         }
     }
 
@@ -772,7 +935,7 @@ impl MemTable {
     {
         self.approx_bytes = 0;
         for (uk, vers) in &mut self.map {
-            for v in vers.as_mut_slice() {
+            for v in vers.iter_mut() {
                 v.value = f(&v.value);
                 self.approx_bytes = self
                     .approx_bytes
@@ -1047,6 +1210,101 @@ mod tests {
         assert_eq!(mt.get_entry(b"user/1", 10).map(|(s, _)| s), Some(3));
         assert_eq!(mt.get_entry(b"user/1", 2).map(|(s, _)| s), Some(1));
         assert!(mt.get_entry(b"nope", 10).is_none());
+    }
+
+    #[test]
+    fn gc_floor_keeps_exact_reads_at_or_above() {
+        let mut mt = MemTable::new();
+        for seq in 1..=8 {
+            mt.put(b"hot".as_slice(), seq, format!("v{seq}"));
+        }
+        mt.spill_tail_with_gc(Some(5));
+        // Keep-set: {seq > 5} ∪ {newest ≤ 5} = {6, 7, 8, 5}
+        assert_eq!(mt.len(), 4);
+        for (seq, want) in [
+            (5u64, "v5"),
+            (6, "v6"),
+            (7, "v7"),
+            (8, "v8"),
+            (100, "v8"),
+        ] {
+            assert_eq!(
+                mt.get(b"hot", seq),
+                Lookup::Found(Bytes::from_static(want.as_bytes())),
+                "read at {seq}"
+            );
+        }
+        assert_eq!(mt.approx_memory_usage() > 0, true);
+    }
+
+    #[test]
+    fn gc_floor_none_keeps_everything() {
+        let mut mt = MemTable::new();
+        for seq in 1..=8 {
+            mt.put(b"hot".as_slice(), seq, format!("v{seq}"));
+        }
+        mt.spill_tail_with_gc(None);
+        assert_eq!(mt.len(), 8);
+        assert_eq!(mt.get(b"hot", 1), Lookup::Found(Bytes::from_static(b"v1")));
+    }
+
+    #[test]
+    fn gc_collapses_pair_back_to_one() {
+        let mut mt = MemTable::new();
+        mt.put(b"k".as_slice(), 1, b"old".as_slice());
+        mt.spill_tail();
+        mt.put(b"k".as_slice(), 2, b"new".as_slice());
+        mt.spill_tail_with_gc(Some(2));
+        // newest-≤-2 = v2; v1 dropped → back to Versions::One
+        assert!(matches!(mt.map.get(b"k".as_slice()), Some(Versions::One(_))));
+        assert_eq!(mt.len(), 1);
+        assert_eq!(mt.get(b"k", 2), Lookup::Found(Bytes::from_static(b"new")));
+    }
+
+    #[test]
+    fn absorb_with_floor_merges_and_gcs() {
+        let mut a = MemTable::new();
+        for seq in 1..=4 {
+            a.put(b"k".as_slice(), seq, format!("a{seq}"));
+        }
+        a.spill_tail();
+        let mut b = MemTable::new();
+        for seq in 5..=9 {
+            b.put(b"k".as_slice(), seq, format!("b{seq}"));
+        }
+        b.spill_tail();
+        let a_len = a.len();
+        a.absorb_with_floor(b, Some(7));
+        // keep {> 7} ∪ {newest ≤ 7} = {8, 9, 7}
+        assert_eq!(a.len(), 3, "had {a_len}");
+        assert_eq!(a.get(b"k", 7), Lookup::Found(Bytes::from_static(b"b7")));
+        assert_eq!(a.get(b"k", 9), Lookup::Found(Bytes::from_static(b"b9")));
+        assert_eq!(a.get(b"k", 100), Lookup::Found(Bytes::from_static(b"b9")));
+    }
+
+    #[test]
+    fn hot_key_overwrite_fold_is_not_quadratic() {
+        // Pre-fix shape: newest-first Vec insert landed at index 0 → one
+        // memmove per version (one full core of `insert_map` memmove in the
+        // 2026-08-22 ycsb_a profile). 40k versions on one key must fold fast.
+        let mut a = MemTable::new();
+        for seq in 1..=20_000u64 {
+            a.put(b"hot".as_slice(), seq, b"x".as_slice());
+        }
+        let mut b = MemTable::new();
+        for seq in 20_001..=40_000u64 {
+            b.put(b"hot".as_slice(), seq, b"x".as_slice());
+        }
+        let t0 = std::time::Instant::now();
+        use std::time::Duration;
+        a.absorb(b);
+        let el = t0.elapsed();
+        assert_eq!(a.len(), 40_000);
+        assert_eq!(a.get(b"hot", 40_000), Lookup::Found(Bytes::from_static(b"x")));
+        assert!(
+            el < Duration::from_millis(250),
+            "absorb of 40k hot-key versions took {el:?} — front-insert regressed"
+        );
     }
 
     #[test]

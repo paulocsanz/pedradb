@@ -1,0 +1,731 @@
+Analysis of sampling rocks-parity-bench (pid 38239) every 1 millisecond
+Process:         rocks-parity-bench [38239]
+Path:            /private/tmp/*/rocks-parity-bench
+Load Address:    0x100ff8000
+Identifier:      rocks-parity-bench
+Version:         0
+Code Type:       ARM64
+Platform:        macOS
+Parent Process:  zsh [38235]
+
+Date/Time:       2026-08-22 11:22:34.317 -0300
+Launch Time:     2026-08-22 11:21:39.277 -0300
+OS Version:      macOS 14.6.1 (23G93)
+Report Version:  7
+Analysis Tool:   /usr/bin/sample
+
+Physical footprint:         10.1G
+Physical footprint (peak):  13.2G
+Idle exit:                  untracked
+----
+
+Call graph:
+    6588 Thread_46003971   DispatchQueue_1: com.apple.main-thread  (serial)
+    + 6552 start  (in dyld) + 2476  [0x199c67154]
+    + ! 6552 main  (in rocks-parity-bench) + 52  [0x10106654c]
+    + !   6552 _RNvNtCsa9BKTri5B3M_3std2rt19lang_start_internal  (in rocks-parity-bench) + 952  [0x101115c44]  rt.rs:171
+    + !     6552 _RNCINvNtCsa9BKTri5B3M_3std2rt10lang_startuE0CsfgYT6aPkLat_18rocks_parity_bench  (in rocks-parity-bench) + 16  [0x10106204c]  rt.rs:206
+    + !       6552 _RINvNtNtCsa9BKTri5B3M_3std3sys9backtrace28___rust_begin_short_backtraceFEuuECsfgYT6aPkLat_18rocks_parity_bench  (in rocks-parity-bench) + 12  [0x10105e174]  backtrace.rs:166
+    + !         6552 _RNvCsfgYT6aPkLat_18rocks_parity_bench4main  (in rocks-parity-bench) + 2236  [0x101064594]  rocks_parity_bench.rs:97
+    + !           6552 _RINvCsfgYT6aPkLat_18rocks_parity_bench18run_and_report_occNtNtCsjhBRx3bsdFE_20rocksdb_parity_bench7engines12CompatEngineEB2_  (in rocks-parity-bench) + 728  [0x101040738]  rocks_parity_bench.rs:228
+    + !             2715 _RINvMs_CsjhBRx3bsdFE_20rocksdb_parity_benchNtB5_10YcsbRunner3runNtNtB5_7engines12CompatEngineECsfgYT6aPkLat_18rocks_parity_bench  (in rocks-parity-bench) + 548  [0x101054b38]  lib.rs:1859
+    + !             : 887 _RNvXs_NtCsjhBRx3bsdFE_20rocksdb_parity_bench7enginesNtB4_12CompatEngineNtB6_6Engine9get_probe  (in rocks-parity-bench) + 240  [0x1010eed14]  engines.rs:100
+    + !             : | 565 _RNvMs0_NtCs9rGgPUxlRPa_12pedradb_core10concurrentNtB5_12ConcurrentDb3getCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 60  [0x1010c8b18]
+    + !             : | + 387 _RNvMs2_NtCs9rGgPUxlRPa_12pedradb_core5cacheINtB5_11AnswerCacheINtNtCsgtPOCBgevO_4core6option6OptionNtNtCser8HrCHQmCi_5bytes5bytes5BytesEE3getCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 300  [0x1010ca440]
+    + !             : | + ! 339 _platform_memcmp  (in libsystem_platform.dylib) + 272,260,...  [0x19a01fe60,0x19a01fe54,...]
+    + !             : | + ! 48 DYLD-STUB$$memcmp  (in rocks-parity-bench) + 4,0  [0x101131eec,0x101131ee8]
+    + !             : | + 168 _RNvMs2_NtCs9rGgPUxlRPa_12pedradb_core5cacheINtB5_11AnswerCacheINtNtCsgtPOCBgevO_4core6option6OptionNtNtCser8HrCHQmCi_5bytes5bytes5BytesEE3getCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 344,540,...  [0x1010ca46c,0x1010ca530,...]
+    + !             : | + 10 _RNvMs2_NtCs9rGgPUxlRPa_12pedradb_core5cacheINtB5_11AnswerCacheINtNtCsgtPOCBgevO_4core6option6OptionNtNtCser8HrCHQmCi_5bytes5bytes5BytesEE3getCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 440  [0x1010ca4cc]
+    + !             : | +   10 _RNvNtCser8HrCHQmCi_5bytes5bytes12shared_clone  (in rocks-parity-bench) + 16,0,...  [0x100ffd1cc,0x100ffd1bc,...]
+    + !             : | 296 _RNvMs0_NtCs9rGgPUxlRPa_12pedradb_core10concurrentNtB5_12ConcurrentDb3getCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 168  [0x1010c8b84]
+    + !             : | + 170 _RNvMsb_NtCs9rGgPUxlRPa_12pedradb_core2dbNtB5_2Db3getCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 108  [0x1010df29c]
+    + !             : | + ! 144 _RNvMsb_NtCs9rGgPUxlRPa_12pedradb_core2dbNtB5_2Db6get_atCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 668  [0x1010df858]  db.rs:2167
+    + !             : | + ! : 129 _RNvMsb_NtCs9rGgPUxlRPa_12pedradb_core2dbNtB5_2Db6lookupCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 456  [0x1010e1f64]  db.rs:5745
+    + !             : | + ! : | 91 _RNvMs5_NtCs9rGgPUxlRPa_12pedradb_core8memtableNtB5_8MemTable9get_entry  (in rocks-parity-bench) + 116  [0x101023ec4]  memtable.rs:493
+    + !             : | + ! : | + 82 _platform_memcmp  (in libsystem_platform.dylib) + 272,280,...  [0x19a01fe60,0x19a01fe68,...]
+    + !             : | + ! : | + 9 DYLD-STUB$$memcmp  (in rocks-parity-bench) + 4  [0x101131eec]
+    + !             : | + ! : | 27 _RNvMs5_NtCs9rGgPUxlRPa_12pedradb_core8memtableNtB5_8MemTable9get_entry  (in rocks-parity-bench) + 144,88,...  [0x101023ee0,0x101023ea8,...]  memtable.rs:493
+    + !             : | + ! : | 4 _RNvMs5_NtCs9rGgPUxlRPa_12pedradb_core8memtableNtB5_8MemTable9get_entry  (in rocks-parity-bench) + 1344  [0x101024390]  memtable.rs:518
+    + !             : | + ! : | + 4 _RNvNtCser8HrCHQmCi_5bytes5bytes12shared_clone  (in rocks-parity-bench) + 0,16,...  [0x100ffd1bc,0x100ffd1cc,...]
+    + !             : | + ! : | 3 _RNvMs5_NtCs9rGgPUxlRPa_12pedradb_core8memtableNtB5_8MemTable9get_entry  (in rocks-parity-bench) + 408  [0x101023fe8]  memtable.rs:496
+    + !             : | + ! : | 2 _RNvMs5_NtCs9rGgPUxlRPa_12pedradb_core8memtableNtB5_8MemTable9get_entry  (in rocks-parity-bench) + 1320,1328  [0x101024378,0x101024380]  memtable.rs:518
+    + !             : | + ! : | 1 _RNvMs5_NtCs9rGgPUxlRPa_12pedradb_core8memtableNtB5_8MemTable9get_entry  (in rocks-parity-bench) + 24  [0x101023e68]  memtable.rs:488
+    + !             : | + ! : | 1 _RNvMs5_NtCs9rGgPUxlRPa_12pedradb_core8memtableNtB5_8MemTable9get_entry  (in rocks-parity-bench) + 740  [0x101024134]  memtable.rs:512
+    + !             : | + ! : 4 _RNvMsb_NtCs9rGgPUxlRPa_12pedradb_core2dbNtB5_2Db6lookupCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 424  [0x1010e1f44]  db.rs:5745
+    + !             : | + ! : 2 _RINvNtCsgtPOCBgevO_4core3ptr9drop_glueSNtNtCs9rGgPUxlRPa_12pedradb_core5merge14RangeTombstoneECsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 88  [0x1010b8f90]  mod.rs:825
+    + !             : | + ! : 2 _RNvMs5_NtCs9rGgPUxlRPa_12pedradb_core8memtableNtB5_8MemTable24collect_range_tombstones  (in rocks-parity-bench) + 764  [0x101022c28]  memtable.rs:578
+    + !             : | + ! : 2 _RNvMsb_NtCs9rGgPUxlRPa_12pedradb_core2dbNtB5_2Db6lookupCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 128  [0x1010e1e1c]  db.rs:5744
+    + !             : | + ! : 2 _RNvMsb_NtCs9rGgPUxlRPa_12pedradb_core2dbNtB5_2Db6lookupCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 516,560  [0x1010e1fa0,0x1010e1fcc]  db.rs:5797
+    + !             : | + ! : 1 _RNvMs5_NtCs9rGgPUxlRPa_12pedradb_core8memtableNtB5_8MemTable9get_entry  (in rocks-parity-bench) + 1388  [0x1010243bc]  memtable.rs:524
+    + !             : | + ! : 1 _RNvMsb_NtCs9rGgPUxlRPa_12pedradb_core2dbNtB5_2Db6lookupCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 436  [0x1010e1f50]  db.rs:5745
+    + !             : | + ! : | 1 _RNvMs5_NtCs9rGgPUxlRPa_12pedradb_core8memtableNtB5_8MemTable24collect_range_tombstones  (in rocks-parity-bench) + 744  [0x101022c14]  memtable.rs:578
+    + !             : | + ! : 1 _RNvMsb_NtCs9rGgPUxlRPa_12pedradb_core2dbNtB5_2Db6lookupCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 560  [0x1010e1fcc]  db.rs:5797
+    + !             : | + ! :   1 _RINvNtCsgtPOCBgevO_4core3ptr9drop_glueSNtNtCs9rGgPUxlRPa_12pedradb_core5merge14RangeTombstoneECsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 4  [0x1010b8f3c]  mod.rs:825
+    + !             : | + ! 10 _RNvMsb_NtCs9rGgPUxlRPa_12pedradb_core2dbNtB5_2Db6get_atCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 336  [0x1010df70c]  db.rs:2161
+    + !             : | + ! : 10 _RNvMs2_NtCs9rGgPUxlRPa_12pedradb_core5cacheINtB5_11AnswerCacheINtNtCsgtPOCBgevO_4core6option6OptionNtNtCser8HrCHQmCi_5bytes5bytes5BytesEE3getCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 108,460,...  [0x1010ca380,0x1010ca4e0,...]
+    + !             : | + ! 7 _RNvMsb_NtCs9rGgPUxlRPa_12pedradb_core2dbNtB5_2Db6get_atCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 832  [0x1010df8fc]  db.rs:2175
+    + !             : | + ! : 3 _RNvMsb_NtCs9rGgPUxlRPa_12pedradb_core2dbNtB5_2Db20resolve_stored_valueCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 32,36  [0x1010d8fbc,0x1010d8fc0]  db.rs:2417
+    + !             : | + ! : 2 _RNvMsb_NtCs9rGgPUxlRPa_12pedradb_core2dbNtB5_2Db20resolve_stored_valueCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 0,4  [0x1010d8f9c,0x1010d8fa0]  db.rs:2416
+    + !             : | + ! : 2 _RNvMsb_NtCs9rGgPUxlRPa_12pedradb_core2dbNtB5_2Db20resolve_stored_valueCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 276,288  [0x1010d90b0,0x1010d90bc]  db.rs:2418
+    + !             : | + ! 2 _RNvMsb_NtCs9rGgPUxlRPa_12pedradb_core2dbNtB5_2Db6get_atCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 32  [0x1010df5dc]  db.rs:2136
+    + !             : | + ! 2 _RNvMsb_NtCs9rGgPUxlRPa_12pedradb_core2dbNtB5_2Db6get_atCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 644,668  [0x1010df840,0x1010df858]  db.rs:2167
+    + !             : | + ! 1 _RNvMs2_NtCs9rGgPUxlRPa_12pedradb_core5cacheINtB5_11AnswerCacheINtNtCsgtPOCBgevO_4core6option6OptionNtNtCser8HrCHQmCi_5bytes5bytes5BytesEE3getCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 648  [0x1010ca59c]
+    + !             : | + ! 1 _RNvMsb_NtCs9rGgPUxlRPa_12pedradb_core2dbNtB5_2Db20resolve_stored_valueCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 304  [0x1010d90cc]  db.rs:2427
+    + !             : | + ! 1 _RNvMsb_NtCs9rGgPUxlRPa_12pedradb_core2dbNtB5_2Db6get_atCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 296  [0x1010df6e4]  db.rs:2160
+    + !             : | + ! 1 _RNvMsb_NtCs9rGgPUxlRPa_12pedradb_core2dbNtB5_2Db6get_atCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 684  [0x1010df868]  db.rs:2168
+    + !             : | + ! 1 _RNvMsb_NtCs9rGgPUxlRPa_12pedradb_core2dbNtB5_2Db6get_atCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 848  [0x1010df90c]  db.rs:2175
+    + !             : | + 111 _RNvMsb_NtCs9rGgPUxlRPa_12pedradb_core2dbNtB5_2Db3getCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 252  [0x1010df32c]
+    + !             : | + ! 47 _RNvMs2_NtCs9rGgPUxlRPa_12pedradb_core5cacheINtB5_11AnswerCacheINtNtCsgtPOCBgevO_4core6option6OptionNtNtCser8HrCHQmCi_5bytes5bytes5BytesEE6insertCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 740  [0x1010cab68]  cache.rs:397
+    + !             : | + ! : 21 _RNvMs2_NtCs9rGgPUxlRPa_12pedradb_core5cacheINtB5_11AnswerCacheINtNtCsgtPOCBgevO_4core6option6OptionNtNtCser8HrCHQmCi_5bytes5bytes5BytesEE6insertCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 620  [0x1010caaf0]  cache.rs:396
+    + !             : | + ! : | 11 _malloc_zone_malloc  (in libsystem_malloc.dylib) + 52,12,...  [0x199e2b950,0x199e2b928,...]
+    + !             : | + ! : | 10 nanov2_malloc  (in libsystem_malloc.dylib) + 68,24,...  [0x199e01c64,0x199e01c38,...]
+    + !             : | + ! : 18 _RNvNtCser8HrCHQmCi_5bytes5bytes17shallow_clone_vec  (in rocks-parity-bench) + 52  [0x101124d84]  bytes.rs:1486
+    + !             : | + ! : | 7 nanov2_malloc  (in libsystem_malloc.dylib) + 40,0,...  [0x199e01c48,0x199e01c20,...]
+    + !             : | + ! : | 6 _malloc_zone_malloc  (in libsystem_malloc.dylib) + 84,96,...  [0x199e2b970,0x199e2b97c,...]
+    + !             : | + ! : | 3 nanov2_allocate_outlined  (in libsystem_malloc.dylib) + 252  [0x199e23474]
+    + !             : | + ! : | + 3 nanov2_find_block_and_allocate  (in libsystem_malloc.dylib) + 392,612  [0x199e01fa8,0x199e02084]
+    + !             : | + ! : | 1 _RNvMs2_NtCs9rGgPUxlRPa_12pedradb_core5cacheINtB5_11AnswerCacheINtNtCsgtPOCBgevO_4core6option6OptionNtNtCser8HrCHQmCi_5bytes5bytes5BytesEE6insertCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 740  [0x1010cab68]  cache.rs:397
+    + !             : | + ! : | + 1 _RNvNtCser8HrCHQmCi_5bytes5bytes17shallow_clone_vec  (in rocks-parity-bench) + 12  [0x101124d5c]  bytes.rs:1468
+    + !             : | + ! : | 1 nanov2_allocate_outlined  (in libsystem_malloc.dylib) + 316  [0x199e234b4]
+    + !             : | + ! : 4 _RNvMs2_NtCs9rGgPUxlRPa_12pedradb_core5cacheINtB5_11AnswerCacheINtNtCsgtPOCBgevO_4core6option6OptionNtNtCser8HrCHQmCi_5bytes5bytes5BytesEE6insertCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 640  [0x1010cab04]  cache.rs:396
+    + !             : | + ! : | 4 _platform_memmove  (in libsystem_platform.dylib) + 12,428,...  [0x19a0221ac,0x19a02234c,...]
+    + !             : | + ! : 1 _RNvMs2_NtCs9rGgPUxlRPa_12pedradb_core5cacheINtB5_11AnswerCacheINtNtCsgtPOCBgevO_4core6option6OptionNtNtCser8HrCHQmCi_5bytes5bytes5BytesEE6insertCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 740  [0x1010cab68]  cache.rs:397
+    + !             : | + ! : | 1 _RNvNtCser8HrCHQmCi_5bytes5bytes21promotable_even_clone  (in rocks-parity-bench) + 8  [0x100ffd914]  bytes.rs:1185
+    + !             : | + ! : 1 _RNvNtCser8HrCHQmCi_5bytes5bytes17shallow_clone_vec  (in rocks-parity-bench) + 40  [0x101124d78]  bytes.rs:1468
+    + !             : | + ! : 1 _RNvNtCser8HrCHQmCi_5bytes5bytes17shallow_clone_vec  (in rocks-parity-bench) + 52  [0x101124d84]  bytes.rs:1486
+    + !             : | + ! : 1 _RNvNtCser8HrCHQmCi_5bytes5bytes17shallow_clone_vec  (in rocks-parity-bench) + 84  [0x101124da4]  bytes.rs:1515
+    + !             : | + ! 14 _RNvMs2_NtCs9rGgPUxlRPa_12pedradb_core5cacheINtB5_11AnswerCacheINtNtCsgtPOCBgevO_4core6option6OptionNtNtCser8HrCHQmCi_5bytes5bytes5BytesEE6insertCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 620  [0x1010caaf0]  cache.rs:396
+    + !             : | + ! : 10 nanov2_allocate_outlined  (in libsystem_malloc.dylib) + 252  [0x199e23474]
+    + !             : | + ! : | 10 nanov2_find_block_and_allocate  (in libsystem_malloc.dylib) + 392,572,...  [0x199e01fa8,0x199e0205c,...]
+    + !             : | + ! : 4 nanov2_allocate_outlined  (in libsystem_malloc.dylib) + 316  [0x199e234b4]
+    + !             : | + ! 14 _RNvMs2_NtCs9rGgPUxlRPa_12pedradb_core5cacheINtB5_11AnswerCacheINtNtCsgtPOCBgevO_4core6option6OptionNtNtCser8HrCHQmCi_5bytes5bytes5BytesEE6insertCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 832,740,...  [0x1010cabc4,0x1010cab68,...]  cache.rs:397
+    + !             : | + ! 14 _RNvMs2_NtCs9rGgPUxlRPa_12pedradb_core5cacheINtB5_11AnswerCacheINtNtCsgtPOCBgevO_4core6option6OptionNtNtCser8HrCHQmCi_5bytes5bytes5BytesEE6insertCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 840,1184,...  [0x1010cabcc,0x1010cad24,...]  cache.rs:398
+    + !             : | + ! 12 _RNvMs2_NtCs9rGgPUxlRPa_12pedradb_core5cacheINtB5_11AnswerCacheINtNtCsgtPOCBgevO_4core6option6OptionNtNtCser8HrCHQmCi_5bytes5bytes5BytesEE6insertCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 332,156,...  [0x1010ca9d0,0x1010ca920,...]  cache.rs:377
+    + !             : | + ! 5 _RNvMs2_NtCs9rGgPUxlRPa_12pedradb_core5cacheINtB5_11AnswerCacheINtNtCsgtPOCBgevO_4core6option6OptionNtNtCser8HrCHQmCi_5bytes5bytes5BytesEE6insertCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 64,60  [0x1010ca8c4,0x1010ca8c0]  cache.rs:372
+    + !             : | + ! 2 _RNvMs2_NtCs9rGgPUxlRPa_12pedradb_core5cacheINtB5_11AnswerCacheINtNtCsgtPOCBgevO_4core6option6OptionNtNtCser8HrCHQmCi_5bytes5bytes5BytesEE6insertCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 1504  [0x1010cae64]  cache.rs:399
+    + !             : | + ! 1 _RNvMs2_NtCs9rGgPUxlRPa_12pedradb_core5cacheINtB5_11AnswerCacheINtNtCsgtPOCBgevO_4core6option6OptionNtNtCser8HrCHQmCi_5bytes5bytes5BytesEE6insertCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 24  [0x1010ca89c]  cache.rs:371
+    + !             : | + ! 1 _RNvMs2_NtCs9rGgPUxlRPa_12pedradb_core5cacheINtB5_11AnswerCacheINtNtCsgtPOCBgevO_4core6option6OptionNtNtCser8HrCHQmCi_5bytes5bytes5BytesEE6insertCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 584  [0x1010caacc]  cache.rs:382
+    + !             : | + ! 1 _RNvMs2_NtCs9rGgPUxlRPa_12pedradb_core5cacheINtB5_11AnswerCacheINtNtCsgtPOCBgevO_4core6option6OptionNtNtCser8HrCHQmCi_5bytes5bytes5BytesEE6insertCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 628  [0x1010caaf8]  cache.rs:396
+    + !             : | + 8 _RNvMsb_NtCs9rGgPUxlRPa_12pedradb_core2dbNtB5_2Db3getCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 56  [0x1010df268]
+    + !             : | + ! 8 _RNvMs2_NtCs9rGgPUxlRPa_12pedradb_core5cacheINtB5_11AnswerCacheINtNtCsgtPOCBgevO_4core6option6OptionNtNtCser8HrCHQmCi_5bytes5bytes5BytesEE3getCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 160,64,...  [0x1010ca3b4,0x1010ca354,...]
+    + !             : | + 3 _RNvMs2_NtCs9rGgPUxlRPa_12pedradb_core5cacheINtB5_11AnswerCacheINtNtCsgtPOCBgevO_4core6option6OptionNtNtCser8HrCHQmCi_5bytes5bytes5BytesEE6insertCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 1364  [0x1010cadd8]  cache.rs:399
+    + !             : | + 2 _RNvMs2_NtCs9rGgPUxlRPa_12pedradb_core5cacheINtB5_11AnswerCacheINtNtCsgtPOCBgevO_4core6option6OptionNtNtCser8HrCHQmCi_5bytes5bytes5BytesEE3getCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 648  [0x1010ca59c]
+    + !             : | + 2 _RNvMsb_NtCs9rGgPUxlRPa_12pedradb_core2dbNtB5_2Db6get_atCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 8516  [0x1010e1700]  db.rs:2179
+    + !             : | 14 _RNvMs2_NtCs9rGgPUxlRPa_12pedradb_core5cacheINtB5_11AnswerCacheINtNtCsgtPOCBgevO_4core6option6OptionNtNtCser8HrCHQmCi_5bytes5bytes5BytesEE3getCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 648,640  [0x1010ca59c,0x1010ca594]
+    + !             : | 12 _RNvMs0_NtCs9rGgPUxlRPa_12pedradb_core10concurrentNtB5_12ConcurrentDb3getCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 16,176,...  [0x1010c8aec,0x1010c8b8c,...]
+    + !             : 850 _RNvXs_NtCsjhBRx3bsdFE_20rocksdb_parity_bench7enginesNtB4_12CompatEngineNtB6_6Engine9get_probe  (in rocks-parity-bench) + 140  [0x1010eecb0]  engines.rs:100
+    + !             : | 394 _RNvMs9_CsiewQOjgBaKc_14rocksdb_compatNtB5_12LastGetTable7get_key  (in rocks-parity-bench) + 272,380,...  [0x10108f428,0x10108f494,...]  lib.rs:648
+    + !             : | 236 _RNvMs9_CsiewQOjgBaKc_14rocksdb_compatNtB5_12LastGetTable7get_key  (in rocks-parity-bench) + 344,452,...  [0x10108f470,0x10108f4dc,...]  lib.rs:644
+    + !             : | 96 _RNvMs9_CsiewQOjgBaKc_14rocksdb_compatNtB5_12LastGetTable7get_key  (in rocks-parity-bench) + 340  [0x10108f46c]  lib.rs:648
+    + !             : | + 93 _platform_memcmp  (in libsystem_platform.dylib) + 280,272,...  [0x19a01fe68,0x19a01fe60,...]
+    + !             : | + 3 DYLD-STUB$$memcmp  (in rocks-parity-bench) + 4  [0x101131eec]
+    + !             : | 33 _RNvMs9_CsiewQOjgBaKc_14rocksdb_compatNtB5_12LastGetTable7get_key  (in rocks-parity-bench) + 92  [0x10108f374]  lib.rs:642
+    + !             : | + 24 _platform_memmove  (in libsystem_platform.dylib) + 456,452,...  [0x19a022368,0x19a022364,...]
+    + !             : | + 9 DYLD-STUB$$memcpy  (in rocks-parity-bench) + 0  [0x101131ef4]
+    + !             : | 23 _RNvMs9_CsiewQOjgBaKc_14rocksdb_compatNtB5_12LastGetTable7get_key  (in rocks-parity-bench) + 368,476,...  [0x10108f488,0x10108f4f4,...]  lib.rs:645
+    + !             : | 17 _RNvMs9_CsiewQOjgBaKc_14rocksdb_compatNtB5_12LastGetTable7get_key  (in rocks-parity-bench) + 216,72  [0x10108f3f0,0x10108f360]  lib.rs:642
+    + !             : | 11 _RNvMs9_CsiewQOjgBaKc_14rocksdb_compatNtB5_12LastGetTable7get_key  (in rocks-parity-bench) + 0,4,...  [0x10108f318,0x10108f31c,...]  lib.rs:641
+    + !             : | 11 _RNvMs9_CsiewQOjgBaKc_14rocksdb_compatNtB5_12LastGetTable7get_key  (in rocks-parity-bench) + 1168,1108,...  [0x10108f7a8,0x10108f76c,...]  lib.rs:649
+    + !             : | 10 _RNvMs9_CsiewQOjgBaKc_14rocksdb_compatNtB5_12LastGetTable7get_key  (in rocks-parity-bench) + 448  [0x10108f4d8]  lib.rs:648
+    + !             : | + 10 _platform_memcmp  (in libsystem_platform.dylib) + 260,280,...  [0x19a01fe54,0x19a01fe68,...]
+    + !             : | 6 _RNvMs9_CsiewQOjgBaKc_14rocksdb_compatNtB5_12LastGetTable7get_key  (in rocks-parity-bench) + 792,248  [0x10108f630,0x10108f410]  lib.rs:0
+    + !             : | 5 _RNvMs9_CsiewQOjgBaKc_14rocksdb_compatNtB5_12LastGetTable7get_key  (in rocks-parity-bench) + 1136  [0x10108f788]  lib.rs:649
+    + !             : | + 5 _RNvNtCser8HrCHQmCi_5bytes5bytes12shared_clone  (in rocks-parity-bench) + 16,32  [0x100ffd1cc,0x100ffd1dc]
+    + !             : | 2 _RNvMs9_CsiewQOjgBaKc_14rocksdb_compatNtB5_12LastGetTable7get_key  (in rocks-parity-bench) + 1096  [0x10108f760]  lib.rs:648
+    + !             : | + 1 DYLD-STUB$$memcmp  (in rocks-parity-bench) + 4  [0x101131eec]
+    + !             : | + 1 _platform_memcmp  (in libsystem_platform.dylib) + 164  [0x19a01fdf4]
+    + !             : | 2 _RNvMs9_CsiewQOjgBaKc_14rocksdb_compatNtB5_12LastGetTable7get_key  (in rocks-parity-bench) + 1180  [0x10108f7b4]  lib.rs:653
+    + !             : | 1 _RNvMs9_CsiewQOjgBaKc_14rocksdb_compatNtB5_12LastGetTable7get_key  (in rocks-parity-bench) + 556  [0x10108f544]  lib.rs:648
+    + !             : | + 1 _platform_memcmp  (in libsystem_platform.dylib) + 272  [0x19a01fe60]
+    + !             : | 1 _RNvMs9_CsiewQOjgBaKc_14rocksdb_compatNtB5_12LastGetTable7get_key  (in rocks-parity-bench) + 664  [0x10108f5b0]  lib.rs:648
+    + !             : | + 1 _platform_memcmp  (in libsystem_platform.dylib) + 280  [0x19a01fe68]
+    + !             : | 1 _RNvMs9_CsiewQOjgBaKc_14rocksdb_compatNtB5_12LastGetTable7get_key  (in rocks-parity-bench) + 772  [0x10108f61c]  lib.rs:648
+    + !             : | + 1 _platform_memcmp  (in libsystem_platform.dylib) + 260  [0x19a01fe54]
+    + !             : | 1 _RNvMs9_CsiewQOjgBaKc_14rocksdb_compatNtB5_12LastGetTable7get_key  (in rocks-parity-bench) + 1100  [0x10108f764]  lib.rs:652
+    + !             : 750 _RNvXs_NtCsjhBRx3bsdFE_20rocksdb_parity_bench7enginesNtB4_12CompatEngineNtB6_6Engine9get_probe  (in rocks-parity-bench) + 632  [0x1010eee9c]  engines.rs:100
+    + !             : | 325 _RNvMs9_CsiewQOjgBaKc_14rocksdb_compatNtB5_12LastGetTable9store_key  (in rocks-parity-bench) + 1384  [0x10108fd5c]  lib.rs:673
+    + !             : | + 151 _RNvNtCser8HrCHQmCi_5bytes5bytes11shared_drop  (in rocks-parity-bench) + 24,28,...  [0x100ffd128,0x100ffd12c,...]
+    + !             : | + 79 _RNvMs9_CsiewQOjgBaKc_14rocksdb_compatNtB5_12LastGetTable9store_key  (in rocks-parity-bench) + 188  [0x10108f8b0]  lib.rs:659
+    + !             : | + ! 68 _platform_memmove  (in libsystem_platform.dylib) + 452,436,...  [0x19a022364,0x19a022354,...]
+    + !             : | + ! 11 DYLD-STUB$$memcpy  (in rocks-parity-bench) + 4  [0x101131ef8]
+    + !             : | + 73 _RNvMs9_CsiewQOjgBaKc_14rocksdb_compatNtB5_12LastGetTable9store_key  (in rocks-parity-bench) + 156  [0x10108f890]  lib.rs:656
+    + !             : | + ! 47 _platform_memmove  (in libsystem_platform.dylib) + 452,436,...  [0x19a022364,0x19a022354,...]
+    + !             : | + ! 26 DYLD-STUB$$memcpy  (in rocks-parity-bench) + 4  [0x101131ef8]
+    + !             : | + 13 _RNvMs9_CsiewQOjgBaKc_14rocksdb_compatNtB5_12LastGetTable9store_key  (in rocks-parity-bench) + 436  [0x10108f9a8]  lib.rs:664
+    + !             : | + ! 12 _platform_memcmp  (in libsystem_platform.dylib) + 164,260,...  [0x19a01fdf4,0x19a01fe54,...]
+    + !             : | + ! 1 DYLD-STUB$$memcmp  (in rocks-parity-bench) + 4  [0x101131eec]
+    + !             : | + 3 _RNvMs9_CsiewQOjgBaKc_14rocksdb_compatNtB5_12LastGetTable9store_key  (in rocks-parity-bench) + 544  [0x10108fa14]  lib.rs:664
+    + !             : | + ! 3 _platform_memcmp  (in libsystem_platform.dylib) + 260,272,...  [0x19a01fe54,0x19a01fe60,...]
+    + !             : | + 3 _RNvMs9_CsiewQOjgBaKc_14rocksdb_compatNtB5_12LastGetTable9store_key  (in rocks-parity-bench) + 1320  [0x10108fd1c]  lib.rs:664
+    + !             : | + ! 3 _platform_memcmp  (in libsystem_platform.dylib) + 164,272  [0x19a01fdf4,0x19a01fe60]
+    + !             : | + 3 _RNvMs9_CsiewQOjgBaKc_14rocksdb_compatNtB5_12LastGetTable9store_key  (in rocks-parity-bench) + 1384  [0x10108fd5c]  lib.rs:673
+    + !             : | +   3 _RNvNtCser8HrCHQmCi_5bytes5bytes11shared_drop  (in rocks-parity-bench) + 0  [0x100ffd110]
+    + !             : | 186 _RNvMs9_CsiewQOjgBaKc_14rocksdb_compatNtB5_12LastGetTable9store_key  (in rocks-parity-bench) + 1224,1096,...  [0x10108fcbc,0x10108fc3c,...]  lib.rs:663
+    + !             : | 72 _RNvMs9_CsiewQOjgBaKc_14rocksdb_compatNtB5_12LastGetTable9store_key  (in rocks-parity-bench) + 1240,1112,...  [0x10108fccc,0x10108fc4c,...]  lib.rs:664
+    + !             : | 40 _RNvMs9_CsiewQOjgBaKc_14rocksdb_compatNtB5_12LastGetTable9store_key  (in rocks-parity-bench) + 1376,1364,...  [0x10108fd54,0x10108fd48,...]  lib.rs:673
+    + !             : | 36 _RNvMs9_CsiewQOjgBaKc_14rocksdb_compatNtB5_12LastGetTable9store_key  (in rocks-parity-bench) + 324,160,...  [0x10108f938,0x10108f894,...]  lib.rs:659
+    + !             : | 33 _RNvMs9_CsiewQOjgBaKc_14rocksdb_compatNtB5_12LastGetTable9store_key  (in rocks-parity-bench) + 440,576,...  [0x10108f9ac,0x10108fa34,...]  lib.rs:662
+    + !             : | 21 _RNvMs9_CsiewQOjgBaKc_14rocksdb_compatNtB5_12LastGetTable9store_key  (in rocks-parity-bench) + 24,4,...  [0x10108f80c,0x10108f7f8,...]  lib.rs:655
+    + !             : | 18 _RNvMs9_CsiewQOjgBaKc_14rocksdb_compatNtB5_12LastGetTable9store_key  (in rocks-parity-bench) + 1340  [0x10108fd30]  lib.rs:677
+    + !             : | 9 _RNvMs9_CsiewQOjgBaKc_14rocksdb_compatNtB5_12LastGetTable9store_key  (in rocks-parity-bench) + 692,696,...  [0x10108faa8,0x10108faac,...]  lib.rs:668
+    + !             : | 5 _RNvNtCser8HrCHQmCi_5bytes5bytes11shared_drop  (in rocks-parity-bench) + 84  [0x100ffd164]
+    + !             : | 3 _RNvMs9_CsiewQOjgBaKc_14rocksdb_compatNtB5_12LastGetTable9store_key  (in rocks-parity-bench) + 1324  [0x10108fd20]  lib.rs:672
+    + !             : | 1 _RNvMs9_CsiewQOjgBaKc_14rocksdb_compatNtB5_12LastGetTable9store_key  (in rocks-parity-bench) + 344  [0x10108f94c]  lib.rs:0
+    + !             : | 1 _RNvMs9_CsiewQOjgBaKc_14rocksdb_compatNtB5_12LastGetTable9store_key  (in rocks-parity-bench) + 136  [0x10108f87c]  lib.rs:656
+    + !             : 79 _RNvXs_NtCsjhBRx3bsdFE_20rocksdb_parity_bench7enginesNtB4_12CompatEngineNtB6_6Engine9get_probe  (in rocks-parity-bench) + 660,576,...  [0x1010eeeb8,0x1010eee64,...]  engines.rs:100
+    + !             : 53 _RNvXs_NtCsjhBRx3bsdFE_20rocksdb_parity_bench7enginesNtB4_12CompatEngineNtB6_6Engine9get_probe  (in rocks-parity-bench) + 668  [0x1010eeec0]  engines.rs:100
+    + !             : | 53 _RNvNtCser8HrCHQmCi_5bytes5bytes11shared_drop  (in rocks-parity-bench) + 28,24,...  [0x100ffd12c,0x100ffd128,...]
+    + !             : 21 _RNvMs9_CsiewQOjgBaKc_14rocksdb_compatNtB5_12LastGetTable9store_key  (in rocks-parity-bench) + 1508,1496  [0x10108fdd8,0x10108fdcc]  lib.rs:679
+    + !             : 16 _RNvMs9_CsiewQOjgBaKc_14rocksdb_compatNtB5_12LastGetTable7get_key  (in rocks-parity-bench) + 1196,1184,...  [0x10108f7c4,0x10108f7b8,...]  lib.rs:653
+    + !             : 15 _RNvXs_NtCsjhBRx3bsdFE_20rocksdb_parity_bench7enginesNtB4_12CompatEngineNtB6_6Engine9get_probe  (in rocks-parity-bench) + 592  [0x1010eee74]  engines.rs:100
+    + !             : | 15 _RNvNtCser8HrCHQmCi_5bytes5bytes12shared_clone  (in rocks-parity-bench) + 16,32,...  [0x100ffd1cc,0x100ffd1dc,...]
+    + !             : 13 _RNvXs_NtCsjhBRx3bsdFE_20rocksdb_parity_bench7enginesNtB4_12CompatEngineNtB6_6Engine9get_probe  (in rocks-parity-bench) + 192  [0x1010eece4]  engines.rs:100
+    + !             : | 13 _RNvNtCser8HrCHQmCi_5bytes5bytes11shared_drop  (in rocks-parity-bench) + 28,0  [0x100ffd12c,0x100ffd110]
+    + !             : 13 _RNvXs_NtCsjhBRx3bsdFE_20rocksdb_parity_bench7enginesNtB4_12CompatEngineNtB6_6Engine9get_probe  (in rocks-parity-bench) + 20,12,...  [0x1010eec38,0x1010eec30,...]  engines.rs:99
+    + !             : 8 _RNvMs0_NtCs9rGgPUxlRPa_12pedradb_core10concurrentNtB5_12ConcurrentDb3getCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 204,196  [0x1010c8ba8,0x1010c8ba0]
+    + !             : 8 _RNvXs_NtCsjhBRx3bsdFE_20rocksdb_parity_bench7enginesNtB4_12CompatEngineNtB6_6Engine9get_probe  (in rocks-parity-bench) + 72  [0x1010eec6c]  engines.rs:100
+    + !             : | 8 tlv_get_addr  (in libdyld.dylib) + 0,20  [0x199ff9fc0,0x199ff9fd4]
+    + !             : 2 _RNvNtCser8HrCHQmCi_5bytes5bytes11shared_drop  (in rocks-parity-bench) + 84  [0x100ffd164]
+    + !             1262 _RINvMs_CsjhBRx3bsdFE_20rocksdb_parity_benchNtB5_10YcsbRunner3runNtNtB5_7engines12CompatEngineECsfgYT6aPkLat_18rocks_parity_bench  (in rocks-parity-bench) + 1036  [0x101054d20]  lib.rs:1891
+    + !             : 1259 _RNvXs_NtCsjhBRx3bsdFE_20rocksdb_parity_bench7enginesNtB4_12CompatEngineNtB6_6Engine3put  (in rocks-parity-bench) + 220  [0x1010ec964]  engines.rs:94
+    + !             : | 1217 _RINvMs0_NtCs9rGgPUxlRPa_12pedradb_core10concurrentNtB6_12ConcurrentDb3putRShB19_ECsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 264  [0x10109fb54]
+    + !             : | + 1004 _RINvMNtCs9rGgPUxlRPa_12pedradb_core10concurrentNtB3_10WriteGroup12submit_innerNtNtB5_3env6StdEnvECsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 2136  [0x1010978d8]  concurrent.rs:337
+    + !             : | + ! 287 _RNvMsb_NtCs9rGgPUxlRPa_12pedradb_core2dbNtB5_2Db16commit_async_opsCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 1020  [0x1010d2b84]  db.rs:5968
+    + !             : | + ! : 189 _RNvNtCs9rGgPUxlRPa_12pedradb_core2db15apply_ops_owned  (in rocks-parity-bench) + 592  [0x10102a6d0]  db.rs:7294
+    + !             : | + ! : | 141 _RNvMsi_NtNtNtCslJsSqIQKwiA_5alloc11collections5btree3mapINtB5_8BTreeMapNtNtCser8HrCHQmCi_5bytes5bytes5BytesjE6insertCs9rGgPUxlRPa_12pedradb_core  (in rocks-parity-bench) + 108  [0x10102675c]  map.rs:1049
+    + !             : | + ! : | + 136 _platform_memcmp  (in libsystem_platform.dylib) + 272,280,...  [0x19a01fe60,0x19a01fe68,...]
+    + !             : | + ! : | + 5 DYLD-STUB$$memcmp  (in rocks-parity-bench) + 4  [0x101131eec]
+    + !             : | + ! : | 47 _RNvMsi_NtNtNtCslJsSqIQKwiA_5alloc11collections5btree3mapINtB5_8BTreeMapNtNtCser8HrCHQmCi_5bytes5bytes5BytesjE6insertCs9rGgPUxlRPa_12pedradb_core  (in rocks-parity-bench) + 80,136,...  [0x101026740,0x101026778,...]  map.rs:1049
+    + !             : | + ! : | 1 _RNvMsi_NtNtNtCslJsSqIQKwiA_5alloc11collections5btree3mapINtB5_8BTreeMapNtNtCser8HrCHQmCi_5bytes5bytes5BytesjE6insertCs9rGgPUxlRPa_12pedradb_core  (in rocks-parity-bench) + 212  [0x1010267c4]  map.rs:1049
+    + !             : | + ! : |   1 _RNvNtCser8HrCHQmCi_5bytes5bytes11shared_drop  (in rocks-parity-bench) + 28  [0x100ffd12c]
+    + !             : | + ! : 43 _RNvNtCs9rGgPUxlRPa_12pedradb_core2db15apply_ops_owned  (in rocks-parity-bench) + 80,136,...  [0x10102a4d0,0x10102a508,...]  db.rs:7294
+    + !             : | + ! : 23 _RNvNtCs9rGgPUxlRPa_12pedradb_core2db15apply_ops_owned  (in rocks-parity-bench) + 720  [0x10102a750]  db.rs:7294
+    + !             : | + ! : | 17 _nanov2_free  (in libsystem_malloc.dylib) + 604,840,...  [0x199e23768,0x199e23854,...]
+    + !             : | + ! : | 3 _free  (in libsystem_malloc.dylib) + 0,20,...  [0x199e2c574,0x199e2c588,...]
+    + !             : | + ! : | 1 DYLD-STUB$$free  (in rocks-parity-bench) + 4  [0x101131e68]
+    + !             : | + ! : | 1 _nanov2_free  (in libsystem_malloc.dylib) + 520  [0x199e23714]
+    + !             : | + ! : | + 1 __bzero  (in libsystem_platform.dylib) + 24  [0x19a021e88]
+    + !             : | + ! : | 1 nanov2_try_free_default  (in libsystem_malloc.dylib) + 0  [0x199e23868]
+    + !             : | + ! : 23 _RNvNtCs9rGgPUxlRPa_12pedradb_core2db15apply_ops_owned  (in rocks-parity-bench) + 732  [0x10102a75c]  db.rs:7294
+    + !             : | + ! : | 12 _RNvMs5_NtCs9rGgPUxlRPa_12pedradb_core8memtableNtB5_8MemTable19invalidate_tail_ord  (in rocks-parity-bench) + 36  [0x10102285c]  memtable.rs:268
+    + !             : | + ! : | + 11 pthread_mutex_lock  (in libsystem_pthread.dylib) + 12,32,...  [0x199fec4f8,0x199fec50c,...]
+    + !             : | + ! : | + 1 DYLD-STUB$$pthread_mutex_lock  (in rocks-parity-bench) + 0  [0x1011320d4]
+    + !             : | + ! : | 5 pthread_mutex_unlock  (in libsystem_pthread.dylib) + 104,12  [0x199fecaac,0x199feca50]
+    + !             : | + ! : | 2 _RNvMs5_NtCs9rGgPUxlRPa_12pedradb_core8memtableNtB5_8MemTable19invalidate_tail_ord  (in rocks-parity-bench) + 0,4  [0x101022838,0x10102283c]  memtable.rs:267
+    + !             : | + ! : | 1 DYLD-STUB$$pthread_mutex_unlock  (in rocks-parity-bench) + 4  [0x1011320f0]
+    + !             : | + ! : | 1 _RNvMs5_NtCs9rGgPUxlRPa_12pedradb_core8memtableNtB5_8MemTable19invalidate_tail_ord  (in rocks-parity-bench) + 72  [0x101022880]  memtable.rs:0
+    + !             : | + ! : | 1 _RNvMs5_NtCs9rGgPUxlRPa_12pedradb_core8memtableNtB5_8MemTable19invalidate_tail_ord  (in rocks-parity-bench) + 48  [0x101022868]  memtable.rs:268
+    + !             : | + ! : | 1 _RNvMs5_NtCs9rGgPUxlRPa_12pedradb_core8memtableNtB5_8MemTable19invalidate_tail_ord  (in rocks-parity-bench) + 116  [0x1010228ac]  memtable.rs:269
+    + !             : | + ! : 4 _RNvNtCs9rGgPUxlRPa_12pedradb_core2db15apply_ops_owned  (in rocks-parity-bench) + 732  [0x10102a75c]  db.rs:7300
+    + !             : | + ! : 2 _RNvNtCs9rGgPUxlRPa_12pedradb_core2db15apply_ops_owned  (in rocks-parity-bench) + 576  [0x10102a6c0]  db.rs:7294
+    + !             : | + ! : | 2 _RNvNtCser8HrCHQmCi_5bytes5bytes21promotable_even_clone  (in rocks-parity-bench) + 28  [0x100ffd928]  bytes.rs:1189
+    + !             : | + ! : 1 _RNvMs5_NtCs9rGgPUxlRPa_12pedradb_core8memtableNtB5_8MemTable19invalidate_tail_ord  (in rocks-parity-bench) + 148  [0x1010228cc]  memtable.rs:0
+    + !             : | + ! : 1 _RNvNtCs9rGgPUxlRPa_12pedradb_core2db15apply_ops_owned  (in rocks-parity-bench) + 0  [0x10102a480]  db.rs:7293
+    + !             : | + ! : 1 _nanov2_free  (in libsystem_malloc.dylib) + 852  [0x199e23860]
+    + !             : | + ! 285 _RNvMsb_NtCs9rGgPUxlRPa_12pedradb_core2dbNtB5_2Db16commit_async_opsCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 700  [0x1010d2a44]  db.rs:5960
+    + !             : | + ! : 285 write  (in libsystem_kernel.dylib) + 8  [0x199fb4914]
+    + !             : | + ! 159 _RNvMsb_NtCs9rGgPUxlRPa_12pedradb_core2dbNtB5_2Db16commit_async_opsCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 480  [0x1010d2968]  db.rs:5959
+    + !             : | + ! : 70 _RNvMs_NtCs9rGgPUxlRPa_12pedradb_core3walINtB4_3WalNtNtCsa9BKTri5B3M_3std2fs4FileE23encode_write_op_batchesCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 520  [0x1010cd270]  mod.rs:149
+    + !             : | + ! : | 28 _RNvXs1_NtNtCs9rGgPUxlRPa_12pedradb_core3wal6writerNtB5_16EncodedOpsSourceNtB5_12RecordSource15read_exact_into  (in rocks-parity-bench) + 704  [0x1010301c4]  writer.rs:461
+    + !             : | + ! : | + 26 _platform_memmove  (in libsystem_platform.dylib) + 452,420,...  [0x19a022364,0x19a022344,...]
+    + !             : | + ! : | + 2 DYLD-STUB$$memcpy  (in rocks-parity-bench) + 4  [0x101131ef8]
+    + !             : | + ! : | 17 _RNvXs1_NtNtCs9rGgPUxlRPa_12pedradb_core3wal6writerNtB5_16EncodedOpsSourceNtB5_12RecordSource15read_exact_into  (in rocks-parity-bench) + 704,720,...  [0x1010301c4,0x1010301d4,...]  writer.rs:462
+    + !             : | + ! : | 13 _RNvXs1_NtNtCs9rGgPUxlRPa_12pedradb_core3wal6writerNtB5_16EncodedOpsSourceNtB5_12RecordSource15read_exact_into  (in rocks-parity-bench) + 152,300,...  [0x10102ff9c,0x101030030,...]  writer.rs:455
+    + !             : | + ! : | 4 _RNvXs1_NtNtCs9rGgPUxlRPa_12pedradb_core3wal6writerNtB5_16EncodedOpsSourceNtB5_12RecordSource15read_exact_into  (in rocks-parity-bench) + 656  [0x101030194]  writer.rs:457
+    + !             : | + ! : | 3 _RNvXs1_NtNtCs9rGgPUxlRPa_12pedradb_core3wal6writerNtB5_16EncodedOpsSourceNtB5_12RecordSource15read_exact_into  (in rocks-parity-bench) + 100  [0x10102ff68]  writer.rs:454
+    + !             : | + ! : | 2 _RNvXs1_NtNtCs9rGgPUxlRPa_12pedradb_core3wal6writerNtB5_16EncodedOpsSourceNtB5_12RecordSource15read_exact_into  (in rocks-parity-bench) + 660  [0x101030198]  writer.rs:460
+    + !             : | + ! : | 2 _RNvXs1_NtNtCs9rGgPUxlRPa_12pedradb_core3wal6writerNtB5_16EncodedOpsSourceNtB5_12RecordSource15read_exact_into  (in rocks-parity-bench) + 680,688  [0x1010301ac,0x1010301b4]  writer.rs:461
+    + !             : | + ! : | 1 _RNvXs1_NtNtCs9rGgPUxlRPa_12pedradb_core3wal6writerNtB5_16EncodedOpsSourceNtB5_12RecordSource15read_exact_into  (in rocks-parity-bench) + 84  [0x10102ff58]  writer.rs:0
+    + !             : | + ! : 32 _RNvMs_NtCs9rGgPUxlRPa_12pedradb_core3walINtB4_3WalNtNtCsa9BKTri5B3M_3std2fs4FileE23encode_write_op_batchesCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 568  [0x1010cd2a0]  mod.rs:149
+    + !             : | + ! : | 10 _RNvNtCs3G6olMR1Q7_6crc32c10hw_aarch646crc32c  (in rocks-parity-bench) + 276,252  [0x101007500,0x1010074e8]  hw_aarch64.rs:40
+    + !             : | + ! : | 6 _RNvNtCs3G6olMR1Q7_6crc32c10hw_aarch646crc32c  (in rocks-parity-bench) + 108  [0x101007458]  macros.rs:0
+    + !             : | + ! : | 5 _RNvNtCs3G6olMR1Q7_6crc32c10hw_aarch646crc32c  (in rocks-parity-bench) + 336,380,...  [0x10100753c,0x101007568,...]  hw_aarch64.rs:42
+    + !             : | + ! : | 4 _RINvYINtNtNtCsgtPOCBgevO_4core5slice4iter6ChunksNtNtCs3G6olMR1Q7_6crc32c4util5U64LeENtNtNtNtBa_4iter6traits8iterator8Iterator4foldmNCNvNtBO_10hw_aarch6417crc_u64_parallel30EBO_  (in rocks-parity-bench) + 316  [0x101007384]
+    + !             : | + ! : | 3 _RNvNtCs3G6olMR1Q7_6crc32c10hw_aarch646crc32c  (in rocks-parity-bench) + 180  [0x1010074a0]  hw_aarch64.rs:29
+    + !             : | + ! : | + 3 _RINvYINtNtNtCsgtPOCBgevO_4core5slice4iter6ChunksNtNtCs3G6olMR1Q7_6crc32c4util5U64LeENtNtNtNtBa_4iter6traits8iterator8Iterator4foldmNCNvNtBO_10hw_aarch6417crc_u64_parallel30EBO_  (in rocks-parity-bench) + 12,308  [0x101007254,0x10100737c]
+    + !             : | + ! : | 2 _RNvNtCs3G6olMR1Q7_6crc32c10hw_aarch646crc32c  (in rocks-parity-bench) + 92  [0x101007448]  hw_aarch64.rs:15
+    + !             : | + ! : | 1 _RNvNtCs3G6olMR1Q7_6crc32c10hw_aarch646crc32c  (in rocks-parity-bench) + 252  [0x1010074e8]  hw_aarch64.rs:37
+    + !             : | + ! : | + 1 _RINvYINtNtNtCsgtPOCBgevO_4core5slice4iter6ChunksNtNtCs3G6olMR1Q7_6crc32c4util5U64LeENtNtNtNtBa_4iter6traits8iterator8Iterator4foldmNCNvNtBO_10hw_aarch6417crc_u64_parallel30EBO_  (in rocks-parity-bench) + 12  [0x101007254]
+    + !             : | + ! : | 1 _RNvNtCs3G6olMR1Q7_6crc32c10hw_aarch646crc32c  (in rocks-parity-bench) + 76  [0x101007438]  hw_aarch64.rs:7
+    + !             : | + ! : 16 _RNvMs_NtCs9rGgPUxlRPa_12pedradb_core3walINtB4_3WalNtNtCsa9BKTri5B3M_3std2fs4FileE23encode_write_op_batchesCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 540  [0x1010cd284]  mod.rs:149
+    + !             : | + ! : | 6 _RNvNtCs3G6olMR1Q7_6crc32c10hw_aarch646crc32c  (in rocks-parity-bench) + 180  [0x1010074a0]  hw_aarch64.rs:29
+    + !             : | + ! : | + 6 _RINvYINtNtNtCsgtPOCBgevO_4core5slice4iter6ChunksNtNtCs3G6olMR1Q7_6crc32c4util5U64LeENtNtNtNtBa_4iter6traits8iterator8Iterator4foldmNCNvNtBO_10hw_aarch6417crc_u64_parallel30EBO_  (in rocks-parity-bench) + 12,4,...  [0x101007254,0x10100724c,...]
+    + !             : | + ! : | 5 _RNvNtCs3G6olMR1Q7_6crc32c10hw_aarch646crc32c  (in rocks-parity-bench) + 316,292,...  [0x101007528,0x101007510,...]  hw_aarch64.rs:42
+    + !             : | + ! : | 3 _RNvNtCs3G6olMR1Q7_6crc32c10hw_aarch646crc32c  (in rocks-parity-bench) + 252  [0x1010074e8]  hw_aarch64.rs:37
+    + !             : | + ! : | + 3 _RINvYINtNtNtCsgtPOCBgevO_4core5slice4iter6ChunksNtNtCs3G6olMR1Q7_6crc32c4util5U64LeENtNtNtNtBa_4iter6traits8iterator8Iterator4foldmNCNvNtBO_10hw_aarch6417crc_u64_parallel30EBO_  (in rocks-parity-bench) + 0,12  [0x101007248,0x101007254]
+    + !             : | + ! : | 1 _RINvYINtNtNtCsgtPOCBgevO_4core5slice4iter6ChunksNtNtCs3G6olMR1Q7_6crc32c4util5U64LeENtNtNtNtBa_4iter6traits8iterator8Iterator4foldmNCNvNtBO_10hw_aarch6417crc_u64_parallel30EBO_  (in rocks-parity-bench) + 316  [0x101007384]
+    + !             : | + ! : | 1 _RNvNtCs3G6olMR1Q7_6crc32c10hw_aarch646crc32c  (in rocks-parity-bench) + 76  [0x101007438]  hw_aarch64.rs:7
+    + !             : | + ! : 16 _RNvMs_NtCs9rGgPUxlRPa_12pedradb_core3walINtB4_3WalNtNtCsa9BKTri5B3M_3std2fs4FileE23encode_write_op_batchesCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 556  [0x1010cd294]  mod.rs:149
+    + !             : | + ! : | 4 _RINvYINtNtNtCsgtPOCBgevO_4core5slice4iter6ChunksNtNtCs3G6olMR1Q7_6crc32c4util5U64LeENtNtNtNtBa_4iter6traits8iterator8Iterator4foldmNCNvNtBO_10hw_aarch6417crc_u64_parallel30EBO_  (in rocks-parity-bench) + 316  [0x101007384]
+    + !             : | + ! : | 4 _RNvNtCs3G6olMR1Q7_6crc32c10hw_aarch646crc32c  (in rocks-parity-bench) + 292,404  [0x101007510,0x101007580]  hw_aarch64.rs:42
+    + !             : | + ! : | 4 _RNvNtCs3G6olMR1Q7_6crc32c10hw_aarch646crc32c  (in rocks-parity-bench) + 76,64,...  [0x101007438,0x10100742c,...]  hw_aarch64.rs:7
+    + !             : | + ! : | 3 _RNvNtCs3G6olMR1Q7_6crc32c10hw_aarch646crc32c  (in rocks-parity-bench) + 180  [0x1010074a0]  hw_aarch64.rs:29
+    + !             : | + ! : | + 3 _RINvYINtNtNtCsgtPOCBgevO_4core5slice4iter6ChunksNtNtCs3G6olMR1Q7_6crc32c4util5U64LeENtNtNtNtBa_4iter6traits8iterator8Iterator4foldmNCNvNtBO_10hw_aarch6417crc_u64_parallel30EBO_  (in rocks-parity-bench) + 12  [0x101007254]
+    + !             : | + ! : | 1 _RNvNtCs3G6olMR1Q7_6crc32c10hw_aarch646crc32c  (in rocks-parity-bench) + 252  [0x1010074e8]  hw_aarch64.rs:37
+    + !             : | + ! : |   1 _RINvYINtNtNtCsgtPOCBgevO_4core5slice4iter6ChunksNtNtCs3G6olMR1Q7_6crc32c4util5U64LeENtNtNtNtBa_4iter6traits8iterator8Iterator4foldmNCNvNtBO_10hw_aarch6417crc_u64_parallel30EBO_  (in rocks-parity-bench) + 12  [0x101007254]
+    + !             : | + ! : 11 _RNvMs_NtCs9rGgPUxlRPa_12pedradb_core3walINtB4_3WalNtNtCsa9BKTri5B3M_3std2fs4FileE23encode_write_op_batchesCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 268,176,...  [0x1010cd174,0x1010cd118,...]  mod.rs:149
+    + !             : | + ! : 4 _RNvMs_NtCs9rGgPUxlRPa_12pedradb_core3walINtB4_3WalNtNtCsa9BKTri5B3M_3std2fs4FileE23encode_write_op_batchesCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 480  [0x1010cd248]  mod.rs:149
+    + !             : | + ! : | 4 _platform_memset  (in libsystem_platform.dylib) + 140  [0x19a021f5c]
+    + !             : | + ! : 4 _RNvNtCs3G6olMR1Q7_6crc32c10hw_aarch646crc32c  (in rocks-parity-bench) + 424,428  [0x101007594,0x101007598]  hw_aarch64.rs:43
+    + !             : | + ! : 2 _RNvMs_NtCs9rGgPUxlRPa_12pedradb_core3walINtB4_3WalNtNtCsa9BKTri5B3M_3std2fs4FileE23encode_write_op_batchesCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 84,108  [0x1010cd0bc,0x1010cd0d4]  mod.rs:146
+    + !             : | + ! : 2 _RNvMs_NtCs9rGgPUxlRPa_12pedradb_core3walINtB4_3WalNtNtCsa9BKTri5B3M_3std2fs4FileE23encode_write_op_batchesCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 220  [0x1010cd144]  mod.rs:149
+    + !             : | + ! : | 2 _RNvNtCs9rGgPUxlRPa_12pedradb_core5batch11encoded_len  (in rocks-parity-bench) + 416  [0x10102b694]
+    + !             : | + ! : 1 _RNvMs_NtCs9rGgPUxlRPa_12pedradb_core3walINtB4_3WalNtNtCsa9BKTri5B3M_3std2fs4FileE23encode_write_op_batchesCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 1348  [0x1010cd5ac]  mod.rs:151
+    + !             : | + ! : 1 _RNvXs1_NtNtCs9rGgPUxlRPa_12pedradb_core3wal6writerNtB5_16EncodedOpsSourceNtB5_12RecordSource15read_exact_into  (in rocks-parity-bench) + 1380  [0x101030468]  writer.rs:465
+    + !             : | + ! 156 _RNvMsb_NtCs9rGgPUxlRPa_12pedradb_core2dbNtB5_2Db16commit_async_opsCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 1152  [0x1010d2c08]  db.rs:5974
+    + !             : | + ! : 67 _RNvMsb_NtCs9rGgPUxlRPa_12pedradb_core2dbNtB5_2Db16publish_sequenceCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 1200,696,...  [0x1010d39b8,0x1010d37c0,...]  db.rs:1574
+    + !             : | + ! : 20 _RNvMsb_NtCs9rGgPUxlRPa_12pedradb_core2dbNtB5_2Db16publish_sequenceCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 1292  [0x1010d3a14]  db.rs:1574
+    + !             : | + ! : | 14 _RNvMs5_NtCs9rGgPUxlRPa_12pedradb_core5cacheNtB5_10CountCache12record_dirty  (in rocks-parity-bench) + 4292,4296  [0x10101f234,0x10101f238]  cache.rs:637
+    + !             : | + ! : | 4 _RNvMs5_NtCs9rGgPUxlRPa_12pedradb_core5cacheNtB5_10CountCache12record_dirty  (in rocks-parity-bench) + 72  [0x10101e1b8]  cache.rs:594
+    + !             : | + ! : | 2 _RNvMs5_NtCs9rGgPUxlRPa_12pedradb_core5cacheNtB5_10CountCache12record_dirty  (in rocks-parity-bench) + 56,64  [0x10101e1a8,0x10101e1b0]  cache.rs:593
+    + !             : | + ! : 13 _RNvMsb_NtCs9rGgPUxlRPa_12pedradb_core2dbNtB5_2Db16publish_sequenceCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 1300  [0x1010d3a1c]  db.rs:1574
+    + !             : | + ! : | 8 _RNvMs2_NtCs9rGgPUxlRPa_12pedradb_core5cacheINtB5_11AnswerCacheINtNtCsgtPOCBgevO_4core6option6OptionNtNtCser8HrCHQmCi_5bytes5bytes5BytesEE5clearCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 308  [0x1010ca738]  cache.rs:410
+    + !             : | + ! : | 5 _RNvMs2_NtCs9rGgPUxlRPa_12pedradb_core5cacheINtB5_11AnswerCacheINtNtCsgtPOCBgevO_4core6option6OptionNtNtCser8HrCHQmCi_5bytes5bytes5BytesEE5clearCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 40  [0x1010ca62c]  cache.rs:403
+    + !             : | + ! : 11 _nanov2_free  (in libsystem_malloc.dylib) + 268,280,...  [0x199e23618,0x199e23624,...]
+    + !             : | + ! : 10 _free  (in libsystem_malloc.dylib) + 124,24,...  [0x199e2c5f0,0x199e2c58c,...]
+    + !             : | + ! : 9 _RNvMsb_NtCs9rGgPUxlRPa_12pedradb_core2dbNtB5_2Db16publish_sequenceCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 920  [0x1010d38a0]  db.rs:1574
+    + !             : | + ! : | 8 _platform_memcmp  (in libsystem_platform.dylib) + 272,164,...  [0x19a01fe60,0x19a01fdf4,...]
+    + !             : | + ! : | 1 DYLD-STUB$$memcmp  (in rocks-parity-bench) + 4  [0x101131eec]
+    + !             : | + ! : 5 _RNvMs5_NtCs9rGgPUxlRPa_12pedradb_core5cacheNtB5_10CountCache12record_dirty  (in rocks-parity-bench) + 4328,4312  [0x10101f258,0x10101f248]  cache.rs:637
+    + !             : | + ! : 5 _RNvMsb_NtCs9rGgPUxlRPa_12pedradb_core2dbNtB5_2Db16publish_sequenceCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 76  [0x1010d3554]  db.rs:1540
+    + !             : | + ! : 3 _RNvMsb_NtCs9rGgPUxlRPa_12pedradb_core2dbNtB5_2Db16publish_sequenceCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 1352  [0x1010d3a50]  db.rs:1574
+    + !             : | + ! : | 3 _RNvNtCser8HrCHQmCi_5bytes5bytes11shared_drop  (in rocks-parity-bench) + 28  [0x100ffd12c]
+    + !             : | + ! : 3 _nanov2_free  (in libsystem_malloc.dylib) + 520  [0x199e23714]
+    + !             : | + ! : | 2 __bzero  (in libsystem_platform.dylib) + 0,24  [0x19a021e70,0x19a021e88]
+    + !             : | + ! : | 1 _platform_memset  (in libsystem_platform.dylib) + 128  [0x19a021f50]
+    + !             : | + ! : 2 DYLD-STUB$$free  (in rocks-parity-bench) + 4  [0x101131e68]
+    + !             : | + ! : 2 _RNvMsb_NtCs9rGgPUxlRPa_12pedradb_core2dbNtB5_2Db16publish_sequenceCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 24  [0x1010d3520]  db.rs:1537
+    + !             : | + ! : 2 _RNvMsb_NtCs9rGgPUxlRPa_12pedradb_core2dbNtB5_2Db16publish_sequenceCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 128  [0x1010d3588]  db.rs:1554
+    + !             : | + ! : | 2 _RNvMNtNtNtNtCsa9BKTri5B3M_3std3sys3pal4unix4timeNtB2_8Timespec3now  (in rocks-parity-bench) + 24  [0x10110630c]
+    + !             : | + ! : |   2 clock_gettime  (in libsystem_c.dylib) + 148  [0x199e965f4]
+    + !             : | + ! : |     2 gettimeofday  (in libsystem_c.dylib) + 56  [0x199e8edd4]
+    + !             : | + ! : |       2 __commpage_gettimeofday_internal  (in libsystem_kernel.dylib) + 44  [0x199fb2cd8]
+    + !             : | + ! : |         2 mach_absolute_time  (in libsystem_kernel.dylib) + 108  [0x199fb12c0]
+    + !             : | + ! : 2 _RNvMsb_NtCs9rGgPUxlRPa_12pedradb_core2dbNtB5_2Db16publish_sequenceCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 1164  [0x1010d3994]  db.rs:1574
+    + !             : | + ! : | 1 _RNvNtCser8HrCHQmCi_5bytes5bytes20promotable_even_drop  (in rocks-parity-bench) + 36  [0x100ffd7dc]  bytes.rs:1266
+    + !             : | + ! : | 1 _RNvNtCser8HrCHQmCi_5bytes5bytes20promotable_even_drop  (in rocks-parity-bench) + 104  [0x100ffd820]  bytes.rs:1272
+    + !             : | + ! : 2 _RNvMsb_NtCs9rGgPUxlRPa_12pedradb_core2dbNtB5_2Db16publish_sequenceCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 1188  [0x1010d39ac]  db.rs:1574
+    + !             : | + ! :   2 _RNvNtCser8HrCHQmCi_5bytes5bytes11shared_drop  (in rocks-parity-bench) + 24,28  [0x100ffd128,0x100ffd12c]
+    + !             : | + ! 44 _RNvMsb_NtCs9rGgPUxlRPa_12pedradb_core2dbNtB5_2Db16commit_async_opsCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 1008  [0x1010d2b78]  db.rs:5967
+    + !             : | + ! : 19 _RNvMsb_NtCs9rGgPUxlRPa_12pedradb_core2dbNtB5_2Db17note_dirty_pointsCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 428  [0x1010d3d60]  db.rs:1586
+    + !             : | + ! : | 13 _RINvNvMs2_NtCslJsSqIQKwiA_5alloc7raw_vecINtB8_11RawVecInnerpE7reserve21do_reserve_and_handleNtNtBa_5alloc6GlobalECsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 88  [0x10112c86c]
+    + !             : | + ! : | + 9 _RNvMs4_NtCslJsSqIQKwiA_5alloc7raw_vecNtB5_11RawVecInner11finish_growCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 260  [0x10112d3d4]
+    + !             : | + ! : | + ! 7 nanov2_malloc  (in libsystem_malloc.dylib) + 168,68,...  [0x199e01cc8,0x199e01c64,...]
+    + !             : | + ! : | + ! 1 DYLD-STUB$$malloc  (in rocks-parity-bench) + 4  [0x101131ee0]
+    + !             : | + ! : | + ! 1 malloc  (in libsystem_malloc.dylib) + 0  [0x199e01be0]
+    + !             : | + ! : | + 4 _RNvMs4_NtCslJsSqIQKwiA_5alloc7raw_vecNtB5_11RawVecInner11finish_growCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 0,12,...  [0x10112d2d0,0x10112d2dc,...]
+    + !             : | + ! : | 4 _RINvNvMs2_NtCslJsSqIQKwiA_5alloc7raw_vecINtB8_11RawVecInnerpE7reserve21do_reserve_and_handleNtNtBa_5alloc6GlobalECsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 0,8  [0x10112c814,0x10112c81c]
+    + !             : | + ! : | 1 _RNvMs4_NtCslJsSqIQKwiA_5alloc7raw_vecNtB5_11RawVecInner11finish_growCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 292  [0x10112d3f4]
+    + !             : | + ! : | 1 _RNvMsb_NtCs9rGgPUxlRPa_12pedradb_core2dbNtB5_2Db17note_dirty_pointsCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 284  [0x1010d3cd0]  db.rs:1586
+    + !             : | + ! : |   1 _RNvNtCser8HrCHQmCi_5bytes5bytes17shallow_clone_vec  (in rocks-parity-bench) + 0  [0x101124d50]  bytes.rs:1468
+    + !             : | + ! : 16 _RNvMsb_NtCs9rGgPUxlRPa_12pedradb_core2dbNtB5_2Db17note_dirty_pointsCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 284  [0x1010d3cd0]  db.rs:1586
+    + !             : | + ! : | 14 _RNvNtCser8HrCHQmCi_5bytes5bytes17shallow_clone_vec  (in rocks-parity-bench) + 52  [0x101124d84]  bytes.rs:1486
+    + !             : | + ! : | + 6 nanov2_malloc  (in libsystem_malloc.dylib) + 208,108,...  [0x199e01cf0,0x199e01c8c,...]
+    + !             : | + ! : | + 3 nanov2_allocate_outlined  (in libsystem_malloc.dylib) + 252  [0x199e23474]
+    + !             : | + ! : | + ! 3 nanov2_find_block_and_allocate  (in libsystem_malloc.dylib) + 392,572,...  [0x199e01fa8,0x199e0205c,...]
+    + !             : | + ! : | + 2 _malloc_zone_malloc  (in libsystem_malloc.dylib) + 52,84  [0x199e2b950,0x199e2b970]
+    + !             : | + ! : | + 2 nanov2_allocate_outlined  (in libsystem_malloc.dylib) + 316  [0x199e234b4]
+    + !             : | + ! : | + 1 DYLD-STUB$$malloc  (in rocks-parity-bench) + 4  [0x101131ee0]
+    + !             : | + ! : | 1 _RNvNtCser8HrCHQmCi_5bytes5bytes17shallow_clone_vec  (in rocks-parity-bench) + 40  [0x101124d78]  bytes.rs:1468
+    + !             : | + ! : | 1 _RNvNtCser8HrCHQmCi_5bytes5bytes17shallow_clone_vec  (in rocks-parity-bench) + 84  [0x101124da4]  bytes.rs:1515
+    + !             : | + ! : 4 _RNvMsb_NtCs9rGgPUxlRPa_12pedradb_core2dbNtB5_2Db17note_dirty_pointsCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 248,296  [0x1010d3cac,0x1010d3cdc]  db.rs:1586
+    + !             : | + ! : 4 _RNvMsb_NtCs9rGgPUxlRPa_12pedradb_core2dbNtB5_2Db17note_dirty_pointsCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 324,332  [0x1010d3cf8,0x1010d3d00]  db.rs:1587
+    + !             : | + ! : 1 _RNvMsb_NtCs9rGgPUxlRPa_12pedradb_core2dbNtB5_2Db17note_dirty_pointsCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 16  [0x1010d3bc4]  db.rs:1577
+    + !             : | + ! 23 _RNvMsb_NtCs9rGgPUxlRPa_12pedradb_core2dbNtB5_2Db16commit_async_opsCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 232  [0x1010d2870]  db.rs:5950
+    + !             : | + ! : 11 _RINvMsb_NtCs9rGgPUxlRPa_12pedradb_core2dbNtB6_2Db17prepare_write_opsINtNtCslJsSqIQKwiA_5alloc3vec3VecNtB6_7BatchOpEECsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 2356  [0x1010a9538]  db.rs:5917
+    + !             : | + ! : | 9 _nanov2_free  (in libsystem_malloc.dylib) + 36,468,...  [0x199e23530,0x199e236e0,...]
+    + !             : | + ! : | 2 _nanov2_free  (in libsystem_malloc.dylib) + 520  [0x199e23714]
+    + !             : | + ! : |   2 _platform_memset  (in libsystem_platform.dylib) + 160,168  [0x19a021f70,0x19a021f78]
+    + !             : | + ! : 3 _RINvMsb_NtCs9rGgPUxlRPa_12pedradb_core2dbNtB6_2Db17prepare_write_opsINtNtCslJsSqIQKwiA_5alloc3vec3VecNtB6_7BatchOpEECsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 888,880  [0x1010a8f7c,0x1010a8f74]  db.rs:5908
+    + !             : | + ! : 3 _RINvMsb_NtCs9rGgPUxlRPa_12pedradb_core2dbNtB6_2Db17prepare_write_opsINtNtCslJsSqIQKwiA_5alloc3vec3VecNtB6_7BatchOpEECsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 2356  [0x1010a9538]  db.rs:5918
+    + !             : | + ! : 2 _RINvMsb_NtCs9rGgPUxlRPa_12pedradb_core2dbNtB6_2Db17prepare_write_opsINtNtCslJsSqIQKwiA_5alloc3vec3VecNtB6_7BatchOpEECsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 384,848  [0x1010a8d84,0x1010a8f54]  db.rs:0
+    + !             : | + ! : 1 _RINvMsb_NtCs9rGgPUxlRPa_12pedradb_core2dbNtB6_2Db17prepare_write_opsINtNtCslJsSqIQKwiA_5alloc3vec3VecNtB6_7BatchOpEECsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 100  [0x1010a8c68]  db.rs:5888
+    + !             : | + ! : 1 _RINvMsb_NtCs9rGgPUxlRPa_12pedradb_core2dbNtB6_2Db17prepare_write_opsINtNtCslJsSqIQKwiA_5alloc3vec3VecNtB6_7BatchOpEECsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 244  [0x1010a8cf8]  db.rs:5889
+    + !             : | + ! : 1 _RINvMsb_NtCs9rGgPUxlRPa_12pedradb_core2dbNtB6_2Db17prepare_write_opsINtNtCslJsSqIQKwiA_5alloc3vec3VecNtB6_7BatchOpEECsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 2432  [0x1010a9584]  db.rs:5923
+    + !             : | + ! : 1 _nanov2_free  (in libsystem_malloc.dylib) + 852  [0x199e23860]
+    + !             : | + ! 22 _RNvMsb_NtCs9rGgPUxlRPa_12pedradb_core2dbNtB5_2Db16commit_async_opsCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 232,236,...  [0x1010d2870,0x1010d2874,...]  db.rs:5950
+    + !             : | + ! 7 _RNvMsb_NtCs9rGgPUxlRPa_12pedradb_core2dbNtB5_2Db16commit_async_opsCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 480  [0x1010d2968]  db.rs:5959
+    + !             : | + ! 3 _RNvMsb_NtCs9rGgPUxlRPa_12pedradb_core2dbNtB5_2Db16commit_async_opsCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 8,4  [0x1010d2790,0x1010d278c]  db.rs:5946
+    + !             : | + ! 3 _RNvMsb_NtCs9rGgPUxlRPa_12pedradb_core2dbNtB5_2Db16commit_async_opsCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 52  [0x1010d27bc]  db.rs:5947
+    + !             : | + ! : 2 _RNvMse_NtCs9rGgPUxlRPa_12pedradb_core2dbNtB5_2Db21ensure_write_admittedCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 608  [0x1010e3954]  db.rs:6339
+    + !             : | + ! : 1 _RNvMse_NtCs9rGgPUxlRPa_12pedradb_core2dbNtB5_2Db21ensure_write_admittedCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 0  [0x1010e36f4]  db.rs:6315
+    + !             : | + ! 3 _RNvMsb_NtCs9rGgPUxlRPa_12pedradb_core2dbNtB5_2Db16commit_async_opsCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 1280  [0x1010d2c88]  db.rs:5980
+    + !             : | + ! : 2 _RNvMse_NtCs9rGgPUxlRPa_12pedradb_core2dbNtB5_2Db28maybe_auto_flush_best_effortCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 20,60  [0x1010e3d14,0x1010e3d3c]  db.rs:6399
+    + !             : | + ! : 1 _RNvMse_NtCs9rGgPUxlRPa_12pedradb_core2dbNtB5_2Db28maybe_auto_flush_best_effortCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 592  [0x1010e3f50]  db.rs:6400
+    + !             : | + ! 1 _RINvMsb_NtCs9rGgPUxlRPa_12pedradb_core2dbNtB6_2Db17prepare_write_opsINtNtCslJsSqIQKwiA_5alloc3vec3VecNtB6_7BatchOpEECsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 2436  [0x1010a9588]  db.rs:5923
+    + !             : | + ! 1 _RNvMs_NtCs9rGgPUxlRPa_12pedradb_core3walINtB4_3WalNtNtCsa9BKTri5B3M_3std2fs4FileE23encode_write_op_batchesCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 1412  [0x1010cd5ec]  mod.rs:153
+    + !             : | + ! 1 _RNvMsb_NtCs9rGgPUxlRPa_12pedradb_core2dbNtB5_2Db16commit_async_opsCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 52  [0x1010d27bc]  db.rs:5947
+    + !             : | + ! 1 _RNvMsb_NtCs9rGgPUxlRPa_12pedradb_core2dbNtB5_2Db16commit_async_opsCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 444  [0x1010d2944]  db.rs:5957
+    + !             : | + ! 1 _RNvMsb_NtCs9rGgPUxlRPa_12pedradb_core2dbNtB5_2Db16commit_async_opsCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 452  [0x1010d294c]  db.rs:5958
+    + !             : | + ! 1 _RNvMsb_NtCs9rGgPUxlRPa_12pedradb_core2dbNtB5_2Db16commit_async_opsCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 736  [0x1010d2a68]  db.rs:5960
+    + !             : | + ! 1 _RNvMsb_NtCs9rGgPUxlRPa_12pedradb_core2dbNtB5_2Db16commit_async_opsCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 1112  [0x1010d2be0]  db.rs:5973
+    + !             : | + ! 1 _RNvMsb_NtCs9rGgPUxlRPa_12pedradb_core2dbNtB5_2Db16commit_async_opsCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 1152  [0x1010d2c08]  db.rs:5975
+    + !             : | + ! 1 _RNvMsb_NtCs9rGgPUxlRPa_12pedradb_core2dbNtB5_2Db16commit_async_opsCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 1244  [0x1010d2c64]  db.rs:5979
+    + !             : | + ! 1 _RNvMsb_NtCs9rGgPUxlRPa_12pedradb_core2dbNtB5_2Db16publish_sequenceCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 1384  [0x1010d3a70]  db.rs:1574
+    + !             : | + ! 1 _RNvNtCs9rGgPUxlRPa_12pedradb_core2db15apply_ops_owned  (in rocks-parity-bench) + 752  [0x10102a770]  db.rs:7300
+    + !             : | + ! 1 _nanov2_free  (in libsystem_malloc.dylib) + 852  [0x199e23860]
+    + !             : | + 101 _RINvMNtCs9rGgPUxlRPa_12pedradb_core10concurrentNtB3_10WriteGroup12submit_innerNtNtB5_3env6StdEnvECsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 88  [0x1010970d8]  concurrent.rs:320
+    + !             : | + ! 101 _RNvMNtNtNtNtCsa9BKTri5B3M_3std3sys3pal4unix4timeNtB2_8Timespec3now  (in rocks-parity-bench) + 24  [0x10110630c]
+    + !             : | + !   99 clock_gettime  (in libsystem_c.dylib) + 148  [0x199e965f4]
+    + !             : | + !   : 98 gettimeofday  (in libsystem_c.dylib) + 56  [0x199e8edd4]
+    + !             : | + !   : | 92 __commpage_gettimeofday_internal  (in libsystem_kernel.dylib) + 44  [0x199fb2cd8]
+    + !             : | + !   : | + 92 mach_absolute_time  (in libsystem_kernel.dylib) + 108,16,...  [0x199fb12c0,0x199fb1264,...]
+    + !             : | + !   : | 4 __commpage_gettimeofday_internal  (in libsystem_kernel.dylib) + 36,0  [0x199fb2cd0,0x199fb2cac]
+    + !             : | + !   : | 2 DYLD-STUB$$__commpage_gettimeofday  (in libsystem_c.dylib) + 8  [0x199eff2e8]
+    + !             : | + !   : 1 gettimeofday  (in libsystem_c.dylib) + 56  [0x199e8edd4]
+    + !             : | + !   2 clock_gettime  (in libsystem_c.dylib) + 12,52  [0x199e9656c,0x199e96594]
+    + !             : | + 93 _RINvMNtCs9rGgPUxlRPa_12pedradb_core10concurrentNtB3_10WriteGroup12submit_innerNtNtB5_3env6StdEnvECsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 4160  [0x1010980c0]  concurrent.rs:342
+    + !             : | + ! 93 _RNvMNtNtNtNtCsa9BKTri5B3M_3std3sys3pal4unix4timeNtB2_8Timespec3now  (in rocks-parity-bench) + 24  [0x10110630c]
+    + !             : | + !   84 clock_gettime  (in libsystem_c.dylib) + 148  [0x199e965f4]
+    + !             : | + !   : 84 gettimeofday  (in libsystem_c.dylib) + 56  [0x199e8edd4]
+    + !             : | + !   :   82 __commpage_gettimeofday_internal  (in libsystem_kernel.dylib) + 44  [0x199fb2cd8]
+    + !             : | + !   :   | 82 mach_absolute_time  (in libsystem_kernel.dylib) + 108,112,...  [0x199fb12c0,0x199fb12c4,...]
+    + !             : | + !   :   1 DYLD-STUB$$__commpage_gettimeofday  (in libsystem_c.dylib) + 8  [0x199eff2e8]
+    + !             : | + !   :   1 __commpage_gettimeofday_internal  (in libsystem_kernel.dylib) + 80  [0x199fb2cfc]
+    + !             : | + !   6 clock_gettime  (in libsystem_c.dylib) + 408,12,...  [0x199e966f8,0x199e9656c,...]
+    + !             : | + !   3 DYLD-STUB$$clock_gettime  (in rocks-parity-bench) + 4  [0x101131d90]
+    + !             : | + 4 _RINvMNtCs9rGgPUxlRPa_12pedradb_core10concurrentNtB3_10WriteGroup12submit_innerNtNtB5_3env6StdEnvECsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 424  [0x101097228]  concurrent.rs:0
+    + !             : | + 3 _RINvMNtCs9rGgPUxlRPa_12pedradb_core10concurrentNtB3_10WriteGroup12submit_innerNtNtB5_3env6StdEnvECsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 132,88  [0x101097104,0x1010970d8]  concurrent.rs:320
+    + !             : | + 3 _RINvMNtCs9rGgPUxlRPa_12pedradb_core10concurrentNtB3_10WriteGroup12submit_innerNtNtB5_3env6StdEnvECsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 4152  [0x1010980b8]  concurrent.rs:342
+    + !             : | + 2 _RNvMsb_NtCs9rGgPUxlRPa_12pedradb_core2dbNtB5_2Db16commit_async_opsCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 592  [0x1010d29d8]  db.rs:5987
+    + !             : | + 1 _RINvMNtCs9rGgPUxlRPa_12pedradb_core10concurrentNtB3_10WriteGroup12submit_innerNtNtB5_3env6StdEnvECsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 0  [0x101097080]  concurrent.rs:311
+    + !             : | + 1 _RINvMNtCs9rGgPUxlRPa_12pedradb_core10concurrentNtB3_10WriteGroup12submit_innerNtNtB5_3env6StdEnvECsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 72  [0x1010970c8]  concurrent.rs:319
+    + !             : | + 1 _RINvMNtCs9rGgPUxlRPa_12pedradb_core10concurrentNtB3_10WriteGroup12submit_innerNtNtB5_3env6StdEnvECsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 2108  [0x1010978bc]  concurrent.rs:337
+    + !             : | + 1 _RINvMNtCs9rGgPUxlRPa_12pedradb_core10concurrentNtB3_10WriteGroup12submit_innerNtNtB5_3env6StdEnvECsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 2144  [0x1010978e0]  concurrent.rs:338
+    + !             : | + 1 _RINvMNtCs9rGgPUxlRPa_12pedradb_core10concurrentNtB3_10WriteGroup12submit_innerNtNtB5_3env6StdEnvECsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 4132  [0x1010980a4]  concurrent.rs:340
+    + !             : | + 1 _RINvMNtCs9rGgPUxlRPa_12pedradb_core10concurrentNtB3_10WriteGroup12submit_innerNtNtB5_3env6StdEnvECsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 4140  [0x1010980ac]  concurrent.rs:341
+    + !             : | + 1 _RINvMNtCs9rGgPUxlRPa_12pedradb_core10concurrentNtB3_10WriteGroup12submit_innerNtNtB5_3env6StdEnvECsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 4392  [0x1010981a8]  concurrent.rs:437
+    + !             : | 19 _RINvMs0_NtCs9rGgPUxlRPa_12pedradb_core10concurrentNtB6_12ConcurrentDb3putRShB19_ECsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 96  [0x10109faac]
+    + !             : | + 10 nanov2_allocate_outlined  (in libsystem_malloc.dylib) + 252  [0x199e23474]
+    + !             : | + ! 10 nanov2_find_block_and_allocate  (in libsystem_malloc.dylib) + 356,392,...  [0x199e01f84,0x199e01fa8,...]
+    + !             : | + 7 nanov2_allocate_outlined  (in libsystem_malloc.dylib) + 316  [0x199e234b4]
+    + !             : | + 2 nanov2_malloc  (in libsystem_malloc.dylib) + 440  [0x199e01dd8]
+    + !             : | 10 _RINvMs0_NtCs9rGgPUxlRPa_12pedradb_core10concurrentNtB6_12ConcurrentDb3putRShB19_ECsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 184  [0x10109fb04]
+    + !             : | + 8 _RNvNtCs9rGgPUxlRPa_12pedradb_core2db12intern_bytes  (in rocks-parity-bench) + 164  [0x10102a2f8]  db.rs:7307
+    + !             : | + ! 8 _platform_memcmp  (in libsystem_platform.dylib) + 48,36,...  [0x19a01fd80,0x19a01fd74,...]
+    + !             : | + 2 _RNvNtCs9rGgPUxlRPa_12pedradb_core2db12intern_bytes  (in rocks-parity-bench) + 44,112  [0x10102a280,0x10102a2c4]  db.rs:7307
+    + !             : | 6 _RINvMs0_NtCs9rGgPUxlRPa_12pedradb_core10concurrentNtB6_12ConcurrentDb3putRShB19_ECsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 72  [0x10109fa94]
+    + !             : | + 4 _malloc_zone_malloc  (in libsystem_malloc.dylib) + 0,28,...  [0x199e2b91c,0x199e2b938,...]
+    + !             : | + 1 DYLD-STUB$$malloc  (in rocks-parity-bench) + 4  [0x101131ee0]
+    + !             : | + 1 nanov2_malloc  (in libsystem_malloc.dylib) + 220  [0x199e01cfc]
+    + !             : | 5 _RINvMs0_NtCs9rGgPUxlRPa_12pedradb_core10concurrentNtB6_12ConcurrentDb3putRShB19_ECsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 184,12,...  [0x10109fb04,0x10109fa58,...]
+    + !             : | 2 _RINvMs0_NtCs9rGgPUxlRPa_12pedradb_core10concurrentNtB6_12ConcurrentDb3putRShB19_ECsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 116  [0x10109fac0]
+    + !             : |   2 _platform_memmove  (in libsystem_platform.dylib) + 428,444  [0x19a02234c,0x19a02235c]
+    + !             : 1 _RINvMs0_NtCs9rGgPUxlRPa_12pedradb_core10concurrentNtB6_12ConcurrentDb3putRShB19_ECsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 304  [0x10109fb7c]
+    + !             : 1 _RNvXs_NtCsjhBRx3bsdFE_20rocksdb_parity_bench7enginesNtB4_12CompatEngineNtB6_6Engine3put  (in rocks-parity-bench) + 8  [0x1010ec890]  engines.rs:93
+    + !             : 1 _RNvXs_NtCsjhBRx3bsdFE_20rocksdb_parity_bench7enginesNtB4_12CompatEngineNtB6_6Engine3put  (in rocks-parity-bench) + 220  [0x1010ec964]  engines.rs:94
+    + !             1092 _RINvMs_CsjhBRx3bsdFE_20rocksdb_parity_benchNtB5_10YcsbRunner3runNtNtB5_7engines12CompatEngineECsfgYT6aPkLat_18rocks_parity_bench  (in rocks-parity-bench) + 876  [0x101054c80]  lib.rs:1897
+    + !             : 1074 _RNvMNtNtNtNtCsa9BKTri5B3M_3std3sys3pal4unix4timeNtB2_8Timespec3now  (in rocks-parity-bench) + 24  [0x10110630c]
+    + !             : | 1020 clock_gettime  (in libsystem_c.dylib) + 72  [0x199e965a8]
+    + !             : | + 908 clock_gettime_nsec_np  (in libsystem_c.dylib) + 404  [0x199e89640]
+    + !             : | + ! 900 mach_absolute_time  (in libsystem_kernel.dylib) + 108,112,...  [0x199fb12c0,0x199fb12c4,...]
+    + !             : | + ! 8 DYLD-STUB$$mach_absolute_time  (in libsystem_c.dylib) + 8,12,...  [0x199effb88,0x199effb8c,...]
+    + !             : | + 72 clock_gettime_nsec_np  (in libsystem_c.dylib) + 28,280,...  [0x199e894c8,0x199e895c4,...]
+    + !             : | + 38 clock_gettime_nsec_np  (in libsystem_c.dylib) + 240  [0x199e8959c]
+    + !             : | + ! 26 mach_timebase_info  (in libsystem_kernel.dylib) + 28,8,...  [0x199fb11a0,0x199fb118c,...]
+    + !             : | + ! 12 DYLD-STUB$$mach_timebase_info  (in libsystem_c.dylib) + 8,0  [0x199effc08,0x199effc00]
+    + !             : | + 2 mach_timebase_info  (in libsystem_kernel.dylib) + 80  [0x199fb11d4]
+    + !             : | 38 clock_gettime  (in libsystem_c.dylib) + 52,12,...  [0x199e96594,0x199e9656c,...]
+    + !             : | 16 DYLD-STUB$$clock_gettime  (in rocks-parity-bench) + 4,0  [0x101131d90,0x101131d8c]
+    + !             : 18 _RNvMNtNtNtNtCsa9BKTri5B3M_3std3sys3pal4unix4timeNtB2_8Timespec3now  (in rocks-parity-bench) + 96,4,...  [0x101106354,0x1011062f8,...]
+    + !             1069 _RINvMs_CsjhBRx3bsdFE_20rocksdb_parity_benchNtB5_10YcsbRunner3runNtNtB5_7engines12CompatEngineECsfgYT6aPkLat_18rocks_parity_bench  (in rocks-parity-bench) + 420  [0x101054ab8]  lib.rs:1855
+    + !             : 1057 _RNvMNtNtNtNtCsa9BKTri5B3M_3std3sys3pal4unix4timeNtB2_8Timespec3now  (in rocks-parity-bench) + 24  [0x10110630c]
+    + !             : | 1033 clock_gettime  (in libsystem_c.dylib) + 72  [0x199e965a8]
+    + !             : | + 1003 clock_gettime_nsec_np  (in libsystem_c.dylib) + 404  [0x199e89640]
+    + !             : | + ! 992 mach_absolute_time  (in libsystem_kernel.dylib) + 108,112  [0x199fb12c0,0x199fb12c4]
+    + !             : | + ! 11 DYLD-STUB$$mach_absolute_time  (in libsystem_c.dylib) + 8,0  [0x199effb88,0x199effb80]
+    + !             : | + 19 clock_gettime_nsec_np  (in libsystem_c.dylib) + 240  [0x199e8959c]
+    + !             : | + ! 18 mach_timebase_info  (in libsystem_kernel.dylib) + 72,68,...  [0x199fb11cc,0x199fb11c8,...]
+    + !             : | + ! 1 DYLD-STUB$$mach_timebase_info  (in libsystem_c.dylib) + 0  [0x199effc00]
+    + !             : | + 11 clock_gettime_nsec_np  (in libsystem_c.dylib) + 40,228,...  [0x199e894d4,0x199e89590,...]
+    + !             : | 24 clock_gettime  (in libsystem_c.dylib) + 76,96,...  [0x199e965ac,0x199e965c0,...]
+    + !             : 12 _RNvMNtNtNtNtCsa9BKTri5B3M_3std3sys3pal4unix4timeNtB2_8Timespec3now  (in rocks-parity-bench) + 88,104  [0x10110634c,0x10110635c]
+    + !             187 _RINvMs_CsjhBRx3bsdFE_20rocksdb_parity_benchNtB5_10YcsbRunner3runNtNtB5_7engines12CompatEngineECsfgYT6aPkLat_18rocks_parity_bench  (in rocks-parity-bench) + 172  [0x1010549c0]  lib.rs:1845
+    + !             : 172 _RNvXs_NtNtCslJsSqIQKwiA_5alloc3vec21spec_from_iter_nestedINtB6_3VecIBU_hEEINtB4_18SpecFromIterNestedB13_INtNtNtNtCsgtPOCBgevO_4core4iter8adapters3map3MapINtNtNtB1N_3ops5range5RangejENvCsjhBRx3bsdFE_20rocksdb_parity_bench4ykeyEE9from_iterCsfgYT6aPkLat_18rocks_parity_bench  (in rocks-parity-bench) + 172  [0x101065cdc]  spec_from_iter_nested.rs:60
+    + !             : | 144 _RNvNvNtCslJsSqIQKwiA_5alloc3fmt6format12format_inner  (in rocks-parity-bench) + 300  [0x100ffc614]  fmt.rs:654
+    + !             : | + 118 _RNvNtCsgtPOCBgevO_4core3fmt5write  (in rocks-parity-bench) + 324  [0x101000da8]  mod.rs:1735
+    + !             : | + ! 105 _RNvXsd_NtNtNtCsgtPOCBgevO_4core3fmt3num3impyNtB9_7Display3fmt  (in rocks-parity-bench) + 76  [0x101006b5c]  num.rs:143
+    + !             : | + ! : 90 _RNvXsZ_NtCslJsSqIQKwiA_5alloc6stringNtB5_6StringNtNtCsgtPOCBgevO_4core3fmt5Write9write_str  (in rocks-parity-bench) + 112  [0x100ffc838]  string.rs:3358
+    + !             : | + ! : | 85 _RINvNvMs2_NtCslJsSqIQKwiA_5alloc7raw_vecINtB8_11RawVecInnerpE7reserve21do_reserve_and_handleNtNtBa_5alloc6GlobalEBa_  (in rocks-parity-bench) + 68  [0x101124a88]  mod.rs:668
+    + !             : | + ! : | + 76 _RNvMs4_NtCslJsSqIQKwiA_5alloc7raw_vecNtB5_11RawVecInner11finish_growB7_  (in rocks-parity-bench) + 40  [0x101124b44]
+    + !             : | + ! : | + ! 63 _realloc  (in libsystem_malloc.dylib) + 468  [0x199e2c7e8]
+    + !             : | + ! : | + ! : 57 _malloc_zone_realloc  (in libsystem_malloc.dylib) + 144  [0x199e2bfb0]
+    + !             : | + ! : | + ! : | 28 nanov2_realloc  (in libsystem_malloc.dylib) + 312  [0x199e04d94]
+    + !             : | + ! : | + ! : | + 15 nanov2_malloc  (in libsystem_malloc.dylib) + 108,380,...  [0x199e01c8c,0x199e01d9c,...]
+    + !             : | + ! : | + ! : | + 8 nanov2_allocate_outlined  (in libsystem_malloc.dylib) + 316  [0x199e234b4]
+    + !             : | + ! : | + ! : | + 5 nanov2_allocate_outlined  (in libsystem_malloc.dylib) + 252  [0x199e23474]
+    + !             : | + ! : | + ! : | +   5 nanov2_find_block_and_allocate  (in libsystem_malloc.dylib) + 392,612,...  [0x199e01fa8,0x199e02084,...]
+    + !             : | + ! : | + ! : | 12 nanov2_realloc  (in libsystem_malloc.dylib) + 356  [0x199e04dc0]
+    + !             : | + ! : | + ! : | + 12 _nanov2_free  (in libsystem_malloc.dylib) + 604,272,...  [0x199e23768,0x199e2361c,...]
+    + !             : | + ! : | + ! : | 9 nanov2_realloc  (in libsystem_malloc.dylib) + 52  [0x199e04c90]
+    + !             : | + ! : | + ! : | + 9 nanov2_pointer_size  (in libsystem_malloc.dylib) + 0,300,...  [0x199e02704,0x199e02830,...]
+    + !             : | + ! : | + ! : | 5 nanov2_realloc  (in libsystem_malloc.dylib) + 340  [0x199e04db0]
+    + !             : | + ! : | + ! : | + 3 _platform_memmove  (in libsystem_platform.dylib) + 428,12  [0x19a02234c,0x19a0221ac]
+    + !             : | + ! : | + ! : | + 2 DYLD-STUB$$_platform_memmove  (in libsystem_malloc.dylib) + 8  [0x199e34088]
+    + !             : | + ! : | + ! : | 2 default_zone_realloc  (in libsystem_malloc.dylib) + 24  [0x199e04c50]
+    + !             : | + ! : | + ! : | 1 nanov2_realloc  (in libsystem_malloc.dylib) + 56  [0x199e04c94]
+    + !             : | + ! : | + ! : 6 _malloc_zone_realloc  (in libsystem_malloc.dylib) + 84,164,...  [0x199e2bf74,0x199e2bfc4,...]
+    + !             : | + ! : | + ! 10 _realloc  (in libsystem_malloc.dylib) + 260  [0x199e2c718]
+    + !             : | + ! : | + ! : 10 nanov2_size  (in libsystem_malloc.dylib) + 288,0,...  [0x199e026b4,0x199e02594,...]
+    + !             : | + ! : | + ! 2 DYLD-STUB$$realloc  (in rocks-parity-bench) + 4  [0x10113215c]
+    + !             : | + ! : | + ! 1 _realloc  (in libsystem_malloc.dylib) + 216  [0x199e2c6ec]
+    + !             : | + ! : | + 5 _RNvMs4_NtCslJsSqIQKwiA_5alloc7raw_vecNtB5_11RawVecInner11finish_growB7_  (in rocks-parity-bench) + 4  [0x101124b20]
+    + !             : | + ! : | + 4 _realloc  (in libsystem_malloc.dylib) + 516  [0x199e2c818]
+    + !             : | + ! : | 4 _RINvNvMs2_NtCslJsSqIQKwiA_5alloc7raw_vecINtB8_11RawVecInnerpE7reserve21do_reserve_and_handleNtNtBa_5alloc6GlobalEBa_  (in rocks-parity-bench) + 8  [0x101124a4c]  mod.rs:661
+    + !             : | + ! : | 1 _RINvNvMs2_NtCslJsSqIQKwiA_5alloc7raw_vecINtB8_11RawVecInnerpE7reserve21do_reserve_and_handleNtNtBa_5alloc6GlobalEBa_  (in rocks-parity-bench) + 68  [0x101124a88]  mod.rs:668
+    + !             : | + ! : 3 _RNvMsa_NtCsgtPOCBgevO_4core3fmtNtB5_9Formatter12pad_integral  (in rocks-parity-bench) + 72  [0x100fff478]  mod.rs:1830
+    + !             : | + ! : 3 _RNvXsZ_NtCslJsSqIQKwiA_5alloc6stringNtB5_6StringNtNtCsgtPOCBgevO_4core3fmt5Write9write_str  (in rocks-parity-bench) + 64  [0x100ffc808]  string.rs:3358
+    + !             : | + ! : | 3 _platform_memmove  (in libsystem_platform.dylib) + 12,460  [0x19a0221ac,0x19a02236c]
+    + !             : | + ! : 3 _RNvXsZ_NtCslJsSqIQKwiA_5alloc6stringNtB5_6StringNtNtCsgtPOCBgevO_4core3fmt5Write9write_str  (in rocks-parity-bench) + 28  [0x100ffc7e4]  string.rs:3358
+    + !             : | + ! : 2 _RNvMsa_NtCsgtPOCBgevO_4core3fmtNtB5_9Formatter12pad_integral  (in rocks-parity-bench) + 140  [0x100fff4bc]  mod.rs:1858
+    + !             : | + ! : | 1 _RNvNvMsa_NtCsgtPOCBgevO_4core3fmtNtB7_9Formatter12pad_integral12write_prefix  (in rocks-parity-bench) + 20  [0x1010048f8]  mod.rs:1847
+    + !             : | + ! : | 1 _RNvNvMsa_NtCsgtPOCBgevO_4core3fmtNtB7_9Formatter12pad_integral12write_prefix  (in rocks-parity-bench) + 32  [0x101004904]  mod.rs:1848
+    + !             : | + ! : 2 _RNvNvMsa_NtCsgtPOCBgevO_4core3fmtNtB7_9Formatter12pad_integral12write_prefix  (in rocks-parity-bench) + 116  [0x101004958]  mod.rs:1852
+    + !             : | + ! : 1 _RNvMsa_NtCsgtPOCBgevO_4core3fmtNtB5_9Formatter12pad_integral  (in rocks-parity-bench) + 48  [0x100fff460]  mod.rs:1826
+    + !             : | + ! : 1 _RNvMsa_NtCsgtPOCBgevO_4core3fmtNtB5_9Formatter12pad_integral  (in rocks-parity-bench) + 100  [0x100fff494]  mod.rs:1855
+    + !             : | + ! 10 _RNvXsd_NtNtNtCsgtPOCBgevO_4core3fmt3num3impyNtB9_7Display3fmt  (in rocks-parity-bench) + 48  [0x101006b40]  num.rs:143
+    + !             : | + ! : 10 _RNvMsf_NtNtNtCsgtPOCBgevO_4core3fmt3num3impy10__fmt_inner  (in rocks-parity-bench) + 80,72,...  [0x10100028c,0x101000284,...]
+    + !             : | + ! 1 _RNvMsa_NtCsgtPOCBgevO_4core3fmtNtB5_9Formatter12pad_integral  (in rocks-parity-bench) + 180  [0x100fff4e4]  mod.rs:1859
+    + !             : | + ! 1 _RNvXsZ_NtCslJsSqIQKwiA_5alloc6stringNtB5_6StringNtNtCsgtPOCBgevO_4core3fmt5Write9write_str  (in rocks-parity-bench) + 84  [0x100ffc81c]  string.rs:3360
+    + !             : | + ! 1 _RNvXsd_NtNtNtCsgtPOCBgevO_4core3fmt3num3impyNtB9_7Display3fmt  (in rocks-parity-bench) + 76  [0x101006b5c]  num.rs:151
+    + !             : | + 7 _RNvNtCsgtPOCBgevO_4core3fmt5write  (in rocks-parity-bench) + 144  [0x101000cf4]  mod.rs:1665
+    + !             : | + ! 6 _RNvXsZ_NtCslJsSqIQKwiA_5alloc6stringNtB5_6StringNtNtCsgtPOCBgevO_4core3fmt5Write9write_str  (in rocks-parity-bench) + 64  [0x100ffc808]  string.rs:3358
+    + !             : | + ! : 5 _platform_memmove  (in libsystem_platform.dylib) + 12,436,...  [0x19a0221ac,0x19a022354,...]
+    + !             : | + ! : 1 DYLD-STUB$$memcpy  (in rocks-parity-bench) + 4  [0x101131ef8]
+    + !             : | + ! 1 _RNvXsZ_NtCslJsSqIQKwiA_5alloc6stringNtB5_6StringNtNtCsgtPOCBgevO_4core3fmt5Write9write_str  (in rocks-parity-bench) + 28  [0x100ffc7e4]  string.rs:3358
+    + !             : | + 4 _RNvNtCsgtPOCBgevO_4core3fmt5write  (in rocks-parity-bench) + 104,44  [0x101000ccc,0x101000c90]  mod.rs:1648
+    + !             : | + 3 _RNvNtCsgtPOCBgevO_4core3fmt5write  (in rocks-parity-bench) + 276  [0x101000d78]  mod.rs:1717
+    + !             : | + 3 _RNvNtCsgtPOCBgevO_4core3fmt5write  (in rocks-parity-bench) + 312  [0x101000d9c]  mod.rs:1735
+    + !             : | + 2 _RNvNtCsgtPOCBgevO_4core3fmt5write  (in rocks-parity-bench) + 156  [0x101000d00]  mod.rs:1666
+    + !             : | + 2 _RNvNtCsgtPOCBgevO_4core3fmt5write  (in rocks-parity-bench) + 172  [0x101000d10]  mod.rs:1700
+    + !             : | + 1 _RNvNtCsgtPOCBgevO_4core3fmt5write  (in rocks-parity-bench) + 20  [0x101000c78]  mod.rs:1631
+    + !             : | + 1 _RNvNtCsgtPOCBgevO_4core3fmt5write  (in rocks-parity-bench) + 116  [0x101000cd8]  mod.rs:1649
+    + !             : | + 1 _RNvNtCsgtPOCBgevO_4core3fmt5write  (in rocks-parity-bench) + 124  [0x101000ce0]  mod.rs:1661
+    + !             : | + 1 _RNvNtCsgtPOCBgevO_4core3fmt5write  (in rocks-parity-bench) + 144  [0x101000cf4]  mod.rs:1665
+    + !             : | + 1 _RNvXsZ_NtCslJsSqIQKwiA_5alloc6stringNtB5_6StringNtNtCsgtPOCBgevO_4core3fmt5Write9write_str  (in rocks-parity-bench) + 84  [0x100ffc81c]  string.rs:3360
+    + !             : | 19 _RNvNvNtCslJsSqIQKwiA_5alloc3fmt6format12format_inner  (in rocks-parity-bench) + 248  [0x100ffc5e0]  fmt.rs:652
+    + !             : | + 11 nanov2_malloc  (in libsystem_malloc.dylib) + 16,128,...  [0x199e01c30,0x199e01ca0,...]
+    + !             : | + 7 _malloc_zone_malloc  (in libsystem_malloc.dylib) + 52,96,...  [0x199e2b950,0x199e2b97c,...]
+    + !             : | + 1 DYLD-STUB$$malloc  (in rocks-parity-bench) + 4  [0x101131ee0]
+    + !             : | 5 _RNvNtCsgtPOCBgevO_4core3fmt5write  (in rocks-parity-bench) + 424,420  [0x101000e0c,0x101000e08]  mod.rs:1740
+    + !             : | 3 _RNvNvNtCslJsSqIQKwiA_5alloc3fmt6format12format_inner  (in rocks-parity-bench) + 80,180,...  [0x100ffc538,0x100ffc59c,...]  fmt.rs:651
+    + !             : | 1 _RNvNvNtCslJsSqIQKwiA_5alloc3fmt6format12format_inner  (in rocks-parity-bench) + 12  [0x100ffc4f4]  fmt.rs:650
+    + !             : 14 _RNvXs_NtNtCslJsSqIQKwiA_5alloc3vec21spec_from_iter_nestedINtB6_3VecIBU_hEEINtB4_18SpecFromIterNestedB13_INtNtNtNtCsgtPOCBgevO_4core4iter8adapters3map3MapINtNtNtB1N_3ops5range5RangejENvCsjhBRx3bsdFE_20rocksdb_parity_bench4ykeyEE9from_iterCsfgYT6aPkLat_18rocks_parity_bench  (in rocks-parity-bench) + 188,180  [0x101065cec,0x101065ce4]  spec_from_iter_nested.rs:60
+    + !             : 1 _RNvNvNtCslJsSqIQKwiA_5alloc3fmt6format12format_inner  (in rocks-parity-bench) + 328  [0x100ffc630]  fmt.rs:657
+    + !             66 _RINvMs_CsjhBRx3bsdFE_20rocksdb_parity_benchNtB5_10YcsbRunner3runNtNtB5_7engines12CompatEngineECsfgYT6aPkLat_18rocks_parity_bench  (in rocks-parity-bench) + 512  [0x101054b14]  lib.rs:1858
+    + !             : 27 _RNvMs_CsjhBRx3bsdFE_20rocksdb_parity_benchNtB4_10YcsbRunner4pick  (in rocks-parity-bench) + 164,76,...  [0x1010cca94,0x1010cca3c,...]  lib.rs:287
+    + !             : 22 _RNvMs_CsjhBRx3bsdFE_20rocksdb_parity_benchNtB4_10YcsbRunner4pick  (in rocks-parity-bench) + 84  [0x1010cca44]  uint_macros.rs:0
+    + !             : 11 _RNvMs_CsjhBRx3bsdFE_20rocksdb_parity_benchNtB4_10YcsbRunner4pick  (in rocks-parity-bench) + 224  [0x1010ccad0]  lib.rs:289
+    + !             : 5 _RNvMs_CsjhBRx3bsdFE_20rocksdb_parity_benchNtB4_10YcsbRunner4pick  (in rocks-parity-bench) + 0  [0x1010cc9f0]  lib.rs:278
+    + !             : 1 _RNvMs_CsjhBRx3bsdFE_20rocksdb_parity_benchNtB4_10YcsbRunner4pick  (in rocks-parity-bench) + 32  [0x1010cca10]  lib.rs:284
+    + !             52 _RINvMs_CsjhBRx3bsdFE_20rocksdb_parity_benchNtB5_10YcsbRunner3runNtNtB5_7engines12CompatEngineECsfgYT6aPkLat_18rocks_parity_bench  (in rocks-parity-bench) + 388,396,...  [0x101054a98,0x101054aa0,...]  lib.rs:1897
+    + !             43 _RINvMs_CsjhBRx3bsdFE_20rocksdb_parity_benchNtB5_10YcsbRunner3runNtNtB5_7engines12CompatEngineECsfgYT6aPkLat_18rocks_parity_bench  (in rocks-parity-bench) + 524,548  [0x101054b20,0x101054b38]  lib.rs:1859
+    + !             29 _RNvXs_NtCsjhBRx3bsdFE_20rocksdb_parity_bench7enginesNtB4_12CompatEngineNtB6_6Engine9get_probe  (in rocks-parity-bench) + 696,684  [0x1010eeedc,0x1010eeed0]  engines.rs:101
+    + !             20 _RINvMs_CsjhBRx3bsdFE_20rocksdb_parity_benchNtB5_10YcsbRunner3runNtNtB5_7engines12CompatEngineECsfgYT6aPkLat_18rocks_parity_bench  (in rocks-parity-bench) + 908  [0x101054ca0]  lib.rs:1897
+    + !             : 20 _RNvMNtNtNtNtCsa9BKTri5B3M_3std3sys3pal4unix4timeNtB2_8Timespec12sub_timespec  (in rocks-parity-bench) + 132,8,...  [0x101106294,0x101106218,...]
+    + !             8 _RINvMs_CsjhBRx3bsdFE_20rocksdb_parity_benchNtB5_10YcsbRunner3runNtNtB5_7engines12CompatEngineECsfgYT6aPkLat_18rocks_parity_bench  (in rocks-parity-bench) + 496  [0x101054b04]  lib.rs:1858
+    + !             3 _RINvMs_CsjhBRx3bsdFE_20rocksdb_parity_benchNtB5_10YcsbRunner3runNtNtB5_7engines12CompatEngineECsfgYT6aPkLat_18rocks_parity_bench  (in rocks-parity-bench) + 512  [0x101054b14]  lib.rs:0
+    + !             2 _RINvMs_CsjhBRx3bsdFE_20rocksdb_parity_benchNtB5_10YcsbRunner3runNtNtB5_7engines12CompatEngineECsfgYT6aPkLat_18rocks_parity_bench  (in rocks-parity-bench) + 400  [0x101054aa4]  lib.rs:1854
+    + !             2 _RINvMs_CsjhBRx3bsdFE_20rocksdb_parity_benchNtB5_10YcsbRunner3runNtNtB5_7engines12CompatEngineECsfgYT6aPkLat_18rocks_parity_bench  (in rocks-parity-bench) + 992  [0x101054cf4]  lib.rs:1890
+    + !             : 1 _RNvMs_CsjhBRx3bsdFE_20rocksdb_parity_benchNtB4_10YcsbRunner4pick  (in rocks-parity-bench) + 56  [0x1010cca28]  lib.rs:285
+    + !             : 1 _RNvMs_CsjhBRx3bsdFE_20rocksdb_parity_benchNtB4_10YcsbRunner4pick  (in rocks-parity-bench) + 164  [0x1010cca94]  lib.rs:287
+    + !             1 _RINvMs_CsjhBRx3bsdFE_20rocksdb_parity_benchNtB5_10YcsbRunner3runNtNtB5_7engines12CompatEngineECsfgYT6aPkLat_18rocks_parity_bench  (in rocks-parity-bench) + 412  [0x101054ab0]  lib.rs:1855
+    + !             1 _RNvXs_NtCsjhBRx3bsdFE_20rocksdb_parity_bench7enginesNtB4_12CompatEngineNtB6_6Engine3put  (in rocks-parity-bench) + 420  [0x1010eca2c]  engines.rs:95
+    + 15 ???  (in <unknown binary>)  [0x600001574120]
+    + ! 9 _RNvMs9_CsiewQOjgBaKc_14rocksdb_compatNtB5_12LastGetTable9store_key  (in rocks-parity-bench) + 156  [0x10108f890]  lib.rs:656
+    + ! : 9 _platform_memmove  (in libsystem_platform.dylib) + 436,452,...  [0x19a022354,0x19a022364,...]
+    + ! 3 _RNvMs9_CsiewQOjgBaKc_14rocksdb_compatNtB5_12LastGetTable9store_key  (in rocks-parity-bench) + 436  [0x10108f9a8]  lib.rs:664
+    + ! : 2 DYLD-STUB$$memcmp  (in rocks-parity-bench) + 0,4  [0x101131ee8,0x101131eec]
+    + ! : 1 _platform_memcmp  (in libsystem_platform.dylib) + 260  [0x19a01fe54]
+    + ! 2 _RNvMs9_CsiewQOjgBaKc_14rocksdb_compatNtB5_12LastGetTable9store_key  (in rocks-parity-bench) + 544  [0x10108fa14]  lib.rs:664
+    + ! : 2 _platform_memcmp  (in libsystem_platform.dylib) + 148  [0x19a01fde4]
+    + ! 1 _RNvMs9_CsiewQOjgBaKc_14rocksdb_compatNtB5_12LastGetTable9store_key  (in rocks-parity-bench) + 680  [0x10108fa9c]  lib.rs:664
+    + !   1 _platform_memcmp  (in libsystem_platform.dylib) + 272  [0x19a01fe60]
+    + 10 ???  (in <unknown binary>)  [0x797979797979]
+    + ! 10 ???  (in <unknown binary>)  [0x64]
+    + !   10 _RNvMs9_CsiewQOjgBaKc_14rocksdb_compatNtB5_12LastGetTable9store_key  (in rocks-parity-bench) + 1384  [0x10108fd5c]  lib.rs:673
+    + !     7 _RNvMs9_CsiewQOjgBaKc_14rocksdb_compatNtB5_12LastGetTable9store_key  (in rocks-parity-bench) + 188  [0x10108f8b0]  lib.rs:659
+    + !     : 6 _platform_memmove  (in libsystem_platform.dylib) + 452,12,...  [0x19a022364,0x19a0221ac,...]
+    + !     : 1 DYLD-STUB$$memcpy  (in rocks-parity-bench) + 4  [0x101131ef8]
+    + !     3 _RNvMs9_CsiewQOjgBaKc_14rocksdb_compatNtB5_12LastGetTable9store_key  (in rocks-parity-bench) + 156  [0x10108f890]  lib.rs:656
+    + !       2 _platform_memmove  (in libsystem_platform.dylib) + 0,436  [0x19a0221a0,0x19a022354]
+    + !       1 DYLD-STUB$$memcpy  (in rocks-parity-bench) + 4  [0x101131ef8]
+    + 9 ???  (in <unknown binary>)  [0x14600ab90]
+    + ! 5 _RINvMsb_NtCs9rGgPUxlRPa_12pedradb_core2dbNtB6_2Db17prepare_write_opsINtNtCslJsSqIQKwiA_5alloc3vec3VecNtB6_7BatchOpEECsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 2356  [0x1010a9538]  db.rs:5917
+    + ! : 3 _free  (in libsystem_malloc.dylib) + 20,124,...  [0x199e2c588,0x199e2c5f0,...]
+    + ! : 1 DYLD-STUB$$free  (in rocks-parity-bench) + 4  [0x101131e68]
+    + ! : 1 free  (in libsystem_malloc.dylib) + 0  [0x199e02590]
+    + ! 4 _RINvMsb_NtCs9rGgPUxlRPa_12pedradb_core2dbNtB6_2Db17prepare_write_opsINtNtCslJsSqIQKwiA_5alloc3vec3VecNtB6_7BatchOpEECsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 220  [0x1010a8ce0]  db.rs:5889
+    + !   3 _malloc_zone_malloc  (in libsystem_malloc.dylib) + 44,80  [0x199e2b948,0x199e2b96c]
+    + !   1 nanov2_malloc  (in libsystem_malloc.dylib) + 444  [0x199e01ddc]
+    + 2 _RNvNtCser8HrCHQmCi_5bytes5bytes22promotable_even_to_mut  (in rocks-parity-bench) + 280  [0x100ffdbfc]  bytes.rs:1257
+    +   1 ???  (in <unknown binary>)  [0x6009656195e0]
+    +   : 1 ???  (in <unknown binary>)  [0x14600ab90]
+    +   :   1 _RINvMsb_NtCs9rGgPUxlRPa_12pedradb_core2dbNtB6_2Db17prepare_write_opsINtNtCslJsSqIQKwiA_5alloc3vec3VecNtB6_7BatchOpEECsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 2356  [0x1010a9538]  db.rs:5917
+    +   :     1 _free  (in libsystem_malloc.dylib) + 88  [0x199e2c5cc]
+    +   1 ???  (in <unknown binary>)  [0x6009696adbb0]
+    +     1 ???  (in <unknown binary>)  [0x14600ab90]
+    +       1 _RINvMsb_NtCs9rGgPUxlRPa_12pedradb_core2dbNtB6_2Db17prepare_write_opsINtNtCslJsSqIQKwiA_5alloc3vec3VecNtB6_7BatchOpEECsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 2356  [0x1010a9538]  db.rs:5917
+    +         1 _free  (in libsystem_malloc.dylib) + 132  [0x199e2c5f8]
+    6588 Thread_46003974: pedra-compat-compact
+      6588 thread_start  (in libsystem_pthread.dylib) + 8  [0x199fecd34]
+        6588 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x199ff1f94]
+          6588 _RNvNvMs0_NtNtNtCsa9BKTri5B3M_3std3sys6thread4unixNtB7_6Thread3new12thread_start  (in rocks-parity-bench) + 400  [0x10111cfb8]
+            6588 _RNSNvYNCINvNtNtCsa9BKTri5B3M_3std6thread9lifecycle15spawn_uncheckedNCNvCsiewQOjgBaKc_14rocksdb_compat20spawn_compact_worker0uEs_0INtNtNtCsgtPOCBgevO_4core3ops8function6FnOnceuE9call_once6vtableB17_  (in rocks-parity-bench) + 132  [0x10108a478]  function.rs:250
+              6588 _RINvNtNtCsa9BKTri5B3M_3std3sys9backtrace28___rust_begin_short_backtraceNCNvCsiewQOjgBaKc_14rocksdb_compat20spawn_compact_worker0uEB1b_  (in rocks-parity-bench) + 12  [0x10107a5bc]  backtrace.rs:166
+                6588 _RNCNvCsiewQOjgBaKc_14rocksdb_compat20spawn_compact_worker0B3_  (in rocks-parity-bench) + 4608  [0x101084270]  lib.rs:2216
+                  6588 _RNvMs0_NtCs9rGgPUxlRPa_12pedradb_core10concurrentNtB5_12ConcurrentDb25fold_parked_once_off_lockCsiewQOjgBaKc_14rocksdb_compat  (in rocks-parity-bench) + 300  [0x10108bc04]  concurrent.rs:1351
+                    6588 _RNvMs5_NtCs9rGgPUxlRPa_12pedradb_core8memtableNtB5_8MemTable6absorb  (in rocks-parity-bench) + 44  [0x101023580]  memtable.rs:293
+                      6586 _RNvMs5_NtCs9rGgPUxlRPa_12pedradb_core8memtableNtB5_8MemTable10spill_tail  (in rocks-parity-bench) + 384  [0x1010220b8]  memtable.rs:287
+                      ! 6534 _RNvMs5_NtCs9rGgPUxlRPa_12pedradb_core8memtableNtB5_8MemTable10insert_map  (in rocks-parity-bench) + 1408  [0x101021260]  memtable.rs:393
+                      ! : 6533 _platform_memmove  (in libsystem_platform.dylib) + 536,552,...  [0x19a0223b8,0x19a0223c8,...]
+                      ! : 1 DYLD-STUB$$memmove  (in rocks-parity-bench) + 4  [0x101131f04]
+                      ! 31 _RNvMs5_NtCs9rGgPUxlRPa_12pedradb_core8memtableNtB5_8MemTable10insert_map  (in rocks-parity-bench) + 1572,788,...  [0x101021304,0x101020ff4,...]  memtable.rs:393
+                      ! 16 _RNvMs5_NtCs9rGgPUxlRPa_12pedradb_core8memtableNtB5_8MemTable10insert_map  (in rocks-parity-bench) + 172  [0x101020d8c]  memtable.rs:383
+                      ! : 12 _platform_memcmp  (in libsystem_platform.dylib) + 280,272,...  [0x19a01fe68,0x19a01fe60,...]
+                      ! : 4 DYLD-STUB$$memcmp  (in rocks-parity-bench) + 4  [0x101131eec]
+                      ! 3 _RNvMs5_NtCs9rGgPUxlRPa_12pedradb_core8memtableNtB5_8MemTable10insert_map  (in rocks-parity-bench) + 144,220  [0x101020d70,0x101020dbc]  memtable.rs:383
+                      ! 1 _RNvMs5_NtCs9rGgPUxlRPa_12pedradb_core8memtableNtB5_8MemTable10insert_map  (in rocks-parity-bench) + 8  [0x101020ce8]  memtable.rs:380
+                      ! 1 _RNvMs5_NtCs9rGgPUxlRPa_12pedradb_core8memtableNtB5_8MemTable10insert_map  (in rocks-parity-bench) + 88  [0x101020d38]  memtable.rs:383
+                      !   1 _RNvNtCser8HrCHQmCi_5bytes5bytes12shared_clone  (in rocks-parity-bench) + 0  [0x100ffd1bc]
+                      1 _RNvMs5_NtCs9rGgPUxlRPa_12pedradb_core8memtableNtB5_8MemTable10insert_map  (in rocks-parity-bench) + 3484  [0x101021a7c]  memtable.rs:401
+                      1 _RNvMs5_NtCs9rGgPUxlRPa_12pedradb_core8memtableNtB5_8MemTable10spill_tail  (in rocks-parity-bench) + 384  [0x1010220b8]  memtable.rs:279
+
+Total number in stack (recursive counted multiple, when >=5):
+        18       _platform_memcmp  (in libsystem_platform.dylib) + 0  [0x19a01fd50]
+        13       _platform_memmove  (in libsystem_platform.dylib) + 0  [0x19a0221a0]
+        9       DYLD-STUB$$memcmp  (in rocks-parity-bench) + 0  [0x101131ee8]
+        9       _RINvYINtNtNtCsgtPOCBgevO_4core5slice4iter6ChunksNtNtCs3G6olMR1Q7_6crc32c4util5U64LeENtNtNtNtBa_4iter6traits8iterator8Iterator4foldmNCNvNtBO_10hw_aarch6417crc_u64_parallel30EBO_  (in rocks-parity-bench) + 0  [0x101007248]
+        9       _RNvNtCser8HrCHQmCi_5bytes5bytes11shared_drop  (in rocks-parity-bench) + 0  [0x100ffd110]
+        9       nanov2_malloc  (in libsystem_malloc.dylib) + 0  [0x199e01c20]
+        7       DYLD-STUB$$memcpy  (in rocks-parity-bench) + 0  [0x101131ef4]
+        7       _nanov2_free  (in libsystem_malloc.dylib) + 0  [0x199e2350c]
+        6       _RNvMs2_NtCs9rGgPUxlRPa_12pedradb_core5cacheINtB5_11AnswerCacheINtNtCsgtPOCBgevO_4core6option6OptionNtNtCser8HrCHQmCi_5bytes5bytes5BytesEE3getCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench) + 0  [0x1010ca314]
+        6       _malloc_zone_malloc  (in libsystem_malloc.dylib) + 0  [0x199e2b91c]
+        5       _RNvMNtNtNtNtCsa9BKTri5B3M_3std3sys3pal4unix4timeNtB2_8Timespec3now  (in rocks-parity-bench) + 24  [0x10110630c]
+        5       _RNvNtCser8HrCHQmCi_5bytes5bytes12shared_clone  (in rocks-parity-bench) + 0  [0x100ffd1bc]
+        5       _free  (in libsystem_malloc.dylib) + 0  [0x199e2c574]
+        5       mach_absolute_time  (in libsystem_kernel.dylib) + 0  [0x199fb1254]
+        5       nanov2_allocate_outlined  (in libsystem_malloc.dylib) + 0  [0x199e23378]
+        5       nanov2_allocate_outlined  (in libsystem_malloc.dylib) + 252  [0x199e23474]
+        5       nanov2_find_block_and_allocate  (in libsystem_malloc.dylib) + 0  [0x199e01e20]
+
+Sort by top of stack, same collapsed (when >= 5):
+        _platform_memmove  (in libsystem_platform.dylib)        6732
+        mach_absolute_time  (in libsystem_kernel.dylib)        2068
+        _RNvMs9_CsiewQOjgBaKc_14rocksdb_compatNtB5_12LastGetTable7get_key  (in rocks-parity-bench)        717
+        _platform_memcmp  (in libsystem_platform.dylib)        714
+        _RNvMs9_CsiewQOjgBaKc_14rocksdb_compatNtB5_12LastGetTable9store_key  (in rocks-parity-bench)        441
+        write  (in libsystem_kernel.dylib)        285
+        _RNvNtCser8HrCHQmCi_5bytes5bytes11shared_drop  (in rocks-parity-bench)        233
+        _RNvMs2_NtCs9rGgPUxlRPa_12pedradb_core5cacheINtB5_11AnswerCacheINtNtCsgtPOCBgevO_4core6option6OptionNtNtCser8HrCHQmCi_5bytes5bytes5BytesEE3getCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench)        203
+        _RNvXs_NtCsjhBRx3bsdFE_20rocksdb_parity_bench7enginesNtB4_12CompatEngineNtB6_6Engine9get_probe  (in rocks-parity-bench)        121
+        _RINvMs_CsjhBRx3bsdFE_20rocksdb_parity_benchNtB5_10YcsbRunner3runNtNtB5_7engines12CompatEngineECsfgYT6aPkLat_18rocks_parity_bench  (in rocks-parity-bench)        109
+        clock_gettime_nsec_np  (in libsystem_c.dylib)        83
+        _RNvMsb_NtCs9rGgPUxlRPa_12pedradb_core2dbNtB5_2Db16publish_sequenceCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench)        75
+        DYLD-STUB$$memcmp  (in rocks-parity-bench)        74
+        clock_gettime  (in libsystem_c.dylib)        70
+        _RNvMs_CsjhBRx3bsdFE_20rocksdb_parity_benchNtB4_10YcsbRunner4pick  (in rocks-parity-bench)        68
+        nanov2_malloc  (in libsystem_malloc.dylib)        60
+        _RNvMs2_NtCs9rGgPUxlRPa_12pedradb_core5cacheINtB5_11AnswerCacheINtNtCsgtPOCBgevO_4core6option6OptionNtNtCser8HrCHQmCi_5bytes5bytes5BytesEE6insertCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench)        53
+        _nanov2_free  (in libsystem_malloc.dylib)        52
+        DYLD-STUB$$memcpy  (in rocks-parity-bench)        51
+        _RNvNtCs9rGgPUxlRPa_12pedradb_core2db15apply_ops_owned  (in rocks-parity-bench)        49
+        _RNvMsi_NtNtNtCslJsSqIQKwiA_5alloc11collections5btree3mapINtB5_8BTreeMapNtNtCser8HrCHQmCi_5bytes5bytes5BytesjE6insertCs9rGgPUxlRPa_12pedradb_core  (in rocks-parity-bench)        47
+        mach_timebase_info  (in libsystem_kernel.dylib)        46
+        _RNvXs1_NtNtCs9rGgPUxlRPa_12pedradb_core3wal6writerNtB5_16EncodedOpsSourceNtB5_12RecordSource15read_exact_into  (in rocks-parity-bench)        43
+        _RNvNtCs3G6olMR1Q7_6crc32c10hw_aarch646crc32c  (in rocks-parity-bench)        42
+        _RNvMsb_NtCs9rGgPUxlRPa_12pedradb_core2dbNtB5_2Db16commit_async_opsCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench)        41
+        _RNvMs5_NtCs9rGgPUxlRPa_12pedradb_core8memtableNtB5_8MemTable10insert_map  (in rocks-parity-bench)        36
+        _RNvMs5_NtCs9rGgPUxlRPa_12pedradb_core8memtableNtB5_8MemTable9get_entry  (in rocks-parity-bench)        35
+        _RNvNtCser8HrCHQmCi_5bytes5bytes12shared_clone  (in rocks-parity-bench)        35
+        _malloc_zone_malloc  (in libsystem_malloc.dylib)        33
+        nanov2_find_block_and_allocate  (in libsystem_malloc.dylib)        31
+        _RNvMNtNtNtNtCsa9BKTri5B3M_3std3sys3pal4unix4timeNtB2_8Timespec3now  (in rocks-parity-bench)        30
+        _RINvYINtNtNtCsgtPOCBgevO_4core5slice4iter6ChunksNtNtCs3G6olMR1Q7_6crc32c4util5U64LeENtNtNtNtBa_4iter6traits8iterator8Iterator4foldmNCNvNtBO_10hw_aarch6417crc_u64_parallel30EBO_  (in rocks-parity-bench)        26
+        _RNvMs5_NtCs9rGgPUxlRPa_12pedradb_core5cacheNtB5_10CountCache12record_dirty  (in rocks-parity-bench)        25
+        _RNvNtCsgtPOCBgevO_4core3fmt5write  (in rocks-parity-bench)        23
+        nanov2_allocate_outlined  (in libsystem_malloc.dylib)        22
+        _RNvMNtNtNtNtCsa9BKTri5B3M_3std3sys3pal4unix4timeNtB2_8Timespec12sub_timespec  (in rocks-parity-bench)        20
+        _RNvMs0_NtCs9rGgPUxlRPa_12pedradb_core10concurrentNtB5_12ConcurrentDb3getCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench)        20
+        DYLD-STUB$$clock_gettime  (in rocks-parity-bench)        19
+        DYLD-STUB$$mach_absolute_time  (in libsystem_c.dylib)        19
+        _free  (in libsystem_malloc.dylib)        18
+        _RINvMNtCs9rGgPUxlRPa_12pedradb_core10concurrentNtB3_10WriteGroup12submit_innerNtNtB5_3env6StdEnvECsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench)        17
+        _RNvMs_NtCs9rGgPUxlRPa_12pedradb_core3walINtB4_3WalNtNtCsa9BKTri5B3M_3std2fs4FileE23encode_write_op_batchesCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench)        15
+        _RNvXs_NtNtCslJsSqIQKwiA_5alloc3vec21spec_from_iter_nestedINtB6_3VecIBU_hEEINtB4_18SpecFromIterNestedB13_INtNtNtNtCsgtPOCBgevO_4core4iter8adapters3map3MapINtNtNtB1N_3ops5range5RangejENvCsjhBRx3bsdFE_20rocksdb_parity_bench4ykeyEE9from_iterCsfgYT6aPkLat_18rocks_parity_bench  (in rocks-parity-bench)        14
+        DYLD-STUB$$mach_timebase_info  (in libsystem_c.dylib)        13
+        _RNvMs2_NtCs9rGgPUxlRPa_12pedradb_core5cacheINtB5_11AnswerCacheINtNtCsgtPOCBgevO_4core6option6OptionNtNtCser8HrCHQmCi_5bytes5bytes5BytesEE5clearCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench)        13
+        _RINvMsb_NtCs9rGgPUxlRPa_12pedradb_core2dbNtB6_2Db17prepare_write_opsINtNtCslJsSqIQKwiA_5alloc3vec3VecNtB6_7BatchOpEECsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench)        12
+        pthread_mutex_lock  (in libsystem_pthread.dylib)        11
+        _RNvMsf_NtNtNtCsgtPOCBgevO_4core3fmt3num3impy10__fmt_inner  (in rocks-parity-bench)        10
+        nanov2_size  (in libsystem_malloc.dylib)        10
+        _RNvMsb_NtCs9rGgPUxlRPa_12pedradb_core2dbNtB5_2Db17note_dirty_pointsCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench)        9
+        _RNvMsb_NtCs9rGgPUxlRPa_12pedradb_core2dbNtB5_2Db6get_atCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench)        9
+        nanov2_pointer_size  (in libsystem_malloc.dylib)        9
+        _RNvMsb_NtCs9rGgPUxlRPa_12pedradb_core2dbNtB5_2Db20resolve_stored_valueCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench)        8
+        _RNvMsb_NtCs9rGgPUxlRPa_12pedradb_core2dbNtB5_2Db6lookupCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench)        8
+        tlv_get_addr  (in libdyld.dylib)        8
+        _RNvNtCser8HrCHQmCi_5bytes5bytes17shallow_clone_vec  (in rocks-parity-bench)        7
+        _platform_memset  (in libsystem_platform.dylib)        7
+        _RINvMs0_NtCs9rGgPUxlRPa_12pedradb_core10concurrentNtB6_12ConcurrentDb3putRShB19_ECsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench)        6
+        _RNvMs5_NtCs9rGgPUxlRPa_12pedradb_core8memtableNtB5_8MemTable19invalidate_tail_ord  (in rocks-parity-bench)        6
+        _RNvMsa_NtCsgtPOCBgevO_4core3fmtNtB5_9Formatter12pad_integral  (in rocks-parity-bench)        6
+        _RNvXsZ_NtCslJsSqIQKwiA_5alloc6stringNtB5_6StringNtNtCsgtPOCBgevO_4core3fmt5Write9write_str  (in rocks-parity-bench)        6
+        _malloc_zone_realloc  (in libsystem_malloc.dylib)        6
+        _RINvNvMs2_NtCslJsSqIQKwiA_5alloc7raw_vecINtB8_11RawVecInnerpE7reserve21do_reserve_and_handleNtNtBa_5alloc6GlobalEBa_  (in rocks-parity-bench)        5
+        _RNvMs4_NtCslJsSqIQKwiA_5alloc7raw_vecNtB5_11RawVecInner11finish_growB7_  (in rocks-parity-bench)        5
+        _RNvMs4_NtCslJsSqIQKwiA_5alloc7raw_vecNtB5_11RawVecInner11finish_growCsjhBRx3bsdFE_20rocksdb_parity_bench  (in rocks-parity-bench)        5
+        _RNvNvNtCslJsSqIQKwiA_5alloc3fmt6format12format_inner  (in rocks-parity-bench)        5
+        __commpage_gettimeofday_internal  (in libsystem_kernel.dylib)        5
+        _realloc  (in libsystem_malloc.dylib)        5
+        pthread_mutex_unlock  (in libsystem_pthread.dylib)        5
+
+Binary Images:
+       0x100ff8000 -        0x101177fff +rocks-parity-bench (0) <CE0CF4B3-05C5-38C3-A6AA-B5A023B2E256> /tmp/*/rocks-parity-bench
+       0x199c10000 -        0x199c60e0b  libobjc.A.dylib (912.7) <5C6386BD-F308-3370-BCE9-63D1A89DAB87> /usr/lib/libobjc.A.dylib
+       0x199c61000 -        0x199cea507  dyld (1.0.0 - 1165.3) <F635824E-318B-3F0C-842C-C369737F2B68> /usr/lib/dyld
+       0x199ceb000 -        0x199cefff8  libsystem_blocks.dylib (90) <6BC23DD4-94AC-3BB0-BC84-93E6D7813ACE> /usr/lib/system/libsystem_blocks.dylib
+       0x199cf0000 -        0x199d3afff  libxpc.dylib (2748.140.10) <987AF6AA-AB54-39CE-84CF-C6D2D1DC9464> /usr/lib/system/libxpc.dylib
+       0x199d3b000 -        0x199d55fff  libsystem_trace.dylib (1510.140.4) <72852AF1-4BCC-326A-BE13-6C6F22A44E4A> /usr/lib/system/libsystem_trace.dylib
+       0x199d56000 -        0x199dfffcf  libcorecrypto.dylib (1638.140.6) <717EA919-DB53-3DDA-AFA1-D87BFD649A83> /usr/lib/system/libcorecrypto.dylib
+       0x199e00000 -        0x199e3cff7  libsystem_malloc.dylib (521.120.7) <8A69A1AC-6D54-3B64-9860-CD0DB47473ED> /usr/lib/system/libsystem_malloc.dylib
+       0x199e3d000 -        0x199e84fff  libdispatch.dylib (1477.100.9) <1A1CE00A-89CD-36BA-9678-5038AEDD0D8D> /usr/lib/system/libdispatch.dylib
+       0x199e85000 -        0x199e87fff  libsystem_featureflags.dylib (86) <F9E56A3B-6350-3D8B-BEC6-6BC253B19355> /usr/lib/system/libsystem_featureflags.dylib
+       0x199e88000 -        0x199f06ff7  libsystem_c.dylib (1592.100.35) <D30F1830-93D0-3D0B-8CBA-9544E84BFD5B> /usr/lib/system/libsystem_c.dylib
+       0x199f07000 -        0x199f93ff7  libc++.1.dylib (1700.255.5) <AAA5636D-6F3F-3FA7-9F4A-CF966F0308FE> /usr/lib/libc++.1.dylib
+       0x199f94000 -        0x199fafffb  libc++abi.dylib (1700.255.5) <68E3EB36-B4BA-30E0-A240-31E942936D06> /usr/lib/libc++abi.dylib
+       0x199fb0000 -        0x199feaffb  libsystem_kernel.dylib (10063.141.2) <71FF45B8-F14E-3666-9E96-6CF58315B91D> /usr/lib/system/libsystem_kernel.dylib
+       0x199feb000 -        0x199ff7fff  libsystem_pthread.dylib (519.120.4) <E03E8478-6F5C-3D21-A79A-58408F514000> /usr/lib/system/libsystem_pthread.dylib
+       0x199ff8000 -        0x19a01dff7  libdyld.dylib (1165.3) <C433509D-7CD3-3884-B24D-5D68B9B95627> /usr/lib/system/libdyld.dylib
+       0x19a01e000 -        0x19a025fe7  libsystem_platform.dylib (316.100.10) <B4BF9F89-31D7-3742-8CE7-AB3554F9F525> /usr/lib/system/libsystem_platform.dylib
+       0x19a026000 -        0x19a052ffb  libsystem_info.dylib (583.0.1) <827E8091-520E-3537-8E72-678CED1BAAAE> /usr/lib/system/libsystem_info.dylib
+       0x19d416000 -        0x19d420ff3  libsystem_darwin.dylib (1592.100.35) <4DD0C579-C2FC-37A7-B6D7-1BA7268DD8B3> /usr/lib/system/libsystem_darwin.dylib
+       0x19d88c000 -        0x19d89cfff  libsystem_notify.dylib (317.120.2) <6902E910-4F75-32C7-BBF3-D46CD6743BFA> /usr/lib/system/libsystem_notify.dylib
+       0x19f6e2000 -        0x19f6fcfff  libsystem_networkextension.dylib (1838.140.5.0.1) <9ADD8A04-8F8C-3916-A9ED-20F6947294BD> /usr/lib/system/libsystem_networkextension.dylib
+       0x19f775000 -        0x19f78cff7  libsystem_asl.dylib (398) <138939F9-52A2-35BF-A8E5-4B2154A3F1B0> /usr/lib/system/libsystem_asl.dylib
+       0x1a1167000 -        0x1a116fff3  libsystem_symptoms.dylib (1871.140.6) <3E5E0270-E98C-303F-A566-624005886B88> /usr/lib/system/libsystem_symptoms.dylib
+       0x1a42f5000 -        0x1a431fffb  libsystem_containermanager.dylib (582.140.2) <230DEE13-0738-3710-A305-2D87D2522E52> /usr/lib/system/libsystem_containermanager.dylib
+       0x1a52b9000 -        0x1a52bdfff  libsystem_configuration.dylib (1300.120.2) <4F21FA09-0224-337E-9843-10109C019B1E> /usr/lib/system/libsystem_configuration.dylib
+       0x1a52be000 -        0x1a52c3fff  libsystem_sandbox.dylib (2190.140.13) <DA843F8C-6155-3B7C-99B0-DEB74CF9F109> /usr/lib/system/libsystem_sandbox.dylib
+       0x1a60e1000 -        0x1a60e3fff  libquarantine.dylib (172.140.2) <1F514E6F-7D94-356E-A5DC-6E8DCDD40846> /usr/lib/system/libquarantine.dylib
+       0x1a6898000 -        0x1a689dfff  libsystem_coreservices.dylib (152.5.3) <CF38F1DD-9C1B-34D8-8C4D-DC5899486CD1> /usr/lib/system/libsystem_coreservices.dylib
+       0x1a6bc6000 -        0x1a6bfcff3  libsystem_m.dylib (3252.100.9) <0BE2E009-9F7F-331D-B4AC-F39136591F6F> /usr/lib/system/libsystem_m.dylib
+       0x1a6bfd000 -        0x1a6c00fff  libcharset.1.dylib (102) <56C33416-C658-3BA4-9210-3D463DFDC945> /usr/lib/libcharset.1.dylib
+       0x1a6c01000 -        0x1a6c08ffb  libmacho.dylib (1010.6) <BB441E41-3804-3949-B620-0B29D7975490> /usr/lib/system/libmacho.dylib
+       0x1a6c29000 -        0x1a6c36ff7  libcommonCrypto.dylib (600028.100.1) <B0A2DDA7-420D-3DDE-9FE2-3AFDD2188F14> /usr/lib/system/libcommonCrypto.dylib
+       0x1a6c37000 -        0x1a6c42fff  libunwind.dylib (1700.242) <40A5125B-1225-337B-9D1A-968356D29580> /usr/lib/system/libunwind.dylib
+       0x1a6c43000 -        0x1a6c4afff  liboah.dylib (318.9) <749BB71D-B6F2-3C9D-A96D-65D22F7A42B3> /usr/lib/liboah.dylib
+       0x1a6c4b000 -        0x1a6c54fff  libcopyfile.dylib (196.120.5) <3F3A181E-C6AB-3F09-BC74-37B8AC2BBE57> /usr/lib/system/libcopyfile.dylib
+       0x1a6c55000 -        0x1a6c58fff  libcompiler_rt.dylib (103.2) <D133BCC9-EFB7-3C69-83D2-A33BB6AFA430> /usr/lib/system/libcompiler_rt.dylib
+       0x1a6c59000 -        0x1a6c5dffb  libsystem_collections.dylib (1592.100.35) <E08997D8-CC79-3A51-A3E0-B7706A78CC50> /usr/lib/system/libsystem_collections.dylib
+       0x1a6c5e000 -        0x1a6c61ffb  libsystem_secinit.dylib (147.140.2) <1F043FF2-1603-32F0-A8FB-DC6CBB118581> /usr/lib/system/libsystem_secinit.dylib
+       0x1a6c62000 -        0x1a6c64ffb  libremovefile.dylib (70.100.4) <01FAC88B-53F2-36C6-91EE-1EC62AC11CC8> /usr/lib/system/libremovefile.dylib
+       0x1a6c65000 -        0x1a6c65ffb  libkeymgr.dylib (31) <59B09DF8-56B7-3FAC-94D3-CC946797E98E> /usr/lib/system/libkeymgr.dylib
+       0x1a6c66000 -        0x1a6c6efff  libsystem_dnssd.dylib (2200.140.11) <4E11F9C6-8BD5-380C-A46F-7AB5DD6E91B6> /usr/lib/system/libsystem_dnssd.dylib
+       0x1a6c6f000 -        0x1a6c74fff  libcache.dylib (93) <291EEBA0-190B-30E0-A7FF-1ED0CA3505B4> /usr/lib/system/libcache.dylib
+       0x1a6c75000 -        0x1a6c76fff  libSystem.B.dylib (1345.120.2) <2C0809B3-B3E0-3921-BB57-569E6984EC1A> /usr/lib/libSystem.B.dylib
+       0x1a6cb2000 -        0x1a6cb8ff7  libiconv.2.dylib (102) <132D5CDF-9E1F-3595-A92D-22C4B22F7A92> /usr/lib/libiconv.2.dylib
+       0x261b69000 -        0x261b6cfff  libsystem_darwindirectory.dylib (86.0.2) <815D7896-79A3-36C4-8008-DD672DA625C5> /usr/lib/system/libsystem_darwindirectory.dylib
+       0x261b6d000 -        0x261b70fff  libsystem_eligibility.dylib (47.140.3) <ADF6A9D2-C5C3-3A9C-9302-4618D9DFAD21> /usr/lib/system/libsystem_eligibility.dylib
+       0x261b71000 -        0x261b74ffb  libsystem_sanitizers.dylib (8) <6BBDFCBC-D608-3318-BC22-2172E5258046> /usr/lib/system/libsystem_sanitizers.dylib

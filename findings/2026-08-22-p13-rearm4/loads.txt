@@ -1,0 +1,55 @@
+=== build start 11:19:11 load1=8.16 ===
+11:21:27 load1=39.43 (gate: 0/2 consecutive)
+11:22:27 load1=18.88 (gate: 0/2 consecutive)
+11:23:27 load1=17.15 (gate: 0/2 consecutive)
+11:24:27 load1=10.21 (gate: 0/2 consecutive)
+11:25:27 load1=11.54 (gate: 0/2 consecutive)
+11:26:27 load1=12.64 (gate: 0/2 consecutive)
+11:27:27 load1=12.80 (gate: 0/2 consecutive)
+11:28:27 load1=8.31 (gate: 0/2 consecutive)
+11:29:27 load1=6.86 (gate: 1/2 consecutive)
+QUIET at 11:29:27 load1=6.86 (2 consecutive under 10)
+..............
+test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 367 filtered out; finished in 0.20s
+
+=== round 1 kvr-compat 11:29:37 load1=6.86 ===
+=== round 1 async-compat 11:29:37 load1=6.86 ===
+=== round 1 rocks-kvr 11:29:38 load1=6.86 ===
+=== round 1 rocks-default 11:29:39 load1=7.03 ===
+=== round 2 kvr-compat 11:29:40 load1=7.03 ===
+=== round 2 async-compat 11:29:42 load1=7.03 ===
+=== round 2 rocks-kvr 11:29:42 load1=7.03 ===
+=== round 2 rocks-default 11:29:43 load1=10.79 ===
+=== round 3 kvr-compat 11:29:44 load1=10.79 ===
+=== round 3 async-compat 11:29:45 load1=10.79 ===
+=== round 3 rocks-kvr 11:29:45 load1=10.79 ===
+=== round 3 rocks-default 11:29:46 load1=10.79 ===
+11:29:47 WATCHDOG load1=10.79 >= 10 — battery marked NON-OFFICIAL
+=== long 2M compat 11:29:48 load1=10.79 ===
+=== long 2M rocks 11:30:21 load1=10.66 ===
+VERDICT: NON-OFFICIAL (load crossed 10 mid-battery) — evidence only
+--- kvr median-of-3 ---
+kvrocks_scan             med=34.43 runs=34.72/34.43/34.16
+kvrocks_get              med=6.30 runs=6.00/6.30/6.66
+kvrocks_pipelined_set    med=5.08 runs=5.08/1.12/6.30
+kvrocks_set              med=4.54 runs=4.54/0.23/5.51
+kvrocks_set_mc50         med=3.10 runs=2.15/3.73/3.10
+kvrocks_blob_set         med=1.36 runs=0.80/1.36/3.98
+--- async median-of-3 ---
+ycsb_f                   med=6.02 runs=6.02/3.18/7.71
+ycsb_e                   med=5.16 runs=7.05/4.51/5.16
+ycsb_a                   med=4.56 runs=7.74/4.56/2.14
+ycsb_d                   med=4.55 runs=5.59/4.55/1.18
+ycsb_c                   med=3.74 runs=4.49/3.74/3.52
+ycsb_b                   med=3.68 runs=4.49/3.51/3.68
+deps_cache_overwrite     med=3.67 runs=7.05/3.31/3.67
+deps_lock_prewrite       med=2.23 runs=4.04/2.23/1.78
+deps_apply_batch         med=2.17 runs=3.67/1.89/2.17
+deps_scan                med=1.71 runs=2.41/1.71/1.60
+deps_mvcc_latest         med=1.63 runs=2.26/1.62/1.63
+deps_raftlog             med=0.78 runs=1.28/0.78/0.78
+--- long 2M (single) ---
+kvrocks_get              ratio=6.49
+kvrocks_set              ratio=4.49
+kvrocks_pipelined_set    ratio=3.67
+P13-REARM4-DONE

@@ -1153,12 +1153,16 @@ mod tests {
         db.close().unwrap();
 
         // Corrupt one remote segment byte → restore fails closed (typed).
+        // P2.6 added `seg-*.hist.bloom` sidecars next to the segments —
+        // match the segment itself, not the (restore-unread) sidecar.
         let seg: PathBuf = std::fs::read_dir(&remote)
             .unwrap()
             .map(|e| e.unwrap().path())
             .find(|p| {
-                p.file_name()
-                    .is_some_and(|n| n.to_string_lossy().starts_with("seg-"))
+                p.file_name().is_some_and(|n| {
+                    let n = n.to_string_lossy();
+                    n.starts_with("seg-") && n.ends_with(".hist")
+                })
             })
             .expect("remote segment object");
         let mut bytes = std::fs::read(&seg).unwrap();

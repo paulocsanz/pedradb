@@ -179,8 +179,13 @@ Não fecha (e não se mente):
       a 12–15 no meio da bateria — pela norma P0.4 é **evidência, não
       recorde oficial**; composição conservadora só de números
       controlados (compat quieta 11,8M × fator A/B 1,30 ÷ peer quieta
-      2,49M) dá **≥6,1×**. Fechamento oficial aguarda a bateria quieta
-      re-armada)
+      2,49M) dá **≥6,1×**. **Re-arm 4 (2026-08-22,
+      `findings/2026-08-22-p13-rearm4/`)**: rounds **6,00/6,30/6,66 —
+      3/3 ≥5, med 6,30** (compat 14,9–15,2M, peer 2,36–2,48M estável)
+      e longa 2M **6,49**; watchdog flagou load 10,79 mid-battery →
+      **evidência (terceira confirmação suja consecutiva)**. Fechamento
+      oficial aguarda a bateria quieta re-armada (rearm5, no HEAD do
+      write-path)
 
 ### P2 — YCSB + quiet 3×
 
@@ -212,6 +217,16 @@ Não fecha (e não se mente):
       E 4,94 e C 3,95 caem −15–17% no lado compat com peer plano —
       assinatura de load, não do fix (A/B controlado: c +57%);
       oficiais aguardam a bateria quieta)
+      **Write path (2026-08-22, `findings/2026-08-22-writepath-fold-gc/`)**:
+      perfil do ycsb_a achou o fold do park em O(n²) (`Vec::insert(0)`
+      por versão em chave quente) queimando um núcleo inteiro + versões
+      sem GC (RSS 15,7 GB p/ ~100 MB vivos). Fix: `VecDeque` +
+      absorb oldest-first + GC por floor de snapshot-list (compat ON,
+      paridade rust-rocksdb; core OFF). A/B mesma caixa 20M ops:
+      CPU user da suíte **−93%** (1 073–1 109 s → 71 s), pico RSS
+      **−62%** (15,7→5,9 GB), **d +16,8%, b +14,8%, f +7,1% (3/3)**,
+      c +3,3%; a/e planos (limitados por fdatasync, drift ±6% da caixa
+      troca o sinal entre rodadas). Oficiais = rearm5 neste HEAD
 - [x] **P2.3** Script: `PEDRA_PARITY_ASYNC=1` + `FLOOR=5` **não** é o
       default do `tikv_ycsb_parity_v0.sh` — status: `done`
 
@@ -226,9 +241,9 @@ Não fecha (e não se mente):
 | P0.5 | p0 | set_mc50 ≥ 5× async | doing | quieto: **2.02 vs peer são** — não fecha; 3.4–9.2 eram peer doente | 2026-08-20 |
 | P1.1 | p1 | pipeline ≥ 5× | doing | re-arm: longa 5,00 exato, rounds 5,31 med c/ 1 perna anômala — segue na linha | 2026-08-22 |
 | P1.2 | p1 | set / blob ≥ 5× | doing | SET longa 4,65 no re-arm load-14 (assinatura load; quieta P0.4 era 5,45 3/3) — bateria quieta decide | 2026-08-22 |
-| P1.3 | p1 | get ≥ 5× | doing | fix commitado 312e354; re-arm: **3/3 ≥5 (6,28 med) + longa 7,04**, mas load 12–15 → evidência; composição controlada ≥6,1×; bateria quieta re-armada fecha | 2026-08-22 |
+| P1.3 | p1 | get ≥ 5× | doing | fix 312e354; rearm4: **3/3 ≥5 (6,30 med) + longa 6,49** (3ª confirmação suja; watchdog 10,79); composição controlada ≥6,1×; rearm5 fecha | 2026-08-22 |
 | P2.1 | p2 | quiet 3× | **done** | **árbitro @ load 9.4**: E 10.5 e scan 7.4 fecham; SET 5.41 longo; resto 0.94–3.8 | 2026-08-20 |
-| P2.2 | p2 | ycsb A–F ≥ 5× async | doing | E fechado (10.5 quieto, 3/3 toda condição); re-arm: **F 1,40→3,33, A 2,98→3,65** (fix P1.3, compat +100/+25–57% peer plano) — wall ≥5 ainda não | 2026-08-22 |
+| P2.2 | p2 | ycsb A–F ≥ 5× async | doing | E fechado (10.5 quieto); rearm4: F 3,33 / A 3,65 med; **write-path fix (fold O(n²)+GC)**: A/B 20M — CPU −93%, RSS −62%, d +17%, b +15%, f +7% 3/3; oficiais = rearm5 | 2026-08-22 |
 | P2.3 | p2 | script não default 5× | done | tikv_ycsb_parity_v0.sh | 2026-08-19 |
 
 ## Acceptance Criteria
