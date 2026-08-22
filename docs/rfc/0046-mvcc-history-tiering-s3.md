@@ -276,6 +276,19 @@ P0.4, gated em caixa quieta)
       chave ausente = mesmo estado final) — nuance documentada.
       Teste `changes_feed_fails_closed_below_watermark` — status:
       `done`
+- [ ] **P2.5** Índice por segmento do archive (custo de leitura, wart v0
+      do P2.1 tornado material pelo P0.5): `get_at` abaixo do watermark
+      CRC-walka **todos** os segmentos retidos por leitura (sem índice
+      de chaves; com o P0.5 o archive agora retém a janela inteira até
+      o cap — até 1 GiB caminhado por leitura pontual). Design: no seal,
+      gravar no manifesto por segmento (a) key range `[min,max]` do
+      user key e (b) amostra 1/64 das chaves (índice esparso/bloom
+      leve); `get_at_from_archive` pula segmento cujo range exclui a
+      chave; CRC por record no read permanece (integridade do que é
+      servido, inegociável); segmentos antigos sem índice continuam
+      exatos (walk completo — backward compat do formato).
+      `history_stats()` já expõe `local_bytes` para dimensionar o
+      ganho — status: `todo`
 
 ## Status (living — update with every PR)
 
@@ -294,6 +307,7 @@ P0.4, gated em caixa quieta)
 | P2.2 | p2 | métricas + banda | **done** | `eea769d` | 2026-08-21 |
 | P2.3 | p2 | fallback LSM abaixo do watermark (wart cap×sobrevivente) | **done** | `get_at_below_watermark_lsm` + teste | 2026-08-21 |
 | P2.4 | p2 | change feed fail-closed abaixo do watermark | **done** | `changes` check + teste | 2026-08-21 |
+| P2.5 | p2 | índice por segmento do archive (custo de leitura) | todo | wart material pelo P0.5; design no slice | 2026-08-21 |
 
 ## Acceptance Criteria
 
