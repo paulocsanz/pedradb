@@ -322,6 +322,13 @@ pub fn store<E: Env>(env: &E, dir: &Path, vs: &VersionSet, sync: bool) -> Result
         f.sync_data()?;
     }
     env.rename(&man_tmp, &man_final)?;
+    if sync {
+        // F195: the MANIFEST rename must be durable BEFORE `CURRENT` can
+        // point at it. Without this dir fsync a crash between the two
+        // renames can leave CURRENT → a missing MANIFEST (LevelDB/Rocks
+        // persist order: MANIFEST, dir, CURRENT, dir).
+        env.sync_dir(dir)?;
+    }
 
     let cur_tmp = dir.join(CURRENT_TMP);
     {

@@ -94,6 +94,27 @@ pub const HORIZON_SAMPLE_RING_CAP: usize = 4096;
 /// Default WAL file name inside the DB directory.
 pub const WAL_FILE_NAME: &str = "CURRENT.log";
 
+/// F188: marker byte prepended to inline values that would otherwise sniff
+/// as a vlog pointer (`VLG1…`/`VLG3…`) or that already start with the marker,
+/// so [`Db::resolve_stored_value`] strips exactly one byte unconditionally.
+const INLINE_ESCAPE: u8 = 0x01;
+
+/// F188: stored form of an inline (non-spilled) value. Escaped iff the raw
+/// value could be misread as a vlog pointer, or already starts with the
+/// marker (so reader/writer stay inverse for every input).
+fn escape_inline_value(value: Bytes) -> Bytes {
+    if value.is_empty() {
+        return value;
+    }
+    if value[0] == INLINE_ESCAPE || vlog::decode_vlog_ptr(&value).is_some() {
+        let mut escaped = Vec::with_capacity(value.len() + 1);
+        escaped.push(INLINE_ESCAPE);
+        escaped.extend_from_slice(&value);
+        return Bytes::from(escaped);
+    }
+    value
+}
+
 /// WAL recovery policy at open (RFC-0047 P0.2).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum WalRecovery {
@@ -888,6 +909,14 @@ pub struct Db<E: Env = StdEnv> {
     next_file_num: u64,
     /// Last written MANIFEST file number (0 = none yet).
     manifest_file_num: u64,
+    /// Monotonic MANIFEST snapshot epoch (F187). Unlike
+    /// [`Self::manifest_file_num`] (which undos roll back), it never
+    /// decreases for the process lifetime, so it can order off-lock
+    /// [`ManifestPersist::write`] calls.
+    manifest_epoch: u64,
+    /// Highest epoch actually written to disk (F187). A stale off-lock
+    /// persist no-ops instead of regressing `CURRENT`.
+    manifest_write_gate: Arc<Mutex<u64>>,
     /// MANIFEST flag: open `VALUES.vlog.new` (SST pointers already remapped).
     vlog_use_new: bool,
     /// Next sequence to assign (1-based; 0 means “no writes yet”).
@@ -1365,6 +1394,8 @@ impl<E: Env> Db<E> {
             sst_levels,
             next_file_num,
             manifest_file_num,
+            manifest_epoch: 0,
+            manifest_write_gate: Arc::new(Mutex::new(0)),
             vlog_use_new,
             next_seq,
             published_seq: Arc::new(AtomicU64::new(next_seq.saturating_sub(1))),
@@ -1802,11 +1833,35 @@ impl<E: Env> Db<E> {
         Ok(())
     }
 
-    /// Raise the GC watermark (monotonic). Used after history-dropping compact.
-    fn raise_earliest_readable(&mut self, floor: SequenceNumber) {
+    /// Raise the GC watermark (monotonic). Used after history-dropping compact
+    /// and after a fold that dropped versions below the snapshot-list floor
+    /// (in-memory only: WAL replay restores the dropped versions on reopen).
+    pub(crate) fn raise_earliest_readable(&mut self, floor: SequenceNumber) {
         if floor > self.earliest_readable_seq {
             self.earliest_readable_seq = floor;
         }
+    }
+
+    /// Versions of `user_key` across every live memtable layer (fold-GC tests).
+    #[cfg(test)]
+    pub(crate) fn count_mem_versions(&self, user_key: &[u8]) -> usize {
+        let hit = |m: &MemTable| {
+            m.iter_internal()
+                .filter(|(k, _)| k.user_key.as_ref() == user_key)
+                .count()
+        };
+        let mut n = hit(&self.mem);
+        if let Some(ref imm) = self.imm {
+            n += hit(imm);
+        }
+        if let Some(ref p) = self.flush_read_pin {
+            n += hit(p);
+        }
+        n + self
+            .parked_unflushed
+            .iter()
+            .map(|m| hit(m))
+            .sum::<usize>()
     }
 
     /// RFC-0046 P0.1: highest published sequence at or before
@@ -2414,6 +2469,10 @@ impl<E: Env> Db<E> {
 
     /// Resolve vlog pointer to payload (or return inline value).
     fn resolve_stored_value(&self, stored: Bytes) -> Result<Bytes> {
+        if stored.first() == Some(&INLINE_ESCAPE) {
+            // F188: escaped inline value — strip the marker byte.
+            return Ok(stored.slice(1..));
+        }
         let Some(ptr) = vlog::decode_vlog_ptr(stored.as_ref()) else {
             return Ok(stored);
         };
@@ -2616,10 +2675,12 @@ impl<E: Env> Db<E> {
     /// Maybe rewrite a large put value into the vlog; returns stored value bytes.
     fn maybe_spill_large_value(&mut self, value: Bytes) -> Result<Bytes> {
         let Some(threshold) = self.large_value_threshold else {
-            return Ok(value);
+            // F188: inline values are stored escaped so an honest `VLG…`
+            // payload can never be resolved as a pointer on read.
+            return Ok(escape_inline_value(value));
         };
         if value.len() < threshold {
-            return Ok(value);
+            return Ok(escape_inline_value(value));
         }
         if self.vlog.is_none() {
             if self.vlog_rotate_bytes.is_some() {
@@ -4257,11 +4318,12 @@ impl<E: Env> Db<E> {
         self.sync_dir_if_required(&self.dir)?;
         let new_table = SstTable::open_on(&self.env, &final_path)?;
         self.table_cache.insert(Arc::new(new_table.clone()));
+        let prev_next = self.next_file_num;
         self.next_file_num = num + 1;
 
         let old_paths: Vec<PathBuf> = self.ssts.iter().map(|t| t.path().to_path_buf()).collect();
-        self.ssts = vec![new_table];
-        self.sst_levels = vec![MAX_LSM_LEVEL];
+        let prev_tables = std::mem::replace(&mut self.ssts, vec![new_table]);
+        let prev_levels = std::mem::replace(&mut self.sst_levels, vec![MAX_LSM_LEVEL]);
         // Same as every other inventory swap: rebuild `sst_order_newest`
         // before reads resume (stale indices panic `lookup`).
         self.note_sst_inventory_changed();
@@ -4270,8 +4332,21 @@ impl<E: Env> Db<E> {
             self.bytes_written_sst = self.bytes_written_sst.saturating_add(len);
         }
         // Watermark must be raised before MANIFEST so reopen recovers it.
+        let prev_earliest = self.earliest_readable_seq;
         self.note_version_gc_watermark(CompactOptions::latest_only().gc);
-        self.persist_manifest()?;
+        if let Err(e) = self.persist_manifest() {
+            // F194: same contract as every other inventory swap (F173 /
+            // `L0CompactUndo`): Err leaves the pre-compact state — a later
+            // persist must not commit a GC the caller saw fail.
+            self.ssts = prev_tables;
+            self.sst_levels = prev_levels;
+            self.next_file_num = prev_next;
+            self.earliest_readable_seq = prev_earliest;
+            self.note_sst_inventory_changed();
+            let _ = self.env.remove_file(&final_path);
+            let _ = self.env.sync_dir(&self.dir);
+            return Err(e);
+        }
 
         for path in old_paths {
             if path != final_path {
@@ -5378,14 +5453,15 @@ impl<E: Env> Db<E> {
             });
         }
         let to = to_seq.min(self.last_sequence());
-        if self.feed_is_lazy() {
-            return Ok(self
-                .lazy_feed_entries()?
+        let entries = if self.feed_is_lazy() {
+            self.lazy_feed_entries()?
                 .into_iter()
                 .filter(|e| e.sequence > from_seq && e.sequence <= to)
-                .collect());
-        }
-        Ok(self.change_log.changes_in(from_seq, to))
+                .collect::<Vec<_>>()
+        } else {
+            self.change_log.changes_in(from_seq, to)
+        };
+        self.resolve_feed_entries(entries)
     }
 
     /// All durable changes with `sequence > from_seq` (tail / watch catch-up).
@@ -5406,14 +5482,40 @@ impl<E: Env> Db<E> {
     #[must_use]
     pub fn changes_after(&self, from_seq: SequenceNumber) -> Vec<ChangeEntry> {
         let from = from_seq.min(self.last_sequence());
-        if self.feed_is_lazy() {
-            let entries = match self.lazy_feed_entries() {
+        let entries = if self.feed_is_lazy() {
+            match self.lazy_feed_entries() {
                 Ok(e) => e,
                 Err(e) => fail_stop_corrupt_value("changes_after feed rebuild", &e),
-            };
-            return entries.into_iter().filter(|e| e.sequence > from).collect();
+            }
+            .into_iter()
+            .filter(|e| e.sequence > from)
+            .collect::<Vec<_>>()
+        } else {
+            self.change_log.changes_after(from)
+        };
+        match self.resolve_feed_entries(entries) {
+            Ok(e) => e,
+            // F1 contract (doc above): never serve the raw pointer; fail-stop.
+            Err(e) => fail_stop_corrupt_value("changes_after feed resolve", &e),
         }
-        self.change_log.changes_after(from)
+    }
+
+    /// F190: cached feed entries are stored-form values (vlog pointer or the
+    /// F188 inline escape) — resolve to user values at the read boundary so
+    /// every feed path agrees with `collect_feed_from_live` (which resolves).
+    /// Range-delete entries carry the exclusive end key, not a value: as-is.
+    ///
+    /// # Errors
+    /// [`CoreError::CorruptValue`] when a spilled payload fails CRC/I/O.
+    fn resolve_feed_entries(&self, entries: Vec<ChangeEntry>) -> Result<Vec<ChangeEntry>> {
+        let mut out = Vec::with_capacity(entries.len());
+        for mut e in entries {
+            if e.kind == ChangeKind::Put {
+                e.value = self.resolve_stored_value(e.value)?;
+            }
+            out.push(e);
+        }
+        Ok(out)
     }
 
     /// `changelog_interval == 0`: do not grow an in-memory ChangeEntry vec on
@@ -6671,11 +6773,18 @@ impl<E: Env> Db<E> {
         let mut vs = self.version_set_now()?;
         vs.manifest_file_num = vs.manifest_file_num.saturating_add(1).max(1);
         self.manifest_file_num = vs.manifest_file_num;
+        let epoch = self
+            .manifest_epoch
+            .checked_add(1)
+            .expect("manifest epoch overflow after 2^64 persists");
+        self.manifest_epoch = epoch;
         Ok(ManifestPersist {
             env: self.env.clone(),
             dir: self.dir.clone(),
             vs,
             sync: self.sync,
+            epoch,
+            gate: Arc::clone(&self.manifest_write_gate),
         })
     }
 
@@ -6790,15 +6899,32 @@ pub struct ManifestPersist<E: Env> {
     dir: PathBuf,
     vs: VersionSet,
     sync: bool,
+    /// Snapshot epoch (F187): `write` no-ops when a newer epoch already won.
+    epoch: u64,
+    /// Highest epoch written to disk, shared with `Db`.
+    gate: Arc<Mutex<u64>>,
 }
 
 impl<E: Env> ManifestPersist<E> {
     /// `fsync` MANIFEST + CURRENT. Does not touch `Db`.
     ///
+    /// F187: a snapshot taken before a newer successful persist is stale —
+    /// writing it would regress `CURRENT` (and `manifest::store` deletes the
+    /// newer MANIFEST). Stale snapshots no-op; the watermark advances only on
+    /// success, so a failed newer write leaves older snapshots eligible.
+    ///
     /// # Errors
     /// Env I/O.
     pub fn write(self) -> Result<()> {
-        manifest::store(&self.env, &self.dir, &self.vs, self.sync)
+        let mut written = self.gate.lock();
+        if self.epoch <= *written {
+            return Ok(());
+        }
+        let res = manifest::store(&self.env, &self.dir, &self.vs, self.sync);
+        if res.is_ok() {
+            *written = self.epoch;
+        }
+        res
     }
 }
 
@@ -12286,7 +12412,7 @@ mod tests {
         // Deterministic schedule: puts (multi-version), point deletes, a
         // range delete, then flushes to split layers, then more puts.
         let mut x = 0x1357_9BDF_2468_ACE0_u64;
-        let mut step = || {
+        let step = || {
             x ^= x << 13;
             x ^= x >> 7;
             x ^= x << 17;

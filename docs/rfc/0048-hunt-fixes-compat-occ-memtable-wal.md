@@ -55,6 +55,32 @@
 - [x] **P2.1** Fuzz de framing do WAL com o painel `explode_choices` + os dois novos kinds (`ZeroHeaderTail`, resync re-anchor) no sweep de corrupção — status: `done` (2026-08-22; `ZeroTail` + `ForgeZeroHeaderAlive` no painel, sweep afirma FailStop tipado `WalZeroHeader` e o re-anchor `resync_origin`; dentes verificados neutralizando o check F170: sweep falha `expected FailStop, got Ok([])`)
 - [x] **P2.2** `blocks_overlapping_range` simétrico com `blocks_for_point` sob user-key split (leitor defender-se do writer futuro) — status: `done` (2026-08-22; partição `< s` + guarda `hi >= s`; prova unitária dois estados com índice hand-made, controles sem split idênticos)
 
+### P1.5 — wave 2 "ache mais" (2026-08-22; superfícies não caçadas: cache, occ/concurrent, compat txn/shape, feed, manifest+WAL rotate, rewrite/merge)
+- [x] **W1** core: `rewrite_ssts` derrubava tombstone em rewrite PARCIAL (gate `to_level == MAX_LSM_LEVEL` irrelevante) — F177, fix `bottommost = input cobre todas as SSTs` — status: `done`
+- [x] **W2** core: `AnswerCache` FIFO fantasma do `invalidate` (capacidade mente + evicção prematura da reinserida) — F178, pareamento por época — status: `done`
+- [x] **W3** compat: `scan_count` sem read-your-own-writes — F179, `staged_entries` + overlay — status: `done`
+- [x] **W4** compat: `set_snapshot` no-op no raw iterator — F180, `ReadOptions.snap` — status: `done`
+- [x] **W5** compat: seeks reversos param em cima do upper exclusivo — F181, `step_prev_past_upper` — status: `done`
+- [x] **W6** core: WAL rotate trunca inode vivo com frame async pendente (reopen FailStop c/ L0+MANIFEST íntegros) — F182, drain antes do `create_on` — status: `done`
+- [x] **W7** core: feed lazy descarta chaves flushadas (curto-circuito WAL) — F183, união CHANGELOG+WAL por cutoff de seq (+ hardening sort B2 latente) — status: `done`
+- [x] **W8** core: `mem_layers` fold-antes-de-pending inverte first-hit do `lookup` (get stalado × scan; afeta fluxo sequencial) — F184, swap das cadeias — status: `done`
+- Não-prováveis classificados (sem fix forçado): MANIFEST off-lock×CURRENT (interleave), CAS×mem aplicada (Env stall), leader panic (Env panic), rollback F173 no `compact_for_reads` (fault env), compat txn unpinned sob auto_reclaim, codec CF process-local, `Manifest::decode` with_capacity remoto (LOW).
+
+### W3 — wave 3 "vai" (2026-08-22; backlog dois-estados + manifest pipeline, vlog/feed, compat CF/batch)
+- [x] **W3.1** compat: codec CF process-local → registro persistido `CFREG` (frozen + reconcile fail-closed) — F185, c10/c10b — status: `done`
+- [x] **W3.2** compat: `Transaction` sem pin de version-GC sob `auto_reclaim` — F186, c11 — status: `done`
+- [x] **W3.3** core: snapshot off-lock de MANIFEST obsoleto regride CURRENT e deleta o manifest novo — F187, época monotônica + gate, k17 — status: `done`
+- [x] **W3.4** core: valor honesto colidindo com mágica `VLG` sniffado como ponteiro — F188, escape `0x01` no chokepoint, k18 — status: `done`
+- [x] **W3.5** core: vlog GC × caches sem espelho SST — F189 **REFUTADO** (3 rotas; retired espelha SSTs, parked é fechado por gate `mem_is_empty_for_rotate`; k20 guarda a invariante do gate) — status: `done` (dead end registrado)
+- [x] **W3.6** core: feed não-lazy serve ponteiro VLG cru — F190, `resolve_feed_entries` na borda, k21 — status: `done`
+- [x] **W3.7** compat: adicionar CF a DB default-only vaza `cf\0…` no scan default — F191, recusa fail-closed, c12 — status: `done`
+- [x] **W3.8** compat: `open_default` não cria diretório (paridade rust-rocksdb) — F192, c13 — status: `done`
+- [x] **W3.9** compat: `flush_wal` no-op sob `set_sync(false)` — F193, `inner.sync()`, c14 (fault env) — status: `done`
+- [x] **W3.10** core: `compact_for_reads` sem undo F173 (GC falho commitado pelo próximo flush) — F194, k23 — status: `done`
+- [x] **W3.11** core: `sync_dir` entre rename do MANIFEST e swing do CURRENT — F195, hardening aplicado (prova NEEDS-CRASH-ENV) — status: `done` (hardening)
+- [x] **W3.12** sst/table "residual F167" — **REFUTADO** por leitura (tombstones coletados antes do salto; salto ⟺ sem pontos na janela) + diferencial mecânico k22 (150 seeds × 5 APIs de leitura em acordo) — status: `done` (dead end registrado)
+- Abertos: manifest#3 (sync_dir Err pós-swing do CURRENT → memória atrás do disco; crash-window, precisa rename-as-commit+fence), history LOW (`Manifest::decode` with_capacity remoto) — como na wave 2.
+
 ## Status (living — update with every PR)
 
 | ID | Band | Title | Status | Task / PR | Updated |
@@ -72,12 +98,32 @@
 | P1.4 | p1 | paridade Rocks: scans no read-set OCC | done | doc em `rocksdb-compat/src/txn.rs` | 2026-08-22 |
 | P2.1 | p2 | fuzz framing WAL (novos kinds) | done | `wal/recover_choose.rs` + `tests/recover_choose.rs` | 2026-08-22 |
 | P2.2 | p2 | simetria blocks_for_point/range | done | `sst/table.rs` + teste unitário dois estados | 2026-08-22 |
+| W1 | p1.5 | rewrite parcial conserva tombstone (F177) | done | `db.rs` + `merge.rs`; prova k12 (artefato temporário) | 2026-08-22 |
+| W2 | p1.5 | FIFO do AnswerCache sem fantasma (F178) | done | `cache.rs`; k13 | 2026-08-22 |
+| W3 | p1.5 | scan_count com own-writes (F179) | done | `occ.rs` + compat `txn.rs`; c7 | 2026-08-22 |
+| W4 | p1.5 | set_snapshot efetivo no raw iterator (F180) | done | compat `shape.rs` + `lib.rs`; c8 | 2026-08-22 |
+| W5 | p1.5 | seeks reversos vs upper exclusivo (F181) | done | compat `shape.rs`; c9 | 2026-08-22 |
+| W6 | p1.5 | rotate WAL drena pendente antes do truncate (F182) | done | `db.rs` (`rotate_wal_now`); k14 | 2026-08-22 |
+| W7 | p1.5 | feed lazy une CHANGELOG+WAL (F183; +B2 latente) | done | `db.rs` (`lazy_feed_entries`, `collect_feed_from_live`); k15 | 2026-08-22 |
+| W8 | p1.5 | mem_layers pending-antes-do-fold (F184) | done | `db.rs` (`mem_layers`); k16 | 2026-08-22 |
+| W3.1 | w3 | CFREG persistido p/ codec CF (F185) | done | compat `lib.rs`; c10/c10b/c10ctl | 2026-08-22 |
+| W3.2 | w3 | pin de GC na Transaction (F186) | done | compat `txn.rs`; c11/c11ctl | 2026-08-22 |
+| W3.3 | w3 | época de MANIFEST off-lock (F187) | done | `db.rs` (`take_manifest_persist`/`ManifestPersist`); k17 | 2026-08-22 |
+| W3.4 | w3 | escape de colisão VLG inline (F188) | done | `db.rs` (`escape_inline_value`); k18 | 2026-08-22 |
+| W3.5 | w3 | vlog GC × parked/retired — REFUTADO | done | dead end + guarda k20 do gate | 2026-08-22 |
+| W3.6 | w3 | feed resolve ponteiros na borda (F190) | done | `db.rs` (`resolve_feed_entries`); k21 | 2026-08-22 |
+| W3.7 | w3 | recusa add-CF em default raw (F191) | done | compat `lib.rs`; c12 | 2026-08-22 |
+| W3.8 | w3 | open_default cria diretório (F192) | done | compat `lib.rs` + `txn.rs`; c13 | 2026-08-22 |
+| W3.9 | w3 | flush_wal fsynca de verdade (F193) | done | compat `lib.rs`; c14 (FailingEnv) | 2026-08-22 |
+| W3.10 | w3 | undo F194 no compact_for_reads | done | `db.rs`; k23 (Rename count=3) | 2026-08-22 |
+| W3.11 | w3 | sync_dir antes do swing CURRENT (F195) | done | `manifest.rs` (hardening; NEEDS-CRASH-ENV) | 2026-08-22 |
+| W3.12 | w3 | sst overlaps residual — REFUTADO | done | diferencial k22 (scan×get×count×prefix) | 2026-08-22 |
 
 ## Acceptance Criteria
 
-- **Tests:** `pedradb-core --lib` (380 passando — incluindo `point_in_time_reports_resync_reanchor`, `zero_header_journals_and_pit_reports`, `torn_tail_*`, theorem do recover kernel, sweep `explode` com os kinds novos e a simetria de blocos; as 3 falhas remote-tier da sessão paralela foram resolvidas por eles), `rocksdb-compat` (43, incl. `txn_snapshot_hides_later_writes` atualizado), harness `compat_hunt` (7) + `core_hunt` (10, k1..k4b + k7..k11) + oracle `wal_crc_flip_is_fail_stop_or_clean` — todos verdes com os fixes; os 17 de hunt falham sem eles.
+- **Tests:** `pedradb-core --lib` (390 passando — incluindo `point_in_time_reports_resync_reanchor`, `zero_header_journals_and_pit_reports`, `torn_tail_*`, theorem do recover kernel, sweep `explode` com os kinds novos e a simetria de blocos), `rocksdb-compat` (40+7, incl. `txn_snapshot_hides_later_writes` atualizado), harness `compat_hunt` (**21**, c1..c14 + controles) + `core_hunt` (**32**, k1..k4b + k7..k23 + controles + diferencial k22) + oracle `wal_crc_flip_is_fail_stop_or_clean` — todos verdes com os fixes; os de hunt falham sem eles.
 - **Telemetry / Analytics:** none — correção de corretude; o `CORRUPTLOG` (RFC-0038) recebe eventos `resync` e `zero_header` (P1.2).
-- **Documentation:** este RFC + fichas F165–F176 em `determinismo/pedradb-dst/findings/` + LEDGER do hunt 2026-08-21.
+- **Documentation:** este RFC + fichas F165–F194 em `determinismo/pedradb-dst/findings/` (+ 2 dead ends F189/sst registrados) + LEDGER do hunt 2026-08-21/22 (waves 1, 2 e 3).
 - **Screenshots:** backend-only.
 
 ## Out of scope

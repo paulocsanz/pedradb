@@ -71,7 +71,10 @@ impl OptimisticTransactionDB<StdEnv> {
     /// # Errors
     /// Pedra open errors.
     pub fn open_default(path: impl AsRef<Path>) -> Result<Self> {
-        Self::open(&super::Options::new(), path)
+        // F192: create if missing — rust-rocksdb `open_default` parity.
+        let mut opts = super::Options::new();
+        opts.create_if_missing(true);
+        Self::open(&opts, path)
     }
 
     /// Open with explicit options.
@@ -156,14 +159,28 @@ impl<E: Env> Deref for OptimisticTransactionDB<E> {
 /// consumes the handle.
 pub struct Transaction<'a, E: Env = StdEnv> {
     occ: Mutex<OccTransaction<E>>,
+    /// Version-GC pin held from begin to drop (F186) — see [`Self::new`].
+    pin: pedradb_core::SnapshotPin,
     codec: KeyCodec,
     db: &'a DB<E>,
 }
 
+impl<E: Env> Drop for Transaction<'_, E> {
+    fn drop(&mut self) {
+        self.db.inner.release_snapshot_pin(self.pin);
+    }
+}
+
 impl<'a, E: Env> Transaction<'a, E> {
     pub(crate) fn new(db: &'a DB<E>) -> Self {
+        // F186: pin the version-GC floor for the transaction's lifetime
+        // (rust-rocksdb: a txn's snapshot is pinned; `auto_reclaim` must
+        // never abort a live txn with `SnapshotTooOld`). Pin BEFORE
+        // `begin_occ` so the OCC snapshot is always ≥ the pinned floor.
+        let pin = db.inner.pin_snapshot();
         Self {
             occ: Mutex::new(db.inner.begin_occ()),
+            pin,
             codec: db.codec.clone(),
             db,
         }
@@ -358,8 +375,11 @@ impl<'a, E: Env> Transaction<'a, E> {
     ///
     /// # Errors
     /// `Busy` (write conflict), snapshot-too-old, or WAL I/O.
-    pub fn commit(self) -> Result<()> {
-        let occ = self.occ.into_inner();
+    pub fn commit(mut self) -> Result<()> {
+        // Drop (F186 pin release) needs `self` intact; swap in a finished
+        // stub instead of a partial move out of a Drop type.
+        let stub = self.db.inner.begin_occ();
+        let occ = std::mem::replace(&mut self.occ, Mutex::new(stub)).into_inner();
         occ.commit().map_err(|e| match e {
             CoreError::TransactionConflict => Error {
                 msg: "Busy: transaction conflict: key changed since snapshot".into(),

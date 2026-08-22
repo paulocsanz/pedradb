@@ -381,21 +381,127 @@ impl ColumnFamily {
 /// Default CF name (raw keys when it is the only CF; prefixed otherwise).
 pub const DEFAULT_CF: &str = "default";
 
-/// CF↔keyspace codec. `default` is raw **only** when no named CF exists;
-/// otherwise it is prefixed too, so full-CF range scans never leak another
-/// CF's encoded keys.
+/// F185: persisted CF registry (`CFREG` next to the DB). The CF↔keyspace
+/// codec used to be derived from the list *supplied at open*
+/// (`default_raw = cfs.len() <= 1`), process-local: reopening without the
+/// named CFs (or adding a new CF to a default-only DB) flipped the codec
+/// and silently read a different keyspace — committed keys answered `None`.
+/// The registry freezes `default_raw` at first creation and reconciles the
+/// CF set on every open (an existing CF omitted from the open list is an
+/// error, like rocksdb's "column families not opened").
+const CFREG_FILE_NAME: &str = "CFREG";
+const CFREG_MAGIC: &[u8] = b"COMPATCF1\n";
+
+fn cfreg_path(dir: &std::path::Path) -> std::path::PathBuf {
+    dir.join(CFREG_FILE_NAME)
+}
+
+fn validate_cf_name(name: &str) -> Result<()> {
+    if name.contains('\n') || name.contains('\0') {
+        return Err(Error {
+            msg: format!("invalid column family name {name:?} (NUL/newline reserved)"),
+            kind: ErrorKind::InvalidArgument,
+        });
+    }
+    Ok(())
+}
+
+/// `(default_raw, non-default CF names)`, or `None` when no registry exists
+/// yet (first compat open / pre-F185 DB).
+///
+/// # Errors
+/// Fail-closed on a corrupt registry (a silent recreate could flip the
+/// codec and hide committed keys).
+fn load_cf_registry(dir: &std::path::Path) -> Result<Option<(bool, Vec<String>)>> {
+    let path = cfreg_path(dir);
+    let raw = match std::fs::read(&path) {
+        Ok(r) => r,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => {
+            return Err(Error {
+                msg: format!("read {}: {e}", path.display()),
+                kind: ErrorKind::Io,
+            })
+        }
+    };
+    let bad = |what: &str| {
+        Err(Error {
+            msg: format!("CFREG corrupt ({what}): {}", path.display()),
+            kind: ErrorKind::InvalidArgument,
+        })
+    };
+    if !raw.starts_with(CFREG_MAGIC) {
+        return bad("bad magic");
+    }
+    let mut lines = raw[CFREG_MAGIC.len()..].split(|&b| b == b'\n');
+    let default_raw = match lines.next() {
+        Some(b"R") => true,
+        Some(b"P") => false,
+        _ => return bad("codec flag"),
+    };
+    let mut names = Vec::new();
+    for line in lines {
+        if line.is_empty() {
+            continue;
+        }
+        match std::str::from_utf8(line) {
+            Ok(s) => names.push(s.to_string()),
+            Err(_) => return bad("name not utf-8"),
+        }
+    }
+    Ok(Some((default_raw, names)))
+}
+
+/// Persist the registry atomically (tmp + rename + dir fsync). Written
+/// BEFORE the core DB opens so a crash mid-open never leaves a CF'd DB
+/// without its registry.
+///
+/// # Errors
+/// I/O.
+fn store_cf_registry(dir: &std::path::Path, default_raw: bool, non_default: &[String]) -> Result<()> {
+    use std::io::Write as _;
+    let path = cfreg_path(dir);
+    let tmp = dir.join(format!("{CFREG_FILE_NAME}.tmp"));
+    let mut buf = CFREG_MAGIC.to_vec();
+    buf.extend_from_slice(if default_raw { b"R\n" } else { b"P\n" });
+    for n in non_default {
+        buf.extend_from_slice(n.as_bytes());
+        buf.push(b'\n');
+    }
+    {
+        let mut f = std::fs::File::create(&tmp).map_err(|e| Error {
+            msg: format!("create {}: {e}", tmp.display()),
+            kind: ErrorKind::Io,
+        })?;
+        f.write_all(&buf).map_err(|e| Error {
+            msg: format!("write {}: {e}", tmp.display()),
+            kind: ErrorKind::Io,
+        })?;
+        f.sync_all().map_err(|e| Error {
+            msg: format!("sync {}: {e}", tmp.display()),
+            kind: ErrorKind::Io,
+        })?;
+    }
+    std::fs::rename(&tmp, &path).map_err(|e| Error {
+        msg: format!("rename {}: {e}", path.display()),
+        kind: ErrorKind::Io,
+    })?;
+    if let Ok(d) = std::fs::File::open(dir) {
+        let _ = d.sync_all();
+    }
+    Ok(())
+}
+
+/// CF↔keyspace codec. `default` is raw **only** when no named CF existed at
+/// first creation; otherwise it is prefixed too, so full-CF range scans
+/// never leak another CF's encoded keys. The flag is frozen in `CFREG`
+/// (F185) — never recomputed from the supplied open list.
 #[derive(Debug, Clone)]
 struct KeyCodec {
     default_raw: bool,
 }
 
 impl KeyCodec {
-    fn new(cfs: &[String]) -> Self {
-        Self {
-            default_raw: cfs.len() <= 1,
-        }
-    }
-
     fn encode(&self, cf: &str, key: &[u8]) -> Vec<u8> {
         self.encode_with(cf, key, <[u8]>::to_vec)
     }
@@ -1289,7 +1395,11 @@ impl DB<StdEnv> {
     /// # Errors
     /// Pedra open errors (lock, manifest, I/O).
     pub fn open_default(path: impl AsRef<std::path::Path>) -> Result<Self> {
-        Self::open_cf(&Options::new(), path, &[])
+        // F192: rust-rocksdb's `open_default` creates the directory
+        // (`opts.create_if_missing(true)`); `Options::new()` does not.
+        let mut opts = Options::new();
+        opts.create_if_missing(true);
+        Self::open_cf(&opts, path, &[])
     }
 
     /// Open (create if missing) with explicit CFs (must include `default` only
@@ -1392,6 +1502,58 @@ impl<E: Env> DB<E> {
             }
             names.push((*c).to_string());
         }
+        // F185: freeze the codec against the persisted registry and
+        // reconcile the CF set (see [`CFREG_FILE_NAME`]). `default_raw`
+        // must never flip on reopen — it decides which physical keys the
+        // default CF reads.
+        for n in &names {
+            validate_cf_name(n)?;
+        }
+        let supplied: Vec<String> = names.iter().skip(1).cloned().collect();
+        let (default_raw, non_default) = match load_cf_registry(dir)? {
+            None => (names.len() <= 1, supplied),
+            Some((frozen, persisted)) => {
+                for p in &persisted {
+                    if !supplied.iter().any(|s| s == p) {
+                        return Err(Error {
+                            msg: format!(
+                                "column family not opened: {p} \
+                                 (existing families must all be listed at open)"
+                            ),
+                            kind: ErrorKind::InvalidArgument,
+                        });
+                    }
+                }
+                // F191: with the default CF stored raw (`frozen`), default
+                // reads are unbounded — adding a named CF would leak its
+                // `cf\0key` entries into default scans. Refuse the schema
+                // change (fail-closed) instead of serving the leak.
+                if frozen {
+                    for s in &supplied {
+                        if !persisted.iter().any(|p| p == s) {
+                            return Err(Error {
+                                msg: format!(
+                                    "cannot add column family {s} to a default-only DB: \
+                                     default-CF keys are stored raw; create the DB with \
+                                     the full column family list"
+                                ),
+                                kind: ErrorKind::InvalidArgument,
+                            });
+                        }
+                    }
+                }
+                let mut union = persisted;
+                for s in supplied {
+                    if !union.iter().any(|u| *u == s) {
+                        union.push(s);
+                    }
+                }
+                (frozen, union)
+            }
+        };
+        store_cf_registry(dir, default_raw, &non_default)?;
+        let mut names = vec![DEFAULT_CF.to_string()];
+        names.extend(non_default);
         let mut core_opts = pedradb_core::OpenOptions::default();
         core_opts.sync = opts.sync;
         core_opts.wal_recovery = match opts.wal_recovery {
@@ -1407,7 +1569,15 @@ impl<E: Env> DB<E> {
         if opts.auto_reclaim {
             db.set_auto_reclaim(true);
         }
-        let codec = KeyCodec::new(&names);
+        // Rocks parity: rust-rocksdb drops superseded versions below the
+        // oldest live snapshot (`Snapshot` pins / OCC begins). This bounds
+        // parked-fold memory under overwrite-heavy loads (one core of pure
+        // memmove + ~100x footprint growth otherwise). Core-only users keep
+        // the F20 keep-everything default.
+        db.set_fold_version_gc(true);
+        // F185: frozen flag from the registry — not derived from `names`
+        // (a reopen with a different supplied list must not flip the codec).
+        let codec = KeyCodec { default_raw };
         let cache_epoch_base = CACHE_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed) << 32;
         Ok(Self {
             inner: db,
@@ -2101,9 +2271,21 @@ impl<E: Env> DB<E> {
         self.fence_recovery.lock().clone()
     }
 
-    /// rust-rocksdb `flush_wal`. Pedra already `fdatasync`s before Ok (G1).
-    pub fn flush_wal(&self, _sync: bool) -> Result<()> {
-        Ok(())
+    /// rust-rocksdb `flush_wal`. With `sync: true` the WAL already
+    /// `fdatasync`s before every Ok (G1), so this is a cheap barrier re-run.
+    /// With `Options::set_sync(false)` writes are async — `flush_wal(true)`
+    /// is the durability barrier (F193: it used to be a hard no-op).
+    /// `false` matches pedra's WAL shape (appends go straight to the fd; no
+    /// userspace buffer to flush).
+    ///
+    /// # Errors
+    /// WAL fsync I/O.
+    pub fn flush_wal(&self, sync: bool) -> Result<()> {
+        if sync {
+            self.inner.sync().map_err(Error::from)
+        } else {
+            Ok(())
+        }
     }
 
     /// rust-rocksdb `wait_for_compact` (no-op: compact worker is host-side).
@@ -3146,6 +3328,41 @@ mod tests {
         }
         let hits = keys.iter().filter(|k| t.get_key(7, k).is_some()).count();
         assert!(hits >= 972, "uniform hot set hit rate {hits}/1024 < 95%");
+    }
+
+    #[test]
+    fn fold_gc_keeps_pinned_snapshot_and_bounds_versions() {
+        // Compat opens with fold version GC on (rust-rocksdb snapshot-list
+        // semantics). A pinned Snapshot must read its exact version across
+        // folds; with no snapshot open, superseded versions collapse.
+        let d = tmp("fold_gc_compat");
+        let mut opts = Options::new();
+        opts.create_if_missing(true);
+        let db = DB::open(&opts, &d).unwrap();
+        for i in 0..200u32 {
+            db.put(b"hot", format!("v{i}").as_bytes()).unwrap();
+        }
+        let snap = db.snapshot();
+        for i in 200..400u32 {
+            db.put(b"hot", format!("v{i}").as_bytes()).unwrap();
+        }
+        // Drain the compat worker's fold ticks synchronously (write lock).
+        let mut folded = 0;
+        for _ in 0..64 {
+            if db.inner.fold_parked_once_off_lock() {
+                folded += 1;
+            } else {
+                break;
+            }
+        }
+        assert!(
+            db.inner.fold_gc_enabled(),
+            "compat opens with fold version GC on"
+        );
+        assert_eq!(snap.get(b"hot").unwrap().as_deref(), Some(&b"v199"[..]));
+        assert_eq!(db.get(b"hot").unwrap().as_deref(), Some(&b"v399"[..]));
+        drop(snap);
+        let _ = std::fs::remove_dir_all(&d);
     }
 
     #[test]
