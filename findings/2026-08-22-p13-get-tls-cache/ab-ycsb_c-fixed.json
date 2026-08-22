@@ -1,0 +1,72 @@
+{
+  "bench": "rocks-parity-v1",
+  "engine": "compat",
+  "sync": false,
+  "peer_policy": "rocks-default",
+  "durability": "async-wal (PEDRA_PARITY_ASYNC=1; WAL write, no fdatasync — NOT G1, not official)",
+  "changelog_interval": 0,
+  "status": "ok",
+  "notes": ["ycsb records=1024 ops=1000000 payload=100 dist=zipfian", "engine=compat durability=async-wal (PEDRA_PARITY_ASYNC=1; WAL write, no fdatasync — NOT G1, not official)", "suites: ycsb", "seed: one put per record (not timed)", "cfs: default + write, lock, raftlog (TiKV store shape; raftlog = raftdb)", "deps apply batch txns/commit: 32", "changelog_interval=0", "peer_policy=rocks-default", "host-default write sync: kvrocks=false myrocks=true surreal=true"],
+  "benches": [
+{
+    "name": "ycsb_a",
+    "n": 1000000,
+    "qps": 2580693.718,
+    "p50_ms": 0.0003,
+    "p95_ms": 0.0005,
+    "p99_ms": 0.0007,
+    "max_ms": 8.5298,
+    "wall_s": 0.3875
+  },
+{
+    "name": "ycsb_b",
+    "n": 1000000,
+    "qps": 6441460.663,
+    "p50_ms": 0.0001,
+    "p95_ms": 0.0004,
+    "p99_ms": 0.0005,
+    "max_ms": 4.1629,
+    "wall_s": 0.1552
+  },
+{
+    "name": "ycsb_c",
+    "n": 1000000,
+    "qps": 9137068.565,
+    "p50_ms": 0.0001,
+    "p95_ms": 0.0001,
+    "p99_ms": 0.0002,
+    "max_ms": 1.0641,
+    "wall_s": 0.1094
+  },
+{
+    "name": "ycsb_d",
+    "n": 1000000,
+    "qps": 6411020.102,
+    "p50_ms": 0.0001,
+    "p95_ms": 0.0004,
+    "p99_ms": 0.0005,
+    "max_ms": 8.3271,
+    "wall_s": 0.1560
+  },
+{
+    "name": "ycsb_e",
+    "n": 1000000,
+    "qps": 3174910.173,
+    "p50_ms": 0.0002,
+    "p95_ms": 0.0010,
+    "p99_ms": 0.0015,
+    "max_ms": 0.1749,
+    "wall_s": 0.3150
+  },
+{
+    "name": "ycsb_f",
+    "n": 1000000,
+    "qps": 1963185.686,
+    "p50_ms": 0.0004,
+    "p95_ms": 0.0008,
+    "p99_ms": 0.0018,
+    "max_ms": 10.4964,
+    "wall_s": 0.5094
+  }
+  ]
+}

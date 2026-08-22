@@ -42,10 +42,16 @@ use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::fmt;
 use std::ops::Bound;
+use std::sync::atomic::AtomicU64;
 use std::sync::mpsc::{self, RecvTimeoutError, SyncSender};
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
+
+/// Process-wide DB-instance discriminator for TLS read caches (fix C1/C1b):
+/// `base + read_cache_epoch()` is unique per live instance, so the thread-local
+/// last-get / last-count tables can never answer for another instance.
+static CACHE_ID: AtomicU64 = AtomicU64::new(0);
 
 enum CompactCmd {
     Run,
@@ -475,8 +481,8 @@ fn bound_as_ref(b: &Bound<Vec<u8>>) -> Bound<&[u8]> {
 /// keep the working set so a hit skips CF-prefix encode + the point-cache
 /// mutex (~the 39 ns C still needs for 2.0). 2-probe; epoch drops every
 /// slot on publish.
-const LAST_N: usize = 1024;
-const LAST_PROBE: usize = 2;
+const LAST_N: usize = 2048;
+const LAST_PROBE: usize = 8;
 const TINY: usize = 64;
 
 fn fx_mix(hash: u64, word: u64) -> u64 {
@@ -550,25 +556,26 @@ impl TinyBuf {
 }
 
 struct LastGetSlot {
-    occupied: bool,
+    /// Epoch the entry was stored under; 0 = never used. A published write
+    /// bumps the shared epoch, so any slot whose epoch differs from the
+    /// reader's is stale — lazy invalidation instead of a clear-all walk.
+    epoch: u64,
     cf: TinyBuf,
     key: TinyBuf,
     val: Option<Bytes>,
 }
 
 struct LastGetTable {
-    epoch: u64,
     slots: Box<[LastGetSlot]>,
 }
 
 impl LastGetTable {
     fn new() -> Self {
         Self {
-            epoch: 0,
-            // Heap — 1024 TinyBuf slots overflow the thread stack if inline.
+            // Heap — TinyBuf slots overflow the thread stack if inline.
             slots: (0..LAST_N)
                 .map(|_| LastGetSlot {
-                    occupied: false,
+                    epoch: 0,
                     cf: TinyBuf::empty(),
                     key: TinyBuf::empty(),
                     val: None,
@@ -577,30 +584,19 @@ impl LastGetTable {
         }
     }
 
-    fn prepare(&mut self, epoch: u64) {
-        if self.epoch != epoch {
-            self.epoch = epoch;
-            for s in &mut self.slots {
-                s.occupied = false;
-                s.val = None;
-            }
-        }
-    }
-
     fn hash(cf: &str, key: &[u8]) -> u64 {
         fx_bytes(fx_bytes(0, cf.as_bytes()), key)
     }
 
     fn get(&self, epoch: u64, cf: &str, key: &[u8]) -> Option<Option<Bytes>> {
-        if self.epoch != epoch {
-            return None;
-        }
         let h = Self::hash(cf, key);
         let cf_b = cf.as_bytes();
         for p in 0..LAST_PROBE {
             let s = &self.slots[last_slot(h, p)];
-            if !s.occupied {
-                return None;
+            // Stale (or never-used) slots do not terminate the probe: the
+            // live entry for this key may sit deeper.
+            if s.epoch != epoch {
+                continue;
             }
             if s.cf.eq(cf_b) && s.key.eq(key) {
                 return Some(s.val.clone());
@@ -610,7 +606,6 @@ impl LastGetTable {
     }
 
     fn store(&mut self, epoch: u64, cf: &str, key: &[u8], val: Option<Bytes>) {
-        self.prepare(epoch);
         let Some(cf_t) = TinyBuf::from_slice(cf.as_bytes()) else {
             return;
         };
@@ -618,21 +613,22 @@ impl LastGetTable {
             return;
         };
         let h = Self::hash(cf, key);
-        let mut empty = None;
+        let mut free = None;
         for p in 0..LAST_PROBE {
             let i = last_slot(h, p);
             let s = &mut self.slots[i];
-            if s.occupied && s.cf.eq(cf.as_bytes()) && s.key.eq(key) {
+            if s.epoch == epoch && s.cf.eq(cf.as_bytes()) && s.key.eq(key) {
                 s.val = val;
                 return;
             }
-            if !s.occupied && empty.is_none() {
-                empty = Some(i);
+            // Prefer a stale/empty slot over evicting a live entry.
+            if s.epoch != epoch && free.is_none() {
+                free = Some(i);
             }
         }
-        let i = empty.unwrap_or_else(|| last_slot(h, LAST_PROBE - 1));
+        let i = free.unwrap_or_else(|| last_slot(h, LAST_PROBE - 1));
         self.slots[i] = LastGetSlot {
-            occupied: true,
+            epoch,
             cf: cf_t,
             key: key_t,
             val,
@@ -641,14 +637,11 @@ impl LastGetTable {
 
     /// Default-CF `get()`: hash the user key only (no `default` prefix).
     fn get_key(&self, epoch: u64, key: &[u8]) -> Option<Option<Bytes>> {
-        if self.epoch != epoch {
-            return None;
-        }
         let h = fx_bytes(0, key);
         for p in 0..LAST_PROBE {
             let s = &self.slots[last_slot(h, p)];
-            if !s.occupied {
-                return None;
+            if s.epoch != epoch {
+                continue;
             }
             if s.key.eq(key) {
                 return Some(s.val.clone());
@@ -658,31 +651,37 @@ impl LastGetTable {
     }
 
     fn store_key(&mut self, epoch: u64, key: &[u8], val: Option<Bytes>) {
-        self.prepare(epoch);
         let Some(key_t) = TinyBuf::from_slice(key) else {
             return;
         };
         let h = fx_bytes(0, key);
-        let mut empty = None;
+        let mut free = None;
         for p in 0..LAST_PROBE {
             let i = last_slot(h, p);
             let s = &mut self.slots[i];
-            if s.occupied && s.key.eq(key) {
+            if s.epoch == epoch && s.key.eq(key) {
                 s.val = val;
                 return;
             }
-            if !s.occupied && empty.is_none() {
-                empty = Some(i);
+            if s.epoch != epoch && free.is_none() {
+                free = Some(i);
             }
         }
-        let i = empty.unwrap_or_else(|| last_slot(h, LAST_PROBE - 1));
+        let i = free.unwrap_or_else(|| last_slot(h, LAST_PROBE - 1));
         self.slots[i] = LastGetSlot {
-            occupied: true,
+            epoch,
             cf: TinyBuf::empty(),
             key: key_t,
             val,
         };
     }
+}
+
+
+thread_local! {
+    /// Default-CF last-get table shared by `get()` and `contains()` —
+    /// the same query, so a warm from either call site serves both.
+    static LAST_GET: RefCell<LastGetTable> = RefCell::new(LastGetTable::new());
 }
 
 struct LastCountSlot {
@@ -1246,6 +1245,8 @@ pub struct DB<E: Env = StdEnv> {
     fence_recovery: Arc<Mutex<Option<pedradb_core::FenceRecovery>>>,
     /// RFC-0047 P1.2: worker auto-resumes Transient-class fences.
     auto_resume_transient: bool,
+    /// TLS-cache epoch base unique per instance (fix C1/C1b).
+    cache_epoch_base: u64,
 }
 
 impl DB<StdEnv> {
@@ -1373,8 +1374,10 @@ impl<E: Env> DB<E> {
             db.set_auto_reclaim(true);
         }
         let codec = KeyCodec::new(&names);
+        let cache_epoch_base = CACHE_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed) << 32;
         Ok(Self {
             inner: db,
+            cache_epoch_base,
             cfs: names,
             codec,
             compact_tx: None,
@@ -1449,17 +1452,14 @@ impl<E: Env> DB<E> {
         // RFC-0041 YCSB-C: default-CF get hashes the user key only (no
         // `default` prefix / CF compare). Same bytes as `get_named`.
         let key = key.as_ref();
-        thread_local! {
-            static LAST: RefCell<LastGetTable> = RefCell::new(LastGetTable::new());
-        }
-        let epoch = self.inner.read_cache_epoch();
-        if let Some(hit) = LAST.with(|slot| slot.borrow().get_key(epoch, key)) {
+        let epoch = self.cache_epoch_base + self.inner.read_cache_epoch();
+        if let Some(hit) = LAST_GET.with(|slot| slot.borrow().get_key(epoch, key)) {
             return Ok(hit.map(|b| b.to_vec()));
         }
         let got = self
             .codec
             .encode_with(DEFAULT_CF, key, |enc| self.inner.get(enc));
-        LAST.with(|slot| slot.borrow_mut().store_key(epoch, key, got.clone()));
+        LAST_GET.with(|slot| slot.borrow_mut().store_key(epoch, key, got.clone()));
         Ok(got.map(|b| b.to_vec()))
     }
 
@@ -1469,17 +1469,14 @@ impl<E: Env> DB<E> {
     /// Pedra read errors.
     pub fn contains(&self, key: impl AsRef<[u8]>) -> Result<bool> {
         let key = key.as_ref();
-        thread_local! {
-            static LAST: RefCell<LastGetTable> = RefCell::new(LastGetTable::new());
-        }
-        let epoch = self.inner.read_cache_epoch();
-        if let Some(hit) = LAST.with(|slot| slot.borrow().get_key(epoch, key)) {
+        let epoch = self.cache_epoch_base + self.inner.read_cache_epoch();
+        if let Some(hit) = LAST_GET.with(|slot| slot.borrow().get_key(epoch, key)) {
             return Ok(hit.is_some());
         }
         let got = self
             .codec
             .encode_with(DEFAULT_CF, key, |enc| self.inner.get(enc));
-        LAST.with(|slot| slot.borrow_mut().store_key(epoch, key, got.clone()));
+        LAST_GET.with(|slot| slot.borrow_mut().store_key(epoch, key, got.clone()));
         Ok(got.is_some())
     }
 
@@ -1504,7 +1501,7 @@ impl<E: Env> DB<E> {
         thread_local! {
             static LAST: RefCell<LastGetTable> = RefCell::new(LastGetTable::new());
         }
-        let epoch = self.inner.read_cache_epoch();
+        let epoch = self.cache_epoch_base + self.inner.read_cache_epoch();
         if let Some(hit) = LAST.with(|slot| slot.borrow().get(epoch, cf, key)) {
             return Ok(hit.map(|b| b.to_vec()));
         }
@@ -1918,7 +1915,7 @@ impl<E: Env> DB<E> {
         thread_local! {
             static LAST: RefCell<LastCountTable> = RefCell::new(LastCountTable::new());
         }
-        let epoch = self.inner.read_cache_epoch();
+        let epoch = self.cache_epoch_base + self.inner.read_cache_epoch();
         if let Some(n) = LAST.with(|slot| slot.borrow().get(epoch, cf, start, end, limit)) {
             return Ok(n);
         }
@@ -3069,5 +3066,70 @@ mod tests {
             Some(b"entry".as_ref())
         );
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn last_get_table_lazy_epoch_invalidation() {
+        let mut t = LastGetTable::new();
+        t.store_key(1, b"k1", Some(Bytes::from_static(b"v1")));
+        assert_eq!(
+            t.get_key(1, b"k1"),
+            Some(Some(Bytes::from_static(b"v1")))
+        );
+        // Epoch bump: the stale entry must not answer for the new epoch.
+        assert_eq!(t.get_key(2, b"k1"), None);
+        // Re-store under the new epoch answers without any clear-all pass.
+        t.store_key(2, b"k1", Some(Bytes::from_static(b"v2")));
+        assert_eq!(
+            t.get_key(2, b"k1"),
+            Some(Some(Bytes::from_static(b"v2")))
+        );
+        // An entry stored under an old epoch coexists but never leaks.
+        t.store_key(1, b"k2", Some(Bytes::from_static(b"old")));
+        assert_eq!(t.get_key(2, b"k2"), None);
+        assert_eq!(
+            t.get_key(1, b"k2"),
+            Some(Some(Bytes::from_static(b"old")))
+        );
+    }
+
+    #[test]
+    fn last_get_table_keeps_uniform_working_set() {
+        // kvrocks-shaped uniform hot set (1024 × `k/NNNNNN`) must stay
+        // ≥95% cached (RFC-0044 P1.3): 2048 slots, 4-probe, stale-preferred
+        // eviction. Deterministic: fixed key strings, fixed hash.
+        let mut t = LastGetTable::new();
+        let keys: Vec<Vec<u8>> = (0..1024)
+            .map(|i| format!("k/{i:06}").into_bytes())
+            .collect();
+        for k in &keys {
+            t.store_key(7, k, Some(Bytes::from_static(b"v")));
+        }
+        let hits = keys.iter().filter(|k| t.get_key(7, k).is_some()).count();
+        assert!(hits >= 972, "uniform hot set hit rate {hits}/1024 < 95%");
+    }
+
+    #[test]
+    fn tls_get_cache_never_answers_across_instances() {
+        // Two DB instances share one thread's TLS tables. Distinct
+        // `cache_epoch_base` (fix C1/C1b) keeps instance A's entries from
+        // answering for instance B even before any write bumps an epoch.
+        let d1 = tmp("tls_cross_a");
+        let d2 = tmp("tls_cross_b");
+        let mut opts = Options::new();
+        opts.create_if_missing(true);
+        let a = DB::open(&opts, &d1).unwrap();
+        let b = DB::open(&opts, &d2).unwrap();
+        a.put(b"shared", b"from-a").unwrap();
+        // Fill A's TLS entry (default-CF get + contains share the table).
+        assert_eq!(a.get(b"shared").unwrap().as_deref(), Some(&b"from-a"[..]));
+        assert!(a.contains(b"shared").unwrap());
+        assert_eq!(b.get(b"shared").unwrap(), None);
+        assert!(!b.contains(b"shared").unwrap());
+        b.put(b"shared", b"from-b").unwrap();
+        assert_eq!(b.get(b"shared").unwrap().as_deref(), Some(&b"from-b"[..]));
+        assert_eq!(a.get(b"shared").unwrap().as_deref(), Some(&b"from-a"[..]));
+        let _ = std::fs::remove_dir_all(&d1);
+        let _ = std::fs::remove_dir_all(&d2);
     }
 }

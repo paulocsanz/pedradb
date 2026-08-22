@@ -150,7 +150,19 @@ Não fecha (e não se mente):
       **4.61** com Rocks são a 2.5 M — p50 0.0 µs vs 0.4 µs. Não é ≥5
       estável; janela curta 1.61. **Renovação 2026-08-22 (P0.4 clean,
       3× longa quieta, árvore commitada)**: 4,74/4,71/4,71 — 3/3
-      tight; o straddle é **real, não load**; curta 3,23 med)
+      tight; o straddle é **real, não load**; curta 3,23 med.
+      **Engenharia 2026-08-22 (`findings/2026-08-22-p13-get-tls-cache/`)**:
+      perfil `sample` do loop GET → a TLS `LastGetTable` errava ~85%
+      (1024 slots × probe-2 a load 1.0 = thrash de evicção; a leitura
+      caía no `AnswerCache` ~20 ns/op) e o `prepare()` limpava 1024
+      slots a **cada write publicado**. Redesenho: época por slot
+      (invalidação O(1)), 2048 slots × probe-8, inserção prefere slot
+      stale, `get()`/`contains()` compartilham a tabela, `cache_epoch_base`
+      (fix C1/C1b, mesma mecânica da árvore paralela RFC-0048) fecha o
+      cross-instance. A/B mesma caixa: GET 200 M 11,06→15,80 M qps
+      (**+43%**), hit 95,6%; ycsb a/c/f **+51/57/61%** (fim do clear
+      O(N) por read-after-write). Projeção vs peer ~400 ns: ~6,0×.
+      Aguardando re-árbitro quieto 3× para fechar)
 
 ### P2 — YCSB + quiet 3×
 
@@ -189,9 +201,9 @@ Não fecha (e não se mente):
 | P0.5 | p0 | set_mc50 ≥ 5× async | doing | quieto: **2.02 vs peer são** — não fecha; 3.4–9.2 eram peer doente | 2026-08-20 |
 | P1.1 | p1 | pipeline ≥ 5× | doing | reaberto: straddle 4.22 (quieto 2M) – 5.86; p50 ~6× | 2026-08-20 |
 | P1.2 | p1 | set / blob ≥ 5× | doing | SET **5.41 quieto 2M** (cruza); blob 2.02 | 2026-08-20 |
-| P1.3 | p1 | get ≥ 5× | doing | straddle 4.61 (quieto) – 5.50; p50 0.0 vs 0.4 µs | 2026-08-20 |
+| P1.3 | p1 | get ≥ 5× | doing | eng: TLS cache redesenhado (época/slot, 2048×8) — GET +43%, A/C/F +51/57/61% no A/B; re-árbitro quieto pendente | 2026-08-22 |
 | P2.1 | p2 | quiet 3× | **done** | **árbitro @ load 9.4**: E 10.5 e scan 7.4 fecham; SET 5.41 longo; resto 0.94–3.8 | 2026-08-20 |
-| P2.2 | p2 | ycsb A–F ≥ 5× async | doing | E fechado (10.5 quieto, 3/3 toda condição); A–F demais 1.7–3.8 no wall | 2026-08-20 |
+| P2.2 | p2 | ycsb A–F ≥ 5× async | doing | E fechado (10.5 quieto, 3/3 toda condição); A–F demais 1.7–3.8 no wall. **Nota 2026-08-22: o fix P1.3 (fim do clear TLS O(N) por write) deu +51/57/61% em A/C/F no A/B — remedeiar oficial após re-árbitro** | 2026-08-22 |
 | P2.3 | p2 | script não default 5× | done | tikv_ycsb_parity_v0.sh | 2026-08-19 |
 
 ## Acceptance Criteria
