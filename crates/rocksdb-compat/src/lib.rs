@@ -113,7 +113,8 @@ impl From<CoreError> for Error {
             CoreError::DurabilityFenced => ErrorKind::Fenced,
             CoreError::Crc { .. }
             | CoreError::Truncated(_)
-            | CoreError::CorruptManifest(_) => ErrorKind::Corruption,
+            | CoreError::CorruptManifest(_)
+            | CoreError::CorruptHistory(_) => ErrorKind::Corruption,
             CoreError::CorruptionEscalated { .. } => ErrorKind::CorruptionEscalated,
             CoreError::Io(_) => ErrorKind::Io,
             CoreError::TransactionConflict => ErrorKind::TransactionConflict,
