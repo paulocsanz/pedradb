@@ -662,7 +662,7 @@ fn changelog_interval_from_env() -> u64 {
 ///
 /// # Panics
 /// Always — corruption on a read path must be loud, never silent.
-fn fail_stop_corrupt_value(context: &str, e: CoreError) -> ! {
+fn fail_stop_corrupt_value(context: &str, e: &CoreError) -> ! {
     panic!(
         "pedradb: corrupt value log while resolving {context}: {e}; \
          refusing to serve a silent miss — use get_at/scan_at/verify_checksums \
@@ -1920,7 +1920,7 @@ impl<E: Env> Db<E> {
             // Below-watermark latest reads are not a corruption signal
             // (concurrent GC raised the floor past our snapshot token).
             Err(CoreError::SnapshotTooOld { .. }) => None,
-            Err(e) => fail_stop_corrupt_value(&format!("get key {:?}", key), e),
+            Err(e) => fail_stop_corrupt_value(&format!("get key {key:?}"), &e),
         };
         self.point_cache.insert(key, got.clone());
         got
@@ -3129,7 +3129,7 @@ impl<E: Env> Db<E> {
         }
         match self.resolve_stored_value(stored) {
             Ok(v) => v,
-            Err(e) => fail_stop_corrupt_value("scan stream entry", e),
+            Err(e) => fail_stop_corrupt_value("scan stream entry", &e),
         }
     }
 
@@ -5045,11 +5045,23 @@ impl<E: Env> Db<E> {
     /// [`CoreError::CorruptValue`] when a live entry's vlog payload fails
     /// CRC/I-O during a lazy rebuild (F1: corruption is an error, never a
     /// raw pointer served as the user value).
+    /// [`CoreError::SnapshotTooOld`] when the window starts below the
+    /// retention watermark (RFC-0046): versions below it — including lone
+    /// tombstones — may have been GC'd out of every source, so a partial
+    /// `Ok` would silently drop events. Catch up from `earliest_readable`
+    /// (or the last sequence a previous feed call returned) instead.
     pub fn changes(
         &self,
         from_seq: SequenceNumber,
         to_seq: SequenceNumber,
     ) -> Result<Vec<ChangeEntry>> {
+        let first = from_seq.saturating_add(1);
+        if first < self.earliest_readable_seq {
+            return Err(CoreError::SnapshotTooOld {
+                requested: first,
+                earliest: self.earliest_readable_seq,
+            });
+        }
         let to = to_seq.min(self.last_sequence());
         if self.feed_is_lazy() {
             return Ok(self
@@ -5063,6 +5075,13 @@ impl<E: Env> Db<E> {
 
     /// All durable changes with `sequence > from_seq` (tail / watch catch-up).
     ///
+    /// Below the retention watermark (RFC-0046) this returns what survived
+    /// GC — fine for the last-write-wins seeding callers use it for (the
+    /// newest version of every key always survives GC, and a dropped lone
+    /// tombstone leaves the key absent, which is the same final state),
+    /// NOT exact event history. For an exact windowed feed use
+    /// [`Self::changes`], which fails `SnapshotTooOld` below the watermark.
+    ///
     /// Fail-stop on a corrupt value log (F1): the `Vec` shape cannot express
     /// the error and a swallowed resolve would serve the raw VLG pointer as
     /// the user value. Use [`Self::changes`] for an error-shaped read.
@@ -5075,7 +5094,7 @@ impl<E: Env> Db<E> {
         if self.feed_is_lazy() {
             let entries = match self.lazy_feed_entries() {
                 Ok(e) => e,
-                Err(e) => fail_stop_corrupt_value("changes_after feed rebuild", e),
+                Err(e) => fail_stop_corrupt_value("changes_after feed rebuild", &e),
             };
             return entries.into_iter().filter(|e| e.sequence > from).collect();
         }
@@ -12274,6 +12293,52 @@ mod tests {
             drained <= 1,
             "consumed samples drain on read (got {drained})"
         );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn changes_feed_fails_closed_below_watermark() {
+        // RFC-0046 P2.4: the change feed must not serve a silently partial
+        // window. Below the GC watermark, versions — including lone
+        // tombstones — are gone from every feed source; `changes` fails
+        // SnapshotTooOld. From the watermark on, the tail stays exact.
+        let dir = temp_dir();
+        let clock = std::rc::Rc::new(std::cell::Cell::new(1_000_000u64));
+        let env = ClockEnv::new(std::rc::Rc::clone(&clock));
+        let mut opts = horizon_opts(1_000, 1 << 30);
+        opts.auto_compact_sst_count = None;
+        let mut db = Db::open_with_env(&dir, opts, env).unwrap();
+        // Waves sized to cross the every-32-publishes sampling so the
+        // horizon cutoff provably covers the old wave.
+        for i in 0..64u32 {
+            db.put(b"a", format!("v{i}").as_bytes()).unwrap();
+            db.put(b"b", format!("v{i}").as_bytes()).unwrap();
+        }
+        db.delete(b"b").unwrap(); // lone tombstone for the GC to eat
+        let old_to = db.last_sequence();
+        db.flush().unwrap();
+        clock.set(1_000_000 + 60_000);
+        for i in 0..64u32 {
+            db.put(b"a", format!("w{i}").as_bytes()).unwrap();
+        }
+        db.flush().unwrap();
+        clock.set(1_000_000 + 120_000);
+        db.compact_horizon().unwrap();
+        let wm = db.earliest_readable_sequence();
+        assert!(wm > old_to, "watermark advanced past the old wave ({wm} vs {old_to})");
+        assert!(
+            matches!(
+                db.changes(0, old_to),
+                Err(CoreError::SnapshotTooOld { .. })
+            ),
+            "window below the watermark fails closed, never a silent partial"
+        );
+        // From the watermark the tail is exact: the surviving wave answers.
+        let tail = db.changes(wm - 1, db.last_sequence()).unwrap();
+        assert!(!tail.is_empty(), "tail from the watermark answers");
+        let last = tail.last().expect("non-empty");
+        assert_eq!(last.key.as_ref(), b"a");
+        assert_eq!(last.value.as_ref(), b"w63");
         let _ = fs::remove_dir_all(&dir);
     }
 

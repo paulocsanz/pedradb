@@ -1,6 +1,6 @@
 # RFC-0046: história MVCC fora do SSD — retention default + tier em object storage (S3)
 
-**Status:** in-progress (P0.1–P0.3 + P0.5 + P1 + P2.1–P2.3 done; só falta
+**Status:** in-progress (P0.1–P0.3 + P0.5 + P1 + P2.1–P2.4 done; só falta
 P0.4, gated em caixa quieta)
 **Updated:** 2026-08-21
 **Parents:** [0009](0009-rocksdb-class-engine.md) (F20 retention),
@@ -257,6 +257,19 @@ P0.4, gated em caixa quieta)
       responde pós-cap-drop; sombra e never-written seguem
       `SnapshotTooOld`; verificado que o teste falha sem o fix) —
       status: `done`
+- [x] **P2.4** Change feed fail-closed abaixo do watermark (audit pós-P2.3):
+      `changes(from, to]` retornava `Ok` com o que sobreviveu ao GC —
+      eventos intermediários e **tombstones solitários** somem de todas
+      as fontes (WAL rotacionado, cache de changelog, rebuild do LSM
+      pós-GC) = partial silencioso. Fix: window começando abaixo do
+      watermark → erro tipado `SnapshotTooOld` (mesma régua de
+      `get_at`/`try_scan_at`); da watermark em diante o tail é exato.
+      `changes_after` (semente last-write-wins de fold/journal) segue
+      `Vec` sem erro e **está correto sob GC** para essa semântica (a
+      versão mais nova por chave sempre sobrevive; tombstone dropado =
+      chave ausente = mesmo estado final) — nuance documentada.
+      Teste `changes_feed_fails_closed_below_watermark` — status:
+      `done`
 
 ## Status (living — update with every PR)
 
@@ -274,6 +287,7 @@ P0.4, gated em caixa quieta)
 | P2.1 | p2 | leitura lazy do tier | **done** | `eea769d` | 2026-08-21 |
 | P2.2 | p2 | métricas + banda | **done** | `eea769d` | 2026-08-21 |
 | P2.3 | p2 | fallback LSM abaixo do watermark (wart cap×sobrevivente) | **done** | `get_at_below_watermark_lsm` + teste | 2026-08-21 |
+| P2.4 | p2 | change feed fail-closed abaixo do watermark | **done** | `changes` check + teste | 2026-08-21 |
 
 ## Acceptance Criteria
 
