@@ -1,0 +1,9 @@
+$ # Corrected workload (stable 256-key set, real overwrites) WITH the P0.5
+$ # dead-weight-doubling full-rewrite trigger (db.rs uncommitted at capture;
+$ # ships in the P0.5 commit).
+$ ./target/release/examples/rfc0046_sizing_ab
+sizing_ab: keys=256 x 1KiB, 40 overwrite rounds, flush/round, pause 3s x10
+sizing_ab: all    live_set=262144B written=10485760B db=10991231B history=0B total=10991231B total_over_live=41.9x total_over_written=1.05x
+sizing_ab: window live_set=262144B written=10485760B db=2710428B history=4036766B total=6747194B total_over_live=25.7x total_over_written=0.64x
+sizing_ab: trigger live_set=262144B written=10485760B db=2710428B history=4036766B total=6747194B total_over_live=25.7x total_over_written=0.64x
+SIZING-AB-DONE

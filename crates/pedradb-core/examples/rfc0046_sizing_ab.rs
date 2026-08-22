@@ -72,20 +72,29 @@ fn run_opts(label: &str, mut opts: OpenOptions) {
     let _ = std::fs::remove_dir_all(&dir);
     let mut db = Db::open_with(&dir, opts).expect("open");
     let mut rng = xorshift(0x4643_5349_5A49_4E47);
-    let mut key = [0u8; 8];
     let mut val = vec![0u8; 1024];
+
+    // Stable key set: 256 keys with random 2-byte suffixes generated ONCE.
+    // Every round overwrites the SAME keys — the previous version
+    // regenerated the suffix per round (256 distinct keys per round,
+    // zero overwrites), which made the whole run un-GC-able and
+    // invalidated the first falsification (corrected 2026-08-21).
+    let keys: Vec<Vec<u8>> = (0..KEYS)
+        .map(|k| {
+            let mut kb = Vec::with_capacity(8);
+            kb.extend_from_slice(format!("k{k:04}").as_bytes());
+            kb.extend_from_slice(&rng().to_le_bytes()[..2]);
+            kb
+        })
+        .collect();
 
     let written: u64 = (KEYS * ROUNDS) as u64 * 1024;
     for round in 0..ROUNDS {
         for k in 0..KEYS {
-            key.copy_from_slice(&rng().to_le_bytes());
             for chunk in val.chunks_mut(8) {
                 chunk.copy_from_slice(&rng().to_le_bytes());
             }
-            let mut kbuf = Vec::with_capacity(16);
-            kbuf.extend_from_slice(format!("k{k:04}").as_bytes());
-            kbuf.extend_from_slice(&key[..2]); // spread, still same key set
-            db.put(kbuf.as_slice(), &val).expect("put");
+            db.put(keys[k].as_slice(), &val).expect("put");
         }
         db.flush().expect("flush");
         if std::env::var("SIZING_DEBUG").is_ok() {
@@ -138,10 +147,12 @@ fn main() {
         );
     }
     if only.is_empty() || only == "trigger" {
-        // Same window retention + `auto_compact_sst_count=8`: measured
-        // NEGATIVE — the count path still promotes one level at a time
-        // (lowest first, so L0 wins) and never revisits aged versions that
-        // already reached L1+. Kept to document the swept lever.
+        // Same window retention + `auto_compact_sst_count=8`. Before P0.5
+        // this lever measured NEGATIVE (the count path promotes one level
+        // at a time, lowest first, and never revisits aged versions in
+        // L1+); with the P0.5 dead-weight-doubling rewrite the profile is
+        // byte-identical to plain `window` — kept to document that the
+        // lever adds nothing.
         let mut opts = OpenOptions::default();
         opts.history = HistoryOptions {
             horizon: HistoryHorizon::Window(Duration::from_secs(2)),
