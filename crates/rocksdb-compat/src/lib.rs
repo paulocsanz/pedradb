@@ -1804,7 +1804,7 @@ impl<E: Env> DB<E> {
                 };
                 ops.push(encoded);
             }
-            self.inner.apply_batch(ops).map(|_| ()).map_err(Error::from)
+            self.inner.apply_batch_vec(ops).map(|_| ()).map_err(Error::from)
         });
         r
     }
@@ -1840,7 +1840,7 @@ impl<E: Env> DB<E> {
                 };
                 ops.push(encoded);
             }
-            self.inner.apply_batch(ops).map(|_| ()).map_err(Error::from)
+            self.inner.apply_batch_vec(ops).map(|_| ()).map_err(Error::from)
         });
         r
     }
@@ -1887,7 +1887,7 @@ impl<E: Env> DB<E> {
             if ops.is_empty() {
                 return Ok(());
             }
-            self.inner.apply_batch(ops).map(|_| ()).map_err(Error::from)
+            self.inner.apply_batch_vec(ops).map(|_| ()).map_err(Error::from)
         });
         r
     }
@@ -1932,7 +1932,7 @@ impl<E: Env> DB<E> {
             if ops.is_empty() {
                 return Ok(());
             }
-            self.inner.apply_batch(ops).map(|_| ()).map_err(Error::from)
+            self.inner.apply_batch_vec(ops).map(|_| ()).map_err(Error::from)
         });
         r
     }
@@ -1958,7 +1958,7 @@ impl<E: Env> DB<E> {
                     value: val.clone(),
                 });
             }
-            self.inner.apply_batch(ops).map(|_| ()).map_err(Error::from)
+            self.inner.apply_batch_vec(ops).map(|_| ()).map_err(Error::from)
         })
     }
 

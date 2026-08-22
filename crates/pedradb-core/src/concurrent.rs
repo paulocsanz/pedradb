@@ -1713,8 +1713,17 @@ impl<E: Env> ConcurrentDb<E> {
     /// # Errors
     /// WAL I/O or sequence exhaustion.
     pub fn apply_batch(&self, ops: impl IntoIterator<Item = BatchOp>) -> Result<SequenceNumber> {
+        self.apply_batch_vec(ops.into_iter().collect())
+    }
+
+    /// Owned fast path: callers that already hold the ops `Vec` (compat
+    /// `write_cf_owned` et al.) skip the identity `collect()` of
+    /// [`ConcurrentDb::apply_batch`] — one alloc + memcpy per batch.
+    ///
+    /// # Errors
+    /// WAL I/O or sequence exhaustion.
+    pub fn apply_batch_vec(&self, ops: Vec<BatchOp>) -> Result<SequenceNumber> {
         let do_sync = self.resolve_sync(WriteOptions::default());
-        let ops: Vec<_> = ops.into_iter().collect();
         self.writes.submit(&self.inner, ops, do_sync)
     }
 
