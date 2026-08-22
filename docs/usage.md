@@ -101,7 +101,7 @@ fn layer_sketch(db: &mut Db) -> pedradb_core::Result<()> {
 | `put_if_absent` / `put_if_eq` / `compare_and_swap` | First-class CAS; fail closed on mismatch |
 | `put_with` / `delete_with` / `apply_batch` / `tx.commit` | Return **commit sequence** (layer pin) |
 | `changes(from, to)` / `changes_after(from)` | Post-commit logical feed (durable CHANGELOG). `changes` fails `SnapshotTooOld` when the window starts below the retention watermark (aged events — including lone tombstones — may be gone; catch up from the last sequence you were served). `changes_after` seeds last-write-wins state (safe under GC: the newest version per key always survives) but is not exact event history below the watermark |
-| `multi_get` / `multi_get_at` | N point reads, same visibility as `get` |
+| `multi_get` / `multi_get_at` | N point reads, same visibility as `get`/`get_at` — including the below-watermark tier read and LSM fallback (a batch with an uncoverable key fails closed as a whole) |
 | `scan_projected(..., KeyOnly)` | Keys without loading values |
 
 ---

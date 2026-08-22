@@ -5015,26 +5015,22 @@ impl<E: Env> Db<E> {
     #[must_use]
     /// Multi-get at an explicit snapshot.
     ///
+    /// Each key answers exactly as [`Self::get_at`] — including the
+    /// below-watermark tier read and LSM fallback (RFC-0046 P2.1/P2.3):
+    /// one per-key loop, one visibility contract.
+    ///
     /// # Errors
-    /// [`CoreError::SnapshotTooOld`] if `snap` is below the version-GC watermark.
+    /// [`CoreError::SnapshotTooOld`] if `snap` is below the version-GC
+    /// watermark and history for a requested key cannot be covered by the
+    /// retained tier or a surviving LSM version.
     pub fn multi_get_at(
         &self,
         snap: Snapshot,
         keys: &[impl AsRef<[u8]>],
     ) -> Result<Vec<Option<Bytes>>> {
-        self.ensure_snapshot_readable(snap)?;
         let mut out = Vec::with_capacity(keys.len());
         for k in keys {
-            if snap.seq == 0 {
-                out.push(None);
-                continue;
-            }
-            // F1: corruption surfaces as Err, never as a miss.
-            let got = match self.lookup(k.as_ref(), snap.seq) {
-                Lookup::Found(v) => Some(self.resolve_stored_value(v)?),
-                Lookup::Deleted | Lookup::NotFound => None,
-            };
-            out.push(got);
+            out.push(self.get_at(snap, k.as_ref())?);
         }
         Ok(out)
     }
@@ -12241,6 +12237,19 @@ mod tests {
             db.get_at(Snapshot::at(solo_seq), solo).unwrap().as_deref(),
             Some(&solo_val[..]),
             "survivor below the watermark serves from the LSM after the cap drop"
+        );
+        assert_eq!(
+            db.multi_get_at(Snapshot::at(solo_seq), &[solo]).unwrap(),
+            vec![Some(Bytes::from(solo_val.clone()))],
+            "multi_get_at shares the get_at below-watermark legs (tier + LSM fallback)"
+        );
+        let mixed: &[&[u8]] = &[solo, b"never-written"];
+        assert!(
+            matches!(
+                db.multi_get_at(Snapshot::at(solo_seq), mixed),
+                Err(CoreError::SnapshotTooOld { .. })
+            ),
+            "a batch with an uncoverable key fails closed as a whole"
         );
         assert!(
             matches!(

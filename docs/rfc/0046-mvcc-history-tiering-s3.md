@@ -255,8 +255,14 @@ P0.4, gated em caixa quieta)
       destroy silencioso. Teste
       `below_watermark_lsm_fallback_serves_survivors` (sobrevivente
       responde pós-cap-drop; sombra e never-written seguem
-      `SnapshotTooOld`; verificado que o teste falha sem o fix) —
-      status: `done`
+      `SnapshotTooOld`; verificado que o teste falha sem o fix).
+      **Unificação P2.3b (mesma data): `multi_get_at` delega em
+      `get_at`** — antes ele tinha só o check imediato
+      (`ensure_snapshot_readable`) e errava abaixo do watermark mesmo
+      quando o tier cobria a leitura que `get_at` responderia (fonte de
+      disponibilidade divergente entre APIs com o mesmo contrato); agora
+      compartilha as pernas tier+LSM e um lote com chave incobrível
+      falha fechado como um todo — status: `done`
 - [x] **P2.4** Change feed fail-closed abaixo do watermark (audit pós-P2.3):
       `changes(from, to]` retornava `Ok` com o que sobreviveu ao GC —
       eventos intermediários e **tombstones solitários** somem de todas
