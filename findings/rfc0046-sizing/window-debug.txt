@@ -1,0 +1,43 @@
+sizing_ab: keys=256 x 1KiB, 40 overwrite rounds, flush/round, pause 3s x10
+round  0: earliest=0 ssts=1 sst_bytes=270386
+round  1: earliest=0 ssts=2 sst_bytes=540772
+round  2: earliest=0 ssts=3 sst_bytes=811158
+round  3: earliest=0 ssts=1 sst_bytes=1080702
+round  4: earliest=0 ssts=2 sst_bytes=1351088
+round  5: earliest=0 ssts=3 sst_bytes=1621474
+round  6: earliest=0 ssts=4 sst_bytes=1891860
+round  7: earliest=993 ssts=2 sst_bytes=2161405
+round  8: earliest=993 ssts=3 sst_bytes=2431791
+round  9: earliest=993 ssts=4 sst_bytes=2702177
+round 10: earliest=993 ssts=5 sst_bytes=2972563
+round 11: earliest=2017 ssts=3 sst_bytes=3242235
+round 12: earliest=2017 ssts=4 sst_bytes=3512621
+round 13: earliest=2017 ssts=5 sst_bytes=3783007
+round 14: earliest=2017 ssts=6 sst_bytes=4053393
+round 15: earliest=3041 ssts=4 sst_bytes=4322871
+round 16: earliest=3041 ssts=5 sst_bytes=4593257
+round 17: earliest=3041 ssts=6 sst_bytes=4863643
+round 18: earliest=3041 ssts=7 sst_bytes=5134029
+round 19: earliest=4065 ssts=5 sst_bytes=5403616
+round 20: earliest=4065 ssts=6 sst_bytes=5674002
+round 21: earliest=4065 ssts=7 sst_bytes=5944388
+round 22: earliest=4065 ssts=8 sst_bytes=6214774
+round 23: earliest=5089 ssts=6 sst_bytes=6484371
+round 24: earliest=5089 ssts=7 sst_bytes=6754757
+round 25: earliest=5089 ssts=8 sst_bytes=7025143
+round 26: earliest=5089 ssts=9 sst_bytes=7295529
+round 27: earliest=6113 ssts=7 sst_bytes=7565094
+round 28: earliest=6113 ssts=8 sst_bytes=7835480
+round 29: earliest=6113 ssts=9 sst_bytes=8105866
+round 30: earliest=6113 ssts=10 sst_bytes=8376252
+round 31: earliest=7137 ssts=8 sst_bytes=8645681
+round 32: earliest=7137 ssts=9 sst_bytes=8916067
+round 33: earliest=7137 ssts=10 sst_bytes=9186453
+round 34: earliest=7137 ssts=11 sst_bytes=9456839
+round 35: earliest=8161 ssts=9 sst_bytes=9726547
+round 36: earliest=8161 ssts=10 sst_bytes=9996933
+round 37: earliest=8161 ssts=11 sst_bytes=10267319
+round 38: earliest=8161 ssts=12 sst_bytes=10537705
+round 39: earliest=9185 ssts=10 sst_bytes=10807362
+sizing_ab: window live_set=262144B written=10485760B db=21535931B history=1043686B total=22579617B total_over_live=86.1x total_over_written=2.15x
+SIZING-AB-DONE

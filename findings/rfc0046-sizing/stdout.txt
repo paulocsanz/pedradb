@@ -1,0 +1,4 @@
+sizing_ab: keys=256 x 1KiB, 40 overwrite rounds, flush/round, pause 3s x10
+sizing_ab: all    live_set=262144B written=10485760B db=21535931B history=0B total=21535931B total_over_live=82.2x total_over_written=2.05x
+sizing_ab: window live_set=262144B written=10485760B db=21535931B history=1043686B total=22579617B total_over_live=86.1x total_over_written=2.15x
+SIZING-AB-DONE
