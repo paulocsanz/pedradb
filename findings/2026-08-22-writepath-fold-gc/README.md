@@ -88,9 +88,29 @@ ficam planos; o núcleo queimado do fold (−93% CPU user) e o RSS some. O
 GC também encolhe o DB em disco (versões superseded não são re-flushadas).
 
 Nota: o binário "new" inclui também a wave 3 do RFC-0048 (F185–F195,
-commitada em `f1acb4f`) — o discriminador de 3 binários
-(old / só-fix / combo) em 5M ops separa as contribuições; tabela no
-apêndice quando coletada.
+commitada em `f1acb4f`) — o discriminador de 3 binários abaixo separa as
+contribuições.
+
+## Apêndice — discriminador de 3 binários (5M ops, 3 rodadas alternadas)
+
+Braços: **old** = `54d0b24` (wave 2); **my** = old + este fix (sem wave 3);
+**combo** = old + wave 3 + fix (= HEAD `a28637a`).
+
+| braço | ycsb_a med (runs) | ycsb_f med (runs) |
+|---|---|---|
+| old | 71 280 (63,6 / 71,9 / 71,3 k) | 64 520 (68,0 / **53,9** / 64,5 k) |
+| my | 66 090 (66,1 / 69,3 / 61,4 k) | 77 290 (67,4 / 77,5 / 77,2 k) |
+| combo | 67 980 (68,7 / 68,0 / 64,9 k) | 74 880 (74,9 / 75,3 / 65,5 k) |
+
+- **a**: os três braços se sobrepõem dentro da banda de ruído do próprio
+  binário (±6–7%: old r1 63,6k vs old r2 71,9k). Os −6,7/−6,9% de mediana
+  do A/B 20M em a/e são **drift da caixa**, não custo do fix nem da wave 3.
+- **f**: o old tem **modo de colapso** (53,9k numa rodada, −30% vs o
+  próprio melhor — o quadrático mordendo já em 5M ops); my/combo nunca
+  passam de 65,5k para baixo e ficam em ~75–77k (**my +19,7% med**).
+- **wave 3 deles é neutra** para as shapes do bench (my ≈ combo dentro do
+  ruído em a e f) — consistente com a leitura de código (F188 = sniff de
+  prefixo por put; F185 = um fsync por open; F193 não é chamado pelo bench).
 
 ## Testes
 
