@@ -413,6 +413,15 @@ impl<V: Clone> AnswerCache<V> {
     pub fn invalidate(&self, key: &[u8]) {
         self.inner.lock().map.remove(key);
     }
+
+    /// Drop several keys under **one** lock (publish path: one acquire per
+    /// written batch instead of one per key).
+    pub fn invalidate_many(&self, keys: &[Bytes]) {
+        let mut g = self.inner.lock();
+        for k in keys {
+            g.map.remove(k);
+        }
+    }
 }
 
 /// One side of a cached count window: `None` = unbounded,
@@ -457,6 +466,12 @@ struct CountCacheState {
     order: std::collections::VecDeque<Bytes>,
     capacity: usize,
     dirty: CountDirty,
+    /// Highest publish sequence whose dirty keys were NOT recorded because
+    /// the entry map was empty (write-heavy shapes record 100% of publishes
+    /// for a cache no reader ever fills). An entry observed before such a
+    /// publish must not validate — a lock-free `count_cache_handle` reader
+    /// can still insert it after the skip (F204's interleaving, one flight).
+    skipped_below: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -524,6 +539,7 @@ impl CountCache {
                     by_key: std::collections::BTreeMap::new(),
                     capacity: COUNT_DIRTY_CAP,
                 },
+                skipped_below: 0,
             }),
         }
     }
@@ -544,7 +560,7 @@ impl CountCache {
             return None;
         }
         let e = g.map.get(ck.as_slice())?;
-        if g.dirty.overlaps_newer_than(start, end, e.seq) {
+        if e.seq < g.skipped_below || g.dirty.overlaps_newer_than(start, end, e.seq) {
             return None;
         }
         Some(e.n)
@@ -591,11 +607,21 @@ impl CountCache {
     /// atomically, so no get can validate against the truncated log first.
     pub fn record_dirty(&self, seq: u64, keys: &[Bytes]) {
         let mut g = self.state.lock();
+        // Empty entry map: no cached answer can exist from before this
+        // publish under the Db read/write lock, and a lock-free reader that
+        // still inserts one observed earlier will carry `seq <
+        // skipped_below` and miss in `get`. Skipping keeps write-only
+        // shapes from allocating two Boxes per written key per publish.
         if g.map.is_empty() {
-            // Nothing cached to invalidate; past writes can never matter to
-            // a future entry (its seq is observed at compute time).
+            g.skipped_below = g.skipped_below.max(seq);
             return;
         }
+        // F204: track even when no entries are cached yet. A publish that
+        // lands while a reader is between its seq observation and its
+        // insert (both run under the Db read lock; the publish too) is NOT
+        // a "past" write for the entry that reader is about to insert —
+        // without this record the pre-write answer validates forever,
+        // because `get` only checks the dirty log.
         let d = &mut g.dirty;
         if d.capacity == 0 {
             return;
@@ -755,6 +781,27 @@ mod tests {
         }
         cache.get_or_insert_with(path, 64, || Vec::new());
         cache.get_or_insert_with(path, 0, || panic!("0 must survive insert of 64"));
+    }
+
+    #[test]
+    fn count_cache_skip_while_empty_retires_racy_insert() {
+        use std::ops::Bound;
+        let c = CountCache::new(8);
+        let (s, e) = (Bound::Included(&b"k"[..]), Bound::Excluded(&b"m"[..]));
+        // Publish while the entry map is empty: recorded only as a
+        // watermark. A lock-free reader that observed seq BEFORE this
+        // publish may still insert its answer afterwards — it must miss.
+        c.record_dirty(6, &[Bytes::from_static(b"key00")]);
+        c.insert(s, e, Some(25), 3, 5);
+        assert!(c.get(s, e, Some(25)).is_none(), "pre-skip answer served");
+        // An answer observed at/after the skipped publish includes it and
+        // stays valid.
+        c.insert(s, e, Some(25), 4, 6);
+        assert_eq!(c.get(s, e, Some(25)), Some(4));
+        // The watermark also retires entries re-inserted after clear().
+        c.clear();
+        c.insert(s, e, Some(25), 4, 5);
+        assert!(c.get(s, e, Some(25)).is_none(), "stale seq below watermark");
     }
 
     #[test]

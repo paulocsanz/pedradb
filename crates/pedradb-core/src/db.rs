@@ -3215,9 +3215,7 @@ impl<E: Env> Db<E> {
         if reset || keys.len() > 32 || keys.is_empty() {
             self.point_cache.clear();
         } else {
-            for k in &keys {
-                self.point_cache.invalidate(k);
-            }
+            self.point_cache.invalidate_many(&keys);
         }
         // Count answers are window-scoped: range-check the dirty keys
         // instead of clearing every window (RFC-0044 `ycsb-longwindow`).
@@ -3690,6 +3688,13 @@ impl<E: Env> Db<E> {
         }
         let wal_src = self.dir.join(WAL_FILE_NAME);
         if self.env.exists(&wal_src) {
+            // F206: drain the WAL handle under its mutex before copying — a
+            // write group parked between `begin_commit` and `end_commit`
+            // holds an acked key's only durable bytes out of the file, and
+            // completed async groups buffer up to 64 KiB in userspace. Taking
+            // the lock waits out the former; `flush` pushes the latter, so
+            // the copy carries every commit acked before the checkpoint.
+            self.wal.lock().flush()?;
             self.env.copy_file(&wal_src, &dest.join(WAL_FILE_NAME))?;
         }
         // Large-value spill (RFC-0014 P2.2): SST/WAL may hold only VLG1 pointers.

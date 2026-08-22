@@ -2142,6 +2142,13 @@ impl<E: Env> ConcurrentDb<E> {
     /// I/O.
     pub fn create_checkpoint(&self, dest: impl AsRef<Path>) -> Result<CheckpointMeta> {
         let _flush = self.flush_lock.lock();
+        // F205: serialize the copy loop with the off-lock MANIFEST persisters
+        // (`persist_unsynced_l0s_off_lock` / `install_prepared_l0_off_lock`):
+        // they swing CURRENT and GC older MANIFEST-* without the Db write
+        // lock, so a concurrent copy can seal a CURRENT whose MANIFEST the
+        // GC deletes before the copy loop reaches it (dest reopen: missing
+        // MANIFEST).
+        let _persist = self.persist_lock.lock();
         self.inner.write().create_checkpoint(dest)
     }
 
