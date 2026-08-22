@@ -34,10 +34,12 @@ impl CompatEngine {
         // `ROCKS_PARITY_RETENTION` (RFC-0047 P0.3): pin the retention the
         // column measures, so the compat default flip (auto_reclaim=true)
         // never silently changes official numbers. `product` (default) =
-        // Pedra product retention — keep all versions (RFC-0009 F20), what
-        // every official column has measured. `rocks` = RocksDB storage
-        // profile (drop-in default): auto-compact GCs unpinned obsolete
-        // versions. Legacy `ROCKS_PARITY_AUTO_RECLAIM=1` == `rocks`.
+        // kernel default retention, whatever it currently is — since
+        // RFC-0046 that is `HistoryHorizon::Window(24h)` + archive tier
+        // (before 2026-08-21 it was F20 keep-all). `rocks` = RocksDB
+        // storage profile (drop-in default): auto-compact GCs unpinned
+        // obsolete versions, no archive. Legacy `ROCKS_PARITY_AUTO_RECLAIM=1`
+        // == `rocks`.
         let retention = std::env::var("ROCKS_PARITY_RETENTION").unwrap_or_else(|_| "product".into());
         let mut reclaim = match retention.as_str() {
             "product" => false,
