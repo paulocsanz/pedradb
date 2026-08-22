@@ -134,15 +134,23 @@ Não fecha (e não se mente):
 - [ ] **P1.1** `kvrocks_pipelined_set` ≥ 5.0 — status: `doing`
       (reaberto pelo árbitro quieto: **straddle 4.22–5.86** entre
       janelas — 11.3 @ 64 KiB e 5.86 @ 2M load ~100, mas 4.22 @ 2M
-      quieto; p50 4.0 µs vs 23 µs segue ~6× melhor. Não é ≥5 estável)
+      quieto; p50 4.0 µs vs 23 µs segue ~6× melhor. Não é ≥5 estável.
+      **Renovação 2026-08-22 (P0.4 clean, 3× longa quieta, árvore
+      commitada)**: 4,95/5,38/6,24 — **mediana 5,38 ≥5 alcançada**,
+      mas um run na linha; curta 5,04 med. Não é 3/3 — segue `doing`)
 - [ ] **P1.2** `kvrocks_set` / `kvrocks_blob_set` ≥ 5.0 — status: `doing`
       (SET **cruza na quieta longa: 5.41** @ 2M quieto, p50 0.4 µs vs
       2.5 µs; curta 4.61. Blob **2.02** quieto — longe; copies de 16 KB
-      dominam)
+      dominam. **Renovação 2026-08-22 (P0.4 clean, 3× longa quieta)**:
+      SET **5,45/5,18/16,47 — 3/3 ≥5, mediana 5,45** (o 16,47 é run
+      com rocks deprimido); curta 4,70 med; blob 2,68 med — blob segue
+      longe, slice continua `doing` por ele)
 - [ ] **P1.3** `kvrocks_get` ≥ 5.0 — status: `doing`
       (straddle: 20 M ops 4.4–5.5; 2 M load ~100 **5.50**; 2 M quieto
       **4.61** com Rocks são a 2.5 M — p50 0.0 µs vs 0.4 µs. Não é ≥5
-      estável; janela curta 1.61)
+      estável; janela curta 1.61. **Renovação 2026-08-22 (P0.4 clean,
+      3× longa quieta, árvore commitada)**: 4,74/4,71/4,71 — 3/3
+      tight; o straddle é **real, não load**; curta 3,23 med)
 
 ### P2 — YCSB + quiet 3×
 
@@ -162,6 +170,10 @@ Não fecha (e não se mente):
       `Window(24 h)` bounded + archive (versões velhas saem do SSD,
       scan frio volta a O(live set + janela)), não só via CountCache
       no caminho quente. Re-árbitro oficial: RFC-0046 P0.4.**
+      **Fechado pelo P0.4 (2026-08-22, `findings/rfc0046-p04/clean/`):
+      sem regressão do default novo — controle `04c7aa2`≡`edfa132`
+      prova o lado compat estável no arco todo; E async 5,88 med
+      (3/3 ≥5) contra um peer ~1,8× mais rápido que 20/ago.**
       `ycsb-longwindow/` + `rfc0044-p2/quiet/`)
 - [x] **P2.3** Script: `PEDRA_PARITY_ASYNC=1` + `FLOOR=5` **não** é o
       default do `tikv_ycsb_parity_v0.sh` — status: `done`

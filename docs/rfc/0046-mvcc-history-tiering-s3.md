@@ -1,7 +1,7 @@
 # RFC-0046: história MVCC fora do SSD — retention default + tier em object storage (S3)
 
-**Status:** in-progress (P0.1–P0.3 + P0.5 + P1 + P2.1–P2.8 done;
-só falta P0.4, gated em caixa quieta)
+**Status:** done (P0.1–P0.5 + P1 + P2.1–P2.8 — P0.4 fechado em
+2026-08-22; registro em `findings/rfc0046-p04/`)
 **Updated:** 2026-08-22
 **Parents:** [0009](0009-rocksdb-class-engine.md) (F20 retention),
 [0044](0044-async-class-5x-rocks.md) (E/cliff de retenção),
@@ -129,13 +129,31 @@ só falta P0.4, gated em caixa quieta)
       como arquivo — `metadata_len` é `Ok` em dir no macOS; agora
       `Env::is_dir` pula dir de verdade) e o over-archive do perfil
       Rocks (acima) — status: `done`
-- [ ] **P0.4** Re-árbitro quieto 3× com o novo default (colunas oficiais
+- [x] **P0.4** Re-árbitro quieto 3× com o novo default (colunas oficiais
       0041 medem o default do produto): E/scan/A–D + regressão G1;
       expectativa: cliff do E some estruturalmente (retenção), CountCache
-      segue no caminho quente — status: `doing`
-      (`scripts/rfc0046_p04_quiet_arbiter.sh` armado: gate load < 10,
-      auto-dispara; g1 col 0041 floor 2.0 + col async 0044, 3 rounds
-      pareados, regressão G1 primeiro)
+      segue no caminho quente — status: `done`
+      (`findings/rfc0046-p04/`, 2026-08-22). Três execuções: **v1
+      descartada** (rodadas a n=200 — default de fumaça do bench; bug
+      do script, fix `27b1fd7`), **v2** disparou limpo (load 8,9–9,95,
+      n=2000) mas **mediu a árvore de trabalho suja** (edits
+      não-commitados de uma sessão paralela em occ/memtable/wal), e a
+      **clean/** (worktree em `edfa132`, mesmo box, mesma barra) é o
+      registro oficial. **Veredito: default novo e todo o arco
+      RFC-0046 commitado não custam nada mensurável** — controle
+      decisivo: a árvore do p34 (`04c7aa2`) rodando hoje é igual à
+      `edfa132` em toda shape (compat estável no arco inteiro; e o
+      default é inerte em bench por construção — janela wall-clock,
+      processo curto não GC nada). Colunas (med-de-3, peer Rocks
+      default `sync=false`): g1 c 4,67 / e 2,17 / scan 2,04 (a/f no
+      teto de fdatasync conhecido, 0041 P1.2 `todo`); async E 5,88
+      (3/3 ≥5) / a 2,98 / f 1,40 / lock 2,54; longa 2M 3×: **set 5,45
+      (3/3 ≥5)**, pipeline 5,38 (med ≥5; min 4,95), get 4,71 (3/3
+      tight <5 — straddle do GET é real, não load). Bônus forense
+      (README do finding): os edits da sessão paralela movem o compat
+      (a −2,5×, f −1,7× — caminho RMW; e +1,8×) e o peer rocks mediu
+      ~1,8× mais rápido que 20/ago (drift de caixa, tight 3/3 em ambas
+      as eras).
 - [x] **P0.5** Rewrite de níveis velhos dirigido pelo horizonte (nascido da
       telemetria `findings/rfc0046-sizing/`, 2026-08-21): **o caminho
       default não devolvia ao disco o que envelheceu** — o floor do
@@ -407,7 +425,7 @@ só falta P0.4, gated em caixa quieta)
 | P0.1 | p0 | history_horizon + default bounded | **done** | b68f9a1 (+docs neste commit) | 2026-08-21 |
 | P0.2 | p0 | archive local bounded + GC pin-aware | **done** | b68f9a1 (+docs neste commit) | 2026-08-21 |
 | P0.3 | p0 | testes pin/cap/crash/PITR local | **done** | b68f9a1 (+docs neste commit) | 2026-08-21 |
-| P0.4 | p0 | re-árbitro quieto com novo default | **doing** | script armado (gate load < 10, auto-dispara) | 2026-08-21 |
+| P0.4 | p0 | re-árbitro quieto com novo default | **done** | clean/ edfa132: 04c7aa2≡edfa132, default inerte; v1 descartado (n=200), v2 dirty = evidência de anomalia (p04) | 2026-08-22 |
 | P0.5 | p0 | rewrite de níveis velhos pelo horizonte (LSM bound) | **done** | dead-weight-doubling trigger + teste; erratum rfc0046-sizing | 2026-08-21 |
 | P1.1 | p1 | Env→S3 + testes seam | **done** | cc760e5 | 2026-08-21 |
 | P1.2 | p1 | upload pipeline + backpressure | **done** | b548a5e | 2026-08-21 |

@@ -308,3 +308,67 @@ kvrocks_get              ratio=4.58
 kvrocks_set              ratio=5.40
 kvrocks_pipelined_set    ratio=4.62
 P04-ARBITER-DONE
+=== build start 03:18:24 load1=8.05 ===
+03:18:52 load1=8.92
+QUIET at 03:18:52 load1=8.92
+..............
+test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 362 filtered out; finished in 0.23s
+
+............
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.79s
+
+=== round 1 g1-compat 03:18:58 load1=8.76 ===
+=== round 1 async-compat 03:18:59 load1=8.76 ===
+=== round 1 kvr-compat 03:19:00 load1=8.76 ===
+=== round 1 rocks-default 03:19:00 load1=8.76 ===
+=== round 1 rocks-kvr 03:19:01 load1=8.76 ===
+=== round 2 g1-compat 03:19:02 load1=9.42 ===
+=== round 2 async-compat 03:19:04 load1=9.42 ===
+=== round 2 kvr-compat 03:19:04 load1=9.42 ===
+=== round 2 rocks-default 03:19:04 load1=9.42 ===
+=== round 2 rocks-kvr 03:19:05 load1=9.42 ===
+=== round 3 g1-compat 03:19:07 load1=9.95 ===
+=== round 3 async-compat 03:19:08 load1=9.95 ===
+=== round 3 kvr-compat 03:19:08 load1=9.95 ===
+=== round 3 rocks-default 03:19:09 load1=9.95 ===
+=== round 3 rocks-kvr 03:19:10 load1=9.95 ===
+=== long 2M compat 03:19:11 load1=9.95 ===
+=== long 2M rocks 03:19:43 load1=8.89 ===
+--- g1 median-of-3 ---
+ycsb_c                   med=4.69 runs=4.69/4.54/4.76
+ycsb_e                   med=2.13 runs=2.21/2.11/2.13
+deps_scan                med=1.99 runs=2.09/1.98/1.99
+deps_mvcc_latest         med=1.62 runs=1.62/1.65/1.56
+deps_apply_batch         med=0.48 runs=0.38/0.57/0.48
+deps_lock_prewrite       med=0.44 runs=0.44/0.36/0.63
+ycsb_d                   med=0.39 runs=0.17/0.40/0.39
+ycsb_b                   med=0.37 runs=0.10/0.37/0.37
+deps_raftlog             med=0.13 runs=0.08/0.13/0.17
+ycsb_f                   med=0.12 runs=0.13/0.12/0.12
+ycsb_a                   med=0.12 runs=0.11/0.12/0.12
+deps_cache_overwrite     med=0.10 runs=0.10/0.10/0.12
+--- async median-of-3 ---
+ycsb_e                   med=5.77 runs=5.77/5.54/5.89
+ycsb_c                   med=4.89 runs=4.89/4.60/4.90
+deps_cache_overwrite     med=3.48 runs=3.33/3.48/3.86
+ycsb_b                   med=2.97 runs=2.98/2.30/2.97
+deps_lock_prewrite       med=2.23 runs=2.23/2.30/2.19
+ycsb_d                   med=2.16 runs=1.27/2.16/2.58
+deps_apply_batch         med=2.00 runs=2.00/1.86/2.24
+deps_scan                med=1.66 runs=1.55/1.66/1.84
+deps_mvcc_latest         med=1.62 runs=1.62/1.63/1.59
+ycsb_a                   med=0.87 runs=1.06/0.87/0.73
+deps_raftlog             med=0.74 runs=0.75/0.70/0.74
+ycsb_f                   med=0.73 runs=0.73/1.16/0.70
+--- kvr median-of-3 ---
+kvrocks_scan             med=35.24 runs=34.55/35.24/35.65
+kvrocks_pipelined_set    med=7.29 runs=5.07/7.29/8.53
+kvrocks_set              med=5.10 runs=4.51/5.10/5.95
+kvrocks_get              med=3.13 runs=3.06/3.13/3.14
+kvrocks_set_mc50         med=2.00 runs=1.92/2.00/2.03
+kvrocks_blob_set         med=1.65 runs=1.14/2.08/1.65
+--- long 2M (single) ---
+kvrocks_get              ratio=4.83
+kvrocks_set              ratio=4.61
+kvrocks_pipelined_set    ratio=4.89
+P04-ARBITER-DONE

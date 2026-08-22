@@ -94,8 +94,13 @@
       reproduz em 9 rounds. Stalls sem causa mecânica fechada — reabrir
       instrumentando park/fold do worker se `max_ms` voltar a explodir.
       `findings/rfc0045-p12/`)
-- [ ] **P1.3** Remesura quieto 3× (P2.1 bar): mc50 e lock_prewrite; sem
-      regressão em SET/GET/pipeline/E — status: `todo`
+- [x] **P1.3** Remesura quieto 3× (P2.1 bar): mc50 e lock_prewrite; sem
+      regressão em SET/GET/pipeline/E — status: `done`
+      (2026-08-22, carona no P0.4 clean — `findings/rfc0046-p04/clean/`,
+      worktree em `edfa132`, load ~9): mc50 **2,13 med** (2,22/2,13/2,03
+      vs peer são) e lock_prewrite **2,54 med** (2,54/2,54/2,25) — sem
+      regressão (mc50 2,02→2,13, lock 1,24→2,54); SET longa 5,45 3/3,
+      pipeline 5,38 med, GET 4,71 tight, E 5,88 3/3 ≥5)
 
 ### P2 — concorrência de memtable (o alvo medido do 5×; promoted)
 
@@ -132,7 +137,7 @@
 | P0.3 | p0 | lock_prewrite isolado vs in-suite | done | 2.2× isolado / 0.94 in-suite | 2026-08-20 |
 | P1.1 | p1 | prepare off-lock | done (negativo) | 8% do hold; P0.2 | 2026-08-20 |
 | P1.2 | p1 | bissecção do contexto v0 | done | premissa corrigida: era config+janela de stalls, não contexto; 9 rounds sem flip | 2026-08-21 |
-| P1.3 | p1 | remesura quieto 3× sem regressão | todo | — | 2026-08-20 |
+| P1.3 | p1 | remesura quieto 3× sem regressão | **done** | P0.4 clean (edfa132): mc50 2.13 med 3× (2.22/2.13/2.03), lock_prewrite 2.54 med 3× — sem regressão | 2026-08-22 |
 | P2.1 | p2 | memtable apply fora da seção crítica | todo | +15% esperado (aritmética P0.2); não fecha 5× sozinho | 2026-08-21 |
 | P2.2 | p2 | handoff sem park-convoy | **done (negativo)** | premissa corrigida: merge 0.19× já era sem catch-up (021c231); lock-flags varridos (rfc0045-p22, 66e672c) | 2026-08-21 |
 
