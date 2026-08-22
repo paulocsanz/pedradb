@@ -183,9 +183,12 @@ Não fecha (e não se mente):
       `findings/2026-08-22-p13-rearm4/`)**: rounds **6,00/6,30/6,66 —
       3/3 ≥5, med 6,30** (compat 14,9–15,2M, peer 2,36–2,48M estável)
       e longa 2M **6,49**; watchdog flagou load 10,79 mid-battery →
-      **evidência (terceira confirmação suja consecutiva)**. Fechamento
-      oficial aguarda a bateria quieta re-armada (rearm5, no HEAD do
-      write-path)
+      **evidência (terceira confirmação suja consecutiva)**. **Re-arm 5
+      (2026-08-22, `findings/2026-08-22-p23-rearm5/`, HEAD `28a3d59`
+      com o write-path fix)**: rounds a load 7,7–8,5 (sob a barra):
+      **6,18/7,07/6,70 — 4ª confirmação 3/3 ≥5**; a longa desta bateria
+      rodou sob load 12–15 e é inválida (watchdog 14,86). Fechamento
+      oficial aguarda caixa quieta (rearm6, sem mudanças de código)
 
 ### P2 — YCSB + quiet 3×
 
@@ -226,7 +229,13 @@ Não fecha (e não se mente):
       CPU user da suíte **−93%** (1 073–1 109 s → 71 s), pico RSS
       **−62%** (15,7→5,9 GB), **d +16,8%, b +14,8%, f +7,1% (3/3)**,
       c +3,3%; a/e planos (limitados por fdatasync, drift ±6% da caixa
-      troca o sinal entre rodadas). Oficiais = rearm5 neste HEAD
+      troca o sinal entre rodadas). **Re-arm 5 (2026-08-22,
+      `findings/2026-08-22-p23-rearm5/`, HEAD `28a3d59`, rounds a load
+      7,7–8,5)**: primeira bateria com **a/d/e ≥5 na mediana** —
+      E 5,82 / D 5,45 / A 5,40 (era 4,94/~3,0/3,65 no rearm4);
+      C 4,70, B 4,03, F 3,73 sobem mas não fecham; longa contaminada
+      (load 12–15, watchdog) — bateria NON-OFFICIAL, evidência.
+      Oficiais = rearm6 quando a caixa aquietar
 - [x] **P2.3** Script: `PEDRA_PARITY_ASYNC=1` + `FLOOR=5` **não** é o
       default do `tikv_ycsb_parity_v0.sh` — status: `done`
 
@@ -241,9 +250,9 @@ Não fecha (e não se mente):
 | P0.5 | p0 | set_mc50 ≥ 5× async | doing | quieto: **2.02 vs peer são** — não fecha; 3.4–9.2 eram peer doente | 2026-08-20 |
 | P1.1 | p1 | pipeline ≥ 5× | doing | re-arm: longa 5,00 exato, rounds 5,31 med c/ 1 perna anômala — segue na linha | 2026-08-22 |
 | P1.2 | p1 | set / blob ≥ 5× | doing | SET longa 4,65 no re-arm load-14 (assinatura load; quieta P0.4 era 5,45 3/3) — bateria quieta decide | 2026-08-22 |
-| P1.3 | p1 | get ≥ 5× | doing | fix 312e354; rearm4: **3/3 ≥5 (6,30 med) + longa 6,49** (3ª confirmação suja; watchdog 10,79); composição controlada ≥6,1×; rearm5 fecha | 2026-08-22 |
+| P1.3 | p1 | get ≥ 5× | doing | 4ª confirmação suja: rearm5 **6,70 med (3/3)** no HEAD 28a3d59 (rounds load 7,7–8,5); composição controlada ≥6,1×; oficial = rearm6 caixa quieta | 2026-08-22 |
 | P2.1 | p2 | quiet 3× | **done** | **árbitro @ load 9.4**: E 10.5 e scan 7.4 fecham; SET 5.41 longo; resto 0.94–3.8 | 2026-08-20 |
-| P2.2 | p2 | ycsb A–F ≥ 5× async | doing | E fechado (10.5 quieto); rearm4: F 3,33 / A 3,65 med; **write-path fix (fold O(n²)+GC)**: A/B 20M — CPU −93%, RSS −62%, d +17%, b +15%, f +7% 3/3; oficiais = rearm5 | 2026-08-22 |
+| P2.2 | p2 | ycsb A–F ≥ 5× async | doing | rearm5 (rounds load 7,7–8,5): **E 5,82 / D 5,45 / A 5,40 med** — 1ª bateria com a/d/e ≥5 (fix write-path a28637a); C 4,70 / B 4,03 / F 3,73; bateria NON-OFFICIAL (longa sob 12–15); oficial = rearm6 | 2026-08-22 |
 | P2.3 | p2 | script não default 5× | done | tikv_ycsb_parity_v0.sh | 2026-08-19 |
 
 ## Acceptance Criteria
