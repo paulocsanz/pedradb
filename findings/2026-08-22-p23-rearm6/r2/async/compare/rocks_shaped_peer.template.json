@@ -1,0 +1,80 @@
+{
+  "bench": "rocks-side-peer-template",
+  "engine": "rocksdb",
+  "sync": false,
+  "durability": "async-wal (WriteOptions.sync=false, rocksdb default)",
+  "benches": [
+    {
+      "name": "deps_apply_batch",
+      "qps": null,
+      "compat_qps_ref": 20863.207,
+      "note": "fill qps from real RocksDB same shape"
+    },
+    {
+      "name": "deps_cache_overwrite",
+      "qps": null,
+      "compat_qps_ref": 1306015.835,
+      "note": "fill qps from real RocksDB same shape"
+    },
+    {
+      "name": "deps_lock_prewrite",
+      "qps": null,
+      "compat_qps_ref": 27984.487,
+      "note": "fill qps from real RocksDB same shape"
+    },
+    {
+      "name": "deps_mvcc_latest",
+      "qps": null,
+      "compat_qps_ref": 529678.551,
+      "note": "fill qps from real RocksDB same shape"
+    },
+    {
+      "name": "deps_raftlog",
+      "qps": null,
+      "compat_qps_ref": 67034.519,
+      "note": "fill qps from real RocksDB same shape"
+    },
+    {
+      "name": "deps_scan",
+      "qps": null,
+      "compat_qps_ref": 505710.355,
+      "note": "fill qps from real RocksDB same shape"
+    },
+    {
+      "name": "ycsb_a",
+      "qps": null,
+      "compat_qps_ref": 3077514.907,
+      "note": "fill qps from real RocksDB same shape"
+    },
+    {
+      "name": "ycsb_b",
+      "qps": null,
+      "compat_qps_ref": 5968670.449,
+      "note": "fill qps from real RocksDB same shape"
+    },
+    {
+      "name": "ycsb_c",
+      "qps": null,
+      "compat_qps_ref": 9205983.890,
+      "note": "fill qps from real RocksDB same shape"
+    },
+    {
+      "name": "ycsb_d",
+      "qps": null,
+      "compat_qps_ref": 7977376.161,
+      "note": "fill qps from real RocksDB same shape"
+    },
+    {
+      "name": "ycsb_e",
+      "qps": null,
+      "compat_qps_ref": 1262028.711,
+      "note": "fill qps from real RocksDB same shape"
+    },
+    {
+      "name": "ycsb_f",
+      "qps": null,
+      "compat_qps_ref": 1812073.483,
+      "note": "fill qps from real RocksDB same shape"
+    }
+  ]
+}

@@ -1,0 +1,44 @@
+{
+  "bench": "rocks-side-peer-template",
+  "engine": "rocksdb",
+  "sync": false,
+  "durability": "async-wal (WriteOptions.sync=false, rocksdb default)",
+  "benches": [
+    {
+      "name": "kvrocks_blob_set",
+      "qps": null,
+      "compat_qps_ref": 24423.056,
+      "note": "fill qps from real RocksDB same shape"
+    },
+    {
+      "name": "kvrocks_get",
+      "qps": null,
+      "compat_qps_ref": 15242972.989,
+      "note": "fill qps from real RocksDB same shape"
+    },
+    {
+      "name": "kvrocks_pipelined_set",
+      "qps": null,
+      "compat_qps_ref": 231656.886,
+      "note": "fill qps from real RocksDB same shape"
+    },
+    {
+      "name": "kvrocks_scan",
+      "qps": null,
+      "compat_qps_ref": 1653462.392,
+      "note": "fill qps from real RocksDB same shape"
+    },
+    {
+      "name": "kvrocks_set",
+      "qps": null,
+      "compat_qps_ref": 1938610.036,
+      "note": "fill qps from real RocksDB same shape"
+    },
+    {
+      "name": "kvrocks_set_mc50",
+      "qps": null,
+      "compat_qps_ref": 328591.530,
+      "note": "fill qps from real RocksDB same shape"
+    }
+  ]
+}
