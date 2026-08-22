@@ -137,14 +137,24 @@ Não fecha (e não se mente):
       quieto; p50 4.0 µs vs 23 µs segue ~6× melhor. Não é ≥5 estável.
       **Renovação 2026-08-22 (P0.4 clean, 3× longa quieta, árvore
       commitada)**: 4,95/5,38/6,24 — **mediana 5,38 ≥5 alcançada**,
-      mas um run na linha; curta 5,04 med. Não é 3/3 — segue `doing`)
+      mas um run na linha; curta 5,04 med. Não é 3/3 — segue `doing`.
+      **Re-arm 2026-08-22 (`findings/2026-08-22-p13-rearm/`, commit
+      312e354, load subiu a 12–15 mid-run — evidência)**: rounds
+      2,33/5,34/5,31 (r1 compat 105k vs 235k/224k nas outras — perna
+      anômala), longa **5,00 exato** (compat 187k ≡ 186k da quieta
+      P0.4; peer 37,4k vs 34,7k — peer ~8% mais rápido). Compat
+      inalterado pelo fix P1.3 (esperado — batch writes); o alvo
+      continua straddle na linha)
 - [ ] **P1.2** `kvrocks_set` / `kvrocks_blob_set` ≥ 5.0 — status: `doing`
       (SET **cruza na quieta longa: 5.41** @ 2M quieto, p50 0.4 µs vs
       2.5 µs; curta 4.61. Blob **2.02** quieto — longe; copies de 16 KB
       dominam. **Renovação 2026-08-22 (P0.4 clean, 3× longa quieta)**:
       SET **5,45/5,18/16,47 — 3/3 ≥5, mediana 5,45** (o 16,47 é run
       com rocks deprimido); curta 4,70 med; blob 2,68 med — blob segue
-      longe, slice continua `doing` por ele)
+      longe, slice continua `doing` por ele. **Re-arm 2026-08-22
+      (`findings/2026-08-22-p13-rearm/`, load 12–15)**: SET longa 4,65
+      (compat 1,97M→1,61M, peer plano — assinatura de load; a quieta
+      re-armada decide), rounds 4,44/4,56/4,60; blob 1,47–1,80)
 - [ ] **P1.3** `kvrocks_get` ≥ 5.0 — status: `doing`
       (straddle: 20 M ops 4.4–5.5; 2 M load ~100 **5.50**; 2 M quieto
       **4.61** com Rocks são a 2.5 M — p50 0.0 µs vs 0.4 µs. Não é ≥5
@@ -162,7 +172,15 @@ Não fecha (e não se mente):
       cross-instance. A/B mesma caixa: GET 200 M 11,06→15,80 M qps
       (**+43%**), hit 95,6%; ycsb a/c/f **+51/57/61%** (fim do clear
       O(N) por read-after-write). Projeção vs peer ~400 ns: ~6,0×.
-      Aguardando re-árbitro quieto 3× para fechar)
+      **Re-arm 2026-08-22 (`findings/2026-08-22-p13-rearm/`, bateria
+      P0.4-método no commit)**: rounds **5,98/6,28/6,46 — 3/3 ≥5**
+      (compat 7,6–7,8M → 14,2–15,2M +90%, peer estável 2,3–2,4M) e
+      longa **7,04**. Porém o gate quieto passou a 8,85 e o load subiu
+      a 12–15 no meio da bateria — pela norma P0.4 é **evidência, não
+      recorde oficial**; composição conservadora só de números
+      controlados (compat quieta 11,8M × fator A/B 1,30 ÷ peer quieta
+      2,49M) dá **≥6,1×**. Fechamento oficial aguarda a bateria quieta
+      re-armada)
 
 ### P2 — YCSB + quiet 3×
 
@@ -186,7 +204,14 @@ Não fecha (e não se mente):
       sem regressão do default novo — controle `04c7aa2`≡`edfa132`
       prova o lado compat estável no arco todo; E async 5,88 med
       (3/3 ≥5) contra um peer ~1,8× mais rápido que 20/ago.**
-      `ycsb-longwindow/` + `rfc0044-p2/quiet/`)
+      `ycsb-longwindow/` + `rfc0044-p2/quiet/`.
+      **Re-arm 2026-08-22 (`findings/2026-08-22-p13-rearm/`, commit
+      312e354 — load 12–15, evidência)**: **F 3,33 med** (era 1,40;
+      compat 0,78M→1,54–1,80M com peer estável — o fix P1.3), **A
+      3,65 med** (compat 1,9M→2,4–3,0M; r2 0,61M vítima de spike);
+      E 4,94 e C 3,95 caem −15–17% no lado compat com peer plano —
+      assinatura de load, não do fix (A/B controlado: c +57%);
+      oficiais aguardam a bateria quieta)
 - [x] **P2.3** Script: `PEDRA_PARITY_ASYNC=1` + `FLOOR=5` **não** é o
       default do `tikv_ycsb_parity_v0.sh` — status: `done`
 
@@ -199,11 +224,11 @@ Não fecha (e não se mente):
 | P0.3 | p0 | `commit_async_ops` | done | sem group no async | 2026-08-19 |
 | P0.4 | p0 | buffer async 64 KiB | done | `ASYNC_WAL_BUFFER` | 2026-08-19 |
 | P0.5 | p0 | set_mc50 ≥ 5× async | doing | quieto: **2.02 vs peer são** — não fecha; 3.4–9.2 eram peer doente | 2026-08-20 |
-| P1.1 | p1 | pipeline ≥ 5× | doing | reaberto: straddle 4.22 (quieto 2M) – 5.86; p50 ~6× | 2026-08-20 |
-| P1.2 | p1 | set / blob ≥ 5× | doing | SET **5.41 quieto 2M** (cruza); blob 2.02 | 2026-08-20 |
-| P1.3 | p1 | get ≥ 5× | doing | eng: TLS cache redesenhado (época/slot, 2048×8) — GET +43%, A/C/F +51/57/61% no A/B; re-árbitro quieto pendente | 2026-08-22 |
+| P1.1 | p1 | pipeline ≥ 5× | doing | re-arm: longa 5,00 exato, rounds 5,31 med c/ 1 perna anômala — segue na linha | 2026-08-22 |
+| P1.2 | p1 | set / blob ≥ 5× | doing | SET longa 4,65 no re-arm load-14 (assinatura load; quieta P0.4 era 5,45 3/3) — bateria quieta decide | 2026-08-22 |
+| P1.3 | p1 | get ≥ 5× | doing | fix commitado 312e354; re-arm: **3/3 ≥5 (6,28 med) + longa 7,04**, mas load 12–15 → evidência; composição controlada ≥6,1×; bateria quieta re-armada fecha | 2026-08-22 |
 | P2.1 | p2 | quiet 3× | **done** | **árbitro @ load 9.4**: E 10.5 e scan 7.4 fecham; SET 5.41 longo; resto 0.94–3.8 | 2026-08-20 |
-| P2.2 | p2 | ycsb A–F ≥ 5× async | doing | E fechado (10.5 quieto, 3/3 toda condição); A–F demais 1.7–3.8 no wall. **Nota 2026-08-22: o fix P1.3 (fim do clear TLS O(N) por write) deu +51/57/61% em A/C/F no A/B — remedeiar oficial após re-árbitro** | 2026-08-22 |
+| P2.2 | p2 | ycsb A–F ≥ 5× async | doing | E fechado (10.5 quieto, 3/3 toda condição); re-arm: **F 1,40→3,33, A 2,98→3,65** (fix P1.3, compat +100/+25–57% peer plano) — wall ≥5 ainda não | 2026-08-22 |
 | P2.3 | p2 | script não default 5× | done | tikv_ycsb_parity_v0.sh | 2026-08-19 |
 
 ## Acceptance Criteria
