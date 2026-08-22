@@ -62,7 +62,7 @@
 
 - [ ] **P1.1** `deps_apply_batch_mc4` e `deps_raftlog_mc4` ≥ 2.0 vs default da run — status: `doing` (head3: **apply_mc4 2.788 ✓**; raftlog_mc4 **1.792**. Catch-up 50 µs (único dado quieto; 80 µs revertido sem remesura); `write_cf_owned` + WAL 1× `encoded_len`. Remesura só caixa quieta)
 - [ ] **P1.2** `ycsb_a` / `ycsb_f` / `deps_cache_overwrite` (1c e `_mc4` se existirem) ≥ 2.0 vs default — status: `todo` (teto **afirmado no código**: `rfc0041_one_fdatasync_cannot_hit_2x_rocks_default_ycsb_a` — p50 `fdatasync` > 2.48 µs = 2× head3 Rocks A. Sem largar G1/peer/shapes isto não fecha)
-- [ ] **P1.3** `deps_apply_batch` e `deps_raftlog` **1 cliente** ≥ 2.0 vs default — status: `todo` (mesmo `write_cf_owned`; official ainda head3 1.30 / 0.99)
+- [ ] **P1.3** `deps_apply_batch` e `deps_raftlog` **1 cliente** ≥ 2.0 vs default — status: `doing` (mesmo `write_cf_owned`; official ainda head3 1.30 / 0.72. **Pubfix 2026-08-22 (`8e3a460`/F204, `findings/2026-08-22-raftlog-pubfix/`)**: publish-phase era 28% do batch (record_dirty alocava 2 Box + 2 hash inserts por chave com mapa vazio; point-cache 1 mutex/chave) — watermark `skipped_below` + `invalidate_many` derrubou publish 3,17→0,15 µs (−95%); A/B oficial-shape 15 rounds sujo **+24,5%** raftlog (extrapola ~0,90× vs 0,72× limpo), ycsb_a +3,1% sem regressão (391 testes ok). Restam ~2× de headroom sobre os pisos: fold deep-clone, `tail_idx` 0,197 µs/op, submit-path. NON-OFFICIAL)
 
 ### P2 — leituras ≥ 2× default
 
@@ -79,7 +79,7 @@
 | P0.3 | p0 | floor 2.0 nas que já passam | done | wiring; default off (scatter) | 2026-08-18 |
 | P1.1 | p1 | apply/raftlog MC ≥ 2× | doing | apply_mc4 **2.788 ✓**; raftlog_mc4 1.792 (head3). WAL one `encoded_len` | 2026-08-18 |
 | P1.2 | p1 | A/F/overwrite ≥ 2× | todo | env.rs fd-ceiling test; 1c físico | 2026-08-18 |
-| P1.3 | p1 | apply/raftlog 1c ≥ 2× | todo | head3 apply 1.30 / raftlog 0.99; owned batch | 2026-08-18 |
+| P1.3 | p1 | apply/raftlog 1c ≥ 2× | doing | pubfix `8e3a460`: raftlog +24,5% A/B sujo (0,72→~0,90× est.); head3 apply 1.30; restam fold-clone/tail_idx/submit | 2026-08-22 |
 | P2.1 | p2 | scan/E ≥ 2× | doing | head3 E 2.121 / scan 1.790; count hit is `&self` | 2026-08-18 |
 | P2.2 | p2 | C/B/D/MVCC ≥ 2× | doing | head3 C 1.796; get hit `borrow()` + short hash | 2026-08-18 |
 | P2.3 | p2 | gate 2.0 em todas | todo | — | 2026-08-17 |

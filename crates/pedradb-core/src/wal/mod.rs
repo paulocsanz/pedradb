@@ -304,3 +304,52 @@ impl<F: EnvFile> Wal<F> {
         self.flush()
     }
 }
+
+#[cfg(test)]
+mod probe_tests {
+    use super::*;
+
+    /// RFC-0044 P2.2 micro: deps_raftlog WAL floor —
+    /// `encode_write_op_batches` + async-buffered write only (no Db lock,
+    /// memtable, or publish). Run:
+    /// `cargo test -p pedradb-core --lib --release wal_encode_raftlog_micro -- --ignored --nocapture`
+    /// `WAL_MICRO_OPS` sets ops/batch (default 16), `WAL_MICRO_N` batches.
+    #[test]
+    #[ignore]
+    fn wal_encode_raftlog_micro() {
+        let dir = std::env::temp_dir().join(format!("wal-micro-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut w = Wal::create(dir.join("wal.log")).unwrap();
+        let per: usize = std::env::var("WAL_MICRO_OPS")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(16);
+        let n: u64 = std::env::var("WAL_MICRO_N")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(200_000);
+        let val = bytes::Bytes::from(vec![b'r'; 100]);
+        let mut ops: Vec<crate::batch::WriteOp> = Vec::with_capacity(per);
+        for i in 1..=per as u64 {
+            ops.push(crate::batch::WriteOp::put(
+                i,
+                format!("raftlog/{i:08}"),
+                val.clone(),
+            ));
+        }
+        let sl = ops.as_slice();
+        let t0 = std::time::Instant::now();
+        for _ in 0..n {
+            w.encode_write_op_batches(&[sl]).unwrap();
+            w.write_pending_frame_if(false).unwrap();
+        }
+        let el = t0.elapsed();
+        println!(
+            "wal micro: {n} batches x {per} ops, {el:?} ({:.3} µs/batch, {:.4} µs/op)",
+            el.as_secs_f64() * 1e6 / n as f64,
+            el.as_secs_f64() * 1e6 / (n as f64 * per as f64),
+        );
+        drop(w);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}

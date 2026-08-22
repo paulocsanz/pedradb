@@ -1,0 +1,81 @@
+{
+  "bench": "rocks-parity-v1",
+  "engine": "compat",
+  "sync": false,
+  "peer_policy": "rocks-default",
+  "durability": "async-wal (PEDRA_PARITY_ASYNC=1; WAL write, no fdatasync — NOT G1, not official)",
+  "changelog_interval": 0,
+  "status": "ok",
+  "notes": ["ycsb records=1024 ops=2000 payload=100 dist=uniform", "engine=compat durability=async-wal (PEDRA_PARITY_ASYNC=1; WAL write, no fdatasync — NOT G1, not official)", "suites: deps", "seed: one put per record (not timed)", "cfs: default + write, lock, raftlog (TiKV store shape; raftlog = raftdb)", "deps apply batch txns/commit: 32", "changelog_interval=0", "peer_policy=rocks-default", "host-default write sync: kvrocks=false myrocks=true surreal=true"],
+  "benches": [
+{
+    "name": "deps_apply_batch",
+    "n": 2000,
+    "qps": 5319.428,
+    "p50_ms": 0.0406,
+    "p95_ms": 0.0595,
+    "p99_ms": 0.0804,
+    "max_ms": 143.3580,
+    "wall_s": 0.3760
+  },
+{
+    "name": "deps_mvcc_latest",
+    "n": 2000,
+    "qps": 556967.313,
+    "p50_ms": 0.0005,
+    "p95_ms": 0.0040,
+    "p99_ms": 0.0049,
+    "max_ms": 0.0272,
+    "wall_s": 0.0036
+  },
+{
+    "name": "deps_mvcc_latest_split",
+    "combined": true,
+    "probe": {"latest_ops":2000,"latest_mem_hit":875,"latest_sst_fallback":0,"latest_sst_probed":0,"scan_ops":0,"scan_sst_probed":0,"sst_count":0,"l0_files":0,"level1_files":0,"mem_entries":264192,"block_cache_hits":0,"block_cache_misses":0,"blocks_decoded":0,"get_mem_hit":875,"get_sst_fallback":0,"get_inline":875,"get_vlog":0,"mvcc_split_ops":2000,"mvcc_ns_encode":85503,"mvcc_ns_last":2428543,"mvcc_ns_get":476503,"mvcc_ns_copy":62725}
+  },
+{
+    "name": "deps_scan",
+    "n": 2000,
+    "qps": 623384.655,
+    "p50_ms": 0.0002,
+    "p95_ms": 0.0039,
+    "p99_ms": 0.0123,
+    "max_ms": 0.0775,
+    "wall_s": 0.0032
+  },
+{
+    "name": "deps_scan_probe",
+    "probe": {"latest_ops":0,"latest_mem_hit":0,"latest_sst_fallback":0,"latest_sst_probed":0,"scan_ops":874,"scan_sst_probed":0,"sst_count":0,"l0_files":0,"level1_files":0,"mem_entries":264192,"block_cache_hits":0,"block_cache_misses":0,"blocks_decoded":0,"get_mem_hit":0,"get_sst_fallback":0,"get_inline":0,"get_vlog":0,"mvcc_split_ops":0,"mvcc_ns_encode":0,"mvcc_ns_last":0,"mvcc_ns_get":0,"mvcc_ns_copy":0}
+  },
+{
+    "name": "deps_raftlog",
+    "n": 2000,
+    "qps": 33459.947,
+    "p50_ms": 0.0068,
+    "p95_ms": 0.0175,
+    "p99_ms": 0.0613,
+    "max_ms": 41.5783,
+    "wall_s": 0.0598
+  },
+{
+    "name": "deps_cache_overwrite",
+    "n": 2000,
+    "qps": 1292963.563,
+    "p50_ms": 0.0005,
+    "p95_ms": 0.0008,
+    "p99_ms": 0.0015,
+    "max_ms": 0.0800,
+    "wall_s": 0.0015
+  },
+{
+    "name": "deps_lock_prewrite",
+    "n": 2000,
+    "qps": 17991.537,
+    "p50_ms": 0.0213,
+    "p95_ms": 0.0348,
+    "p99_ms": 0.0542,
+    "max_ms": 43.5608,
+    "wall_s": 0.1112
+  }
+  ]
+}

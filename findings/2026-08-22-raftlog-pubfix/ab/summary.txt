@@ -1,0 +1,48 @@
+# A/B pubfix — resumo bruto (caixa suja load 6-12, NON-OFFICIAL)
+
+old = b21379f (worktree /tmp/pedradb-pubfix-old), new = main com o fix
+(cache.rs watermark + db.rs invalidate_many). Alternado por round.
+Env: PEDRA_PARITY_ASYNC=1 ROCKS_PARITY_SYNC=0 ROCKS_PARITY_SUITE=deps
+ROCKS_PARITY_ONLY=deps_raftlog ROCKS_YCSB_OPS=2000 (ycsba: SUITE=ycsb
+ONLY=ycsb_a).
+
+## deps_raftlog (15 rounds) — deps_raftlog qps por round
+
+round | old | new
+--- | --- | ---
+1 | 45160 | 46782
+2 | 60006 | 57903
+3 | 68668 | 62797
+4 | 52537 | 36223
+5 | 41905 | 64683
+6 | 36285 | 59329
+7 | 58900 | 75854
+8 | 99036 | 73093
+9 | 47647 | 75014
+10 | 85982 | 61462
+11 | 34513 | 13957
+12 | 20652 | 92463
+13 | 5901 | 33460
+14 | 60667 | 49639
+15 | 26963 | 58679
+
+medianas: old 47647 / new 59329 -> +24,5%
+
+## ycsb_a dedicado (15 rounds)
+
+medianas: old 3232323 / new 3331712 -> +3,1%
+(0,82 no guard de 3 rounds era ruído; refutado aqui)
+
+## guard de suites (3 rounds, mediana; caixa suja)
+
+deps_apply_batch 1,032 | deps_mvcc_latest 0,991 | deps_scan 0,914
+deps_cache_overwrite 1,137 | deps_lock_prewrite 0,963
+ycsb_a 0,822 (refutado -> +3,1% no dedicado) | ycsb_b 0,956
+ycsb_c 0,997 | ycsb_d 1,017 | ycsb_e 1,024 | ycsb_f 1,010
+
+scan/prewrite: caminhos não tocados pelo fix (invalidação é write-side),
+banda de ruído da caixa; sem regressão dedicada neste arco.
+
+## fase (PEDRA_WRITE_PHASE_STATS=1, raftlog_phase_probe, load 12)
+
+publish 3,17 -> 0,15 us/batch; total 11,1 -> 9,3-10,0 us/batch

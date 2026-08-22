@@ -1003,6 +1003,46 @@ mod tests {
     use super::*;
     use std::ops::Bound;
 
+    /// RFC-0044 P2.2 micro: deps_raftlog memtable floor — `insert_many`
+    /// (tail append + tail_idx index) only, no WAL/Db/publish. Run:
+    /// `cargo test -p pedradb-core --lib --release mem_insert_raftlog_micro -- --ignored --nocapture`
+    /// `MEM_MICRO_OPS` sets ops/batch (default 16), `MEM_MICRO_N` batches.
+    #[test]
+    #[ignore]
+    fn mem_insert_raftlog_micro() {
+        let per: usize = std::env::var("MEM_MICRO_OPS")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(16);
+        let n: u64 = std::env::var("MEM_MICRO_N")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(100_000);
+        let mut mt = MemTable::new();
+        let val = Bytes::from(vec![b'r'; 100]);
+        let mut seq = 0u64;
+        let t0 = std::time::Instant::now();
+        for _ in 0..n {
+            let mut items = Vec::with_capacity(per);
+            for _ in 0..per {
+                seq += 1;
+                items.push((
+                    InternalKey::new(format!("raftlog/{seq:08}"), seq, ValueType::Value),
+                    val.clone(),
+                ));
+            }
+            mt.insert_many(items);
+        }
+        let el = t0.elapsed();
+        println!(
+            "mem micro: {n} batches x {per} ops, {el:?} ({:.3} µs/batch, {:.4} µs/op) entries={} approx_kb={}",
+            el.as_secs_f64() * 1e6 / n as f64,
+            el.as_secs_f64() * 1e6 / (n as f64 * per as f64),
+            mt.len(),
+            mt.approx_memory_usage() / 1024,
+        );
+    }
+
     #[test]
     fn put_get() {
         let mut mt = MemTable::new();

@@ -2461,6 +2461,78 @@ fn compat_compact_once<E: Env>(inner: &ConcurrentDb<E>, gate: &Mutex<()>) -> boo
 mod tests {
     use super::*;
 
+    /// RFC-0044 P2.2 probe: deps_raftlog shape through the exact bench path
+    /// (`write_cf_owned`, async lone-writer). Prints WritePhaseStats so the
+    /// per-batch gap vs Rocks has numbers. Run with:
+    /// `cargo test -p rocksdb-compat --lib --release --ignored raftlog_phase -- --nocapture`
+    #[test]
+    #[ignore]
+    fn raftlog_phase_probe() {
+        let want_stats = std::env::var("RAFTLOG_PROBE_STATS")
+            .map(|v| v != "0")
+            .unwrap_or(true);
+        if want_stats {
+            std::env::set_var("PEDRA_WRITE_PHASE_STATS", "1");
+        }
+        let d = tmp("raftlog_probe");
+        let mut opts = Options::new();
+        opts.create_if_missing(true);
+        if std::env::var("RAFTLOG_PROBE_NOFLUSH").is_ok() {
+            // Discriminator: no auto-flush ⇒ no parked memtables ⇒ no folds.
+            opts.set_write_buffer_size(0);
+        }
+        let db = DB::open_cf(&opts, &d, &["raftlog"]).unwrap();
+        db.inner.set_default_write_sync(false);
+        // 3.2M sequential keys = 100x the official battery leg; small enough
+        // that cache/invalidation structures stay battery-scale.
+        let per_batch: usize = std::env::var("RAFTLOG_PROBE_BATCH")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(16);
+        let batches = std::env::var("RAFTLOG_PROBE_N")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(200_000);
+        let mut idx = 0u64;
+        let val = vec![b'r'; 100];
+        let t0 = std::time::Instant::now();
+        for _ in 0..batches {
+            let mut puts = Vec::with_capacity(per_batch);
+            for _ in 0..per_batch {
+                idx += 1;
+                puts.push((
+                    "raftlog",
+                    format!("raftlog/{idx:08}").into_bytes(),
+                    val.clone(),
+                ));
+            }
+            db.write_cf_owned(puts, Vec::new()).unwrap();
+        }
+        let wall = t0.elapsed();
+        let commits = batches;
+        let ops = commits as usize * per_batch;
+        if let Some(st) = db.inner.write_phase_stats() {
+            let rd = |v: &std::sync::atomic::AtomicU64| {
+                v.load(std::sync::atomic::Ordering::Relaxed) as f64 / commits as f64 / 1000.0
+            };
+            println!(
+                "  prepare={:.2}µs wal={:.2}µs mem={:.2}µs publish={:.2}µs flush_chk={:.2}µs lock_wait={:.2}µs",
+                rd(&st.prepare_ns),
+                rd(&st.wal_ns),
+                rd(&st.mem_ns),
+                rd(&st.publish_ns),
+                rd(&st.flush_check_ns),
+                rd(&st.lock_wait_ns),
+            );
+        }
+        println!(
+            "raftlog probe: {commits} batches x {per_batch} ops ({ops} ops), wall {wall:?} ({:.2} µs/batch, {:.3} µs/op)",
+            wall.as_secs_f64() * 1e6 / commits as f64,
+            wall.as_secs_f64() * 1e6 / ops as f64
+        );
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
     fn tmp(tag: &str) -> std::path::PathBuf {
         use std::sync::atomic::{AtomicU64, Ordering};
         static N: AtomicU64 = AtomicU64::new(0);
