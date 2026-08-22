@@ -907,6 +907,13 @@ pub struct Db<E: Env = StdEnv> {
     /// Unix-ms of the last archive pass this open (P2.2 age metric;
     /// in-memory — `None` after reopen until the next pass).
     last_archive_millis: Option<u64>,
+    /// RFC-0046 P0.5: state of the last horizon-driven full reclaim —
+    /// (GC floor it ran at, total SST bytes right after). The next full
+    /// rewrite waits until the floor advanced AND SST bytes at least
+    /// doubled (classic size-ratio trigger: at most one rewrite per
+    /// dead-weight doubling). In-memory; a reopen may pay one extra
+    /// rewrite (self-limiting, correct either way).
+    last_horizon_reclaim: Option<(SequenceNumber, u64)>,
     /// Count of successful WAL `sync_all` (observability / group-commit tests).
     wal_sync_count: AtomicU64,
     /// Logical user-value bytes ingested.
@@ -1226,6 +1233,7 @@ impl<E: Env> Db<E> {
             uploaded_history_segs: std::collections::HashSet::new(),
             upload_bandwidth: None,
             last_archive_millis: None,
+            last_horizon_reclaim: None,
             wal_sync_count: AtomicU64::new(0),
             bytes_ingested: 0,
             bytes_written_wal: 0,
@@ -1935,7 +1943,7 @@ impl<E: Env> Db<E> {
         }
         let mut best: Option<crate::history::HistoryRecord> = None;
         let mut missing_below_snap = false;
-        for (from, through, name, local_id) in &cands {
+        for (from, _, name, local_id) in &cands {
             if *from > snap.seq {
                 continue; // cannot hold a record this snapshot can see
             }
@@ -5895,6 +5903,62 @@ impl<E: Env> Db<E> {
                 }
             }
             self.last_auto_compact_error = None;
+        }
+        // RFC-0046 P0.5: dead-weight-doubling full rewrite. The horizon
+        // floor always lags the versions `compact_l0_into_l1` just merged
+        // (they age out only after reaching L1) and the L0 path never
+        // absorbs old levels, so disk grows without bound — the `window`
+        // profile measured byte-identical to `All` (rfc0046-sizing). When
+        // the floor advanced past the last full reclaim AND total SST bytes
+        // at least doubled since then, rewrite ALL SSTs under the horizon
+        // floor. Archive first, GC fail-closed (an archive error keeps the
+        // data and the trigger retries on the next flush).
+        if !self.auto_reclaim && !self.ssts.is_empty() {
+            if let Some((floor, true)) = self.auto_gc_floor() {
+                let mut total: u64 = 0;
+                for t in &self.ssts {
+                    if let Ok(len) = self.env.metadata_len(t.path()) {
+                        total = total.saturating_add(len);
+                    }
+                }
+                let fire = match self.last_horizon_reclaim {
+                    None => false,
+                    Some((last_floor, last_bytes)) => {
+                        floor > last_floor && total >= last_bytes.saturating_mul(2)
+                    }
+                };
+                if fire {
+                    if let Err(e) = self.archive_history_below(floor) {
+                        self.last_auto_compact_error = Some(e.to_string());
+                    } else {
+                        let input_idxs: Vec<usize> = (0..self.ssts.len()).collect();
+                        self.rewrite_ssts(
+                            input_idxs,
+                            MAX_LSM_LEVEL,
+                            CompactOptions {
+                                gc: crate::merge::CompactGcOptions::for_oldest_snapshot(floor),
+                            },
+                        )?;
+                        let mut after: u64 = 0;
+                        for t in &self.ssts {
+                            if let Ok(len) = self.env.metadata_len(t.path()) {
+                                after = after.saturating_add(len);
+                            }
+                        }
+                        tracing::info!(
+                            floor,
+                            before_bytes = total,
+                            after_bytes = after,
+                            "horizon-driven full rewrite (RFC-0046 P0.5)"
+                        );
+                        self.last_horizon_reclaim = Some((floor, after));
+                        self.last_auto_compact_error = None;
+                    }
+                } else if self.last_horizon_reclaim.is_none() {
+                    // First observation: record the baseline, don't rewrite.
+                    self.last_horizon_reclaim = Some((floor, total));
+                }
+            }
         }
         Ok(())
     }
@@ -11770,6 +11834,68 @@ mod tests {
             None,
             "anchored coverage proves never-written (P2.1)"
         );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn horizon_full_rewrite_bounds_disk() {
+        // RFC-0046 P0.5: dead-weight-doubling trigger. On an overwrite
+        // workload the horizon floor lags the L0 merges and old levels are
+        // never rewritten, so without the trigger the window profile's LSM
+        // stays byte-identical to `All` (findings/rfc0046-sizing). With it,
+        // aged versions are rewritten away once SST bytes double, and
+        // below-floor history stays readable through the archive.
+        let dir = temp_dir();
+        let clock = std::rc::Rc::new(std::cell::Cell::new(1_000_000u64));
+        let env = ClockEnv::new(std::rc::Rc::clone(&clock));
+        // Default auto-compact (no count/bytes override): L0 merges only,
+        // so the bound can only come from the P0.5 trigger.
+        let mut opts = horizon_opts(1_000, 1 << 30);
+        opts.auto_compact_sst_count = None;
+        let mut db = Db::open_with_env(&dir, opts, env).unwrap();
+        let keys: Vec<Vec<u8>> = (0..64u32).map(|k| format!("k{k:04}").into()).collect();
+        let val = |round: u32, k: u32| vec![(k * 7 + round) as u8; 1024];
+        let mut round0 = Vec::new();
+        for (k, key) in keys.iter().enumerate() {
+            let v = val(0, k as u32);
+            db.put(key, &v).unwrap();
+            round0.push(v);
+        }
+        let pin = db.pin_snapshot();
+        let seq0 = pin.sequence();
+        db.release_snapshot_pin(pin);
+        db.flush().unwrap();
+        for round in 1..24u32 {
+            for (k, key) in keys.iter().enumerate() {
+                db.put(key, &val(round, k as u32)).unwrap();
+            }
+            db.flush().unwrap();
+            clock.set(1_000_000 + (round as u64 + 1) * 1_500);
+        }
+        let live = 64 * 1024u64;
+        let sst = db.stats().sst_bytes;
+        assert!(
+            sst < 12 * live,
+            "SST bytes must stay bounded (live {live}, got {sst})"
+        );
+        for (k, key) in keys.iter().enumerate() {
+            assert_eq!(
+                db.get(key).as_deref(),
+                Some(&val(23, k as u32)[..]),
+                "latest value survives the full rewrites"
+            );
+        }
+        assert!(
+            db.earliest_readable_sequence() > seq0,
+            "watermark advanced past the aged round-0 seq"
+        );
+        for (k, key) in keys.iter().enumerate() {
+            assert_eq!(
+                db.get_at(Snapshot::at(seq0), key).unwrap().as_deref(),
+                Some(&round0[k][..]),
+                "below-floor history reads from the archive after rewrites"
+            );
+        }
         let _ = fs::remove_dir_all(&dir);
     }
 

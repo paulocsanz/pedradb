@@ -1,7 +1,7 @@
 # RFC-0046: história MVCC fora do SSD — retention default + tier em object storage (S3)
 
-**Status:** in-progress (P0.1–P0.3 + P1 + P2.1–P2.2 done; só falta P0.4,
-gated em caixa quieta)
+**Status:** in-progress (P0.1–P0.3 + P0.5 + P1 + P2.1–P2.2 done; só falta
+P0.4, gated em caixa quieta)
 **Updated:** 2026-08-21
 **Parents:** [0009](0009-rocksdb-class-engine.md) (F20 retention),
 [0044](0044-async-class-5x-rocks.md) (E/cliff de retenção),
@@ -106,7 +106,8 @@ gated em caixa quieta)
       pegou o over-archive e fechou); archive só quando o floor vem do
       horizon — status: `done`
       (**caveat pós-telemetria**: "disco ≈ live set + janela + cap" vale
-      para o archive/, não para o total — ver P0.5)
+      para o archive/, não para o total — **fechado pelo P0.5**, que
+      limita o LSM com o trigger de dead-weight-doubling)
 - [x] **P0.3** Testes: `snapshot_pinned_survives_horizon` (pin sobrevive a
       aging+GC; release + novo envelhecimento → `SnapshotTooOld`);
       `pitr_local_by_seq_within_window`; `archive_cap_overflow_advances_watermark_not_silent`
@@ -126,25 +127,34 @@ gated em caixa quieta)
       (`scripts/rfc0046_p04_quiet_arbiter.sh` armado: gate load < 10,
       auto-dispara; g1 col 0041 floor 2.0 + col async 0044, 3 rounds
       pareados, regressão G1 primeiro)
-- [ ] **P0.5** Rewrite de níveis velhos dirigido pelo horizonte (nascido da
+- [x] **P0.5** Rewrite de níveis velhos dirigido pelo horizonte (nascido da
       telemetria `findings/rfc0046-sizing/`, 2026-08-21): **o caminho
-      default não devolve ao disco o que envelheceu** — o floor do horizonte
-      sempre atrasa os inputs do `compact_l0_into_l1` (versões cruzam a
-      janela depois de chegar a L1, e L1 nunca é reescrito; `all` vs
-      `window` byte-idênticos no A/B: LSM 21 535 931 B nos dois, com o
-      watermark avançando 993→9185 — window fica PIOR que F20: retém tudo
-      + arquiva cópia; `auto_compact_sst_count` não salva: promove um
-      nível por vez, L0 vence). Assimetria vs reclaim: floor de reclaim
-      (`last_seq`) sempre excede o batch; floor do horizonte sempre
-      atrasa. Fix: quando o floor avançar além da versão mais antiga de
-      um nível (margem material, ex. floor > último reclaim + fração do
-      live set), reescrever esse nível com o GC floor; + API pública de
-      full-compaction horizon-aware (hoje `compact()` sem GC,
-      `compact_reclaim()` dropa a janela inteira, `auto_gc_floor`
-      privado). Wart junto: watermark avança pelo floor *reportado* sem
-      drop efetivo — leitura abaixo dele vai ao archive (P2.1) e pode
-      falhar `SnapshotTooOld` com a versão ainda no LSM se o cap derrubar
-      o segmento — status: `todo`
+      default não devolvia ao disco o que envelheceu** — o floor do
+      horizonte sempre atrasa os inputs do `compact_l0_into_l1` (versões
+      cruzam a janela depois de chegar a L1, e L1 nunca é reescrito).
+      Medido no workload corrigido (256 chaves estáveis × 40 overwrites):
+      sem o fix, `all` vs `window` byte-idênticos (LSM 10 991 231 B nos
+      dois) e o window ainda arquiva cópia por cima — PIOR que F20;
+      `auto_compact_sst_count` não salva (promove um nível por vez, L0
+      vence). Erratum: a primeira rodada da telemetria media um workload
+      sem overwrite (sufixo de chave re-sortido por round — zero versões
+      repetidas); a conclusão sobreviveu, a evidência não — ver
+      `findings/rfc0046-sizing/` (README erratum + contrafactual).
+      Fix entregue: **dead-weight-doubling trigger** em
+      `maybe_auto_compact` — quando o floor avançou além do último full
+      reclaim E os bytes de SST pelo menos dobraram desde então,
+      reescrever TODOS os SSTs com o GC floor (archive-first,
+      fail-closed; erro de archive retenta no próximo flush). Máx. uma
+      reescrita por dobramento de peso morto; `last_horizon_reclaim`
+      in-memory (reopen pode pagar uma extra, auto-limitante). A/B:
+      LSM 10 991 231 → 2 710 428 B (4,1×), archive no cap, total
+      0,64× escrito. `auto_reclaim` inalterado (floor maximal).
+      Teste `horizon_full_rewrite_bounds_disk` (bound + latest intacto
+      + leitura abaixo do watermark pelo archive). Wart REMANESCENTE:
+      watermark avança pelo floor *reportado* sem drop efetivo —
+      leitura abaixo dele vai ao archive (P2.1) e pode falhar
+      `SnapshotTooOld` com a versão ainda no LSM se o cap derrubar o
+      segmento — status: `done`
 
 ### P1 — tier S3 (história barata e PITR de lá)
 
@@ -228,7 +238,7 @@ gated em caixa quieta)
 | P0.2 | p0 | archive local bounded + GC pin-aware | **done** | b68f9a1 (+docs neste commit) | 2026-08-21 |
 | P0.3 | p0 | testes pin/cap/crash/PITR local | **done** | b68f9a1 (+docs neste commit) | 2026-08-21 |
 | P0.4 | p0 | re-árbitro quieto com novo default | **doing** | script armado (gate load < 10, auto-dispara) | 2026-08-21 |
-| P0.5 | p0 | rewrite de níveis velhos pelo horizonte (LSM bound) | todo | falsificado no default: `rfc0046-sizing` | 2026-08-21 |
+| P0.5 | p0 | rewrite de níveis velhos pelo horizonte (LSM bound) | **done** | dead-weight-doubling trigger + teste; erratum rfc0046-sizing | 2026-08-21 |
 | P1.1 | p1 | Env→S3 + testes seam | **done** | cc760e5 | 2026-08-21 |
 | P1.2 | p1 | upload pipeline + backpressure | **done** | b548a5e | 2026-08-21 |
 | P1.3 | p1 | restore drill do tier | **done** | c429acb | 2026-08-21 |
