@@ -339,9 +339,15 @@ pub fn store<E: Env>(env: &E, dir: &Path, vs: &VersionSet, sync: bool) -> Result
     }
     env.rename(&cur_tmp, &dir.join(CURRENT_FILE))?;
 
+    // Commit point passed: `CURRENT` names `man_name`. From here on the new
+    // version is the one a reopen reads — errors must not trigger caller
+    // undos (F196); they carry ManifestCommittedUnsynced instead.
+    let mut unsynced: Option<std::io::Error> = None;
     if sync {
         // RFC-0015 H2: durability-required paths must not discard dir fsync errors.
-        env.sync_dir(dir)?;
+        if let Err(e) = env.sync_dir(dir) {
+            unsynced = Some(e);
+        }
     }
 
     // Best-effort: drop older MANIFEST-* files (not the one we just wrote).
@@ -352,7 +358,10 @@ pub fn store<E: Env>(env: &E, dir: &Path, vs: &VersionSet, sync: bool) -> Result
             }
         }
     }
-    Ok(())
+    match unsynced {
+        Some(source) => Err(CoreError::ManifestCommittedUnsynced { source }),
+        None => Ok(()),
+    }
 }
 
 fn is_tmp_name(name: &str) -> bool {

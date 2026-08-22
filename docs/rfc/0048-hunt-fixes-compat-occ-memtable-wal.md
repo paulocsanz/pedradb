@@ -81,6 +81,13 @@
 - [x] **W3.12** sst/table "residual F167" — **REFUTADO** por leitura (tombstones coletados antes do salto; salto ⟺ sem pontos na janela) + diferencial mecânico k22 (150 seeds × 5 APIs de leitura em acordo) — status: `done` (dead end registrado)
 - Abertos: manifest#3 (sync_dir Err pós-swing do CURRENT → memória atrás do disco; crash-window, precisa rename-as-commit+fence), history LOW (`Manifest::decode` with_capacity remoto) — como na wave 2.
 
+### W4 — wave 4 "vai" (2026-08-22; fechamento do backlog: manifest pós-commit, write-group panic, point-cache fill, history remoto)
+- [x] **W4.1** core: `sync_dir` Err DEPOIS do swing do CURRENT fazia undo de um commit já em disco (reopen quebra) — F196, Err tipado `ManifestCommittedUnsynced` + fence nos quatro sítios, k24 (RED: reopen quebrado AS-IS; ctl count=9 undo limpo) — status: `done`
+- [x] **W4.2** core: pânico do leader do write-group deixa `leader_active` preso — todo writer futuro trava no recv() — F197, `catch_unwind` em `lead()` (libera grupo + Err pendentes + fence + `resume_unwind`); `FaultKind::Panic` no sim; k25 (RED: watchdog 10s; fix verde 0,05s) — status: `done`
+- [x] **W4.3** core: fill do point-cache sem revalidar `published_seq` perde a invalidação de um publish concorrente (get serve v1 após put v2 Ok) — F198, recheck no fill + `invalidate_read_answers` ANTES do CAS do publish (vetor transitório do duplo-check OCC fechado pela reordem; prova dele NEEDS-INTERLEAVE-HOOK); k26 determinístico via `K26Env` (gates sync-WAL/read-vlog; SST decodifica inteiro no flush, leitura por get é a do `VALUES.vlog`) — status: `done`
+- [x] **W4.4** core: `Manifest::decode` aloca `n×104B` antes de validar corpo (manifest remoto de 36 B reserva ~446 GB; morte por abort/OOM em overcommit estrito) — F199, rejeição `n > (body_len-28)/36` pré-alocação; k27 = guarda local / RED em host Linux (malloc ≤1 TB aceito como VA neste macOS — sonda documentada) — status: `done` (NEEDS-LINUX-ENV)
+- Backlog da wave 2 encerrado: manifest#3 ✅ F196, concurrent#4 ✅ F197, concurrent#3 ✅ F198, history LOW ✅ F199.
+
 ## Status (living — update with every PR)
 
 | ID | Band | Title | Status | Task / PR | Updated |
@@ -118,12 +125,16 @@
 | W3.10 | w3 | undo F194 no compact_for_reads | done | `db.rs`; k23 (Rename count=3) | 2026-08-22 |
 | W3.11 | w3 | sync_dir antes do swing CURRENT (F195) | done | `manifest.rs` (hardening; NEEDS-CRASH-ENV) | 2026-08-22 |
 | W3.12 | w3 | sst overlaps residual — REFUTADO | done | diferencial k22 (scan×get×count×prefix) | 2026-08-22 |
+| W4.1 | w4 | commit pós-swing cercado (F196) | done | `manifest.rs`/`db.rs`/`concurrent.rs`/`error.rs`/compat; k24 | 2026-08-22 |
+| W4.2 | w4 | leader panic não engalha writes (F197) | done | `concurrent.rs` + `FaultKind::Panic` no sim; k25 | 2026-08-22 |
+| W4.3 | w4 | point-cache fill revalida published (F198) | done | `db.rs` (`get` fill + `publish_sequence`); k26 | 2026-08-22 |
+| W4.4 | w4 | contagem do manifest remoto validada (F199) | done | `history.rs`; k27 guarda (NEEDS-LINUX-ENV) | 2026-08-22 |
 
 ## Acceptance Criteria
 
-- **Tests:** `pedradb-core --lib` (390 passando — incluindo `point_in_time_reports_resync_reanchor`, `zero_header_journals_and_pit_reports`, `torn_tail_*`, theorem do recover kernel, sweep `explode` com os kinds novos e a simetria de blocos), `rocksdb-compat` (40+7, incl. `txn_snapshot_hides_later_writes` atualizado), harness `compat_hunt` (**21**, c1..c14 + controles) + `core_hunt` (**32**, k1..k4b + k7..k23 + controles + diferencial k22) + oracle `wal_crc_flip_is_fail_stop_or_clean` — todos verdes com os fixes; os de hunt falham sem eles.
+- **Tests:** `pedradb-core --lib` (390 passando — incluindo `point_in_time_reports_resync_reanchor`, `zero_header_journals_and_pit_reports`, `torn_tail_*`, theorem do recover kernel, sweep `explode` com os kinds novos e a simetria de blocos), `rocksdb-compat` (40+7, incl. `txn_snapshot_hides_later_writes` atualizado), harness `compat_hunt` (**21**, c1..c14 + controles) + `core_hunt` (**39**, k1..k4b + k7..k27 + controles + diferencial k22) + oracle `wal_crc_flip_is_fail_stop_or_clean` — todos verdes com os fixes; os de hunt falham sem eles (F196–F198 demonstrados RED→GREEN; F199 guarda local condicionada a host Linux).
 - **Telemetry / Analytics:** none — correção de corretude; o `CORRUPTLOG` (RFC-0038) recebe eventos `resync` e `zero_header` (P1.2).
-- **Documentation:** este RFC + fichas F165–F194 em `determinismo/pedradb-dst/findings/` (+ 2 dead ends F189/sst registrados) + LEDGER do hunt 2026-08-21/22 (waves 1, 2 e 3).
+- **Documentation:** este RFC + fichas F165–F199 em `determinismo/pedradb-dst/findings/` (+ dead ends F189/sst registrados) + LEDGER do hunt 2026-08-21/22 (waves 1–4) + patches `core-hunt-20260822.patch` (waves 1–3) e `core-hunt-20260822-wave4.patch` (delta da wave 4).
 - **Screenshots:** backend-only.
 
 ## Out of scope

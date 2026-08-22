@@ -1508,6 +1508,13 @@ impl<E: Env> Db<E> {
         self.durability_fenced
     }
 
+    /// F196: fence from the off-lock persist path after a post-commit
+    /// (`CURRENT` swung) error — the caller cannot undo past the commit
+    /// point, so writes must stop instead.
+    pub(crate) fn fence_durability_post_commit(&mut self, io_error: &dyn std::fmt::Display) {
+        self.fence_durability(io_error, FenceClass::Unknown);
+    }
+
     /// Directory this DB was opened on.
     #[must_use]
     pub fn path(&self) -> &Path {
@@ -1566,6 +1573,11 @@ impl<E: Env> Db<E> {
 
     /// Publish `seq` as visible and drop read caches (after WAL is durable).
     pub(crate) fn publish_sequence(&self, seq: SequenceNumber) {
+        // F198: drop stale cached answers BEFORE `seq` becomes visible —
+        // the point-cache OCC double-check (`get_at` with snap == published)
+        // accepts any hit while `published` is unchanged, so invalidating
+        // after the CAS leaves a window that serves the pre-write value.
+        self.invalidate_read_answers(seq);
         let mut cur = self.published_seq.load(Ordering::Relaxed);
         while seq > cur {
             match self.published_seq.compare_exchange_weak(
@@ -1602,7 +1614,6 @@ impl<E: Env> Db<E> {
                 }
             }
         }
-        self.invalidate_read_answers(seq);
     }
 
     fn note_dirty_points(&self, ops: &[WriteOp]) {
@@ -2170,14 +2181,22 @@ impl<E: Env> Db<E> {
         if let Some(cached) = self.point_cache.get(key) {
             return cached;
         }
-        let got = match self.get_at(self.snapshot(), key) {
+        let snap = self.snapshot();
+        let got = match self.get_at(snap, key) {
             Ok(v) => v,
             // Below-watermark latest reads are not a corruption signal
             // (concurrent GC raised the floor past our snapshot token).
             Err(CoreError::SnapshotTooOld { .. }) => None,
             Err(e) => fail_stop_corrupt_value(&format!("get key {key:?}"), &e),
         };
-        self.point_cache.insert(key, got.clone());
+        // F198: the fill runs under the read lock, which does not exclude
+        // `publish_sequence` (also read-locked) — a publish can invalidate
+        // `key` between the snapshot above and this insert, caching a stale
+        // answer indefinitely. Only insert while `published` still matches
+        // the seq the answer was computed at.
+        if self.published_seq.load(Ordering::Acquire) == snap.seq {
+            self.point_cache.insert(key, got.clone());
+        }
         got
     }
 
@@ -6682,7 +6701,18 @@ impl<E: Env> Db<E> {
     /// never points at a torn file (RFC-0041).
     fn persist_manifest(&mut self) -> Result<()> {
         self.fsync_unsynced_ssts()?;
-        self.take_manifest_persist()?.write()
+        match self.take_manifest_persist()?.write() {
+            Ok(()) => Ok(()),
+            // F196: CURRENT already names the new MANIFEST — the version on
+            // disk IS the new one (unsynced). Undoing here would put memory
+            // behind disk and delete files the manifest references; fence
+            // and treat the persist as landed (promote/fence shape).
+            Err(CoreError::ManifestCommittedUnsynced { .. }) => {
+                self.durability_fenced = true;
+                Ok(())
+            }
+            Err(e) => Err(e),
+        }
     }
 
     /// Public wrapper: SST `fdatasync` + MANIFEST before WAL rotate / checkpoint.
@@ -6921,7 +6951,11 @@ impl<E: Env> ManifestPersist<E> {
             return Ok(());
         }
         let res = manifest::store(&self.env, &self.dir, &self.vs, self.sync);
-        if res.is_ok() {
+        // F196: committed-unsynced landed on disk (CURRENT swung) — the
+        // epoch gate must advance so an older snapshot cannot overwrite it.
+        let committed = res.is_ok()
+            || matches!(res, Err(CoreError::ManifestCommittedUnsynced { .. }));
+        if committed {
             *written = self.epoch;
         }
         res
@@ -7529,7 +7563,12 @@ fn recover_ssts<E: Env>(
         earliest_readable_seq: 0,
     };
     // Always install so subsequent opens use inventory (even if empty).
-    manifest::install_next(env, dir, &mut vs, sync)?;
+    // F196: committed-unsynced during first open = the inventory IS
+    // committed (nothing acked is at risk yet); open proceeds.
+    match manifest::install_next(env, dir, &mut vs, sync) {
+        Err(CoreError::ManifestCommittedUnsynced { .. }) => {}
+        r => r?,
+    }
     Ok((
         tables,
         levels,

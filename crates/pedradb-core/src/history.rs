@@ -99,6 +99,17 @@ impl Manifest {
         let next_id = u64::from_le_bytes(buf[8..16].try_into().unwrap());
         let archive_floor = u64::from_le_bytes(buf[16..24].try_into().unwrap());
         let n = u32::from_le_bytes(buf[24..28].try_into().unwrap()) as usize;
+        // F199: `n` is untrusted (remote manifests decode through here).
+        // Each entry consumes at least 36 body bytes (v2: id + name len +
+        // from/through/bytes; v3 adds the keyed flag), so a count the body
+        // cannot possibly hold is a corrupt/attack manifest — reject it
+        // BEFORE the `with_capacity` allocation: n = u32::MAX otherwise
+        // reserves ~446 GB (`n × sizeof(SegmentMeta)`) and strict-overcommit
+        // hosts abort the process on a 36-byte remote object.
+        const MIN_ENTRY_BYTES: usize = 36;
+        if n > (body_len - 28) / MIN_ENTRY_BYTES {
+            return Err(bad());
+        }
         let mut segs = VecDeque::with_capacity(n);
         let mut off = 28;
         for _ in 0..n {

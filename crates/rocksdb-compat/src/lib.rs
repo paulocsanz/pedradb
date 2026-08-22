@@ -133,6 +133,9 @@ impl From<CoreError> for Error {
             CoreError::Internal(_) | CoreError::TransactionFinished | CoreError::Transaction(_) => {
                 ErrorKind::Other
             }
+            // F196: post-commit manifest unsynced — surfaced by off-lock
+            // host persisters; an I/O durability condition.
+            CoreError::ManifestCommittedUnsynced { .. } => ErrorKind::Io,
         };
         Self {
             msg: e.to_string(),

@@ -30,6 +30,7 @@ fn kind_to_u64(k: FaultKind) -> u64 {
         FaultKind::Interrupted => 3,
         FaultKind::SyncFail => 4,
         FaultKind::ShortWrite => 5,
+        FaultKind::Panic => 6,
     }
 }
 
@@ -40,6 +41,7 @@ fn kind_from_u64(v: u64) -> FaultKind {
         3 => FaultKind::Interrupted,
         4 => FaultKind::SyncFail,
         5 => FaultKind::ShortWrite,
+        6 => FaultKind::Panic,
         _ => FaultKind::IoError,
     }
 }
@@ -56,6 +58,9 @@ impl FailStateArc {
                 return Ok(());
             }
             self.fired.store(true, Ordering::Relaxed);
+            if matches!(kind, FaultKind::Panic) {
+                panic!("injected panic fault (FailingEnvArc)");
+            }
             return Err(kind.to_error());
         }
         if kind.is_sync_only() || self.sync_only.load(Ordering::Relaxed) {
@@ -112,6 +117,18 @@ impl FailingEnvArc {
         self.state.remaining.store(after_ops, Ordering::Relaxed);
         self.state.once.store(transient, Ordering::Relaxed);
         self.state.fired.store(false, Ordering::Relaxed);
+    }
+
+    /// Runtime arm with an explicit fault kind (e.g. [`FaultKind::Panic`]
+    /// to model a mid-commit crash).
+    pub fn arm_with_kind(&self, after_ops: u64, transient: bool, kind: FaultKind) {
+        self.state
+            .kind
+            .store(kind_to_u64(kind), Ordering::Relaxed);
+        self.state
+            .sync_only
+            .store(kind.is_sync_only(), Ordering::Relaxed);
+        self.arm(after_ops, transient);
     }
 
     /// Whether a fault fired.

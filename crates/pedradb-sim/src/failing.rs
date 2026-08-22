@@ -26,6 +26,10 @@ pub enum FaultKind {
     SyncFail,
     /// Partial write then error (RFC-0018 short-write class).
     ShortWrite,
+    /// `panic!` instead of an Err when the fault fires — models a leader
+    /// crash mid-commit (unwind handling contracts, e.g. write-group
+    /// leadership release).
+    Panic,
 }
 
 impl FaultKind {
@@ -39,6 +43,8 @@ impl FaultKind {
             Self::Interrupted => io::Error::new(io::ErrorKind::Interrupted, "injected EINTR"),
             Self::SyncFail => io::Error::other("injected sync failure"),
             Self::ShortWrite => io::Error::new(io::ErrorKind::WriteZero, "injected short write"),
+            // Unreachable: `gate_class` panics before calling `to_error`.
+            Self::Panic => io::Error::other("injected panic"),
         }
     }
 
@@ -122,6 +128,9 @@ impl FailState {
             if d > 0 {
                 self.delay_ticks
                     .set(self.delay_ticks.get().saturating_add(d));
+            }
+            if matches!(kind, FaultKind::Panic) {
+                panic!("injected panic fault (FailingEnv)");
             }
             return Err(kind.to_error());
         }

@@ -422,7 +422,36 @@ impl WriteGroup {
             }
         };
         let r = if reply.is_none() {
-            self.lead(db)
+            // F197: a leader panic unwinds through `lead` without clearing
+            // `leader_active`, so every future writer queues behind a dead
+            // leader and blocks on `recv()` forever. Catch the unwind,
+            // release the group (queued members get Err), fence the Db
+            // (mid-commit in-memory state is uncertain — same stance as a
+            // post-commit manifest error), then re-raise the panic.
+            match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| self.lead(db))) {
+                Ok(r) => r,
+                Err(payload) => {
+                    let mut g = self.queue.lock();
+                    g.leader_active = false;
+                    let dead = std::mem::take(&mut g.pending);
+                    drop(g);
+                    for p in dead {
+                        if let Some(tx) = p.reply {
+                            let _ = tx.send(Err(CoreError::Internal(
+                                "write group leader panicked mid-commit".into(),
+                            )));
+                        }
+                    }
+                    // This thread's `active` ticket never reaches the tail
+                    // decrement after a resume; account it here.
+                    self.active.fetch_sub(1, Ordering::Relaxed);
+                    self.mark_complete();
+                    if let Some(mut guard) = db.try_write() {
+                        guard.fence_durability_post_commit(&"write group leader panicked mid-commit");
+                    }
+                    std::panic::resume_unwind(payload);
+                }
+            }
         } else {
             self.queued.fetch_add(1, Ordering::Relaxed);
             rx.expect("follower has recv").recv().unwrap_or_else(|_| {
@@ -1952,11 +1981,19 @@ impl<E: Env> ConcurrentDb<E> {
             let _p = self.persist_lock.lock();
             persist.write()
         };
-        if let Err(e) = wrote {
-            self.inner.write().restore_unsynced_ssts(paths);
-            return Err(e);
+        match wrote {
+            Ok(()) => Ok(()),
+            // F196: CURRENT swung — the new inventory is committed on disk;
+            // restoring the unsynced bookkeeping would fight it. Fence.
+            Err(e @ CoreError::ManifestCommittedUnsynced { .. }) => {
+                self.inner.write().fence_durability_post_commit(&e);
+                Ok(())
+            }
+            Err(e) => {
+                self.inner.write().restore_unsynced_ssts(paths);
+                Err(e)
+            }
         }
-        Ok(())
     }
 
     /// Publish a prepared L0→L1 compact: mem install under the write lock,
@@ -1993,9 +2030,18 @@ impl<E: Env> ConcurrentDb<E> {
             persist.write()
         };
         let mut g = self.inner.write();
-        if wrote.is_err() {
-            g.undo_prepared_l0_compact(undo);
-            return false;
+        match wrote {
+            Err(e @ CoreError::ManifestCommittedUnsynced { .. }) => {
+                // F196: CURRENT swung — the compact IS committed on disk.
+                // Keep the installed inventory (undoing would put memory
+                // behind disk) and fence; same shape as compact_vlog_promote.
+                g.fence_durability_post_commit(&e);
+            }
+            Err(_) => {
+                g.undo_prepared_l0_compact(undo);
+                return false;
+            }
+            Ok(()) => {}
         }
         for path in old_paths {
             let _ = g.env().remove_file(&path);

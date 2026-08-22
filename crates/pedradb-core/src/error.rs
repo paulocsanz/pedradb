@@ -56,6 +56,16 @@ pub enum CoreError {
     #[error("internal error: {0}")]
     Internal(String),
 
+    /// MANIFEST/`CURRENT` were renamed (the new version IS the committed
+    /// one on disk) but the final directory fsync failed (F196). Callers
+    /// must NOT roll back in-memory state past this point — fence instead
+    /// (same shape as `compact_vlog_promote`).
+    #[error("manifest committed (CURRENT swung) but final dir sync failed: {source}")]
+    ManifestCommittedUnsynced {
+        /// The directory fsync I/O error.
+        source: std::io::Error,
+    },
+
     /// Transaction was already committed or aborted.
     #[error("transaction already finished")]
     TransactionFinished,
