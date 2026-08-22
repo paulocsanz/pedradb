@@ -1,6 +1,6 @@
 # RFC-0046: história MVCC fora do SSD — retention default + tier em object storage (S3)
 
-**Status:** in-progress (P0.1–P0.3 + P0.5 + P1 + P2.1–P2.2 done; só falta
+**Status:** in-progress (P0.1–P0.3 + P0.5 + P1 + P2.1–P2.3 done; só falta
 P0.4, gated em caixa quieta)
 **Updated:** 2026-08-21
 **Parents:** [0009](0009-rocksdb-class-engine.md) (F20 retention),
@@ -154,11 +154,9 @@ P0.4, gated em caixa quieta)
       `Db::compact_horizon()`**: a mesma reescrita sob demanda do operador
       (flush → archive-first fail-closed → rewrite ALL sob o floor; no-op
       em `All`; renova a baseline do trigger), teste
-      `compact_horizon_reclaims_aged_versions`. Wart REMANESCENTE:
-      watermark avança pelo floor *reportado* sem drop efetivo —
-      leitura abaixo dele vai ao archive (P2.1) e pode falhar
-      `SnapshotTooOld` com a versão ainda no LSM se o cap derrubar o
-      segmento — status: `done`
+      `compact_horizon_reclaims_aged_versions`. Wart (watermark global ×
+      sobrevivência por chave): **fechado pelo P2.3** (fallback LSM) —
+      status: `done`
 
 ### P1 — tier S3 (história barata e PITR de lá)
 
@@ -233,6 +231,23 @@ P0.4, gated em caixa quieta)
       segmentos no destino (o remoto nunca lista o que não tem);
       backlog drena idempotente, cap segura o não-enviado — status:
       `done`
+- [x] **P2.3** Fallback LSM na leitura abaixo do watermark (wart do P0.5,
+      fechado): o watermark é **global** mas a sobrevivência é **por
+      chave** — chaves de versão única abaixo do floor sobrevivem ao
+      rewrite, e o cap pode derrubar o segmento del do archive; a leitura
+      em `seq < watermark` ia só ao tier e falhava `SnapshotTooOld` com a
+      versão viva no LSM (perda de disponibilidade, fail-closed). Fix
+      sound-undo: quando o tier não cobre a leitura
+      (`SnapshotTooOld` de cobertura), cair para o LSM e servir
+      **somente** registro decisivo fisicamente presente a `seq ≤ snap`
+      (`get_at_below_watermark_lsm`); `NotFound` no LSM mantém o erro do
+      tier — nunca-escrita não é provável lá (todas as versões da chave
+      podem ter sido GC'd e tombstone-cleaned), então `None` ali seria
+      destroy silencioso. Teste
+      `below_watermark_lsm_fallback_serves_survivors` (sobrevivente
+      responde pós-cap-drop; sombra e never-written seguem
+      `SnapshotTooOld`; verificado que o teste falha sem o fix) —
+      status: `done`
 
 ## Status (living — update with every PR)
 
@@ -249,6 +264,7 @@ P0.4, gated em caixa quieta)
 | P1.4 | p1 | CLI archive/restore | **done** | 751e9d4 | 2026-08-21 |
 | P2.1 | p2 | leitura lazy do tier | **done** | `eea769d` | 2026-08-21 |
 | P2.2 | p2 | métricas + banda | **done** | `eea769d` | 2026-08-21 |
+| P2.3 | p2 | fallback LSM abaixo do watermark (wart cap×sobrevivente) | **done** | `get_at_below_watermark_lsm` + teste | 2026-08-21 |
 
 ## Acceptance Criteria
 

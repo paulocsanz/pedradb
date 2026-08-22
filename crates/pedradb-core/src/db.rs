@@ -647,6 +647,22 @@ fn changelog_interval_from_env() -> u64 {
         .unwrap_or(0)
 }
 
+/// F1 fail-stop for read APIs whose shape cannot express an error
+/// (`get`/`multi_get`/`scan` iterator/`changes_after`). Swallowing a value-log
+/// resolve failure would serve corruption as a miss (or as an empty value) —
+/// indistinguishable from deleted data. Error-shaped twins (`get_at`,
+/// `scan_at`, `changes`) propagate instead.
+///
+/// # Panics
+/// Always — corruption on a read path must be loud, never silent.
+fn fail_stop_corrupt_value(context: &str, e: CoreError) -> ! {
+    panic!(
+        "pedradb: corrupt value log while resolving {context}: {e}; \
+         refusing to serve a silent miss — use get_at/scan_at/verify_checksums \
+         for an error-shaped read"
+    )
+}
+
 /// What a range scan yields (RFC-0019 P1.2).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ScanProjection {
@@ -1471,9 +1487,12 @@ impl<E: Env> Db<E> {
     fn persist_changelog_best_effort(&mut self) {
         if self.feed_is_lazy() && self.change_log.max_sequence().unwrap_or(0) < self.last_sequence()
         {
-            let entries = self.collect_feed_from_live();
-            if !entries.is_empty() {
-                self.change_log.replace_sorted(entries);
+            // Best-effort fill (F1): a corrupt payload keeps the cache stale;
+            // the feed is still rebuildable from WAL on reopen.
+            if let Ok(entries) = self.collect_feed_from_live() {
+                if !entries.is_empty() {
+                    self.change_log.replace_sorted(entries);
+                }
             }
         }
         match self.change_log.store_on(&self.env, &self.dir) {
@@ -1857,6 +1876,13 @@ impl<E: Env> Db<E> {
     }
 
     /// Point lookup at the latest committed sequence (MemTable ∪ SSTs).
+    ///
+    /// Fail-stop on a corrupt value log (F1): the `Option` shape cannot express
+    /// the error, and returning `None` would make corruption indistinguishable
+    /// from deletion. Use [`Self::get_at`] for an error-shaped read.
+    ///
+    /// # Panics
+    /// If the stored value is a vlog reference whose payload fails CRC/I-O.
     #[must_use]
     pub fn get(&self, key: &[u8]) -> Option<Bytes> {
         // Latest snapshot is always ≥ watermark when watermark is raised from
@@ -1864,7 +1890,13 @@ impl<E: Env> Db<E> {
         if let Some(cached) = self.point_cache.get(key) {
             return cached;
         }
-        let got = self.get_at(self.snapshot(), key).ok().flatten();
+        let got = match self.get_at(self.snapshot(), key) {
+            Ok(v) => v,
+            // Below-watermark latest reads are not a corruption signal
+            // (concurrent GC raised the floor past our snapshot token).
+            Err(CoreError::SnapshotTooOld { .. }) => None,
+            Err(e) => fail_stop_corrupt_value(&format!("get key {:?}", key), e),
+        };
         self.point_cache.insert(key, got.clone());
         got
     }
@@ -1881,7 +1913,18 @@ impl<E: Env> Db<E> {
             return Ok(None);
         }
         if snap.seq < self.earliest_readable_seq {
-            return self.get_at_from_archive(snap, key);
+            // RFC-0046 P2.3: the global watermark advances with the cap and
+            // the reported GC floor, not per key — a version that survived
+            // the rewrite (single-version keys are never dropped) can sit
+            // below it while the archive already dropped its segment. When
+            // the tier cannot cover the read, fall back to the LSM and
+            // serve only a physically-present decisive record.
+            return match self.get_at_from_archive(snap, key) {
+                Err(CoreError::SnapshotTooOld { .. }) => {
+                    self.get_at_below_watermark_lsm(snap, key)
+                }
+                other => other,
+            };
         }
         // Snapshot == published: the point cache already answers at exactly
         // this seq (it only ever holds latest-published values; publish
@@ -1903,7 +1946,8 @@ impl<E: Env> Db<E> {
                 } else {
                     self.get_inline.fetch_add(1, Ordering::Relaxed);
                 }
-                self.resolve_stored_value(v).ok()
+                // F1: corruption surfaces as Err, never as a miss.
+                Some(self.resolve_stored_value(v)?)
             }
             Lookup::Deleted | Lookup::NotFound => None,
         })
@@ -2010,6 +2054,32 @@ impl<E: Env> Db<E> {
             Ok(None)
         } else {
             Err(too_old())
+        }
+    }
+
+    /// RFC-0046 P2.3: LSM leg of a below-watermark read whose archive
+    /// coverage failed. Soundness: a found version (put or tombstone) at
+    /// `seq ≤ snap` is physically present — serve it. Anything else keeps
+    /// the tier's `SnapshotTooOld`: the LSM cannot prove a key was never
+    /// written (all its versions may have been GC'd and tombstone-cleaned),
+    /// so `None` here would be a silent destroy.
+    fn get_at_below_watermark_lsm(&self, snap: Snapshot, key: &[u8]) -> Result<Option<Bytes>> {
+        let too_old = || CoreError::SnapshotTooOld {
+            requested: snap.seq,
+            earliest: self.earliest_readable_seq,
+        };
+        match self.lookup(key, snap.seq) {
+            Lookup::Found(v) => {
+                if vlog::decode_vlog_ptr(v.as_ref()).is_some() {
+                    self.get_vlog.fetch_add(1, Ordering::Relaxed);
+                } else {
+                    self.get_inline.fetch_add(1, Ordering::Relaxed);
+                }
+                // F1: corruption surfaces as Err, never as a miss.
+                Ok(Some(self.resolve_stored_value(v)?))
+            }
+            Lookup::Deleted => Ok(None),
+            Lookup::NotFound => Err(too_old()),
         }
     }
 
@@ -2603,13 +2673,13 @@ impl<E: Env> Db<E> {
         end: Bound<&[u8]>,
         limit: Option<usize>,
     ) -> Result<Vec<(Bytes, Bytes)>> {
-        Ok(self
-            .try_scan_at(snapshot, start, end, limit)?
-            .filter_map(|VisibleKv { key, value }| {
-                let value = self.resolve_stored_value(value).ok()?;
-                Some((key, value))
-            })
-            .collect())
+        // F1: a corrupt vlog payload surfaces as Err; silently skipping the
+        // entry would hide corruption as an absent key.
+        let mut out = Vec::new();
+        for VisibleKv { key, value } in self.try_scan_at(snapshot, start, end, limit)? {
+            out.push((key, self.resolve_stored_value(value)?));
+        }
+        Ok(out)
     }
 
     /// Streaming range scan at the latest snapshot (public bound-memory path).
@@ -3023,12 +3093,18 @@ impl<E: Env> Db<E> {
     }
 
     /// Resolve VLG1 for user values; leave range-tombstone end keys untouched.
+    ///
+    /// Fail-stop on corruption (F1): the streaming scan shape cannot express
+    /// an error, and serving an empty `Bytes` would dress corruption up as a
+    /// real (empty) value.
     fn resolve_stream_value(&self, kind: ValueType, stored: Bytes) -> Bytes {
         if kind == ValueType::RangeDeletion {
             return stored;
         }
-        self.resolve_stored_value(stored)
-            .unwrap_or_else(|_| Bytes::new())
+        match self.resolve_stored_value(stored) {
+            Ok(v) => v,
+            Err(e) => fail_stop_corrupt_value("scan stream entry", e),
+        }
     }
 
     /// Observability snapshot: sizes, counts, WAL length (RFC-0014 / RFC-0016).
@@ -3704,6 +3780,28 @@ impl<E: Env> Db<E> {
         self.rotate_wal_now()
     }
 
+    /// F2 guard: value-log/blob GC may only delete or replace pre-GC vlog
+    /// sources when the covering WAL was **actually rotated** by the flush that
+    /// precedes it. `flush` rotates best-effort — a writer parked in the
+    /// off-lock fsync window (`commit_inflight > 0`) or staged-but-unflushed
+    /// mem keeps acked records in the WAL, and replaying those after the GC
+    /// round would shadow the remapped SSTs with stale pre-GC pointers (a lost
+    /// sync-acked write). Refuse and let the caller retry when idle.
+    ///
+    /// While the caller holds the write lock no new records can be appended,
+    /// so this predicate (the exact skip-condition of [`Self::try_rotate_wal`],
+    /// evaluated after a completed flush) is equivalent to "the WAL was
+    /// rotated".
+    fn ensure_wal_rotated_for_gc(&self) -> Result<()> {
+        if self.commit_inflight.load(Ordering::Acquire) > 0 || !self.mem_is_empty_for_rotate() {
+            return Err(CoreError::Internal(
+                "vlog gc refused: wal not rotated (commits in flight or mem staged) — retry when idle"
+                    .into(),
+            ));
+        }
+        Ok(())
+    }
+
     fn rotate_wal_now(&mut self) -> Result<()> {
         // SST + MANIFEST must be durable before the WAL that covers those
         // keys is discarded (G1). L0 flush skips file fsync; this is the pay
@@ -4096,8 +4194,20 @@ impl<E: Env> Db<E> {
     /// I/O, CRC, or durability fence.
     pub fn compact_vlog_stage_manifest(&mut self) -> Result<VlogRewriteStats> {
         self.ensure_not_fenced()?;
+        // F3: a staged-but-unpromoted round (`vlog_use_new=true`, `.new` live)
+        // must never be rewritten in place — `rewrite_live_to_new` replacing
+        // the live staging file could leave a truncated `.new` that recovery
+        // trusts under `vlog_use_new` (or bricks the open). Promote first so
+        // the rewrite only ever replaces a non-live staging file.
+        if self.vlog_use_new {
+            self.compact_vlog_promote()?;
+        }
         // Durable empty WAL of unflushed pointers that would break after remap.
         self.flush()?;
+        // F2: `flush` rotates best-effort; refuse the round unless it really
+        // rotated (stale pre-GC pointers in an un-rotated WAL shadow the
+        // remapped SSTs after crash replay).
+        self.ensure_wal_rotated_for_gc()?;
 
         if self.vlog.is_none() {
             let main = self.dir.join(VLOG_FILE_NAME);
@@ -4261,6 +4371,9 @@ impl<E: Env> Db<E> {
             ));
         }
         self.flush()?;
+        // F2: the sealed blob is deleted after the remap — its WAL pointers
+        // must be gone (rotated), not merely shadowed by newer mem state.
+        self.ensure_wal_rotated_for_gc()?;
         let live = self.collect_vlog_live_for_file(file_num)?;
         let src = vlog::blob_path(&self.dir, file_num);
         let bytes_before = self.env.metadata_len(&src).unwrap_or(0);
@@ -4862,7 +4975,11 @@ impl<E: Env> Db<E> {
 
     /// Point lookups for many keys at the latest snapshot (RFC-0019 P1.1).
     ///
-    /// Order matches `keys`; each entry is the same as [`Self::get`] for that key.
+    /// Order matches `keys`; each entry is the same as [`Self::get`] for that
+    /// key — including its fail-stop-on-corruption contract (F1).
+    ///
+    /// # Panics
+    /// If any stored value is a vlog reference whose payload fails CRC/I-O.
     #[must_use]
     pub fn multi_get(&self, keys: &[impl AsRef<[u8]>]) -> Vec<Option<Bytes>> {
         keys.iter().map(|k| self.get(k.as_ref())).collect()
@@ -4880,24 +4997,28 @@ impl<E: Env> Db<E> {
         keys: &[impl AsRef<[u8]>],
     ) -> Result<Vec<Option<Bytes>>> {
         self.ensure_snapshot_readable(snap)?;
-        Ok(keys
-            .iter()
-            .map(|k| {
-                if snap.seq == 0 {
-                    return None;
-                }
-                match self.lookup(k.as_ref(), snap.seq) {
-                    Lookup::Found(v) => self.resolve_stored_value(v).ok(),
-                    Lookup::Deleted | Lookup::NotFound => None,
-                }
-            })
-            .collect())
+        let mut out = Vec::with_capacity(keys.len());
+        for k in keys {
+            if snap.seq == 0 {
+                out.push(None);
+                continue;
+            }
+            // F1: corruption surfaces as Err, never as a miss.
+            let got = match self.lookup(k.as_ref(), snap.seq) {
+                Lookup::Found(v) => Some(self.resolve_stored_value(v)?),
+                Lookup::Deleted | Lookup::NotFound => None,
+            };
+            out.push(got);
+        }
+        Ok(out)
     }
 
     /// Changes with `from_seq < sequence <= to_seq` (RFC-0019 change feed).
     ///
     /// # Errors
-    /// Never fails today (in-memory + loaded log); reserved for I/O.
+    /// [`CoreError::CorruptValue`] when a live entry's vlog payload fails
+    /// CRC/I-O during a lazy rebuild (F1: corruption is an error, never a
+    /// raw pointer served as the user value).
     pub fn changes(
         &self,
         from_seq: SequenceNumber,
@@ -4906,7 +5027,7 @@ impl<E: Env> Db<E> {
         let to = to_seq.min(self.last_sequence());
         if self.feed_is_lazy() {
             return Ok(self
-                .lazy_feed_entries()
+                .lazy_feed_entries()?
                 .into_iter()
                 .filter(|e| e.sequence > from_seq && e.sequence <= to)
                 .collect());
@@ -4915,15 +5036,22 @@ impl<E: Env> Db<E> {
     }
 
     /// All durable changes with `sequence > from_seq` (tail / watch catch-up).
+    ///
+    /// Fail-stop on a corrupt value log (F1): the `Vec` shape cannot express
+    /// the error and a swallowed resolve would serve the raw VLG pointer as
+    /// the user value. Use [`Self::changes`] for an error-shaped read.
+    ///
+    /// # Panics
+    /// If a live entry's vlog payload fails CRC/I/O.
     #[must_use]
     pub fn changes_after(&self, from_seq: SequenceNumber) -> Vec<ChangeEntry> {
         let from = from_seq.min(self.last_sequence());
         if self.feed_is_lazy() {
-            return self
-                .lazy_feed_entries()
-                .into_iter()
-                .filter(|e| e.sequence > from)
-                .collect();
+            let entries = match self.lazy_feed_entries() {
+                Ok(e) => e,
+                Err(e) => fail_stop_corrupt_value("changes_after feed rebuild", e),
+            };
+            return entries.into_iter().filter(|e| e.sequence > from).collect();
         }
         self.change_log.changes_after(from)
     }
@@ -4936,13 +5064,16 @@ impl<E: Env> Db<E> {
     }
 
     /// Full WAL history when the log is still live; last-per-key after rotate.
-    fn lazy_feed_entries(&self) -> Vec<ChangeEntry> {
+    ///
+    /// # Errors
+    /// [`CoreError::CorruptValue`] via [`Self::collect_feed_from_live`].
+    fn lazy_feed_entries(&self) -> Result<Vec<ChangeEntry>> {
         let from_wal = self.collect_feed_from_wal();
         if !from_wal.is_empty() {
-            return from_wal;
+            return Ok(from_wal);
         }
         if !self.change_log.is_empty() {
-            return self.change_log.changes_after(0);
+            return Ok(self.change_log.changes_after(0));
         }
         self.collect_feed_from_live()
     }
@@ -4967,7 +5098,10 @@ impl<E: Env> Db<E> {
         out
     }
 
-    fn collect_feed_from_live(&self) -> Vec<ChangeEntry> {
+    /// # Errors
+    /// [`CoreError::CorruptValue`] when a live entry's vlog payload fails
+    /// CRC/I-O (F1: never serve the raw pointer as the user value).
+    fn collect_feed_from_live(&self) -> Result<Vec<ChangeEntry>> {
         let mut latest: BTreeMap<Bytes, (InternalKey, Bytes)> = BTreeMap::new();
         let consider = |map: &mut BTreeMap<Bytes, (InternalKey, Bytes)>,
                         ik: InternalKey,
@@ -5005,22 +5139,21 @@ impl<E: Env> Db<E> {
                 }
             }
         }
-        latest
-            .into_values()
-            .map(|(ik, v)| {
-                let value = self.resolve_stored_value(v.clone()).unwrap_or(v);
-                ChangeEntry {
-                    sequence: ik.sequence,
-                    key: ik.user_key,
-                    kind: match ik.kind {
-                        ValueType::Value => ChangeKind::Put,
-                        ValueType::Deletion => ChangeKind::Delete,
-                        ValueType::RangeDeletion => ChangeKind::DeleteRange,
-                    },
-                    value,
-                }
-            })
-            .collect()
+        let mut out = Vec::with_capacity(latest.len());
+        for (ik, v) in latest.into_values() {
+            let value = self.resolve_stored_value(v.clone())?;
+            out.push(ChangeEntry {
+                sequence: ik.sequence,
+                key: ik.user_key,
+                kind: match ik.kind {
+                    ValueType::Value => ChangeKind::Put,
+                    ValueType::Deletion => ChangeKind::Delete,
+                    ValueType::RangeDeletion => ChangeKind::DeleteRange,
+                },
+                value,
+            });
+        }
+        Ok(out)
     }
 
     /// When CHANGELOG is missing after flush (WAL already truncated), rebuild a
@@ -5030,7 +5163,15 @@ impl<E: Env> Db<E> {
         if !changelog_needs_sst_rebuild(feed_empty, self.last_sequence()) {
             return;
         }
-        let entries = self.collect_feed_from_live();
+        // Best-effort cache rebuild: a corrupt payload keeps the (stale but
+        // WAL-covered) feed as-is instead of failing the flush.
+        let entries = match self.collect_feed_from_live() {
+            Ok(e) => e,
+            Err(e) => {
+                tracing::warn!(error = %e, "CHANGELOG rebuild skipped: value-log read failed");
+                return;
+            }
+        };
         if entries.is_empty() {
             return;
         }
@@ -11999,6 +12140,77 @@ mod tests {
         assert!(db_all.compact_horizon().is_ok());
         assert_eq!(db_all.get(b"k").as_deref(), Some(&b"v"[..]));
         let _ = fs::remove_dir_all(&dir_all);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn below_watermark_lsm_fallback_serves_survivors() {
+        // RFC-0046 P2.3: the watermark is global but survival is per key.
+        // A single-version key below the GC floor survives the full
+        // rewrite; after the archive cap drops its segment, the read must
+        // still answer from the LSM. Shadowed (dropped) history and
+        // never-written keys keep failing SnapshotTooOld — the fallback
+        // never turns "gone" into None.
+        let dir = temp_dir();
+        let clock = std::rc::Rc::new(std::cell::Cell::new(1_000_000u64));
+        let env = ClockEnv::new(std::rc::Rc::clone(&clock));
+        // Tiny cap: the second archive pass must drop the first segments.
+        let mut opts = horizon_opts(1_000, 64 * 1024);
+        opts.auto_compact_sst_count = None;
+        let mut db = Db::open_with_env(&dir, opts, env).unwrap();
+        let solo = b"solo";
+        let solo_val = vec![0xAB; 1024];
+        db.put(solo, &solo_val).unwrap();
+        let solo_seq = db.last_sequence();
+        let hot = b"hot";
+        let hot_val = |round: u32| vec![round as u8; 1024];
+        let mut hot_shadow_seq = 0;
+        let mut round = 0u32;
+        // Two aging cycles: each archives + cap-drops the previous wave.
+        for _cycle in 0..2 {
+            for _ in 0..48 {
+                db.put(hot, &hot_val(round)).unwrap();
+                if round == 0 {
+                    hot_shadow_seq = db.last_sequence();
+                }
+                round += 1;
+                if db.last_sequence() % 16 == 0 {
+                    db.flush().unwrap();
+                }
+            }
+            db.flush().unwrap();
+            clock.set(1_000_000 + 60_000 + u64::from(round) * 1_000);
+            db.compact_horizon().unwrap();
+        }
+        assert!(
+            db.earliest_readable_sequence() > solo_seq,
+            "precondition: watermark above the solo seq (earliest={})",
+            db.earliest_readable_sequence()
+        );
+        assert!(
+            db.earliest_readable_sequence() > hot_shadow_seq,
+            "precondition: watermark above the shadowed seq (earliest={})",
+            db.earliest_readable_sequence()
+        );
+        assert_eq!(
+            db.get_at(Snapshot::at(solo_seq), solo).unwrap().as_deref(),
+            Some(&solo_val[..]),
+            "survivor below the watermark serves from the LSM after the cap drop"
+        );
+        assert!(
+            matches!(
+                db.get_at(Snapshot::at(hot_shadow_seq), hot),
+                Err(CoreError::SnapshotTooOld { .. })
+            ),
+            "shadowed history stays SnapshotTooOld (dropped from LSM, segment cap-dropped)"
+        );
+        assert!(
+            matches!(
+                db.get_at(Snapshot::at(solo_seq), b"never-written"),
+                Err(CoreError::SnapshotTooOld { .. })
+            ),
+            "never-written below the watermark stays fail-closed (no silent None)"
+        );
         let _ = fs::remove_dir_all(&dir);
     }
 
