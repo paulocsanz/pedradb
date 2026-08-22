@@ -150,7 +150,11 @@ P0.4, gated em caixa quieta)
       LSM 10 991 231 → 2 710 428 B (4,1×), archive no cap, total
       0,64× escrito. `auto_reclaim` inalterado (floor maximal).
       Teste `horizon_full_rewrite_bounds_disk` (bound + latest intacto
-      + leitura abaixo do watermark pelo archive). Wart REMANESCENTE:
+      + leitura abaixo do watermark pelo archive). **API pública
+      `Db::compact_horizon()`**: a mesma reescrita sob demanda do operador
+      (flush → archive-first fail-closed → rewrite ALL sob o floor; no-op
+      em `All`; renova a baseline do trigger), teste
+      `compact_horizon_reclaims_aged_versions`. Wart REMANESCENTE:
       watermark avança pelo floor *reportado* sem drop efetivo —
       leitura abaixo dele vai ao archive (P2.1) e pode falhar
       `SnapshotTooOld` com a versão ainda no LSM se o cap derrubar o

@@ -3764,6 +3764,48 @@ impl<E: Env> Db<E> {
         })
     }
 
+    /// Horizon-aware full compaction (RFC-0046 P0.5): flush, archive every
+    /// version below the current horizon floor (fail-closed — an archive
+    /// error aborts before anything is dropped), then rewrite **all** SSTs
+    /// under that floor into one file. This is the same rewrite the
+    /// automatic dead-weight-doubling trigger performs on its own schedule,
+    /// exposed for operators who want the aged bytes back now (e.g. after
+    /// shrinking the window). No-op when the horizon is `All`; with
+    /// `set_auto_reclaim(true)` it behaves like [`Self::compact_reclaim`].
+    /// Ages the `last_horizon_reclaim` baseline so the automatic trigger
+    /// does not immediately re-run.
+    ///
+    /// # Errors
+    /// I/O while flushing, archiving, or rewriting SSTs.
+    pub fn compact_horizon(&mut self) -> Result<()> {
+        self.flush()?;
+        let Some((floor, archive)) = self.auto_gc_floor() else {
+            return Ok(());
+        };
+        if self.ssts.is_empty() {
+            return Ok(());
+        }
+        if archive {
+            self.archive_history_below(floor)?;
+        }
+        let input_idxs: Vec<usize> = (0..self.ssts.len()).collect();
+        self.rewrite_ssts(
+            input_idxs,
+            MAX_LSM_LEVEL,
+            CompactOptions {
+                gc: crate::merge::CompactGcOptions::for_oldest_snapshot(floor),
+            },
+        )?;
+        let mut after: u64 = 0;
+        for t in &self.ssts {
+            if let Ok(len) = self.env.metadata_len(t.path()) {
+                after = after.saturating_add(len);
+            }
+        }
+        self.last_horizon_reclaim = Some((floor, after));
+        Ok(())
+    }
+
     /// Collapse write-burst history for read-heavy control-plane prefixes (RFC-0019 P2.2).
     ///
     /// Flushes the memtable, then rewrites **all** SST files into one with
@@ -11896,6 +11938,67 @@ mod tests {
                 "below-floor history reads from the archive after rewrites"
             );
         }
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn compact_horizon_reclaims_aged_versions() {
+        // RFC-0046 P0.5 public API: the operator-triggered horizon-aware
+        // full compaction. Ages everything past a 1 s window, rewrites the
+        // LSM down to the live set, and below-floor history stays readable
+        // through the archive. `All` horizon is a no-op.
+        let dir = temp_dir();
+        let clock = std::rc::Rc::new(std::cell::Cell::new(1_000_000u64));
+        let env = ClockEnv::new(std::rc::Rc::clone(&clock));
+        let mut opts = horizon_opts(1_000, 1 << 30);
+        opts.auto_compact_sst_count = None;
+        let mut db = Db::open_with_env(&dir, opts, env).unwrap();
+        let keys: Vec<Vec<u8>> = (0..32u32).map(|k| format!("k{k:04}").into()).collect();
+        let val = |round: u32, k: u32| vec![(k * 11 + round) as u8; 2048];
+        let mut round0 = Vec::new();
+        for (k, key) in keys.iter().enumerate() {
+            let v = val(0, k as u32);
+            db.put(key, &v).unwrap();
+            round0.push(v);
+        }
+        let pin = db.pin_snapshot();
+        let seq0 = pin.sequence();
+        db.release_snapshot_pin(pin);
+        for round in 1..8u32 {
+            for (k, key) in keys.iter().enumerate() {
+                db.put(key, &val(round, k as u32)).unwrap();
+            }
+            db.flush().unwrap();
+        }
+        let before = db.stats().sst_bytes;
+        clock.set(1_000_000 + 60_000); // everything ages past the window
+        db.compact_horizon().unwrap();
+        let after = db.stats().sst_bytes;
+        let live = 32 * 2048u64;
+        assert!(
+            after < before / 4,
+            "explicit horizon compaction reclaims aged bytes (before {before}, after {after})"
+        );
+        assert!(after < 4 * live, "bounded near live set (live {live}, after {after})");
+        for (k, key) in keys.iter().enumerate() {
+            assert_eq!(db.get(key).as_deref(), Some(&val(7, k as u32)[..]));
+            assert_eq!(
+                db.get_at(Snapshot::at(seq0), key).unwrap().as_deref(),
+                Some(&round0[k][..]),
+                "aged round-0 history answers from the archive"
+            );
+        }
+        // `All` horizon: nothing to GC — Ok no-op.
+        let dir_all = temp_dir();
+        let mut o = horizon_opts(1_000, 1 << 30);
+        o.history.horizon = HistoryHorizon::All;
+        o.auto_compact_sst_count = None;
+        let mut db_all = Db::open_with_env(&dir_all, o, ClockEnv::new(std::rc::Rc::clone(&clock))).unwrap();
+        db_all.put(b"k", b"v").unwrap();
+        db_all.flush().unwrap();
+        assert!(db_all.compact_horizon().is_ok());
+        assert_eq!(db_all.get(b"k").as_deref(), Some(&b"v"[..]));
+        let _ = fs::remove_dir_all(&dir_all);
         let _ = fs::remove_dir_all(&dir);
     }
 
