@@ -1986,8 +1986,10 @@ impl<E: Env> Db<E> {
     /// answers even when coverage has gaps. A no-match answers `None` only
     /// when the retained segments provably cover `[1, snap]` with nothing
     /// dropped — otherwise fail-closed [`CoreError::SnapshotTooOld`]
-    /// (never-written and dropped are indistinguishable). v0 cost: every
-    /// retained segment is CRC-walked per read (no key index yet).
+    /// (never-written and dropped are indistinguishable). Read cost: the
+    /// P2.5 key-coverage bound and the P2.6/P2.7 bloom sidecar prune
+    /// segments (local and remote alike) before their bytes are read;
+    /// only may-affect segments are fetched and CRC-walked.
     fn get_at_from_archive(&self, snap: Snapshot, key: &[u8]) -> Result<Option<Bytes>> {
         let too_old = || CoreError::SnapshotTooOld {
             requested: snap.seq,
@@ -1998,9 +2000,11 @@ impl<E: Env> Db<E> {
         };
         // Candidate segments: the local manifest plus (content-addressed
         // dedup by name) everything the remote manifest still lists.
-        // Local entries carry the P2.5 key-coverage bound (range-delete
-        // aware) — segments whose bound excludes the key are skipped
-        // without a walk; remote listings have no bound (always walk).
+        // Entries carry the P2.5 key-coverage bound (range-delete aware)
+        // — segments whose bound excludes the key are skipped without a
+        // walk. Remote listings carry the bound of their manifest
+        // generation (v3+); a pre-P2.5 remote manifest decodes with
+        // `None` (walk).
         #[allow(clippy::type_complexity)]
         let mut cands: Vec<(u64, u64, String, Option<u64>, Option<(Vec<u8>, Vec<u8>)>)> =
             tier.segment_metas()
@@ -2018,7 +2022,7 @@ impl<E: Env> Db<E> {
         if let Some(remote) = self.remote_history.as_ref() {
             for seg in remote.tier.latest_segments(&remote.env)? {
                 if !cands.iter().any(|(_, _, name, _, _)| *name == seg.name) {
-                    cands.push((seg.from_seq, seg.through_seq, seg.name, None, None));
+                    cands.push((seg.from_seq, seg.through_seq, seg.name, None, seg.key_lo.zip(seg.key_hi)));
                 }
             }
         }
@@ -2049,25 +2053,35 @@ impl<E: Env> Db<E> {
             };
             let bytes = match bytes {
                 Some(bytes) => Some(bytes),
-                // Local copy absent: fall back to the remote mirror. A
-                // missing object is a coverage gap (fail-closed below);
-                // anything else (corrupt read-back) propagates typed.
-                None => match self.remote_history.as_ref() {
-                    Some(remote) => match remote.tier.read_segment(&remote.env, name) {
+                // Local copy absent: consult the remote mirror. The P2.7
+                // sidecar object (KBs) prunes the segment fetch (100s of
+                // KB) when the segment provably cannot decide this key —
+                // any sidecar problem (absent = pre-P2.7 upload or
+                // pre-P2.6 segment, unreadable, corrupt) fails open to
+                // the fetch+walk, exactly like the local sidecar.
+                None => {
+                    let Some(remote) = self.remote_history.as_ref() else {
+                        missing_below_snap = true;
+                        continue;
+                    };
+                    if let Ok(Some(buf)) = remote.tier.read_sidecar(&remote.env, name) {
+                        if !crate::history::HistoryTier::sidecar_may_affect(&buf, key) {
+                            continue; // sound skip — spans below still count it
+                        }
+                    }
+                    // A missing object is a coverage gap (fail-closed
+                    // below); anything else (corrupt read-back)
+                    // propagates typed.
+                    match remote.tier.read_segment(&remote.env, name) {
                         Ok(bytes) => Some(bytes),
                         Err(CoreError::Io(e))
-                            if e.kind() == std::io::ErrorKind::NotFound =>
-                        {
+                            if e.kind() == std::io::ErrorKind::NotFound => {
                             missing_below_snap = true;
                             None
                         }
                         Err(e) => return Err(e),
-                    },
-                    None => {
-                        missing_below_snap = true;
-                        None
                     }
-                },
+                }
             };
             let Some(bytes) = bytes else { continue };
             let records = crate::history::walk_segment_records(&bytes)?;
@@ -12032,6 +12046,18 @@ mod tests {
         }
     }
 
+    /// `horizon_opts` with auto-compaction OFF: the only archive passes
+    /// are the ones `compact_horizon` runs explicitly (P2.7 tests need
+    /// exactly one upload per wave so the shipped remote manifest is the
+    /// pre-cap-drop generation — it still lists the locally-dropped
+    /// segment, which is what the lazy remote read serves from).
+    fn horizon_opts_manual(window_ms: u64, cap_bytes: u64) -> OpenOptions {
+        OpenOptions {
+            auto_compact_sst_count: None,
+            ..horizon_opts(window_ms, cap_bytes)
+        }
+    }
+
     #[test]
     fn snapshot_pinned_survives_horizon() {
         // RFC-0046 P0.3: the horizon GC is pin-aware — a pinned seq keeps
@@ -12793,6 +12819,258 @@ mod tests {
             ),
             "corrupt remote history fails closed, typed"
         );
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn remote_sidecar_prunes_segment_fetch() {
+        // RFC-0046 P2.7: a remote-only segment whose valid CRC'd sidecar
+        // proves the key is outside its key set is never fetched — a
+        // corrupt object under it does not disturb the read. Delete the
+        // sidecar and the same read walks into the corruption: typed
+        // error. The never-written hole key sits inside every segment's
+        // coverage bound (the P2.5 prune cannot help) but in no key set.
+        //
+        // Three same-keyspace waves (compact_horizon each, auto-compact
+        // off): wave 2 supersedes wave 1 so the rewrite really sheds it;
+        // wave 2's big segment [1..192] is then dropped by the cap when
+        // wave 3 seals [193..288] — remote-only, still listed by the
+        // shipped pre-drop manifest. Overlapping coverage on both.
+        let dir = temp_dir();
+        let remote_root = dir.join("remote");
+        let clock = std::rc::Rc::new(std::cell::Cell::new(1_000_000u64));
+        let env = ClockEnv::new(std::rc::Rc::clone(&clock));
+        let mut db =
+            Db::open_with_env(&dir, horizon_opts_manual(1_000, 9_000), env.clone()).unwrap();
+        db.set_remote_history(env.clone(), remote_root.clone());
+        for wave in [b'a', b'b', b'c'] {
+            for i in 0..100u32 {
+                if i == 42 {
+                    continue; // the hole: k042 is never written
+                }
+                db.put(format!("k{i:03}").as_bytes(), &[wave, b'0', b'0', b'0'])
+                    .unwrap();
+            }
+            clock.set(clock.get() + 60_000);
+            db.compact_horizon().unwrap();
+        }
+        let tier = db.history_tier.as_ref().unwrap();
+        let remote = crate::history::RemoteTier::new(&remote_root);
+        let remote_names: Vec<String> = remote
+            .latest_segments(&env)
+            .unwrap()
+            .into_iter()
+            .map(|s| s.name)
+            .collect();
+        let local_names: Vec<String> =
+            tier.segment_metas().into_iter().map(|m| m.name).collect();
+        assert!(
+            remote_names.iter().any(|n| !local_names.contains(n)),
+            "a listed segment is dropped locally (remote-only): {remote_names:?} vs {local_names:?}"
+        );
+        assert!(tier.archive_floor() >= 193);
+        assert!(db.earliest_readable_sequence() > 288);
+        let snap = Snapshot::at(288);
+        assert_eq!(
+            db.get_at(Snapshot::at(150), b"k000").unwrap().as_deref(),
+            Some(&b"b000"[..]),
+            "remote-only segment serves decisive reads"
+        );
+        // One sidecar object per segment object (incl. unlisted drops).
+        let count = |ext: &str| {
+            fs::read_dir(&remote_root)
+                .unwrap()
+                .filter(|e| {
+                    e.as_ref()
+                        .unwrap()
+                        .path()
+                        .extension()
+                        .and_then(|x| x.to_str())
+                        == Some(ext)
+                })
+                .count()
+        };
+        let hists = count("hist");
+        assert!(hists >= 2, "at least the two listed segments shipped");
+        assert_eq!(count("bloom"), hists, "sidecar shipped next to every object");
+        // Corrupt the remote segment bodies. The hole key reads as a
+        // coverage-gap SnapshotTooOld — the pruned segment is never
+        // fetched, so the corruption under it is inert (an unpruned walk
+        // would surface CorruptHistory instead — that discrimination is
+        // the point). Affected keys still walk and fail typed.
+        for entry in fs::read_dir(&remote_root).unwrap() {
+            let path = entry.unwrap().path();
+            if path.extension().and_then(|e| e.to_str()) != Some("hist") {
+                continue;
+            }
+            let mut bytes = fs::read(&path).unwrap();
+            let mid = bytes.len() / 2;
+            bytes[mid] ^= 0xff;
+            fs::write(&path, bytes).unwrap();
+        }
+        assert!(matches!(
+            db.get_at(snap, b"k042"),
+            Err(CoreError::SnapshotTooOld { .. })
+        ));
+        assert!(matches!(
+            db.get_at(Snapshot::at(150), b"k000"),
+            Err(CoreError::CorruptHistory(_))
+        ));
+        // Fail-open proof: without the sidecar the same read walks into
+        // the corrupt segment and fails typed.
+        for entry in fs::read_dir(&remote_root).unwrap() {
+            let path = entry.unwrap().path();
+            if path.extension().and_then(|e| e.to_str()) == Some("bloom") {
+                fs::remove_file(&path).unwrap();
+            }
+        }
+        assert!(matches!(
+            db.get_at(snap, b"k042"),
+            Err(CoreError::CorruptHistory(_))
+        ));
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn remote_manifest_bound_prunes_fetch() {
+        // RFC-0046 P2.7: the remote listing carries the manifest v3
+        // key-coverage bound. A corrupt remote segment whose bound
+        // excludes the key is never fetched for that key's read — even
+        // with its sidecar deleted (the bound alone prunes); its own
+        // keys still hit the corruption (fail-closed).
+        //
+        // Waves a, a (supersede — sheds wave 1 from the LSM), then b:
+        // wave 2's segment has a-only coverage and is dropped by the cap
+        // when the b-wave seals its own — remote-only, still listed.
+        let dir = temp_dir();
+        let remote_root = dir.join("remote");
+        let clock = std::rc::Rc::new(std::cell::Cell::new(1_000_000u64));
+        let env = ClockEnv::new(std::rc::Rc::clone(&clock));
+        let mut db =
+            Db::open_with_env(&dir, horizon_opts_manual(1_000, 9_000), env.clone()).unwrap();
+        db.set_remote_history(env.clone(), remote_root.clone());
+        for (prefix, val) in [("a", &b"va"[..]), ("a", &b"wa"[..]), ("b", &b"vb"[..])] {
+            for i in 0..100u32 {
+                db.put(format!("{prefix}{i:03}").as_bytes(), val).unwrap();
+            }
+            clock.set(clock.get() + 60_000);
+            db.compact_horizon().unwrap();
+        }
+        let tier = db.history_tier.as_ref().unwrap();
+        let remote = crate::history::RemoteTier::new(&remote_root);
+        let remote_names: Vec<String> = remote
+            .latest_segments(&env)
+            .unwrap()
+            .into_iter()
+            .map(|s| s.name)
+            .collect();
+        let local_names: Vec<String> =
+            tier.segment_metas().into_iter().map(|m| m.name).collect();
+        assert!(
+            remote_names.iter().any(|n| !local_names.contains(n)),
+            "a listed segment is dropped locally (remote-only): {remote_names:?} vs {local_names:?}"
+        );
+        assert!(tier.archive_floor() >= 193);
+        assert!(db.earliest_readable_sequence() > 288);
+        // Corrupt only the a-only remote objects (coverage bound ends
+        // before 'b'): those are the ones the b-key read must never
+        // fetch. Mixed-range objects legitimately hold b-keys and stay
+        // intact — fetching those is correct, not a prune failure.
+        let remote = crate::history::RemoteTier::new(&remote_root);
+        let mut corrupted = 0;
+        for seg in remote.latest_segments(&env).unwrap() {
+            let a_only = seg
+                .key_hi
+                .as_ref()
+                .is_some_and(|hi| hi.as_slice() < &b"b000"[..]);
+            if !a_only {
+                continue;
+            }
+            let path = remote_root.join(&seg.name);
+            let mut bytes = fs::read(&path).unwrap();
+            let mid = bytes.len() / 2;
+            bytes[mid] ^= 0xff;
+            fs::write(&path, bytes).unwrap();
+            corrupted += 1;
+        }
+        assert!(corrupted >= 1, "at least one a-only remote segment");
+        let snap = Snapshot::at(288);
+        // The b-key read never fetches the corrupt a-only remote segment.
+        assert_eq!(
+            db.get_at(snap, b"b000").unwrap().as_deref(),
+            Some(&b"vb"[..]),
+            "out-of-bound corrupt remote segment is inert for this key"
+        );
+        // The bound, not the sidecar, did it: delete every sidecar and
+        // the b-key read still succeeds.
+        for entry in fs::read_dir(&remote_root).unwrap() {
+            let path = entry.unwrap().path();
+            if path.extension().and_then(|e| e.to_str()) == Some("bloom") {
+                fs::remove_file(&path).unwrap();
+            }
+        }
+        assert_eq!(
+            db.get_at(snap, b"b000").unwrap().as_deref(),
+            Some(&b"vb"[..]),
+            "the coverage bound alone prunes the fetch"
+        );
+        // The a-keys live in the corrupt remote segment: fail-closed.
+        assert!(matches!(
+            db.get_at(snap, b"a000"),
+            Err(CoreError::CorruptHistory(_))
+        ));
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn remote_upload_ships_sidecars_idempotently() {
+        // RFC-0046 P2.7: every upload pass ships one sidecar per segment
+        // object; retries (AlreadyPresent segments) re-check the sidecar
+        // without duplicating or mutating it. The remote is configured
+        // after the flush so the two manual passes are the only ones.
+        let dir = temp_dir();
+        let remote_root = dir.join("remote");
+        let clock = std::rc::Rc::new(std::cell::Cell::new(1_000_000u64));
+        let env = ClockEnv::new(std::rc::Rc::clone(&clock));
+        let mut db =
+            Db::open_with_env(&dir, horizon_opts_manual(1_000, 8_192), env.clone()).unwrap();
+        for i in 0..100u32 {
+            db.put(format!("k{i:03}").as_bytes(), format!("v{i:03}").as_bytes())
+                .unwrap();
+        }
+        clock.set(1_000_000 + 60_000);
+        // Seal via the one explicit pass; the remote is configured only
+        // after, so the two manual upload passes are the only ones.
+        db.compact_horizon().unwrap();
+        db.set_remote_history(env, remote_root.clone());
+        let count = |ext: &str| {
+            fs::read_dir(&remote_root)
+                .unwrap()
+                .filter(|e| {
+                    e.as_ref()
+                        .unwrap()
+                        .path()
+                        .extension()
+                        .and_then(|x| x.to_str())
+                        == Some(ext)
+                })
+                .count()
+        };
+        db.upload_history_now().unwrap();
+        let hists = count("hist");
+        let blooms = count("bloom");
+        assert!(hists >= 1);
+        assert_eq!(blooms, hists, "one sidecar per segment object");
+        let report = db.upload_history_now().unwrap();
+        assert_eq!(
+            report.segments_uploaded, 0,
+            "second pass is a no-op on segments"
+        );
+        assert_eq!(count("hist"), hists, "no segment duplication");
+        assert_eq!(count("bloom"), blooms, "no sidecar duplication");
         db.close().unwrap();
         let _ = fs::remove_dir_all(&dir);
     }

@@ -277,6 +277,12 @@ fn fnv1a64(data: &[u8]) -> u64 {
     fnv1a64_seed(data, 0xcbf2_9ce4_8422_2325)
 }
 
+/// FNV-1a 64 exposed for independent second digests (remote segment
+/// naming — see `RemoteTier::segment_name`).
+pub(crate) fn fnv1a64_pub(data: &[u8]) -> u64 {
+    fnv1a64(data)
+}
+
 fn fnv1a64_seed(data: &[u8], seed: u64) -> u64 {
     let mut hash = seed;
     for b in data {

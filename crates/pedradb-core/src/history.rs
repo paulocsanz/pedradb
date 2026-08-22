@@ -416,7 +416,7 @@ impl HistoryTier {
     }
 
     /// Pure parse of a bloom sidecar (test surface). Fails open to `true`.
-    fn sidecar_may_affect(buf: &[u8], key: &[u8]) -> bool {
+    pub(crate) fn sidecar_may_affect(buf: &[u8], key: &[u8]) -> bool {
         let footer_len = 12usize;
         if buf.len() < 8 + footer_len || &buf[0..4] != b"PHB1" {
             return true;
@@ -738,6 +738,12 @@ pub struct RemoteSegment {
     pub through_seq: u64,
     /// Segment size in bytes.
     pub bytes: u64,
+    /// Lowest key the segment's manifest bound covers (`None` = pre-P2.5
+    /// remote manifest — the reader walks; the bound is advisory for
+    /// pruning only, RFC-0046 P2.7).
+    pub key_lo: Option<Vec<u8>>,
+    /// Highest key the segment's manifest bound covers (inclusive).
+    pub key_hi: Option<Vec<u8>>,
 }
 
 /// Roll-up of the newest intact remote manifest (status output,
@@ -782,9 +788,18 @@ impl RemoteTier {
         Self { root: root.into() }
     }
 
-    /// Content-addressed object name for segment `bytes`.
+    /// Content-addressed object name for segment `bytes`. Two digests:
+    /// crc32c alone collided on a structured workload (same key set with
+    /// shifted seqs — 3-wave overwrite test, 2026-08-21); FNV-1a 64 is
+    /// the independent second check. The read-back byte verify in
+    /// `put_segment` stays regardless.
     pub fn segment_name(bytes: &[u8]) -> String {
-        format!("seg-{:016x}-{:08x}.hist", bytes.len() as u64, crc32c(bytes))
+        format!(
+            "seg-{:016x}-{:08x}-{:016x}.hist",
+            bytes.len() as u64,
+            crc32c(bytes),
+            crate::bloom::fnv1a64_pub(bytes)
+        )
     }
 
     fn segment_path(&self, name: &str) -> PathBuf {
@@ -808,25 +823,87 @@ impl RemoteTier {
         walk_segment_records(&bytes)?;
         let name = Self::segment_name(&bytes);
         let dest = self.segment_path(&name);
+        let status = if remote_env.exists(&dest) {
+            let mut rf = remote_env.open_read(&dest)?;
+            let mut have = Vec::new();
+            std::io::Read::read_to_end(&mut rf, &mut have)?;
+            if have.len() == bytes.len() && crc32c(&have) == crc32c(&bytes) {
+                PutStatus::AlreadyPresent
+            } else {
+                return Err(CoreError::CorruptHistory(format!(
+                    "remote name collision at {name}: read-back differs"
+                )));
+            }
+        } else {
+            remote_env.create_dir_all(&self.root)?;
+            {
+                let mut out = remote_env.create(&dest)?;
+                out.write_all(&bytes)?;
+                out.sync_all()?;
+            }
+            remote_env.sync_dir(&self.root)?;
+            PutStatus::Uploaded
+        };
+        // RFC-0046 P2.7: ship the bloom sidecar next to the object
+        // (`<segment-name>.bloom`) in BOTH branches — retry/resume covers
+        // a sidecar the previous pass never got to. Segment first, then
+        // sidecar, then (caller) manifest: a listed segment may lack its
+        // sidecar only in the harmless direction — the reader walks.
+        // A segment without a local sidecar (pre-P2.6) ships nothing.
+        let sidecar = local_path.with_extension("bloom");
+        if local_env.exists(&sidecar) {
+            self.put_sidecar(remote_env, local_env, &sidecar, &name)?;
+        }
+        Ok(status)
+    }
+
+    /// Upload one sidecar under `<remote_name>.bloom`, idempotent the same
+    /// way as [`Self::put_segment`] (present + crc-identical = no-op;
+    /// a differing read-back is a collision and fails closed).
+    fn put_sidecar<R: Env, L: Env>(
+        &self,
+        remote_env: &R,
+        local_env: &L,
+        local_path: &Path,
+        remote_name: &str,
+    ) -> Result<()> {
+        let mut f = local_env.open_read(local_path)?;
+        let mut bytes = Vec::new();
+        std::io::Read::read_to_end(&mut f, &mut bytes)?;
+        let dest = self.segment_path(&format!("{remote_name}.bloom"));
         if remote_env.exists(&dest) {
             let mut rf = remote_env.open_read(&dest)?;
             let mut have = Vec::new();
             std::io::Read::read_to_end(&mut rf, &mut have)?;
             if have.len() == bytes.len() && crc32c(&have) == crc32c(&bytes) {
-                return Ok(PutStatus::AlreadyPresent);
+                return Ok(());
             }
             return Err(CoreError::CorruptHistory(format!(
-                "remote name collision at {name}: read-back differs"
+                "remote sidecar collision at {remote_name}.bloom: read-back differs"
             )));
         }
-        remote_env.create_dir_all(&self.root)?;
         {
             let mut out = remote_env.create(&dest)?;
             out.write_all(&bytes)?;
             out.sync_all()?;
         }
         remote_env.sync_dir(&self.root)?;
-        Ok(PutStatus::Uploaded)
+        Ok(())
+    }
+
+    /// Read the bloom sidecar of remote segment `name` (`None` when the
+    /// object is absent — a pre-P2.7 upload or a pre-P2.6 segment).
+    /// Other errors propagate; callers treat any sidecar problem as
+    /// fail-open (walk).
+    pub fn read_sidecar<E: Env>(&self, env: &E, name: &str) -> Result<Option<Vec<u8>>> {
+        let path = self.segment_path(&format!("{name}.bloom"));
+        if !env.exists(&path) {
+            return Ok(None);
+        }
+        let mut f = env.open_read(&path)?;
+        let mut buf = Vec::new();
+        std::io::Read::read_to_end(&mut f, &mut buf)?;
+        Ok(Some(buf))
     }
 
     /// Read back one segment object (restore path; the caller replays via
@@ -895,6 +972,8 @@ impl RemoteTier {
                 from_seq: s.from_seq,
                 through_seq: s.through_seq,
                 bytes: s.bytes,
+                key_lo: s.key_lo,
+                key_hi: s.key_hi,
             })
             .collect())
     }
@@ -1473,11 +1552,20 @@ mod tests {
         assert_eq!(first, PutStatus::Uploaded);
         let second = remote.put_segment(&map, &crate::env::StdEnv, &seg).unwrap();
         assert_eq!(second, PutStatus::AlreadyPresent);
-        let objects: Vec<String> =
-            remote_objects(&map).into_iter().filter(|n| n.starts_with("seg-")).collect();
+        let objects: Vec<String> = remote_objects(&map)
+            .into_iter()
+            .filter(|n| n.starts_with("seg-") && n.ends_with(".hist"))
+            .collect();
         assert_eq!(objects.len(), 1, "idempotent put must not duplicate objects");
         let bytes = std::fs::read(&seg).unwrap();
         assert_eq!(objects[0], RemoteTier::segment_name(&bytes));
+        // The P2.7 bloom sidecar ships alongside, exactly once, named after the segment.
+        let sidecars: Vec<String> = remote_objects(&map)
+            .into_iter()
+            .filter(|n| n.ends_with(".bloom"))
+            .collect();
+        assert_eq!(sidecars.len(), 1, "sidecar ships with the segment");
+        assert_eq!(sidecars[0], format!("{}.bloom", RemoteTier::segment_name(&bytes)));
         let _ = std::fs::remove_dir_all(&root);
     }
 

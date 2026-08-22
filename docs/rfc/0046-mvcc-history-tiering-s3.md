@@ -1,8 +1,8 @@
 # RFC-0046: história MVCC fora do SSD — retention default + tier em object storage (S3)
 
-**Status:** in-progress (P0.1–P0.3 + P0.5 + P1 + P2.1–P2.6 done;
+**Status:** in-progress (P0.1–P0.3 + P0.5 + P1 + P2.1–P2.7 done;
 só falta P0.4, gated em caixa quieta)
-**Updated:** 2026-08-21
+**Updated:** 2026-08-22
 **Parents:** [0009](0009-rocksdb-class-engine.md) (F20 retention),
 [0044](0044-async-class-5x-rocks.md) (E/cliff de retenção),
 [0045](0045-multi-writer-async-5x.md)
@@ -327,6 +327,39 @@ só falta P0.4, gated em caixa quieta)
       load≈41 — a razão é a alegação; ambas as pernas responderam `None`
       (cross-check do fail-open).
 
+- [x] **P2.7** Índice de leitura do espelho remoto — fecha a lacuna que o
+      P2.6 deixou aberta ("espelho remoto segue walk"): a perna remota
+      do `get_at_from_archive` ainda baixava o objeto inteiro para
+      decidir. Duas podas, mesmas semânticas das pernas locais:
+      (a) **bound do manifesto v3**: `RemoteSegment` carrega
+      `key_lo/key_hi` (`None` = manifesto remoto pré-P2.5 → walk,
+      back-compat); segmento cujo range não contém a chave não é baixado.
+      (b) **sidecar no objeto**: `put_segment` embarca o
+      `seg-<nome>.bloom` junto (idempotente por read-back len+crc;
+      divergência = `CorruptHistory` fail-closed); a perna
+      local-absente consulta `read_sidecar` **antes** do fetch — bloom
+      negativo + nenhum intervalo rd cobrindo pula o download. Fail-open
+      idêntico ao P2.6: sidecar ausente (upload pré-P2.7) ou corrompido
+      → fetch+walk. **Correção real no caminho**: colisão no nome
+      content-addressed — workload estruturado de 3 ondas (mesmo key
+      set, seqs deslocadas) selou dois segmentos com mesmo len E mesmo
+      crc32c; o upload falhava fechado na verificação read-back
+      (fail-closed correto, mas erro forçado em workload legítimo).
+      Nome agora 3-digest `seg-<len:016x>-<crc32c:08x>-<fnv1a64:016x>.hist`;
+      objetos 2-digest já presentes coexistem (o nome vem do manifesto)
+      e a verificação read-back continua valendo. Testes:
+      `remote_manifest_bound_prunes_fetch` (objetos a-only corrompidos
+      nunca baixados para leitura de b-key, mesmo sem sidecar; a-key
+      → `CorruptHistory` = controle), `remote_sidecar_prunes_segment_fetch`
+      (buraco nunca escrito responde sem tocar objetos corrompidos;
+      sem sidecars o mesmo read → `CorruptHistory` = prova do
+      fail-open), `remote_upload_ships_sidecars_idempotently`
+      (2 passes: 0 uploads novos, 1 sidecar por segmento),
+      `remote_segment_put_content_addressed_and_idempotent` estendido
+      (sidecar embarca exatamente 1×) — status: `done`. Wart conhecido
+      restante: segmento remoto ainda faz walk CRC quando é baixado
+      (sem cache de blocos remoto) — aceitável no v0.
+
 ## Status (living — update with every PR)
 
 | ID | Band | Title | Status | Task / PR | Updated |
@@ -346,6 +379,7 @@ só falta P0.4, gated em caixa quieta)
 | P2.4 | p2 | change feed fail-closed abaixo do watermark | **done** | `changes` check + teste | 2026-08-21 |
 | P2.5 | p2 | índice por segmento do archive (custo de leitura) | **done** | manifesto v3 key-range rd-aware + 3 testes | 2026-08-21 |
 | P2.6 | p2 | bloom por segmento (ranges sobrepostos) | **done** | sidecar `seg-*.bloom` fail-open + 3 testes + A/B 55× (p26) | 2026-08-21 |
+| P2.7 | p2 | índice de leitura do espelho remoto | **done** | bound v3 + sidecar no objeto + fix colisão de nome (3-digest) + 4 testes | 2026-08-22 |
 
 ## Acceptance Criteria
 
