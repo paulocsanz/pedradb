@@ -120,7 +120,10 @@ gated em caixa quieta)
 - [ ] **P0.4** Re-árbitro quieto 3× com o novo default (colunas oficiais
       0041 medem o default do produto): E/scan/A–D + regressão G1;
       expectativa: cliff do E some estruturalmente (retenção), CountCache
-      segue no caminho quente — status: `todo` (gated: load < 10)
+      segue no caminho quente — status: `doing`
+      (`scripts/rfc0046_p04_quiet_arbiter.sh` armado: gate load < 10,
+      auto-dispara; g1 col 0041 floor 2.0 + col async 0044, 3 rounds
+      pareados, regressão G1 primeiro)
 
 ### P1 — tier S3 (história barata e PITR de lá)
 
@@ -203,7 +206,7 @@ gated em caixa quieta)
 | P0.1 | p0 | history_horizon + default bounded | **done** | b68f9a1 (+docs neste commit) | 2026-08-21 |
 | P0.2 | p0 | archive local bounded + GC pin-aware | **done** | b68f9a1 (+docs neste commit) | 2026-08-21 |
 | P0.3 | p0 | testes pin/cap/crash/PITR local | **done** | b68f9a1 (+docs neste commit) | 2026-08-21 |
-| P0.4 | p0 | re-árbitro quieto com novo default | todo | gated: load < 10 | 2026-08-21 |
+| P0.4 | p0 | re-árbitro quieto com novo default | **doing** | script armado (gate load < 10, auto-dispara) | 2026-08-21 |
 | P1.1 | p1 | Env→S3 + testes seam | **done** | cc760e5 | 2026-08-21 |
 | P1.2 | p1 | upload pipeline + backpressure | **done** | b548a5e | 2026-08-21 |
 | P1.3 | p1 | restore drill do tier | **done** | c429acb | 2026-08-21 |

@@ -103,16 +103,25 @@
       ceiling 640 k → 900 k): per-writer staging + apply paralelo pós-WAL
       (shape Rocks) ou estrutura concorrente; A/B pareado vs BTree atual —
       status: `todo`
-- [ ] **P2.2** Handoff sem park-convoy (wait 175 µs vs hold 1.6 µs é o 2.4×
-      entre 266 k e o ceiling): fila leader-follower **sem catch-up wait**
-      (diferente do merge falsificado 0.19×, que esperava); protótipo
-      env-gated — status: `doing`
-      (**fair handoff falsificado** 2026-08-21, `findings/rfc0045-p22/`:
-      `PEDRA_WRITE_FAIR=1` 8/8 rounds pares 2–3.5× pior em qps e
-      lock_wait 3–4× pior — o barging injusto é load-shedding, handoff
-      direto encadeia latência de wake. Espaço de lock-flags da
-      parking_lot/lock_api 0.4 varrido: park injusto > spin > fair;
-      direção restante = batching leader-follower sem catch-up)
+      (aritmética de primeira ordem dos números medidos do P0.2: 266 k
+      em 50c = ~3,76 µs efetivos por commit (hold 1,6 + handoff
+      residual ~2,2); tirar o mem (0,5 µs) do hold → ~3,26 µs → ~306 k
+      = **+15%**, não 5× — o 5× precisa ~760 k = ~1,3 µs por commit
+      incluindo handoff, i.e. handoff ~zero. P2.1 segue como alavanca,
+      mas com valor esperado quantificado; só vale como fundação se a
+      caixa quieta (re-árbitro P2.1 do 0044) mantiver o peer no nível do
+      árbitro 04c7aa2)
+- [x] **P2.2** Handoff sem park-convoy (wait 175 µs vs hold 1.6 µs é o 2.4×
+      entre 266 k e o ceiling) — status: `done (negativo)`
+      (**premissa corrigida + ambas as famílias de handoff medidas**:
+      o merge falsificado 0.19× **não esperava** — o skip de catch-up
+      para grupo async (`any_sync`) e a rejeição saíram no mesmo commit
+      `021c231`; a "fila leader-follower sem catch-up" do P2.2 É a shape
+      já testada e rejeitada. Família lock-flags varrida no mesmo dia:
+      park injusto 266 k > spin 243–251 k (P0.2) > fair release 95–153 k
+      (`findings/rfc0045-p22/`, 8/8 rounds, lock_wait 3–4× pior — o
+      barging é load-shedding; handoff direto encadeia wake). Não resta
+      alavanca de handoff não medida no espaço parking_lot/lock_api 0.4)
 
 ## Status (living — update with every PR)
 
@@ -124,8 +133,8 @@
 | P1.1 | p1 | prepare off-lock | done (negativo) | 8% do hold; P0.2 | 2026-08-20 |
 | P1.2 | p1 | bissecção do contexto v0 | done | premissa corrigida: era config+janela de stalls, não contexto; 9 rounds sem flip | 2026-08-21 |
 | P1.3 | p1 | remesura quieto 3× sem regressão | todo | — | 2026-08-20 |
-| P2.1 | p2 | memtable apply fora da seção crítica | todo | alvo medido: hold ≤1.1 µs | 2026-08-20 |
-| P2.2 | p2 | handoff sem park-convoy | doing | fair handoff falsificado (8/8, rfc0045-p22); resta batching sem catch-up | 2026-08-21 |
+| P2.1 | p2 | memtable apply fora da seção crítica | todo | +15% esperado (aritmética P0.2); não fecha 5× sozinho | 2026-08-21 |
+| P2.2 | p2 | handoff sem park-convoy | **done (negativo)** | premissa corrigida: merge 0.19× já era sem catch-up (021c231); lock-flags varridos (rfc0045-p22, 66e672c) | 2026-08-21 |
 
 ## Acceptance Criteria
 
