@@ -1,0 +1,8 @@
+   Compiling pedradb-core v0.1.0 (/Users/paulo/software/pedradb/crates/pedradb-core)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 2.87s
+     Running `target/debug/examples/rfc0046_p28_remote_cache_ab`
+p28_ab: segments_local=3 segments_remote=48 remote=24593387B snap.seq=122880 earliest_readable=139233
+p28_ab: phase 0: cached 5039.5 us/read refetch 9820.8 us/read cache_entries=1 cache_bytes=745472
+p28_ab: phase 1: cached 5058.3 us/read refetch 9807.1 us/read cache_entries=1 cache_bytes=745472
+p28_ab: phase 2: cached 5102.9 us/read refetch 9821.1 us/read cache_entries=1 cache_bytes=745472
+p28_ab: BEST cached 5039.5 us/read refetch 9807.1 us/read ratio 1.9x

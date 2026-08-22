@@ -755,6 +755,91 @@ struct RemoteHistory<E: Env> {
     tier: crate::history::RemoteTier,
 }
 
+/// RFC-0046 P2.8: bounded LRU of remote segments already fetched and
+/// CRC-verified this open. Object names are content-addressed
+/// (len + crc32c + FNV-1a 64, P2.7), so one verified decode is stable
+/// for the name — cache hits skip both the object fetch and the record
+/// walk. The cache trusts the name: object bytes replaced under an
+/// existing name (operator-level corruption) are not re-detected after
+/// that segment's first verified read. Entries larger than the budget
+/// are never cached; a budget cut evicts immediately (LRU order).
+#[derive(Default)]
+struct SegmentCache {
+    budget: u64,
+    used: u64,
+    clock: u64,
+    map: std::collections::HashMap<String, SegmentCacheEntry>,
+    order: std::collections::BTreeSet<(u64, String)>,
+}
+
+struct SegmentCacheEntry {
+    records: std::sync::Arc<Vec<crate::history::HistoryRecord>>,
+    cost: u64,
+    at: u64,
+}
+
+impl SegmentCache {
+    fn get(&mut self, name: &str) -> Option<std::sync::Arc<Vec<crate::history::HistoryRecord>>> {
+        let entry = self.map.get_mut(name)?;
+        self.clock += 1;
+        let now = self.clock;
+        self.order.remove(&(entry.at, name.to_string()));
+        entry.at = now;
+        self.order.insert((now, name.to_string()));
+        Some(std::sync::Arc::clone(&entry.records))
+    }
+
+    fn insert(&mut self, name: &str, records: std::sync::Arc<Vec<crate::history::HistoryRecord>>, cost: u64) {
+        self.remove(name);
+        if cost > self.budget {
+            return; // oversize segments never cache
+        }
+        while self.used + cost > self.budget {
+            if !self.evict_lru() {
+                break;
+            }
+        }
+        self.clock += 1;
+        let at = self.clock;
+        self.order.insert((at, name.to_string()));
+        self.used += cost;
+        self.map.insert(
+            name.to_string(),
+            SegmentCacheEntry { records, cost, at },
+        );
+    }
+
+    fn evict_lru(&mut self) -> bool {
+        let Some((at, name)) = self.order.iter().next().cloned() else {
+            return false;
+        };
+        self.order.remove(&(at, name.clone()));
+        if let Some(entry) = self.map.remove(&name) {
+            self.used = self.used.saturating_sub(entry.cost);
+        }
+        true
+    }
+
+    fn remove(&mut self, name: &str) -> bool {
+        if let Some(entry) = self.map.remove(name) {
+            self.order.remove(&(entry.at, name.to_string()));
+            self.used = self.used.saturating_sub(entry.cost);
+            true
+        } else {
+            false
+        }
+    }
+
+    fn set_budget(&mut self, budget: u64) {
+        self.budget = budget;
+        while self.used > self.budget {
+            if !self.evict_lru() {
+                break;
+            }
+        }
+    }
+}
+
 /// [`Db`] itself is single-threaded (`&mut` for writes). Use [`ConcurrentDb`] for
 /// multi-thread access with a coarse mutex/rwlock.
 pub struct Db<E: Env = StdEnv> {
@@ -927,6 +1012,9 @@ pub struct Db<E: Env = StdEnv> {
     /// RFC-0046 P2.2: max segment bytes one upload step may ship (`None` =
     /// unlimited). Leftover segments stay pending; the cap holds them.
     upload_bandwidth: Option<u64>,
+    /// RFC-0046 P2.8 read cache for remote segments (verified-decoded,
+    /// LRU, byte-bounded by [`Self::set_remote_read_cache`]).
+    remote_read_cache: Mutex<SegmentCache>,
     /// Unix-ms of the last archive pass this open (P2.2 age metric;
     /// in-memory — `None` after reopen until the next pass).
     last_archive_millis: Option<u64>,
@@ -1255,6 +1343,10 @@ impl<E: Env> Db<E> {
             remote_history: None,
             uploaded_history_segs: std::collections::HashSet::new(),
             upload_bandwidth: None,
+            remote_read_cache: Mutex::new(SegmentCache {
+                budget: 64 * 1024 * 1024,
+                ..Default::default()
+            }),
             last_archive_millis: None,
             last_horizon_reclaim: None,
             wal_sync_count: AtomicU64::new(0),
@@ -1814,6 +1906,16 @@ impl<E: Env> Db<E> {
         self.upload_bandwidth = bytes_per_round;
     }
 
+    /// RFC-0046 P2.8: bound the in-memory read cache for remote segments
+    /// (bytes of verified-decoded records; 64 MiB by default). `0`
+    /// disables it — every below-watermark read of a remote-only segment
+    /// then refetches the object and CRC-walks it again. Cached entries
+    /// are trusted by name (content-addressed): they are verified once,
+    /// on insert.
+    pub fn set_remote_read_cache(&mut self, bytes: u64) {
+        self.remote_read_cache.lock().set_budget(bytes);
+    }
+
     /// RFC-0046 P2.2: local tier, remote mirror, upload backlog and archive
     /// age in one roll-up.
     ///
@@ -1847,6 +1949,9 @@ impl<E: Env> Db<E> {
             .last_archive_millis
             .map(|t| self.env.unix_millis().saturating_sub(t));
         stats.seq_time_samples = self.seq_times.lock().len();
+        let cache = self.remote_read_cache.lock();
+        stats.remote_cache_entries = cache.map.len();
+        stats.remote_cache_bytes = cache.used;
         Ok(stats)
     }
 
@@ -2046,13 +2151,15 @@ impl<E: Env> Db<E> {
                     continue;
                 }
             }
-            let bytes = match local_id.map(|id| tier.read_local_segment(&self.env, id)) {
-                Some(Ok(Some(bytes))) => Some(bytes),
+            let records = match local_id.map(|id| tier.read_local_segment(&self.env, id)) {
+                Some(Ok(Some(bytes))) => Some(std::sync::Arc::new(
+                    crate::history::walk_segment_records(&bytes)?,
+                )),
                 Some(Ok(None)) | None => None,
                 Some(Err(e)) => return Err(e),
             };
-            let bytes = match bytes {
-                Some(bytes) => Some(bytes),
+            let records = match records {
+                Some(records) => Some(records),
                 // Local copy absent: consult the remote mirror. The P2.7
                 // sidecar object (KBs) prunes the segment fetch (100s of
                 // KB) when the segment provably cannot decide this key —
@@ -2069,22 +2176,40 @@ impl<E: Env> Db<E> {
                             continue; // sound skip — spans below still count it
                         }
                     }
-                    // A missing object is a coverage gap (fail-closed
-                    // below); anything else (corrupt read-back)
-                    // propagates typed.
-                    match remote.tier.read_segment(&remote.env, name) {
-                        Ok(bytes) => Some(bytes),
-                        Err(CoreError::Io(e))
-                            if e.kind() == std::io::ErrorKind::NotFound => {
-                            missing_below_snap = true;
-                            None
+                    // P2.8 read cache: a hit skips the fetch and the walk
+                    // (entries are CRC-verified on insert and the name is
+                    // content-addressed — stable for the bytes). The
+                    // guard is dropped at the `let` so the miss path can
+                    // re-lock for the insert.
+                    let cached = self.remote_read_cache.lock().get(name);
+                    if let Some(records) = cached {
+                        Some(records)
+                    } else {
+                        // A missing object is a coverage gap (fail-closed
+                        // below); anything else (corrupt read-back)
+                        // propagates typed.
+                        match remote.tier.read_segment(&remote.env, name) {
+                            Ok(bytes) => {
+                                let records = std::sync::Arc::new(
+                                    crate::history::walk_segment_records(&bytes)?,
+                                );
+                                let cost = bytes.len() as u64;
+                                self.remote_read_cache
+                                    .lock()
+                                    .insert(name, records.clone(), cost);
+                                Some(records)
+                            }
+                            Err(CoreError::Io(e))
+                                if e.kind() == std::io::ErrorKind::NotFound => {
+                                missing_below_snap = true;
+                                None
+                            }
+                            Err(e) => return Err(e),
                         }
-                        Err(e) => return Err(e),
                     }
                 }
             };
-            let Some(bytes) = bytes else { continue };
-            let records = crate::history::walk_segment_records(&bytes)?;
+            let Some(records) = records else { continue };
             if let Some(rec) = crate::history::decide_at(&records, key, snap.seq) {
                 if best.as_ref().map_or(true, |b| rec.seq > b.seq) {
                     best = Some(rec.clone());
@@ -12773,6 +12898,9 @@ mod tests {
         let mut db =
             Db::open_with_env(&dir, horizon_opts(1_000, 2_048), env.clone()).unwrap();
         db.set_remote_history(env.clone(), remote_root.clone());
+        // Fetch-path fail-closed semantics under test after reads; the
+        // P2.8 read cache would serve the verified copy instead.
+        db.set_remote_read_cache(0);
         // 100 publishes: the sampled cutoff reaches 96, so one archive
         // pass ships ~95 records (~3 KB) — past the 2 KB cap, forcing a
         // local drop of the uploaded segment (the remote keeps it).
@@ -12844,6 +12972,9 @@ mod tests {
         let mut db =
             Db::open_with_env(&dir, horizon_opts_manual(1_000, 9_000), env.clone()).unwrap();
         db.set_remote_history(env.clone(), remote_root.clone());
+        // Fetch-path semantics under test (prune + fail-open); the P2.8
+        // read cache is off so reads always refetch.
+        db.set_remote_read_cache(0);
         for wave in [b'a', b'b', b'c'] {
             for i in 0..100u32 {
                 if i == 42 {
@@ -12931,6 +13062,152 @@ mod tests {
         ));
         db.close().unwrap();
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Shared P2.8 harness: three same-keyspace waves archived and
+    /// capped so every segment that can decide a read at seq 150 is
+    /// dropped locally and lives only in the remote mirror.
+    fn remote_only_mirror_150() -> (std::path::PathBuf, ClockEnv, Db<ClockEnv>) {
+        let dir = temp_dir();
+        let remote_root = dir.join("remote");
+        let clock = std::rc::Rc::new(std::cell::Cell::new(1_000_000u64));
+        let env = ClockEnv::new(std::rc::Rc::clone(&clock));
+        let mut db =
+            Db::open_with_env(&dir, horizon_opts_manual(1_000, 9_000), env.clone()).unwrap();
+        db.set_remote_history(env.clone(), remote_root.clone());
+        for wave in [b'a', b'b', b'c'] {
+            for i in 0..100u32 {
+                db.put(format!("k{i:03}").as_bytes(), &[wave, b'0', b'0', b'0'])
+                    .unwrap();
+            }
+            clock.set(clock.get() + 60_000);
+            db.compact_horizon().unwrap();
+        }
+        let floor = db.history_tier.as_ref().unwrap().archive_floor();
+        assert!(
+            floor > 150,
+            "every segment deciding a read at 150 must be dropped locally (floor={floor})"
+        );
+        (remote_root, env, db)
+    }
+
+    #[test]
+    fn remote_read_cache_trusts_verified_name() {
+        // Verify-once contract: object bytes replaced under an existing
+        // content-addressed name are not re-detected while the segment
+        // is cached (the name is the identity) — the read answers from
+        // the verified copy. With the cache disabled the same corruption
+        // fails closed, typed (the pre-P2.8 behavior: every read
+        // refetches and re-walks).
+        let (remote_root, _env, mut db) = remote_only_mirror_150();
+        assert_eq!(
+            db.get_at(Snapshot::at(150), b"k000").unwrap().as_deref(),
+            Some(&b"b000"[..])
+        );
+        assert!(
+            db.history_stats().unwrap().remote_cache_entries > 0,
+            "the read populated the cache"
+        );
+        for entry in fs::read_dir(&remote_root).unwrap() {
+            let path = entry.unwrap().path();
+            if path.extension().and_then(|e| e.to_str()) != Some("hist") {
+                continue;
+            }
+            let mut bytes = fs::read(&path).unwrap();
+            let mid = bytes.len() / 2;
+            bytes[mid] ^= 0xff;
+            fs::write(&path, bytes).unwrap();
+        }
+        assert_eq!(
+            db.get_at(Snapshot::at(150), b"k000").unwrap().as_deref(),
+            Some(&b"b000"[..]),
+            "cached entry serves without re-verifying the object"
+        );
+        db.set_remote_read_cache(0);
+        assert!(
+            matches!(
+                db.get_at(Snapshot::at(150), b"k000"),
+                Err(CoreError::CorruptHistory(_))
+            ),
+            "disabled cache refetches and fails closed on the corruption"
+        );
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(remote_root.parent().unwrap());
+    }
+
+    #[test]
+    fn remote_read_cache_oversize_never_caches() {
+        // Budget smaller than any segment: nothing is ever cached, every
+        // read refetches — the corruption under the object surfaces on
+        // the very next read (a cached entry would answer instead).
+        let (remote_root, _env, mut db) = remote_only_mirror_150();
+        db.set_remote_read_cache(1);
+        assert_eq!(
+            db.get_at(Snapshot::at(150), b"k000").unwrap().as_deref(),
+            Some(&b"b000"[..])
+        );
+        assert_eq!(
+            db.history_stats().unwrap().remote_cache_entries,
+            0,
+            "oversize entries must not cache"
+        );
+        for entry in fs::read_dir(&remote_root).unwrap() {
+            let path = entry.unwrap().path();
+            if path.extension().and_then(|e| e.to_str()) != Some("hist") {
+                continue;
+            }
+            let mut bytes = fs::read(&path).unwrap();
+            let mid = bytes.len() / 2;
+            bytes[mid] ^= 0xff;
+            fs::write(&path, bytes).unwrap();
+        }
+        assert!(
+            matches!(
+                db.get_at(Snapshot::at(150), b"k000"),
+                Err(CoreError::CorruptHistory(_))
+            ),
+            "nothing was cached; the read refetches and fails closed"
+        );
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(remote_root.parent().unwrap());
+    }
+
+    #[test]
+    fn remote_read_cache_budget_cut_evicts() {
+        // Cutting the budget below the held bytes evicts immediately
+        // (LRU): an evicted entry is refetched on the next read — the
+        // corruption under it surfaces again.
+        let (remote_root, _env, mut db) = remote_only_mirror_150();
+        assert_eq!(
+            db.get_at(Snapshot::at(150), b"k000").unwrap().as_deref(),
+            Some(&b"b000"[..])
+        );
+        assert!(db.history_stats().unwrap().remote_cache_entries > 0);
+        db.set_remote_read_cache(1);
+        assert_eq!(
+            db.history_stats().unwrap().remote_cache_entries,
+            0,
+            "budget cut must evict held entries"
+        );
+        for entry in fs::read_dir(&remote_root).unwrap() {
+            let path = entry.unwrap().path();
+            if path.extension().and_then(|e| e.to_str()) != Some("hist") {
+                continue;
+            }
+            let mut bytes = fs::read(&path).unwrap();
+            let mid = bytes.len() / 2;
+            bytes[mid] ^= 0xff;
+            fs::write(&path, bytes).unwrap();
+        }
+        assert!(
+            matches!(
+                db.get_at(Snapshot::at(150), b"k000"),
+                Err(CoreError::CorruptHistory(_))
+            ),
+            "evicted entry is refetched and fails closed on the corruption"
+        );
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(remote_root.parent().unwrap());
     }
 
     #[test]

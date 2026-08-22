@@ -724,6 +724,12 @@ pub struct HistoryStats {
     /// Hard-bounded by `HORIZON_SAMPLE_RING_CAP` — long windows under
     /// sustained writes must not grow memory without bound.
     pub seq_time_samples: usize,
+    /// RFC-0046 P2.8 remote read cache: verified-decoded segments held
+    /// in memory (0 when no remote is configured or the budget is 0).
+    pub remote_cache_entries: usize,
+    /// RFC-0046 P2.8 remote read cache: bytes held (bounded by the
+    /// configured budget).
+    pub remote_cache_bytes: u64,
 }
 
 /// One segment as listed by the remote manifest (restore input,

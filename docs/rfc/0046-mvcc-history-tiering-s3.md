@@ -1,6 +1,6 @@
 # RFC-0046: história MVCC fora do SSD — retention default + tier em object storage (S3)
 
-**Status:** in-progress (P0.1–P0.3 + P0.5 + P1 + P2.1–P2.7 done;
+**Status:** in-progress (P0.1–P0.3 + P0.5 + P1 + P2.1–P2.8 done;
 só falta P0.4, gated em caixa quieta)
 **Updated:** 2026-08-22
 **Parents:** [0009](0009-rocksdb-class-engine.md) (F20 retention),
@@ -360,6 +360,46 @@ só falta P0.4, gated em caixa quieta)
       restante: segmento remoto ainda faz walk CRC quando é baixado
       (sem cache de blocos remoto) — aceitável no v0.
 
+- [x] **P2.8** Cache de leitura remota — fecha o wart que o P2.7
+      registrou ("segmento baixado ainda faz fetch+walk a cada
+      leitura"): LRU em memória, limitado por bytes (default **64 MiB**,
+      `set_remote_read_cache`; `0` desliga), guardando o segmento já
+      **decodificado e verificado** — hit pula o fetch E o walk
+      (parse+CRC). **Soundness**: a chave do cache é o nome
+      content-addressed de 3 digests (P2.7) — um nome identifica os
+      bytes; a entrada só entra depois do walk CRC completo, então
+      hit = bytes já verificados. Contrato verify-once documentado:
+      bytes trocados sob um nome existente (corrupção em nível de
+      operador) não são redetectados após a primeira leitura verificada
+      daquele segmento — o cache confia no nome; com budget 0 toda
+      leitura refaz fetch+walk e a corrupção fecha tipada como antes.
+      Entradas maiores que o budget nunca entram; cortar o budget
+      ejeta na hora (LRU). Telemetria: `history_stats()` ganha
+      `remote_cache_entries`/`remote_cache_bytes`. Testes:
+      `remote_read_cache_trusts_verified_name` (objetos corrompidos
+      após o cache: leitura responde da cópia verificada; budget 0 →
+      `CorruptHistory` = controle pre-P2.8),
+      `remote_read_cache_oversize_never_caches` (budget 1: nada entra,
+      corrupção fecha na leitura seguinte),
+      `remote_read_cache_budget_cut_evicts` (corte ejeta; refetch
+      reencontra a corrupção). Oráculo dos testes é discriminação de
+      erro: cacheado = resposta limpa, refetch = `CorruptHistory`
+      (propaga antes do fallback LSM do P2.3 — o LSM pode servir o
+      registro fisicamente presente, então valor sozinho não
+      discrimina). **Medido** (`findings/rfc0046-p28/`, exemplo
+      `rfc0046_p28_remote_cache_ab`): leitura decisiva abaixo do
+      watermark de segmento remote-only (bloom-positivo — o caso que
+      nenhuma poda resolve), melhor de 3 fases interleaved: cached
+      5 039,5 µs/read vs refetch 9 807,1 µs/read — **1,9× end-to-end**.
+      As duas pernas pagam o mesmo piso de ~5 ms de walk nos segmentos
+      LOCAIS may-affect (bloom-positivos, versões acima do snap); o
+      cache elimina por completo o fetch+walk do objeto remoto (delta
+      de ~4,8 ms/read — num object store real é o round-trip + egress
+      de CADA leitura). Caixa suja (load ~12); a razão é a alegação.
+      Wart remanescente menor: o hit ainda varre os registros do
+      segmento (`decide_at` linear; registros ordenados por chave —
+      busca binária fica como follow-up).
+
 ## Status (living — update with every PR)
 
 | ID | Band | Title | Status | Task / PR | Updated |
@@ -380,6 +420,7 @@ só falta P0.4, gated em caixa quieta)
 | P2.5 | p2 | índice por segmento do archive (custo de leitura) | **done** | manifesto v3 key-range rd-aware + 3 testes | 2026-08-21 |
 | P2.6 | p2 | bloom por segmento (ranges sobrepostos) | **done** | sidecar `seg-*.bloom` fail-open + 3 testes + A/B 55× (p26) | 2026-08-21 |
 | P2.7 | p2 | índice de leitura do espelho remoto | **done** | bound v3 + sidecar no objeto + fix colisão de nome (3-digest) + 4 testes | 2026-08-22 |
+| P2.8 | p2 | cache de leitura remota (LRU por bytes) | **done** | 64 MiB default + `set_remote_read_cache` + 3 testes + A/B 1,9× e2e / fetch zerado (p28) | 2026-08-22 |
 
 ## Acceptance Criteria
 
