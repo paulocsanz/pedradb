@@ -2579,6 +2579,32 @@ mod tests {
         let rd = |v: &std::sync::atomic::AtomicU64| v.load(std::sync::atomic::Ordering::Relaxed);
         let mut idx = 0u64;
         let val = vec![b'r'; 100];
+        // Discriminator: batch construction cost alone (format! + clone x16),
+        // paid identically by both engines in the bench loop.
+        {
+            let mut builds: Vec<u128> = Vec::with_capacity(batches);
+            let mut sink: usize = 0;
+            let mut j = 0u64;
+            for _ in 0..batches {
+                let t = std::time::Instant::now();
+                let mut puts = Vec::with_capacity(per_batch);
+                for _ in 0..per_batch {
+                    j += 1;
+                    puts.push(("raftlog", format!("raftlog/{j:08}").into_bytes(), val.clone()));
+                }
+                let dt = t.elapsed().as_nanos();
+                sink += puts.len();
+                builds.push(dt);
+            }
+            builds.sort_unstable();
+            let q = |p: f64| builds[((builds.len() as f64 - 1.0) * p) as usize] as f64 / 1000.0;
+            println!(
+                "raftlog build-only: {batches} x {per_batch}: p50={:.2}µs p95={:.2}µs (sink={})",
+                q(0.50),
+                q(0.95),
+                sink
+            );
+        }
         // (batch, wall_ns, prepare, wal, mem, publish, flush_chk, lock_wait)
         let mut recs: Vec<(usize, u128, u64, u64, u64, u64, u64, u64)> =
             Vec::with_capacity(batches);
@@ -2645,6 +2671,124 @@ mod tests {
                 r.6 as f64 / 1000.0,
                 r.7 as f64 / 1000.0,
                 residual
+            );
+        }
+        // Per-phase p50 over all batches (attribution of the steady state).
+        {
+            let n = recs.len();
+            let pct = |mut v: Vec<u64>| {
+                v.sort_unstable();
+                v[((n as f64 - 1.0) * 0.5) as usize] as f64 / 1000.0
+            };
+            println!(
+                "  phases p50: prepare={:.2}µs wal={:.2}µs mem={:.2}µs publish={:.2}µs flsh_chk={:.2}µs lock_wait={:.2}µs",
+                pct(recs.iter().map(|r| r.2).collect()),
+                pct(recs.iter().map(|r| r.3).collect()),
+                pct(recs.iter().map(|r| r.4).collect()),
+                pct(recs.iter().map(|r| r.5).collect()),
+                pct(recs.iter().map(|r| r.6).collect()),
+                pct(recs.iter().map(|r| r.7).collect()),
+            );
+        }
+        // Bench-shape replica: construction + write + per-op Instant pair +
+        // every-8th get, all inside the timing — isolates what the official
+        // loop adds over the write-only probe above (same process, same DB).
+        {
+            let mut walls: Vec<u128> = Vec::with_capacity(batches);
+            let mut idx2 = idx;
+            let cf = db.cf_handle("raftlog").expect("raftlog cf");
+            let t_all = std::time::Instant::now();
+            for op in 0..batches {
+                let t = std::time::Instant::now();
+                let mut wb: Vec<(&str, Vec<u8>, Vec<u8>)> = Vec::with_capacity(16);
+                for _ in 0..per_batch {
+                    idx2 += 1;
+                    wb.push((
+                        "raftlog",
+                        format!("raftlog/{idx2:08}").into_bytes(),
+                        val.clone(),
+                    ));
+                }
+                db.write_cf_owned(wb, Vec::new()).unwrap();
+                if op % 8 == 0 && idx2 > 1 {
+                    let _ = db.get_cf(&cf, format!("raftlog/{:08}", idx2 - 1).as_bytes());
+                }
+                walls.push(t.elapsed().as_nanos());
+            }
+            let total = t_all.elapsed();
+            walls.sort_unstable();
+            let q = |p: f64| walls[((walls.len() as f64 - 1.0) * p) as usize] as f64 / 1000.0;
+            println!(
+                "raftlog bench-shape: {batches} x {per_batch}: p50={:.2}µs p95={:.2}µs mean={:.2}µs (leg wall {:.4}s)",
+                q(0.50),
+                q(0.95),
+                total.as_nanos() as f64 / batches as f64 / 1000.0,
+                total.as_secs_f64()
+            );
+        }
+        // Discriminators for the replica delta over the probe loop (same
+        // `write_cf_owned` call, +3.5µs unexplained): (a) same loop with NO
+        // get → get interference; (b) with-get again at a larger DB →
+        // state growth vs loop shape.
+        for (label, with_get) in [("bench-shape-noget", false), ("bench-shape+get2", true)] {
+            let mut walls: Vec<u128> = Vec::with_capacity(batches);
+            let mut idx2 = idx;
+            let cf = db.cf_handle("raftlog").expect("raftlog cf");
+            let t_all = std::time::Instant::now();
+            for op in 0..batches {
+                let t = std::time::Instant::now();
+                let mut wb: Vec<(&str, Vec<u8>, Vec<u8>)> = Vec::with_capacity(16);
+                for _ in 0..per_batch {
+                    idx2 += 1;
+                    wb.push((
+                        "raftlog",
+                        format!("raftlog/{idx2:08}").into_bytes(),
+                        val.clone(),
+                    ));
+                }
+                db.write_cf_owned(wb, Vec::new()).unwrap();
+                if with_get && op % 8 == 0 && idx2 > 1 {
+                    let _ = db.get_cf(&cf, format!("raftlog/{:08}", idx2 - 1).as_bytes());
+                }
+                walls.push(t.elapsed().as_nanos());
+            }
+            let total = t_all.elapsed();
+            walls.sort_unstable();
+            let q = |p: f64| walls[((walls.len() as f64 - 1.0) * p) as usize] as f64 / 1000.0;
+            println!(
+                "raftlog {label}: {batches} x {per_batch}: p50={:.2}µs p95={:.2}µs mean={:.2}µs (leg wall {:.4}s)",
+                q(0.50),
+                q(0.95),
+                total.as_nanos() as f64 / batches as f64 / 1000.0,
+                total.as_secs_f64()
+            );
+        }
+        // Probe-loop repeat at the larger DB: identical body to the first
+        // probe pass (build outside timing). Separates loop-shape from
+        // DB-growth-over-time.
+        {
+            let mut walls: Vec<u128> = Vec::with_capacity(batches);
+            let mut idx2 = idx;
+            for _ in 0..batches {
+                let mut puts = Vec::with_capacity(per_batch);
+                for _ in 0..per_batch {
+                    idx2 += 1;
+                    puts.push((
+                        "raftlog",
+                        format!("raftlog/{idx2:08}").into_bytes(),
+                        val.clone(),
+                    ));
+                }
+                let t0 = std::time::Instant::now();
+                db.write_cf_owned(puts, Vec::new()).unwrap();
+                walls.push(t0.elapsed().as_nanos());
+            }
+            walls.sort_unstable();
+            let q = |p: f64| walls[((walls.len() as f64 - 1.0) * p) as usize] as f64 / 1000.0;
+            println!(
+                "raftlog probe2: {batches} x {per_batch}: p50={:.2}µs p95={:.2}µs",
+                q(0.50),
+                q(0.95)
             );
         }
         let _ = std::fs::remove_dir_all(&d);
