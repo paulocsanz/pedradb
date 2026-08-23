@@ -70,7 +70,7 @@
 - [x] **W3.1** compat: codec CF process-local → registro persistido `CFREG` (frozen + reconcile fail-closed) — F185, c10/c10b — status: `done`
 - [x] **W3.2** compat: `Transaction` sem pin de version-GC sob `auto_reclaim` — F186, c11 — status: `done`
 - [x] **W3.3** core: snapshot off-lock de MANIFEST obsoleto regride CURRENT e deleta o manifest novo — F187, época monotônica + gate, k17 — status: `done`
-- [x] **W3.4** core: valor honesto colidindo com mágica `VLG` sniffado como ponteiro — F188, escape `0x01` no chokepoint, k18 — status: `done`
+- [x] **W3.4** core: valor honesto colidindo com mágica `VLG` sniffado como ponteiro — F188, escape `0x01` no chokepoint, k18 — status: `done` (emendum b3f3473: o chokepoint cobria put/apply mas não o commit de `Transaction` — staged value cru no `WriteOp`; todo meta dcs começa `0x01` e era corrompido em silêncio desde f1acb4f; fix + `tx_value_escape_marker_round_trips`)
 - [x] **W3.5** core: vlog GC × caches sem espelho SST — F189 **REFUTADO** (3 rotas; retired espelha SSTs, parked é fechado por gate `mem_is_empty_for_rotate`; k20 guarda a invariante do gate) — status: `done` (dead end registrado)
 - [x] **W3.6** core: feed não-lazy serve ponteiro VLG cru — F190, `resolve_feed_entries` na borda, k21 — status: `done`
 - [x] **W3.7** compat: adicionar CF a DB default-only vaza `cf\0…` no scan default — F191, recusa fail-closed, c12 — status: `done`
@@ -150,7 +150,7 @@
 | W3.1 | w3 | CFREG persistido p/ codec CF (F185) | done | compat `lib.rs`; c10/c10b/c10ctl | 2026-08-22 |
 | W3.2 | w3 | pin de GC na Transaction (F186) | done | compat `txn.rs`; c11/c11ctl | 2026-08-22 |
 | W3.3 | w3 | época de MANIFEST off-lock (F187) | done | `db.rs` (`take_manifest_persist`/`ManifestPersist`); k17 | 2026-08-22 |
-| W3.4 | w3 | escape de colisão VLG inline (F188) | done | `db.rs` (`escape_inline_value`); k18 | 2026-08-22 |
+| W3.4 | w3 | escape de colisão VLG inline (F188) | done | `db.rs` (`escape_inline_value`); k18; emendum TX b3f3473 | 2026-08-23 |
 | W3.5 | w3 | vlog GC × parked/retired — REFUTADO | done | dead end + guarda k20 do gate | 2026-08-22 |
 | W3.6 | w3 | feed resolve ponteiros na borda (F190) | done | `db.rs` (`resolve_feed_entries`); k21 | 2026-08-22 |
 | W3.7 | w3 | recusa add-CF em default raw (F191) | done | compat `lib.rs`; c12 | 2026-08-22 |
