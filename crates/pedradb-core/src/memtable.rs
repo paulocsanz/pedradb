@@ -230,8 +230,14 @@ pub struct MemTable {
     map: BTreeMap<Bytes, Versions>,
     /// Recent inserts not yet in `map` (RFC-0041: apply Ok path is O(1) push).
     tail: Vec<Version>,
-    /// Newest tail index per user key (point/MVCC without a linear tail walk).
-    tail_idx: BTreeMap<Bytes, usize>,
+    /// Newest tail index per user key, **sharded by CF prefix** (bytes before
+    /// the first `0x00` — compat `cf\\0key`; keys without NUL live in the
+    /// empty prefix). Rocks gives each CF its own memtable; we emulate that
+    /// on the Ok-path index so `deps_raftlog` after `deps_apply_batch` does
+    /// not pay `log(N_all_cfs)` (RFC-0054).
+    tail_idx: BTreeMap<Bytes, BTreeMap<Bytes, usize>>,
+    /// Always empty — missing-shard `range` needs a `btree_map::Range`.
+    empty_idx: BTreeMap<Bytes, usize>,
     /// Highest sequence in `tail` (fast-path guard: snapshot ≥ it ⇒ only the
     /// newest version per key can be visible).
     tail_max_seq: SequenceNumber,
@@ -251,12 +257,28 @@ impl Clone for MemTable {
             map: self.map.clone(),
             tail: self.tail.clone(),
             tail_idx: self.tail_idx.clone(),
+            empty_idx: BTreeMap::new(),
             tail_max_seq: self.tail_max_seq,
             tail_ord: Mutex::new(None),
             approx_bytes: self.approx_bytes,
             range_tombstones: self.range_tombstones,
             entries: self.entries,
         }
+    }
+}
+
+/// Compat CF encoding is `cf\\0user`. Kernel keys without NUL share one shard.
+fn cf_prefix(key: &[u8]) -> &[u8] {
+    match key.iter().position(|&b| b == 0) {
+        Some(i) => &key[..i],
+        None => &[],
+    }
+}
+
+fn bound_cf_prefix(b: Bound<&[u8]>) -> Option<&[u8]> {
+    match b {
+        Bound::Included(k) | Bound::Excluded(k) => Some(cf_prefix(k)),
+        Bound::Unbounded => None,
     }
 }
 
@@ -308,9 +330,55 @@ impl MemTable {
         !self.tail.is_empty()
     }
 
+    /// Length of the unsorted tail (RFC-0054).
+    #[must_use]
+    pub fn tail_len(&self) -> usize {
+        self.tail.len()
+    }
+
     fn invalidate_tail_ord(&self) {
         if let Ok(mut g) = self.tail_ord.lock() {
             *g = None;
+        }
+    }
+
+    fn tail_idx_insert(&mut self, key: Bytes, i: usize) {
+        let p = Bytes::copy_from_slice(cf_prefix(key.as_ref()));
+        self.tail_idx.entry(p).or_default().insert(key, i);
+    }
+
+    fn tail_idx_get(&self, user_key: &[u8]) -> Option<&usize> {
+        self.tail_idx
+            .get(cf_prefix(user_key))
+            .and_then(|m| m.get(user_key))
+    }
+
+    fn tail_idx_range<'a>(
+        &'a self,
+        start: Bound<&'a [u8]>,
+        end: Bound<&'a [u8]>,
+    ) -> std::collections::btree_map::Range<'a, Bytes, usize> {
+        let p = match (bound_cf_prefix(start), bound_cf_prefix(end)) {
+            (Some(a), Some(b)) if a == b => a,
+            (Some(a), None) => a,
+            (None, Some(b)) => b,
+            _ => {
+                // Unbounded / cross-CF: one shard only → that shard; else empty
+                // (caller should have fallen back to the linear merge).
+                if self.tail_idx.len() == 1 {
+                    return self
+                        .tail_idx
+                        .values()
+                        .next()
+                        .expect("len==1")
+                        .range::<[u8], _>((start, end));
+                }
+                return self.empty_idx.range::<[u8], _>((start, end));
+            }
+        };
+        match self.tail_idx.get(p) {
+            Some(m) => m.range::<[u8], _>((start, end)),
+            None => self.empty_idx.range::<[u8], _>((start, end)),
         }
     }
 
@@ -325,6 +393,7 @@ impl MemTable {
     pub fn spill_tail_with_gc(&mut self, floor: Option<SequenceNumber>) {
         self.invalidate_tail_ord();
         self.tail_idx.clear();
+        // shards dropped; empty_idx stays empty
         self.tail_max_seq = 0;
         let tail = std::mem::take(&mut self.tail);
         for v in tail {
@@ -401,7 +470,7 @@ impl MemTable {
         }
         self.invalidate_tail_ord();
         self.tail_max_seq = self.tail_max_seq.max(key.sequence);
-        self.tail_idx.insert(key.user_key.clone(), self.tail.len());
+        self.tail_idx_insert(key.user_key.clone(), self.tail.len());
         self.tail.push(Version { key, value });
     }
 
@@ -432,7 +501,7 @@ impl MemTable {
                 self.range_tombstones = self.range_tombstones.saturating_add(1);
             }
             self.tail_max_seq = self.tail_max_seq.max(key.sequence);
-            self.tail_idx.insert(key.user_key.clone(), self.tail.len());
+            self.tail_idx_insert(key.user_key.clone(), self.tail.len());
             self.tail.push(Version { key, value });
             any = true;
         }
@@ -697,7 +766,7 @@ impl MemTable {
     }
 
     fn tail_best(&self, user_key: &[u8], snapshot: SequenceNumber) -> Option<&Version> {
-        let Some(&i) = self.tail_idx.get(user_key) else {
+        let Some(&i) = self.tail_idx_get(user_key) else {
             return None;
         };
         let newest = &self.tail[i];
@@ -864,10 +933,18 @@ impl MemTable {
         if self.tail.is_empty() || snapshot < self.tail_max_seq {
             return self.iter_internal_iter(start, end);
         }
+        // Cross-CF / unbounded range cannot use a single shard cursor.
+        match (bound_cf_prefix(start), bound_cf_prefix(end)) {
+            (Some(a), Some(b)) if a != b => return self.iter_internal_iter(start, end),
+            (None, _) | (_, None) if self.tail_idx.len() > 1 => {
+                return self.iter_internal_iter(start, end);
+            }
+            _ => {}
+        }
         let map = self.iter_internal_range_cursor(start, end);
         MemInternalIter::Idx(MemInternalIdx {
             map: map.peekable(),
-            idx: self.tail_idx.range::<[u8], _>((start, end)).peekable(),
+            idx: self.tail_idx_range(start, end).peekable(),
             tail: &self.tail,
         })
     }
@@ -923,8 +1000,7 @@ impl MemTable {
             .map(|(uk, _)| uk.clone())
             .collect();
         keys.extend(
-            self.tail_idx
-                .range::<[u8], _>((Bound::Included(prefix), end_b))
+            self.tail_idx_range(Bound::Included(prefix), end_b)
                 .filter(|(uk, _)| prefix.is_empty() || uk.starts_with(prefix))
                 .map(|(uk, _)| uk.clone()),
         );
@@ -1469,6 +1545,28 @@ mod tests {
             .expect("indexed last");
         assert_eq!(&k[..], &1999u32.to_le_bytes());
         assert_eq!(&v[..], b"v");
+    }
+
+    #[test]
+    fn cf_sharded_tail_idx_isolates_lookups() {
+        // RFC-0054: lock\\0* keys must not sit in the raftlog shard.
+        let mut mt = MemTable::new();
+        for i in 0..5000u32 {
+            let mut k = b"lock\0".to_vec();
+            k.extend_from_slice(&i.to_le_bytes());
+            mt.put(k, u64::from(i) + 1, b"L".as_slice());
+        }
+        mt.put(b"raftlog\0x".as_slice(), 9000, b"R".as_slice());
+        assert_eq!(
+            mt.get(b"raftlog\0x", 9000),
+            Lookup::Found(Bytes::from_static(b"R"))
+        );
+        assert_eq!(
+            mt.get(b"lock\0\x00\x00\x00\x00", 9000),
+            Lookup::Found(Bytes::from_static(b"L"))
+        );
+        assert_eq!(mt.get(b"raftlog\0missing", 9000), Lookup::NotFound);
+        assert_eq!(mt.tail_idx.len(), 2, "lock + raftlog shards");
     }
 
     #[test]

@@ -1618,6 +1618,24 @@ impl<E: Env> Db<E> {
         self.phase_stats.clone()
     }
 
+    /// Fold the unsorted memtable tail into the BTree (no SST I/O).
+    ///
+    /// RFC-0054: compat CFs share one memtable; raftdb is a separate Rocks
+    /// instance. Folding the tail between shapes restores an empty insert
+    /// path for the next CF without a flush. No-op if the tail is empty.
+    pub fn fold_active_tail(&mut self) {
+        if self.mem.has_tail() {
+            self.mem.spill_tail();
+        }
+    }
+
+    /// Unsorted tail length (RFC-0054 probe).
+    #[must_use]
+    #[must_use]
+    pub fn mem_tail_len(&self) -> usize {
+        self.mem.tail_len()
+    }
+
     /// RFC-0047 P0.2: what a [`WalRecovery::PointInTime`] open discarded
     /// (`None` = nothing discarded / [`WalRecovery::FailClosed`] mode).
     #[must_use]

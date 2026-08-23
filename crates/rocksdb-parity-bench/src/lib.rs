@@ -211,6 +211,18 @@ pub trait Engine {
     fn write_group_stats(&self) -> Option<(u64, u64, u64, u64)> {
         None
     }
+    /// Live memtable entries (compat). RFC-0054 raftlog attribution.
+    fn mem_entries(&self) -> Option<u64> {
+        None
+    }
+    /// `PEDRA_WRITE_PHASE_STATS` dump, or `None`.
+    fn write_phase_line(&self) -> Option<String> {
+        None
+    }
+    /// Fold memtable tail (no SST). Returns tail length before fold.
+    fn fold_mem_tail(&self) -> usize {
+        0
+    }
     /// Switch the Rocks peer's `WriteOptions.sync` for the next writes.
     /// Compat ignores this (always fdatasync). Used so MyRocks/Surreal
     /// match the **upper DB default**, not a forced async peer.
@@ -297,10 +309,26 @@ impl YcsbRunner {
         let batch = self.cfg.batch;
         let yval = vec![b'd'; self.cfg.payload];
 
+        // RFC-0054: `ROCKS_PARITY_ONLY` on deps (same contract as kvrocks —
+        // filtered runs are experiments, never official tables).
+        let only: Option<Vec<String>> = std::env::var("ROCKS_PARITY_ONLY").ok().map(|s| {
+            s.split(',')
+                .map(str::trim)
+                .filter(|x| !x.is_empty())
+                .map(String::from)
+                .collect()
+        });
+        let want = |name: &str| only.as_ref().map_or(true, |v| v.iter().any(|x| x == name));
+        let need_seed = want("deps_apply_batch")
+            || want("deps_mvcc_latest")
+            || want("deps_scan")
+            || want("deps_lock_prewrite");
+
         // Seed: 2 versions per record via batched commits (not timed) —
         // prewrite rows (lock + default) then commit rows (write, lock del).
-        let t0 = Instant::now();
         let mut vers: Vec<u64> = vec![0; records];
+        if need_seed {
+        let t0 = Instant::now();
         for round in 0..2u64 {
             let mut i = 0usize;
             while i < records {
@@ -339,12 +367,16 @@ impl YcsbRunner {
             "[rocks-parity] deps seed {records}×2 versions in {:.1}s",
             t0.elapsed().as_secs_f64()
         );
+        } else {
+            eprintln!("[rocks-parity] deps seed skipped (ROCKS_PARITY_ONLY)");
+        }
 
         let mut rng = std::mem::take(&mut self.rng);
         let mut blocks = Vec::with_capacity(5);
 
         // 1. deps_apply_batch — raftstore apply: per logical op one ready =
         //    prewrite batch + commit batch (batch txns each).
+        if want("deps_apply_batch") {
         let mut lats = Vec::with_capacity(cfg_ops);
         let (mut txns, mut errors) = (0u64, 0u64);
         let t0 = Instant::now();
@@ -394,9 +426,11 @@ impl YcsbRunner {
             &mut lats,
         ));
         eprintln!("[rocks-parity] deps_apply_batch done txns={txns} errors={errors}");
+        }
 
         // 2. deps_mvcc_latest — point read of the latest version: reverse-seek
         //    write CF for the user prefix, then fetch the value in default.
+        if want("deps_mvcc_latest") {
         e.reset_read_probe();
         let mut lats = Vec::with_capacity(cfg_ops);
         let (mut reads, mut errors) = (0u64, 0u64);
@@ -425,9 +459,11 @@ impl YcsbRunner {
   }}"#
         ));
         eprintln!("[rocks-parity] deps_mvcc_latest done reads={reads} errors={errors}");
+        }
 
         // 3. deps_scan — short range scan over user keys in the write CF
         //    (coprocessor / GC range shape).
+        if want("deps_scan") {
         e.reset_read_probe();
         let mut lats = Vec::with_capacity(cfg_ops);
         let (mut scans, mut errors) = (0u64, 0u64);
@@ -450,12 +486,20 @@ impl YcsbRunner {
   }}"#
         ));
         eprintln!("[rocks-parity] deps_scan done scans={scans} errors={errors}");
+        }
 
         // 4. deps_raftlog — raftdb append shape: batched sequential appends to
         //    the raftlog CF; every 8th op also reads the previous entry.
+        if want("deps_raftlog") {
         let mut lats = Vec::with_capacity(cfg_ops);
         let (mut appends, mut reads, mut errors) = (0u64, 0u64, 0u64);
         let mut idx = 0u64;
+        let mut build_ns = Vec::with_capacity(cfg_ops);
+        let mut batch_ns = Vec::with_capacity(cfg_ops);
+        eprintln!(
+            "[rocks-parity] deps_raftlog enter mem_entries={}",
+            e.mem_entries().map_or_else(|| "?".into(), |n| n.to_string())
+        );
         let t0 = Instant::now();
         for op in 0..cfg_ops {
             let t = Instant::now();
@@ -468,7 +512,10 @@ impl YcsbRunner {
                     v: yval.clone(),
                 });
             }
+            let t_build = t.elapsed();
+            let t_b = Instant::now();
             let ok = e.batch(std::mem::take(&mut wb));
+            let t_batch = t_b.elapsed();
             if ok {
                 appends += 16;
             } else {
@@ -480,15 +527,31 @@ impl YcsbRunner {
                     Err(_) => errors += 1,
                 }
             }
+            build_ns.push(t_build.as_nanos());
+            batch_ns.push(t_batch.as_nanos());
             lats.push(ms(t));
         }
         blocks.push(summarize("deps_raftlog", cfg_ops, t0.elapsed(), &mut lats));
+        build_ns.sort_unstable();
+        batch_ns.sort_unstable();
+        let p50 = |v: &[u128]| v[v.len() / 2] as f64 / 1000.0;
+        eprintln!(
+            "[rocks-parity] deps_raftlog split p50 build={:.2}µs batch={:.2}µs mem_after={}",
+            p50(&build_ns),
+            p50(&batch_ns),
+            e.mem_entries().map_or_else(|| "?".into(), |n| n.to_string())
+        );
+        if let Some(line) = e.write_phase_line() {
+            eprintln!("[rocks-parity] deps_raftlog phases {line}");
+        }
         eprintln!(
             "[rocks-parity] deps_raftlog done appends={appends} reads={reads} errors={errors}"
         );
+        }
 
         // 5. deps_cache_overwrite — unbatched zipf overwrite of a fixed
         //    keyspace (cache-style dependent; compat worst case).
+        if want("deps_cache_overwrite") {
         let mut lats = Vec::with_capacity(cfg_ops);
         let (mut writes, mut errors) = (0u64, 0u64);
         let t0 = Instant::now();
@@ -509,9 +572,11 @@ impl YcsbRunner {
             &mut lats,
         ));
         eprintln!("[rocks-parity] deps_cache_overwrite done writes={writes} errors={errors}");
+        }
 
         // 6. RFC-0043: TiKV prewrite-only ready (lock+default WriteBatch, no
         //    commit). Batched — HL, not a 1-op canary.
+        if want("deps_lock_prewrite") {
         let mut lats = Vec::with_capacity(cfg_ops);
         let (mut txns, mut errors) = (0u64, 0u64);
         let t0 = Instant::now();
@@ -555,6 +620,7 @@ impl YcsbRunner {
             })
             .collect();
         let _ = e.batch(cleanup);
+        }
 
         self.rng = rng;
         blocks

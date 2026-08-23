@@ -171,6 +171,28 @@ impl Engine for CompatEngine {
     fn write_group_stats(&self) -> Option<(u64, u64, u64, u64)> {
         Some(self.db.write_group_stats())
     }
+    fn mem_entries(&self) -> Option<u64> {
+        Some(self.db.stats().mem_entries as u64)
+    }
+    fn fold_mem_tail(&self) -> usize {
+        self.db.fold_mem_tail()
+    }
+    fn write_phase_line(&self) -> Option<String> {
+        let st = self.db.write_phase_stats()?;
+        let n = st.commits.load(std::sync::atomic::Ordering::Relaxed).max(1);
+        let us = |a: &std::sync::atomic::AtomicU64| {
+            a.load(std::sync::atomic::Ordering::Relaxed) as f64 / n as f64 / 1000.0
+        };
+        Some(format!(
+            "prepare={:.2}µs wal={:.2}µs mem={:.2}µs publish={:.2}µs flsh={:.2}µs lock_wait={:.2}µs n={n}",
+            us(&st.prepare_ns),
+            us(&st.wal_ns),
+            us(&st.mem_ns),
+            us(&st.publish_ns),
+            us(&st.flush_check_ns),
+            us(&st.lock_wait_ns),
+        ))
+    }
     fn flush(&self) -> bool {
         self.db.flush().is_ok()
     }

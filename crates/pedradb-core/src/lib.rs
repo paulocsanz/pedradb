@@ -53,7 +53,7 @@ pub use db::{
     copy_db_directory, read_checkpoint_meta, BatchOp, BlobGcCandidate, CheckpointMeta,
     CompactOptions, Db, DbStats, FenceClass, FenceRecovery, FenceReport, HistoryHorizon,
     HistoryOptions, OpenOptions, PreparedL0Compact, ReadProbeSnap, RecoveryReport, ScanProjection,
-    Snapshot, SnapshotPin, WalRecovery, WriteOptions, CHECKPOINT_META_FILE, L0_COMPACTION_TRIGGER,
+    Snapshot, SnapshotPin, WalRecovery, WriteOptions, WritePhaseStats, CHECKPOINT_META_FILE, L0_COMPACTION_TRIGGER,
     MAX_LSM_LEVEL, WAL_FILE_NAME,
 };
 pub use env::{AdviseKind, Env, EnvFile, StdEnv};

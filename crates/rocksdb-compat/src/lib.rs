@@ -2340,7 +2340,24 @@ impl<E: Env> DB<E> {
         self.inner.write_group_stats()
     }
 
-    /// Toggle default WAL `fdatasync` (G1). Product default is `true`.
+    /// Kernel [`pedradb_core::DbStats`] (mem/SST counters). RFC-0054 probe.
+    #[must_use]
+    pub fn stats(&self) -> pedradb_core::DbStats {
+        self.inner.stats()
+    }
+
+    /// Write-phase timers when `PEDRA_WRITE_PHASE_STATS=1` at open.
+    #[must_use]
+    pub fn write_phase_stats(&self) -> Option<std::sync::Arc<pedradb_core::WritePhaseStats>> {
+        self.inner.write_phase_stats()
+    }
+
+    /// Fold the memtable tail (no SST). See [`pedradb_core::Db::fold_active_tail`].
+    pub fn fold_mem_tail(&self) -> usize {
+        self.inner.fold_mem_tail()
+    }
+
+    /// Toggle default WAL barrier. Drop-in default is false (RFC-0054).
     pub fn set_write_sync(&self, sync: bool) {
         self.inner.set_default_write_sync(sync);
     }
@@ -3121,6 +3138,13 @@ fn compat_compact_once<E: Env>(inner: &ConcurrentDb<E>, gate: &Mutex<()>) -> boo
 mod tests {
     use super::*;
 
+    fn g1_opts() -> Options {
+        let mut o = Options::new();
+        o.create_if_missing(true);
+        o.set_sync(true);
+        o
+    }
+
     /// RFC-0044 P2.2 probe: deps_raftlog shape through the exact bench path
     /// (`write_cf_owned`, async lone-writer). Prints WritePhaseStats so the
     /// per-batch gap vs Rocks has numbers. Run with:
@@ -3560,8 +3584,7 @@ mod tests {
         use pedradb_core::wal::recover_choose::{apply_recover_choice, RecoverChoice};
 
         let dir = tmp("pit-default");
-        let mut opts = Options::new();
-        opts.create_if_missing(true);
+        let opts = g1_opts();
         {
             let db = DB::open(&opts, &dir).unwrap();
             for i in 0..8 {
@@ -3751,8 +3774,7 @@ mod tests {
     #[test]
     fn blob_files_spill_large_value_and_read_back() {
         let dir = tmp("blob-spill");
-        let mut opts = Options::new();
-        opts.create_if_missing(true);
+        let mut opts = g1_opts();
         opts.set_enable_blob_files(true);
         opts.set_min_blob_size(4096);
         let db = DB::open(&opts, &dir).unwrap();
@@ -4114,7 +4136,7 @@ mod tests {
     #[test]
     fn write_owned_moves_values_and_is_durable() {
         let dir = tmp("writeown");
-        let db = DB::open_cf(&Options::new(), &dir, &["write"]).unwrap();
+        let db = DB::open_cf(&g1_opts(), &dir, &["write"]).unwrap();
         let cf = db.cf_handle("write").unwrap();
         let mut wb = WriteBatch::new();
         wb.put_cf(&cf, b"k1", b"payload-one");
@@ -4128,7 +4150,7 @@ mod tests {
         assert_eq!(big.len(), 1024);
         assert!(big.iter().all(|&b| b == 0xcd));
         drop(db);
-        let db = DB::open_cf(&Options::new(), &dir, &["write"]).unwrap();
+        let db = DB::open_cf(&g1_opts(), &dir, &["write"]).unwrap();
         assert_eq!(
             db.get_named("write", b"k1").unwrap().as_deref(),
             Some(b"payload-one".as_ref())
@@ -4333,7 +4355,7 @@ mod tests {
     #[test]
     fn write_cf_owned_moves_values_and_is_durable() {
         let dir = tmp("cfowned");
-        let db = DB::open_cf(&Options::new(), &dir, &["raftlog"]).unwrap();
+        let db = DB::open_cf(&g1_opts(), &dir, &["raftlog"]).unwrap();
         db.write_cf_owned(
             vec![("raftlog", b"raftlog/00000001".to_vec(), vec![0xab; 1024])],
             vec![],
@@ -4346,7 +4368,7 @@ mod tests {
         assert_eq!(got.len(), 1024);
         assert!(got.iter().all(|&b| b == 0xab));
         drop(db);
-        let db = DB::open_cf(&Options::new(), &dir, &["raftlog"]).unwrap();
+        let db = DB::open_cf(&g1_opts(), &dir, &["raftlog"]).unwrap();
         let got = db
             .get_named("raftlog", b"raftlog/00000001")
             .unwrap()
@@ -4358,7 +4380,7 @@ mod tests {
     #[test]
     fn write_cf_slices_is_durable() {
         let dir = tmp("cfslices");
-        let db = DB::open_cf(&Options::new(), &dir, &["raftlog"]).unwrap();
+        let db = DB::open_cf(&g1_opts(), &dir, &["raftlog"]).unwrap();
         db.write_cf_slices(
             &[(
                 "raftlog",
@@ -4375,7 +4397,7 @@ mod tests {
             Some(b"entry".as_ref())
         );
         drop(db);
-        let db = DB::open_cf(&Options::new(), &dir, &["raftlog"]).unwrap();
+        let db = DB::open_cf(&g1_opts(), &dir, &["raftlog"]).unwrap();
         assert_eq!(
             db.get_named("raftlog", b"raftlog/00000001")
                 .unwrap()
@@ -4571,8 +4593,7 @@ mod tests {
     #[test]
     fn create_list_drop_cf() {
         let dir = tmp("cflife");
-        let mut opts = Options::new();
-        opts.create_if_missing(true);
+        let opts = g1_opts();
         let db = DB::open_cf(&opts, &dir, &["cf1"]).unwrap();
         db.create_cf("cf2", &Options::new()).unwrap();
         assert!(db.cf_handle("cf2").is_some());

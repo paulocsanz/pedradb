@@ -1555,6 +1555,16 @@ impl<E: Env> ConcurrentDb<E> {
         self.writes.phase_stats.clone()
     }
 
+    /// Fold the active memtable tail under the write lock (RFC-0054).
+    /// Returns tail length **before** the fold.
+    pub fn fold_mem_tail(&self) -> usize {
+        self.with_write(|db| {
+            let n = db.mem_tail_len();
+            db.fold_active_tail();
+            n
+        })
+    }
+
     /// RFC-0047 P0.2: what a [`crate::db::WalRecovery::PointInTime`] open
     /// discarded (`None` = clean open or FailClosed mode).
     #[must_use]
