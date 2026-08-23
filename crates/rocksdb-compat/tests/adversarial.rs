@@ -43,6 +43,14 @@ fn admit_range_delete(acc: &mut Accept, a: &[u8], b: &[u8], certain: bool) {
     }
 }
 
+/// Adversarial campaigns test **Ok = durable**. Drop-in `Options::sync`
+/// defaults to Rocks-shaped async (RFC-0054); these tests opt into G1.
+fn g1_opts() -> Options {
+    let mut o = Options::new();
+    o.set_sync(true);
+    o
+}
+
 fn tmp(tag: &str, seed: u64) -> std::path::PathBuf {
     let d = std::env::temp_dir().join(format!("rdbcompat-adv-{tag}-{seed}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&d);
@@ -82,7 +90,7 @@ fn run_campaign(seed: u64, kind: Option<FaultKind>, ops: usize) -> (Model, Model
     // Open healthy (from_seed budget would fire during open's own I/O), then arm
     // the fault schedule on the shared Rc state via the env clone.
     let env = FailingEnv::passing();
-    let db = DB::open_cf_with_env(&Options::new(), &dir, &["raft"], env.clone()).expect("open");
+    let db = DB::open_cf_with_env(&g1_opts(), &dir, &["raft"], env.clone()).expect("open");
     let kind = kind.unwrap_or(FaultKind::IoError);
     env.arm_with_kind(FailingEnv::seed_to_fail_after(seed), false, kind);
 
@@ -219,7 +227,7 @@ fn run_campaign(seed: u64, kind: Option<FaultKind>, ops: usize) -> (Model, Model
     // Reopen on a healed env. ShortWrite may leave a torn WAL record; Pedra is
     // fail-closed there (CRC stops open — operator repairs), which is the
     // intended integrity contract, not a regression.
-    let reopened = DB::open_cf_with_env(&Options::new(), &dir, &["raft"], FailingEnv::passing());
+    let reopened = DB::open_cf_with_env(&g1_opts(), &dir, &["raft"], FailingEnv::passing());
     let db2 = match reopened {
         Ok(db) => db,
         Err(e) => {
@@ -309,7 +317,7 @@ fn adversarial_batch_all_or_nothing() {
     for seed in 0..=15u64 {
         let dir = tmp("atomic", seed);
         let env = FailingEnv::passing();
-        let db = DB::open_cf_with_env(&Options::new(), &dir, &[], env.clone()).expect("open");
+        let db = DB::open_cf_with_env(&g1_opts(), &dir, &[], env.clone()).expect("open");
         // Seed base while healthy; fault schedule starts after.
         db.put(b"base", b"0").unwrap();
         // Budget ≥4 so some batches land before the disk dies (tiny budgets
@@ -351,7 +359,7 @@ fn adversarial_iterator_positioning() {
     for seed in 0..=7u64 {
         let dir = tmp("iterpos", seed);
         let env = FailingEnv::passing();
-        let db = DB::open_cf_with_env(&Options::new(), &dir, &[], env.clone()).expect("open");
+        let db = DB::open_cf_with_env(&g1_opts(), &dir, &[], env.clone()).expect("open");
         env.arm_with_kind(
             FailingEnv::seed_to_fail_after(seed),
             false,
@@ -390,7 +398,7 @@ fn compat_resume_reports_uncertain_range() {
 
     let dir = tmp("resume", 0x4747);
     let env = FailingEnv::passing();
-    let db = DB::open_cf_with_env(&Options::new(), &dir, &[], env.clone()).expect("open");
+    let db = DB::open_cf_with_env(&g1_opts(), &dir, &[], env.clone()).expect("open");
     db.put(b"a", b"1").expect("put");
     // One-shot failure on the next file write = the WAL frame write.
     env.arm_op_class(OpClass::Write, 0, true, FaultKind::IoError);
@@ -429,7 +437,7 @@ fn compat_auto_resume_transient_only() {
     // (a) ENOSPC write failure → Transient → auto tick resumes.
     let dir = tmp("resume-eno", 0x4748);
     let env = FailingEnv::passing();
-    let db = DB::open_cf_with_env(&Options::new(), &dir, &[], env.clone()).expect("open");
+    let db = DB::open_cf_with_env(&g1_opts(), &dir, &[], env.clone()).expect("open");
     db.put(b"a", b"1").expect("put");
     env.arm_op_class(OpClass::Write, 0, true, FaultKind::StorageFull);
     assert!(db.put(b"b", b"2").is_err(), "ENOSPC write failure fences");
@@ -448,7 +456,7 @@ fn compat_auto_resume_transient_only() {
     // manual `resume()` still works.
     let dir = tmp("resume-io", 0x4749);
     let env = FailingEnv::passing();
-    let db = DB::open_cf_with_env(&Options::new(), &dir, &[], env.clone()).expect("open");
+    let db = DB::open_cf_with_env(&g1_opts(), &dir, &[], env.clone()).expect("open");
     db.put(b"a", b"1").expect("put");
     env.arm_op_class(OpClass::Write, 0, true, FaultKind::IoError);
     assert!(db.put(b"b", b"2").is_err(), "write failure fences");

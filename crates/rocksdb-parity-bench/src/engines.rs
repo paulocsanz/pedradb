@@ -6,8 +6,9 @@
 use crate::{CfWrite, Engine, OccEngine, OccTxn, DEPS_CFS};
 use std::path::Path;
 
-/// rocksdb-compat on pedradb-core (always available). Single node, single
-/// client; WAL `fdatasync` before Ok (RFC-0001 / RFC-0036).
+/// rocksdb-compat on pedradb-core (always available). Single node.
+/// Drop-in default is Rocks-shaped async WAL (RFC-0054); `set_sync(true)`
+/// is G1 (`F_FULLFSYNC` on Darwin).
 pub struct CompatEngine {
     db: rocksdb_compat::DB,
 }
@@ -27,7 +28,8 @@ impl CompatEngine {
             .ok()
             .and_then(|v| v.parse::<u64>().ok())
             .unwrap_or(256 * 1024 * 1024) as usize;
-        // Bench-only same-class column. Product default remains G1 (fsync).
+        // Drop-in default is already Rocks-shaped async (RFC-0054). This
+        // env remains the explicit same-class column (no-op if already false).
         if std::env::var("PEDRA_PARITY_ASYNC").as_deref() == Ok("1") {
             opts.set_sync(false);
         }

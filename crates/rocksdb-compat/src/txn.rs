@@ -29,11 +29,14 @@ use pedradb_io_uring::IoUringEnv;
 use std::ops::{Bound, Deref};
 use std::path::Path;
 
-/// rust-rocksdb `WriteOptions` subset. Pedra still `fdatasync`s before Ok
-/// (G1); `sync` is accepted so SurrealDB's `set_sync(false)` compiles.
+/// rust-rocksdb `WriteOptions` subset. Durability follows the DB
+/// [`super::Options::sync`] (drop-in default false, RFC-0054). `sync` is
+/// accepted so SurrealDB's `set_sync(false)` compiles; it does not override
+/// the DB flag (kernel `WriteOptions` on `OccTransaction::commit_with` does).
 #[derive(Debug, Clone, Default)]
 pub struct WriteOptions {
-    /// Rocks `WriteOptions.sync`. Ignored: Pedra G1 always syncs.
+    /// Rocks `WriteOptions.sync`. Accepted, not applied — commit uses the
+    /// DB default (`Options::sync`).
     pub sync: bool,
 }
 
@@ -372,7 +375,7 @@ impl<'a, E: Env> Transaction<'a, E> {
         Ok(())
     }
 
-    /// Validate OCC and commit (one WAL record; G1 fdatasync).
+    /// Validate OCC and commit (one WAL record; durability = DB `Options::sync`).
     ///
     /// # Errors
     /// `Busy` (write conflict), snapshot-too-old, or WAL I/O.

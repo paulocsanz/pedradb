@@ -12,9 +12,10 @@
 `pedradb-core::ConcurrentDb`:
 
 - **Writes** join the Rocks-style write group (one leader: appends + one
-  `fdatasync` + apply). A lone client takes the single-writer fast path
-  (`apply_batch_with`, no channel hop) so sequential benches stay on the
-  same fsync-before-Ok cost as `Db::put`.
+  barrier if any member asked for sync + apply). Drop-in default is
+  **async** (RFC-0054). A lone client takes the single-writer fast path
+  (`apply_batch_with`, no channel hop). `set_sync(true)` is G1
+  (`F_FULLFSYNC` on Darwin).
 - **Reads** take `RwLock` read guards (point get, prefix latest, count,
   iterator refill). Composite reads (`last_prefix_then_get`, `count_cf`)
   stay under one guard.
@@ -102,6 +103,36 @@ differences are **how** Pedra stores bytes, not missing names:
 
 TiKV-as-a-product still needs a raftstore integration (not an extra `pub fn`). **Do not** claim a running TiKV cluster from the API table alone.
 
+## Kernel vs drop-in (two APIs, two defaults)
+
+| | Kernel `pedradb_core::Db` | Drop-in `rocksdb-compat::DB` |
+|---|---|---|
+| Type | `&mut self` single-writer | **`ConcurrentDb` always** (group commit + lone fast path) |
+| `sync` default | **true** (G1) | **false** (Rocks-shaped, RFC-0054) |
+| Darwin barrier when `sync=true` | `F_FULLFSYNC` (`wal_full_fsync=true`) | same — the flag is on; it only fires if the host opts into G1 |
+| WAL recovery | FailClosed | PointInTime |
+| Version GC | 24 h horizon + archive | `auto_reclaim=true` (Rocks compact-GC) |
+| Memtable flush | 4 MiB | 4 MiB (see below) |
+
+A program that `use rocksdb::…` through the alias hits the **drop-in** column.
+`Db::open` / Montanha / CLI hit the **kernel**. Mixing the two defaults is how
+"why is my put 4 ms on a Mac" happens: that process called `set_sync(true)`
+(or used the kernel) and paid `F_FULLFSYNC`. The drop-in default does not.
+
+### Memtable: 4 MiB vs 64 MiB vs 256 MiB
+
+Three numbers, three jobs — they do **not** leak into each other:
+
+| Where | Size | Why |
+|---|---|---|
+| Drop-in / kernel **product default** | **4 MiB** | Isolated apply (2000× pre+com): 4 MiB + drain **2251 qps** vs Rocks-shaped 64 MiB drain **1228** — one 64 MiB SST at the end lost apply (RFC-0041, `apply_flush_probe`). |
+| Rocks **engine default** | 64 MiB | Their knob. |
+| **Official parity bench** | **256 MiB** (`CompatEngine::open`, override `ROCKS_PARITY_COMPAT_MEMTABLE`) | Bigger than any timed suite's write volume so auto-flush does **not** run in the measured window. 4 MiB flushed ~25× during `set_mc50` and poisoned the ratio. |
+
+Official numbers are therefore **flush-free**. Shipping 4 MiB in the drop-in is
+a production apply win, not a silent bench cheat. A host that wants Rocks'
+64 MiB calls `set_write_buffer_size(64 << 20)`.
+
 ## Knob map: RocksDB → compat behavior (RFC-0047 P2.1)
 
 The drop-in contract is not just the API table above — the *operational*
@@ -110,14 +141,14 @@ the compat face. Divergences are deliberate and listed, not accidental.
 
 | RocksDB | Compat | Behavior / divergence |
 |---|---|---|
-| `WriteOptions::sync` (default `false`) | `Options::sync` (default **`true`**) | **Divergence (the product):** the drop-in `fdatasync`s before Ok — more durable *and* faster than the Rocks default people run. `set_sync(false)` gives the exact async-WAL shape. |
+| `WriteOptions::sync` (default `false`) | `Options::sync` (default **`false`**, RFC-0054) | **Same class as Rocks default.** `set_sync(true)` is G1 (barrier before Ok; Darwin `F_FULLFSYNC` via `wal_full_fsync=true`). Kernel `OpenOptions.sync` stays `true` — Pedra-the-engine is still durable-by-default. |
 | Compaction GCs unpinned obsolete versions | `Options::auto_reclaim` (default **`true`**, RFC-0047 P0.3) | Same storage profile: disk ≈ live set + pins. `false` opts into Pedra F20 full history (PITR) — an option Rocks does not have. |
 | `WalRecoveryMode::PointInTimeRecovery` (default) | `Options::wal_recovery = PointInTime` (default) | Serves the clean prefix; the discarded suffix is **reported** (`DB::last_recovery_report`), never guessed. Kernel default stays `FailClosed`. |
 | `kAbsoluteConsistency` / `kSkipAnyCorruptedRecords` | `FailClosed` / — | `FailClosed` refuses the open on mid-WAL damage. Skip-any is **absent on purpose**: silent-wrong is banned (G2). |
 | `DB::Resume()` after a background error | `DB::resume()` (RFC-0047 P1.1) | Close+replay+reopen, typed outcome on `DB::last_fence_recovery` (`uncertain_from..=uncertain_through`, `lost_writes`). `Ok(())` when nothing was fenced (defensive resume). |
 | Rocks auto-retries soft/retryable bg errors | `Options::auto_resume_transient` (default **`true`**, P1.2) | Auto-resume **only** for `FenceClass::Transient` (ENOSPC-like); `Persistent`/`Unknown` stay manual — never an untyped retry flag. |
 | `EventListener::on_background_error(reason)` | `Options::set_background_error_listener` (P2.1) | Fired once per fence within one worker poll tick, before auto-resume. Payload `BackgroundError { kind: Fenced, class, message }`; `reason` severity maps to `class` (Transient ≈ retryable/soft, rest ≈ hard). Default off. |
-| `flush_wal(true)` | no-op `Ok(())` | Pedra already `fdatasync`s before Ok (G1) — there is nothing extra to flush. |
+| `flush_wal(true)` | `DB::sync` when `sync=true` | With drop-in default async, `flush_wal(true)` **is** the durability barrier (F193). With `set_sync(true)` the WAL already synced at Ok. |
 | `enable_blob_files` + `min_blob_size` (Rocks default **off**) | `Options::set_enable_blob_files` / `set_min_blob_size` | Wired to `OpenOptions.large_value_threshold` (`VALUES.vlog`). Default **off** on the drop-in (Rocks). The parity harness enables 4 KiB so `kvrocks_blob_set` (16 KiB) spills; 1 KiB SET stays inline. `set_blob_file_size` is numbered-blob rotate (Titan); default off. G1 fsyncs the vlog **once per commit** before the WAL pointer is durable; async `write()`s at 64 KiB, no `fdatasync` (same class as WAL). |
 
 Every other `set_*` builder (`set_use_fsync`, `increase_parallelism`,
@@ -132,14 +163,15 @@ FDB suite (plus the `deps` suite above) through **one generic runner** with
 two engine adapters, so the op schedule (rng seed, zipf CDF,
 read/insert/scan/RMW mix) cannot drift between engines:
 
-- `compat` — `rocksdb-compat` on pedradb-core (single node, single client,
-  WAL fsync before Ok).
+- `compat` — `rocksdb-compat` on pedradb-core (`ConcurrentDb`). Drop-in
+  default is async WAL (RFC-0054). Official batteries pin `PEDRA_PARITY_ASYNC=1`
+  / `set_write_sync(false)` so the column is same-class vs the peer.
 - `rocksdb` — real RocksDB via the `rocksdb` crate (feature `real`, matching
   the `pedradb-oracle` pin 0.22 / librocksdb-sys 8.10). **Official peer =
-  Rocks default** (`WriteOptions.sync=false`, `ROCKS_PARITY_SYNC=0`). Pedra
-  still `fdatasync`s before Ok. That is the point: more durability **and**
-  beat default Rocks. `ROCKS_PARITY_SYNC=1` is an extra same-class column,
-  never the win condition.
+  Rocks default** (`WriteOptions.sync=false`, `ROCKS_PARITY_SYNC=0`).
+  `ROCKS_PARITY_SYNC=1` is an extra same-class-with-G1 column, never the
+  win condition. Kernel Pedra (`Db` / `OpenOptions.sync=true`) is still
+  durable-by-default — that is a different API than this drop-in.
 
 **Retention pin (RFC-0047 P0.3):** the compat drop-in now defaults to the
 Rocks storage profile (`auto_reclaim=true` — auto-compact GCs unpinned

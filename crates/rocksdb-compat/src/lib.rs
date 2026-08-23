@@ -192,8 +192,11 @@ pub struct Options {
     /// drain **1228** (one 64 MiB SST write at the end). 64 MiB matched Rocks
     /// `write_buffer_size` and lost apply (RFC-0041).
     pub write_buffer_size: usize,
-    /// Pedra WAL `fdatasync` before Ok (G1). Default `true` (product).
-    /// `false` is Rocks-shaped async WAL — bench-only same-class column.
+    /// WAL barrier before Ok. Default **`false`** (RFC-0054): the drop-in
+    /// matches Rocks `WriteOptions.sync=false` — the class people actually
+    /// run. `true` is G1 (Pedra kernel contract): barrier before Ok, and on
+    /// Darwin that barrier is `F_FULLFSYNC` when [`Self::wal_full_fsync`]
+    /// is on (the default). Kernel `OpenOptions.sync` stays `true`.
     pub sync: bool,
     /// Version GC on auto-compact (Pedra `auto_reclaim`): drops versions
     /// older than the oldest open snapshot pin, like RocksDB compaction
@@ -286,7 +289,7 @@ impl Default for Options {
         Self {
             create_if_missing: false,
             write_buffer_size: 4 * 1024 * 1024,
-            sync: true,
+            sync: false,
             auto_reclaim: true,
             auto_resume_transient: true,
             background_error_listener: None,
@@ -360,7 +363,8 @@ impl Options {
         self
     }
 
-    /// WAL `fdatasync` before Ok. Default `true` (G1). `false` = Rocks async.
+    /// WAL barrier before Ok. Default `false` (Rocks-shaped). `true` = G1
+    /// (and `F_FULLFSYNC` on Darwin when [`Self::wal_full_fsync`] is on).
     pub fn set_sync(&mut self, v: bool) -> &mut Self {
         self.sync = v;
         self
@@ -2141,8 +2145,9 @@ impl<E: Env> DB<E> {
 
     /// rust-rocksdb `OptimisticTransactionDB::transaction` shape (RFC-0043 P2.4).
     /// Pedra [`pedradb_core::OccTransaction`]: snapshot isolation + write-set
-    /// conflict at commit. Always `fdatasync`s before Ok (G1); `WriteOptions.sync`
-    /// is accepted and ignored (SurrealDB sets `sync=false` on the txn).
+    /// conflict at commit. Durability follows [`Options::sync`] (drop-in
+    /// default false, RFC-0054). Per-txn `WriteOptions.sync` is accepted
+    /// and ignored (SurrealDB sets `sync=false` on the txn).
     #[must_use]
     pub fn transaction(&self) -> Transaction<'_, E> {
         Transaction::new(self)
@@ -3657,6 +3662,23 @@ mod tests {
             default_size < written_bytes / 2,
             "default retention must bound disk near the live set ({default_size}B for {live_set_bytes}B live)"
         );
+    }
+
+    #[test]
+    fn dropin_default_sync_matches_rocks() {
+        // RFC-0054: the drop-in WAL class is Rocks default (async). G1 is
+        // `set_sync(true)`. Kernel `OpenOptions.sync` stays true.
+        assert!(
+            !Options::default().sync,
+            "drop-in default must match WriteOptions.sync=false"
+        );
+        assert!(
+            Options::default().wal_full_fsync,
+            "when a host does set_sync(true), Darwin must still be F_FULLFSYNC"
+        );
+        let mut on = Options::new();
+        on.set_sync(true);
+        assert!(on.sync);
     }
 
     #[test]
