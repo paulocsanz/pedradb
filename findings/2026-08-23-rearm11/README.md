@@ -93,3 +93,23 @@ de regressão (raftlog/lock em pernas limpas) roda em
 - **P1.2** blob_set — re-medir em disco quieto; shape de banda simétrica
 - raftlog: 2/3 ≥1 aqui com miss atribuído a stall (p50 idêntico); recorde
   oficial 3/3 permanece rearm10; sondas pack32 mostram leitura mais rápida
+
+## Re-confirmação (`../2026-08-23-rearm11-reconfirm/`)
+
+Armada 20:35:02 em load 7,33; a sessão paralela subiu o load para 10,4–11,3
+no meio (loads.txt). A rodada **r1, inteira em load 7,33**, passa todos os
+guardas: apply **2,199**, mvcc 2,738, raftlog **1,066 (≥1)**, lock
+**2,286 (≥2)**, scan 1,835 — nenhuma regressão das formas fechadas com as
+mudanças do P1.4. r2/r3 documentam a interferência de novo (raftlog r2
+0,783 com max 5,3 ms; lock r3 0,630 com p50 0,0363 e max 6,2 ms; blob r3
+6,7 k qps — disco). Registros oficiais seguem sendo os desta bateria (r1–r3
+da seção acima) + rearm10 para raftlog 3/3.
+
+## Nota de escala (não-oficial)
+
+Curva da fase `mem` (phasesΔ por commit) conforme a memtable cresce além
+da escala oficial (deps para em ~256k entradas): 13,5 µs (oficial) →
+18,2 µs (25,6M entradas, 200k ops) → 24,9 µs (128M, 1M ops). Micro
+`mem_insert_apply_micro` confirma: 26 µs/op (2,56M entradas) → 59,8 µs
+(192M). 500× mais entradas ≈ 1,8× mais lento por commit — descida
+logarítmica do índice, sem degradação súbita. Não afeta P1.4.

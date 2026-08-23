@@ -1,0 +1,13 @@
+20:29:32 gate pid=49365 load1=17.94 (consecutive 0/2)
+20:30:02 gate pid=49365 load1=15.96 (consecutive 0/2)
+20:30:32 gate pid=49365 load1=14.00 (consecutive 0/2)
+20:31:02 gate pid=49365 load1=15.87 (consecutive 0/2)
+20:31:32 gate pid=49365 load1=13.46 (consecutive 0/2)
+20:32:02 gate pid=49365 load1=13.74 (consecutive 0/2)
+20:32:32 gate pid=49365 load1=14.15 (consecutive 0/2)
+20:33:02 gate pid=49365 load1=16.19 (consecutive 0/2)
+20:33:32 gate pid=49365 load1=15.35 (consecutive 0/2)
+20:34:02 gate pid=49365 load1=11.50 (consecutive 0/2)
+20:34:32 gate pid=49365 load1=8.95 (consecutive 1/2)
+20:35:02 gate pid=49365 load1=7.33 (consecutive 2/2)
+20:35:02 maxpoll load1=7.33
