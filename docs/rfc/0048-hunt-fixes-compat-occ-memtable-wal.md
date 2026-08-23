@@ -125,13 +125,20 @@
 - [x] **W9.2** core: `verify_checksums` fail-open com table_cache quente (backlog #3 REENQUADRADO — furo mais largo que o veneno-por-undo especulado) — o verify resolve cada SST vivo via `table_cache.get_or_open` e TODA via que instala tabela primeia o cache no momento da instalação (flush `apply_l0_install`, compact, blob rewrite, vlog GC, L0 compact): em qualquer processo vivo que já escreveu o "re-open" é sempre HIT e serve os bytes decodificados em memória — o disco nunca é relido e bitrot in-process em arquivo vivo responde Ok (contrato documentado: "detect bitrot before relying on reads"); o in-tree 9475 só cobre caminho frio porque fecha+reabre antes do verify — F217, `SstTable::open_on` direto (relê disco, CRC32C do trailer F3); k41 RED (Ok com bitrot) → GREEN (Err) + k41ctl (close→flip→reopen fecha o oráculo: fail-closed no open) + cause-check; assert in-tree "second verify should hit table cache" invertido em guarda (`hits()==0`) — status: `done`
 - Nota de numeração: F215 pertence à sessão paralela (capi marshalling);
   os desta wave são F216/F217 (sequência única do LEDGER).
+- Backlog #6 (`decode_block` fail-open) **REFUTADO** como bug de disco
+  (F218 dead-end): o open valida TODOS os blocos (`decoded_n != n`) —
+  corrupção de disco fail-close no open mesmo com CRC do arquivo
+  recomputado; guardas `k42_defense_open_validates_all_blocks` (stride
+  corruption + CRC recompute → open Err) + `k42_control_bitrot_caught_by_
+  file_crc` verdes nos dois lados; residual = payload corrompido em RAM
+  (hardening P2: CRC por bloco).
 - Nota de bateria: no HEAD main atual (DurabilityFenced, sessão paralela)
   quebram por conta deles, com meus hunks desligados: k8 (guarda wave 1)
   + 2 testes compat — pendência repassada, não regressão deste RFC.
 - Backlog restante: #1 (feed reopen last-per-key × "Full WAL history",
   decidir spec), #5 (`try_scan_at` hard-fail vs `get_at` tier, spec
-  RFC-0046 P2.1), #6 (decode_block fail-open, confirmar alcance), #7
-  (remote AlreadyPresent len+crc, LOW).
+  RFC-0046 P2.1), #7 (remote AlreadyPresent len+crc, LOW); #6 refutado
+  (F218, guardas k42/k42ctl).
 
 - Refutados na onda (dead ends com análise): fadvise overflow→"até EOF" (equivalente ao clampe; único caller passa u32), trunc `as u32` em write >4 GiB (escrita parcial é contrato de `Write`), EINTR no fdatasync (propagar Err é correto); tx/occ: skip de commit com `last_sequence()==snap` defendido pela write lock.
 
@@ -193,7 +200,7 @@
 
 ## Acceptance Criteria
 
-- **Tests:** `pedradb-core --lib` (398 passando — incluindo `point_in_time_reports_resync_reanchor`, `zero_header_journals_and_pit_reports`, `torn_tail_*`, theorem do recover kernel, sweep `explode` com os kinds novos e a simetria de blocos), `pedradb-io-uring` (env + `cqe_kernel` U1 as-is vs unique), `rocksdb-compat` (47+3 dos guardas), harness `compat_hunt` (**21**, c1..c14 + controles) + `core_hunt` (**68**, k1..k41 + controles + diferencial k22; k39 é defesa/controle do backlog refutado #2; k40/k41 da W9) + oracle `wal_crc_flip_is_fail_stop_or_clean` — verdes com os fixes; os de hunt falham sem eles (F196–F198, F200–F207, F211–F213, F216–F217 demonstrados RED→GREEN; F199/F203 guardas/fixes condicionados a host Linux conforme fichas). Exceção pendente na sessão paralela (não deste RFC): k8 + 2 testes compat quebram no HEAD main atual (`DurabilityFenced`) mesmo com os hunks deste RFC desligados.
+- **Tests:** `pedradb-core --lib` (398 passando — incluindo `point_in_time_reports_resync_reanchor`, `zero_header_journals_and_pit_reports`, `torn_tail_*`, theorem do recover kernel, sweep `explode` com os kinds novos e a simetria de blocos), `pedradb-io-uring` (env + `cqe_kernel` U1 as-is vs unique), `rocksdb-compat` (47+3 dos guardas), harness `compat_hunt` (**21**, c1..c14 + controles) + `core_hunt` (**70**, k1..k42 + controles + diferencial k22; k39 defesa do backlog refutado #2, k40/k41 da W9, k42/k42ctl defesa do backlog refutado #6) + oracle `wal_crc_flip_is_fail_stop_or_clean` — verdes com os fixes; os de hunt falham sem eles (F196–F198, F200–F207, F211–F213, F216–F217 demonstrados RED→GREEN; F199/F203 guardas/fixes condicionados a host Linux conforme fichas). Exceção pendente na sessão paralela (não deste RFC): k8 + 2 testes compat quebram no HEAD main atual (`DurabilityFenced`) mesmo com os hunks deste RFC desligados.
 - **Telemetry / Analytics:** none — correção de corretude; o `CORRUPTLOG` (RFC-0038) recebe eventos `resync` e `zero_header` (P1.2).
 - **Documentation:** este RFC + fichas F165–F213 em `determinismo/pedradb-dst/findings/` (+ dead ends F189/sst/io-uring registrados) + LEDGER do hunt 2026-08-21/22/23 (waves 1–7 + backlog wave 8) + patches `core-hunt-20260822.patch` (waves 1–3), `core-hunt-20260822-wave4.patch` (delta da wave 4), `core-hunt-20260822-wave5.patch` (delta da wave 5) e `core-hunt-20260822-wave6.patch` (delta da wave 6) e `core-hunt-20260822-wave7.patch` (delta da wave 7: F207/F211/F212/F213, 6 hunks, apply/reverse-apply verificados).
 - **Screenshots:** backend-only.
