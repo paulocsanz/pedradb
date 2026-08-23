@@ -20,6 +20,11 @@ pub struct WalWriter<W> {
     out: W,
     /// Bytes consumed within the current 32 KiB block.
     block_offset: usize,
+    /// Byte offset of the next write (anchored at construction; advanced by
+    /// every successful sink write). Pure in-memory state — querying the
+    /// sink mid-commit would `flush`, which fault-injection envs classify
+    /// as a Write op and which is a syscall on the hot path.
+    position: u64,
     /// Reused framing buffer (RFC-0040: no per-record malloc of the payload).
     frame: Vec<u8>,
 }
@@ -44,6 +49,7 @@ impl<W: Write + Seek> WalWriter<W> {
         Ok(Self {
             out,
             block_offset: pos % BLOCK_SIZE,
+            position: raw_pos,
             frame: Vec::new(),
         })
     }
@@ -62,6 +68,7 @@ impl<W: Write + Seek> WalWriter<W> {
         frame.reserve(data.len() + 2 * HEADER_SIZE);
         self.fragment_into(data, &mut frame);
         self.out.write_all(&frame)?;
+        self.position = self.position.saturating_add(frame.len() as u64);
         // Do not leave the just-written bytes in `frame` — `Wal::sync_data`
         // drains staged frames from `encode_write_op_batches`. Re-emitting
         // this buffer would duplicate the record (same seq) on recover.
@@ -89,6 +96,7 @@ impl<W: Write + Seek> WalWriter<W> {
             self.fragment_into(data, &mut frame);
         }
         self.out.write_all(&frame)?;
+        self.position = self.position.saturating_add(frame.len() as u64);
         frame.clear();
         self.frame = frame;
         Ok(())
@@ -135,8 +143,15 @@ impl<W: Write + Seek> WalWriter<W> {
     pub(crate) fn write_frame(&mut self, buf: &[u8]) -> Result<()> {
         if !buf.is_empty() {
             self.out.write_all(buf)?;
+            self.position = self.position.saturating_add(buf.len() as u64);
         }
         Ok(())
+    }
+
+    /// Byte offset of the next write (in-memory; no sink I/O).
+    #[must_use]
+    pub fn position(&self) -> u64 {
+        self.position
     }
 
     /// Fragmentation state machine shared by [`Self::add_record`] (direct

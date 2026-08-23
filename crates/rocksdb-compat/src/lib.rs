@@ -2533,6 +2533,106 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
     }
 
+    // Tail probe: per-batch wall + WritePhaseStats deltas for the slowest
+    // batches — attributes the once-per-leg multi-ms stall to a phase (a
+    // large residual means the stall is outside the measured phases).
+    #[test]
+    #[ignore]
+    fn raftlog_tail_probe() {
+        std::env::set_var("PEDRA_WRITE_PHASE_STATS", "1");
+        let d = tmp("raftlog_tail");
+        let mut opts = Options::new();
+        opts.create_if_missing(true);
+        // Match the bench engine config: no auto-flush inside the window.
+        opts.set_write_buffer_size(256 * 1024 * 1024);
+        let db = DB::open_cf(&opts, &d, &["raftlog"]).unwrap();
+        db.inner.set_default_write_sync(false);
+        let per_batch: usize = std::env::var("RAFTLOG_TAIL_BATCH")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(16);
+        let batches: usize = std::env::var("RAFTLOG_TAIL_N")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(2000);
+        let stats = db
+            .inner
+            .write_phase_stats()
+            .expect("PEDRA_WRITE_PHASE_STATS=1");
+        let rd = |v: &std::sync::atomic::AtomicU64| v.load(std::sync::atomic::Ordering::Relaxed);
+        let mut idx = 0u64;
+        let val = vec![b'r'; 100];
+        // (batch, wall_ns, prepare, wal, mem, publish, flush_chk, lock_wait)
+        let mut recs: Vec<(usize, u128, u64, u64, u64, u64, u64, u64)> =
+            Vec::with_capacity(batches);
+        for i in 0..batches {
+            let mut puts = Vec::with_capacity(per_batch);
+            for _ in 0..per_batch {
+                idx += 1;
+                puts.push(("raftlog", format!("raftlog/{idx:08}").into_bytes(), val.clone()));
+            }
+            let before = (
+                rd(&stats.prepare_ns),
+                rd(&stats.wal_ns),
+                rd(&stats.mem_ns),
+                rd(&stats.publish_ns),
+                rd(&stats.flush_check_ns),
+                rd(&stats.lock_wait_ns),
+            );
+            let t0 = std::time::Instant::now();
+            db.write_cf_owned(puts, Vec::new()).unwrap();
+            let wall = t0.elapsed().as_nanos();
+            let after = (
+                rd(&stats.prepare_ns),
+                rd(&stats.wal_ns),
+                rd(&stats.mem_ns),
+                rd(&stats.publish_ns),
+                rd(&stats.flush_check_ns),
+                rd(&stats.lock_wait_ns),
+            );
+            recs.push((
+                i,
+                wall,
+                after.0 - before.0,
+                after.1 - before.1,
+                after.2 - before.2,
+                after.3 - before.3,
+                after.4 - before.4,
+                after.5 - before.5,
+            ));
+        }
+        let mut walls: Vec<u128> = recs.iter().map(|r| r.1).collect();
+        walls.sort_unstable();
+        let q = |p: f64| walls[((walls.len() as f64 - 1.0) * p) as usize];
+        println!(
+            "raftlog tail probe: {batches} x {per_batch}: wall p50={:.1}µs p95={:.1}µs p99={:.1}µs max={:.1}µs",
+            q(0.50) as f64 / 1000.0,
+            q(0.95) as f64 / 1000.0,
+            q(0.99) as f64 / 1000.0,
+            *walls.last().unwrap() as f64 / 1000.0
+        );
+        println!("  idx   wall_ms  prepare  wal_ms   mem  publish flsh_chk lock_wt  residual_ms");
+        let mut slow = recs.clone();
+        slow.sort_unstable_by_key(|r| std::cmp::Reverse(r.1));
+        for r in slow.iter().take(10) {
+            let phases = r.2 + r.3 + r.4 + r.5 + r.6 + r.7;
+            let residual = (r.1.saturating_sub(phases as u128)) as f64 / 1e6;
+            println!(
+                "  {:>4}  {:>7.2}  {:>6.2}µs {:>6.2}  {:>6.2}µs {:>5.2}µs {:>5.2}µs {:>6.2}µs {:>9.2}",
+                r.0,
+                r.1 as f64 / 1e6,
+                r.2 as f64 / 1000.0,
+                r.3 as f64 / 1e6,
+                r.4 as f64 / 1000.0,
+                r.5 as f64 / 1000.0,
+                r.6 as f64 / 1000.0,
+                r.7 as f64 / 1000.0,
+                residual
+            );
+        }
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
     fn tmp(tag: &str) -> std::path::PathBuf {
         use std::sync::atomic::{AtomicU64, Ordering};
         static N: AtomicU64 = AtomicU64::new(0);

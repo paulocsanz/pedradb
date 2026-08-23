@@ -28,6 +28,16 @@ pub mod writer;
 pub use reader::WalReader;
 pub use writer::WalWriter;
 
+/// Space reservation chunk for a WAL segment (macOS `F_PREALLOCATE`).
+///
+/// APFS assigns a fresh extent when a plain append crosses an ~8 MiB
+/// boundary; that `write(2)` blocks 10–50 ms inside the commit path
+/// (`findings/2026-08-22-rearm7/`). Segments reserve this much storage past
+/// physical EOF up front (lazily, on first write) and re-reserve as the
+/// segment grows, so every append lands in already-allocated space. RocksDB
+/// preallocates its WAL the same way.
+const WAL_PREALLOC_CHUNK: u64 = 8 * 1024 * 1024;
+
 /// High-level, file-backed WAL with real durability semantics.
 ///
 /// Wraps a [`WalWriter`] over an [`EnvFile`] and exposes `sync_all`/`sync_data`
@@ -37,6 +47,10 @@ pub struct Wal<F: EnvFile = <StdEnv as Env>::File> {
     writer: WalWriter<F>,
     /// Reused logical-record encode buffer (RFC-0040).
     logical: Vec<u8>,
+    /// Logical offset believed covered by space reservation. 0 = nothing
+    /// reserved yet ([`WAL_PREALLOC_CHUNK`] semantics; best-effort — an env
+    /// without support no-ops and the segment simply appends plain).
+    prealloc_to: u64,
 }
 
 impl Wal<<StdEnv as Env>::File> {
@@ -83,6 +97,7 @@ impl<F: EnvFile> Wal<F> {
         Ok(Self {
             writer: WalWriter::new(file)?,
             logical: Vec::new(),
+            prealloc_to: 0,
         })
     }
 
@@ -95,6 +110,7 @@ impl<F: EnvFile> Wal<F> {
         Ok(Self {
             writer: WalWriter::new(file)?,
             logical: Vec::new(),
+            prealloc_to: 0,
         })
     }
 
@@ -104,6 +120,7 @@ impl<F: EnvFile> Wal<F> {
     /// # Errors
     /// Returns [`std::io::Error`] propagated from the underlying file.
     pub fn append_record(&mut self, data: &[u8]) -> Result<()> {
+        self.reserve_space(data.len() as u64 + 2 * format::HEADER_SIZE as u64);
         self.writer.add_record(data)
     }
 
@@ -115,6 +132,7 @@ impl<F: EnvFile> Wal<F> {
         self.logical.clear();
         crate::batch::encode_ops(ops, &mut self.logical);
         let n = self.logical.len() as u64;
+        self.reserve_space(n + 2 * format::HEADER_SIZE as u64);
         self.writer.add_record(&self.logical)?;
         Ok(n)
     }
@@ -127,6 +145,8 @@ impl<F: EnvFile> Wal<F> {
     /// # Errors
     /// Returns [`std::io::Error`] propagated from the underlying file.
     pub fn append_records(&mut self, datas: &[&[u8]]) -> Result<()> {
+        let n: u64 = datas.iter().map(|d| d.len() as u64).sum();
+        self.reserve_space(n + 2 * format::HEADER_SIZE as u64);
         self.writer.add_records(datas)
     }
 
@@ -188,10 +208,31 @@ impl<F: EnvFile> Wal<F> {
             self.writer.restore_frame(frame);
             return Ok(());
         }
+        self.reserve_space(frame.len() as u64);
         let r = self.writer.write_frame(&frame);
         frame.clear();
         self.writer.restore_frame(frame);
         r
+    }
+
+    /// Keep [`WAL_PREALLOC_CHUNK`] of storage reserved ahead of the append
+    /// point. Best-effort: on an env without support (or a failed
+    /// reservation) the segment appends plain and the frontier stays put —
+    /// the next write just retries.
+    fn reserve_space(&mut self, upcoming: u64) {
+        let pos = self.writer.position();
+        // Bytes below `pos` are written (allocated); anchor the frontier
+        // there so a recovered segment never over-reserves.
+        self.prealloc_to = self.prealloc_to.max(pos);
+        let need = pos.saturating_add(upcoming).saturating_add(WAL_PREALLOC_CHUNK);
+        while self.prealloc_to < need {
+            // `F_PEOFPOSMODE` allocates past physical EOF; the invariant
+            // physEOF ≥ prealloc_to makes each call cover exactly one chunk.
+            if self.writer.inner_mut().preallocate(WAL_PREALLOC_CHUNK).is_err() {
+                break;
+            }
+            self.prealloc_to = self.prealloc_to.saturating_add(WAL_PREALLOC_CHUNK);
+        }
     }
 
     /// Flush + `fdatasync` (sync data only).
@@ -308,6 +349,39 @@ impl<F: EnvFile> Wal<F> {
 #[cfg(test)]
 mod probe_tests {
     use super::*;
+
+    #[test]
+    fn prealloc_keeps_logical_size_and_recovers() {
+        let dir = std::env::temp_dir().join(format!("wal-prealloc-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("wal.log");
+
+        // Cross the async buffer several times so `reserve_space` runs and
+        // the file grows past one 64 KiB frame flush.
+        let val = bytes::Bytes::from(vec![b'p'; 1024]);
+        let mut ops: Vec<crate::batch::WriteOp> = Vec::new();
+        for i in 1..=1024u64 {
+            ops.push(crate::batch::WriteOp::put(i, format!("k/{i:06}"), val.clone()));
+        }
+        let mut w = Wal::create(&path).unwrap();
+        for _ in 0..8 {
+            w.append_write_ops(&ops).unwrap();
+            w.write_pending_frame_if(true).unwrap();
+        }
+        let append_end = w.stream_position().unwrap();
+        drop(w);
+        // Reservation covers physical space only: the logical size must
+        // stay at the append point (readers never see reserved zeros).
+        assert_eq!(StdEnv.metadata_len(&path).unwrap(), append_end);
+
+        // Crash-shaped reopen: recover exactly the appended records;
+        // last-good offset == append point == file size.
+        let (recs, end, _) = Wal::recover_span_on(&StdEnv, &path).unwrap();
+        assert_eq!(recs.len(), 8);
+        assert_eq!(end, append_end);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     /// RFC-0044 P2.2 micro: deps_raftlog WAL floor —
     /// `encode_write_op_batches` + async-buffered write only (no Db lock,

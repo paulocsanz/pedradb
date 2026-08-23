@@ -29,6 +29,20 @@ pub trait EnvFile: Read + Write + Seek {
     /// Underlying I/O.
     fn set_len(&mut self, len: u64) -> io::Result<()>;
 
+    /// Reserve `len` bytes of storage past physical EOF so appends never
+    /// block on filesystem extent allocation (macOS `F_PREALLOCATE`; see
+    /// `pedradb_posix::preallocate_file`). Does **not** change the logical
+    /// size — recovery reads stop at `len` and never observe the reserved
+    /// region. Best-effort: default is a no-op (sim / DST / platforms
+    /// without support); callers treat failure as a missing optimization.
+    ///
+    /// # Errors
+    /// Underlying I/O when the platform implements the reservation.
+    fn preallocate(&mut self, len: u64) -> io::Result<()> {
+        let _ = len;
+        Ok(())
+    }
+
     /// Current file length.
     ///
     /// # Errors
@@ -188,6 +202,10 @@ pub fn fdatasync_file(file: &File) -> io::Result<()> {
 impl EnvFile for File {
     fn sync_data(&mut self) -> io::Result<()> {
         fdatasync_file(self)
+    }
+
+    fn preallocate(&mut self, len: u64) -> io::Result<()> {
+        pedradb_posix::preallocate_file(self, len)
     }
 
     fn sync_all(&mut self) -> io::Result<()> {
