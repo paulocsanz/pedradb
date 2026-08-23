@@ -646,6 +646,35 @@ impl KeyCodec {
         pool.split_to(n).freeze()
     }
 
+    /// `cf\0` run prefix for [`Self::encode_run`] — materialized once per
+    /// same-CF run instead of re-encoding the prefix bytes per key
+    /// (RFC-0054 P1.4 apply path).
+    fn run_prefix(&self, cf: &str) -> Vec<u8> {
+        let effective = if cf == DEFAULT_CF && self.default_raw {
+            ""
+        } else {
+            cf
+        };
+        let mut p = Vec::with_capacity(effective.len() + 1);
+        p.extend_from_slice(effective.as_bytes());
+        p.push(0);
+        p
+    }
+
+    /// [`Self::encode_pooled`] with the prefix from [`Self::run_prefix`].
+    fn encode_run(&self, prefix: &[u8], key: &[u8], pool: &mut bytes::BytesMut) -> Bytes {
+        if prefix.is_empty() {
+            pool.reserve(key.len());
+            pool.extend_from_slice(key);
+            return pool.split_to(key.len()).freeze();
+        }
+        let n = prefix.len() + key.len();
+        pool.reserve(n);
+        pool.extend_from_slice(prefix);
+        pool.extend_from_slice(key);
+        pool.split_to(n).freeze()
+    }
+
     /// Default-CF raw: copy user key; otherwise `cf\\0key` via the pool.
     fn encode_owned(&self, cf: &str, key: &[u8], pool: &mut bytes::BytesMut) -> Bytes {
         if cf == DEFAULT_CF && self.default_raw {
@@ -2071,23 +2100,26 @@ impl<E: Env> DB<E> {
             let mut pool = pool.borrow_mut();
             let mut ops = Vec::with_capacity(puts.len() + deletes.len());
             let mut last_ok: Option<&str> = None;
+            let mut pfx = Vec::new();
             for (cf, k, v) in puts {
                 if last_ok != Some(cf) {
                     self.check_cf(cf)?;
+                    pfx = self.codec.run_prefix(cf);
                     last_ok = Some(cf);
                 }
                 ops.push(BatchOp::Put {
-                    key: self.codec.encode_pooled(cf, k.as_ref(), &mut pool),
+                    key: self.codec.encode_run(&pfx, k.as_ref(), &mut pool),
                     value: Bytes::from(v),
                 });
             }
             for (cf, k) in deletes {
                 if last_ok != Some(cf) {
                     self.check_cf(cf)?;
+                    pfx = self.codec.run_prefix(cf);
                     last_ok = Some(cf);
                 }
                 ops.push(BatchOp::Delete {
-                    key: self.codec.encode_pooled(cf, k.as_ref(), &mut pool),
+                    key: self.codec.encode_run(&pfx, k.as_ref(), &mut pool),
                 });
             }
             if ops.is_empty() {

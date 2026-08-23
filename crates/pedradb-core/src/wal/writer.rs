@@ -191,11 +191,14 @@ impl<W: Write + Seek> WalWriter<W> {
                 RecordType::Middle
             };
 
-            // Stage the payload first: the crc needs the contiguous bytes,
-            // and a source may produce them field by field.
+            // Stage the payload first: the crc needs the contiguous bytes.
+            // RFC-0054 P1.4: the header goes in as a 7-byte placeholder and
+            // the source appends the payload field by field — the previous
+            // `resize(0)` + copy pass wrote every payload byte twice.
             let hdr_pos = buf.len();
-            buf.resize(hdr_pos + HEADER_SIZE + fragment_len, 0);
-            src.read_exact_into(&mut buf[hdr_pos + HEADER_SIZE..]);
+            buf.reserve(HEADER_SIZE + fragment_len);
+            buf.extend_from_slice(&[0u8; HEADER_SIZE]);
+            src.append_exact_to(buf, fragment_len);
             self.patch_physical_record(rtype, fragment_len, hdr_pos, buf);
 
             left -= fragment_len;
@@ -266,8 +269,9 @@ impl<W: Write + Seek> WalWriter<W> {
 /// fragmentation state machine directly, one copy).
 trait RecordSource {
     fn total_len(&self) -> usize;
-    /// Fill `dst` completely with the next `dst.len()` bytes of the record.
-    fn read_exact_into(&mut self, dst: &mut [u8]);
+    /// Append exactly `n` bytes of the record onto `dst` (single write per
+    /// run — no pre-zeroed region; see `fragment_from`).
+    fn append_exact_to(&mut self, dst: &mut Vec<u8>, n: usize);
 }
 
 struct SliceSource<'a>(&'a [u8]);
@@ -277,9 +281,8 @@ impl RecordSource for SliceSource<'_> {
         self.0.len()
     }
 
-    fn read_exact_into(&mut self, dst: &mut [u8]) {
-        let n = dst.len();
-        dst.copy_from_slice(&self.0[..n]);
+    fn append_exact_to(&mut self, dst: &mut Vec<u8>, n: usize) {
+        dst.extend_from_slice(&self.0[..n]);
         self.0 = &self.0[n..];
     }
 }
@@ -464,16 +467,16 @@ impl RecordSource for EncodedOpsSource<'_> {
         self.total
     }
 
-    fn read_exact_into(&mut self, dst: &mut [u8]) {
+    fn append_exact_to(&mut self, dst: &mut Vec<u8>, n: usize) {
         let mut filled = 0;
-        while filled < dst.len() {
+        while filled < n {
             let run = self.current();
             assert!(
                 !run.is_empty(),
                 "EncodedOpsSource exhausted before record end"
             );
-            let take = (dst.len() - filled).min(run.len());
-            dst[filled..filled + take].copy_from_slice(&run[..take]);
+            let take = (n - filled).min(run.len());
+            dst.extend_from_slice(&run[..take]);
             self.advance(take);
             filled += take;
         }

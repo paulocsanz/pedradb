@@ -384,6 +384,8 @@ impl YcsbRunner {
         if want("deps_apply_batch") {
         let mut lats = Vec::with_capacity(cfg_ops);
         let (mut txns, mut errors) = (0u64, 0u64);
+        let phase0 = e.write_phase_snapshot();
+        let mut build_ns = Vec::with_capacity(cfg_ops);
         let t0 = Instant::now();
         for _ in 0..cfg_ops {
             let t = Instant::now();
@@ -416,13 +418,31 @@ impl YcsbRunner {
                     k: ukey(u),
                 });
             }
+            let t_build = t.elapsed();
             let ok = e.batch(std::mem::take(&mut pre)) && e.batch(std::mem::take(&mut com));
             if ok {
                 txns += batch as u64;
             } else {
                 errors += 1;
             }
+            build_ns.push(t_build.as_nanos());
             lats.push(ms(t));
+        }
+        build_ns.sort_unstable();
+        let bp50 = build_ns[build_ns.len() / 2] as f64 / 1000.0;
+        eprintln!("[rocks-parity] deps_apply_batch split p50 build={bp50:.2}µs");
+        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
+            let n = b[0].saturating_sub(a[0]).max(1);
+            let us = |d: u64| d as f64 / n as f64 / 1000.0;
+            eprintln!(
+                "[rocks-parity] deps_apply_batch phasesΔ (per commit, 2/op) prepare={:.2}µs wal={:.2}µs mem={:.2}µs publish={:.2}µs flsh={:.2}µs lock_wait={:.2}µs n={n}",
+                us(b[1].saturating_sub(a[1])),
+                us(b[2].saturating_sub(a[2])),
+                us(b[3].saturating_sub(a[3])),
+                us(b[4].saturating_sub(a[4])),
+                us(b[5].saturating_sub(a[5])),
+                us(b[6].saturating_sub(a[6])),
+            );
         }
         blocks.push(summarize(
             "deps_apply_batch",
