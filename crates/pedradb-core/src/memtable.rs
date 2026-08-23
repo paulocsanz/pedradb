@@ -117,14 +117,14 @@ impl<'a> IntoIterator for &'a Versions {
 /// Borrowed walk of `BTreeMap` user-key range, newest-first versions per key.
 /// Concrete so count/scan do not `Box<dyn Iterator>` on every refill.
 pub(crate) struct MemInternalRange<'a> {
-    users: std::collections::btree_map::Range<'a, Bytes, Versions>,
+    users: std::iter::Peekable<std::collections::btree_map::Range<'a, Bytes, Versions>>,
     cur: VersIter<'a>,
 }
 
 /// Merge of the sorted BTree with a **sorted tail** (O(tail log tail), not
 /// O((map+tail) log) — YCSB E/scan must not sort the whole memtable).
 pub(crate) struct MemInternalMerge<'a> {
-    map: std::iter::Peekable<MemInternalRange<'a>>,
+    map: MemInternalRange<'a>,
     tail: std::iter::Peekable<std::vec::IntoIter<(&'a InternalKey, &'a Bytes)>>,
 }
 
@@ -134,7 +134,7 @@ pub(crate) struct MemInternalMerge<'a> {
 /// CF shard in sorted order (cross-CF / unbounded queries fall back to
 /// [`MemInternalMerge`] first).
 pub(crate) struct MemInternalIdx<'a> {
-    map: std::iter::Peekable<MemInternalRange<'a>>,
+    map: MemInternalRange<'a>,
     idx: std::iter::Peekable<Box<dyn Iterator<Item = (&'a Bytes, &'a usize)> + 'a>>,
     tail: &'a [Version],
 }
@@ -156,6 +156,59 @@ impl<'a> Iterator for MemInternalRange<'a> {
             }
             let (_, vers) = self.users.next()?;
             self.cur = vers.iter();
+        }
+    }
+}
+
+impl<'a> MemInternalRange<'a> {
+    /// Next yieldable item without consuming (O(1) lookahead; may pull the
+    /// next user group into the peekable — `Peekable` caches it).
+    fn peek(&mut self) -> Option<(&'a InternalKey, &'a Bytes)> {
+        match &self.cur {
+            VersIter::One(Some(v)) => Some((&v.key, &v.value)),
+            VersIter::Many(it) => it.clone().next().map(|v| (&v.key, &v.value)),
+            VersIter::One(None) => {
+                let (_, vers) = self.users.peek()?;
+                match vers {
+                    Versions::One(v) => Some((&v.key, &v.value)),
+                    Versions::Many(vs) => vs.front().map(|v| (&v.key, &v.value)),
+                }
+            }
+        }
+    }
+
+    /// Drop every remaining version of the current user group and land on
+    /// the next user (RFC-0054 P1.3: count/scan `step_user` must not pop a
+    /// hot user's versions one by one — the shared deps memtable holds
+    /// dozens per hot key after apply). No-op when positioned elsewhere.
+    fn step_user(&mut self, user: &[u8]) {
+        if self.peek().is_some_and(|(k, _)| k.user_key.as_ref() == user) {
+            self.cur = VersIter::One(None);
+            if let Some((_, vers)) = self.users.next() {
+                self.cur = vers.iter();
+            }
+        }
+    }
+}
+
+impl<'a> MemInternalMerge<'a> {
+    /// Fast user skip for count/scan (see [`MemInternalRange::step_user`]);
+    /// the sorted-tail side advances past the user's versions linearly.
+    fn step_user(&mut self, user: &[u8]) {
+        self.map.step_user(user);
+        while self.tail.peek().is_some_and(|(k, _)| k.user_key.as_ref() == user) {
+            self.tail.next();
+        }
+    }
+}
+
+impl<'a> MemInternalIdx<'a> {
+    /// Fast user skip for count/scan (see [`MemInternalRange::step_user`]);
+    /// the idx side holds one entry per user.
+    fn step_user(&mut self, user: &[u8]) {
+        self.map.step_user(user);
+        while self.idx.peek().is_some_and(|(uk, _)| uk.as_ref() == user) {
+            self.idx.next();
         }
     }
 }
@@ -215,6 +268,18 @@ impl<'a> Iterator for MemInternalIter<'a> {
             Self::Map(it) => it.next(),
             Self::Merge(it) => it.next(),
             Self::Idx(it) => it.next(),
+        }
+    }
+}
+
+impl<'a> MemInternalIter<'a> {
+    /// Fast user skip (see [`MemInternalRange::step_user`]) — count/scan
+    /// only ever consume the first visible version per user key.
+    pub(crate) fn step_user(&mut self, user: &[u8]) {
+        match self {
+            Self::Map(it) => it.step_user(user),
+            Self::Merge(it) => it.step_user(user),
+            Self::Idx(it) => it.step_user(user),
         }
     }
 }
@@ -901,7 +966,7 @@ impl MemTable {
             })
             .collect();
         MemInternalIter::Merge(MemInternalMerge {
-            map: map.peekable(),
+            map,
             tail: tail.into_iter().peekable(),
         })
     }
@@ -929,7 +994,7 @@ impl MemTable {
         }
         let map = self.iter_internal_range_cursor(start, end);
         MemInternalIter::Idx(MemInternalIdx {
-            map: map.peekable(),
+            map,
             idx: self.tail_idx_range(start, end).peekable(),
             tail: &self.tail,
         })
@@ -954,7 +1019,10 @@ impl MemTable {
         end: Bound<&'a [u8]>,
     ) -> MemInternalRange<'a> {
         MemInternalRange {
-            users: self.map.range::<[u8], _>((start, end)),
+            users: self
+                .map
+                .range::<[u8], _>((start, end))
+                .peekable(),
             cur: VersIter::One(None),
         }
     }

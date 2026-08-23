@@ -7455,6 +7455,15 @@ impl<'a> MemCountCursor<'a> {
     }
 
     fn step_user(&mut self, user: &[u8]) {
+        // RFC-0054 P1.3: fast group skip — popping one version at a time
+        // made each scanned hot user cost O(its versions) after apply
+        // filled the shared memtable (Filter keeps the old loop).
+        if let MemCountIter::Range(it) = &mut self.it {
+            it.step_user(user);
+            self.head = None;
+            self.settle();
+            return;
+        }
         while self.head.is_some_and(|h| h.user_key.as_ref() == user) {
             self.head = None;
             self.settle();
