@@ -1,8 +1,11 @@
 /**
- * Montanha FDB-shaped C ABI (RFC-0023 P2.2) — plug/test only.
+ * Montanha FDB-shaped C ABI (RFC-0023 P2.2) — in-process product face.
  *
  * Build: cargo build -p pedradb-capi
  * Link:  libpedradb_capi (cdylib / staticlib / rlib).
+ * Gate:  bash scripts/capi-asan.sh
+ *        PASS = honest C + rotten handles + oversize → LIMIT
+ *        malicious key/value/path = ASan-red (required)
  *
  * Handles are opaque IDs (slot + generation packed into the pointer), not
  * heap pointers. Double-free and use-after-destroy return NULL / ERROR;
@@ -10,11 +13,17 @@
  * another thread returns NULL / ERROR (not a data race). Do not share
  * handles across threads.
  *
- * Still required of the C caller (inherent): `path` is a NUL-terminated
- * string; `key`/`value` are readable for the given lengths.
+ * Length caps (reject without unbounded read):
+ *   path: first 4096 bytes must contain a NUL (else create → NULL)
+ *   key_len   ≤ 10MiB  (MAX_TX_BYTES)     → else LIMIT
+ *   value_len ≤ 100KiB (MAX_VALUE_BYTES)  → else LIMIT
  *
- * This is NOT a supported product ABI and NOT the FoundationDB client /
- * fdbcli.
+ * C contract (UB if lied about, under the cap): `path` bytes are readable
+ * until NUL; `key`/`value` are readable for the given (capped) lengths.
+ * Wild pointers are not validatable. The malicious ASan binary is the
+ * regression oracle for a short-buffer lie, not a runtime validator.
+ *
+ * This is NOT the FoundationDB client / fdbcli / libfdb_c.
  */
 #ifndef MONTAHA_FDB_H
 #define MONTAHA_FDB_H
@@ -32,6 +41,10 @@ extern "C" {
 #define MONTAHA_FDB_LIMIT 3
 #define MONTAHA_FDB_UNAVAILABLE 4
 #define MONTAHA_FDB_ERROR 5
+
+#define MONTAHA_FDB_MAX_PATH_BYTES 4096
+#define MONTAHA_FDB_MAX_KEY_BYTES (10 * 1024 * 1024)
+#define MONTAHA_FDB_MAX_VALUE_BYTES (100 * 1024)
 
 typedef struct MontanhaFdbDatabase MontanhaFdbDatabase;
 typedef struct MontanhaFdbTransaction MontanhaFdbTransaction;

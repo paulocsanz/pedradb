@@ -46,3 +46,16 @@ jobs:
         env:
           MIRI_REQUIRED: "1"
         run: bash scripts/miri-unsafe-islands.sh
+
+  capi-asan-harness:
+    name: C ABI C+ASan harness (in-process product gate)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: clang
+        run: sudo apt-get update && sudo apt-get install -y clang
+      - name: capi-asan
+        env:
+          ASAN_REQUIRED: "1"
+        run: bash scripts/capi-asan.sh

@@ -1,16 +1,21 @@
-//! Thin C ABI for FDB-shaped plug tests (RFC-0023 P2.2).
+//! Thin in-process C ABI (RFC-0023 P2.2). Product face for embedders;
+//! **not** FoundationDB / fdbcli / `libfdb_c`.
 //!
-//! **Not** FoundationDB / fdbcli / a supported product ABI. Opaque **handles**
-//! (slot + generation packed into the pointer) over [`StoreCluster`] +
-//! [`Transaction`]. Double-destroy and use-after-destroy return an error /
-//! NULL — they are not `Box::from_raw` UB. Handle tables are **thread-local**
-//! (`StoreCluster` is `!Send`). A handle used on another thread yields ERROR,
-//! not a data race.
+//! Opaque **handles** (slot + generation packed into the pointer) over
+//! [`StoreCluster`] + [`Transaction`]. Double-destroy and use-after-destroy
+//! return an error / NULL — they are not `Box::from_raw` UB. Handle tables
+//! are **thread-local** (`StoreCluster` is `!Send`). A handle used on
+//! another thread yields ERROR, not a data race.
 //!
 //! Header: `include/montanha_fdb.h`. Build: `cargo build -p pedradb-capi`.
+//! Gate: `bash scripts/capi-asan.sh` (honest C PASS; malicious slices
+//! ASan-red).
 //!
-//! Remaining `unsafe` is marshalling only: NUL-terminated `path`, and
-//! `key`/`value` readable for `*_len` bytes. Invariants: crate `SAFETY.md`.
+//! Remaining `unsafe` is marshalling only. Lengths are capped before any
+//! copy / NUL walk (`MAX_PATH_BYTES` / [`MAX_C_KEY_BYTES`] /
+//! [`MAX_C_VALUE_BYTES`]) so a huge `*_len` is `LIMIT`, not a terabyte
+//! read. A C caller that lies about a *capped* length is still UB — that
+//! is the C contract. Invariants: crate `SAFETY.md`.
 
 #![warn(missing_docs)]
 
@@ -18,14 +23,13 @@ mod handles;
 
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::ffi::CStr;
 use std::os::raw::{c_char, c_int};
 use std::path::PathBuf;
 use std::ptr;
 
 use pedradb_store::client::Transaction;
 use pedradb_store::fdb_compat::FdbError;
-use pedradb_store::{StoreCluster, StoreError};
+use pedradb_store::{StoreCluster, StoreError, MAX_TX_BYTES, MAX_VALUE_BYTES};
 
 use handles::{pack, unpack, Handle, Table, KIND_DB, KIND_TX};
 
@@ -41,6 +45,65 @@ pub const MONTAHA_FDB_LIMIT: c_int = 3;
 pub const MONTAHA_FDB_UNAVAILABLE: c_int = 4;
 /// Other / invalid args / stale handle.
 pub const MONTAHA_FDB_ERROR: c_int = 5;
+
+/// Bytes walked looking for a path NUL. No NUL in this window → create
+/// returns NULL (no unbounded `strlen`).
+pub const MAX_PATH_BYTES: usize = 4096;
+/// Key length cap before copying C bytes (store TX budget).
+pub const MAX_C_KEY_BYTES: usize = MAX_TX_BYTES;
+/// Value length cap before copying C bytes.
+pub const MAX_C_VALUE_BYTES: usize = MAX_VALUE_BYTES;
+
+extern "C" {
+    /// Bounded NUL search. Darwin ASan intercepts `memchr` (not `strnlen`).
+    fn memchr(s: *const u8, c: i32, n: usize) -> *const u8;
+}
+
+fn path_from_c(path: *const c_char) -> Option<PathBuf> {
+    if path.is_null() {
+        return None;
+    }
+    // SAFETY: at most `MAX_PATH_BYTES` are read. `memchr` is
+    // ASan-intercepted: a short heap buffer with no NUL is a C-harness
+    // FAIL. A full-window no-NUL buffer is rejected without reading past it.
+    let nul = unsafe { memchr(path.cast(), 0, MAX_PATH_BYTES) };
+    if nul.is_null() {
+        return None;
+    }
+    let n = (nul as usize).wrapping_sub(path as usize);
+    if n >= MAX_PATH_BYTES {
+        return None;
+    }
+    let bytes = match copy_c_bytes(path.cast(), n, MAX_PATH_BYTES) {
+        Ok(b) => b,
+        Err(_) => return None,
+    };
+    let s = std::str::from_utf8(&bytes).ok()?;
+    Some(PathBuf::from(s))
+}
+
+/// Copy `len` bytes from C. `len == 0` is an empty vec (null `p` allowed).
+/// `len > max` is [`MONTAHA_FDB_LIMIT`] and does **not** read.
+fn copy_c_bytes(p: *const u8, len: usize, max: usize) -> Result<Vec<u8>, c_int> {
+    if len > max {
+        return Err(MONTAHA_FDB_LIMIT);
+    }
+    if len == 0 {
+        return Ok(Vec::new());
+    }
+    if p.is_null() {
+        return Err(MONTAHA_FDB_ERROR);
+    }
+    let mut buf = vec![0u8; len];
+    // SAFETY: caller contract — `p` is readable for `len` (≤ `max`).
+    // Oversize was rejected above so `SIZE_MAX` never becomes a terabyte
+    // claim. `copy_nonoverlapping` is memcpy: ASan intercepts a short
+    // buffer in the C harness.
+    unsafe {
+        ptr::copy_nonoverlapping(p, buf.as_mut_ptr(), len);
+    }
+    Ok(buf)
+}
 
 /// Opaque C database handle (packed id, not a heap pointer).
 #[repr(C)]
@@ -116,7 +179,8 @@ fn tx_handle(p: *mut MontanhaFdbTransaction) -> Option<Handle> {
 /// On success returns a handle; free with [`montanha_fdb_database_destroy`].
 ///
 /// # Safety
-/// `path` must be a valid NUL-terminated C string (or null).
+/// `path` is null, or the first [`MAX_PATH_BYTES`] bytes are readable and
+/// contain a NUL (C contract). A missing NUL in that window returns NULL.
 #[no_mangle]
 pub unsafe extern "C" fn montanha_fdb_database_create(
     path: *const c_char,
@@ -126,13 +190,9 @@ pub unsafe extern "C" fn montanha_fdb_database_create(
     if path.is_null() || n_nodes == 0 || n_ranges == 0 {
         return ptr::null_mut();
     }
-    // SAFETY: caller contract — `path` is NUL-terminated and readable.
-    let cstr = unsafe { CStr::from_ptr(path) };
-    let s = match cstr.to_str() {
-        Ok(s) => s,
-        Err(_) => return ptr::null_mut(),
+    let Some(p) = path_from_c(path) else {
+        return ptr::null_mut();
     };
-    let p = PathBuf::from(s);
     match StoreCluster::open(&p, n_nodes, n_ranges) {
         Ok(mut cluster) => {
             if cluster.elect_all(120).is_err() {
@@ -204,7 +264,8 @@ pub unsafe extern "C" fn montanha_fdb_transaction_destroy(tr: *mut MontanhaFdbTr
 ///
 /// # Safety
 /// `key` (and `value` when `value_len > 0`) must be readable for the given
-/// lengths. `tr` is a handle from create.
+/// lengths **when those lengths are ≤ the caps**. Oversize is `LIMIT`
+/// without a read. `tr` is a handle from create.
 #[no_mangle]
 pub unsafe extern "C" fn montanha_fdb_transaction_set(
     tr: *mut MontanhaFdbTransaction,
@@ -216,21 +277,25 @@ pub unsafe extern "C" fn montanha_fdb_transaction_set(
     if key.is_null() || (value.is_null() && value_len > 0) {
         return MONTAHA_FDB_ERROR;
     }
+    if key_len > MAX_C_KEY_BYTES || value_len > MAX_C_VALUE_BYTES {
+        return MONTAHA_FDB_LIMIT;
+    }
     let Some(h) = tx_handle(tr) else {
         return MONTAHA_FDB_ERROR;
     };
-    // SAFETY: caller contract — `key`/`value` live for `*_len` bytes.
-    let k = unsafe { std::slice::from_raw_parts(key, key_len) };
-    let v = if value_len == 0 {
-        &[][..]
-    } else {
-        unsafe { std::slice::from_raw_parts(value, value_len) }
+    let k = match copy_c_bytes(key, key_len, MAX_C_KEY_BYTES) {
+        Ok(k) => k,
+        Err(c) => return c,
+    };
+    let v = match copy_c_bytes(value, value_len, MAX_C_VALUE_BYTES) {
+        Ok(v) => v,
+        Err(c) => return c,
     };
     with_state(|st| {
         let Some(t) = st.txs.get_mut(h) else {
             return MONTAHA_FDB_ERROR;
         };
-        match t.inner.set(k, v) {
+        match t.inner.set(&k, &v) {
             Ok(()) => MONTAHA_FDB_OK,
             Err(e) => map_err(&e),
         }
@@ -242,7 +307,8 @@ pub unsafe extern "C" fn montanha_fdb_transaction_set(
 /// Error also writes null/0 so the caller never reads uninitialized outputs.
 ///
 /// # Safety
-/// `key` readable for `key_len`. `out_ptr` / `out_len` live. Handles live
+/// `key` readable for `key_len` when `key_len ≤ MAX_C_KEY_BYTES`. Oversize
+/// is `LIMIT` (and writes null/0). `out_ptr` / `out_len` live. Handles live
 /// and belong together (`tr` was created from `db`).
 #[no_mangle]
 pub unsafe extern "C" fn montanha_fdb_transaction_get(
@@ -256,14 +322,30 @@ pub unsafe extern "C" fn montanha_fdb_transaction_get(
     if key.is_null() || out_ptr.is_null() || out_len.is_null() {
         return MONTAHA_FDB_ERROR;
     }
+    if key_len > MAX_C_KEY_BYTES {
+        // SAFETY: `out_*` checked non-null above.
+        unsafe {
+            *out_ptr = ptr::null_mut();
+            *out_len = 0;
+        }
+        return MONTAHA_FDB_LIMIT;
+    }
     let Some(dh) = db_handle(db) else {
         return MONTAHA_FDB_ERROR;
     };
     let Some(th) = tx_handle(tr) else {
         return MONTAHA_FDB_ERROR;
     };
-    // SAFETY: caller contract — `key` live for `key_len`.
-    let k = unsafe { std::slice::from_raw_parts(key, key_len) };
+    let k = match copy_c_bytes(key, key_len, MAX_C_KEY_BYTES) {
+        Ok(k) => k,
+        Err(c) => {
+            unsafe {
+                *out_ptr = ptr::null_mut();
+                *out_len = 0;
+            }
+            return c;
+        }
+    };
     with_state(|st| {
         if st.txs.get(th).map(|t| t.db) != Some(dh) {
             // SAFETY: `out_*` checked non-null above.
@@ -285,7 +367,7 @@ pub unsafe extern "C" fn montanha_fdb_transaction_get(
             let t = st.txs.get_mut(th).expect("checked");
             // SAFETY: `cluster` is `st.dbs[dh]`, `t` is `st.txs[th]` — disjoint
             // slots, both live for this `with_state` call.
-            t.inner.get(unsafe { &*cluster }, k)
+            t.inner.get(unsafe { &*cluster }, &k)
         };
         match got {
             Ok(None) => {
@@ -587,5 +669,51 @@ mod tests {
             montanha_fdb_database_destroy(db);
         }
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn slice_cap_oversize_len_is_limit_without_reading() {
+        // One-byte buffer + huge len must not read (F215). Null handle is
+        // fine: the cap fires before table lookup / copy.
+        let tiny = 1u8;
+        unsafe {
+            assert_eq!(
+                montanha_fdb_transaction_set(ptr::null_mut(), &tiny, MAX_C_KEY_BYTES + 1, &tiny, 1,),
+                MONTAHA_FDB_LIMIT
+            );
+            assert_eq!(
+                montanha_fdb_transaction_set(
+                    ptr::null_mut(),
+                    &tiny,
+                    1,
+                    &tiny,
+                    MAX_C_VALUE_BYTES + 1,
+                ),
+                MONTAHA_FDB_LIMIT
+            );
+            let mut out = ptr::null_mut();
+            let mut len = 7usize;
+            assert_eq!(
+                montanha_fdb_transaction_get(
+                    ptr::null_mut(),
+                    ptr::null_mut(),
+                    &tiny,
+                    MAX_C_KEY_BYTES + 1,
+                    &mut out,
+                    &mut len,
+                ),
+                MONTAHA_FDB_LIMIT
+            );
+            assert!(out.is_null());
+            assert_eq!(len, 0);
+        }
+    }
+
+    #[test]
+    fn slice_cap_path_without_nul_in_max_is_null() {
+        let buf = vec![b'a'; MAX_PATH_BYTES];
+        unsafe {
+            assert!(montanha_fdb_database_create(buf.as_ptr().cast(), 3, 1).is_null());
+        }
     }
 }

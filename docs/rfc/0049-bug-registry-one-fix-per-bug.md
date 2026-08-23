@@ -15,9 +15,10 @@
   dois lados). Nenhum fix remove funcionalidade.
 - Este RFC é o **registro canônico e consumível por máquina**: uma linha por
   bug, colunas estáveis, IDs estáveis (F1..F213; numeração do LEDGER do
-  hunt — ver "Fontes" abaixo). As correções **já estão aplicadas no
-  `main`**; este documento serve para auditoria, verificação automatizada e
-  regressão — não para reaplicar patches.
+  hunt — ver "Fontes" abaixo; F215 acresce o cap de slices no C ABI). As
+  correções **já estão aplicadas no `main`**; este documento serve para
+  auditoria, verificação automatizada e regressão — não para reaplicar
+  patches.
 
 ## Contrato de consumo (para automação do repo)
 
@@ -216,6 +217,7 @@
 | F211 | core `compact_reclaim`/`auto_gc_floor` | floor sem pins = `last_sequence()` conta seq não-publicada → `SnapshotTooOld` transitório no snapshot visível corrente | cap `min(visible_sequence)` nos 2 sítios (2026-08-23, wave 7) | `core_hunt::k36_reclaim_floor_counts_unpublished_seq` (+k36ctl) |
 | F212 | core `ConcurrentDb::flush` | rotaciona WAL sem persistir CHANGELOG (interval 0) → chave flushed some do feed vivo e pós-bare-drop-reopen | tail `persist_changelog_after_explicit_flush` (2026-08-23, wave 7) | `core_hunt::k37_concurrent_flush_skips_changelog_persist` (+k37ctl) |
 | F213 | core `commit_async_ops` | write `no_sync` nunca estende change_log não-lazy; perda vira durável via persist+rebuild cego | espelho do extend pós-append WAL (2026-08-23, wave 7) | `core_hunt::k38_async_commit_missing_from_change_feed` (+k38ctl) |
+| F215 | `pedradb-capi` marshalling | `CStr::from_ptr` / `from_raw_parts` sem cap: `SIZE_MAX` `*_len` é claim de terabyte (UB) | `memchr` ≤4096; copy só se `key_len`/`value_len` ≤ store MAX | `slice_cap_*` + `scripts/capi-asan.sh` (PASS + malicious ASan-red) |
 
 ## Delivery slices
 
@@ -236,6 +238,8 @@
   compat rows) — status: `done`
 - [x] **P2.2** ilhas unsafe posix/io-uring/capi (F202–F203, F208–F210;
   Miri/ASan) — status: `done`
+- [x] **P2.3** C ABI C+ASan harness (F215 caps; in-process product
+  face, **não** `libfdb_c`) — status: `done` (`scripts/capi-asan.sh`)
 
 ## Status (living — update with every PR)
 
@@ -247,14 +251,16 @@
 | P1.2 | p1 | Fixes http no main | done | waves hunt 2026-08 | 2026-08-23 |
 | P2.1 | p2 | Fixes compat no main | done | RFC-0048 + waves | 2026-08-23 |
 | P2.2 | p2 | Fixes ilhas unsafe no main | done | wave 8 unsafe (Miri/ASan) | 2026-08-23 |
+| P2.3 | p2 | C+ASan harness C ABI (produto in-process) | done | F215 + `scripts/capi-asan.sh` | 2026-08-23 |
 
 ## Acceptance Criteria
 
 - **Tests:** todas as provas da coluna `Prova` verdes no `main` —
   baterias de referência: `pedradb-core --lib` 395/0, harness `core_hunt`
   64/64 (k1..k39 + controles), `compat_hunt` 21/21, `rocksdb-compat`
-  41+7, `pedradb-io-uring` 14/14, `pedradb-capi` 16/16 (Miri/ASan nas
-  ilhas). Cada teste de prova INDIVIDUAL falha no tree sem o fix
+  41+7, `pedradb-io-uring` 14/14, `pedradb-capi` 18/18 + C+ASan harness
+  (Miri/ASan nas ilhas; C ABI in-process, não `libfdb_c`). Cada teste de prova
+  INDIVIDUAL falha no tree sem o fix
   correspondente (dois-estados demonstrados por bug nas fichas).
 - **Telemetry / Analytics:** none — corretude; o `CORRUPTLOG` (RFC-0038)
   continua o canal de eventos de corrupção.

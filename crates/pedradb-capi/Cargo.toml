@@ -3,7 +3,7 @@ name = "pedradb-capi"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Montanha FDB-shaped C ABI (handle table; store stays forbid(unsafe_code))"
+description = "Montanha FDB-shaped in-process C ABI (not libfdb_c; store stays forbid(unsafe_code))"
 rust-version.workspace = true
 
 [lib]

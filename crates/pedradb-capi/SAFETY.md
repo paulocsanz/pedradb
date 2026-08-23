@@ -1,7 +1,10 @@
 # SAFETY — `pedradb-capi`
 
-Lab C ABI (RFC-0023 P2.2). **Not** a supported product face, **not**
-`libfdb_c`. `pedradb-store` is `#![forbid(unsafe_code)]`.
+In-process product C ABI (RFC-0023 P2.2). **Not** `libfdb_c` / fdbcli.
+`pedradb-store` is `#![forbid(unsafe_code)]`.
+
+The C+ASan harness (`scripts/capi-asan.sh`) is the **product gate**: PASS
+binary green, malicious binary ASan-red. CI job `capi-asan-harness`.
 
 ## What is not `unsafe`
 
@@ -22,20 +25,51 @@ Database and transaction “pointers” are packed `slot + generation` integers
   slot, gen wraps to 1: a stale handle from that first generation can
   alias (inherent to a packed 31-bit gen, not allocator UB).
 
+## Length caps (F215)
+
+Marshalling copies C bytes only after a length check. A huge `*_len` is
+`MONTAHA_FDB_LIMIT` / NULL and does **not** construct a terabyte slice.
+
+| Input | Cap | Oversize |
+|-------|-----|----------|
+| `path` | `MAX_PATH_BYTES` (4096) NUL walk via `memchr` | create → NULL |
+| `key_len` | `MAX_C_KEY_BYTES` = `MAX_TX_BYTES` (10MiB) | `LIMIT` |
+| `value_len` | `MAX_C_VALUE_BYTES` = `MAX_VALUE_BYTES` (100KiB) | `LIMIT` |
+
+Copy is `ptr::copy_nonoverlapping` (memcpy). `memchr` / memcpy are
+ASan-intercepted in the C harness (Darwin ASan does **not** intercept
+`strnlen` — that is why the path walk is `memchr`, not `strnlen`).
+
 ## Remaining `unsafe` (marshalling only)
 
 | Site | Obligation |
 |------|------------|
-| `CStr::from_ptr(path)` | `path` is a valid NUL-terminated C string (or we returned on null) |
-| `from_raw_parts(key/value, len)` | The bytes are readable for `len` (C contract) |
+| `memchr(path, 0, MAX_PATH_BYTES)` | First `MAX_PATH_BYTES` readable, or ASan fires (C contract) |
+| `copy_nonoverlapping` of key/value | Bytes readable for the **capped** `len` (C contract) |
 | Writes through `out_ptr` / `out_len` | Pointers checked non-null |
 
-Garbage `key`/`path` pointers are still UB — that is inherent to C. Stale
-*handles* are not.
+A caller that lies about a *capped* length (4-byte buffer, `key_len=256`)
+is still UB. That is inherent to C. Stale *handles* are not. Wild pointers
+are not validatable from this side.
+
+## C+ASan harness (product gate)
+
+`scripts/capi-asan.sh` builds `libpedradb_capi.a` and two C binaries
+under `-fsanitize=address`:
+
+| Binary | Must |
+|--------|------|
+| `capi_asan` | **PASS** — well-behaved set/get/commit, stale/double-free handles, oversize `*_len` → `LIMIT`, 4096-byte no-NUL path → NULL |
+| `capi_asan_malicious` | **FAIL** (ASan) — short *heap* buffer + capped-but-too-big `len`; 8-byte heap path with no NUL (`memchr`) |
+
+PASS proves rotten handles and accidental huge lengths. FAIL proves the
+sanitizer still sees a malicious C slice under the cap.
 
 ## What this crate must not grow
 
 - `Box::into_raw` / `from_raw` for db/tx handles (buffers use into_raw
   only while the pointer is table-owned; garbage `free` must not)
 - Unlocking the process mutex across a callback into C
-- Claiming FoundationDB client compatibility
+- Claiming FoundationDB client compatibility (`libfdb_c` / fdbcli)
+- Shipping a change that makes `capi_asan` ASan-red or the malicious
+  binary ASan-green

@@ -35,4 +35,8 @@ echo "== miri pedradb-capi C ABI get (F210 buffer ownership) =="
 MIRIFLAGS="${MIRIFLAGS:--Zmiri-disable-isolation -Zmiri-permissive-provenance}" \
   cargo +nightly miri test -p pedradb-capi --lib tests::c_api_open_set_get_commit -- --test-threads=1
 
+echo "== miri pedradb-capi slice caps (F215) =="
+# Oversize lens never read; 4096-byte no-NUL path is an in-bounds memchr.
+cargo +nightly miri test -p pedradb-capi --lib slice_cap -- --test-threads=1
+
 echo "miri-unsafe-islands: ok"

@@ -54,10 +54,11 @@ Do **not** regress Pedra embed strengths (no forced FDB 5s/100KB on local-only).
 | P1.3 | p1 | Range conflict subset | done | `tx_range_read_conflict` + `keys_in_range_at_after_reopen_sees_pedra` (Pedra scan) | 2026-08-14 |
 | P1.4 | p1 | Versioned watch | done | WatchEvent.version + tests | 2026-08-14 |
 | P2.1 | p2 | Cluster vs embed limits | done | §Limits below + `docs` pointer | 2026-08-14 |
-| P2.2 | p2 | fdb-compat + thin C ABI | done | `fdb_compat` + crate `pedradb-capi` (handle table, `cdylib`; store `forbid`) | 2026-08-23 |
+| P2.2 | p2 | fdb-compat + thin C ABI | done | `fdb_compat` + crate `pedradb-capi` (in-process product face, C+ASan gate; not `libfdb_c`; store `forbid`) | 2026-08-23 |
 | P2.3 | p2 | Parallel commit residual | done | §Out of scope residual | 2026-08-14 |
 
-**Honesty:** not FDB field peer; not full fdbcli/C API; not Apple Simulation.
+**Honesty:** not FDB field peer; not fdbcli / `libfdb_c`; not Apple Simulation.
+Thin in-process C ABI is `pedradb-capi` (C+ASan gated).
 
 ---
 
@@ -86,7 +87,8 @@ Do **not** regress Pedra embed strengths (no forced FDB 5s/100KB on local-only).
 
 ## 5. Out of scope / residual
 
-- Full FDB wire, fdbcli (C ABI is crate `pedradb-capi`, lab subset only).  
+- Full FDB wire, fdbcli, `libfdb_c` (thin in-process C ABI is
+  `pedradb-capi`, C+ASan gated; slices under the cap remain C-contract).  
 - Parallel commit / unbundled proxies (P2.3 residual — future).  
 - Zero-downtime range-leader HA (orthogonal).  
 - Field pedigree / Simulation Apple-scale.
