@@ -1,0 +1,3 @@
+20:20:53 gate pid=32819 load1=6.56 (consecutive 1/2)
+20:21:23 gate pid=32819 load1=6.35 (consecutive 2/2)
+20:21:23 maxpoll load1=6.35
