@@ -2601,6 +2601,73 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
     }
 
+    /// RFC-0036 addendum cost probe: per-commit price of the strong barrier
+    /// class (`F_FULLFSYNC` on Darwin) vs the default `fdatasync` class, in
+    /// the two product shapes — single put and raftlog batch (16 puts / one
+    /// WAL barrier per commit). Cost is the barrier itself, so box noise is
+    /// second-order; still not an official battery.
+    #[test]
+    #[ignore]
+    fn wal_full_fsync_cost_probe() {
+        let n: usize = std::env::var("WAL_FF_N")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(200);
+        let val = vec![b'r'; 100];
+        let mut idx = 0u64;
+        for full in [false, true] {
+            for per_batch in [1usize, 16] {
+                let d = tmp("wal_ff_cost");
+                let mut opts = Options::new();
+                opts.create_if_missing(true);
+                opts.set_wal_full_fsync(full);
+                opts.set_write_buffer_size(256 * 1024 * 1024);
+                let db = DB::open_cf(&opts, &d, &["raftlog"]).unwrap();
+                // Warm-up: first barrier pays open/extent costs.
+                for _ in 0..8 {
+                    idx += 1;
+                    let _ = db.put_cf(
+                        &db.cf_handle("raftlog").expect("raftlog cf"),
+                        format!("warm/{idx:08}").as_bytes(),
+                        val.as_slice(),
+                    );
+                }
+                let mut walls: Vec<u128> = Vec::with_capacity(n);
+                let t_all = std::time::Instant::now();
+                for _ in 0..n {
+                    let mut wb: Vec<(&str, Vec<u8>, Vec<u8>)> = Vec::with_capacity(per_batch);
+                    for _ in 0..per_batch {
+                        idx += 1;
+                        wb.push((
+                            "raftlog",
+                            format!("raftlog/{idx:08}").into_bytes(),
+                            val.clone(),
+                        ));
+                    }
+                    let t = std::time::Instant::now();
+                    db.write_cf_owned(wb, Vec::new()).unwrap();
+                    walls.push(t.elapsed().as_nanos());
+                }
+                let total_ns = t_all.elapsed().as_nanos();
+                walls.sort_unstable();
+                let p50 = walls[(walls.len() - 1) / 2] as f64 / 1e6;
+                // Integer-first arithmetic: a float division path in this
+                // test binary miscompiles to inf/0 (u128→f64 expressions);
+                // the integer rates cross-check against p50.
+                let mean = (total_ns / n as u128) as f64 / 1e6;
+                let cps = n as u128 * 1_000_000_000 / total_ns.max(1);
+                println!(
+                    "wal_ff full={full} batch={per_batch:>2}: p50={:.3}ms mean={:.3}ms commits/s={} puts/s={}",
+                    p50,
+                    mean,
+                    cps,
+                    cps * per_batch as u128,
+                );
+                let _ = std::fs::remove_dir_all(&d);
+            }
+        }
+    }
+
     // Tail probe: per-batch wall + WritePhaseStats deltas for the slowest
     // batches — attributes the once-per-leg multi-ms stall to a phase (a
     // large residual means the stall is outside the measured phases).
