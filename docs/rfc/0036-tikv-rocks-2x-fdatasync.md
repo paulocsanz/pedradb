@@ -35,6 +35,37 @@
 
 Não é “menos durável que o TiKV”. É a **mesma** classe. `F_FULLFSYNC` continua disponível em `sync_all` para ficheiros publicados.
 
+## Addendum v2 2026-08-23 — decisão invertida: classe forte é o DEFAULT no Darwin
+
+O addendum acima entregou o `wal_full_fsync` como opt-in (default `fdatasync`
+fraco). Decisão revertida no mesmo dia, por coerência de contrato:
+
+1. **`sync=true` é uma promessa de durabilidade.** No Darwin só
+   `fcntl(F_FULLFSYNC)` entrega "Ok sobrevive a corte de energia". Um default
+   silenciosamente mais fraco numa plataforma é a classe de buraco que o
+   produto existe para não ter.
+2. **Os artifacts derivados já pagam a classe forte.** `sync_all` (SST /
+   MANIFEST / CHANGELOG) é `F_FULLFSYNC` no Darwin desde o P0. O write acked
+   — a fronteira de durabilidade — era o elo mais fraco. Incoerente.
+3. **RocksDB oficial faz igual.** O CMake detecta `HAVE_FULLFSYNC` no Darwin
+   e o `sync=true` é `F_FULLFSYNC` — sem knob (detecção em build). O
+   `librocksdb-sys` (build cc, sem detecção) é que fica na classe fraca —
+   nosso default passa a bater no build oficial, não no crate.
+4. **Custo zero em produção.** Linux: as duas classes são o mesmo
+   `fdatasync` (barreira completa). O default novo só muda o Darwin.
+
+Custo medido (probe `wal_full_fsync_cost_probe`): 4,0 ms/commit na classe
+forte vs 31–33 µs na fraca (~120×) — 250 commits/s single-client, ~4,0k
+puts/s no shape raftlog-16; group commit (`ConcurrentDb`) escala com C
+clientes (C×250/s). Quem precisa de velocidade já tem o knob de primeira
+classe: `sync=false` (o default do Rocks que todo mundo roda). O opt-out
+`wal_full_fsync=false` restaura a classe fraca (colunas comparativas e dev).
+
+**Pisos oficiais não mudam:** as pernas oficiais (peer `sync=false`) rodam o
+Pedra async (`set_write_sync(false)` via `write_sync_for_suite`) — nenhuma
+barreira de WAL executa nelas. Só as colunas host-sync (myrocks/surreal/
+ceph, não-oficiais) e a suíte de testes no Mac pagam a classe forte.
+
 ## Addendum 2026-08-23 — classe de barreira no Darwin, verificada na fonte primária
 
 Pergunta: “Pedra `fdatasync` é menos durável que RocksDB no Mac?” Verificado
@@ -63,18 +94,15 @@ esvazia o cache do disco; só `fcntl(F_FULLFSYNC)` esvazia).
   sobrevive a corte de energia com cache volátil; o nosso `fdatasync` não
   garante).
 
-**Entrega (P2.1, era “report-only”):** knob opt-in `wal_full_fsync`
-(`pedradb_core::OpenOptions::wal_full_fsync`; compat
-`Options::wal_full_fsync` / `set_wal_full_fsync`). Ligado: toda barreira de
+**Entrega (P2.1):** `wal_full_fsync` (kernel
+`pedradb_core::OpenOptions::wal_full_fsync`; compat `Options::wal_full_fsync`
+/ `set_wal_full_fsync`). Default **true** (addendum v2): toda barreira de
 WAL usa `EnvFile::sync_data_strong` — `File::sync_data` no Darwin =
 `F_FULLFSYNC`, a classe do CMake-RocksDB; no Linux idêntico ao default.
-Desligado (default): classe `fdatasync`, igual ao build crate do peer que
-medimos. Rotação de WAL e repair herdam o flag; `FailingFile` cerca a classe
-forte com o mesmo `OpClass::Sync` (fence inalterado). Custo aqui (probe
-`wal_full_fsync_cost_probe`, 200 commits/shape, release): p50
-**4,0 ms/commit** (~120× o default de 31–33 µs; ~250 commits/s teto
-single-client, ~4,0k puts/s no shape raftlog 16) — decisão de produto, não
-default silencioso. Teste:
+`false` = classe `fdatasync` fraca (o build crate do peer que medimos; opt-out
+de dev/coluna comparativa, ~120× mais rápido por commit em hardware Apple).
+Rotação de WAL e repair herdam o flag; `FailingFile` cerca a classe
+forte com o mesmo `OpClass::Sync` (fence inalterado). Teste:
 `wal_full_fsync_switches_barrier_class` (conta as classes de sync do
 ficheiro WAL: flag on ⇒ só forte; off ⇒ só fraca).
 
@@ -94,7 +122,7 @@ ficheiro WAL: flag on ⇒ só forte; off ⇒ só fraca).
 
 ### P2 — later
 
-- [x] **P2.1** Opt-in `wal_full_fsync` — `F_FULLFSYNC` no WAL quando on (addendum acima) — status: `done`
+- [x] **P2.1** `wal_full_fsync` — classe forte (`F_FULLFSYNC` no Darwin) é o **default**; `false` = opt-out da classe fraca (addendum v2) — status: `done`
 
 ## Status (living — update with every PR)
 
@@ -106,7 +134,7 @@ ficheiro WAL: flag on ⇒ só forte; off ⇒ só fraca).
 | P1.1 | p1 | gate 0.5 default Rocks | todo | — | 2026-08-16 |
 | P1.2 | p1 | CHANGELOG fora do commit | done | interval default 0 | 2026-08-16 |
 | P1.3 | p1 | L0-only compact + skip feed no auto-flush | done | apply 6.6× → 2.31× | 2026-08-16 |
-| P2.1 | p2 | FF report-only → knob `wal_full_fsync` | done | addendum 2026-08-23 + teste de classe | 2026-08-23 |
+| P2.1 | p2 | FF default forte (addendum v2) | done | knob `wal_full_fsync` default true + teste de classe | 2026-08-23 |
 
 ## Acceptance Criteria
 

@@ -334,7 +334,7 @@ impl<E: Env> BackupEngine<E> {
         let db = Db::open_with_env(
             &path,
             OpenOptions {
-                wal_full_fsync: false,
+                wal_full_fsync: true,
                 history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: false,
@@ -482,7 +482,7 @@ impl<E: Env> BackupEngine<E> {
         let db = Db::open_with_env(
             dest,
             OpenOptions {
-                wal_full_fsync: false,
+                wal_full_fsync: true,
                 history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
@@ -574,7 +574,7 @@ pub fn restore_history_from_remote<E: Env>(
     let db = Db::open_with_env(
         dest,
         OpenOptions {
-            wal_full_fsync: false,
+            wal_full_fsync: true,
             history: Default::default(),
             wal_recovery: Default::default(),
             sync: true,
@@ -758,7 +758,7 @@ pub fn migrate_to_latest_env(path: impl AsRef<Path>, env: impl Env) -> Result<Mi
     let mut db = Db::open_with_env(
         path,
         OpenOptions {
-            wal_full_fsync: false,
+            wal_full_fsync: true,
             history: Default::default(),
             wal_recovery: Default::default(),
             sync: true,
@@ -816,7 +816,7 @@ mod tests {
         Db::open_with(
             path,
             OpenOptions {
-                wal_full_fsync: false,
+                wal_full_fsync: true,
                 history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
@@ -1097,7 +1097,7 @@ mod tests {
             let mut db = Db::open_with(
                 &data,
                 OpenOptions {
-                    wal_full_fsync: false,
+                    wal_full_fsync: true,
                     history: HistoryOptions {
                         horizon: HistoryHorizon::Window(std::time::Duration::from_millis(1)),
                         cap_bytes: 1 << 30,

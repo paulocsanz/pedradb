@@ -27,7 +27,7 @@ fn open_nosync_autoflush(path: impl AsRef<std::path::Path>) -> Db {
     Db::open_with(
         path,
         OpenOptions {
-            wal_full_fsync: false,
+            wal_full_fsync: true,
             history: Default::default(),
             wal_recovery: Default::default(),
             sync: true,

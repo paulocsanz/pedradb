@@ -313,7 +313,7 @@ pub fn open_replica(replica_dir: impl AsRef<Path>, exclusive: bool) -> CoreResul
     Db::open_with(
         replica_dir,
         DbOpen {
-            wal_full_fsync: false,
+            wal_full_fsync: true,
             history: Default::default(),
             sync: true,
             auto_flush_bytes: None,
@@ -365,7 +365,7 @@ mod tests {
         Db::open_with(
             dir,
             OpenOptions {
-                wal_full_fsync: false,
+                wal_full_fsync: true,
                 history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,

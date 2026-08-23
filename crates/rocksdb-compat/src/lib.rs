@@ -189,10 +189,11 @@ pub struct Options {
     pub wal_recovery: WalRecoveryMode,
     /// Every WAL barrier uses the platform's strongest data class — on
     /// Darwin `fcntl(F_FULLFSYNC)` (the CMake-RocksDB `sync=true` class);
-    /// on Linux identical to the default. Default **false**: the
-    /// `fdatasync` class, matching `librocksdb-sys` builds (which map
-    /// `fdatasync`→`fsync` on Darwin and stay weak-class there). Power-cut
-    /// durability on Apple hardware needs this on (RFC-0036 addendum).
+    /// on Linux identical to the default. Default **true** (RFC-0036
+    /// addendum v2): `sync=true` means durable-Ok. `false` restores the
+    /// weak `fdatasync`/`fsync` class (what `librocksdb-sys` builds use on
+    /// Darwin) — ~120× faster per commit on Apple hardware, at the cost of
+    /// the power-cut durability claim.
     pub wal_full_fsync: bool,
     /// rust-rocksdb `enable_blob_files`. Default `false` (Rocks default).
     /// When true, values ≥ [`Self::min_blob_size`] spill to `VALUES.vlog`
@@ -250,7 +251,7 @@ impl Default for Options {
             auto_resume_transient: true,
             background_error_listener: None,
             wal_recovery: WalRecoveryMode::PointInTime,
-            wal_full_fsync: false,
+            wal_full_fsync: true,
             enable_blob_files: false,
             min_blob_size: 4096,
             blob_file_size: None,
@@ -323,8 +324,8 @@ impl Options {
         self
     }
 
-    /// Strongest-barrier WAL syncs (`F_FULLFSYNC` on Apple) for the whole
-    /// DB. See [`Options::wal_full_fsync`].
+    /// WAL barrier class switch for the whole DB. See
+    /// [`Options::wal_full_fsync`] (default true; `false` = weak class).
     pub fn set_wal_full_fsync(&mut self, v: bool) -> &mut Self {
         self.wal_full_fsync = v;
         self

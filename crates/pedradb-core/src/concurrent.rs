@@ -2267,7 +2267,7 @@ mod tests {
             let db = ConcurrentDb::open_with(
                 &dir,
                 OpenOptions {
-                                        wal_full_fsync: false,
+                                        wal_full_fsync: true,
                     history: Default::default(),
                     wal_recovery: Default::default(),
                     sync: false,
@@ -2307,7 +2307,7 @@ mod tests {
             let db = ConcurrentDb::open_with(
                 &dir,
                 OpenOptions {
-                                        wal_full_fsync: false,
+                                        wal_full_fsync: true,
                     history: Default::default(),
                     wal_recovery: Default::default(),
                     sync: false,
@@ -2357,7 +2357,7 @@ mod tests {
             let db = ConcurrentDb::open_with(
                 &dir,
                 OpenOptions {
-                                        wal_full_fsync: false,
+                                        wal_full_fsync: true,
                     history: Default::default(),
                     wal_recovery: Default::default(),
                     sync: false,
@@ -2412,7 +2412,7 @@ mod tests {
             let db = ConcurrentDb::open_with(
                 &dir,
                 OpenOptions {
-                                        wal_full_fsync: false,
+                                        wal_full_fsync: true,
                     history: Default::default(),
                     wal_recovery: Default::default(),
                     sync: false,
@@ -2466,7 +2466,7 @@ mod tests {
             let db = ConcurrentDb::open_with(
                 &dir,
                 OpenOptions {
-                                        wal_full_fsync: false,
+                                        wal_full_fsync: true,
                     history: Default::default(),
                     wal_recovery: Default::default(),
                     sync: false,
@@ -2501,7 +2501,7 @@ mod tests {
         ConcurrentDb::open_with(
             dir,
             OpenOptions {
-                                wal_full_fsync: false,
+                                wal_full_fsync: true,
                 history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
@@ -2523,7 +2523,7 @@ mod tests {
         let db = ConcurrentDb::open_with(
             &dir,
             OpenOptions {
-                                wal_full_fsync: false,
+                                wal_full_fsync: true,
                 history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
@@ -2549,7 +2549,7 @@ mod tests {
         let db = ConcurrentDb::open_with(
             &dir,
             OpenOptions {
-                                wal_full_fsync: false,
+                                wal_full_fsync: true,
                 history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: false,
@@ -2695,7 +2695,7 @@ mod tests {
         let db = ConcurrentDb::open_with(
             &dir,
             OpenOptions {
-                                wal_full_fsync: false,
+                                wal_full_fsync: true,
                 history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
@@ -3523,7 +3523,7 @@ mod tests {
             ConcurrentDb::open_with(
                 &dir,
                 OpenOptions {
-                                        wal_full_fsync: false,
+                                        wal_full_fsync: true,
                     history: Default::default(),
                     wal_recovery: Default::default(),
                     sync: true,
@@ -3822,7 +3822,7 @@ mod tests {
             sleep_us: Arc::clone(&sleep_us),
         };
         let opts = OpenOptions {
-                        wal_full_fsync: false,
+                        wal_full_fsync: true,
             history: Default::default(),
             wal_recovery: Default::default(),
             sync: true,
@@ -3887,7 +3887,7 @@ mod tests {
         let re = ConcurrentDb::open_with_env(
             &dir,
             OpenOptions {
-                                wal_full_fsync: false,
+                                wal_full_fsync: true,
                 sync: false,
                 ..opts
             },
@@ -3977,7 +3977,7 @@ mod tests {
         let re = ConcurrentDb::open_with(
             &dir,
             OpenOptions {
-                                wal_full_fsync: false,
+                                wal_full_fsync: true,
                 history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
@@ -4043,7 +4043,7 @@ mod tests {
         let db = ConcurrentDb::open_with(
             &dir,
             OpenOptions {
-                                wal_full_fsync: false,
+                                wal_full_fsync: true,
                 history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
@@ -4221,7 +4221,7 @@ mod tests {
         let db = ConcurrentDb::open_with(
             &dir,
             OpenOptions {
-                                wal_full_fsync: false,
+                                wal_full_fsync: true,
                 history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
@@ -4263,7 +4263,7 @@ mod tests {
         let db = ConcurrentDb::open_with(
             &dir,
             OpenOptions {
-                                wal_full_fsync: false,
+                                wal_full_fsync: true,
                 history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: false,
@@ -4340,7 +4340,7 @@ mod tests {
         let restored = ConcurrentDb::open_with(
             &dest,
             OpenOptions {
-                                wal_full_fsync: false,
+                                wal_full_fsync: true,
                 history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
@@ -4575,7 +4575,7 @@ mod tests {
         let db = ConcurrentDb::open_with(
             &dir,
             OpenOptions {
-                                wal_full_fsync: false,
+                                wal_full_fsync: true,
                 history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
@@ -4616,7 +4616,7 @@ mod tests {
         let db = ConcurrentDb::open_with(
             &dir,
             OpenOptions {
-                                wal_full_fsync: false,
+                                wal_full_fsync: true,
                 history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
@@ -4667,7 +4667,7 @@ mod tests {
         let db = ConcurrentDb::open_with(
             &dir,
             OpenOptions {
-                                wal_full_fsync: false,
+                                wal_full_fsync: true,
                 history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
@@ -4724,7 +4724,7 @@ mod tests {
         let db = ConcurrentDb::open_with(
             &dir,
             OpenOptions {
-                                wal_full_fsync: false,
+                                wal_full_fsync: true,
                 history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
@@ -4784,7 +4784,7 @@ mod tests {
         let db = ConcurrentDb::open_with(
             &dir,
             OpenOptions {
-                                wal_full_fsync: false,
+                                wal_full_fsync: true,
                 history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: false,
