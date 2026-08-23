@@ -1,7 +1,7 @@
 # RFC-0044: ≥ **5×** RocksDB **async** na mesma classe (não é o cartaz G1)
 
 **Status:** in-progress
-**Updated:** 2026-08-19
+**Updated:** 2026-08-23
 **Parents:** [0041](0041-2x-rocks-default.md) (cartaz = Pedra G1 vs Rocks `sync=false`),
 [0043](0043-high-level-2x-expanding-benches.md) (catálogo que só cresce),
 [AGENTS.md](../../AGENTS.md)
@@ -150,6 +150,11 @@ Não fecha (e não se mente):
       inalterado pelo fix P1.3 (esperado — batch writes); o alvo
       continua straddle na linha)
 - [ ] **P1.2** `kvrocks_set` / `kvrocks_blob_set` ≥ 5.0 — status: `doing`
+      (**rearm8 quieta 2026-08-23, `findings/2026-08-23-rearm8/`**: SET
+      **4,40/4,68/4,48 — 3/3 <5** (rearm7: 5,14 med mas 2/3; straddle real,
+      mediana agora abaixo); blob **1,64/1,79/1,70** — saiu de 0,99 para
+      ~1,7 (p50 compat 0,0 vs rocks 10,2 µs; máx 11–14 ms é o próprio
+      rocks). Nenhum fecha.
       (**2026-08-23 WiscKey wiring:** `set_enable_blob_files` /
       `set_min_blob_size` no longer no-ops — spill ≥4 KiB to `VALUES.vlog`.
       Vlog `append` was `sync_all` per record (would tank async); now 64 KiB
@@ -173,8 +178,13 @@ Não fecha (e não se mente):
       (`findings/2026-08-22-p13-rearm/`, load 12–15)**: SET longa 4,65
       (compat 1,97M→1,61M, peer plano — assinatura de load; a quieta
       re-armada decide), rounds 4,44/4,56/4,60; blob 1,47–1,80)
-- [ ] **P1.3** `kvrocks_get` ≥ 5.0 — status: `doing`
-      (**rearm7 quieta 2026-08-23**: **5,96/6,06/4,86 — med 5,96, 2/3** (r3
+- [x] **P1.3** `kvrocks_get` ≥ 5.0 — status: `done`
+      (**rearm8 quieta 2026-08-23, `findings/2026-08-23-rearm8/`, `wal-prealloc`
+      6c49252**: **5,465/6,074/5,710 — 3/3 ≥5, med 5,58 — FECHA**; a rodada
+      que faltava no rearm7 chegou com folga; peer estável 2,37–2,44 M,
+      compat 13,3–14,7 M. Bateria OFICIAL: gate 2× load<10, watchdog pico 8,
+      12 pernas load 7–8, peers `sync:false` `rocks-default`.
+      **rearm7 quieta 2026-08-23**: **5,96/6,06/4,86 — med 5,96, 2/3** (r3
       compat 15,4 M→12,1 M, peer estável); pelo padrão 3/3 **não fecha**,
       mas é a 1ª bateria quieta com mediana ≥5 — próxima bateria decide.
       Histórico: straddle: 20 M ops 4.4–5.5; 2 M load ~100 **5.50**; 2 M quieto
@@ -220,6 +230,12 @@ Não fecha (e não se mente):
       2.9–3.8; `deps_lock_prewrite` 0.94. Piso ≥5 para todos **não**
       alcançado — registrado sem maquiagem em `rfc0044-p2/quiet/`)
 - [ ] **P2.2** ycsb A–F ≥ 5.0 na coluna async — status: `doing`
+      (**rearm8 quieta 2026-08-23, `findings/2026-08-23-rearm8/`**: **E
+      5,18/5,38/5,49 — 3/3, 2ª bateria quieta consecutiva (med 5,44)** —
+      consolidado; **D 4,69/4,56/4,84 — 3/3 <5**; **A 3,47/4,48/4,64** — o
+      artifact r1 do rearm7 **sumiu** (máx r1 0,078 ms com a pré-alocação
+      WAL; era stall de extent 3,1 ms), r1 segue ~30% abaixo de r2/r3
+      (warmup, não stall), med 4,48; B 3,33 / C 4,23 / F 3,80.)
       (**rearm7 quieta 2026-08-23**: **E re-confirma 5,08/5,75/5,38 — 3/3**;
       D **5,19/5,42/4,72 med 5,19 (2/3)**; A r2/r3 **5,13/4,93** com r1
       =0,43 artifact (stall 3,1 ms *dentro* da perna — ver
@@ -276,10 +292,10 @@ Não fecha (e não se mente):
 | P0.4 | p0 | buffer async 64 KiB | done | `ASYNC_WAL_BUFFER` | 2026-08-19 |
 | P0.5 | p0 | set_mc50 ≥ 5× async | doing | quieto: **2.02 vs peer são** — não fecha; 3.4–9.2 eram peer doente | 2026-08-20 |
 | P1.1 | p1 | pipeline ≥ 5× | **done** | **rearm7 quieta 3/3 ≥5 (5,10/6,04/5,45), med 5,67** — fecha | 2026-08-23 |
-| P1.2 | p1 | set / blob ≥ 5× | doing | rearm7 quieta: SET 5,14 med (2/3, r1 4,20); blob 0,99 — SET na linha, blob longe | 2026-08-23 |
-| P1.3 | p1 | get ≥ 5× | doing | rearm7 quieta: **med 5,96, 2/3** (r3 4,86, peer estável) — 1ª quieta ≥5; não fecha sem 3/3 | 2026-08-23 |
+| P1.2 | p1 | set / blob ≥ 5× | doing | rearm8: SET 4,40/4,68/4,48 3/3 <5 (straddle); blob 1,64/1,79/1,70 (era 0,99) — nenhum fecha | 2026-08-23 |
+| P1.3 | p1 | get ≥ 5× | **done** | **rearm8 quieta 3/3 ≥5 (5,465/6,074/5,710), med 5,58 — fecha** | 2026-08-23 |
 | P2.1 | p2 | quiet 3× | **done** | **árbitro @ load 9.4**: E 10.5 e scan 7.4 fecham; SET 5.41 longo; resto 0.94–3.8 | 2026-08-20 |
-| P2.2 | p2 | ycsb A–F ≥ 5× async | doing | rearm7 quieta: **E 3/3 re-confirma (med 5,21)**; D 5,19 med 2/3; A 4,93 med (r1 artifact stall-extent WAL, fix pré-alocação em curso); B 3,91/C 4,33/F 3,69 | 2026-08-23 |
+| P2.2 | p2 | ycsb A–F ≥ 5× async | doing | rearm8: E 3/3 (2ª consecutiva, med 5,44); D 4,56–4,84 3/3 <5; A artifact r1 sumiu (med 4,48); B 3,33/C 4,23/F 3,80 | 2026-08-23 |
 | P2.3 | p2 | script não default 5× | done | tikv_ycsb_parity_v0.sh | 2026-08-19 |
 
 ## Acceptance Criteria

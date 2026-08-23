@@ -1,0 +1,552 @@
+diff --git a/crates/pedradb-core/src/memtable.rs b/crates/pedradb-core/src/memtable.rs
+index fd4f931..5f997ad 100644
+--- a/crates/pedradb-core/src/memtable.rs
++++ b/crates/pedradb-core/src/memtable.rs
+@@ -134,9 +134,48 @@ pub(crate) struct MemInternalMerge<'a> {
+ pub(crate) struct MemInternalIdx<'a> {
+     map: std::iter::Peekable<MemInternalRange<'a>>,
+     idx: std::iter::Peekable<std::collections::btree_map::Range<'a, Bytes, usize>>,
++    suffix: std::iter::Peekable<SuffixRange<'a>>,
+     tail: &'a [Version],
+ }
+ 
++/// User-key-ascending walk of the tail's run suffix (at most one version
++/// per key; bounds checked per item — the slice order makes both checks
++/// exact). Returned by [`MemTable::iter_internal_iter_at`].
++struct SuffixRange<'a> {
++    it: std::slice::Iter<'a, Version>,
++    start: Bound<&'a [u8]>,
++    end: Bound<&'a [u8]>,
++}
++
++impl<'a> Iterator for SuffixRange<'a> {
++    type Item = (&'a InternalKey, &'a Bytes);
++
++    fn next(&mut self) -> Option<Self::Item> {
++        loop {
++            let v = self.it.next()?;
++            let uk = v.key.user_key.as_ref();
++            let after_start = match self.start {
++                Bound::Unbounded => true,
++                Bound::Included(s) => uk >= s,
++                Bound::Excluded(s) => uk > s,
++            };
++            if !after_start {
++                continue;
++            }
++            let before_end = match self.end {
++                Bound::Unbounded => true,
++                Bound::Included(e) => uk <= e,
++                Bound::Excluded(e) => uk < e,
++            };
++            if !before_end {
++                // Ascending: everything past `end` stays out of range.
++                return None;
++            }
++            return Some((&v.key, &v.value));
++        }
++    }
++}
++
+ /// Map-only or map+tail merge. Returned by [`MemTable::iter_internal_range`].
+ pub(crate) enum MemInternalIter<'a> {
+     Map(MemInternalRange<'a>),
+@@ -182,21 +221,53 @@ impl<'a> Iterator for MemInternalIdx<'a> {
+     type Item = (&'a InternalKey, &'a Bytes);
+ 
+     fn next(&mut self) -> Option<Self::Item> {
+-        let tail_item = self
+-            .idx
+-            .peek()
+-            .map(|(_, &i)| (&self.tail[i].key, &self.tail[i].value));
+-        match (self.map.peek(), tail_item) {
+-            (None, None) => None,
+-            (Some(_), None) => self.map.next(),
+-            (None, Some(_)) => {
+-                let (_, &i) = self.idx.next()?;
+-                Some((&self.tail[i].key, &self.tail[i].value))
++        // Full internal order (user asc, seq desc): the suffix entry of a
++        // key is newer than its `tail_idx` entry, so ties order suffix →
++        // idx → map, matching the map-before-idx tie of the 2-way merge.
++        let m = self.map.peek().map(|(k, _)| k);
++        let i = self.idx.peek().map(|(_, &p)| &self.tail[p].key);
++        let s = self.suffix.peek().map(|(k, _)| *k);
++        match (m, i, s) {
++            (None, None, None) => None,
++            (Some(_), None, None) => self.map.next(),
++            (None, Some(_), None) => {
++                let (_, &p) = self.idx.next()?;
++                Some((&self.tail[p].key, &self.tail[p].value))
+             }
+-            (Some(m), Some(t)) => {
+-                if t.0 < m.0 {
+-                    let (_, &i) = self.idx.next()?;
+-                    Some((&self.tail[i].key, &self.tail[i].value))
++            (None, None, Some(_)) => self.suffix.next(),
++            (Some(a), Some(b), None) => {
++                if b < a {
++                    let (_, &p) = self.idx.next()?;
++                    Some((&self.tail[p].key, &self.tail[p].value))
++                } else {
++                    self.map.next()
++                }
++            }
++            (Some(a), None, Some(c)) => {
++                if c < a {
++                    self.suffix.next()
++                } else {
++                    self.map.next()
++                }
++            }
++            (None, Some(b), Some(c)) => {
++                if c < b {
++                    self.suffix.next()
++                } else {
++                    let (_, &p) = self.idx.next()?;
++                    Some((&self.tail[p].key, &self.tail[p].value))
++                }
++            }
++            (Some(a), Some(b), Some(c)) => {
++                if c < b {
++                    if c < a {
++                        self.suffix.next()
++                    } else {
++                        self.map.next()
++                    }
++                } else if b < a {
++                    let (_, &p) = self.idx.next()?;
++                    Some((&self.tail[p].key, &self.tail[p].value))
+                 } else {
+                     self.map.next()
+                 }
+@@ -231,7 +302,20 @@ pub struct MemTable {
+     /// Recent inserts not yet in `map` (RFC-0041: apply Ok path is O(1) push).
+     tail: Vec<Version>,
+     /// Newest tail index per user key (point/MVCC without a linear tail walk).
++    /// Covers only `tail[..run_start]` — the ascending-run suffix beyond
++    /// `run_start` is looked up by binary search instead (RFC-0041 P1.3:
++    /// append-only shapes like raftlog skip the per-op BTree insert).
+     tail_idx: BTreeMap<Bytes, usize>,
++    /// Start of the strictly-ascending user-key run at the tail's end.
++    /// `tail[run_start..]` has at most one version per key and none of its
++    /// keys are in `tail_idx`. An out-of-order insert spills the run into
++    /// `tail_idx` (sorted bulk — O(1) amortized per entry) and restarts it.
++    run_start: usize,
++    /// Consecutive strictly-ascending inserts ending at the tail. Only
++    /// streaks longer than [`RUN_ARM`] enter suffix mode; shorter ones keep
++    /// the exact pre-run cost, so uniform/overwrite shapes (which reset the
++    /// streak every op or two) never pay a spill for a 1-entry run.
++    streak: usize,
+     /// Highest sequence in `tail` (fast-path guard: snapshot ≥ it ⇒ only the
+     /// newest version per key can be visible).
+     tail_max_seq: SequenceNumber,
+@@ -251,6 +335,8 @@ impl Clone for MemTable {
+             map: self.map.clone(),
+             tail: self.tail.clone(),
+             tail_idx: self.tail_idx.clone(),
++            run_start: self.run_start,
++            streak: self.streak,
+             tail_max_seq: self.tail_max_seq,
+             tail_ord: Mutex::new(None),
+             approx_bytes: self.approx_bytes,
+@@ -277,6 +363,12 @@ fn ver_cmp(
+     }
+ }
+ 
++/// Ascending-streak length before the tail's run suffix goes un-indexed
++/// (see [`MemTable::run_start`]). Short streaks index normally so random-key
++/// shapes never pay a spill; append-only shapes amortize the first `RUN_ARM`
++/// indexed ops over an unbounded run.
++const RUN_ARM: usize = 8;
++
+ impl MemTable {
+     /// Create an empty MemTable.
+     #[must_use]
+@@ -314,6 +406,47 @@ impl MemTable {
+         }
+     }
+ 
++    /// Index the ascending-run suffix into `tail_idx` (sorted inserts land
++    /// in the rightmost leaf — O(1) amortized) and restart the run.
++    fn spill_run_suffix(&mut self) {
++        for i in self.run_start..self.tail.len() {
++            let k = self.tail[i].key.user_key.clone();
++            self.tail_idx.insert(k, i);
++        }
++        self.run_start = self.tail.len();
++    }
++
++    /// Tail append with run-suffix bookkeeping. Ops on a strictly-ascending
++    /// streak longer than [`RUN_ARM`] skip the per-op `tail_idx` insert and
++    /// join the un-indexed suffix (read back by binary search); everything
++    /// else keeps the exact pre-run indexing cost, spilling an interrupted
++    /// armed run first.
++    fn push_tail(&mut self, key: InternalKey, value: Bytes) {
++        self.tail_max_seq = self.tail_max_seq.max(key.sequence);
++        let ascending = self
++            .tail
++            .last()
++            .is_some_and(|last| last.key.user_key < key.user_key);
++        self.streak = if ascending { self.streak + 1 } else { 0 };
++        if self.streak > RUN_ARM {
++            // Armed: the op joins the un-indexed suffix (`run_start` was
++            // pinned to this op's position when the predecessor — an
++            // unarmed op — pushed; unarmed pushes reset `run_start` to the
++            // new tail length, so an empty suffix arms exactly here).
++            self.tail.push(Version { key, value });
++            return;
++        }
++        if self.streak == 0 {
++            // Out-of-order: retire an interrupted armed suffix into the
++            // index (no-op while the suffix is empty).
++            self.spill_run_suffix();
++        }
++        self.tail_idx.insert(key.user_key.clone(), self.tail.len());
++        self.tail.push(Version { key, value });
++        // Indexed op: the suffix stays empty.
++        self.run_start = self.tail.len();
++    }
++
+     /// Fold [`Self::tail`] into the BTree (SST write / fold / tests).
+     pub fn spill_tail(&mut self) {
+         self.spill_tail_with_gc(None);
+@@ -325,6 +458,8 @@ impl MemTable {
+     pub fn spill_tail_with_gc(&mut self, floor: Option<SequenceNumber>) {
+         self.invalidate_tail_ord();
+         self.tail_idx.clear();
++        self.run_start = 0;
++        self.streak = 0;
+         self.tail_max_seq = 0;
+         let tail = std::mem::take(&mut self.tail);
+         for v in tail {
+@@ -400,9 +535,7 @@ impl MemTable {
+             self.range_tombstones = self.range_tombstones.saturating_add(1);
+         }
+         self.invalidate_tail_ord();
+-        self.tail_max_seq = self.tail_max_seq.max(key.sequence);
+-        self.tail_idx.insert(key.user_key.clone(), self.tail.len());
+-        self.tail.push(Version { key, value });
++        self.push_tail(key, value);
+     }
+ 
+     /// Batch insert: one `tail_ord` invalidate (RFC-0044 P1.1 pipeline).
+@@ -431,9 +564,7 @@ impl MemTable {
+             if is_rd {
+                 self.range_tombstones = self.range_tombstones.saturating_add(1);
+             }
+-            self.tail_max_seq = self.tail_max_seq.max(key.sequence);
+-            self.tail_idx.insert(key.user_key.clone(), self.tail.len());
+-            self.tail.push(Version { key, value });
++            self.push_tail(key, value);
+             any = true;
+         }
+         if any {
+@@ -585,11 +716,7 @@ impl MemTable {
+     /// newest-first version list, counting what was dropped. Reads at any
+     /// sequence ≥ floor still resolve exactly; reads below fail closed via
+     /// the caller's watermark ratchet (never silent-wrong).
+-    fn gc_below_floor(
+-        list: &mut VecDeque<Version>,
+-        floor: SequenceNumber,
+-        dropped: &mut Dropped,
+-    ) {
++    fn gc_below_floor(list: &mut VecDeque<Version>, floor: SequenceNumber, dropped: &mut Dropped) {
+         // First index with sequence ≤ floor ([0, idx) all newer than floor).
+         let (mut lo, mut hi) = (0usize, list.len());
+         while lo < hi {
+@@ -697,15 +824,17 @@ impl MemTable {
+     }
+ 
+     fn tail_best(&self, user_key: &[u8], snapshot: SequenceNumber) -> Option<&Version> {
++        // Ascending-run suffix: at most one version per key — binary search.
++        let mut best = self.suffix_best(user_key, snapshot);
+         let Some(&i) = self.tail_idx.get(user_key) else {
+-            return None;
++            return best;
+         };
+         let newest = &self.tail[i];
+         if newest.key.sequence <= snapshot {
+-            return Some(newest);
++            return Some(best.filter(|b| version_newer(b, newest)).unwrap_or(newest));
+         }
+-        let mut best: Option<&Version> = None;
+-        for v in &self.tail {
++        // Older versions of this key may sit in the pre-run tail.
++        for v in &self.tail[..self.run_start] {
+             if v.key.user_key.as_ref() != user_key || v.key.sequence > snapshot {
+                 continue;
+             }
+@@ -716,6 +845,16 @@ impl MemTable {
+         best
+     }
+ 
++    /// Newest suffix version of `user_key` visible at `snapshot`. The run is
++    /// strictly ascending, so a binary search is exact and there is at most
++    /// one version to consider.
++    fn suffix_best(&self, user_key: &[u8], snapshot: SequenceNumber) -> Option<&Version> {
++        let suffix = &self.tail[self.run_start..];
++        let pos = suffix.partition_point(|v| v.key.user_key.as_ref() < user_key);
++        let v = suffix.get(pos)?;
++        (v.key.user_key.as_ref() == user_key && v.key.sequence <= snapshot).then_some(v)
++    }
++
+     /// Append range tombstones visible at `snapshot` (O(n) — only call when
+     /// [`Self::has_range_tombstones`] is true).
+     pub fn collect_range_tombstones(
+@@ -865,9 +1004,23 @@ impl MemTable {
+             return self.iter_internal_iter(start, end);
+         }
+         let map = self.iter_internal_range_cursor(start, end);
++        // Skip the obviously-before-start part of the run suffix; bounds are
++        // re-checked per item (Excluded starts need the equality case).
++        let suffix = &self.tail[self.run_start..];
++        let start_ref = match start {
++            Bound::Included(s) | Bound::Excluded(s) => s,
++            Bound::Unbounded => &[],
++        };
++        let pos = suffix.partition_point(|v| v.key.user_key.as_ref() < start_ref);
+         MemInternalIter::Idx(MemInternalIdx {
+             map: map.peekable(),
+             idx: self.tail_idx.range::<[u8], _>((start, end)).peekable(),
++            suffix: SuffixRange {
++                it: suffix[pos..].iter(),
++                start,
++                end,
++            }
++            .peekable(),
+             tail: &self.tail,
+         })
+     }
+@@ -928,6 +1081,21 @@ impl MemTable {
+                 .filter(|(uk, _)| prefix.is_empty() || uk.starts_with(prefix))
+                 .map(|(uk, _)| uk.clone()),
+         );
++        // Ascending-run suffix (not in `tail_idx`): binary-search the start.
++        let before_end = |uk: &[u8]| match end_b {
++            Bound::Included(e) => uk <= e,
++            Bound::Excluded(e) => uk < e,
++            Bound::Unbounded => true,
++        };
++        let suffix = &self.tail[self.run_start..];
++        let pos = suffix.partition_point(|v| v.key.user_key.as_ref() < prefix);
++        keys.extend(
++            suffix[pos..]
++                .iter()
++                .take_while(|v| before_end(v.key.user_key.as_ref()))
++                .filter(|v| prefix.is_empty() || v.key.user_key.starts_with(prefix))
++                .map(|v| v.key.user_key.clone()),
++        );
+         keys.sort();
+         keys.dedup();
+         for uk in keys.into_iter().rev() {
+@@ -988,8 +1156,7 @@ impl MemTable {
+                 continue;
+             }
+             last = Some(k.user_key.clone());
+-            if k.kind == ValueType::Value
+-                && !self.range_deleted(&k.user_key, k.sequence, snapshot)
++            if k.kind == ValueType::Value && !self.range_deleted(&k.user_key, k.sequence, snapshot)
+             {
+                 out.push((k.user_key.clone(), v.clone()));
+             }
+@@ -1003,6 +1170,161 @@ mod tests {
+     use super::*;
+     use std::ops::Bound;
+ 
++    #[test]
++    fn run_suffix_skips_tail_idx_and_reads_back() {
++        let mut mt = MemTable::new();
++        for seq in 1..=16u64 {
++            mt.insert(
++                InternalKey::new(
++                    Bytes::from(format!("raftlog/{seq:08}")),
++                    seq,
++                    ValueType::Value,
++                ),
++                Bytes::from(format!("v{seq}")),
++            );
++        }
++        // Armed pure-ascending run: only the first RUN_ARM+1 ops are
++        // indexed (the first op starts the streak, it does not extend it).
++        assert_eq!(
++            mt.tail_idx.len(),
++            RUN_ARM + 1,
++            "armed run should skip tail_idx"
++        );
++        assert_eq!(mt.run_start, RUN_ARM + 1);
++        assert_eq!(mt.streak, 15);
++        // Point reads see every key, indexed or suffix (binary-search path).
++        for seq in 1..=16u64 {
++            assert_eq!(
++                mt.get(format!("raftlog/{seq:08}").as_bytes(), seq),
++                Lookup::Found(Bytes::from(format!("v{seq}")))
++            );
++        }
++        // Latest-snapshot range iter sees them all, in order.
++        let got: Vec<Bytes> = mt
++            .range_snapshot(Bound::Unbounded, Bound::Unbounded, 16)
++            .map(|(k, _)| k)
++            .collect();
++        assert_eq!(got.len(), 16);
++        assert!(got.windows(2).all(|w| w[0] < w[1]));
++        // Prefix (latest-under-prefix) path too.
++        let last = mt.last_visible_under_prefix(b"raftlog/", 16, None).unwrap();
++        assert_eq!(last.0, Bytes::from_static(b"raftlog/00000016"));
++    }
++
++    #[test]
++    fn run_suffix_out_of_order_spills_and_stays_correct() {
++        let mut mt = MemTable::new();
++        for seq in 1..=12u64 {
++            mt.put(format!("k{seq:02}"), seq, Bytes::from_static(b"a"));
++        }
++        // Armed: first RUN_ARM+1 indexed, the rest in the run suffix.
++        assert_eq!(mt.tail_idx.len(), RUN_ARM + 1);
++        assert_eq!(mt.tail.len() - mt.run_start, 12 - RUN_ARM - 1);
++        // Out-of-order write: spills the suffix into tail_idx, restarts it.
++        mt.put(b"k02".as_slice(), 13, Bytes::from_static(b"b"));
++        assert_eq!(
++            mt.tail_idx.len(),
++            12,
++            "spilled; k02 re-points to its newest tail slot"
++        );
++        assert_eq!(
++            mt.tail.len() - mt.run_start,
++            0,
++            "straggler is indexed, suffix empty"
++        );
++        // Every other key reads back unchanged; the straggler wins for k02.
++        for k in ["k01", "k03", "k04", "k12"] {
++            assert_eq!(
++                mt.get(k.as_bytes(), 13),
++                Lookup::Found(Bytes::from_static(b"a"))
++            );
++        }
++        assert_eq!(mt.get(b"k02", 13), Lookup::Found(Bytes::from_static(b"b")));
++        // Older snapshot still sees the pre-run version (MVCC across runs).
++        assert_eq!(mt.get(b"k02", 12), Lookup::Found(Bytes::from_static(b"a")));
++        // Range snapshot sees each user key once, newest visible value.
++        let snap: Vec<(Bytes, Bytes)> = mt
++            .range_snapshot(Bound::Unbounded, Bound::Unbounded, 13)
++            .collect();
++        assert_eq!(snap.len(), 12);
++        assert!(snap.contains(&(Bytes::from_static(b"k02"), Bytes::from_static(b"b"))));
++        let snap5: Vec<(Bytes, Bytes)> = mt
++            .range_snapshot(Bound::Unbounded, Bound::Unbounded, 12)
++            .collect();
++        assert!(snap5.contains(&(Bytes::from_static(b"k02"), Bytes::from_static(b"a"))));
++    }
++
++    #[test]
++    fn run_suffix_cross_run_overwrite_latest_wins() {
++        let mut mt = MemTable::new();
++        // Run 1: k01..k09 ascending (arms at RUN_ARM), then an out-of-order
++        // k01' spills the armed suffix.
++        for seq in 1..=10u64 {
++            mt.put(format!("k{seq:02}"), seq, Bytes::from_static(b"old"));
++        }
++        assert!(mt.tail.len() - mt.run_start >= 1, "run should be armed");
++        mt.put(b"k01".as_slice(), 11, Bytes::from_static(b"new1"));
++        // Run 2 grows ascending from the straggler.
++        mt.put(b"k11".as_slice(), 12, Bytes::from_static(b"run2"));
++        assert_eq!(
++            mt.get(b"k01", 12),
++            Lookup::Found(Bytes::from_static(b"new1"))
++        );
++        assert_eq!(
++            mt.get(b"k01", 10),
++            Lookup::Found(Bytes::from_static(b"old"))
++        );
++        // Scan order stays ascending by user key, newest visible value per key.
++        let snap: Vec<(Bytes, Bytes)> = mt
++            .range_snapshot(Bound::Unbounded, Bound::Unbounded, 12)
++            .collect();
++        assert_eq!(snap.len(), 11);
++        assert_eq!(
++            snap[0],
++            (Bytes::from_static(b"k01"), Bytes::from_static(b"new1"))
++        );
++        assert_eq!(
++            snap[10],
++            (Bytes::from_static(b"k11"), Bytes::from_static(b"run2"))
++        );
++        // Bounded range across the suffix boundary.
++        let mid: Vec<Bytes> = mt
++            .range_snapshot(
++                Bound::Included(b"k02".as_slice()),
++                Bound::Included(b"k03".as_slice()),
++                12,
++            )
++            .map(|(k, _)| k)
++            .collect();
++        assert_eq!(
++            mid,
++            vec![Bytes::from_static(b"k02"), Bytes::from_static(b"k03")]
++        );
++    }
++
++    #[test]
++    fn run_suffix_survives_spill_and_clone() {
++        let mut mt = MemTable::new();
++        for seq in 1..=12u64 {
++            mt.put(format!("k{seq:02}"), seq, Bytes::from_static(b"v"));
++        }
++        let cl = mt.clone();
++        assert_eq!(cl.run_start, mt.run_start);
++        assert_eq!(cl.streak, mt.streak);
++        assert_eq!(cl.get(b"k03", 12), Lookup::Found(Bytes::from_static(b"v")));
++        assert_eq!(cl.tail_idx.len(), RUN_ARM + 1);
++        // Spill folds the run into the map; run state resets.
++        mt.spill_tail();
++        assert_eq!(mt.run_start, 0);
++        assert_eq!(mt.streak, 0);
++        assert!(mt.tail.is_empty());
++        assert_eq!(mt.get(b"k03", 12), Lookup::Found(Bytes::from_static(b"v")));
++        // Inserts after spill re-arm only past RUN_ARM.
++        mt.put(b"k20".as_slice(), 13, Bytes::from_static(b"w"));
++        assert_eq!(mt.tail_idx.len(), 1);
++        assert_eq!(mt.get(b"k20", 13), Lookup::Found(Bytes::from_static(b"w")));
++    }
++
+     /// RFC-0044 P2.2 micro: deps_raftlog memtable floor — `insert_many`
+     /// (tail append + tail_idx index) only, no WAL/Db/publish. Run:
+     /// `cargo test -p pedradb-core --lib --release mem_insert_raftlog_micro -- --ignored --nocapture`
+@@ -1271,13 +1593,7 @@ mod tests {
+         mt.spill_tail_with_gc(Some(5));
+         // Keep-set: {seq > 5} ∪ {newest ≤ 5} = {6, 7, 8, 5}
+         assert_eq!(mt.len(), 4);
+-        for (seq, want) in [
+-            (5u64, "v5"),
+-            (6, "v6"),
+-            (7, "v7"),
+-            (8, "v8"),
+-            (100, "v8"),
+-        ] {
++        for (seq, want) in [(5u64, "v5"), (6, "v6"), (7, "v7"), (8, "v8"), (100, "v8")] {
+             assert_eq!(
+                 mt.get(b"hot", seq),
+                 Lookup::Found(Bytes::from_static(want.as_bytes())),
+@@ -1306,7 +1622,10 @@ mod tests {
+         mt.put(b"k".as_slice(), 2, b"new".as_slice());
+         mt.spill_tail_with_gc(Some(2));
+         // newest-≤-2 = v2; v1 dropped → back to Versions::One
+-        assert!(matches!(mt.map.get(b"k".as_slice()), Some(Versions::One(_))));
++        assert!(matches!(
++            mt.map.get(b"k".as_slice()),
++            Some(Versions::One(_))
++        ));
+         assert_eq!(mt.len(), 1);
+         assert_eq!(mt.get(b"k", 2), Lookup::Found(Bytes::from_static(b"new")));
+     }
+@@ -1350,7 +1669,10 @@ mod tests {
+         a.absorb(b);
+         let el = t0.elapsed();
+         assert_eq!(a.len(), 40_000);
+-        assert_eq!(a.get(b"hot", 40_000), Lookup::Found(Bytes::from_static(b"x")));
++        assert_eq!(
++            a.get(b"hot", 40_000),
++            Lookup::Found(Bytes::from_static(b"x"))
++        );
+         assert!(
+             el < Duration::from_millis(250),
+             "absorb of 40k hot-key versions took {el:?} — front-insert regressed"
