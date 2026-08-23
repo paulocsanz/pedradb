@@ -97,7 +97,7 @@ impl Engine for CompatEngine {
     }
     fn durability(&self) -> &'static str {
         if self.db.write_sync() {
-            "fdatasync-before-ok (pedradb-core WAL; RFC-0001/0036)"
+            "strongest-data-barrier-before-ok (F_FULLFSYNC on Darwin, fdatasync on Linux; RFC-0001/0036 v2)"
         } else {
             "async-wal (PEDRA_PARITY_ASYNC=1; WAL write, no fdatasync — NOT G1, not official)"
         }
