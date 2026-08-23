@@ -114,6 +114,11 @@
 - Nota de numeração: F208–F210 da tabela pertencem à wave 8 (unsafe) da
   sessão paralela; os desta wave foram renumerados F211–F213 na
   consolidação (sequência única do LEDGER).
+- Backlog #2 (enforce_cap × occ_registry_floor) **REFUTADO** por derivação:
+  os floors F201/F211 mantêm `archive_floor ≤ snapshot` OCC aberto e a
+  fronteira de `ensure_snapshot_readable` é `<` estrito; guarda de
+  regressão `k39_defense_cap_gc_holds_open_occ_snapshot` verde nos dois
+  lados (dead-end F214 no LEDGER).
 
 - Refutados na onda (dead ends com análise): fadvise overflow→"até EOF" (equivalente ao clampe; único caller passa u32), trunc `as u32` em write >4 GiB (escrita parcial é contrato de `Write`), EINTR no fdatasync (propagar Err é correto); tx/occ: skip de commit com `last_sequence()==snap` defendido pela write lock.
 
@@ -173,7 +178,7 @@
 
 ## Acceptance Criteria
 
-- **Tests:** `pedradb-core --lib` (395 passando — incluindo `point_in_time_reports_resync_reanchor`, `zero_header_journals_and_pit_reports`, `torn_tail_*`, theorem do recover kernel, sweep `explode` com os kinds novos e a simetria de blocos), `pedradb-io-uring` (env + `cqe_kernel` U1 as-is vs unique), `rocksdb-compat` (41+7), harness `compat_hunt` (**21**, c1..c14 + controles) + `core_hunt` (**63**, k1..k38 + controles + diferencial k22) + oracle `wal_crc_flip_is_fail_stop_or_clean` — todos verdes com os fixes; os de hunt falham sem eles (F196–F198, F200–F207, F211–F213 demonstrados RED→GREEN; F199/F203 guardas/fixes condicionados a host Linux conforme fichas).
+- **Tests:** `pedradb-core --lib` (395 passando — incluindo `point_in_time_reports_resync_reanchor`, `zero_header_journals_and_pit_reports`, `torn_tail_*`, theorem do recover kernel, sweep `explode` com os kinds novos e a simetria de blocos), `pedradb-io-uring` (env + `cqe_kernel` U1 as-is vs unique), `rocksdb-compat` (41+7), harness `compat_hunt` (**21**, c1..c14 + controles) + `core_hunt` (**64**, k1..k39 + controles + diferencial k22; k39 é defesa/controle do backlog refutado #2) + oracle `wal_crc_flip_is_fail_stop_or_clean` — todos verdes com os fixes; os de hunt falham sem eles (F196–F198, F200–F207, F211–F213 demonstrados RED→GREEN; F199/F203 guardas/fixes condicionados a host Linux conforme fichas).
 - **Telemetry / Analytics:** none — correção de corretude; o `CORRUPTLOG` (RFC-0038) recebe eventos `resync` e `zero_header` (P1.2).
 - **Documentation:** este RFC + fichas F165–F213 em `determinismo/pedradb-dst/findings/` (+ dead ends F189/sst/io-uring registrados) + LEDGER do hunt 2026-08-21/22/23 (waves 1–7 + backlog wave 8) + patches `core-hunt-20260822.patch` (waves 1–3), `core-hunt-20260822-wave4.patch` (delta da wave 4), `core-hunt-20260822-wave5.patch` (delta da wave 5) e `core-hunt-20260822-wave6.patch` (delta da wave 6) e `core-hunt-20260822-wave7.patch` (delta da wave 7: F207/F211/F212/F213, 6 hunks, apply/reverse-apply verificados).
 - **Screenshots:** backend-only.
