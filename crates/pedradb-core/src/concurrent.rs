@@ -1807,7 +1807,7 @@ impl<E: Env> ConcurrentDb<E> {
         }
         let mut g = self.inner.write();
         g.finish_flush_pipeline()?;
-        // F209: explicit flush is a CHANGELOG persist point (same tail as
+        // F212: explicit flush is a CHANGELOG persist point (same tail as
         // `Db::flush`) — the rotate above dropped the WAL rebuild source
         // for the flushed keys.
         g.persist_changelog_after_explicit_flush();

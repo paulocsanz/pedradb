@@ -1950,7 +1950,7 @@ impl<E: Env> Db<E> {
     /// aged out, pin-aware, and archives what leaves (P0.2). Returns
     /// `(floor, archive_first)`.
     fn auto_gc_floor(&self) -> Option<(SequenceNumber, bool)> {
-        // F208: with no pins the floor is capped at the published sequence —
+        // F211: with no pins the floor is capped at the published sequence —
         // `last_sequence()` counts applied-but-unpublished writes (write-group
         // off-lock window) and would push `earliest_readable_seq` above
         // `published_seq`, failing visible-snapshot reads until publish.
@@ -4339,7 +4339,7 @@ impl<E: Env> Db<E> {
     /// # Errors
     /// I/O while flushing or rewriting SSTs.
     pub fn compact_reclaim(&mut self) -> Result<()> {
-        // F208 (auto_gc_floor): cap the no-pin floor at the published
+        // F211 (auto_gc_floor): cap the no-pin floor at the published
         // sequence — `last_sequence()` counts applied-but-unpublished writes.
         let oldest = self
             .oldest_pinned_sequence()
@@ -6184,7 +6184,7 @@ impl<E: Env> Db<E> {
                     .fetch_add(t1.elapsed().as_nanos() as u64, Ordering::Relaxed);
             }
         }
-        // F210: feed the non-lazy change log on the async path too — the
+        // F213: feed the non-lazy change log on the async path too — the
         // write is visible via `get` once published; `commit_ops_with`
         // extends regardless of sync, and a later durable commit would
         // otherwise persist a CHANGELOG that never contains this event.
