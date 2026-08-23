@@ -54,8 +54,9 @@ pub struct Wal<F: EnvFile = <StdEnv as Env>::File> {
     /// Every WAL barrier on this DB uses the platform's strongest data
     /// class ([`EnvFile::sync_data_strong`]) — on Darwin
     /// `fcntl(F_FULLFSYNC)`, the CMake-RocksDB `WriteOptions.sync` class.
-    /// Default false: `fdatasync` class, matching the linked
-    /// `librocksdb-sys` peer (RFC-0036 addendum; `OpenOptions::wal_full_fsync`).
+    /// Set from [`crate::OpenOptions::wal_full_fsync`] (default **true**,
+    /// RFC-0036 addendum v2); `false` = `fdatasync` weak class, the
+    /// `librocksdb-sys` crate-build class (dev opt-out on Apple hardware).
     full_fsync: bool,
 }
 

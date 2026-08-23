@@ -21,12 +21,12 @@ pub trait EnvFile: Read + Write + Seek {
     ///
     /// Default: same barrier class as [`Self::sync_data`] (sim / DST envs
     /// inherit it — fault seams see the same op). `File` on Darwin uses std
-    /// `File::sync_data` = `fcntl(F_FULLFSYNC)` (~5 ms here), which is the
+    /// `File::sync_data` = `fcntl(F_FULLFSYNC)` (~4 ms here), which is the
     /// class a CMake build of RocksDB uses for `WriteOptions.sync`
     /// (`HAVE_FULLFSYNC`); `librocksdb-sys` builds without that macro stay
-    /// on `fsync`, the same weak class as the default. On Linux the two are
-    /// the same barrier (`fdatasync` is a full barrier there). Opt-in via
-    /// `OpenOptions::wal_full_fsync`.
+    /// on `fsync`, the weak class. On Linux the two are the same barrier
+    /// (`fdatasync` is a full barrier there). The WAL uses this class by
+    /// default ([`OpenOptions::wal_full_fsync`], RFC-0036 addendum v2).
     ///
     /// # Errors
     /// Underlying I/O.
@@ -225,8 +225,9 @@ impl EnvFile for File {
     /// is std `File::sync_data` = `fcntl(F_FULLFSYNC)` — the class a CMake
     /// build of RocksDB uses for `WriteOptions.sync` (`HAVE_FULLFSYNC`). On
     /// Linux std `sync_data` is `fdatasync`, already a full barrier — the
-    /// strong and default classes are identical there. Opt-in per DB via
-    /// `OpenOptions::wal_full_fsync` (RFC-0036 addendum).
+    /// strong and default classes are identical there. The WAL barrier uses
+    /// this class by default (`OpenOptions::wal_full_fsync`, RFC-0036
+    /// addendum v2).
     fn sync_data_strong(&mut self) -> io::Result<()> {
         File::sync_data(self)
     }

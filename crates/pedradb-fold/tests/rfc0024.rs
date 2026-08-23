@@ -30,7 +30,7 @@ fn temp() -> PathBuf {
 
 fn opts() -> OpenOptions {
     OpenOptions {
-        wal_full_fsync: false,
+        wal_full_fsync: true,
         history: Default::default(),
         sync: true,
         auto_flush_bytes: None,

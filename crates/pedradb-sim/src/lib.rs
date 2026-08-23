@@ -90,7 +90,7 @@ impl FaultEnv {
         Db::open_with(
             &self.dir,
             DbOpen {
-                wal_full_fsync: false,
+                wal_full_fsync: true,
                 history: Default::default(),
                 sync,
                 auto_flush_bytes: None,
@@ -241,7 +241,7 @@ mod tests {
 
     fn opts() -> OpenOptions {
         OpenOptions {
-            wal_full_fsync: false,
+            wal_full_fsync: true,
             history: Default::default(),
             wal_recovery: Default::default(),
             sync: true,
@@ -364,7 +364,7 @@ mod tests {
         let big_c = vec![0xCCu8; 2048];
 
         let vlog_opts = OpenOptions {
-            wal_full_fsync: false,
+            wal_full_fsync: true,
             history: Default::default(),
             wal_recovery: Default::default(),
             sync: true,
@@ -503,7 +503,7 @@ mod tests {
         let mut silent_wrong = 0u64;
 
         let vlog_opts = OpenOptions {
-            wal_full_fsync: false,
+            wal_full_fsync: true,
             history: Default::default(),
             wal_recovery: Default::default(),
             sync: true,
@@ -619,7 +619,7 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
         let env = FailingEnv::passing();
         let opts = OpenOptions {
-            wal_full_fsync: false,
+            wal_full_fsync: true,
             history: Default::default(),
             wal_recovery: Default::default(),
             sync: true,
@@ -734,7 +734,7 @@ mod tests {
         let mut model: HashMap<Vec<u8>, Vec<u8>> = HashMap::new();
         let mut silent_wrong = 0u64;
         let opts = OpenOptions {
-            wal_full_fsync: false,
+            wal_full_fsync: true,
             history: Default::default(),
             wal_recovery: Default::default(),
             sync: true,
@@ -967,7 +967,7 @@ mod tests {
         let mut db = Db::open_with_env(
             &dir,
             OpenOptions {
-                wal_full_fsync: false,
+                wal_full_fsync: true,
                 history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
@@ -1002,7 +1002,7 @@ mod tests {
         let db = Db::open_with_env(
             &dir,
             OpenOptions {
-                wal_full_fsync: false,
+                wal_full_fsync: true,
                 history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
@@ -1044,7 +1044,7 @@ mod tests {
         let r = Db::open_with_env(
             &dir,
             OpenOptions {
-                wal_full_fsync: false,
+                wal_full_fsync: true,
                 history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
@@ -1080,7 +1080,7 @@ mod tests {
         let mut db = Db::open_with_env(
             &dir,
             OpenOptions {
-                wal_full_fsync: false,
+                wal_full_fsync: true,
                 history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
@@ -1108,7 +1108,7 @@ mod tests {
         let db = Db::open_with_env(
             &dir,
             OpenOptions {
-                wal_full_fsync: false,
+                wal_full_fsync: true,
                 history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
@@ -1147,7 +1147,7 @@ mod tests {
         let mut db = Db::open_with_env(
             &dir,
             OpenOptions {
-                wal_full_fsync: false,
+                wal_full_fsync: true,
                 history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
@@ -1182,7 +1182,7 @@ mod tests {
         let db = Db::open_with_env(
             &dir,
             OpenOptions {
-                wal_full_fsync: false,
+                wal_full_fsync: true,
                 history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
@@ -1229,7 +1229,7 @@ mod tests {
         let r = Db::open_with_env(
             &dir,
             OpenOptions {
-                wal_full_fsync: false,
+                wal_full_fsync: true,
                 history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
@@ -1262,7 +1262,7 @@ mod tests {
         let r = Db::open_with_env(
             &dir,
             OpenOptions {
-                wal_full_fsync: false,
+                wal_full_fsync: true,
                 history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
@@ -1301,7 +1301,7 @@ mod tests {
         let mut db = Db::open_with_env(
             &dir,
             OpenOptions {
-                wal_full_fsync: false,
+                wal_full_fsync: true,
                 history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
@@ -1330,7 +1330,7 @@ mod tests {
         let db = Db::open_with_env(
             &dir,
             OpenOptions {
-                wal_full_fsync: false,
+                wal_full_fsync: true,
                 history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
@@ -1355,7 +1355,7 @@ mod tests {
         use pedradb_core::{Db, OpenOptions};
 
         let opts = OpenOptions {
-            wal_full_fsync: false,
+            wal_full_fsync: true,
             history: Default::default(),
             wal_recovery: Default::default(),
             sync: true,
@@ -1416,7 +1416,7 @@ mod tests {
         use pedradb_core::{Db, OpenOptions};
 
         let opts = OpenOptions {
-            wal_full_fsync: false,
+            wal_full_fsync: true,
             history: Default::default(),
             wal_recovery: Default::default(),
             sync: true,
@@ -1612,7 +1612,7 @@ mod tests {
         let mut db = Db::open_with_env(
             &dir,
             OpenOptions {
-                wal_full_fsync: false,
+                wal_full_fsync: true,
                 history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
@@ -1650,7 +1650,7 @@ mod tests {
         let db = Db::open_with_env(
             &dir,
             OpenOptions {
-                wal_full_fsync: false,
+                wal_full_fsync: true,
                 history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
@@ -1692,7 +1692,7 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
         let env = FailingEnv::passing();
         let opts = OpenOptions {
-            wal_full_fsync: false,
+            wal_full_fsync: true,
             history: Default::default(),
             wal_recovery: Default::default(),
             sync: true,
@@ -1834,7 +1834,7 @@ mod tests {
         let mut db = Db::open_with_env(
             &dir,
             OpenOptions {
-                wal_full_fsync: false,
+                wal_full_fsync: true,
                 history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
@@ -1860,7 +1860,7 @@ mod tests {
         let db: CoreResult<Db<_>> = Db::open_with_env(
             &dir,
             OpenOptions {
-                wal_full_fsync: false,
+                wal_full_fsync: true,
                 history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
@@ -1984,7 +1984,7 @@ mod tests {
         let db = Db::open_with_env(
             &dir,
             OpenOptions {
-                wal_full_fsync: false,
+                wal_full_fsync: true,
                 history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,

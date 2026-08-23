@@ -616,7 +616,7 @@ impl RaftCluster {
             let db = Db::open_with(
                 &dir,
                 OpenOptions {
-                    wal_full_fsync: false,
+                    wal_full_fsync: true,
                     history: Default::default(),
                     wal_recovery: Default::default(),
                     sync: true,
@@ -1105,7 +1105,7 @@ mod tests {
             let mut db = Db::open_with(
                 &dir,
                 OpenOptions {
-                    wal_full_fsync: false,
+                    wal_full_fsync: true,
                     history: Default::default(),
                     wal_recovery: Default::default(),
                     sync: true,
@@ -1209,7 +1209,7 @@ mod tests {
             let mut db = Db::open_with(
                 &dir,
                 OpenOptions {
-                    wal_full_fsync: false,
+                    wal_full_fsync: true,
                     history: Default::default(),
                     wal_recovery: Default::default(),
                     sync: true,

@@ -2018,7 +2018,7 @@ impl StoreCluster<StdEnv> {
         let parent = parent.as_ref();
         let ranges = split_keyspace(n_ranges);
         let opts = OpenOptions {
-            wal_full_fsync: false,
+            wal_full_fsync: true,
             history: Default::default(),
             wal_recovery: Default::default(),
             // Multiproc path: honor store_opts.pedra_sync (default true = durable).
@@ -2171,7 +2171,7 @@ impl<E: Env> StoreCluster<E> {
         let mut nodes = HashMap::new();
         let ids: Vec<u64> = (1..=n_nodes).collect();
         let opts = OpenOptions {
-            wal_full_fsync: false,
+            wal_full_fsync: true,
             history: Default::default(),
             wal_recovery: Default::default(),
             sync: store_opts.pedra_sync,

@@ -218,11 +218,15 @@ pub struct OpenOptions {
     /// data class** — on Darwin `fcntl(F_FULLFSYNC)` via
     /// [`EnvFile::sync_data_strong`](crate::env::EnvFile::sync_data_strong),
     /// which is the class a CMake build of RocksDB uses for
-    /// `WriteOptions.sync`. Default **false**: the `fdatasync` class, matching
-    /// the `librocksdb-sys` peer this product benches against (on Linux the
-    /// two classes are the same barrier; on Darwin the strong class costs
-    /// ~5 ms/commit on this box — a durability-over-latency product choice,
-    /// RFC-0036 addendum).
+    /// `WriteOptions.sync`. Default **true** (RFC-0036 addendum v2): the
+    /// `sync=true` contract means durable-Ok, and on Darwin only
+    /// `F_FULLFSYNC` delivers it — SST/MANIFEST publishes already pay this
+    /// class via `sync_all`, so the acked WAL (the durability boundary) must
+    /// not be weaker than the derived artifacts. `false` restores the
+    /// `fdatasync`/`fsync` weak class (the `librocksdb-sys` crate build
+    /// class; ~120× faster per commit on Apple hardware — dev opt-out). On
+    /// Linux the two classes are the same barrier — the flag is a no-op
+    /// there.
     pub wal_full_fsync: bool,
     /// WAL recovery mode at open (RFC-0047). Default [`WalRecovery::FailClosed`];
     /// [`WalRecovery::PointInTime`] is the Rocks-shaped drop-in profile.
@@ -664,7 +668,7 @@ impl Default for OpenOptions {
     fn default() -> Self {
         Self {
             sync: true,
-            wal_full_fsync: false,
+            wal_full_fsync: true,
             wal_recovery: WalRecovery::FailClosed,
             // 4 MiB default encourages SST creation under load without manual flush.
             auto_flush_bytes: Some(4 * 1024 * 1024),
@@ -7819,6 +7823,12 @@ mod tests {
         use std::path::Path;
         use std::rc::Rc;
 
+        // RFC-0036 addendum v2: the product default IS the strong class.
+        assert!(
+            OpenOptions::default().wal_full_fsync,
+            "default must be strongest data barrier (F_FULLFSYNC on Darwin)"
+        );
+
         #[derive(Default)]
         struct Counts {
             normal: Cell<u64>,
@@ -8002,7 +8012,7 @@ mod tests {
 
     fn vlog_opts() -> OpenOptions {
         OpenOptions {
-            wal_full_fsync: false,
+            wal_full_fsync: true,
             history: Default::default(),
             sync: true,
             auto_flush_bytes: None,
@@ -8016,7 +8026,7 @@ mod tests {
 
     fn sync_opts() -> OpenOptions {
         OpenOptions {
-                        wal_full_fsync: false,
+                        wal_full_fsync: true,
             history: Default::default(),
             sync: true,
             auto_flush_bytes: None,
@@ -8032,7 +8042,7 @@ mod tests {
     /// drop-in recovery profile (compat default).
     fn pit_opts() -> OpenOptions {
         OpenOptions {
-                        wal_full_fsync: false,
+                        wal_full_fsync: true,
             wal_recovery: WalRecovery::PointInTime,
             ..sync_opts()
         }
@@ -9062,7 +9072,7 @@ mod tests {
             let mut db = Db::open_with(
                 &dir,
                 OpenOptions {
-                                        wal_full_fsync: false,
+                                        wal_full_fsync: true,
                     history: Default::default(),
                     wal_recovery: Default::default(),
                     sync: true,
@@ -9128,7 +9138,7 @@ mod tests {
             let db = Db::open_with(
                 &dir,
                 OpenOptions {
-                                        wal_full_fsync: false,
+                                        wal_full_fsync: true,
                     history: Default::default(),
                     wal_recovery: Default::default(),
                     sync: true,
@@ -9229,7 +9239,7 @@ mod tests {
             let mut db = Db::open_with(
                 &dir,
                 OpenOptions {
-                                        wal_full_fsync: false,
+                                        wal_full_fsync: true,
                     history: Default::default(),
                     wal_recovery: Default::default(),
                     sync: false,
@@ -9353,7 +9363,7 @@ mod tests {
             let mut db = Db::open_with(
                 &dir,
                 OpenOptions {
-                                        wal_full_fsync: false,
+                                        wal_full_fsync: true,
                     history: Default::default(),
                     wal_recovery: Default::default(),
                     sync: true,
@@ -9744,7 +9754,7 @@ mod tests {
         let mut db = Db::open_with(
             &dir,
             OpenOptions {
-                                wal_full_fsync: false,
+                                wal_full_fsync: true,
                 history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: false,
@@ -9780,7 +9790,7 @@ mod tests {
         let mut db = Db::open_with(
             &dir,
             OpenOptions {
-                                wal_full_fsync: false,
+                                wal_full_fsync: true,
                 history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
@@ -9812,7 +9822,7 @@ mod tests {
             let mut db = Db::open_with(
                 &dir,
                 OpenOptions {
-                                        wal_full_fsync: false,
+                                        wal_full_fsync: true,
                     history: Default::default(),
                     wal_recovery: Default::default(),
                     sync: true,
@@ -9848,7 +9858,7 @@ mod tests {
             let mut db = Db::open_with(
                 &dir,
                 OpenOptions {
-                                        wal_full_fsync: false,
+                                        wal_full_fsync: true,
                     history: Default::default(),
                     wal_recovery: Default::default(),
                     sync: false,
@@ -9888,7 +9898,7 @@ mod tests {
             let mut db = Db::open_with(
                 &dir,
                 OpenOptions {
-                wal_full_fsync: false,
+                wal_full_fsync: true,
                     history: Default::default(),
                     wal_recovery: Default::default(),
                     sync: false,
@@ -9911,7 +9921,7 @@ mod tests {
         let db = Db::open_with(
             &dir,
             OpenOptions {
-            wal_full_fsync: false,
+            wal_full_fsync: true,
                 history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: false,
@@ -9943,7 +9953,7 @@ mod tests {
             let mut db = Db::open_with(
                 &dir,
                 OpenOptions {
-                                        wal_full_fsync: false,
+                                        wal_full_fsync: true,
                     history: Default::default(),
                     wal_recovery: Default::default(),
                     sync: false,
@@ -9987,7 +9997,7 @@ mod tests {
             let mut db = Db::open_with(
                 &dir,
                 OpenOptions {
-                                        wal_full_fsync: false,
+                                        wal_full_fsync: true,
                     history: Default::default(),
                     wal_recovery: Default::default(),
                     sync: false,
@@ -10024,7 +10034,7 @@ mod tests {
         let mut db = Db::open_with(
             &dir,
             OpenOptions {
-                                wal_full_fsync: false,
+                                wal_full_fsync: true,
                 history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
@@ -10164,7 +10174,7 @@ mod tests {
         let mut db = Db::open_with_env(
             &dir,
             OpenOptions {
-                                wal_full_fsync: false,
+                                wal_full_fsync: true,
                 history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
@@ -10216,7 +10226,7 @@ mod tests {
         let mut db = Db::open_with(
             &dir,
             OpenOptions {
-                                wal_full_fsync: false,
+                                wal_full_fsync: true,
                 history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
@@ -10253,7 +10263,7 @@ mod tests {
         let mut db = Db::open_with(
             &dir,
             OpenOptions {
-                                wal_full_fsync: false,
+                                wal_full_fsync: true,
                 history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
@@ -10313,7 +10323,7 @@ mod tests {
         let mut db = Db::open_with(
             &dir,
             OpenOptions {
-                                wal_full_fsync: false,
+                                wal_full_fsync: true,
                 history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
@@ -10361,7 +10371,7 @@ mod tests {
         let mut db = Db::open_with(
             &dir,
             OpenOptions {
-                                wal_full_fsync: false,
+                                wal_full_fsync: true,
                 history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
@@ -10417,7 +10427,7 @@ mod tests {
         let mut db = Db::open_with(
             &dir,
             OpenOptions {
-                                wal_full_fsync: false,
+                                wal_full_fsync: true,
                 history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
@@ -10461,7 +10471,7 @@ mod tests {
         let mut db = Db::open_with(
             &dir,
             OpenOptions {
-                                wal_full_fsync: false,
+                                wal_full_fsync: true,
                 history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
@@ -10506,7 +10516,7 @@ mod tests {
         let mut db = Db::open_with(
             &dir,
             OpenOptions {
-                                wal_full_fsync: false,
+                                wal_full_fsync: true,
                 history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
@@ -10875,7 +10885,7 @@ mod tests {
     fn exclusive_false_skips_lock_file() {
         let dir = temp_dir();
         let opts = OpenOptions {
-                        wal_full_fsync: false,
+                        wal_full_fsync: true,
             history: Default::default(),
             wal_recovery: Default::default(),
             sync: true,
@@ -11181,7 +11191,7 @@ mod tests {
             let mut db = Db::open_with(
                 &dir,
                 OpenOptions {
-                                        wal_full_fsync: false,
+                                        wal_full_fsync: true,
                     history: Default::default(),
                     wal_recovery: Default::default(),
                     sync: true,
@@ -11202,7 +11212,7 @@ mod tests {
         let restored = Db::open_with(
             &ckpt,
             OpenOptions {
-                                wal_full_fsync: false,
+                                wal_full_fsync: true,
                 history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
@@ -11274,7 +11284,7 @@ mod tests {
             let mut db = Db::open_with(
                 &dir,
                 OpenOptions {
-                                        wal_full_fsync: false,
+                                        wal_full_fsync: true,
                     history: Default::default(),
                     wal_recovery: Default::default(),
                     sync: true,
@@ -11318,7 +11328,7 @@ mod tests {
         let restored = Db::open_with(
             &ckpt,
             OpenOptions {
-                                wal_full_fsync: false,
+                                wal_full_fsync: true,
                 history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
@@ -11385,7 +11395,7 @@ mod tests {
         let mut db = Db::open_with(
             &dir,
             OpenOptions {
-                                wal_full_fsync: false,
+                                wal_full_fsync: true,
                 history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
@@ -11458,7 +11468,7 @@ mod tests {
         let mut db = Db::open_with(
             &dir,
             OpenOptions {
-                                wal_full_fsync: false,
+                                wal_full_fsync: true,
                 history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: false,
@@ -11525,7 +11535,7 @@ mod tests {
         let mut db = Db::open_with(
             &dir,
             OpenOptions {
-                                wal_full_fsync: false,
+                                wal_full_fsync: true,
                 history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: false,
@@ -11605,7 +11615,7 @@ mod tests {
             let mut db = Db::open_with(
                 &dir,
                 OpenOptions {
-                                        wal_full_fsync: false,
+                                        wal_full_fsync: true,
                     history: Default::default(),
                     wal_recovery: Default::default(),
                     sync: true,
@@ -11773,7 +11783,7 @@ mod tests {
             let mut db = Db::open_with(
                 dir,
                 OpenOptions {
-                                        wal_full_fsync: false,
+                                        wal_full_fsync: true,
                     history: Default::default(),
                     wal_recovery: Default::default(),
                     sync: true,
@@ -12076,7 +12086,7 @@ mod tests {
             crate::ConcurrentDb::open_with(
                 &dir,
                 OpenOptions {
-                                        wal_full_fsync: false,
+                                        wal_full_fsync: true,
                     history: Default::default(),
                     wal_recovery: Default::default(),
                     sync: true,
@@ -12164,7 +12174,7 @@ mod tests {
             let mut db = Db::open_with(
                 &dir,
                 OpenOptions {
-                                        wal_full_fsync: false,
+                                        wal_full_fsync: true,
                     history: Default::default(),
                     wal_recovery: Default::default(),
                     sync: true,
@@ -12192,7 +12202,7 @@ mod tests {
         let db = Db::open_with(
             &dir,
             OpenOptions {
-                                wal_full_fsync: false,
+                                wal_full_fsync: true,
                 history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
@@ -12224,7 +12234,7 @@ mod tests {
         let mut db = Db::open_with(
             &dir,
             OpenOptions {
-                                wal_full_fsync: false,
+                                wal_full_fsync: true,
                 history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
@@ -12259,7 +12269,7 @@ mod tests {
             let mut db = Db::open_with(
                 &dir,
                 OpenOptions {
-                                        wal_full_fsync: false,
+                                        wal_full_fsync: true,
                     history: Default::default(),
                     wal_recovery: Default::default(),
                     sync: true,
@@ -12307,7 +12317,7 @@ mod tests {
             let mut db = Db::open_with(
                 &dir,
                 OpenOptions {
-                                        wal_full_fsync: false,
+                                        wal_full_fsync: true,
                     history: Default::default(),
                     wal_recovery: Default::default(),
                     sync: true,
@@ -12352,7 +12362,7 @@ mod tests {
             let mut db = Db::open_with(
                 &dir,
                 OpenOptions {
-                                        wal_full_fsync: false,
+                                        wal_full_fsync: true,
                     history: Default::default(),
                     wal_recovery: Default::default(),
                     sync: true,
@@ -13070,7 +13080,7 @@ mod tests {
 
     fn horizon_opts(window_ms: u64, cap_bytes: u64) -> OpenOptions {
         OpenOptions {
-                        wal_full_fsync: false,
+                        wal_full_fsync: true,
             history: HistoryOptions {
                 horizon: HistoryHorizon::Window(Duration::from_millis(window_ms)),
                 cap_bytes,
@@ -13092,7 +13102,7 @@ mod tests {
     /// segment, which is what the lazy remote read serves from).
     fn horizon_opts_manual(window_ms: u64, cap_bytes: u64) -> OpenOptions {
         OpenOptions {
-                        wal_full_fsync: false,
+                        wal_full_fsync: true,
             auto_compact_sst_count: None,
             ..horizon_opts(window_ms, cap_bytes)
         }
