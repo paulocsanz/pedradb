@@ -3712,8 +3712,12 @@ impl<E: Env> Db<E> {
             }
         }
         for table in &self.ssts {
-            // Re-open via table cache (second verify hits cache; first may miss).
-            let re = self.table_cache.get_or_open(&self.env, table.path())?;
+            // F217: read the file from disk, not the table cache — the cache
+            // is primed by the very paths that install each table (flush via
+            // `apply_l0_install`, compact, blob rewrite, vlog GC), so a cache
+            // hit would serve the decoded in-memory bytes and never see
+            // in-process bitrot on a live file.
+            let re = SstTable::open_on(&self.env, table.path())?;
             if re.len() != table.len() {
                 return Err(CoreError::Internal(format!(
                     "SST {} entry count drift after re-open",
@@ -4473,7 +4477,23 @@ impl<E: Env> Db<E> {
         for t in &self.ssts {
             merged.extend(t.entries_cloned());
         }
-        let mut gc = CompactOptions::latest_only().gc;
+        // F216: `latest_only` seeds the GC watermark from `last_sequence()`,
+        // which counts applied-but-unpublished writes (write-group off-lock
+        // window). In that window the watermark rises above the published
+        // sequence and every visible-snapshot read fails `SnapshotTooOld`.
+        // Use the `auto_gc_floor` discipline instead (F201/F211): pin/OCC
+        // floor capped at the published sequence. `for_oldest_snapshot`
+        // keeps every version newer than the floor and, with `bottommost`,
+        // still collapses lone tombstones — equivalent to latest-only when
+        // nothing is pinned or in flight.
+        let pin_or_last = self
+            .oldest_pinned_sequence()
+            .unwrap_or_else(|| self.last_sequence().min(self.visible_sequence()));
+        let gc_floor = match self.occ_registry_floor() {
+            Some(occ) => pin_or_last.min(occ),
+            None => pin_or_last,
+        };
+        let mut gc = crate::merge::CompactGcOptions::for_oldest_snapshot(gc_floor);
         gc.bottommost = true;
         let merged = crate::merge::gc_compact_entries(merged, gc);
 
@@ -4501,7 +4521,7 @@ impl<E: Env> Db<E> {
         }
         // Watermark must be raised before MANIFEST so reopen recovers it.
         let prev_earliest = self.earliest_readable_seq;
-        self.note_version_gc_watermark(CompactOptions::latest_only().gc);
+        self.note_version_gc_watermark(crate::merge::CompactGcOptions::for_oldest_snapshot(gc_floor));
         if let Err(e) = self.persist_manifest() {
             // F194: same contract as every other inventory swap (F173 /
             // `L0CompactUndo`): Err leaves the pre-compact state — a later
@@ -11711,13 +11731,17 @@ mod tests {
             db.get(b"ck0199").as_deref(),
             Some(vec![b'Z'; 128].as_slice())
         );
-        // verify uses table cache path.
+        // F217: verify must re-read the file from disk — the table cache is
+        // primed by the very installs that create each table (flush, compact,
+        // …), so serving verify from the cache would hide in-process bitrot
+        // on a live file. Verify never consults the cache.
         db.table_cache.reset_stats();
         db.verify_checksums().unwrap();
         db.verify_checksums().unwrap();
-        assert!(
-            db.table_cache.hits() >= 1,
-            "second verify should hit table cache for SSTs"
+        assert_eq!(
+            db.table_cache.hits(),
+            0,
+            "verify must not serve SSTs from the table cache"
         );
         db.close().unwrap();
         let _ = fs::remove_dir_all(&dir);
