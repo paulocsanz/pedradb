@@ -218,7 +218,12 @@ struct CountingEnv {
 impl CountingEnv {
     fn new() -> (Self, Arc<WalCounters>) {
         let counters = Arc::new(WalCounters::default());
-        (Self { counters: Arc::clone(&counters) }, counters)
+        (
+            Self {
+                counters: Arc::clone(&counters),
+            },
+            counters,
+        )
     }
 
     fn is_wal(path: &Path) -> bool {
@@ -245,9 +250,20 @@ impl pedradb_core::env::Env for CountingEnv {
         }
         let fail_write_after = (path.file_name().and_then(|n| n.to_str())
             == Some(pedradb_core::vlog::VLOG_NEW_NAME))
-            .then(|| self.counters.fail_vlognew_write_after.lock().unwrap().take())
-            .flatten();
-        Ok(CountingFile { inner: f, counters, fail_write_after, written: 0 })
+        .then(|| {
+            self.counters
+                .fail_vlognew_write_after
+                .lock()
+                .unwrap()
+                .take()
+        })
+        .flatten();
+        Ok(CountingFile {
+            inner: f,
+            counters,
+            fail_write_after,
+            written: 0,
+        })
     }
     fn open_append(&self, path: &Path) -> io::Result<Self::File> {
         let mut f = std::fs::OpenOptions::new()
@@ -256,11 +272,21 @@ impl pedradb_core::env::Env for CountingEnv {
             .open(path)?;
         f.seek(SeekFrom::End(0))?;
         let counters = Self::is_wal(path).then(|| Arc::clone(&self.counters));
-        Ok(CountingFile { inner: f, counters, fail_write_after: None, written: 0 })
+        Ok(CountingFile {
+            inner: f,
+            counters,
+            fail_write_after: None,
+            written: 0,
+        })
     }
     fn open_read(&self, path: &Path) -> io::Result<Self::File> {
         let f = std::fs::File::open(path)?;
-        Ok(CountingFile { inner: f, counters: None, fail_write_after: None, written: 0 })
+        Ok(CountingFile {
+            inner: f,
+            counters: None,
+            fail_write_after: None,
+            written: 0,
+        })
     }
     fn sync_dir(&self, path: &Path) -> io::Result<()> {
         let dir = fs::File::open(path)?;
@@ -342,13 +368,20 @@ fn lone_client_cannot_share_or_skip_fsyncs() {
         db.put(format!("k{i}"), b"v").unwrap();
     }
     let syncs = c.wal_sync_ok.load(Ordering::Relaxed);
-    assert!(syncs >= n, "lone 1-op sync puts: {n} Ok need >= {n} real fdatasyncs, got {syncs}");
+    assert!(
+        syncs >= n,
+        "lone 1-op sync puts: {n} Ok need >= {n} real fdatasyncs, got {syncs}"
+    );
 
     // Abrupt drop (process-crash model): every Ok'd key must recover.
     std::mem::forget(db);
     let db2 = Db::open(&dir).unwrap();
     for i in 0..n {
-        assert_eq!(db2.get(format!("k{i}").as_bytes()), Some("v".into()), "lost acked k{i}");
+        assert_eq!(
+            db2.get(format!("k{i}").as_bytes()),
+            Some("v".into()),
+            "lost acked k{i}"
+        );
     }
     drop(db2);
     let _ = fs::remove_dir_all(&dir);
@@ -370,7 +403,8 @@ fn group_commit_amortizes_but_never_skips() {
             let barrier = Arc::clone(&barrier);
             std::thread::spawn(move || {
                 barrier.wait();
-                db.put_with(format!("g{i}"), b"gv", WriteOptions::sync()).unwrap();
+                db.put_with(format!("g{i}"), b"gv", WriteOptions::sync())
+                    .unwrap();
             })
         })
         .collect();
@@ -379,7 +413,10 @@ fn group_commit_amortizes_but_never_skips() {
     }
 
     let syncs = c.wal_sync_ok.load(Ordering::Relaxed);
-    assert!(syncs >= 1, "group must fdatasync at least once, got {syncs}");
+    assert!(
+        syncs >= 1,
+        "group must fdatasync at least once, got {syncs}"
+    );
     assert!(
         syncs <= clients as u64,
         "group commit must amortize: {clients} clients cannot need > {clients} fsyncs, got {syncs}"
@@ -432,7 +469,8 @@ fn no_sync_puts_perform_zero_fsync_until_sync() {
     let mut db = open_db(&env, &dir);
 
     for i in 0..100u64 {
-        db.put_with(format!("a{i}"), b"v", WriteOptions::no_sync()).unwrap();
+        db.put_with(format!("a{i}"), b"v", WriteOptions::no_sync())
+            .unwrap();
     }
     assert_eq!(
         c.wal_sync_ok.load(Ordering::Relaxed),
@@ -472,7 +510,10 @@ fn sync_failure_after_append_fences_fail_closed() {
     c.fail_sync_after.store(ok_syncs, Ordering::Relaxed);
     let failed = db.put("during", b"v2");
     assert!(failed.is_err(), "put whose fsync failed must return Err");
-    assert!(db.is_durability_fenced(), "Db must be durability-fenced after sync failure");
+    assert!(
+        db.is_durability_fenced(),
+        "Db must be durability-fenced after sync failure"
+    );
 
     match db.put("after", b"v3") {
         Err(CoreError::DurabilityFenced) => {}
@@ -481,13 +522,21 @@ fn sync_failure_after_append_fences_fail_closed() {
     drop(db);
 
     let db2 = Db::open(&dir).unwrap();
-    assert_eq!(db2.get(b"before"), Some("v1".into()), "durable prefix must survive");
+    assert_eq!(
+        db2.get(b"before"),
+        Some("v1".into()),
+        "durable prefix must survive"
+    );
     // "during" is the fence's uncertain range: the WAL append succeeded, the
     // fsync failed — Err means "outcome unknown", not "absent". A process
     // crash keeps the written bytes; power loss may not. Either visibility
     // is within contract; partial or corrupted state is not.
     if let Some(v) = db2.get(b"during") {
-        assert_eq!(v.as_ref(), b"v2".as_slice(), "uncertain write recovered wrong");
+        assert_eq!(
+            v.as_ref(),
+            b"v2".as_slice(),
+            "uncertain write recovered wrong"
+        );
     }
     assert_eq!(db2.get(b"after"), None, "never-appended key must be absent");
     drop(db2);
@@ -521,7 +570,11 @@ fn append_after_torn_tail_recovery_survives_crash() {
 
     {
         let mut db = open_db(&env, &dir);
-        assert_eq!(db.get(b"solid"), Some("v".into()), "prefix before torn tail must recover");
+        assert_eq!(
+            db.get(b"solid"),
+            Some("v".into()),
+            "prefix before torn tail must recover"
+        );
         db.put("post-torn-1", b"p1").unwrap();
         db.put("post-torn-2", b"p2").unwrap();
         std::mem::forget(db);
@@ -553,7 +606,8 @@ fn mixed_sync_async_all_or_nothing_per_batch() {
         handles.push(std::thread::spawn(move || {
             barrier.wait();
             for j in 0..25u64 {
-                db.put_with(format!("s{i}-{j}"), b"sv", WriteOptions::sync()).unwrap();
+                db.put_with(format!("s{i}-{j}"), b"sv", WriteOptions::sync())
+                    .unwrap();
             }
         }));
     }
@@ -683,8 +737,10 @@ fn vlog_gc_during_offlock_fsync_window_refuses_then_preserves_acked_sync_write()
     db.put_with(b"seed", b"s", WriteOptions::sync()).unwrap();
     // Two large values; the first one dies so a later GC compacts the second
     // to a LOWER offset. Both puts stay in the un-rotated WAL below.
-    db.put_with(b"dead", [1u8; 4096], WriteOptions::sync()).unwrap();
-    db.put_with(b"big", [7u8; 4096], WriteOptions::sync()).unwrap();
+    db.put_with(b"dead", [1u8; 4096], WriteOptions::sync())
+        .unwrap();
+    db.put_with(b"big", [7u8; 4096], WriteOptions::sync())
+        .unwrap();
     db.delete(b"dead").unwrap();
 
     // Park 1: drop the superseded `dead` version (and its vlog pointer) from

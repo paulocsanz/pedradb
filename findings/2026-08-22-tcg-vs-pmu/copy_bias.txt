@@ -1,0 +1,17 @@
+== host arm64 native clang ==
+ops=1048576 copy_1k_ns=13969000 copy_16k_ns=273836000 ratio_16k_over_1k=19.603
+ops=1048576 copy_1k_ns=13895000 copy_16k_ns=273960000 ratio_16k_over_1k=19.716
+== docker linux/arm64 ==
+uname=aarch64
+ops=1048576 copy_1k_ns=14034169 copy_16k_ns=235782089 ratio_16k_over_1k=16.801
+ops=1048576 copy_1k_ns=14070919 copy_16k_ns=253352039 ratio_16k_over_1k=18.005
+== docker linux/amd64 ==
+uname=x86_64
+ops=1048576 copy_1k_ns=16030385 copy_16k_ns=211787232 ratio_16k_over_1k=13.212
+ops=1048576 copy_1k_ns=15957135 copy_16k_ns=212684946 ratio_16k_over_1k=13.329
+== qemu-user insn count (arm64 container, x86_64 guest binary) ==
+qemu=qemu-x86_64 version 8.2.2 (Debian 1:8.2.2+ds-0ubuntu1.18)
+hdr=/tmp/qhdr/qemu-plugin.h
+plugin compile failed; falling back to wall-only TCG
+ops=1048576 copy_1k_ns=107851794 copy_16k_ns=23725812037 ratio_16k_over_1k=219.985
+ops=1048576 copy_1k_ns=111622316 copy_16k_ns=24722563402 ratio_16k_over_1k=221.484

@@ -2,6 +2,8 @@
 //! Building and running it demonstrates the rust-rocksdb→pedradb substitution
 //! mechanism (see docs/rocksdb-compat.md — lab foundation, not drop-in TiKV).
 
+#![forbid(unsafe_code)]
+
 use rocksdb::{Direction, IteratorMode, Options, WriteBatch, DB};
 
 fn main() {

@@ -125,8 +125,7 @@ impl Manifest {
             if off + 4 > body_len {
                 return Err(bad());
             }
-            let nlen =
-                u32::from_le_bytes(buf[off..off + 4].try_into().unwrap()) as usize;
+            let nlen = u32::from_le_bytes(buf[off..off + 4].try_into().unwrap()) as usize;
             off += 4;
             if off + nlen + 24 > body_len {
                 return Err(bad());
@@ -150,8 +149,7 @@ impl Manifest {
                             return Err(bad());
                         }
                         let l =
-                            u32::from_le_bytes(buf[*off..*off + 4].try_into().unwrap())
-                                as usize;
+                            u32::from_le_bytes(buf[*off..*off + 4].try_into().unwrap()) as usize;
                         *off += 4;
                         if *off + l > body_len {
                             return Err(bad());
@@ -175,7 +173,11 @@ impl Manifest {
                 key_hi,
             });
         }
-        Ok(Self { next_id, segs, archive_floor })
+        Ok(Self {
+            next_id,
+            segs,
+            archive_floor,
+        })
     }
 }
 
@@ -193,8 +195,11 @@ impl HistoryTier {
     /// removed — the manifest is the truth.
     pub(crate) fn open<E: Env>(env: &E, db_root: &Path) -> Result<Self> {
         let dir = db_root.join("history");
-        let mut manifest =
-            Manifest { next_id: 1, segs: VecDeque::new(), archive_floor: 0 };
+        let mut manifest = Manifest {
+            next_id: 1,
+            segs: VecDeque::new(),
+            archive_floor: 0,
+        };
         if env.exists(&dir) {
             let path = dir.join("MANIFEST");
             if env.exists(&path) {
@@ -203,8 +208,7 @@ impl HistoryTier {
                 std::io::Read::read_to_end(&mut f, &mut buf)?;
                 manifest = Manifest::decode(&buf)?;
             }
-            let live: std::collections::HashSet<u64> =
-                manifest.segs.iter().map(|s| s.id).collect();
+            let live: std::collections::HashSet<u64> = manifest.segs.iter().map(|s| s.id).collect();
             for name in env.read_dir_names(&dir).unwrap_or_default() {
                 // Both segment data (.hist) and P2.6 bloom sidecars (.bloom)
                 // without a manifest entry are crash leftovers (manifest is
@@ -222,7 +226,10 @@ impl HistoryTier {
                 }
             }
         }
-        Ok(Self { root: db_root.to_path_buf(), manifest })
+        Ok(Self {
+            root: db_root.to_path_buf(),
+            manifest,
+        })
     }
 
     /// Stream `records` (all already filtered to what GC will drop) into
@@ -284,7 +291,11 @@ impl HistoryTier {
                 cur_key_lo.extend_from_slice(&key);
                 key_lo_set = true;
             }
-            let ceiling = if kind == 2 { val.as_slice() } else { key.as_slice() };
+            let ceiling = if kind == 2 {
+                val.as_slice()
+            } else {
+                key.as_slice()
+            };
             if ceiling > cur_key_hi.as_slice() {
                 cur_key_hi.clear();
                 cur_key_hi.extend_from_slice(ceiling);
@@ -436,7 +447,9 @@ impl HistoryTier {
             return true;
         }
         let body_len = u64::from_le_bytes(
-            buf[buf.len() - footer_len..buf.len() - 4].try_into().unwrap(),
+            buf[buf.len() - footer_len..buf.len() - 4]
+                .try_into()
+                .unwrap(),
         ) as usize;
         if body_len + 8 + footer_len != buf.len() {
             return true;
@@ -463,8 +476,7 @@ impl HistoryTier {
             return true;
         }
         let mut off = bloom_end;
-        let rd_count =
-            u32::from_le_bytes(body[off..off + 4].try_into().unwrap()) as usize;
+        let rd_count = u32::from_le_bytes(body[off..off + 4].try_into().unwrap()) as usize;
         off += 4;
         for _ in 0..rd_count {
             if off + 4 > body.len() {
@@ -528,7 +540,9 @@ impl HistoryTier {
         let mut total: u64 = self.manifest.segs.iter().map(|s| s.bytes).sum();
         let dir = self.root.join("history");
         while total > cap_bytes {
-            let Some(front) = self.manifest.segs.front().cloned() else { break };
+            let Some(front) = self.manifest.segs.front().cloned() else {
+                break;
+            };
             // A pin at/below the segment's top holds it — stop (fail-closed
             // toward keeping history, never toward dropping pinned data).
             if let Some(pin) = pin_floor {
@@ -569,11 +583,7 @@ impl HistoryTier {
 
     /// Bytes of one local segment file, `None` when absent (cap-dropped or
     /// never sealed). Corrupt-but-present is the caller's CRC walk to catch.
-    pub(crate) fn read_local_segment<E: Env>(
-        &self,
-        env: &E,
-        id: u64,
-    ) -> Result<Option<Vec<u8>>> {
+    pub(crate) fn read_local_segment<E: Env>(&self, env: &E, id: u64) -> Result<Option<Vec<u8>>> {
         let path = Self::segment_path(&self.root, id);
         match env.open_read(&path) {
             Ok(mut f) => {
@@ -684,7 +694,12 @@ pub fn walk_segment_records(bytes: &[u8]) -> Result<Vec<HistoryRecord>> {
         if crc32c(&bytes[start..off - 4]) != stored {
             return Err(bad("crc mismatch"));
         }
-        out.push(HistoryRecord { key, val, seq, kind });
+        out.push(HistoryRecord {
+            key,
+            val,
+            seq,
+            kind,
+        });
     }
     Ok(out)
 }
@@ -935,12 +950,7 @@ impl RemoteTier {
     /// Upload manifest `bytes` as immutable generation `n`, then point
     /// `LATEST` at it. A crash between the two leaves the previous
     /// `LATEST` — the next upload repairs; readers fall back.
-    pub fn put_manifest<E: Env>(
-        &self,
-        env: &E,
-        bytes: &[u8],
-        n: u64,
-    ) -> Result<PutStatus> {
+    pub fn put_manifest<E: Env>(&self, env: &E, bytes: &[u8], n: u64) -> Result<PutStatus> {
         env.create_dir_all(&self.root)?;
         let gen = self.segment_path(&Self::manifest_name(n));
         let status = if env.exists(&gen) {
@@ -1020,10 +1030,7 @@ impl RemoteTier {
         if env.exists(&latest) {
             if let Ok(mut f) = env.open_read(&latest) {
                 let mut buf = String::new();
-                if f
-                    .read_to_string(&mut buf)
-                    .is_ok_and(|_| !buf.is_empty())
-                {
+                if f.read_to_string(&mut buf).is_ok_and(|_| !buf.is_empty()) {
                     if let Some((name, _crc)) = buf.trim_end().split_once('\n') {
                         let p = self.segment_path(name);
                         if env.exists(&p) {
@@ -1182,9 +1189,12 @@ mod tests {
             })
         }
         fn open_read(&self, path: &Path) -> std::io::Result<Self::File> {
-            let buf = self.files.borrow().get(path).cloned().ok_or_else(|| {
-                std::io::Error::new(std::io::ErrorKind::NotFound, "missing")
-            })?;
+            let buf = self
+                .files
+                .borrow()
+                .get(path)
+                .cloned()
+                .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "missing"))?;
             Ok(MapFile {
                 files: Rc::clone(&self.files),
                 path: path.to_path_buf(),
@@ -1244,7 +1254,10 @@ mod tests {
 
     impl FaultyEnv {
         fn new(inner: MapEnv) -> Self {
-            Self { inner, fail_create: Rc::new(Cell::new(false)) }
+            Self {
+                inner,
+                fail_create: Rc::new(Cell::new(false)),
+            }
         }
     }
 
@@ -1306,7 +1319,8 @@ mod tests {
             (b"k".to_vec(), b"v2".to_vec(), 2, 0),
             (b"k".to_vec(), b"v3".to_vec(), 3, 0),
         ];
-        tier.archive_stream(&crate::env::StdEnv, records.into_iter()).unwrap();
+        tier.archive_stream(&crate::env::StdEnv, records.into_iter())
+            .unwrap();
         (root, tier)
     }
 
@@ -1357,24 +1371,30 @@ mod tests {
         assert_eq!(metas[1].key_lo.as_deref(), Some(&b"zz"[..]));
         assert_eq!(metas[1].key_hi.as_deref(), Some(&b"zz"[..]));
         // Corrupt segment 1 (aa..ab): a read inside its range fails typed.
-        let seg1 = root.join("history").join(format!("seg-{:08}.hist", metas[0].id));
+        let seg1 = root
+            .join("history")
+            .join(format!("seg-{:08}.hist", metas[0].id));
         let mut bytes = std::fs::read(&seg1).unwrap();
         bytes[10] ^= 0xff;
         std::fs::write(&seg1, &bytes).unwrap();
         let records = crate::history::walk_segment_records(
-            &tier.read_local_segment(&crate::env::StdEnv, metas[0].id)
+            &tier
+                .read_local_segment(&crate::env::StdEnv, metas[0].id)
                 .unwrap()
                 .expect("present"),
         );
-        assert!(records.is_err(), "in-range read still verifies CRC (fail-closed)");
+        assert!(
+            records.is_err(),
+            "in-range read still verifies CRC (fail-closed)"
+        );
         // Coverage of segment 2 excludes aa/ab — the db-level reader would
         // skip it; here we assert the bound math directly: aa < zz and
         // ab < zz, so both prune, while zz does not.
         let covers = |m: &SegmentMeta, k: &[u8]| {
             m.key_lo.as_ref().is_some_and(|lo| {
-                m.key_hi.as_ref().is_some_and(|hi| {
-                    k >= lo.as_slice() && k <= hi.as_slice()
-                })
+                m.key_hi
+                    .as_ref()
+                    .is_some_and(|hi| k >= lo.as_slice() && k <= hi.as_slice())
             })
         };
         assert!(!covers(&metas[1], b"aa") && !covers(&metas[1], b"ab"));
@@ -1438,7 +1458,10 @@ mod tests {
         let m2 = super::Manifest::decode(&bad(2)).expect("v2 decodes");
         assert_eq!(m2.segs.len(), 1);
         assert!(m2.segs[0].key_lo.is_none() && m2.segs[0].key_hi.is_none());
-        assert!(super::Manifest::decode(&bad(4)).is_err(), "unknown version still rejected");
+        assert!(
+            super::Manifest::decode(&bad(4)).is_err(),
+            "unknown version still rejected"
+        );
         // v3 round-trip keeps coverage.
         let mut m3 = super::Manifest::decode(&bad(2)).unwrap();
         m3.segs[0].key_lo = Some(b"lo".to_vec());
@@ -1477,7 +1500,9 @@ mod tests {
         let metas = tier.segment_metas();
         assert_eq!(metas.len(), 2, "two overlapping segments");
         // Overlapping manifest coverage (P2.5 can't prune either).
-        assert!(metas.iter().all(|m| m.key_lo.as_deref() == Some(&b"aa"[..])));
+        assert!(metas
+            .iter()
+            .all(|m| m.key_lo.as_deref() == Some(&b"aa"[..])));
         for m in &metas {
             assert!(
                 root.join("history")
@@ -1573,7 +1598,11 @@ mod tests {
             .into_iter()
             .filter(|n| n.starts_with("seg-") && n.ends_with(".hist"))
             .collect();
-        assert_eq!(objects.len(), 1, "idempotent put must not duplicate objects");
+        assert_eq!(
+            objects.len(),
+            1,
+            "idempotent put must not duplicate objects"
+        );
         let bytes = std::fs::read(&seg).unwrap();
         assert_eq!(objects[0], RemoteTier::segment_name(&bytes));
         // The P2.7 bloom sidecar ships alongside, exactly once, named after the segment.
@@ -1582,7 +1611,10 @@ mod tests {
             .filter(|n| n.ends_with(".bloom"))
             .collect();
         assert_eq!(sidecars.len(), 1, "sidecar ships with the segment");
-        assert_eq!(sidecars[0], format!("{}.bloom", RemoteTier::segment_name(&bytes)));
+        assert_eq!(
+            sidecars[0],
+            format!("{}.bloom", RemoteTier::segment_name(&bytes))
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -1637,7 +1669,10 @@ mod tests {
         let map = MapEnv::default();
         let m1 = tier.manifest_bytes();
         let n1 = tier.remote_generation();
-        assert_eq!(remote.put_manifest(&map, &m1, n1).unwrap(), PutStatus::Uploaded);
+        assert_eq!(
+            remote.put_manifest(&map, &m1, n1).unwrap(),
+            PutStatus::Uploaded
+        );
         // Re-put same generation: idempotent.
         assert_eq!(
             remote.put_manifest(&map, &m1, n1).unwrap(),
@@ -1656,7 +1691,9 @@ mod tests {
         assert_eq!(remote.latest_manifest(&map).unwrap(), Some(m2.clone()));
         // Torn LATEST (garbage pointer) → walk back to newest intact gen.
         {
-            let mut f = map.create(Path::new(REMOTE).join("LATEST").as_path()).unwrap();
+            let mut f = map
+                .create(Path::new(REMOTE).join("LATEST").as_path())
+                .unwrap();
             f.write_all(b"garbage").unwrap();
             f.sync_all().unwrap();
         }
@@ -1666,8 +1703,12 @@ mod tests {
             "torn LATEST falls back to the newest intact generation"
         );
         // Newest generation unreadable → previous generation still serves.
-        map.remove_file(Path::new(REMOTE).join(format!("MANIFEST-{n2:016}")).as_path())
-            .unwrap();
+        map.remove_file(
+            Path::new(REMOTE)
+                .join(format!("MANIFEST-{n2:016}"))
+                .as_path(),
+        )
+        .unwrap();
         assert_eq!(remote.latest_manifest(&map).unwrap(), Some(m1));
         // Empty remote tier.
         let empty = MapEnv::default();
@@ -1683,14 +1724,18 @@ mod tests {
         let faulty = FaultyEnv::new(map.clone());
         faulty.fail_create.set(true);
         let remote = RemoteTier::new(REMOTE);
-        assert!(remote.put_segment(&faulty, &crate::env::StdEnv, &seg).is_err());
+        assert!(remote
+            .put_segment(&faulty, &crate::env::StdEnv, &seg)
+            .is_err());
         assert!(
             remote_objects(&map).iter().all(|n| !n.starts_with("seg-")),
             "failed upload leaves no partial object"
         );
         faulty.fail_create.set(false);
         assert_eq!(
-            remote.put_segment(&faulty, &crate::env::StdEnv, &seg).unwrap(),
+            remote
+                .put_segment(&faulty, &crate::env::StdEnv, &seg)
+                .unwrap(),
             PutStatus::Uploaded,
             "retry after the fault clears resumes and completes"
         );

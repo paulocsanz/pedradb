@@ -489,10 +489,7 @@ impl CountEntry {
     /// dirty keys (loose on Included/Excluded edges — extra retirement is
     /// safe, missed retirement is not).
     fn overlaps_box(&self, lo: &[u8], hi: &[u8]) -> bool {
-        let starts_before_hi = self
-            .start
-            .as_ref()
-            .is_none_or(|(s, _)| s.as_ref() <= hi);
+        let starts_before_hi = self.start.as_ref().is_none_or(|(s, _)| s.as_ref() <= hi);
         let ends_after_lo = self.end.as_ref().is_none_or(|(e, _)| e.as_ref() >= lo);
         starts_before_hi && ends_after_lo
     }

@@ -29,11 +29,6 @@ path = "src/bin/montanha-fdb-compare.rs"
 name = "montanha-scale-gate"
 path = "src/bin/montanha-scale-gate.rs"
 
-[features]
-default = []
-## Thin C ABI (`montanha_fdb_*`) for external harnesses that speak FDB-shaped C.
-c-api = []
-
 [dependencies]
 pedradb-core.workspace = true
 pedradb-dcs.workspace = true

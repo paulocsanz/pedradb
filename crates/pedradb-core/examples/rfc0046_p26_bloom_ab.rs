@@ -52,7 +52,9 @@ fn xorshift(mut x: u64) -> impl FnMut() -> u64 {
 fn dir_file_bytes(dir: &std::path::Path, ext: &str) -> (usize, u64) {
     let mut n = 0usize;
     let mut b = 0u64;
-    let Ok(rd) = fs::read_dir(dir) else { return (0, 0) };
+    let Ok(rd) = fs::read_dir(dir) else {
+        return (0, 0);
+    };
     for e in rd.flatten() {
         if e.path().extension().is_some_and(|x| x == ext) {
             n += 1;
@@ -129,10 +131,16 @@ fn main() {
         snap.sequence() < stats.earliest_readable,
         "snapshot is not below the watermark; the tier leg would not run"
     );
-    assert_eq!(segs_bloom, stats.local_segments, "every segment must have a sidecar");
+    assert_eq!(
+        segs_bloom, stats.local_segments,
+        "every segment must have a sidecar"
+    );
 
     // Stash the sidecars so legs can toggle fail-open (removed = pre-P2.6).
-    let bak = dir.parent().unwrap().join(format!("pedra-46p26-bak-{}", std::process::id()));
+    let bak = dir
+        .parent()
+        .unwrap()
+        .join(format!("pedra-46p26-bak-{}", std::process::id()));
     fs::create_dir_all(&bak).expect("bak dir");
     let sidecars: Vec<PathBuf> = fs::read_dir(&hist)
         .expect("history dir")

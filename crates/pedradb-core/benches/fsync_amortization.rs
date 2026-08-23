@@ -113,7 +113,10 @@ impl Env for CountingEnv {
         })
     }
     fn open_append(&self, path: &Path) -> io::Result<Self::File> {
-        let mut f = fs::OpenOptions::new().create(true).append(true).open(path)?;
+        let mut f = fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)?;
         f.seek(SeekFrom::End(0))?;
         Ok(CountingFile {
             inner: f,
@@ -179,7 +182,9 @@ fn report(name: &str, n: u64, elapsed: Duration, syncs: u64) {
 }
 
 fn lone_sync(n: u64) {
-    let env = CountingEnv { io: Arc::new(WalIo::default()) };
+    let env = CountingEnv {
+        io: Arc::new(WalIo::default()),
+    };
     let dir = temp_dir("lone-sync");
     let mut db = Db::open_with_env(&dir, OpenOptions::default(), env.clone()).expect("open");
     let t0 = Instant::now();
@@ -194,10 +199,11 @@ fn lone_sync(n: u64) {
 }
 
 fn group_sync(clients: usize, puts_per: u64) {
-    let env = CountingEnv { io: Arc::new(WalIo::default()) };
+    let env = CountingEnv {
+        io: Arc::new(WalIo::default()),
+    };
     let dir = temp_dir("group-sync");
-    let db =
-        ConcurrentDb::open_with_env(&dir, OpenOptions::default(), env.clone()).expect("open");
+    let db = ConcurrentDb::open_with_env(&dir, OpenOptions::default(), env.clone()).expect("open");
     let barrier = Arc::new(Barrier::new(clients));
     let t0 = Instant::now();
     let handles: Vec<_> = (0..clients)
@@ -219,18 +225,15 @@ fn group_sync(clients: usize, puts_per: u64) {
     let el = t0.elapsed();
     let n = clients as u64 * puts_per;
     let syncs = env.io.syncs.load(Ordering::Relaxed);
-    report(
-        &format!("group_sync_{clients:2}c "),
-        n,
-        el,
-        syncs,
-    );
+    report(&format!("group_sync_{clients:2}c "), n, el, syncs);
     drop(db);
     let _ = fs::remove_dir_all(&dir);
 }
 
 fn lone_async(n: u64) {
-    let env = CountingEnv { io: Arc::new(WalIo::default()) };
+    let env = CountingEnv {
+        io: Arc::new(WalIo::default()),
+    };
     let dir = temp_dir("lone-async");
     let mut db = Db::open_with_env(&dir, OpenOptions::default(), env.clone()).expect("open");
     let t0 = Instant::now();

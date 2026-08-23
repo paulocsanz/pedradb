@@ -194,6 +194,16 @@ pub struct Options {
     /// `fdatasync`→`fsync` on Darwin and stay weak-class there). Power-cut
     /// durability on Apple hardware needs this on (RFC-0036 addendum).
     pub wal_full_fsync: bool,
+    /// rust-rocksdb `enable_blob_files`. Default `false` (Rocks default).
+    /// When true, values ≥ [`Self::min_blob_size`] spill to `VALUES.vlog`
+    /// (WiscKey / BlobDB-shaped).
+    pub enable_blob_files: bool,
+    /// rust-rocksdb `min_blob_size`. Titan's 4096. Ignored unless blob files
+    /// are enabled. `0` with blob files on spills every value.
+    pub min_blob_size: u64,
+    /// rust-rocksdb / Titan `blob_file_size` (rotate cap). `None` = single
+    /// `VALUES.vlog` (no numbered blob generation).
+    pub blob_file_size: Option<u64>,
 }
 
 /// WAL recovery mode at open (rust-rocksdb `WalRecoveryMode` subset).
@@ -219,6 +229,9 @@ impl fmt::Debug for Options {
             .field("auto_resume_transient", &self.auto_resume_transient)
             .field("wal_recovery", &self.wal_recovery)
             .field("wal_full_fsync", &self.wal_full_fsync)
+            .field("enable_blob_files", &self.enable_blob_files)
+            .field("min_blob_size", &self.min_blob_size)
+            .field("blob_file_size", &self.blob_file_size)
             .field(
                 "background_error_listener",
                 &self.background_error_listener.is_some(),
@@ -238,6 +251,9 @@ impl Default for Options {
             background_error_listener: None,
             wal_recovery: WalRecoveryMode::PointInTime,
             wal_full_fsync: false,
+            enable_blob_files: false,
+            min_blob_size: 4096,
+            blob_file_size: None,
         }
     }
 }
@@ -363,9 +379,15 @@ impl Options {
     pub fn set_disable_auto_compactions(&mut self, _v: bool) {}
     pub fn set_report_bg_io_stats(&mut self, _v: bool) {}
     pub fn set_optimize_filters_for_hits(&mut self, _v: bool) {}
-    pub fn set_enable_blob_files(&mut self, _v: bool) {}
-    pub fn set_min_blob_size(&mut self, _n: u64) {}
-    pub fn set_blob_file_size(&mut self, _n: u64) {}
+    pub fn set_enable_blob_files(&mut self, v: bool) {
+        self.enable_blob_files = v;
+    }
+    pub fn set_min_blob_size(&mut self, n: u64) {
+        self.min_blob_size = n;
+    }
+    pub fn set_blob_file_size(&mut self, n: u64) {
+        self.blob_file_size = if n == 0 { None } else { Some(n) };
+    }
     pub fn set_enable_blob_gc(&mut self, _v: bool) {}
     pub fn set_blob_gc_age_cutoff(&mut self, _n: f64) {}
     pub fn set_blob_compression_type(&mut self, _c: DBCompressionType) {}
@@ -477,7 +499,11 @@ fn load_cf_registry(dir: &std::path::Path) -> Result<Option<(bool, Vec<String>)>
 ///
 /// # Errors
 /// I/O.
-fn store_cf_registry(dir: &std::path::Path, default_raw: bool, non_default: &[String]) -> Result<()> {
+fn store_cf_registry(
+    dir: &std::path::Path,
+    default_raw: bool,
+    non_default: &[String],
+) -> Result<()> {
     use std::io::Write as _;
     let path = cfreg_path(dir);
     let tmp = dir.join(format!("{CFREG_FILE_NAME}.tmp"));
@@ -803,7 +829,6 @@ impl LastGetTable {
         };
     }
 }
-
 
 thread_local! {
     /// Default-CF last-get table shared by `get()` and `contains()` —
@@ -1502,11 +1527,10 @@ impl<E: Env> DB<E> {
                     kind: ErrorKind::InvalidArgument,
                 });
             }
-            std::fs::create_dir_all(dir)
-                .map_err(|e| Error {
-                    msg: format!("mkdir {}: {e}", dir.display()),
-                    kind: ErrorKind::Io,
-                })?;
+            std::fs::create_dir_all(dir).map_err(|e| Error {
+                msg: format!("mkdir {}: {e}", dir.display()),
+                kind: ErrorKind::Io,
+            })?;
         }
         let mut names = vec![DEFAULT_CF.to_string()];
         for c in cfs {
@@ -1585,7 +1609,15 @@ impl<E: Env> DB<E> {
         } else {
             Some(opts.write_buffer_size)
         };
+        if opts.enable_blob_files {
+            core_opts.large_value_threshold = Some(opts.min_blob_size as usize);
+        }
         let db = ConcurrentDb::open_with_env(dir, core_opts, env)?;
+        if opts.enable_blob_files {
+            if let Some(n) = opts.blob_file_size {
+                db.set_vlog_rotate_bytes(Some(n));
+            }
+        }
         if opts.auto_reclaim {
             db.set_auto_reclaim(true);
         }
@@ -1821,7 +1853,10 @@ impl<E: Env> DB<E> {
                 };
                 ops.push(encoded);
             }
-            self.inner.apply_batch_vec(ops).map(|_| ()).map_err(Error::from)
+            self.inner
+                .apply_batch_vec(ops)
+                .map(|_| ())
+                .map_err(Error::from)
         });
         r
     }
@@ -1857,7 +1892,10 @@ impl<E: Env> DB<E> {
                 };
                 ops.push(encoded);
             }
-            self.inner.apply_batch_vec(ops).map(|_| ()).map_err(Error::from)
+            self.inner
+                .apply_batch_vec(ops)
+                .map(|_| ())
+                .map_err(Error::from)
         });
         r
     }
@@ -1904,7 +1942,10 @@ impl<E: Env> DB<E> {
             if ops.is_empty() {
                 return Ok(());
             }
-            self.inner.apply_batch_vec(ops).map(|_| ()).map_err(Error::from)
+            self.inner
+                .apply_batch_vec(ops)
+                .map(|_| ())
+                .map_err(Error::from)
         });
         r
     }
@@ -1949,7 +1990,10 @@ impl<E: Env> DB<E> {
             if ops.is_empty() {
                 return Ok(());
             }
-            self.inner.apply_batch_vec(ops).map(|_| ()).map_err(Error::from)
+            self.inner
+                .apply_batch_vec(ops)
+                .map(|_| ())
+                .map_err(Error::from)
         });
         r
     }
@@ -1975,7 +2019,10 @@ impl<E: Env> DB<E> {
                     value: val.clone(),
                 });
             }
-            self.inner.apply_batch_vec(ops).map(|_| ()).map_err(Error::from)
+            self.inner
+                .apply_batch_vec(ops)
+                .map(|_| ())
+                .map_err(Error::from)
         })
     }
 
@@ -1986,7 +2033,11 @@ impl<E: Env> DB<E> {
     pub fn snapshot(&self) -> Snapshot<'_, E> {
         let snap = self.inner.snapshot();
         let pin = self.inner.pin_snapshot();
-        Snapshot { db: self, snap, pin }
+        Snapshot {
+            db: self,
+            snap,
+            pin,
+        }
     }
 
     /// rust-rocksdb `OptimisticTransactionDB::transaction` shape (RFC-0043 P2.4).
@@ -2868,8 +2919,14 @@ mod tests {
 
         let db = DB::open(&opts, &dir).unwrap();
         assert_eq!(db.get(b"k02").unwrap().as_deref(), Some(&[7u8; 120][..]));
-        assert_eq!(db.get(b"k03").unwrap(), None, "suffix after the flip is discarded");
-        let report = db.last_recovery_report().expect("compat default must report");
+        assert_eq!(
+            db.get(b"k03").unwrap(),
+            None,
+            "suffix after the flip is discarded"
+        );
+        let report = db
+            .last_recovery_report()
+            .expect("compat default must report");
         assert_eq!(report.kind, "crc");
         assert!(report.discarded_bytes > 0);
         assert_eq!(report.corrupt_offset, report.good_through_offset);
@@ -2912,8 +2969,7 @@ mod tests {
             // `auto_reclaim_worker_gcs_versions`. Explicit per-round flush
             // drives L0 past the compaction trigger (on this path staging
             // is the host's job, RFC-0037 P2.1).
-            let db =
-                DB::open_cf_with_env(&opts, &dir, &[], pedradb_core::StdEnv).unwrap();
+            let db = DB::open_cf_with_env(&opts, &dir, &[], pedradb_core::StdEnv).unwrap();
             // Deterministic incompressible values (xorshift): F20 retention
             // keeps every round's bytes; reclaim keeps only the live set.
             let mut seed = 0x5EED_0047_u64;
@@ -3013,6 +3069,34 @@ mod tests {
             Some(format!("{:08}", n - 1).as_bytes())
         );
         drop(db);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn blob_files_spill_large_value_and_read_back() {
+        let dir = tmp("blob-spill");
+        let mut opts = Options::new();
+        opts.create_if_missing(true);
+        opts.set_enable_blob_files(true);
+        opts.set_min_blob_size(4096);
+        let db = DB::open(&opts, &dir).unwrap();
+        let small = vec![b's'; 100];
+        let big = vec![b'B'; 16 * 1024];
+        db.put(b"small", &small).unwrap();
+        db.put(b"big", &big).unwrap();
+        assert_eq!(db.get(b"small").unwrap().as_deref(), Some(small.as_slice()));
+        assert_eq!(db.get(b"big").unwrap().as_deref(), Some(big.as_slice()));
+        assert!(
+            dir.join("VALUES.vlog").exists(),
+            "16KiB put must create vlog"
+        );
+        drop(db);
+        let db = DB::open(&opts, &dir).unwrap();
+        assert_eq!(
+            db.get(b"big").unwrap().as_deref(),
+            Some(big.as_slice()),
+            "G1 large put must fsync vlog before Ok"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -3629,25 +3713,16 @@ mod tests {
     fn last_get_table_lazy_epoch_invalidation() {
         let mut t = LastGetTable::new();
         t.store_key(1, b"k1", Some(Bytes::from_static(b"v1")));
-        assert_eq!(
-            t.get_key(1, b"k1"),
-            Some(Some(Bytes::from_static(b"v1")))
-        );
+        assert_eq!(t.get_key(1, b"k1"), Some(Some(Bytes::from_static(b"v1"))));
         // Epoch bump: the stale entry must not answer for the new epoch.
         assert_eq!(t.get_key(2, b"k1"), None);
         // Re-store under the new epoch answers without any clear-all pass.
         t.store_key(2, b"k1", Some(Bytes::from_static(b"v2")));
-        assert_eq!(
-            t.get_key(2, b"k1"),
-            Some(Some(Bytes::from_static(b"v2")))
-        );
+        assert_eq!(t.get_key(2, b"k1"), Some(Some(Bytes::from_static(b"v2"))));
         // An entry stored under an old epoch coexists but never leaks.
         t.store_key(1, b"k2", Some(Bytes::from_static(b"old")));
         assert_eq!(t.get_key(2, b"k2"), None);
-        assert_eq!(
-            t.get_key(1, b"k2"),
-            Some(Some(Bytes::from_static(b"old")))
-        );
+        assert_eq!(t.get_key(1, b"k2"), Some(Some(Bytes::from_static(b"old"))));
     }
 
     #[test]

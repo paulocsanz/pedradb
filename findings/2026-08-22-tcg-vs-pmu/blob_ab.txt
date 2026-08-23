@@ -1,0 +1,11 @@
+=== A/B blob inline vs vlog load= 9:26  up 5 days,  7:31, 14 users, load averages: 8,49 7,78 7,89 ===
+--- ROCKS_PARITY_MIN_BLOB=0 (inline) ---
+{"probe":"hotpath","engine":"compat","async":true,"records":1024,"ops":250000,"seconds":0,"phase":"blob"}
+{"phase":"blob","ops":31250,"payload":16384,"ns":3427067750,"ns_per_op":109666.2,"qps":9118.6}
+--- default min_blob=4096 (vlog) ---
+{"probe":"hotpath","engine":"compat","async":true,"records":1024,"ops":250000,"seconds":0,"phase":"blob"}
+{"phase":"blob","ops":31250,"payload":16384,"ns":2802500709,"ns_per_op":89680.0,"qps":11150.8}
+--- SET 1KB with vlog on (should stay inline) ---
+{"probe":"hotpath","engine":"compat","async":true,"records":1024,"ops":2000000,"seconds":0,"phase":"set"}
+{"phase":"set","ops":2000000,"payload":1000,"ns":15682829375,"ns_per_op":7841.4,"qps":127528.0}
+=== done load= 9:26  up 5 days,  7:31, 14 users, load averages: 8,36 7,82 7,90 ===

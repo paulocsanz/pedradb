@@ -447,7 +447,9 @@ impl WriteGroup {
                     self.active.fetch_sub(1, Ordering::Relaxed);
                     self.mark_complete();
                     if let Some(mut guard) = db.try_write() {
-                        guard.fence_durability_post_commit(&"write group leader panicked mid-commit");
+                        guard.fence_durability_post_commit(
+                            &"write group leader panicked mid-commit",
+                        );
                     }
                     std::panic::resume_unwind(payload);
                 }
@@ -1425,8 +1427,7 @@ impl<E: Env> ConcurrentDb<E> {
     /// Enable/disable snapshot-list version GC during parked folds
     /// (see [`Self::fold_parked_once_off_lock`]). Off by default.
     pub fn set_fold_version_gc(&self, on: bool) {
-        self.fold_gc
-            .store(on, std::sync::atomic::Ordering::Release);
+        self.fold_gc.store(on, std::sync::atomic::Ordering::Release);
     }
 
     /// Whether fold version GC is on.
@@ -1459,7 +1460,9 @@ impl<E: Env> ConcurrentDb<E> {
         let id = self
             .occ_next_id
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let bound = self.published_seq.load(std::sync::atomic::Ordering::Acquire);
+        let bound = self
+            .published_seq
+            .load(std::sync::atomic::Ordering::Acquire);
         self.occ_registry.lock().insert(id, bound);
         id
     }
@@ -1804,6 +1807,10 @@ impl<E: Env> ConcurrentDb<E> {
         }
         let mut g = self.inner.write();
         g.finish_flush_pipeline()?;
+        // F212: explicit flush is a CHANGELOG persist point (same tail as
+        // `Db::flush`) — the rotate above dropped the WAL rebuild source
+        // for the flushed keys.
+        g.persist_changelog_after_explicit_flush();
         Ok(())
     }
 
@@ -2421,12 +2428,14 @@ mod tests {
             std::thread::scope(|s| {
                 let async_t = s.spawn(|| {
                     for i in 0..PER {
-                        db.put_with([b'h', 0, i], &payload, WriteOptions::no_sync()).unwrap();
+                        db.put_with([b'h', 0, i], &payload, WriteOptions::no_sync())
+                            .unwrap();
                     }
                 });
                 let sync_t = s.spawn(|| {
                     for i in 0..PER {
-                        db.put_with([b'h', 1, i], &payload, WriteOptions::sync()).unwrap();
+                        db.put_with([b'h', 1, i], &payload, WriteOptions::sync())
+                            .unwrap();
                     }
                 });
                 async_t.join().unwrap();
@@ -2902,7 +2911,8 @@ mod tests {
         db.set_defer_auto_compact(true);
         for round in 0..2u64 {
             for i in 0..50u64 {
-                db.put(b"hot", format!("r{round}i{i}").into_bytes()).unwrap();
+                db.put(b"hot", format!("r{round}i{i}").into_bytes())
+                    .unwrap();
             }
             assert!(db.with_write(|d| d.stage_flush_imm()).unwrap());
             assert!(db.park_imm_once());
@@ -2924,7 +2934,8 @@ mod tests {
         db.set_defer_auto_compact(true);
         for round in 0..2u64 {
             for i in 0..50u64 {
-                db.put(b"hot", format!("r{round}i{i}").into_bytes()).unwrap();
+                db.put(b"hot", format!("r{round}i{i}").into_bytes())
+                    .unwrap();
             }
             assert!(db.with_write(|d| d.stage_flush_imm()).unwrap());
             assert!(db.park_imm_once());
@@ -2961,11 +2972,8 @@ mod tests {
         }
         for round in 0..2u64 {
             for i in 0..50u64 {
-                db.put(
-                    b"filler",
-                    format!("f{round}i{i}").into_bytes(),
-                )
-                .unwrap();
+                db.put(b"filler", format!("f{round}i{i}").into_bytes())
+                    .unwrap();
             }
             assert!(db.with_write(|d| d.stage_flush_imm()).unwrap());
             assert!(db.park_imm_once());
@@ -3275,7 +3283,10 @@ mod tests {
         let rec = db.recover_from_fence().unwrap().expect("fenced");
         assert_eq!(rec.fence.uncertain_from, 2);
         assert_eq!(rec.fence.uncertain_through, 2);
-        assert_eq!(rec.replayed_through, 2, "frame reached the file before the sync error");
+        assert_eq!(
+            rec.replayed_through, 2,
+            "frame reached the file before the sync error"
+        );
         assert!(!rec.lost_writes);
         assert_eq!(db.get(b"b").as_deref(), Some(&b"2"[..]));
         drop(db);

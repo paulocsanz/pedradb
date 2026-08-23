@@ -684,15 +684,13 @@ impl YcsbRunner {
         // RFC-0044 P0.5 A/B tool: `ROCKS_PARITY_ONLY=csv` runs a subset of
         // shapes. Filtering changes the rng stream and db state, so filtered
         // runs are for experiments only — never official tables.
-        let only: Option<Vec<String>> = std::env::var("ROCKS_PARITY_ONLY")
-            .ok()
-            .map(|s| {
-                s.split(',')
-                    .map(str::trim)
-                    .filter(|x| !x.is_empty())
-                    .map(String::from)
-                    .collect()
-            });
+        let only: Option<Vec<String>> = std::env::var("ROCKS_PARITY_ONLY").ok().map(|s| {
+            s.split(',')
+                .map(str::trim)
+                .filter(|x| !x.is_empty())
+                .map(String::from)
+                .collect()
+        });
         let want = |name: &str| only.as_ref().map_or(true, |v| v.iter().any(|x| x == name));
 
         // Materialise the zipf stream before the timed window so the ratio

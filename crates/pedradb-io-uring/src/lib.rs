@@ -1,9 +1,11 @@
 //! PedraDB storage Env backed by **Linux io_uring** for write + fsync paths.
 //!
 //! # Why a separate crate
-//! `pedradb-core` is `#![forbid(unsafe_code)]`. Submitting SQEs and calling
-//! `posix_fadvise` require `unsafe`, so they live here. The engine still
-//! speaks only [`Env`] / [`EnvFile`].
+//! `pedradb-core` is `#![forbid(unsafe_code)]`. Submitting SQEs lives in
+//! `ring.rs` (Linux). `posix_fadvise` lives in `pedradb-posix`. The engine
+//! still speaks only [`Env`] / [`EnvFile`]. SQE `user_data` is unique per
+//! issue (U1 / F203): leftover CQEs after a failed submit cannot be adopted
+//! as a later write/fsync.
 //!
 //! # Platform
 //! - **Linux:** real `io_uring` for `write`, `fsync` / `fdatasync`.
@@ -24,6 +26,10 @@
 //! Or [`open`] / [`open_with`] helpers.
 
 #![warn(missing_docs)]
+
+mod cqe_kernel;
+#[cfg(target_os = "linux")]
+mod ring;
 
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Seek, SeekFrom, Write};
@@ -67,7 +73,7 @@ pub struct IoUringEnv {
 enum Inner {
     #[cfg(target_os = "linux")]
     Uring {
-        ring: Mutex<io_uring::IoUring>,
+        state: Mutex<ring::UringState>,
     },
     Posix(StdEnv),
 }
@@ -92,7 +98,7 @@ impl IoUringEnv {
                 Ok(ring) => {
                     return Ok(Self {
                         inner: Arc::new(Inner::Uring {
-                            ring: Mutex::new(ring),
+                            state: Mutex::new(ring::UringState::new(ring)),
                         }),
                     });
                 }
@@ -180,86 +186,29 @@ impl IoUringFile {
 
     #[cfg(target_os = "linux")]
     fn uring_write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        let Inner::Uring { ring } = &*self.env.inner else {
+        let Inner::Uring { state } = &*self.env.inner else {
             return self.file.write(buf);
         };
         if buf.is_empty() {
             return Ok(0);
         }
-        let mut ring = ring.lock();
-        let fd = io_uring::types::Fd(self.file.as_raw_fd());
-        // SAFETY: `buf` is valid for the duration of submit_and_wait (we wait before return).
-        let entry = io_uring::opcode::Write::new(fd, buf.as_ptr(), buf.len() as u32)
-            .offset(self.pos)
-            .build()
-            .user_data(0x77);
-        unsafe {
-            ring.submission()
-                .push(&entry)
-                .map_err(|e| io::Error::other(format!("io_uring sq full: {e}")))?;
-        }
-        ring.submit_and_wait(1)?;
-        let res = wait_tagged_cqe(&mut ring, 0x77)?;
-        if res < 0 {
-            return Err(io::Error::from_raw_os_error(-res));
-        }
-        let n = res as usize;
+        let mut state = state.lock();
+        let n = state.pwrite(&self.file, buf, self.pos)?;
         self.pos = self.pos.saturating_add(n as u64);
         Ok(n)
     }
 
     #[cfg(target_os = "linux")]
     fn uring_fsync(&mut self, datasync: bool) -> io::Result<()> {
-        let Inner::Uring { ring } = &*self.env.inner else {
+        let Inner::Uring { state } = &*self.env.inner else {
             return if datasync {
                 self.file.sync_data()
             } else {
                 self.file.sync_all()
             };
         };
-        let mut ring = ring.lock();
-        let fd = io_uring::types::Fd(self.file.as_raw_fd());
-        let mut op = io_uring::opcode::Fsync::new(fd);
-        if datasync {
-            op = op.flags(io_uring::types::FsyncFlags::DATASYNC);
-        }
-        let entry = op.build().user_data(0x5f);
-        // SAFETY: no buffer; fsync completes before return.
-        unsafe {
-            ring.submission()
-                .push(&entry)
-                .map_err(|e| io::Error::other(format!("io_uring sq full: {e}")))?;
-        }
-        ring.submit_and_wait(1)?;
-        let res = wait_tagged_cqe(&mut ring, 0x5f)?;
-        if res < 0 {
-            return Err(io::Error::from_raw_os_error(-res));
-        }
-        Ok(())
-    }
-}
-
-#[cfg(target_os = "linux")]
-use std::os::unix::io::AsRawFd;
-
-/// Wait for OUR completion, matched by its `user_data` tag (F203).
-///
-/// `submit_and_wait` can fail (e.g. `EINTR`) after the SQE was already
-/// submitted: the kernel still completes the op and leaves a stale CQE in
-/// the ring. Taking `completion().next()` blindly lets the next operation
-/// adopt that stale result as its own (wrong `res`, double cursor advance).
-/// Drain CQEs until the tag matches, waiting for more when only stale ones
-/// were queued.
-#[cfg(target_os = "linux")]
-fn wait_tagged_cqe(ring: &mut io_uring::IoUring, tag: u64) -> io::Result<i32> {
-    loop {
-        while let Some(cqe) = ring.completion().next() {
-            if cqe.user_data() == tag {
-                return Ok(cqe.result());
-            }
-            // Stale CQE from an op whose caller already saw the submit error.
-        }
-        ring.submit_and_wait(1)?;
+        let mut state = state.lock();
+        state.fsync(&self.file, datasync)
     }
 }
 
@@ -307,7 +256,10 @@ impl Seek for IoUringFile {
             // irrelevant, so delegating is safe here.
             SeekFrom::End(n) => self.file.seek(SeekFrom::End(n))?,
             SeekFrom::Current(n) => self.pos.checked_add_signed(n).ok_or_else(|| {
-                io::Error::new(io::ErrorKind::InvalidInput, "invalid seek (cursor underflow)")
+                io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "invalid seek (cursor underflow)",
+                )
             })?,
         };
         self.pos = new;
@@ -385,25 +337,12 @@ impl Env for IoUringEnv {
         let dir = File::open(path)?;
         #[cfg(target_os = "linux")]
         {
-            if let Inner::Uring { ring } = &*self.inner {
-                let mut ring = ring.lock();
-                let fd = io_uring::types::Fd(dir.as_raw_fd());
-                let entry = io_uring::opcode::Fsync::new(fd).build().user_data(0xd1);
-                // SAFETY: dir fd lives until wait returns.
-                unsafe {
-                    ring.submission()
-                        .push(&entry)
-                        .map_err(|e| io::Error::other(format!("io_uring sq full: {e}")))?;
-                }
-                ring.submit_and_wait(1)?;
-                let res = wait_tagged_cqe(&mut ring, 0xd1)?;
-                if res < 0 {
-                    return Err(io::Error::from_raw_os_error(-res));
-                }
-                return Ok(());
+            if let Inner::Uring { state } = &*self.inner {
+                let mut state = state.lock();
+                return state.fsync(&dir, false);
             }
         }
-        dir.sync_all()
+        pedradb_posix::sync_dir_fd(&dir)
     }
 
     fn read_dir_names(&self, path: &Path) -> io::Result<Vec<String>> {
@@ -432,34 +371,12 @@ impl Env for IoUringEnv {
     }
 
     fn advise(&self, path: &Path, offset: u64, len: u64, kind: AdviseKind) -> io::Result<()> {
-        #[cfg(target_os = "linux")]
-        {
-            use std::os::unix::io::AsRawFd;
-            let f = File::open(path)?;
-            let advice = match kind {
-                AdviseKind::WillNeed => libc::POSIX_FADV_WILLNEED,
-                AdviseKind::DontNeed => libc::POSIX_FADV_DONTNEED,
-            };
-            // posix_fadvise returns 0 on success, errno-style code otherwise.
-            // SAFETY: `f` is open for the call; offset/len are best-effort hints.
-            let rc = unsafe {
-                libc::posix_fadvise(
-                    f.as_raw_fd(),
-                    i64::try_from(offset).unwrap_or(i64::MAX),
-                    i64::try_from(len).unwrap_or(0),
-                    advice,
-                )
-            };
-            if rc != 0 {
-                return Err(io::Error::from_raw_os_error(rc));
-            }
-            return Ok(());
-        }
-        #[cfg(not(target_os = "linux"))]
-        {
-            let _ = (path, offset, len, kind);
-            Ok(())
-        }
+        let f = File::open(path)?;
+        let hint = match kind {
+            AdviseKind::WillNeed => pedradb_posix::FileAdvise::WillNeed,
+            AdviseKind::DontNeed => pedradb_posix::FileAdvise::DontNeed,
+        };
+        pedradb_posix::advise_file(&f, offset, len, hint)
     }
 }
 

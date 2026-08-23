@@ -38,7 +38,8 @@ impl Picker {
 }
 
 fn run(threads: usize, ops: usize, records: usize) {
-    let dir = std::env::temp_dir().join(format!("pedra-mwprobe-{}-{}", threads, std::process::id()));
+    let dir =
+        std::env::temp_dir().join(format!("pedra-mwprobe-{}-{}", threads, std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     let db = ConcurrentDb::open_with(
         &dir,

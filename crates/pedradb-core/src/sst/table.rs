@@ -1206,9 +1206,7 @@ impl SstTable {
                 // `hi == s` means the next block starts at `s`; this block
                 // may hold trailing versions of `s` from a mid-key split —
                 // keep it (same window rule as `blocks_for_point`).
-                Bound::Included(s) | Bound::Excluded(s) => {
-                    block_hi_excl.is_none_or(|hi| hi >= s)
-                }
+                Bound::Included(s) | Bound::Excluded(s) => block_hi_excl.is_none_or(|hi| hi >= s),
             };
             if ends_after_start {
                 out.push(i);
@@ -2126,7 +2124,8 @@ mod tests {
         // only [1], silently dropping the newest versions of `k`.
         let got = table.blocks_overlapping_range(Bound::Included(&b"k"[..]), Bound::Unbounded);
         assert_eq!(
-            got, vec![0, 1],
+            got,
+            vec![0, 1],
             "mid-key split: scan at `k` must see block 0 like the point path"
         );
 

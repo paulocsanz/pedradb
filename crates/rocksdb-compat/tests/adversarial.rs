@@ -394,7 +394,10 @@ fn compat_resume_reports_uncertain_range() {
     db.put(b"a", b"1").expect("put");
     // One-shot failure on the next file write = the WAL frame write.
     env.arm_op_class(OpClass::Write, 0, true, FaultKind::IoError);
-    assert!(db.put(b"b", b"2").is_err(), "injected WAL write failure fences");
+    assert!(
+        db.put(b"b", b"2").is_err(),
+        "injected WAL write failure fences"
+    );
     db.resume().expect("resume after fence");
     let rec = db.last_fence_recovery().expect("typed fence report");
     assert_eq!(rec.fence.uncertain_from, 2);
@@ -430,7 +433,10 @@ fn compat_auto_resume_transient_only() {
     db.put(b"a", b"1").expect("put");
     env.arm_op_class(OpClass::Write, 0, true, FaultKind::StorageFull);
     assert!(db.put(b"b", b"2").is_err(), "ENOSPC write failure fences");
-    assert!(db.try_auto_resume().expect("auto tick"), "transient auto-resumes");
+    assert!(
+        db.try_auto_resume().expect("auto tick"),
+        "transient auto-resumes"
+    );
     let rec = db.last_fence_recovery().expect("report recorded");
     assert_eq!(rec.fence.class, pedradb_core::FenceClass::Transient);
     assert!(rec.lost_writes);

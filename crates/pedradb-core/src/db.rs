@@ -821,7 +821,12 @@ impl SegmentCache {
         Some(std::sync::Arc::clone(&entry.records))
     }
 
-    fn insert(&mut self, name: &str, records: std::sync::Arc<Vec<crate::history::HistoryRecord>>, cost: u64) {
+    fn insert(
+        &mut self,
+        name: &str,
+        records: std::sync::Arc<Vec<crate::history::HistoryRecord>>,
+        cost: u64,
+    ) {
         self.remove(name);
         if cost > self.budget {
             return; // oversize segments never cache
@@ -835,10 +840,8 @@ impl SegmentCache {
         let at = self.clock;
         self.order.insert((at, name.to_string()));
         self.used += cost;
-        self.map.insert(
-            name.to_string(),
-            SegmentCacheEntry { records, cost, at },
-        );
+        self.map
+            .insert(name.to_string(), SegmentCacheEntry { records, cost, at });
     }
 
     fn evict_lru(&mut self) -> bool {
@@ -1197,9 +1200,7 @@ impl<E: Env> Db<E> {
                             &dir,
                             "resync",
                             origin,
-                            CoreError::Internal(
-                                "WAL resync skipped damaged region mid-log".into(),
-                            ),
+                            CoreError::Internal("WAL resync skipped damaged region mid-log".into()),
                         );
                         if opts.wal_recovery == WalRecovery::PointInTime
                             && !matches!(escalated, CoreError::CorruptionEscalated { .. })
@@ -1797,6 +1798,16 @@ impl<E: Env> Db<E> {
         }
     }
 
+    /// Explicit-flush tail (`ConcurrentDb::flush`): persist the CHANGELOG
+    /// cache even when the debounce interval is 0 — the flush rotated the
+    /// WAL, so reopen cannot rebuild the flushed keys from it (mirrors the
+    /// `Db::flush` tail).
+    pub(crate) fn persist_changelog_after_explicit_flush(&mut self) {
+        if self.changelog_interval == 0 {
+            self.persist_changelog_best_effort();
+        }
+    }
+
     /// LSM level of each live SST (parallel to inventory order).
     #[must_use]
     pub fn sst_levels(&self) -> &[u32] {
@@ -1913,11 +1924,7 @@ impl<E: Env> Db<E> {
         if let Some(ref p) = self.flush_read_pin {
             n += hit(p);
         }
-        n + self
-            .parked_unflushed
-            .iter()
-            .map(|m| hit(m))
-            .sum::<usize>()
+        n + self.parked_unflushed.iter().map(|m| hit(m)).sum::<usize>()
     }
 
     /// RFC-0046 P0.1: highest published sequence at or before
@@ -1959,9 +1966,15 @@ impl<E: Env> Db<E> {
     /// aged out, pin-aware, and archives what leaves (P0.2). Returns
     /// `(floor, archive_first)`.
     fn auto_gc_floor(&self) -> Option<(SequenceNumber, bool)> {
+        // F211: with no pins the floor is capped at the published sequence —
+        // `last_sequence()` counts applied-but-unpublished writes (write-group
+        // off-lock window) and would push `earliest_readable_seq` above
+        // `published_seq`, failing visible-snapshot reads until publish.
+        // `for_oldest_snapshot` GC keeps every version newer than the floor,
+        // so the in-flight version is retained.
         let pin_or_last = self
             .oldest_pinned_sequence()
-            .unwrap_or_else(|| self.last_sequence());
+            .unwrap_or_else(|| self.last_sequence().min(self.visible_sequence()));
         // F201: an open OCC transaction holds the floor even without a pin.
         let pin_or_last = match self.occ_registry_floor() {
             Some(occ) => pin_or_last.min(occ),
@@ -2091,9 +2104,7 @@ impl<E: Env> Db<E> {
                     report.segments_uploaded += 1;
                     shipped += m.bytes;
                 }
-                crate::history::PutStatus::AlreadyPresent => {
-                    report.segments_already_present += 1
-                }
+                crate::history::PutStatus::AlreadyPresent => report.segments_already_present += 1,
             }
             self.uploaded_history_segs.insert(m.id);
         }
@@ -2187,10 +2198,7 @@ impl<E: Env> Db<E> {
         Ok(())
     }
 
-    fn archive_flush_chunk(
-        &mut self,
-        chunk: &mut Vec<(Vec<u8>, Vec<u8>, u64, u8)>,
-    ) -> Result<()> {
+    fn archive_flush_chunk(&mut self, chunk: &mut Vec<(Vec<u8>, Vec<u8>, u64, u8)>) -> Result<()> {
         if chunk.is_empty() {
             return Ok(());
         }
@@ -2269,9 +2277,7 @@ impl<E: Env> Db<E> {
             // the tier cannot cover the read, fall back to the LSM and
             // serve only a physically-present decisive record.
             return match self.get_at_from_archive(snap, key) {
-                Err(CoreError::SnapshotTooOld { .. }) => {
-                    self.get_at_below_watermark_lsm(snap, key)
-                }
+                Err(CoreError::SnapshotTooOld { .. }) => self.get_at_below_watermark_lsm(snap, key),
                 other => other,
             };
         }
@@ -2330,23 +2336,29 @@ impl<E: Env> Db<E> {
         // generation (v3+); a pre-P2.5 remote manifest decodes with
         // `None` (walk).
         #[allow(clippy::type_complexity)]
-        let mut cands: Vec<(u64, u64, String, Option<u64>, Option<(Vec<u8>, Vec<u8>)>)> =
-            tier.segment_metas()
-                .into_iter()
-                .map(|m| {
-                    (
-                        m.from_seq,
-                        m.through_seq,
-                        m.name,
-                        Some(m.id),
-                        m.key_lo.zip(m.key_hi),
-                    )
-                })
-                .collect();
+        let mut cands: Vec<(u64, u64, String, Option<u64>, Option<(Vec<u8>, Vec<u8>)>)> = tier
+            .segment_metas()
+            .into_iter()
+            .map(|m| {
+                (
+                    m.from_seq,
+                    m.through_seq,
+                    m.name,
+                    Some(m.id),
+                    m.key_lo.zip(m.key_hi),
+                )
+            })
+            .collect();
         if let Some(remote) = self.remote_history.as_ref() {
             for seg in remote.tier.latest_segments(&remote.env)? {
                 if !cands.iter().any(|(_, _, name, _, _)| *name == seg.name) {
-                    cands.push((seg.from_seq, seg.through_seq, seg.name, None, seg.key_lo.zip(seg.key_hi)));
+                    cands.push((
+                        seg.from_seq,
+                        seg.through_seq,
+                        seg.name,
+                        None,
+                        seg.key_lo.zip(seg.key_hi),
+                    ));
                 }
             }
         }
@@ -2418,8 +2430,7 @@ impl<E: Env> Db<E> {
                                     .insert(name, records.clone(), cost);
                                 Some(records)
                             }
-                            Err(CoreError::Io(e))
-                                if e.kind() == std::io::ErrorKind::NotFound => {
+                            Err(CoreError::Io(e)) if e.kind() == std::io::ErrorKind::NotFound => {
                                 missing_below_snap = true;
                                 None
                             }
@@ -2728,6 +2739,7 @@ impl<E: Env> Db<E> {
     }
 
     fn rotate_blob(&mut self) -> Result<()> {
+        self.vlog_sync_pending()?;
         let next = if self.blob_active == 0 {
             1
         } else {
@@ -2782,7 +2794,7 @@ impl<E: Env> Db<E> {
         }
         let vlog = self.vlog.as_ref().expect("just opened");
         let mut guard = vlog.lock();
-        let (off, len, crc) = guard.append(value.as_ref())?;
+        let (off, len, crc) = guard.append_pending(value.as_ref())?;
         drop(guard);
         Ok(vlog::encode_vlog_ptr(vlog::VlogPtr {
             file_num: self.blob_active,
@@ -2790,6 +2802,31 @@ impl<E: Env> Db<E> {
             len,
             crc,
         }))
+    }
+
+    /// `write()` vlog tail so WAL pointers cannot outrun the payload (async).
+    fn vlog_flush_pending(&mut self) -> Result<()> {
+        if let Some(v) = &self.vlog {
+            v.lock().flush_pending()?;
+        }
+        Ok(())
+    }
+
+    /// Flush + fsync vlog. G1: must return before the WAL pointer is durable.
+    fn vlog_sync_pending(&mut self) -> Result<()> {
+        if let Some(v) = &self.vlog {
+            v.lock().sync_pending()?;
+        }
+        Ok(())
+    }
+
+    /// Async: `write()` only. G1: `fsync` so a crash after Ok still resolves.
+    fn vlog_prepare_wal(&mut self, do_sync: bool) -> Result<()> {
+        if do_sync {
+            self.vlog_sync_pending()
+        } else {
+            self.vlog_flush_pending()
+        }
     }
 
     /// Range scan at the latest committed snapshot over MemTable ∪ SSTs.
@@ -3480,7 +3517,7 @@ impl<E: Env> Db<E> {
         while i < stream.len() {
             let end = (i + n).min(stream.len());
             let mut issued = 0u64;
-            // Kernel readahead hints (no-op on sim / non-Linux).
+            // Kernel readahead hints (StdEnv: Linux posix_fadvise; sim no-op).
             for slot in &stream[i..end] {
                 if slot.0.kind == ValueType::RangeDeletion {
                     continue;
@@ -3773,7 +3810,8 @@ impl<E: Env> Db<E> {
             let dest_hist = dest.join("history");
             self.env.create_dir_all(&dest_hist)?;
             for name in self.env.read_dir_names(&hist)? {
-                self.env.copy_file(&hist.join(&name), &dest_hist.join(&name))?;
+                self.env
+                    .copy_file(&hist.join(&name), &dest_hist.join(&name))?;
             }
         }
 
@@ -3798,6 +3836,7 @@ impl<E: Env> Db<E> {
     /// I/O while writing SST or recreating the WAL.
     pub fn flush(&mut self) -> Result<()> {
         self.ensure_not_fenced()?;
+        self.vlog_sync_pending()?;
         let _ = crate::buggify_hooks::maybe_arm(crate::buggify_hooks::sites::BEFORE_SST_RENAME);
         let _ =
             crate::buggify_hooks::maybe_arm(crate::buggify_hooks::sites::BEFORE_MANIFEST_RENAME);
@@ -4324,9 +4363,11 @@ impl<E: Env> Db<E> {
     /// # Errors
     /// I/O while flushing or rewriting SSTs.
     pub fn compact_reclaim(&mut self) -> Result<()> {
+        // F211 (auto_gc_floor): cap the no-pin floor at the published
+        // sequence — `last_sequence()` counts applied-but-unpublished writes.
         let oldest = self
             .oldest_pinned_sequence()
-            .unwrap_or_else(|| self.last_sequence());
+            .unwrap_or_else(|| self.last_sequence().min(self.visible_sequence()));
         // F201: honor open OCC transactions (same floor rule as auto-GC).
         let oldest = match self.occ_registry_floor() {
             Some(occ) => oldest.min(occ),
@@ -5079,6 +5120,7 @@ impl<E: Env> Db<E> {
     /// # Errors
     /// I/O opening the log.
     fn replace_vlog_handle(&mut self, use_new: bool) -> Result<()> {
+        self.vlog_sync_pending()?;
         // File-0 GC must not steal the append handle off a numbered blob.
         let opened = if self.blob_active > 0 {
             ValueLog::open_blob(&self.env, &self.dir, self.blob_active)
@@ -5653,7 +5695,9 @@ impl<E: Env> Db<E> {
         if !self.env.exists(&path) {
             return Vec::new();
         }
-        let Ok((records, _, _resync)) = crate::wal::Wal::<E::File>::recover_span_on(&self.env, &path) else {
+        let Ok((records, _, _resync)) =
+            crate::wal::Wal::<E::File>::recover_span_on(&self.env, &path)
+        else {
             return Vec::new();
         };
         let mut out = Vec::new();
@@ -5925,6 +5969,7 @@ impl<E: Env> Db<E> {
     pub fn close(mut self) -> Result<()> {
         // RFC-0031: close is a persist point for the CHANGELOG cache.
         self.persist_changelog_best_effort();
+        self.vlog_sync_pending()?;
         self.release_lock()?;
         // Flush in place — `Db` implements `Drop` (Env unlock), so we cannot move `wal`.
         self.wal.lock().flush()
@@ -6045,9 +6090,10 @@ impl<E: Env> Db<E> {
         // RFC-0015 H1: if append OK and required sync fails, fence so later fsyncs
         // cannot silently publish an unacked prefix while in-process mem diverges.
         // RFC-0040: encode into WAL scratch (one payload memcpy), then move ops to mem.
+        let do_sync = durability.sync.unwrap_or(self.sync);
+        self.vlog_prepare_wal(do_sync)?;
         let n = self.wal.lock().append_write_ops(&records)?;
         self.bytes_written_wal = self.bytes_written_wal.saturating_add(n);
-        let do_sync = durability.sync.unwrap_or(self.sync);
         if do_sync {
             if let Err(e) = self.wal.lock().sync_data() {
                 self.durability_fenced = true;
@@ -6150,6 +6196,7 @@ impl<E: Env> Db<E> {
             st.prepare_ns
                 .fetch_add(t0.elapsed().as_nanos() as u64, Ordering::Relaxed);
         }
+        self.vlog_prepare_wal(false)?;
         {
             let t1 = st.as_ref().map(|_| Instant::now());
             let mut w = self.wal.lock();
@@ -6160,6 +6207,14 @@ impl<E: Env> Db<E> {
                 st.wal_ns
                     .fetch_add(t1.elapsed().as_nanos() as u64, Ordering::Relaxed);
             }
+        }
+        // F213: feed the non-lazy change log on the async path too — the
+        // write is visible via `get` once published; `commit_ops_with`
+        // extends regardless of sync, and a later durable commit would
+        // otherwise persist a CHANGELOG that never contains this event.
+        if !self.feed_is_lazy() {
+            self.change_log
+                .extend(ops.iter().map(ChangeEntry::from_write_op));
         }
         let t2 = st.as_ref().map(|_| Instant::now());
         self.note_dirty_points(&ops);
@@ -6203,11 +6258,7 @@ impl<E: Env> Db<E> {
         self.commit_inflight.load(Ordering::Acquire)
     }
 
-    pub(crate) fn fence_durability(
-        &mut self,
-        io_error: impl std::fmt::Display,
-        class: FenceClass,
-    ) {
+    pub(crate) fn fence_durability(&mut self, io_error: impl std::fmt::Display, class: FenceClass) {
         if self.fence_report.is_none() {
             let published = self.published_seq.load(Ordering::Acquire);
             self.fence_report = Some(FenceReport {
@@ -6263,6 +6314,12 @@ impl<E: Env> Db<E> {
             return Err(results);
         }
         self.group_prepare(&mut g, batches, 0);
+        if let Err(e) = self.vlog_prepare_wal(g.any_sync) {
+            let msg = e.to_string();
+            return Err((0..n)
+                .map(|_| Err(CoreError::Internal(format!("vlog flush failed: {msg}"))))
+                .collect());
+        }
         self.group_append_ops(&mut g);
         Ok(g)
     }
@@ -6281,6 +6338,17 @@ impl<E: Env> Db<E> {
         g.results
             .resize_with(g.next_i, || None::<Result<SequenceNumber>>);
         self.group_prepare(g, batches, base);
+        if let Err(e) = self.vlog_prepare_wal(g.any_sync) {
+            let msg = e.to_string();
+            g.failed = true;
+            for (i, _, _) in &g.pending {
+                g.results[*i] = Some(Err(CoreError::Internal(format!(
+                    "vlog flush failed: {msg}"
+                ))));
+            }
+            g.pending.clear();
+            return;
+        }
         self.group_append_ops(g);
     }
 
@@ -6363,6 +6431,10 @@ impl<E: Env> Db<E> {
     }
 
     pub(crate) fn group_finish(&mut self, g: GroupInFlight) -> Vec<Result<SequenceNumber>> {
+        if let Err(e) = self.vlog_prepare_wal(g.needs_sync()) {
+            self.durability_fenced = true;
+            return g.fail_sync(e);
+        }
         if let Err(e) = self.wal.lock().write_pending_frame_if(g.needs_sync()) {
             self.durability_fenced = true;
             return g.fail_sync(e);
@@ -7030,8 +7102,8 @@ impl<E: Env> ManifestPersist<E> {
         let res = manifest::store(&self.env, &self.dir, &self.vs, self.sync);
         // F196: committed-unsynced landed on disk (CURRENT swung) — the
         // epoch gate must advance so an older snapshot cannot overwrite it.
-        let committed = res.is_ok()
-            || matches!(res, Err(CoreError::ManifestCommittedUnsynced { .. }));
+        let committed =
+            res.is_ok() || matches!(res, Err(CoreError::ManifestCommittedUnsynced { .. }));
         if committed {
             *written = self.epoch;
         }
@@ -8098,12 +8170,21 @@ mod tests {
 
         let db = Db::open_with(&dir, pit_opts()).unwrap();
         for i in 0..3 {
-            assert_eq!(db.get(format!("k{i:02}").as_bytes()).as_deref(), Some(&[7u8; 120][..]));
+            assert_eq!(
+                db.get(format!("k{i:02}").as_bytes()).as_deref(),
+                Some(&[7u8; 120][..])
+            );
         }
         for i in 3..8 {
-            assert_eq!(db.get(format!("k{i:02}").as_bytes()), None, "k{i:02} is in the discarded suffix");
+            assert_eq!(
+                db.get(format!("k{i:02}").as_bytes()),
+                None,
+                "k{i:02} is in the discarded suffix"
+            );
         }
-        let report = db.last_recovery_report().expect("PointInTime must report the discard");
+        let report = db
+            .last_recovery_report()
+            .expect("PointInTime must report the discard");
         assert_eq!(report.kind, "crc");
         assert!(report.good_through_offset > 0);
         assert_eq!(
@@ -8111,8 +8192,7 @@ mod tests {
             "prefix ends exactly where the corrupt record began"
         );
         assert!(report.discarded_bytes > 0);
-        let journal =
-            fs::read_to_string(dir.join(crate::corrupt::CORRUPTLOG_NAME)).unwrap();
+        let journal = fs::read_to_string(dir.join(crate::corrupt::CORRUPTLOG_NAME)).unwrap();
         assert_eq!(journal.lines().count(), 1);
         assert!(journal.lines().all(|l| l.contains("\tcrc\t")));
         let good_through = report.good_through_offset;
@@ -8220,7 +8300,10 @@ mod tests {
             Err(e) => e,
             Ok(_) => panic!("fail-closed open must refuse a zero header mid-block"),
         };
-        assert!(matches!(err, CoreError::WalZeroHeader { .. }), "got {err:?}");
+        assert!(
+            matches!(err, CoreError::WalZeroHeader { .. }),
+            "got {err:?}"
+        );
         let journal = fs::read_to_string(dir.join(crate::corrupt::CORRUPTLOG_NAME)).unwrap();
         assert!(
             journal.lines().any(|l| l.contains("\tzero_header\t")),
@@ -8232,7 +8315,11 @@ mod tests {
         assert_eq!(db.get(b"k00").as_deref(), Some(&[7u8; 120][..]));
         assert_eq!(db.get(b"k01").as_deref(), Some(&[7u8; 120][..]));
         for i in 2..8 {
-            assert_eq!(db.get(format!("k{i:02}").as_bytes()), None, "k{i:02} discarded");
+            assert_eq!(
+                db.get(format!("k{i:02}").as_bytes()),
+                None,
+                "k{i:02} discarded"
+            );
         }
         let report = db.last_recovery_report().expect("PointInTime must report");
         assert_eq!(report.kind, "zero_header");
@@ -8271,11 +8358,13 @@ mod tests {
             fs::write(&wal, &bytes).unwrap();
             let db = match Db::open_with(&dir, pit_opts()) {
                 Ok(db) => db,
-                Err(e) => panic!("attempt {}: PointInTime must recover the prefix, got {e:?}", attempt + 1),
+                Err(e) => panic!(
+                    "attempt {}: PointInTime must recover the prefix, got {e:?}",
+                    attempt + 1
+                ),
             };
             assert!(db.last_recovery_report().is_some());
-            let journal =
-                fs::read_to_string(dir.join(crate::corrupt::CORRUPTLOG_NAME)).unwrap();
+            let journal = fs::read_to_string(dir.join(crate::corrupt::CORRUPTLOG_NAME)).unwrap();
             assert_eq!(journal.lines().count() as u32, attempt as u32 + 1);
             drop(db);
         }
@@ -8322,7 +8411,10 @@ mod tests {
 
         let mut db = Db::open_with(&dir, pit_opts()).unwrap();
         for i in 0..7 {
-            assert_eq!(db.get(format!("k{i:02}").as_bytes()).as_deref(), Some(&[7u8; 120][..]));
+            assert_eq!(
+                db.get(format!("k{i:02}").as_bytes()).as_deref(),
+                Some(&[7u8; 120][..])
+            );
         }
         assert_eq!(db.get(b"k07"), None, "torn record is dropped");
         assert!(
@@ -9783,6 +9875,60 @@ mod tests {
         let db = Db::open(&dir).unwrap();
         for i in 0..20u8 {
             assert_eq!(db.get(&[b'a', i]).as_deref(), Some(b"xxxxxxxx".as_ref()));
+        }
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn async_large_puts_recover_without_vlog_fsync() {
+        let dir = temp_dir();
+        let payload = vec![b'B'; 800];
+        {
+            let mut db = Db::open_with(
+                &dir,
+                OpenOptions {
+                wal_full_fsync: false,
+                    history: Default::default(),
+                    wal_recovery: Default::default(),
+                    sync: false,
+                    auto_flush_bytes: None,
+                    auto_compact_sst_count: None,
+                    auto_compact_sst_bytes: None,
+                    exclusive: true,
+                    large_value_threshold: Some(512),
+                },
+            )
+            .unwrap();
+            for i in 0..16u8 {
+                db.put([b'k', i], &payload).unwrap();
+            }
+            for i in 0..16u8 {
+                assert_eq!(db.get(&[b'k', i]).as_deref(), Some(payload.as_slice()));
+            }
+            drop(db);
+        }
+        let db = Db::open_with(
+            &dir,
+            OpenOptions {
+            wal_full_fsync: false,
+                history: Default::default(),
+                wal_recovery: Default::default(),
+                sync: false,
+                auto_flush_bytes: None,
+                auto_compact_sst_count: None,
+                auto_compact_sst_bytes: None,
+                exclusive: true,
+                large_value_threshold: Some(512),
+            },
+        )
+        .unwrap();
+        for i in 0..16u8 {
+            assert_eq!(
+                db.get(&[b'k', i]).as_deref(),
+                Some(payload.as_slice()),
+                "async large put must write() vlog before the WAL pointer"
+            );
         }
         db.close().unwrap();
         let _ = fs::remove_dir_all(&dir);
@@ -12390,7 +12536,7 @@ mod tests {
         }
         assert_eq!(win(&db), 10);
         assert_eq!(win(&db), 10); // second read takes the cache path
-        // ycsb_e shape: inserts land above every scanned window.
+                                  // ycsb_e shape: inserts land above every scanned window.
         for i in 0..2000u32 {
             db.put(format!("u/9{i:03}").as_bytes(), b"v").unwrap();
         }
@@ -12995,12 +13141,15 @@ mod tests {
             db.earliest_readable_sequence()
         );
         assert_eq!(
-            db.get_at(Snapshot::at(pinned_seq), b"k").unwrap().as_deref(),
+            db.get_at(Snapshot::at(pinned_seq), b"k")
+                .unwrap()
+                .as_deref(),
             Some(&b"v39"[..]),
             "below-watermark read serves from the retained tier (P2.1)"
         );
         assert_eq!(
-            db.get_at(Snapshot::at(pinned_seq), b"never-written").unwrap(),
+            db.get_at(Snapshot::at(pinned_seq), b"never-written")
+                .unwrap(),
             None,
             "anchored coverage proves never-written (P2.1)"
         );
@@ -13107,7 +13256,10 @@ mod tests {
             after < before / 4,
             "explicit horizon compaction reclaims aged bytes (before {before}, after {after})"
         );
-        assert!(after < 4 * live, "bounded near live set (live {live}, after {after})");
+        assert!(
+            after < 4 * live,
+            "bounded near live set (live {live}, after {after})"
+        );
         for (k, key) in keys.iter().enumerate() {
             assert_eq!(db.get(key).as_deref(), Some(&val(7, k as u32)[..]));
             assert_eq!(
@@ -13121,7 +13273,8 @@ mod tests {
         let mut o = horizon_opts(1_000, 1 << 30);
         o.history.horizon = HistoryHorizon::All;
         o.auto_compact_sst_count = None;
-        let mut db_all = Db::open_with_env(&dir_all, o, ClockEnv::new(std::rc::Rc::clone(&clock))).unwrap();
+        let mut db_all =
+            Db::open_with_env(&dir_all, o, ClockEnv::new(std::rc::Rc::clone(&clock))).unwrap();
         db_all.put(b"k", b"v").unwrap();
         db_all.flush().unwrap();
         assert!(db_all.compact_horizon().is_ok());
@@ -13280,12 +13433,12 @@ mod tests {
         clock.set(1_000_000 + 120_000);
         db.compact_horizon().unwrap();
         let wm = db.earliest_readable_sequence();
-        assert!(wm > old_to, "watermark advanced past the old wave ({wm} vs {old_to})");
         assert!(
-            matches!(
-                db.changes(0, old_to),
-                Err(CoreError::SnapshotTooOld { .. })
-            ),
+            wm > old_to,
+            "watermark advanced past the old wave ({wm} vs {old_to})"
+        );
+        assert!(
+            matches!(db.changes(0, old_to), Err(CoreError::SnapshotTooOld { .. })),
             "window below the watermark fails closed, never a silent partial"
         );
         // From the watermark the tail is exact: the surviving wave answers.
@@ -13470,7 +13623,8 @@ mod tests {
         let dir = temp_dir();
         let remote_root = dir.join("remote");
         let clock = std::rc::Rc::new(std::cell::Cell::new(1_000_000u64));
-        let (env, outage) = ClockEnv::with_fail_prefix(std::rc::Rc::clone(&clock), remote_root.clone());
+        let (env, outage) =
+            ClockEnv::with_fail_prefix(std::rc::Rc::clone(&clock), remote_root.clone());
         let mut db = Db::open_with_env(&dir, horizon_opts(1_000, 1 << 30), env.clone()).unwrap();
         db.set_remote_history(env.clone(), remote_root.clone());
         for i in 0..40u32 {
@@ -13513,7 +13667,8 @@ mod tests {
         let dir = temp_dir();
         let remote_root = dir.join("remote");
         let clock = std::rc::Rc::new(std::cell::Cell::new(1_000_000u64));
-        let (env, outage) = ClockEnv::with_fail_prefix(std::rc::Rc::clone(&clock), remote_root.clone());
+        let (env, outage) =
+            ClockEnv::with_fail_prefix(std::rc::Rc::clone(&clock), remote_root.clone());
         let mut db = Db::open_with_env(&dir, horizon_opts(1_000, 2_048), env.clone()).unwrap();
         db.set_remote_history(env.clone(), remote_root.clone());
         outage.set(true);
@@ -13557,7 +13712,8 @@ mod tests {
         {
             let (env, outage) =
                 ClockEnv::with_fail_prefix(std::rc::Rc::clone(&clock), remote_root.clone());
-            let mut db = Db::open_with_env(&dir, horizon_opts(1_000, 1 << 30), env.clone()).unwrap();
+            let mut db =
+                Db::open_with_env(&dir, horizon_opts(1_000, 1 << 30), env.clone()).unwrap();
             db.set_remote_history(env.clone(), remote_root.clone());
             outage.set(true);
             for i in 0..20u32 {
@@ -13570,7 +13726,8 @@ mod tests {
         {
             let (env, _outage) =
                 ClockEnv::with_fail_prefix(std::rc::Rc::clone(&clock), remote_root.clone());
-            let mut db = Db::open_with_env(&dir, horizon_opts(1_000, 1 << 30), env.clone()).unwrap();
+            let mut db =
+                Db::open_with_env(&dir, horizon_opts(1_000, 1 << 30), env.clone()).unwrap();
             db.set_remote_history(env.clone(), remote_root.clone());
             for i in 20..40u32 {
                 db.put(b"k", format!("v{i:08}").as_bytes()).unwrap();
@@ -13578,7 +13735,10 @@ mod tests {
             clock.set(1_000_000 + 120_000);
             db.flush().unwrap();
             let report = db.upload_history_now().unwrap();
-            assert_eq!(report.segments_uploaded, 0, "everything already shipped inline");
+            assert_eq!(
+                report.segments_uploaded, 0,
+                "everything already shipped inline"
+            );
             assert!(
                 report.segments_already_present >= 1,
                 "resume must be idempotent, not a re-upload"
@@ -13610,8 +13770,8 @@ mod tests {
         db.delete(b"d").unwrap(); // seq 42
         db.put(b"r", b"ranged").unwrap(); // seq 43
         db.delete_range(b"r", b"s").unwrap(); // seq 44
-        // Filler past the next 32-publish sample so the horizon cutoff
-        // (sampled every 32 publishes) passes the deletes too.
+                                              // Filler past the next 32-publish sample so the horizon cutoff
+                                              // (sampled every 32 publishes) passes the deletes too.
         for i in 0..40u32 {
             db.put(b"f", format!("f{i:02}").as_bytes()).unwrap();
         }
@@ -13664,8 +13824,7 @@ mod tests {
         let remote_root = dir.join("remote");
         let clock = std::rc::Rc::new(std::cell::Cell::new(1_000_000u64));
         let env = ClockEnv::new(std::rc::Rc::clone(&clock));
-        let mut db =
-            Db::open_with_env(&dir, horizon_opts(1_000, 2_048), env.clone()).unwrap();
+        let mut db = Db::open_with_env(&dir, horizon_opts(1_000, 2_048), env.clone()).unwrap();
         db.set_remote_history(env.clone(), remote_root.clone());
         // Fetch-path fail-closed semantics under test after reads; the
         // P2.8 read cache would serve the verified copy instead.
@@ -13763,8 +13922,7 @@ mod tests {
             .into_iter()
             .map(|s| s.name)
             .collect();
-        let local_names: Vec<String> =
-            tier.segment_metas().into_iter().map(|m| m.name).collect();
+        let local_names: Vec<String> = tier.segment_metas().into_iter().map(|m| m.name).collect();
         assert!(
             remote_names.iter().any(|n| !local_names.contains(n)),
             "a listed segment is dropped locally (remote-only): {remote_names:?} vs {local_names:?}"
@@ -13793,7 +13951,11 @@ mod tests {
         };
         let hists = count("hist");
         assert!(hists >= 2, "at least the two listed segments shipped");
-        assert_eq!(count("bloom"), hists, "sidecar shipped next to every object");
+        assert_eq!(
+            count("bloom"),
+            hists,
+            "sidecar shipped next to every object"
+        );
         // Corrupt the remote segment bodies. The hole key reads as a
         // coverage-gap SnapshotTooOld — the pruned segment is never
         // fetched, so the corruption under it is inert (an unpruned walk
@@ -14012,8 +14174,7 @@ mod tests {
             .into_iter()
             .map(|s| s.name)
             .collect();
-        let local_names: Vec<String> =
-            tier.segment_metas().into_iter().map(|m| m.name).collect();
+        let local_names: Vec<String> = tier.segment_metas().into_iter().map(|m| m.name).collect();
         assert!(
             remote_names.iter().any(|n| !local_names.contains(n)),
             "a listed segment is dropped locally (remote-only): {remote_names:?} vs {local_names:?}"
@@ -14132,7 +14293,8 @@ mod tests {
         let dir = temp_dir();
         let remote_root = dir.join("remote");
         let clock = std::rc::Rc::new(std::cell::Cell::new(1_000_000u64));
-        let (env, outage) = ClockEnv::with_fail_prefix(std::rc::Rc::clone(&clock), remote_root.clone());
+        let (env, outage) =
+            ClockEnv::with_fail_prefix(std::rc::Rc::clone(&clock), remote_root.clone());
         let mut db = Db::open_with_env(&dir, horizon_opts(1_000, 2_048), env.clone()).unwrap();
         db.set_remote_history(env.clone(), remote_root.clone());
         outage.set(true);
@@ -14144,7 +14306,11 @@ mod tests {
             db.flush().unwrap();
         }
         let stats = db.history_stats().unwrap();
-        assert!(stats.local_segments >= 2, "backlog built up (segs={})", stats.local_segments);
+        assert!(
+            stats.local_segments >= 2,
+            "backlog built up (segs={})",
+            stats.local_segments
+        );
         assert_eq!(stats.pending_uploads, stats.local_segments);
         assert!(stats.last_archive_age_millis.is_some());
         outage.set(false);
@@ -14167,7 +14333,11 @@ mod tests {
         let stats = db.history_stats().unwrap();
         assert_eq!(stats.pending_uploads, 0);
         let remote = stats.remote.expect("remote summary");
-        assert!(remote.segments >= 2, "mirror complete ({})", remote.segments);
+        assert!(
+            remote.segments >= 2,
+            "mirror complete ({})",
+            remote.segments
+        );
         assert!(remote.bytes >= stats.local_bytes);
         // With the backlog drained, a flush lets the cap reclaim again.
         db.put(b"k", b"tail").unwrap();
