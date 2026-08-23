@@ -965,6 +965,15 @@ impl MemTable {
     /// (same visibility as [`get_entry`]). `before` is an exclusive upper bound
     /// inside the prefix (retry after a cross-layer tombstone). `None` means
     /// `prefix_succ`.
+    ///
+    /// RFC-0054 P1.1: newest-first without materializing the prefix — the
+    /// candidate is the max of the per-set maxima (`map` + each `tail_idx`
+    /// shard; the sets partition the keyspace, so max-of-maxes is the global
+    /// max), re-seeking with the candidate as `before` only when it is not
+    /// visible. O(rounds × shards × log n) — the previous collect-sort-walk
+    /// cloned EVERY version of the user into a `Vec` per call, which the
+    /// shared 264k-entry memtable of the deps suite turned into the mvcc
+    /// gap (probe: `last` 289 ns isolated → 1649 ns full).
     #[must_use]
     pub fn last_visible_under_prefix(
         &self,
@@ -973,31 +982,41 @@ impl MemTable {
         before: Option<&[u8]>,
     ) -> Option<(Bytes, Bytes)> {
         let prefix_end = crate::prefix::prefix_exclusive_end(prefix);
-        let end_b = match (before, prefix_end.as_deref()) {
-            (Some(b), Some(p)) if b < p => Bound::Excluded(b),
-            (Some(b), None) => Bound::Excluded(b),
-            (_, Some(p)) => Bound::Excluded(p),
-            (_, None) => Bound::Unbounded,
-        };
-        let mut keys: Vec<Bytes> = self
-            .map
-            .range::<[u8], _>((Bound::Included(prefix), end_b))
-            .filter(|(uk, _)| prefix.is_empty() || uk.starts_with(prefix))
-            .map(|(uk, _)| uk.clone())
-            .collect();
-        keys.extend(
-            self.tail_idx_range(Bound::Included(prefix), end_b)
-                .filter(|(uk, _)| prefix.is_empty() || uk.starts_with(prefix))
-                .map(|(uk, _)| uk.clone()),
-        );
-        keys.sort();
-        keys.dedup();
-        for uk in keys.into_iter().rev() {
+        let mut before_owned: Option<Bytes> = before.map(Bytes::copy_from_slice);
+        loop {
+            let end_b = match (before_owned.as_deref(), prefix_end.as_deref()) {
+                (Some(b), Some(p)) if b < p => Bound::Excluded(b),
+                (Some(b), None) => Bound::Excluded(b),
+                (_, Some(p)) => Bound::Excluded(p),
+                (_, None) => Bound::Unbounded,
+            };
+            // [prefix, end_b) contains exactly the keys that start with
+            // `prefix` (F57 contract; `before` only shrinks it inside), so
+            // no post-filter is needed — the max of these disjoint sets is
+            // the newest candidate.
+            let mut cand: Option<Bytes> = self
+                .map
+                .range::<[u8], _>((Bound::Included(prefix), end_b))
+                .next_back()
+                .map(|(uk, _)| uk.clone());
+            for shard in self.tail_idx.values() {
+                if let Some((uk, _)) = shard
+                    .range::<[u8], _>((Bound::Included(prefix), end_b))
+                    .next_back()
+                {
+                    if cand.as_ref().is_none_or(|c| uk > c) {
+                        cand = Some(uk.clone());
+                    }
+                }
+            }
+            let Some(uk) = cand else {
+                return None;
+            };
             if let Some((_, Lookup::Found(val))) = self.get_entry(&uk, snapshot) {
                 return Some((uk, val));
             }
+            before_owned = Some(uk);
         }
-        None
     }
 
     /// Rewrite every stored value with `f` (used by value-log GC remapping).
