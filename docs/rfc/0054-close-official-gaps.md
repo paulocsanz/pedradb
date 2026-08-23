@@ -59,11 +59,15 @@
       Oficial 13–15 µs ainda é o processo do harness, não o encode)
 - [ ] **P0.2** Cortar o gap nomeado por P0.1 até `deps_raftlog` **>1×** numa
       bateria quieta (1/3 já conta como evidência; fecha com 3/3) — status: `doing`
-      (finding `rfc0054-p02`: isolado 131–159 k **>1×** vs rocks 131 k;
-      full-deps 67–76 k porque 264 k versões do apply compartilham o
-      memtable — raftdb no Rocks é outra instância / CF memtable. `tail_idx`
-      sharded por prefixo CF aterrissou; fold-before-raftlog **não** recuperou
-      p50. Próximo = per-CF **tail** vecs)
+      (finding `rfc0054-p02`: gap **não** era memtable — fases por forma
+      mostram mem 2,6 µs igual nos dois runs; era `publish` 0,57→4,2 µs:
+      `CountCache::record_dirty` alocando 2 `Box`/key/publish depois que um
+      scan enche o cache. Fix: envelope conservador + watermark no `insert`
+      (F204-safe). p50 full-deps 6,7→**5,3 µs**, publish→0,90 µs. Per-CF
+      tail vecs **refutado**. De quebra, F219: `tail_idx_range` cross-shard
+      devolvia range vazio e `last_visible_under_prefix` perdia o tail —
+      4 testes vermelhos no `main` desde ae89515, corrigidos. Falta a
+      bateria quieta 3/3)
 
 ### P1 — os outros ≥2× + apply 3/3
 
@@ -87,7 +91,7 @@
 |----|------|-------|--------|-----------|---------|
 | P0.0 | p0 | drop-in sync=false | done | este change | 2026-08-23 |
 | P0.1 | p0 | raftlog_submit_probe | done | example (core 3,79µs / shape 5,50µs) | 2026-08-23 |
-| P0.2 | p0 | raftlog >1× quieto | doing | findings/rfc0054-p02; tail_idx CF-shard | 2026-08-23 |
+| P0.2 | p0 | raftlog >1× quieto | doing | publish=count-cache tax fix; F219; falta bateria 3/3 | 2026-08-23 |
 | P1.1 | p1 | mvcc_latest ≥2× | todo | — | 2026-08-23 |
 | P1.2 | p1 | blob_set ≥2× | todo | — | 2026-08-23 |
 | P1.3 | p1 | deps_scan ≥2× | todo | — | 2026-08-23 |

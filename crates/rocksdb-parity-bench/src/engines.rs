@@ -177,6 +177,21 @@ impl Engine for CompatEngine {
     fn fold_mem_tail(&self) -> usize {
         self.db.fold_mem_tail()
     }
+    /// Raw phase counters for per-shape deltas (cumulative line mixes
+    /// shapes): `[commits, prepare, wal, mem, publish, flush, lock_wait]`.
+    fn write_phase_snapshot(&self) -> Option<[u64; 7]> {
+        let st = self.db.write_phase_stats()?;
+        let r = std::sync::atomic::Ordering::Relaxed;
+        Some([
+            st.commits.load(r),
+            st.prepare_ns.load(r),
+            st.wal_ns.load(r),
+            st.mem_ns.load(r),
+            st.publish_ns.load(r),
+            st.flush_check_ns.load(r),
+            st.lock_wait_ns.load(r),
+        ])
+    }
     fn write_phase_line(&self) -> Option<String> {
         let st = self.db.write_phase_stats()?;
         let n = st.commits.load(std::sync::atomic::Ordering::Relaxed).max(1);

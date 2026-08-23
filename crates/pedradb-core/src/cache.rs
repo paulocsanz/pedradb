@@ -472,6 +472,52 @@ struct CountCacheState {
     /// publish must not validate — a lock-free `count_cache_handle` reader
     /// can still insert it after the skip (F204's interleaving, one flight).
     skipped_below: u64,
+    /// RFC-0054 P0.2: conservative key-space envelope of the cached windows
+    /// (min start / max end). Sticky through eviction — retirement only
+    /// loses precision, never correctness. Keys published outside it cannot
+    /// invalidate any present entry and skip the per-key dirty log (the
+    /// raftdb-CF shape paid two allocations per key per publish once any
+    /// scan had filled the cache: publish 0.57 µs → 4.2 µs).
+    env_lo: EnvSide,
+    env_hi: EnvSide,
+    /// Highest publish sequence with envelope-dropped keys. An answer
+    /// computed before such a publish cannot know whether a dropped key
+    /// lay inside its window (F204's in-flight reader interleaving), so
+    /// [`CountCache::insert`] refuses to cache anything observed below it.
+    dropped_below_max: u64,
+}
+
+/// One sticky side of the [`CountCacheState`] envelope.
+#[derive(Debug, Default, Clone)]
+enum EnvSide {
+    /// No window inserted yet (the empty-map path in `record_dirty`
+    /// returns before the filter ever runs).
+    #[default]
+    Empty,
+    /// An unbounded window was inserted: this side extends to infinity
+    /// until `clear` — eviction never shrinks the envelope.
+    Unbounded,
+    /// Extreme bound seen so far (min start / max end).
+    At(Bytes),
+}
+
+impl EnvSide {
+    /// Keep `k` (it may lie inside a cached window)? `lo` picks the side:
+    /// start bounds only drop keys below the minimum, end bounds only
+    /// keys above the maximum (equal bytes stay — an `Included` end at
+    /// the envelope edge still contains its own key).
+    fn keeps(&self, k: &[u8], lo: bool) -> bool {
+        match self {
+            Self::Empty | Self::Unbounded => true,
+            Self::At(b) => {
+                if lo {
+                    k >= b.as_ref()
+                } else {
+                    k <= b.as_ref()
+                }
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -522,6 +568,39 @@ impl CountDirty {
     }
 }
 
+impl CountCacheState {
+    /// Widen the envelope for a newly inserted window. Unbounded sides are
+    /// sticky-infinite until `clear`.
+    fn widen(&mut self, entry: &CountEntry) {
+        match &entry.start {
+            None => self.env_lo = EnvSide::Unbounded,
+            Some((s, _)) => {
+                if matches!(self.env_lo, EnvSide::Empty)
+                    || matches!(&self.env_lo, EnvSide::At(cur) if s < cur)
+                {
+                    self.env_lo = EnvSide::At(s.clone());
+                }
+            }
+        }
+        match &entry.end {
+            None => self.env_hi = EnvSide::Unbounded,
+            Some((e, _)) => {
+                if matches!(self.env_hi, EnvSide::Empty)
+                    || matches!(&self.env_hi, EnvSide::At(cur) if e > cur)
+                {
+                    self.env_hi = EnvSide::At(e.clone());
+                }
+            }
+        }
+    }
+
+    /// Could `k` lie inside some cached window? Conservative: only keys
+    /// strictly outside the envelope are droppable.
+    fn envelope_drops(&self, k: &[u8]) -> bool {
+        !(self.env_lo.keeps(k, true) && self.env_hi.keeps(k, false))
+    }
+}
+
 impl CountCache {
     /// Create with max cached windows (`0` = disabled).
     #[must_use]
@@ -537,6 +616,9 @@ impl CountCache {
                     capacity: COUNT_DIRTY_CAP,
                 },
                 skipped_below: 0,
+                env_lo: EnvSide::Empty,
+                env_hi: EnvSide::Empty,
+                dropped_below_max: 0,
             }),
         }
     }
@@ -579,12 +661,19 @@ impl CountCache {
         if g.capacity == 0 {
             return;
         }
+        // RFC-0054: an answer observed before an envelope-dropped publish
+        // cannot know whether a dropped key lay inside its window — cache
+        // nothing below that watermark (F204's in-flight reader).
+        if seq < g.dropped_below_max {
+            return;
+        }
         let entry = CountEntry {
             start: count_side(start),
             end: count_side(end),
             seq,
             n,
         };
+        g.widen(&entry);
         if let Some(e) = g.map.get_mut(ck.as_slice()) {
             *e = entry;
             return;
@@ -619,14 +708,24 @@ impl CountCache {
         // a "past" write for the entry that reader is about to insert —
         // without this record the pre-write answer validates forever,
         // because `get` only checks the dirty log.
-        let d = &mut g.dirty;
-        if d.capacity == 0 {
+        if g.dirty.capacity == 0 {
             return;
         }
         for k in keys {
-            d.order.push_back((seq, Box::from(k.as_ref())));
-            d.by_key.insert(Box::from(k.as_ref()), seq);
+            // RFC-0054 P0.2 envelope filter: a key outside every cached
+            // window cannot invalidate a present entry — no dirty-log
+            // allocation. `insert` refuses answers observed below the
+            // bumped watermark, closing the in-flight-reader hole.
+            if g.envelope_drops(k.as_ref()) {
+                if seq > g.dropped_below_max {
+                    g.dropped_below_max = seq;
+                }
+                continue;
+            }
+            g.dirty.order.push_back((seq, Box::from(k.as_ref())));
+            g.dirty.by_key.insert(Box::from(k.as_ref()), seq);
         }
+        let d = &mut g.dirty;
         if d.order.len() <= d.capacity {
             return;
         }
@@ -666,6 +765,9 @@ impl CountCache {
         g.order.clear();
         g.dirty.order.clear();
         g.dirty.by_key.clear();
+        g.env_lo = EnvSide::Empty;
+        g.env_hi = EnvSide::Empty;
+        g.dropped_below_max = 0;
     }
 }
 
@@ -840,5 +942,72 @@ mod tests {
             c.record_dirty(4000 + i as u64, &[Bytes::from(format!("key{i:06}"))]);
         }
         assert!(c.get(s, e, Some(25)).is_none());
+    }
+
+    #[test]
+    fn count_cache_envelope_skips_outside_publishes() {
+        use std::ops::Bound;
+        let c = CountCache::new(8);
+        let (s, e) = (Bound::Included(&b"k"[..]), Bound::Excluded(&b"m"[..]));
+        c.insert(s, e, Some(25), 3, 1);
+        assert_eq!(c.get(s, e, Some(25)), Some(3));
+        // "zz" is outside the envelope [k, m]: dropped from the dirty log…
+        c.record_dirty(5, &[Bytes::from_static(b"zz")]);
+        // …and the cached window stays valid — no overlap either way.
+        assert_eq!(c.get(s, e, Some(25)), Some(3));
+        // A racy reader that observed seq 4 (< 5) tries to insert a window
+        // containing "zz": refused below the dropped watermark.
+        let (ys, ye) = (Bound::Included(&b"y"[..]), Bound::Excluded(&b"zzz"[..]));
+        c.insert(ys, ye, Some(25), 7, 4);
+        assert_eq!(c.get(ys, ye, Some(25)), None);
+        // An answer observed at/after the dropped publish caches normally.
+        c.insert(ys, ye, Some(25), 8, 5);
+        assert_eq!(c.get(ys, ye, Some(25)), Some(8));
+        // Inside-envelope publishes still record and invalidate precisely.
+        c.record_dirty(6, &[Bytes::from_static(b"kk")]);
+        assert_eq!(c.get(s, e, Some(25)), None);
+    }
+
+    #[test]
+    fn count_cache_dropped_watermark_blocks_stale_insert_only() {
+        use std::ops::Bound;
+        let c = CountCache::new(8);
+        let (ds, de) = (
+            Bound::Included(&b"data\0a"[..]),
+            Bound::Excluded(&b"data\0z"[..]),
+        );
+        c.insert(ds, de, Some(25), 5, 1);
+        // A raftlog-CF publish outside the data envelope: dropped, only
+        // the global dropped watermark moves.
+        c.record_dirty(9, &[Bytes::from_static(b"raftlog\0x")]);
+        assert_eq!(c.get(ds, de, Some(25)), Some(5));
+        // A racy raftlog window (observed seq 8 < 9) is refused entry.
+        let (rs, re) = (
+            Bound::Included(&b"raftlog\0a"[..]),
+            Bound::Excluded(&b"raftlog\0z"[..]),
+        );
+        c.insert(rs, re, Some(25), 2, 8);
+        assert_eq!(c.get(rs, re, Some(25)), None);
+        // The data window is untouched by the raftlog drop.
+        assert_eq!(c.get(ds, de, Some(25)), Some(5));
+    }
+
+    #[test]
+    fn count_cache_envelope_unbounded_start_drops_above_end() {
+        use std::ops::Bound;
+        let c = CountCache::new(8);
+        let (s, e) = (Bound::<&[u8]>::Unbounded, Bound::Excluded(&b"m"[..]));
+        c.insert(s, e, Some(25), 3, 1);
+        assert_eq!(c.get(s, e, Some(25)), Some(3));
+        // "zz" is above the envelope's end: no cached window contains it.
+        c.record_dirty(5, &[Bytes::from_static(b"zz")]);
+        assert_eq!(c.get(s, e, Some(25)), Some(3));
+        // …but an insert observed below that drop (seq 4) is refused.
+        let (ys, ye) = (Bound::Included(&b"y"[..]), Bound::Excluded(&b"zzz"[..]));
+        c.insert(ys, ye, Some(25), 9, 4);
+        assert_eq!(c.get(ys, ye, Some(25)), None);
+        // Publishes below "m" may hit the unbounded window: recorded.
+        c.record_dirty(6, &[Bytes::from_static(b"j")]);
+        assert_eq!(c.get(s, e, Some(25)), None);
     }
 }

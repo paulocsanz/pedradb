@@ -219,6 +219,11 @@ pub trait Engine {
     fn write_phase_line(&self) -> Option<String> {
         None
     }
+    /// Raw phase counters for per-shape deltas: `[commits, prepare, wal,
+    /// mem, publish, flush, lock_wait]` ns (RFC-0054 P0.2).
+    fn write_phase_snapshot(&self) -> Option<[u64; 7]> {
+        None
+    }
     /// Fold memtable tail (no SST). Returns tail length before fold.
     fn fold_mem_tail(&self) -> usize {
         0
@@ -500,6 +505,14 @@ impl YcsbRunner {
             "[rocks-parity] deps_raftlog enter mem_entries={}",
             e.mem_entries().map_or_else(|| "?".into(), |n| n.to_string())
         );
+        // RFC-0054 P0.2 discriminator: untimed fold of the active tail
+        // before the loop (does an empty tail recover isolated p50?).
+        if std::env::var_os("ROCKS_DEPS_FOLD_TAIL").is_some() {
+            let t = e.fold_mem_tail();
+            eprintln!("[rocks-parity] deps_raftlog pre-fold tail={t} mem_entries={}",
+                e.mem_entries().map_or_else(|| "?".into(), |n| n.to_string()));
+        }
+        let phase0 = e.write_phase_snapshot();
         let t0 = Instant::now();
         for op in 0..cfg_ops {
             let t = Instant::now();
@@ -541,6 +554,19 @@ impl YcsbRunner {
             p50(&batch_ns),
             e.mem_entries().map_or_else(|| "?".into(), |n| n.to_string())
         );
+        if let (Some(a), Some(b)) = (phase0, e.write_phase_snapshot()) {
+            let n = b[0].saturating_sub(a[0]).max(1);
+            let us = |d: u64| d as f64 / n as f64 / 1000.0;
+            eprintln!(
+                "[rocks-parity] deps_raftlog phasesΔ prepare={:.2}µs wal={:.2}µs mem={:.2}µs publish={:.2}µs flsh={:.2}µs lock_wait={:.2}µs n={n}",
+                us(b[1].saturating_sub(a[1])),
+                us(b[2].saturating_sub(a[2])),
+                us(b[3].saturating_sub(a[3])),
+                us(b[4].saturating_sub(a[4])),
+                us(b[5].saturating_sub(a[5])),
+                us(b[6].saturating_sub(a[6])),
+            );
+        }
         if let Some(line) = e.write_phase_line() {
             eprintln!("[rocks-parity] deps_raftlog phases {line}");
         }

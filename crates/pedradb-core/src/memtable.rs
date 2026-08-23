@@ -130,10 +130,12 @@ pub(crate) struct MemInternalMerge<'a> {
 
 /// Snapshot-aware merge: BTree range + `tail_idx` range (newest tail version
 /// per user key). O(log n + hits) — a parked 4 MiB tail must not be walked
-/// per count/scan (RFC-0041 deps_scan regression).
+/// per count/scan (RFC-0041 deps_scan regression). The idx side is a single
+/// CF shard in sorted order (cross-CF / unbounded queries fall back to
+/// [`MemInternalMerge`] first).
 pub(crate) struct MemInternalIdx<'a> {
     map: std::iter::Peekable<MemInternalRange<'a>>,
-    idx: std::iter::Peekable<std::collections::btree_map::Range<'a, Bytes, usize>>,
+    idx: std::iter::Peekable<Box<dyn Iterator<Item = (&'a Bytes, &'a usize)> + 'a>>,
     tail: &'a [Version],
 }
 
@@ -236,8 +238,6 @@ pub struct MemTable {
     /// on the Ok-path index so `deps_raftlog` after `deps_apply_batch` does
     /// not pay `log(N_all_cfs)` (RFC-0054).
     tail_idx: BTreeMap<Bytes, BTreeMap<Bytes, usize>>,
-    /// Always empty — missing-shard `range` needs a `btree_map::Range`.
-    empty_idx: BTreeMap<Bytes, usize>,
     /// Highest sequence in `tail` (fast-path guard: snapshot ≥ it ⇒ only the
     /// newest version per key can be visible).
     tail_max_seq: SequenceNumber,
@@ -257,7 +257,6 @@ impl Clone for MemTable {
             map: self.map.clone(),
             tail: self.tail.clone(),
             tail_idx: self.tail_idx.clone(),
-            empty_idx: BTreeMap::new(),
             tail_max_seq: self.tail_max_seq,
             tail_ord: Mutex::new(None),
             approx_bytes: self.approx_bytes,
@@ -353,33 +352,20 @@ impl MemTable {
             .and_then(|m| m.get(user_key))
     }
 
+    /// All `(user_key, newest tail index)` in `[start, end)` across every
+    /// shard — exact for any bounds (a prefix range like `["u/03",
+    /// "u/04")` spans two shards; F219: returning an empty range here made
+    /// `last_visible_under_prefix` drop all tail keys of the prefix).
+    /// Order is NOT globally sorted across shards (NUL-less kernel keys
+    /// share the empty shard) — callers that need order must sort.
     fn tail_idx_range<'a>(
         &'a self,
         start: Bound<&'a [u8]>,
         end: Bound<&'a [u8]>,
-    ) -> std::collections::btree_map::Range<'a, Bytes, usize> {
-        let p = match (bound_cf_prefix(start), bound_cf_prefix(end)) {
-            (Some(a), Some(b)) if a == b => a,
-            (Some(a), None) => a,
-            (None, Some(b)) => b,
-            _ => {
-                // Unbounded / cross-CF: one shard only → that shard; else empty
-                // (caller should have fallen back to the linear merge).
-                if self.tail_idx.len() == 1 {
-                    return self
-                        .tail_idx
-                        .values()
-                        .next()
-                        .expect("len==1")
-                        .range::<[u8], _>((start, end));
-                }
-                return self.empty_idx.range::<[u8], _>((start, end));
-            }
-        };
-        match self.tail_idx.get(p) {
-            Some(m) => m.range::<[u8], _>((start, end)),
-            None => self.empty_idx.range::<[u8], _>((start, end)),
-        }
+    ) -> Box<dyn Iterator<Item = (&'a Bytes, &'a usize)> + 'a> {
+        Box::new(self.tail_idx.values().flat_map(move |m| {
+            m.range::<[u8], _>((start, end))
+        }))
     }
 
     /// Fold [`Self::tail`] into the BTree (SST write / fold / tests).
@@ -1567,6 +1553,32 @@ mod tests {
         );
         assert_eq!(mt.get(b"raftlog\0missing", 9000), Lookup::NotFound);
         assert_eq!(mt.tail_idx.len(), 2, "lock + raftlog shards");
+    }
+
+    #[test]
+    fn tail_idx_range_spans_shards_for_prefix_bounds() {
+        // F219: a prefix query's bounds land in two CF shards (`["u/03",
+        // "u/04")`); the sharded index must not drop the prefix's tail keys.
+        let mut mt = MemTable::new();
+        let key = |u: u32, v: u64| {
+            let mut k = format!("u/{u:02}").into_bytes();
+            k.extend_from_slice(&v.to_be_bytes());
+            k
+        };
+        for u in 0..=4u32 {
+            for v in 1..=3u64 {
+                mt.put(key(u, v), v, b"x".as_slice());
+            }
+        }
+        let (k, _) = mt
+            .last_visible_under_prefix(b"u/03", 99, None)
+            .expect("u/03 lives in the tail");
+        assert!(k.starts_with(b"u/03"), "{k:?}");
+        assert_eq!(&k[k.len() - 8..], &3u64.to_be_bytes(), "newest version");
+        // Point range across shards still sees only in-range keys.
+        assert!(mt
+            .last_visible_under_prefix(b"u/77", 99, None)
+            .is_none());
     }
 
     #[test]
