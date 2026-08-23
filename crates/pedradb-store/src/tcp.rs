@@ -447,13 +447,20 @@ pub fn connect_host(host_port: &str, timeout: Duration) -> Result<TcpStream> {
     connect(addr, timeout)
 }
 
+/// Dial `host:port` and wrap TLS when process TLS is installed (RFC-0050 P0.5).
+fn client_session(addr: &str, read_timeout: Duration) -> Result<crate::tls::IoBox> {
+    let s = connect_host(addr, Duration::from_secs(3))?;
+    s.set_read_timeout(Some(read_timeout)).ok();
+    s.set_nodelay(true).ok();
+    crate::tls::maybe_client_wrap(s)
+}
+
 /// Client helper: put via TCP (`host:port` or resolved [`SocketAddr`]).
 ///
 /// # Errors
 /// Network / server error.
 pub fn client_put(addr: impl AsRef<str>, key: &[u8], value: &[u8]) -> Result<()> {
-    let mut s = connect_host(addr.as_ref(), Duration::from_secs(3))?;
-    s.set_read_timeout(Some(Duration::from_secs(10))).ok();
+    let mut s = client_session(addr.as_ref(), Duration::from_secs(10))?;
     write_frame(
         &mut s,
         &WireMsg::Put {
@@ -473,8 +480,7 @@ pub fn client_put(addr: impl AsRef<str>, key: &[u8], value: &[u8]) -> Result<()>
 /// # Errors
 /// Network / server error.
 pub fn client_get(addr: impl AsRef<str>, key: &[u8]) -> Result<Option<Vec<u8>>> {
-    let mut s = connect_host(addr.as_ref(), Duration::from_secs(3))?;
-    s.set_read_timeout(Some(Duration::from_secs(10))).ok();
+    let mut s = client_session(addr.as_ref(), Duration::from_secs(10))?;
     write_frame(&mut s, &WireMsg::Get { key: key.to_vec() })?;
     match read_frame(&mut s)? {
         WireMsg::RespValue { value } => Ok(value),
@@ -488,8 +494,7 @@ pub fn client_get(addr: impl AsRef<str>, key: &[u8]) -> Result<Option<Vec<u8>>> 
 /// # Errors
 /// Network.
 pub fn client_tick(addr: impl AsRef<str>, n: u32) -> Result<()> {
-    let mut s = connect_host(addr.as_ref(), Duration::from_secs(3))?;
-    s.set_read_timeout(Some(Duration::from_secs(10))).ok();
+    let mut s = client_session(addr.as_ref(), Duration::from_secs(10))?;
     for _ in 0..n {
         write_frame(&mut s, &WireMsg::Tick)?;
         match read_frame(&mut s)? {
@@ -506,8 +511,7 @@ pub fn client_tick(addr: impl AsRef<str>, n: u32) -> Result<()> {
 /// # Errors
 /// Network / server error.
 pub fn client_status(addr: impl AsRef<str>) -> Result<String> {
-    let mut s = connect_host(addr.as_ref(), Duration::from_secs(3))?;
-    s.set_read_timeout(Some(Duration::from_secs(10))).ok();
+    let mut s = client_session(addr.as_ref(), Duration::from_secs(10))?;
     write_frame(&mut s, &WireMsg::Status)?;
     match read_frame(&mut s)? {
         WireMsg::StatusResp { text } => Ok(text),
@@ -522,8 +526,7 @@ pub fn client_status(addr: impl AsRef<str>) -> Result<String> {
 /// Network, NotLeader, Conflict, size limits, protocol.
 pub fn client_commit_tx(addr: impl AsRef<str>, pairs: &[(Vec<u8>, Vec<u8>)]) -> Result<u64> {
     validate_tx_pairs(pairs)?;
-    let mut s = connect_host(addr.as_ref(), Duration::from_secs(3))?;
-    s.set_read_timeout(Some(Duration::from_secs(20))).ok();
+    let mut s = client_session(addr.as_ref(), Duration::from_secs(20))?;
     write_frame(
         &mut s,
         &WireMsg::CommitTx {
@@ -554,8 +557,7 @@ pub fn client_put_batch(addr: impl AsRef<str>, pairs: &[(Vec<u8>, Vec<u8>)]) -> 
         return Ok(());
     }
     validate_tx_pairs(pairs)?;
-    let mut s = connect_host(addr.as_ref(), Duration::from_secs(3))?;
-    s.set_read_timeout(Some(Duration::from_secs(20))).ok();
+    let mut s = client_session(addr.as_ref(), Duration::from_secs(20))?;
     write_frame(
         &mut s,
         &WireMsg::PutBatch {
@@ -578,8 +580,7 @@ pub fn client_put_batch(addr: impl AsRef<str>, pairs: &[(Vec<u8>, Vec<u8>)]) -> 
 /// # Errors
 /// Network, NotLeader, key exists, NotCommitted.
 pub fn client_dcs_create(addr: impl AsRef<str>, key: &[u8], value: &[u8]) -> Result<u64> {
-    let mut s = connect_host(addr.as_ref(), Duration::from_secs(3))?;
-    s.set_read_timeout(Some(Duration::from_secs(20))).ok();
+    let mut s = client_session(addr.as_ref(), Duration::from_secs(20))?;
     write_frame(
         &mut s,
         &WireMsg::DcsCreate {
@@ -608,8 +609,7 @@ pub fn client_dcs_cas(
     value: &[u8],
     expected_rev: u64,
 ) -> Result<u64> {
-    let mut s = connect_host(addr.as_ref(), Duration::from_secs(3))?;
-    s.set_read_timeout(Some(Duration::from_secs(20))).ok();
+    let mut s = client_session(addr.as_ref(), Duration::from_secs(20))?;
     write_frame(
         &mut s,
         &WireMsg::DcsCas {
@@ -634,8 +634,7 @@ pub fn client_dcs_cas(
 /// # Errors
 /// Network / server error.
 pub fn client_dcs_get(addr: impl AsRef<str>, key: &[u8]) -> Result<Option<Vec<u8>>> {
-    let mut s = connect_host(addr.as_ref(), Duration::from_secs(3))?;
-    s.set_read_timeout(Some(Duration::from_secs(10))).ok();
+    let mut s = client_session(addr.as_ref(), Duration::from_secs(10))?;
     write_frame(&mut s, &WireMsg::DcsGet { key: key.to_vec() })?;
     match read_frame(&mut s)? {
         WireMsg::RespValue { value } => Ok(value),
@@ -651,8 +650,7 @@ pub fn client_dcs_get(addr: impl AsRef<str>, key: &[u8]) -> Result<Option<Vec<u8
 /// # Errors
 /// Network / server error.
 pub fn client_set_peers(addr: impl AsRef<str>, peers: &[(u64, String)]) -> Result<()> {
-    let mut s = connect_host(addr.as_ref(), Duration::from_secs(3))?;
-    s.set_read_timeout(Some(Duration::from_secs(10))).ok();
+    let mut s = client_session(addr.as_ref(), Duration::from_secs(10))?;
     write_frame(
         &mut s,
         &WireMsg::SetPeers {

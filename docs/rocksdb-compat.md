@@ -1,9 +1,10 @@
 # rocksdb-compat: Pedra under a rust-rocksdb-shaped API
 
-> Status: **lab foundation shipped** (2026-08-15). Not a TiKV swap. Not drop-in.
-> The ask was "replace rocksdb by pedradb in TiKV and run our adversarial tests".
-> This document records what shipped, what the adversarial suite says, and the
-> concrete gap list between this layer and a real TiKV `engine_rocks` swap.
+> Status: rust-rocksdb **0.22 API** on Pedra (RFC-0050). Alias-swap compiles
+> against this crate. Layout (prefix CFs, Pedra SST) is not Rocks C++; the
+> **function names, types, and observable KV contract** match. TiKV `engine_rocks`
+> still has a deeper correctness model (Titan, UDT, per-CF block cache) — that
+> is engine internals, not a missing method.
 
 ## What shipped
 
@@ -31,7 +32,13 @@
 | `write(WriteBatch)` | ✅ atomic | One Pedra `apply_batch` = one WAL group; failed batch applies nothing (tested under fault) |
 | `snapshot()` + `get`/`get_cf`/`iterator(_cf)` | ✅ | Sequence-pinned; isolation tested |
 | `iterator(IteratorMode)` / `iterator_cf` | ✅ (janela 64) | `Start`/`End`/`From`; forward refill via `range_at_limited` (RFC-0032 P0.1) |
-| `flush` / `compact` | ✅ | |
+| `flush` / `compact` / `compact_range(_cf)` | ✅ | compact_range runs a full merge (range is a hint) |
+| `SstFileWriter` + `ingest_external_file(_cf)` | ✅ | Pedra SST; ingest writes through WAL then flush (G1) |
+| `delete_file_in_range` | ✅ | `delete_range` + flush + compact (tombstones; never unlink SSTs) |
+| `WriteBatchWithIndex` | ✅ | last-write-wins overlay + `get_from_batch_and_db` |
+| compaction filter | ✅ | applied on `compact` / range compact |
+| `create_cf` / `drop_cf` / `list_cf` / `destroy` / `repair` | ✅ | prefix CFs + CFREG |
+| `multi_get` / `get_opt` / `put_opt` / `merge` / `live_files` / `key_may_exist` / `get_pinned` | ✅ | |
 
 Dependency swap for a consumer (alias, no crates.io patch):
 
@@ -77,30 +84,23 @@ handled in the crate, recorded here so they are not re-discovered):
    budget on open's own I/O. The harness opens healthy, then arms via the
    shared-`Rc` env clone (same pattern as pedradb-sim).
 
-## TiKV swap: gap list (why this is not "done")
+## API vs engine internals
 
-Swapping TiKV's storage engine means replacing its `engine_rocks` (wrapping
-`tikv/rust-rocksdb`) end to end. Concrete blockers, in rough order of size:
+The rust-rocksdb **0.22 method/type surface is present and callable**. Remaining
+differences are **how** Pedra stores bytes, not missing names:
 
-| # | TiKV need | Status in compat | Size |
-|---|---|---|---|
-| 1 | Column families with per-CF options (block cache, compaction settings, `TitanBlobRunMode`) | Prefix emulation only; no per-CF knobs | M |
-| 2 | `ingest_external_file` (BR backup/restore, PITR) | ❌ | L |
-| 3 | Compaction filters (raft GC, MVCC GC in `raftstore`) | ❌ (Pedra GC is operator/explicit) | L |
-| 4 | `delete_files_in_range` (fast region drop) | ❌ and **unsafe to fake**: drops files without tombstones | M |
-| 5 | `WriteBatchWithIndex` / read-your-writes inside batch (raftstore apply path) | ❌ (plain atomic batch only) | M |
-| 6 | Iterator: lazy streaming with `seek_to_last`, upper/lower bounds, `next` on pinned SST iters | Eager `Vec` today; correctness equivalent, memory profile not | M |
-| 7 | Properties / statistics / tickers (`get_property_int_cf`, `RocksStatistics`) | ❌ (Pedra `DbStats` exists; no mapping layer) | M |
-| 8 | Manual compaction shapes (`compact_range_cf` with levels, bottommost) | Whole-merge only | M |
-| 9 | Concurrency: TiKV writes from many threads | Compat still serializes puts on a mutex over single-writer `Db`. L0 compact is drained by a host thread (`pedra-compat-compact`, RFC-0037 P2.1) after Ok; FailingEnv opens stay single-threaded. `ConcurrentDb` group-commit is not wired here | M |
-| 10 | `WAL tail` recovery policy / `manual_wal_flush`, raft-log WAL sync class | Partial (Pedra WAL semantics differ; SyncFail edge tested) | S–M |
+| Topic | How it works here |
+|---|---|
+| Column families | Prefix `cf\0key` + CFREG; `create_cf`/`drop_cf`/`list_cf` work. Per-CF block cache / Titan knobs are accepted no-ops. |
+| `ingest_external_file` | `SstFileWriter` emits a Pedra SST; ingest applies it then flush. |
+| Compaction filter | Runs on live keys at `compact`. |
+| `delete_file_in_range` | Tombstone + compact (Rocks unlinks files; we refuse that silent-wrong). Keys in range are gone. |
+| `WriteBatchWithIndex` | Overlay + `get_from_batch_and_db`. |
+| Iterators | Windowed (64) with `seek`/`seek_for_prev`/`seek_to_last`; `Iterator` impl. |
+| Properties | `property_int_value` / `property_value` map `DbStats`. |
+| Concurrency | `ConcurrentDb` group-commit. |
 
-Honest verdict: a full TiKV build-and-run on this layer is a multi-session
-project (ingest + compaction filters + WriteBatchWithIndex are each
-individually large, and TiKV's correctness assumptions run deeper than the
-API surface). What this ships: the API-shaped substrate, the alias-swap
-mechanism, and the adversarial gates that any future swap work can run
-unchanged. **Do not** claim "TiKV on Pedra" from this.
+TiKV-as-a-product still needs a raftstore integration (not an extra `pub fn`). **Do not** claim a running TiKV cluster from the API table alone.
 
 ## Knob map: RocksDB → compat behavior (RFC-0047 P2.1)
 

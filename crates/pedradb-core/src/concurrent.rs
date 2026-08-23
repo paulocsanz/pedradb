@@ -788,7 +788,8 @@ pub struct ConcurrentDb<E: Env = StdEnv> {
 }
 
 impl ConcurrentDb<StdEnv> {
-    /// Open on the real filesystem (same as [`Db::open`]).
+    /// Open on POSIX [`StdEnv`] (same as [`Db::open`]). Production uses
+    /// `pedradb_io_uring::open_concurrent`.
     ///
     /// # Errors
     /// Same as [`Db::open`].
@@ -4805,6 +4806,41 @@ mod tests {
         assert_eq!(db.get(&[b'a', 0]).as_deref(), Some([b'1', 0].as_slice()));
         db.put(b"after", b"ok").unwrap();
         assert_eq!(db.get(b"after").as_deref(), Some(b"ok".as_slice()));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0050 P0.4: concurrent puts amortize into write groups; memtable
+    /// apply remains inside the leader's write-lock (lone-path `apply` phase).
+    #[test]
+    fn write_group_amortizes_apply_still_locked() {
+        let dir = temp_dir();
+        let db = Arc::new(open_sync(&dir));
+        db.set_write_group_catchup_window(Duration::from_millis(2));
+        let n = 8usize;
+        let ops = 24usize;
+        let barrier = Arc::new(std::sync::Barrier::new(n));
+        std::thread::scope(|s| {
+            for t in 0..n {
+                let db = Arc::clone(&db);
+                let barrier = Arc::clone(&barrier);
+                s.spawn(move || {
+                    barrier.wait();
+                    for i in 0..ops {
+                        let k = [(t as u8), (i as u8)];
+                        db.put(k, [t as u8, i as u8, 1]).unwrap();
+                    }
+                });
+            }
+        });
+        let (submits, _queued, groups, group_ops) = db.write_group_stats();
+        assert_eq!(submits, (n * ops) as u64);
+        assert_eq!(group_ops, (n * ops) as u64);
+        assert!(
+            groups < submits,
+            "group commit must amortize: groups={groups} submits={submits}"
+        );
+        // Apply still happens under the leader write lock (group commit), not a
+        // concurrent memtable — that ceiling is RFC-0045 P2.1, not this P0.
         let _ = fs::remove_dir_all(&dir);
     }
 }

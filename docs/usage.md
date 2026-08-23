@@ -163,10 +163,16 @@ fn open_pin_resume(src: &pedradb_core::Db, fold_dir: &std::path::Path) -> pedrad
 | Flush / MANIFEST / checkpoint with `sync=true` | **`Env::sync_dir` errors are propagated** (not discarded) |
 | `sync=false` dir fsync | Best-effort discard still OK |
 
-**Apple / Darwin:** G1 is libSystem `fdatasync`, **not** `fcntl(F_FULLFSYNC)`.
-Rust `File::sync_data` / `sync_all` on macOS *are* `F_FULLFSYNC` (~5 ms here);
-Pedra does not use them for WAL or directory publish (`StdEnv::sync_dir` →
-`pedradb_posix::sync_dir_fd` → the same `fdatasync`). On this host's RocksDB
+**I/O backend:** production `open` (CLI, store, compat, HTTP, SQL, DCS, …)
+uses [`IoUringEnv`](../crates/pedradb-io-uring): Linux `io_uring` for write +
+fsync, POSIX fallback on macOS / if the ring cannot be created. Engine unit
+tests and DST keep [`StdEnv`](../crates/pedradb-core/src/env.rs) (`Db::open`).
+Force POSIX with `IoUringEnv::posix()` / `Db::open_with_env(..., StdEnv)`.
+
+**Apple / Darwin:** G1's WAL barrier is std `File::sync_data` =
+`fcntl(F_FULLFSYNC)` by default (`wal_full_fsync=true`, ~4 ms here;
+`sync_dir` publish stays `pedradb_posix::sync_dir_fd` → `fdatasync`). Rust
+`File::sync_data` / `sync_all` on macOS *are* `F_FULLFSYNC`. On this host's RocksDB
 **as linked by the Rust crate** (`librocksdb-sys` 8.10), `WriteOptions.sync`
 is the same class: `port/port_posix.h` maps `#define fdatasync fsync` on
 Darwin and the cargo build never defines `HAVE_FULLFSYNC` (only CMake
@@ -179,6 +185,30 @@ layer flushes the drive cache) — same class as RocksDB, no gap on the
 production target (RFC-0036). On Darwin, a power cut can lose a
 WAL that already returned Ok if the drive cache still holds it. Windows
 `FlushFileBuffers` is a different, typically stronger, class.
+
+Mechanical proof (not a plug-pull): posix test
+`darwin_fdatasync_and_dirfd_are_not_fullfsync_class` — **file** `fdatasync`
+p50 is ≥8× faster than `File::sync_all` (`F_FULLFSYNC`, ~24–30 µs vs ~4–5 ms
+here). **Directory** `fdatasync` stays in that fast class (~0.3–0.7 µs).
+`File::sync_all` on a Darwin dirfd is noisy (~300 ns **or** ~5 ms) — not a
+reliable FULLFSYNC; Pedra does not use it for publish. Process crash after
+Ok is WAL recover. Drive-cache power-loss is the file-`fdatasync` class.
+
+Opt-in strong class: **strong is the default** — `OpenOptions::wal_full_fsync`
+defaults to `true` (compat `Options::wal_full_fsync` /
+`set_wal_full_fsync(false)` to opt out): every WAL barrier goes through
+`EnvFile::sync_data_strong` — on Darwin `File::sync_data` =
+`fcntl(F_FULLFSYNC)`, the CMake-RocksDB `sync=true` class (on Linux the two
+classes are the same barrier). Cost on Apple hardware ~4 ms/commit (~120× the
+weak class; ~250 commits/s single-client — group commit scales with clients);
+`wal_full_fsync=false` restores the `fdatasync`/`fsync` weak class (the
+`librocksdb-sys` crate-build class) for comparative columns and dev speed.
+WAL rotation and repair inherit the flag; a failing strong barrier fences
+with the same `OpClass::Sync` semantics (RFC-0036 addendum v2).
+
+Linux live `io_uring` soak: `scripts/io_uring_linux_soak.sh` (CI job
+`io-uring-linux-soak`). Docker Desktop needs `--privileged` (`io_uring_setup`
+is EPERM under default seccomp).
 
 Full contract: rustdoc on `db` module. Audit fix backlog: [RFC-0015](rfc/0015-audit-pedradb-correctness-fixes.md). Unsafe/FFI inventory: [2026-08-22 audit](audits/2026-08-22-unsafe-and-ffi.md).
 
@@ -394,7 +424,7 @@ Before calling an embed deployment “launch-ready”:
 | Backup | Checkpoint or `BackupEngine` exercised under your write load (P2.1 continuous still open) |
 | Encryption | **Non-goal in core** — use FS encryption (LUKS, cloud volume) or app-layer AEAD |
 | Concurrency | `ConcurrentDb` group-commit + dual-mem; not Rocks multi-mem writer class |
-| Honesty | Do not claim field parity with Rocks/Pebble/FDB ([robustness doc](robustness-vs-rocks-pebble-fdb.md)) |
+| Honesty | Do not claim field parity with Rocks/Pebble/FDB ([robustness doc](robustness-vs-rocks-pebble-fdb.md); [nine axes](robustness-nine-axes.md)) |
 
 ---
 
@@ -421,8 +451,11 @@ fn list_page(db: &Db, start: &[u8], limit: usize) {
 ### ConcurrentDb contention (M2)
 
 `ConcurrentDb` serialises **writers** with a write lock that holds through WAL
-`fsync`. Concurrent puts are correct and linearizable, but write QPS is not
-RocksDB multi-writer class. Readers share a read lock.
+append + memtable apply + publish; one `fdatasync` is amortized across the
+write group. Concurrent puts are correct and linearizable. Write QPS is **not**
+RocksDB multi-writer class (no concurrent memtable / multi-flush). Many cores
+with disjoint keys still share that lock — the ceiling is ours (RFC-0045 /
+RFC-0050 P0.4). Readers share a read lock.
 
 ### Raft integration wall sleep (M5)
 

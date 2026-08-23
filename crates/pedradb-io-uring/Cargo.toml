@@ -13,3 +13,9 @@ parking_lot.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
 io-uring = "0.7"
+
+[dev-dependencies]
+pedradb-sim.workspace = true
+
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+libc = "0.2"

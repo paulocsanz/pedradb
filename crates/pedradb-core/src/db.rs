@@ -1106,7 +1106,11 @@ pub struct Db<E: Env = StdEnv> {
 }
 
 impl Db<StdEnv> {
-    /// Open or create a database at `path` (directory) on the real filesystem.
+    /// Open or create a database at `path` on **POSIX** [`StdEnv`].
+    ///
+    /// Engine tests and DST (`FailingEnv`) use this. **Production** processes
+    /// (CLI, store, compat, HTTP) open via `pedradb_io_uring::open` —
+    /// Linux `io_uring`, POSIX fallback elsewhere.
     ///
     /// Loads `*.sst` files, then recovers the WAL into the MemTable.
     ///
@@ -1116,7 +1120,7 @@ impl Db<StdEnv> {
         Self::open_with(path, OpenOptions::default())
     }
 
-    /// Open with explicit options on the real filesystem.
+    /// Open with explicit options on POSIX [`StdEnv`] (see [`Self::open`]).
     ///
     /// # Errors
     /// Same as [`Self::open`].
@@ -4259,12 +4263,12 @@ impl<E: Env> Db<E> {
             Err(e) => {
                 // Put imm back so data is not lost in memory.
                 self.imm = Some(imm);
-                return Err(e);
+                return Err(self.fence_io_err(e));
             }
         };
         if let Err(e) = self.install_l0_sst(table, file_num) {
             self.imm = Some(imm);
-            return Err(e);
+            return Err(self.fence_io_err(e));
         }
         Ok(())
     }
@@ -4310,7 +4314,9 @@ impl<E: Env> Db<E> {
         // SST + MANIFEST must be durable before the WAL that covers those
         // keys is discarded (G1). L0 flush skips file fsync; this is the pay
         // point.
-        self.persist_manifest_durable()?;
+        if let Err(e) = self.persist_manifest_durable() {
+            return Err(self.fence_io_err(e));
+        }
         // WAL truncate drops the rebuild source for the CHANGELOG cache.
         // Persist first when debounce is on. interval 0: skip on auto-flush
         // (RFC-0036) — F53 SST rebuild covers crash+reopen; explicit flush
@@ -4354,7 +4360,10 @@ impl<E: Env> Db<E> {
     /// I/O while writing the compacted SST or deleting old files.
     pub fn compact_with(&mut self, options: CompactOptions) -> Result<()> {
         self.flush()?;
-        self.compact_with_ssts_only(options)
+        match self.compact_with_ssts_only(options) {
+            Ok(()) => Ok(()),
+            Err(e) => Err(self.fence_io_err(e)),
+        }
     }
 
     /// Snapshot-safe version GC piggybacked on compaction (open-items §2.1 option b).
@@ -6275,6 +6284,12 @@ impl<E: Env> Db<E> {
         self.durability_fenced = true;
     }
 
+    /// Fence then return `e` (explicit flush / compact I/O — RFC-0050 P0.3).
+    fn fence_io_err(&mut self, e: CoreError) -> CoreError {
+        self.fence_durability(&e, FenceClass::of_core(&e));
+        e
+    }
+
     pub(crate) fn note_wal_sync(&self) {
         self.wal_sync_count.fetch_add(1, Ordering::Relaxed);
     }
@@ -7808,6 +7823,22 @@ mod tests {
     use super::*;
     use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    /// RFC-0050 P0.1 / P0.7: product surface is FailClosed | PointInTime.
+    /// Adding skip-any (or any third variant) fails this exhaustive match.
+    #[test]
+    fn wal_recovery_exactly_two_modes() {
+        fn classify(m: WalRecovery) -> u8 {
+            match m {
+                WalRecovery::FailClosed => 0,
+                WalRecovery::PointInTime => 1,
+            }
+        }
+        assert_eq!(classify(WalRecovery::FailClosed), 0);
+        assert_eq!(classify(WalRecovery::PointInTime), 1);
+        assert_eq!(WalRecovery::default(), WalRecovery::FailClosed);
+        assert_ne!(WalRecovery::FailClosed, WalRecovery::PointInTime);
+    }
 
     /// RFC-0036 addendum: `OpenOptions::wal_full_fsync` routes every WAL
     /// barrier to [`crate::env::EnvFile::sync_data_strong`] (Darwin

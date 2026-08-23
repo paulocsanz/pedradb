@@ -29,14 +29,27 @@ path = "src/bin/montanha-fdb-compare.rs"
 name = "montanha-scale-gate"
 path = "src/bin/montanha-scale-gate.rs"
 
+[features]
+default = []
+tls = ["dep:rustls", "dep:rustls-pemfile"]
+
 [dependencies]
 pedradb-core.workspace = true
+pedradb-io-uring.workspace = true
 pedradb-dcs.workspace = true
 bytes.workspace = true
 crc32c.workspace = true
 thiserror.workspace = true
+rustls = { version = "0.21", optional = true }
+rustls-pemfile = { version = "1.0", optional = true }
 
 [dev-dependencies]
 pedradb-sim.workspace = true
 # Same production txn_kernel as apply / discard (RFC-0002 P9).
 stateright = "0.31"
+rcgen = "0.12"
+
+[[test]]
+name = "tcp_tls"
+path = "tests/tcp_tls.rs"
+required-features = ["tls"]

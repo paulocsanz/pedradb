@@ -20,6 +20,11 @@ Last updated: 2026-08-14 (RFC-0024 done: Montanha fold for Caixote)
 
  RFC-0009 done · RFC-0014 done · RFC-0015 done · RFC-0019 done
  RFC-0016 P0 done · RFC-0017 draft · RFC-0020 done (P0–P2 synthetic field maturity)
+ RFC-0050 draft — World in-tree (FDB-shaped determinism, not Flow / not FDB Simulation)
+ RFC-0051 draft — beyond Sim2 holes (ConcurrentDb PCT / G1–G5; not “more trusted than FDB”)
+ RFC-0052 draft — DST inside Miri/ASan/TCG (cycle, not one interpreter)
+ RFC-0053 draft — IronFleet-scale years (TCB + P40; not Dafny rewrite)
+ “100%”: docs/formal/one-hundred-percent.md (relativo a TCB; glue ~34k vs ~3k Verus)
  Vision: docs/node-primitive-and-unified-platform.md (SoR + projections + multi-leader)
 ```
 
@@ -43,7 +48,8 @@ Last updated: 2026-08-14 (RFC-0024 done: Montanha fold for Caixote)
 | 11 | Streaming range / lazy blocks (RFC-0014 P1) | ✅ done | scan + lazy SST blocks + levels + lz4 | — |
 | 12 | Audit correctness fixes (RFC-0015) | ✅ done | fence, sync_dir, Env seams, compact stats, deny CI | — |
 
-**Next action:** Full bindingtester / Java RL only if requested; FDB **field** peer numbers need lab `fdbserver`. Value-store pick C (0029) done including CLI `compact-blob` / `blob-gc` / `maintain`.  
+**Next action (determinism):** [RFC-0050](rfc/0050-world-in-tree-fdb-determinism.md) P0 World in-tree. [RFC-0051](rfc/0051-beyond-fdb-sim-holes.md) P0 PCT extract. [RFC-0052](rfc/0052-dst-inside-boxes.md) P0.2 `miri_dst_smoke` when `pedradb-core` compiles on nightly. [RFC-0053](rfc/0053-ironfleet-years.md) P0.2 = formal P40 (Aeneas `iff` on extracted vote).  
+**Next action (other):** Full bindingtester / Java RL only if requested; FDB **field** peer numbers need lab `fdbserver`. Value-store pick C (0029) done including CLI `compact-blob` / `blob-gc` / `maintain`.  
 **CI:** `synthetic-field` **montanha-scale-and-compare** — scale_gate (± `MONTANHA_WRITE_BACKPRESSURE=1`) + `montanha_bp_ab_v0` (off vs BP thr/admission delta) + mini_bt_soak (± BP) + fdb-compare template (no FDB required).  
 **Shipped (admission):** Pedra L0/mem write stall + soft pressure; Montanha `StoreError::WriteStall*` + `WriteAdmissionSnap`; lab flags on scale-gate / fdb-bench / perf-gate / montanha-tcp / mini_bt_soak; fdb-compare pass-through `write_backpressure`; structured `admission_*` in scale/perf reports.  
 **Shipped (YCSB parity workstream):** `montanha-fdb-bench` suite **ycsb** (shapes of the FDB `benchmark` tool: `ycsb_a..f`, 50/50 · 95/5 · 100r · read-latest+insert · short scans · RMW; uniform|zipfian); `scripts/fdb_side_ycsb.sh` (peer FDB: official `benchmark` → python binding → stub); `scripts/montanha_fdb_parity_v0.sh` (end-to-end + `MONTANHA_PARITY_RATIO_FLOOR` gate; CI em template mode com `parity.pass: null`). **Parity numbers require lab fdbserver** — CI cover only the shapes/estrutura.
@@ -58,7 +64,7 @@ Last updated: 2026-08-14 (RFC-0024 done: Montanha fold for Caixote)
 **Open (RFC-0039):** apply / raftlog / scan ≥ **5× Rocks sync** (fd, `sync=true`). Coluna **async sempre** no relatório (não é o gate; 5× vs async não é o alvo). Piso apply = 2×`fdatasync` — P0.2 mede se 13.9 k qps cabe. Ver [RFC-0039](rfc/0039-apply-raftlog-scan-5x-rocks-sync.md).
 **Open (RFC-0041):** Pedra ≥ **2×** Rocks **default** em **todo** o harness (11 + MC4). P1.1 **doing**: apply-before-fd + publish after `fdatasync` (G1; get/iter use `visible_sequence`). enc1hop rejected. parkfold2 still best (scan 2.21, E 2.06). 1c A/F 2× above `1/t_fd`; FLOOR off. Ver [RFC-0041](rfc/0041-2x-rocks-default.md).
 **Open (RFC-0040):** group/sticky vs default; apply MC ~0.9×. Alimenta o 0041 P1. Ver [p11](../findings/rfc0040-p11/README.md).
-**Shipped (rocksdb-compat):** `crates/rocksdb-compat` — rust-rocksdb-shaped API subset on pedradb-core (open_cf / put / get / delete / delete_range_cf / atomic WriteBatch / snapshot / iterator modes / flush·compact; CFs emulated por prefixo com `default` prefixed quando há CFs nomeadas) + suite adversarial FailingEnv (dead-disk ×32, sync-fail ×8, short-write ×8, batch all-or-nothing, iterator positioning) + alias-swap smoke (`rocksdb-compat-alias-smoke`). **Não é drop-in TiKV** — gap matrix em [rocksdb-compat.md](rocksdb-compat.md) (ingest, compaction filters, WriteBatchWithIndex, properties, delete_files_in_range, concorrência multi-thread).  
+**Shipped (rocksdb-compat):** `crates/rocksdb-compat` — rust-rocksdb-shaped API subset on pedradb-core (open_cf / put / get / delete / delete_range_cf / atomic WriteBatch / snapshot / iterator modes / flush·compact; CFs emulated por prefixo com `default` prefixed quando há CFs nomeadas) + suite adversarial FailingEnv (dead-disk ×32, sync-fail ×8, short-write ×8, batch all-or-nothing, iterator positioning) + alias-swap smoke (`rocksdb-compat-alias-smoke`). **rust-rocksdb 0.22 API** on Pedra ([rocksdb-compat.md](rocksdb-compat.md)): ingest/`SstFileWriter`, `delete_file_in_range` (tombstone+compact), WBWI, compaction filter, `create_cf`/`drop_cf`. Prefix CFs, not Titan. Scoreboard: [robustness-nine-axes.md](robustness-nine-axes.md).  
 
 **DST soak / FDB compare / scale S1–S10:** see prior notes + [montanha-vs-fdb-bench.md](montanha-vs-fdb-bench.md).  
 **Shipped Phase 1–3 + A–E continuum:** [montanha-fdb-phases.md](montanha-fdb-phases.md) — fdb-compat 12-step harness (`clear_range`), etcd multiproc + **TCP DCS wire**, `RecordTable` unique/multi-index, platform need faces (CP/OLAP/stream), F47–F49 residuals.  

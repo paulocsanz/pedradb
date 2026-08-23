@@ -15,7 +15,7 @@
 | “Montanha is FDB-class / field peer” | **False.** Gates and product surface advanced; field pedigree and full TX isolation remain open. |
 | “RFC-0017 done ⇒ parity” | 0017 = lab multi-Raft MVP. Parity program = **this RFC**. |
 | “P0.4 done ⇒ 8h always ran in CI” | Gate **supports** 8h via `PEDRA_SIM_VOLUME_WALL_SECS=28800`; CI runs a dense short bank. |
-| “P2.3 done ⇒ TLS on wire” | Baseline **documented**; cleartext lab still default until rustls lands. |
+| “P2.3 done ⇒ TLS on wire” | rustls **lab** behind `--features tls` (RFC-0050); cleartext still the default. Not GA. |
 
 **Definition of field peer (still unmet):** FDB-feel TX (OCC/snapshot) + multi-region ops maturity + years of production evidence.
 
@@ -72,7 +72,7 @@ W4 Control/ops   W5 Perf ceilings
 
 - [x] **P2.1** 24h sim entrypoint (`montanha_sim_24h.sh` → volume gate wall) — status: `done` (entrypoint; not that 24h was run in every CI)  
 - [x] **P2.2** Commit-path scale decision — status: `done` ([0021-commit-path-scale-decision.md](0021-commit-path-scale-decision.md): default multi-Raft ranges)  
-- [x] **P2.3** Security TLS **baseline doc** — status: `done` (doc only; wire still cleartext lab)  
+- [x] **P2.3** Security TLS **baseline doc** — status: `done` (RFC-0050: rustls lab + `--require-tls`; cleartext still default)  
 - [x] **P2.4** Rolling upgrade + multi-AZ runbook — status: `done`  
 - [x] **P2.5** YCSB-class v0 script — status: `done` (`montanha_ycsb_class_v0.sh`)  
 - [x] **P2.6** Multi-region **lab** (region tags + prefer-region dial) — status: `done` ([0021-geo-multiregion.md](0021-geo-multiregion.md); **not** geo-HA field)  
@@ -149,7 +149,7 @@ W4 Control/ops   W5 Perf ceilings
 ## Out of scope
 
 - Claiming field parity with FoundationDB.  
-- Implementing rustls in this RFC wave.  
+- Claiming FDB field peer or Montanha GA (TLS lab ≠ production mesh).  
 - Geo HA.  
 - Softening Status to look greener than evidence.
 

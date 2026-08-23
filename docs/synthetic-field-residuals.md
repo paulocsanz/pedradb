@@ -26,6 +26,8 @@ Run weekly (or after overnight soak):
 
 **Residual ticket (honest):** full det_io CONTRACT-OK and QEMU guest revalidation are **blocked** without Linux CI runner + optional guest image. In-tree FailingEnv / RecordingEnv remain the authoritative disk-fault proof on macOS and default CI.
 
+RFC-0050 P0.2 (does **not** close this residual): live-ring soak now injects CQE `res<0` (EIO/ENOSPC) and wraps `IoUringEnv` in `FailingEnv`. That is Pedra's harvest path, not page-cache / `dm-error` / QEMU guest.
+
 ```bash
 bash scripts/det_io_status.sh /tmp/e-detio.txt
 bash scripts/universe_abcde.sh   # A–E one-shot
@@ -46,7 +48,7 @@ Gate: `scripts/miri-unsafe-islands.sh` (`MIRI_REQUIRED=1` in CI).
 | Island | What Miri runs | Residual |
 |--------|----------------|----------|
 | `pedradb-posix` | all tests, `MIRIFLAGS=-Zmiri-disable-isolation` (real `fdatasync` FFI) | — |
-| `pedradb-io-uring` | `cqe_kernel` (unique tag / harvest) | `IoUringEnv` ring syscalls need a Linux kernel |
+| `pedradb-io-uring` | `cqe_kernel` (unique tag / harvest) | Live ring: `scripts/io_uring_linux_soak.sh` (CI ubuntu + privileged Docker) |
 | `pedradb-capi` | `handles` (slot+generation) | `StoreCluster` C tests are FS + `!Send` |
 | `pedradb-core` | not required (`forbid(unsafe_code)`) | — |
 

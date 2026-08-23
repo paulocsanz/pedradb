@@ -415,13 +415,14 @@ impl<'a, D, E: Env> DBRawIteratorWithThreadMode<'a, D, E> {
         let cf = super::ColumnFamily {
             name: DEFAULT_CF.into(),
         };
+        let names = self.db.cf_names();
         match scan_cf_at(
             &self.db.inner,
             &self.db.codec,
             DEFAULT_CF,
             mode,
             self.seq,
-            &self.db.cfs,
+            &names,
         ) {
             Ok(it) => self.inner = Some(it),
             Err(_) => self.inner = None,

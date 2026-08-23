@@ -1,6 +1,7 @@
 # SAFETY — `pedradb-io-uring`
 
-Opt-in Linux Env. Public API (`IoUringEnv`, `open`) is safe. `unsafe` lives
+Production Linux Env (POSIX fallback elsewhere). Public API (`IoUringEnv`,
+`open`) is safe. `unsafe` lives
 in `src/ring.rs` only (`submit_sqe`). CQE policy is safe Rust in
 `src/cqe_kernel.rs`. `posix_fadvise` is **not** here — `pedradb-posix`.
 

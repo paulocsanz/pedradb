@@ -2007,4 +2007,143 @@ mod tests {
         assert!(!dir.join(LOCK_FILE).exists());
         let _ = fs::remove_dir_all(&dir);
     }
+
+    fn sim_dir(tag: &str) -> PathBuf {
+        let dir = parent().join(format!(
+            "pedradb-{tag}-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        dir
+    }
+
+    /// RFC-0050 P0.3: ENOSPC during SST flush fences Transient; acked prefix survives.
+    #[test]
+    fn enospc_mid_flush_fences_transient() {
+        use pedradb_core::{Db, FenceClass};
+
+        let dir = sim_dir("enospc-flush");
+        let env = FailingEnv::passing();
+        let mut db = Db::open_with_env(&dir, opts(), env.clone()).unwrap();
+        db.put(b"seed", b"ok").unwrap();
+        db.put(b"a", b"1").unwrap();
+        env.arm_op_class(OpClass::Write, 0, true, FaultKind::StorageFull);
+        assert!(db.flush().is_err(), "injected ENOSPC on SST write");
+        assert!(db.is_durability_fenced());
+        assert_eq!(
+            db.fence_report().expect("fence").class,
+            FenceClass::Transient
+        );
+        assert!(db.put(b"after", b"x").is_err(), "fenced writer");
+        drop(db);
+        env.disarm();
+        let db = Db::open_with_env(&dir, opts(), FailingEnv::passing()).unwrap();
+        assert_eq!(db.get(b"seed").as_deref(), Some(b"ok".as_ref()));
+        let _ = db.close();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0050 P0.3: EIO during compact fails closed; live L0 unchanged.
+    #[test]
+    fn eio_mid_compact_fail_closed() {
+        use pedradb_core::Db;
+
+        let dir = sim_dir("eio-compact");
+        let env = FailingEnv::passing();
+        let mut db = Db::open_with_env(&dir, opts(), env.clone()).unwrap();
+        db.put(b"seed", b"ok").unwrap();
+        db.flush().unwrap();
+        let ssts = db.sst_count();
+        assert!(ssts >= 1, "flush must land an L0");
+        env.arm_op_class(OpClass::Write, 0, true, FaultKind::IoError);
+        assert!(db.compact().is_err(), "injected EIO on compact SST write");
+        assert_eq!(
+            db.sst_count(),
+            ssts,
+            "failed compact must not install a new SST"
+        );
+        drop(db);
+        env.disarm();
+        let db = Db::open_with_env(&dir, opts(), FailingEnv::passing()).unwrap();
+        assert_eq!(db.get(b"seed").as_deref(), Some(b"ok".as_ref()));
+        let _ = db.close();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0050 P0.3: ENOSPC on MANIFEST/CURRENT rename rolls back; CURRENT stays valid.
+    #[test]
+    fn enospc_mid_manifest_rename() {
+        use pedradb_core::{Db, CURRENT_FILE};
+
+        let dir = sim_dir("enospc-manifest");
+        let env = FailingEnv::passing();
+        let mut db = Db::open_with_env(&dir, opts(), env.clone()).unwrap();
+        db.put(b"seed", b"ok").unwrap();
+        db.flush().unwrap();
+        let current_before = fs::read(dir.join(CURRENT_FILE)).unwrap_or_default();
+        let ssts = db.sst_count();
+        let mut hit = false;
+        for n in 0..6u64 {
+            env.arm_op_class(OpClass::Rename, n, true, FaultKind::StorageFull);
+            if db.compact().is_err() {
+                hit = true;
+                assert_eq!(db.sst_count(), ssts, "inventory rolled back on MANIFEST fail");
+                break;
+            }
+            env.disarm();
+        }
+        assert!(hit, "expected some Rename budget to fail compact");
+        let current_after = fs::read(dir.join(CURRENT_FILE)).unwrap_or_default();
+        assert!(
+            !current_after.is_empty(),
+            "CURRENT must remain a valid pointer"
+        );
+        let _ = current_before;
+        drop(db);
+        env.disarm();
+        let db = Db::open_with_env(&dir, opts(), FailingEnv::passing()).unwrap();
+        assert_eq!(db.get(b"seed").as_deref(), Some(b"ok".as_ref()));
+        let _ = db.close();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0050 P0.3: range-delete + compact loop terminates; L0 stall bounds files.
+    #[test]
+    fn range_delete_compact_terminates() {
+        use pedradb_core::Db;
+
+        let dir = sim_dir("range-compact");
+        let mut db = Db::open_with_env(&dir, opts(), FailingEnv::passing()).unwrap();
+        db.set_write_stall_l0(Some(12));
+        for i in 0..64u32 {
+            let k = format!("k{i:04}");
+            match db.put(k.as_bytes(), b"v") {
+                Ok(()) => {}
+                Err(e) => {
+                    assert!(
+                        e.to_string().contains("stall") || e.to_string().contains("Stall"),
+                        "unexpected put err {e}"
+                    );
+                }
+            }
+            if i % 8 == 7 {
+                let start = format!("k{:04}", i.saturating_sub(7));
+                let end = format!("k{:04}", i + 1);
+                let _ = db.delete_range(start.as_bytes(), end.as_bytes());
+                let _ = db.flush();
+                db.compact()
+                    .expect("range-delete compact must return (not hang)");
+            }
+        }
+        assert!(
+            db.stats().l0_files <= 12,
+            "L0 stall must bound files, got {}",
+            db.stats().l0_files
+        );
+        let _ = db.close();
+        let _ = fs::remove_dir_all(&dir);
+    }
 }

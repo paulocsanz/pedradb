@@ -5,7 +5,8 @@
 **Parent:** [RFC-0001](0001-pedradb-high-level-spec.md)  
 **Builds on:** [RFC-0011](0011-env-fault-injection.md), [RFC-0015](0015-audit-pedradb-correctness-fixes.md), [RFC-0016](0016-pedradb-production-robustness.md), [RFC-0018](0018-fdb-method-parity-and-fault-coverage.md), [RFC-0019](0019-local-primitive-for-platform-and-scylla-need.md) (L1 done)  
 **Feeds:** [RFC-0017](0017-montanha-fdb-class-substrate.md) (cluster must *survive* this program), product layers (SQL / watch / stream)  
-**Out-of-tree harness (normative for campaigns):** [`../../../determinismo/pedradb-dst/`](../../../determinismo/pedradb-dst/) — `CONFIDENCE-ROADMAP.md`, `FDB-PARITY-ROADMAP.md`, `DST-VS-FDB-SIM.md`, `findings/LEDGER.md`, `world/`, `scripts/`  
+**Out-of-tree harness (normative for tesoura / det_io / QEMU):** [`../../../determinismo/pedradb-dst/`](../../../determinismo/pedradb-dst/) — `CONFIDENCE-ROADMAP.md`, `FDB-PARITY-ROADMAP.md`, `DST-VS-FDB-SIM.md`, `findings/LEDGER.md`, `scripts/`  
+**World runtime in-tree:** [RFC-0050](0050-world-in-tree-fdb-determinism.md) (draft) — amends boundary rule 1.  
 **Seams doctrine:** [`../dst-seams.md`](../dst-seams.md)  
 **Honest baseline:** [`../robustness-vs-rocks-pebble-fdb.md`](../robustness-vs-rocks-pebble-fdb.md)
 
@@ -20,7 +21,7 @@
 | **Pedra L1** | RFC-0019 done: CAS, seq pin, change feed, multi_get, KeyOnly, soak, backup-under-load, `compact_for_reads` |
 | **Feature shape** | RFC-0014 done: leveled LSM, scan, ConcurrentDb, lz4, checkpoint, vlog+GC |
 | **Fault seams** | `Env` / `Clock` / `Rng` / `Host`; `FailingEnv` OpClass + short-write + delay; `DetHost` |
-| **DST method (RFC-0018)** | World + Net + buggify + CoverageMask + UCB1 + overnight entry scripts in `determinismo/pedradb-dst` |
+| **DST method (RFC-0018)** | World + Net + buggify + CoverageMask + UCB1; overnight ops soak in-tree; cluster World still sibling until [RFC-0050](0050-world-in-tree-fdb-determinism.md) P0 |
 | **Field / multi-TB / fleet ops** | Near zero — **not** Rocks/Pebble/WiredTiger/Redwood peer |
 
 ### Pain / why now
@@ -37,7 +38,7 @@
 | “Become RocksDB in 60 days” | **No** — multi-TB policy + decade of field lore |
 | “We are FDB” | **No** — FDB-**method** (seed, buggify, silent_wrong=0, repro) |
 | More CRCs as maturity | Necessary; **insufficient** without World volume + product pressure |
-| Merge harness into core | **Forbidden** — seams in pedradb; campaigns in determinismo |
+| Merge tesoura / det_io / QEMU into core | **Forbidden** — those campaigns stay in determinismo. **World runtime** moves in-tree under [RFC-0050](0050-world-in-tree-fdb-determinism.md) |
 
 ### Synthetic field maturity (definition)
 
@@ -145,10 +146,10 @@ Each canary ships with **named limit workloads** (see Acceptance). Failures prod
 
 ### Boundary rules (non-negotiable)
 
-1. **Seams in pedradb; campaigns in determinismo** (`dst-seams.md`).  
+1. **Seams + World runtime in pedradb; tesoura / det_io / QEMU in determinismo** (`dst-seams.md`, amended [RFC-0050](0050-world-in-tree-fdb-determinism.md)). Volume *ops* soak of RFC-0020 stays in-tree `pedradb-dst`; cluster World CI is RFC-0050.  
 2. **Product canaries use public APIs only** — no `pub(crate)` cheating.  
 3. **silent_wrong = 0** on acked prefix; fail-stop preferred over silent continue.  
-4. **Every REAL** → `determinismo/pedradb-dst/findings/LEDGER.md` + regression seed in same effort window.  
+4. **Every REAL** → sibling `determinismo/pedradb-dst/findings/LEDGER.md` **and**, after RFC-0050 P1.4, the in-tree engine LEDGER + regression seed in the same effort window.  
 5. **Do not claim** Rocks/Pebble/WT field parity from this RFC’s green bars.
 
 ---

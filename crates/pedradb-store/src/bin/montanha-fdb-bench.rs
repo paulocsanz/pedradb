@@ -758,7 +758,7 @@ fn main() {
              insert_pct: u64,
              rmw: bool,
              scans: bool,
-             c: &mut pedradb_store::StoreCluster<pedradb_core::StdEnv>| {
+             c: &mut pedradb_store::StoreCluster| {
                 let mut lats = Vec::with_capacity(ycsb_ops);
                 let mut updates = 0u64;
                 let mut inserts = 0u64;

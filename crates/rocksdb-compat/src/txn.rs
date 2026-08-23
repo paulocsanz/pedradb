@@ -24,7 +24,8 @@
 
 use super::{ColumnFamily, Error, KeyCodec, Result, DB, DEFAULT_CF};
 use parking_lot::Mutex;
-use pedradb_core::{CoreError, Env, OccTransaction, StdEnv};
+use pedradb_core::{CoreError, Env, OccTransaction};
+use pedradb_io_uring::IoUringEnv;
 use std::ops::{Bound, Deref};
 use std::path::Path;
 
@@ -61,11 +62,11 @@ impl OptimisticTransactionOptions {
 }
 
 /// rust-rocksdb `OptimisticTransactionDB` — `DB` plus `transaction()`.
-pub struct OptimisticTransactionDB<E: Env = StdEnv> {
+pub struct OptimisticTransactionDB<E: Env = IoUringEnv> {
     db: DB<E>,
 }
 
-impl OptimisticTransactionDB<StdEnv> {
+impl OptimisticTransactionDB<IoUringEnv> {
     /// Open with only the default CF.
     ///
     /// # Errors
@@ -157,7 +158,7 @@ impl<E: Env> Deref for OptimisticTransactionDB<E> {
 ///
 /// Methods take `&self` (Rocks FFI is internally mutable). Commit
 /// consumes the handle.
-pub struct Transaction<'a, E: Env = StdEnv> {
+pub struct Transaction<'a, E: Env = IoUringEnv> {
     occ: Mutex<OccTransaction<E>>,
     /// Version-GC pin held from begin to drop (F186) — see [`Self::new`].
     pin: pedradb_core::SnapshotPin,

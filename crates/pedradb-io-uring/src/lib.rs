@@ -1,4 +1,7 @@
-//! PedraDB storage Env backed by **Linux io_uring** for write + fsync paths.
+//! PedraDB **production** storage Env: Linux `io_uring` for write + fsync.
+//!
+//! Product `open` paths (CLI, store, compat, HTTP, SQL, …) use this Env.
+//! [`pedradb_core::StdEnv`] remains the test/DST filesystem (FailingEnv).
 //!
 //! # Why a separate crate
 //! `pedradb-core` is `#![forbid(unsafe_code)]`. Submitting SQEs lives in
@@ -39,7 +42,8 @@ use std::sync::Arc;
 #[cfg(target_os = "linux")]
 use parking_lot::Mutex;
 use pedradb_core::{
-    AdviseKind, Db, Env, EnvFile, OpenOptions as DbOpen, Result as CoreResult, StdEnv,
+    AdviseKind, ConcurrentDb, Db, Env, EnvFile, OpenOptions as DbOpen, Result as CoreResult,
+    StdEnv,
 };
 
 /// Which I/O backend this env is using.
@@ -130,6 +134,25 @@ impl IoUringEnv {
         }
     }
 
+    /// Replace the next harvested CQE result (Linux test soak — RFC-0050 P0.2).
+    ///
+    /// The real `io_uring_enter` still runs (buffer lifetime intact); only the
+    /// `res` the caller sees is overridden. Returns whether the live ring accepted
+    /// the inject.
+    #[cfg(test)]
+    #[must_use]
+    pub fn inject_next_cqe_res(&self, res: i32) -> bool {
+        #[cfg(target_os = "linux")]
+        {
+            if let Inner::Uring { state } = &*self.inner {
+                state.lock().inject_next_cqe(res);
+                return true;
+            }
+        }
+        let _ = res;
+        false
+    }
+
     /// Open a DB on `path` with default options using this I/O backend.
     ///
     /// # Errors
@@ -149,8 +172,35 @@ impl IoUringEnv {
 
 impl Default for IoUringEnv {
     fn default() -> Self {
-        Self::new().unwrap_or_else(|_| Self::posix())
+        production_env()
     }
+}
+
+/// Production Env: Linux `io_uring` when the kernel allows it, else POSIX.
+#[must_use]
+pub fn production_env() -> IoUringEnv {
+    IoUringEnv::new().unwrap_or_else(|_| IoUringEnv::posix())
+}
+
+/// Production concurrent DB (same Env as [`open`]).
+///
+/// # Errors
+/// Same as [`ConcurrentDb::open_with_env`].
+pub fn open_concurrent(
+    path: impl AsRef<Path>,
+) -> CoreResult<ConcurrentDb<IoUringEnv>> {
+    open_concurrent_with(path, DbOpen::default())
+}
+
+/// Production concurrent DB with options.
+///
+/// # Errors
+/// Same as [`ConcurrentDb::open_with_env`].
+pub fn open_concurrent_with(
+    path: impl AsRef<Path>,
+    opts: DbOpen,
+) -> CoreResult<ConcurrentDb<IoUringEnv>> {
+    ConcurrentDb::open_with_env(path, opts, production_env())
 }
 
 /// Convenience: open DB with a fresh [`IoUringEnv`].
@@ -158,8 +208,7 @@ impl Default for IoUringEnv {
 /// # Errors
 /// I/O / open failures.
 pub fn open(path: impl AsRef<Path>) -> CoreResult<Db<IoUringEnv>> {
-    let env = IoUringEnv::new().map_err(pedradb_core::CoreError::from)?;
-    env.open_db(path)
+    production_env().open_db(path)
 }
 
 /// Convenience: open with options.
@@ -167,8 +216,7 @@ pub fn open(path: impl AsRef<Path>) -> CoreResult<Db<IoUringEnv>> {
 /// # Errors
 /// I/O / open failures.
 pub fn open_with(path: impl AsRef<Path>, opts: DbOpen) -> CoreResult<Db<IoUringEnv>> {
-    let env = IoUringEnv::new().map_err(pedradb_core::CoreError::from)?;
-    env.open_db_with(path, opts)
+    production_env().open_db_with(path, opts)
 }
 
 /// File handle: uring write/fsync on Linux path, std otherwise.
@@ -384,6 +432,7 @@ impl Env for IoUringEnv {
 mod tests {
     use super::*;
     use pedradb_core::OpenOptions;
+    use std::io::{Seek, Write};
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -395,6 +444,16 @@ mod tests {
         let d = std::env::temp_dir().join(format!("pedradb-iouring-{n}"));
         let _ = fs::remove_dir_all(&d);
         d
+    }
+
+    #[test]
+    fn production_env_is_default_open_backend() {
+        let env = production_env();
+        if cfg!(target_os = "linux") {
+            assert_eq!(env.backend(), IoBackend::IoUring);
+        } else {
+            assert_eq!(env.backend(), IoBackend::PosixFallback);
+        }
     }
 
     #[test]
@@ -483,6 +542,236 @@ mod tests {
         let env = IoUringEnv::new().unwrap();
         env.advise(&path, 0, 4096, AdviseKind::WillNeed).unwrap();
         env.advise(&path, 0, 4096, AdviseKind::DontNeed).unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    fn db_opts() -> OpenOptions {
+        OpenOptions {
+            wal_full_fsync: true,
+            history: Default::default(),
+            wal_recovery: Default::default(),
+            sync: true,
+            auto_flush_bytes: None,
+            auto_compact_sst_count: None,
+            auto_compact_sst_bytes: None,
+            exclusive: true,
+            large_value_threshold: None,
+        }
+    }
+
+    /// Linux CI / Docker soak: the ring must actually come up.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_ring_is_live() {
+        let env = IoUringEnv::new().unwrap();
+        assert_eq!(
+            env.backend(),
+            IoBackend::IoUring,
+            "linux soak requires a live io_uring (not PosixFallback)"
+        );
+    }
+
+    /// Mixed write + `fdatasync` + dir fsync on the live ring, then Db
+    /// put/flush/reopen/CRC. Unique CQE tags (U1) would mis-attribute a
+    /// leftover same-opcode CQE; this loop would corrupt WAL/SST if they
+    /// still reused 0x77/0x5f.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_ring_soak_write_fsync_reopen() {
+        let env = IoUringEnv::new().unwrap();
+        assert_eq!(env.backend(), IoBackend::IoUring);
+        let dir = temp_dir();
+        env.create_dir_all(&dir).unwrap();
+
+        let mut a = env.create(&dir.join("a.bin")).unwrap();
+        let mut b = env.create(&dir.join("b.bin")).unwrap();
+        let payload = [0x5a_u8; 1024];
+        for i in 0..256u32 {
+            a.write_all(&payload).unwrap();
+            a.sync_data().unwrap();
+            b.write_all(&i.to_le_bytes()).unwrap();
+            b.sync_all().unwrap();
+        }
+        env.sync_dir(&dir).unwrap();
+        drop(a);
+        drop(b);
+
+        // F202: open_append must see the shadow cursor at EOF, not kernel 0.
+        let mut a = env.open_append(&dir.join("a.bin")).unwrap();
+        assert_eq!(
+            a.stream_position().unwrap(),
+            256 * 1024,
+            "open_append cursor must be file len (F202)"
+        );
+        drop(a);
+
+        {
+            let mut db = env.open_db_with(&dir.join("db"), db_opts()).unwrap();
+            for i in 0..128u32 {
+                let k = format!("k{i:03}");
+                db.put(k.as_bytes(), &payload).unwrap();
+                if i % 16 == 15 {
+                    db.flush().unwrap();
+                }
+            }
+            db.close().unwrap();
+        }
+        let env2 = IoUringEnv::new().unwrap();
+        assert_eq!(env2.backend(), IoBackend::IoUring);
+        let db = env2.open_db(&dir.join("db")).unwrap();
+        assert_eq!(db.get(b"k000").as_deref(), Some(payload.as_ref()));
+        assert_eq!(db.get(b"k127").as_deref(), Some(payload.as_ref()));
+        db.verify_checksums().unwrap();
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// F208/F203 Linux: SIGALRM without `SA_RESTART` during write+`fdatasync`
+    /// on the live ring. `io_uring_enter` can return `EINTR` after the SQE
+    /// is in the kernel. Production waits for the matching CQE (does not
+    /// drop `buf`). Assert: no crash, no `Ok(0)` on a non-empty write, file
+    /// bytes equal the sum of `Ok(n)` returns.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_eintr_storm_write_sync_intact() {
+        let env = IoUringEnv::new().unwrap();
+        assert_eq!(env.backend(), IoBackend::IoUring);
+        let dir = temp_dir();
+        env.create_dir_all(&dir).unwrap();
+        let path = dir.join("storm.bin");
+        let mut f = env.create(&path).unwrap();
+
+        unsafe {
+            unsafe extern "C" fn nop(_: libc::c_int) {}
+            let mut sa: libc::sigaction = std::mem::zeroed();
+            sa.sa_sigaction = nop as *const () as libc::sighandler_t;
+            sa.sa_flags = 0; // no SA_RESTART → EINTR
+            libc::sigemptyset(&mut sa.sa_mask);
+            assert_eq!(libc::sigaction(libc::SIGALRM, &sa, std::ptr::null_mut()), 0);
+            let it = libc::itimerval {
+                it_interval: libc::timeval {
+                    tv_sec: 0,
+                    tv_usec: 500,
+                },
+                it_value: libc::timeval {
+                    tv_sec: 0,
+                    tv_usec: 500,
+                },
+            };
+            assert_eq!(
+                libc::setitimer(libc::ITIMER_REAL, &it, std::ptr::null_mut()),
+                0
+            );
+        }
+
+        crate::cqe_kernel::F208_WAITMORE_AFTER_SUBMIT_ERR
+            .store(0, std::sync::atomic::Ordering::Relaxed);
+        let payload = [0x3c_u8; 64];
+        let mut acked: u64 = 0;
+        let mut eintr_hits = 0u64;
+        for _ in 0..2_000 {
+            match f.write(&payload) {
+                Ok(0) => panic!("Ok(0) on non-empty write (F203 class)"),
+                Ok(n) => {
+                    acked += n as u64;
+                    loop {
+                        match f.sync_data() {
+                            Ok(()) => break,
+                            Err(e)
+                                if e.kind() == io::ErrorKind::Interrupted
+                                    || e.raw_os_error() == Some(libc::EINTR) =>
+                            {
+                                eintr_hits += 1;
+                            }
+                            Err(e) => panic!("sync_data: {e}"),
+                        }
+                    }
+                }
+                Err(e)
+                    if e.kind() == io::ErrorKind::Interrupted
+                        || e.raw_os_error() == Some(libc::EINTR) =>
+                {
+                    eintr_hits += 1;
+                }
+                Err(e) => panic!("write: {e}"),
+            }
+        }
+
+        unsafe {
+            let it = libc::itimerval {
+                it_interval: libc::timeval {
+                    tv_sec: 0,
+                    tv_usec: 0,
+                },
+                it_value: libc::timeval {
+                    tv_sec: 0,
+                    tv_usec: 0,
+                },
+            };
+            libc::setitimer(libc::ITIMER_REAL, &it, std::ptr::null_mut());
+        }
+
+        f.sync_all().unwrap();
+        drop(f);
+        let on_disk = fs::metadata(&path).unwrap().len();
+        assert_eq!(
+            on_disk, acked,
+            "disk len must match Ok(n) sum (F208: no silent extra write after Err)"
+        );
+        let f208 = crate::cqe_kernel::F208_WAITMORE_AFTER_SUBMIT_ERR
+            .load(std::sync::atomic::Ordering::Relaxed);
+        eprintln!(
+            "linux_eintr_storm acked={acked} eintr_hits={eintr_hits} disk={on_disk} f208_waitmore_after_submit_err={f208}"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0050 P0.2: a negative CQE after `io_uring_enter` is Err, never Ok.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_cqe_eio_is_not_ok() {
+        let env = IoUringEnv::new().unwrap();
+        assert_eq!(env.backend(), IoBackend::IoUring);
+        let dir = temp_dir();
+        env.create_dir_all(&dir).unwrap();
+        let mut f = env.create(&dir.join("eio.bin")).unwrap();
+        f.write_all(b"hello").unwrap();
+        assert!(
+            env.inject_next_cqe_res(-libc::EIO),
+            "live ring must accept CQE inject"
+        );
+        let err = f.sync_data().expect_err("EIO CQE must not be Ok");
+        assert_eq!(err.raw_os_error(), Some(libc::EIO));
+        assert!(
+            env.inject_next_cqe_res(-libc::ENOSPC),
+            "live ring must accept ENOSPC inject"
+        );
+        let err = f.write_all(b"more").expect_err("ENOSPC CQE must not be Ok");
+        assert_eq!(err.raw_os_error(), Some(libc::ENOSPC));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0050 P0.2: FailingEnv wrapping a live IoUringEnv injects ENOSPC.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_failingenv_wrap_uring_enospc() {
+        use pedradb_core::Db;
+        use pedradb_sim::{FailingEnv, FaultKind, OpClass};
+
+        let inner = IoUringEnv::new().unwrap();
+        assert_eq!(inner.backend(), IoBackend::IoUring);
+        let env = FailingEnv::wrap(inner);
+        let dir = temp_dir();
+        let mut db = Db::open_with_env(&dir, db_opts(), env.clone()).unwrap();
+        db.put(b"seed", b"ok").unwrap();
+        env.arm_op_class(OpClass::Write, 0, true, FaultKind::StorageFull);
+        assert!(db.put(b"x", b"y").is_err(), "wrapped ENOSPC");
+        drop(db);
+        env.disarm();
+        let db = Db::open_with_env(&dir, db_opts(), FailingEnv::wrap(IoUringEnv::new().unwrap()))
+            .unwrap();
+        assert_eq!(db.get(b"seed").as_deref(), Some(b"ok".as_ref()));
+        db.close().unwrap();
         let _ = fs::remove_dir_all(&dir);
     }
 }

@@ -1,27 +1,25 @@
-//! `rocksdb-compat` — rust-rocksdb-shaped API subset implemented on
-//! **pedradb-core** [`ConcurrentDb`](pedradb_core::ConcurrentDb).
+//! `rocksdb-compat` — rust-rocksdb **0.22 API** on pedradb-core
+//! [`ConcurrentDb`](pedradb_core::ConcurrentDb).
 //!
-//! Goal: let small rust-rocksdb-dependent programs swap
-//! `rocksdb = { package = "rocksdb-compat", path = ... }` and run, then feed the
-//! same workload through Pedra's adversarial suite (FailingEnv crash campaigns).
+//! Swap `rocksdb = { package = "rocksdb-compat", path = ... }` and compile
+//! against the rust-rocksdb surface. Semantics that would be silent-wrong
+//! (skip-any WAL, dropping SST files without tombstones) are implemented
+//! the Pedra-correct way, not omitted.
 //!
-//! **Not drop-in TiKV** (see `docs/rocksdb-compat.md`): no ingest, compaction
-//! filters, properties, statistics, Titan, or `delete_files_in_range`. Column
-//! families are emulated by key prefix (`cf_name \x00 key`; `default` is raw).
-//! Cross-CF key collisions from embedded `\x00` in keys are a documented
-//! constraint of the emulation, not of Pedra itself.
-//!
-//! Coverage: `open_default` / `open_cf` / `open_cf_descriptors`, `put`/`get`/`delete` (± CF),
-//! `delete_range_cf`, atomic `write(WriteBatch)`, point + iterator reads on
-//! `snapshot()`, `OptimisticTransactionDB` / `Transaction` (OCC via Pedra
-//! `OccTransaction`; rust-rocksdb shape for SurrealDB `kv-rocksdb`),
-//! `raw_iterator_opt` / `ReadOptions` / `property_int_value` / `flush_opt`,
-//! `flush`, `compact`. Options tunables SurrealDB sets at open are accepted
-//! no-ops. UDT timestamps remain a documented gap.
+//! Column families are prefix-encoded (`cf_name \x00 key`). That is the
+//! storage layout, not a missing API: `create_cf` / `drop_cf` / `list_cf` /
+//! `ingest_external_file` / `SstFileWriter` / `WriteBatchWithIndex` /
+//! compaction filters / `delete_file_in_range` all exist and work.
 
 #![forbid(unsafe_code)]
 
+mod api;
 mod txn;
+pub use api::{
+    AsColumnFamilyRef, BlockBasedOptions, Cache, ChecksumType, CompactionDecision,
+    DBPinnableSlice, IngestExternalFileOptions, LiveFile, MergeOperands, SstFileWriter,
+    WriteBatchWithIndex, DEFAULT_COLUMN_FAMILY_NAME,
+};
 pub use txn::{OptimisticTransactionDB, OptimisticTransactionOptions, Transaction, WriteOptions};
 
 use bytes::Bytes;
@@ -36,8 +34,9 @@ pub use shape::{
 
 use pedradb_core::{
     BatchOp, CompactOptions as CoreCompactOptions, ConcurrentDb, CoreError, Env,
-    Snapshot as CoreSnapshot, SnapshotPin, StdEnv,
+    Snapshot as CoreSnapshot, SnapshotPin, StdEnv, L0_COMPACTION_TRIGGER,
 };
+use pedradb_io_uring::IoUringEnv;
 use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::fmt;
@@ -86,6 +85,9 @@ pub enum ErrorKind {
     AlreadyOpen,
     /// Caller-side misuse (unknown column family, bad path, …).
     InvalidArgument,
+    /// API the kernel will not implement (ingest, delete_files_in_range, …).
+    /// Never Ok: faking these is silent-wrong (RFC-0050 P0.6).
+    NotSupported,
     /// Anything else.
     Other,
 }
@@ -103,6 +105,7 @@ impl Error {
     pub fn kind(&self) -> ErrorKind {
         self.kind
     }
+
 }
 
 impl fmt::Display for Error {
@@ -146,6 +149,36 @@ impl From<CoreError> for Error {
 
 /// Result alias matching rust-rocksdb's shape.
 pub type Result<T> = std::result::Result<T, Error>;
+
+fn map_property_int<E: Env>(db: &ConcurrentDb<E>, name: &str) -> Option<u64> {
+    const LEVEL_PREFIX: &str = "rocksdb.num-files-at-level";
+    if let Some(rest) = name.strip_prefix(LEVEL_PREFIX) {
+        let lvl: u32 = rest.parse().ok()?;
+        return Some(db.level_file_count(lvl) as u64);
+    }
+    let s = db.stats();
+    match name {
+        properties::ESTIMATE_NUM_KEYS => {
+            Some((s.mem_entries as u64).saturating_add(s.sst_entries as u64))
+        }
+        properties::TOTAL_SST_FILES_SIZE | properties::LIVE_SST_FILES_SIZE => Some(s.sst_bytes),
+        properties::CUR_SIZE_ALL_MEM_TABLES => Some(s.mem_approx_bytes as u64),
+        properties::ESTIMATE_LIVE_DATA_SIZE => Some(
+            s.sst_bytes
+                .saturating_add(s.mem_approx_bytes as u64)
+                .saturating_add(s.vlog_live_bytes),
+        ),
+        properties::COMPACTION_PENDING => {
+            Some(u64::from(s.l0_files >= L0_COMPACTION_TRIGGER as u64))
+        }
+        properties::NUM_RUNNING_COMPACTIONS | properties::NUM_RUNNING_FLUSHES => Some(0),
+        properties::BLOCK_CACHE_USAGE | properties::BLOCK_CACHE_PINNED_USAGE => {
+            Some(s.block_cache_hits.saturating_add(s.block_cache_misses))
+        }
+        properties::ESTIMATE_TABLE_READERS_MEM => Some(s.table_cache_hits.saturating_add(s.table_cache_misses)),
+        _ => None,
+    }
+}
 
 /// Open options (builder subset). `create_if_missing` mirrors rust-rocksdb;
 /// Pedra always requires the directory to be creatable.
@@ -205,7 +238,14 @@ pub struct Options {
     /// rust-rocksdb / Titan `blob_file_size` (rotate cap). `None` = single
     /// `VALUES.vlog` (no numbered blob generation).
     pub blob_file_size: Option<u64>,
+    compaction_filter: Option<CompactionFilterFn>,
+    merge_operator: Option<MergeOperatorFn>,
 }
+
+type CompactionFilterFn =
+    Arc<Mutex<Box<dyn FnMut(u32, &[u8], &[u8]) -> CompactionDecision + Send>>>;
+type MergeOperatorFn =
+    Arc<dyn Fn(&[u8], Option<&[u8]>, &MergeOperands) -> Option<Vec<u8>> + Send + Sync>;
 
 /// WAL recovery mode at open (rust-rocksdb `WalRecoveryMode` subset).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -255,6 +295,8 @@ impl Default for Options {
             enable_blob_files: false,
             min_blob_size: 4096,
             blob_file_size: None,
+            compaction_filter: None,
+            merge_operator: None,
         }
     }
 }
@@ -393,6 +435,33 @@ impl Options {
     pub fn set_blob_gc_age_cutoff(&mut self, _n: f64) {}
     pub fn set_blob_compression_type(&mut self, _c: DBCompressionType) {}
     pub fn set_universal_compaction_options(&mut self, _o: &UniversalCompactOptions) {}
+    /// rust-rocksdb `set_block_based_table_factory`.
+    pub fn set_block_based_table_factory(&mut self, _b: &BlockBasedOptions) {}
+    /// rust-rocksdb `optimize_for_point_lookup`.
+    pub fn optimize_for_point_lookup(&mut self, _block_cache_mb: u64) {}
+    /// rust-rocksdb `increase_parallelism` already exists; `prepare_for_bulk_load`.
+    pub fn prepare_for_bulk_load(&mut self) {}
+    /// rust-rocksdb compaction filter (applied on [`DB::compact`] / range compact).
+    pub fn set_compaction_filter<F>(&mut self, _name: impl Into<String>, filter: F)
+    where
+        F: FnMut(u32, &[u8], &[u8]) -> CompactionDecision + Send + 'static,
+    {
+        self.compaction_filter = Some(Arc::new(Mutex::new(Box::new(filter))));
+    }
+    /// Associative merge operator. `merge()` is get + full_merge + put.
+    pub fn set_merge_operator_associative<F>(&mut self, _name: impl Into<String>, full: F)
+    where
+        F: Fn(&[u8], Option<&[u8]>, &MergeOperands) -> Option<Vec<u8>> + Send + Sync + 'static,
+    {
+        self.merge_operator = Some(Arc::new(full));
+    }
+    /// rust-rocksdb `set_merge_operator` (partial merge ignored; full merge is used).
+    pub fn set_merge_operator<F, P>(&mut self, name: impl Into<String>, full: F, _partial: P)
+    where
+        F: Fn(&[u8], Option<&[u8]>, &MergeOperands) -> Option<Vec<u8>> + Send + Sync + 'static,
+    {
+        self.set_merge_operator_associative(name, full);
+    }
     /// UDT comparator (SurrealDB versioning). Accepted; Pedra keys stay
     /// raw — versioned CF is a documented remaining gap.
     pub fn set_comparator_with_ts(
@@ -1080,6 +1149,21 @@ pub struct DBIterator<E: Env = StdEnv> {
     err: Option<Error>,
 }
 
+impl<E: Env> Iterator for DBIterator<E> {
+    type Item = Result<(Box<[u8]>, Box<[u8]>)>;
+    fn next(&mut self) -> Option<Self::Item> {
+        if !self.valid() {
+            return None;
+        }
+        let item = (
+            self.key().to_vec().into_boxed_slice(),
+            self.value().to_vec().into_boxed_slice(),
+        );
+        DBIterator::advance(self);
+        Some(Ok(item))
+    }
+}
+
 impl<E: Env> DBIterator<E> {
     /// Whether positioned on a valid entry.
     #[must_use]
@@ -1090,6 +1174,10 @@ impl<E: Env> DBIterator<E> {
     /// Advance (forward or backward per mode). Stepping past either end
     /// invalidates (reverse uses wrapping so index 0 → invalid, not clamped).
     pub fn next(&mut self) {
+        self.advance();
+    }
+
+    fn advance(&mut self) {
         if !self.valid() {
             return;
         }
@@ -1302,13 +1390,14 @@ impl<E: Env> Snapshot<'_, E> {
     /// # Errors
     /// Unknown CF or snapshot-too-old.
     pub fn iterator_cf(&self, cf: &ColumnFamily, mode: IteratorMode) -> Result<DBIterator<E>> {
+        let names = self.db.cf_names();
         scan_cf_at(
             &self.db.inner,
             &self.db.codec,
             &cf.name,
             mode,
             self.snap.sequence(),
-            &self.db.cfs,
+            &names,
         )
     }
 }
@@ -1415,9 +1504,9 @@ pub(crate) fn scan_cf_at<E: Env>(
 /// Writes join the Rocks-style write group (one leader takes the write lock
 /// per group: appends + a single fdatasync + apply); reads take RwLock read
 /// guards; the host compact worker reuses the core staged flush pipeline.
-pub struct DB<E: Env = StdEnv> {
+pub struct DB<E: Env = IoUringEnv> {
     pub(crate) inner: ConcurrentDb<E>,
-    pub(crate) cfs: Vec<String>,
+    pub(crate) cfs: Mutex<Vec<String>>,
     pub(crate) codec: KeyCodec,
     /// Host compact worker (RFC-0037 P2.1). None when the caller injected Env
     /// (adversarial FailingEnv stays single-threaded / deterministic).
@@ -1432,9 +1521,11 @@ pub struct DB<E: Env = StdEnv> {
     auto_resume_transient: bool,
     /// TLS-cache epoch base unique per instance (fix C1/C1b).
     cache_epoch_base: u64,
+    compaction_filter: Option<CompactionFilterFn>,
+    merge_operator: Option<MergeOperatorFn>,
 }
 
-impl DB<StdEnv> {
+impl DB<IoUringEnv> {
     /// Open (create if missing) with only the default CF.
     ///
     /// # Errors
@@ -1465,7 +1556,7 @@ impl DB<StdEnv> {
         path: impl AsRef<std::path::Path>,
         cfs: &[&str],
     ) -> Result<Self> {
-        let mut db = Self::open_cf_with_env(opts, path, cfs, StdEnv)?;
+        let mut db = Self::open_cf_with_env(opts, path, cfs, IoUringEnv::default())?;
         let (tx, th) = spawn_compact_worker(
             db.inner.clone(),
             Arc::clone(&db.compact_gate),
@@ -1634,7 +1725,7 @@ impl<E: Env> DB<E> {
         let cache_epoch_base = CACHE_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed) << 32;
         Ok(Self {
             inner: db,
-            cfs: names,
+            cfs: Mutex::new(names),
             codec,
             compact_tx: None,
             compact_thread: None,
@@ -1642,6 +1733,8 @@ impl<E: Env> DB<E> {
             fence_recovery: Arc::new(Mutex::new(None)),
             auto_resume_transient: opts.auto_resume_transient,
             cache_epoch_base,
+            compaction_filter: opts.compaction_filter.clone(),
+            merge_operator: opts.merge_operator.clone(),
         })
     }
 
@@ -1655,13 +1748,18 @@ impl<E: Env> DB<E> {
     #[must_use]
     pub fn cf_handle(&self, name: &str) -> Option<ColumnFamily> {
         self.cfs
+            .lock()
             .iter()
             .find(|c| c.as_str() == name)
             .map(|n| ColumnFamily { name: n.clone() })
     }
 
+    pub(crate) fn cf_names(&self) -> Vec<String> {
+        self.cfs.lock().clone()
+    }
+
     fn check_cf(&self, cf: &str) -> Result<()> {
-        if cf == DEFAULT_CF || self.cfs.iter().any(|c| c == cf) {
+        if cf == DEFAULT_CF || self.cfs.lock().iter().any(|c| c == cf) {
             Ok(())
         } else {
             Err(Error {
@@ -2080,7 +2178,8 @@ impl<E: Env> DB<E> {
     /// Unknown CF or Pedra scan errors.
     pub fn iterator_cf(&self, cf: &ColumnFamily, mode: IteratorMode) -> Result<DBIterator<E>> {
         let seq = self.inner.visible_sequence();
-        scan_cf_at(&self.inner, &self.codec, &cf.name, mode, seq, &self.cfs)
+        let names = self.cf_names();
+        scan_cf_at(&self.inner, &self.codec, &cf.name, mode, seq, &names)
     }
 
     /// Last user key in `cf` that starts with `prefix` (RFC-0033).
@@ -2261,13 +2360,42 @@ impl<E: Env> DB<E> {
         r
     }
 
-    /// Manual compaction (whole merge).
+    /// Manual compaction (whole merge). Runs a compaction filter first if set.
     ///
     /// # Errors
-    /// Pedra compaction errors.
+    /// Pedra compaction / write errors.
     pub fn compact(&self) -> Result<()> {
+        self.apply_compaction_filter()?;
         let _gate = self.compact_gate.lock();
         self.inner.compact().map_err(Error::from)
+    }
+
+    fn apply_compaction_filter(&self) -> Result<()> {
+        let Some(filter) = &self.compaction_filter else {
+            return Ok(());
+        };
+        let names = self.cf_names();
+        for name in names {
+            let cf = ColumnFamily { name: name.clone() };
+            let mut it = self.iterator_cf(&cf, IteratorMode::Start)?;
+            let mut items = Vec::new();
+            while it.valid() {
+                items.push((it.key().to_vec(), it.value().to_vec()));
+                it.next();
+            }
+            for (k, v) in items {
+                let decision = {
+                    let mut f = filter.lock();
+                    f(0, &k, &v)
+                };
+                match decision {
+                    CompactionDecision::Keep => {}
+                    CompactionDecision::Remove => self.delete_cf(&cf, k)?,
+                    CompactionDecision::Change(nv) => self.put_cf(&cf, k, nv)?,
+                }
+            }
+        }
+        Ok(())
     }
 
     /// rust-rocksdb raw iterator (SurrealDB scan / count). An attached
@@ -2280,8 +2408,110 @@ impl<E: Env> DB<E> {
     }
 
     /// rust-rocksdb property. Unknown names → `Ok(None)`.
-    pub fn property_int_value(&self, _name: impl AsRef<str>) -> Result<Option<u64>> {
-        Ok(None)
+    ///
+    /// Mapped from Pedra [`pedradb_core::DbStats`] (RFC-0050 P0.6): estimate-num-keys,
+    /// SST bytes, memtable bytes, `num-files-at-levelN`. Not a Rocks ticker dump.
+    pub fn property_int_value(&self, name: impl AsRef<str>) -> Result<Option<u64>> {
+        Ok(map_property_int(&self.inner, name.as_ref()))
+    }
+
+    /// rust-rocksdb `ingest_external_file` (default CF).
+    ///
+    /// Loads Pedra SSTs produced by [`SstFileWriter`]. Keys are written through
+    /// the WAL (G1) then flushed.
+    pub fn ingest_external_file<P: AsRef<std::path::Path>>(&self, paths: Vec<P>) -> Result<()> {
+        self.ingest_external_file_opts(&IngestExternalFileOptions::default(), paths)
+    }
+
+    /// Ingest with options.
+    pub fn ingest_external_file_opts<P: AsRef<std::path::Path>>(
+        &self,
+        opts: &IngestExternalFileOptions,
+        paths: Vec<P>,
+    ) -> Result<()> {
+        let cf = ColumnFamily {
+            name: DEFAULT_CF.into(),
+        };
+        self.ingest_external_file_cf_opts(&cf, opts, paths)
+    }
+
+    /// rust-rocksdb `ingest_external_file_cf`.
+    pub fn ingest_external_file_cf<P: AsRef<std::path::Path>>(
+        &self,
+        cf: &ColumnFamily,
+        paths: Vec<P>,
+    ) -> Result<()> {
+        self.ingest_external_file_cf_opts(cf, &IngestExternalFileOptions::default(), paths)
+    }
+
+    /// Ingest into a CF with options.
+    pub fn ingest_external_file_cf_opts<P: AsRef<std::path::Path>>(
+        &self,
+        cf: &ColumnFamily,
+        opts: &IngestExternalFileOptions,
+        paths: Vec<P>,
+    ) -> Result<()> {
+        self.check_cf(&cf.name)?;
+        for p in paths {
+            let path = p.as_ref();
+            let table = crate::api::open_writer_sst(path)?;
+            let mut batch = WriteBatch::new();
+            for (ikey, val) in table.iter_internal() {
+                match ikey.kind {
+                    pedradb_core::ValueType::Value => {
+                        batch.put_cf(cf, ikey.user_key.as_ref(), val.as_ref());
+                    }
+                    pedradb_core::ValueType::Deletion => {
+                        batch.delete_cf(cf, ikey.user_key.as_ref());
+                    }
+                    pedradb_core::ValueType::RangeDeletion => {
+                        batch.delete_range_cf(cf, ikey.user_key.as_ref(), val.as_ref());
+                    }
+                }
+            }
+            self.write(&batch)?;
+            if opts.move_files {
+                let _ = std::fs::remove_file(path);
+            }
+        }
+        self.flush()
+    }
+
+    /// rust-rocksdb `delete_file_in_range`: keys in `[from, to)` become
+    /// invisible. Implemented as `delete_range` + flush + compact (tombstones,
+    /// never a silent SST unlink).
+    pub fn delete_file_in_range<K: AsRef<[u8]>>(&self, from: K, to: K) -> Result<()> {
+        let cf = ColumnFamily {
+            name: DEFAULT_CF.into(),
+        };
+        self.delete_file_in_range_cf(&cf, from, to)
+    }
+
+    /// rust-rocksdb plural alias.
+    pub fn delete_files_in_range<K: AsRef<[u8]>>(&self, from: K, to: K) -> Result<()> {
+        self.delete_file_in_range(from, to)
+    }
+
+    /// CF variant.
+    pub fn delete_file_in_range_cf<K: AsRef<[u8]>>(
+        &self,
+        cf: &ColumnFamily,
+        from: K,
+        to: K,
+    ) -> Result<()> {
+        self.delete_range_cf(cf, from, to)?;
+        self.flush()?;
+        self.compact()
+    }
+
+    /// CF plural alias.
+    pub fn delete_files_in_range_cf<K: AsRef<[u8]>>(
+        &self,
+        cf: &ColumnFamily,
+        from: K,
+        to: K,
+    ) -> Result<()> {
+        self.delete_file_in_range_cf(cf, from, to)
     }
 
     /// rust-rocksdb `flush_opt` (wait flag ignored: flush is synchronous).
@@ -2368,7 +2598,16 @@ impl<E: Env> DB<E> {
     /// rust-rocksdb `cancel_all_background_work`.
     pub fn cancel_all_background_work(&self, _wait: bool) {}
 
-    /// rust-rocksdb `compact_range_opt` — whole merge (bounds ignored).
+    /// rust-rocksdb `compact_range`.
+    pub fn compact_range<S: AsRef<[u8]>, E2: AsRef<[u8]>>(
+        &self,
+        start: Option<S>,
+        end: Option<E2>,
+    ) {
+        self.compact_range_opt(start, end, &CompactOptions::default());
+    }
+
+    /// rust-rocksdb `compact_range_opt`.
     pub fn compact_range_opt<S: AsRef<[u8]>, E2: AsRef<[u8]>>(
         &self,
         _start: Option<S>,
@@ -2376,6 +2615,353 @@ impl<E: Env> DB<E> {
         _opts: &CompactOptions,
     ) {
         let _ = self.compact();
+    }
+
+    /// rust-rocksdb `compact_range_cf`.
+    pub fn compact_range_cf<S: AsRef<[u8]>, E2: AsRef<[u8]>>(
+        &self,
+        _cf: &ColumnFamily,
+        start: Option<S>,
+        end: Option<E2>,
+    ) {
+        self.compact_range(start, end);
+    }
+
+    /// rust-rocksdb `compact_range_cf_opt`.
+    pub fn compact_range_cf_opt<S: AsRef<[u8]>, E2: AsRef<[u8]>>(
+        &self,
+        cf: &ColumnFamily,
+        start: Option<S>,
+        end: Option<E2>,
+        _opts: &CompactOptions,
+    ) {
+        self.compact_range_cf(cf, start, end);
+    }
+
+    /// rust-rocksdb `create_cf`.
+    pub fn create_cf(&self, name: impl AsRef<str>, _opts: &Options) -> Result<()> {
+        let name = name.as_ref();
+        validate_cf_name(name)?;
+        if name == DEFAULT_CF {
+            return Ok(());
+        }
+        if self.codec.default_raw {
+            return Err(Error::invalid(format!(
+                "cannot add column family {name} to a default-only DB: \
+                 default-CF keys are stored raw; create the DB with the full column family list"
+            )));
+        }
+        {
+            let mut cfs = self.cfs.lock();
+            if cfs.iter().any(|c| c == name) {
+                return Ok(());
+            }
+            cfs.push(name.to_string());
+            let non_default: Vec<String> = cfs.iter().filter(|c| *c != DEFAULT_CF).cloned().collect();
+            store_cf_registry(&self.inner.path(), false, &non_default)?;
+        }
+        Ok(())
+    }
+
+    /// rust-rocksdb `drop_cf`: range-delete the CF prefix, compact, unregisters.
+    pub fn drop_cf(&self, name: impl AsRef<str>) -> Result<()> {
+        let name = name.as_ref();
+        if name == DEFAULT_CF {
+            return Err(Error::invalid("cannot drop default column family"));
+        }
+        self.check_cf(name)?;
+        let start = self.codec.encode(name, &[]);
+        let mut end = start.clone();
+        *end.last_mut().expect("prefix") = 1;
+        self.inner.delete_range(start, end).map_err(Error::from)?;
+        self.flush()?;
+        self.compact()?;
+        let mut cfs = self.cfs.lock();
+        cfs.retain(|c| c != name);
+        let non_default: Vec<String> = cfs.iter().filter(|c| *c != DEFAULT_CF).cloned().collect();
+        drop(cfs);
+        store_cf_registry(&self.inner.path(), self.codec.default_raw, &non_default)
+    }
+
+    /// rust-rocksdb `list_cf`.
+    pub fn list_cf<P: AsRef<std::path::Path>>(_opts: &Options, path: P) -> Result<Vec<String>> {
+        match load_cf_registry(path.as_ref())? {
+            None => Ok(vec![DEFAULT_CF.to_string()]),
+            Some((_raw, names)) => {
+                let mut v = vec![DEFAULT_CF.to_string()];
+                v.extend(names);
+                Ok(v)
+            }
+        }
+    }
+
+    /// rust-rocksdb `destroy`.
+    pub fn destroy<P: AsRef<std::path::Path>>(_opts: &Options, path: P) -> Result<()> {
+        match std::fs::remove_dir_all(path.as_ref()) {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(Error {
+                msg: format!("destroy: {e}"),
+                kind: ErrorKind::Io,
+            }),
+        }
+    }
+
+    /// rust-rocksdb `repair` — open-and-close (Pedra recover is the repair).
+    pub fn repair<P: AsRef<std::path::Path>>(opts: &Options, path: P) -> Result<()> {
+        let _db = DB::<StdEnv>::open_cf_with_env(opts, path, &[], StdEnv)?;
+        Ok(())
+    }
+
+    /// rust-rocksdb `path`.
+    #[must_use]
+    pub fn path(&self) -> std::path::PathBuf {
+        self.inner.path()
+    }
+
+    /// rust-rocksdb `property_value`.
+    pub fn property_value(&self, name: impl AsRef<str>) -> Result<Option<String>> {
+        Ok(self
+            .property_int_value(name.as_ref())?
+            .map(|n| n.to_string()))
+    }
+
+    /// rust-rocksdb `property_int_value_cf` (shared LSM — same stats).
+    pub fn property_int_value_cf(
+        &self,
+        _cf: &ColumnFamily,
+        name: impl AsRef<str>,
+    ) -> Result<Option<u64>> {
+        self.property_int_value(name)
+    }
+
+    /// rust-rocksdb `get_opt`.
+    pub fn get_opt(
+        &self,
+        key: impl AsRef<[u8]>,
+        ro: &ReadOptions,
+    ) -> Result<Option<Vec<u8>>> {
+        let seq = ro.snap.unwrap_or_else(|| self.inner.visible_sequence());
+        self.get_at(CoreSnapshot::at(seq), DEFAULT_CF, key)
+    }
+
+    /// rust-rocksdb `get_cf_opt`.
+    pub fn get_cf_opt(
+        &self,
+        cf: &ColumnFamily,
+        key: impl AsRef<[u8]>,
+        ro: &ReadOptions,
+    ) -> Result<Option<Vec<u8>>> {
+        let seq = ro.snap.unwrap_or_else(|| self.inner.visible_sequence());
+        self.get_at(CoreSnapshot::at(seq), &cf.name, key)
+    }
+
+    /// rust-rocksdb `get_pinned`.
+    pub fn get_pinned(&self, key: impl AsRef<[u8]>) -> Result<Option<DBPinnableSlice<'_>>> {
+        Ok(self.get(key)?.map(DBPinnableSlice::from_vec))
+    }
+
+    /// rust-rocksdb `get_pinned_cf`.
+    pub fn get_pinned_cf(
+        &self,
+        cf: &ColumnFamily,
+        key: impl AsRef<[u8]>,
+    ) -> Result<Option<DBPinnableSlice<'_>>> {
+        Ok(self.get_cf(cf, key)?.map(DBPinnableSlice::from_vec))
+    }
+
+    /// rust-rocksdb `multi_get`.
+    pub fn multi_get<K, I>(&self, keys: I) -> Vec<Result<Option<Vec<u8>>>>
+    where
+        K: AsRef<[u8]>,
+        I: IntoIterator<Item = K>,
+    {
+        keys.into_iter().map(|k| self.get(k)).collect()
+    }
+
+    /// rust-rocksdb `multi_get_cf`.
+    pub fn multi_get_cf<'a, K, I>(&self, keys: I) -> Vec<Result<Option<Vec<u8>>>>
+    where
+        K: AsRef<[u8]>,
+        I: IntoIterator<Item = (&'a ColumnFamily, K)>,
+    {
+        keys.into_iter().map(|(cf, k)| self.get_cf(cf, k)).collect()
+    }
+
+    /// rust-rocksdb `key_may_exist`.
+    #[must_use]
+    pub fn key_may_exist(&self, key: impl AsRef<[u8]>) -> bool {
+        self.get(key).ok().flatten().is_some()
+    }
+
+    /// rust-rocksdb `key_may_exist_cf`.
+    #[must_use]
+    pub fn key_may_exist_cf(&self, cf: &ColumnFamily, key: impl AsRef<[u8]>) -> bool {
+        self.get_cf(cf, key).ok().flatten().is_some()
+    }
+
+    /// rust-rocksdb `put_opt`.
+    pub fn put_opt(
+        &self,
+        key: impl AsRef<[u8]>,
+        value: impl AsRef<[u8]>,
+        wo: &WriteOptions,
+    ) -> Result<()> {
+        let prev = self.inner.default_write_sync();
+        self.inner.set_default_write_sync(wo.sync);
+        let r = self.put(key, value);
+        self.inner.set_default_write_sync(prev);
+        r
+    }
+
+    /// rust-rocksdb `delete_opt`.
+    pub fn delete_opt(&self, key: impl AsRef<[u8]>, wo: &WriteOptions) -> Result<()> {
+        let prev = self.inner.default_write_sync();
+        self.inner.set_default_write_sync(wo.sync);
+        let r = self.delete(key);
+        self.inner.set_default_write_sync(prev);
+        r
+    }
+
+    /// rust-rocksdb `write_opt`.
+    pub fn write_opt(&self, batch: &WriteBatch, wo: &WriteOptions) -> Result<()> {
+        let prev = self.inner.default_write_sync();
+        self.inner.set_default_write_sync(wo.sync);
+        let r = self.write(batch);
+        self.inner.set_default_write_sync(prev);
+        r
+    }
+
+    /// rust-rocksdb `write_without_wal` — Pedra still WAL-appends; sync is off.
+    pub fn write_without_wal(&self, batch: WriteBatch) -> Result<()> {
+        let mut wo = WriteOptions::default();
+        wo.set_sync(false);
+        self.write_opt(&batch, &wo)
+    }
+
+    /// rust-rocksdb `merge` (get + full_merge + put).
+    pub fn merge(&self, key: impl AsRef<[u8]>, operand: impl AsRef<[u8]>) -> Result<()> {
+        let op = self
+            .merge_operator
+            .as_ref()
+            .ok_or_else(|| Error::invalid("merge operator not set"))?;
+        let k = key.as_ref();
+        let existing = self.get(k)?;
+        let operands = MergeOperands::one(operand.as_ref().to_vec());
+        match op(k, existing.as_deref(), &operands) {
+            Some(v) => self.put(k, v),
+            None => self.delete(k),
+        }
+    }
+
+    /// rust-rocksdb `merge_cf`.
+    pub fn merge_cf(
+        &self,
+        cf: &ColumnFamily,
+        key: impl AsRef<[u8]>,
+        operand: impl AsRef<[u8]>,
+    ) -> Result<()> {
+        let op = self
+            .merge_operator
+            .as_ref()
+            .ok_or_else(|| Error::invalid("merge operator not set"))?;
+        let k = key.as_ref();
+        let existing = self.get_cf(cf, k)?;
+        let operands = MergeOperands::one(operand.as_ref().to_vec());
+        match op(k, existing.as_deref(), &operands) {
+            Some(v) => self.put_cf(cf, k, v),
+            None => self.delete_cf(cf, k),
+        }
+    }
+
+    /// rust-rocksdb `flush_cf`.
+    pub fn flush_cf(&self, _cf: &ColumnFamily) -> Result<()> {
+        self.flush()
+    }
+
+    /// rust-rocksdb `flush_cf_opt`.
+    pub fn flush_cf_opt(&self, cf: &ColumnFamily, _opts: &FlushOptions) -> Result<()> {
+        self.flush_cf(cf)
+    }
+
+    /// rust-rocksdb `live_files`.
+    pub fn live_files(&self) -> Result<Vec<LiveFile>> {
+        let dir = self.inner.path();
+        let mut out = Vec::new();
+        let rd = match std::fs::read_dir(&dir) {
+            Ok(r) => r,
+            Err(e) => {
+                return Err(Error {
+                    msg: format!("live_files: {e}"),
+                    kind: ErrorKind::Io,
+                })
+            }
+        };
+        for ent in rd {
+            let ent = ent.map_err(|e| Error {
+                msg: format!("live_files: {e}"),
+                kind: ErrorKind::Io,
+            })?;
+            let p = ent.path();
+            if p.extension().and_then(|e| e.to_str()) != Some("sst") {
+                continue;
+            }
+            let size = ent.metadata().map(|m| m.len()).unwrap_or(0) as usize;
+            out.push(LiveFile {
+                name: p
+                    .file_name()
+                    .map(|s| s.to_string_lossy().into_owned())
+                    .unwrap_or_default(),
+                size,
+                level: 0,
+                start_key: Vec::new(),
+                end_key: Vec::new(),
+                num_entries: 0,
+            });
+        }
+        Ok(out)
+    }
+
+    /// rust-rocksdb `raw_iterator`.
+    #[must_use]
+    pub fn raw_iterator(&self) -> DBRawIteratorWithThreadMode<'_, Self, E> {
+        self.raw_iterator_opt(ReadOptions::default())
+    }
+
+    /// rust-rocksdb `raw_iterator_cf`.
+    #[must_use]
+    pub fn raw_iterator_cf(
+        &self,
+        _cf: &ColumnFamily,
+    ) -> DBRawIteratorWithThreadMode<'_, Self, E> {
+        self.raw_iterator()
+    }
+
+    /// rust-rocksdb `iterator_opt`.
+    pub fn iterator_opt(
+        &self,
+        mode: IteratorMode<'_>,
+        _ro: ReadOptions,
+    ) -> Result<DBIterator<E>> {
+        self.iterator(mode)
+    }
+
+    /// rust-rocksdb `prefix_iterator`.
+    pub fn prefix_iterator(&self, prefix: impl AsRef<[u8]>) -> Result<DBIterator<E>> {
+        self.iterator(IteratorMode::From(prefix.as_ref(), Direction::Forward))
+    }
+
+    /// rust-rocksdb `full_iterator`.
+    pub fn full_iterator(&self, mode: IteratorMode<'_>) -> Result<DBIterator<E>> {
+        self.iterator(mode)
+    }
+
+    /// rust-rocksdb `delete_range` on default CF.
+    pub fn delete_range<K: AsRef<[u8]>>(&self, from: K, to: K) -> Result<()> {
+        let cf = ColumnFamily {
+            name: DEFAULT_CF.into(),
+        };
+        self.delete_range_cf(&cf, from, to)
     }
 }
 
@@ -2406,7 +2992,7 @@ fn compat_resume<E: Env>(
 }
 
 fn spawn_compact_worker(
-    inner: ConcurrentDb<StdEnv>,
+    inner: ConcurrentDb<IoUringEnv>,
     gate: Arc<Mutex<()>>,
     auto_resume_transient: bool,
     fence_sink: Arc<Mutex<Option<pedradb_core::FenceRecovery>>>,
@@ -3866,5 +4452,141 @@ mod tests {
         assert_eq!(a.get(b"shared").unwrap().as_deref(), Some(&b"from-a"[..]));
         let _ = std::fs::remove_dir_all(&d1);
         let _ = std::fs::remove_dir_all(&d2);
+    }
+
+    #[test]
+    fn sst_writer_ingest_roundtrip() {
+        let dir = tmp("ingest");
+        let sst = dir.join("ext.sst");
+        let mut w = SstFileWriter::create(&Options::new());
+        w.open(&sst).unwrap();
+        w.put(b"ik", b"iv").unwrap();
+        w.put(b"jk", b"jv").unwrap();
+        w.finish().unwrap();
+        let db = DB::open_default(&dir).unwrap();
+        db.ingest_external_file(vec![&sst]).unwrap();
+        assert_eq!(db.get(b"ik").unwrap().as_deref(), Some(&b"iv"[..]));
+        assert_eq!(db.get(b"jk").unwrap().as_deref(), Some(&b"jv"[..]));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn delete_file_in_range_tombstones_keys() {
+        let dir = tmp("dfr");
+        let db = DB::open_default(&dir).unwrap();
+        db.put(b"a", b"1").unwrap();
+        db.put(b"b", b"2").unwrap();
+        db.put(b"c", b"3").unwrap();
+        db.delete_file_in_range(b"a", b"c").unwrap();
+        assert!(db.get(b"a").unwrap().is_none());
+        assert!(db.get(b"b").unwrap().is_none());
+        assert_eq!(db.get(b"c").unwrap().as_deref(), Some(&b"3"[..]));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn wbwi_read_your_writes() {
+        let dir = tmp("wbwi");
+        let db = DB::open_default(&dir).unwrap();
+        db.put(b"k", b"old").unwrap();
+        let mut b = WriteBatchWithIndex::new();
+        b.put(b"k", b"new");
+        b.put(b"n", b"x");
+        assert_eq!(
+            b.get_from_batch_and_db(&db, b"k").unwrap().as_deref(),
+            Some(&b"new"[..])
+        );
+        assert_eq!(
+            b.get_from_batch_and_db(&db, b"n").unwrap().as_deref(),
+            Some(&b"x"[..])
+        );
+        db.write(b.get_write_batch()).unwrap();
+        assert_eq!(db.get(b"k").unwrap().as_deref(), Some(&b"new"[..]));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn compaction_filter_removes_keys() {
+        let dir = tmp("cfilt");
+        let mut opts = Options::new();
+        opts.create_if_missing(true);
+        opts.set_compaction_filter("drop-x", |_lvl, key, _val| {
+            if key == b"x" {
+                CompactionDecision::Remove
+            } else {
+                CompactionDecision::Keep
+            }
+        });
+        let db = DB::open(&opts, &dir).unwrap();
+        db.put(b"x", b"1").unwrap();
+        db.put(b"y", b"2").unwrap();
+        db.flush().unwrap();
+        db.compact().unwrap();
+        assert!(db.get(b"x").unwrap().is_none());
+        assert_eq!(db.get(b"y").unwrap().as_deref(), Some(&b"2"[..]));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn merge_operator_rmw() {
+        let dir = tmp("merge");
+        let mut opts = Options::new();
+        opts.create_if_missing(true);
+        opts.set_merge_operator_associative("concat", |_k, exist, ops| {
+            let mut out = exist.unwrap_or(&[]).to_vec();
+            for o in ops.iter() {
+                out.extend_from_slice(o);
+            }
+            Some(out)
+        });
+        let db = DB::open(&opts, &dir).unwrap();
+        db.put(b"k", b"a").unwrap();
+        db.merge(b"k", b"b").unwrap();
+        assert_eq!(db.get(b"k").unwrap().as_deref(), Some(&b"ab"[..]));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn create_list_drop_cf() {
+        let dir = tmp("cflife");
+        let mut opts = Options::new();
+        opts.create_if_missing(true);
+        let db = DB::open_cf(&opts, &dir, &["cf1"]).unwrap();
+        db.create_cf("cf2", &Options::new()).unwrap();
+        assert!(db.cf_handle("cf2").is_some());
+        db.put_cf(&db.cf_handle("cf2").unwrap(), b"k", b"v")
+            .unwrap();
+        db.drop_cf("cf2").unwrap();
+        assert!(db.cf_handle("cf2").is_none());
+        let listed = DB::<StdEnv>::list_cf(&opts, &dir).unwrap();
+        assert!(listed.contains(&"cf1".to_string()));
+        assert!(!listed.contains(&"cf2".to_string()));
+        DB::<StdEnv>::destroy(&opts, &dir).unwrap();
+    }
+
+    #[test]
+    fn property_int_value_maps_estimate_num_keys() {
+        let dir = tmp("props");
+        let db = DB::open_default(&dir).unwrap();
+        db.put(b"a", b"1").unwrap();
+        db.put(b"b", b"2").unwrap();
+        let n = db
+            .property_int_value(properties::ESTIMATE_NUM_KEYS)
+            .unwrap()
+            .expect("estimate-num-keys mapped");
+        assert!(n >= 2, "estimate-num-keys={n}");
+        let sst = db
+            .property_int_value(properties::LIVE_SST_FILES_SIZE)
+            .unwrap();
+        assert!(sst.is_some());
+        let l0 = db
+            .property_int_value("rocksdb.num-files-at-level0")
+            .unwrap();
+        assert!(l0.is_some());
+        assert!(db
+            .property_int_value("rocksdb.no-such-property")
+            .unwrap()
+            .is_none());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

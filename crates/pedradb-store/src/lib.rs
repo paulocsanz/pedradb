@@ -54,6 +54,7 @@ mod msg;
 mod si_kernel;
 mod snapshot_kernel;
 pub mod tcp;
+pub mod tls;
 mod txn_kernel;
 
 pub use ae_ack_kernel::{ae_ack_success, ae_ack_success_as_is};
@@ -98,6 +99,9 @@ pub use tcp::{
     client_put_batch, client_set_peers, client_status, client_tick, connect as tcp_connect,
     connect_host as tcp_connect_host, peer_wire, read_frame, resolve_host_port, write_frame,
     WireMsg,
+};
+pub use tls::{
+    install_from_pem_files, maybe_client_wrap, maybe_server_wrap, tls_installed, IoBox,
 };
 pub use txn_kernel::{
     discard_cut, discard_cut_as_is, leftover_txn_is_aborted, leftover_txn_is_aborted_as_is,
@@ -194,6 +198,7 @@ use std::path::{Path, PathBuf};
 
 use bytes::Bytes;
 use pedradb_core::{BatchOp, Db, Env, Host, OpenOptions, Rng, SeedRng, StdEnv};
+use pedradb_io_uring::IoUringEnv;
 use pedradb_dcs::{
     apply_dcs_command, bind_absent_create, check_command_at, dcs_get, dcs_get_at, DcsCommand,
     KeyValue,
@@ -1810,7 +1815,7 @@ impl RangePeer {
 }
 
 /// One physical store node.
-struct StoreNode<E: Env = StdEnv> {
+struct StoreNode<E: Env = IoUringEnv> {
     db: Db<E>,
     /// range_id → peer
     ranges: HashMap<u64, RangePeer>,
@@ -1836,7 +1841,7 @@ type RangeKvMap = HashMap<u64, Vec<KvPair>>;
 /// Peer RPCs use [`RpcMode`]: default [`RpcMode::Direct`] keeps sync in-process
 /// delivery; [`RpcMode::Queued`] exposes AE/RV via [`Self::drain_outbound`] /
 /// [`Self::handle_inbound`] for World/Net simulation.
-pub struct StoreCluster<E: Env = StdEnv> {
+pub struct StoreCluster<E: Env = IoUringEnv> {
     nodes: HashMap<u64, StoreNode<E>>,
     /// Raft voting membership (strict majority of this set).
     ids: Vec<u64>,
@@ -1898,10 +1903,10 @@ pub struct StoreCluster<E: Env = StdEnv> {
 /// Snapshots older than `commit_generation - VERSION_RETENTION` become too-old after GC.
 pub const VERSION_RETENTION: u64 = 64;
 
-impl StoreCluster<StdEnv> {
+impl StoreCluster<IoUringEnv> {
     /// Open `n_nodes` under `parent`, with `n_ranges` equal splits of the keyspace.
     ///
-    /// Uses production [`StdEnv`] and a fixed seed RNG. Prefer
+    /// Uses production [`IoUringEnv`] (Linux ring, POSIX fallback) and a fixed seed RNG. Prefer
     /// [`open_with_rng`](Self::open_with_rng) / [`open_with_env_rng`](StoreCluster::open_with_env_rng)
     /// / [`open_with_host`](StoreCluster::open_with_host) for DST.
     ///
@@ -1923,7 +1928,7 @@ impl StoreCluster<StdEnv> {
         n_ranges: u64,
         opts: StoreOpenOptions,
     ) -> Result<Self> {
-        let envs: Vec<StdEnv> = (0..n_nodes).map(|_| StdEnv).collect();
+        let envs: Vec<IoUringEnv> = (0..n_nodes).map(|_| IoUringEnv::default()).collect();
         Self::open_with_envs_rng_opts(parent, n_nodes, n_ranges, envs, SeedRng::new(0xA11CE), opts)
     }
 
@@ -2030,7 +2035,7 @@ impl StoreCluster<StdEnv> {
             large_value_threshold: None,
         };
         let dir = parent.join(format!("store-node-{self_id}"));
-        let mut db = Db::open_with_env(&dir, opts, StdEnv)?;
+        let mut db = Db::open_with_env(&dir, opts, IoUringEnv::default())?;
         if store_opts.pedra_write_backpressure {
             db.enable_write_backpressure_defaults();
         }
@@ -2081,7 +2086,7 @@ impl StoreCluster<StdEnv> {
 
     /// Open with a deterministic RNG for election jitter (DST / reproducible tests).
     ///
-    /// Disk remains `StdEnv`. For injectable disk, use [`open_with_env_rng`](StoreCluster::open_with_env_rng).
+    /// Disk is production [`IoUringEnv`]. For injectable disk, use [`open_with_env_rng`](StoreCluster::open_with_env_rng).
     ///
     /// # Errors
     /// Open / bad args.
@@ -2091,7 +2096,7 @@ impl StoreCluster<StdEnv> {
         n_ranges: u64,
         rng: SeedRng,
     ) -> Result<Self> {
-        StoreCluster::open_with_env_rng(parent, n_nodes, n_ranges, StdEnv, rng)
+        StoreCluster::open_with_env_rng(parent, n_nodes, n_ranges, IoUringEnv::default(), rng)
     }
 }
 

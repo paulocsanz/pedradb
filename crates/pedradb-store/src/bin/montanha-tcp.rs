@@ -39,8 +39,9 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use pedradb_store::{
-    client_get, client_put, client_set_peers, client_status, client_tick, read_frame,
-    resolve_host_port, write_frame, StoreCluster, StoreError, StoreOpenOptions, WireMsg,
+    client_get, client_put, client_set_peers, client_status, client_tick, install_from_pem_files,
+    maybe_client_wrap, maybe_server_wrap, read_frame, resolve_host_port, write_frame, StoreCluster,
+    StoreError, StoreOpenOptions, WireMsg,
 };
 
 fn main() {
@@ -49,6 +50,7 @@ fn main() {
         eprintln!(
             "usage: montanha-tcp <node|put|get|status|tick|smoke|elect-wait|set-peers|proxy> [flags]\n\
              node: --id N --data DIR --bind ADDR --peer id=addr... [--ranges N] [--health ADDR] [--write-backpressure]\n\
+             tls:  --tls-cert PEM --tls-key PEM --tls-ca PEM [--tls-server-name NAME] [--require-tls]\n\
              put:  --addr HOST:PORT --key K --value V [--peer id=addr...]\n\
              get:  --addr HOST:PORT --key K\n\
              status/tick: --addr HOST:PORT [--n N]\n\
@@ -60,6 +62,10 @@ fn main() {
         process::exit(2);
     }
     let cmd = args.remove(0);
+    if let Err(e) = install_tls_from_args(&args) {
+        eprintln!("{e}");
+        process::exit(2);
+    }
     match cmd.as_str() {
         "node" => cmd_node(&args),
         "put" => cmd_put(&args),
@@ -93,6 +99,26 @@ fn parse_peer(s: &str) -> (u64, String) {
         process::exit(2);
     }
     (id, b.to_string())
+}
+
+fn install_tls_from_args(args: &[String]) -> std::result::Result<(), String> {
+    let require = args.iter().any(|a| a == "--require-tls");
+    let cert = flag_val(args, "--tls-cert");
+    let key = flag_val(args, "--tls-key");
+    let ca = flag_val(args, "--tls-ca");
+    let name = flag_val(args, "--tls-server-name").unwrap_or_else(|| "localhost".into());
+    match (cert, key, ca) {
+        (Some(c), Some(k), Some(ca)) => install_from_pem_files(
+            std::path::Path::new(&c),
+            std::path::Path::new(&k),
+            std::path::Path::new(&ca),
+            &name,
+        )
+        .map_err(|e| e.to_string()),
+        (None, None, None) if !require => Ok(()),
+        _ if require => Err("--require-tls needs --tls-cert --tls-key --tls-ca".into()),
+        _ => Err("tls: pass all of --tls-cert --tls-key --tls-ca (or none)".into()),
+    }
 }
 
 fn flag_val(args: &[String], name: &str) -> Option<String> {
@@ -194,7 +220,8 @@ fn cmd_node(args: &[String]) {
         .or_else(|| env::var("HEALTH_BIND").ok())
         .unwrap_or_else(|| {
             let p = bind.port().saturating_add(79); // 9701 → 9780
-            format!("0.0.0.0:{p}")
+            // RFC-0050 P0.5: health HTTP is localhost-only unless --health is set.
+            format!("127.0.0.1:{p}")
         })
         .parse()
         .expect("health bind");
@@ -385,6 +412,16 @@ fn accept_loop(bind: SocketAddr, tx: SyncSender<Work>) {
                 let inflight_c = Arc::clone(&inflight);
                 thread::spawn(move || {
                     let _guard = InflightGuard(inflight_c);
+                    stream.set_read_timeout(Some(Duration::from_secs(3))).ok();
+                    stream.set_write_timeout(Some(Duration::from_secs(5))).ok();
+                    stream.set_nodelay(true).ok();
+                    let stream = match maybe_server_wrap(stream) {
+                        Ok(s) => s,
+                        Err(e) => {
+                            eprintln!("tls handshake: {e}");
+                            return;
+                        }
+                    };
                     if let Err(e) = handle_conn(tx, stream) {
                         let msg = e.to_string();
                         if !msg.contains("tcp read magic")
@@ -414,12 +451,10 @@ impl Drop for InflightGuard {
     }
 }
 
-fn handle_conn(tx: SyncSender<Work>, mut stream: TcpStream) -> Result<(), StoreError> {
-    // Short first-frame timeout: TCP health probes that never send MTCP must not
-    // pin FDs for 30s (EMFILE under proxy churn).
-    stream.set_read_timeout(Some(Duration::from_secs(3))).ok();
-    stream.set_write_timeout(Some(Duration::from_secs(5))).ok();
-    stream.set_nodelay(true).ok();
+fn handle_conn(
+    tx: SyncSender<Work>,
+    mut stream: pedradb_store::IoBox,
+) -> Result<(), StoreError> {
     let msg = read_frame(&mut stream)?;
     match msg {
         WireMsg::Peer { from, to, body } => {
@@ -1108,10 +1143,11 @@ fn send_peer(host_port: &str, from: u64, to: u64, body: &[u8]) -> Result<(), Sto
     // (both sides blocked in send_peer). Delivery is confirmed by the peer's
     // accept thread reading the frame; TCP write success is enough for lab/P0.1.
     let addr = resolve_host_port(host_port)?;
-    let mut s = TcpStream::connect_timeout(&addr, Duration::from_millis(400))
+    let s = TcpStream::connect_timeout(&addr, Duration::from_millis(400))
         .map_err(|e| StoreError::Msg(format!("dial {host_port} ({addr}): {e}")))?;
     s.set_write_timeout(Some(Duration::from_millis(800))).ok();
     s.set_nodelay(true).ok();
+    let mut s = maybe_client_wrap(s)?;
     write_frame(
         &mut s,
         &WireMsg::Peer {

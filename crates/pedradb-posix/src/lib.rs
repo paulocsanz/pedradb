@@ -264,4 +264,71 @@ mod tests {
         fsync_file(&f).unwrap();
         let _ = std::fs::remove_dir_all(&dir);
     }
+
+    /// Darwin G1 is libSystem `fdatasync`, **not** `F_FULLFSYNC` (RFC-0036).
+    /// Process crash after Ok is covered by WAL recover tests; drive-cache
+    /// power-loss is the weaker class and cannot be simulated in-process.
+    /// This test proves the *class*: file + dirfd barriers stay on the fast
+    /// `fdatasync` side of `File::sync_all` (`F_FULLFSYNC`, ~100× here).
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn darwin_fdatasync_and_dirfd_are_not_fullfsync_class() {
+        use std::time::{Duration, Instant};
+
+        fn p50_ns(mut samples: Vec<Duration>) -> u128 {
+            samples.sort();
+            samples[samples.len() / 2].as_nanos()
+        }
+
+        let dir = temp_dir();
+        let path = dir.join("wal.bin");
+        let mut f = File::create(&path).unwrap();
+        f.write_all(&[0u8; 4096]).unwrap();
+
+        let mut fd = Vec::with_capacity(80);
+        let mut ff = Vec::with_capacity(80);
+        for i in 0..80 {
+            f.write_all(&[i as u8; 64]).unwrap();
+            let t = Instant::now();
+            fdatasync_file(&f).unwrap();
+            fd.push(t.elapsed());
+            let t = Instant::now();
+            f.sync_all().unwrap();
+            ff.push(t.elapsed());
+        }
+        let fd_p50 = p50_ns(fd);
+        let ff_p50 = p50_ns(ff);
+        eprintln!(
+            "darwin class: file fdatasync p50={fd_p50}ns  File::sync_all(F_FULLFSYNC) p50={ff_p50}ns"
+        );
+        assert!(
+            fd_p50.saturating_mul(8) < ff_p50,
+            "G1 must be fdatasync-class, not F_FULLFSYNC: fdatasync p50={fd_p50}ns sync_all p50={ff_p50}ns"
+        );
+
+        let d = File::open(&dir).unwrap();
+        let mut dir_fd = Vec::with_capacity(40);
+        let mut dir_ff = Vec::with_capacity(40);
+        for _ in 0..40 {
+            let t = Instant::now();
+            sync_dir_fd(&d).unwrap();
+            dir_fd.push(t.elapsed());
+            let t = Instant::now();
+            d.sync_all().unwrap();
+            dir_ff.push(t.elapsed());
+        }
+        let dir_fd_p50 = p50_ns(dir_fd);
+        let dir_ff_p50 = p50_ns(dir_ff);
+        eprintln!(
+            "darwin class: dirfd fdatasync p50={dir_fd_p50}ns  dir File::sync_all p50={dir_ff_p50}ns (dir sync_all class is noisy; not G1)"
+        );
+        // `sync_dir_fd` is stably the fast class. `File::sync_all` on a
+        // Darwin dirfd is **not** a reliable FULLFSYNC (this host: ~300 ns
+        // or ~5 ms depending on the run) — we do not use it for publish.
+        assert!(
+            dir_fd_p50.saturating_mul(8) < ff_p50,
+            "dirfd fdatasync must not be file F_FULLFSYNC class: dir={dir_fd_p50}ns file FULLFSYNC={ff_p50}ns"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

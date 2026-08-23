@@ -84,14 +84,25 @@ pub enum SubmitCompleteAct {
     ReturnSubmitErr,
 }
 
+/// Times `WaitMore` was chosen after `submit_and_wait` returned Err with
+/// an empty CQ (the F208 arm). Test/Linux soak only.
+#[cfg(test)]
+pub static F208_WAITMORE_AFTER_SUBMIT_ERR: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(0);
+
 /// Decide what to do after a submit attempt plus a non-blocking CQ drain.
 ///
-/// `submit_ok` is kept so as-is tests can contrast F203/F208. Production
-/// ignores it: a pushed SQE is in flight until its CQE is harvested.
-pub fn submit_complete_act(_submit_ok: bool, harvested: bool) -> SubmitCompleteAct {
+/// `submit_ok` is kept so as-is tests can contrast F203/F208 and so the
+/// F208 counter can see a failed submit. Production still WaitMore either
+/// way: a pushed SQE is in flight until its CQE is harvested.
+pub fn submit_complete_act(submit_ok: bool, harvested: bool) -> SubmitCompleteAct {
     if harvested {
         SubmitCompleteAct::UseHarvested
     } else {
+        #[cfg(test)]
+        if !submit_ok {
+            F208_WAITMORE_AFTER_SUBMIT_ERR.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
         SubmitCompleteAct::WaitMore
     }
 }

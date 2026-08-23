@@ -59,3 +59,14 @@ jobs:
         env:
           ASAN_REQUIRED: "1"
         run: bash scripts/capi-asan.sh
+
+  io-uring-linux-soak:
+    name: io_uring live ring soak
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: pedradb-io-uring (live io_uring)
+        env:
+          URING_SOAK_REQUIRED: "1"
+        run: bash scripts/io_uring_linux_soak.sh

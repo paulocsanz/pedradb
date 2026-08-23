@@ -17,8 +17,11 @@ This crate is the **only** `unsafe` on Pedra's default I/O path
 - Non-Unix: `File::sync_data()` (Windows `FlushFileBuffers`); no FFI.
 
 **Not `F_FULLFSYNC`.** On Darwin this is weaker than Rust std
-`File::sync_data`. Same barrier class as RocksDB / TiKV `fdatasync`
-(RFC-0036). Power-loss can lose a “synced” WAL if the drive cache holds it.
+`File::sync_data`. Same barrier class as the rust-rocksdb peer on this
+host (RFC-0036). Power-loss can lose a “synced” WAL if the drive cache
+holds it. Proof: test `darwin_fdatasync_and_dirfd_are_not_fullfsync_class`
+(file `fdatasync` p50 ~25 µs vs `F_FULLFSYNC` ~4 ms; dirfd `fdatasync`
+stays fast). `File::sync_all` on a Darwin **dirfd** is noisy — not used.
 
 `EINTR` / failed `fdatasync` after the kernel may have completed the
 barrier is the RFC-0015 H1 uncertain outcome — not unique to unsafe.

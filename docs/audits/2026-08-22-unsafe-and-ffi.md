@@ -22,7 +22,7 @@ The kernel is already the thing we wanted: `pedradb-core` is `#![forbid(unsafe_c
 | Crate | Kind | Sites | Default in product path? |
 |-------|------|-------|--------------------------|
 | `pedradb-posix` | POSIX FFI `fdatasync(2)` | 1 `unsafe extern "C"` block + 1 call | **Yes** — `StdEnv` / WAL G1 on Unix |
-| `pedradb-io-uring` | Linux `io_uring` SQE push (`ring.rs`) | `submit_sqe` | **No** — opt-in `IoUringEnv` |
+| `pedradb-io-uring` | Linux `io_uring` SQE push (`ring.rs`) | `submit_sqe` | **Yes** — production `open` (POSIX fallback off-Linux / ring-setup fail) |
 | `pedradb-capi` | C ABI marshalling (handle table) | `unsafe extern "C"` + slice/`CStr` | **No** — lab `cdylib`, store does not link it |
 
 False positives (prose, not Rust `unsafe`):
@@ -217,7 +217,7 @@ There is **no `crate-type = ["cdylib"]`**. A C consumer cannot link a shared lib
 | Threading | `StoreCluster` is a plain struct (HashMaps, nodes, generation). C callers can pass the same `db*` to two threads. That is a data race = UB. Nothing in the header says “not thread-safe”. |
 | `CStr::from_ptr(path)` | Path must be NUL-terminated. Missing NUL → read off end. No max length. |
 
-Null checks on entry are present (good). `elect_all` failure drops the unboxed cluster (good). Tests cover set/get/commit and conflict codes **from Rust**, not from a C compiler + ASan.
+Null checks on entry are present (good). `elect_all` failure drops the unboxed cluster (good). **Update 2026-08-23:** C+ASan harness (`scripts/capi-asan.sh`) links a C TU; Rust tests alone are not the C-caller oracle.
 
 ### MEDIUM
 
@@ -254,15 +254,15 @@ None on the **default** `StdEnv` path. Core remains `forbid(unsafe_code)`.
 
 | ID | Location | Pattern | Issue | Fix |
 |----|----------|---------|-------|-----|
-| U1 | `pedradb-io-uring` constant `user_data` | Stale CQE adopted as current op | **Fixed 2026-08-22:** unique `next_user_data` + harvest on submit Err (`cqe_kernel` / `submit_sqe`). Ring soak still NEEDS-LINUX-ENV. | — |
-| U2 | `pedradb-store` `fdb_c` | Raw `Box` handles | **Fixed 2026-08-23:** `pedradb-capi` slot+generation table + process mutex. Stale/double-free → ERROR. Path/key slices remain C-contract `unsafe`. |
+| U1 | `pedradb-io-uring` constant `user_data` | Stale CQE adopted as current op | **Fixed 2026-08-22** unique tags; **soak 2026-08-23:** live ring in privileged Docker + CI `io-uring-linux-soak` (`linux_ring_is_live`, write/fsync/reopen, EINTR storm). | — |
+| U2 | `pedradb-store` `fdb_c` | Raw `Box` handles | **Fixed 2026-08-23:** `pedradb-capi` slot+generation table. Stale/double-free → ERROR. **F215:** path/key/value lengths capped before copy; C+ASan harness (`scripts/capi-asan.sh`) PASS + malicious expected-FAIL. Slices under the cap remain C-contract `unsafe`. **Not product.** |
 
 ### Medium
 
 | ID | Location | Issue | Fix |
 |----|----------|-------|-----|
 | U3 | `pedradb-posix` | `unsafe extern` vs MSRV 1.75 | **Fixed 2026-08-23:** edition-2021 `extern "C"` + crate `SAFETY.md`. |
-| U4 | `StdEnv::sync_dir` | `fdatasync` on directory fds, Darwin semantics unknown | **Documented 2026-08-23** in `docs/usage.md` (G1 = `fdatasync`, not `F_FULLFSYNC`). Not a code flex. |
+| U4 | `StdEnv::sync_dir` | `fdatasync` on directory fds, Darwin semantics unknown | **Measured 2026-08-23:** file `fdatasync` p50 ~24 µs vs `F_FULLFSYNC` ~4 ms. Dirfd `fdatasync` **and** dir `sync_all` ~300 ns — `sync_all` on a Darwin dirfd is not file FULLFSYNC. Drive-cache plug-pull unsimulated (file-fdatasync class). |
 | U5 | `posix_fadvise` in io-uring crate | Default Linux `StdEnv` never prefetches | **Fixed 2026-08-23:** `pedradb-posix::advise_file`; `StdEnv` + `IoUringEnv` call it. |
 | U6 | `c-api` not a `cdylib` | Header over-promises linkability | **Fixed 2026-08-23:** `pedradb-capi` `cdylib` + `staticlib` + `rlib`. |
 | U7 | `pedradb-cli`, alias-smoke | No `forbid(unsafe_code)` | **Fixed 2026-08-22:** crate-level `forbid`. |
@@ -440,6 +440,11 @@ Reviewers can read **~60 lines of posix**, **~150 lines of ring**, **~200 lines 
 - [x] Miri on the islands that can run: posix FFI (`fdatasync` 4/4 with isolation off), `cqe_kernel` 8/8, capi `handles` 5/5. Script `scripts/miri-unsafe-islands.sh`; CI `MIRI_REQUIRED=1`. Ring syscalls and capi `StoreCluster` tests remain residual.
 - [x] `montanha-fdb-recipes` `#![forbid(unsafe_code)]` (was `deny`).
 
+**P4** — done 2026-08-23 (environment residuals):
+
+- [x] Linux live-ring soak: `linux_ring_is_live` + `linux_ring_soak_write_fsync_reopen` (256 mixed write/fsync, F202 cursor, 128 keyed put/flush/reopen/CRC). Privileged Docker Linux 17/17; CI `io-uring-linux-soak` (`URING_SOAK_REQUIRED=1`). Default Docker seccomp EPERM on `io_uring_setup` — script uses `--privileged`.
+- [x] Darwin G1 class: `darwin_fdatasync_and_dirfd_are_not_fullfsync_class` — file `fdatasync` ~24 µs vs `F_FULLFSYNC` ~4 ms; dirfd both `fdatasync` and `sync_all` ~300 ns (not file FULLFSYNC). Drive-cache power-loss is the file-fdatasync class.
+
 ---
 
 ## 10. Layer / policy checks (this audit)
@@ -449,7 +454,7 @@ Reviewers can read **~60 lines of posix**, **~150 lines of ring**, **~200 lines 
 | `pedradb-core` `forbid(unsafe_code)` | pass |
 | No `unsafe` in WAL/memtable/SST/TX | pass |
 | Default I/O FFI isolated in `pedradb-posix` | pass |
-| io_uring isolated, opt-in | pass (U1 closed in `cqe_kernel`; ring soak NEEDS-LINUX-ENV) |
+| io_uring isolated, opt-in | pass (U1 + live-ring soak gated) |
 | C ABI isolated (`pedradb-capi`) | pass (store `forbid`) |
 | Rocks C++ not a core dep | pass |
 | `mmap` / `transmute` / `unsafe impl Send` | none found |

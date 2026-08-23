@@ -70,6 +70,15 @@ jobs:
       - name: race job
         run: bash scripts/race_job.sh
 
+  montanha-secure:
+    name: Montanha TLS lab (RFC-0050 P0.5)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: montanha-tcp --features tls
+        run: cargo test -p pedradb-store --features tls --test tcp_tls -- --nocapture
+
   explore:
     name: explore campaign (P1.3)
     runs-on: ubuntu-latest

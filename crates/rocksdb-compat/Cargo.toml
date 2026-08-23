@@ -1,6 +1,6 @@
 [package]
 name = "rocksdb-compat"
-description = "rust-rocksdb-shaped API subset on pedradb-core (compat lab; not drop-in TiKV)"
+description = "rust-rocksdb 0.22 API on pedradb-core"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -8,6 +8,7 @@ rust-version.workspace = true
 
 [dependencies]
 pedradb-core = { path = "../pedradb-core" }
+pedradb-io-uring = { path = "../pedradb-io-uring" }
 pedradb-sim = { path = "../pedradb-sim" }
 bytes = "1"
 parking_lot.workspace = true

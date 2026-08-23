@@ -17,6 +17,10 @@ use super::cqe_kernel::{
 pub(crate) struct UringState {
     ring: io_uring::IoUring,
     next_tag: u64,
+    /// Test-only: replace the next harvested CQE `res` (RFC-0050 P0.2).
+    /// Applied *after* `io_uring_enter` so the real buffer stays valid.
+    #[cfg(test)]
+    inject_cqe: Option<i32>,
 }
 
 impl UringState {
@@ -24,7 +28,14 @@ impl UringState {
         Self {
             ring,
             next_tag: FIRST_USER_DATA,
+            #[cfg(test)]
+            inject_cqe: None,
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn inject_next_cqe(&mut self, res: i32) {
+        self.inject_cqe = Some(res);
     }
 
     /// `pwrite` at `offset`. Short writes (`res` as `u32` SQE length) are
@@ -124,7 +135,13 @@ unsafe fn submit_sqe(state: &mut UringState, entry: io_uring::squeue::Entry) -> 
             submit_complete_act(submit_ok, harvested.is_some()),
             harvested,
         ) {
-            (SubmitCompleteAct::UseHarvested, Some(res)) => return Ok(res),
+            (SubmitCompleteAct::UseHarvested, Some(mut res)) => {
+                #[cfg(test)]
+                if let Some(over) = state.inject_cqe.take() {
+                    res = over;
+                }
+                return Ok(res);
+            }
             (SubmitCompleteAct::UseHarvested, None) => {
                 unreachable!("cqe kernel: UseHarvested implies a CQE");
             }
