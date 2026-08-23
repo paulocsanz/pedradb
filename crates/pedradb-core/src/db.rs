@@ -2725,8 +2725,13 @@ impl<E: Env> Db<E> {
         Ok(())
     }
 
+    /// Ingest accounting for write paths outside `apply_batch` (TX staging).
+    pub(crate) fn note_ingested(&mut self, n: usize) {
+        self.bytes_ingested = self.bytes_ingested.saturating_add(n as u64);
+    }
+
     /// Maybe rewrite a large put value into the vlog; returns stored value bytes.
-    fn maybe_spill_large_value(&mut self, value: Bytes) -> Result<Bytes> {
+    pub(crate) fn maybe_spill_large_value(&mut self, value: Bytes) -> Result<Bytes> {
         let Some(threshold) = self.large_value_threshold else {
             // F188: inline values are stored escaped so an honest `VLG…`
             // payload can never be resolved as a pointer on read.
@@ -7708,6 +7713,45 @@ mod tests {
     use super::*;
     use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    /// F188 regression (TX path): values must reach the stored form through
+    /// the same escape/spill contract as `apply_batch`. A staged value whose
+    /// first byte is the `0x01` inline-escape marker used to be stored raw,
+    /// and every later read stripped that byte (length kept) — silent
+    /// corruption, one byte past the value (broke all dcs meta round-trips).
+    #[test]
+    fn tx_value_escape_marker_round_trips() {
+        let dir = temp_dir();
+        let mut db = Db::open_with(&dir, OpenOptions::default()).unwrap();
+        assert!(db.get(b"k").is_none());
+        db.put(b"k", b"v").unwrap();
+        assert_eq!(db.get(b"k"), Some(bytes::Bytes::from_static(b"v")));
+        assert!(db.get(b"t").is_none());
+        let mut tx = db.begin();
+        tx.put(b"t", b"tv").expect("tx put");
+        tx.commit().expect("tx commit");
+        assert_eq!(db.get(b"t"), Some(bytes::Bytes::from_static(b"tv")));
+        // dcs meta shape: 24 B starting with 0x01 (the escape marker).
+        let meta: bytes::Bytes = Bytes::from(vec![
+            1u8, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        ]);
+        db.put(b"m", meta.clone()).unwrap();
+        assert_eq!(
+            db.get(b"m").unwrap(),
+            meta,
+            "put path mangled the 0x01-leading value"
+        );
+        assert!(db.get(b"mt").is_none());
+        let mut tx = db.begin();
+        tx.put(b"mt", meta.clone()).expect("tx put meta");
+        tx.commit().expect("tx commit meta");
+        assert_eq!(
+            db.get(b"mt").expect("tx-path meta read"),
+            meta,
+            "tx path mangled the 0x01-leading value"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
 
     fn temp_dir() -> PathBuf {
         use std::sync::atomic::{AtomicU64, Ordering};

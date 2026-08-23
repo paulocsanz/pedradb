@@ -134,7 +134,23 @@ impl<'db, E: crate::env::Env> Transaction<'db, E> {
                 }
             };
             match stage {
-                Stage::Put(value) => records.push(WriteOp::put(seq, key, value)),
+                Stage::Put(value) => {
+                    // Same stored-form contract as the apply paths (F188):
+                    // escape/spill before the WriteOp. Staged raw, a value
+                    // starting with the `0x01` escape marker would be stored
+                    // unescaped and misread (one marker byte stripped) on
+                    // every later read — silent corruption (dcs meta keys).
+                    self.db.note_ingested(value.len());
+                    let stored = match self.db.maybe_spill_large_value(value) {
+                        Ok(v) => v,
+                        Err(e) => {
+                            self.db.restore_next_seq(seq_checkpoint);
+                            self.finished = true;
+                            return Err(e);
+                        }
+                    };
+                    records.push(WriteOp::put(seq, key, stored));
+                }
                 Stage::Delete => records.push(WriteOp::delete(seq, key)),
             }
         }
