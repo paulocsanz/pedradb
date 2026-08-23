@@ -119,6 +119,7 @@ fn open_live(path: &str) -> pedradb_core::Result<Db> {
     Db::open_with(
         path,
         OpenOptions {
+            wal_full_fsync: false,
             history: Default::default(),
             wal_recovery: Default::default(),
             sync: true,

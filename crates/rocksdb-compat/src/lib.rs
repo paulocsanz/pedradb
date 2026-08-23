@@ -187,6 +187,13 @@ pub struct Options {
     /// [`WalRecoveryMode::PointInTime`] (serve the prefix, report the
     /// discard). The kernel default is fail-closed.
     pub wal_recovery: WalRecoveryMode,
+    /// Every WAL barrier uses the platform's strongest data class — on
+    /// Darwin `fcntl(F_FULLFSYNC)` (the CMake-RocksDB `sync=true` class);
+    /// on Linux identical to the default. Default **false**: the
+    /// `fdatasync` class, matching `librocksdb-sys` builds (which map
+    /// `fdatasync`→`fsync` on Darwin and stay weak-class there). Power-cut
+    /// durability on Apple hardware needs this on (RFC-0036 addendum).
+    pub wal_full_fsync: bool,
 }
 
 /// WAL recovery mode at open (rust-rocksdb `WalRecoveryMode` subset).
@@ -211,6 +218,7 @@ impl fmt::Debug for Options {
             .field("auto_reclaim", &self.auto_reclaim)
             .field("auto_resume_transient", &self.auto_resume_transient)
             .field("wal_recovery", &self.wal_recovery)
+            .field("wal_full_fsync", &self.wal_full_fsync)
             .field(
                 "background_error_listener",
                 &self.background_error_listener.is_some(),
@@ -229,6 +237,7 @@ impl Default for Options {
             auto_resume_transient: true,
             background_error_listener: None,
             wal_recovery: WalRecoveryMode::PointInTime,
+            wal_full_fsync: false,
         }
     }
 }
@@ -295,6 +304,13 @@ impl Options {
     /// WAL `fdatasync` before Ok. Default `true` (G1). `false` = Rocks async.
     pub fn set_sync(&mut self, v: bool) -> &mut Self {
         self.sync = v;
+        self
+    }
+
+    /// Strongest-barrier WAL syncs (`F_FULLFSYNC` on Apple) for the whole
+    /// DB. See [`Options::wal_full_fsync`].
+    pub fn set_wal_full_fsync(&mut self, v: bool) -> &mut Self {
+        self.wal_full_fsync = v;
         self
     }
 
@@ -1559,6 +1575,7 @@ impl<E: Env> DB<E> {
         names.extend(non_default);
         let mut core_opts = pedradb_core::OpenOptions::default();
         core_opts.sync = opts.sync;
+        core_opts.wal_full_fsync = opts.wal_full_fsync;
         core_opts.wal_recovery = match opts.wal_recovery {
             WalRecoveryMode::PointInTime => pedradb_core::WalRecovery::PointInTime,
             WalRecoveryMode::FailClosed => pedradb_core::WalRecovery::FailClosed,

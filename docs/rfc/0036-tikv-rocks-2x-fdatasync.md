@@ -35,6 +35,46 @@
 
 Não é “menos durável que o TiKV”. É a **mesma** classe. `F_FULLFSYNC` continua disponível em `sync_all` para ficheiros publicados.
 
+## Addendum 2026-08-23 — classe de barreira no Darwin, verificada na fonte primária
+
+Pergunta: “Pedra `fdatasync` é menos durável que RocksDB no Mac?” Verificado
+em três camadas independentes contra o peer exato que linkamos
+(librorocksdb-sys 8.10):
+
+1. **Fonte** — `rocksdb/port/port_posix.h`: `#if defined(OS_MACOSX) … #define
+   fdatasync fsync`. No Darwin o próprio RocksDB reescreve `fdatasync` para
+   `fsync`.
+2. **Build** — `librocksdb-sys/build.rs` define `OS_MACOSX` mas nunca
+   `HAVE_FULLFSYNC`; só o `CMakeLists.txt` do RocksDB (~L555,
+   `check_cxx_symbol_exists(F_FULLFSYNC…)`) detecta e define. Sem a macro,
+   `PosixWritableFile::Sync()` cai no ramo `fdatasync(fd_)` → que o macro
+   virou `fsync(fd_)`.
+3. **Binário** — disassembly do `rocks-parity-bench-real` que medimos:
+   `PosixWritableFile::Sync` chama `_fsync`.
+
+No Darwin `fsync` e `fdatasync` são a mesma classe fraca (nenhum dos dois
+esvazia o cache do disco; só `fcntl(F_FULLFSYNC)` esvazia).
+
+**Veredicto por plataforma:**
+
+- **Linux (produção):** sem gap — `fdatasync` lá é barreira completa.
+- **vs peer oficial (`sync=false`):** sem gap — Pedra `fdatasync` > nada.
+- **vs RocksDB CMake `sync=true` no Darwin:** gap real de classe (o Ok deles
+  sobrevive a corte de energia com cache volátil; o nosso `fdatasync` não
+  garante).
+
+**Entrega (P2.1, era “report-only”):** knob opt-in `wal_full_fsync`
+(`pedradb_core::OpenOptions::wal_full_fsync`; compat
+`Options::wal_full_fsync` / `set_wal_full_fsync`). Ligado: toda barreira de
+WAL usa `EnvFile::sync_data_strong` — `File::sync_data` no Darwin =
+`F_FULLFSYNC`, a classe do CMake-RocksDB; no Linux idêntico ao default.
+Desligado (default): classe `fdatasync`, igual ao build crate do peer que
+medimos. Rotação de WAL e repair herdam o flag; `FailingFile` cerca a classe
+forte com o mesmo `OpClass::Sync` (fence inalterado). Custo aqui: ~5
+ms/commit — decisão de produto, não default silencioso. Teste:
+`wal_full_fsync_switches_barrier_class` (conta as classes de sync do
+ficheiro WAL: flag on ⇒ só forte; off ⇒ só fraca).
+
 ## Delivery slices (mandatory)
 
 ### P0 — must ship first
@@ -51,7 +91,7 @@ Não é “menos durável que o TiKV”. É a **mesma** classe. `F_FULLFSYNC` co
 
 ### P2 — later
 
-- [ ] **P2.1** Coluna FF continua report-only (opt-in `sync_all` no WAL) — status: `todo`
+- [x] **P2.1** Opt-in `wal_full_fsync` — `F_FULLFSYNC` no WAL quando on (addendum acima) — status: `done`
 
 ## Status (living — update with every PR)
 
@@ -63,7 +103,7 @@ Não é “menos durável que o TiKV”. É a **mesma** classe. `F_FULLFSYNC` co
 | P1.1 | p1 | gate 0.5 default Rocks | todo | — | 2026-08-16 |
 | P1.2 | p1 | CHANGELOG fora do commit | done | interval default 0 | 2026-08-16 |
 | P1.3 | p1 | L0-only compact + skip feed no auto-flush | done | apply 6.6× → 2.31× | 2026-08-16 |
-| P2.1 | p2 | FF report-only | todo | — | 2026-08-16 |
+| P2.1 | p2 | FF report-only → knob `wal_full_fsync` | done | addendum 2026-08-23 + teste de classe | 2026-08-23 |
 
 ## Acceptance Criteria
 

@@ -85,6 +85,7 @@ pub struct WorkloadReport {
 pub fn workload_feed_watermark(dir: impl AsRef<Path>) -> Result<WorkloadReport> {
     let dir = dir.as_ref();
     let opts = OpenOptions {
+        wal_full_fsync: false,
         history: Default::default(),
         wal_recovery: Default::default(),
         sync: true,

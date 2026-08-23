@@ -501,6 +501,7 @@ mod tests {
                 .open_db_with(
                     &dir,
                     OpenOptions {
+                        wal_full_fsync: false,
                         history: Default::default(),
                         wal_recovery: Default::default(),
                         sync: true,

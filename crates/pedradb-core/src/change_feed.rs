@@ -394,6 +394,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("pedradb-chlog-loss-{n}"));
         let _ = fs::remove_dir_all(&dir);
         let opts = OpenOptions {
+                        wal_full_fsync: false,
             history: Default::default(),
             wal_recovery: Default::default(),
             sync: true,
@@ -464,6 +465,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("pedradb-chlog-corrupt-{n}"));
         let _ = fs::remove_dir_all(&dir);
         let opts = OpenOptions {
+                        wal_full_fsync: false,
             history: Default::default(),
             wal_recovery: Default::default(),
             sync: true,

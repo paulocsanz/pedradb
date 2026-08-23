@@ -410,6 +410,13 @@ impl<F: EnvFile> EnvFile for FailingFile<F> {
         self.inner.sync_data()
     }
 
+    /// Same `OpClass::Sync` fault seam as [`Self::sync_data`] — the strong
+    /// class is a different syscall, not a different failure policy.
+    fn sync_data_strong(&mut self) -> io::Result<()> {
+        self.gate(OpClass::Sync)?;
+        self.inner.sync_data_strong()
+    }
+
     fn sync_all(&mut self) -> io::Result<()> {
         self.gate(OpClass::Sync)?;
         self.inner.sync_all()

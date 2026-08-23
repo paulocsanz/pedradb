@@ -436,6 +436,7 @@ mod tests {
 
     fn opts() -> OpenOptions {
         OpenOptions {
+            wal_full_fsync: false,
             history: Default::default(),
             wal_recovery: Default::default(),
             sync: true,

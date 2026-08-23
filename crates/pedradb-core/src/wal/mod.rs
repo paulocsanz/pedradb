@@ -51,6 +51,12 @@ pub struct Wal<F: EnvFile = <StdEnv as Env>::File> {
     /// reserved yet ([`WAL_PREALLOC_CHUNK`] semantics; best-effort — an env
     /// without support no-ops and the segment simply appends plain).
     prealloc_to: u64,
+    /// Every WAL barrier on this DB uses the platform's strongest data
+    /// class ([`EnvFile::sync_data_strong`]) — on Darwin
+    /// `fcntl(F_FULLFSYNC)`, the CMake-RocksDB `WriteOptions.sync` class.
+    /// Default false: `fdatasync` class, matching the linked
+    /// `librocksdb-sys` peer (RFC-0036 addendum; `OpenOptions::wal_full_fsync`).
+    full_fsync: bool,
 }
 
 impl Wal<<StdEnv as Env>::File> {
@@ -98,6 +104,7 @@ impl<F: EnvFile> Wal<F> {
             writer: WalWriter::new(file)?,
             logical: Vec::new(),
             prealloc_to: 0,
+            full_fsync: false,
         })
     }
 
@@ -111,6 +118,7 @@ impl<F: EnvFile> Wal<F> {
             writer: WalWriter::new(file)?,
             logical: Vec::new(),
             prealloc_to: 0,
+            full_fsync: false,
         })
     }
 
@@ -242,8 +250,26 @@ impl<F: EnvFile> Wal<F> {
     pub fn sync_data(&mut self) -> Result<()> {
         self.write_pending_frame()?;
         self.writer.flush()?;
-        self.writer.inner_mut().sync_data()?;
+        if self.full_fsync {
+            self.writer.inner_mut().sync_data_strong()?;
+        } else {
+            self.writer.inner_mut().sync_data()?;
+        }
         Ok(())
+    }
+
+    /// Switch the barrier class of every subsequent WAL sync on this handle
+    /// ([`Self::sync_data`]) to the platform's strongest data barrier.
+    /// WAL rotation (`Db`) carries the flag to the new segment. See
+    /// [`EnvFile::sync_data_strong`] for the class table (RFC-0036 addendum).
+    pub fn set_full_fsync(&mut self, on: bool) {
+        self.full_fsync = on;
+    }
+
+    /// Whether this WAL syncs with the strong barrier class.
+    #[must_use]
+    pub fn full_fsync(&self) -> bool {
+        self.full_fsync
     }
 
     /// Flush + `fsync` (data + metadata).

@@ -29,6 +29,7 @@ fn concurrent_db_write_group_stress_silent_wrong_zero() {
         ConcurrentDb::open_with(
             &dir,
             OpenOptions {
+                wal_full_fsync: false,
                 history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,

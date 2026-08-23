@@ -48,6 +48,7 @@ impl LeaseStore<StdEnv> {
         Self::open_with(
             path,
             OpenOptions {
+                wal_full_fsync: false,
                 history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
@@ -367,6 +368,7 @@ mod tests {
 
         let dir = temp_dir();
         let opts = OpenOptions {
+            wal_full_fsync: false,
             history: Default::default(),
             wal_recovery: Default::default(),
             sync: true,
