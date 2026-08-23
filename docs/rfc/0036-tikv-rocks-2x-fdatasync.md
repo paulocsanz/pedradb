@@ -70,8 +70,11 @@ WAL usa `EnvFile::sync_data_strong` — `File::sync_data` no Darwin =
 `F_FULLFSYNC`, a classe do CMake-RocksDB; no Linux idêntico ao default.
 Desligado (default): classe `fdatasync`, igual ao build crate do peer que
 medimos. Rotação de WAL e repair herdam o flag; `FailingFile` cerca a classe
-forte com o mesmo `OpClass::Sync` (fence inalterado). Custo aqui: ~5
-ms/commit — decisão de produto, não default silencioso. Teste:
+forte com o mesmo `OpClass::Sync` (fence inalterado). Custo aqui (probe
+`wal_full_fsync_cost_probe`, 200 commits/shape, release): p50
+**4,0 ms/commit** (~120× o default de 31–33 µs; ~250 commits/s teto
+single-client, ~4,0k puts/s no shape raftlog 16) — decisão de produto, não
+default silencioso. Teste:
 `wal_full_fsync_switches_barrier_class` (conta as classes de sync do
 ficheiro WAL: flag on ⇒ só forte; off ⇒ só fraca).
 
