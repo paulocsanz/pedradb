@@ -2963,7 +2963,16 @@ impl<E: Env> Db<E> {
             self.last_under_user_prefix_sst(snapshot, prefix)?
         };
         if latest {
-            self.last_prefix_cache.insert(prefix, out.clone());
+            // F207 (F198 shape): the fill runs under the read lock, which does
+            // not exclude `publish_sequence` (also read-locked). A publish
+            // landing mid-walk clears the cache between the entry check above
+            // and this insert; the pre-publish answer would then carry the
+            // post-clear generation and validate until the next write. Only
+            // fill while `published` still matches the seq the answer was
+            // computed at.
+            if self.published_seq.load(Ordering::Acquire) == snapshot {
+                self.last_prefix_cache.insert(prefix, out.clone());
+            }
         }
         Ok(out)
     }
