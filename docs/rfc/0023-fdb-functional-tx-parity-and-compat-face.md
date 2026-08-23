@@ -1,7 +1,7 @@
 # RFC-0023: FDB functional TX parity + dual face (native power + FDB plug-in)
 
 **Status:** done (P0–P2 thin-but-real proofs in-tree; not FDB field peer)  
-**Updated:** 2026-08-14  
+**Updated:** 2026-08-23  
 **Parents:** [RFC-0022](0022-montanha-fdb-functional-parity-and-layer-substrate.md) · [RFC-0017](0017-montanha-fdb-class-substrate.md)  
 **Related:** [`../fdb-limitations-analysis.md`](../fdb-limitations-analysis.md) · [`../montanha-vs-foundationdb.md`](../montanha-vs-foundationdb.md)
 
@@ -54,7 +54,7 @@ Do **not** regress Pedra embed strengths (no forced FDB 5s/100KB on local-only).
 | P1.3 | p1 | Range conflict subset | done | `tx_range_read_conflict` + `keys_in_range_at_after_reopen_sees_pedra` (Pedra scan) | 2026-08-14 |
 | P1.4 | p1 | Versioned watch | done | WatchEvent.version + tests | 2026-08-14 |
 | P2.1 | p2 | Cluster vs embed limits | done | §Limits below + `docs` pointer | 2026-08-14 |
-| P2.2 | p2 | fdb-compat + thin C ABI | done | `fdb_compat` + feature `c-api` (`fdb_c`, `include/montanha_fdb.h`) | 2026-08-14 |
+| P2.2 | p2 | fdb-compat + thin C ABI | done | `fdb_compat` + crate `pedradb-capi` (handle table, `cdylib`; store `forbid`) | 2026-08-23 |
 | P2.3 | p2 | Parallel commit residual | done | §Out of scope residual | 2026-08-14 |
 
 **Honesty:** not FDB field peer; not full fdbcli/C API; not Apple Simulation.
@@ -86,7 +86,7 @@ Do **not** regress Pedra embed strengths (no forced FDB 5s/100KB on local-only).
 
 ## 5. Out of scope / residual
 
-- Full FDB wire, fdbcli (C ABI is feature `c-api` subset only).  
+- Full FDB wire, fdbcli (C ABI is crate `pedradb-capi`, lab subset only).  
 - Parallel commit / unbundled proxies (P2.3 residual — future).  
 - Zero-downtime range-leader HA (orthogonal).  
 - Field pedigree / Simulation Apple-scale.

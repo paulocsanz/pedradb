@@ -41,17 +41,22 @@ Sync-labeled criterion baseline; not a field-parity claim. Optional in CI.
 
 ## Miri on unsafe crates (P2.5)
 
-- `pedradb-core`: `#![forbid(unsafe_code)]` — Miri not required.
-- `pedradb-io-uring`: contains platform unsafe; Miri gate:
+Gate: `scripts/miri-unsafe-islands.sh` (`MIRI_REQUIRED=1` in CI).
+
+| Island | What Miri runs | Residual |
+|--------|----------------|----------|
+| `pedradb-posix` | all tests, `MIRIFLAGS=-Zmiri-disable-isolation` (real `fdatasync` FFI) | — |
+| `pedradb-io-uring` | `cqe_kernel` (unique tag / harvest) | `IoUringEnv` ring syscalls need a Linux kernel |
+| `pedradb-capi` | `handles` (slot+generation) | `StoreCluster` C tests are FS + `!Send` |
+| `pedradb-core` | not required (`forbid(unsafe_code)`) | — |
 
 ```bash
-# residual-friendly: skip if miri not installed
-rustup component add miri 2>/dev/null || true
-cargo +nightly miri test -p pedradb-io-uring 2>/dev/null \
-  || echo "MIRI_RESIDUAL: install nightly+miri or skip on host without miri"
+bash scripts/miri-unsafe-islands.sh
+# CI:
+MIRI_REQUIRED=1 bash scripts/miri-unsafe-islands.sh
 ```
 
-Documented residual when miri/toolchain unavailable; no false green.
+Local host without nightly+miri prints `MIRI_RESIDUAL` and exits 0 (no false green in CI).
 
 ## Race job (P1.4)
 

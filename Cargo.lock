@@ -416,6 +416,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "pedradb-capi"
+version = "0.1.0"
+dependencies = [
+ "pedradb-store",
+]
+
+[[package]]
 name = "pedradb-cli"
 version = "0.1.0"
 dependencies = [
@@ -493,9 +500,9 @@ name = "pedradb-io-uring"
 version = "0.1.0"
 dependencies = [
  "io-uring",
- "libc",
  "parking_lot",
  "pedradb-core",
+ "pedradb-posix",
 ]
 
 [[package]]

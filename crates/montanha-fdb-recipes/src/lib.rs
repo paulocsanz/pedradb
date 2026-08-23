@@ -6,7 +6,7 @@
 //!
 //! Recipes: subspaces, tables, simple indexes, queues, multimaps, priority queues.
 
-#![deny(unsafe_code)]
+#![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
 mod children_kernel;

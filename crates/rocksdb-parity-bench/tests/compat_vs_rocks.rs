@@ -69,11 +69,7 @@ fn put_get_delete_overwrite_empty_match() {
     let (_keep, cp, rp) = tmp("basic");
     let c = open_compat(&cp);
     let r = open_rocks(&rp);
-    for (k, v) in [
-        (&b"a"[..], &b"1"[..]),
-        (b"b", b""),
-        (b"c", b"xxxxxxxx"),
-    ] {
+    for (k, v) in [(&b"a"[..], &b"1"[..]), (b"b", b""), (b"c", b"xxxxxxxx")] {
         c.put(k, v).unwrap();
         r.put(k, v).unwrap();
         assert_eq!(c.get(k).unwrap(), r.get(k).unwrap(), "get {k:?}");

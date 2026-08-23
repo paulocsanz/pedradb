@@ -163,7 +163,24 @@ fn open_pin_resume(src: &pedradb_core::Db, fold_dir: &std::path::Path) -> pedrad
 | Flush / MANIFEST / checkpoint with `sync=true` | **`Env::sync_dir` errors are propagated** (not discarded) |
 | `sync=false` dir fsync | Best-effort discard still OK |
 
-Full contract: rustdoc on `db` module. Audit fix backlog: [RFC-0015](rfc/0015-audit-pedradb-correctness-fixes.md).
+**Apple / Darwin:** G1 is libSystem `fdatasync`, **not** `fcntl(F_FULLFSYNC)`.
+Rust `File::sync_data` / `sync_all` on macOS *are* `F_FULLFSYNC` (~5 ms here);
+Pedra does not use them for WAL or directory publish (`StdEnv::sync_dir` →
+`pedradb_posix::sync_dir_fd` → the same `fdatasync`). On this host's RocksDB
+**as linked by the Rust crate** (`librocksdb-sys` 8.10), `WriteOptions.sync`
+is the same class: `port/port_posix.h` maps `#define fdatasync fsync` on
+Darwin and the cargo build never defines `HAVE_FULLFSYNC` (only CMake
+auto-detects it), so the WAL calls libSystem `fsync` — verified in the
+disassembly of the parity peer's `PosixWritableFile::Sync` (`bl _fsync`).
+**Official CMake builds of RocksDB on macOS are a stronger class**:
+`HAVE_FULLFSYNC` is defined and the WAL uses `fcntl(F_FULLFSYNC)`
+(`env/io_posix.cc`). On **Linux** `fdatasync` is a full barrier (the block
+layer flushes the drive cache) — same class as RocksDB, no gap on the
+production target (RFC-0036). On Darwin, a power cut can lose a
+WAL that already returned Ok if the drive cache still holds it. Windows
+`FlushFileBuffers` is a different, typically stronger, class.
+
+Full contract: rustdoc on `db` module. Audit fix backlog: [RFC-0015](rfc/0015-audit-pedradb-correctness-fixes.md). Unsafe/FFI inventory: [2026-08-22 audit](audits/2026-08-22-unsafe-and-ffi.md).
 
 ---
 

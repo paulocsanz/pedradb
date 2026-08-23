@@ -8,8 +8,8 @@ rust-version.workspace = true
 
 [dependencies]
 pedradb-core.workspace = true
+pedradb-posix.workspace = true
 parking_lot.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
 io-uring = "0.7"
-libc = "0.2"

@@ -31,6 +31,23 @@ impl CompatEngine {
         if std::env::var("PEDRA_PARITY_ASYNC").as_deref() == Ok("1") {
             opts.set_sync(false);
         }
+        // WiscKey / BlobDB: values ≥ threshold go to VALUES.vlog so the WAL
+        // holds a pointer (16 KiB blob is not copied into every WAL record).
+        // Default 4096 — 1 KiB SET/GET stay inline. `ROCKS_PARITY_MIN_BLOB=0`
+        // restores always-inline (A/B). Rocks default is blob files off;
+        // this is the Pedra large-value profile on the parity harness only.
+        match std::env::var("ROCKS_PARITY_MIN_BLOB") {
+            Ok(s) if s == "0" || s.eq_ignore_ascii_case("off") => {}
+            Ok(s) => {
+                let n = s.parse::<u64>().unwrap_or(4096);
+                opts.set_enable_blob_files(true);
+                opts.set_min_blob_size(n);
+            }
+            Err(_) => {
+                opts.set_enable_blob_files(true);
+                opts.set_min_blob_size(4096);
+            }
+        }
         // `ROCKS_PARITY_RETENTION` (RFC-0047 P0.3): pin the retention the
         // column measures, so the compat default flip (auto_reclaim=true)
         // never silently changes official numbers. `product` (default) =
@@ -40,7 +57,8 @@ impl CompatEngine {
         // storage profile (drop-in default): auto-compact GCs unpinned
         // obsolete versions, no archive. Legacy `ROCKS_PARITY_AUTO_RECLAIM=1`
         // == `rocks`.
-        let retention = std::env::var("ROCKS_PARITY_RETENTION").unwrap_or_else(|_| "product".into());
+        let retention =
+            std::env::var("ROCKS_PARITY_RETENTION").unwrap_or_else(|_| "product".into());
         let mut reclaim = match retention.as_str() {
             "product" => false,
             "rocks" => true,

@@ -15,6 +15,7 @@ members = [
     "crates/pedradb-http",
     "crates/pedradb-dst",
     "crates/pedradb-store",
+    "crates/pedradb-capi",
     "crates/pedradb-io-uring",
     "crates/pedradb-ops",
     "crates/pedradb-lease",
@@ -49,6 +50,7 @@ pedradb-stream = { path = "crates/pedradb-stream" }
 pedradb-http = { path = "crates/pedradb-http" }
 pedradb-dst = { path = "crates/pedradb-dst" }
 pedradb-store = { path = "crates/pedradb-store" }
+pedradb-capi = { path = "crates/pedradb-capi" }
 pedradb-io-uring = { path = "crates/pedradb-io-uring" }
 pedradb-ops = { path = "crates/pedradb-ops" }
 pedradb-lease = { path = "crates/pedradb-lease" }

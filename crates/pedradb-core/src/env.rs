@@ -174,10 +174,10 @@ pub trait Env: Clone {
 
     /// Optional kernel readahead / cache-drop for `[offset, offset+len)` of `path`.
     ///
-    /// Default is a **no-op**. Linux `posix_fadvise` lives in `pedradb-io-uring`
-    /// (`IoUringEnv`) so this crate stays `#![forbid(unsafe_code)]`. Sim / DST
-    /// envs inherit the no-op. Errors are best-effort — callers must not fail
-    /// the request on advise failure.
+    /// Default is a **no-op** (sim / DST). [`StdEnv`] implements Linux
+    /// `posix_fadvise` via `pedradb-posix` so this crate stays
+    /// `#![forbid(unsafe_code)]`. Errors are best-effort — callers must not
+    /// fail the request on advise failure.
     ///
     /// # Errors
     /// Underlying I/O when the platform implements the hint.
@@ -255,8 +255,17 @@ impl Env for StdEnv {
 
     fn sync_dir(&self, path: &Path) -> io::Result<()> {
         let dir = File::open(path)?;
-        // Same class as WAL/SST (RFC-0036): Apple File::sync_all is F_FULLFSYNC.
-        fdatasync_file(&dir)
+        // Same class as WAL G1 (RFC-0036): not Apple F_FULLFSYNC.
+        pedradb_posix::sync_dir_fd(&dir)
+    }
+
+    fn advise(&self, path: &Path, offset: u64, len: u64, kind: AdviseKind) -> io::Result<()> {
+        let f = File::open(path)?;
+        let hint = match kind {
+            AdviseKind::WillNeed => pedradb_posix::FileAdvise::WillNeed,
+            AdviseKind::DontNeed => pedradb_posix::FileAdvise::DontNeed,
+        };
+        pedradb_posix::advise_file(&f, offset, len, hint)
     }
 
     fn read_dir_names(&self, path: &Path) -> io::Result<Vec<String>> {
@@ -306,7 +315,7 @@ mod tests {
             f.write_all(&[0u8; 4096]).unwrap();
             f.sync_all().unwrap();
         }
-        // StdEnv is always a no-op (Linux fadvise is IoUringEnv).
+        // StdEnv: Linux posix_fadvise via pedradb-posix; no-op elsewhere.
         StdEnv.advise(&path, 0, 4096, AdviseKind::WillNeed).unwrap();
         StdEnv.advise(&path, 0, 4096, AdviseKind::DontNeed).unwrap();
         let _ = fs::remove_dir_all(&dir);

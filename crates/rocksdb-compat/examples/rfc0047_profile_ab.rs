@@ -109,8 +109,7 @@ fn recovery_print(root: &Path) {
     let suffix = db.get(b"k03").unwrap().is_some();
     println!(
         "recovery_report: prefix k02 visible={} suffix k03 discarded={}",
-        prefix,
-        !suffix
+        prefix, !suffix
     );
     drop(db);
     let _ = std::fs::remove_dir_all(&dir);

@@ -1,0 +1,12 @@
+=== add run1 ===
+guest_insns=10000031 guest_memops=4000008
+=== add run2 ===
+guest_insns=10000031 guest_memops=4000008
+=== copy1k run1 ===
+guest_insns=102564133 guest_memops=41001031
+=== copy1k run2 ===
+guest_insns=102564133 guest_memops=41001031
+=== copy16k run1 ===
+guest_insns=1638645579 guest_memops=655416391
+=== copy16k run2 ===
+guest_insns=1638645579 guest_memops=655416391

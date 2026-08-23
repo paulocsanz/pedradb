@@ -292,7 +292,7 @@ Não fecha (e não se mente):
 | P0.4 | p0 | buffer async 64 KiB | done | `ASYNC_WAL_BUFFER` | 2026-08-19 |
 | P0.5 | p0 | set_mc50 ≥ 5× async | doing | quieto: **2.02 vs peer são** — não fecha; 3.4–9.2 eram peer doente | 2026-08-20 |
 | P1.1 | p1 | pipeline ≥ 5× | **done** | **rearm7 quieta 3/3 ≥5 (5,10/6,04/5,45), med 5,67** — fecha | 2026-08-23 |
-| P1.2 | p1 | set / blob ≥ 5× | doing | rearm8: SET 4,40/4,68/4,48 3/3 <5 (straddle); blob 1,64/1,79/1,70 (era 0,99) — nenhum fecha | 2026-08-23 |
+| P1.2 | p1 | set / blob ≥ 5× | doing | BlobDB knobs + vlog 64 KiB async buffer shipped; A/B blob +22% vs inline, not 5× (`write()` of 16 KiB remains). rearm8: SET 4,40/4,68/4,48 3/3 <5 (straddle); blob 1,64/1,79/1,70 (era 0,99) — nenhum fecha | 2026-08-23 |
 | P1.3 | p1 | get ≥ 5× | **done** | **rearm8 quieta 3/3 ≥5 (5,465/6,074/5,710), med 5,58 — fecha** | 2026-08-23 |
 | P2.1 | p2 | quiet 3× | **done** | **árbitro @ load 9.4**: E 10.5 e scan 7.4 fecham; SET 5.41 longo; resto 0.94–3.8 | 2026-08-20 |
 | P2.2 | p2 | ycsb A–F ≥ 5× async | doing | rearm8: E 3/3 (2ª consecutiva, med 5,44); D 4,56–4,84 3/3 <5; A artifact r1 sumiu (med 4,48); B 3,33/C 4,23/F 3,80 | 2026-08-23 |

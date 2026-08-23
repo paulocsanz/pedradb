@@ -1,0 +1,2 @@
+{"probe":"hotpath","engine":"compat","async":true,"records":1024,"ops":2000000,"seconds":14,"phase":"blob"}
+{"phase":"blob","ops":140067,"payload":16384,"ns":14001583083,"ns_per_op":99963.5,"qps":10003.7}

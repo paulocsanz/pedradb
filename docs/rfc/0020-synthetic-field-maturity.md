@@ -1,7 +1,7 @@
 # RFC-0020: Synthetic field maturity (DST volume + product canaries + parallel proof lanes)
 
 **Status:** implemented (P0–P2)  
-**Updated:** 2026-08-13  
+**Updated:** 2026-08-23  
 **Parent:** [RFC-0001](0001-pedradb-high-level-spec.md)  
 **Builds on:** [RFC-0011](0011-env-fault-injection.md), [RFC-0015](0015-audit-pedradb-correctness-fixes.md), [RFC-0016](0016-pedradb-production-robustness.md), [RFC-0018](0018-fdb-method-parity-and-fault-coverage.md), [RFC-0019](0019-local-primitive-for-platform-and-scylla-need.md) (L1 done)  
 **Feeds:** [RFC-0017](0017-montanha-fdb-class-substrate.md) (cluster must *survive* this program), product layers (SQL / watch / stream)  
@@ -115,7 +115,7 @@ Run **eight parallel proof lanes**. Seams stay in `pedradb`; **volume and campai
 | cargo-fuzz / libFuzzer | parse/decode hang/crash | E |
 | proptest / arbitrary op streams | API contract | B, D |
 | loom / TSan | data races | F |
-| Miri | UB (unsafe crates only) | F (io_uring / store if any) |
+| Miri | UB (unsafe islands) | `scripts/miri-unsafe-islands.sh` (posix FFI + cqe_kernel + handles) |
 | criterion (sync-labeled) | p99 regression honesty | optional P2 |
 | cargo deny | supply chain | CI housekeeping |
 
@@ -181,7 +181,7 @@ Smallest program that **produces nightly adversary pressure** and **one product 
 - [x] **P2.2** Stretch soak config (≥100k ops) + weekly LEDGER triage checklist — status: `done` (`scripts/stretch_soak.sh`, `docs/synthetic-field-residuals.md`)  
 - [x] **P2.3** **Linux det_io / QEMU** residual recorded (entries exist; hard bar blocked without Linux/guest) — status: `done`  
 - [x] **P2.4** Honesty bench entry documented (`cargo bench -p pedradb-core --bench baseline`) — status: `done`  
-- [x] **P2.5** Miri residual documented (core forbid unsafe; io-uring optional) — status: `done`  
+- [x] **P2.5** Miri on unsafe islands — status: `done` (`scripts/miri-unsafe-islands.sh`: posix FFI + `cqe_kernel` + capi `handles`; CI `MIRI_REQUIRED=1`)  
 
 ---
 
@@ -205,7 +205,7 @@ Smallest program that **produces nightly adversary pressure** and **one product 
 | P2.2 | p2 | 100k soak + weekly LEDGER triage | done | stretch_soak.sh + residuals doc | 2026-08-13 |
 | P2.3 | p2 | Linux det_io hard bar | done | residual documented | 2026-08-13 |
 | P2.4 | p2 | Sync-labeled benches | done | criterion baseline entry | 2026-08-13 |
-| P2.5 | p2 | Miri on unsafe crates | done | residual documented | 2026-08-13 |
+| P2.5 | p2 | Miri on unsafe crates | done | `scripts/miri-unsafe-islands.sh` + supply-chain job | 2026-08-23 |
 
 ---
 

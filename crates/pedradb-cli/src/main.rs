@@ -1,5 +1,7 @@
 //! PedraDB CLI — demo, WAL smoke, backup / PITR / migrate.
 
+#![forbid(unsafe_code)]
+
 use pedradb_core::wal::Wal;
 use pedradb_core::{Db, OpenOptions};
 use pedradb_ops::{inspect_format, migrate_to_latest, restore_history_from_remote, BackupEngine};
@@ -219,11 +221,13 @@ fn archive_cmd(args: &[String]) -> std::process::ExitCode {
             match (|| -> Result<(), Box<dyn std::error::Error>> {
                 let tier = pedradb_core::history::RemoteTier::new(&args[1]);
                 match tier.latest_summary(&pedradb_core::StdEnv)? {
-                    Some(s) => println!(
+                    Some(s) => {
+                        println!(
                         "segments={} bytes={} seq_range={}-{} archive_floor={} next_generation={}",
                         s.segments, s.bytes, s.from_seq, s.through_seq, s.archive_floor,
                         s.next_generation
-                    ),
+                    )
+                    }
                     None => println!("no manifest — remote tier is empty"),
                 }
                 Ok(())
@@ -241,19 +245,11 @@ fn archive_cmd(args: &[String]) -> std::process::ExitCode {
                     Some(s) => Some(s.parse::<u64>()?),
                     None => None,
                 };
-                let rep = restore_history_from_remote(
-                    &pedradb_core::StdEnv,
-                    &args[1],
-                    &args[2],
-                    target,
-                )?;
+                let rep =
+                    restore_history_from_remote(&pedradb_core::StdEnv, &args[1], &args[2], target)?;
                 println!(
                     "restored {} segments / {} records -> {} last_sequence={} (target={:?})",
-                    rep.segments,
-                    rep.records,
-                    args[2],
-                    rep.last_sequence,
-                    target
+                    rep.segments, rep.records, args[2], rep.last_sequence, target
                 );
                 Ok(())
             })() {

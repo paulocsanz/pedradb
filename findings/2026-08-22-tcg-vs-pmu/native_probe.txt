@@ -1,0 +1,8 @@
+=== load 20:27  up 4 days, 18:32, 15 users, load averages: 13,53 12,01 13,01 ===
+=== hotpath all (async, 2M get/set) ===
+{"probe":"hotpath","engine":"compat","async":true,"records":1024,"ops":2000000,"seconds":0,"phase":"all"}
+{"phase":"get","ops":2000000,"payload":1000,"ns":61776417,"ns_per_op":30.9,"qps":32374813.8}
+{"phase":"set","ops":2000000,"payload":1000,"ns":5594464208,"ns_per_op":2797.2,"qps":357496.3}
+{"phase":"blob","ops":250000,"payload":16384,"ns":11269818750,"ns_per_op":45079.3,"qps":22183.1}
+{"phase":"pipe","ops":20000,"payload":1000,"ns":129924958,"ns_per_op":6496.2,"qps":153935.0}
+=== done load 20:27  up 4 days, 18:32, 15 users, load averages: 12,27 11,83 12,92 ===

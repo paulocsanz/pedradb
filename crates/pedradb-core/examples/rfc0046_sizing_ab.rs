@@ -39,7 +39,9 @@ fn dir_bytes_split(root: &Path) -> (u64, u64) {
     let mut hist = 0u64;
     let mut stack = vec![root.to_path_buf()];
     while let Some(p) = stack.pop() {
-        let Ok(rd) = std::fs::read_dir(&p) else { continue };
+        let Ok(rd) = std::fs::read_dir(&p) else {
+            continue;
+        };
         for e in rd.flatten() {
             let path = e.path();
             let Ok(ft) = e.file_type() else { continue };
@@ -134,7 +136,10 @@ fn main() {
     if only.is_empty() || only == "all" {
         run(
             "all",
-            HistoryOptions { horizon: HistoryHorizon::All, ..Default::default() },
+            HistoryOptions {
+                horizon: HistoryHorizon::All,
+                ..Default::default()
+            },
         );
     }
     if only.is_empty() || only == "window" {

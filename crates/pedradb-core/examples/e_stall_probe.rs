@@ -46,7 +46,9 @@ fn time_scan(db: &Db, i: usize, reps: usize) {
 }
 
 fn main() {
-    let dir = std::env::args().nth(1).expect("usage: e_stall_probe <db-dir>");
+    let dir = std::env::args()
+        .nth(1)
+        .expect("usage: e_stall_probe <db-dir>");
     let t = Instant::now();
     let mut db = Db::open(&dir).expect("open");
     println!("open+wal-replay: {:.1}s", t.elapsed().as_secs_f64());

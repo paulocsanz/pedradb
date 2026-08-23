@@ -22,3 +22,27 @@ jobs:
         with:
           command: check advisories
           arguments: --all-features
+
+  unsafe-surface:
+    name: unsafe allowlist (posix / io-uring / capi)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: unsafe-surface
+        run: bash scripts/unsafe-surface.sh
+
+  miri-unsafe-islands:
+    name: miri posix + cqe_kernel + handles
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: miri, rust-src
+      - name: cargo miri setup
+        run: cargo +nightly miri setup
+      - name: miri-unsafe-islands
+        env:
+          MIRI_REQUIRED: "1"
+        run: bash scripts/miri-unsafe-islands.sh

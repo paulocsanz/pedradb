@@ -118,6 +118,7 @@ the compat face. Divergences are deliberate and listed, not accidental.
 | Rocks auto-retries soft/retryable bg errors | `Options::auto_resume_transient` (default **`true`**, P1.2) | Auto-resume **only** for `FenceClass::Transient` (ENOSPC-like); `Persistent`/`Unknown` stay manual — never an untyped retry flag. |
 | `EventListener::on_background_error(reason)` | `Options::set_background_error_listener` (P2.1) | Fired once per fence within one worker poll tick, before auto-resume. Payload `BackgroundError { kind: Fenced, class, message }`; `reason` severity maps to `class` (Transient ≈ retryable/soft, rest ≈ hard). Default off. |
 | `flush_wal(true)` | no-op `Ok(())` | Pedra already `fdatasync`s before Ok (G1) — there is nothing extra to flush. |
+| `enable_blob_files` + `min_blob_size` (Rocks default **off**) | `Options::set_enable_blob_files` / `set_min_blob_size` | Wired to `OpenOptions.large_value_threshold` (`VALUES.vlog`). Default **off** on the drop-in (Rocks). The parity harness enables 4 KiB so `kvrocks_blob_set` (16 KiB) spills; 1 KiB SET stays inline. `set_blob_file_size` is numbered-blob rotate (Titan); default off. G1 fsyncs the vlog **once per commit** before the WAL pointer is durable; async `write()`s at 64 KiB, no `fdatasync` (same class as WAL). |
 
 Every other `set_*` builder (`set_use_fsync`, `increase_parallelism`,
 `set_max_background_jobs`, level-tuning, compression, bloom, …) is accepted

@@ -1,0 +1,13 @@
+=== paired SET A/B load= 9:27  up 5 days,  7:32, 14 users, load averages: 8,75 7,96 7,95 ===
+--- MIN_BLOB=0 ---
+{"probe":"hotpath","engine":"compat","async":true,"records":1024,"ops":2000000,"seconds":0,"phase":"set"}
+{"phase":"set","ops":2000000,"payload":1000,"ns":19464776667,"ns_per_op":9732.4,"qps":102749.7}
+--- min_blob=4096 ---
+{"probe":"hotpath","engine":"compat","async":true,"records":1024,"ops":2000000,"seconds":0,"phase":"set"}
+{"phase":"set","ops":2000000,"payload":1000,"ns":21185186833,"ns_per_op":10592.6,"qps":94405.6}
+=== paired GET A/B ===
+{"probe":"hotpath","engine":"compat","async":true,"records":1024,"ops":2000000,"seconds":0,"phase":"get"}
+{"phase":"get","ops":2000000,"payload":1000,"ns":59774958,"ns_per_op":29.9,"qps":33458827.4}
+{"probe":"hotpath","engine":"compat","async":true,"records":1024,"ops":2000000,"seconds":0,"phase":"get"}
+{"phase":"get","ops":2000000,"payload":1000,"ns":58864500,"ns_per_op":29.4,"qps":33976335.5}
+=== done  9:28  up 5 days,  7:32, 14 users, load averages: 9,05 8,14 8,01 ===

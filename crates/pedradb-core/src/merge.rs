@@ -786,10 +786,7 @@ mod tests {
             (ik(b"a", 3, ValueType::Value), Bytes::from_static(b"a3")),
             (ik(b"b", 2, ValueType::Value), Bytes::from_static(b"b2")),
             (ik(b"b", 4, ValueType::Deletion), Bytes::new()),
-            (
-                ik(b"c", 5, ValueType::Value),
-                Bytes::from_static(b"c5"),
-            ),
+            (ik(b"c", 5, ValueType::Value), Bytes::from_static(b"c5")),
             (
                 ik(b"c", 6, ValueType::RangeDeletion),
                 Bytes::from_static(b"z"),
@@ -811,8 +808,7 @@ mod tests {
             "partial latest_only must keep the range tombstone: {kinds:?}"
         );
         // Same for the snapshot-safe profile: lone point tombstone survives.
-        let out =
-            gc_compact_entries(entries, CompactGcOptions::for_oldest_snapshot(u64::MAX));
+        let out = gc_compact_entries(entries, CompactGcOptions::for_oldest_snapshot(u64::MAX));
         assert!(
             out.iter()
                 .any(|(k, _)| k.user_key.as_ref() == b"b" && k.kind == ValueType::Deletion),

@@ -30,7 +30,7 @@ const PAUSE: Duration = Duration::from_secs(3); // > window, ages the round
 const READS: usize = 40;
 const PHASES: usize = 3;
 const CAP: u64 = 2 * 1024 * 1024; // keeps ~2-3 newest segments locally; the
-// older uploaded segments drop to remote-only
+                                  // older uploaded segments drop to remote-only
 
 fn key(i: usize) -> Vec<u8> {
     format!("k{i:05}").into_bytes()
@@ -48,7 +48,9 @@ fn xorshift(mut x: u64) -> impl FnMut() -> u64 {
 fn dir_file_bytes(dir: &std::path::Path, ext: &str) -> (usize, u64) {
     let mut n = 0usize;
     let mut b = 0u64;
-    let Ok(rd) = fs::read_dir(dir) else { return (0, 0) };
+    let Ok(rd) = fs::read_dir(dir) else {
+        return (0, 0);
+    };
     for e in rd.flatten() {
         if e.path().extension().is_some_and(|x| x == ext) {
             n += 1;
