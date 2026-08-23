@@ -1,0 +1,329 @@
++/tmp/pedradb-rearm9/battery10.sh:10> date '+%F %T'
++/tmp/pedradb-rearm9/battery10.sh:10> echo 'battery pid=55611 start 2026-08-23 16:36:28'
++/tmp/pedradb-rearm9/battery10.sh:15> c=0 
++/tmp/pedradb-rearm9/battery10.sh:16> [ 0 -lt 2 ']'
++/tmp/pedradb-rearm9/battery10.sh:17> l=+/tmp/pedradb-rearm9/battery10.sh:17> load1
++load1:0> awk '{gsub(",", ".", $2); print $2}'
++load1:0> sysctl -n vm.loadavg
++/tmp/pedradb-rearm9/battery10.sh:17> l=7.24 
++/tmp/pedradb-rearm9/battery10.sh:18> awk -v 'l=7.24' 'BEGIN{exit !(l < 10)}'
++/tmp/pedradb-rearm9/battery10.sh:19> c=1 
++/tmp/pedradb-rearm9/battery10.sh:23> date +%H:%M:%S
++/tmp/pedradb-rearm9/battery10.sh:23> echo '16:36:28 gate pid=55611 load1=7.24 (consecutive 1/2)'
++/tmp/pedradb-rearm9/battery10.sh:24> [ 1 -lt 2 ']'
++/tmp/pedradb-rearm9/battery10.sh:24> sleep 30
++/tmp/pedradb-rearm9/battery10.sh:16> [ 1 -lt 2 ']'
++/tmp/pedradb-rearm9/battery10.sh:17> l=+/tmp/pedradb-rearm9/battery10.sh:17> load1
++load1:0> sysctl -n vm.loadavg
++load1:0> awk '{gsub(",", ".", $2); print $2}'
++/tmp/pedradb-rearm9/battery10.sh:17> l=6.69 
++/tmp/pedradb-rearm9/battery10.sh:18> awk -v 'l=6.69' 'BEGIN{exit !(l < 10)}'
++/tmp/pedradb-rearm9/battery10.sh:19> c=2 
++/tmp/pedradb-rearm9/battery10.sh:23> date +%H:%M:%S
++/tmp/pedradb-rearm9/battery10.sh:23> echo '16:36:58 gate pid=55611 load1=6.69 (consecutive 2/2)'
++/tmp/pedradb-rearm9/battery10.sh:24> [ 2 -lt 2 ']'
++/tmp/pedradb-rearm9/battery10.sh:16> [ 2 -lt 2 ']'
++/tmp/pedradb-rearm9/battery10.sh:26> date '+%Y-%m-%d %H:%M:%S'
++/tmp/pedradb-rearm9/battery10.sh:26> echo '=== rearm10 armed rfc-0054-gaps HEAD=d36f747 pid=55611 2026-08-23 16:36:58 ==='
++/tmp/pedradb-rearm9/battery10.sh:28> :
++/tmp/pedradb-rearm9/battery10.sh:29> WD=56172 
++/tmp/pedradb-rearm9/battery10.sh:30> trap 'kill $WD 2>/dev/null || true' EXIT
++/tmp/pedradb-rearm9/battery10.sh:32> r=1
++/tmp/pedradb-rearm9/battery10.sh:33> leg=async
++/tmp/pedradb-rearm9/battery10.sh:28> date +%H:%M:%S
++/tmp/pedradb-rearm9/battery10.sh:34> mkdir -p findings/2026-08-23-rearm10/r1/async
++/tmp/pedradb-rearm9/battery10.sh:28> load1
++/tmp/pedradb-rearm9/battery10.sh:35> case async (async)
++load1:0> sysctl -n vm.loadavg
++/tmp/pedradb-rearm9/battery10.sh:36> env 'PEDRA_PARITY_ASYNC=1' 'ROCKS_YCSB_OPS=2000' /tmp/pedradb-rearm9/rocks-parity-bench-real-p11 findings/2026-08-23-rearm10/r1/async compat
++load1:0> awk '{gsub(",", ".", $2); print $2}'
++/tmp/pedradb-rearm9/battery10.sh:28> echo '16:36:58 maxpoll load1=6.69'
++/tmp/pedradb-rearm9/battery10.sh:28> sleep 20
+[rocks-parity] engine=compat suites=ycsb,deps records=1024 ops=2000 payload=100 dist=uniform batch=32
+[rocks-parity] seed 1024 records in 0.0s
+[rocks-parity] ycsb_a done ops=2000 updates=1002 inserts=0 scans=0 errors=0
+[rocks-parity] ycsb_b done ops=2000 updates=108 inserts=0 scans=0 errors=0
+[rocks-parity] ycsb_c done ops=2000 updates=0 inserts=0 scans=0 errors=0
+[rocks-parity] ycsb_d done ops=2000 updates=0 inserts=104 scans=0 errors=0
+[rocks-parity] ycsb_e done ops=2000 updates=0 inserts=97 scans=1903 errors=0
+[rocks-parity] ycsb_f done ops=2000 updates=1048 inserts=0 scans=0 errors=0
+[rocks-parity] deps seed 1024×2 versions in 0.0s
+[rocks-parity] deps_apply_batch done txns=64000 errors=0
+[rocks-parity] deps_mvcc_latest done reads=2000 errors=0
+[rocks-parity] deps_scan done scans=2000 errors=0
+[rocks-parity] deps_raftlog enter mem_entries=267575
+[rocks-parity] deps_raftlog split p50 build=0.67µs batch=5.46µs mem_after=299575
+[rocks-parity] deps_raftlog done appends=32000 reads=250 errors=0
+[rocks-parity] deps_cache_overwrite done writes=2000 errors=0
+[rocks-parity] deps_lock_prewrite done txns=64000 errors=0
+[rocks-parity] wrote findings/2026-08-23-rearm10/r1/async/rocks_parity_bench.json (ts=1787513818)
++/tmp/pedradb-rearm9/battery10.sh:41> date +%H:%M:%S
++/tmp/pedradb-rearm9/battery10.sh:41> load1
++load1:0> sysctl -n vm.loadavg
++load1:0> awk '{gsub(",", ".", $2); print $2}'
++/tmp/pedradb-rearm9/battery10.sh:41> echo '16:36:58 r1 async done load1=6.79'
++/tmp/pedradb-rearm9/battery10.sh:33> leg=kvr
++/tmp/pedradb-rearm9/battery10.sh:34> mkdir -p findings/2026-08-23-rearm10/r1/kvr
++/tmp/pedradb-rearm9/battery10.sh:35> case kvr (async)
++/tmp/pedradb-rearm9/battery10.sh:35> case kvr (kvr)
++/tmp/pedradb-rearm9/battery10.sh:37> env 'PEDRA_PARITY_ASYNC=1' 'ROCKS_YCSB_OPS=2000' 'ROCKS_PARITY_SUITE=kvrocks' /tmp/pedradb-rearm9/rocks-parity-bench-real-p11 findings/2026-08-23-rearm10/r1/kvr compat
+[rocks-parity] engine=compat suites=kvrocks records=1024 ops=2000 payload=100 dist=uniform batch=32
+[rocks-parity] kvrocks_get done gets=2000 errors=0
+[rocks-parity] kvrocks_set done sets=2000 errors=0
+[rocks-parity] kvrocks_pipelined_set done puts=64000 errors=0
+[rocks-parity] kvrocks_scan done scans=2000 errors=0
+[rocks-parity] kvrocks_blob_set done sets=2000 errors=0
+[rocks-parity] kvrocks_set_mc50 done ops=100000 errors=0
+[rocks-parity] write_group submits=107280 queued=0 groups=107280 ops=107280 avg_group=1.00
+[rocks-parity] wrote findings/2026-08-23-rearm10/r1/kvr/rocks_parity_bench.json (ts=1787513818)
++/tmp/pedradb-rearm9/battery10.sh:41> date +%H:%M:%S
++/tmp/pedradb-rearm9/battery10.sh:41> load1
++load1:0> sysctl -n vm.loadavg
++load1:0> awk '{gsub(",", ".", $2); print $2}'
++/tmp/pedradb-rearm9/battery10.sh:41> echo '16:36:58 r1 kvr done load1=6.79'
++/tmp/pedradb-rearm9/battery10.sh:33> leg=rocks
++/tmp/pedradb-rearm9/battery10.sh:34> mkdir -p findings/2026-08-23-rearm10/r1/rocks
++/tmp/pedradb-rearm9/battery10.sh:35> case rocks (async)
++/tmp/pedradb-rearm9/battery10.sh:35> case rocks (kvr)
++/tmp/pedradb-rearm9/battery10.sh:35> case rocks (rocks)
++/tmp/pedradb-rearm9/battery10.sh:38> env 'ROCKS_PARITY_SYNC=0' 'ROCKS_YCSB_OPS=2000' /tmp/pedradb-rearm9/rocks-parity-bench-real-p11 findings/2026-08-23-rearm10/r1/rocks rocksdb
+[rocks-parity] engine=rocksdb suites=ycsb,deps records=1024 ops=2000 payload=100 dist=uniform batch=32
+[rocks-parity] seed 1024 records in 0.0s
+[rocks-parity] ycsb_a done ops=2000 updates=1002 inserts=0 scans=0 errors=0
+[rocks-parity] ycsb_b done ops=2000 updates=108 inserts=0 scans=0 errors=0
+[rocks-parity] ycsb_c done ops=2000 updates=0 inserts=0 scans=0 errors=0
+[rocks-parity] ycsb_d done ops=2000 updates=0 inserts=104 scans=0 errors=0
+[rocks-parity] ycsb_e done ops=2000 updates=0 inserts=97 scans=1903 errors=0
+[rocks-parity] ycsb_f done ops=2000 updates=1048 inserts=0 scans=0 errors=0
+[rocks-parity] deps seed 1024×2 versions in 0.0s
+[rocks-parity] deps_apply_batch done txns=64000 errors=0
+[rocks-parity] deps_mvcc_latest done reads=2000 errors=0
+[rocks-parity] deps_scan done scans=2000 errors=0
+[rocks-parity] deps_raftlog enter mem_entries=?
+[rocks-parity] deps_raftlog split p50 build=0.67µs batch=6.25µs mem_after=?
+[rocks-parity] deps_raftlog done appends=32000 reads=250 errors=0
+[rocks-parity] deps_cache_overwrite done writes=2000 errors=0
+[rocks-parity] deps_lock_prewrite done txns=64000 errors=0
+[rocks-parity] wrote findings/2026-08-23-rearm10/r1/rocks/rocks_parity_bench.json (ts=1787513819)
++/tmp/pedradb-rearm9/battery10.sh:41> date +%H:%M:%S
++/tmp/pedradb-rearm9/battery10.sh:41> load1
++load1:0> sysctl -n vm.loadavg
++load1:0> awk '{gsub(",", ".", $2); print $2}'
++/tmp/pedradb-rearm9/battery10.sh:41> echo '16:36:59 r1 rocks done load1=6.79'
++/tmp/pedradb-rearm9/battery10.sh:33> leg=rocks-kvr
++/tmp/pedradb-rearm9/battery10.sh:34> mkdir -p findings/2026-08-23-rearm10/r1/rocks-kvr
++/tmp/pedradb-rearm9/battery10.sh:35> case rocks-kvr (async)
++/tmp/pedradb-rearm9/battery10.sh:35> case rocks-kvr (kvr)
++/tmp/pedradb-rearm9/battery10.sh:35> case rocks-kvr (rocks)
++/tmp/pedradb-rearm9/battery10.sh:35> case rocks-kvr (rocks-kvr)
++/tmp/pedradb-rearm9/battery10.sh:39> env 'ROCKS_PARITY_SYNC=0' 'ROCKS_YCSB_OPS=2000' 'ROCKS_PARITY_SUITE=kvrocks' /tmp/pedradb-rearm9/rocks-parity-bench-real-p11 findings/2026-08-23-rearm10/r1/rocks-kvr rocksdb
+[rocks-parity] engine=rocksdb suites=kvrocks records=1024 ops=2000 payload=100 dist=uniform batch=32
+[rocks-parity] kvrocks_get done gets=2000 errors=0
+[rocks-parity] kvrocks_set done sets=2000 errors=0
+[rocks-parity] kvrocks_pipelined_set done puts=64000 errors=0
+[rocks-parity] kvrocks_scan done scans=2000 errors=0
+[rocks-parity] kvrocks_blob_set done sets=2000 errors=0
+[rocks-parity] kvrocks_set_mc50 done ops=100000 errors=0
+[rocks-parity] wrote findings/2026-08-23-rearm10/r1/rocks-kvr/rocks_parity_bench.json (ts=1787513820)
++/tmp/pedradb-rearm9/battery10.sh:41> date +%H:%M:%S
++/tmp/pedradb-rearm9/battery10.sh:41> load1
++load1:0> sysctl -n vm.loadavg
++load1:0> awk '{gsub(",", ".", $2); print $2}'
++/tmp/pedradb-rearm9/battery10.sh:41> echo '16:37:00 r1 rocks-kvr done load1=6.79'
++/tmp/pedradb-rearm9/battery10.sh:32> r=2
++/tmp/pedradb-rearm9/battery10.sh:33> leg=async
++/tmp/pedradb-rearm9/battery10.sh:34> mkdir -p findings/2026-08-23-rearm10/r2/async
++/tmp/pedradb-rearm9/battery10.sh:35> case async (async)
++/tmp/pedradb-rearm9/battery10.sh:36> env 'PEDRA_PARITY_ASYNC=1' 'ROCKS_YCSB_OPS=2000' /tmp/pedradb-rearm9/rocks-parity-bench-real-p11 findings/2026-08-23-rearm10/r2/async compat
+[rocks-parity] engine=compat suites=ycsb,deps records=1024 ops=2000 payload=100 dist=uniform batch=32
+[rocks-parity] seed 1024 records in 0.0s
+[rocks-parity] ycsb_a done ops=2000 updates=1002 inserts=0 scans=0 errors=0
+[rocks-parity] ycsb_b done ops=2000 updates=108 inserts=0 scans=0 errors=0
+[rocks-parity] ycsb_c done ops=2000 updates=0 inserts=0 scans=0 errors=0
+[rocks-parity] ycsb_d done ops=2000 updates=0 inserts=104 scans=0 errors=0
+[rocks-parity] ycsb_e done ops=2000 updates=0 inserts=97 scans=1903 errors=0
+[rocks-parity] ycsb_f done ops=2000 updates=1048 inserts=0 scans=0 errors=0
+[rocks-parity] deps seed 1024×2 versions in 0.0s
+[rocks-parity] deps_apply_batch done txns=64000 errors=0
+[rocks-parity] deps_mvcc_latest done reads=2000 errors=0
+[rocks-parity] deps_scan done scans=2000 errors=0
+[rocks-parity] deps_raftlog enter mem_entries=267575
+[rocks-parity] deps_raftlog split p50 build=0.67µs batch=5.42µs mem_after=299575
+[rocks-parity] deps_raftlog done appends=32000 reads=250 errors=0
+[rocks-parity] deps_cache_overwrite done writes=2000 errors=0
+[rocks-parity] deps_lock_prewrite done txns=64000 errors=0
+[rocks-parity] wrote findings/2026-08-23-rearm10/r2/async/rocks_parity_bench.json (ts=1787513820)
++/tmp/pedradb-rearm9/battery10.sh:41> date +%H:%M:%S
++/tmp/pedradb-rearm9/battery10.sh:41> load1
++load1:0> sysctl -n vm.loadavg
++load1:0> awk '{gsub(",", ".", $2); print $2}'
++/tmp/pedradb-rearm9/battery10.sh:41> echo '16:37:00 r2 async done load1=6.79'
++/tmp/pedradb-rearm9/battery10.sh:33> leg=kvr
++/tmp/pedradb-rearm9/battery10.sh:34> mkdir -p findings/2026-08-23-rearm10/r2/kvr
++/tmp/pedradb-rearm9/battery10.sh:35> case kvr (async)
++/tmp/pedradb-rearm9/battery10.sh:35> case kvr (kvr)
++/tmp/pedradb-rearm9/battery10.sh:37> env 'PEDRA_PARITY_ASYNC=1' 'ROCKS_YCSB_OPS=2000' 'ROCKS_PARITY_SUITE=kvrocks' /tmp/pedradb-rearm9/rocks-parity-bench-real-p11 findings/2026-08-23-rearm10/r2/kvr compat
+[rocks-parity] engine=compat suites=kvrocks records=1024 ops=2000 payload=100 dist=uniform batch=32
+[rocks-parity] kvrocks_get done gets=2000 errors=0
+[rocks-parity] kvrocks_set done sets=2000 errors=0
+[rocks-parity] kvrocks_pipelined_set done puts=64000 errors=0
+[rocks-parity] kvrocks_scan done scans=2000 errors=0
+[rocks-parity] kvrocks_blob_set done sets=2000 errors=0
+[rocks-parity] kvrocks_set_mc50 done ops=100000 errors=0
+[rocks-parity] write_group submits=107280 queued=0 groups=107280 ops=107280 avg_group=1.00
+[rocks-parity] wrote findings/2026-08-23-rearm10/r2/kvr/rocks_parity_bench.json (ts=1787513820)
++/tmp/pedradb-rearm9/battery10.sh:41> date +%H:%M:%S
++/tmp/pedradb-rearm9/battery10.sh:41> load1
++load1:0> sysctl -n vm.loadavg
++load1:0> awk '{gsub(",", ".", $2); print $2}'
++/tmp/pedradb-rearm9/battery10.sh:41> echo '16:37:00 r2 kvr done load1=6.79'
++/tmp/pedradb-rearm9/battery10.sh:33> leg=rocks
++/tmp/pedradb-rearm9/battery10.sh:34> mkdir -p findings/2026-08-23-rearm10/r2/rocks
++/tmp/pedradb-rearm9/battery10.sh:35> case rocks (async)
++/tmp/pedradb-rearm9/battery10.sh:35> case rocks (kvr)
++/tmp/pedradb-rearm9/battery10.sh:35> case rocks (rocks)
++/tmp/pedradb-rearm9/battery10.sh:38> env 'ROCKS_PARITY_SYNC=0' 'ROCKS_YCSB_OPS=2000' /tmp/pedradb-rearm9/rocks-parity-bench-real-p11 findings/2026-08-23-rearm10/r2/rocks rocksdb
+[rocks-parity] engine=rocksdb suites=ycsb,deps records=1024 ops=2000 payload=100 dist=uniform batch=32
+[rocks-parity] seed 1024 records in 0.0s
+[rocks-parity] ycsb_a done ops=2000 updates=1002 inserts=0 scans=0 errors=0
+[rocks-parity] ycsb_b done ops=2000 updates=108 inserts=0 scans=0 errors=0
+[rocks-parity] ycsb_c done ops=2000 updates=0 inserts=0 scans=0 errors=0
+[rocks-parity] ycsb_d done ops=2000 updates=0 inserts=104 scans=0 errors=0
+[rocks-parity] ycsb_e done ops=2000 updates=0 inserts=97 scans=1903 errors=0
+[rocks-parity] ycsb_f done ops=2000 updates=1048 inserts=0 scans=0 errors=0
+[rocks-parity] deps seed 1024×2 versions in 0.0s
+[rocks-parity] deps_apply_batch done txns=64000 errors=0
+[rocks-parity] deps_mvcc_latest done reads=2000 errors=0
+[rocks-parity] deps_scan done scans=2000 errors=0
+[rocks-parity] deps_raftlog enter mem_entries=?
+[rocks-parity] deps_raftlog split p50 build=0.67µs batch=7.79µs mem_after=?
+[rocks-parity] deps_raftlog done appends=32000 reads=250 errors=0
+[rocks-parity] deps_cache_overwrite done writes=2000 errors=0
+[rocks-parity] deps_lock_prewrite done txns=64000 errors=0
+[rocks-parity] wrote findings/2026-08-23-rearm10/r2/rocks/rocks_parity_bench.json (ts=1787513821)
++/tmp/pedradb-rearm9/battery10.sh:41> date +%H:%M:%S
++/tmp/pedradb-rearm9/battery10.sh:41> load1
++load1:0> sysctl -n vm.loadavg
++load1:0> awk '{gsub(",", ".", $2); print $2}'
++/tmp/pedradb-rearm9/battery10.sh:41> echo '16:37:01 r2 rocks done load1=6.79'
++/tmp/pedradb-rearm9/battery10.sh:33> leg=rocks-kvr
++/tmp/pedradb-rearm9/battery10.sh:34> mkdir -p findings/2026-08-23-rearm10/r2/rocks-kvr
++/tmp/pedradb-rearm9/battery10.sh:35> case rocks-kvr (async)
++/tmp/pedradb-rearm9/battery10.sh:35> case rocks-kvr (kvr)
++/tmp/pedradb-rearm9/battery10.sh:35> case rocks-kvr (rocks)
++/tmp/pedradb-rearm9/battery10.sh:35> case rocks-kvr (rocks-kvr)
++/tmp/pedradb-rearm9/battery10.sh:39> env 'ROCKS_PARITY_SYNC=0' 'ROCKS_YCSB_OPS=2000' 'ROCKS_PARITY_SUITE=kvrocks' /tmp/pedradb-rearm9/rocks-parity-bench-real-p11 findings/2026-08-23-rearm10/r2/rocks-kvr rocksdb
+[rocks-parity] engine=rocksdb suites=kvrocks records=1024 ops=2000 payload=100 dist=uniform batch=32
+[rocks-parity] kvrocks_get done gets=2000 errors=0
+[rocks-parity] kvrocks_set done sets=2000 errors=0
+[rocks-parity] kvrocks_pipelined_set done puts=64000 errors=0
+[rocks-parity] kvrocks_scan done scans=2000 errors=0
+[rocks-parity] kvrocks_blob_set done sets=2000 errors=0
+[rocks-parity] kvrocks_set_mc50 done ops=100000 errors=0
+[rocks-parity] wrote findings/2026-08-23-rearm10/r2/rocks-kvr/rocks_parity_bench.json (ts=1787513821)
++/tmp/pedradb-rearm9/battery10.sh:41> date +%H:%M:%S
++/tmp/pedradb-rearm9/battery10.sh:41> load1
++load1:0> sysctl -n vm.loadavg
++load1:0> awk '{gsub(",", ".", $2); print $2}'
++/tmp/pedradb-rearm9/battery10.sh:41> echo '16:37:01 r2 rocks-kvr done load1=6.79'
++/tmp/pedradb-rearm9/battery10.sh:32> r=3
++/tmp/pedradb-rearm9/battery10.sh:33> leg=async
++/tmp/pedradb-rearm9/battery10.sh:34> mkdir -p findings/2026-08-23-rearm10/r3/async
++/tmp/pedradb-rearm9/battery10.sh:35> case async (async)
++/tmp/pedradb-rearm9/battery10.sh:36> env 'PEDRA_PARITY_ASYNC=1' 'ROCKS_YCSB_OPS=2000' /tmp/pedradb-rearm9/rocks-parity-bench-real-p11 findings/2026-08-23-rearm10/r3/async compat
+[rocks-parity] engine=compat suites=ycsb,deps records=1024 ops=2000 payload=100 dist=uniform batch=32
+[rocks-parity] seed 1024 records in 0.0s
+[rocks-parity] ycsb_a done ops=2000 updates=1002 inserts=0 scans=0 errors=0
+[rocks-parity] ycsb_b done ops=2000 updates=108 inserts=0 scans=0 errors=0
+[rocks-parity] ycsb_c done ops=2000 updates=0 inserts=0 scans=0 errors=0
+[rocks-parity] ycsb_d done ops=2000 updates=0 inserts=104 scans=0 errors=0
+[rocks-parity] ycsb_e done ops=2000 updates=0 inserts=97 scans=1903 errors=0
+[rocks-parity] ycsb_f done ops=2000 updates=1048 inserts=0 scans=0 errors=0
+[rocks-parity] deps seed 1024×2 versions in 0.0s
+[rocks-parity] deps_apply_batch done txns=64000 errors=0
+[rocks-parity] deps_mvcc_latest done reads=2000 errors=0
+[rocks-parity] deps_scan done scans=2000 errors=0
+[rocks-parity] deps_raftlog enter mem_entries=267575
+[rocks-parity] deps_raftlog split p50 build=0.67µs batch=5.50µs mem_after=299575
+[rocks-parity] deps_raftlog done appends=32000 reads=250 errors=0
+[rocks-parity] deps_cache_overwrite done writes=2000 errors=0
+[rocks-parity] deps_lock_prewrite done txns=64000 errors=0
+[rocks-parity] wrote findings/2026-08-23-rearm10/r3/async/rocks_parity_bench.json (ts=1787513822)
++/tmp/pedradb-rearm9/battery10.sh:41> date +%H:%M:%S
++/tmp/pedradb-rearm9/battery10.sh:41> load1
++load1:0> sysctl -n vm.loadavg
++load1:0> awk '{gsub(",", ".", $2); print $2}'
++/tmp/pedradb-rearm9/battery10.sh:41> echo '16:37:02 r3 async done load1=6.79'
++/tmp/pedradb-rearm9/battery10.sh:33> leg=kvr
++/tmp/pedradb-rearm9/battery10.sh:34> mkdir -p findings/2026-08-23-rearm10/r3/kvr
++/tmp/pedradb-rearm9/battery10.sh:35> case kvr (async)
++/tmp/pedradb-rearm9/battery10.sh:35> case kvr (kvr)
++/tmp/pedradb-rearm9/battery10.sh:37> env 'PEDRA_PARITY_ASYNC=1' 'ROCKS_YCSB_OPS=2000' 'ROCKS_PARITY_SUITE=kvrocks' /tmp/pedradb-rearm9/rocks-parity-bench-real-p11 findings/2026-08-23-rearm10/r3/kvr compat
+[rocks-parity] engine=compat suites=kvrocks records=1024 ops=2000 payload=100 dist=uniform batch=32
+[rocks-parity] kvrocks_get done gets=2000 errors=0
+[rocks-parity] kvrocks_set done sets=2000 errors=0
+[rocks-parity] kvrocks_pipelined_set done puts=64000 errors=0
+[rocks-parity] kvrocks_scan done scans=2000 errors=0
+[rocks-parity] kvrocks_blob_set done sets=2000 errors=0
+[rocks-parity] kvrocks_set_mc50 done ops=100000 errors=0
+[rocks-parity] write_group submits=107280 queued=0 groups=107280 ops=107280 avg_group=1.00
+[rocks-parity] wrote findings/2026-08-23-rearm10/r3/kvr/rocks_parity_bench.json (ts=1787513822)
++/tmp/pedradb-rearm9/battery10.sh:41> date +%H:%M:%S
++/tmp/pedradb-rearm9/battery10.sh:41> load1
++load1:0> sysctl -n vm.loadavg
++load1:0> awk '{gsub(",", ".", $2); print $2}'
++/tmp/pedradb-rearm9/battery10.sh:41> echo '16:37:02 r3 kvr done load1=6.79'
++/tmp/pedradb-rearm9/battery10.sh:33> leg=rocks
++/tmp/pedradb-rearm9/battery10.sh:34> mkdir -p findings/2026-08-23-rearm10/r3/rocks
++/tmp/pedradb-rearm9/battery10.sh:35> case rocks (async)
++/tmp/pedradb-rearm9/battery10.sh:35> case rocks (kvr)
++/tmp/pedradb-rearm9/battery10.sh:35> case rocks (rocks)
++/tmp/pedradb-rearm9/battery10.sh:38> env 'ROCKS_PARITY_SYNC=0' 'ROCKS_YCSB_OPS=2000' /tmp/pedradb-rearm9/rocks-parity-bench-real-p11 findings/2026-08-23-rearm10/r3/rocks rocksdb
+[rocks-parity] engine=rocksdb suites=ycsb,deps records=1024 ops=2000 payload=100 dist=uniform batch=32
+[rocks-parity] seed 1024 records in 0.0s
+[rocks-parity] ycsb_a done ops=2000 updates=1002 inserts=0 scans=0 errors=0
+[rocks-parity] ycsb_b done ops=2000 updates=108 inserts=0 scans=0 errors=0
+[rocks-parity] ycsb_c done ops=2000 updates=0 inserts=0 scans=0 errors=0
+[rocks-parity] ycsb_d done ops=2000 updates=0 inserts=104 scans=0 errors=0
+[rocks-parity] ycsb_e done ops=2000 updates=0 inserts=97 scans=1903 errors=0
+[rocks-parity] ycsb_f done ops=2000 updates=1048 inserts=0 scans=0 errors=0
+[rocks-parity] deps seed 1024×2 versions in 0.0s
+[rocks-parity] deps_apply_batch done txns=64000 errors=0
+[rocks-parity] deps_mvcc_latest done reads=2000 errors=0
+[rocks-parity] deps_scan done scans=2000 errors=0
+[rocks-parity] deps_raftlog enter mem_entries=?
+[rocks-parity] deps_raftlog split p50 build=0.67µs batch=6.29µs mem_after=?
+[rocks-parity] deps_raftlog done appends=32000 reads=250 errors=0
+[rocks-parity] deps_cache_overwrite done writes=2000 errors=0
+[rocks-parity] deps_lock_prewrite done txns=64000 errors=0
+[rocks-parity] wrote findings/2026-08-23-rearm10/r3/rocks/rocks_parity_bench.json (ts=1787513822)
++/tmp/pedradb-rearm9/battery10.sh:41> date +%H:%M:%S
++/tmp/pedradb-rearm9/battery10.sh:41> load1
++load1:0> sysctl -n vm.loadavg
++load1:0> awk '{gsub(",", ".", $2); print $2}'
++/tmp/pedradb-rearm9/battery10.sh:41> echo '16:37:02 r3 rocks done load1=6.79'
++/tmp/pedradb-rearm9/battery10.sh:33> leg=rocks-kvr
++/tmp/pedradb-rearm9/battery10.sh:34> mkdir -p findings/2026-08-23-rearm10/r3/rocks-kvr
++/tmp/pedradb-rearm9/battery10.sh:35> case rocks-kvr (async)
++/tmp/pedradb-rearm9/battery10.sh:35> case rocks-kvr (kvr)
++/tmp/pedradb-rearm9/battery10.sh:35> case rocks-kvr (rocks)
++/tmp/pedradb-rearm9/battery10.sh:35> case rocks-kvr (rocks-kvr)
++/tmp/pedradb-rearm9/battery10.sh:39> env 'ROCKS_PARITY_SYNC=0' 'ROCKS_YCSB_OPS=2000' 'ROCKS_PARITY_SUITE=kvrocks' /tmp/pedradb-rearm9/rocks-parity-bench-real-p11 findings/2026-08-23-rearm10/r3/rocks-kvr rocksdb
+[rocks-parity] engine=rocksdb suites=kvrocks records=1024 ops=2000 payload=100 dist=uniform batch=32
+[rocks-parity] kvrocks_get done gets=2000 errors=0
+[rocks-parity] kvrocks_set done sets=2000 errors=0
+[rocks-parity] kvrocks_pipelined_set done puts=64000 errors=0
+[rocks-parity] kvrocks_scan done scans=2000 errors=0
+[rocks-parity] kvrocks_blob_set done sets=2000 errors=0
+[rocks-parity] kvrocks_set_mc50 done ops=100000 errors=0
+[rocks-parity] wrote findings/2026-08-23-rearm10/r3/rocks-kvr/rocks_parity_bench.json (ts=1787513823)
++/tmp/pedradb-rearm9/battery10.sh:41> date +%H:%M:%S
++/tmp/pedradb-rearm9/battery10.sh:41> load1
++load1:0> sysctl -n vm.loadavg
++load1:0> awk '{gsub(",", ".", $2); print $2}'
++/tmp/pedradb-rearm9/battery10.sh:41> echo '16:37:03 r3 rocks-kvr done load1=8.41'
++/tmp/pedradb-rearm9/battery10.sh:44> kill 56172
++/tmp/pedradb-rearm9/battery10.sh:45> date +%H:%M:%S
++/tmp/pedradb-rearm9/battery10.sh:45> echo 'BATTERY_DONE 16:37:03'
++/tmp/pedradb-rearm9/battery10.sh:46> kill 56172
++/tmp/pedradb-rearm9/battery10.sh:46> true

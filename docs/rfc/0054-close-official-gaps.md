@@ -6,7 +6,8 @@
 [0044](0044-async-class-5x-rocks.md) (coluna async 5×),
 [AGENTS.md](../../AGENTS.md) (peer = `sync=false`)
 **Evidence:** [`findings/2026-08-23-rearm8/`](../../findings/2026-08-23-rearm8/),
-[`findings/2026-08-23-rearm9/`](../../findings/2026-08-23-rearm9/) (P0.2)
+[`findings/2026-08-23-rearm9/`](../../findings/2026-08-23-rearm9/) (P0.2),
+[`findings/2026-08-23-rearm10/`](../../findings/2026-08-23-rearm10/) (P1.1)
 
 ## Background
 
@@ -25,9 +26,9 @@
 | kvrocks_get / pipelined_set / ycsb_e | 5,58 / 5,20 / 5,44 | já fechado (0044) |
 | A/D/SET/C/B/F / lock / mc50 | 4,6 … 2,12 | já ≥2 |
 | **deps_apply_batch** | 1,93 (rearm9) | P1.4: 3/3 ≥2 |
-| deps_mvcc_latest | 1,41 (rearm9) | P1.1 ≥2 |
+| deps_mvcc_latest | ~~1,41~~ → **2,53 (3/3, rearm10)** | **P1.1 fechado** |
 | kvrocks_blob_set | 1,25 (peer 31,6k→90,2k no rearm9) | P1.2 ≥2 |
-| deps_scan | 1,80 (rearm9) | P1.3 ≥2 |
+| deps_scan | 1,89 (rearm10) | P1.3 ≥2 |
 | **deps_raftlog** | ~~0,59~~ → **1,05 (3/3, rearm9)** | **P0.2 fechado** |
 
 - `deps_raftlog` já não é cauda: stall APFS (F_PREALLOCATE) eliminado;
@@ -74,11 +75,18 @@
 
 ### P1 — os outros ≥2× + apply 3/3
 
-- [ ] **P1.1** `deps_mvcc_latest` ≥2× (medir get-at / prefix cache / CF
-      routing; não chutar memtable) — status: `todo`
+- [x] **P1.1** `deps_mvcc_latest` ≥2× — status: `done`
+      (rearm10 3/3: **2,18/2,53/2,98**. `last_visible_under_prefix`
+      coletava TODAS as versões do usuário num Vec por chamada — usuário
+      quente do zipf com dezenas de versões do apply. Agora max-of-maxes
+      reverso por conjunto (map + shards do tail_idx), sem materializar;
+      probe `last` 1649→400 ns. Era 1,41 no rearm9)
 - [ ] **P1.2** `kvrocks_blob_set` ≥2× (vlog spill vs inline; peer máx 11–14 ms
       é dele) — status: `todo`
-- [ ] **P1.3** `deps_scan` ≥2× (L0 / count-cache / janela) — status: `todo`
+- [ ] **P1.3** `deps_scan` ≥2× — status: `partial`
+      (step_user O(1) no cursor de count: 1,80→**1,89** (1,65/1,96/1,89,
+      rearm10); TLS absolve ~45% das scans (874/2000 ao kernel). Falta
+      cortar o caminho dos 874)
 - [ ] **P1.4** `deps_apply_batch` 3/3 ≥2 numa bateria quieta — status: `todo`
 
 ### P2 — polish
@@ -95,10 +103,10 @@
 | P0.0 | p0 | drop-in sync=false | done | este change | 2026-08-23 |
 | P0.1 | p0 | raftlog_submit_probe | done | example (core 3,79µs / shape 5,50µs) | 2026-08-23 |
 | P0.2 | p0 | raftlog >1× quieto | done | rearm9 3/3 (1,04 med); publish=count-cache tax; F219 | 2026-08-23 |
-| P1.1 | p1 | mvcc_latest ≥2× | todo | — | 2026-08-23 |
-| P1.2 | p1 | blob_set ≥2× | todo | — | 2026-08-23 |
-| P1.3 | p1 | deps_scan ≥2× | todo | — | 2026-08-23 |
-| P1.4 | p1 | apply 3/3 ≥2 | todo | — | 2026-08-23 |
+| P1.1 | p1 | mvcc_latest ≥2× | done | rearm10 3/3 (2,18/2,53/2,98) reverse-walk | 2026-08-23 |
+| P1.2 | p1 | blob_set ≥2× | todo | 1,23/1,27/1,31 (rearm10, banda) | 2026-08-23 |
+| P1.3 | p1 | deps_scan ≥2× | partial | 1,89 (step_user +10%) | 2026-08-23 |
+| P1.4 | p1 | apply 3/3 ≥2 | todo | 1,82/1,93/1,84 (rearm10) | 2026-08-23 |
 | P2.1 | p2 | OCC WriteOptions.sync | todo | — | 2026-08-23 |
 | P2.2 | p2 | floor 2.0 gated | todo | — | 2026-08-23 |
 

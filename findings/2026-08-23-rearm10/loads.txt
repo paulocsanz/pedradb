@@ -1,0 +1,15 @@
+battery pid=55611 start 2026-08-23 16:36:28
+=== rearm10 armed rfc-0054-gaps HEAD=d36f747 pid=55611 2026-08-23 16:36:58 ===
+16:36:58 r1 async done load1=6.79
+16:36:58 r1 kvr done load1=6.79
+16:36:59 r1 rocks done load1=6.79
+16:37:00 r1 rocks-kvr done load1=6.79
+16:37:00 r2 async done load1=6.79
+16:37:00 r2 kvr done load1=6.79
+16:37:01 r2 rocks done load1=6.79
+16:37:01 r2 rocks-kvr done load1=6.79
+16:37:02 r3 async done load1=6.79
+16:37:02 r3 kvr done load1=6.79
+16:37:02 r3 rocks done load1=6.79
+16:37:03 r3 rocks-kvr done load1=8.41
+BATTERY_DONE 16:37:03
