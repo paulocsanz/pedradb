@@ -131,8 +131,12 @@ Não fecha (e não se mente):
 
 ### P1 — o resto do kvrocks ≥ 5×
 
-- [ ] **P1.1** `kvrocks_pipelined_set` ≥ 5.0 — status: `doing`
-      (reaberto pelo árbitro quieto: **straddle 4.22–5.86** entre
+- [x] **P1.1** `kvrocks_pipelined_set` ≥ 5.0 — status: `done`
+      (**FECHA rearm7 quieta 2026-08-23, `findings/2026-08-22-rearm7/`,
+      HEAD d343044, gate load<10 ×2, pernas 8–9**: rounds
+      **5,10/6,04/5,45 — 3/3 ≥5**, med 5,67; peer 48/40/43 k estável.
+      Fecha pelo padrão 3/3-em-toda-condição. Histórico:
+      reaberto pelo árbitro quieto: **straddle 4.22–5.86** entre
       janelas — 11.3 @ 64 KiB e 5.86 @ 2M load ~100, mas 4.22 @ 2M
       quieto; p50 4.0 µs vs 23 µs segue ~6× melhor. Não é ≥5 estável.
       **Renovação 2026-08-22 (P0.4 clean, 3× longa quieta, árvore
@@ -146,7 +150,21 @@ Não fecha (e não se mente):
       inalterado pelo fix P1.3 (esperado — batch writes); o alvo
       continua straddle na linha)
 - [ ] **P1.2** `kvrocks_set` / `kvrocks_blob_set` ≥ 5.0 — status: `doing`
-      (SET **cruza na quieta longa: 5.41** @ 2M quieto, p50 0.4 µs vs
+      (**2026-08-23 WiscKey wiring:** `set_enable_blob_files` /
+      `set_min_blob_size` no longer no-ops — spill ≥4 KiB to `VALUES.vlog`.
+      Vlog `append` was `sync_all` per record (would tank async); now 64 KiB
+      `write()` buffer, G1 one fsync/commit before the WAL pointer, async
+      no `fdatasync`. Parity harness default `min_blob=4096`
+      (`ROCKS_PARITY_MIN_BLOB=0` restores inline). A/B dirty
+      `findings/2026-08-22-tcg-vs-pmu/blob_ab.txt`: blob 16 KiB
+      **9.1 k → 11.2 k qps (+22%)**; GET 1 KiB unchanged (~33 M); SET
+      paired A/B 103 k vs 94 k (disk dirty, not a spill — 1 KiB < 4 KiB).
+      **Does not close 5×**: `sample` still shows `write()` of 16 KiB
+      dominates; vlog moves the payload out of the WAL record, not off
+      disk. Blob 5× remains physics unless Rocks BlobDB is the peer.)
+      (**rearm7 quieta 2026-08-23**: SET **5,20/5,74/5,42 — 2/3, med 5,14**
+      (r1 4,20); blob **0,99 med** vs peer são. SET na linha, blob longe.
+      SET **cruza na quieta longa: 5.41** @ 2M quieto, p50 0.4 µs vs
       2.5 µs; curta 4.61. Blob **2.02** quieto — longe; copies de 16 KB
       dominam. **Renovação 2026-08-22 (P0.4 clean, 3× longa quieta)**:
       SET **5,45/5,18/16,47 — 3/3 ≥5, mediana 5,45** (o 16,47 é run
@@ -156,7 +174,10 @@ Não fecha (e não se mente):
       (compat 1,97M→1,61M, peer plano — assinatura de load; a quieta
       re-armada decide), rounds 4,44/4,56/4,60; blob 1,47–1,80)
 - [ ] **P1.3** `kvrocks_get` ≥ 5.0 — status: `doing`
-      (straddle: 20 M ops 4.4–5.5; 2 M load ~100 **5.50**; 2 M quieto
+      (**rearm7 quieta 2026-08-23**: **5,96/6,06/4,86 — med 5,96, 2/3** (r3
+      compat 15,4 M→12,1 M, peer estável); pelo padrão 3/3 **não fecha**,
+      mas é a 1ª bateria quieta com mediana ≥5 — próxima bateria decide.
+      Histórico: straddle: 20 M ops 4.4–5.5; 2 M load ~100 **5.50**; 2 M quieto
       **4.61** com Rocks são a 2.5 M — p50 0.0 µs vs 0.4 µs. Não é ≥5
       estável; janela curta 1.61. **Renovação 2026-08-22 (P0.4 clean,
       3× longa quieta, árvore commitada)**: 4,74/4,71/4,71 — 3/3
@@ -199,7 +220,13 @@ Não fecha (e não se mente):
       2.9–3.8; `deps_lock_prewrite` 0.94. Piso ≥5 para todos **não**
       alcançado — registrado sem maquiagem em `rfc0044-p2/quiet/`)
 - [ ] **P2.2** ycsb A–F ≥ 5.0 na coluna async — status: `doing`
-      (quieto 3×: **E fecha 10.5 med (3/3 ≥5 em toda condição) — P2.2
+      (**rearm7 quieta 2026-08-23**: **E re-confirma 5,08/5,75/5,38 — 3/3**;
+      D **5,19/5,42/4,72 med 5,19 (2/3)**; A r2/r3 **5,13/4,93** com r1
+      =0,43 artifact (stall 3,1 ms *dentro* da perna — ver
+      `findings/2026-08-22-rearm7/`: extensão de extent APFS a cada 8 MiB
+      de WAL, mesmo mecanismo do deps_raftlog 0,35×; fix pré-alocação WAL
+      em curso); B 3,91 / C 4,33 / F 3,69. Histórico:
+      quieto 3×: **E fecha 10.5 med (3/3 ≥5 em toda condição) — P2.2
       parcial E fechado**; A 2.88 B 2.93 C 3.84 D 3.02 F 1.66 não
       fecham no wall (p50/p99 do F 1.5×/22× melhores). Cliff do E no 2M
       mapeado e fixado no produto (CountCache); `auto_reclaim` opt-in.
@@ -248,11 +275,11 @@ Não fecha (e não se mente):
 | P0.3 | p0 | `commit_async_ops` | done | sem group no async | 2026-08-19 |
 | P0.4 | p0 | buffer async 64 KiB | done | `ASYNC_WAL_BUFFER` | 2026-08-19 |
 | P0.5 | p0 | set_mc50 ≥ 5× async | doing | quieto: **2.02 vs peer são** — não fecha; 3.4–9.2 eram peer doente | 2026-08-20 |
-| P1.1 | p1 | pipeline ≥ 5× | doing | re-arm: longa 5,00 exato, rounds 5,31 med c/ 1 perna anômala — segue na linha | 2026-08-22 |
-| P1.2 | p1 | set / blob ≥ 5× | doing | SET longa 4,65 no re-arm load-14 (assinatura load; quieta P0.4 era 5,45 3/3) — bateria quieta decide | 2026-08-22 |
-| P1.3 | p1 | get ≥ 5× | doing | 4ª confirmação suja: rearm5 **6,70 med (3/3)** no HEAD 28a3d59 (rounds load 7,7–8,5); composição controlada ≥6,1×; oficial = rearm6 caixa quieta | 2026-08-22 |
+| P1.1 | p1 | pipeline ≥ 5× | **done** | **rearm7 quieta 3/3 ≥5 (5,10/6,04/5,45), med 5,67** — fecha | 2026-08-23 |
+| P1.2 | p1 | set / blob ≥ 5× | doing | rearm7 quieta: SET 5,14 med (2/3, r1 4,20); blob 0,99 — SET na linha, blob longe | 2026-08-23 |
+| P1.3 | p1 | get ≥ 5× | doing | rearm7 quieta: **med 5,96, 2/3** (r3 4,86, peer estável) — 1ª quieta ≥5; não fecha sem 3/3 | 2026-08-23 |
 | P2.1 | p2 | quiet 3× | **done** | **árbitro @ load 9.4**: E 10.5 e scan 7.4 fecham; SET 5.41 longo; resto 0.94–3.8 | 2026-08-20 |
-| P2.2 | p2 | ycsb A–F ≥ 5× async | doing | rearm5 (rounds load 7,7–8,5): **E 5,82 / D 5,45 / A 5,40 med** — 1ª bateria com a/d/e ≥5 (fix write-path a28637a); C 4,70 / B 4,03 / F 3,73; bateria NON-OFFICIAL (longa sob 12–15); oficial = rearm6 | 2026-08-22 |
+| P2.2 | p2 | ycsb A–F ≥ 5× async | doing | rearm7 quieta: **E 3/3 re-confirma (med 5,21)**; D 5,19 med 2/3; A 4,93 med (r1 artifact stall-extent WAL, fix pré-alocação em curso); B 3,91/C 4,33/F 3,69 | 2026-08-23 |
 | P2.3 | p2 | script não default 5× | done | tikv_ycsb_parity_v0.sh | 2026-08-19 |
 
 ## Acceptance Criteria
