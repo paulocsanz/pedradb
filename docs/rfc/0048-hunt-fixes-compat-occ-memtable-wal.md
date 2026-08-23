@@ -99,8 +99,21 @@
 - [x] **W6.1** core: `CountCache::record_dirty` early-out com map vazio descartava o publish que aterrissava entre o seq do leitor e o insert dele (ambos sob READ lock) → entrada pré-write validava para sempre (`get` valida só contra o dirty-log) — F204, remoção do early-out; k31 RED→GREEN + k31ctl — status: `done`
 - [x] **W6.2** core: `ConcurrentDb::create_checkpoint` sem `persist_lock` → persist off-lock completa swing+GC de MANIFESTs entre a cópia do CURRENT e a listagem do checkpoint → destino reabre com `CorruptManifest` (backup inútil, cópia retorna Ok) — F205, `persist_lock` no wrapper (flush_lock→persist_lock→write); k32 RED→GREEN + k32ctl; cause-check isolado — status: `done`
 - [x] **W6.3** core: cópia do WAL do checkpoint sem quiescer o pipeline — grupo in-flight (L0 acked órfão do CURRENT velho + WAL sem frame) OU frame async acked em buffer userspace → chave acked some do restore — F206, `self.wal.lock().flush()?` antes da cópia (mutex espera o grupo; flush empurra o buffer); k33+k34 RED→GREEN + ctl; porte alternativo (drain de `commit_inflight`) descartado por redundância — status: `done`
-### W7 — wave 7 (2026-08-22; caches de leitura — fechamento da classe F198/F204)
+### W7 — wave 7 (2026-08-22/23; caches de leitura + floor de GC + change-feed)
 - [x] **W7.1** core: fill do `last_prefix_cache` sem revalidar `published_seq` (furo F198 em versão prefixo; backlog C4) — publish concorrente sob READ lock limpa o cache no meio do walk, o fill pós-clear grava resposta pré-publish com o gen novo e ela valida até o próximo write; `last_under_user_prefix` serve `None`/chave velha após put Ok — F207, recheck `published_seq == snapshot` antes do insert; k35 RED 5/5 → GREEN 3/3 (steering: writer parado pós-fsync no sync do WAL + progresso observável via `read_probe`), k35ctl verde nos dois lados — status: `done`
+- [x] **W7.2** core: floor de GC sem pins conta seq não-publicado (fan-out read-path #1) — `compact_reclaim`/`auto_gc_floor` caem em `last_sequence()` que inclui write aplicado-mas-não-publicado (janela off-lock do write-group); `raise_earliest_readable` sobe acima do `published_seq` e `count_in_range` no snapshot visível corrente falha `SnapshotTooOld` transitório — F211, cap `last_sequence().min(visible_sequence())` nos dois sítios (sem perdas: `for_oldest_snapshot` GC preserva versões > floor); k36 RED → GREEN + k36ctl + cause-check isolado — status: `done`
+- [x] **W7.3** core: `ConcurrentDb::flush` rotaciona o WAL sem persistir o CHANGELOG com interval 0 (fan-out history #2) — o tail de persist da `Db::flush` (db.rs 3826) não existe no pipeline concorrente; a união F183 do feed vivo fica só o tail do WAL (chave flushed some do feed com `get` normal) e bare-drop/crash + reopen cai no short-circuit de `lazy_feed_entries` (5653) — F212, tail `persist_changelog_after_explicit_flush` no flush concorrente; k37 RED (vivo + reopen) → GREEN + k37ctl (close persiste) + cause-check — status: `done`
+- [x] **W7.4** core: `commit_async_ops` nunca estende o change-log não-lazy (fan-out history #3) — todo write `no_sync` da face `ConcurrentDb` publica e fica visível via `get` mas o evento não entra no feed; o próximo commit sync persiste o CHANGELOG sem ele e o rebuild do open pula `sequence <= feed_max` — perda durável — F213, espelho do extend de `commit_ops_with` (6078) após o append WAL; k38 RED (vivo + reopen) → GREEN + k38ctl (sync alimenta) + cause-check — status: `done`
+
+- Backlog wave 8 registrado no LEDGER (exploradores read-path/history): veneno
+  TableCache/BlockCache no undo de `compact_for_reads` (#2), `enforce_cap`
+  ignora `occ_registry_floor` (#4), watermark `keep_only_latest` na janela
+  off-lock (limite deliberado do F211), feed reopen last-per-key com WAL
+  vivo (#1, checar spec), `try_scan_at` vs `get_at` (#5, checar spec),
+  decode_block fail-open (#6/#3 LOW), remote AlreadyPresent len+crc (#7 LOW).
+- Nota de numeração: F208–F210 da tabela pertencem à wave 8 (unsafe) da
+  sessão paralela; os desta wave foram renumerados F211–F213 na
+  consolidação (sequência única do LEDGER).
 
 - Refutados na onda (dead ends com análise): fadvise overflow→"até EOF" (equivalente ao clampe; único caller passa u32), trunc `as u32` em write >4 GiB (escrita parcial é contrato de `Write`), EINTR no fdatasync (propagar Err é correto); tx/occ: skip de commit com `last_sequence()==snap` defendido pela write lock.
 
@@ -154,12 +167,15 @@
 | W6.2 | w6 | checkpoint serializa com persist off-lock (F205) | done | `concurrent.rs` (`persist_lock`); k32 + k32ctl | 2026-08-22 |
 | W6.3 | w6 | checkpoint drena WAL antes de copiar (F206) | done | `db.rs` (`wal.lock().flush()`); k33/k34 + ctl | 2026-08-22 |
 | W7.1 | w7 | last_prefix_cache fill revalida published (F207) | done | `db.rs`; k35 + k35ctl | 2026-08-22 |
+| W7.2 | w7 | floor de GC capped no published (F211) | done | `db.rs` (`compact_reclaim`, `auto_gc_floor`); k36 + k36ctl | 2026-08-23 |
+| W7.3 | w7 | flush concorrente persiste CHANGELOG (F212) | done | `concurrent.rs` + helper `db.rs`; k37 + k37ctl | 2026-08-23 |
+| W7.4 | w7 | commit async alimenta feed não-lazy (F213) | done | `db.rs` (`commit_async_ops`); k38 + k38ctl | 2026-08-23 |
 
 ## Acceptance Criteria
 
-- **Tests:** `pedradb-core --lib` (391 passando — incluindo `point_in_time_reports_resync_reanchor`, `zero_header_journals_and_pit_reports`, `torn_tail_*`, theorem do recover kernel, sweep `explode` com os kinds novos e a simetria de blocos), `pedradb-io-uring` (env + `cqe_kernel` U1 as-is vs unique), `rocksdb-compat` (40+7), harness `compat_hunt` (**21**, c1..c14 + controles) + `core_hunt` (**47**, k1..k30 + controles + diferencial k22) + oracle `wal_crc_flip_is_fail_stop_or_clean` — todos verdes com os fixes; os de hunt falham sem eles (F196–F198, F200–F207 demonstrados RED→GREEN; F199/F203 guardas/fixes condicionados a host Linux conforme fichas).
+- **Tests:** `pedradb-core --lib` (395 passando — incluindo `point_in_time_reports_resync_reanchor`, `zero_header_journals_and_pit_reports`, `torn_tail_*`, theorem do recover kernel, sweep `explode` com os kinds novos e a simetria de blocos), `pedradb-io-uring` (env + `cqe_kernel` U1 as-is vs unique), `rocksdb-compat` (41+7), harness `compat_hunt` (**21**, c1..c14 + controles) + `core_hunt` (**63**, k1..k38 + controles + diferencial k22) + oracle `wal_crc_flip_is_fail_stop_or_clean` — todos verdes com os fixes; os de hunt falham sem eles (F196–F198, F200–F207, F211–F213 demonstrados RED→GREEN; F199/F203 guardas/fixes condicionados a host Linux conforme fichas).
 - **Telemetry / Analytics:** none — correção de corretude; o `CORRUPTLOG` (RFC-0038) recebe eventos `resync` e `zero_header` (P1.2).
-- **Documentation:** este RFC + fichas F165–F207 em `determinismo/pedradb-dst/findings/` (+ dead ends F189/sst/io-uring registrados) + LEDGER do hunt 2026-08-21/22 (waves 1–6) + patches `core-hunt-20260822.patch` (waves 1–3), `core-hunt-20260822-wave4.patch` (delta da wave 4), `core-hunt-20260822-wave5.patch` (delta da wave 5) e `core-hunt-20260822-wave6.patch` (delta da wave 6) e `core-hunt-20260822-wave7.patch` (delta da wave 7).
+- **Documentation:** este RFC + fichas F165–F213 em `determinismo/pedradb-dst/findings/` (+ dead ends F189/sst/io-uring registrados) + LEDGER do hunt 2026-08-21/22/23 (waves 1–7 + backlog wave 8) + patches `core-hunt-20260822.patch` (waves 1–3), `core-hunt-20260822-wave4.patch` (delta da wave 4), `core-hunt-20260822-wave5.patch` (delta da wave 5) e `core-hunt-20260822-wave6.patch` (delta da wave 6) e `core-hunt-20260822-wave7.patch` (delta da wave 7: F207/F211/F212/F213, 6 hunks, apply/reverse-apply verificados).
 - **Screenshots:** backend-only.
 
 ## Out of scope
