@@ -1,0 +1,868 @@
++/tmp/pedradb-rearm9/battery.sh:10> date '+%F %T'
++/tmp/pedradb-rearm9/battery.sh:10> echo 'battery pid=21046 start 2026-08-23 15:22:59'
++/tmp/pedradb-rearm9/battery.sh:15> c=0 
++/tmp/pedradb-rearm9/battery.sh:16> [ 0 -lt 2 ']'
++/tmp/pedradb-rearm9/battery.sh:17> l=+/tmp/pedradb-rearm9/battery.sh:17> load1
++load1:0> sysctl -n vm.loadavg
++load1:0> awk '{gsub(",", ".", $2); print $2}'
++/tmp/pedradb-rearm9/battery.sh:17> l=22.20 
++/tmp/pedradb-rearm9/battery.sh:18> awk -v 'l=22.20' 'BEGIN{exit !(l < 10)}'
++/tmp/pedradb-rearm9/battery.sh:21> c=0 
++/tmp/pedradb-rearm9/battery.sh:23> date +%H:%M:%S
++/tmp/pedradb-rearm9/battery.sh:23> echo '15:22:59 gate pid=21046 load1=22.20 (consecutive 0/2)'
++/tmp/pedradb-rearm9/battery.sh:24> [ 0 -lt 2 ']'
++/tmp/pedradb-rearm9/battery.sh:24> sleep 30
++/tmp/pedradb-rearm9/battery.sh:16> [ 0 -lt 2 ']'
++/tmp/pedradb-rearm9/battery.sh:17> l=+/tmp/pedradb-rearm9/battery.sh:17> load1
++load1:0> sysctl -n vm.loadavg
++load1:0> awk '{gsub(",", ".", $2); print $2}'
++/tmp/pedradb-rearm9/battery.sh:17> l=24.40 
++/tmp/pedradb-rearm9/battery.sh:18> awk -v 'l=24.40' 'BEGIN{exit !(l < 10)}'
++/tmp/pedradb-rearm9/battery.sh:21> c=0 
++/tmp/pedradb-rearm9/battery.sh:23> date +%H:%M:%S
++/tmp/pedradb-rearm9/battery.sh:23> echo '15:23:29 gate pid=21046 load1=24.40 (consecutive 0/2)'
++/tmp/pedradb-rearm9/battery.sh:24> [ 0 -lt 2 ']'
++/tmp/pedradb-rearm9/battery.sh:24> sleep 30
++/tmp/pedradb-rearm9/battery.sh:16> [ 0 -lt 2 ']'
++/tmp/pedradb-rearm9/battery.sh:17> l=+/tmp/pedradb-rearm9/battery.sh:17> load1
++load1:0> awk '{gsub(",", ".", $2); print $2}'
++load1:0> sysctl -n vm.loadavg
++/tmp/pedradb-rearm9/battery.sh:17> l=27.80 
++/tmp/pedradb-rearm9/battery.sh:18> awk -v 'l=27.80' 'BEGIN{exit !(l < 10)}'
++/tmp/pedradb-rearm9/battery.sh:21> c=0 
++/tmp/pedradb-rearm9/battery.sh:23> date +%H:%M:%S
++/tmp/pedradb-rearm9/battery.sh:23> echo '15:23:59 gate pid=21046 load1=27.80 (consecutive 0/2)'
++/tmp/pedradb-rearm9/battery.sh:24> [ 0 -lt 2 ']'
++/tmp/pedradb-rearm9/battery.sh:24> sleep 30
++/tmp/pedradb-rearm9/battery.sh:16> [ 0 -lt 2 ']'
++/tmp/pedradb-rearm9/battery.sh:17> l=+/tmp/pedradb-rearm9/battery.sh:17> load1
++load1:0> sysctl -n vm.loadavg
++load1:0> awk '{gsub(",", ".", $2); print $2}'
++/tmp/pedradb-rearm9/battery.sh:17> l=28.04 
++/tmp/pedradb-rearm9/battery.sh:18> awk -v 'l=28.04' 'BEGIN{exit !(l < 10)}'
++/tmp/pedradb-rearm9/battery.sh:21> c=0 
++/tmp/pedradb-rearm9/battery.sh:23> date +%H:%M:%S
++/tmp/pedradb-rearm9/battery.sh:23> echo '15:24:29 gate pid=21046 load1=28.04 (consecutive 0/2)'
++/tmp/pedradb-rearm9/battery.sh:24> [ 0 -lt 2 ']'
++/tmp/pedradb-rearm9/battery.sh:24> sleep 30
++/tmp/pedradb-rearm9/battery.sh:16> [ 0 -lt 2 ']'
++/tmp/pedradb-rearm9/battery.sh:17> l=+/tmp/pedradb-rearm9/battery.sh:17> load1
++load1:0> sysctl -n vm.loadavg
++load1:0> awk '{gsub(",", ".", $2); print $2}'
++/tmp/pedradb-rearm9/battery.sh:17> l=23.64 
++/tmp/pedradb-rearm9/battery.sh:18> awk -v 'l=23.64' 'BEGIN{exit !(l < 10)}'
++/tmp/pedradb-rearm9/battery.sh:21> c=0 
++/tmp/pedradb-rearm9/battery.sh:23> date +%H:%M:%S
++/tmp/pedradb-rearm9/battery.sh:23> echo '15:24:59 gate pid=21046 load1=23.64 (consecutive 0/2)'
++/tmp/pedradb-rearm9/battery.sh:24> [ 0 -lt 2 ']'
++/tmp/pedradb-rearm9/battery.sh:24> sleep 30
++/tmp/pedradb-rearm9/battery.sh:16> [ 0 -lt 2 ']'
++/tmp/pedradb-rearm9/battery.sh:17> l=+/tmp/pedradb-rearm9/battery.sh:17> load1
++load1:0> awk '{gsub(",", ".", $2); print $2}'
++load1:0> sysctl -n vm.loadavg
++/tmp/pedradb-rearm9/battery.sh:17> l=21.03 
++/tmp/pedradb-rearm9/battery.sh:18> awk -v 'l=21.03' 'BEGIN{exit !(l < 10)}'
++/tmp/pedradb-rearm9/battery.sh:21> c=0 
++/tmp/pedradb-rearm9/battery.sh:23> date +%H:%M:%S
++/tmp/pedradb-rearm9/battery.sh:23> echo '15:25:29 gate pid=21046 load1=21.03 (consecutive 0/2)'
++/tmp/pedradb-rearm9/battery.sh:24> [ 0 -lt 2 ']'
++/tmp/pedradb-rearm9/battery.sh:24> sleep 30
++/tmp/pedradb-rearm9/battery.sh:16> [ 0 -lt 2 ']'
++/tmp/pedradb-rearm9/battery.sh:17> l=+/tmp/pedradb-rearm9/battery.sh:17> load1
++load1:0> sysctl -n vm.loadavg
++load1:0> awk '{gsub(",", ".", $2); print $2}'
++/tmp/pedradb-rearm9/battery.sh:17> l=21.60 
++/tmp/pedradb-rearm9/battery.sh:18> awk -v 'l=21.60' 'BEGIN{exit !(l < 10)}'
++/tmp/pedradb-rearm9/battery.sh:21> c=0 
++/tmp/pedradb-rearm9/battery.sh:23> date +%H:%M:%S
++/tmp/pedradb-rearm9/battery.sh:23> echo '15:25:59 gate pid=21046 load1=21.60 (consecutive 0/2)'
++/tmp/pedradb-rearm9/battery.sh:24> [ 0 -lt 2 ']'
++/tmp/pedradb-rearm9/battery.sh:24> sleep 30
++/tmp/pedradb-rearm9/battery.sh:16> [ 0 -lt 2 ']'
++/tmp/pedradb-rearm9/battery.sh:17> l=+/tmp/pedradb-rearm9/battery.sh:17> load1
++load1:0> sysctl -n vm.loadavg
++load1:0> awk '{gsub(",", ".", $2); print $2}'
++/tmp/pedradb-rearm9/battery.sh:17> l=20.55 
++/tmp/pedradb-rearm9/battery.sh:18> awk -v 'l=20.55' 'BEGIN{exit !(l < 10)}'
++/tmp/pedradb-rearm9/battery.sh:21> c=0 
++/tmp/pedradb-rearm9/battery.sh:23> date +%H:%M:%S
++/tmp/pedradb-rearm9/battery.sh:23> echo '15:26:29 gate pid=21046 load1=20.55 (consecutive 0/2)'
++/tmp/pedradb-rearm9/battery.sh:24> [ 0 -lt 2 ']'
++/tmp/pedradb-rearm9/battery.sh:24> sleep 30
++/tmp/pedradb-rearm9/battery.sh:16> [ 0 -lt 2 ']'
++/tmp/pedradb-rearm9/battery.sh:17> l=+/tmp/pedradb-rearm9/battery.sh:17> load1
++load1:0> awk '{gsub(",", ".", $2); print $2}'
++load1:0> sysctl -n vm.loadavg
++/tmp/pedradb-rearm9/battery.sh:17> l=17.89 
++/tmp/pedradb-rearm9/battery.sh:18> awk -v 'l=17.89' 'BEGIN{exit !(l < 10)}'
++/tmp/pedradb-rearm9/battery.sh:21> c=0 
++/tmp/pedradb-rearm9/battery.sh:23> date +%H:%M:%S
++/tmp/pedradb-rearm9/battery.sh:23> echo '15:26:59 gate pid=21046 load1=17.89 (consecutive 0/2)'
++/tmp/pedradb-rearm9/battery.sh:24> [ 0 -lt 2 ']'
++/tmp/pedradb-rearm9/battery.sh:24> sleep 30
++/tmp/pedradb-rearm9/battery.sh:16> [ 0 -lt 2 ']'
++/tmp/pedradb-rearm9/battery.sh:17> l=+/tmp/pedradb-rearm9/battery.sh:17> load1
++load1:0> awk '{gsub(",", ".", $2); print $2}'
++load1:0> sysctl -n vm.loadavg
++/tmp/pedradb-rearm9/battery.sh:17> l=15.70 
++/tmp/pedradb-rearm9/battery.sh:18> awk -v 'l=15.70' 'BEGIN{exit !(l < 10)}'
++/tmp/pedradb-rearm9/battery.sh:21> c=0 
++/tmp/pedradb-rearm9/battery.sh:23> date +%H:%M:%S
++/tmp/pedradb-rearm9/battery.sh:23> echo '15:27:29 gate pid=21046 load1=15.70 (consecutive 0/2)'
++/tmp/pedradb-rearm9/battery.sh:24> [ 0 -lt 2 ']'
++/tmp/pedradb-rearm9/battery.sh:24> sleep 30
++/tmp/pedradb-rearm9/battery.sh:16> [ 0 -lt 2 ']'
++/tmp/pedradb-rearm9/battery.sh:17> l=+/tmp/pedradb-rearm9/battery.sh:17> load1
++load1:0> awk '{gsub(",", ".", $2); print $2}'
++load1:0> sysctl -n vm.loadavg
++/tmp/pedradb-rearm9/battery.sh:17> l=19.26 
++/tmp/pedradb-rearm9/battery.sh:18> awk -v 'l=19.26' 'BEGIN{exit !(l < 10)}'
++/tmp/pedradb-rearm9/battery.sh:21> c=0 
++/tmp/pedradb-rearm9/battery.sh:23> date +%H:%M:%S
++/tmp/pedradb-rearm9/battery.sh:23> echo '15:27:59 gate pid=21046 load1=19.26 (consecutive 0/2)'
++/tmp/pedradb-rearm9/battery.sh:24> [ 0 -lt 2 ']'
++/tmp/pedradb-rearm9/battery.sh:24> sleep 30
++/tmp/pedradb-rearm9/battery.sh:16> [ 0 -lt 2 ']'
++/tmp/pedradb-rearm9/battery.sh:17> l=+/tmp/pedradb-rearm9/battery.sh:17> load1
++load1:0> awk '{gsub(",", ".", $2); print $2}'
++load1:0> sysctl -n vm.loadavg
++/tmp/pedradb-rearm9/battery.sh:17> l=16.12 
++/tmp/pedradb-rearm9/battery.sh:18> awk -v 'l=16.12' 'BEGIN{exit !(l < 10)}'
++/tmp/pedradb-rearm9/battery.sh:21> c=0 
++/tmp/pedradb-rearm9/battery.sh:23> date +%H:%M:%S
++/tmp/pedradb-rearm9/battery.sh:23> echo '15:28:29 gate pid=21046 load1=16.12 (consecutive 0/2)'
++/tmp/pedradb-rearm9/battery.sh:24> [ 0 -lt 2 ']'
++/tmp/pedradb-rearm9/battery.sh:24> sleep 30
++/tmp/pedradb-rearm9/battery.sh:16> [ 0 -lt 2 ']'
++/tmp/pedradb-rearm9/battery.sh:17> l=+/tmp/pedradb-rearm9/battery.sh:17> load1
++load1:0> awk '{gsub(",", ".", $2); print $2}'
++load1:0> sysctl -n vm.loadavg
++/tmp/pedradb-rearm9/battery.sh:17> l=13.75 
++/tmp/pedradb-rearm9/battery.sh:18> awk -v 'l=13.75' 'BEGIN{exit !(l < 10)}'
++/tmp/pedradb-rearm9/battery.sh:21> c=0 
++/tmp/pedradb-rearm9/battery.sh:23> date +%H:%M:%S
++/tmp/pedradb-rearm9/battery.sh:23> echo '15:28:59 gate pid=21046 load1=13.75 (consecutive 0/2)'
++/tmp/pedradb-rearm9/battery.sh:24> [ 0 -lt 2 ']'
++/tmp/pedradb-rearm9/battery.sh:24> sleep 30
++/tmp/pedradb-rearm9/battery.sh:16> [ 0 -lt 2 ']'
++/tmp/pedradb-rearm9/battery.sh:17> l=+/tmp/pedradb-rearm9/battery.sh:17> load1
++load1:0> sysctl -n vm.loadavg
++load1:0> awk '{gsub(",", ".", $2); print $2}'
++/tmp/pedradb-rearm9/battery.sh:17> l=14.97 
++/tmp/pedradb-rearm9/battery.sh:18> awk -v 'l=14.97' 'BEGIN{exit !(l < 10)}'
++/tmp/pedradb-rearm9/battery.sh:21> c=0 
++/tmp/pedradb-rearm9/battery.sh:23> date +%H:%M:%S
++/tmp/pedradb-rearm9/battery.sh:23> echo '15:29:29 gate pid=21046 load1=14.97 (consecutive 0/2)'
++/tmp/pedradb-rearm9/battery.sh:24> [ 0 -lt 2 ']'
++/tmp/pedradb-rearm9/battery.sh:24> sleep 30
++/tmp/pedradb-rearm9/battery.sh:16> [ 0 -lt 2 ']'
++/tmp/pedradb-rearm9/battery.sh:17> l=+/tmp/pedradb-rearm9/battery.sh:17> load1
++load1:0> sysctl -n vm.loadavg
++load1:0> awk '{gsub(",", ".", $2); print $2}'
++/tmp/pedradb-rearm9/battery.sh:17> l=17.83 
++/tmp/pedradb-rearm9/battery.sh:18> awk -v 'l=17.83' 'BEGIN{exit !(l < 10)}'
++/tmp/pedradb-rearm9/battery.sh:21> c=0 
++/tmp/pedradb-rearm9/battery.sh:23> date +%H:%M:%S
++/tmp/pedradb-rearm9/battery.sh:23> echo '15:29:59 gate pid=21046 load1=17.83 (consecutive 0/2)'
++/tmp/pedradb-rearm9/battery.sh:24> [ 0 -lt 2 ']'
++/tmp/pedradb-rearm9/battery.sh:24> sleep 30
++/tmp/pedradb-rearm9/battery.sh:16> [ 0 -lt 2 ']'
++/tmp/pedradb-rearm9/battery.sh:17> l=+/tmp/pedradb-rearm9/battery.sh:17> load1
++load1:0> sysctl -n vm.loadavg
++load1:0> awk '{gsub(",", ".", $2); print $2}'
++/tmp/pedradb-rearm9/battery.sh:17> l=16.39 
++/tmp/pedradb-rearm9/battery.sh:18> awk -v 'l=16.39' 'BEGIN{exit !(l < 10)}'
++/tmp/pedradb-rearm9/battery.sh:21> c=0 
++/tmp/pedradb-rearm9/battery.sh:23> date +%H:%M:%S
++/tmp/pedradb-rearm9/battery.sh:23> echo '15:30:29 gate pid=21046 load1=16.39 (consecutive 0/2)'
++/tmp/pedradb-rearm9/battery.sh:24> [ 0 -lt 2 ']'
++/tmp/pedradb-rearm9/battery.sh:24> sleep 30
++/tmp/pedradb-rearm9/battery.sh:16> [ 0 -lt 2 ']'
++/tmp/pedradb-rearm9/battery.sh:17> l=+/tmp/pedradb-rearm9/battery.sh:17> load1
++load1:0> awk '{gsub(",", ".", $2); print $2}'
++load1:0> sysctl -n vm.loadavg
++/tmp/pedradb-rearm9/battery.sh:17> l=14.71 
++/tmp/pedradb-rearm9/battery.sh:18> awk -v 'l=14.71' 'BEGIN{exit !(l < 10)}'
++/tmp/pedradb-rearm9/battery.sh:21> c=0 
++/tmp/pedradb-rearm9/battery.sh:23> date +%H:%M:%S
++/tmp/pedradb-rearm9/battery.sh:23> echo '15:30:59 gate pid=21046 load1=14.71 (consecutive 0/2)'
++/tmp/pedradb-rearm9/battery.sh:24> [ 0 -lt 2 ']'
++/tmp/pedradb-rearm9/battery.sh:24> sleep 30
++/tmp/pedradb-rearm9/battery.sh:16> [ 0 -lt 2 ']'
++/tmp/pedradb-rearm9/battery.sh:17> l=+/tmp/pedradb-rearm9/battery.sh:17> load1
++load1:0> sysctl -n vm.loadavg
++load1:0> awk '{gsub(",", ".", $2); print $2}'
++/tmp/pedradb-rearm9/battery.sh:17> l=18.66 
++/tmp/pedradb-rearm9/battery.sh:18> awk -v 'l=18.66' 'BEGIN{exit !(l < 10)}'
++/tmp/pedradb-rearm9/battery.sh:21> c=0 
++/tmp/pedradb-rearm9/battery.sh:23> date +%H:%M:%S
++/tmp/pedradb-rearm9/battery.sh:23> echo '15:31:29 gate pid=21046 load1=18.66 (consecutive 0/2)'
++/tmp/pedradb-rearm9/battery.sh:24> [ 0 -lt 2 ']'
++/tmp/pedradb-rearm9/battery.sh:24> sleep 30
++/tmp/pedradb-rearm9/battery.sh:16> [ 0 -lt 2 ']'
++/tmp/pedradb-rearm9/battery.sh:17> l=+/tmp/pedradb-rearm9/battery.sh:17> load1
++load1:0> awk '{gsub(",", ".", $2); print $2}'
++load1:0> sysctl -n vm.loadavg
++/tmp/pedradb-rearm9/battery.sh:17> l=17.09 
++/tmp/pedradb-rearm9/battery.sh:18> awk -v 'l=17.09' 'BEGIN{exit !(l < 10)}'
++/tmp/pedradb-rearm9/battery.sh:21> c=0 
++/tmp/pedradb-rearm9/battery.sh:23> date +%H:%M:%S
++/tmp/pedradb-rearm9/battery.sh:23> echo '15:31:59 gate pid=21046 load1=17.09 (consecutive 0/2)'
++/tmp/pedradb-rearm9/battery.sh:24> [ 0 -lt 2 ']'
++/tmp/pedradb-rearm9/battery.sh:24> sleep 30
++/tmp/pedradb-rearm9/battery.sh:16> [ 0 -lt 2 ']'
++/tmp/pedradb-rearm9/battery.sh:17> l=+/tmp/pedradb-rearm9/battery.sh:17> load1
++load1:0> awk '{gsub(",", ".", $2); print $2}'
++load1:0> sysctl -n vm.loadavg
++/tmp/pedradb-rearm9/battery.sh:17> l=15.70 
++/tmp/pedradb-rearm9/battery.sh:18> awk -v 'l=15.70' 'BEGIN{exit !(l < 10)}'
++/tmp/pedradb-rearm9/battery.sh:21> c=0 
++/tmp/pedradb-rearm9/battery.sh:23> date +%H:%M:%S
++/tmp/pedradb-rearm9/battery.sh:23> echo '15:32:29 gate pid=21046 load1=15.70 (consecutive 0/2)'
++/tmp/pedradb-rearm9/battery.sh:24> [ 0 -lt 2 ']'
++/tmp/pedradb-rearm9/battery.sh:24> sleep 30
++/tmp/pedradb-rearm9/battery.sh:16> [ 0 -lt 2 ']'
++/tmp/pedradb-rearm9/battery.sh:17> l=+/tmp/pedradb-rearm9/battery.sh:17> load1
++load1:0> awk '{gsub(",", ".", $2); print $2}'
++load1:0> sysctl -n vm.loadavg
++/tmp/pedradb-rearm9/battery.sh:17> l=13.45 
++/tmp/pedradb-rearm9/battery.sh:18> awk -v 'l=13.45' 'BEGIN{exit !(l < 10)}'
++/tmp/pedradb-rearm9/battery.sh:21> c=0 
++/tmp/pedradb-rearm9/battery.sh:23> date +%H:%M:%S
++/tmp/pedradb-rearm9/battery.sh:23> echo '15:32:59 gate pid=21046 load1=13.45 (consecutive 0/2)'
++/tmp/pedradb-rearm9/battery.sh:24> [ 0 -lt 2 ']'
++/tmp/pedradb-rearm9/battery.sh:24> sleep 30
++/tmp/pedradb-rearm9/battery.sh:16> [ 0 -lt 2 ']'
++/tmp/pedradb-rearm9/battery.sh:17> l=+/tmp/pedradb-rearm9/battery.sh:17> load1
++load1:0> awk '{gsub(",", ".", $2); print $2}'
++load1:0> sysctl -n vm.loadavg
++/tmp/pedradb-rearm9/battery.sh:17> l=16.70 
++/tmp/pedradb-rearm9/battery.sh:18> awk -v 'l=16.70' 'BEGIN{exit !(l < 10)}'
++/tmp/pedradb-rearm9/battery.sh:21> c=0 
++/tmp/pedradb-rearm9/battery.sh:23> date +%H:%M:%S
++/tmp/pedradb-rearm9/battery.sh:23> echo '15:33:29 gate pid=21046 load1=16.70 (consecutive 0/2)'
++/tmp/pedradb-rearm9/battery.sh:24> [ 0 -lt 2 ']'
++/tmp/pedradb-rearm9/battery.sh:24> sleep 30
++/tmp/pedradb-rearm9/battery.sh:16> [ 0 -lt 2 ']'
++/tmp/pedradb-rearm9/battery.sh:17> l=+/tmp/pedradb-rearm9/battery.sh:17> load1
++load1:0> awk '{gsub(",", ".", $2); print $2}'
++load1:0> sysctl -n vm.loadavg
++/tmp/pedradb-rearm9/battery.sh:17> l=14.01 
++/tmp/pedradb-rearm9/battery.sh:18> awk -v 'l=14.01' 'BEGIN{exit !(l < 10)}'
++/tmp/pedradb-rearm9/battery.sh:21> c=0 
++/tmp/pedradb-rearm9/battery.sh:23> date +%H:%M:%S
++/tmp/pedradb-rearm9/battery.sh:23> echo '15:33:59 gate pid=21046 load1=14.01 (consecutive 0/2)'
++/tmp/pedradb-rearm9/battery.sh:24> [ 0 -lt 2 ']'
++/tmp/pedradb-rearm9/battery.sh:24> sleep 30
++/tmp/pedradb-rearm9/battery.sh:16> [ 0 -lt 2 ']'
++/tmp/pedradb-rearm9/battery.sh:17> l=+/tmp/pedradb-rearm9/battery.sh:17> load1
++load1:0> awk '{gsub(",", ".", $2); print $2}'
++load1:0> sysctl -n vm.loadavg
++/tmp/pedradb-rearm9/battery.sh:17> l=12.44 
++/tmp/pedradb-rearm9/battery.sh:18> awk -v 'l=12.44' 'BEGIN{exit !(l < 10)}'
++/tmp/pedradb-rearm9/battery.sh:21> c=0 
++/tmp/pedradb-rearm9/battery.sh:23> date +%H:%M:%S
++/tmp/pedradb-rearm9/battery.sh:23> echo '15:34:29 gate pid=21046 load1=12.44 (consecutive 0/2)'
++/tmp/pedradb-rearm9/battery.sh:24> [ 0 -lt 2 ']'
++/tmp/pedradb-rearm9/battery.sh:24> sleep 30
++/tmp/pedradb-rearm9/battery.sh:16> [ 0 -lt 2 ']'
++/tmp/pedradb-rearm9/battery.sh:17> l=+/tmp/pedradb-rearm9/battery.sh:17> load1
++load1:0> awk '{gsub(",", ".", $2); print $2}'
++load1:0> sysctl -n vm.loadavg
++/tmp/pedradb-rearm9/battery.sh:17> l=15.87 
++/tmp/pedradb-rearm9/battery.sh:18> awk -v 'l=15.87' 'BEGIN{exit !(l < 10)}'
++/tmp/pedradb-rearm9/battery.sh:21> c=0 
++/tmp/pedradb-rearm9/battery.sh:23> date +%H:%M:%S
++/tmp/pedradb-rearm9/battery.sh:23> echo '15:34:59 gate pid=21046 load1=15.87 (consecutive 0/2)'
++/tmp/pedradb-rearm9/battery.sh:24> [ 0 -lt 2 ']'
++/tmp/pedradb-rearm9/battery.sh:24> sleep 30
++/tmp/pedradb-rearm9/battery.sh:16> [ 0 -lt 2 ']'
++/tmp/pedradb-rearm9/battery.sh:17> l=+/tmp/pedradb-rearm9/battery.sh:17> load1
++load1:0> awk '{gsub(",", ".", $2); print $2}'
++load1:0> sysctl -n vm.loadavg
++/tmp/pedradb-rearm9/battery.sh:17> l=13.56 
++/tmp/pedradb-rearm9/battery.sh:18> awk -v 'l=13.56' 'BEGIN{exit !(l < 10)}'
++/tmp/pedradb-rearm9/battery.sh:21> c=0 
++/tmp/pedradb-rearm9/battery.sh:23> date +%H:%M:%S
++/tmp/pedradb-rearm9/battery.sh:23> echo '15:35:29 gate pid=21046 load1=13.56 (consecutive 0/2)'
++/tmp/pedradb-rearm9/battery.sh:24> [ 0 -lt 2 ']'
++/tmp/pedradb-rearm9/battery.sh:24> sleep 30
++/tmp/pedradb-rearm9/battery.sh:16> [ 0 -lt 2 ']'
++/tmp/pedradb-rearm9/battery.sh:17> l=+/tmp/pedradb-rearm9/battery.sh:17> load1
++load1:0> awk '{gsub(",", ".", $2); print $2}'
++load1:0> sysctl -n vm.loadavg
++/tmp/pedradb-rearm9/battery.sh:17> l=18.17 
++/tmp/pedradb-rearm9/battery.sh:18> awk -v 'l=18.17' 'BEGIN{exit !(l < 10)}'
++/tmp/pedradb-rearm9/battery.sh:21> c=0 
++/tmp/pedradb-rearm9/battery.sh:23> date +%H:%M:%S
++/tmp/pedradb-rearm9/battery.sh:23> echo '15:35:59 gate pid=21046 load1=18.17 (consecutive 0/2)'
++/tmp/pedradb-rearm9/battery.sh:24> [ 0 -lt 2 ']'
++/tmp/pedradb-rearm9/battery.sh:24> sleep 30
++/tmp/pedradb-rearm9/battery.sh:16> [ 0 -lt 2 ']'
++/tmp/pedradb-rearm9/battery.sh:17> l=+/tmp/pedradb-rearm9/battery.sh:17> load1
++load1:0> awk '{gsub(",", ".", $2); print $2}'
++load1:0> sysctl -n vm.loadavg
++/tmp/pedradb-rearm9/battery.sh:17> l=17.63 
++/tmp/pedradb-rearm9/battery.sh:18> awk -v 'l=17.63' 'BEGIN{exit !(l < 10)}'
++/tmp/pedradb-rearm9/battery.sh:21> c=0 
++/tmp/pedradb-rearm9/battery.sh:23> date +%H:%M:%S
++/tmp/pedradb-rearm9/battery.sh:23> echo '15:36:29 gate pid=21046 load1=17.63 (consecutive 0/2)'
++/tmp/pedradb-rearm9/battery.sh:24> [ 0 -lt 2 ']'
++/tmp/pedradb-rearm9/battery.sh:24> sleep 30
++/tmp/pedradb-rearm9/battery.sh:16> [ 0 -lt 2 ']'
++/tmp/pedradb-rearm9/battery.sh:17> l=+/tmp/pedradb-rearm9/battery.sh:17> load1
++load1:0> awk '{gsub(",", ".", $2); print $2}'
++load1:0> sysctl -n vm.loadavg
++/tmp/pedradb-rearm9/battery.sh:17> l=17.21 
++/tmp/pedradb-rearm9/battery.sh:18> awk -v 'l=17.21' 'BEGIN{exit !(l < 10)}'
++/tmp/pedradb-rearm9/battery.sh:21> c=0 
++/tmp/pedradb-rearm9/battery.sh:23> date +%H:%M:%S
++/tmp/pedradb-rearm9/battery.sh:23> echo '15:36:59 gate pid=21046 load1=17.21 (consecutive 0/2)'
++/tmp/pedradb-rearm9/battery.sh:24> [ 0 -lt 2 ']'
++/tmp/pedradb-rearm9/battery.sh:24> sleep 30
++/tmp/pedradb-rearm9/battery.sh:16> [ 0 -lt 2 ']'
++/tmp/pedradb-rearm9/battery.sh:17> l=+/tmp/pedradb-rearm9/battery.sh:17> load1
++load1:0> awk '{gsub(",", ".", $2); print $2}'
++load1:0> sysctl -n vm.loadavg
++/tmp/pedradb-rearm9/battery.sh:17> l=19.37 
++/tmp/pedradb-rearm9/battery.sh:18> awk -v 'l=19.37' 'BEGIN{exit !(l < 10)}'
++/tmp/pedradb-rearm9/battery.sh:21> c=0 
++/tmp/pedradb-rearm9/battery.sh:23> date +%H:%M:%S
++/tmp/pedradb-rearm9/battery.sh:23> echo '15:37:29 gate pid=21046 load1=19.37 (consecutive 0/2)'
++/tmp/pedradb-rearm9/battery.sh:24> [ 0 -lt 2 ']'
++/tmp/pedradb-rearm9/battery.sh:24> sleep 30
++/tmp/pedradb-rearm9/battery.sh:16> [ 0 -lt 2 ']'
++/tmp/pedradb-rearm9/battery.sh:17> l=+/tmp/pedradb-rearm9/battery.sh:17> load1
++load1:0> sysctl -n vm.loadavg
++load1:0> awk '{gsub(",", ".", $2); print $2}'
++/tmp/pedradb-rearm9/battery.sh:17> l=25.06 
++/tmp/pedradb-rearm9/battery.sh:18> awk -v 'l=25.06' 'BEGIN{exit !(l < 10)}'
++/tmp/pedradb-rearm9/battery.sh:21> c=0 
++/tmp/pedradb-rearm9/battery.sh:23> date +%H:%M:%S
++/tmp/pedradb-rearm9/battery.sh:23> echo '15:37:59 gate pid=21046 load1=25.06 (consecutive 0/2)'
++/tmp/pedradb-rearm9/battery.sh:24> [ 0 -lt 2 ']'
++/tmp/pedradb-rearm9/battery.sh:24> sleep 30
++/tmp/pedradb-rearm9/battery.sh:16> [ 0 -lt 2 ']'
++/tmp/pedradb-rearm9/battery.sh:17> l=+/tmp/pedradb-rearm9/battery.sh:17> load1
++load1:0> sysctl -n vm.loadavg
++load1:0> awk '{gsub(",", ".", $2); print $2}'
++/tmp/pedradb-rearm9/battery.sh:17> l=22.81 
++/tmp/pedradb-rearm9/battery.sh:18> awk -v 'l=22.81' 'BEGIN{exit !(l < 10)}'
++/tmp/pedradb-rearm9/battery.sh:21> c=0 
++/tmp/pedradb-rearm9/battery.sh:23> date +%H:%M:%S
++/tmp/pedradb-rearm9/battery.sh:23> echo '15:38:29 gate pid=21046 load1=22.81 (consecutive 0/2)'
++/tmp/pedradb-rearm9/battery.sh:24> [ 0 -lt 2 ']'
++/tmp/pedradb-rearm9/battery.sh:24> sleep 30
++/tmp/pedradb-rearm9/battery.sh:16> [ 0 -lt 2 ']'
++/tmp/pedradb-rearm9/battery.sh:17> l=+/tmp/pedradb-rearm9/battery.sh:17> load1
++load1:0> sysctl -n vm.loadavg
++load1:0> awk '{gsub(",", ".", $2); print $2}'
++/tmp/pedradb-rearm9/battery.sh:17> l=20.82 
++/tmp/pedradb-rearm9/battery.sh:18> awk -v 'l=20.82' 'BEGIN{exit !(l < 10)}'
++/tmp/pedradb-rearm9/battery.sh:21> c=0 
++/tmp/pedradb-rearm9/battery.sh:23> date +%H:%M:%S
++/tmp/pedradb-rearm9/battery.sh:23> echo '15:38:59 gate pid=21046 load1=20.82 (consecutive 0/2)'
++/tmp/pedradb-rearm9/battery.sh:24> [ 0 -lt 2 ']'
++/tmp/pedradb-rearm9/battery.sh:24> sleep 30
++/tmp/pedradb-rearm9/battery.sh:16> [ 0 -lt 2 ']'
++/tmp/pedradb-rearm9/battery.sh:17> l=+/tmp/pedradb-rearm9/battery.sh:17> load1
++load1:0> awk '{gsub(",", ".", $2); print $2}'
++load1:0> sysctl -n vm.loadavg
++/tmp/pedradb-rearm9/battery.sh:17> l=16.41 
++/tmp/pedradb-rearm9/battery.sh:18> awk -v 'l=16.41' 'BEGIN{exit !(l < 10)}'
++/tmp/pedradb-rearm9/battery.sh:21> c=0 
++/tmp/pedradb-rearm9/battery.sh:23> date +%H:%M:%S
++/tmp/pedradb-rearm9/battery.sh:23> echo '15:39:29 gate pid=21046 load1=16.41 (consecutive 0/2)'
++/tmp/pedradb-rearm9/battery.sh:24> [ 0 -lt 2 ']'
++/tmp/pedradb-rearm9/battery.sh:24> sleep 30
++/tmp/pedradb-rearm9/battery.sh:16> [ 0 -lt 2 ']'
++/tmp/pedradb-rearm9/battery.sh:17> l=+/tmp/pedradb-rearm9/battery.sh:17> load1
++load1:0> awk '{gsub(",", ".", $2); print $2}'
++load1:0> sysctl -n vm.loadavg
++/tmp/pedradb-rearm9/battery.sh:17> l=13.19 
++/tmp/pedradb-rearm9/battery.sh:18> awk -v 'l=13.19' 'BEGIN{exit !(l < 10)}'
++/tmp/pedradb-rearm9/battery.sh:21> c=0 
++/tmp/pedradb-rearm9/battery.sh:23> date +%H:%M:%S
++/tmp/pedradb-rearm9/battery.sh:23> echo '15:40:00 gate pid=21046 load1=13.19 (consecutive 0/2)'
++/tmp/pedradb-rearm9/battery.sh:24> [ 0 -lt 2 ']'
++/tmp/pedradb-rearm9/battery.sh:24> sleep 30
++/tmp/pedradb-rearm9/battery.sh:16> [ 0 -lt 2 ']'
++/tmp/pedradb-rearm9/battery.sh:17> l=+/tmp/pedradb-rearm9/battery.sh:17> load1
++load1:0> awk '{gsub(",", ".", $2); print $2}'
++load1:0> sysctl -n vm.loadavg
++/tmp/pedradb-rearm9/battery.sh:17> l=11.78 
++/tmp/pedradb-rearm9/battery.sh:18> awk -v 'l=11.78' 'BEGIN{exit !(l < 10)}'
++/tmp/pedradb-rearm9/battery.sh:21> c=0 
++/tmp/pedradb-rearm9/battery.sh:23> date +%H:%M:%S
++/tmp/pedradb-rearm9/battery.sh:23> echo '15:40:30 gate pid=21046 load1=11.78 (consecutive 0/2)'
++/tmp/pedradb-rearm9/battery.sh:24> [ 0 -lt 2 ']'
++/tmp/pedradb-rearm9/battery.sh:24> sleep 30
++/tmp/pedradb-rearm9/battery.sh:16> [ 0 -lt 2 ']'
++/tmp/pedradb-rearm9/battery.sh:17> l=+/tmp/pedradb-rearm9/battery.sh:17> load1
++load1:0> sysctl -n vm.loadavg
++load1:0> awk '{gsub(",", ".", $2); print $2}'
++/tmp/pedradb-rearm9/battery.sh:17> l=10.90 
++/tmp/pedradb-rearm9/battery.sh:18> awk -v 'l=10.90' 'BEGIN{exit !(l < 10)}'
++/tmp/pedradb-rearm9/battery.sh:21> c=0 
++/tmp/pedradb-rearm9/battery.sh:23> date +%H:%M:%S
++/tmp/pedradb-rearm9/battery.sh:23> echo '15:41:00 gate pid=21046 load1=10.90 (consecutive 0/2)'
++/tmp/pedradb-rearm9/battery.sh:24> [ 0 -lt 2 ']'
++/tmp/pedradb-rearm9/battery.sh:24> sleep 30
++/tmp/pedradb-rearm9/battery.sh:16> [ 0 -lt 2 ']'
++/tmp/pedradb-rearm9/battery.sh:17> l=+/tmp/pedradb-rearm9/battery.sh:17> load1
++load1:0> awk '{gsub(",", ".", $2); print $2}'
++load1:0> sysctl -n vm.loadavg
++/tmp/pedradb-rearm9/battery.sh:17> l=14.83 
++/tmp/pedradb-rearm9/battery.sh:18> awk -v 'l=14.83' 'BEGIN{exit !(l < 10)}'
++/tmp/pedradb-rearm9/battery.sh:21> c=0 
++/tmp/pedradb-rearm9/battery.sh:23> date +%H:%M:%S
++/tmp/pedradb-rearm9/battery.sh:23> echo '15:41:30 gate pid=21046 load1=14.83 (consecutive 0/2)'
++/tmp/pedradb-rearm9/battery.sh:24> [ 0 -lt 2 ']'
++/tmp/pedradb-rearm9/battery.sh:24> sleep 30
++/tmp/pedradb-rearm9/battery.sh:16> [ 0 -lt 2 ']'
++/tmp/pedradb-rearm9/battery.sh:17> l=+/tmp/pedradb-rearm9/battery.sh:17> load1
++load1:0> awk '{gsub(",", ".", $2); print $2}'
++load1:0> sysctl -n vm.loadavg
++/tmp/pedradb-rearm9/battery.sh:17> l=13.37 
++/tmp/pedradb-rearm9/battery.sh:18> awk -v 'l=13.37' 'BEGIN{exit !(l < 10)}'
++/tmp/pedradb-rearm9/battery.sh:21> c=0 
++/tmp/pedradb-rearm9/battery.sh:23> date +%H:%M:%S
++/tmp/pedradb-rearm9/battery.sh:23> echo '15:42:00 gate pid=21046 load1=13.37 (consecutive 0/2)'
++/tmp/pedradb-rearm9/battery.sh:24> [ 0 -lt 2 ']'
++/tmp/pedradb-rearm9/battery.sh:24> sleep 30
++/tmp/pedradb-rearm9/battery.sh:16> [ 0 -lt 2 ']'
++/tmp/pedradb-rearm9/battery.sh:17> l=+/tmp/pedradb-rearm9/battery.sh:17> load1
++load1:0> sysctl -n vm.loadavg
++load1:0> awk '{gsub(",", ".", $2); print $2}'
++/tmp/pedradb-rearm9/battery.sh:17> l=13.73 
++/tmp/pedradb-rearm9/battery.sh:18> awk -v 'l=13.73' 'BEGIN{exit !(l < 10)}'
++/tmp/pedradb-rearm9/battery.sh:21> c=0 
++/tmp/pedradb-rearm9/battery.sh:23> date +%H:%M:%S
++/tmp/pedradb-rearm9/battery.sh:23> echo '15:42:30 gate pid=21046 load1=13.73 (consecutive 0/2)'
++/tmp/pedradb-rearm9/battery.sh:24> [ 0 -lt 2 ']'
++/tmp/pedradb-rearm9/battery.sh:24> sleep 30
++/tmp/pedradb-rearm9/battery.sh:16> [ 0 -lt 2 ']'
++/tmp/pedradb-rearm9/battery.sh:17> l=+/tmp/pedradb-rearm9/battery.sh:17> load1
++load1:0> sysctl -n vm.loadavg
++load1:0> awk '{gsub(",", ".", $2); print $2}'
++/tmp/pedradb-rearm9/battery.sh:17> l=13.20 
++/tmp/pedradb-rearm9/battery.sh:18> awk -v 'l=13.20' 'BEGIN{exit !(l < 10)}'
++/tmp/pedradb-rearm9/battery.sh:21> c=0 
++/tmp/pedradb-rearm9/battery.sh:23> date +%H:%M:%S
++/tmp/pedradb-rearm9/battery.sh:23> echo '15:43:00 gate pid=21046 load1=13.20 (consecutive 0/2)'
++/tmp/pedradb-rearm9/battery.sh:24> [ 0 -lt 2 ']'
++/tmp/pedradb-rearm9/battery.sh:24> sleep 30
++/tmp/pedradb-rearm9/battery.sh:16> [ 0 -lt 2 ']'
++/tmp/pedradb-rearm9/battery.sh:17> l=+/tmp/pedradb-rearm9/battery.sh:17> load1
++load1:0> awk '{gsub(",", ".", $2); print $2}'
++load1:0> sysctl -n vm.loadavg
++/tmp/pedradb-rearm9/battery.sh:17> l=15.88 
++/tmp/pedradb-rearm9/battery.sh:18> awk -v 'l=15.88' 'BEGIN{exit !(l < 10)}'
++/tmp/pedradb-rearm9/battery.sh:21> c=0 
++/tmp/pedradb-rearm9/battery.sh:23> date +%H:%M:%S
++/tmp/pedradb-rearm9/battery.sh:23> echo '15:43:30 gate pid=21046 load1=15.88 (consecutive 0/2)'
++/tmp/pedradb-rearm9/battery.sh:24> [ 0 -lt 2 ']'
++/tmp/pedradb-rearm9/battery.sh:24> sleep 30
++/tmp/pedradb-rearm9/battery.sh:16> [ 0 -lt 2 ']'
++/tmp/pedradb-rearm9/battery.sh:17> l=+/tmp/pedradb-rearm9/battery.sh:17> load1
++load1:0> sysctl -n vm.loadavg
++load1:0> awk '{gsub(",", ".", $2); print $2}'
++/tmp/pedradb-rearm9/battery.sh:17> l=14.48 
++/tmp/pedradb-rearm9/battery.sh:18> awk -v 'l=14.48' 'BEGIN{exit !(l < 10)}'
++/tmp/pedradb-rearm9/battery.sh:21> c=0 
++/tmp/pedradb-rearm9/battery.sh:23> date +%H:%M:%S
++/tmp/pedradb-rearm9/battery.sh:23> echo '15:44:00 gate pid=21046 load1=14.48 (consecutive 0/2)'
++/tmp/pedradb-rearm9/battery.sh:24> [ 0 -lt 2 ']'
++/tmp/pedradb-rearm9/battery.sh:24> sleep 30
++/tmp/pedradb-rearm9/battery.sh:16> [ 0 -lt 2 ']'
++/tmp/pedradb-rearm9/battery.sh:17> l=+/tmp/pedradb-rearm9/battery.sh:17> load1
++load1:0> sysctl -n vm.loadavg
++load1:0> awk '{gsub(",", ".", $2); print $2}'
++/tmp/pedradb-rearm9/battery.sh:17> l=13.09 
++/tmp/pedradb-rearm9/battery.sh:18> awk -v 'l=13.09' 'BEGIN{exit !(l < 10)}'
++/tmp/pedradb-rearm9/battery.sh:21> c=0 
++/tmp/pedradb-rearm9/battery.sh:23> date +%H:%M:%S
++/tmp/pedradb-rearm9/battery.sh:23> echo '15:44:30 gate pid=21046 load1=13.09 (consecutive 0/2)'
++/tmp/pedradb-rearm9/battery.sh:24> [ 0 -lt 2 ']'
++/tmp/pedradb-rearm9/battery.sh:24> sleep 30
++/tmp/pedradb-rearm9/battery.sh:16> [ 0 -lt 2 ']'
++/tmp/pedradb-rearm9/battery.sh:17> l=+/tmp/pedradb-rearm9/battery.sh:17> load1
++load1:0> awk '{gsub(",", ".", $2); print $2}'
++load1:0> sysctl -n vm.loadavg
++/tmp/pedradb-rearm9/battery.sh:17> l=11.79 
++/tmp/pedradb-rearm9/battery.sh:18> awk -v 'l=11.79' 'BEGIN{exit !(l < 10)}'
++/tmp/pedradb-rearm9/battery.sh:21> c=0 
++/tmp/pedradb-rearm9/battery.sh:23> date +%H:%M:%S
++/tmp/pedradb-rearm9/battery.sh:23> echo '15:45:00 gate pid=21046 load1=11.79 (consecutive 0/2)'
++/tmp/pedradb-rearm9/battery.sh:24> [ 0 -lt 2 ']'
++/tmp/pedradb-rearm9/battery.sh:24> sleep 30
++/tmp/pedradb-rearm9/battery.sh:16> [ 0 -lt 2 ']'
++/tmp/pedradb-rearm9/battery.sh:17> l=+/tmp/pedradb-rearm9/battery.sh:17> load1
++load1:0> sysctl -n vm.loadavg
++load1:0> awk '{gsub(",", ".", $2); print $2}'
++/tmp/pedradb-rearm9/battery.sh:17> l=16.75 
++/tmp/pedradb-rearm9/battery.sh:18> awk -v 'l=16.75' 'BEGIN{exit !(l < 10)}'
++/tmp/pedradb-rearm9/battery.sh:21> c=0 
++/tmp/pedradb-rearm9/battery.sh:23> date +%H:%M:%S
++/tmp/pedradb-rearm9/battery.sh:23> echo '15:45:30 gate pid=21046 load1=16.75 (consecutive 0/2)'
++/tmp/pedradb-rearm9/battery.sh:24> [ 0 -lt 2 ']'
++/tmp/pedradb-rearm9/battery.sh:24> sleep 30
++/tmp/pedradb-rearm9/battery.sh:16> [ 0 -lt 2 ']'
++/tmp/pedradb-rearm9/battery.sh:17> l=+/tmp/pedradb-rearm9/battery.sh:17> load1
++load1:0> awk '{gsub(",", ".", $2); print $2}'
++load1:0> sysctl -n vm.loadavg
++/tmp/pedradb-rearm9/battery.sh:17> l=14.37 
++/tmp/pedradb-rearm9/battery.sh:18> awk -v 'l=14.37' 'BEGIN{exit !(l < 10)}'
++/tmp/pedradb-rearm9/battery.sh:21> c=0 
++/tmp/pedradb-rearm9/battery.sh:23> date +%H:%M:%S
++/tmp/pedradb-rearm9/battery.sh:23> echo '15:46:00 gate pid=21046 load1=14.37 (consecutive 0/2)'
++/tmp/pedradb-rearm9/battery.sh:24> [ 0 -lt 2 ']'
++/tmp/pedradb-rearm9/battery.sh:24> sleep 30
++/tmp/pedradb-rearm9/battery.sh:16> [ 0 -lt 2 ']'
++/tmp/pedradb-rearm9/battery.sh:17> l=+/tmp/pedradb-rearm9/battery.sh:17> load1
++load1:0> awk '{gsub(",", ".", $2); print $2}'
++load1:0> sysctl -n vm.loadavg
++/tmp/pedradb-rearm9/battery.sh:17> l=12.83 
++/tmp/pedradb-rearm9/battery.sh:18> awk -v 'l=12.83' 'BEGIN{exit !(l < 10)}'
++/tmp/pedradb-rearm9/battery.sh:21> c=0 
++/tmp/pedradb-rearm9/battery.sh:23> date +%H:%M:%S
++/tmp/pedradb-rearm9/battery.sh:23> echo '15:46:30 gate pid=21046 load1=12.83 (consecutive 0/2)'
++/tmp/pedradb-rearm9/battery.sh:24> [ 0 -lt 2 ']'
++/tmp/pedradb-rearm9/battery.sh:24> sleep 30
++/tmp/pedradb-rearm9/battery.sh:16> [ 0 -lt 2 ']'
++/tmp/pedradb-rearm9/battery.sh:17> l=+/tmp/pedradb-rearm9/battery.sh:17> load1
++load1:0> sysctl -n vm.loadavg
++load1:0> awk '{gsub(",", ".", $2); print $2}'
++/tmp/pedradb-rearm9/battery.sh:17> l=11.01 
++/tmp/pedradb-rearm9/battery.sh:18> awk -v 'l=11.01' 'BEGIN{exit !(l < 10)}'
++/tmp/pedradb-rearm9/battery.sh:21> c=0 
++/tmp/pedradb-rearm9/battery.sh:23> date +%H:%M:%S
++/tmp/pedradb-rearm9/battery.sh:23> echo '15:47:00 gate pid=21046 load1=11.01 (consecutive 0/2)'
++/tmp/pedradb-rearm9/battery.sh:24> [ 0 -lt 2 ']'
++/tmp/pedradb-rearm9/battery.sh:24> sleep 30
++/tmp/pedradb-rearm9/battery.sh:16> [ 0 -lt 2 ']'
++/tmp/pedradb-rearm9/battery.sh:17> l=+/tmp/pedradb-rearm9/battery.sh:17> load1
++load1:0> sysctl -n vm.loadavg
++load1:0> awk '{gsub(",", ".", $2); print $2}'
++/tmp/pedradb-rearm9/battery.sh:17> l=9.75 
++/tmp/pedradb-rearm9/battery.sh:18> awk -v 'l=9.75' 'BEGIN{exit !(l < 10)}'
++/tmp/pedradb-rearm9/battery.sh:19> c=1 
++/tmp/pedradb-rearm9/battery.sh:23> date +%H:%M:%S
++/tmp/pedradb-rearm9/battery.sh:23> echo '15:47:30 gate pid=21046 load1=9.75 (consecutive 1/2)'
++/tmp/pedradb-rearm9/battery.sh:24> [ 1 -lt 2 ']'
++/tmp/pedradb-rearm9/battery.sh:24> sleep 30
++/tmp/pedradb-rearm9/battery.sh:16> [ 1 -lt 2 ']'
++/tmp/pedradb-rearm9/battery.sh:17> l=+/tmp/pedradb-rearm9/battery.sh:17> load1
++load1:0> sysctl -n vm.loadavg
++load1:0> awk '{gsub(",", ".", $2); print $2}'
++/tmp/pedradb-rearm9/battery.sh:17> l=8.58 
++/tmp/pedradb-rearm9/battery.sh:18> awk -v 'l=8.58' 'BEGIN{exit !(l < 10)}'
++/tmp/pedradb-rearm9/battery.sh:19> c=2 
++/tmp/pedradb-rearm9/battery.sh:23> date +%H:%M:%S
++/tmp/pedradb-rearm9/battery.sh:23> echo '15:48:00 gate pid=21046 load1=8.58 (consecutive 2/2)'
++/tmp/pedradb-rearm9/battery.sh:24> [ 2 -lt 2 ']'
++/tmp/pedradb-rearm9/battery.sh:16> [ 2 -lt 2 ']'
++/tmp/pedradb-rearm9/battery.sh:26> date '+%Y-%m-%d %H:%M:%S'
++/tmp/pedradb-rearm9/battery.sh:26> echo '=== rearm9 armed rfc-0054-gaps HEAD=520538e pid=21046 2026-08-23 15:48:00 ==='
++/tmp/pedradb-rearm9/battery.sh:28> :
++/tmp/pedradb-rearm9/battery.sh:29> WD=71134 
++/tmp/pedradb-rearm9/battery.sh:30> trap 'kill $WD 2>/dev/null || true' EXIT
++/tmp/pedradb-rearm9/battery.sh:32> r=1
++/tmp/pedradb-rearm9/battery.sh:33> leg=async
++/tmp/pedradb-rearm9/battery.sh:28> date +%H:%M:%S
++/tmp/pedradb-rearm9/battery.sh:34> mkdir -p findings/2026-08-23-rearm9/r1/async
++/tmp/pedradb-rearm9/battery.sh:28> load1
++/tmp/pedradb-rearm9/battery.sh:35> case async (async)
++load1:0> sysctl -n vm.loadavg
++load1:0> awk '{gsub(",", ".", $2); print $2}'
++/tmp/pedradb-rearm9/battery.sh:36> env 'PEDRA_PARITY_ASYNC=1' 'ROCKS_YCSB_OPS=2000' /tmp/pedradb-rearm9/rocks-parity-bench findings/2026-08-23-rearm9/r1/async compat
++/tmp/pedradb-rearm9/battery.sh:28> echo '15:48:00 maxpoll load1=8.58'
++/tmp/pedradb-rearm9/battery.sh:28> sleep 20
+[rocks-parity] engine=compat suites=ycsb,deps records=1024 ops=2000 payload=100 dist=uniform batch=32
+[rocks-parity] seed 1024 records in 0.0s
+[rocks-parity] ycsb_a done ops=2000 updates=1002 inserts=0 scans=0 errors=0
+[rocks-parity] ycsb_b done ops=2000 updates=108 inserts=0 scans=0 errors=0
+[rocks-parity] ycsb_c done ops=2000 updates=0 inserts=0 scans=0 errors=0
+[rocks-parity] ycsb_d done ops=2000 updates=0 inserts=104 scans=0 errors=0
+[rocks-parity] ycsb_e done ops=2000 updates=0 inserts=97 scans=1903 errors=0
+[rocks-parity] ycsb_f done ops=2000 updates=1048 inserts=0 scans=0 errors=0
+[rocks-parity] deps seed 1024×2 versions in 0.0s
+[rocks-parity] deps_apply_batch done txns=64000 errors=0
+[rocks-parity] deps_mvcc_latest done reads=2000 errors=0
+[rocks-parity] deps_scan done scans=2000 errors=0
+[rocks-parity] deps_raftlog enter mem_entries=267575
+[rocks-parity] deps_raftlog split p50 build=0.67µs batch=5.46µs mem_after=299575
+[rocks-parity] deps_raftlog done appends=32000 reads=250 errors=0
+[rocks-parity] deps_cache_overwrite done writes=2000 errors=0
+[rocks-parity] deps_lock_prewrite done txns=64000 errors=0
+[rocks-parity] wrote findings/2026-08-23-rearm9/r1/async/rocks_parity_bench.json (ts=1787510881)
++/tmp/pedradb-rearm9/battery.sh:41> date +%H:%M:%S
++/tmp/pedradb-rearm9/battery.sh:41> load1
++load1:0> sysctl -n vm.loadavg
++load1:0> awk '{gsub(",", ".", $2); print $2}'
++/tmp/pedradb-rearm9/battery.sh:41> echo '15:48:01 r1 async done load1=8.58'
++/tmp/pedradb-rearm9/battery.sh:33> leg=kvr
++/tmp/pedradb-rearm9/battery.sh:34> mkdir -p findings/2026-08-23-rearm9/r1/kvr
++/tmp/pedradb-rearm9/battery.sh:35> case kvr (async)
++/tmp/pedradb-rearm9/battery.sh:35> case kvr (kvr)
++/tmp/pedradb-rearm9/battery.sh:37> env 'PEDRA_PARITY_ASYNC=1' 'ROCKS_YCSB_OPS=2000' 'ROCKS_PARITY_SUITE=kvrocks' /tmp/pedradb-rearm9/rocks-parity-bench findings/2026-08-23-rearm9/r1/kvr compat
+[rocks-parity] engine=compat suites=kvrocks records=1024 ops=2000 payload=100 dist=uniform batch=32
+[rocks-parity] kvrocks_get done gets=2000 errors=0
+[rocks-parity] kvrocks_set done sets=2000 errors=0
+[rocks-parity] kvrocks_pipelined_set done puts=64000 errors=0
+[rocks-parity] kvrocks_scan done scans=2000 errors=0
+[rocks-parity] kvrocks_blob_set done sets=2000 errors=0
+[rocks-parity] kvrocks_set_mc50 done ops=100000 errors=0
+[rocks-parity] write_group submits=107280 queued=0 groups=107280 ops=107280 avg_group=1.00
+[rocks-parity] wrote findings/2026-08-23-rearm9/r1/kvr/rocks_parity_bench.json (ts=1787510881)
++/tmp/pedradb-rearm9/battery.sh:41> date +%H:%M:%S
++/tmp/pedradb-rearm9/battery.sh:41> load1
++load1:0> sysctl -n vm.loadavg
++load1:0> awk '{gsub(",", ".", $2); print $2}'
++/tmp/pedradb-rearm9/battery.sh:41> echo '15:48:01 r1 kvr done load1=8.58'
++/tmp/pedradb-rearm9/battery.sh:33> leg=rocks
++/tmp/pedradb-rearm9/battery.sh:34> mkdir -p findings/2026-08-23-rearm9/r1/rocks
++/tmp/pedradb-rearm9/battery.sh:35> case rocks (async)
++/tmp/pedradb-rearm9/battery.sh:35> case rocks (kvr)
++/tmp/pedradb-rearm9/battery.sh:35> case rocks (rocks)
++/tmp/pedradb-rearm9/battery.sh:38> env 'ROCKS_PARITY_SYNC=0' 'ROCKS_YCSB_OPS=2000' /tmp/pedradb-rearm9/rocks-parity-bench findings/2026-08-23-rearm9/r1/rocks rocksdb
+[rocks-parity] engine=rocksdb suites=ycsb,deps records=1024 ops=2000 payload=100 dist=uniform batch=32
+[rocks-parity] seed 1024 records in 0.0s
+[rocks-parity] ycsb_a done ops=2000 updates=1002 inserts=0 scans=0 errors=0
+[rocks-parity] ycsb_b done ops=2000 updates=108 inserts=0 scans=0 errors=0
+[rocks-parity] ycsb_c done ops=2000 updates=0 inserts=0 scans=0 errors=0
+[rocks-parity] ycsb_d done ops=2000 updates=0 inserts=104 scans=0 errors=0
+[rocks-parity] ycsb_e done ops=2000 updates=0 inserts=97 scans=1903 errors=0
+[rocks-parity] ycsb_f done ops=2000 updates=1048 inserts=0 scans=0 errors=0
+[rocks-parity] deps seed 1024×2 versions in 0.0s
+[rocks-parity] deps_apply_batch done txns=64000 errors=0
+[rocks-parity] deps_mvcc_latest done reads=2000 errors=0
+[rocks-parity] deps_scan done scans=2000 errors=0
+[rocks-parity] deps_raftlog enter mem_entries=?
+[rocks-parity] deps_raftlog split p50 build=0.67µs batch=6.25µs mem_after=?
+[rocks-parity] deps_raftlog done appends=32000 reads=250 errors=0
+[rocks-parity] deps_cache_overwrite done writes=2000 errors=0
+[rocks-parity] deps_lock_prewrite done txns=64000 errors=0
+[rocks-parity] wrote findings/2026-08-23-rearm9/r1/rocks/rocks_parity_bench.json (ts=1787510881)
++/tmp/pedradb-rearm9/battery.sh:41> date +%H:%M:%S
++/tmp/pedradb-rearm9/battery.sh:41> load1
++load1:0> sysctl -n vm.loadavg
++load1:0> awk '{gsub(",", ".", $2); print $2}'
++/tmp/pedradb-rearm9/battery.sh:41> echo '15:48:01 r1 rocks done load1=8.58'
++/tmp/pedradb-rearm9/battery.sh:33> leg=rocks-kvr
++/tmp/pedradb-rearm9/battery.sh:34> mkdir -p findings/2026-08-23-rearm9/r1/rocks-kvr
++/tmp/pedradb-rearm9/battery.sh:35> case rocks-kvr (async)
++/tmp/pedradb-rearm9/battery.sh:35> case rocks-kvr (kvr)
++/tmp/pedradb-rearm9/battery.sh:35> case rocks-kvr (rocks)
++/tmp/pedradb-rearm9/battery.sh:35> case rocks-kvr (rocks-kvr)
++/tmp/pedradb-rearm9/battery.sh:39> env 'ROCKS_PARITY_SYNC=0' 'ROCKS_YCSB_OPS=2000' 'ROCKS_PARITY_SUITE=kvrocks' /tmp/pedradb-rearm9/rocks-parity-bench findings/2026-08-23-rearm9/r1/rocks-kvr rocksdb
+[rocks-parity] engine=rocksdb suites=kvrocks records=1024 ops=2000 payload=100 dist=uniform batch=32
+[rocks-parity] kvrocks_get done gets=2000 errors=0
+[rocks-parity] kvrocks_set done sets=2000 errors=0
+[rocks-parity] kvrocks_pipelined_set done puts=64000 errors=0
+[rocks-parity] kvrocks_scan done scans=2000 errors=0
+[rocks-parity] kvrocks_blob_set done sets=2000 errors=0
+[rocks-parity] kvrocks_set_mc50 done ops=100000 errors=0
+[rocks-parity] wrote findings/2026-08-23-rearm9/r1/rocks-kvr/rocks_parity_bench.json (ts=1787510882)
++/tmp/pedradb-rearm9/battery.sh:41> date +%H:%M:%S
++/tmp/pedradb-rearm9/battery.sh:41> load1
++load1:0> sysctl -n vm.loadavg
++load1:0> awk '{gsub(",", ".", $2); print $2}'
++/tmp/pedradb-rearm9/battery.sh:41> echo '15:48:02 r1 rocks-kvr done load1=8.58'
++/tmp/pedradb-rearm9/battery.sh:32> r=2
++/tmp/pedradb-rearm9/battery.sh:33> leg=async
++/tmp/pedradb-rearm9/battery.sh:34> mkdir -p findings/2026-08-23-rearm9/r2/async
++/tmp/pedradb-rearm9/battery.sh:35> case async (async)
++/tmp/pedradb-rearm9/battery.sh:36> env 'PEDRA_PARITY_ASYNC=1' 'ROCKS_YCSB_OPS=2000' /tmp/pedradb-rearm9/rocks-parity-bench findings/2026-08-23-rearm9/r2/async compat
+[rocks-parity] engine=compat suites=ycsb,deps records=1024 ops=2000 payload=100 dist=uniform batch=32
+[rocks-parity] seed 1024 records in 0.0s
+[rocks-parity] ycsb_a done ops=2000 updates=1002 inserts=0 scans=0 errors=0
+[rocks-parity] ycsb_b done ops=2000 updates=108 inserts=0 scans=0 errors=0
+[rocks-parity] ycsb_c done ops=2000 updates=0 inserts=0 scans=0 errors=0
+[rocks-parity] ycsb_d done ops=2000 updates=0 inserts=104 scans=0 errors=0
+[rocks-parity] ycsb_e done ops=2000 updates=0 inserts=97 scans=1903 errors=0
+[rocks-parity] ycsb_f done ops=2000 updates=1048 inserts=0 scans=0 errors=0
+[rocks-parity] deps seed 1024×2 versions in 0.0s
+[rocks-parity] deps_apply_batch done txns=64000 errors=0
+[rocks-parity] deps_mvcc_latest done reads=2000 errors=0
+[rocks-parity] deps_scan done scans=2000 errors=0
+[rocks-parity] deps_raftlog enter mem_entries=267575
+[rocks-parity] deps_raftlog split p50 build=0.67µs batch=5.33µs mem_after=299575
+[rocks-parity] deps_raftlog done appends=32000 reads=250 errors=0
+[rocks-parity] deps_cache_overwrite done writes=2000 errors=0
+[rocks-parity] deps_lock_prewrite done txns=64000 errors=0
+[rocks-parity] wrote findings/2026-08-23-rearm9/r2/async/rocks_parity_bench.json (ts=1787510882)
++/tmp/pedradb-rearm9/battery.sh:41> date +%H:%M:%S
++/tmp/pedradb-rearm9/battery.sh:41> load1
++load1:0> sysctl -n vm.loadavg
++load1:0> awk '{gsub(",", ".", $2); print $2}'
++/tmp/pedradb-rearm9/battery.sh:41> echo '15:48:02 r2 async done load1=8.45'
++/tmp/pedradb-rearm9/battery.sh:33> leg=kvr
++/tmp/pedradb-rearm9/battery.sh:34> mkdir -p findings/2026-08-23-rearm9/r2/kvr
++/tmp/pedradb-rearm9/battery.sh:35> case kvr (async)
++/tmp/pedradb-rearm9/battery.sh:35> case kvr (kvr)
++/tmp/pedradb-rearm9/battery.sh:37> env 'PEDRA_PARITY_ASYNC=1' 'ROCKS_YCSB_OPS=2000' 'ROCKS_PARITY_SUITE=kvrocks' /tmp/pedradb-rearm9/rocks-parity-bench findings/2026-08-23-rearm9/r2/kvr compat
+[rocks-parity] engine=compat suites=kvrocks records=1024 ops=2000 payload=100 dist=uniform batch=32
+[rocks-parity] kvrocks_get done gets=2000 errors=0
+[rocks-parity] kvrocks_set done sets=2000 errors=0
+[rocks-parity] kvrocks_pipelined_set done puts=64000 errors=0
+[rocks-parity] kvrocks_scan done scans=2000 errors=0
+[rocks-parity] kvrocks_blob_set done sets=2000 errors=0
+[rocks-parity] kvrocks_set_mc50 done ops=100000 errors=0
+[rocks-parity] write_group submits=107280 queued=0 groups=107280 ops=107280 avg_group=1.00
+[rocks-parity] wrote findings/2026-08-23-rearm9/r2/kvr/rocks_parity_bench.json (ts=1787510883)
++/tmp/pedradb-rearm9/battery.sh:41> date +%H:%M:%S
++/tmp/pedradb-rearm9/battery.sh:41> load1
++load1:0> sysctl -n vm.loadavg
++load1:0> awk '{gsub(",", ".", $2); print $2}'
++/tmp/pedradb-rearm9/battery.sh:41> echo '15:48:03 r2 kvr done load1=8.45'
++/tmp/pedradb-rearm9/battery.sh:33> leg=rocks
++/tmp/pedradb-rearm9/battery.sh:34> mkdir -p findings/2026-08-23-rearm9/r2/rocks
++/tmp/pedradb-rearm9/battery.sh:35> case rocks (async)
++/tmp/pedradb-rearm9/battery.sh:35> case rocks (kvr)
++/tmp/pedradb-rearm9/battery.sh:35> case rocks (rocks)
++/tmp/pedradb-rearm9/battery.sh:38> env 'ROCKS_PARITY_SYNC=0' 'ROCKS_YCSB_OPS=2000' /tmp/pedradb-rearm9/rocks-parity-bench findings/2026-08-23-rearm9/r2/rocks rocksdb
+[rocks-parity] engine=rocksdb suites=ycsb,deps records=1024 ops=2000 payload=100 dist=uniform batch=32
+[rocks-parity] seed 1024 records in 0.0s
+[rocks-parity] ycsb_a done ops=2000 updates=1002 inserts=0 scans=0 errors=0
+[rocks-parity] ycsb_b done ops=2000 updates=108 inserts=0 scans=0 errors=0
+[rocks-parity] ycsb_c done ops=2000 updates=0 inserts=0 scans=0 errors=0
+[rocks-parity] ycsb_d done ops=2000 updates=0 inserts=104 scans=0 errors=0
+[rocks-parity] ycsb_e done ops=2000 updates=0 inserts=97 scans=1903 errors=0
+[rocks-parity] ycsb_f done ops=2000 updates=1048 inserts=0 scans=0 errors=0
+[rocks-parity] deps seed 1024×2 versions in 0.0s
+[rocks-parity] deps_apply_batch done txns=64000 errors=0
+[rocks-parity] deps_mvcc_latest done reads=2000 errors=0
+[rocks-parity] deps_scan done scans=2000 errors=0
+[rocks-parity] deps_raftlog enter mem_entries=?
+[rocks-parity] deps_raftlog split p50 build=0.67µs batch=6.25µs mem_after=?
+[rocks-parity] deps_raftlog done appends=32000 reads=250 errors=0
+[rocks-parity] deps_cache_overwrite done writes=2000 errors=0
+[rocks-parity] deps_lock_prewrite done txns=64000 errors=0
+[rocks-parity] wrote findings/2026-08-23-rearm9/r2/rocks/rocks_parity_bench.json (ts=1787510883)
++/tmp/pedradb-rearm9/battery.sh:41> date +%H:%M:%S
++/tmp/pedradb-rearm9/battery.sh:41> load1
++load1:0> sysctl -n vm.loadavg
++load1:0> awk '{gsub(",", ".", $2); print $2}'
++/tmp/pedradb-rearm9/battery.sh:41> echo '15:48:03 r2 rocks done load1=8.45'
++/tmp/pedradb-rearm9/battery.sh:33> leg=rocks-kvr
++/tmp/pedradb-rearm9/battery.sh:34> mkdir -p findings/2026-08-23-rearm9/r2/rocks-kvr
++/tmp/pedradb-rearm9/battery.sh:35> case rocks-kvr (async)
++/tmp/pedradb-rearm9/battery.sh:35> case rocks-kvr (kvr)
++/tmp/pedradb-rearm9/battery.sh:35> case rocks-kvr (rocks)
++/tmp/pedradb-rearm9/battery.sh:35> case rocks-kvr (rocks-kvr)
++/tmp/pedradb-rearm9/battery.sh:39> env 'ROCKS_PARITY_SYNC=0' 'ROCKS_YCSB_OPS=2000' 'ROCKS_PARITY_SUITE=kvrocks' /tmp/pedradb-rearm9/rocks-parity-bench findings/2026-08-23-rearm9/r2/rocks-kvr rocksdb
+[rocks-parity] engine=rocksdb suites=kvrocks records=1024 ops=2000 payload=100 dist=uniform batch=32
+[rocks-parity] kvrocks_get done gets=2000 errors=0
+[rocks-parity] kvrocks_set done sets=2000 errors=0
+[rocks-parity] kvrocks_pipelined_set done puts=64000 errors=0
+[rocks-parity] kvrocks_scan done scans=2000 errors=0
+[rocks-parity] kvrocks_blob_set done sets=2000 errors=0
+[rocks-parity] kvrocks_set_mc50 done ops=100000 errors=0
+[rocks-parity] wrote findings/2026-08-23-rearm9/r2/rocks-kvr/rocks_parity_bench.json (ts=1787510884)
++/tmp/pedradb-rearm9/battery.sh:41> date +%H:%M:%S
++/tmp/pedradb-rearm9/battery.sh:41> load1
++load1:0> sysctl -n vm.loadavg
++load1:0> awk '{gsub(",", ".", $2); print $2}'
++/tmp/pedradb-rearm9/battery.sh:41> echo '15:48:04 r2 rocks-kvr done load1=8.45'
++/tmp/pedradb-rearm9/battery.sh:32> r=3
++/tmp/pedradb-rearm9/battery.sh:33> leg=async
++/tmp/pedradb-rearm9/battery.sh:34> mkdir -p findings/2026-08-23-rearm9/r3/async
++/tmp/pedradb-rearm9/battery.sh:35> case async (async)
++/tmp/pedradb-rearm9/battery.sh:36> env 'PEDRA_PARITY_ASYNC=1' 'ROCKS_YCSB_OPS=2000' /tmp/pedradb-rearm9/rocks-parity-bench findings/2026-08-23-rearm9/r3/async compat
+[rocks-parity] engine=compat suites=ycsb,deps records=1024 ops=2000 payload=100 dist=uniform batch=32
+[rocks-parity] seed 1024 records in 0.0s
+[rocks-parity] ycsb_a done ops=2000 updates=1002 inserts=0 scans=0 errors=0
+[rocks-parity] ycsb_b done ops=2000 updates=108 inserts=0 scans=0 errors=0
+[rocks-parity] ycsb_c done ops=2000 updates=0 inserts=0 scans=0 errors=0
+[rocks-parity] ycsb_d done ops=2000 updates=0 inserts=104 scans=0 errors=0
+[rocks-parity] ycsb_e done ops=2000 updates=0 inserts=97 scans=1903 errors=0
+[rocks-parity] ycsb_f done ops=2000 updates=1048 inserts=0 scans=0 errors=0
+[rocks-parity] deps seed 1024×2 versions in 0.0s
+[rocks-parity] deps_apply_batch done txns=64000 errors=0
+[rocks-parity] deps_mvcc_latest done reads=2000 errors=0
+[rocks-parity] deps_scan done scans=2000 errors=0
+[rocks-parity] deps_raftlog enter mem_entries=267575
+[rocks-parity] deps_raftlog split p50 build=0.62µs batch=5.21µs mem_after=299575
+[rocks-parity] deps_raftlog done appends=32000 reads=250 errors=0
+[rocks-parity] deps_cache_overwrite done writes=2000 errors=0
+[rocks-parity] deps_lock_prewrite done txns=64000 errors=0
+[rocks-parity] wrote findings/2026-08-23-rearm9/r3/async/rocks_parity_bench.json (ts=1787510884)
++/tmp/pedradb-rearm9/battery.sh:41> date +%H:%M:%S
++/tmp/pedradb-rearm9/battery.sh:41> load1
++load1:0> sysctl -n vm.loadavg
++load1:0> awk '{gsub(",", ".", $2); print $2}'
++/tmp/pedradb-rearm9/battery.sh:41> echo '15:48:04 r3 async done load1=8.45'
++/tmp/pedradb-rearm9/battery.sh:33> leg=kvr
++/tmp/pedradb-rearm9/battery.sh:34> mkdir -p findings/2026-08-23-rearm9/r3/kvr
++/tmp/pedradb-rearm9/battery.sh:35> case kvr (async)
++/tmp/pedradb-rearm9/battery.sh:35> case kvr (kvr)
++/tmp/pedradb-rearm9/battery.sh:37> env 'PEDRA_PARITY_ASYNC=1' 'ROCKS_YCSB_OPS=2000' 'ROCKS_PARITY_SUITE=kvrocks' /tmp/pedradb-rearm9/rocks-parity-bench findings/2026-08-23-rearm9/r3/kvr compat
+[rocks-parity] engine=compat suites=kvrocks records=1024 ops=2000 payload=100 dist=uniform batch=32
+[rocks-parity] kvrocks_get done gets=2000 errors=0
+[rocks-parity] kvrocks_set done sets=2000 errors=0
+[rocks-parity] kvrocks_pipelined_set done puts=64000 errors=0
+[rocks-parity] kvrocks_scan done scans=2000 errors=0
+[rocks-parity] kvrocks_blob_set done sets=2000 errors=0
+[rocks-parity] kvrocks_set_mc50 done ops=100000 errors=0
+[rocks-parity] write_group submits=107280 queued=0 groups=107280 ops=107280 avg_group=1.00
+[rocks-parity] wrote findings/2026-08-23-rearm9/r3/kvr/rocks_parity_bench.json (ts=1787510884)
++/tmp/pedradb-rearm9/battery.sh:41> date +%H:%M:%S
++/tmp/pedradb-rearm9/battery.sh:41> load1
++load1:0> sysctl -n vm.loadavg
++load1:0> awk '{gsub(",", ".", $2); print $2}'
++/tmp/pedradb-rearm9/battery.sh:41> echo '15:48:04 r3 kvr done load1=8.45'
++/tmp/pedradb-rearm9/battery.sh:33> leg=rocks
++/tmp/pedradb-rearm9/battery.sh:34> mkdir -p findings/2026-08-23-rearm9/r3/rocks
++/tmp/pedradb-rearm9/battery.sh:35> case rocks (async)
++/tmp/pedradb-rearm9/battery.sh:35> case rocks (kvr)
++/tmp/pedradb-rearm9/battery.sh:35> case rocks (rocks)
++/tmp/pedradb-rearm9/battery.sh:38> env 'ROCKS_PARITY_SYNC=0' 'ROCKS_YCSB_OPS=2000' /tmp/pedradb-rearm9/rocks-parity-bench findings/2026-08-23-rearm9/r3/rocks rocksdb
+[rocks-parity] engine=rocksdb suites=ycsb,deps records=1024 ops=2000 payload=100 dist=uniform batch=32
+[rocks-parity] seed 1024 records in 0.0s
+[rocks-parity] ycsb_a done ops=2000 updates=1002 inserts=0 scans=0 errors=0
+[rocks-parity] ycsb_b done ops=2000 updates=108 inserts=0 scans=0 errors=0
+[rocks-parity] ycsb_c done ops=2000 updates=0 inserts=0 scans=0 errors=0
+[rocks-parity] ycsb_d done ops=2000 updates=0 inserts=104 scans=0 errors=0
+[rocks-parity] ycsb_e done ops=2000 updates=0 inserts=97 scans=1903 errors=0
+[rocks-parity] ycsb_f done ops=2000 updates=1048 inserts=0 scans=0 errors=0
+[rocks-parity] deps seed 1024×2 versions in 0.0s
+[rocks-parity] deps_apply_batch done txns=64000 errors=0
+[rocks-parity] deps_mvcc_latest done reads=2000 errors=0
+[rocks-parity] deps_scan done scans=2000 errors=0
+[rocks-parity] deps_raftlog enter mem_entries=?
+[rocks-parity] deps_raftlog split p50 build=0.67µs batch=6.12µs mem_after=?
+[rocks-parity] deps_raftlog done appends=32000 reads=250 errors=0
+[rocks-parity] deps_cache_overwrite done writes=2000 errors=0
+[rocks-parity] deps_lock_prewrite done txns=64000 errors=0
+[rocks-parity] wrote findings/2026-08-23-rearm9/r3/rocks/rocks_parity_bench.json (ts=1787510885)
++/tmp/pedradb-rearm9/battery.sh:41> date +%H:%M:%S
++/tmp/pedradb-rearm9/battery.sh:41> load1
++load1:0> sysctl -n vm.loadavg
++load1:0> awk '{gsub(",", ".", $2); print $2}'
++/tmp/pedradb-rearm9/battery.sh:41> echo '15:48:05 r3 rocks done load1=8.45'
++/tmp/pedradb-rearm9/battery.sh:33> leg=rocks-kvr
++/tmp/pedradb-rearm9/battery.sh:34> mkdir -p findings/2026-08-23-rearm9/r3/rocks-kvr
++/tmp/pedradb-rearm9/battery.sh:35> case rocks-kvr (async)
++/tmp/pedradb-rearm9/battery.sh:35> case rocks-kvr (kvr)
++/tmp/pedradb-rearm9/battery.sh:35> case rocks-kvr (rocks)
++/tmp/pedradb-rearm9/battery.sh:35> case rocks-kvr (rocks-kvr)
++/tmp/pedradb-rearm9/battery.sh:39> env 'ROCKS_PARITY_SYNC=0' 'ROCKS_YCSB_OPS=2000' 'ROCKS_PARITY_SUITE=kvrocks' /tmp/pedradb-rearm9/rocks-parity-bench findings/2026-08-23-rearm9/r3/rocks-kvr rocksdb
+[rocks-parity] engine=rocksdb suites=kvrocks records=1024 ops=2000 payload=100 dist=uniform batch=32
+[rocks-parity] kvrocks_get done gets=2000 errors=0
+[rocks-parity] kvrocks_set done sets=2000 errors=0
+[rocks-parity] kvrocks_pipelined_set done puts=64000 errors=0
+[rocks-parity] kvrocks_scan done scans=2000 errors=0
+[rocks-parity] kvrocks_blob_set done sets=2000 errors=0
+[rocks-parity] kvrocks_set_mc50 done ops=100000 errors=0
+[rocks-parity] wrote findings/2026-08-23-rearm9/r3/rocks-kvr/rocks_parity_bench.json (ts=1787510886)
++/tmp/pedradb-rearm9/battery.sh:41> date +%H:%M:%S
++/tmp/pedradb-rearm9/battery.sh:41> load1
++load1:0> sysctl -n vm.loadavg
++load1:0> awk '{gsub(",", ".", $2); print $2}'
++/tmp/pedradb-rearm9/battery.sh:41> echo '15:48:06 r3 rocks-kvr done load1=8.45'
++/tmp/pedradb-rearm9/battery.sh:44> kill 71134
++/tmp/pedradb-rearm9/battery.sh:45> date +%H:%M:%S
++/tmp/pedradb-rearm9/battery.sh:45> echo 'BATTERY_DONE 15:48:06'
++/tmp/pedradb-rearm9/battery.sh:46> kill 71134
++/tmp/pedradb-rearm9/battery.sh:46> true

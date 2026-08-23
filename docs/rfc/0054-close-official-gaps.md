@@ -5,7 +5,8 @@
 **Parents:** [0041](0041-2x-rocks-default.md) (piso 2× vs Rocks default),
 [0044](0044-async-class-5x-rocks.md) (coluna async 5×),
 [AGENTS.md](../../AGENTS.md) (peer = `sync=false`)
-**Evidence:** [`findings/2026-08-23-rearm8/`](../../findings/2026-08-23-rearm8/)
+**Evidence:** [`findings/2026-08-23-rearm8/`](../../findings/2026-08-23-rearm8/),
+[`findings/2026-08-23-rearm9/`](../../findings/2026-08-23-rearm9/) (P0.2)
 
 ## Background
 
@@ -13,18 +14,21 @@
   mesma classe do peer oficial. Kernel `OpenOptions.sync` **continua true**.
   `wal_full_fsync=true` permanece: `set_sync(true)` no Darwin **é**
   `F_FULLFSYNC` (CMake-Rocks), não um knob extra na hora do Ok.
-- Scoreboard oficial rearm8 (gate load<10 ×2, peer `sync:false`):
-  **13/18 ≥ 2×**. Ganhamos em quase tudo. O que falta é curto e nomeado.
+- Scoreboard rearm8 (baseline deste RFC): 13/18 ≥ 2×. rearm9 (com P0.0+P0.2):
+  raftlog 0,59→**1,05** (alvo P0 cumprido); lock_prewrite 1,96 e apply 1,93
+  caíram para a borda do piso (ruído de box + peer mais rápido), mvcc 1,41,
+  blob 1,25 (peer acelerou), scan 1,80 — os quatro seguem como P1. Ganhamos
+  em quase tudo; o que falta é curto e nomeado.
 
 | forma | × Rocks | alvo deste RFC |
 |---|---:|---|
 | kvrocks_get / pipelined_set / ycsb_e | 5,58 / 5,20 / 5,44 | já fechado (0044) |
 | A/D/SET/C/B/F / lock / mc50 | 4,6 … 2,12 | já ≥2 |
-| **deps_apply_batch** | 2,08 med, **2/3** | P1.4: 3/3 ≥2 |
-| deps_mvcc_latest | 1,79 | P1.1 ≥2 |
-| kvrocks_blob_set | 1,70 | P1.2 ≥2 |
-| deps_scan | 1,68 | P1.3 ≥2 |
-| **deps_raftlog** | **0,59** | P0: **>1×** |
+| **deps_apply_batch** | 1,93 (rearm9) | P1.4: 3/3 ≥2 |
+| deps_mvcc_latest | 1,41 (rearm9) | P1.1 ≥2 |
+| kvrocks_blob_set | 1,25 (peer 31,6k→90,2k no rearm9) | P1.2 ≥2 |
+| deps_scan | 1,80 (rearm9) | P1.3 ≥2 |
+| **deps_raftlog** | ~~0,59~~ → **1,05 (3/3, rearm9)** | **P0.2 fechado** |
 
 - `deps_raftlog` já não é cauda: stall APFS (F_PREALLOCATE) eliminado;
   máx 0,063–0,098 ms ≈ peer 0,047–0,068. Gap = caminho:
@@ -57,17 +61,16 @@
 - [x] **P0.1** Example `raftlog_submit_probe` — status: `done`
       (release: write-core p50 **3,79 µs**; bench-shape p50 **5,50 µs**.
       Oficial 13–15 µs ainda é o processo do harness, não o encode)
-- [ ] **P0.2** Cortar o gap nomeado por P0.1 até `deps_raftlog` **>1×** numa
-      bateria quieta (1/3 já conta como evidência; fecha com 3/3) — status: `doing`
-      (finding `rfc0054-p02`: gap **não** era memtable — fases por forma
-      mostram mem 2,6 µs igual nos dois runs; era `publish` 0,57→4,2 µs:
-      `CountCache::record_dirty` alocando 2 `Box`/key/publish depois que um
-      scan enche o cache. Fix: envelope conservador + watermark no `insert`
-      (F204-safe). p50 full-deps 6,7→**5,3 µs**, publish→0,90 µs. Per-CF
-      tail vecs **refutado**. De quebra, F219: `tail_idx_range` cross-shard
-      devolvia range vazio e `last_visible_under_prefix` perdia o tail —
-      4 testes vermelhos no `main` desde ae89515, corrigidos. Falta a
-      bateria quieta 3/3)
+- [x] **P0.2** Cortar o gap nomeado por P0.1 até `deps_raftlog` **>1×** numa
+      bateria quieta (1/3 já conta como evidência; fecha com 3/3) — status: `done`
+      (rearm9 3/3: **1,036/1,054/1,043** vs rocks 131–134 k. Gap **não** era
+      memtable — fases por forma mostram mem 2,6 µs igual nos dois runs; era
+      `publish` 0,57→4,2 µs: `CountCache::record_dirty` alocando 2 `Box`/key/
+      publish depois que um scan enche o cache. Fix: envelope conservador +
+      watermark no `insert` (F204-safe). Per-CF tail vecs **refutado**.
+      De quebra, F219: `tail_idx_range` cross-shard devolvia range vazio e
+      `last_visible_under_prefix` perdia o tail — 4 testes vermelhos no
+      `main` desde ae89515, corrigidos)
 
 ### P1 — os outros ≥2× + apply 3/3
 
@@ -91,7 +94,7 @@
 |----|------|-------|--------|-----------|---------|
 | P0.0 | p0 | drop-in sync=false | done | este change | 2026-08-23 |
 | P0.1 | p0 | raftlog_submit_probe | done | example (core 3,79µs / shape 5,50µs) | 2026-08-23 |
-| P0.2 | p0 | raftlog >1× quieto | doing | publish=count-cache tax fix; F219; falta bateria 3/3 | 2026-08-23 |
+| P0.2 | p0 | raftlog >1× quieto | done | rearm9 3/3 (1,04 med); publish=count-cache tax; F219 | 2026-08-23 |
 | P1.1 | p1 | mvcc_latest ≥2× | todo | — | 2026-08-23 |
 | P1.2 | p1 | blob_set ≥2× | todo | — | 2026-08-23 |
 | P1.3 | p1 | deps_scan ≥2× | todo | — | 2026-08-23 |
