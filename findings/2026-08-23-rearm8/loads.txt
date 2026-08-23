@@ -1,0 +1,22 @@
+=== rearm8 armed wal-prealloc HEAD=6c49252 2026-08-23 09:48:41 ===
+09:48:41 gate load1=8,00 (consecutive 1/2)
+09:49:41 gate load1=10,00 (consecutive 0/2)
+09:50:41 gate load1=7,00 (consecutive 1/2)
+09:51:41 gate load1=7,00 (consecutive 2/2)
+GATE-PASS 09:52:41 load=7,00
+round r1 start 09:52:41 load=7,00
+  r1 async end load=7,00
+  r1 kvr end load=7,00
+  r1 rocks end load=7,00
+  r1 rocks-kvr end load=7,00
+round r2 start 09:52:43 load=7,00
+  r2 async end load=7,00
+  r2 kvr end load=7,00
+  r2 rocks end load=7,00
+  r2 rocks-kvr end load=7,00
+round r3 start 09:52:45 load=7,00
+  r3 async end load=7,00
+  r3 kvr end load=7,00
+  r3 rocks end load=7,00
+  r3 rocks-kvr end load=8,00
+REARM8-DONE 09:52:47 load=8,00
