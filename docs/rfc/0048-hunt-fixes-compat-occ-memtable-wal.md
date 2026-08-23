@@ -135,10 +135,12 @@
 - Nota de bateria: no HEAD main atual (DurabilityFenced, sessão paralela)
   quebram por conta deles, com meus hunks desligados: k8 (guarda wave 1)
   + 2 testes compat — pendência repassada, não regressão deste RFC.
-- Backlog restante: #1 (feed reopen last-per-key × "Full WAL history",
-  decidir spec), #5 (`try_scan_at` hard-fail vs `get_at` tier, spec
-  RFC-0046 P2.1), #7 (remote AlreadyPresent len+crc, LOW); #6 refutado
-  (F218, guardas k42/k42ctl).
+- Backlog restante: #1 (feed reopen last-per-key × "Full WAL history when
+  the log is still live" — contrato ambíguo, prova unitária barata:
+  put k v1; put k v2; close; reopen → `changes(0..)`; wave 9), #7 (remote
+  AlreadyPresent len+crc, LOW); #5 refutado-by-spec (RFC-0046 P2.1:
+  "scans continuam fail-closed" — fallback point-only por desenho), #6
+  refutado (F218, guardas k42/k42ctl).
 
 - Refutados na onda (dead ends com análise): fadvise overflow→"até EOF" (equivalente ao clampe; único caller passa u32), trunc `as u32` em write >4 GiB (escrita parcial é contrato de `Write`), EINTR no fdatasync (propagar Err é correto); tx/occ: skip de commit com `last_sequence()==snap` defendido pela write lock.
 
