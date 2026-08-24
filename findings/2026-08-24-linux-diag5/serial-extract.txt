@@ -1,0 +1,72 @@
+# Extrato do serial linux-diag-5 (bench9diag v3) — 2026-08-24T12:27:24Z
+
+## DIAG_RATIO
+DIAG_RATIO deps_apply_batch r1 pedra=10130 rocks=5859 ratio=1.729
+DIAG_RATIO deps_apply_batch r2 pedra=13227 rocks=6246 ratio=2.118
+DIAG_RATIO deps_apply_batch r3 pedra=12658 rocks=6189 ratio=2.045
+DIAG_RATIO deps_apply_batch r4 pedra=11778 rocks=6302 ratio=1.869
+DIAG_RATIO deps_apply_batch r5 pedra=12730 rocks=6515 ratio=1.954
+DIAG_RATIO deps_raftlog r1 pedra=63331 rocks=85814 ratio=0.738
+DIAG_RATIO deps_raftlog r2 pedra=66584 rocks=86668 ratio=0.768
+DIAG_RATIO deps_raftlog r3 pedra=66448 rocks=84098 ratio=0.790
+DIAG_RATIO deps_raftlog r4 pedra=68300 rocks=83947 ratio=0.814
+DIAG_RATIO deps_raftlog r5 pedra=70180 rocks=89950 ratio=0.780
+
+## DIAG_FOLDTAIL
+DIAG_FOLDTAIL deps_apply_batch r1 foldtail=12497 base=10130 delta=1.234
+DIAG_FOLDTAIL deps_apply_batch r2 foldtail=13217 base=13227 delta=0.999
+DIAG_FOLDTAIL deps_raftlog r1 foldtail=59960 base=63331 delta=0.947
+DIAG_FOLDTAIL deps_raftlog r2 foldtail=68497 base=66584 delta=1.029
+
+## fases deps_raftlog (deltas isolados, n=4000)
+deps_raftlog phasesΔ prepare=0.60µs wal=3.53µs mem=3.71µs publish=1.90µs flsh=0.03µs lock_wait=0.00µs n=4000
+deps_raftlog phasesΔ prepare=0.65µs wal=4.33µs mem=4.31µs publish=1.96µs flsh=0.03µs lock_wait=0.00µs n=4000
+deps_raftlog phasesΔ prepare=0.96µs wal=4.91µs mem=3.53µs publish=1.88µs flsh=0.03µs lock_wait=0.00µs n=4000
+deps_raftlog phasesΔ prepare=0.98µs wal=4.69µs mem=3.62µs publish=1.72µs flsh=0.03µs lock_wait=0.00µs n=4000
+deps_raftlog phasesΔ prepare=0.98µs wal=4.91µs mem=3.51µs publish=1.82µs flsh=0.03µs lock_wait=0.00µs n=4000
+deps_raftlog phasesΔ prepare=0.98µs wal=5.09µs mem=4.15µs publish=1.79µs flsh=0.03µs lock_wait=0.00µs n=4000
+deps_raftlog phasesΔ prepare=1.15µs wal=3.16µs mem=4.05µs publish=1.88µs flsh=0.03µs lock_wait=0.00µs n=4000
+
+## fases deps_apply_batch (deltas isolados, n=8000)
+deps_apply_batch phasesΔ (per commit, 2/op) prepare=2.74µs wal=9.66µs mem=12.36µs publish=0.10µs flsh=0.03µs lock_wait=0.00µs n=8000
+deps_apply_batch phasesΔ (per commit, 2/op) prepare=2.76µs wal=8.43µs mem=13.22µs publish=0.10µs flsh=0.03µs lock_wait=0.00µs n=8000
+deps_apply_batch phasesΔ (per commit, 2/op) prepare=2.78µs wal=7.47µs mem=12.66µs publish=0.10µs flsh=0.03µs lock_wait=0.00µs n=8000
+deps_apply_batch phasesΔ (per commit, 2/op) prepare=2.80µs wal=6.94µs mem=12.94µs publish=0.11µs flsh=0.03µs lock_wait=0.00µs n=8000
+deps_apply_batch phasesΔ (per commit, 2/op) prepare=2.86µs wal=8.16µs mem=13.33µs publish=0.11µs flsh=0.03µs lock_wait=0.00µs n=8000
+deps_apply_batch phasesΔ (per commit, 2/op) prepare=3.09µs wal=9.79µs mem=13.87µs publish=0.11µs flsh=0.03µs lock_wait=0.00µs n=8000
+deps_apply_batch phasesΔ (per commit, 2/op) prepare=3.70µs wal=8.59µs mem=16.17µs publish=0.37µs flsh=0.03µs lock_wait=0.00µs n=8000
+
+## splits
+deps_raftlog split p50 build=1.32µs batch=9.65µs mem_after=
+deps_raftlog split p50 build=1.34µs batch=9.74µs mem_after=
+deps_raftlog split p50 build=1.34µs batch=9.75µs mem_after=
+deps_raftlog split p50 build=1.35µs batch=9.56µs mem_after=
+deps_raftlog split p50 build=1.36µs batch=9.68µs mem_after=
+deps_raftlog split p50 build=1.46µs batch=10.26µs mem_after=1638676
+deps_raftlog split p50 build=1.51µs batch=10.54µs mem_after=1638676
+deps_raftlog split p50 build=1.52µs batch=10.16µs mem_after=1638676
+deps_raftlog split p50 build=1.52µs batch=10.72µs mem_after=1638676
+deps_raftlog split p50 build=1.56µs batch=9.25µs mem_after=1638676
+deps_raftlog split p50 build=2.62µs batch=8.59µs mem_after=1638676
+deps_raftlog split p50 build=3.10µs batch=9.92µs mem_after=1638676
+deps_apply_batch split p50 build=15.30µs
+deps_apply_batch split p50 build=15.89µs
+deps_apply_batch split p50 build=15.90µs
+deps_apply_batch split p50 build=15.95µs
+deps_apply_batch split p50 build=16.12µs
+deps_apply_batch split p50 build=16.17µs
+deps_apply_batch split p50 build=16.26µs
+deps_apply_batch split p50 build=16.34µs
+deps_apply_batch split p50 build=16.35µs
+deps_apply_batch split p50 build=16.36µs
+deps_apply_batch split p50 build=16.63µs
+deps_apply_batch split p50 build=16.86µs
+
+## done counters
+deps_raftlog done appends=64000 reads=500
+deps_apply_batch done txns=128000 errors=0
+
+## marcadores
+=== DIAG_START bench9diag v3 Mon Aug 24 12:10:18 UTC 2026 ===
+DIAG_BLOB_SIZE=145296031
+RESULT=BUILD_OK 12:19:42
