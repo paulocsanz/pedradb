@@ -1060,14 +1060,22 @@ impl MemTable {
         if self.tail.is_empty() || snapshot < self.tail_max_seq {
             return self.iter_internal_iter(start, end);
         }
-        // Single CF shard: same prefix on both bounds, or unbounded bounds
-        // over a one-shard index. Anything else (cross-CF, unbounded over
-        // many shards, no shard at all) takes the sorted full fallback.
+        // Single CF shard: a non-empty `cf\0` prefix on BOTH bounds pins the
+        // range inside that shard's key space (shard keys are exactly
+        // `cf\0…`; any key of another shard sorts outside `cf\0…`).
+        // Empty-prefix bounds (kernel keys without NUL) and unbounded bounds
+        // are only safe over a one-shard index — a range like `["d/m/",
+        // "d/m0")` has no NUL, yet admits `d/m/\0…` keys that live in the
+        // "d/m/" shard (F220: the empty shard missed them and the scan
+        // silently returned less). Anything else takes the sorted fallback.
         let shard = match (bound_cf_prefix(start), bound_cf_prefix(end)) {
-            (Some(a), Some(b)) if a != b => None,
-            (None, _) | (_, None) if self.tail_idx.len() > 1 => None,
-            (Some(a), _) => self.tail_idx.get(a),
-            _ => self.tail_idx.values().next(),
+            (Some(a), Some(b))
+                if a == b && !a.is_empty() && a.len() < 32 =>
+            {
+                self.tail_idx.get(a)
+            }
+            _ if self.tail_idx.len() == 1 => self.tail_idx.values().next(),
+            _ => None,
         };
         let Some(shard) = shard else {
             return self.iter_internal_iter(start, end);
