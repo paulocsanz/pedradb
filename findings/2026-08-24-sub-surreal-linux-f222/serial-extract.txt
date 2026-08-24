@@ -1,0 +1,1938 @@
+Connecting to wss://portaria.up.railway.app/api/ws ...
+Streaming logs for resource cnt_b0babd61e1b84d5787674c18d1c8a06b (Ctrl-C to stop)...
+
+2026-08-24T16:12:26 [info ] build | === Building ghcr.io/paulocsanz/pedradb-linux-gate:bench16sub ===
+2026-08-24T16:12:26 [info ] build | Pulling image from registry...
+2026-08-24T16:12:28 [info ] build | Downloading ghcr.io/paulocsanz/pedradb-linux-gate:bench16sub...
+2026-08-24T16:14:19 [info ] build | Download complete
+2026-08-24T16:14:20 [info ] build | Extracting image layers...
+2026-08-24T16:14:32 [info ] build | Extraction complete
+2026-08-24T16:14:32 [info ] build | Building shared rootfs disk...
+2026-08-24T16:16:38 [info ] build | Rootfs disk ready
+2026-08-24T16:16:38 [info ] build | Generating container config...
+2026-08-24T16:16:38 [info ] build | Generating base initramfs...
+2026-08-24T16:16:38 [info ] build | Checking base initramfs cache...
+2026-08-24T16:16:38 [info ] build | Using cached base initramfs
+2026-08-24T16:16:38 [info ] build | Adding container config to initramfs...
+2026-08-24T16:16:38 [info ] build | Creating final initramfs...
+2026-08-24T16:16:38 [info ] build | Initramfs ready (13.7 MB)
+2026-08-24T16:16:38 [info ] build | Locating kernel...
+2026-08-24T16:16:38 [info ] build | Build complete
+2026-08-24T16:16:38 [info ] build | Starting VM (build took 251.6s)...
+2026-08-24T16:16:43 [info ] build | === linux-sub-6 started (built in 256.8s) ===
+2026-08-24T16:16:43 [info ] serial | === Caixote Init Starting ===
+2026-08-24T16:16:43 [info ] serial | CAIXOTE_MEMINFO: MemTotal:        8108240 kB MemFree:         8007844 kB MemAvailable:    7872712 kB
+2026-08-24T16:16:43 [info ] serial | Loading kernel modules...
+2026-08-24T16:16:43 [info ] serial | Loaded virtio_blk
+2026-08-24T16:16:43 [info ] serial | Loaded evdev
+2026-08-24T16:16:43 [info ] serial | Loaded acpi button
+2026-08-24T16:16:43 [info ] serial | Loaded virtio_balloon
+2026-08-24T16:16:43 [info ] serial | [supervisor] input /dev/input/event0 name='Power Button'
+2026-08-24T16:16:43 [info ] serial | [supervisor] power-button watcher on: /dev/input/event0
+2026-08-24T16:16:43 [info ] serial | Loaded af_packet
+2026-08-24T16:16:43 [info ] serial | Loaded failover
+2026-08-24T16:16:43 [info ] serial | Loaded net_failover
+2026-08-24T16:16:43 [info ] serial | Loaded virtio_net
+2026-08-24T16:16:43 [info ] serial | Loaded crc16
+2026-08-24T16:16:43 [info ] serial | Loaded crc32c_generic
+2026-08-24T16:16:43 [info ] serial | Loaded mbcache
+2026-08-24T16:16:43 [info ] serial | Loaded jbd2
+2026-08-24T16:16:43 [info ] serial | Loaded ext4
+2026-08-24T16:16:43 [info ] serial | Loaded overlay
+2026-08-24T16:16:43 [info ] serial | Waiting for disk devices...
+2026-08-24T16:16:43 [info ] serial | Disk layout: ROOTFS_DEV=/dev/vda
+2026-08-24T16:16:43 [info ] serial | Available filesystems:
+2026-08-24T16:16:43 [info ] serial | nodev	sysfs
+2026-08-24T16:16:43 [info ] serial | nodev	tmpfs
+2026-08-24T16:16:43 [info ] serial | nodev	bdev
+2026-08-24T16:16:43 [info ] serial | nodev	proc
+2026-08-24T16:16:43 [info ] serial | nodev	cgroup
+2026-08-24T16:16:43 [info ] serial | nodev	cgroup2
+2026-08-24T16:16:43 [info ] serial | nodev	devtmpfs
+2026-08-24T16:16:43 [info ] serial | nodev	debugfs
+2026-08-24T16:16:43 [info ] serial | nodev	tracefs
+2026-08-24T16:16:43 [info ] serial | nodev	securityfs
+2026-08-24T16:16:43 [info ] serial | nodev	sockfs
+2026-08-24T16:16:43 [info ] serial | nodev	bpf
+2026-08-24T16:16:43 [info ] serial | nodev	pipefs
+2026-08-24T16:16:43 [info ] serial | nodev	ramfs
+2026-08-24T16:16:43 [info ] serial | nodev	hugetlbfs
+2026-08-24T16:16:43 [info ] serial | nodev	devpts
+2026-08-24T16:16:43 [info ] serial | nodev	mqueue
+2026-08-24T16:16:43 [info ] serial | nodev	pstore
+2026-08-24T16:16:43 [info ] serial | 	ext3
+2026-08-24T16:16:43 [info ] serial | 	ext4
+2026-08-24T16:16:43 [info ] serial | Block devices:
+2026-08-24T16:16:43 [info ] serial | brw-rw----    1 0        0         253,   0 Aug 24 16:16 [1;35m/dev/vda[m
+2026-08-24T16:16:43 [info ] serial | brw-rw----    1 0        0         253,  16 Aug 24 16:16 [1;35m/dev/vdb[m
+2026-08-24T16:16:43 [info ] serial | Mounting container rootfs from /dev/vda...
+2026-08-24T16:16:43 [info ] serial | === dmesg before mount (last 20 lines with ext4/disk) ===
+2026-08-24T16:16:43 [info ] serial | [    0.308483] Write protecting the kernel read-only data: 24576k
+2026-08-24T16:16:43 [info ] serial | [    0.437802] virtio_blk virtio1: [vda] 6404096 512-byte logical blocks (3.28 GB/3.05 GiB)
+2026-08-24T16:16:43 [info ] serial | [    0.440266] virtio_blk virtio2: [vdb] 33554432 512-byte logical blocks (17.2 GB/16.0 GiB)
+2026-08-24T16:16:43 [info ] serial | Running e2fsck -p on /dev/vda...
+2026-08-24T16:16:43 [info ] serial | /dev/vda: clean, 61001/200400 files, 673184/800512 blocks
+2026-08-24T16:16:43 [info ] serial | mount: mounting /dev/vda on /rootfs failed: No such device
+2026-08-24T16:16:43 [info ] serial | Rootfs disk mounted (ext4 rw)
+2026-08-24T16:16:43 [info ] serial | /rootfs is mounted
+2026-08-24T16:16:43 [info ] serial | Mount info:
+2026-08-24T16:16:43 [info ] serial | /dev/vda /rootfs ext4 rw,noatime 0 0
+2026-08-24T16:16:43 [info ] serial | Filesystem                Size      Used Available Use% Mounted on
+2026-08-24T16:16:43 [info ] serial | /dev/vda                  3.0G      2.5G    341.0M  88% /rootfs
+2026-08-24T16:16:43 [info ] serial | Rootfs contents:
+2026-08-24T16:16:43 [info ] serial | total 24
+2026-08-24T16:16:43 [info ] serial | drwxr-xr-x    4 0        0             4096 Aug 24 16:15 [1;34m.[m
+2026-08-24T16:16:43 [info ] serial | drwxr-xr-x   17 0        0              380 Aug 24 16:16 [1;34m..[m
+2026-08-24T16:16:43 [info ] serial | drwxr-xr-x    3 994      982           4096 Aug 24 16:15 [1;34mcontainer[m
+2026-08-24T16:16:43 [info ] serial | drwx------    2 0        0            16384 Aug 24 16:15 [1;34mlost+found[m
+2026-08-24T16:16:43 [info ] serial | Rootfs is writable
+2026-08-24T16:16:43 [info ] serial | Rootfs remounted read-only
+2026-08-24T16:16:43 [info ] serial | No /dev/vda device found
+2026-08-24T16:16:43 [info ] serial | Kernel cmdline: console=ttyS0 quiet init=/init caixote.hostname=linux-sub-6 caixote.vpc=vpc-production-a124b760 caixote.service=linux-sub-6 caixote.ip=10.0.0.102/24 caixote.gw=10.0.0.1 caixote.wg_privkey=FnvVEtMozgiUpdpaOfNeiCI+4kl8nRfhLIyJA1/nsoU= caixote.wg_peer_pubkey=2B+uzy57pJPuMY6ZfLIIK6s2mLdx3qEzOZtE+Suy/SA= caixote.wg_endpoint=198.18.0.1 caixote.wg_port=54755 caixote.hosts=vpc-production-a124b760.internal:10.0.0.1,vpc-production-4e0aafd5.internal:10.0.0.1,vpc-production-a85449cf.internal:10.0.0.1,vpc-production-e7c5e0f1.internal:10.0.0.1,torrent-pipeline-a03a7bf7.internal:10.0.0.110 caixote.eth0_ip=198.18.0.10/16 caixote.eth0_gw=198.18.0.1
+2026-08-24T16:16:43 [info ] serial | Parsing cmdline parameters...
+2026-08-24T16:16:43 [info ] serial |   parsed caixote.hostname=linux-sub-6
+2026-08-24T16:16:43 [info ] serial |   parsed caixote.ip=10.0.0.102/24
+2026-08-24T16:16:43 [info ] serial |   parsed caixote.gw=10.0.0.1
+2026-08-24T16:16:43 [info ] serial |   parsed caixote.wg_privkey (len=44)
+2026-08-24T16:16:43 [info ] serial |   parsed caixote.wg_peer_pubkey (len=44)
+2026-08-24T16:16:43 [info ] serial |   parsed caixote.wg_endpoint=198.18.0.1
+2026-08-24T16:16:43 [info ] serial |   parsed caixote.wg_port=54755
+2026-08-24T16:16:43 [info ] serial |   parsed caixote.hosts=vpc-production-a124b760.internal:10.0.0.1,vpc-production-4e0aafd5.internal:10.0.0.1,vpc-production-a85449cf.internal:10.0.0.1,vpc-production-e7c5e0f1.internal:10.0.0.1,torrent-pipeline-a03a7bf7.internal:10.0.0.110
+2026-08-24T16:16:43 [info ] serial | === golden config done; ttyS0 reopened ===
+2026-08-24T16:16:43 [info ] serial | Configuring eth0 with static 198.18.0.10/16 (gw=198.18.0.1)
+2026-08-24T16:16:43 [info ] serial | WireGuard config check:
+2026-08-24T16:16:43 [info ] serial |   CAIXOTE_WG_PRIVKEY set: yes
+2026-08-24T16:16:43 [info ] serial |   CAIXOTE_WG_PEER_PUBKEY set: yes
+2026-08-24T16:16:43 [info ] serial |   CAIXOTE_WG_ENDPOINT: 198.18.0.1
+2026-08-24T16:16:43 [info ] serial |   CAIXOTE_WG_PORT: 54755
+2026-08-24T16:16:43 [info ] serial |   CAIXOTE_IP: 10.0.0.102/24
+2026-08-24T16:16:43 [info ] serial | Configuring WireGuard...
+2026-08-24T16:16:43 [info ] serial | Loading WireGuard modules from /lib/modules/6.12.94-0-virt...
+2026-08-24T16:16:43 [info ] serial | Loaded udp_tunnel.ko
+2026-08-24T16:16:43 [info ] serial | Loaded ip6_udp_tunnel.ko
+2026-08-24T16:16:43 [info ] serial | Loaded libcurve25519-generic.ko
+2026-08-24T16:16:43 [info ] serial | Loaded curve25519-x86_64.ko
+2026-08-24T16:16:43 [info ] serial | Module curve25519-neon.ko not found
+2026-08-24T16:16:43 [info ] serial | Failed to load chacha_generic.ko (may be built-in or already loaded)
+2026-08-24T16:16:43 [info ] serial | Failed to load poly1305_generic.ko (may be built-in or already loaded)
+2026-08-24T16:16:43 [info ] serial | Loaded libchacha.ko
+2026-08-24T16:16:43 [info ] serial | Loaded libpoly1305.ko
+2026-08-24T16:16:43 [info ] serial | Loaded chacha-x86_64.ko
+2026-08-24T16:16:43 [info ] serial | Loaded poly1305-x86_64.ko
+2026-08-24T16:16:43 [info ] serial | Module chacha-neon.ko not found
+2026-08-24T16:16:43 [info ] serial | Module poly1305-neon.ko not found
+2026-08-24T16:16:43 [info ] serial | Loaded libchacha20poly1305.ko
+2026-08-24T16:16:43 [info ] serial | Loaded wireguard.ko
+2026-08-24T16:16:43 [info ] serial | WireGuard configured: 10.0.0.102 via 198.18.0.1:54755
+2026-08-24T16:16:43 [info ] serial | [0m[32m[1minterface[0m: [32mwg0[0m
+2026-08-24T16:16:43 [info ] serial |   [1mpublic key[0m: VSsrKNRlN0wc4+YFoo9NbDMLACOHcK8ssvGPsyFZMl8=
+2026-08-24T16:16:43 [info ] serial |   [1mprivate key[0m: (hidden)
+2026-08-24T16:16:43 [info ] serial |   [1mlistening port[0m: 34711
+2026-08-24T16:16:43 [info ] serial | [33m[1mpeer[0m: [33m2B+uzy57pJPuMY6ZfLIIK6s2mLdx3qEzOZtE+Suy/SA=[0m
+2026-08-24T16:16:43 [info ] serial |   [1mendpoint[0m: 198.18.0.1:54755
+2026-08-24T16:16:43 [info ] serial |   [1mallowed ips[0m: 10.0.0.0[36m/[0m8
+2026-08-24T16:16:43 [info ] serial |   [1mtransfer[0m: 0 [36mB[0m received, 148 [36mB[0m sent
+2026-08-24T16:16:43 [info ] serial |   [1mpersistent keepalive[0m: every 25 [36mseconds[0m
+2026-08-24T16:16:43 [info ] serial |   hosts: 10.0.0.1 vpc-production-a124b760.internal
+2026-08-24T16:16:43 [info ] serial |   hosts: 10.0.0.1 vpc-production-4e0aafd5.internal
+2026-08-24T16:16:43 [info ] serial |   hosts: 10.0.0.1 vpc-production-a85449cf.internal
+2026-08-24T16:16:43 [info ] serial |   hosts: 10.0.0.1 vpc-production-e7c5e0f1.internal
+2026-08-24T16:16:43 [info ] serial |   hosts: 10.0.0.110 torrent-pipeline-a03a7bf7.internal
+2026-08-24T16:16:43 [info ] serial | Static hosts injected from caixote.hosts
+2026-08-24T16:16:43 [info ] serial | DNS configured to use vigia at 10.0.0.1
+2026-08-24T16:16:43 [info ] serial | DNS also has bridge gateway at 198.18.0.1
+2026-08-24T16:16:43 [info ] serial | Network configuration:
+2026-08-24T16:16:43 [info ] serial | 1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN qlen 1000
+2026-08-24T16:16:43 [info ] serial |     link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
+2026-08-24T16:16:43 [info ] serial |     inet 127.0.0.1/8 scope host lo
+2026-08-24T16:16:43 [info ] serial |        valid_lft forever preferred_lft forever
+2026-08-24T16:16:43 [info ] serial |     inet6 ::1/128 scope host
+2026-08-24T16:16:43 [info ] serial |        valid_lft forever preferred_lft forever
+2026-08-24T16:16:43 [info ] serial | 2: eth0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc pfifo_fast state UP qlen 1000
+2026-08-24T16:16:43 [info ] serial |     link/ether 52:54:00:14:70:11 brd ff:ff:ff:ff:ff:ff
+2026-08-24T16:16:43 [info ] serial |     inet 198.18.0.10/16 scope global eth0
+2026-08-24T16:16:43 [info ] serial |        valid_lft forever preferred_lft forever
+2026-08-24T16:16:43 [info ] serial |     inet6 fe80::5054:ff:fe14:7011/64 scope link tentative
+2026-08-24T16:16:43 [info ] serial |        valid_lft forever preferred_lft forever
+2026-08-24T16:16:43 [info ] serial | 3: wg0: <POINTOPOINT,NOARP,UP,LOWER_UP> mtu 1420 qdisc noqueue state UNKNOWN qlen 1000
+2026-08-24T16:16:43 [info ] serial |     link/[65534]
+2026-08-24T16:16:43 [info ] serial |     inet 10.0.0.102/24 scope global wg0
+2026-08-24T16:16:43 [info ] serial |        valid_lft forever preferred_lft forever
+2026-08-24T16:16:43 [info ] serial | default via 198.18.0.1 dev eth0
+2026-08-24T16:16:43 [info ] serial | 10.0.0.0/24 dev wg0 scope link  src 10.0.0.102
+2026-08-24T16:16:43 [info ] serial | 10.0.0.0/8 dev wg0 scope link
+2026-08-24T16:16:43 [info ] serial | 198.18.0.0/16 dev eth0 scope link  src 198.18.0.10
+2026-08-24T16:16:43 [info ] serial | Setting up container on tmpfs for pivot_root support...
+2026-08-24T16:16:43 [info ] serial | Overlay tmpfs ceiling: 1979M (25% of MemTotal unless caixote.overlay_tmpfs_pct=N)
+2026-08-24T16:16:43 [info ] serial | Mounted tmpfs at /mnt (size=1979M)
+2026-08-24T16:16:43 [info ] serial | Using disk-based rootfs from /dev/vda
+2026-08-24T16:16:43 [info ] serial | Overlay mount result: 0 (lowerdir=/rootfs/container/rootfs)
+2026-08-24T16:16:43 [info ] serial | Installed caixote-unfreeze hook
+2026-08-24T16:16:43 [info ] serial | No QGA virtio-port found (host did not configure org.qemu.guest_agent.0);               qemu-ga not started
+2026-08-24T16:16:43 [info ] serial | Mounting per-volume disks from /container/volumes.json...
+2026-08-24T16:16:43 [info ] serial |   blkid /dev/vdb: '/dev/vdb: LABEL="data" UUID="305eb94d-b5bd-486f-b698-7cd8ae474ead" TYPE="ext4"'
+2026-08-24T16:16:43 [info ] serial |   Mounted volume 'data' (/dev/vdb) -> /mnt/vol-data
+2026-08-24T16:16:43 [info ] serial |   Bound /mnt/vol-data -> /data (for mounts.json binds)
+2026-08-24T16:16:43 [info ] serial |   Bound volume 'data' -> container /data
+2026-08-24T16:16:43 [info ] serial | Bundle contents:
+2026-08-24T16:16:43 [info ] serial | total 4
+2026-08-24T16:16:43 [info ] serial | drwxr-xr-x    3 0        0               80 Aug 24 16:16 [1;34m.[m
+2026-08-24T16:16:43 [info ] serial | drwxrwxrwt    6 0        0              120 Aug 24 16:16 [1;34m..[m
+2026-08-24T16:16:43 [info ] serial | -rw-r--r--    1 0        0             2657 Aug 24 16:16 [0;0mconfig.json[m
+2026-08-24T16:16:43 [info ] serial | drwxr-xr-x    1 0        0               60 Aug 24 16:16 [1;34mrootfs[m
+2026-08-24T16:16:43 [info ] serial | Rootfs contents (first 5):
+2026-08-24T16:16:43 [info ] serial | total 64
+2026-08-24T16:16:43 [info ] serial | drwxr-xr-x    1 0        0               60 Aug 24 16:16 .
+2026-08-24T16:16:43 [info ] serial | drwxr-xr-x    3 0        0               80 Aug 24 16:16 ..
+2026-08-24T16:16:43 [info ] serial | lrwxrwxrwx    1 994      982              7 Aug  3 00:00 bin -> usr/bin
+2026-08-24T16:16:43 [info ] serial | drwxr-xr-x    2 994      982           4096 Aug 24 16:14 boot
+2026-08-24T16:16:43 [info ] serial | /mnt/container/rootfs is now a mount point (overlay on tmpfs)
+2026-08-24T16:16:43 [info ] serial | Relevant mounts:
+2026-08-24T16:16:43 [info ] serial | tmpfs on /mnt type tmpfs (rw,relatime,size=2026496k,inode64)
+2026-08-24T16:16:43 [info ] serial | overlay on /mnt/container/rootfs type overlay (rw,relatime,lowerdir=/rootfs/container/rootfs,upperdir=/mnt/upper,workdir=/mnt/work,uuid=on)
+2026-08-24T16:16:43 [info ] serial | /dev/vdb on /mnt/vol-data type ext4 (rw,relatime)
+2026-08-24T16:16:43 [info ] serial | /dev/vdb on /mnt/container/rootfs/data type ext4 (rw,relatime)
+2026-08-24T16:16:43 [info ] serial | DNS configuration copied to container:
+2026-08-24T16:16:43 [info ] serial | nameserver 10.0.0.1
+2026-08-24T16:16:43 [info ] serial | nameserver 198.18.0.1
+2026-08-24T16:16:43 [info ] serial | Static hosts injected into container rootfs from caixote.hosts
+2026-08-24T16:16:43 [info ] serial | Added container hostname 'youki' to /etc/hosts
+2026-08-24T16:16:43 [info ] serial | Running ldconfig in container rootfs...
+2026-08-24T16:16:43 [info ] serial | [supervisor] [uptime=3.84s] Container supervisor starting
+2026-08-24T16:16:43 [info ] serial | [supervisor] [uptime=3.84s] Bundle: /mnt/container
+2026-08-24T16:16:43 [info ] serial | [supervisor] [uptime=3.84s] === Starting container (attempt 1) ===
+2026-08-24T16:16:43 [info ] serial | [supervisor] [uptime=3.84s] Cleaning up previous container state...
+2026-08-24T16:16:43 [info ] serial | [supervisor] [uptime=3.84s] Cleanup complete
+2026-08-24T16:16:43 [info ] serial | CAIXOTE_GUEST_READY
+2026-08-24T16:16:43 [info ] serial | [supervisor] [uptime=3.85s] Executing: runc run --no-pivot --bundle /mnt/container container0
+2026-08-24T16:16:43 [info ] serial | === sub-surreal linux/amd64 v7 (offline, no-/data, run target-free) ===
+2026-08-24T16:16:43 [info ] serial | Linux youki 6.12.94-0-virt #1-Alpine SMP PREEMPT_DYNAMIC 2026-06-20 16:46:16 x86_64 GNU/Linux
+2026-08-24T16:16:43 [info ] serial | model name	: AMD Ryzen Threadripper PRO 3975WX 32-Cores
+2026-08-24T16:16:43 [info ] serial | 4
+2026-08-24T16:16:43 [info ] serial | Filesystem      Size  Used Avail Use% Mounted on
+2026-08-24T16:16:43 [info ] serial | overlay         2.0G   60K  2.0G   1% /
+2026-08-24T16:16:43 [info ] serial | /dev/vdb         16G   24K   15G   1% /data
+2026-08-24T16:16:43 [info ] serial | --- build pedra side 16:16:43 ---
+2026-08-24T16:16:43 [info ] serial | [1m[33mwarning[0m: profiles for the non root package will be ignored, specify profiles at the workspace root:
+2026-08-24T16:16:43 [info ] serial | package:   /src/pedradb/bench/sub-surreal/pedra/sub-bench/Cargo.toml
+2026-08-24T16:16:43 [info ] serial | workspace: /src/pedradb/bench/sub-surreal/pedra/Cargo.toml
+2026-08-24T16:16:45 [info ] serial | [1m[92m   Compiling[0m proc-macro2 v1.0.107
+2026-08-24T16:16:45 [info ] serial | [1m[92m   Compiling[0m quote v1.0.47
+2026-08-24T16:16:45 [info ] serial | [1m[92m   Compiling[0m unicode-ident v1.0.24
+2026-08-24T16:16:45 [info ] serial | [1m[92m   Compiling[0m libc v0.2.189
+2026-08-24T16:16:45 [info ] serial | [1m[92m   Compiling[0m cfg-if v1.0.4
+2026-08-24T16:16:45 [info ] serial | [1m[92m   Compiling[0m autocfg v1.5.1
+2026-08-24T16:16:45 [info ] serial | [1m[92m   Compiling[0m version_check v0.9.5
+2026-08-24T16:16:45 [info ] serial | [1m[92m   Compiling[0m serde_core v1.0.229
+2026-08-24T16:16:46 [info ] serial | [1m[92m   Compiling[0m syn v2.0.119
+2026-08-24T16:16:46 [info ] serial | [1m[92m   Compiling[0m syn v3.0.4
+2026-08-24T16:16:47 [info ] serial | [1m[92m   Compiling[0m libm v0.2.16
+2026-08-24T16:16:48 [info ] serial | [1m[92m   Compiling[0m num-traits v0.2.19
+2026-08-24T16:16:49 [info ] serial | [1m[92m   Compiling[0m serde v1.0.229
+2026-08-24T16:16:49 [info ] serial | [1m[92m   Compiling[0m serde_derive v1.0.229
+2026-08-24T16:16:49 [info ] serial | [1m[92m   Compiling[0m smallvec v1.15.2
+2026-08-24T16:16:49 [info ] serial | [1m[92m   Compiling[0m smallvec v1.15.2
+2026-08-24T16:16:49 [info ] serial | [1m[92m   Compiling[0m parking_lot_core v0.9.12
+2026-08-24T16:16:49 [info ] serial | [1m[92m   Compiling[0m parking_lot_core v0.9.12
+2026-08-24T16:16:49 [info ] serial | [1m[92m   Compiling[0m once_cell v1.21.4
+2026-08-24T16:16:49 [info ] serial | [1m[92m   Compiling[0m once_cell v1.21.4
+2026-08-24T16:16:49 [info ] serial | [1m[92m   Compiling[0m stable_deref_trait v1.2.1
+2026-08-24T16:16:49 [info ] serial | [1m[92m   Compiling[0m generic-array v0.14.7
+2026-08-24T16:16:49 [info ] serial | [1m[92m   Compiling[0m stable_deref_trait v1.2.1
+2026-08-24T16:16:49 [info ] serial | [1m[92m   Compiling[0m generic-array v0.14.7
+2026-08-24T16:16:49 [info ] serial | [1m[92m   Compiling[0m zerocopy v0.8.56
+2026-08-24T16:16:49 [info ] serial | [1m[92m   Compiling[0m zerocopy-derive v0.8.56
+2026-08-24T16:16:49 [info ] serial | [1m[92m   Compiling[0m zerocopy v0.8.56
+2026-08-24T16:16:49 [info ] serial | [1m[92m   Compiling[0m zerocopy-derive v0.8.56
+2026-08-24T16:16:49 [info ] serial | [1m[92m   Compiling[0m synstructure v0.13.2
+2026-08-24T16:16:49 [info ] serial | [1m[92m   Compiling[0m synstructure v0.13.2
+2026-08-24T16:16:50 [info ] serial | [1m[92m   Compiling[0m typenum v1.20.1
+2026-08-24T16:16:50 [info ] serial | [1m[92m   Compiling[0m scopeguard v1.2.0
+2026-08-24T16:16:50 [info ] serial | [1m[92m   Compiling[0m semver v1.0.28
+2026-08-24T16:16:50 [info ] serial | [1m[92m   Compiling[0m memchr v2.8.3
+2026-08-24T16:16:50 [info ] serial | [1m[92m   Compiling[0m rustc_version v0.4.1
+2026-08-24T16:16:51 [info ] serial | [1m[92m   Compiling[0m lock_api v0.4.14
+2026-08-24T16:16:51 [info ] serial | [1m[92m   Compiling[0m zerofrom-derive v0.1.7
+2026-08-24T16:16:52 [info ] serial | [1m[92m   Compiling[0m thiserror v1.0.69
+2026-08-24T16:16:52 [info ] serial | [1m[92m   Compiling[0m yoke-derive v0.8.2
+2026-08-24T16:16:52 [info ] serial | [1m[92m   Compiling[0m zerofrom v0.1.8
+2026-08-24T16:16:52 [info ] serial | [1m[92m   Compiling[0m thiserror-impl v1.0.69
+2026-08-24T16:16:52 [info ] serial | [1m[92m   Compiling[0m getrandom v0.2.17
+2026-08-24T16:16:52 [info ] serial | [1m[92m   Compiling[0m shlex v2.0.1
+2026-08-24T16:16:52 [info ] serial | [1m[92m   Compiling[0m find-msvc-tools v0.1.11
+2026-08-24T16:16:53 [info ] serial | [1m[92m   Compiling[0m pin-project-lite v0.2.17
+2026-08-24T16:16:53 [info ] serial | [1m[92m   Compiling[0m cc v1.4.4
+2026-08-24T16:16:53 [info ] serial | [1m[92m   Compiling[0m yoke v0.8.3
+2026-08-24T16:16:53 [info ] serial | [1m[92m   Compiling[0m crypto-common v0.1.7
+2026-08-24T16:16:53 [info ] serial | [1m[92m   Compiling[0m ident_case v1.0.1
+2026-08-24T16:16:53 [info ] serial | [1m[92m   Compiling[0m either v1.18.0
+2026-08-24T16:16:53 [info ] serial | [1m[92m   Compiling[0m strsim v0.11.1
+2026-08-24T16:16:53 [info ] serial | [1m[92m   Compiling[0m rand_core v0.6.4
+2026-08-24T16:16:53 [info ] serial | [1m[92m   Compiling[0m zerovec-derive v0.11.6
+2026-08-24T16:16:54 [info ] serial | [1m[92m   Compiling[0m displaydoc v0.2.7
+2026-08-24T16:16:54 [info ] serial | [1m[92m   Compiling[0m subtle v2.6.1
+2026-08-24T16:16:54 [info ] serial | [1m[92m   Compiling[0m equivalent v1.0.2
+2026-08-24T16:16:54 [info ] serial | [1m[92m   Compiling[0m byteorder v1.5.0
+2026-08-24T16:16:54 [info ] serial | [1m[92m   Compiling[0m getrandom v0.3.4
+2026-08-24T16:16:54 [info ] serial | [1m[92m   Compiling[0m object v0.39.1
+2026-08-24T16:16:54 [info ] serial | [1m[92m   Compiling[0m crossbeam-utils v0.8.22
+2026-08-24T16:16:54 [info ] serial | [1m[92m   Compiling[0m zerovec v0.11.8
+2026-08-24T16:16:54 [info ] serial | [1m[92m   Compiling[0m dirs-sys-next v0.1.2
+2026-08-24T16:16:54 [info ] serial | [1m[92m   Compiling[0m block-buffer v0.10.4
+2026-08-24T16:16:54 [info ] serial | [1m[92m   Compiling[0m aho-corasick v1.1.5
+2026-08-24T16:16:54 [info ] serial | [1m[92m   Compiling[0m crunchy v0.2.4
+2026-08-24T16:16:54 [info ] serial | [1m[92m   Compiling[0m regex-syntax v0.8.11
+2026-08-24T16:16:54 [info ] serial | [1m[92m   Compiling[0m syn v1.0.109
+2026-08-24T16:16:55 [info ] serial | [1m[92m   Compiling[0m tinystr v0.8.4
+2026-08-24T16:16:55 [info ] serial | [1m[92m   Compiling[0m digest v0.10.7
+2026-08-24T16:16:55 [info ] serial | [1m[92m   Compiling[0m dirs-next v2.0.0
+2026-08-24T16:16:55 [info ] serial | [1m[92m   Compiling[0m ppv-lite86 v0.2.21
+2026-08-24T16:16:56 [info ] serial | [1m[92m   Compiling[0m regex-automata v0.4.18
+2026-08-24T16:16:56 [info ] serial | [1m[92m   Compiling[0m zmij v1.0.23
+2026-08-24T16:16:56 [info ] serial | [1m[92m   Compiling[0m writeable v0.6.4
+2026-08-24T16:16:56 [info ] serial | [1m[92m   Compiling[0m bytes v1.12.1
+2026-08-24T16:16:57 [info ] serial | [1m[92m   Compiling[0m tiny-keccak v2.0.2
+2026-08-24T16:16:57 [info ] serial | [1m[92m   Compiling[0m thiserror v2.0.20
+2026-08-24T16:16:57 [info ] serial | [1m[92m   Compiling[0m siphasher v1.0.3
+2026-08-24T16:16:57 [info ] serial | [1m[92m   Compiling[0m litemap v0.8.3
+2026-08-24T16:16:57 [info ] serial | [1m[92m   Compiling[0m hashbrown v0.17.1
+2026-08-24T16:16:57 [info ] serial | [1m[92m   Compiling[0m futures-core v0.3.34
+2026-08-24T16:16:57 [info ] serial | [1m[92m   Compiling[0m icu_locale_core v2.3.0
+2026-08-24T16:16:57 [info ] serial | [1m[92m   Compiling[0m ar_archive_writer v0.5.3
+2026-08-24T16:16:58 [info ] serial | [1m[92m   Compiling[0m indexmap v2.14.0
+2026-08-24T16:16:58 [info ] serial | [1m[92m   Compiling[0m phf_shared v0.11.3
+2026-08-24T16:16:58 [info ] serial | [1m[92m   Compiling[0m term v0.7.0
+2026-08-24T16:16:58 [info ] serial | [1m[92m   Compiling[0m parking_lot v0.12.5
+2026-08-24T16:16:58 [info ] serial | [1m[92m   Compiling[0m potential_utf v0.1.6
+2026-08-24T16:16:58 [info ] serial | [1m[92m   Compiling[0m potential_utf v0.1.6
+2026-08-24T16:16:58 [info ] serial | [1m[92m   Compiling[0m potential_utf v0.1.6
+2026-08-24T16:16:59 [info ] serial | [1m[92m   Compiling[0m zerotrie v0.2.5
+2026-08-24T16:16:59 [info ] serial | [1m[92m   Compiling[0m zerotrie v0.2.5
+2026-08-24T16:16:59 [info ] serial | [1m[92m   Compiling[0m darling_core v0.23.0
+2026-08-24T16:17:01 [info ] serial | [1m[92m   Compiling[0m crc32c v0.6.8
+2026-08-24T16:17:01 [info ] serial | [1m[92m   Compiling[0m heapless v0.7.17
+2026-08-24T16:17:01 [info ] serial | [1m[92m   Compiling[0m tracing-core v0.1.36
+2026-08-24T16:17:01 [info ] serial | [1m[92m   Compiling[0m tracing-attributes v0.1.31
+2026-08-24T16:17:01 [info ] serial | [1m[92m   Compiling[0m thiserror-impl v2.0.20
+2026-08-24T16:17:01 [info ] serial | [1m[92m   Compiling[0m thiserror-impl v2.0.20
+2026-08-24T16:17:02 [info ] serial | [1m[92m   Compiling[0m fixedbitset v0.4.2
+2026-08-24T16:17:02 [info ] serial | [1m[92m   Compiling[0m new_debug_unreachable v1.0.6
+2026-08-24T16:17:02 [info ] serial | [1m[92m   Compiling[0m same-file v1.0.6
+2026-08-24T16:17:02 [info ] serial | [1m[92m   Compiling[0m serde_json v1.0.151
+2026-08-24T16:17:02 [info ] serial | [1m[92m   Compiling[0m icu_normalizer_data v2.3.0
+2026-08-24T16:17:02 [info ] serial | [1m[92m   Compiling[0m utf8_iter v1.0.4
+2026-08-24T16:17:02 [info ] serial | [1m[92m   Compiling[0m bitflags v2.13.1
+2026-08-24T16:17:03 [info ] serial | [1m[92m   Compiling[0m log v0.4.34
+2026-08-24T16:17:03 [info ] serial | [1m[92m   Compiling[0m icu_properties_data v2.3.0
+2026-08-24T16:17:03 [info ] serial | [1m[92m   Compiling[0m bit-vec v0.6.3
+2026-08-24T16:17:03 [info ] serial | [1m[92m   Compiling[0m precomputed-hash v0.1.1
+2026-08-24T16:17:03 [info ] serial | [1m[92m   Compiling[0m string_cache v0.8.9
+2026-08-24T16:17:04 [info ] serial | [1m[92m   Compiling[0m bit-set v0.5.3
+2026-08-24T16:17:04 [info ] serial | [1m[92m   Compiling[0m ena v0.14.4
+2026-08-24T16:17:05 [info ] serial | [1m[92m   Compiling[0m icu_collections v2.3.0
+2026-08-24T16:17:05 [info ] serial | [1m[92m   Compiling[0m walkdir v2.5.0
+2026-08-24T16:17:05 [info ] serial | [1m[92m   Compiling[0m petgraph v0.6.5
+2026-08-24T16:17:06 [info ] serial | [1m[92m   Compiling[0m itertools v0.11.0
+2026-08-24T16:17:07 [info ] serial | [1m[92m   Compiling[0m tracing v0.1.44
+2026-08-24T16:17:07 [info ] serial | [1m[92m   Compiling[0m darling_macro v0.23.0
+2026-08-24T16:17:07 [info ] serial | [1m[92m   Compiling[0m icu_provider v2.3.1
+2026-08-24T16:17:07 [info ] serial | [1m[92m   Compiling[0m ascii-canvas v3.0.0
+2026-08-24T16:17:08 [info ] serial | [1m[92m   Compiling[0m psm v0.1.32
+2026-08-24T16:17:08 [info ] serial | [1m[92m   Compiling[0m lalrpop-util v0.20.2
+2026-08-24T16:17:08 [info ] serial | [1m[92m   Compiling[0m regex v1.13.1
+2026-08-24T16:17:08 [info ] serial | [1m[92m   Compiling[0m hash32 v0.2.1
+2026-08-24T16:17:08 [info ] serial | [1m[92m   Compiling[0m spin v0.9.9
+2026-08-24T16:17:08 [info ] serial | [1m[92m   Compiling[0m num-integer v0.1.47
+2026-08-24T16:17:08 [info ] serial | [1m[92m   Compiling[0m itoa v1.0.18
+2026-08-24T16:17:08 [info ] serial | [1m[92m   Compiling[0m pico-args v0.5.0
+2026-08-24T16:17:08 [info ] serial | [1m[92m   Compiling[0m unicode-xid v0.2.6
+2026-08-24T16:17:08 [info ] serial | [1m[92m   Compiling[0m crossbeam-epoch v0.9.20
+2026-08-24T16:17:08 [info ] serial | [1m[92m   Compiling[0m allocator-api2 v0.2.21
+2026-08-24T16:17:08 [info ] serial | [1m[92m   Compiling[0m getrandom v0.4.3
+2026-08-24T16:17:08 [info ] serial | [1m[92m   Compiling[0m lalrpop v0.20.2
+2026-08-24T16:17:11 [info ] serial | [1m[92m   Compiling[0m darling v0.23.0
+2026-08-24T16:17:11 [info ] serial | [1m[92m   Compiling[0m stacker v0.1.25
+2026-08-24T16:17:12 [info ] serial | [1m[92m   Compiling[0m inout v0.1.4
+2026-08-24T16:17:12 [info ] serial | [1m[92m   Compiling[0m proc-macro-error-attr v1.0.4
+2026-08-24T16:17:12 [info ] serial | [1m[92m   Compiling[0m ahash v0.8.12
+2026-08-24T16:17:12 [info ] serial | [1m[92m   Compiling[0m matrixmultiply v0.3.11
+2026-08-24T16:17:12 [info ] serial | [1m[92m   Compiling[0m tinyvec_macros v0.1.1
+2026-08-24T16:17:12 [info ] serial | [1m[92m   Compiling[0m fnv v1.0.7
+2026-08-24T16:17:12 [info ] serial | [1m[92m   Compiling[0m slab v0.4.12
+2026-08-24T16:17:12 [info ] serial | [1m[92m   Compiling[0m cpufeatures v0.2.17
+2026-08-24T16:17:12 [info ] serial | [1m[92m   Compiling[0m lz4_flex v0.11.6
+2026-08-24T16:17:12 [info ] serial | [1m[92m   Compiling[0m io-uring v0.7.14
+2026-08-24T16:17:12 [info ] serial | [1m[92m   Compiling[0m futures-sink v0.3.34
+2026-08-24T16:17:12 [info ] serial | [1m[92m   Compiling[0m crossbeam-deque v0.8.7
+2026-08-24T16:17:12 [info ] serial | [1m[92m   Compiling[0m pedradb-posix v0.1.0 (/src/pedradb/crates/pedradb-posix)
+2026-08-24T16:17:12 [info ] serial | [1m[92m   Compiling[0m pedradb-core v0.1.0 (/src/pedradb/crates/pedradb-core)
+2026-08-24T16:17:12 [info ] serial | [1m[92m   Compiling[0m futures-channel v0.3.34
+2026-08-24T16:17:13 [info ] serial | [1m[92m   Compiling[0m darling_core v0.20.11
+2026-08-24T16:17:14 [info ] serial | [1m[92m   Compiling[0m tinyvec v1.12.0
+2026-08-24T16:17:14 [info ] serial | [1m[92m   Compiling[0m cedar-policy-core v2.4.2
+2026-08-24T16:17:15 [info ] serial | [1m[92m   Compiling[0m cipher v0.4.4
+2026-08-24T16:17:15 [info ] serial | [1m[92m   Compiling[0m icu_properties v2.3.0
+2026-08-24T16:17:15 [info ] serial | [1m[92m   Compiling[0m icu_normalizer v2.3.0
+2026-08-24T16:17:16 [info ] serial | [1m[92m   Compiling[0m serde_with_macros v3.22.0
+2026-08-24T16:17:16 [info ] serial | [1m[92m   Compiling[0m rstar v0.11.0
+2026-08-24T16:17:16 [info ] serial | [1m[92m   Compiling[0m rand_chacha v0.3.1
+2026-08-24T16:17:17 [info ] serial | [1m[92m   Compiling[0m itertools v0.10.5
+2026-08-24T16:17:17 [info ] serial | [1m[92m   Compiling[0m approx v0.5.1
+2026-08-24T16:17:17 [info ] serial | [1m[92m   Compiling[0m miette-derive v5.10.0
+2026-08-24T16:17:18 [info ] serial | [1m[92m   Compiling[0m futures-macro v0.3.34
+2026-08-24T16:17:18 [info ] serial | [1m[92m   Compiling[0m proc-macro-error v1.0.4
+2026-08-24T16:17:18 [info ] serial | [1m[92m   Compiling[0m futures-task v0.3.34
+2026-08-24T16:17:18 [info ] serial | [1m[92m   Compiling[0m unicode-width v0.1.14
+2026-08-24T16:17:18 [info ] serial | [1m[92m   Compiling[0m proc-macro-error v1.0.4
+2026-08-24T16:17:18 [info ] serial | [1m[92m   Compiling[0m futures-task v0.3.34
+2026-08-24T16:17:18 [info ] serial | [1m[92m   Compiling[0m unicode-width v0.1.14
+2026-08-24T16:17:18 [info ] serial | [1m[92m   Compiling[0m base64ct v1.8.3
+2026-08-24T16:17:18 [info ] serial | [1m[92m   Compiling[0m base64ct v1.8.3
+2026-08-24T16:17:18 [info ] serial | [1m[92m   Compiling[0m arbitrary v1.4.2
+2026-08-24T16:17:18 [info ] serial | [1m[92m   Compiling[0m arbitrary v1.4.2
+2026-08-24T16:17:18 [info ] serial | [1m[92m   Compiling[0m rawpointer v0.2.1
+2026-08-24T16:17:18 [info ] serial | [1m[92m   Compiling[0m rawpointer v0.2.1
+2026-08-24T16:17:18 [info ] serial | [1m[92m   Compiling[0m time-core v0.1.9
+2026-08-24T16:17:18 [info ] serial | [1m[92m   Compiling[0m robust v1.2.0
+2026-08-24T16:17:18 [info ] serial | [1m[92m   Compiling[0m time-core v0.1.9
+2026-08-24T16:17:18 [info ] serial | [1m[92m   Compiling[0m robust v1.2.0
+2026-08-24T16:17:19 [info ] serial | [1m[92m   Compiling[0m rayon-core v1.13.0
+2026-08-24T16:17:19 [info ] serial | [1m[92m   Compiling[0m futures-io v0.3.34
+2026-08-24T16:17:19 [info ] serial | [1m[92m   Compiling[0m rustversion v1.0.23
+2026-08-24T16:17:19 [info ] serial | [1m[92m   Compiling[0m doc-comment v0.3.4
+2026-08-24T16:17:19 [info ] serial | [1m[92m   Compiling[0m rustix v1.1.4
+2026-08-24T16:17:19 [info ] serial | [1m[92m   Compiling[0m num-conv v0.2.2
+2026-08-24T16:17:19 [info ] serial | [1m[92m   Compiling[0m time-macros v0.2.32
+2026-08-24T16:17:19 [info ] serial | [1m[92m   Compiling[0m futures-util v0.3.34
+2026-08-24T16:17:20 [info ] serial | [1m[92m   Compiling[0m geo-types v0.7.20
+2026-08-24T16:17:20 [info ] serial | [1m[92m   Compiling[0m rustc_lexer v0.1.0
+2026-08-24T16:17:21 [info ] serial | [1m[92m   Compiling[0m password-hash v0.5.0
+2026-08-24T16:17:21 [info ] serial | [1m[92m   Compiling[0m miette v5.10.0
+2026-08-24T16:17:21 [info ] serial | [1m[92m   Compiling[0m rand v0.8.7
+2026-08-24T16:17:22 [info ] serial | [1m[92m   Compiling[0m serde_with v3.22.0
+2026-08-24T16:17:22 [info ] serial | [1m[92m   Compiling[0m idna_adapter v1.2.2
+2026-08-24T16:17:23 [info ] serial | [1m[92m   Compiling[0m unicode-normalization v0.1.25
+2026-08-24T16:17:23 [info ] serial | [1m[92m   Compiling[0m unicode-normalization v0.1.25
+2026-08-24T16:17:23 [info ] serial | [1m[92m   Compiling[0m darling_macro v0.20.11
+2026-08-24T16:17:23 [info ] serial | [1m[92m   Compiling[0m earcutr v0.4.3
+2026-08-24T16:17:24 [info ] serial | [1m[92m   Compiling[0m rand_core v0.9.5
+2026-08-24T16:17:24 [info ] serial | [1m[92m   Compiling[0m ring v0.16.20
+2026-08-24T16:17:24 [info ] serial | [1m[92m   Compiling[0m smol_str v0.2.2
+2026-08-24T16:17:24 [info ] serial | [1m[92m   Compiling[0m approx v0.4.0
+2026-08-24T16:17:24 [info ] serial | [1m[92m   Compiling[0m rmp v0.8.15
+2026-08-24T16:17:24 [info ] serial | [1m[92m   Compiling[0m num-complex v0.4.6
+2026-08-24T16:17:24 [info ] serial | [1m[92m   Compiling[0m tokio-macros v2.7.2
+2026-08-24T16:17:24 [info ] serial | [1m[92m   Compiling[0m geographiclib-rs v0.2.7
+2026-08-24T16:17:25 [info ] serial | [1m[92m   Compiling[0m indexmap v1.9.3
+2026-08-24T16:17:25 [info ] serial | [1m[92m   Compiling[0m linux-raw-sys v0.12.1
+2026-08-24T16:17:25 [info ] serial | [1m[92m   Compiling[0m lazy_static v1.5.0
+2026-08-24T16:17:25 [info ] serial | [1m[92m   Compiling[0m heck v0.4.1
+2026-08-24T16:17:25 [info ] serial | [1m[92m   Compiling[0m float_next_after v1.0.0
+2026-08-24T16:17:25 [info ] serial | [1m[92m   Compiling[0m unicode-script v0.5.8
+2026-08-24T16:17:25 [info ] serial | [1m[92m   Compiling[0m rust_decimal v1.42.1
+2026-08-24T16:17:25 [info ] serial | [1m[92m   Compiling[0m ref-cast v1.0.27
+2026-08-24T16:17:25 [info ] serial | [1m[92m   Compiling[0m deranged v0.5.8
+2026-08-24T16:17:25 [info ] serial | [1m[92m   Compiling[0m foldhash v0.2.0
+2026-08-24T16:17:25 [info ] serial | [1m[92m   Compiling[0m powerfmt v0.2.0
+2026-08-24T16:17:25 [info ] serial | [1m[92m   Compiling[0m iana-time-zone v0.1.65
+2026-08-24T16:17:25 [info ] serial | [1m[92m   Compiling[0m fastrand v2.5.0
+2026-08-24T16:17:26 [info ] serial | [1m[92m   Compiling[0m ipnet v2.12.1
+2026-08-24T16:17:26 [info ] serial | [1m[92m   Compiling[0m bitmaps v3.2.1
+[loop] recycled 16:17:27Z
+Connecting to wss://portaria.up.railway.app/api/ws ...
+Streaming logs for resource cnt_b0babd61e1b84d5787674c18d1c8a06b (Ctrl-C to stop)...
+
+2026-08-24T16:17:08 [info ] serial | [1m[92m   Compiling[0m getrandom v0.4.3
+2026-08-24T16:17:08 [info ] serial | [1m[92m   Compiling[0m lalrpop v0.20.2
+2026-08-24T16:17:11 [info ] serial | [1m[92m   Compiling[0m darling v0.23.0
+2026-08-24T16:17:11 [info ] serial | [1m[92m   Compiling[0m stacker v0.1.25
+2026-08-24T16:17:12 [info ] serial | [1m[92m   Compiling[0m inout v0.1.4
+2026-08-24T16:17:12 [info ] serial | [1m[92m   Compiling[0m proc-macro-error-attr v1.0.4
+2026-08-24T16:17:12 [info ] serial | [1m[92m   Compiling[0m ahash v0.8.12
+2026-08-24T16:17:12 [info ] serial | [1m[92m   Compiling[0m matrixmultiply v0.3.11
+2026-08-24T16:17:12 [info ] serial | [1m[92m   Compiling[0m tinyvec_macros v0.1.1
+2026-08-24T16:17:12 [info ] serial | [1m[92m   Compiling[0m fnv v1.0.7
+2026-08-24T16:17:12 [info ] serial | [1m[92m   Compiling[0m slab v0.4.12
+2026-08-24T16:17:12 [info ] serial | [1m[92m   Compiling[0m cpufeatures v0.2.17
+2026-08-24T16:17:12 [info ] serial | [1m[92m   Compiling[0m lz4_flex v0.11.6
+2026-08-24T16:17:12 [info ] serial | [1m[92m   Compiling[0m io-uring v0.7.14
+2026-08-24T16:17:12 [info ] serial | [1m[92m   Compiling[0m futures-sink v0.3.34
+2026-08-24T16:17:12 [info ] serial | [1m[92m   Compiling[0m crossbeam-deque v0.8.7
+2026-08-24T16:17:12 [info ] serial | [1m[92m   Compiling[0m pedradb-posix v0.1.0 (/src/pedradb/crates/pedradb-posix)
+2026-08-24T16:17:12 [info ] serial | [1m[92m   Compiling[0m pedradb-core v0.1.0 (/src/pedradb/crates/pedradb-core)
+2026-08-24T16:17:12 [info ] serial | [1m[92m   Compiling[0m futures-channel v0.3.34
+2026-08-24T16:17:13 [info ] serial | [1m[92m   Compiling[0m darling_core v0.20.11
+2026-08-24T16:17:14 [info ] serial | [1m[92m   Compiling[0m tinyvec v1.12.0
+2026-08-24T16:17:14 [info ] serial | [1m[92m   Compiling[0m cedar-policy-core v2.4.2
+2026-08-24T16:17:15 [info ] serial | [1m[92m   Compiling[0m cipher v0.4.4
+2026-08-24T16:17:15 [info ] serial | [1m[92m   Compiling[0m icu_properties v2.3.0
+2026-08-24T16:17:15 [info ] serial | [1m[92m   Compiling[0m icu_normalizer v2.3.0
+2026-08-24T16:17:16 [info ] serial | [1m[92m   Compiling[0m serde_with_macros v3.22.0
+2026-08-24T16:17:16 [info ] serial | [1m[92m   Compiling[0m rstar v0.11.0
+2026-08-24T16:17:16 [info ] serial | [1m[92m   Compiling[0m rand_chacha v0.3.1
+2026-08-24T16:17:17 [info ] serial | [1m[92m   Compiling[0m itertools v0.10.5
+2026-08-24T16:17:17 [info ] serial | [1m[92m   Compiling[0m approx v0.5.1
+2026-08-24T16:17:17 [info ] serial | [1m[92m   Compiling[0m miette-derive v5.10.0
+2026-08-24T16:17:18 [info ] serial | [1m[92m   Compiling[0m futures-macro v0.3.34
+2026-08-24T16:17:18 [info ] serial | [1m[92m   Compiling[0m proc-macro-error v1.0.4
+2026-08-24T16:17:18 [info ] serial | [1m[92m   Compiling[0m futures-task v0.3.34
+2026-08-24T16:17:18 [info ] serial | [1m[92m   Compiling[0m unicode-width v0.1.14
+2026-08-24T16:17:18 [info ] serial | [1m[92m   Compiling[0m proc-macro-error v1.0.4
+2026-08-24T16:17:18 [info ] serial | [1m[92m   Compiling[0m futures-task v0.3.34
+2026-08-24T16:17:18 [info ] serial | [1m[92m   Compiling[0m unicode-width v0.1.14
+2026-08-24T16:17:18 [info ] serial | [1m[92m   Compiling[0m base64ct v1.8.3
+2026-08-24T16:17:18 [info ] serial | [1m[92m   Compiling[0m base64ct v1.8.3
+2026-08-24T16:17:18 [info ] serial | [1m[92m   Compiling[0m arbitrary v1.4.2
+2026-08-24T16:17:18 [info ] serial | [1m[92m   Compiling[0m arbitrary v1.4.2
+2026-08-24T16:17:18 [info ] serial | [1m[92m   Compiling[0m rawpointer v0.2.1
+2026-08-24T16:17:18 [info ] serial | [1m[92m   Compiling[0m rawpointer v0.2.1
+2026-08-24T16:17:18 [info ] serial | [1m[92m   Compiling[0m time-core v0.1.9
+2026-08-24T16:17:18 [info ] serial | [1m[92m   Compiling[0m robust v1.2.0
+2026-08-24T16:17:18 [info ] serial | [1m[92m   Compiling[0m time-core v0.1.9
+2026-08-24T16:17:18 [info ] serial | [1m[92m   Compiling[0m robust v1.2.0
+2026-08-24T16:17:19 [info ] serial | [1m[92m   Compiling[0m rayon-core v1.13.0
+2026-08-24T16:17:19 [info ] serial | [1m[92m   Compiling[0m futures-io v0.3.34
+2026-08-24T16:17:19 [info ] serial | [1m[92m   Compiling[0m rustversion v1.0.23
+2026-08-24T16:17:19 [info ] serial | [1m[92m   Compiling[0m doc-comment v0.3.4
+2026-08-24T16:17:19 [info ] serial | [1m[92m   Compiling[0m rustix v1.1.4
+2026-08-24T16:17:19 [info ] serial | [1m[92m   Compiling[0m num-conv v0.2.2
+2026-08-24T16:17:19 [info ] serial | [1m[92m   Compiling[0m time-macros v0.2.32
+2026-08-24T16:17:19 [info ] serial | [1m[92m   Compiling[0m futures-util v0.3.34
+2026-08-24T16:17:20 [info ] serial | [1m[92m   Compiling[0m geo-types v0.7.20
+2026-08-24T16:17:20 [info ] serial | [1m[92m   Compiling[0m rustc_lexer v0.1.0
+2026-08-24T16:17:21 [info ] serial | [1m[92m   Compiling[0m password-hash v0.5.0
+2026-08-24T16:17:21 [info ] serial | [1m[92m   Compiling[0m miette v5.10.0
+2026-08-24T16:17:21 [info ] serial | [1m[92m   Compiling[0m rand v0.8.7
+2026-08-24T16:17:22 [info ] serial | [1m[92m   Compiling[0m serde_with v3.22.0
+2026-08-24T16:17:22 [info ] serial | [1m[92m   Compiling[0m idna_adapter v1.2.2
+2026-08-24T16:17:23 [info ] serial | [1m[92m   Compiling[0m unicode-normalization v0.1.25
+2026-08-24T16:17:23 [info ] serial | [1m[92m   Compiling[0m unicode-normalization v0.1.25
+2026-08-24T16:17:23 [info ] serial | [1m[92m   Compiling[0m darling_macro v0.20.11
+2026-08-24T16:17:23 [info ] serial | [1m[92m   Compiling[0m earcutr v0.4.3
+2026-08-24T16:17:24 [info ] serial | [1m[92m   Compiling[0m rand_core v0.9.5
+2026-08-24T16:17:24 [info ] serial | [1m[92m   Compiling[0m ring v0.16.20
+2026-08-24T16:17:24 [info ] serial | [1m[92m   Compiling[0m smol_str v0.2.2
+2026-08-24T16:17:24 [info ] serial | [1m[92m   Compiling[0m approx v0.4.0
+2026-08-24T16:17:24 [info ] serial | [1m[92m   Compiling[0m rmp v0.8.15
+2026-08-24T16:17:24 [info ] serial | [1m[92m   Compiling[0m num-complex v0.4.6
+2026-08-24T16:17:24 [info ] serial | [1m[92m   Compiling[0m tokio-macros v2.7.2
+2026-08-24T16:17:24 [info ] serial | [1m[92m   Compiling[0m geographiclib-rs v0.2.7
+2026-08-24T16:17:25 [info ] serial | [1m[92m   Compiling[0m indexmap v1.9.3
+2026-08-24T16:17:25 [info ] serial | [1m[92m   Compiling[0m linux-raw-sys v0.12.1
+2026-08-24T16:17:25 [info ] serial | [1m[92m   Compiling[0m lazy_static v1.5.0
+2026-08-24T16:17:25 [info ] serial | [1m[92m   Compiling[0m heck v0.4.1
+2026-08-24T16:17:25 [info ] serial | [1m[92m   Compiling[0m float_next_after v1.0.0
+2026-08-24T16:17:25 [info ] serial | [1m[92m   Compiling[0m unicode-script v0.5.8
+2026-08-24T16:17:25 [info ] serial | [1m[92m   Compiling[0m rust_decimal v1.42.1
+2026-08-24T16:17:25 [info ] serial | [1m[92m   Compiling[0m ref-cast v1.0.27
+2026-08-24T16:17:25 [info ] serial | [1m[92m   Compiling[0m deranged v0.5.8
+2026-08-24T16:17:25 [info ] serial | [1m[92m   Compiling[0m foldhash v0.2.0
+2026-08-24T16:17:25 [info ] serial | [1m[92m   Compiling[0m powerfmt v0.2.0
+2026-08-24T16:17:25 [info ] serial | [1m[92m   Compiling[0m iana-time-zone v0.1.65
+2026-08-24T16:17:25 [info ] serial | [1m[92m   Compiling[0m fastrand v2.5.0
+2026-08-24T16:17:26 [info ] serial | [1m[92m   Compiling[0m ipnet v2.12.1
+2026-08-24T16:17:26 [info ] serial | [1m[92m   Compiling[0m bitmaps v3.2.1
+2026-08-24T16:17:26 [info ] serial | [1m[92m   Compiling[0m percent-encoding v2.3.2
+2026-08-24T16:17:26 [info ] serial | [1m[92m   Compiling[0m form_urlencoded v1.2.2
+2026-08-24T16:17:26 [info ] serial | [1m[92m   Compiling[0m imbl-sized-chunks v0.1.3
+2026-08-24T16:17:26 [info ] serial | [1m[92m   Compiling[0m time v0.3.55
+2026-08-24T16:17:26 [info ] serial | [1m[92m   Compiling[0m chrono v0.4.45
+2026-08-24T16:17:28 [info ] serial | [1m[92m   Compiling[0m hashbrown v0.16.1
+2026-08-24T16:17:29 [info ] serial | [1m[92m   Compiling[0m unicode-security v0.1.2
+2026-08-24T16:17:29 [info ] serial | [1m[92m   Compiling[0m unicode-security v0.1.2
+2026-08-24T16:17:29 [info ] serial | [1m[92m   Compiling[0m snafu-derive v0.7.5
+2026-08-24T16:17:30 [info ] serial | [1m[92m   Compiling[0m tokio v1.53.1
+2026-08-24T16:17:31 [info ] serial | [1m[92m   Compiling[0m ndarray v0.15.6
+2026-08-24T16:17:37 [info ] serial | [1m[92m   Compiling[0m rand_chacha v0.9.0
+2026-08-24T16:17:37 [info ] serial | [1m[92m   Compiling[0m pedradb-io-uring v0.1.0 (/src/pedradb/crates/pedradb-io-uring)
+2026-08-24T16:17:37 [info ] serial | [1m[92m   Compiling[0m darling v0.20.11
+2026-08-24T16:17:37 [info ] serial | [1m[92m   Compiling[0m hashbrown v0.14.5
+2026-08-24T16:17:37 [info ] serial | [1m[33mwarning[0m[1m: variable does not need to be mutable[0m
+2026-08-24T16:17:37 [info ] serial |    [1m[94m--> [0m/src/pedradb/crates/pedradb-io-uring/src/ring.rs:138:52
+2026-08-24T16:17:37 [info ] serial |     [1m[94m|[0m
+2026-08-24T16:17:37 [info ] serial | [1m[94m138[0m [1m[94m|[0m             (SubmitCompleteAct::UseHarvested, Some(mut res)) => {
+2026-08-24T16:17:37 [info ] serial |     [1m[94m|[0m                                                    [1m[94m----[0m[1m[33m^^^[0m
+2026-08-24T16:17:37 [info ] serial |     [1m[94m|[0m                                                    [1m[94m|[0m
+2026-08-24T16:17:37 [info ] serial |     [1m[94m|[0m                                                    [1m[94mhelp: remove this `mut`[0m
+2026-08-24T16:17:37 [info ] serial |     [1m[94m|[0m
+2026-08-24T16:17:37 [info ] serial |     [1m[94m= [0m[1mnote[0m: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+2026-08-24T16:17:37 [info ] serial | [1m[33mwarning[0m[1m: variant `ReturnSubmitErr` is never constructed[0m
+2026-08-24T16:17:37 [info ] serial |   [1m[94m--> [0m/src/pedradb/crates/pedradb-io-uring/src/cqe_kernel.rs:84:5
+2026-08-24T16:17:37 [info ] serial |    [1m[94m|[0m
+2026-08-24T16:17:37 [info ] serial | [1m[94m75[0m [1m[94m|[0m pub enum SubmitCompleteAct {
+2026-08-24T16:17:37 [info ] serial |    [1m[94m|[0m          [1m[94m-----------------[0m [1m[94mvariant in this enum[0m
+2026-08-24T16:17:37 [info ] serial | [1m[94m...[0m
+2026-08-24T16:17:37 [info ] serial | [1m[94m84[0m [1m[94m|[0m     ReturnSubmitErr,
+2026-08-24T16:17:37 [info ] serial |    [1m[94m|[0m     [1m[33m^^^^^^^^^^^^^^^[0m
+2026-08-24T16:17:37 [info ] serial |    [1m[94m|[0m
+2026-08-24T16:17:37 [info ] serial |    [1m[94m= [0m[1mnote[0m: `SubmitCompleteAct` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+2026-08-24T16:17:37 [info ] serial |    [1m[94m= [0m[1mnote[0m: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+2026-08-24T16:17:37 [info ] serial | [1m[33mwarning[0m: `pedradb-io-uring` (lib) generated 2 warnings (run `cargo fix --lib -p pedradb-io-uring` to apply 1 suggestion)
+2026-08-24T16:17:38 [info ] serial | [1m[92m   Compiling[0m idna v1.1.0
+2026-08-24T16:17:39 [info ] serial | [1m[92m   Compiling[0m futures-executor v0.3.34
+2026-08-24T16:17:39 [info ] serial | [1m[92m   Compiling[0m pedradb-sim v0.1.0 (/src/pedradb/crates/pedradb-sim)
+2026-08-24T16:17:39 [info ] serial | [1m[92m   Compiling[0m sha2 v0.10.9
+2026-08-24T16:17:40 [info ] serial | [1m[92m   Compiling[0m num-bigint v0.4.8
+2026-08-24T16:17:42 [info ] serial | [1m[92m   Compiling[0m concurrent-queue v2.5.0
+2026-08-24T16:17:43 [info ] serial | [1m[92m   Compiling[0m hmac v0.12.1
+2026-08-24T16:17:43 [info ] serial | [1m[92m   Compiling[0m rand_xoshiro v0.6.0
+2026-08-24T16:17:43 [info ] serial | [1m[92m   Compiling[0m half v2.7.1
+2026-08-24T16:17:43 [info ] serial | [1m[92m   Compiling[0m ref-cast-impl v1.0.27
+2026-08-24T16:17:43 [info ] serial | [1m[92m   Compiling[0m snap v1.1.2
+2026-08-24T16:17:44 [info ] serial | [1m[92m   Compiling[0m arrayvec v0.7.8
+2026-08-24T16:17:44 [info ] serial | [1m[92m   Compiling[0m hashbrown v0.12.3
+2026-08-24T16:17:44 [info ] serial | [1m[92m   Compiling[0m fst v0.4.7
+2026-08-24T16:17:44 [info ] serial | [1m[92m   Compiling[0m ciborium-io v0.2.2
+2026-08-24T16:17:44 [info ] serial | [1m[92m   Compiling[0m untrusted v0.7.1
+2026-08-24T16:17:44 [info ] serial | [1m[92m   Compiling[0m spin v0.5.2
+2026-08-24T16:17:44 [info ] serial | [1m[92m   Compiling[0m bytemuck v1.25.2
+2026-08-24T16:17:44 [info ] serial | [1m[92m   Compiling[0m base64 v0.21.7
+2026-08-24T16:17:44 [info ] serial | [1m[92m   Compiling[0m roarin
+2026-08-24T16:17:44 [info ] serial | g v0.10.12
+2026-08-24T16:17:44 [info ] serial | [1m[92m   Compiling[0m pem v2.0.1
+2026-08-24T16:17:48 [info ] serial | [1m[92m   Compiling[0m ciborium-ll v0.2.2
+2026-08-24T16:17:48 [info ] serial | [1m[92m   Compiling[0m imbl v2.0.3
+2026-08-24T16:17:49 [info ] serial | [1m[92m   Compiling[0m pbkdf2 v0.12.2
+2026-08-24T16:17:49 [info ] serial | [1m[92m   Compiling[0m simple_asn1 v0.6.4
+2026-08-24T16:17:50 [info ] serial | [1m[92m   Compiling[0m rocksdb-compat v0.1.0 (/src/pedradb/crates/rocksdb-compat)
+2026-08-24T16:17:50 [info ] serial | [1m[92m   Compiling[0m rocksdb-compat v0.1.0 (/src/pedradb/crates/rocksdb-compat)
+2026-08-24T16:17:51 [info ] serial | [1m[92m   Compiling[0m arc-swap v1.9.2
+2026-08-24T16:17:51 [info ] serial | [1m[92m   Compiling[0m snafu v0.7.5
+2026-08-24T16:17:52 [info ] serial | [1m[92m   Compiling[0m futures v0.3.34
+2026-08-24T16:17:52 [info ] serial | [1m[92m   Compiling[0m rayon v1.12.0
+2026-08-24T16:17:53 [info ] serial | [1m[92m   Compiling[0m url v2.5.8
+2026-08-24T16:17:55 [info ] serial | [1m[92m   Compiling[0m revision-derive v0.7.0
+2026-08-24T16:17:56 [info ] serial | [1m[92m   Compiling[0m rand v0.9.5
+2026-08-24T16:17:56 [info ] serial | [1m[92m   Compiling[0m cedar-policy-validator v2.4.2
+2026-08-24T16:17:57 [info ] serial | [1m[92m   Compiling[0m tempfile v3.27.0
+2026-08-24T16:17:57 [info ] serial | [1m[92m   Compiling[0m spade v2.15.1
+2026-08-24T16:17:58 [info ] serial | [1m[92m   Compiling[0m geo v0.26.0
+2026-08-24T16:18:00 [info ] serial | [1m[92m   Compiling[0m rmp-serde v1.3.1
+2026-08-24T16:18:01 [info ] serial | [1m[92m   Compiling[0m uuid v1.25.0
+2026-08-24T16:18:01 [info ] serial | [1m[92m   Compiling[0m blowfish v0.9.1
+2026-08-24T16:18:01 [info ] serial | [1m[92m   Compiling[0m salsa20 v0.10.2
+2026-08-24T16:18:01 [info ] serial | [1m[92m   Compiling[0m futures-lite v2.6.1
+2026-08-24T16:18:01 [info ] serial | [1m[92m   Compiling[0m blake2 v0.10.6
+2026-08-24T16:18:01 [info ] serial | [1m[92m   Compiling[0m bincode v1.3.3
+2026-08-24T16:18:02 [info ] serial | [1m[92m   Compiling[0m noisy_float v0.2.1
+2026-08-24T16:18:02 [info ] serial | [1m[92m   Compiling[0m nibble_vec v0.1.0
+2026-08-24T16:18:02 [info ] serial | [1m[92m   Compiling[0m async-trait v0.1.92
+2026-08-24T16:18:02 [info ] serial | [1m[92m   Compiling[0m thread_local v1.1.10
+2026-08-24T16:18:02 [info ] serial | [1m[92m   Compiling[0m base64 v0.22.1
+2026-08-24T16:18:02 [info ] serial | [1m[92m   Compiling[0m urlencoding v2.1.3
+2026-08-24T16:18:02 [info ] serial | [1m[92m   Compiling[0m any_ascii v0.3.3
+2026-08-24T16:18:02 [info ] serial | [1m[92m   Compiling[0m humantime v2.4.0
+2026-08-24T16:18:02 [info ] serial | [1m[92m   Compiling[0m zeroize v1.9.0
+2026-08-24T16:18:03 [info ] serial | [1m[92m   Compiling[0m trice v0.4.0
+2026-08-24T16:18:03 [info ] serial | [1m[92m   Compiling[0m psl-types v2.0.11
+2026-08-24T16:18:03 [info ] serial | [1m[92m   Compiling[0m async-task v4.7.1
+2026-08-24T16:18:03 [info ] serial | [1m[92m   Compiling[0m endian-type v0.1.2
+2026-08-24T16:18:03 [info ] serial | [1m[92m   Compiling[0m minimal-lexical v0.2.1
+2026-08-24T16:18:03 [info ] serial | [1m[92m   Compiling[0m event-listener v2.5.3
+2026-08-24T16:18:03 [info ] serial | [1m[92m   Compiling[0m nom v7.1.3
+2026-08-24T16:18:03 [info ] serial | [1m[92m   Compiling[0m async-channel v1.9.0
+2026-08-24T16:18:03 [info ] serial | [1m[92m   Compiling[0m async-executor v1.14.0
+2026-08-24T16:18:03 [info ] serial | [1m[92m   Compiling[0m radix_trie v0.2.1
+2026-08-24T16:18:04 [info ] serial | [1m[92m   Compiling[0m addr v0.15.6
+2026-08-24T16:18:04 [info ] serial | [1m[92m   Compiling[0m addr v0.15.6
+2026-08-24T16:18:04 [info ] serial | [1m[92m   Compiling[0m dmp v0.2.3
+2026-08-24T16:18:04 [info ] serial | [1m[92m   Compiling[0m bcrypt v0.15.1
+2026-08-24T16:18:04 [info ] serial | [1m[92m   Compiling[0m object_store v0.8.0
+2026-08-24T16:18:06 [info ] serial | [1m[92m   Compiling[0m lexicmp v0.1.0
+2026-08-24T16:18:06 [info ] serial | [1m[92m   Compiling[0m fuzzy-matcher v0.3.7
+2026-08-24T16:18:07 [info ] serial | [1m[92m   Compiling[0m revision v0.7.1
+2026-08-24T16:18:07 [info ] serial | [1m[92m   Compiling[0m ndarray-stats v0.5.1
+2026-08-24T16:18:08 [info ] serial | [1m[92m   Compiling[0m argon2 v0.5.3
+2026-08-24T16:18:09 [info ] serial | [1m[92m   Compiling[0m scrypt v0.11.0
+2026-08-24T16:18:09 [info ] serial | [1m[92m   Compiling[0m ext-sort v0.1.5
+2026-08-24T16:18:09 [info ] serial | [1m[92m   Compiling[0m geo v0.27.0
+2026-08-24T16:18:11 [info ] serial | [1m[92m   Compiling[0m cedar-policy v2.4.2
+2026-08-24T16:18:12 [info ] serial | [1m[92m   Compiling[0m ulid v1.2.1
+2026-08-24T16:18:13 [info ] serial | [1m[92m   Compiling[0m echodb v0.4.0
+2026-08-24T16:18:13 [info ] serial | [1m[92m   Compiling[0m rocksdb v0.21.0 (/src/pedradb/crates/rocksdb)
+2026-08-24T16:18:13 [info ] serial | [1m[92m   Compiling[0m surrealdb-jsonwebtoken v8.3.0-surreal.1
+2026-08-24T16:18:14 [info ] serial | [1m[92m   Compiling[0m ciborium v0.2.2
+2026-08-24T16:18:15 [info ] serial | [1m[92m   Compiling[0m dashmap v5.5.3
+2026-08-24T16:18:15 [info ] serial | [1m[92m   Compiling[0m quick_cache v0.4.3
+2026-08-24T16:18:15 [info ] serial | [1m[92m   Compiling[0m linfa-linalg v0.1.0
+2026-08-24T16:18:15 [info ] serial | [1m[92m   Compiling[0m rmpv v1.3.1
+2026-08-24T16:18:16 [info ] serial | [1m[92m   Compiling[0m nanoid v0.4.0
+2026-08-24T16:18:16 [info ] serial | [1m[92m   Compiling[0m sha1 v0.10.7
+2026-08-24T16:18:16 [info ] serial | [1m[92m   Compiling[0m surrealdb-derive v0.12.0
+2026-08-24T16:18:16 [info ] serial | [1m[92m   Compiling[0m md-5 v0.10.6
+2026-08-24T16:18:16 [info ] serial | [1m[92m   Compiling[0m storekey v0.5.0
+2026-08-24T16:18:16 [info ] serial | [1m[92m   Compiling[0m rust-stemmers v1.2.0
+2026-08-24T16:18:16 [info ] serial | [1m[92m   Compiling[0m async-recursion v1.1.1
+2026-08-24T16:18:17 [info ] serial | [1m[92m   Compiling[0m num_cpus v1.17.0
+2026-08-24T16:18:18 [info ] serial | [1m[92m   Compiling[0m hex v0.4.3
+2026-08-24T16:18:18 [info ] serial | [1m[92m   Compiling[0m reblessive v0.3.5
+2026-08-24T16:18:18 [info ] serial | [1m[92m   Compiling[0m deunicode v1.6.2
+2026-08-24T16:18:18 [info ] serial | [1m[92m   Compiling[0m surrealdb-core v2.0.0-1.5.4 (/src/pedradb/bench/sub-surreal/surreal-core)
+2026-08-24T16:18:19 [info ] serial | [1m[33mwarning[0m[1m: unexpected `cfg` condition value: `ml2`[0m
+2026-08-24T16:18:19 [info ] serial |   [1m[94m--> [0m/src/pedradb/bench/sub-surreal/surreal-core/src/lib.rs:37:27
+2026-08-24T16:18:19 [info ] serial |    [1m[94m|[0m
+2026-08-24T16:18:19 [info ] serial | [1m[94m37[0m [1m[94m|[0m #[cfg(any(feature = "ml", feature = "ml2"))]
+2026-08-24T16:18:19 [info ] serial |    [1m[94m|[0m                           [1m[33m^^^^^^^^^^[0m[1m[94m-----[0m
+2026-08-24T16:18:19 [info ] serial |    [1m[94m|[0m                                     [1m[94m|[0m
+2026-08-24T16:18:19 [info ] serial |    [1m[94m|[0m                                     [1m[94mhelp: there is a expected value with a similar name: `"ml"`[0m
+2026-08-24T16:18:19 [info ] serial |    [1m[94m|[0m
+2026-08-24T16:18:19 [info ] serial |    [1m[94m= [0m[1mnote[0m: expected values for `feature` are: `arbitrary`, `default`, `experimental-parser`, `foundationdb`, `http`, `jwks`, `kv-fdb`, `kv-fdb-5_1`, `kv-fdb-5_2`, `kv-fdb-6_0`, `kv-fdb-6_1`, `kv-fdb-6_2`, `kv-fdb-6_3`, `kv-fdb-7_0`, `kv-fdb-7_1`, `kv-indxdb`, `kv-mem`, `kv-rocksdb`, `kv-speedb`, `kv-surrealkv`, `kv-tikv`, `ml`, `scripting`, and `tokio-tungstenite`
+2026-08-24T16:18:19 [info ] serial |    [1m[94m= [0m[1mhelp[0m: consider adding `ml2` as a feature in `Cargo.toml`
+2026-08-24T16:18:19 [info ] serial |    [1m[94m= [0m[1mnote[0m: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+2026-08-24T16:18:19 [info ] serial |    [1m[94m= [0m[1mnote[0m: `#[warn(unexpected_cfgs)]` on by default
+2026-08-24T16:18:19 [info ] serial | [1m[33mwarning[0m[1m: unexpected `cfg` condition value: `ml2`[0m
+2026-08-24T16:18:19 [info ] serial |   [1m[94m--> [0m/src/pedradb/bench/sub-surreal/surreal-core/src/lib.rs:62:31
+2026-08-24T16:18:19 [info ] serial |    [1m[94m|[0m
+2026-08-24T16:18:19 [info ] serial | [1m[94m62[0m [1m[94m|[0m #[cfg(all(feature = "ml", not(feature = "ml2")))]
+2026-08-24T16:18:19 [info ] serial |    [1m[94m|[0m                               [1m[33m^^^^^^^^^^[0m[1m[94m-----[0m
+2026-08-24T16:18:19 [info ] serial |    [1m[94m|[0m                                         [1m[94m|[0m
+2026-08-24T16:18:19 [info ] serial |    [1m[94m|[0m                                         [1m[94mhelp: there is a expected value with a similar name: `"ml"`[0m
+2026-08-24T16:18:19 [info ] serial |    [1m[94m|[0m
+2026-08-24T16:18:19 [info ] serial |    [1m[94m= [0m[1mnote[0m: expected values for `feature` are: `arbitrary`, `default`, `experimental-parser`, `foundationdb`, `http`, `jwks`, `kv-fdb`, `kv-fdb-5_1`, `kv-fdb-5_2`, `kv-fdb-6_0`, `kv-fdb-6_1`, `kv-fdb-6_2`, `kv-fdb-6_3`, `kv-fdb-7_0`, `kv-fdb-7_1`, `kv-indxdb`, `kv-mem`, `kv-rocksdb`, `kv-speedb`, `kv-surrealkv`, `kv-tikv`, `ml`, `scripting`, and `tokio-tungstenite`
+2026-08-24T16:18:19 [info ] serial |    [1m[94m= [0m[1mhelp[0m: consider adding `ml2` as a feature in `Cargo.toml`
+2026-08-24T16:18:19 [info ] serial |    [1m[94m= [0m[1mnote[0m: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+2026-08-24T16:18:19 [info ] serial | [1m[33mwarning[0m[1m: unexpected `cfg` condition value: `ml2`[0m
+2026-08-24T16:18:19 [info ] serial |   [1m[94m--> [0m/src/pedradb/bench/sub-surreal/surreal-core/src/lib.rs:67:7
+2026-08-24T16:18:19 [info ] serial |    [1m[94m|[0m
+2026-08-24T16:18:19 [info ] serial | [1m[94m67[0m [1m[94m|[0m #[cfg(feature = "ml2")]
+2026-08-24T16:18:19 [info ] serial |    [1m[94m|[0m       [1m[33m^^^^^^^^^^[0m[1m[94m-----[0m
+2026-08-24T16:18:19 [info ] serial |    [1m[94m|[0m                 [1m[94m|[0m
+2026-08-24T16:18:19 [info ] serial |    [1m[94m|[0m                 [1m[94mhelp: there is a expected value with a similar name: `"ml"`[0m
+2026-08-24T16:18:19 [info ] serial |    [1m[94m|[0m
+2026-08-24T16:18:19 [info ] serial |    [1m[94m= [0m[1mnote[0m: expected values for `feature` are: `arbitrary`, `default`, `experimental-parser`, `foundationdb`, `http`, `jwks`, `kv-fdb`, `kv-fdb-5_1`, `kv-fdb-5_2`, `kv-fdb-6_0`, `kv-fdb-6_1`, `kv-fdb-6_2`, `kv-fdb-6_3`, `kv-fdb-7_0`, `kv-fdb-7_1`, `kv-indxdb`, `kv-mem`, `kv-rocksdb`, `kv-speedb`, `kv-surrealkv`, `kv-tikv`, `ml`, `scripting`, and `tokio-tungstenite`
+2026-08-24T16:18:19 [info ] serial |    [1m[94m= [0m[1mhelp[0m: consider adding `ml2` as a feature in `Cargo.toml`
+2026-08-24T16:18:19 [info ] serial |    [1m[94m= [0m[1mnote[0m: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+2026-08-24T16:18:19 [info ] serial | [1m[33mwarning[0m[1m: unexpected `cfg` condition value: `ml2`[0m
+2026-08-24T16:18:19 [info ] serial |   [1m[94m--> [0m/src/pedradb/bench/sub-surreal/surreal-core/src/sql/model.rs:11:27
+2026-08-24T16:18:19 [info ] serial |    [1m[94m|[0m
+2026-08-24T16:18:19 [info ] serial | [1m[94m11[0m [1m[94m|[0m #[cfg(any(feature = "ml", feature = "ml2"))]
+2026-08-24T16:18:19 [info ] serial |    [1m[94m|[0m                           [1m[33m^^^^^^^^^^[0m[1m[94m-----[0m
+2026-08-24T16:18:19 [info ] serial |    [1m[94m|[0m                                     [1m[94m|[0m
+2026-08-24T16:18:19 [info ] serial |    [1m[94m|[0m                                     [1m[94mhelp: there is a expected value with a similar name: `"ml"`[0m
+2026-08-24T16:18:19 [info ] serial |    [1m[94m|[0m
+2026-08-24T16:18:19 [info ] serial |    [1m[94m= [0m[1mnote[0m: expected values for `feature` are: `arbitrary`, `default`, `experimental-parser`, `foundationdb`, `http`, `jwks`, `kv-fdb`, `kv-fdb-5_1`, `kv-fdb-5_2`, `kv-fdb-6_0`, `kv-fdb-6_1`, `kv-fdb-6_2`, `kv-fdb-6_3`, `kv-fdb-7_0`, `kv-fdb-7_1`, `kv-indxdb`, `kv-mem`, `kv-rocksdb`, `kv-speedb`, `kv-surrealkv`, `kv-tikv`, `ml`, `scripting`, and `tokio-tungstenite`
+2026-08-24T16:18:19 [info ] serial |    [1m[94m= [0m[1mhelp[0m: consider adding `ml2` as a feature in `Cargo.toml`
+2026-08-24T16:18:19 [info ] serial |    [1m[94m= [0m[1mnote[0m: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+2026-08-24T16:18:19 [info ] serial | [1m[33mwarning[0m[1m: unexpected `cfg` condition value: `ml2`[0m
+2026-08-24T16:18:19 [info ] serial |   [1m[94m--> [0m/src/pedradb/bench/sub-surreal/surreal-core/src/sql/model.rs:13:27
+2026-08-24T16:18:19 [info ] serial |    [1m[94m|[0m
+2026-08-24T16:18:19 [info ] serial | [1m[94m13[0m [1m[94m|[0m #[cfg(any(feature = "ml", feature = "ml2"))]
+2026-08-24T16:18:19 [info ] serial |    [1m[94m|[0m                           [1m[33m^^^^^^^^^^[0m[1m[94m-----[0m
+2026-08-24T16:18:19 [info ] serial |    [1m[94m|[0m                                     [1m[94m|[0m
+2026-08-24T16:18:19 [info ] serial |    [1m[94m|[0m                                     [1m[94mhelp: there is a expected value with a similar name: `"ml"`[0m
+2026-08-24T16:18:19 [info ] serial |    [1m[94m|[0m
+2026-08-24T16:18:19 [info ] serial |    [1m[94m= [0m[1mnote[0m: expected values for `feature` are: `arbitrary`, `default`, `experimental-parser`, `foundationdb`, `http`, `jwks`, `kv-fdb`, `kv-fdb-5_1`, `kv-fdb-5_2`, `kv-fdb-6_0`, `kv-fdb-6_1`, `kv-fdb-6_2`, `kv-fdb-6_3`, `kv-fdb-7_0`, `kv-fdb-7_1`, `kv-indxdb`, `kv-mem`, `kv-rocksdb`, `kv-speedb`, `kv-surrealkv`, `kv-tikv`, `ml`, `scripting`, and `tokio-tungstenite`
+2026-08-24T16:18:19 [info ] serial |    [1m[94m= [0m[1mhelp[0m: consider adding `ml2` as a feature in `Cargo.toml`
+2026-08-24T16:18:20 [info ] serial |    [1m[94m= [0m[1mnote[0m: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+2026-08-24T16:18:20 [info ] serial | [1m[33mwarning[0m[1m: unexpected `cfg` condition value: `ml2`[0m
+2026-08-24T16:18:20 [info ] serial |   [1m[94m--> [0m/src/pedradb/bench/sub-surreal/surreal-core/src/sql/model.rs:15:27
+2026-08-24T16:18:20 [info ] serial |    [1m[94m|[0m
+2026-08-24T16:18:20 [info ] serial | [1m[94m15[0m [1m[94m|[0m #[cfg(any(feature = "ml", feature = "ml2"))]
+2026-08-24T16:18:20 [info ] serial |    [1m[94m|[0m                           [1m[33m^^^^^^^^^^[0m[1m[94m-----[0m
+2026-08-24T16:18:20 [info ] serial |    [1m[94m|[0m                                     [1m[94m|[0m
+2026-08-24T16:18:20 [info ] serial |    [1m[94m|[0m                                     [1m[94mhelp: there is a expected value with a similar name: `"ml"`[0m
+2026-08-24T16:18:20 [info ] serial |    [1m[94m|[0m
+2026-08-24T16:18:20 [info ] serial |    [1m[94m= [0m[1mnote[0m: expected values for `feature` are: `arbitrary`, `default`, `experimental-parser`, `foundationdb`, `http`, `jwks`, `kv-fdb`, `kv-fdb-5_1`, `kv-fdb-5_2`, `kv-fdb-6_0`, `kv-fdb-6_1`, `kv-fdb-6_2`, `kv-fdb-6_3`, `kv-fdb-7_0`, `kv-fdb-7_1`, `kv-indxdb`, `kv-mem`, `kv-rocksdb`, `kv-speedb`, `kv-surrealkv`, `kv-tikv`, `ml`, `scripting`, and `tokio-tungstenite`
+2026-08-24T16:18:20 [info ] serial |    [1m[94m= [0m[1mhelp[0m: consider adding `ml2` as a feature in `Cargo.toml`
+2026-08-24T16:18:20 [info ] serial |    [1m[94m= [0m[1mnote[0m: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+2026-08-24T16:18:20 [info ] serial | [1m[33mwarning[0m[1m: unexpected `cfg` condition value: `ml2`[0m
+2026-08-24T16:18:20 [info ] serial |   [1m[94m--> [0m/src/pedradb/bench/sub-surreal/surreal-core/src/sql/model.rs:17:27
+2026-08-24T16:18:20 [info ] serial |    [1m[94m|[0m
+2026-08-24T16:18:20 [info ] serial | [1m[94m17[0m [1m[94m|[0m #[cfg(any(feature = "ml", feature = "ml2"))]
+2026-08-24T16:18:20 [info ] serial |    [1m[94m|[0m                           [1m[33m^^^^^^^^^^[0m[1m[94m-----[0m
+2026-08-24T16:18:20 [info ] serial |    [1m[94m|[0m                                     [1m[94m|[0m
+2026-08-24T16:18:20 [info ] serial |    [1m[94m|[0m                                     [1m[94mhelp: there is a expected value with a similar name: `"ml"`[0m
+2026-08-24T16:18:20 [info ] serial |    [1m[94m|[0m
+2026-08-24T16:18:20 [info ] serial |    [1m[94m= [0m[1mnote[0m: expected values for `feature` are: `arbitrary`, `default`, `experimental-parser`, `foundationdb`, `http`, `jwks`, `kv-fdb`, `kv-fdb-5_1`, `kv-fdb-5_2`, `kv-fdb-6_0`, `kv-fdb-6_1`, `kv-fdb-6_2`, `kv-fdb-6_3`, `kv-fdb-7_0`, `kv-fdb-7_1`, `kv-indxdb`, `kv-mem`, `kv-rocksdb`, `kv-speedb`, `kv-surrealkv`, `kv-tikv`, `ml`, `scripting`, and `tokio-tungstenite`
+2026-08-24T16:18:20 [info ] serial |    [1m[94m= [0m[1mhelp[0m: consider adding `ml2` as a feature in `Cargo.toml`
+2026-08-24T16:18:20 [info ] serial |    [1m[94m= [0m[1mnote[0m: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+2026-08-24T16:18:20 [info ] serial | [1m[33mwarning[0m[1m: unexpected `cfg` condition value: `ml2`[0m
+2026-08-24T16:18:20 [info ] serial |   [1m[94m--> [0m/src/pedradb/bench/sub-surreal/surreal-core/src/sql/model.rs:19:27
+2026-08-24T16:18:20 [info ] serial |    [1m[94m|[0m
+2026-08-24T16:18:20 [info ] serial | [1m[94m19[0m [1m[94m|[0m #[cfg(any(feature = "ml", feature = "ml2"))]
+2026-08-24T16:18:20 [info ] serial |    [1m[94m|[0m                           [1m[33m^^^^^^^^^^[0m[1m[94m-----[0m
+2026-08-24T16:18:20 [info ] serial |    [1m[94m|[0m                                     [1m[94m|[0m
+2026-08-24T16:18:20 [info ] serial |    [1m[94m|[0m                                     [1m[94mhelp: there is a expected value with a similar name: `"ml"`[0m
+2026-08-24T16:18:20 [info ] serial |    [1m[94m|[0m
+2026-08-24T16:18:20 [info ] serial |    [1m[94m= [0m[1mnote[0m: expected values for `feature` are: `arbitrary`, `default`, `experimental-parser`, `foundationdb`, `http`, `jwks`, `kv-fdb`, `kv-fdb-5_1`, `kv-fdb-5_2`, `kv-fdb-6_0`, `kv-fdb-6_1`, `kv-fdb-6_2`, `kv-fdb-6_3`, `kv-fdb-7_0`, `kv-fdb-7_1`, `kv-indxdb`, `kv-mem`, `kv-rocksdb`, `kv-speedb`, `kv-surrealkv`, `kv-tikv`, `ml`, `scripting`, and `tokio-tungstenite`
+2026-08-24T16:18:20 [info ] serial |    [1m[94m= [0m[1mhelp[0m: consider adding `ml2` as a feature in `Cargo.toml`
+2026-08-24T16:18:20 [info ] serial |    [1m[94m= [0m[1mnote[0m: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+2026-08-24T16:18:20 [info ] serial | [1m[33mwarning[0m[1m: unexpected `cfg` condition value: `ml2`[0m
+2026-08-24T16:18:20 [info ] serial |   [1m[94m--> [0m/src/pedradb/bench/sub-surreal/surreal-core/src/sql/model.rs:21:27
+2026-08-24T16:18:20 [info ] serial |    [1m[94m|[0m
+2026-08-24T16:18:20 [info ] serial | [1m[94m21[0m [1m[94m|[0m #[cfg(any(feature = "ml", feature = "ml2"))]
+2026-08-24T16:18:20 [info ] serial |    [1m[94m|[0m                           [1m[33m^^^^^^^^^^[0m[1m[94m-----[0m
+2026-08-24T16:18:20 [info ] serial |    [1m[94m|[0m                                     [1m[94m|[0m
+2026-08-24T16:18:20 [info ] serial |    [1m[94m|[0m                                     [1m[94mhelp: there is a expected value with a similar name: `"ml"`[0m
+2026-08-24T16:18:20 [info ] serial |    [1m[94m|[0m
+2026-08-24T16:18:20 [info ] serial |    [1m[94m= [0m[1mnote[0m: expected values for `feature` are: `arbitrary`, `default`, `experimental-parser`, `foundationdb`, `http`, `jwks`, `kv-fdb`, `kv-fdb-5_1`, `kv-fdb-5_2`, `kv-fdb-6_0`, `kv-fdb-6_1`, `kv-fdb-6_2`, `kv-fdb-6_3`, `kv-fdb-7_0`, `kv-fdb-7_1`, `kv-indxdb`, `kv-mem`, `kv-rocksdb`, `kv-speedb`, `kv-surrealkv`, `kv-tikv`, `ml`, `scripting`, and `tokio-tungstenite`
+2026-08-24T16:18:20 [info ] serial |    [1m[94m= [0m[1mhelp[0m: consider adding `ml2` as a feature in `Cargo.toml`
+2026-08-24T16:18:20 [info ] serial |    [1m[94m= [0m[1mnote[0m: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+2026-08-24T16:18:20 [info ] serial | [1m[33mwarning[0m[1m: unexpected `cfg` condition value: `ml2`[0m
+2026-08-24T16:18:20 [info ] serial |   [1m[94m--> [0m/src/pedradb/bench/sub-surreal/surreal-core/src/sql/model.rs:23:27
+2026-08-24T16:18:20 [info ] serial |    [1m[94m|[0m
+2026-08-24T16:18:20 [info ] serial | [1m[94m23[0m [1m[94m|[0m #[cfg(any(feature = "ml", feature = "ml2"))]
+2026-08-24T16:18:20 [info ] serial |    [1m[94m|[0m                           [1m[33m^^^^^^^^^^[0m[1m[94m-----[0m
+2026-08-24T16:18:20 [info ] serial |    [1m[94m|[0m                                     [1m[94m|[0m
+2026-08-24T16:18:20 [info ] serial |    [1m[94m|[0m                                     [1m[94mhelp: there is a expected value with a similar name: `"ml"`[0m
+2026-08-24T16:18:20 [info ] serial |    [1m[94m|[0m
+2026-08-24T16:18:20 [info ] serial |    [1m[94m= [0m[1mnote[0m: expected values for `feature` are: `arbitrary`, `default`, `experimental-parser`, `foundationdb`, `http`, `jwks`, `kv-fdb`, `kv-fdb-5_1`, `kv-fdb-5_2`, `kv-fdb-6_0`, `kv-fdb-6_1`, `kv-fdb-6_2`, `kv-fdb-6_3`, `kv-fdb-7_0`, `kv-fdb-7_1`, `kv-indxdb`, `kv-mem`, `kv-rocksdb`, `kv-speedb`, `kv-surrealkv`, `kv-tikv`, `ml`, `scripting`, and `tokio-tungstenite`
+2026-08-24T16:18:20 [info ] serial |    [1m[94m= [0m[1mhelp[0m: consider adding `ml2` as a feature in `Cargo.toml`
+2026-08-24T16:18:20 [info ] serial |    [1m[94m= [0m[1mnote[0m: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+2026-08-24T16:18:20 [info ] serial | [1m[33mwarning[0m[1m: unexpected `cfg` condition value: `ml2`[0m
+2026-08-24T16:18:20 [info ] serial |   [1m[94m--> [0m/src/pedradb/bench/sub-surreal/surreal-core/src/sql/model.rs:26:27
+2026-08-24T16:18:20 [info ] serial |    [1m[94m|[0m
+2026-08-24T16:18:20 [info ] serial | [1m[94m26[0m [1m[94m|[0m #[cfg(any(feature = "ml", feature = "ml2"))]
+2026-08-24T16:18:20 [info ] serial |    [1m[94m|[0m                           [1m[33m^^^^^^^^^^[0m[1m[94m-----[0m
+2026-08-24T16:18:20 [info ] serial |    [1m[94m|[0m                                     [1m[94m|[0m
+2026-08-24T16:18:20 [info ] serial |    [1m[94m|[0m                                     [1m[94mhelp: there is a expected value with a similar name: `"ml"`[0m
+2026-08-24T16:18:20 [info ] serial |    [1m[94m|[0m
+2026-08-24T16:18:20 [info ] serial |    [1m[94m= [0m[1mnote[0m: expected values for `feature` are: `arbitrary`, `default`, `experimental-parser`, `foundationdb`, `http`, `jwks`, `kv-fdb`, `kv-fdb-5_1`, `kv-fdb-5_2`, `kv-fdb-6_0`, `kv-fdb-6_1`, `kv-fdb-6_2`, `kv-fdb-6_3`, `kv-fdb-7_0`, `kv-fdb-7_1`, `kv-indxdb`, `kv-mem`, `kv-rocksdb`, `kv-speedb`, `kv-surrealkv`, `kv-tikv`, `ml`, `scripting`, and
+2026-08-24T16:18:20 [info ] serial | `tokio-tungstenite`
+2026-08-24T16:18:20 [info ] serial |    [1m[94m= [0m[1mhelp[0m: consider adding `ml2` as a feature in `Cargo.toml`
+2026-08-24T16:18:20 [info ] serial |    [1m[94m= [0m[1mnote[0m: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+2026-08-24T16:18:20 [info ] serial | [1m[33mwarning[0m[1m: unexpected `cfg` condition value: `ml2`[0m
+2026-08-24T16:18:20 [info ] serial |   [1m[94m--> [0m/src/pedradb/bench/sub-surreal/surreal-core/src/sql/model.rs:53:28
+2026-08-24T16:18:20 [info ] serial |    [1m[94m|[0m
+2026-08-24T16:18:20 [info ] serial | [1m[94m53[0m [1m[94m|[0m     #[cfg(any(feature = "ml", feature = "ml2"))]
+2026-08-24T16:18:20 [info ] serial |    [1m[94m|[0m                               [1m[33m^^^^^^^^^^[0m[1m[94m-----[0m
+2026-08-24T16:18:20 [info ] serial |    [1m[94m|[0m                                         [1m[94m|[0m
+2026-08-24T16:18:20 [info ] serial |    [1m[94m|[0m                                         [1m[94mhelp: there is a expected value with a similar name: `"ml"`[0m
+2026-08-24T16:18:20 [info ] serial |    [1m[94m|[0m
+2026-08-24T16:18:20 [info ] serial |    [1m[94m= [0m[1mnote[0m: expected values for `feature` are: `arbitrary`, `default`, `experimental-parser`, `foundationdb`, `http`, `jwks`, `kv-fdb`, `kv-fdb-5_1`, `kv-fdb-5_2`, `kv-fdb-6_0`, `kv-fdb-6_1`, `kv-fdb-6_2`, `kv-fdb-6_3`, `kv-fdb-7_0`, `kv-fdb-7_1`, `kv-indxdb`, `kv-mem`, `kv-rocksdb`, `kv-speedb`, `kv-surrealkv`, `kv-tikv`, `ml`, `scripting`, and `tokio-tungstenite`
+2026-08-24T16:18:20 [info ] serial |    [1m[94m= [0m[1mhelp[0m: consider adding `ml2` as a feature in `Cargo.toml`
+2026-08-24T16:18:20 [info ] serial |    [1m[94m= [0m[1mnote[0m: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+2026-08-24T16:18:20 [info ] serial | [1m[33mwarning[0m[1m: unexpected `cfg` condition value: `ml2`[0m
+2026-08-24T16:18:20 [info ] serial |    [1m[94m--> [0m/src/pedradb/bench/sub-surreal/surreal-core/src/sql/model.rs:214:32
+2026-08-24T16:18:20 [info ] serial |     [1m[94m|[0m
+2026-08-24T16:18:20 [info ] serial | [1m[94m214[0m [1m[94m|[0m     #[cfg(not(any(feature = "ml", feature = "ml2")))]
+2026-08-24T16:18:20 [info ] serial |     [1m[94m|[0m                                   [1m[33m^^^^^^^^^^[0m[1m[94m-----[0m
+2026-08-24T16:18:20 [info ] serial |     [1m[94m|[0m                                             [1m[94m|[0m
+2026-08-24T16:18:20 [info ] serial |     [1m[94m|[0m                                             [1m[94mhelp: there is a expected value with a similar name: `"ml"`[0m
+2026-08-24T16:18:20 [info ] serial |     [1m[94m|[0m
+2026-08-24T16:18:20 [info ] serial |     [1m[94m= [0m[1mnote[0m: expected values for `feature` are: `arbitrary`, `default`, `experimental-parser`, `foundationdb`, `http`, `jwks`, `kv-fdb`, `kv-fdb-5_1`, `kv-fdb-5_2`, `kv-fdb-6_0`, `kv-fdb-6_1`, `kv-fdb-6_2`, `kv-fdb-6_3`, `kv-fdb-7_0`, `kv-fdb-7_1`, `kv-indxdb`, `kv-mem`, `kv-rocksdb`, `kv-speedb`, `kv-surrealkv`, `kv-tikv`, `ml`, `scripting`, and `tokio-tungstenite`
+2026-08-24T16:18:20 [info ] serial |     [1m[94m= [0m[1mhelp[0m: consider adding `ml2` as a feature in `Cargo.toml`
+2026-08-24T16:18:20 [info ] serial |     [1m[94m= [0m[1mnote[0m: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+2026-08-24T16:18:20 [info ] serial | [1m[33mwarning[0m[1m: unused imports: `lazy_env_parse_or_else` and `lazy_env_parse`[0m
+2026-08-24T16:18:20 [info ] serial |  [1m[94m--> [0m/src/pedradb/bench/sub-surreal/surreal-core/src/kvs/rocksdb/cnf.rs:1:13
+2026-08-24T16:18:20 [info ] serial |   [1m[94m|[0m
+2026-08-24T16:18:20 [info ] serial | [1m[94m1[0m [1m[94m|[0m use crate::{lazy_env_parse, lazy_env_parse_or_else};
+2026-08-24T16:18:20 [info ] serial |   [1m[94m|[0m             [1m[33m^^^^^^^^^^^^^^[0m  [1m[33m^^^^^^^^^^^^^^^^^^^^^^[0m
+2026-08-24T16:18:20 [info ] serial |   [1m[94m|[0m
+2026-08-24T16:18:20 [info ] serial |   [1m[94m= [0m[1mnote[0m: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+2026-08-24T16:18:40 [info ] serial | [1m[33mwarning[0m[1m: enum `Id` is never used[0m
+2026-08-24T16:18:40 [info ] serial |    [1m[94m--> [0m/src/pedradb/bench/sub-surreal/surreal-core/src/sql/value/serde/de/mod.rs:178:7
+2026-08-24T16:18:40 [info ] serial |     [1m[94m|[0m
+2026-08-24T16:18:40 [info ] serial | [1m[94m178[0m [1m[94m|[0m     enum Id {
+2026-08-24T16:18:40 [info ] serial |     [1m[94m|[0m          [1m[33m^^[0m
+2026-08-24T16:18:40 [info ] serial |     [1m[94m|[0m
+2026-08-24T16:18:40 [info ] serial |     [1m[94m= [0m[1mnote[0m: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+2026-08-24T16:18:40 [info ] serial | [1m[33mwarning[0m[1m: struct `Thing` is never constructed[0m
+2026-08-24T16:18:40 [info ] serial |    [1m[94m--> [0m/src/pedradb/bench/sub-surreal/surreal-core/src/sql/value/serde/de/mod.rs:202:9
+2026-08-24T16:18:40 [info ] serial |     [1m[94m|[0m
+2026-08-24T16:18:40 [info ] serial | [1m[94m202[0m [1m[94m|[0m     struct Thing {
+2026-08-24T16:18:40 [info ] serial |     [1m[94m|[0m            [1m[33m^^^^^[0m
+2026-08-24T16:18:40 [info ] serial | [1m[33mwarning[0m[1m: struct `Serializer` is never constructed[0m
+2026-08-24T16:18:40 [info ] serial |   [1m[94m--> [0m/src/pedradb/bench/sub-surreal/surreal-core/src/sql/value/serde/ser/cast/mod.rs:11:19
+2026-08-24T16:18:40 [info ] serial |    [1m[94m|[0m
+2026-08-24T16:18:40 [info ] serial | [1m[94m11[0m [1m[94m|[0m pub(super) struct Serializer;
+2026-08-24T16:18:40 [info ] serial |    [1m[94m|[0m                   [1m[33m^^^^^^^^^^[0m
+2026-08-24T16:18:40 [info ] serial | [1m[33mwarning[0m[1m: struct `Serializer` is never constructed[0m
+2026-08-24T16:18:40 [info ] serial |   [1m[94m--> [0m/src/pedradb/bench/sub-surreal/surreal-core/src/sql/value/serde/ser/edges/mod.rs:12:19
+2026-08-24T16:18:40 [info ] serial |    [1m[94m|[0m
+2026-08-24T16:18:40 [info ] serial | [1m[94m12[0m [1m[94m|[0m pub(super) struct Serializer;
+2026-08-24T16:18:40 [info ] serial |    [1m[94m|[0m                   [1m[33m^^^^^^^^^^[0m
+2026-08-24T16:18:40 [info ] serial | [1m[33mwarning[0m[1m: struct `Serializer` is never constructed[0m
+2026-08-24T16:18:40 [info ] serial |   [1m[94m--> [0m/src/pedradb/bench/sub-surreal/surreal-core/src/sql/value/serde/ser/expression/mod.rs:11:19
+2026-08-24T16:18:40 [info ] serial |    [1m[94m|[0m
+2026-08-24T16:18:40 [info ] serial | [1m[94m11[0m [1m[94m|[0m pub(super) struct Serializer;
+2026-08-24T16:18:40 [info ] serial |    [1m[94m|[0m                   [1m[33m^^^^^^^^^^[0m
+2026-08-24T16:18:40 [info ] serial | [1m[33mwarning[0m[1m: struct `Serializer` is never constructed[0m
+2026-08-24T16:18:40 [info ] serial |   [1m[94m--> [0m/src/pedradb/bench/sub-surreal/surreal-core/src/sql/value/serde/ser/range/mod.rs:13:19
+2026-08-24T16:18:40 [info ] serial |    [1m[94m|[0m
+2026-08-24T16:18:40 [info ] serial | [1m[94m13[0m [1m[94m|[0m pub(super) struct Serializer;
+2026-08-24T16:18:40 [info ] serial |    [1m[94m|[0m                   [1m[33m^^^^^^^^^^[0m
+2026-08-24T16:18:40 [info ] serial | [1m[33mwarning[0m[1m: hiding a lifetime that's elided elsewhere is conf
+2026-08-24T16:18:40 [info ] serial | using[0m
+2026-08-24T16:18:40 [info ] serial |    [1m[94m--> [0m/src/pedradb/bench/sub-surreal/surreal-core/src/ctx/context.rs:288:34
+2026-08-24T16:18:40 [info ] serial |     [1m[94m|[0m
+2026-08-24T16:18:40 [info ] serial | [1m[94m288[0m [1m[94m|[0m     pub(crate) fn get_query_planner(&self) -> Option<&QueryPlanner> {
+2026-08-24T16:18:40 [info ] serial |     [1m[94m|[0m                                     [1m[33m^^^^^[0m            [1m[33m^^^^^^^^^^^^^[0m
+2026-08-24T16:18:40 [info ] serial |     [1m[94m|[0m                                     [1m[33m|[0m                [1m[33m||[0m
+2026-08-24T16:18:40 [info ] serial |     [1m[94m|[0m                                     [1m[33m|[0m                [1m[33m|the same lifetime is hidden here[0m
+2026-08-24T16:18:40 [info ] serial |     [1m[94m|[0m                                     [1m[33m|[0m                [1m[33mthe same lifetime is elided here[0m
+2026-08-24T16:18:40 [info ] serial |     [1m[94m|[0m                                     [1m[33mthe lifetime is elided here[0m
+2026-08-24T16:18:40 [info ] serial |     [1m[94m|[0m
+2026-08-24T16:18:40 [info ] serial |     [1m[94m= [0m[1mhelp[0m: the same lifetime is referred to in inconsistent ways, making the signature confusing
+2026-08-24T16:18:40 [info ] serial |     [1m[94m= [0m[1mnote[0m: `#[warn(mismatched_lifetime_syntaxes)]` on by default
+2026-08-24T16:18:40 [info ] serial | [1m[96mhelp[0m: use `'_` for type paths
+2026-08-24T16:18:40 [info ] serial |     [1m[94m|[0m
+2026-08-24T16:18:40 [info ] serial | [1m[94m288[0m [1m[94m| [0m    pub(crate) fn get_query_planner(&self) -> Option<&QueryPlanner[92m<'_>[0m> {
+2026-08-24T16:18:40 [info ] serial |     [1m[94m|[0m                                                                   [92m++++[0m
+2026-08-24T16:18:40 [info ] serial | [1m[33mwarning[0m[1m: hiding a lifetime that's elided elsewhere is confusing[0m
+2026-08-24T16:18:40 [info ] serial |    [1m[94m--> [0m/src/pedradb/bench/sub-surreal/surreal-core/src/doc/index.rs:263:26
+2026-08-24T16:18:40 [info ] serial |     [1m[94m|[0m
+2026-08-24T16:18:40 [info ] serial | [1m[94m263[0m [1m[94m|[0m     fn get_unique_index_key(&self, v: &'a Array) -> key::index::Index {
+2026-08-24T16:18:40 [info ] serial |     [1m[94m|[0m                             [1m[33m^^^^^[0m                   [1m[33m^^^^^^^^^^^^^^^^^[0m [1m[33mthe same lifetime is hidden here[0m
+2026-08-24T16:18:40 [info ] serial |     [1m[94m|[0m                             [1m[33m|[0m
+2026-08-24T16:18:40 [info ] serial |     [1m[94m|[0m                             [1m[33mthe lifetime is elided here[0m
+2026-08-24T16:18:40 [info ] serial |     [1m[94m|[0m
+2026-08-24T16:18:40 [info ] serial |     [1m[94m= [0m[1mhelp[0m: the same lifetime is referred to in inconsistent ways, making the signature confusing
+2026-08-24T16:18:40 [info ] serial | [1m[96mhelp[0m: use `'_` for type paths
+2026-08-24T16:18:40 [info ] serial |     [1m[94m|[0m
+2026-08-24T16:18:40 [info ] serial | [1m[94m263[0m [1m[94m| [0m    fn get_unique_index_key(&self, v: &'a Array) -> key::index::Index[92m<'_>[0m {
+2026-08-24T16:18:40 [info ] serial |     [1m[94m|[0m                                                                      [92m++++[0m
+2026-08-24T16:18:40 [info ] serial | [1m[33mwarning[0m[1m: hiding a lifetime that's elided elsewhere is confusing[0m
+2026-08-24T16:18:40 [info ] serial |    [1m[94m--> [0m/src/pedradb/bench/sub-surreal/surreal-core/src/doc/index.rs:274:30
+2026-08-24T16:18:40 [info ] serial |     [1m[94m|[0m
+2026-08-24T16:18:40 [info ] serial | [1m[94m274[0m [1m[94m|[0m     fn get_non_unique_index_key(&self, v: &'a Array) -> key::index::Index {
+2026-08-24T16:18:40 [info ] serial |     [1m[94m|[0m                                 [1m[33m^^^^^[0m                   [1m[33m^^^^^^^^^^^^^^^^^[0m [1m[33mthe same lifetime is hidden here[0m
+2026-08-24T16:18:40 [info ] serial |     [1m[94m|[0m                                 [1m[33m|[0m
+2026-08-24T16:18:40 [info ] serial |     [1m[94m|[0m                                 [1m[33mthe lifetime is elided here[0m
+2026-08-24T16:18:40 [info ] serial |     [1m[94m|[0m
+2026-08-24T16:18:40 [info ] serial |     [1m[94m= [0m[1mhelp[0m: the same lifetime is referred to in inconsistent ways, making the signature confusing
+2026-08-24T16:18:40 [info ] serial | [1m[96mhelp[0m: use `'_` for type paths
+2026-08-24T16:18:40 [info ] serial |     [1m[94m|[0m
+2026-08-24T16:18:40 [info ] serial | [1m[94m274[0m [1m[94m| [0m    fn get_non_unique_index_key(&self, v: &'a Array) -> key::index::Index[92m<'_>[0m {
+2026-08-24T16:18:40 [info ] serial |     [1m[94m|[0m                                                                          [92m++++[0m
+2026-08-24T16:18:40 [info ] serial | [1m[33mwarning[0m[1m: eliding a lifetime that's named elsewhere is confusing[0m
+2026-08-24T16:18:40 [info ] serial |    [1m[94m--> [0m/src/pedradb/bench/sub-surreal/surreal-core/src/sql/part.rs:117:23
+2026-08-24T16:18:40 [info ] serial |     [1m[94m|[0m
+2026-08-24T16:18:40 [info ] serial | [1m[94m117[0m [1m[94m|[0m     fn next(&'a self) -> &[Part];
+2026-08-24T16:18:40 [info ] serial |     [1m[94m|[0m              [1m[94m--[0m          [1m[33m^^^^^^^[0m [1m[33mthe same lifetime is elided here[0m
+2026-08-24T16:18:40 [info ] serial |     [1m[94m|[0m              [1m[94m|[0m
+2026-08-24T16:18:40 [info ] serial |     [1m[94m|[0m              [1m[94mthe lifetime is named here[0m
+2026-08-24T16:18:40 [info ] serial |     [1m[94m|[0m
+2026-08-24T16:18:40 [info ] serial |     [1m[94m= [0m[1mhelp[0m: the same lifetime is referred to in inconsistent ways, making the signature confusing
+2026-08-24T16:18:40 [info ] serial | [1m[96mhelp[0m: consistently use `'a`
+2026-08-24T16:18:40 [info ] serial |     [1m[94m|[0m
+2026-08-24T16:18:40 [info ] serial | [1m[94m117[0m [1m[94m| [0m    fn next(&'a self) -> &[92m'a [0m[Part];
+2026-08-24T16:18:40 [info ] serial |     [1m[94m|[0m                           [92m++[0m
+2026-08-24T16:18:40 [info ] serial | [1m[33mwarning[0m[1m: eliding a lifetime that's named elsewhere is confusing[0m
+2026-08-24T16:18:40 [info ] serial |   [1m[94m--> [0m/src/pedradb/bench/sub-surreal/surreal-core/src/idx/ft/analyzer/tokenizer.rs:23:71
+2026-08-24T16:18:40 [info ] serial |    [1m[94m|[0m
+2026-08-24T16:18:40 [info ] serial | [1m[94m23[0m [1m[94m|[0m     pub(super) fn get_token_string<'a>(&'a self, t: &'a Token) -> Result<&str, Error> {
+2026-08-24T16:18:40 [info ] serial |    [1m[94m|[0m                                         [1m[94m--[0m           [1m[94m--[0m                  [1m[33m^^^^[0m [1m[33mthe same lifetime is elided here[0m
+2026-08-24T16:18:40 [info ] serial |    [1m[94m|[0m                                         [1m[94m|[0m            [1m[94m|[0m
+2026-08-24T16:18:40 [info ] serial |    [1m[94m|[0m                                         [1m[94m|[0m            [1m[94mthe lifetime is named here[0m
+2026-08-24T16:18:40 [info ] serial |    [1m[94m|[0m                                         [1m[94mthe lifetime is named here[0m
+2026-08-24T16:18:40 [info ] serial |    [1m[94m|[0m
+2026-08-24T16:18:40 [info ] serial |    [1m[94m= [0m[1mhelp[0m: the same lifetime is referred to in inconsistent ways, making the signature confusing
+2026-08-24T16:18:40 [info ] serial | [1m[96mhelp[0m: consistently use `'a`
+2026-08-24T16:18:40 [info ] serial |    [1m[94m|[0m
+2026-08-24T16:18:40 [info ] serial | [1m[94m23[0m [1m[94m| [0m    pub(super) fn get_token_string<'a>(&'a self, t: &'a Token) -> Result<&[92m'a [0mstr, Error> {
+2026-08-24T16:18:40 [info ] serial |    [1m[94m|[0m                                                                           [92m++[0m
+2026-08-24T16:18:40 [info ] serial | [1m[33mwarning[0m[1m: eliding a lifetime that's named elsewhere is confusing[0m
+2026-08-24T16:18:40 [info ] serial |    [1m[94m--> [0m/src/pedradb/bench/sub-surreal/surreal-core/src/idx/ft/analyzer/tokenizer.rs:165:60
+2026-08-24T16:18:40 [info ] serial |     [1m[94m|[0m
+2026-08-24T16:18:40 [info ] serial | [1m[94m165[0m [1m[94m|[0m     pub(super) fn get_str<'a>(&'a self, i: &'a str) -> Result<&str, Error> {
+2026-08-24T16:18:40 [info ] serial |     [1m[94m|[0m                                [1m[94m--[0m           [1m[94m--[0m                [1m[33m^^^^[0m [1m[33mthe same lifetime is elided here[0m
+2026-08-24T16:18:40 [info ] serial |     [1m[94m|[0m                                [1m[94m|[0m            [1m[94m|[0m
+2026-08-24T16:18:40 [info ] serial |     [1m[94m|[0m                                [1m[94m|[0m            [1m[94mthe lifetime is named here[0m
+2026-08-24T16:18:40 [info ] serial |     [1m[94m|[0m                                [1m[94mthe lifetime is named here[0m
+2026-08-24T16:18:40 [info ] serial |     [1m[94m|[0m
+2026-08-24T16:18:40 [info ] serial |     [1m[94m= [0m[1mhelp[0m: the same lifetime is referred to in inconsistent ways, making the signature confusing
+2026-08-24T16:18:40 [info ] serial | [1m[96mhelp[0m: consistently use `'a`
+2026-08-24T16:18:40 [info ] serial |     [1m[94m|[0m
+2026-08-24T16:18:40 [info ] serial | [1m[94m165[0m [1m[94m|
+2026-08-24T16:18:40 [info ] serial |  
+2026-08-24T16:18:40 [info ] serial | [0m    pub(su
+2026-08-24T16:18:40 [info ] serial | per)
+2026-08-24T16:18:40 [info ] serial | fn get_str<
+2026-08-24T16:18:40 [info ] serial | 'a>(&'a s
+2026-08-24T16:18:40 [info ] serial | elf, i:
+2026-08-24T16:18:40 [info ] serial |  &'a str) -> Res
+2026-08-24T16:18:40 [info ] serial | ult<&[92m'a [0
+2026-08-24T16:18:40 [info ] serial | ms
+2026-08-24T16:18:40 [info ] serial | tr, Error> {
+2026-08-24T16:18:40 [info ] serial |     [1m[94m|[
+2026-08-24T16:18:40 [info ] serial | 0m
+2026-08-24T16:18:40 [info ] serial |        [92m++[0m
+2026-08-24T16:18:40 [info ] serial | [
+2026-08-24T16:18:40 [info ] serial | 1m[33mwarnin
+2026-08-24T16:18:40 [info ] serial | g
+2026-08-24T16:18:40 [info ] serial | [0m[1m: hidin
+2026-08-24T16:18:41 [info ] serial | g a lifetime that's elided elsewhere is confusing[0m
+2026-08-24T16:18:41 [info ] serial |     [1m[94m--> [0m/src/pedradb/bench/sub-surreal/surreal-core/src/kvs/ds.rs:1098:34
+2026-08-24T16:18:41 [info ] serial |      [1m[94m|[0m
+2026-08-24T16:18:41 [info ] serial | [1m[94m1098[0m [1m[94m|[0m     fn construct_document(mutation: &TableMutation) -> Option<Document> {
+2026-08-24T16:18:41 [info ] serial |      [1m[94m|[0m                                     [1m[33m^^^^^^^^^^^^^^[0m            [1m[33m^^^^^^^^[0m [1m[33mthe same lifetime is hidden here[0m
+2026-08-24T16:18:41 [info ] serial |      [1m[94m|[0m                                     [1m[33m|[0m
+2026-08-24T16:18:41 [info ] serial |      [1m[94m|[0m                                     [1m[33mthe lifetime is elided here[0m
+2026-08-24T16:18:41 [info ] serial |      [1m[94m|[0m
+2026-08-24T16:18:41 [info ] serial |      [1m[94m= [0m[1mhelp[0m: the same lifetime is referred to in inconsistent ways, making the signature confusing
+2026-08-24T16:18:41 [info ] serial | [1m[96mhelp[0m: use `'_` for type paths
+2026-08-24T16:18:41 [info ] serial |      [1m[94m|[0m
+2026-08-24T16:18:41 [info ] serial | [1m[94m1098[0m [1m[94m| [0m    fn construct_document(mutation: &TableMutation) -> Option<Document[92m<'_>[0m> {
+2026-08-24T16:18:41 [info ] serial |      [1m[94m|[0m                                                                       [92m++++[0m
+2026-08-24T16:20:16 [info ] serial | [1m[33mwarning[0m: `surrealdb-core` (lib) generated 27 warnings (run `cargo fix --lib -p surrealdb-core` to apply 8 suggestions)
+2026-08-24T16:20:16 [info ] serial | [1m[92m   Compiling[0m sub-bench v0.1.0 (/src/pedradb/bench/sub-surreal/pedra/sub-bench)
+2026-08-24T16:20:21 [info ] serial | [1m[92m    Finished[0m `release` profile [optimized] target(s) in 3m 37s
+2026-08-24T16:20:21 [info ] serial | --- pedra side done 16:20:21 ---
+2026-08-24T16:20:21 [info ] serial | --- run pedra 16:20:21 ---
+2026-08-24T16:20:58 [info ] serial | SUB_BENCH_JSON {"engine":"pedra","ops":2000,"records":1024,"seconds":8.0,"legs":[{"name":"point_read","qps":627872.5254822047},{"name":"point_write","qps":355017.9428421112},{"name":"scan","qps":797265.6793096733},{"name":"doc_txn","qps":143989.18501152797}]}
+2026-08-24T16:21:08 [info ] serial | --- build peer side (real rocksdb C++) 16:21:08 ---
+2026-08-24T16:21:08 [info ] serial | [1m[33mwarning[0m: profiles for the non
+2026-08-24T16:21:08 [info ] serial | root
+2026-08-24T16:21:08 [info ] serial | package will be ignored, specify profiles at the workspace root:
+2026-08-24T16:21:08 [info ] serial | package:   /src/pedradb/bench/sub-surreal/peer/sub-bench/Cargo.toml
+2026-08-24T16:21:08 [info ] serial | workspace: /src/pedradb/bench/sub-surreal/peer/Cargo.toml
+2026-08-24T16:21:09 [info ] serial | [1m[92m   Compiling[0m proc-macro2 v1.0.107
+2026-08-24T16:21:09 [info ] serial | [1m[92m   Compiling[0m unicode-ident v1.0.24
+2026-08-24T16:21:09 [info ] serial | [1m[92m   Compiling[0m quote v1.0.47
+2026-08-24T16:21:09 [info ] serial | [1m[92m   Compiling[0m libc v0.2.189
+2026-08-24T16:21:09 [info ] serial | [1m[92m   Compiling[0m cfg-if v1.0.4
+2026-08-24T16:21:09 [info ] serial | [1m[92m   Compiling[0m autocfg v1.5.1
+2026-08-24T16:21:10 [info ] serial | [1m[92m   Compiling[0m syn v2.0.119
+2026-08-24T16:21:10 [info ] serial | [1m[92m   Compiling[0m syn v3.0.4
+2026-08-24T16:21:10 [info ] serial | [1m[92m   Compiling[0m version_check v0.9.5
+2026-08-24T16:21:10 [info ] serial | [1m[92m   Compiling[0m serde_core v1.0.229
+2026-08-24T16:21:12 [info ] serial | [1m[92m   Compiling[0m jobserver v0.1.35
+2026-08-24T16:21:12 [info ] serial | [1m[92m   Compiling[0m find-msvc-tools v0.1.11
+2026-08-24T16:21:12 [info ] serial | [1m[92m   Compiling[0m shlex v2.0.1
+2026-08-24T16:21:12 [info ] serial | [1m[92m   Compiling[0m cc v1.4.4
+2026-08-24T16:21:13 [info ] serial | [1m[92m   Compiling[0m libm v0.2.16
+2026-08-24T16:21:13 [info ] serial | [1m[92m   Compiling[0m num-traits v0.2.19
+2026-08-24T16:21:13 [info ] serial | [1m[92m   Compiling[0m serde v1.0.229
+2026-08-24T16:21:13 [info ] serial | [1m[92m   Compiling[0m memchr v2.8.3
+2026-08-24T16:21:13 [info ] serial | [1m[92m   Compiling[0m serde_derive v1.0.229
+2026-08-24T16:21:14 [info ] serial | [1m[92m   Compiling[0m stable_deref_trait v1.2.1
+2026-08-24T16:21:14 [info ] serial | [1m[92m   Compiling[0m aho-corasick v1.1.5
+2026-08-24T16:21:15 [info ] serial | [1m[92m   Compiling[0m generic-array v0.14.7
+2026-08-24T16:21:15 [info ] serial | [1m[92m   Compiling[0m zerocopy v0.8.56
+2026-08-24T16:21:15 [info ] serial | [1m[92m   Compiling[0m regex-syntax v0.8.11
+2026-08-24T16:21:15 [info ] serial | [1m[92m   Compiling[0m zerocopy-derive v0.8.56
+2026-08-24T16:21:16 [info ] serial | [1m[92m   Compiling[0m synstructure v0.13.2
+2026-08-24T16:21:16 [info ] serial | [1m[92m   Compiling[0m smallvec v1.15.2
+2026-08-24T16:21:16 [info ] serial | [1m[92m   Compiling[0m regex-automata v0.4.18
+2026-08-24T16:21:16 [info ] serial | [1m[92m   Compiling[0m typenum v1.20.1
+2026-08-24T16:21:17 [info ] serial | [1m[92m   Compiling[0m parking_lot_core v0.9.12
+2026-08-24T16:21:17 [info ] serial | [1m[92m   Compiling[0m regex v1.13.1
+2026-08-24T16:21:18 [info ] serial | [1m[92m   Compiling[0m zerofrom-derive v0.1.7
+2026-08-24T16:21:18 [info ] serial | [1m[92m   Compiling[0m either v1.18.0
+2026-08-24T16:21:18 [info ] serial | [1m[92m   Compiling[0m once_cell v1.21.4
+2026-08-24T16:21:18 [info ] serial | [1m[92m   Compiling[0m yoke-derive v0.8.2
+2026-08-24T16:21:18 [info ] serial | [1m[92m   Compiling[0m zerofrom v0.1.8
+2026-08-24T16:21:18 [info ] serial | [1m[92m   Compiling[0m getrandom v0.2.17
+2026-08-24T16:21:18 [info ] serial | [1m[92m   Compiling[0m glob v0.3.4
+2026-08-24T16:21:19 [info ] serial | [1m[92m   Compiling[0m clang-sys v1.9.1
+2026-08-24T16:21:19 [info ] serial | [1m[92m   Compiling[0m yoke v0.8.3
+2026-08-24T16:21:19 [info ] serial | [1m[92m   Compiling[0m crypto-common v0.1.7
+2026-08-24T16:21:19 [info ] serial | [1m[92m   Compiling[0m ident_case v1.0.1
+2026-08-24T16:21:19 [info ] serial | [1m[92m   Compiling[0m strsim v0.11.1
+2026-08-24T16:21:19 [info ] serial | [1m[92m   Compiling[0m rand_core v0.6.4
+2026-08-24T16:21:19 [info ] serial | [1m[92m   Compiling[0m zerovec-derive v0.11.6
+2026-08-24T16:21:19 [info ] serial | [1m[92m   Compiling[0m pkg-config v0.3.34
+2026-08-24T16:21:19 [info ] serial | [1m[92m   Compiling[0m scopeguard v1.2.0
+2026-08-24T16:21:19 [info ] serial | [1m[92m   Compiling[0m lock_api v0.4.14
+2026-08-24T16:21:19 [info ] serial | [1m[92m   Compiling[0m displaydoc v0.2.7
+2026-08-24T16:21:20 [info ] serial | [1m[92m   Compiling[0m minimal-lexical v0.2.1
+2026-08-24T16:21:20 [info ] serial | [1m[92m   Compiling[0m zerovec v0.11.8
+2026-08-24T16:21:20 [info ] serial | [1m[92m   Compiling[0m byteorder v1.5.0
+2026-08-24T16:21:20 [info ] serial | [1m[92m   Compiling[0m equivalent v1.0.2
+2026-08-24T16:21:20 [info ] serial | [1m[92m   Compiling[0m subtle v2.6.1
+2026-08-24T16:21:20 [info ] serial | [1m[92m   Compiling[0m nom v7.1.3
+2026-08-24T16:21:20 [info ] serial | [1m[92m   Compiling[0m libloading v0.8.9
+2026-08-24T16:21:20 [info ] serial | [1m[92m   Compiling[0m thiserror v1.0.69
+2026-08-24T16:21:20 [info ] serial | [1m[92m   Compiling[0m getrandom v0.3.4
+2026-08-24T16:21:20 [info ] serial | [1m[92m   Compiling[0m crossbeam-utils v0.8.22
+2026-08-24T16:21:20 [info ] serial | [1m[92m   Compiling[0m object v0.39.1
+2026-08-24T16:21:20 [info ] serial | [1m[92m   Compiling[0m block-buffer v0.10.4
+2026-08-24T16:21:20 [info ] serial | [1m[92m   Compiling[0m thiserror-impl v1.0.69
+2026-08-24T16:21:21 [info ] serial | [1m[92m   Compiling[0m cexpr v0.6.0
+2026-08-24T16:21:21 [info ] serial | [1m[92m   Compiling[0m dirs-sys-next v0.1.2
+2026-08-24T16:21:21 [info ] serial | [1m[92m   Compiling[0m semver v1.0.28
+2026-08-24T16:21:21 [info ] serial | [1m[92m   Compiling[0m pin-project-lite v0.2.17
+2026-08-24T16:21:21 [info ] serial | [1m[92m   Compiling[0m crunchy v0.2.4
+2026-08-24T16:21:21 [info ] serial | [1m[92m   Compiling[0m syn v1.0.109
+2026-08-24T16:21:21 [info ] serial | [1m[92m   Compiling[0m shlex v1.3.0
+2026-08-24T16:21:21 [info ] serial | [1m[92m   Compiling[0m rustc_version v0.4.1
+2026-08-24T16:21:22 [info ] serial | [1m[92m   Compiling[0m dirs-next v2.0.0
+2026-08-24T16:21:22 [info ] serial | [1m[92m   Compiling[0m digest v0.10.7
+2026-08-24T16:21:22 [info ] serial | [1m[92m   Compiling[0m tinystr v0.8.4
+2026-08-24T16:21:22 [info ] serial | [1m[92m   Compiling[0m ppv-lite86 v0.2.21
+2026-08-24T16:21:22 [info ] serial | [1m[92m   Compiling[0m writeable v0.6.4
+2026-08-24T16:21:22 [info ] serial | [1m[92m   Compiling[0m hashbrown v0.17.1
+2026-08-24T16:21:22 [info ] serial | [1m[92m   Compiling[0m zmij v1.0.23
+2026-08-24T16:21:23 [info ] serial | [1m[92m   Compiling[0m prettyplease v0.2.37
+2026-08-24T16:21:23 [info ] serial | [1m[92m   Compiling[0m futures-core v0.3.34
+2026-08-24T16:21:23 [info ] serial | [1m[92m   Compiling[0m litemap v0.8.3
+2026-08-24T16:21:23 [info ] serial | [1m[92m   Compiling[0m tiny-keccak v2.0.2
+2026-08-24T16:21:23 [info ] serial | [1m[92m   Compiling[0m bindgen v0.72.1
+2026-08-24T16:21:23 [info ] serial | [1m[92m   Compiling[0m siphasher v1.0.3
+2026-08-24T16:21:23 [info ] serial | [1m[92m   Compiling[0m thiserror v2.0.20
+2026-08-24T16:21:23 [info ] serial | [1m[92m   Compiling[0m indexmap v2.14.0
+2026-08-24T16:21:23 [info ] serial | [1m[92m   Compiling[0m phf_shared v0.11.3
+2026-08-24T16:21:23 [info ] serial | [1m[92m   Compiling[0m icu_locale_core v2.3.0
+2026-08-24T16:21:23 [info ] serial | [1m[92m   Compiling[0m term v0.7.0
+2026-08-24T16:21:24 [info ] serial | [1m[92m   Compiling[0m parking_lot v0.12.5
+2026-08-24T16:21:24 [info ] serial | [1m[92m   Compiling[0m ar_archive_writer v0.5.3
+2026-08-24T16:21:24 [info ] serial | [1m[92m   Compiling[0m heapless v0.7.17
+2026-08-24T16:21:24 [info ] serial | [1m[92m   Compiling[0m potential_utf v0.1.6
+2026-08-24T16:21:24 [info ] serial | [1m[92m   Compiling[0m zerotrie v0.2.5
+2026-08-24T16:21:25 [info ] serial | [1m[92m   Compiling[0m darling_core v0.23.0
+2026-08-24T16:21:25 [info ] serial | [1m[92m   Compiling[0m itertools v0.13.0
+2026-08-24T16:21:26 [info ] serial | [1m[92m   Compiling[0m thiserror-impl v2.0.20
+2026-08-24T16:21:26 [info ] serial | [1m[92m   Compiling[0m thiserror-impl v2.0.20
+2026-08-24T16:21:26 [info ] serial | [1m[92m   Compiling[0m icu_properties_data v2.3.0
+2026-08-24T16:21:26 [info ] serial | [1m[92m   Compiling[0m utf8_iter v1.0.4
+2026-08-24T16:21:27 [info ] serial | [1m[92m   Compiling[0m log v0.4.34
+2026-08-24T16:21:27 [info ] serial | [1m[92m   Compiling[0m fixedbitset v0.4.2
+2026-08-24T16:21:27 [info ] serial | [1m[92m   Compiling[0m new_debug_unreachable v1.0.6
+2026-08-24T16:21:27 [info ] serial | [1m[92m   Compiling[0m precomputed-hash v0.1.1
+2026-08-24T16:21:27 [info ] serial | [1m[92m   Compiling[0m bitflags v2.13.1
+2026-08-24T16:21:27 [info ] serial | [1m[92m   Compiling[0m icu_normalizer_data v2.3.0
+2026-08-24T16:21:27 [info ] serial | [1m[92m   Compiling[0m serde_json v1.0.151
+2026-08-24T16:21:28 [info ] serial | [1m[92m   Compiling[0m rustc-hash v2.1.3
+2026-08-24T16:21:28 [info ] serial | [1m[92m   Compiling[0m same-file v1.0.6
+2026-08-24T16:21:28 [info ] serial | [1m[92m   Compiling[0m bit-vec v0.6.3
+2026-08-24T16:21:28 [info ] serial | [1m[92m   Compiling[0m bit-set v0.5.3
+2026-08-24T16:21:28 [info ] serial | [1m[92m   Compiling[0m walkdir v2.5.0
+2026-08-24T16:21:32 [info ] serial | [1m[92m   Compiling[0m string_cache v0.8.9
+2026-08-24T16:21:32 [info ] serial | [1m[92m   Compiling[0m petgraph v0.6.5
+2026-08-24T16:21:33 [info ] serial | [1m[92m   Compiling[0m ena v0.14.4
+2026-08-24T16:21:33 [info ] serial | [1m[92m   Compiling[0m icu_collections v2.3.0
+2026-08-24T16:21:33 [info ] serial | [1m[92m   Compiling[0m darling_macro v0.23.0
+2026-08-24T16:21:33 [info ] serial | [1m[92m   Compiling[0m icu_provider v2.3.1
+2026-08-24T16:21:33 [info ] serial | [1m[92m   Compiling[0m psm v0.1.32
+2026-08-24T16:21:33 [info ] serial | [1m[92m   Compiling[0m ascii-canvas v3.0.0
+2026-08-24T16:21:34 [info ] serial | [1m[92m   Compiling[0m hash32 v0.2.1
+2026-08-24T16:21:34 [info ] serial | [1m[92m   Compiling[0m spin v0.9.9
+2026-08-24T16:21:34 [info ] serial | [1m[92m   Compiling[0m itertools v0.11.0
+2026-08-24T16:21:34 [info ] serial | [1m[92m   Compiling[0m lalrpop-util v0.20.2
+2026-08-24T16:21:34 [info ] serial | [1m[92m   Compiling[0m num-integer v0.1.47
+2026-08-24T16:21:34 [info ] serial | [1m[92m   Compiling[0m itoa v1.0.18
+2026-08-24T16:21:34 [info ] serial | [1m[92m   Compiling[0m vcpkg v0.2.15
+2026-08-24T16:21:34 [info ] serial | [1m[92m   Compiling[0m crossbeam-epoch v0.9.20
+2026-08-24T16:21:35 [info ] serial | [1m[92m   Compiling[0m allocator-api2 v0.2.21
+2026-08-24T16:21:35 [info ] serial | [1m[92m   Compiling[0m bindgen v0.65.1
+2026-08-24T16:21:35 [info ] serial | [1m[92m   Compiling[0m pico-args v0.5.0
+2026-08-24T16:21:35 [info ] serial | [1m[92m   Compiling[0m getrandom v0.4.3
+2026-08-24T16:21:35 [info ] serial | [1m[92m   Compiling[0m unicode-xid v0.2.6
+2026-08-24T16:21:35 [info ] serial | [1m[92m   Compiling[0m libz-sys v1.1.29
+2026-08-24T16:21:35 [info ] serial | [1m[92m   Compiling[0m lalrpop v0.20.2
+2026-08-24T16:21:37 [info ] serial | [1m[92m   Compiling[0m darling v0.23.0
+2026-08-24T16:21:38 [info ] serial | [1m[92m   Compiling[0m zstd-sys v2.0.16+zstd.1.5.7
+2026-08-24T16:21:38 [info ] serial | [1m[92m   Compiling[0m bzip2-sys v0.1.13+1.0.8
+2026-08-24T16:21:39 [info ] serial | [1m[92m   Compiling[0m inout v0.1.4
+2026-08-24T16:21:39 [info ] serial | [1m[92m   Compiling[0m stacker v0.1.25
+2026-08-24T16:21:39 [info ] serial | [1m[92m   Compiling[0m lz4-sys v1.11.1+lz4-1.10.0
+2026-08-24T16:21:39 [info ] serial | [1m[92m   Compiling[0m ahash v0.8.12
+2026-08-24T16:21:39 [info ] serial | [1m[92m   Compiling[0m proc-macro-error-attr v1.0.4
+2026-08-24T16:21:39 [info ] serial | [1m[92m   Compiling[0m matrixmultiply v0.3.11
+2026-08-24T16:21:40 [info ] serial | [1m[92m   Compiling[0m lazycell v1.3.0
+2026-08-24T16:21:40 [info ] serial | [1m[92m   Compiling[0m peeking_take_while v0.1.2
+2026-08-24T16:21:40 [info ] serial | [1m[92m   Compiling[0m fnv v1.0.7
+2026-08-24T16:21:40 [info ] serial | [1m[92m   Compiling[0m cpufeatures v0.2.17
+2026-08-24T16:21:40 [info ] serial | [1m[92m   Compiling[0m rustc-hash v1.1.0
+2026-08-24T16:21:40 [info ] serial | [1m[92m   Compiling[0m tinyvec_macros v0.1.1
+2026-08-24T16:21:40 [info ] serial | [1m[92m   Compiling[0m lazy_static v1.5.0
+2026-08-24T16:21:40 [info ] serial | [1m[92m   Compiling[0m slab v0.4.12
+2026-08-24T16:21:40 [info ] serial | [1m[92m   Compiling[0m futures-sink v0.3.34
+2026-08-24T16:21:40 [info ] serial | [1m[92m   Compiling[0m bitflags v1.3.2
+2026-08-24T16:21:40 [info ] serial | [1m[92m   Compiling[0m crossbeam-deque v0.8.7
+2026-08-24T16:21:40 [info ] serial | [1m[92m   Compiling[0m futures-channel v0.3.34
+2026-08-24T16:21:40 [info ] serial | [1m[92m   Compiling[0m tinyvec v1.12.0
+2026-08-24T16:21:40 [info ] serial | [1m[92m   Compiling[0m darling_core v0.20.11
+2026-08-24T16:21:41 [info ] serial | [1m[92m   Compiling[0m cedar-policy-core v2.4.2
+2026-08-24T16:21:42 [info ] serial | [1m[92m   Compiling[0m cipher v0.4.4
+2026-08-24T16:21:46 [info ] serial | [1m[92m   Compiling[0m icu_normalizer v2.3.0
+2026-08-24T16:21:47 [info ] serial | [1m[92m   Compiling[0m icu_properties v2.3.0
+2026-08-24T16:21:48 [info ] serial | [1m[92m   Compiling[0m serde_with_macros v3.22.0
+2026-08-24T16:21:49 [info ] serial | [1m[92m   Compiling[0m rstar v0.11.0
+2026-08-24T16:21:50 [info ] serial | [1m[92m   Compiling[0m rand_chacha v0.3.1
+2026-08-24T16:21:51 [info ] serial | [1m[92m   Compiling[0m itertools v0.10.5
+2026-08-24T16:21:52 [info ] serial | [1m[92m   Compiling[0m approx v0.5.1
+2026-08-24T16:21:52 [info ] serial | [1m[92m   Compiling[0m miette-derive v5.10.0
+2026-08-24T16:21:52 [info ] serial | [1m[92m   Compiling[0m futures-macro v0.3.34
+2026-08-24T16:21:52 [info ] serial | [1m[92m   Compiling[0m futures-macro v0.3.34
+2026-08-24T16:21:53 [info ] serial | [1m[92m   Compiling[0m proc-macro-error v1.0.4
+2026-08-24T16:21:53 [info ] serial | [1m[92m   Compiling[0m futures-task v0.3.34
+2026-08-24T16:21:53 [info ] serial | [1m[92m   Compiling[0m rayon-core v1.13.0
+2026-08-24T16:21:53 [info ] serial | [1m[92m   Compiling[0m base64ct v1.8.3
+2026-08-24T16:21:53 [info ] serial | [1m[92m   Compiling[0m time-core v0.1.9
+2026-08-24T16:21:53 [info ] serial | [1m[92m   Compiling[0m futures-io v0.3.34
+2026-08-24T16:21:53 [info ] serial | [1m[92m   Compiling[0m rustix v1.1.4
+2026-08-24T16:21:53 [info ] serial | [1m[92m   Compiling[0m rustversion v1.0.23
+2026-08-24T16:21:54 [info ] serial | [1m[92m   Compiling[0m arbitrary v1.4.2
+2026-08-24T16:21:54 [info ] serial | [1m[92m   Compiling[0m num-conv v0.2.2
+2026-08-24T16:21:54 [info ] serial | [1m[92m   Compiling[0m rawpointer v0.2.1
+2026-08-24T16:21:54 [info ] serial | [1m[92m   Compiling[0m unicode-width v0.1.14
+2026-08-24T16:21:54 [info ] serial | [1m[92m   Compiling[0m doc-comment v0.3.4
+2026-08-24T16:21:54 [info ] serial | [1m[92m   Compiling[0m robust v1.2.0
+2026-08-24T16:21:54 [info ] serial | [1m[92m   Compiling[0m rustc_lexer v0.1.0
+2026-08-24T16:21:55 [info ] serial | [1m[92m   Compiling[0m geo-types v0.7.20
+2026-08-24T16:21:55 [info ] serial | [1m[92m   Compiling[0m miette v5.10.0
+2026-08-24T16:21:56 [info ] serial | [1m[92m   Compiling[0m time-macros v0.2.32
+2026-08-24T16:21:57 [info ] serial | [1m[92m   Compiling[0m futures-util v0.3.34
+2026-08-24T16:21:57 [info ] serial | [1m[92m   Compiling[0m password-hash v0.5.0
+2026-08-24T16:21:57 [info ] serial | [1m[92m   Compiling[0m rand v0.8.7
+2026-08-24T16:21:58 [info ] serial | [1m[92m   Compiling[0m serde_with v3.22.0
+2026-08-24T16:21:59 [info ] serial | [1m[92m   Compiling[0m idna_adapter v1.2.2
+2026-08-24T16:21:59 [info ] serial | [1m[92m   Compiling[0m librocksdb-sys v0.11.0+8.1.1
+2026-08-24T16:21:59 [info ] serial | [1m[92m   Compiling[0m darling_macro v0.20.11
+2026-08-24T16:21:59 [info ] serial | [1m[92m   Compiling[0m unicode-normalization v0.1.25
+2026-08-24T16:22:00 [info ] serial | [1m[92m   Compiling[0m earcutr v0.4.3
+2026-08-24T16:22:00 [info ] serial | [1m[92m   Compiling[0m rand_core v0.9.5
+2026-08-24T16:22:00 [info ] serial | [1m[92m   Compiling[0m smol_str v0.2.2
+2026-08-24T16:22:00 [info ] serial | [1m[92m   Compiling[0m num-complex v0.4.6
+2026-08-24T16:22:01 [info ] serial | [1m[92m   Compiling[0m rmp v0.8.15
+2026-08-24T16:22:01 [info ] serial | [1m[92m   Compiling[0m approx v0.4.0
+2026-08-24T16:22:01 [info ] serial | [1m[92m   Compiling[0m geographiclib-rs v0.2.7
+2026-08-24T16:22:01 [info ] serial | [1m[92m   Compiling[0m ring v0.16.20
+2026-08-24T16:22:02 [info ] serial | [1m[92m   Compiling[0m tokio-macros v2.7.2
+2026-08-24T16:22:02 [info ] serial | [1m[92m   Compiling[0m indexmap v1.9.3
+2026-08-24T16:22:02 [info ] serial | [1m[92m   Compiling[0m fastrand v2.5.0
+2026-08-24T16:22:02 [info ] serial | [1m[92m   Compiling[0m bitmaps v3.2.1
+2026-08-24T16:22:02 [info ] serial | [1m[92m   Compiling[0m percent-encoding v2.3.2
+2026-08-24T16:22:02 [info ] serial | [1m[92m   Compiling[0m iana-time-zone v0.1.65
+2026-08-24T16:22:02 [info ] serial | [1m[92m   Compiling[0m deranged v0.5.8
+2026-08-24T16:22:02 [info ] serial | [1m[92m   Compiling[0m bytes v1.12.1
+2026-08-24T16:22:03 [info ] serial | [1m[92m   Compiling[0m unicode-script v0.5.8
+2026-08-24T16:22:03 [info ] serial | [1m[92m   Compiling[0m unicode-script v0.5.8
+2026-08-24T16:22:03 [info ] serial | [1m[92m   Compiling[0m ref-cast v1.0.27
+2026-08-24T16:22:03 [info ] serial | [1m[92m   Compiling[0m ref-cast v1.0.27
+2026-08-24T16:22:03 [info ] serial | [1m[92m   Compiling[0m foldhash v0.2.0
+2026-08-24T16:22:03 [info ] serial | [1m[92m   Compiling[0m foldhash v0.2.0
+2026-08-24T16:22:03 [info ] serial | [1m[92m   Compiling[0m heck v0.4.1
+2026-08-24T16:22:03 [info ] serial | [1m[92m   Compiling[0m ipnet v2.12.1
+2026-08-24T16:22:03 [info ] serial | [1m[92m   Compiling[0m linux-raw-sys v0.12.1
+2026-08-24T16:22:03 [info ] serial | [1m[92m   Compiling[0m heck v0.4.1
+2026-08-24T16:22:03 [info ] serial | [1m[92m   Compiling[0m ipnet v2.12.1
+2026-08-24T16:22:03 [info ] serial | [1m[92m   Compiling[0m linux-raw-sys v0.12.1
+2026-08-24T16:22:04 [info ] serial | [1m[92m   Compiling[0m rust_decimal v1.42.1
+2026-08-24T16:22:04 [info ] serial | [1m[92m   Compiling[0m rust_decimal v1.42.1
+2026-08-24T16:22:04 [info ] serial | [1m[92m   Compiling[0m float_next_after v1.0.0
+2026-08-24T16:22:04 [info ] serial | [1m[92m   Compiling[0m float_next_after v1.0.0
+2026-08-24T16:22:04 [info ] serial | [1m[92m   Compiling[0m powerfmt v0.2.0
+2026-08-24T16:22:04 [info ] serial | [1m[92m   Compiling[0m powerfmt v0.2.0
+2026-08-24T16:22:04 [info ] serial | [1m[92m   Compiling[0m time v0.3.55
+2026-08-24T16:22:04 [info ] serial | [1m[92m   Compiling[0m time v0.3.55
+2026-08-24T16:22:06 [info ] serial | [1m[92m   Compiling[0m snafu-derive v0.7.5
+2026-08-24T16:22:07 [info ] serial | [1m[92m   Compiling[0m hashbrown v0.16.1
+2026-08-24T16:22:08 [info ] serial | [1m[92m   Compiling[0m unicode-security v0.1.2
+2026-08-24T16:22:08 [info ] serial | [1m[92m   Compiling[0m unicode-security v0.1.2
+2026-08-24T16:22:08 [info ] serial | [1m[92m   Compiling[0m tokio v1.53.1
+2026-08-24T16:22:15 [info ] serial | [1m[92m   Compiling[0m imbl-sized-chunks v0.1.3
+2026-08-24T16:22:15 [info ] serial | [1m[92m   Compiling[0m chrono v0.4.45
+2026-08-24T16:22:18 [info ] serial | [1m[92m   Compiling[0m form_urlencoded v1.2.2
+2026-08-24T16:22:21 [info ] serial | [1m[92m   Compiling[0m ndarray v0.15.6
+2026-08-24T16:22:24 [info ] serial | [1m[92m   Compiling[0m rand_chacha v0.9.0
+2026-08-24T16:22:24 [info ] serial | [1m[92m   Compiling[0m hashbrown v0.14.5
+2026-08-24T16:22:25 [info ] serial | [1m[92m   Compiling[0m darling v0.20.11
+2026-08-24T16:22:25 [info ] serial | [1m[92m   Compiling[0m idna v1.1.0
+2026-08-24T16:22:27 [info ] serial | [1m[92m   Compiling[0m futures-executor v0.3.34
+2026-08-24T16:22:27 [info ] serial | [1m[92m   Compiling[0m futures-executor v0.3.34
+[loop] recycled 16:22:29Z
+Connecting to wss://portaria.up.railway.app/api/ws ...
+Streaming logs for resource cnt_b0babd61e1b84d5787674c18d1c8a06b (Ctrl-C to stop)...
+
+2026-08-24T16:21:40 [info ] serial | [1m[92m   Compiling[0m tinyvec_macros v0.1.1
+2026-08-24T16:21:40 [info ] serial | [1m[92m   Compiling[0m lazy_static v1.5.0
+2026-08-24T16:21:40 [info ] serial | [1m[92m   Compiling[0m slab v0.4.12
+2026-08-24T16:21:40 [info ] serial | [1m[92m   Compiling[0m futures-sink v0.3.34
+2026-08-24T16:21:40 [info ] serial | [1m[92m   Compiling[0m bitflags v1.3.2
+2026-08-24T16:21:40 [info ] serial | [1m[92m   Compiling[0m crossbeam-deque v0.8.7
+2026-08-24T16:21:40 [info ] serial | [1m[92m   Compiling[0m futures-channel v0.3.34
+2026-08-24T16:21:40 [info ] serial | [1m[92m   Compiling[0m tinyvec v1.12.0
+2026-08-24T16:21:40 [info ] serial | [1m[92m   Compiling[0m darling_core v0.20.11
+2026-08-24T16:21:41 [info ] serial | [1m[92m   Compiling[0m cedar-policy-core v2.4.2
+2026-08-24T16:21:42 [info ] serial | [1m[92m   Compiling[0m cipher v0.4.4
+2026-08-24T16:21:46 [info ] serial | [1m[92m   Compiling[0m icu_normalizer v2.3.0
+2026-08-24T16:21:47 [info ] serial | [1m[92m   Compiling[0m icu_properties v2.3.0
+2026-08-24T16:21:48 [info ] serial | [1m[92m   Compiling[0m serde_with_macros v3.22.0
+2026-08-24T16:21:49 [info ] serial | [1m[92m   Compiling[0m rstar v0.11.0
+2026-08-24T16:21:50 [info ] serial | [1m[92m   Compiling[0m rand_chacha v0.3.1
+2026-08-24T16:21:51 [info ] serial | [1m[92m   Compiling[0m itertools v0.10.5
+2026-08-24T16:21:52 [info ] serial | [1m[92m   Compiling[0m approx v0.5.1
+2026-08-24T16:21:52 [info ] serial | [1m[92m   Compiling[0m miette-derive v5.10.0
+2026-08-24T16:21:52 [info ] serial | [1m[92m   Compiling[0m futures-macro v0.3.34
+2026-08-24T16:21:52 [info ] serial | [1m[92m   Compiling[0m futures-macro v0.3.34
+2026-08-24T16:21:53 [info ] serial | [1m[92m   Compiling[0m proc-macro-error v1.0.4
+2026-08-24T16:21:53 [info ] serial | [1m[92m   Compiling[0m futures-task v0.3.34
+2026-08-24T16:21:53 [info ] serial | [1m[92m   Compiling[0m rayon-core v1.13.0
+2026-08-24T16:21:53 [info ] serial | [1m[92m   Compiling[0m base64ct v1.8.3
+2026-08-24T16:21:53 [info ] serial | [1m[92m   Compiling[0m time-core v0.1.9
+2026-08-24T16:21:53 [info ] serial | [1m[92m   Compiling[0m futures-io v0.3.34
+2026-08-24T16:21:53 [info ] serial | [1m[92m   Compiling[0m rustix v1.1.4
+2026-08-24T16:21:53 [info ] serial | [1m[92m   Compiling[0m rustversion v1.0.23
+2026-08-24T16:21:54 [info ] serial | [1m[92m   Compiling[0m arbitrary v1.4.2
+2026-08-24T16:21:54 [info ] serial | [1m[92m   Compiling[0m num-conv v0.2.2
+2026-08-24T16:21:54 [info ] serial | [1m[92m   Compiling[0m rawpointer v0.2.1
+2026-08-24T16:21:54 [info ] serial | [1m[92m   Compiling[0m unicode-width v0.1.14
+2026-08-24T16:21:54 [info ] serial | [1m[92m   Compiling[0m doc-comment v0.3.4
+2026-08-24T16:21:54 [info ] serial | [1m[92m   Compiling[0m robust v1.2.0
+2026-08-24T16:21:54 [info ] serial | [1m[92m   Compiling[0m rustc_lexer v0.1.0
+2026-08-24T16:21:55 [info ] serial | [1m[92m   Compiling[0m geo-types v0.7.20
+2026-08-24T16:21:55 [info ] serial | [1m[92m   Compiling[0m miette v5.10.0
+2026-08-24T16:21:56 [info ] serial | [1m[92m   Compiling[0m time-macros v0.2.32
+2026-08-24T16:21:57 [info ] serial | [1m[92m   Compiling[0m futures-util v0.3.34
+2026-08-24T16:21:57 [info ] serial | [1m[92m   Compiling[0m password-hash v0.5.0
+2026-08-24T16:21:57 [info ] serial | [1m[92m   Compiling[0m rand v0.8.7
+2026-08-24T16:21:58 [info ] serial | [1m[92m   Compiling[0m serde_with v3.22.0
+2026-08-24T16:21:59 [info ] serial | [1m[92m   Compiling[0m idna_adapter v1.2.2
+2026-08-24T16:21:59 [info ] serial | [1m[92m   Compiling[0m librocksdb-sys v0.11.0+8.1.1
+2026-08-24T16:21:59 [info ] serial | [1m[92m   Compiling[0m darling_macro v0.20.11
+2026-08-24T16:21:59 [info ] serial | [1m[92m   Compiling[0m unicode-normalization v0.1.25
+2026-08-24T16:22:00 [info ] serial | [1m[92m   Compiling[0m earcutr v0.4.3
+2026-08-24T16:22:00 [info ] serial | [1m[92m   Compiling[0m rand_core v0.9.5
+2026-08-24T16:22:00 [info ] serial | [1m[92m   Compiling[0m smol_str v0.2.2
+2026-08-24T16:22:00 [info ] serial | [1m[92m   Compiling[0m num-complex v0.4.6
+2026-08-24T16:22:01 [info ] serial | [1m[92m   Compiling[0m rmp v0.8.15
+2026-08-24T16:22:01 [info ] serial | [1m[92m   Compiling[0m approx v0.4.0
+2026-08-24T16:22:01 [info ] serial | [1m[92m   Compiling[0m geographiclib-rs v0.2.7
+2026-08-24T16:22:01 [info ] serial | [1m[92m   Compiling[0m ring v0.16.20
+2026-08-24T16:22:02 [info ] serial | [1m[92m   Compiling[0m tokio-macros v2.7.2
+2026-08-24T16:22:02 [info ] serial | [1m[92m   Compiling[0m indexmap v1.9.3
+2026-08-24T16:22:02 [info ] serial | [1m[92m   Compiling[0m fastrand v2.5.0
+2026-08-24T16:22:02 [info ] serial | [1m[92m   Compiling[0m bitmaps v3.2.1
+2026-08-24T16:22:02 [info ] serial | [1m[92m   Compiling[0m percent-encoding v2.3.2
+2026-08-24T16:22:02 [info ] serial | [1m[92m   Compiling[0m iana-time-zone v0.1.65
+2026-08-24T16:22:02 [info ] serial | [1m[92m   Compiling[0m deranged v0.5.8
+2026-08-24T16:22:02 [info ] serial | [1m[92m   Compiling[0m bytes v1.12.1
+2026-08-24T16:22:03 [info ] serial | [1m[92m   Compiling[0m unicode-script v0.5.8
+2026-08-24T16:22:03 [info ] serial | [1m[92m   Compiling[0m unicode-script v0.5.8
+2026-08-24T16:22:03 [info ] serial | [1m[92m   Compiling[0m ref-cast v1.0.27
+2026-08-24T16:22:03 [info ] serial | [1m[92m   Compiling[0m ref-cast v1.0.27
+2026-08-24T16:22:03 [info ] serial | [1m[92m   Compiling[0m foldhash v0.2.0
+2026-08-24T16:22:03 [info ] serial | [1m[92m   Compiling[0m foldhash v0.2.0
+2026-08-24T16:22:03 [info ] serial | [1m[92m   Compiling[0m heck v0.4.1
+2026-08-24T16:22:03 [info ] serial | [1m[92m   Compiling[0m ipnet v2.12.1
+2026-08-24T16:22:03 [info ] serial | [1m[92m   Compiling[0m linux-raw-sys v0.12.1
+2026-08-24T16:22:03 [info ] serial | [1m[92m   Compiling[0m heck v0.4.1
+2026-08-24T16:22:03 [info ] serial | [1m[92m   Compiling[0m ipnet v2.12.1
+2026-08-24T16:22:03 [info ] serial | [1m[92m   Compiling[0m linux-raw-sys v0.12.1
+2026-08-24T16:22:04 [info ] serial | [1m[92m   Compiling[0m rust_decimal v1.42.1
+2026-08-24T16:22:04 [info ] serial | [1m[92m   Compiling[0m rust_decimal v1.42.1
+2026-08-24T16:22:04 [info ] serial | [1m[92m   Compiling[0m float_next_after v1.0.0
+2026-08-24T16:22:04 [info ] serial | [1m[92m   Compiling[0m float_next_after v1.0.0
+2026-08-24T16:22:04 [info ] serial | [1m[92m   Compiling[0m powerfmt v0.2.0
+2026-08-24T16:22:04 [info ] serial | [1m[92m   Compiling[0m powerfmt v0.2.0
+2026-08-24T16:22:04 [info ] serial | [1m[92m   Compiling[0m time v0.3.55
+2026-08-24T16:22:04 [info ] serial | [1m[92m   Compiling[0m time v0.3.55
+2026-08-24T16:22:06 [info ] serial | [1m[92m   Compiling[0m snafu-derive v0.7.5
+2026-08-24T16:22:07 [info ] serial | [1m[92m   Compiling[0m hashbrown v0.16.1
+2026-08-24T16:22:08 [info ] serial | [1m[92m   Compiling[0m unicode-security v0.1.2
+2026-08-24T16:22:08 [info ] serial | [1m[92m   Compiling[0m unicode-security v0.1.2
+2026-08-24T16:22:08 [info ] serial | [1m[92m   Compiling[0m tokio v1.53.1
+2026-08-24T16:22:15 [info ] serial | [1m[92m   Compiling[0m imbl-sized-chunks v0.1.3
+2026-08-24T16:22:15 [info ] serial | [1m[92m   Compiling[0m chrono v0.4.45
+2026-08-24T16:22:18 [info ] serial | [1m[92m   Compiling[0m form_urlencoded v1.2.2
+2026-08-24T16:22:21 [info ] serial | [1m[92m   Compiling[0m ndarray v0.15.6
+2026-08-24T16:22:24 [info ] serial | [1m[92m   Compiling[0m rand_chacha v0.9.0
+2026-08-24T16:22:24 [info ] serial | [1m[92m   Compiling[0m hashbrown v0.14.5
+2026-08-24T16:22:25 [info ] serial | [1m[92m   Compiling[0m darling v0.20.11
+2026-08-24T16:22:25 [info ] serial | [1m[92m   Compiling[0m idna v1.1.0
+2026-08-24T16:22:27 [info ] serial | [1m[92m   Compiling[0m futures-executor v0.3.34
+2026-08-24T16:22:27 [info ] serial | [1m[92m   Compiling[0m futures-executor v0.3.34
+2026-08-24T16:22:29 [info ] serial | [1m[92m   Compiling[0m sha2 v0.10.9
+2026-08-24T16:22:30 [info ] serial | [1m[92m   Compiling[0m num-bigint v0.4.8
+2026-08-24T16:22:33 [info ] serial | [1m[92m   Compiling[0m concurrent-queue v2.5.0
+2026-08-24T16:22:33 [info ] serial | [1m[92m   Compiling[0m concurrent-queue v2.5.0
+2026-08-24T16:22:33 [info ] serial | [1m[92m   Compiling[0m hmac v0.12.1
+2026-08-24T16:22:33 [info ] serial | [1m[92m   Compiling[0m hmac v0.12.1
+2026-08-24T16:22:33 [info ] serial | [1m[92m   Compiling[0m half v2.7.1
+2026-08-24T16:22:33 [info ] serial | [1m[92m   Compiling[0m half v2.7.1
+2026-08-24T16:22:34 [info ] serial | [1m[92m   Compiling[0m rand_xoshiro v0.6.0
+2026-08-24T16:22:34 [info ] serial | [1m[92m   Compiling[0m rand_xoshiro v0.6.0
+2026-08-24T16:22:34 [info ] serial | [1m[92m   Compiling[0m tracing-core v0.1.36
+2026-08-24T16:22:35 [info ] serial | [1m[92m   Compiling[0m tracing-attributes v0.1.31
+2026-08-24T16:22:35 [info ] serial | [1m[92m   Compiling[0m tracing-attributes v0.1.31
+2026-08-24T16:22:35 [info ] serial | [1m[92m   Compiling[0m ref-cast-impl v1.0.27
+2026-08-24T16:22:36 [info ] serial | [1m[92m   Compiling[0m hashbrown v0.12.3
+2026-08-24T16:22:36 [info ] serial | [1m[92m   Compiling[0m arrayvec v0.7.8
+2026-08-24T16:22:36 [info ] serial | [1m[92m   Compiling[0m spin v0.5.2
+2026-08-24T16:22:36 [info ] serial | [1m[92m   Compiling[0m fst v0.4.7
+2026-08-24T16:22:36 [info ] serial | [1m[92m   Compiling[0m snap v1.1.2
+2026-08-24T16:22:36 [info ] serial | [1m[92m   Compiling[0m untrusted v0.7.1
+2026-08-24T16:22:36 [info ] serial | [1m[92m   Compiling[0m base64 v0.21.7
+2026-08-24T16:22:37 [info ] serial | [1m[92m   Compiling[0m bytemuck v1.25.2
+2026-08-24T16:22:37 [info ] serial | [1m[92m   Compiling[0m ciborium-io v0.2.2
+2026-08-24T16:22:37 [info ] serial | [1m[92m   Compiling[0m ciborium-ll v0.2.2
+2026-08-24T16:22:37 [info ] serial | [1m[92m   Compiling[0m roaring v0.10.12
+2026-08-24T16:22:40 [info ] serial | [1m[92m   Compiling[0m pem v2.0.1
+2026-08-24T16:22:43 [info ] serial | [1m[92m   Compiling[0m tracing v0.1.44
+2026-08-24T16:22:44 [info ] serial | [1m[92m   Compiling[0m imbl v2.0.3
+2026-08-24T16:22:44 [info ] serial | [1m[92m   Compiling[0m pbkdf2 v0.12.2
+2026-08-24T16:22:44 [info ] serial | [1m[92m   Compiling[0m simple_asn1 v0.6.4
+2026-08-24T16:22:44 [info ] serial | [1m[92m   Compiling[0m snafu v0.7.5
+2026-08-24T16:22:45 [info ] serial | [1m[92m   Compiling[0m arc-swap v1.9.2
+2026-08-24T16:22:45 [info ] serial | [1m[92m   Compiling[0m rayon v1.12.0
+2026-08-24T16:22:46 [info ] serial | [1m[92m   Compiling[0m futures v0.3.34
+2026-08-24T16:22:46 [info ] serial | [1m[92m   Compiling[0m url v2.5.8
+2026-08-24T16:22:46 [info ] serial | [1m[92m   Compiling[0m revision-derive v0.7.0
+2026-08-24T16:22:47 [info ] serial | [1m[92m   Compiling[0m rand v0.9.5
+2026-08-24T16:22:47 [info ] serial | [1m[92m   Compiling[0m cedar-policy-validator v2.4.2
+2026-08-24T16:22:48 [info ] serial | [1m[92m   Compiling[0m spade v2.15.1
+2026-08-24T16:22:49 [info ] serial | [1m[92m   Compiling[0m tempfile v3.27.0
+2026-08-24T16:22:50 [info ] serial | [1m[92m   Compiling[0m geo v0.26.0
+2026-08-24T16:22:52 [info ] serial | [1m[92m   Compiling[0m rmp-serde v1.3.1
+2026-08-24T16:22:52 [info ] serial | [1m[92m   Compiling[0m uuid v1.25.0
+2026-08-24T16:22:52 [info ] serial | [1m[92m   Compiling[0m salsa20 v0.10.2
+2026-08-24T16:22:52 [info ] serial | [1m[92m   Compiling[0m blowfish v0.9.1
+2026-08-24T16:22:52 [info ] serial | [1m[92m   Compiling[0m futures-lite v2.6.1
+2026-08-24T16:22:53 [info ] serial | [1m[92m   Compiling[0m blake2 v0.10.6
+2026-08-24T16:22:53 [info ] serial | [1m[92m   Compiling[0m nibble_vec v0.1.0
+2026-08-24T16:22:53 [info ] serial | [1m[92m   Compiling[0m bincode v1.3.3
+2026-08-24T16:22:53 [info ] serial | [1m[92m   Compiling[0m noisy_float v0.2.1
+2026-08-24T16:22:53 [info ] serial | [1m[92m   Compiling[0m async-trait v0.1.92
+2026-08-24T16:22:54 [info ] serial | [1m[92m   Compiling[0m thread_local v1.1.10
+2026-08-24T16:22:54 [info ] serial | [1m[92m   Compiling[0m event-listener v2.5.3
+2026-08-24T16:22:54 [info ] serial | [1m[92m   Compiling[0m async-task v4.7.1
+2026-08-24T16:22:55 [info ] serial | [1m[92m   Compiling[0m psl-types v2.0.11
+2026-08-24T16:22:55 [info ] serial | [1m[92m   Compiling[0m urlencoding v2.1.3
+2026-08-24T16:22:55 [info ] serial | [1m[92m   Compiling[0m trice v0.4.0
+2026-08-24T16:22:55 [info ] serial | [1m[92m   Compiling[0m zeroize v1.9.0
+2026-08-24T16:22:55 [info ] serial | [1m[92m   Compiling[0m base64 v0.22.1
+2026-08-24T16:22:55 [info ] serial | [1m[92m   Compiling[0m any_ascii v0.3.3
+2026-08-24T16:22:55 [info ] serial | [1m[92m   Compiling[0m endian-type v0.1.2
+2026-08-24T16:22:55 [info ] serial | [1m[92m   Compiling[0m humantime v2.4.0
+2026-08-24T16:22:56 [info ] serial | [1m[92m   Compiling[0m object_store v0.8.0
+2026-08-24T16:23:04 [info ] serial | [1m[92m   Compiling[0m radix_trie v0.2.1
+2026-08-24T16:23:04 [info ] serial | [1m[92m   Compiling[0m lexicmp v0.1.0
+2026-08-24T16:23:04 [info ] serial | [1m[92m   Compiling[0m bcrypt v0.15.1
+2026-08-24T16:23:04 [info ] serial | [1m[92m   Compiling[0m dmp v0.2.3
+2026-08-24T16:23:05 [info ] serial | [1m[92m   Compiling[0m addr v0.15.6
+2026-08-24T16:23:06 [info ] serial | [1m[92m   Compiling[0m async-executor v1.14.0
+2026-08-24T16:23:06 [info ] serial | [1m[92m   Compiling[0m async-channel v1.9.0
+2026-08-24T16:23:06 [info ] serial | [1m[92m   Compiling[0m fuzzy-matcher v0.3.7
+2026-08-24T16:23:07 [info ] serial | [1m[92m   Compiling[0m ndarray-stats v0.5.1
+2026-08-24T16:23:07 [info ] serial | [1m[92m   Compiling[0m revision v0.7.1
+2026-08-24T16:23:07 [info ] serial | [1m[92m   Compiling[0m argon2 v0.5.3
+2026-08-24T16:23:08 [info ] serial | [1m[92m   Compiling[0m scrypt v0.11.0
+2026-08-24T16:23:08 [info ] serial | [1m[92m   Compiling[0m ext-sort v0.1.5
+2026-08-24T16:23:08 [info ] serial | [1m[92m   Compiling[0m geo v0.27.0
+2026-08-24T16:23:08 [info ] serial | [1m[92m   Compiling[0m cedar-policy v2.4.2
+2026-08-24T16:23:10 [info ] serial | [1m[92m   Compiling[0m ulid v1.2.1
+2026-08-24T16:23:11 [info ] serial | [1m[92m   Compiling[0m echodb v0.4.0
+2026-08-24T16:23:11 [info ] serial | [1m[92m   Compiling[0m surrealdb-jsonwebtoken v8.3.0-surreal.1
+2026-08-24T16:23:14 [info ] serial | [1m[92m   Compiling[0m ciborium v0.2.2
+2026-08-24T16:23:15 [info ] serial | [1m[92m   Compiling[0m quick_cache v0.4.3
+2026-08-24T16:23:15 [info ] serial | [1m[92m   Compiling[0m dashmap v5.5.3
+2026-08-24T16:23:16 [info ] serial | [1m[92m   Compiling[0m linfa-linalg v0.1.0
+2026-08-24T16:23:16 [info ] serial | [1m[92m   Compiling[0m rmpv v1.3.1
+2026-08-24T16:23:17 [info ] serial | [1m[92m   Compiling[0m nanoid v0.4.0
+2026-08-24T16:23:17 [info ] serial | [1m[92m   Compiling[0m sha1 v0.10.7
+2026-08-24T16:23:17 [info ] serial | [1m[92m   Compiling[0m surrealdb-derive v0.12.0
+2026-08-24T16:23:17 [info ] serial | [1m[92m   Compiling[0m md-5 v0.10.6
+2026-08-24T16:23:17 [info ] serial | [1m[92m   Compiling[0m storekey v0.5.0
+2026-08-24T16:23:17 [info ] serial | [1m[92m   Compiling[0m rust-stemmers v1.2.0
+2026-08-24T16:23:20 [info ] serial | [1m[92m   Compiling[0m async-recursion v1.1.1
+2026-08-24T16:23:20 [info ] serial | [1m[92m   Compiling[0m num_cpus v1.17.0
+2026-08-24T16:23:21 [info ] serial | [1m[92m   Compiling[0m hex v0.4.3
+2026-08-24T16:23:21 [info ] serial | [1m[92m   Compiling[0m reblessive v0.3.5
+2026-08-24T16:23:21 [info ] serial | [1m[92m   Compiling[0m deunicode v1.6.2
+[loop] recycled 16:27:31Z
+Connecting to wss://portaria.up.railway.app/api/ws ...
+Streaming logs for resource cnt_b0babd61e1b84d5787674c18d1c8a06b (Ctrl-C to stop)...
+
+2026-08-24T16:22:25 [info ] serial | [1m[92m   Compiling[0m idna v1.1.0
+2026-08-24T16:22:27 [info ] serial | [1m[92m   Compiling[0m futures-executor v0.3.34
+2026-08-24T16:22:27 [info ] serial | [1m[92m   Compiling[0m futures-executor v0.3.34
+2026-08-24T16:22:29 [info ] serial | [1m[92m   Compiling[0m sha2 v0.10.9
+2026-08-24T16:22:30 [info ] serial | [1m[92m   Compiling[0m num-bigint v0.4.8
+2026-08-24T16:22:33 [info ] serial | [1m[92m   Compiling[0m concurrent-queue v2.5.0
+2026-08-24T16:22:33 [info ] serial | [1m[92m   Compiling[0m concurrent-queue v2.5.0
+2026-08-24T16:22:33 [info ] serial | [1m[92m   Compiling[0m hmac v0.12.1
+2026-08-24T16:22:33 [info ] serial | [1m[92m   Compiling[0m hmac v0.12.1
+2026-08-24T16:22:33 [info ] serial | [1m[92m   Compiling[0m half v2.7.1
+2026-08-24T16:22:33 [info ] serial | [1m[92m   Compiling[0m half v2.7.1
+2026-08-24T16:22:34 [info ] serial | [1m[92m   Compiling[0m rand_xoshiro v0.6.0
+2026-08-24T16:22:34 [info ] serial | [1m[92m   Compiling[0m rand_xoshiro v0.6.0
+2026-08-24T16:22:34 [info ] serial | [1m[92m   Compiling[0m tracing-core v0.1.36
+2026-08-24T16:22:35 [info ] serial | [1m[92m   Compiling[0m tracing-attributes v0.1.31
+2026-08-24T16:22:35 [info ] serial | [1m[92m   Compiling[0m tracing-attributes v0.1.31
+2026-08-24T16:22:35 [info ] serial | [1m[92m   Compiling[0m ref-cast-impl v1.0.27
+2026-08-24T16:22:36 [info ] serial | [1m[92m   Compiling[0m hashbrown v0.12.3
+2026-08-24T16:22:36 [info ] serial | [1m[92m   Compiling[0m arrayvec v0.7.8
+2026-08-24T16:22:36 [info ] serial | [1m[92m   Compiling[0m spin v0.5.2
+2026-08-24T16:22:36 [info ] serial | [1m[92m   Compiling[0m fst v0.4.7
+2026-08-24T16:22:36 [info ] serial | [1m[92m   Compiling[0m snap v1.1.2
+2026-08-24T16:22:36 [info ] serial | [1m[92m   Compiling[0m untrusted v0.7.1
+2026-08-24T16:22:36 [info ] serial | [1m[92m   Compiling[0m base64 v0.21.7
+2026-08-24T16:22:37 [info ] serial | [1m[92m   Compiling[0m bytemuck v1.25.2
+2026-08-24T16:22:37 [info ] serial | [1m[92m   Compiling[0m ciborium-io v0.2.2
+2026-08-24T16:22:37 [info ] serial | [1m[92m   Compiling[0m ciborium-ll v0.2.2
+2026-08-24T16:22:37 [info ] serial | [1m[92m   Compiling[0m roaring v0.10.12
+2026-08-24T16:22:40 [info ] serial | [1m[92m   Compiling[0m pem v2.0.1
+2026-08-24T16:22:43 [info ] serial | [1m[92m   Compiling[0m tracing v0.1.44
+2026-08-24T16:22:44 [info ] serial | [1m[92m   Compiling[0m imbl v2.0.3
+2026-08-24T16:22:44 [info ] serial | [1m[92m   Compiling[0m pbkdf2 v0.12.2
+2026-08-24T16:22:44 [info ] serial | [1m[92m   Compiling[0m simple_asn1 v0.6.4
+2026-08-24T16:22:44 [info ] serial | [1m[92m   Compiling[0m snafu v0.7.5
+2026-08-24T16:22:45 [info ] serial | [1m[92m   Compiling[0m arc-swap v1.9.2
+2026-08-24T16:22:45 [info ] serial | [1m[92m   Compiling[0m rayon v1.12.0
+2026-08-24T16:22:46 [info ] serial | [1m[92m   Compiling[0m futures v0.3.34
+2026-08-24T16:22:46 [info ] serial | [1m[92m   Compiling[0m url v2.5.8
+2026-08-24T16:22:46 [info ] serial | [1m[92m   Compiling[0m revision-derive v0.7.0
+2026-08-24T16:22:47 [info ] serial | [1m[92m   Compiling[0m rand v0.9.5
+2026-08-24T16:22:47 [info ] serial | [1m[92m   Compiling[0m cedar-policy-validator v2.4.2
+2026-08-24T16:22:48 [info ] serial | [1m[92m   Compiling[0m spade v2.15.1
+2026-08-24T16:22:49 [info ] serial | [1m[92m   Compiling[0m tempfile v3.27.0
+2026-08-24T16:22:50 [info ] serial | [1m[92m   Compiling[0m geo v0.26.0
+2026-08-24T16:22:52 [info ] serial | [1m[92m   Compiling[0m rmp-serde v1.3.1
+2026-08-24T16:22:52 [info ] serial | [1m[92m   Compiling[0m uuid v1.25.0
+2026-08-24T16:22:52 [info ] serial | [1m[92m   Compiling[0m salsa20 v0.10.2
+2026-08-24T16:22:52 [info ] serial | [1m[92m   Compiling[0m blowfish v0.9.1
+2026-08-24T16:22:52 [info ] serial | [1m[92m   Compiling[0m futures-lite v2.6.1
+2026-08-24T16:22:53 [info ] serial | [1m[92m   Compiling[0m blake2 v0.10.6
+2026-08-24T16:22:53 [info ] serial | [1m[92m   Compiling[0m nibble_vec v0.1.0
+2026-08-24T16:22:53 [info ] serial | [1m[92m   Compiling[0m bincode v1.3.3
+2026-08-24T16:22:53 [info ] serial | [1m[92m   Compiling[0m noisy_float v0.2.1
+2026-08-24T16:22:53 [info ] serial | [1m[92m   Compiling[0m async-trait v0.1.92
+2026-08-24T16:22:54 [info ] serial | [1m[92m   Compiling[0m thread_local v1.1.10
+2026-08-24T16:22:54 [info ] serial | [1m[92m   Compiling[0m event-listener v2.5.3
+2026-08-24T16:22:54 [info ] serial | [1m[92m   Compiling[0m async-task v4.7.1
+2026-08-24T16:22:55 [info ] serial | [1m[92m   Compiling[0m psl-types v2.0.11
+2026-08-24T16:22:55 [info ] serial | [1m[92m   Compiling[0m urlencoding v2.1.3
+2026-08-24T16:22:55 [info ] serial | [1m[92m   Compiling[0m trice v0.4.0
+2026-08-24T16:22:55 [info ] serial | [1m[92m   Compiling[0m zeroize v1.9.0
+2026-08-24T16:22:55 [info ] serial | [1m[92m   Compiling[0m base64 v0.22.1
+2026-08-24T16:22:55 [info ] serial | [1m[92m   Compiling[0m any_ascii v0.3.3
+2026-08-24T16:22:55 [info ] serial | [1m[92m   Compiling[0m endian-type v0.1.2
+2026-08-24T16:22:55 [info ] serial | [1m[92m   Compiling[0m humantime v2.4.0
+2026-08-24T16:22:56 [info ] serial | [1m[92m   Compiling[0m object_store v0.8.0
+2026-08-24T16:23:04 [info ] serial | [1m[92m   Compiling[0m radix_trie v0.2.1
+2026-08-24T16:23:04 [info ] serial | [1m[92m   Compiling[0m lexicmp v0.1.0
+2026-08-24T16:23:04 [info ] serial | [1m[92m   Compiling[0m bcrypt v0.15.1
+2026-08-24T16:23:04 [info ] serial | [1m[92m   Compiling[0m dmp v0.2.3
+2026-08-24T16:23:05 [info ] serial | [1m[92m   Compiling[0m addr v0.15.6
+2026-08-24T16:23:06 [info ] serial | [1m[92m   Compiling[0m async-executor v1.14.0
+2026-08-24T16:23:06 [info ] serial | [1m[92m   Compiling[0m async-channel v1.9.0
+2026-08-24T16:23:06 [info ] serial | [1m[92m   Compiling[0m fuzzy-matcher v0.3.7
+2026-08-24T16:23:07 [info ] serial | [1m[92m   Compiling[0m ndarray-stats v0.5.1
+2026-08-24T16:23:07 [info ] serial | [1m[92m   Compiling[0m revision v0.7.1
+2026-08-24T16:23:07 [info ] serial | [1m[92m   Compiling[0m argon2 v0.5.3
+2026-08-24T16:23:08 [info ] serial | [1m[92m   Compiling[0m scrypt v0.11.0
+2026-08-24T16:23:08 [info ] serial | [1m[92m   Compiling[0m ext-sort v0.1.5
+2026-08-24T16:23:08 [info ] serial | [1m[92m   Compiling[0m geo v0.27.0
+2026-08-24T16:23:08 [info ] serial | [1m[92m   Compiling[0m cedar-policy v2.4.2
+2026-08-24T16:23:10 [info ] serial | [1m[92m   Compiling[0m ulid v1.2.1
+2026-08-24T16:23:11 [info ] serial | [1m[92m   Compiling[0m echodb v0.4.0
+2026-08-24T16:23:11 [info ] serial | [1m[92m   Compiling[0m surrealdb-jsonwebtoken v8.3.0-surreal.1
+2026-08-24T16:23:14 [info ] serial | [1m[92m   Compiling[0m ciborium v0.2.2
+2026-08-24T16:23:15 [info ] serial | [1m[92m   Compiling[0m quick_cache v0.4.3
+2026-08-24T16:23:15 [info ] serial | [1m[92m   Compiling[0m dashmap v5.5.3
+2026-08-24T16:23:16 [info ] serial | [1m[92m   Compiling[0m linfa-linalg v0.1.0
+2026-08-24T16:23:16 [info ] serial | [1m[92m   Compiling[0m rmpv v1.3.1
+2026-08-24T16:23:17 [info ] serial | [1m[92m   Compiling[0m nanoid v0.4.0
+2026-08-24T16:23:17 [info ] serial | [1m[92m   Compiling[0m sha1 v0.10.7
+2026-08-24T16:23:17 [info ] serial | [1m[92m   Compiling[0m surrealdb-derive v0.12.0
+2026-08-24T16:23:17 [info ] serial | [1m[92m   Compiling[0m md-5 v0.10.6
+2026-08-24T16:23:17 [info ] serial | [1m[92m   Compiling[0m storekey v0.5.0
+2026-08-24T16:23:17 [info ] serial | [1m[92m   Compiling[0m rust-stemmers v1.2.0
+2026-08-24T16:23:20 [info ] serial | [1m[92m   Compiling[0m async-recursion v1.1.1
+2026-08-24T16:23:20 [info ] serial | [1m[92m   Compiling[0m num_cpus v1.17.0
+2026-08-24T16:23:21 [info ] serial | [1m[92m   Compiling[0m hex v0.4.3
+2026-08-24T16:23:21 [info ] serial | [1m[92m   Compiling[0m reblessive v0.3.5
+2026-08-24T16:23:21 [info ] serial | [1m[92m   Compiling[0m deunicode v1.6.2
+2026-08-24T16:27:55 [info ] serial | [1m[92m   Compiling[0m rocksdb v0.21.0
+2026-08-24T16:27:56 [info ] serial | [1m[92m   Compiling[0m surrealdb-core v2.0.0-1.5.4 (/src/pedradb/bench/sub-surreal/surreal-core)
+2026-08-24T16:27:57 [info ] serial | [1m[33mwarning[0m[1m: unexpected `cfg` condition value: `ml2`[0m
+2026-08-24T16:27:57 [info ] serial |   [1m[94m--> [0m/src/pedradb/bench/sub-surreal/surreal-core/src/lib.rs:37:27
+2026-08-24T16:27:57 [info ] serial |    [1m[94m|[0m
+2026-08-24T16:27:57 [info ] serial | [1m[94m37[0m [1m[94m|[0m #[cfg(any(feature = "ml", feature = "ml2"))]
+2026-08-24T16:27:57 [info ] serial |    [1m[94m|[0m                           [1m[33m^^^^^^^^^^[0m[1m[94m-----[0m
+2026-08-24T16:27:57 [info ] serial |    [1m[94m|[0m                                     [1m[94m|[0m
+2026-08-24T16:27:57 [info ] serial |    [1m[94m|[0m                                     [1m[94mhelp: there is a expected value with a similar name: `"ml"`[0m
+2026-08-24T16:27:57 [info ] serial |    [1m[94m|[0m
+2026-08-24T16:27:57 [info ] serial |    [1m[94m= [0m[1mnote[0m: expected values for `feature` are: `arbitrary`, `default`, `experimental-parser`, `foundationdb`, `http`, `jwks`, `kv-fdb`, `kv-fdb-5_1`, `kv-fdb-5_2`, `kv-fdb-6_0`, `kv-fdb-6_1`, `kv-fdb-6_2`, `kv-fdb-6_3`, `kv-fdb-7_0`, `kv-fdb-7_1`, `kv-indxdb`, `kv-mem`, `kv-rocksdb`, `kv-speedb`, `kv-surrealkv`, `kv-tikv`, `ml`, `scripting`, and `tokio-tungstenite`
+2026-08-24T16:27:57 [info ] serial |    [1m[94m= [0m[1mhelp[0m: consider adding `ml2` as a feature in `Cargo.toml`
+2026-08-24T16:27:57 [info ] serial |    [1m[94m= [0m[1mnote[0m: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+2026-08-24T16:27:57 [info ] serial |    [1m[94m= [0m[1mnote[0m: `#[warn(unexpected_cfgs)]` on by default
+2026-08-24T16:27:57 [info ] serial | [1m[33mwarning[0m[1m: unexpected `cfg` condition value: `ml2`[0m
+2026-08-24T16:27:57 [info ] serial |   [1m[94m--> [0m/src/pedradb/bench/sub-surreal/surreal-core/src/lib.rs:62:31
+2026-08-24T16:27:57 [info ] serial |    [1m[94m|[0m
+2026-08-24T16:27:57 [info ] serial | [1m[94m62[0m [1m[94m|[0m #[cfg(all(feature = "ml", not(feature = "ml2")))]
+2026-08-24T16:27:57 [info ] serial |    [1m[94m|[0m                               [1m[33m^^^^^^^^^^[0m[1m[94m-----[0m
+2026-08-24T16:27:57 [info ] serial |    [1m[94m|[0m                                         [1m[94m|[0m
+2026-08-24T16:27:57 [info ] serial |    [1m[94m|[0m                                         [1m[94mhelp: there is a expected value with a similar name: `"ml"`[0m
+2026-08-24T16:27:57 [info ] serial |    [1m[94m|[0m
+2026-08-24T16:27:57 [info ] serial |    [1m[94m= [0m[1mnote[0m: expected values for `feature` are: `arbitrary`, `default`, `experimental-parser`, `foundationdb`, `http`, `jwks`, `kv-fdb`, `kv-fdb-5_1`, `kv-fdb-5_2`, `kv-fdb-6_0`, `kv-fdb-6_1`, `kv-fdb-6_2`, `kv-fdb-6_3`, `kv-fdb-7_0`, `kv-fdb-7_1`, `kv-indxdb`, `kv-mem`, `kv-rocksdb`, `kv-speedb`, `kv-surrealkv`, `kv-tikv`, `ml`, `scripting`, and `tokio-tungstenite`
+2026-08-24T16:27:57 [info ] serial |    [1m[94m= [0m[1mhelp[0m: consider adding `ml2` as a feature in `Cargo.toml`
+2026-08-24T16:27:57 [info ] serial |    [1m[94m= [0m[1mnote[0m: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+2026-08-24T16:27:57 [info ] serial | [1m[33mwarning[0m[1m: unexpected `cfg` condition value: `ml2`[0m
+2026-08-24T16:27:57 [info ] serial |   [1m[94m--> [0m/src/pedradb/bench/sub-surreal/surreal-core/src/lib.rs:67:7
+2026-08-24T16:27:57 [info ] serial |    [1m[94m|[0m
+2026-08-24T16:27:57 [info ] serial | [1m[94m67[0m [1m[94m|[0m #[cfg(feature = "ml2")]
+2026-08-24T16:27:57 [info ] serial |    [1m[94m|[0m       [1m[33m^^^^^^^^^^[0m[1m[94m-----[0m
+2026-08-24T16:27:57 [info ] serial |    [1m[94m|[0m                 [1m[94m|[0m
+2026-08-24T16:27:57 [info ] serial |    [1m[94m|[0m                 [1m[94mhelp: there is a expected value with a similar name: `"ml"`[0m
+2026-08-24T16:27:57 [info ] serial |    [1m[94m|[0m
+2026-08-24T16:27:57 [info ] serial |    [1m[94m= [0m[1mnote[0m: expected values for `feature` are: `arbitrary`, `default`, `experimental-parser`, `foundationdb`, `http`, `jwks`, `kv-fdb`, `kv-fdb-5_1`, `kv-fdb-5_2`, `kv-fdb-6_0`, `kv-fdb-6_1`, `kv-fdb-6_2`, `kv-fdb-6_3`, `kv-fdb-7_0`, `kv-fdb-7_1`, `kv-indxdb`, `kv-mem`, `kv-rocksdb`, `kv-speedb`, `kv-surrealkv`, `kv-tikv`, `ml`, `scripting`, and `tokio-tungstenite`
+2026-08-24T16:27:57 [info ] serial |    [1m[94m= [0m[1mhelp[0m: consider adding `ml2` as a feature in `Cargo.toml`
+2026-08-24T16:27:57 [info ] serial |    [1m[94m= [0m[1mnote[0m: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+2026-08-24T16:27:57 [info ] serial | [1m[33mwarning[0m[1m: unexpected `cfg` condition value: `ml2`[0m
+2026-08-24T16:27:57 [info ] serial |   [1m[94m--> [0m/src/pedradb/bench/sub-surreal/surreal-core/src/sql/model.rs:11:27
+2026-08-24T16:27:57 [info ] serial |    [1m[94m|[0m
+2026-08-24T16:27:57 [info ] serial | [1m[94m11[0m [1m[94m|[0m #[cfg(any(feature = "ml", feature = "ml2"))]
+2026-08-24T16:27:57 [info ] serial |    [1m[94m|[0m                           [1m[33m^^^^^^^^^^[0m[1m[94m
+2026-08-24T16:27:57 [info ] serial | -----[0m
+2026-08-24T16:27:57 [info ] serial |    [
+2026-08-24T16:27:57 [info ] serial | 1m[94m|[0m
+2026-08-24T16:27:58 [info ] serial |                                    [1m[94m|[0m
+2026-08-24T16:27:58 [info ] serial |    [1m[94m|[0m                                     [1m[94mhelp: there is a expected value with a similar name: `"ml"`[0m
+2026-08-24T16:27:58 [info ] serial |    [1m[94m|[0m
+2026-08-24T16:27:58 [info ] serial |    [1m[94m= [0m[1mnote[0m: expected values for `feature` are: `arbitrary`, `default`, `experimental-parser`, `foundationdb`, `http`, `jwks`, `kv-fdb`, `kv-fdb-5_1`, `kv-fdb-5_2`, `kv-fdb-6_0`, `kv-fdb-6_1`, `kv-fdb-6_2`, `kv-fdb-6_3`, `kv-fdb-7_0`, `kv-fdb-7_1`, `kv-indxdb`, `kv-mem`, `kv-rocksdb`, `kv-speedb`, `kv-surrealkv`, `kv-tikv`, `ml`, `scripting`, and `tokio-tungstenite`
+2026-08-24T16:27:58 [info ] serial |    [1m[94m= [0m[1mhelp[0m: consider adding `ml2` as a feature in `Cargo.toml`
+2026-08-24T16:27:58 [info ] serial |    [1m[94m= [0m[1mnote[0m: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+2026-08-24T16:27:58 [info ] serial | [1m[33mwarning[0m[1m: unexpected `cfg` condition value: `ml2`[0m
+2026-08-24T16:27:58 [info ] serial |   [1m[94m--> [0m/src/pedradb/bench/sub-surreal/surreal-core/src/sql/model.rs:13:27
+2026-08-24T16:27:58 [info ] serial |    [1m[94m|[0m
+2026-08-24T16:27:58 [info ] serial | [1m[94m13[0m [1m[94m|[0m #[cfg(any(feature = "ml", feature = "ml2"))]
+2026-08-24T16:27:58 [info ] serial |    [1m[94m|[0m                           [1m[33m^^^^^^^^^^[0m[1m[94m-----[0m
+2026-08-24T16:27:58 [info ] serial |    [1m[94m|[0m                                     [1m[94m|[0m
+2026-08-24T16:27:58 [info ] serial |    [1m[94m|[0m                                     [1m[94mhelp: there is a expected value with a similar name: `"ml"`[0m
+2026-08-24T16:27:58 [info ] serial |    [1m[94m|[0m
+2026-08-24T16:27:58 [info ] serial |    [1m[94m= [0m[1mnote[0m: expected values for `feature` are: `arbitrary`, `default`, `experimental-parser`, `foundationdb`, `http`, `jwks`, `kv-fdb`, `kv-fdb-5_1`, `kv-fdb-5_2`, `kv-fdb-6_0`, `kv-fdb-6_1`, `kv-fdb-6_2`, `kv-fdb-6_3`, `kv-fdb-7_0`, `kv-fdb-7_1`, `kv-indxdb`, `kv-mem`, `kv-rocksdb`, `kv-speedb`, `kv-surrealkv`, `kv-tikv`, `ml`, `scripting`, and `tokio-tungstenite`
+2026-08-24T16:27:58 [info ] serial |    [1m[94m= [0m[1mhelp[0m: consider adding `ml2` as a feature in `Cargo.toml`
+2026-08-24T16:27:58 [info ] serial |    [1m[94m= [0m[1mnote[0m: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+2026-08-24T16:27:58 [info ] serial | [1m[33mwarning[0m[1m: unexpected `cfg` condition value: `ml2`[0m
+2026-08-24T16:27:58 [info ] serial |   [1m[94m--> [0m/src/pedradb/bench/sub-surreal/surreal-core/src/sql/model.rs:15:27
+2026-08-24T16:27:58 [info ] serial |    [1m[94m|[0m
+2026-08-24T16:27:58 [info ] serial | [1m[94m15[0m [1m[94m|[0m #[cfg(any(feature = "ml", feature = "ml2"))]
+2026-08-24T16:27:58 [info ] serial |    [1m[94m|[0m                           [1m[33m^^^^^^^^^^[0m[1m[94m-----[0m
+2026-08-24T16:27:58 [info ] serial |    [1m[94m|[0m                                     [1m[94m|[0m
+2026-08-24T16:27:58 [info ] serial |    [1m[94m|[0m                                     [1m[94mhelp: there is a expected value with a similar name: `"ml"`[0m
+2026-08-24T16:27:58 [info ] serial |    [1m[94m|[0m
+2026-08-24T16:27:58 [info ] serial |    [1m[94m= [0m[1mnote[0m: expected values for `feature` are: `arbitrary`, `default`, `experimental-parser`, `foundationdb`, `http`, `jwks`, `kv-fdb`, `kv-fdb-5_1`, `kv-fdb-5_2`, `kv-fdb-6_0`, `kv-fdb-6_1`, `kv-fdb-6_2`, `kv-fdb-6_3`, `kv-fdb-7_0`, `kv-fdb-7_1`, `kv-indxdb`, `kv-mem`, `kv-rocksdb`, `kv-speedb`, `kv-surrealkv`, `kv-tikv`, `ml`, `scripting`, and `tokio-tungstenite`
+2026-08-24T16:27:58 [info ] serial |    [1m[94m= [0m[1mhelp[0m: consider adding `ml2` as a feature in `Cargo.toml`
+2026-08-24T16:27:58 [info ] serial |    [1m[94m= [0m[1mnote[0m: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+2026-08-24T16:27:58 [info ] serial | [1m[33mwarning[0m[1m: unexpected `cfg` condition value: `ml2`[0m
+2026-08-24T16:27:58 [info ] serial |   [1m[94m--> [0m/src/pedradb/bench/sub-surreal/surreal-core/src/sql/model.rs:17:27
+2026-08-24T16:27:58 [info ] serial |    [1m[94m|[0m
+2026-08-24T16:27:58 [info ] serial | [1m[94m17[0m [1m[94m|[0m #[cfg(any(feature = "ml", feature = "ml2"))]
+2026-08-24T16:27:58 [info ] serial |    [1m[94m|[0m                           [1m[33m^^^^^^^^^^[0m[1m[94m-----[0m
+2026-08-24T16:27:58 [info ] serial |    [1m[94m|[0m                                     [1m[94m|[0m
+2026-08-24T16:27:58 [info ] serial |    [1m[94m|[0m                                     [1m[94mhelp: there is a expected value with a similar name: `"ml"`[0m
+2026-08-24T16:27:58 [info ] serial |    [1m[94m|[0m
+2026-08-24T16:27:58 [info ] serial |    [1m[94m= [0m[1mnote[0m: expected values for `feature` are: `arbitrary`, `default`, `experimental-parser`, `foundationdb`, `http`, `jwks`, `kv-fdb`, `kv-fdb-5_1`, `kv-fdb-5_2`, `kv-fdb-6_0`, `kv-fdb-6_1`, `kv-fdb-6_2`, `kv-fdb-6_3`, `kv-fdb-7_0`, `kv-fdb-7_1`, `kv-indxdb`, `kv-mem`, `kv-rocksdb`, `kv-speedb`, `kv-surrealkv`, `kv-tikv`, `ml`, `scripting`, and `tokio-tungstenite`
+2026-08-24T16:27:58 [info ] serial |    [1m[94m= [0m[1mhelp[0m: consider adding `ml2` as a feature in `Cargo.toml`
+2026-08-24T16:27:58 [info ] serial |    [1m[94m= [0m[1mnote[0m: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+2026-08-24T16:27:58 [info ] serial | [1m[33mwarning[0m[1m: unexpected `cfg` condition value: `ml2`[0m
+2026-08-24T16:27:58 [info ] serial |   [1m[94m--> [0m/src/pedradb/bench/sub-surreal/surreal-core/src/sql/model.rs:19:27
+2026-08-24T16:27:58 [info ] serial |    [1m[94m|[0m
+2026-08-24T16:27:58 [info ] serial | [1m[94m19[0m [1m[94m|[0m #[cfg(any(feature = "ml", feature = "ml2"))]
+2026-08-24T16:27:58 [info ] serial |    [1m[94m|[0m                           [1m[33m^^^^^^^^^^[0m[1m[94m-----[0m
+2026-08-24T16:27:58 [info ] serial |    [1m[94m|[0m                                     [1m[94m|[0m
+2026-08-24T16:27:58 [info ] serial |    [1m[94m|[0m                                     [1m[94mhelp: there is a expected value with a similar name: `"ml"`[0m
+2026-08-24T16:27:58 [info ] serial |    [1m[94m|[0m
+2026-08-24T16:27:58 [info ] serial |    [1m[94m= [0m[1mnote[0m: expected values for `feature` are: `arbitrary`, `default`, `experimental-parser`, `foundationdb`, `http`, `jwks`, `kv-fdb`, `kv-fdb-5_1`, `kv-fdb-5_2`, `kv-fdb-6_0`, `kv-fdb-6_1`, `kv-fdb-6_2`, `kv-fdb-6_3`, `kv-fdb-7_0`, `kv-fdb-7_1`, `kv-indxdb`, `kv-mem`, `kv-rocksdb`, `kv-speedb`, `kv-surrealkv`, `kv-tikv`, `ml`, `scripting`, and `tokio-tungstenite`
+2026-08-24T16:27:58 [info ] serial |    [1m[94m= [0m[1mhelp[0m: consider adding `ml2` as a feature in `Cargo.toml`
+2026-08-24T16:27:58 [info ] serial |    [1m[94m= [0m[1mnote[0m: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+2026-08-24T16:27:58 [info ] serial | [1m[33mwarning[0m[1m: unexpected `cfg` condition value: `ml2`[0m
+2026-08-24T16:27:58 [info ] serial |   [1m[94m--> [0m/src/pedradb/bench/sub-surreal/surreal-core/src/sql/model.rs:21:27
+2026-08-24T16:27:58 [info ] serial |    [1m[94m|[0m
+2026-08-24T16:27:58 [info ] serial | [1m[94m21[0m [1m[94m|[0m #[cfg(any(feature = "ml", feature = "ml2"))]
+2026-08-24T16:27:58 [info ] serial |    [1m[94m|[0m                           [1m[33m^^^^^^^^^^[0m[1m[94m-----[0m
+2026-08-24T16:27:58 [info ] serial |    [1m[94m|[0m                                     [1m[94m|[0m
+2026-08-24T16:27:58 [info ] serial |    [1m[94m|[0m                                     [1m[94mhelp: there is a expected value with a similar name: `"ml"`[0m
+2026-08-24T16:27:58 [info ] serial |    [1m[94m|[0m
+2026-08-24T16:27:58 [info ] serial |    [1m[94m= [0m[1mnote[0m: expected values for `feature` are: `arbitrary`, `default`, `experimental-parser`, `foundationdb`, `http`, `jwks`, `kv-fdb`, `kv-fdb-5_1`, `kv-fdb-5_2`, `kv-fdb-6_0`, `kv-fdb-6_1`, `kv-fdb-6_2`, `kv-fdb-6_3`, `kv-fdb-7_0`, `kv-fdb-7_1`, `kv-indxdb`, `kv-mem`, `kv-rocksdb`, `kv-speedb`, `kv-surrealkv`, `kv-tikv`, `ml`, `scripting`, and `tokio-tungstenite`
+2026-08-24T16:27:58 [info ] serial |    [1m[94m= [0m[1mhelp[0m: consider adding `ml2` as a feature in `Cargo.toml`
+2026-08-24T16:27:58 [info ] serial |    [1m[94m= [0m[1mnote[0m: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+2026-08-24T16:27:58 [info ] serial | [1m[33mwarning[0m[1m: unexpected `cfg` condition value: `ml2`[0m
+2026-08-24T16:27:58 [info ] serial |   [1m[94m--> [0m/src/pedradb/bench/sub-surreal/surreal-core/src/sql/model.rs:23:27
+2026-08-24T16:27:58 [info ] serial |    [1m[94m|[0m
+2026-08-24T16:27:58 [info ] serial | [1m[94m23[0m [1m[94m|[0m #[cfg(any(feature = "ml", feature = "ml2"))]
+2026-08-24T16:27:58 [info ] serial |    [1m[94m|[0m                           [1m[33m^^^^^^^^^^[0m[1m[94m-----[0m
+2026-08-24T16:27:58 [info ] serial |    [1m[94m|[0m                                     [1m[94m|[0m
+2026-08-24T16:27:58 [info ] serial |    [1m[94m|[0m                                     [1m[94mhelp: there is a expected value with a similar name: `"ml"`[0m
+2026-08-24T16:27:58 [info ] serial |    [1m[94m|[0m
+2026-08-24T16:27:58 [info ] serial |    [1m[94m= [0m[1mnote[0m: expected values for `feature` are: `arbitrary`, `default`, `experimental-parser`, `foundationdb`, `http`, `jwks`, `kv-fdb`, `kv-fdb-5_1`, `kv-fdb-5_2`, `kv-fdb-6_0`, `kv-fdb-6_1`, `kv-fdb-6_2`, `kv-fdb-6_3`, `kv-fdb-7_0`, `kv-fdb-7_1`, `kv-i
+2026-08-24T16:27:58 [info ] serial | ndxdb`, `
+2026-08-24T16:27:58 [info ] serial | kv-mem`, `kv-rocksdb`, `kv-speedb`, `kv-surrealkv`, `kv-tikv`, `ml`, `scripting`, and `tokio-tungstenite`
+2026-08-24T16:27:58 [info ] serial |    [1m[94m= [0m[1mhelp[0m: consider adding `ml2` as a feature in `Cargo.toml`
+2026-08-24T16:27:58 [info ] serial |    [1m[94m= [0m[1mnote[0m: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+2026-08-24T16:27:58 [info ] serial | [1m[33mwarning[0m[1m: unexpected `cfg` condition value: `ml2`[0m
+2026-08-24T16:27:58 [info ] serial |   [1m[94m--> [0m/src/pedradb/bench/sub-surreal/surreal-core/src/sql/model.rs:26:27
+2026-08-24T16:27:58 [info ] serial |    [1m[94m|[0m
+2026-08-24T16:27:58 [info ] serial | [1m[94m26[0m [1m[94m|[0m #[cfg(any(feature = "ml", feature = "ml2"))]
+2026-08-24T16:27:58 [info ] serial |    [1m[94m|[0m                           [1m[33m^^^^^^^^^^[0m[1m[94m-----[0m
+2026-08-24T16:27:58 [info ] serial |    [1m[94m|[0m                                     [1m[94m|[0m
+2026-08-24T16:27:58 [info ] serial |    [1m[94m|[0m                                     [1m[94mhelp: there is a expected value with a similar name: `"ml"`[0m
+2026-08-24T16:27:58 [info ] serial |    [1m[94m|[0m
+2026-08-24T16:27:58 [info ] serial |    [1m[94m= [0m[1mnote[0m: expected values for `feature` are: `arbitrary`, `default`, `experimental-parser`, `foundationdb`, `http`, `jwks`, `kv-fdb`, `kv-fdb-5_1`, `kv-fdb-5_2`, `kv-fdb-6_0`, `kv-fdb-6_1`, `kv-fdb-6_2`, `kv-fdb-6_3`, `kv-fdb-7_0`, `kv-fdb-7_1`, `kv-indxdb`, `kv-mem`, `kv-rocksdb`, `kv-speedb`, `kv-surrealkv`, `kv-tikv`, `ml`, `scripting`, and `tokio-tungstenite`
+2026-08-24T16:27:58 [info ] serial |    [1m[94m= [0m[1mhelp[0m: consider adding `ml2` as a feature in `Cargo.toml`
+2026-08-24T16:27:58 [info ] serial |    [1m[94m= [0m[1mnote[0m: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+2026-08-24T16:27:58 [info ] serial | [1m[33mwarning[0m[1m: unexpected `cfg` condition value: `ml2`[0m
+2026-08-24T16:27:58 [info ] serial |   [1m[94m--> [0m/src/pedradb/bench/sub-surreal/surreal-core/src/sql/model.rs:53:28
+2026-08-24T16:27:58 [info ] serial |    [1m[94m|[0m
+2026-08-24T16:27:58 [info ] serial | [1m[94m53[0m [1m[94m|[0m     #[cfg(any(feature = "ml", feature = "ml2"))]
+2026-08-24T16:27:58 [info ] serial |    [1m[94m|[0m                               [1m[33m^^^^^^^^^^[0m[1m[94m-----[0m
+2026-08-24T16:27:58 [info ] serial |    [1m[94m|[0m                                         [1m[94m|[0m
+2026-08-24T16:27:58 [info ] serial |    [1m[94m|[0m                                         [1m[94mhelp: there is a expected value with a similar name: `"ml"`[0m
+2026-08-24T16:27:58 [info ] serial |    [1m[94m|[0m
+2026-08-24T16:27:58 [info ] serial |    [1m[94m= [0m[1mnote[0m: expected values for `feature` are: `arbitrary`, `default`, `experimental-parser`, `foundationdb`, `http`, `jwks`, `kv-fdb`, `kv-fdb-5_1`, `kv-fdb-5_2`, `kv-fdb-6_0`, `kv-fdb-6_1`, `kv-fdb-6_2`, `kv-fdb-6_3`, `kv-fdb-7_0`, `kv-fdb-7_1`, `kv-indxdb`, `kv-mem`, `kv-rocksdb`, `kv-speedb`, `kv-surrealkv`, `kv-tikv`, `ml`, `scripting`, and `tokio-tungstenite`
+2026-08-24T16:27:58 [info ] serial |    [1m[94m= [0m[1mhelp[0m: consider adding `ml2` as a feature in `Cargo.toml`
+2026-08-24T16:27:58 [info ] serial |    [1m[94m= [0m[1mnote[0m: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+2026-08-24T16:27:58 [info ] serial | [1m[33mwarning[0m[1m: unexpected `cfg` condition value: `ml2`[0m
+2026-08-24T16:27:58 [info ] serial |    [1m[94m--> [0m/src/pedradb/bench/sub-surreal/surreal-core/src/sql/model.rs:214:32
+2026-08-24T16:27:58 [info ] serial |     [1m[94m|[0m
+2026-08-24T16:27:58 [info ] serial | [1m[94m214[0m [1m[94m|[0m     #[cfg(not(any(feature = "ml", feature = "ml2")))]
+2026-08-24T16:27:58 [info ] serial |     [1m[94m|[0m                                   [1m[33m^^^^^^^^^^[0m[1m[94m-----[0m
+2026-08-24T16:27:58 [info ] serial |     [1m[94m|[0m                                             [1m[94m|[0m
+2026-08-24T16:27:58 [info ] serial |     [1m[94m|[0m                                             [1m[94mhelp: there is a expected value with a similar name: `"ml"`[0m
+2026-08-24T16:27:58 [info ] serial |     [1m[94m|[0m
+2026-08-24T16:27:58 [info ] serial |     [1m[94m= [0m[1mnote[0m: expected values for `feature` are: `arbitrary`, `default`, `experimental-parser`, `foundationdb`, `http`, `jwks`, `kv-fdb`, `kv-fdb-5_1`, `kv-fdb-5_2`, `kv-fdb-6_0`, `kv-fdb-6_1`, `kv-fdb-6_2`, `kv-fdb-6_3`, `kv-fdb-7_0`, `kv-fdb-7_1`, `kv-indxdb`, `kv-mem`, `kv-rocksdb`, `kv-speedb`, `kv-surrealkv`, `kv-tikv`, `ml`, `scripting`, and `tokio-tungstenite`
+2026-08-24T16:27:58 [info ] serial |     [1m[94m= [0m[1mhelp[0m: consider adding `ml2` as a feature in `Cargo.toml`
+2026-08-24T16:27:58 [info ] serial |     [1m[94m= [0m[1mnote[0m: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+2026-08-24T16:27:58 [info ] serial | [1m[33mwarning[0m[1m: unused imports: `lazy_env_parse_or_else` and `lazy_env_parse`[0m
+2026-08-24T16:27:58 [info ] serial |  [1m[94m--> [0m/src/pedradb/bench/sub-surreal/surreal-core/src/kvs/rocksdb/cnf.rs:1:13
+2026-08-24T16:27:58 [info ] serial |   [1m[94m|[0m
+2026-08-24T16:27:58 [info ] serial | [1m[94m1[0m [1m[94m|[0m use crate::{lazy_env_parse, lazy_env_parse_or_else};
+2026-08-24T16:27:58 [info ] serial |   [1m[94m|[0m             [1m[33m^^^^^^^^^^^^^^[0m  [1m[33m^^^^^^^^^^^^^^^^^^^^^^[0m
+2026-08-24T16:27:58 [info ] serial |   [1m[94m|[0m
+2026-08-24T16:27:58 [info ] serial |   [1m[94m= [0m[1mnote[0m: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+2026-08-24T16:28:18 [info ] serial | [1m[33mwarning[0m[1m: enum `Id` is never used[0m
+2026-08-24T16:28:18 [info ] serial |    [1m[94m--> [0m/src/pedradb/bench/sub-surreal/surreal-core/src/sql/value/serde/de/mod.rs:178:7
+2026-08-24T16:28:18 [info ] serial |     [1m[94m|[0m
+2026-08-24T16:28:18 [info ] serial | [1m[94m178[0m [1m[94m|[0m     enum Id {
+2026-08-24T16:28:18 [info ] serial |     [1m[94m|[0m          [1m[33m^^[0m
+2026-08-24T16:28:18 [info ] serial |     [1m[94m|[0m
+2026-08-24T16:28:18 [info ] serial |     [1m[94m= [0m[1mnote[0m: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+2026-08-24T16:28:18 [info ] serial | [1m[33mwarning[0m[1m: struct `Thing` is never constructed[0m
+2026-08-24T16:28:18 [info ] serial |    [1m[94m--> [0m/src/pedradb/bench/sub-surreal/surreal-core/src/sql/value/serde/de/mod.rs:202:9
+2026-08-24T16:28:18 [info ] serial |     [1m[94m|[0m
+2026-08-24T16:28:18 [info ] serial | [1m[94m202[0m [1m[94m|[0m     struct Thing {
+2026-08-24T16:28:18 [info ] serial |     [1m[94m|[0m            [1m[33m^^^^^[0m
+2026-08-24T16:28:18 [info ] serial | [1m[33mwarning[0m[1m: struct `Serializer` is never constructed[0m
+2026-08-24T16:28:18 [info ] serial |   [1m[94m--> [0m/src/pedradb/bench/sub-surreal/surreal-core/src/sql/value/serde/ser/cast/mod.rs:11:19
+2026-08-24T16:28:18 [info ] serial |    [1m[94m|[0m
+2026-08-24T16:28:18 [info ] serial | [1m[94m11[0m [1m[94m|[0m pub(super) struct Serializer;
+2026-08-24T16:28:18 [info ] serial |    [1m[94m|[0m                   [1m[33m^^^^^^^^^^[0m
+2026-08-24T16:28:18 [info ] serial | [1m[33mwarning[0m[1m: struct `Serializer` is never constructed[0m
+2026-08-24T16:28:18 [info ] serial |   [1m[94m--> [0m/src/pedradb/bench/sub-surreal/surreal-core/src/sql/value/serde/ser/edges/mod.rs:12:19
+2026-08-24T16:28:18 [info ] serial |    [1m[94m|[0m
+2026-08-24T16:28:18 [info ] serial | [1m[94m12[0m [1m[94m|[0m pub(super) struct Serializer;
+2026-08-24T16:28:18 [info ] serial |    [1m[94m|[0m                   [1m[33m^^^^^^^^^^[0m
+2026-08-24T16:28:18 [info ] serial | [1m[33mwarning[0m[1m: struct `Serializer` is never constructed[0m
+2026-08-24T16:28:18 [info ] serial |   [1m[94m--> [0m/src/pedradb/bench/sub-surreal/surreal-core/src/sql/value/serde/ser/expression/mod.rs:11:19
+2026-08-24T16:28:18 [info ] serial |    [1m[94m|[0m
+2026-08-24T16:28:18 [info ] serial | [1m[94m11[0m [1m[94m|[0m pub(super) struct Serializer;
+2026-08-24T16:28:18 [info ] serial |    [1m[94m|[0m                   [1m[33m^^^^^^^^^^[0m
+2026-08-24T16:28:18 [info ] serial | [1m[33mwarning[0m[1m: struct `Serializer` is never constructed[0m
+2026-08-24T16:28:18 [info ] serial |   [1m[94m--> [0m/src/pedradb/b
+2026-08-24T16:28:18 [info ] serial | ench/sub-surre
+2026-08-24T16:28:18 [info ] serial | a
+2026-08-24T16:28:18 [info ] serial | l/surreal-core/src/s
+2026-08-24T16:28:18 [info ] serial | ql/value/serde/ser/range/mod
+2026-08-24T16:28:18 [info ] serial | .rs:13:19
+2026-08-24T16:28:18 [info ] serial |    [1m[94m|[0m
+2026-08-24T16:28:18 [info ] serial | [1m[94m13[0m [1m[94m|[0m pub(super) struct Serializer;
+2026-08-24T16:28:18 [info ] serial |    [1m[94m|[0m                   [1m[33m^^^^^^^^^^[0m
+2026-08-24T16:28:18 [info ] serial | [1m[33mwarning[0m[1m: hiding a lifetime that's elided elsewhere is confusing[0m
+2026-08-24T16:28:18 [info ] serial |    [1m[94m--> [0m/src/pedradb/bench/sub-surreal/surreal-core/src/ctx/context.rs:288:34
+2026-08-24T16:28:18 [info ] serial |     [1m[94m|[0m
+2026-08-24T16:28:18 [info ] serial | [1m[94m288[0m [1m[94m|[0m     pub(crate) fn get_query_planner(&self) -> Option<&QueryPlanner> {
+2026-08-24T16:28:18 [info ] serial |     [1m[94m|[0m                                     [1m[33m^^^^^[0m            [1m[33m^^^^^^^^^^^^^[0m
+2026-08-24T16:28:18 [info ] serial |     [1m[94m|[0m                                     [1m[33m|[0m                [1m[33m||[0m
+2026-08-24T16:28:18 [info ] serial |     [1m[94m|[0m                                     [1m[33m|[0m                [1m[33m|the same lifetime is hidden here[0m
+2026-08-24T16:28:18 [info ] serial |     [1m[94m|[0m                                     [1m[33m|[0m                [1m[33mthe same lifetime is elided here[0m
+2026-08-24T16:28:18 [info ] serial |     [1m[94m|[0m                                     [1m[33mthe lifetime is elided here[0m
+2026-08-24T16:28:18 [info ] serial |     [1m[94m|[0m
+2026-08-24T16:28:18 [info ] serial |     [1m[94m= [0m[1mhelp[0m: the same lifetime is referred to in inconsistent ways, making the signature confusing
+2026-08-24T16:28:18 [info ] serial |     [1m[94m= [0m[1mnote[0m: `#[warn(mismatched_lifetime_syntaxes)]` on by default
+2026-08-24T16:28:18 [info ] serial | [1m[96mhelp[0m: use `'_` for type paths
+2026-08-24T16:28:18 [info ] serial |     [1m[94m|[0m
+2026-08-24T16:28:18 [info ] serial | [1m[94m288[0m [1m[94m| [0m    pub(crate) fn get_query_planner(&self) -> Option<&QueryPlanner[92m<'_>[0m> {
+2026-08-24T16:28:18 [info ] serial |     [1m[94m|[0m                                                                   [92m++++[0m
+2026-08-24T16:28:18 [info ] serial | [1m[33mwarning[0m[1m: hiding a lifetime that's elided elsewhere is confusing[0m
+2026-08-24T16:28:18 [info ] serial |    [1m[94m--> [0m/src/pedradb/bench/sub-surreal/surreal-core/src/doc/index.rs:263:26
+2026-08-24T16:28:18 [info ] serial |     [1m[94m|[0m
+2026-08-24T16:28:18 [info ] serial | [1m[94m263[0m [1m[94m|[0m     fn get_unique_index_key(&self, v: &'a Array) -> key::index::Index {
+2026-08-24T16:28:18 [info ] serial |     [1m[94m|[0m                             [1m[33m^^^^^[0m                   [1m[33m^^^^^^^^^^^^^^^^^[0m [1m[33mthe same lifetime is hidden here[0m
+2026-08-24T16:28:18 [info ] serial |     [1m[94m|[0m                             [1m[33m|[0m
+2026-08-24T16:28:18 [info ] serial |     [1m[94m|[0m                             [1m[33mthe lifetime is elided here[0m
+2026-08-24T16:28:18 [info ] serial |     [1m[94m|[0m
+2026-08-24T16:28:18 [info ] serial |     [1m[94m= [0m[1mhelp[0m: the same lifetime is referred to in inconsistent ways, making the signature confusing
+2026-08-24T16:28:18 [info ] serial | [1m[96mhelp[0m: use `'_` for type paths
+2026-08-24T16:28:18 [info ] serial |     [1m[94m|[0m
+2026-08-24T16:28:18 [info ] serial | [1m[94m263[0m [1m[94m| [0m    fn get_unique_index_key(&self, v: &'a Array) -> key::index::Index[92m<'_>[0m {
+2026-08-24T16:28:18 [info ] serial |     [1m[94m|[0m                                                                      [92m++++[0m
+2026-08-24T16:28:18 [info ] serial | [1m[33mwarning[0m[1m: hiding a lifetime that's elided elsewhere is confusing[0m
+2026-08-24T16:28:18 [info ] serial |    [1m[94m--> [0m/src/pedradb/bench/sub-surreal/surreal-core/src/doc/index.rs:274:30
+2026-08-24T16:28:18 [info ] serial |     [1m[94m|[0m
+2026-08-24T16:28:18 [info ] serial | [1m[94m274[0m [1m[94m|[0m     fn get_non_unique_index_key(&self, v: &'a Array) -> key::index::Index {
+2026-08-24T16:28:18 [info ] serial |     [1m[94m|[0m                                 [1m[33m^^^^^[0m                   [1m[33m^^^^^^^^^^^^^^^^^[0m [1m[33mthe same lifetime is hidden here[0m
+2026-08-24T16:28:18 [info ] serial |     [1m[94m|[0m                                 [1m[33m|[0m
+2026-08-24T16:28:18 [info ] serial |     [1m[94m|[0m                                 [1m[33mthe lifetime is elided here[0m
+2026-08-24T16:28:18 [info ] serial |     [1m[94m|[0m
+2026-08-24T16:28:18 [info ] serial |     [1m[94m= [0m[1mhelp[0m: the same lifetime is referred to in inconsistent ways, making the signature confusing
+2026-08-24T16:28:18 [info ] serial | [1m[96mhelp[0m: use `'_` for type paths
+2026-08-24T16:28:18 [info ] serial |     [1m[94m|[0m
+2026-08-24T16:28:18 [info ] serial | [1m[94m274[0m [1m[94m| [0m    fn get_non_unique_index_key(&self, v: &'a Array) -> key::index::Index[92m<'_>[0m {
+2026-08-24T16:28:18 [info ] serial |     [1m[94m|[0m                                                                          [92m++++[0m
+2026-08-24T16:28:18 [info ] serial | [1m[33mwarning[0m[1m: eliding a lifetime that's named elsewhere is confusing[0m
+2026-08-24T16:28:18 [info ] serial |    [1m[94m--> [0m/src/pedradb/bench/sub-surreal/surreal-core/src/sql/part.rs:117:23
+2026-08-24T16:28:18 [info ] serial |     [1m[94m|[0m
+2026-08-24T16:28:18 [info ] serial | [1m[94m117[0m [1m[94m|[0m     fn next(&'a self) -> &[Part];
+2026-08-24T16:28:18 [info ] serial |     [1m[94m|[0m              [1m[94m--[0m          [1m[33m^^^^^^^[0m [1m[33mthe same lifetime is elided here[0m
+2026-08-24T16:28:18 [info ] serial |     [1m[94m|[0m              [1m[94m|[0m
+2026-08-24T16:28:18 [info ] serial |     [1m[94m|[0m              [1m[94mthe lifetime is named here[0m
+2026-08-24T16:28:18 [info ] serial |     [1m[94m|[0m
+2026-08-24T16:28:18 [info ] serial |     [1m[94m= [0m[1mhelp[0m: the same lifetime is referred to in inconsistent ways, making the signature confusing
+2026-08-24T16:28:18 [info ] serial | [1m[96mhelp[0m: consistently use `'a`
+2026-08-24T16:28:18 [info ] serial |     [1m[94m|[0m
+2026-08-24T16:28:18 [info ] serial | [1m[94m117[0m [1m[94m| [0m    fn next(&'a self) -> &[92m'a [0m[Part];
+2026-08-24T16:28:18 [info ] serial |     [1m[94m|[0m                           [92m++[0m
+2026-08-24T16:28:18 [info ] serial | [1m[33mwarning[0m[1m: eliding a lifetime that's named elsewhere is confusing[0m
+2026-08-24T16:28:18 [info ] serial |   [1m[94m--> [0m/src/pedradb/bench/sub-surreal/surreal-core/src/idx/ft/analyzer/tokenizer.rs:23:71
+2026-08-24T16:28:18 [info ] serial |    [1m[94m|[0m
+2026-08-24T16:28:18 [info ] serial | [1m[94m23[0m [1m[94m|[0m     pub(super) fn get_token_string<'a>(&'a self, t: &'a Token) -> Result<&str, Error> {
+2026-08-24T16:28:18 [info ] serial |    [1m[94m|[0m                                         [1m[94m--[0m           [1m[94m--[0m                  [1m[33m^^^^[0m [1m[33mthe same lifetime is elided here[0m
+2026-08-24T16:28:18 [info ] serial |    [1m[94m|[0m                                         [1m[94m|[0m            [1m[94m|[0m
+2026-08-24T16:28:18 [info ] serial |    [1m[94m|[0m                                         [1m[94m|[0m            [1m[94mthe lifetime is named here[0m
+2026-08-24T16:28:18 [info ] serial |    [1m[94m|[0m                                         [1m[94mthe lifetime is named here[0m
+2026-08-24T16:28:18 [info ] serial |    [1m[94m|[0m
+2026-08-24T16:28:18 [info ] serial |    [1m[94m= [0m[1mhelp[0m: the same lifetime is referred to in inconsistent ways, making the signature confusing
+2026-08-24T16:28:18 [info ] serial | [1m[96mhelp[0m: consistently use `'a`
+2026-08-24T16:28:18 [info ] serial |    [1m[94m|[0m
+2026-08-24T16:28:18 [info ] serial | [1m[94m23[0m [1m[94m| [0m    pub(super) fn get_token_string<'a>(&'a self, t: &'a Token) -> Result<&[92m'a [0mstr, Error> {
+2026-08-24T16:28:18 [info ] serial |    [1m[94m|[0m                                                                           [92m++[0m
+2026-08-24T16:28:18 [info ] serial | [1m[33mwarning[0m[1m: eliding a lifetime that's named elsewhere is confusing[0m
+2026-08-24T16:28:18 [info ] serial |    [1m[94m--> [0m/src/pedradb/bench/sub-surreal/surreal-core/src/idx/ft/analyzer/tokenizer.rs:165:60
+2026-08-24T16:28:18 [info ] serial |     [1m[94m|[0m
+2026-08-24T16:28:18 [info ] serial | [1m[94m165[0m [1m[94m|[0m     pub(super) fn get_str<'a>(&'a self, i: &'a str) -> Result<&str, Error> {
+2026-08-24T16:28:18 [info ] serial |     [1m[94m|[0m                                [1m[94m--[0m           [1m[94m--[0m                [1m[33m^^^^[0m [1m[33mthe same lifetime is elided here[0m
+2026-08-24T16:28:18 [info ] serial |     [1m[94m|[0m                                [1m[94m|[0m            [1m[94m|[0m
+2026-08-24T16:28:18 [info ] serial |     [1m[94m|[0m                                [1m[94m|[0m            [1m[94mthe lifetime is named
+2026-08-24T16:28:18 [info ] serial | here[0m
+2026-08-24T16:28:18 [info ] serial |     [1m[94m|[0m                                [1m[94mthe lifetime is named here[0m
+2026-08-24T16:28:18 [info ] serial |     [1m[94m|[0m
+2026-08-24T16:28:18 [info ] serial |     [1m[94m= [0m[1mhelp[0m: the same lifetime is referred to in inconsistent ways, making the signature confusing
+2026-08-24T16:28:18 [info ] serial | [1m[96mhelp[0m: consistently use `'a`
+2026-08-24T16:28:18 [info ] serial |     [1m[94m|[0m
+2026-08-24T16:28:18 [info ] serial | [1m[94m165[0m [1m[94m| [0m    pub(super) fn get_str<'a>(&'a self, i: &'a str) -> Result<&[92m'a [0mstr, Error> {
+2026-08-24T16:28:18 [info ] serial |     [1m[94m|[0m                                                                [92m++[0m
+2026-08-24T16:28:18 [info ] serial | [1m[33mwarning[0m[1m: hiding a lifetime that's elided elsewhere is confusing[0m
+2026-08-24T16:28:18 [info ] serial |     [1m[94m--> [0m/src/pedradb/bench/sub-surreal/surreal-core/src/kvs/ds.rs:1098:34
+2026-08-24T16:28:18 [info ] serial |      [1m[94m|[0m
+2026-08-24T16:28:18 [info ] serial | [1m[94m1098[0m [1m[94m|[0m     fn construct_document(mutation: &TableMutation) -> Option<Document> {
+2026-08-24T16:28:18 [info ] serial |      [1m[94m|[0m                                     [1m[33m^^^^^^^^^^^^^^[0m            [1m[33m^^^^^^^^[0m [1m[33mthe same lifetime is hidden here[0m
+2026-08-24T16:28:18 [info ] serial |      [1m[94m|[0m                                     [1m[33m|[0m
+2026-08-24T16:28:18 [info ] serial |      [1m[94m|[0m                                     [1m[33mthe lifetime is elided here[0m
+2026-08-24T16:28:18 [info ] serial |      [1m[94m|[0m
+2026-08-24T16:28:18 [info ] serial |      [1m[94m= [0m[1mhelp[0m: the same lifetime is referred to in inconsistent ways, making the signature confusing
+2026-08-24T16:28:18 [info ] serial | [1m[96mhelp[0m: use `'_` for type paths
+2026-08-24T16:28:18 [info ] serial |      [1m[94m|[0m
+2026-08-24T16:28:18 [info ] serial | [1m[94m1098[0m [1m[94m| [0m    fn construct_document(mutation: &TableMutation) -> Option<Document[92m<'_>[0m> {
+2026-08-24T16:28:18 [info ] serial |      [1m[94m|[0m                                                                       [92m++++[0m
+2026-08-24T16:29:51 [info ] serial | [1m[33mwarning[0m: `surrealdb-core` (lib) generated 27 warnings (run `cargo fix --lib -p surrealdb-core` to apply 8 suggestions)
+2026-08-24T16:29:51 [info ] serial | [1m[92m   Compiling[0m sub-bench v0.1.0 (/src/pedradb/bench/sub-surreal/peer/sub-bench)
+2026-08-24T16:29:54 [info ] serial | [1m[92m    Finished[0m `release` profile [optimized] target(s) in 8m 45s
+2026-08-24T16:29:54 [info ] serial | --- peer side done 16:29:54 ---
+2026-08-24T16:29:54 [info ] serial | --- run peer 16:29:54 ---
+2026-08-24T16:30:30 [info ] serial | SUB_BENCH_JSON {"engine":"rocks","ops":2000,"records":1024,"seconds":8.0,"legs":[{"name":"point_read","qps":350308.4058984045},{"name":"point_write","qps":147423.59367267133},{"name":"scan","qps":598809.9035999333},{"name":"doc_txn","qps":103153.72615859503}]}
+2026-08-24T16:30:30 [info ] serial | --- ratio 16:30:30 ---
+2026-08-24T16:30:30 [info ] serial | SUB_RATIO point_read pedra=627873 rocks=350308 ratio=1.79
+2026-08-24T16:30:30 [info ] serial | SUB_RATIO point_write pedra=355018 rocks=147424 ratio=2.41
+2026-08-24T16:30:30 [info ] serial | SUB_RATIO scan pedra=797266 rocks=598810 ratio=1.33
+2026-08-24T16:30:30 [info ] serial | SUB_RATIO doc_txn pedra=143989 rocks=103154 ratio=1.40
+2026-08-24T16:30:30 [info ] serial | BLOBSUB| H4sIAAAAAAAAA+2XTW/aQBCGOftXrHwmy85+b6RcUlWqekgPUU9RZBGwUreJTW2jRor47x2v3QSwIWoFidruczHeHZYXxvPOQCejo8MQo5S/IttX/xoUl4IZpqXGdWM4GxF1fGmj0bKqpyUho7Io6n1xL+3/pdBJtbxJqmVZptO75C7Llw/0a1Xkh/yMJsFayl35B4Y538g/SKFhRNghReziP8//Y0Tiu/S2ik/JVUQI3hIS59P7FBfiRZHldYJPxjwe+41FOi+nyfdFE665sYZTxZW0nDNp2pCymH2ruhChmGCWSqass5JJ1YVM66zAbaDGcSE5aNDGWgCB26vxDhk/yqxOB3QIpRgY6iS3eBQA7+sAaSQXVDmhDdcGhNgUwlGiBWkNnsQNV6CHhVSzaT6gwDg8VVFtnGBOm6fT1xQoZy1z1DGhnHNiWwBQIUCCdtbhIdoxMyxgXsyS+mFIA5YMvpmCxa+AtYSSBn4GJkAJimJBWeUwOT0VTlmN+iRmiyvXiIjIdbR666c0cCzoxD8htH44nru94P9Mm63+D6CZCv7/GmD3P7lJ89kXUiyqM47ZIGU6K8p5dQaMSzLPyrNJfb+YPAWeANeMRVWazokP6eJJlhNGWRVhOyHPnYOg93SNYG3Hm7nf8t4s/VZjr36tcUtgfq1zvDa08S8ZXX4+T87fX7z7kHy8/HRBHuM0v81y9MfW7OJxXDR213yXcdyJi08bqeO4wtu8ubUUN9vGd/XY+etGv4u9Z/Y62Gq8Fd21pTa832jW4tvu0Qb2+sFa3JPJd2f2XHt1vYoOlX868V3kbetf/5r/NP5NgKb+lQ71/yr8Qf0r6dTvlb8fFcVg+fvpzW6Wv5+ndL/8/Yizp/z9k3zQ8u/NuPvLvzeK7qj+3sC4p/p7c90hqz8QCAQCgUAgEAgEAoFAIBAIBAKBwL/IT158qEkAKAAA
+2026-08-24T16:30:30 [info ] serial | BLOBSUB_BEGIN_MARKED
+2026-08-24T16:30:30 [info ] serial | RESULT=SUB_BENCH_DONE 2026-08-24T16:30:30Z
+[loop] recycled 16:32:33Z
+Connecting to wss://portaria.up.railway.app/api/ws ...
+Streaming logs for resource cnt_b0babd61e1b84d5787674c18d1c8a06b (Ctrl-C to stop)...
+
+2026-08-24T16:28:18 [info ] serial |     [1m[94m= [0m[1mnote[0m: `#[warn(mismatched_lifetime_syntaxes)]` on by default
+2026-08-24T16:28:18 [info ] serial | [1m[96mhelp[0m: use `'_` for type paths
+2026-08-24T16:28:18 [info ] serial |     [1m[94m|[0m
+2026-08-24T16:28:18 [info ] serial | [1m[94m288[0m [1m[94m| [0m    pub(crate) fn get_query_planner(&self) -> Option<&QueryPlanner[92m<'_>[0m> {
+2026-08-24T16:28:18 [info ] serial |     [1m[94m|[0m                                                                   [92m++++[0m
+2026-08-24T16:28:18 [info ] serial | [1m[33mwarning[0m[1m: hiding a lifetime that's elided elsewhere is confusing[0m
+2026-08-24T16:28:18 [info ] serial |    [1m[94m--> [0m/src/pedradb/bench/sub-surreal/surreal-core/src/doc/index.rs:263:26
+2026-08-24T16:28:18 [info ] serial |     [1m[94m|[0m
+2026-08-24T16:28:18 [info ] serial | [1m[94m263[0m [1m[94m|[0m     fn get_unique_index_key(&self, v: &'a Array) -> key::index::Index {
+2026-08-24T16:28:18 [info ] serial |     [1m[94m|[0m                             [1m[33m^^^^^[0m                   [1m[33m^^^^^^^^^^^^^^^^^[0m [1m[33mthe same lifetime is hidden here[0m
+2026-08-24T16:28:18 [info ] serial |     [1m[94m|[0m                             [1m[33m|[0m
+2026-08-24T16:28:18 [info ] serial |     [1m[94m|[0m                             [1m[33mthe lifetime is elided here[0m
+2026-08-24T16:28:18 [info ] serial |     [1m[94m|[0m
+2026-08-24T16:28:18 [info ] serial |     [1m[94m= [0m[1mhelp[0m: the same lifetime is referred to in inconsistent ways, making the signature confusing
+2026-08-24T16:28:18 [info ] serial | [1m[96mhelp[0m: use `'_` for type paths
+2026-08-24T16:28:18 [info ] serial |     [1m[94m|[0m
+2026-08-24T16:28:18 [info ] serial | [1m[94m263[0m [1m[94m| [0m    fn get_unique_index_key(&self, v: &'a Array) -> key::index::Index[92m<'_>[0m {
+2026-08-24T16:28:18 [info ] serial |     [1m[94m|[0m                                                                      [92m++++[0m
+2026-08-24T16:28:18 [info ] serial | [1m[33mwarning[0m[1m: hiding a lifetime that's elided elsewhere is confusing[0m
+2026-08-24T16:28:18 [info ] serial |    [1m[94m--> [0m/src/pedradb/bench/sub-surreal/surreal-core/src/doc/index.rs:274:30
+2026-08-24T16:28:18 [info ] serial |     [1m[94m|[0m
+2026-08-24T16:28:18 [info ] serial | [1m[94m274[0m [1m[94m|[0m     fn get_non_unique_index_key(&self, v: &'a Array) -> key::index::Index {
+2026-08-24T16:28:18 [info ] serial |     [1m[94m|[0m                                 [1m[33m^^^^^[0m                   [1m[33m^^^^^^^^^^^^^^^^^[0m [1m[33mthe same lifetime is hidden here[0m
+2026-08-24T16:28:18 [info ] serial |     [1m[94m|[0m                                 [1m[33m|[0m
+2026-08-24T16:28:18 [info ] serial |     [1m[94m|[0m                                 [1m[33mthe lifetime is elided here[0m
+2026-08-24T16:28:18 [info ] serial |     [1m[94m|[0m
+2026-08-24T16:28:18 [info ] serial |     [1m[94m= [0m[1mhelp[0m: the same lifetime is referred to in inconsistent ways, making the signature confusing
+2026-08-24T16:28:18 [info ] serial | [1m[96mhelp[0m: use `'_` for type paths
+2026-08-24T16:28:18 [info ] serial |     [1m[94m|[0m
+2026-08-24T16:28:18 [info ] serial | [1m[94m274[0m [1m[94m| [0m    fn get_non_unique_index_key(&self, v: &'a Array) -> key::index::Index[92m<'_>[0m {
+2026-08-24T16:28:18 [info ] serial |     [1m[94m|[0m                                                                          [92m++++[0m
+2026-08-24T16:28:18 [info ] serial | [1m[33mwarning[0m[1m: eliding a lifetime that's named elsewhere is confusing[0m
+2026-08-24T16:28:18 [info ] serial |    [1m[94m--> [0m/src/pedradb/bench/sub-surreal/surreal-core/src/sql/part.rs:117:23
+2026-08-24T16:28:18 [info ] serial |     [1m[94m|[0m
+2026-08-24T16:28:18 [info ] serial | [1m[94m117[0m [1m[94m|[0m     fn next(&'a self) -> &[Part];
+2026-08-24T16:28:18 [info ] serial |     [1m[94m|[0m              [1m[94m--[0m          [1m[33m^^^^^^^[0m [1m[33mthe same lifetime is elided here[0m
+2026-08-24T16:28:18 [info ] serial |     [1m[94m|[0m              [1m[94m|[0m
+2026-08-24T16:28:18 [info ] serial |     [1m[94m|[0m              [1m[94mthe lifetime is named here[0m
+2026-08-24T16:28:18 [info ] serial |     [1m[94m|[0m
+2026-08-24T16:28:18 [info ] serial |     [1m[94m= [0m[1mhelp[0m: the same lifetime is referred to in inconsistent ways, making the signature confusing
+2026-08-24T16:28:18 [info ] serial | [1m[96mhelp[0m: consistently use `'a`
+2026-08-24T16:28:18 [info ] serial |     [1m[94m|[0m
+2026-08-24T16:28:18 [info ] serial | [1m[94m117[0m [1m[94m| [0m    fn next(&'a self) -> &[92m'a [0m[Part];
+2026-08-24T16:28:18 [info ] serial |     [1m[94m|[0m                           [92m++[0m
+2026-08-24T16:28:18 [info ] serial | [1m[33mwarning[0m[1m: eliding a lifetime that's named elsewhere is confusing[0m
+2026-08-24T16:28:18 [info ] serial |   [1m[94m--> [0m/src/pedradb/bench/sub-surreal/surreal-core/src/idx/ft/analyzer/tokenizer.rs:23:71
+2026-08-24T16:28:18 [info ] serial |    [1m[94m|[0m
+2026-08-24T16:28:18 [info ] serial | [1m[94m23[0m [1m[94m|[0m     pub(super) fn get_token_string<'a>(&'a self, t: &'a Token) -> Result<&str, Error> {
+2026-08-24T16:28:18 [info ] serial |    [1m[94m|[0m                                         [1m[94m--[0m           [1m[94m--[0m                  [1m[33m^^^^[0m [1m[33mthe same lifetime is elided here[0m
+2026-08-24T16:28:18 [info ] serial |    [1m[94m|[0m                                         [1m[94m|[0m            [1m[94m|[0m
+2026-08-24T16:28:18 [info ] serial |    [1m[94m|[0m                                         [1m[94m|[0m            [1m[94mthe lifetime is named here[0m
+2026-08-24T16:28:18 [info ] serial |    [1m[94m|[0m                                         [1m[94mthe lifetime is named here[0m
+2026-08-24T16:28:18 [info ] serial |    [1m[94m|[0m
+2026-08-24T16:28:18 [info ] serial |    [1m[94m= [0m[1mhelp[0m: the same lifetime is referred to in inconsistent ways, making the signature confusing
+2026-08-24T16:28:18 [info ] serial | [1m[96mhelp[0m: consistently use `'a`
+2026-08-24T16:28:18 [info ] serial |    [1m[94m|[0m
+2026-08-24T16:28:18 [info ] serial | [1m[94m23[0m [1m[94m| [0m    pub(super) fn get_token_string<'a>(&'a self, t: &'a Token) -> Result<&[92m'a [0mstr, Error> {
+2026-08-24T16:28:18 [info ] serial |    [1m[94m|[0m                                                                           [92m++[0m
+2026-08-24T16:28:18 [info ] serial | [1m[33mwarning[0m[1m: eliding a lifetime that's named elsewhere is confusing[0m
+2026-08-24T16:28:18 [info ] serial |    [1m[94m--> [0m/src/pedradb/bench/sub-surreal/surreal-core/src/idx/ft/analyzer/tokenizer.rs:165:60
+2026-08-24T16:28:18 [info ] serial |     [1m[94m|[0m
+2026-08-24T16:28:18 [info ] serial | [1m[94m165[0m [1m[94m|[0m     pub(super) fn get_str<'a>(&'a self, i: &'a str) -> Result<&str, Error> {
+2026-08-24T16:28:18 [info ] serial |     [1m[94m|[0m                                [1m[94m--[0m           [1m[94m--[0m                [1m[33m^^^^[0m [1m[33mthe same lifetime is elided here[0m
+2026-08-24T16:28:18 [info ] serial |     [1m[94m|[0m                                [1m[94m|[0m            [1m[94m|[0m
+2026-08-24T16:28:18 [info ] serial |     [1m[94m|[0m                                [1m[94m|[0m            [1m[94mthe lifetime is named
+2026-08-24T16:28:18 [info ] serial | here[0m
+2026-08-24T16:28:18 [info ] serial |     [1m[94m|[0m                                [1m[94mthe lifetime is named here[0m
+2026-08-24T16:28:18 [info ] serial |     [1m[94m|[0m
+2026-08-24T16:28:18 [info ] serial |     [1m[94m= [0m[1mhelp[0m: the same lifetime is referred to in inconsistent ways, making the signature confusing
+2026-08-24T16:28:18 [info ] serial | [1m[96mhelp[0m: consistently use `'a`
+2026-08-24T16:28:18 [info ] serial |     [1m[94m|[0m
+2026-08-24T16:28:18 [info ] serial | [1m[94m165[0m [1m[94m| [0m    pub(super) fn get_str<'a>(&'a self, i: &'a str) -> Result<&[92m'a [0mstr, Error> {
+2026-08-24T16:28:18 [info ] serial |     [1m[94m|[0m                                                                [92m++[0m
+2026-08-24T16:28:18 [info ] serial | [1m[33mwarning[0m[1m: hiding a lifetime that's elided elsewhere is confusing[0m
+2026-08-24T16:28:18 [info ] serial |     [1m[94m--> [0m/src/pedradb/bench/sub-surreal/surreal-core/src/kvs/ds.rs:1098:34
+2026-08-24T16:28:18 [info ] serial |      [1m[94m|[0m
+2026-08-24T16:28:18 [info ] serial | [1m[94m1098[0m [1m[94m|[0m     fn construct_document(mutation: &TableMutation) -> Option<Document> {
+2026-08-24T16:28:18 [info ] serial |      [1m[94m|[0m                                     [1m[33m^^^^^^^^^^^^^^[0m            [1m[33m^^^^^^^^[0m [1m[33mthe same lifetime is hidden here[0m
+2026-08-24T16:28:18 [info ] serial |      [1m[94m|[0m                                     [1m[33m|[0m
+2026-08-24T16:28:18 [info ] serial |      [1m[94m|[0m                                     [1m[33mthe lifetime is elided here[0m
+2026-08-24T16:28:18 [info ] serial |      [1m[94m|[0m
+2026-08-24T16:28:18 [info ] serial |      [1m[94m= [0m[1mhelp[0m: the same lifetime is referred to in inconsistent ways, making the signature confusing
+2026-08-24T16:28:18 [info ] serial | [1m[96mhelp[0m: use `'_` for type paths
+2026-08-24T16:28:18 [info ] serial |      [1m[94m|[0m
+2026-08-24T16:28:18 [info ] serial | [1m[94m1098[0m [1m[94m| [0m    fn construct_document(mutation: &TableMutation) -> Option<Document[92m<'_>[0m> {
+2026-08-24T16:28:18 [info ] serial |      [1m[94m|[0m                                                                       [92m++++[0m
+2026-08-24T16:29:51 [info ] serial | [1m[33mwarning[0m: `surrealdb-core` (lib) generated 27 warnings (run `cargo fix --lib -p surrealdb-core` to apply 8 suggestions)
+2026-08-24T16:29:51 [info ] serial | [1m[92m   Compiling[0m sub-bench v0.1.0 (/src/pedradb/bench/sub-surreal/peer/sub-bench)
+2026-08-24T16:29:54 [info ] serial | [1m[92m    Finished[0m `release` profile [optimized] target(s) in 8m 45s
+2026-08-24T16:29:54 [info ] serial | --- peer side done 16:29:54 ---
+2026-08-24T16:29:54 [info ] serial | --- run peer 16:29:54 ---
+2026-08-24T16:30:30 [info ] serial | SUB_BENCH_JSON {"engine":"rocks","ops":2000,"records":1024,"seconds":8.0,"legs":[{"name":"point_read","qps":350308.4058984045},{"name":"point_write","qps":147423.59367267133},{"name":"scan","qps":598809.9035999333},{"name":"doc_txn","qps":103153.72615859503}]}
+2026-08-24T16:30:30 [info ] serial | --- ratio 16:30:30 ---
+2026-08-24T16:30:30 [info ] serial | SUB_RATIO point_read pedra=627873 rocks=350308 ratio=1.79
+2026-08-24T16:30:30 [info ] serial | SUB_RATIO point_write pedra=355018 rocks=147424 ratio=2.41
+2026-08-24T16:30:30 [info ] serial | SUB_RATIO scan pedra=797266 rocks=598810 ratio=1.33
+2026-08-24T16:30:30 [info ] serial | SUB_RATIO doc_txn pedra=143989 rocks=103154 ratio=1.40
+2026-08-24T16:30:30 [info ] serial | BLOBSUB| H4sIAAAAAAAAA+2XTW/aQBCGOftXrHwmy85+b6RcUlWqekgPUU9RZBGwUreJTW2jRor47x2v3QSwIWoFidruczHeHZYXxvPOQCejo8MQo5S/IttX/xoUl4IZpqXGdWM4GxF1fGmj0bKqpyUho7Io6n1xL+3/pdBJtbxJqmVZptO75C7Llw/0a1Xkh/yMJsFayl35B4Y538g/SKFhRNghReziP8//Y0Tiu/S2ik/JVUQI3hIS59P7FBfiRZHldYJPxjwe+41FOi+nyfdFE665sYZTxZW0nDNp2pCymH2ruhChmGCWSqass5JJ1YVM66zAbaDGcSE5aNDGWgCB26vxDhk/yqxOB3QIpRgY6iS3eBQA7+sAaSQXVDmhDdcGhNgUwlGiBWkNnsQNV6CHhVSzaT6gwDg8VVFtnGBOm6fT1xQoZy1z1DGhnHNiWwBQIUCCdtbhIdoxMyxgXsyS+mFIA5YMvpmCxa+AtYSSBn4GJkAJimJBWeUwOT0VTlmN+iRmiyvXiIjIdbR666c0cCzoxD8htH44nru94P9Mm63+D6CZCv7/GmD3P7lJ89kXUiyqM47ZIGU6K8p5dQaMSzLPyrNJfb+YPAWeANeMRVWazokP6eJJlhNGWRVhOyHPnYOg93SNYG3Hm7nf8t4s/VZjr36tcUtgfq1zvDa08S8ZXX4+T87fX7z7kHy8/HRBHuM0v81y9MfW7OJxXDR213yXcdyJi08bqeO4wtu8ubUUN9vGd/XY+etGv4u9Z/Y62Gq8Fd21pTa832jW4tvu0Qb2+sFa3JPJd2f2XHt1vYoOlX868V3kbetf/5r/NP5NgKb+lQ71/yr8Qf0r6dTvlb8fFcVg+fvpzW6Wv5+ndL/8/Yizp/z9k3zQ8u/NuPvLvzeK7qj+3sC4p/p7c90hqz8QCAQCgUAgEAgEAoFAIBAIBAKBwL/IT158qEkAKAAA
+2026-08-24T16:30:30 [info ] serial | BLOBSUB_BEGIN_MARKED
+2026-08-24T16:30:30 [info ] serial | RESULT=SUB_BENCH_DONE 2026-08-24T16:30:30Z

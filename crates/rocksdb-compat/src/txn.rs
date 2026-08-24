@@ -433,15 +433,26 @@ pub struct TxnRawIterator<'a, D, E: Env = IoUringEnv> {
     /// Sorted, deduped staged entries (`None` = staged delete).
     staged: Vec<(Vec<u8>, Option<Vec<u8>>)>,
     idx: usize,
-    /// Which source produced the current head (advance bookkeeping).
-    head_staged: bool,
+    /// Current merged head (forward path): staged rows are an index into
+    /// `staged`, db rows delegate to the db walk's current position — zero
+    /// copies per row (F222; the old head cloned key+value for every row
+    /// into an owned `cur`).
+    cur: CurRow,
     lower: Option<Vec<u8>>,
     upper: Option<Vec<u8>>,
-    /// Current merged head (forward path).
-    cur: Option<(Vec<u8>, Option<Vec<u8>>)>,
     /// Materialized merged view (reverse-path only).
     mat: Option<Vec<(Vec<u8>, Vec<u8>)>>,
     mat_at: usize,
+}
+
+/// Source of the current merged head. A staged head is an index into
+/// `TxnRawIterator::staged` (immutable after `new`); a db head is the db
+/// walk's current row, borrowed on read — the walk only advances on `next`,
+/// so the position is stable between `key()`/`value()` calls.
+enum CurRow {
+    Db,
+    Staged(usize),
+    End,
 }
 
 impl<'a, D, E: Env> TxnRawIterator<'a, D, E> {
@@ -458,10 +469,9 @@ impl<'a, D, E: Env> TxnRawIterator<'a, D, E> {
             db,
             staged,
             idx: 0,
-            head_staged: false,
+            cur: CurRow::End,
             lower: ro.lower,
             upper: ro.upper,
-            cur: None,
             mat: None,
             mat_at: 0,
         }
@@ -482,54 +492,51 @@ impl<'a, D, E: Env> TxnRawIterator<'a, D, E> {
     }
 
     /// Merged head: smallest visible key from db walk + staged overlay.
-    fn head(&mut self) -> Option<(Vec<u8>, Option<Vec<u8>>)> {
+    /// Returns the head's source; db-row bytes land in the reusable
+    /// buffers, staged rows are an index — no per-row allocation (F222).
+    fn head(&mut self) -> CurRow {
         loop {
-            let db_k = self.db.key().map(<[u8]>::to_vec);
+            let db_k = self.db.key();
             let st = self.staged.get(self.idx);
             match (db_k, st) {
-                (None, None) => return None,
+                (None, None) => return CurRow::End,
                 (Some(dk), None) => {
-                    if !self.in_window(&dk) {
-                        return None;
+                    if !self.in_window(dk) {
+                        return CurRow::End;
                     }
-                    self.head_staged = false;
-                    return Some((dk, self.db.value().map(<[u8]>::to_vec)));
+                    return CurRow::Db;
                 }
                 (None, Some((sk, sv))) => {
-                    let (sk, sv) = (sk.clone(), sv.clone());
+                    let idx = self.idx;
                     self.idx += 1;
-                    if !self.in_window(&sk) {
+                    if !self.in_window(sk) {
                         continue;
                     }
                     if sv.is_some() {
-                        self.head_staged = true;
-                        return Some((sk, sv));
+                        return CurRow::Staged(idx);
                     }
                 }
                 (Some(dk), Some((sk, sv))) => {
-                    if sk.as_slice() < dk.as_slice() {
-                        let (sk, sv) = (sk.clone(), sv.clone());
+                    if sk.as_slice() < dk {
+                        let idx = self.idx;
                         self.idx += 1;
-                        if sv.is_some() && self.in_window(&sk) {
-                            self.head_staged = true;
-                            return Some((sk, sv));
+                        if sv.is_some() && self.in_window(sk) {
+                            return CurRow::Staged(idx);
                         }
                         continue;
                     }
-                    if sk.as_slice() > dk.as_slice() {
-                        if !self.in_window(&dk) {
-                            return None;
+                    if sk.as_slice() > dk {
+                        if !self.in_window(dk) {
+                            return CurRow::End;
                         }
-                        self.head_staged = false;
-                        return Some((dk, self.db.value().map(<[u8]>::to_vec)));
+                        return CurRow::Db;
                     }
                     // Equal: staged shadows db (put or delete).
-                    let sv = sv.clone();
+                    let idx = self.idx;
                     self.idx += 1;
                     self.db.next();
-                    if sv.is_some() && self.in_window(&dk) {
-                        self.head_staged = true;
-                        return Some((dk, sv));
+                    if sv.is_some() && self.in_window(sk) {
+                        return CurRow::Staged(idx);
                     }
                 }
             }
@@ -542,7 +549,7 @@ impl<'a, D, E: Env> TxnRawIterator<'a, D, E> {
         if let Some(m) = &self.mat {
             return self.mat_at < m.len();
         }
-        self.cur.is_some()
+        !matches!(self.cur, CurRow::End)
     }
 
     /// Current key.
@@ -551,7 +558,11 @@ impl<'a, D, E: Env> TxnRawIterator<'a, D, E> {
         if let Some(m) = &self.mat {
             return m.get(self.mat_at).map(|(k, _)| k.as_slice());
         }
-        self.cur.as_ref().map(|(k, _)| k.as_slice())
+        match &self.cur {
+            CurRow::Db => self.db.key(),
+            CurRow::Staged(i) => Some(self.staged[*i].0.as_slice()),
+            CurRow::End => None,
+        }
     }
 
     /// Current value.
@@ -560,7 +571,11 @@ impl<'a, D, E: Env> TxnRawIterator<'a, D, E> {
         if let Some(m) = &self.mat {
             return m.get(self.mat_at).map(|(_, v)| v.as_slice());
         }
-        self.cur.as_ref().and_then(|(_, v)| v.as_deref())
+        match &self.cur {
+            CurRow::Db => self.db.value(),
+            CurRow::Staged(i) => self.staged[*i].1.as_deref(),
+            CurRow::End => None,
+        }
     }
 
     /// Seek ≥ `key`.
@@ -590,14 +605,13 @@ impl<'a, D, E: Env> TxnRawIterator<'a, D, E> {
             }
             return;
         }
-        if let Some(cur) = self.cur.take() {
-            if self.head_staged {
-                // Staged key produced the head; equal db key (if any) was
-                // already consumed inside `head`.
-                let _ = cur;
-            } else {
+        match std::mem::replace(&mut self.cur, CurRow::End) {
+            CurRow::Db => {
                 self.db.next();
             }
+            // Staged head: its index already advanced inside `head`, and an
+            // equal db key (shadowed put) was consumed there too.
+            CurRow::Staged(_) | CurRow::End => {}
         }
         self.advance_head();
     }
@@ -617,19 +631,17 @@ impl<'a, D, E: Env> TxnRawIterator<'a, D, E> {
         }
         // Full merged forward walk (reverse path: correctness over speed).
         let mut out = Vec::new();
-        let mut saved = std::mem::take(&mut self.cur);
+        let saved_cur = std::mem::replace(&mut self.cur, CurRow::End);
         let saved_idx = self.idx;
-        let saved_head_staged = self.head_staged;
         self.seek_to_first();
-        while let Some((k, v)) = self.cur.clone() {
-            if let Some(v) = v {
-                out.push((k, v));
+        while !matches!(self.cur, CurRow::End) {
+            if let (Some(k), Some(v)) = (self.key(), self.value()) {
+                out.push((k.to_vec(), v.to_vec()));
             }
             self.next();
         }
-        self.cur = saved.take();
+        self.cur = saved_cur;
         self.idx = saved_idx;
-        self.head_staged = saved_head_staged;
         self.mat = Some(out);
         self.mat_at = 0;
     }
