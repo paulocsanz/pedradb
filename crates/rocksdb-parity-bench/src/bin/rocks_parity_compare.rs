@@ -200,6 +200,27 @@ fn main() {
     };
     let cs = sync_opt(compat_sync);
     let rs = sync_opt(peer_sync);
+    // Honesty must mirror the column actually measured. The official
+    // scoreboard column is G1 (fdatasync before Ok) vs Rocks default;
+    // `PEDRA_PARITY_ASYNC=1` legs are the same-class async column (no
+    // fdatasync) and must never read as the product's durability claim.
+    let honesty = match compat_sync {
+        Some(false) => concat!(
+            "Single-node lab bench: rocksdb-compat async same-class column ",
+            "(PEDRA_PARITY_ASYNC=1; WAL write, NO fdatasync) vs real RocksDB default ",
+            "(WriteOptions.sync=false). Same durability class on both sides. ",
+            "This column measures engine speed only and is NEVER quoted as ",
+            "'we beat Rocks'. The product claim (more durability AND faster) ",
+            "is the G1 column (set_sync(true)) vs Rocks default. ",
+            "Not a distributed/field claim."
+        ),
+        _ => concat!(
+            "Single-node lab bench: rocksdb-compat (Pedra, fdatasync before Ok, G1) ",
+            "vs real RocksDB default (WriteOptions.sync=false). Official peer is Rocks ",
+            "**default**, not a matched-sync peer. Pedra keeps the stronger durability ",
+            "and still has to beat default Rocks. Not a distributed/field claim."
+        ),
+    };
     let report = format!(
         r#"{{
   "compare": "rocks-parity-v1",
@@ -220,7 +241,7 @@ fn main() {
   "ratios": {ratios},
   "peer_anomalies": {anomalies_json},
   "parity": {parity},
-  "honesty": "Single-node lab bench: rocksdb-compat (Pedra, fdatasync before Ok) vs real RocksDB default (WriteOptions.sync=false). Official peer is Rocks **default**, not a matched-sync peer. ROCKS_PARITY_SYNC=1 is an extra same-class column only. Pedra keeps the stronger durability and still has to beat default Rocks. Not a distributed/field claim."
+  "honesty": "{honesty}"
 }}
 "#,
         cj = compat_json,

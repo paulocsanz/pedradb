@@ -1,0 +1,15 @@
+=== linux-battery1 pid=2018 start 2026-08-24 04:32:27 ===
+armed 2026-08-24 04:33:47 uname=Linux youki 6.12.94-0-virt #1-Alpine SMP PREEMPT_DYNAMIC 2026-06-20 16:46:16 x86_64 GNU/Linux
+04:33:50 r1 async done load1=1.68
+04:33:50 r1 kvr done load1=1.68
+04:33:54 r1 rocks done load1=1.70
+04:33:55 r1 rocks-kvr done load1=1.70
+04:33:57 r2 async done load1=1.70
+04:33:58 r2 kvr done load1=1.70
+04:34:01 r2 rocks done load1=1.73
+04:34:02 r2 rocks-kvr done load1=1.73
+04:34:05 r3 async done load1=1.75
+04:34:05 r3 kvr done load1=1.75
+04:34:09 r3 rocks done load1=1.77
+04:34:10 r3 rocks-kvr done load1=1.77
+BATTERY_DONE 04:34:10

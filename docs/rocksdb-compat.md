@@ -48,6 +48,22 @@ Dependency swap for a consumer (alias, no crates.io patch):
 rocksdb = { package = "rocksdb-compat", path = "../rocksdb-compat" }
 ```
 
+Full substitution by crate name (RFC-0059) — for upper databases that
+depend on the crates.io `rocksdb` by name (SurrealDB `kv-rocksdb`
+requires `rocksdb = "0.21.0"`), use the shim package
+`crates/rocksdb` (package name `rocksdb`, version `0.21.0`, reexports
+`rocksdb-compat` plus a `Transaction<'a, D>` alias parameterized on the
+DB type). Zero source changes on the consumer:
+
+```toml
+[patch.crates-io]
+rocksdb = { path = "crates/rocksdb" }
+```
+
+Proof harness: `bench/sub-surreal/` — SurrealDB v1.5.4 (vendored) built
+twice, storage swapped only by the patch; see
+`findings/2026-08-24-sub-surreal-mac/`.
+
 ## Adversarial results (our suite style, on the compat layer)
 
 `crates/rocksdb-compat/tests/adversarial.rs`:

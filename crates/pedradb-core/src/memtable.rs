@@ -135,7 +135,10 @@ pub(crate) struct MemInternalMerge<'a> {
 /// [`MemInternalMerge`] first).
 pub(crate) struct MemInternalIdx<'a> {
     map: MemInternalRange<'a>,
-    idx: std::iter::Peekable<Box<dyn Iterator<Item = (&'a Bytes, &'a usize)> + 'a>>,
+    /// Concrete single-shard `BTreeMap` range (RFC-0054 P1.3: no Box and no
+    /// per-bound `Bytes` clones — the gate in `iter_internal_iter_at` only
+    /// reaches here when the bounds pin one CF shard).
+    idx: std::iter::Peekable<std::collections::btree_map::Range<'a, TailIdxKey, usize>>,
     tail: &'a [Version],
 }
 
@@ -207,7 +210,11 @@ impl<'a> MemInternalIdx<'a> {
     /// the idx side holds one entry per user.
     fn step_user(&mut self, user: &[u8]) {
         self.map.step_user(user);
-        while self.idx.peek().is_some_and(|(uk, _)| uk.as_ref() == user) {
+        while self
+            .idx
+            .peek()
+            .is_some_and(|((_, _, uk), _)| uk.as_ref() == user)
+        {
             self.idx.next();
         }
     }
@@ -240,17 +247,17 @@ impl<'a> Iterator for MemInternalIdx<'a> {
         let tail_item = self
             .idx
             .peek()
-            .map(|(_, &i)| (&self.tail[i].key, &self.tail[i].value));
+            .map(|((_, _, _), &i)| (&self.tail[i].key, &self.tail[i].value));
         match (self.map.peek(), tail_item) {
             (None, None) => None,
             (Some(_), None) => self.map.next(),
             (None, Some(_)) => {
-                let (_, &i) = self.idx.next()?;
+                let ((_, _, _), &i) = self.idx.next()?;
                 Some((&self.tail[i].key, &self.tail[i].value))
             }
             (Some(m), Some(t)) => {
                 if t.0 < m.0 {
-                    let (_, &i) = self.idx.next()?;
+                    let ((_, _, _), &i) = self.idx.next()?;
                     Some((&self.tail[i].key, &self.tail[i].value))
                 } else {
                     self.map.next()
@@ -390,6 +397,26 @@ fn bound_cf_prefix(b: Bound<&[u8]>) -> Option<&[u8]> {
     }
 }
 
+/// Byte bound → exact `(pack32, empty)` class-floor bound for keys ≤ 32
+/// bytes — no `Bytes` clone. `pack32` is injective there, and the only
+/// >32-byte keys sharing the class extend the bound with zero padding,
+/// which sorts strictly after it — so the floor admits exactly the same
+/// entries as `(pack32, key)` for both `Included` and `Excluded` (see
+/// `pack32`).
+fn class_floor(b: Bound<&[u8]>) -> Bound<TailIdxKey> {
+    match b {
+        Bound::Included(k) if k.len() <= 32 => {
+            let (p0, p1) = pack32(k);
+            Bound::Included((p0, p1, Bytes::new()))
+        }
+        Bound::Excluded(k) if k.len() <= 32 => {
+            let (p0, p1) = pack32(k);
+            Bound::Excluded((p0, p1, Bytes::new()))
+        }
+        other => packed_bound(other),
+    }
+}
+
 /// [`InternalKey`] order on `(seq, kind)` only (user key already equal).
 fn version_newer(a: &Version, b: &Version) -> bool {
     a.key.sequence > b.key.sequence || (a.key.sequence == b.key.sequence && a.key.kind > b.key.kind)
@@ -480,32 +507,6 @@ impl MemTable {
             .take_while(|(&(ref q0, ref q1, _), _)| *q0 == p0 && *q1 == p1)
             .find(|&((_, _, ref k), _)| k.as_ref() == user_key)
             .map(|(_, v)| v)
-    }
-
-    /// All `(user_key, newest tail index)` in `[start, end)` across every
-    /// shard — exact for any bounds (a prefix range like `["u/03",
-    /// "u/04")` spans two shards; F219: returning an empty range here made
-    /// `last_visible_under_prefix` drop all tail keys of the prefix).
-    /// Order is NOT globally sorted across shards (NUL-less kernel keys
-    /// share the empty shard) — callers that need order must sort.
-    fn tail_idx_range<'a>(
-        &'a self,
-        start: Bound<&'a [u8]>,
-        end: Bound<&'a [u8]>,
-    ) -> Box<dyn Iterator<Item = (&'a Bytes, &'a usize)> + 'a> {
-        let lo = packed_bound(start);
-        let hi = packed_bound(end);
-        Box::new(
-            self.tail_idx
-                .values()
-                .flat_map(move |m| {
-                    // Clone per shard: the returned iterator owns `lo`/`hi`
-                    // while each shard's range borrows its own copy
-                    // (refcount bumps only).
-                    m.range((lo.clone(), hi.clone()))
-                })
-                .map(|((_, _, k), i)| (k, i)),
-        )
     }
 
     /// Fold [`Self::tail`] into the BTree (SST write / fold / tests).
@@ -1059,18 +1060,30 @@ impl MemTable {
         if self.tail.is_empty() || snapshot < self.tail_max_seq {
             return self.iter_internal_iter(start, end);
         }
-        // Cross-CF / unbounded range cannot use a single shard cursor.
-        match (bound_cf_prefix(start), bound_cf_prefix(end)) {
-            (Some(a), Some(b)) if a != b => return self.iter_internal_iter(start, end),
-            (None, _) | (_, None) if self.tail_idx.len() > 1 => {
-                return self.iter_internal_iter(start, end);
+        // Single CF shard: a non-empty `cf\0` prefix on BOTH bounds pins the
+        // range inside that shard's key space (shard keys are exactly
+        // `cf\0…`; any key of another shard sorts outside `cf\0…`).
+        // Empty-prefix bounds (kernel keys without NUL) and unbounded bounds
+        // are only safe over a one-shard index — a range like `["d/m/",
+        // "d/m0")` has no NUL, yet admits `d/m/\0…` keys that live in the
+        // "d/m/" shard (F220: the empty shard missed them and the scan
+        // silently returned less). Anything else takes the sorted fallback.
+        let shard = match (bound_cf_prefix(start), bound_cf_prefix(end)) {
+            (Some(a), Some(b))
+                if a == b && !a.is_empty() && a.len() < 32 =>
+            {
+                self.tail_idx.get(a)
             }
-            _ => {}
-        }
+            _ if self.tail_idx.len() == 1 => self.tail_idx.values().next(),
+            _ => None,
+        };
+        let Some(shard) = shard else {
+            return self.iter_internal_iter(start, end);
+        };
         let map = self.iter_internal_range_cursor(start, end);
         MemInternalIter::Idx(MemInternalIdx {
             map,
-            idx: self.tail_idx_range(start, end).peekable(),
+            idx: shard.range((class_floor(start), class_floor(end))).peekable(),
             tail: &self.tail,
         })
     }

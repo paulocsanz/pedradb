@@ -22,7 +22,9 @@
 //! `compact_range_opt`. Prefix extractor / UDT comparator are accepted
 //! no-ops. Versioned CF timestamps remain a gap.
 
-use super::{ColumnFamily, Error, KeyCodec, Result, DB, DEFAULT_CF};
+use super::{
+    ColumnFamily, Error, KeyCodec, Result, DB, DBRawIteratorWithThreadMode, DEFAULT_CF,
+};
 use parking_lot::Mutex;
 use pedradb_core::{CoreError, Env, OccTransaction};
 use pedradb_io_uring::IoUringEnv;
@@ -349,6 +351,12 @@ impl<'a, E: Env> Transaction<'a, E> {
 
     /// rust-rocksdb raw iterator at this txn's snapshot (SurrealDB scan).
     ///
+    /// Rocks `Transaction` iterators see the transaction's own uncommitted
+    /// writes (write-batch overlay, WriteBatchWithIndex semantics): a
+    /// staged put must be returned by a mid-txn scan and a staged delete
+    /// must hide the committed key (F183). The merged iterator overlays
+    /// `staged_entries` on the snapshot read.
+    ///
     /// Untracked OCC read (see module policy): unlike Rocks
     /// `Transaction::NewIterator`, keys yielded here do not enter the read
     /// set — a later `commit()` does not conflict on them.
@@ -356,9 +364,16 @@ impl<'a, E: Env> Transaction<'a, E> {
     pub fn raw_iterator_opt(
         &self,
         ro: super::ReadOptions,
-    ) -> super::DBRawIteratorWithThreadMode<'_, Self, E> {
-        let seq = self.occ.lock().snapshot();
-        super::DBRawIteratorWithThreadMode::open(self.db, seq, &ro)
+    ) -> TxnRawIterator<'_, Self, E> {
+        let (seq, staged) = {
+            let g = self.occ.lock();
+            (g.snapshot(), g.staged_entries())
+        };
+        let staged = staged
+            .into_iter()
+            .map(|(k, v)| (k.to_vec(), v.map(|b| b.to_vec())))
+            .collect();
+        TxnRawIterator::new(self.db, seq, staged, ro)
     }
 
     /// rust-rocksdb `snapshot()` — sequence pin matching this txn's begin.
@@ -404,6 +419,246 @@ impl<'a, E: Env> Transaction<'a, E> {
         let old = std::mem::replace(&mut *g, self.db.inner.begin_occ());
         old.abort();
         Ok(())
+    }
+}
+
+/// Merged raw iterator for [`Transaction`]: the txn's staged writes
+/// (last-write-wins per key, sorted) overlaid on the snapshot read — the
+/// rust-rocksdb `Transaction` iterator contract (F183). Forward operations
+/// (`seek`, `seek_to_first`, `next`) are lazy merge walks; reverse
+/// operations materialize the merged view once (SurrealDB scans only walk
+/// forward; the reverse path is correctness, not speed).
+pub struct TxnRawIterator<'a, D, E: Env = IoUringEnv> {
+    db: DBRawIteratorWithThreadMode<'a, D, E>,
+    /// Sorted, deduped staged entries (`None` = staged delete).
+    staged: Vec<(Vec<u8>, Option<Vec<u8>>)>,
+    idx: usize,
+    /// Which source produced the current head (advance bookkeeping).
+    head_staged: bool,
+    lower: Option<Vec<u8>>,
+    upper: Option<Vec<u8>>,
+    /// Current merged head (forward path).
+    cur: Option<(Vec<u8>, Option<Vec<u8>>)>,
+    /// Materialized merged view (reverse-path only).
+    mat: Option<Vec<(Vec<u8>, Vec<u8>)>>,
+    mat_at: usize,
+}
+
+impl<'a, D, E: Env> TxnRawIterator<'a, D, E> {
+    pub(crate) fn new(
+        db: &'a super::DB<E>,
+        seq: pedradb_core::SequenceNumber,
+        mut staged: Vec<(Vec<u8>, Option<Vec<u8>>)>,
+        ro: super::ReadOptions,
+    ) -> Self {
+        staged.sort_by(|a, b| a.0.cmp(&b.0));
+        staged.dedup_by(|a, b| a.0 == b.0);
+        let db = super::DBRawIteratorWithThreadMode::open(db, seq, &ro);
+        Self {
+            db,
+            staged,
+            idx: 0,
+            head_staged: false,
+            lower: ro.lower,
+            upper: ro.upper,
+            cur: None,
+            mat: None,
+            mat_at: 0,
+        }
+    }
+
+    fn in_window(&self, k: &[u8]) -> bool {
+        if let Some(lo) = &self.lower {
+            if k < lo.as_slice() {
+                return false;
+            }
+        }
+        if let Some(hi) = &self.upper {
+            if k >= hi.as_slice() {
+                return false;
+            }
+        }
+        true
+    }
+
+    /// Merged head: smallest visible key from db walk + staged overlay.
+    fn head(&mut self) -> Option<(Vec<u8>, Option<Vec<u8>>)> {
+        loop {
+            let db_k = self.db.key().map(<[u8]>::to_vec);
+            let st = self.staged.get(self.idx);
+            match (db_k, st) {
+                (None, None) => return None,
+                (Some(dk), None) => {
+                    if !self.in_window(&dk) {
+                        return None;
+                    }
+                    self.head_staged = false;
+                    return Some((dk, self.db.value().map(<[u8]>::to_vec)));
+                }
+                (None, Some((sk, sv))) => {
+                    let (sk, sv) = (sk.clone(), sv.clone());
+                    self.idx += 1;
+                    if !self.in_window(&sk) {
+                        continue;
+                    }
+                    if sv.is_some() {
+                        self.head_staged = true;
+                        return Some((sk, sv));
+                    }
+                }
+                (Some(dk), Some((sk, sv))) => {
+                    if sk.as_slice() < dk.as_slice() {
+                        let (sk, sv) = (sk.clone(), sv.clone());
+                        self.idx += 1;
+                        if sv.is_some() && self.in_window(&sk) {
+                            self.head_staged = true;
+                            return Some((sk, sv));
+                        }
+                        continue;
+                    }
+                    if sk.as_slice() > dk.as_slice() {
+                        if !self.in_window(&dk) {
+                            return None;
+                        }
+                        self.head_staged = false;
+                        return Some((dk, self.db.value().map(<[u8]>::to_vec)));
+                    }
+                    // Equal: staged shadows db (put or delete).
+                    let sv = sv.clone();
+                    self.idx += 1;
+                    self.db.next();
+                    if sv.is_some() && self.in_window(&dk) {
+                        self.head_staged = true;
+                        return Some((dk, sv));
+                    }
+                }
+            }
+        }
+    }
+
+    /// rust-rocksdb: iterator is usable.
+    #[must_use]
+    pub fn valid(&self) -> bool {
+        if let Some(m) = &self.mat {
+            return self.mat_at < m.len();
+        }
+        self.cur.is_some()
+    }
+
+    /// Current key.
+    #[must_use]
+    pub fn key(&self) -> Option<&[u8]> {
+        if let Some(m) = &self.mat {
+            return m.get(self.mat_at).map(|(k, _)| k.as_slice());
+        }
+        self.cur.as_ref().map(|(k, _)| k.as_slice())
+    }
+
+    /// Current value.
+    #[must_use]
+    pub fn value(&self) -> Option<&[u8]> {
+        if let Some(m) = &self.mat {
+            return m.get(self.mat_at).map(|(_, v)| v.as_slice());
+        }
+        self.cur.as_ref().and_then(|(_, v)| v.as_deref())
+    }
+
+    /// Seek ≥ `key`.
+    pub fn seek<K: AsRef<[u8]>>(&mut self, key: K) {
+        let k = key.as_ref();
+        self.mat = None;
+        self.db.seek(k);
+        self.idx = self
+            .staged
+            .partition_point(|(sk, _)| sk.as_slice() < k);
+        self.advance_head();
+    }
+
+    /// Seek first key.
+    pub fn seek_to_first(&mut self) {
+        self.mat = None;
+        self.db.seek_to_first();
+        self.idx = 0;
+        self.advance_head();
+    }
+
+    /// Next visible key (ascending).
+    pub fn next(&mut self) {
+        if let Some(m) = &mut self.mat {
+            if self.mat_at < m.len() {
+                self.mat_at += 1;
+            }
+            return;
+        }
+        if let Some(cur) = self.cur.take() {
+            if self.head_staged {
+                // Staged key produced the head; equal db key (if any) was
+                // already consumed inside `head`.
+                let _ = cur;
+            } else {
+                self.db.next();
+            }
+        }
+        self.advance_head();
+    }
+
+    fn advance_head(&mut self) {
+        self.cur = self.head();
+    }
+
+    /// Last error (Pedra fails closed on open).
+    pub fn status(&self) -> Result<()> {
+        self.db.status()
+    }
+
+    fn materialize(&mut self) {
+        if self.mat.is_some() {
+            return;
+        }
+        // Full merged forward walk (reverse path: correctness over speed).
+        let mut out = Vec::new();
+        let mut saved = std::mem::take(&mut self.cur);
+        let saved_idx = self.idx;
+        let saved_head_staged = self.head_staged;
+        self.seek_to_first();
+        while let Some((k, v)) = self.cur.clone() {
+            if let Some(v) = v {
+                out.push((k, v));
+            }
+            self.next();
+        }
+        self.cur = saved.take();
+        self.idx = saved_idx;
+        self.head_staged = saved_head_staged;
+        self.mat = Some(out);
+        self.mat_at = 0;
+    }
+
+    /// Seek last key (reverse path — materialized).
+    pub fn seek_to_last(&mut self) {
+        self.materialize();
+        if let Some(m) = &self.mat {
+            self.mat_at = m.len().saturating_sub(1);
+        }
+    }
+
+    /// Previous key (reverse path — materialized).
+    pub fn prev(&mut self) {
+        self.materialize();
+        if self.mat_at > 0 {
+            self.mat_at -= 1;
+        } else {
+            self.mat_at = usize::MAX; // exhausted
+        }
+    }
+
+    /// Seek ≤ `key` (reverse path — materialized).
+    pub fn seek_for_prev<K: AsRef<[u8]>>(&mut self, key: K) {
+        self.materialize();
+        let k = key.as_ref();
+        if let Some(m) = &self.mat {
+            self.mat_at = m.partition_point(|(mk, _)| mk.as_slice() <= k).saturating_sub(1);
+        }
     }
 }
 

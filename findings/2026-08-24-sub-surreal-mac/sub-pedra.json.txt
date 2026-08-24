@@ -1,0 +1,7 @@
+sub-bench ops=2000 records=1024 dir=/var/folders/q_/5tskc6890_z2pk73666wb_m40000gn/T/sub-bench-5346
+seed 1024 records in 0.0s
+leg point_read qps 999946
+leg point_write qps 495811
+leg scan qps 784870
+leg doc_txn qps 249535
+SUB_BENCH_JSON {"engine":"unknown","ops":2000,"records":1024,"seconds":8.0,"legs":[{"name":"point_read","qps":999946.2447502823},{"name":"point_write","qps":495811.2241558399},{"name":"scan","qps":784869.7839516333},{"name":"doc_txn","qps":249535.42981816037}]}

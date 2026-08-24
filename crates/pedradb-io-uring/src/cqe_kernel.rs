@@ -95,6 +95,7 @@ pub static F208_WAITMORE_AFTER_SUBMIT_ERR: std::sync::atomic::AtomicU64 =
 /// `submit_ok` is kept so as-is tests can contrast F203/F208 and so the
 /// F208 counter can see a failed submit. Production still WaitMore either
 /// way: a pushed SQE is in flight until its CQE is harvested.
+#[cfg_attr(not(test), allow(unused_variables))]
 pub fn submit_complete_act(submit_ok: bool, harvested: bool) -> SubmitCompleteAct {
     if harvested {
         SubmitCompleteAct::UseHarvested

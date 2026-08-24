@@ -1,0 +1,5 @@
+[workspace]
+resolver = "2"
+members = ["sub-bench"]
+# Peer: real RocksDB from crates.io (the official parity peer, sync=false
+# default is set inside SurrealDB's WriteOptions already).

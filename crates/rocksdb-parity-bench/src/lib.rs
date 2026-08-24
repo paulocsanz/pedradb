@@ -140,6 +140,11 @@ pub const COMPARE_SHAPES: &[&str] = &[
     "rockstore_widecol_rw",
     "oxigraph_spo_lookup",
     "oxigraph_triple_put",
+    // RFC-0059 anti-overindex: uniform (no zipf hot set) + 2^20-key working
+    // set — the official shapes' caches and windows must generalize.
+    "ycsb_b_unif",
+    "ycsb_c_unif",
+    "ycsb_c_big",
 ];
 
 /// Length of the RFC-0041 official prefix of [`COMPARE_SHAPES`].
@@ -2013,6 +2018,65 @@ impl YcsbRunner {
             "[rocks-parity] {name} done ops={cfg_ops} updates={updates} inserts={inserts} scans={scan_ops} errors={errors}"
         );
         block
+    }
+
+    /// RFC-0059 anti-overindex: same mix as [`Self::run`] but with the
+    /// distribution forced (uniform = no zipf hot set — the TLS/point caches
+    /// cannot lean on a hot working set). Existing callers stay zipf-default.
+    pub fn run_dist<E: Engine>(
+        &mut self,
+        e: &E,
+        name: &str,
+        read_pct: u64,
+        insert_pct: u64,
+        rmw: bool,
+        scans: bool,
+        uniform: bool,
+    ) -> String {
+        let saved = self.cfg.zipfian;
+        self.cfg.zipfian = !uniform;
+        let block = self.run(e, name, read_pct, insert_pct, rmw, scans);
+        self.cfg.zipfian = saved;
+        block
+    }
+
+    /// RFC-0059 anti-overindex: 100% uniform GETs over a 2^20-key working
+    /// set (≈1000× the official `records=1024`) — cache sizing and read path
+    /// must generalize past the official hot windows. Seed is untimed; the
+    /// measured loop is `cfg.ops` uniform point reads. Skip with
+    /// `ROCKS_PARITY_BIG=0`.
+    pub fn run_c_big<E: Engine>(&mut self, e: &E) -> Option<String> {
+        if std::env::var("ROCKS_PARITY_BIG").as_deref() == Ok("0") {
+            return None;
+        }
+        let cfg_ops = self.cfg.ops;
+        let big: usize = 1 << 20;
+        let payload = self.cfg.payload;
+        let yval = vec![b'y'; payload];
+        let t0 = std::time::Instant::now();
+        for i in 0..big {
+            let _ = e.put(&ykey(i), &yval);
+        }
+        eprintln!(
+            "[rocks-parity] ycsb_c_big seed {big} keys in {:.1}s (untimed)",
+            t0.elapsed().as_secs_f64()
+        );
+        let mut rng = std::mem::take(&mut self.rng);
+        let mut lats = Vec::with_capacity(cfg_ops);
+        let mut errors = 0u64;
+        let t0 = Instant::now();
+        for _ in 0..cfg_ops {
+            let t = Instant::now();
+            let i = (xorshift(&mut rng) as usize) % big;
+            if e.get_probe(&ykey(i)).is_err() {
+                errors += 1;
+            }
+            lats.push(ms(t));
+        }
+        self.rng = rng;
+        let block = summarize("ycsb_c_big", cfg_ops, t0.elapsed(), &mut lats);
+        eprintln!("[rocks-parity] ycsb_c_big done (uniform 2^20 keyspace) errors={errors}");
+        Some(block)
     }
 
     /// RFC-0037 P2.2: multi-client A/F/overwrite shapes over a fixed seeded

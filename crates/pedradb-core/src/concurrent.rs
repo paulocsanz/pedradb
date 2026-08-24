@@ -2282,10 +2282,27 @@ impl<E: Env> ConcurrentDb<E> {
         read_set: impl IntoIterator<Item = Bytes>,
         ops: Vec<BatchOp>,
     ) -> Result<SequenceNumber> {
+        self.apply_batch_occ_with(snapshot, read_set, ops, WriteOptions::default())
+    }
+
+    /// [`Self::apply_batch_occ`] with per-commit durability. RFC-0054 P2.1:
+    /// `WriteOptions::sync` is honored exactly like `put_with` — `no_sync`
+    /// commits the WAL record without a barrier (caller groups via
+    /// [`Self::sync`]); `None` keeps the open-time default.
+    ///
+    /// # Errors
+    /// [`CoreError::TransactionConflict`], snapshot-too-old, or WAL I/O.
+    pub fn apply_batch_occ_with(
+        &self,
+        snapshot: SequenceNumber,
+        read_set: impl IntoIterator<Item = Bytes>,
+        ops: Vec<BatchOp>,
+        opts: WriteOptions,
+    ) -> Result<SequenceNumber> {
         if ops.is_empty() {
             return Ok(self.last_sequence());
         }
-        let do_sync = self.resolve_sync(WriteOptions::default());
+        let do_sync = self.resolve_sync(opts);
         let keys: Vec<Bytes> = read_set.into_iter().collect();
         self.writes
             .submit_occ(&self.inner, ops, do_sync, snapshot, keys)
