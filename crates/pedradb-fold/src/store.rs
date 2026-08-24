@@ -2,7 +2,7 @@
 
 use crate::{FoldCursor, FoldError, FoldMetrics, FoldRole, FoldUpdate, Result};
 use bytes::Bytes;
-use pedradb_core::{prefix_exclusive_end, BatchOp, Db, Env, OpenOptions};
+use pedradb_core::{prefix_exclusive_end, BatchOp, Db, Env, OpenOptions, StdEnv};
 use pedradb_io_uring::IoUringEnv;
 use std::path::{Path, PathBuf};
 
@@ -60,6 +60,19 @@ impl PedraFold<IoUringEnv> {
     /// Pedra open.
     pub fn open_role(path: &Path, role: FoldRole) -> Result<(FoldCursor, Self)> {
         Self::open_role_env(path, role, IoUringEnv::default())
+    }
+}
+
+impl PedraFold<StdEnv> {
+    /// RFC-0058 P1.1 verified profile: `StdEnv` pinned — no io_uring ring.
+    /// The file options of [`Self::open_role_env`] are already the profile
+    /// composition (sync forced, strongest WAL data class, fail-closed
+    /// recovery); fold keeps auto-flush off (replay is batch-apply).
+    ///
+    /// # Errors
+    /// Pedra open.
+    pub fn open_verified(path: &Path, role: FoldRole) -> Result<(FoldCursor, Self)> {
+        Self::open_role_env(path, role, StdEnv)
     }
 }
 
@@ -357,6 +370,41 @@ fn keyset_key(user: &[u8]) -> Vec<u8> {
 #[cfg(test)]
 mod keyset_tests {
     use super::*;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_dir() -> std::path::PathBuf {
+        static N: AtomicU64 = AtomicU64::new(0);
+        let n = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let i = N.fetch_add(1, Ordering::Relaxed);
+        let d = std::env::temp_dir().join(format!("pedra-fold-vrf-{n}-{i}"));
+        let _ = std::fs::remove_dir_all(&d);
+        d
+    }
+
+    /// RFC-0058 P1.1: `open_verified` pins `StdEnv` (the type is the
+    /// no-ring assertion); apply + cursor + get work unchanged.
+    #[test]
+    fn open_verified_pins_std_env() {
+        use crate::{FoldRole, FoldUpdate};
+        let dir = temp_dir();
+        let (cursor, mut fold): (FoldCursor, PedraFold<StdEnv>) =
+            PedraFold::open_verified(&dir, FoldRole::Storage).unwrap();
+        assert_eq!(cursor.seq(), 0);
+        let batch = vec![FoldUpdate::Put {
+            key: b"k1".to_vec(),
+            value: b"v1".to_vec(),
+            seq: 7,
+        }];
+        fold.apply_updates(&batch, FoldCursor(7)).unwrap();
+        assert_eq!(fold.cursor_value().seq(), 7);
+        assert_eq!(fold.get_value(b"k1").unwrap().as_deref(), Some(b"v1".as_ref()));
+        drop(fold);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn keyset_key_not_prefix_of_sibling_user() {

@@ -111,6 +111,11 @@ struct WriteGroup {
     /// lock directly to the next waiter — one wake per handoff, no
     /// convoy. Prototype lever; the quiet arbiter decides.
     write_fair: bool,
+    /// RFC-0058 P0.1 (verified profile): one-way pin forcing the
+    /// single-writer critical section for **every** commit — no
+    /// leader/member merge, no shared fsync. Set once by
+    /// [`ConcurrentDb::pin_verified`]; never cleared.
+    lone_only: AtomicBool,
     /// RFC-0045 P0.1: lock-wait accumulation for the async bypass
     /// (`PEDRA_WRITE_PHASE_STATS=1`); `None` when the env is unset.
     phase_stats: Option<Arc<crate::db::WritePhaseStats>>,
@@ -238,6 +243,7 @@ impl WriteGroup {
                     _ => None,
                 })
                 .unwrap_or(false),
+            lone_only: AtomicBool::new(false),
             phase_stats: None,
         }
     }
@@ -329,6 +335,25 @@ impl WriteGroup {
         let active = self.active.load(Ordering::Relaxed);
         if active > 1 {
             self.last_multi_ns.store(Self::now_ns(), Ordering::Relaxed);
+        }
+
+        // RFC-0058 P0.1 (verified profile): every commit is a single-writer
+        // critical section — no leader/member merge, no shared fsync. Sync
+        // and OCC writes take `lone_commit` (OCC validated under the write
+        // lock — first-committer-wins holds); plain async takes the write
+        // lock itself (the un-merged bypass shape). The merge returns only
+        // with the group-commit kernel (RFC-0057 P2.1 / RFC-0058 P2.1).
+        if self.lone_only.load(Ordering::Relaxed) {
+            let result = if occ.is_none() && !do_sync {
+                db.write().commit_async_ops(ops)
+            } else {
+                Self::lone_commit(self, db, ops, do_sync, occ)
+            };
+            self.batches.fetch_add(1, Ordering::Relaxed);
+            self.batch_ops.fetch_add(1, Ordering::Relaxed);
+            self.active.fetch_sub(1, Ordering::Relaxed);
+            self.mark_complete();
+            return result;
         }
 
         // Lone writer (parity bench, sequential client): skip the mpsc hop.
@@ -738,10 +763,7 @@ impl WriteGroup {
         {
             let seqs: Vec<u64> = results.iter().filter_map(|r| r.as_ref().ok().copied()).collect();
             if let (Some(lo), Some(hi)) = (seqs.iter().copied().min(), seqs.iter().copied().max()) {
-                crate::pct_hooks::GROUP_RANGES
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner())
-                    .push((lo, hi));
+                crate::pct_hooks::record_group_range(lo, hi);
             }
         }
         let wal = guard.wal_arc();
@@ -846,6 +868,18 @@ impl ConcurrentDb<StdEnv> {
     /// Same as [`Db::open_with`].
     pub fn open_with(path: impl AsRef<Path>, opts: OpenOptions) -> Result<Self> {
         Ok(Self::from_db(Db::open_with(path, opts)?))
+    }
+
+    /// Open on the real filesystem with the **verified profile**
+    /// (RFC-0058 P0.1): [`OpenOptions::verified`] file options plus the
+    /// lone-commit-only group pin.
+    ///
+    /// # Errors
+    /// Same as [`Db::open_with`].
+    pub fn open_verified(path: impl AsRef<Path>) -> Result<Self> {
+        let db = Self::open_with(path, OpenOptions::verified())?;
+        db.pin_verified();
+        Ok(db)
     }
 }
 
@@ -1537,6 +1571,26 @@ impl<E: Env> ConcurrentDb<E> {
         self.writes
             .catchup_window_us
             .store(micros, Ordering::Relaxed);
+    }
+
+    /// RFC-0058 P0.1: one-way pin of the verified group policy — from now
+    /// on every commit is a **single-writer critical section** (no
+    /// leader/member merge, no shared fsync) and the catch-up window is
+    /// forced to 0. There is deliberately no un-pin: the composition is
+    /// declared, not toggled. Prefer [`Self::open_verified`] /
+    /// [`crate::VerifiedProfile::open_with_env`], which pin at open.
+    pub fn pin_verified(&self) {
+        self.writes.lone_only.store(true, Ordering::Release);
+        self.writes
+            .catchup_window_us
+            .store(0, Ordering::Relaxed);
+    }
+
+    /// Whether the verified group policy is pinned
+    /// (see [`Self::pin_verified`]).
+    #[must_use]
+    pub fn is_verified(&self) -> bool {
+        self.writes.lone_only.load(Ordering::Acquire)
     }
 
     /// Group fsync for prior `WriteOptions::no_sync` writes (write lock).
@@ -3059,7 +3113,9 @@ mod tests {
             .get_at(crate::db::Snapshot::at(pinned_seq), b"hot")
             .unwrap();
         assert_eq!(got.as_deref(), Some(&b"v49"[..]), "pin read is exact");
-        drop(pin);
+        // `SnapshotPin` is a Copy handle — dropping it releases nothing;
+        // the real unpin goes through the registry.
+        db.release_snapshot_pin(pin);
         // With the pin gone the next fold can collapse under it.
         assert!(db.fold_parked_once_off_lock() || db.parked_unflushed_count() < 2);
         let _ = fs::remove_dir_all(&dir);
@@ -3076,7 +3132,7 @@ mod tests {
             db.put(b"hot", format!("v{i}").into_bytes()).unwrap();
         }
         let mut tx = db.begin_occ();
-        let tx_snapshot = tx.snapshot();
+        let _tx_snapshot = tx.snapshot();
         for i in 50..100u64 {
             db.put(b"hot", format!("v{i}").into_bytes()).unwrap();
         }
@@ -4914,6 +4970,184 @@ mod tests {
         );
         // Apply still happens under the leader write lock (group commit), not a
         // concurrent memtable — that ceiling is RFC-0045 P2.1, not this P0.
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0058 P0.1/P0.2: the verified profile forces the composition.
+    /// Same barrier-shaped concurrent workload as the group-amortization
+    /// test above (which proves this workload merges in full mode):
+    /// under the pin **no writer ever queues** (queued == 0) and every
+    /// submit is its own single-writer commit (batches == submits); all
+    /// writes survive reopen (silent_wrong = 0).
+    #[test]
+    fn verified_profile_forces_safe_composition() {
+        let dir = temp_dir();
+        let n = 4usize;
+        let ops = 25usize;
+        let db = Arc::new(ConcurrentDb::open_verified(&dir).unwrap());
+        assert!(db.is_verified());
+        assert_eq!(db.write_group_catchup_window(), Duration::ZERO);
+        let barrier = Arc::new(std::sync::Barrier::new(n));
+        std::thread::scope(|s| {
+            for t in 0..n {
+                let db = Arc::clone(&db);
+                let barrier = Arc::clone(&barrier);
+                s.spawn(move || {
+                    barrier.wait();
+                    for i in 0..ops {
+                        let k = format!("v/{t}/{i}");
+                        if t % 2 == 0 {
+                            db.put(k.as_bytes(), b"plain").unwrap();
+                        } else {
+                            // OCC txs take the lone path too — validation
+                            // under the write lock keeps first-committer-wins.
+                            let mut tx = db.begin_occ();
+                            tx.put(k.as_bytes(), b"occ").unwrap();
+                            tx.commit().unwrap();
+                        }
+                    }
+                });
+            }
+        });
+        let (submits, queued, batches, batch_ops) = db.write_group_stats();
+        assert_eq!(submits, (n * ops) as u64);
+        assert_eq!(batch_ops, (n * ops) as u64);
+        assert_eq!(queued, 0, "verified mode must never merge writers");
+        assert_eq!(
+            batches, submits,
+            "every commit is its own single-writer batch"
+        );
+        let db = Arc::try_unwrap(db)
+            .map_err(|_| "threads still hold the db")
+            .unwrap();
+        db.close().unwrap();
+
+        // Reopen (verified) — silent_wrong oracle: every acked write visible.
+        let db = ConcurrentDb::open_verified(&dir).unwrap();
+        for t in 0..n {
+            for i in 0..ops {
+                let k = format!("v/{t}/{i}");
+                let want = if t % 2 == 0 { &b"plain"[..] } else { &b"occ"[..] };
+                assert_eq!(db.get(k.as_bytes()).as_deref(), Some(want), "key {k}");
+            }
+        }
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0058 P0.2 (async half): `WriteOptions::no_sync` under the pin.
+    /// Async Ok never promises durability before a barrier — after `close()`
+    /// the tail must drain (existing full-mode contract), and after an
+    /// explicit [`Self::sync`] barrier a process-style kill (no close) must
+    /// keep the writes. Stats prove the async path never merges either.
+    #[test]
+    fn verified_async_close_and_barrier_reopen() {
+        let dir = temp_dir();
+        let payload = vec![b'a'; 1024];
+        {
+            // Phase 1: 8 × 1 KiB ≪ 64 KiB — nothing hits the file until close.
+            let db = ConcurrentDb::open_verified(&dir).unwrap();
+            for i in 0..8u8 {
+                db.put_with([b't', i], &payload, WriteOptions::no_sync())
+                    .unwrap();
+            }
+            let (submits, queued, batches, batch_ops) = db.write_group_stats();
+            assert_eq!(submits, 8);
+            assert_eq!(queued, 0, "verified async must not merge");
+            assert_eq!(batches, submits);
+            assert_eq!(batch_ops, 8);
+            db.close().unwrap();
+        }
+        {
+            let db = ConcurrentDb::open_verified(&dir).unwrap();
+            for i in 0..8u8 {
+                assert_eq!(
+                    db.get(&[b't', i]).as_deref(),
+                    Some(payload.as_slice()),
+                    "close must drain the async tail, t/{i}"
+                );
+            }
+            // Phase 2: fresh async tail, explicit sync() barrier, then a
+            // process-style kill (no close drain). Barrier ⇒ durable.
+            for i in 8..12u8 {
+                db.put_with([b't', i], &payload, WriteOptions::no_sync())
+                    .unwrap();
+            }
+            let (submits, queued, batches, _) = db.write_group_stats();
+            assert_eq!(submits, 4);
+            assert_eq!(queued, 0);
+            assert_eq!(batches, submits);
+            db.sync().unwrap();
+            std::mem::forget(db);
+        }
+        let db = ConcurrentDb::open_verified(&dir).unwrap();
+        for i in 0..12u8 {
+            assert_eq!(
+                db.get(&[b't', i]).as_deref(),
+                Some(payload.as_slice()),
+                "barriered async write lost, t/{i}"
+            );
+        }
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0058 P0.2 (async half, concurrent): barrier-shaped mix of sync
+    /// and `no_sync` writers under the pin — same workload shape the
+    /// group-amortization test merges in full mode. Verified: no writer
+    /// ever queues; after close every key (sync-acked **and** async) is
+    /// visible on reopen with the right value.
+    #[test]
+    fn verified_async_concurrent_never_merges() {
+        let dir = temp_dir();
+        let n = 4usize;
+        let ops = 25usize;
+        let db = Arc::new(ConcurrentDb::open_verified(&dir).unwrap());
+        let barrier = Arc::new(std::sync::Barrier::new(n));
+        std::thread::scope(|s| {
+            for t in 0..n {
+                let db = Arc::clone(&db);
+                let barrier = Arc::clone(&barrier);
+                s.spawn(move || {
+                    barrier.wait();
+                    for i in 0..ops {
+                        let k = format!("va/{t}/{i}");
+                        let v = [(t as u8), (i as u8), 7];
+                        // Every 5th write syncs — a natural barrier that
+                        // also flushes earlier async WAL frames.
+                        let w = if (t + i) % 5 == 0 {
+                            WriteOptions::sync()
+                        } else {
+                            WriteOptions::no_sync()
+                        };
+                        db.put_with(k.as_bytes(), &v, w).unwrap();
+                    }
+                });
+            }
+        });
+        let (submits, queued, batches, batch_ops) = db.write_group_stats();
+        assert_eq!(submits, (n * ops) as u64);
+        assert_eq!(batch_ops, (n * ops) as u64);
+        assert_eq!(queued, 0, "verified async must never merge writers");
+        assert_eq!(batches, submits);
+        let db = Arc::try_unwrap(db)
+            .map_err(|_| "threads still hold the db")
+            .unwrap();
+        db.close().unwrap();
+
+        let db = ConcurrentDb::open_verified(&dir).unwrap();
+        for t in 0..n {
+            for i in 0..ops {
+                let k = format!("va/{t}/{i}");
+                let want = [(t as u8), (i as u8), 7];
+                assert_eq!(
+                    db.get(k.as_bytes()).as_deref(),
+                    Some(want.as_slice()),
+                    "key {k}"
+                );
+            }
+        }
+        db.close().unwrap();
         let _ = fs::remove_dir_all(&dir);
     }
 }

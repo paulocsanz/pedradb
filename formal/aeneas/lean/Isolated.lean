@@ -126,7 +126,7 @@ theorem isolated_id_matches_loop_spec
         Nat.lt_of_le_of_ne hj_key hneLen.symm
       have hji : j.val < key.val.length := by simp [hj_eq]; exact hltK
       step as ⟨ next, hnext ⟩
-      simp [spec_ok]
+      simp
       constructor
       · intro hb
         refine ⟨?_, Or.inr ⟨hltK, ?_⟩⟩
@@ -189,7 +189,7 @@ theorem isolated_id_matches_as_is_loop_spec
     · rename_i hneU
       have hne : kb ≠ ib := by
         intro he
-        simp [he, bne_iff_ne] at hneU
+        simp [he] at hneU
       simp [spec_ok]
       intro hok
       have hne' : key.val[j.val] ≠ id.val[j.val] := by

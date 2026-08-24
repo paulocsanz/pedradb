@@ -92,6 +92,10 @@ pub struct RunReport {
     pub steps: Vec<RunStep>,
     /// Bit-stable hash of the grant sequence.
     pub schedule_hash: u64,
+    /// Per-group returned-seq ranges of every atomic group commit in this
+    /// run (group-aware oracle forensics; per-run, so parallel trials in
+    /// one process never interleave).
+    pub group_ranges: Vec<(u64, u64)>,
 }
 
 /// Bit-stable hash over grant sequence (worker + site).
@@ -139,11 +143,6 @@ where
     F: FnOnce(&Yielder) + Send + 'static,
 {
     let ts = Arc::new(Turnstile::new(n));
-    // Forensics start clean per trial (see GROUP_RANGES).
-    pedradb_core::pct_hooks::GROUP_RANGES
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .clear();
     let mut joins = Vec::with_capacity(n);
     for task in 0..n {
         let ts = Arc::clone(&ts);
@@ -193,7 +192,12 @@ where
         j.join().expect("pct worker panicked");
     }
     let schedule_hash = run_steps_hash(&steps);
-    RunReport { steps, schedule_hash }
+    let group_ranges = ts.take_group_ranges();
+    RunReport {
+        steps,
+        schedule_hash,
+        group_ranges,
+    }
 }
 
 #[cfg(test)]
@@ -498,6 +502,382 @@ mod tests {
         );
     }
 
+    /// P0.2 (RFC-0058): PCT over the **verified profile** — same π×disk
+    /// teeth as `pct_disk_fence_three_teeth`, but the DB is pinned
+    /// lone-commit-only, with all three write shapes in the mix: plain
+    /// sync put, OCC tx, and `no_sync` async put. No matter how π
+    /// preempts: no writer ever joins a group (`queued == 0`,
+    /// `batches == submits`), the one-shot EIO fences **at most one**
+    /// writer (the full mode proves 2+ members can share a fence — that
+    /// shape is structurally absent here), outcomes are only ok / fenced /
+    /// refused, every sync-Ok commit survives the reopen (`silent_wrong =
+    /// 0`), and async survivors are never wrong (async Ok promises no
+    /// durability before a barrier — the DB is dropped, not closed).
+    #[test]
+    fn pct_verified_lone_never_merges() {
+        use pedradb_core::{ConcurrentDb, CoreError, OpenOptions, StdEnv, WriteOptions};
+        use pedradb_sim::{FailingEnvArc, FaultKind};
+        use std::sync::Mutex;
+
+        const N: usize = 3;
+        const COMMITS: usize = 3;
+        const AFTER_FS: u64 = 5; // one-shot EIO on the 6th group fsync
+        const SEEDS: u64 = 64;
+        let base = std::env::temp_dir().join(format!("pedra-pct-verified-{}", std::process::id()));
+
+        #[allow(clippy::type_complexity)]
+        let trial = |tag: &str, seed: u64, policy: PiPolicy| {
+            let dir = base.join(format!("{tag}-{seed:03}"));
+            let _ = std::fs::remove_dir_all(&dir);
+            let env = FailingEnvArc::passing();
+            let opts = OpenOptions::verified();
+            let db = ConcurrentDb::open_with_env(&dir, opts, env.clone()).unwrap();
+            db.pin_verified();
+            assert!(db.is_verified());
+            env.arm_with_kind(AFTER_FS, true, FaultKind::SyncFail);
+            let db = std::sync::Arc::new(db);
+
+            let outcomes: std::sync::Arc<Mutex<Vec<(usize, &'static str)>>> =
+                std::sync::Arc::new(Mutex::new(Vec::new()));
+            let report = run_pcts(seed, N, policy, |task| {
+                let db = std::sync::Arc::clone(&db);
+                let outcomes = std::sync::Arc::clone(&outcomes);
+                move |_y: &Yielder| {
+                    for i in 0..COMMITS {
+                        let k = format!("vrf/{task}/{i}");
+                        // Three shapes: sync put / OCC tx / async no_sync put.
+                        let tag = match task % 3 {
+                            0 => match db.put(k.as_bytes(), b"v") {
+                                Ok(()) => "ok",
+                                Err(CoreError::Internal(m))
+                                    if m.starts_with("group wal write/sync failed") =>
+                                {
+                                    "fence"
+                                }
+                                Err(CoreError::DurabilityFenced) => "refused",
+                                Err(e) => Box::leak(format!("{e}").into_boxed_str()),
+                            },
+                            1 => {
+                                let mut tx = db.begin_occ();
+                                tx.put(k.as_bytes(), b"v").unwrap();
+                                match tx.commit() {
+                                    Ok(()) => "ok",
+                                    Err(CoreError::Internal(m))
+                                        if m.starts_with("group wal write/sync failed") =>
+                                    {
+                                        "fence"
+                                    }
+                                    Err(CoreError::DurabilityFenced) => "refused",
+                                    Err(e) => Box::leak(format!("{e}").into_boxed_str()),
+                                }
+                            }
+                            _ => match db.put_with(k.as_bytes(), b"v", WriteOptions::no_sync()) {
+                                // Separate tag: async Ok promises no
+                                // durability before a barrier — the oracle
+                                // below only checks survivors' values.
+                                Ok(()) => "ok_async",
+                                Err(CoreError::DurabilityFenced) => "refused",
+                                Err(e) => Box::leak(format!("{e}").into_boxed_str()),
+                            },
+                        };
+                        outcomes.lock().unwrap().push((task * COMMITS + i, tag));
+                    }
+                }
+            });
+            let mut got = outcomes.lock().unwrap().clone();
+            got.sort_unstable();
+            let fenced = got.iter().filter(|(_, t)| *t == "fence").count();
+            let oks = got.iter().filter(|(_, t)| *t == "ok").count();
+            let async_oks = got.iter().filter(|(_, t)| *t == "ok_async").count();
+            let refused = got.iter().filter(|(_, t)| *t == "refused").count();
+            let other = got.len() - fenced - oks - async_oks - refused;
+            let stats = db.write_group_stats();
+            let tripped = env.tripped();
+            drop(db);
+
+            // silent_wrong oracle: every sync/OCC Ok commit fsynced before
+            // any EIO fence, so all its keys must survive the reopen. Async
+            // Oks promise no durability before a barrier (the DB is dropped,
+            // not closed) — survivors must simply never be wrong.
+            let re = ConcurrentDb::open_with_env(&dir, opts, StdEnv).unwrap();
+            for &(idx, tag) in &got {
+                let (t, i) = (idx / COMMITS, idx % COMMITS);
+                let k = format!("vrf/{t}/{i}");
+                match tag {
+                    "ok" => assert!(
+                        re.get(k.as_bytes()).is_some(),
+                        "silent wrong: ok commit {k} vanished on reopen"
+                    ),
+                    "ok_async" => {
+                        if let Some(v) = re.get(k.as_bytes()) {
+                            assert_eq!(
+                                v.as_ref(),
+                                &b"v"[..],
+                                "async survivor {k} has a wrong value"
+                            );
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            drop(re);
+            let _ = std::fs::remove_dir_all(&dir);
+            (fenced, oks, async_oks, refused, other, tripped, stats, report.schedule_hash)
+        };
+
+        for policy in [PiPolicy::Sequential, PiPolicy::Pct { depth: 2 }] {
+            let mut fenced_total = 0usize;
+            for s in 0..SEEDS {
+                let (fenced, oks, async_oks, refused, other, tripped, stats, _h) =
+                    trial(if matches!(policy, PiPolicy::Sequential) { "seq" } else { "pct" }, s, policy);
+                assert_eq!(other, 0, "unexpected error class in verified trial {s}");
+                assert!(tripped, "SyncFail must fire in every verified trial {s}");
+                assert_eq!(fenced + refused + oks + async_oks, N * COMMITS);
+                assert!(fenced <= 1, "lone-only pin yet {fenced} writers shared one fence");
+                let (submits, queued, batches, batch_ops) = stats;
+                assert_eq!(submits, (N * COMMITS) as u64);
+                assert_eq!(queued, 0, "verified mode must never merge writers (trial {s})");
+                assert_eq!(batches, submits, "every commit its own batch (trial {s})");
+                assert_eq!(batch_ops, (N * COMMITS) as u64);
+                fenced_total += fenced;
+            }
+            assert!(fenced_total >= 1, "the EIO must fence someone across {SEEDS} seeds");
+        }
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// RFC-0058 P1.3: semantics derivation — the verified profile must be a
+    /// **scheduling-only** transformation of the full mode. Same seeds, same
+    /// PCT schedules, same three write shapes (sync put / OCC tx / async
+    /// `no_sync` put), same one-shot EIO on the 6th group fsync. The safety
+    /// oracles are **identical** in both modes: every sync/OCC Ok survives
+    /// the reopen (`silent_wrong == 0`), every async survivor holds the
+    /// right value, the reopen invents nothing (ghost-free, value-exact
+    /// scan over the written range), and the only error classes are
+    /// fence/refused. Differences are allowed **only** in scheduling and
+    /// performance: the full mode (catchup window ZERO, group commit
+    /// active) merges writers under PCT preemption — asserted to actually
+    /// happen, else the pairing is vacuous — and one EIO may fence 2+
+    /// members of one group; the verified mode never merges (`queued == 0`,
+    /// `batches == submits`) and fences at most one writer per trial.
+    #[test]
+    fn verified_vs_full_same_oracles() {
+        use pedradb_core::{ConcurrentDb, CoreError, OpenOptions, StdEnv, WriteOptions};
+        use pedradb_sim::{FailingEnvArc, FaultKind};
+        use std::collections::HashSet;
+        use std::ops::Bound;
+        use std::sync::Mutex;
+
+        const N: usize = 3;
+        const COMMITS: usize = 3;
+        const AFTER_FS: u64 = 5; // one-shot EIO on the 6th group fsync
+        const SEEDS: u64 = 64;
+        let base = std::env::temp_dir().join(format!("pedra-pct-derive-{}", std::process::id()));
+
+        #[allow(clippy::type_complexity)]
+        let trial = |tag: &str, seed: u64, policy: PiPolicy, verified: bool| {
+            let dir = base.join(format!("{tag}-{seed:03}"));
+            let _ = std::fs::remove_dir_all(&dir);
+            let env = FailingEnvArc::passing();
+            let opts = if verified {
+                OpenOptions::verified()
+            } else {
+                OpenOptions {
+                    sync: true,
+                    ..OpenOptions::default()
+                }
+            };
+            let db = ConcurrentDb::open_with_env(&dir, opts, env.clone()).unwrap();
+            if verified {
+                db.pin_verified();
+            } else {
+                // Same merge-friendly window the fence test uses (the
+                // verified pin already implies ZERO).
+                db.set_write_group_catchup_window(std::time::Duration::ZERO);
+            }
+            env.arm_with_kind(AFTER_FS, true, FaultKind::SyncFail);
+            let db = std::sync::Arc::new(db);
+
+            let outcomes: std::sync::Arc<Mutex<Vec<(usize, &'static str)>>> =
+                std::sync::Arc::new(Mutex::new(Vec::new()));
+            let _report = run_pcts(seed, N, policy, |task| {
+                let db = std::sync::Arc::clone(&db);
+                let outcomes = std::sync::Arc::clone(&outcomes);
+                move |_y: &Yielder| {
+                    for i in 0..COMMITS {
+                        let k = format!("drv/{task}/{i}");
+                        let tag = match task % 3 {
+                            0 => match db.put(k.as_bytes(), b"v") {
+                                Ok(()) => "ok",
+                                Err(CoreError::Internal(m))
+                                    if m.starts_with("group wal write/sync failed") =>
+                                {
+                                    "fence"
+                                }
+                                Err(CoreError::DurabilityFenced) => "refused",
+                                Err(e) => Box::leak(format!("{e}").into_boxed_str()),
+                            },
+                            1 => {
+                                let mut tx = db.begin_occ();
+                                tx.put(k.as_bytes(), b"v").unwrap();
+                                match tx.commit() {
+                                    Ok(()) => "ok",
+                                    Err(CoreError::Internal(m))
+                                        if m.starts_with("group wal write/sync failed") =>
+                                    {
+                                        "fence"
+                                    }
+                                    Err(CoreError::DurabilityFenced) => "refused",
+                                    Err(e) => Box::leak(format!("{e}").into_boxed_str()),
+                                }
+                            }
+                            _ => match db.put_with(k.as_bytes(), b"v", WriteOptions::no_sync()) {
+                                Ok(()) => "ok_async",
+                                Err(CoreError::DurabilityFenced) => "refused",
+                                Err(e) => Box::leak(format!("{e}").into_boxed_str()),
+                            },
+                        };
+                        outcomes.lock().unwrap().push((task * COMMITS + i, tag));
+                    }
+                }
+            });
+            let mut got = outcomes.lock().unwrap().clone();
+            got.sort_unstable();
+            let fenced = got.iter().filter(|(_, t)| *t == "fence").count();
+            let oks = got.iter().filter(|(_, t)| *t == "ok").count();
+            let async_oks = got.iter().filter(|(_, t)| *t == "ok_async").count();
+            let refused = got.iter().filter(|(_, t)| *t == "refused").count();
+            let other = got.len() - fenced - oks - async_oks - refused;
+            let stats = db.write_group_stats();
+            let tripped = env.tripped();
+            drop(db);
+
+            // Shared safety oracle (must be identical across modes): Ok
+            // sync/OCC ⇒ present after reopen; async survivor ⇒ right
+            // value; reopen scan over the written range is ghost-free and
+            // value-exact.
+            let mut silent_wrong = 0usize;
+            let mut wrong_async = 0usize;
+            let re = ConcurrentDb::open_with_env(&dir, opts, StdEnv).unwrap();
+            for &(idx, tag) in &got {
+                let (t, i) = (idx / COMMITS, idx % COMMITS);
+                let k = format!("drv/{t}/{i}");
+                match tag {
+                    "ok" => {
+                        if re.get(k.as_bytes()).is_none() {
+                            silent_wrong += 1;
+                        }
+                    }
+                    "ok_async" => {
+                        if let Some(v) = re.get(k.as_bytes()) {
+                            if v.as_ref() != &b"v"[..] {
+                                wrong_async += 1;
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            let expected: HashSet<Vec<u8>> = (0..N)
+                .flat_map(|t| (0..COMMITS).map(move |i| format!("drv/{t}/{i}").into_bytes()))
+                .collect();
+            let ghost = re
+                .scan_collect(Bound::Included(&b"drv/"[..]), Bound::Excluded(&b"drv0"[..]))
+                .iter()
+                .filter(|(k, v)| {
+                    !expected.contains(k.as_ref()) || v.as_ref() != &b"v"[..]
+                })
+                .count();
+            drop(re);
+            let _ = std::fs::remove_dir_all(&dir);
+            (
+                oks,
+                async_oks,
+                fenced,
+                refused,
+                other,
+                silent_wrong,
+                wrong_async,
+                ghost,
+                tripped,
+                stats,
+            )
+        };
+
+        for policy in [PiPolicy::Sequential, PiPolicy::Pct { depth: 2 }] {
+            let tag = if matches!(policy, PiPolicy::Sequential) {
+                "seq"
+            } else {
+                "pct"
+            };
+            let mut full_queued_total = 0u64;
+            for s in 0..SEEDS {
+                let full = trial(&format!("{tag}-full"), s, policy, false);
+                let ver = trial(&format!("{tag}-ver"), s, policy, true);
+
+                // (a) identical safety oracles in both modes.
+                for (mode, r) in [("full", &full), ("verified", &ver)] {
+                    let (oks, async_oks, fenced, refused, other, silent_wrong, wrong_async, ghost, tripped, _stats) =
+                        *r;
+                    assert_eq!(other, 0, "{mode} trial {s}: unexpected error class");
+                    assert_eq!(
+                        oks + async_oks + fenced + refused,
+                        N * COMMITS,
+                        "{mode} trial {s}: outcome total"
+                    );
+                    assert_eq!(
+                        silent_wrong, 0,
+                        "{mode} trial {s}: Ok commit vanished on reopen"
+                    );
+                    assert_eq!(
+                        wrong_async, 0,
+                        "{mode} trial {s}: async survivor holds a wrong value"
+                    );
+                    assert_eq!(
+                        ghost, 0,
+                        "{mode} trial {s}: reopen invented or wrong-valued key"
+                    );
+                    if !tripped {
+                        // Heavy merging (full mode) can keep the fsync count
+                        // <= AFTER_FS: no fault fired, nothing fenced.
+                        assert_eq!(
+                            oks + async_oks,
+                            N * COMMITS,
+                            "{mode} trial {s}: no EIO yet not all Ok"
+                        );
+                    }
+                }
+
+                // (b) differences allowed only in scheduling/performance.
+                let (_, _, ver_fenced, _, _, _, _, _, ver_tripped, ver_stats) = ver;
+                let (submits, queued, batches, batch_ops) = ver_stats;
+                assert_eq!(submits, (N * COMMITS) as u64, "verified trial {s}");
+                assert_eq!(queued, 0, "verified trial {s} merged writers");
+                assert_eq!(batches, submits, "verified trial {s}: commit not lone");
+                assert_eq!(batch_ops, (N * COMMITS) as u64, "verified trial {s}");
+                assert!(
+                    ver_tripped,
+                    "verified trial {s}: SyncFail must fire (6 lone fsyncs > {AFTER_FS})"
+                );
+                assert!(
+                    ver_fenced <= 1,
+                    "verified trial {s}: lone-only yet {ver_fenced} writers shared one fence"
+                );
+                // Full mode: merging is *allowed* (the documented shape) —
+                // and must actually happen under PCT preemption somewhere.
+                let (_, _, _, _, _, _, _, _, _, full_stats) = full;
+                full_queued_total += full_stats.1;
+            }
+            if matches!(policy, PiPolicy::Pct { .. }) {
+                assert!(
+                    full_queued_total > 0,
+                    "{tag}: full mode never merged across {SEEDS} seeds — vacuous comparison"
+                );
+            }
+        }
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
     /// P1.3 (RFC-0051): OCC under the same runner, three-teeth ritual.
     /// Task 0 is the X-writer; tasks 1–2 read X and write a disjoint Z.
     /// Planted depth-2 bug (TEST CODE ONLY): the reader reads X raw
@@ -512,8 +892,8 @@ mod tests {
     /// between them is NOT serialization order. A reader whose window
     /// contains only same-group writer seqs serializes before that writer
     /// (its raw read predates the group) — a valid Ok. The oracle therefore
-    /// classifies each window via the engine's recorded group seq-ranges
-    /// (`pct_hooks::GROUP_RANGES`): only cross-group windows are violations.
+    /// classifies each window via the run's recorded group seq-ranges
+    /// (`RunReport::group_ranges`): only cross-group windows are violations.
     #[test]
     fn occ_three_teeth() {
         use pedradb_core::{BatchOp, ConcurrentDb, CoreError, OpenOptions, StdEnv};
@@ -594,10 +974,7 @@ mod tests {
                 }
             });
             let rs = recs.lock().unwrap().clone();
-            let ranges = pedradb_core::pct_hooks::GROUP_RANGES
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .clone();
+            let ranges = report.group_ranges.clone();
             let same_group = |a: u64, b: u64| {
                 ranges.iter().any(|(lo, hi)| *lo <= a && a <= *hi && *lo <= b && b <= *hi)
             };
@@ -760,6 +1137,74 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// RFC-0057 P1.2 target: the runner under TSan with **no PCT in the
+    /// process** (0052 XOR rule — TSan's OS scheduling and logical π never
+    /// nest). Sequential and RoundRobin still drive real threads through
+    /// the turnstile and a real `ConcurrentDb`, so a sanitizer build of
+    /// this one test exercises the runner's own synchronization (grant
+    /// hand-offs, worker install/clear, group-range forensics) plus the
+    /// engine publish path those threads drive. Natively it is a plain
+    /// progress/replay check: Sequential is a pure function of n (same
+    /// grant hash twice) and every put stays visible.
+    #[test]
+    fn pct_runner_without_pct_replays_and_covers_engine() {
+        use pedradb_core::{ConcurrentDb, OpenOptions, StdEnv};
+
+        let dir = std::env::temp_dir().join(format!("pedra-pct-nopct-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let opts = OpenOptions {
+            sync: false,
+            ..OpenOptions::default()
+        };
+        let db = ConcurrentDb::open_with_env(&dir, opts, StdEnv).unwrap();
+        db.set_write_group_catchup_window(std::time::Duration::ZERO);
+        let db = Arc::new(db);
+
+        const N: usize = 4;
+        const PUTS: usize = 8;
+
+        let run_once = |policy: PiPolicy| {
+            let db = Arc::clone(&db);
+            run_pcts(0x0057_7EED, N, policy, |task| {
+                let db = Arc::clone(&db);
+                move |_y: &Yielder| {
+                    for i in 0..PUTS {
+                        let k = format!("nopct/{task}/{i}");
+                        db.put(k.as_bytes(), b"v").unwrap();
+                    }
+                }
+            })
+        };
+
+        let seq1 = run_once(PiPolicy::Sequential);
+        let seq2 = run_once(PiPolicy::Sequential);
+        let rr = run_once(PiPolicy::RoundRobin);
+
+        assert!(!seq1.steps.is_empty());
+        assert_eq!(
+            seq1.schedule_hash, seq2.schedule_hash,
+            "Sequential policy is a pure function of n — replay must match"
+        );
+        assert!(!rr.steps.is_empty());
+        let covered: std::collections::HashSet<_> = rr.steps.iter().map(|s| s.worker).collect();
+        assert_eq!(covered.len(), N, "round-robin must grant every worker");
+        let total = (0..N)
+            .map(|t| {
+                (0..PUTS)
+                    .filter(|i| db.get(format!("nopct/{t}/{i}").as_bytes()).is_some())
+                    .count()
+            })
+            .sum::<usize>();
+        assert_eq!(total, N * PUTS, "every put from all three runs visible");
+
+        Arc::try_unwrap(db)
+            .map_err(|_| "workers still hold the db")
+            .unwrap()
+            .close()
+            .unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// RFC-0051 P2.1: Linux trial — the runner over a real `ConcurrentDb`
     /// opened on `FailingEnvArc<IoUringEnv>` (io_uring path; Darwin's
     /// canonical path stays POSIX `StdEnv`). The schedule is a pure
@@ -835,6 +1280,95 @@ mod tests {
         eprintln!(
             "SKIP (RFC-0051 P2.1): FailingEnvArc<IoUringEnv> trial is Linux-only; \
              Darwin/other run the POSIX StdEnv path (see pct_runner_drives_real_concurrentdb)"
+        );
+    }
+
+    /// RFC-0057 P0: parallel trials in one process must not interfere —
+    /// each `run_pcts` owns its turnstile and its forensics
+    /// (`group_ranges` is per-run, not a global), so concurrent trials
+    /// produce the same schedule hash and the same group forensics as a
+    /// serial run of the same seeds.
+    #[test]
+    fn pct_parallel_trials_no_interference() {
+        use pedradb_core::{ConcurrentDb, OpenOptions, StdEnv};
+
+        let base = std::env::temp_dir().join(format!("pedra-pct-par-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        const SEEDS: [u64; 4] = [0xAAAA_0001, 0xAAAA_0002, 0xAAAA_0003, 0xAAAA_0004];
+        const N: usize = 3;
+        const PUTS: usize = 6;
+
+        let run_one = |seed: u64, slot: u64| -> RunReport {
+            let dir = base.join(format!("s{slot}"));
+            let _ = std::fs::remove_dir_all(&dir);
+            let db = ConcurrentDb::open_with_env(&dir, OpenOptions::default(), StdEnv).unwrap();
+            db.set_write_group_catchup_window(std::time::Duration::ZERO);
+            let db = Arc::new(db);
+            let report = run_pcts(seed, N, PiPolicy::Pct { depth: 2 }, |task| {
+                let db = Arc::clone(&db);
+                move |_y: &Yielder| {
+                    for i in 0..PUTS {
+                        let k = format!("par/{task}/{i}");
+                        db.put(k.as_bytes(), b"v").unwrap();
+                    }
+                }
+            });
+            let closed = Arc::try_unwrap(db)
+                .map_err(|_| "workers still hold the db")
+                .unwrap()
+                .close()
+                .unwrap();
+            let _ = closed;
+            let _ = std::fs::remove_dir_all(&dir);
+            report
+        };
+
+        // Serial baseline.
+        let baseline: Vec<RunReport> = SEEDS
+            .iter()
+            .enumerate()
+            .map(|(i, &s)| run_one(s, i as u64))
+            .collect();
+
+        // Same seeds, trials running concurrently on separate threads.
+        let parallel: Vec<RunReport> = {
+            let mut out: Vec<Option<RunReport>> = vec![None; SEEDS.len()];
+            std::thread::scope(|scope| {
+                let handles: Vec<_> = SEEDS
+                    .iter()
+                    .enumerate()
+                    .map(|(i, &s)| {
+                        scope.spawn(move || {
+                            let r = run_one(s, i as u64 + 100);
+                            (i, r)
+                        })
+                    })
+                    .collect();
+                for h in handles {
+                    let (i, r) = h.join().expect("parallel trial panicked");
+                    out[i] = Some(r);
+                }
+            });
+            out.into_iter().map(|r| r.expect("slot filled")).collect()
+        };
+
+        for (i, (b, p)) in baseline.iter().zip(parallel.iter()).enumerate() {
+            assert_eq!(
+                b.schedule_hash, p.schedule_hash,
+                "seed {} changed schedule under parallel trials",
+                SEEDS[i]
+            );
+            assert_eq!(
+                b.group_ranges, p.group_ranges,
+                "seed {} group forensics changed under parallel trials",
+                SEEDS[i]
+            );
+        }
+        let _ = std::fs::remove_dir_all(&base);
+        eprintln!(
+            "pct_concurrent: parallel trials: {}/{} seeds schedule+forensics stable",
+            SEEDS.len(),
+            SEEDS.len()
         );
     }
 }

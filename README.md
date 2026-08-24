@@ -103,6 +103,9 @@ Default commit **fsyncs the WAL** before `Ok` (process-crash safe after successf
 | Synthetic field maturity | [RFC-0020](docs/rfc/0020-synthetic-field-maturity.md) | **P0–P2 done** — gate, soaks, canaries (lease/index/journal), cluster matrix, explore, race, fuzz, residuals |
 | World in-tree (FDB-shaped determinism) | [RFC-0050](docs/rfc/0050-world-in-tree-fdb-determinism.md) | **done (P0–P2)** — `crates/pedradb-world`: seed→`trace_hash` + invariantes + seam inventory no CI; lab=produto (PeerMsg, canaries, buggify); P2: π ordena `World::run` (5º seam), swarm L28 24/24 clean (gate REAL aberto), papel fold no mesmo seed, det_io hard-CT com sibling. Not FDB Simulation |
 | Beyond Sim2 holes (π / layers / OS) | [RFC-0051](docs/rfc/0051-beyond-fdb-sim-holes.md) | **done (P0–P2)** — PCT sobre `ConcurrentDb` real: plantado d=2 3/256 (seq 0), fence de grupo no fsync off-lock 9/256 (seq 0), OCC plantado 38/256 cross-group / correto 0/256 (oráculo group-aware), CommitUnknown canário, trial `FailingEnvArc<IoUringEnv>` Linux, guards spawn/wall-clock no CI. Not “more trusted than FDB” |
+| Intensidade máxima (paralelo + caixas + formal) | [RFC-0057](docs/rfc/0057-maximum-intensity-parallel-dst-boxes-formal.md) | **draft (P0.1+P0.2 done)** — swarm DST multi-núcleo com forenses por-run e trials paralelos não-interferentes; caixas (Miri/TSan/ASan) como jobs irmãos no CI; kernel formal do group-commit + OCC. “100%” = espaço verificável relativo ao TCB; residual publicado |
+| Modo verificado (fallback dos kernels) | [RFC-0058](docs/rfc/0058-verified-mode-kernel-derived-fallback.md) | **draft (P0+P1 done)** — perfil de produto com seções críticas = kernels provados (`OpenOptions::verified()` + lone-commit-only até o kernel do grupo; `profile_report()` amarrado ao `catalog.json` 44/44); suíte FailingEnv + World + PCT rodando no perfil (silent_wrong=0, fence ≤ 1 escritor); `open_verified` em fold/lease/dcs/compat (StdEnv por tipo); derivação de semântica verified=full nos oráculos; CI `verified-mode`; piso medido no modo: reads ≥5× vs Rocks default, writes lone-fsync (~0,001× — sem claim de paridade no perfil; reativação é P2.1). Extração total segue REFUSE (VeriBetrKV 8×) |
+| Escala massiva paralela + invariantes de cluster | [RFC-0059](docs/rfc/0059-massive-scale-parallel-dst-and-cluster-invariants.md) | **draft (P0 done)** — `world_swarm` (work-stealing por núcleo, backend mem com mesmas seams de falha, gate serial-vs-paralelo por `trace_hash`); invariant checker cross-node no estado convergido (autenticidade/split-brain/ressurreição); escala 7/9 nós; 4 F-found corrigidos com regressão pinada (CRC do frame, discard escapado, CommitUnknown por payload, snapshot stale wipe). Campanhas: 16384@3n/4096@7n/4096@9n-4ranges — sem claim CPU-hours vs FDB |
 | DST inside boxes (Miri / ASan / TCG) | [RFC-0052](docs/rfc/0052-dst-inside-boxes.md) | **draft** — compose in the cycle, not one VM. P0: `FailingEnv` under Miri. REFUSE Miri-in-TCG and TCG benches |
 | IronFleet-scale formal (years) | [RFC-0053](docs/rfc/0053-ironfleet-years.md) | **done (Y1–Y3)** — Lean AE/commit extracts; AE/apply caller refinements; reopen kernel + lemmas; bounded liveness sob axioma quórum-vivo; π/VerusSync não disparado (RFC-0051 draft) |
 | Entregar o 100% (relativo ao TCB) | [RFC-0056](docs/rfc/0056-one-hundred-percent-delivery.md) | **done** — itens 1–6/8/9/11 do checklist verdes; 7 gated (RFC-0051 PCT); 10 “TCB à vista” (freeze no CI); 12 contínuo. Estado: [one-hundred-percent-report](docs/formal/one-hundred-percent-report.md) |
@@ -123,6 +126,13 @@ cargo run -p pedradb-store --bin montanha-tcp -- node --id 1 --data /tmp/m1 --bi
   --peer 1=127.0.0.1:9701 --peer 2=127.0.0.1:9702 --peer 3=127.0.0.1:9703
 # Real Linux lab on caixote (3-process local3; smoke on start + external ports)
 ./scripts/montanha_tcp_caixote.sh all
+# Parallel World swarm campaign (RFC-0059): n_seeds start_seed workers n_nodes steps
+#   env: PEDRA_SWARM_RANGES=4 (multi-range) | PEDRA_SWARM_DISK=1 (real-FS nodes)
+#        PEDRA_SWARM_BUGGIFY=0 (faults off) | PEDRA_SWARM_CONSISTENCY=0 (checker off)
+#        PEDRA_SWARM_LOG=dir (JSONL per seed + summary) | PEDRA_SWARM_DUMP=<seed>
+#        (single-seed diagnostic: event trace; PEDRA_SWARM_TRACE=1 prints every event)
+# exit 1 on any oracle failure (silent_wrong / row_half / cross-node consistency)
+cargo run --release -p pedradb-world --bin world_swarm -- 16384 1 0 3 12
 # docker smoke: docker run --rm --platform linux/amd64 -e CLUSTER=smoke ghcr.io/paulocsanz/montanha-tcp:p01-m3
 # Multi-container mesh (experimental): MONTANHA_MESH=1 — blocked on caixote WG/hairpin today
 # Local backup / PITR / migrate

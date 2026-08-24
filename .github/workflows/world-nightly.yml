@@ -1,0 +1,56 @@
+# RFC-0059 P1.3 — nightly swarm campaigns as CI artifacts.
+# The per-PR job (synthetic-field `world-parallel`) keeps small campaigns
+# in the critical path; this one spends runner time off-hours on the
+# reference scale (16384@3n, 4096@7n, 4096@9n-4ranges) and rotates the
+# seed window every night: base = YYYYMMDD, so each run hunts fresh seeds
+# instead of replaying yesterday's. The gate is per-seed oracle outcome
+# (`world_swarm` exits 1 on any failure), never wall-clock.
+name: world-nightly
+on:
+  schedule:
+    - cron: "23 2 * * *"
+  workflow_dispatch:
+    inputs:
+      seed-base:
+        description: "u64 seed base (empty = today's date)"
+        required: false
+        default: ""
+permissions:
+  contents: read
+concurrency:
+  group: world-nightly
+  cancel-in-progress: false
+jobs:
+  campaigns:
+    name: reference campaigns (fresh seeds nightly)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: build
+        run: cargo build --release -p pedradb-world --bin world_swarm
+      - name: seed base (rotates nightly; manual runs may pin it)
+        run: |
+          BASE="${{ github.event.inputs.seed-base }}"
+          if [ -z "$BASE" ]; then BASE="$(date -u +%Y%m%d)"; fi
+          echo "SEED_BASE=$BASE" >> "$GITHUB_ENV"
+      - name: campaign 3 nodes (16384 seeds)
+        run: |
+          PEDRA_SWARM_LOG=findings/world-nightly/3n target/release/world_swarm 16384 "$SEED_BASE" 0 3 12
+          ! grep -q '"ok":false' findings/world-nightly/3n/swarm.jsonl
+      - name: campaign 7 nodes (4096 seeds, multi-quorum)
+        run: |
+          PEDRA_SWARM_LOG=findings/world-nightly/7n target/release/world_swarm 4096 "$((SEED_BASE + 100000))" 0 7 12
+          ! grep -q '"ok":false' findings/world-nightly/7n/swarm.jsonl
+      - name: campaign 9 nodes 4 ranges (4096 seeds, multi-range)
+        env:
+          PEDRA_SWARM_RANGES: "4"
+        run: |
+          PEDRA_SWARM_LOG=findings/world-nightly/9n-4ranges target/release/world_swarm 4096 "$((SEED_BASE + 200000))" 0 9 12
+          ! grep -q '"ok":false' findings/world-nightly/9n-4ranges/swarm.jsonl
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: world-nightly-${{ env.SEED_BASE }}
+          path: findings/world-nightly/

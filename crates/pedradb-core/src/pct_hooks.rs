@@ -248,6 +248,21 @@ pub fn clear_worker() {
     CURRENT.with(|c| *c.borrow_mut() = None);
 }
 
+/// Record one atomic group commit's returned-seq range on the current
+/// run's turnstile (forensics for group-aware oracles; feature `pct` only,
+/// no-op off a registered worker thread).
+pub fn record_group_range(lo: u64, hi: u64) {
+    CURRENT.with(|c| {
+        let borrow = c.borrow();
+        if let Some((ts, _)) = borrow.as_ref() {
+            ts.group_ranges
+                .lock()
+                .expect("pct ranges mutex poisoned")
+                .push((lo, hi));
+        }
+    });
+}
+
 /// Engine yield site (feature `pct` only). No-op unless the calling thread
 /// is a registered PCT worker.
 pub fn maybe_yield(site: &'static str) {

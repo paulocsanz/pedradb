@@ -432,7 +432,6 @@ impl Env for IoUringEnv {
 mod tests {
     use super::*;
     use pedradb_core::OpenOptions;
-    use std::io::{Seek, Write};
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -545,6 +544,9 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
     }
 
+    /// Linux-only tests open with explicit durable options (their macOS
+    /// twins use `OpenOptions::default()` inline).
+    #[cfg(target_os = "linux")]
     fn db_opts() -> OpenOptions {
         OpenOptions {
             wal_full_fsync: true,

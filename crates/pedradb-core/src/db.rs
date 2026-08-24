@@ -13150,13 +13150,6 @@ mod tests {
         let mut db = Db::open(&dir).unwrap();
         // Deterministic schedule: puts (multi-version), point deletes, a
         // range delete, then flushes to split layers, then more puts.
-        let mut x = 0x1357_9BDF_2468_ACE0_u64;
-        let step = || {
-            x ^= x << 13;
-            x ^= x >> 7;
-            x ^= x << 17;
-            x
-        };
         let key = |u: u8, ts: u64| {
             let mut k = vec![b'k', b'/', u];
             k.extend_from_slice(&ts.to_be_bytes());
@@ -13636,7 +13629,7 @@ mod tests {
         // 1 h window: nothing ages during the write phase.
         let mut opts = horizon_opts(3_600_000, 1 << 30);
         opts.auto_compact_sst_count = None;
-        let mut db = Db::open_with_env(&dir, opts, env).unwrap();
+        let db = Db::open_with_env(&dir, opts, env).unwrap();
         let n = 400_000u64; // → 12 500 samples uncapped
         for i in 0..n {
             db.publish_sequence(i + 1);
@@ -13778,7 +13771,7 @@ mod tests {
         let durable_floor = db.history_tier.as_ref().unwrap().archive_floor();
         assert!(durable_floor > 1);
         db.close().unwrap();
-        let mut db = Db::open(&dir).unwrap();
+        let db = Db::open(&dir).unwrap();
         assert!(
             db.earliest_readable_sequence() >= durable_floor,
             "reopen must keep the cap-advanced watermark ({} < {durable_floor})",

@@ -126,6 +126,19 @@ pub struct StoreOpenOptions {
     /// (pressure @ L0 trigger, hard stall @ 2×, drain on). Default **false**
     /// so lab/soak paths stay unconstrained unless opted in.
     pub pedra_write_backpressure: bool,
+    /// RFC-0058 P0.2: open every node with the **verified profile**
+    /// (`OpenOptions::verified()` — sync forced **true**, strongest WAL
+    /// data class, fail-closed recovery). Verified wins over
+    /// `pedra_sync = false`: durability is the composition being declared.
+    /// Default **false**.
+    pub pedra_verified: bool,
+    /// WAL barrier data class. Default `true` = platform strongest
+    /// (`F_FULLFSYNC` on Darwin) — the product class. `false` =
+    /// `fdatasync` weak class (the `librocksdb-sys` crate-build class):
+    /// same barrier call and same `OpClass::Sync` fault seam, cheaper
+    /// syscall. For simulation harnesses whose wall clock is dominated
+    /// by the strong barrier without adding oracle power (RFC-0059).
+    pub pedra_wal_full_fsync: bool,
 }
 
 impl Default for StoreOpenOptions {
@@ -133,6 +146,8 @@ impl Default for StoreOpenOptions {
         Self {
             pedra_sync: true,
             pedra_write_backpressure: false,
+            pedra_verified: false,
+            pedra_wal_full_fsync: true,
         }
     }
 }
@@ -144,6 +159,8 @@ impl StoreOpenOptions {
         Self {
             pedra_sync: false,
             pedra_write_backpressure: false,
+            pedra_verified: false,
+            pedra_wal_full_fsync: true,
         }
     }
 
@@ -1682,6 +1699,13 @@ struct RangePeer {
     hb_left: u64,
     next_index: HashMap<u64, u64>,
     match_index: HashMap<u64, u64>,
+    /// Highest log index this leader has ever put on the wire for that
+    /// peer — acked or still in flight (F-found, RFC-0059 swarm: seeds
+    /// 49/865). `match_index` alone is not an escape proof: a copy can
+    /// sit in the net past the ack deadline. Discard must respect it or
+    /// the freed index is reused within the same term and two payloads
+    /// share one (index, term).
+    sent_through: HashMap<u64, u64>,
     leader_id: Option<u64>,
     /// Highest log index known durable on Pedra for this peer (RFC-0025 P1.2).
     /// Volatile after load; used to choose append vs full rewrite on persist.
@@ -1734,6 +1758,7 @@ impl RangePeer {
             hb_left: 2,
             next_index: HashMap::new(),
             match_index: HashMap::new(),
+            sent_through: HashMap::new(),
             leader_id: None,
             disk_log_hi: 0,
         }
@@ -1895,6 +1920,13 @@ pub struct StoreCluster<E: Env = IoUringEnv> {
     pending_version_notes: PendingNotes,
     /// Last log index per range already flushed into version history (idempotent).
     version_notes_through: HashMap<u64, u64>,
+    /// F-found (RFC-0059 swarm, seed 49): the exact entry each in-flight
+    /// Queued propose wrote, keyed `(range_id, log_index)`.
+    /// `finish_queued_propose` compares the live log entry against it —
+    /// a commit watermark alone cannot prove the client's entry is what
+    /// committed at that index after a not-escaped abort freed the index
+    /// for reuse within the same term.
+    proposed_entries: HashMap<(u64, u64), RangeEntry>,
     /// In-process watch hub; notified after majority put/commit_tx (RFC-0022 P0.3).
     watch: WatchHub,
     /// RFC-0025 P1.1: staged puts for [`Self::put_buffered`] / [`Self::flush_writes`].
@@ -2024,17 +2056,22 @@ impl StoreCluster<IoUringEnv> {
         }
         let parent = parent.as_ref();
         let ranges = split_keyspace(n_ranges);
-        let opts = OpenOptions {
-            wal_full_fsync: true,
-            history: Default::default(),
-            wal_recovery: Default::default(),
-            // Multiproc path: honor store_opts.pedra_sync (default true = durable).
-            sync: store_opts.pedra_sync,
-            auto_flush_bytes: None,
-            auto_compact_sst_count: None,
-            auto_compact_sst_bytes: None,
-            exclusive: true,
-            large_value_threshold: None,
+        let opts = if store_opts.pedra_verified {
+            // RFC-0058 P0.2: verified nodes pin the profile options.
+            OpenOptions::verified()
+        } else {
+            OpenOptions {
+                wal_full_fsync: store_opts.pedra_wal_full_fsync,
+                history: Default::default(),
+                wal_recovery: Default::default(),
+                // Multiproc path: honor store_opts.pedra_sync (default true = durable).
+                sync: store_opts.pedra_sync,
+                auto_flush_bytes: None,
+                auto_compact_sst_count: None,
+                auto_compact_sst_bytes: None,
+                exclusive: true,
+                large_value_threshold: None,
+            }
         };
         let dir = parent.join(format!("store-node-{self_id}"));
         let mut db = Db::open_with_env(&dir, opts, IoUringEnv::default())?;
@@ -2079,6 +2116,7 @@ impl StoreCluster<IoUringEnv> {
             safe_watermark: 0,
             pending_version_notes: HashMap::new(),
             version_notes_through: HashMap::new(),
+            proposed_entries: HashMap::new(),
             watch: WatchHub::new(),
             write_coalesce: Vec::new(),
         };
@@ -2177,16 +2215,21 @@ impl<E: Env> StoreCluster<E> {
         let ranges = split_keyspace(n_ranges);
         let mut nodes = HashMap::new();
         let ids: Vec<u64> = (1..=n_nodes).collect();
-        let opts = OpenOptions {
-            wal_full_fsync: true,
-            history: Default::default(),
-            wal_recovery: Default::default(),
-            sync: store_opts.pedra_sync,
-            auto_flush_bytes: None,
-            auto_compact_sst_count: None,
-            auto_compact_sst_bytes: None,
-            exclusive: true,
-            large_value_threshold: None,
+        let opts = if store_opts.pedra_verified {
+            // RFC-0058 P0.2: verified nodes pin the profile options.
+            OpenOptions::verified()
+        } else {
+            OpenOptions {
+                wal_full_fsync: store_opts.pedra_wal_full_fsync,
+                history: Default::default(),
+                wal_recovery: Default::default(),
+                sync: store_opts.pedra_sync,
+                auto_flush_bytes: None,
+                auto_compact_sst_count: None,
+                auto_compact_sst_bytes: None,
+                exclusive: true,
+                large_value_threshold: None,
+            }
         };
         for (i, env) in envs.into_iter().enumerate() {
             let id = (i as u64) + 1;
@@ -2231,6 +2274,7 @@ impl<E: Env> StoreCluster<E> {
             safe_watermark: 0,
             pending_version_notes: HashMap::new(),
             version_notes_through: HashMap::new(),
+            proposed_entries: HashMap::new(),
             watch: WatchHub::new(),
             write_coalesce: Vec::new(),
         };
@@ -2660,6 +2704,43 @@ impl<E: Env> StoreCluster<E> {
             .and_then(|n| n.ranges.get(&range_id))
             .map(|p| p.snapshot_index)
             .unwrap_or(0)
+    }
+
+    /// RFC-0059 diagnostics: one-line raft peer state (term, vote, log
+    /// suffix with per-entry terms, commit/applied/snapshot watermarks,
+    /// match_index map) for divergence triage in the swarm.
+    pub fn raft_debug_line(&self, node_id: u64, range_id: u64) -> String {
+        let Some(n) = self.nodes.get(&node_id) else {
+            return format!("n{node_id}: missing");
+        };
+        let Some(p) = n.ranges.get(&range_id) else {
+            return format!("n{node_id}: no-range");
+        };
+        let log: Vec<String> = p
+            .log
+            .iter()
+            .map(|e| {
+                let entry = match &e.entry {
+                    RangeEntry::Put { key, value, .. } => {
+                        format!("put({:02x?},{:02x?})", key, value)
+                    }
+                    RangeEntry::Batch { .. } => "batch".to_string(),
+                    #[allow(unreachable_patterns)]
+                    _ => "other".to_string(),
+                };
+                format!("{}@{}:{}", e.index, e.term, entry)
+            })
+            .collect();
+        let mut m: Vec<String> = p
+            .match_index
+            .iter()
+            .map(|(k, v)| format!("{k}:{v}"))
+            .collect();
+        m.sort();
+        format!(
+            "n{node_id}: term={} role={:?} vote={:?} commit={} applied={} snap={} log={:?} match={:?}",
+            p.term, p.role, p.voted_for, p.commit, p.applied, p.snapshot_index, log, m
+        )
     }
 
     /// Set peer RPC delivery mode ([`RpcMode::Direct`] default, [`RpcMode::Queued`] for Net).
@@ -3754,8 +3835,22 @@ impl<E: Env> StoreCluster<E> {
             });
         }
         {
-            let n = self.nodes.get_mut(&to).unwrap();
-            let p = n.ranges.get_mut(&range_id).unwrap();
+            let n = self
+                .nodes
+                .get_mut(&to)
+                .ok_or_else(|| StoreError::Msg(format!("install-snap: unknown node {to}")))?;
+            let Some(p) = n.ranges.get_mut(&range_id) else {
+                // Defense in depth past the frame CRC: a (stale or
+                // foreign) snapshot for a range this node does not
+                // serve is rejected, never a panic — a wire-fed value
+                // must not take the process down.
+                return Ok(PeerMsg::InstallSnapshotReply {
+                    range_id,
+                    term: 0,
+                    success: false,
+                    match_index: 0,
+                });
+            };
             if term < p.term {
                 return Ok(PeerMsg::InstallSnapshotReply {
                     range_id,
@@ -3781,6 +3876,25 @@ impl<E: Env> StoreCluster<E> {
                 p.election_left = p.election_timeout;
             }
             p.leader_id = Some(leader_id);
+            // F-found (RFC-0059 swarm, seed 104853): reject a snapshot
+            // strictly older than our own commit. Everything ≤ commit is
+            // already in our applied state (or replays from our own log);
+            // installing the older snapshot wipes that newer applied user
+            // state while the retained log prefix (`applied` unchanged)
+            // never re-applies it — committed data silently vanishes with
+            // converged raft bookkeeping. An at-commit snapshot (equal
+            // index) still installs (idempotent replacement + persist-fail
+            // rollback are tested paths). Reply success at our commit so
+            // the leader continues with AE from there.
+            if last_included_index < p.commit {
+                let m = p.commit;
+                return Ok(PeerMsg::InstallSnapshotReply {
+                    range_id,
+                    term: p.term,
+                    success: true,
+                    match_index: m,
+                });
+            }
             // F124: raft meta must be durable **before** wiping user keys.
             // AS-IS swallowed persist errors then wiped + replied success — leader
             // thought install worked while the follower lost keys without a snap.
@@ -3891,8 +4005,14 @@ impl<E: Env> StoreCluster<E> {
             return Ok(());
         }
         {
-            let n = self.nodes.get_mut(&leader).unwrap();
-            let p = n.ranges.get_mut(&range_id).unwrap();
+            let Some(n) = self.nodes.get_mut(&leader) else {
+                return Ok(());
+            };
+            // Defense in depth past the frame CRC: a reply for a range
+            // this node does not serve is dropped, never a panic.
+            let Some(p) = n.ranges.get_mut(&range_id) else {
+                return Ok(());
+            };
             if term > p.term {
                 let _ = durable_become_follower_if_newer(&mut n.db, range_id, p, term);
                 return Ok(());
@@ -3964,13 +4084,18 @@ impl<E: Env> StoreCluster<E> {
             p.log.push(LogRec {
                 index: idx,
                 term,
-                entry,
+                entry: entry.clone(),
             });
             proposed_index = Some(idx);
+            // F-found (RFC-0059 swarm, seed 49): remember the exact entry at
+            // this index so `finish_queued_propose` can tell *whose* commit
+            // a later watermark reflects after an abort freed the index.
+            self.proposed_entries.insert((rid, idx), entry);
             // F47: if durable log write fails, roll back the in-memory push.
             // Otherwise a later heal/cancel can majority-commit the orphan.
             if let Err(e) = persist_log_db(&mut n.db, rid, p) {
                 p.log.pop();
+                self.proposed_entries.remove(&(rid, idx));
                 // F49/F50: unreserve SI gen so a failed propose does not burn
                 // generations (and so retry can re-use the same logical slot).
                 self.commit_generation =
@@ -4060,6 +4185,12 @@ impl<E: Env> StoreCluster<E> {
                     last_included_term: leader_snap.1,
                     kv_pairs,
                 };
+                if let Some(n) = self.nodes.get_mut(&leader) {
+                    if let Some(p) = n.ranges.get_mut(&rid) {
+                        let st = p.sent_through.entry(pid).or_insert(0);
+                        *st = (*st).max(leader_snap.0);
+                    }
+                }
                 self.send_peer_rpc(leader, pid, msg)?;
                 continue;
             }
@@ -4068,6 +4199,14 @@ impl<E: Env> StoreCluster<E> {
                 .filter(|e| e.index >= next)
                 .cloned()
                 .collect();
+            if let Some(last_sent) = entries.last().map(|e| e.index) {
+                if let Some(n) = self.nodes.get_mut(&leader) {
+                    if let Some(p) = n.ranges.get_mut(&rid) {
+                        let st = p.sent_through.entry(pid).or_insert(0);
+                        *st = (*st).max(last_sent);
+                    }
+                }
+            }
             let msg = PeerMsg::AppendEntries {
                 range_id: rid,
                 term,
@@ -4157,15 +4296,50 @@ impl<E: Env> StoreCluster<E> {
         let leader = self.range_leader(range_id);
         let Some(leader) = leader else {
             if abort_if_uncommitted {
-                // No leader — best-effort discard on all nodes.
+                // No leader — best-effort discard on all nodes. Note
+                // dropping lives inside the discard (cut-precise; an
+                // escaped entry keeps its notes to match its fate).
                 if let Some(&any) = self.ids.first() {
                     self.discard_uncommitted_from(range_id, any, index)?;
                 }
-                self.drop_pending_version_notes_from(range_id, index);
             }
             return Ok(false);
         };
         let commit = self.commit_index(leader, range_id);
+        // F-found (RFC-0059 swarm, seed 49): a commit watermark alone cannot
+        // resolve CommitUnknown — after a not-escaped abort freed this index,
+        // a later entry reused it and committed, and the client's put was
+        // reported Ok for a commit that was never its entry. The live log
+        // entry (when still present) must still be the one this propose
+        // wrote; an overwritten/missing entry means the client keeps its
+        // NotCommitted (the commit at that index belongs to someone else).
+        if let Some(expected) = self.proposed_entries.get(&(range_id, index)).cloned() {
+            let snapshot_index = self.snapshot_index(leader, range_id);
+            let actual = self
+                .nodes
+                .get(&leader)
+                .and_then(|n| n.ranges.get(&range_id))
+                .and_then(|p| p.log.iter().find(|e| e.index == index))
+                .map(|e| e.entry.clone());
+            match actual {
+                Some(actual) if actual == expected => {}
+                Some(_) => {
+                    // Index reused by a different entry — not this client's commit.
+                    self.proposed_entries.remove(&(range_id, index));
+                    self.drop_pending_version_notes_from(range_id, index);
+                    return Ok(false);
+                }
+                None if snapshot_index >= index => {
+                    // Compacted past the index: the prefix (whatever entries
+                    // it held) applied; judge by the watermark as before.
+                }
+                None => {
+                    self.proposed_entries.remove(&(range_id, index));
+                    self.drop_pending_version_notes_from(range_id, index);
+                    return Ok(false);
+                }
+            }
+        }
         if commit >= index {
             let ids = self.ids.clone();
             for &nid in &ids {
@@ -4176,6 +4350,8 @@ impl<E: Env> StoreCluster<E> {
             // OCC/SI version history — must run even when put() returned NotCommitted.
             self.flush_version_notes_through(range_id, index)?;
             self.maybe_compact_logs(range_id)?;
+            // Resolution done — stop tracking this propose's entry.
+            self.proposed_entries.remove(&(range_id, index));
             // Heartbeat commit to followers.
             if self.is_local_node(leader) && self.is_participating(leader) {
                 let _ = self.broadcast_append(range_id, leader, None);
@@ -4183,7 +4359,7 @@ impl<E: Env> StoreCluster<E> {
             Ok(true)
         } else if abort_if_uncommitted {
             self.discard_uncommitted_from(range_id, leader, index)?;
-            self.drop_pending_version_notes_from(range_id, index);
+            self.proposed_entries.remove(&(range_id, index));
             Ok(false)
         } else {
             Ok(false)
@@ -4272,6 +4448,30 @@ impl<E: Env> StoreCluster<E> {
     /// time; this path must re-persist the truncated log (and applied cursor if
     /// clamped) so a process reopen cannot resurrect an orphan (I-MAJ-3 / I-DCS-5).
     fn discard_uncommitted_from(&mut self, rid: u64, leader: u64, from_index: u64) -> Result<()> {
+        // F-found (RFC-0059 swarm, seeds 49/865): an entry that already
+        // left **some** leader on the wire (acked **or still in flight**)
+        // must NOT be discarded. `match_index` alone missed the in-flight
+        // case: the freed index was reused within the same term, and the
+        // crossed copy then let two different payloads share one
+        // (index, term) — the retained follower copy applied against the
+        // leader's replacement (phantom value), and in the fully-escaped
+        // case the commit advanced past the reused index reporting the
+        // client's put Ok while its value was erased everywhere. Keep the
+        // entry: the client already saw NotCommitted (commit-unknown), and
+        // the entry commits or not on its own quorum fate. Index identity
+        // within a term is the Raft invariant that must never break. Any
+        // node may be the (former) leader that sent it — scan them all.
+        let escaped = self.nodes.values().any(|n| {
+            n.ranges
+                .get(&rid)
+                .map(|p| p.sent_through.values().any(|&si| si >= from_index))
+                .unwrap_or(false)
+        });
+        if escaped {
+            // Entry (and anything after it still in flight) keeps its
+            // quorum fate — its OCC notes must survive to match.
+            return Ok(()) ;
+        }
         let ids = self.ids.clone();
         for &nid in &ids {
             let Some(n) = self.nodes.get_mut(&nid) else {
@@ -4309,7 +4509,17 @@ impl<E: Env> StoreCluster<E> {
                 }
             }
         }
-        self.drop_pending_version_notes_from(rid, from_index);
+        // Notes for exactly the pruned suffix (leader cut), never a blanket
+        // from-index drop: later entries with the leader's own commit < their
+        // index still lose their entries here (retain < cut removes them) and
+        // take their notes with them; earlier-than-cut indexes keep both.
+        let leader_cut = self
+            .nodes
+            .get(&leader)
+            .and_then(|n| n.ranges.get(&rid))
+            .map(|p| txn_kernel::discard_cut(from_index, p.commit))
+            .unwrap_or(from_index);
+        self.drop_pending_version_notes_from_cut(rid, leader_cut);
         if let Some(p) = self
             .nodes
             .get_mut(&leader)
@@ -5688,6 +5898,16 @@ impl<E: Env> StoreCluster<E> {
             .retain(|(r, i), _| !(*r == range_id && *i >= from_index));
     }
 
+    /// F-found companion (RFC-0059 swarm, seed 49): drop notes only for
+    /// indexes the discard actually pruned (>= the leader's `cut`), never
+    /// `from_index` — with the escape check keeping later entries alive,
+    /// an from-index drop would strip the OCC notes of entries that still
+    /// commit (silent versionless apply).
+    fn drop_pending_version_notes_from_cut(&mut self, range_id: u64, cut: u64) {
+        self.pending_version_notes
+            .retain(|(r, i), _| !(*r == range_id && *i >= cut));
+    }
+
     /// Value of `key` as of snapshot generation `R` (RFC-0023 SI).
     ///
     /// Does **not** return commits with generation `> R`. Own-TX write buffering is
@@ -6016,6 +6236,21 @@ impl<E: Env> StoreCluster<E> {
             return Vec::new();
         };
         let Some(n) = self.nodes.get(&id) else {
+            return Vec::new();
+        };
+        n.db.changes_after(from_seq)
+    }
+
+    /// RFC-0059 diagnostics: that node's own changelog entries (WAL
+    /// writes it applied locally), independent of reader election.
+    /// Invariant checkers use the union across participating nodes as
+    /// ground truth; a single reader can lag under faults.
+    pub fn changelog_on(
+        &self,
+        node_id: u64,
+        from_seq: u64,
+    ) -> Vec<pedradb_core::ChangeEntry> {
+        let Some(n) = self.nodes.get(&node_id) else {
             return Vec::new();
         };
         n.db.changes_after(from_seq)

@@ -135,11 +135,9 @@ unsafe fn submit_sqe(state: &mut UringState, entry: io_uring::squeue::Entry) -> 
             submit_complete_act(submit_ok, harvested.is_some()),
             harvested,
         ) {
-            (SubmitCompleteAct::UseHarvested, Some(mut res)) => {
+            (SubmitCompleteAct::UseHarvested, Some(res)) => {
                 #[cfg(test)]
-                if let Some(over) = state.inject_cqe.take() {
-                    res = over;
-                }
+                let res = state.inject_cqe.take().unwrap_or(res);
                 return Ok(res);
             }
             (SubmitCompleteAct::UseHarvested, None) => {

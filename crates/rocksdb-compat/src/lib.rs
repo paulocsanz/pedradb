@@ -1624,6 +1624,37 @@ impl DB<IoUringEnv> {
     }
 }
 
+impl DB<StdEnv> {
+    /// RFC-0058 verified profile: `StdEnv` pinned (no io_uring ring),
+    /// [`pedradb_core::OpenOptions::verified`] forced (sync, strongest WAL
+    /// data class, fail-closed recovery) and the lone-commit-only group
+    /// pin. Perf knobs of `opts` (memtable, blob threshold, reclaim) still
+    /// apply. Same host compact worker as [`DB::open_cf`].
+    ///
+    /// # Errors
+    /// Pedra open errors; duplicate CF names.
+    pub fn open_verified(
+        opts: &Options,
+        path: impl AsRef<std::path::Path>,
+        cfs: &[&str],
+    ) -> Result<Self> {
+        let mut db = Self::open_cf_inner(opts, path, cfs, StdEnv::default(), true)?;
+        let (tx, th) = spawn_compact_worker(
+            db.inner.clone(),
+            Arc::clone(&db.compact_gate),
+            db.auto_resume_transient,
+            Arc::clone(&db.fence_recovery),
+            opts.background_error_listener.clone(),
+        );
+        if th.is_some() {
+            db.inner.set_defer_auto_compact(true);
+            db.compact_tx = tx;
+            db.compact_thread = th;
+        }
+        Ok(db)
+    }
+}
+
 impl<E: Env> DB<E> {
     /// Open with an explicit [`Env`] (adversarial `FailingEnv` campaigns).
     ///
@@ -1635,7 +1666,7 @@ impl<E: Env> DB<E> {
         cfs: &[&str],
         env: E,
     ) -> Result<Self> {
-        Self::open_cf_inner(opts, path, cfs, env)
+        Self::open_cf_inner(opts, path, cfs, env, false)
     }
 
     fn open_cf_inner(
@@ -1643,6 +1674,7 @@ impl<E: Env> DB<E> {
         path: impl AsRef<std::path::Path>,
         cfs: &[&str],
         env: E,
+        verified: bool,
     ) -> Result<Self> {
         let dir = path.as_ref();
         if !dir.exists() {
@@ -1722,12 +1754,22 @@ impl<E: Env> DB<E> {
         store_cf_registry(dir, default_raw, &non_default)?;
         let mut names = vec![DEFAULT_CF.to_string()];
         names.extend(non_default);
-        let mut core_opts = pedradb_core::OpenOptions::default();
-        core_opts.sync = opts.sync;
-        core_opts.wal_full_fsync = opts.wal_full_fsync;
-        core_opts.wal_recovery = match opts.wal_recovery {
-            WalRecoveryMode::PointInTime => pedradb_core::WalRecovery::PointInTime,
-            WalRecoveryMode::FailClosed => pedradb_core::WalRecovery::FailClosed,
+        // RFC-0058 verified profile: the file composition is declared, not
+        // caller-negotiated — sync + strongest data class + fail-closed
+        // recovery are forced. Performance knobs (memtable/auto-flush, blob
+        // threshold, reclaim) stay caller's.
+        let mut core_opts = if verified {
+            pedradb_core::OpenOptions::verified()
+        } else {
+            pedradb_core::OpenOptions {
+                sync: opts.sync,
+                wal_full_fsync: opts.wal_full_fsync,
+                wal_recovery: match opts.wal_recovery {
+                    WalRecoveryMode::PointInTime => pedradb_core::WalRecovery::PointInTime,
+                    WalRecoveryMode::FailClosed => pedradb_core::WalRecovery::FailClosed,
+                },
+                ..pedradb_core::OpenOptions::default()
+            }
         };
         core_opts.auto_flush_bytes = if opts.write_buffer_size == 0 {
             None
@@ -1738,6 +1780,11 @@ impl<E: Env> DB<E> {
             core_opts.large_value_threshold = Some(opts.min_blob_size as usize);
         }
         let db = ConcurrentDb::open_with_env(dir, core_opts, env)?;
+        if verified {
+            // Lone-commit-only: every commit a single-writer critical
+            // section until the group-commit kernel (RFC-0057 P2.1).
+            db.pin_verified();
+        }
         if opts.enable_blob_files {
             if let Some(n) = opts.blob_file_size {
                 db.set_vlog_rotate_bytes(Some(n));
@@ -2370,6 +2417,13 @@ impl<E: Env> DB<E> {
     #[must_use]
     pub fn write_group_stats(&self) -> (u64, u64, u64, u64) {
         self.inner.write_group_stats()
+    }
+
+    /// Whether the verified group policy is pinned (RFC-0058:
+    /// [`DB::open_verified`] lone-commit-only).
+    #[must_use]
+    pub fn is_verified(&self) -> bool {
+        self.inner.is_verified()
     }
 
     /// Kernel [`pedradb_core::DbStats`] (mem/SST counters). RFC-0054 probe.
@@ -3045,13 +3099,17 @@ fn compat_resume<E: Env>(
     }
 }
 
-fn spawn_compact_worker(
-    inner: ConcurrentDb<IoUringEnv>,
+fn spawn_compact_worker<E>(
+    inner: ConcurrentDb<E>,
     gate: Arc<Mutex<()>>,
     auto_resume_transient: bool,
     fence_sink: Arc<Mutex<Option<pedradb_core::FenceRecovery>>>,
     background_error_listener: Option<BackgroundErrorListener>,
-) -> (Option<SyncSender<CompactCmd>>, Option<JoinHandle<()>>) {
+) -> (Option<SyncSender<CompactCmd>>, Option<JoinHandle<()>>)
+where
+    E: Env + Send + Sync + 'static,
+    E::File: Send + Sync + 'static,
+{
     let (tx, rx) = mpsc::sync_channel(1);
     let handle = thread::Builder::new()
         .name("pedra-compat-compact".into())
@@ -3573,6 +3631,28 @@ mod tests {
     #[test]
     fn default_write_buffer_is_4_mib() {
         assert_eq!(Options::new().write_buffer_size, 4 * 1024 * 1024);
+    }
+
+    /// RFC-0058 P1.1: `open_verified` pins `StdEnv` (the type is the
+    /// no-ring assertion), forces the profile options and the lone-only
+    /// pin; writes never queue (single-writer critical sections).
+    #[test]
+    fn open_verified_pins_lone_profile() {
+        let d = tmp("verified");
+        let mut opts = Options::new();
+        opts.create_if_missing(true);
+        let db: DB<StdEnv> = DB::open_verified(&opts, &d, &[]).unwrap();
+        assert!(db.is_verified(), "verified constructor must pin");
+        for i in 0..8u8 {
+            db.put([b'k', i], [b'v', i]).unwrap();
+        }
+        let (submits, queued, batches, _ops) = db.write_group_stats();
+        assert_eq!(submits, 8);
+        assert_eq!(queued, 0, "verified compat must never merge writers");
+        assert_eq!(batches, submits);
+        assert_eq!(db.get(&[b'k', 3]).unwrap().as_deref(), Some(&[b'v', 3][..]));
+        drop(db);
+        let _ = std::fs::remove_dir_all(&d);
     }
 
     #[test]
@@ -4488,10 +4568,9 @@ mod tests {
             db.put(b"hot", format!("v{i}").as_bytes()).unwrap();
         }
         // Drain the compat worker's fold ticks synchronously (write lock).
-        let mut folded = 0;
         for _ in 0..64 {
             if db.inner.fold_parked_once_off_lock() {
-                folded += 1;
+                // folded — keep draining until the worker parks
             } else {
                 break;
             }

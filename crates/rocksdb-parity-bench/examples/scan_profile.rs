@@ -37,7 +37,6 @@ fn main() {
     r.seed(&e); // 2 versions/record via batched commits (same as run_deps)
                 // Apply shape (same loop as run_deps step 1): per op, batch=8 picks →
                 // prewrite batch + commit batch.
-    let mut rng = 0x5EED_0042_u64;
     let yval = vec![b'd'; payload];
     let mut vers = vec![0u64; records];
     let mut zrng = 0u64;
@@ -84,7 +83,6 @@ fn main() {
         assert!(e.batch(std::mem::take(&mut pre)));
         assert!(e.batch(std::mem::take(&mut com)));
     }
-    drop(rng);
     e.reset_read_probe();
     // Top the active memtable back up to the bench-time state (~30k entries):
     // apply batches until the probe shows a resident memtable again.

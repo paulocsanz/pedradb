@@ -103,6 +103,16 @@ impl FaultEnv {
         )
     }
 
+    /// Open a DB with the **verified profile** options (RFC-0058 P0.2):
+    /// `OpenOptions::verified()` — sync forced true, strongest WAL data
+    /// class, fail-closed recovery. Same media faults apply.
+    ///
+    /// # Errors
+    /// Propagates [`Db::open_with`].
+    pub fn open_verified(&self) -> Result<Db> {
+        Db::open_with(&self.dir, DbOpen::verified())
+    }
+
     /// Path of the active WAL file.
     #[must_use]
     pub fn wal_path(&self) -> PathBuf {
@@ -2148,5 +2158,160 @@ mod tests {
         );
         let _ = db.close();
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    // ---- RFC-0058 P0.2: the FailingEnv battery on the verified profile
+    // (`OpenOptions::verified()`). Same fault classes as the twins above;
+    // oracles must hold identically (silent_wrong = 0, fail-closed).
+
+    fn vrf_dir(tag: &str) -> PathBuf {
+        parent().join(format!(
+            "pedradb-vrf-{tag}-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ))
+    }
+
+    /// Verified twin of `scenario_crash_after_sync_survives`: durable put →
+    /// process kill → reopen keeps the acked key.
+    #[test]
+    fn verified_crash_after_sync_survives() {
+        let env = FaultEnv::new(parent()).unwrap();
+        {
+            let mut db = env.open_verified().unwrap();
+            db.put(b"durable", b"yes").unwrap();
+            std::mem::forget(db);
+        }
+        let db = env.open_verified().unwrap();
+        assert_eq!(db.get(b"durable").as_deref(), Some(b"yes".as_ref()));
+        env.cleanup();
+    }
+
+    /// Verified twin of `scenario_truncated_tail_loses_unsynced_suffix`:
+    /// power-loss tail drop keeps the durable prefix, invents nothing.
+    #[test]
+    fn verified_truncated_tail_loses_unsynced_suffix() {
+        let env = FaultEnv::new(parent()).unwrap();
+        {
+            let mut db = env.open_verified().unwrap();
+            db.apply_batch([BatchOp::put(b"keep", b"1"), BatchOp::put(b"keep2", b"2")])
+                .unwrap();
+            db.close().unwrap();
+        }
+        let prefix_len = env.wal_len().unwrap();
+        {
+            let mut db = env.open_verified().unwrap();
+            db.put(b"lost", b"x").unwrap();
+            db.close().unwrap();
+        }
+        env.truncate_wal_to(prefix_len).unwrap();
+        let db = env.open_verified().unwrap();
+        assert_eq!(db.get(b"keep").as_deref(), Some(b"1".as_ref()));
+        assert_eq!(db.get(b"keep2").as_deref(), Some(b"2".as_ref()));
+        assert_eq!(db.get(b"lost"), None);
+        env.cleanup();
+    }
+
+    /// Verified twin of `failing_env_nth_put_then_reopen_recovers_prefix`:
+    /// injected EIO on the write path → Err; reopen keeps the acked prefix.
+    #[test]
+    fn verified_nth_put_eio_reopen_keeps_prefix() {
+        use pedradb_core::OpenOptions;
+        let dir = vrf_dir("eio");
+        let _ = fs::remove_dir_all(&dir);
+        let env = FailingEnv::passing();
+        let mut db =
+            Db::open_with_env(&dir, OpenOptions::verified(), env.clone()).unwrap();
+        db.put(b"keep", b"1").unwrap();
+        env.arm_one_failure();
+        assert!(db.put(b"lost", b"x").is_err(), "must inject");
+        assert!(env.tripped());
+        drop(db);
+        env.disarm();
+        let db = Db::open_with_env(&dir, OpenOptions::verified(), env).unwrap();
+        assert_eq!(db.get(b"keep").as_deref(), Some(b"1".as_ref()));
+        let _ = db.close();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Verified twin of `sync_fail_after_append_fences_until_reopen`: WAL
+    /// sync EIO → fence (fail-closed), unacked write invisible, further
+    /// puts refused, reopen heals with the acked prefix only.
+    #[test]
+    fn verified_sync_fail_fences_fail_closed() {
+        use pedradb_core::{CoreError, Db, OpenOptions};
+        let dir = vrf_dir("fence");
+        let _ = fs::remove_dir_all(&dir);
+        let env = FailingEnv::passing();
+        let mut db =
+            Db::open_with_env(&dir, OpenOptions::verified(), env.clone()).unwrap();
+        db.put(b"a", b"1").unwrap();
+        assert!(!db.is_durability_fenced());
+        env.arm_with_kind(0, false, FaultKind::SyncFail);
+        let err = db.put(b"b", b"2").unwrap_err();
+        assert!(
+            matches!(err, CoreError::Io(_)) || err.to_string().contains("sync"),
+            "injected sync err expected, got {err:?}"
+        );
+        assert!(db.is_durability_fenced());
+        assert!(db.get(b"b").is_none(), "unacked write must be invisible");
+        assert!(matches!(
+            db.put(b"c", b"3"),
+            Err(CoreError::DurabilityFenced)
+        ));
+        drop(db);
+        env.disarm();
+        let db = Db::open_with_env(&dir, OpenOptions::verified(), env).unwrap();
+        assert!(!db.is_durability_fenced());
+        assert_eq!(db.get(b"a").as_deref(), Some(b"1".as_ref()));
+        // Append succeeded before the sync fail → WAL recovery may surface
+        // `b` (same as the non-verified twin); `c` was refused by the
+        // fence and must never appear.
+        assert_eq!(
+            db.get(b"b").as_deref(),
+            Some(b"2".as_ref()),
+            "failed-sync write still recoverable from WAL after reopen"
+        );
+        assert!(db.get(b"c").is_none(), "fenced put must not appear");
+        let _ = db.close();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Verified twins of the multi-key TX crash pair: committed TX is
+    /// all-visible after a kill; uncommitted TX leaves no half state.
+    #[test]
+    fn verified_multi_key_tx_crash_no_half() {
+        let env = FaultEnv::new(parent()).unwrap();
+        {
+            let mut db = env.open_verified().unwrap();
+            let mut tx = db.begin();
+            tx.put(b"row", b"R").unwrap();
+            tx.put(b"idx", b"I").unwrap();
+            tx.commit().unwrap();
+            std::mem::forget(db);
+        }
+        let db = env.open_verified().unwrap();
+        assert_eq!(db.get(b"row").as_deref(), Some(b"R".as_ref()));
+        assert_eq!(db.get(b"idx").as_deref(), Some(b"I".as_ref()));
+        let _ = db.close();
+        env.cleanup();
+
+        let env = FaultEnv::new(parent()).unwrap();
+        {
+            let mut db = env.open_verified().unwrap();
+            db.put(b"base", b"0").unwrap();
+            let mut tx = db.begin();
+            tx.put(b"h1", b"1").unwrap();
+            tx.put(b"h2", b"2").unwrap();
+            std::mem::forget(tx);
+            std::mem::forget(db);
+        }
+        let db = env.open_verified().unwrap();
+        assert_eq!(db.get(b"base").as_deref(), Some(b"0".as_ref()));
+        assert_eq!(db.get(b"h1"), None);
+        assert_eq!(db.get(b"h2"), None);
+        env.cleanup();
     }
 }

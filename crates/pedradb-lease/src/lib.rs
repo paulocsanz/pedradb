@@ -8,7 +8,7 @@
 #![warn(missing_docs)]
 
 use bytes::Bytes;
-use pedradb_core::{ConcurrentDb, CoreError, Db, Env, OpenOptions, Result, SequenceNumber};
+use pedradb_core::{ConcurrentDb, CoreError, Db, Env, OpenOptions, Result, SequenceNumber, StdEnv};
 use pedradb_io_uring::IoUringEnv;
 use std::path::Path;
 
@@ -73,7 +73,28 @@ impl LeaseStore<IoUringEnv> {
     }
 }
 
+impl LeaseStore<StdEnv> {
+    /// RFC-0058 P1.1 verified profile: `StdEnv` pinned (no io_uring ring),
+    /// [`OpenOptions::verified`] and the lone-commit-only group pin — CAS
+    /// lease writes are single-writer critical sections.
+    ///
+    /// # Errors
+    /// Open I/O.
+    pub fn open_verified(path: impl AsRef<Path>) -> Result<Self> {
+        Ok(Self {
+            db: ConcurrentDb::open_verified(path)?,
+        })
+    }
+}
+
 impl<E: Env> LeaseStore<E> {
+    /// Whether the verified group policy is pinned
+    /// ([`ConcurrentDb::pin_verified`], RFC-0058).
+    #[must_use]
+    pub fn is_verified(&self) -> bool {
+        self.db.is_verified()
+    }
+
     /// Wrap an existing concurrent DB (e.g. after `Db::open_with_env` + convert).
     #[must_use]
     pub fn from_concurrent(db: ConcurrentDb<E>) -> Self {
@@ -328,6 +349,23 @@ mod tests {
         assert!(store.try_release(b"x", b"c").unwrap());
         assert!(store.holder(b"x").is_none());
         let _ = store.try_acquire(b"x", b"e").unwrap().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0058 P1.1: `open_verified` pins `StdEnv` (the type **is** the
+    /// no-ring assertion — `LeaseStore<StdEnv>` cannot hold the io_uring
+    /// backend) and the lone-commit-only group pin; the CAS lease path
+    /// works unchanged under the profile.
+    #[test]
+    fn open_verified_pins_std_env() {
+        let dir = temp_dir();
+        let store: LeaseStore<StdEnv> = LeaseStore::open_verified(&dir).unwrap();
+        assert!(store.is_verified(), "verified constructor must pin");
+        let s1 = store.try_acquire(b"vx", b"a").unwrap().unwrap();
+        assert!(store.try_acquire(b"vx", b"b").unwrap().is_none());
+        assert_eq!(store.holder(b"vx").as_deref(), Some(b"a".as_ref()));
+        assert!(store.try_release(b"vx", b"a").unwrap());
+        assert!(s1 > 0);
         let _ = fs::remove_dir_all(&dir);
     }
 

@@ -41,7 +41,7 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::time::{Duration, Instant};
 
-use pedradb_core::{Db, Env, Host, OpenOptions, Result as CoreResult};
+use pedradb_core::{Db, Env, Host, OpenOptions, Result as CoreResult, StdEnv};
 use pedradb_io_uring::IoUringEnv;
 use thiserror::Error;
 
@@ -224,6 +224,20 @@ impl<C: Clock> Dcs<C, IoUringEnv> {
     /// PedraDB open.
     pub fn open_with_clock(path: impl AsRef<Path>, clock: C) -> Result<Self> {
         Self::open_with_env_clock(path, IoUringEnv::default(), clock)
+    }
+}
+
+impl<C: Clock> Dcs<C, StdEnv> {
+    /// RFC-0058 P1.1 verified profile: `StdEnv` pinned (no io_uring ring)
+    /// with [`OpenOptions::verified`] — sync forced, strongest WAL data
+    /// class, fail-closed recovery. DCS keeps auto-flush off (system keys,
+    /// batch replay).
+    ///
+    /// # Errors
+    /// PedraDB open.
+    pub fn open_verified(path: impl AsRef<Path>, clock: C) -> Result<Self> {
+        let db = Db::open_with_env(path, OpenOptions::verified(), StdEnv)?;
+        Self::from_open_db(db, clock)
     }
 }
 
@@ -658,6 +672,24 @@ mod tests {
         assert_eq!(dcs.get(b"a").unwrap().value, b"2");
         assert_eq!(r2, 2);
 
+        dcs.delete(b"a").unwrap();
+        assert!(dcs.get(b"a").is_none());
+        dcs.close().unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0058 P1.1: `open_verified` pins `StdEnv` (the type is the
+    /// no-ring assertion) with `OpenOptions::verified()`; kv + CAS work
+    /// unchanged under the profile.
+    #[test]
+    fn open_verified_pins_std_env() {
+        let dir = temp_dir("verified");
+        let mut dcs: Dcs<ManualClock, StdEnv> =
+            Dcs::open_verified(&dir, ManualClock::new()).unwrap();
+        assert_eq!(dcs.put(b"a", b"1", 0).unwrap(), 1);
+        let r2 = dcs.cas(b"a", b"2", 1, 0).unwrap();
+        assert_eq!(r2, 2);
+        assert_eq!(dcs.get(b"a").unwrap().value, b"2");
         dcs.delete(b"a").unwrap();
         assert!(dcs.get(b"a").is_none());
         dcs.close().unwrap();

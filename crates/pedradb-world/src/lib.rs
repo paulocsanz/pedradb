@@ -16,6 +16,9 @@ pub mod pct;
 pub mod pct_concurrent;
 pub mod schedule;
 pub mod scheduler;
+/// Parallel swarm executor over World seeds (RFC-0057 P0.3).
+pub mod swarm;
+pub mod wenv;
 
 pub use buggify::{buggify_schedule_from_seed, BuggifyArm, BuggifySchedule};
 pub use coverage::{CoverageMask, SEAM_IDS};
@@ -26,7 +29,9 @@ use std::path::{Path, PathBuf};
 
 use pedradb_core::SeedRng;
 use pedradb_sim::{FailingEnv, FaultKind, OpClass};
-use pedradb_store::{meta_key, RpcMode, StoreCluster, StoreError};
+use pedradb_store::{meta_key, RpcMode, StoreCluster, StoreError, StoreOpenOptions};
+
+use crate::wenv::WorldEnv;
 
 use buggify::arm_to_disk_kind;
 use net::{InProcessNet, MembershipFault, Net};
@@ -116,6 +121,10 @@ pub struct Trace {
     /// G2 violations: a canary node ended with a partial index row (some
     /// keys present, some absent) or a secondary pointing elsewhere.
     pub row_half_indexed: u32,
+    /// RFC-0059 P0.2: cross-node consistency invariant violations after
+    /// the convergence tail (authenticity / split-brain / resurrection).
+    /// 0 when `consistency_check` is off and nothing ran.
+    pub consistency_violations: u32,
 }
 
 impl Trace {
@@ -171,6 +180,35 @@ pub struct WorldConfig {
     /// schedule; oracle = independent replay of the same changes
     /// (`fold_mismatch == 0`), cursor reaches the last change seq.
     pub fold_role: bool,
+    /// RFC-0058 P0.2: open every node with the **verified profile**
+    /// (`StoreOpenOptions::pedra_verified` — `OpenOptions::verified()`
+    /// per node: sync forced true, fail-closed recovery). Default false.
+    pub verified: bool,
+    /// RFC-0059 P0.2: cross-node **consistency invariants** at end of run
+    /// (FDB-style invariant checker, single-shard shape): heal the net
+    /// tail, pump to quiescence, then check (a) authenticity — every
+    /// visible value is a real changelog entry for that key — (b) no
+    /// split brain — no two distinct values each visible on a majority
+    /// of participating nodes — (c) no resurrection — latest changelog
+    /// entry is a delete yet a majority still holds a value. Violations
+    /// land in `Trace::consistency_violations` (must be 0).
+    pub consistency_check: bool,
+    /// WAL barrier data class for the simulated nodes. Default `false`
+    /// (RFC-0059): the `fdatasync` weak class — same barrier call and
+    /// same fault seam (`OpClass::Sync` gates both), but without the
+    /// wall-clock cost of `F_FULLFSYNC`, which serializes across the
+    /// volume and caps swarm parallelism. The **product** default stays
+    /// the strongest class (`StoreOpenOptions::pedra_wal_full_fsync`);
+    /// `verified: true` pins it regardless of this flag.
+    pub wal_full_fsync: bool,
+    /// RFC-0059 P0.1: run nodes on the in-memory virtual FS
+    /// (`WorldEnv::Mem`) instead of the real filesystem. Same engine
+    /// code paths and the same `FailingEnv` fault seams (arms gate ops
+    /// in the wrapper, not the backing store); removes host-I/O
+    /// serialization so swarm throughput scales with cores. Default
+    /// `false` (real-FS runs keep exercising extent preallocation and
+    /// real barrier syscalls).
+    pub mem_storage: bool,
 }
 
 impl Default for WorldConfig {
@@ -190,6 +228,10 @@ impl Default for WorldConfig {
             buggify_arm_mask: None,
             node_step_pct: false,
             fold_role: false,
+            verified: false,
+            consistency_check: false,
+            wal_full_fsync: false,
+            mem_storage: false,
         }
     }
 }
@@ -277,21 +319,30 @@ impl World {
         let _ = std::fs::remove_dir_all(&parent);
         std::fs::create_dir_all(&parent).map_err(|e| WorldError::Store(e.to_string()))?;
 
-        let mut disks: HashMap<u64, FailingEnv> = HashMap::new();
+        let mut disks: HashMap<u64, WorldEnv> = HashMap::new();
         let mut envs = Vec::with_capacity(self.cfg.n_nodes as usize);
         for id in 1..=self.cfg.n_nodes {
-            let env = FailingEnv::passing();
+            let env = WorldEnv::passing(self.cfg.mem_storage);
             disks.insert(id, env.clone());
             envs.push(env);
         }
 
         let rng = SeedRng::new(self.seed);
-        let mut cluster = StoreCluster::open_with_envs_rng(
+        // RFC-0058 P0.2: `verified` runs open every node with the profile
+        // options (same call otherwise — default StoreOpenOptions keeps the
+        // historical behavior).
+        let store_opts = StoreOpenOptions {
+            pedra_verified: self.cfg.verified,
+            pedra_wal_full_fsync: self.cfg.wal_full_fsync,
+            ..StoreOpenOptions::default()
+        };
+        let mut cluster = StoreCluster::open_with_envs_rng_opts(
             &parent,
             self.cfg.n_nodes,
             self.cfg.n_ranges,
             envs,
             rng,
+            store_opts,
         )
         .map_err(|e| WorldError::Store(e.to_string()))?;
         cluster.set_rpc_mode(RpcMode::Queued);
@@ -357,6 +408,7 @@ impl World {
             fold_mismatch: 0,
             commit_unknown: 0,
             row_half_indexed: 0,
+            consistency_violations: 0,
         };
 
         let arm_enabled = |idx: usize| -> bool {
@@ -450,6 +502,220 @@ impl World {
 
         // Final safety sample after last step.
         self.sample_safety(u32::MAX, &cluster, &mut trace);
+
+        // RFC-0059 P0.2: cross-node consistency invariants (FDB-style
+        // invariant checker, single-shard shape). Heal the net tail so a
+        // *converged* state is what gets judged — lag from message loss
+        // during the faulted schedule is legitimate; a converged state
+        // with a phantom value, two majority values, or a resurrected
+        // delete is a real violation. Partitions stay: offline nodes are
+        // excluded via `is_participating`.
+        if self.cfg.consistency_check {
+            net.set_drop_ppm(0);
+            net.set_corrupt_ppm(0);
+            net.set_max_delay(1);
+            self.exchange(&mut cluster, &mut net, &mut trace, u32::MAX, "converge")?;
+
+            // Ground truth: the UNION of every participating node's
+            // changelog — the same committed-truth source the fold role
+            // replays. A single "best reader" node can lag behind a
+            // crash/partition tail and would flag committed values as
+            // phantoms; a value any participant applied is authentic.
+            // Sequences are per-node WAL counters (not comparable
+            // across nodes), so "latest entry" is judged per node: a
+            // delete proven committed by ANY participant forbids a
+            // majority still serving the key.
+            // Scope = user-visible keyspaces only (`k…` KV rows and
+            // `d/k/…` DCS rows). Excluded, per layer, because they are
+            // private bookkeeping legitimately written through local
+            // paths rather than the judged changelog: `\0store/`
+            // (engine: raft/intent/txn/meta/hist; user puts with that
+            // prefix are rejected), `m/` (range membership metadata),
+            // `d/m/` (DCS create/mod_rev/lease triplets) and `d/rev`
+            // (DCS revision counter).
+            const INTERNAL_ROOTS: [&[u8]; 4] =
+                [b"\0store/", b"m/", b"d/m/", b"d/rev"];
+            let is_user_key = |k: &[u8]| {
+                !INTERNAL_ROOTS.iter().any(|p| k.starts_with(p))
+            };
+            let part: Vec<u64> = cluster
+                .node_ids()
+                .iter()
+                .copied()
+                .filter(|&nid| cluster.is_participating(nid))
+                .collect();
+            let per_node: Vec<Vec<pedradb_core::ChangeEntry>> = part
+                .iter()
+                .map(|&nid| cluster.changelog_on(nid, 0))
+                .collect();
+            let mut history: HashMap<Vec<u8>, Vec<Vec<u8>>> = HashMap::new();
+            for changes in &per_node {
+                for e in changes {
+                    if matches!(e.kind, pedradb_core::ChangeKind::Put) && is_user_key(&e.key) {
+                        history
+                            .entry(e.key.to_vec())
+                            .or_default()
+                            .push(e.value.to_vec());
+                    }
+                }
+            }
+            // Latest user-key entry per participating node, in that
+            // node's seq order (DeleteRange covers every union-history
+            // key in [start, end) that the node has not superseded).
+            let mut node_latest: Vec<HashMap<Vec<u8>, (bool, u64)>> = Vec::with_capacity(part.len());
+            for changes in &per_node {
+                let mut latest: HashMap<Vec<u8>, (bool, u64)> = HashMap::new();
+                for e in changes {
+                    let seq = e.sequence;
+                    match e.kind {
+                        pedradb_core::ChangeKind::Put => {
+                            if is_user_key(&e.key) {
+                                latest.insert(e.key.to_vec(), (false, seq));
+                            }
+                        }
+                        pedradb_core::ChangeKind::Delete => {
+                            if is_user_key(&e.key) {
+                                latest.insert(e.key.to_vec(), (true, seq));
+                            }
+                        }
+                        pedradb_core::ChangeKind::DeleteRange => {
+                            for k in history.keys() {
+                                if k.as_slice() >= e.key.as_ref()
+                                    && k.as_slice() < e.value.as_ref()
+                                    && !latest
+                                        .get(k)
+                                        .is_some_and(|&(_, s)| s > seq)
+                                {
+                                    latest.insert(k.clone(), (true, seq));
+                                }
+                            }
+                        }
+                    }
+                }
+                node_latest.push(latest);
+            }
+            let maj = part.len() / 2 + 1;
+            let step = u32::MAX;
+            for (key, values) in &history {
+                let mut counts: HashMap<Vec<u8>, usize> = HashMap::new();
+                let mut any_visible = 0usize;
+                for &nid in &part {
+                    let Ok(v) = cluster.get_on(nid, key) else { continue };
+                    let Some(v) = v else { continue };
+                    any_visible += 1;
+                    // (a) authenticity: phantom value (never in history).
+                    if !values.iter().any(|hv| hv.as_slice() == v.as_ref()) {
+                        trace.consistency_violations += 1;
+                        // DBG: per-node ground truth for the phantom key.
+                        let dump: Vec<String> = cluster
+                            .node_ids()
+                            .iter()
+                            .map(|&nid| {
+                                let v = cluster.get_on(nid, key).ok().flatten();
+                                let snap = cluster.snapshot_index(nid, 1);
+                                let applied = cluster.applied_index(nid, 1);
+                                let changes: Vec<String> = cluster
+                                    .changelog_on(nid, 0)
+                                    .into_iter()
+                                    .filter(|e| e.key.as_ref() == key.as_slice())
+                                    .map(|e| {
+                                        format!("{:?}@{}={:02x?}", e.kind, e.sequence, e.value.as_ref())
+                                    })
+                                    .collect();
+                                format!("n{nid}:v={v:?},snap={snap},applied={applied},log={changes:?}")
+                            })
+                            .collect();
+                        trace.push(
+                            step,
+                            "consistency_phantom",
+                            format!(
+                                "k={:02x?} node={nid} v={:02x?} | {}",
+                                key,
+                                v.as_ref(),
+                                dump.join(" | ")
+                            ),
+                        );
+                        let raft: Vec<String> = cluster
+                            .node_ids()
+                            .iter()
+                            .map(|&nid| cluster.raft_debug_line(nid, 1))
+                            .collect();
+                        trace.push(step, "raft_debug", raft.join(" || "));
+                        continue;
+                    }
+                    *counts.entry(v.as_ref().to_vec()).or_insert(0) += 1;
+                }
+                // (b) split brain: two distinct values each on ≥ majority.
+                let majors = counts.values().filter(|&&c| c >= maj).count();
+                if majors > 1 {
+                    trace.consistency_violations += 1;
+                    trace.push(
+                        step,
+                        "consistency_split_brain",
+                        format!(
+                            "k={:02x?} majority_values={} visible={}",
+                            key, majors, any_visible
+                        ),
+                    );
+                }
+                // (c) resurrection: a delete proven committed by ANY
+                // participating node's own latest entry, yet a majority
+                // still shows a value. DCS rows (`d/…`) are exempt: lease
+                // revoke/expire deletes are local-by-design (non-raft);
+                // served invisibility for expired leases is enforced at
+                // read time by the DCS layer, not by row absence.
+                let is_dcs = key.as_slice().starts_with(b"d/");
+                let delete_proven = node_latest
+                    .iter()
+                    .any(|latest| latest.get(key).is_some_and(|&(d, _)| d));
+                if !is_dcs && delete_proven && any_visible >= maj {
+                    trace.consistency_violations += 1;
+                    // DBG: which node proves the delete and what each
+                    // node's own latest entry for the key is.
+                    let proofs: Vec<String> = part
+                        .iter()
+                        .zip(&node_latest)
+                        .map(|(nid, latest)| {
+                            let e = latest
+                                .get(key)
+                                .map_or("none".to_string(), |&(d, s)| {
+                                    format!("{}@{s}", if d { "del" } else { "put" })
+                                });
+                            let v = cluster.get_on(*nid, key).ok().flatten();
+                            let hist: Vec<String> = cluster
+                                .changelog_on(*nid, 0)
+                                .into_iter()
+                                .filter(|c| c.key.as_ref() == key.as_slice())
+                                .map(|c| {
+                                    format!(
+                                        "{:?}@{}={:02x?}",
+                                        c.kind,
+                                        c.sequence,
+                                        c.value.as_ref()
+                                    )
+                                })
+                                .collect();
+                            format!("n{nid}:latest={e},v={v:?},hist={hist:?}")
+                        })
+                        .collect();
+                    let rid = cluster.locate(key).unwrap_or(0);
+                    let raft: Vec<String> = part
+                        .iter()
+                        .map(|&nid| cluster.raft_debug_line(nid, rid))
+                        .collect();
+                    trace.push(
+                        step,
+                        "consistency_resurrected",
+                        format!(
+                            "k={:02x?} deleted yet visible on {any_visible} | {} | RAFT {}",
+                            key,
+                            proofs.join(" | "),
+                            raft.join(" || ")
+                        ),
+                    );
+                }
+            }
+        }
 
         // RFC-0050 P2.3: one extra role on the same seed — a fold Storage
         // replica consumes the cluster changelog. Oracle = an independent
@@ -580,7 +846,7 @@ impl World {
 
     fn exchange(
         &self,
-        cluster: &mut StoreCluster<FailingEnv>,
+        cluster: &mut StoreCluster<WorldEnv>,
         net: &mut InProcessNet,
         trace: &mut Trace,
         step: u32,
@@ -636,7 +902,7 @@ impl World {
 
     fn pump_propose(
         &self,
-        cluster: &mut StoreCluster<FailingEnv>,
+        cluster: &mut StoreCluster<WorldEnv>,
         net: &mut InProcessNet,
         trace: &mut Trace,
         step: u32,
@@ -681,10 +947,10 @@ impl World {
         &self,
         step: u32,
         action: &Action,
-        cluster: &mut StoreCluster<FailingEnv>,
+        cluster: &mut StoreCluster<WorldEnv>,
         net: &mut InProcessNet,
         memb: &mut MembershipFault,
-        disks: &mut HashMap<u64, FailingEnv>,
+        disks: &mut HashMap<u64, WorldEnv>,
         trace: &mut Trace,
         cov: &mut CoverageMask,
     ) -> Result<()> {
@@ -748,10 +1014,18 @@ impl World {
                                 if cluster.range_leader(rid).is_some() {
                                     trace.silent_wrong += 1;
                                     trace.false_majority += 1;
+                                    let raft: Vec<String> = cluster
+                                        .node_ids()
+                                        .iter()
+                                        .map(|&nid| cluster.raft_debug_line(nid, rid))
+                                        .collect();
                                     trace.push(
                                         step,
                                         "false_majority",
-                                        format!("k={key_tag} strong_none after put_ok seen={seen}"),
+                                        format!(
+                                            "k={key_tag} strong_none after put_ok seen={seen} | {}",
+                                            raft.join(" || ")
+                                        ),
                                     );
                                 }
                             }
@@ -894,6 +1168,11 @@ impl World {
                     if let Some(v) = &r {
                         if v.as_ref() != val.as_slice() {
                             trace.silent_wrong += 1;
+                            trace.push(
+                                step,
+                                "cu_row_wrong_val",
+                                format!("k={key_tag} n={nid} v={:02x?}", v.as_ref()),
+                            );
                         }
                     }
                     for iv in [&n1, &n2] {
@@ -1166,7 +1445,7 @@ impl World {
     fn sample_safety(
         &self,
         step: u32,
-        cluster: &StoreCluster<FailingEnv>,
+        cluster: &StoreCluster<WorldEnv>,
         trace: &mut Trace,
     ) {
         // Probe key `k\x01` — always locatable in single-byte split.
@@ -1183,17 +1462,32 @@ impl World {
             rids.sort_unstable();
             rids.dedup();
         }
+        // One probe key per range: Strong fails closed on the KEY's range,
+        // so judging a read of `k\x01` by claims on an unrelated range
+        // flags legitimate reads (multi-range conflation). Map candidate
+        // workload keys to their ranges and probe each rid with a key it
+        // actually owns; skip ranges with no candidate key.
+        let mut probe_for: HashMap<u64, Vec<u8>> = HashMap::new();
+        for tag in 0u8..=255u8 {
+            let k = vec![b'k', tag];
+            if let Ok(r) = cluster.locate(&k) {
+                probe_for.entry(r).or_insert(k);
+            }
+        }
         for rid in rids {
             let claims = cluster.leader_claim_count(rid);
             if claims > trace.max_leader_claims {
                 trace.max_leader_claims = claims;
             }
             if claims > 1 {
+                let Some(pkey) = probe_for.get(&rid).cloned() else {
+                    continue;
+                };
                 // Any Strong Ok on any node while dual-claim is fail-open.
                 for &nid in cluster.node_ids() {
                     use pedradb_store::ReadPolicy;
                     if cluster
-                        .get_with_policy(nid, &probe, ReadPolicy::Strong)
+                        .get_with_policy(nid, &pkey, ReadPolicy::Strong)
                         .is_ok()
                     {
                         trace.dual_leader_fail_open += 1;
@@ -1211,7 +1505,7 @@ impl World {
 }
 
 #[allow(dead_code)]
-fn count_seen(cluster: &StoreCluster<FailingEnv>, key: &[u8], val: &[u8]) -> usize {
+fn count_seen(cluster: &StoreCluster<WorldEnv>, key: &[u8], val: &[u8]) -> usize {
     cluster
         .node_ids()
         .iter()
@@ -1254,7 +1548,7 @@ pub fn probe_dual_leader_fail_open<E: pedradb_core::Env>(
 
 /// `(seen_on_participating, participating_count, majority_threshold)`.
 fn count_seen_participating(
-    cluster: &StoreCluster<FailingEnv>,
+    cluster: &StoreCluster<WorldEnv>,
     key: &[u8],
     val: &[u8],
 ) -> (usize, usize, usize) {
@@ -1887,5 +2181,31 @@ mod tests {
         let t = World::new(0x5CE0_0001u64, cfg).run().unwrap();
         assert!(t.logical_now > 0);
         let _ = std::fs::remove_dir_all(&parent);
+    }
+
+    /// RFC-0058 P0.2: World DST on the verified profile — nodes open with
+    /// `OpenOptions::verified()` (sync forced true, fail-closed recovery)
+    /// under buggify faults; safety oracles must hold identically
+    /// (`silent_wrong == 0`, `fold_mismatch == 0`, `row_half_indexed == 0`).
+    #[test]
+    fn verified_world_run_oracles() {
+        for seed in [0x0058_0001u64, 0x0058_0002] {
+            let parent = temp_parent(&format!("verified-{seed:x}"));
+            let cfg = WorldConfig {
+                n_nodes: 3,
+                n_ranges: 1,
+                schedule_steps: 12,
+                buggify: true,
+                verified: true,
+                parent: parent.clone(),
+                ..Default::default()
+            };
+            let t = World::new(seed, cfg).run().unwrap();
+            assert_eq!(t.silent_wrong, 0, "seed {seed:x}: {t:?}");
+            assert_eq!(t.fold_mismatch, 0, "seed {seed:x}: {t:?}");
+            assert_eq!(t.row_half_indexed, 0, "seed {seed:x}: {t:?}");
+            assert!(t.events.len() > 5, "seed {seed:x} must actually run");
+            let _ = std::fs::remove_dir_all(&parent);
+        }
     }
 }

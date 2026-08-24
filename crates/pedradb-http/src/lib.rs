@@ -244,7 +244,10 @@ fn write_wire_err(stream: &mut TcpStream, e: &HttpError) {
     }
 }
 
-/// Extract bearer / X-Pedra-Token from headers.
+/// Extract bearer / X-Pedra-Token from headers (legacy extractor kept for
+/// the F149–F151 regression tests; production auth goes through
+/// [`authorize`] / [`authorization_matches`]).
+#[cfg(test)]
 fn header_token(headers: &[(String, String)]) -> Option<&str> {
     // F149: Authorization (RFC 9110) wins over X-Pedra-Token; custom header is
     // fallback only (was first-match and shadowed a valid Bearer).
@@ -271,7 +274,7 @@ fn authorize(headers: &[(String, String)], token: &Option<String>) -> bool {
         None => true,
         Some(t) if t.is_empty() => true,
         // F152: any extracted Bearer may match; first dummy Bearer used to 401
-        // a later valid one via header_token first-match.
+        // a later valid one under the old first-match extractor.
         Some(t) => authorization_matches(headers, t),
     }
 }

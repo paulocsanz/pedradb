@@ -41,6 +41,79 @@ jobs:
       - name: det_io hard CONTRACT-OK when sibling checkout present (RFC-0050 P2.4)
         run: bash scripts/det_io_status.sh /tmp/det_io.txt && cat /tmp/det_io.txt
 
+  # RFC-0057 P0.4 / RFC-0059 P1.1 — parallel World swarm in CI.
+  # Determinism gate is per-seed trace_hash (serial-vs-parallel + two
+  # identical runs); the campaign itself uses the in-memory node backend
+  # (same engine paths + fault seams, no host-I/O serialization).
+  # NOTE on preemption: OS thread preemption is real here — the gate is
+  # the per-seed hash, not wall-clock equality. Throughput numbers from
+  # CI runners are noisy; only failures/hashes are authoritative.
+  world-parallel:
+    name: world swarm parallel + determinism (RFC-0057 P0.4 / 0059 P1.1)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: swarm tests (serial-vs-parallel hash gate, throughput, scale 7/9)
+        run: |
+          cargo test -p pedradb-world --lib swarm -- --test-threads=1
+          cargo test -p pedradb-world --lib world_scale -- --test-threads=1
+          cargo test -p pedradb-world --lib world_regression -- --test-threads=1
+      - name: campaign 3 nodes (1024 seeds; exit 1 on any oracle failure)
+        run: |
+          cargo build --release -p pedradb-world --bin world_swarm
+          PEDRA_SWARM_LOG=findings/world-swarm-ci target/release/world_swarm 1024 1 0 3 12
+          ! grep -q '"ok":false' findings/world-swarm-ci/swarm.jsonl
+      - name: determinism (same campaign twice ⇒ identical per-seed hashes)
+        run: |
+          PEDRA_SWARM_LOG=/tmp/sw1 target/release/world_swarm 256 0x0059_C1 4 3 12
+          PEDRA_SWARM_LOG=/tmp/sw2 target/release/world_swarm 256 0x0059_C1 4 3 12
+          cmp /tmp/sw1/swarm.jsonl /tmp/sw2/swarm.jsonl
+      - name: campaign 7 nodes (256 seeds, multi-quorum)
+        run: target/release/world_swarm 256 0x0059_C7 0 7 12
+      - name: campaign 9 nodes 4 ranges (256 seeds, multi-range)
+        env:
+          PEDRA_SWARM_RANGES: "4"
+        run: target/release/world_swarm 256 0x0059_C9 0 9 12
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: world-swarm-campaign
+          path: findings/world-swarm-ci/
+
+  # RFC-0058 — verified mode (P1.4): the declared profile is a product
+  # surface; every change must keep its DST battery + the semantics
+  # derivation (P1.3) green. Formal kernels are already frozen by
+  # pedra_formal --ci (formal-glue job).
+  verified-mode:
+    name: verified mode (RFC-0058 P0.2+P1.3)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: profile invariant (report == catalog 44/44; options fixed)
+        run: cargo test -p pedradb-core --lib verified
+      - name: FailingEnv DST on the profile (crash / EIO / fence / TX)
+        run: cargo test -p pedradb-sim verified -- --test-threads=1
+      - name: World buggify oracles on the profile (silent_wrong=0)
+        run: cargo test -p pedradb-world --lib verified_world_run_oracles -- --test-threads=1
+      - name: "PCT: lone-commit-only + verified-vs-full derivation (P1.3)"
+        run: |
+          cargo test -p pedradb-world --features pct --lib pct_verified_lone_never_merges -- --test-threads=1
+          cargo test -p pedradb-world --features pct --lib verified_vs_full_same_oracles -- --test-threads=1
+      - name: compatv bench engine smoke (verified column wiring)
+        env:
+          ROCKS_YCSB_RECORDS: "128"
+          ROCKS_YCSB_OPS: "48"
+        run: |
+          cargo run -q --release -p rocksdb-parity-bench --bin rocks-parity-bench -- findings/rocks-parity-ci-verified compatv
+          python3 -c "import json; r=json.load(open('findings/rocks-parity-ci-verified/rocks_parity_bench.json')); assert r['engine']=='compatv', r; assert r['sync'] is True, r; assert 'verified profile' in r['durability'], r; assert r['status']=='ok', r"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: verified-mode-bench
+          path: findings/rocks-parity-ci-verified/rocks_parity_bench.json
+
   formal-glue:
     name: formal glue (lint + twins + Stateright)
     runs-on: ubuntu-latest
@@ -99,6 +172,22 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - name: race job
+        run: bash scripts/race_job.sh
+
+  # RFC-0052 P1 / RFC-0057 P1 / RFC-0059 P1.2 — TSan box. Sibling job,
+  # never combined with PCT or Miri in the same process.
+  tsan-box:
+    name: ThreadSanitizer box (RFC-0059 P1.2)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rust-src
+      - name: ConcurrentDb under TSan
+        env:
+          PEDRA_RUN_TSAN: "1"
+          TSAN_REQUIRED: "1"
         run: bash scripts/race_job.sh
 
   montanha-secure:
@@ -200,7 +289,7 @@ jobs:
           ROCKS_YCSB_OPS: "48"
         run: |
           cargo run -q --release -p rocksdb-parity-bench --bin rocks-parity-bench -- findings/rocks-parity-ci compat
-          python3 -c "import json; r=json.load(open('findings/rocks-parity-ci/rocks_parity_bench.json')); names=[b['name'] for b in r['benches']]; assert all(f'ycsb_{w}' in names for w in 'abcdef'), names; assert all(f'deps_{w}' in names for w in ('apply_batch','mvcc_latest','scan','raftlog','cache_overwrite')), names; assert r['engine']=='compat' and r['sync'] is True, r"
+          python3 -c "import json; r=json.load(open('findings/rocks-parity-ci/rocks_parity_bench.json')); names=[b['name'] for b in r['benches']]; assert all(f'ycsb_{w}' in names for w in 'abcdef'), names; assert all(f'deps_{w}' in names for w in ('apply_batch','mvcc_latest','scan','raftlog','cache_overwrite')), names; assert r['engine']=='compat' and r['sync'] is False, r"
           ROCKS_PARITY_TEMPLATE=1 bash scripts/rocksdb_parity_v0.sh findings/rocks-parity-ci-e2e
           python3 -c "import json; r=json.load(open('findings/rocks-parity-ci-e2e/compare/compare_report.json')); assert r['parity']['pass'] is None and r['parity']['shapes_with_peer']==0, r; assert 'deps_apply_batch' in [x['shape'] for x in r['ratios']], r"
       - name: mini-bt soak (Pedra L0 write backpressure)

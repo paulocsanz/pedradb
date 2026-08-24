@@ -3,7 +3,10 @@
 //! Framing is self-describing (tag + fields). Production TCP can reuse the same
 //! codec; [`crate::StoreCluster::handle_inbound`] applies deliveries.
 
-use super::{decode_entry, encode_bytes, encode_entry, take_bytes, LogRec, Result, StoreError};
+use super::{
+    append_crc, decode_entry, encode_bytes, encode_entry, strip_crc, take_bytes, LogRec, Result,
+    StoreError,
+};
 
 /// Raft-ish peer RPC used by Montanha-Store multi-Raft ranges.
 ///
@@ -202,14 +205,24 @@ impl PeerMsg {
                 put_u64(&mut b, *match_index);
             }
         }
+        // Frame integrity: a corrupted byte anywhere (net fault, TCP
+        // noise) must fail-stop at decode, not decode into a
+        // plausible-but-wrong message (found by the RFC-0059 swarm:
+        // corrupted range_id panicked a participating node's snapshot
+        // handler). Same CRC-32C tail as every durable record.
+        append_crc(&mut b);
         b
     }
 
     /// Decode opaque bytes.
     ///
     /// # Errors
-    /// Truncated / bad tag / bad entry payload.
-    pub fn decode(buf: &[u8]) -> Result<Self> {
+    /// Truncated / bad tag / CRC mismatch / bad entry payload.
+    pub fn decode(bytes: &[u8]) -> Result<Self> {
+        if bytes.len() < 5 {
+            return Err(StoreError::Msg("peer msg short".into()));
+        }
+        let buf = strip_crc(bytes)?;
         if buf.is_empty() {
             return Err(StoreError::Msg("peer msg empty".into()));
         }
@@ -405,6 +418,8 @@ mod tests {
         }
         // n = 100_000 entries claimed, zero body remaining after count.
         b.extend_from_slice(&100_000u64.to_le_bytes());
+        // Frame carries the CRC tail like every wire message.
+        append_crc(&mut b);
         let err = PeerMsg::decode(&b).expect_err("must reject");
         assert!(
             err.to_string().contains("too many") || err.to_string().contains("eof"),

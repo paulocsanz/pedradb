@@ -80,7 +80,10 @@ pub enum SubmitCompleteAct {
     /// still complete it (F208).
     WaitMore,
     /// AS-IS F203/F208: submit failed and CQ empty → return Err (releases
-    /// the caller's buffer). Production never takes this arm after a push.
+    /// the caller's buffer). Production never takes this arm after a push;
+    /// only the as-is test twins construct it (Linux non-test builds see
+    /// it pattern-only in `ring`).
+    #[cfg_attr(not(test), allow(dead_code))]
     ReturnSubmitErr,
 }
 

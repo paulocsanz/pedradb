@@ -46,6 +46,7 @@ pub mod time;
 pub mod tx;
 pub mod vlog;
 pub mod vlog_gc_kernel;
+pub mod verified;
 pub mod wal;
 
 pub use batch::{WriteOp, WriteRecord, WRITE_RECORD_VERSION};
@@ -57,6 +58,7 @@ pub use changelog_kernel::{
     changelog_should_store_as_is, DEFAULT_CHANGELOG_INTERVAL,
 };
 pub use concurrent::ConcurrentDb;
+pub use verified::{profile_report, ProfileComponent, ProfileState, VerifiedProfile, PROFILE_VERSION};
 pub use db::{
     copy_db_directory, read_checkpoint_meta, BatchOp, BlobGcCandidate, CheckpointMeta,
     CompactOptions, Db, DbStats, FenceClass, FenceRecovery, FenceReport, HistoryHorizon,

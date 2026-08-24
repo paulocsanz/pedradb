@@ -47,6 +47,24 @@ jobs:
           MIRI_REQUIRED: "1"
         run: bash scripts/miri-unsafe-islands.sh
 
+  # RFC-0057 P1 / RFC-0059 P1.2 — FailingEnv durability oracles under
+  # Miri (sibling of miri-unsafe-islands; never combined with TSan/PCT
+  # in one process).
+  miri-dst-smoke:
+    name: miri FailingEnv DST smoke (RFC-0057 P1 / 0059 P1.2)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: miri, rust-src
+      - name: cargo miri setup
+        run: cargo +nightly miri setup
+      - name: miri-dst-smoke
+        env:
+          MIRI_REQUIRED: "1"
+        run: bash scripts/miri_dst_smoke.sh
+
   capi-asan-harness:
     name: C ABI C+ASan harness (in-process product gate)
     runs-on: ubuntu-latest

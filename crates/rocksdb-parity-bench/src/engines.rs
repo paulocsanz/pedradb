@@ -6,81 +6,22 @@
 use crate::{CfWrite, Engine, OccEngine, OccTxn, DEPS_CFS};
 use std::path::Path;
 
+use pedradb_core::Env;
+
 /// rocksdb-compat on pedradb-core (always available). Single node.
 /// Drop-in default is Rocks-shaped async WAL (RFC-0054); `set_sync(true)`
 /// is G1 (`F_FULLFSYNC` on Darwin).
-pub struct CompatEngine {
-    db: rocksdb_compat::DB,
+pub struct CompatEngine<E: Env = pedradb_io_uring::IoUringEnv> {
+    db: rocksdb_compat::DB<E>,
+    /// Column label — "compat" (default) or "compatv" (RFC-0058 verified
+    /// profile: StdEnv + lone-commit-only; `set_write_sync(false)` is
+    /// refused there).
+    label: &'static str,
 }
 
 impl CompatEngine {
     pub fn open(path: &Path) -> Self {
-        let mut opts = rocksdb_compat::Options::default();
-        opts.create_if_missing(true);
-        // Match RocksDB default memtable (64 MiB). 4 MiB was for apply_mc4;
-        // kvrocks_set_mc50 at 4 MiB flushed ~25× per timed run.
-        // Larger than any timed suite's write volume (mc50 100k×1 KiB) so
-        // auto-flush does not run in the measured window. Rocks default is
-        // 64 MiB — 4 MiB was flushing ~25× during set_mc50.
-        // `ROCKS_PARITY_COMPAT_MEMTABLE` (bytes) overrides for long-window
-        // experiments that want the same flush pressure as Rocks default.
-        opts.write_buffer_size = std::env::var("ROCKS_PARITY_COMPAT_MEMTABLE")
-            .ok()
-            .and_then(|v| v.parse::<u64>().ok())
-            .unwrap_or(256 * 1024 * 1024) as usize;
-        // Drop-in default is already Rocks-shaped async (RFC-0054). This
-        // env remains the explicit same-class column (no-op if already false).
-        if std::env::var("PEDRA_PARITY_ASYNC").as_deref() == Ok("1") {
-            opts.set_sync(false);
-        }
-        // WiscKey / BlobDB: values ≥ threshold go to VALUES.vlog so the WAL
-        // holds a pointer (16 KiB blob is not copied into every WAL record).
-        // Default 4096 — 1 KiB SET/GET stay inline. `ROCKS_PARITY_MIN_BLOB=0`
-        // restores always-inline (A/B). Rocks default is blob files off;
-        // this is the Pedra large-value profile on the parity harness only.
-        match std::env::var("ROCKS_PARITY_MIN_BLOB") {
-            Ok(s) if s == "0" || s.eq_ignore_ascii_case("off") => {}
-            Ok(s) => {
-                let n = s.parse::<u64>().unwrap_or(4096);
-                opts.set_enable_blob_files(true);
-                opts.set_min_blob_size(n);
-            }
-            Err(_) => {
-                opts.set_enable_blob_files(true);
-                opts.set_min_blob_size(4096);
-            }
-        }
-        // `ROCKS_PARITY_RETENTION` (RFC-0047 P0.3): pin the retention the
-        // column measures, so the compat default flip (auto_reclaim=true)
-        // never silently changes official numbers. `product` (default) =
-        // kernel default retention, whatever it currently is — since
-        // RFC-0046 that is `HistoryHorizon::Window(24h)` + archive tier
-        // (before 2026-08-21 it was F20 keep-all). `rocks` = RocksDB
-        // storage profile (drop-in default): auto-compact GCs unpinned
-        // obsolete versions, no archive. Legacy `ROCKS_PARITY_AUTO_RECLAIM=1`
-        // == `rocks`.
-        let retention =
-            std::env::var("ROCKS_PARITY_RETENTION").unwrap_or_else(|_| "product".into());
-        let mut reclaim = match retention.as_str() {
-            "product" => false,
-            "rocks" => true,
-            other => {
-                eprintln!(
-                    "ROCKS_PARITY_RETENTION={other}: invalid (want product|rocks) — refusing to bench an ambiguous retention"
-                );
-                std::process::exit(2);
-            }
-        };
-        if crate::env_usize("ROCKS_PARITY_AUTO_RECLAIM", 0) != 0 {
-            if retention == "product" {
-                eprintln!(
-                    "ROCKS_PARITY_RETENTION=product conflicts with ROCKS_PARITY_AUTO_RECLAIM=1 — refusing ambiguous retention"
-                );
-                std::process::exit(2);
-            }
-            reclaim = true;
-        }
-        opts.auto_reclaim = reclaim;
+        let opts = compat_bench_opts();
         // Only register extra CFs when a suite needs them. Named CFs force
         // `default\0` prefix on every ycsb/kvrocks key; Rocks default CF does not.
         let cfs: &[&str] = if crate::suites_enabled("deps") || crate::suites_enabled("myrocks") {
@@ -89,16 +30,114 @@ impl CompatEngine {
             &[]
         };
         let db = rocksdb_compat::DB::open_cf(&opts, path, cfs).expect("compat open_cf");
-        Self { db }
+        Self {
+            db,
+            label: "compat",
+        }
     }
 }
 
-impl Engine for CompatEngine {
+impl CompatEngine<pedradb_core::StdEnv> {
+    /// RFC-0058 P1.2: the **verified profile** column — `StdEnv` (no
+    /// io_uring ring), `OpenOptions::verified()` forced and the
+    /// lone-commit-only pin (via [`rocksdb_compat::DB::open_verified`]).
+    /// Same bench opts (memtable / blob / retention / CFs) as `compat` so
+    /// the only delta vs the official column is the profile itself.
+    pub fn open_verified(path: &Path) -> Self {
+        let opts = compat_bench_opts();
+        let cfs: &[&str] = if crate::suites_enabled("deps") || crate::suites_enabled("myrocks") {
+            DEPS_CFS
+        } else {
+            &[]
+        };
+        let db = rocksdb_compat::DB::open_verified(&opts, path, cfs).expect("compat open_verified");
+        Self {
+            db,
+            label: "compatv",
+        }
+    }
+}
+
+/// Shared bench-side compat options (memtable, blob profile, retention) —
+/// one place so `compat` and `compatv` differ only by the profile.
+fn compat_bench_opts() -> rocksdb_compat::Options {
+    let mut opts = rocksdb_compat::Options::default();
+    opts.create_if_missing(true);
+    // Match RocksDB default memtable (64 MiB). 4 MiB was for apply_mc4;
+    // kvrocks_set_mc50 at 4 MiB flushed ~25× per timed run.
+    // Larger than any timed suite's write volume (mc50 100k×1 KiB) so
+    // auto-flush does not run in the measured window. Rocks default is
+    // 64 MiB — 4 MiB was flushing ~25× during set_mc50.
+    // `ROCKS_PARITY_COMPAT_MEMTABLE` (bytes) overrides for long-window
+    // experiments that want the same flush pressure as Rocks default.
+    opts.write_buffer_size = std::env::var("ROCKS_PARITY_COMPAT_MEMTABLE")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .unwrap_or(256 * 1024 * 1024) as usize;
+    // Drop-in default is already Rocks-shaped async (RFC-0054). This
+    // env remains the explicit same-class column (no-op if already false).
+    // (Ignored by the verified column — the profile forces sync.)
+    if std::env::var("PEDRA_PARITY_ASYNC").as_deref() == Ok("1") {
+        opts.set_sync(false);
+    }
+    // WiscKey / BlobDB: values ≥ threshold go to VALUES.vlog so the WAL
+    // holds a pointer (16 KiB blob is not copied into every WAL record).
+    // Default 4096 — 1 KiB SET/GET stay inline. `ROCKS_PARITY_MIN_BLOB=0`
+    // restores always-inline (A/B). Rocks default is blob files off;
+    // this is the Pedra large-value profile on the parity harness only.
+    match std::env::var("ROCKS_PARITY_MIN_BLOB") {
+        Ok(s) if s == "0" || s.eq_ignore_ascii_case("off") => {}
+        Ok(s) => {
+            let n = s.parse::<u64>().unwrap_or(4096);
+            opts.set_enable_blob_files(true);
+            opts.set_min_blob_size(n);
+        }
+        Err(_) => {
+            opts.set_enable_blob_files(true);
+            opts.set_min_blob_size(4096);
+        }
+    }
+    // `ROCKS_PARITY_RETENTION` (RFC-0047 P0.3): pin the retention the
+    // column measures, so the compat default flip (auto_reclaim=true)
+    // never silently changes official numbers. `product` (default) =
+    // kernel default retention, whatever it currently is — since
+    // RFC-0046 that is `HistoryHorizon::Window(24h)` + archive tier
+    // (before 2026-08-21 it was F20 keep-all). `rocks` = RocksDB
+    // storage profile (drop-in default): auto-compact GCs unpinned
+    // obsolete versions, no archive. Legacy `ROCKS_PARITY_AUTO_RECLAIM=1`
+    // == `rocks`.
+    let retention = std::env::var("ROCKS_PARITY_RETENTION").unwrap_or_else(|_| "product".into());
+    let mut reclaim = match retention.as_str() {
+        "product" => false,
+        "rocks" => true,
+        other => {
+            eprintln!(
+                "ROCKS_PARITY_RETENTION={other}: invalid (want product|rocks) — refusing to bench an ambiguous retention"
+            );
+            std::process::exit(2);
+        }
+    };
+    if crate::env_usize("ROCKS_PARITY_AUTO_RECLAIM", 0) != 0 {
+        if retention == "product" {
+            eprintln!(
+                "ROCKS_PARITY_RETENTION=product conflicts with ROCKS_PARITY_AUTO_RECLAIM=1 — refusing ambiguous retention"
+            );
+            std::process::exit(2);
+        }
+        reclaim = true;
+    }
+    opts.auto_reclaim = reclaim;
+    opts
+}
+
+impl<E: Env> Engine for CompatEngine<E> {
     fn label(&self) -> &'static str {
-        "compat"
+        self.label
     }
     fn durability(&self) -> &'static str {
-        if self.db.write_sync() {
+        if self.label == "compatv" {
+            "verified profile: strongest-data-barrier-before-ok + lone-commit-only (RFC-0058)"
+        } else if self.db.write_sync() {
             "strongest-data-barrier-before-ok (F_FULLFSYNC on Darwin, fdatasync on Linux; RFC-0001/0036 v2)"
         } else {
             "async-wal (PEDRA_PARITY_ASYNC=1; WAL write, no fdatasync — NOT G1, not official)"
@@ -108,6 +147,10 @@ impl Engine for CompatEngine {
         self.db.write_sync()
     }
     fn set_write_sync(&self, sync: bool) {
+        if self.label == "compatv" && !sync {
+            // RFC-0058: the verified column never leaves the profile.
+            return;
+        }
         self.db.set_write_sync(sync);
     }
     fn put(&self, k: &[u8], v: &[u8]) -> bool {
@@ -244,11 +287,11 @@ impl Engine for CompatEngine {
     }
 }
 
-struct CompatOccTxn<'a> {
-    inner: Option<rocksdb_compat::Transaction<'a>>,
+struct CompatOccTxn<'a, E: Env> {
+    inner: Option<rocksdb_compat::Transaction<'a, E>>,
 }
 
-impl OccTxn for CompatOccTxn<'_> {
+impl<E: Env> OccTxn for CompatOccTxn<'_, E> {
     fn get(&mut self, k: &[u8]) -> Result<Option<Vec<u8>>, ()> {
         self.inner.as_ref().ok_or(())?.get(k).map_err(|_| ())
     }
@@ -279,9 +322,9 @@ impl OccTxn for CompatOccTxn<'_> {
     }
 }
 
-impl OccEngine for CompatEngine {
+impl<E: Env> OccEngine for CompatEngine<E> {
     fn with_txn<R>(&self, f: impl FnOnce(&mut dyn OccTxn) -> R) -> R {
-        let mut wrap = CompatOccTxn {
+        let mut wrap = CompatOccTxn::<E> {
             inner: Some(self.db.transaction()),
         };
         f(&mut wrap)
