@@ -99,6 +99,12 @@ Três perguntas abertas depois do RFC-0054:
       `MemChunkStream` (chunks de 256, resume `Excluded(last)`) fecha:
       scan **0.58× → 1.10×**, write 2.64×, read 1.93×, txn 1.45× —
       **4/4 pernas >1×**.
+      **Pós-F222 (linux-sub-6, fonte 3c2c607:
+      `findings/2026-08-24-sub-surreal-linux-f222/`): overlay de
+      transação a custo zero** — `TxnRawIterator::head` clonava
+      key+value por linha; agora a cabeça é a origem (db delega,
+      staged por índice). Scan **1.10× → 1.33×**; write 2.41×, read
+      1.79×, txn 1.40× (banda de ruído entre VMs). 4/4 >1×.
 
 ## Não-metas
 
@@ -152,7 +158,7 @@ específicos do port (write-heavy, batch de 16/32) → linux-diag-5 (closed — 
 | P1.3 | p1 | ratios anti-overindex Linux | done | sem overindex: unif ±1.5%, big −22% (corte 30%) | 2026-08-24 |
 | P2.1 | p2 | shim rocksdb 0.21 | done | crates/rocksdb + alias Transaction | 2026-08-24 |
 | P2.2 | p2 | sub-bench SurrealDB | done | bench/sub-surreal no repo; kvs::tests 62/62 no shim (pós-F183) | 2026-08-24 |
-| P2.3 | p2 | sub-bench no Linux | done | sub-5: write 2.40×, read 1.81×, txn 1.43×, scan 0.58× → sub-6 pós-F221: scan 1.10×, 4/4 >1× | 2026-08-24 |
+| P2.3 | p2 | sub-bench no Linux | done | sub-5: scan 0.58× → F221 1.10× → F222 1.33×; 4/4 >1× (write 2.41×, read 1.79×, txn 1.40×) | 2026-08-24 |
 
 ## Acceptance Criteria
 
