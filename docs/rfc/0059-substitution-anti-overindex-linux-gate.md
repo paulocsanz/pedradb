@@ -1,4 +1,4 @@
-# RFC-0059 — Substituição real, anti-overindex e gate Linux/Intel
+# RFC-0059 — Substituição real, anti-overindex e gate Linux (x86-64)
 
 Data: 2026-08-24 · Status: `in-progress` · Precede: [RFC-0054](0054-close-official-gaps.md) · Par: [RFC-0041](0041-*.md) (piso 2×)
 
@@ -6,11 +6,17 @@ Data: 2026-08-24 · Status: `in-progress` · Precede: [RFC-0054](0054-close-offi
 
 Três perguntas abertas depois do RFC-0054:
 
-1. **O scoreboard Apple Silicon representa Linux/Intel?** Todo número
+1. **O scoreboard Apple Silicon representa Linux/x86-64?** Todo número
    oficial até agora é macOS/aarch64 (M-series, F_FULLFSYNC no peer
-   real-Rocks). O produto roda em servidores Linux/Intel com `fdatasync` +
+   real-Rocks). O produto roda em servidores Linux/x86-64 com `fdatasync` +
    io_uring — o peer pode ser mais lento no Mac do que será no Linux, ou o
    contrário. Sem bateria Linux, publicar é aposta.
+   Correção honesta: a VM caixote disponível é **AMD Ryzen Threadripper
+   PRO 3975WX** (kernel 6.12.94-0-virt, 4 vCPU, linux/amd64 — cpuinfo
+   confirmado no serial). É silício de servidor x86-64 diferente do
+   M-series, o que basta para a pergunta "o Mac está enviesando?"; **não**
+   é Intel, então quem precisar de número Intel específico ainda precisa
+   de uma bateria Intel (não-meta aqui).
 2. **Estamos otimizando pro benchmark ou pro mundo?** Todo shape oficial é
    zipfiano com `records=1024` — working set inteiro quente em cache, sem
    uniformidade, sem conjunto maior. Um motor que vence só nesse regime é
@@ -20,7 +26,7 @@ Três perguntas abertas depois do RFC-0054:
    (SurrealDB `kv-rocksdb`) exercita a mesma API por outro caminho — e
    exigia `rocksdb = "0.21.0"` por nome de crate.
 
-## P0 — bateria Linux/Intel (gate de publicação)
+## P0 — bateria Linux/x86-64 (gate de publicação)
 
 - [x] **P0.1** Bateria oficial (3 rounds × 4 pernas, ops=2000, mesmo
       script POSIX com gate de load) em VM linux/amd64 4 vCPU
@@ -76,7 +82,7 @@ Três perguntas abertas depois do RFC-0054:
 | P1.2 | p1 | ycsb_c_big 2^20 | done | run_c_big, knob ROCKS_PARITY_BIG | 2026-08-24 |
 | P1.3 | p1 | ratios anti-overindex Linux | pending | precisa bateria com novo bin | 2026-08-24 |
 | P2.1 | p2 | shim rocksdb 0.21 | done | crates/rocksdb + alias Transaction | 2026-08-24 |
-| P2.2 | p2 | sub-bench SurrealDB | done | /tmp/pedradb-sub (pedra/peer) — promovido ao repo no merge | 2026-08-24 |
+| P2.2 | p2 | sub-bench SurrealDB | done | bench/sub-surreal no repo; kvs::tests 62/62 no shim (pós-F183) | 2026-08-24 |
 | P2.3 | p2 | sub-bench no Linux | pending | — | 2026-08-24 |
 
 ## Acceptance Criteria
