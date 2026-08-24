@@ -11,6 +11,15 @@ Peer oficial: RocksDB default (`WriteOptions.sync=false`,
 `peer_policy: rocks-default`). 3 rounds × (async+compat vs rocks;
 kvr+compat vs rocks-kvr), ops=2000.
 
+**Coluna medida (importante):** as pernas compat rodaram
+`PEDRA_PARITY_ASYNC=1` — a coluna **async same-class** (WAL write, sem
+fdatasync), a mesma coluna da bateria oficial do gate (rearm11 e
+sucessoras). NÃO é a coluna G1 do produto ("fdatasync antes do Ok");
+ratios aqui medem velocidade de motor, não o claim de durabilidade. O
+campo `honesty` dentro dos `compare_report.json` arquivados ainda traz
+o texto estático antigo ("fdatasync before Ok") — incorreto para esta
+coluna; corrigido no bin em `4930f63` (honesty dinâmica).
+
 ## Resultado (gate `parity_gate_closed.py --from-compares`)
 
 - **13/16 shapes oficiais PASS ≥2× (3/3 rounds)**: ycsb_a 2.65, ycsb_b
