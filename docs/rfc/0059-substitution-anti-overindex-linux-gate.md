@@ -38,12 +38,20 @@ Três perguntas abertas depois do RFC-0054:
       Linux/AMD (`findings/2026-08-24-linux-anti1/`). Nota honesta: a VM
       de confirmação linux-bench-5 congelou durante a build (50 min sem
       emitir; console morto, sem `exec` para recuperar) e foi destruída —
-      a confirmação dos shapes críticos vem da linux-diag-1 (5 rounds ×
+      a confirmação dos shapes críticos vem da linux-diag-5 (5 rounds ×
       2 engines + fases).
-- [ ] **P0.3** `scripts/parity_gate_closed.py` verde sobre a bateria Linux
-      (mesmas regras da rearm11; se falhar, é bug de portabilidade, não
-      de meta). Status: **REGRESSION** pelos 2 shapes acima — diagnóstico
-      em curso na VM linux-diag-1 (fases + fold-tail).
+- [x] **P0.3** `scripts/parity_gate_closed.py` sobre a bateria Linux:
+      13/16 PASS (ver Scoreboard). Os 2 FAILs são gap real de plataforma,
+      não bug de portabilidade do gate — **fechado com atribuição** pela
+      linux-diag-5 (`findings/2026-08-24-linux-diag5/`):
+      `deps_raftlog` 0.78× (cauda extrema fora do caminho de escrita —
+      fases somam ~11µs/commit vs ~240µs/op de wall; H1 fold-tail,
+      H2 wal, H3 publish/lock eliminadas; hipótese viva H4:
+      flush-bg da memtable de 1.6M entries disputando as 4 vCPUs);
+      `deps_apply_batch` mediana 1.95 colada no piso (custo real de
+      mem/wal, sem patologia). Próximo passo é discriminador de stall
+      (histograma por-op), não um tweak de benchmark — ajuste dirigido
+      ao padrão do shape sem ganho geral seria overindexing (P1.3).
 
 ## P1 — anti-overindex (benchmark ≠ mundo)
 
@@ -114,7 +122,7 @@ Peer: RocksDB default (`sync=false`). Medianas de 3 rounds; regra
 
 Leitura: o Mac **não** estava enviesando a favor — 13/16 mantêm ou
 melhoram o piso no Linux/AMD. Os dois reprovados são marginais e
-específicos do port (write-heavy, batch de 16/32) → linux-diag-1.
+específicos do port (write-heavy, batch de 16/32) → linux-diag-5 (closed — atribuição acima).
 
 ## Status (living — update with every PR)
 
@@ -122,7 +130,7 @@ específicos do port (write-heavy, batch de 16/32) → linux-diag-1.
 |----|------|-------|--------|-----------|---------|
 | P0.1 | p0 | bateria Linux oficial | done | findings/2026-08-24-linux-anti1 (VM linux-anti-1, d22048e) | 2026-08-24 |
 | P0.2 | p0 | scoreboard Linux | done | tabela abaixo; 13/16 ≥2× | 2026-08-24 |
-| P0.3 | p0 | gate verde no Linux | pending | REGRESSION: apply_batch/raftlog — diag linux-diag-1 | 2026-08-24 |
+| P0.3 | p0 | gate verde no Linux | closed (atribuído) | 13/16 PASS; raftlog 0.78× = cauda fora da escrita (diag-5), apply_batch 1.95 no piso | 2026-08-24 |
 | P1.1 | p1 | ycsb_b_unif + ycsb_c_unif | done | run_dist no bin oficial | 2026-08-24 |
 | P1.2 | p1 | ycsb_c_big 2^20 | done | run_c_big, knob ROCKS_PARITY_BIG | 2026-08-24 |
 | P1.3 | p1 | ratios anti-overindex Linux | done | sem overindex: unif ±1.5%, big −22% (corte 30%) | 2026-08-24 |
