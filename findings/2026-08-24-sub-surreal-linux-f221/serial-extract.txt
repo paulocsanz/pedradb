@@ -1,0 +1,364 @@
+Connecting to wss://portaria.up.railway.app/api/ws ...
+Streaming logs for resource cnt_f7657e67408e4e5f9cb404ec1b2745cc (Ctrl-C to stop)...
+
+2026-08-24T15:24:55 [info ] build | === Building ghcr.io/paulocsanz/pedradb-linux-gate:bench15sub ===
+2026-08-24T15:24:55 [info ] build | Pulling image from registry...
+2026-08-24T15:24:56 [info ] build | Downloading ghcr.io/paulocsanz/pedradb-linux-gate:bench15sub...
+2026-08-24T15:26:43 [info ] build | Download complete
+2026-08-24T15:26:44 [info ] build | Extracting image layers...
+2026-08-24T15:26:44 [info ] build | Extracting image layers...
+2026-08-24T15:26:57 [info ] build | Extraction complete
+2026-08-24T15:26:57 [info ] build | Building shared rootfs disk...
+[loop] recycled 15:40:53Z
+Connecting to wss://portaria.up.railway.app/api/ws ...
+Streaming logs for resource cnt_f7657e67408e4e5f9cb404ec1b2745cc (Ctrl-C to stop)...
+
+2026-08-24T15:40:47 [info ] serial |    [1m[94m= [0m[1mhelp[0m: consider adding `ml2` as a feature in `Cargo.toml`
+2026-08-24T15:40:47 [info ] serial |    [1m[94m= [0m[1mnote[0m: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+2026-08-24T15:40:47 [info ] serial | [1m[33mwarning[0m[1m: unexpected `cfg` condition value: `ml2`[0m
+2026-08-24T15:40:47 [info ] serial |   [1m[94m--> [0m/src/pedradb/bench/sub-surreal/surreal-core/src/sql/model.rs:15:27
+2026-08-24T15:40:47 [info ] serial |    [1m[94m|[0m
+2026-08-24T15:40:47 [info ] serial | [1m[94m15[0m [1m[94m|[0m #[cfg(any(feature = "ml", feature = "ml2"))]
+2026-08-24T15:40:47 [info ] serial |    [1m[94m|[0m                           [1m[33m^^^^^^^^^^[0m[1m[94m-----[0m
+2026-08-24T15:40:47 [info ] serial |    [1m[94m|[0m                                     [1m[94m|[0m
+2026-08-24T15:40:47 [info ] serial |    [1m[94m|[0m                                     [1m[94mhelp: there is a expected value with a similar name: `"ml"`[0m
+2026-08-24T15:40:47 [info ] serial |    [1m[94m|[0m
+2026-08-24T15:40:47 [info ] serial |    [1m[94m= [0m[1mnote[0m: expected values for `feature` are: `arbitrary`, `default`, `experimental-parser`, `foundationdb`, `http`, `jwks`, `kv-fdb`, `kv-fdb-5_1`, `kv-fdb-5_2`, `kv-fdb-6_0`, `kv-fdb-6_1`, `kv-fdb-6_2`, `kv-fdb-6_3`, `kv-fdb-7_0`, `kv-fdb-7_1`, `kv-indxdb`, `kv-mem`, `kv-rocksdb`, `kv-speedb`, `kv-surrealkv`, `kv-tikv`, `ml`, `scripting`, and `tokio-tungstenite`
+2026-08-24T15:40:47 [info ] serial |    [1m[94m= [0m[1mhelp[0m: consider adding `ml2` as a feature in `Cargo.toml`
+2026-08-24T15:40:47 [info ] serial |    [1m[94m= [0m[1mnote[0m: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+2026-08-24T15:40:47 [info ] serial | [1m[33mwarning[0m[1m: unexpected `cfg` condition value: `ml2`[0m
+2026-08-24T15:40:47 [info ] serial |   [1m[94m--> [0m/src/pedradb/bench/sub-surreal/surreal-core/src/sql/model.rs:17:27
+2026-08-24T15:40:47 [info ] serial |    [1m[94m|[0m
+2026-08-24T15:40:47 [info ] serial | [1m[94m17[0m [1m[94m|[0m #[cfg(any(feature = "ml", feature = "ml2"))]
+2026-08-24T15:40:47 [info ] serial |    [1m[94m|[0m                           [1m[33m^^^^^^^^^^[0m[1m[94m-----[0m
+2026-08-24T15:40:47 [info ] serial |    [1m[94m|[0m                                     [1m[94m|[0m
+2026-08-24T15:40:47 [info ] serial |    [1m[94m|[0m                                     [1m[94mhelp: there is a expected value with a similar name: `"ml"`[0m
+2026-08-24T15:40:47 [info ] serial |    [1m[94m|[0m
+2026-08-24T15:40:47 [info ] serial |    [1m[94m= [0m[1mnote[0m: expected values for `feature` are: `arbitrary`, `default`, `experimental-parser`, `foundationdb`, `http`, `jwks`, `kv-fdb`, `kv-fdb-5_1`, `kv-fdb-5_2`, `kv-fdb-6_0`, `kv-fdb-6_1`, `kv-fdb-6_2`, `kv-fdb-6_3`, `kv-fdb-7_0`, `kv-fdb-7_1`, `kv-indxdb`, `kv-mem`, `kv-rocksdb`, `kv-speedb`, `kv-surrealkv`, `kv-tikv`, `ml`, `scripting`, and `tokio-tungstenite`
+2026-08-24T15:40:47 [info ] serial |    [1m[94m= [0m[1mhelp[0m: consider adding `ml2` as a feature in `Cargo.toml`
+2026-08-24T15:40:47 [info ] serial |    [1m[94m= [0m[1mnote[0m: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+2026-08-24T15:40:47 [info ] serial | [1m[33mwarning[0m[1m: unexpected `cfg` condition value: `ml2`[0m
+2026-08-24T15:40:47 [info ] serial |   [1m[94m--> [0m/src/pedradb/bench/sub-surreal/surreal-core/src/sql/model.rs:19:27
+2026-08-24T15:40:47 [info ] serial |    [1m[94m|[0m
+2026-08-24T15:40:47 [info ] serial | [1m[94m19[0m [1m[94m|[0m #[cfg(any(feature = "ml", feature = "ml2"))]
+2026-08-24T15:40:47 [info ] serial |    [1m[94m|[0m                           [1m[33m^^^^^^^^^^[0m[1m[94m-----[0m
+2026-08-24T15:40:47 [info ] serial |    [1m[94m|[0m                                     [1m[94m|[0m
+2026-08-24T15:40:47 [info ] serial |    [1m[94m|[0m                                     [1m[94mhelp: there is a expected value with a similar name: `"ml"`[0m
+2026-08-24T15:40:47 [info ] serial |    [1m[94m|[0m
+2026-08-24T15:40:47 [info ] serial |    [1m[94m= [0m[1mnote[0m: expected values for `feature` are: `arbitrary`, `default`, `experimental-parser`, `foundationdb`, `http`, `jwks`, `kv-fdb`, `kv-fdb-5_1`, `kv-fdb-5_2`, `kv-fdb-6_0`, `kv-fdb-6_1`, `kv-fdb-6_2`, `kv-fdb-6_3`, `kv-fdb-7_0`, `kv-fdb-7_1`, `kv-indxdb`, `kv-mem`, `kv-rocksdb`, `kv-speedb`, `kv-surrealkv`, `kv-tikv`, `ml`, `scripting`, and `tokio-tungstenite`
+2026-08-24T15:40:47 [info ] serial |    [1m[94m= [0m[1mhelp[0m: consider adding `ml2` as a feature in `Cargo.toml`
+2026-08-24T15:40:47 [info ] serial |    [1m[94m= [0m[1mnote[0m: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+2026-08-24T15:40:47 [info ] serial | [1m[33mwarning[0m[1m: unexpected `cfg` condition value: `ml2`[0m
+2026-08-24T15:40:47 [info ] serial |   [1m[94m--> [0m/src/pedradb/bench/sub-surreal/surreal-core/src/sql/model.rs:21:27
+2026-08-24T15:40:47 [info ] serial |    [1m[94m|[0m
+2026-08-24T15:40:47 [info ] serial | [1m[94m21[0m [1m[94m|[0m #[cfg(any(feature = "ml", feature = "ml2"))]
+2026-08-24T15:40:47 [info ] serial |    [1m[94m|[0m                           [1m[33m^^^^^^^^^^[0m[1m[94m-----[0m
+2026-08-24T15:40:47 [info ] serial |    [1m[94m|[0m                                     [1m[94m|[0m
+2026-08-24T15:40:47 [info ] serial |    [1m[94m|[0m                                     [1m[94mhelp: there is a expected value with a similar name: `"ml"`[0m
+2026-08-24T15:40:47 [info ] serial |    [1m[94m|[0m
+2026-08-24T15:40:47 [info ] serial |    [1m[94m= [0m[1mnote[0m: expected values for `feature` are: `arbitrary`, `default`, `experimental-parser`, `foundationdb`, `http`, `jwks`, `kv-fdb`, `kv-fdb-5_1`, `kv-fdb-5_2`, `kv-fdb-6_0`, `kv-fdb-6_1`, `kv-fdb-6_2`, `kv-fdb-6_3`, `kv-fdb-7_0`, `kv-fdb-7_1`, `kv-indxdb`, `kv-mem`, `kv-rocksdb`, `kv-speedb`, `kv-surrealkv`, `kv-tikv`, `ml`, `scripting`, and `tokio-tungstenite`
+2026-08-24T15:40:47 [info ] serial |    [1m[94m= [0m[1mhelp[0m: consider adding `ml2` as a feature in `Cargo.toml`
+2026-08-24T15:40:47 [info ] serial |    [1m[94m= [0m[1mnote[0m: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+2026-08-24T15:40:47 [info ] serial | [1m[33mwarning[0m[1m: unexpected `cfg` condition value: `ml2`[0m
+2026-08-24T15:40:47 [info ] serial |   [1m[94m--> [0m/src/pedradb/bench/sub-surreal/surreal-core/src/sql/model.rs:23:27
+2026-08-24T15:40:47 [info ] serial |    [1m[94m|[0m
+2026-08-24T15:40:47 [info ] serial | [1m[94m23[0m [1m[94m|[0m #[cfg(any(feature
+2026-08-24T15:40:47 [info ] serial |  = "ml", feature
+2026-08-24T15:40:47 [info ] serial |  = "ml2"))]
+2026-08-24T15:40:47 [info ] serial |    [1m[94m|[0m
+2026-08-24T15:40:47 [info ] serial |                          [1m[33m^^^^^^^^^^[0m[1m[94m-----[0m
+2026-08-24T15:40:47 [info ] serial |    [1m[94m|[0m                                     [1m[94m|[0m
+2026-08-24T15:40:47 [info ] serial |    [1m[94m|[0m                                     [1m[94mhelp: there is a expected value with a similar name: `"ml"`[0m
+2026-08-24T15:40:47 [info ] serial |    [1m[94m|[0m
+2026-08-24T15:40:47 [info ] serial |    [1m[94m= [0m[1mnote[0m: expected values for `feature` are: `arbitrary`, `default`, `experimental-parser`, `foundationdb`, `http`, `jwks`, `kv-fdb`, `kv-fdb-5_1`, `kv-fdb-5_2`, `kv-fdb-6_0`, `kv-fdb-6_1`, `kv-fdb-6_2`, `kv-fdb-6_3`, `kv-fdb-7_0`, `kv-fdb-7_1`, `kv-indxdb`, `kv-mem`, `kv-rocksdb`, `kv-speedb`, `kv-surrealkv`, `kv-tikv`, `ml`, `scripting`, and `tokio-tungstenite`
+2026-08-24T15:40:47 [info ] serial |    [1m[94m= [0m[1mhelp[0m: consider adding `ml2` as a feature in `Cargo.toml`
+2026-08-24T15:40:47 [info ] serial |    [1m[94m= [0m[1mnote[0m: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+2026-08-24T15:40:47 [info ] serial | [1m[33mwarning[0m[1m: unexpected `cfg` condition value: `ml2`[0m
+2026-08-24T15:40:47 [info ] serial |   [1m[94m--> [0m/src/pedradb/bench/sub-surreal/surreal-core/src/sql/model.rs:26:27
+2026-08-24T15:40:47 [info ] serial |    [1m[94m|[0m
+2026-08-24T15:40:47 [info ] serial | [1m[94m26[0m [1m[94m|[0m #[cfg(any(feature = "ml", feature = "ml2"))]
+2026-08-24T15:40:47 [info ] serial |    [1m[94m|[0m                           [1m[33m^^^^^^^^^^[0m[1m[94m-----[0m
+2026-08-24T15:40:47 [info ] serial |    [1m[94m|[0m                                     [1m[94m|[0m
+2026-08-24T15:40:47 [info ] serial |    [1m[94m|[0m                                     [1m[94mhelp: there is a expected value with a similar name: `"ml"`[0m
+2026-08-24T15:40:47 [info ] serial |    [1m[94m|[0m
+2026-08-24T15:40:47 [info ] serial |    [1m[94m= [0m[1mnote[0m: expected values for `feature` are: `arbitrary`, `default`, `experimental-parser`, `foundationdb`, `http`, `jwks`, `kv-fdb`, `kv-fdb-5_1`, `kv-fdb-5_2`, `kv-fdb-6_0`, `kv-fdb-6_1`, `kv-fdb-6_2`, `kv-fdb-6_3`, `kv-fdb-7_0`, `kv-fdb-7_1`, `kv-indxdb`, `kv-mem`, `kv-rocksdb`, `kv-speedb`, `kv-surrealkv`, `kv-tikv`, `ml`, `scripting`, and `tokio-tungstenite`
+2026-08-24T15:40:47 [info ] serial |    [1m[94m= [0m[1mhelp[0m: consider adding `ml2` as a feature in `Cargo.toml`
+2026-08-24T15:40:47 [info ] serial |    [1m[94m= [0m[1mnote[0m: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+2026-08-24T15:40:47 [info ] serial | [1m[33mwarning[0m[1m: unexpected `cfg` condition value: `ml2`[0m
+2026-08-24T15:40:47 [info ] serial |   [1m[94m--> [0m/src/pedradb/bench/sub-surreal/surreal-core/src/sql/model.rs:53:28
+2026-08-24T15:40:47 [info ] serial |    [1m[94m|[0m
+2026-08-24T15:40:47 [info ] serial | [1m[94m53[0m [1m[94m|[0m     #[cfg(any(feature = "ml", feature = "ml2"))]
+2026-08-24T15:40:47 [info ] serial |    [1m[94m|[0m                               [1m[33m^^^^^^^^^^[0m[1m[94m-----[0m
+2026-08-24T15:40:47 [info ] serial |    [1m[94m|[0m                                         [1m[94m|[0m
+2026-08-24T15:40:47 [info ] serial |    [1m[94m|[0m                                         [1m[94mhelp: there is a expected value with a similar name: `"ml"`[0m
+2026-08-24T15:40:47 [info ] serial |    [1m[94m|[0m
+2026-08-24T15:40:47 [info ] serial |    [1m[94m= [0m[1mnote[0m: expected values for `feature` are: `arbitrary`, `default`, `experimental-parser`, `foundationdb`, `http`, `jwks`, `kv-fdb`, `kv-fdb-5_1`, `kv-fdb-5_2`, `kv-fdb-6_0`, `kv-fdb-6_1`, `kv-fdb-6_2`, `kv-fdb-6_3`, `kv-fdb-7_0`, `kv-fdb-7_1`, `kv-indxdb`, `kv-mem`, `kv-rocksdb`, `kv-speedb`, `kv-surrealkv`, `kv-tikv`, `ml`, `scripting`, and `tokio-tungstenite`
+2026-08-24T15:40:47 [info ] serial |    [1m[94m= [0m[1mhelp[0m: consider adding `ml2` as a feature in `Cargo.toml`
+2026-08-24T15:40:47 [info ] serial |    [1m[94m= [0m[1mnote[0m: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+2026-08-24T15:40:47 [info ] serial | [1m[33mwarning[0m[1m: unexpected `cfg` condition value: `ml2`[0m
+2026-08-24T15:40:47 [info ] serial |    [1m[94m--> [0m/src/pedradb/bench/sub-surreal/surreal-core/src/sql/model.rs:214:32
+2026-08-24T15:40:47 [info ] serial |     [1m[94m|[0m
+2026-08-24T15:40:47 [info ] serial | [1m[94m214[0m [1m[94m|[0m     #[cfg(not(any(feature = "ml", feature = "ml2")))]
+2026-08-24T15:40:47 [info ] serial |     [1m[94m|[0m                                   [1m[33m^^^^^^^^^^[0m[1m[94m-----[0m
+2026-08-24T15:40:47 [info ] serial |     [1m[94m|[0m                                             [1m[94m|[0m
+2026-08-24T15:40:47 [info ] serial |     [1m[94m|[0m                                             [1m[94mhelp: there is a expected value with a similar name: `"ml"`[0m
+2026-08-24T15:40:47 [info ] serial |     [1m[94m|[0m
+2026-08-24T15:40:47 [info ] serial |     [1m[94m= [0m[1mnote[0m: expected values for `feature` are: `arbitrary`, `default`, `experimental-parser`, `foundationdb`, `http`, `jwks`, `kv-fdb`, `kv-fdb-5_1`, `kv-fdb-5_2`, `kv-fdb-6_0`, `kv-fdb-6_1`, `kv-fdb-6_2`, `kv-fdb-6_3`, `kv-fdb-7_0`, `kv-fdb-7_1`, `kv-indxdb`, `kv-mem`, `kv-rocksdb`, `kv-speedb`, `kv-surrealkv`, `kv-tikv`, `ml`, `scripting`, and `tokio-tungstenite`
+2026-08-24T15:40:47 [info ] serial |     [1m[94m= [0m[1mhelp[0m: consider adding `ml2` as a feature in `Cargo.toml`
+2026-08-24T15:40:47 [info ] serial |     [1m[94m= [0m[1mnote[0m: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+2026-08-24T15:40:47 [info ] serial | [1m[33mwarning[0m[1m: unused imports: `lazy_env_parse_or_else` and `lazy_env_parse`[0m
+2026-08-24T15:40:47 [info ] serial |  [1m[94m--> [0m/src/pedradb/bench/sub-surreal/surreal-core/src/kvs/rocksdb/cnf.rs:1:13
+2026-08-24T15:40:47 [info ] serial |   [1m[94m|[0m
+2026-08-24T15:40:47 [info ] serial | [1m[94m1[0m [1m[94m|[0m use crate::{lazy_env_parse, lazy_env_parse_or_else};
+2026-08-24T15:40:47 [info ] serial |   [1m[94m|[0m             [1m[33m^^^^^^^^^^^^^^[0m  [1m[33m^^^^^^^^^^^^^^^^^^^^^^[0m
+2026-08-24T15:40:47 [info ] serial |   [1m[94m|[0m
+2026-08-24T15:40:47 [info ] serial |   [1m[94m= [0m[1mnote[0m: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+2026-08-24T15:41:07 [info ] serial | [1m[33mwarning[0m[1m: enum `Id` is never used[0m
+2026-08-24T15:41:07 [info ] serial |    [1m[94m--> [0m/src/pedradb/bench/sub-surreal/surreal-core/src/sql/value/serde/de/mod.rs:178:7
+2026-08-24T15:41:07 [info ] serial |     [1m[94m|[0m
+2026-08-24T15:41:07 [info ] serial | [1m[94m178[0m [1m[94m|[0m     enum Id {
+2026-08-24T15:41:07 [info ] serial |     [1m[94m|[0m          [1m[33m^^[0m
+2026-08-24T15:41:07 [info ] serial |     [1m[94m|[0m
+2026-08-24T15:41:07 [info ] serial |     [1m[94m= [0m[1mnote[0m: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+2026-08-24T15:41:07 [info ] serial | [1m[33mwarning[0m[1m: struct `Thing` is never constructed[0m
+2026-08-24T15:41:07 [info ] serial |    [1m[94m--> [0m/src/pedradb/bench/sub-surreal/surreal-core/src/sql/value/serde/de/mod.rs:202:9
+2026-08-24T15:41:07 [info ] serial |     [1m[94m|[0m
+2026-08-24T15:41:07 [info ] serial | [1m[94m202[0m [1m[94m|[0m     struct Thing {
+2026-08-24T15:41:07 [info ] serial |     [1m[94m|[0m            [1m[33m^^^^^[0m
+2026-08-24T15:41:07 [info ] serial | [1m[33mwarning[0m[1m: struct `Serializer` is never constructed[0m
+2026-08-24T15:41:07 [info ] serial |   [1m[94m--> [0m/src/pedradb/bench/sub-surreal/surreal-core/src/sql/value/serde/ser/cast/mod.rs:11:19
+2026-08-24T15:41:07 [info ] serial |    [1m[94m|[0m
+2026-08-24T15:41:07 [info ] serial | [1m[94m11[0m [1m[94m|[0m pub(super) struct Serializer;
+2026-08-24T15:41:07 [info ] serial |    [1m[94m|[0m                   [1m[33m^^^^^^^^^^[0m
+2026-08-24T15:41:07 [info ] serial | [1m[33mwarning[0m[1m: struct `Serializer` is never constructed[0m
+2026-08-24T15:41:07 [info ] serial |   [1m[94m--> [0m/src/pedradb/bench/sub-surreal/surreal-core/src/sql/value/serde/ser/edges/mod.rs:12:19
+2026-08-24T15:41:07 [info ] serial |    [1m[94m|[0m
+2026-08-24T15:41:07 [info ] serial | [1m[94m12[0m [1m[94m|[0m pub(super) struct Serializer;
+2026-08-24T15:41:07 [info ] serial |    [1m[94m|[0m                   [1m[33m^^^^^^^^^^[0m
+2026-08-24T15:41:07 [info ] serial | [1m[33mwarning[0m[1m: struct `Serializer` is never constructed[0m
+2026-08-24T15:41:07 [info ] serial |   [1m[94m--> [0m/src/pedradb/bench/sub-surreal/surreal-core/src/sql/value/serde/ser/expression/mod.rs:11:19
+2026-08-24T15:41:07 [info ] serial |    [1m[94m|[0m
+2026-08-24T15:41:07 [info ] serial | [1m[94m11[0m [1m[94m|[0m pub(super) struct Serializer;
+2026-08-24T15:41:07 [info ] serial |    [1m[94m|[0m                   [1m[33m^^^^^^^^^^[0m
+2026-08-24T15:41:07 [info ] serial | [1m[33mwarning[0m[1m: struct `Serializer` is never constructed[0m
+2026-08-24T15:41:07 [info ] serial |   [1m[94m--> [0m/src/pedradb/bench/sub-surreal/surreal-core/src/sql/value/serde/ser/range/mod.rs:13:19
+2026-08-24T15:41:07 [info ] serial |    [1m[94m|[0m
+2026-08-24T15:41:07 [info ] serial | [1m[94m13[0m [1m[94m|[0m pub(super) struct Serializer;
+2026-08-24T15:41:07 [info ] serial |    [1m[94m|[0m                   [1m[33m^^^^^^^^^^[0m
+2026-08-24T15:41:07 [info ] serial | [1m[33mwarning[0m[1m: hiding a lifetime that's elided elsewhere is confusing[0m
+2026-08-24T15:41:07 [info ] serial |    [1m[94m--> [0m/src/pedradb/bench/sub-surreal/surreal-core/src/ctx/context.rs:288:34
+2026-08-24T15:41:07 [info ] serial |     [1m[94m|[0m
+2026-08-24T15:41:07 [info ] serial | [1m[94m288[0m [1m[94m|[0m     pub(crate) fn get_query_planner(&self) -> Option<&QueryPlanner> {
+2026-08-24T15:41:07 [info ] serial |     [1m[94m|[0m                                     [1m[33m^^^^^[0m            [1m[33m^^^^^^^^^^^^^[0m
+2026-08-24T15:41:07 [info ] serial |     [1m[94m|[0m                                     [1m[33m|[0m                [1m[33m||[0m
+2026-08-24T15:41:07 [info ] serial |     [1m[94m|[0m                                     [1m[33m|[0m                [1m[33m|the same lifetime is hidden here[0m
+2026-08-24T15:41:07 [info ] serial |     [1m[94m|[0m                                     [1m[33m|[0m                [1m[33mthe same lifetime is elided here[0m
+2026-08-24T15:41:07 [info ] serial |     [1m[94m|[0m                                     [1m[33mthe lifetime is elided here[0m
+2026-08-24T15:41:07 [info ] serial |     [1m[94m|[0m
+2026-08-24T15:41:07 [info ] serial |     [1m[94m= [0m[1mhelp[0m: the same lifetime is referred to in inconsistent ways, making the signature confusing
+2026-08-24T15:41:07 [info ] serial |     [1m[94m= [0m[1mnote[0m: `#[warn(mismatched_lifetime_syntaxes)]` on by default
+2026-08-24T15:41:07 [info ] serial | [1m[96mhelp[0m: use `'_` for type paths
+2026-08-24T15:41:07 [info ] serial |     [1m[94m|[0m
+2026-08-24T15:41:07 [info ] serial | [1m[94m288[0m [1m[94m| [0m    pub(crate) fn get_query_planner(&self) -> Option<&QueryPlanner[92m<'_>[0m> {
+2026-08-24T15:41:07 [info ] serial |     [1m[94m|[0m                                                                   [92m++++[0m
+2026-08-24T15:41:07 [info ] serial | [1m[33mwarning[0m[1m: hiding a lifetime that's elided elsewhere is confusing[0m
+2026-08-24T15:41:07 [info ] serial |    [1m[94m--> [0m/src/pedradb/bench/sub-surreal/surreal-core/src/doc/index.rs:263:26
+2026-08-24T15:41:07 [info ] serial |     [1m[94m|[0m
+2026-08-24T15:41:07 [info ] serial | [1m[94m263[0m [1m[94m|[0m     fn get_unique_index_key(&self, v: &'a Array) -> key::index::Index {
+2026-08-24T15:41:07 [info ] serial |     [1m[94m|[0m                             [1m[33m^^^^^[0m                   [1m[33m^^^^^^^^^^^^^^^^^[0m [1m[33mthe same lifetime is hidden here[0m
+2026-08-24T15:41:07 [info ] serial |     [1m[94m|[0m                             [1m[33m|[0m
+2026-08-24T15:41:07 [info ] serial |     [1m[94m|[0m                             [1m[33mthe lifetime is elided here[0m
+2026-08-24T15:41:07 [info ] serial |     [1m[94m|[0m
+2026-08-24T15:41:07 [info ] serial |     [1m[94m= [0m[1mhelp[0m: the same lifetime is referred to in inc
+2026-08-24T15:41:07 [info ] serial | onsistent ways, making the signa
+2026-08-24T15:41:07 [info ] serial | ture confusing
+2026-08-24T15:41:07 [info ] serial | [1m[96mhelp[0m: use `'_` for type paths
+2026-08-24T15:41:07 [info ] serial |     [1m[94m|[0m
+2026-08-24T15:41:07 [info ] serial | [1m[94m263[0m [1m[94m| [0m    fn get_unique_index_key(&self, v: &'a Array) -> key::index::Index[92m<'_>[0m {
+2026-08-24T15:41:07 [info ] serial |     [1m[94m|[0m                                                                      [92m++++[0m
+2026-08-24T15:41:07 [info ] serial | [1m[33mwarning[0m[1m: hiding a lifetime that's elided elsewhere is confusing[0m
+2026-08-24T15:41:07 [info ] serial |    [1m[94m--> [0m/src/pedradb/bench/sub-surreal/surreal-core/src/doc/index.rs:274:30
+2026-08-24T15:41:07 [info ] serial |     [1m[94m|[0m
+2026-08-24T15:41:07 [info ] serial | [1m[94m274[0m [1m[94m|[0m     fn get_non_unique_index_key(&self, v: &'a Array) -> key::index::Index {
+2026-08-24T15:41:07 [info ] serial |     [1m[94m|[0m                                 [1m[33m^^^^^[0m                   [1m[33m^^^^^^^^^^^^^^^^^[0m [1m[33mthe same lifetime is hidden here[0m
+2026-08-24T15:41:07 [info ] serial |     [1m[94m|[0m                                 [1m[33m|[0m
+2026-08-24T15:41:07 [info ] serial |     [1m[94m|[0m                                 [1m[33mthe lifetime is elided here[0m
+2026-08-24T15:41:07 [info ] serial |     [1m[94m|[0m
+2026-08-24T15:41:07 [info ] serial |     [1m[94m= [0m[1mhelp[0m: the same lifetime is referred to in inconsistent ways, making the signature confusing
+2026-08-24T15:41:07 [info ] serial | [1m[96mhelp[0m: use `'_` for type paths
+2026-08-24T15:41:07 [info ] serial |     [1m[94m|[0m
+2026-08-24T15:41:07 [info ] serial | [1m[94m274[0m [1m[94m| [0m    fn get_non_unique_index_key(&self, v: &'a Array) -> key::index::Index[92m<'_>[0m {
+2026-08-24T15:41:07 [info ] serial |     [1m[94m|[0m                                                                          [92m++++[0m
+2026-08-24T15:41:07 [info ] serial | [1m[33mwarning[0m[1m: eliding a lifetime that's named elsewhere is confusing[0m
+2026-08-24T15:41:07 [info ] serial |    [1m[94m--> [0m/src/pedradb/bench/sub-surreal/surreal-core/src/sql/part.rs:117:23
+2026-08-24T15:41:07 [info ] serial |     [1m[94m|[0m
+2026-08-24T15:41:07 [info ] serial | [1m[94m117[0m [1m[94m|[0m     fn next(&'a self) -> &[Part];
+2026-08-24T15:41:07 [info ] serial |     [1m[94m|[0m              [1m[94m--[0m          [1m[33m^^^^^^^[0m [1m[33mthe same lifetime is elided here[0m
+2026-08-24T15:41:07 [info ] serial |     [1m[94m|[0m              [1m[94m|[0m
+2026-08-24T15:41:07 [info ] serial |     [1m[94m|[0m              [1m[94mthe lifetime is named here[0m
+2026-08-24T15:41:07 [info ] serial |     [1m[94m|[0m
+2026-08-24T15:41:07 [info ] serial |     [1m[94m= [0m[1mhelp[0m: the same lifetime is referred to in inconsistent ways, making the signature confusing
+2026-08-24T15:41:07 [info ] serial | [1m[96mhelp[0m: consistently use `'a`
+2026-08-24T15:41:07 [info ] serial |     [1m[94m|[0m
+2026-08-24T15:41:07 [info ] serial | [1m[94m117[0m [1m[94m| [0m    fn next(&'a self) -> &[92m'a [0m[Part];
+2026-08-24T15:41:07 [info ] serial |     [1m[94m|[0m                           [92m++[0m
+2026-08-24T15:41:07 [info ] serial | [1m[33mwarning[0m[1m: eliding a lifetime that's named elsewhere is confusing[0m
+2026-08-24T15:41:07 [info ] serial |   [1m[94m--> [0m/src/pedradb/bench/sub-surreal/surreal-core/src/idx/ft/analyzer/tokenizer.rs:23:71
+2026-08-24T15:41:07 [info ] serial |    [1m[94m|[0m
+2026-08-24T15:41:07 [info ] serial | [1m[94m23[0m [1m[94m|[0m     pub(super) fn get_token_string<'a>(&'a self, t: &'a Token) -> Result<&str, Error> {
+2026-08-24T15:41:07 [info ] serial |    [1m[94m|[0m                                         [1m[94m--[0m           [1m[94m--[0m                  [1m[33m^^^^[0m [1m[33mthe same lifetime is elided here[0m
+2026-08-24T15:41:07 [info ] serial |    [1m[94m|[0m                                         [1m[94m|[0m            [1m[94m|[0m
+2026-08-24T15:41:07 [info ] serial |    [1m[94m|[0m                                         [1m[94m|[0m            [1m[94mthe lifetime is named here[0m
+2026-08-24T15:41:07 [info ] serial |    [1m[94m|[0m                                         [1m[94mthe lifetime is named here[0m
+2026-08-24T15:41:07 [info ] serial |    [1m[94m|[0m
+2026-08-24T15:41:07 [info ] serial |    [1m[94m= [0m[1mhelp[0m: the same lifetime is referred to in inconsistent ways, making the signature confusing
+2026-08-24T15:41:07 [info ] serial | [1m[96mhelp[0m: consistently use `'a`
+2026-08-24T15:41:07 [info ] serial |    [1m[94m|[0m
+2026-08-24T15:41:07 [info ] serial | [1m[94m23[0m [1m[94m| [0m    pub(super) fn get_token_string<'a>(&'a self, t: &'a Token) -> Result<&[92m'a [0mstr, Error> {
+2026-08-24T15:41:07 [info ] serial |    [1m[94m|[0m                                                                           [92m++[0m
+2026-08-24T15:41:07 [info ] serial | [1m[33mwarning[0m[1m: eliding a lifetime that's named elsewhere is confusing[0m
+2026-08-24T15:41:07 [info ] serial |    [1m[94m--> [0m/src/pedradb/bench/sub-surreal/surreal-core/src/idx/ft/analyzer/tokenizer.rs:165:60
+2026-08-24T15:41:07 [info ] serial |     [1m[94m|[0m
+2026-08-24T15:41:07 [info ] serial | [1m[94m165[0m [1m[94m|[0m     pub(super) fn get_str<'a>(&'a self, i: &'a str) -> Result<&str, Error> {
+2026-08-24T15:41:07 [info ] serial |     [1m[94m|[0m                                [1m[94m--[0m           [1m[94m--[0m                [1m[33m^^^^[0m [1m[33mthe same lifetime is elided here[0m
+2026-08-24T15:41:07 [info ] serial |     [1m[94m|[0m                                [1m[94m|[0m            [1m[94m|[0m
+2026-08-24T15:41:07 [info ] serial |     [1m[94m|[0m                                [1m[94m|[0m            [1m[94mthe lifetime is named here[0m
+2026-08-24T15:41:07 [info ] serial |     [1m[94m|[0m                                [1m[94mthe lifetime is named here[0m
+2026-08-24T15:41:07 [info ] serial |     [1m[94m|[0m
+2026-08-24T15:41:07 [info ] serial |     [1m[94m= [0m[1mhelp[0m: the same lifetime is referred to in inconsistent ways, making the signature confusing
+2026-08-24T15:41:07 [info ] serial | [1m[96mhelp[0m: consistently use `'a`
+2026-08-24T15:41:07 [info ] serial |     [1m[94m|[0m
+2026-08-24T15:41:07 [info ] serial | [1m[94m165[0m [1m[94m| [0m    pub(super) fn get_str<'a>(&'a self, i: &'a str) -> Result<&[92m'a [0mstr, Error> {
+2026-08-24T15:41:07 [info ] serial |     [1m[94m|[0m                                                                [92m++[0m
+2026-08-24T15:41:07 [info ] serial | [1m[33mwarning[0m[1m: hiding a lifetime that's elided elsewhere is confusing[0m
+2026-08-24T15:41:07 [info ] serial |     [1m[94m--> [0m/src/pedradb/bench/sub-surreal/surreal-core/src/kvs/ds.rs:1098:34
+2026-08-24T15:41:07 [info ] serial |      [1m[94m|[0m
+2026-08-24T15:41:07 [info ] serial | [1m[94m1098[0m [1m[94m|[0m     fn construct_document(mutation: &TableMutation) -> Option<Document> {
+2026-08-24T15:41:07 [info ] serial |      [1m[94m|[0m                                     [1m[33m^^^^^^^^^^^^^^[0m            [1m[33m^^^^^^^^[0m [1m[33mthe same lifetime is hidden here[0m
+2026-08-24T15:41:07 [info ] serial |      [1m[94m|[0m                                     [1m[33m|[0m
+2026-08-24T15:41:07 [info ] serial |      [1m[94m|[0m                                     [1m[33mthe lifetime is elided here[0m
+2026-08-24T15:41:07 [info ] serial |      [1m[94m|[0m
+2026-08-24T15:41:07 [info ] serial |      [1m[94m= [0m[1mhelp[0m: the same lifetime is referred to in inconsistent ways, making the signature confusing
+2026-08-24T15:41:07 [info ] serial | [1m[96mhelp[0m: use `'_` for type paths
+2026-08-24T15:41:07 [info ] serial |      [1m[94m|[0m
+2026-08-24T15:41:07 [info ] serial | [1m[94m1098[0m [1m[94m| [0m    fn construct_document(mutation: &TableMutation) -> Option<Document[92m<'_>[0m> {
+2026-08-24T15:41:07 [info ] serial |      [1m[94m|[0m                                                                       [92m++++[0m
+2026-08-24T15:42:39 [info ] serial | [1m[33mwarning[0m: `surrealdb-core` (lib) generated 27 warnings (run `cargo fix --lib -p surrealdb-core` to apply 8 suggestions)
+2026-08-24T15:42:39 [info ] serial | [1m[92m   Compiling[0m sub-bench v0.1.0 (/src/pedradb/bench/sub-surreal/peer/sub-bench)
+2026-08-24T15:42:42 [info ] serial | [1m[92m    Finished[0m `release` profile [optimized] target(s) in 8m 47s
+2026-08-24T15:42:42 [info ] serial | --- peer side done 15:42:42 ---
+2026-08-24T15:42:42 [info ] serial | --- run peer 15:42:42 ---
+2026-08-24T15:43:19 [info ] serial | SUB_BENCH_JSON {"engine":"rocks","ops":2000,"records":1024,"seconds":8.0,"legs":[{"name":"point_read","qps":345391.25782949623},{"name":"point_write","qps":132932.7746856049},{"name":"scan","qps":641831.4289525298},{"name":"doc_txn","qps":103592.52048809589}]}
+2026-08-24T15:43:19 [info ] serial | --- ratio 15:43:19 ---
+2026-08-24T15:43:19 [info ] serial | SUB_RATIO point_read pedra=665271 rocks=345391 ratio=1.93
+2026-08-24T15:43:19 [info ] serial | SUB_RATIO point_write pedra=350534 rocks=132933 ratio=2.64
+2026-08-24T15:43:19 [info ] serial | SUB_RATIO scan pedra=708896 rocks=641831 ratio=1.10
+2026-08-24T15:43:19 [info ] serial | SUB_RATIO doc_txn pedra=150139 rocks=103593 ratio=1.45
+2026-08-24T15:43:19 [info ] serial | BLOBSUB| H4sIAAAAAAAAA+2WTW/aQBCGOftXrHwmy35/RMolVaWqh/QQ9RRFFgErdZvY1DZqpIj/3vHaTQAbolaQqO08B8CeV+zYu/PO0Mno6DDAah2+ge3v8JtroSQzUggL963lekT08VMbjZZVPS0JGZVFUe/TvRT/S6GTanmTVMuyTKd3yV2WLx/o16rID7lGs8FGqV37z5nim/vPldR8RNghk9jFf77/jxGJ79LbKj4lVxEhcElInE/vU7gRL4osrxM4GfN4HAKLdF5Ok++LRm6MFpZRayzT3nHXKspi9q3qFFJp6TkV2jrhlTdCdpppnRUQ59QLw6UxxmunvfUQXY13ZPGjzOp0IA2pmZaSesmN8xZOUz8PLoWXglqrjNOGKb+ZhqBGGshEcshRSSOH06hm03xgfcuc85oawTyXjDvdX98o7iSnSoBQaOHd9muAClDOWS+9N/DphhOYF7OkfhjKgWvGpYcF4An0UAacSe0F1YLBOgw0fjsFpeAVwethnjElLG9SiMh1tHrrA4ocFToJ54TWD8dztxf8n4GDrPm/Af/nhqH/vwrQ/U9u0nz2hRSL6kzAbpAynRXlvDrjTCgyz8qzSX2/mDwJT7iA3YmqNJ2TIOn0JMsJo6yKoJ2Q585BwIG6TrAWCW4eQsGcZQg1DhvutYYZ7nWm10obF5PR5efz5Pz9xbsPycfLTxfkMU7z2ywHi2wtLx7HRWN6zbOM4y65+LRJdRxXcJk3l45CsG18V4+dxW70uzg4Z7+FrcZb8q4xtfpeq1mTtw2k1fVawpruyee7v+x59+p6FR1q/+kkNJK3rX8jftW/gB7a1L9WGuv/NfiD+tcwZPxe+YdRcbj8w/imNss/jFSmX/5hytlT/uEkH7T8t2fc/cXfG0V3FH9vZNxT/JuT3SErH0EQBEEQBEEQBEEQBEEQBEGQf5Wf5GN+iQAoAAA=
+2026-08-24T15:43:19 [info ] serial | BLOBSUB_BEGIN_MARKED
+2026-08-24T15:43:19 [info ] serial | RESULT=SUB_BENCH_DONE 2026-08-24T15:43:19Z
+WebSocket error: IO error: peer closed connection without sending TLS close_notify: https://docs.rs/rustls/latest/rustls/manual/_03_howto/index.html#unexpected-eof
+[loop] recycled 15:45:55Z
+Connecting to wss://portaria.up.railway.app/api/ws ...
+Streaming logs for resource cnt_f7657e67408e4e5f9cb404ec1b2745cc (Ctrl-C to stop)...
+
+2026-08-24T15:41:07 [info ] serial | [1m[96mhelp[0m: use `'_` for type paths
+2026-08-24T15:41:07 [info ] serial |     [1m[94m|[0m
+2026-08-24T15:41:07 [info ] serial | [1m[94m288[0m [1m[94m| [0m    pub(crate) fn get_query_planner(&self) -> Option<&QueryPlanner[92m<'_>[0m> {
+2026-08-24T15:41:07 [info ] serial |     [1m[94m|[0m                                                                   [92m++++[0m
+2026-08-24T15:41:07 [info ] serial | [1m[33mwarning[0m[1m: hiding a lifetime that's elided elsewhere is confusing[0m
+2026-08-24T15:41:07 [info ] serial |    [1m[94m--> [0m/src/pedradb/bench/sub-surreal/surreal-core/src/doc/index.rs:263:26
+2026-08-24T15:41:07 [info ] serial |     [1m[94m|[0m
+2026-08-24T15:41:07 [info ] serial | [1m[94m263[0m [1m[94m|[0m     fn get_unique_index_key(&self, v: &'a Array) -> key::index::Index {
+2026-08-24T15:41:07 [info ] serial |     [1m[94m|[0m                             [1m[33m^^^^^[0m                   [1m[33m^^^^^^^^^^^^^^^^^[0m [1m[33mthe same lifetime is hidden here[0m
+2026-08-24T15:41:07 [info ] serial |     [1m[94m|[0m                             [1m[33m|[0m
+2026-08-24T15:41:07 [info ] serial |     [1m[94m|[0m                             [1m[33mthe lifetime is elided here[0m
+2026-08-24T15:41:07 [info ] serial |     [1m[94m|[0m
+2026-08-24T15:41:07 [info ] serial |     [1m[94m= [0m[1mhelp[0m: the same lifetime is referred to in inc
+2026-08-24T15:41:07 [info ] serial | onsistent ways, making the signa
+2026-08-24T15:41:07 [info ] serial | ture confusing
+2026-08-24T15:41:07 [info ] serial | [1m[96mhelp[0m: use `'_` for type paths
+2026-08-24T15:41:07 [info ] serial |     [1m[94m|[0m
+2026-08-24T15:41:07 [info ] serial | [1m[94m263[0m [1m[94m| [0m    fn get_unique_index_key(&self, v: &'a Array) -> key::index::Index[92m<'_>[0m {
+2026-08-24T15:41:07 [info ] serial |     [1m[94m|[0m                                                                      [92m++++[0m
+2026-08-24T15:41:07 [info ] serial | [1m[33mwarning[0m[1m: hiding a lifetime that's elided elsewhere is confusing[0m
+2026-08-24T15:41:07 [info ] serial |    [1m[94m--> [0m/src/pedradb/bench/sub-surreal/surreal-core/src/doc/index.rs:274:30
+2026-08-24T15:41:07 [info ] serial |     [1m[94m|[0m
+2026-08-24T15:41:07 [info ] serial | [1m[94m274[0m [1m[94m|[0m     fn get_non_unique_index_key(&self, v: &'a Array) -> key::index::Index {
+2026-08-24T15:41:07 [info ] serial |     [1m[94m|[0m                                 [1m[33m^^^^^[0m                   [1m[33m^^^^^^^^^^^^^^^^^[0m [1m[33mthe same lifetime is hidden here[0m
+2026-08-24T15:41:07 [info ] serial |     [1m[94m|[0m                                 [1m[33m|[0m
+2026-08-24T15:41:07 [info ] serial |     [1m[94m|[0m                                 [1m[33mthe lifetime is elided here[0m
+2026-08-24T15:41:07 [info ] serial |     [1m[94m|[0m
+2026-08-24T15:41:07 [info ] serial |     [1m[94m= [0m[1mhelp[0m: the same lifetime is referred to in inconsistent ways, making the signature confusing
+2026-08-24T15:41:07 [info ] serial | [1m[96mhelp[0m: use `'_` for type paths
+2026-08-24T15:41:07 [info ] serial |     [1m[94m|[0m
+2026-08-24T15:41:07 [info ] serial | [1m[94m274[0m [1m[94m| [0m    fn get_non_unique_index_key(&self, v: &'a Array) -> key::index::Index[92m<'_>[0m {
+2026-08-24T15:41:07 [info ] serial |     [1m[94m|[0m                                                                          [92m++++[0m
+2026-08-24T15:41:07 [info ] serial | [1m[33mwarning[0m[1m: eliding a lifetime that's named elsewhere is confusing[0m
+2026-08-24T15:41:07 [info ] serial |    [1m[94m--> [0m/src/pedradb/bench/sub-surreal/surreal-core/src/sql/part.rs:117:23
+2026-08-24T15:41:07 [info ] serial |     [1m[94m|[0m
+2026-08-24T15:41:07 [info ] serial | [1m[94m117[0m [1m[94m|[0m     fn next(&'a self) -> &[Part];
+2026-08-24T15:41:07 [info ] serial |     [1m[94m|[0m              [1m[94m--[0m          [1m[33m^^^^^^^[0m [1m[33mthe same lifetime is elided here[0m
+2026-08-24T15:41:07 [info ] serial |     [1m[94m|[0m              [1m[94m|[0m
+2026-08-24T15:41:07 [info ] serial |     [1m[94m|[0m              [1m[94mthe lifetime is named here[0m
+2026-08-24T15:41:07 [info ] serial |     [1m[94m|[0m
+2026-08-24T15:41:07 [info ] serial |     [1m[94m= [0m[1mhelp[0m: the same lifetime is referred to in inconsistent ways, making the signature confusing
+2026-08-24T15:41:07 [info ] serial | [1m[96mhelp[0m: consistently use `'a`
+2026-08-24T15:41:07 [info ] serial |     [1m[94m|[0m
+2026-08-24T15:41:07 [info ] serial | [1m[94m117[0m [1m[94m| [0m    fn next(&'a self) -> &[92m'a [0m[Part];
+2026-08-24T15:41:07 [info ] serial |     [1m[94m|[0m                           [92m++[0m
+2026-08-24T15:41:07 [info ] serial | [1m[33mwarning[0m[1m: eliding a lifetime that's named elsewhere is confusing[0m
+2026-08-24T15:41:07 [info ] serial |   [1m[94m--> [0m/src/pedradb/bench/sub-surreal/surreal-core/src/idx/ft/analyzer/tokenizer.rs:23:71
+2026-08-24T15:41:07 [info ] serial |    [1m[94m|[0m
+2026-08-24T15:41:07 [info ] serial | [1m[94m23[0m [1m[94m|[0m     pub(super) fn get_token_string<'a>(&'a self, t: &'a Token) -> Result<&str, Error> {
+2026-08-24T15:41:07 [info ] serial |    [1m[94m|[0m                                         [1m[94m--[0m           [1m[94m--[0m                  [1m[33m^^^^[0m [1m[33mthe same lifetime is elided here[0m
+2026-08-24T15:41:07 [info ] serial |    [1m[94m|[0m                                         [1m[94m|[0m            [1m[94m|[0m
+2026-08-24T15:41:07 [info ] serial |    [1m[94m|[0m                                         [1m[94m|[0m            [1m[94mthe lifetime is named here[0m
+2026-08-24T15:41:07 [info ] serial |    [1m[94m|[0m                                         [1m[94mthe lifetime is named here[0m
+2026-08-24T15:41:07 [info ] serial |    [1m[94m|[0m
+2026-08-24T15:41:07 [info ] serial |    [1m[94m= [0m[1mhelp[0m: the same lifetime is referred to in inconsistent ways, making the signature confusing
+2026-08-24T15:41:07 [info ] serial | [1m[96mhelp[0m: consistently use `'a`
+2026-08-24T15:41:07 [info ] serial |    [1m[94m|[0m
+2026-08-24T15:41:07 [info ] serial | [1m[94m23[0m [1m[94m| [0m    pub(super) fn get_token_string<'a>(&'a self, t: &'a Token) -> Result<&[92m'a [0mstr, Error> {
+2026-08-24T15:41:07 [info ] serial |    [1m[94m|[0m                                                                           [92m++[0m
+2026-08-24T15:41:07 [info ] serial | [1m[33mwarning[0m[1m: eliding a lifetime that's named elsewhere is confusing[0m
+2026-08-24T15:41:07 [info ] serial |    [1m[94m--> [0m/src/pedradb/bench/sub-surreal/surreal-core/src/idx/ft/analyzer/tokenizer.rs:165:60
+2026-08-24T15:41:07 [info ] serial |     [1m[94m|[0m
+2026-08-24T15:41:07 [info ] serial | [1m[94m165[0m [1m[94m|[0m     pub(super) fn get_str<'a>(&'a self, i: &'a str) -> Result<&str, Error> {
+2026-08-24T15:41:07 [info ] serial |     [1m[94m|[0m                                [1m[94m--[0m           [1m[94m--[0m                [1m[33m^^^^[0m [1m[33mthe same lifetime is elided here[0m
+2026-08-24T15:41:07 [info ] serial |     [1m[94m|[0m                                [1m[94m|[0m            [1m[94m|[0m
+2026-08-24T15:41:07 [info ] serial |     [1m[94m|[0m                                [1m[94m|[0m            [1m[94mthe lifetime is named here[0m
+2026-08-24T15:41:07 [info ] serial |     [1m[94m|[0m                                [1m[94mthe lifetime is named here[0m
+2026-08-24T15:41:07 [info ] serial |     [1m[94m|[0m
+2026-08-24T15:41:07 [info ] serial |     [1m[94m= [0m[1mhelp[0m: the same lifetime is referred to in inconsistent ways, making the signature confusing
+2026-08-24T15:41:07 [info ] serial | [1m[96mhelp[0m: consistently use `'a`
+2026-08-24T15:41:07 [info ] serial |     [1m[94m|[0m
+2026-08-24T15:41:07 [info ] serial | [1m[94m165[0m [1m[94m| [0m    pub(super) fn get_str<'a>(&'a self, i: &'a str) -> Result<&[92m'a [0mstr, Error> {
+2026-08-24T15:41:07 [info ] serial |     [1m[94m|[0m                                                                [92m++[0m
+2026-08-24T15:41:07 [info ] serial | [1m[33mwarning[0m[1m: hiding a lifetime that's elided elsewhere is confusing[0m
+2026-08-24T15:41:07 [info ] serial |     [1m[94m--> [0m/src/pedradb/bench/sub-surreal/surreal-core/src/kvs/ds.rs:1098:34
+2026-08-24T15:41:07 [info ] serial |      [1m[94m|[0m
+2026-08-24T15:41:07 [info ] serial | [1m[94m1098[0m [1m[94m|[0m     fn construct_document(mutation: &TableMutation) -> Option<Document> {
+2026-08-24T15:41:07 [info ] serial |      [1m[94m|[0m                                     [1m[33m^^^^^^^^^^^^^^[0m            [1m[33m^^^^^^^^[0m [1m[33mthe same lifetime is hidden here[0m
+2026-08-24T15:41:07 [info ] serial |      [1m[94m|[0m                                     [1m[33m|[0m
+2026-08-24T15:41:07 [info ] serial |      [1m[94m|[0m                                     [1m[33mthe lifetime is elided here[0m
+2026-08-24T15:41:07 [info ] serial |      [1m[94m|[0m
+2026-08-24T15:41:07 [info ] serial |      [1m[94m= [0m[1mhelp[0m: the same lifetime is referred to in inconsistent ways, making the signature confusing
+2026-08-24T15:41:07 [info ] serial | [1m[96mhelp[0m: use `'_` for type paths
+2026-08-24T15:41:07 [info ] serial |      [1m[94m|[0m
+2026-08-24T15:41:07 [info ] serial | [1m[94m1098[0m [1m[94m| [0m    fn construct_document(mutation: &TableMutation) -> Option<Document[92m<'_>[0m> {
+2026-08-24T15:41:07 [info ] serial |      [1m[94m|[0m                                                                       [92m++++[0m
+2026-08-24T15:42:39 [info ] serial | [1m[33mwarning[0m: `surrealdb-core` (lib) generated 27 warnings (run `cargo fix --lib -p surrealdb-core` to apply 8 suggestions)
+2026-08-24T15:42:39 [info ] serial | [1m[92m   Compiling[0m sub-bench v0.1.0 (/src/pedradb/bench/sub-surreal/peer/sub-bench)
+2026-08-24T15:42:42 [info ] serial | [1m[92m    Finished[0m `release` profile [optimized] target(s) in 8m 47s
+2026-08-24T15:42:42 [info ] serial | --- peer side done 15:42:42 ---
+2026-08-24T15:42:42 [info ] serial | --- run peer 15:42:42 ---
+2026-08-24T15:43:19 [info ] serial | SUB_BENCH_JSON {"engine":"rocks","ops":2000,"records":1024,"seconds":8.0,"legs":[{"name":"point_read","qps":345391.25782949623},{"name":"point_write","qps":132932.7746856049},{"name":"scan","qps":641831.4289525298},{"name":"doc_txn","qps":103592.52048809589}]}
+2026-08-24T15:43:19 [info ] serial | --- ratio 15:43:19 ---
+2026-08-24T15:43:19 [info ] serial | SUB_RATIO point_read pedra=665271 rocks=345391 ratio=1.93
+2026-08-24T15:43:19 [info ] serial | SUB_RATIO point_write pedra=350534 rocks=132933 ratio=2.64
+2026-08-24T15:43:19 [info ] serial | SUB_RATIO scan pedra=708896 rocks=641831 ratio=1.10
+2026-08-24T15:43:19 [info ] serial | SUB_RATIO doc_txn pedra=150139 rocks=103593 ratio=1.45
+2026-08-24T15:43:19 [info ] serial | BLOBSUB| H4sIAAAAAAAAA+2WTW/aQBCGOftXrHwmy35/RMolVaWqh/QQ9RRFFgErdZvY1DZqpIj/3vHaTQAbolaQqO08B8CeV+zYu/PO0Mno6DDAah2+ge3v8JtroSQzUggL963lekT08VMbjZZVPS0JGZVFUe/TvRT/S6GTanmTVMuyTKd3yV2WLx/o16rID7lGs8FGqV37z5nim/vPldR8RNghk9jFf77/jxGJ79LbKj4lVxEhcElInE/vU7gRL4osrxM4GfN4HAKLdF5Ok++LRm6MFpZRayzT3nHXKspi9q3qFFJp6TkV2jrhlTdCdpppnRUQ59QLw6UxxmunvfUQXY13ZPGjzOp0IA2pmZaSesmN8xZOUz8PLoWXglqrjNOGKb+ZhqBGGshEcshRSSOH06hm03xgfcuc85oawTyXjDvdX98o7iSnSoBQaOHd9muAClDOWS+9N/DphhOYF7OkfhjKgWvGpYcF4An0UAacSe0F1YLBOgw0fjsFpeAVwethnjElLG9SiMh1tHrrA4ocFToJ54TWD8dztxf8n4GDrPm/Af/nhqH/vwrQ/U9u0nz2hRSL6kzAbpAynRXlvDrjTCgyz8qzSX2/mDwJT7iA3YmqNJ2TIOn0JMsJo6yKoJ2Q585BwIG6TrAWCW4eQsGcZQg1DhvutYYZ7nWm10obF5PR5efz5Pz9xbsPycfLTxfkMU7z2ywHi2wtLx7HRWN6zbOM4y65+LRJdRxXcJk3l45CsG18V4+dxW70uzg4Z7+FrcZb8q4xtfpeq1mTtw2k1fVawpruyee7v+x59+p6FR1q/+kkNJK3rX8jftW/gB7a1L9WGuv/NfiD+tcwZPxe+YdRcbj8w/imNss/jFSmX/5hytlT/uEkH7T8t2fc/cXfG0V3FH9vZNxT/JuT3SErH0EQBEEQBEEQBEEQBEEQBEGQf5Wf5GN+iQAoAAA=
+2026-08-24T15:43:19 [info ] serial | BLOBSUB_BEGIN_MARKED
+2026-08-24T15:43:19 [info ] serial | RESULT=SUB_BENCH_DONE 2026-08-24T15:43:19Z
