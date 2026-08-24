@@ -67,6 +67,10 @@ def main() -> int:
     if len(sys.argv) < 2:
         print(__doc__)
         return 2
+    if sys.argv[1] == "--from-compares":
+        # Linux-serial mode: reassembled blob carries only the compare JSONs
+        # (compare-r*/ and compare-kvr-r*/), not the raw per-leg files.
+        return main_from_compares(Path(sys.argv[2]))
     out = Path(sys.argv[1])
     rounds = sorted(d.name for d in out.glob("r[0-9]*")
                     if (d / "async").is_dir() or (d / "kvr").is_dir())
@@ -76,6 +80,80 @@ def main() -> int:
     per_round = {r: round_ratios(out, r) for r in rounds}
     failures: list[str] = []
     print(f"parity-gate: {out} rounds={rounds} peer=RocksDB-default(sync=false)")
+
+    for shape in FLOOR2_SHAPES:
+        vals = [per_round[r][shape] for r in rounds if shape in per_round[r]]
+        if not vals:
+            failures.append(f"{shape}: no data")
+            continue
+        med = statistics.median(vals)
+        ok = med >= 2.0
+        print(f"  {'PASS' if ok else 'FAIL'} {shape:26s} median={med:6.3f}  rounds={['%.3f' % v for v in vals]}")
+        if not ok:
+            failures.append(f"{shape}: median {med:.3f} < 2.0")
+
+    vals = [per_round[r].get(APPLY_3OF3) for r in rounds]
+    if None in vals or not vals:
+        failures.append(f"{APPLY_3OF3}: missing round data")
+    else:
+        ok = all(v >= 2.0 for v in vals)
+        print(f"  {'PASS' if ok else 'FAIL'} {APPLY_3OF3:26s} 3/3={['%.3f' % v for v in vals]}")
+        if not ok:
+            failures.append(f"{APPLY_3OF3}: below 2.0 in a round")
+
+    vals = [per_round[r].get(RAFTLOG_MIN) for r in rounds]
+    if None in vals or not vals:
+        failures.append(f"{RAFTLOG_MIN}: missing round data")
+    else:
+        med = statistics.median(vals)
+        ok = med > 1.0
+        print(f"  {'PASS' if ok else 'FAIL'} {RAFTLOG_MIN:26s} median={med:.3f} (target >1) rounds={['%.3f' % v for v in vals]}")
+        if not ok:
+            failures.append(f"{RAFTLOG_MIN}: median {med:.3f} <= 1.0")
+
+    for shape in OPEN_SHAPES:
+        vals = [per_round[r][shape] for r in rounds if shape in per_round[r]]
+        if vals:
+            print(f"  OPEN {shape:26s} (not gated): {['%.3f' % v for v in vals]}")
+
+    if failures:
+        print("parity-gate: REGRESSION — " + "; ".join(failures), file=sys.stderr)
+        return 1
+    print("parity-gate: PASS (closed shapes hold their floors)")
+    return 0
+
+
+def compare_ratios(path: Path) -> dict[str, float]:
+    try:
+        d = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return {r["shape"]: float(r["compat_over_rocksdb"])
+            for r in d.get("ratios", []) if r.get("compat_over_rocksdb")}
+
+
+def _compare_jsons(pattern: str, out: Path) -> list[Path]:
+    files = sorted(out.glob(pattern + "/rocks_parity_compare.json"))
+    if not files:
+        files = sorted(out.glob(pattern + "/compare_report.json"))
+    return files
+
+
+def main_from_compares(out: Path) -> int:
+    full = [compare_ratios(p) for p in _compare_jsons("compare-r[0-9]*", out)]
+    kvr = [compare_ratios(p) for p in _compare_jsons("compare-kvr-r[0-9]*", out)]
+    if not full:
+        print(f"parity-gate: no compare-r*/ JSONs under {out}", file=sys.stderr)
+        return 2
+    rounds = [f"{i + 1}" for i in range(len(full))]
+    per_round: dict[str, dict[str, float]] = {}
+    for i, r in enumerate(rounds):
+        d: dict[str, float] = dict(full[i])
+        if i < len(kvr):
+            d.update(kvr[i])
+        per_round[r] = d
+    failures: list[str] = []
+    print(f"parity-gate(from-compares): {out} rounds={rounds} peer=RocksDB-default(sync=false)")
 
     for shape in FLOOR2_SHAPES:
         vals = [per_round[r][shape] for r in rounds if shape in per_round[r]]
