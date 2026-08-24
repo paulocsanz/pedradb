@@ -1,0 +1,16 @@
+# Extrato serial linux-sub-5 (bench8sub v3)
+---    1
+---    2
+--- build pedra side 12:29:42
+--- build peer side 
+--- pedra side done 12:33:23
+--- peer side done 12:42:14
+--- ratio 12:43:37
+--- run pedra 12:42:14
+--- run peer 12:43:01
+
+SUB_RATIO doc_txn pedra=159247 rocks=111459 ratio=1.43
+SUB_RATIO point_read pedra=649058 rocks=359003 ratio=1.81
+SUB_RATIO point_write pedra=356497 rocks=148724 ratio=2.40
+SUB_RATIO scan pedra=371044 rocks=636953 ratio=0.58
+RESULT=SUB_BENCH_DONE 2026-08-24T12:43:38Z

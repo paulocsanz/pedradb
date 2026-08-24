@@ -1,0 +1,7 @@
+sub-bench ops=2000 records=1024 dir=/tmp/sub-bench-12603
+seed 1024 records in 0.0s
+leg point_read qps 359003
+leg point_write qps 148724
+leg scan qps 636953
+leg doc_txn qps 111459
+SUB_BENCH_JSON {"engine":"rocks","ops":2000,"records":1024,"seconds":8.0,"legs":[{"name":"point_read","qps":359002.86126814055},{"name":"point_write","qps":148723.59081216456},{"name":"scan","qps":636952.5483090561},{"name":"doc_txn","qps":111458.98456293065}]}

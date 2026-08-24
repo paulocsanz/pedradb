@@ -82,7 +82,16 @@ Três perguntas abertas depois do RFC-0054:
       (kvs `scan` = raw_iterator + seek), `doc_txn` (RMW com validação
       OCC). Sem meta de ratio — é prova de substituição correta + telemetria
       de onde o custo upper mora.
-- [ ] **P2.3** Rodar sub-bench no Linux (mesma VM) e arquivar JSON.
+- [x] **P2.3** Rodar sub-bench no Linux e arquivar JSON.
+      **Resultado (linux-sub-5, fonte ad2dbab):
+      `findings/2026-08-24-sub-surreal-linux/`** — SurrealDB v1.5.4
+      inteiro sobre o shim: `point_write` **2.40×**, `point_read`
+      **1.81×**, `doc_txn` **1.43×** vs RocksDB real (peer default
+      `sync=false`); `scan` **0.58×** (gap do shim no padrão
+      range-scan do SurrealDB — diferente do `kvrocks_scan` oficial
+      que passa 32.7×; próximo item do shim: iterator com
+      run-prefix/prefix-skip). Substituição provada no Linux: 3/4
+      pernas mais rápidas com o upper DB intacto.
 
 ## Não-metas
 
@@ -136,7 +145,7 @@ específicos do port (write-heavy, batch de 16/32) → linux-diag-5 (closed — 
 | P1.3 | p1 | ratios anti-overindex Linux | done | sem overindex: unif ±1.5%, big −22% (corte 30%) | 2026-08-24 |
 | P2.1 | p2 | shim rocksdb 0.21 | done | crates/rocksdb + alias Transaction | 2026-08-24 |
 | P2.2 | p2 | sub-bench SurrealDB | done | bench/sub-surreal no repo; kvs::tests 62/62 no shim (pós-F183) | 2026-08-24 |
-| P2.3 | p2 | sub-bench no Linux | pending | — | 2026-08-24 |
+| P2.3 | p2 | sub-bench no Linux | done | sub-5: write 2.40×, read 1.81×, txn 1.43×, scan 0.58× (gap shim) | 2026-08-24 |
 
 ## Acceptance Criteria
 
