@@ -1,0 +1,7 @@
+04:32:27 gate load1=3.47 (consecutive 0/2)
+04:32:47 gate load1=2.77 (consecutive 0/2)
+04:33:07 gate load1=2.27 (consecutive 0/2)
+04:33:27 gate load1=1.91 (consecutive 1/2)
+04:33:47 gate load1=1.65 (consecutive 2/2)
+04:33:47 maxpoll load1=1.65
+04:34:07 maxpoll load1=1.75
