@@ -166,6 +166,9 @@ impl FaultEnv {
 
 /// Run: durable put → process-style crash → reopen; key must survive.
 ///
+/// RFC-0053 crash-dictionary tooth: acked prefix ⊆ map after reopen
+/// (`docs/formal/crash-dictionary.md`).
+///
 /// # Errors
 /// DB I/O.
 pub fn scenario_crash_after_sync_survives(parent: impl AsRef<Path>) -> Result<()> {

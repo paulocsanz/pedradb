@@ -8,5 +8,6 @@ rust-version.workspace = true
 
 [dependencies]
 pedradb-core.workspace = true
+pedradb-io-uring.workspace = true
 crc32c.workspace = true
 thiserror.workspace = true

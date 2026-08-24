@@ -8,7 +8,8 @@
 #![warn(missing_docs)]
 
 use bytes::Bytes;
-use pedradb_core::{ConcurrentDb, CoreError, Db, Env, OpenOptions, Result, SequenceNumber, StdEnv};
+use pedradb_core::{ConcurrentDb, CoreError, Db, Env, OpenOptions, Result, SequenceNumber};
+use pedradb_io_uring::IoUringEnv;
 use std::path::Path;
 
 /// Key prefix for lease records.
@@ -35,11 +36,11 @@ pub fn lease_key(name: impl AsRef<[u8]>) -> Vec<u8> {
 
 /// Exclusive lease handle over a [`ConcurrentDb`] (thread-safe CAS path).
 #[derive(Clone)]
-pub struct LeaseStore<E: Env = StdEnv> {
+pub struct LeaseStore<E: Env = IoUringEnv> {
     db: ConcurrentDb<E>,
 }
 
-impl LeaseStore<StdEnv> {
+impl LeaseStore<IoUringEnv> {
     /// Open a lease store on the real filesystem.
     ///
     /// # Errors
@@ -67,7 +68,7 @@ impl LeaseStore<StdEnv> {
     /// Open I/O.
     pub fn open_with(path: impl AsRef<Path>, opts: OpenOptions) -> Result<Self> {
         Ok(Self {
-            db: ConcurrentDb::open_with(path, opts)?,
+            db: ConcurrentDb::open_with_env(path, opts, IoUringEnv::default())?,
         })
     }
 }

@@ -8,3 +8,6 @@ description = "Secondary-index canary on public Pedra multi-key TX (RFC-0020 P1.
 [dependencies]
 pedradb-core.workspace = true
 bytes.workspace = true
+
+[dev-dependencies]
+pedradb-sim.workspace = true

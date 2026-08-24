@@ -16,6 +16,7 @@
 #![warn(missing_docs)]
 
 use pedradb_core::{Db, OpenOptions, Result as CoreResult};
+use pedradb_io_uring::IoUringEnv;
 use thiserror::Error;
 
 /// SQL execution errors.
@@ -58,7 +59,7 @@ pub enum QueryResult {
 
 /// SQL session over one PedraDB directory.
 pub struct SqlEngine {
-    db: Db,
+    db: Db<IoUringEnv>,
 }
 
 impl SqlEngine {
@@ -67,7 +68,7 @@ impl SqlEngine {
     /// # Errors
     /// PedraDB open.
     pub fn open(path: impl AsRef<std::path::Path>) -> Result<Self> {
-        let db = Db::open_with(
+        let db = Db::open_with_env(
             path,
             OpenOptions {
                 wal_full_fsync: true,
@@ -80,6 +81,7 @@ impl SqlEngine {
                 exclusive: true,
                 large_value_threshold: None,
             },
+            IoUringEnv::default(),
         )?;
         Ok(Self { db })
     }

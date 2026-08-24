@@ -15,6 +15,7 @@
 #![warn(missing_docs)]
 
 use pedradb_core::{BatchOp, Db, Result, SequenceNumber, Snapshot, Transaction, WriteOptions};
+use pedradb_io_uring::IoUringEnv;
 
 /// One committed log entry: an ordered multi-op batch for PedraDB.
 #[derive(Debug, Clone)]
@@ -305,13 +306,13 @@ impl InProcessCluster {
 /// Outer products can wrap this with gRPC/HTTP later; the contract stays
 /// `get` / `put` / `delete` / multi-key [`Transaction`].
 pub struct KvService {
-    db: Db,
+    db: Db<IoUringEnv>,
 }
 
 impl KvService {
     /// Wrap an open database.
     #[must_use]
-    pub fn new(db: Db) -> Self {
+    pub fn new(db: Db<IoUringEnv>) -> Self {
         Self { db }
     }
 
@@ -321,7 +322,7 @@ impl KvService {
     /// PedraDB open.
     pub fn open(path: impl AsRef<std::path::Path>) -> Result<Self> {
         use pedradb_core::OpenOptions;
-        let db = Db::open_with(
+        let db = Db::open_with_env(
             path,
             OpenOptions {
                 wal_full_fsync: true,
@@ -334,6 +335,7 @@ impl KvService {
                 exclusive: true,
                 large_value_threshold: None,
             },
+            IoUringEnv::default(),
         )?;
         Ok(Self::new(db))
     }
@@ -361,7 +363,7 @@ impl KvService {
     }
 
     /// Begin a multi-key transaction.
-    pub fn begin(&mut self) -> Transaction<'_> {
+    pub fn begin(&mut self) -> Transaction<'_, IoUringEnv> {
         self.db.begin()
     }
 
@@ -375,12 +377,12 @@ impl KvService {
 
     /// Underlying DB for flush/compact/snapshot.
     #[must_use]
-    pub fn db(&self) -> &Db {
+    pub fn db(&self) -> &Db<IoUringEnv> {
         &self.db
     }
 
     /// Mutable DB.
-    pub fn db_mut(&mut self) -> &mut Db {
+    pub fn db_mut(&mut self) -> &mut Db<IoUringEnv> {
         &mut self.db
     }
 

@@ -200,6 +200,15 @@ def check_lint(root: Path, catalog: dict, r: Report) -> None:
                 r.good(f"{pair['id']}: {entry} lives and is used in {caller}")
             else:
                 r.good(f"{pair['id']}: {caller} calls {entry}")
+            if pair.get("data_fate"):
+                for handler in pair.get("handlers", []):
+                    if not mentions(src, handler):
+                        r.fail(
+                            f"{pair['id']}: data_fate handler {handler} missing in {caller} "
+                            f"(RFC-0053 P0.4)"
+                        )
+                    else:
+                        r.good(f"{pair['id']}: data_fate handler {handler} in {caller}")
 
 
 def check_clones(root: Path, catalog: dict, r: Report) -> None:
@@ -222,6 +231,64 @@ def check_clones(root: Path, catalog: dict, r: Report) -> None:
                 )
             else:
                 r.good(f"{clone['id']}: {name} identical tokens")
+
+
+# ---------------------------------------------------------------------------
+# RFC-0056 P2.5 — TCB freeze.
+# ---------------------------------------------------------------------------
+
+# Explicit exceptions: production decision kernels that are NOT catalog
+# pairs. Adding a line here is a visible diff a reviewer must justify;
+# anything not listed and not registered turns CI red. TCB cannot grow in
+# silence.
+TCB_FREEZE_ALLOWLIST = {
+    "crates/pedradb-io-uring/src/cqe_kernel.rs": (
+        "io_uring CQE ownership (U1/G1): in-file property tests only; "
+        "Verus twin blocked on an io_uring ring model (docs/open-items.md)"
+    ),
+}
+
+
+def check_tcb_freeze(root: Path, catalog: dict, r: Report) -> None:
+    print("== tcb freeze (RFC-0056 P2.5) ==")
+    registered = {p["kernel"] for p in catalog["pairs"] if p.get("status") != "absent"}
+    for clone in catalog.get("clones", []):
+        registered.add(clone["a"])
+        registered.add(clone["b"])
+    frozen = sorted(
+        str(p.relative_to(root))
+        for p in (root / "crates").glob("*/src/**/*_kernel.rs")
+        if p.is_file() and "verus" not in p.parts
+    )
+    before = len(r.failed)
+    for k in frozen:
+        if k in registered:
+            continue
+        if k in TCB_FREEZE_ALLOWLIST:
+            r.good(f"tcb freeze: allowlisted {k}")
+            continue
+        r.fail(
+            f"tcb freeze: kernel {k} is neither a catalog pair, a catalog "
+            "clone, nor allowlisted — new TCB must register kernel+twin "
+            "(RFC-0056 P2.5)"
+        )
+    for k in TCB_FREEZE_ALLOWLIST:
+        if k not in frozen:
+            r.fail(f"tcb freeze: stale allowlist entry {k} (file gone)")
+    # data_fate pairs are the data-destination TCB: each must carry the
+    # full kernel+twin+script triple.
+    for pair in catalog["pairs"]:
+        if not pair.get("data_fate"):
+            continue
+        missing = [
+            what
+            for what, val in (("twin", pair.get("twin")), ("verus script", pair.get("verus")))
+            if not val or not (root / val).is_file()
+        ]
+        if missing:
+            r.fail(f"tcb freeze: data_fate pair {pair['id']} lacks {', '.join(missing)}")
+    if len(r.failed) == before:
+        r.good(f"tcb freeze: {len(frozen)} decision kernels accounted for")
 
 
 TWIN_KINDS = {"close", "atom", "model"}
@@ -395,6 +462,25 @@ def check_extract(
     lean = root / "formal/aeneas/out/lean/VoteKernel.lean"
     if lean.is_file() and "def vote_decision" in lean.read_text(encoding="utf-8"):
         r.good("aeneas extract artifact has def vote_decision")
+        vk = lean.read_text(encoding="utf-8")
+        axiom = "axiom core.option.Option.Insts.CoreCmpPartialEqOption.eq"
+        modeled = "def core.option.Option.Insts.CoreCmpPartialEqOption.eq"
+        if axiom in vk:
+            r.fail(
+                "RFC-0053 P40: VoteKernel still axioms Option::eq "
+                "(replace with match def; see formal/aeneas/lean/Vote.lean)"
+            )
+        elif modeled in vk:
+            r.good("RFC-0053 P40: Option::eq is a match def, not an axiom")
+        else:
+            r.good("RFC-0053 P40: extract has no Option::eq (derive dropped)")
+        vote_thy = root / "formal/aeneas/lean/Vote.lean"
+        if vote_thy.is_file() and "theorem vote_decision_iff" in vote_thy.read_text(
+            encoding="utf-8"
+        ):
+            r.good("RFC-0053 P40: Vote.lean has theorem vote_decision_iff")
+        else:
+            r.fail("RFC-0053 P40: Vote.lean missing theorem vote_decision_iff")
     else:
         r.gap("aeneas extract artifact formal/aeneas/out/lean/VoteKernel.lean missing (run ./scripts/aeneas_vote.sh)")
     stamp = root / "formal/aeneas/out/SOURCE"
@@ -457,6 +543,141 @@ def check_extract(
             r.fail(
                 f"aeneas SOURCE.bloom drifted (kernel {have[:12]}… vs stamp {want[:12]}…; re-run ./scripts/aeneas_bloom.sh)"
             )
+    ae_lean = root / "formal/aeneas/out/lean/AeKernel.lean"
+    if ae_lean.is_file() and "def ae_entry_action" in ae_lean.read_text(encoding="utf-8"):
+        r.good("aeneas extract artifact has def ae_entry_action")
+    else:
+        r.gap(
+            "aeneas extract artifact AeKernel.lean missing (run ./scripts/aeneas_ae.sh)"
+        )
+    ae_stamp = root / "formal/aeneas/out/SOURCE.ae"
+    ae_src = root / "crates/pedradb-raft/src/ae_kernel.rs"
+    if ae_stamp.is_file() and ae_src.is_file():
+        want = None
+        for line in ae_stamp.read_text(encoding="utf-8").splitlines():
+            if line.startswith("sha256="):
+                want = line.split("=", 1)[1].strip()
+        have = hashlib.sha256(ae_src.read_bytes()).hexdigest()
+        if want and have == want:
+            r.good("aeneas SOURCE.ae sha256 matches ae_kernel.rs")
+        elif want:
+            r.fail(
+                f"aeneas SOURCE.ae drifted (kernel {have[:12]}… vs stamp {want[:12]}…; re-run ./scripts/aeneas_ae.sh)"
+            )
+    ae_thy = root / "formal/aeneas/lean/Ae.lean"
+    if ae_thy.is_file():
+        at = ae_thy.read_text(encoding="utf-8")
+        if re.search(r"\bsorry\b", at):
+            r.fail("RFC-0053 P2.1: Ae.lean contains sorry")
+        elif "theorem as_is_rewrites_committed" in at and "theorem ae_keep_if_same_term" in at:
+            r.good("RFC-0053 P2.1: Ae.lean theorems (no sorry)")
+        else:
+            r.fail("RFC-0053 P2.1: Ae.lean missing named theorems")
+    else:
+        r.fail("RFC-0053 P2.1: formal/aeneas/lean/Ae.lean missing")
+    cm_lean = root / "formal/aeneas/out/lean/CommitKernel.lean"
+    if cm_lean.is_file() and "def recover_commit" in cm_lean.read_text(encoding="utf-8"):
+        r.good("aeneas extract artifact has def recover_commit")
+    else:
+        r.gap(
+            "aeneas extract artifact CommitKernel.lean missing (run ./scripts/aeneas_commit.sh)"
+        )
+    cm_stamp = root / "formal/aeneas/out/SOURCE.commit"
+    cm_src = root / "crates/pedradb-raft/src/commit_kernel.rs"
+    if cm_stamp.is_file() and cm_src.is_file():
+        want = None
+        for line in cm_stamp.read_text(encoding="utf-8").splitlines():
+            if line.startswith("sha256="):
+                want = line.split("=", 1)[1].strip()
+        have = hashlib.sha256(cm_src.read_bytes()).hexdigest()
+        if want and have == want:
+            r.good("aeneas SOURCE.commit sha256 matches commit_kernel.rs")
+        elif want:
+            r.fail(
+                f"aeneas SOURCE.commit drifted (kernel {have[:12]}… vs stamp {want[:12]}…; re-run ./scripts/aeneas_commit.sh)"
+            )
+    cm_thy = root / "formal/aeneas/lean/Commit.lean"
+    if cm_thy.is_file():
+        ct = cm_thy.read_text(encoding="utf-8")
+        if re.search(r"\bsorry\b", ct):
+            r.fail("RFC-0053 P2.1: Commit.lean contains sorry")
+        elif "theorem may_commit_at_iff" in ct and "theorem recover_commit_caps_examples" in ct:
+            r.good("RFC-0053 P2.1: Commit.lean theorems (no sorry)")
+        else:
+            r.fail("RFC-0053 P2.1: Commit.lean missing named theorems")
+    else:
+        r.fail("RFC-0053 P2.1: formal/aeneas/lean/Commit.lean missing")
+    # RFC-0056 P1.2: WAL/apply/reopen extracts + Lean theorems
+    for stamp, artifact, marker, regen, src, thy, theorems in [
+        (
+            "reopen",
+            "formal/aeneas/out/lean/ReopenKernel.lean",
+            "def reopen_outcome",
+            "./scripts/aeneas_reopen.sh",
+            "crates/pedradb-core/src/wal/reopen_kernel.rs",
+            "formal/aeneas/lean/Reopen.lean",
+            ("theorem fail_closed_refuses_every_damage", "theorem as_is_swallows_damage"),
+        ),
+        (
+            "apply",
+            "formal/aeneas/out/lean/ApplyKernel.lean",
+            "def apply_advance",
+            "./scripts/aeneas_apply.sh",
+            "crates/pedradb-raft/src/apply_kernel.rs",
+            "formal/aeneas/lean/Apply.lean",
+            ("theorem apply_advance_closed_form", "theorem as_is_applies_hole"),
+        ),
+        (
+            "wal_recover",
+            "formal/aeneas/out/lean/WalRecoverKernel.lean",
+            "def recover_kernel.recover_collect_act",
+            "./scripts/aeneas_wal_recover.sh",
+            "crates/pedradb-core/src/wal/recover_kernel.rs",
+            "formal/aeneas/lean/WalRecover.lean",
+            ("theorem crc_fresh_alignment_fail_stops", "theorem as_is_torn_is_silent_eof"),
+        ),
+    ]:
+        art = root / artifact
+        if art.is_file() and marker in art.read_text(encoding="utf-8"):
+            r.good(f"aeneas extract artifact has {marker}")
+        else:
+            r.gap(
+                f"aeneas extract artifact {artifact.rsplit('/', 1)[-1]} missing (run {regen})"
+            )
+        st = root / f"formal/aeneas/out/SOURCE.{stamp}"
+        kr = root / src
+        if st.is_file() and kr.is_file():
+            want = None
+            for line in st.read_text(encoding="utf-8").splitlines():
+                if line.startswith("sha256="):
+                    want = line.split("=", 1)[1].strip()
+            have = hashlib.sha256(kr.read_bytes()).hexdigest()
+            if want and have == want:
+                r.good(f"aeneas SOURCE.{stamp} sha256 matches {src.rsplit('/', 1)[-1]}")
+            elif want:
+                r.fail(
+                    f"aeneas SOURCE.{stamp} drifted (kernel {have[:12]}… vs stamp {want[:12]}…; re-run {regen})"
+                )
+        tf = root / thy
+        if tf.is_file():
+            tt = tf.read_text(encoding="utf-8")
+            if re.search(r"\bsorry\b", tt):
+                r.fail(f"RFC-0056 P1.2: {thy.rsplit('/', 1)[-1]} contains sorry")
+            elif all(t in tt for t in theorems):
+                r.good(f"RFC-0056 P1.2: {thy.rsplit('/', 1)[-1]} theorems (no sorry)")
+            else:
+                r.fail(f"RFC-0056 P1.2: {thy.rsplit('/', 1)[-1]} missing named theorems")
+        else:
+            r.fail(f"RFC-0056 P1.2: {thy} missing")
+    p12_script = root / "scripts/lean_wal_apply_reopen.sh"
+    p = subprocess.run(
+        ["bash", str(p12_script)] + (["--required"] if charon_required else []),
+        cwd=root,
+    )
+    if p.returncode != 0:
+        r.fail(f"lean_wal_apply_reopen.sh exit {p.returncode}")
+    elif charon_required:
+        r.good("lean_wal_apply_reopen.sh (Reopen + Apply + WalRecover)")
     lean_script = root / "scripts/lean_vote.sh"
     p = subprocess.run(
         ["bash", str(lean_script)] + (["--required"] if charon_required else []),
@@ -465,7 +686,7 @@ def check_extract(
     if p.returncode != 0:
         r.fail(f"lean_vote.sh exit {p.returncode}")
     elif charon_required:
-        r.good("lean_vote.sh (vote_decision_matches_spec)")
+        r.good("lean_vote.sh (vote + Ae + Commit)")
     if not (want_charon or charon_required):
         return
     script = root / "scripts/aeneas_vote.sh"
@@ -572,6 +793,7 @@ def main() -> int:
     run_ci = args.ci or args.all
     if args.lint or run_ci:
         check_lint(root, catalog, r)
+        check_tcb_freeze(root, catalog, r)
     if args.clones or run_ci:
         check_clones(root, catalog, r)
     if args.twins or run_ci:

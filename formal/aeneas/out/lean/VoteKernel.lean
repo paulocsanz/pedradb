@@ -42,9 +42,14 @@ def core.option.Option.Insts.CoreFmtDebug {T : Type} (fmtDebugInst :
     Visibility: public -/
 @[rust_fun
   "core::option::{core::cmp::PartialEq<core::option::Option<@T>, core::option::Option<@T>>}::eq"]
-axiom core.option.Option.Insts.CoreCmpPartialEqOption.eq
+def core.option.Option.Insts.CoreCmpPartialEqOption.eq
   {T : Type} (cmpPartialEqInst : core.cmp.PartialEq T T) :
   Option T → Option T → Result Bool
+  := fun a b =>
+    match a, b with
+    | some x, some y => cmpPartialEqInst.eq x y
+    | none, none => ok true
+    | _, _ => ok false
 
 /-- [pedra_aeneas_vote_kernel::VoteInputs]
     Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 25:0-42:1

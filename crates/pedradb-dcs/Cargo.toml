@@ -7,6 +7,7 @@ description = "etcd-class DCS state machine on PedraDB (RFC-0010 P2.1 / Patroni 
 
 [dependencies]
 pedradb-core.workspace = true
+pedradb-io-uring.workspace = true
 bytes.workspace = true
 thiserror.workspace = true
 

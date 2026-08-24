@@ -532,6 +532,7 @@ version = "0.1.0"
 dependencies = [
  "bytes",
  "pedradb-core",
+ "pedradb-sim",
 ]
 
 [[package]]
@@ -552,6 +553,7 @@ version = "0.1.0"
 dependencies = [
  "bytes",
  "pedradb-core",
+ "pedradb-sim",
  "stateright",
 ]
 
@@ -654,6 +656,21 @@ dependencies = [
  "pedradb-core",
  "pedradb-io-uring",
  "stateright",
+ "thiserror",
+]
+
+[[package]]
+name = "pedradb-world"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "pedradb-core",
+ "pedradb-fold",
+ "pedradb-index",
+ "pedradb-io-uring",
+ "pedradb-journal",
+ "pedradb-sim",
+ "pedradb-store",
  "thiserror",
 ]
 

@@ -558,7 +558,8 @@ fn gc_snapshot_safe(
                 break;
             }
         }
-        // Newest always kept; each older drops when immediate newer.seq ≤ oldest.
+        // Newest always kept; each older drops when immediate newer.seq ≤ oldest
+        // (decided by `compact_kernel::point_version_fate`, RFC-0056 P0.3).
         let mut keep: Vec<(InternalKey, Bytes)> = Vec::with_capacity(versions.len());
         for (ikey, value) in versions {
             if keep.is_empty() {
@@ -566,7 +567,12 @@ fn gc_snapshot_safe(
                 continue;
             }
             let newer_seq = keep.last().expect("non-empty").0.sequence;
-            if newer_seq <= oldest_snapshot {
+            if crate::compact_kernel::point_version_fate(
+                ikey.sequence,
+                Some(newer_seq),
+                oldest_snapshot,
+            ) == crate::compact_kernel::VersionFate::Drop
+            {
                 // All open snapshots ≥ oldest see `newer` (or something newer).
                 continue;
             }
@@ -578,7 +584,12 @@ fn gc_snapshot_safe(
         // older version of the key can live in a file outside the input
         // (e.g. existing L1+ untouched by compact_l0_into_l1); dropping the
         // tombstone there resurrects that version (durably, after reopen).
-        if bottommost && keep.len() == 1 && keep[0].0.kind == ValueType::Deletion {
+        // Decided by `compact_kernel::lone_tombstone_fate`.
+        let lone_tombstone =
+            keep.len() == 1 && keep[0].0.kind == ValueType::Deletion;
+        if crate::compact_kernel::lone_tombstone_fate(bottommost, lone_tombstone)
+            == crate::compact_kernel::VersionFate::Drop
+        {
             // Tombstone only needed if some open snap is ≥ tombstone seq and
             // would otherwise see an older value we already dropped — if we
             // dropped everything under it, snaps see NotFound either way.

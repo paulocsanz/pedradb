@@ -51,6 +51,49 @@ theorem vote_decision_matches_spec (i : VoteInputs) :
       split <;> simp_all [vote_decision_spec]
     · simp_all [vote_decision_spec]
 
+/-- RFC-0053 P40: iff on the **extracted** term `VoteKernel.vote_decision`
+    (not the Verus twin). Same closed form as the Verus `ensures`. -/
+theorem vote_decision_iff (i : VoteInputs) :
+    vote_decision i = ok .WouldGrant ↔
+      i.candidate_term = i.current_term ∧
+      can_vote i.voted_for i.candidate_id = ok true ∧
+      log_up_to_date i.last_log_term i.last_log_index
+          i.candidate_last_log_term i.candidate_last_log_index = ok true := by
+  constructor
+  · intro h
+    unfold vote_decision at h
+    split at h
+    · simp at h
+    · have heq' := u64_eq_of_not_bne ‹_›
+      obtain ⟨can, hcan⟩ := can_vote_ok i.voted_for i.candidate_id
+      rw [hcan] at h
+      simp only [bind_tc_ok] at h
+      split at h
+      · obtain ⟨up, hup⟩ :=
+          log_up_to_date_ok i.last_log_term i.last_log_index
+            i.candidate_last_log_term i.candidate_last_log_index
+        rw [hup] at h
+        simp only [bind_tc_ok] at h
+        split at h
+        · have hc : can = true := ‹can = true›
+          have hu : up = true := ‹up = true›
+          rw [hc] at hcan
+          rw [hu] at hup
+          exact ⟨heq', hcan, hup⟩
+        · simp at h
+      · simp at h
+  · intro ⟨heq, hcan, hup⟩
+    unfold vote_decision
+    split
+    · have hne' := u64_ne_of_bne ‹_›
+      exact (hne' heq).elim
+    · rw [hcan]
+      simp only [bind_tc_ok]
+      split
+      · rw [hup]
+        simp
+      · simp_all
+
 private abbrev staleOther : VoteInputs := {
   current_term := 5#u64
   voted_for := some (2#u64)

@@ -22,3 +22,33 @@ name = "BloomKernel"
 
 [[lean_lib]]
 name = "Bloom"
+
+[[lean_lib]]
+name = "AeKernel"
+
+[[lean_lib]]
+name = "Ae"
+
+[[lean_lib]]
+name = "CommitKernel"
+
+[[lean_lib]]
+name = "Commit"
+
+[[lean_lib]]
+name = "ReopenKernel"
+
+[[lean_lib]]
+name = "Reopen"
+
+[[lean_lib]]
+name = "ApplyKernel"
+
+[[lean_lib]]
+name = "Apply"
+
+[[lean_lib]]
+name = "WalRecoverKernel"
+
+[[lean_lib]]
+name = "WalRecover"

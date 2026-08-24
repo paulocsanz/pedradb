@@ -9,6 +9,9 @@ description = "PedraDB core LSM-tree storage engine (clean-room Rust reimplement
 default = []
 # RFC-0018 P2.5: enable optional engine buggify hook bodies (still SeedRng-only).
 buggify = []
+# RFC-0051 P0: cooperative PCT turnstile hooks (maybe_yield) on the
+# ConcurrentDb commit path; off ⇒ hooks compile away entirely.
+pct = []
 
 # Kani proof harnesses live in-tree under #[cfg(kani)] (bloom T1–T4).
 [lints.rust]

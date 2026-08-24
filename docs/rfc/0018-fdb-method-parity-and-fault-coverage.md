@@ -2,7 +2,7 @@
 
 **Status:** in-progress (P0–P2 slices shipped in-tree; field/Linux hard CI residual)  
 **Updated:** 2026-08-12  
-**Repos:** `determinismo/pedradb-dst` (campanhas) + `pedradb` (seams)  
+**Repos:** `determinismo/pedradb-dst` (tesoura / det_io / QEMU) + `pedradb` (seams). **World runtime in-tree:** [RFC-0050](0050-world-in-tree-fdb-determinism.md).  
 **Espelho de seams:** [`pedradb/docs/rfc/0018-fdb-method-parity-and-fault-coverage.md`](../../pedradb/docs/rfc/0018-fdb-method-parity-and-fault-coverage.md)  
 **Normativo “DST ≠ FDB Sim”:** [`DST-VS-FDB-SIM.md`](DST-VS-FDB-SIM.md)  
 **Roadmap irmão:** [`FDB-PARITY-ROADMAP.md`](FDB-PARITY-ROADMAP.md)  

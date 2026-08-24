@@ -1,0 +1,51 @@
+[package]
+name = "pedradb-world"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "FDB-shaped World runtime (RFC-0050): deterministic cluster sim over Montanha-Store, in-tree"
+
+[[bin]]
+name = "world_smoke"
+path = "src/bin/world_smoke.rs"
+
+[[bin]]
+name = "world_soak"
+path = "src/bin/world_soak.rs"
+
+[[bin]]
+name = "world_buggify_matrix"
+path = "src/bin/world_buggify_matrix.rs"
+
+[[bin]]
+name = "world_shrink"
+path = "src/bin/world_shrink.rs"
+
+[[bin]]
+name = "world_invariant_soak"
+path = "src/bin/world_invariant_soak.rs"
+
+[[bin]]
+name = "world_partition_storm"
+path = "src/bin/world_partition_storm.rs"
+
+[[bin]]
+name = "multiproc_trace_smoke"
+path = "src/bin/multiproc_trace_smoke.rs"
+
+[features]
+# RFC-0051 P0: PCT runner over the real ConcurrentDb (enables core hooks).
+pct = ["pedradb-core/pct"]
+
+[dependencies]
+pedradb-core.workspace = true
+pedradb-fold.workspace = true
+pedradb-io-uring.workspace = true
+pedradb-sim.workspace = true
+pedradb-store.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+bytes.workspace = true
+pedradb-journal.workspace = true
+pedradb-index.workspace = true

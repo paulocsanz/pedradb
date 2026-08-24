@@ -16,7 +16,7 @@ twin, and the handler that is supposed to call the kernel.
 
 | Check | What it refuses |
 |-------|-----------------|
-| **lint** | A kernel whose `entry` is never called from the listed production file |
+| **lint** | A kernel whose `entry` is never called from the listed production file. `data_fate` kernels (RFC-0053) also require named `handlers` (`handle_request_vote`, `rpc_request_vote`, …) |
 | **clones** | Raft vs store copies of `recover_commit` / `ae_ack_success` drifting |
 | **twins** | Missing `twin_kind`; a **close** twin without the entry `fn`; kernel decision tokens (`==`, `0xff`, `WouldGrant`, …) missing from the Verus twin |
 | **scripts** | A `scripts/verus_*.sh` whose `SRC=` is not in `catalog.json` |

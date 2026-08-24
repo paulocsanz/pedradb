@@ -18,6 +18,8 @@ pub enum RecoverKind {
     OrphanFragment,
     Crc,
     Other,
+    /// F170: zero type+len at a fresh alignment with junk after (not padding).
+    ZeroHeaderTail,
 }
 
 pub enum RecoverAct {
@@ -85,6 +87,7 @@ pub open spec fn recover_collect_act_spec(
     prefix_n: u64,
     can_skip: bool,
     consecutive_skips: u64,
+    in_resync: bool,
 ) -> RecoverAct {
     match kind {
         RecoverKind::Record => RecoverAct::KeepRecord,
@@ -92,7 +95,20 @@ pub open spec fn recover_collect_act_spec(
         RecoverKind::Truncated => recover_resync_act(prefix_n, can_skip, consecutive_skips),
         RecoverKind::LengthCorrupt => recover_resync_act(prefix_n, can_skip, consecutive_skips),
         RecoverKind::UnknownType => recover_resync_act(prefix_n, can_skip, consecutive_skips),
-        RecoverKind::Crc => RecoverAct::FailStop,
+        RecoverKind::Crc => {
+            if in_resync {
+                recover_resync_act(prefix_n, can_skip, consecutive_skips)
+            } else {
+                RecoverAct::FailStop
+            }
+        },
+        RecoverKind::ZeroHeaderTail => {
+            if in_resync {
+                recover_resync_act(prefix_n, can_skip, consecutive_skips)
+            } else {
+                RecoverAct::FailStop
+            }
+        },
         RecoverKind::OrphanFragment => RecoverAct::FailStop,
         RecoverKind::Other => RecoverAct::FailStop,
     }
@@ -117,55 +133,62 @@ pub fn recover_collect_act(
     prefix_n: u64,
     can_skip: bool,
     consecutive_skips: u64,
+    in_resync: bool,
 ) -> (d: RecoverAct)
     ensures
-        d == recover_collect_act_spec(kind, prefix_n, can_skip, consecutive_skips),
+        d == recover_collect_act_spec(
+            kind,
+            prefix_n,
+            can_skip,
+            consecutive_skips,
+            in_resync,
+        ),
 {
     match kind {
         RecoverKind::Record => RecoverAct::KeepRecord,
         RecoverKind::CleanEof => RecoverAct::Stop,
         RecoverKind::Truncated => {
-            if !can_skip {
-                if prefix_n == 0 {
-                    RecoverAct::FailStop
-                } else {
-                    RecoverAct::KeepPrefix
-                }
-            } else if consecutive_skips > MAX_CONSECUTIVE_SKIPS {
-                RecoverAct::FailStop
-            } else {
-                RecoverAct::Resync
-            }
+            recover_resync_exec(prefix_n, can_skip, consecutive_skips)
         },
         RecoverKind::LengthCorrupt => {
-            if !can_skip {
-                if prefix_n == 0 {
-                    RecoverAct::FailStop
-                } else {
-                    RecoverAct::KeepPrefix
-                }
-            } else if consecutive_skips > MAX_CONSECUTIVE_SKIPS {
-                RecoverAct::FailStop
-            } else {
-                RecoverAct::Resync
-            }
+            recover_resync_exec(prefix_n, can_skip, consecutive_skips)
         },
         RecoverKind::UnknownType => {
-            if !can_skip {
-                if prefix_n == 0 {
-                    RecoverAct::FailStop
-                } else {
-                    RecoverAct::KeepPrefix
-                }
-            } else if consecutive_skips > MAX_CONSECUTIVE_SKIPS {
-                RecoverAct::FailStop
+            recover_resync_exec(prefix_n, can_skip, consecutive_skips)
+        },
+        RecoverKind::Crc => {
+            if in_resync {
+                recover_resync_exec(prefix_n, can_skip, consecutive_skips)
             } else {
-                RecoverAct::Resync
+                RecoverAct::FailStop
             }
         },
-        RecoverKind::Crc => RecoverAct::FailStop,
+        RecoverKind::ZeroHeaderTail => {
+            if in_resync {
+                recover_resync_exec(prefix_n, can_skip, consecutive_skips)
+            } else {
+                RecoverAct::FailStop
+            }
+        },
         RecoverKind::OrphanFragment => RecoverAct::FailStop,
         RecoverKind::Other => RecoverAct::FailStop,
+    }
+}
+
+fn recover_resync_exec(prefix_n: u64, can_skip: bool, consecutive_skips: u64) -> (d: RecoverAct)
+    ensures
+        d == recover_resync_act(prefix_n, can_skip, consecutive_skips),
+{
+    if !can_skip {
+        if prefix_n == 0 {
+            RecoverAct::FailStop
+        } else {
+            RecoverAct::KeepPrefix
+        }
+    } else if consecutive_skips > MAX_CONSECUTIVE_SKIPS {
+        RecoverAct::FailStop
+    } else {
+        RecoverAct::Resync
     }
 }
 
@@ -182,6 +205,7 @@ pub open spec fn recover_collect_act_as_is(
         RecoverKind::LengthCorrupt => RecoverAct::Stop,
         RecoverKind::UnknownType => RecoverAct::Stop,
         RecoverKind::Crc => RecoverAct::Resync,
+        RecoverKind::ZeroHeaderTail => RecoverAct::Stop,
         RecoverKind::OrphanFragment => RecoverAct::FailStop,
         RecoverKind::Other => RecoverAct::FailStop,
     }
@@ -273,19 +297,30 @@ pub open spec fn fragment_act_as_is(kind: FragKind, scratch_empty: bool) -> Frag
 
 proof fn lemma_as_is_torn_is_silent_eof()
     ensures
-        recover_collect_act_spec(RecoverKind::Truncated, 0, false, 0) == RecoverAct::FailStop,
+        recover_collect_act_spec(RecoverKind::Truncated, 0, false, 0, false)
+            == RecoverAct::FailStop,
         recover_collect_act_as_is(RecoverKind::Truncated, 0, false, 0) == RecoverAct::Stop,
-        recover_collect_act_spec(RecoverKind::LengthCorrupt, 0, false, 0) == RecoverAct::FailStop,
+        recover_collect_act_spec(RecoverKind::LengthCorrupt, 0, false, 0, false)
+            == RecoverAct::FailStop,
         recover_collect_act_as_is(RecoverKind::LengthCorrupt, 0, false, 0) == RecoverAct::Stop,
 {
 }
 
 proof fn lemma_as_is_crc_resyncs()
     ensures
-        recover_collect_act_spec(RecoverKind::Crc, 3, true, 0) == RecoverAct::FailStop,
+        recover_collect_act_spec(RecoverKind::Crc, 3, true, 0, false) == RecoverAct::FailStop,
         recover_collect_act_as_is(RecoverKind::Crc, 3, true, 0) == RecoverAct::Resync,
         !is_length_resyncable_spec(RecoverKind::Crc),
         is_length_resyncable_as_is(RecoverKind::Crc),
+{
+}
+
+/// RFC-0053 P1.3 / crash-dictionary: AS-IS swallows ZeroHeaderTail as EOF.
+proof fn lemma_as_is_zero_header_silent_eof()
+    ensures
+        recover_collect_act_spec(RecoverKind::ZeroHeaderTail, 3, true, 0, false)
+            == RecoverAct::FailStop,
+        recover_collect_act_as_is(RecoverKind::ZeroHeaderTail, 3, true, 0) == RecoverAct::Stop,
 {
 }
 
@@ -296,23 +331,35 @@ proof fn lemma_as_is_orphan_is_eof()
 {
 }
 
-proof fn lemma_crc_never_resyncs(prefix_n: u64, can_skip: bool, skips: u64)
+proof fn lemma_crc_fresh_alignment_fail_stops(prefix_n: u64, can_skip: bool, skips: u64)
     ensures
-        recover_collect_act_spec(RecoverKind::Crc, prefix_n, can_skip, skips) == RecoverAct::FailStop,
-        recover_collect_act_spec(RecoverKind::OrphanFragment, prefix_n, can_skip, skips) == RecoverAct::FailStop,
+        recover_collect_act_spec(RecoverKind::Crc, prefix_n, can_skip, skips, false)
+            == RecoverAct::FailStop,
+        recover_collect_act_spec(
+            RecoverKind::ZeroHeaderTail,
+            prefix_n,
+            can_skip,
+            skips,
+            false,
+        ) == RecoverAct::FailStop,
+        recover_collect_act_spec(RecoverKind::OrphanFragment, prefix_n, can_skip, skips, false)
+            == RecoverAct::FailStop,
 {
 }
 
 proof fn lemma_empty_torn_fail_stops()
     ensures
-        recover_collect_act_spec(RecoverKind::Truncated, 0, false, 0) == RecoverAct::FailStop,
-        recover_collect_act_spec(RecoverKind::UnknownType, 0, false, 0) == RecoverAct::FailStop,
+        recover_collect_act_spec(RecoverKind::Truncated, 0, false, 0, false)
+            == RecoverAct::FailStop,
+        recover_collect_act_spec(RecoverKind::UnknownType, 0, false, 0, false)
+            == RecoverAct::FailStop,
 {
 }
 
 proof fn lemma_prefix_torn_keeps()
     ensures
-        recover_collect_act_spec(RecoverKind::Truncated, 1, false, 0) == RecoverAct::KeepPrefix,
+        recover_collect_act_spec(RecoverKind::Truncated, 1, false, 0, false)
+            == RecoverAct::KeepPrefix,
 {
 }
 

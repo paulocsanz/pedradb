@@ -10,6 +10,37 @@ on:
   workflow_dispatch:
 
 jobs:
+  world-determinism:
+    name: World in-tree determinism + lab=product (RFC-0050 P0+P1)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: world crate tests (seed⇒trace_hash, invariants)
+        run: cargo test -p pedradb-world --lib -- --test-threads=1
+      - name: world_smoke launch (same seed twice ⇒ same hash)
+        run: |
+          A=$(cargo run -q -p pedradb-world --bin world_smoke -- 0xC0FFEE | grep -o 'hash=[0-9a-f]*')
+          B=$(cargo run -q -p pedradb-world --bin world_smoke -- 0xC0FFEE | grep -o 'hash=[0-9a-f]*')
+          C=$(cargo run -q -p pedradb-world --bin world_smoke -- 0xC0FFEF | grep -o 'hash=[0-9a-f]*')
+          echo "run1 $A / run2 $B / other-seed $C"
+          test "$A" = "$B" || { echo "same seed must replay"; exit 1; }
+          test "$A" != "$C" || { echo "different seed must differ"; exit 1; }
+      - name: seam inventory check (all sites L2; orphan ⇒ fail)
+        run: python3 scripts/check_seam_inventory.py
+      - name: lab = product (P1.1 same PeerMsg Direct/Queued + P1.2 layer canaries)
+        run: |
+          cargo test -p pedradb-store --lib direct_pump_and_queued_share_peer_msg_semantics
+          cargo test -p pedradb-world --tests
+      - name: buggify engine injection fires (P1.3; default stays no-op)
+        run: cargo test -p pedradb-core --features buggify --lib buggify
+      - name: PCT over real ConcurrentDb (RFC-0051 P0+P1; planted d=2 stays found, group fence, OCC oracle)
+        run: cargo test -p pedradb-world --features pct --lib pct_concurrent -- --test-threads=1
+      - name: Spawn / wall-clock guards (RFC-0051 P2.2+P2.3)
+        run: python3 scripts/check_no_prod_time_spawn.py
+      - name: det_io hard CONTRACT-OK when sibling checkout present (RFC-0050 P2.4)
+        run: bash scripts/det_io_status.sh /tmp/det_io.txt && cat /tmp/det_io.txt
+
   formal-glue:
     name: formal glue (lint + twins + Stateright)
     runs-on: ubuntu-latest

@@ -101,4 +101,46 @@ pub fn vote_decision(
     }
 }
 
+/// Mirrors `PersistOutcome` in vote_kernel.rs.
+pub enum PersistOutcome {
+    Ok,
+    Err,
+}
+
+/// F15: wire grant only if the kernel would grant **and** persist Ok.
+pub open spec fn grant_after_persist_spec(d: VoteDecision, p: PersistOutcome) -> bool {
+    match (d, p) {
+        (VoteDecision::WouldGrant, PersistOutcome::Ok) => true,
+        _ => false,
+    }
+}
+
+/// Executable protocol bit — production `handle_request_vote_with_persist` calls this.
+///
+/// `ensures g ==> persist Ok` is the caller refinement (sent_grant ⇒ disk Ok).
+pub fn grant_after_persist(decision: VoteDecision, persist: PersistOutcome) -> (g: bool)
+    ensures
+        g == grant_after_persist_spec(decision, persist),
+        g ==> persist == PersistOutcome::Ok,
+{
+    match (decision, persist) {
+        (VoteDecision::WouldGrant, PersistOutcome::Ok) => true,
+        (VoteDecision::WouldGrant, PersistOutcome::Err) => false,
+        (VoteDecision::Deny, PersistOutcome::Ok) => false,
+        (VoteDecision::Deny, PersistOutcome::Err) => false,
+    }
+}
+
+/// AS-IS F15: ignore persist (teeth: grants on Err).
+pub fn grant_after_persist_as_is(decision: VoteDecision, persist: PersistOutcome) -> (g: bool)
+    ensures
+        g == (decision == VoteDecision::WouldGrant),
+{
+    let _ = persist;
+    match decision {
+        VoteDecision::WouldGrant => true,
+        VoteDecision::Deny => false,
+    }
+}
+
 } // verus!

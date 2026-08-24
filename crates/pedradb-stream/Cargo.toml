@@ -7,6 +7,7 @@ description = "Durable append-only stream over PedraDB (RFC-0010 P2.4 / JetStrea
 
 [dependencies]
 pedradb-core.workspace = true
+pedradb-io-uring.workspace = true
 bytes.workspace = true
 thiserror.workspace = true
 

@@ -6,7 +6,7 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
-use pedradb_core::{Db, OpenOptions, Result, StdEnv};
+use pedradb_core::{Db, Env, OpenOptions, Result};
 use std::path::Path;
 
 /// Primary key prefix: `row/` + length-prefixed id (F89).
@@ -49,8 +49,8 @@ pub fn idx_key(field: impl AsRef<[u8]>, value: impl AsRef<[u8]>) -> Vec<u8> {
 ///
 /// # Errors
 /// WAL / TX I/O.
-pub fn put_row_with_indexes(
-    db: &mut Db<StdEnv>,
+pub fn put_row_with_indexes<E: Env>(
+    db: &mut Db<E>,
     id: impl AsRef<[u8]>,
     payload: impl AsRef<[u8]>,
     name: impl AsRef<[u8]>,
@@ -67,8 +67,8 @@ pub fn put_row_with_indexes(
 
 /// Whether all three keys for a row are present (consistent index).
 #[must_use]
-pub fn row_fully_indexed(
-    db: &Db<StdEnv>,
+pub fn row_fully_indexed<E: Env>(
+    db: &Db<E>,
     id: impl AsRef<[u8]>,
     name: impl AsRef<[u8]>,
     email: impl AsRef<[u8]>,
@@ -82,8 +82,8 @@ pub fn row_fully_indexed(
 
 /// Half-index: some but not all of the three keys exist.
 #[must_use]
-pub fn row_half_indexed(
-    db: &Db<StdEnv>,
+pub fn row_half_indexed<E: Env>(
+    db: &Db<E>,
     id: impl AsRef<[u8]>,
     name: impl AsRef<[u8]>,
     email: impl AsRef<[u8]>,
@@ -228,6 +228,23 @@ mod tests {
         let d = std::env::temp_dir().join(format!("pedra-index-{n}-{i}"));
         let _ = fs::remove_dir_all(&d);
         d
+    }
+
+    #[test]
+    fn failing_env_flows_through_the_whole_index_path() {
+        // RFC-0056 P2.3: the index layer's API is Env-injectable — the DST
+        // fault oracle (`FailingEnv`) drives the multi-key TX (row + both
+        // secondary indexes) end to end, proving no hidden StdEnv seam
+        // remains in this crate's public surface.
+        use pedradb_sim::FailingEnv;
+
+        let dir = temp();
+        let env = FailingEnv::passing();
+        let mut db = Db::open_with_env(&dir, OpenOptions::default(), env).unwrap();
+        put_row_with_indexes(&mut db, b"r1", b"p", b"n", b"e").unwrap();
+        assert!(row_fully_indexed(&db, b"r1", b"n", b"e"));
+        assert!(!row_half_indexed(&db, b"r1", b"n", b"e"));
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]

@@ -318,6 +318,7 @@ impl<F: EnvFile> ValueLog<F> {
     /// # Errors
     /// I/O on a buffer flush.
     pub fn append_pending(&mut self, data: &[u8]) -> Result<(u64, u32, u32)> {
+        crate::buggify_hooks::inject_checked(crate::buggify_hooks::sites::BEFORE_VLOG_APPEND)?;
         let len = u32::try_from(data.len())
             .map_err(|_| CoreError::Internal("vlog value too large".into()))?;
         let crc = crc32c::crc32c(data);

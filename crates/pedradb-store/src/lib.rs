@@ -55,6 +55,7 @@ mod si_kernel;
 mod snapshot_kernel;
 pub mod tcp;
 pub mod tls;
+pub mod tx_glue_kernel;
 mod txn_kernel;
 
 pub use ae_ack_kernel::{ae_ack_success, ae_ack_success_as_is};
@@ -103,6 +104,7 @@ pub use tcp::{
 pub use tls::{
     install_from_pem_files, maybe_client_wrap, maybe_server_wrap, tls_installed, IoBox,
 };
+pub use tx_glue_kernel::{tx_range_action, TxRangeAction};
 pub use txn_kernel::{
     discard_cut, discard_cut_as_is, leftover_txn_is_aborted, leftover_txn_is_aborted_as_is,
     next_txn_id_after, next_txn_id_as_is, prepare_error_aborts_earlier,
@@ -197,7 +199,7 @@ use std::ops::Bound;
 use std::path::{Path, PathBuf};
 
 use bytes::Bytes;
-use pedradb_core::{BatchOp, Db, Env, Host, OpenOptions, Rng, SeedRng, StdEnv};
+use pedradb_core::{BatchOp, Db, Env, Host, OpenOptions, Rng, SeedRng};
 use pedradb_io_uring::IoUringEnv;
 use pedradb_dcs::{
     apply_dcs_command, bind_absent_create, check_command_at, dcs_get, dcs_get_at, DcsCommand,
@@ -4406,6 +4408,10 @@ impl<E: Env> StoreCluster<E> {
         if !self.is_local_node(nid) {
             return Ok(());
         }
+        pedradb_core::buggify_hooks::inject_checked(
+            pedradb_core::buggify_hooks::sites::BEFORE_RAFT_APPLY,
+        )
+        .map_err(|e| StoreError::from(pedradb_core::CoreError::from(e)))?;
         let node = self.nodes.get_mut(&nid).unwrap();
         // Collect entries to apply, then mutate db + peer separately (borrowck).
         let (start, end, recs) = {
@@ -5327,20 +5333,31 @@ impl<E: Env> StoreCluster<E> {
                     let mut cleanup_err: Option<StoreError> = None;
                     for rid2 in &handle.ranges {
                         let akeys = Self::keys_for_range(handle, *rid2).to_vec();
-                        if committed.contains(rid2) {
-                            if let Err(ce) =
-                                self.revert_majority_committed_range(*rid2, handle.id, &akeys)
-                            {
-                                if cleanup_err.is_none() {
-                                    cleanup_err = Some(ce);
+                        // RFC-0056 P1.4: per-range cleanup action from the
+                        // pure kernel (F47 majority revert vs F34 local).
+                        match tx_glue_kernel::tx_range_action(committed.contains(rid2), true) {
+                            TxRangeAction::MajorityRevert => {
+                                if let Err(ce) =
+                                    self.revert_majority_committed_range(*rid2, handle.id, &akeys)
+                                {
+                                    if cleanup_err.is_none() {
+                                        cleanup_err = Some(ce);
+                                    }
                                 }
                             }
-                        } else if let Err(ce) =
-                            self.cleanup_range_keys(*rid2, handle.id, &akeys, CleanupMode::Revert)
-                        {
-                            if cleanup_err.is_none() {
-                                cleanup_err = Some(ce);
+                            TxRangeAction::LocalRevert => {
+                                if let Err(ce) = self.cleanup_range_keys(
+                                    *rid2,
+                                    handle.id,
+                                    &akeys,
+                                    CleanupMode::Revert,
+                                ) {
+                                    if cleanup_err.is_none() {
+                                        cleanup_err = Some(ce);
+                                    }
+                                }
                             }
+                            TxRangeAction::KeepCommitted => {}
                         }
                     }
                     if let Err(fe) = self.fence_txn_aborted(handle.id) {
@@ -6662,6 +6679,68 @@ mod tests {
         put_queued(&mut c, key, val);
         assert_eq!(c.count_applied_eq(key, val), 3);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0050 P1.1: `RpcMode::Direct` is a synchronous pump of the **same**
+    /// `PeerMsg` — not a second protocol. Same seed ⇒ same leader topology and
+    /// same committed/apply state under both delivery modes; bytes drained in
+    /// Queued mode are `PeerMsg`-codec stable (Direct dispatches this exact
+    /// message).
+    #[test]
+    fn direct_pump_and_queued_share_peer_msg_semantics() {
+        let seed = 0xD1DE_0001u64;
+        let ka = b"p11/a";
+        let kb = b"p11/b";
+        let v = b"same-peermsg";
+
+        // A: Direct (default) — in-process sync dispatch of PeerMsg.
+        let dir_a = temp();
+        let mut a = StoreCluster::open_with_rng(&dir_a, 3, 1, SeedRng::new(seed)).unwrap();
+        for _ in 0..80 {
+            a.tick().unwrap();
+            if a.range_leader(1).is_some() {
+                break;
+            }
+        }
+        assert!(a.range_leader(1).is_some(), "leader via Direct RV");
+        a.put(ka, v).unwrap();
+        a.put(kb, v).unwrap();
+
+        // B: Queued — same PeerMsg travels encode → drain → decode → dispatch.
+        let dir_b = temp();
+        let mut b = StoreCluster::open_with_rng(&dir_b, 3, 1, SeedRng::new(seed)).unwrap();
+        b.set_rpc_mode(RpcMode::Queued);
+        elect_queued(&mut b, 80);
+        put_queued(&mut b, ka, v);
+        put_queued(&mut b, kb, v);
+
+        let rid = a.locate(ka).unwrap();
+        assert_eq!(
+            a.range_leader(rid),
+            b.range_leader(rid),
+            "same seed must elect the same leader under both modes"
+        );
+        assert_eq!(a.leader_claim_count(rid), b.leader_claim_count(rid));
+        assert_eq!(
+            a.count_applied_eq(ka, v),
+            b.count_applied_eq(ka, v),
+            "apply state must match across Direct/Queued"
+        );
+        assert_eq!(a.count_applied_eq(kb, v), b.count_applied_eq(kb, v));
+        assert_eq!(a.get_strong(ka).unwrap().as_deref(), Some(&v[..]));
+        assert_eq!(b.get_strong(ka).unwrap().as_deref(), Some(&v[..]));
+
+        // Codec stability: one more tick queues heartbeats; every drained byte
+        // blob decodes to the PeerMsg Direct dispatches and re-encodes equal.
+        b.tick().unwrap();
+        let drained = b.drain_outbound();
+        assert!(!drained.is_empty(), "heartbeats should be queued after tick");
+        for (_from, _to, bytes) in drained {
+            let msg = PeerMsg::decode(&bytes).unwrap();
+            assert_eq!(msg.encode(), bytes, "PeerMsg codec must be byte-stable");
+        }
+        let _ = std::fs::remove_dir_all(&dir_a);
+        let _ = std::fs::remove_dir_all(&dir_b);
     }
 
     /// F49: two outstanding Queued proposes must stamp **distinct** durable SI gens.

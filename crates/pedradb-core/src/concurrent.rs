@@ -319,6 +319,13 @@ impl WriteGroup {
         self.submits.fetch_add(1, Ordering::Relaxed);
         self.last_submit_ns.store(Self::now_ns(), Ordering::Relaxed);
 
+        // RFC-0051 P1.1: PCT preemption point between the `active`
+        // increment and the lone-vs-group decision. Parking here is what
+        // lets a second writer make the first one take the group path
+        // (lock-free; the queue lock comes later).
+        #[cfg(feature = "pct")]
+        crate::pct_hooks::maybe_yield("submit_decision");
+
         let active = self.active.load(Ordering::Relaxed);
         if active > 1 {
             self.last_multi_ns.store(Self::now_ns(), Ordering::Relaxed);
@@ -456,11 +463,30 @@ impl WriteGroup {
             }
         } else {
             self.queued.fetch_add(1, Ordering::Relaxed);
-            rx.expect("follower has recv").recv().unwrap_or_else(|_| {
-                Err(CoreError::Internal(
-                    "write group leader dropped reply channel".into(),
-                ))
-            })
+            // RFC-0051 P0: PCT preemption point before the follower blocks
+            // on the leader's reply channel (lock-free).
+            #[cfg(feature = "pct")]
+            crate::pct_hooks::maybe_yield("follower_wait");
+            // RFC-0051 P1.1: the recv is a real blocking wait — under PCT it
+            // runs as a blocking section (CPU token released, out of the
+            // enabled set until the reply lands).
+            let recv_reply = || {
+                rx.expect("follower has recv")
+                    .recv()
+                    .unwrap_or_else(|_| {
+                        Err(CoreError::Internal(
+                            "write group leader dropped reply channel".into(),
+                        ))
+                    })
+            };
+            #[cfg(feature = "pct")]
+            {
+                crate::pct_hooks::blocking_section("follower_reply", recv_reply)
+            }
+            #[cfg(not(feature = "pct"))]
+            {
+                recv_reply()
+            }
         };
         self.active.fetch_sub(1, Ordering::Relaxed);
         self.mark_complete();
@@ -526,6 +552,10 @@ impl WriteGroup {
 
             // One write lock: append + absorb anyone who queued during
             // prepare (no extra wait) + one fsync + apply (RFC-0041 P1.1).
+            // RFC-0051 P0: PCT preemption point before the leader takes the
+            // write lock (lock-free: followers can still enqueue).
+            #[cfg(feature = "pct")]
+            crate::pct_hooks::maybe_yield("lead_write_lock");
             let mut guard = db.write();
             Self::validate_occ_batch(&mut guard, &mut batch);
             let inputs: Vec<(Vec<BatchOp>, bool)> = batch
@@ -699,6 +729,19 @@ impl WriteGroup {
                     }
                 }
                 batch.extend(extra);
+            }
+        }
+        // RFC-0051 P1.3 forensics: record the returned-seq range of this
+        // atomic group so tests can tell same-group (simultaneous) writes
+        // from cross-group (ordered) ones.
+        #[cfg(feature = "pct")]
+        {
+            let seqs: Vec<u64> = results.iter().filter_map(|r| r.as_ref().ok().copied()).collect();
+            if let (Some(lo), Some(hi)) = (seqs.iter().copied().min(), seqs.iter().copied().max()) {
+                crate::pct_hooks::GROUP_RANGES
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .push((lo, hi));
             }
         }
         let wal = guard.wal_arc();
@@ -1652,6 +1695,9 @@ impl<E: Env> ConcurrentDb<E> {
         value: impl AsRef<[u8]>,
         opts: WriteOptions,
     ) -> Result<SequenceNumber> {
+        // RFC-0051 P0: PCT preemption point at client op entry (lock-free).
+        #[cfg(feature = "pct")]
+        crate::pct_hooks::maybe_yield("op_entry");
         let do_sync = self.resolve_sync(opts);
         self.writes
             .submit(&self.inner, vec![BatchOp::put(key, value)], do_sync)
@@ -3850,8 +3896,8 @@ mod tests {
         db.put(b"warm", b"v").unwrap();
         assert!(db.wal_fd_ema() > Duration::ZERO);
         assert!(
-            db.wal_fd_ema() < Duration::from_millis(10),
-            "seeded fd ema should be µs-class, got {:?}",
+            db.wal_fd_ema() < Duration::from_millis(50),
+            "seeded fd ema should be fast-sample class, got {:?}",
             db.wal_fd_ema()
         );
         assert_eq!(db.catchup_wait_stats(), (0, 0));

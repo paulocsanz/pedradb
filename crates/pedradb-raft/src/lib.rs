@@ -12,6 +12,7 @@
 #![warn(missing_docs)]
 
 pub mod ae_kernel;
+pub mod apply_kernel;
 pub mod commit_kernel;
 pub mod net;
 pub mod persist;
@@ -19,6 +20,9 @@ pub mod vote_kernel;
 
 pub use ae_kernel::{
     ae_ack_success, ae_ack_success_as_is, ae_entry_action, ae_prev_log_ok, AeEntryAction,
+};
+pub use apply_kernel::{
+    apply_advance, apply_advance_as_is_skip_holes, ApplyAction,
 };
 pub use commit_kernel::{
     may_commit_at, may_commit_at_as_is, propose_ack_ok, propose_ack_ok_as_is, recover_commit,
@@ -311,11 +315,25 @@ impl RaftNode {
     }
 
     pub(crate) fn apply_committed(&mut self) -> CoreResult<()> {
-        while self.last_applied < self.commit_index {
+        loop {
+            // Pure kernel decides the step (F10-apply); caller mutates.
             let next = self.last_applied + 1;
-            let Some(entry) = self.log.iter().find(|e| e.index == next).cloned() else {
-                break;
-            };
+            let entry_present = self.last_applied < self.commit_index
+                && self.log.iter().any(|e| e.index == next);
+            match apply_kernel::apply_advance(
+                self.last_applied,
+                self.commit_index,
+                entry_present,
+            ) {
+                ApplyAction::Done | ApplyAction::Stop => break,
+                ApplyAction::Apply => {}
+            }
+            let entry = self
+                .log
+                .iter()
+                .find(|e| e.index == next)
+                .cloned()
+                .expect("kernel Apply ⇒ entry present");
             // DCS command: single marker put → apply state machine, not raw put.
             if entry.ops.len() == 1 {
                 if let BatchOp::Put { key, value } = &entry.ops[0] {
@@ -440,15 +458,18 @@ pub fn handle_request_vote_with_persist(
     if decision == VoteDecision::WouldGrant {
         let prev = node.hard.voted_for;
         node.hard.voted_for = Some(args.candidate_id);
-        match persist(&node.hard) {
+        let persist_out = match persist(&node.hard) {
             Ok(()) => {
                 node.election_ticks_left = node.election_timeout;
-                vote_granted = true;
+                vote_kernel::PersistOutcome::Ok
             }
             Err(_) => {
                 node.hard.voted_for = prev;
+                vote_kernel::PersistOutcome::Err
             }
-        }
+        };
+        // F15 / RFC-0053 P1.1: wire bit is the kernel, not an inline `true`.
+        vote_granted = vote_kernel::grant_after_persist(decision, persist_out);
     }
     RequestVoteReply {
         term: node.hard.current_term,

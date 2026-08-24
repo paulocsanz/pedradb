@@ -44,6 +44,19 @@ pub const ALL_SITES: &[BuggifySite] = &[
     sites::BEFORE_VLOG_APPEND,
 ];
 
+/// What an armed site injects when it fires (RFC-0050 P1.3).
+///
+/// `None` everywhere unless `feature = "buggify"` **and** a table is installed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Injection {
+    /// Site did not fire (or feature/table absent).
+    None,
+    /// Deterministic thread stall in ms (lab interleaving perturbation).
+    DelayMs(u64),
+    /// Fail-stop I/O error of this kind.
+    IoErrorKind(std::io::ErrorKind),
+}
+
 /// Process-local arm table installed by DST (feature `buggify` only).
 #[derive(Debug, Clone)]
 pub struct BuggifyTable {
@@ -89,6 +102,27 @@ impl BuggifyTable {
     #[must_use]
     pub fn fire_count(&self, site: BuggifySite) -> u64 {
         self.fires.get(site.0).copied().unwrap_or(0)
+    }
+
+    /// Injection decision for one annotated site call (advances stream):
+    /// not fired ⇒ [`Injection::None`]; fired ⇒ seed-derived delay or
+    /// fail-stop `io::Error` kind.
+    pub fn should_fire_injection(&mut self, site: BuggifySite) -> Injection {
+        if !self.should_fire(site) {
+            return Injection::None;
+        }
+        self.state = xorshift(self.state);
+        match self.state % 4 {
+            0 | 1 => Injection::DelayMs(1 + self.state % 20),
+            2 => Injection::IoErrorKind(std::io::ErrorKind::TimedOut),
+            _ => Injection::IoErrorKind(std::io::ErrorKind::Other),
+        }
+    }
+
+    /// Total fires across all sites (trial observability).
+    #[must_use]
+    pub fn total_fires(&self) -> u64 {
+        self.fires.values().sum()
     }
 }
 
@@ -148,6 +182,66 @@ pub fn install_from_seed(seed: u64) {
     install_table(BuggifyTable::from_seed(seed));
 }
 
+/// Engine-site hook (RFC-0050 P1.3): fire ⇒ seed-derived delay or fail-stop
+/// `io::Error`. Always [`Injection::None`] without `feature = "buggify"` or
+/// without an installed table.
+#[inline]
+#[must_use]
+pub fn inject(site: BuggifySite) -> Injection {
+    #[cfg(feature = "buggify")]
+    {
+        return TABLE.with(|t| {
+            let mut g = t.borrow_mut();
+            match g.as_mut() {
+                Some(table) => table.should_fire_injection(site),
+                None => Injection::None,
+            }
+        });
+    }
+    #[cfg(not(feature = "buggify"))]
+    {
+        let _ = site;
+        Injection::None
+    }
+}
+
+/// Annotated-site convenience: fired delay sleeps (lab only), fired
+/// `io::Error` propagates as `Err` (fail-stop, never silent).
+#[inline]
+pub fn inject_checked(site: BuggifySite) -> std::io::Result<()> {
+    match inject(site) {
+        Injection::None => Ok(()),
+        Injection::DelayMs(ms) => {
+            std::thread::sleep(std::time::Duration::from_millis(ms));
+            Ok(())
+        }
+        Injection::IoErrorKind(k) => Err(std::io::Error::from(k)),
+    }
+}
+
+/// Fire counts of the installed table, sorted by site name (feature only).
+#[must_use]
+pub fn installed_fire_counts() -> Vec<(&'static str, u64)> {
+    #[cfg(feature = "buggify")]
+    {
+        return TABLE.with(|t| {
+            let g = t.borrow();
+            match g.as_ref() {
+                Some(table) => {
+                    let mut v: Vec<_> = table.fires.iter().map(|(k, c)| (*k, *c)).collect();
+                    v.sort_unstable();
+                    v
+                }
+                None => Vec::new(),
+            }
+        });
+    }
+    #[cfg(not(feature = "buggify"))]
+    {
+        Vec::new()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -183,6 +277,23 @@ mod tests {
                 assert_eq!(a.should_fire(*s), b.should_fire(*s));
             }
         }
+    }
+
+    #[test]
+    fn injection_decisions_replayable() {
+        let mut a = BuggifyTable::from_seed(0xB0B0_C0DE);
+        let mut b = BuggifyTable::from_seed(0xB0B0_C0DE);
+        let mut fired = 0u32;
+        for _ in 0..64 {
+            for s in ALL_SITES {
+                let (ia, ib) = (a.should_fire_injection(*s), b.should_fire_injection(*s));
+                assert_eq!(ia, ib, "injection decision must replay per seed");
+                if ia != Injection::None {
+                    fired += 1;
+                }
+            }
+        }
+        assert!(fired > 0, "expected >=1 injection across 64x8 rolls");
     }
 }
 

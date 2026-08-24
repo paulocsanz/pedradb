@@ -76,7 +76,7 @@ This is the only model checker that matches the house rule “no paraphrase.” 
 
 **Creusot / Prusti:** Why3 / Viper. Verus SOSP’24 §5: slower SMT, no ghost-resource story comparable to VerusSync, no EPR, no concurrency story at Anvil/NR scale. Not a reason to switch.
 
-**Fit.** Verus on **kernels we already extracted** is the cheap end of this family ( Pedra’s vote twin is 1 `ensures`, not 39k lines of IronRSL). Verus on `db.rs` / `ConcurrentDb` / the Raft event loop is IronFleet-scale (person-years, 3–13× proof). Do not start that without a named protocol layer and a reduction argument.
+**Fit.** Verus on **kernels we already extracted** is the cheap end of this family ( Pedra’s vote twin is 1 `ensures`, not 39k lines of IronRSL). Verus on `db.rs` / `ConcurrentDb` / the Raft event loop is IronFleet-scale (person-years, 3–13× proof). That program is now [RFC-0053](rfc/0053-ironfleet-years.md) (budget accepted; TCB + reduction first; `ConcurrentDb` out until Y3). Do not start it by rewriting `db.rs` in Dafny or by verifying HTTP next.
 
 ### 2.4 Extract-and-prove — Verdi, Aeneas, hax, CompCert-style
 
@@ -146,7 +146,7 @@ I/O + time     persist_hard, fsync, CRC, net, clock  ← axioms forever
 | WAL recover / torn tail | DST + EXPLODE-style choice points | FailingEnv; not systematic `choose` at every I/O | put CRC in the theorem |
 | Journal pin-on-read (H1) | **new kernel** + mutant + Verus | no | a TLA+ of NATS |
 | HTTP parsers | Verus on tiny predicates | yes (F79–F105) | more of these first |
-| `ConcurrentDb` | Loom / TSan | residual | VerusSync of the whole engine |
+| `ConcurrentDb` | Loom / TSan / PCT ([RFC-0051](rfc/0051-beyond-fdb-sim-holes.md)) | residual | VerusSync of the whole engine in Y1 ([RFC-0053](rfc/0053-ironfleet-years.md) TCB: out until Y3) |
 | New fold pointer / 2PC variant | Quint/TLA+ **then** extract kernel | not yet needed | skip the kernel and keep only TLA+ |
 | Full Montanha Raft + store | IronFleet layers (person-years) | not started | “we’ll Verus `lib.rs`” |
 

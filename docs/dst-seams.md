@@ -1,11 +1,10 @@
-# DST seams (keep determinismo separate)
+# DST seams (keep tesoura / det_io separate)
 
 **Status:** living  
-**Updated:** 2026-08-12 (World P1/P2: Net + PeerMsg + Env por peer; see `determinismo/pedradb-dst/DST-VS-FDB-SIM.md`)  
+**Updated:** 2026-08-23 ([RFC-0050](rfc/0050-world-in-tree-fdb-determinism.md) P0 done: World runtime lives in `crates/pedradb-world`; tesoura/det_io/QEMU stay sibling)  
+**Normative claims:** `determinismo/pedradb-dst/DST-VS-FDB-SIM.md`
 
-
-Full deterministic simulation campaigns stay in **`../determinismo`** (pedradb-dst harness, tesoura, det_io).  
-This repo only ships **plug points** so a deterministic / fault-injecting host can be swapped in without rewriting the engine or store.
+Since [RFC-0050](rfc/0050-world-in-tree-fdb-determinism.md) P0 the cluster World crate lives in-tree at **`crates/pedradb-world`** (seed → `trace_hash`, CI job `world-determinism`, seam inventory `scripts/seam_inventory_v1.json` + `scripts/check_seam_inventory.py`). Engine seams stay here. Tesoura, LD_PRELOAD det_io, and QEMU stay in **`../determinismo`**.
 
 ---
 
@@ -87,7 +86,7 @@ for (from, to, bytes) in c.drain_outbound() {
 // c.finish_queued_propose(range_id, index, abort_if_uncommitted)?;
 ```
 
-Harness: `determinismo/pedradb-dst/world` runs `RpcMode::Queued` end-to-end through `InProcessNet`.
+Harness: in-tree `crates/pedradb-world` runs `RpcMode::Queued` end-to-end through `InProcessNet` (seed → `trace_hash`; CI job `world-determinism`).
 
 ### DCS leases
 
@@ -128,7 +127,7 @@ CI smoke: `pedradb-dst::run_seed_trial` / `sweep_seeds` (uses `open_with_host`).
 |------|----------------|
 | Seed→schedule fleet, shrink, repro packages | `determinismo/dst-envelope` (tesoura) |
 | LD_PRELOAD lying fsync / clock | `determinismo/determinism-hooks` |
-| Long property campaigns / LEDGER findings | `determinismo/pedradb-dst` |
+| Long property campaigns / LEDGER findings | `determinismo/pedradb-dst` (engine/cluster REALs also in-tree: `crates/pedradb-dst/findings/LEDGER.md`, RFC-0050 P1.4) |
 | QEMU TCG multi-VM | `determinismo/tikv-emulation`, caixote-dst |
 
 In-tree `pedradb-dst` crate: thin seed trials on `FailingEnv::from_seed` for CI smoke — not the full campaign runner.
@@ -139,14 +138,18 @@ In-tree `pedradb-dst` crate: thin seed trials on `FailingEnv::from_seed` for CI 
 
 | Seam | Status |
 |------|--------|
-| Network / RPC for multi-Raft store | Not a trait yet (in-process ticks) |
-| Cooperative scheduler (thread order) | Out of scope; use single-threaded store API |
+| Network / RPC for multi-Raft store | **In-tree + lab=produto (P1 done)**: `InProcessNet` + `PeerMsg` + `RpcMode::Queued` (`crates/pedradb-world`); Direct is a sync pump of the **same** `PeerMsg` (proved by `direct_pump_and_queued_share_peer_msg_semantics`) |
+| Cooperative scheduler (thread order) | PCT hook exists but does **not** drive `World::run` (RFC-0050 P2.1) |
 | Wire `Db`/`Store`/`Dcs` to `Host` | **Done** for open: `open_with_host` / `open_with_env_rng`; layers still free-standing after open |
 
 ---
 
 ## Related
 
+- [RFC-0050](rfc/0050-world-in-tree-fdb-determinism.md) — World in-tree (P0 done)
+- [RFC-0051](rfc/0051-beyond-fdb-sim-holes.md) — π / ConcurrentDb beyond Sim2 holes (draft)
+- [RFC-0052](rfc/0052-dst-inside-boxes.md) — DST inside Miri/ASan/TCG (draft)
+- [RFC-0053](rfc/0053-ironfleet-years.md) — IronFleet-scale years (draft)
 - [RFC-0011](rfc/0011-env-fault-injection.md) — Env + FailingEnv  
 - [RFC-0013](rfc/0013-montanhadb-product.md) — Montanha product  
 - `crates/pedradb-core/{env,time,rng,host}.rs`  

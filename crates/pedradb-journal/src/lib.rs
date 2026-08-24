@@ -8,7 +8,7 @@
 
 pub mod pin_kernel;
 
-use pedradb_core::{ChangeEntry, ChangeKind, Db, OpenOptions, Result, SequenceNumber, StdEnv};
+use pedradb_core::{ChangeEntry, ChangeKind, Db, Env, OpenOptions, Result, SequenceNumber};
 use std::path::Path;
 
 /// In-process journal consumer pinned at a sequence.
@@ -30,7 +30,7 @@ impl JournalConsumer {
     /// Pin-on-read is the journal-canary contract. Fold consumers must **not**
     /// use this: call [`Self::peek`] then [`Self::pin_after_apply`] after the
     /// fold `apply` returns (RFC-0024).
-    pub fn catch_up(&mut self, db: &Db<StdEnv>) -> Vec<ChangeEntry> {
+    pub fn catch_up<E: Env>(&mut self, db: &Db<E>) -> Vec<ChangeEntry> {
         let batch = self.peek(db);
         if pin_kernel::catch_up_pins_on_read() {
             let batch_max = batch.iter().map(|e| e.sequence).max();
@@ -41,7 +41,7 @@ impl JournalConsumer {
 
     /// Poll durable changes after pin **without** advancing the pin.
     #[must_use]
-    pub fn peek(&self, db: &Db<StdEnv>) -> Vec<ChangeEntry> {
+    pub fn peek<E: Env>(&self, db: &Db<E>) -> Vec<ChangeEntry> {
         debug_assert!(!pin_kernel::peek_pins_cursor());
         debug_assert!(!pin_kernel::fold_pins_on_read());
         let last = db.last_sequence();
@@ -176,8 +176,8 @@ pub fn workload_feed_watermark(dir: impl AsRef<Path>) -> Result<WorkloadReport> 
 ///
 /// # Errors
 /// Put I/O.
-pub fn append(
-    db: &mut Db<StdEnv>,
+pub fn append<E: Env>(
+    db: &mut Db<E>,
     key: impl AsRef<[u8]>,
     val: impl AsRef<[u8]>,
 ) -> Result<SequenceNumber> {
@@ -186,7 +186,7 @@ pub fn append(
 
 /// Read feed slice as public API.
 #[must_use]
-pub fn changes_after(db: &Db<StdEnv>, from: SequenceNumber) -> Vec<ChangeEntry> {
+pub fn changes_after<E: Env>(db: &Db<E>, from: SequenceNumber) -> Vec<ChangeEntry> {
     db.changes_after(from)
 }
 
@@ -241,6 +241,29 @@ mod tests {
         let dir = temp();
         let r = workload_feed_watermark(&dir).unwrap();
         assert_eq!(r.silent_wrong, 0, "{r:?}");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn failing_env_flows_through_the_whole_journal_path() {
+        // RFC-0056 P2.3: the journal layer's API is Env-injectable — the
+        // DST fault oracle (`FailingEnv`) drives catch_up/peek/append/
+        // changes_after end to end, proving no hidden StdEnv seam remains
+        // in this crate's public surface.
+        use pedradb_core::OpenOptions;
+        use pedradb_sim::FailingEnv;
+
+        let dir = temp();
+        let env = FailingEnv::passing();
+        let mut db = Db::open_with_env(&dir, OpenOptions::default(), env).unwrap();
+        let seq = append(&mut db, b"fx", b"1").unwrap();
+        let mut c = JournalConsumer::new();
+        let batch = c.catch_up(&db);
+        assert_eq!(batch.len(), 1);
+        assert_eq!(c.pin, seq);
+        assert!(batch[0].sequence <= db.last_sequence());
+        let tail = changes_after(&db, 0);
+        assert_eq!(tail.len(), 1);
         let _ = fs::remove_dir_all(&dir);
     }
 }

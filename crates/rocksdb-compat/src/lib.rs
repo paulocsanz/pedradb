@@ -4636,6 +4636,9 @@ mod tests {
         let listed = DB::<StdEnv>::list_cf(&opts, &dir).unwrap();
         assert!(listed.contains(&"cf1".to_string()));
         assert!(!listed.contains(&"cf2".to_string()));
+        // DestroyDB contract: the instance must be closed first — its
+        // compaction thread would race `remove_dir_all` (ENOTEMPTY).
+        drop(db);
         DB::<StdEnv>::destroy(&opts, &dir).unwrap();
     }
 

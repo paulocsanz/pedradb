@@ -7,6 +7,7 @@ description = "Ordered log apply helpers for embedding PedraDB under Raft / fake
 
 [dependencies]
 pedradb-core.workspace = true
+pedradb-io-uring.workspace = true
 bytes.workspace = true
 
 [dev-dependencies]

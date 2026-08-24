@@ -1,0 +1,12 @@
+[workspace]
+
+[package]
+name = "pedra-aeneas-apply-kernel"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+publish = false
+description = "Standalone crate whose [lib] path is production apply_kernel.rs"
+
+[lib]
+path = "../../../crates/pedradb-raft/src/apply_kernel.rs"

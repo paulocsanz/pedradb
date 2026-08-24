@@ -75,13 +75,15 @@ impl FailStateArc {
 }
 
 /// Thread-safe [`FailingEnv`] (`Send + Sync` when cloned across threads).
+/// Generic over the wrapped env since RFC-0051 P2.1 (`FailingEnvArc<IoUringEnv>`
+/// Linux trial); `StdEnv` stays the default.
 #[derive(Debug, Clone)]
-pub struct FailingEnvArc {
-    inner: StdEnv,
+pub struct FailingEnvArc<E: Env = StdEnv> {
+    inner: E,
     state: Arc<FailStateArc>,
 }
 
-impl FailingEnvArc {
+impl FailingEnvArc<StdEnv> {
     /// Permanent fail after `n` ops.
     #[must_use]
     pub fn fail_after(n: u64) -> Self {
@@ -103,6 +105,24 @@ impl FailingEnvArc {
                 once: AtomicBool::new(once),
                 kind: AtomicU64::new(kind_to_u64(kind)),
                 sync_only: AtomicBool::new(kind.is_sync_only()),
+            }),
+        }
+    }
+}
+
+impl<E: Env> FailingEnvArc<E> {
+    /// Passing until armed, over a caller-supplied inner env
+    /// (e.g. `IoUringEnv` on Linux).
+    #[must_use]
+    pub fn with_inner_passing(inner: E) -> Self {
+        Self {
+            inner,
+            state: Arc::new(FailStateArc {
+                remaining: AtomicU64::new(u64::MAX),
+                fired: AtomicBool::new(false),
+                once: AtomicBool::new(false),
+                kind: AtomicU64::new(kind_to_u64(FaultKind::IoError)),
+                sync_only: AtomicBool::new(false),
             }),
         }
     }
@@ -139,19 +159,19 @@ impl FailingEnvArc {
 }
 
 /// File handle for [`FailingEnvArc`].
-pub struct FailingFileArc {
-    inner: <StdEnv as Env>::File,
+pub struct FailingFileArc<E: Env = StdEnv> {
+    inner: E::File,
     state: Arc<FailStateArc>,
 }
 
-impl Read for FailingFileArc {
+impl<E: Env> Read for FailingFileArc<E> {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         self.state.gate(false)?;
         self.inner.read(buf)
     }
 }
 
-impl Write for FailingFileArc {
+impl<E: Env> Write for FailingFileArc<E> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         self.state.gate(false)?;
         self.inner.write(buf)
@@ -163,13 +183,13 @@ impl Write for FailingFileArc {
     }
 }
 
-impl Seek for FailingFileArc {
+impl<E: Env> Seek for FailingFileArc<E> {
     fn seek(&mut self, pos: SeekFrom) -> io::Result<u64> {
         self.inner.seek(pos)
     }
 }
 
-impl EnvFile for FailingFileArc {
+impl<E: Env> EnvFile for FailingFileArc<E> {
     fn sync_data(&mut self) -> io::Result<()> {
         self.state.gate(true)?;
         self.inner.sync_data()
@@ -191,8 +211,8 @@ impl EnvFile for FailingFileArc {
     }
 }
 
-impl Env for FailingEnvArc {
-    type File = FailingFileArc;
+impl<E: Env> Env for FailingEnvArc<E> {
+    type File = FailingFileArc<E>;
 
     fn create_dir_all(&self, path: &Path) -> io::Result<()> {
         self.state.gate(false)?;

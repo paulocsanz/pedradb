@@ -16,19 +16,26 @@ pub mod batch;
 pub mod bloom;
 /// Optional DST buggify annotation sites (RFC-0018 P2.5; no-op unless feature).
 pub mod buggify_hooks;
+
+/// Cooperative PCT turnstile hooks (RFC-0051 P0; feature `pct` only).
+#[cfg(feature = "pct")]
+pub mod pct_hooks;
 pub mod cache;
 pub mod change_feed;
 pub mod changelog_kernel;
+pub mod compact_kernel;
 pub mod concurrent;
 pub mod corrupt;
 pub mod db;
 pub mod env;
 pub mod error;
+pub mod flush_kernel;
 pub mod history;
 pub mod host;
 pub mod key;
 pub mod lock;
 pub mod manifest;
+pub mod manifest_kernel;
 pub mod memtable;
 pub mod merge;
 pub mod occ;
@@ -38,6 +45,7 @@ pub mod sst;
 pub mod time;
 pub mod tx;
 pub mod vlog;
+pub mod vlog_gc_kernel;
 pub mod wal;
 
 pub use batch::{WriteOp, WriteRecord, WRITE_RECORD_VERSION};

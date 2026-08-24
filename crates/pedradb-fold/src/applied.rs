@@ -1,7 +1,7 @@
 //! Cursor-after-apply combinator (RFC-0024 P0.1).
 
 use crate::{FoldCursor, FoldStore, FoldUpdate, Result};
-use pedradb_core::{ChangeEntry, Db, StdEnv};
+use pedradb_core::{ChangeEntry, Db, Env};
 use pedradb_journal::JournalConsumer;
 
 /// Receive-then-apply loop: pin advances only after `store.apply` returns.
@@ -61,8 +61,8 @@ impl<S: FoldStore> WatchApplied<S> {
 ///
 /// # Errors
 /// Store apply.
-pub fn watch_applied(
-    db: &Db<StdEnv>,
+pub fn watch_applied<E: Env>(
+    db: &Db<E>,
     consumer: &mut JournalConsumer,
     store: &mut impl FoldStore,
 ) -> Result<FoldCursor> {
@@ -73,8 +73,8 @@ pub fn watch_applied(
 ///
 /// # Errors
 /// Store apply.
-pub fn watch_applied_prefix(
-    db: &Db<StdEnv>,
+pub fn watch_applied_prefix<E: Env>(
+    db: &Db<E>,
     consumer: &mut JournalConsumer,
     store: &mut impl FoldStore,
     prefixes: Option<&crate::PrefixSet>,

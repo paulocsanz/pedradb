@@ -11,7 +11,13 @@
       "callers": [
         "crates/pedradb-raft/src/lib.rs"
       ],
-      "entry": "vote_decision"
+      "entry": "vote_decision",
+      "data_fate": true,
+      "handlers": [
+        "handle_request_vote",
+        "handle_request_vote_with_persist",
+        "rpc_request_vote"
+      ]
     },
     {
       "id": "ae_entry",
@@ -23,7 +29,12 @@
       "callers": [
         "crates/pedradb-raft/src/lib.rs"
       ],
-      "entry": "ae_entry_action"
+      "entry": "ae_entry_action",
+      "data_fate": true,
+      "handlers": [
+        "handle_append_entries",
+        "rpc_append_entries"
+      ]
     },
     {
       "id": "ae_ack",
@@ -35,7 +46,12 @@
       "callers": [
         "crates/pedradb-raft/src/lib.rs"
       ],
-      "entry": "ae_ack_success"
+      "entry": "ae_ack_success",
+      "data_fate": true,
+      "handlers": [
+        "handle_append_entries",
+        "rpc_append_entries"
+      ]
     },
     {
       "id": "commit_raft",
@@ -48,7 +64,8 @@
         "crates/pedradb-raft/src/lib.rs",
         "crates/pedradb-raft/src/net.rs"
       ],
-      "entry": "propose_ack_ok"
+      "entry": "propose_ack_ok",
+      "data_fate": true
     },
     {
       "id": "lease",
@@ -60,7 +77,8 @@
       "callers": [
         "crates/pedradb-dcs/src/command.rs"
       ],
-      "entry": "lease_live"
+      "entry": "lease_live",
+      "data_fate": true
     },
     {
       "id": "dcs_apply",
@@ -85,7 +103,8 @@
       "callers": [
         "crates/pedradb-store/src/lib.rs"
       ],
-      "entry": "txn_commit_action"
+      "entry": "txn_commit_action",
+      "data_fate": true
     },
     {
       "id": "compact",
@@ -156,6 +175,7 @@
       "twin": "crates/pedradb-core/verus/range_covers.rs",
       "verus": "scripts/verus_range_covers.sh",
       "callers": [
+        "crates/pedradb-core/src/merge.rs",
         "crates/pedradb-core/src/db.rs"
       ],
       "entry": "range_tombstone_covers"
@@ -314,7 +334,8 @@
       "callers": [
         "crates/pedradb-core/src/wal/reader.rs"
       ],
-      "entry": "recover_collect_act"
+      "entry": "recover_collect_act",
+      "data_fate": true
     },
     {
       "id": "pack",
@@ -412,6 +433,180 @@
         "crates/pedradb-fold/src/store.rs"
       ],
       "entry": "fold_event_hides_key"
+    },
+    {
+      "id": "manifest_recover",
+      "finding": "F196/G8",
+      "twin_kind": "close",
+      "kernel": "crates/pedradb-core/src/manifest_kernel.rs",
+      "twin": "crates/pedradb-core/verus/manifest_recover.rs",
+      "verus": "scripts/verus_manifest_recover.sh",
+      "callers": [
+        "crates/pedradb-core/src/db.rs"
+      ],
+      "entry": "sst_recover_action",
+      "data_fate": true,
+      "handlers": [
+        "recover_ssts"
+      ]
+    },
+    {
+      "id": "reopen_outcome",
+      "finding": "F170/F171/G8",
+      "twin_kind": "close",
+      "kernel": "crates/pedradb-core/src/wal/reopen_kernel.rs",
+      "twin": "crates/pedradb-core/verus/reopen_outcome.rs",
+      "verus": "scripts/verus_reopen_outcome.sh",
+      "callers": [
+        "crates/pedradb-core/src/db.rs"
+      ],
+      "entry": "reopen_outcome",
+      "data_fate": true,
+      "handlers": [
+        "open_with_env"
+      ]
+    },
+    {
+      "id": "flush_decision",
+      "finding": "F2/F43/G1",
+      "twin_kind": "close",
+      "kernel": "crates/pedradb-core/src/flush_kernel.rs",
+      "twin": "crates/pedradb-core/verus/flush_decision.rs",
+      "verus": "scripts/verus_flush_decision.sh",
+      "callers": [
+        "crates/pedradb-core/src/db.rs"
+      ],
+      "entry": "wal_rotate_decision",
+      "data_fate": true,
+      "handlers": [
+        "flush",
+        "try_rotate_wal"
+      ]
+    },
+    {
+      "id": "compact_decision",
+      "finding": "F177/F20",
+      "twin_kind": "close",
+      "kernel": "crates/pedradb-core/src/compact_kernel.rs",
+      "twin": "crates/pedradb-core/verus/compact_decision.rs",
+      "verus": "scripts/verus_compact_decision.sh",
+      "callers": [
+        "crates/pedradb-core/src/db.rs"
+      ],
+      "entry": "compact_pick",
+      "data_fate": true,
+      "handlers": [
+        "compact_with_ssts_only"
+      ]
+    },
+    {
+      "id": "compact_retention",
+      "finding": "F177/F20",
+      "twin_kind": "close",
+      "kernel": "crates/pedradb-core/src/compact_kernel.rs",
+      "twin": "crates/pedradb-core/verus/compact_decision.rs",
+      "verus": "scripts/verus_compact_decision.sh",
+      "callers": [
+        "crates/pedradb-core/src/merge.rs"
+      ],
+      "entry": "point_version_fate",
+      "data_fate": true,
+      "handlers": [
+        "gc_snapshot_safe"
+      ]
+    },
+    {
+      "id": "dictionary_link",
+      "finding": "G1/G8 (crash dictionary put\u2192get)",
+      "twin_kind": "close",
+      "kernel": "crates/pedradb-core/src/wal/reopen_kernel.rs",
+      "twin": "crates/pedradb-core/verus/dictionary_link.rs",
+      "verus": "scripts/verus_dictionary_link.sh",
+      "callers": [
+        "crates/pedradb-core/src/db.rs"
+      ],
+      "entry": "reopen_outcome",
+      "data_fate": true,
+      "handlers": [
+        "open_with_env"
+      ]
+    },
+    {
+      "id": "apply_step",
+      "finding": "F10-apply",
+      "twin_kind": "close",
+      "kernel": "crates/pedradb-raft/src/apply_kernel.rs",
+      "twin": "crates/pedradb-raft/verus/apply_advance.rs",
+      "verus": "scripts/verus_apply_advance.sh",
+      "callers": [
+        "crates/pedradb-raft/src/lib.rs"
+      ],
+      "entry": "apply_advance",
+      "data_fate": true,
+      "handlers": [
+        "apply_committed"
+      ]
+    },
+    {
+      "id": "grant_persist",
+      "finding": "F15",
+      "twin_kind": "close",
+      "kernel": "crates/pedradb-raft/src/vote_kernel.rs",
+      "twin": "crates/pedradb-raft/verus/vote_decision.rs",
+      "verus": "scripts/verus_vote_decision.sh",
+      "callers": [
+        "crates/pedradb-raft/src/lib.rs"
+      ],
+      "entry": "grant_after_persist",
+      "data_fate": true
+    },
+    {
+      "id": "vlog_recover",
+      "finding": "F51/G-swing",
+      "twin_kind": "close",
+      "kernel": "crates/pedradb-core/src/vlog_gc_kernel.rs",
+      "twin": "crates/pedradb-core/verus/vlog_gc_decision.rs",
+      "verus": "scripts/verus_vlog_gc.sh",
+      "callers": [
+        "crates/pedradb-core/src/db.rs"
+      ],
+      "entry": "vlog_recover_action",
+      "data_fate": true,
+      "handlers": [
+        "open_with_env"
+      ]
+    },
+    {
+      "id": "blob_gc_pick",
+      "finding": "F-active-gen",
+      "twin_kind": "close",
+      "kernel": "crates/pedradb-core/src/vlog_gc_kernel.rs",
+      "twin": "crates/pedradb-core/verus/vlog_gc_decision.rs",
+      "verus": "scripts/verus_vlog_gc.sh",
+      "callers": [
+        "crates/pedradb-core/src/db.rs"
+      ],
+      "entry": "blob_gc_action",
+      "data_fate": true,
+      "handlers": [
+        "compact_blob_auto"
+      ]
+    },
+    {
+      "id": "tx_glue",
+      "finding": "F47/F34",
+      "twin_kind": "close",
+      "kernel": "crates/pedradb-store/src/tx_glue_kernel.rs",
+      "twin": "crates/pedradb-store/verus/tx_glue.rs",
+      "verus": "scripts/verus_tx_glue.sh",
+      "callers": [
+        "crates/pedradb-store/src/lib.rs"
+      ],
+      "entry": "tx_range_action",
+      "data_fate": true,
+      "handlers": [
+        "tx_finish"
+      ]
     }
   ],
   "clones": [
@@ -556,6 +751,14 @@
     {
       "crate": "pedradb-fold",
       "test": "fold_range_model"
+    },
+    {
+      "crate": "pedradb-raft",
+      "test": "compose_model"
+    },
+    {
+      "crate": "pedradb-raft",
+      "test": "tcp_node_model"
     }
   ]
 }

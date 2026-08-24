@@ -70,7 +70,7 @@ use crate::key::{InternalKey, SequenceNumber, ValueType, MAX_SEQUENCE_NUMBER};
 use crate::lock::DirLock;
 use crate::manifest::{self, VersionSet};
 use crate::memtable::{Lookup, MemTable};
-use crate::merge::{range_deleted, StreamingVisibleIter, VisibleKv};
+use crate::merge::{range_deleted, range_tombstone_covers, StreamingVisibleIter, VisibleKv};
 use crate::sst::{write_l0_sst, write_sst_entries_on, write_sst_try_sorted_on, SstTable};
 use crate::tx::Transaction;
 use crate::vlog::{self, ValueLog, VlogRewriteStats, VLOG_FILE_NAME};
@@ -1152,7 +1152,7 @@ impl<E: Env> Db<E> {
     /// or corrupt MANIFEST.
     #[allow(clippy::too_many_lines)] // recover WAL + CHANGELOG + vlog in one open path
     pub fn open_with_env(path: impl AsRef<Path>, opts: OpenOptions, env: E) -> Result<Self> {
-        let _ = crate::buggify_hooks::maybe_arm(crate::buggify_hooks::sites::AFTER_OPEN_LOCK);
+        crate::buggify_hooks::inject_checked(crate::buggify_hooks::sites::AFTER_OPEN_LOCK)?;
         let dir = path.as_ref().to_path_buf();
         env.create_dir_all(&dir)?;
 
@@ -1210,23 +1210,28 @@ impl<E: Env> Db<E> {
                             origin,
                             CoreError::Internal("WAL resync skipped damaged region mid-log".into()),
                         );
-                        if opts.wal_recovery == WalRecovery::PointInTime
-                            && !matches!(escalated, CoreError::CorruptionEscalated { .. })
-                        {
-                            let (records, last_good, _err, _resync) =
-                                Wal::recover_prefix_span_on(&env, &wal_path)?;
-                            point_in_time_report = Some(RecoveryReport {
-                                kind: "resync",
-                                corrupt_offset: origin,
-                                good_through_offset: last_good,
-                                discarded_bytes: env
-                                    .metadata_len(&wal_path)
-                                    .unwrap_or(0)
-                                    .saturating_sub(last_good),
-                            });
-                            (records, last_good)
-                        } else {
-                            return Err(escalated);
+                        // RFC-0053 Y3.3: reopen outcome decided by the pure
+                        // kernel (refuse / serve prefix + report), not ad hoc.
+                        match crate::wal::reopen_kernel::reopen_outcome(
+                            crate::wal::reopen_kernel::ReopenDamage::Resync,
+                            opts.wal_recovery == WalRecovery::PointInTime,
+                            matches!(escalated, CoreError::CorruptionEscalated { .. }),
+                        ) {
+                            crate::wal::reopen_kernel::ReopenOutcome::ServePrefixReport => {
+                                let (records, last_good, _err, _resync) =
+                                    Wal::recover_prefix_span_on(&env, &wal_path)?;
+                                point_in_time_report = Some(RecoveryReport {
+                                    kind: "resync",
+                                    corrupt_offset: origin,
+                                    good_through_offset: last_good,
+                                    discarded_bytes: env
+                                        .metadata_len(&wal_path)
+                                        .unwrap_or(0)
+                                        .saturating_sub(last_good),
+                                });
+                                (records, last_good)
+                            }
+                            _ => return Err(escalated),
                         }
                     } else {
                         (records, last_good)
@@ -1244,23 +1249,27 @@ impl<E: Env> Db<E> {
                             0,
                             CoreError::Truncated(0),
                         );
-                        if opts.wal_recovery == WalRecovery::PointInTime
-                            && !matches!(escalated, CoreError::CorruptionEscalated { .. })
-                        {
-                            // Re-walk collecting the decoded prefix; the
-                            // stopping error is the same head error that
-                            // routed us here (first error is deterministic).
-                            let (records, last_good, _prefix_err, _resync) =
-                                Wal::recover_prefix_span_on(&env, &wal_path)?;
-                            point_in_time_report = Some(RecoveryReport {
-                                kind: "truncated_head",
-                                corrupt_offset: 0,
-                                good_through_offset: last_good,
-                                discarded_bytes: len.saturating_sub(last_good),
-                            });
-                            (records, last_good)
-                        } else {
-                            return Err(escalated);
+                        // RFC-0053 Y3.3: reopen outcome from the pure kernel.
+                        match crate::wal::reopen_kernel::reopen_outcome(
+                            crate::wal::reopen_kernel::ReopenDamage::TruncatedHead,
+                            opts.wal_recovery == WalRecovery::PointInTime,
+                            matches!(escalated, CoreError::CorruptionEscalated { .. }),
+                        ) {
+                            crate::wal::reopen_kernel::ReopenOutcome::ServePrefixReport => {
+                                // Re-walk collecting the decoded prefix; the
+                                // stopping error is the same head error that
+                                // routed us here (first error is deterministic).
+                                let (records, last_good, _prefix_err, _resync) =
+                                    Wal::recover_prefix_span_on(&env, &wal_path)?;
+                                point_in_time_report = Some(RecoveryReport {
+                                    kind: "truncated_head",
+                                    corrupt_offset: 0,
+                                    good_through_offset: last_good,
+                                    discarded_bytes: len.saturating_sub(last_good),
+                                });
+                                (records, last_good)
+                            }
+                            _ => return Err(escalated),
                         }
                     }
                 }
@@ -1268,23 +1277,27 @@ impl<E: Env> Db<E> {
                     // Mid-WAL bitflip: fail-stop (silent skip is G8-forbidden),
                     // journaled; the Nth event escalates (RFC-0038 D).
                     let escalated = crate::corrupt::escalate_or_fail(&env, &dir, "crc", offset, e);
-                    if opts.wal_recovery == WalRecovery::PointInTime
-                        && !matches!(escalated, CoreError::CorruptionEscalated { .. })
-                    {
-                        let (records, last_good, _prefix_err, _resync) =
-                            Wal::recover_prefix_span_on(&env, &wal_path)?;
-                        point_in_time_report = Some(RecoveryReport {
-                            kind: "crc",
-                            corrupt_offset: offset,
-                            good_through_offset: last_good,
-                            discarded_bytes: env
-                                .metadata_len(&wal_path)
-                                .unwrap_or(0)
-                                .saturating_sub(last_good),
-                        });
-                        (records, last_good)
-                    } else {
-                        return Err(escalated);
+                    // RFC-0053 Y3.3: reopen outcome from the pure kernel.
+                    match crate::wal::reopen_kernel::reopen_outcome(
+                        crate::wal::reopen_kernel::ReopenDamage::Crc,
+                        opts.wal_recovery == WalRecovery::PointInTime,
+                        matches!(escalated, CoreError::CorruptionEscalated { .. }),
+                    ) {
+                        crate::wal::reopen_kernel::ReopenOutcome::ServePrefixReport => {
+                            let (records, last_good, _prefix_err, _resync) =
+                                Wal::recover_prefix_span_on(&env, &wal_path)?;
+                            point_in_time_report = Some(RecoveryReport {
+                                kind: "crc",
+                                corrupt_offset: offset,
+                                good_through_offset: last_good,
+                                discarded_bytes: env
+                                    .metadata_len(&wal_path)
+                                    .unwrap_or(0)
+                                    .saturating_sub(last_good),
+                            });
+                            (records, last_good)
+                        }
+                        _ => return Err(escalated),
                     }
                 }
                 Err(e @ CoreError::WalZeroHeader { offset }) => {
@@ -1294,23 +1307,27 @@ impl<E: Env> Db<E> {
                     // decoded prefix and reports the discard.
                     let escalated =
                         crate::corrupt::escalate_or_fail(&env, &dir, "zero_header", offset, e);
-                    if opts.wal_recovery == WalRecovery::PointInTime
-                        && !matches!(escalated, CoreError::CorruptionEscalated { .. })
-                    {
-                        let (records, last_good, _prefix_err, _resync) =
-                            Wal::recover_prefix_span_on(&env, &wal_path)?;
-                        point_in_time_report = Some(RecoveryReport {
-                            kind: "zero_header",
-                            corrupt_offset: offset,
-                            good_through_offset: last_good,
-                            discarded_bytes: env
-                                .metadata_len(&wal_path)
-                                .unwrap_or(0)
-                                .saturating_sub(last_good),
-                        });
-                        (records, last_good)
-                    } else {
-                        return Err(escalated);
+                    // RFC-0053 Y3.3: reopen outcome from the pure kernel.
+                    match crate::wal::reopen_kernel::reopen_outcome(
+                        crate::wal::reopen_kernel::ReopenDamage::ZeroHeader,
+                        opts.wal_recovery == WalRecovery::PointInTime,
+                        matches!(escalated, CoreError::CorruptionEscalated { .. }),
+                    ) {
+                        crate::wal::reopen_kernel::ReopenOutcome::ServePrefixReport => {
+                            let (records, last_good, _prefix_err, _resync) =
+                                Wal::recover_prefix_span_on(&env, &wal_path)?;
+                            point_in_time_report = Some(RecoveryReport {
+                                kind: "zero_header",
+                                corrupt_offset: offset,
+                                good_through_offset: last_good,
+                                discarded_bytes: env
+                                    .metadata_len(&wal_path)
+                                    .unwrap_or(0)
+                                    .saturating_sub(last_good),
+                            });
+                            (records, last_good)
+                        }
+                        _ => return Err(escalated),
                     }
                 }
                 Err(e) => return Err(e),
@@ -1392,19 +1409,26 @@ impl<E: Env> Db<E> {
         let vlog_new = dir.join(crate::vlog::VLOG_NEW_NAME);
         let blob_nums = vlog::list_blob_nums(&env, &dir);
         let blob_active = blob_nums.last().copied().unwrap_or(0);
-        let vlog = if blob_active > 0 {
-            Some(Mutex::new(ValueLog::open_blob(&env, &dir, blob_active)?))
-        } else if large_value_threshold.is_some()
-            || env.exists(&vlog_path)
-            || (vlog_use_new && env.exists(&vlog_new))
-        {
-            Some(Mutex::new(ValueLog::open_with_flag(
-                &env,
-                &dir,
-                vlog_use_new,
-            )?))
-        } else {
-            None
+        // RFC-0056 P1.4: vlog swing decision comes from the pure kernel; the
+        // flag-resolved arms delegate to `open_with_flag`, which encodes the
+        // same F51 refuse / empty-create rules as defense-in-depth.
+        let vlog = match crate::vlog_gc_kernel::vlog_recover_action(
+            blob_active > 0,
+            large_value_threshold.is_some(),
+            env.exists(&vlog_path),
+            vlog_use_new,
+            env.exists(&vlog_new),
+        ) {
+            crate::vlog_gc_kernel::VlogRecoverAction::NoVlog => None,
+            crate::vlog_gc_kernel::VlogRecoverAction::OpenBlob => {
+                Some(Mutex::new(ValueLog::open_blob(&env, &dir, blob_active)?))
+            }
+            crate::vlog_gc_kernel::VlogRecoverAction::OpenNew
+            | crate::vlog_gc_kernel::VlogRecoverAction::OpenPrimary
+            | crate::vlog_gc_kernel::VlogRecoverAction::CreateEmptyPrimary
+            | crate::vlog_gc_kernel::VlogRecoverAction::RefuseOpen => Some(Mutex::new(
+                ValueLog::open_with_flag(&env, &dir, vlog_use_new)?,
+            )),
         };
 
         let mut db = Self {
@@ -1630,7 +1654,6 @@ impl<E: Env> Db<E> {
     }
 
     /// Unsorted tail length (RFC-0054 probe).
-    #[must_use]
     #[must_use]
     pub fn mem_tail_len(&self) -> usize {
         self.mem.tail_len()
@@ -2547,7 +2570,9 @@ impl<E: Env> Db<E> {
                 let mut tombs = Vec::new();
                 table.collect_range_tombstones(MAX_SEQUENCE_NUMBER, &mut tombs);
                 for t in tombs {
-                    if t.sequence > snapshot && t.covers(key) {
+                    if t.sequence > snapshot
+                        && range_tombstone_covers(t.start.as_ref(), t.end.as_ref(), key)
+                    {
                         return true;
                     }
                 }
@@ -2565,7 +2590,9 @@ impl<E: Env> Db<E> {
             let mut tombs = Vec::new();
             table.collect_range_tombstones(MAX_SEQUENCE_NUMBER, &mut tombs);
             for t in tombs {
-                if t.sequence > snapshot && t.covers(key) {
+                if t.sequence > snapshot
+                    && range_tombstone_covers(t.start.as_ref(), t.end.as_ref(), key)
+                {
                     return true;
                 }
             }
@@ -3867,22 +3894,32 @@ impl<E: Env> Db<E> {
     pub fn flush(&mut self) -> Result<()> {
         self.ensure_not_fenced()?;
         self.vlog_sync_pending()?;
-        let _ = crate::buggify_hooks::maybe_arm(crate::buggify_hooks::sites::BEFORE_SST_RENAME);
-        let _ =
-            crate::buggify_hooks::maybe_arm(crate::buggify_hooks::sites::BEFORE_MANIFEST_RENAME);
-        // Finish any in-flight imm first (single-flight).
-        if self.imm.is_some() {
-            self.flush_imm_to_l0()?;
+        crate::buggify_hooks::inject_checked(crate::buggify_hooks::sites::BEFORE_SST_RENAME)?;
+        crate::buggify_hooks::inject_checked(crate::buggify_hooks::sites::BEFORE_MANIFEST_RENAME)?;
+        // Flush plan decided by the pure kernel (RFC-0056 P0.2): the mem
+        // tail is always written to an SST before any WAL rotate.
+        match crate::flush_kernel::flush_plan(self.mem.is_empty(), self.imm.is_some()) {
+            crate::flush_kernel::FlushPlan::FinishImmThenFlush
+            | crate::flush_kernel::FlushPlan::WriteSstThenRotate => {
+                // Finish any in-flight imm first (single-flight).
+                if self.imm.is_some() {
+                    self.flush_imm_to_l0()?;
+                }
+                if self.mem.is_empty() {
+                    self.try_rotate_wal()?;
+                    return Ok(());
+                }
+                // Switch: active → imm; new empty active (writers can continue after return
+                // on ConcurrentDb once this returns; single-threaded Db flushes imm next).
+                self.imm = Some(std::mem::replace(&mut self.mem, MemTable::new()));
+                self.flush_imm_to_l0()?;
+                self.finish_flush_pipeline()?;
+            }
+            crate::flush_kernel::FlushPlan::RotateOnly => {
+                self.try_rotate_wal()?;
+                return Ok(());
+            }
         }
-        if self.mem.is_empty() {
-            self.try_rotate_wal()?;
-            return Ok(());
-        }
-        // Switch: active → imm; new empty active (writers can continue after return
-        // on ConcurrentDb once this returns; single-threaded Db flushes imm next).
-        self.imm = Some(std::mem::replace(&mut self.mem, MemTable::new()));
-        self.flush_imm_to_l0()?;
-        self.finish_flush_pipeline()?;
         // Explicit flush: persist the cache even when interval is 0 (WAL gone).
         if self.changelog_interval == 0 {
             self.persist_changelog_best_effort();
@@ -4096,13 +4133,13 @@ impl<E: Env> Db<E> {
         self.imm = Some(imm);
     }
 
-    /// Active mem empty and no imm (safe to rotate WAL).
+    /// Active mem empty and no imm/pin/parked (the WAL-pin half of
+    /// `flush_kernel::wal_rotate_decision`, minus the in-flight-commit
+    /// guard).
     #[must_use]
     pub fn mem_is_empty_for_rotate(&self) -> bool {
-        self.mem.is_empty()
-            && self.imm.is_none()
-            && self.flush_read_pin.is_none()
-            && self.parked_unflushed.is_empty()
+        let s = self.wal_pin_state();
+        s.mem_empty && !s.imm_present && !s.pin_live && !s.parked_unflushed
     }
 
     /// Whether an immutable memtable is present.
@@ -4301,13 +4338,24 @@ impl<E: Env> Db<E> {
     /// pin (and an in-flight SST). Truncating WAL here leaves a checkpoint or
     /// crash with nothing to replay.
     fn try_rotate_wal(&mut self) -> Result<()> {
-        if self.commit_inflight.load(Ordering::Acquire) > 0 {
-            return Ok(());
-        }
-        if !self.mem_is_empty_for_rotate() {
+        if crate::flush_kernel::wal_rotate_decision(self.wal_pin_state())
+            == crate::flush_kernel::WalRotateAction::KeepWal
+        {
             return Ok(());
         }
         self.rotate_wal_now()
+    }
+
+    /// Snapshot of every way acked keys can still depend on the WAL
+    /// (input to `flush_kernel::wal_rotate_decision`).
+    fn wal_pin_state(&self) -> crate::flush_kernel::WalPinState {
+        crate::flush_kernel::WalPinState {
+            mem_empty: self.mem.is_empty(),
+            imm_present: self.imm.is_some(),
+            pin_live: self.flush_read_pin.is_some(),
+            parked_unflushed: !self.parked_unflushed.is_empty(),
+            commit_inflight: self.commit_inflight.load(Ordering::Acquire) > 0,
+        }
     }
 
     /// F2 guard: value-log/blob GC may only delete or replace pre-GC vlog
@@ -4323,7 +4371,9 @@ impl<E: Env> Db<E> {
     /// evaluated after a completed flush) is equivalent to "the WAL was
     /// rotated".
     fn ensure_wal_rotated_for_gc(&self) -> Result<()> {
-        if self.commit_inflight.load(Ordering::Acquire) > 0 || !self.mem_is_empty_for_rotate() {
+        if crate::flush_kernel::wal_rotate_decision(self.wal_pin_state())
+            == crate::flush_kernel::WalRotateAction::KeepWal
+        {
             return Err(CoreError::Internal(
                 "vlog gc refused: wal not rotated (commits in flight or mem staged) — retry when idle"
                     .into(),
@@ -4382,6 +4432,7 @@ impl<E: Env> Db<E> {
     /// I/O while writing the compacted SST or deleting old files.
     pub fn compact_with(&mut self, options: CompactOptions) -> Result<()> {
         self.flush()?;
+        crate::buggify_hooks::inject_checked(crate::buggify_hooks::sites::BEFORE_COMPACT_WRITE)?;
         match self.compact_with_ssts_only(options) {
             Ok(()) => Ok(()),
             Err(e) => Err(self.fence_io_err(e)),
@@ -4563,31 +4614,30 @@ impl<E: Env> Db<E> {
         if self.ssts.is_empty() {
             return Ok(());
         }
-        // Pick lowest level that has files and can promote (N → N+1).
-        let mut from_level = None;
-        for lvl in 0..=MAX_LSM_LEVEL {
-            if self.level_file_count(lvl) > 0 {
-                // Prefer compacting when we have multiple files at L0, or any
-                // L0 while L1+ exists, or multiple files at higher levels.
-                if lvl < MAX_LSM_LEVEL {
-                    from_level = Some(lvl);
-                    break;
+        // Pick lowest level that has files and can promote (N → N+1);
+        // decided by the pure kernel (RFC-0056 P0.3).
+        let lowest = (0..MAX_LSM_LEVEL)
+            .find(|&lvl| self.level_file_count(lvl) > 0);
+        let files_at_max = self.level_file_count(MAX_LSM_LEVEL) > 0;
+        match crate::compact_kernel::compact_pick(
+            lowest,
+            files_at_max,
+            options.gc.requests_gc(),
+            MAX_LSM_LEVEL,
+        ) {
+            crate::compact_kernel::CompactPlan::Merge { from, to } => {
+                // Unreachable in practice (from < MAX ⇒ to = from + 1), kept
+                // as the historical single-file no-op guard.
+                if from == to && self.ssts.len() == 1 && !options.gc.requests_gc() {
+                    return Ok(());
                 }
+                self.compact_levels(from, to, options)
             }
-        }
-        let Some(from) = from_level else {
-            // Only files at MAX level: optional GC rewrite of all of them.
-            if options.gc.requests_gc() {
-                return self.compact_levels(MAX_LSM_LEVEL, MAX_LSM_LEVEL, options);
+            crate::compact_kernel::CompactPlan::GcRewriteMax => {
+                self.compact_levels(MAX_LSM_LEVEL, MAX_LSM_LEVEL, options)
             }
-            return Ok(());
-        };
-        let to = (from + 1).min(MAX_LSM_LEVEL);
-        // Skip no-op when single file already at `to` and no GC requested.
-        if from == to && self.ssts.len() == 1 && !options.gc.requests_gc() {
-            return Ok(());
+            crate::compact_kernel::CompactPlan::NoOp => Ok(()),
         }
-        self.compact_levels(from, to, options)
     }
 
     /// Promote L0 files into one new L1 file. Existing L1+ SSTs are left
@@ -4952,7 +5002,11 @@ impl<E: Env> Db<E> {
         let pick = self
             .blob_gc_candidates()?
             .into_iter()
-            .find(|c| !c.is_active && c.bytes > 0 && c.dead_ratio + f64::EPSILON >= min);
+            .find(|c| {
+                crate::vlog_gc_kernel::blob_gc_action(c.is_active, c.bytes)
+                    == crate::vlog_gc_kernel::BlobGcAction::Rewrite
+                    && c.dead_ratio + f64::EPSILON >= min
+            });
         let Some(c) = pick else {
             return Ok(None);
         };
@@ -5441,8 +5495,8 @@ impl<E: Env> Db<E> {
         value: impl AsRef<[u8]>,
         opts: WriteOptions,
     ) -> Result<SequenceNumber> {
-        let _ = crate::buggify_hooks::maybe_arm(crate::buggify_hooks::sites::AFTER_MEM_INSERT);
-        let _ = crate::buggify_hooks::maybe_arm(crate::buggify_hooks::sites::AFTER_WAL_APPEND);
+        crate::buggify_hooks::inject_checked(crate::buggify_hooks::sites::AFTER_MEM_INSERT)?;
+        crate::buggify_hooks::inject_checked(crate::buggify_hooks::sites::AFTER_WAL_APPEND)?;
         self.apply_batch_with([BatchOp::put(key, value)], opts)
     }
 
@@ -7722,77 +7776,134 @@ type RecoveredSsts = (
 );
 
 /// Returns `(tables, levels, next_file_num, manifest_file_num, vlog_use_new, max_sequence, earliest_readable)`.
+///
+/// Every decision routes through `manifest_kernel` (RFC-0056 P0.1): the
+/// observation (`manifest::load` + listed-SST existence) is gathered here,
+/// the reopen action is decided by the pure kernel.
 fn recover_ssts<E: Env>(
     env: &E,
     dir: &Path,
     sync: bool,
     table_cache: &TableCache,
 ) -> Result<RecoveredSsts> {
-    if let Some(mut vs) = manifest::load(env, dir)? {
-        vs.normalize_levels();
-        // Drop SST files not listed (mid-compact / failed flush orphans).
-        manifest::gc_orphan_ssts(env, dir, &vs.sst_file_nums)?;
-        let mut max_seq = 0;
-        let mut tables = Vec::with_capacity(vs.sst_file_nums.len());
-        let mut levels = Vec::with_capacity(vs.sst_file_nums.len());
-        for (i, num) in vs.sst_file_nums.iter().enumerate() {
-            let path = VersionSet::sst_path(dir, *num);
-            if !env.exists(&path) {
-                return Err(CoreError::CorruptManifest(format!(
-                    "MANIFEST lists missing SST {num:06}.sst"
-                )));
-            }
-            let t = table_cache.get_or_open(env, &path)?;
-            max_seq = max_seq.max(t.max_sequence());
-            tables.push((*t).clone());
-            levels.push(vs.sst_levels.get(i).copied().unwrap_or(0));
-        }
-        return Ok((
-            tables,
-            levels,
-            vs.next_file_num,
-            vs.manifest_file_num,
-            vs.vlog_use_new,
-            max_seq,
-            vs.earliest_readable_seq,
-        ));
-    }
-
-    // Legacy / first open: scan directory, then write initial MANIFEST.
-    let (tables, next_file_num, max_seq) = load_ssts_scan(env, dir)?;
-    let levels = vec![0u32; tables.len()];
-    let mut vs = VersionSet {
-        next_file_num,
-        sst_file_nums: tables
-            .iter()
-            .filter_map(|t| {
-                t.path()
-                    .file_name()
-                    .and_then(|n| n.to_str())
-                    .and_then(manifest::parse_sst_name)
-            })
-            .collect(),
-        sst_levels: levels.clone(),
-        manifest_file_num: 0,
-        vlog_use_new: false,
-        earliest_readable_seq: 0,
+    use crate::manifest_kernel::{
+        first_install_action, sst_recover_action, FirstInstallAction, FirstInstallOutcome,
+        ListedSst, ManifestObs, SstRecoverAction,
     };
-    // Always install so subsequent opens use inventory (even if empty).
-    // F196: committed-unsynced during first open = the inventory IS
-    // committed (nothing acked is at risk yet); open proceeds.
-    match manifest::install_next(env, dir, &mut vs, sync) {
-        Err(CoreError::ManifestCommittedUnsynced { .. }) => {}
-        r => r?,
+
+    // Gather the two observations; the kernel decides.
+    let loaded = manifest::load(env, dir);
+    let (obs, listed, missing_num) = match &loaded {
+        Ok(None) => (ManifestObs::Absent, ListedSst::AllPresent, None),
+        Ok(Some(vs)) => {
+            let missing = vs.sst_file_nums.iter().copied().find(|num| {
+                !env.exists(&VersionSet::sst_path(dir, *num))
+            });
+            match missing {
+                Some(num) => (ManifestObs::Inventory, ListedSst::Missing(num), Some(num)),
+                None => (ManifestObs::Inventory, ListedSst::AllPresent, None),
+            }
+        }
+        // Corrupt CURRENT/MANIFEST (and any other load failure — also
+        // fail-closed) refuse below via the kernel; the original error is
+        // what the caller sees.
+        Err(_) => (ManifestObs::Corrupt, ListedSst::AllPresent, None),
+    };
+
+    match sst_recover_action(obs, listed) {
+        SstRecoverAction::ServeInventory => {
+            let mut vs = match loaded {
+                Ok(Some(vs)) => vs,
+                // Kernel contract: ServeInventory implies a loaded inventory.
+                _ => unreachable!("ServeInventory requires a decoded MANIFEST"),
+            };
+            vs.normalize_levels();
+            // Drop SST files not listed (mid-compact / failed flush orphans).
+            manifest::gc_orphan_ssts(env, dir, &vs.sst_file_nums)?;
+            let mut max_seq = 0;
+            let mut tables = Vec::with_capacity(vs.sst_file_nums.len());
+            let mut levels = Vec::with_capacity(vs.sst_file_nums.len());
+            for (i, num) in vs.sst_file_nums.iter().enumerate() {
+                let path = VersionSet::sst_path(dir, *num);
+                if !env.exists(&path) {
+                    return Err(CoreError::CorruptManifest(format!(
+                        "MANIFEST lists missing SST {num:06}.sst"
+                    )));
+                }
+                let t = table_cache.get_or_open(env, &path)?;
+                max_seq = max_seq.max(t.max_sequence());
+                tables.push((*t).clone());
+                levels.push(vs.sst_levels.get(i).copied().unwrap_or(0));
+            }
+            Ok((
+                tables,
+                levels,
+                vs.next_file_num,
+                vs.manifest_file_num,
+                vs.vlog_use_new,
+                max_seq,
+                vs.earliest_readable_seq,
+            ))
+        }
+        SstRecoverAction::ScanAndInstall => {
+            // Kernel contract: ScanAndInstall implies absent inventory.
+            debug_assert!(loaded.is_ok() && loaded.as_ref().unwrap().is_none());
+            // Legacy / first open: scan directory, then write initial MANIFEST.
+            let (tables, next_file_num, max_seq) = load_ssts_scan(env, dir)?;
+            let levels = vec![0u32; tables.len()];
+            let mut vs = VersionSet {
+                next_file_num,
+                sst_file_nums: tables
+                    .iter()
+                    .filter_map(|t| {
+                        t.path()
+                            .file_name()
+                            .and_then(|n| n.to_str())
+                            .and_then(manifest::parse_sst_name)
+                    })
+                    .collect(),
+                sst_levels: levels.clone(),
+                manifest_file_num: 0,
+                vlog_use_new: false,
+                earliest_readable_seq: 0,
+            };
+            // Always install so subsequent opens use inventory (even if empty).
+            // F196: committed-unsynced during first open = the inventory IS
+            // committed (nothing acked is at risk yet); open proceeds.
+            let installed = match manifest::install_next(env, dir, &mut vs, sync) {
+                Ok(()) => FirstInstallOutcome::Committed,
+                Err(CoreError::ManifestCommittedUnsynced { .. }) => {
+                    FirstInstallOutcome::CommittedUnsynced
+                }
+                Err(e) => return Err(e),
+            };
+            if first_install_action(installed) == FirstInstallAction::RefuseOpen {
+                return Err(CoreError::CorruptManifest(
+                    "first MANIFEST install failed".into(),
+                ));
+            }
+            Ok((
+                tables,
+                levels,
+                next_file_num,
+                vs.manifest_file_num,
+                false,
+                max_seq,
+                0,
+            ))
+        }
+        SstRecoverAction::RefuseOpen => match (loaded, missing_num) {
+            (Err(e), _) => Err(e),
+            (Ok(_), Some(num)) => Err(CoreError::CorruptManifest(format!(
+                "MANIFEST lists missing SST {num:06}.sst"
+            ))),
+            // Kernel contract: RefuseOpen implies damage or a missing listed
+            // SST; the defensive arm keeps the open fail-closed either way.
+            (Ok(_), None) => Err(CoreError::CorruptManifest(
+                "SST inventory damaged at reopen".into(),
+            )),
+        },
     }
-    Ok((
-        tables,
-        levels,
-        next_file_num,
-        vs.manifest_file_num,
-        false,
-        max_seq,
-        0,
-    ))
 }
 
 /// Load `NNNNNN.sst` files ascending; return tables, next file num, max sequence.
@@ -9348,6 +9459,38 @@ mod tests {
         }
         let db = Db::open(&dir).unwrap();
         assert_eq!(db.get(b"durable").as_deref(), Some(b"yes".as_ref()));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0056 P1.1 end-to-end exercise of the theorem-link
+    /// (`verus/dictionary_link.rs`): acked put → flush (SST + MANIFEST +
+    /// WAL rotate via `flush_kernel`) → acked tail put (mem/WAL only) →
+    /// crash → reopen (inventory via `manifest_kernel`, tail via WAL
+    /// recover, `reopen_outcome` ServeAll) → both acked keys visible.
+    #[test]
+    fn crash_after_flush_and_tail_put_recovers_both_paths() {
+        let dir = temp_dir();
+        {
+            let mut db = Db::open(&dir).unwrap();
+            db.put(b"flushed", b"F").unwrap();
+            db.flush().unwrap();
+            assert!(db.sst_count() >= 1, "flush wrote the SST");
+            db.put(b"tail", b"T").unwrap();
+            std::mem::forget(db);
+        }
+        let db = Db::open(&dir).unwrap();
+        assert_eq!(
+            db.get(b"flushed").as_deref(),
+            Some(b"F".as_ref()),
+            "acked key on the SST-inventory path"
+        );
+        assert_eq!(
+            db.get(b"tail").as_deref(),
+            Some(b"T".as_ref()),
+            "acked key on the WAL-replay path"
+        );
+        assert!(db.sst_count() >= 1, "reopen served the committed inventory");
+        db.close().unwrap();
         let _ = fs::remove_dir_all(&dir);
     }
 
@@ -14439,5 +14582,47 @@ mod tests {
         assert!(db.earliest_readable_sequence() > 0, "GC resumed");
         db.close().unwrap();
         let _ = fs::remove_dir_all(&dir);
+    }
+}
+
+#[cfg(all(test, feature = "buggify"))]
+mod buggify_engine_tests {
+    use super::*;
+
+    /// RFC-0050 P1.3: feature + seeded table ⇒ engine sites inject delay or
+    /// fail-stop `io::Error` (never silent wrong); reopen stays clean.
+    /// Without the feature every site is a no-op (default suite proves it).
+    #[test]
+    fn engine_matrix_fires_and_survives_fixed_seed() {
+        let dir = std::env::temp_dir().join(format!("pedra-buggify-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        crate::buggify_hooks::clear_table();
+        crate::buggify_hooks::install_from_seed(0xB175_F1ED);
+
+        let mut injected_errs = 0u32;
+        {
+            let mut db = Db::open(&dir).unwrap();
+            for i in 0..64u64 {
+                let k = format!("k{i}");
+                if db.put(k.as_bytes(), b"v").is_err() {
+                    injected_errs += 1;
+                }
+            }
+            let _ = db.flush();
+            let _ = db.compact();
+        }
+        let counts = crate::buggify_hooks::installed_fire_counts();
+        let total: u64 = counts.iter().map(|(_, c)| c).sum();
+        assert!(total > 0, "matrix must fire >=1 site under fixed seed");
+        assert!(
+            injected_errs > 0,
+            "fixed seed must produce >=1 fail-stop injection, counts={counts:?}"
+        );
+        crate::buggify_hooks::clear_table();
+
+        // Fail-stop only: reopen clean, no silent corruption.
+        let db = Db::open(&dir).unwrap();
+        let _ = db.get(b"k0");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

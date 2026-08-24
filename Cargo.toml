@@ -4,6 +4,7 @@ members = [
     "crates/pedradb-posix",
     "crates/pedradb-core",
     "crates/pedradb-sim",
+    "crates/pedradb-world",
     "crates/pedradb-oracle",
     "crates/pedradb-cli",
     "crates/pedradb-apply",
@@ -27,7 +28,13 @@ members = [
     "crates/rocksdb-compat-alias-smoke",
     "crates/rocksdb-parity-bench",
 ]
-exclude = ["formal/aeneas/vote-kernel", "formal/aeneas/isolated-kernel"]
+exclude = [
+    "formal/aeneas/vote-kernel",
+    "formal/aeneas/isolated-kernel",
+    "formal/aeneas/ae-kernel",
+    "formal/aeneas/commit-kernel",
+    "formal/aeneas/bloom-kernel",
+]
 
 [workspace.package]
 version = "0.1.0"

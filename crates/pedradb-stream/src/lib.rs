@@ -18,6 +18,7 @@ pub use cursor_kernel::{
 };
 
 use pedradb_core::{Db, OpenOptions, Result as CoreResult};
+use pedradb_io_uring::IoUringEnv;
 use thiserror::Error;
 
 fn push_len_pref(buf: &mut Vec<u8>, part: &[u8]) {
@@ -51,7 +52,7 @@ pub struct Message {
 
 /// Durable stream handle.
 pub struct Stream {
-    db: Db,
+    db: Db<IoUringEnv>,
     name: String,
 }
 
@@ -64,7 +65,7 @@ impl Stream {
         if name.is_empty() {
             return Err(StreamError::Msg("bad stream name".into()));
         }
-        let db = Db::open_with(
+        let db = Db::open_with_env(
             path,
             OpenOptions {
                 wal_full_fsync: true,
@@ -77,6 +78,7 @@ impl Stream {
                 exclusive: true,
                 large_value_threshold: None,
             },
+            IoUringEnv::default(),
         )?;
         let mut s = Self {
             db,

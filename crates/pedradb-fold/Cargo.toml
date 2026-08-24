@@ -11,6 +11,7 @@ path = "src/bin/fold_smoke.rs"
 
 [dependencies]
 pedradb-core.workspace = true
+pedradb-io-uring.workspace = true
 pedradb-journal.workspace = true
 pedradb-replicate.workspace = true
 pedradb-store.workspace = true

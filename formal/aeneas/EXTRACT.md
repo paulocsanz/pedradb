@@ -8,8 +8,10 @@
 - Production tweaks so the extract is not an axiom: `can_vote` and `grant_after_persist` use `match`.
 - Lean 4.31.0 accepted (no `sorry` in `Vote.lean`):
   - `vote_decision_matches_spec`
+  - **`vote_decision_iff`** (RFC-0053 P40: iff on the extracted term)
   - `grant_after_persist_implies_ok` (wire grant ⇒ persist Ok)
   - `as_is_grants_where_fixed_denies` (mutant teeth)
+- **P40 Option::eq:** `VoteKernel.lean` models `Option::eq` as `match` (`def`, not `axiom`). `pedra_formal.py` fails if an Aeneas re-extract restores the axiom.
 
 ## Bloom (`bloom.rs`, RFC-0030)
 
@@ -39,6 +41,22 @@
   (Vec deref_mut + k-step invariant). T2 encode/decode. Those stay
   Verus/Kani/tests.
 
+## AE (`ae_kernel.rs`, RFC-0053 P2.1)
+
+- Charon + Aeneas → `out/lean/AeKernel.lean` (`SOURCE.ae` sha256).
+- Lean 4.31.0 accepted (no `sorry` in `Ae.lean`):
+  - `ae_keep_if_same_term` (∀)
+  - `ae_refuse_conflict_at_commit` / `ae_truncate_conflict_after_commit`
+  - `as_is_rewrites_committed` (F16 teeth)
+
+## Commit (`commit_kernel.rs`, RFC-0053 P2.1)
+
+- Charon + Aeneas → `out/lean/CommitKernel.lean` (`SOURCE.commit` sha256).
+- Lean 4.31.0 accepted (no `sorry` in `Commit.lean`):
+  - `may_commit_at_iff` (∀)
+  - `recover_commit_caps_examples` (F10 min)
+  - `as_is_commits_prev_term` / `as_is_recover_promotes_suffix`
+
 ## Isolated (F83, was a Verus cartoon)
 
 - `[lib] path` = production `isolated_kernel.rs`.
@@ -61,8 +79,11 @@ Never: “Lean proved Raft / fold / the Bloom filter.”
 
 ```
 ./scripts/aeneas_vote.sh --required
+./scripts/aeneas_ae.sh --required
+./scripts/aeneas_commit.sh --required
 ./scripts/aeneas_isolated.sh --required
 ./scripts/aeneas_bloom.sh --required
 ./scripts/lean_vote.sh --required
+./scripts/lean_ae_commit.sh --required
 ./scripts/lean_bloom.sh --required
 ```

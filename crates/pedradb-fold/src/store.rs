@@ -2,7 +2,8 @@
 
 use crate::{FoldCursor, FoldError, FoldMetrics, FoldRole, FoldUpdate, Result};
 use bytes::Bytes;
-use pedradb_core::{prefix_exclusive_end, BatchOp, Db, Env, OpenOptions, StdEnv};
+use pedradb_core::{prefix_exclusive_end, BatchOp, Db, Env, OpenOptions};
+use pedradb_io_uring::IoUringEnv;
 use std::path::{Path, PathBuf};
 
 /// Meta key for the applied cursor (not a user key).
@@ -43,7 +44,7 @@ pub trait FoldStore {
 }
 
 /// Pedra directory fold.
-pub struct PedraFold<E: Env = StdEnv> {
+pub struct PedraFold<E: Env = IoUringEnv> {
     db: Db<E>,
     dir: PathBuf,
     cursor: FoldCursor,
@@ -52,13 +53,13 @@ pub struct PedraFold<E: Env = StdEnv> {
     pub metrics: FoldMetrics,
 }
 
-impl PedraFold<StdEnv> {
-    /// Open with an explicit role on [`StdEnv`].
+impl PedraFold<IoUringEnv> {
+    /// Open with an explicit role on the production Env.
     ///
     /// # Errors
     /// Pedra open.
     pub fn open_role(path: &Path, role: FoldRole) -> Result<(FoldCursor, Self)> {
-        Self::open_role_env(path, role, StdEnv)
+        Self::open_role_env(path, role, IoUringEnv::default())
     }
 }
 
@@ -156,6 +157,29 @@ impl<E: Env> PedraFold<E> {
     /// Pedra apply.
     pub fn apply_updates(&mut self, batch: &[FoldUpdate], cursor: FoldCursor) -> Result<()> {
         apply_inner(self, batch, cursor)
+    }
+
+    /// Applied cursor (inherent, for generic-`E` callers; same as
+    /// [`FoldStore::cursor`]).
+    #[must_use]
+    pub fn cursor_value(&self) -> FoldCursor {
+        self.cursor
+    }
+
+    /// Point get of a live user key (inherent; same as [`FoldStore::get`]).
+    ///
+    /// # Errors
+    /// Store I/O.
+    pub fn get_value(&self, key: &[u8]) -> Result<Option<Vec<u8>>> {
+        self.get_user(key)
+    }
+
+    /// Ordered scan of live user keys (inherent; same as [`FoldStore::range`]).
+    ///
+    /// # Errors
+    /// Store I/O.
+    pub fn range_values(&self, prefix: &[u8]) -> Result<Vec<(Vec<u8>, Vec<u8>)>> {
+        self.range_user(prefix)
     }
 
     /// Close exclusive lock so another open can import/export.
@@ -298,7 +322,7 @@ impl<E: Env> PedraFold<E> {
     }
 }
 
-impl FoldStore for PedraFold<StdEnv> {
+impl FoldStore for PedraFold<IoUringEnv> {
     fn open(path: &Path) -> Result<(FoldCursor, Self)> {
         Self::open_role(path, FoldRole::Storage)
     }

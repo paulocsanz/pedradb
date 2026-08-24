@@ -20,11 +20,22 @@ Last updated: 2026-08-14 (RFC-0024 done: Montanha fold for Caixote)
 
  RFC-0009 done · RFC-0014 done · RFC-0015 done · RFC-0019 done
  RFC-0016 P0 done · RFC-0017 draft · RFC-0020 done (P0–P2 synthetic field maturity)
- RFC-0050 draft — World in-tree (FDB-shaped determinism, not Flow / not FDB Simulation)
- RFC-0051 draft — beyond Sim2 holes (ConcurrentDb PCT / G1–G5; not “more trusted than FDB”)
+ RFC-0050 done — World in-tree (`crates/pedradb-world`: seed→`trace_hash`, invariantes,
+   inventário de seams no CI; lab=produto: mesmo PeerMsg Direct/Queued, canaries index/journal
+   sob FailingEnv, buggify 8 sites com delay/erro seedável; P2 entregue: π ordena `World::run`
+   (5º seam), swarm L28 24/24 clean (gate REAL continua aberto), papel fold no mesmo seed,
+   det_io hard-CT quando sibling presente; not Flow / not FDB Simulation)
+ RFC-0051 done — beyond Sim2 holes entregue (ConcurrentDb PCT runner; π×disk fence de grupo
+   9/256 vs seq 0/256, canário CommitUnknown `row_half_indexed=0`, OCC plantado 38/256
+   cross-group / correto 0/256 com oráculo group-aware; trial `FailingEnvArc<IoUringEnv>`
+   Linux com skip explícito; guards spawn/wall-clock no CI; not “more trusted than FDB”)
  RFC-0052 draft — DST inside Miri/ASan/TCG (cycle, not one interpreter)
- RFC-0053 draft — IronFleet-scale years (TCB + P40; not Dafny rewrite)
- “100%”: docs/formal/one-hundred-percent.md (relativo a TCB; glue ~34k vs ~3k Verus)
+ RFC-0053 done — Y1–Y3 shipped (2ª máquina AE/commit, caller refinements vote/AE/apply,
+   reopen kernel + lemmas, liveness bounded sob axioma; π/VerusSync não disparado, RFC-0051 draft)
+ RFC-0056 done — 100% relativo ao TCB entregue (itens 1–6/8/9/11 verdes; 7 gated por
+   RFC-0051; 10 “TCB à vista” via freeze; 12 contínuo): 35 kernels + 44 pares catalog,
+   liveness sob axiomas ES-1/2/3, StdEnv→Env sem ilhas, TCB congelado no CI
+ “100%”: docs/formal/one-hundred-percent.md (contrato) + one-hundred-percent-report.md (estado)
  Vision: docs/node-primitive-and-unified-platform.md (SoR + projections + multi-leader)
 ```
 
@@ -48,7 +59,7 @@ Last updated: 2026-08-14 (RFC-0024 done: Montanha fold for Caixote)
 | 11 | Streaming range / lazy blocks (RFC-0014 P1) | ✅ done | scan + lazy SST blocks + levels + lz4 | — |
 | 12 | Audit correctness fixes (RFC-0015) | ✅ done | fence, sync_dir, Env seams, compact stats, deny CI | — |
 
-**Next action (determinism):** [RFC-0050](rfc/0050-world-in-tree-fdb-determinism.md) P0 World in-tree. [RFC-0051](rfc/0051-beyond-fdb-sim-holes.md) P0 PCT extract. [RFC-0052](rfc/0052-dst-inside-boxes.md) P0.2 `miri_dst_smoke` when `pedradb-core` compiles on nightly. [RFC-0053](rfc/0053-ironfleet-years.md) P0.2 = formal P40 (Aeneas `iff` on extracted vote).  
+**Next action (determinism):** [RFC-0050](rfc/0050-world-in-tree-fdb-determinism.md) + [RFC-0051](rfc/0051-beyond-fdb-sim-holes.md) **fechados** (P0–P2; swarm L28 limpo — REAL gate só fecha com bug de cluster reproduzido por seed). [RFC-0056](rfc/0056-one-hundred-percent-delivery.md) fechado — estado final em `docs/formal/one-hundred-percent-report.md` (única fatia aberta: P2.1 `ConcurrentDb`, agora coberta pelos dentes PCT do 0051). [RFC-0052](rfc/0052-dst-inside-boxes.md) P0.2 `miri_dst_smoke` quando `pedradb-core` compilar no nightly. [RFC-0053](rfc/0053-ironfleet-years.md) fechado — relatórios `docs/formal/y1|y2|y3-report.md`. Formal: `cqe_kernel.rs` (io_uring) é a única allowlist do freeze — twin bloqueado num modelo de ring.  
 **Next action (other):** Full bindingtester / Java RL only if requested; FDB **field** peer numbers need lab `fdbserver`. Value-store pick C (0029) done including CLI `compact-blob` / `blob-gc` / `maintain`.  
 **CI:** `synthetic-field` **montanha-scale-and-compare** — scale_gate (± `MONTANHA_WRITE_BACKPRESSURE=1`) + `montanha_bp_ab_v0` (off vs BP thr/admission delta) + mini_bt_soak (± BP) + fdb-compare template (no FDB required).  
 **Shipped (admission):** Pedra L0/mem write stall + soft pressure; Montanha `StoreError::WriteStall*` + `WriteAdmissionSnap`; lab flags on scale-gate / fdb-bench / perf-gate / montanha-tcp / mini_bt_soak; fdb-compare pass-through `write_backpressure`; structured `admission_*` in scale/perf reports.  

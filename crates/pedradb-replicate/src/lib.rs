@@ -19,7 +19,7 @@
 //!   `pedradb-apply`. WAL ship is for **asynchronous read replicas** of one writer.
 //! - The replica must not take local writes while shipping (single-writer primary).
 //!
-//! Durable ship I/O uses [`pedradb_core::Env`] (path-only helpers default to [`StdEnv`]).
+//! Durable ship I/O uses [`pedradb_core::Env`] (path-only helpers default to production `IoUringEnv`).
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
@@ -31,8 +31,9 @@ use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
 use pedradb_core::{
-    Db, Env, EnvFile, OpenOptions as DbOpen, Result as CoreResult, StdEnv, WAL_FILE_NAME,
+    Db, Env, EnvFile, OpenOptions as DbOpen, Result as CoreResult, WAL_FILE_NAME,
 };
+use pedradb_io_uring::IoUringEnv;
 use thiserror::Error;
 
 /// Errors from WAL shipping (distinct from engine [`pedradb_core::CoreError`]).
@@ -104,7 +105,7 @@ impl WalShipper {
     /// # Errors
     /// Metadata I/O if the WAL exists but cannot be stat'd.
     pub fn follow(primary_dir: impl AsRef<Path>) -> ShipResult<Self> {
-        Self::follow_on(&StdEnv, primary_dir)
+        Self::follow_on(&IoUringEnv::default(), primary_dir)
     }
 
     /// Like [`Self::follow`] with an explicit [`Env`].
@@ -191,7 +192,7 @@ impl WalShipper {
     /// prefix (flush rotates `CURRENT.log` in place, F165), or missing file
     /// under an advanced cursor.
     pub fn pull(&mut self) -> ShipResult<Option<Vec<u8>>> {
-        self.pull_on(&StdEnv)
+        self.pull_on(&IoUringEnv::default())
     }
 
     /// Like [`Self::pull`] with an explicit [`Env`].
@@ -248,12 +249,12 @@ impl WalShipper {
 /// Append raw WAL bytes onto a replica directory's `CURRENT.log` and fsync.
 ///
 /// Creates the directory if missing. Does **not** open the DB (caller opens
-/// after shipping, or between batches). Uses [`StdEnv`].
+/// after shipping, or between batches). Uses production Env.
 ///
 /// # Errors
 /// I/O while creating/appending/syncing.
 pub fn append_wal_bytes(replica_dir: impl AsRef<Path>, bytes: &[u8]) -> ShipResult<()> {
-    append_wal_bytes_on(&StdEnv, replica_dir, bytes)
+    append_wal_bytes_on(&IoUringEnv::default(), replica_dir, bytes)
 }
 
 /// Append WAL bytes via [`Env`] (create/append/sync + dir sync).
@@ -284,7 +285,7 @@ pub fn append_wal_bytes_on<E: Env>(
 /// # Errors
 /// Ship I/O or WAL rotation.
 pub fn catch_up(shipper: &mut WalShipper, replica_dir: impl AsRef<Path>) -> ShipResult<usize> {
-    catch_up_on(&StdEnv, shipper, replica_dir)
+    catch_up_on(&IoUringEnv::default(), shipper, replica_dir)
 }
 
 /// Like [`catch_up`] with an explicit [`Env`].
@@ -309,8 +310,8 @@ pub fn catch_up_on<E: Env>(
 ///
 /// # Errors
 /// PedraDB open/recover errors.
-pub fn open_replica(replica_dir: impl AsRef<Path>, exclusive: bool) -> CoreResult<Db> {
-    Db::open_with(
+pub fn open_replica(replica_dir: impl AsRef<Path>, exclusive: bool) -> CoreResult<Db<IoUringEnv>> {
+    Db::open_with_env(
         replica_dir,
         DbOpen {
             wal_full_fsync: true,
@@ -323,6 +324,7 @@ pub fn open_replica(replica_dir: impl AsRef<Path>, exclusive: bool) -> CoreResul
             large_value_threshold: None,
             wal_recovery: Default::default(),
         },
+        IoUringEnv::default(),
     )
 }
 
@@ -336,7 +338,7 @@ pub fn open_replica(replica_dir: impl AsRef<Path>, exclusive: bool) -> CoreResul
 pub fn bootstrap_replica_from_wal(
     primary_dir: impl AsRef<Path>,
     replica_dir: impl AsRef<Path>,
-) -> ShipResult<Db> {
+) -> ShipResult<Db<IoUringEnv>> {
     let mut shipper = WalShipper::from_start(primary_dir.as_ref());
     catch_up(&mut shipper, replica_dir.as_ref())?;
     Ok(open_replica(replica_dir.as_ref(), true)?)

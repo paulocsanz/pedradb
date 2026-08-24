@@ -4,6 +4,7 @@
 
 use pedradb_core::wal::Wal;
 use pedradb_core::{Db, OpenOptions};
+use pedradb_io_uring::{open as open_db, open_with as open_db_with, production_env, IoUringEnv};
 use pedradb_ops::{inspect_format, migrate_to_latest, restore_history_from_remote, BackupEngine};
 
 fn main() -> std::process::ExitCode {
@@ -57,7 +58,7 @@ fn demo_cmd(args: &[String]) -> std::process::ExitCode {
 }
 
 fn run_db_demo(path: &str) -> pedradb_core::Result<()> {
-    let mut db = Db::open(path)?;
+    let mut db = open_db(path)?;
     {
         let mut tx = db.begin();
         tx.put(b"u/1", br#"{"name":"ada"}"#)?;
@@ -77,7 +78,7 @@ fn run_db_demo(path: &str) -> pedradb_core::Result<()> {
     );
     println!("  last_sequence = {}", db.last_sequence());
     db.close()?;
-    let db2 = Db::open(path)?;
+    let db2 = open_db(path)?;
     assert_eq!(
         db2.get(b"u/1").as_deref(),
         Some(br#"{"name":"ada"}"#.as_ref())
@@ -117,8 +118,8 @@ fn run_wal_demo(path: &str) -> pedradb_core::Result<()> {
     Ok(())
 }
 
-fn open_live(path: &str) -> pedradb_core::Result<Db> {
-    Db::open_with(
+fn open_live(path: &str) -> pedradb_core::Result<Db<IoUringEnv>> {
+    open_db_with(
         path,
         OpenOptions {
             wal_full_fsync: true,
@@ -221,7 +222,7 @@ fn archive_cmd(args: &[String]) -> std::process::ExitCode {
         Some("status") if args.len() >= 2 => {
             match (|| -> Result<(), Box<dyn std::error::Error>> {
                 let tier = pedradb_core::history::RemoteTier::new(&args[1]);
-                match tier.latest_summary(&pedradb_core::StdEnv)? {
+                match tier.latest_summary(&production_env())? {
                     Some(s) => {
                         println!(
                         "segments={} bytes={} seq_range={}-{} archive_floor={} next_generation={}",
@@ -247,7 +248,7 @@ fn archive_cmd(args: &[String]) -> std::process::ExitCode {
                     None => None,
                 };
                 let rep =
-                    restore_history_from_remote(&pedradb_core::StdEnv, &args[1], &args[2], target)?;
+                    restore_history_from_remote(&production_env(), &args[1], &args[2], target)?;
                 println!(
                     "restored {} segments / {} records -> {} last_sequence={} (target={:?})",
                     rep.segments, rep.records, args[2], rep.last_sequence, target

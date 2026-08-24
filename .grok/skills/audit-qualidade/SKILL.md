@@ -83,6 +83,9 @@ Não é esta skill: auditoria de *código* → `/audit-pedradb`.
 
 ## Gold
 
-Ainda não há ficha D3 neste repo. Padrão de *forma*:
-`research/fichamentos/template.md`. Padrão de *rigor citacional* (outro
-domínio): `../coop/referencias/fichamentos/template.md`.
+Estado (audit 2026-08-23): **17 fichas D4**, zero < D3 — meta ≥D3 atingida.
+Padrão de *forma*: `research/fichamentos/template.md`. Padrão de *rigor
+citacional* (outro domínio): `../coop/referencias/fichamentos/template.md`.
+Nota de verificação: extrações `pages.txt` podem hifenizar, usar ligaduras
+(ﬁ) ou intercalar colunas — grep literal falha; normalizar (NFKC, de-hifen,
+marcadores de página) antes de concluir MISS.

@@ -41,7 +41,8 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::time::{Duration, Instant};
 
-use pedradb_core::{Db, Env, Host, OpenOptions, Result as CoreResult, StdEnv};
+use pedradb_core::{Db, Env, Host, OpenOptions, Result as CoreResult};
+use pedradb_io_uring::IoUringEnv;
 use thiserror::Error;
 
 // Re-export core time / host seams so DCS and store share one DST plug surface.
@@ -196,7 +197,7 @@ struct Lease {
 /// **state machine** + local API.
 ///
 /// Generic over [`Clock`] (lease TTL) and [`Env`] (disk faults via `FailingEnv`).
-pub struct Dcs<C: Clock = SystemClock, E: Env = StdEnv> {
+pub struct Dcs<C: Clock = SystemClock, E: Env = IoUringEnv> {
     db: Db<E>,
     clock: C,
     next_lease_id: u64,
@@ -206,23 +207,23 @@ pub struct Dcs<C: Clock = SystemClock, E: Env = StdEnv> {
     watch_log: Vec<(u64, Event)>, // (revision, event)
 }
 
-impl Dcs<SystemClock, StdEnv> {
-    /// Open or create a DCS store at `path` (production wall clock + real FS).
+impl Dcs<SystemClock, IoUringEnv> {
+    /// Open or create a DCS store at `path` (production wall clock + io_uring Env).
     ///
     /// # Errors
     /// PedraDB open.
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
-        Self::open_with_env_clock(path, StdEnv, SystemClock)
+        Self::open_with_env_clock(path, IoUringEnv::default(), SystemClock)
     }
 }
 
-impl<C: Clock> Dcs<C, StdEnv> {
-    /// Open with an explicit clock (tests); real filesystem.
+impl<C: Clock> Dcs<C, IoUringEnv> {
+    /// Open with an explicit clock (tests); production Env.
     ///
     /// # Errors
     /// PedraDB open.
     pub fn open_with_clock(path: impl AsRef<Path>, clock: C) -> Result<Self> {
-        Self::open_with_env_clock(path, StdEnv, clock)
+        Self::open_with_env_clock(path, IoUringEnv::default(), clock)
     }
 }
 

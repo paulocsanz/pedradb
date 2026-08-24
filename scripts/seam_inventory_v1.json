@@ -1,0 +1,147 @@
+{
+  "version": 1,
+  "rfc": "RFC-0018",
+  "ported": "RFC-0050 P0.4 — ported from ../determinismo/pedradb-dst/schedules/seam_inventory_v1.json @ 2026-08-23; trial_refs re-pointed to in-tree tests (C.tick/H.open/W.crash/D.bitrot referenced the sibling harness)",
+  "definition": "L0=listed, L1=injector, L2=trial_ref exercises site. 100% v1 = all rows L2.",
+  "sites": [
+    {
+      "id": "E.write",
+      "site": "EnvFile write",
+      "fault_classes": ["Io", "ENOSPC", "ShortWrite"],
+      "delay_reorder": ["stall_ticks"],
+      "phase": ["put", "flush"],
+      "injector": "FailingEnv::arm_op_class(Write)+ShortWrite",
+      "trial_ref": "pedradb-sim::tests::failing_op_class_write_and_short_write"
+    },
+    {
+      "id": "E.sync",
+      "site": "sync_data/sync_all/sync_dir",
+      "fault_classes": ["SyncFail", "lie-ok"],
+      "delay_reorder": ["stall_ticks"],
+      "phase": ["commit", "flush"],
+      "injector": "FaultKind::SyncFail + RecordingEnv::Lying",
+      "trial_ref": "pedradb-sim::tests::sync_fail_and_recording_lying"
+    },
+    {
+      "id": "E.rename",
+      "site": "Env::rename",
+      "fault_classes": ["Io"],
+      "delay_reorder": [],
+      "phase": ["flush", "manifest"],
+      "injector": "FailingEnv::arm_op_class(Rename)",
+      "trial_ref": "pedradb-sim::tests::failing_op_class_rename"
+    },
+    {
+      "id": "E.create_open",
+      "site": "create/open_append/open_read",
+      "fault_classes": ["Io", "Permission"],
+      "delay_reorder": [],
+      "phase": ["open", "reopen"],
+      "injector": "FailingEnv::arm_op_class(CreateOpen)",
+      "trial_ref": "pedradb-sim::tests::failing_op_class_create_open"
+    },
+    {
+      "id": "E.remove",
+      "site": "Env::remove_file",
+      "fault_classes": ["Io"],
+      "delay_reorder": [],
+      "phase": ["compact_gc"],
+      "injector": "FailingEnv::arm_op_class(Remove)",
+      "trial_ref": "pedradb-sim::tests::failing_op_class_remove"
+    },
+    {
+      "id": "E.meta",
+      "site": "metadata_len/read_dir",
+      "fault_classes": ["Io"],
+      "delay_reorder": [],
+      "phase": ["recovery"],
+      "injector": "FailingEnv::arm_op_class(Meta)",
+      "trial_ref": "pedradb-sim::tests::failing_op_class_meta"
+    },
+    {
+      "id": "N.send",
+      "site": "Net enqueue",
+      "fault_classes": ["drop"],
+      "delay_reorder": ["delay_dist", "reorder"],
+      "phase": ["AE", "RV"],
+      "injector": "InProcessNet drop/delay/reorder",
+      "trial_ref": "pedradb_world::net::tests::reorder_and_delay"
+    },
+    {
+      "id": "N.part",
+      "site": "partition/heal",
+      "fault_classes": ["hard_cut"],
+      "delay_reorder": [],
+      "phase": ["failover"],
+      "injector": "InProcessNet::partition + MembershipFault",
+      "trial_ref": "pedradb_world::tests::partition_blocks_cross_traffic"
+    },
+    {
+      "id": "N.corrupt",
+      "site": "Net payload corrupt",
+      "fault_classes": ["bitflip"],
+      "delay_reorder": [],
+      "phase": ["AE", "RV"],
+      "injector": "InProcessNet::set_corrupt_ppm",
+      "trial_ref": "pedradb_world::net::tests::corrupt_payload"
+    },
+    {
+      "id": "C.tick",
+      "site": "ClockAdvance/ManualClock",
+      "fault_classes": [],
+      "delay_reorder": ["jump_forward"],
+      "phase": ["election"],
+      "injector": "Action::ClockAdvance",
+      "note": "sibling ref same_seed_same_trace_hash; in-tree equivalent name",
+      "trial_ref": "pedradb_world::tests::world_seed_replayable"
+    },
+    {
+      "id": "R.rng",
+      "site": "SeedRng streams",
+      "fault_classes": [],
+      "delay_reorder": [],
+      "phase": ["election_jitter"],
+      "injector": "SeedRng::new(seed) shared host",
+      "trial_ref": "pedradb_core::rng::tests::seed_rng_replayable"
+    },
+    {
+      "id": "H.open",
+      "site": "open_with_env/open_with_host",
+      "fault_classes": ["fail_nth_open"],
+      "delay_reorder": [],
+      "phase": ["crash_reopen"],
+      "injector": "Db::open_with_env + DetHost",
+      "note": "in-tree equivalent of sibling pedradb_dst_harness fail_nth_open trial",
+      "trial_ref": "pedradb-journal::tests::failing_env_flows_through_the_whole_journal_path"
+    },
+    {
+      "id": "W.crash",
+      "site": "process-style forget/reopen",
+      "fault_classes": ["torn_tail"],
+      "delay_reorder": [],
+      "phase": ["recovery"],
+      "injector": "torn WAL tail + reopen",
+      "note": "in-tree equivalent of sibling dst_property_sweep crash_every trial",
+      "trial_ref": "pedradb-core::tests::wal_durability_adversarial::append_after_torn_tail_recovery_survives_crash"
+    },
+    {
+      "id": "D.bitrot",
+      "site": "file byte flip",
+      "fault_classes": ["corruption"],
+      "delay_reorder": [],
+      "phase": ["open_after_flush"],
+      "injector": "SST bitflip",
+      "note": "in-tree equivalent of sibling wal_crc_flip_is_fail_stop_or_clean trial",
+      "trial_ref": "pedradb-core::db::tests::verify_checksums_fails_closed_on_sst_bitflip"
+    },
+    {
+      "id": "B.buggify",
+      "site": "BuggifySchedule multi-site",
+      "fault_classes": ["random_arm"],
+      "delay_reorder": ["composed"],
+      "phase": ["any"],
+      "injector": "buggify_schedule_from_seed",
+      "trial_ref": "pedradb_world::tests::buggify_schedule_replayable"
+    }
+  ]
+}

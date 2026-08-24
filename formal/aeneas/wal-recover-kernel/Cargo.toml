@@ -1,0 +1,12 @@
+[workspace]
+
+[package]
+name = "pedra-aeneas-wal-recover-kernel"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+publish = false
+description = "Standalone crate exposing production wal/recover_kernel.rs (with wal/format.rs) to Charon"
+
+[lib]
+path = "src/lib.rs"

@@ -9,6 +9,10 @@
 //! - Snapshot isolation for reads at begin time.
 //! - Conflict on any concurrent committed write to a **read or written** key
 //!   with `sequence > snapshot` (fail-closed; no silent overwrite of concurrent work).
+//! - Writes absorbed into the **same atomic group commit** are simultaneous
+//!   (one write-lock hold, one WAL fsync): they never conflict with each
+//!   other, and per-member sequence order inside a group is not
+//!   serialization order.
 //! - `ConcurrentDb`'s write lock still serialises the commit critical section
 //!   (OCC validation + WAL fsync); the point is **detectable conflicts** when two
 //!   txs overlap on keys, not lock-free LSM multi-writer amp.

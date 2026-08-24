@@ -31,8 +31,11 @@ use pedradb_core::manifest::{self, VersionSet};
 use pedradb_core::wal::Wal;
 use pedradb_core::{
     copy_db_directory, read_checkpoint_meta, CheckpointMeta, CoreError, Db, Env, EnvFile,
-    OpenOptions, SequenceNumber, StdEnv, WriteOp, WriteRecord, WAL_FILE_NAME,
+    OpenOptions, SequenceNumber, WriteOp, WriteRecord, WAL_FILE_NAME,
 };
+#[cfg(test)]
+use pedradb_core::StdEnv;
+use pedradb_io_uring::IoUringEnv;
 
 /// Ops-layer error (wraps core + structured messages).
 #[derive(Debug, thiserror::Error)]
@@ -132,19 +135,19 @@ impl Catalog {
 
 /// Local backup + PITR engine over a backup root directory.
 #[derive(Debug)]
-pub struct BackupEngine<E: Env = StdEnv> {
+pub struct BackupEngine<E: Env = IoUringEnv> {
     root: PathBuf,
     env: E,
     catalog: Catalog,
 }
 
-impl BackupEngine<StdEnv> {
-    /// Open or create a backup root on the real filesystem.
+impl BackupEngine<IoUringEnv> {
+    /// Open or create a backup root on the production Env.
     ///
     /// # Errors
     /// I/O.
     pub fn open(root: impl AsRef<Path>) -> Result<Self> {
-        Self::open_with_env(root, StdEnv)
+        Self::open_with_env(root, IoUringEnv::default())
     }
 }
 
@@ -679,7 +682,7 @@ pub struct MigrateReport {
 /// # Errors
 /// I/O or unreadable SST headers.
 pub fn inspect_format(path: impl AsRef<Path>) -> Result<FormatReport> {
-    inspect_format_env(&StdEnv, path)
+    inspect_format_env(&IoUringEnv::default(), path)
 }
 
 /// Inspect via `env`.
@@ -745,7 +748,7 @@ fn peek_sst_version(env: &impl Env, path: &Path) -> Result<u32> {
 /// # Errors
 /// Open / compact / verify failures.
 pub fn migrate_to_latest(path: impl AsRef<Path>) -> Result<MigrateReport> {
-    migrate_to_latest_env(path, StdEnv)
+    migrate_to_latest_env(path, IoUringEnv::default())
 }
 
 /// Migrate via `env`.
@@ -812,8 +815,8 @@ mod tests {
         d
     }
 
-    fn open_db(path: &Path) -> Db {
-        Db::open_with(
+    fn open_db(path: &Path) -> Db<IoUringEnv> {
+        Db::open_with_env(
             path,
             OpenOptions {
                 wal_full_fsync: true,
@@ -826,6 +829,7 @@ mod tests {
                 exclusive: true,
                 large_value_threshold: None,
             },
+            IoUringEnv::default(),
         )
         .unwrap()
     }
