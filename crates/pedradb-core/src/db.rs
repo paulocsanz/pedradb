@@ -1631,7 +1631,6 @@ impl<E: Env> Db<E> {
 
     /// Unsorted tail length (RFC-0054 probe).
     #[must_use]
-    #[must_use]
     pub fn mem_tail_len(&self) -> usize {
         self.mem.tail_len()
     }
