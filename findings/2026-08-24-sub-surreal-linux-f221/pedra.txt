@@ -1,0 +1,7 @@
+sub-bench ops=2000 records=1024 dir=/tmp/sub-bench-5495
+seed 1024 records in 0.0s
+leg point_read qps 665271
+leg point_write qps 350534
+leg scan qps 708896
+leg doc_txn qps 150139
+SUB_BENCH_JSON {"engine":"pedra","ops":2000,"records":1024,"seconds":8.0,"legs":[{"name":"point_read","qps":665270.767059818},{"name":"point_write","qps":350533.9316897001},{"name":"scan","qps":708895.6209130185},{"name":"doc_txn","qps":150139.42149585}]}

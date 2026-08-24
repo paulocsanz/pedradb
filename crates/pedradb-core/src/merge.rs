@@ -373,7 +373,7 @@ impl Iterator for StreamingVisibleIter<'_> {
     }
 }
 
-fn bound_to_owned(b: Bound<&[u8]>) -> Bound<Bytes> {
+pub(crate) fn bound_to_owned(b: Bound<&[u8]>) -> Bound<Bytes> {
     match b {
         Bound::Unbounded => Bound::Unbounded,
         Bound::Included(s) => Bound::Included(Bytes::copy_from_slice(s)),
@@ -381,7 +381,7 @@ fn bound_to_owned(b: Bound<&[u8]>) -> Bound<Bytes> {
     }
 }
 
-fn bound_as_ref(b: &Bound<Bytes>) -> Bound<&[u8]> {
+pub(crate) fn bound_as_ref(b: &Bound<Bytes>) -> Bound<&[u8]> {
     match b {
         Bound::Unbounded => Bound::Unbounded,
         Bound::Included(s) => Bound::Included(s.as_ref()),

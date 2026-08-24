@@ -92,6 +92,13 @@ Três perguntas abertas depois do RFC-0054:
       que passa 32.7×; próximo item do shim: iterator com
       run-prefix/prefix-skip). Substituição provada no Linux: 3/4
       pernas mais rápidas com o upper DB intacto.
+      **Pós-F221 (linux-sub-6, fonte e9fcf29:
+      `findings/2026-08-24-sub-surreal-linux-f221/`): o gap de scan
+      era no core, não no shim** — `memtable_stream` materializava o
+      range inteiro por refill de janela de iterador (quadrático);
+      `MemChunkStream` (chunks de 256, resume `Excluded(last)`) fecha:
+      scan **0.58× → 1.10×**, write 2.64×, read 1.93×, txn 1.45× —
+      **4/4 pernas >1×**.
 
 ## Não-metas
 
@@ -145,7 +152,7 @@ específicos do port (write-heavy, batch de 16/32) → linux-diag-5 (closed — 
 | P1.3 | p1 | ratios anti-overindex Linux | done | sem overindex: unif ±1.5%, big −22% (corte 30%) | 2026-08-24 |
 | P2.1 | p2 | shim rocksdb 0.21 | done | crates/rocksdb + alias Transaction | 2026-08-24 |
 | P2.2 | p2 | sub-bench SurrealDB | done | bench/sub-surreal no repo; kvs::tests 62/62 no shim (pós-F183) | 2026-08-24 |
-| P2.3 | p2 | sub-bench no Linux | done | sub-5: write 2.40×, read 1.81×, txn 1.43×, scan 0.58× (gap shim) | 2026-08-24 |
+| P2.3 | p2 | sub-bench no Linux | done | sub-5: write 2.40×, read 1.81×, txn 1.43×, scan 0.58× → sub-6 pós-F221: scan 1.10×, 4/4 >1× | 2026-08-24 |
 
 ## Acceptance Criteria
 
