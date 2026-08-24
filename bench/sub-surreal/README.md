@@ -26,6 +26,12 @@ cd ../peer && cargo build --release   # first build compiles C++ RocksDB
 SUB_BENCH_ENGINE=rocks ./target/release/sub-bench
 ```
 
+Offline (VM gates behind a resolver that drops `index.crates.io`): run
+`sh bench/sub-surreal/vendor.sh` once from the repo root — merges both
+sides' crates.io deps into `vendor/` (gitignored) and writes the
+`.cargo/config.toml` source replacement — then `cargo build --release
+--offline` on either side.
+
 Knobs: `SUB_BENCH_SECONDS` (leg duration, default 8), `SUB_BENCH_RECORDS`
 (seed size, default 1024), `SUB_BENCH_DIR`, `SUB_BENCH_OPS` (informational).
 Output: `SUB_BENCH_JSON {…}` single line — ratios computed outside.

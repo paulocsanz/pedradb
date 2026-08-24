@@ -1,5 +1,8 @@
 /target
 **/target/
+# Vendored crates.io deps for the offline sub-surreal Linux gate (bench12sub+):
+# regenerate with bench/sub-surreal/vendor.sh — too big for git.
+/vendor
 **/*.rs.bk
 *.log
 /tmp
