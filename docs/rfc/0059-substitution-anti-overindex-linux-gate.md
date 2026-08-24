@@ -35,8 +35,11 @@ Três perguntas abertas depois do RFC-0054:
 - [x] **P0.2** Scoreboard Linux documentado neste RFC com coluna própria —
       primeira bateria: VM linux-anti-1, 13/16 ≥2×; `deps_apply_batch`
       (1.87/2.13/1.83) e `deps_raftlog` (0.79/0.91/1.47) reprovam só no
-      Linux/AMD (`findings/2026-08-24-linux-anti1/`). VM linux-bench-5
-      (fonte 9edc373) roda como confirmação independente.
+      Linux/AMD (`findings/2026-08-24-linux-anti1/`). Nota honesta: a VM
+      de confirmação linux-bench-5 congelou durante a build (50 min sem
+      emitir; console morto, sem `exec` para recuperar) e foi destruída —
+      a confirmação dos shapes críticos vem da linux-diag-1 (5 rounds ×
+      2 engines + fases).
 - [ ] **P0.3** `scripts/parity_gate_closed.py` verde sobre a bateria Linux
       (mesmas regras da rearm11; se falhar, é bug de portabilidade, não
       de meta). Status: **REGRESSION** pelos 2 shapes acima — diagnóstico
@@ -117,7 +120,7 @@ específicos do port (write-heavy, batch de 16/32) → linux-diag-1.
 
 | ID | Band | Title | Status | Task / PR | Updated |
 |----|------|-------|--------|-----------|---------|
-| P0.1 | p0 | bateria Linux oficial | done | findings/2026-08-24-linux-anti1 (VM linux-anti-1, d22048e); VM bench-5 como confirmação | 2026-08-24 |
+| P0.1 | p0 | bateria Linux oficial | done | findings/2026-08-24-linux-anti1 (VM linux-anti-1, d22048e) | 2026-08-24 |
 | P0.2 | p0 | scoreboard Linux | done | tabela abaixo; 13/16 ≥2× | 2026-08-24 |
 | P0.3 | p0 | gate verde no Linux | pending | REGRESSION: apply_batch/raftlog — diag linux-diag-1 | 2026-08-24 |
 | P1.1 | p1 | ycsb_b_unif + ycsb_c_unif | done | run_dist no bin oficial | 2026-08-24 |
