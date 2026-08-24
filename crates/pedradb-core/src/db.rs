@@ -3468,10 +3468,7 @@ impl<E: Env> Db<E> {
             Vec::with_capacity(3 + self.ssts.len());
         for table in self.scan_mem_layers() {
             table.collect_range_tombstones(snapshot, &mut range_dels);
-            let pts = self.memtable_stream(table, start, end, snapshot, resolve_values);
-            if !pts.is_empty() {
-                streams.push(Box::new(pts.into_iter()));
-            }
+            streams.push(self.memtable_stream(table, start, end, snapshot, resolve_values));
         }
         for table in self.ssts.iter() {
             table.collect_range_tombstones(snapshot, &mut range_dels);
@@ -3506,49 +3503,53 @@ impl<E: Env> Db<E> {
         StreamingVisibleIter::from_point_streams(streams, range_dels, snapshot, start, end, limit)
     }
 
-    fn memtable_stream(
-        &self,
-        table: &MemTable,
+    fn memtable_stream<'a>(
+        &'a self,
+        table: &'a MemTable,
         start: Bound<&[u8]>,
         end: Bound<&[u8]>,
         snapshot: SequenceNumber,
         resolve_values: bool,
-    ) -> Vec<(InternalKey, Bytes)> {
-        let mut stream = Vec::new();
-        let mut last: Option<Bytes> = None;
-        let push = |stream: &mut Vec<(InternalKey, Bytes)>,
-                    last: &mut Option<Bytes>,
-                    k: &InternalKey,
-                    v: &Bytes| {
-            if k.kind == ValueType::RangeDeletion || k.sequence > snapshot {
-                return;
-            }
-            if last.as_ref().is_some_and(|u| u == &k.user_key) {
-                return;
-            }
-            *last = Some(k.user_key.clone());
-            let value = if resolve_values {
-                v.clone()
-            } else {
-                Bytes::new()
-            };
-            stream.push((k.clone(), value));
-        };
+    ) -> crate::merge::LayerStream<'a> {
         if table.has_range_tombstones() {
+            // Range-tombstone layout walks the full table (no cursor
+            // bounds) — keep the materialized shape; range deletes are
+            // rare and this path is correctness-first.
+            let mut stream: Vec<(InternalKey, Bytes)> = Vec::new();
+            let mut last: Option<Bytes> = None;
             for (k, v) in table.iter_internal() {
-                if crate::merge::user_key_in_range(k.user_key.as_ref(), start, end) {
-                    push(&mut stream, &mut last, k, v);
+                if !crate::merge::user_key_in_range(k.user_key.as_ref(), start, end) {
+                    continue;
                 }
+                if k.kind == ValueType::RangeDeletion || k.sequence > snapshot {
+                    continue;
+                }
+                if last.as_ref().is_some_and(|u| u == &k.user_key) {
+                    continue;
+                }
+                last = Some(k.user_key.clone());
+                let value = if resolve_values {
+                    v.clone()
+                } else {
+                    Bytes::new()
+                };
+                stream.push((k.clone(), value));
             }
-        } else {
-            for (k, v) in table.iter_internal_iter_at(start, end, snapshot) {
-                push(&mut stream, &mut last, k, v);
+            if resolve_values {
+                self.prefetch_resolve_stream(&mut stream);
             }
+            return Box::new(stream.into_iter());
         }
-        if resolve_values {
-            self.prefetch_resolve_stream(&mut stream);
-        }
-        stream
+        Box::new(MemChunkStream {
+            table,
+            start: crate::merge::bound_to_owned(start),
+            end: crate::merge::bound_to_owned(end),
+            last: None,
+            snapshot,
+            resolve: resolve_values,
+            db: self,
+            buf: Vec::new().into_iter(),
+        })
     }
 
     /// Resolve vlog pointers in windows of [`Self::scan_prefetch`] (RFC-0029 P0.3).
@@ -3615,8 +3616,7 @@ impl<E: Env> Db<E> {
 
     /// Observability snapshot: sizes, counts, WAL length (RFC-0014 / RFC-0016).
     #[must_use]
-    pub fn stats(&self) -> DbStats {
-        let mut sst_entries = 0usize;
+    pub fn stats(&self) -> DbStats {        let mut sst_entries = 0usize;
         let mut sst_bytes = 0u64;
         for t in &self.ssts {
             sst_entries = sst_entries.saturating_add(t.len());
@@ -14574,5 +14574,85 @@ mod tests {
         );
         db.close().unwrap();
         let _ = fs::remove_dir_all(&dir);
+    }
+}
+
+/// Chunked, lazy memtable stream (F221): refills bounded chunks of distinct
+/// user keys on demand instead of materializing the whole `[start, end)`
+/// range per window refill — a window's `limit` bounds only merge emission,
+/// so collection used to sweep from the window start to the range end
+/// (quadratic over long scans; sampled as Vec realloc + memmove in the scan
+/// hot path). Chunks keep the vlog prefetch batching (RFC-0029): each
+/// resolved chunk still goes through [`Db::prefetch_resolve_stream`].
+struct MemChunkStream<'a, E: Env = StdEnv> {
+    table: &'a MemTable,
+    start: Bound<Bytes>,
+    end: Bound<Bytes>,
+    last: Option<Bytes>,
+    snapshot: SequenceNumber,
+    resolve: bool,
+    db: &'a Db<E>,
+    buf: std::vec::IntoIter<(InternalKey, Bytes)>,
+}
+
+/// Distinct user keys collected per chunk: bounds upfront work for
+/// window-limited consumers (compat `ITER_WINDOW` = 64) while amortizing
+/// chunk setup for full-range walkers.
+const MEM_STREAM_CHUNK: usize = 256;
+
+impl<'a, E: Env> MemChunkStream<'a, E> {
+    fn refill(&mut self) -> bool {
+        // The internal iterator borrows its bounds for its whole lifetime;
+        // building it per chunk from owned copies keeps those borrows local
+        // to this call. Resume position: every version of `last` was already
+        // emitted or skipped, so `Excluded(last)` is exact.
+        let seek_from = match self.last.clone() {
+            Some(last) => Bound::Excluded(last),
+            None => self.start.clone(),
+        };
+        let end = self.end.clone();
+        let table = self.table;
+        let mut iter =
+            table.iter_internal_iter_at(crate::merge::bound_as_ref(&seek_from), crate::merge::bound_as_ref(&end), self.snapshot);
+        let mut chunk: Vec<(InternalKey, Bytes)> = Vec::with_capacity(MEM_STREAM_CHUNK);
+        while chunk.len() < MEM_STREAM_CHUNK {
+            let Some((k, v)) = iter.next() else { break };
+            if k.kind == ValueType::RangeDeletion || k.sequence > self.snapshot {
+                continue;
+            }
+            if self.last.as_ref().is_some_and(|u| u == &k.user_key) {
+                continue;
+            }
+            self.last = Some(k.user_key.clone());
+            let value = if self.resolve {
+                v.clone()
+            } else {
+                Bytes::new()
+            };
+            chunk.push((k.clone(), value));
+        }
+        drop(iter);
+        if chunk.is_empty() {
+            return false;
+        }
+        if self.resolve {
+            self.db.prefetch_resolve_stream(&mut chunk);
+        }
+        self.buf = chunk.into_iter();
+        true
+    }
+}
+
+impl<'a, E: Env> Iterator for MemChunkStream<'a, E> {
+    type Item = (InternalKey, Bytes);
+    fn next(&mut self) -> Option<Self::Item> {
+        if let Some(x) = self.buf.next() {
+            return Some(x);
+        }
+        if self.refill() {
+            self.buf.next()
+        } else {
+            None
+        }
     }
 }
