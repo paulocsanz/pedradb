@@ -147,7 +147,9 @@ impl<E: Env> OccTransaction<E> {
         self.commit_with(WriteOptions::default())
     }
 
-    /// Commit with durability options.
+    /// Commit with durability options. RFC-0054 P2.1: `WriteOptions::sync`
+    /// is honored — `no_sync` commits without a WAL barrier (same semantics
+    /// as `put_with`); `None` keeps the open-time default.
     ///
     /// # Errors
     /// Conflict, [`CoreError::SnapshotTooOld`], WAL I/O, or finished.
@@ -192,8 +194,8 @@ impl<E: Env> OccTransaction<E> {
                 Stage::Delete => BatchOp::Delete { key },
             });
         }
-        let _ = durability; // G1: ConcurrentDb resolve_sync still fsyncs.
-        db.apply_batch_occ(snapshot, read_set, ops).map(|_| ())
+        db.apply_batch_occ_with(snapshot, read_set, ops, durability)
+            .map(|_| ())
     }
 
     /// Discard staged changes.
@@ -244,6 +246,180 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("pedradb-occ-{n}-{i}"));
         let _ = fs::remove_dir_all(&dir);
         dir
+    }
+
+    /// RFC-0054 P2.1: `commit_with(WriteOptions)` must honor `sync` —
+    /// `no_sync` commits the WAL record without a barrier, explicit `sync`
+    /// barriers, and `None` resolves to the open-time default. Proven at the
+    /// env seam (counting WAL barriers), not assumed.
+    #[test]
+    fn occ_write_options_sync_honored() {
+        use crate::db::WAL_FILE_NAME;
+        use crate::env::{Env, EnvFile, StdEnv};
+        use std::cell::Cell;
+        use std::io::{self, Read, Seek, SeekFrom, Write};
+        use std::path::Path;
+        use std::rc::Rc;
+
+        #[derive(Default)]
+        struct Counts {
+            barriers: Cell<u64>,
+        }
+        #[derive(Clone)]
+        struct CountingEnv {
+            inner: StdEnv,
+            counts: Rc<Counts>,
+        }
+        struct CountingFile {
+            inner: <StdEnv as Env>::File,
+            counts: Rc<Counts>,
+            is_wal: bool,
+        }
+        impl Read for CountingFile {
+            fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+                self.inner.read(buf)
+            }
+        }
+        impl Write for CountingFile {
+            fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+                self.inner.write(buf)
+            }
+            fn flush(&mut self) -> io::Result<()> {
+                self.inner.flush()
+            }
+        }
+        impl Seek for CountingFile {
+            fn seek(&mut self, pos: SeekFrom) -> io::Result<u64> {
+                self.inner.seek(pos)
+            }
+        }
+        impl EnvFile for CountingFile {
+            fn sync_data(&mut self) -> io::Result<()> {
+                if self.is_wal {
+                    self.counts.barriers.set(self.counts.barriers.get() + 1);
+                }
+                self.inner.sync_data()
+            }
+            fn sync_data_strong(&mut self) -> io::Result<()> {
+                if self.is_wal {
+                    self.counts.barriers.set(self.counts.barriers.get() + 1);
+                }
+                self.inner.sync_data_strong()
+            }
+            fn sync_all(&mut self) -> io::Result<()> {
+                self.inner.sync_all()
+            }
+            fn set_len(&mut self, len: u64) -> io::Result<()> {
+                self.inner.set_len(len)
+            }
+            fn len(&mut self) -> io::Result<u64> {
+                self.inner.len()
+            }
+        }
+        impl Env for CountingEnv {
+            type File = CountingFile;
+            fn create_dir_all(&self, path: &Path) -> io::Result<()> {
+                self.inner.create_dir_all(path)
+            }
+            fn create(&self, path: &Path) -> io::Result<Self::File> {
+                Ok(CountingFile {
+                    inner: self.inner.create(path)?,
+                    counts: Rc::clone(&self.counts),
+                    is_wal: path.file_name().is_some_and(|n| n == WAL_FILE_NAME),
+                })
+            }
+            fn open_append(&self, path: &Path) -> io::Result<Self::File> {
+                Ok(CountingFile {
+                    inner: self.inner.open_append(path)?,
+                    counts: Rc::clone(&self.counts),
+                    is_wal: path.file_name().is_some_and(|n| n == WAL_FILE_NAME),
+                })
+            }
+            fn open_read(&self, path: &Path) -> io::Result<Self::File> {
+                Ok(CountingFile {
+                    inner: self.inner.open_read(path)?,
+                    counts: Rc::clone(&self.counts),
+                    is_wal: path.file_name().is_some_and(|n| n == WAL_FILE_NAME),
+                })
+            }
+            fn sync_dir(&self, path: &Path) -> io::Result<()> {
+                self.inner.sync_dir(path)
+            }
+            fn read_dir_names(&self, path: &Path) -> io::Result<Vec<String>> {
+                self.inner.read_dir_names(path)
+            }
+            fn remove_file(&self, path: &Path) -> io::Result<()> {
+                self.inner.remove_file(path)
+            }
+            fn rename(&self, from: &Path, to: &Path) -> io::Result<()> {
+                self.inner.rename(from, to)
+            }
+            fn exists(&self, path: &Path) -> bool {
+                self.inner.exists(path)
+            }
+            fn metadata_len(&self, path: &Path) -> io::Result<u64> {
+                self.inner.metadata_len(path)
+            }
+        }
+
+        let dir = temp_dir();
+        let env = CountingEnv {
+            inner: StdEnv,
+            counts: Rc::default(),
+        };
+        let db = ConcurrentDb::open_with_env(
+            &dir,
+            OpenOptions {
+                wal_full_fsync: true,
+                history: Default::default(),
+                wal_recovery: Default::default(),
+                sync: true,
+                auto_flush_bytes: None,
+                auto_compact_sst_count: None,
+                auto_compact_sst_bytes: None,
+                exclusive: true,
+                large_value_threshold: None,
+            },
+            env.clone(),
+        )
+        .unwrap();
+
+        // no_sync: WAL record committed, no barrier on the WAL file.
+        let before = env.counts.barriers.get();
+        let mut tx = db.begin_occ();
+        tx.put(b"a", b"1").unwrap();
+        tx.commit_with(WriteOptions::no_sync()).unwrap();
+        assert_eq!(
+            env.counts.barriers.get(),
+            before,
+            "no_sync OCC commit must not barrier the WAL"
+        );
+        assert_eq!(db.get(b"a").as_deref(), Some(b"1".as_ref()));
+
+        // Explicit sync: one barrier.
+        let before = env.counts.barriers.get();
+        let mut tx = db.begin_occ();
+        tx.put(b"b", b"2").unwrap();
+        tx.commit_with(WriteOptions::sync()).unwrap();
+        assert_eq!(
+            env.counts.barriers.get(),
+            before + 1,
+            "sync OCC commit must barrier the WAL exactly once"
+        );
+
+        // None → open-time default (sync=true here): one barrier.
+        let before = env.counts.barriers.get();
+        let mut tx = db.begin_occ();
+        tx.put(b"c", b"3").unwrap();
+        tx.commit().unwrap();
+        assert_eq!(
+            env.counts.barriers.get(),
+            before + 1,
+            "default must resolve to the open-time sync policy"
+        );
+
+        drop(db);
+        let _ = fs::remove_dir_all(&dir);
     }
 
     fn open_cdb(dir: &std::path::Path) -> ConcurrentDb {

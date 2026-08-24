@@ -3339,7 +3339,11 @@ impl<E: Env> Db<E> {
         self.scan_ops.fetch_add(1, Ordering::Relaxed);
         // Range tombstones first (G2), exactly like `scan_at_raw`.
         let mut range_dels = Vec::new();
-        let mut cursors: Vec<CountCursor<'_>> = Vec::with_capacity(3 + self.ssts.len());
+        // First non-empty layer stays on the stack (the deps-scan state is
+        // one memtable + no SSTs — no cursor Vec alloc on that path);
+        // a second layer migrates to the Vec (RFC-0054 P1.3).
+        let mut single: Option<CountCursor<'_>> = None;
+        let mut cursors: Vec<CountCursor<'_>> = Vec::new();
         // Live + parked-without-SST only. Retired BTrees are a point/MVCC
         // cache; their L0 files are in `ssts` (retire2 scan died merging them).
         for table in self.scan_mem_layers() {
@@ -3349,9 +3353,14 @@ impl<E: Env> Db<E> {
             if table.is_empty() {
                 continue;
             }
-            cursors.push(CountCursor::Mem(MemCountCursor::new(
-                table, start, end, snapshot,
-            )));
+            let c = CountCursor::Mem(MemCountCursor::new(table, start, end, snapshot));
+            if let Some(first) = single.take() {
+                cursors.reserve_exact(4 + self.ssts.len());
+                cursors.push(first);
+                cursors.push(c);
+            } else {
+                single = Some(c);
+            }
         }
         for table in self.ssts.iter() {
             table.collect_range_tombstones(snapshot, &mut range_dels);
@@ -3359,16 +3368,45 @@ impl<E: Env> Db<E> {
                 continue;
             }
             self.scan_sst_probed.fetch_add(1, Ordering::Relaxed);
-            cursors.push(CountCursor::Sst(SstCountCursor::new(
+            let c = CountCursor::Sst(SstCountCursor::new(
                 table,
                 start,
                 end,
                 snapshot,
                 &self.block_cache,
-            )));
+            ));
+            if let Some(first) = single.take() {
+                cursors.push(first);
+                cursors.push(c);
+            } else if cursors.is_empty() {
+                single = Some(c);
+            } else {
+                cursors.push(c);
+            }
         }
         let cap = limit.unwrap_or(usize::MAX);
         let mut count = 0usize;
+        // Single-cursor fast path: the k-way min-head scan is pure overhead
+        // when only one layer overlaps the window (deps-scan state: one
+        // memtable, no SSTs — RFC-0054 P1.3).
+        if let Some(c) = single.as_mut() {
+            while count < cap {
+                let Some(head) = c.head() else { break };
+                let kind = head.kind;
+                let seq = head.sequence;
+                // Step even on tombstone heads — visibility and cursor
+                // advance must not be coupled (short-circuit spin).
+                let user = head.user_key.clone();
+                let visible = kind == ValueType::Value
+                    && (range_dels.is_empty()
+                        || !crate::merge::range_deleted(user.as_ref(), seq, &range_dels));
+                c.step_user(user.as_ref());
+                if visible {
+                    count += 1;
+                }
+            }
+            return count;
+        }
         while count < cap {
             // Min head across layers by InternalKey order (user asc, seq
             // desc, kind desc) — the global newest version of that user.
@@ -3392,35 +3430,18 @@ impl<E: Env> Db<E> {
             let head = cursors[bi].head().expect("best head");
             let kind = head.kind;
             let seq = head.sequence;
-            // Stack copy of the user key so we can step cursors without
-            // cloning `Bytes` (RFC-0040 P0.3). Bench keys fit in 192 B.
-            const STACK: usize = 192;
-            let ulen = head.user_key.len();
-            let visible = if ulen <= STACK {
-                let mut buf = [0u8; STACK];
-                buf[..ulen].copy_from_slice(head.user_key.as_ref());
-                let user = &buf[..ulen];
-                let vis = kind == ValueType::Value
-                    && (range_dels.is_empty()
-                        || !crate::merge::range_deleted(user, seq, &range_dels));
-                for c in cursors.iter_mut() {
-                    if c.head().is_some_and(|h| h.user_key.as_ref() == user) {
-                        c.step_user(user);
-                    }
+            // `Bytes::clone` is a refcount bump — stepping cursors while the
+            // winning head borrows the table needs a stable key, and a stack
+            // zero+copy per step cost more (RFC-0054 P1.3).
+            let user = head.user_key.clone();
+            let visible = kind == ValueType::Value
+                && (range_dels.is_empty()
+                    || !crate::merge::range_deleted(user.as_ref(), seq, &range_dels));
+            for c in cursors.iter_mut() {
+                if c.head().is_some_and(|h| h.user_key == user) {
+                    c.step_user(user.as_ref());
                 }
-                vis
-            } else {
-                let user = head.user_key.clone();
-                let vis = kind == ValueType::Value
-                    && (range_dels.is_empty()
-                        || !crate::merge::range_deleted(user.as_ref(), seq, &range_dels));
-                for c in cursors.iter_mut() {
-                    if c.head().is_some_and(|h| h.user_key == user) {
-                        c.step_user(user.as_ref());
-                    }
-                }
-                vis
-            };
+            }
             if visible {
                 count += 1;
             }
@@ -14437,6 +14458,121 @@ mod tests {
         db.flush().unwrap();
         assert!(db.history_tier.as_ref().unwrap().bytes() <= 2_048);
         assert!(db.earliest_readable_sequence() > 0, "GC resumed");
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0054 P1.3 micro: cold-window cost of `count_in_range` in the
+    /// deps-scan shape (write-CF windows over an MVCC keyspace seeded by
+    /// fat `apply_batch` commits, ts suffix in the key — one kernel user
+    /// key per version, cap stops after `limit` keys). Run:
+    /// `cargo test -p pedradb-core --lib --release count_scan_micro -- --ignored --nocapture`
+    /// `MEM_MICRO_N` sets windows per phase (default 999).
+    #[test]
+    #[ignore]
+    fn count_scan_micro() {
+        let users = 1024usize;
+        let versions = 64u64;
+        let n: usize = std::env::var("MEM_MICRO_N")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(999)
+            .min(users - 25);
+        let rounds: u32 = std::env::var("MEM_MICRO_ROUNDS")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(3);
+        let dir = temp_dir();
+        let mut opts = OpenOptions::default();
+        opts.sync = false;
+        // Bench keeps the whole keyspace in mem (264k entries, no SST
+        // cursors on the count path); auto-flush would change the shape.
+        opts.auto_flush_bytes = None;
+        let mut db = Db::open_with(&dir, opts).unwrap();
+        let val = Bytes::from_static(b"d");
+        let key = |cf: &str, u: usize, ts: Option<u64>| -> Bytes {
+            let mut k = Vec::with_capacity(cf.len() + 1 + 8 + 8);
+            k.extend_from_slice(cf.as_bytes());
+            k.push(0);
+            k.extend_from_slice(format!("u/{u:06}").as_bytes());
+            if let Some(ts) = ts {
+                k.extend_from_slice(&ts.to_be_bytes());
+            }
+            Bytes::from(k)
+        };
+        // Seed: fat prewrite+commit rounds (bench deps_apply_batch shape).
+        let mut ts = 0u64;
+        for _ in 0..versions {
+            let mut pre = Vec::with_capacity(users * 2);
+            let mut com = Vec::with_capacity(users * 2);
+            for u in 0..users {
+                ts += 1;
+                pre.push(BatchOp::Put {
+                    key: key("lock", u, None),
+                    value: Bytes::from_static(b"l"),
+                });
+                pre.push(BatchOp::Put {
+                    key: key("default", u, Some(ts)),
+                    value: val.clone(),
+                });
+                com.push(BatchOp::Put {
+                    key: key("write", u, Some(ts)),
+                    value: Bytes::from_static(b"c"),
+                });
+                com.push(BatchOp::Delete {
+                    key: key("lock", u, None),
+                });
+            }
+            db.apply_batch(pre).unwrap();
+            db.apply_batch(com).unwrap();
+        }
+        // Phase A — cold windows: a dirty key inside the window forces the
+        // kernel count recompute (CountCache::record_dirty range check).
+        // The dirtying put is OUTSIDE the timed section.
+        let mut cold_ns: u128 = 0;
+        let mut t0 = std::time::Instant::now();
+        for _ in 0..rounds.max(1) {
+            for u in 0..n {
+                ts += 1;
+                db.apply_batch([BatchOp::Put {
+                    key: key("write", u, Some(ts)),
+                    value: Bytes::from_static(b"c"),
+                }])
+                .unwrap();
+                t0 = std::time::Instant::now();
+                let c = db
+                    .count_in_range(
+                        db.visible_sequence(),
+                        Bound::Included(&key("write", u, None)),
+                        Bound::Excluded(&key("write", u + 25, None)),
+                        Some(25),
+                    )
+                    .unwrap();
+                cold_ns += t0.elapsed().as_nanos();
+                std::hint::black_box(c);
+            }
+        }
+        let cold = cold_ns as f64 / (n as f64 * rounds.max(1) as f64) / 1000.0;
+        // Phase B — repeated windows, no writes (kernel count-cache hits
+        // need `latest`, so read visible_sequence per call).
+        t0 = std::time::Instant::now();
+        for u in 0..n {
+            let c = db
+                .count_in_range(
+                    db.visible_sequence(),
+                    Bound::Included(&key("write", u, None)),
+                    Bound::Excluded(&key("write", u + 25, None)),
+                    Some(25),
+                )
+                .unwrap();
+            std::hint::black_box(c);
+        }
+        let warm = t0.elapsed().as_secs_f64() / n as f64 * 1e6;
+        println!(
+            "count scan micro: users={users} vers={versions} rounds={rounds} cold={cold:.3}µs/window warm={warm:.3}µs/window (n={n}, mem_entries={}, ssts={})",
+            db.stats().mem_entries,
+            db.stats().sst_count
+        );
         db.close().unwrap();
         let _ = fs::remove_dir_all(&dir);
     }

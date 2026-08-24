@@ -151,6 +151,13 @@ fn run_and_report<E: Engine + Sync>(e: &E, cfg: &Cfg, suites: &str, out: &Path) 
             r.run(e, "ycsb_e", 0, 5, false, true),
             r.run(e, "ycsb_f", 50, 0, true, false),
         ]);
+        benches.extend([
+            r.run_dist(e, "ycsb_b_unif", 95, 0, false, false, true),
+            r.run_dist(e, "ycsb_c_unif", 100, 0, false, false, true),
+        ]);
+        if let Some(b) = r.run_c_big(e) {
+            benches.push(b);
+        }
         let clients = rocksdb_parity_bench::env_usize("ROCKS_PARITY_CLIENTS", 1);
         if clients >= 2 {
             benches.extend(r.run_clients(e, clients));
@@ -231,6 +238,13 @@ fn run_and_report_occ<E: rocksdb_parity_bench::OccEngine + Sync>(
             r.run(e, "ycsb_e", 0, 5, false, true),
             r.run(e, "ycsb_f", 50, 0, true, false),
         ]);
+        benches.extend([
+            r.run_dist(e, "ycsb_b_unif", 95, 0, false, false, true),
+            r.run_dist(e, "ycsb_c_unif", 100, 0, false, false, true),
+        ]);
+        if let Some(b) = r.run_c_big(e) {
+            benches.push(b);
+        }
         let clients = rocksdb_parity_bench::env_usize("ROCKS_PARITY_CLIENTS", 1);
         if clients >= 2 {
             benches.extend(r.run_clients(e, clients));

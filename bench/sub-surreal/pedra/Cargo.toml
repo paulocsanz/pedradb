@@ -1,0 +1,8 @@
+[workspace]
+resolver = "2"
+members = ["sub-bench"]
+
+# RFC-0059 substitution: surrealdb-core's `rocksdb = "0.21.0"` dependency is
+# satisfied by the Pedra shim crate (package name `rocksdb`, version 0.21.0).
+[patch.crates-io]
+rocksdb = { path = "../../../crates/rocksdb" }

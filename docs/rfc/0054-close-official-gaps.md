@@ -101,10 +101,25 @@
 
 ### P2 — polish
 
-- [ ] **P2.1** OCC `WriteOptions.sync` honrado (hoje herda o DB; Surreal já
-      seta false) — status: `todo`
-- [ ] **P2.2** Gate `ROCKS_PARITY_RATIO_FLOOR=2.0` nas formas que P1 fechou
-      — status: `todo`
+- [x] **P2.1** OCC `WriteOptions.sync` honrado — status: `done`
+      (`ConcurrentDb::apply_batch_occ_with` resolve `opts.sync` com o
+      default do DB; `OccTransaction::commit_with` propaga; seam test
+      `occ_write_options_sync_honored` conta barriers WAL 0/1/1 para
+      no_sync/sync/default — RFC-0059)
+- [x] **P2.2** Gate `ROCKS_PARITY_RATIO_FLOOR=2.0` nas formas que P1 fechou
+      — status: `done` (`scripts/parity_gate_closed.py`: medianas ≥2 nas
+      formas fechadas, raftlog mediana >1, scan/blob/mc50 abertas;
+      valida PASS em rearm11 e FAIL nas rondas contaminadas)
+
+### Depriorizados (decisão do usuário, 2026-08-24)
+
+> "deps_scan e kvrocks <2x ta ok a gente resolve isso dps nao é prioridade"
+
+- **P1.2** `kvrocks_blob_set` ≥2× fica aberto (vlog spill é otimização de
+  benchmark, não do mundo — ver RFC-0059 anti-overindex).
+- **P1.3** `deps_scan` ≥2× fica aberto; os cortes gerais feitos (cursor
+  único sem Vec em `count_visible`, `class_floor` no tail idx, idx peekable)
+  seguem no change como melhoria geral, sem meta de ratio.
 
 ## Status (living — update with every PR)
 
@@ -114,11 +129,11 @@
 | P0.1 | p0 | raftlog_submit_probe | done | example (core 3,79µs / shape 5,50µs) | 2026-08-23 |
 | P0.2 | p0 | raftlog >1× quieto | done | rearm9 3/3 (1,04 med); publish=count-cache tax; F219 | 2026-08-23 |
 | P1.1 | p1 | mvcc_latest ≥2× | done | rearm10 3/3 (2,18/2,53/2,98) reverse-walk | 2026-08-23 |
-| P1.2 | p1 | blob_set ≥2× | todo | 1,23/1,27/1,31 (rearm10, banda) | 2026-08-23 |
-| P1.3 | p1 | deps_scan ≥2× | partial | 1,89 (step_user +10%) | 2026-08-23 |
+| P1.2 | p1 | blob_set ≥2× | deprioritized | decisão do usuário 2026-08-24 | 2026-08-24 |
+| P1.3 | p1 | deps_scan ≥2× | deprioritized | cortes gerais seguem; meta de ratio suspensa | 2026-08-24 |
 | P1.4 | p1 | apply 3/3 ≥2 | done | rearm11 3/3 (2,07/2,08/2,18) tail_idx pack32 + WAL append_exact_to | 2026-08-23 |
-| P2.1 | p2 | OCC WriteOptions.sync | todo | — | 2026-08-23 |
-| P2.2 | p2 | floor 2.0 gated | todo | — | 2026-08-23 |
+| P2.1 | p2 | OCC WriteOptions.sync | done | apply_batch_occ_with + seam test (barriers 0/1/1) | 2026-08-24 |
+| P2.2 | p2 | floor 2.0 gated | done | scripts/parity_gate_closed.py (PASS rearm11 / FAIL contaminação) | 2026-08-24 |
 
 ## Acceptance Criteria
 

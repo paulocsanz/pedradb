@@ -110,6 +110,7 @@ da seção acima) + rearm10 para raftlog 3/3.
 Curva da fase `mem` (phasesΔ por commit) conforme a memtable cresce além
 da escala oficial (deps para em ~256k entradas): 13,5 µs (oficial) →
 18,2 µs (25,6M entradas, 200k ops) → 24,9 µs (128M, 1M ops). Micro
-`mem_insert_apply_micro` confirma: 26 µs/op (2,56M entradas) → 59,8 µs
-(192M). 500× mais entradas ≈ 1,8× mais lento por commit — descida
-logarítmica do índice, sem degradação súbita. Não afeta P1.4.
+`mem_insert_apply_micro` confirma: 26 µs/op (2,56M entradas) → 45,5 µs
+(102M, 800k ops) → 59,8 µs (192M, 1,5M ops). 500× mais entradas ≈ 1,8×
+mais lento por commit — descida logarítmica do índice, sem degradação
+súbita. Não afeta P1.4.

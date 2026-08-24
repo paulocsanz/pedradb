@@ -1,0 +1,24 @@
+[package]
+name = "rocksdb"
+description = "rocksdb 0.21 crate-name shim: upper databases (SurrealDB kv-rocksdb) on pedradb via rocksdb-compat (RFC-0059)"
+version = "0.21.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+rocksdb-compat = { path = "../rocksdb-compat" }
+pedradb-io-uring = { path = "../pedradb-io-uring" }
+
+[features]
+# crates.io rocksdb feature names accepted by SurrealDB's dependency
+# declaration; storage features are engine policy here, so they are no-ops.
+default = []
+lz4 = []
+snappy = []
+zstd = []
+zlib = []
+bzip2 = []
+lz4hc = []
+multi-threaded-cf = []

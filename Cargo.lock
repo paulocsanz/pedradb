@@ -448,7 +448,6 @@ version = "0.1.0"
 dependencies = [
  "bytes",
  "pedradb-core",
- "pedradb-io-uring",
 ]
 
 [[package]]
@@ -463,7 +462,6 @@ name = "pedradb-cli"
 version = "0.1.0"
 dependencies = [
  "pedradb-core",
- "pedradb-io-uring",
  "pedradb-ops",
 ]
 
@@ -487,7 +485,6 @@ version = "0.1.0"
 dependencies = [
  "bytes",
  "pedradb-core",
- "pedradb-io-uring",
  "stateright",
  "thiserror",
 ]
@@ -506,7 +503,6 @@ version = "0.1.0"
 dependencies = [
  "bytes",
  "pedradb-core",
- "pedradb-io-uring",
  "pedradb-journal",
  "pedradb-replicate",
  "pedradb-sim",
@@ -561,7 +557,6 @@ version = "0.1.0"
 dependencies = [
  "bytes",
  "pedradb-core",
- "pedradb-io-uring",
  "pedradb-sim",
 ]
 
@@ -571,7 +566,6 @@ version = "0.1.0"
 dependencies = [
  "crc32c",
  "pedradb-core",
- "pedradb-io-uring",
  "thiserror",
 ]
 
@@ -580,7 +574,7 @@ name = "pedradb-oracle"
 version = "0.1.0"
 dependencies = [
  "pedradb-core",
- "rocksdb",
+ "rocksdb 0.22.0",
 ]
 
 [[package]]
@@ -606,7 +600,6 @@ name = "pedradb-replicate"
 version = "0.1.0"
 dependencies = [
  "pedradb-core",
- "pedradb-io-uring",
  "pedradb-sim",
  "stateright",
  "thiserror",
@@ -625,7 +618,6 @@ version = "0.1.0"
 dependencies = [
  "bytes",
  "pedradb-core",
- "pedradb-io-uring",
  "thiserror",
 ]
 
@@ -652,7 +644,6 @@ version = "0.1.0"
 dependencies = [
  "bytes",
  "pedradb-core",
- "pedradb-io-uring",
  "stateright",
  "thiserror",
 ]
@@ -819,6 +810,14 @@ dependencies = [
 
 [[package]]
 name = "rocksdb"
+version = "0.21.0"
+dependencies = [
+ "pedradb-io-uring",
+ "rocksdb-compat",
+]
+
+[[package]]
+name = "rocksdb"
 version = "0.22.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6bd13e55d6d7b8cd0ea569161127567cd587676c99f4472f779a0279aa60a7a7"
@@ -851,7 +850,7 @@ name = "rocksdb-parity-bench"
 version = "0.1.0"
 dependencies = [
  "pedradb-core",
- "rocksdb",
+ "rocksdb 0.22.0",
  "rocksdb-compat",
  "tempfile",
 ]

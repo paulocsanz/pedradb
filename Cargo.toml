@@ -25,9 +25,10 @@ members = [
     "crates/montanha-fdb-recipes",
     "crates/rocksdb-compat",
     "crates/rocksdb-compat-alias-smoke",
+    "crates/rocksdb",
     "crates/rocksdb-parity-bench",
 ]
-exclude = ["formal/aeneas/vote-kernel", "formal/aeneas/isolated-kernel"]
+exclude = ["formal/aeneas/vote-kernel", "formal/aeneas/isolated-kernel", "bench/sub-surreal"]
 
 [workspace.package]
 version = "0.1.0"

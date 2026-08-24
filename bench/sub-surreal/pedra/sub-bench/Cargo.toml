@@ -1,0 +1,17 @@
+[package]
+name = "sub-bench"
+description = "SurrealDB kv-rocksdb substitution bench: identical SurrealDB transaction code, storage crate swapped via [patch.crates-io] (RFC-0059)"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+surrealdb-core = { path = "../../surreal-core", features = ["kv-rocksdb"] }
+tokio = { version = "1", features = ["rt", "macros", "time"] }
+serde_json = "1"
+
+[profile.release]
+opt-level = 3
+debug = false
+lto = false
+codegen-units = 16
