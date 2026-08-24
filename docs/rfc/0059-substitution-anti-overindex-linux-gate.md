@@ -111,8 +111,8 @@ Peer: RocksDB default (`sync=false`). Medianas de 3 rounds; regra
 | kvrocks_set | 2.273 | PASS | |
 | kvrocks_scan | 32.707 | PASS | |
 | kvrocks_pipelined_set | 3.514 | PASS | |
-| **deps_apply_batch** | **1.873** | **FAIL** | Mac 2.07–2.18 → Linux 1.83–2.13 |
-| **deps_raftlog** | **0.910** | **FAIL** | regra >1.0; Mac 1.07 → Linux 0.79–1.47 |
+| **deps_apply_batch** | **1.873** | **FAIL** | mediana 1.95 isolado (diag-5): custo real mem/wal, sem patologia |
+| **deps_raftlog** | **0.910** | **FAIL** | 0.78× isolado (diag-5): cauda fora da escrita (~11µs fases vs ~240µs/op wall) |
 | deps_scan | 2.108 | OPEN | não-gated (depriorizado) |
 | kvrocks_blob_set | 1.206 | OPEN | não-gated (depriorizado) |
 | kvrocks_set_mc50 | 3.123 | OPEN | não-gated |
