@@ -202,3 +202,12 @@ uuid = { version = "1.6.1", features = ["serde", "v4", "v7"] }
 
 [lib]
 name = "surrealdb_core"
+
+# RFC-0059 substitution test workspace: build-config only delta over the
+# upstream v1.5.4 vendored tree (no source changes). Enabling this stanza
+# swaps the storage engine to Pedra for THIS workspace; the pedra/ and
+# peer/ benches carry their own [patch] stanzas and do not depend on it.
+[workspace]
+
+[patch.crates-io]
+rocksdb = { path = "../../../crates/rocksdb" }
