@@ -1,6 +1,7 @@
 //! RFC-0050 P0.5: MTCP TLS 1.3 + mTLS lab (own process so OnceLock is isolated).
 
-use std::net::SocketAddr;
+use std::io::{Read, Write};
+use std::net::{SocketAddr, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::thread;
@@ -75,7 +76,14 @@ fn tls_flags(cert: &Path, key: &Path, ca: &Path) -> Vec<String> {
 #[test]
 fn require_tls_refuses_cleartext() {
     let out = Command::new(bin())
-        .args(["node", "--require-tls", "--id", "1", "--bind", "127.0.0.1:0"])
+        .args([
+            "node",
+            "--require-tls",
+            "--id",
+            "1",
+            "--bind",
+            "127.0.0.1:0",
+        ])
         .output()
         .expect("spawn");
     assert_eq!(
@@ -179,4 +187,49 @@ fn tcp_tls_mtls_roundtrip() {
     assert!(put_ok, "tls put");
     let got = pedradb_store::client_get(&addr, b"tls-k").expect("tls get");
     assert_eq!(got.as_deref(), Some(&b"tls-v"[..]));
+
+    // RFC-0050 P1.3: health HTTP is TLS when PEMs are installed.
+    let hp = nodes[0].addr.port().saturating_add(79);
+    let ha: SocketAddr = format!("127.0.0.1:{hp}").parse().unwrap();
+    let hdead = Instant::now() + Duration::from_secs(8);
+    let mut health_ok = false;
+    while Instant::now() < hdead {
+        if let Ok(s) = TcpStream::connect_timeout(&ha, Duration::from_millis(200)) {
+            if let Ok(mut s) = pedradb_store::maybe_client_wrap(s) {
+                let _ = s.write_all(b"GET /ready HTTP/1.0\r\nHost: localhost\r\n\r\n");
+                let mut buf = [0u8; 256];
+                if let Ok(n) = s.read(&mut buf) {
+                    let body = String::from_utf8_lossy(&buf[..n]);
+                    if body.contains("200") || body.contains("ready") {
+                        health_ok = true;
+                        break;
+                    }
+                }
+            }
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
+    assert!(health_ok, "health HTTPS /ready on {ha}");
+}
+
+#[test]
+fn tls_reload_from_pem_files_replaces_config() {
+    let tmp = {
+        let mut p = std::env::temp_dir();
+        p.push(format!(
+            "pedradb-tls-reload-{}-{}",
+            std::process::id(),
+            Instant::now().elapsed().as_nanos()
+        ));
+        let _ = std::fs::remove_dir_all(&p);
+        std::fs::create_dir_all(&p).unwrap();
+        p
+    };
+    let (cert, key, ca) = write_mtls_pems(&tmp);
+    pedradb_store::install_from_pem_files(&cert, &key, &ca, "localhost").unwrap();
+    // Second call used to fail "already installed" (OnceLock). Rotation must replace.
+    pedradb_store::reload_from_pem_files(&cert, &key, &ca, "localhost").unwrap();
+    pedradb_store::install_from_pem_files(&cert, &key, &ca, "localhost").unwrap();
+    assert!(pedradb_store::tls_installed());
+    let _ = std::fs::remove_dir_all(&tmp);
 }

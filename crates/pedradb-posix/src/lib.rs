@@ -71,12 +71,13 @@ pub fn fdatasync_file(file: &File) -> io::Result<()> {
 ///
 /// Best-effort on other platforms (no-op `Ok(())`): Linux ext4/xfs delayed
 /// allocation does not block appends this way; revisit if a Linux box
-/// measures a comparable tail.
+/// measures a comparable tail. Under Miri the Darwin `fcntl` is also a
+/// no-op: the interpreter does not implement `F_PREALLOCATE` (cmd 0x2a).
 ///
 /// # Errors
 /// Underlying I/O when the platform implements the reservation.
 pub fn preallocate_file(file: &File, len: u64) -> io::Result<()> {
-    #[cfg(target_os = "macos")]
+    #[cfg(all(target_os = "macos", not(miri)))]
     {
         use std::os::fd::AsRawFd;
 
@@ -116,7 +117,7 @@ pub fn preallocate_file(file: &File, len: u64) -> io::Result<()> {
             Err(io::Error::last_os_error())
         }
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(any(miri, not(target_os = "macos")))]
     {
         let _ = (file, len);
         Ok(())

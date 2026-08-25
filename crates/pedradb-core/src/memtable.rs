@@ -185,7 +185,10 @@ impl<'a> MemInternalRange<'a> {
     /// hot user's versions one by one — the shared deps memtable holds
     /// dozens per hot key after apply). No-op when positioned elsewhere.
     fn step_user(&mut self, user: &[u8]) {
-        if self.peek().is_some_and(|(k, _)| k.user_key.as_ref() == user) {
+        if self
+            .peek()
+            .is_some_and(|(k, _)| k.user_key.as_ref() == user)
+        {
             self.cur = VersIter::One(None);
             if let Some((_, vers)) = self.users.next() {
                 self.cur = vers.iter();
@@ -199,7 +202,11 @@ impl<'a> MemInternalMerge<'a> {
     /// the sorted-tail side advances past the user's versions linearly.
     fn step_user(&mut self, user: &[u8]) {
         self.map.step_user(user);
-        while self.tail.peek().is_some_and(|(k, _)| k.user_key.as_ref() == user) {
+        while self
+            .tail
+            .peek()
+            .is_some_and(|(k, _)| k.user_key.as_ref() == user)
+        {
             self.tail.next();
         }
     }
@@ -781,11 +788,7 @@ impl MemTable {
     /// newest-first version list, counting what was dropped. Reads at any
     /// sequence ≥ floor still resolve exactly; reads below fail closed via
     /// the caller's watermark ratchet (never silent-wrong).
-    fn gc_below_floor(
-        list: &mut VecDeque<Version>,
-        floor: SequenceNumber,
-        dropped: &mut Dropped,
-    ) {
+    fn gc_below_floor(list: &mut VecDeque<Version>, floor: SequenceNumber, dropped: &mut Dropped) {
         // First index with sequence ≤ floor ([0, idx) all newer than floor).
         let (mut lo, mut hi) = (0usize, list.len());
         while lo < hi {
@@ -1069,11 +1072,7 @@ impl MemTable {
         // "d/m/" shard (F220: the empty shard missed them and the scan
         // silently returned less). Anything else takes the sorted fallback.
         let shard = match (bound_cf_prefix(start), bound_cf_prefix(end)) {
-            (Some(a), Some(b))
-                if a == b && !a.is_empty() && a.len() < 32 =>
-            {
-                self.tail_idx.get(a)
-            }
+            (Some(a), Some(b)) if a == b && !a.is_empty() && a.len() < 32 => self.tail_idx.get(a),
             _ if self.tail_idx.len() == 1 => self.tail_idx.values().next(),
             _ => None,
         };
@@ -1083,7 +1082,9 @@ impl MemTable {
         let map = self.iter_internal_range_cursor(start, end);
         MemInternalIter::Idx(MemInternalIdx {
             map,
-            idx: shard.range((class_floor(start), class_floor(end))).peekable(),
+            idx: shard
+                .range((class_floor(start), class_floor(end)))
+                .peekable(),
             tail: &self.tail,
         })
     }
@@ -1107,10 +1108,7 @@ impl MemTable {
         end: Bound<&'a [u8]>,
     ) -> MemInternalRange<'a> {
         MemInternalRange {
-            users: self
-                .map
-                .range::<[u8], _>((start, end))
-                .peekable(),
+            users: self.map.range::<[u8], _>((start, end)).peekable(),
             cur: VersIter::One(None),
         }
     }
@@ -1224,8 +1222,7 @@ impl MemTable {
                 continue;
             }
             last = Some(k.user_key.clone());
-            if k.kind == ValueType::Value
-                && !self.range_deleted(&k.user_key, k.sequence, snapshot)
+            if k.kind == ValueType::Value && !self.range_deleted(&k.user_key, k.sequence, snapshot)
             {
                 out.push((k.user_key.clone(), v.clone()));
             }
@@ -1582,13 +1579,7 @@ mod tests {
         mt.spill_tail_with_gc(Some(5));
         // Keep-set: {seq > 5} ∪ {newest ≤ 5} = {6, 7, 8, 5}
         assert_eq!(mt.len(), 4);
-        for (seq, want) in [
-            (5u64, "v5"),
-            (6, "v6"),
-            (7, "v7"),
-            (8, "v8"),
-            (100, "v8"),
-        ] {
+        for (seq, want) in [(5u64, "v5"), (6, "v6"), (7, "v7"), (8, "v8"), (100, "v8")] {
             assert_eq!(
                 mt.get(b"hot", seq),
                 Lookup::Found(Bytes::from_static(want.as_bytes())),
@@ -1617,7 +1608,10 @@ mod tests {
         mt.put(b"k".as_slice(), 2, b"new".as_slice());
         mt.spill_tail_with_gc(Some(2));
         // newest-≤-2 = v2; v1 dropped → back to Versions::One
-        assert!(matches!(mt.map.get(b"k".as_slice()), Some(Versions::One(_))));
+        assert!(matches!(
+            mt.map.get(b"k".as_slice()),
+            Some(Versions::One(_))
+        ));
         assert_eq!(mt.len(), 1);
         assert_eq!(mt.get(b"k", 2), Lookup::Found(Bytes::from_static(b"new")));
     }
@@ -1661,7 +1655,10 @@ mod tests {
         a.absorb(b);
         let el = t0.elapsed();
         assert_eq!(a.len(), 40_000);
-        assert_eq!(a.get(b"hot", 40_000), Lookup::Found(Bytes::from_static(b"x")));
+        assert_eq!(
+            a.get(b"hot", 40_000),
+            Lookup::Found(Bytes::from_static(b"x"))
+        );
         assert!(
             el < Duration::from_millis(250),
             "absorb of 40k hot-key versions took {el:?} — front-insert regressed"
@@ -1825,9 +1822,7 @@ mod tests {
         assert!(k.starts_with(b"u/03"), "{k:?}");
         assert_eq!(&k[k.len() - 8..], &3u64.to_be_bytes(), "newest version");
         // Point range across shards still sees only in-range keys.
-        assert!(mt
-            .last_visible_under_prefix(b"u/77", 99, None)
-            .is_none());
+        assert!(mt.last_visible_under_prefix(b"u/77", 99, None).is_none());
     }
 
     /// RFC-0054 P1.4: `(pack32, key)` shard order must equal raw byte order
@@ -1885,7 +1880,10 @@ mod tests {
             let b = &keys[(next() as usize) % keys.len()];
             let (lo, hi) = if a <= b { (a, b) } else { (b, a) };
             let p: Vec<&Bytes> = packed
-                .range((packed_bound(Bound::Included(lo)), packed_bound(Bound::Excluded(hi))))
+                .range((
+                    packed_bound(Bound::Included(lo)),
+                    packed_bound(Bound::Excluded(hi)),
+                ))
                 .map(|((_, _, k), _)| k)
                 .collect();
             let q: Vec<&Bytes> = plain

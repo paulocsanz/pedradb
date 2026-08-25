@@ -1,7 +1,8 @@
 # RFC-0036: ≤2× vs TiKV-class Rocks (`fdatasync`) — WAL still synced before Ok
 
 **Status:** in-progress  
-**Updated:** 2026-08-16  
+**Updated:** 2026-08-24
+**Parked (quiet remesure):** remaining P0.3/P1.1 remesure+gate need a quiet host; dirty sandbox is not the official floor.  
 **Parents:** [0001](0001-pedradb-high-level-spec.md) (O1: WAL `fdatasync` before Ok), [0031](0031-rocks-parity-10x-budget.md)–[0035](0035-mvcc-scan-2x-measure-first.md) (same-class FF table)
 
 ## Background
@@ -112,11 +113,11 @@ ficheiro WAL: flag on ⇒ só forte; off ⇒ só fraca).
 
 - [x] **P0.1** RFC + Status vivo (este doc) — status: `done`
 - [x] **P0.2** `EnvFile::sync_data` = `fdatasync(2)` no Unix; WAL commit/group usa `sync_data`; fence inalterado — status: `done`
-- [ ] **P0.3** Remesura 11/11 ≥ 0.5 vs Rocks fd — status: `doing` (10/11; apply 2.31× → [RFC-0037](0037-apply-off-put-and-2x-pedra.md))
+- [ ] **P0.3** Remesura 11/11 ≥ 0.5 vs Rocks fd — status: `doing` (parked: quiet remesure; 10/11; apply 2.31× → [RFC-0037](0037-apply-off-put-and-2x-pedra.md))
 
 ### P1 — next wave
 
-- [ ] **P1.1** Gate `ROCKS_PARITY_RATIO_FLOOR=0.5` no script **sem** FULL_SYNC (todas as 11) — status: `todo`
+- [ ] **P1.1** Gate `ROCKS_PARITY_RATIO_FLOOR=0.5` no script **sem** FULL_SYNC (todas as 11) — status: `todo` (parked: quiet remesure)
 - [x] **P1.2** CHANGELOG fora do caminho do commit (interval 0; flush/close ainda persistem) — status: `done`
 - [x] **P1.3** Auto-compact L0-only (não absorve L1 existente); auto-flush não reescreve CHANGELOG — status: `done`
 

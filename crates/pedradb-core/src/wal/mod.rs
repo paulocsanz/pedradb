@@ -234,11 +234,18 @@ impl<F: EnvFile> Wal<F> {
         // Bytes below `pos` are written (allocated); anchor the frontier
         // there so a recovered segment never over-reserves.
         self.prealloc_to = self.prealloc_to.max(pos);
-        let need = pos.saturating_add(upcoming).saturating_add(WAL_PREALLOC_CHUNK);
+        let need = pos
+            .saturating_add(upcoming)
+            .saturating_add(WAL_PREALLOC_CHUNK);
         while self.prealloc_to < need {
             // `F_PEOFPOSMODE` allocates past physical EOF; the invariant
             // physEOF ≥ prealloc_to makes each call cover exactly one chunk.
-            if self.writer.inner_mut().preallocate(WAL_PREALLOC_CHUNK).is_err() {
+            if self
+                .writer
+                .inner_mut()
+                .preallocate(WAL_PREALLOC_CHUNK)
+                .is_err()
+            {
                 break;
             }
             self.prealloc_to = self.prealloc_to.saturating_add(WAL_PREALLOC_CHUNK);
@@ -390,7 +397,11 @@ mod probe_tests {
         let val = bytes::Bytes::from(vec![b'p'; 1024]);
         let mut ops: Vec<crate::batch::WriteOp> = Vec::new();
         for i in 1..=1024u64 {
-            ops.push(crate::batch::WriteOp::put(i, format!("k/{i:06}"), val.clone()));
+            ops.push(crate::batch::WriteOp::put(
+                i,
+                format!("k/{i:06}"),
+                val.clone(),
+            ));
         }
         let mut w = Wal::create(&path).unwrap();
         for _ in 0..8 {

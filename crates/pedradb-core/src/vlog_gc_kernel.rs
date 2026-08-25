@@ -192,9 +192,8 @@ mod tests {
             let use_new = bits & 8 != 0;
             let new_exists = bits & 16 != 0;
             let a = vlog_recover_action(blob, wants, primary, use_new, new_exists);
-            let m = vlog_recover_action_as_is_ignore_swing(
-                blob, wants, primary, use_new, new_exists,
-            );
+            let m =
+                vlog_recover_action_as_is_ignore_swing(blob, wants, primary, use_new, new_exists);
             if blob {
                 assert_eq!(a, VlogRecoverAction::OpenBlob);
                 continue;

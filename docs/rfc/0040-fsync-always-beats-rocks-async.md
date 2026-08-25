@@ -1,7 +1,8 @@
 # RFC-0040: `fdatasync` always-on mais rápido que Rocks **async**
 
 **Status:** in-progress  
-**Updated:** 2026-08-17  
+**Updated:** 2026-08-24
+**Parked (quiet remesure):** remaining P2 remesure/pipeline-host slices need a quiet host; dirty sandbox is not the official floor.  
 **Parents:** [0039](0039-apply-raftlog-scan-5x-rocks-sync.md) (5× vs sync), [0037](0037-apply-off-put-and-2x-pedra.md) (group commit + host worker), [0036](0036-tikv-rocks-2x-fdatasync.md) (G1 = `fdatasync` antes do Ok)
 
 ## Background
@@ -49,8 +50,8 @@
 
 ### P2 — scan vs async + pipeline
 
-- [ ] **P2.1** `deps_scan` ≥ Rocks async da mesma run (async=sync nas leituras) — status: `todo`
-- [ ] **P2.2** Pipeline encode∥fsync no **host** se P1.1 ainda perder no MC — status: `todo`
+- [ ] **P2.1** `deps_scan` ≥ Rocks async da mesma run (async=sync nas leituras) — status: `todo` (parked: quiet remesure)
+- [ ] **P2.2** Pipeline encode∥fsync no **host** se P1.1 ainda perder no MC — status: `todo` (parked: quiet remesure)
 
 ## Status (living — update with every PR)
 

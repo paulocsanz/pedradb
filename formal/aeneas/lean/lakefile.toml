@@ -52,3 +52,9 @@ name = "WalRecoverKernel"
 
 [[lean_lib]]
 name = "WalRecover"
+
+[[lean_lib]]
+name = "GroupCommitKernel"
+
+[[lean_lib]]
+name = "GroupCommit"

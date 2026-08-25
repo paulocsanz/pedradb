@@ -82,8 +82,8 @@ pub use index_val_kernel::{
 pub use layers::{
     olap_get, olap_ingest, olap_list_at, olap_stream_range, pg_upsert, pks_one_per_range,
     put_with_secondary_index, raw_keys_one_per_range, sql_multi_table_write, stream_get,
-    stream_list_at, stream_publish, table_get, table_put, table_row_key, EtcdNeedFace, TikvKvFace,
-    WatchEvent, WatchHub,
+    stream_list_at, stream_publish, table_get, table_put, table_row_key, EtcdNeedFace,
+    LeadershipEvent, LeadershipHub, TikvKvFace, WatchEvent, WatchHub,
 };
 pub use msg::PeerMsg;
 pub use si_kernel::{
@@ -102,7 +102,8 @@ pub use tcp::{
     WireMsg,
 };
 pub use tls::{
-    install_from_pem_files, maybe_client_wrap, maybe_server_wrap, tls_installed, IoBox,
+    install_from_pem_files, maybe_client_wrap, maybe_server_wrap, reload_from_pem_files,
+    tls_installed, IoBox,
 };
 pub use tx_glue_kernel::{tx_range_action, TxRangeAction};
 pub use txn_kernel::{
@@ -139,6 +140,11 @@ pub struct StoreOpenOptions {
     /// syscall. For simulation harnesses whose wall clock is dominated
     /// by the strong barrier without adding oracle power (RFC-0059).
     pub pedra_wal_full_fsync: bool,
+    /// RFC-0013 P1.3: shared cluster identity. `None` (default) mints on
+    /// first open of empty nodes and recovers from `\0store/cluster/id`.
+    /// Multi-host processes must pass the **same** 16 bytes or a node dir
+    /// from another cluster is refuse-closed as [`StoreError::ClusterMismatch`].
+    pub cluster_id: Option<[u8; 16]>,
 }
 
 impl Default for StoreOpenOptions {
@@ -148,6 +154,7 @@ impl Default for StoreOpenOptions {
             pedra_write_backpressure: false,
             pedra_verified: false,
             pedra_wal_full_fsync: true,
+            cluster_id: None,
         }
     }
 }
@@ -161,6 +168,7 @@ impl StoreOpenOptions {
             pedra_write_backpressure: false,
             pedra_verified: false,
             pedra_wal_full_fsync: true,
+            cluster_id: None,
         }
     }
 
@@ -170,6 +178,25 @@ impl StoreOpenOptions {
         self.pedra_write_backpressure = true;
         self
     }
+
+    /// Pin the RFC-0013 P1.3 cluster id (multi-host must share one value).
+    #[must_use]
+    pub fn with_cluster_id(mut self, id: [u8; 16]) -> Self {
+        self.cluster_id = Some(id);
+        self
+    }
+}
+
+/// In-process counters (RFC-0013 P1.5). Not a metrics product — lab/ops
+/// hooks so hosts are not blind. Single-threaded `StoreCluster`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct StoreMetrics {
+    /// Client proposes that majority-committed (`put` / `put_batch` Ok).
+    pub commits_ok: u64,
+    /// Client proposes that returned [`StoreError::NotCommitted`].
+    pub not_committed: u64,
+    /// Successful range elections (`try_become_leader` persisted).
+    pub elections: u64,
 }
 
 /// Aggregate Pedra L0 / mem admission counters across local nodes (lab A/B, gates).
@@ -217,11 +244,11 @@ use std::path::{Path, PathBuf};
 
 use bytes::Bytes;
 use pedradb_core::{BatchOp, Db, Env, Host, OpenOptions, Rng, SeedRng};
-use pedradb_io_uring::IoUringEnv;
 use pedradb_dcs::{
     apply_dcs_command, bind_absent_create, check_command_at, dcs_get, dcs_get_at, DcsCommand,
     KeyValue,
 };
+use pedradb_io_uring::IoUringEnv;
 use thiserror::Error;
 
 /// How peer RPCs (RequestVote / AppendEntries) are delivered.
@@ -343,6 +370,17 @@ pub enum StoreError {
     /// No range covers key.
     #[error("no range for key")]
     NoRange,
+    /// A node directory belongs to a different cluster (RFC-0013 P1.3).
+    /// Silent merge of two Pedra trees is refuse-closed.
+    #[error("cluster id mismatch on node {node_id}")]
+    ClusterMismatch {
+        /// Node whose on-disk id disagreed.
+        node_id: u64,
+        /// Id this process bound (minted, configured, or from a sibling).
+        expected: [u8; 16],
+        /// Id stored under `\0store/cluster/id` on that node.
+        found: [u8; 16],
+    },
     /// Empty cluster / bad config.
     #[error("{0}")]
     Msg(String),
@@ -509,6 +547,10 @@ const INTENT_PREFIX: &[u8] = b"\0store/intent/";
 const TXN_PREFIX: &[u8] = b"\0store/txn/";
 const SI_META_PREFIX: &[u8] = b"\0store/meta/";
 const HIST_PREFIX: &[u8] = b"\0store/hist/";
+/// RFC-0013 P1.3: cluster identity (id + last voting set). Layout:
+/// `\0store/cluster/id` = 16 raw bytes; `\0store/cluster/membership` =
+/// `u32 LE` count + `count` × `u64 LE` voter ids (sorted).
+const CLUSTER_META_PREFIX: &[u8] = b"\0store/cluster/";
 
 fn raft_meta_key(range_id: u64, kind: &str) -> Vec<u8> {
     let mut k = RAFT_META_PREFIX.to_vec();
@@ -566,6 +608,69 @@ fn is_reserved_store_key(key: &[u8]) -> bool {
         || key.starts_with(TXN_PREFIX)
         || key.starts_with(SI_META_PREFIX)
         || key.starts_with(HIST_PREFIX)
+        || key.starts_with(CLUSTER_META_PREFIX)
+}
+
+fn cluster_id_key() -> Vec<u8> {
+    let mut k = CLUSTER_META_PREFIX.to_vec();
+    k.extend_from_slice(b"id");
+    k
+}
+
+fn cluster_membership_key() -> Vec<u8> {
+    let mut k = CLUSTER_META_PREFIX.to_vec();
+    k.extend_from_slice(b"membership");
+    k
+}
+
+fn mint_cluster_id() -> [u8; 16] {
+    use pedradb_core::rng::{Rng, SystemRng};
+    let a = SystemRng.next_u64();
+    let b = SystemRng.next_u64();
+    let mut id = [0u8; 16];
+    id[..8].copy_from_slice(&a.to_le_bytes());
+    id[8..].copy_from_slice(&b.to_le_bytes());
+    id
+}
+
+fn decode_cluster_id(raw: &[u8]) -> Result<[u8; 16]> {
+    raw.try_into()
+        .map_err(|_| StoreError::Msg("cluster id must be 16 bytes".into()))
+}
+
+fn encode_membership(ids: &[u64]) -> Vec<u8> {
+    let mut v = Vec::with_capacity(4 + ids.len() * 8);
+    v.extend_from_slice(&(ids.len() as u32).to_le_bytes());
+    for id in ids {
+        v.extend_from_slice(&id.to_le_bytes());
+    }
+    v
+}
+
+fn decode_membership(raw: &[u8]) -> Result<Vec<u64>> {
+    if raw.len() < 4 {
+        return Err(StoreError::Msg("cluster membership short".into()));
+    }
+    let n = u32::from_le_bytes(raw[0..4].try_into().unwrap()) as usize;
+    if raw.len() != 4 + n * 8 {
+        return Err(StoreError::Msg("cluster membership length".into()));
+    }
+    let mut ids = Vec::with_capacity(n);
+    for i in 0..n {
+        let off = 4 + i * 8;
+        ids.push(u64::from_le_bytes(raw[off..off + 8].try_into().unwrap()));
+    }
+    Ok(ids)
+}
+
+/// Hex of a 16-byte cluster id (status / docs / tests).
+#[must_use]
+pub fn cluster_id_hex(id: &[u8; 16]) -> String {
+    let mut s = String::with_capacity(32);
+    for b in id {
+        s.push_str(&format!("{b:02x}"));
+    }
+    s
 }
 
 /// F100: length-prefix user under intent/hist/txn so `intent/a` is not a
@@ -1862,6 +1967,11 @@ type RangeKvMap = HashMap<u64, Vec<KvPair>>;
 
 /// In-process multi-node multi-Raft store (Montanha-Store MVP).
 ///
+/// RFC-0013 P1.3: every node directory stores `\0store/cluster/id` (16 bytes).
+/// Open refuses [`StoreError::ClusterMismatch`] if a dir already belongs to
+/// another cluster (no silent merge). Pin with
+/// [`StoreOpenOptions::with_cluster_id`] on multi-host.
+///
 /// Generic over [`Env`] so DST can open every node on a shared `FailingEnv` /
 /// `RecordingEnv` clone (same trip state via `Rc`).
 ///
@@ -1872,6 +1982,13 @@ pub struct StoreCluster<E: Env = IoUringEnv> {
     nodes: HashMap<u64, StoreNode<E>>,
     /// Raft voting membership (strict majority of this set).
     ids: Vec<u64>,
+    /// Largest membership ever admitted (grows on `add_member` / cluster
+    /// build). [`Self::remove_member`] refuses to shrink below the size
+    /// where any two commit/election quorums over this universe still
+    /// intersect — the quorum floor for out-of-band reconfiguration.
+    membership_high_water: usize,
+    /// Options used to open each node's engine (reopen after BitFlip).
+    engine_opts: pedradb_core::OpenOptions,
     /// All range metas (same on every node).
     ranges: Vec<RangeMeta>,
     /// Election jitter / non-determinism seam (inject [`SeedRng`] for DST).
@@ -1883,7 +2000,11 @@ pub struct StoreCluster<E: Env = IoUringEnv> {
     /// Outbound peer messages when [`RpcMode::Queued`] (`from`, `to`, msg).
     outbound: VecDeque<(u64, u64, PeerMsg)>,
     /// In-flight election vote counts: (range_id, term) → votes (includes self).
-    election_votes: HashMap<(u64, u64), u64>,
+    /// Election tally per (range, term, candidate). Keyed by candidate:
+    /// two nodes can time out into the same term and both poll votes —
+    /// a shared (range, term) counter pooled grants across candidates
+    /// and elected a leader without its own majority (seed 503976).
+    election_votes: HashMap<(u64, u64, u64), u64>,
     /// Logical time (World/DST); each [`Self::tick`] / [`Self::advance_time`] advances it.
     /// Raft election/heartbeat counters are pure functions of this — no wall clock.
     logical_now: u64,
@@ -1897,6 +2018,8 @@ pub struct StoreCluster<E: Env = IoUringEnv> {
     has_ttl_leases: bool,
     /// When true, each [`Self::tick`] also advances `now_ms` by this many ms (World).
     ms_per_tick: u64,
+    /// RFC-0013 P1.3: durable cluster identity (`\0store/cluster/id`).
+    cluster_id: [u8; 16],
     /// RFC-0021 P2.6: node_id → region label (lab multi-site; empty = unknown).
     node_regions: HashMap<u64, String>,
     /// RFC-0021 P1.3: optional dial map id → host:port (in-process control plane;
@@ -1929,6 +2052,10 @@ pub struct StoreCluster<E: Env = IoUringEnv> {
     proposed_entries: HashMap<(u64, u64), RangeEntry>,
     /// In-process watch hub; notified after majority put/commit_tx (RFC-0022 P0.3).
     watch: WatchHub,
+    /// RFC-0013 P1.2: best-effort leadership stream (not fencing).
+    live: LeadershipHub,
+    /// RFC-0013 P1.5: commits / NotCommitted / elections.
+    metrics: StoreMetrics,
     /// RFC-0025 P1.1: staged puts for [`Self::put_buffered`] / [`Self::flush_writes`].
     write_coalesce: Vec<(Vec<u8>, Vec<u8>)>,
 }
@@ -2095,10 +2222,13 @@ impl StoreCluster<IoUringEnv> {
             },
         );
         let mut cluster = Self {
+            membership_high_water: ids.len(),
+            engine_opts: opts,
             nodes,
             ids,
             ranges,
             rng,
+            cluster_id: [0u8; 16],
             next_txn_id: 1,
             rpc_mode: RpcMode::Queued,
             outbound: VecDeque::new(),
@@ -2118,8 +2248,11 @@ impl StoreCluster<IoUringEnv> {
             version_notes_through: HashMap::new(),
             proposed_entries: HashMap::new(),
             watch: WatchHub::new(),
+            live: LeadershipHub::new(),
+            metrics: StoreMetrics::default(),
             write_coalesce: Vec::new(),
         };
+        cluster.bind_cluster_identity(store_opts.cluster_id)?;
         cluster.recover_after_open()?;
         Ok(cluster)
     }
@@ -2253,10 +2386,13 @@ impl<E: Env> StoreCluster<E> {
             );
         }
         let mut cluster = Self {
+            membership_high_water: ids.len(),
+            engine_opts: opts,
             nodes,
             ids,
             ranges,
             rng,
+            cluster_id: [0u8; 16],
             next_txn_id: 1,
             rpc_mode: RpcMode::Direct,
             outbound: VecDeque::new(),
@@ -2276,8 +2412,11 @@ impl<E: Env> StoreCluster<E> {
             version_notes_through: HashMap::new(),
             proposed_entries: HashMap::new(),
             watch: WatchHub::new(),
+            live: LeadershipHub::new(),
+            metrics: StoreMetrics::default(),
             write_coalesce: Vec::new(),
         };
+        cluster.bind_cluster_identity(store_opts.cluster_id)?;
         cluster.recover_after_open()?;
         Ok(cluster)
     }
@@ -2305,6 +2444,76 @@ impl<E: Env> StoreCluster<E> {
     /// Set ms added to `now_ms` on each raft [`Self::tick`] (default 10).
     pub fn set_ms_per_tick(&mut self, ms: u64) {
         self.ms_per_tick = ms;
+    }
+
+    /// RFC-0013 P1.3: bind a cluster id (configured, recovered, or minted)
+    /// and refuse a node directory that already belongs to another cluster.
+    fn bind_cluster_identity(&mut self, configured: Option<[u8; 16]>) -> Result<()> {
+        let mut disk: Option<(u64, [u8; 16])> = None;
+        let nids: Vec<u64> = self.nodes.keys().copied().collect();
+        for nid in &nids {
+            let Some(node) = self.nodes.get(nid) else {
+                continue;
+            };
+            if let Some(raw) = node.db.get(&cluster_id_key()) {
+                let found = decode_cluster_id(&raw)?;
+                match disk {
+                    None => disk = Some((*nid, found)),
+                    Some((_, expected)) if expected != found => {
+                        return Err(StoreError::ClusterMismatch {
+                            node_id: *nid,
+                            expected,
+                            found,
+                        });
+                    }
+                    Some(_) => {}
+                }
+            }
+            if let Some(raw) = node.db.get(&cluster_membership_key()) {
+                decode_membership(&raw)?;
+            }
+        }
+        let id = match (configured, disk) {
+            (Some(want), Some((nid, found))) if want != found => {
+                return Err(StoreError::ClusterMismatch {
+                    node_id: nid,
+                    expected: want,
+                    found,
+                });
+            }
+            (Some(want), _) => want,
+            (None, Some((_, found))) => found,
+            (None, None) => mint_cluster_id(),
+        };
+        self.cluster_id = id;
+        self.persist_cluster_identity()
+    }
+
+    fn persist_cluster_identity(&mut self) -> Result<()> {
+        let id_key = cluster_id_key();
+        let mem_key = cluster_membership_key();
+        let mem_val = encode_membership(&self.ids);
+        let nids: Vec<u64> = self.nodes.keys().copied().collect();
+        for nid in nids {
+            let Some(node) = self.nodes.get_mut(&nid) else {
+                continue;
+            };
+            node.db.put(id_key.as_slice(), self.cluster_id.as_slice())?;
+            node.db.put(mem_key.as_slice(), mem_val.as_slice())?;
+        }
+        Ok(())
+    }
+
+    /// RFC-0013 P1.3: 16-byte cluster identity (stable across reopen).
+    #[must_use]
+    pub fn cluster_id(&self) -> [u8; 16] {
+        self.cluster_id
+    }
+
+    /// Hex form of [`Self::cluster_id`].
+    #[must_use]
+    pub fn cluster_id_hex(&self) -> String {
+        cluster_id_hex(&self.cluster_id)
     }
 
     /// Crash recovery: abort leftover 2PC intents, restore SI meta + next txn id.
@@ -2614,6 +2823,25 @@ impl<E: Env> StoreCluster<E> {
                 "remove_member: cannot empty membership".into(),
             ));
         }
+        // F-found (RFC-0059 P2 campaign, seeds 500308/500908/501044/...):
+        // chained out-of-band removals shrank the voting set until a
+        // commit quorum of the shrunken config was disjoint from a later
+        // election quorum of the restored config — a committed delete was
+        // overwritten and the invariant checker flagged a resurrection.
+        // Out-of-band (non-log-carried) reconfiguration is only sound
+        // while every quorum pair over the largest-ever membership still
+        // intersects: 2·(⌊m/2⌋+1) > high_water. Multi-node rollouts need
+        // log-carried config changes (joint consensus) — refusing here is
+        // the contract until that lands.
+        let high_water = self.membership_high_water.max(self.ids.len());
+        let next = self.ids.len() - 1;
+        if 2 * (next / 2 + 1) <= high_water {
+            return Err(StoreError::Msg(format!(
+                "remove_member: quorum floor — {next} voters cannot keep every quorum pair \
+                 intersecting over the {high_water}-node high-water mark; shrinking further \
+                 needs a log-carried config change"
+            )));
+        }
         self.ids.retain(|&id| id != node_id);
         if let Some(n) = self.nodes.get_mut(&node_id) {
             n.participating = false;
@@ -2639,6 +2867,7 @@ impl<E: Env> StoreCluster<E> {
                 }
             }
         }
+        self.persist_cluster_identity()?;
         Ok(())
     }
 
@@ -2655,6 +2884,7 @@ impl<E: Env> StoreCluster<E> {
         }
         self.ids.push(node_id);
         self.ids.sort_unstable();
+        self.membership_high_water = self.membership_high_water.max(self.ids.len());
         {
             let n = self.nodes.get_mut(&node_id).unwrap();
             n.participating = true;
@@ -2687,6 +2917,7 @@ impl<E: Env> StoreCluster<E> {
                 }
             }
         }
+        self.persist_cluster_identity()?;
         Ok(())
     }
 
@@ -2696,6 +2927,73 @@ impl<E: Env> StoreCluster<E> {
         self.ids.contains(&node_id)
     }
 
+    /// Engine data directory for `node_id` (RFC-0060 BitFlip / at-rest scrub).
+    #[must_use]
+    pub fn node_data_dir(&self, node_id: u64) -> Option<std::path::PathBuf> {
+        self.nodes.get(&node_id).map(|n| n.db.path().to_path_buf())
+    }
+
+    /// Flush that node's Pedra engine (WAL → SST) so BitFlip has a durable page.
+    ///
+    /// # Errors
+    /// Unknown node / flush I/O.
+    pub fn flush_engine_on(&mut self, node_id: u64) -> Result<()> {
+        let n = self
+            .nodes
+            .get_mut(&node_id)
+            .ok_or_else(|| StoreError::Msg(format!("flush_engine: unknown node {node_id}")))?;
+        n.db.flush()?;
+        Ok(())
+    }
+
+    /// Close and reopen the node's engine from `env` (force disk re-read).
+    ///
+    /// On open/CRC failure the node is **removed** so later `get_on` is
+    /// fail-closed (`bad node`) instead of serving a cached memtable.
+    ///
+    /// # Errors
+    /// Unknown node / close / reopen.
+    pub fn reopen_engine_on(&mut self, node_id: u64, env: E) -> Result<()> {
+        let n = self
+            .nodes
+            .remove(&node_id)
+            .ok_or_else(|| StoreError::Msg(format!("reopen_engine: unknown node {node_id}")))?;
+        let path = n.db.path().to_path_buf();
+        let participating = n.participating;
+        n.db.close()?;
+        let mut db = match Db::open_with_env(&path, self.engine_opts, env) {
+            Ok(db) => db,
+            Err(e) => {
+                return Err(StoreError::from(e));
+            }
+        };
+        if let Some(raw) = db.get(&cluster_id_key()) {
+            let found = decode_cluster_id(&raw)?;
+            if found != self.cluster_id {
+                return Err(StoreError::ClusterMismatch {
+                    node_id,
+                    expected: self.cluster_id,
+                    found,
+                });
+            }
+        } else {
+            db.put(cluster_id_key(), self.cluster_id.as_slice())?;
+        }
+        let mut rmap = HashMap::new();
+        for meta in &self.ranges {
+            rmap.insert(meta.id, load_range_peer(&db, meta.id, node_id, &self.ids)?);
+        }
+        self.nodes.insert(
+            node_id,
+            StoreNode {
+                db,
+                ranges: rmap,
+                participating,
+            },
+        );
+        Ok(())
+    }
+
     /// Snapshot index on a node for a range (0 if missing).
     #[must_use]
     pub fn snapshot_index(&self, node_id: u64, range_id: u64) -> u64 {
@@ -2703,6 +3001,18 @@ impl<E: Env> StoreCluster<E> {
             .get(&node_id)
             .and_then(|n| n.ranges.get(&range_id))
             .map(|p| p.snapshot_index)
+            .unwrap_or(0)
+    }
+
+    /// RFC-0059 P2.2: current term on a node for a range (0 if missing) —
+    /// input for the trajectory checker (a live node's term never goes
+    /// backwards, including across install-snapshot catch-up).
+    #[must_use]
+    pub fn term_on(&self, node_id: u64, range_id: u64) -> u64 {
+        self.nodes
+            .get(&node_id)
+            .and_then(|n| n.ranges.get(&range_id))
+            .map(|p| p.term)
             .unwrap_or(0)
     }
 
@@ -2918,6 +3228,8 @@ impl<E: Env> StoreCluster<E> {
                 }
             }
         }
+        let now = self.range_leader(range_id);
+        self.live.notify_leader(range_id, now);
         Ok(lid)
     }
 
@@ -3260,7 +3572,7 @@ impl<E: Env> StoreCluster<E> {
             (t, li, lt)
         };
         // Self-vote; majority of configured membership.
-        self.election_votes.insert((rid, term), 1);
+        self.election_votes.insert((rid, term, cand), 1);
         let maj = (ids.len() as u64) / 2 + 1;
         for &pid in &ids {
             if pid == cand || !self.is_participating(pid) {
@@ -3278,7 +3590,11 @@ impl<E: Env> StoreCluster<E> {
         // Direct mode already applied votes via replies; check majority now.
         // Queued mode waits for handle_inbound of RequestVoteReply.
         if self.rpc_mode == RpcMode::Direct {
-            let votes = self.election_votes.get(&(rid, term)).copied().unwrap_or(1);
+            let votes = self
+                .election_votes
+                .get(&(rid, term, cand))
+                .copied()
+                .unwrap_or(1);
             if votes >= maj {
                 self.try_become_leader(rid, cand, term)?;
             }
@@ -3317,7 +3633,10 @@ impl<E: Env> StoreCluster<E> {
             }
         };
         if promoted {
-            self.election_votes.remove(&(rid, term));
+            self.election_votes.remove(&(rid, term, cand));
+            self.metrics.elections = self.metrics.elections.saturating_add(1);
+            let leader = self.range_leader(rid);
+            self.live.notify_leader(rid, leader);
             self.broadcast_append(rid, cand, None)?;
         }
         Ok(())
@@ -3511,7 +3830,7 @@ impl<E: Env> StoreCluster<E> {
                 // F127: step-down hard state must be durable (or demote without
                 // keeping Candidate/Leader of the old term).
                 let _ = durable_become_follower_if_newer(&mut n.db, range_id, p, term);
-                self.election_votes.remove(&(range_id, p.term));
+                self.election_votes.remove(&(range_id, p.term, cand));
                 return Ok(());
             }
             if p.role != Role::Candidate || p.term != term {
@@ -3519,13 +3838,16 @@ impl<E: Env> StoreCluster<E> {
             }
         }
         if vote_granted {
-            let votes = self.election_votes.entry((range_id, term)).or_insert(1);
+            let votes = self
+                .election_votes
+                .entry((range_id, term, cand))
+                .or_insert(1);
             *votes = votes.saturating_add(1);
         }
         let maj = (self.ids.len() as u64) / 2 + 1;
         let votes = self
             .election_votes
-            .get(&(range_id, term))
+            .get(&(range_id, term, cand))
             .copied()
             .unwrap_or(1);
         if votes >= maj {
@@ -3884,14 +4206,17 @@ impl<E: Env> StoreCluster<E> {
             // never re-applies it — committed data silently vanishes with
             // converged raft bookkeeping. An at-commit snapshot (equal
             // index) still installs (idempotent replacement + persist-fail
-            // rollback are tested paths). Reply success at our commit so
-            // the leader continues with AE from there.
+            // rollback are tested paths). Reply failure with our commit as
+            // a *hint*: the leader may resume AE from it, but must not
+            // count it as a match — those indexes are our branch, not the
+            // leader's (a leader that recorded them as matches committed
+            // its own-term no-op without any real replication, seed 503976).
             if last_included_index < p.commit {
                 let m = p.commit;
                 return Ok(PeerMsg::InstallSnapshotReply {
                     range_id,
                     term: p.term,
-                    success: true,
+                    success: false,
                     match_index: m,
                 });
             }
@@ -4024,9 +4349,21 @@ impl<E: Env> StoreCluster<E> {
                 p.next_index.insert(from, match_index + 1);
                 p.match_index.insert(from, match_index);
             } else {
-                // Retry from snapshot again next time.
+                // Rejected snapshot. A non-zero match_index is the
+                // follower's own commit — a hint for where AE may resume,
+                // never a match (F-found seed 503976: a stale-branch
+                // leader counted two such hints as replication and
+                // committed its own-term no-op with no real follower
+                // acks). Clamp to our log; below the compaction
+                // watermark retry the snapshot next round.
                 let snap = p.snapshot_index;
-                p.next_index.insert(from, snap.max(1));
+                let last = p.last_index();
+                let ni = if match_index > 0 {
+                    (match_index + 1).min(last + 1).max(snap.max(1))
+                } else {
+                    snap.max(1)
+                };
+                p.next_index.insert(from, ni);
             }
         }
         self.try_advance_commit(range_id, leader)?;
@@ -4176,19 +4513,32 @@ impl<E: Env> StoreCluster<E> {
             };
             // P2.3: follower is behind compacted prefix → InstallSnapshot, not AE.
             if leader_snap.0 > 0 && next <= leader_snap.0 {
+                // The export is the leader's **live applied state**, so it is
+                // labeled at the leader's applied point — a committed prefix
+                // (applied ≤ commit) whose exact state is the db we just
+                // serialized. Labeling it at the compaction watermark shipped
+                // state the follower never reached (or lacked) under a stale
+                // label: two leaders sent (4,6) with different contents and a
+                // lagging follower flip-flopped between them (seed 503976).
+                // `applied ≥ snapshot_index` (install/compaction invariants),
+                // so the term always resolves.
+                let (lii, lit) = {
+                    let p = self.nodes.get(&leader).unwrap().ranges.get(&rid).unwrap();
+                    (p.applied, p.term_at(p.applied))
+                };
                 let kv_pairs = self.export_range_kv(leader, rid)?;
                 let msg = PeerMsg::InstallSnapshot {
                     range_id: rid,
                     term,
                     leader_id: leader,
-                    last_included_index: leader_snap.0,
-                    last_included_term: leader_snap.1,
+                    last_included_index: lii,
+                    last_included_term: lit,
                     kv_pairs,
                 };
                 if let Some(n) = self.nodes.get_mut(&leader) {
                     if let Some(p) = n.ranges.get_mut(&rid) {
                         let st = p.sent_through.entry(pid).or_insert(0);
-                        *st = (*st).max(leader_snap.0);
+                        *st = (*st).max(lii);
                     }
                 }
                 self.send_peer_rpc(leader, pid, msg)?;
@@ -4470,7 +4820,7 @@ impl<E: Env> StoreCluster<E> {
         if escaped {
             // Entry (and anything after it still in flight) keeps its
             // quorum fate — its OCC notes must survive to match.
-            return Ok(()) ;
+            return Ok(());
         }
         let ids = self.ids.clone();
         for &nid in &ids {
@@ -4780,7 +5130,11 @@ impl<E: Env> StoreCluster<E> {
             .local_node_id()
             .map(|id| id.to_string())
             .unwrap_or_else(|| "multi".into());
-        let mut parts = vec![format!("local={local}"), format!("members={:?}", self.ids)];
+        let mut parts = vec![
+            format!("local={local}"),
+            format!("cluster={}", self.cluster_id_hex()),
+            format!("members={:?}", self.ids),
+        ];
         for r in &self.ranges {
             let lead = self
                 .range_leader(r.id)
@@ -5066,7 +5420,7 @@ impl<E: Env> StoreCluster<E> {
         }
         // Version notes staged inside broadcast_append; flushed on majority commit
         // (Direct Ok or later via finish_queued_propose).
-        self.broadcast_append(
+        let r = self.broadcast_append(
             rid,
             leader,
             Some(RangeEntry::Put {
@@ -5074,8 +5428,8 @@ impl<E: Env> StoreCluster<E> {
                 value: value.clone(),
                 si_gen: 0, // assigned in with_si_gen at propose
             }),
-        )?;
-        Ok(())
+        );
+        self.record_propose_result(r)
     }
 
     /// Atomically put multiple key/value pairs in **one** raft log entry.
@@ -5129,15 +5483,15 @@ impl<E: Env> StoreCluster<E> {
                 }
             }
         }
-        self.broadcast_append(
+        let r = self.broadcast_append(
             rid,
             leader,
             Some(RangeEntry::Batch {
                 pairs: owned.clone(),
                 si_gen: 0,
             }),
-        )?;
-        Ok(())
+        );
+        self.record_propose_result(r)
     }
 
     /// Stage a put for later [`Self::flush_writes`] (RFC-0025 P1.1 group-commit style).
@@ -6176,6 +6530,41 @@ impl<E: Env> StoreCluster<E> {
         self.watch.unwatch(id);
     }
 
+    /// RFC-0013 P1.2: subscribe to range leadership. Best-effort stream —
+    /// **not fencing**. Truth remains Raft/DCS (`range_leader` / `get_strong`).
+    /// First event is a snapshot of the current unique leader (if any).
+    pub fn subscribe_leadership(
+        &mut self,
+        range_id: u64,
+    ) -> (u64, std::sync::mpsc::Receiver<LeadershipEvent>) {
+        let (id, rx) = self.live.subscribe(range_id);
+        let leader = self.range_leader(range_id);
+        self.live.push_snapshot(id, range_id, leader);
+        (id, rx)
+    }
+
+    /// Drop a Live leadership subscription.
+    pub fn unwatch_leadership(&mut self, id: u64) {
+        self.live.unwatch(id);
+    }
+
+    /// RFC-0013 P1.5: commit / NotCommitted / election counters.
+    #[must_use]
+    pub fn metrics(&self) -> StoreMetrics {
+        self.metrics
+    }
+
+    fn record_propose_result(&mut self, r: Result<()>) -> Result<()> {
+        match &r {
+            Ok(()) => self.metrics.commits_ok = self.metrics.commits_ok.saturating_add(1),
+            Err(StoreError::NotCommitted { .. }) => {
+                self.metrics.not_committed = self.metrics.not_committed.saturating_add(1);
+            }
+            _ => {}
+        }
+        r
+    }
+
     /// Shared watch hub (layers / Scylla-need CP helpers).
     #[must_use]
     pub fn watch_hub(&self) -> &WatchHub {
@@ -6245,11 +6634,7 @@ impl<E: Env> StoreCluster<E> {
     /// writes it applied locally), independent of reader election.
     /// Invariant checkers use the union across participating nodes as
     /// ground truth; a single reader can lag under faults.
-    pub fn changelog_on(
-        &self,
-        node_id: u64,
-        from_seq: u64,
-    ) -> Vec<pedradb_core::ChangeEntry> {
+    pub fn changelog_on(&self, node_id: u64, from_seq: u64) -> Vec<pedradb_core::ChangeEntry> {
         let Some(n) = self.nodes.get(&node_id) else {
             return Vec::new();
         };
@@ -6684,6 +7069,115 @@ mod tests {
         d
     }
 
+    fn copy_tree(src: &std::path::Path, dst: &std::path::Path) {
+        std::fs::create_dir_all(dst).unwrap();
+        for e in std::fs::read_dir(src).unwrap() {
+            let e = e.unwrap();
+            let to = dst.join(e.file_name());
+            if e.file_type().unwrap().is_dir() {
+                copy_tree(&e.path(), &to);
+            } else {
+                std::fs::copy(e.path(), to).unwrap();
+            }
+        }
+    }
+
+    /// RFC-0013 P1.3: cluster id is minted, persisted, and stable on reopen.
+    #[test]
+    fn cluster_id_survives_reopen() {
+        let dir = temp();
+        let id = {
+            let c = StoreCluster::open(&dir, 3, 1).unwrap();
+            let id = c.cluster_id();
+            assert_ne!(id, [0u8; 16]);
+            let raw = c.nodes[&1].db.get(&cluster_id_key()).expect("id key");
+            assert_eq!(raw.as_ref(), id.as_slice());
+            let mem = c.nodes[&1]
+                .db
+                .get(&cluster_membership_key())
+                .expect("membership key");
+            assert_eq!(decode_membership(&mem).unwrap(), vec![1, 2, 3]);
+            drop(c);
+            id
+        };
+        let c = StoreCluster::open(&dir, 3, 1).unwrap();
+        assert_eq!(c.cluster_id(), id);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0013 P1.3: configured id pins empty dirs; a different pin refuses.
+    #[test]
+    fn cluster_id_configured_pin_and_mismatch() {
+        let dir = temp();
+        let pin = [0xC1, 0xD0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x13];
+        {
+            let c = StoreCluster::open_with_options(
+                &dir,
+                3,
+                1,
+                StoreOpenOptions::default().with_cluster_id(pin),
+            )
+            .unwrap();
+            assert_eq!(c.cluster_id(), pin);
+            drop(c);
+        }
+        let other = [0xFF; 16];
+        let err = match StoreCluster::open_with_options(
+            &dir,
+            3,
+            1,
+            StoreOpenOptions::default().with_cluster_id(other),
+        ) {
+            Err(e) => e,
+            Ok(_) => panic!("expected ClusterMismatch, open succeeded"),
+        };
+        assert!(
+            matches!(err, StoreError::ClusterMismatch { .. }),
+            "got {err:?}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0013 P1.3: copying a node dir from cluster A into cluster B is
+    /// refuse-closed (no silent merge of two Pedra trees).
+    #[test]
+    fn cluster_id_refuses_cross_cluster_node_dir() {
+        let dir_a = temp();
+        let dir_b = temp();
+        {
+            let _a = StoreCluster::open(&dir_a, 3, 1).unwrap();
+            let _b = StoreCluster::open(&dir_b, 3, 1).unwrap();
+        }
+        let src = dir_a.join("store-node-2");
+        let dst = dir_b.join("store-node-2");
+        let _ = std::fs::remove_dir_all(&dst);
+        copy_tree(&src, &dst);
+        let err = match StoreCluster::open(&dir_b, 3, 1) {
+            Err(e) => e,
+            Ok(_) => panic!("expected ClusterMismatch, silent merge succeeded"),
+        };
+        assert!(
+            matches!(err, StoreError::ClusterMismatch { .. }),
+            "got {err:?}"
+        );
+        let _ = std::fs::remove_dir_all(&dir_a);
+        let _ = std::fs::remove_dir_all(&dir_b);
+    }
+
+    /// RFC-0013 P1.3: user puts cannot stamp cluster identity.
+    #[test]
+    fn cluster_id_key_is_reserved() {
+        let dir = temp();
+        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        c.elect_all(80).unwrap();
+        let err = c.put(cluster_id_key(), b"hijack").unwrap_err();
+        assert!(
+            matches!(err, StoreError::Msg(ref m) if m.contains("reserved")),
+            "got {err:?}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// F103: `m/` || suffix made `m/a` a prefix of `m/ab` (F96 fixed EtcdNeedFace only).
     #[test]
     fn meta_key_suffix_is_not_prefix_of_sibling() {
@@ -6969,7 +7463,10 @@ mod tests {
         // blob decodes to the PeerMsg Direct dispatches and re-encodes equal.
         b.tick().unwrap();
         let drained = b.drain_outbound();
-        assert!(!drained.is_empty(), "heartbeats should be queued after tick");
+        assert!(
+            !drained.is_empty(),
+            "heartbeats should be queued after tick"
+        );
         for (_from, _to, bytes) in drained {
             let msg = PeerMsg::decode(&bytes).unwrap();
             assert_eq!(msg.encode(), bytes, "PeerMsg codec must be byte-stable");
@@ -9323,6 +9820,31 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// F-found (RFC-0059 P2 campaign, seeds 500308 et al.): quorum floor
+    /// on chained out-of-band removals. From 7 nodes a single removal is
+    /// allowed (any two quorums over the 7-node universe still
+    /// intersect); shrinking further is refused until a re-add restores
+    /// the high-water mark — a smaller config could commit with a quorum
+    /// disjoint from a later restored-config election and lose
+    /// acknowledged writes.
+    #[test]
+    fn remove_member_quorum_floor_refuses_disjoint_shrink() {
+        let dir = temp();
+        let mut c = StoreCluster::open(&dir, 7, 1).unwrap();
+        c.elect_all(80).unwrap();
+        assert!(c.remove_member(7).is_ok(), "single removal must pass");
+        assert!(
+            c.remove_member(6).is_err(),
+            "second chained removal must hit the quorum floor"
+        );
+        assert!(c.add_member(7).is_ok());
+        assert!(
+            c.remove_member(6).is_ok(),
+            "after re-add the high-water rule allows one out again"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// F148: try_become_leader must not leave Leader + non-durable Noop on log fail.
     #[test]
     fn try_become_leader_log_persist_fail_stays_candidate() {
@@ -9897,6 +10419,211 @@ mod tests {
             "install-snapshot merge left stale key on follower: {:?}",
             c.get_on(3, b"stale-k").unwrap()
         );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// F-found (RFC-0059 swarm, seed 503976): a follower rejecting a
+    /// snapshot older than its own commit used to reply success with its
+    /// commit, and the leader recorded that as a replication match of its
+    /// own log — a stale-branch leader then satisfied the commit quorum
+    /// with those phantom matches and "committed" its own-term no-op with
+    /// zero real follower acks. The rejection must be failure + hint: the
+    /// leader may resume AE at the hint, never count it as a match.
+    #[test]
+    fn install_snapshot_stale_reject_is_hint_not_match() {
+        let dir = temp();
+        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        c.elect_all(80).unwrap();
+        for i in 0..4u8 {
+            c.put([b'a', i], [b'v', i]).unwrap();
+        }
+        let rid = 1;
+        let leader = c.range_leader(rid).unwrap();
+        let commit3 = c.commit_index(3, rid);
+        assert!(commit3 >= 3, "follower must be ahead of the stale offer");
+        let term = c.term_on(leader, rid);
+        let reply = c
+            .on_install_snapshot(3, rid, term, leader, 1, 1, vec![])
+            .unwrap();
+        let PeerMsg::InstallSnapshotReply {
+            success,
+            match_index,
+            ..
+        } = reply
+        else {
+            panic!("not a snapshot reply");
+        };
+        assert!(!success, "stale snapshot must be rejected, not acked");
+        assert_eq!(
+            match_index, commit3,
+            "rejection carries the follower commit as a hint"
+        );
+        let before = c
+            .nodes
+            .get(&leader)
+            .unwrap()
+            .ranges
+            .get(&rid)
+            .unwrap()
+            .match_index
+            .get(&3)
+            .copied()
+            .unwrap_or(0);
+        c.on_install_snapshot_reply(leader, 3, rid, term, success, match_index)
+            .unwrap();
+        let n = c.nodes.get(&leader).unwrap();
+        let p = n.ranges.get(&rid).unwrap();
+        assert_eq!(
+            p.match_index.get(&3).copied().unwrap_or(0),
+            before,
+            "a rejected snapshot must not advance match_index"
+        );
+        let last = p.last_index();
+        let snap = p.snapshot_index;
+        assert_eq!(
+            p.next_index.get(&3).copied().unwrap_or(0),
+            (match_index + 1).min(last + 1).max(snap.max(1)),
+            "AE must resume at the hint clamped into our log"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// F-found (RFC-0059 swarm, seed 503976): the install-snapshot export is
+    /// the leader's **live applied state**, but the message was labeled at the
+    /// compaction watermark — two leaders labeled (4,6) with different
+    /// contents and a lagging follower flip-flopped between them (materialized
+    /// keys from one, cleared them for the other). The label must be the
+    /// leader's applied point, which is exactly what the export reflects.
+    #[test]
+    fn install_snapshot_label_is_leader_applied_point() {
+        let dir = temp();
+        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        c.elect_all(80).unwrap();
+        for i in 0..6u8 {
+            c.put([b'b', i], [b'v', i]).unwrap();
+        }
+        let rid = 1;
+        let leader = c.range_leader(rid).unwrap();
+        let (applied, snap, expected_term) = {
+            // Compact watermark behind live applied, with the applied
+            // entry still in the log so `term_at` resolves. Lowering the
+            // watermark below a *real* compacted prefix would make
+            // `term_at(applied)` miss (the production compact path never
+            // does that).
+            let n = c.nodes.get_mut(&leader).unwrap();
+            let p = n.ranges.get_mut(&rid).unwrap();
+            let applied = p.applied;
+            assert!(applied >= 1);
+            let idx = p.last_index() + 1;
+            let term = p.term.max(1);
+            n.db.put(b"bx", b"v").unwrap();
+            p.log.push(LogRec {
+                index: idx,
+                term,
+                entry: RangeEntry::Put {
+                    key: b"bx".to_vec(),
+                    value: b"v".to_vec(),
+                    si_gen: 0,
+                },
+            });
+            p.commit = idx;
+            p.applied = idx;
+            p.snapshot_index = 1;
+            p.snapshot_term = p.term_at(1).max(1);
+            p.next_index.insert(3, 1);
+            p.match_index.insert(3, 0);
+            (p.applied, p.snapshot_index, term)
+        };
+        assert!(
+            applied > snap,
+            "test must distinguish applied={applied} from watermark={snap}"
+        );
+        c.set_rpc_mode(RpcMode::Queued);
+        c.broadcast_append(rid, leader, None).unwrap();
+        let msgs = c.drain_outbound();
+        let mut found = false;
+        for (from, to, bytes) in msgs {
+            if let Ok(PeerMsg::InstallSnapshot {
+                last_included_index,
+                last_included_term,
+                kv_pairs,
+                ..
+            }) = PeerMsg::decode(&bytes)
+            {
+                assert_eq!((from, to), (leader, 3));
+                found = true;
+                assert_eq!(
+                    last_included_index, applied,
+                    "label must be the leader's applied point, not the compaction watermark {snap}"
+                );
+                assert_ne!(last_included_index, snap);
+                assert_eq!(last_included_term, expected_term);
+                assert!(
+                    kv_pairs.iter().any(|(k, _)| k == b"bx"),
+                    "export carries the applied user state"
+                );
+            }
+        }
+        assert!(found, "expected an InstallSnapshot for lagging peer 3");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// F-found (RFC-0059 swarm, seed 503976): the election tally was keyed by
+    /// (range, term) only, so two rivals that timed out into the same term
+    /// pooled their grants — one won with votes cast for the other. Each
+    /// candidate must tally only its own grants.
+    #[test]
+    fn same_term_rival_candidates_do_not_pool_votes() {
+        let dir = temp();
+        let mut c = StoreCluster::open(&dir, 5, 1).unwrap();
+        c.elect_all(200).unwrap();
+        c.put(b"r", b"1").unwrap();
+        let rid = 1;
+        c.set_rpc_mode(RpcMode::Queued);
+        // Land both rivals on the same term: start_election always does
+        // `term += 1`, so first reset every peer onto a shared floor.
+        let floor = c.term_on(1, rid).min(c.term_on(2, rid));
+        for nid in c.ids.clone() {
+            let p = c.nodes.get_mut(&nid).unwrap().ranges.get_mut(&rid).unwrap();
+            p.role = Role::Follower;
+            p.leader_id = None;
+            p.voted_for = None;
+            p.term = floor;
+        }
+        c.start_election(rid, 2).unwrap();
+        c.start_election(rid, 1).unwrap();
+        let term = c.term_on(1, rid);
+        assert_eq!(term, c.term_on(2, rid), "rivals must share a term");
+        let outbound = c.drain_outbound();
+        let mut delivered = 0;
+        for (from, to, bytes) in outbound {
+            let is_rv = matches!(
+                PeerMsg::decode(&bytes).ok(),
+                Some(PeerMsg::RequestVote { .. })
+            );
+            if is_rv && ((from, to) == (2, 3) || (from, to) == (1, 4)) {
+                c.handle_inbound(from, to, &bytes).unwrap();
+                delivered += 1;
+            }
+        }
+        assert_eq!(delivered, 2, "one grant routed to each rival");
+        let replies = c.drain_outbound();
+        for (from, to, bytes) in replies {
+            c.handle_inbound(from, to, &bytes).unwrap();
+        }
+        // Each rival tallied self + one grant = 2 of majority 3. Under the
+        // old (range, term) key those two grants pooled onto one counter
+        // and someone hit majority; per-candidate keys keep them apart.
+        assert_eq!(c.election_votes.get(&(rid, term, 1)).copied(), Some(2));
+        assert_eq!(c.election_votes.get(&(rid, term, 2)).copied(), Some(2));
+        for cand in [1u64, 2] {
+            let p = c.nodes.get(&cand).unwrap().ranges.get(&rid).unwrap();
+            assert_ne!(
+                p.role,
+                Role::Leader,
+                "candidate {cand} won with a grant cast for its same-term rival"
+            );
+        }
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -10528,6 +11255,30 @@ mod tests {
         assert!(
             err.is_err(),
             "short intent val fallback must fail closed, not SI-delete: {err:?}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0013 P1.6 / F7: an expired DCS TTL stays dead across process restart
+    /// (`now_ms` recovered; unknown/expired is fail-safe, not reanimated).
+    #[test]
+    fn dcs_lease_fail_safe_on_reopen() {
+        let dir = temp();
+        let key = meta_key(b"ttl-lock");
+        {
+            let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+            c.set_ms_per_tick(0);
+            c.elect_all(80).unwrap();
+            c.dcs_create_ttl(&key, b"holder-a", 50).unwrap();
+            assert!(c.dcs_get(&key).unwrap().is_some());
+            c.advance_now_ms(50);
+            assert!(c.dcs_get(&key).unwrap().is_none());
+        }
+        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        c.elect_all(40).unwrap();
+        assert!(
+            c.dcs_get(&key).unwrap().is_none(),
+            "expired lease must stay dead after reopen (F7 fail-safe)"
         );
         let _ = std::fs::remove_dir_all(&dir);
     }

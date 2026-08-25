@@ -1,6 +1,6 @@
 # RFC-0057: Intensidade máxima — DST paralelo em escala, caixas no CI e formalização do que falta
 
-**Status:** draft (P0 done; P1.1–P1.3 done — P1.4 é 0052 P2)  
+**Status:** draft (P0+P1+P2 done; P1.4 = 0052 P2 reference, not a guest)  
 **Updated:** 2026-08-24
 
 ## Em uma frase
@@ -106,21 +106,41 @@ formalizável tem kernel provado, e **o residual é publicado, não escondido**:
   o job Ubuntu é a autoridade; nativamente o alvo é o teste de replay/cobertura verde)  
 - [x] **P1.3** ASan: rodar 0052 P1.1 (capi + posix, Ubuntu, fail-closed) — status:
   `done` (supply-chain `capi-asan-harness` pré-existente, `ASAN_REQUIRED=1`)  
-- [ ] **P1.4** TCG: fica como 0052 P2 (guest com imagem, `trace_hash` nativo vs guest,
-  **proibido** wall-clock) — este RFC só referencia; não antecipa — status: `todo`
+- [x] **P1.4** TCG: fica como 0052 P2 (guest com imagem, `trace_hash` nativo vs guest,
+  **proibido** wall-clock) — este RFC só referencia; não antecipa — status: `done`
+  (cross-ref: RFC-0052 P2.1–P2.3 shipped — `tcg_world_smoke.sh` +
+  `tcg_world_smoke_detio.sh`. This RFC does not reimplement the guest.)
 
 ### P2 — formalização do que falta (fecha 0056 P2.1)
 
-- [ ] **P2.1** Kernel Verus `group_commit`: estados assign→validate→apply→fence com o
+- [x] **P2.1** Kernel Verus `group_commit`: estados assign→validate→apply→fence com o
   **lema de atomicidade de grupo**: membros do mesmo grupo são simultâneos (nenhuma
   ordem de serialização entre eles) e commit cross-group com `w ∈ (snap, seq)` ⇒
   validação detecta (first-committer-wins) — a semântica do 0051 P1.3 como teorema —
-  status: `todo`  
-- [ ] **P2.2** Extrato Aeneas→Lean do kernel (`GroupCommit.lean`) + theorem-link no
-  CI (`lean_wal_apply_reopen` ganha o novo alvo) — status: `todo`  
-- [ ] **P2.3** Inventário final formalizável-vs-residual: tabela kernel×glue extendida
-  (group-commit/OCC dentro; io_uring ring e OS scheduler fora, com motivo) — status: `todo`  
-- [ ] **P2.4** Freeze: novos kernels no `pedra_formal --ci` (fail se drift) — status: `todo`
+  status: `done` (`crates/pedradb-core/verus/group_commit.rs` 14 verified/0 errors via
+  `scripts/verus_group_commit.sh`: `group_outcome_is_solo_outcome`,
+  `fence_covers_every_member`, `fast_path_never_conflicts`,
+  `serialized_mutant_diverges_on_intra_group_write`; kernel de produção
+  `src/group_commit_kernel.rs` chamado por `validate_occ_batch`/`lone_commit`/
+  `GroupInFlight::max_appended_seq`; mutante serializado plantado como teeth)
+- [x] **P2.2** Extrato Aeneas→Lean do kernel (`GroupCommit.lean`) + theorem-link no
+  CI (`lean_wal_apply_reopen` ganha o novo alvo) — status: `done`
+  (`formal/aeneas/lean/GroupCommitKernel.lean` extraído do kernel de produção via
+  `scripts/aeneas_group_commit.sh` (stamp sha256 `SOURCE.group_commit`);
+  `GroupCommit.lean` com forma fechada universal + exemplos concretos pontuados pela
+  ponte `LawfulBEq.eq_of_beq (by native_decide)` (loops extraídos são
+  `partial_fixpoint`); `scripts/lean_vote.sh` builda `GroupCommit`; CI formal
+  confirma "theorems (no sorry)")
+- [x] **P2.3** Inventário final formalizável-vs-residual: tabela kernel×glue extendida
+  (group-commit/OCC dentro; io_uring ring e OS scheduler fora, com motivo) — status:
+  `done` (`docs/formal/coverage-map.md`: 46 pares do catálogo com callers lintados;
+  36 kernels/6.285 LOC vs 75.662 LOC src das 11 crates formalizadas; tabela de
+  residuais com dono para cada linha — field/hardware, o único sem dono, ganhou o
+  draft [RFC-0060](0060-field-and-hardware-residuals.md))
+- [x] **P2.4** Freeze: novos kernels no `pedra_formal --ci` (fail se drift) — status:
+  `done` (catalog: pares `group_commit`/`group_fence` com twins `close` e callers
+  `concurrent.rs`/`db.rs`; extract checks RFC-0056 P1.2 com stamp + teoremas;
+  `pedra_formal.py --ci` verde: 223 ok / 0 fail)
 
 ---
 
@@ -135,11 +155,11 @@ formalizável tem kernel provado, e **o residual é publicado, não escondido**:
 | P1.1 | p1 | Miri smoke no CI (0052 P0.2) | done | supply-chain `miri-dst-smoke` (`scripts/miri_dst_smoke.sh`, `MIRI_REQUIRED=1`) | 2026-08-24 |
 | P1.2 | p1 | TSan job + alvo pct_concurrent (0052 P1.2) | done | `race_job.sh` 2 alvos: `concurrent_race_stress` + `pct_runner_without_pct_replays_and_covers_engine` (sem PCT no processo; XOR 0052) | 2026-08-24 |
 | P1.3 | p1 | ASan job (0052 P1.1) | done | `capi-asan-harness` (job pré-existente, agora slice requerido) | 2026-08-24 |
-| P1.4 | p1 | TCG = 0052 P2 (referência) | todo | — | 2026-08-23 |
-| P2.1 | p2 | Kernel Verus group-commit + lema | todo | — | 2026-08-23 |
-| P2.2 | p2 | Lean `GroupCommit` theorem-link | todo | — | 2026-08-23 |
-| P2.3 | p2 | Inventário formalizável-vs-residual final | todo | — | 2026-08-23 |
-| P2.4 | p2 | Freeze dos novos kernels | todo | — | 2026-08-23 |
+| P1.4 | p1 | TCG = 0052 P2 (referência) | done | 0052 P2.1–P2.3 `tcg_world_smoke*.sh` | 2026-08-24 |
+| P2.1 | p2 | Kernel Verus group-commit + lema | done | `verus/group_commit.rs` (14/0) + kernel prod `group_commit_kernel.rs` wired em `concurrent.rs`/`db.rs` | 2026-08-24 |
+| P2.2 | p2 | Lean `GroupCommit` theorem-link | done | `GroupCommit.lean` + `lean_vote.sh` alvo + CI "no sorry" | 2026-08-24 |
+| P2.3 | p2 | Inventário formalizável-vs-residual final | done | `docs/formal/coverage-map.md` + RFC-0060 draft para field/hardware | 2026-08-24 |
+| P2.4 | p2 | Freeze dos novos kernels | done | catalog `group_commit`/`group_fence` + extract checks; `--ci` 223 ok / 0 fail | 2026-08-24 |
 
 ---
 

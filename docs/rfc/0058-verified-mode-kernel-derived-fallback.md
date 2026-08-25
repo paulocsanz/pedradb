@@ -1,17 +1,19 @@
 # RFC-0058: Modo verificado — fallback seguro derivado dos kernels
 
-**Status:** draft (P0+P1 done)  
+**Status:** P0+P1+P2 done  
 **Updated:** 2026-08-24
 
 ## Em uma frase
 
 Um perfil de produto **verificado**: desliga o que não tem kernel provado
-(io_uring ring, group-commit até o kernel do 0057 P2.1 cair), liga o que tem
-(WAL sync, recovery provado, decisões provadas), e o caminho resultante é a
+(io_uring ring — gate documentado, P2.2), liga o que tem (WAL sync, recovery
+provado, decisões provadas — e, desde o P2.1, o group-commit pelo kernel
+provado do 0057 P2.1), e o caminho resultante é a
 **composição declarada dos kernels** — com teste de derivação (mesmo oráculo
 DST, mesma semântica) e residual publicado. O fallback deixa de ser um
 acidente de plataforma (`PosixFallback` quando o kernel rejeita o ring) e
-vira o **default declarado e seguro**.
+vira o **default declarado e seguro** — e uma linha de configuração
+(`PEDRA_VERIFIED=1`, P2.3).
 
 ## A tese e os seus limites (honestidade primeiro)
 
@@ -172,15 +174,36 @@ vira o **default declarado e seguro**.
 
 ### P2 — reativação por teorema
 
-- [ ] **P2.1** Group-commit no modo verificado quando 0057 P2.1 (lema de
+- [x] **P2.1** Group-commit no modo verificado quando 0057 P2.1 (lema de
    atomicidade + first-committer-wins) estiver `done`; `profile_report()`
-   passa a listar o kernel do grupo — status: `todo` (gated)  
-- [ ] **P2.2** Ring io_uring: permanece **fora** do modo verificado até
+   passa a listar o kernel do grupo — status: `done` (kernel provado em
+   `group_commit_kernel.rs`/`verus/group_commit.rs`; `pin_verified()` = merge
+   decidido pelo kernel provado + catch-up window 0 + bypass async; report:
+   `write_group_merge` ON (kernel `group_commit`) + `group_fence` ON;
+   `PROFILE_VERSION = "verified-v2"`; bateria re-escrita para exigir merge
+   ativo: `verified_profile_forces_safe_composition` (`queued > 0`,
+   `batches < submits`), `pct_verified_merges_under_preemption`,
+   `verified_vs_full_same_oracles` com não-vacuidade `queued_total > 0` nos
+   dois modos; bypass async continua provado all-async
+   (`verified_async_concurrent_never_merges`))  
+- [x] **P2.2** Ring io_uring: permanece **fora** do modo verificado até
    existir modelo de ring provável (ou para sempre, documentado); o modo
    completo continua a usá-lo em Linux com o `PosixFallback` de hoje —
-   status: `todo` (doc/gate)  
-- [ ] **P2.3** Binário/flag de produto: `PEDRA_VERIFIED=1` no CLI/store open
-   como uma linha de configuração com contrato publicado — status: `todo`
+   status: `done` (gate documentado em três lugares amarrados: row `off!`
+   `io_uring_ring` do `profile_report()` ("no proven ring model — cqe_kernel
+   twin blocked; verified constructors pin StdEnv; full mode keeps
+   PosixFallback"), doc do `OpenOptions::verified` (instrui abrir com
+   `StdEnv`, como `PEDRA_VERIFIED=1` faz), e este slice; sem promessa de
+   prova do ring — non-goal vivo)
+- [x] **P2.3** Binário/flag de produto: `PEDRA_VERIFIED=1` no CLI/store open
+   como uma linha de configuração com contrato publicado — status: `done`
+   (`pedradb-cli`: `verified_requested()` + `LiveDb` (Full/Verified); todo
+   comando live-open vira `Db<StdEnv>` + `OpenOptions::verified()` com uma
+   env var — demo/backup/ship-wal/stats/compact/reclaim/maintain/compact-vlog/
+   compact-blob/blob-gc; banner no stderr com `PROFILE_VERSION`; contrato no
+   usage (`pedra` sem args) e no doc do `OpenOptions::verified`; testes
+   `verified_flag_pins_the_profile_and_survives_reopen` (banner + TX
+   all-or-nothing sob o perfil + reopen) e `default_mode_has_no_verified_banner`)
 
 ---
 
@@ -195,9 +218,9 @@ vira o **default declarado e seguro**.
 | P1.2 | p1 | Piso 2× medido no modo verificado | done (medido; 2× refutado no perfil — reads ≥5×, writes ~0,001×; tabela acima) | `findings/2026-08-24-verified-parity/` | 2026-08-24 |
 | P1.3 | p1 | Derivação de semântica (oráculos idênticos) | done | `verified_vs_full_same_oracles` (64 seeds × 2 políticas × 2 modos; merge full não-vacuo) | 2026-08-24 |
 | P1.4 | p1 | CI `verified-mode` | done | job `verified-mode` (synthetic-field.yml) + assert CI do flip 0054 corrigido | 2026-08-24 |
-| P2.1 | p2 | Group-commit reativado por teorema | todo (gated 0057 P2.1) | — | 2026-08-23 |
-| P2.2 | p2 | Ring fora do modo (gate documentado) | todo | — | 2026-08-23 |
-| P2.3 | p2 | `PEDRA_VERIFIED=1` como contrato de produto | todo | — | 2026-08-23 |
+| P2.1 | p2 | Group-commit reativado por teorema | done | `group_commit_kernel.rs` (Verus 14/0 + Lean no-sorry) + `verified-v2` + bateria com merge ativo | 2026-08-24 |
+| P2.2 | p2 | Ring fora do modo (gate documentado) | done | `profile_report` row off + doc `OpenOptions::verified` + este slice | 2026-08-24 |
+| P2.3 | p2 | `PEDRA_VERIFIED=1` como contrato de produto | done | `pedradb-cli` `LiveDb` + banner + `verified_flag_*` (2/2) | 2026-08-24 |
 
 ---
 

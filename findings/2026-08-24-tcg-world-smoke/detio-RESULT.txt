@@ -1,0 +1,5 @@
+C2.3=tcg_and_detio
+seed=42 hash=61f8a02125b3c69e (native = TCG+det_io)
+det_io_drop_lines=215
+STALL_SO=/libdet_io.so
+compare_wall_clock=forbidden

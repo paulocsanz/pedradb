@@ -7,7 +7,7 @@
 //!            rocksdb (needs --features real; real RocksDB via the rocksdb crate)
 //!   suites: ROCKS_PARITY_SUITE (default "ycsb,deps"; csv; "all" = every
 //!            suite). Opt-in: qs, kvrocks, myrocks, surreal, nebula,
-//!            streaming, ceph, solana, arango, venice, oxigraph (RFC-0043).
+//!            streaming, ceph, solana, arango, venice, oxigraph, rocksapi (RFC-0043).
 //!
 //! Env: ROCKS_YCSB_RECORDS/OPS/PAYLOAD/DIST (uniform|zipfian), ROCKS_DEPS_BATCH
 //! (ops per apply commit), ROCKS_PARITY_SYNC (rocksdb engine only; **0 = default
@@ -71,6 +71,9 @@ fn main() {
         }
         if suites_enabled("oxigraph") {
             v.push("oxigraph");
+        }
+        if suites_enabled("rocksapi") {
+            v.push("rocksapi");
         }
         if v.is_empty() {
             "ycsb,deps".to_string()
@@ -209,6 +212,9 @@ fn run_and_report<E: Engine + Sync>(e: &E, cfg: &Cfg, suites: &str, out: &Path) 
     if suites_enabled("oxigraph") {
         benches.extend(r.run_oxigraph(e));
     }
+    if suites_enabled("rocksapi") {
+        benches.extend(r.run_rocksapi(e));
+    }
     if suites_enabled("surreal") {
         eprintln!(
             "[rocks-parity] engine {} cannot run surreal (need OccEngine / OptimisticTransactionDB)",
@@ -295,6 +301,9 @@ fn run_and_report_occ<E: rocksdb_parity_bench::OccEngine + Sync>(
     }
     if suites_enabled("oxigraph") {
         benches.extend(r.run_oxigraph(e));
+    }
+    if suites_enabled("rocksapi") {
+        benches.extend(r.run_rocksapi(e));
     }
     if suites_enabled("surreal") {
         benches.extend(r.run_surreal(e));

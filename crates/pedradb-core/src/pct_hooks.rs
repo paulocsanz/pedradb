@@ -206,8 +206,7 @@ impl Turnstile {
         if std::env::var_os("PCT_TRACE").is_some() {
             eprintln!(
                 "TRACE grant task={task} turn_was={:?} ready={:?}",
-                g.turn,
-                g.ready
+                g.turn, g.ready
             );
         }
         let idx = g
@@ -224,7 +223,10 @@ impl Turnstile {
 
     /// Workers finished so far.
     pub fn finished(&self) -> usize {
-        self.inner.lock().expect("pct turnstile mutex poisoned").finished
+        self.inner
+            .lock()
+            .expect("pct turnstile mutex poisoned")
+            .finished
     }
 
     /// Total workers.

@@ -13,11 +13,15 @@
 //! Composition (file level, [`OpenOptions::verified`]):
 //! `sync=true`, `wal_full_fsync=true` (strongest data class),
 //! `wal_recovery=FailClosed`. Composition (group level,
-//! [`ConcurrentDb::pin_verified`]): **lone-commit-only** — every commit is
-//! a single-writer critical section; the leader/member merge stays off
-//! until the group-commit kernel lands (RFC-0057 P2.1 / RFC-0058 P2.1).
-//! Product constructors pin `StdEnv` — the `io_uring` ring is out of the
-//! mode (P2.2); the full mode keeps its `PosixFallback`.
+//! [`ConcurrentDb::pin_verified`]), reactivated by RFC-0058 P2.1 with the
+//! proved group-commit kernel (RFC-0057 P2.1): the leader/member merge
+//! runs (`group_commit_kernel` decides first-committer-wins and group
+//! atomicity; `fence_publish_seq` publishes the group at one watermark),
+//! the catch-up window is pinned to 0 (merging by natural queuing, never
+//! by a delay window), and async writers keep the un-merged bypass (no
+//! leader dependency). Product constructors pin `StdEnv` — the `io_uring`
+//! ring is out of the mode (P2.2); the full mode keeps its
+//! `PosixFallback`.
 //!
 //! [`profile_report`] is the machine-checked tie to the catalog: the set
 //! of ON kernels must equal the catalog pair ids exactly. Adding a kernel
@@ -32,7 +36,8 @@ use crate::Result;
 use std::path::Path;
 
 /// Version tag of the declared composition (report format, not semver).
-pub const PROFILE_VERSION: &str = "verified-v1";
+/// v2 = RFC-0058 P2.1: the merge is back with the proved kernel.
+pub const PROFILE_VERSION: &str = "verified-v2";
 
 /// Whether a component of the mode is active.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -114,6 +119,9 @@ pub fn profile_report() -> &'static [ProfileComponent] {
         on!("txn", "txn", "multi-key TX all-or-nothing (F47/F34)"),
         on!("tx_glue", "tx_glue", "OCC glue — validation under the write lock keeps first-committer-wins lone (F47/F34)"),
         on!("isolated", "isolated", "isolated apply (F83)"),
+        // --- commit path (group level — RFC-0058 P2.1 reactivation) ---
+        on!("write_group_merge", "group_commit", "leader/member merge with the proved kernel: first-committer-wins cross-group, group atomicity intra-group (RFC-0057 P2.1 / RFC-0051 P1.3)"),
+        on!("group_fence", "group_fence", "one publish watermark per group = max appended member sequence, after WAL durability (RFC-0057 P2.1)"),
         // --- background decisions ---
         on!("flush_decision", "flush_decision", "when to flush (F2/F43/G1)"),
         on!("compact_decision", "compact_decision", "when to compact (F177/F20)"),
@@ -155,18 +163,18 @@ pub fn profile_report() -> &'static [ProfileComponent] {
         contract!("wal_barrier", "WAL write + fdatasync before Ok (RFC-0001 O1 / RFC-0036) — enforced in code, exercised by the crash/EIO battery"),
         contract!("disk_env", "StdEnv pinned by the verified constructors (Env seam; FailingEnv drives the DST battery)"),
         // --- deliberately off ---
-        off!("write_group_merge", "lone-commit-only: every commit is a single-writer critical section (ConcurrentDb::pin_verified); the merge returns with the RFC-0057 P2.1 kernel (RFC-0058 P2.1)"),
-        off!("catchup_window", "moot while the merge is off — the pin forces it to 0"),
-        off!("async_group_merge", "verified async writes take the write lock themselves (no leader dependency, the un-merged shape)"),
+        off!("catchup_window", "pinned to 0 by the verified pin — the merge happens by natural queuing, never by a delay window"),
+        off!("async_group_merge", "verified async writes take the write lock themselves (no leader dependency — the pin forces the bypass even under PEDRA_ASYNC_GROUP=1)"),
         off!("io_uring_ring", "no proven ring model (cqe_kernel twin blocked); verified constructors pin StdEnv — the full mode keeps PosixFallback (RFC-0058 P2.2)"),
     ]
 }
 
-/// The declared composition (RFC-0058 P0.1).
+/// The declared composition (RFC-0058 P0.1 + P2.1).
 ///
 /// Use [`Self::open`] / [`Self::open_with_env`] for the whole profile
-/// (file options + lone-commit-only group). [`Self::open_options`] is the
-/// file-level half alone.
+/// (file options + the verified group pin: merge decided by the proved
+/// `group_commit_kernel`, catch-up window 0, async bypass).
+/// [`Self::open_options`] is the file-level half alone.
 pub struct VerifiedProfile;
 
 impl VerifiedProfile {
@@ -183,7 +191,7 @@ impl VerifiedProfile {
     }
 
     /// Open on the real filesystem (`StdEnv`) with the full profile:
-    /// file options + lone-commit-only group.
+    /// file options + the verified group pin.
     ///
     /// # Errors
     /// Same as [`ConcurrentDb::open_with`].
@@ -207,10 +215,14 @@ impl OpenOptions {
     /// File-level composition of the verified profile (RFC-0058 P0.1):
     /// `sync=true`, `wal_full_fsync=true`, `wal_recovery=FailClosed`.
     ///
-    /// The group-level half (lone-commit-only) is a runtime policy — pin
-    /// it with [`ConcurrentDb::pin_verified`](crate::ConcurrentDb::pin_verified)
+    /// The group-level half (RFC-0058 P2.1: merge decided by the proved
+    /// `group_commit_kernel`, catch-up window 0, async bypass) is a
+    /// runtime policy — pin it with
+    /// [`ConcurrentDb::pin_verified`](crate::ConcurrentDb::pin_verified)
     /// or open through [`VerifiedProfile::open`] /
-    /// [`ConcurrentDb::open_verified`], which do both.
+    /// [`ConcurrentDb::open_verified`], which do both. The io_uring ring
+    /// stays outside the mode (P2.2 gate: no proven ring model — open
+    /// with [`StdEnv`](crate::StdEnv), as `PEDRA_VERIFIED=1` does).
     #[must_use]
     pub fn verified() -> Self {
         VerifiedProfile::open_options()
@@ -241,7 +253,10 @@ mod tests {
         while let Some(pos) = rest.find("\"id\"") {
             rest = &rest[pos + 4..];
             let after_colon = rest.trim_start().strip_prefix(':').unwrap_or(rest);
-            let quoted = after_colon.trim_start().strip_prefix('"').unwrap_or(after_colon);
+            let quoted = after_colon
+                .trim_start()
+                .strip_prefix('"')
+                .unwrap_or(after_colon);
             if let Some(end) = quoted.find('"') {
                 ids.push(quoted[..end].to_string());
                 rest = &quoted[end..];
@@ -257,10 +272,7 @@ mod tests {
     #[test]
     fn verified_report_matches_catalog() {
         let catalog = catalog_ids();
-        assert!(
-            catalog.len() >= 44,
-            "catalog shrank? ids: {catalog:?}"
-        );
+        assert!(catalog.len() >= 44, "catalog shrank? ids: {catalog:?}");
         let reported: std::collections::HashSet<&str> = profile_report()
             .iter()
             .filter(|c| c.state == ProfileState::On)
@@ -280,8 +292,16 @@ mod tests {
                 "report cites kernel {k} that is not in the catalog"
             );
         }
-        // The mode's differentiators are explicit.
-        for name in ["write_group_merge", "io_uring_ring", "catchup_window"] {
+        // The mode's differentiators are explicit: the merge is ON with
+        // the proved kernel; the delay window, the async leader
+        // dependency and the io_uring ring stay OFF.
+        let c = profile_report()
+            .iter()
+            .find(|c| c.component == "write_group_merge")
+            .unwrap_or_else(|| panic!("missing report row write_group_merge"));
+        assert_eq!(c.state, ProfileState::On, "{c:?}");
+        assert_eq!(c.kernel, Some("group_commit"));
+        for name in ["io_uring_ring", "catchup_window", "async_group_merge"] {
             let c = profile_report()
                 .iter()
                 .find(|c| c.component == name)
@@ -300,5 +320,35 @@ mod tests {
         let p = VerifiedProfile::open_options();
         assert!(p.sync && p.wal_full_fsync);
         assert_eq!(p.wal_recovery, WalRecovery::FailClosed);
+    }
+
+    /// Same TX the CLI `demo` runs under `PEDRA_VERIFIED=1` (`StdEnv` +
+    /// verified options). Pins the shipped commit path, not a copy.
+    #[test]
+    fn verified_std_env_demo_tx_roundtrip() {
+        use crate::db::Db;
+        use crate::StdEnv;
+        let dir =
+            std::env::temp_dir().join(format!("pedradb-verified-demo-tx-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut db = Db::open_with_env(&dir, OpenOptions::verified(), StdEnv).unwrap();
+        {
+            let mut tx = db.begin();
+            tx.put(b"u/1", br#"{"name":"ada"}"#).unwrap();
+            tx.put(b"idx/name/ada", b"1").unwrap();
+            tx.commit().unwrap();
+        }
+        assert_eq!(
+            db.get(b"u/1").as_deref(),
+            Some(br#"{"name":"ada"}"#.as_ref())
+        );
+        db.close().unwrap();
+        let db2 = Db::open_with_env(&dir, OpenOptions::verified(), StdEnv).unwrap();
+        assert_eq!(
+            db2.get(b"u/1").as_deref(),
+            Some(br#"{"name":"ada"}"#.as_ref())
+        );
+        db2.close().unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

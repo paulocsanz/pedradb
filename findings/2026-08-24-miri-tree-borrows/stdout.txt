@@ -1,0 +1,20 @@
+MIRIFLAGS=-Zmiri-disable-isolation -Zmiri-tree-borrows -Zmiri-ignore-leaks
+== miri-tree-borrows pedradb-sim crash_after_sync_recovers_committed ==
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.22s
+     Running unittests src/lib.rs (target/miri/aarch64-apple-darwin/debug/build/pedradb-sim/d63527d6eb59db24/out/pedradb_sim-d63527d6eb59db24)
+
+running 1 test
+test tests::crash_after_sync_recovers_committed ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 50 filtered out; finished in 2.66s
+
+== miri-tree-borrows pedradb-sim failing_env_nth_put_then_reopen_recovers_prefix ==
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.03s
+     Running unittests src/lib.rs (target/miri/aarch64-apple-darwin/debug/build/pedradb-sim/d63527d6eb59db24/out/pedradb_sim-d63527d6eb59db24)
+
+running 1 test
+test tests::failing_env_nth_put_then_reopen_recovers_prefix ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 50 filtered out; finished in 2.19s
+
+miri_dst_tree_borrows: ok (Tree Borrows; not a Stacked Borrows rerun)

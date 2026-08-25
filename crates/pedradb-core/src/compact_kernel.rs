@@ -68,10 +68,7 @@ pub fn compact_pick(
     match lowest_level_with_files {
         // Caller invariant: `lowest_level_with_files < max_level` (the
         // trigger loop only scans levels below max).
-        Some(l) => CompactPlan::Merge {
-            from: l,
-            to: l + 1,
-        },
+        Some(l) => CompactPlan::Merge { from: l, to: l + 1 },
         None => {
             if gc_requested && files_at_max_level {
                 CompactPlan::GcRewriteMax
@@ -232,8 +229,14 @@ mod tests {
 
     #[test]
     fn pick_merges_lowest_and_moves_one_level() {
-        assert_eq!(compact_pick(Some(0), false, false, 3), CompactPlan::Merge { from: 0, to: 1 });
-        assert_eq!(compact_pick(Some(2), true, false, 3), CompactPlan::Merge { from: 2, to: 3 });
+        assert_eq!(
+            compact_pick(Some(0), false, false, 3),
+            CompactPlan::Merge { from: 0, to: 1 }
+        );
+        assert_eq!(
+            compact_pick(Some(2), true, false, 3),
+            CompactPlan::Merge { from: 2, to: 3 }
+        );
         assert_eq!(compact_pick(None, true, true, 3), CompactPlan::GcRewriteMax);
         assert_eq!(compact_pick(None, true, false, 3), CompactPlan::NoOp);
         assert_eq!(compact_pick(None, false, true, 3), CompactPlan::NoOp);
@@ -254,10 +257,7 @@ mod tests {
                     let f = point_version_fate(this, Some(newer), oldest);
                     match f {
                         VersionFate::Drop => {
-                            assert!(
-                                newer <= oldest,
-                                "drop requires newer visible to all snaps"
-                            );
+                            assert!(newer <= oldest, "drop requires newer visible to all snaps");
                         }
                         VersionFate::Keep => {}
                     }
@@ -267,11 +267,8 @@ mod tests {
                         if this <= oldest {
                             assert_eq!(f, VersionFate::Keep, "pinned snapshot reads this");
                         }
-                        let m = point_version_fate_as_is_drop_under_snapshot(
-                            this,
-                            Some(newer),
-                            oldest,
-                        );
+                        let m =
+                            point_version_fate_as_is_drop_under_snapshot(this, Some(newer), oldest);
                         if this <= oldest {
                             assert_eq!(m, VersionFate::Drop, "AS-IS must drop the pinned one");
                             assert_ne!(m, f, "mutant must differ from fixed");

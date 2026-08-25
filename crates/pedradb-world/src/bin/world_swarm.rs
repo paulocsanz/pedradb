@@ -37,6 +37,14 @@ fn main() {
     let mem_storage = std::env::var("PEDRA_SWARM_DISK")
         .map(|v| v == "0")
         .unwrap_or(true);
+    // RFC-0059 P2: membership upgrade/rollback windows + trajectory
+    // invariants in the campaign (default off keeps the base stream).
+    let membership_upgrade = std::env::var("PEDRA_SWARM_UPGRADE")
+        .map(|v| v != "0")
+        .unwrap_or(false);
+    let trajectory_check = std::env::var("PEDRA_SWARM_TRAJECTORY")
+        .map(|v| v != "0")
+        .unwrap_or(false);
     // Single-seed diagnostic mode: run one seed inline with the campaign
     // config and print the event trace (consistency/silent-wrong lines
     // included). Exit 1 if the seed fails an oracle.
@@ -54,6 +62,8 @@ fn main() {
             net_reorder_window: if buggify { 2 } else { 0 },
             consistency_check: consistency,
             mem_storage,
+            membership_upgrade,
+            trajectory_check,
             ..Default::default()
         };
         let t = pedradb_world::World::new(dump_seed, cfg)
@@ -68,6 +78,7 @@ fn main() {
                 || ev.kind.contains("false_majority")
                 || ev.kind.contains("dual_leader")
                 || ev.kind.contains("wrong")
+                || ev.kind.contains("trajectory")
             {
                 println!("seed={dump_seed} {ev:?}");
             }
@@ -75,15 +86,17 @@ fn main() {
         let ok = t.silent_wrong == 0
             && t.row_half_indexed == 0
             && t.consistency_violations == 0
-            && t.false_majority == 0;
+            && t.false_majority == 0
+            && t.trajectory_violations == 0;
         println!(
-            "dump seed={dump_seed} ok={ok} hash={:016x} silent_wrong={} row_half={} consistency={} false_majority={} dual_leader_fail_open={}",
+            "dump seed={dump_seed} ok={ok} hash={:016x} silent_wrong={} row_half={} consistency={} false_majority={} dual_leader_fail_open={} traj={}",
             t.trace_hash,
             t.silent_wrong,
             t.row_half_indexed,
             t.consistency_violations,
             t.false_majority,
-            t.dual_leader_fail_open
+            t.dual_leader_fail_open,
+            t.trajectory_violations
         );
         let _ = std::fs::remove_dir_all(&parent);
         std::process::exit(i32::from(!ok));
@@ -97,7 +110,7 @@ fn main() {
     };
 
     println!(
-        "world_swarm seeds={n_seeds} start={start_seed} workers={workers} n_nodes={n_nodes} steps={steps} ranges={n_ranges} buggify={buggify} consistency={consistency} mem={mem_storage}"
+        "world_swarm seeds={n_seeds} start={start_seed} workers={workers} n_nodes={n_nodes} steps={steps} ranges={n_ranges} buggify={buggify} consistency={consistency} mem={mem_storage} upgrade={membership_upgrade} trajectory={trajectory_check}"
     );
 
     let mk = move |_seed: u64, parent: &std::path::Path| WorldConfig {
@@ -110,6 +123,8 @@ fn main() {
         net_reorder_window: if buggify { 2 } else { 0 },
         consistency_check: consistency,
         mem_storage,
+        membership_upgrade,
+        trajectory_check,
         ..Default::default()
     };
 
@@ -117,12 +132,13 @@ fn main() {
     for s in &report.seeds {
         if !s.ok {
             eprintln!(
-                "FAIL seed={} hash={:016x} silent_wrong={} row_half={} consistency={} err={:?}",
+                "FAIL seed={} hash={:016x} silent_wrong={} row_half={} consistency={} traj={} err={:?}",
                 s.seed,
                 s.trace_hash,
                 s.silent_wrong,
                 s.row_half_indexed,
                 s.consistency_violations,
+                s.trajectory_violations,
                 s.err
             );
         }

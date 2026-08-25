@@ -636,6 +636,15 @@ def check_extract(
             "formal/aeneas/lean/WalRecover.lean",
             ("theorem crc_fresh_alignment_fail_stops", "theorem as_is_torn_is_silent_eof"),
         ),
+        (
+            "group_commit",
+            "formal/aeneas/out/lean/GroupCommitKernel.lean",
+            "def fence_publish_seq",
+            "./scripts/aeneas_group_commit.sh",
+            "crates/pedradb-core/src/group_commit_kernel.rs",
+            "formal/aeneas/lean/GroupCommit.lean",
+            ("theorem occ_conflict_closed_form", "theorem as_is_serialized_aborts_same_group_writer"),
+        ),
     ]:
         art = root / artifact
         if art.is_file() and marker in art.read_text(encoding="utf-8"):

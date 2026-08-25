@@ -1,0 +1,4 @@
+native: seed=42 hash=61f8a02125b3c69e
+guest:  seed=42 hash=61f8a02125b3c69e
+C2.1=native_eq_guest
+compare_wall_clock=forbidden

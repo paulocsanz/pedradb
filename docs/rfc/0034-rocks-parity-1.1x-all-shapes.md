@@ -1,7 +1,8 @@
 # RFC-0034: 1.1× ceiling vs Rocks on every tabulated shape
 
 **Status:** draft  
-**Updated:** 2026-08-15  
+**Updated:** 2026-08-24
+**Parked (quiet remesure):** remaining P-slices need a quiet 3× host; dirty sandbox numbers are not the official floor (AGENTS.md peer `sync=false`).  
 **Parents:** [0033](0033-mvcc-scan-2x.md), [0032](0032-tikv-mix-2x-budget.md) (teto 2×), [0031](0031-rocks-parity-10x-budget.md) (G1–G8 + classe de sync)
 
 ## Background
@@ -67,21 +68,21 @@ Editar asserção existente para ficar verde é relaxação — volta para o des
 
 - [x] **P0.1** RFC + Status vivo: teto 1.1× em todos os shapes vs FF; fdatasync-write fora do gate — status: `done`
 - [x] **P0.2** Remesura completa `tikv_ycsb_parity_v0.sh` + `ROCKS_PARITY_FULL_SYNC=1` (4096/2000 zipfian 1 KB); substituir as linhas velhas de B/C/D/E na tabela — status: `done`
-- [ ] **P0.3** Gate `ROCKS_PARITY_RATIO_FLOOR=0.91` nos shapes que a remesura mostrar ≥ 0.91 — status: `todo` (remesura: **0/11**; não ligar gate vazio)
+- [ ] **P0.3** Gate `ROCKS_PARITY_RATIO_FLOOR=0.91` nos shapes que a remesura mostrar ≥ 0.91 — status: `todo` (parked: quiet remesure; remesura: **0/11**; não ligar gate vazio)
 
 ### P1 — escritas / mix que a remesura ainda deixar < 0.91
 
-- [ ] **P1.1** Conta medida do extra além de um `sync_all` em `deps_apply_batch` (e o pior mix que falhar P0.2) — status: `todo`
-- [ ] **P1.2** `deps_apply_batch` e `deps_raftlog` ≥ 0.91 vs FF da run — status: `todo`
-- [ ] **P1.3** ycsb_b / ycsb_d ≥ 0.91 se ainda falharem depois de P0.2 (são 95% leitura: fechar C/E pode bastar) — status: `todo`
+- [ ] **P1.1** Conta medida do extra além de um `sync_all` em `deps_apply_batch` (e o pior mix que falhar P0.2) — status: `todo` (parked: quiet remesure)
+- [ ] **P1.2** `deps_apply_batch` e `deps_raftlog` ≥ 0.91 vs FF da run — status: `todo` (parked: quiet remesure)
+- [ ] **P1.3** ycsb_b / ycsb_d ≥ 0.91 se ainda falharem depois de P0.2 (são 95% leitura: fechar C/E pode bastar) — status: `todo` (parked: quiet remesure)
 
 ### P2 — leituras até 0.91
 
-- [ ] **P2.1** ycsb_c ≥ 0.91 a **4096/2000** (não só o smoke 1024) — status: `todo`
-- [ ] **P2.2** ycsb_e ≥ 0.91 — status: `todo`
-- [ ] **P2.3** `deps_scan` ≥ 0.91 — status: `todo`
-- [ ] **P2.4** `deps_mvcc_latest` ≥ 0.91 — status: `todo`
-- [ ] **P2.5** Gate 0.91 em **todos** os 11 shapes; se algum residual: follow-up com número (L0/seek, blocos, syscalls) — não relaxar G1 — status: `todo`
+- [ ] **P2.1** ycsb_c ≥ 0.91 a **4096/2000** (não só o smoke 1024) — status: `todo` (parked: quiet remesure)
+- [ ] **P2.2** ycsb_e ≥ 0.91 — status: `todo` (parked: quiet remesure)
+- [ ] **P2.3** `deps_scan` ≥ 0.91 — status: `todo` (parked: quiet remesure)
+- [ ] **P2.4** `deps_mvcc_latest` ≥ 0.91 — status: `todo` (parked: quiet remesure)
+- [ ] **P2.5** Gate 0.91 em **todos** os 11 shapes; se algum residual: follow-up com número (L0/seek, blocos, syscalls) — não relaxar G1 — status: `todo` (parked: quiet remesure)
 
 ## Status (living — update with every PR)
 

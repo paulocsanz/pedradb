@@ -1,7 +1,7 @@
 # RFC-0055: pipeline de escrita Rocks — medir antes de implementar
 
 **Status:** in-progress
-**Updated:** 2026-08-23
+**Updated:** 2026-08-24
 **Parents:** [0045](0045-multi-writer-async-5x.md) (bypass vs merge; hold 1.6 µs),
 [0050](0050-nine-axis-robustness.md) (P0.4 teto; P2.1 memtable fora do lock),
 [0054](0054-close-official-gaps.md) (buracos oficiais são 1-cliente)
@@ -69,16 +69,16 @@ impede implementar skiplist no escuro.
 ### P1 — implementar só se P0 obrigar
 
 - [ ] **P1.1** Memtable insert fora do write lock (RFC-0050 P2.1) **iff**
-      P0.3 mostrar ≥15% do gap mc50/mc4 no mem-apply — status: `todo`
+      P0.3 mostrar ≥15% do gap mc50/mc4 no mem-apply — status: `todo` (parked: iff P0 numbers did not obligate; apply-after-fd is RFC-0045 P2.1)
 - [ ] **P1.2** `max_write_buffer_number` real (N imm) **iff** uma forma
-      oficial com o default 4 MiB flushar na janela e perder — status: `todo`
+      oficial com o default 4 MiB flushar na janela e perder — status: `todo` (parked: iff)
 - [ ] **P1.3** pipelined write (WAL overlap) **iff** 1c não, e mc4
-      mostrar encode+wal serializado como o buraco — status: `todo`
+      mostrar encode+wal serializado como o buraco — status: `todo` (parked: iff)
 
 ### P2 — polish
 
-- [ ] **P2.1** Setters deixam de ser no-op só para os knobs que P1 ligou;
-      os outros continuam inertes e listados — status: `todo`
+- [x] **P2.1** Setters deixam de ser no-op só para os knobs que P1 ligou;
+      os outros continuam inertes e listados — status: `done` (P1 did not enable any knob; setters stay documented no-ops — `findings/rfc0055-p0/`)
 
 ## Status (living — update with every PR)
 
@@ -90,7 +90,7 @@ impede implementar skiplist no escuro.
 | P1.1 | p1 | mem apply off-lock iff | todo | — | 2026-08-23 |
 | P1.2 | p1 | N write buffers iff | todo | — | 2026-08-23 |
 | P1.3 | p1 | pipelined write iff | todo | — | 2026-08-23 |
-| P2.1 | p2 | setters deixam de mentir | todo | — | 2026-08-23 |
+| P2.1 | p2 | setters deixam de mentir | done | no P1 knobs; documented inert | 2026-08-24 |
 
 ## Acceptance Criteria
 

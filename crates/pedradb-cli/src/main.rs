@@ -3,17 +3,28 @@
 #![forbid(unsafe_code)]
 
 use pedradb_core::wal::Wal;
-use pedradb_core::{Db, OpenOptions};
-use pedradb_io_uring::{open as open_db, open_with as open_db_with, production_env, IoUringEnv};
+use pedradb_core::{
+    verify_at_rest, BlobGcCandidate, CompactOptions, Db, DbStats, Env, OpenOptions, SequenceNumber,
+    StdEnv, VlogRewriteStats, PROFILE_VERSION,
+};
+use pedradb_io_uring::{open_with as open_db_with, production_env, IoUringEnv};
 use pedradb_ops::{inspect_format, migrate_to_latest, restore_history_from_remote, BackupEngine};
 
 fn main() -> std::process::ExitCode {
     let args: Vec<String> = std::env::args().collect();
     if args.len() < 2 {
         eprintln!(
-            "usage: pedra <demo|wal|version|backup|restore|pitr|ship-wal|list-backups|verify-backup|archive|inspect|stats|compact|reclaim|maintain|compact-vlog|compact-blob|blob-gc|migrate> [args...]"
+            "usage: pedra <demo|wal|version|backup|restore|pitr|ship-wal|list-backups|verify-backup|verify|archive|inspect|stats|compact|reclaim|maintain|compact-vlog|compact-blob|blob-gc|migrate> [args...]"
+        );
+        eprintln!(
+            "env: PEDRA_VERIFIED=1 runs every command on the verified profile (RFC-0058 P2.3)"
         );
         return std::process::ExitCode::from(2);
+    }
+    if verified_requested() {
+        eprintln!(
+            "pedra: PEDRA_VERIFIED=1 — verified profile {PROFILE_VERSION} (StdEnv, no io_uring ring; RFC-0058 P2.3)"
+        );
     }
     match args[1].as_str() {
         "version" => {
@@ -28,6 +39,7 @@ fn main() -> std::process::ExitCode {
         "pitr" => pitr_cmd(&args[2..]),
         "list-backups" => list_backups_cmd(&args[2..]),
         "verify-backup" => verify_backup_cmd(&args[2..]),
+        "verify" => verify_cmd(&args[2..]),
         "archive" => archive_cmd(&args[2..]),
         "inspect" => inspect_cmd(&args[2..]),
         "stats" => stats_cmd(&args[2..]),
@@ -58,7 +70,18 @@ fn demo_cmd(args: &[String]) -> std::process::ExitCode {
 }
 
 fn run_db_demo(path: &str) -> pedradb_core::Result<()> {
-    let mut db = open_db(path)?;
+    if verified_requested() {
+        demo_body(path, open_verified_db)
+    } else {
+        demo_body(path, open_full_db)
+    }
+}
+
+fn demo_body<E: Env>(
+    path: &str,
+    mut open: impl FnMut(&str) -> pedradb_core::Result<Db<E>>,
+) -> pedradb_core::Result<()> {
+    let mut db = open(path)?;
     {
         let mut tx = db.begin();
         tx.put(b"u/1", br#"{"name":"ada"}"#)?;
@@ -78,7 +101,7 @@ fn run_db_demo(path: &str) -> pedradb_core::Result<()> {
     );
     println!("  last_sequence = {}", db.last_sequence());
     db.close()?;
-    let db2 = open_db(path)?;
+    let db2 = open(path)?;
     assert_eq!(
         db2.get(b"u/1").as_deref(),
         Some(br#"{"name":"ada"}"#.as_ref())
@@ -118,7 +141,18 @@ fn run_wal_demo(path: &str) -> pedradb_core::Result<()> {
     Ok(())
 }
 
-fn open_live(path: &str) -> pedradb_core::Result<Db<IoUringEnv>> {
+/// RFC-0058 P2.3 — `PEDRA_VERIFIED=1` is the one-line product switch:
+/// every CLI command that opens a live database runs the verified
+/// profile (`StdEnv` — no io_uring ring, P2.2 — plus
+/// `OpenOptions::verified()`: `sync`, full-WAL fsync, fail-closed
+/// recovery). Any other value (or unset) keeps the full mode
+/// (`IoUringEnv` on Linux, `PosixFallback` where the ring is
+/// unavailable).
+fn verified_requested() -> bool {
+    std::env::var_os("PEDRA_VERIFIED").is_some_and(|v| v == "1")
+}
+
+fn open_full_db(path: &str) -> pedradb_core::Result<Db<IoUringEnv>> {
     open_db_with(
         path,
         OpenOptions {
@@ -135,6 +169,141 @@ fn open_live(path: &str) -> pedradb_core::Result<Db<IoUringEnv>> {
     )
 }
 
+fn open_verified_db(path: &str) -> pedradb_core::Result<Db<IoUringEnv>> {
+    // Ring stays out (RFC-0058 P2.2): POSIX backend, verified options.
+    // Same `Db<IoUringEnv>` type as full mode — a second `Db<StdEnv>`
+    // monomorph in this binary SIGSEGV'd TX commit under release
+    // (`Vec<WriteOp>::as_slice` on a garbage pointer). `posix()` is
+    // StdEnv underneath.
+    Db::open_with_env(path, OpenOptions::verified(), IoUringEnv::posix())
+}
+
+/// The handle every live-open command uses: full mode or verified
+/// mode, chosen by `PEDRA_VERIFIED` (RFC-0058 P2.3).
+enum LiveDb {
+    Full(Db<IoUringEnv>),
+    Verified(Db<IoUringEnv>),
+}
+
+macro_rules! for_both {
+    ($self:ident, $db:ident => $body:expr) => {
+        match $self {
+            LiveDb::Full($db) => $body,
+            LiveDb::Verified($db) => $body,
+        }
+    };
+}
+
+impl LiveDb {
+    fn close(self) -> pedradb_core::Result<()> {
+        for_both!(self, db => db.close())
+    }
+
+    fn create_base_backup(
+        &mut self,
+        backup_root: &str,
+    ) -> pedradb_ops::Result<pedradb_ops::BackupMeta> {
+        match self {
+            LiveDb::Full(db) => {
+                let mut eng = BackupEngine::open(backup_root)?;
+                eng.create_base_backup(db)
+            }
+            LiveDb::Verified(db) => {
+                let mut eng = BackupEngine::open_with_env(backup_root, IoUringEnv::posix())?;
+                eng.create_base_backup(db)
+            }
+        }
+    }
+
+    fn ship_wal(&self, backup_root: &str) -> pedradb_ops::Result<pedradb_ops::WalShipMeta> {
+        match self {
+            LiveDb::Full(db) => {
+                let mut eng = BackupEngine::open(backup_root)?;
+                eng.ship_wal(db)
+            }
+            LiveDb::Verified(db) => {
+                let mut eng = BackupEngine::open_with_env(backup_root, IoUringEnv::posix())?;
+                eng.ship_wal(db)
+            }
+        }
+    }
+
+    fn stats(&self) -> DbStats {
+        for_both!(self, db => db.stats())
+    }
+
+    fn last_sequence(&self) -> SequenceNumber {
+        for_both!(self, db => db.last_sequence())
+    }
+
+    fn sst_count(&self) -> usize {
+        for_both!(self, db => db.sst_count())
+    }
+
+    fn snapshot_pin_count(&self) -> usize {
+        for_both!(self, db => db.snapshot_pin_count())
+    }
+
+    fn earliest_readable_sequence(&self) -> SequenceNumber {
+        for_both!(self, db => db.earliest_readable_sequence())
+    }
+
+    fn auto_blob_gc_min_ratio(&self) -> Option<f64> {
+        for_both!(self, db => db.auto_blob_gc_min_ratio())
+    }
+
+    fn scan_prefetch(&self) -> usize {
+        for_both!(self, db => db.scan_prefetch())
+    }
+
+    fn blob_active(&self) -> u32 {
+        for_both!(self, db => db.blob_active())
+    }
+
+    fn blob_gc_candidates(&self) -> pedradb_core::Result<Vec<BlobGcCandidate>> {
+        for_both!(self, db => db.blob_gc_candidates())
+    }
+
+    fn flush(&mut self) -> pedradb_core::Result<()> {
+        for_both!(self, db => db.flush())
+    }
+
+    fn compact(&mut self) -> pedradb_core::Result<()> {
+        for_both!(self, db => db.compact())
+    }
+
+    fn compact_with(&mut self, options: CompactOptions) -> pedradb_core::Result<()> {
+        for_both!(self, db => db.compact_with(options))
+    }
+
+    fn compact_reclaim(&mut self) -> pedradb_core::Result<()> {
+        for_both!(self, db => db.compact_reclaim())
+    }
+
+    fn compact_vlog(&mut self) -> pedradb_core::Result<VlogRewriteStats> {
+        for_both!(self, db => db.compact_vlog())
+    }
+
+    fn compact_blob_auto(
+        &mut self,
+        min_dead_ratio: f64,
+    ) -> pedradb_core::Result<Option<(u32, VlogRewriteStats)>> {
+        for_both!(self, db => db.compact_blob_auto(min_dead_ratio))
+    }
+
+    fn compact_blob(&mut self, file_num: u32) -> pedradb_core::Result<VlogRewriteStats> {
+        for_both!(self, db => db.compact_blob(file_num))
+    }
+}
+
+fn open_live(path: &str) -> pedradb_core::Result<LiveDb> {
+    if verified_requested() {
+        Ok(LiveDb::Verified(open_verified_db(path)?))
+    } else {
+        Ok(LiveDb::Full(open_full_db(path)?))
+    }
+}
+
 fn backup_cmd(args: &[String]) -> std::process::ExitCode {
     // pedra backup <db_path> <backup_root>
     if args.len() < 2 {
@@ -143,8 +312,7 @@ fn backup_cmd(args: &[String]) -> std::process::ExitCode {
     }
     match (|| -> Result<(), Box<dyn std::error::Error>> {
         let mut db = open_live(&args[0])?;
-        let mut eng = BackupEngine::open(&args[1])?;
-        let meta = eng.create_base_backup(&mut db)?;
+        let meta = db.create_base_backup(&args[1])?;
         println!(
             "base backup id={} seq={} ssts={} earliest_readable={} path={}",
             meta.id,
@@ -172,8 +340,7 @@ fn ship_wal_cmd(args: &[String]) -> std::process::ExitCode {
     }
     match (|| -> Result<(), Box<dyn std::error::Error>> {
         let db = open_live(&args[0])?;
-        let mut eng = BackupEngine::open(&args[1])?;
-        let ship = eng.ship_wal(&db)?;
+        let ship = db.ship_wal(&args[1])?;
         println!(
             "shipped records={} last_seq={} segment={:?}",
             ship.records, ship.last_shipped_sequence, ship.segment
@@ -217,6 +384,7 @@ fn restore_cmd(args: &[String]) -> std::process::ExitCode {
 /// RFC-0046 P1.4: remote history-tier inspection and restore.
 fn archive_cmd(args: &[String]) -> std::process::ExitCode {
     // pedra archive status <remote_root>
+    // pedra archive verify <remote_root>
     // pedra archive restore <remote_root> <dest> [target_seq]
     match args.first().map(String::as_str) {
         Some("status") if args.len() >= 2 => {
@@ -233,6 +401,27 @@ fn archive_cmd(args: &[String]) -> std::process::ExitCode {
                     None => println!("no manifest — remote tier is empty"),
                 }
                 Ok(())
+            })() {
+                Ok(()) => std::process::ExitCode::SUCCESS,
+                Err(e) => {
+                    eprintln!("error: {e}");
+                    std::process::ExitCode::FAILURE
+                }
+            }
+        }
+        Some("verify") if args.len() >= 2 => {
+            match (|| -> Result<(), Box<dyn std::error::Error>> {
+                let tier = pedradb_core::history::RemoteTier::new(&args[1]);
+                let r = tier.verify(&production_env())?;
+                println!("{}", r.summary_line());
+                for (file, msg) in &r.failures {
+                    println!("FAIL {file} {msg}");
+                }
+                if r.is_clean() {
+                    Ok(())
+                } else {
+                    Err(format!("archive verify {}", r.summary_line()).into())
+                }
             })() {
                 Ok(()) => std::process::ExitCode::SUCCESS,
                 Err(e) => {
@@ -264,7 +453,7 @@ fn archive_cmd(args: &[String]) -> std::process::ExitCode {
         }
         _ => {
             eprintln!(
-                "usage: pedra archive status <remote_root> | pedra archive restore <remote_root> <dest> [target_seq]"
+                "usage: pedra archive status <remote_root> | pedra archive verify <remote_root> | pedra archive restore <remote_root> <dest> [target_seq]"
             );
             std::process::ExitCode::from(2)
         }
@@ -468,16 +657,16 @@ fn reclaim_cmd(args: &[String]) -> std::process::ExitCode {
 /// Operator-side maintenance (open-items §2.2 residual: no bg thread in core).
 ///
 /// ```text
-/// pedra maintain <db> [--blob-theta 0.5] [--no-reclaim] [--vlog] [--every SECS]
+/// pedra maintain <db> [--blob-theta 0.5] [--no-reclaim] [--vlog] [--verify] [--every SECS]
 /// ```
 ///
 /// One pass: flush → optional compact_reclaim → compact_blob_auto(θ) → optional
-/// compact_vlog. With `--every N`, repeat every N seconds until SIGINT (cron
-/// substitute; still outside pedradb-core).
+/// compact_vlog → optional at-rest scrub (`--verify`, RFC-0060). With `--every N`,
+/// repeat every N seconds until SIGINT (cron substitute; still outside pedradb-core).
 fn maintain_cmd(args: &[String]) -> std::process::ExitCode {
     if args.is_empty() {
         eprintln!(
-            "usage: pedra maintain <db_path> [--blob-theta 0.5] [--no-reclaim] [--vlog] [--every SECS]"
+            "usage: pedra maintain <db_path> [--blob-theta 0.5] [--no-reclaim] [--vlog] [--verify] [--every SECS]"
         );
         return std::process::ExitCode::from(2);
     }
@@ -485,6 +674,7 @@ fn maintain_cmd(args: &[String]) -> std::process::ExitCode {
     let mut blob_theta: f64 = 0.5;
     let mut do_reclaim = true;
     let mut do_vlog = false;
+    let mut do_verify = false;
     let mut every: Option<u64> = None;
     let mut i = 1;
     while i < args.len() {
@@ -499,6 +689,7 @@ fn maintain_cmd(args: &[String]) -> std::process::ExitCode {
             }
             "--no-reclaim" => do_reclaim = false,
             "--vlog" => do_vlog = true,
+            "--verify" => do_verify = true,
             "--every" => {
                 i += 1;
                 let Some(secs) = args.get(i).and_then(|s| s.parse().ok()) else {
@@ -522,7 +713,7 @@ fn maintain_cmd(args: &[String]) -> std::process::ExitCode {
     let mut pass: u64 = 0;
     loop {
         pass = pass.saturating_add(1);
-        match maintain_once(&path, do_reclaim, do_vlog, blob_theta, pass) {
+        match maintain_once(&path, do_reclaim, do_vlog, blob_theta, pass, do_verify) {
             Ok(()) => {}
             Err(code) => return code,
         }
@@ -540,6 +731,7 @@ fn maintain_once(
     do_vlog: bool,
     blob_theta: f64,
     pass: u64,
+    do_verify: bool,
 ) -> Result<(), std::process::ExitCode> {
     let mut db = open_live(path).map_err(|e| {
         eprintln!("error: {e}");
@@ -589,7 +781,49 @@ fn maintain_once(
         eprintln!("error close: {e}");
         std::process::ExitCode::FAILURE
     })?;
+    if do_verify {
+        let r = emit_verify(path);
+        if !r.is_clean() {
+            return Err(std::process::ExitCode::FAILURE);
+        }
+    }
     Ok(())
+}
+
+/// RFC-0060 P0.1: at-rest CRC scrub. Does not open a writer (no LOCK).
+/// RFC-0060 P2.14: a backup root (`CATALOG` present) also CRC-walks
+/// `wal/*.warch` via [`BackupEngine::verify_wal_archive`].
+fn verify_cmd(args: &[String]) -> std::process::ExitCode {
+    if args.is_empty() {
+        eprintln!("usage: pedra verify <db_path>");
+        return std::process::ExitCode::from(2);
+    }
+    let r = emit_verify(&args[0]);
+    let mut ok = r.is_clean();
+    let catalog = std::path::Path::new(&args[0]).join("CATALOG");
+    if catalog.exists() {
+        match BackupEngine::open(&args[0]).and_then(|eng| eng.verify_wal_archive()) {
+            Ok(n) => println!("warch_segments={n}"),
+            Err(e) => {
+                eprintln!("error: {e}");
+                ok = false;
+            }
+        }
+    }
+    if ok {
+        std::process::ExitCode::SUCCESS
+    } else {
+        std::process::ExitCode::FAILURE
+    }
+}
+
+fn emit_verify(path: &str) -> pedradb_core::VerifyReport {
+    let r = verify_at_rest(&StdEnv, path);
+    println!("{}", r.summary_line());
+    for f in &r.failures {
+        println!("FAIL {} offset={} {}", f.file, f.offset, f.message);
+    }
+    r
 }
 
 fn compact_vlog_cmd(args: &[String]) -> std::process::ExitCode {
@@ -733,6 +967,7 @@ fn inspect_cmd(args: &[String]) -> std::process::ExitCode {
             println!("has_manifest={}", r.has_manifest);
             println!("sst_count={}", r.sst_count);
             println!("needs_migration={}", r.needs_migration);
+            println!("current_crc={}", r.current_crc);
             println!(
                 "earliest_readable={} vlog_use_new={}",
                 r.earliest_readable_seq, r.vlog_use_new

@@ -3,13 +3,13 @@
   "keys": 48,
   "value_bytes": 2048,
   "rows": [
-    {"n":1,"rounds":82,"ms_per_scan":0.9770},
-    {"n":2,"rounds":84,"ms_per_scan":0.9577},
-    {"n":4,"rounds":82,"ms_per_scan":0.9758},
-    {"n":8,"rounds":85,"ms_per_scan":0.9504},
-    {"n":16,"rounds":85,"ms_per_scan":0.9488}
+    {"n":1,"rounds":78,"ms_per_scan":1.0348},
+    {"n":2,"rounds":77,"ms_per_scan":1.0486},
+    {"n":4,"rounds":78,"ms_per_scan":1.0264},
+    {"n":8,"rounds":78,"ms_per_scan":1.0264},
+    {"n":16,"rounds":76,"ms_per_scan":1.0615}
   ],
-  "best_n": 16,
+  "best_n": 8,
   "default_n": 4,
   "note": "single-threaded Env reads; lab laptop"
 }

@@ -28,12 +28,13 @@ fn main() {
     match World::new(seed, cfg).run() {
         Ok(t) => {
             println!(
-                "seed={seed} hash={:016x} puts_ok={} puts_err={} gets_ok={} dcs_ok={} events={} net_sent={} dropped={} rpc={} disk_arms={} trip={} t={}",
+                "seed={seed} hash={:016x} puts_ok={} puts_err={} gets_ok={} dcs_ok={} silent_wrong={} events={} net_sent={} dropped={} rpc={} disk_arms={} trip={} t={}",
                 t.trace_hash,
                 t.puts_ok,
                 t.puts_err,
                 t.gets_ok,
                 t.dcs_ok,
+                t.silent_wrong,
                 t.events.len(),
                 t.net_sent,
                 t.net_dropped,

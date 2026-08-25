@@ -173,6 +173,13 @@ impl SstTable {
         self.num_entries
     }
 
+    /// Data-block count for the at-rest scrub (RFC-0060). v1 files have no
+    /// sparse index — they count as one file-level block after the CRC check.
+    #[must_use]
+    pub fn data_block_count(&self) -> usize {
+        self.index.len().max(1)
+    }
+
     /// Whether the table has no entries.
     #[must_use]
     pub fn is_empty(&self) -> bool {

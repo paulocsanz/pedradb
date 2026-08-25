@@ -3,9 +3,10 @@
 //! [`ConcurrentDb`] wraps [`Db`] in a [`parking_lot::RwLock`]:
 //! - readers (`get` / `range` / `scan` / `stats`) take a **read** lock;
 //! - writers (`put` / `delete` / `apply_batch`) **join a write group**: one leader
-//!   holds the write lock, appends every queued WAL record, applies memtables,
-//!   performs **one** `fsync` off that lock (if any member requested sync),
-//!   then publishes the snapshot and wakes waiters (G1: Ok waits for fd).
+//!   holds the write lock for WAL encode, absorbs queued members, drops the
+//!   lock for **one** `fsync` (if any member requested sync), then reacquires
+//!   to apply memtables + publish (RFC-0045 P2.1; G1: Ok waits for fd). Apply
+//!   is still serialized — not a concurrent skiplist (RFC-0055 P1.1).
 //!
 //! # Flush / compact (fine write lock — RFC-0016 P1.2–P1.3)
 //!
@@ -111,11 +112,14 @@ struct WriteGroup {
     /// lock directly to the next waiter — one wake per handoff, no
     /// convoy. Prototype lever; the quiet arbiter decides.
     write_fair: bool,
-    /// RFC-0058 P0.1 (verified profile): one-way pin forcing the
-    /// single-writer critical section for **every** commit — no
-    /// leader/member merge, no shared fsync. Set once by
-    /// [`ConcurrentDb::pin_verified`]; never cleared.
-    lone_only: AtomicBool,
+    /// RFC-0058 P0.1 (verified profile), reactivated by P2.1: one-way pin
+    /// declaring the verified group composition — the leader/member merge
+    /// runs with the proved group-commit kernel
+    /// (`group_commit_kernel.rs`), the catch-up window is forced to 0
+    /// (merging happens by natural queuing, never by a delay window), and
+    /// async writers keep the un-merged bypass (no leader dependency).
+    /// Set once by [`ConcurrentDb::pin_verified`]; never cleared.
+    verified: AtomicBool,
     /// RFC-0045 P0.1: lock-wait accumulation for the async bypass
     /// (`PEDRA_WRITE_PHASE_STATS=1`); `None` when the env is unset.
     phase_stats: Option<Arc<crate::db::WritePhaseStats>>,
@@ -243,7 +247,7 @@ impl WriteGroup {
                     _ => None,
                 })
                 .unwrap_or(false),
-            lone_only: AtomicBool::new(false),
+            verified: AtomicBool::new(false),
             phase_stats: None,
         }
     }
@@ -337,24 +341,13 @@ impl WriteGroup {
             self.last_multi_ns.store(Self::now_ns(), Ordering::Relaxed);
         }
 
-        // RFC-0058 P0.1 (verified profile): every commit is a single-writer
-        // critical section — no leader/member merge, no shared fsync. Sync
-        // and OCC writes take `lone_commit` (OCC validated under the write
-        // lock — first-committer-wins holds); plain async takes the write
-        // lock itself (the un-merged bypass shape). The merge returns only
-        // with the group-commit kernel (RFC-0057 P2.1 / RFC-0058 P2.1).
-        if self.lone_only.load(Ordering::Relaxed) {
-            let result = if occ.is_none() && !do_sync {
-                db.write().commit_async_ops(ops)
-            } else {
-                Self::lone_commit(self, db, ops, do_sync, occ)
-            };
-            self.batches.fetch_add(1, Ordering::Relaxed);
-            self.batch_ops.fetch_add(1, Ordering::Relaxed);
-            self.active.fetch_sub(1, Ordering::Relaxed);
-            self.mark_complete();
-            return result;
-        }
+        // RFC-0058 P2.1 (verified profile): the merge is back — the
+        // group decision is the proved `group_commit_kernel` (first-
+        // committer-wins, group atomicity, fence = max member seq).
+        // The pin's declared composition lives on: `pin_verified`
+        // forces the catch-up window to 0 and keeps async writers on
+        // the un-merged bypass below.
+        let async_merged = self.async_group && !self.verified.load(Ordering::Relaxed);
 
         // Lone writer (parity bench, sequential client): skip the mpsc hop.
         // WAL append under the write lock, `fdatasync` off it (same as the
@@ -381,7 +374,7 @@ impl WriteGroup {
         // syncs (there is no fd to share). `PEDRA_ASYNC_GROUP=0` keeps the
         // Rocks shape instead: every async writer takes the write lock
         // itself (no mpsc, no leader dependency).
-        if occ.is_none() && !do_sync && !self.async_group {
+        if occ.is_none() && !do_sync && !async_merged {
             let t0 = self.phase_stats.as_ref().map(|_| Instant::now());
             // RFC-0045 P0.2: bounded spin-then-park (`PEDRA_WRITE_SPIN`).
             // Default 0 = plain park (current shape). P0 measured the 50-thread
@@ -496,13 +489,11 @@ impl WriteGroup {
             // runs as a blocking section (CPU token released, out of the
             // enabled set until the reply lands).
             let recv_reply = || {
-                rx.expect("follower has recv")
-                    .recv()
-                    .unwrap_or_else(|_| {
-                        Err(CoreError::Internal(
-                            "write group leader dropped reply channel".into(),
-                        ))
-                    })
+                rx.expect("follower has recv").recv().unwrap_or_else(|_| {
+                    Err(CoreError::Internal(
+                        "write group leader dropped reply channel".into(),
+                    ))
+                })
             };
             #[cfg(feature = "pct")]
             {
@@ -575,8 +566,9 @@ impl WriteGroup {
                 }
             }
 
-            // One write lock: append + absorb anyone who queued during
-            // prepare (no extra wait) + one fsync + apply (RFC-0041 P1.1).
+            // First write lock: append + absorb anyone who queued during
+            // prepare (no extra wait). fsync is off that lock; apply is the
+            // second hold after durable WAL (RFC-0045 P2.1 / RFC-0041 P1.1).
             // RFC-0051 P0: PCT preemption point before the leader takes the
             // write lock (lock-free: followers can still enqueue).
             #[cfg(feature = "pct")]
@@ -640,19 +632,31 @@ impl WriteGroup {
     }
 
     fn validate_occ_batch<E: Env>(guard: &mut Db<E>, batch: &mut [PendingWrite]) {
-        for p in batch.iter_mut() {
+        // RFC-0057 P2.1: collect each member's read state under the one
+        // lock acquisition, then let the group-commit kernel decide —
+        // every member validates against the same `last_seq` (the group's
+        // own sequences do not exist yet), which is the simultaneity the
+        // kernel's theorem pins.
+        let mut reads: Vec<crate::group_commit_kernel::OccRead> = Vec::with_capacity(batch.len());
+        let mut too_old: Vec<Option<CoreError>> = Vec::with_capacity(batch.len());
+        for p in batch.iter() {
             let Some((snap, keys)) = p.occ.as_ref() else {
+                reads.push(crate::group_commit_kernel::OccRead {
+                    snap: 0,
+                    touched_key_written_after: false,
+                });
+                too_old.push(None);
                 continue;
             };
             if let Err(e) = guard.ensure_snapshot_readable(Snapshot::at(*snap)) {
-                p.ops.clear();
-                p.occ_err = Some(e);
+                too_old.push(Some(e));
+                reads.push(crate::group_commit_kernel::OccRead {
+                    snap: 0,
+                    touched_key_written_after: false,
+                });
                 continue;
             }
-            if guard.last_sequence() == *snap {
-                continue;
-            }
-            let conflict = keys
+            let touched = keys
                 .iter()
                 .any(|k| guard.key_has_write_after(k.as_ref(), *snap))
                 || p.ops.iter().any(|op| match op {
@@ -661,6 +665,19 @@ impl WriteGroup {
                     }
                     BatchOp::DeleteRange { .. } => false,
                 });
+            reads.push(crate::group_commit_kernel::OccRead {
+                snap: *snap,
+                touched_key_written_after: touched,
+            });
+            too_old.push(None);
+        }
+        let conflicts = crate::group_commit_kernel::group_validate(&reads, guard.last_sequence());
+        for ((p, conflict), old) in batch.iter_mut().zip(conflicts).zip(too_old) {
+            if let Some(e) = old {
+                p.ops.clear();
+                p.occ_err = Some(e);
+                continue;
+            }
             if conflict {
                 p.ops.clear();
                 p.occ_err = Some(CoreError::TransactionConflict);
@@ -680,19 +697,20 @@ impl WriteGroup {
         let mut guard = db.write();
         if let Some((snap, keys)) = occ.as_ref() {
             guard.ensure_snapshot_readable(Snapshot::at(*snap))?;
-            if guard.last_sequence() != *snap {
-                let conflict = keys
-                    .iter()
-                    .any(|k| guard.key_has_write_after(k.as_ref(), *snap))
-                    || ops.iter().any(|op| match op {
-                        BatchOp::Put { key, .. } | BatchOp::Delete { key } => {
-                            guard.key_has_write_after(key, *snap)
-                        }
-                        BatchOp::DeleteRange { .. } => false,
-                    });
-                if conflict {
-                    return Err(CoreError::TransactionConflict);
-                }
+            let last_seq = guard.last_sequence();
+            let touched = keys
+                .iter()
+                .any(|k| guard.key_has_write_after(k.as_ref(), *snap))
+                || ops.iter().any(|op| match op {
+                    BatchOp::Put { key, .. } | BatchOp::Delete { key } => {
+                        guard.key_has_write_after(key, *snap)
+                    }
+                    BatchOp::DeleteRange { .. } => false,
+                });
+            // RFC-0057 P2.1: first-committer-wins is the kernel's
+            // decision, not an inline predicate.
+            if crate::group_commit_kernel::occ_conflict(*snap, last_seq, touched) {
+                return Err(CoreError::TransactionConflict);
             }
         }
         match guard.group_start(vec![(ops, do_sync)]) {
@@ -714,12 +732,17 @@ impl WriteGroup {
         }
     }
 
-    /// Apply mem under the write lock, absorb anyone who queued during that
-    /// apply (same fd, no extra wait), drop the lock for WAL `fdatasync`,
-    /// then publish (G1: Ok and default `get` wait for fd).
+    /// WAL encode under the write lock, absorb anyone who queued during that
+    /// encode (same fd, no extra wait), drop the lock for WAL `fdatasync`,
+    /// then reacquire to apply mem + publish (RFC-0045 P2.1). G1: Ok and
+    /// default `get` wait for fd. Apply is still serialized on the second
+    /// hold — not a concurrent skiplist (RFC-0055 P1.1).
     ///
     /// RFC-0042: records the real `fdatasync` duration into the group's fd
     /// EMA; when `lone` is set, fills `[apply, io, publish]` phase timings.
+    ///
+    /// The WAL mutex is released before the apply write-lock is taken, so a
+    /// follower blocked on `wal.lock()` during our fd cannot deadlock us.
     #[allow(clippy::too_many_arguments)]
     fn finish_group_off_lock<E: Env>(
         group: &WriteGroup,
@@ -730,10 +753,15 @@ impl WriteGroup {
         mut drain: impl FnMut() -> Vec<PendingWrite>,
         mut lone: Option<&mut [u64; 4]>,
     ) -> Vec<Result<SequenceNumber>> {
+        enum Chunk {
+            Fly(crate::db::GroupInFlight),
+            Done(Vec<Result<SequenceNumber>>),
+        }
         let mut need_sync = inflight.needs_sync();
         let mut pub_seq = inflight.max_appended_seq();
         guard.begin_commit();
-        let mut results = guard.group_apply(inflight);
+        guard.stage_unapplied(&inflight);
+        let mut chunks = vec![Chunk::Fly(inflight)];
         if let Some(batch) = batch.as_mut() {
             loop {
                 let mut extra = drain();
@@ -746,22 +774,29 @@ impl WriteGroup {
                     .map(|p| (std::mem::take(&mut p.ops), p.do_sync))
                     .collect();
                 match guard.group_start(more) {
-                    Err(r) => results.extend(r),
+                    Err(r) => chunks.push(Chunk::Done(r)),
                     Ok(inf) => {
                         need_sync |= inf.needs_sync();
                         pub_seq = pub_seq.max(inf.max_appended_seq());
-                        results.extend(guard.group_apply(inf));
+                        guard.stage_unapplied(&inf);
+                        chunks.push(Chunk::Fly(inf));
                     }
                 }
                 batch.extend(extra);
             }
         }
-        // RFC-0051 P1.3 forensics: record the returned-seq range of this
+        // RFC-0051 P1.3 forensics: record the assigned-seq range of this
         // atomic group so tests can tell same-group (simultaneous) writes
-        // from cross-group (ordered) ones.
+        // from cross-group (ordered) ones. Recorded before fd so a fenced
+        // group still has a range.
         #[cfg(feature = "pct")]
         {
-            let seqs: Vec<u64> = results.iter().filter_map(|r| r.as_ref().ok().copied()).collect();
+            let mut seqs: Vec<u64> = Vec::new();
+            for chunk in &chunks {
+                if let Chunk::Fly(inf) = chunk {
+                    inf.collect_appended_seqs(&mut seqs);
+                }
+            }
             if let (Some(lo), Some(hi)) = (seqs.iter().copied().min(), seqs.iter().copied().max()) {
                 crate::pct_hooks::record_group_range(lo, hi);
             }
@@ -791,22 +826,32 @@ impl WriteGroup {
         }
         if let Some(e) = io_err {
             let mut g = db.write();
+            for chunk in &chunks {
+                if let Chunk::Fly(inf) = chunk {
+                    g.unstage_unapplied(inf);
+                }
+            }
             g.fence_durability(&e, crate::db::FenceClass::of_core(&e));
             g.end_commit();
-            return results
+            return chunks
                 .into_iter()
-                .map(|r| match r {
-                    Ok(_) => Err(CoreError::Internal(format!(
-                        "group wal write/sync failed: {e}"
-                    ))),
-                    Err(err) => Err(err),
+                .flat_map(|chunk| match chunk {
+                    Chunk::Fly(inf) => inf.fail_io(&e),
+                    Chunk::Done(r) => r,
                 })
                 .collect();
         }
-        let g = db.read();
+        let mut g = db.write();
         if need_sync {
             g.note_wal_sync();
         }
+        let results: Vec<Result<SequenceNumber>> = chunks
+            .into_iter()
+            .flat_map(|chunk| match chunk {
+                Chunk::Fly(inf) => g.group_apply(inf),
+                Chunk::Done(r) => r,
+            })
+            .collect();
         g.publish_sequence(pub_seq);
         g.end_commit();
         if let Some(l) = lone {
@@ -871,8 +916,9 @@ impl ConcurrentDb<StdEnv> {
     }
 
     /// Open on the real filesystem with the **verified profile**
-    /// (RFC-0058 P0.1): [`OpenOptions::verified`] file options plus the
-    /// lone-commit-only group pin.
+    /// (RFC-0058 P0.1, P2.1): [`OpenOptions::verified`] file options plus
+    /// the verified group pin (merge with the proved kernel, zero
+    /// catch-up window, un-merged async bypass).
     ///
     /// # Errors
     /// Same as [`Db::open_with`].
@@ -1056,6 +1102,25 @@ impl<E: Env> ConcurrentDb<E> {
         };
         self.inner.write().install_prepared_l0_compact(job, table)?;
         Ok(true)
+    }
+
+    /// RFC-0039 P2.2: compact L0 until below [`crate::db::L0_COMPACTION_TRIGGER`].
+    /// Host workers call this (no thread in core). Returns jobs run.
+    ///
+    /// # Errors
+    /// SST / MANIFEST I/O.
+    pub fn drain_l0_below_trigger(&self) -> Result<usize> {
+        let mut n = 0usize;
+        loop {
+            let l0 = self.inner.read().level_file_count(0);
+            if l0 < crate::db::L0_COMPACTION_TRIGGER {
+                return Ok(n);
+            }
+            if !self.compact_l0_off_lock()? {
+                return Ok(n);
+            }
+            n = n.saturating_add(1);
+        }
     }
 
     /// Whether auto-compact uses snapshot-safe reclaim.
@@ -1293,12 +1358,22 @@ impl<E: Env> ConcurrentDb<E> {
         self.published_seq.load(Ordering::Acquire)
     }
 
-    /// OCC begin snapshot: `last_sequence` if the write lock is free, else
-    /// published (do not block `begin` behind apply).
+    /// OCC begin snapshot: `last_sequence` if the write lock is free **and**
+    /// no group is in the off-lock fsync/apply window; otherwise published.
+    ///
+    /// RFC-0045 P2.1 drops the write lock for `fdatasync` before memtable
+    /// apply. A snap equal to an unapplied seq would miss the write on
+    /// `get_at` and fail to conflict (`seq > snap` is false when equal).
     #[must_use]
     pub(crate) fn occ_snapshot(&self) -> SequenceNumber {
         match self.inner.try_read() {
-            Some(g) => g.last_sequence(),
+            Some(g) => {
+                if g.commit_inflight() > 0 {
+                    self.published_seq.load(Ordering::Acquire)
+                } else {
+                    g.last_sequence()
+                }
+            }
             None => self.published_seq.load(Ordering::Acquire),
         }
     }
@@ -1573,24 +1648,24 @@ impl<E: Env> ConcurrentDb<E> {
             .store(micros, Ordering::Relaxed);
     }
 
-    /// RFC-0058 P0.1: one-way pin of the verified group policy — from now
-    /// on every commit is a **single-writer critical section** (no
-    /// leader/member merge, no shared fsync) and the catch-up window is
-    /// forced to 0. There is deliberately no un-pin: the composition is
-    /// declared, not toggled. Prefer [`Self::open_verified`] /
+    /// RFC-0058 P0.1 → P2.1: one-way pin of the verified group policy —
+    /// from now on the leader/member merge runs with the proved
+    /// group-commit kernel, the catch-up window is forced to 0 (no
+    /// delay-window merging), and async writers keep the un-merged
+    /// bypass (no leader dependency, even if `PEDRA_ASYNC_GROUP=1`).
+    /// There is deliberately no un-pin: the composition is declared,
+    /// not toggled. Prefer [`Self::open_verified`] /
     /// [`crate::VerifiedProfile::open_with_env`], which pin at open.
     pub fn pin_verified(&self) {
-        self.writes.lone_only.store(true, Ordering::Release);
-        self.writes
-            .catchup_window_us
-            .store(0, Ordering::Relaxed);
+        self.writes.verified.store(true, Ordering::Release);
+        self.writes.catchup_window_us.store(0, Ordering::Relaxed);
     }
 
     /// Whether the verified group policy is pinned
     /// (see [`Self::pin_verified`]).
     #[must_use]
     pub fn is_verified(&self) -> bool {
-        self.writes.lone_only.load(Ordering::Acquire)
+        self.writes.verified.load(Ordering::Acquire)
     }
 
     /// Group fsync for prior `WriteOptions::no_sync` writes (write lock).
@@ -2395,7 +2470,7 @@ mod tests {
             let db = ConcurrentDb::open_with(
                 &dir,
                 OpenOptions {
-                                        wal_full_fsync: true,
+                    wal_full_fsync: true,
                     history: Default::default(),
                     wal_recovery: Default::default(),
                     sync: false,
@@ -2435,7 +2510,7 @@ mod tests {
             let db = ConcurrentDb::open_with(
                 &dir,
                 OpenOptions {
-                                        wal_full_fsync: true,
+                    wal_full_fsync: true,
                     history: Default::default(),
                     wal_recovery: Default::default(),
                     sync: false,
@@ -2485,7 +2560,7 @@ mod tests {
             let db = ConcurrentDb::open_with(
                 &dir,
                 OpenOptions {
-                                        wal_full_fsync: true,
+                    wal_full_fsync: true,
                     history: Default::default(),
                     wal_recovery: Default::default(),
                     sync: false,
@@ -2540,7 +2615,7 @@ mod tests {
             let db = ConcurrentDb::open_with(
                 &dir,
                 OpenOptions {
-                                        wal_full_fsync: true,
+                    wal_full_fsync: true,
                     history: Default::default(),
                     wal_recovery: Default::default(),
                     sync: false,
@@ -2594,7 +2669,7 @@ mod tests {
             let db = ConcurrentDb::open_with(
                 &dir,
                 OpenOptions {
-                                        wal_full_fsync: true,
+                    wal_full_fsync: true,
                     history: Default::default(),
                     wal_recovery: Default::default(),
                     sync: false,
@@ -2629,7 +2704,7 @@ mod tests {
         ConcurrentDb::open_with(
             dir,
             OpenOptions {
-                                wal_full_fsync: true,
+                wal_full_fsync: true,
                 history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
@@ -2651,7 +2726,7 @@ mod tests {
         let db = ConcurrentDb::open_with(
             &dir,
             OpenOptions {
-                                wal_full_fsync: true,
+                wal_full_fsync: true,
                 history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
@@ -2677,7 +2752,7 @@ mod tests {
         let db = ConcurrentDb::open_with(
             &dir,
             OpenOptions {
-                                wal_full_fsync: true,
+                wal_full_fsync: true,
                 history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: false,
@@ -2823,7 +2898,7 @@ mod tests {
         let db = ConcurrentDb::open_with(
             &dir,
             OpenOptions {
-                                wal_full_fsync: true,
+                wal_full_fsync: true,
                 history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
@@ -3480,6 +3555,96 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
     }
 
+    /// RFC-0045 P2.1: ConcurrentDb (apply after durable fd) recovers the
+    /// same user-visible state as single-threaded `Db::group_commit`.
+    #[test]
+    fn encode_offlock_matches_lock_path() {
+        let ops = vec![
+            BatchOp::put(b"a", b"1"),
+            BatchOp::put(b"b", b"2"),
+            BatchOp::delete(b"a"),
+            BatchOp::put(b"c", b"3"),
+            BatchOp::put(b"intern", b"payload-payload-payload"),
+            BatchOp::put(b"intern2", b"payload-payload-payload"),
+        ];
+        let dir_lock = temp_dir();
+        let dir_off = temp_dir();
+        {
+            let mut db = crate::db::Db::open(&dir_lock).unwrap();
+            for r in db.group_commit(vec![(ops.clone(), true)]) {
+                r.unwrap();
+            }
+            db.close().unwrap();
+        }
+        {
+            let db = open_sync(&dir_off);
+            db.apply_batch(ops).unwrap();
+            db.close().unwrap();
+        }
+        let lock = crate::db::Db::open(&dir_lock).unwrap();
+        let off = crate::db::Db::open(&dir_off).unwrap();
+        for k in [b"a".as_slice(), b"b", b"c", b"intern", b"intern2"] {
+            assert_eq!(
+                lock.get(k),
+                off.get(k),
+                "recovered value mismatch for {k:?}"
+            );
+        }
+        assert_eq!(lock.get(b"a"), None);
+        assert_eq!(off.get(b"b").as_deref(), Some(&b"2"[..]));
+        lock.close().unwrap();
+        off.close().unwrap();
+        let _ = fs::remove_dir_all(&dir_lock);
+        let _ = fs::remove_dir_all(&dir_off);
+    }
+
+    /// RFC-0045 P2.1: a failed off-lock `fdatasync` must not leave the
+    /// write in the memtable (or the OCC unapplied list). Recover still
+    /// sees it if the frame reached the file (existing fence case B).
+    #[test]
+    fn sync_fail_does_not_apply_before_publish() {
+        let dir = temp_dir();
+        let env = FenceEnv::new();
+        let db = ConcurrentDb::open_with_env(&dir, OpenOptions::default(), env.clone()).unwrap();
+        db.put(b"a", b"1").unwrap();
+        let snap = db.visible_sequence();
+        env.fail_sync.set(true);
+        assert!(db.put(b"b", b"2").is_err(), "injected WAL sync failure");
+        assert!(
+            !db.with_read(|d| d.key_has_write_after(b"b", snap)),
+            "fsync-fail must unstage and must not apply to mem"
+        );
+        assert_eq!(db.get(b"b"), None, "unpublished after fence");
+        let rec = db.recover_from_fence().unwrap().expect("fenced");
+        assert_eq!(rec.replayed_through, 2);
+        assert!(!rec.lost_writes);
+        assert_eq!(db.get(b"b").as_deref(), Some(&b"2"[..]));
+        drop(db);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0045 P2.1: while `commit_inflight > 0` the write lock is free
+    /// (off-lock fd) but assigned seqs are not in the memtable — OCC begin
+    /// must not take `last_sequence`.
+    #[test]
+    fn occ_snapshot_pins_published_while_commit_inflight() {
+        let dir = temp_dir();
+        let db = open_sync(&dir);
+        db.put(b"a", b"1").unwrap();
+        let published = db.visible_sequence();
+        db.with_write(|d| {
+            d.begin_commit();
+            d.prepare_write_ops(vec![BatchOp::put(b"x", b"y")]).unwrap();
+        });
+        assert!(
+            db.last_sequence() > published,
+            "prepare must assign a seq ahead of publish"
+        );
+        assert_eq!(db.occ_snapshot(), published);
+        db.with_write(|d| d.end_commit());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn count_in_range_cache_matches_locked_and_invalidates() {
         use std::ops::Bound;
@@ -3653,7 +3818,7 @@ mod tests {
             ConcurrentDb::open_with(
                 &dir,
                 OpenOptions {
-                                        wal_full_fsync: true,
+                    wal_full_fsync: true,
                     history: Default::default(),
                     wal_recovery: Default::default(),
                     sync: true,
@@ -3952,7 +4117,7 @@ mod tests {
             sleep_us: Arc::clone(&sleep_us),
         };
         let opts = OpenOptions {
-                        wal_full_fsync: true,
+            wal_full_fsync: true,
             history: Default::default(),
             wal_recovery: Default::default(),
             sync: true,
@@ -4017,7 +4182,7 @@ mod tests {
         let re = ConcurrentDb::open_with_env(
             &dir,
             OpenOptions {
-                                wal_full_fsync: true,
+                wal_full_fsync: true,
                 sync: false,
                 ..opts
             },
@@ -4107,7 +4272,7 @@ mod tests {
         let re = ConcurrentDb::open_with(
             &dir,
             OpenOptions {
-                                wal_full_fsync: true,
+                wal_full_fsync: true,
                 history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
@@ -4173,7 +4338,7 @@ mod tests {
         let db = ConcurrentDb::open_with(
             &dir,
             OpenOptions {
-                                wal_full_fsync: true,
+                wal_full_fsync: true,
                 history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
@@ -4351,7 +4516,7 @@ mod tests {
         let db = ConcurrentDb::open_with(
             &dir,
             OpenOptions {
-                                wal_full_fsync: true,
+                wal_full_fsync: true,
                 history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
@@ -4393,7 +4558,7 @@ mod tests {
         let db = ConcurrentDb::open_with(
             &dir,
             OpenOptions {
-                                wal_full_fsync: true,
+                wal_full_fsync: true,
                 history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: false,
@@ -4470,7 +4635,7 @@ mod tests {
         let restored = ConcurrentDb::open_with(
             &dest,
             OpenOptions {
-                                wal_full_fsync: true,
+                wal_full_fsync: true,
                 history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
@@ -4705,7 +4870,7 @@ mod tests {
         let db = ConcurrentDb::open_with(
             &dir,
             OpenOptions {
-                                wal_full_fsync: true,
+                wal_full_fsync: true,
                 history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
@@ -4746,7 +4911,7 @@ mod tests {
         let db = ConcurrentDb::open_with(
             &dir,
             OpenOptions {
-                                wal_full_fsync: true,
+                wal_full_fsync: true,
                 history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
@@ -4797,7 +4962,7 @@ mod tests {
         let db = ConcurrentDb::open_with(
             &dir,
             OpenOptions {
-                                wal_full_fsync: true,
+                wal_full_fsync: true,
                 history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
@@ -4854,7 +5019,7 @@ mod tests {
         let db = ConcurrentDb::open_with(
             &dir,
             OpenOptions {
-                                wal_full_fsync: true,
+                wal_full_fsync: true,
                 history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
@@ -4914,7 +5079,7 @@ mod tests {
         let db = ConcurrentDb::open_with(
             &dir,
             OpenOptions {
-                                wal_full_fsync: true,
+                wal_full_fsync: true,
                 history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: false,
@@ -4938,8 +5103,48 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
     }
 
+    /// RFC-0039 P2.2: host drain loops until L0 < trigger so scan does not
+    /// observe a trigger-full L0 set.
+    #[test]
+    fn drain_l0_below_trigger_for_scan() {
+        let dir = temp_dir();
+        let db = ConcurrentDb::open_with(
+            &dir,
+            OpenOptions {
+                wal_full_fsync: true,
+                history: Default::default(),
+                wal_recovery: Default::default(),
+                sync: false,
+                auto_flush_bytes: None,
+                auto_compact_sst_count: None,
+                auto_compact_sst_bytes: None,
+                exclusive: true,
+                large_value_threshold: None,
+            },
+        )
+        .unwrap();
+        db.set_defer_auto_compact(true);
+        for i in 0..crate::db::L0_COMPACTION_TRIGGER {
+            db.put([b'a', i as u8], [b'1', i as u8]).unwrap();
+            db.flush().unwrap();
+        }
+        let jobs = db.drain_l0_below_trigger().unwrap();
+        assert!(jobs >= 1, "must compact at least once from a full L0");
+        let l0 = db.with_read(|d| d.level_file_count(0));
+        assert!(
+            l0 < crate::db::L0_COMPACTION_TRIGGER,
+            "drain must leave L0 below trigger, got {l0}"
+        );
+        let n = db
+            .count_in_range(Bound::Unbounded, Bound::Unbounded, None)
+            .unwrap();
+        assert_eq!(n, crate::db::L0_COMPACTION_TRIGGER);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
     /// RFC-0050 P0.4: concurrent puts amortize into write groups; memtable
-    /// apply remains inside the leader's write-lock (lone-path `apply` phase).
+    /// apply is still serialized on a write-lock hold (RFC-0045 P2.1 moved
+    /// that hold to *after* durable fsync — not a concurrent skiplist).
     #[test]
     fn write_group_amortizes_apply_still_locked() {
         let dir = temp_dir();
@@ -4968,17 +5173,18 @@ mod tests {
             groups < submits,
             "group commit must amortize: groups={groups} submits={submits}"
         );
-        // Apply still happens under the leader write lock (group commit), not a
-        // concurrent memtable — that ceiling is RFC-0045 P2.1, not this P0.
+        // Apply is still under a write lock (second hold, after fd). Concurrent
+        // skiplist remains RFC-0055 P1.1 (gated; P0 numbers did not obligate).
         let _ = fs::remove_dir_all(&dir);
     }
 
-    /// RFC-0058 P0.1/P0.2: the verified profile forces the composition.
+    /// RFC-0058 P0.1→P2.1: the verified profile declares the composition.
     /// Same barrier-shaped concurrent workload as the group-amortization
     /// test above (which proves this workload merges in full mode):
-    /// under the pin **no writer ever queues** (queued == 0) and every
-    /// submit is its own single-writer commit (batches == submits); all
-    /// writes survive reopen (silent_wrong = 0).
+    /// under the pin **the merge runs** (`queued > 0`, amortized
+    /// `batches < submits` — sync/OCC writers share leaders and fsyncs),
+    /// the catch-up window is pinned to 0 (merging by queuing, never by
+    /// delay), and all writes survive reopen (silent_wrong = 0).
     #[test]
     fn verified_profile_forces_safe_composition() {
         let dir = temp_dir();
@@ -4999,8 +5205,9 @@ mod tests {
                         if t % 2 == 0 {
                             db.put(k.as_bytes(), b"plain").unwrap();
                         } else {
-                            // OCC txs take the lone path too — validation
-                            // under the write lock keeps first-committer-wins.
+                            // OCC txs ride the group too — every member
+                            // validates against the same `last_seq`
+                            // (group atomicity, RFC-0057 P2.1).
                             let mut tx = db.begin_occ();
                             tx.put(k.as_bytes(), b"occ").unwrap();
                             tx.commit().unwrap();
@@ -5012,10 +5219,10 @@ mod tests {
         let (submits, queued, batches, batch_ops) = db.write_group_stats();
         assert_eq!(submits, (n * ops) as u64);
         assert_eq!(batch_ops, (n * ops) as u64);
-        assert_eq!(queued, 0, "verified mode must never merge writers");
-        assert_eq!(
-            batches, submits,
-            "every commit is its own single-writer batch"
+        assert!(queued > 0, "verified mode must merge concurrent writers");
+        assert!(
+            batches < submits,
+            "the merge must amortize (batches={batches} submits={submits})"
         );
         let db = Arc::try_unwrap(db)
             .map_err(|_| "threads still hold the db")
@@ -5027,7 +5234,11 @@ mod tests {
         for t in 0..n {
             for i in 0..ops {
                 let k = format!("v/{t}/{i}");
-                let want = if t % 2 == 0 { &b"plain"[..] } else { &b"occ"[..] };
+                let want = if t % 2 == 0 {
+                    &b"plain"[..]
+                } else {
+                    &b"occ"[..]
+                };
                 assert_eq!(db.get(k.as_bytes()).as_deref(), Some(want), "key {k}");
             }
         }
@@ -5092,11 +5303,12 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
     }
 
-    /// RFC-0058 P0.2 (async half, concurrent): barrier-shaped mix of sync
-    /// and `no_sync` writers under the pin — same workload shape the
-    /// group-amortization test merges in full mode. Verified: no writer
-    /// ever queues; after close every key (sync-acked **and** async) is
-    /// visible on reopen with the right value.
+    /// RFC-0058 P0.2 (async half, concurrent): barrier-shaped all-async
+    /// (`no_sync`) workload under the pin. The sync half of the merge is
+    /// covered by `verified_profile_forces_safe_composition`; this test
+    /// pins the **async bypass**: no async writer ever joins a group
+    /// (`queued == 0`, `batches == submits` — no leader dependency), and
+    /// after close every key is visible on reopen with the right value.
     #[test]
     fn verified_async_concurrent_never_merges() {
         let dir = temp_dir();
@@ -5113,14 +5325,11 @@ mod tests {
                     for i in 0..ops {
                         let k = format!("va/{t}/{i}");
                         let v = [(t as u8), (i as u8), 7];
-                        // Every 5th write syncs — a natural barrier that
-                        // also flushes earlier async WAL frames.
-                        let w = if (t + i) % 5 == 0 {
-                            WriteOptions::sync()
-                        } else {
-                            WriteOptions::no_sync()
-                        };
-                        db.put_with(k.as_bytes(), &v, w).unwrap();
+                        // All-async: the verified pin keeps async writers
+                        // on the un-merged bypass even under contention
+                        // with each other.
+                        db.put_with(k.as_bytes(), &v, WriteOptions::no_sync())
+                            .unwrap();
                     }
                 });
             }

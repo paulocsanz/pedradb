@@ -1,0 +1,8 @@
+RFC-0050 P2.3 — QEMU blkdebug flush_to_disk errno=5 (virtio-blk /dev/vda)
+
+I/O error, dev vda, sector 0 op 0x1:(WRITE)
+world failed: store: pedradb: io error: I/O error (os error 5)
+BLK_RUN_END
+C2.4=block_eio_fail_closed
+silent_wrong=absent_run_aborted (run did not return Ok with a wrong value)
+compare_wall_clock=forbidden

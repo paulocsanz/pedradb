@@ -125,6 +125,13 @@ pub struct Trace {
     /// the convergence tail (authenticity / split-brain / resurrection).
     /// 0 when `consistency_check` is off and nothing ran.
     pub consistency_violations: u32,
+    /// RFC-0059 P2.2: trajectory invariant violations observed between
+    /// exchanges (term / snapshot_index / applied_index regressed on a
+    /// live node×range). 0 when `trajectory_check` is off.
+    pub trajectory_violations: u32,
+    /// RFC-0059 P2.1: membership changes applied by the run (windows +
+    /// base schedule removes/adds).
+    pub membership_events: u32,
 }
 
 impl Trace {
@@ -209,6 +216,20 @@ pub struct WorldConfig {
     /// `false` (real-FS runs keep exercising extent preallocation and
     /// real barrier syscalls).
     pub mem_storage: bool,
+    /// RFC-0059 P2.1: splice deterministic membership upgrade/rollback
+    /// windows into the schedule (rolling exit/rejoin under load, an
+    /// aborted upgrade rolled back, and a quorum-shrink window where the
+    /// surviving majority must keep committing). Default `false` keeps
+    /// the historical action stream (pinned regression seeds untouched).
+    pub membership_upgrade: bool,
+    /// RFC-0059 P2.2: trajectory invariants — after every net exchange,
+    /// per (node, range): term, snapshot_index and applied_index must
+    /// never decrease. Violations land in
+    /// `Trace::trajectory_violations` (must be 0).
+    pub trajectory_check: bool,
+    /// RFC-0060 P1.2: splice a deterministic BitFlip of a durable page
+    /// mid-schedule. Default `false` keeps historical traces.
+    pub bitflip: bool,
 }
 
 impl Default for WorldConfig {
@@ -232,8 +253,89 @@ impl Default for WorldConfig {
             consistency_check: false,
             wal_full_fsync: false,
             mem_storage: false,
+            membership_upgrade: false,
+            trajectory_check: false,
+            bitflip: false,
         }
     }
+}
+
+/// Per-node intra-run trajectory sample (RFC-0059 P2.2): raft
+/// coordinates observed right after a net exchange. A live node's term,
+/// snapshot_index and applied_index are monotone across the whole run —
+/// including install-snapshot catch-up (stale snapshots are rejected by
+/// the store's commit guard) and membership exit/rejoin (state is kept,
+/// only the role demotes).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TrajectorySample {
+    /// Schedule step the sample was taken after.
+    pub step: u32,
+    /// Node id (1-based).
+    pub node: u64,
+    /// Range id.
+    pub range: u64,
+    /// Raft term at sample time.
+    pub term: u64,
+    /// Snapshot watermark at sample time.
+    pub snapshot_index: u64,
+    /// Applied watermark at sample time.
+    pub applied_index: u64,
+}
+
+/// Which coordinate regressed between two samples of the same
+/// (node, range): `None` when the pair is monotone.
+#[must_use]
+pub fn trajectory_violation(
+    prev: &TrajectorySample,
+    cur: &TrajectorySample,
+) -> Option<&'static str> {
+    if cur.term < prev.term {
+        Some("term")
+    } else if cur.snapshot_index < prev.snapshot_index {
+        Some("snapshot_index")
+    } else if cur.applied_index < prev.applied_index {
+        Some("applied_index")
+    } else {
+        None
+    }
+}
+
+/// Fold a full sample sequence (any interleaving of nodes/ranges) into
+/// per-(node, range) monotonicity violations. The run itself checks the
+/// same invariant incrementally through [`trajectory_violation`]; this
+/// fold is the exported form (mutant tests + forensics on a captured
+/// trajectory).
+#[must_use]
+pub fn check_trajectory(samples: &[TrajectorySample]) -> Vec<String> {
+    let mut prev: HashMap<(u64, u64), TrajectorySample> = HashMap::new();
+    let mut out = Vec::new();
+    for s in samples {
+        match prev.get(&(s.node, s.range)) {
+            Some(p) => {
+                if let Some(what) = trajectory_violation(p, s) {
+                    out.push(format!(
+                        "n{} r{} {} regressed {}->{} @step {} (after {})",
+                        s.node, s.range, what,
+                        match what {
+                            "term" => p.term,
+                            "snapshot_index" => p.snapshot_index,
+                            _ => p.applied_index,
+                        },
+                        match what {
+                            "term" => s.term,
+                            "snapshot_index" => s.snapshot_index,
+                            _ => s.applied_index,
+                        },
+                        s.step,
+                        p.step
+                    ));
+                }
+            }
+            None => {}
+        }
+        prev.insert((s.node, s.range), s.clone());
+    }
+    out
 }
 
 /// Per-node inbound processing order inside each Net exchange round
@@ -286,6 +388,10 @@ pub struct World {
     /// Per-node inbound processing order; reset at the top of every
     /// `run_with_schedule` (run is single-threaded).
     order: std::cell::RefCell<NodeOrder>,
+    /// RFC-0059 P2.2: last trajectory sample per (node, range); reset at
+    /// the top of every `run_with_schedule`. Interior mutability mirrors
+    /// `order` — the run is single-threaded.
+    traj_prev: std::cell::RefCell<HashMap<(u64, u64), TrajectorySample>>,
 }
 
 impl World {
@@ -296,6 +402,7 @@ impl World {
             cfg,
             seed,
             order: std::cell::RefCell::new(NodeOrder::Arrival),
+            traj_prev: std::cell::RefCell::new(HashMap::new()),
         }
     }
 
@@ -304,7 +411,13 @@ impl World {
     /// # Errors
     /// Store open / I/O.
     pub fn run(&self) -> Result<Trace> {
-        let actions = schedule_from_seed(self.seed, self.cfg.n_nodes, self.cfg.schedule_steps);
+        let mut actions = schedule_from_seed(self.seed, self.cfg.n_nodes, self.cfg.schedule_steps);
+        if self.cfg.membership_upgrade {
+            schedule::splice_membership_windows(&mut actions, self.cfg.n_nodes);
+        }
+        if self.cfg.bitflip {
+            schedule::splice_bitflip_window(&mut actions, self.cfg.n_nodes);
+        }
         self.run_with_schedule(&actions)
     }
 
@@ -409,6 +522,8 @@ impl World {
             commit_unknown: 0,
             row_half_indexed: 0,
             consistency_violations: 0,
+            trajectory_violations: 0,
+            membership_events: 0,
         };
 
         let arm_enabled = |idx: usize| -> bool {
@@ -423,6 +538,7 @@ impl World {
         } else {
             NodeOrder::Arrival
         };
+        self.traj_prev.borrow_mut().clear();
 
         if let Some(ref plan) = buggify {
             cov.hit("B.buggify");
@@ -659,15 +775,21 @@ impl World {
                     );
                 }
                 // (c) resurrection: a delete proven committed by ANY
-                // participating node's own latest entry, yet a majority
-                // still shows a value. DCS rows (`d/…`) are exempt: lease
+                // participating node (changelog latest is delete AND the
+                // live get is gone), yet a majority still shows a value.
+                // Changelog-only deletes are not proof: InstallSnapshot
+                // wipes log as user-key Deletes then restores from export,
+                // and a lazy CHANGELOG cache can keep the wipe as latest
+                // while `get` already serves the restored value (F-found
+                // seed 502514). DCS rows (`d/…`) are exempt: lease
                 // revoke/expire deletes are local-by-design (non-raft);
                 // served invisibility for expired leases is enforced at
                 // read time by the DCS layer, not by row absence.
                 let is_dcs = key.as_slice().starts_with(b"d/");
-                let delete_proven = node_latest
-                    .iter()
-                    .any(|latest| latest.get(key).is_some_and(|&(d, _)| d));
+                let delete_proven = part.iter().zip(&node_latest).any(|(nid, latest)| {
+                    latest.get(key).is_some_and(|&(d, _)| d)
+                        && cluster.get_on(*nid, key).ok().flatten().is_none()
+                });
                 if !is_dcs && delete_proven && any_visible >= maj {
                     trace.consistency_violations += 1;
                     // DBG: which node proves the delete and what each
@@ -896,6 +1018,34 @@ impl World {
         if applied > 0 {
             trace.rpc_applied += applied;
             trace.push(step, "rpc", format!("{tag} n={applied}"));
+        }
+        // RFC-0059 P2.2: trajectory invariant — sampled after every
+        // exchange; a regression on a live node×range is an oracle hit.
+        if self.cfg.trajectory_check {
+            let mut prev = self.traj_prev.borrow_mut();
+            for nid in 1..=self.cfg.n_nodes {
+                for rid in 1..=self.cfg.n_ranges {
+                    let cur = TrajectorySample {
+                        step,
+                        node: nid,
+                        range: rid,
+                        term: cluster.term_on(nid, rid),
+                        snapshot_index: cluster.snapshot_index(nid, rid),
+                        applied_index: cluster.applied_index(nid, rid),
+                    };
+                    if let Some(p) = prev.get(&(nid, rid)) {
+                        if let Some(what) = trajectory_violation(p, &cur) {
+                            trace.trajectory_violations += 1;
+                            trace.push(
+                                step,
+                                "trajectory_regression",
+                                format!("{what} n{nid} r{rid} {p:?} -> {cur:?}"),
+                            );
+                        }
+                    }
+                    prev.insert((nid, rid), cur);
+                }
+            }
         }
         Ok(())
     }
@@ -1335,6 +1485,7 @@ impl World {
                     match cluster.remove_member(*node) {
                         Ok(()) => {
                             memb.set_offline(*node, true);
+                            trace.membership_events += 1;
                             trace.push(step, "rm_member", format!("node={node}"));
                         }
                         Err(e) => {
@@ -1357,6 +1508,7 @@ impl World {
                                 let _ = cluster.tick();
                                 self.exchange(cluster, net, trace, step, "add_tick")?;
                             }
+                            trace.membership_events += 1;
                             trace.push(step, "add_member", format!("node={node}"));
                         }
                         Err(e) => {
@@ -1417,6 +1569,67 @@ impl World {
                     }
                 }
                 trace.push(step, "net_tick", format!("n={n} drained={k}"));
+            }
+            Action::BitFlip {
+                node,
+                n_bits,
+                apply,
+            } => {
+                let nid = *node;
+                let Some(env) = disks.get(&nid).cloned() else {
+                    trace.push(step, "bitflip_skip", format!("node={nid} missing env"));
+                    return Ok(());
+                };
+                if let Err(e) = cluster.flush_engine_on(nid) {
+                    trace.push(step, "bitflip_flush_err", format!("node={nid} e={e}"));
+                }
+                let Some(node_dir) = cluster.node_data_dir(nid) else {
+                    trace.push(step, "bitflip_skip", format!("node={nid} no dir"));
+                    return Ok(());
+                };
+                match pedradb_core::xor_durable_bits(
+                    &env,
+                    &node_dir,
+                    self.seed ^ u64::from(step),
+                    *n_bits,
+                    *apply,
+                ) {
+                    Some(hit) => {
+                        let kind = if *apply { "bitflip" } else { "bitflip_unapplied" };
+                        trace.push(
+                            step,
+                            kind,
+                            format!(
+                                "node={nid} file={} offset={} bits={n_bits} apply={apply}",
+                                hit.file, hit.offset
+                            ),
+                        );
+                        let scrub = pedradb_core::verify_at_rest(&env, &node_dir);
+                        trace.push(
+                            step,
+                            "bitflip_verify",
+                            format!(
+                                "clean={} {}",
+                                scrub.is_clean(),
+                                scrub.summary_line()
+                            ),
+                        );
+                        if *apply {
+                            if let Err(e) = cluster.reopen_engine_on(nid, env) {
+                                trace.push(
+                                    step,
+                                    "bitflip_reopen_err",
+                                    format!("node={nid} e={e}"),
+                                );
+                            } else {
+                                trace.push(step, "bitflip_reopen_ok", format!("node={nid}"));
+                            }
+                        }
+                    }
+                    None => {
+                        trace.push(step, "bitflip_skip", format!("node={nid} no durable file"));
+                    }
+                }
             }
             Action::NetDrain => {
                 let mut k = 0u32;
@@ -2137,6 +2350,140 @@ mod tests {
         assert_eq!(t.dual_leader_fail_open, 0);
         assert_eq!(t.silent_wrong, 0);
         assert_eq!(t.false_majority, 0);
+        let _ = std::fs::remove_dir_all(&parent);
+    }
+
+    /// RFC-0060 P1.2: BitFlip of a flushed durable page, then reopen so
+    /// Gets re-read Env (not the memtable). Must emit a real `bitflip`
+    /// event (not skip); subsequent read fail-closes or stays correct
+    /// (`silent_wrong==0`).
+    #[test]
+    fn bitflip_never_silent_wrong() {
+        let parent = temp_parent("bitflip-ok");
+        let cfg = WorldConfig {
+            n_nodes: 3,
+            n_ranges: 1,
+            schedule_steps: 8,
+            parent: parent.clone(),
+            exchange_rounds: 48,
+            mem_storage: true,
+            ..Default::default()
+        };
+        let actions = bitflip_schedule(true);
+        let t = World::new(0x0060_B17F, cfg)
+            .run_with_schedule(&actions)
+            .expect("bitflip world run");
+        assert_eq!(t.silent_wrong, 0, "{:#?}", t.events);
+        assert!(
+            t.events.iter().any(|e| e.kind == "bitflip"),
+            "must XOR a durable page, not skip: {:#?}",
+            t.events
+        );
+        let scrub = t
+            .events
+            .iter()
+            .find(|e| e.kind == "bitflip_verify")
+            .expect("BitFlip must scrub the live Env before Get");
+        assert!(
+            scrub.detail.contains("clean=false"),
+            "applied flip must dirty at-rest CRC (otherwise Get-from-memtable is vacuous): {scrub:?}"
+        );
+        assert!(
+            t.events.iter().any(|e| e.kind == "bitflip_reopen_ok"
+                || e.kind == "bitflip_reopen_err"),
+            "must close+reopen the node so Get re-reads Env, not the memtable: {:#?}",
+            t.events
+        );
+        assert!(
+            t.events.iter().any(|e| e.kind == "get_ok"
+                || e.kind == "get_err"
+                || e.kind == "get_strong_ok"
+                || e.kind == "get_strong_err"),
+            "must follow the flip with a World read: {:#?}",
+            t.events
+        );
+        let _ = std::fs::remove_dir_all(&parent);
+    }
+
+    fn bitflip_schedule(apply: bool) -> Vec<Action> {
+        vec![
+            Action::ClockAdvance(40),
+            Action::Put {
+                key_tag: 1,
+                val_tag: 7,
+            },
+            Action::ClockAdvance(20),
+            Action::BitFlip {
+                node: 1,
+                n_bits: 1,
+                apply,
+            },
+            Action::Get {
+                key_tag: 1,
+                node: 1,
+            },
+            Action::GetStrong { key_tag: 1 },
+        ]
+    }
+
+    /// RFC-0060 P1.2 mutant on the **same** `Action::BitFlip` path: apply=false
+    /// leaves `verify_at_rest` clean; apply=true dirties the node's files so
+    /// `silent_wrong==0` is not a no-op flip.
+    #[test]
+    fn bitflip_unapplied_mutant_leaves_verify_clean() {
+        let seed = 0x0060_B17F_u64;
+        let parent = temp_parent("bitflip-mutant");
+        let cfg = WorldConfig {
+            n_nodes: 3,
+            n_ranges: 1,
+            schedule_steps: 8,
+            parent: parent.clone(),
+            exchange_rounds: 48,
+            mem_storage: true,
+            ..Default::default()
+        };
+        let t_skip = World::new(seed, cfg.clone())
+            .run_with_schedule(&bitflip_schedule(false))
+            .expect("unapplied bitflip run");
+        assert_eq!(t_skip.silent_wrong, 0, "{:#?}", t_skip.events);
+        assert!(
+            t_skip
+                .events
+                .iter()
+                .any(|e| e.kind == "bitflip_unapplied"),
+            "unapplied path must record the selected page: {:#?}",
+            t_skip.events
+        );
+        let skip_v = t_skip
+            .events
+            .iter()
+            .find(|e| e.kind == "bitflip_verify")
+            .expect("unapplied path must scrub the node");
+        assert!(
+            skip_v.detail.contains("clean=true")
+                && skip_v.detail.contains("errors=0")
+                && !skip_v.detail.contains("files=0"),
+            "unapplied Action::BitFlip must scrub real inventory and leave it clean: {skip_v:?}"
+        );
+
+        let t_on = World::new(seed, cfg)
+            .run_with_schedule(&bitflip_schedule(true))
+            .expect("applied bitflip run");
+        assert_eq!(t_on.silent_wrong, 0, "{:#?}", t_on.events);
+        assert!(
+            t_on.events.iter().any(|e| e.kind == "bitflip"),
+            "applied path must XOR: {:#?}",
+            t_on.events
+        );
+        let on_v = t_on
+            .events
+            .iter()
+            .find(|e| e.kind == "bitflip_verify")
+            .expect("applied path must scrub the node");
+        assert!(
+            on_v.detail.contains("clean=false"),
+            "applied Action::BitFlip must dirty verify_at_rest (not vacuous silent_wrong==0): {on_v:?}"
+        );
         let _ = std::fs::remove_dir_all(&parent);
     }
 

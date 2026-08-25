@@ -450,12 +450,14 @@ fn list_page(db: &Db, start: &[u8], limit: usize) {
 
 ### ConcurrentDb contention (M2)
 
-`ConcurrentDb` serialises **writers** with a write lock that holds through WAL
-append + memtable apply + publish; one `fdatasync` is amortized across the
-write group. Concurrent puts are correct and linearizable. Write QPS is **not**
-RocksDB multi-writer class (no concurrent memtable / multi-flush). Many cores
-with disjoint keys still share that lock — the ceiling is ours (RFC-0045 /
-RFC-0050 P0.4). Readers share a read lock.
+`ConcurrentDb` serialises **writers**: the first write-lock hold is WAL
+encode; `fdatasync` runs off that lock; memtable apply + publish take a
+second hold after the WAL is durable (RFC-0045 P2.1). One `fdatasync` is
+amortized across the write group. Concurrent puts are correct and
+linearizable. Write QPS is **not** RocksDB multi-writer class (no concurrent
+memtable / multi-flush — RFC-0055 P1.1 still gated). Many cores with disjoint
+keys still share that lock — the ceiling is ours (RFC-0045 / RFC-0050 P0.4).
+Readers share a read lock.
 
 ### Raft integration wall sleep (M5)
 

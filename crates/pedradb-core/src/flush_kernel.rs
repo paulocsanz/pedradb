@@ -110,12 +110,7 @@ pub enum WalRotateAction {
 /// Finite-domain check: [`tests::theorem_wal_rotate_on_finite_domain`].
 #[must_use]
 pub fn wal_rotate_decision(s: WalPinState) -> WalRotateAction {
-    if s.mem_empty
-        && !s.imm_present
-        && !s.pin_live
-        && !s.parked_unflushed
-        && !s.commit_inflight
-    {
+    if s.mem_empty && !s.imm_present && !s.pin_live && !s.parked_unflushed && !s.commit_inflight {
         WalRotateAction::RotateWal
     } else {
         WalRotateAction::KeepWal
@@ -127,11 +122,7 @@ pub fn wal_rotate_decision(s: WalPinState) -> WalRotateAction {
 /// copy of acked keys (`Db::rotate_wal_ignoring_pin` replays this).
 #[must_use]
 pub fn wal_rotate_decision_as_is_ignore_pin(s: WalPinState) -> WalRotateAction {
-    if s.mem_empty
-        && !s.imm_present
-        && !s.parked_unflushed
-        && !s.commit_inflight
-    {
+    if s.mem_empty && !s.imm_present && !s.parked_unflushed && !s.commit_inflight {
         WalRotateAction::RotateWal
     } else {
         WalRotateAction::KeepWal
@@ -236,7 +227,11 @@ mod tests {
                 && !s.commit_inflight;
             assert_eq!(a == WalRotateAction::RotateWal, clean, "rotate iff clean");
             let m = wal_rotate_decision_as_is_ignore_pin(s);
-            if s.pin_live && s.mem_empty && !s.imm_present && !s.parked_unflushed && !s.commit_inflight
+            if s.pin_live
+                && s.mem_empty
+                && !s.imm_present
+                && !s.parked_unflushed
+                && !s.commit_inflight
             {
                 assert_eq!(
                     m,

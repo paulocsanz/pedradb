@@ -49,7 +49,7 @@ fn main() {
     if args.is_empty() {
         eprintln!(
             "usage: montanha-tcp <node|put|get|status|tick|smoke|elect-wait|set-peers|proxy> [flags]\n\
-             node: --id N --data DIR --bind ADDR --peer id=addr... [--ranges N] [--health ADDR] [--write-backpressure]\n\
+             node: --id N --data DIR --bind ADDR --peer id=addr... [--ranges N] [--health ADDR] [--write-backpressure] [--cluster-id HEX32]\n\
              tls:  --tls-cert PEM --tls-key PEM --tls-ca PEM [--tls-server-name NAME] [--require-tls]\n\
              put:  --addr HOST:PORT --key K --value V [--peer id=addr...]\n\
              get:  --addr HOST:PORT --key K\n\
@@ -130,6 +130,18 @@ fn flag_val(args: &[String], name: &str) -> Option<String> {
         i += 1;
     }
     None
+}
+
+fn parse_cluster_id_hex(s: &str) -> Result<[u8; 16], String> {
+    let s = s.trim();
+    if s.len() != 32 || !s.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Err("need 32 hex chars (16 bytes)".into());
+    }
+    let mut id = [0u8; 16];
+    for i in 0..16 {
+        id[i] = u8::from_str_radix(&s[i * 2..i * 2 + 2], 16).map_err(|e| e.to_string())?;
+    }
+    Ok(id)
 }
 
 fn flag_peers(args: &[String]) -> HashMap<u64, String> {
@@ -220,7 +232,7 @@ fn cmd_node(args: &[String]) {
         .or_else(|| env::var("HEALTH_BIND").ok())
         .unwrap_or_else(|| {
             let p = bind.port().saturating_add(79); // 9701 → 9780
-            // RFC-0050 P0.5: health HTTP is localhost-only unless --health is set.
+                                                    // RFC-0050 P0.5: health HTTP is localhost-only unless --health is set.
             format!("127.0.0.1:{p}")
         })
         .parse()
@@ -239,6 +251,17 @@ fn cmd_node(args: &[String]) {
     if write_bp {
         store_opts = store_opts.with_write_backpressure();
         eprintln!("montanha-tcp: Pedra L0 write backpressure defaults enabled");
+    }
+    if let Some(hex) =
+        flag_val(args, "--cluster-id").or_else(|| env::var("MONTANHA_CLUSTER_ID").ok())
+    {
+        match parse_cluster_id_hex(&hex) {
+            Ok(id) => store_opts = store_opts.with_cluster_id(id),
+            Err(e) => {
+                eprintln!("--cluster-id: {e}");
+                process::exit(2);
+            }
+        }
     }
 
     std::fs::create_dir_all(&data).ok();
@@ -263,8 +286,9 @@ fn cmd_node(args: &[String]) {
     }
 
     eprintln!(
-        "montanha-tcp node id={id} bind={bind} health={health_bind} data={} members={member_ids:?}",
-        data.display()
+        "montanha-tcp node id={id} bind={bind} health={health_bind} data={} members={member_ids:?} cluster={}",
+        data.display(),
+        cluster.cluster_id_hex()
     );
 
     worker_loop(id, cluster, peers, rx);
@@ -281,9 +305,14 @@ fn health_http_loop(bind: SocketAddr, self_id: u64, tx: SyncSender<Work>) {
     };
     eprintln!("health http listening on {bind}");
     for conn in listener.incoming() {
-        let Ok(mut stream) = conn else { continue };
+        let Ok(stream) = conn else { continue };
         stream.set_read_timeout(Some(Duration::from_secs(2))).ok();
         stream.set_write_timeout(Some(Duration::from_secs(2))).ok();
+        // RFC-0050 P1.3: when process TLS is installed, health is HTTPS too.
+        let mut stream = match pedradb_store::maybe_server_wrap(stream) {
+            Ok(s) => s,
+            Err(_) => continue,
+        };
         let mut buf = [0u8; 1024];
         let n = match std::io::Read::read(&mut stream, &mut buf) {
             Ok(0) | Err(_) => continue,
@@ -451,10 +480,7 @@ impl Drop for InflightGuard {
     }
 }
 
-fn handle_conn(
-    tx: SyncSender<Work>,
-    mut stream: pedradb_store::IoBox,
-) -> Result<(), StoreError> {
+fn handle_conn(tx: SyncSender<Work>, mut stream: pedradb_store::IoBox) -> Result<(), StoreError> {
     let msg = read_frame(&mut stream)?;
     match msg {
         WireMsg::Peer { from, to, body } => {
@@ -1475,7 +1501,7 @@ fn http_get_status(health_hp: &str, path: &str) -> u16 {
     let Ok(addr) = resolve_host_port(health_hp) else {
         return 0;
     };
-    let Ok(mut stream) = TcpStream::connect_timeout(&addr, Duration::from_millis(400)) else {
+    let Ok(stream) = TcpStream::connect_timeout(&addr, Duration::from_millis(400)) else {
         return 0;
     };
     stream
@@ -1484,6 +1510,10 @@ fn http_get_status(health_hp: &str, path: &str) -> u16 {
     stream
         .set_write_timeout(Some(Duration::from_millis(400)))
         .ok();
+    let mut stream = match pedradb_store::maybe_client_wrap(stream) {
+        Ok(s) => s,
+        Err(_) => return 0,
+    };
     let host = health_hp.split(':').next().unwrap_or(health_hp);
     let req = format!("GET {path} HTTP/1.0\r\nHost: {host}\r\nConnection: close\r\n\r\n");
     if stream.write_all(req.as_bytes()).is_err() {

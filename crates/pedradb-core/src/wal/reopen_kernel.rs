@@ -63,11 +63,7 @@ pub enum ReopenOutcome {
 /// Finite-domain check: [`tests::theorem_reopen_on_finite_domain`].
 /// ∀ Verus twin: `crates/pedradb-core/verus/reopen_outcome.rs`.
 #[must_use]
-pub fn reopen_outcome(
-    damage: ReopenDamage,
-    point_in_time: bool,
-    escalated: bool,
-) -> ReopenOutcome {
+pub fn reopen_outcome(damage: ReopenDamage, point_in_time: bool, escalated: bool) -> ReopenOutcome {
     match damage {
         ReopenDamage::None => ReopenOutcome::ServeAll,
         _ => {

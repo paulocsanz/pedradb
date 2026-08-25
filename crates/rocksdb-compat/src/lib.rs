@@ -545,10 +545,11 @@ fn load_cf_registry(dir: &std::path::Path) -> Result<Option<(bool, Vec<String>)>
             kind: ErrorKind::InvalidArgument,
         })
     };
-    if !raw.starts_with(CFREG_MAGIC) {
-        return bad("bad magic");
-    }
-    let mut lines = raw[CFREG_MAGIC.len()..].split(|&b| b == b'\n');
+    let payload = match cfreg_payload(&raw) {
+        Ok(p) => p,
+        Err(what) => return bad(&what),
+    };
+    let mut lines = payload[CFREG_MAGIC.len()..].split(|&b| b == b'\n');
     let default_raw = match lines.next() {
         Some(b"R") => true,
         Some(b"P") => false,
@@ -565,6 +566,32 @@ fn load_cf_registry(dir: &std::path::Path) -> Result<Option<(bool, Vec<String>)>
         }
     }
     Ok(Some((default_raw, names)))
+}
+
+/// RFC-0060 P2.26: optional last line `c:` + 8 hex CRC32C of the prefix.
+/// Legacy files without that line still load.
+fn cfreg_payload(raw: &[u8]) -> std::result::Result<&[u8], String> {
+    if !raw.starts_with(CFREG_MAGIC) {
+        return Err("bad magic".into());
+    }
+    let s = std::str::from_utf8(raw).map_err(|_| "not utf-8".to_string())?;
+    let trimmed = s.trim_end_matches('\n');
+    if let Some((head, last)) = trimmed.rsplit_once('\n') {
+        if let Some(hex) = last.strip_prefix("c:") {
+            if hex.len() == 8 && hex.bytes().all(|b| b.is_ascii_hexdigit()) {
+                let expect = u32::from_str_radix(hex, 16).map_err(|_| "crc not hex".to_string())?;
+                let payload = raw.get(..head.len() + 1).ok_or_else(|| "crc payload".to_string())?;
+                let got = crc32c::crc32c(payload);
+                if got != expect {
+                    return Err(format!(
+                        "crc mismatch stored={expect:#010x} computed={got:#010x}"
+                    ));
+                }
+                return Ok(payload);
+            }
+        }
+    }
+    Ok(raw)
 }
 
 /// Persist the registry atomically (tmp + rename + dir fsync). Written
@@ -587,6 +614,9 @@ fn store_cf_registry(
         buf.extend_from_slice(n.as_bytes());
         buf.push(b'\n');
     }
+    // RFC-0060 P2.26: CRC32C hex of the prefix (CURRENT-shaped trailer).
+    let crc = crc32c::crc32c(&buf);
+    buf.extend_from_slice(format!("c:{crc:08x}\n").as_bytes());
     {
         let mut f = std::fs::File::create(&tmp).map_err(|e| Error {
             msg: format!("create {}: {e}", tmp.display()),
@@ -2478,6 +2508,36 @@ impl<E: Env> DB<E> {
         self.inner.compact().map_err(Error::from)
     }
 
+    /// Compact after applying `filter` once (RFC-0043 P2.7). Same decisions
+    /// as [`Options::set_compaction_filter`]: Keep / Remove / Change.
+    ///
+    /// # Errors
+    /// Pedra compaction / write errors.
+    pub fn compact_with_filter<F>(&self, mut filter: F) -> Result<()>
+    where
+        F: FnMut(u32, &[u8], &[u8]) -> CompactionDecision,
+    {
+        let names = self.cf_names();
+        for name in names {
+            let cf = ColumnFamily { name: name.clone() };
+            let mut it = self.iterator_cf(&cf, IteratorMode::Start)?;
+            let mut items = Vec::new();
+            while it.valid() {
+                items.push((it.key().to_vec(), it.value().to_vec()));
+                it.next();
+            }
+            for (k, v) in items {
+                match filter(0, &k, &v) {
+                    CompactionDecision::Keep => {}
+                    CompactionDecision::Remove => self.delete_cf(&cf, k)?,
+                    CompactionDecision::Change(nv) => self.put_cf(&cf, k, nv)?,
+                }
+            }
+        }
+        let _gate = self.compact_gate.lock();
+        self.inner.compact().map_err(Error::from)
+    }
+
     fn apply_compaction_filter(&self) -> Result<()> {
         let Some(filter) = &self.compaction_filter else {
             return Ok(());
@@ -3167,7 +3227,14 @@ where
                         if may_fold && inner.parked_unflushed_count() >= 2 {
                             let _ = inner.fold_parked_once_off_lock();
                         }
-                        if inner.writes_idle_for(persist_idle) {
+                        // RFC-0039 P2.2: if L0 is at/above the trigger, drain
+                        // now — do not wait for the 200 ms write-idle window
+                        // (that was the scan-vs-apply race).
+                        let l0 = inner.with_read(|db| db.level_file_count(0));
+                        if l0 >= pedradb_core::L0_COMPACTION_TRIGGER {
+                            while compat_compact_once(&inner, &gate) {}
+                            wait = poll;
+                        } else if inner.writes_idle_for(persist_idle) {
                             while inner.materialize_parked_once() {}
                             let _ = inner.persist_unsynced_l0s_off_lock();
                             let _ = inner.rotate_wal_if_writers_idle();
@@ -4032,6 +4099,78 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// RFC-0039 P2.2: `DB::open` spawns `pedra-compat-compact`. When L0
+    /// reaches `L0_COMPACTION_TRIGGER`, the worker must drain on the 5 ms
+    /// poll — not wait for the 200 ms write-idle window. Writers stay busy
+    /// so `writes_idle_for(200ms)` cannot fire. Does not call
+    /// `drain_l0_below_trigger`.
+    #[test]
+    fn host_worker_drains_l0_at_trigger_without_idle() {
+        let dir = tmp("worker-l0-poll");
+        let db = DB::open_default(&dir).unwrap();
+        let trigger = L0_COMPACTION_TRIGGER;
+        let persist_idle = std::time::Duration::from_millis(200);
+
+        let mut saw_at_trigger = false;
+        let mut max_l0 = 0usize;
+        // Two rounds so a compact-in-flight of the first TRIGGER files
+        // cannot hide the second round from `num-files-at-level0`.
+        for i in 0..(L0_COMPACTION_TRIGGER * 2) {
+            db.put([b'k', i as u8], [b'v', i as u8]).unwrap();
+            db.flush().unwrap();
+            let l0 = db.read_probe().l0_files;
+            max_l0 = max_l0.max(l0);
+            if l0 >= trigger {
+                saw_at_trigger = true;
+            }
+        }
+        assert!(
+            saw_at_trigger,
+            "explicit flush must land L0 files at the trigger (max L0={max_l0})"
+        );
+
+        let t0 = std::time::Instant::now();
+        let deadline = std::time::Duration::from_millis(150);
+        let mut n = 0u32;
+        let mut drained = false;
+        loop {
+            n = n.wrapping_add(1);
+            db.put(n.to_be_bytes(), n.to_be_bytes()).unwrap();
+            assert!(
+                !db.inner.writes_idle_for(persist_idle),
+                "writers must stay busy so the 200 ms idle path cannot fire"
+            );
+            let l0 = db.read_probe().l0_files;
+            if l0 < trigger {
+                drained = true;
+                break;
+            }
+            if t0.elapsed() >= deadline {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        let elapsed = t0.elapsed();
+        let l0 = db.read_probe().l0_files;
+        assert!(
+            drained,
+            "worker must drain L0 below trigger on the 5 ms poll while writers are busy (not 200 ms idle); elapsed={elapsed:?} L0={l0} max_l0={max_l0}"
+        );
+        assert!(
+            elapsed < persist_idle,
+            "drain took {elapsed:?} (>= {persist_idle:?} idle window)"
+        );
+        for i in 0..(L0_COMPACTION_TRIGGER * 2) {
+            assert_eq!(
+                db.get(&[b'k', i as u8]).unwrap().as_deref(),
+                Some(&[b'v', i as u8][..]),
+                "acked key {i} must survive the drain"
+            );
+        }
+        drop(db);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn basic_put_get_delete_reopen() {
         let dir = tmp("basic");
@@ -4683,6 +4822,26 @@ mod tests {
     }
 
     #[test]
+    fn compact_with_filter_drops_prefix() {
+        let dir = tmp("cfilt-oneshot");
+        let db = DB::open_default(&dir).unwrap();
+        db.put(b"keep/a", b"1").unwrap();
+        db.put(b"drop/a", b"2").unwrap();
+        db.flush().unwrap();
+        db.compact_with_filter(|_lvl, key, _val| {
+            if key.starts_with(b"drop/") {
+                CompactionDecision::Remove
+            } else {
+                CompactionDecision::Keep
+            }
+        })
+        .unwrap();
+        assert!(db.get(b"drop/a").unwrap().is_none());
+        assert_eq!(db.get(b"keep/a").unwrap().as_deref(), Some(&b"1"[..]));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn merge_operator_rmw() {
         let dir = tmp("merge");
         let mut opts = Options::new();
@@ -4719,6 +4878,48 @@ mod tests {
         // compaction thread would race `remove_dir_all` (ENOTEMPTY).
         drop(db);
         DB::<StdEnv>::destroy(&opts, &dir).unwrap();
+    }
+
+    #[test]
+    fn cfreg_crc_mismatch_fails_closed() {
+        let dir = tmp("cfreg-crc");
+        let opts = g1_opts();
+        {
+            let db = DB::open_cf(&opts, &dir, &["write"]).unwrap();
+            db.put(b"k", b"v").unwrap();
+            drop(db);
+        }
+        let path = dir.join("CFREG");
+        let mut raw = std::fs::read(&path).unwrap();
+        let text = std::str::from_utf8(&raw).unwrap();
+        assert!(
+            text.lines().any(|l| l.starts_with("c:")),
+            "new CFREG must carry a crc line: {text:?}"
+        );
+        let last = raw.len() - 2;
+        raw[last] = if raw[last] == b'0' { b'1' } else { b'0' };
+        std::fs::write(&path, &raw).unwrap();
+        let err = match DB::open_cf(&opts, &dir, &["write"]) {
+            Err(e) => e,
+            Ok(_) => panic!("poison CFREG crc must refuse open"),
+        };
+        let msg = err.to_string();
+        assert!(
+            msg.contains("crc") || msg.contains("CFREG"),
+            "open must fail-closed on CFREG crc, got {msg}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn cfreg_legacy_without_crc_still_opens() {
+        let dir = tmp("cfreg-leg");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("CFREG"), b"COMPATCF1\nP\nwrite\n").unwrap();
+        let opts = g1_opts();
+        let db = DB::open_cf(&opts, &dir, &["write"]).unwrap();
+        drop(db);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

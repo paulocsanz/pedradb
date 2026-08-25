@@ -249,13 +249,13 @@ Optional later: rename bins/crates to `montanha-*` in a dedicated RFC; **identit
 - [x] Raft multi-node + persist + failover tests  
 - [x] DCS commands on Raft  
 - [x] Design: live leadership + anti-etcd doctrine  
-- [ ] Ship **Montanha-Live** hub (open sessions)  
+- [x] Ship **Montanha-Live** hub (open sessions) — RFC-0013 P1.2 `subscribe_leadership` (best-effort, not fencing)  
 - [ ] Branding in CLI/help strings (“MontanhaDb coordination”)
 
 ### M1 — Operable HA product
 
 - [ ] Group commit / disk SLO errors on raft path  
-- [ ] Membership + cluster id  
+- [x] Membership + cluster id (RFC-0013 P1.3: `\0store/cluster/id` + membership key; mixed node dirs refuse)  
 - [ ] Agent reference (Patroni-shaped loop)  
 - [ ] Proxy example on `LeaderChanged`
 

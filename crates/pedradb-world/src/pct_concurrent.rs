@@ -502,19 +502,18 @@ mod tests {
         );
     }
 
-    /// P0.2 (RFC-0058): PCT over the **verified profile** — same π×disk
-    /// teeth as `pct_disk_fence_three_teeth`, but the DB is pinned
-    /// lone-commit-only, with all three write shapes in the mix: plain
-    /// sync put, OCC tx, and `no_sync` async put. No matter how π
-    /// preempts: no writer ever joins a group (`queued == 0`,
-    /// `batches == submits`), the one-shot EIO fences **at most one**
-    /// writer (the full mode proves 2+ members can share a fence — that
-    /// shape is structurally absent here), outcomes are only ok / fenced /
-    /// refused, every sync-Ok commit survives the reopen (`silent_wrong =
-    /// 0`), and async survivors are never wrong (async Ok promises no
-    /// durability before a barrier — the DB is dropped, not closed).
+    /// P2.1 (RFC-0058): PCT over the **verified profile with the merge
+    /// back** — same π×disk teeth, but the DB runs the proved group-commit
+    /// kernel: sync puts and OCC txs may share a leader and one fsync,
+    /// async `no_sync` puts keep the un-merged bypass. No matter how π
+    /// preempts: outcomes are only ok / fenced / refused / ok_async, every
+    /// sync-Ok commit survives the reopen (`silent_wrong = 0`), async
+    /// survivors are never wrong, and across the seed set the merge
+    /// actually engages under preemption (`queued > 0` somewhere — the
+    /// comparison is not vacuous). A fence may hit several members of one
+    /// group: with group atomicity proven, that is the shape, not a bug.
     #[test]
-    fn pct_verified_lone_never_merges() {
+    fn pct_verified_merges_under_preemption() {
         use pedradb_core::{ConcurrentDb, CoreError, OpenOptions, StdEnv, WriteOptions};
         use pedradb_sim::{FailingEnvArc, FaultKind};
         use std::sync::Mutex;
@@ -627,39 +626,56 @@ mod tests {
 
         for policy in [PiPolicy::Sequential, PiPolicy::Pct { depth: 2 }] {
             let mut fenced_total = 0usize;
+            let mut queued_total = 0u64;
             for s in 0..SEEDS {
                 let (fenced, oks, async_oks, refused, other, tripped, stats, _h) =
                     trial(if matches!(policy, PiPolicy::Sequential) { "seq" } else { "pct" }, s, policy);
                 assert_eq!(other, 0, "unexpected error class in verified trial {s}");
-                assert!(tripped, "SyncFail must fire in every verified trial {s}");
                 assert_eq!(fenced + refused + oks + async_oks, N * COMMITS);
-                assert!(fenced <= 1, "lone-only pin yet {fenced} writers shared one fence");
+                if !tripped {
+                    // Merging keeps the group fsync count <= AFTER_FS: no
+                    // fault fired, nothing fenced — everything must be Ok.
+                    assert_eq!(
+                        oks + async_oks,
+                        N * COMMITS,
+                        "no EIO yet not all Ok (trial {s})"
+                    );
+                }
                 let (submits, queued, batches, batch_ops) = stats;
                 assert_eq!(submits, (N * COMMITS) as u64);
-                assert_eq!(queued, 0, "verified mode must never merge writers (trial {s})");
-                assert_eq!(batches, submits, "every commit its own batch (trial {s})");
+                assert!(batches <= submits, "trial {s}: batches {batches} > submits");
                 assert_eq!(batch_ops, (N * COMMITS) as u64);
+                queued_total += queued;
                 fenced_total += fenced;
             }
             assert!(fenced_total >= 1, "the EIO must fence someone across {SEEDS} seeds");
+            if matches!(policy, PiPolicy::Pct { .. }) {
+                assert!(
+                    queued_total > 0,
+                    "verified mode never merged across {SEEDS} seeds — the merge is not exercised"
+                );
+            }
         }
         let _ = std::fs::remove_dir_all(&base);
     }
 
-    /// RFC-0058 P1.3: semantics derivation — the verified profile must be a
-    /// **scheduling-only** transformation of the full mode. Same seeds, same
+    /// RFC-0058 P1.3→P2.1: semantics derivation — the verified profile
+    /// must keep the **same safety oracles** as the full mode while both
+    /// run the (now shared) proved group-commit kernel. Same seeds, same
     /// PCT schedules, same three write shapes (sync put / OCC tx / async
-    /// `no_sync` put), same one-shot EIO on the 6th group fsync. The safety
-    /// oracles are **identical** in both modes: every sync/OCC Ok survives
-    /// the reopen (`silent_wrong == 0`), every async survivor holds the
-    /// right value, the reopen invents nothing (ghost-free, value-exact
-    /// scan over the written range), and the only error classes are
-    /// fence/refused. Differences are allowed **only** in scheduling and
-    /// performance: the full mode (catchup window ZERO, group commit
-    /// active) merges writers under PCT preemption — asserted to actually
-    /// happen, else the pairing is vacuous — and one EIO may fence 2+
-    /// members of one group; the verified mode never merges (`queued == 0`,
-    /// `batches == submits`) and fences at most one writer per trial.
+    /// `no_sync` put), same one-shot EIO on the 6th group fsync. The
+    /// safety oracles are **identical** in both modes: every sync/OCC Ok
+    /// survives the reopen (`silent_wrong == 0`), every async survivor
+    /// holds the right value, the reopen invents nothing (ghost-free,
+    /// value-exact scan over the written range), and the only error
+    /// classes are fence/refused. Since RFC-0058 P2.1 the group
+    /// semantics are the same kernel in both modes (the full side pins
+    /// the same ZERO catch-up window the verified pin forces) — so the
+    /// derivation asserts both modes actually merge under PCT
+    /// preemption (each side non-vacuous), and a fence may hit several
+    /// members of one group in either mode; what differs is the
+    /// declared composition (verified forces sync, fail-closed, the
+    /// un-merged async bypass), not the safety outcome.
     #[test]
     fn verified_vs_full_same_oracles() {
         use pedradb_core::{ConcurrentDb, CoreError, OpenOptions, StdEnv, WriteOptions};
@@ -811,6 +827,7 @@ mod tests {
                 "pct"
             };
             let mut full_queued_total = 0u64;
+            let mut ver_queued_total = 0u64;
             for s in 0..SEEDS {
                 let full = trial(&format!("{tag}-full"), s, policy, false);
                 let ver = trial(&format!("{tag}-ver"), s, policy, true);
@@ -848,23 +865,25 @@ mod tests {
                     }
                 }
 
-                // (b) differences allowed only in scheduling/performance.
+                // (b) same kernel, same group semantics: both modes may
+                // merge (and both must, somewhere across the seeds, or
+                // the pairing is vacuous); a fence may hit several
+                // members of one group in either mode. What differs is
+                // the declared composition, not the safety outcome.
                 let (_, _, ver_fenced, _, _, _, _, _, ver_tripped, ver_stats) = ver;
                 let (submits, queued, batches, batch_ops) = ver_stats;
                 assert_eq!(submits, (N * COMMITS) as u64, "verified trial {s}");
-                assert_eq!(queued, 0, "verified trial {s} merged writers");
-                assert_eq!(batches, submits, "verified trial {s}: commit not lone");
+                assert!(queued <= submits, "verified trial {s}: queued {queued} > submits");
+                assert!(
+                    batches <= submits,
+                    "verified trial {s}: batches {batches} > submits"
+                );
                 assert_eq!(batch_ops, (N * COMMITS) as u64, "verified trial {s}");
-                assert!(
-                    ver_tripped,
-                    "verified trial {s}: SyncFail must fire (6 lone fsyncs > {AFTER_FS})"
-                );
-                assert!(
-                    ver_fenced <= 1,
-                    "verified trial {s}: lone-only yet {ver_fenced} writers shared one fence"
-                );
-                // Full mode: merging is *allowed* (the documented shape) —
-                // and must actually happen under PCT preemption somewhere.
+                if !ver_tripped && ver_fenced > 0 {
+                    panic!("verified trial {s}: fenced without a tripped EIO");
+                }
+                ver_queued_total += queued;
+                // Full mode: same kernel, same shape.
                 let (_, _, _, _, _, _, _, _, _, full_stats) = full;
                 full_queued_total += full_stats.1;
             }
@@ -872,6 +891,10 @@ mod tests {
                 assert!(
                     full_queued_total > 0,
                     "{tag}: full mode never merged across {SEEDS} seeds — vacuous comparison"
+                );
+                assert!(
+                    ver_queued_total > 0,
+                    "{tag}: verified mode never merged across {SEEDS} seeds — vacuous comparison"
                 );
             }
         }

@@ -67,7 +67,7 @@ Editar asserção existente para ficar verde é relaxação.
 
 ### P2 — redesign só com cliff medido
 
-- [ ] **P2.1** Se P1 esgotar e ainda > 2×: doc do cliff (µs irredutíveis no desenho atual) + uma proposta de redesign que **preserve G1–G8** — status: `todo`
+- [x] **P2.1** Se P1 esgotar e ainda > 2×: doc do cliff (µs irredutíveis no desenho atual) + uma proposta de redesign que **preserve G1–G8** — status: `done` (not needed: P1.3 met ≤2× / scan ≥1× vs FF without redesign)
 - [x] **P2.2** Gate `ROCKS_PARITY_RATIO_FLOOR=0.5` + `ROCKS_PARITY_GATE_SHAPES=deps_mvcc_latest,deps_scan` no `tikv_ycsb_parity_v0.sh` com FULL_SYNC=1 — status: `done`
 
 ## Status (living — update with every PR)
@@ -81,7 +81,7 @@ Editar asserção existente para ficar verde é relaxação.
 | P1.1 | p1 | get_cf 1 KB no path MVCC | done | mem-hit skip SST + 1 lock; get 100% inline; p50 ~36 µs; 2× não | 2026-08-16 |
 | P1.2 | p1 | cortar 36 µs do get na mem | done | borrowed mem get; p50 2.0 µs; qps 18.8k vs 252k FF = 13× | 2026-08-16 |
 | P1.3 | p1 | MVCC+scan ≥ 0.5 vs FF | done | combined ycsb+deps: 299k / 347k vs 273k / 251k FF | 2026-08-16 |
-| P2.1 | p2 | redesign só com cliff medido | todo | 2× atingido sem redesign | 2026-08-16 |
+| P2.1 | p2 | redesign só com cliff medido | done | 2× atingido sem redesign | 2026-08-24 |
 | P2.2 | p2 | gate 0.5 nestes dois shapes | done | tikv_ycsb_parity_v0.sh FULL_SYNC=1 | 2026-08-16 |
 
 ## Acceptance Criteria

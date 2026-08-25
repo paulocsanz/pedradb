@@ -30,8 +30,8 @@ use std::path::{Path, PathBuf};
 use pedradb_core::manifest::{self, VersionSet};
 use pedradb_core::wal::Wal;
 use pedradb_core::{
-    copy_db_directory, read_checkpoint_meta, CheckpointMeta, CoreError, Db, Env, EnvFile,
-    OpenOptions, SequenceNumber, WriteOp, WriteRecord, WAL_FILE_NAME,
+    copy_db_directory, read_checkpoint_meta, verify_at_rest, CheckpointMeta, CoreError, Db, Env,
+    EnvFile, OpenOptions, SequenceNumber, WriteOp, WriteRecord, WAL_FILE_NAME,
 };
 #[cfg(test)]
 use pedradb_core::StdEnv;
@@ -324,7 +324,30 @@ impl<E: Env> BackupEngine<E> {
         Ok(out)
     }
 
-    /// Verify a base backup (checkpoint meta + open + checksums).
+    /// CRC-walk every `wal/*.warch` increment (RFC-0060 P2.9).
+    ///
+    /// # Errors
+    /// Missing/corrupt archive segment.
+    pub fn verify_wal_archive(&self) -> Result<usize> {
+        let mut n = 0usize;
+        for path in self.list_increments()? {
+            let name = path
+                .file_name()
+                .map(|s| s.to_string_lossy().into_owned())
+                .unwrap_or_else(|| path.display().to_string());
+            read_warch(&self.env, &path)
+                .map_err(|e| OpsError::Msg(format!("wal archive {name}: {e}")))?;
+            n = n.saturating_add(1);
+        }
+        Ok(n)
+    }
+
+    /// Verify a base backup (checkpoint meta + WAL archive CRC + at-rest scrub + open + checksums).
+    ///
+    /// RFC-0060 P2.8: [`verify_at_rest`] walks CHANGELOG/history/CURRENT/WAL
+    /// the live `verify_checksums` path does not. Open still F33-quarantines
+    /// a poison CHANGELOG; this method **fails** so `pedra verify-backup`
+    /// is honest.
     ///
     /// # Errors
     /// Corrupt backup or I/O.
@@ -334,6 +357,34 @@ impl<E: Env> BackupEngine<E> {
             return Err(OpsError::Msg(format!("backup {backup_id} missing")));
         }
         let meta = read_checkpoint_meta(&self.env, &path)?;
+        self.verify_wal_archive()?;
+        // RFC-0060 P2.17: the backup *root* holds CATALOG + wal/*.warch.
+        // Open already CRC'd CATALOG; this walk catches poison written after
+        // open, and names the file the same way `pedra verify` does.
+        let root_scrub = verify_at_rest(&self.env, &self.root);
+        if !root_scrub.is_clean() {
+            let first = root_scrub
+                .failures
+                .first()
+                .map(|f| f.file.as_str())
+                .unwrap_or("?");
+            return Err(OpsError::Msg(format!(
+                "backup root at-rest scrub {}: first={first}",
+                root_scrub.summary_line()
+            )));
+        }
+        let scrub = verify_at_rest(&self.env, &path);
+        if !scrub.is_clean() {
+            let first = scrub
+                .failures
+                .first()
+                .map(|f| f.file.as_str())
+                .unwrap_or("?");
+            return Err(OpsError::Msg(format!(
+                "backup {backup_id} at-rest scrub {}: first={first}",
+                scrub.summary_line()
+            )));
+        }
         let db = Db::open_with_env(
             &path,
             OpenOptions {
@@ -664,6 +715,9 @@ pub struct FormatReport {
     pub earliest_readable_seq: u64,
     /// MANIFEST mid-vlog-GC flag (`VALUES.vlog.new` preferred).
     pub vlog_use_new: bool,
+    /// RFC-0060 P2.23: `CURRENT` CRC trailer — `absent` / `legacy` / `ok` /
+    /// `mismatch` / `dangling` / `invalid`.
+    pub current_crc: &'static str,
 }
 
 /// Result of rewriting a DB to current on-disk formats.
@@ -725,7 +779,51 @@ pub fn inspect_format_env(env: &impl Env, path: impl AsRef<Path>) -> Result<Form
         needs_migration,
         earliest_readable_seq,
         vlog_use_new,
+        current_crc: classify_current_crc(env, path),
     })
+}
+
+/// RFC-0060 P2.23: classify the optional CURRENT CRC trailer without opening a writer.
+fn classify_current_crc(env: &impl Env, dir: &Path) -> &'static str {
+    let cur = dir.join(manifest::CURRENT_FILE);
+    if !env.exists(&cur) {
+        return "absent";
+    }
+    let mut f = match env.open_read(&cur) {
+        Ok(f) => f,
+        Err(_) => return "invalid",
+    };
+    let mut buf = String::new();
+    if f.read_to_string(&mut buf).is_err() {
+        return "invalid";
+    }
+    let (name, crc) = match manifest::parse_current_pointer(&buf) {
+        Ok(v) => v,
+        Err(_) => return "invalid",
+    };
+    match crc {
+        None => "legacy",
+        Some(expect) => {
+            let man = dir.join(&name);
+            if !env.exists(&man) {
+                return "dangling";
+            }
+            let mut bytes = Vec::new();
+            match env.open_read(&man) {
+                Ok(mut f) => {
+                    if f.read_to_end(&mut bytes).is_err() {
+                        return "dangling";
+                    }
+                }
+                Err(_) => return "dangling",
+            }
+            if crc32c::crc32c(&bytes) == expect {
+                "ok"
+            } else {
+                "mismatch"
+            }
+        }
+    }
 }
 
 fn peek_sst_version(env: &impl Env, path: &Path) -> Result<u32> {
@@ -862,6 +960,97 @@ mod tests {
         let _ = std::fs::remove_dir_all(&rest);
     }
 
+    /// RFC-0060 P2.8: `verify_backup` runs the at-rest scrub (CHANGELOG
+    /// poison fails here; `Db::open` would F33-quarantine it).
+    #[test]
+    fn verify_backup_runs_at_rest_scrub() {
+        let data = temp();
+        let bak = temp();
+        let mut db = open_db(&data);
+        db.put(b"k", b"v").unwrap();
+        let mut eng = BackupEngine::open(&bak).unwrap();
+        let meta = eng.create_base_backup(&mut db).unwrap();
+        db.close().unwrap();
+        eng.verify_backup(meta.id).unwrap();
+        let ch = meta.path.join("CHANGELOG");
+        let mut bytes = if ch.exists() {
+            std::fs::read(&ch).unwrap()
+        } else {
+            let mut b = b"PDBCHLG1".to_vec();
+            b.extend_from_slice(&0u32.to_le_bytes());
+            b.extend_from_slice(&0u32.to_le_bytes());
+            b
+        };
+        let last = bytes.len() - 1;
+        bytes[last] ^= 0xff;
+        std::fs::write(&ch, &bytes).unwrap();
+        let err = eng.verify_backup(meta.id).unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("CHANGELOG") || msg.contains("at-rest scrub"),
+            "verify_backup must fail the scrub, got {msg}"
+        );
+        let _ = std::fs::remove_dir_all(&data);
+        let _ = std::fs::remove_dir_all(&bak);
+    }
+
+    /// RFC-0060 P2.9: poison a `.warch` increment and `verify_backup` fails.
+    #[test]
+    fn verify_backup_flags_corrupt_warch() {
+        let data = temp();
+        let bak = temp();
+        let mut db = open_db(&data);
+        db.put(b"base", b"0").unwrap();
+        let mut eng = BackupEngine::open(&bak).unwrap();
+        let meta = eng.create_base_backup(&mut db).unwrap();
+        db.put(b"i1", b"a").unwrap();
+        let ship = eng.create_incremental(&db).unwrap();
+        assert!(ship.records >= 1, "need a WAL archive to poison");
+        db.close().unwrap();
+        eng.verify_backup(meta.id).unwrap();
+        let segs = eng.list_increments().unwrap();
+        assert!(!segs.is_empty());
+        let warch = &segs[0];
+        let mut bytes = std::fs::read(warch).unwrap();
+        let last = bytes.len() - 1;
+        bytes[last] ^= 0xff;
+        std::fs::write(warch, &bytes).unwrap();
+        let err = eng.verify_backup(meta.id).unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("warch") || msg.contains("wal archive"),
+            "verify_backup must fail the archive CRC, got {msg}"
+        );
+        let _ = std::fs::remove_dir_all(&data);
+        let _ = std::fs::remove_dir_all(&bak);
+    }
+
+    /// RFC-0060 P2.17: poison `CATALOG` after open; `verify_backup` fails.
+    #[test]
+    fn verify_backup_flags_corrupt_catalog() {
+        let data = temp();
+        let bak = temp();
+        let mut db = open_db(&data);
+        db.put(b"k", b"v").unwrap();
+        let mut eng = BackupEngine::open(&bak).unwrap();
+        let meta = eng.create_base_backup(&mut db).unwrap();
+        db.close().unwrap();
+        eng.verify_backup(meta.id).unwrap();
+        let cat = bak.join("CATALOG");
+        let mut bytes = std::fs::read(&cat).unwrap();
+        let last = bytes.len() - 1;
+        bytes[last] ^= 0xff;
+        std::fs::write(&cat, &bytes).unwrap();
+        let err = eng.verify_backup(meta.id).unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("CATALOG") || msg.contains("at-rest scrub"),
+            "verify_backup must fail CATALOG crc, got {msg}"
+        );
+        let _ = std::fs::remove_dir_all(&data);
+        let _ = std::fs::remove_dir_all(&bak);
+    }
+
     /// RFC-0014 P2.3: base → two incremental ships → restore_with_increments.
     #[test]
     fn incremental_backup_two_ships_then_full_restore() {
@@ -981,7 +1170,32 @@ mod tests {
             );
             assert!(rep.has_manifest);
             assert!(!rep.vlog_use_new);
+            assert_eq!(rep.current_crc, "ok", "flushed CURRENT must carry a matching CRC");
         }
+        let _ = std::fs::remove_dir_all(&data);
+    }
+
+    /// RFC-0060 P2.23: one-line CURRENT is `legacy`; two-line CRC mismatch is
+    /// reported even though `manifest::load` fail-closes.
+    #[test]
+    fn inspect_classifies_current_crc() {
+        let data = temp();
+        {
+            let mut db = open_db(&data);
+            db.put(b"k", b"v").unwrap();
+            db.flush().unwrap();
+            db.close().unwrap();
+        }
+        let ok = inspect_format(&data).unwrap();
+        assert_eq!(ok.current_crc, "ok");
+        let cur = data.join("CURRENT");
+        let body = std::fs::read_to_string(&cur).unwrap();
+        let name = body.lines().next().unwrap().trim();
+        std::fs::write(&cur, format!("{name}\n")).unwrap();
+        let legacy = classify_current_crc(&StdEnv, &data);
+        assert_eq!(legacy, "legacy");
+        std::fs::write(&cur, format!("{name}\nffffffff\n")).unwrap();
+        assert_eq!(classify_current_crc(&StdEnv, &data), "mismatch");
         let _ = std::fs::remove_dir_all(&data);
     }
 

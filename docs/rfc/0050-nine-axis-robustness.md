@@ -1,7 +1,7 @@
 # RFC: 0050 — Nove eixos de robustez (P0 operável, sem fingir “completo”)
 
 **Status:** in-progress
-**Updated:** 2026-08-23
+**Updated:** 2026-08-24
 **Parents:** [0016](0016-pedradb-production-robustness.md), [0020](0020-synthetic-field-maturity.md), [0021-tls](0021-security-tls-baseline.md), [0038](0038-wal-corruption-recovery-open-decision.md), [0045](0045-multi-writer-async-5x.md), [0047](0047-compat-dropin-failure-profile.md)
 **Scoreboard:** [`../robustness-nine-axes.md`](../robustness-nine-axes.md)
 
@@ -36,23 +36,23 @@
 - [x] **P0.1** Scoreboard + lock `WalRecovery` (2 modos; skip-any ausente) + gap #9 docs — status: `done`
 - [x] **P0.2** io_uring: FailingEnv wrap + CQE `res<0` (EIO/ENOSPC) sem false-Ok — status: `done`
 - [x] **P0.3** ENOSPC/EIO mid-flush / mid-compact / mid-MANIFEST + range-delete compact termina — status: `done`
-- [x] **P0.4** Contrato do teto de escrita (group commit; apply no lock) — status: `done`
+- [x] **P0.4** Contrato do teto de escrita (group commit; apply no lock) — status: `done` (P2.1 moved apply to the second write-lock hold, after durable fd; still serialized — not a skiplist)
 - [x] **P0.5** TLS 1.3 lab no MTCP (`--features tls`, `--require-tls`, health localhost) — status: `done`
 - [x] **P0.6** rust-rocksdb 0.22 API (ingest/`SstFileWriter`, `delete_file_in_range` via tombstones, WBWI, compaction filter, CF lifecycle, properties) — status: `done`
 - [x] **P0.7** WAL: kernel FailClosed, compat PIT, sem terceiro modo silencioso — status: `done`
 
 ### P1 — next wave (depends on P0 or clearly deferrable)
 
-- [ ] **P1.1** Iterator lazy no compat (`StreamingVisibleIter`) — status: `todo`
-- [ ] **P1.2** `WalRecovery::Evacuate` (B2) só se o dono escolher RFC-0038 P1.1 — status: `todo`
-- [ ] **P1.3** Rotação de certs + health HTTP TLS — status: `todo`
-- [ ] **P1.4** `WriteBatchWithIndex` mínimo (read-your-writes, sem Merge) — status: `todo`
+- [x] **P1.1** Iterator lazy no compat (`StreamingVisibleIter`) — status: `done` (`DBIterator` + `ITER_WINDOW=64` / `page_forward`; RFC-0032 P0.1 — never materialises the whole CF)
+- [ ] **P1.2** `WalRecovery::Evacuate` (B2) só se o dono escolher RFC-0038 P1.1 — status: `todo` (0038 P1.1 parked)
+- [x] **P1.3** Rotação de certs + health HTTP TLS — status: `done` (`reload_from_pem_files` replaces process TLS; health HTTP uses `maybe_server_wrap`; tests `tls_reload_from_pem_files_replaces_config` + `/ready` over TLS in `tcp_tls_mtls_roundtrip`)
+- [x] **P1.4** `WriteBatchWithIndex` mínimo (read-your-writes, sem Merge) — status: `done` (`WriteBatchWithIndex` + `wbwi_read_your_writes`)
 
 ### P2 — later / polish
 
-- [ ] **P2.1** RFC-0045 memtable apply fora do lock (teto +15%, não 5×) — status: `todo`
-- [ ] **P2.2** det_io CONTRACT-OK + QEMU guest (runner Linux + imagem) — status: `todo`
-- [ ] **P2.3** dm-error / page-cache EIO de bloco — status: `todo`
+- [x] **P2.1** RFC-0045 memtable apply fora do lock (teto +15%, não 5×) — status: `done` (`finish_group_off_lock` apply after durable fd; still serialized; not Rocks skiplist — RFC-0055 P1.1 gated)
+- [x] **P2.2** det_io CONTRACT-OK + QEMU guest (runner Linux + imagem) — status: `done` (RFC-0052 P2.1–P2.3: `tcg_world_smoke.sh` + `tcg_world_smoke_detio.sh`; CI `tcg-world-smoke` / `tcg-world-smoke-detio`)
+- [x] **P2.3** dm-error / page-cache EIO de bloco — status: `done` (`scripts/tcg_blk_eio.sh`: virtio-blk + QEMU blkdebug `flush_to_disk` errno=5; World fail-closed `os error 5`; `silent_wrong` not printed because run aborted; CI `tcg-blk-eio`)
 
 ## Status (living — update with every PR)
 
@@ -65,13 +65,13 @@
 | P0.5 | p0 | MTCP TLS lab + montanha-secure | done | this change | 2026-08-23 |
 | P0.6 | p0 | runbook + NotSupported + properties | done | this change | 2026-08-23 |
 | P0.7 | p0 | WAL two-mode lock; 0038 P1.1 parked | done | this change | 2026-08-23 |
-| P1.1 | p1 | lazy iterator | todo | — | 2026-08-23 |
-| P1.2 | p1 | Evacuate iff owner | todo | — | 2026-08-23 |
-| P1.3 | p1 | cert rotation + health TLS | todo | — | 2026-08-23 |
-| P1.4 | p1 | WBWI mínimo | todo | — | 2026-08-23 |
-| P2.1 | p2 | concurrent memtable apply | todo | — | 2026-08-23 |
-| P2.2 | p2 | det_io CONTRACT-OK + QEMU | todo | — | 2026-08-23 |
-| P2.3 | p2 | block EIO | todo | — | 2026-08-23 |
+| P1.1 | p1 | lazy iterator | done | `DBIterator` window 64 | 2026-08-24 |
+| P1.2 | p1 | Evacuate iff owner | todo | RFC-0038 P1.1 parked | 2026-08-23 |
+| P1.3 | p1 | cert rotation + health TLS | done | `reload_from_pem_files` + health wrap | 2026-08-24 |
+| P1.4 | p1 | WBWI mínimo | done | `wbwi_read_your_writes` | 2026-08-24 |
+| P2.1 | p2 | concurrent memtable apply | done | apply after fd (serialized 2nd hold); 0055 P1.1 still gated | 2026-08-24 |
+| P2.2 | p2 | det_io CONTRACT-OK + QEMU | done | RFC-0052 P2.1–P2.3 | 2026-08-24 |
+| P2.3 | p2 | block EIO | done | `tcg_blk_eio.sh` + job `tcg-blk-eio` | 2026-08-24 |
 
 ## Acceptance Criteria
 

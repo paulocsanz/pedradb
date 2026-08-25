@@ -44,19 +44,19 @@ HashKV’s own vLog clone shows the failure mode we must not ignore: after Zipf 
 
 ### P0 — one chunk, crash-safe, useful
 
-- [ ] **P0.1** v2 record includes key; v1 still readable — status: `todo`
-- [ ] **P0.2** `compact_vlog_prefix(n_bytes)`: validate via key→current pointer (mem/imm/SST get), re-append valids, persist tail in MANIFEST, remap only moved offsets — status: `todo`
-- [ ] **P0.3** DST: crash after append-valids / after MANIFEST tail / after punch; no pointer at punched offset; no tail past live data — status: `todo`
+- [ ] **P0.1** v2 record includes key; v1 still readable — status: `todo` (parked: 0026 P0.3 picked **C**, not A)
+- [ ] **P0.2** `compact_vlog_prefix(n_bytes)`: validate via key→current pointer (mem/imm/SST get), re-append valids, persist tail in MANIFEST, remap only moved offsets — status: `todo` (parked: 0026 P0.3 picked **C**, not A)
+- [ ] **P0.3** DST: crash after append-valids / after MANIFEST tail / after punch; no pointer at punched offset; no tail past live data — status: `todo` (parked: 0026 P0.3 picked **C**, not A)
 
 ### P1
 
-- [ ] **P1.1** `Env::punch` or portable truncate-front; sim/FailingEnv — status: `todo`
-- [ ] **P1.2** Stats: bytes_punched, records_relocated, lsm_lookups_during_gc — status: `todo`
+- [ ] **P1.1** `Env::punch` or portable truncate-front; sim/FailingEnv — status: `todo` (parked: 0026 P0.3 picked **C**, not A)
+- [ ] **P1.2** Stats: bytes_punched, records_relocated, lsm_lookups_during_gc — status: `todo` (parked: 0026 P0.3 picked **C**, not A)
 
 ### P2
 
-- [ ] **P2.1** Background / periodic trigger with a live-ratio threshold — status: `todo`
-- [ ] **P2.2** Kill-switch if Zipf bench (0026 P0.2) shows WA ≥ rewrite — status: `todo`
+- [ ] **P2.1** Background / periodic trigger with a live-ratio threshold — status: `todo` (parked: 0026 P0.3 picked **C**, not A)
+- [ ] **P2.2** Kill-switch if Zipf bench (0026 P0.2) shows WA ≥ rewrite — status: `todo` (parked: 0026 P0.3 picked **C**, not A)
 
 ## Status (living)
 

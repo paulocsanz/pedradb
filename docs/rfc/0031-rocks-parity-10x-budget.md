@@ -119,12 +119,12 @@ Expectativa mecânica (rev. P0.1): o debounce remove as 2–3 barreiras extras d
 
 ### P1 — next wave
 
-- [ ] **P1.1** Iterador com janela bornada no rocksdb-compat (≤ K entradas por passo; `From+Forward/Reverse` preservados) — status: `todo`
-- [ ] **P1.2** Re-medir `deps_mvcc_latest`/`deps_scan`/`ycsb_c` ≥ 0.5 vs same-class; adversarial de iterator positioning re-verde — status: `todo`
+- [x] **P1.1** Iterador com janela bornada no rocksdb-compat (≤ K entradas por passo; `From+Forward/Reverse` preservados) — status: `done` (`StreamingVisibleIter` / `ITER_WINDOW=64`; RFC-0050 P1.1)
+- [ ] **P1.2** Re-medir `deps_mvcc_latest`/`deps_scan`/`ycsb_c` ≥ 0.5 vs same-class; adversarial de iterator positioning re-verde — status: `todo` (parked: quiet-box remesure; dirty sandbox is not the official floor)
 
 ### P2 — later / polish
 
-- [ ] **P2.1** Tabela final no `rocksdb-compat.md` + nota de orçamento (min_ratio global ≥ 0.5 same-class) — status: `todo`
+- [ ] **P2.1** Tabela final no `rocksdb-compat.md` + nota de orçamento (min_ratio global ≥ 0.5 same-class) — status: `todo` (parked: quiet-box remesure)
 - [x] **P2.2** Se algum shape ainda < floor com mecanismo novo identificado: abrir seção de follow-up com número (não engessar) — status: `done` (residual = 1× WAL `sync_all`/`F_FULLFSYNC` ≈ 3.8 ms/put; interval=0 ≈ interval=64)
 
 ## Status (living — update with every PR)
@@ -135,9 +135,9 @@ Expectativa mecânica (rev. P0.1): o debounce remove as 2–3 barreiras extras d
 | P0.2 | p0 | re-medida + floor 2× same-class (writes) | done | este commit | 2026-08-15 |
 | P0.3 | p0 | RFC + status vivo | done | este doc | 2026-08-15 |
 | P0.4 | p0 | peer F_FULLFSYNC (`ROCKS_PARITY_FULL_SYNC`) | done | este commit | 2026-08-15 |
-| P1.1 | p1 | iterador janela bornada | todo | — | 2026-08-15 |
-| P1.2 | p1 | ycsb_c + mvcc/scan ≥ 0.5 + adversarial | todo | — | 2026-08-15 |
-| P2.1 | p2 | tabela final + min_ratio ≥ 0.5 | todo | — | 2026-08-15 |
+| P1.1 | p1 | iterador janela bornada | done | `ITER_WINDOW=64` / RFC-0050 P1.1 | 2026-08-24 |
+| P1.2 | p1 | ycsb_c + mvcc/scan ≥ 0.5 + adversarial | todo | parked: quiet remesure | 2026-08-24 |
+| P2.1 | p2 | tabela final + min_ratio ≥ 0.5 | todo | parked: quiet remesure | 2026-08-24 |
 | P2.2 | p2 | follow-up de shape remanescente | done | classe de sync medida; 2× writes already | 2026-08-15 |
 
 ## Acceptance Criteria

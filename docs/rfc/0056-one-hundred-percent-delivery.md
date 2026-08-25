@@ -1,7 +1,7 @@
 # RFC-0056: Entregar o 100% (relativo ao TCB)
 
-**Status:** draft  
-**Updated:** 2026-08-23  
+**Status:** done (P0–P2; P2.1 choice recorded as Verus group-commit kernel, RFC-0057 — not π-reduction of all thread interleavings, not VerusSync)  
+**Updated:** 2026-08-24  
 **Programa-mãe:** [RFC-0053](0053-ironfleet-years.md) (done Y1–Y3) · checklist: [`../formal/one-hundred-percent.md`](../formal/one-hundred-percent.md)  
 **“TUDO” significa:** itens **1–11** do checklist verdes; item **12** continua para sempre (por definição); TCB permanente nomeado e **congelado** (CI recusa se crescer em silêncio).  
 **Frase final permitida (a canónica):** kernel K ⊨ spec S; Verus/Lean aceitaram; relativo a axiomas A; mutar K parte S e a máquina recusa; o dicionário, em crash, não reverte para além do último sync **nos caminhos cobertos pelos kernels**.  
@@ -57,7 +57,7 @@ Regra inegociável herdada do RFC-0053: se uma sub-prova não descarrega na barr
 
 ### P2 — Gates externos + congelamento do TCB (fecha itens 7/8/9/10-como-meta)
 
-- [ ] **P2.1** `ConcurrentDb`: **gate** = RFC-0051 P0 (PCT in-tree) aterrar. Depois: π-redução do group-commit (interleaving de threads ⇒ passo atómico no modelo) ou VerusSync — escolha registada quando o gate abrir — status: `todo` (bloqueado por gate; estado gravado, não falha)
+- [x] **P2.1** `ConcurrentDb`: **gate** = RFC-0051 P0 (PCT in-tree) aterrar. Depois: π-redução do group-commit (interleaving de threads ⇒ passo atómico no modelo) ou VerusSync — escolha registada quando o gate abrir — status: `done` (gate aberto: RFC-0051 P0–P2. Escolha registada: **nem** π-redução de todos os interleavings **nem** VerusSync — kernel Verus sequencial da decisão de grupo, RFC-0057 P2.1 / RFC-0058 P2.1. `group_commit_kernel.rs` é o passo atómico: `occ_conflict` / `group_validate` / `fence_publish_seq`; twin `verus/group_commit.rs` 14/0; extract Lean `GroupCommit.lean` sem sorry; callers `validate_occ_batch` / `lone_commit` / `GroupInFlight::max_appended_seq`. Residual honesto: glue de lock/WAL I/O/scheduler do OS continua TCB — `∀ interleavings` do `ConcurrentDb` ficou fora de escopo no contrato)
 - [x] **P2.2** Liveness IronFleet-class: eleição eventual sob **sincronia eventual** (axioma explícito: crash-restart finito, sem partição infinita) — upgrade do witness BFS para propriedade de eventualidade no modelo do node inteiro — status: `done` (`tcp_node_model.rs`: `Property::eventually` `Evt-apply-quiescence` + `Evt-election` como bounded liveness — comportamentos limitados a `MAX_STEPS = ES_BOUND+2`, precondition do check de eventualidade do BFS (path-acyclic, avaliado nos estados terminais); axiomas **ES-1/ES-2/ES-3 nomeados** no modelo e no TCB (`one-hundred-percent.md` §1); 8/8 testes: verde sob os axiomas, **refutado** sem axiomas (ambos), **refutado** sem ES-3 (só eleição — cada axioma é load-bearing), mutante de loop `broken_drain` apanhado mesmo com todos os axiomas)
 - [x] **P2.3** `StdEnv` escondidos → mesmo `Env` injectável em todas as layers (`Db<StdEnv>` hardcodes, persist path, `pedradb-store`) — alvo: zero `StdEnv` fora de `main`/bins; `FailingEnv` consegue exercer o path inteiro — status: `done` (ilhas `pedradb-journal` `catch_up/peek/append/changes_after` e `pedradb-index` `put_row_with_indexes/row_fully_indexed/row_half_indexed` generalizadas para `E: Env`; teste `FailingEnv` end-to-end em ambas as crates prova a injectabilidade; sweep final: zero `Db<StdEnv>` hardcode em API de biblioteca — hits restantes são defaults de type-param (`E: Env = StdEnv`), construtores de conveniência com variante injectável (`_on`/`_with_env`), módulos `#[cfg(test)]`, wrappers Env by-design (io-uring POSIX fallback) e leaf consumers a passar o default à API injectável (rocksdb-compat); 4 imports `StdEnv` mortos removidos)
 - [x] **P2.4** Glue → zero (meta mensurável): relatório final com tabela LOC glue vs kernel por crate e trajecto; meta: todo caminho de destino de dados é “abre fd, chama kernel, persiste” — status: `done` (`one-hundred-percent-report.md` §3: kernel 7.723 LOC / twin 5.022 LOC (0.65:1) / handler-files 39.793 LOC por crate; trajecto P0 0.84:1 → P1 +339/+688 → 0.65:1; o shape abre-fd→kernel→persiste é lint-garantido nos 18 pares `data_fate`)
@@ -76,7 +76,7 @@ Regra inegociável herdada do RFC-0053: se uma sub-prova não descarrega na barr
 | P1.3 | p1 | Loop TCP como máquina de estados | done | tests/tcp_node_model.rs 4/4; 3 mutantes de loop com contraexemplo | 2026-08-23 |
 | P1.4 | p1 | vlog GC + 2PC glue kernels | done | vlog twin `14 verified`; tx_glue twin `7 verified`; catalog ×3 negativo-testado | 2026-08-23 |
 | P1.5 | p1 | Relatório wave composição | done | docs/formal/p1-composition-report.md | 2026-08-23 |
-| P2.1 | p2 | ConcurrentDb via π/VerusSync (gate RFC-0051) | todo (gated) | — | 2026-08-23 |
+| P2.1 | p2 | ConcurrentDb via kernel Verus (não π/VerusSync) | done | RFC-0057 P2.1 `group_commit_kernel` + twin 14/0 + Lean | 2026-08-24 |
 | P2.2 | p2 | Liveness sob sincronia eventual | done | tcp_node_model.rs 8/8; axiomas ES-1/2/3 no TCB; 3 refutações (axiomas necessários) | 2026-08-23 |
 | P2.3 | p2 | StdEnv → Env injectável em todo o path | done | journal+index generalizadas; testes FailingEnv e2e; sweep sem hardcodes | 2026-08-23 |
 | P2.4 | p2 | Glue → zero (relatório + trajecto) | done | one-hundred-percent-report.md §3 (7.723/5.022/39.793 LOC) | 2026-08-23 |
@@ -111,7 +111,7 @@ Regra inegociável herdada do RFC-0053: se uma sub-prova não descarrega na barr
 |-----------|-----------|----------|
 | P0 | “Decisões de MANIFEST/flush/compact são kernels com prova e dentes” | “engine LSM verificado” |
 | P1 | “put acked ⇒ visível após reopen, nos caminhos cobertos (teorema-link)” | “dicionário ∀” (fora dos caminhos cobertos) |
-| P2 (TUDO) | Frase canónica (§ acima) + “itens 1–11 verdes, 12 contínuo” | “não há bugs”; “fsync provado”; “Pedra verificado” |
+| P2 (TUDO) | Frase canónica (§ acima) + “itens 1–9, 11 verdes; 7 = kernel de grupo (não ∀ interleavings); 10 à vista; 12 contínuo” | “não há bugs”; “fsync provado”; “Pedra verificado”; “ConcurrentDb ∀ interleavings” |
 
 ## Out of scope
 

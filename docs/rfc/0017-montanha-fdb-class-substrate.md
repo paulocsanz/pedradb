@@ -135,9 +135,9 @@ Ship a path operators can run on 3 machines/VMs with real sockets and survive le
 
 **P2**
 
-- [ ] Chaos suite green for fixed seeds list.  
-- [ ] Client contract tests for `NotLeader` / retry.  
-- [ ] DCS create/cas only through multi-process store path in CI.
+- [x] Chaos suite green for fixed seeds list.  
+- [x] Client contract tests for `NotLeader` / retry.  
+- [x] DCS create/cas only through multi-process store path in CI.
 
 ### Telemetry / analytics
 

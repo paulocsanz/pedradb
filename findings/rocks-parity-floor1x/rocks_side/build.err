@@ -1,0 +1,23 @@
+[rocks-parity] engine=rocksdb suites=ycsb,deps records=1024 ops=200 payload=100 dist=uniform batch=32
+[rocks-parity] seed 1024 records in 0.0s
+[rocks-parity] ycsb_a done ops=200 updates=107 inserts=0 scans=0 errors=0
+[rocks-parity] ycsb_b done ops=200 updates=10 inserts=0 scans=0 errors=0
+[rocks-parity] ycsb_c done ops=200 updates=0 inserts=0 scans=0 errors=0
+[rocks-parity] ycsb_d done ops=200 updates=0 inserts=13 scans=0 errors=0
+[rocks-parity] ycsb_e done ops=200 updates=0 inserts=8 scans=192 errors=0
+[rocks-parity] ycsb_f done ops=200 updates=91 inserts=0 scans=0 errors=0
+[rocks-parity] ycsb_b_unif done ops=200 updates=6 inserts=0 scans=0 errors=0
+[rocks-parity] ycsb_c_unif done ops=200 updates=0 inserts=0 scans=0 errors=0
+[rocks-parity] ycsb_c_big seed 1048576 keys in 3.9s (untimed)
+[rocks-parity] ycsb_c_big done (uniform 2^20 keyspace) errors=0
+[rocks-parity] deps seed 1024×2 versions in 0.0s
+[rocks-parity] deps_apply_batch split p50 build=7.58µs
+[rocks-parity] deps_apply_batch done txns=6400 errors=0
+[rocks-parity] deps_mvcc_latest done reads=200 errors=0
+[rocks-parity] deps_scan done scans=200 errors=0
+[rocks-parity] deps_raftlog enter mem_entries=?
+[rocks-parity] deps_raftlog split p50 build=0.67µs batch=6.04µs mem_after=?
+[rocks-parity] deps_raftlog done appends=3200 reads=25 errors=0
+[rocks-parity] deps_cache_overwrite done writes=200 errors=0
+[rocks-parity] deps_lock_prewrite done txns=6400 errors=0
+[rocks-parity] wrote findings/rocks-parity-floor1x/rocks_side/run/rocks_parity_bench.json (ts=1787588602)

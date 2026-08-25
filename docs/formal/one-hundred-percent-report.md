@@ -1,6 +1,6 @@
 # Entrega do “100% relativo ao TCB” — relatório final (RFC-0056)
 
-**Updated:** 2026-08-23
+**Updated:** 2026-08-24
 **Programa:** [RFC-0056](../rfc/0056-one-hundred-percent-delivery.md) · **Contrato:** [one-hundred-percent.md](one-hundred-percent.md)
 **Frase canónica:** kernel K ⊨ spec S, relativo a axiomas A — nunca “não há bugs no Pedra”.
 
@@ -10,23 +10,23 @@
 
 | # | Item | Estado | Evidência |
 |---|------|--------|-----------|
-| 1 | Todo `if` de destino de dados é `fn` puro que produção chama | **verde** (menos o caminho `ConcurrentDb`/group-commit — gate do item 7) | 35 kernels de decisão (freeze-enumerated); flush, compact, MANIFEST, vlog GC, 2PC glue saíram do inline (P0.1–P0.3, P1.4); lint exige o `entry` chamado em cada caller |
+| 1 | Todo `if` de destino de dados é `fn` puro que produção chama | **verde** | 36 kernels de decisão (freeze-enumerated, incl. `group_commit_kernel`); flush, compact, MANIFEST, vlog GC, 2PC glue, group-commit saíram do inline; lint exige o `entry` chamado em cada caller |
 | 2 | Cada kernel tem prova ∀ (Verus) | **verde** | 44 pares catalogados, 40 twins; rácio twin:kernel ≈ 0.65:1 (tabela §3); zero `sorry`; drift twin⊇kernel no `--ci` |
 | 3 | 2ª máquina (Aeneas→Lean) no extract | **verde** | 8 extracts com drift-stamp sha256 (vote, isolated, bloom, AE, commit, reopen, apply, wal-recover); `vote_decision_iff`; teoremas AS-IS nos 3 kernels P1.2 |
 | 4 | Caller refina (grant ⇒ persist Ok, ACK ⇒ commit) | **verde** | F15/F11/F16 kernels + twins; refinamento verificado no loop TCP (P1.3: 8/8); dicionário put→…→get (P1.1, `8 verified`) |
 | 5 | Composição: spec dicionário + crash | **verde** | `dictionary_link.rs` encadeia put→WAL→recover→reopen→get com hipóteses nomeadas A1–A4; DST e2e acked-prefix-survives verde no `--ci` |
 | 6 | Host loop é máquina de estados | **verde** | `compose_model.rs` (vote∧AE∧commit) + `tcp_node_model.rs` (node inteiro, kernels de produção chamados no passo; 8/8) |
-| 7 | Concorrência: redução ou lógica concorrente | **ABERTO (gate)** | `ConcurrentDb` real; PCT não aterrou (RFC-0051 P0); P2.1 gravado como `todo (gated)` — **não** claim de concorrência verificada |
+| 7 | Concorrência: redução ou lógica concorrente | **verde relativo ao kernel de grupo** | Gate RFC-0051 P0–P2 aterrado (PCT in-tree). Escolha (RFC-0056 P2.1): kernel Verus `group_commit` (RFC-0057 P2.1) — **não** π-redução de todos os interleavings, **não** VerusSync. Teoremas: atomicidade de grupo + first-committer-wins. Residual: glue lock/WAL I/O/scheduler OS continua TCB |
 | 8 | Liveness (eleição eventual) | **verde relativo aos axiomas** | P2.2: `Property::eventually` no modelo do node inteiro; bounded liveness sob ES-1/ES-2/ES-3 (§4); refutado sem axiomas — nunca teorema |
 | 9 | I/O é transição (crash = reset + torn) | **verde** | `FailingEnv`/`RecordingEnv` por todo o path; P2.3: zero `Db<StdEnv>` hardcode em API de biblioteca (§5); journal+index generalizadas com teste `FailingEnv` e2e |
 | 10 | Glue não-kernel é zero **ou** TCB à vista | **verde à vista; zero não** | §3: 7.723 LOC kernel vs 39.793 LOC de ficheiros handler; freeze do TCB (§6) recusa crescimento silencioso — o resto é explícito, não escondido |
 | 11 | Twin drift = CI vermelho | **verde** | lint (entry+handlers), clones (tokens idênticos), SOURCE sha256 stamps, freeze; testes negativos em cada wave (P0.4, P1.2, P1.5, §6) |
 | 12 | Axiomas atacados para sempre | **contínuo (por definição)** | World sibling (RFC-0050), Miri/TCG (RFC-0052), axiomas ES (§4) agora declarados no TCB; item que nunca “fecha” |
 
-**Leitura honesta:** itens 1–6, 8, 9, 11 verdes; 10 verde no braço “TCB à vista” (zero-glue
-continua a trajectória); **7 aberto por gate** (RFC-0051 PCT; π-redução/VerusSync escolhida
-quando abrir); 12 contínuo. Isso é o máximo que seL4/IronFleet chamam de sistema verificado —
-relativo ao TCB escrito, nunca “não há bugs”.
+**Leitura honesta:** itens 1–9, 11 verdes; 10 verde no braço “TCB à vista” (zero-glue
+continua a trajectória); 12 contínuo. Item 7 = kernel de grupo (RFC-0057), não `∀`
+interleavings do `ConcurrentDb`. Isso é o máximo que seL4/IronFleet chamam de sistema
+verificado — relativo ao TCB escrito, nunca “não há bugs”.
 
 ---
 
@@ -44,6 +44,7 @@ relativo ao TCB escrito, nunca “não há bugs”.
 | Verus bateria final (×2 cada) | manifest 9 · flush 10 · compact 10 · dictionary 8 · reopen 6 · apply 3 · vlog 14 · tx_glue 7 — todos `0 errors` nas duas corridas |
 | Verificados novos por wave | P0: 29 (manifest 9 + flush 10 + compact 10) · P1.1: 8 · P1.4: 21 (vlog 14 + tx_glue 7) |
 | Teoremas Lean sobre extracts | 17 novos em P1.2 (reopen 4, apply 5, wal-recover 8) + vote/iso/bloom/ae/commit prévios |
+| P2.1 addendum 2026-08-24 | catalog `group_commit`/`group_fence`; twin `verus/group_commit.rs` 14/0; extract `SOURCE.group_commit` + `GroupCommit.lean`; escolha = kernel Verus, não π/VerusSync |
 
 ## 3. P2.4 — tabela LOC glue vs kernel por crate
 
@@ -125,8 +126,9 @@ catalog clone, nor allowlisted`, `1 fail`; (b) par `vlog_recover` sem script Ver
 
 ## 7. O que este relatório **não** claima
 
-- Concorrência do `ConcurrentDb` (item 7 / P2.1: gate RFC-0051; π-redução ou VerusSync
-  quando o gate abrir).
+- `∀` interleavings do `ConcurrentDb` (item 7 cobre o kernel de decisão de grupo,
+  não o scheduler do OS; π-redução completa e VerusSync foram recusados — escolha
+  registada no RFC-0056 P2.1).
 - Liveness não-axiomática: ES-1/2/3 são axiomas declarados, atacados para sempre (item 12).
 - “Zero glue”: 39.793 LOC de handler-files continuam TCB — agora visíveis e congelados,
   não provados.

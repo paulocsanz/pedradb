@@ -1,0 +1,3 @@
+TCG_WORLD_SMOKE_BEGIN
+seed=42 hash=61f8a02125b3c69e puts_ok=6 puts_err=0 gets_ok=2 dcs_ok=1 events=126 net_sent=304 dropped=0 rpc=296 disk_arms=1 trip=0 t=166
+TCG_WORLD_SMOKE_END

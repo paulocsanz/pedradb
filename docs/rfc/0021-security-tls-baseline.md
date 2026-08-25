@@ -24,12 +24,12 @@
 ## Non-goals here
 
 - Claiming secure-by-default / GA.  
-- In-process key rotation (restart + replace PEMs).  
+- Encrypt-at-rest in the engine (LUKS/volume, ops). In-process PEM reload is RFC-0050 P1.3 (`reload_from_pem_files`).  
 - Encrypt-at-rest in the engine (LUKS/volume, ops).
 
 ## Gate
 
 - [x] CI profile `montanha-secure` builds with TLS features  
-- [x] Doc + runbook for key rotation (manual restart)  
+- [x] Doc + runbook for key rotation (manual restart); in-process reload is RFC-0050 P1.3  
 
 Without `--tls-*` / `--require-tls`: **cleartext lab only**.

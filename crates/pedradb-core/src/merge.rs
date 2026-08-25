@@ -585,8 +585,7 @@ fn gc_snapshot_safe(
         // (e.g. existing L1+ untouched by compact_l0_into_l1); dropping the
         // tombstone there resurrects that version (durably, after reopen).
         // Decided by `compact_kernel::lone_tombstone_fate`.
-        let lone_tombstone =
-            keep.len() == 1 && keep[0].0.kind == ValueType::Deletion;
+        let lone_tombstone = keep.len() == 1 && keep[0].0.kind == ValueType::Deletion;
         if crate::compact_kernel::lone_tombstone_fate(bottommost, lone_tombstone)
             == crate::compact_kernel::VersionFate::Drop
         {

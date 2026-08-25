@@ -216,7 +216,11 @@ mod tests {
     #[test]
     fn theorem_sst_recover_on_finite_domain() {
         let listed = [ListedSst::AllPresent, ListedSst::Missing(3)];
-        for obs in [ManifestObs::Absent, ManifestObs::Inventory, ManifestObs::Corrupt] {
+        for obs in [
+            ManifestObs::Absent,
+            ManifestObs::Inventory,
+            ManifestObs::Corrupt,
+        ] {
             for l in listed {
                 let a = sst_recover_action(obs, l);
                 match a {

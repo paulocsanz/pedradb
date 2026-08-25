@@ -2,7 +2,8 @@
 //!
 //! Layout (LevelDB-inspired, simplified full rewrite — not an append-only edit log):
 //!
-//! - `CURRENT` — one line: active manifest file name (`MANIFEST-000001`)
+//! - `CURRENT` — active manifest name (`MANIFEST-000001`), plus an optional
+//!   CRC32C hex line of that file (RFC-0060 P2.15). One-line pointers still load.
 //! - `MANIFEST-NNNNNN` — binary inventory of live SST file numbers + next file num
 //!
 //! Updates are crash-safe: write `MANIFEST-*.tmp` → rename → write `CURRENT.tmp` → rename.
@@ -280,17 +281,12 @@ pub fn load<E: Env>(env: &E, dir: &Path) -> Result<Option<VersionSet>> {
     let mut text = String::new();
     f.read_to_string(&mut text)
         .map_err(|e| CoreError::CorruptManifest(format!("read CURRENT: {e}")))?;
-    let name = text.trim();
     // Empty CURRENT (torn write / unsynced crash) → treat as missing inventory.
-    if name.is_empty() {
+    if text.trim().is_empty() {
         return Ok(None);
     }
-    if !name.starts_with(MANIFEST_PREFIX) {
-        return Err(CoreError::CorruptManifest(format!(
-            "bad CURRENT contents: {name:?}"
-        )));
-    }
-    let path = dir.join(name);
+    let (name, crc) = parse_current_pointer(&text)?;
+    let path = dir.join(&name);
     if !env.exists(&path) {
         return Err(CoreError::CorruptManifest(format!(
             "CURRENT points to missing {name}"
@@ -299,7 +295,47 @@ pub fn load<E: Env>(env: &E, dir: &Path) -> Result<Option<VersionSet>> {
     let mut f = env.open_read(&path)?;
     let mut buf = Vec::new();
     f.read_to_end(&mut buf)?;
+    if let Some(expect) = crc {
+        if crc32c::crc32c(&buf) != expect {
+            return Err(CoreError::CorruptManifest(format!(
+                "CURRENT crc mismatch for {name}"
+            )));
+        }
+    }
     Ok(Some(decode(&buf)?))
+}
+
+/// Parse `CURRENT`: line 1 is `MANIFEST-*`; line 2, if present, is CRC32C hex
+/// of that file (RFC-0060 P2.15). Legacy one-line pointers have `crc = None`.
+///
+/// # Errors
+/// Bad name, path escape, or unparsable CRC line.
+pub fn parse_current_pointer(text: &str) -> Result<(String, Option<u32>)> {
+    let t = text.trim();
+    let mut lines = t.lines();
+    let name = lines.next().unwrap_or("").trim();
+    if name.is_empty() {
+        return Err(CoreError::CorruptManifest("empty CURRENT".into()));
+    }
+    if !name.starts_with(MANIFEST_PREFIX)
+        || name.contains('/')
+        || name.contains('\\')
+        || name.contains('\0')
+    {
+        return Err(CoreError::CorruptManifest(format!(
+            "bad CURRENT contents: {name:?}"
+        )));
+    }
+    let crc = match lines.next().map(str::trim).filter(|s| !s.is_empty()) {
+        None => None,
+        Some(hex) => {
+            let v = u32::from_str_radix(hex, 16).map_err(|_| {
+                CoreError::CorruptManifest(format!("CURRENT crc not hex: {hex:?}"))
+            })?;
+            Some(v)
+        }
+    };
+    Ok((name.to_string(), crc))
 }
 
 /// Persist `vs` as a new MANIFEST and swing `CURRENT` (tmp + rename).
@@ -335,6 +371,8 @@ pub fn store<E: Env>(env: &E, dir: &Path, vs: &VersionSet, sync: bool) -> Result
         let mut f = env.create(&cur_tmp)?;
         f.write_all(man_name.as_bytes())?;
         f.write_all(b"\n")?;
+        // RFC-0060 P2.15: CRC of the MANIFEST bytes this pointer names.
+        writeln!(f, "{:08x}", crc32c::crc32c(&payload))?;
         f.sync_data()?;
     }
     env.rename(&cur_tmp, &dir.join(CURRENT_FILE))?;
@@ -578,6 +616,41 @@ mod tests {
         assert!(!dir.join("000002.sst").exists());
         assert!(dir.join("000003.sst").exists());
 
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0060 P2.15: one-line CURRENT still loads; CRC mismatch does not.
+    #[test]
+    fn current_pointer_legacy_and_crc_mismatch() {
+        let dir = temp_dir();
+        let env = StdEnv;
+        let mut vs = VersionSet {
+            next_file_num: 2,
+            sst_file_nums: vec![1],
+            sst_levels: vec![0],
+            manifest_file_num: 0,
+            vlog_use_new: false,
+            earliest_readable_seq: 0,
+        };
+        fs::write(dir.join("000001.sst"), b"a").unwrap();
+        install_next(&env, &dir, &mut vs, true).unwrap();
+        let body = fs::read(dir.join(CURRENT_FILE)).unwrap();
+        let text = String::from_utf8(body).unwrap();
+        assert!(
+            text.lines().count() >= 2,
+            "new CURRENT must carry a CRC line, got {text:?}"
+        );
+        assert!(load(&env, &dir).unwrap().is_some());
+        // Legacy one-line pointer.
+        fs::write(dir.join(CURRENT_FILE), "MANIFEST-000001\n").unwrap();
+        assert!(load(&env, &dir).unwrap().is_some());
+        // CRC line that does not match the MANIFEST bytes.
+        fs::write(dir.join(CURRENT_FILE), "MANIFEST-000001\nffffffff\n").unwrap();
+        let err = load(&env, &dir).unwrap_err();
+        assert!(
+            err.to_string().contains("crc mismatch"),
+            "got {err}"
+        );
         let _ = fs::remove_dir_all(&dir);
     }
 

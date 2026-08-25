@@ -52,19 +52,19 @@ Claim vs circular vLog under update-intensive load: **4.6× throughput, 53.4% le
 
 ### P0 — two segments, one group GC, useful
 
-- [ ] **P0.1** `VLG2` pointer + two main segment files; hash puts; get still works after reopen — status: `todo`
-- [ ] **P0.2** `compact_vlog_group(seg)`: latest-version-in-group, remap only SSTs that mention that `seg` — status: `todo`
-- [ ] **P0.3** DST crash during group rewrite (same fence rules as today’s `compact_vlog`) — status: `todo`
+- [ ] **P0.1** `VLG2` pointer + two main segment files; hash puts; get still works after reopen — status: `todo` (parked: 0026 P0.3 picked **C**, not B)
+- [ ] **P0.2** `compact_vlog_group(seg)`: latest-version-in-group, remap only SSTs that mention that `seg` — status: `todo` (parked: 0026 P0.3 picked **C**, not B)
+- [ ] **P0.3** DST crash during group rewrite (same fence rules as today’s `compact_vlog`) — status: `todo` (parked: 0026 P0.3 picked **C**, not B)
 
 ### P1
 
-- [ ] **P1.1** Overflow log segments when a main is full; segment table checkpoint — status: `todo`
-- [ ] **P1.2** Greedy “dirtiest group” picker + stats — status: `todo`
+- [ ] **P1.1** Overflow log segments when a main is full; segment table checkpoint — status: `todo` (parked: 0026 P0.3 picked **C**, not B)
+- [ ] **P1.2** Greedy “dirtiest group” picker + stats — status: `todo` (parked: 0026 P0.3 picked **C**, not B)
 
 ### P2
 
-- [ ] **P2.1** Hot/cold tag (HashKV §3.4) — status: `todo`
-- [ ] **P2.2** Change `N_main` via full rewrite — status: `todo`
+- [ ] **P2.1** Hot/cold tag (HashKV §3.4) — status: `todo` (parked: 0026 P0.3 picked **C**, not B)
+- [ ] **P2.2** Change `N_main` via full rewrite — status: `todo` (parked: 0026 P0.3 picked **C**, not B)
 - [x] **P2.3** R018 HashKV D4 ficha — status: `done`. Re-bench vs 0026 P0.2 só se L19 abrir P0.
 
 ## Status (living)

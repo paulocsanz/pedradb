@@ -71,6 +71,96 @@ impl WatchHub {
     }
 }
 
+// ── Montanha-Live leadership hub (RFC-0013 P1.2) ───────────────────────────
+
+/// Best-effort leadership stream. **Not fencing** — Raft/DCS remain the
+/// truth plane; a missed or stale event must not be used to grant writes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LeadershipEvent {
+    /// Current leader (if any) at subscribe time.
+    Snapshot {
+        /// Range id.
+        range_id: u64,
+        /// Unique live leader, or `None` if unknown / dual-claim.
+        leader: Option<u64>,
+        /// Monotone hub cursor.
+        cursor: u64,
+    },
+    /// Leader claim changed (step-down, elect). Best-effort.
+    LeaderChanged {
+        /// Range id.
+        range_id: u64,
+        /// Unique live leader after the change.
+        leader: Option<u64>,
+        /// Monotone hub cursor.
+        cursor: u64,
+    },
+}
+
+/// In-process Live hub (RFC-0013 P1.2). Full channels drop events — that is
+/// the non-fencing contract, not a silent-wrong on the KV plane.
+#[derive(Default)]
+pub struct LeadershipHub {
+    next_id: u64,
+    cursor: u64,
+    /// id → (range_id, sender)
+    subs: HashMap<u64, (u64, SyncSender<LeadershipEvent>)>,
+}
+
+impl LeadershipHub {
+    /// Empty hub.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Subscribe to one range. Caller should push a [`LeadershipEvent::Snapshot`].
+    pub fn subscribe(&mut self, range_id: u64) -> (u64, Receiver<LeadershipEvent>) {
+        let (tx, rx) = mpsc::sync_channel(64);
+        let id = self.next_id;
+        self.next_id = self.next_id.saturating_add(1);
+        self.subs.insert(id, (range_id, tx));
+        (id, rx)
+    }
+
+    /// Drop a subscription.
+    pub fn unwatch(&mut self, id: u64) {
+        self.subs.remove(&id);
+    }
+
+    fn next_cursor(&mut self) -> u64 {
+        self.cursor = self.cursor.saturating_add(1);
+        self.cursor
+    }
+
+    /// Snapshot for one subscriber (subscribe-time).
+    pub fn push_snapshot(&mut self, id: u64, range_id: u64, leader: Option<u64>) {
+        let cursor = self.next_cursor();
+        if let Some((_, tx)) = self.subs.get(&id) {
+            let _ = tx.try_send(LeadershipEvent::Snapshot {
+                range_id,
+                leader,
+                cursor,
+            });
+        }
+    }
+
+    /// Fan-out [`LeadershipEvent::LeaderChanged`] to matching subscribers.
+    pub fn notify_leader(&mut self, range_id: u64, leader: Option<u64>) {
+        let cursor = self.next_cursor();
+        let ev = LeadershipEvent::LeaderChanged {
+            range_id,
+            leader,
+            cursor,
+        };
+        for (rid, tx) in self.subs.values() {
+            if *rid == range_id {
+                let _ = tx.try_send(ev.clone());
+            }
+        }
+    }
+}
+
 // ── etcd-need DCS face ─────────────────────────────────────────────────────
 
 /// etcd-class coordination face on store only (RFC-0022 P0.4).
@@ -503,7 +593,7 @@ pub use crate::meta_key;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{StoreCluster, StoreError};
+    use crate::{StoreCluster, StoreError, StoreMetrics};
 
     fn temp() -> std::path::PathBuf {
         use std::sync::atomic::{AtomicU64, Ordering};
@@ -649,6 +739,82 @@ mod tests {
             matches!(err, StoreError::TransactionTooOld { .. }),
             "got {err:?}"
         );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0013 P1.2: Live stream sees failover without polling DCS; KV
+    /// plane remains the truth (put/get after re-elect). Stream is not fencing.
+    #[test]
+    fn live_hub_failover_notifies_without_polling_dcs() {
+        let dir = temp();
+        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        let rid = c.range_metas()[0].id;
+        let (_id, rx) = c.subscribe_leadership(rid);
+        c.elect_all(80).unwrap();
+        let mut saw_leader = None;
+        while let Ok(ev) = rx.try_recv() {
+            match ev {
+                LeadershipEvent::Snapshot { leader, .. }
+                | LeadershipEvent::LeaderChanged { leader, .. } => {
+                    if leader.is_some() {
+                        saw_leader = leader;
+                    }
+                }
+            }
+        }
+        assert!(
+            saw_leader.is_some(),
+            "elect must push a leader on the stream"
+        );
+        let old = saw_leader.unwrap();
+        c.put(b"truth", b"1").unwrap();
+        let _ = c.step_down_range_leader(rid).unwrap();
+        c.elect_all(80).unwrap();
+        let mut saw_change = false;
+        while let Ok(ev) = rx.try_recv() {
+            if let LeadershipEvent::LeaderChanged { leader, .. } = ev {
+                if leader != Some(old) {
+                    saw_change = true;
+                }
+            }
+        }
+        assert!(
+            saw_change,
+            "failover must notify the Live stream (no DCS poll)"
+        );
+        assert_eq!(
+            c.get(b"truth").unwrap().as_deref(),
+            Some(b"1".as_ref()),
+            "truth plane (get) independent of stream"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0013 P1.5: Ok put and election bump counters; NotCommitted too.
+    #[test]
+    fn store_metrics_count_commits_and_elections() {
+        let dir = temp();
+        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        assert_eq!(c.metrics(), StoreMetrics::default());
+        c.elect_all(80).unwrap();
+        assert!(
+            c.metrics().elections >= 1,
+            "elect_all must count a persisted election"
+        );
+        c.put(b"m", b"1").unwrap();
+        assert!(c.metrics().commits_ok >= 1);
+        let leader = c.range_leader(c.range_metas()[0].id).unwrap();
+        for nid in c.node_ids().to_vec() {
+            if nid != leader {
+                c.set_participating(nid, false).unwrap();
+            }
+        }
+        let err = c.put(b"m2", b"2");
+        assert!(
+            matches!(err, Err(StoreError::NotCommitted { .. })),
+            "{err:?}"
+        );
+        assert!(c.metrics().not_committed >= 1);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

@@ -1,0 +1,19 @@
+== miri pedradb-sim crash_after_sync_recovers_committed ==
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.03s
+     Running unittests src/lib.rs (target/miri/aarch64-apple-darwin/debug/build/pedradb-sim/d63527d6eb59db24/out/pedradb_sim-d63527d6eb59db24)
+
+running 1 test
+test tests::crash_after_sync_recovers_committed ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 50 filtered out; finished in 1.33s
+
+== miri pedradb-sim failing_env_nth_put_then_reopen_recovers_prefix ==
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.07s
+     Running unittests src/lib.rs (target/miri/aarch64-apple-darwin/debug/build/pedradb-sim/d63527d6eb59db24/out/pedradb_sim-d63527d6eb59db24)
+
+running 1 test
+test tests::failing_env_nth_put_then_reopen_recovers_prefix ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 50 filtered out; finished in 1.36s
+
+miri_dst_smoke: ok

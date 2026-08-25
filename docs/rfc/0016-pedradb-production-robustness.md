@@ -1,7 +1,7 @@
 # RFC-0016: PedraDB production robustness (launch-ready engine)
 
-**Status:** P0 done (P1 partial, P2 launch docs)  
-**Updated:** 2026-08-12  
+**Status:** done (P0–P2; P1.4 rocks-parity-bench; P2.1 ops backup-under-load; P2.2 ingest)  
+**Updated:** 2026-08-24  
 **Parent:** [RFC-0001](0001-pedradb-high-level-spec.md)  
 **Builds on:** [RFC-0014](0014-rocks-pebble-redwood-maturity.md) (feature shape — **done**), [RFC-0015](0015-audit-pedradb-correctness-fixes.md) (audit correctness — **done**), [RFC-0011](0011-env-fault-injection.md), [RFC-0012 research](0012-research-decisions.md)  
 **Complements:** [RFC-0017](0017-montanha-fdb-class-substrate.md) (distributed product on top of this kernel), [RFC-0019](0019-local-primitive-for-platform-and-scylla-need.md) (CAS / seq pin / change feed for platform L1)  
@@ -87,12 +87,12 @@ Preserve anti-corner rules (versioned formats, no dual primary B-tree, no knob z
 - [x] **P1.1** Group commit (or concurrent-writer fsync amortization) with tests: multi-thread puts; durability contract unchanged — status: `done` (`ConcurrentDb` write group + `Db::group_commit`)  
 - [x] **P1.2** Dual-memtable switch + ConcurrentDb flush SST I/O off write lock (puts not starved) — status: `done`  
 - [x] **P1.3** Pipeline: imm flush while active mem accepts writes; compact after flush pipeline — status: `done`  
-- [ ] **P1.4** Apples-to-apples bench harness vs Rocks/fjall + multi-GB lab — status: `todo`  
+- [x] **P1.4** Apples-to-apples bench harness vs Rocks/fjall + multi-GB lab — status: `done` (`crates/rocksdb-parity-bench` + `scripts/rocksdb_parity_v0.sh`; official peer Rocks `sync=false`; fjall is not the official peer)  
 
 ### P2 — ops & launch readiness polish
 
-- [ ] **P2.1** Continuous backup under load (ship_wal / checkpoint without wrong live reads) — status: `todo`  
-- [ ] **P2.2** Optional SST ingest / bulk load path (if Montanha snapshot install needs it) — status: `todo`  
+- [x] **P2.1** Continuous backup under load (ship_wal / checkpoint without wrong live reads) — status: `done` (`rfc19_backup_under_continuous_put_restore_acked_prefix` in `pedradb-ops`)  
+- [x] **P2.2** Optional SST ingest / bulk load path (if Montanha snapshot install needs it) — status: `done` (RFC-0050 P0.6: `SstFileWriter` / `ingest_external_file`)  
 - [x] **P2.3** Encryption-at-rest hook **or** explicit non-goal with layer recommendation — status: `done` (explicit non-goal: app/FS layer)  
 - [x] **P2.4** Public “launch readiness” checklist in `docs/usage.md` + robustness doc update — status: `done`  
 
@@ -109,9 +109,9 @@ Preserve anti-corner rules (versioned formats, no dual primary B-tree, no knob z
 | P1.1 | p1 | Group commit / fsync amortize | done | ConcurrentDb WriteGroup | 2026-08-12 |
 | P1.2 | p1 | Fine write lock / flush off-lock | done | dual-mem + prepare_flush_imm | 2026-08-12 |
 | P1.3 | p1 | Dual-mem pipeline | done | imm + active mem | 2026-08-12 |
-| P1.4 | p1 | Bench harness + multi-GB lab | todo | — | 2026-08-12 |
-| P2.1 | p2 | Backup under load | todo | — | 2026-08-12 |
-| P2.2 | p2 | SST ingest (if needed) | todo | — | 2026-08-12 |
+| P1.4 | p1 | Bench harness + multi-GB lab | done | rocksdb-parity-bench vs Rocks default | 2026-08-24 |
+| P2.1 | p2 | Backup under load | done | ops `rfc19_backup_under_continuous_put_restore_acked_prefix` | 2026-08-24 |
+| P2.2 | p2 | SST ingest (if needed) | done | RFC-0050 `ingest_external_file` | 2026-08-24 |
 | P2.3 | p2 | Encryption decision | done | non-goal: FS/app layer | 2026-08-12 |
 | P2.4 | p2 | Launch checklist docs | done | usage.md checklist | 2026-08-12 |
 
@@ -130,14 +130,14 @@ Preserve anti-corner rules (versioned formats, no dual primary B-tree, no knob z
 
 **P1**
 
-- [ ] Concurrent puts under group-commit path: Ok ⇒ durable; higher sustained QPS than pre-change under same machine (number attached to PR).  
-- [ ] Compact pacing: put latency does not wedge unbounded during L0 storm (bounded test).  
-- [ ] Bench doc: table of thruput/latency vs Rocks/fjall with sync modes labeled.
+- [x] Concurrent puts under group-commit path: Ok ⇒ durable; higher sustained QPS than pre-change under same machine (number attached to PR).  
+- [x] Compact pacing: put latency does not wedge unbounded during L0 storm (bounded test).  
+- [x] Bench doc: table of thruput/latency vs Rocks/fjall with sync modes labeled.
 
 **P2**
 
-- [ ] Backup ship during continuous put stream; restore verifies acked prefix.  
-- [ ] Launch checklist exists and is referenced from README/open-items.
+- [x] Backup ship during continuous put stream; restore verifies acked prefix.  
+- [x] Launch checklist exists and is referenced from README/open-items.
 
 ### Telemetry / analytics
 

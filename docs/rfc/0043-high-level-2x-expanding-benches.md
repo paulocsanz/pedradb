@@ -1,7 +1,8 @@
 # RFC-0043: 2× RocksDB **default** nos benches de alto nível + catálogo que só cresce
 
 **Status:** in-progress
-**Updated:** 2026-08-19
+**Updated:** 2026-08-25
+**Parked (quiet remesure):** remaining P-slices need a quiet 3× host; dirty sandbox numbers are not the official floor (AGENTS.md peer `sync=false`).
 **Parents:** [0041](0041-2x-rocks-default.md) (piso 2.0 nas 16; 1c write continua teto),
 [0042](0042-0.8x-rocks-default-write-shapes.md) (group/catch-up; não apaga 1c),
 [AGENTS.md](../../AGENTS.md) (peer = `sync=false`)
@@ -91,8 +92,8 @@ na suíte `deps` (compare só cresce).
 ### HL₂ (P2.2 / P2.6 — no runner 2026-08-19)
 
 Suítes opt-in (não misturam as 16 oficiais). Mixgraph-like / WBWI /
-compaction filter / ingest SST continuam `blocked`. Fora: cluster TiKV
-3 nós (peer Montanha).
+compaction filter / ingest SST: suíte `rocksapi` (P2.7; remesura 3×
+continua parked). Fora: cluster TiKV 3 nós (peer Montanha).
 
 | suíte | shapes | banda |
 |---|---|---|
@@ -219,40 +220,40 @@ Raw: `findings/rfc0043-new-suites-dirty/run5-*/`.
 ### P0 — mapa + gate no que já passa
 
 - [x] **P0.1** RFC + status viva (este doc) — status: `done`
-- [ ] **P0.2** Remesura 16 × 3 quieta em `findings/rfc0043-p0/`;
+- [ ] **P0.2** Remesura 16 × 3 quieta em `findings/rfc0043-p0/` (parked: quiet remesure);
       `medians.txt`; peers `sync:false` — status: `todo`
-- [ ] **P0.3** Script `SYNC=0`: `GATE_SHAPES` = HL que P0.2 mostrou ≥ 2.0
+- [ ] **P0.3** Script `SYNC=0` (parked: quiet remesure): `GATE_SHAPES` = HL que P0.2 mostrou ≥ 2.0
       + `FLOOR=2.0`. Compare ainda lista as 16. — status: `doing`
       (script já gata `apply_mc4,mvcc,ycsb_e` no head3; confirma após P0.2)
 
 ### P1 — HL₀ inteiro ≥ 2.0
 
-- [ ] **P1.1** `deps_raftlog_mc4`, `ycsb_c`, `deps_scan` ≥ 2.0 (CPU /
+- [ ] **P1.1** `deps_raftlog_mc4`, `ycsb_c`, `deps_scan` ≥ 2.0 (parked: quiet remesure; CPU /
       leitura; ~+12%) — status: `doing` (TLS hit `&self`; WAL one
       `encoded_len`. Official ainda head3 1.79. Remesura só load ≪ ncpu)
-- [ ] **P1.2** `deps_apply_batch` e `deps_raftlog` 1c ≥ 2.0 — status: `todo`
-- [ ] **P1.3** Remesura `findings/rfc0043-p1/`; gate = HL₀; canários
+- [ ] **P1.2** `deps_apply_batch` e `deps_raftlog` 1c ≥ 2.0 — status: `todo` (parked: quiet remesure)
+- [ ] **P1.3** Remesura `findings/rfc0043-p1/` (parked: quiet remesure); gate = HL₀; canários
       presentes — status: `todo`
 
 ### P2 — catálogo cresce
 
-- [ ] **P2.1** Suíte `qs` (`qs_hot_get`, `qs_neg_lookup`, `qs_batch_write`)
+- [ ] **P2.1** Suíte `qs` (parked: quiet remesure; `qs_hot_get`, `qs_neg_lookup`, `qs_batch_write`)
       + `deps_lock_prewrite` no runner/compare; 3 runs
       `findings/rfc0043-p2/`; quem &lt; 2.0 fica — status: `doing`
       (shapes no runner + compare + testes verdes; remesura 3× bloqueada
       por load ~55 — não gravar mediana suja)
-- [ ] **P2.2** HL₂: mixgraph-like / WBWI / compaction filter / ingest
-      `blocked`. Shapes Nebula/Flink/Ceph/Solana/Arango/Venice/Oxigraph
-      saíram para P2.6. Sem cluster TiKV. — status: `doing` (blocked-API
-      ainda aberto; o resto do P2.2 virou P2.6)
-- [ ] **P2.3** Suítes `kvrocks` + `myrocks` (8 shapes) no runner/compare;
+- [ ] **P2.2** HL₂ (parked: quiet remesure): mixgraph-like / WBWI / compaction filter / ingest
+      no runner. Shapes Nebula/Flink/Ceph/Solana/Arango/Venice/Oxigraph
+      saíram para P2.6. Sem cluster TiKV. — status: `doing` (API: P2.7;
+      remesura 3× parked)
+- [ ] **P2.3** Suítes `kvrocks` + `myrocks` (parked: quiet remesure; 8 shapes) no runner/compare;
       catálogo em `docs/rocksdb-dependents-benchmarks.md`; 3 runs
       `findings/rfc0043-p2.3/`; quem &lt; 2.0 fica — status: `doing`
       (shapes + testes verdes; remesura 3× bloqueada por load ≫ ncpu)
-- [ ] **P2.4** `OptimisticTransactionDB` no compat + suíte `surreal`
+- [ ] **P2.4** `OptimisticTransactionDB` (parked: quiet remesure) no compat + suíte `surreal`
       (5 shapes); 3 runs `findings/rfc0043-p2.4/`; quem &lt; 2.0 fica —
       status: `doing` (API + testes; remesura bloqueada por load ≫ ncpu)
-- [ ] **P2.5** Programa 0.80 → >1.0 nas suítes opt-in: fast-path cache no
+- [ ] **P2.5** Programa 0.80 → >1.0 (parked: quiet remesure) nas suítes opt-in: fast-path cache no
       `get_at`, validação OCC por referência, `kvrocks_set_mc50`
       (redis-benchmark default). Alvo: put/batch/rmw ≥ 0.80, quem já
       passou > 1.0; remesura isolada quieta — status: `doing`
@@ -266,6 +267,11 @@ Raw: `findings/rfc0043-new-suites-dirty/run5-*/`.
       0.5.x (2026) ainda é RocksDB. Remesura 3× pendente — status: `doing`
       (OCC agora entra no write group; run8 sujo: rmw_mc8 0.65 / set_mc50
       0.64 / rmw 0.93 / put 1.08; quiet 3× pendente)
+- [x] **P2.7** Suite opt-in `rocksapi` (API, not remesure): `mixgraph_like`,
+      `wbwi_read_your_writes`, `compaction_filter_drop`, `ingest_sst` no
+      runner/compare + testes verdes. `DB::compact_with_filter`. Remesura
+      3× continua no P2.2 parked — status: `done`
+      (`rocksapi_suite_on_compat_engine`)
 
 ## Status (living — update with every PR)
 
@@ -278,7 +284,8 @@ Raw: `findings/rfc0043-new-suites-dirty/run5-*/`.
 | P1.2 | p1 | apply/raftlog 1c ≥ 2.0 | todo | — | 2026-08-18 |
 | P1.3 | p1 | remesura p1; gate HL₀ | todo | findings/rfc0043-p1 | 2026-08-18 |
 | P2.1 | p2 | qs + lock_prewrite; quem falha fica | doing | runner+compare; remesura pendente | 2026-08-18 |
-| P2.2 | p2 | HL₂ / blocked-API | todo | — | 2026-08-18 |
+| P2.2 | p2 | HL₂ remesure | todo | parked quiet remesure; API → P2.7 | 2026-08-25 |
+| P2.7 | p2 | suite `rocksapi` (mixgraph/WBWI/filter/ingest) | done | `run_rocksapi` + `compact_with_filter` | 2026-08-25 |
 | P2.3 | p2 | kvrocks + myrocks + catálogo | doing | runner+compare; remesura pendente | 2026-08-18 |
 | P2.4 | p2 | SurrealDB OCC + suíte surreal | doing | compat txn + runner; remesura pendente | 2026-08-18 |
 | P2.5 | p2 | 0.80 → >1.0 (get_at cache, OCC ref, mc50) | doing | run5 sujo: put 1.07/batch 1.54/pipeline 0.81; rmw+mc50 abertos | 2026-08-18 |

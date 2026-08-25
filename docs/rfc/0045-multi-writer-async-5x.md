@@ -1,7 +1,7 @@
 # RFC-0045: escrita concorrente real — fechar `mc50` ≥5× e `lock_prewrite` ≥1× na coluna async
 
-**Status:** draft
-**Updated:** 2026-08-20
+**Status:** in-progress
+**Updated:** 2026-08-24
 **Parents:** [0044](0044-async-class-5x-rocks.md) (coluna async/async, piso 5×),
 [0040](0040-fsync-always-beats-rocks-async.md) (group commit + bypass),
 [AGENTS.md](../../AGENTS.md) (coluna oficial ≠ coluna async)
@@ -80,7 +80,7 @@
 
 ### P1 — o que o P0 deixou vivo (P1.1 original falsificado)
 
-- [ ] **P1.1** ~~prepare fora do write lock~~ — status: `done (negativo)`
+- [x] **P1.1** ~~prepare fora do write lock~~ — status: `done` (negativo: P0.2 prepare = 8% do hold; não implementar)
       (P0.2: prepare = 0.13 µs de hold 1.6 µs = 8%; mover não move o qps.
       Registrado como negativo com número; não implementar)
 - [x] **P1.2** Bissecção do contexto da suíte que flipa `deps_lock_prewrite`
@@ -104,18 +104,13 @@
 
 ### P2 — concorrência de memtable (o alvo medido do 5×; promoted)
 
-- [ ] **P2.1** Memtable apply fora da seção crítica (hold 1.6 → ≤1.1 µs;
-      ceiling 640 k → 900 k): per-writer staging + apply paralelo pós-WAL
-      (shape Rocks) ou estrutura concorrente; A/B pareado vs BTree atual —
-      status: `todo`
-      (aritmética de primeira ordem dos números medidos do P0.2: 266 k
-      em 50c = ~3,76 µs efetivos por commit (hold 1,6 + handoff
-      residual ~2,2); tirar o mem (0,5 µs) do hold → ~3,26 µs → ~306 k
-      = **+15%**, não 5× — o 5× precisa ~760 k = ~1,3 µs por commit
-      incluindo handoff, i.e. handoff ~zero. P2.1 segue como alavanca,
-      mas com valor esperado quantificado; só vale como fundação se a
-      caixa quieta (re-árbitro P2.1 do 0044) mantiver o peer no nível do
-      árbitro 04c7aa2)
+- [x] **P2.1** Memtable apply fora da seção crítica — status: `done`
+      (`finish_group_off_lock`: primeiro hold = WAL encode; `fdatasync` off
+      lock; segundo hold = `group_apply` + publish. OCC vê ops staged em
+      `unapplied` durante o fd; `occ_snapshot` fica em `published` enquanto
+      `commit_inflight > 0`. Não é skiplist concorrente — RFC-0055 P1.1
+      continua gated. Aritmética P0.2: **+15% esperado, não 5×**; throughput
+      **não** re-arbitrado nesta fatia — ver `findings/rfc0045-p21/`)
 - [x] **P2.2** Handoff sem park-convoy (wait 175 µs vs hold 1.6 µs é o 2.4×
       entre 266 k e o ceiling) — status: `done (negativo)`
       (**premissa corrigida + ambas as famílias de handoff medidas**:
@@ -138,19 +133,21 @@
 | P1.1 | p1 | prepare off-lock | done (negativo) | 8% do hold; P0.2 | 2026-08-20 |
 | P1.2 | p1 | bissecção do contexto v0 | done | premissa corrigida: era config+janela de stalls, não contexto; 9 rounds sem flip | 2026-08-21 |
 | P1.3 | p1 | remesura quieto 3× sem regressão | **done** | P0.4 clean (edfa132): mc50 2.13 med 3× (2.22/2.13/2.03), lock_prewrite 2.54 med 3× — sem regressão | 2026-08-22 |
-| P2.1 | p2 | memtable apply fora da seção crítica | todo | +15% esperado (aritmética P0.2); não fecha 5× sozinho | 2026-08-21 |
+| P2.1 | p2 | memtable apply fora da seção crítica | **done** | apply after durable fd (2º hold); não skiplist; +15% não re-medido | 2026-08-24 |
 | P2.2 | p2 | handoff sem park-convoy | **done (negativo)** | premissa corrigida: merge 0.19× já era sem catch-up (021c231); lock-flags varridos (rfc0045-p22, 66e672c) | 2026-08-21 |
 
 ## Acceptance Criteria
 
-- **Tests:** `encode_offlock_matches_lock_path` (bytes idênticos ao caminho
-  atual, incl. interned v2); suítes async existentes re-verdes sem editar
-  asserção (`async_concurrent_writers_recover`,
-  `async_and_sync_concurrent_writers_recover`, crash-after-sync-put G1);
-  adversarial FailingEnv re-verde.
-- **Telemetry:** finding `findings/rfc0045-*/` com profile P0 + árbitro
-  quieto 3× (P2.1 bar) para mc50 e lock_prewrite; colunas `sync=false` dos
-  dois lados; "not official" no README se dirty.
+- **Tests:** `encode_offlock_matches_lock_path` (recovered user-visible
+  state = `Db::group_commit`); `sync_fail_does_not_apply_before_publish`;
+  `occ_snapshot_pins_published_while_commit_inflight`;
+  `unapplied_ops_are_visible_to_occ_not_get`; suítes async existentes
+  re-verdes sem editar asserção (`async_concurrent_writers_recover`,
+  `async_and_sync_concurrent_writers_recover`); adversarial FenceEnv
+  (`resume_after_fence_reports_uncertain_range`).
+- **Telemetry:** finding `findings/rfc0045-p21/` — correctness slice only;
+  **no** quiet 3× remesure this turn (P0.2 +15% remains arithmetic, not a
+  measured win). Coluna oficial intocada (`sync=false` peer).
 - **Documentation:** este RFC + linha no status do 0044 (P0.5/P2.2
   referenciam este doc).
 - **Screenshots:** none — backend-only.

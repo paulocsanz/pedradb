@@ -1,6 +1,6 @@
 # RFC: 0059 — Escala massiva paralela de DST e invariantes de cluster
 
-**Status:** draft (P0 done; P1 done — P2 abertos)
+**Status:** draft (P0+P1+P2 done; P2.3 = TCG reference, not a guest)
 **Updated:** 2026-08-24
 
 ## Background
@@ -70,11 +70,16 @@
   4096@7n, 4096@9n-4ranges): InstallSnapshot stale-wipe (seed 104853 —
   snapshot com `last_included_index` < commit do follower apagava estado
   aplicado mais novo que o prefixo retido nunca re-aplica; follower agora
-  rejeita snapshot estritamente mais velho que seu commit e responde
-  success no próprio commit) + 2 correções do checker/oráculo (ground
+  rejeita snapshot estritamente mais velho que seu commit — failure +
+  hint, never a replication match) + 2 correções do checker/oráculo (ground
   truth = união dos changelogs dos participantes, não um "best reader"
   que pode estar atrás; probe dual-claim lê chave do próprio range)
   — status: `done`
+- [x] **P0.4c** Bugs achados pela campanha P2 (upgrade+trajectory):
+  quorum floor em reconfig out-of-band (seed 500308); apuração de voto
+  por candidato, snapshot reject is-hint-not-match, label no applied
+  (seed 503976); union lazy do CHANGELOG per-key + oráculo de ressurreição
+  exige get local ausente (seed 502514) — status: `done`
 - [x] **P0.5** Bin de campanha `world_swarm` (JSONL + summary, exit 1 em
   falha) documentado no README — status: `done` (args + env knobs +
   modo diagnóstico `PEDRA_SWARM_DUMP`/`PEDRA_SWARM_TRACE`)
@@ -98,12 +103,21 @@
   falha de oráculo, nunca wall-clock; artifact `world-nightly-<base>`)
 
 ### P2 — later / polish
-- [ ] **P2.1** Schedules de upgrade/rollback de membership (o "lado
+- [x] **P2.1** Schedules de upgrade/rollback de membership (o "lado
   upgrade" que ainda não modelamos — nó entra/sai durante o run,
-  re-configuração de quorum) — status: `todo`
-- [ ] **P2.2** Checker de invariantes sobre a trajetória (não só estado
-  final): monotonicidade de termo/index por nó entre exchanges — status: `todo`
-- [ ] **P2.3** Referência TCG (RFC-0052 P2 — não antecipar aqui) — status: `todo`
+  re-configuração de quorum) — status: `done` (`schedule::splice_membership_windows` injeta janelas determinísticas de
+  join/leave/reconfig/rollback no schedule; knobs `PEDRA_SWARM_UPGRADE=1` /
+  `PEDRA_SWARM_TRAJECTORY=1`; testes `world_membership_upgrade_trajectory` e
+  `world_membership_upgrade_7_nodes`)
+- [x] **P2.2** Checker de invariantes sobre a trajetória (não só estado
+  final): monotonicidade de termo/index por nó entre exchanges — status:
+  `done` (`World::trajectory_violation`/`check_trajectory` sobre amostras
+  por exchange; mutante `trajectory_checker_flags_injected_regression`
+  prova que violação injetada é flaggada — não teatral)
+- [x] **P2.3** Referência TCG (RFC-0052 P2 — não antecipar aqui) — status: `done`
+  (cross-ref: RFC-0052 P2.1–P2.3 shipped — native=guest `trace_hash`
+  seed 42, and `STALL_SO=libdet_io.so` PRELOAD in-guest. P2.2 remains
+  the SSH residual.)
 
 ## Status (living — update with every PR)
 
@@ -114,13 +128,14 @@
 | P0.3 | p0 | Escala 7/9 nós com invariantes | done | this change | 2026-08-24 |
 | P0.4 | p0 | 3 F-found corrigidos + regressões pinadas (49/865/1093) | done | this change | 2026-08-24 |
 | P0.4b | p0 | Stale-snapshot wipe (104853) + checker união/probe por range | done | this change | 2026-08-24 |
+| P0.4c | p0 | P2 campaign F-found (500308/503976/502514) | done | quorum floor + per-candidate tally + snap hint/label + lazy feed | 2026-08-24 |
 | P0.5 | p0 | Bin de campanha documentado | done | this change | 2026-08-24 |
 | P1.1 | p1 | CI world-parallel | done | this change | 2026-08-24 |
 | P1.2 | p1 | Miri/TSan/ASan no CI | done | this change | 2026-08-24 |
 | P1.3 | p1 | Campanhas noturnas como artifact | done | workflow `world-nightly` (cron + dispatch, seed base rotativa) | 2026-08-24 |
-| P2.1 | p2 | Schedules upgrade/rollback membership | todo | — | 2026-08-24 |
-| P2.2 | p2 | Invariantes de trajetória | todo | — | 2026-08-24 |
-| P2.3 | p2 | Referência TCG (herda 0052 P2) | todo | — | 2026-08-24 |
+| P2.1 | p2 | Schedules upgrade/rollback membership | done | `splice_membership_windows` + knobs swarm + 2 testes membership | 2026-08-24 |
+| P2.2 | p2 | Invariantes de trajetória | done | `check_trajectory` + mutante `trajectory_checker_flags_injected_regression` | 2026-08-24 |
+| P2.3 | p2 | Referência TCG (herda 0052 P2) | done | cross-ref 0052 P2 + 0060 P2.2; no guest | 2026-08-24 |
 
 ## Acceptance Criteria
 
@@ -129,7 +144,11 @@
   `world_regression_seed49_commit_unknown_index_reuse`,
   `world_regression_seed865_index_reuse_phantom`,
   `world_regression_seed1093_dcs_local_delete_scope`,
-  `world_regression_seed104853_stale_snapshot_wipe`, suíte
+  `world_regression_seed104853_stale_snapshot_wipe`,
+  `world_regression_seed500308_quorum_floor`,
+  `world_regression_seed503976_rival_votes_fake_match_stale_label`,
+  `world_regression_seed502514_changelog_wipe_is_not_committed_delete`,
+  `world_swarm_parallel_matches_serial_membership_windows`, suíte
   `pedradb-store` inteira (213) verde — o CRC, os handlers de snapshot e
   o guard de snapshot stale são caminhos de produto.
 - **Telemetry / Analytics:** `SwarmReport.seeds_per_s` + JSONL por seed

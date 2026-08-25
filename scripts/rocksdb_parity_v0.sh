@@ -4,9 +4,20 @@
 # Usage:
 #   scripts/rocksdb_parity_v0.sh [out_dir]
 # Env:
-#   ROCKS_PARITY_RATIO_FLOOR  gate floor (default "none"; 0.5 = RFC-0031 2×)
+#   ROCKS_PARITY_RATIO_FLOOR  gate floor (default "1.0" — the 2026-08-24
+#                             product decision, RFC-0041: floor moved 2×→1×
+#                             against the same default peer. The default
+#                             (drop-in, RFC-0054) column is same-class
+#                             async-vs-async and gates every shape; set
+#                             "none" for report-only)
 #   ROCKS_PARITY_GATE_SHAPES  csv of shapes the floor applies to (default all;
 #                             writes: ycsb_a,ycsb_b,ycsb_d,ycsb_f,deps_apply_batch,deps_raftlog,deps_cache_overwrite)
+#   PEDRA_PARITY_G1=1         product column (fdatasync before Ok): run it
+#                             report-only or with GATE_SHAPES on the read set —
+#                             single-client write-per-op shapes are fd-ceiling
+#                             below 1× by construction (one full barrier per op
+#                             vs the peer's zero; group commit closes it with
+#                             concurrency). See findings/rocks-parity-floor1x-g1/
 #   ROCKS_PARITY_TEMPLATE     "1" skips the real side (CI mode; ratios stay null)
 #   ROCKS_PARITY_SYNC         0 = Rocks default async WAL (official peer)
 #                             1 = sync-per-write (same-class column only)
@@ -19,7 +30,7 @@ cd "$ROOT"
 OUT="${1:-$ROOT/findings/rocks-parity-$(date -u +%Y%m%dT%H%M%SZ)}"
 mkdir -p "$OUT"
 
-FLOOR="${ROCKS_PARITY_RATIO_FLOOR:-none}"
+FLOOR="${ROCKS_PARITY_RATIO_FLOOR:-1.0}"
 if [[ "$FLOOR" == "none" ]]; then
   unset ROCKS_PARITY_RATIO_FLOOR || true
 else

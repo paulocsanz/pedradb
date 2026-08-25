@@ -484,6 +484,30 @@
       ]
     },
     {
+      "id": "group_commit",
+      "finding": "RFC-0051-P1.3/RFC-0057-P2.1",
+      "twin_kind": "close",
+      "kernel": "crates/pedradb-core/src/group_commit_kernel.rs",
+      "twin": "crates/pedradb-core/verus/group_commit.rs",
+      "verus": "scripts/verus_group_commit.sh",
+      "callers": [
+        "crates/pedradb-core/src/concurrent.rs"
+      ],
+      "entry": "occ_conflict"
+    },
+    {
+      "id": "group_fence",
+      "finding": "RFC-0057-P2.1",
+      "twin_kind": "close",
+      "kernel": "crates/pedradb-core/src/group_commit_kernel.rs",
+      "twin": "crates/pedradb-core/verus/group_commit.rs",
+      "verus": "scripts/verus_group_commit.sh",
+      "callers": [
+        "crates/pedradb-core/src/db.rs"
+      ],
+      "entry": "fence_publish_seq"
+    },
+    {
       "id": "compact_decision",
       "finding": "F177/F20",
       "twin_kind": "close",

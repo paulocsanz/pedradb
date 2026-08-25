@@ -31,5 +31,5 @@ if [[ ! -f "$LEAN_DIR/Vote.lean" || ! -e "$LEAN_DIR/VoteKernel.lean" ]]; then
 fi
 
 echo "      lake=$LAKE"
-(cd "$LEAN_DIR" && "$LAKE" build Vote Isolated Bloom Ae Commit)
-echo "ok    lean Vote + Isolated + Bloom + Ae + Commit"
+(cd "$LEAN_DIR" && "$LAKE" build Vote Isolated Bloom Ae Commit GroupCommit)
+echo "ok    lean Vote + Isolated + Bloom + Ae + Commit + GroupCommit"

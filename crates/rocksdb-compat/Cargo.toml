@@ -12,6 +12,7 @@ pedradb-io-uring = { path = "../pedradb-io-uring" }
 pedradb-sim = { path = "../pedradb-sim" }
 bytes = "1"
 parking_lot.workspace = true
+crc32c.workspace = true
 
 [dev-dependencies]
 tempfile = "3"

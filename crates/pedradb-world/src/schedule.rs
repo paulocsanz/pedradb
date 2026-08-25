@@ -102,6 +102,18 @@ pub enum Action {
         /// Key suffix byte (row + both secondary index keys derive from it).
         key_tag: u8,
     },
+    /// RFC-0060 P1.2: XOR `n_bits` of an already-durable page on `node`
+    /// (SST / WAL / vlog). Subsequent reads must fail-closed or return the
+    /// correct value — never silent-wrong.
+    BitFlip {
+        /// Peer id (1-based).
+        node: u64,
+        /// How many bits to invert (1 is enough to trip CRC).
+        n_bits: u32,
+        /// When false, select the same file/offset but do not write — World
+        /// mutant of the silent-wrong oracle (RFC-0060 P1.2).
+        apply: bool,
+    },
 }
 
 /// Expand `seed` into a fixed-length schedule (deterministic).
@@ -230,6 +242,101 @@ pub fn schedule_from_seed(seed: u64, n_nodes: u64, steps: usize) -> Vec<Action> 
     out
 }
 
+/// RFC-0059 P2.1: splice deterministic membership upgrade/rollback
+/// windows into an already-built schedule. Positions are fractions of
+/// the ORIGINAL length (pure function of `actions.len()` + `n_nodes`),
+/// so the same seed still yields the same action stream.
+///
+/// Windows:
+/// 1. **rolling upgrade under load** — each node exits in order, client
+///    writes continue, the node rejoins and catches up (install-snapshot
+///    path);
+/// 2. **aborted upgrade (rollback)** — everyone leaves again in reverse
+///    order, one write lands in the degraded cluster, then the rollout
+///    rolls forward (rejoin in order);
+/// 3. **quorum shrink** — ⌊(n−1)/2⌋ peers out at once; the surviving
+///    majority must keep committing; then everyone returns.
+pub fn splice_membership_windows(actions: &mut Vec<Action>, n_nodes: u64) {
+    if n_nodes < 2 {
+        return;
+    }
+    let len = actions.len();
+    let splice_at = |v: &mut Vec<Action>, at: usize, window: Vec<Action>| {
+        let tail = v.split_off(at.min(v.len()));
+        v.extend(window);
+        v.extend(tail);
+    };
+
+    // Window 1: rolling upgrade under load.
+    let mut w1 = Vec::new();
+    for node in 1..=n_nodes {
+        w1.push(Action::RemoveMember { node });
+        w1.push(Action::ClockAdvance(3));
+        w1.push(Action::Put {
+            key_tag: 1,
+            val_tag: 0xA7,
+        });
+        w1.push(Action::ClockAdvance(3));
+        w1.push(Action::AddMember { node });
+        w1.push(Action::ClockAdvance(6));
+    }
+    splice_at(actions, len / 3, w1);
+
+    // Window 2: aborted upgrade → rollback → roll forward again.
+    let mut w2 = Vec::new();
+    for node in (1..=n_nodes).rev() {
+        w2.push(Action::RemoveMember { node });
+        w2.push(Action::ClockAdvance(2));
+    }
+    w2.push(Action::Put {
+        key_tag: 2,
+        val_tag: 0xB9,
+    });
+    w2.push(Action::ClockAdvance(4));
+    for node in 1..=n_nodes {
+        w2.push(Action::AddMember { node });
+        w2.push(Action::ClockAdvance(4));
+    }
+    splice_at(actions, (2 * len) / 3, w2);
+
+    // Window 3: quorum shrink — surviving majority must keep committing.
+    let out = (n_nodes - 1) / 2;
+    let mut w3 = Vec::new();
+    if out >= 1 {
+        for node in 1..=out {
+            w3.push(Action::RemoveMember { node });
+        }
+        w3.push(Action::ClockAdvance(3));
+        w3.push(Action::Put {
+            key_tag: 3,
+            val_tag: 0xC3,
+        });
+        w3.push(Action::ClockAdvance(4));
+        for node in 1..=out {
+            w3.push(Action::AddMember { node });
+            w3.push(Action::ClockAdvance(5));
+        }
+    }
+    splice_at(actions, (5 * len) / 6, w3);
+}
+
+/// RFC-0060 P1.2: inject a deterministic BitFlip after the first puts so a
+/// durable file exists. Off by default — pinning historical seeds.
+pub fn splice_bitflip_window(actions: &mut Vec<Action>, n_nodes: u64) {
+    if actions.is_empty() || n_nodes == 0 {
+        return;
+    }
+    let at = (actions.len() / 2).max(1);
+    actions.insert(
+        at.min(actions.len()),
+        Action::BitFlip {
+            node: 1,
+            n_bits: 1,
+            apply: true,
+        },
+    );
+}
+
 /// Fold a string into a running FNV-1a 64-bit hash (stable, no extra deps).
 #[must_use]
 pub fn hash_str(mut h: u64, s: &str) -> u64 {
@@ -266,6 +373,8 @@ pub struct ScheduleCoverage {
     pub commit_unknown: bool,
     /// AdvanceNowMs.
     pub clock_ms: bool,
+    /// BitFlip of a durable page (RFC-0060).
+    pub bitflip: bool,
 }
 
 impl ScheduleCoverage {
@@ -293,6 +402,7 @@ impl ScheduleCoverage {
                     c.commit_unknown = true;
                 }
                 Action::AdvanceNowMs { .. } => c.clock_ms = true,
+                Action::BitFlip { .. } => c.bitflip = true,
                 Action::StoreTicks(_) | Action::ClockAdvance(_) => {}
             }
         }
@@ -329,6 +439,9 @@ impl ScheduleCoverage {
         }
         if self.clock_ms {
             m |= 1 << 8;
+        }
+        if self.bitflip {
+            m |= 1 << 9;
         }
         m
     }

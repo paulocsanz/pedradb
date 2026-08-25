@@ -1,7 +1,8 @@
 # RFC-0032: 2× budget on the tabulated TiKV-mix workloads
 
 **Status:** draft  
-**Updated:** 2026-08-15  
+**Updated:** 2026-08-24
+**Parked (quiet remesure):** remaining P-slices need a quiet 3× host; dirty sandbox numbers are not the official floor (AGENTS.md peer `sync=false`).  
 **Parents:** [0031](0031-rocks-parity-10x-budget.md) (classe de sync + G1–G8), [rocksdb-compat](../rocksdb-compat.md), [lab table](../findings/tikv-ycsb-lab-20260815.md)
 
 ## Background
@@ -66,7 +67,7 @@ Herdadas de [RFC-0031](0031-rocks-parity-10x-budget.md) G1–G8. Em particular:
 
 - [x] **P0.1** Iterador do compat com janela bornada no *forward* (`range_at_limited` / refill; `collect_rest` recarrega até o bound do CF) — status: `done`
 - [x] **P0.2** `latest_cf` / SeekForPrev-shaped: last key em `[prefix, prefix_succ)` — **não** reverse-scan do CF inteiro — status: `done`
-- [ ] **P0.3** Re-medir esta tabela (`tikv_ycsb_parity_v0.sh` + FULL_SYNC=1); MVCC latest e short scan ≥ floor 0.5 vs F_FULLFSYNC; adversarial iterator + `cargo test -p rocksdb-compat` sem editar asserção — status: `todo` (P0.1/P0.2: mvcc 3.2→81 qps / p50 292→2.3 ms @1024/1KB; ainda ≪ floor 0.5)
+- [ ] **P0.3** Re-medir esta tabela (`tikv_ycsb_parity_v0.sh` + FULL_SYNC=1); MVCC latest e short scan ≥ floor 0.5 vs F_FULLFSYNC; adversarial iterator + `cargo test -p rocksdb-compat` sem editar asserção — status: `todo` (parked: quiet remesure; P0.1/P0.2: mvcc 3.2→81 qps / p50 292→2.3 ms @1024/1KB)
 - [x] **P0.4** RFC + Status vivo (este doc) — status: `done`
 - [x] **P0.5** MemTable `iter_internal_range` (BTree `range`, sem varrer o mapa) no `memtable_stream` quando não há range-tombstone — status: `done`
 - [x] **P0.6** `Db::lookup` point-get via `MemTable::get_entry` (seek) em vez de `iter_internal` linear — status: `done`
@@ -74,12 +75,12 @@ Herdadas de [RFC-0031](0031-rocks-parity-10x-budget.md) G1–G8. Em particular:
 ### P1 — next wave
 
 - [x] **P1.1** Point-get (shape C) ≥ 0.5 vs F_FULLFSYNC nesta tabela — status: `done` (`lookup` usava scan linear da memtable; agora `get_entry` BTree. Lab 1024/1KB zipfian: ycsb_c **404k qps** / p50 2 µs ≥ floor 186k)
-- [ ] **P1.2** Gate `ROCKS_PARITY_RATIO_FLOOR=0.5` em **todos** os shapes desta tabela contra o peer FULL_SYNC; `tikv_ycsb_parity_v0.sh` documenta o comando — status: `todo`
+- [ ] **P1.2** Gate `ROCKS_PARITY_RATIO_FLOOR=0.5` em **todos** os shapes desta tabela contra o peer FULL_SYNC; `tikv_ycsb_parity_v0.sh` documenta o comando — status: `todo` (parked: quiet remesure)
 
 ### P2 — later / polish
 
-- [ ] **P2.1** Atualizar a tabela em `findings/tikv-ycsb-lab-*.md` + `rocksdb-compat.md` com o commit da re-medida — status: `todo`
-- [ ] **P2.2** Se C ou scan ainda < 0.5: follow-up com mecanismo novo e número (não engessar; não relaxar G1) — status: `todo`
+- [ ] **P2.1** Atualizar a tabela em `findings/tikv-ycsb-lab-*.md` + `rocksdb-compat.md` com o commit da re-medida — status: `todo` (parked: quiet remesure)
+- [ ] **P2.2** Se C ou scan ainda < 0.5: follow-up com mecanismo novo e número (não engessar; não relaxar G1) — status: `todo` (parked: quiet remesure)
 
 ## Status (living — update with every PR)
 

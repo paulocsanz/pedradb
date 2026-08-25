@@ -22,8 +22,9 @@ pub type IoBox = Box<dyn SessionIo>;
 pub fn maybe_client_wrap(s: TcpStream) -> Result<IoBox> {
     #[cfg(feature = "tls")]
     {
-        if let Some(tls) = CLIENT.get() {
-            return wrap_client(s, tls);
+        let snap = CLIENT.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        if let Some(tls) = snap {
+            return wrap_client(s, &tls);
         }
     }
     Ok(Box::new(s))
@@ -36,8 +37,9 @@ pub fn maybe_client_wrap(s: TcpStream) -> Result<IoBox> {
 pub fn maybe_server_wrap(s: TcpStream) -> Result<IoBox> {
     #[cfg(feature = "tls")]
     {
-        if let Some(cfg) = SERVER.get() {
-            return wrap_server(s, cfg.clone());
+        let snap = SERVER.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        if let Some(cfg) = snap {
+            return wrap_server(s, cfg);
         }
     }
     Ok(Box::new(s))
@@ -48,7 +50,8 @@ pub fn maybe_server_wrap(s: TcpStream) -> Result<IoBox> {
 pub fn tls_installed() -> bool {
     #[cfg(feature = "tls")]
     {
-        SERVER.get().is_some() || CLIENT.get().is_some()
+        SERVER.lock().unwrap_or_else(|e| e.into_inner()).is_some()
+            || CLIENT.lock().unwrap_or_else(|e| e.into_inner()).is_some()
     }
     #[cfg(not(feature = "tls"))]
     {
@@ -59,14 +62,15 @@ pub fn tls_installed() -> bool {
 #[cfg(feature = "tls")]
 use std::path::Path;
 #[cfg(feature = "tls")]
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Mutex};
 
 #[cfg(feature = "tls")]
-static SERVER: OnceLock<Arc<rustls::ServerConfig>> = OnceLock::new();
+static SERVER: Mutex<Option<Arc<rustls::ServerConfig>>> = Mutex::new(None);
 #[cfg(feature = "tls")]
-static CLIENT: OnceLock<ClientTls> = OnceLock::new();
+static CLIENT: Mutex<Option<ClientTls>> = Mutex::new(None);
 
 #[cfg(feature = "tls")]
+#[derive(Clone)]
 struct ClientTls {
     config: Arc<rustls::ClientConfig>,
     server_name: String,
@@ -75,16 +79,22 @@ struct ClientTls {
 /// Load PEMs and install process-wide mTLS (server + client).
 ///
 /// `ca` is both the trust root and the client-auth verifier (mTLS).
+/// Calling again **replaces** the live config (RFC-0050 P1.3 rotation);
+/// in-flight sessions keep the `Arc` they already cloned.
 ///
 /// # Errors
-/// File I/O / PEM / rustls config / already installed.
+/// File I/O / PEM / rustls config.
 #[cfg(feature = "tls")]
-pub fn install_from_pem_files(
-    cert: &Path,
-    key: &Path,
-    ca: &Path,
-    server_name: &str,
-) -> Result<()> {
+pub fn install_from_pem_files(cert: &Path, key: &Path, ca: &Path, server_name: &str) -> Result<()> {
+    reload_from_pem_files(cert, key, ca, server_name)
+}
+
+/// RFC-0050 P1.3: replace the process TLS config from new PEMs.
+///
+/// # Errors
+/// File I/O / PEM / rustls config.
+#[cfg(feature = "tls")]
+pub fn reload_from_pem_files(cert: &Path, key: &Path, ca: &Path, server_name: &str) -> Result<()> {
     let certs = load_certs(cert)?;
     let key = load_key(key)?;
     let roots = load_roots(ca)?;
@@ -102,15 +112,11 @@ pub fn install_from_pem_files(
         .with_client_auth_cert(certs, key)
         .map_err(|e| StoreError::Msg(format!("tls client cert: {e}")))?;
 
-    SERVER
-        .set(Arc::new(server))
-        .map_err(|_| StoreError::Msg("tls server already installed".into()))?;
-    CLIENT
-        .set(ClientTls {
-            config: Arc::new(client),
-            server_name: server_name.to_string(),
-        })
-        .map_err(|_| StoreError::Msg("tls client already installed".into()))?;
+    *SERVER.lock().unwrap_or_else(|e| e.into_inner()) = Some(Arc::new(server));
+    *CLIENT.lock().unwrap_or_else(|e| e.into_inner()) = Some(ClientTls {
+        config: Arc::new(client),
+        server_name: server_name.to_string(),
+    });
     Ok(())
 }
 
@@ -128,6 +134,20 @@ pub fn install_from_pem_files(
     Err(StoreError::Msg(
         "montanha-tcp TLS requires building with --features tls".into(),
     ))
+}
+
+/// RFC-0050 P1.3 stub without the `tls` feature.
+///
+/// # Errors
+/// Always.
+#[cfg(not(feature = "tls"))]
+pub fn reload_from_pem_files(
+    cert: &std::path::Path,
+    key: &std::path::Path,
+    ca: &std::path::Path,
+    server_name: &str,
+) -> Result<()> {
+    install_from_pem_files(cert, key, ca, server_name)
 }
 
 #[cfg(feature = "tls")]
@@ -151,8 +171,8 @@ fn load_certs(path: &Path) -> Result<Vec<rustls::Certificate>> {
     let f = std::fs::File::open(path)
         .map_err(|e| StoreError::Msg(format!("tls cert {}: {e}", path.display())))?;
     let mut r = std::io::BufReader::new(f);
-    let der = rustls_pemfile::certs(&mut r)
-        .map_err(|e| StoreError::Msg(format!("tls cert pem: {e}")))?;
+    let der =
+        rustls_pemfile::certs(&mut r).map_err(|e| StoreError::Msg(format!("tls cert pem: {e}")))?;
     if der.is_empty() {
         return Err(StoreError::Msg(format!(
             "tls cert {}: no certificates",

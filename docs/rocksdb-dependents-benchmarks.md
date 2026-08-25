@@ -18,9 +18,13 @@ Kvrocks async, MyRocks sync-on-commit, Surreal `sync=every`. Isso **não**
 (`write`, `write_owned`, `write_cf_slices`, `write_cf_owned`), `Snapshot`
 (get/iterator), `DBIterator` (`valid/next/key/value/collect_rest`, `IteratorMode`),
 `last_key_with_prefix`, `count_cf/count_named`, `flush`, `compact`.
-**Não tem:** ingest externo/SSTFileWriter, compaction filter, properties/estatísticas,
-Titan/BlobDB, PlainTable, merge operator, `multi_get`, checkpoint, transações
-(pessimistas **ou** otimistas).
+**Tem também (RFC-0050 P0.6 / RFC-0043 P2.7):** `SstFileWriter` +
+`ingest_external_file`, compaction filter (`compact_with_filter`),
+`WriteBatchWithIndex`, properties, merge operator, `multi_get`,
+OptimisticTransactionDB. **Não tem:** Titan/BlobDB, PlainTable,
+transações pessimistas. Suíte opt-in `ROCKS_PARITY_SUITE=rocksapi`
+(`mixgraph_like`, `wbwi_read_your_writes`, `compaction_filter_drop`,
+`ingest_sst`) — remesura 3× parked.
 
 ---
 

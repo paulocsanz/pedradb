@@ -131,7 +131,7 @@ abre limpo (escalação nunca briqua diretório são).
 ### P1 — decisão (bloqueado em escolha do dono)
 
 - [ ] **P1.1** Decidir composição (candidata da discussão: **D + B2 primeiro**, B1 só depois de D medido em frota; A quando Montanha majority existir) — status: `todo` (parked; RFC-0050 P0.7 locks the surface to FailClosed \| PointInTime — no silent third mode, no skip-any)
-- [ ] **P1.2** Desenho da API: `wal_recovery` (`FailStop` | `PointInTimeReported`), tipo do relatório de perda, quarentena (`WAL.corrupt-<n>`), formato do journal de corrupção (D) — status: `todo`
+- [ ] **P1.2** Desenho da API: `wal_recovery` (`FailStop` | `PointInTimeReported`), tipo do relatório de perda, quarentena (`WAL.corrupt-<n>`), formato do journal de corrupção (D) — status: `todo` (parked: gated on P1.1 owner decision)
 
 ### P2 — implementação (só após P1)
 
@@ -145,8 +145,7 @@ abre limpo (escalação nunca briqua diretório são).
     truncamento para `last_good_offset` no open.
   - Painel EXPLODE re-run fica para o modo escolhido em P1.1 (o painel de enumeração já
     existe em `wal::recover_choose`).
-- [ ] **P2.2** B2 (evacuação read-only do prefixo) + heal: réplica/PITR consumindo o
-  relatório — status: `todo`
+- [ ] **P2.2** B2 (evacuação read-only do prefixo) + heal: réplica/PITR consumindo o prefixo — status: `todo` (parked: gated on P1.1; no Evacuate default)
 
 ## Status (living — update with every PR)
 

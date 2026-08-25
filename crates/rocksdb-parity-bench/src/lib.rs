@@ -13,8 +13,9 @@
 //!
 //! Opt-in suites grow the catalog (RFC-0043; never replace the official 16):
 //! `qs` (Quicksilver-inspired), `kvrocks` (Redis GET/SET/pipeline/SCAN),
-//! `myrocks` (sysbench point/range/tx + LinkBench-inspired mix). See
-//! [`COMPARE_SHAPES`] and `docs/rocksdb-dependents-benchmarks.md`.
+//! `myrocks` (sysbench point/range/tx + LinkBench-inspired mix), `rocksapi`
+//! (mixgraph / WBWI / compaction filter / ingest). See [`COMPARE_SHAPES`]
+//! and `docs/rocksdb-dependents-benchmarks.md`.
 
 #![forbid(unsafe_code)]
 
@@ -140,6 +141,11 @@ pub const COMPARE_SHAPES: &[&str] = &[
     "rockstore_widecol_rw",
     "oxigraph_spo_lookup",
     "oxigraph_triple_put",
+    // RFC-0043 P2.7 — blocked-API (mixgraph / WBWI / compaction filter / ingest)
+    "mixgraph_like",
+    "wbwi_read_your_writes",
+    "compaction_filter_drop",
+    "ingest_sst",
     // RFC-0059 anti-overindex: uniform (no zipf hot set) + 2^20-key working
     // set — the official shapes' caches and windows must generalize.
     "ycsb_b_unif",
@@ -253,6 +259,30 @@ pub trait Engine {
             Some(k) => self.get_cf(value_cf, &k),
             None => Ok(None),
         }
+    }
+
+    /// RFC-0043 P2.7: `WriteBatchWithIndex` overlay then DB (read-your-writes).
+    fn wbwi_overlay_get(
+        &self,
+        puts: &[(&[u8], &[u8])],
+        key: &[u8],
+    ) -> Result<Option<Vec<u8>>, ()> {
+        let _ = (puts, key);
+        Err(())
+    }
+
+    /// RFC-0043 P2.7: `SstFileWriter` + `ingest_external_file`. Keys must be
+    /// unique per call; the adapter sorts them.
+    fn ingest_kvs(&self, kvs: &[(&[u8], &[u8])]) -> bool {
+        let _ = kvs;
+        false
+    }
+
+    /// RFC-0043 P2.7: compact, dropping keys that start with `prefix`
+    /// (compaction-filter contract).
+    fn compact_drop_prefix(&self, prefix: &[u8]) -> bool {
+        let _ = prefix;
+        false
     }
 }
 
@@ -1930,6 +1960,112 @@ impl YcsbRunner {
         blocks
     }
 
+    /// RFC-0043 P2.7 — rust-rocksdb APIs that were catalog-`blocked`:
+    /// mixgraph-like put/get/seek mix, `WriteBatchWithIndex`, compaction
+    /// filter, `SstFileWriter`+ingest. Opt-in `ROCKS_PARITY_SUITE=rocksapi`.
+    pub fn run_rocksapi<E: Engine>(&mut self, e: &E) -> Vec<String> {
+        let records = self.cfg.records;
+        let cfg_ops = self.cfg.ops;
+        let yval = vec![b'r'; self.cfg.payload];
+        let mut rng = std::mem::take(&mut self.rng);
+        let mut blocks = Vec::with_capacity(4);
+
+        let mut lats = Vec::with_capacity(cfg_ops);
+        let (mut ops_ok, mut errors) = (0u64, 0u64);
+        let t0 = Instant::now();
+        for _ in 0..cfg_ops {
+            let t = Instant::now();
+            let u = self.pick(&mut rng, records);
+            let k = ykey(u);
+            let k2 = ykey((u + 1) % records);
+            let ok_put = e.put(&k, &yval);
+            let ok_g1 = e.get(&k).is_ok();
+            let ok_g2 = e.get(&k2).is_ok();
+            let end = {
+                let mut e = k.clone();
+                e.push(0xff);
+                e
+            };
+            let ok_s = e.scan_count(&k, &end, 8).is_ok();
+            if ok_put && ok_g1 && ok_g2 && ok_s {
+                ops_ok += 1;
+            } else {
+                errors += 1;
+            }
+            lats.push(ms(t));
+        }
+        blocks.push(summarize("mixgraph_like", cfg_ops, t0.elapsed(), &mut lats));
+        eprintln!("[rocks-parity] mixgraph_like done ops={ops_ok} errors={errors}");
+
+        let mut lats = Vec::with_capacity(cfg_ops);
+        let (mut gets, mut errors) = (0u64, 0u64);
+        let t0 = Instant::now();
+        for i in 0..cfg_ops {
+            let t = Instant::now();
+            let k = format!("wbwi/{i:08}").into_bytes();
+            let overlay = [(&k[..], yval.as_slice())];
+            match e.wbwi_overlay_get(&overlay, &k) {
+                Ok(Some(v)) if v == yval => gets += 1,
+                _ => errors += 1,
+            }
+            lats.push(ms(t));
+        }
+        blocks.push(summarize(
+            "wbwi_read_your_writes",
+            cfg_ops,
+            t0.elapsed(),
+            &mut lats,
+        ));
+        eprintln!("[rocks-parity] wbwi_read_your_writes done gets={gets} errors={errors}");
+
+        let mut lats = Vec::with_capacity(cfg_ops);
+        let (mut drops, mut errors) = (0u64, 0u64);
+        let t0 = Instant::now();
+        for i in 0..cfg_ops {
+            let t = Instant::now();
+            let keep = format!("keep/{i:08}").into_bytes();
+            let drop = format!("drop/{i:08}").into_bytes();
+            let put_ok = e.put(&keep, &yval) && e.put(&drop, &yval);
+            let compact_ok = e.flush() && e.compact_drop_prefix(b"drop/");
+            let kept = e.get(&keep).ok().flatten().as_deref() == Some(yval.as_slice());
+            let gone = matches!(e.get(&drop), Ok(None));
+            if put_ok && compact_ok && kept && gone {
+                drops += 1;
+            } else {
+                errors += 1;
+            }
+            lats.push(ms(t));
+        }
+        blocks.push(summarize(
+            "compaction_filter_drop",
+            cfg_ops,
+            t0.elapsed(),
+            &mut lats,
+        ));
+        eprintln!("[rocks-parity] compaction_filter_drop done drops={drops} errors={errors}");
+
+        let mut lats = Vec::with_capacity(cfg_ops);
+        let (mut ingest, mut errors) = (0u64, 0u64);
+        let t0 = Instant::now();
+        for i in 0..cfg_ops {
+            let t = Instant::now();
+            let k = format!("ing/{i:08}").into_bytes();
+            let pair = [(&k[..], yval.as_slice())];
+            if e.ingest_kvs(&pair) && e.get(&k).ok().flatten().as_deref() == Some(yval.as_slice())
+            {
+                ingest += 1;
+            } else {
+                errors += 1;
+            }
+            lats.push(ms(t));
+        }
+        blocks.push(summarize("ingest_sst", cfg_ops, t0.elapsed(), &mut lats));
+        eprintln!("[rocks-parity] ingest_sst done ingest={ingest} errors={errors}");
+
+        self.rng = rng;
+        blocks
+    }
+
     pub fn seed<E: Engine>(&mut self, e: &E) {
         let val = vec![b'y'; self.cfg.payload];
         for i in 0..self.cfg.records {
@@ -2053,10 +2189,19 @@ impl YcsbRunner {
         let big: usize = 1 << 20;
         let payload = self.cfg.payload;
         let yval = vec![b'y'; payload];
+        // Untimed 2^20-put seed: under the G1 column each put would
+        // F_FULLFSYNC (~70 min of Darwin setup for a read-only measured
+        // loop). Seed async — symmetric with the Rocks peer, whose global
+        // default seeds the same keyspace async — then restore the
+        // battery column before the timed loop (pure point reads; every
+        // timed write shape elsewhere keeps its per-op sync).
+        let column_sync = e.sync();
+        e.set_write_sync(false);
         let t0 = std::time::Instant::now();
         for i in 0..big {
             let _ = e.put(&ykey(i), &yval);
         }
+        e.set_write_sync(column_sync);
         eprintln!(
             "[rocks-parity] ycsb_c_big seed {big} keys in {:.1}s (untimed)",
             t0.elapsed().as_secs_f64()
@@ -2483,8 +2628,8 @@ fn summarize_mc(
 }
 
 /// Suite selector: `ROCKS_PARITY_SUITE` csv (default "ycsb,deps"; "all" =
-/// every suite). RFC-0043: `qs`/`kvrocks`/`myrocks`/`surreal` are opt-in
-/// so the 16-shape official set stays comparable.
+/// every suite). RFC-0043: `qs`/`kvrocks`/`myrocks`/`surreal`/`rocksapi`
+/// are opt-in so the 16-shape official set stays comparable.
 pub fn suites_enabled(want: &str) -> bool {
     let s = std::env::var("ROCKS_PARITY_SUITE").unwrap_or_else(|_| "ycsb,deps".into());
     let s = s.to_lowercase();
@@ -2544,6 +2689,7 @@ pub fn peer_reports_sync() -> bool {
         "arango",
         "venice",
         "oxigraph",
+        "rocksapi",
     ]
     .iter()
     .any(|s| suites_enabled(s) && write_sync_for_suite(s))
@@ -2896,6 +3042,10 @@ mod tests {
             "arango_traversal",
             "venice_fanout_get",
             "oxigraph_spo_lookup",
+            "mixgraph_like",
+            "wbwi_read_your_writes",
+            "compaction_filter_drop",
+            "ingest_sst",
         ] {
             assert!(
                 COMPARE_SHAPES.contains(&name),
@@ -3079,5 +3229,37 @@ mod tests {
         );
         assert!(ekey(3, 7).starts_with(&eprefix(3)));
         assert!(tkey(1, 0, 1).starts_with(b"t/"));
+    }
+
+    #[test]
+    fn rocksapi_suite_on_compat_engine() {
+        let dir = tempfile::tempdir().unwrap();
+        let e = crate::engines::CompatEngine::open(dir.path());
+        let mut r = YcsbRunner::new(tiny_cfg());
+        assert_eq!(
+            block_names(&r.run_rocksapi(&e)),
+            vec![
+                Some("mixgraph_like"),
+                Some("wbwi_read_your_writes"),
+                Some("compaction_filter_drop"),
+                Some("ingest_sst"),
+            ]
+        );
+        let k = b"wbwi-probe";
+        let v = b"overlay";
+        assert_eq!(
+            e.wbwi_overlay_get(&[(k.as_slice(), v.as_slice())], k)
+                .unwrap()
+                .as_deref(),
+            Some(&b"overlay"[..])
+        );
+        assert!(e.ingest_kvs(&[(b"ing-k".as_slice(), b"ing-v".as_slice())]));
+        assert_eq!(e.get(b"ing-k").unwrap().as_deref(), Some(&b"ing-v"[..]));
+        assert!(e.put(b"keep/z", b"1"));
+        assert!(e.put(b"drop/z", b"2"));
+        assert!(e.flush());
+        assert!(e.compact_drop_prefix(b"drop/"));
+        assert!(e.get(b"drop/z").unwrap().is_none());
+        assert_eq!(e.get(b"keep/z").unwrap().as_deref(), Some(&b"1"[..]));
     }
 }

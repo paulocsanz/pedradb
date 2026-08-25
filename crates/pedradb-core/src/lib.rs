@@ -17,9 +17,6 @@ pub mod bloom;
 /// Optional DST buggify annotation sites (RFC-0018 P2.5; no-op unless feature).
 pub mod buggify_hooks;
 
-/// Cooperative PCT turnstile hooks (RFC-0051 P0; feature `pct` only).
-#[cfg(feature = "pct")]
-pub mod pct_hooks;
 pub mod cache;
 pub mod change_feed;
 pub mod changelog_kernel;
@@ -30,6 +27,7 @@ pub mod db;
 pub mod env;
 pub mod error;
 pub mod flush_kernel;
+pub mod group_commit_kernel;
 pub mod history;
 pub mod host;
 pub mod key;
@@ -39,32 +37,39 @@ pub mod manifest_kernel;
 pub mod memtable;
 pub mod merge;
 pub mod occ;
+/// Cooperative PCT turnstile hooks (RFC-0051 P0; feature `pct` only).
+#[cfg(feature = "pct")]
+pub mod pct_hooks;
 pub mod prefix;
 pub mod rng;
 pub mod sst;
 pub mod time;
 pub mod tx;
+pub mod verified;
+/// At-rest CRC scrub (RFC-0060).
+pub mod verify;
 pub mod vlog;
 pub mod vlog_gc_kernel;
-pub mod verified;
 pub mod wal;
 
 pub use batch::{WriteOp, WriteRecord, WRITE_RECORD_VERSION};
 pub use bloom::{bloom_header_ok, bloom_header_ok_as_is, BloomFilter, DEFAULT_BITS_PER_KEY, MAX_K};
 pub use cache::{BlockCache, TableCache};
-pub use change_feed::{decode_changelog, ChangeEntry, ChangeKind, ChangeLog, CHANGELOG_FILE_NAME};
+pub use change_feed::{
+    decode_changelog, ChangeEntry, ChangeKind, ChangeLog, CHANGELOG_CORRUPT_FILE_NAME,
+    CHANGELOG_FILE_NAME,
+};
 pub use changelog_kernel::{
     changelog_needs_sst_rebuild, changelog_needs_sst_rebuild_as_is, changelog_should_store,
     changelog_should_store_as_is, DEFAULT_CHANGELOG_INTERVAL,
 };
 pub use concurrent::ConcurrentDb;
-pub use verified::{profile_report, ProfileComponent, ProfileState, VerifiedProfile, PROFILE_VERSION};
 pub use db::{
     copy_db_directory, read_checkpoint_meta, BatchOp, BlobGcCandidate, CheckpointMeta,
     CompactOptions, Db, DbStats, FenceClass, FenceRecovery, FenceReport, HistoryHorizon,
     HistoryOptions, OpenOptions, PreparedL0Compact, ReadProbeSnap, RecoveryReport, ScanProjection,
-    Snapshot, SnapshotPin, WalRecovery, WriteOptions, WritePhaseStats, CHECKPOINT_META_FILE, L0_COMPACTION_TRIGGER,
-    MAX_LSM_LEVEL, WAL_FILE_NAME,
+    Snapshot, SnapshotPin, WalRecovery, WriteOptions, WritePhaseStats, CHECKPOINT_META_FILE,
+    L0_COMPACTION_TRIGGER, MAX_LSM_LEVEL, WAL_FILE_NAME,
 };
 pub use env::{AdviseKind, Env, EnvFile, StdEnv};
 pub use error::{CoreError, Result};
@@ -87,6 +92,10 @@ pub use rng::{mix_seed, Rng, SeedRng, SystemRng};
 pub use sst::{write_sst, write_sst_entries, write_sst_entries_on, write_sst_on, SstTable};
 pub use time::{Clock, ManualClock, SystemClock};
 pub use tx::Transaction;
+pub use verified::{
+    profile_report, ProfileComponent, ProfileState, VerifiedProfile, PROFILE_VERSION,
+};
+pub use verify::{verify_at_rest, xor_durable_bits, VerifyFailure, VerifyReport};
 pub use vlog::{
     blob_path, decode_vlog_ptr, decode_vlog_ref, encode_vlog_ptr, encode_vlog_ref, list_blob_nums,
     ValueLog, VlogPtr, VlogRewriteStats, VLOG_BLOB_PREFIX, VLOG_FILE_NAME, VLOG_NEW_NAME,

@@ -1,7 +1,8 @@
 # RFC-0039: apply / raftlog / scan ≥5× Rocks **sync** (async continua a coluna honesta)
 
 **Status:** draft  
-**Updated:** 2026-08-17  
+**Updated:** 2026-08-24
+**Parked (quiet remesure):** remaining 5×-vs-sync slices (P0.2/P1/P2) need a quiet host; P0.3 code (`feed_is_lazy`) shipped. Dirty sandbox is not the official floor.  
 **Parents:** [0037](0037-apply-off-put-and-2x-pedra.md) (apply off-put, host worker, gate 0.5), [0036](0036-tikv-rocks-2x-fdatasync.md) (WAL `fdatasync` = classe TiKV), [0031](0031-rocks-parity-10x-budget.md) (G1–G8)  
 **Sibling:** [0040](0040-fsync-always-beats-rocks-async.md) (ganhar do Rocks **async** com fd always-on)  
 **Next run:** [0040-next-run](0040-next-run.md) (P1.1 MC + 0039 P0.2 no mesmo dia)
@@ -58,32 +59,32 @@
 ### P0 — must ship first (útil sozinho: piso medido + uma cópia a menos)
 
 - [x] **P0.1** RFC + Status vivo (este doc) — status: `done`
-- [ ] **P0.2** Medir nesta caixa: `fdatasync` p50 isolado; split apply/raftlog (encode CF / `WriteRecord` / mem / fd / flush); split scan (cache hit vs miss, nº SST, setup vs merge). Publicar Pedra · sync · **async**. Escrever se 5× apply cabe no 2×fd — status: `todo`
-- [ ] **P0.3** WAL encode sem segunda cópia do payload + skip `ChangeEntry` quando `changelog_interval=0`. Teste: reopen ainda reconstrói o feed. Remesura apply/raftlog p50 — status: `todo`
+- [ ] **P0.2** Medir nesta caixa: `fdatasync` p50 isolado; split apply/raftlog (encode CF / `WriteRecord` / mem / fd / flush); split scan (cache hit vs miss, nº SST, setup vs merge). Publicar Pedra · sync · **async**. Escrever se 5× apply cabe no 2×fd — status: `todo` (parked: quiet remesure)
+- [x] **P0.3** WAL encode sem segunda cópia do payload + skip `ChangeEntry` quando `changelog_interval=0`. Teste: reopen ainda reconstrói o feed. Remesura apply/raftlog p50 — status: `done` (`feed_is_lazy`; tests `changelog_interval_zero_*`; remesure p50 is quiet-box parked)
 
 ### P1 — apply e raftlog ≥ 5× sync
 
-- [ ] **P1.1** `deps_raftlog` ≥ **5.0** vs Rocks sync da run (matar cauda de flush no timed path; 1 fd + CPU curto) — status: `todo`
-- [ ] **P1.2** `deps_apply_batch` ≥ **5.0** vs Rocks sync da run. Se P0.2 mostrou 2×fd > Rocks_avg/5, finding com o piso e o slice permanece `todo` até o dono rever o número — status: `todo`
+- [ ] **P1.1** `deps_raftlog` ≥ **5.0** vs Rocks sync da run (matar cauda de flush no timed path; 1 fd + CPU curto) — status: `todo` (parked: quiet remesure)
+- [ ] **P1.2** `deps_apply_batch` ≥ **5.0** vs Rocks sync da run. Se P0.2 mostrou 2×fd > Rocks_avg/5, finding com o piso e o slice permanece `todo` até o dono rever o número — status: `todo` (parked: quiet remesure)
 
 ### P2 — scan ≥ 5× sync
 
-- [ ] **P2.1** Cursor SST de count sem `Box<dyn>` e sem copiar bounds para `Bytes`; `count_visible` sem `user_key.clone()` — status: `todo`
-- [ ] **P2.2** Apply não deixa L0 ≥ trigger para o scan: worker drena até `< L0_COMPACTION_TRIGGER` (já é o contrato; fechar a corrida) — status: `todo`
-- [ ] **P2.3** `deps_scan` ≥ **5.0** vs Rocks sync da run (p95 do miss perto do Rocks 5 µs, ou hit-rate que puxe a média a ≤ 0.79 µs) — status: `todo`
+- [x] **P2.1** Cursor SST de count sem `Box<dyn>` e sem copiar bounds para `Bytes`; `count_visible` sem `user_key.clone()` — status: `done` (`MemCountFilter` concrete; `step_current_user`; test `count_visible_matches_scan_set`)
+- [x] **P2.2** Apply não deixa L0 ≥ trigger para o scan: worker drena até `< L0_COMPACTION_TRIGGER` (já é o contrato; fechar a corrida) — status: `done` (`drain_l0_below_trigger`; worker compact when L0 ≥ trigger without 200 ms idle; tests `apply_does_not_leave_l0_at_trigger_for_scan`, `drain_l0_below_trigger_for_scan`, `host_worker_drains_l0_at_trigger_without_idle`)
+- [ ] **P2.3** `deps_scan` ≥ **5.0** vs Rocks sync da run (p95 do miss perto do Rocks 5 µs, ou hit-rate que puxe a média a ≤ 0.79 µs) — status: `todo` (parked: quiet remesure; dirty sandbox is not the official floor)
 
 ## Status (living — update with every PR)
 
 | ID | Band | Title | Status | Task / PR | Updated |
 |----|------|-------|--------|-----------|---------|
 | P0.1 | p0 | RFC | done | este doc | 2026-08-17 |
-| P0.2 | p0 | piso fd + split + coluna async | todo | — | 2026-08-17 |
-| P0.3 | p0 | uma cópia WAL + skip ChangeEntry | todo | — | 2026-08-17 |
-| P1.1 | p1 | raftlog ≥ 5× sync | todo | — | 2026-08-17 |
-| P1.2 | p1 | apply ≥ 5× sync | todo | — | 2026-08-17 |
-| P2.1 | p2 | cursor count sem Box | todo | — | 2026-08-17 |
-| P2.2 | p2 | L0 drenado antes do scan | todo | — | 2026-08-17 |
-| P2.3 | p2 | scan ≥ 5× sync | todo | — | 2026-08-17 |
+| P0.2 | p0 | piso fd + split + coluna async | todo | parked: quiet remesure | 2026-08-24 |
+| P0.3 | p0 | uma cópia WAL + skip ChangeEntry | done | `feed_is_lazy` + changelog_interval_zero tests | 2026-08-24 |
+| P1.1 | p1 | raftlog ≥ 5× sync | todo | parked: quiet remesure | 2026-08-24 |
+| P1.2 | p1 | apply ≥ 5× sync | todo | parked: quiet remesure | 2026-08-24 |
+| P2.1 | p2 | cursor count sem Box | done | `MemCountFilter` + `step_current_user` | 2026-08-24 |
+| P2.2 | p2 | L0 drenado antes do scan | done | worker 5 ms poll (not 200 ms idle); `host_worker_drains_l0_at_trigger_without_idle` | 2026-08-24 |
+| P2.3 | p2 | scan ≥ 5× sync | todo | parked: quiet remesure | 2026-08-24 |
 
 ## Acceptance Criteria
 

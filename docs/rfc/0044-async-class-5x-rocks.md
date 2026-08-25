@@ -1,7 +1,8 @@
 # RFC-0044: ≥ **5×** RocksDB **async** na mesma classe (não é o cartaz G1)
 
 **Status:** in-progress
-**Updated:** 2026-08-23
+**Updated:** 2026-08-24
+**Parked (quiet remesure):** remaining 5× async slices need a quiet 3× host; dirty sandbox is not the official floor.
 **Parents:** [0041](0041-2x-rocks-default.md) (cartaz = Pedra G1 vs Rocks `sync=false`),
 [0043](0043-high-level-2x-expanding-benches.md) (catálogo que só cresce),
 [AGENTS.md](../../AGENTS.md)
@@ -124,7 +125,7 @@ Não fecha (e não se mente):
       compact não notifica por put — status: `done`
 - [x] **P0.4** buffer async 64 KiB (Rocks file writer), não 1 MiB —
       status: `done` (`ASYNC_WAL_BUFFER`; testes 64 KiB + tail no close)
-- [ ] **P0.5** `kvrocks_set_mc50` ≥ 5.0 async/async — status: `doing`
+- [ ] **P0.5** `kvrocks_set_mc50` ≥ 5.0 async/async — status: `doing` (parked: quiet remesure; 2.02 vs peer são)
       (**veredito quieto: 2.02** vs peer são 152 k — os 3.4–9.2
       anteriores eram Rocks doente sob carga (55 k); merge rejeitado
       0.19×; o gap é outro mecanismo, não handoff de grupo)
@@ -149,7 +150,7 @@ Não fecha (e não se mente):
       P0.4; peer 37,4k vs 34,7k — peer ~8% mais rápido). Compat
       inalterado pelo fix P1.3 (esperado — batch writes); o alvo
       continua straddle na linha)
-- [ ] **P1.2** `kvrocks_set` / `kvrocks_blob_set` ≥ 5.0 — status: `doing`
+- [ ] **P1.2** `kvrocks_set` / `kvrocks_blob_set` ≥ 5.0 — status: `doing` (parked: quiet remesure)
       (**rearm8 quieta 2026-08-23, `findings/2026-08-23-rearm8/`**: SET
       **4,40/4,68/4,48 — 3/3 <5** (rearm7: 5,14 med mas 2/3; straddle real,
       mediana agora abaixo); blob **1,64/1,79/1,70** — saiu de 0,99 para
@@ -229,7 +230,7 @@ Não fecha (e não se mente):
       GET/pipeline straddle 4.2–5.9; mc50/blob ~2.0; F 1.66; A–D
       2.9–3.8; `deps_lock_prewrite` 0.94. Piso ≥5 para todos **não**
       alcançado — registrado sem maquiagem em `rfc0044-p2/quiet/`)
-- [ ] **P2.2** ycsb A–F ≥ 5.0 na coluna async — status: `doing`
+- [ ] **P2.2** ycsb A–F ≥ 5.0 na coluna async — status: `doing` (parked: quiet remesure)
       (**rearm8 quieta 2026-08-23, `findings/2026-08-23-rearm8/`**: **E
       5,18/5,38/5,49 — 3/3, 2ª bateria quieta consecutiva (med 5,44)** —
       consolidado; **D 4,69/4,56/4,84 — 3/3 <5**; **A 3,47/4,48/4,64** — o

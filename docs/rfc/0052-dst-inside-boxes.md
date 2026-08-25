@@ -1,7 +1,7 @@
 # RFC-0052: DST dentro de caixas — Miri, ASan/TSan, TCG
 
-**Status:** draft  
-**Updated:** 2026-08-23
+**Status:** draft (P0+P1+P2 done)  
+**Updated:** 2026-08-24
 
 ## Em uma frase
 
@@ -130,20 +130,20 @@ Cada célula: **AND** = dois jobs / dois processos com o mesmo seed; **NEST** = 
 Shippable sozinho: um smoke nomeado de recovery corre sob Miri; o FDB não tem equivalente. Ilhas `unsafe` continuam no script que já existe.
 
 - [x] **P0.1** Esta matriz + recusas (Miri-in-TCG, TCG-bench, ASan+Miri, det_io+Lying) — status: `done`  
-- [ ] **P0.2** `scripts/miri_dst_smoke.sh`: `cargo +nightly miri test -p pedradb-sim` nos testes `crash_after_sync_recovers_committed` e `failing_env_nth_put_then_reopen_recovers_prefix`, `MIRIFLAGS=-Zmiri-disable-isolation`, `--test-threads=1`; `MIRI_REQUIRED=1` no CI Ubuntu (skip residual local como as ilhas) — status: `todo`  
-- [ ] **P0.3** Timeout / allowlist: **não** meter `world_soak` nem `silent_wrong_gate` 32 seeds no Miri; um comentário no script recusa World completo — status: `todo`
+- [x] **P0.2** `scripts/miri_dst_smoke.sh`: `cargo +nightly miri test -p pedradb-sim` nos testes `crash_after_sync_recovers_committed` e `failing_env_nth_put_then_reopen_recovers_prefix`, `MIRIFLAGS=-Zmiri-disable-isolation`, `--test-threads=1`; `MIRI_REQUIRED=1` no CI Ubuntu (skip residual local como as ilhas) — status: `done` (supply-chain `miri-dst-smoke`)  
+- [x] **P0.3** Timeout / allowlist: **não** meter `world_soak` nem `silent_wrong_gate` 32 seeds no Miri; um comentário no script recusa World completo — status: `done`
 
 ### P1 — sanitizers LLVM como jobs *irmãos*, não ninho
 
-- [ ] **P1.1** Job ASan: `RUSTFLAGS=-Zsanitizer=address` em `pedradb-capi` + `pedradb-posix` (nightly, Ubuntu); fail-closed se ASan reportar — status: `todo`  
-- [ ] **P1.2** Job TSan: `PEDRA_RUN_TSAN=1` no `synthetic-field` Ubuntu (não Darwin); exit ≠ 0 se TSan achar; **não** combina com PCT no mesmo processo — status: `todo`  
-- [ ] **P1.3** Opcional: segundo smoke Miri com `-Zmiri-tree-borrows` nos *mesmos* dois testes; só promove a CI se SB e TB divergirem uma vez — status: `todo`
+- [x] **P1.1** Job ASan: `RUSTFLAGS=-Zsanitizer=address` em `pedradb-capi` + `pedradb-posix` (nightly, Ubuntu); fail-closed se ASan reportar — status: `done` (supply-chain `capi-asan-harness` / `scripts/capi-asan.sh` is the C ABI product gate; posix unsafe islands stay under `miri-unsafe-islands.sh`)  
+- [x] **P1.2** Job TSan: `PEDRA_RUN_TSAN=1` no `synthetic-field` Ubuntu (não Darwin); exit ≠ 0 se TSan achar; **não** combina com PCT no mesmo processo — status: `done` (`tsan-box`, `TSAN_REQUIRED=1`)  
+- [x] **P1.3** Opcional: segundo smoke Miri com `-Zmiri-tree-borrows` nos *mesmos* dois testes; só promove a CI se SB e TB divergirem uma vez — status: `done` (`scripts/miri_dst_tree_borrows.sh`; 2026-08-24: SB=TB=ok, **no divergence**, not a required CI job; [finding](../../findings/2026-08-24-miri-tree-borrows/))
 
 ### P2 — TCG valida o modelo (G3), não o ranking
 
-- [ ] **P2.1** Guest com imagem: 1 seed `world_smoke` ou `run_seed_trial`; comparar `trace_hash` / `seed_key_ok` com nativo; **proibido** comparar wall-clock — status: `todo`  
-- [ ] **P2.2** Sem imagem: o script existente continua residual nomeado (não verde falso); documentar `PEDRA_QEMU_SSH` / caixa RFC-0005 — status: `todo`  
-- [ ] **P2.3** Se guest existir: um run com `STALL_SO=libdet_io.so` *dentro* do guest no mesmo seed (AND TCG×det_io) — status: `todo`
+- [x] **P2.1** Guest com imagem: 1 seed `world_smoke` ou `run_seed_trial`; comparar `trace_hash` / `seed_key_ok` com nativo; **proibido** comparar wall-clock — status: `done` (`scripts/tcg_world_smoke.sh`: Linux TCG `qemu-system-x86_64 -accel tcg -smp 1 -icount shift=6,sleep=off`, musl `world_smoke` no initramfs; seed 42 native=guest `hash=61f8a02125b3c69e`; CI `tcg-world-smoke` `TCG_REQUIRED=1`)  
+- [x] **P2.2** Sem imagem: o script existente continua residual nomeado (não verde falso); documentar `PEDRA_QEMU_SSH` / caixa RFC-0005 — status: `done` (`scripts/tcg_guest_status.sh` prints `C2.2=residual_no_guest`; CI `tcg-guest-residual`; `TCG_REQUIRED=1` fails closed)  
+- [x] **P2.3** Se guest existir: um run com `STALL_SO=libdet_io.so` *dentro* do guest no mesmo seed (AND TCG×det_io) — status: `done` (`scripts/tcg_world_smoke_detio.sh`: musl dinâmico + `LD_PRELOAD=/libdet_io.so` drop_fsync_all; seed 42 native=guest `hash=61f8a02125b3c69e` com 215 `fdatasync drop=1`; CI `tcg-world-smoke-detio`)
 
 ---
 
@@ -152,18 +152,16 @@ Shippable sozinho: um smoke nomeado de recovery corre sob Miri; o FDB não tem e
 | ID | Band | Title | Status | Task / PR | Updated |
 |----|------|-------|--------|-----------|---------|
 | P0.1 | p0 | Matriz COMPOSE/NEST/NO neste RFC | done | este ficheiro | 2026-08-23 |
-| P0.2 | p0 | `miri_dst_smoke.sh` dois testes `pedradb-sim` | todo | — | 2026-08-23 |
-| P0.3 | p0 | Allowlist; World completo fora do Miri | todo | — | 2026-08-23 |
-| P1.1 | p1 | ASan capi+posix fail-closed Ubuntu | todo | — | 2026-08-23 |
-| P1.2 | p1 | TSan ConcurrentDb job Ubuntu | todo | — | 2026-08-23 |
-| P1.3 | p1 | Tree Borrows só se divergir de SB | todo | — | 2026-08-23 |
-| P2.1 | p2 | Mesmo seed nativo vs TCG → `trace_hash` | todo | — | 2026-08-23 |
-| P2.2 | p2 | Residual sem imagem, sem verde falso | todo | — | 2026-08-23 |
-| P2.3 | p2 | det_io no guest TCG | todo | — | 2026-08-23 |
+| P0.2 | p0 | `miri_dst_smoke.sh` dois testes `pedradb-sim` | done | supply-chain `miri-dst-smoke` | 2026-08-24 |
+| P0.3 | p0 | Allowlist; World completo fora do Miri | done | comment in `miri_dst_smoke.sh` | 2026-08-24 |
+| P1.1 | p1 | ASan capi+posix fail-closed Ubuntu | done | `capi-asan-harness` + posix Miri islands | 2026-08-24 |
+| P1.2 | p1 | TSan ConcurrentDb job Ubuntu | done | synthetic-field `tsan-box` | 2026-08-24 |
+| P1.3 | p1 | Tree Borrows só se divergir de SB | done | script ran; SB=TB; not required CI | 2026-08-24 |
+| P2.1 | p2 | Mesmo seed nativo vs TCG → `trace_hash` | done | `tcg_world_smoke.sh` + job `tcg-world-smoke` | 2026-08-24 |
+| P2.2 | p2 | Residual sem imagem, sem verde falso | done | `scripts/tcg_guest_status.sh` + job `tcg-guest-residual` | 2026-08-24 |
+| P2.3 | p2 | det_io no guest TCG | done | `tcg_world_smoke_detio.sh` + job `tcg-world-smoke-detio` | 2026-08-24 |
 
-P0.1 = esta página. P0.2 é o dente executável.
-
-**Tentativa P0.2 (2026-08-23, nightly 1.99 / miri 7608eb7):** `cargo +nightly miri test -p pedradb-sim crash_after_sync_recovers_committed` morreu a **compilar** `pedradb-core` com `E0592` duplicate `ConcurrentDb::level_file_count` (`concurrent.rs` ~1203 e ~2194; o primeiro é uncommitted “RFC-0050 properties”). Re-correr o smoke quando o lib compilar no nightly. Não é recusa do Miri.
+P0.1 = esta página. P0.2 é o dente executável. P2.1 `tcg_world_smoke.sh`; P2.2 residual SSH; P2.3 `tcg_world_smoke_detio.sh` (PRELOAD in-guest).
 
 ---
 

@@ -704,6 +704,44 @@ pub fn walk_segment_records(bytes: &[u8]) -> Result<Vec<HistoryRecord>> {
     Ok(out)
 }
 
+/// RFC-0060: decode + CRC the history-tier `history/MANIFEST` (`PHST` trailer).
+///
+/// # Errors
+/// Corrupt magic, version, length, or CRC.
+pub fn verify_history_manifest(bytes: &[u8]) -> Result<()> {
+    Manifest::decode(bytes).map(|_| ())
+}
+
+/// RFC-0060: bloom sidecar CRC fail-closed (scrub is not the read-path
+/// fail-open used when deciding whether to skip a segment).
+///
+/// # Errors
+/// Bad magic/version/length or CRC mismatch.
+pub fn verify_bloom_sidecar(bytes: &[u8]) -> Result<()> {
+    let bad = || CoreError::CorruptHistory("bloom sidecar".into());
+    const FOOTER: usize = 12;
+    if bytes.len() < 8 + FOOTER || &bytes[0..4] != b"PHB1" {
+        return Err(bad());
+    }
+    if u32::from_le_bytes(bytes[4..8].try_into().unwrap()) != 1 {
+        return Err(bad());
+    }
+    let body_len = u64::from_le_bytes(
+        bytes[bytes.len() - FOOTER..bytes.len() - 4]
+            .try_into()
+            .unwrap(),
+    ) as usize;
+    if body_len.saturating_add(8).saturating_add(FOOTER) != bytes.len() {
+        return Err(bad());
+    }
+    let body = &bytes[8..8 + body_len];
+    let crc = u32::from_le_bytes(bytes[bytes.len() - 4..].try_into().unwrap());
+    if crc32c(body) != crc {
+        return Err(bad());
+    }
+    Ok(())
+}
+
 /// RFC-0046 P2.1: newest record that decides `key`'s visibility at `seq` —
 /// exact puts/deletes (`kind` 0/1, `record.key == key`) and range deletes
 /// (`kind` 2, `key` stored as the range start with the end in `val`).
@@ -794,6 +832,36 @@ pub struct RemoteSummary {
     pub archive_floor: u64,
     /// Next immutable manifest generation id.
     pub next_generation: u64,
+}
+
+/// RFC-0060 P2.11: at-rest CRC walk of a remote history tier.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct RemoteVerifyReport {
+    /// Segments listed by the newest intact manifest.
+    pub segments: usize,
+    /// Bloom sidecars found next to those segments.
+    pub sidecars: usize,
+    /// CRC/decode failures.
+    pub errors: u64,
+    /// `(object name, message)` for each failure.
+    pub failures: Vec<(String, String)>,
+}
+
+impl RemoteVerifyReport {
+    /// Product stdout line.
+    #[must_use]
+    pub fn summary_line(&self) -> String {
+        format!(
+            "segments={} sidecars={} errors={}",
+            self.segments, self.sidecars, self.errors
+        )
+    }
+
+    /// True when every listed object decoded.
+    #[must_use]
+    pub fn is_clean(&self) -> bool {
+        self.errors == 0
+    }
 }
 
 /// RFC-0046 P1.1: object-storage-shaped mirror of the local history tier,
@@ -984,6 +1052,20 @@ impl RemoteTier {
         format!("MANIFEST-{n:016}")
     }
 
+    /// `LATEST` body: `MANIFEST-<n>\n<crc32c hex of that generation>`.
+    fn parse_latest_pointer(buf: &str) -> Option<(&str, u32)> {
+        let (name, crc_hex) = buf.trim_end().split_once('\n')?;
+        if name.is_empty()
+            || name.contains('/')
+            || name.contains('\\')
+            || name.contains('\0')
+        {
+            return None;
+        }
+        let crc = u32::from_str_radix(crc_hex.trim(), 16).ok()?;
+        Some((name, crc))
+    }
+
     /// Segments of the newest intact remote manifest, oldest-first.
     /// Empty when the remote tier holds no manifest yet.
     pub fn latest_segments<E: Env>(&self, env: &E) -> Result<Vec<RemoteSegment>> {
@@ -1022,6 +1104,93 @@ impl RemoteTier {
         }))
     }
 
+    /// RFC-0060 P2.11: CRC-walk every segment (and bloom sidecar) listed
+    /// by the newest intact remote manifest. Empty tier is clean.
+    ///
+    /// # Errors
+    /// Remote I/O or a corrupt manifest (not a per-segment CRC miss —
+    /// those are counted in [`RemoteVerifyReport::errors`]).
+    pub fn verify<E: Env>(&self, env: &E) -> Result<RemoteVerifyReport> {
+        let mut report = RemoteVerifyReport::default();
+        self.verify_latest_pointer(env, &mut report);
+        let segs = self.latest_segments(env)?;
+        for seg in segs {
+            report.segments = report.segments.saturating_add(1);
+            let bytes = match self.read_segment(env, &seg.name) {
+                Ok(b) => b,
+                Err(e) => {
+                    report.errors = report.errors.saturating_add(1);
+                    report.failures.push((seg.name.clone(), e.to_string()));
+                    continue;
+                }
+            };
+            if let Err(e) = walk_segment_records(&bytes) {
+                report.errors = report.errors.saturating_add(1);
+                report.failures.push((seg.name.clone(), e.to_string()));
+            }
+            if let Ok(Some(sc)) = self.read_sidecar(env, &seg.name) {
+                report.sidecars = report.sidecars.saturating_add(1);
+                if let Err(e) = verify_bloom_sidecar(&sc) {
+                    report.errors = report.errors.saturating_add(1);
+                    report
+                        .failures
+                        .push((format!("{}.bloom", seg.name), e.to_string()));
+                }
+            }
+        }
+        Ok(report)
+    }
+
+    fn verify_latest_pointer<E: Env>(&self, env: &E, report: &mut RemoteVerifyReport) {
+        let latest = self.segment_path("LATEST");
+        if !env.exists(&latest) {
+            return;
+        }
+        let mut buf = String::new();
+        let Ok(mut f) = env.open_read(&latest) else {
+            report.errors = report.errors.saturating_add(1);
+            report
+                .failures
+                .push(("LATEST".into(), "unreadable".into()));
+            return;
+        };
+        if f.read_to_string(&mut buf).is_err() || buf.trim().is_empty() {
+            report.errors = report.errors.saturating_add(1);
+            report
+                .failures
+                .push(("LATEST".into(), "empty".into()));
+            return;
+        }
+        let Some((name, expect_crc)) = Self::parse_latest_pointer(&buf) else {
+            report.errors = report.errors.saturating_add(1);
+            report
+                .failures
+                .push(("LATEST".into(), "bad pointer".into()));
+            return;
+        };
+        let p = self.segment_path(name);
+        if !env.exists(&p) {
+            report.errors = report.errors.saturating_add(1);
+            report
+                .failures
+                .push(("LATEST".into(), format!("missing {name}")));
+            return;
+        }
+        let Ok(mut mf) = env.open_read(&p) else {
+            return;
+        };
+        let mut mb = Vec::new();
+        if std::io::Read::read_to_end(&mut mf, &mut mb).is_err() {
+            return;
+        }
+        if crc32c(&mb) != expect_crc {
+            report.errors = report.errors.saturating_add(1);
+            report
+                .failures
+                .push(("LATEST".into(), "crc mismatch".into()));
+        }
+    }
+
     /// Newest intact manifest generation: `LATEST` if it parses and its
     /// target decodes; otherwise the highest-numbered intact generation;
     /// `None` when the remote tier is empty.
@@ -1031,13 +1200,14 @@ impl RemoteTier {
             if let Ok(mut f) = env.open_read(&latest) {
                 let mut buf = String::new();
                 if f.read_to_string(&mut buf).is_ok_and(|_| !buf.is_empty()) {
-                    if let Some((name, _crc)) = buf.trim_end().split_once('\n') {
+                    if let Some((name, expect_crc)) = Self::parse_latest_pointer(&buf) {
                         let p = self.segment_path(name);
                         if env.exists(&p) {
                             if let Ok(mut mf) = env.open_read(&p) {
                                 let mut mb = Vec::new();
                                 if std::io::Read::read_to_end(&mut mf, &mut mb).is_ok()
                                     && Manifest::decode(&mb).is_ok()
+                                    && crc32c(&mb) == expect_crc
                                 {
                                     return Ok(Some(mb));
                                 }
@@ -1689,6 +1859,21 @@ mod tests {
         let n2 = tier.remote_generation();
         remote.put_manifest(&map, &m2, n2).unwrap();
         assert_eq!(remote.latest_manifest(&map).unwrap(), Some(m2.clone()));
+        // LATEST names the older generation with a bogus CRC: do not trust
+        // the name (RFC-0060 P2.12) — fall back to the newest intact gen.
+        {
+            let mut f = map
+                .create(Path::new(REMOTE).join("LATEST").as_path())
+                .unwrap();
+            f.write_all(format!("MANIFEST-{n1:016}\nffffffff").as_bytes())
+                .unwrap();
+            f.sync_all().unwrap();
+        }
+        assert_eq!(
+            remote.latest_manifest(&map).unwrap(),
+            Some(m2.clone()),
+            "CRC mismatch on LATEST must not serve the named older generation"
+        );
         // Torn LATEST (garbage pointer) → walk back to newest intact gen.
         {
             let mut f = map
@@ -1763,5 +1948,85 @@ mod tests {
         assert!(walk_segment_records(b"").unwrap().is_empty());
         assert!(walk_segment_records(&bytes[..bytes.len() - 1]).is_err());
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// RFC-0060 P2.11: remote-tier CRC walk names a flipped segment.
+    #[test]
+    fn remote_verify_flags_corrupt_segment() {
+        let local = temp_root("rv-l");
+        let remote_root = temp_root("rv-r");
+        let mut tier = HistoryTier::open(&crate::env::StdEnv, &local).unwrap();
+        tier.archive_stream(
+            &crate::env::StdEnv,
+            vec![(b"k".to_vec(), b"v1".to_vec(), 1u64, 0u8)].into_iter(),
+        )
+        .unwrap();
+        let seg = only_segment_path(&local);
+        let remote = RemoteTier::new(&remote_root);
+        remote
+            .put_segment(&crate::env::StdEnv, &crate::env::StdEnv, &seg)
+            .unwrap();
+        let man = std::fs::read(local.join("history").join("MANIFEST")).unwrap();
+        remote
+            .put_manifest(&crate::env::StdEnv, &man, tier.remote_generation())
+            .unwrap();
+        let clean = remote.verify(&crate::env::StdEnv).unwrap();
+        assert!(
+            clean.is_clean(),
+            "fresh remote must be clean: {} {:?}",
+            clean.summary_line(),
+            clean.failures
+        );
+        assert!(clean.segments >= 1);
+        let obj = std::fs::read_dir(&remote_root)
+            .unwrap()
+            .filter_map(std::result::Result::ok)
+            .map(|e| e.path())
+            .find(|p| p.extension().is_some_and(|x| x == "hist"))
+            .expect("remote hist");
+        let mut bytes = std::fs::read(&obj).unwrap();
+        let mid = bytes.len() / 2;
+        bytes[mid] ^= 0xff;
+        std::fs::write(&obj, bytes).unwrap();
+        let dirty = remote.verify(&crate::env::StdEnv).unwrap();
+        assert!(!dirty.is_clean(), "flipped remote hist must fail");
+        assert!(dirty.errors >= 1);
+        let _ = std::fs::remove_dir_all(&local);
+        let _ = std::fs::remove_dir_all(&remote_root);
+    }
+
+    /// RFC-0060 P2.12: `archive verify` names a LATEST CRC mismatch.
+    #[test]
+    fn remote_verify_flags_corrupt_latest() {
+        let local = temp_root("rv-latest-l");
+        let remote_root = temp_root("rv-latest-r");
+        let mut tier = HistoryTier::open(&crate::env::StdEnv, &local).unwrap();
+        tier.archive_stream(
+            &crate::env::StdEnv,
+            vec![(b"k".to_vec(), b"v1".to_vec(), 1u64, 0u8)].into_iter(),
+        )
+        .unwrap();
+        let seg = only_segment_path(&local);
+        let remote = RemoteTier::new(&remote_root);
+        remote
+            .put_segment(&crate::env::StdEnv, &crate::env::StdEnv, &seg)
+            .unwrap();
+        let man = std::fs::read(local.join("history").join("MANIFEST")).unwrap();
+        remote
+            .put_manifest(&crate::env::StdEnv, &man, tier.remote_generation())
+            .unwrap();
+        let latest = remote_root.join("LATEST");
+        let body = std::fs::read_to_string(&latest).unwrap();
+        let name = body.split('\n').next().unwrap();
+        std::fs::write(&latest, format!("{name}\nffffffff")).unwrap();
+        let r = remote.verify(&crate::env::StdEnv).unwrap();
+        assert!(!r.is_clean(), "LATEST crc mismatch must fail verify");
+        assert!(
+            r.failures.iter().any(|(f, m)| f == "LATEST" && m.contains("crc")),
+            "must name LATEST crc mismatch, got {:?}",
+            r.failures
+        );
+        let _ = std::fs::remove_dir_all(&local);
+        let _ = std::fs::remove_dir_all(&remote_root);
     }
 }

@@ -82,9 +82,9 @@
       quente do zipf com dezenas de versões do apply. Agora max-of-maxes
       reverso por conjunto (map + shards do tail_idx), sem materializar;
       probe `last` 1649→400 ns. Era 1,41 no rearm9)
-- [ ] **P1.2** `kvrocks_blob_set` ≥2× (vlog spill vs inline; peer máx 11–14 ms
+- [ ] **P1.2** `kvrocks_blob_set` ≥2× (parked: owner deprioritized 2026-08-24; vlog spill vs inline; peer máx 11–14 ms
       é dele) — status: `todo`
-- [ ] **P1.3** `deps_scan` ≥2× — status: `partial`
+- [ ] **P1.3** `deps_scan` ≥2× — status: `todo` (parked: owner deprioritized 2026-08-24; was partial)
       (step_user O(1) no cursor de count: 1,80→**1,89** (1,65/1,96/1,89,
       rearm10); TLS absolve ~45% das scans (874/2000 ao kernel). Falta
       cortar o caminho dos 874)

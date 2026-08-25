@@ -1,7 +1,8 @@
 # RFC-0033: Close MVCC latest + deps_scan to the 2× floor
 
 **Status:** in-progress  
-**Updated:** 2026-08-15  
+**Updated:** 2026-08-24
+**Parked (quiet remesure):** remaining P2 table/follow-up slices need a quiet remesure; P1.2 gate shipped via RFC-0035 P2.2.  
 **Parents:** [0032](0032-tikv-mix-2x-budget.md) (teto 2× nesta tabela, G1–G8), [0031](0031-rocks-parity-10x-budget.md)
 
 ## Background
@@ -69,12 +70,12 @@ Herdadas de RFC-0031/0032. Em especial:
 ### P1 — next wave
 
 - [x] **P1.1** SST: `entries_in_user_range` / last-in-prefix não decodifica bloco cujo `first_user_key` já passou do end — status: `done`
-- [ ] **P1.2** Gate `ROCKS_PARITY_RATIO_FLOOR=0.5` + `ROCKS_PARITY_GATE_SHAPES=deps_mvcc_latest,deps_scan` contra FULL_SYNC no `tikv_ycsb_parity_v0.sh` — status: `todo`
+- [x] **P1.2** Gate `ROCKS_PARITY_RATIO_FLOOR=0.5` + `ROCKS_PARITY_GATE_SHAPES=deps_mvcc_latest,deps_scan` contra FULL_SYNC no `tikv_ycsb_parity_v0.sh` — status: `done` (same gate as RFC-0035 P2.2)
 
 ### P2 — later / polish
 
-- [ ] **P2.1** Atualizar a tabela em `findings/tikv-ycsb-lab-*.md` com o commit da re-medida — status: `todo`
-- [ ] **P2.2** Se ainda < 0.5: follow-up com número (L0 count, blocos decodificados/seek) — não relaxar G1 — status: `todo`
+- [ ] **P2.1** Atualizar a tabela em `findings/tikv-ycsb-lab-*.md` com o commit da re-medida — status: `todo` (parked: quiet remesure)
+- [ ] **P2.2** Se ainda < 0.5: follow-up com número (L0 count, blocos decodificados/seek) — não relaxar G1 — status: `todo` (parked: quiet remesure; P1.3 of 0035 already met ≥0.5)
 
 ## Status (living — update with every PR)
 
@@ -85,7 +86,7 @@ Herdadas de RFC-0031/0032. Em especial:
 | P0.3 | p0 | scan limit corta coleta | done | 4096/2000: scan 2778 qps / p50 0.35 ms (era 1024 / 0.97) | 2026-08-15 |
 | P0.4 | p0 | RFC + status vivo | done | este doc | 2026-08-15 |
 | P1.1 | p1 | SST skip blocos past end | done | `blocks_overlapping_range` already exclusive-end | 2026-08-15 |
-| P1.2 | p1 | gate 0.5 mvcc+scan | todo | — | 2026-08-15 |
+| P1.2 | p1 | gate 0.5 mvcc+scan | done | RFC-0035 P2.2 `tikv_ycsb_parity_v0.sh` | 2026-08-24 |
 | P2.1 | p2 | tabela lab | todo | — | 2026-08-15 |
 | P2.2 | p2 | follow-up se residual | done | 2026-08-16: MVCC **0.56×** (116k / 207k FF), scan **1.16×** (246k / 213k) — ≤2× | 2026-08-16 |
 

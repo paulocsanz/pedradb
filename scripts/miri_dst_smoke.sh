@@ -11,6 +11,13 @@
 # MIRI_REQUIRED=1 (set in CI): a missing nightly+miri is a failure,
 # not a residual note.
 #
+# NOTE (RFC-0052 P0.3 allowlist): this script runs *only* the two named
+# pedradb-sim tests below. Do not add world_soak, silent_wrong_gate, a
+# 32-seed matrix, or a full World::run — Miri is not a cluster DST box.
+#
+# Tree Borrows sibling: `scripts/miri_dst_tree_borrows.sh` (RFC-0052 P1.3).
+# Promote that script to required CI only if it ever diverges from this one.
+#
 # NOTE (RFC-0052 discipline): never run Miri in the same process as
 # TSan/PCT; this script is a sibling job, not a matrix combination.
 set -euo pipefail
@@ -28,11 +35,13 @@ fi
 
 echo "== miri pedradb-sim crash_after_sync_recovers_committed =="
 # -Zmiri-disable-isolation: the sim touches the host clock for unix_millis.
-MIRIFLAGS="${MIRIFLAGS:--Zmiri-disable-isolation}" \
+# -Zmiri-ignore-leaks: process-lifetime TLS (`intern_bytes`) and std
+# OnceBox mutexes are not dropped at test end; this is not aliasing UB.
+MIRIFLAGS="${MIRIFLAGS:--Zmiri-disable-isolation -Zmiri-ignore-leaks}" \
   cargo +nightly miri test -p pedradb-sim crash_after_sync_recovers_committed -- --test-threads=1
 
 echo "== miri pedradb-sim failing_env_nth_put_then_reopen_recovers_prefix =="
-MIRIFLAGS="${MIRIFLAGS:--Zmiri-disable-isolation}" \
+MIRIFLAGS="${MIRIFLAGS:--Zmiri-disable-isolation -Zmiri-ignore-leaks}" \
   cargo +nightly miri test -p pedradb-sim failing_env_nth_put_then_reopen_recovers_prefix -- --test-threads=1
 
 echo "miri_dst_smoke: ok"

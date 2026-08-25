@@ -1,7 +1,7 @@
 # Montanha P0–P1: invariants ↔ tests (RFC-0013)
 
 **Status:** living map for P0 + P1.1 multi-key  
-**Updated:** 2026-08-12  
+**Updated:** 2026-08-24  
 **Contract:** [RFC-0013](rfc/0013-montanhadb-product.md) §5 invariants, §9 catalogue, P1.1  
 **Code:** `crates/pedradb-store`, apply helpers in `crates/pedradb-dcs`
 
@@ -112,6 +112,17 @@ RFC §9: `T-DCS-*`, `T-DCS-APPLY-*`.
 | I-MK-5 multi-range single-key still works after batch API | `put_batch_cross_range_hard_fails` (tail puts), `multi_range_puts_different_leaders` | pedradb-store |
 
 API: [`StoreCluster::put_batch`](../../crates/pedradb-store/src/lib.rs) — one raft log entry `RangeEntry::Batch`, apply via PedraDB `apply_batch`.
+
+### Cluster identity (P1.3)
+
+| Invariant | Test function | Crate |
+|-----------|---------------|-------|
+| Id minted + stable on reopen | `cluster_id_survives_reopen` | pedradb-store |
+| Configured pin vs other pin | `cluster_id_configured_pin_and_mismatch` | pedradb-store |
+| Copying a node dir from another cluster refuses | `cluster_id_refuses_cross_cluster_node_dir` | pedradb-store |
+| User put cannot stamp `\0store/cluster/id` | `cluster_id_key_is_reserved` | pedradb-store |
+
+Layout (reserved NUL prefix, same as raft/SI meta): `\0store/cluster/id` = 16 bytes; `\0store/cluster/membership` = `u32 LE` count + `u64 LE` voter ids. Multi-host: `StoreOpenOptions::with_cluster_id` / `montanha-tcp --cluster-id HEX32`. PeerMsg does **not** carry the id — two empty TCP nodes without a shared pin still mint distinct ids and will not mix **dirs**; live RPC merge without the pin is residual.
 
 ### Cross-range multi-key TX (FDB-class defining gap / I-TX-*)
 

@@ -857,6 +857,7 @@ name = "rocksdb-compat"
 version = "0.1.0"
 dependencies = [
  "bytes",
+ "crc32c",
  "parking_lot",
  "pedradb-core",
  "pedradb-io-uring",

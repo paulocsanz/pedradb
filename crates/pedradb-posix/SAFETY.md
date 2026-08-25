@@ -36,6 +36,13 @@ barrier is the RFC-0015 H1 uncertain outcome — not unique to unsafe.
 - Return is an errno-style code (0 = success), **not** `-1` + errno.
 - Non-Linux: no-op `Ok(())`. Darwin has no `posix_fadvise`.
 
+### `preallocate_file` (`fcntl(F_PREALLOCATE)`, Darwin only)
+
+- Live `File`; `as_raw_fd()` is not stored. `fstore_t` layout is local.
+- **Miri:** Darwin `F_PREALLOCATE` is unsupported (`fcntl` cmd 0x2a) — the
+  function no-ops under `cfg(miri)` the same way Linux already does. Production
+  Darwin still reserves extents. This is not a durability barrier.
+
 ### `fsync_file` / `sync_dir_fd`
 
 No `unsafe`. `fsync_file` is `File::sync_all`. `sync_dir_fd` is

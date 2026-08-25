@@ -879,6 +879,18 @@ impl SegmentCache {
     }
 }
 
+/// WAL-encoded op not yet in the memtable (RFC-0045 P2.1). Occupied only
+/// while a [`crate::concurrent::ConcurrentDb`] leader has dropped the write
+/// lock for `fdatasync`. OCC [`Db::key_has_write_after`] consults this so a
+/// later group cannot miss a sequenced-but-unapplied write.
+struct UnappliedOp {
+    seq: SequenceNumber,
+    kind: ValueType,
+    key: Bytes,
+    /// Range-tombstone end; empty for point puts/deletes.
+    end: Bytes,
+}
+
 /// [`Db`] itself is single-threaded (`&mut` for writes). Use [`ConcurrentDb`] for
 /// multi-thread access with a coarse mutex/rwlock.
 pub struct Db<E: Env = StdEnv> {
@@ -889,6 +901,9 @@ pub struct Db<E: Env = StdEnv> {
     wal: Arc<Mutex<Wal<E::File>>>,
     /// Group-commit appends in flight (not yet applied). Blocks WAL rotate.
     commit_inflight: AtomicUsize,
+    /// Sequenced WAL ops waiting for the off-lock `fdatasync` to finish
+    /// before memtable apply (RFC-0045 P2.1).
+    unapplied: Vec<UnappliedOp>,
     /// Active memtable (new writes).
     mem: MemTable,
     /// Immutable memtable being flushed (Rocks dual-memtable / pipeline).
@@ -940,8 +955,9 @@ pub struct Db<E: Env = StdEnv> {
     /// Next sequence to assign (1-based; 0 means “no writes yet”).
     next_seq: SequenceNumber,
     /// Highest sequence default reads may observe. Assigned (`next_seq-1`)
-    /// may be ahead while mem is applied but WAL `fdatasync` has not finished
-    /// (G1: Ok and `get` wait for publish after fd).
+    /// may be ahead while a ConcurrentDb leader has encoded WAL but not yet
+    /// applied+published (RFC-0045 P2.1: apply after durable fsync; G1: Ok
+    /// and `get` wait for publish after fd).
     published_seq: Arc<AtomicU64>,
     sync: bool,
     auto_flush_bytes: Option<usize>,
@@ -1436,6 +1452,7 @@ impl<E: Env> Db<E> {
             env,
             wal,
             commit_inflight: AtomicUsize::new(0),
+            unapplied: Vec::new(),
             mem,
             imm: None,
             flush_read_pin: None,
@@ -2558,6 +2575,20 @@ impl<E: Env> Db<E> {
     /// (F30: a concurrent `delete_range` that covers a read/write key must conflict).
     #[must_use]
     pub fn key_has_write_after(&self, key: &[u8], snapshot: SequenceNumber) -> bool {
+        // RFC-0045 P2.1: WAL-encoded ops sit here during off-lock fsync,
+        // before memtable apply. First-committer-wins must see them.
+        for u in &self.unapplied {
+            if u.seq <= snapshot {
+                continue;
+            }
+            if u.kind == ValueType::RangeDeletion {
+                if range_tombstone_covers(u.key.as_ref(), u.end.as_ref(), key) {
+                    return true;
+                }
+            } else if u.key.as_ref() == key {
+                return true;
+            }
+        }
         // Point lookup per layer (not a full memtable walk). Range tombs
         // only when the layer actually has any (OCC 1c / Surreal commit).
         for table in self.mem_layers() {
@@ -3423,11 +3454,10 @@ impl<E: Env> Db<E> {
                 let seq = head.sequence;
                 // Step even on tombstone heads — visibility and cursor
                 // advance must not be coupled (short-circuit spin).
-                let user = head.user_key.clone();
                 let visible = kind == ValueType::Value
                     && (range_dels.is_empty()
-                        || !crate::merge::range_deleted(user.as_ref(), seq, &range_dels));
-                c.step_user(user.as_ref());
+                        || !crate::merge::range_deleted(head.user_key.as_ref(), seq, &range_dels));
+                c.step_current_user();
                 if visible {
                     count += 1;
                 }
@@ -3454,21 +3484,29 @@ impl<E: Env> Db<E> {
                 }
             }
             let Some(bi) = best else { break };
-            let head = cursors[bi].head().expect("best head");
-            let kind = head.kind;
-            let seq = head.sequence;
-            // `Bytes::clone` is a refcount bump — stepping cursors while the
-            // winning head borrows the table needs a stable key, and a stack
-            // zero+copy per step cost more (RFC-0054 P1.3).
-            let user = head.user_key.clone();
-            let visible = kind == ValueType::Value
-                && (range_dels.is_empty()
-                    || !crate::merge::range_deleted(user.as_ref(), seq, &range_dels));
-            for c in cursors.iter_mut() {
-                if c.head().is_some_and(|h| h.user_key == user) {
-                    c.step_user(user.as_ref());
+            let visible = {
+                let head = cursors[bi].head().expect("best head");
+                head.kind == ValueType::Value
+                    && (range_dels.is_empty()
+                        || !crate::merge::range_deleted(
+                            head.user_key.as_ref(),
+                            head.sequence,
+                            &range_dels,
+                        ))
+            };
+            // Split the winner out so other cursors can step while its
+            // user-key borrow is live, then step the winner (RFC-0039 P2.1).
+            let (left, rest) = cursors.split_at_mut(bi);
+            let (win, right) = rest.split_at_mut(1);
+            {
+                let user = win[0].head().expect("best head").user_key.as_ref();
+                for c in left.iter_mut().chain(right.iter_mut()) {
+                    if c.head().is_some_and(|h| h.user_key.as_ref() == user) {
+                        c.step_current_user();
+                    }
                 }
             }
+            win[0].step_current_user();
             if visible {
                 count += 1;
             }
@@ -3644,7 +3682,8 @@ impl<E: Env> Db<E> {
 
     /// Observability snapshot: sizes, counts, WAL length (RFC-0014 / RFC-0016).
     #[must_use]
-    pub fn stats(&self) -> DbStats {        let mut sst_entries = 0usize;
+    pub fn stats(&self) -> DbStats {
+        let mut sst_entries = 0usize;
         let mut sst_bytes = 0u64;
         for t in &self.ssts {
             sst_entries = sst_entries.saturating_add(t.len());
@@ -3779,6 +3818,13 @@ impl<E: Env> Db<E> {
             let _ = Wal::recover_on(&self.env, &wal_path)?;
         }
         Ok(())
+    }
+
+    /// RFC-0060 at-rest scrub over this DB's directory (same walk as
+    /// [`crate::verify_at_rest`] / `pedra verify`).
+    #[must_use]
+    pub fn verify_at_rest(&self) -> crate::VerifyReport {
+        crate::verify_at_rest(&self.env, &self.dir)
     }
 
     /// Create a point-in-time checkpoint under `dest` (RocksDB Checkpoint class).
@@ -4375,7 +4421,8 @@ impl<E: Env> Db<E> {
             imm_present: self.imm.is_some(),
             pin_live: self.flush_read_pin.is_some(),
             parked_unflushed: !self.parked_unflushed.is_empty(),
-            commit_inflight: self.commit_inflight.load(Ordering::Acquire) > 0,
+            commit_inflight: self.commit_inflight.load(Ordering::Acquire) > 0
+                || !self.unapplied.is_empty(),
         }
     }
 
@@ -4593,7 +4640,9 @@ impl<E: Env> Db<E> {
         }
         // Watermark must be raised before MANIFEST so reopen recovers it.
         let prev_earliest = self.earliest_readable_seq;
-        self.note_version_gc_watermark(crate::merge::CompactGcOptions::for_oldest_snapshot(gc_floor));
+        self.note_version_gc_watermark(crate::merge::CompactGcOptions::for_oldest_snapshot(
+            gc_floor,
+        ));
         if let Err(e) = self.persist_manifest() {
             // F194: same contract as every other inventory swap (F173 /
             // `L0CompactUndo`): Err leaves the pre-compact state — a later
@@ -4637,8 +4686,7 @@ impl<E: Env> Db<E> {
         }
         // Pick lowest level that has files and can promote (N → N+1);
         // decided by the pure kernel (RFC-0056 P0.3).
-        let lowest = (0..MAX_LSM_LEVEL)
-            .find(|&lvl| self.level_file_count(lvl) > 0);
+        let lowest = (0..MAX_LSM_LEVEL).find(|&lvl| self.level_file_count(lvl) > 0);
         let files_at_max = self.level_file_count(MAX_LSM_LEVEL) > 0;
         match crate::compact_kernel::compact_pick(
             lowest,
@@ -5020,14 +5068,11 @@ impl<E: Env> Db<E> {
     ) -> Result<Option<(u32, VlogRewriteStats)>> {
         self.ensure_not_fenced()?;
         let min = min_dead_ratio.clamp(0.0, 1.0);
-        let pick = self
-            .blob_gc_candidates()?
-            .into_iter()
-            .find(|c| {
-                crate::vlog_gc_kernel::blob_gc_action(c.is_active, c.bytes)
-                    == crate::vlog_gc_kernel::BlobGcAction::Rewrite
-                    && c.dead_ratio + f64::EPSILON >= min
-            });
+        let pick = self.blob_gc_candidates()?.into_iter().find(|c| {
+            crate::vlog_gc_kernel::blob_gc_action(c.is_active, c.bytes)
+                == crate::vlog_gc_kernel::BlobGcAction::Rewrite
+                && c.dead_ratio + f64::EPSILON >= min
+        });
         let Some(c) = pick else {
             return Ok(None);
         };
@@ -5805,8 +5850,24 @@ impl<E: Env> Db<E> {
             if from_wal.is_empty() {
                 return Ok(out);
             }
-            let cutoff = out.last().map(|e| e.sequence).unwrap_or(0);
-            out.extend(from_wal.into_iter().filter(|e| e.sequence > cutoff));
+            // Per-key cutoff, not `out.last().sequence`. The cache is
+            // last-per-key sorted by seq, so the global max is some other
+            // key's latest — WAL ops for a key whose cached latest is older
+            // (snapshot wipe Delete, then export Put) were dropped, and
+            // watchers/oracles saw a delete while `get` served the restore
+            // (F-found World seed 502514).
+            let mut cached_latest = std::collections::BTreeMap::<bytes::Bytes, u64>::new();
+            for e in &out {
+                cached_latest
+                    .entry(e.key.clone())
+                    .and_modify(|s| *s = (*s).max(e.sequence))
+                    .or_insert(e.sequence);
+            }
+            out.extend(
+                from_wal
+                    .into_iter()
+                    .filter(|e| e.sequence > cached_latest.get(&e.key).copied().unwrap_or(0)),
+            );
             out.sort_by_key(|e| e.sequence);
             return Ok(out);
         }
@@ -6378,6 +6439,46 @@ impl<E: Env> Db<E> {
         self.commit_inflight.fetch_sub(1, Ordering::Release);
     }
 
+    /// Remember WAL-encoded ops so OCC sees them while memtable apply waits
+    /// for off-lock `fdatasync` (RFC-0045 P2.1).
+    pub(crate) fn stage_unapplied(&mut self, g: &GroupInFlight) {
+        for (_, ops, _) in &g.appended {
+            for op in ops {
+                self.unapplied.push(UnappliedOp {
+                    seq: op.sequence,
+                    kind: op.kind,
+                    key: op.key.clone(),
+                    end: if op.kind == ValueType::RangeDeletion {
+                        op.value.clone()
+                    } else {
+                        Bytes::new()
+                    },
+                });
+            }
+        }
+    }
+
+    /// Drop staged ops for `g` (apply finished, or the group's fsync fenced).
+    pub(crate) fn unstage_unapplied(&mut self, g: &GroupInFlight) {
+        if self.unapplied.is_empty() {
+            return;
+        }
+        let mut lo = u64::MAX;
+        let mut hi = 0u64;
+        let mut any = false;
+        for (_, ops, _) in &g.appended {
+            for op in ops {
+                any = true;
+                lo = lo.min(op.sequence);
+                hi = hi.max(op.sequence);
+            }
+        }
+        if !any {
+            return;
+        }
+        self.unapplied.retain(|u| u.seq < lo || u.seq > hi);
+    }
+
     /// WAL appends whose `fdatasync`/mem-apply has not finished.
     #[must_use]
     pub fn commit_inflight(&self) -> usize {
@@ -6583,8 +6684,10 @@ impl<E: Env> Db<E> {
     }
 
     /// Mem apply + feed after WAL is durable. No fsync (RFC-0041: leader may
-    /// have `fdatasync`'d off the write lock).
+    /// have `fdatasync`'d off the write lock). RFC-0045 P2.1: ConcurrentDb
+    /// calls this on the second write-lock hold, after the off-lock fd.
     pub(crate) fn group_apply(&mut self, g: GroupInFlight) -> Vec<Result<SequenceNumber>> {
+        self.unstage_unapplied(&g);
         let GroupInFlight {
             mut results,
             appended,
@@ -6632,8 +6735,8 @@ impl<E: Env> Db<E> {
 /// In-flight group commit (prepare / encode / append / apply).
 pub(crate) struct GroupInFlight {
     results: Vec<Option<Result<SequenceNumber>>>,
-    /// Seq-assigned ops not yet WAL-appended (ConcurrentDb encodes these
-    /// without the Db write lock).
+    /// Seq-assigned ops not yet WAL-encoded (still under the Db write lock;
+    /// RFC-0045 P1.1 prepare-off-lock was a negative).
     pending: Vec<(usize, Vec<WriteOp>, SequenceNumber)>,
     appended: Vec<(usize, Vec<WriteOp>, SequenceNumber)>,
     any_sync: bool,
@@ -6647,11 +6750,13 @@ impl GroupInFlight {
     }
 
     pub(crate) fn max_appended_seq(&self) -> SequenceNumber {
-        self.appended
-            .iter()
-            .map(|(_, _, seq)| *seq)
-            .max()
-            .unwrap_or(0)
+        // RFC-0057 P2.1: the fence watermark is the group-commit kernel's
+        // decision — one publish sequence for the whole group.
+        let mut seqs = Vec::with_capacity(self.appended.len());
+        for (_, _, seq) in &self.appended {
+            seqs.push(*seq);
+        }
+        crate::group_commit_kernel::fence_publish_seq(&seqs)
     }
 
     pub(crate) fn fail_sync(mut self, e: impl std::fmt::Display) -> Vec<Result<SequenceNumber>> {
@@ -6662,6 +6767,23 @@ impl GroupInFlight {
             ))));
         }
         finish_group_results(self.results)
+    }
+
+    /// ConcurrentDb off-lock I/O failure (write or `fdatasync`). Prefix is
+    /// part of the RFC-0051 PCT oracle (`starts_with("group wal write/sync failed")`).
+    pub(crate) fn fail_io(mut self, e: impl std::fmt::Display) -> Vec<Result<SequenceNumber>> {
+        let msg = format!("group wal write/sync failed: {e}");
+        for (i, _, _) in &self.appended {
+            self.results[*i] = Some(Err(CoreError::Internal(msg.clone())));
+        }
+        finish_group_results(self.results)
+    }
+
+    #[cfg(feature = "pct")]
+    pub(crate) fn collect_appended_seqs(&self, out: &mut Vec<u64>) {
+        for (_, _, seq) in &self.appended {
+            out.push(*seq);
+        }
     }
 }
 
@@ -7417,6 +7539,16 @@ pub(crate) enum CountKeyBuf {
 }
 
 impl CountKeyBuf {
+    pub(crate) fn from_slice(s: &[u8]) -> Self {
+        if s.len() <= 64 {
+            let mut buf = [0u8; 64];
+            buf[..s.len()].copy_from_slice(s);
+            Self::Inline { buf, len: s.len() }
+        } else {
+            Self::Heap(s.to_vec())
+        }
+    }
+
     pub(crate) fn as_slice(&self) -> &[u8] {
         match self {
             Self::Inline { buf, len } => &buf[..*len],
@@ -7453,10 +7585,11 @@ impl CountCursor<'_> {
         }
     }
 
-    fn step_user(&mut self, user: &[u8]) {
+    /// Advance past the current head's user key without `Bytes::clone`.
+    fn step_current_user(&mut self) {
         match self {
-            Self::Mem(c) => c.step_user(user),
-            Self::Sst(c) => c.step_user(user),
+            Self::Mem(c) => c.step_current(),
+            Self::Sst(c) => c.step_current(),
         }
     }
 }
@@ -7471,8 +7604,16 @@ struct MemCountCursor<'a> {
 enum MemCountIter<'a> {
     /// Common path: concrete BTree range or map+tail merge (no `dyn`).
     Range(crate::memtable::MemInternalIter<'a>),
-    /// Rare: range tombstones whose start sits outside the window.
-    Filter(Box<dyn Iterator<Item = (&'a InternalKey, &'a Bytes)> + 'a>),
+    /// Range tombstones whose start sits outside the window: walk the
+    /// full table with a concrete filter (RFC-0039 P2.1: no `Box<dyn>`).
+    Filter(MemCountFilter<'a>),
+}
+
+/// Concrete in-range filter over [`crate::memtable::MemInternalIter`].
+struct MemCountFilter<'a> {
+    inner: crate::memtable::MemInternalIter<'a>,
+    start: Bound<&'a [u8]>,
+    end: Bound<&'a [u8]>,
 }
 
 impl<'a> Iterator for MemCountIter<'a> {
@@ -7481,7 +7622,12 @@ impl<'a> Iterator for MemCountIter<'a> {
     fn next(&mut self) -> Option<Self::Item> {
         match self {
             Self::Range(it) => it.next(),
-            Self::Filter(it) => it.next(),
+            Self::Filter(it) => loop {
+                let (k, v) = it.inner.next()?;
+                if crate::merge::user_key_in_range(k.user_key.as_ref(), it.start, it.end) {
+                    return Some((k, v));
+                }
+            },
         }
     }
 }
@@ -7497,14 +7643,11 @@ impl<'a> MemCountCursor<'a> {
         // tables iterate everything (tombstone starts may precede the
         // window), bounded range otherwise.
         let it = if table.has_range_tombstones() {
-            MemCountIter::Filter(Box::new(
-                table
-                    .iter_internal()
-                    .filter(move |(k, _)| {
-                        crate::merge::user_key_in_range(k.user_key.as_ref(), start, end)
-                    })
-                    .map(|(k, v)| (k, v)),
-            ))
+            MemCountIter::Filter(MemCountFilter {
+                inner: table.iter_internal_iter(Bound::Unbounded, Bound::Unbounded),
+                start,
+                end,
+            })
         } else {
             MemCountIter::Range(table.iter_internal_iter_at(start, end, snapshot))
         };
@@ -7543,6 +7686,14 @@ impl<'a> MemCountCursor<'a> {
             self.head = None;
             self.settle();
         }
+    }
+
+    fn step_current(&mut self) {
+        let Some(h) = self.head else {
+            return;
+        };
+        let user = h.user_key.as_ref();
+        self.step_user(user);
     }
 }
 
@@ -7676,6 +7827,16 @@ impl<'a> SstCountCursor<'a> {
             self.idx += 1;
             self.settle();
         }
+    }
+
+    fn step_current(&mut self) {
+        let Some(h) = self.head() else {
+            return;
+        };
+        // SST block may be dropped on settle — copy the user key off the
+        // Arc before advancing (RFC-0039 P2.1: not `Bytes::clone`).
+        let buf = CountKeyBuf::from_slice(h.user_key.as_ref());
+        self.step_user(buf.as_ref());
     }
 }
 
@@ -7817,9 +7978,11 @@ fn recover_ssts<E: Env>(
     let (obs, listed, missing_num) = match &loaded {
         Ok(None) => (ManifestObs::Absent, ListedSst::AllPresent, None),
         Ok(Some(vs)) => {
-            let missing = vs.sst_file_nums.iter().copied().find(|num| {
-                !env.exists(&VersionSet::sst_path(dir, *num))
-            });
+            let missing = vs
+                .sst_file_nums
+                .iter()
+                .copied()
+                .find(|num| !env.exists(&VersionSet::sst_path(dir, *num)));
             match missing {
                 Some(num) => (ManifestObs::Inventory, ListedSst::Missing(num), Some(num)),
                 None => (ManifestObs::Inventory, ListedSst::AllPresent, None),
@@ -8017,6 +8180,36 @@ mod tests {
         assert_eq!(classify(WalRecovery::PointInTime), 1);
         assert_eq!(WalRecovery::default(), WalRecovery::FailClosed);
         assert_ne!(WalRecovery::FailClosed, WalRecovery::PointInTime);
+    }
+
+    /// RFC-0045 P2.1: staged-but-unapplied WAL ops are visible to OCC and
+    /// invisible to default `get` (publish has not happened).
+    #[test]
+    fn unapplied_ops_are_visible_to_occ_not_get() {
+        let dir = temp_dir();
+        let mut db = Db::open(&dir).unwrap();
+        db.put(b"keep", b"1").unwrap();
+        let snap = db.visible_sequence();
+        assert!(!db.key_has_write_after(b"k", snap));
+        db.unapplied.push(UnappliedOp {
+            seq: snap + 1,
+            kind: ValueType::Value,
+            key: Bytes::from_static(b"k"),
+            end: Bytes::new(),
+        });
+        db.unapplied.push(UnappliedOp {
+            seq: snap + 2,
+            kind: ValueType::RangeDeletion,
+            key: Bytes::from_static(b"r"),
+            end: Bytes::from_static(b"t"),
+        });
+        assert!(db.key_has_write_after(b"k", snap));
+        assert!(db.key_has_write_after(b"s", snap), "range tomb covers s");
+        assert!(!db.key_has_write_after(b"a", snap));
+        assert_eq!(db.get(b"k"), None, "unapplied must not publish");
+        assert_eq!(db.get(b"keep").as_deref(), Some(&b"1"[..]));
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
     }
 
     /// RFC-0036 addendum: `OpenOptions::wal_full_fsync` routes every WAL
@@ -8236,7 +8429,7 @@ mod tests {
 
     fn sync_opts() -> OpenOptions {
         OpenOptions {
-                        wal_full_fsync: true,
+            wal_full_fsync: true,
             history: Default::default(),
             sync: true,
             auto_flush_bytes: None,
@@ -8252,7 +8445,7 @@ mod tests {
     /// drop-in recovery profile (compat default).
     fn pit_opts() -> OpenOptions {
         OpenOptions {
-                        wal_full_fsync: true,
+            wal_full_fsync: true,
             wal_recovery: WalRecovery::PointInTime,
             ..sync_opts()
         }
@@ -9282,7 +9475,7 @@ mod tests {
             let mut db = Db::open_with(
                 &dir,
                 OpenOptions {
-                                        wal_full_fsync: true,
+                    wal_full_fsync: true,
                     history: Default::default(),
                     wal_recovery: Default::default(),
                     sync: true,
@@ -9348,7 +9541,7 @@ mod tests {
             let db = Db::open_with(
                 &dir,
                 OpenOptions {
-                                        wal_full_fsync: true,
+                    wal_full_fsync: true,
                     history: Default::default(),
                     wal_recovery: Default::default(),
                     sync: true,
@@ -9449,7 +9642,7 @@ mod tests {
             let mut db = Db::open_with(
                 &dir,
                 OpenOptions {
-                                        wal_full_fsync: true,
+                    wal_full_fsync: true,
                     history: Default::default(),
                     wal_recovery: Default::default(),
                     sync: false,
@@ -9605,7 +9798,7 @@ mod tests {
             let mut db = Db::open_with(
                 &dir,
                 OpenOptions {
-                                        wal_full_fsync: true,
+                    wal_full_fsync: true,
                     history: Default::default(),
                     wal_recovery: Default::default(),
                     sync: true,
@@ -9996,7 +10189,7 @@ mod tests {
         let mut db = Db::open_with(
             &dir,
             OpenOptions {
-                                wal_full_fsync: true,
+                wal_full_fsync: true,
                 history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: false,
@@ -10032,7 +10225,7 @@ mod tests {
         let mut db = Db::open_with(
             &dir,
             OpenOptions {
-                                wal_full_fsync: true,
+                wal_full_fsync: true,
                 history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
@@ -10064,7 +10257,7 @@ mod tests {
             let mut db = Db::open_with(
                 &dir,
                 OpenOptions {
-                                        wal_full_fsync: true,
+                    wal_full_fsync: true,
                     history: Default::default(),
                     wal_recovery: Default::default(),
                     sync: true,
@@ -10100,7 +10293,7 @@ mod tests {
             let mut db = Db::open_with(
                 &dir,
                 OpenOptions {
-                                        wal_full_fsync: true,
+                    wal_full_fsync: true,
                     history: Default::default(),
                     wal_recovery: Default::default(),
                     sync: false,
@@ -10140,7 +10333,7 @@ mod tests {
             let mut db = Db::open_with(
                 &dir,
                 OpenOptions {
-                wal_full_fsync: true,
+                    wal_full_fsync: true,
                     history: Default::default(),
                     wal_recovery: Default::default(),
                     sync: false,
@@ -10163,7 +10356,7 @@ mod tests {
         let db = Db::open_with(
             &dir,
             OpenOptions {
-            wal_full_fsync: true,
+                wal_full_fsync: true,
                 history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: false,
@@ -10195,7 +10388,7 @@ mod tests {
             let mut db = Db::open_with(
                 &dir,
                 OpenOptions {
-                                        wal_full_fsync: true,
+                    wal_full_fsync: true,
                     history: Default::default(),
                     wal_recovery: Default::default(),
                     sync: false,
@@ -10239,7 +10432,7 @@ mod tests {
             let mut db = Db::open_with(
                 &dir,
                 OpenOptions {
-                                        wal_full_fsync: true,
+                    wal_full_fsync: true,
                     history: Default::default(),
                     wal_recovery: Default::default(),
                     sync: false,
@@ -10276,7 +10469,7 @@ mod tests {
         let mut db = Db::open_with(
             &dir,
             OpenOptions {
-                                wal_full_fsync: true,
+                wal_full_fsync: true,
                 history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
@@ -10416,7 +10609,7 @@ mod tests {
         let mut db = Db::open_with_env(
             &dir,
             OpenOptions {
-                                wal_full_fsync: true,
+                wal_full_fsync: true,
                 history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
@@ -10468,7 +10661,7 @@ mod tests {
         let mut db = Db::open_with(
             &dir,
             OpenOptions {
-                                wal_full_fsync: true,
+                wal_full_fsync: true,
                 history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
@@ -10505,7 +10698,7 @@ mod tests {
         let mut db = Db::open_with(
             &dir,
             OpenOptions {
-                                wal_full_fsync: true,
+                wal_full_fsync: true,
                 history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
@@ -10565,7 +10758,7 @@ mod tests {
         let mut db = Db::open_with(
             &dir,
             OpenOptions {
-                                wal_full_fsync: true,
+                wal_full_fsync: true,
                 history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
@@ -10613,7 +10806,7 @@ mod tests {
         let mut db = Db::open_with(
             &dir,
             OpenOptions {
-                                wal_full_fsync: true,
+                wal_full_fsync: true,
                 history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
@@ -10669,7 +10862,7 @@ mod tests {
         let mut db = Db::open_with(
             &dir,
             OpenOptions {
-                                wal_full_fsync: true,
+                wal_full_fsync: true,
                 history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
@@ -10713,7 +10906,7 @@ mod tests {
         let mut db = Db::open_with(
             &dir,
             OpenOptions {
-                                wal_full_fsync: true,
+                wal_full_fsync: true,
                 history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
@@ -10758,7 +10951,7 @@ mod tests {
         let mut db = Db::open_with(
             &dir,
             OpenOptions {
-                                wal_full_fsync: true,
+                wal_full_fsync: true,
                 history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
@@ -11127,7 +11320,7 @@ mod tests {
     fn exclusive_false_skips_lock_file() {
         let dir = temp_dir();
         let opts = OpenOptions {
-                        wal_full_fsync: true,
+            wal_full_fsync: true,
             history: Default::default(),
             wal_recovery: Default::default(),
             sync: true,
@@ -11433,7 +11626,7 @@ mod tests {
             let mut db = Db::open_with(
                 &dir,
                 OpenOptions {
-                                        wal_full_fsync: true,
+                    wal_full_fsync: true,
                     history: Default::default(),
                     wal_recovery: Default::default(),
                     sync: true,
@@ -11454,7 +11647,7 @@ mod tests {
         let restored = Db::open_with(
             &ckpt,
             OpenOptions {
-                                wal_full_fsync: true,
+                wal_full_fsync: true,
                 history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
@@ -11526,7 +11719,7 @@ mod tests {
             let mut db = Db::open_with(
                 &dir,
                 OpenOptions {
-                                        wal_full_fsync: true,
+                    wal_full_fsync: true,
                     history: Default::default(),
                     wal_recovery: Default::default(),
                     sync: true,
@@ -11570,7 +11763,7 @@ mod tests {
         let restored = Db::open_with(
             &ckpt,
             OpenOptions {
-                                wal_full_fsync: true,
+                wal_full_fsync: true,
                 history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
@@ -11637,7 +11830,7 @@ mod tests {
         let mut db = Db::open_with(
             &dir,
             OpenOptions {
-                                wal_full_fsync: true,
+                wal_full_fsync: true,
                 history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
@@ -11710,7 +11903,7 @@ mod tests {
         let mut db = Db::open_with(
             &dir,
             OpenOptions {
-                                wal_full_fsync: true,
+                wal_full_fsync: true,
                 history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: false,
@@ -11777,7 +11970,7 @@ mod tests {
         let mut db = Db::open_with(
             &dir,
             OpenOptions {
-                                wal_full_fsync: true,
+                wal_full_fsync: true,
                 history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: false,
@@ -11857,7 +12050,7 @@ mod tests {
             let mut db = Db::open_with(
                 &dir,
                 OpenOptions {
-                                        wal_full_fsync: true,
+                    wal_full_fsync: true,
                     history: Default::default(),
                     wal_recovery: Default::default(),
                     sync: true,
@@ -11995,6 +12188,35 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
     }
 
+    /// RFC-0060 P2.15: live `verify_checksums` re-reads CURRENT (via
+    /// `manifest::load`) and fails closed on a CRC mismatch.
+    #[test]
+    fn verify_checksums_fails_on_current_crc_mismatch() {
+        let dir = temp_dir();
+        let mut db = Db::open(&dir).unwrap();
+        db.put(b"k", b"v").unwrap();
+        db.flush().unwrap();
+        db.verify_checksums().unwrap();
+        let body = fs::read(dir.join(crate::manifest::CURRENT_FILE)).unwrap();
+        let (name, _) = crate::manifest::parse_current_pointer(
+            &String::from_utf8(body).unwrap(),
+        )
+        .unwrap();
+        fs::write(
+            dir.join(crate::manifest::CURRENT_FILE),
+            format!("{name}\nffffffff\n"),
+        )
+        .unwrap();
+        let err = db.verify_checksums().unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("crc mismatch") || msg.contains("CURRENT"),
+            "got {msg}"
+        );
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
     /// F29 regression: multi-version flush into multi-block SST must return latest.
     #[test]
     fn multi_version_large_memtable_point_lookup() {
@@ -12029,7 +12251,7 @@ mod tests {
             let mut db = Db::open_with(
                 dir,
                 OpenOptions {
-                                        wal_full_fsync: true,
+                    wal_full_fsync: true,
                     history: Default::default(),
                     wal_recovery: Default::default(),
                     sync: true,
@@ -12332,7 +12554,7 @@ mod tests {
             crate::ConcurrentDb::open_with(
                 &dir,
                 OpenOptions {
-                                        wal_full_fsync: true,
+                    wal_full_fsync: true,
                     history: Default::default(),
                     wal_recovery: Default::default(),
                     sync: true,
@@ -12420,7 +12642,7 @@ mod tests {
             let mut db = Db::open_with(
                 &dir,
                 OpenOptions {
-                                        wal_full_fsync: true,
+                    wal_full_fsync: true,
                     history: Default::default(),
                     wal_recovery: Default::default(),
                     sync: true,
@@ -12448,7 +12670,7 @@ mod tests {
         let db = Db::open_with(
             &dir,
             OpenOptions {
-                                wal_full_fsync: true,
+                wal_full_fsync: true,
                 history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
@@ -12480,7 +12702,7 @@ mod tests {
         let mut db = Db::open_with(
             &dir,
             OpenOptions {
-                                wal_full_fsync: true,
+                wal_full_fsync: true,
                 history: Default::default(),
                 wal_recovery: Default::default(),
                 sync: true,
@@ -12515,7 +12737,7 @@ mod tests {
             let mut db = Db::open_with(
                 &dir,
                 OpenOptions {
-                                        wal_full_fsync: true,
+                    wal_full_fsync: true,
                     history: Default::default(),
                     wal_recovery: Default::default(),
                     sync: true,
@@ -12553,6 +12775,37 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
     }
 
+    /// F-found (World seed 502514): after a flush the lazy CHANGELOG cache
+    /// is last-per-key. A later delete+restore of one key must still show
+    /// Put as that key's latest even when other keys have a higher sequence.
+    #[test]
+    fn lazy_feed_restore_after_delete_survives_other_keys_higher_seq() {
+        let dir = temp_dir();
+        let mut db = Db::open(&dir).unwrap();
+        db.set_changelog_interval(0);
+        db.put(b"a", b"1").unwrap();
+        db.put(b"z", b"1").unwrap();
+        db.flush().unwrap();
+        db.delete(b"a").unwrap();
+        for i in 0..8u8 {
+            db.put(b"z", [i]).unwrap();
+        }
+        db.put(b"a", b"2").unwrap();
+        assert_eq!(db.get(b"a").as_deref(), Some(&b"2"[..]));
+        let a: Vec<_> = db
+            .changes_after(0)
+            .into_iter()
+            .filter(|e| e.key.as_ref() == b"a")
+            .collect();
+        assert!(
+            !a.is_empty() && matches!(a.last().unwrap().kind, crate::ChangeKind::Put),
+            "restore must be changelog-latest, got {a:?}"
+        );
+        assert_eq!(a.last().unwrap().value.as_ref(), b"2");
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
     /// RFC-0036: auto-flush with interval 0 must not rewrite CHANGELOG (apply tail).
     /// Keys stay visible; reopen rebuilds from SST if the cache is absent.
     #[test]
@@ -12563,7 +12816,7 @@ mod tests {
             let mut db = Db::open_with(
                 &dir,
                 OpenOptions {
-                                        wal_full_fsync: true,
+                    wal_full_fsync: true,
                     history: Default::default(),
                     wal_recovery: Default::default(),
                     sync: true,
@@ -12608,7 +12861,7 @@ mod tests {
             let mut db = Db::open_with(
                 &dir,
                 OpenOptions {
-                                        wal_full_fsync: true,
+                    wal_full_fsync: true,
                     history: Default::default(),
                     wal_recovery: Default::default(),
                     sync: true,
@@ -13202,6 +13455,60 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
     }
 
+    /// RFC-0039 P2.1: count and scan emit the same set (borrowed cursor).
+    #[test]
+    fn count_visible_matches_scan_set() {
+        let dir = temp_dir();
+        let mut db = Db::open(&dir).unwrap();
+        for i in 0u8..16 {
+            db.put([b'a', i], [b'v', i]).unwrap();
+        }
+        db.delete([b'a', 3]).unwrap();
+        db.delete_range([b'a', 10], [b'a', 13]).unwrap();
+        db.flush().unwrap();
+        for i in 16u8..24 {
+            db.put([b'a', i], [b'v', i]).unwrap();
+        }
+        let snap = db.last_sequence();
+        let fast = db.count_visible(snap, Bound::Unbounded, Bound::Unbounded, None);
+        let slow = db
+            .scan_at_raw(snap, Bound::Unbounded, Bound::Unbounded, None, false)
+            .count();
+        assert_eq!(fast, slow);
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0039 P2.2: flush+auto-compact must not leave L0 at the trigger
+    /// for a following count/scan.
+    #[test]
+    fn apply_does_not_leave_l0_at_trigger_for_scan() {
+        let dir = temp_dir();
+        let mut db = Db::open(&dir).unwrap();
+        for i in 0..L0_COMPACTION_TRIGGER {
+            db.put([b'k', i as u8], b"v").unwrap();
+            db.flush().unwrap();
+        }
+        assert!(
+            db.level_file_count(0) < L0_COMPACTION_TRIGGER,
+            "L0 after apply/flush must be below trigger, got {}",
+            db.level_file_count(0)
+        );
+        let n = db
+            .count_in_range(
+                db.visible_sequence(),
+                Bound::Unbounded,
+                Bound::Unbounded,
+                None,
+            )
+            .unwrap();
+        let scan_n = db.scan(Bound::Unbounded, Bound::Unbounded).count();
+        assert_eq!(n, scan_n);
+        assert_eq!(n, L0_COMPACTION_TRIGGER);
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn last_under_user_prefix_older_l0_still_visible() {
         let dir = temp_dir();
@@ -13319,7 +13626,7 @@ mod tests {
 
     fn horizon_opts(window_ms: u64, cap_bytes: u64) -> OpenOptions {
         OpenOptions {
-                        wal_full_fsync: true,
+            wal_full_fsync: true,
             history: HistoryOptions {
                 horizon: HistoryHorizon::Window(Duration::from_millis(window_ms)),
                 cap_bytes,
@@ -13341,7 +13648,7 @@ mod tests {
     /// segment, which is what the lazy remote read serves from).
     fn horizon_opts_manual(window_ms: u64, cap_bytes: u64) -> OpenOptions {
         OpenOptions {
-                        wal_full_fsync: true,
+            wal_full_fsync: true,
             auto_compact_sst_count: None,
             ..horizon_opts(window_ms, cap_bytes)
         }
@@ -14666,7 +14973,6 @@ mod tests {
         // kernel count recompute (CountCache::record_dirty range check).
         // The dirtying put is OUTSIDE the timed section.
         let mut cold_ns: u128 = 0;
-        let mut t0 = std::time::Instant::now();
         for _ in 0..rounds.max(1) {
             for u in 0..n {
                 ts += 1;
@@ -14675,7 +14981,7 @@ mod tests {
                     value: Bytes::from_static(b"c"),
                 }])
                 .unwrap();
-                t0 = std::time::Instant::now();
+                let t0 = std::time::Instant::now();
                 let c = db
                     .count_in_range(
                         db.visible_sequence(),
@@ -14691,7 +14997,7 @@ mod tests {
         let cold = cold_ns as f64 / (n as f64 * rounds.max(1) as f64) / 1000.0;
         // Phase B — repeated windows, no writes (kernel count-cache hits
         // need `latest`, so read visible_sequence per call).
-        t0 = std::time::Instant::now();
+        let t0 = std::time::Instant::now();
         for u in 0..n {
             let c = db
                 .count_in_range(
@@ -14791,8 +15097,11 @@ impl<'a, E: Env> MemChunkStream<'a, E> {
         };
         let end = self.end.clone();
         let table = self.table;
-        let mut iter =
-            table.iter_internal_iter_at(crate::merge::bound_as_ref(&seek_from), crate::merge::bound_as_ref(&end), self.snapshot);
+        let mut iter = table.iter_internal_iter_at(
+            crate::merge::bound_as_ref(&seek_from),
+            crate::merge::bound_as_ref(&end),
+            self.snapshot,
+        );
         let mut chunk: Vec<(InternalKey, Bytes)> = Vec::with_capacity(MEM_STREAM_CHUNK);
         while chunk.len() < MEM_STREAM_CHUNK {
             let Some((k, v)) = iter.next() else { break };

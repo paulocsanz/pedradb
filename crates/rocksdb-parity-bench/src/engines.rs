@@ -5,8 +5,11 @@
 
 use crate::{CfWrite, Engine, OccEngine, OccTxn, DEPS_CFS};
 use std::path::Path;
+use std::sync::atomic::AtomicU64;
 
 use pedradb_core::Env;
+
+static INGEST_SEQ: AtomicU64 = AtomicU64::new(0);
 
 /// rocksdb-compat on pedradb-core (always available). Single node.
 /// Drop-in default is Rocks-shaped async WAL (RFC-0054); `set_sync(true)`
@@ -79,6 +82,15 @@ fn compat_bench_opts() -> rocksdb_compat::Options {
     // (Ignored by the verified column — the profile forces sync.)
     if std::env::var("PEDRA_PARITY_ASYNC").as_deref() == Ok("1") {
         opts.set_sync(false);
+    }
+    // The G1 product column: Pedra fdatasyncs before Ok (the Agents.md
+    // peer rule — more durability AND faster than the Rocks people
+    // actually run). RFC-0054 made async the drop-in default and left no
+    // way back to the durable column; this env restores it for the
+    // official parity battery. The reported `durability` label flips to
+    // "strongest-data-barrier-before-ok" when it is on.
+    if std::env::var("PEDRA_PARITY_G1").as_deref() == Ok("1") {
+        opts.set_sync(true);
     }
     // WiscKey / BlobDB: values ≥ threshold go to VALUES.vlog so the WAL
     // holds a pointer (16 KiB blob is not copied into every WAL record).
@@ -253,6 +265,54 @@ impl<E: Env> Engine for CompatEngine<E> {
     }
     fn flush(&self) -> bool {
         self.db.flush().is_ok()
+    }
+    fn wbwi_overlay_get(
+        &self,
+        puts: &[(&[u8], &[u8])],
+        key: &[u8],
+    ) -> Result<Option<Vec<u8>>, ()> {
+        let mut b = rocksdb_compat::WriteBatchWithIndex::new();
+        for (k, v) in puts {
+            b.put(k, v);
+        }
+        b.get_from_batch_and_db(&self.db, key).map_err(|_| ())
+    }
+    fn ingest_kvs(&self, kvs: &[(&[u8], &[u8])]) -> bool {
+        let n = INGEST_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let sst = std::env::temp_dir().join(format!(
+            "pedra-parity-ingest-{}-{n}.sst",
+            std::process::id()
+        ));
+        let mut pairs: Vec<(&[u8], &[u8])> = kvs.to_vec();
+        pairs.sort_by(|a, b| a.0.cmp(b.0));
+        let mut w = rocksdb_compat::SstFileWriter::create(&rocksdb_compat::Options::new());
+        if w.open(&sst).is_err() {
+            return false;
+        }
+        for (k, v) in &pairs {
+            if w.put(k, v).is_err() {
+                let _ = std::fs::remove_file(&sst);
+                return false;
+            }
+        }
+        if w.finish().is_err() {
+            let _ = std::fs::remove_file(&sst);
+            return false;
+        }
+        let ok = self.db.ingest_external_file(vec![&sst]).is_ok();
+        let _ = std::fs::remove_file(&sst);
+        ok
+    }
+    fn compact_drop_prefix(&self, prefix: &[u8]) -> bool {
+        self.db
+            .compact_with_filter(|_lvl, key, _val| {
+                if key.starts_with(prefix) {
+                    rocksdb_compat::CompactionDecision::Remove
+                } else {
+                    rocksdb_compat::CompactionDecision::Keep
+                }
+            })
+            .is_ok()
     }
     fn reset_read_probe(&self) {
         self.db.reset_read_probe();
@@ -482,6 +542,72 @@ impl Engine for RocksEngine {
     }
     fn flush(&self) -> bool {
         self.db.flush().is_ok()
+    }
+    fn wbwi_overlay_get(
+        &self,
+        puts: &[(&[u8], &[u8])],
+        key: &[u8],
+    ) -> Result<Option<Vec<u8>>, ()> {
+        // rust-rocksdb 0.22 has no WriteBatchWithIndex type; last-write-wins
+        // overlay then DB is the same observable as compat WBWI for this shape.
+        for (k, v) in puts.iter().rev() {
+            if *k == key {
+                return Ok(Some(v.to_vec()));
+            }
+        }
+        self.db.get(key).map_err(|_| ())
+    }
+    fn ingest_kvs(&self, kvs: &[(&[u8], &[u8])]) -> bool {
+        let n = INGEST_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let sst = std::env::temp_dir().join(format!(
+            "pedra-parity-rocks-ingest-{}-{n}.sst",
+            std::process::id()
+        ));
+        let mut pairs: Vec<(&[u8], &[u8])> = kvs.to_vec();
+        pairs.sort_by(|a, b| a.0.cmp(b.0));
+        let opts = rocksdb::Options::default();
+        let mut w = rocksdb::SstFileWriter::create(&opts);
+        if w.open(&sst).is_err() {
+            return false;
+        }
+        for (k, v) in &pairs {
+            if w.put(k, v).is_err() {
+                let _ = std::fs::remove_file(&sst);
+                return false;
+            }
+        }
+        if w.finish().is_err() {
+            let _ = std::fs::remove_file(&sst);
+            return false;
+        }
+        let ok = self.db.ingest_external_file(vec![&sst]).is_ok();
+        let _ = std::fs::remove_file(&sst);
+        ok
+    }
+    fn compact_drop_prefix(&self, prefix: &[u8]) -> bool {
+        let mut drop = Vec::new();
+        {
+            let it = self.db.iterator(rocksdb::IteratorMode::From(
+                prefix,
+                rocksdb::Direction::Forward,
+            ));
+            for r in it {
+                let Ok((k, _)) = r else {
+                    break;
+                };
+                if !k.starts_with(prefix) {
+                    break;
+                }
+                drop.push(k.to_vec());
+            }
+        }
+        for k in drop {
+            if self.db.delete_opt(&k, self.wopts()).is_err() {
+                return false;
+            }
+        }
+        self.db.compact_range(None::<&[u8]>, None::<&[u8]>);
+        true
     }
     fn put(&self, k: &[u8], v: &[u8]) -> bool {
         let ok = self.db.put_opt(k, v, self.wopts()).is_ok();

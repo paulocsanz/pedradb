@@ -4,7 +4,7 @@
 > item is closed, or a new open question emerges. The authoritative source for
 > "what's done, what's next, what's unresolved."
 
-Last updated: 2026-08-24 (RFC-0059 swarm/invariants P0 done; 0057 caixas no CI)
+Last updated: 2026-08-25 (RFC-0060 P2.27 unrecognized leftover files named FAIL)
 
 ---
 
@@ -16,7 +16,7 @@ Last updated: 2026-08-24 (RFC-0059 swarm/invariants P0 done; 0057 caixas no CI)
                  vlog+GC ✅  | group commit / dual-mem ✅  | CAS/feed/seq (0019) ✅
  pedradb-sim     FailingEnv / RecordingEnv ✅
  pedradb-oracle  model oracle + optional live-rocksdb ✅
- pedradb-cli     version + wal + demo
+ pedradb-cli     version + wal + demo + verify/maintain
 
  RFC-0009 done · RFC-0014 done · RFC-0015 done · RFC-0019 done
  RFC-0016 P0 done · RFC-0017 draft · RFC-0020 done (P0–P2 synthetic field maturity)
@@ -29,7 +29,7 @@ Last updated: 2026-08-24 (RFC-0059 swarm/invariants P0 done; 0057 caixas no CI)
    9/256 vs seq 0/256, canário CommitUnknown `row_half_indexed=0`, OCC plantado 38/256
    cross-group / correto 0/256 com oráculo group-aware; trial `FailingEnvArc<IoUringEnv>`
    Linux com skip explícito; guards spawn/wall-clock no CI; not “more trusted than FDB”)
- RFC-0057 draft (P0 done; P1.1–P1.3 done, P1.4 = 0052 P2) — intensidade máxima: swarm paralelo multi-núcleo
+ RFC-0057 draft (P0+P1+P2 done; P1.4 = 0052 P2 reference) — intensidade máxima: swarm paralelo multi-núcleo
    (forenses por-run; trials paralelos não-interferentes), caixas no CI (Miri/TSan/ASan
    executando os slices do 0052), formalização do group-commit+OCC (fecha 0056 P2.1);
    “100%” = espaço verificável relativo ao TCB, residual publicado — não “sem bugs”.
@@ -38,38 +38,55 @@ Last updated: 2026-08-24 (RFC-0059 swarm/invariants P0 done; 0057 caixas no CI)
    P1 entregue: caixas **required** — `miri-dst-smoke` (supply-chain) + `tsan-box`
    (`TSAN_REQUIRED=1`; 2 alvos: `concurrent_race_stress` + o runner `pct_concurrent`
    sem PCT no processo, XOR 0052) + `capi-asan-harness`; irmãos, nunca no mesmo
-   processo. P1.4 (TCG) é 0052 P2.
- RFC-0058 draft (P0+P1 done) — modo verificado: perfil de produto cujas seções críticas são os
-   kernels provados (StdEnv + sync + lone-commit até 0057 P2.1). P0: `OpenOptions::verified()` +
-   `VerifiedProfile`/`profile_report()` amarrado ao catalog.json (44/44 machine-checked), pin
-   lone-only de-uma-via, bateria FailingEnv 5/5 + World (`silent_wrong=0`) + PCT com sync/OCC/
-   **async** (fence ≤ 1 escritor; sobrevivente async nunca errado) + contratos async do pin (close
-   drena tail; barreira `sync()` sobrevive a kill). P1: `open_verified` em fold/lease/dcs/compat
-   (StdEnv por tipo), derivação `verified_vs_full_same_oracles` (oráculos idênticos; merge full
-   não-vacuo), CI job `verified-mode`, piso medido no modo (reads ≥5× vs Rocks default; writes
-   lone-fsync ~0,001× — sem claim de paridade no perfil; reativação = P2.1). Falta (P2):
-   group-commit por teorema; ring io_uring fora, com contrato; `PEDRA_VERIFIED=1`.
+   processo. P1.4 (TCG) é 0052 P2: `C2.2=residual_no_guest` (`tcg_guest_status.sh`);
+   guest nativo-vs-TCG continua 0052 P2.1.
+ RFC-0058 (P0+P1+P2 done) — modo verificado: perfil de produto cujas seções críticas são os
+   kernels provados (StdEnv + sync; group-commit de volta por teorema — 0057 P2.1 caiu). P0:
+   `OpenOptions::verified()` + `VerifiedProfile`/`profile_report()` amarrado ao catalog.json
+   (machine-checked), pin verified-v2, bateria FailingEnv 5/5 + World (`silent_wrong=0`) + PCT
+   com sync/OCC/**async** (fence ≤ 1 escritor; sobrevivente async nunca errado) + contratos async
+   do pin (close drena tail; barreira `sync()` sobrevive a kill). P1: `open_verified` em
+   fold/lease/dcs/compat (StdEnv por tipo), derivação `verified_vs_full_same_oracles` (oráculos
+   idênticos; merge full não-vacuo), CI job `verified-mode`, piso medido no modo (reads ≥5× vs
+   Rocks default; writes eram lone-fsync ~0,001× no v1). P2: group-commit por teorema
+   (`group_commit_kernel.rs` — Verus 14/0 + Lean no-sorry; merge ativo no perfil, catch-up 0,
+   bypass async; `verified-v2`); ring io_uring **fora** do modo com contrato publicado (sem
+   modelo de ring provável — P2.2 gate; `profile_report` row off + doc do `OpenOptions::verified`);
+   `PEDRA_VERIFIED=1` no CLI como linha de produto (P2.3: StdEnv + `OpenOptions::verified()`,
+   banner com `PROFILE_VERSION`, testes `verified_flag_*`).
    Extração total: REFUSE (L46)
- RFC-0059 draft (P0+P1 done) — [escala massiva paralela + invariantes de
-   cluster](rfc/0059-massive-scale-parallel-dst-and-cluster-invariants.md): swarm
-   work-stealing (4486,7 seeds/s @3n mem, 8 workers) com determinismo serial=paralelo;
-   checker cross-node no estado convergido (ground truth = união dos changelogs; delete
-   provado por qualquer participante proíbe maioria servindo o valor); escala 7/9 nós +
-   4 ranges; WorldEnv Disk/Mem com as mesmas seams de fault. **4 bugs de produto achados
-   e corrigidos com regressão pinada por seed** (13 CRC frame, 865 índice reusado, 49
-   CommitUnknown, 104853 InstallSnapshot stale-wipe) + 2 correções do próprio
-   checker/oráculo (false-phantom do single-reader; probe por range). Campanhas
-   16384@3n / 4096@7n / 4096@9n-4ranges = 0 falhas
-   ([evidência](../findings/2026-08-24-world-swarm/)); sem claim CPU-hours vs FDB.
+ RFC-0060 done (P0–P2.27) — [field/hardware residuals](rfc/0060-field-and-hardware-residuals.md):
+   `pedra verify` / `maintain --verify` at-rest CRC scrub; World BitFlip
+   (`flush`→XOR→scrub on live Env→reopen; apply=false mutant);
+   leftover `*.tmp` named FAIL; CATALOG/`wal/*.warch` on-scrub; CURRENT CRC
+   on checkpoint copy. Checksum table + hardware residual in coverage-map/LEDGER
+   L49/L50. Not a proof of ECC.
+ RFC-0059 draft (P0+P1+P2 done; P2.3 = TCG via RFC-0052 P2.1–P2.3) — [escala massiva
+   paralela + invariantes de cluster](rfc/0059-massive-scale-parallel-dst-and-cluster-invariants.md):
+   swarm work-stealing com determinismo serial=paralelo (mesmo processo);
+   checker cross-node no estado convergido (delete provado = changelog latest
+   delete **e** get local ausente) + trajetória (termo/index monotônicos);
+   janelas de membership upgrade/rollback. **7 bugs de produto pinados por seed**
+   (13 CRC, 865 índice reusado, 49 CommitUnknown, 104853 stale-wipe, 500308
+   quorum floor, 503976 voto/snapshot, 502514 CHANGELOG lazy). Campanhas P2
+   16384@3n / 4096@7n / 4096@9n-4ranges com UPGRADE+TRAJECTORY = 0 falhas
+   ([evidência](../findings/2026-08-24-world-swarm-p2/)); sem claim CPU-hours vs FDB.
    P1.3: workflow `world-nightly` (cron diário + dispatch) roda a escala de
    referência com base de seed rotativa (YYYYMMDD) e publica artifact.
-   P2 abertos (membership/upgrade-rollback, invariantes de trajetória)
- RFC-0052 draft — DST inside Miri/ASan/TCG (cycle, not one interpreter)
+   P2 entregues 2026-08-24: membership/upgrade-rollback
+   (`splice_membership_windows` + knobs `PEDRA_SWARM_UPGRADE`/`PEDRA_SWARM_TRAJECTORY`)
+   e invariantes de trajetória (`check_trajectory` + mutante). P2.3 (TCG) é
+   RFC-0052 P2.1–P2.3 (`tcg_world_smoke.sh` + det_io PRELOAD in-guest).
+ RFC-0052 draft (P0+P1+P2 done) — DST inside Miri/ASan/TCG; native=guest
+   `trace_hash` seed 42; `STALL_SO=libdet_io.so` 215 fsync drops in-guest.
+   Block EIO: RFC-0050 P2.3 `tcg_blk_eio.sh` (blkdebug, fail-closed).
  RFC-0053 done — Y1–Y3 shipped (2ª máquina AE/commit, caller refinements vote/AE/apply,
-   reopen kernel + lemmas, liveness bounded sob axioma; π/VerusSync não disparado, RFC-0051 draft)
- RFC-0056 done — 100% relativo ao TCB entregue (itens 1–6/8/9/11 verdes; 7 gated por
-   RFC-0051; 10 “TCB à vista” via freeze; 12 contínuo): 35 kernels + 44 pares catalog,
-   liveness sob axiomas ES-1/2/3, StdEnv→Env sem ilhas, TCB congelado no CI
+   reopen kernel + lemmas, liveness bounded sob axioma; π/VerusSync recusados — RFC-0056
+   P2.1 registrou kernel Verus `group_commit` via RFC-0057; RFC-0051 PCT in-tree)
+ RFC-0056 done — 100% relativo ao TCB entregue (itens 1–9, 11 verdes; 7 = kernel de
+   grupo, não `∀` interleavings; 10 “TCB à vista” via freeze; 12 contínuo): group-commit
+   kernel + twin 14/0 + Lean; liveness sob axiomas ES-1/2/3, StdEnv→Env sem ilhas,
+   TCB congelado no CI
  “100%”: docs/formal/one-hundred-percent.md (contrato) + one-hundred-percent-report.md (estado)
  Vision: docs/node-primitive-and-unified-platform.md (SoR + projections + multi-leader)
 ```
@@ -94,7 +111,7 @@ Last updated: 2026-08-24 (RFC-0059 swarm/invariants P0 done; 0057 caixas no CI)
 | 11 | Streaming range / lazy blocks (RFC-0014 P1) | ✅ done | scan + lazy SST blocks + levels + lz4 | — |
 | 12 | Audit correctness fixes (RFC-0015) | ✅ done | fence, sync_dir, Env seams, compact stats, deny CI | — |
 
-**Next action (determinism):** [RFC-0050](rfc/0050-world-in-tree-fdb-determinism.md) + [RFC-0051](rfc/0051-beyond-fdb-sim-holes.md) **fechados** (P0–P2; swarm L28 limpo — REAL gate só fecha com bug de cluster reproduzido por seed). [RFC-0056](rfc/0056-one-hundred-percent-delivery.md) fechado — estado final em `docs/formal/one-hundred-percent-report.md` (única fatia aberta: P2.1 `ConcurrentDb`, agora coberta pelos dentes PCT do 0051). [RFC-0052](rfc/0052-dst-inside-boxes.md) P0.2 `miri_dst_smoke` quando `pedradb-core` compilar no nightly. [RFC-0053](rfc/0053-ironfleet-years.md) fechado — relatórios `docs/formal/y1|y2|y3-report.md`. Formal: `cqe_kernel.rs` (io_uring) é a única allowlist do freeze — twin bloqueado num modelo de ring.  
+**Next action (determinism):** [RFC-0050](rfc/0050-world-in-tree-fdb-determinism.md) + [RFC-0051](rfc/0051-beyond-fdb-sim-holes.md) **fechados** (P0–P2). [RFC-0056](rfc/0056-one-hundred-percent-delivery.md) fechado. [RFC-0052](rfc/0052-dst-inside-boxes.md) P0+P1+P2 done (`tcg_world_smoke.sh` + `tcg_world_smoke_detio.sh`: seed 42 native=guest `61f8a02125b3c69e`, 215 fsync drops in-guest). [RFC-0053](rfc/0053-ironfleet-years.md) fechado — relatórios `docs/formal/y1|y2|y3-report.md`. Formal: `cqe_kernel.rs` (io_uring) é a única allowlist do freeze — twin bloqueado num modelo de ring.  
 **Next action (other):** Full bindingtester / Java RL only if requested; FDB **field** peer numbers need lab `fdbserver`. Value-store pick C (0029) done including CLI `compact-blob` / `blob-gc` / `maintain`.  
 **CI:** `synthetic-field` **montanha-scale-and-compare** — scale_gate (± `MONTANHA_WRITE_BACKPRESSURE=1`) + `montanha_bp_ab_v0` (off vs BP thr/admission delta) + mini_bt_soak (± BP) + fdb-compare template (no FDB required).  
 **Shipped (admission):** Pedra L0/mem write stall + soft pressure; Montanha `StoreError::WriteStall*` + `WriteAdmissionSnap`; lab flags on scale-gate / fdb-bench / perf-gate / montanha-tcp / mini_bt_soak; fdb-compare pass-through `write_backpressure`; structured `admission_*` in scale/perf reports.  
@@ -108,7 +125,7 @@ Last updated: 2026-08-24 (RFC-0059 swarm/invariants P0 done; 0057 caixas no CI)
 **Open (RFC-0035):** P1.3 **met**. last+count cache: MVCC **116k / 0.7 µs** vs FF 207k — **0.56×** (1.79× mais lento). Scan **246k / 0.4 µs** vs 213k — **1.16×** (mais rápido). Gate 0.5 em `tikv_ycsb_parity_v0.sh` com FULL_SYNC=1. Ver [RFC-0035](rfc/0035-mvcc-scan-2x-measure-first.md).
 **Open (RFC-0034):** teto **1.1×** (`Pedra / Rocks_F_FULLFSYNC ≥ 0.91`) em **todos** os 11 shapes. Remesura 4096/2000 FF: **0/11 passam** (A 1.12× · F 1.19× · C 8× · E 2.2× · scan 35× · MVCC 69×). Sem 1.1× de escrita vs fdatasync (G1). Sem gate mentiroso no conjunto vazio. Ver [RFC-0034](rfc/0034-rocks-parity-1.1x-all-shapes.md).
 **Open (RFC-0039):** apply / raftlog / scan ≥ **5× Rocks sync** (fd, `sync=true`). Coluna **async sempre** no relatório (não é o gate; 5× vs async não é o alvo). Piso apply = 2×`fdatasync` — P0.2 mede se 13.9 k qps cabe. Ver [RFC-0039](rfc/0039-apply-raftlog-scan-5x-rocks-sync.md).
-**Open (RFC-0041):** Pedra ≥ **2×** Rocks **default** em **todo** o harness (11 + MC4). P1.1 **doing**: apply-before-fd + publish after `fdatasync` (G1; get/iter use `visible_sequence`). enc1hop rejected. parkfold2 still best (scan 2.21, E 2.06). 1c A/F 2× above `1/t_fd`; FLOOR off. Ver [RFC-0041](rfc/0041-2x-rocks-default.md).
+**Re-baselined (RFC-0041):** piso oficial **1×** (2026-08-24, decisão de produto registrada; peer inalterado `sync=false`, compare ainda recusa peer sync): gate default `ROCKS_PARITY_RATIO_FLOOR=1.0` na coluna drop-in same-class (**15/15 ≥ 1.254**, [findings/rocks-parity-floor1x/](../findings/rocks-parity-floor1x/README.md)); G1 (fdatasync antes do Ok) vira tabela de produto publicada ([findings/rocks-parity-floor1x-g1/](../findings/rocks-parity-floor1x-g1/README.md)) — leituras **1.128–1.986×** com durabilidade mais forte; escritas 1c write-per-op são fd-ceiling <1× **por construção** (fechamento: group commit — apply_mc4 2.788× head3). Slices P1/P2 de 2× = backlog registrado, não gate. Ver [RFC-0041](rfc/0041-2x-rocks-default.md).
 **Open (RFC-0040):** group/sticky vs default; apply MC ~0.9×. Alimenta o 0041 P1. Ver [p11](../findings/rfc0040-p11/README.md).
 **Open (RFC-0059 anti-overindex/substitution — distinto do 0059 swarm):** bateria Linux/AMD (anti-1): **13/16 ≥2×** async same-class, **sem overindex** (unif ±1.5%, big −22%). Linux-only atribuído (diag-5, `findings/2026-08-24-linux-diag5/`): `deps_raftlog` 0.78× = cauda fora do caminho de escrita (fases ~11µs vs wall ~240µs/op; H1/H2/H3 eliminadas; H4 flush-bg/4vCPU viva); `deps_apply_batch` mediana 1.95 colada no piso — custo real, sem patologia. Substituição SurrealDB fechada no Linux (sub-5): write **2.40×**, read **1.81×**, txn **1.43×**; `scan` 0.58× é gap do shim (range-scan do SurrealDB ≠ kvrocks_scan oficial 32.7×) — próximo item do shim. Ver [RFC-0059](rfc/0059-substitution-anti-overindex-linux-gate.md).
 **Shipped (rocksdb-compat):** `crates/rocksdb-compat` — rust-rocksdb-shaped API subset on pedradb-core (open_cf / put / get / delete / delete_range_cf / atomic WriteBatch / snapshot / iterator modes / flush·compact; CFs emulated por prefixo com `default` prefixed quando há CFs nomeadas) + suite adversarial FailingEnv (dead-disk ×32, sync-fail ×8, short-write ×8, batch all-or-nothing, iterator positioning) + alias-swap smoke (`rocksdb-compat-alias-smoke`). **rust-rocksdb 0.22 API** on Pedra ([rocksdb-compat.md](rocksdb-compat.md)): ingest/`SstFileWriter`, `delete_file_in_range` (tombstone+compact), WBWI, compaction filter, `create_cf`/`drop_cf`. Prefix CFs, not Titan. Scoreboard: [robustness-nine-axes.md](robustness-nine-axes.md).  

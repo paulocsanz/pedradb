@@ -190,6 +190,69 @@ jobs:
           TSAN_REQUIRED: "1"
         run: bash scripts/race_job.sh
 
+  # RFC-0052 P2.2 — TCG residual must stay named. CI has no PEDRA_QEMU_SSH
+  # guest; this job fails if the script ever prints a fake TCG_PASS.
+  tcg-guest-residual:
+    name: TCG residual named (RFC-0052 P2.2)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: tcg_guest_status residual_no_guest
+        run: |
+          bash scripts/tcg_guest_status.sh /tmp/tcg-status.txt
+          cat /tmp/tcg-status.txt
+          grep -q 'C2.2=residual_no_guest' /tmp/tcg-status.txt
+          ! grep -qE 'TCG_PASS|native==guest|trace_hash match' /tmp/tcg-status.txt
+
+  # RFC-0052 P2.1 — Linux TCG guest world_smoke vs native, same seed.
+  # Oráculo = trace_hash; wall-clock é proibido.
+  tcg-world-smoke:
+    name: TCG world_smoke native=guest (RFC-0052 P2.1)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-musl
+      - name: qemu + musl
+        run: sudo apt-get update && sudo apt-get install -y qemu-system-x86 musl-tools cpio gzip
+      - name: native vs TCG trace_hash
+        env:
+          TCG_REQUIRED: "1"
+        run: bash scripts/tcg_world_smoke.sh
+
+  # RFC-0052 P2.3 — same seed, libdet_io.so PRELOAD inside the guest.
+  tcg-world-smoke-detio:
+    name: TCG × det_io (RFC-0052 P2.3)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-musl
+      - name: qemu + musl
+        run: sudo apt-get update && sudo apt-get install -y qemu-system-x86 musl-tools cpio gzip
+      - name: TCG guest with STALL_SO=libdet_io.so
+        env:
+          TCG_REQUIRED: "1"
+        run: bash scripts/tcg_world_smoke_detio.sh
+
+  # RFC-0050 P2.3 — block-layer EIO (QEMU blkdebug), fail-closed.
+  tcg-blk-eio:
+    name: TCG block EIO fail-closed (RFC-0050 P2.3)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-musl
+      - name: qemu + musl
+        run: sudo apt-get update && sudo apt-get install -y qemu-system-x86 musl-tools cpio gzip
+      - name: virtio-blk + blkdebug EIO
+        env:
+          TCG_REQUIRED: "1"
+        run: bash scripts/tcg_blk_eio.sh
+
   montanha-secure:
     name: Montanha TLS lab (RFC-0050 P0.5)
     runs-on: ubuntu-latest

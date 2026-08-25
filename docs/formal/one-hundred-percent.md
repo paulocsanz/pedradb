@@ -81,22 +81,22 @@ Cada linha é **necessária**. Nenhuma sozinha chega.
 
 | # | O que tem de ser verdade | Hoje | Falta |
 |---|---------------------------|------|-------|
-| **1** | Todo `if` de destino de dados é um `fn` puro; **produção chama** | **verde**: 35 kernels (voto, AE, commit, TX, lease, WAL recover, prefix, bloom, pack, flush, compact, MANIFEST, vlog GC, 2PC glue, …); freeze recusa kernels não registados | só o group-commit/`ConcurrentDb` (item 7) |
-| **2** | Cada um desses `fn` tem prova ∀ (Verus) | **verde**: 44 pares, 40 twins, twin:kernel ≈ 0.65:1, zero `sorry` | — |
-| **3** | 2ª máquina (Aeneas→Lean) no **extract**, não gémeo à mão | **verde**: 8 extracts drift-stamped (voto, isolated, bloom, AE, commit, reopen, apply, wal-recover) | — |
+| **1** | Todo `if` de destino de dados é um `fn` puro; **produção chama** | **verde**: 36 kernels (voto, AE, commit, TX, lease, WAL recover, prefix, bloom, pack, flush, compact, MANIFEST, vlog GC, 2PC glue, group-commit, …); freeze recusa kernels não registados | — |
+| **2** | Cada um desses `fn` tem prova ∀ (Verus) | **verde**: 46 pares (catalog, incl. `group_commit`/`group_fence`), twins Verus, zero `sorry` | — |
+| **3** | 2ª máquina (Aeneas→Lean) no **extract**, não gémeo à mão | **verde**: 9 extracts drift-stamped (voto, isolated, bloom, AE, commit, reopen, apply, wal-recover, group-commit) | — |
 | **4** | Caller refina: `Grant ⇒ persist Ok`, `ACK ⇒ majority` | **verde**: F15/F11/F16 kernels + refinamento verificado no loop TCP (8/8) | — |
 | **5** | Composição: um spec de **dicionário + crash** (acked prefix sobrevive) | **verde**: `dictionary_link` (put→…→get, hipóteses nomeadas) + DST e2e no CI | — |
 | **6** | Host loop é máquina de estados (redução: passo atómico) | **verde**: `compose_model` + `tcp_node_model` (node inteiro; kernels de produção no passo) | — |
-| **7** | Concorrência: ou redução a (6), ou lógica concorrente | `ConcurrentDb` real; PCT **não** ligado; TSan opcional | **aberto (gate RFC-0051)**; π/VerusSync quando o gate abrir |
+| **7** | Concorrência: ou redução a (6), ou lógica concorrente | **verde relativo ao kernel de grupo**: RFC-0051 PCT in-tree; RFC-0057 `group_commit_kernel` (assign/validate/apply/fence) com teorema de atomicidade de grupo + first-committer-wins; escolha = kernel Verus, **não** π-redução de todos os interleavings nem VerusSync | glue lock/WAL I/O/scheduler OS continua TCB (`∀ interleavings` fora de escopo §3) |
 | **8** | Liveness (eleição eventualmente, se quórum vivo) | **verde relativo aos axiomas**: `Property::eventually` no modelo do node; ES-1/2/3 declarados (§1); refutado sem axiomas | atacar os axiomas (item 12) |
 | **9** | I/O é transição (Hance): crash = reset + torn unacked | **verde**: `FailingEnv`/`RecordingEnv` por todo o path; zero `Db<StdEnv>` hardcode em API de biblioteca; journal+index injectáveis | — |
 | **10** | Glue não-kernel é **zero** ou no TCB à vista | **à vista**: 7.723 kernel / 5.022 twin / 39.793 handler LOC; TCB freeze no CI | zero-glue continua a trajecto |
 | **11** | Twin drift = CI vermelho | **verde**: lint (entry+handlers) + clones (tokens) + SOURCE sha256 + TCB freeze; negativos em cada wave | — |
 | **12** | Axiomas atacados para sempre (não “fechados”) | World sibling, det_io residual, **ES-1/2/3 declarados (§1)** | RFC-0050 World in-tree; 0052 Miri/TCG — contínuo por definição |
 
-Fecho 2026-08-23 (RFC-0056): **1–6, 8, 9, 11 verdes; 7 aberto por gate (RFC-0051); 10 verde no
-braço “à vista”; 12 contínuo**. Isso é o máximo que seL4/IronFleet chamam de sistema
-verificado. **Não é 100% do universo.**
+Fecho 2026-08-24 (RFC-0056 P2.1): **1–9, 11 verdes; 10 verde no braço “à vista”; 12 contínuo**.
+Item 7 = kernel de grupo (RFC-0057), não `∀` interleavings do `ConcurrentDb`. Isso é o máximo
+que seL4/IronFleet chamam de sistema verificado. **Não é 100% do universo.**
 
 ---
 

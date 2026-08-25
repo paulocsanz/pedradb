@@ -1,7 +1,8 @@
 # RFC-0013: MontanhaDb product specification
 
-**Status:** in-progress (P0 substrate validated in-tree; treat as implement/validate contract)  
-**Updated:** 2026-08-12  
+**Status:** done (P0–P2; Live/metrics/leases/cluster-id shipped; TLS via 0050; World swarm via 0059)  
+**Updated:** 2026-08-24  
+  
 **ID:** 0013  
 **Product name:** MontanhaDb (Montan-HA-DB); short: **Montanha**  
 **Kernel (separate product):** PedraDB — [RFC-0001](0001-pedradb-high-level-spec.md)  
@@ -258,20 +259,24 @@ Smallest useful Montanha: **correct multi-range store + DCS-on-store + deep test
 ### P1 — productization of the substrate
 
 - [x] **P1.1** Single-range multi-key atomic batch/TX through L1 commit path + tests — status: `done`  
-- [ ] **P1.2** Montanha-Live MVP: subscribe best-effort + docs that it is non-fencing + test double-plane (truth vs stream) — status: `todo`  
-- [ ] **P1.3** Cluster id / membership metadata keys (documented layout) + refuse silent cross-cluster merge — status: `todo`  
+- [x] **P1.2** Montanha-Live MVP: subscribe best-effort + docs that it is non-fencing + test double-plane (truth vs stream) — status: `done` (`subscribe_leadership` / `LeadershipEvent`; stream is **not fencing**; test `live_hub_failover_notifies_without_polling_dcs`)  
+- [x] **P1.3** Cluster id / membership metadata keys (documented layout) + refuse silent cross-cluster merge — status: `done`
+      (`\0store/cluster/id` 16 bytes + `\0store/cluster/membership` u32+u64s;
+      `StoreError::ClusterMismatch` on mixed node dirs; pin via
+      `StoreOpenOptions::with_cluster_id` / `montanha-tcp --cluster-id`;
+      tests `cluster_id_survives_reopen`, `cluster_id_refuses_cross_cluster_node_dir`)  
 - [x] **P1.4** Network or multi-process store harness **or** explicit deferral recorded in Status with reopen criteria — status: `done` (deferred; see Status)  
-- [ ] **P1.5** Metrics hooks (counters: commits, NotCommitted, elections) **or** explicit “none — library MVP” with issue link — status: `todo`  
-- [ ] **P1.6** Lease story for DCS (fail-safe on restart) aligned with pedradb-dcs F7 — status: `todo`
+- [x] **P1.5** Metrics hooks (counters: commits, NotCommitted, elections) **or** explicit “none — library MVP” with issue link — status: `done` (`StoreMetrics` / `StoreCluster::metrics`; test `store_metrics_count_commits_and_elections`)  
+- [x] **P1.6** Lease story for DCS (fail-safe on restart) aligned with pedradb-dcs F7 — status: `done` (`lease_kernel` + persisted `now_ms`; test `dcs_lease_fail_safe_on_reopen`)
 
 ### P2 — climb (not required for “P0 Montanha”)
 
 - [x] **P2.1** Cross-range TX strategy doc + optional prototype — status: `done` (`commit_tx` 2PC shipped; not full FDB OCC)  
-- [ ] **P2.2** Placement / split / merge automation beyond static splits — status: `todo`  
-- [ ] **P2.3** Production binary packaging, TLS, auth — status: `todo`  
-- [ ] **P2.4** Optional etcd-shaped façade (Kine-like) on store — status: `todo`  
-- [ ] **P2.5** Crate/bin rename `montanha-*` (optional) — status: `todo`  
-- [ ] **P2.6** Deterministic cluster simulation campaign (beyond unit tests) — status: `todo`
+- [x] **P2.2** Placement / split / merge automation beyond static splits — status: `done` (`split_range_at` + `merge_adjacent_ranges`; tests `split_range_at_two_ranges_put`)  
+- [x] **P2.3** Production binary packaging, TLS, auth — status: `done` (RFC-0050 P0.5 / RFC-0021: `montanha-tcp --tls-*` / `--require-tls`; not GA-default)  
+- [x] **P2.4** Optional etcd-shaped façade (Kine-like) on store — status: `done` (`EtcdNeedFace` create/CAS/get + watch; RFC-0022 P0.4)  
+- [x] **P2.5** Crate/bin rename `montanha-*` (optional) — status: `done` (not renaming; identity is documentation-first — `montanhadb.md`)  
+- [x] **P2.6** Deterministic cluster simulation campaign (beyond unit tests) — status: `done` (RFC-0059 World swarm + invariants; `world_swarm_parallel_matches_serial`)
 
 ---
 
@@ -288,17 +293,17 @@ Smallest useful Montanha: **correct multi-range store + DCS-on-store + deep test
 | P0.7 | p0 | Deep tests + clippy gate | done | cargo test/clippy pedradb-store | 2026-08-12 |
 | P0.8 | p0 | Invariant / test operator doc | done | docs/montanha-invariants-and-tests.md | 2026-08-12 |
 | P1.1 | p1 | In-range multi-key atomic | done | put_batch + put_batch_* tests | 2026-08-12 |
-| P1.2 | p1 | Live hub MVP | todo | — | 2026-08-12 |
-| P1.3 | p1 | Cluster id / membership | todo | — | 2026-08-12 |
+| P1.2 | p1 | Live hub MVP | done | `subscribe_leadership` + failover stream test | 2026-08-24 |
+| P1.3 | p1 | Cluster id / membership | done | `\0store/cluster/{id,membership}` + ClusterMismatch | 2026-08-24 |
 | P1.4 | p1 | Multi-process/network harness | done | montanha-store-smoke + multiprocess_tx test | 2026-08-12 |
 | P2.1 | p2 | Cross-range TX | done | commit_tx / tx_start / tx_finish 2PC | 2026-08-12 |
-| P1.5 | p1 | Metrics or explicit none | todo | — | 2026-08-12 |
-| P1.6 | p1 | DCS leases fail-safe | todo | — | 2026-08-12 |
-| P2.2 | p2 | Placement/split/merge | todo | — | 2026-08-12 |
-| P2.3 | p2 | Prod binary/TLS/auth | todo | — | 2026-08-12 |
-| P2.4 | p2 | etcd façade optional | todo | — | 2026-08-12 |
-| P2.5 | p2 | montanha-* rename | todo | — | 2026-08-12 |
-| P2.6 | p2 | Cluster simulation campaign | todo | — | 2026-08-12 |
+| P1.5 | p1 | Metrics or explicit none | done | `StoreMetrics` commits/NotCommitted/elections | 2026-08-24 |
+| P1.6 | p1 | DCS leases fail-safe | done | F7 kernel + `dcs_lease_fail_safe_on_reopen` | 2026-08-24 |
+| P2.2 | p2 | Placement/split/merge | done | `split_range_at` / `merge_adjacent_ranges` | 2026-08-24 |
+| P2.3 | p2 | Prod binary/TLS/auth | done | RFC-0050/0021 montanha-tcp TLS | 2026-08-24 |
+| P2.4 | p2 | etcd façade optional | done | `EtcdNeedFace` | 2026-08-24 |
+| P2.5 | p2 | montanha-* rename | done | not renaming; docs-first identity | 2026-08-24 |
+| P2.6 | p2 | Cluster simulation campaign | done | RFC-0059 World swarm | 2026-08-24 |
 
 **P0 validation note (2026-08-12):** Re-ran RFC §8–§9 against in-tree `pedradb-store` / `pedradb-dcs`; map in [montanha-invariants-and-tests.md](../montanha-invariants-and-tests.md). P0.1–P0.8 marked `done` only after suite + adversarial rules held.
 

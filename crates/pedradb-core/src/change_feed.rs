@@ -16,6 +16,8 @@ use crate::key::{SequenceNumber, ValueType};
 
 /// On-disk changelog file name inside the DB directory.
 pub const CHANGELOG_FILE_NAME: &str = "CHANGELOG";
+/// F33 quarantine of a poison `CHANGELOG` (WAL rebuild is source of truth).
+pub const CHANGELOG_CORRUPT_FILE_NAME: &str = "CHANGELOG.corrupt";
 
 const MAGIC: &[u8; 8] = b"PDBCHLG1";
 
@@ -198,7 +200,7 @@ impl ChangeLog {
                     "CHANGELOG corrupt or unreadable; treating as empty cache (F33)"
                 );
                 // Best-effort quarantine so a later rewrite does not keep re-reading poison.
-                let bad = dir.join(format!("{CHANGELOG_FILE_NAME}.corrupt"));
+                let bad = dir.join(CHANGELOG_CORRUPT_FILE_NAME);
                 let _ = env.rename(&path, &bad);
                 Ok(Self::new())
             }
@@ -394,7 +396,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("pedradb-chlog-loss-{n}"));
         let _ = fs::remove_dir_all(&dir);
         let opts = OpenOptions {
-                        wal_full_fsync: true,
+            wal_full_fsync: true,
             history: Default::default(),
             wal_recovery: Default::default(),
             sync: true,
@@ -465,7 +467,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("pedradb-chlog-corrupt-{n}"));
         let _ = fs::remove_dir_all(&dir);
         let opts = OpenOptions {
-                        wal_full_fsync: true,
+            wal_full_fsync: true,
             history: Default::default(),
             wal_recovery: Default::default(),
             sync: true,

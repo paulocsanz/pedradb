@@ -1,6 +1,6 @@
 # RFC-0053: Formalização à escala IronFleet (anos)
 
-**Status:** done (P0–P2 Y1 + Y2 + Y3 shipped; π/VerusSync não disparado — RFC-0051 sem dente in-tree, estado gravado)  
+**Status:** done (P0–P2 Y1 + Y2 + Y3 shipped; π/VerusSync recusados — RFC-0056 P2.1 registrou kernel Verus `group_commit` via RFC-0057; RFC-0051 PCT in-tree)  
 **Updated:** 2026-08-23  
 **Orçamento:** ~3.7 pessoa-anos aceites (IronFleet SOSP’15 §7 — metodologia + IronRSL + IronKV)  
 **Método que já corre:** `../determinismo/rfcs/0002-formalizacao-mista-ate-prova.md` (P0–P39 shipped; **P40** aberto)  

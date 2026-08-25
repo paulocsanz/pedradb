@@ -501,10 +501,10 @@ RenewLeader(key, holder, expected_rev) -> { rev } | LostLeadership
 
 ### P0 — Live hub MVP
 
-1. Hook after successful `apply_dcs_command` / leader-key updates → local event log.  
-2. Long-poll or framed TCP `SubscribeLeadership` with snapshot + `LeaderChanged`.  
-3. Cursor + `CursorGone`.  
-4. Test: client subscribed; failover; client receives event without polling DCS.
+1. Hook after successful `apply_dcs_command` / leader-key updates → local event log. **done** (`WatchHub` + `LeadershipHub`).  
+2. In-process `subscribe_leadership` with snapshot + `LeaderChanged` (TCP SubscribeLeadership remains optional). **done**.  
+3. Cursor on each event; full channel drops (non-fencing). `CursorGone` not a separate wire yet.  
+4. Test: `live_hub_failover_notifies_without_polling_dcs` — subscribe; failover; event without polling DCS. **done**.
 
 ### P1 — Production-shaped
 
