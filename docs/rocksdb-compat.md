@@ -5,6 +5,15 @@
 > **function names, types, and observable KV contract** match. TiKV `engine_rocks`
 > still has a deeper correctness model (Titan, UDT, per-CF block cache) — that
 > is engine internals, not a missing method.
+>
+> **Strict substitute bar** (RFC-0062, 2026-08-25): same `WriteOptions.sync`
+> as the host, Linux, min of 3 rounds **>1.0** on every official shape;
+> only advantages; never a defect the host can feel. Not there yet:
+> `deps_raftlog` Linux min still <1× (p50 tied after `pwrite`).
+> `Checkpoint` / `BackupEngine` names **shipped** (RFC-0062 P1.2). Analysis:
+> [`reports/2026-08-25-compat-strict-substitute.md`](reports/2026-08-25-compat-strict-substitute.md).
+> The 0.001× G1-vs-async table is **not** this crate's default (default is
+> async, RFC-0054) and is **not** full-sync.
 
 ## What shipped
 
@@ -40,6 +49,8 @@
 | compaction filter | ✅ | applied on `compact` / range compact |
 | `create_cf` / `drop_cf` / `list_cf` / `destroy` / `repair` | ✅ | prefix CFs + CFREG |
 | `multi_get` / `get_opt` / `put_opt` / `merge` / `live_files` / `key_may_exist` / `get_pinned` | ✅ | |
+| `Checkpoint` / `backup::BackupEngine` | ✅ | wrap `create_checkpoint` / `pedradb-ops`; `Env` is a stub for `BackupEngine::open` |
+| knobs (`set_*`) | ✅ classified | [`KNOB_INVENTORY`](../crates/rocksdb-compat/src/knobs.rs): Wired / Inert / NotSupported (G2) / SaferDivergent. `set_verify_checksums(false)` → `ErrorKind::NotSupported` |
 
 Dependency swap for a consumer (alias, no crates.io patch):
 

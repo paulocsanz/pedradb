@@ -4,7 +4,11 @@
 
 #![forbid(unsafe_code)]
 
-use rocksdb::{Direction, IteratorMode, Options, WriteBatch, DB};
+use rocksdb::{
+    backup::{BackupEngine, BackupEngineOptions, RestoreOptions},
+    checkpoint::Checkpoint,
+    Direction, Env, IteratorMode, Options, WriteBatch, DB,
+};
 
 fn main() {
     let dir = std::env::temp_dir().join(format!("rdbcompat-alias-{}", std::process::id()));
@@ -41,9 +45,40 @@ fn main() {
     db.put(b"kv/3", b"v3").unwrap();
     assert_eq!(snap.get(b"kv/3").unwrap(), None);
 
+    let ckpt = std::env::temp_dir().join(format!("rdbcompat-alias-ckpt-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&ckpt);
+    Checkpoint::new(&db)
+        .expect("checkpoint obj")
+        .create_checkpoint(&ckpt)
+        .expect("checkpoint");
+    let opened = DB::open_cf(&opts, &ckpt, &["raft"]).expect("open checkpoint");
+    assert_eq!(opened.get(b"kv/2").unwrap().as_deref(), Some(&b"v2"[..]));
+    drop(opened);
+
+    let backup = std::env::temp_dir().join(format!("rdbcompat-alias-bak-{}", std::process::id()));
+    let restore = std::env::temp_dir().join(format!("rdbcompat-alias-rst-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&backup);
+    let _ = std::fs::remove_dir_all(&restore);
+    let env = Env::new().unwrap();
+    let bopts = BackupEngineOptions::new(&backup).unwrap();
+    let mut eng = BackupEngine::open(&bopts, &env).unwrap();
+    eng.create_new_backup_flush(&db, true).unwrap();
+    let info = eng.get_backup_info();
+    assert!(!info.is_empty());
+    eng.verify_backup(info[0].backup_id).unwrap();
+    let ropts = RestoreOptions::default();
+    eng.restore_from_latest_backup(&restore, &restore, &ropts)
+        .unwrap();
+    let restored = DB::open_cf(&opts, &restore, &["raft"]).unwrap();
+    assert_eq!(restored.get(b"kv/2").unwrap().as_deref(), Some(&b"v2"[..]));
+    drop(restored);
+
     println!(
         "alias-smoke ok: rocksdb-named consumer running on pedradb ({})",
         dir.display()
     );
     let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(&ckpt);
+    let _ = std::fs::remove_dir_all(&backup);
+    let _ = std::fs::remove_dir_all(&restore);
 }

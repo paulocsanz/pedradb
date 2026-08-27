@@ -1736,6 +1736,14 @@ impl<E: Env> Db<E> {
             self.dirty_points.lock().clear();
             return;
         }
+        // RFC-0062 P0.4: 16-insert raftlog on a write-only cache (empty
+        // point+count maps) cloned every user key into `dirty_points` then
+        // discarded at publish (`record_dirty` short-circuits on empty
+        // map). The write lock excludes readers, so empty now stays empty
+        // until we return. 1-key puts skip the is_empty peek.
+        if ops.len() >= 16 && self.point_cache.is_empty() && self.count_cache.is_empty() {
+            return;
+        }
         let mut g = self.dirty_points.lock();
         g.extend(ops.iter().map(|op| op.key.clone()));
     }
@@ -6349,6 +6357,7 @@ impl<E: Env> Db<E> {
         if records.is_empty() {
             return Ok((records, self.last_sequence()));
         }
+        crate::batch::share_consecutive_equal_values(&mut records);
         let last = records.last().map_or(self.last_sequence(), |o| o.sequence);
         Ok((records, last))
     }
@@ -6423,6 +6432,45 @@ impl<E: Env> Db<E> {
                 .fetch_add(t4.elapsed().as_nanos() as u64, Ordering::Relaxed);
             st.commits.fetch_add(1, Ordering::Relaxed);
         }
+        Ok(seq)
+    }
+
+    /// Sequential G1 client: prepare, one WAL lock (encode + `write` +
+    /// `fdatasync`), apply, publish. Skips [`GroupInFlight`] — that path
+    /// still encodes under one lock and write+fd under another (RFC-0062
+    /// P1.1 p11j; isolated raftlog 0.935 was that extra hop + vec).
+    /// Multi-writer leaders stay on [`Self::group_start`].
+    pub(crate) fn lone_sync_commit(&mut self, ops: Vec<BatchOp>) -> Result<SequenceNumber> {
+        if ops.is_empty() {
+            return Ok(self.last_sequence());
+        }
+        self.ensure_write_admitted()?;
+        let (records, seq) = self.prepare_write_ops(ops)?;
+        if records.is_empty() {
+            return Ok(seq);
+        }
+        self.vlog_prepare_wal(true)?;
+        let sl = records.as_slice();
+        let (n, sync_r) = {
+            let mut w = self.wal.lock();
+            let n = w.encode_write_op_batches(&[sl])?;
+            let r = w.sync_data();
+            (n, r)
+        };
+        if let Err(e) = sync_r {
+            self.durability_fenced = true;
+            return Err(e);
+        }
+        self.bytes_written_wal = self.bytes_written_wal.saturating_add(n);
+        self.note_wal_sync();
+        if !self.feed_is_lazy() {
+            self.change_log
+                .extend(records.iter().map(ChangeEntry::from_write_op));
+        }
+        self.maybe_persist_changelog_after_durable_commit();
+        self.note_dirty_points(&records);
+        apply_ops_owned(&mut self.mem, records);
+        self.publish_sequence(seq);
         Ok(seq)
     }
 
@@ -6668,14 +6716,16 @@ impl<E: Env> Db<E> {
             self.durability_fenced = true;
             return g.fail_sync(e);
         }
-        if let Err(e) = self.wal.lock().write_pending_frame_if(g.needs_sync()) {
-            self.durability_fenced = true;
-            return g.fail_sync(e);
-        }
+        // One WAL lock: `sync_data` already `write()`s the pending frame
+        // then `fdatasync`s. Split write-then-sync was two mutex hops on
+        // the 1c G1 raftlog batch (RFC-0062 P1.1 p11h).
         if g.needs_sync() {
             if let Err(e) = self.wal_sync_group() {
                 return g.fail_sync(e);
             }
+        } else if let Err(e) = self.wal.lock().write_pending_frame_if(false) {
+            self.durability_fenced = true;
+            return g.fail_sync(e);
         }
         let pub_seq = g.max_appended_seq();
         let results = self.group_apply(g);
@@ -8182,6 +8232,57 @@ mod tests {
         assert_ne!(WalRecovery::FailClosed, WalRecovery::PointInTime);
     }
 
+    /// RFC-0062 P0.4: 16-insert batch on empty caches skips dirty-key clones
+    /// but the keys must still be readable (memtable, not a stale miss).
+    #[test]
+    fn sixteen_insert_batch_readable_without_dirty_clones() {
+        let dir = temp_dir();
+        let mut db = Db::open(&dir).unwrap();
+        let ops: Vec<BatchOp> = (0..16u32)
+            .map(|i| BatchOp::Put {
+                key: Bytes::from(format!("raftlog/{i:08}")),
+                value: Bytes::from_static(b"xxxxxxxxxxxxxxxx"),
+            })
+            .collect();
+        db.apply_batch(ops).unwrap();
+        for i in 0..16u32 {
+            let k = format!("raftlog/{i:08}");
+            assert_eq!(
+                db.get(k.as_bytes()).as_deref(),
+                Some(b"xxxxxxxxxxxxxxxx".as_ref()),
+                "key {k}"
+            );
+        }
+        db.put(b"raftlog/00000007", b"new").unwrap();
+        assert_eq!(
+            db.get(b"raftlog/00000007").as_deref(),
+            Some(b"new".as_ref()),
+            "overwrite after 16-batch must not serve the interned value"
+        );
+        // Warm the point cache, then a 16-batch that overwrites: dirty
+        // clones must run (caches non-empty) and the get must not stick.
+        let _ = db.get(b"warm");
+        db.put(b"warm", b"old").unwrap();
+        assert_eq!(db.get(b"warm").as_deref(), Some(b"old".as_ref()));
+        let mut ops: Vec<BatchOp> = (0..15u32)
+            .map(|i| BatchOp::Put {
+                key: Bytes::from(format!("n/{i:02}")),
+                value: Bytes::from_static(b"x"),
+            })
+            .collect();
+        ops.push(BatchOp::Put {
+            key: Bytes::from_static(b"warm"),
+            value: Bytes::from_static(b"new"),
+        });
+        db.apply_batch(ops).unwrap();
+        assert_eq!(
+            db.get(b"warm").as_deref(),
+            Some(b"new".as_ref()),
+            "16-batch overwrite of a cached key must invalidate"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
     /// RFC-0045 P2.1: staged-but-unapplied WAL ops are visible to OCC and
     /// invisible to default `get` (publish has not happened).
     #[test]
@@ -8359,6 +8460,171 @@ mod tests {
             }
             let _ = fs::remove_dir_all(&dir);
         }
+    }
+
+    /// RFC-0062 P1.1: blob-on + G1 must not `fdatasync` `VALUES.vlog` on
+    /// small puts (parity bench default min_blob=4096, ycsb payload 100 B).
+    /// A spilled value still takes one strong vlog barrier before Ok.
+    #[test]
+    fn g1_small_put_does_not_fsync_empty_vlog() {
+        use crate::env::{Env, EnvFile, StdEnv};
+        use std::cell::Cell;
+        use std::io::{self, Read, Seek, SeekFrom, Write};
+        use std::path::Path;
+        use std::rc::Rc;
+
+        #[derive(Default)]
+        struct Counts {
+            wal_strong: Cell<u64>,
+            vlog_strong: Cell<u64>,
+            vlog_all: Cell<u64>,
+        }
+        #[derive(Clone)]
+        struct CountingEnv {
+            inner: StdEnv,
+            counts: Rc<Counts>,
+        }
+        struct CountingFile {
+            inner: <StdEnv as Env>::File,
+            counts: Rc<Counts>,
+            kind: u8, // 1 = WAL, 2 = vlog
+        }
+        impl Read for CountingFile {
+            fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+                self.inner.read(buf)
+            }
+        }
+        impl Write for CountingFile {
+            fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+                self.inner.write(buf)
+            }
+            fn flush(&mut self) -> io::Result<()> {
+                self.inner.flush()
+            }
+        }
+        impl Seek for CountingFile {
+            fn seek(&mut self, pos: SeekFrom) -> io::Result<u64> {
+                self.inner.seek(pos)
+            }
+        }
+        impl EnvFile for CountingFile {
+            fn sync_data(&mut self) -> io::Result<()> {
+                self.inner.sync_data()
+            }
+            fn sync_data_strong(&mut self) -> io::Result<()> {
+                match self.kind {
+                    1 => self.counts.wal_strong.set(self.counts.wal_strong.get() + 1),
+                    2 => self
+                        .counts
+                        .vlog_strong
+                        .set(self.counts.vlog_strong.get() + 1),
+                    _ => {}
+                }
+                self.inner.sync_data_strong()
+            }
+            fn sync_all(&mut self) -> io::Result<()> {
+                if self.kind == 2 {
+                    self.counts.vlog_all.set(self.counts.vlog_all.get() + 1);
+                }
+                self.inner.sync_all()
+            }
+            fn set_len(&mut self, len: u64) -> io::Result<()> {
+                self.inner.set_len(len)
+            }
+            fn len(&mut self) -> io::Result<u64> {
+                self.inner.len()
+            }
+        }
+        impl Env for CountingEnv {
+            type File = CountingFile;
+            fn create_dir_all(&self, path: &Path) -> io::Result<()> {
+                self.inner.create_dir_all(path)
+            }
+            fn create(&self, path: &Path) -> io::Result<Self::File> {
+                Ok(CountingFile {
+                    inner: self.inner.create(path)?,
+                    counts: Rc::clone(&self.counts),
+                    kind: file_kind(path),
+                })
+            }
+            fn open_append(&self, path: &Path) -> io::Result<Self::File> {
+                Ok(CountingFile {
+                    inner: self.inner.open_append(path)?,
+                    counts: Rc::clone(&self.counts),
+                    kind: file_kind(path),
+                })
+            }
+            fn open_read(&self, path: &Path) -> io::Result<Self::File> {
+                Ok(CountingFile {
+                    inner: self.inner.open_read(path)?,
+                    counts: Rc::clone(&self.counts),
+                    kind: file_kind(path),
+                })
+            }
+            fn sync_dir(&self, path: &Path) -> io::Result<()> {
+                self.inner.sync_dir(path)
+            }
+            fn read_dir_names(&self, path: &Path) -> io::Result<Vec<String>> {
+                self.inner.read_dir_names(path)
+            }
+            fn remove_file(&self, path: &Path) -> io::Result<()> {
+                self.inner.remove_file(path)
+            }
+            fn rename(&self, from: &Path, to: &Path) -> io::Result<()> {
+                self.inner.rename(from, to)
+            }
+            fn exists(&self, path: &Path) -> bool {
+                self.inner.exists(path)
+            }
+            fn metadata_len(&self, path: &Path) -> io::Result<u64> {
+                self.inner.metadata_len(path)
+            }
+        }
+        fn file_kind(path: &Path) -> u8 {
+            match path.file_name().and_then(|n| n.to_str()) {
+                Some(WAL_FILE_NAME) => 1,
+                Some(VLOG_FILE_NAME) => 2,
+                _ => 0,
+            }
+        }
+
+        let dir = temp_dir();
+        let env = CountingEnv {
+            inner: StdEnv,
+            counts: Rc::default(),
+        };
+        let mut opts = vlog_opts();
+        opts.sync = true;
+        opts.large_value_threshold = Some(512);
+        let mut db = Db::open_with_env(&dir, opts, env.clone()).unwrap();
+        let vlog_at_open = env.counts.vlog_strong.get() + env.counts.vlog_all.get();
+        for i in 0..8u8 {
+            db.put([b'k', i], vec![b'v'; 32]).unwrap();
+        }
+        assert_eq!(
+            env.counts.wal_strong.get(),
+            8,
+            "each G1 put pays one WAL barrier"
+        );
+        assert_eq!(
+            env.counts.vlog_strong.get() + env.counts.vlog_all.get(),
+            vlog_at_open,
+            "small puts must not fsync VALUES.vlog"
+        );
+        db.put(b"big", vec![b'B'; 1024]).unwrap();
+        assert_eq!(
+            env.counts.vlog_strong.get(),
+            1,
+            "spill still barriers the vlog once before Ok"
+        );
+        db.put(b"k9", vec![b'v'; 32]).unwrap();
+        assert_eq!(
+            env.counts.vlog_strong.get(),
+            1,
+            "small put after spill must not re-fsync a durable vlog"
+        );
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
     }
 
     /// F188 regression (TX path): values must reach the stored form through
@@ -12198,10 +12464,8 @@ mod tests {
         db.flush().unwrap();
         db.verify_checksums().unwrap();
         let body = fs::read(dir.join(crate::manifest::CURRENT_FILE)).unwrap();
-        let (name, _) = crate::manifest::parse_current_pointer(
-            &String::from_utf8(body).unwrap(),
-        )
-        .unwrap();
+        let (name, _) =
+            crate::manifest::parse_current_pointer(&String::from_utf8(body).unwrap()).unwrap();
         fs::write(
             dir.join(crate::manifest::CURRENT_FILE),
             format!("{name}\nffffffff\n"),

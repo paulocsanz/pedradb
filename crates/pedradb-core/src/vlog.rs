@@ -171,6 +171,11 @@ pub struct ValueLog<F: EnvFile> {
     pending_start: u64,
     /// Unwritten tail (headers + payloads). Flushed at [`ASYNC_VLOG_BUFFER`].
     pending: Vec<u8>,
+    /// Bytes have been `write()`n since the last [`Self::sync_pending`].
+    /// G1 must not `fdatasync` an empty vlog on every small put (RFC-0062
+    /// P1.1: the parity bench enables blob, ycsb_a stays under the
+    /// threshold, and a second barrier per Ok was the leftover Linux tax).
+    needs_sync: bool,
 }
 
 impl<F: EnvFile> ValueLog<F> {
@@ -295,6 +300,7 @@ impl<F: EnvFile> ValueLog<F> {
             next_offset: len,
             pending_start: len,
             pending: Vec::new(),
+            needs_sync: false,
         })
     }
 
@@ -357,18 +363,35 @@ impl<F: EnvFile> ValueLog<F> {
         Write::write_all(&mut self.file, &self.pending)?;
         self.pending.clear();
         self.pending_start = self.next_offset;
+        self.needs_sync = true;
         Ok(())
     }
 
-    /// Flush the tail and `fsync` (G1 / close / flush). Pointers in the WAL
-    /// must not become durable before this returns.
+    /// Flush the tail and barrier at the **same class as WAL G1**
+    /// (`sync_data_strong`). Pointers in the WAL must not become durable
+    /// before this returns. Not `sync_all`: that was a full metadata
+    /// `fsync` / uring wait on Linux (RFC-0062 P1.1 blob_set).
+    ///
+    /// No-op when nothing is staged and the file is already durable —
+    /// `vlog_prepare_wal(true)` runs on every G1 commit, including
+    /// 100-byte ycsb puts that never spilled.
     ///
     /// # Errors
     /// I/O.
     pub fn sync_pending(&mut self) -> Result<()> {
+        if self.pending.is_empty() && !self.needs_sync {
+            return Ok(());
+        }
         self.flush_pending()?;
-        self.file.sync_all()?;
+        self.file.sync_data_strong()?;
+        self.needs_sync = false;
         Ok(())
+    }
+
+    /// Whether a G1 `sync_pending` would issue a barrier (tests / probes).
+    #[must_use]
+    pub fn needs_barrier(&self) -> bool {
+        !self.pending.is_empty() || self.needs_sync
     }
 
     /// Bytes staged in userspace (tests / probes).
@@ -804,6 +827,104 @@ mod tests {
         assert_eq!(log.pending_len(), rec);
         let on_disk = fs::metadata(dir.join(VLOG_FILE_NAME)).unwrap().len();
         assert_eq!(on_disk, 8 + 3 * rec as u64, "magic + 3 flushed records");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0062 P1.1: G1 `vlog_prepare_wal(true)` must not `fdatasync` when
+    /// the handle has no unsynced bytes (small puts under the blob
+    /// threshold). A spilled record still takes exactly one strong barrier.
+    #[test]
+    fn sync_pending_skips_empty_and_barriers_once_when_dirty() {
+        use crate::env::EnvFile;
+        use std::cell::Cell;
+        use std::io::{self, Read, Seek, SeekFrom, Write};
+        use std::rc::Rc;
+
+        struct CountFile {
+            inner: std::fs::File,
+            strong: Rc<Cell<u64>>,
+        }
+        impl Read for CountFile {
+            fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+                self.inner.read(buf)
+            }
+        }
+        impl Write for CountFile {
+            fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+                self.inner.write(buf)
+            }
+            fn flush(&mut self) -> io::Result<()> {
+                self.inner.flush()
+            }
+        }
+        impl Seek for CountFile {
+            fn seek(&mut self, pos: SeekFrom) -> io::Result<u64> {
+                self.inner.seek(pos)
+            }
+        }
+        impl EnvFile for CountFile {
+            fn sync_data(&mut self) -> io::Result<()> {
+                self.inner.sync_data()
+            }
+            fn sync_data_strong(&mut self) -> io::Result<()> {
+                self.strong.set(self.strong.get() + 1);
+                self.inner.sync_data_strong()
+            }
+            fn sync_all(&mut self) -> io::Result<()> {
+                self.inner.sync_all()
+            }
+            fn set_len(&mut self, len: u64) -> io::Result<()> {
+                self.inner.set_len(len)
+            }
+            fn len(&mut self) -> io::Result<u64> {
+                self.inner.len()
+            }
+        }
+
+        let dir = std::env::temp_dir().join(format!(
+            "pedradb-vlog-skip-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(VLOG_FILE_NAME);
+        {
+            let mut f = fs::File::create(&path).unwrap();
+            f.write_all(MAGIC).unwrap();
+            f.sync_all().unwrap();
+        }
+        let strong = Rc::new(Cell::new(0));
+        let file = CountFile {
+            inner: fs::OpenOptions::new()
+                .read(true)
+                .append(true)
+                .open(&path)
+                .unwrap(),
+            strong: Rc::clone(&strong),
+        };
+        let mut log = ValueLog {
+            path: path.clone(),
+            file,
+            next_offset: MAGIC.len() as u64,
+            pending_start: MAGIC.len() as u64,
+            pending: Vec::new(),
+            needs_sync: false,
+        };
+        assert!(!log.needs_barrier());
+        log.sync_pending().unwrap();
+        log.sync_pending().unwrap();
+        assert_eq!(strong.get(), 0, "empty vlog must not fsync");
+
+        log.append_pending(&[1u8; 32]).unwrap();
+        assert!(log.needs_barrier());
+        log.sync_pending().unwrap();
+        assert_eq!(strong.get(), 1, "one spill, one G1 barrier");
+        assert!(!log.needs_barrier());
+        log.sync_pending().unwrap();
+        assert_eq!(strong.get(), 1, "already durable: skip");
         let _ = fs::remove_dir_all(&dir);
     }
 

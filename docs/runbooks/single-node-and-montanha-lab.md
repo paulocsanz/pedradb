@@ -30,13 +30,19 @@ A failed required WAL `fdatasync` (or explicit flush/compact I/O) **fences** the
 
 ### What we will not do
 
-- `ingest_external_file` — not implemented (`NotSupported`).
-- `delete_files_in_range` — **unsafe to fake** (drop SSTs without tombstones). Use `delete_range` + compact.
-- Compaction filters — Pedra GC is operator/explicit (`auto_reclaim` / `compact_reclaim`).
+- `kSkipAnyCorruptedRecords` / `set_paranoid_checks(false)` / `set_verify_checksums(false)` / `ChecksumType::NoChecksum` — `ErrorKind::NotSupported` (G2).
+- `delete_files_in_range` as SST unlink — we tombstone+compact instead (safer-divergent).
+- Encrypt-at-rest **in the LSM**. Volume encryption only.
+
+### RFC-0038 P1.1 (owner, still open)
+
+Surface is locked to **exactly two** modes: kernel `FailClosed`, compat `PointInTime` + `RecoveryReport`. Skip-any does not exist. CORRUPTLOG 3rd event refuses open in every mode. Evacuate (B2) and changing the product default stay the owner's call — this runbook will not pick A vs B2 vs B1+D.
+
+`ingest_external_file` **is** implemented (WAL+flush, not a Rocks SST hardlink). Compaction filters run on `DB::compact`.
 
 ## Encrypt at rest
 
-Ops-owned: LUKS, FileVault, cloud volume encryption. The engine does not implement encrypt-at-rest.
+**Permanent:** LUKS, FileVault, or cloud volume encryption. The engine **never** implements encrypt-at-rest inside the LSM (RFC-0062 P2.2 as documentation, not a cipher).
 
 ## Montanha TCP (lab)
 

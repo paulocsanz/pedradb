@@ -4,7 +4,22 @@
 > item is closed, or a new open question emerges. The authoritative source for
 > "what's done, what's next, what's unresolved."
 
-Last updated: 2026-08-25 (RFC-0060 P2.27 unrecognized leftover files named FAIL)
+Last updated: 2026-08-27 (RFC-0062 P0+P1 Linux fechados; P2 iff + crates.io)
+
+---
+
+## Launch readiness (2026-08-27) — Linux substituto **sim**; P2 não bloqueia v1
+
+Âmbito = `rocksdb-compat` só. Addendum: [`docs/reports/2026-08-25-compat-strict-substitute.md`](reports/2026-08-25-compat-strict-substitute.md). RFC: [0062](rfc/0062-launch-readiness-remaining-gaps.md).
+
+| eixo | hoje | falta |
+|---|---|---|
+| Coluna A (compat default = Rocks default, `sync=false`) | Linux 4 vCPU **17/17 min>1.0** (`P04_PASS` 1.014). Mac 15/15 ≥1.25× | 2× em raftlog 1c recusado (p50 empatado). Intel **não** é meta. |
+| Coluna B (ambos `sync=true`) | Linux **17/17 min>1.0** (`P11_PASS` 1.013, raftlog 1.013/1.019/1.021) | Darwin quiet 3/3 não re-medido (smoke 25/08 p50 empatado). Não é cartaz vs default. |
+| S1 compile | Surreal 1.5.4 4/4 >1×; `Checkpoint` / `BackupEngine` nomes | TransactionDB/Titan/CFs físicos/`Env` = P2 **iff** host nomeado |
+| S5 knobs | `KNOB_INVENTORY`; G2 recusa `verify_checksums(false)` / skip-any / paranoid-off | Inert continua aceite e documentado (cache/pipeline) |
+
+P0+P1 Linux fechados. Próximo: P2.4 crates.io `rocksdb-compat` (não o nome `rocksdb`); P2.1–P2.3 só se um host não compilar.
 
 ---
 
@@ -55,6 +70,16 @@ Last updated: 2026-08-25 (RFC-0060 P2.27 unrecognized leftover files named FAIL)
    `PEDRA_VERIFIED=1` no CLI como linha de produto (P2.3: StdEnv + `OpenOptions::verified()`,
    banner com `PROFILE_VERSION`, testes `verified_flag_*`).
    Extração total: REFUSE (L46)
+ RFC-0062 in-progress (P0+P1 done) — rocksdb-compat strict substitute
+   Linux coluna A `P04_PASS` 1.014 e B `P11_PASS` 1.013, 17/17. P2:
+   TransactionDB/Env/Titan iff host; crates.io `rocksdb-compat`. Intel
+   is not a meta. Report:
+   docs/reports/2026-08-25-compat-strict-substitute.md.
+ RFC-0061 done (P0–P2) — [inventário único dos residuais](rfc/0061-residuals-sel4-ironfleet.md):
+   Pedra ≠ seL4/IronRSL (mesma classe de claim, não de garantia); freeze
+   `residuals.json` no `pedra_formal.py --ci` (ilhas unsafe, TCG guest,
+   glue LOC live, never_floor). TLS default e joint consensus continuam
+   parked nos donos 0021/0059.
  RFC-0060 done (P0–P2.27) — [field/hardware residuals](rfc/0060-field-and-hardware-residuals.md):
    `pedra verify` / `maintain --verify` at-rest CRC scrub; World BitFlip
    (`flush`→XOR→scrub on live Env→reopen; apply=false mutant);

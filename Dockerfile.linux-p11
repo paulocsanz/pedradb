@@ -1,0 +1,10 @@
+# RFC-0062 P1.1 — coluna B on the p04a Linux-gate image (rustc + Rocks C++ already baked).
+FROM ghcr.io/paulocsanz/pedradb-linux-gate:p04a
+COPY crates /src/pedradb/crates
+COPY scripts /src/pedradb/scripts
+COPY Cargo.toml Cargo.lock clippy.toml deny.toml /src/pedradb/
+WORKDIR /src/pedradb
+# Keep p04a ENTRYPOINT (["/bin/bash","/usr/local/bin/p04_entrypoint.sh"]).
+# Changing ENTRYPOINT made p11c fail before PID 1; p11b with this path ran.
+COPY scripts/rfc0062_p11_entrypoint.sh /usr/local/bin/p04_entrypoint.sh
+RUN chmod +x /usr/local/bin/p04_entrypoint.sh /src/pedradb/scripts/rfc0062_p11_entrypoint.sh

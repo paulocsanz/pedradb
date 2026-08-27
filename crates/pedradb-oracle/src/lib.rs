@@ -257,6 +257,13 @@ pub mod live;
 #[cfg(feature = "live-rocksdb")]
 pub use live::{assert_pedra_matches_rocks, RocksStore};
 
+/// rust-rocksdb 0.22 names on Pedra-compat vs live C++ Rocks (RFC-0062).
+#[cfg(feature = "live-rocksdb")]
+pub mod compat_live;
+
+#[cfg(feature = "live-rocksdb")]
+pub use compat_live::assert_compat_matches_rocks;
+
 #[cfg(test)]
 mod tests {
     use super::*;

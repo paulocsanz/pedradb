@@ -350,11 +350,13 @@ impl WriteGroup {
         let async_merged = self.async_group && !self.verified.load(Ordering::Relaxed);
 
         // Lone writer (parity bench, sequential client): skip the mpsc hop.
-        // WAL append under the write lock, `fdatasync` off it (same as the
-        // group leader) so the host worker can drain imm during the fd.
-        // Stay off this path for MULTI_HOLD after a concurrent burst so
-        // apply's second write() still joins the group (RFC-0040 P1.2).
-        // Lone async (`do_sync=false`) takes the leaner `commit_async_ops`.
+        // G1 keeps the write lock through `fdatasync` (RFC-0062 P1.1
+        // raftlog: drop+reacquire after fd was leftover 1c tax vs Rocks
+        // `sync=true`). Group leader still fds off-lock so followers can
+        // enqueue and the host worker can drain imm. Stay off this path
+        // for MULTI_HOLD after a concurrent burst so apply's second
+        // write() still joins the group (RFC-0040 P1.2). Lone async
+        // (`do_sync=false`) takes the leaner `commit_async_ops`.
         if occ.is_none() && active == 1 && !self.recently_concurrent() {
             let result = if do_sync {
                 Self::lone_commit(self, db, ops, do_sync, occ)
@@ -685,13 +687,14 @@ impl WriteGroup {
         }
     }
 
-    /// Sequential client: one batch, `fdatasync` off the write lock (G1).
-    /// RFC-0042 P0.2: accumulates the phase split into `group.lone_phase_ns`.
+    /// Sequential client: one batch, write lock held through `fdatasync` (G1).
+    /// Multi-writer leaders still fd off-lock via [`Self::finish_group_off_lock`].
+    /// RFC-0042 P0.2: `lone_phase_ns` is filled on the off-lock path only.
     fn lone_commit<E: Env>(
-        group: &WriteGroup,
+        _group: &WriteGroup,
         db: &RwLock<Db<E>>,
         ops: Vec<BatchOp>,
-        do_sync: bool,
+        _do_sync: bool,
         occ: Option<(SequenceNumber, Vec<Bytes>)>,
     ) -> Result<SequenceNumber> {
         let mut guard = db.write();
@@ -713,23 +716,9 @@ impl WriteGroup {
                 return Err(CoreError::TransactionConflict);
             }
         }
-        match guard.group_start(vec![(ops, do_sync)]) {
-            Err(mut results) => results.pop().unwrap_or_else(|| {
-                Err(CoreError::Internal(
-                    "lone writer missing admit result".into(),
-                ))
-            }),
-            Ok(inflight) => {
-                Self::finish_group_off_lock(group, db, guard, inflight, None, Vec::new, None)
-                    .into_iter()
-                    .next()
-                    .unwrap_or_else(|| {
-                        Err(CoreError::Internal(
-                            "lone writer missing commit result".into(),
-                        ))
-                    })
-            }
-        }
+        // One WAL lock encode+write+fd; no GroupInFlight (RFC-0062 P1.1 p11j).
+        // Multi-writer leaders still use [`Self::finish_group_off_lock`].
+        guard.lone_sync_commit(ops)
     }
 
     /// WAL encode under the write lock, absorb anyone who queued during that
@@ -3296,6 +3285,33 @@ mod tests {
         assert!(
             t0.elapsed() < Duration::from_millis(50),
             "Ok must return the write lock before the caller continues"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0062 P1.1: 1c G1 16× same payload is one WAL barrier (intern +
+    /// lock held through `fdatasync`), and every key is readable after Ok.
+    #[test]
+    fn lone_g1_sixteen_same_payload_one_barrier() {
+        let dir = temp_dir();
+        let db = open_sync(&dir);
+        let val = vec![b'r'; 100];
+        let ops: Vec<BatchOp> = (0..16u32)
+            .map(|i| BatchOp::Put {
+                key: Bytes::from(format!("raftlog/{i:08}")),
+                value: Bytes::from(val.clone()),
+            })
+            .collect();
+        let before = db.wal_sync_count();
+        db.apply_batch_vec(ops).unwrap();
+        assert_eq!(
+            db.wal_sync_count(),
+            before + 1,
+            "16 interned puts, one G1 barrier"
+        );
+        assert_eq!(
+            db.get(b"raftlog/00000015").as_deref(),
+            Some(val.as_slice())
         );
         let _ = fs::remove_dir_all(&dir);
     }

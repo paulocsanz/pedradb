@@ -200,6 +200,27 @@ pub(crate) fn value_ptr_eq(a: &WriteOp, b: &WriteOp) -> bool {
         && std::ptr::eq(a.value.as_ptr(), b.value.as_ptr())
 }
 
+/// Point consecutive equal payloads at the same `Bytes` so WAL v2 can omit
+/// 15 copies (RFC-0062 P1.1: `deps_raftlog` is 16× the same 100 B `yval`
+/// via `write_cf_owned`, each `Bytes::from` a fresh alloc — intern never
+/// fired). Content-equal, not just pointer-equal. Deletions skipped.
+pub(crate) fn share_consecutive_equal_values(ops: &mut [WriteOp]) {
+    for i in 1..ops.len() {
+        let (head, tail) = ops.split_at_mut(i);
+        let prev = &head[i - 1];
+        let cur = &mut tail[0];
+        if cur.kind != ValueType::Value
+            || prev.kind != ValueType::Value
+            || cur.value.is_empty()
+            || prev.value.as_ref() != cur.value.as_ref()
+            || std::ptr::eq(prev.value.as_ptr(), cur.value.as_ptr())
+        {
+            continue;
+        }
+        cur.value = prev.value.clone();
+    }
+}
+
 /// v2 when at least one op can omit a repeated interned payload.
 pub(crate) fn record_uses_v2(ops: &[WriteOp]) -> bool {
     ops.windows(2).any(|w| value_ptr_eq(&w[0], &w[1]))
@@ -413,5 +434,37 @@ mod tests {
         assert_eq!(raw[0], WRITE_RECORD_VERSION_V2);
         let decoded = WriteRecord::decode(&raw).unwrap();
         assert_eq!(decoded.ops, ops);
+    }
+
+    /// RFC-0062 P1.1: raftlog 16× same payload from distinct `Bytes::from`
+    /// allocs still intern after prepare.
+    #[test]
+    fn share_consecutive_equal_values_enables_v2() {
+        let ops: Vec<WriteOp> = (0..16)
+            .map(|i| WriteOp::put(i + 1, format!("raftlog/{i:08}").into_bytes(), vec![b'r'; 100]))
+            .collect();
+        assert!(
+            !record_uses_v2(&ops),
+            "distinct allocs must not intern yet"
+        );
+        let v1 = encoded_len(&ops);
+        let mut shared = ops;
+        share_consecutive_equal_values(&mut shared);
+        assert!(record_uses_v2(&shared));
+        let v2 = encoded_len(&shared);
+        assert!(
+            v2 < v1,
+            "shared 16×100 B must shrink the WAL record ({v2} >= {v1})"
+        );
+        // 15 omitted 100 B payloads plus their length prefixes.
+        assert!(
+            v1 - v2 >= 15 * (4 + 100),
+            "expected ≥15 interned payloads, v1={v1} v2={v2}"
+        );
+        let mut raw = Vec::new();
+        encode_ops(&shared, &mut raw);
+        let decoded = WriteRecord::decode(&raw).unwrap();
+        assert_eq!(decoded.ops.len(), 16);
+        assert!(decoded.ops.iter().all(|o| o.value.as_ref() == [b'r'; 100]));
     }
 }

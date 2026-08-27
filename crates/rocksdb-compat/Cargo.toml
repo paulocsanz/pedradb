@@ -9,6 +9,7 @@ rust-version.workspace = true
 [dependencies]
 pedradb-core = { path = "../pedradb-core" }
 pedradb-io-uring = { path = "../pedradb-io-uring" }
+pedradb-ops = { path = "../pedradb-ops" }
 pedradb-sim = { path = "../pedradb-sim" }
 bytes = "1"
 parking_lot.workspace = true

@@ -7,12 +7,14 @@ description = "RocksDB (C++) bindings used only as a correctness/performance ora
 
 [dependencies]
 pedradb-core.workspace = true
+rocksdb-compat = { path = "../rocksdb-compat", optional = true }
 
 # Real RocksDB, used exclusively as an external oracle (never linked into
 # the shipped engine). Feature-gated so CI without a C++ toolchain can skip.
+# Version 0.22 (workspace shim is 0.21) so this is crates.io C++, not Pedra.
 rocksdb = { version = "0.22", optional = true, default-features = false }
 
 [features]
 default = []
 # Enables the live RocksDB oracle. Requires a working C++ toolchain.
-live-rocksdb = ["dep:rocksdb"]
+live-rocksdb = ["dep:rocksdb", "dep:rocksdb-compat"]

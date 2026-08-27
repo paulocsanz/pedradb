@@ -19,10 +19,12 @@
 //! same struct).
 
 pub use rocksdb_compat::{
-    BottommostLevelCompaction, ColumnFamilyDescriptor, CompactOptions, DBCompactionStyle,
-    DBCompressionType, DBRawIteratorWithThreadMode, Error, LogLevel, OptimisticTransactionDB,
-    OptimisticTransactionOptions, Options, ReadOptions, SliceTransform, SnapshotWithThreadMode,
-    UniversalCompactOptions, UniversalCompactionStopStyle, WaitForCompactOptions, WriteOptions,
+    backup, checkpoint, BackupEngine, BackupEngineOptions, BottommostLevelCompaction, Checkpoint,
+    ColumnFamilyDescriptor, CompactOptions, DBCompactionStyle, DBCompressionType,
+    DBRawIteratorWithThreadMode, DBRecoveryMode, Env, Error, LogLevel, OptimisticTransactionDB,
+    OptimisticTransactionOptions, Options, ReadOptions, RestoreOptions, SliceTransform,
+    SnapshotWithThreadMode, UniversalCompactOptions, UniversalCompactionStopStyle,
+    WaitForCompactOptions, WriteOptions, KNOB_INVENTORY,
 };
 
 /// Maps a rust-rocksdb DB type to the Pedra `Env` its handle owns. The
@@ -39,8 +41,7 @@ impl TransactionDb for OptimisticTransactionDB {
 }
 
 /// rust-rocksdb `Transaction<'a, D>` (D = `OptimisticTransactionDB`).
-pub type Transaction<'a, D> =
-    rocksdb_compat::Transaction<'a, <D as TransactionDb>::Env>;
+pub type Transaction<'a, D> = rocksdb_compat::Transaction<'a, <D as TransactionDb>::Env>;
 
 #[cfg(test)]
 mod tests {

@@ -1,0 +1,102 @@
+{
+  "bench": "rocks-parity-v1",
+  "engine": "rocksdb",
+  "sync": false,
+  "peer_policy": "rocks-default",
+  "durability": "async-wal (WriteOptions.sync=false, rocksdb default)",
+  "changelog_interval": 0,
+  "status": "ok",
+  "notes": ["ycsb records=1024 ops=2000 payload=100 dist=zipfian", "engine=rocksdb durability=async-wal (WriteOptions.sync=false, rocksdb default)", "suites: ycsb,deps", "seed: one put per record (not timed)", "cfs: default + write, lock, raftlog (TiKV store shape; raftlog = raftdb)", "deps apply batch txns/commit: 32", "changelog_interval=0", "peer_policy=rocks-default", "host-default write sync: kvrocks=false myrocks=true surreal=true"],
+  "benches": [
+{
+    "name": "ycsb_a",
+    "n": 2000,
+    "qps": 502233.810,
+    "p50_ms": 0.0030,
+    "p95_ms": 0.0034,
+    "p99_ms": 0.0115,
+    "max_ms": 0.0138,
+    "wall_s": 0.0040
+  },
+{
+    "name": "ycsb_b",
+    "n": 2000,
+    "qps": 1689307.612,
+    "p50_ms": 0.0004,
+    "p95_ms": 0.0031,
+    "p99_ms": 0.0033,
+    "max_ms": 0.0129,
+    "wall_s": 0.0012
+  },
+{
+    "name": "ycsb_c",
+    "n": 2000,
+    "qps": 2452356.838,
+    "p50_ms": 0.0004,
+    "p95_ms": 0.0005,
+    "p99_ms": 0.0006,
+    "max_ms": 0.0021,
+    "wall_s": 0.0008
+  },
+{
+    "name": "ycsb_d",
+    "n": 2000,
+    "qps": 1732038.115,
+    "p50_ms": 0.0004,
+    "p95_ms": 0.0029,
+    "p99_ms": 0.0031,
+    "max_ms": 0.0150,
+    "wall_s": 0.0012
+  },
+{
+    "name": "ycsb_e",
+    "n": 2000,
+    "qps": 125515.468,
+    "p50_ms": 0.0060,
+    "p95_ms": 0.0133,
+    "p99_ms": 0.0159,
+    "max_ms": 0.0200,
+    "wall_s": 0.0159
+  },
+{
+    "name": "ycsb_f",
+    "n": 2000,
+    "qps": 409601.804,
+    "p50_ms": 0.0033,
+    "p95_ms": 0.0047,
+    "p99_ms": 0.0127,
+    "max_ms": 0.0168,
+    "wall_s": 0.0049
+  },
+{
+    "name": "ycsb_b_unif",
+    "n": 2000,
+    "qps": 1577028.374,
+    "p50_ms": 0.0004,
+    "p95_ms": 0.0031,
+    "p99_ms": 0.0033,
+    "max_ms": 0.0128,
+    "wall_s": 0.0013
+  },
+{
+    "name": "ycsb_c_unif",
+    "n": 2000,
+    "qps": 2177562.828,
+    "p50_ms": 0.0004,
+    "p95_ms": 0.0005,
+    "p99_ms": 0.0006,
+    "max_ms": 0.0008,
+    "wall_s": 0.0009
+  },
+{
+    "name": "deps_raftlog",
+    "n": 2000,
+    "qps": 86573.839,
+    "p50_ms": 0.0090,
+    "p95_ms": 0.0185,
+    "p99_ms": 0.0201,
+    "max_ms": 0.0548,
+    "wall_s": 0.0231
+  }
+  ]
+}

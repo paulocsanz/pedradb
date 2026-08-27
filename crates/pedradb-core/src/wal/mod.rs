@@ -29,14 +29,16 @@ pub mod writer;
 pub use reader::WalReader;
 pub use writer::WalWriter;
 
-/// Space reservation chunk for a WAL segment (macOS `F_PREALLOCATE`).
+/// Space reservation chunk for a WAL segment (Darwin `F_PREALLOCATE`,
+/// Linux `fallocate(FALLOC_FL_KEEP_SIZE)`).
 ///
 /// APFS assigns a fresh extent when a plain append crosses an ~8 MiB
 /// boundary; that `write(2)` blocks 10–50 ms inside the commit path
-/// (`findings/2026-08-22-rearm7/`). Segments reserve this much storage past
-/// physical EOF up front (lazily, on first write) and re-reserve as the
-/// segment grows, so every append lands in already-allocated space. RocksDB
-/// preallocates its WAL the same way.
+/// (`findings/2026-08-22-rearm7/`). Linux G1 `fdatasync` of a growing WAL
+/// pays delayed-allocation in the Ok path unless extents exist already
+/// (RFC-0062 P1.1). Segments reserve this much storage past physical EOF
+/// up front (lazily, on first write) and re-reserve as the segment grows.
+/// RocksDB `PosixWritableFile::Allocate` does the same.
 const WAL_PREALLOC_CHUNK: u64 = 8 * 1024 * 1024;
 
 /// High-level, file-backed WAL with real durability semantics.

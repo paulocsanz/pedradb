@@ -156,15 +156,28 @@ impl SliceTransform {
 }
 
 /// rust-rocksdb `ReadOptions`. Iterate bounds are honoured; the snapshot is
-/// honoured by `DB::raw_iterator_opt` when attached via `set_snapshot`
-/// (F180 — was a no-op and the iterator read latest, leaking post-snapshot
-/// writes into a "pinned" scan).
-#[derive(Debug, Clone, Default)]
+/// honoured by `DB::raw_iterator_opt` / `iterator_opt` / `get_opt` when
+/// attached via `set_snapshot` (F180 — was a no-op and the iterator read
+/// latest, leaking post-snapshot writes into a "pinned" scan).
+#[derive(Debug, Clone)]
 pub struct ReadOptions {
     pub lower: Option<Vec<u8>>,
     pub upper: Option<Vec<u8>>,
     /// Sequence pinned by `set_snapshot` (`None` = read latest).
     pub(crate) snap: Option<pedradb_core::SequenceNumber>,
+    /// rust-rocksdb default is `true`. `false` is G2 — [`Self::refuse_checksums_off`].
+    pub(crate) verify_checksums: bool,
+}
+
+impl Default for ReadOptions {
+    fn default() -> Self {
+        Self {
+            lower: None,
+            upper: None,
+            snap: None,
+            verify_checksums: true,
+        }
+    }
 }
 
 impl ReadOptions {
@@ -173,7 +186,11 @@ impl ReadOptions {
     }
     pub fn set_async_io(&mut self, _v: bool) {}
     pub fn fill_cache(&mut self, _v: bool) {}
-    pub fn set_verify_checksums(&mut self, _v: bool) {}
+    /// rust-rocksdb `set_verify_checksums`. `false` does **not** disable CRC:
+    /// subsequent `get_opt` / `iterator_opt` return [`ErrorKind::NotSupported`].
+    pub fn set_verify_checksums(&mut self, v: bool) {
+        self.verify_checksums = v;
+    }
     pub fn set_prefix_same_as_start(&mut self, _v: bool) {}
     pub fn set_total_order_seek(&mut self, _v: bool) {}
     pub fn set_timestamp(&mut self, _ts: impl Into<Vec<u8>>) {}
@@ -185,6 +202,16 @@ impl ReadOptions {
     }
     pub fn set_readahead_size(&mut self, _n: usize) {}
     pub fn set_pin_data(&mut self, _v: bool) {}
+
+    pub(crate) fn refuse_checksums_off(&self) -> Result<()> {
+        if self.verify_checksums {
+            Ok(())
+        } else {
+            Err(super::Error::not_supported(
+                "ReadOptions::set_verify_checksums(false) is NotSupported (G2: CRC stays on)",
+            ))
+        }
+    }
 }
 
 /// rust-rocksdb snapshot handle (sequence pin). SurrealDB stores this and

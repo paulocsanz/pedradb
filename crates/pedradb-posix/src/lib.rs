@@ -4,8 +4,10 @@
 //! [`std::fs::File::sync_data`] is `fcntl(F_FULLFSYNC)` (~5 ms here), while
 //! RocksDB / TiKV `WriteOptions.sync` call libc `fdatasync` (~30–50 µs).
 //! This crate issues the real syscall so WAL commit can match that class
-//! (RFC-0001 / RFC-0036) without skipping the barrier. macOS WAL
-//! preallocation (`F_PREALLOCATE`) also lives here (`preallocate_file`).
+//! (RFC-0001 / RFC-0036) without skipping the barrier. WAL space reservation
+//! also lives here (`preallocate_file`): Darwin `F_PREALLOCATE`, Linux
+//! `fallocate(FALLOC_FL_KEEP_SIZE)` — same class as Rocks
+//! `PosixWritableFile::Allocate`.
 //!
 //! All `unsafe` in the workspace's default I/O path lives here. Callers see
 //! only safe functions. Invariants: crate `SAFETY.md`.
@@ -58,25 +60,29 @@ pub fn fdatasync_file(file: &File) -> io::Result<()> {
     }
 }
 
-/// Reserve `len` bytes of storage past the file's physical end (macOS
-/// `fcntl(F_PREALLOCATE)`).
+/// Reserve `len` bytes of storage past the file's logical end without
+/// changing `i_size`.
 ///
-/// APFS assigns a new extent when a plain append crosses an ~8 MiB boundary;
-/// that `write(2)` blocks 10–50 ms inside the commit path while the writer
-/// waits on the metadata journal (measured: `findings/2026-08-22-rearm7/`).
-/// Reserving space up front keeps appends µs-scale. RocksDB preallocates its
-/// WAL the same way (`PosixWritableFile`). Blocks are allocated without
-/// changing the logical size — readers never observe the reserved region
-/// (WAL zero padding beyond EOF is unreachable through `len`).
+/// - **Darwin:** `fcntl(F_PREALLOCATE)` / `F_PEOFPOSMODE`. APFS assigns a
+///   fresh extent when a plain append crosses an ~8 MiB boundary; that
+///   `write(2)` blocks 10–50 ms inside the commit path
+///   (`findings/2026-08-22-rearm7/`).
+/// - **Linux:** `fallocate(FALLOC_FL_KEEP_SIZE)` from current `i_size`.
+///   Delayed allocation is cheap on async `write`; G1 `fdatasync` of a
+///   growing WAL still has to allocate extents on the Ok path. Rocks
+///   `PosixWritableFile::Allocate` pays this up front — Pedra must too
+///   (RFC-0062 P1.1 p11b: coluna B min 0.15 vs Rocks `sync=true`).
 ///
-/// Best-effort on other platforms (no-op `Ok(())`): Linux ext4/xfs delayed
-/// allocation does not block appends this way; revisit if a Linux box
-/// measures a comparable tail. Under Miri the Darwin `fcntl` is also a
-/// no-op: the interpreter does not implement `F_PREALLOCATE` (cmd 0x2a).
+/// Recovery never observes the reserved region (reads stop at logical
+/// `len`). Best-effort: unsupported FS (`EOPNOTSUPP`) returns `Ok`. Miri
+/// no-ops (no `F_PREALLOCATE` / `fallocate`).
 ///
 /// # Errors
 /// Underlying I/O when the platform implements the reservation.
 pub fn preallocate_file(file: &File, len: u64) -> io::Result<()> {
+    if len == 0 {
+        return Ok(());
+    }
     #[cfg(all(target_os = "macos", not(miri)))]
     {
         use std::os::fd::AsRawFd;
@@ -117,7 +123,34 @@ pub fn preallocate_file(file: &File, len: u64) -> io::Result<()> {
             Err(io::Error::last_os_error())
         }
     }
-    #[cfg(any(miri, not(target_os = "macos")))]
+    #[cfg(all(target_os = "linux", not(miri)))]
+    {
+        use std::os::fd::AsRawFd;
+        // linux/falloc.h — allocate past EOF without growing i_size.
+        const FALLOC_FL_KEEP_SIZE: i32 = 0x01;
+        // SAFETY: signature is Linux `int fallocate(int, int, off_t, off_t)`
+        // with `off_t` = i64 on LP64 (the only targets we ship).
+        extern "C" {
+            fn fallocate(fd: i32, mode: i32, offset: i64, len: i64) -> i32;
+        }
+        let offset = i64::try_from(file.metadata()?.len()).unwrap_or(i64::MAX);
+        let n = i64::try_from(len).unwrap_or(0);
+        // SAFETY: `file` is an open `std::fs::File`; `as_raw_fd()` is not
+        // stored; `mode` is the documented KEEP_SIZE flag.
+        let rc = unsafe { fallocate(file.as_raw_fd(), FALLOC_FL_KEEP_SIZE, offset, n) };
+        if rc == 0 {
+            Ok(())
+        } else {
+            let err = io::Error::last_os_error();
+            // NFS / some FUSE: reservation is an optimization, not a barrier.
+            // 95 = EOPNOTSUPP, 38 = ENOSYS (linux/asm-generic/errno*.h).
+            match err.raw_os_error() {
+                Some(95 | 38) => Ok(()),
+                _ => Err(err),
+            }
+        }
+    }
+    #[cfg(any(miri, not(any(target_os = "macos", target_os = "linux"))))]
     {
         let _ = (file, len);
         Ok(())
@@ -224,6 +257,21 @@ mod tests {
         let mut f = File::create(&path).unwrap();
         f.write_all(b"y").unwrap();
         fsync_file(&f).unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn preallocate_does_not_grow_logical_size() {
+        let dir = temp_dir();
+        let path = dir.join("wal.bin");
+        let f = File::create(&path).unwrap();
+        preallocate_file(&f, 0).unwrap();
+        preallocate_file(&f, 1024 * 1024).unwrap();
+        assert_eq!(
+            f.metadata().unwrap().len(),
+            0,
+            "KEEP_SIZE / F_PREALLOCATE must not become visible WAL bytes"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 

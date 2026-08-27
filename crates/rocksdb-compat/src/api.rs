@@ -1,8 +1,6 @@
 //! rust-rocksdb 0.22 types that the drop-in must expose with working semantics.
 
-use super::{
-    ColumnFamily, Error, ErrorKind, Options, Result, WriteBatch, DB, DEFAULT_CF,
-};
+use super::{ColumnFamily, Error, ErrorKind, Options, Result, WriteBatch, DB, DEFAULT_CF};
 use pedradb_core::{write_sst, Env, InternalKey, MemTable, SstTable, ValueType};
 use std::collections::BTreeMap;
 use std::ops::Deref;
@@ -126,7 +124,7 @@ impl Cache {
 /// rust-rocksdb `BlockBasedOptions`.
 #[derive(Debug, Clone, Default)]
 pub struct BlockBasedOptions {
-    _priv: (),
+    pub(crate) checksum: ChecksumType,
 }
 
 impl BlockBasedOptions {
@@ -144,8 +142,11 @@ impl BlockBasedOptions {
     pub fn set_whole_key_filtering(&mut self, _v: bool) {}
     /// Format version.
     pub fn set_format_version(&mut self, _n: i32) {}
-    /// Checksum.
-    pub fn set_checksum_type(&mut self, _t: ChecksumType) {}
+    /// Checksum. [`ChecksumType::NoChecksum`] is recorded so `DB::open` can
+    /// refuse it (G2); other values stay inert (Pedra SST is CRC32C).
+    pub fn set_checksum_type(&mut self, t: ChecksumType) {
+        self.checksum = t;
+    }
 }
 
 /// rust-rocksdb checksum type.
@@ -424,6 +425,13 @@ impl Error {
         Self {
             msg: msg.into(),
             kind: ErrorKind::InvalidArgument,
+        }
+    }
+
+    pub(crate) fn not_supported(msg: impl Into<String>) -> Self {
+        Self {
+            msg: msg.into(),
+            kind: ErrorKind::NotSupported,
         }
     }
 }

@@ -42,8 +42,7 @@ use std::sync::Arc;
 #[cfg(target_os = "linux")]
 use parking_lot::Mutex;
 use pedradb_core::{
-    AdviseKind, ConcurrentDb, Db, Env, EnvFile, OpenOptions as DbOpen, Result as CoreResult,
-    StdEnv,
+    AdviseKind, ConcurrentDb, Db, Env, EnvFile, OpenOptions as DbOpen, Result as CoreResult, StdEnv,
 };
 
 /// Which I/O backend this env is using.
@@ -186,9 +185,7 @@ pub fn production_env() -> IoUringEnv {
 ///
 /// # Errors
 /// Same as [`ConcurrentDb::open_with_env`].
-pub fn open_concurrent(
-    path: impl AsRef<Path>,
-) -> CoreResult<ConcurrentDb<IoUringEnv>> {
+pub fn open_concurrent(path: impl AsRef<Path>) -> CoreResult<ConcurrentDb<IoUringEnv>> {
     open_concurrent_with(path, DbOpen::default())
 }
 
@@ -222,6 +219,9 @@ pub fn open_with(path: impl AsRef<Path>, opts: DbOpen) -> CoreResult<Db<IoUringE
 /// File handle: uring write/fsync on Linux path, std otherwise.
 pub struct IoUringFile {
     file: File,
+    /// Ring handle for test CQE inject. Production write/fsync is POSIX
+    /// (RFC-0062 P1.1: uring `submit_and_wait` was the coluna B tax).
+    #[allow(dead_code)]
     env: IoUringEnv,
     /// Logical cursor for write/read (append opens seek to end).
     pos: u64,
@@ -232,10 +232,35 @@ impl IoUringFile {
         Self { file, env, pos }
     }
 
+    /// Data path: `pwrite(2)` at the shadow cursor. Not the ring —
+    /// `submit_and_wait(1)` serialized every WAL/SST write (diag-6).
+    /// Durability is [`EnvFile::sync_data`] (`fdatasync(2)`, not the ring).
+    fn posix_pwrite(&mut self, buf: &[u8]) -> io::Result<usize> {
+        if buf.is_empty() {
+            return Ok(0);
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::FileExt;
+            let n = self.file.write_at(buf, self.pos)?;
+            self.pos = self.pos.saturating_add(n as u64);
+            return Ok(n);
+        }
+        #[cfg(not(unix))]
+        {
+            self.file.seek(SeekFrom::Start(self.pos))?;
+            let n = self.file.write(buf)?;
+            self.pos = self.pos.saturating_add(n as u64);
+            Ok(n)
+        }
+    }
+
+    /// Ring write (tests / RFC-0050 CQE inject). Production uses [`Self::posix_pwrite`].
     #[cfg(target_os = "linux")]
+    #[cfg_attr(not(test), allow(dead_code))]
     fn uring_write(&mut self, buf: &[u8]) -> io::Result<usize> {
         let Inner::Uring { state } = &*self.env.inner else {
-            return self.file.write(buf);
+            return self.posix_pwrite(buf);
         };
         if buf.is_empty() {
             return Ok(0);
@@ -246,7 +271,10 @@ impl IoUringFile {
         Ok(n)
     }
 
+    /// Ring fsync (tests / RFC-0050 CQE inject). Production G1 uses POSIX
+    /// `fdatasync` / `fsync` (coluna B: `submit_and_wait` was the tax).
     #[cfg(target_os = "linux")]
+    #[cfg_attr(not(test), allow(dead_code))]
     fn uring_fsync(&mut self, datasync: bool) -> io::Result<()> {
         let Inner::Uring { state } = &*self.env.inner else {
             return if datasync {
@@ -271,16 +299,7 @@ impl Read for IoUringFile {
 
 impl Write for IoUringFile {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        if self.env.backend() == IoBackend::IoUring {
-            #[cfg(target_os = "linux")]
-            {
-                return self.uring_write(buf);
-            }
-        }
-        self.file.seek(SeekFrom::Start(self.pos))?;
-        let n = self.file.write(buf)?;
-        self.pos = self.pos.saturating_add(n as u64);
-        Ok(n)
+        self.posix_pwrite(buf)
     }
 
     fn flush(&mut self) -> io::Result<()> {
@@ -317,23 +336,36 @@ impl Seek for IoUringFile {
 
 impl EnvFile for IoUringFile {
     fn sync_data(&mut self) -> io::Result<()> {
-        if self.env.backend() == IoBackend::IoUring {
-            #[cfg(target_os = "linux")]
-            {
+        // G1 / coluna B: `submit_and_wait` on every Ok was the Linux tax
+        // (P1.1 first measure ycsb_a min 0.12 vs Rocks sync=true). Tests
+        // still use the ring so CQE inject sees the fsync.
+        #[cfg(all(test, target_os = "linux"))]
+        {
+            if self.env.backend() == IoBackend::IoUring {
                 return self.uring_fsync(true);
             }
         }
         pedradb_core::env::fdatasync_file(&self.file)
     }
 
+    fn sync_data_strong(&mut self) -> io::Result<()> {
+        // Darwin `File::sync_data` = `F_FULLFSYNC` (G1 advertised class).
+        // Linux `File::sync_data` = `fdatasync` (same as [`Self::sync_data`]).
+        self.file.sync_data()
+    }
+
     fn sync_all(&mut self) -> io::Result<()> {
-        if self.env.backend() == IoBackend::IoUring {
-            #[cfg(target_os = "linux")]
-            {
+        #[cfg(all(test, target_os = "linux"))]
+        {
+            if self.env.backend() == IoBackend::IoUring {
                 return self.uring_fsync(false);
             }
         }
         self.file.sync_all()
+    }
+
+    fn preallocate(&mut self, len: u64) -> io::Result<()> {
+        pedradb_posix::preallocate_file(&self.file, len)
     }
 
     fn set_len(&mut self, len: u64) -> io::Result<()> {
@@ -383,7 +415,7 @@ impl Env for IoUringEnv {
 
     fn sync_dir(&self, path: &Path) -> io::Result<()> {
         let dir = File::open(path)?;
-        #[cfg(target_os = "linux")]
+        #[cfg(all(test, target_os = "linux"))]
         {
             if let Inner::Uring { state } = &*self.inner {
                 let mut state = state.lock();
@@ -527,6 +559,23 @@ mod tests {
         db.put(b"p", b"q").unwrap();
         assert_eq!(db.get(b"p").as_deref(), Some(b"q".as_ref()));
         db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn preallocate_is_forwarded_and_keep_size() {
+        let dir = temp_dir();
+        let env = IoUringEnv::new().unwrap();
+        env.create_dir_all(&dir).unwrap();
+        let mut f = env.create(&dir.join("wal.log")).unwrap();
+        f.preallocate(1024 * 1024).unwrap();
+        assert_eq!(
+            f.len().unwrap(),
+            0,
+            "WAL reservation must not become recoverable bytes"
+        );
+        f.write_all(b"abc").unwrap();
+        assert_eq!(f.len().unwrap(), 3);
         let _ = fs::remove_dir_all(&dir);
     }
 
@@ -773,8 +822,12 @@ mod tests {
         assert!(db.put(b"x", b"y").is_err(), "wrapped ENOSPC");
         drop(db);
         env.disarm();
-        let db = Db::open_with_env(&dir, db_opts(), FailingEnv::wrap(IoUringEnv::new().unwrap()))
-            .unwrap();
+        let db = Db::open_with_env(
+            &dir,
+            db_opts(),
+            FailingEnv::wrap(IoUringEnv::new().unwrap()),
+        )
+        .unwrap();
         assert_eq!(db.get(b"seed").as_deref(), Some(b"ok".as_ref()));
         db.close().unwrap();
         let _ = fs::remove_dir_all(&dir);

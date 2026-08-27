@@ -47,11 +47,13 @@ pub trait EnvFile: Read + Write + Seek {
     fn set_len(&mut self, len: u64) -> io::Result<()>;
 
     /// Reserve `len` bytes of storage past physical EOF so appends never
-    /// block on filesystem extent allocation (macOS `F_PREALLOCATE`; see
-    /// `pedradb_posix::preallocate_file`). Does **not** change the logical
-    /// size — recovery reads stop at `len` and never observe the reserved
-    /// region. Best-effort: default is a no-op (sim / DST / platforms
-    /// without support); callers treat failure as a missing optimization.
+    /// block on filesystem extent allocation (Darwin `F_PREALLOCATE`, Linux
+    /// `fallocate(FALLOC_FL_KEEP_SIZE)`; see `pedradb_posix::preallocate_file`).
+    /// Does **not** change the logical size — recovery reads stop at `len`
+    /// and never observe the reserved region. Best-effort: default is a
+    /// no-op (sim / DST / platforms without support); callers treat failure
+    /// as a missing optimization. Production `EnvFile` impls must forward
+    /// this — a silent default no-op is a G1 tax vs Rocks.
     ///
     /// # Errors
     /// Underlying I/O when the platform implements the reservation.

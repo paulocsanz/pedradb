@@ -77,6 +77,8 @@ db.flush()?; // MemTable → SST (optional; shrinks WAL/mem)
 
 Default commit **fsyncs the WAL** before `Ok` (process-crash safe after successful commit).
 
+**Encrypt-at-rest:** the engine does not implement it. Use LUKS / FileVault / volume encryption. Never a claim of LSM-level cipher.
+
 ## Status (shipped)
 
 | Layer | Crates | Status |

@@ -36,12 +36,18 @@ barrier is the RFC-0015 H1 uncertain outcome — not unique to unsafe.
 - Return is an errno-style code (0 = success), **not** `-1` + errno.
 - Non-Linux: no-op `Ok(())`. Darwin has no `posix_fadvise`.
 
-### `preallocate_file` (`fcntl(F_PREALLOCATE)`, Darwin only)
+### `preallocate_file` (Darwin `F_PREALLOCATE` / Linux `fallocate`)
 
-- Live `File`; `as_raw_fd()` is not stored. `fstore_t` layout is local.
-- **Miri:** Darwin `F_PREALLOCATE` is unsupported (`fcntl` cmd 0x2a) — the
-  function no-ops under `cfg(miri)` the same way Linux already does. Production
-  Darwin still reserves extents. This is not a durability barrier.
+- Live `File`; `as_raw_fd()` is not stored. Darwin `fstore_t` layout is local.
+- **Linux:** `extern "C" { fn fallocate(int, int, off_t, off_t) -> i32; }`
+  with `FALLOC_FL_KEEP_SIZE = 0x01`. Offset is current `i_size`; `len` is
+  the reservation. `i_size` does not grow — WAL recovery never observes
+  the reserved region. `EOPNOTSUPP` (95) / `ENOSYS` (38) map to `Ok`
+  (reservation is an optimization).
+- **Miri:** Darwin `F_PREALLOCATE` is unsupported (`fcntl` cmd 0x2a) and
+  Linux `fallocate` is not interpreted — the function no-ops under
+  `cfg(miri)`. Production still reserves extents. This is not a durability
+  barrier.
 
 ### `fsync_file` / `sync_dir_fd`
 

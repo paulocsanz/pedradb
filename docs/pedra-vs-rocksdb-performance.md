@@ -1,6 +1,16 @@
 # Por que o Pedra é mais rápido que o RocksDB — relatório técnico
 
-**Status:** relatório de engenharia, evidência medida 2026-08-17 → 2026-08-20
+> **Stale no cartaz (RFC-0062 P0.2, 2026-08-25).** A tabela da §1 abaixo ainda
+> descreve o piso **2× G1** como “oficial (cartaz)”. Isso foi
+> **re-baselined 2026-08-24** (RFC-0041): o gate é **1×** na coluna drop-in
+> async vs Rocks `sync=false` (15/15 ≥ 1.254);
+> G1 vira tabela de produto publicada (leituras 1.13–1.99×; writes 1c
+> fd-ceiling ≪ 1×; group commit fecha — apply_mc4 2.788×). **Não** citar
+> este ficheiro como “estamos 2× o Rocks em tudo”. Estado de lançamento:
+> [`docs/reports/2026-08-25-launch-readiness.md`](reports/2026-08-25-launch-readiness.md)
+> + [RFC-0062](rfc/0062-launch-readiness-remaining-gaps.md).
+
+**Status:** relatório de engenharia, evidência medida 2026-08-17 → 2026-08-20; cartaz 2× G1 superseded 2026-08-24
 **Escopo:** `pedradb-core` + `rocksdb-compat` (compat engine) vs RocksDB via `librocksdb` (branch upstream corrente no dia de cada medição)
 **Método:** todo número cita o finding/RFC de onde veio. Árbitro de números em pé = 3 runs em caixa quieta (load 1-min < 10, P2.1). Janela curta sob carga é ruído (mesma engine varia 6×); p50 por op é o sinal estável. Números dirty estão **sempre** marcados como dirty.
 

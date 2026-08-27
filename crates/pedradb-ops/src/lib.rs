@@ -29,12 +29,12 @@ use std::path::{Path, PathBuf};
 
 use pedradb_core::manifest::{self, VersionSet};
 use pedradb_core::wal::Wal;
-use pedradb_core::{
-    copy_db_directory, read_checkpoint_meta, verify_at_rest, CheckpointMeta, CoreError, Db, Env,
-    EnvFile, OpenOptions, SequenceNumber, WriteOp, WriteRecord, WAL_FILE_NAME,
-};
 #[cfg(test)]
 use pedradb_core::StdEnv;
+use pedradb_core::{
+    copy_db_directory, read_checkpoint_meta, verify_at_rest, CheckpointMeta, ConcurrentDb,
+    CoreError, Db, Env, EnvFile, OpenOptions, SequenceNumber, WriteOp, WriteRecord, WAL_FILE_NAME,
+};
 use pedradb_io_uring::IoUringEnv;
 
 /// Ops-layer error (wraps core + structured messages).
@@ -223,6 +223,36 @@ impl<E: Env> BackupEngine<E> {
         self.catalog.next_id = id + 1;
         // Base covers up to base_sequence; ship watermark at least that high so
         // we only archive *later* WAL for PITR.
+        self.catalog.last_shipped_seq = self.catalog.last_shipped_seq.max(ck.last_sequence);
+        self.persist_catalog()?;
+        Ok(BackupMeta {
+            id,
+            base_sequence: ck.last_sequence,
+            sst_count: ck.sst_count,
+            earliest_readable_seq: ck.earliest_readable_seq,
+            path: dest,
+        })
+    }
+
+    /// Checkpoint a [`ConcurrentDb`] into a new base backup (RFC-0062 P1.5).
+    /// Same catalog rules as [`Self::create_base_backup`].
+    ///
+    /// # Errors
+    /// Checkpoint / I/O.
+    pub fn create_base_backup_concurrent<E2: Env>(
+        &mut self,
+        db: &ConcurrentDb<E2>,
+    ) -> Result<BackupMeta> {
+        let id = self.catalog.next_id;
+        let dest = self.base_dir(id);
+        if self.env.exists(&dest) {
+            return Err(OpsError::Msg(format!(
+                "base dir already exists: {}",
+                dest.display()
+            )));
+        }
+        let ck = db.create_checkpoint(&dest)?;
+        self.catalog.next_id = id + 1;
         self.catalog.last_shipped_seq = self.catalog.last_shipped_seq.max(ck.last_sequence);
         self.persist_catalog()?;
         Ok(BackupMeta {
@@ -1170,7 +1200,10 @@ mod tests {
             );
             assert!(rep.has_manifest);
             assert!(!rep.vlog_use_new);
-            assert_eq!(rep.current_crc, "ok", "flushed CURRENT must carry a matching CRC");
+            assert_eq!(
+                rep.current_crc, "ok",
+                "flushed CURRENT must carry a matching CRC"
+            );
         }
         let _ = std::fs::remove_dir_all(&data);
     }
@@ -1356,7 +1389,10 @@ mod tests {
         let report = restore_history_from_remote(&StdEnv, &remote, &dest, None).unwrap();
         assert_eq!(report.segments, 1);
         let cutoff = report.last_sequence;
-        assert!(cutoff >= 31, "aging must archive nearly everything: {cutoff}");
+        assert!(
+            cutoff >= 31,
+            "aging must archive nearly everything: {cutoff}"
+        );
         let db = open_db(&dest);
         let expect = format!("v{:02}", cutoff - 1).into_bytes();
         assert_eq!(db.get(b"k").as_deref(), Some(expect.as_ref()));
@@ -1396,10 +1432,7 @@ mod tests {
         let dest3 = temp();
         let err = restore_history_from_remote(&StdEnv, &remote, &dest3, None);
         assert!(
-            matches!(
-                err,
-                Err(OpsError::Core(CoreError::CorruptHistory(_)))
-            ),
+            matches!(err, Err(OpsError::Core(CoreError::CorruptHistory(_)))),
             "corrupt remote bytes must fail the restore closed: {err:?}"
         );
 

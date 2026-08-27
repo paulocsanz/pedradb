@@ -583,6 +583,7 @@ version = "0.1.0"
 dependencies = [
  "pedradb-core",
  "rocksdb 0.22.0",
+ "rocksdb-compat",
 ]
 
 [[package]]
@@ -861,6 +862,7 @@ dependencies = [
  "parking_lot",
  "pedradb-core",
  "pedradb-io-uring",
+ "pedradb-ops",
  "pedradb-sim",
  "tempfile",
 ]

@@ -22,9 +22,7 @@
 //! `compact_range_opt`. Prefix extractor / UDT comparator are accepted
 //! no-ops. Versioned CF timestamps remain a gap.
 
-use super::{
-    ColumnFamily, Error, KeyCodec, Result, DB, DBRawIteratorWithThreadMode, DEFAULT_CF,
-};
+use super::{ColumnFamily, DBRawIteratorWithThreadMode, Error, KeyCodec, Result, DB, DEFAULT_CF};
 use parking_lot::Mutex;
 use pedradb_core::{CoreError, Env, OccTransaction};
 use pedradb_io_uring::IoUringEnv;
@@ -361,10 +359,7 @@ impl<'a, E: Env> Transaction<'a, E> {
     /// `Transaction::NewIterator`, keys yielded here do not enter the read
     /// set — a later `commit()` does not conflict on them.
     #[must_use]
-    pub fn raw_iterator_opt(
-        &self,
-        ro: super::ReadOptions,
-    ) -> TxnRawIterator<'_, Self, E> {
+    pub fn raw_iterator_opt(&self, ro: super::ReadOptions) -> TxnRawIterator<'_, Self, E> {
         let (seq, staged) = {
             let g = self.occ.lock();
             (g.snapshot(), g.staged_entries())
@@ -583,9 +578,7 @@ impl<'a, D, E: Env> TxnRawIterator<'a, D, E> {
         let k = key.as_ref();
         self.mat = None;
         self.db.seek(k);
-        self.idx = self
-            .staged
-            .partition_point(|(sk, _)| sk.as_slice() < k);
+        self.idx = self.staged.partition_point(|(sk, _)| sk.as_slice() < k);
         self.advance_head();
     }
 
@@ -669,7 +662,9 @@ impl<'a, D, E: Env> TxnRawIterator<'a, D, E> {
         self.materialize();
         let k = key.as_ref();
         if let Some(m) = &self.mat {
-            self.mat_at = m.partition_point(|(mk, _)| mk.as_slice() <= k).saturating_sub(1);
+            self.mat_at = m
+                .partition_point(|(mk, _)| mk.as_slice() <= k)
+                .saturating_sub(1);
         }
     }
 }

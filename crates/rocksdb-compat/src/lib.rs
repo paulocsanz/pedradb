@@ -14,12 +14,20 @@
 #![forbid(unsafe_code)]
 
 mod api;
+mod env;
+mod knobs;
 mod txn;
 pub use api::{
-    AsColumnFamilyRef, BlockBasedOptions, Cache, ChecksumType, CompactionDecision,
-    DBPinnableSlice, IngestExternalFileOptions, LiveFile, MergeOperands, SstFileWriter,
-    WriteBatchWithIndex, DEFAULT_COLUMN_FAMILY_NAME,
+    AsColumnFamilyRef, BlockBasedOptions, Cache, ChecksumType, CompactionDecision, DBPinnableSlice,
+    IngestExternalFileOptions, LiveFile, MergeOperands, SstFileWriter, WriteBatchWithIndex,
+    DEFAULT_COLUMN_FAMILY_NAME,
 };
+pub mod backup;
+pub mod checkpoint;
+pub use backup::{BackupEngine, BackupEngineInfo, BackupEngineOptions, RestoreOptions};
+pub use checkpoint::Checkpoint;
+pub use env::Env;
+pub use knobs::{g2_not_supported, KnobClass, KnobEntry, KNOB_INVENTORY};
 pub use txn::{OptimisticTransactionDB, OptimisticTransactionOptions, Transaction, WriteOptions};
 
 use bytes::Bytes;
@@ -33,7 +41,7 @@ pub use shape::{
 };
 
 use pedradb_core::{
-    BatchOp, CompactOptions as CoreCompactOptions, ConcurrentDb, CoreError, Env,
+    BatchOp, CompactOptions as CoreCompactOptions, ConcurrentDb, CoreError, Env as PedraEnv,
     Snapshot as CoreSnapshot, SnapshotPin, StdEnv, L0_COMPACTION_TRIGGER,
 };
 use pedradb_io_uring::IoUringEnv;
@@ -105,7 +113,6 @@ impl Error {
     pub fn kind(&self) -> ErrorKind {
         self.kind
     }
-
 }
 
 impl fmt::Display for Error {
@@ -150,7 +157,7 @@ impl From<CoreError> for Error {
 /// Result alias matching rust-rocksdb's shape.
 pub type Result<T> = std::result::Result<T, Error>;
 
-fn map_property_int<E: Env>(db: &ConcurrentDb<E>, name: &str) -> Option<u64> {
+fn map_property_int<E: PedraEnv>(db: &ConcurrentDb<E>, name: &str) -> Option<u64> {
     const LEVEL_PREFIX: &str = "rocksdb.num-files-at-level";
     if let Some(rest) = name.strip_prefix(LEVEL_PREFIX) {
         let lvl: u32 = rest.parse().ok()?;
@@ -175,7 +182,9 @@ fn map_property_int<E: Env>(db: &ConcurrentDb<E>, name: &str) -> Option<u64> {
         properties::BLOCK_CACHE_USAGE | properties::BLOCK_CACHE_PINNED_USAGE => {
             Some(s.block_cache_hits.saturating_add(s.block_cache_misses))
         }
-        properties::ESTIMATE_TABLE_READERS_MEM => Some(s.table_cache_hits.saturating_add(s.table_cache_misses)),
+        properties::ESTIMATE_TABLE_READERS_MEM => {
+            Some(s.table_cache_hits.saturating_add(s.table_cache_misses))
+        }
         _ => None,
     }
 }
@@ -243,6 +252,12 @@ pub struct Options {
     pub blob_file_size: Option<u64>,
     compaction_filter: Option<CompactionFilterFn>,
     merge_operator: Option<MergeOperatorFn>,
+    /// RFC-0062 P1.6: `set_paranoid_checks(false)` recorded; open refuses.
+    paranoid_off: bool,
+    /// RFC-0062 P1.6: `ChecksumType::NoChecksum` recorded; open refuses.
+    checksum_off: bool,
+    /// RFC-0062 P1.6: skip-any WAL recorded; open refuses.
+    skip_any: bool,
 }
 
 type CompactionFilterFn =
@@ -250,7 +265,7 @@ type CompactionFilterFn =
 type MergeOperatorFn =
     Arc<dyn Fn(&[u8], Option<&[u8]>, &MergeOperands) -> Option<Vec<u8>> + Send + Sync>;
 
-/// WAL recovery mode at open (rust-rocksdb `WalRecoveryMode` subset).
+/// WAL recovery mode at open (rust-rocksdb `WalRecoveryMode` / `DBRecoveryMode`).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum WalRecoveryMode {
     /// Rocks `kPointInTimeRecovery`-shaped: recover every complete record
@@ -261,7 +276,18 @@ pub enum WalRecoveryMode {
     PointInTime,
     /// Pedra kernel default: mid-WAL integrity failure fails the open.
     FailClosed,
+    /// rust-rocksdb `AbsoluteConsistency` — mapped to [`Self::FailClosed`].
+    AbsoluteConsistency,
+    /// rust-rocksdb `TolerateCorruptedTailRecords` — mapped to [`Self::FailClosed`]
+    /// (Rocks also refuses open on mid-WAL CRC).
+    TolerateCorruptedTailRecords,
+    /// rust-rocksdb `SkipAnyCorruptedRecord`. **Not implemented.** Open
+    /// returns [`ErrorKind::NotSupported`] (G2).
+    SkipAnyCorruptedRecord,
 }
+
+/// rust-rocksdb `DBRecoveryMode` name.
+pub type DBRecoveryMode = WalRecoveryMode;
 
 impl fmt::Debug for Options {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -300,6 +326,9 @@ impl Default for Options {
             blob_file_size: None,
             compaction_filter: None,
             merge_operator: None,
+            paranoid_off: false,
+            checksum_off: false,
+            skip_any: false,
         }
     }
 }
@@ -440,7 +469,46 @@ impl Options {
     pub fn set_blob_compression_type(&mut self, _c: DBCompressionType) {}
     pub fn set_universal_compaction_options(&mut self, _o: &UniversalCompactOptions) {}
     /// rust-rocksdb `set_block_based_table_factory`.
-    pub fn set_block_based_table_factory(&mut self, _b: &BlockBasedOptions) {}
+    /// [`ChecksumType::NoChecksum`] is G2 — recorded so [`DB::open`] refuses.
+    pub fn set_block_based_table_factory(&mut self, b: &BlockBasedOptions) {
+        self.checksum_off = matches!(b.checksum, ChecksumType::NoChecksum);
+    }
+
+    /// rust-rocksdb `set_paranoid_checks`. `false` is G2 (open refuses).
+    pub fn set_paranoid_checks(&mut self, enabled: bool) {
+        self.paranoid_off = !enabled;
+    }
+
+    /// rust-rocksdb `set_wal_recovery_mode`.
+    pub fn set_wal_recovery_mode(&mut self, mode: DBRecoveryMode) {
+        self.skip_any = matches!(mode, WalRecoveryMode::SkipAnyCorruptedRecord);
+        self.wal_recovery = match mode {
+            WalRecoveryMode::SkipAnyCorruptedRecord => WalRecoveryMode::PointInTime,
+            WalRecoveryMode::AbsoluteConsistency
+            | WalRecoveryMode::TolerateCorruptedTailRecords
+            | WalRecoveryMode::FailClosed => WalRecoveryMode::FailClosed,
+            WalRecoveryMode::PointInTime => WalRecoveryMode::PointInTime,
+        };
+    }
+
+    pub(crate) fn refuse_g2(&self) -> Result<()> {
+        if self.paranoid_off {
+            return Err(Error::not_supported(
+                "set_paranoid_checks(false) is NotSupported (G2: Pedra never writes through unrecognized corruption)",
+            ));
+        }
+        if self.checksum_off {
+            return Err(Error::not_supported(
+                "ChecksumType::NoChecksum is NotSupported (G2: SST CRC stays on)",
+            ));
+        }
+        if self.skip_any || matches!(self.wal_recovery, WalRecoveryMode::SkipAnyCorruptedRecord) {
+            return Err(Error::not_supported(
+                "DBRecoveryMode::SkipAnyCorruptedRecord is NotSupported (G2)",
+            ));
+        }
+        Ok(())
+    }
     /// rust-rocksdb `optimize_for_point_lookup`.
     pub fn optimize_for_point_lookup(&mut self, _block_cache_mb: u64) {}
     /// rust-rocksdb `increase_parallelism` already exists; `prepare_for_bulk_load`.
@@ -580,7 +648,9 @@ fn cfreg_payload(raw: &[u8]) -> std::result::Result<&[u8], String> {
         if let Some(hex) = last.strip_prefix("c:") {
             if hex.len() == 8 && hex.bytes().all(|b| b.is_ascii_hexdigit()) {
                 let expect = u32::from_str_radix(hex, 16).map_err(|_| "crc not hex".to_string())?;
-                let payload = raw.get(..head.len() + 1).ok_or_else(|| "crc payload".to_string())?;
+                let payload = raw
+                    .get(..head.len() + 1)
+                    .ok_or_else(|| "crc payload".to_string())?;
                 let got = crc32c::crc32c(payload);
                 if got != expect {
                     return Err(format!(
@@ -765,10 +835,17 @@ fn bound_as_ref(b: &Bound<Vec<u8>>) -> Bound<&[u8]> {
 /// Per-thread direct-mapped hot set (RFC-0041). Official YCSB is zipfian
 /// θ=0.99 / 4096 keys / 2000 ops — a few hundred unique keys. 1024 slots
 /// keep the working set so a hit skips CF-prefix encode + the point-cache
-/// mutex (~the 39 ns C still needs for 2.0). 2-probe; epoch drops every
-/// slot on publish.
+/// mutex (~the 39 ns C still needs for 2.0). 8-probe hash; named CF writes
+/// also land in a 16-slot ring (raftlog idx-1). Epoch drops every slot on
+/// publish.
 const LAST_N: usize = 2048;
+/// Hash probe for LAST_GET (default CF) and LAST_CF miss after the write
+/// ring. 8 is enough for zipfian; raftlog idx-1 lives in `LAST_RING`.
 const LAST_PROBE: usize = 8;
+/// `write_cf_owned` write-through is this ring, not the 16-probe hash
+/// (p11h hashed AND ringed — extra tax, dirty min 0.843). Newest-first
+/// get of idx-1 is 2 compares.
+const LAST_RING: usize = 16;
 const TINY: usize = 64;
 
 fn fx_mix(hash: u64, word: u64) -> u64 {
@@ -853,20 +930,28 @@ struct LastGetSlot {
 
 struct LastGetTable {
     slots: Box<[LastGetSlot]>,
+    /// Last `LAST_RING` named stores. LAST_GET (`get_key` / `store_key`)
+    /// does not touch this.
+    ring: [LastGetSlot; LAST_RING],
+    ring_i: u8,
 }
 
 impl LastGetTable {
+    fn empty_slot() -> LastGetSlot {
+        LastGetSlot {
+            epoch: 0,
+            cf: TinyBuf::empty(),
+            key: TinyBuf::empty(),
+            val: None,
+        }
+    }
+
     fn new() -> Self {
         Self {
             // Heap — TinyBuf slots overflow the thread stack if inline.
-            slots: (0..LAST_N)
-                .map(|_| LastGetSlot {
-                    epoch: 0,
-                    cf: TinyBuf::empty(),
-                    key: TinyBuf::empty(),
-                    val: None,
-                })
-                .collect(),
+            slots: (0..LAST_N).map(|_| Self::empty_slot()).collect(),
+            ring: std::array::from_fn(|_| Self::empty_slot()),
+            ring_i: 0,
         }
     }
 
@@ -875,12 +960,18 @@ impl LastGetTable {
     }
 
     fn get(&self, epoch: u64, cf: &str, key: &[u8]) -> Option<Option<Bytes>> {
-        let h = Self::hash(cf, key);
         let cf_b = cf.as_bytes();
+        let n = self.ring_i as usize;
+        for k in 0..LAST_RING {
+            let i = (n + LAST_RING - 1 - k) % LAST_RING;
+            let s = &self.ring[i];
+            if s.epoch == epoch && s.cf.eq(cf_b) && s.key.eq(key) {
+                return Some(s.val.clone());
+            }
+        }
+        let h = Self::hash(cf, key);
         for p in 0..LAST_PROBE {
             let s = &self.slots[last_slot(h, p)];
-            // Stale (or never-used) slots do not terminate the probe: the
-            // live entry for this key may sit deeper.
             if s.epoch != epoch {
                 continue;
             }
@@ -898,27 +989,16 @@ impl LastGetTable {
         let Some(key_t) = TinyBuf::from_slice(key) else {
             return;
         };
-        let h = Self::hash(cf, key);
-        let mut free = None;
-        for p in 0..LAST_PROBE {
-            let i = last_slot(h, p);
-            let s = &mut self.slots[i];
-            if s.epoch == epoch && s.cf.eq(cf.as_bytes()) && s.key.eq(key) {
-                s.val = val;
-                return;
-            }
-            // Prefer a stale/empty slot over evicting a live entry.
-            if s.epoch != epoch && free.is_none() {
-                free = Some(i);
-            }
-        }
-        let i = free.unwrap_or_else(|| last_slot(h, LAST_PROBE - 1));
-        self.slots[i] = LastGetSlot {
+        // Ring only — sequential raftlog 16-puts must not also walk the
+        // hash table (p11h). Get idx-1 hits newest-first. Hash stays for
+        // LAST_GET (`store_key`) and named misses that still hash-store.
+        self.ring[self.ring_i as usize] = LastGetSlot {
             epoch,
             cf: cf_t,
             key: key_t,
             val,
         };
+        self.ring_i = (self.ring_i + 1) % LAST_RING as u8;
     }
 
     /// Default-CF `get()`: hash the user key only (no `default` prefix).
@@ -967,6 +1047,9 @@ thread_local! {
     /// Default-CF last-get table shared by `get()` and `contains()` —
     /// the same query, so a warm from either call site serves both.
     static LAST_GET: RefCell<LastGetTable> = RefCell::new(LastGetTable::new());
+    /// Named-CF last-get. Write-through on `write_cf_owned` so raftlog
+    /// `get idx-1` hits without encode+lock (RFC-0062 P0.4; diag-6e I-cache).
+    static LAST_CF: RefCell<LastGetTable> = RefCell::new(LastGetTable::new());
 }
 
 struct LastCountSlot {
@@ -1196,7 +1279,7 @@ pub enum IteratorMode<'a> {
 const ITER_WINDOW: usize = 64;
 
 /// Windowed CF iterator (RFC-0032 P0.1). Same positioning semantics as v0.
-pub struct DBIterator<E: Env = StdEnv> {
+pub struct DBIterator<E: PedraEnv = StdEnv> {
     items: Vec<(Vec<u8>, Vec<u8>)>,
     idx: usize,
     reverse: bool,
@@ -1212,7 +1295,7 @@ pub struct DBIterator<E: Env = StdEnv> {
     err: Option<Error>,
 }
 
-impl<E: Env> Iterator for DBIterator<E> {
+impl<E: PedraEnv> Iterator for DBIterator<E> {
     type Item = Result<(Box<[u8]>, Box<[u8]>)>;
     fn next(&mut self) -> Option<Self::Item> {
         if !self.valid() {
@@ -1227,7 +1310,7 @@ impl<E: Env> Iterator for DBIterator<E> {
     }
 }
 
-impl<E: Env> DBIterator<E> {
+impl<E: PedraEnv> DBIterator<E> {
     /// Whether positioned on a valid entry.
     #[must_use]
     pub fn valid(&self) -> bool {
@@ -1363,7 +1446,7 @@ impl<E: Env> DBIterator<E> {
     }
 }
 
-fn page_forward<E: Env>(
+fn page_forward<E: PedraEnv>(
     inner: &ConcurrentDb<E>,
     codec: &KeyCodec,
     cf: &str,
@@ -1383,7 +1466,7 @@ fn page_forward<E: Env>(
         })
 }
 
-fn page_last_n<E: Env>(
+fn page_last_n<E: PedraEnv>(
     inner: &ConcurrentDb<E>,
     codec: &KeyCodec,
     cf: &str,
@@ -1410,7 +1493,7 @@ fn page_last_n<E: Env>(
 }
 
 /// Read snapshot (sequence-pinned point + iterator reads).
-pub struct Snapshot<'a, E: Env = StdEnv> {
+pub struct Snapshot<'a, E: PedraEnv = StdEnv> {
     db: &'a DB<E>,
     snap: CoreSnapshot,
     /// GC pin (fix C5/C6): a live rust-rocksdb-shaped snapshot must stay
@@ -1418,7 +1501,7 @@ pub struct Snapshot<'a, E: Env = StdEnv> {
     pin: SnapshotPin,
 }
 
-impl<E: Env> Snapshot<'_, E> {
+impl<E: PedraEnv> Snapshot<'_, E> {
     /// Point read pinned at the snapshot sequence.
     ///
     /// # Errors
@@ -1465,7 +1548,7 @@ impl<E: Env> Snapshot<'_, E> {
     }
 }
 
-impl<E: Env> Drop for Snapshot<'_, E> {
+impl<E: PedraEnv> Drop for Snapshot<'_, E> {
     fn drop(&mut self) {
         self.db.inner.release_snapshot_pin(self.pin);
     }
@@ -1482,7 +1565,7 @@ fn cf_bounds(codec: &KeyCodec, cf: &str) -> (Bound<Vec<u8>>, Bound<Vec<u8>>) {
     }
 }
 
-pub(crate) fn scan_cf_at<E: Env>(
+pub(crate) fn scan_cf_at<E: PedraEnv>(
     inner: &ConcurrentDb<E>,
     codec: &KeyCodec,
     cf: &str,
@@ -1567,7 +1650,7 @@ pub(crate) fn scan_cf_at<E: Env>(
 /// Writes join the Rocks-style write group (one leader takes the write lock
 /// per group: appends + a single fdatasync + apply); reads take RwLock read
 /// guards; the host compact worker reuses the core staged flush pipeline.
-pub struct DB<E: Env = IoUringEnv> {
+pub struct DB<E: PedraEnv = IoUringEnv> {
     pub(crate) inner: ConcurrentDb<E>,
     pub(crate) cfs: Mutex<Vec<String>>,
     pub(crate) codec: KeyCodec,
@@ -1685,7 +1768,7 @@ impl DB<StdEnv> {
     }
 }
 
-impl<E: Env> DB<E> {
+impl<E: PedraEnv> DB<E> {
     /// Open with an explicit [`Env`] (adversarial `FailingEnv` campaigns).
     ///
     /// # Errors
@@ -1706,6 +1789,7 @@ impl<E: Env> DB<E> {
         env: E,
         verified: bool,
     ) -> Result<Self> {
+        opts.refuse_g2()?;
         let dir = path.as_ref();
         if !dir.exists() {
             if !opts.create_if_missing {
@@ -1796,7 +1880,14 @@ impl<E: Env> DB<E> {
                 wal_full_fsync: opts.wal_full_fsync,
                 wal_recovery: match opts.wal_recovery {
                     WalRecoveryMode::PointInTime => pedradb_core::WalRecovery::PointInTime,
-                    WalRecoveryMode::FailClosed => pedradb_core::WalRecovery::FailClosed,
+                    WalRecoveryMode::FailClosed
+                    | WalRecoveryMode::AbsoluteConsistency
+                    | WalRecoveryMode::TolerateCorruptedTailRecords => {
+                        pedradb_core::WalRecovery::FailClosed
+                    }
+                    WalRecoveryMode::SkipAnyCorruptedRecord => {
+                        pedradb_core::WalRecovery::FailClosed
+                    }
                 },
                 ..pedradb_core::OpenOptions::default()
             }
@@ -1888,7 +1979,13 @@ impl<E: Env> DB<E> {
         let value = value.as_ref();
         self.codec
             .encode_with(DEFAULT_CF, key, |enc| self.inner.put(enc, value))
-            .map_err(Error::from)
+            .map_err(Error::from)?;
+        let epoch = self.cache_epoch_base + self.inner.read_cache_epoch();
+        LAST_GET.with(|t| {
+            t.borrow_mut()
+                .store_key(epoch, key, Some(Bytes::copy_from_slice(value)))
+        });
+        Ok(())
     }
 
     /// Put into a named CF.
@@ -1906,7 +2003,13 @@ impl<E: Env> DB<E> {
         let value = value.as_ref();
         self.codec
             .encode_with(&cf.name, key, |enc| self.inner.put(enc, value))
-            .map_err(Error::from)
+            .map_err(Error::from)?;
+        let epoch = self.cache_epoch_base + self.inner.read_cache_epoch();
+        LAST_CF.with(|t| {
+            t.borrow_mut()
+                .store(epoch, &cf.name, key, Some(Bytes::copy_from_slice(value)))
+        });
+        Ok(())
     }
 
     /// Get from the default CF.
@@ -1963,19 +2066,23 @@ impl<E: Env> DB<E> {
         // set. Direct-mapped last-N skips CF-prefix encode + point-cache
         // mutex. Bytes stay shared with the point cache; we copy into Vec
         // only for the rust-rocksdb return type. Epoch bumps on publish.
-        thread_local! {
-            static LAST: RefCell<LastGetTable> = RefCell::new(LastGetTable::new());
-        }
         let epoch = self.cache_epoch_base + self.inner.read_cache_epoch();
-        if let Some(hit) = LAST.with(|slot| slot.borrow().get(epoch, cf, key)) {
+        if let Some(hit) = LAST_CF.with(|slot| slot.borrow().get(epoch, cf, key)) {
             return Ok(hit.map(|b| b.to_vec()));
         }
         if cf != DEFAULT_CF {
             self.check_cf(cf)?;
         }
         let got = self.codec.encode_with(cf, key, |enc| self.inner.get(enc));
-        LAST.with(|slot| slot.borrow_mut().store(epoch, cf, key, got.clone()));
+        LAST_CF.with(|slot| slot.borrow_mut().store(epoch, cf, key, got.clone()));
         Ok(got.map(|b| b.to_vec()))
+    }
+
+    /// Test helper: named get is a LAST_CF hit (no encode / inner get).
+    #[cfg(test)]
+    fn last_cf_is_hot(&self, cf: &str, key: &[u8]) -> bool {
+        let epoch = self.cache_epoch_base + self.inner.read_cache_epoch();
+        LAST_CF.with(|slot| slot.borrow().get(epoch, cf, key).is_some())
     }
 
     fn get_at(
@@ -2173,21 +2280,32 @@ impl<E: Env> DB<E> {
             static KEY_POOL: std::cell::RefCell<bytes::BytesMut> =
                 std::cell::RefCell::new(bytes::BytesMut::with_capacity(8 * 1024));
         }
+        let mut warm: Vec<(&str, Vec<u8>, Option<Bytes>)> =
+            Vec::with_capacity(puts.len() + deletes.len());
         let r = KEY_POOL.with(|pool| {
             let mut pool = pool.borrow_mut();
             let mut ops = Vec::with_capacity(puts.len() + deletes.len());
             let mut last_ok: Option<&str> = None;
             let mut pfx = Vec::new();
+            let mut prev_val: Option<Bytes> = None;
             for (cf, k, v) in puts {
                 if last_ok != Some(cf) {
                     self.check_cf(cf)?;
                     pfx = self.codec.run_prefix(cf);
                     last_ok = Some(cf);
                 }
+                // RFC-0062 P1.1: raftlog 16× same yval. Share the Bytes so
+                // WAL v2 intern fires (prepare also shares by content).
+                let val = match prev_val.as_ref() {
+                    Some(p) if p.as_ref() == v.as_slice() => p.clone(),
+                    _ => Bytes::from(v),
+                };
+                prev_val = Some(val.clone());
                 ops.push(BatchOp::Put {
                     key: self.codec.encode_run(&pfx, k.as_ref(), &mut pool),
-                    value: Bytes::from(v),
+                    value: val.clone(),
                 });
+                warm.push((cf, k, Some(val)));
             }
             for (cf, k) in deletes {
                 if last_ok != Some(cf) {
@@ -2198,6 +2316,7 @@ impl<E: Env> DB<E> {
                 ops.push(BatchOp::Delete {
                     key: self.codec.encode_run(&pfx, k.as_ref(), &mut pool),
                 });
+                warm.push((cf, k, None));
             }
             if ops.is_empty() {
                 return Ok(());
@@ -2207,6 +2326,15 @@ impl<E: Env> DB<E> {
                 .map(|_| ())
                 .map_err(Error::from)
         });
+        if r.is_ok() && !warm.is_empty() {
+            let epoch = self.cache_epoch_base + self.inner.read_cache_epoch();
+            LAST_CF.with(|t| {
+                let mut t = t.borrow_mut();
+                for (cf, k, v) in warm {
+                    t.store(epoch, cf, &k, v);
+                }
+            });
+        }
         r
     }
 
@@ -2825,7 +2953,8 @@ impl<E: Env> DB<E> {
                 return Ok(());
             }
             cfs.push(name.to_string());
-            let non_default: Vec<String> = cfs.iter().filter(|c| *c != DEFAULT_CF).cloned().collect();
+            let non_default: Vec<String> =
+                cfs.iter().filter(|c| *c != DEFAULT_CF).cloned().collect();
             store_cf_registry(&self.inner.path(), false, &non_default)?;
         }
         Ok(())
@@ -2904,11 +3033,8 @@ impl<E: Env> DB<E> {
     }
 
     /// rust-rocksdb `get_opt`.
-    pub fn get_opt(
-        &self,
-        key: impl AsRef<[u8]>,
-        ro: &ReadOptions,
-    ) -> Result<Option<Vec<u8>>> {
+    pub fn get_opt(&self, key: impl AsRef<[u8]>, ro: &ReadOptions) -> Result<Option<Vec<u8>>> {
+        ro.refuse_checksums_off()?;
         let seq = ro.snap.unwrap_or_else(|| self.inner.visible_sequence());
         self.get_at(CoreSnapshot::at(seq), DEFAULT_CF, key)
     }
@@ -2920,6 +3046,7 @@ impl<E: Env> DB<E> {
         key: impl AsRef<[u8]>,
         ro: &ReadOptions,
     ) -> Result<Option<Vec<u8>>> {
+        ro.refuse_checksums_off()?;
         let seq = ro.snap.unwrap_or_else(|| self.inner.visible_sequence());
         self.get_at(CoreSnapshot::at(seq), &cf.name, key)
     }
@@ -3098,20 +3225,30 @@ impl<E: Env> DB<E> {
 
     /// rust-rocksdb `raw_iterator_cf`.
     #[must_use]
-    pub fn raw_iterator_cf(
-        &self,
-        _cf: &ColumnFamily,
-    ) -> DBRawIteratorWithThreadMode<'_, Self, E> {
+    pub fn raw_iterator_cf(&self, _cf: &ColumnFamily) -> DBRawIteratorWithThreadMode<'_, Self, E> {
         self.raw_iterator()
     }
 
-    /// rust-rocksdb `iterator_opt`.
-    pub fn iterator_opt(
+    /// rust-rocksdb `iterator_opt`. Honours snapshot (F180) and refuses
+    /// `set_verify_checksums(false)` (RFC-0062 P1.6).
+    pub fn iterator_opt(&self, mode: IteratorMode<'_>, ro: ReadOptions) -> Result<DBIterator<E>> {
+        ro.refuse_checksums_off()?;
+        let seq = ro.snap.unwrap_or_else(|| self.inner.visible_sequence());
+        let names = self.cf_names();
+        scan_cf_at(&self.inner, &self.codec, DEFAULT_CF, mode, seq, &names)
+    }
+
+    /// rust-rocksdb `iterator_cf_opt`.
+    pub fn iterator_cf_opt(
         &self,
+        cf: &ColumnFamily,
         mode: IteratorMode<'_>,
-        _ro: ReadOptions,
+        ro: ReadOptions,
     ) -> Result<DBIterator<E>> {
-        self.iterator(mode)
+        ro.refuse_checksums_off()?;
+        let seq = ro.snap.unwrap_or_else(|| self.inner.visible_sequence());
+        let names = self.cf_names();
+        scan_cf_at(&self.inner, &self.codec, &cf.name, mode, seq, &names)
     }
 
     /// rust-rocksdb `prefix_iterator`.
@@ -3133,7 +3270,7 @@ impl<E: Env> DB<E> {
     }
 }
 
-impl<E: Env> Drop for DB<E> {
+impl<E: PedraEnv> Drop for DB<E> {
     fn drop(&mut self) {
         if let Some(tx) = self.compact_tx.take() {
             let _ = tx.send(CompactCmd::Shutdown);
@@ -3145,7 +3282,7 @@ impl<E: Env> Drop for DB<E> {
 }
 
 /// Shared resume path (manual [`DB::resume`] and the P1.2 auto tick).
-fn compat_resume<E: Env>(
+fn compat_resume<E: PedraEnv>(
     inner: &ConcurrentDb<E>,
     sink: &Mutex<Option<pedradb_core::FenceRecovery>>,
 ) -> Result<()> {
@@ -3167,7 +3304,7 @@ fn spawn_compact_worker<E>(
     background_error_listener: Option<BackgroundErrorListener>,
 ) -> (Option<SyncSender<CompactCmd>>, Option<JoinHandle<()>>)
 where
-    E: Env + Send + Sync + 'static,
+    E: PedraEnv + Send + Sync + 'static,
     E::File: Send + Sync + 'static,
 {
     let (tx, rx) = mpsc::sync_channel(1);
@@ -3218,6 +3355,15 @@ where
                                 let _ = compat_resume(&inner, &fence_sink);
                             }
                         }
+                        // RFC-0062 P1.1: G1 `lone_commit` drops the write
+                        // lock for `fdatasync`. Fold/stage in that window
+                        // steals the lock from apply. 1c still counts as
+                        // `writes_active() == 1`, so that predicate is not
+                        // enough — skip while a commit is inflight.
+                        if inner.with_read(|db| db.commit_inflight() > 0) {
+                            wait = poll;
+                            continue;
+                        }
                         if !inner.recently_multi(fold_multi_hold) {
                             let _ = inner.try_stage_if_full();
                         }
@@ -3252,7 +3398,7 @@ where
 }
 
 /// One L0→L1 job. I/O runs without the write lock (G5: failed write is not installed).
-fn compat_compact_once<E: Env>(inner: &ConcurrentDb<E>, gate: &Mutex<()>) -> bool {
+fn compat_compact_once<E: PedraEnv>(inner: &ConcurrentDb<E>, gate: &Mutex<()>) -> bool {
     // Only invoked when writers are idle — drain every leftover L0 so a
     // mid-loop compact that hits L0=0 cannot leave a sub-trigger remnant.
     let l0 = inner.with_read(|db| db.level_file_count(0));
@@ -3481,7 +3627,11 @@ mod tests {
                 let mut puts = Vec::with_capacity(per_batch);
                 for _ in 0..per_batch {
                     j += 1;
-                    puts.push(("raftlog", format!("raftlog/{j:08}").into_bytes(), val.clone()));
+                    puts.push((
+                        "raftlog",
+                        format!("raftlog/{j:08}").into_bytes(),
+                        val.clone(),
+                    ));
                 }
                 let dt = t.elapsed().as_nanos();
                 sink += puts.len();
@@ -3503,7 +3653,11 @@ mod tests {
             let mut puts = Vec::with_capacity(per_batch);
             for _ in 0..per_batch {
                 idx += 1;
-                puts.push(("raftlog", format!("raftlog/{idx:08}").into_bytes(), val.clone()));
+                puts.push((
+                    "raftlog",
+                    format!("raftlog/{idx:08}").into_bytes(),
+                    val.clone(),
+                ));
             }
             let before = (
                 rd(&stats.prepare_ns),
@@ -3698,6 +3852,145 @@ mod tests {
     #[test]
     fn default_write_buffer_is_4_mib() {
         assert_eq!(Options::new().write_buffer_size, 4 * 1024 * 1024);
+    }
+
+    /// RFC-0062 P0.3 + P1.6: G2 setters never Ok with CRC/paranoid/skip-any off.
+    #[test]
+    fn g2_setters_are_not_supported() {
+        let d = tmp("g2-verify");
+        let mut opts = Options::new();
+        opts.create_if_missing(true);
+        let db = DB::open(&opts, &d).unwrap();
+        db.put(b"k", b"v").unwrap();
+        let mut ro = ReadOptions::default();
+        ro.set_verify_checksums(false);
+        let err = db.get_opt(b"k", &ro).expect_err("checksums-off must fail");
+        assert_eq!(err.kind(), ErrorKind::NotSupported);
+        let err = db
+            .iterator_opt(IteratorMode::Start, ro)
+            .err()
+            .expect("iterator checksums-off");
+        assert_eq!(err.kind(), ErrorKind::NotSupported);
+        assert_eq!(db.get(b"k").unwrap().as_deref(), Some(&b"v"[..]));
+        drop(db);
+        let _ = std::fs::remove_dir_all(&d);
+
+        let d = tmp("g2-paranoid");
+        let mut opts = Options::new();
+        opts.create_if_missing(true);
+        opts.set_paranoid_checks(false);
+        let err = DB::open(&opts, &d).err().expect("paranoid-off");
+        assert_eq!(err.kind(), ErrorKind::NotSupported);
+        let _ = std::fs::remove_dir_all(&d);
+
+        let d = tmp("g2-skipany");
+        let mut opts = Options::new();
+        opts.create_if_missing(true);
+        opts.set_wal_recovery_mode(WalRecoveryMode::SkipAnyCorruptedRecord);
+        let err = DB::open(&opts, &d).err().expect("skip-any");
+        assert_eq!(err.kind(), ErrorKind::NotSupported);
+        let _ = std::fs::remove_dir_all(&d);
+
+        let d = tmp("g2-nochecksum");
+        let mut opts = Options::new();
+        opts.create_if_missing(true);
+        let mut bb = BlockBasedOptions::default();
+        bb.set_checksum_type(ChecksumType::NoChecksum);
+        opts.set_block_based_table_factory(&bb);
+        let err = DB::open(&opts, &d).err().expect("NoChecksum");
+        assert_eq!(err.kind(), ErrorKind::NotSupported);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// RFC-0062 P1.5: rust-rocksdb Checkpoint + BackupEngine names.
+    #[test]
+    fn checkpoint_and_backup_engine_roundtrip() {
+        use crate::backup::{BackupEngine, BackupEngineOptions, RestoreOptions};
+        use crate::{Checkpoint, Env};
+
+        let d = tmp("ckpt-live");
+        let mut opts = Options::new();
+        opts.create_if_missing(true);
+        opts.set_sync(true);
+        let db = DB::open(&opts, &d).unwrap();
+        db.put(b"k", b"v").unwrap();
+
+        let ckpt = tmp("ckpt-dest");
+        Checkpoint::new(&db)
+            .unwrap()
+            .create_checkpoint(&ckpt)
+            .unwrap();
+        let opened = DB::open(&opts, &ckpt).unwrap();
+        assert_eq!(opened.get(b"k").unwrap().as_deref(), Some(&b"v"[..]));
+        drop(opened);
+
+        // Named-CF checkpoint must copy CFREG or default keys go missing.
+        let d_cf = tmp("ckpt-cf");
+        let db_cf = DB::open_cf(&opts, &d_cf, &["raft"]).unwrap();
+        db_cf.put(b"k", b"v").unwrap();
+        let ckpt_cf = tmp("ckpt-cf-dest");
+        Checkpoint::new(&db_cf)
+            .unwrap()
+            .create_checkpoint(&ckpt_cf)
+            .unwrap();
+        let opened_cf = DB::open_cf(&opts, &ckpt_cf, &["raft"]).unwrap();
+        assert_eq!(
+            opened_cf.get(b"k").unwrap().as_deref(),
+            Some(&b"v"[..]),
+            "checkpoint of a CF db must restore default-CF keys"
+        );
+        drop(opened_cf);
+        drop(db_cf);
+        let _ = std::fs::remove_dir_all(&d_cf);
+        let _ = std::fs::remove_dir_all(&ckpt_cf);
+
+        let backup_root = tmp("backup-root");
+        let env = Env::new().unwrap();
+        let backup_opts = BackupEngineOptions::new(&backup_root).unwrap();
+        let mut engine = BackupEngine::open(&backup_opts, &env).unwrap();
+        engine.create_new_backup_flush(&db, true).unwrap();
+        let info = engine.get_backup_info();
+        assert_eq!(info.len(), 1);
+        engine.verify_backup(info[0].backup_id).unwrap();
+
+        drop(db);
+        let restore = tmp("backup-restore");
+        let ropts = RestoreOptions::default();
+        engine
+            .restore_from_latest_backup(&restore, &restore, &ropts)
+            .unwrap();
+        let restored = DB::open(&opts, &restore).unwrap();
+        assert_eq!(restored.get(b"k").unwrap().as_deref(), Some(&b"v"[..]));
+        drop(restored);
+        let _ = std::fs::remove_dir_all(&d);
+        let _ = std::fs::remove_dir_all(&ckpt);
+        let _ = std::fs::remove_dir_all(&backup_root);
+        let _ = std::fs::remove_dir_all(&restore);
+    }
+
+    /// iterator_opt must pin the snapshot (F180 class on the non-raw path).
+    #[test]
+    fn iterator_opt_honours_snapshot() {
+        let d = tmp("iter-opt-snap");
+        let mut opts = Options::new();
+        opts.create_if_missing(true);
+        let db = DB::open(&opts, &d).unwrap();
+        db.put(b"a", b"1").unwrap();
+        let snap = db.snapshot();
+        db.put(b"b", b"2").unwrap();
+        let mut ro = ReadOptions::default();
+        ro.set_snapshot(&SnapshotWithThreadMode::<DB>::at(snap.snap.sequence()));
+        let it = db.iterator_opt(IteratorMode::Start, ro).unwrap();
+        let mut keys = Vec::new();
+        let mut it = it;
+        while it.valid() {
+            keys.push(it.key().to_vec());
+            it.next();
+        }
+        assert_eq!(keys, vec![b"a".to_vec()], "post-snapshot put must not leak");
+        drop(snap);
+        drop(db);
+        let _ = std::fs::remove_dir_all(&d);
     }
 
     /// RFC-0058 P1.1: `open_verified` pins `StdEnv` (the type is the
@@ -4625,6 +4918,84 @@ mod tests {
             .unwrap()
             .expect("replay");
         assert_eq!(got.len(), 1024);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn write_cf_owned_warms_named_get_tls() {
+        let dir = tmp("cfowned-tls");
+        let db = DB::open_cf(&g1_opts(), &dir, &["raftlog"]).unwrap();
+        let mut puts = Vec::new();
+        for i in 1u8..=16 {
+            puts.push((
+                "raftlog",
+                format!("raftlog/{i:08}").into_bytes(),
+                vec![i; 100],
+            ));
+        }
+        let syncs_before = db.inner.wal_sync_count();
+        db.write_cf_owned(puts, vec![]).unwrap();
+        assert_eq!(
+            db.inner.wal_sync_count().saturating_sub(syncs_before),
+            1,
+            "G1 raftlog batch is one WAL barrier, not 16"
+        );
+        let got = db
+            .get_named("raftlog", b"raftlog/00000016")
+            .unwrap()
+            .expect("last of batch");
+        assert_eq!(got.len(), 100);
+        assert_eq!(got[0], 16);
+        // Bench reads idx-1 after a 16-append (every 8th op).
+        let prev = db
+            .get_named("raftlog", b"raftlog/00000015")
+            .unwrap()
+            .expect("idx-1 of batch");
+        assert_eq!(prev[0], 15);
+        assert!(
+            db.last_cf_is_hot("raftlog", b"raftlog/00000015"),
+            "idx-1 must be a TLS hit (LAST_RING holds the 16-key batch)"
+        );
+        for i in 1u8..=16 {
+            assert!(
+                db.last_cf_is_hot("raftlog", format!("raftlog/{i:08}").as_bytes()),
+                "key {i} of the 16-append batch must stay TLS-hot"
+            );
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0062 P1.1: 16 identical raftlog payloads stay readable (WAL v2 intern).
+    #[test]
+    fn write_cf_owned_sixteen_same_payload_roundtrip() {
+        let dir = tmp("cfowned-intern");
+        let db = DB::open_cf(&g1_opts(), &dir, &["raftlog"]).unwrap();
+        let val = vec![b'r'; 100];
+        let puts: Vec<_> = (1..=16)
+            .map(|i| {
+                (
+                    "raftlog",
+                    format!("raftlog/{i:08}").into_bytes(),
+                    val.clone(),
+                )
+            })
+            .collect();
+        db.write_cf_owned(puts, vec![]).unwrap();
+        for i in 1..=16 {
+            let got = db
+                .get_named("raftlog", format!("raftlog/{i:08}").as_bytes())
+                .unwrap()
+                .expect("interned put");
+            assert_eq!(got, val);
+        }
+        drop(db);
+        let db = DB::open_cf(&g1_opts(), &dir, &["raftlog"]).unwrap();
+        assert_eq!(
+            db.get_named("raftlog", b"raftlog/00000016")
+                .unwrap()
+                .as_deref(),
+            Some(val.as_slice())
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 

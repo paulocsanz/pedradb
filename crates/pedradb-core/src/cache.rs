@@ -422,6 +422,12 @@ impl<V: Clone> AnswerCache<V> {
             g.map.remove(k);
         }
     }
+
+    /// No cached answers (RFC-0062 P0.4: skip per-key dirty clones).
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.inner.lock().map.is_empty()
+    }
 }
 
 /// One side of a cached count window: `None` = unbounded,
@@ -768,6 +774,12 @@ impl CountCache {
         g.env_lo = EnvSide::Empty;
         g.env_hi = EnvSide::Empty;
         g.dropped_below_max = 0;
+    }
+
+    /// No cached count windows (RFC-0062 P0.4: skip per-key dirty clones).
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.state.lock().map.is_empty()
     }
 }
 

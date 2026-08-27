@@ -470,3 +470,61 @@ fn compat_auto_resume_transient_only() {
     db.put(b"c", b"3").expect("put after manual resume");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// Snapshot iterator must not leak later puts (F180 class on the compat face).
+#[test]
+fn adversarial_snapshot_iterator_no_leak() {
+    let dir = tmp("snap-iter", 7);
+    let db = DB::open_cf_with_env(&g1_opts(), &dir, &["raft"], FailingEnv::passing()).unwrap();
+    db.put(b"a", b"1").unwrap();
+    let snap = db.snapshot();
+    db.put(b"b", b"2").unwrap();
+    assert_eq!(snap.get(b"a").unwrap().as_deref(), Some(&b"1"[..]));
+    assert_eq!(snap.get(b"b").unwrap(), None, "snapshot leaked later put");
+    let mut it = snap.iterator(IteratorMode::Start).unwrap();
+    let mut keys = Vec::new();
+    while it.valid() {
+        keys.push(it.key().to_vec());
+        it.next();
+    }
+    assert_eq!(keys, vec![b"a".to_vec()]);
+    assert_eq!(db.get(b"b").unwrap().as_deref(), Some(&b"2"[..]));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// `delete_file_in_range` is tombstone+compact, never silent unlink.
+#[test]
+fn adversarial_delete_file_in_range_is_tombstone() {
+    let dir = tmp("dfr", 1);
+    let db = DB::open_cf_with_env(&g1_opts(), &dir, &[], FailingEnv::passing()).unwrap();
+    db.put(b"a", b"1").unwrap();
+    db.put(b"b", b"2").unwrap();
+    db.put(b"c", b"3").unwrap();
+    db.delete_file_in_range(b"a", b"c").unwrap();
+    assert_eq!(db.get(b"a").unwrap(), None);
+    assert_eq!(db.get(b"b").unwrap(), None);
+    assert_eq!(db.get(b"c").unwrap().as_deref(), Some(&b"3"[..]));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Merge operator through the compat face is get+full_merge+put (atomic).
+#[test]
+fn adversarial_merge_operator_roundtrip() {
+    use rocksdb_compat::MergeOperands;
+
+    let dir = tmp("merge", 2);
+    let mut opts = g1_opts();
+    opts.set_merge_operator_associative("concat", |_k, existing, ops: &MergeOperands| {
+        let mut out = existing.unwrap_or(&[]).to_vec();
+        for o in ops.iter() {
+            out.extend_from_slice(o);
+        }
+        Some(out)
+    });
+    let db = DB::open_cf_with_env(&opts, &dir, &[], FailingEnv::passing()).unwrap();
+    db.put(b"k", b"a").unwrap();
+    db.merge(b"k", b"b").unwrap();
+    db.merge(b"k", b"c").unwrap();
+    assert_eq!(db.get(b"k").unwrap().as_deref(), Some(&b"abc"[..]));
+    let _ = std::fs::remove_dir_all(&dir);
+}
