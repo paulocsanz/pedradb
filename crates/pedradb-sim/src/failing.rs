@@ -317,6 +317,12 @@ impl<E: Env> FailingEnv<E> {
         self.state.delay_ticks.set(0);
     }
 
+    /// Inner env (crash image, production FS, …).
+    #[must_use]
+    pub fn inner(&self) -> &E {
+        &self.inner
+    }
+
     /// Whether an injection actually refused an op (or short-wrote).
     #[must_use]
     pub fn tripped(&self) -> bool {

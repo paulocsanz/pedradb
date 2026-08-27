@@ -248,6 +248,37 @@ TCB_FREEZE_ALLOWLIST = {
     ),
 }
 
+ISLAND_CRATES = ("pedradb-posix", "pedradb-io-uring", "pedradb-capi")
+RFC_0061 = "docs/rfc/0061-residuals-sel4-ironfleet.md"
+
+
+def decision_kernel_paths(root: Path) -> list[Path]:
+    return sorted(
+        p
+        for p in (root / "crates").glob("*/src/**/*_kernel.rs")
+        if p.is_file() and "verus" not in p.parts
+    )
+
+
+def file_loc(path: Path) -> int:
+    return len(path.read_text(encoding="utf-8", errors="replace").splitlines())
+
+
+def glue_loc(root: Path, catalog: dict) -> tuple[int, int, int]:
+    """Kernel-file count, kernel LOC, unique-caller handler LOC."""
+    kernels = decision_kernel_paths(root)
+    kernel_loc = sum(file_loc(p) for p in kernels)
+    handlers: set[str] = set()
+    for pair in catalog.get("pairs", []):
+        for c in pair.get("callers") or []:
+            handlers.add(c)
+    handler_loc = 0
+    for rel in handlers:
+        p = root / rel
+        if p.is_file():
+            handler_loc += file_loc(p)
+    return len(kernels), kernel_loc, handler_loc
+
 
 def check_tcb_freeze(root: Path, catalog: dict, r: Report) -> None:
     print("== tcb freeze (RFC-0056 P2.5) ==")
@@ -255,11 +286,7 @@ def check_tcb_freeze(root: Path, catalog: dict, r: Report) -> None:
     for clone in catalog.get("clones", []):
         registered.add(clone["a"])
         registered.add(clone["b"])
-    frozen = sorted(
-        str(p.relative_to(root))
-        for p in (root / "crates").glob("*/src/**/*_kernel.rs")
-        if p.is_file() and "verus" not in p.parts
-    )
+    frozen = [str(p.relative_to(root)) for p in decision_kernel_paths(root)]
     before = len(r.failed)
     for k in frozen:
         if k in registered:
@@ -289,6 +316,155 @@ def check_tcb_freeze(root: Path, catalog: dict, r: Report) -> None:
             r.fail(f"tcb freeze: data_fate pair {pair['id']} lacks {', '.join(missing)}")
     if len(r.failed) == before:
         r.good(f"tcb freeze: {len(frozen)} decision kernels accounted for")
+
+
+RESIDUAL_CLASSES = {"never", "continuous", "parked", "open"}
+
+
+def check_residuals(
+    root: Path,
+    r: Report,
+    catalog: dict | None = None,
+    residuals_path: Path | None = None,
+    rfc_path: Path | None = None,
+) -> None:
+    """RFC-0061: residual catalog is well-formed; scripts exist; never-floor holds."""
+    print("== residuals freeze (RFC-0061) ==")
+    path = residuals_path or (root / "scripts/formal/residuals.json")
+    rfc = rfc_path or (root / RFC_0061)
+    before = len(r.failed)
+    if not path.is_file():
+        r.fail("residuals freeze: missing scripts/formal/residuals.json")
+        return
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as e:
+        r.fail(f"residuals freeze: invalid JSON: {e}")
+        return
+    rows = data.get("residuals")
+    if not isinstance(rows, list) or not rows:
+        r.fail("residuals freeze: residuals must be a non-empty list")
+        return
+    seen: set[str] = set()
+    classes_seen: set[str] = set()
+    never_ids: set[str] = set()
+    island_crates: set[str] = set()
+    rfc_dir = root / "docs/rfc"
+    for i, row in enumerate(rows):
+        if not isinstance(row, dict):
+            r.fail(f"residuals freeze: row {i} is not an object")
+            continue
+        rid = row.get("id")
+        title = row.get("title")
+        klass = row.get("class")
+        owner = row.get("owner")
+        close = row.get("close")
+        if not all(isinstance(x, str) and x.strip() for x in (rid, title, klass, owner, close)):
+            r.fail(f"residuals freeze: row {i} missing id/title/class/owner/close")
+            continue
+        if rid in seen:
+            r.fail(f"residuals freeze: duplicate id {rid}")
+        seen.add(rid)
+        if klass not in RESIDUAL_CLASSES:
+            r.fail(f"residuals freeze: {rid} class {klass!r} not in {sorted(RESIDUAL_CLASSES)}")
+            continue
+        classes_seen.add(klass)
+        if klass == "never":
+            never_ids.add(rid)
+        matches = list(rfc_dir.glob(f"{owner}-*.md")) + list(rfc_dir.glob(f"{owner}*.md"))
+        if not matches:
+            r.fail(f"residuals freeze: {rid} owner RFC {owner} has no docs/rfc/{owner}*.md")
+        for key in ("script", "safety"):
+            rel = row.get(key)
+            if rel is None:
+                continue
+            if not isinstance(rel, str) or not (root / rel).is_file():
+                r.fail(f"residuals freeze: {rid} {key} {rel!r} is not a file")
+        crate = row.get("crate")
+        if crate in ISLAND_CRATES:
+            island_crates.add(crate)
+            blob = f"{title} {close}".lower()
+            if "safety.md" not in blob or not any(w in blob for w in ("forall", "∀", "for all")):
+                r.fail(
+                    f"residuals freeze: {rid} must name SAFETY.md and that it is not a forall proof"
+                )
+            if not row.get("script") or not row.get("safety"):
+                r.fail(f"residuals freeze: {rid} island row needs script+safety")
+        if rid == "R-tcg-guest":
+            script = row.get("script") or ""
+            blob = f"{title} {close} {row.get('mechanism') or ''}"
+            if Path(script).name != "tcg_guest_status.sh":
+                r.fail(f"residuals freeze: {rid} script must be tcg_guest_status.sh (got {script!r})")
+            if "C2.2" not in blob or "residual_no_guest" not in blob:
+                r.fail(f"residuals freeze: {rid} must name C2.2=residual_no_guest")
+            tcg = (root / script) if script else None
+            if tcg and tcg.is_file():
+                src = tcg.read_text(encoding="utf-8", errors="replace")
+                if "TCG_REQUIRED" not in src or "FAIL_no_guest" not in src:
+                    r.fail(f"residuals freeze: {script} must fail-close when TCG_REQUIRED=1")
+
+    for need in ("never", "continuous"):
+        if need not in classes_seen:
+            r.fail(f"residuals freeze: catalog missing any {need!r} row")
+    for crate in ISLAND_CRATES:
+        if crate not in island_crates:
+            r.fail(f"residuals freeze: missing unsafe island row for {crate}")
+
+    floor = data.get("never_floor")
+    if not isinstance(floor, list) or not all(isinstance(x, str) for x in floor):
+        r.fail("residuals freeze: never_floor must be a list of ids")
+    else:
+        floor_set = set(floor)
+        if floor_set != never_ids:
+            missing = sorted(floor_set - never_ids)
+            extra = sorted(never_ids - floor_set)
+            if missing:
+                r.fail(
+                    f"residuals freeze: never id(s) disappeared {missing} "
+                    "(edit never_floor and RFC-0061 together — RFC-0061 P2.1)"
+                )
+            if extra:
+                r.fail(f"residuals freeze: never id(s) not in never_floor {extra}")
+        rfc_text = rfc.read_text(encoding="utf-8") if rfc.is_file() else ""
+        if not rfc.is_file():
+            r.fail(f"residuals freeze: missing {RFC_0061}")
+        else:
+            for nid in sorted(floor_set):
+                if nid not in rfc_text:
+                    r.fail(
+                        f"residuals freeze: never id {nid} missing from {RFC_0061} "
+                        "(P2.1: catalog and RFC must both change)"
+                    )
+
+    glue = data.get("glue")
+    if not isinstance(glue, dict):
+        r.fail("residuals freeze: glue object required (RFC-0061 P1.3)")
+    else:
+        if glue.get("db_rs_extracted") is not False:
+            r.fail("residuals freeze: glue.db_rs_extracted must be false (do not extract db.rs)")
+        cat = catalog
+        if cat is None:
+            cat_path = root / "scripts/formal/catalog.json"
+            cat = json.loads(cat_path.read_text(encoding="utf-8")) if cat_path.is_file() else {"pairs": []}
+        n_files, k_loc, h_loc = glue_loc(root, cat)
+        for key, live in (
+            ("kernel_files", n_files),
+            ("kernel_loc", k_loc),
+            ("handler_loc", h_loc),
+        ):
+            got = glue.get(key)
+            if got != live:
+                r.fail(
+                    f"residuals freeze: glue.{key}={got!r} != live {live} "
+                    "(recompute; do not extract db.rs)"
+                )
+        for pair in cat.get("pairs", []):
+            k = pair.get("kernel") or ""
+            if Path(k).name == "db.rs":
+                r.fail(f"residuals freeze: kernel {k} extracts db.rs — refused")
+
+    if len(r.failed) == before:
+        r.good(f"residuals freeze: {len(seen)} rows")
 
 
 TWIN_KINDS = {"close", "atom", "model"}
@@ -803,6 +979,7 @@ def main() -> int:
     if args.lint or run_ci:
         check_lint(root, catalog, r)
         check_tcb_freeze(root, catalog, r)
+        check_residuals(root, r, catalog)
     if args.clones or run_ci:
         check_clones(root, catalog, r)
     if args.twins or run_ci:

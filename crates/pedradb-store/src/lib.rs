@@ -64,8 +64,8 @@ pub use client::{
     SnapshotTx, TcpClusterClient, Transaction, MAX_SNAPSHOT_LAG,
 };
 pub use commit_kernel::{
-    may_commit_at, may_commit_at_as_is, propose_ack_ok, propose_ack_ok_as_is, recover_commit,
-    recover_commit_as_is,
+    joint_election_ok, joint_election_ok_as_is, majority_of, may_commit_at, may_commit_at_as_is,
+    propose_ack_ok, propose_ack_ok_as_is, recover_commit, recover_commit_as_is,
 };
 pub use compact_kernel::{
     compact_index_floor, compact_ready, may_compact_through, may_compact_through_as_is,
@@ -514,6 +514,16 @@ pub enum RangeEntry {
         txn_id: u64,
         /// User keys to revert in this range.
         keys: Vec<Vec<u8>>,
+    },
+    /// Log-carried membership (RFC-0063 P0). Joint: while this entry is
+    /// uncommitted, a commit quorum is majority(`old`) ∧ majority(`new`).
+    /// After apply, cluster voters become `new`. Out-of-band
+    /// [`StoreCluster::remove_member`] still uses the quorum floor.
+    MembershipJoint {
+        /// Voters at propose time.
+        old: Vec<u64>,
+        /// Target voters (one add or remove relative to `old` in P0).
+        new: Vec<u64>,
     },
 }
 
@@ -1079,8 +1089,37 @@ fn encode_entry(e: &RangeEntry) -> Vec<u8> {
                 encode_bytes(&mut b, k);
             }
         }
+        RangeEntry::MembershipJoint { old, new } => {
+            b.push(14);
+            encode_u64_list(&mut b, old);
+            encode_u64_list(&mut b, new);
+        }
     }
     b
+}
+
+fn encode_u64_list(b: &mut Vec<u8>, ids: &[u64]) {
+    b.extend_from_slice(&(ids.len() as u32).to_le_bytes());
+    for id in ids {
+        b.extend_from_slice(&id.to_le_bytes());
+    }
+}
+
+fn decode_u64_list(buf: &[u8], off: &mut usize) -> Result<Vec<u64>> {
+    if *off + 4 > buf.len() {
+        return Err(StoreError::Msg("id list count eof".into()));
+    }
+    let n = u32::from_le_bytes(buf[*off..*off + 4].try_into().unwrap()) as usize;
+    *off += 4;
+    if n > 1024 || *off + n.saturating_mul(8) > buf.len() {
+        return Err(StoreError::Msg("id list too large".into()));
+    }
+    let mut ids = Vec::with_capacity(n);
+    for _ in 0..n {
+        ids.push(u64::from_le_bytes(buf[*off..*off + 8].try_into().unwrap()));
+        *off += 8;
+    }
+    Ok(ids)
 }
 
 fn decode_key_list(buf: &[u8], off: &mut usize) -> Result<Vec<Vec<u8>>> {
@@ -1244,6 +1283,11 @@ fn decode_entry(buf: &[u8], off: &mut usize) -> Result<RangeEntry> {
             *off += 8;
             let keys = decode_key_list(buf, off)?;
             Ok(RangeEntry::TxnRevert { txn_id, keys })
+        }
+        14 => {
+            let old = decode_u64_list(buf, off)?;
+            let new = decode_u64_list(buf, off)?;
+            Ok(RangeEntry::MembershipJoint { old, new })
         }
         t => Err(StoreError::Msg(format!("bad entry tag {t}"))),
     }
@@ -2005,6 +2049,9 @@ pub struct StoreCluster<E: Env = IoUringEnv> {
     /// a shared (range, term) counter pooled grants across candidates
     /// and elected a leader without its own majority (seed 503976).
     election_votes: HashMap<(u64, u64, u64), u64>,
+    /// Voter ids that granted (range, term, candidate). Joint elections
+    /// need the set, not just a count (RFC-0064).
+    election_granted: HashMap<(u64, u64, u64), Vec<u64>>,
     /// Logical time (World/DST); each [`Self::tick`] / [`Self::advance_time`] advances it.
     /// Raft election/heartbeat counters are pure functions of this — no wall clock.
     logical_now: u64,
@@ -2233,6 +2280,7 @@ impl StoreCluster<IoUringEnv> {
             rpc_mode: RpcMode::Queued,
             outbound: VecDeque::new(),
             election_votes: HashMap::new(),
+            election_granted: HashMap::new(),
             logical_now: 0,
             now_ms: 0,
             persisted_now_ms: 0,
@@ -2397,6 +2445,7 @@ impl<E: Env> StoreCluster<E> {
             rpc_mode: RpcMode::Direct,
             outbound: VecDeque::new(),
             election_votes: HashMap::new(),
+            election_granted: HashMap::new(),
             logical_now: 0,
             now_ms: 0,
             persisted_now_ms: 0,
@@ -2450,7 +2499,8 @@ impl<E: Env> StoreCluster<E> {
     /// and refuse a node directory that already belongs to another cluster.
     fn bind_cluster_identity(&mut self, configured: Option<[u8; 16]>) -> Result<()> {
         let mut disk: Option<(u64, [u8; 16])> = None;
-        let nids: Vec<u64> = self.nodes.keys().copied().collect();
+        let mut nids: Vec<u64> = self.nodes.keys().copied().collect();
+        nids.sort_unstable();
         for nid in &nids {
             let Some(node) = self.nodes.get(nid) else {
                 continue;
@@ -2490,10 +2540,16 @@ impl<E: Env> StoreCluster<E> {
     }
 
     fn persist_cluster_identity(&mut self) -> Result<()> {
+        let ids = self.ids.clone();
+        self.persist_cluster_identity_with(&ids)
+    }
+
+    fn persist_cluster_identity_with(&mut self, ids: &[u64]) -> Result<()> {
         let id_key = cluster_id_key();
         let mem_key = cluster_membership_key();
-        let mem_val = encode_membership(&self.ids);
-        let nids: Vec<u64> = self.nodes.keys().copied().collect();
+        let mem_val = encode_membership(ids);
+        let mut nids: Vec<u64> = self.nodes.keys().copied().collect();
+        nids.sort_unstable();
         for nid in nids {
             let Some(node) = self.nodes.get_mut(&nid) else {
                 continue;
@@ -2842,7 +2898,12 @@ impl<E: Env> StoreCluster<E> {
                  needs a log-carried config change"
             )));
         }
-        self.ids.retain(|&id| id != node_id);
+        // Persist the shrunken set *before* mutating RAM. A FailingEnv trip
+        // after retain used to leave World with rm_member_err while the
+        // voting set had already shrunk (fail-open membership).
+        let next_ids: Vec<u64> = self.ids.iter().copied().filter(|&id| id != node_id).collect();
+        self.persist_cluster_identity_with(&next_ids)?;
+        self.ids = next_ids;
         if let Some(n) = self.nodes.get_mut(&node_id) {
             n.participating = false;
             for p in n.ranges.values_mut() {
@@ -2867,7 +2928,6 @@ impl<E: Env> StoreCluster<E> {
                 }
             }
         }
-        self.persist_cluster_identity()?;
         Ok(())
     }
 
@@ -2882,8 +2942,11 @@ impl<E: Env> StoreCluster<E> {
         if self.ids.contains(&node_id) {
             return Ok(());
         }
-        self.ids.push(node_id);
-        self.ids.sort_unstable();
+        let mut next_ids = self.ids.clone();
+        next_ids.push(node_id);
+        next_ids.sort_unstable();
+        self.persist_cluster_identity_with(&next_ids)?;
+        self.ids = next_ids;
         self.membership_high_water = self.membership_high_water.max(self.ids.len());
         {
             let n = self.nodes.get_mut(&node_id).unwrap();
@@ -2917,8 +2980,97 @@ impl<E: Env> StoreCluster<E> {
                 }
             }
         }
-        self.persist_cluster_identity()?;
         Ok(())
+    }
+
+    /// Log-carried single remove (RFC-0063 P0 joint). Commits under
+    /// majority(`old`) ∧ majority(`new`); out-of-band [`Self::remove_member`]
+    /// still hits the quorum floor. One joint entry may be in flight.
+    ///
+    /// # Errors
+    /// Unknown node / empty membership / no leader / joint already pending.
+    pub fn remove_member_joint(&mut self, node_id: u64) -> Result<()> {
+        if !self.nodes.contains_key(&node_id) {
+            return Err(StoreError::Msg("remove_member_joint: unknown node".into()));
+        }
+        if !self.ids.contains(&node_id) {
+            return Ok(());
+        }
+        if self.ids.len() <= 1 {
+            return Err(StoreError::Msg(
+                "remove_member_joint: cannot empty membership".into(),
+            ));
+        }
+        let rid = self.ranges.first().map(|r| r.id).unwrap_or(1);
+        let leader = self
+            .range_leader(rid)
+            .ok_or_else(|| StoreError::NotLeader {
+                range_id: rid,
+                leader: None,
+            })?;
+        if let Some(p) = self
+            .nodes
+            .get(&leader)
+            .and_then(|n| n.ranges.get(&rid))
+        {
+            if Self::pending_joint_on(p).is_some() {
+                return Err(StoreError::Msg(
+                    "remove_member_joint: a joint config is already in flight".into(),
+                ));
+            }
+        }
+        let old = self.ids.clone();
+        let new: Vec<u64> = old.iter().copied().filter(|&id| id != node_id).collect();
+        self.broadcast_append(
+            rid,
+            leader,
+            Some(RangeEntry::MembershipJoint { old, new }),
+        )
+    }
+
+    /// Log-carried add (RFC-0064). Same joint quorum as
+    /// [`Self::remove_member_joint`]. The joining node must already exist
+    /// in this process (previously removed, or opened then dropped).
+    ///
+    /// # Errors
+    /// Unknown node / already a member / no leader / joint in flight.
+    pub fn add_member_joint(&mut self, node_id: u64) -> Result<()> {
+        if !self.nodes.contains_key(&node_id) {
+            return Err(StoreError::Msg("add_member_joint: unknown node".into()));
+        }
+        if self.ids.contains(&node_id) {
+            return Ok(());
+        }
+        let rid = self.ranges.first().map(|r| r.id).unwrap_or(1);
+        let leader = self
+            .range_leader(rid)
+            .ok_or_else(|| StoreError::NotLeader {
+                range_id: rid,
+                leader: None,
+            })?;
+        if let Some(p) = self
+            .nodes
+            .get(&leader)
+            .and_then(|n| n.ranges.get(&rid))
+        {
+            if Self::pending_joint_on(p).is_some() {
+                return Err(StoreError::Msg(
+                    "add_member_joint: a joint config is already in flight".into(),
+                ));
+            }
+        }
+        if let Some(n) = self.nodes.get_mut(&node_id) {
+            n.participating = true;
+        }
+        let old = self.ids.clone();
+        let mut new = old.clone();
+        new.push(node_id);
+        new.sort_unstable();
+        self.broadcast_append(
+            rid,
+            leader,
+            Some(RangeEntry::MembershipJoint { old, new }),
+        )
     }
 
     /// Whether `node_id` is in the current Raft membership set.
@@ -2966,6 +3118,51 @@ impl<E: Env> StoreCluster<E> {
             Err(e) => {
                 return Err(StoreError::from(e));
             }
+        };
+        if let Some(raw) = db.get(&cluster_id_key()) {
+            let found = decode_cluster_id(&raw)?;
+            if found != self.cluster_id {
+                return Err(StoreError::ClusterMismatch {
+                    node_id,
+                    expected: self.cluster_id,
+                    found,
+                });
+            }
+        } else {
+            db.put(cluster_id_key(), self.cluster_id.as_slice())?;
+        }
+        let mut rmap = HashMap::new();
+        for meta in &self.ranges {
+            rmap.insert(meta.id, load_range_peer(&db, meta.id, node_id, &self.ids)?);
+        }
+        self.nodes.insert(
+            node_id,
+            StoreNode {
+                db,
+                ranges: rmap,
+                participating,
+            },
+        );
+        Ok(())
+    }
+
+    /// Process-crash reopen: drop the live engine **without** [`Db::close`]
+    /// (close flushes the WAL — a clean shutdown). The caller must already
+    /// have dropped unsynced env bytes (`RecordingEnv::crash` on Mem).
+    ///
+    /// # Errors
+    /// Unknown node / reopen / cluster-id mismatch.
+    pub fn crash_reopen_engine_on(&mut self, node_id: u64, env: E) -> Result<()> {
+        let n = self
+            .nodes
+            .remove(&node_id)
+            .ok_or_else(|| StoreError::Msg(format!("crash_reopen: unknown node {node_id}")))?;
+        let path = n.db.path().to_path_buf();
+        let participating = n.participating;
+        drop(n.db);
+        let mut db = match Db::open_with_env(&path, self.engine_opts, env) {
+            Ok(db) => db,
+            Err(e) => return Err(StoreError::from(e)),
         };
         if let Some(raw) = db.get(&cluster_id_key()) {
             let found = decode_cluster_id(&raw)?;
@@ -3059,6 +3256,7 @@ impl<E: Env> StoreCluster<E> {
         if mode == RpcMode::Direct {
             self.outbound.clear();
             self.election_votes.clear();
+            self.election_granted.clear();
         }
     }
 
@@ -3544,7 +3742,6 @@ impl<E: Env> StoreCluster<E> {
         if !self.is_participating(cand) {
             return Ok(());
         }
-        let ids = self.ids.clone();
         let j = self.next_rand() % 3;
         let (term, last_i, last_t) = {
             let n = self.nodes.get_mut(&cand).unwrap();
@@ -3571,11 +3768,12 @@ impl<E: Env> StoreCluster<E> {
             }
             (t, li, lt)
         };
-        // Self-vote; majority of configured membership.
+        // Self-vote; joint majority of C-old ∧ C-new (RFC-0064).
         self.election_votes.insert((rid, term, cand), 1);
-        let maj = (ids.len() as u64) / 2 + 1;
-        for &pid in &ids {
-            if pid == cand || !self.is_participating(pid) {
+        self.election_granted.insert((rid, term, cand), vec![cand]);
+        let targets = self.vote_targets();
+        for pid in targets {
+            if pid == cand || !self.nodes.contains_key(&pid) {
                 continue;
             }
             let msg = PeerMsg::RequestVote {
@@ -3587,23 +3785,17 @@ impl<E: Env> StoreCluster<E> {
             };
             self.send_peer_rpc(cand, pid, msg)?;
         }
-        // Direct mode already applied votes via replies; check majority now.
-        // Queued mode waits for handle_inbound of RequestVoteReply.
-        if self.rpc_mode == RpcMode::Direct {
-            let votes = self
-                .election_votes
-                .get(&(rid, term, cand))
-                .copied()
-                .unwrap_or(1);
-            if votes >= maj {
-                self.try_become_leader(rid, cand, term)?;
-            }
+        if self.rpc_mode == RpcMode::Direct && self.election_has_joint_quorum(rid, term, cand) {
+            self.try_become_leader(rid, cand, term)?;
         }
         Ok(())
     }
 
     fn try_become_leader(&mut self, rid: u64, cand: u64, term: u64) -> Result<()> {
-        let ids = self.ids.clone();
+        if !self.election_has_joint_quorum(rid, term, cand) {
+            return Ok(());
+        }
+        let ids = self.vote_targets();
         let promoted = {
             let n = self.nodes.get_mut(&cand).unwrap();
             let p = n.ranges.get_mut(&rid).unwrap();
@@ -3634,6 +3826,7 @@ impl<E: Env> StoreCluster<E> {
         };
         if promoted {
             self.election_votes.remove(&(rid, term, cand));
+            self.election_granted.remove(&(rid, term, cand));
             self.metrics.elections = self.metrics.elections.saturating_add(1);
             let leader = self.range_leader(rid);
             self.live.notify_leader(rid, leader);
@@ -3810,7 +4003,7 @@ impl<E: Env> StoreCluster<E> {
     fn on_request_vote_reply(
         &mut self,
         cand: u64,
-        _from: u64,
+        from: u64,
         range_id: u64,
         term: u64,
         vote_granted: bool,
@@ -3831,6 +4024,7 @@ impl<E: Env> StoreCluster<E> {
                 // keeping Candidate/Leader of the old term).
                 let _ = durable_become_follower_if_newer(&mut n.db, range_id, p, term);
                 self.election_votes.remove(&(range_id, p.term, cand));
+                self.election_granted.remove(&(range_id, p.term, cand));
                 return Ok(());
             }
             if p.role != Role::Candidate || p.term != term {
@@ -3843,14 +4037,15 @@ impl<E: Env> StoreCluster<E> {
                 .entry((range_id, term, cand))
                 .or_insert(1);
             *votes = votes.saturating_add(1);
+            let granted = self
+                .election_granted
+                .entry((range_id, term, cand))
+                .or_default();
+            if !granted.contains(&from) {
+                granted.push(from);
+            }
         }
-        let maj = (self.ids.len() as u64) / 2 + 1;
-        let votes = self
-            .election_votes
-            .get(&(range_id, term, cand))
-            .copied()
-            .unwrap_or(1);
-        if votes >= maj {
+        if self.election_has_joint_quorum(range_id, term, cand) {
             self.try_become_leader(range_id, cand, term)?;
         }
         Ok(())
@@ -4053,9 +4248,74 @@ impl<E: Env> StoreCluster<E> {
         Ok(())
     }
 
+    fn replication_count(p: &RangePeer, leader: u64, ids: &[u64], idx: u64) -> usize {
+        ids.iter()
+            .filter(|&&pid| {
+                if pid == leader {
+                    true
+                } else {
+                    p.match_index.get(&pid).copied().unwrap_or(0) >= idx
+                }
+            })
+            .count()
+    }
+
+    fn pending_joint_on(p: &RangePeer) -> Option<(u64, Vec<u64>, Vec<u64>)> {
+        p.log.iter().find_map(|rec| {
+            if rec.index > p.commit {
+                if let RangeEntry::MembershipJoint { old, new } = &rec.entry {
+                    return Some((rec.index, old.clone(), new.clone()));
+                }
+            }
+            None
+        })
+    }
+
+    fn pending_joint(&self) -> Option<(Vec<u64>, Vec<u64>)> {
+        for n in self.nodes.values() {
+            for p in n.ranges.values() {
+                if let Some((_, old, new)) = Self::pending_joint_on(p) {
+                    return Some((old, new));
+                }
+            }
+        }
+        None
+    }
+
+    fn vote_targets(&self) -> Vec<u64> {
+        let mut t = self.ids.clone();
+        if let Some((old, new)) = self.pending_joint() {
+            t.extend(old);
+            t.extend(new);
+        }
+        t.sort_unstable();
+        t.dedup();
+        t
+    }
+
+    fn election_has_joint_quorum(&self, rid: u64, term: u64, cand: u64) -> bool {
+        let granted = self
+            .election_granted
+            .get(&(rid, term, cand))
+            .cloned()
+            .unwrap_or_default();
+        let old = self
+            .pending_joint()
+            .map(|(o, _)| o)
+            .unwrap_or_else(|| self.ids.clone());
+        let new = self.pending_joint().map(|(_, n)| n);
+        let old_yes = old.iter().filter(|id| granted.contains(id)).count() as u64;
+        let new_yes = new.as_ref().map(|n| {
+            (
+                n.iter().filter(|id| granted.contains(id)).count() as u64,
+                n.len() as u64,
+            )
+        });
+        commit_kernel::joint_election_ok(old_yes, old.len() as u64, new_yes)
+    }
+
     fn try_advance_commit(&mut self, rid: u64, leader: u64) -> Result<()> {
         let ids = self.ids.clone();
-        let maj = ids.len() / 2 + 1;
         let Some(n) = self.nodes.get_mut(&leader) else {
             return Ok(());
         };
@@ -4065,19 +4325,19 @@ impl<E: Env> StoreCluster<E> {
         if p.role != Role::Leader {
             return Ok(());
         }
+        let joint = Self::pending_joint_on(p);
         let last = p.last_index();
         for idx in (1..=last).rev() {
-            let count = ids
-                .iter()
-                .filter(|&&pid| {
-                    if pid == leader {
-                        true
-                    } else {
-                        p.match_index.get(&pid).copied().unwrap_or(0) >= idx
-                    }
-                })
-                .count();
-            if commit_kernel::may_commit_at(p.term_at(idx), p.term, count >= maj) {
+            let old_maj = ids.len() / 2 + 1;
+            let old_ok = Self::replication_count(p, leader, &ids, idx) >= old_maj;
+            let new_ok = match &joint {
+                Some((jidx, _, new)) if idx >= *jidx => {
+                    let new_maj = new.len() / 2 + 1;
+                    Self::replication_count(p, leader, new, idx) >= new_maj
+                }
+                _ => true,
+            };
+            if commit_kernel::may_commit_at(p.term_at(idx), p.term, old_ok && new_ok) {
                 if idx > p.commit {
                     // F126: same class as AE leader_commit path — do not leave
                     // memory commit ahead of durable meta (apply would race).
@@ -4974,6 +5234,7 @@ impl<E: Env> StoreCluster<E> {
         .map_err(|e| StoreError::from(pedradb_core::CoreError::from(e)))?;
         let node = self.nodes.get_mut(&nid).unwrap();
         // Collect entries to apply, then mutate db + peer separately (borrowck).
+        let mut install_new: Option<Vec<u64>> = None;
         let (start, end, recs) = {
             let peer = node.ranges.get(&rid).unwrap();
             let start = peer.applied + 1;
@@ -5082,6 +5343,9 @@ impl<E: Env> StoreCluster<E> {
                     }
                 }
                 RangeEntry::Noop => {}
+                RangeEntry::MembershipJoint { new, .. } => {
+                    install_new = Some(new.clone());
+                }
             }
             // Put path: also bump generation meta when SI gen present.
             if let RangeEntry::Put { si_gen, .. } = &rec.entry {
@@ -5102,7 +5366,27 @@ impl<E: Env> StoreCluster<E> {
             peer.applied = old_applied;
             return Err(e);
         }
+        if let Some(new) = install_new {
+            self.install_applied_membership(new)?;
+        }
         Ok(())
+    }
+
+    fn install_applied_membership(&mut self, mut new: Vec<u64>) -> Result<()> {
+        new.sort_unstable();
+        new.dedup();
+        if new.is_empty() {
+            return Err(StoreError::Msg(
+                "membership joint: refusing empty voter set".into(),
+            ));
+        }
+        self.ids = new;
+        self.membership_high_water = self.membership_high_water.max(self.ids.len());
+        let live = self.ids.clone();
+        for (id, n) in self.nodes.iter_mut() {
+            n.participating = live.contains(id);
+        }
+        self.persist_cluster_identity()
     }
 
     /// Best-effort leader id known by **local** peers (from AE `leader_id`).
@@ -6204,7 +6488,8 @@ impl<E: Env> StoreCluster<E> {
             RangeEntry::Noop
             | RangeEntry::TxnPrepare { .. }
             | RangeEntry::TxnAbort { .. }
-            | RangeEntry::TxnRevert { .. } => Vec::new(),
+            | RangeEntry::TxnRevert { .. }
+            | RangeEntry::MembershipJoint { .. } => Vec::new(),
         }
     }
 
@@ -9842,6 +10127,110 @@ mod tests {
             c.remove_member(6).is_ok(),
             "after re-add the high-water rule allows one out again"
         );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0063 P0: log-carried joint remove is committed under
+    /// majority(old)∧majority(new) and may shrink past the out-of-band floor.
+    #[test]
+    fn log_carried_joint_remove_crosses_out_of_band_floor() {
+        let dir = temp();
+        let mut c = StoreCluster::open(&dir, 7, 1).unwrap();
+        c.elect_all(80).unwrap();
+        assert!(c.remove_member(7).is_ok());
+        assert!(
+            c.remove_member(6).is_err(),
+            "out-of-band second shrink still hits the floor"
+        );
+        assert!(c.add_member(7).is_ok());
+        c.remove_member_joint(7).expect("joint remove 7");
+        assert!(!c.is_member(7), "joint apply must drop voter 7");
+        c.remove_member_joint(6).expect("joint remove 6 past floor");
+        assert!(
+            !c.is_member(6),
+            "log-carried joint may shrink past the out-of-band floor"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0064 P0: during joint add (C-old=3 maj=2, C-new=4 maj=3), two
+    /// C-old votes are not enough to become leader.
+    #[test]
+    fn election_during_joint_add_refuses_old_only_majority() {
+        let dir = temp();
+        let mut c = StoreCluster::open(&dir, 4, 1).unwrap();
+        c.elect_all(80).unwrap();
+        c.remove_member_joint(4).expect("shrink to 3");
+        assert!(!c.is_member(4));
+        let lid = c.range_leader(1).expect("leader after shrink");
+        let term = c
+            .nodes
+            .get(&lid)
+            .unwrap()
+            .ranges
+            .get(&1)
+            .unwrap()
+            .term;
+        {
+            let p = c.nodes.get_mut(&lid).unwrap().ranges.get_mut(&1).unwrap();
+            let idx = p.last_index() + 1;
+            p.log.push(LogRec {
+                index: idx,
+                term: p.term,
+                entry: RangeEntry::MembershipJoint {
+                    old: vec![1, 2, 3],
+                    new: vec![1, 2, 3, 4],
+                },
+            });
+        }
+        c.election_granted.insert((1, term, lid), vec![1, 2]);
+        c.election_votes.insert((1, term, lid), 2);
+        assert!(
+            !c.election_has_joint_quorum(1, term, lid),
+            "2/3 old is not a joint quorum for add-to-4"
+        );
+        assert!(
+            crate::commit_kernel::joint_election_ok_as_is(2, 3, Some((2, 4))),
+            "AS-IS dente: old-only would elect"
+        );
+        // Drop the planted uncommitted joint so a real add can run.
+        {
+            let p = c.nodes.get_mut(&lid).unwrap().ranges.get_mut(&1).unwrap();
+            p.log.pop();
+        }
+        c.add_member_joint(4).expect("joint add 4");
+        assert!(c.is_member(4), "Direct joint add must apply");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Persist fail on remove must not shrink the in-RAM voting set
+    /// (World otherwise records `rm_member_err` while the floor already
+    /// sees a smaller config).
+    #[test]
+    fn remove_member_persist_fail_does_not_shrink_ram() {
+        use pedradb_sim::{FailingEnv, FaultKind, OpClass, SeedRng};
+        let dir = temp();
+        let e1 = FailingEnv::passing();
+        let e2 = FailingEnv::passing();
+        let e3 = FailingEnv::passing();
+        let mut c = StoreCluster::open_with_envs_rng(
+            &dir,
+            3,
+            1,
+            [e1.clone(), e2.clone(), e3.clone()],
+            SeedRng::new(0xF1D5),
+        )
+        .unwrap();
+        c.elect_all(80).unwrap();
+        e1.arm_op_class(OpClass::Write, 0, true, FaultKind::IoError);
+        e2.arm_op_class(OpClass::Write, 0, true, FaultKind::IoError);
+        e3.arm_op_class(OpClass::Write, 0, true, FaultKind::IoError);
+        assert!(c.remove_member(3).is_err(), "persist must fail-closed");
+        assert!(
+            c.is_member(3),
+            "RAM membership must not shrink on persist fail"
+        );
+        assert_eq!(c.member_ids().len(), 3);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

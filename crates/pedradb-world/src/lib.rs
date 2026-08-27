@@ -428,6 +428,10 @@ impl World {
     /// # Errors
     /// Store open / I/O.
     pub fn run_with_schedule(&self, actions: &[Action]) -> Result<Trace> {
+        // Fold `Env::unix_millis` (StdEnv default = wall clock) into the
+        // discrete scheduler. Same seed ⇒ same clock; swarm threads each
+        // bind their own TLS. Direct RPC is **not** this path (`Queued` below).
+        let _clock = crate::wenv::LogicalClockGuard::bind_seed(self.seed);
         let parent = self.cfg.parent.join(format!("s{:016x}", self.seed));
         let _ = std::fs::remove_dir_all(&parent);
         std::fs::create_dir_all(&parent).map_err(|e| WorldError::Store(e.to_string()))?;
@@ -447,6 +451,9 @@ impl World {
         let store_opts = StoreOpenOptions {
             pedra_verified: self.cfg.verified,
             pedra_wal_full_fsync: self.cfg.wal_full_fsync,
+            // `None` mints via SystemRng (wall entropy) — not a function of
+            // the seed. Pin identity so persist bytes and buggify sites replay.
+            cluster_id: Some(world_cluster_id(self.seed)),
             ..StoreOpenOptions::default()
         };
         let mut cluster = StoreCluster::open_with_envs_rng_opts(
@@ -493,6 +500,7 @@ impl World {
                 let _ = cluster.advance_now_ms(max_skew);
             }
         }
+        crate::wenv::LogicalClockGuard::sync_now_ms(self.seed, cluster.now_ms());
 
         let mut trace = Trace {
             seed: self.seed,
@@ -1113,6 +1121,7 @@ impl World {
                     }
                     self.exchange(cluster, net, trace, step, "tick")?;
                 }
+                crate::wenv::LogicalClockGuard::sync_now_ms(self.seed, cluster.now_ms());
                 trace.push(
                     step,
                     "clock",
@@ -1275,6 +1284,7 @@ impl World {
                     let _ = cluster.tick();
                     self.exchange(cluster, net, trace, step, "cu_part")?;
                 }
+                crate::wenv::LogicalClockGuard::sync_now_ms(self.seed, cluster.now_ms());
                 // (3) heal.
                 if let Some(l) = leader {
                     memb.set_offline(l, false);
@@ -1301,6 +1311,7 @@ impl World {
                     let _ = cluster.tick();
                     self.exchange(cluster, net, trace, step, "cu_settle")?;
                 }
+                crate::wenv::LogicalClockGuard::sync_now_ms(self.seed, cluster.now_ms());
                 // (5) oracle: 0 or 1 complete correct set per reachable node.
                 let mut half = 0u32;
                 for nid in cluster.node_ids() {
@@ -1387,6 +1398,7 @@ impl World {
             }
             Action::AdvanceNowMs { ms } => {
                 cluster.advance_now_ms(*ms);
+                crate::wenv::LogicalClockGuard::sync_now_ms(self.seed, cluster.now_ms());
                 trace.push(
                     step,
                     "now_ms",
@@ -1508,6 +1520,10 @@ impl World {
                                 let _ = cluster.tick();
                                 self.exchange(cluster, net, trace, step, "add_tick")?;
                             }
+                            crate::wenv::LogicalClockGuard::sync_now_ms(
+                                self.seed,
+                                cluster.now_ms(),
+                            );
                             trace.membership_events += 1;
                             trace.push(step, "add_member", format!("node={node}"));
                         }
@@ -1628,6 +1644,71 @@ impl World {
                     }
                     None => {
                         trace.push(step, "bitflip_skip", format!("node={nid} no durable file"));
+                    }
+                }
+            }
+            Action::FlushAll => {
+                for nid in 1..=self.cfg.n_nodes {
+                    if let Err(e) = cluster.flush_engine_on(nid) {
+                        trace.push(step, "flush_err", format!("node={nid} e={e}"));
+                    }
+                }
+                trace.push(step, "flush_all", format!("n={}", self.cfg.n_nodes));
+            }
+            Action::JointAdd { node } => {
+                if *node >= 1 && *node <= self.cfg.n_nodes {
+                    let res = cluster.add_member_joint(*node);
+                    let ok = self.pump_propose(
+                        cluster,
+                        net,
+                        trace,
+                        step,
+                        res,
+                        "joint_add",
+                        &format!("joint_add node={node}"),
+                    )?;
+                    if ok {
+                        trace.membership_events += 1;
+                        trace.push(step, "joint_add", format!("node={node}"));
+                    }
+                }
+            }
+            Action::JointRemove { node } => {
+                if *node >= 1 && *node <= self.cfg.n_nodes {
+                    let res = cluster.remove_member_joint(*node);
+                    let ok = self.pump_propose(
+                        cluster,
+                        net,
+                        trace,
+                        step,
+                        res,
+                        "joint_rm",
+                        &format!("joint_rm node={node}"),
+                    )?;
+                    if ok {
+                        trace.membership_events += 1;
+                        trace.push(step, "joint_rm", format!("node={node}"));
+                    }
+                }
+            }
+            Action::CrashReopen => {
+                cov.hit("E.sync");
+                for nid in 1..=self.cfg.n_nodes {
+                    let Some(env) = disks.get(&nid).cloned() else {
+                        continue;
+                    };
+                    env.crash_unsynced();
+                    match cluster.crash_reopen_engine_on(nid, env) {
+                        Ok(()) => {
+                            trace.push(step, "crash_reopen_ok", format!("node={nid}"));
+                        }
+                        Err(e) => {
+                            trace.push(
+                                step,
+                                "crash_reopen_err",
+                                format!("node={nid} e={e}"),
+                            );
+                        }
                     }
                 }
             }
@@ -1786,6 +1867,16 @@ fn count_seen_participating(
     (seen, n, maj)
 }
 
+/// RFC-0013 identity as a function of the World seed (not `SystemRng`).
+fn world_cluster_id(seed: u64) -> [u8; 16] {
+    let a = seed ^ 0xC1D5_7EED_C1D5_7EED;
+    let b = seed.rotate_left(17) ^ 0x9E37_79B9_7F4A_7C15;
+    let mut id = [0u8; 16];
+    id[..8].copy_from_slice(&a.to_le_bytes());
+    id[8..].copy_from_slice(&b.to_le_bytes());
+    id
+}
+
 /// Run twice; require identical `trace_hash` and outcome counts.
 ///
 /// # Errors
@@ -1806,9 +1897,11 @@ pub fn assert_seed_replayable(seed: u64, cfg: WorldConfig) -> Result<()> {
         || a.logical_now != b.logical_now
         || a.coverage_mask != b.coverage_mask
         || a.arms != b.arms
+        || a.silent_wrong != b.silent_wrong
+        || a.silent_wrong != 0
     {
         return Err(WorldError::Msg(format!(
-            "replay mismatch seed={seed}: hash {:x} vs {:x} puts {}/{} vs {}/{} t {} vs {} mask {:x}/{:x}",
+            "replay mismatch seed={seed}: hash {:x} vs {:x} puts {}/{} vs {}/{} t {} vs {} mask {:x}/{:x} silent_wrong {}/{}",
             a.trace_hash,
             b.trace_hash,
             a.puts_ok,
@@ -1818,10 +1911,30 @@ pub fn assert_seed_replayable(seed: u64, cfg: WorldConfig) -> Result<()> {
             a.logical_now,
             b.logical_now,
             a.coverage_mask,
-            b.coverage_mask
+            b.coverage_mask,
+            a.silent_wrong,
+            b.silent_wrong
         )));
     }
     Ok(())
+}
+
+/// World campaign used for FDB-class seed-replay (buggify + net/disk
+/// arms + PCT node order + in-memory Env). `World::run` still forces
+/// [`RpcMode::Queued`] — Direct RPC is a lab leftover, not this fingerprint.
+#[must_use]
+pub fn fdb_class_campaign(parent: PathBuf) -> WorldConfig {
+    WorldConfig {
+        n_nodes: 3,
+        n_ranges: 1,
+        schedule_steps: 16,
+        parent,
+        buggify: true,
+        mem_storage: true,
+        node_step_pct: true,
+        net_reorder_window: 2,
+        ..Default::default()
+    }
 }
 
 /// Parent dir helper under temp. Wall-clock free (RFC-0051 P2.3 guard):
@@ -1853,14 +1966,256 @@ mod tests {
     #[test]
     fn world_seed_replayable() {
         let parent = temp_parent("replay");
+        let cfg = fdb_class_campaign(parent.clone());
+        // Same seed ×2: identical fingerprint; faults scheduled from seed;
+        // survivors never silent-wrong.
+        let a = World::new(0xC0FFEE, cfg.clone()).run().unwrap();
+        assert!(
+            !a.arms.is_empty(),
+            "buggify must arm from the seed: {a:?}"
+        );
+        assert!(
+            a.disk_arms > 0
+                || a.net_dropped > 0
+                || a.net_sent > 0
+                || a.arms.iter().any(|s| s.starts_with("N.") || s.starts_with("E.")),
+            "seed must schedule a net or disk arm (FDB first-class faults): arms={:?}",
+            a.arms
+        );
+        assert_eq!(a.silent_wrong, 0, "silent_wrong={a:?}");
+        assert_seed_replayable(0xC0FFEE, cfg.clone()).unwrap();
+        let b = World::new(0xC0FFEE ^ 0xA5A5_A5A5, cfg).run().unwrap();
+        assert_ne!(
+            a.trace_hash, b.trace_hash,
+            "different seed must unseed the fingerprint"
+        );
+        assert_eq!(b.silent_wrong, 0, "unseed silent_wrong={b:?}");
+        let _ = std::fs::remove_dir_all(&parent);
+    }
+
+    /// RFC-0053 crash-dictionary on World/FailingEnv: acked sync/Ok put
+    /// survives `RecordingEnv::crash` + engine drop (no `Db::close` flush)
+    /// + `crash_reopen_engine_on`. Majority of nodes must still hold the
+    /// key; never a silent-wrong value.
+    #[test]
+    fn world_committed_put_visible_or_fail_closed() {
+        let parent = temp_parent("ok-reopen");
         let cfg = WorldConfig {
             n_nodes: 3,
             n_ranges: 1,
-            schedule_steps: 10,
+            schedule_steps: 8,
             parent: parent.clone(),
+            exchange_rounds: 64,
+            mem_storage: true,
             ..Default::default()
         };
-        assert_seed_replayable(0xC0FFEE, cfg).unwrap();
+        let schedule = vec![
+            Action::ClockAdvance(40),
+            Action::Put {
+                key_tag: 1,
+                val_tag: 2,
+            },
+            Action::CrashReopen,
+            Action::Get {
+                key_tag: 1,
+                node: 1,
+            },
+            Action::Get {
+                key_tag: 1,
+                node: 2,
+            },
+            Action::Get {
+                key_tag: 1,
+                node: 3,
+            },
+        ];
+        let t = World::new(0x0B1E_0001, cfg)
+            .run_with_schedule(&schedule)
+            .unwrap();
+        assert_eq!(t.silent_wrong, 0, "{t:?}");
+        assert!(t.puts_ok >= 1, "acked put required for crash+reopen: {t:?}");
+        let crash_ok = t
+            .events
+            .iter()
+            .filter(|e| e.kind == "crash_reopen_ok")
+            .count();
+        assert!(
+            crash_ok >= 2,
+            "majority of engines must reopen after crash: crash_ok={crash_ok} {t:?}"
+        );
+        let hits = t
+            .events
+            .iter()
+            .filter(|e| e.kind == "get_ok" && e.detail.contains("hit=1"))
+            .count();
+        assert!(
+            hits >= 2,
+            "acked put must be visible on a majority after crash+reopen (hits={hits}): {t:?}"
+        );
+        eprintln!(
+            "world_crash_reopen_ok_put_survives puts_ok={} crash_ok={} get_hits={} silent_wrong={}",
+            t.puts_ok, crash_ok, hits, t.silent_wrong
+        );
+        let t2 = World::new(0x0B1E_0001, WorldConfig {
+            n_nodes: 3,
+            n_ranges: 1,
+            schedule_steps: 8,
+            parent: parent.clone(),
+            exchange_rounds: 64,
+            mem_storage: true,
+            ..Default::default()
+        })
+        .run_with_schedule(&schedule)
+        .unwrap();
+        assert_eq!(t.trace_hash, t2.trace_hash);
+        assert_eq!(t2.silent_wrong, 0);
+        let _ = std::fs::remove_dir_all(&parent);
+    }
+
+    /// Crash-dictionary flush+tail: SST key and WAL-only key both survive
+    /// process crash on World/FailingEnv.
+    #[test]
+    fn world_flush_then_tail_put_survives_crash_reopen() {
+        let parent = temp_parent("flush-tail");
+        let cfg = WorldConfig {
+            n_nodes: 3,
+            n_ranges: 1,
+            schedule_steps: 8,
+            parent: parent.clone(),
+            exchange_rounds: 64,
+            mem_storage: true,
+            ..Default::default()
+        };
+        let schedule = vec![
+            Action::ClockAdvance(40),
+            Action::Put {
+                key_tag: 1,
+                val_tag: 0x11,
+            },
+            Action::FlushAll,
+            Action::Put {
+                key_tag: 2,
+                val_tag: 0x22,
+            },
+            Action::CrashReopen,
+            Action::Get {
+                key_tag: 1,
+                node: 1,
+            },
+            Action::Get {
+                key_tag: 2,
+                node: 1,
+            },
+            Action::Get {
+                key_tag: 1,
+                node: 2,
+            },
+            Action::Get {
+                key_tag: 2,
+                node: 2,
+            },
+        ];
+        let t = World::new(0x0B1E_0002, cfg)
+            .run_with_schedule(&schedule)
+            .unwrap();
+        assert_eq!(t.silent_wrong, 0, "{t:?}");
+        assert!(t.puts_ok >= 2, "both flushed and tail puts must Ok: {t:?}");
+        let hit1 = t
+            .events
+            .iter()
+            .filter(|e| e.kind == "get_ok" && e.detail.contains("k=1") && e.detail.contains("hit=1"))
+            .count();
+        let hit2 = t
+            .events
+            .iter()
+            .filter(|e| e.kind == "get_ok" && e.detail.contains("k=2") && e.detail.contains("hit=1"))
+            .count();
+        assert!(hit1 >= 1, "flushed key missing after crash: {t:?}");
+        assert!(hit2 >= 1, "tail key missing after crash: {t:?}");
+        eprintln!(
+            "world_flush_then_tail_survives puts_ok={} flush_hit={} tail_hit={} silent_wrong={}",
+            t.puts_ok, hit1, hit2, t.silent_wrong
+        );
+        let _ = std::fs::remove_dir_all(&parent);
+    }
+
+    /// RFC-0063 P0: log-carried joint remove on the World Queued path.
+    #[test]
+    fn world_joint_remove_is_queued_and_replayable() {
+        let parent = temp_parent("joint-rm");
+        let cfg = WorldConfig {
+            n_nodes: 3,
+            n_ranges: 1,
+            schedule_steps: 8,
+            parent: parent.clone(),
+            exchange_rounds: 64,
+            mem_storage: true,
+            ..Default::default()
+        };
+        let schedule = vec![
+            Action::ClockAdvance(40),
+            Action::JointRemove { node: 3 },
+            Action::ClockAdvance(20),
+            Action::Put {
+                key_tag: 1,
+                val_tag: 9,
+            },
+        ];
+        let t1 = World::new(0x0063_0001, cfg.clone())
+            .run_with_schedule(&schedule)
+            .unwrap();
+        let t2 = World::new(0x0063_0001, cfg)
+            .run_with_schedule(&schedule)
+            .unwrap();
+        assert_eq!(t1.trace_hash, t2.trace_hash, "joint remove must replay");
+        assert_eq!(t1.silent_wrong, 0, "{t1:?}");
+        assert!(
+            t1.events.iter().any(|e| e.kind == "joint_rm" || e.kind == "err"),
+            "joint remove must be attempted: {t1:?}"
+        );
+        eprintln!(
+            "world_joint_remove_replay hash={:x} membership_events={} silent_wrong={}",
+            t1.trace_hash, t1.membership_events, t1.silent_wrong
+        );
+        let _ = std::fs::remove_dir_all(&parent);
+    }
+
+    /// RFC-0064: joint add after joint remove on the Queued World path.
+    #[test]
+    fn world_joint_add_after_remove_replays() {
+        let parent = temp_parent("joint-add");
+        let cfg = WorldConfig {
+            n_nodes: 4,
+            n_ranges: 1,
+            schedule_steps: 8,
+            parent: parent.clone(),
+            exchange_rounds: 64,
+            mem_storage: true,
+            ..Default::default()
+        };
+        let schedule = vec![
+            Action::ClockAdvance(40),
+            Action::JointRemove { node: 4 },
+            Action::ClockAdvance(12),
+            Action::JointAdd { node: 4 },
+            Action::ClockAdvance(12),
+            Action::Put {
+                key_tag: 1,
+                val_tag: 1,
+            },
+        ];
+        let t1 = World::new(0x0064_0001, cfg.clone())
+            .run_with_schedule(&schedule)
+            .unwrap();
+        let t2 = World::new(0x0064_0001, cfg)
+            .run_with_schedule(&schedule)
+            .unwrap();
+        assert_eq!(t1.trace_hash, t2.trace_hash);
+        assert_eq!(t1.silent_wrong, 0, "{t1:?}");
+        eprintln!(
+            "world_joint_add_after_remove hash={:x} memb={} silent_wrong={}",
+            t1.trace_hash, t1.membership_events, t1.silent_wrong
+        );
         let _ = std::fs::remove_dir_all(&parent);
     }
 
@@ -2128,6 +2483,11 @@ mod tests {
     }
 
     /// Optional RecordingEnv / lying fsync path (P1.6 residual) — deterministic open+put.
+    ///
+    /// **Not on the World fingerprint path:** this probe uses
+    /// [`RpcMode::Direct`]. [`World::run`] forces [`RpcMode::Queued`]
+    /// (in-process net the seed can delay/drop/partition). Direct stays a
+    /// named residual, not a second lab protocol.
     #[test]
     fn recording_env_lying_deterministic_put() {
         let parent = temp_parent("rec");

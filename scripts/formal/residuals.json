@@ -1,0 +1,228 @@
+{
+  "rfc": "0061",
+  "updated": "2026-08-26",
+  "classes": ["never", "continuous", "parked", "open"],
+  "never_floor": [
+    "R-cpu",
+    "R-rustc",
+    "R-verus",
+    "R-crc",
+    "R-deps",
+    "R-extract"
+  ],
+  "glue": {
+    "kernel_files": 36,
+    "kernel_loc": 6276,
+    "handler_loc": 47541,
+    "db_rs_extracted": false
+  },
+  "residuals": [
+    {
+      "id": "R-cpu",
+      "title": "CPU / microcode / ISA",
+      "class": "never",
+      "owner": "0061",
+      "close": "another project (ISA proof); Pedra never claims this"
+    },
+    {
+      "id": "R-rustc",
+      "title": "rustc / LLVM",
+      "class": "never",
+      "owner": "0061",
+      "close": "CompCert-class verified compiler; TCB"
+    },
+    {
+      "id": "R-verus",
+      "title": "Verus + Z3 (unverified verifier)",
+      "class": "never",
+      "owner": "0053",
+      "close": "verified verifier; TCB"
+    },
+    {
+      "id": "R-crc",
+      "title": "CRC32C collision axiom",
+      "class": "never",
+      "owner": "0060",
+      "close": "same axiom as VeriBetrKV; not a Pedra theorem"
+    },
+    {
+      "id": "R-deps",
+      "title": "lz4_flex / parking_lot / bytes",
+      "class": "never",
+      "owner": "0061",
+      "close": "verified stubs or extract; de-facto TCB"
+    },
+    {
+      "id": "R-extract",
+      "title": "full-engine extraction into the prover",
+      "class": "never",
+      "owner": "0056",
+      "close": "REFUSE (LEDGER L46); production stays Rust"
+    },
+    {
+      "id": "R-glue",
+      "title": "non-kernel glue (handler LOC vs kernel LOC; freeze publishes counts)",
+      "class": "continuous",
+      "owner": "0056",
+      "close": "TCB freeze + caller lint + DST oracles; zero-glue is trajectory not a theorem; do not extract db.rs"
+    },
+    {
+      "id": "R-group-glue",
+      "title": "lock / WAL I/O / OS scheduler around group_commit",
+      "class": "continuous",
+      "owner": "0057",
+      "close": "kernel proves group decision; interleavings of ConcurrentDb stay TCB (0056 P2.1)"
+    },
+    {
+      "id": "R-pct",
+      "title": "OS interleavings outside PCT d=2",
+      "class": "continuous",
+      "owner": "0051",
+      "close": "TSan + swarm serial=parallel; not forall schedules"
+    },
+    {
+      "id": "R-fsync-lie",
+      "title": "OS lying on fsync / real torn writes",
+      "class": "continuous",
+      "owner": "0052",
+      "close": "TCG/det_io smoke; recovery kernels cover the model not the drive"
+    },
+    {
+      "id": "R-tcg-guest",
+      "title": "TCG guest SSH (C2.2=residual_no_guest)",
+      "class": "continuous",
+      "owner": "0052",
+      "script": "scripts/tcg_guest_status.sh",
+      "mechanism": "C2.2=residual_no_guest",
+      "close": "PEDRA_QEMU_SSH + tcg_world_smoke.sh; TCG_REQUIRED=1 fail-closed; C2.2=residual_no_guest without a guest; do not invent a guest"
+    },
+    {
+      "id": "R-uring",
+      "title": "io_uring ring (no probable ring model)",
+      "class": "continuous",
+      "owner": "0058",
+      "close": "out of verified profile by contract; PosixFallback; twin blocked"
+    },
+    {
+      "id": "R-hardware",
+      "title": "field bit-rot / CPU miscompute / media after last scrub",
+      "class": "continuous",
+      "owner": "0060",
+      "close": "CRC+scrub + BitFlip; not ECC proof"
+    },
+    {
+      "id": "R-es",
+      "title": "liveness axioms ES-1/ES-2/ES-3",
+      "class": "continuous",
+      "owner": "0056",
+      "close": "never a theorem; model refutes eventuality without the axioms"
+    },
+    {
+      "id": "R-swarm-real",
+      "title": "REAL multi-process cluster swarm (MEASURE)",
+      "class": "continuous",
+      "owner": "0050",
+      "close": "in-process swarm is gated; REAL stays MEASURE until cluster repro"
+    },
+    {
+      "id": "R-unsafe-posix",
+      "title": "unsafe island pedradb-posix (fdatasync FFI)",
+      "class": "continuous",
+      "owner": "0061",
+      "crate": "pedradb-posix",
+      "script": "scripts/miri-unsafe-islands.sh",
+      "safety": "crates/pedradb-posix/SAFETY.md",
+      "close": "SAFETY.md is not a forall proof; Miri ramp is scripts/miri-unsafe-islands.sh"
+    },
+    {
+      "id": "R-unsafe-uring",
+      "title": "unsafe island pedradb-io-uring (submit_sqe)",
+      "class": "continuous",
+      "owner": "0061",
+      "crate": "pedradb-io-uring",
+      "script": "scripts/miri-unsafe-islands.sh",
+      "safety": "crates/pedradb-io-uring/SAFETY.md",
+      "close": "SAFETY.md is not a forall proof; Miri covers cqe_kernel; ring stays TCB"
+    },
+    {
+      "id": "R-unsafe-capi",
+      "title": "unsafe island pedradb-capi (C ABI handles)",
+      "class": "continuous",
+      "owner": "0061",
+      "crate": "pedradb-capi",
+      "script": "scripts/capi-asan.sh",
+      "safety": "crates/pedradb-capi/SAFETY.md",
+      "close": "SAFETY.md is not a forall proof; ASan product gate is scripts/capi-asan.sh; Miri sibling scripts/miri-unsafe-islands.sh"
+    },
+    {
+      "id": "R-evacuate",
+      "title": "WalRecovery::Evacuate (B2)",
+      "class": "parked",
+      "owner": "0038",
+      "close": "owner decides 0038 P1.1; surface locked to FailClosed | PointInTime (0050 P0.7)"
+    },
+    {
+      "id": "R-vlog-inc",
+      "title": "incremental vlog GC (pick A)",
+      "class": "parked",
+      "owner": "0027",
+      "close": "0026 P0.3 picked C not A"
+    },
+    {
+      "id": "R-vlog-hash",
+      "title": "hash-partitioned value store (pick B)",
+      "class": "parked",
+      "owner": "0028",
+      "close": "0026 P0.3 picked C not B"
+    },
+    {
+      "id": "R-remesure",
+      "title": "quiet-box remesure vs Rocks default sync=false",
+      "class": "parked",
+      "owner": "0041",
+      "close": "quiet host 3x; dirty sandbox is not the official floor; not a proof residual"
+    },
+    {
+      "id": "R-blob-scan",
+      "title": "kvrocks_blob_set / deps_scan official 2x",
+      "class": "parked",
+      "owner": "0054",
+      "close": "owner deprioritized 2026-08-24"
+    },
+    {
+      "id": "R-fd-ceiling",
+      "title": "ycsb_a 2x vs one fdatasync ceiling",
+      "class": "parked",
+      "owner": "0041",
+      "close": "asserted in code; cannot close without dropping G1/peer/shapes"
+    },
+    {
+      "id": "R-pipeline-iff",
+      "title": "Rocks write pipeline (mem off-lock / N-imm / WAL overlap)",
+      "class": "parked",
+      "owner": "0055",
+      "close": "iff P0 numbers obligate"
+    },
+    {
+      "id": "R-tls",
+      "title": "TLS not the lab default / encrypt-at-rest ops-owned",
+      "class": "parked",
+      "owner": "0021",
+      "close": "lab mTLS shipped (RFC-0021); GA default is a product decision — not enabled here"
+    },
+    {
+      "id": "R-direct-rpc",
+      "title": "RpcMode::Direct skips Net (same PeerMsg, sync pump)",
+      "class": "continuous",
+      "owner": "0063",
+      "close": "World fingerprint is Queued; Direct is lab leftover not a second codec (0050 P1.1 / 0063 P0.1)"
+    },
+    {
+      "id": "R-joint",
+      "title": "Montanha membership joint consensus (log-carried config)",
+      "class": "open",
+      "owner": "0063",
+      "close": "P0 log-carried MembershipJoint + old∧new commit quorum shipped; election-time joint is 0063 P1.1"
+    }
+  ]
+}

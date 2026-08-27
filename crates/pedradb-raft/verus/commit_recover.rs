@@ -101,4 +101,61 @@ proof fn lemma_as_is_acks_uncommitted(index: u64, commit_index: u64)
 {
 }
 
+pub open spec fn majority_of_spec(n: u64) -> u64 {
+    if n == 0 {
+        1
+    } else {
+        n / 2 + 1
+    }
+}
+
+pub fn majority_of(n: u64) -> (m: u64)
+    ensures
+        m == majority_of_spec(n),
+{
+    if n == 0 {
+        1
+    } else {
+        n / 2 + 1
+    }
+}
+
+pub open spec fn joint_election_ok_spec(old_yes: u64, old_n: u64, new_yes: Option<(u64, u64)>) -> bool {
+    old_yes >= majority_of_spec(old_n) && match new_yes {
+        None => true,
+        Some((yes, n)) => yes >= majority_of_spec(n),
+    }
+}
+
+pub fn joint_election_ok(old_yes: u64, old_n: u64, new_yes: Option<(u64, u64)>) -> (d: bool)
+    ensures
+        d == joint_election_ok_spec(old_yes, old_n, new_yes),
+{
+    if old_yes < majority_of(old_n) {
+        return false;
+    }
+    match new_yes {
+        None => true,
+        Some((yes, n)) => yes >= majority_of(n),
+    }
+}
+
+pub open spec fn joint_election_ok_as_is_spec(old_yes: u64, old_n: u64) -> bool {
+    old_yes >= majority_of_spec(old_n)
+}
+
+pub fn joint_election_ok_as_is(old_yes: u64, old_n: u64, _new_yes: Option<(u64, u64)>) -> (d: bool)
+    ensures
+        d == joint_election_ok_as_is_spec(old_yes, old_n),
+{
+    old_yes >= majority_of(old_n)
+}
+
+proof fn lemma_as_is_elects_on_old_only()
+    ensures
+        !joint_election_ok_spec(2, 3, Some((2, 4))),
+        joint_election_ok_as_is_spec(2, 3),
+{
+}
+
 } // verus!

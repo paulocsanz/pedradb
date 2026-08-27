@@ -102,6 +102,21 @@ pub enum Action {
         /// Key suffix byte (row + both secondary index keys derive from it).
         key_tag: u8,
     },
+    /// Flush every node's engine (WAL → SST) so a subsequent put is tail-only.
+    FlushAll,
+    /// Log-carried joint membership remove (RFC-0063 P0).
+    JointRemove {
+        /// Peer id (1-based).
+        node: u64,
+    },
+    /// Log-carried joint membership add (RFC-0064 P0).
+    JointAdd {
+        /// Peer id (1-based).
+        node: u64,
+    },
+    /// Process-style crash: drop unsynced Env bytes, drop engines without
+    /// `Db::close` (close would flush — clean shutdown), reopen from durable.
+    CrashReopen,
     /// RFC-0060 P1.2: XOR `n_bits` of an already-durable page on `node`
     /// (SST / WAL / vlog). Subsequent reads must fail-closed or return the
     /// correct value — never silent-wrong.
@@ -394,7 +409,10 @@ impl ScheduleCoverage {
                 }
                 Action::DcsCas { .. } => c.dcs = true,
                 Action::Partition { .. } | Action::Heal { .. } => c.partition = true,
-                Action::RemoveMember { .. } | Action::AddMember { .. } => c.membership = true,
+                Action::RemoveMember { .. }
+                | Action::AddMember { .. }
+                | Action::JointRemove { .. }
+                | Action::JointAdd { .. } => c.membership = true,
                 Action::DiskArm { .. } | Action::DiskDisarm { .. } => c.disk = true,
                 Action::NetSpray { .. } | Action::NetTick(_) | Action::NetDrain => c.net = true,
                 Action::CommitUnknown { .. } => {
@@ -403,7 +421,10 @@ impl ScheduleCoverage {
                 }
                 Action::AdvanceNowMs { .. } => c.clock_ms = true,
                 Action::BitFlip { .. } => c.bitflip = true,
-                Action::StoreTicks(_) | Action::ClockAdvance(_) => {}
+                Action::StoreTicks(_)
+                | Action::ClockAdvance(_)
+                | Action::CrashReopen
+                | Action::FlushAll => {}
             }
         }
         c

@@ -1,6 +1,6 @@
 //! Smoke: run one seed and print trace_hash (P1 world).
 
-use pedradb_world::{temp_parent, World, WorldConfig};
+use pedradb_world::{fdb_class_campaign, temp_parent, World};
 
 fn main() {
     let seed: u64 = std::env::args()
@@ -18,13 +18,7 @@ fn main() {
         })
         .unwrap_or(1);
     let parent = temp_parent("cli");
-    let cfg = WorldConfig {
-        n_nodes: 3,
-        n_ranges: 1,
-        schedule_steps: 16,
-        parent: parent.clone(),
-        ..Default::default()
-    };
+    let cfg = fdb_class_campaign(parent.clone());
     match World::new(seed, cfg).run() {
         Ok(t) => {
             println!(

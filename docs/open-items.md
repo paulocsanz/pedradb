@@ -15,7 +15,7 @@ Last updated: 2026-08-27 (RFC-0062 P0+P1 Linux fechados; P2 iff + crates.io)
 | eixo | hoje | falta |
 |---|---|---|
 | Coluna A (compat default = Rocks default, `sync=false`) | Linux 4 vCPU **17/17 min>1.0** (`P04_PASS` 1.014). Mac 15/15 ≥1.25× | 2× em raftlog 1c recusado (p50 empatado). Intel **não** é meta. |
-| Coluna B (ambos `sync=true`) | Linux **17/17 min>1.0** (`P11_PASS` 1.013, raftlog 1.013/1.019/1.021) | Darwin quiet 3/3 não re-medido (smoke 25/08 p50 empatado). Não é cartaz vs default. |
+| Coluna B (ambos `sync=true`) | Linux **17/17 min>1.0** (`P11_PASS` 1.013). Darwin smoke 25/08: ycsb_a **p50 empatado** 4.85/4.73 ms, qps 0.61 = cauda sob load 20 | Darwin quiet 3/3. Host Mac `set_sync(true)` ≠ smoke: Pedra `F_FULLFSYNC` vs rust-rocksdb `fdatasync` (~100×). [`findings/2026-08-27-darwin-coluna-b-smoke`](../findings/2026-08-27-darwin-coluna-b-smoke/README.md) |
 | S1 compile | Surreal 1.5.4 4/4 >1×; `Checkpoint` / `BackupEngine` nomes | TransactionDB/Titan/CFs físicos/`Env` = P2 **iff** host nomeado |
 | S5 knobs | `KNOB_INVENTORY`; G2 recusa `verify_checksums(false)` / skip-any / paranoid-off | Inert continua aceite e documentado (cache/pipeline) |
 

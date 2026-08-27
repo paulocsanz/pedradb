@@ -390,6 +390,9 @@ impl Env for RecordingEnv {
                 }
             }
         }
+        // HashMap key order is per-instance; listing must be a function of
+        // the image, not the hasher seed (DST / World replay).
+        names.sort_unstable();
         Ok(names)
     }
 

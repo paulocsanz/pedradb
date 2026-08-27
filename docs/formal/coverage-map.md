@@ -96,6 +96,11 @@ por `LawfulBEq.eq_of_beq (by native_decide)`, sem `sorry`).
 
 ## Residuais e donos ("tem algum desses que não tá nos RFCs?")
 
+Inventário único + comparação seL4/IronFleet: **[RFC-0061](../rfc/0061-residuals-sel4-ironfleet.md)**
+(`scripts/formal/residuals.json`, freeze no `--ci`). Pedra **não** é tão
+robusto quanto seL4; está na mesma classe de *claim* (TCB escrito), não
+na mesma classe de *garantia*.
+
 | Residual (pergunta do usuário) | Dono | Mecanismo vivo | Resto honesto |
 |---|---|---|---|
 | Glue não-kernel (~69k LOC) | RFC-0056 (TCB freeze P2.5) + este mapa | freeze CI dos globs; lint de callers; oráculos DST/World | "verde à vista; zero não" — TCB declarado, nunca "sem bugs" |
@@ -106,7 +111,7 @@ por `LawfulBEq.eq_of_beq (by native_decide)`, sem `sorry`).
 | Paralelismo real do SO (interleavings fora do modelo PCT) | RFC-0057 P0.3/P0.4 + RFC-0052 P1.2 | work-stealing `run_swarm`, gate serial-vs-paralelo por `trace_hash`, TSan job | PCT d=2 cobre uma fatia do espaço de schedules — declarado, não total |
 | io_uring ring | RFC-0058 P2.2 (gate documentado) | fora do modo verificado por contrato; full mode usa com `PosixFallback`; twin bloqueado em modelo de ring | sem promessa de prova do ring |
 | **Field/hardware** (bit-rot fora de leitura, CPU errando, discos que somem) | **[RFC-0060](../rfc/0060-field-and-hardware-residuals.md) P0–P2 done** | `pedra verify` / `maintain --verify` (`verify_at_rest`); World `Action::BitFlip` + `silent_wrong==0` | CRC+scrub ≠ prova de ECC/mídia; TCG (RFC-0052 P2) ainda é o "modelo = hardware" |
-| Reconfig out-of-band sem joint consensus | **fechado 2026-08-24**: RFC-0059 P0.4c / P2.1 (seed 500308) | quorum floor `2·(⌊m/2⌋+1) > high_water` em `remove_member`; recusar é o contrato até log-carried config | rollouts multi-nó precisam joint consensus |
+| Reconfig out-of-band sem joint consensus | **P0 2026-08-26** RFC-0063: `MembershipJoint` no log + quorum old∧new (`log_carried_joint_remove_crosses_out_of_band_floor`); out-of-band floor permanece | election-time joint = 0063 P1.1 | L28 REAL TCP cluster ainda MEASURE |
 | Apuração de voto / snapshot catch-up | **fechado 2026-08-24**: RFC-0059 P0.4c (seed 503976) | tally por candidato; reject de snapshot stale = hint não-match; label no applied | — |
 | CHANGELOG lazy vs get após InstallSnapshot | **fechado 2026-08-24**: RFC-0059 P0.4c (seed 502514) | union per-key no lazy feed; oráculo de ressurreição exige get local ausente | — |
 

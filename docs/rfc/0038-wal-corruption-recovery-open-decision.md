@@ -130,7 +130,7 @@ abre limpo (escalação nunca briqua diretório são).
 
 ### P1 — decisão (bloqueado em escolha do dono)
 
-- [ ] **P1.1** Decidir composição (candidata da discussão: **D + B2 primeiro**, B1 só depois de D medido em frota; A quando Montanha majority existir) — status: `todo` (parked; RFC-0050 P0.7 locks the surface to FailClosed \| PointInTime — no silent third mode, no skip-any)
+- [ ] **P1.1** Decidir composição (candidata da discussão: **D + B2 primeiro**, B1 só depois de D medido em frota; A quando Montanha majority existir) — status: `todo` (parked; RFC-0050 P0.7 locks the surface to FailClosed \| PointInTime — no silent third mode, no skip-any). Runbook 2026-08-25: operator page states the two modes; **does not pick A/B2/B1+D**.
 - [ ] **P1.2** Desenho da API: `wal_recovery` (`FailStop` | `PointInTimeReported`), tipo do relatório de perda, quarentena (`WAL.corrupt-<n>`), formato do journal de corrupção (D) — status: `todo` (parked: gated on P1.1 owner decision)
 
 ### P2 — implementação (só após P1)

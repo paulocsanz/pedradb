@@ -12,11 +12,51 @@
 //! and cap swarm parallelism (measured: ~1.3× at 8 workers on APFS
 //! with `F_FULLFSYNC` off; the CPU is >85% idle waiting on syscalls).
 
+use std::cell::Cell;
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::Path;
 
 use pedradb_core::{AdviseKind, Env, EnvFile};
 use pedradb_sim::{FailingEnv, FaultKind, OpClass, RecordingEnv};
+
+thread_local! {
+    /// Bound for the duration of [`crate::World::run`]. `None` = Env default
+    /// (wall clock). World is single-threaded per run; swarm workers each
+    /// bind their own cell. This is the fold of `Env::unix_millis` into the
+    /// discrete scheduler (FDB-class: no wall-clock in the seed function).
+    static LOGICAL_UNIX_MS: Cell<Option<u64>> = Cell::new(None);
+}
+
+/// RAII bind of [`WorldEnv::unix_millis`] to a seed-derived logical clock.
+pub(crate) struct LogicalClockGuard;
+
+/// Discrete Unix-ms epoch for a World seed (not wall clock).
+pub(crate) fn epoch_ms(seed: u64) -> u64 {
+    1_700_000_000_000u64.wrapping_add(seed)
+}
+
+impl LogicalClockGuard {
+    /// Bind `Env::unix_millis` to the seed epoch (now_ms = 0).
+    pub(crate) fn bind_seed(seed: u64) -> Self {
+        LOGICAL_UNIX_MS.with(|c| c.set(Some(epoch_ms(seed))));
+        Self
+    }
+
+    /// Keep Env time locked to cluster `now_ms` (one clock, seed-derived).
+    pub(crate) fn sync_now_ms(seed: u64, now_ms: u64) {
+        LOGICAL_UNIX_MS.with(|c| {
+            if c.get().is_some() {
+                c.set(Some(epoch_ms(seed).wrapping_add(now_ms)));
+            }
+        });
+    }
+}
+
+impl Drop for LogicalClockGuard {
+    fn drop(&mut self) {
+        LOGICAL_UNIX_MS.with(|c| c.set(None));
+    }
+}
 
 /// Real-FS node backend (`FailingEnv<StdEnv>`).
 pub type DiskEnv = FailingEnv;
@@ -96,6 +136,15 @@ impl WorldEnv {
         match self {
             Self::Disk(e) => e.tripped(),
             Self::Mem(e) => e.tripped(),
+        }
+    }
+
+    /// Process-crash the backing image: drop unsynced (`pending`) bytes.
+    /// Disk is host-durable after Ok+sync; Mem is [`RecordingEnv::crash`].
+    pub fn crash_unsynced(&self) {
+        match self {
+            Self::Mem(e) => e.inner().crash(),
+            Self::Disk(_) => {}
         }
     }
 }
@@ -186,6 +235,9 @@ impl Env for WorldEnv {
     type File = WorldFile;
 
     fn unix_millis(&self) -> u64 {
+        if let Some(t) = LOGICAL_UNIX_MS.with(|c| c.get()) {
+            return t;
+        }
         match self {
             Self::Disk(e) => e.unix_millis(),
             Self::Mem(e) => e.unix_millis(),
@@ -222,10 +274,13 @@ impl Env for WorldEnv {
         }
     }
     fn read_dir_names(&self, path: &Path) -> io::Result<Vec<String>> {
-        match self {
-            Self::Disk(e) => e.read_dir_names(path),
-            Self::Mem(e) => e.read_dir_names(path),
-        }
+        // Fold OS / HashMap listing order into the seed function (FDB-class).
+        let mut names = match self {
+            Self::Disk(e) => e.read_dir_names(path)?,
+            Self::Mem(e) => e.read_dir_names(path)?,
+        };
+        names.sort_unstable();
+        Ok(names)
     }
     fn remove_file(&self, path: &Path) -> io::Result<()> {
         match self {

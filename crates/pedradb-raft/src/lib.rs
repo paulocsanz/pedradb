@@ -25,8 +25,9 @@ pub use apply_kernel::{
     apply_advance, apply_advance_as_is_skip_holes, ApplyAction,
 };
 pub use commit_kernel::{
-    may_commit_at, may_commit_at_as_is, propose_ack_ok, propose_ack_ok_as_is, recover_commit,
-    recover_commit_as_is, recover_last_applied, recover_last_applied_as_is,
+    joint_election_ok, joint_election_ok_as_is, majority_of, may_commit_at, may_commit_at_as_is,
+    propose_ack_ok, propose_ack_ok_as_is, recover_commit, recover_commit_as_is,
+    recover_last_applied, recover_last_applied_as_is,
 };
 pub use vote_kernel::{
     grant_after_persist, grant_after_persist_as_is, vote_decision, PersistOutcome, VoteDecision,

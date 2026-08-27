@@ -33,6 +33,10 @@ path = "src/bin/world_partition_storm.rs"
 name = "multiproc_trace_smoke"
 path = "src/bin/multiproc_trace_smoke.rs"
 
+[[bin]]
+name = "world_hunt"
+path = "src/bin/world_hunt.rs"
+
 [features]
 # RFC-0051 P0: PCT runner over the real ConcurrentDb (enables core hooks).
 pct = ["pedradb-core/pct"]
