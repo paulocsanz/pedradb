@@ -23,8 +23,9 @@ pub use rocksdb_compat::{
     ColumnFamilyDescriptor, CompactOptions, DBCompactionStyle, DBCompressionType,
     DBRawIteratorWithThreadMode, DBRecoveryMode, Env, Error, LogLevel, OptimisticTransactionDB,
     OptimisticTransactionOptions, Options, ReadOptions, RestoreOptions, SliceTransform,
-    SnapshotWithThreadMode, UniversalCompactOptions, UniversalCompactionStopStyle,
-    WaitForCompactOptions, WriteOptions, KNOB_INVENTORY,
+    SnapshotWithThreadMode, SstFileManager, TransactionDB, TransactionDBOptions, TransactionOptions,
+    UniversalCompactOptions, UniversalCompactionStopStyle, WaitForCompactOptions, WriteOptions,
+    KNOB_INVENTORY,
 };
 
 /// Maps a rust-rocksdb DB type to the Pedra `Env` its handle owns. The
@@ -37,6 +38,10 @@ pub trait TransactionDb {
 }
 
 impl TransactionDb for OptimisticTransactionDB {
+    type Env = pedradb_io_uring::IoUringEnv;
+}
+
+impl TransactionDb for TransactionDB {
     type Env = pedradb_io_uring::IoUringEnv;
 }
 

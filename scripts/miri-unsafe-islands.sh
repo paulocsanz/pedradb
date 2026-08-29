@@ -19,6 +19,9 @@ if ! cargo +nightly miri --version >/dev/null 2>&1; then
   exit 0
 fi
 
+echo "== miri pedradb-posix fdatasync_rc_ok (RFC-0073 P1.2, safe fn) =="
+cargo +nightly miri test -p pedradb-posix fdatasync_rc_ok_is_safe_predicate -- --test-threads=1
+
 echo "== miri pedradb-posix (FFI, isolation off) =="
 MIRIFLAGS="${MIRIFLAGS:--Zmiri-disable-isolation}" \
   cargo +nightly miri test -p pedradb-posix -- --test-threads=1

@@ -290,4 +290,58 @@ proof fn lemma_mutant_resurrects_over_partial_compact()
 {
 }
 
+pub open spec fn gc_oldest_from_pin_spec(oldest_pin: Option<u64>, last_seq: u64, visible_seq: u64) -> u64 {
+    match oldest_pin {
+        Some(p) => p,
+        None => if last_seq < visible_seq { last_seq } else { visible_seq },
+    }
+}
+
+pub open spec fn gc_oldest_from_pin_as_is_spec(_oldest_pin: Option<u64>, last_seq: u64, visible_seq: u64) -> u64 {
+    if last_seq < visible_seq { last_seq } else { visible_seq }
+}
+
+pub fn gc_oldest_from_pin(oldest_pin: Option<u64>, last_seq: u64, visible_seq: u64) -> (o: u64)
+    ensures
+        o == gc_oldest_from_pin_spec(oldest_pin, last_seq, visible_seq),
+{
+    match oldest_pin {
+        Some(p) => p,
+        None => last_seq.min(visible_seq),
+    }
+}
+
+pub fn gc_oldest_from_pin_as_is(_oldest_pin: Option<u64>, last_seq: u64, visible_seq: u64) -> (o: u64)
+    ensures
+        o == gc_oldest_from_pin_as_is_spec(_oldest_pin, last_seq, visible_seq),
+{
+    last_seq.min(visible_seq)
+}
+
+/// RFC-0150 P2b: a live pin is the oldest_snapshot bound; a version the pin
+/// still reads is Keep. AS-IS ignores the pin and Drops it.
+proof fn lemma_pin_keeps_version_as_is_drops(
+    this_seq: u64,
+    newer_seq: u64,
+    pin: u64,
+    last_seq: u64,
+    visible_seq: u64,
+)
+    requires
+        this_seq < newer_seq,
+        this_seq <= pin,
+        newer_seq > pin,
+        visible_seq >= newer_seq,
+        last_seq >= visible_seq,
+    ensures
+        gc_oldest_from_pin_spec(Some(pin), last_seq, visible_seq) == pin,
+        point_version_spec(this_seq, Some(newer_seq), pin) == VersionFate::Keep,
+        point_version_spec(
+            this_seq,
+            Some(newer_seq),
+            gc_oldest_from_pin_as_is_spec(Some(pin), last_seq, visible_seq),
+        ) == VersionFate::Drop,
+{
+}
+
 } // verus!

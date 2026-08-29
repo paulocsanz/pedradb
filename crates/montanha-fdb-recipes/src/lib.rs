@@ -776,7 +776,7 @@ mod tests {
 
     fn open3() -> (std::path::PathBuf, StoreCluster) {
         let dir = temp();
-        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
         c.elect_all(100).unwrap();
         (dir, c)
     }

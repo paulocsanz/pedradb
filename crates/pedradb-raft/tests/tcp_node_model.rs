@@ -55,8 +55,8 @@
 use pedradb_raft::ae_kernel::{ae_entry_action, AeEntryAction};
 use pedradb_raft::apply_kernel::{apply_advance, ApplyAction};
 use pedradb_raft::{
-    grant_after_persist, may_commit_at, propose_ack_ok, vote_decision, PersistOutcome,
-    VoteDecision, VoteInputs,
+    grant_after_persist, liveness_admitted, liveness_admitted_as_is, may_commit_at,
+    propose_ack_ok, vote_decision, PersistOutcome, VoteDecision, VoteInputs,
 };
 use stateright::{Checker, Model, Property};
 
@@ -468,6 +468,21 @@ impl LivenessModel {
         }
     }
 
+    /// RFC-0069 P1.1: map model switches onto ES-1 / ES-2 / ES-3.
+    /// Unrestricted = infinite adversary (none of the axioms hold).
+    fn es_axioms(&self) -> (bool, bool, bool) {
+        let es1 = !self.unrestricted;
+        let es2 = !self.unrestricted && !self.broken_drain;
+        let es3 = !self.unrestricted && self.live_retry;
+        (es1, es2, es3)
+    }
+
+    /// Eventual-election claim via the production kernel (same fn as store).
+    fn claim_eventual_election(&self) -> bool {
+        let (es1, es2, es3) = self.es_axioms();
+        liveness_admitted(es1, es2, es3)
+    }
+
     fn init_node_st() -> NodeSt {
         NodeSt {
             voted_for: None,
@@ -613,10 +628,12 @@ impl Model for LivenessModel {
 
 #[test]
 fn liveness_holds_under_eventual_synchrony_axioms() {
-    let checker = LivenessModel::fixed()
-        .checker()
-        .spawn_bfs()
-        .join();
+    let model = LivenessModel::fixed();
+    assert!(
+        model.claim_eventual_election(),
+        "all three ES axioms must admit the liveness claim"
+    );
+    let checker = model.checker().spawn_bfs().join();
     checker.assert_properties();
 }
 
@@ -626,14 +643,20 @@ fn liveness_is_refuted_without_axioms() {
     // persist-fail forever and never schedule ApplyTick or ReqVote — some
     // maximal behavior ends without the property ever holding, refuting
     // BOTH eventual properties. The axioms are necessary, never theorems.
-    let checker = LivenessModel {
+    let model = LivenessModel {
         unrestricted: true,
         live_retry: true,
         broken_drain: false,
-    }
-    .checker()
-    .spawn_bfs()
-    .join();
+    };
+    assert!(
+        !model.claim_eventual_election(),
+        "unrestricted model must refuse the liveness claim"
+    );
+    assert!(
+        liveness_admitted_as_is(false, false, false),
+        "AS-IS dente: claim without axioms"
+    );
+    let checker = model.checker().spawn_bfs().join();
     assert!(
         checker.discovery("Evt-apply-quiescence").is_some(),
         "unrestricted model must counterexample Evt-apply-quiescence"
@@ -648,14 +671,16 @@ fn liveness_is_refuted_without_axioms() {
 fn liveness_election_needs_live_retry_axiom() {
     // ES-1 + ES-2 on, ES-3 OFF: the synchronized environment may avoid
     // ReqVote forever, so election is refuted while apply still drains.
-    let checker = LivenessModel {
+    let model = LivenessModel {
         unrestricted: false,
         live_retry: false,
         broken_drain: false,
-    }
-    .checker()
-    .spawn_bfs()
-    .join();
+    };
+    assert!(
+        !model.claim_eventual_election(),
+        "missing ES-3 must refuse the liveness claim"
+    );
+    let checker = model.checker().spawn_bfs().join();
     assert!(
         checker.discovery("Evt-election").is_some(),
         "without ES-3 the election eventuality must be refuted"
@@ -670,16 +695,52 @@ fn liveness_election_needs_live_retry_axiom() {
 fn liveness_mutant_broken_drain_is_caught() {
     // All axioms ON but the loop never drains (implementation bug): the
     // liveness property must fail even under eventual synchrony.
-    let checker = LivenessModel {
+    let model = LivenessModel {
         unrestricted: false,
         live_retry: true,
         broken_drain: true,
-    }
-    .checker()
-    .spawn_bfs()
-    .join();
+    };
+    assert!(
+        !model.claim_eventual_election(),
+        "broken drain (no ES-2) must refuse the liveness claim"
+    );
+    let checker = model.checker().spawn_bfs().join();
     assert!(
         checker.discovery("Evt-apply-quiescence").is_some(),
         "broken-drain loop must counterexample Evt-apply-quiescence"
     );
+}
+
+/// RFC-0069 P1.1: the tcp_node_model path names ES axioms through the
+/// production kernel. AS-IS would admit any combination.
+#[test]
+fn tcp_node_model_liveness_claim_needs_es_axioms() {
+    assert!(LivenessModel::fixed().claim_eventual_election());
+    assert_eq!(LivenessModel::fixed().es_axioms(), (true, true, true));
+    let unrestricted = LivenessModel {
+        unrestricted: true,
+        live_retry: true,
+        broken_drain: false,
+    };
+    assert!(!unrestricted.claim_eventual_election());
+    assert_eq!(unrestricted.es_axioms(), (false, false, false));
+    let no_es3 = LivenessModel {
+        unrestricted: false,
+        live_retry: false,
+        broken_drain: false,
+    };
+    assert!(!no_es3.claim_eventual_election());
+    assert_eq!(no_es3.es_axioms(), (true, true, false));
+    let broken = LivenessModel {
+        unrestricted: false,
+        live_retry: true,
+        broken_drain: true,
+    };
+    assert!(!broken.claim_eventual_election());
+    assert_eq!(broken.es_axioms(), (true, false, true));
+    assert!(
+        liveness_admitted_as_is(false, false, false),
+        "AS-IS dente: claim without axioms"
+    );
+    assert!(!liveness_admitted(false, true, true));
 }

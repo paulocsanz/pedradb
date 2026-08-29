@@ -4,8 +4,8 @@
 
 use pedradb_core::wal::Wal;
 use pedradb_core::{
-    verify_at_rest, BlobGcCandidate, CompactOptions, Db, DbStats, Env, OpenOptions, SequenceNumber,
-    StdEnv, VlogRewriteStats, PROFILE_VERSION,
+    verified_admits_ring, verify_at_rest, BlobGcCandidate, CompactOptions, Db, DbStats, Env,
+    OpenOptions, SequenceNumber, StdEnv, VlogRewriteStats, PROFILE_VERSION,
 };
 use pedradb_io_uring::{open_with as open_db_with, production_env, IoUringEnv};
 use pedradb_ops::{inspect_format, migrate_to_latest, restore_history_from_remote, BackupEngine};
@@ -23,7 +23,8 @@ fn main() -> std::process::ExitCode {
     }
     if verified_requested() {
         eprintln!(
-            "pedra: PEDRA_VERIFIED=1 — verified profile {PROFILE_VERSION} (StdEnv, no io_uring ring; RFC-0058 P2.3)"
+            "pedra: PEDRA_VERIFIED=1 — verified profile {PROFILE_VERSION} (StdEnv, no io_uring ring, posix(); verified_admits_ring={}; RFC-0080)",
+            u8::from(verified_admits_ring(true)),
         );
     }
     match args[1].as_str() {
@@ -170,12 +171,17 @@ fn open_full_db(path: &str) -> pedradb_core::Result<Db<IoUringEnv>> {
 }
 
 fn open_verified_db(path: &str) -> pedradb_core::Result<Db<IoUringEnv>> {
-    // Ring stays out (RFC-0058 P2.2): POSIX backend, verified options.
+    // RFC-0080 P1.1: ring only if `verified_admits_ring` (always false).
     // Same `Db<IoUringEnv>` type as full mode — a second `Db<StdEnv>`
     // monomorph in this binary SIGSEGV'd TX commit under release
     // (`Vec<WriteOp>::as_slice` on a garbage pointer). `posix()` is
     // StdEnv underneath.
-    Db::open_with_env(path, OpenOptions::verified(), IoUringEnv::posix())
+    let env = if verified_admits_ring(true) {
+        production_env()
+    } else {
+        IoUringEnv::posix()
+    };
+    Db::open_with_env(path, OpenOptions::verified(), env)
 }
 
 /// The handle every live-open command uses: full mode or verified

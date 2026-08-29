@@ -34,6 +34,16 @@ pub enum PiPolicy {
     },
 }
 
+impl PiPolicy {
+    /// RFC-0070 P2.2: campaign default PCT depth (2). d>2 remains RFC-0051.
+    #[must_use]
+    pub fn pct_campaign_default() -> Self {
+        PiPolicy::Pct {
+            depth: pedradb_core::group_commit_kernel::pct_campaign_default_depth() as usize,
+        }
+    }
+}
+
 struct SequentialSched {
     // Sticky CPU holder: stays Some(task) until the task is no longer
     // enabled (i.e. it exited — with the CPU free, every live task is
@@ -96,6 +106,25 @@ pub struct RunReport {
     /// run (group-aware oracle forensics; per-run, so parallel trials in
     /// one process never interleave).
     pub group_ranges: Vec<(u64, u64)>,
+    /// RFC-0070 P1.1: this PCT run is not ∀ OS schedules.
+    pub forall_schedules: bool,
+}
+
+impl RunReport {
+    /// RFC-0070 P1.1: admit ∀π after this PCT run. Always false.
+    #[must_use]
+    pub fn claim_forall_schedules(&self) -> bool {
+        self.forall_schedules
+    }
+}
+
+/// PCT depth encoded in `policy` (0 for sequential / round-robin).
+#[must_use]
+pub fn policy_pct_depth(policy: PiPolicy) -> u64 {
+    match policy {
+        PiPolicy::Pct { depth } => depth as u64,
+        PiPolicy::Sequential | PiPolicy::RoundRobin => 0,
+    }
 }
 
 /// Bit-stable hash over grant sequence (worker + site).
@@ -193,10 +222,12 @@ where
     }
     let schedule_hash = run_steps_hash(&steps);
     let group_ranges = ts.take_group_ranges();
+    let depth = policy_pct_depth(policy);
     RunReport {
         steps,
         schedule_hash,
         group_ranges,
+        forall_schedules: pedradb_core::group_commit_kernel::forall_schedules_admitted(depth),
     }
 }
 
@@ -324,10 +355,7 @@ mod tests {
 
         // (iii) PCT d=2 on the fine plant: >=1/256.
         let violators: Vec<(u64, String)> = (0..SEEDS)
-            .filter_map(|s| {
-                plant_violation(s, N, OPS, PiPolicy::Pct { depth: 2 })
-                    .map(|v| (s, v))
-            })
+            .filter_map(|s| plant_violation(s, N, OPS, PiPolicy::Pct { depth: 2 }).map(|v| (s, v)))
             .collect();
         let pct_hits = violators.len();
         assert!(
@@ -341,7 +369,10 @@ mod tests {
         let baseline = plant_run(vs, N, OPS, PiPolicy::Pct { depth: 2 }, false);
         for _ in 0..8 {
             let r = plant_run(vs, N, OPS, PiPolicy::Pct { depth: 2 }, false);
-            assert_eq!(r.schedule_hash, baseline.schedule_hash, "replay must be bit-stable");
+            assert_eq!(
+                r.schedule_hash, baseline.schedule_hash,
+                "replay must be bit-stable"
+            );
             assert_eq!(
                 plant_violation(vs, N, OPS, PiPolicy::Pct { depth: 2 }),
                 Some(vv.clone()),
@@ -351,6 +382,41 @@ mod tests {
 
         // Telemetry: hit rate over the band (evidence, not a product claim).
         eprintln!("pct_concurrent: planted d=2 hits {pct_hits}/256 (first seed {vs}: {vv})");
+    }
+
+    /// RFC-0064 / 0063 P2.2: d>2 is the same runner, deeper change points.
+    /// Seq/RR stay CLEAN; PCT d=3 finds the plant and replays.
+    #[test]
+    fn planted_depth3_three_teeth() {
+        const N: usize = 3;
+        const OPS: usize = 4;
+        const SEEDS: u64 = 64;
+        let seq_hits = (0..SEEDS)
+            .filter(|&s| plant_violation(s, N, OPS, PiPolicy::Sequential).is_some())
+            .count();
+        assert_eq!(seq_hits, 0, "sequential must stay CLEAN at d=3 band");
+        let violators: Vec<(u64, String)> = (0..SEEDS)
+            .filter_map(|s| plant_violation(s, N, OPS, PiPolicy::Pct { depth: 3 }).map(|v| (s, v)))
+            .collect();
+        assert!(
+            !violators.is_empty(),
+            "PCT d=3 must find the planted bug in 0..63"
+        );
+        let (vs, vv) = violators[0].clone();
+        let baseline = plant_run(vs, N, OPS, PiPolicy::Pct { depth: 3 }, false);
+        for _ in 0..8 {
+            let r = plant_run(vs, N, OPS, PiPolicy::Pct { depth: 3 }, false);
+            assert_eq!(r.schedule_hash, baseline.schedule_hash);
+            assert_eq!(
+                plant_violation(vs, N, OPS, PiPolicy::Pct { depth: 3 }),
+                Some(vv.clone())
+            );
+        }
+        eprintln!(
+            "pct_concurrent: planted d=3 hits {}/{} (first seed {vs}: {vv})",
+            violators.len(),
+            SEEDS
+        );
     }
 
     /// P1.1 (RFC-0051): π × disk. `FailingEnvArc` armed with a one-shot
@@ -437,12 +503,23 @@ mod tests {
                 if tag == "ok" {
                     let (t, i) = (idx / COMMITS, idx % COMMITS);
                     let k = format!("fence/{t}/{i}");
-                    assert!(re.get(k.as_bytes()).is_some(), "silent wrong: ok commit {k} vanished on reopen");
+                    assert!(
+                        re.get(k.as_bytes()).is_some(),
+                        "silent wrong: ok commit {k} vanished on reopen"
+                    );
                 }
             }
             drop(re);
             let _ = std::fs::remove_dir_all(&dir);
-            (members, oks, refused, other, tripped, report.schedule_hash, got)
+            (
+                members,
+                oks,
+                refused,
+                other,
+                tripped,
+                report.schedule_hash,
+                got,
+            )
         };
 
         // (i) grosso: run-to-completion (no preemption anywhere, incl. the
@@ -451,13 +528,19 @@ mod tests {
             .filter(|&s| {
                 let (members, oks, refused, other, tripped, _h, got) =
                     trial("seq", s, PiPolicy::Sequential);
-                assert_eq!(other, 0, "sequential trial saw an unexpected error class: {got:?}");
+                assert_eq!(
+                    other, 0,
+                    "sequential trial saw an unexpected error class: {got:?}"
+                );
                 assert!(tripped, "SyncFail must fire in every sequential trial");
                 assert_eq!(members + refused + oks, N * COMMITS);
                 members >= 2
             })
             .count();
-        assert_eq!(seq_hits, 0, "run-to-completion must miss the multi-member fence");
+        assert_eq!(
+            seq_hits, 0,
+            "run-to-completion must miss the multi-member fence"
+        );
 
         // (ii) AS-IS: PCT d=2 preempts the leader mid-commit; some seed
         // fences 2+ members with the single off-lock EIO.
@@ -491,7 +574,14 @@ mod tests {
             let (members, oks, refused, other, _tripped, h, got) =
                 trial("pct", vs, PiPolicy::Pct { depth: 2 });
             assert_eq!(other, 0);
-            assert_eq!((members, oks, refused), (vm, base_got.iter().filter(|(_, t)| *t == "ok").count(), base_got.iter().filter(|(_, t)| *t == "refused").count()));
+            assert_eq!(
+                (members, oks, refused),
+                (
+                    vm,
+                    base_got.iter().filter(|(_, t)| *t == "ok").count(),
+                    base_got.iter().filter(|(_, t)| *t == "refused").count()
+                )
+            );
             assert_eq!(got, base_got, "same seed must reproduce the same outcomes");
             assert_eq!(h, baseline, "replay must be bit-stable");
         }
@@ -499,6 +589,130 @@ mod tests {
         let _ = std::fs::remove_dir_all(&base);
         eprintln!(
             "pct_concurrent: pi x disk fence dente: seq {seq_hits}/256 (miss), pct {pct_hits}/256 (first seed {vs}: {vm} members fenced at the off-lock EIO)"
+        );
+    }
+
+    /// RFC-0071 P1.2: yield after off-lock fd (`after_wal_sync`); failed
+    /// sync must not publish. Sequential stays on the lone path (never
+    /// parks at that site). PCT d=2 forms a group, hits the site, still
+    /// unpublished; replay 8× bit-stable. AS-IS kernel would publish.
+    #[test]
+    fn pct_after_failed_fd_does_not_publish() {
+        use pedradb_core::{ConcurrentDb, CoreError, OpenOptions, StdEnv};
+        use pedradb_sim::{FailingEnvArc, FaultKind};
+        use std::sync::Mutex;
+
+        const N: usize = 2;
+        const COMMITS: usize = 2;
+        const SEEDS: u64 = 64;
+        let base = std::env::temp_dir().join(format!("pedra-pct-after-fd-{}", std::process::id()));
+
+        let trial = |tag: &str, seed: u64, policy: PiPolicy| {
+            let dir = base.join(format!("{tag}-{seed:03}"));
+            let _ = std::fs::remove_dir_all(&dir);
+            let env = FailingEnvArc::passing();
+            let opts = OpenOptions {
+                sync: true,
+                ..OpenOptions::default()
+            };
+            let db = ConcurrentDb::open_with_env(&dir, opts.clone(), env.clone()).unwrap();
+            db.set_write_group_catchup_window(std::time::Duration::ZERO);
+            let db = std::sync::Arc::new(db);
+            env.arm_with_kind(0, true, FaultKind::SyncFail);
+
+            let outcomes: std::sync::Arc<Mutex<Vec<(usize, &'static str)>>> =
+                std::sync::Arc::new(Mutex::new(Vec::new()));
+            let report = run_pcts(seed, N, policy, |task| {
+                let db = std::sync::Arc::clone(&db);
+                let outcomes = std::sync::Arc::clone(&outcomes);
+                move |_y: &Yielder| {
+                    for i in 0..COMMITS {
+                        let k = format!("afterfd/{task}/{i}");
+                        let tag = match db.put(k.as_bytes(), b"v") {
+                            Ok(()) => "ok",
+                            Err(CoreError::Internal(m))
+                                if m.starts_with("group wal write/sync failed") =>
+                            {
+                                "group_fence"
+                            }
+                            Err(CoreError::DurabilityFenced) => "refused",
+                            Err(_) => "err",
+                        };
+                        outcomes.lock().unwrap().push((task * COMMITS + i, tag));
+                    }
+                }
+            });
+            let mut got = outcomes.lock().unwrap().clone();
+            got.sort_unstable();
+            let after_fd = report
+                .steps
+                .iter()
+                .any(|s| s.site == "after_wal_sync");
+            // Live unpublished: a failed put must not be visible before reopen.
+            let mut silent_wrong = 0usize;
+            for &(idx, tag) in &got {
+                let (t, i) = (idx / COMMITS, idx % COMMITS);
+                let k = format!("afterfd/{t}/{i}");
+                let live = db.get(k.as_bytes()).is_some();
+                if tag != "ok" && live {
+                    silent_wrong += 1;
+                }
+            }
+            drop(db);
+            let re = ConcurrentDb::open_with_env(&dir, opts, StdEnv).unwrap();
+            for &(idx, tag) in &got {
+                let (t, i) = (idx / COMMITS, idx % COMMITS);
+                let k = format!("afterfd/{t}/{i}");
+                if tag == "ok" && re.get(k.as_bytes()).is_none() {
+                    silent_wrong += 1;
+                }
+            }
+            drop(re);
+            let _ = std::fs::remove_dir_all(&dir);
+            (after_fd, silent_wrong, report.schedule_hash, got)
+        };
+
+        let seq_site = (0..SEEDS)
+            .filter(|&s| {
+                let (after_fd, sw, _h, got) = trial("seq", s, PiPolicy::Sequential);
+                assert_eq!(sw, 0, "sequential silent_wrong: {got:?}");
+                after_fd
+            })
+            .count();
+        assert_eq!(
+            seq_site, 0,
+            "sequential must miss after_wal_sync (lone path)"
+        );
+
+        let violators: Vec<u64> = (0..SEEDS)
+            .filter(|&s| {
+                let (after_fd, sw, _h, got) = trial("pct", s, PiPolicy::Pct { depth: 2 });
+                assert_eq!(sw, 0, "pct silent_wrong: {got:?}");
+                after_fd
+            })
+            .collect();
+        assert!(
+            !violators.is_empty(),
+            "PCT d=2 must park at after_wal_sync in 0..{SEEDS}"
+        );
+        let vs = violators[0];
+        let (_, _, baseline, base_got) = trial("pct", vs, PiPolicy::Pct { depth: 2 });
+        for _ in 0..8 {
+            let (after_fd, sw, h, got) = trial("pct", vs, PiPolicy::Pct { depth: 2 });
+            assert!(after_fd);
+            assert_eq!(sw, 0);
+            assert_eq!(got, base_got);
+            assert_eq!(h, baseline, "replay must be bit-stable");
+        }
+        assert!(
+            pedradb_core::group_commit_kernel::may_publish_group_as_is(false),
+            "AS-IS dente: publish after failed WAL I/O"
+        );
+        assert!(!pedradb_core::group_commit_kernel::may_publish_group(false));
+        let _ = std::fs::remove_dir_all(&base);
+        eprintln!(
+            "pct_concurrent: after_wal_sync dente: seq {seq_site}/{SEEDS} (miss), pct {}/{SEEDS} (first seed {vs})",
+            violators.len()
         );
     }
 
@@ -621,15 +835,31 @@ mod tests {
             }
             drop(re);
             let _ = std::fs::remove_dir_all(&dir);
-            (fenced, oks, async_oks, refused, other, tripped, stats, report.schedule_hash)
+            (
+                fenced,
+                oks,
+                async_oks,
+                refused,
+                other,
+                tripped,
+                stats,
+                report.schedule_hash,
+            )
         };
 
         for policy in [PiPolicy::Sequential, PiPolicy::Pct { depth: 2 }] {
             let mut fenced_total = 0usize;
             let mut queued_total = 0u64;
             for s in 0..SEEDS {
-                let (fenced, oks, async_oks, refused, other, tripped, stats, _h) =
-                    trial(if matches!(policy, PiPolicy::Sequential) { "seq" } else { "pct" }, s, policy);
+                let (fenced, oks, async_oks, refused, other, tripped, stats, _h) = trial(
+                    if matches!(policy, PiPolicy::Sequential) {
+                        "seq"
+                    } else {
+                        "pct"
+                    },
+                    s,
+                    policy,
+                );
                 assert_eq!(other, 0, "unexpected error class in verified trial {s}");
                 assert_eq!(fenced + refused + oks + async_oks, N * COMMITS);
                 if !tripped {
@@ -648,7 +878,10 @@ mod tests {
                 queued_total += queued;
                 fenced_total += fenced;
             }
-            assert!(fenced_total >= 1, "the EIO must fence someone across {SEEDS} seeds");
+            assert!(
+                fenced_total >= 1,
+                "the EIO must fence someone across {SEEDS} seeds"
+            );
             if matches!(policy, PiPolicy::Pct { .. }) {
                 assert!(
                     queued_total > 0,
@@ -800,9 +1033,7 @@ mod tests {
             let ghost = re
                 .scan_collect(Bound::Included(&b"drv/"[..]), Bound::Excluded(&b"drv0"[..]))
                 .iter()
-                .filter(|(k, v)| {
-                    !expected.contains(k.as_ref()) || v.as_ref() != &b"v"[..]
-                })
+                .filter(|(k, v)| !expected.contains(k.as_ref()) || v.as_ref() != &b"v"[..])
                 .count();
             drop(re);
             let _ = std::fs::remove_dir_all(&dir);
@@ -834,8 +1065,18 @@ mod tests {
 
                 // (a) identical safety oracles in both modes.
                 for (mode, r) in [("full", &full), ("verified", &ver)] {
-                    let (oks, async_oks, fenced, refused, other, silent_wrong, wrong_async, ghost, tripped, _stats) =
-                        *r;
+                    let (
+                        oks,
+                        async_oks,
+                        fenced,
+                        refused,
+                        other,
+                        silent_wrong,
+                        wrong_async,
+                        ghost,
+                        tripped,
+                        _stats,
+                    ) = *r;
                     assert_eq!(other, 0, "{mode} trial {s}: unexpected error class");
                     assert_eq!(
                         oks + async_oks + fenced + refused,
@@ -873,7 +1114,10 @@ mod tests {
                 let (_, _, ver_fenced, _, _, _, _, _, ver_tripped, ver_stats) = ver;
                 let (submits, queued, batches, batch_ops) = ver_stats;
                 assert_eq!(submits, (N * COMMITS) as u64, "verified trial {s}");
-                assert!(queued <= submits, "verified trial {s}: queued {queued} > submits");
+                assert!(
+                    queued <= submits,
+                    "verified trial {s}: queued {queued} > submits"
+                );
                 assert!(
                     batches <= submits,
                     "verified trial {s}: batches {batches} > submits"
@@ -950,8 +1194,7 @@ mod tests {
             let db = ConcurrentDb::open_with_env(&dir, OpenOptions::default(), StdEnv).unwrap();
             db.set_write_group_catchup_window(std::time::Duration::ZERO);
             let db = std::sync::Arc::new(db);
-            let recs: std::sync::Arc<Mutex<Vec<Rec>>> =
-                std::sync::Arc::new(Mutex::new(Vec::new()));
+            let recs: std::sync::Arc<Mutex<Vec<Rec>>> = std::sync::Arc::new(Mutex::new(Vec::new()));
             let report = run_pcts(seed, N, policy, |task| {
                 let db = std::sync::Arc::clone(&db);
                 let recs = std::sync::Arc::clone(&recs);
@@ -999,7 +1242,9 @@ mod tests {
             let rs = recs.lock().unwrap().clone();
             let ranges = report.group_ranges.clone();
             let same_group = |a: u64, b: u64| {
-                ranges.iter().any(|(lo, hi)| *lo <= a && a <= *hi && *lo <= b && b <= *hi)
+                ranges
+                    .iter()
+                    .any(|(lo, hi)| *lo <= a && a <= *hi && *lo <= b && b <= *hi)
             };
             let writer_seqs: Vec<u64> = rs
                 .iter()
@@ -1013,10 +1258,7 @@ mod tests {
                     continue;
                 }
                 if let Some(seq) = r.ok_seq {
-                    for &w in writer_seqs
-                        .iter()
-                        .filter(|w| r.snapshot < **w && **w < seq)
-                    {
+                    for &w in writer_seqs.iter().filter(|w| r.snapshot < **w && **w < seq) {
                         if same_group(w, seq) {
                             simultaneous += 1;
                         } else {
@@ -1037,7 +1279,11 @@ mod tests {
         // (i) grosso: run-to-completion on the planted reader — serialized
         // rounds never overlap a window: 0 violations in 0..255.
         let seq_hits = (0..SEEDS)
-            .filter(|&s| trial(&base, "seq", s, PiPolicy::Sequential, true).0.is_some())
+            .filter(|&s| {
+                trial(&base, "seq", s, PiPolicy::Sequential, true)
+                    .0
+                    .is_some()
+            })
             .count();
         assert_eq!(seq_hits, 0, "sequential must miss the planted stale read");
 
@@ -1153,10 +1399,80 @@ mod tests {
             .close()
             .unwrap();
         let _ = db;
-        let re = ConcurrentDb::open_with_env(&dir, opts, StdEnv)
-            .expect("reopen after close failed");
+        let re =
+            ConcurrentDb::open_with_env(&dir, opts, StdEnv).expect("reopen after close failed");
         assert!(re.get(b"pct/0/0").is_some(), "durable after reopen");
         assert!(re.get(b"pct/2/11").is_some());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0070 P1.1: a live `run_pcts` at d=2 refuses ∀π. AS-IS would admit.
+    #[test]
+    fn pct_runner_refuses_forall_schedules_at_depth2() {
+        use pedradb_core::{ConcurrentDb, OpenOptions, StdEnv};
+
+        let dir = std::env::temp_dir().join(format!("pedra-pct-forall-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let db = ConcurrentDb::open_with_env(&dir, OpenOptions::default(), StdEnv).unwrap();
+        db.set_write_group_catchup_window(std::time::Duration::ZERO);
+        let db = Arc::new(db);
+        let report = run_pcts(0x0070_0C72, 2, PiPolicy::Pct { depth: 2 }, |task| {
+            let db = Arc::clone(&db);
+            move |_y: &Yielder| {
+                db.put(format!("f70/{task}").as_bytes(), b"v").unwrap();
+            }
+        });
+        assert!(
+            !report.steps.is_empty(),
+            "run_pcts must grant at least one step"
+        );
+        assert!(
+            !report.claim_forall_schedules(),
+            "PCT d=2 must not round to forall schedules"
+        );
+        assert!(!pedradb_core::group_commit_kernel::forall_schedules_admitted(
+            policy_pct_depth(PiPolicy::Pct { depth: 2 })
+        ));
+        assert!(
+            pedradb_core::group_commit_kernel::forall_schedules_admitted_as_is(2),
+            "AS-IS dente: d>=2 would claim forall"
+        );
+        drop(db);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0070 P2.2: live `run_pcts` at campaign default depth is 2;
+    /// 0070 did not raise it. d>2 remains RFC-0051. AS-IS would admit.
+    #[test]
+    fn pct_runner_default_depth_not_raised() {
+        use pedradb_core::{ConcurrentDb, OpenOptions, StdEnv};
+
+        let dir = std::env::temp_dir().join(format!("pedra-pct-d2-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let db = ConcurrentDb::open_with_env(&dir, OpenOptions::default(), StdEnv).unwrap();
+        db.set_write_group_catchup_window(std::time::Duration::ZERO);
+        let db = Arc::new(db);
+        let policy = PiPolicy::pct_campaign_default();
+        assert_eq!(policy_pct_depth(policy), 2);
+        let report = run_pcts(0x0070_0D22, 2, policy, |task| {
+            let db = Arc::clone(&db);
+            move |_y: &Yielder| {
+                db.put(format!("d70/{task}").as_bytes(), b"v").unwrap();
+            }
+        });
+        assert!(
+            !report.steps.is_empty(),
+            "run_pcts must grant at least one step"
+        );
+        assert!(
+            !pedradb_core::group_commit_kernel::default_pct_depth_raised(),
+            "0070 must not raise default PCT depth"
+        );
+        assert!(
+            pedradb_core::group_commit_kernel::default_pct_depth_raised_as_is(),
+            "AS-IS dente: 0070 P2 would claim d>2 is now default"
+        );
+        drop(db);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -1249,14 +1565,12 @@ mod tests {
                 sync: true,
                 ..OpenOptions::default()
             };
-            let mk_env =
-                || FailingEnvArc::<IoUringEnv>::with_inner_passing(IoUringEnv::default());
+            let mk_env = || FailingEnvArc::<IoUringEnv>::with_inner_passing(IoUringEnv::default());
             let db = ConcurrentDb::open_with_env(&base, opts.clone(), mk_env()).unwrap();
             db.set_write_group_catchup_window(std::time::Duration::ZERO);
             let db = Arc::new(db);
-            let std_db = Arc::new(
-                ConcurrentDb::open_with_env(&base.join("std"), opts, StdEnv).unwrap(),
-            );
+            let std_db =
+                Arc::new(ConcurrentDb::open_with_env(&base.join("std"), opts, StdEnv).unwrap());
 
             const N: usize = 3;
             const PUTS: usize = 8;

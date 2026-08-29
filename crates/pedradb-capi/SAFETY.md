@@ -17,7 +17,9 @@ Database and transaction “pointers” are packed `slot + generation` integers
 - Get buffers: `Box::into_raw` then a table of `(addr → len)`. C reads
   the pointer while it is the owner (F210). `montanha_fdb_free` does
   `Box::from_raw` **only** for keys in the table; unknown / double-free
-  is a no-op (never `from_raw` of a garbage pointer).
+  is a no-op (never `from_raw` of a garbage pointer). RFC-0075 P2.2:
+  `c_free_table_admitted` is always false — that table is TCB, not a
+  Verus twin (`verus/c_len.rs` is the len cap only).
 - Tables are **thread-local** (`StoreCluster` / `SeedRng` is `!Send`). A
   handle used on another thread misses the table → ERROR, not a data race.
 - Generation is 31 bits (`GEN_MASK`). `next_gen` stays inside the mask so
@@ -32,9 +34,9 @@ Marshalling copies C bytes only after a length check. A huge `*_len` is
 
 | Input | Cap | Oversize |
 |-------|-----|----------|
-| `path` | `MAX_PATH_BYTES` (4096) NUL walk via `memchr` | create → NULL |
-| `key_len` | `MAX_C_KEY_BYTES` = `MAX_TX_BYTES` (10MiB) | `LIMIT` |
-| `value_len` | `MAX_C_VALUE_BYTES` = `MAX_VALUE_BYTES` (100KiB) | `LIMIT` |
+| `path` | `c_path_walk_bytes()` = `MAX_PATH_BYTES` (4096) NUL walk via `memchr` (RFC-0075 P1.1). AS-IS is `usize::MAX`. Offset must pass `c_path_nul_off_admitted` | create → NULL |
+| `key_len` | `MAX_C_KEY_BYTES` = `MAX_TX_BYTES` (10MiB) via `c_len_admitted` | `LIMIT` |
+| `value_len` | `MAX_C_VALUE_BYTES` = `MAX_VALUE_BYTES` (100KiB) via `c_len_admitted` | `LIMIT` |
 
 Copy is `ptr::copy_nonoverlapping` (memcpy). `memchr` / memcpy are
 ASan-intercepted in the C harness (Darwin ASan does **not** intercept
@@ -44,7 +46,7 @@ ASan-intercepted in the C harness (Darwin ASan does **not** intercept
 
 | Site | Obligation |
 |------|------------|
-| `memchr(path, 0, MAX_PATH_BYTES)` | First `MAX_PATH_BYTES` readable, or ASan fires (C contract) |
+| `memchr(path, 0, c_path_walk_bytes())` | First `MAX_PATH_BYTES` readable, or ASan fires (C contract) |
 | `copy_nonoverlapping` of key/value | Bytes readable for the **capped** `len` (C contract) |
 | Writes through `out_ptr` / `out_len` | Pointers checked non-null |
 
@@ -59,7 +61,7 @@ under `-fsanitize=address`:
 
 | Binary | Must |
 |--------|------|
-| `capi_asan` | **PASS** — well-behaved set/get/commit, stale/double-free handles, oversize `*_len` → `LIMIT`, 4096-byte no-NUL path → NULL |
+| `capi_asan` | **PASS** — well-behaved set/get/commit, stale/double-free handles, oversize `*_len` → `LIMIT` (script greps `LIMIT key/value/get/live-key`, RFC-0075 P1.2), 4096-byte no-NUL path → NULL |
 | `capi_asan_malicious` | **FAIL** (ASan) — short *heap* buffer + capped-but-too-big `len`; 8-byte heap path with no NUL (`memchr`) |
 
 PASS proves rotten handles and accidental huge lengths. FAIL proves the

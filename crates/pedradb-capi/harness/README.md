@@ -8,7 +8,7 @@ bash scripts/capi-asan.sh
 
 | Binary | ASan |
 |--------|------|
-| `capi_asan.c` | must **PASS** (honest caller, rotten handles, oversize `*_len` → `LIMIT`) |
+| `capi_asan.c` | must **PASS** (honest caller, rotten handles, oversize `*_len` → `LIMIT`; script greps `LIMIT key/value/get/live-key`) |
 | `capi_asan_malicious.c` | must **FAIL** (`key` / `value` / `path` short-buffer lies under the cap) |
 
 Rust `cargo test -p pedradb-capi` is not a substitute: those tests never

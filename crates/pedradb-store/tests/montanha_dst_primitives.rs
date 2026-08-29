@@ -46,7 +46,7 @@ fn keys_one_per_range<E: pedradb_core::Env>(c: &StoreCluster<E>) -> Vec<Vec<u8>>
 #[test]
 fn revert_restores_preimage_on_partial_commit() {
     let dir = temp();
-    let mut c = StoreCluster::open(&dir, 3, 3).unwrap();
+    let mut c = StoreCluster::open_lab_direct(&dir, 3, 3).unwrap();
     c.elect_all(80).unwrap();
     let keys = keys_one_per_range(&c);
     assert!(keys.len() >= 2);
@@ -107,7 +107,7 @@ fn crash_after_prepare_does_not_immortalize_intents() {
     let dir = temp();
     let keys;
     {
-        let mut c = StoreCluster::open(&dir, 3, 3).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 3).unwrap();
         c.elect_all(80).unwrap();
         keys = keys_one_per_range(&c);
         let _h = c
@@ -119,7 +119,7 @@ fn crash_after_prepare_does_not_immortalize_intents() {
         // Process crash: drop without tx_finish / tx_cancel.
         drop(c);
     }
-    let mut c = StoreCluster::open(&dir, 3, 3).unwrap();
+    let mut c = StoreCluster::open_lab_direct(&dir, 3, 3).unwrap();
     c.elect_all(80).unwrap();
     c.put(&keys[0], b"after-crash")
         .expect("put after crash-reopen must not Conflict on leftover intent");
@@ -142,14 +142,14 @@ fn crash_after_prepare_does_not_immortalize_intents() {
 fn snapshot_isolation_survives_reopen() {
     let dir = temp();
     {
-        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
         c.elect_all(80).unwrap();
         c.put(b"sk", b"v0").unwrap();
         c.put(b"sk", b"v1").unwrap();
         assert!(c.read_version() >= 2);
         drop(c);
     }
-    let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+    let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
     c.elect_all(80).unwrap();
     assert!(
         c.read_version() >= 2,
@@ -185,7 +185,7 @@ fn snapshot_isolation_survives_reopen() {
 #[test]
 fn multi_range_commit_tx_single_generation_visibility() {
     let dir = temp();
-    let mut c = StoreCluster::open(&dir, 3, 3).unwrap();
+    let mut c = StoreCluster::open_lab_direct(&dir, 3, 3).unwrap();
     c.elect_all(80).unwrap();
     let keys = keys_one_per_range(&c);
     assert!(keys.len() >= 2);
@@ -220,7 +220,7 @@ fn multi_range_commit_tx_single_generation_visibility() {
 #[test]
 fn commit_tx_duplicate_keys_last_wins() {
     let dir = temp();
-    let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+    let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
     c.elect_all(80).unwrap();
     c.commit_tx([
         (b"dup".as_slice(), b"first".as_slice()),
@@ -240,7 +240,7 @@ fn commit_tx_duplicate_keys_last_wins() {
 #[test]
 fn multi_range_tx_conflicts_with_range_read() {
     let dir = temp();
-    let mut c = StoreCluster::open(&dir, 3, 3).unwrap();
+    let mut c = StoreCluster::open_lab_direct(&dir, 3, 3).unwrap();
     c.elect_all(80).unwrap();
     let keys = keys_one_per_range(&c);
     assert!(keys.len() >= 2);
@@ -274,7 +274,7 @@ fn multi_range_tx_conflicts_with_range_read() {
 #[test]
 fn note_tx_commit_reads_applied_not_lagging_first_node() {
     let dir = temp();
-    let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+    let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
     c.elect_all(80).unwrap();
     c.put(b"k", b"old").unwrap();
     // Partition node 1 so it will not apply later commits.
@@ -309,7 +309,7 @@ fn note_tx_commit_reads_applied_not_lagging_first_node() {
 #[test]
 fn changelog_after_skips_lagging_first_node() {
     let dir = temp();
-    let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+    let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
     c.elect_all(80).unwrap();
     c.put(b"/host/h1/old", b"v0").unwrap();
     c.set_participating(1, false).unwrap();
@@ -345,7 +345,7 @@ fn changelog_after_skips_lagging_first_node() {
 fn clear_is_real_pedra_delete() {
     let dir = temp();
     {
-        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
         c.elect_all(80).unwrap();
         c.put(b"gone", b"here").unwrap();
         assert_eq!(c.get(b"gone").unwrap().as_deref(), Some(b"here".as_ref()));
@@ -360,7 +360,7 @@ fn clear_is_real_pedra_delete() {
         assert_eq!(c.get_at_version(b"gone", c.read_version()).unwrap(), None);
         drop(c);
     }
-    let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+    let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
     c.elect_all(40).unwrap();
     assert_eq!(
         c.get(b"gone").unwrap().as_deref(),
@@ -383,7 +383,7 @@ fn fail_after_mid_2pc_restores_preimage() {
         let e3 = FailingEnv::passing();
         let keys;
         {
-            let mut c = StoreCluster::open_with_envs_rng(
+            let mut c = StoreCluster::open_with_envs_rng_lab_direct(
                 &dir,
                 3,
                 3,
@@ -422,7 +422,7 @@ fn fail_after_mid_2pc_restores_preimage() {
             e2.arm(u64::MAX, false);
             drop(c);
         }
-        let mut c = StoreCluster::open_with_envs_rng(
+        let mut c = StoreCluster::open_with_envs_rng_lab_direct(
             &dir,
             3,
             3,
@@ -457,7 +457,7 @@ fn fail_after_mid_2pc_restores_preimage() {
 fn hist_bitrot_does_not_silent_wrong_old_snapshot() {
     let dir = temp();
     {
-        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
         c.elect_all(80).unwrap();
         c.put(b"hk", b"v0").unwrap();
         c.put(b"hk", b"v1").unwrap();
@@ -493,7 +493,7 @@ fn hist_bitrot_does_not_silent_wrong_old_snapshot() {
             drop(db);
         }
     }
-    let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+    let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
     c.elect_all(40).unwrap();
     // Tip may still read Pedra; snapshot 0 must NOT invent tip as pre-history.
     let tip = c.get(b"hk").unwrap();
@@ -520,7 +520,7 @@ fn dcs_ttl_expired_stays_dead_after_reopen() {
     let dir = temp();
     let key = pedradb_store::meta_key(b"leader-lock");
     {
-        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
         c.set_ms_per_tick(0);
         c.elect_all(80).unwrap();
         c.dcs_create_ttl(&key, b"node-a", 100).unwrap();
@@ -533,7 +533,7 @@ fn dcs_ttl_expired_stays_dead_after_reopen() {
         drop(c);
     }
     {
-        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
         c.set_ms_per_tick(0);
         assert!(
             c.dcs_get_on(1, &key).unwrap().is_none(),
@@ -550,13 +550,13 @@ fn dcs_ttl_expired_stays_dead_after_reopen() {
     }
     // Still-valid TTL must survive a crash (do not expire everything on open).
     {
-        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
         c.set_ms_per_tick(0);
         c.elect_all(40).unwrap();
         let live = pedradb_store::meta_key(b"live-lock");
         c.dcs_create_ttl(&live, b"hold", 10_000).unwrap();
         drop(c);
-        let c = StoreCluster::open(&dir, 3, 1).unwrap();
+        let c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
         let kv = c
             .dcs_get_on(1, &live)
             .unwrap()
@@ -574,7 +574,7 @@ fn dcs_ttl_expired_stays_dead_after_reopen() {
 #[test]
 fn snapshot_below_watermark_fails_closed_not_absent() {
     let dir = temp();
-    let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+    let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
     c.elect_all(80).unwrap();
     c.put(b"f168", b"committed").unwrap();
     let snapshot = c.read_version();

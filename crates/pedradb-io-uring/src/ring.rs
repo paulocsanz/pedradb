@@ -9,7 +9,8 @@ use std::io;
 use std::os::unix::io::AsRawFd;
 
 use super::cqe_kernel::{
-    cqe_act, next_user_data, submit_complete_act, CqeAct, SubmitCompleteAct, FIRST_USER_DATA,
+    cqe_act, cqe_res_ok, next_user_data, submit_complete_act, CqeAct, SubmitCompleteAct,
+    FIRST_USER_DATA,
 };
 
 /// Ring + monotonic SQE tags (U1: never reuse a tag while a leftover CQE
@@ -51,7 +52,7 @@ impl UringState {
         // SAFETY: `buf` and `file` are borrowed until this returns. `&mut self`
         // is exclusive ring access (caller holds the env mutex).
         let res = unsafe { submit_sqe(self, entry)? };
-        if res < 0 {
+        if !cqe_res_ok(res) {
             return Err(io::Error::from_raw_os_error(-res));
         }
         Ok(res as usize)
@@ -68,7 +69,7 @@ impl UringState {
         // SAFETY: no user buffer. `file` is open until harvest returns.
         // `&mut self` is exclusive ring access.
         let res = unsafe { submit_sqe(self, entry)? };
-        if res < 0 {
+        if !cqe_res_ok(res) {
             return Err(io::Error::from_raw_os_error(-res));
         }
         Ok(())

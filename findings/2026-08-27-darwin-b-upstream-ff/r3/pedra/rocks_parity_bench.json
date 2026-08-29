@@ -1,0 +1,102 @@
+{
+  "bench": "rocks-parity-v1",
+  "engine": "compat",
+  "sync": true,
+  "peer_policy": "forced-sync",
+  "durability": "strongest-data-barrier-before-ok (F_FULLFSYNC on Darwin, fdatasync on Linux; RFC-0001/0036 v2)",
+  "changelog_interval": 0,
+  "status": "ok",
+  "notes": ["ycsb records=1024 ops=2000 payload=100 dist=zipfian", "engine=compat durability=strongest-data-barrier-before-ok (F_FULLFSYNC on Darwin, fdatasync on Linux; RFC-0001/0036 v2)", "suites: ycsb,deps", "seed: one put per record (not timed)", "cfs: default + write, lock, raftlog (TiKV store shape; raftlog = raftdb)", "deps apply batch txns/commit: 32", "changelog_interval=0", "peer_policy=forced-sync", "host-default write sync: kvrocks=true myrocks=true surreal=true"],
+  "benches": [
+{
+    "name": "ycsb_a",
+    "n": 2000,
+    "qps": 494.979,
+    "p50_ms": 3.6086,
+    "p95_ms": 4.0940,
+    "p99_ms": 4.3629,
+    "max_ms": 9.9571,
+    "wall_s": 4.0406
+  },
+{
+    "name": "ycsb_b",
+    "n": 2000,
+    "qps": 4631.989,
+    "p50_ms": 0.0004,
+    "p95_ms": 3.8916,
+    "p99_ms": 4.0709,
+    "max_ms": 4.1300,
+    "wall_s": 0.4318
+  },
+{
+    "name": "ycsb_c",
+    "n": 2000,
+    "qps": 6059082.110,
+    "p50_ms": 0.0001,
+    "p95_ms": 0.0004,
+    "p99_ms": 0.0008,
+    "max_ms": 0.0050,
+    "wall_s": 0.0003
+  },
+{
+    "name": "ycsb_d",
+    "n": 2000,
+    "qps": 4727.034,
+    "p50_ms": 0.0004,
+    "p95_ms": 3.8523,
+    "p99_ms": 4.0760,
+    "max_ms": 7.4810,
+    "wall_s": 0.4231
+  },
+{
+    "name": "ycsb_e",
+    "n": 2000,
+    "qps": 5158.065,
+    "p50_ms": 0.0005,
+    "p95_ms": 0.0238,
+    "p99_ms": 4.1466,
+    "max_ms": 4.3348,
+    "wall_s": 0.3877
+  },
+{
+    "name": "ycsb_f",
+    "n": 2000,
+    "qps": 470.082,
+    "p50_ms": 3.7215,
+    "p95_ms": 4.2672,
+    "p99_ms": 4.9229,
+    "max_ms": 10.0120,
+    "wall_s": 4.2546
+  },
+{
+    "name": "ycsb_b_unif",
+    "n": 2000,
+    "qps": 4822.232,
+    "p50_ms": 0.0005,
+    "p95_ms": 3.3072,
+    "p99_ms": 4.1904,
+    "max_ms": 7.7014,
+    "wall_s": 0.4147
+  },
+{
+    "name": "ycsb_c_unif",
+    "n": 2000,
+    "qps": 6242684.354,
+    "p50_ms": 0.0001,
+    "p95_ms": 0.0004,
+    "p99_ms": 0.0008,
+    "max_ms": 0.0017,
+    "wall_s": 0.0003
+  },
+{
+    "name": "deps_raftlog",
+    "n": 2000,
+    "qps": 245.246,
+    "p50_ms": 4.0162,
+    "p95_ms": 4.2255,
+    "p99_ms": 4.9706,
+    "max_ms": 30.2823,
+    "wall_s": 8.1551
+  }
+  ]
+}

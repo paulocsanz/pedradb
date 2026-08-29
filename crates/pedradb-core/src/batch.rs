@@ -183,6 +183,12 @@ impl WriteRecord {
                 "trailing bytes after write record".into(),
             ));
         }
+        if !write_record_count_ok(count_raw, ops.len()) {
+            return Err(CoreError::Internal(format!(
+                "write record decoded {} ops, header count {count_raw}",
+                ops.len()
+            )));
+        }
         Ok(Self { ops })
     }
 
@@ -293,6 +299,20 @@ fn op_encoded_len(o: &WriteOp) -> usize {
 
 fn estimate_size(rec: &WriteRecord) -> usize {
     1 + 4 + rec.ops.iter().map(op_encoded_len).sum::<usize>()
+}
+
+/// Decode Ok ⇒ `ops.len() ==` the encoded `count` (RFC-0150 P2a).
+///
+/// A truncated / hostile header that would apply a silent prefix is not Ok.
+#[must_use]
+pub fn write_record_count_ok(count: u32, decoded_len: usize) -> bool {
+    decoded_len == count as usize
+}
+
+/// AS-IS: accept a prefix (`k < count`) as a successful decode.
+#[must_use]
+pub fn write_record_count_ok_as_is(_count: u32, _decoded_len: usize) -> bool {
+    true
 }
 
 /// Minimal little-endian cursor for decoding (no external dep).
@@ -441,12 +461,15 @@ mod tests {
     #[test]
     fn share_consecutive_equal_values_enables_v2() {
         let ops: Vec<WriteOp> = (0..16)
-            .map(|i| WriteOp::put(i + 1, format!("raftlog/{i:08}").into_bytes(), vec![b'r'; 100]))
+            .map(|i| {
+                WriteOp::put(
+                    i + 1,
+                    format!("raftlog/{i:08}").into_bytes(),
+                    vec![b'r'; 100],
+                )
+            })
             .collect();
-        assert!(
-            !record_uses_v2(&ops),
-            "distinct allocs must not intern yet"
-        );
+        assert!(!record_uses_v2(&ops), "distinct allocs must not intern yet");
         let v1 = encoded_len(&ops);
         let mut shared = ops;
         share_consecutive_equal_values(&mut shared);
@@ -466,5 +489,59 @@ mod tests {
         let decoded = WriteRecord::decode(&raw).unwrap();
         assert_eq!(decoded.ops.len(), 16);
         assert!(decoded.ops.iter().all(|o| o.value.as_ref() == [b'r'; 100]));
+    }
+
+    #[test]
+    fn write_record_count_ok_on_live_torn_batch_is_not_ok() {
+        let rec = WriteRecord {
+            ops: vec![
+                WriteOp::put(1, b"a".as_slice(), b"1".as_slice()),
+                WriteOp::put(2, b"b".as_slice(), b"2".as_slice()),
+                WriteOp::put(3, b"c".as_slice(), b"3".as_slice()),
+            ],
+        };
+        let encoded = rec.encode();
+        assert!(write_record_count_ok(
+            3,
+            WriteRecord::decode(&encoded).unwrap().ops.len()
+        ));
+        assert!(!write_record_count_ok(3, 2));
+        assert!(
+            write_record_count_ok_as_is(3, 2),
+            "AS-IS dente: silent prefix"
+        );
+        let mut truncated = encoded.clone();
+        truncated.truncate(encoded.len().saturating_sub(4));
+        assert!(
+            WriteRecord::decode(&truncated).is_err(),
+            "torn batch must not apply a prefix"
+        );
+    }
+
+    #[test]
+    fn write_record_count_is_atomic() {
+        let rec = WriteRecord {
+            ops: vec![
+                WriteOp::put(1, b"a".as_slice(), b"1".as_slice()),
+                WriteOp::put(2, b"b".as_slice(), b"2".as_slice()),
+                WriteOp::put(3, b"c".as_slice(), b"3".as_slice()),
+            ],
+        };
+        let encoded = rec.encode();
+        let decoded = WriteRecord::decode(&encoded).unwrap();
+        assert_eq!(decoded.ops.len(), 3);
+        assert!(write_record_count_ok(3, decoded.ops.len()));
+        assert!(!write_record_count_ok(3, 2), "prefix of count is not Ok");
+        assert!(
+            write_record_count_ok_as_is(3, 2),
+            "AS-IS dente: silent prefix apply"
+        );
+        // Truncated payload: header count=3 but last op missing → Err, not prefix.
+        let mut truncated = encoded.clone();
+        truncated.truncate(encoded.len().saturating_sub(4));
+        assert!(
+            WriteRecord::decode(&truncated).is_err(),
+            "truncated record must not apply a prefix"
+        );
     }
 }

@@ -28,6 +28,7 @@ fi
 
 report "tcg_guest_status $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 report "os=$(uname -s)-$(uname -m)"
+report "kernel=tcg_guest_admitted"
 report "native_cmd=cargo run -q -p pedradb-world --bin world_smoke -- 42"
 report "p2_1=scripts/tcg_world_smoke.sh (Linux TCG guest; C2.1=native_eq_guest)"
 report "compare_wall_clock=forbidden"
@@ -36,6 +37,7 @@ if [[ -n "${PEDRA_QEMU_SSH:-}" ]]; then
   report "PEDRA_QEMU_SSH=$PEDRA_QEMU_SSH"
   if ssh $PEDRA_QEMU_SSH 'echo qemu_guest_ok' >/dev/null 2>&1; then
     report "C2.2=guest_reachable"
+    report "tcg_guest_admitted=1"
     report "note=SSH up; native-vs-guest trace_hash is RFC-0052 P2.1 (not this script)"
     report "tcg_guest_status OK reachable"
     exit 0
@@ -51,6 +53,7 @@ if [[ "${TCG_REQUIRED:-}" == 1 ]]; then
 fi
 
 report "C2.2=residual_no_guest"
-report "note=no PEDRA_QEMU_SSH; do not treat this as TCG_PASS"
+report "tcg_guest_admitted=0"
+report "note=no PEDRA_QEMU_SSH; do not treat this as TCG_PASS (tcg_guest_admitted=false)"
 report "tcg_guest_status OK residual"
 exit 0

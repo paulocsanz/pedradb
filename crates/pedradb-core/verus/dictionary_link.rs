@@ -150,6 +150,29 @@ pub open spec fn tail_has_no_key(recovered: Seq<Rec>, acked_len: u64, k: u64) ->
         acked_len <= j < recovered.len() ==> recovered.index(j).1 != k
 }
 
+/// RFC-0150 P1: replay→get visibility. An acked Value at `seq <= snapshot`
+/// that is not range-hidden is what `get` returns (`merge::visible_at`).
+pub open spec fn visible_at_spec(kind_is_value: bool, seq: u64, snapshot: u64, range_hidden: bool) -> bool {
+    &&& seq <= snapshot
+    &&& kind_is_value
+    &&& !range_hidden
+}
+
+pub fn visible_at(kind_is_value: bool, seq: u64, snapshot: u64, range_hidden: bool) -> (d: bool)
+    ensures
+        d == visible_at_spec(kind_is_value, seq, snapshot, range_hidden),
+{
+    seq <= snapshot && kind_is_value && !range_hidden
+}
+
+proof fn lemma_acked_value_is_visible_at_snapshot(seq: u64, snapshot: u64)
+    requires
+        seq <= snapshot,
+    ensures
+        visible_at_spec(true, seq, snapshot, false),
+{
+}
+
 /// `get(k)` after replay: some record for `k` with value `v` whose seq
 /// dominates every other record for `k` in the recovered set.
 pub open spec fn get_returns(recovered: Seq<Rec>, k: u64, v: u64) -> bool {

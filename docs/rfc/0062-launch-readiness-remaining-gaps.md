@@ -8,7 +8,7 @@
 [0055](0055-rocks-write-pipeline.md)
 **Evidence:** [`docs/reports/2026-08-25-compat-strict-substitute.md`](../reports/2026-08-25-compat-strict-substitute.md)
 
-**Barra deste RFC (dono, 2026-08-25):** o crate `rocksdb-compat` é um **substituto** de rust-rocksdb. 100% de paridade observável. Só vantagem. Nunca defeito. Âmbito = o crate, não Montanha, não seL4, não Intel-como-meta.
+**Barra deste RFC (dono, 2026-08-25; OOTB 2026-08-27):** o crate `rocksdb-compat` é um **substituto** de rust-rocksdb. Config **out of the box** = factory **C++ Rocks** (`sync=false`, 64 MiB memtable; Darwin `set_sync(true)` = `F_FULLFSYNC` como o CMake). Não o `librocksdb-sys` 0.16 sem `HAVE_FULLFSYNC`. Paridade oficial = `sync=false`. 100% observável. Só vantagem. Nunca defeito. Âmbito = o crate.
 
 **O que “100%” significa aqui:** programa P contra rust-rocksdb 0.21/0.22, reconstruído contra o compat/shim: (S1) compila a superfície que P chama, (S2) mesmo KV, (S3) nunca silent-wrong, (S4) throughput ≥ Rocks com os **mesmos** `WriteOptions.sync` que P setou, Linux, **min de 3 rounds > 1.0**, (S5) knobs ou fazem o nome ou não deixam P mais lento. Não é ABI C++ nem abrir diretório SST Rocks.
 
@@ -63,9 +63,11 @@
 
 ### P2 — later (v2 superfície; não bloqueia v1 Surreal 1.5)
 
-- [ ] **P2.1** `TransactionDB` 2PL **iff** um host nomeado não compila no Optimistic — status: `todo` (iff)
-- [ ] **P2.2** `Env` / `SstFileManager` **iff** Surreal v2 ou equivalente — status: `todo` (iff)
-- [ ] **P2.3** Titan / UDT / CFs físicos **iff** TiKV-as-host — status: `todo` (iff)
+- [x] **P2.1** `TransactionDB` 2PL — status: `done`
+      (exclusive key locks; `Busy`/`TimedOut`; `get_for_update`; 1PC — `prepared_transactions` vazio)
+- [x] **P2.2** `Env` / `SstFileManager` superfície 0.22 — status: `done`
+      (`Env` thread-pool setters stored; `Options::set_env`; `SstFileManager` + `set_sst_file_manager`. Pools/rate Inert: Pedra compact worker is one thread; caps stored, compact does not stall yet.)
+- [x] **P2.3** CFs físicos (N LSM, 1 WAL) — status: `done` → [0065](0065-physical-column-families-one-wal.md) P0+P1 (SST/mem/stall por CF, 1 WAL). P2.1 raftdb path remaining. Titan/UDT **fora**.
 - [ ] **P2.4** `crates.io` `rocksdb-compat` (nome **não** `rocksdb`) depois de P0+P1 — status: `todo`
 
 ## Status (living — update with every PR)
@@ -80,9 +82,9 @@
 | P1.2 | p1 | Checkpoint + BackupEngine nomes | done | checkpoint.rs + backup.rs + alias-smoke | 2026-08-25 |
 | P1.3 | p1 | knobs S5 | done | knobs.rs + g2_setters_are_not_supported | 2026-08-25 |
 | P1.4 | p1 | metal AMD coluna A min>1.0 | done | 4 vCPU = único Linux; P04_PASS 1.014 | 2026-08-25 |
-| P2.1 | p2 | TransactionDB iff host | todo | — | 2026-08-25 |
-| P2.2 | p2 | Env iff Surreal v2 | todo | — | 2026-08-25 |
-| P2.3 | p2 | Titan/CF físico iff TiKV | todo | — | 2026-08-25 |
+| P2.1 | p2 | TransactionDB 2PL | done | txn.rs LockTable exclusive | 2026-08-27 |
+| P2.2 | p2 | Env + SstFileManager 0.22 names | done | env.rs; set_env; set_sst_file_manager | 2026-08-27 |
+| P2.3 | p2 | CF físico (N LSM 1 WAL) | done | RFC-0065 P0+P1 | 2026-08-27 |
 | P2.4 | p2 | crates.io rocksdb-compat | todo | after P0+P1 | 2026-08-25 |
 
 ## Acceptance Criteria
@@ -93,6 +95,8 @@
   - P1.1: mesmo gate, `ROCKS_PARITY_SYNC=1` **e** compat `set_sync(true)` (coluna B). Compare **não** usa isto como cartaz vs default.
   - P1.2: crate smoke `use rocksdb::{Checkpoint, backup::BackupEngine}`; backup+restore+verify de 1 key.
   - P1.3: tabela gerada; teste que `set_verify_checksums(false)` deixa CRC ligado (mutante de 1 byte ainda fail-closed).
+  - P2.1: `TransactionDB::open_default` + `transaction` put/commit; second writer `lock_timeout=0` → `TimedOut`; rollback releases lock; `get_for_update` exclusive.
+  - P2.2: `Env::new` + `set_background_threads`; `SstFileManager::new` + `Options::set_env` / `set_sst_file_manager`; alias-smoke.
 - **Telemetry / Analytics**
   - Nenhuma tabela do substituto lidera com coluna C (G1 vs async). Coluna C, se publicada, leva a frase “1c paga a barreira, eles não — não é full-sync”.
 - **Documentation**

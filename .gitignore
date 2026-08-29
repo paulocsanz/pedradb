@@ -20,3 +20,6 @@
 **/*.sst
 **/db-compat/
 **/db-rocksdb/
+
+__pycache__/
+*.pyc

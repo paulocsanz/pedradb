@@ -7,7 +7,8 @@
 use rocksdb::{
     backup::{BackupEngine, BackupEngineOptions, RestoreOptions},
     checkpoint::Checkpoint,
-    Direction, Env, IteratorMode, Options, WriteBatch, DB,
+    Direction, Env, IteratorMode, Options, SstFileManager, TransactionDB, TransactionDBOptions,
+    WriteBatch, DB,
 };
 
 fn main() {
@@ -72,6 +73,24 @@ fn main() {
     let restored = DB::open_cf(&opts, &restore, &["raft"]).unwrap();
     assert_eq!(restored.get(b"kv/2").unwrap().as_deref(), Some(&b"v2"[..]));
     drop(restored);
+
+    let mut env = Env::new().unwrap();
+    env.set_background_threads(2);
+    env.join_all_threads();
+    let mgr = SstFileManager::new(&env).unwrap();
+    mgr.set_max_allowed_space_usage(1 << 20);
+    opts.set_env(&env);
+    opts.set_sst_file_manager(&mgr);
+
+    let tdir = std::env::temp_dir().join(format!("rdbcompat-alias-txn-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&tdir);
+    let tdb = TransactionDB::open(&opts, &TransactionDBOptions::new(), &tdir).unwrap();
+    let txn = tdb.transaction();
+    txn.put(b"t/1", b"tv").unwrap();
+    txn.commit().unwrap();
+    assert_eq!(tdb.get(b"t/1").unwrap().as_deref(), Some(&b"tv"[..]));
+    drop(tdb);
+    let _ = std::fs::remove_dir_all(&tdir);
 
     println!(
         "alias-smoke ok: rocksdb-named consumer running on pedradb ({})",

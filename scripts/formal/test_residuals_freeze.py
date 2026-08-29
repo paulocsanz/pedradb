@@ -7,8 +7,10 @@ that id. The live catalog must pass.
 
 from __future__ import annotations
 
+import io
 import json
 import sys
+from contextlib import redirect_stdout
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -36,7 +38,10 @@ def main() -> int:
     try:
         tmp.write_text(json.dumps(src), encoding="utf-8")
         mutant = pf.Report()
-        pf.check_residuals(ROOT, mutant, catalog, residuals_path=tmp)
+        # Expected negative: check_residuals prints FAIL for the drop. Keep
+        # live stdout FAIL-free; the mutant still has to *name* the id.
+        with redirect_stdout(io.StringIO()):
+            pf.check_residuals(ROOT, mutant, catalog, residuals_path=tmp)
     finally:
         if tmp.exists():
             tmp.unlink()

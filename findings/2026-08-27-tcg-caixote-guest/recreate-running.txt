@@ -1,0 +1,70 @@
+# pedra-tcg-guest running again — 2026-08-27T07:29Z
+
+## Proof
+
+```
+caixote service list --project=pedradb-dst
+# service_name=pedra-tcg-guest
+# scfg_c639cbc3713e4d9d864fb27614f1a920
+# resource_id=cnt_07815c8f8b72458f87f07d654c037cde
+# runtime_state=running intent=running
+# vmm_runtime=deterministic runtime_profile=deterministic
+# ip_v4=10.0.0.106 image=rust:1-bookworm
+
+host qemu (PID 9380):
+  qemu-system-x86_64 -accel tcg,thread=single -cpu max -smp 2
+  # no -icount on argv (RFC-0164 TCG single-thread; RFC-0005 icount still residual)
+
+caixote service exec pedra-tcg-guest --project=pedradb-dst -- echo qemu_guest_ok
+# stdout: qemu_guest_ok
+# exit 0
+```
+
+Guest serial: `Starting qemu-ga`, `CAIXOTE_GUEST_READY`, runc start. QGA exec path live.
+caixote-api was **not** bounced.
+
+## Why the previous cnt died
+
+Previous resource `cnt_d129bee42cbf4eb1951a15c4cfc666a5` (IP 10.0.0.107, disk_mb=20480 elastic):
+
+- elastic-serve PID 32751 stuck **D-state** in `io_wq_put_and_exit` / io_uring cancel, holding exclusive flock on the reclaim lock and `/dev/ublkc6`.
+- SIGKILL does not reap it. `UBLK_U_CMD_GET_DEV_INFO` on **dev_id=6** also D-states the caller (`/tmp/ublk_del6`).
+- GET_DEV_INFO on **dev_id=8** returns immediately (`state=QUIESCED`, `ublksrv_pid=-1`) — ublk-control is not globally dead; only id 6 is wedged.
+- Reconciler start of the old id sat behind that lock: `elastic volume already locked` / `not ready within 15s (socket=false, ublk=false)`.
+- Unlinking the lock file + renaming the elastic dir did not start the old id (backoff + 32751 cmdline still names that path). Leftover reclaim then deleted the renamed dir.
+
+## What we did (same name, new resource)
+
+1. `caixote service stop` then `delete --yes` of `pedra-tcg-guest` (RFC 0129 soft-delete `scfg_9b24bb14a3ad466ca159485ab50a3c2d`).
+2. `caixote service create` same name → `scfg_c639cbc3713e4d9d864fb27614f1a920`.
+3. `set-vmm-runtime deterministic --no-redeploy`.
+4. `deploy-image rust:1-bookworm` → new `cnt_07815c8f8b72458f87f07d654c037cde`.
+5. This incarnation uses qcow2 `/data` (disk_mb=0), **not** elastic/ublk, so it does not touch wedged ublkb6.
+
+## Leftovers (host, until reboot)
+
+- PID 32751 still D-state; `/dev/ublkb6` + `/dev/ublkc6` leaked.
+- PID 7379 (`ublk_del6`) D-state from the GET_DEV_INFO-on-6 attempt.
+- blkid PID 1247 D-state on ublkb8.
+- qemu-system PID 815 zombie.
+- `linux-gate-f208` still failed: missing cached rootfs qcow2.
+- Several CHV guests dropped while ublk id 6 was wedged; do not bounce caixote-api to "fix" them.
+- Old `PEDRA_QEMU_SSH` `:30521` is dead (previous TCP allocate + sshd overlay). Exec is the live path on this incarnation.
+
+## C2.1 re-proof (2026-08-27T08:01Z, same git tree)
+
+musl `world_smoke` pulled into the guest via `wget http://10.0.0.1:18765/world_smoke` (VPC netns), then:
+
+```
+/tmp/world_smoke 42
+seed=42 hash=48b32d03bae5f932 puts_ok=0 puts_err=6 gets_ok=1 dcs_ok=0 silent_wrong=0 events=184 net_sent=8 dropped=0 rpc=0 disk_arms=3 trip=0 t=166
+```
+
+Darwin native `cargo run --release -p pedradb-world --bin world_smoke -- 42` on this tree: **same line**. `C2.1=native_eq_guest`. Compare wall-clock still forbidden. `icount=false` residual vs RFC-0005.
+
+## Do not
+
+- `GET_DEV_INFO` / `STOP_DEV` / `DEL_DEV` on ublk id 6.
+- `systemctl restart caixote-api` (kills/desyncs live QEMU/CHV).
+- Rename the service.
+- Call this RFC-0005 icount TCG (`icount=false` in metal_qemu log).

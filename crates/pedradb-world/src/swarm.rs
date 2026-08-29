@@ -57,6 +57,34 @@ pub struct SwarmReport {
     pub seeds_per_s: f64,
     /// Seeds that failed an oracle or errored.
     pub failures: u32,
+    /// RFC-0070 P1.2: serial==parallel is not ∀ OS schedules.
+    pub forall_schedules: bool,
+}
+
+impl SwarmReport {
+    /// RFC-0070 P1.2: a green serial=parallel run is not ∀π.
+    #[must_use]
+    pub fn claim_forall_schedules(&self) -> bool {
+        self.forall_schedules
+    }
+}
+
+/// RFC-0070 P1.2: same-seed `trace_hash` match does not admit ∀π.
+#[must_use]
+pub fn serial_parallel_is_forall(hashes_match: bool) -> bool {
+    hashes_match
+        && pedradb_core::group_commit_kernel::forall_schedules_admitted(
+            pedradb_core::group_commit_kernel::pct_campaign_default_depth(),
+        )
+}
+
+/// AS-IS: a green serial=parallel gate is rounded to ∀π (the 0070 hole).
+#[must_use]
+pub fn serial_parallel_is_forall_as_is(hashes_match: bool) -> bool {
+    hashes_match
+        && pedradb_core::group_commit_kernel::forall_schedules_admitted_as_is(
+            pedradb_core::group_commit_kernel::pct_campaign_default_depth(),
+        )
 }
 
 impl SwarmReport {
@@ -173,6 +201,9 @@ where
         wall_s,
         seeds_per_s,
         failures,
+        forall_schedules: pedradb_core::group_commit_kernel::forall_schedules_admitted(
+            pedradb_core::group_commit_kernel::pct_campaign_default_depth(),
+        ),
     }
 }
 
@@ -403,9 +434,14 @@ mod tests {
                 trajectory_check: true,
                 ..Default::default()
             };
-            let t1 = World::new(0x0059_0201, cfg.clone()).run().expect("upgrade run 1");
+            let t1 = World::new(0x0059_0201, cfg.clone())
+                .run()
+                .expect("upgrade run 1");
             let t2 = World::new(0x0059_0201, cfg).run().expect("upgrade run 2");
-            assert_eq!(t1.trace_hash, t2.trace_hash, "splice must stay deterministic");
+            assert_eq!(
+                t1.trace_hash, t2.trace_hash,
+                "splice must stay deterministic"
+            );
             assert_eq!(t1.trajectory_violations, 0, "mem={mem}: {:#?}", t1.events);
             assert_eq!(t1.consistency_violations, 0, "mem={mem}: {:#?}", t1.events);
             assert_eq!(t1.silent_wrong, 0, "mem={mem}: {:#?}", t1.events);
@@ -456,17 +492,20 @@ mod tests {
             trajectory_check: true,
             ..Default::default()
         };
-        let t1 = World::new(0x0059_0207, cfg.clone()).run().expect("7n upgrade run 1");
-        let t2 = World::new(0x0059_0207, cfg).run().expect("7n upgrade run 2");
-        assert_eq!(t1.trace_hash, t2.trace_hash, "7n splice must stay deterministic");
+        let t1 = World::new(0x0059_0207, cfg.clone())
+            .run()
+            .expect("7n upgrade run 1");
+        let t2 = World::new(0x0059_0207, cfg)
+            .run()
+            .expect("7n upgrade run 2");
+        assert_eq!(
+            t1.trace_hash, t2.trace_hash,
+            "7n splice must stay deterministic"
+        );
         assert_eq!(t1.trajectory_violations, 0, "{:#?}", t1.events);
         assert_eq!(t1.consistency_violations, 0, "{:#?}", t1.events);
         assert_eq!(t1.silent_wrong, 0, "{:#?}", t1.events);
-        let rms = t1
-            .events
-            .iter()
-            .filter(|e| e.kind == "rm_member")
-            .count() as u64;
+        let rms = t1.events.iter().filter(|e| e.kind == "rm_member").count() as u64;
         assert!(
             rms >= min_rm,
             "windows did not exercise enough changes ({rms} < {min_rm})"
@@ -584,6 +623,20 @@ mod tests {
             );
         }
         assert!(parallel.seeds_per_s > 0.0);
+        // RFC-0070 P1.2: hash match is not ∀ OS interleavings of ConcurrentDb.
+        assert!(
+            !parallel.claim_forall_schedules(),
+            "serial==parallel must not round to forall schedules"
+        );
+        assert!(
+            !serial_parallel_is_forall(true),
+            "live kernel refuses ∀π even when hashes match"
+        );
+        assert!(
+            serial_parallel_is_forall_as_is(true),
+            "AS-IS dente: green serial=parallel would claim forall"
+        );
+        assert!(!serial_parallel_is_forall_as_is(false));
     }
 
     /// Same gate with P2 membership windows + trajectory on. Config must

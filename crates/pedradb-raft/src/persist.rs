@@ -57,7 +57,7 @@ pub fn load_hard_on<E: Env>(env: &E, meta_dir: &Path) -> Result<HardState> {
     let (payload, crc_raw) = buf.split_at(buf.len() - 4);
     let expect = crc32c::crc32c(payload);
     let got = u32::from_le_bytes(crc_raw.try_into().unwrap());
-    if expect != got {
+    if !pedradb_core::wal::crc::crc_match_ok(got, expect) {
         return Err(RaftError::Persist("hard state CRC mismatch".into()));
     }
     if &payload[0..4] != MAGIC {
@@ -140,7 +140,7 @@ pub fn load_commit_on<E: Env>(env: &E, meta_dir: &Path) -> Result<u64> {
     let (payload, crc_raw) = buf.split_at(buf.len() - 4);
     let expect = crc32c::crc32c(payload);
     let got = u32::from_le_bytes(crc_raw.try_into().unwrap());
-    if expect != got {
+    if !pedradb_core::wal::crc::crc_match_ok(got, expect) {
         return Err(RaftError::Persist("commit CRC mismatch".into()));
     }
     if &payload[0..4] != MAGIC {
@@ -287,7 +287,7 @@ fn decode_log(buf: &[u8]) -> Result<Vec<RaftLogEntry>> {
     let (payload, crc_raw) = buf.split_at(buf.len() - 4);
     let expect = crc32c::crc32c(payload);
     let got = u32::from_le_bytes(crc_raw.try_into().unwrap());
-    if expect != got {
+    if !pedradb_core::wal::crc::crc_match_ok(got, expect) {
         return Err(RaftError::Persist("log CRC mismatch".into()));
     }
     if &payload[0..4] != MAGIC {
@@ -513,8 +513,146 @@ mod tests {
         let mut raw = std::fs::read(&path).unwrap();
         raw[10] ^= 0xff;
         std::fs::write(&path, &raw).unwrap();
-        assert!(load_hard(&dir).unwrap_err().to_string().contains("CRC"));
+        assert!(load_hard(&dir)
+            .unwrap_err()
+            .to_string()
+            .to_ascii_lowercase()
+            .contains("crc"));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0090 P0: production `store_hard` writes `RAFT_HARD`; XOR only
+    /// the trailer CRC (magic/term/vote intact). Load is crc mismatch.
+    /// AS-IS would return the stored term. `hard_byte_flip_fail_stops`
+    /// (payload byte 10) is not this tooth.
+    #[test]
+    fn crc_mismatch_on_live_raft_hard_is_not_ok() {
+        assert!(!pedradb_core::wal::crc::crc_match_ok(1, 2));
+        assert!(
+            pedradb_core::wal::crc::crc_match_ok_as_is(1, 2),
+            "AS-IS dente: any hard-state crc would match"
+        );
+        let dir = temp();
+        store_hard(
+            &dir,
+            &HardState {
+                current_term: 3,
+                voted_for: Some(1),
+            },
+        )
+        .unwrap();
+        let path = dir.join(HARD_NAME);
+        let mut raw = std::fs::read(&path).unwrap();
+        assert!(
+            raw.len() >= 4 + 4 + 8 + 1 + 4,
+            "RAFT_HARD must have payload + trailer"
+        );
+        assert_eq!(&raw[0..4], MAGIC, "live hard-state magic");
+        let last = raw.len() - 1;
+        raw[last] ^= 0xff;
+        std::fs::write(&path, &raw).unwrap();
+        match load_hard(&dir) {
+            Ok(h) => {
+                let _ = std::fs::remove_dir_all(&dir);
+                panic!(
+                    "AS-IS hole: served term {} after CRC trailer lie",
+                    h.current_term
+                );
+            }
+            Err(e) => {
+                let _ = std::fs::remove_dir_all(&dir);
+                let msg = e.to_string();
+                assert!(
+                    msg.to_ascii_lowercase().contains("crc mismatch"),
+                    "must fail on crc_match_ok, not a magic/term parse; got {msg}"
+                );
+            }
+        }
+    }
+
+    /// RFC-0090 P1.1: production `store_commit` writes `RAFT_COMMIT`; XOR
+    /// only the trailer CRC (magic/index intact). Load is crc mismatch.
+    /// AS-IS would return the stored commit index.
+    #[test]
+    fn crc_mismatch_on_live_raft_commit_is_not_ok() {
+        assert!(!pedradb_core::wal::crc::crc_match_ok(1, 2));
+        assert!(
+            pedradb_core::wal::crc::crc_match_ok_as_is(1, 2),
+            "AS-IS dente: any commit crc would match"
+        );
+        let dir = temp();
+        store_commit(&dir, 42).unwrap();
+        let path = dir.join(COMMIT_NAME);
+        let mut raw = std::fs::read(&path).unwrap();
+        assert!(
+            raw.len() >= 4 + 4 + 8 + 4,
+            "RAFT_COMMIT must have payload + trailer"
+        );
+        assert_eq!(&raw[0..4], MAGIC, "live commit magic");
+        let last = raw.len() - 1;
+        raw[last] ^= 0xff;
+        std::fs::write(&path, &raw).unwrap();
+        match load_commit(&dir) {
+            Ok(n) => {
+                let _ = std::fs::remove_dir_all(&dir);
+                panic!("AS-IS hole: served commit {n} after CRC trailer lie");
+            }
+            Err(e) => {
+                let _ = std::fs::remove_dir_all(&dir);
+                let msg = e.to_string();
+                assert!(
+                    msg.to_ascii_lowercase().contains("crc mismatch"),
+                    "must fail on crc_match_ok, not a magic/index parse; got {msg}"
+                );
+            }
+        }
+    }
+
+    /// RFC-0090 P1.2: production `store_log` writes `RAFT_LOG`; XOR only
+    /// the trailer CRC (magic/entries intact). Load is crc mismatch.
+    /// AS-IS would return the stored entries. `log_byte_flip_fail_stops`
+    /// (mid-file payload) is not this tooth.
+    #[test]
+    fn crc_mismatch_on_live_raft_log_is_not_ok() {
+        assert!(!pedradb_core::wal::crc::crc_match_ok(1, 2));
+        assert!(
+            pedradb_core::wal::crc::crc_match_ok_as_is(1, 2),
+            "AS-IS dente: any log crc would match"
+        );
+        let dir = temp();
+        let log = vec![RaftLogEntry {
+            index: 1,
+            term: 1,
+            ops: vec![BatchOp::put(b"k", b"v")],
+        }];
+        store_log(&dir, &log).unwrap();
+        let path = dir.join(LOG_NAME);
+        let mut raw = std::fs::read(&path).unwrap();
+        assert!(
+            raw.len() >= 4 + 4 + 8 + 4,
+            "RAFT_LOG must have payload + trailer"
+        );
+        assert_eq!(&raw[0..4], MAGIC, "live log magic");
+        let last = raw.len() - 1;
+        raw[last] ^= 0xff;
+        std::fs::write(&path, &raw).unwrap();
+        match load_log(&dir) {
+            Ok(got) => {
+                let _ = std::fs::remove_dir_all(&dir);
+                panic!(
+                    "AS-IS hole: served {} log entries after CRC trailer lie",
+                    got.len()
+                );
+            }
+            Err(e) => {
+                let _ = std::fs::remove_dir_all(&dir);
+                let msg = e.to_string();
+                assert!(
+                    msg.to_ascii_lowercase().contains("crc mismatch"),
+                    "must fail on crc_match_ok, not a magic/count parse; got {msg}"
+                );
+            }
+        }
     }
 
     /// RFC-0015 P1.4: Env-backed store surfaces injected create/sync failure.

@@ -34,7 +34,7 @@ use parking_lot::{Condvar, Mutex, RwLock};
 
 use crate::db::{
     BatchOp, BlobGcCandidate, CheckpointMeta, CompactOptions, Db, DbStats, OpenOptions,
-    PreparedL0Compact, Snapshot, SnapshotPin, WriteOptions,
+    PreparedL0Compact, Snapshot, SnapshotPin, SstLiveMeta, WriteOptions,
 };
 use crate::env::{Env, StdEnv};
 use crate::error::{CoreError, Result};
@@ -809,11 +809,17 @@ impl WriteGroup {
                 }
             })
         };
+        // RFC-0071 P1.2: yield after off-lock fd, before the publish gate
+        // (no Db write lock held). PCT can interleave a reader here.
+        #[cfg(feature = "pct")]
+        crate::pct_hooks::maybe_yield("after_wal_sync");
         if let Some(l) = lone.as_mut() {
             l[1] = 0;
             l[2] = 0;
         }
-        if let Some(e) = io_err {
+        // RFC-0071: visibility publish is a kernel decision, not inline glue.
+        if !crate::group_commit_kernel::may_publish_group(io_err.is_none()) {
+            let e = io_err.expect("publish refused iff WAL I/O failed");
             let mut g = db.write();
             for chunk in &chunks {
                 if let Chunk::Fly(inf) = chunk {
@@ -1646,6 +1652,9 @@ impl<E: Env> ConcurrentDb<E> {
     /// not toggled. Prefer [`Self::open_verified`] /
     /// [`crate::VerifiedProfile::open_with_env`], which pin at open.
     pub fn pin_verified(&self) {
+        // RFC-0080: this pin is not a ring-model theorem and does not
+        // enable SQE submit. `verified_admits_ring(true)` stays false.
+        let _ = crate::verified::verified_admits_ring(true);
         self.writes.verified.store(true, Ordering::Release);
         self.writes.catchup_window_us.store(0, Ordering::Relaxed);
     }
@@ -1655,6 +1664,56 @@ impl<E: Env> ConcurrentDb<E> {
     #[must_use]
     pub fn is_verified(&self) -> bool {
         self.writes.verified.load(Ordering::Acquire)
+    }
+
+    /// RFC-0070: admit a “serial==parallel for all OS schedules” claim.
+    ///
+    /// Finite PCT depth (including d=2) never covers ∀π. This engine is
+    /// live OS threads; a green PCT campaign is not a theorem. AS-IS
+    /// [`crate::group_commit_kernel::forall_schedules_admitted_as_is`]
+    /// would admit at `pct_depth >= 2`.
+    #[must_use]
+    pub fn claim_forall_schedules(&self, pct_depth: u64) -> bool {
+        let _ = self.with_read(|d| d.last_sequence());
+        crate::group_commit_kernel::forall_schedules_admitted(pct_depth)
+    }
+
+    /// RFC-0070 P2.2: admit a “this RFC raised default PCT depth” claim.
+    ///
+    /// Always false. Campaign default stays
+    /// [`crate::group_commit_kernel::pct_campaign_default_depth`] (2).
+    /// d>2 remains RFC-0051. AS-IS
+    /// [`crate::group_commit_kernel::default_pct_depth_raised_as_is`]
+    /// would admit.
+    #[must_use]
+    pub fn claim_default_pct_depth_raised(&self) -> bool {
+        let _ = self.with_read(|d| d.last_sequence());
+        crate::group_commit_kernel::default_pct_depth_raised()
+    }
+
+    /// RFC-0071 P2.2: admit a “lock/OS-scheduler interleavings around
+    /// `may_publish_group` are ∀-proven” claim.
+    ///
+    /// Always false. The publish gate is a named decision; glue around
+    /// the write lock stays TCB (`R-group-glue`). AS-IS
+    /// [`crate::group_commit_kernel::lock_interleavings_admitted_as_is`]
+    /// would admit after a green put.
+    #[must_use]
+    pub fn claim_lock_interleavings_proven(&self) -> bool {
+        let _ = self.with_read(|d| d.last_sequence());
+        crate::group_commit_kernel::lock_interleavings_admitted()
+    }
+
+    /// RFC-0080: admit a “this verified engine runs a proven io_uring ring” claim.
+    ///
+    /// Always false. Production G1 is POSIX `fdatasync` (RFC-0062 / 0073).
+    /// The verified profile pins `StdEnv`; the ring has no model (R-uring).
+    /// AS-IS [`crate::verified::verified_admits_ring_as_is`] would admit
+    /// a live ring inside verified.
+    #[must_use]
+    pub fn claim_uring_ring_proven(&self) -> bool {
+        let _ = self.is_verified();
+        crate::verified::verified_admits_ring(true)
     }
 
     /// Group fsync for prior `WriteOptions::no_sync` writes (write lock).
@@ -1949,23 +2008,20 @@ impl<E: Env> ConcurrentDb<E> {
                 match g.prepare_flush_imm()? {
                     None => None,
                     Some(imm) => {
-                        let num = g.alloc_file_num();
+                        let nums = g.alloc_file_nums_for_imm(&imm);
                         let (env, dir, sync) = g.l0_write_ctx();
-                        Some((imm, num, env, dir, sync))
+                        Some((imm, nums, env, dir, sync))
                     }
                 }
             };
-            let Some((imm, file_num, env, dir, sync)) = prepared else {
+            let Some((imm, nums, env, dir, sync)) = prepared else {
                 break;
             };
             // Heavy I/O with **no** Db lock — a read guard here would block
             // writers for the whole SST write (parking_lot RwLock).
-            let write_result = Db::write_imm_l0_file(&env, &dir, sync, &imm, file_num);
-            let table = match write_result {
-                Ok((t, n, _)) => {
-                    debug_assert_eq!(n, file_num);
-                    t
-                }
+            let write_result = Db::write_imm_l0_files(&env, &dir, sync, &imm, &nums);
+            let files = match write_result {
+                Ok(f) => f,
                 Err(e) => {
                     // Leave a file-num gap (harmless); put imm back for retry/safety.
                     self.inner.write().restore_imm(imm);
@@ -1974,7 +2030,8 @@ impl<E: Env> ConcurrentDb<E> {
             };
             {
                 let mut g = self.inner.write();
-                if let Err(e) = g.install_l0_sst(table, file_num) {
+                let pairs: Vec<_> = files.into_iter().map(|(t, n, _)| (t, n)).collect();
+                if let Err(e) = g.install_l0_ssts(pairs) {
                     g.restore_imm(imm);
                     return Err(e);
                 }
@@ -2011,21 +2068,18 @@ impl<E: Env> ConcurrentDb<E> {
             }
             match g.prepare_flush_imm() {
                 Ok(Some(imm)) => {
-                    let num = g.alloc_file_num();
+                    let nums = g.alloc_file_nums_for_imm(&imm);
                     let (env, dir, sync) = g.l0_write_ctx();
-                    Some((imm, num, env, dir, sync))
+                    Some((imm, nums, env, dir, sync))
                 }
                 _ => None,
             }
         };
-        let Some((imm, file_num, env, dir, sync)) = prepared else {
+        let Some((imm, nums, env, dir, sync)) = prepared else {
             return false;
         };
-        let table = match Db::write_imm_l0_file(&env, &dir, sync, &imm, file_num) {
-            Ok((t, n, _)) => {
-                debug_assert_eq!(n, file_num);
-                t
-            }
+        let files = match Db::write_imm_l0_files(&env, &dir, sync, &imm, &nums) {
+            Ok(f) => f,
             Err(_) => {
                 self.inner.write().restore_imm(imm);
                 return false;
@@ -2037,7 +2091,8 @@ impl<E: Env> ConcurrentDb<E> {
         // The host worker rotates only when `writes_idle_for`.
         {
             let mut g = self.inner.write();
-            g.apply_l0_install(table, file_num);
+            let pairs: Vec<_> = files.into_iter().map(|(t, n, _)| (t, n)).collect();
+            g.apply_l0_installs(pairs);
             g.retire_flush_pin();
         }
         true
@@ -2082,24 +2137,22 @@ impl<E: Env> ConcurrentDb<E> {
             let Some(imm) = g.parked_front_arc() else {
                 return false;
             };
-            let num = g.alloc_file_num();
+            let nums = g.alloc_file_nums_for_imm(&imm);
             let (env, dir, sync) = g.l0_write_ctx();
-            Some((imm, num, env, dir, sync))
+            Some((imm, nums, env, dir, sync))
         };
-        let Some((imm, file_num, env, dir, sync)) = prepared else {
+        let Some((imm, nums, env, dir, sync)) = prepared else {
             return false;
         };
-        let table = match Db::write_imm_l0_file(&env, &dir, sync, &imm, file_num) {
-            Ok((t, n, _)) => {
-                debug_assert_eq!(n, file_num);
-                t
-            }
+        let files = match Db::write_imm_l0_files(&env, &dir, sync, &imm, &nums) {
+            Ok(f) => f,
             Err(_) => return false,
         };
         {
             let expect = Arc::as_ptr(&imm);
             let mut g = self.inner.write();
-            g.apply_l0_install(table, file_num);
+            let pairs: Vec<_> = files.into_iter().map(|(t, n, _)| (t, n)).collect();
+            g.apply_l0_installs(pairs);
             let popped = g.take_oldest_parked_matching(expect);
             drop(imm);
             if let Some(popped) = popped {
@@ -2256,6 +2309,41 @@ impl<E: Env> ConcurrentDb<E> {
     pub fn compact(&self) -> Result<()> {
         self.flush()?;
         self.inner.write().compact_ssts_only()
+    }
+
+    /// Compact only SSTs of `cf` (RFC-0065 P0.2). Flushes first so mem keys
+    /// of that family are in L0; other families' live files are not rewritten.
+    ///
+    /// # Errors
+    /// I/O.
+    pub fn compact_cf(&self, cf: &str) -> Result<()> {
+        self.flush_cf(cf)?;
+        self.inner.write().compact_ssts_only_cf(cf)
+    }
+
+    /// Register CF names for split flush / compact-by-family (RFC-0065).
+    pub fn set_physical_cfs(&self, names: Vec<String>) {
+        self.inner.write().set_physical_cfs(names);
+    }
+
+    /// Per-CF memtable flush threshold (RFC-0065 P1.1).
+    pub fn set_cf_write_buffer(&self, cf: impl Into<String>, bytes: usize) {
+        self.inner.write().set_cf_write_buffer(cf, bytes);
+    }
+
+    /// Flush only `family` (RFC-0065 P1.1). Other families stay in mem.
+    ///
+    /// # Errors
+    /// SST I/O.
+    pub fn flush_cf(&self, family: &str) -> Result<()> {
+        let _flush = self.flush_lock.lock();
+        self.inner.write().flush_cf(family)
+    }
+
+    /// Live SST inventory (name, level, CF tag, size).
+    #[must_use]
+    pub fn live_sst_meta(&self) -> Vec<SstLiveMeta> {
+        self.inner.read().live_sst_meta()
     }
 
     /// Compact with options (flush pipeline + exclusive compact install).
@@ -2450,6 +2538,163 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("pedradb-concurrent-{n}-{i}"));
         let _ = fs::remove_dir_all(&dir);
         dir
+    }
+
+    /// RFC-0071 P0: injected WAL sync fail must not publish. AS-IS
+    /// `may_publish_group` would still admit visibility.
+    #[test]
+    fn failed_wal_sync_does_not_publish_group() {
+        let dir = temp_dir();
+        let env = FenceEnv::new();
+        let db = ConcurrentDb::open_with_env(&dir, OpenOptions::default(), env.clone()).unwrap();
+        db.put(b"a", b"1").unwrap();
+        assert_eq!(db.get(b"a").as_deref(), Some(&b"1"[..]));
+        env.fail_sync
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        assert!(db.put(b"b", b"2").is_err(), "injected WAL sync failure");
+        assert_eq!(db.get(b"b"), None, "failed sync must not publish the group");
+        assert!(
+            crate::group_commit_kernel::may_publish_group_as_is(false),
+            "AS-IS dente: publish after failed WAL I/O"
+        );
+        assert!(!crate::group_commit_kernel::may_publish_group(false));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0071 P1.1: N concurrent writers take `finish_group_off_lock`;
+    /// a failed off-lock fd must not publish any member. AS-IS would.
+    #[test]
+    fn multi_writer_failed_sync_does_not_publish_group() {
+        let dir = temp_dir();
+        let env = FenceEnv::new();
+        let db = ConcurrentDb::open_with_env(&dir, OpenOptions::default(), env.clone()).unwrap();
+        db.set_write_group_catchup_window(Duration::from_millis(20));
+        db.put(b"warm", b"1").unwrap();
+        env.fail_sync_hold
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        let n = 4usize;
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(n));
+        let mut handles = Vec::new();
+        for i in 0..n {
+            let db = db.clone();
+            let barrier = std::sync::Arc::clone(&barrier);
+            handles.push(thread::spawn(move || {
+                barrier.wait();
+                let k = [b'k', u8::try_from(i).expect("n fits u8")];
+                db.put(&k, b"v")
+            }));
+        }
+        let results: Vec<Result<()>> = handles.into_iter().map(|h| h.join().unwrap()).collect();
+        assert!(
+            results.iter().all(|r| r.is_err()),
+            "every group member must fail closed: {results:?}"
+        );
+        for i in 0..n {
+            let k = [b'k', u8::try_from(i).expect("n fits u8")];
+            assert_eq!(db.get(&k), None, "unpublished key {i}");
+        }
+        let (_submits, _queued, groups, group_ops) = db.write_group_stats();
+        assert!(
+            groups >= 1 && group_ops >= 2,
+            "must have taken finish_group_off_lock groups={groups} ops={group_ops}"
+        );
+        assert!(
+            crate::group_commit_kernel::may_publish_group_as_is(false),
+            "AS-IS dente: publish after failed WAL I/O"
+        );
+        assert!(!crate::group_commit_kernel::may_publish_group(false));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0080 P0: live verified open+put cannot claim a proven ring.
+    /// AS-IS would admit a live ring inside verified. Does not submit SQEs.
+    #[test]
+    fn claim_uring_ring_refused_on_verified_open() {
+        assert!(!crate::verified::ring_model_admitted());
+        assert!(crate::verified::ring_model_admitted_as_is());
+        assert!(!crate::verified::verified_admits_ring(true));
+        assert!(crate::verified::verified_admits_ring_as_is(true));
+        let dir = temp_dir();
+        let db = ConcurrentDb::open_verified(&dir).unwrap();
+        db.put(b"uring/k", b"uring/v").unwrap();
+        assert_eq!(db.get(b"uring/k").as_deref(), Some(&b"uring/v"[..]));
+        assert!(db.is_verified());
+        assert!(
+            !db.claim_uring_ring_proven(),
+            "verified must not round to a proven io_uring ring"
+        );
+        let row = crate::verified::profile_report()
+            .iter()
+            .find(|c| c.component == "io_uring_ring")
+            .expect("io_uring_ring row");
+        assert_eq!(row.state, crate::verified::ProfileState::Off);
+        assert_eq!(
+            row.state == crate::verified::ProfileState::On,
+            crate::verified::ring_model_admitted()
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0070 P0: live ConcurrentDb put then a PCT d=2 forall claim
+    /// is refused. AS-IS would admit at depth ≥ 2.
+    #[test]
+    fn claim_forall_schedules_refused_at_pct_depth2() {
+        let dir = temp_dir();
+        let db = ConcurrentDb::open(&dir).unwrap();
+        db.put(b"pct/k", b"pct/v").unwrap();
+        assert_eq!(db.get(b"pct/k").as_deref(), Some(&b"pct/v"[..]));
+        assert!(
+            !db.claim_forall_schedules(2),
+            "d=2 must not round to forall schedules"
+        );
+        assert!(
+            crate::group_commit_kernel::forall_schedules_admitted_as_is(2),
+            "AS-IS dente: d>=2 would claim forall"
+        );
+        assert!(!crate::group_commit_kernel::forall_schedules_admitted(2));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0070 P2.2: live engine after put refuses “default PCT depth
+    /// was raised”. AS-IS would admit. Default stays 2.
+    #[test]
+    fn claim_default_pct_depth_not_raised() {
+        let dir = temp_dir();
+        let db = ConcurrentDb::open(&dir).unwrap();
+        db.put(b"pct/d", b"2").unwrap();
+        assert_eq!(db.get(b"pct/d").as_deref(), Some(&b"2"[..]));
+        assert_eq!(crate::group_commit_kernel::pct_campaign_default_depth(), 2);
+        assert!(
+            !db.claim_default_pct_depth_raised(),
+            "0070 must not raise default PCT depth"
+        );
+        assert!(
+            crate::group_commit_kernel::default_pct_depth_raised_as_is(),
+            "AS-IS dente: 0070 P2 would claim d>2 is now default"
+        );
+        assert!(!crate::group_commit_kernel::default_pct_depth_raised());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0071 P2.2: live ConcurrentDb open/put then a ∀-lock-interleavings
+    /// claim around the publish gate is refused. AS-IS would admit.
+    #[test]
+    fn claim_lock_interleavings_refused_after_put() {
+        let dir = temp_dir();
+        let db = ConcurrentDb::open(&dir).unwrap();
+        db.put(b"g71/k", b"g71/v").unwrap();
+        assert_eq!(db.get(b"g71/k").as_deref(), Some(&b"g71/v"[..]));
+        assert!(
+            !db.claim_lock_interleavings_proven(),
+            "publish gate is not a ∀ lock-schedule theorem"
+        );
+        assert!(
+            crate::group_commit_kernel::lock_interleavings_admitted_as_is(),
+            "AS-IS dente: green put would claim ∀ lock interleavings"
+        );
+        assert!(!crate::group_commit_kernel::lock_interleavings_admitted());
+        assert!(crate::group_commit_kernel::may_publish_group(true));
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -3309,10 +3554,7 @@ mod tests {
             before + 1,
             "16 interned puts, one G1 barrier"
         );
-        assert_eq!(
-            db.get(b"raftlog/00000015").as_deref(),
-            Some(val.as_slice())
-        );
+        assert_eq!(db.get(b"raftlog/00000015").as_deref(), Some(val.as_slice()));
         let _ = fs::remove_dir_all(&dir);
     }
 
@@ -3336,22 +3578,28 @@ mod tests {
     /// RFC-0047 P1.1 test env: one-shot WAL write / sync failures. The full
     /// `FailingEnv` lives in pedradb-sim (not a core dependency); this is
     /// the minimal fault surface the fence path needs.
+    ///
+    /// `Arc<AtomicBool>` so RFC-0071 P1.1 can share the env across N writer
+    /// threads (`Rc<Cell>` is `!Send`).
     #[derive(Clone)]
     struct FenceEnv {
         inner: StdEnv,
-        fail_write: std::rc::Rc<std::cell::Cell<bool>>,
-        fail_sync: std::rc::Rc<std::cell::Cell<bool>>,
+        fail_write: std::sync::Arc<std::sync::atomic::AtomicBool>,
+        fail_sync: std::sync::Arc<std::sync::atomic::AtomicBool>,
+        /// Sticky sync fail (P1.1 multi-writer): do not consume on first fd.
+        fail_sync_hold: std::sync::Arc<std::sync::atomic::AtomicBool>,
         /// ErrorKind of the injected write failure (default: Other).
-        write_kind: std::rc::Rc<std::cell::Cell<std::io::ErrorKind>>,
+        write_kind: std::sync::Arc<std::sync::Mutex<std::io::ErrorKind>>,
     }
 
     impl FenceEnv {
         fn new() -> Self {
             Self {
                 inner: StdEnv,
-                fail_write: std::rc::Rc::new(std::cell::Cell::new(false)),
-                fail_sync: std::rc::Rc::new(std::cell::Cell::new(false)),
-                write_kind: std::rc::Rc::new(std::cell::Cell::new(std::io::ErrorKind::Other)),
+                fail_write: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                fail_sync: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                fail_sync_hold: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                write_kind: std::sync::Arc::new(std::sync::Mutex::new(std::io::ErrorKind::Other)),
             }
         }
     }
@@ -3368,11 +3616,13 @@ mod tests {
     }
     impl std::io::Write for FenceFile {
         fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-            if self.env.fail_write.replace(false) {
-                return Err(std::io::Error::new(
-                    self.env.write_kind.get(),
-                    "injected wal write failure",
-                ));
+            if self
+                .env
+                .fail_write
+                .swap(false, std::sync::atomic::Ordering::SeqCst)
+            {
+                let kind = *self.env.write_kind.lock().expect("write_kind");
+                return Err(std::io::Error::new(kind, "injected wal write failure"));
             }
             self.inner.write(buf)
         }
@@ -3387,13 +3637,29 @@ mod tests {
     }
     impl crate::env::EnvFile for FenceFile {
         fn sync_data(&mut self) -> std::io::Result<()> {
-            if self.env.fail_sync.replace(false) {
+            if self
+                .env
+                .fail_sync_hold
+                .load(std::sync::atomic::Ordering::SeqCst)
+                || self
+                    .env
+                    .fail_sync
+                    .swap(false, std::sync::atomic::Ordering::SeqCst)
+            {
                 return Err(std::io::Error::other("injected wal sync failure"));
             }
             self.inner.sync_data()
         }
         fn sync_all(&mut self) -> std::io::Result<()> {
-            if self.env.fail_sync.replace(false) {
+            if self
+                .env
+                .fail_sync_hold
+                .load(std::sync::atomic::Ordering::SeqCst)
+                || self
+                    .env
+                    .fail_sync
+                    .swap(false, std::sync::atomic::Ordering::SeqCst)
+            {
                 return Err(std::io::Error::other("injected wal sync failure"));
             }
             self.inner.sync_all()
@@ -3464,7 +3730,8 @@ mod tests {
         db.put(b"a", b"1").unwrap();
         db.put(b"b", b"2").unwrap();
         assert_eq!(db.visible_sequence(), 2);
-        env.fail_write.set(true);
+        env.fail_write
+            .store(true, std::sync::atomic::Ordering::SeqCst);
         assert!(db.put(b"c", b"3").is_err(), "injected WAL write failure");
         assert!(
             matches!(db.put(b"x", b"y"), Err(CoreError::DurabilityFenced)),
@@ -3499,7 +3766,8 @@ mod tests {
         let db = ConcurrentDb::open_with_env(&dir, OpenOptions::default(), env.clone()).unwrap();
         db.put(b"a", b"1").unwrap();
         assert_eq!(db.visible_sequence(), 1);
-        env.fail_sync.set(true);
+        env.fail_sync
+            .store(true, std::sync::atomic::Ordering::SeqCst);
         assert!(db.put(b"b", b"2").is_err(), "injected WAL sync failure");
         let rec = db.recover_from_fence().unwrap().expect("fenced");
         assert_eq!(rec.fence.uncertain_from, 2);
@@ -3517,10 +3785,11 @@ mod tests {
         // the class a host auto-resume policy programs on).
         let dir = temp_dir();
         let env = FenceEnv::new();
-        env.write_kind.set(std::io::ErrorKind::StorageFull);
+        *env.write_kind.lock().expect("write_kind") = std::io::ErrorKind::StorageFull;
         let db = ConcurrentDb::open_with_env(&dir, OpenOptions::default(), env.clone()).unwrap();
         db.put(b"a", b"1").unwrap();
-        env.fail_write.set(true);
+        env.fail_write
+            .store(true, std::sync::atomic::Ordering::SeqCst);
         assert!(db.put(b"b", b"2").is_err(), "injected ENOSPC write failure");
         let report = db.fence_report().expect("fenced");
         assert_eq!(report.class, crate::db::FenceClass::Transient);
@@ -3624,7 +3893,8 @@ mod tests {
         let db = ConcurrentDb::open_with_env(&dir, OpenOptions::default(), env.clone()).unwrap();
         db.put(b"a", b"1").unwrap();
         let snap = db.visible_sequence();
-        env.fail_sync.set(true);
+        env.fail_sync
+            .store(true, std::sync::atomic::Ordering::SeqCst);
         assert!(db.put(b"b", b"2").is_err(), "injected WAL sync failure");
         assert!(
             !db.with_read(|d| d.key_has_write_after(b"b", snap)),

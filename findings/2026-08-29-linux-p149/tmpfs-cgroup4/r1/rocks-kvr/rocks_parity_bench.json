@@ -1,0 +1,74 @@
+{
+  "bench": "rocks-parity-v1",
+  "engine": "rocksdb",
+  "sync": false,
+  "peer_policy": "rocks-default",
+  "durability": "async-wal (WriteOptions.sync=false, rocksdb default)",
+  "changelog_interval": 0,
+  "status": "ok",
+  "notes": ["ycsb records=1024 ops=2000 payload=100 dist=zipfian", "engine=rocksdb durability=async-wal (WriteOptions.sync=false, rocksdb default)", "suites: kvrocks", "seed: one put per record (not timed)", "cfs: default + write, lock, raftlog (TiKV store shape; raftlog = raftdb)", "deps apply batch txns/commit: 32", "changelog_interval=0", "peer_policy=rocks-default", "host-default write sync: kvrocks=false myrocks=true surreal=true"],
+  "benches": [
+{
+    "name": "kvrocks_get",
+    "n": 2000,
+    "qps": 1809422.568,
+    "p50_ms": 0.0005,
+    "p95_ms": 0.0007,
+    "p99_ms": 0.0008,
+    "max_ms": 0.0022,
+    "wall_s": 0.0011
+  },
+{
+    "name": "kvrocks_set",
+    "n": 2000,
+    "qps": 326359.254,
+    "p50_ms": 0.0027,
+    "p95_ms": 0.0048,
+    "p99_ms": 0.0066,
+    "max_ms": 0.0635,
+    "wall_s": 0.0061
+  },
+{
+    "name": "kvrocks_pipelined_set",
+    "n": 2000,
+    "qps": 30420.040,
+    "p50_ms": 0.0316,
+    "p95_ms": 0.0424,
+    "p99_ms": 0.0528,
+    "max_ms": 0.1535,
+    "wall_s": 0.0657
+  },
+{
+    "name": "kvrocks_scan",
+    "n": 2000,
+    "qps": 35167.645,
+    "p50_ms": 0.0271,
+    "p95_ms": 0.0345,
+    "p99_ms": 0.0587,
+    "max_ms": 0.1102,
+    "wall_s": 0.0569
+  },
+{
+    "name": "kvrocks_blob_set",
+    "n": 2000,
+    "qps": 30805.476,
+    "p50_ms": 0.0310,
+    "p95_ms": 0.0370,
+    "p99_ms": 0.0423,
+    "max_ms": 0.2274,
+    "wall_s": 0.0649
+  },
+{
+    "name": "kvrocks_set_mc50",
+    "n": 100000,
+    "qps": 70417.508,
+    "p50_ms": 0.1287,
+    "p95_ms": 0.2108,
+    "p99_ms": 5.2514,
+    "max_ms": 85.5150,
+    "clients": 50,
+    "errors": 0,
+    "wall_s": 1.4201
+  }
+  ]
+}

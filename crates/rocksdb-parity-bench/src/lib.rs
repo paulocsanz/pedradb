@@ -30,6 +30,51 @@ pub fn env_usize(key: &str, default: usize) -> usize {
         .unwrap_or(default)
 }
 
+/// `ROCKS_PARITY_ONLY=csv` — experiment filter. Unset = every shape in the
+/// selected suites. Filtered runs change the rng stream; never official tables.
+pub fn shape_wanted(name: &str) -> bool {
+    shape_wanted_in(name, std::env::var("ROCKS_PARITY_ONLY").ok().as_deref())
+}
+
+pub fn shape_wanted_in(name: &str, only: Option<&str>) -> bool {
+    match only {
+        None => true,
+        Some(s) => s.split(',').map(str::trim).any(|x| x == name),
+    }
+}
+
+/// Extra `File::sync_all` after a Rocks write (`ROCKS_PARITY_FULL_SYNC`).
+/// Must be false when `set_write_sync(false)` (untimed ycsb_c_big seed).
+#[must_use]
+pub fn rocks_full_sync_after_write(full_sync: bool, write_sync: bool) -> bool {
+    full_sync && write_sync
+}
+
+/// Live Rocks WAL among dirent names (`NNNNNN.log`). Highest number only —
+/// syncing every `*.log` double-pays recycled segments and contends the
+/// same `F_FULLFSYNC` as Pedra's one fd.
+#[must_use]
+pub fn live_wal_log_name<'a, I, S>(names: I) -> Option<&'a str>
+where
+    I: IntoIterator<Item = &'a S>,
+    S: AsRef<str> + 'a + ?Sized,
+{
+    let mut best: Option<(u64, &'a str)> = None;
+    for n in names {
+        let n = n.as_ref();
+        let Some(stem) = n.strip_suffix(".log") else {
+            continue;
+        };
+        let Ok(num) = stem.parse::<u64>() else {
+            continue;
+        };
+        if best.map_or(true, |(b, _)| num >= b) {
+            best = Some((num, n));
+        }
+    }
+    best.map(|(_, n)| n)
+}
+
 /// Env knobs: `ROCKS_YCSB_RECORDS/OPS/PAYLOAD/DIST` (uniform|zipfian) and
 /// `ROCKS_DEPS_BATCH` (ops per apply commit, deps suite).
 #[derive(Clone, Debug)]
@@ -2772,6 +2817,37 @@ pub fn report_json<E: Engine>(e: &E, cfg: &Cfg, benches: &[String], suites: &str
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn shape_wanted_in_unset_keeps_every_shape() {
+        assert!(shape_wanted_in("ycsb_a", None));
+        assert!(shape_wanted_in("ycsb_c_big", None));
+        assert!(shape_wanted_in("deps_raftlog", None));
+    }
+
+    #[test]
+    fn shape_wanted_in_csv_is_exact_names() {
+        let only = Some("ycsb_a,deps_raftlog");
+        assert!(shape_wanted_in("ycsb_a", only));
+        assert!(shape_wanted_in("deps_raftlog", only));
+        assert!(!shape_wanted_in("ycsb_b", only));
+        assert!(!shape_wanted_in("ycsb_c_big", only));
+    }
+
+    #[test]
+    fn full_sync_follows_write_sync_flag() {
+        assert!(rocks_full_sync_after_write(true, true));
+        assert!(!rocks_full_sync_after_write(true, false));
+        assert!(!rocks_full_sync_after_write(false, true));
+        assert!(!rocks_full_sync_after_write(false, false));
+    }
+
+    #[test]
+    fn live_wal_log_picks_highest_numbered_segment() {
+        let names = ["LOG", "CURRENT", "000003.log", "000012.log", "MANIFEST-000011"];
+        assert_eq!(live_wal_log_name(names.iter().copied()), Some("000012.log"));
+        assert_eq!(live_wal_log_name(["OPTIONS-000007"].iter().copied()), None);
+    }
 
     #[test]
     fn runner_schedule_is_deterministic() {

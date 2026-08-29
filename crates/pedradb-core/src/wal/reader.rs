@@ -190,7 +190,7 @@ impl<R: Read> WalReader<R> {
                 &self.block[payload_start..payload_end],
             );
 
-            if stored_crc != actual_crc {
+            if !crc::crc_match_ok(stored_crc, actual_crc) {
                 return Err(CoreError::Crc {
                     offset: self.current_record_stream_offset(),
                     expected: stored_crc,
@@ -482,6 +482,22 @@ mod tests {
             .collect_all()
             .unwrap();
         assert_eq!(rest, vec![b"second".to_vec(), b"third".to_vec()]);
+    }
+
+    /// RFC-0076 P0: production writer+reader; a flipped payload is Crc,
+    /// never a valid record. AS-IS `crc_match_ok` would accept it.
+    #[test]
+    fn crc_mismatch_on_live_wal_is_not_ok() {
+        assert!(!crc::crc_match_ok(1, 2));
+        assert!(crc::crc_match_ok_as_is(1, 2));
+        let mut writer = WalWriter::new(Cursor::new(Vec::new())).unwrap();
+        writer.add_record(b"durable-payload").unwrap();
+        let mut buf = writer.into_inner().into_inner();
+        assert!(buf.len() > HEADER_SIZE);
+        buf[HEADER_SIZE] ^= 0xff;
+        let mut reader = WalReader::new(Cursor::new(buf));
+        let err = reader.read_record().unwrap_err();
+        assert!(matches!(err, CoreError::Crc { .. }), "got {err:?}");
     }
 
     #[test]

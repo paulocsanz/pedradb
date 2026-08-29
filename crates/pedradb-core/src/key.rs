@@ -167,14 +167,19 @@ impl Ord for InternalKey {
             Ordering::Equal => {}
             ord => return ord,
         }
-        // Sequence descending: higher sequence is "smaller".
-        match other.sequence.cmp(&self.sequence) {
+        match ikey_seq_cmp(self.sequence, other.sequence) {
             Ordering::Equal => {}
             ord => return ord,
         }
         // Kind descending.
         other.kind.cmp(&self.kind)
     }
+}
+
+/// Sequence descending: higher sequence is "smaller" (newest first).
+#[must_use]
+pub fn ikey_seq_cmp(a: SequenceNumber, b: SequenceNumber) -> Ordering {
+    b.cmp(&a)
 }
 
 #[cfg(test)]
@@ -253,5 +258,62 @@ mod tests {
     #[test]
     fn decode_rejects_short_buffer() {
         assert!(InternalKey::decode(&[0u8; 7]).is_err());
+    }
+
+    #[test]
+    fn pack_unpack_identity_and_ord_seq_desc() {
+        for kind in [
+            ValueType::Deletion,
+            ValueType::Value,
+            ValueType::RangeDeletion,
+        ] {
+            for seq in [0u64, 1, 42, MAX_SEQUENCE_NUMBER] {
+                let packed = pack_sequence_and_type(seq, kind);
+                let (s2, k2) = unpack_sequence_and_type(packed).unwrap();
+                assert_eq!(s2, seq);
+                assert_eq!(k2, kind);
+            }
+        }
+        assert_eq!(ikey_seq_cmp(10, 5), Ordering::Less);
+        assert_eq!(ikey_seq_cmp(5, 10), Ordering::Greater);
+        assert_eq!(ikey_seq_cmp(7, 7), Ordering::Equal);
+        let newer = InternalKey::new(Bytes::from_static(b"k"), 10, ValueType::Value);
+        let older = InternalKey::new(Bytes::from_static(b"k"), 5, ValueType::Value);
+        assert!(newer < older);
+    }
+}
+
+/// Kani harnesses (RFC-0150 P1) — compile only under `cargo kani`.
+#[cfg(kani)]
+mod kani_proofs {
+    use super::*;
+
+    #[kani::proof]
+    fn pack_unpack_identity() {
+        let seq: u64 = kani::any();
+        kani::assume(seq <= MAX_SEQUENCE_NUMBER);
+        let kind_u: u8 = kani::any();
+        kani::assume(kind_u <= 2);
+        let kind = ValueType::from_u8(kind_u).unwrap();
+        let packed = pack_sequence_and_type(seq, kind);
+        // Bit identity — do not call `unpack_sequence_and_type` (its Err
+        // arm `format!`s and CBMC explodes on alloc/fmt).
+        assert!((packed >> 8) == seq);
+        assert!((packed & 0xff) == u64::from(kind_u));
+        assert!(kind.as_u8() == kind_u);
+    }
+
+    #[kani::proof]
+    fn ikey_seq_newer_first() {
+        let a: u64 = kani::any();
+        let b: u64 = kani::any();
+        let ord = ikey_seq_cmp(a, b);
+        if a > b {
+            assert!(ord == Ordering::Less);
+        } else if a < b {
+            assert!(ord == Ordering::Greater);
+        } else {
+            assert!(ord == Ordering::Equal);
+        }
     }
 }

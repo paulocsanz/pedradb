@@ -62,7 +62,7 @@ fn main() {
     if write_bp {
         opts = opts.with_write_backpressure();
     }
-    let mut c = StoreCluster::open_with_options(&dir, 3, 1, opts).expect("open");
+    let mut c = StoreCluster::open_with_options_lab_direct(&dir, 3, 1, opts).expect("open");
     c.elect_all(120).expect("elect");
 
     let val = vec![b'x'; payload];

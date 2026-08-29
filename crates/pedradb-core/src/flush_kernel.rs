@@ -70,6 +70,19 @@ pub fn flush_plan_as_is_lose_tail(_mem_empty: bool, _imm_present: bool) -> Flush
     FlushPlan::RotateOnly
 }
 
+/// MANIFEST / CURRENT may name an SST only after that file is durable.
+#[must_use]
+pub fn may_publish_manifest(sst_durable: bool) -> bool {
+    sst_durable
+}
+
+/// AS-IS: publish MANIFEST while the SST is still unsynced (crash → CURRENT
+/// points at a torn/missing file).
+#[must_use]
+pub fn may_publish_manifest_as_is(_sst_durable: bool) -> bool {
+    true
+}
+
 /// Every way acked keys can still depend on the WAL.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct WalPinState {
@@ -242,5 +255,32 @@ mod tests {
                 assert_ne!(m, a, "mutant must differ from fixed when pin is live");
             }
         }
+    }
+
+    #[test]
+    fn may_publish_manifest_on_live_unsynced_sst_is_not_ok() {
+        assert!(!may_publish_manifest(false));
+        assert!(
+            may_publish_manifest_as_is(false),
+            "AS-IS dente: MANIFEST names unsynced SST"
+        );
+        assert!(may_publish_manifest(true));
+    }
+
+    #[test]
+    fn wal_rotate_decision_on_live_pin_is_not_ok() {
+        let s = WalPinState {
+            mem_empty: true,
+            imm_present: false,
+            pin_live: true,
+            parked_unflushed: false,
+            commit_inflight: false,
+        };
+        assert_eq!(wal_rotate_decision(s), WalRotateAction::KeepWal);
+        assert_eq!(
+            wal_rotate_decision_as_is_ignore_pin(s),
+            WalRotateAction::RotateWal,
+            "AS-IS dente: rotate while pin live"
+        );
     }
 }

@@ -284,12 +284,12 @@ impl Seek for RecordingFile {
 impl EnvFile for RecordingFile {
     fn sync_data(&mut self) -> io::Result<()> {
         let mut img = self.image.borrow_mut();
-        if img.policy == SyncPolicy::Honest {
+        let honest = img.policy == SyncPolicy::Honest;
+        if pedradb_core::group_commit_kernel::fsync_promotes_pending(honest) {
             if let Some(rec) = img.files.get_mut(&self.path) {
                 rec.promote();
             }
         }
-        // Lying: no-op promote
         Ok(())
     }
 

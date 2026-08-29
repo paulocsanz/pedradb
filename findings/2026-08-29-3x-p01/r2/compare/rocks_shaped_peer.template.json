@@ -1,0 +1,128 @@
+{
+  "bench": "rocks-side-peer-template",
+  "engine": "rocksdb",
+  "sync": false,
+  "durability": "async-wal (WriteOptions.sync=false, rocksdb default)",
+  "benches": [
+    {
+      "name": "deps_apply_batch",
+      "qps": null,
+      "compat_qps_ref": 21780.798,
+      "note": "fill qps from real RocksDB same shape"
+    },
+    {
+      "name": "deps_cache_overwrite",
+      "qps": null,
+      "compat_qps_ref": 1416346.336,
+      "note": "fill qps from real RocksDB same shape"
+    },
+    {
+      "name": "deps_lock_prewrite",
+      "qps": null,
+      "compat_qps_ref": 37512.543,
+      "note": "fill qps from real RocksDB same shape"
+    },
+    {
+      "name": "deps_mvcc_latest",
+      "qps": null,
+      "compat_qps_ref": 1170846.393,
+      "note": "fill qps from real RocksDB same shape"
+    },
+    {
+      "name": "deps_raftlog",
+      "qps": null,
+      "compat_qps_ref": 146609.648,
+      "note": "fill qps from real RocksDB same shape"
+    },
+    {
+      "name": "deps_scan",
+      "qps": null,
+      "compat_qps_ref": 786009.039,
+      "note": "fill qps from real RocksDB same shape"
+    },
+    {
+      "name": "kvrocks_blob_set",
+      "qps": null,
+      "compat_qps_ref": 103310.236,
+      "note": "fill qps from real RocksDB same shape"
+    },
+    {
+      "name": "kvrocks_get",
+      "qps": null,
+      "compat_qps_ref": 16789087.093,
+      "note": "fill qps from real RocksDB same shape"
+    },
+    {
+      "name": "kvrocks_pipelined_set",
+      "qps": null,
+      "compat_qps_ref": 198586.718,
+      "note": "fill qps from real RocksDB same shape"
+    },
+    {
+      "name": "kvrocks_scan",
+      "qps": null,
+      "compat_qps_ref": 3359932.801,
+      "note": "fill qps from real RocksDB same shape"
+    },
+    {
+      "name": "kvrocks_set",
+      "qps": null,
+      "compat_qps_ref": 1499109.903,
+      "note": "fill qps from real RocksDB same shape"
+    },
+    {
+      "name": "kvrocks_set_mc50",
+      "qps": null,
+      "compat_qps_ref": 302401.751,
+      "note": "fill qps from real RocksDB same shape"
+    },
+    {
+      "name": "ycsb_a",
+      "qps": null,
+      "compat_qps_ref": 2524984.724,
+      "note": "fill qps from real RocksDB same shape"
+    },
+    {
+      "name": "ycsb_b",
+      "qps": null,
+      "compat_qps_ref": 5549774.540,
+      "note": "fill qps from real RocksDB same shape"
+    },
+    {
+      "name": "ycsb_b_unif",
+      "qps": null,
+      "compat_qps_ref": 6399139.956,
+      "note": "fill qps from real RocksDB same shape"
+    },
+    {
+      "name": "ycsb_c",
+      "qps": null,
+      "compat_qps_ref": 7250764.049,
+      "note": "fill qps from real RocksDB same shape"
+    },
+    {
+      "name": "ycsb_c_unif",
+      "qps": null,
+      "compat_qps_ref": 9353049.562,
+      "note": "fill qps from real RocksDB same shape"
+    },
+    {
+      "name": "ycsb_d",
+      "qps": null,
+      "compat_qps_ref": 6337456.905,
+      "note": "fill qps from real RocksDB same shape"
+    },
+    {
+      "name": "ycsb_e",
+      "qps": null,
+      "compat_qps_ref": 1892147.588,
+      "note": "fill qps from real RocksDB same shape"
+    },
+    {
+      "name": "ycsb_f",
+      "qps": null,
+      "compat_qps_ref": 1685037.791,
+      "note": "fill qps from real RocksDB same shape"
+    }
+  ]
+}

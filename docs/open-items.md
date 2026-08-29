@@ -4,7 +4,7 @@
 > item is closed, or a new open question emerges. The authoritative source for
 > "what's done, what's next, what's unresolved."
 
-Last updated: 2026-08-27 (RFC-0062 P0+P1 Linux fechados; P2 iff + crates.io)
+Last updated: 2026-08-29 (RFC-0149 P0: coluna A 12/17 >3× neste Mac; CFs físicas deixam de varrer a memtable em cada put)
 
 ---
 
@@ -15,8 +15,8 @@ Last updated: 2026-08-27 (RFC-0062 P0+P1 Linux fechados; P2 iff + crates.io)
 | eixo | hoje | falta |
 |---|---|---|
 | Coluna A (compat default = Rocks default, `sync=false`) | Linux 4 vCPU **17/17 min>1.0** (`P04_PASS` 1.014). Mac 15/15 ≥1.25× | 2× em raftlog 1c recusado (p50 empatado). Intel **não** é meta. |
-| Coluna B (ambos `sync=true`) | Linux **17/17 min>1.0** (`P11_PASS` 1.013). Darwin smoke 25/08: ycsb_a **p50 empatado** 4.85/4.73 ms, qps 0.61 = cauda sob load 20 | Darwin quiet 3/3. Host Mac `set_sync(true)` ≠ smoke: Pedra `F_FULLFSYNC` vs rust-rocksdb `fdatasync` (~100×). [`findings/2026-08-27-darwin-coluna-b-smoke`](../findings/2026-08-27-darwin-coluna-b-smoke/README.md) |
-| S1 compile | Surreal 1.5.4 4/4 >1×; `Checkpoint` / `BackupEngine` nomes | TransactionDB/Titan/CFs físicos/`Env` = P2 **iff** host nomeado |
+| Coluna B (ambos `sync=true`) | Linux **17/17 min>1.0** (`P11_PASS` 1.013). Darwin live-WAL `FULL_SYNC=1` (load 9–11): raftlog min **0.999** p50 4.01/4.00; ycsb_a min 0.909 (r3 p99 tail) mediana 0.999 p50 3.43/3.53 | Darwin quiet 3/3. p50 já empatado. [`findings/2026-08-27-darwin-b-now`](../findings/2026-08-27-darwin-b-now/README.md) |
+| S1 compile | Surreal 1.5.4; Checkpoint/BackupEngine; **TransactionDB 2PL**; Env/SstFileManager 0.22 names | CF físico = [RFC-0065](rfc/0065-physical-column-families-one-wal.md) **P0 done** (SST/MANIFEST por família, 1 WAL). P1 memtable/L0 por CF. Titan/UDT fora. crates.io = P2.4 (não agora) |
 | S5 knobs | `KNOB_INVENTORY`; G2 recusa `verify_checksums(false)` / skip-any / paranoid-off | Inert continua aceite e documentado (cache/pipeline) |
 
 P0+P1 Linux fechados. Próximo: P2.4 crates.io `rocksdb-compat` (não o nome `rocksdb`); P2.1–P2.3 só se um host não compilar.
@@ -78,8 +78,9 @@ P0+P1 Linux fechados. Próximo: P2.4 crates.io `rocksdb-compat` (não o nome `ro
  RFC-0061 done (P0–P2) — [inventário único dos residuais](rfc/0061-residuals-sel4-ironfleet.md):
    Pedra ≠ seL4/IronRSL (mesma classe de claim, não de garantia); freeze
    `residuals.json` no `pedra_formal.py --ci` (ilhas unsafe, TCG guest,
-   glue LOC live, never_floor). TLS default e joint consensus continuam
-   parked nos donos 0021/0059.
+   glue LOC live, never_floor). TLS default continua parked (0021).
+   Joint consensus: RFC-0063/0064 P0 — `MembershipJoint` no log + eleição
+   old∧new (`election_during_joint_add_refuses_old_only_majority`).
  RFC-0060 done (P0–P2.27) — [field/hardware residuals](rfc/0060-field-and-hardware-residuals.md):
    `pedra verify` / `maintain --verify` at-rest CRC scrub; World BitFlip
    (`flush`→XOR→scrub on live Env→reopen; apply=false mutant);
@@ -136,7 +137,7 @@ P0+P1 Linux fechados. Próximo: P2.4 crates.io `rocksdb-compat` (não o nome `ro
 | 11 | Streaming range / lazy blocks (RFC-0014 P1) | ✅ done | scan + lazy SST blocks + levels + lz4 | — |
 | 12 | Audit correctness fixes (RFC-0015) | ✅ done | fence, sync_dir, Env seams, compact stats, deny CI | — |
 
-**Next action (determinism):** [RFC-0050](rfc/0050-world-in-tree-fdb-determinism.md) + [RFC-0051](rfc/0051-beyond-fdb-sim-holes.md) **fechados** (P0–P2). [RFC-0056](rfc/0056-one-hundred-percent-delivery.md) fechado. [RFC-0052](rfc/0052-dst-inside-boxes.md) P0+P1+P2 done (`tcg_world_smoke.sh` + `tcg_world_smoke_detio.sh`: seed 42 native=guest `61f8a02125b3c69e`, 215 fsync drops in-guest). [RFC-0053](rfc/0053-ironfleet-years.md) fechado — relatórios `docs/formal/y1|y2|y3-report.md`. Formal: `cqe_kernel.rs` (io_uring) é a única allowlist do freeze — twin bloqueado num modelo de ring.  
+**Next action (determinism):** [RFC-0050](rfc/0050-world-in-tree-fdb-determinism.md) + [RFC-0051](rfc/0051-beyond-fdb-sim-holes.md) **fechados** (P0–P2). [RFC-0056](rfc/0056-one-hundred-percent-delivery.md) fechado. [RFC-0052](rfc/0052-dst-inside-boxes.md) P0+P1+P2 done (`tcg_world_smoke.sh` + `tcg_world_smoke_detio.sh`: seed 42 native=guest `61f8a02125b3c69e`, 215 fsync drops in-guest). [RFC-0053](rfc/0053-ironfleet-years.md) fechado — relatórios `docs/formal/y1|y2|y3-report.md`. Formal: `cqe_kernel.rs` saiu da allowlist do freeze (RFC-0074 P2.1 catalog `cqe_res` / twin de `cqe_res_ok`). Modelo do ring continua bloqueado (P2.2 `cqe_ring_model_admitted`; R-uring).  
 **Next action (other):** Full bindingtester / Java RL only if requested; FDB **field** peer numbers need lab `fdbserver`. Value-store pick C (0029) done including CLI `compact-blob` / `blob-gc` / `maintain`.  
 **CI:** `synthetic-field` **montanha-scale-and-compare** — scale_gate (± `MONTANHA_WRITE_BACKPRESSURE=1`) + `montanha_bp_ab_v0` (off vs BP thr/admission delta) + mini_bt_soak (± BP) + fdb-compare template (no FDB required).  
 **Shipped (admission):** Pedra L0/mem write stall + soft pressure; Montanha `StoreError::WriteStall*` + `WriteAdmissionSnap`; lab flags on scale-gate / fdb-bench / perf-gate / montanha-tcp / mini_bt_soak; fdb-compare pass-through `write_backpressure`; structured `admission_*` in scale/perf reports.  

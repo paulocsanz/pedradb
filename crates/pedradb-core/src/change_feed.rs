@@ -262,6 +262,7 @@ fn encode_changelog(log: &ChangeLog) -> Result<Vec<u8>> {
 }
 
 /// Decode a CHANGELOG payload (for open + codec fuzz smoke, RFC-0020 P0.5).
+/// RFC-0083 P1.2 / RFC-0085 P0: trailer CRC is `crc_match_ok`.
 ///
 /// # Errors
 /// Truncation, bad magic, CRC mismatch, or corrupt entries.
@@ -275,7 +276,7 @@ pub fn decode_changelog(buf: &[u8]) -> Result<ChangeLog> {
     let (payload, crc_bytes) = buf.split_at(buf.len() - 4);
     let stored = le_u32(crc_bytes)?;
     let got = crc32c::crc32c(payload);
-    if stored != got {
+    if !crate::wal::crc::crc_match_ok(stored, got) {
         return Err(CoreError::Internal(format!(
             "changelog CRC mismatch: {stored:#x} vs {got:#x}"
         )));
@@ -453,6 +454,110 @@ mod tests {
             msg.contains("exceeds") || msg.contains("count"),
             "expected count bound error, got {msg}"
         );
+    }
+
+    /// RFC-0085 P0 / RFC-0083 P1.2: production `put`+`close` writes CHANGELOG;
+    /// XOR only the trailer CRC (payload intact). `decode_changelog` is crc
+    /// mismatch. `Db::open` still succeeds (F33). AS-IS would decode Ok.
+    #[test]
+    fn crc_mismatch_on_live_changelog_is_not_ok() {
+        use crate::db::Db;
+        assert!(!crate::wal::crc::crc_match_ok(1, 2));
+        assert!(
+            crate::wal::crc::crc_match_ok_as_is(1, 2),
+            "AS-IS dente: any changelog crc would match"
+        );
+        let dir = std::env::temp_dir().join(format!(
+            "pedradb-chlog-crc-0085-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        {
+            let mut db = Db::open(&dir).unwrap();
+            db.put(b"k", b"v").unwrap();
+            db.close().unwrap();
+        }
+        let path = dir.join(CHANGELOG_FILE_NAME);
+        let mut bytes = fs::read(&path).unwrap();
+        assert!(bytes.len() >= 12, "CHANGELOG must have payload + trailer");
+        let last = bytes.len() - 1;
+        bytes[last] ^= 0xff;
+        fs::write(&path, &bytes).unwrap();
+        let err = decode_changelog(&bytes).unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.to_ascii_lowercase().contains("crc mismatch"),
+            "must fail on crc_match_ok, not a payload parse; got {msg}"
+        );
+        let db = Db::open(&dir).expect("F33: trailer lie must not brick open");
+        assert_eq!(db.get(b"k").as_deref(), Some(b"v".as_ref()));
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0085 P2.1: changelog `crc_match_ok` is not a CRC32C collision theorem.
+    #[test]
+    fn changelog_crc_collision_axiom_remains() {
+        assert!(!crate::wal::crc::crc_collision_admitted());
+        assert!(
+            crate::wal::crc::crc_collision_admitted_as_is(),
+            "AS-IS dente: matching CRC looks collision-free"
+        );
+        assert!(
+            crate::wal::crc::crc_match_ok(1, 1),
+            "equal u32s still match; that is not R-crc"
+        );
+        let residuals = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../scripts/formal/residuals.json");
+        let text = std::fs::read_to_string(&residuals).expect("residuals.json");
+        assert!(
+            text.contains("\"id\": \"R-crc\""),
+            "R-crc must stay in the residual catalog"
+        );
+        assert!(
+            text.contains("\"R-crc\""),
+            "never_floor must still list R-crc"
+        );
+    }
+
+    /// RFC-0085 P2.2: F33 quarantine stays fail-open. Trailer lie is renamed
+    /// to CHANGELOG.corrupt; `Db::open` is Ok; WAL rebuild serves k.
+    #[test]
+    fn changelog_crc_mismatch_open_still_quarantines_f33() {
+        use crate::db::Db;
+        let dir = std::env::temp_dir().join(format!(
+            "pedradb-chlog-f33-0085-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        {
+            let mut db = Db::open(&dir).unwrap();
+            db.put(b"k", b"v").unwrap();
+            db.close().unwrap();
+        }
+        let path = dir.join(CHANGELOG_FILE_NAME);
+        let mut bytes = fs::read(&path).unwrap();
+        assert!(bytes.len() >= 12, "CHANGELOG must have payload + trailer");
+        let last = bytes.len() - 1;
+        bytes[last] ^= 0xff;
+        fs::write(&path, &bytes).unwrap();
+        let db = Db::open(&dir).expect("F33: trailer lie must not brick open");
+        assert_eq!(db.get(b"k").as_deref(), Some(b"v".as_ref()));
+        let quarantined = dir.join(CHANGELOG_CORRUPT_FILE_NAME);
+        assert!(
+            quarantined.exists(),
+            "F33 must rename poison CHANGELOG to CHANGELOG.corrupt"
+        );
+        let q = fs::read(&quarantined).unwrap();
+        assert_eq!(q, bytes, "quarantine must keep the trailer lie");
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
     }
 
     /// Corrupt CHANGELOG should not brick open of durable SST data (feed is a cache).

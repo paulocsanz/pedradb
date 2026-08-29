@@ -211,6 +211,54 @@ def check_lint(root: Path, catalog: dict, r: Report) -> None:
                         r.good(f"{pair['id']}: data_fate handler {handler} in {caller}")
 
 
+def check_three_teeth(root: Path, catalog: dict, r: Report) -> None:
+    """RFC-0151: every data_fate pair has AS-IS + twin + named DST plant."""
+    print("== three teeth (RFC-0151: AS-IS + twin + named DST plant) ==")
+    before = len(r.failed)
+    for pair in catalog["pairs"]:
+        if not pair.get("data_fate"):
+            continue
+        pid = pair["id"]
+        entry = pair.get("entry") or ""
+        ksrc = load_text(root, pair.get("kernel") or "")
+        as_is = pair.get("as_is")
+        if not isinstance(as_is, str) or not as_is.strip():
+            r.fail(f"three teeth: {pid} missing as_is")
+        elif ksrc is None:
+            r.fail(f"three teeth: {pid} missing kernel for as_is")
+        elif re.search(r"\bfn\s+" + re.escape(as_is) + r"\s*\(", ksrc) is None:
+            r.fail(f"three teeth: {pid} as_is {as_is} not in kernel")
+        else:
+            r.good(f"three teeth: {pid} as_is {as_is}")
+        plant = pair.get("dst_plant")
+        if not isinstance(plant, dict):
+            r.fail(f"three teeth: {pid} missing dst_plant")
+            continue
+        pfile = plant.get("file")
+        ptest = plant.get("test")
+        if not pfile or not ptest:
+            r.fail(f"three teeth: {pid} dst_plant needs file+test")
+            continue
+        psrc = load_text(root, pfile)
+        if psrc is None:
+            r.fail(f"three teeth: {pid} dst_plant file missing {pfile}")
+            continue
+        if re.search(r"\bfn\s+" + re.escape(ptest) + r"\s*\(", psrc) is None:
+            r.fail(f"three teeth: {pid} dst_plant test {ptest} missing in {pfile}")
+        elif entry and not mentions(psrc, entry):
+            r.fail(f"three teeth: {pid} dst_plant does not mention {entry}()")
+        else:
+            r.good(f"three teeth: {pid} plant {ptest}")
+        kernel = pair.get("kernel") or ""
+        is_raft = "pedradb-raft" in kernel or str(pid).startswith("l28_")
+        if is_raft and psrc is not None:
+            if "pin_dst_queued" not in psrc and "RpcMode::Queued" not in psrc:
+                r.fail(f"three teeth: {pid} raft plant must pin Queued RPC")
+    if len(r.failed) == before:
+        n = sum(1 for p in catalog["pairs"] if p.get("data_fate"))
+        r.good(f"three teeth: {n} data_fate pairs")
+
+
 def check_clones(root: Path, catalog: dict, r: Report) -> None:
     print("== clones (duplicated production kernels) ==")
     for clone in catalog.get("clones", []):
@@ -241,12 +289,11 @@ def check_clones(root: Path, catalog: dict, r: Report) -> None:
 # pairs. Adding a line here is a visible diff a reviewer must justify;
 # anything not listed and not registered turns CI red. TCB cannot grow in
 # silence.
-TCB_FREEZE_ALLOWLIST = {
-    "crates/pedradb-io-uring/src/cqe_kernel.rs": (
-        "io_uring CQE ownership (U1/G1): in-file property tests only; "
-        "Verus twin blocked on an io_uring ring model (docs/open-items.md)"
-    ),
-}
+#
+# RFC-0074 P2.1 registered `cqe_kernel.rs` as catalog pair `cqe_res`
+# (entry `cqe_res_ok`). That is not a ring model (P2.2 / R-uring):
+# `cqe_ring_model_admitted` stays false; do not add `verus/ring_model.rs`.
+TCB_FREEZE_ALLOWLIST: dict[str, str] = {}
 
 ISLAND_CRATES = ("pedradb-posix", "pedradb-io-uring", "pedradb-capi")
 RFC_0061 = "docs/rfc/0061-residuals-sel4-ironfleet.md"
@@ -979,6 +1026,7 @@ def main() -> int:
     if args.lint or run_ci:
         check_lint(root, catalog, r)
         check_tcb_freeze(root, catalog, r)
+        check_three_teeth(root, catalog, r)
         check_residuals(root, r, catalog)
     if args.clones or run_ci:
         check_clones(root, catalog, r)

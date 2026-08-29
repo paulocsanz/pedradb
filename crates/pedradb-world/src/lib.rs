@@ -18,9 +18,15 @@ pub mod schedule;
 pub mod scheduler;
 /// Parallel swarm executor over World seeds (RFC-0057 P0.3).
 pub mod swarm;
+/// RFC-0079: native World is not TCG guest coverage.
+pub mod tcg;
 pub mod wenv;
 
 pub use buggify::{buggify_schedule_from_seed, BuggifyArm, BuggifySchedule};
+pub use tcg::{
+    allow_claim_tcg_flag, allow_claim_tcg_flag_as_is, tcg_guest_admitted, tcg_guest_admitted_as_is,
+    world_runs_guest_ssh, world_runs_guest_ssh_as_is,
+};
 pub use coverage::{CoverageMask, SEAM_IDS};
 pub use scheduler::{pct_ready_queue, pct_ready_queue_hash};
 
@@ -132,19 +138,51 @@ pub struct Trace {
     /// RFC-0059 P2.1: membership changes applied by the run (windows +
     /// base schedule removes/adds).
     pub membership_events: u32,
+    /// RFC-0079: native World is not TCG guest coverage (`tcg_guest_admitted`).
+    pub tcg_guest: bool,
+    /// RFC-0070: a PCT-ordered World run is not ∀ OS schedules
+    /// (`forall_schedules_admitted`).
+    pub forall_schedules: bool,
+    /// RFC-0069: eventual-election claim (`liveness_admitted`). Native
+    /// World is a bounded seed schedule; default axioms are off.
+    pub eventual_election: bool,
+    /// RFC-0078 P1.2: stacking `RecordingEnv::Lying` with det_io PRELOAD
+    /// (`stacked_fsync_liars_admitted`). Native World uses neither.
+    pub stacked_fsync_liars: bool,
 }
 
 impl Trace {
+    /// RFC-0079: this native run is not TCG guest coverage.
+    #[must_use]
+    pub fn claim_tcg_guest(&self) -> bool {
+        self.tcg_guest
+    }
+
+    /// RFC-0070 P1.1: this World run is not ∀ OS schedules.
+    #[must_use]
+    pub fn claim_forall_schedules(&self) -> bool {
+        self.forall_schedules
+    }
+
+    /// RFC-0069 P1.2: this World run is not unbounded eventual election
+    /// unless ES-1∧ES-2∧ES-3 were named on the config.
+    #[must_use]
+    pub fn claim_eventual_election(&self) -> bool {
+        self.eventual_election
+    }
+
+    /// RFC-0078 P1.2: this World run did not AND Lying × det_io.
+    #[must_use]
+    pub fn claim_stacked_fsync_liars(&self) -> bool {
+        self.stacked_fsync_liars
+    }
+
     fn push(&mut self, step: u32, kind: impl Into<String>, detail: impl Into<String>) {
         let kind = kind.into();
         let detail = detail.into();
         let line = format!("{step}|{kind}|{detail}");
         self.trace_hash = hash_str(self.trace_hash, &line);
-        self.events.push(TraceEvent {
-            step,
-            kind,
-            detail,
-        });
+        self.events.push(TraceEvent { step, kind, detail });
     }
 }
 
@@ -230,6 +268,14 @@ pub struct WorldConfig {
     /// RFC-0060 P1.2: splice a deterministic BitFlip of a durable page
     /// mid-schedule. Default `false` keeps historical traces.
     pub bitflip: bool,
+    /// RFC-0069: name ES-1 (finite adversary) for an eventual-election
+    /// claim. Default false — native World is a bounded seed schedule.
+    pub es1: bool,
+    /// RFC-0069: name ES-2 (internal drain) for an eventual-election claim.
+    pub es2: bool,
+    /// RFC-0069: name ES-3 (live retrying candidate) for an
+    /// eventual-election claim.
+    pub es3: bool,
 }
 
 impl Default for WorldConfig {
@@ -256,6 +302,9 @@ impl Default for WorldConfig {
             membership_upgrade: false,
             trajectory_check: false,
             bitflip: false,
+            es1: false,
+            es2: false,
+            es3: false,
         }
     }
 }
@@ -315,7 +364,9 @@ pub fn check_trajectory(samples: &[TrajectorySample]) -> Vec<String> {
                 if let Some(what) = trajectory_violation(p, s) {
                     out.push(format!(
                         "n{} r{} {} regressed {}->{} @step {} (after {})",
-                        s.node, s.range, what,
+                        s.node,
+                        s.range,
+                        what,
                         match what {
                             "term" => p.term,
                             "snapshot_index" => p.snapshot_index,
@@ -351,14 +402,10 @@ enum NodeOrder {
 
 impl NodeOrder {
     fn pct(seed: u64, n_nodes: u64, steps: usize) -> Self {
-        let queue = crate::scheduler::pct_ready_queue(
-            seed,
-            n_nodes.max(1) as usize,
-            steps.max(1),
-        )
-        .into_iter()
-        .map(|w| w as u64 + 1)
-        .collect();
+        let queue = crate::scheduler::pct_ready_queue(seed, n_nodes.max(1) as usize, steps.max(1))
+            .into_iter()
+            .map(|w| w as u64 + 1)
+            .collect();
         Self::Pct { queue, cursor: 0 }
     }
 
@@ -430,7 +477,7 @@ impl World {
     pub fn run_with_schedule(&self, actions: &[Action]) -> Result<Trace> {
         // Fold `Env::unix_millis` (StdEnv default = wall clock) into the
         // discrete scheduler. Same seed ⇒ same clock; swarm threads each
-        // bind their own TLS. Direct RPC is **not** this path (`Queued` below).
+        // bind their own TLS. Direct RPC is **not** this path (`pin_dst_queued` below).
         let _clock = crate::wenv::LogicalClockGuard::bind_seed(self.seed);
         let parent = self.cfg.parent.join(format!("s{:016x}", self.seed));
         let _ = std::fs::remove_dir_all(&parent);
@@ -465,7 +512,7 @@ impl World {
             store_opts,
         )
         .map_err(|e| WorldError::Store(e.to_string()))?;
-        cluster.set_rpc_mode(RpcMode::Queued);
+        cluster.pin_dst_queued();
 
         let mut net = InProcessNet::lossy(
             self.seed ^ 0xA11CE,
@@ -532,6 +579,29 @@ impl World {
             consistency_violations: 0,
             trajectory_violations: 0,
             membership_events: 0,
+            // Native World does not SSH and does not invent a guest.
+            // Native World does not SSH (RFC-0079 P2.2); guest probe is the script.
+            tcg_guest: tcg_guest_admitted(false) && !world_runs_guest_ssh(),
+            // RFC-0070: PCT node order (or none) is not ∀π.
+            forall_schedules: pedradb_core::group_commit_kernel::forall_schedules_admitted(
+                if self.cfg.node_step_pct {
+                    pedradb_core::group_commit_kernel::pct_campaign_default_depth()
+                } else {
+                    0
+                },
+            ),
+            // RFC-0069: bounded World is not eventual election unless the
+            // operator names ES-1/ES-2/ES-3. AS-IS would admit anyway.
+            eventual_election: pedradb_store::liveness_admitted(
+                self.cfg.es1,
+                self.cfg.es2,
+                self.cfg.es3,
+            ),
+            // RFC-0078: native World is neither RecordingEnv::Lying nor
+            // det_io PRELOAD. Stacking the two liar boxes is refused.
+            stacked_fsync_liars: pedradb_core::group_commit_kernel::stacked_fsync_liars_admitted(
+                false, false,
+            ),
         };
 
         let arm_enabled = |idx: usize| -> bool {
@@ -657,11 +727,8 @@ impl World {
             // prefix are rejected), `m/` (range membership metadata),
             // `d/m/` (DCS create/mod_rev/lease triplets) and `d/rev`
             // (DCS revision counter).
-            const INTERNAL_ROOTS: [&[u8]; 4] =
-                [b"\0store/", b"m/", b"d/m/", b"d/rev"];
-            let is_user_key = |k: &[u8]| {
-                !INTERNAL_ROOTS.iter().any(|p| k.starts_with(p))
-            };
+            const INTERNAL_ROOTS: [&[u8]; 4] = [b"\0store/", b"m/", b"d/m/", b"d/rev"];
+            let is_user_key = |k: &[u8]| !INTERNAL_ROOTS.iter().any(|p| k.starts_with(p));
             let part: Vec<u64> = cluster
                 .node_ids()
                 .iter()
@@ -686,7 +753,8 @@ impl World {
             // Latest user-key entry per participating node, in that
             // node's seq order (DeleteRange covers every union-history
             // key in [start, end) that the node has not superseded).
-            let mut node_latest: Vec<HashMap<Vec<u8>, (bool, u64)>> = Vec::with_capacity(part.len());
+            let mut node_latest: Vec<HashMap<Vec<u8>, (bool, u64)>> =
+                Vec::with_capacity(part.len());
             for changes in &per_node {
                 let mut latest: HashMap<Vec<u8>, (bool, u64)> = HashMap::new();
                 for e in changes {
@@ -706,9 +774,7 @@ impl World {
                             for k in history.keys() {
                                 if k.as_slice() >= e.key.as_ref()
                                     && k.as_slice() < e.value.as_ref()
-                                    && !latest
-                                        .get(k)
-                                        .is_some_and(|&(_, s)| s > seq)
+                                    && !latest.get(k).is_some_and(|&(_, s)| s > seq)
                                 {
                                     latest.insert(k.clone(), (true, seq));
                                 }
@@ -724,7 +790,9 @@ impl World {
                 let mut counts: HashMap<Vec<u8>, usize> = HashMap::new();
                 let mut any_visible = 0usize;
                 for &nid in &part {
-                    let Ok(v) = cluster.get_on(nid, key) else { continue };
+                    let Ok(v) = cluster.get_on(nid, key) else {
+                        continue;
+                    };
                     let Some(v) = v else { continue };
                     any_visible += 1;
                     // (a) authenticity: phantom value (never in history).
@@ -743,10 +811,17 @@ impl World {
                                     .into_iter()
                                     .filter(|e| e.key.as_ref() == key.as_slice())
                                     .map(|e| {
-                                        format!("{:?}@{}={:02x?}", e.kind, e.sequence, e.value.as_ref())
+                                        format!(
+                                            "{:?}@{}={:02x?}",
+                                            e.kind,
+                                            e.sequence,
+                                            e.value.as_ref()
+                                        )
                                     })
                                     .collect();
-                                format!("n{nid}:v={v:?},snap={snap},applied={applied},log={changes:?}")
+                                format!(
+                                    "n{nid}:v={v:?},snap={snap},applied={applied},log={changes:?}"
+                                )
                             })
                             .collect();
                         trace.push(
@@ -806,23 +881,16 @@ impl World {
                         .iter()
                         .zip(&node_latest)
                         .map(|(nid, latest)| {
-                            let e = latest
-                                .get(key)
-                                .map_or("none".to_string(), |&(d, s)| {
-                                    format!("{}@{s}", if d { "del" } else { "put" })
-                                });
+                            let e = latest.get(key).map_or("none".to_string(), |&(d, s)| {
+                                format!("{}@{s}", if d { "del" } else { "put" })
+                            });
                             let v = cluster.get_on(*nid, key).ok().flatten();
                             let hist: Vec<String> = cluster
                                 .changelog_on(*nid, 0)
                                 .into_iter()
                                 .filter(|c| c.key.as_ref() == key.as_slice())
                                 .map(|c| {
-                                    format!(
-                                        "{:?}@{}={:02x?}",
-                                        c.kind,
-                                        c.sequence,
-                                        c.value.as_ref()
-                                    )
+                                    format!("{:?}@{}={:02x?}", c.kind, c.sequence, c.value.as_ref())
                                 })
                                 .collect();
                             format!("n{nid}:latest={e},v={v:?},hist={hist:?}")
@@ -905,11 +973,8 @@ impl World {
                 .range_values(b"")
                 .map_err(|e| WorldError::Store(e.to_string()))?;
             let want: Vec<(Vec<u8>, Vec<u8>)> = expected.into_iter().collect();
-            trace.fold_mismatch = want
-                .iter()
-                .zip(got.iter())
-                .filter(|(a, b)| a != b)
-                .count() as u32
+            trace.fold_mismatch = want.iter().zip(got.iter()).filter(|(a, b)| a != b).count()
+                as u32
                 + want.len().saturating_sub(got.len()) as u32
                 + got.len().saturating_sub(want.len()) as u32;
         }
@@ -1010,11 +1075,7 @@ impl World {
                     match cluster.handle_inbound(*from, *to, bytes) {
                         Ok(()) => applied += 1,
                         Err(e) => {
-                            trace.push(
-                                step,
-                                "rpc_err",
-                                format!("f={from} t={to} e={e}"),
-                            );
+                            trace.push(step, "rpc_err", format!("f={from} t={to} e={e}"));
                         }
                     }
                 }
@@ -1088,7 +1149,11 @@ impl World {
                 } else {
                     let _ = cluster.finish_queued_propose(range_id, index, true);
                     self.exchange(cluster, net, trace, step, "abort")?;
-                    trace.push(step, "err", format!("{err_prefix} NotCommitted idx={index}"));
+                    trace.push(
+                        step,
+                        "err",
+                        format!("{err_prefix} NotCommitted idx={index}"),
+                    );
                     Ok(false)
                 }
             }
@@ -1194,8 +1259,8 @@ impl World {
                         }
                     }
                     // Majority visibility when fully connected (all online, no membership fault).
-                    let fully_connected = part == self.cfg.n_nodes as usize
-                        && memb.offline_ids().is_empty();
+                    let fully_connected =
+                        part == self.cfg.n_nodes as usize && memb.offline_ids().is_empty();
                     if fully_connected && seen < maj {
                         self.exchange(cluster, net, trace, step, "put_vis2")?;
                         let (seen2, _, _) = count_seen_participating(cluster, &key, &val);
@@ -1346,7 +1411,11 @@ impl World {
                 }
                 trace.commit_unknown += 1;
                 trace.row_half_indexed += half;
-                trace.push(step, "cu", format!("k={key_tag} ok1={ok1} ok2={ok2} half={half}"));
+                trace.push(
+                    step,
+                    "cu",
+                    format!("k={key_tag} ok1={ok1} ok2={ok2} half={half}"),
+                );
                 if half > 0 {
                     trace.push(step, "cu_half", format!("k={key_tag} half={half}"));
                 }
@@ -1383,7 +1452,11 @@ impl World {
                                 format!("k={key_tag} claims={claims} strong=Ok"),
                             );
                         }
-                        trace.push(step, "get_strong_ok", format!("k={key_tag} hit={hit} claims={claims}"));
+                        trace.push(
+                            step,
+                            "get_strong_ok",
+                            format!("k={key_tag} hit={hit} claims={claims}"),
+                        );
                     }
                     Err(e) => {
                         trace.gets_err += 1;
@@ -1399,11 +1472,7 @@ impl World {
             Action::AdvanceNowMs { ms } => {
                 cluster.advance_now_ms(*ms);
                 crate::wenv::LogicalClockGuard::sync_now_ms(self.seed, cluster.now_ms());
-                trace.push(
-                    step,
-                    "now_ms",
-                    format!("+={ms} now={}", cluster.now_ms()),
-                );
+                trace.push(step, "now_ms", format!("+={ms} now={}", cluster.now_ms()));
             }
             Action::DcsCreate {
                 key_tag,
@@ -1424,11 +1493,7 @@ impl World {
                 )?;
                 if ok {
                     trace.dcs_ok += 1;
-                    trace.push(
-                        step,
-                        "dcs_ok",
-                        format!("create k={key_tag} ttl={ttl_ms}"),
-                    );
+                    trace.push(step, "dcs_ok", format!("create k={key_tag} ttl={ttl_ms}"));
                 } else {
                     trace.dcs_err += 1;
                 }
@@ -1611,7 +1676,11 @@ impl World {
                     *apply,
                 ) {
                     Some(hit) => {
-                        let kind = if *apply { "bitflip" } else { "bitflip_unapplied" };
+                        let kind = if *apply {
+                            "bitflip"
+                        } else {
+                            "bitflip_unapplied"
+                        };
                         trace.push(
                             step,
                             kind,
@@ -1624,19 +1693,11 @@ impl World {
                         trace.push(
                             step,
                             "bitflip_verify",
-                            format!(
-                                "clean={} {}",
-                                scrub.is_clean(),
-                                scrub.summary_line()
-                            ),
+                            format!("clean={} {}", scrub.is_clean(), scrub.summary_line()),
                         );
                         if *apply {
                             if let Err(e) = cluster.reopen_engine_on(nid, env) {
-                                trace.push(
-                                    step,
-                                    "bitflip_reopen_err",
-                                    format!("node={nid} e={e}"),
-                                );
+                                trace.push(step, "bitflip_reopen_err", format!("node={nid} e={e}"));
                             } else {
                                 trace.push(step, "bitflip_reopen_ok", format!("node={nid}"));
                             }
@@ -1691,6 +1752,33 @@ impl World {
                     }
                 }
             }
+            Action::PlantCommittedJoint { node } => {
+                if *node >= 1 && *node <= self.cfg.n_nodes {
+                    match cluster.plant_committed_joint_without_leave(*node) {
+                        Ok(()) => {
+                            trace.membership_events += 1;
+                            if cluster.probe_old_majority_joint_election(1) {
+                                trace.silent_wrong += 1;
+                                trace.push(step, "joint_plant_old_elects", format!("node={node}"));
+                            } else {
+                                trace.push(step, "joint_plant_old_refused", format!("node={node}"));
+                            }
+                        }
+                        Err(e) => {
+                            trace.push(step, "joint_plant_err", format!("node={node} e={e}"));
+                        }
+                    }
+                }
+            }
+            Action::AttemptDirectRpc => {
+                cluster.set_rpc_mode(RpcMode::Direct);
+                if cluster.rpc_mode() == RpcMode::Direct {
+                    trace.silent_wrong += 1;
+                    trace.push(step, "direct_rpc_admitted", "pin failed");
+                } else {
+                    trace.push(step, "direct_rpc_refused", "queued");
+                }
+            }
             Action::CrashReopen => {
                 cov.hit("E.sync");
                 for nid in 1..=self.cfg.n_nodes {
@@ -1703,11 +1791,7 @@ impl World {
                             trace.push(step, "crash_reopen_ok", format!("node={nid}"));
                         }
                         Err(e) => {
-                            trace.push(
-                                step,
-                                "crash_reopen_err",
-                                format!("node={nid} e={e}"),
-                            );
+                            trace.push(step, "crash_reopen_err", format!("node={nid} e={e}"));
                         }
                     }
                 }
@@ -1736,12 +1820,7 @@ impl World {
     }
 
     /// Sample leadership claims and Strong-policy fail-open on every range.
-    fn sample_safety(
-        &self,
-        step: u32,
-        cluster: &StoreCluster<WorldEnv>,
-        trace: &mut Trace,
-    ) {
+    fn sample_safety(&self, step: u32, cluster: &StoreCluster<WorldEnv>, trace: &mut Trace) {
         // Probe key `k\x01` — always locatable in single-byte split.
         let probe = [b'k', 1u8];
         let Ok(rid) = cluster.locate(&probe) else {
@@ -1921,7 +2000,7 @@ pub fn assert_seed_replayable(seed: u64, cfg: WorldConfig) -> Result<()> {
 
 /// World campaign used for FDB-class seed-replay (buggify + net/disk
 /// arms + PCT node order + in-memory Env). `World::run` still forces
-/// [`RpcMode::Queued`] — Direct RPC is a lab leftover, not this fingerprint.
+/// [`StoreCluster::pin_dst_queued`] — Direct RPC is a lab leftover, not this fingerprint.
 #[must_use]
 pub fn fdb_class_campaign(parent: PathBuf) -> WorldConfig {
     WorldConfig {
@@ -1960,7 +2039,10 @@ pub fn ensure_dir(path: &Path) -> Result<()> {
 mod tests {
     use super::*;
     use pedradb_sim::{RecordingEnv, SyncPolicy};
-    use pedradb_store::{ReadPolicy, StoreCluster};
+    use pedradb_store::{
+        allow_direct_rpc, allow_direct_rpc_as_is, liveness_admitted, liveness_admitted_as_is,
+        world_seed_l28_ok, world_seed_l28_ok_as_is, ReadPolicy, StoreCluster,
+    };
     use schedule::Action;
 
     #[test]
@@ -1970,15 +2052,14 @@ mod tests {
         // Same seed ×2: identical fingerprint; faults scheduled from seed;
         // survivors never silent-wrong.
         let a = World::new(0xC0FFEE, cfg.clone()).run().unwrap();
-        assert!(
-            !a.arms.is_empty(),
-            "buggify must arm from the seed: {a:?}"
-        );
+        assert!(!a.arms.is_empty(), "buggify must arm from the seed: {a:?}");
         assert!(
             a.disk_arms > 0
                 || a.net_dropped > 0
                 || a.net_sent > 0
-                || a.arms.iter().any(|s| s.starts_with("N.") || s.starts_with("E.")),
+                || a.arms
+                    .iter()
+                    .any(|s| s.starts_with("N.") || s.starts_with("E.")),
             "seed must schedule a net or disk arm (FDB first-class faults): arms={:?}",
             a.arms
         );
@@ -2056,15 +2137,18 @@ mod tests {
             "world_crash_reopen_ok_put_survives puts_ok={} crash_ok={} get_hits={} silent_wrong={}",
             t.puts_ok, crash_ok, hits, t.silent_wrong
         );
-        let t2 = World::new(0x0B1E_0001, WorldConfig {
-            n_nodes: 3,
-            n_ranges: 1,
-            schedule_steps: 8,
-            parent: parent.clone(),
-            exchange_rounds: 64,
-            mem_storage: true,
-            ..Default::default()
-        })
+        let t2 = World::new(
+            0x0B1E_0001,
+            WorldConfig {
+                n_nodes: 3,
+                n_ranges: 1,
+                schedule_steps: 8,
+                parent: parent.clone(),
+                exchange_rounds: 64,
+                mem_storage: true,
+                ..Default::default()
+            },
+        )
         .run_with_schedule(&schedule)
         .unwrap();
         assert_eq!(t.trace_hash, t2.trace_hash);
@@ -2123,12 +2207,16 @@ mod tests {
         let hit1 = t
             .events
             .iter()
-            .filter(|e| e.kind == "get_ok" && e.detail.contains("k=1") && e.detail.contains("hit=1"))
+            .filter(|e| {
+                e.kind == "get_ok" && e.detail.contains("k=1") && e.detail.contains("hit=1")
+            })
             .count();
         let hit2 = t
             .events
             .iter()
-            .filter(|e| e.kind == "get_ok" && e.detail.contains("k=2") && e.detail.contains("hit=1"))
+            .filter(|e| {
+                e.kind == "get_ok" && e.detail.contains("k=2") && e.detail.contains("hit=1")
+            })
             .count();
         assert!(hit1 >= 1, "flushed key missing after crash: {t:?}");
         assert!(hit2 >= 1, "tail key missing after crash: {t:?}");
@@ -2170,7 +2258,9 @@ mod tests {
         assert_eq!(t1.trace_hash, t2.trace_hash, "joint remove must replay");
         assert_eq!(t1.silent_wrong, 0, "{t1:?}");
         assert!(
-            t1.events.iter().any(|e| e.kind == "joint_rm" || e.kind == "err"),
+            t1.events
+                .iter()
+                .any(|e| e.kind == "joint_rm" || e.kind == "err"),
             "joint remove must be attempted: {t1:?}"
         );
         eprintln!(
@@ -2216,6 +2306,100 @@ mod tests {
             "world_joint_add_after_remove hash={:x} memb={} silent_wrong={}",
             t1.trace_hash, t1.membership_events, t1.silent_wrong
         );
+        let _ = std::fs::remove_dir_all(&parent);
+    }
+
+    /// RFC-0068 P0: World plants committed C-old,new without leave; C-old
+    /// majority must not elect (`silent_wrong` if it does).
+    #[test]
+    fn world_planted_committed_joint_old_majority_does_not_elect() {
+        let parent = temp_parent("joint-plant");
+        let cfg = WorldConfig {
+            n_nodes: 4,
+            n_ranges: 1,
+            schedule_steps: 8,
+            parent: parent.clone(),
+            exchange_rounds: 64,
+            mem_storage: true,
+            ..Default::default()
+        };
+        let schedule = vec![
+            Action::ClockAdvance(40),
+            Action::JointRemove { node: 4 },
+            Action::ClockAdvance(20),
+            Action::PlantCommittedJoint { node: 4 },
+        ];
+        let t = World::new(0x0068_0001, cfg)
+            .run_with_schedule(&schedule)
+            .unwrap();
+        assert_eq!(t.silent_wrong, 0, "{t:?}");
+        assert!(
+            t.events.iter().any(|e| e.kind == "joint_plant_old_refused"),
+            "planted joint must refuse old-only majority: {t:?}"
+        );
+        let _ = std::fs::remove_dir_all(&parent);
+    }
+
+    /// RFC-0067 P1.1: World Action attempts Direct after pin; fingerprint
+    /// stays Queued. AS-IS would admit Direct and skip Net.
+    #[test]
+    fn world_attempt_direct_after_pin_stays_queued() {
+        let parent = temp_parent("direct-pin");
+        let cfg = WorldConfig {
+            n_nodes: 3,
+            n_ranges: 1,
+            schedule_steps: 4,
+            parent: parent.clone(),
+            mem_storage: true,
+            ..Default::default()
+        };
+        let schedule = vec![Action::ClockAdvance(8), Action::AttemptDirectRpc];
+        let t1 = World::new(0x0067_0001, cfg.clone())
+            .run_with_schedule(&schedule)
+            .unwrap();
+        assert_eq!(t1.silent_wrong, 0, "{t1:?}");
+        assert!(
+            t1.events.iter().any(|e| e.kind == "direct_rpc_refused"),
+            "Direct after pin must be refused: {t1:?}"
+        );
+        assert!(
+            !t1.events.iter().any(|e| e.kind == "direct_rpc_admitted"),
+            "Direct after pin must not skip Net: {t1:?}"
+        );
+        let t2 = World::new(0x0067_0001, cfg)
+            .run_with_schedule(&schedule)
+            .unwrap();
+        assert_eq!(t1.trace_hash, t2.trace_hash, "manual schedule must replay");
+        assert!(!allow_direct_rpc(true, true));
+        assert!(allow_direct_rpc_as_is(true, true), "AS-IS would skip Net");
+        let _ = std::fs::remove_dir_all(&parent);
+    }
+
+    /// RFC-0072 P1.2: World-clean on the L28 seed is not L28 without
+    /// `cluster_real`. The TCP run of the same seed is `l28_real_tcp_seed_replay`.
+    #[test]
+    fn world_l28_seed_silent_wrong_zero_is_not_tcp_clean_alone() {
+        let seed = 0x0064_1E28_u64;
+        let parent = temp_parent("l28-world");
+        let cfg = WorldConfig {
+            n_nodes: 3,
+            n_ranges: 1,
+            schedule_steps: 8,
+            parent: parent.clone(),
+            mem_storage: true,
+            ..Default::default()
+        };
+        let t = World::new(seed, cfg).run().unwrap();
+        assert_eq!(t.silent_wrong, 0, "{t:?}");
+        assert!(
+            world_seed_l28_ok_as_is(t.silent_wrong, false),
+            "AS-IS dente: World-clean without TCP would pass"
+        );
+        assert!(
+            !world_seed_l28_ok(t.silent_wrong, false),
+            "World silent_wrong=0 is not L28 without cluster_real"
+        );
+        assert!(world_seed_l28_ok(t.silent_wrong, true));
         let _ = std::fs::remove_dir_all(&parent);
     }
 
@@ -2309,7 +2493,11 @@ mod tests {
     fn swarm_l28_mask_matrix() {
         let parent = temp_parent("l28");
         for n in [3u64, 5] {
-            for mask in [0xAAAA_AAAA_AAAA_AAAA_u64, 0x5555_5555_5555_5555, 0x0000_0000_0000_0F0F] {
+            for mask in [
+                0xAAAA_AAAA_AAAA_AAAA_u64,
+                0x5555_5555_5555_5555,
+                0x0000_0000_0000_0F0F,
+            ] {
                 for seed in 0..4u64 {
                     let cfg = WorldConfig {
                         n_nodes: n,
@@ -2358,14 +2546,285 @@ mod tests {
             ..Default::default()
         };
         let t1 = World::new(0x00F0_0001, mk(false)).run().unwrap();
-        assert!(t1.fold_cursor > 0, "changelog must have fed the fold: {t1:?}");
-        assert_eq!(t1.fold_mismatch, 0, "fold differs from changelog replay: {t1:?}");
+        assert!(
+            t1.fold_cursor > 0,
+            "changelog must have fed the fold: {t1:?}"
+        );
+        assert_eq!(
+            t1.fold_mismatch, 0,
+            "fold differs from changelog replay: {t1:?}"
+        );
         let t2 = World::new(0x00F0_0001, mk(false)).run().unwrap();
         assert_eq!(t1.trace_hash, t2.trace_hash, "fold role must replay");
         assert_eq!(t1.fold_cursor, t2.fold_cursor);
         let tb = World::new(0x00B0_0002, mk(true)).run().unwrap();
         assert_eq!(tb.fold_mismatch, 0, "fold under buggify: {tb:?}");
         assert_eq!(tb.silent_wrong, 0, "{tb:?}");
+        let _ = std::fs::remove_dir_all(&parent);
+    }
+
+    /// RFC-0079 P0: live World::run is not TCG guest coverage.
+    /// AS-IS `tcg_guest_admitted` would admit a native smoke as TCG.
+    #[test]
+    fn claim_tcg_guest_refused_on_native_world() {
+        assert!(!tcg_guest_admitted(false));
+        assert!(
+            tcg_guest_admitted_as_is(false),
+            "AS-IS dente: native World would claim TCG"
+        );
+        let parent = temp_parent("tcg-0079");
+        let cfg = WorldConfig {
+            n_nodes: 3,
+            n_ranges: 1,
+            schedule_steps: 8,
+            parent: parent.clone(),
+            mem_storage: true,
+            ..Default::default()
+        };
+        let t = World::new(0x0079, cfg).run().unwrap();
+        assert!(!t.events.is_empty(), "World::run must actually schedule");
+        assert!(
+            !t.claim_tcg_guest(),
+            "native World must not round to TCG guest coverage"
+        );
+        assert!(
+            !allow_claim_tcg_flag(true, t.claim_tcg_guest()),
+            "world_smoke --claim-tcg must refuse on native World"
+        );
+        assert!(
+            allow_claim_tcg_flag_as_is(true, false),
+            "AS-IS dente: --claim-tcg on native would pass"
+        );
+        assert!(allow_claim_tcg_flag(false, false));
+        assert!(allow_claim_tcg_flag(true, true));
+        let _ = std::fs::remove_dir_all(&parent);
+    }
+
+    /// RFC-0079 P1.1: the status script names the same kernel.
+    #[test]
+    fn tcg_guest_status_script_names_kernel() {
+        let p = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../scripts/tcg_guest_status.sh");
+        let src = std::fs::read_to_string(&p).expect("tcg_guest_status.sh");
+        assert!(
+            src.contains("tcg_guest_admitted"),
+            "script must print kernel=tcg_guest_admitted"
+        );
+        assert!(src.contains("TCG_REQUIRED"));
+        assert!(src.contains("FAIL_no_guest"));
+        let out = std::process::Command::new("bash")
+            .arg(&p)
+            .env_remove("PEDRA_QEMU_SSH")
+            .env_remove("TCG_REQUIRED")
+            .output()
+            .expect("run tcg_guest_status.sh");
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert!(out.status.success(), "residual path must exit 0: {stdout}");
+        assert!(
+            stdout.contains("kernel=tcg_guest_admitted"),
+            "{stdout}"
+        );
+        assert!(stdout.contains("tcg_guest_admitted=0"), "{stdout}");
+        assert!(stdout.contains("C2.2=residual_no_guest"), "{stdout}");
+    }
+
+    /// RFC-0079 P2.2: World::run does not SSH. Guest probe stays the script.
+    /// AS-IS would claim World SSHed.
+    #[test]
+    fn world_still_does_not_ssh() {
+        assert!(!world_runs_guest_ssh());
+        assert!(
+            world_runs_guest_ssh_as_is(),
+            "AS-IS dente: World::run would SSH"
+        );
+        let tcg = include_str!("tcg.rs");
+        assert!(
+            !tcg.contains("Command::new(\"ssh\")") && !tcg.contains("PEDRA_QEMU_SSH"),
+            "tcg.rs must not spawn ssh or read PEDRA_QEMU_SSH"
+        );
+        let script = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../scripts/tcg_guest_status.sh");
+        let src = std::fs::read_to_string(script).expect("tcg_guest_status.sh");
+        assert!(
+            src.contains("ssh"),
+            "guest SSH probe stays tcg_guest_status.sh"
+        );
+        let parent = temp_parent("ssh-0079");
+        let cfg = WorldConfig {
+            n_nodes: 3,
+            n_ranges: 1,
+            schedule_steps: 8,
+            parent: parent.clone(),
+            mem_storage: true,
+            ..Default::default()
+        };
+        let t = World::new(0x0079_0002, cfg).run().unwrap();
+        assert!(!t.events.is_empty(), "World::run must actually schedule");
+        assert!(!t.claim_tcg_guest(), "World must not invent a guest via SSH");
+        let _ = std::fs::remove_dir_all(&parent);
+    }
+
+    /// RFC-0078 P2.2: closing the lying-fsync model does not invent a
+    /// TCG guest. `R-tcg-guest` stays 0079. AS-IS would claim 0078 closed it.
+    #[test]
+    fn world_fsync_lie_does_not_invent_tcg_guest() {
+        assert!(!pedradb_core::group_commit_kernel::fsync_lie_closes_tcg_guest());
+        assert!(
+            pedradb_core::group_commit_kernel::fsync_lie_closes_tcg_guest_as_is(),
+            "AS-IS dente: 0078 would invent a TCG guest"
+        );
+        assert!(!tcg_guest_admitted(false));
+        let parent = temp_parent("lie-tcg-0078");
+        let cfg = WorldConfig {
+            n_nodes: 3,
+            n_ranges: 1,
+            schedule_steps: 8,
+            parent: parent.clone(),
+            mem_storage: true,
+            ..Default::default()
+        };
+        let t = World::new(0x0078_0002, cfg).run().unwrap();
+        assert!(!t.events.is_empty(), "World::run must actually schedule");
+        assert!(
+            !t.claim_tcg_guest(),
+            "0078 must not round a World run to TCG guest"
+        );
+        let _ = std::fs::remove_dir_all(&parent);
+    }
+
+    /// RFC-0070 P1.1: a live PCT-ordered World run refuses ∀π.
+    /// AS-IS `forall_schedules_admitted` would admit at d≥2.
+    #[test]
+    fn world_pct_run_refuses_forall_schedules() {
+        let parent = temp_parent("pct-0070");
+        let cfg = WorldConfig {
+            n_nodes: 3,
+            n_ranges: 1,
+            schedule_steps: 8,
+            parent: parent.clone(),
+            mem_storage: true,
+            node_step_pct: true,
+            ..Default::default()
+        };
+        let t = World::new(0x0070_0001, cfg).run().unwrap();
+        assert!(!t.events.is_empty(), "World::run must actually schedule");
+        assert!(
+            !t.claim_forall_schedules(),
+            "PCT World run must not round to forall schedules"
+        );
+        assert!(
+            pedradb_core::group_commit_kernel::forall_schedules_admitted_as_is(2),
+            "AS-IS dente: d=2 would claim forall"
+        );
+        assert!(!pedradb_core::group_commit_kernel::forall_schedules_admitted(2));
+        let _ = std::fs::remove_dir_all(&parent);
+    }
+
+    /// RFC-0070 P2.2: a live PCT World run does not raise default depth.
+    /// d>2 remains RFC-0051. AS-IS would claim 0070 raised it.
+    #[test]
+    fn world_pct_default_depth_not_raised() {
+        let parent = temp_parent("pct-0070-d2");
+        let cfg = WorldConfig {
+            n_nodes: 3,
+            n_ranges: 1,
+            schedule_steps: 8,
+            parent: parent.clone(),
+            mem_storage: true,
+            node_step_pct: true,
+            ..Default::default()
+        };
+        let t = World::new(0x0070_0002, cfg).run().unwrap();
+        assert!(!t.events.is_empty(), "World::run must actually schedule");
+        assert_eq!(
+            pedradb_core::group_commit_kernel::pct_campaign_default_depth(),
+            2
+        );
+        assert!(
+            !pedradb_core::group_commit_kernel::default_pct_depth_raised(),
+            "0070 must not raise default PCT depth"
+        );
+        assert!(
+            pedradb_core::group_commit_kernel::default_pct_depth_raised_as_is(),
+            "AS-IS dente: 0070 P2 would claim d>2 is now default"
+        );
+        let _ = std::fs::remove_dir_all(&parent);
+    }
+
+    /// RFC-0069 P1.2: a live World run refuses eventual-election unless
+    /// ES-1∧ES-2∧ES-3 are named. Default axioms are off. AS-IS would admit.
+    #[test]
+    fn world_run_refuses_eventual_election_without_es_axioms() {
+        let parent = temp_parent("es-0069");
+        let cfg = WorldConfig {
+            n_nodes: 3,
+            n_ranges: 1,
+            schedule_steps: 8,
+            parent: parent.clone(),
+            mem_storage: true,
+            ..Default::default()
+        };
+        let t = World::new(0x0069_0001, cfg).run().unwrap();
+        assert!(!t.events.is_empty(), "World::run must actually schedule");
+        assert!(
+            !t.claim_eventual_election(),
+            "native World must not round to eventual election"
+        );
+        assert!(
+            liveness_admitted_as_is(false, false, false),
+            "AS-IS dente: claim without axioms"
+        );
+        assert!(!liveness_admitted(false, true, true));
+        let _ = std::fs::remove_dir_all(&parent);
+
+        let parent = temp_parent("es-0069-on");
+        let cfg = WorldConfig {
+            n_nodes: 3,
+            n_ranges: 1,
+            schedule_steps: 8,
+            parent: parent.clone(),
+            mem_storage: true,
+            es1: true,
+            es2: true,
+            es3: true,
+            ..Default::default()
+        };
+        let t = World::new(0x0069_0002, cfg).run().unwrap();
+        assert!(
+            t.claim_eventual_election(),
+            "naming ES-1∧ES-2∧ES-3 admits the claim"
+        );
+        let _ = std::fs::remove_dir_all(&parent);
+    }
+
+    /// RFC-0078 P1.2: native World does not AND Lying × det_io PRELOAD.
+    /// AS-IS would admit stacking both liar boxes.
+    #[test]
+    fn world_run_refuses_stacked_fsync_liars() {
+        let parent = temp_parent("lie-0078");
+        let cfg = WorldConfig {
+            n_nodes: 3,
+            n_ranges: 1,
+            schedule_steps: 8,
+            parent: parent.clone(),
+            mem_storage: true,
+            ..Default::default()
+        };
+        let t = World::new(0x0078_0001, cfg).run().unwrap();
+        assert!(!t.events.is_empty(), "World::run must actually schedule");
+        assert!(
+            !t.claim_stacked_fsync_liars(),
+            "native World must not stack Lying × det_io"
+        );
+        assert!(
+            pedradb_core::group_commit_kernel::stacked_fsync_liars_admitted_as_is(
+                true, true
+            ),
+            "AS-IS dente: AND both fsync-liar boxes"
+        );
+        assert!(!pedradb_core::group_commit_kernel::stacked_fsync_liars_admitted(
+            true, true
+        ));
         let _ = std::fs::remove_dir_all(&parent);
     }
 
@@ -2397,7 +2856,11 @@ mod tests {
             ..Default::default()
         };
         let t = World::new(11, cfg.clone()).run().unwrap();
-        assert!(t.logical_now >= 40, "prefix ClockAdvance(40); got {}", t.logical_now);
+        assert!(
+            t.logical_now >= 40,
+            "prefix ClockAdvance(40); got {}",
+            t.logical_now
+        );
         // Replay keeps same logical_now.
         assert_seed_replayable(11, cfg).unwrap();
         let _ = std::fs::remove_dir_all(&parent);
@@ -2461,7 +2924,7 @@ mod tests {
         assert_eq!(PeerMsg::decode(&bytes).unwrap(), m);
         // World Queued path uses the same encode in drain_outbound.
         let parent = temp_parent("codec");
-        let mut c = StoreCluster::open_with_rng(&parent, 3, 1, SeedRng::new(1)).unwrap();
+        let mut c = StoreCluster::open_with_rng_lab_direct(&parent, 3, 1, SeedRng::new(1)).unwrap();
         c.set_rpc_mode(RpcMode::Queued);
         // Drive until election timers fire outbound RV.
         for _ in 0..20 {
@@ -2485,21 +2948,15 @@ mod tests {
     /// Optional RecordingEnv / lying fsync path (P1.6 residual) — deterministic open+put.
     ///
     /// **Not on the World fingerprint path:** this probe uses
-    /// [`RpcMode::Direct`]. [`World::run`] forces [`RpcMode::Queued`]
-    /// (in-process net the seed can delay/drop/partition). Direct stays a
+    /// [`RpcMode::Direct`]. [`World::run`] pins [`RpcMode::Queued`]
+    /// (in-process net the seed can delay/drop/partition; RFC-0067). Direct stays a
     /// named residual, not a second lab protocol.
     #[test]
     fn recording_env_lying_deterministic_put() {
         let parent = temp_parent("rec");
         let env = RecordingEnv::with_policy(SyncPolicy::Lying);
-        let mut c = StoreCluster::open_with_env_rng(
-            &parent,
-            3,
-            1,
-            env,
-            SeedRng::new(0x3EC0),
-        )
-        .unwrap();
+        let mut c =
+            StoreCluster::open_with_env_rng_lab_direct(&parent, 3, 1, env, SeedRng::new(0x3EC0)).unwrap();
         c.set_rpc_mode(RpcMode::Direct);
         c.elect_all(80).unwrap();
         c.put(b"rk", b"rv").unwrap();
@@ -2507,14 +2964,8 @@ mod tests {
         // Second cluster same seed path.
         let parent2 = temp_parent("rec2");
         let env2 = RecordingEnv::with_policy(SyncPolicy::Lying);
-        let mut c2 = StoreCluster::open_with_env_rng(
-            &parent2,
-            3,
-            1,
-            env2,
-            SeedRng::new(0x3EC0),
-        )
-        .unwrap();
+        let mut c2 =
+            StoreCluster::open_with_env_rng_lab_direct(&parent2, 3, 1, env2, SeedRng::new(0x3EC0)).unwrap();
         c2.set_rpc_mode(RpcMode::Direct);
         c2.elect_all(80).unwrap();
         c2.put(b"rk", b"rv").unwrap();
@@ -2526,11 +2977,86 @@ mod tests {
         let _ = std::fs::remove_dir_all(&parent2);
     }
 
+    fn det_io_preloaded() -> bool {
+        let hit = |k: &str| {
+            std::env::var(k)
+                .ok()
+                .is_some_and(|v| v.contains("det_io") || v.contains("libdet_io"))
+        };
+        hit("LD_PRELOAD") || hit("DYLD_INSERT_LIBRARIES") || std::env::var("STALL_SO").is_ok()
+    }
+
+    /// RFC-0078 P1.1: World Lying plant names `fsync_promotes_pending`.
+    /// Crash drops the put. AS-IS would promote. P1.2: must not AND det_io.
+    #[test]
+    fn world_lying_fsync_plant_names_kernel() {
+        assert!(
+            !det_io_preloaded(),
+            "RFC-0052: do not AND det_io PRELOAD with RecordingEnv::Lying"
+        );
+        assert!(!pedradb_core::group_commit_kernel::fsync_promotes_pending(
+            false
+        ));
+        assert!(
+            pedradb_core::group_commit_kernel::fsync_promotes_pending_as_is(false),
+            "AS-IS dente: promote on a lying fsync"
+        );
+        assert!(
+            !pedradb_core::group_commit_kernel::stacked_fsync_liars_admitted(
+                true, false
+            )
+        );
+        assert!(
+            !pedradb_core::group_commit_kernel::stacked_fsync_liars_admitted(
+                true, true
+            )
+        );
+        assert!(
+            pedradb_core::group_commit_kernel::stacked_fsync_liars_admitted_as_is(
+                true, true
+            ),
+            "AS-IS dente: AND Lying × det_io"
+        );
+        let parent = temp_parent("lie-plant-0078");
+        let env = RecordingEnv::with_policy(SyncPolicy::Lying);
+        {
+            let mut c = StoreCluster::open_with_env_rng_lab_direct(
+                &parent,
+                3,
+                1,
+                env.clone(),
+                SeedRng::new(0x0078),
+            )
+            .unwrap();
+            c.set_rpc_mode(RpcMode::Direct);
+            c.elect_all(80).unwrap();
+            c.put(b"lk", b"lv").unwrap();
+            assert!(c.count_applied_eq(b"lk", b"lv") >= 2);
+        }
+        env.crash();
+        let mut c = StoreCluster::open_with_env_rng_lab_direct(
+            &parent,
+            3,
+            1,
+            env,
+            SeedRng::new(0x0078),
+        )
+        .unwrap();
+        c.set_rpc_mode(RpcMode::Direct);
+        c.elect_all(80).unwrap();
+        assert_eq!(
+            c.count_applied_eq(b"lk", b"lv"),
+            0,
+            "lying fsync must drop the put on crash"
+        );
+        let _ = std::fs::remove_dir_all(&parent);
+    }
+
     /// P2.4/P2.5: strong-read fail-closed under dual leader (shipped store API).
     #[test]
     fn strong_read_fail_closed_dual_leader_api() {
         let parent = temp_parent("strong");
-        let mut c = StoreCluster::open_with_rng(&parent, 3, 1, SeedRng::new(3)).unwrap();
+        let mut c = StoreCluster::open_with_rng_lab_direct(&parent, 3, 1, SeedRng::new(3)).unwrap();
         c.elect_all(60).unwrap();
         c.put(b"sk", b"sv").unwrap();
         let rid = c.locate(b"sk").unwrap();
@@ -2663,10 +3189,7 @@ mod tests {
             ..Default::default()
         };
         let a = World::new(0xB006_1F1E, cfg.clone()).run().unwrap();
-        assert!(
-            !a.arms.is_empty(),
-            "buggify must record arms in trace"
-        );
+        assert!(!a.arms.is_empty(), "buggify must record arms in trace");
         assert!(a.coverage_mask != 0, "mask must be non-zero");
         assert_seed_replayable(0xB006_1F1E, cfg).unwrap();
         let _ = std::fs::remove_dir_all(&parent);
@@ -2749,8 +3272,9 @@ mod tests {
             "applied flip must dirty at-rest CRC (otherwise Get-from-memtable is vacuous): {scrub:?}"
         );
         assert!(
-            t.events.iter().any(|e| e.kind == "bitflip_reopen_ok"
-                || e.kind == "bitflip_reopen_err"),
+            t.events
+                .iter()
+                .any(|e| e.kind == "bitflip_reopen_ok" || e.kind == "bitflip_reopen_err"),
             "must close+reopen the node so Get re-reads Env, not the memtable: {:#?}",
             t.events
         );
@@ -2807,10 +3331,7 @@ mod tests {
             .expect("unapplied bitflip run");
         assert_eq!(t_skip.silent_wrong, 0, "{:#?}", t_skip.events);
         assert!(
-            t_skip
-                .events
-                .iter()
-                .any(|e| e.kind == "bitflip_unapplied"),
+            t_skip.events.iter().any(|e| e.kind == "bitflip_unapplied"),
             "unapplied path must record the selected page: {:#?}",
             t_skip.events
         );
@@ -2852,7 +3373,7 @@ mod tests {
     fn probe_dual_leader_counts_fail_open_only_when_strong_ok() {
         use pedradb_store::ReadPolicy;
         let parent = temp_parent("probe-dual");
-        let mut c = StoreCluster::open_with_rng(&parent, 3, 1, SeedRng::new(9)).unwrap();
+        let mut c = StoreCluster::open_with_rng_lab_direct(&parent, 3, 1, SeedRng::new(9)).unwrap();
         c.elect_all(80).unwrap();
         c.put(b"k\x01", b"v").unwrap();
         let rid = c.locate(b"k\x01").unwrap();

@@ -23,6 +23,21 @@ pub struct VisibleKv {
     pub value: Bytes,
 }
 
+/// Newest version of a user key in a scan window, before keep/drop.
+///
+/// `snapshot_live` is [`visible_at`] of that version (`kind` + covering
+/// range tombstone). The iterator window (RFC-0151) calls
+/// [`iter_window_keep`] on this bit — not a constant live-put.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WindowKv {
+    /// User key.
+    pub key: Bytes,
+    /// Payload of the winning version (empty on a deletion).
+    pub value: Bytes,
+    /// [`visible_at(kind, range_hidden)`] for this version.
+    pub snapshot_live: bool,
+}
+
 /// A range tombstone covering `[start, end)` at `sequence`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RangeTombstone {
@@ -44,6 +59,40 @@ pub fn range_tombstone_covers(start: &[u8], end: &[u8], key: &[u8]) -> bool {
 #[must_use]
 pub fn range_tombstone_covers_as_is(start: &[u8], _end: &[u8], key: &[u8]) -> bool {
     key == start
+}
+
+/// Whether the winning version at a snapshot is live (RFC-0150 P1).
+///
+/// Candidate versions already satisfy `sequence <= snapshot` (newest first).
+/// A `Value` is live unless a covering range tombstone with `t.seq > point_seq`
+/// hides it. `Deletion` / `RangeDeletion` are not live.
+#[must_use]
+pub fn visible_at(kind: ValueType, range_hidden: bool) -> bool {
+    match kind {
+        ValueType::Value => !range_hidden,
+        ValueType::Deletion | ValueType::RangeDeletion => false,
+    }
+}
+
+/// AS-IS: never hide (deleted / range-covered keys scan as live).
+#[must_use]
+pub fn visible_at_as_is(_kind: ValueType, _range_hidden: bool) -> bool {
+    true
+}
+
+/// Emit a merge/iterator window row only when snapshot merge marked it live.
+///
+/// Production [`StreamingVisibleIter`] / [`visible_range`] call this with
+/// [`visible_at`]. AS-IS keeps a hidden version (scan leak).
+#[must_use]
+pub fn iter_window_keep(snapshot_live: bool) -> bool {
+    snapshot_live
+}
+
+/// AS-IS scan leak: emit a deleted / range-covered version.
+#[must_use]
+pub fn iter_window_keep_as_is(_snapshot_live: bool) -> bool {
+    true
 }
 
 impl RangeTombstone {
@@ -155,18 +204,15 @@ pub fn visible_range_limited(
             }
         }
         let user_key = ikey.user_key.clone();
-        let live = match ikey.kind {
-            ValueType::Value => {
-                if range_deleted(user_key.as_ref(), ikey.sequence, &range_dels) {
-                    None
-                } else {
-                    Some(VisibleKv {
-                        key: user_key.clone(),
-                        value,
-                    })
-                }
-            }
-            ValueType::Deletion | ValueType::RangeDeletion => None,
+        let range_hidden = range_deleted(user_key.as_ref(), ikey.sequence, &range_dels);
+        let snapshot_live = visible_at(ikey.kind, range_hidden);
+        let live = if iter_window_keep(snapshot_live) {
+            Some(VisibleKv {
+                key: user_key.clone(),
+                value,
+            })
+        } else {
+            None
         };
         // Skip older versions of the same user key (map order = newest first).
         while let Some((next, _)) = iter.peek() {
@@ -313,19 +359,13 @@ impl<'a> StreamingVisibleIter<'a> {
         let end = bound_as_ref(&self.end);
         user_key_in_range(user_key, start, end)
     }
-}
 
-impl Iterator for StreamingVisibleIter<'_> {
-    type Item = VisibleKv;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if let Some(max) = self.limit {
-            if self.emitted >= max {
-                return None;
-            }
-        }
+    /// Newest version per user key, with [`WindowKv::snapshot_live`].
+    ///
+    /// Does **not** apply [`iter_window_keep`] — the caller (compat window
+    /// or [`Iterator::next`]) decides keep/drop from that bit.
+    pub fn next_window_kv(&mut self) -> Option<WindowKv> {
         while let Some(item) = self.heap.pop() {
-            // Refill from same stream.
             if let Some((k, v)) = self.streams[item.stream].next() {
                 self.heap.push(HeapItem {
                     key: k,
@@ -345,28 +385,60 @@ impl Iterator for StreamingVisibleIter<'_> {
                 }
             }
             if !self.in_range(ikey.user_key.as_ref()) {
-                // Still mark skip if we see versions outside range for same key? no.
                 continue;
             }
 
-            // Newest version for this user key (heap order = InternalKey order).
             self.skip_user = Some(ikey.user_key.clone());
-            let live = match ikey.kind {
-                ValueType::Value => {
-                    if range_deleted(ikey.user_key.as_ref(), ikey.sequence, &self.range_dels) {
-                        None
-                    } else {
-                        Some(VisibleKv {
-                            key: ikey.user_key.clone(),
-                            value,
-                        })
-                    }
-                }
-                ValueType::Deletion | ValueType::RangeDeletion => None,
-            };
-            if let Some(kv) = live {
+            let range_hidden =
+                range_deleted(ikey.user_key.as_ref(), ikey.sequence, &self.range_dels);
+            let snapshot_live = visible_at(ikey.kind, range_hidden);
+            return Some(WindowKv {
+                key: ikey.user_key,
+                value,
+                snapshot_live,
+            });
+        }
+        None
+    }
+
+    /// Consume as window candidates (hidden rows included, `snapshot_live` set).
+    #[must_use]
+    pub fn into_window_kvs(self) -> WindowKvIter<'a> {
+        WindowKvIter { inner: self }
+    }
+}
+
+/// Iterator adapter over [`StreamingVisibleIter::next_window_kv`].
+///
+/// Yields hidden rows (`snapshot_live == false`) so a window keep can drop them.
+pub struct WindowKvIter<'a> {
+    inner: StreamingVisibleIter<'a>,
+}
+
+impl Iterator for WindowKvIter<'_> {
+    type Item = WindowKv;
+
+    fn next(&mut self) -> Option<WindowKv> {
+        self.inner.next_window_kv()
+    }
+}
+
+impl Iterator for StreamingVisibleIter<'_> {
+    type Item = VisibleKv;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if let Some(max) = self.limit {
+            if self.emitted >= max {
+                return None;
+            }
+        }
+        while let Some(row) = self.next_window_kv() {
+            if iter_window_keep(row.snapshot_live) {
                 self.emitted = self.emitted.saturating_add(1);
-                return Some(kv);
+                return Some(VisibleKv {
+                    key: row.key,
+                    value: row.value,
+                });
             }
         }
         None
@@ -957,5 +1029,91 @@ mod tests {
             got.push(pair);
         }
         assert_eq!(got, expected);
+    }
+
+    #[test]
+    fn visible_at_put_delete_range_del() {
+        assert!(visible_at(ValueType::Value, false));
+        assert!(!visible_at(ValueType::Value, true));
+        assert!(!visible_at(ValueType::Deletion, false));
+        assert!(!visible_at(ValueType::RangeDeletion, false));
+        assert!(
+            visible_at_as_is(ValueType::Deletion, true),
+            "AS-IS dente: never hides"
+        );
+        let entries = vec![
+            (ik(b"a", 1, ValueType::Value), Bytes::from_static(b"1")),
+            (ik(b"b", 2, ValueType::Value), Bytes::from_static(b"2")),
+            (ik(b"c", 3, ValueType::Value), Bytes::from_static(b"3")),
+            (ik(b"b", 4, ValueType::Deletion), Bytes::new()),
+            (
+                ik(b"a", 5, ValueType::RangeDeletion),
+                Bytes::from_static(b"c"),
+            ),
+        ];
+        let got = visible_range(entries, 10, Bound::Unbounded, Bound::Unbounded);
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].key.as_ref(), b"c");
+    }
+
+    #[test]
+    fn visible_at_on_live_range_del_is_not_ok() {
+        assert!(!visible_at(ValueType::Value, true));
+        assert!(
+            visible_at_as_is(ValueType::Value, true),
+            "AS-IS dente: hidden value scans live"
+        );
+        let entries = vec![
+            (ik(b"b", 1, ValueType::Value), Bytes::from_static(b"1")),
+            (
+                ik(b"a", 5, ValueType::RangeDeletion),
+                Bytes::from_static(b"c"),
+            ),
+        ];
+        let got = visible_range(entries, 10, Bound::Unbounded, Bound::Unbounded);
+        assert!(got.is_empty(), "covering range-del hides b");
+        let hidden = range_deleted(
+            b"b",
+            1,
+            &[RangeTombstone {
+                start: Bytes::from_static(b"a"),
+                end: Bytes::from_static(b"c"),
+                sequence: 5,
+            }],
+        );
+        assert!(hidden);
+        assert!(!visible_at(ValueType::Value, hidden));
+    }
+
+    #[test]
+    fn f30_as_is_misses_mid_range_key() {
+        assert!(range_tombstone_covers(b"a", b"c", b"b"));
+        assert!(
+            !range_tombstone_covers_as_is(b"a", b"c", b"b"),
+            "AS-IS F30 only matches the range start"
+        );
+        assert!(range_tombstone_covers_as_is(b"a", b"c", b"a"));
+        let hidden = range_deleted(
+            b"b",
+            1,
+            &[RangeTombstone {
+                start: Bytes::from_static(b"a"),
+                end: Bytes::from_static(b"c"),
+                sequence: 5,
+            }],
+        );
+        assert!(hidden);
+        assert!(!visible_at(ValueType::Value, hidden));
+    }
+
+    #[test]
+    fn dictionary_replay_get_is_visible_at() {
+        // Crash-dictionary last arrow: an acked Value at seq <= snapshot
+        // with no covering range del is what get returns.
+        assert!(visible_at(ValueType::Value, false));
+        let entries = vec![(ik(b"k", 7, ValueType::Value), Bytes::from_static(b"acked"))];
+        let got = visible_range(entries, 7, Bound::Unbounded, Bound::Unbounded);
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].value.as_ref(), b"acked");
     }
 }

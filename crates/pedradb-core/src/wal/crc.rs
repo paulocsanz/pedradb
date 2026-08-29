@@ -46,6 +46,32 @@ pub fn record_checksum(record_type: u8, length: u16, data: &[u8]) -> u32 {
     mask(crc)
 }
 
+/// Admit a stored checksum against the computed one (RFC-0076 / R-hardware).
+/// Mismatch is never Ok — never serve corruption as a valid record.
+#[must_use]
+pub fn crc_match_ok(stored: u32, computed: u32) -> bool {
+    stored == computed
+}
+
+/// AS-IS: any checksum matches (the 0076 hole — silent-wrong record).
+#[must_use]
+pub fn crc_match_ok_as_is(_stored: u32, _computed: u32) -> bool {
+    true
+}
+
+/// RFC-0076 P2.2 / R-crc: CRC32C collision-freedom as a Pedra theorem.
+/// Always false. `crc_match_ok` is equality of two u32s, not a collision proof.
+#[must_use]
+pub fn crc_collision_admitted() -> bool {
+    false
+}
+
+/// AS-IS: matching checksums look collision-free (the 0076 P2.2 hole).
+#[must_use]
+pub fn crc_collision_admitted_as_is() -> bool {
+    true
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -61,5 +87,37 @@ mod tests {
     fn known_mask_value() {
         // mask(0) == rotate + delta; sanity anchor independent of polynomial.
         assert_eq!(mask(0), MASK_DELTA);
+    }
+
+    #[test]
+    fn crc_mismatch_is_not_ok() {
+        assert!(crc_match_ok(1, 1));
+        assert!(!crc_match_ok(1, 2));
+        assert!(crc_match_ok_as_is(1, 2), "AS-IS dente: ignore mismatch");
+    }
+
+    /// RFC-0076 P2.2: equality of checksums is not a collision theorem.
+    #[test]
+    fn crc_collision_axiom_remains() {
+        assert!(!crc_collision_admitted());
+        assert!(
+            crc_collision_admitted_as_is(),
+            "AS-IS dente: matching CRC looks collision-free"
+        );
+        assert!(
+            crc_match_ok(1, 1),
+            "equal u32s still match; that is not R-crc"
+        );
+        let residuals = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../scripts/formal/residuals.json");
+        let text = std::fs::read_to_string(&residuals).expect("residuals.json");
+        assert!(
+            text.contains("\"id\": \"R-crc\""),
+            "R-crc must stay in the residual catalog"
+        );
+        assert!(
+            text.contains("\"R-crc\""),
+            "never_floor must still list R-crc"
+        );
     }
 }

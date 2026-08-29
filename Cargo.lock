@@ -641,6 +641,7 @@ dependencies = [
  "pedradb-core",
  "pedradb-dcs",
  "pedradb-io-uring",
+ "pedradb-raft",
  "pedradb-sim",
  "rcgen",
  "rustls",

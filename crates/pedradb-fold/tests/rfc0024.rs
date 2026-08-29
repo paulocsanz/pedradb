@@ -192,7 +192,7 @@ fn fold_follow_after_changelog_deleted_post_flush() {
 #[test]
 fn fold_follow_montanha_prefix() {
     let dir = temp();
-    let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+    let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
     c.elect_all(80).unwrap();
     c.put(b"/host/h1/cap", b"ok").unwrap();
     c.put(b"/vm/vm-a", b"spec").unwrap();
@@ -216,7 +216,7 @@ fn fold_follow_montanha_prefix() {
 #[test]
 fn caixote_host_filter_does_not_include_vm_id_prefix_sibling() {
     let dir = temp();
-    let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+    let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
     c.elect_all(80).unwrap();
     c.put(b"/host/h1/cap", b"ok").unwrap();
     c.put(b"/vm/vm-a", b"mine").unwrap();

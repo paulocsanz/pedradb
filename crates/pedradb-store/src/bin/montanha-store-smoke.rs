@@ -22,7 +22,7 @@ fn main() {
     let dir = args.next().expect("parent_dir");
     match cmd.as_str() {
         "write" => {
-            let mut c = StoreCluster::open(&dir, 3, 3).expect("open");
+            let mut c = StoreCluster::open_lab_direct(&dir, 3, 3).expect("open");
             c.elect_all(120).expect("elect");
             // Keys guaranteed in different ranges by split (start-of-range style).
             let keys: Vec<Vec<u8>> = c
@@ -61,7 +61,7 @@ fn main() {
             println!("write ok");
         }
         "verify" => {
-            let c = StoreCluster::open(&dir, 3, 3).expect("reopen");
+            let c = StoreCluster::open_lab_direct(&dir, 3, 3).expect("reopen");
             // Prefer stored key bytes from first process.
             let k0 = c
                 .get_on(1, &meta_key(b"smoke/k0"))
@@ -87,7 +87,7 @@ fn main() {
             println!("verify ok");
         }
         "multiwrite" => {
-            let mut c = StoreCluster::open(&dir, 3, 4).expect("open");
+            let mut c = StoreCluster::open_lab_direct(&dir, 3, 4).expect("open");
             c.elect_all(140).expect("elect");
             let keys: Vec<Vec<u8>> = c
                 .range_metas()
@@ -121,7 +121,7 @@ fn main() {
         }
         "partition" => {
             // A: elect + put + minority partition + heal (3 nodes, one process; durable dirs).
-            let mut c = StoreCluster::open(&dir, 3, 1).expect("open");
+            let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).expect("open");
             c.elect_all(120).expect("elect");
             c.put(b"p-ok", b"before").expect("put before partition");
             assert!(c.count_applied_eq(b"p-ok", b"before") >= 2);
@@ -151,7 +151,7 @@ fn main() {
         }
         "canaries" => {
             // B+C: lease + index + journal pins on multi-node, durable for canaries-verify.
-            let mut c = StoreCluster::open(&dir, 3, 1).expect("open");
+            let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).expect("open");
             c.elect_all(120).expect("elect");
             // B: lease IF NOT EXISTS
             c.dcs_create(b"lease/canary", b"holder-a")
@@ -173,7 +173,7 @@ fn main() {
         }
         "canaries-verify" => {
             // Second OS process: reopen, no double-hold, full index, journal keys.
-            let c = StoreCluster::open(&dir, 3, 1).expect("reopen");
+            let c = StoreCluster::open_lab_direct(&dir, 3, 1).expect("reopen");
             let lease = c
                 .dcs_get_on(1, b"lease/canary")
                 .expect("dcs")
@@ -212,7 +212,7 @@ fn main() {
         }
         // RFC-0017 P2.3: DCS layer + one app-shaped batch **only** on multi-process StoreCluster.
         "dcs-layer" => {
-            let mut c = StoreCluster::open(&dir, 3, 1).expect("open");
+            let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).expect("open");
             c.elect_all(120).expect("elect");
             // DCS layer (not a second consensus product).
             let rev = c
@@ -247,7 +247,7 @@ fn main() {
             println!("dcs-layer ok rev={rev2}");
         }
         "dcs-layer-verify" => {
-            let mut c = StoreCluster::open(&dir, 3, 1).expect("reopen");
+            let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).expect("reopen");
             c.elect_all(80).expect("elect");
             let kv = c
                 .dcs_get_on(1, b"dcs/layer/lock")
@@ -281,7 +281,7 @@ fn main() {
         // RFC-0022 P0.4: etcd-need face only via StoreCluster multiproc (no external etcd).
         "etcd-need" => {
             use pedradb_store::EtcdNeedFace;
-            let mut c = StoreCluster::open(&dir, 3, 1).expect("open");
+            let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).expect("open");
             c.elect_all(120).expect("elect");
             let (_id, rx) = c.watch_prefix(EtcdNeedFace::PREFIX);
             let rev = EtcdNeedFace::create(&mut c, b"lock/pg1", b"node-a").expect("create");
@@ -311,7 +311,7 @@ fn main() {
         }
         "etcd-need-verify" => {
             use pedradb_store::EtcdNeedFace;
-            let mut c = StoreCluster::open(&dir, 3, 1).expect("reopen");
+            let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).expect("reopen");
             c.elect_all(80).expect("elect");
             let kv = EtcdNeedFace::get(&c, b"lock/pg1")
                 .expect("get")

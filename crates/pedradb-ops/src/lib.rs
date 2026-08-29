@@ -119,7 +119,7 @@ impl Catalog {
         }
         let (payload, crc_b) = buf.split_at(buf.len() - 4);
         let stored = u32::from_le_bytes(crc_b.try_into().unwrap());
-        if crc32c::crc32c(payload) != stored {
+        if !pedradb_core::wal::crc::crc_match_ok(stored, crc32c::crc32c(payload)) {
             return Err(OpsError::Msg("catalog CRC mismatch".into()));
         }
         if &payload[0..8] != CATALOG_MAGIC {
@@ -704,7 +704,7 @@ fn read_warch(env: &impl Env, path: &Path) -> Result<Vec<Vec<u8>>> {
     }
     let (payload, crc_b) = buf.split_at(buf.len() - 4);
     let stored = u32::from_le_bytes(crc_b.try_into().unwrap());
-    if crc32c::crc32c(payload) != stored {
+    if !pedradb_core::wal::crc::crc_match_ok(stored, crc32c::crc32c(payload)) {
         return Err(OpsError::Msg("warch CRC mismatch".into()));
     }
     if &payload[0..8] != WARCH_MAGIC {
@@ -847,7 +847,7 @@ fn classify_current_crc(env: &impl Env, dir: &Path) -> &'static str {
                 }
                 Err(_) => return "dangling",
             }
-            if crc32c::crc32c(&bytes) == expect {
+            if pedradb_core::wal::crc::crc_match_ok(expect, crc32c::crc32c(&bytes)) {
                 "ok"
             } else {
                 "mismatch"
@@ -960,6 +960,215 @@ mod tests {
             IoUringEnv::default(),
         )
         .unwrap()
+    }
+
+    /// RFC-0090 P2.1: production `BackupEngine::open_with_env` writes
+    /// `CATALOG`; XOR only the trailer CRC (magic/ids intact). Reopen is
+    /// crc mismatch. AS-IS would load the catalog.
+    #[test]
+    fn crc_mismatch_on_live_ops_catalog_is_not_ok() {
+        assert!(!pedradb_core::wal::crc::crc_match_ok(1, 2));
+        assert!(
+            pedradb_core::wal::crc::crc_match_ok_as_is(1, 2),
+            "AS-IS dente: any catalog crc would match"
+        );
+        let bak = temp();
+        BackupEngine::open_with_env(&bak, StdEnv).unwrap();
+        let path = bak.join(CATALOG_FILE);
+        let mut raw = std::fs::read(&path).unwrap();
+        assert!(
+            raw.len() >= 8 + 8 + 8 + 8 + 4,
+            "CATALOG must have payload + trailer"
+        );
+        assert_eq!(&raw[0..8], CATALOG_MAGIC, "live catalog magic");
+        let last = raw.len() - 1;
+        raw[last] ^= 0xff;
+        std::fs::write(&path, &raw).unwrap();
+        match BackupEngine::open_with_env(&bak, StdEnv) {
+            Ok(_) => {
+                let _ = std::fs::remove_dir_all(&bak);
+                panic!("AS-IS hole: opened catalog after CRC trailer lie");
+            }
+            Err(e) => {
+                let _ = std::fs::remove_dir_all(&bak);
+                let msg = e.to_string();
+                assert!(
+                    msg.to_ascii_lowercase().contains("crc mismatch"),
+                    "must fail on crc_match_ok, not a magic/id parse; got {msg}"
+                );
+            }
+        }
+    }
+
+    /// RFC-0091 P0: production `create_incremental` writes `wal/*.warch`;
+    /// XOR only the trailer CRC (magic/count/records intact). Verify is
+    /// crc mismatch. AS-IS would return the shipped records.
+    /// `verify_backup_flags_corrupt_warch` does not pin `crc_match_ok`.
+    #[test]
+    fn crc_mismatch_on_live_ops_warch_is_not_ok() {
+        assert!(!pedradb_core::wal::crc::crc_match_ok(1, 2));
+        assert!(
+            pedradb_core::wal::crc::crc_match_ok_as_is(1, 2),
+            "AS-IS dente: any warch crc would match"
+        );
+        let data = temp();
+        let bak = temp();
+        let mut db = Db::open_with_env(
+            &data,
+            OpenOptions {
+                wal_full_fsync: true,
+                history: Default::default(),
+                wal_recovery: Default::default(),
+                sync: true,
+                auto_flush_bytes: None,
+                auto_compact_sst_count: None,
+                auto_compact_sst_bytes: None,
+                exclusive: true,
+                large_value_threshold: None,
+            },
+            StdEnv,
+        )
+        .unwrap();
+        db.put(b"base", b"0").unwrap();
+        let mut eng = BackupEngine::open_with_env(&bak, StdEnv).unwrap();
+        eng.create_base_backup(&mut db).unwrap();
+        db.put(b"i1", b"a").unwrap();
+        let ship = eng.create_incremental(&db).unwrap();
+        assert!(ship.records >= 1, "need a WAL archive to lie to");
+        let segs = eng.list_increments().unwrap();
+        let warch = &segs[0];
+        let mut bytes = std::fs::read(warch).unwrap();
+        assert!(
+            bytes.len() >= 8 + 4 + 4,
+            "warch must have magic + count + trailer"
+        );
+        assert_eq!(&bytes[0..8], WARCH_MAGIC, "live warch magic");
+        let last = bytes.len() - 1;
+        bytes[last] ^= 0xff;
+        std::fs::write(warch, &bytes).unwrap();
+        match eng.verify_wal_archive() {
+            Ok(_) => {
+                db.close().unwrap();
+                let _ = std::fs::remove_dir_all(&data);
+                let _ = std::fs::remove_dir_all(&bak);
+                panic!("AS-IS hole: verified warch after CRC trailer lie");
+            }
+            Err(e) => {
+                db.close().unwrap();
+                let _ = std::fs::remove_dir_all(&data);
+                let _ = std::fs::remove_dir_all(&bak);
+                let msg = e.to_string();
+                assert!(
+                    msg.to_ascii_lowercase().contains("crc mismatch"),
+                    "must fail on crc_match_ok, not a magic/count parse; got {msg}"
+                );
+            }
+        }
+    }
+
+    fn std_db(path: &Path) -> Db<StdEnv> {
+        Db::open_with_env(
+            path,
+            OpenOptions {
+                wal_full_fsync: true,
+                history: Default::default(),
+                wal_recovery: Default::default(),
+                sync: true,
+                auto_flush_bytes: None,
+                auto_compact_sst_count: None,
+                auto_compact_sst_bytes: None,
+                exclusive: true,
+                large_value_threshold: None,
+            },
+            StdEnv,
+        )
+        .unwrap()
+    }
+
+    /// RFC-0091 P1.1: production inspect of CURRENT; XOR only the stored
+    /// CRC u32 and rewrite as 8 hex digits (name intact, MANIFEST intact).
+    /// Classify is `mismatch`. AS-IS would report `ok`.
+    /// `inspect_classifies_current_crc` (`ffffffff` rewrite) is not this tooth.
+    #[test]
+    fn crc_mismatch_on_live_ops_current_classify_is_not_ok() {
+        assert!(!pedradb_core::wal::crc::crc_match_ok(1, 2));
+        assert!(
+            pedradb_core::wal::crc::crc_match_ok_as_is(1, 2),
+            "AS-IS dente: any CURRENT crc would match"
+        );
+        let data = temp();
+        {
+            let mut db = std_db(&data);
+            db.put(b"k", b"v").unwrap();
+            db.flush().unwrap();
+            db.close().unwrap();
+        }
+        let ok = inspect_format_env(&StdEnv, &data).unwrap();
+        assert_eq!(ok.current_crc, "ok", "live CURRENT must classify clean");
+        let cur = data.join("CURRENT");
+        let body = std::fs::read_to_string(&cur).unwrap();
+        let mut lines = body.lines();
+        let name = lines.next().expect("CURRENT name").trim();
+        let crc_hex = lines.next().expect("CURRENT crc").trim();
+        let crc = u32::from_str_radix(crc_hex, 16).expect("CURRENT crc hex");
+        std::fs::write(&cur, format!("{name}\n{:08x}\n", crc ^ 0xffff_ffff)).unwrap();
+        // inspect_format_env fail-closes in manifest::load; the inspect
+        // classifier is classify_current_crc (`mismatch` vs `ok`).
+        let lied = classify_current_crc(&StdEnv, &data);
+        let _ = std::fs::remove_dir_all(&data);
+        assert_eq!(
+            lied, "mismatch",
+            "must fail on crc_match_ok, not a pointer parse; got {lied}"
+        );
+    }
+
+    /// RFC-0091 P1.2: production `restore_with_increments` calls
+    /// `read_warch`. XOR only the trailer CRC (magic/count/records intact).
+    /// Restore is crc mismatch. `crc_mismatch_on_live_ops_warch_is_not_ok`
+    /// (verify path) is not this tooth.
+    #[test]
+    fn crc_mismatch_on_live_ops_warch_restore_is_not_ok() {
+        assert!(!pedradb_core::wal::crc::crc_match_ok(1, 2));
+        assert!(
+            pedradb_core::wal::crc::crc_match_ok_as_is(1, 2),
+            "AS-IS dente: any warch crc would match"
+        );
+        let data = temp();
+        let bak = temp();
+        let rest = temp();
+        let mut db = std_db(&data);
+        db.put(b"base", b"0").unwrap();
+        let mut eng = BackupEngine::open_with_env(&bak, StdEnv).unwrap();
+        let meta = eng.create_base_backup(&mut db).unwrap();
+        db.put(b"i1", b"a").unwrap();
+        let ship = eng.create_incremental(&db).unwrap();
+        assert!(ship.records >= 1, "need a WAL archive on the restore path");
+        db.close().unwrap();
+        let segs = eng.list_increments().unwrap();
+        let warch = &segs[0];
+        let mut bytes = std::fs::read(warch).unwrap();
+        assert_eq!(&bytes[0..8], WARCH_MAGIC, "live warch magic");
+        let last = bytes.len() - 1;
+        bytes[last] ^= 0xff;
+        std::fs::write(warch, &bytes).unwrap();
+        match eng.restore_with_increments(meta.id, &rest) {
+            Ok(_) => {
+                let _ = std::fs::remove_dir_all(&data);
+                let _ = std::fs::remove_dir_all(&bak);
+                let _ = std::fs::remove_dir_all(&rest);
+                panic!("AS-IS hole: restored after warch CRC trailer lie");
+            }
+            Err(e) => {
+                let _ = std::fs::remove_dir_all(&data);
+                let _ = std::fs::remove_dir_all(&bak);
+                let _ = std::fs::remove_dir_all(&rest);
+                let msg = e.to_string();
+                assert!(
+                    msg.to_ascii_lowercase().contains("crc mismatch"),
+                    "must fail on read_warch crc_match_ok, not a magic/count parse; got {msg}"
+                );
+            }
+        }
     }
 
     #[test]

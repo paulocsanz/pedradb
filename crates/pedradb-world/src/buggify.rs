@@ -43,7 +43,11 @@ impl BuggifySchedule {
 
 /// Build K arms from seed (1..=kmax). Fully deterministic.
 #[must_use]
-pub fn buggify_schedule_from_seed(seed: u64, n_nodes: u64, schedule_steps: usize) -> BuggifySchedule {
+pub fn buggify_schedule_from_seed(
+    seed: u64,
+    n_nodes: u64,
+    schedule_steps: usize,
+) -> BuggifySchedule {
     let rng = SeedRng::new(seed ^ 0xB006_1F1E);
     let kmax = 6u64;
     let k = 1 + rng.gen_range(kmax);

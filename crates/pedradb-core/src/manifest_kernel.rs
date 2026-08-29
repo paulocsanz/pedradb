@@ -271,4 +271,17 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn sst_recover_action_on_live_missing_sst_is_not_ok() {
+        assert_eq!(
+            sst_recover_action(ManifestObs::Inventory, ListedSst::Missing(1)),
+            SstRecoverAction::RefuseOpen
+        );
+        assert_eq!(
+            sst_recover_action_as_is_scan_on_damage(ManifestObs::Inventory, ListedSst::Missing(1)),
+            SstRecoverAction::ScanAndInstall,
+            "AS-IS dente: missing SST silently scanned"
+        );
+    }
 }

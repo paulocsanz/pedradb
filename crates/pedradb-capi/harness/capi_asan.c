@@ -103,19 +103,55 @@ static int test_stale_handles(void) {
 static int test_oversize_is_limit(void) {
     /* Dangling pointer + huge len: LIMIT, no ASan (F215). */
     uint8_t *dangling = (uint8_t *)(uintptr_t)0x1;
-    CHECK(montanha_fdb_transaction_set(NULL, dangling, (size_t)MONTAHA_FDB_MAX_KEY_BYTES + 1,
-                                       dangling, 1) == MONTAHA_FDB_LIMIT,
-          "oversize key_len");
-    CHECK(montanha_fdb_transaction_set(NULL, dangling, 1, dangling,
-                                       (size_t)MONTAHA_FDB_MAX_VALUE_BYTES + 1) == MONTAHA_FDB_LIMIT,
-          "oversize value_len");
+    int rc = montanha_fdb_transaction_set(NULL, dangling, (size_t)MONTAHA_FDB_MAX_KEY_BYTES + 1,
+                                          dangling, 1);
+    CHECK(rc == MONTAHA_FDB_LIMIT, "oversize key_len");
+    if (rc == MONTAHA_FDB_LIMIT) {
+        fprintf(stderr, "capi_asan: LIMIT key\n");
+    }
+    rc = montanha_fdb_transaction_set(NULL, dangling, 1, dangling,
+                                      (size_t)MONTAHA_FDB_MAX_VALUE_BYTES + 1);
+    CHECK(rc == MONTAHA_FDB_LIMIT, "oversize value_len");
+    if (rc == MONTAHA_FDB_LIMIT) {
+        fprintf(stderr, "capi_asan: LIMIT value\n");
+    }
     uint8_t *out = (uint8_t *)(uintptr_t)0xdead;
     size_t len = 7;
-    CHECK(montanha_fdb_transaction_get(NULL, NULL, dangling,
-                                       (size_t)MONTAHA_FDB_MAX_KEY_BYTES + 1, &out,
-                                       &len) == MONTAHA_FDB_LIMIT,
-          "oversize get key_len");
+    rc = montanha_fdb_transaction_get(NULL, NULL, dangling, (size_t)MONTAHA_FDB_MAX_KEY_BYTES + 1,
+                                      &out, &len);
+    CHECK(rc == MONTAHA_FDB_LIMIT, "oversize get key_len");
     CHECK(out == NULL && len == 0, "get oversize zeros outputs");
+    if (rc == MONTAHA_FDB_LIMIT) {
+        fprintf(stderr, "capi_asan: LIMIT get\n");
+    }
+    return 0;
+}
+
+/* RFC-0075 P1.2: same LIMIT on a live create+tx (not a null handle). */
+static int test_live_oversize_is_limit(void) {
+    char *dir = make_dir();
+    CHECK(dir, "mkdtemp");
+    if (!dir) {
+        return -1;
+    }
+    MontanhaFdbDatabase *db = montanha_fdb_database_create(dir, 3, 1);
+    CHECK(db != NULL, "live database_create");
+    if (!db) {
+        free(dir);
+        return -1;
+    }
+    MontanhaFdbTransaction *tr = montanha_fdb_transaction_create(db);
+    CHECK(tr != NULL, "live transaction_create");
+    uint8_t tiny = 1;
+    int rc = montanha_fdb_transaction_set(tr, &tiny, (size_t)MONTAHA_FDB_MAX_KEY_BYTES + 1, &tiny,
+                                          1);
+    CHECK(rc == MONTAHA_FDB_LIMIT, "live oversize key_len");
+    if (rc == MONTAHA_FDB_LIMIT) {
+        fprintf(stderr, "capi_asan: LIMIT live-key\n");
+    }
+    montanha_fdb_transaction_destroy(tr);
+    montanha_fdb_database_destroy(db);
+    free(dir);
     return 0;
 }
 
@@ -135,6 +171,7 @@ int main(void) {
     test_roundtrip();
     test_stale_handles();
     test_oversize_is_limit();
+    test_live_oversize_is_limit();
     test_path_no_nul_in_window();
     if (fails) {
         fprintf(stderr, "capi_asan: %d check(s) failed\n", fails);

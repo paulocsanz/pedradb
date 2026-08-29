@@ -69,8 +69,9 @@ let mut c = StoreCluster::open_with_envs_rng(parent, 3, 1, envs, SeedRng::new(1)
 // Arm only node 1 mid-run: keep a clone of envs[0] and call arm/disarm.
 
 // Peer RPC for World / Net (FDB-parity P1–P2): default Direct keeps unit-test sync path.
+// RFC-0067: World::run calls pin_dst_queued() so set_rpc_mode(Direct) cannot skip Net.
 use pedradb_store::{RpcMode, PeerMsg};
-c.set_rpc_mode(RpcMode::Queued);
+c.pin_dst_queued();
 c.advance_time(40)?; // logical clock (no wall sleep)
 for (from, to, bytes) in c.drain_outbound() {
     // net.send(from, to, bytes) — same PeerMsg codec for any transport (P2.1)
@@ -86,7 +87,7 @@ for (from, to, bytes) in c.drain_outbound() {
 // c.finish_queued_propose(range_id, index, abort_if_uncommitted)?;
 ```
 
-Harness: in-tree `crates/pedradb-world` runs `RpcMode::Queued` end-to-end through `InProcessNet` (seed → `trace_hash`; CI job `world-determinism`).
+Harness: in-tree `crates/pedradb-world` runs `pin_dst_queued` (`RpcMode::Queued`) end-to-end through `InProcessNet` (seed → `trace_hash`; CI job `world-determinism`). Direct after pin is refused (RFC-0067).
 
 ### DCS leases
 

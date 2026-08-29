@@ -85,13 +85,7 @@ impl WorldEnv {
 
     /// Arm a one-shot fault on the `after_ops`-th op of `class`
     /// (delegates to the [`FailingEnv`] wrapper in either variant).
-    pub fn arm_op_class(
-        &self,
-        class: OpClass,
-        after_ops: u64,
-        transient: bool,
-        kind: FaultKind,
-    ) {
+    pub fn arm_op_class(&self, class: OpClass, after_ops: u64, transient: bool, kind: FaultKind) {
         match self {
             Self::Disk(e) => e.arm_op_class(class, after_ops, transient, kind),
             Self::Mem(e) => e.arm_op_class(class, after_ops, transient, kind),

@@ -141,32 +141,50 @@ fn main() {
     }
 }
 
+fn push_ycsb<E: Engine>(r: &mut YcsbRunner, e: &E, records: usize, benches: &mut Vec<String>) {
+    use rocksdb_parity_bench::shape_wanted;
+    let t0 = std::time::Instant::now();
+    r.seed(e);
+    eprintln!(
+        "[rocks-parity] seed {records} records in {:.1}s",
+        t0.elapsed().as_secs_f64()
+    );
+    if shape_wanted("ycsb_a") {
+        benches.push(r.run(e, "ycsb_a", 50, 0, false, false));
+    }
+    if shape_wanted("ycsb_b") {
+        benches.push(r.run(e, "ycsb_b", 95, 0, false, false));
+    }
+    if shape_wanted("ycsb_c") {
+        benches.push(r.run(e, "ycsb_c", 100, 0, false, false));
+    }
+    if shape_wanted("ycsb_d") {
+        benches.push(r.run(e, "ycsb_d", 95, 5, false, false));
+    }
+    if shape_wanted("ycsb_e") {
+        benches.push(r.run(e, "ycsb_e", 0, 5, false, true));
+    }
+    if shape_wanted("ycsb_f") {
+        benches.push(r.run(e, "ycsb_f", 50, 0, true, false));
+    }
+    if shape_wanted("ycsb_b_unif") {
+        benches.push(r.run_dist(e, "ycsb_b_unif", 95, 0, false, false, true));
+    }
+    if shape_wanted("ycsb_c_unif") {
+        benches.push(r.run_dist(e, "ycsb_c_unif", 100, 0, false, false, true));
+    }
+    if shape_wanted("ycsb_c_big") {
+        if let Some(b) = r.run_c_big(e) {
+            benches.push(b);
+        }
+    }
+}
+
 fn run_and_report<E: Engine + Sync>(e: &E, cfg: &Cfg, suites: &str, out: &Path) {
     let mut r = YcsbRunner::new(cfg.clone());
     let mut benches = Vec::new();
     if suites_enabled("ycsb") {
-        let t0 = std::time::Instant::now();
-        r.seed(e);
-        eprintln!(
-            "[rocks-parity] seed {} records in {:.1}s",
-            cfg.records,
-            t0.elapsed().as_secs_f64()
-        );
-        benches.extend([
-            r.run(e, "ycsb_a", 50, 0, false, false),
-            r.run(e, "ycsb_b", 95, 0, false, false),
-            r.run(e, "ycsb_c", 100, 0, false, false),
-            r.run(e, "ycsb_d", 95, 5, false, false),
-            r.run(e, "ycsb_e", 0, 5, false, true),
-            r.run(e, "ycsb_f", 50, 0, true, false),
-        ]);
-        benches.extend([
-            r.run_dist(e, "ycsb_b_unif", 95, 0, false, false, true),
-            r.run_dist(e, "ycsb_c_unif", 100, 0, false, false, true),
-        ]);
-        if let Some(b) = r.run_c_big(e) {
-            benches.push(b);
-        }
+        push_ycsb(&mut r, e, cfg.records, &mut benches);
         let clients = rocksdb_parity_bench::env_usize("ROCKS_PARITY_CLIENTS", 1);
         if clients >= 2 {
             benches.extend(r.run_clients(e, clients));
@@ -235,28 +253,7 @@ fn run_and_report_occ<E: rocksdb_parity_bench::OccEngine + Sync>(
     let mut r = YcsbRunner::new(cfg.clone());
     let mut benches = Vec::new();
     if suites_enabled("ycsb") {
-        let t0 = std::time::Instant::now();
-        r.seed(e);
-        eprintln!(
-            "[rocks-parity] seed {} records in {:.1}s",
-            cfg.records,
-            t0.elapsed().as_secs_f64()
-        );
-        benches.extend([
-            r.run(e, "ycsb_a", 50, 0, false, false),
-            r.run(e, "ycsb_b", 95, 0, false, false),
-            r.run(e, "ycsb_c", 100, 0, false, false),
-            r.run(e, "ycsb_d", 95, 5, false, false),
-            r.run(e, "ycsb_e", 0, 5, false, true),
-            r.run(e, "ycsb_f", 50, 0, true, false),
-        ]);
-        benches.extend([
-            r.run_dist(e, "ycsb_b_unif", 95, 0, false, false, true),
-            r.run_dist(e, "ycsb_c_unif", 100, 0, false, false, true),
-        ]);
-        if let Some(b) = r.run_c_big(e) {
-            benches.push(b);
-        }
+        push_ycsb(&mut r, e, cfg.records, &mut benches);
         let clients = rocksdb_parity_bench::env_usize("ROCKS_PARITY_CLIENTS", 1);
         if clients >= 2 {
             benches.extend(r.run_clients(e, clients));

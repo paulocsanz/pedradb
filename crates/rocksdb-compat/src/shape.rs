@@ -14,7 +14,8 @@ pub struct ColumnFamilyDescriptor {
 }
 
 impl ColumnFamilyDescriptor {
-    /// Name + CF options (options ignored except `write_buffer_size` on the DB).
+    /// Name + CF options. `write_buffer_size` is the per-CF memtable cap
+    /// (RFC-0065 P1.1); other knobs stay ignored.
     pub fn new(name: impl Into<String>, options: super::Options) -> Self {
         Self {
             name: name.into(),

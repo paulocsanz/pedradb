@@ -22,6 +22,62 @@ const GEN_MASK: u64 = (1 << 31) - 1;
 pub const KIND_DB: u64 = 1;
 pub const KIND_TX: u64 = 2;
 
+/// Admit a C `*_len` against a marshalling cap (RFC-0075 / F215).
+/// Oversize must not become a slice for `copy_nonoverlapping`.
+#[must_use]
+pub fn c_len_admitted(len: usize, max: usize) -> bool {
+    len <= max
+}
+
+/// AS-IS: any length is copied (the 0075 hole — terabyte slice / ASan-miss).
+#[must_use]
+pub fn c_len_admitted_as_is(_len: usize, _max: usize) -> bool {
+    true
+}
+
+/// C path NUL-walk window (RFC-0075 P1.1). Header `MONTAHA_FDB_MAX_PATH_BYTES`.
+pub const C_PATH_WALK_BYTES: usize = 4096;
+
+/// Bound passed to `memchr` for a C create path. Production is
+/// [`C_PATH_WALK_BYTES`]. AS-IS is unbounded (`strlen` hole).
+#[must_use]
+pub fn c_path_walk_bytes() -> usize {
+    C_PATH_WALK_BYTES
+}
+
+/// AS-IS: walk `usize::MAX` looking for NUL (unbounded `strlen`).
+#[must_use]
+pub fn c_path_walk_bytes_as_is() -> usize {
+    usize::MAX
+}
+
+/// Admit a NUL offset found inside the path walk. Must sit strictly
+/// inside the window (`n < c_path_walk_bytes()`).
+#[must_use]
+pub fn c_path_nul_off_admitted(n: usize) -> bool {
+    n < c_path_walk_bytes()
+}
+
+/// AS-IS: any offset is a path (the 0075 P1.1 hole).
+#[must_use]
+pub fn c_path_nul_off_admitted_as_is(_n: usize) -> bool {
+    true
+}
+
+/// RFC-0075 P2.2: a Verus twin of the get-buffer `free` table
+/// (`Box::into_raw` / `from_raw` keyed by `CapiState.bufs`). Always false.
+/// `c_len_admitted` is cataloged; `montanha_fdb_free` stays TCB.
+#[must_use]
+pub fn c_free_table_admitted() -> bool {
+    false
+}
+
+/// AS-IS: the len-cap twin looks like a proven free table (the 0075 P2.2 hole).
+#[must_use]
+pub fn c_free_table_admitted_as_is() -> bool {
+    true
+}
+
 /// Next generation that still fits in [`GEN_MASK`] (31 bits). 0 is never
 /// issued: `pack` would look like NULL to `unpack`. Wrapping from
 /// `GEN_MASK` back to 1 is the inherent ABA of a 31-bit generation (a
@@ -145,6 +201,36 @@ fn raw_box_second_free_is_alias(first: u64) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn c_len_oversize_is_not_admitted() {
+        assert!(c_len_admitted(0, 10));
+        assert!(c_len_admitted(10, 10));
+        assert!(!c_len_admitted(11, 10));
+        assert!(c_len_admitted_as_is(11, 10), "AS-IS dente: copy any len");
+    }
+
+    #[test]
+    fn c_path_walk_is_named_cap() {
+        assert_eq!(c_path_walk_bytes(), C_PATH_WALK_BYTES);
+        assert_eq!(c_path_walk_bytes_as_is(), usize::MAX);
+        assert!(c_path_nul_off_admitted(0));
+        assert!(c_path_nul_off_admitted(C_PATH_WALK_BYTES - 1));
+        assert!(!c_path_nul_off_admitted(C_PATH_WALK_BYTES));
+        assert!(
+            c_path_nul_off_admitted_as_is(C_PATH_WALK_BYTES),
+            "AS-IS dente: offset past the window"
+        );
+    }
+
+    #[test]
+    fn c_free_table_is_not_admitted() {
+        assert!(!c_free_table_admitted());
+        assert!(
+            c_free_table_admitted_as_is(),
+            "AS-IS dente: len-cap twin looks like a free-table proof"
+        );
+    }
 
     #[test]
     fn pack_never_null_and_kind_checked() {

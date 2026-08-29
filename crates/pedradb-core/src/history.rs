@@ -82,6 +82,7 @@ impl Manifest {
         b
     }
 
+    /// RFC-0082 P1.2 / RFC-0086 P0: trailer CRC is `crc_match_ok`.
     fn decode(buf: &[u8]) -> Result<Self> {
         let bad = || CoreError::CorruptManifest("history manifest".into());
         if buf.len() < 32 || &buf[0..4] != b"PHST" {
@@ -93,8 +94,10 @@ impl Manifest {
         }
         let body_len = buf.len() - 4;
         let crc = u32::from_le_bytes(buf[body_len..].try_into().unwrap());
-        if crc32c(&buf[..body_len]) != crc {
-            return Err(bad());
+        if !crate::wal::crc::crc_match_ok(crc32c(&buf[..body_len]), crc) {
+            return Err(CoreError::CorruptManifest(
+                "history manifest crc mismatch".into(),
+            ));
         }
         let next_id = u64::from_le_bytes(buf[8..16].try_into().unwrap());
         let archive_floor = u64::from_le_bytes(buf[16..24].try_into().unwrap());
@@ -438,6 +441,9 @@ impl HistoryTier {
     }
 
     /// Pure parse of a bloom sidecar (test surface). Fails open to `true`.
+    /// RFC-0088 P1.1: trailer CRC is `crc_match_ok`. Mismatch returns true
+    /// (walk, never prune). Scrub (`verify_bloom_sidecar`) is fail-closed;
+    /// this path is not.
     pub(crate) fn sidecar_may_affect(buf: &[u8], key: &[u8]) -> bool {
         let footer_len = 12usize;
         if buf.len() < 8 + footer_len || &buf[0..4] != b"PHB1" {
@@ -456,7 +462,7 @@ impl HistoryTier {
         }
         let body = &buf[8..8 + body_len];
         let crc = u32::from_le_bytes(buf[buf.len() - 4..].try_into().unwrap());
-        if crc32c(body) != crc {
+        if !crate::wal::crc::crc_match_ok(crc, crc32c(body)) {
             return true; // corrupt sidecar — never prune
         }
         // Bloom blob is self-framed: nbits/k/nbytes then bits.
@@ -656,6 +662,9 @@ pub struct HistoryRecord {
 /// Walk every record of a serialized segment, verifying the per-record CRC.
 /// Returns the records; corrupt or truncated input is a typed error
 /// (fail-closed — used both before upload and at restore time).
+/// RFC-0087 P0: per-record CRC is `crc_match_ok`. P2.2: upload
+/// (`put_segment`) and restore/scrub callers (db.rs / ops / verify.rs)
+/// stay on this walker.
 pub fn walk_segment_records(bytes: &[u8]) -> Result<Vec<HistoryRecord>> {
     let bad = |why: &str| CoreError::CorruptHistory(format!("segment record {why}"));
     let mut out = Vec::new();
@@ -691,7 +700,7 @@ pub fn walk_segment_records(bytes: &[u8]) -> Result<Vec<HistoryRecord>> {
         off += 1;
         let stored = u32::from_le_bytes(bytes[off..off + 4].try_into().unwrap());
         off += 4;
-        if crc32c(&bytes[start..off - 4]) != stored {
+        if !crate::wal::crc::crc_match_ok(crc32c(&bytes[start..off - 4]), stored) {
             return Err(bad("crc mismatch"));
         }
         out.push(HistoryRecord {
@@ -712,11 +721,11 @@ pub fn verify_history_manifest(bytes: &[u8]) -> Result<()> {
     Manifest::decode(bytes).map(|_| ())
 }
 
-/// RFC-0060: bloom sidecar CRC fail-closed (scrub is not the read-path
-/// fail-open used when deciding whether to skip a segment).
+/// RFC-0060 / RFC-0088: bloom sidecar CRC fail-closed (scrub is not the
+/// read-path fail-open used when deciding whether to skip a segment).
 ///
 /// # Errors
-/// Bad magic/version/length or CRC mismatch.
+/// Bad magic/version/length, or CRC mismatch (`crc_match_ok`).
 pub fn verify_bloom_sidecar(bytes: &[u8]) -> Result<()> {
     let bad = || CoreError::CorruptHistory("bloom sidecar".into());
     const FOOTER: usize = 12;
@@ -736,8 +745,10 @@ pub fn verify_bloom_sidecar(bytes: &[u8]) -> Result<()> {
     }
     let body = &bytes[8..8 + body_len];
     let crc = u32::from_le_bytes(bytes[bytes.len() - 4..].try_into().unwrap());
-    if crc32c(body) != crc {
-        return Err(bad());
+    if !crate::wal::crc::crc_match_ok(crc32c(body), crc) {
+        return Err(CoreError::CorruptHistory(
+            "bloom sidecar crc mismatch".into(),
+        ));
     }
     Ok(())
 }
@@ -927,13 +938,25 @@ impl RemoteTier {
             let mut rf = remote_env.open_read(&dest)?;
             let mut have = Vec::new();
             std::io::Read::read_to_end(&mut rf, &mut have)?;
-            if have.len() == bytes.len() && crc32c(&have) == crc32c(&bytes) {
-                PutStatus::AlreadyPresent
-            } else {
+            if have.len() != bytes.len() {
                 return Err(CoreError::CorruptHistory(format!(
                     "remote name collision at {name}: read-back differs"
                 )));
             }
+            if !crate::wal::crc::crc_match_ok(crc32c(&have), crc32c(&bytes)) {
+                return Err(CoreError::CorruptHistory(format!(
+                    "remote name collision at {name}: crc mismatch"
+                )));
+            }
+            // RFC-0092 P2.1: CRC match is not a collision theorem (R-crc).
+            // Byte-equal after the CRC gate; checking bytes first would
+            // hide the P0 same-length XOR tooth.
+            if have != bytes {
+                return Err(CoreError::CorruptHistory(format!(
+                    "remote name collision at {name}: read-back differs"
+                )));
+            }
+            PutStatus::AlreadyPresent
         } else {
             remote_env.create_dir_all(&self.root)?;
             {
@@ -975,12 +998,25 @@ impl RemoteTier {
             let mut rf = remote_env.open_read(&dest)?;
             let mut have = Vec::new();
             std::io::Read::read_to_end(&mut rf, &mut have)?;
-            if have.len() == bytes.len() && crc32c(&have) == crc32c(&bytes) {
-                return Ok(());
+            if have.len() != bytes.len() {
+                return Err(CoreError::CorruptHistory(format!(
+                    "remote sidecar collision at {remote_name}.bloom: read-back differs"
+                )));
             }
-            return Err(CoreError::CorruptHistory(format!(
-                "remote sidecar collision at {remote_name}.bloom: read-back differs"
-            )));
+            if !crate::wal::crc::crc_match_ok(crc32c(&have), crc32c(&bytes)) {
+                return Err(CoreError::CorruptHistory(format!(
+                    "remote sidecar collision at {remote_name}.bloom: crc mismatch"
+                )));
+            }
+            // RFC-0093 P1.2: CRC match is not a collision theorem (R-crc).
+            // Byte-equal after the CRC gate; checking bytes first would
+            // hide the P0 same-length XOR tooth.
+            if have != bytes {
+                return Err(CoreError::CorruptHistory(format!(
+                    "remote sidecar collision at {remote_name}.bloom: read-back differs"
+                )));
+            }
+            return Ok(());
         }
         {
             let mut out = remote_env.create(&dest)?;
@@ -1055,11 +1091,7 @@ impl RemoteTier {
     /// `LATEST` body: `MANIFEST-<n>\n<crc32c hex of that generation>`.
     fn parse_latest_pointer(buf: &str) -> Option<(&str, u32)> {
         let (name, crc_hex) = buf.trim_end().split_once('\n')?;
-        if name.is_empty()
-            || name.contains('/')
-            || name.contains('\\')
-            || name.contains('\0')
-        {
+        if name.is_empty() || name.contains('/') || name.contains('\\') || name.contains('\0') {
             return None;
         }
         let crc = u32::from_str_radix(crc_hex.trim(), 16).ok()?;
@@ -1141,6 +1173,9 @@ impl RemoteTier {
         Ok(report)
     }
 
+    /// RFC-0089: LATEST CRC is `crc_match_ok` (mismatch is never a clean
+    /// verify). Torn/unreadable pointer still counts as a named failure;
+    /// the reader walks back separately.
     fn verify_latest_pointer<E: Env>(&self, env: &E, report: &mut RemoteVerifyReport) {
         let latest = self.segment_path("LATEST");
         if !env.exists(&latest) {
@@ -1149,16 +1184,12 @@ impl RemoteTier {
         let mut buf = String::new();
         let Ok(mut f) = env.open_read(&latest) else {
             report.errors = report.errors.saturating_add(1);
-            report
-                .failures
-                .push(("LATEST".into(), "unreadable".into()));
+            report.failures.push(("LATEST".into(), "unreadable".into()));
             return;
         };
         if f.read_to_string(&mut buf).is_err() || buf.trim().is_empty() {
             report.errors = report.errors.saturating_add(1);
-            report
-                .failures
-                .push(("LATEST".into(), "empty".into()));
+            report.failures.push(("LATEST".into(), "empty".into()));
             return;
         }
         let Some((name, expect_crc)) = Self::parse_latest_pointer(&buf) else {
@@ -1183,7 +1214,7 @@ impl RemoteTier {
         if std::io::Read::read_to_end(&mut mf, &mut mb).is_err() {
             return;
         }
-        if crc32c(&mb) != expect_crc {
+        if !crate::wal::crc::crc_match_ok(crc32c(&mb), expect_crc) {
             report.errors = report.errors.saturating_add(1);
             report
                 .failures
@@ -1194,6 +1225,8 @@ impl RemoteTier {
     /// Newest intact manifest generation: `LATEST` if it parses and its
     /// target decodes; otherwise the highest-numbered intact generation;
     /// `None` when the remote tier is empty.
+    /// RFC-0089 P1.2: a CRC-hex lie that names an older generation must
+    /// not serve that generation — walk back to the newest intact file.
     pub fn latest_manifest<E: Env>(&self, env: &E) -> Result<Option<Vec<u8>>> {
         let latest = self.segment_path("LATEST");
         if env.exists(&latest) {
@@ -1207,7 +1240,7 @@ impl RemoteTier {
                                 let mut mb = Vec::new();
                                 if std::io::Read::read_to_end(&mut mf, &mut mb).is_ok()
                                     && Manifest::decode(&mb).is_ok()
-                                    && crc32c(&mb) == expect_crc
+                                    && crate::wal::crc::crc_match_ok(crc32c(&mb), expect_crc)
                                 {
                                     return Ok(Some(mb));
                                 }
@@ -1505,11 +1538,519 @@ mod tests {
         dir.join(&segs[0])
     }
 
+    fn only_bloom_path(root: &Path) -> PathBuf {
+        let dir = root.join("history");
+        let blooms: Vec<String> = std::fs::read_dir(&dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .filter(|n| n.starts_with("seg-") && n.ends_with(".bloom"))
+            .collect();
+        assert_eq!(blooms.len(), 1, "seeded tier writes one bloom sidecar");
+        dir.join(&blooms[0])
+    }
+
     fn remote_objects(map: &MapEnv) -> Vec<String> {
         map.read_dir_names(Path::new("/remote")).unwrap()
     }
 
     const REMOTE: &str = "/remote";
+
+    /// RFC-0086 P0 / RFC-0082 P1.2: production `archive_stream` writes
+    /// `history/MANIFEST`; XOR only the trailer CRC (payload intact).
+    /// Decode/open is crc mismatch. AS-IS would load the inventory.
+    #[test]
+    fn crc_mismatch_on_live_history_manifest_is_not_ok() {
+        assert!(!crate::wal::crc::crc_match_ok(1, 2));
+        assert!(
+            crate::wal::crc::crc_match_ok_as_is(1, 2),
+            "AS-IS dente: any history manifest crc would match"
+        );
+        let (root, _tier) = seeded_tier("crc-0086");
+        let path = root.join("history").join("MANIFEST");
+        let mut bytes = std::fs::read(&path).unwrap();
+        assert!(
+            bytes.len() >= 8,
+            "history MANIFEST must have payload + trailer"
+        );
+        let last = bytes.len() - 1;
+        bytes[last] ^= 0xff;
+        std::fs::write(&path, &bytes).unwrap();
+        let err = verify_history_manifest(&bytes).unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.to_ascii_lowercase().contains("crc mismatch"),
+            "must fail on crc_match_ok, not a payload parse; got {msg}"
+        );
+        let open_err = HistoryTier::open(&crate::env::StdEnv, &root).unwrap_err();
+        assert!(
+            open_err
+                .to_string()
+                .to_ascii_lowercase()
+                .contains("crc mismatch"),
+            "HistoryTier::open must refuse the trailer lie; got {open_err}"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// RFC-0086 P2.2: history MANIFEST `crc_match_ok` is not a CRC32C
+    /// collision theorem (R-crc stays never_floor).
+    #[test]
+    fn history_manifest_crc_collision_axiom_remains() {
+        assert!(!crate::wal::crc::crc_collision_admitted());
+        assert!(
+            crate::wal::crc::crc_collision_admitted_as_is(),
+            "AS-IS dente: matching CRC looks collision-free"
+        );
+        assert!(
+            crate::wal::crc::crc_match_ok(1, 1),
+            "equal u32s still match; that is not R-crc"
+        );
+        let residuals = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../scripts/formal/residuals.json");
+        let text = std::fs::read_to_string(&residuals).expect("residuals.json");
+        assert!(
+            text.contains("\"id\": \"R-crc\""),
+            "R-crc must stay in the residual catalog"
+        );
+        assert!(
+            text.contains("\"R-crc\""),
+            "never_floor must still list R-crc"
+        );
+    }
+
+    /// RFC-0087 P0: production `archive_stream` writes `seg-*.hist`; XOR
+    /// only the last record's CRC trailer (key/len intact). Walk is crc
+    /// mismatch. AS-IS would return the archived versions.
+    #[test]
+    fn crc_mismatch_on_live_history_segment_is_not_ok() {
+        assert!(!crate::wal::crc::crc_match_ok(1, 2));
+        assert!(
+            crate::wal::crc::crc_match_ok_as_is(1, 2),
+            "AS-IS dente: any segment crc would match"
+        );
+        let (root, _tier) = seeded_tier("crc-0087");
+        let path = only_segment_path(&root);
+        let mut bytes = std::fs::read(&path).unwrap();
+        assert!(bytes.len() >= 4, "segment must have a record CRC trailer");
+        let last = bytes.len() - 1;
+        bytes[last] ^= 0xff;
+        let err = walk_segment_records(&bytes).unwrap_err();
+        let msg = err.to_string();
+        let _ = std::fs::remove_dir_all(&root);
+        assert!(
+            msg.to_ascii_lowercase().contains("crc mismatch"),
+            "must fail on crc_match_ok, not a key/len parse; got {msg}"
+        );
+    }
+
+    /// RFC-0087 P2.1: segment `crc_match_ok` is not a CRC32C collision theorem.
+    #[test]
+    fn history_segment_crc_collision_axiom_remains() {
+        assert!(!crate::wal::crc::crc_collision_admitted());
+        assert!(
+            crate::wal::crc::crc_collision_admitted_as_is(),
+            "AS-IS dente: matching CRC looks collision-free"
+        );
+        assert!(
+            crate::wal::crc::crc_match_ok(1, 1),
+            "equal u32s still match; that is not R-crc"
+        );
+        let residuals = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../scripts/formal/residuals.json");
+        let text = std::fs::read_to_string(&residuals).expect("residuals.json");
+        assert!(
+            text.contains("\"id\": \"R-crc\""),
+            "R-crc must stay in the residual catalog"
+        );
+        assert!(
+            text.contains("\"R-crc\""),
+            "never_floor must still list R-crc"
+        );
+    }
+
+    /// RFC-0087 P2.2: upload (`put_segment`) and restore/scrub callers stay
+    /// on `walk_segment_records`. Same last-record CRC trailer lie as P0:
+    /// put is crc mismatch (nothing uploaded); `verify_at_rest` names the
+    /// `.hist` file. Payload flip (`remote_segment_put_refuses_corrupt_local`)
+    /// is not this tooth.
+    #[test]
+    fn history_segment_upload_restore_stay_on_walk() {
+        assert!(!crate::wal::crc::crc_match_ok(1, 2));
+        assert!(
+            crate::wal::crc::crc_match_ok_as_is(1, 2),
+            "AS-IS dente: any segment crc would match"
+        );
+        let crate_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        for rel in [
+            "src/history.rs",
+            "src/db.rs",
+            "src/verify.rs",
+            "../pedradb-ops/src/lib.rs",
+        ] {
+            let text = std::fs::read_to_string(crate_root.join(rel))
+                .unwrap_or_else(|e| panic!("read {rel}: {e}"));
+            assert!(
+                text.contains("walk_segment_records"),
+                "{rel} must stay on walk_segment_records"
+            );
+        }
+
+        let (local, _tier) = seeded_tier("crc-0087-up");
+        let seg = only_segment_path(&local);
+        let mut bytes = std::fs::read(&seg).unwrap();
+        assert!(bytes.len() >= 4, "segment must have a record CRC trailer");
+        let last = bytes.len() - 1;
+        bytes[last] ^= 0xff;
+        std::fs::write(&seg, &bytes).unwrap();
+        let remote_root = temp_root("crc-0087-up-r");
+        let remote = RemoteTier::new(&remote_root);
+        let err = remote
+            .put_segment(&crate::env::StdEnv, &crate::env::StdEnv, &seg)
+            .unwrap_err();
+        let msg = err.to_string();
+        let uploaded = std::fs::read_dir(&remote_root)
+            .map(|rd| {
+                rd.filter_map(|e| e.ok()).any(|e| {
+                    let n = e.file_name();
+                    let n = n.to_string_lossy();
+                    n.starts_with("seg-") && n.ends_with(".hist")
+                })
+            })
+            .unwrap_or(false);
+        let _ = std::fs::remove_dir_all(&local);
+        let _ = std::fs::remove_dir_all(&remote_root);
+        assert!(
+            msg.to_ascii_lowercase().contains("crc mismatch"),
+            "put_segment must fail on crc_match_ok, not a key/len parse; got {msg}"
+        );
+        assert!(!uploaded, "nothing may be uploaded from a CRC-lied segment");
+
+        let (root, _tier) = seeded_tier("crc-0087-sc");
+        let path = only_segment_path(&root);
+        let mut bytes = std::fs::read(&path).unwrap();
+        let last = bytes.len() - 1;
+        bytes[last] ^= 0xff;
+        std::fs::write(&path, &bytes).unwrap();
+        let r = crate::verify::verify_at_rest(&crate::env::StdEnv, &root);
+        let rel = format!("history/{}", path.file_name().unwrap().to_string_lossy());
+        let _ = std::fs::remove_dir_all(&root);
+        assert!(!r.is_clean(), "trailer lie must fail the scrub");
+        assert!(
+            r.failures.iter().any(|f| {
+                f.file == rel && f.message.to_ascii_lowercase().contains("crc mismatch")
+            }),
+            "must name {rel} crc mismatch, got {:?}",
+            r.failures
+        );
+    }
+
+    /// RFC-0088 P0: production `archive_stream` writes `seg-*.bloom`; XOR
+    /// only the trailer CRC (magic / body_len / bits intact). Verify is crc
+    /// mismatch. AS-IS would report the sidecar clean.
+    #[test]
+    fn crc_mismatch_on_live_history_bloom_is_not_ok() {
+        assert!(!crate::wal::crc::crc_match_ok(1, 2));
+        assert!(
+            crate::wal::crc::crc_match_ok_as_is(1, 2),
+            "AS-IS dente: any bloom sidecar crc would match"
+        );
+        let (root, _tier) = seeded_tier("crc-0088");
+        let path = only_bloom_path(&root);
+        let mut bytes = std::fs::read(&path).unwrap();
+        assert!(
+            bytes.len() >= 8 + 12,
+            "bloom sidecar must have PHB1 header + body + footer"
+        );
+        assert_eq!(&bytes[0..4], b"PHB1", "live sidecar magic");
+        let last = bytes.len() - 1;
+        bytes[last] ^= 0xff;
+        let err = verify_bloom_sidecar(&bytes).unwrap_err();
+        let msg = err.to_string();
+        let _ = std::fs::remove_dir_all(&root);
+        assert!(
+            msg.to_ascii_lowercase().contains("crc mismatch"),
+            "must fail on crc_match_ok, not a magic/len parse; got {msg}"
+        );
+    }
+
+    /// RFC-0088 P1.1: production prune parse (`sidecar_may_affect`) uses
+    /// `crc_match_ok`. XOR only the trailer CRC (magic/body_len/bits
+    /// intact). Intact bloom prunes `zzz`; after the lie, still walks.
+    /// AS-IS would prune. `segment_may_affect` file I/O is RFC-0091 P2.1.
+    #[test]
+    fn crc_mismatch_on_live_history_bloom_sidecar_may_affect_still_walks() {
+        assert!(!crate::wal::crc::crc_match_ok(1, 2));
+        assert!(
+            crate::wal::crc::crc_match_ok_as_is(1, 2),
+            "AS-IS dente: any bloom sidecar crc would match"
+        );
+        let (root, _tier) = seeded_tier("crc-0088-p11");
+        let path = only_bloom_path(&root);
+        let bytes = std::fs::read(&path).unwrap();
+        assert_eq!(&bytes[0..4], b"PHB1", "live sidecar magic");
+        assert!(
+            !HistoryTier::sidecar_may_affect(&bytes, b"zzz"),
+            "intact bloom must prune zzz so the CRC-lie tooth is observable"
+        );
+        let mut lied = bytes.clone();
+        let last = lied.len() - 1;
+        lied[last] ^= 0xff;
+        let walks = HistoryTier::sidecar_may_affect(&lied, b"zzz");
+        let _ = std::fs::remove_dir_all(&root);
+        assert!(walks, "CRC trailer lie must fail-open (walk), never prune");
+    }
+
+    /// RFC-0088 P2.1: bloom sidecar `crc_match_ok` is not a CRC32C
+    /// collision theorem.
+    #[test]
+    fn history_bloom_crc_collision_axiom_remains() {
+        assert!(!crate::wal::crc::crc_collision_admitted());
+        assert!(
+            crate::wal::crc::crc_collision_admitted_as_is(),
+            "AS-IS dente: matching CRC looks collision-free"
+        );
+        assert!(
+            crate::wal::crc::crc_match_ok(1, 1),
+            "equal u32s still match; that is not R-crc"
+        );
+        let residuals = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../scripts/formal/residuals.json");
+        let text = std::fs::read_to_string(&residuals).expect("residuals.json");
+        assert!(
+            text.contains("\"id\": \"R-crc\""),
+            "R-crc must stay in the residual catalog"
+        );
+        assert!(
+            text.contains("\"R-crc\""),
+            "never_floor must still list R-crc"
+        );
+    }
+
+    /// RFC-0088 P2.2: prune stays fail-open. Same trailer lie: scrub
+    /// (`verify_bloom_sidecar`) is crc mismatch; prune still walks.
+    /// `db.rs` stays on `sidecar_may_affect`. Do not make prune fail-closed.
+    #[test]
+    fn history_bloom_crc_mismatch_prune_stays_fail_open() {
+        assert!(!crate::wal::crc::crc_match_ok(1, 2));
+        assert!(
+            crate::wal::crc::crc_match_ok_as_is(1, 2),
+            "AS-IS dente: any bloom sidecar crc would match"
+        );
+        let crate_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let db = std::fs::read_to_string(crate_root.join("src/db.rs")).expect("db.rs");
+        assert!(
+            db.contains("sidecar_may_affect"),
+            "db.rs restore prune must stay on sidecar_may_affect"
+        );
+        let hist = std::fs::read_to_string(crate_root.join("src/history.rs")).expect("history.rs");
+        assert!(
+            hist.contains("return true; // corrupt sidecar"),
+            "mismatch must keep the fail-open walk, not prune"
+        );
+
+        let (root, _tier) = seeded_tier("crc-0088-p22");
+        let path = only_bloom_path(&root);
+        let mut bytes = std::fs::read(&path).unwrap();
+        assert_eq!(&bytes[0..4], b"PHB1", "live sidecar magic");
+        let last = bytes.len() - 1;
+        bytes[last] ^= 0xff;
+        let scrub = verify_bloom_sidecar(&bytes).unwrap_err().to_string();
+        let walks = HistoryTier::sidecar_may_affect(&bytes, b"zzz");
+        let _ = std::fs::remove_dir_all(&root);
+        assert!(
+            scrub.to_ascii_lowercase().contains("crc mismatch"),
+            "scrub stays fail-closed; got {scrub}"
+        );
+        assert!(walks, "prune stays fail-open (walk), never skip on CRC lie");
+    }
+
+    /// RFC-0091 P2.1: production prune (`segment_may_affect`) XOR only
+    /// the sidecar trailer CRC (magic/body_len/bits intact). Must still
+    /// walk (fail-open). AS-IS would prune. `verify_bloom_sidecar` is
+    /// RFC-0088, not this tooth. Body-byte flip in
+    /// `bloom_sidecar_missing_or_corrupt_never_prunes` is not this tooth.
+    #[test]
+    fn crc_mismatch_on_live_history_bloom_prune_still_walks() {
+        assert!(!crate::wal::crc::crc_match_ok(1, 2));
+        assert!(
+            crate::wal::crc::crc_match_ok_as_is(1, 2),
+            "AS-IS dente: any bloom sidecar crc would match"
+        );
+        let (root, tier) = seeded_tier("crc-0091-bloom");
+        let id = tier.segment_metas()[0].id;
+        let prune_key: &[u8] = b"zzz";
+        assert!(
+            !tier.segment_may_affect(&crate::env::StdEnv, id, prune_key),
+            "intact bloom must prune {prune_key:?} so the CRC-lie tooth is observable"
+        );
+        let path = only_bloom_path(&root);
+        let mut bytes = std::fs::read(&path).unwrap();
+        assert_eq!(&bytes[0..4], b"PHB1", "live sidecar magic");
+        let last = bytes.len() - 1;
+        bytes[last] ^= 0xff;
+        std::fs::write(&path, &bytes).unwrap();
+        let walks = tier.segment_may_affect(&crate::env::StdEnv, id, prune_key);
+        let _ = std::fs::remove_dir_all(&root);
+        assert!(walks, "CRC trailer lie must fail-open (walk), never prune");
+    }
+
+    /// RFC-0089 P0: production `put_manifest` writes `LATEST`; XOR only
+    /// the stored CRC u32 and rewrite as 8 hex digits (name intact,
+    /// MANIFEST bytes intact). Verify names crc mismatch. AS-IS would
+    /// report the pointer clean. XOR of an ASCII hex digit is not this
+    /// tooth (`bad pointer`). `remote_verify_flags_corrupt_latest`
+    /// (`ffffffff` rewrite) is RFC-0060 P2.12, not this gate.
+    #[test]
+    fn crc_mismatch_on_live_history_latest_is_not_ok() {
+        assert!(!crate::wal::crc::crc_match_ok(1, 2));
+        assert!(
+            crate::wal::crc::crc_match_ok_as_is(1, 2),
+            "AS-IS dente: any LATEST crc would match"
+        );
+        let local = temp_root("crc-0089-l");
+        let remote_root = temp_root("crc-0089-r");
+        let mut tier = HistoryTier::open(&crate::env::StdEnv, &local).unwrap();
+        tier.archive_stream(
+            &crate::env::StdEnv,
+            vec![(b"k".to_vec(), b"v1".to_vec(), 1u64, 0u8)].into_iter(),
+        )
+        .unwrap();
+        let seg = only_segment_path(&local);
+        let remote = RemoteTier::new(&remote_root);
+        remote
+            .put_segment(&crate::env::StdEnv, &crate::env::StdEnv, &seg)
+            .unwrap();
+        let man = std::fs::read(local.join("history").join("MANIFEST")).unwrap();
+        remote
+            .put_manifest(&crate::env::StdEnv, &man, tier.remote_generation())
+            .unwrap();
+        let latest = remote_root.join("LATEST");
+        let body = std::fs::read_to_string(&latest).unwrap();
+        let (name, crc_hex) = body.trim_end().split_once('\n').expect("LATEST pointer");
+        let crc = u32::from_str_radix(crc_hex.trim(), 16).expect("LATEST crc hex");
+        std::fs::write(&latest, format!("{name}\n{:08x}", crc ^ 0xffff_ffff)).unwrap();
+        let r = remote.verify(&crate::env::StdEnv).unwrap();
+        assert!(!r.is_clean(), "LATEST crc-hex lie must fail verify");
+        assert!(
+            r.failures
+                .iter()
+                .any(|(f, m)| { f == "LATEST" && m.to_ascii_lowercase().contains("crc mismatch") }),
+            "must fail on crc_match_ok, not a pointer parse; got {:?}",
+            r.failures
+        );
+        let got = remote.latest_manifest(&crate::env::StdEnv).unwrap();
+        assert_eq!(
+            got.as_deref(),
+            Some(man.as_slice()),
+            "walk-back still serves the intact generation"
+        );
+        let _ = std::fs::remove_dir_all(&local);
+        let _ = std::fs::remove_dir_all(&remote_root);
+    }
+
+    /// RFC-0089 P1.2: two remote generations. `LATEST` names the older
+    /// with XOR'd CRC hex (name intact, both MANIFEST files intact).
+    /// `latest_manifest` walk-back serves the newest intact (m2), never
+    /// the named older (m1). AS-IS `crc_match_ok` would serve m1.
+    /// `ffffffff` rewrite (`remote_manifest_generations_latest_and_walkback`)
+    /// is RFC-0060 P2.12, not this tooth.
+    #[test]
+    fn crc_mismatch_on_live_history_latest_walkback_refuses_named_older() {
+        assert!(!crate::wal::crc::crc_match_ok(1, 2));
+        assert!(
+            crate::wal::crc::crc_match_ok_as_is(1, 2),
+            "AS-IS dente: any LATEST crc would match"
+        );
+        let (root, mut tier) = seeded_tier("crc-0089-p12");
+        let remote_root = temp_root("crc-0089-p12-r");
+        let remote = RemoteTier::new(&remote_root);
+        let m1 = tier.manifest_bytes();
+        let n1 = tier.remote_generation();
+        remote.put_manifest(&crate::env::StdEnv, &m1, n1).unwrap();
+        tier.archive_stream(
+            &crate::env::StdEnv,
+            vec![(b"k".to_vec(), b"v4".to_vec(), 4, 0)].into_iter(),
+        )
+        .unwrap();
+        let m2 = tier.manifest_bytes();
+        let n2 = tier.remote_generation();
+        assert_ne!(n1, n2, "second archive must mint a new generation");
+        assert_ne!(m1, m2, "manifest bytes must differ across generations");
+        remote.put_manifest(&crate::env::StdEnv, &m2, n2).unwrap();
+        let latest = remote_root.join("LATEST");
+        let stored = crc32c(&m1);
+        std::fs::write(
+            &latest,
+            format!("MANIFEST-{n1:016}\n{:08x}", stored ^ 0xffff_ffff),
+        )
+        .unwrap();
+        let got = remote.latest_manifest(&crate::env::StdEnv).unwrap();
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&remote_root);
+        assert_eq!(
+            got.as_deref(),
+            Some(m2.as_slice()),
+            "walk-back must serve the newest intact generation, not the named older"
+        );
+        assert_ne!(
+            got.as_deref(),
+            Some(m1.as_slice()),
+            "CRC-hex lie must not serve the named older generation"
+        );
+    }
+
+    /// RFC-0089 P2.1: LATEST `crc_match_ok` is not a CRC32C collision theorem.
+    #[test]
+    fn history_latest_crc_collision_axiom_remains() {
+        assert!(!crate::wal::crc::crc_collision_admitted());
+        assert!(
+            crate::wal::crc::crc_collision_admitted_as_is(),
+            "AS-IS dente: matching CRC looks collision-free"
+        );
+        assert!(
+            crate::wal::crc::crc_match_ok(1, 1),
+            "equal u32s still match; that is not R-crc"
+        );
+        let residuals = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../scripts/formal/residuals.json");
+        let text = std::fs::read_to_string(&residuals).expect("residuals.json");
+        assert!(
+            text.contains("\"id\": \"R-crc\""),
+            "R-crc must stay in the residual catalog"
+        );
+        assert!(
+            text.contains("\"R-crc\""),
+            "never_floor must still list R-crc"
+        );
+    }
+
+    /// RFC-0089 P2.2: content-addressed put read-back identity stays
+    /// RFC-0092 (`crc_match_ok` on two computed CRCs). This RFC is the
+    /// LATEST hex trailer, not put resume. Byte-equal is RFC-0092 P2.1.
+    #[test]
+    fn history_latest_put_readback_stays_rfc0092() {
+        assert!(!crate::wal::crc::crc_collision_admitted());
+        assert!(
+            crate::wal::crc::crc_collision_admitted_as_is(),
+            "AS-IS dente: matching CRC looks collision-free"
+        );
+        let hist = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/history.rs"),
+        )
+        .expect("history.rs");
+        assert!(
+            hist.contains("crc_mismatch_on_live_history_put_is_not_ok"),
+            "put resume identity stays RFC-0092"
+        );
+        assert!(
+            hist.contains("crc_match_ok(crc32c(&have), crc32c(&bytes))"),
+            "put_segment identity is two computed CRCs, not LATEST hex"
+        );
+        assert!(
+            hist.contains("fn verify_latest_pointer"),
+            "LATEST hex trailer stays this RFC"
+        );
+    }
 
     #[test]
     fn segment_key_coverage_prunes_reads_soundly() {
@@ -1832,6 +2373,386 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    /// RFC-0092 P0: production `put_segment` resumes on name hit; XOR one
+    /// payload byte of the remote object (length intact). Re-put is crc
+    /// mismatch. AS-IS would return AlreadyPresent.
+    /// `remote_segment_name_collision_fails_closed` (different length) is
+    /// not this tooth.
+    #[test]
+    fn crc_mismatch_on_live_history_put_is_not_ok() {
+        assert!(!crate::wal::crc::crc_match_ok(1, 2));
+        assert!(
+            crate::wal::crc::crc_match_ok_as_is(1, 2),
+            "AS-IS dente: any same-length remote crc would match"
+        );
+        let (local, _tier) = seeded_tier("crc-0092");
+        let seg = only_segment_path(&local);
+        let remote_root = temp_root("crc-0092-r");
+        let remote = RemoteTier::new(&remote_root);
+        assert_eq!(
+            remote
+                .put_segment(&crate::env::StdEnv, &crate::env::StdEnv, &seg)
+                .unwrap(),
+            PutStatus::Uploaded
+        );
+        let bytes = std::fs::read(&seg).unwrap();
+        let dest = remote_root.join(RemoteTier::segment_name(&bytes));
+        let mut have = std::fs::read(&dest).unwrap();
+        assert_eq!(have.len(), bytes.len(), "plant keeps length");
+        let mid = have.len() / 2;
+        have[mid] ^= 0xff;
+        std::fs::write(&dest, &have).unwrap();
+        match remote.put_segment(&crate::env::StdEnv, &crate::env::StdEnv, &seg) {
+            Ok(st) => {
+                let _ = std::fs::remove_dir_all(&local);
+                let _ = std::fs::remove_dir_all(&remote_root);
+                panic!("AS-IS hole: {st:?} after same-length CRC lie");
+            }
+            Err(e) => {
+                let _ = std::fs::remove_dir_all(&local);
+                let _ = std::fs::remove_dir_all(&remote_root);
+                let msg = e.to_string();
+                assert!(
+                    msg.to_ascii_lowercase().contains("crc mismatch"),
+                    "must fail on crc_match_ok, not a length parse; got {msg}"
+                );
+            }
+        }
+    }
+
+    /// RFC-0092 P1.2: same same-length payload lie as P0; the collision
+    /// error names the content-addressed object. Length-mismatch plant
+    /// (`remote_segment_name_collision_fails_closed`) is not this tooth.
+    #[test]
+    fn crc_mismatch_on_live_history_put_names_the_object() {
+        assert!(!crate::wal::crc::crc_match_ok(1, 2));
+        assert!(
+            crate::wal::crc::crc_match_ok_as_is(1, 2),
+            "AS-IS dente: any same-length remote crc would match"
+        );
+        let (local, _tier) = seeded_tier("crc-0092-p12");
+        let seg = only_segment_path(&local);
+        let remote_root = temp_root("crc-0092-p12-r");
+        let remote = RemoteTier::new(&remote_root);
+        remote
+            .put_segment(&crate::env::StdEnv, &crate::env::StdEnv, &seg)
+            .unwrap();
+        let bytes = std::fs::read(&seg).unwrap();
+        let name = RemoteTier::segment_name(&bytes);
+        let dest = remote_root.join(&name);
+        let mut have = std::fs::read(&dest).unwrap();
+        assert_eq!(have.len(), bytes.len(), "plant keeps length");
+        let mid = have.len() / 2;
+        have[mid] ^= 0xff;
+        std::fs::write(&dest, &have).unwrap();
+        let err = remote
+            .put_segment(&crate::env::StdEnv, &crate::env::StdEnv, &seg)
+            .unwrap_err();
+        let msg = err.to_string();
+        let _ = std::fs::remove_dir_all(&local);
+        let _ = std::fs::remove_dir_all(&remote_root);
+        assert!(
+            msg.to_ascii_lowercase().contains("crc mismatch"),
+            "must fail on crc_match_ok, not a length parse; got {msg}"
+        );
+        assert!(msg.contains(&name), "collision must name {name}, got {msg}");
+    }
+
+    /// RFC-0092 P2.1: resume also requires byte-equal after `crc_match_ok`.
+    /// Same-length XOR still fails CRC first (P0 tooth). Identical re-put
+    /// is AlreadyPresent. Byte-equal first would hide the AS-IS CRC tooth.
+    #[test]
+    fn history_put_resume_requires_byte_equal_after_crc() {
+        assert!(!crate::wal::crc::crc_match_ok(1, 2));
+        let hist = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/history.rs"),
+        )
+        .expect("history.rs");
+        let crc_at = hist
+            .find("crc_match_ok(crc32c(&have), crc32c(&bytes))")
+            .expect("put_segment CRC identity");
+        let bytes_at = hist[crc_at..]
+            .find("if have != bytes")
+            .expect("byte-equal must follow crc_match_ok in put_segment");
+        assert!(
+            bytes_at > 0,
+            "byte-equal after CRC, never before (would hide P0)"
+        );
+
+        let (local, _tier) = seeded_tier("crc-0092-p21");
+        let seg = only_segment_path(&local);
+        let remote_root = temp_root("crc-0092-p21-r");
+        let remote = RemoteTier::new(&remote_root);
+        assert_eq!(
+            remote
+                .put_segment(&crate::env::StdEnv, &crate::env::StdEnv, &seg)
+                .unwrap(),
+            PutStatus::Uploaded
+        );
+        assert_eq!(
+            remote
+                .put_segment(&crate::env::StdEnv, &crate::env::StdEnv, &seg)
+                .unwrap(),
+            PutStatus::AlreadyPresent,
+            "identical resume still no-ops after byte-equal"
+        );
+        let bytes = std::fs::read(&seg).unwrap();
+        let dest = remote_root.join(RemoteTier::segment_name(&bytes));
+        let mut have = std::fs::read(&dest).unwrap();
+        let mid = have.len() / 2;
+        have[mid] ^= 0xff;
+        std::fs::write(&dest, &have).unwrap();
+        let msg = remote
+            .put_segment(&crate::env::StdEnv, &crate::env::StdEnv, &seg)
+            .unwrap_err()
+            .to_string();
+        let _ = std::fs::remove_dir_all(&local);
+        let _ = std::fs::remove_dir_all(&remote_root);
+        assert!(
+            msg.to_ascii_lowercase().contains("crc mismatch"),
+            "same-length XOR must still fail CRC first, not byte-equal; got {msg}"
+        );
+        assert!(
+            !msg.to_ascii_lowercase().contains("read-back differs"),
+            "byte-equal must not steal the P0 CRC tooth; got {msg}"
+        );
+    }
+
+    /// RFC-0092 P2.2: put `crc_match_ok` + byte-equal is not a CRC32C
+    /// collision theorem.
+    #[test]
+    fn history_put_crc_collision_axiom_remains() {
+        assert!(!crate::wal::crc::crc_collision_admitted());
+        assert!(
+            crate::wal::crc::crc_collision_admitted_as_is(),
+            "AS-IS dente: matching CRC looks collision-free"
+        );
+        assert!(
+            crate::wal::crc::crc_match_ok(1, 1),
+            "equal u32s still match; that is not R-crc"
+        );
+        let residuals = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../scripts/formal/residuals.json");
+        let text = std::fs::read_to_string(&residuals).expect("residuals.json");
+        assert!(
+            text.contains("\"id\": \"R-crc\""),
+            "R-crc must stay in the residual catalog"
+        );
+        assert!(
+            text.contains("\"R-crc\""),
+            "never_floor must still list R-crc"
+        );
+    }
+
+    /// RFC-0093 P0: production `put_segment` ships `.bloom`; XOR one
+    /// payload byte of the remote sidecar (length intact, `.hist` intact).
+    /// Re-put is crc mismatch. AS-IS would no-op the sidecar.
+    /// `crc_mismatch_on_live_history_put_is_not_ok` is the `.hist` tooth.
+    #[test]
+    fn crc_mismatch_on_live_history_sidecar_put_is_not_ok() {
+        assert!(!crate::wal::crc::crc_match_ok(1, 2));
+        assert!(
+            crate::wal::crc::crc_match_ok_as_is(1, 2),
+            "AS-IS dente: any same-length sidecar crc would match"
+        );
+        let (local, _tier) = seeded_tier("crc-0093");
+        let seg = only_segment_path(&local);
+        let remote_root = temp_root("crc-0093-r");
+        let remote = RemoteTier::new(&remote_root);
+        assert_eq!(
+            remote
+                .put_segment(&crate::env::StdEnv, &crate::env::StdEnv, &seg)
+                .unwrap(),
+            PutStatus::Uploaded
+        );
+        let bytes = std::fs::read(&seg).unwrap();
+        let bloom = remote_root.join(format!("{}.bloom", RemoteTier::segment_name(&bytes)));
+        let mut have = std::fs::read(&bloom).unwrap();
+        assert!(have.len() >= 8 + 12, "remote sidecar must have payload");
+        let mid = have.len() / 2;
+        have[mid] ^= 0xff;
+        std::fs::write(&bloom, &have).unwrap();
+        match remote.put_segment(&crate::env::StdEnv, &crate::env::StdEnv, &seg) {
+            Ok(st) => {
+                let _ = std::fs::remove_dir_all(&local);
+                let _ = std::fs::remove_dir_all(&remote_root);
+                panic!("AS-IS hole: {st:?} after same-length sidecar CRC lie");
+            }
+            Err(e) => {
+                let _ = std::fs::remove_dir_all(&local);
+                let _ = std::fs::remove_dir_all(&remote_root);
+                let msg = e.to_string();
+                assert!(
+                    msg.to_ascii_lowercase().contains("crc mismatch"),
+                    "must fail on put_sidecar crc_match_ok, not a length parse; got {msg}"
+                );
+            }
+        }
+    }
+
+    /// RFC-0093 P1.1: same same-length sidecar lie as P0; the collision
+    /// error names the `.bloom` object. `.hist` tooth is RFC-0092, not this.
+    #[test]
+    fn crc_mismatch_on_live_history_sidecar_put_names_the_object() {
+        assert!(!crate::wal::crc::crc_match_ok(1, 2));
+        assert!(
+            crate::wal::crc::crc_match_ok_as_is(1, 2),
+            "AS-IS dente: any same-length sidecar crc would match"
+        );
+        let (local, _tier) = seeded_tier("crc-0093-p11");
+        let seg = only_segment_path(&local);
+        let remote_root = temp_root("crc-0093-p11-r");
+        let remote = RemoteTier::new(&remote_root);
+        remote
+            .put_segment(&crate::env::StdEnv, &crate::env::StdEnv, &seg)
+            .unwrap();
+        let bytes = std::fs::read(&seg).unwrap();
+        let bloom_name = format!("{}.bloom", RemoteTier::segment_name(&bytes));
+        let bloom = remote_root.join(&bloom_name);
+        let mut have = std::fs::read(&bloom).unwrap();
+        assert!(have.len() >= 8 + 12, "remote sidecar must have payload");
+        let mid = have.len() / 2;
+        have[mid] ^= 0xff;
+        std::fs::write(&bloom, &have).unwrap();
+        let err = remote
+            .put_segment(&crate::env::StdEnv, &crate::env::StdEnv, &seg)
+            .unwrap_err();
+        let msg = err.to_string();
+        let _ = std::fs::remove_dir_all(&local);
+        let _ = std::fs::remove_dir_all(&remote_root);
+        assert!(
+            msg.to_ascii_lowercase().contains("crc mismatch"),
+            "must fail on put_sidecar crc_match_ok, not a length parse; got {msg}"
+        );
+        assert!(
+            msg.contains(&bloom_name),
+            "collision must name {bloom_name}, got {msg}"
+        );
+    }
+
+    /// RFC-0093 P1.2: sidecar resume also requires byte-equal after
+    /// `crc_match_ok`. Same-length XOR still fails CRC first (P0 tooth).
+    /// Identical re-put is Ok. Byte-equal first would hide the AS-IS CRC
+    /// tooth. `.hist` byte-equal is RFC-0092 P2.1, not this tooth.
+    #[test]
+    fn history_sidecar_put_resume_requires_byte_equal_after_crc() {
+        assert!(!crate::wal::crc::crc_match_ok(1, 2));
+        let hist = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/history.rs"),
+        )
+        .expect("history.rs");
+        let sidecar_fn = hist.find("fn put_sidecar").expect("put_sidecar must exist");
+        let rest = &hist[sidecar_fn..];
+        let crc_at = rest
+            .find("crc_match_ok(crc32c(&have), crc32c(&bytes))")
+            .expect("put_sidecar CRC identity");
+        let bytes_at = rest[crc_at..]
+            .find("if have != bytes")
+            .expect("byte-equal must follow crc_match_ok in put_sidecar");
+        assert!(
+            bytes_at > 0,
+            "byte-equal after CRC, never before (would hide P0)"
+        );
+
+        let (local, _tier) = seeded_tier("crc-0093-p12");
+        let seg = only_segment_path(&local);
+        let remote_root = temp_root("crc-0093-p12-r");
+        let remote = RemoteTier::new(&remote_root);
+        assert_eq!(
+            remote
+                .put_segment(&crate::env::StdEnv, &crate::env::StdEnv, &seg)
+                .unwrap(),
+            PutStatus::Uploaded
+        );
+        assert_eq!(
+            remote
+                .put_segment(&crate::env::StdEnv, &crate::env::StdEnv, &seg)
+                .unwrap(),
+            PutStatus::AlreadyPresent,
+            "identical resume still no-ops after sidecar byte-equal"
+        );
+        let bytes = std::fs::read(&seg).unwrap();
+        let bloom = remote_root.join(format!("{}.bloom", RemoteTier::segment_name(&bytes)));
+        let mut have = std::fs::read(&bloom).unwrap();
+        let mid = have.len() / 2;
+        have[mid] ^= 0xff;
+        std::fs::write(&bloom, &have).unwrap();
+        let msg = remote
+            .put_segment(&crate::env::StdEnv, &crate::env::StdEnv, &seg)
+            .unwrap_err()
+            .to_string();
+        let _ = std::fs::remove_dir_all(&local);
+        let _ = std::fs::remove_dir_all(&remote_root);
+        assert!(
+            msg.to_ascii_lowercase().contains("crc mismatch"),
+            "same-length XOR must still fail CRC first, not byte-equal; got {msg}"
+        );
+        assert!(
+            !msg.to_ascii_lowercase().contains("read-back differs"),
+            "byte-equal must not steal the P0 CRC tooth; got {msg}"
+        );
+    }
+
+    /// RFC-0093 P2.1: sidecar put `crc_match_ok` + byte-equal is not a
+    /// CRC32C collision theorem.
+    #[test]
+    fn history_sidecar_put_crc_collision_axiom_remains() {
+        assert!(!crate::wal::crc::crc_collision_admitted());
+        assert!(
+            crate::wal::crc::crc_collision_admitted_as_is(),
+            "AS-IS dente: matching CRC looks collision-free"
+        );
+        assert!(
+            crate::wal::crc::crc_match_ok(1, 1),
+            "equal u32s still match; that is not R-crc"
+        );
+        let residuals = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../scripts/formal/residuals.json");
+        let text = std::fs::read_to_string(&residuals).expect("residuals.json");
+        assert!(
+            text.contains("\"id\": \"R-crc\""),
+            "R-crc must stay in the residual catalog"
+        );
+        assert!(
+            text.contains("\"R-crc\""),
+            "never_floor must still list R-crc"
+        );
+    }
+
+    /// RFC-0093 P2.2: this RFC does not fail-close the bloom prune.
+    /// Trailer lie still walks (`sidecar_may_affect`); scrub stays
+    /// fail-closed. Ownership of prune remains RFC-0088 / RFC-0091.
+    #[test]
+    fn history_sidecar_put_prune_stays_fail_open() {
+        let hist = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/history.rs"),
+        )
+        .expect("history.rs");
+        assert!(
+            hist.contains("crc_mismatch_on_live_history_bloom_sidecar_may_affect_still_walks"),
+            "prune fail-open stays RFC-0088 P1.1"
+        );
+        assert!(
+            hist.contains("return true; // corrupt sidecar"),
+            "mismatch must keep the fail-open walk, not prune"
+        );
+
+        let (root, _tier) = seeded_tier("crc-0093-p22");
+        let path = only_bloom_path(&root);
+        let mut bytes = std::fs::read(&path).unwrap();
+        assert_eq!(&bytes[0..4], b"PHB1", "live sidecar magic");
+        let last = bytes.len() - 1;
+        bytes[last] ^= 0xff;
+        let scrub = verify_bloom_sidecar(&bytes).unwrap_err().to_string();
+        let walks = HistoryTier::sidecar_may_affect(&bytes, b"zzz");
+        let _ = std::fs::remove_dir_all(&root);
+        assert!(
+            scrub.to_ascii_lowercase().contains("crc mismatch"),
+            "scrub stays fail-closed; got {scrub}"
+        );
+        assert!(walks, "prune stays fail-open (walk), never skip on CRC lie");
+    }
+
     #[test]
     fn remote_manifest_generations_latest_and_walkback() {
         let (root, mut tier) = seeded_tier("mani");
@@ -2022,7 +2943,9 @@ mod tests {
         let r = remote.verify(&crate::env::StdEnv).unwrap();
         assert!(!r.is_clean(), "LATEST crc mismatch must fail verify");
         assert!(
-            r.failures.iter().any(|(f, m)| f == "LATEST" && m.contains("crc")),
+            r.failures
+                .iter()
+                .any(|(f, m)| f == "LATEST" && m.contains("crc")),
             "must name LATEST crc mismatch, got {:?}",
             r.failures
         );

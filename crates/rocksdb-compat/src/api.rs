@@ -64,6 +64,8 @@ impl IngestExternalFileOptions {
 /// rust-rocksdb `LiveFile`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LiveFile {
+    /// Column-family name (`default` if unknown / mixed).
+    pub column_family_name: String,
     /// File name (`NNNNNN.sst`).
     pub name: String,
     /// Size in bytes.

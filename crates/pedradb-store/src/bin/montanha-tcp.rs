@@ -18,6 +18,7 @@
 //! montanha-tcp put  --addr 127.0.0.1:9701 --key hello --value world
 //! montanha-tcp get  --addr 127.0.0.1:9701 --key hello
 //! montanha-tcp status --addr 127.0.0.1:9701
+//! montanha-tcp leave-joint --addr 127.0.0.1:9701
 //! montanha-tcp smoke --peer 1=... --peer 2=... --peer 3=...
 //! ```
 //!
@@ -39,21 +40,26 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use pedradb_store::{
-    client_get, client_put, client_set_peers, client_status, client_tick, install_from_pem_files,
-    maybe_client_wrap, maybe_server_wrap, read_frame, resolve_host_port, write_frame, StoreCluster,
-    StoreError, StoreOpenOptions, WireMsg,
+    client_add_member_joint, client_get, client_leave_joint, client_put, client_remove_member_joint,
+    client_set_peers, client_status, client_tick,
+    elect_claim_banner, install_from_pem_files, liveness_admitted, maybe_client_wrap,
+    maybe_server_wrap, read_frame, resolve_host_port, write_frame, StoreCluster, StoreError,
+    StoreOpenOptions, WireMsg,
 };
 
 fn main() {
     let mut args: Vec<String> = env::args().skip(1).collect();
     if args.is_empty() {
         eprintln!(
-            "usage: montanha-tcp <node|put|get|status|tick|smoke|elect-wait|set-peers|proxy> [flags]\n\
+            "usage: montanha-tcp <node|put|get|status|tick|smoke|elect-wait|set-peers|proxy|leave-joint|remove-member-joint|add-member-joint> [flags]\n\
              node: --id N --data DIR --bind ADDR --peer id=addr... [--ranges N] [--health ADDR] [--write-backpressure] [--cluster-id HEX32]\n\
              tls:  --tls-cert PEM --tls-key PEM --tls-ca PEM [--tls-server-name NAME] [--require-tls]\n\
              put:  --addr HOST:PORT --key K --value V [--peer id=addr...]\n\
              get:  --addr HOST:PORT --key K\n\
              status/tick: --addr HOST:PORT [--n N]\n\
+             leave-joint: --addr HOST:PORT (production leave_joint, RFC-0118)\n\
+             remove-member-joint: --addr HOST:PORT --id N (RFC-0120)\n\
+             add-member-joint: --addr HOST:PORT --id N (RFC-0119 P1.2)\n\
              elect-wait: --peer id=addr... (waits until every r*:leader is set)\n\
              smoke: --peer id=addr... (elect + put + get on real TCP cluster)\n\
              proxy: --listen ADDR --mode write|read|any --member host:dataPort[@healthPort]...\n\
@@ -75,6 +81,9 @@ fn main() {
         "smoke" => cmd_smoke(&args),
         "elect-wait" => cmd_elect_wait(&args),
         "set-peers" => cmd_set_peers(&args),
+        "leave-joint" => cmd_leave_joint(&args),
+        "remove-member-joint" => cmd_remove_member_joint(&args),
+        "add-member-joint" => cmd_add_member_joint(&args),
         "proxy" => cmd_proxy(&args),
         other => {
             eprintln!("unknown command {other}");
@@ -215,6 +224,17 @@ enum Work {
         key: Vec<u8>,
         resp: SyncSender<Result<Option<Vec<u8>>, String>>,
     },
+    LeaveJoint {
+        resp: SyncSender<Result<(), String>>,
+    },
+    RemoveMemberJoint {
+        node_id: u64,
+        resp: SyncSender<Result<(), String>>,
+    },
+    AddMemberJoint {
+        node_id: u64,
+        resp: SyncSender<Result<(), String>>,
+    },
 }
 
 fn cmd_node(args: &[String]) {
@@ -265,12 +285,14 @@ fn cmd_node(args: &[String]) {
     }
 
     std::fs::create_dir_all(&data).ok();
-    let cluster =
+    let mut cluster =
         StoreCluster::open_single_node_with_options(&data, id, &member_ids, n_ranges, store_opts)
             .unwrap_or_else(|e| {
                 eprintln!("open_single_node: {e}");
                 process::exit(1);
             });
+    // RFC-0067 P1.2: production TCP cannot drop to Direct mid-run.
+    cluster.pin_dst_queued();
 
     let (tx, rx) = mpsc::sync_channel::<Work>(256);
 
@@ -623,6 +645,48 @@ fn handle_conn(tx: SyncSender<Work>, mut stream: pedradb_store::IoBox) -> Result
                 Err(m) => write_frame(&mut stream, &WireMsg::RespErr { message: m })?,
             }
         }
+        WireMsg::LeaveJoint => {
+            let (rtx, rrx) = mpsc::sync_channel(1);
+            tx.send(Work::LeaveJoint { resp: rtx })
+                .map_err(|_| StoreError::Msg("worker dead".into()))?;
+            let r = rrx
+                .recv_timeout(Duration::from_secs(10))
+                .map_err(|_| StoreError::Msg("leave_joint timeout".into()))?;
+            match r {
+                Ok(()) => write_frame(&mut stream, &WireMsg::RespOk)?,
+                Err(m) => write_frame(&mut stream, &WireMsg::RespErr { message: m })?,
+            }
+        }
+        WireMsg::RemoveMemberJoint { node_id } => {
+            let (rtx, rrx) = mpsc::sync_channel(1);
+            tx.send(Work::RemoveMemberJoint {
+                node_id,
+                resp: rtx,
+            })
+            .map_err(|_| StoreError::Msg("worker dead".into()))?;
+            let r = rrx
+                .recv_timeout(Duration::from_secs(10))
+                .map_err(|_| StoreError::Msg("remove_member_joint timeout".into()))?;
+            match r {
+                Ok(()) => write_frame(&mut stream, &WireMsg::RespOk)?,
+                Err(m) => write_frame(&mut stream, &WireMsg::RespErr { message: m })?,
+            }
+        }
+        WireMsg::AddMemberJoint { node_id } => {
+            let (rtx, rrx) = mpsc::sync_channel(1);
+            tx.send(Work::AddMemberJoint {
+                node_id,
+                resp: rtx,
+            })
+            .map_err(|_| StoreError::Msg("worker dead".into()))?;
+            let r = rrx
+                .recv_timeout(Duration::from_secs(10))
+                .map_err(|_| StoreError::Msg("add_member_joint timeout".into()))?;
+            match r {
+                Ok(()) => write_frame(&mut stream, &WireMsg::RespOk)?,
+                Err(m) => write_frame(&mut stream, &WireMsg::RespErr { message: m })?,
+            }
+        }
         WireMsg::DcsGet { key } => {
             let (rtx, rrx) = mpsc::sync_channel(1);
             tx.send(Work::DcsGet { key, resp: rtx })
@@ -768,6 +832,21 @@ fn worker_loop(
                     .map_err(|e| e.to_string());
                 let _ = resp.send(r);
             }
+            Ok(Work::LeaveJoint { resp }) => {
+                let proposed = cluster.leave_joint();
+                let r = membership_until_committed(id, &mut cluster, &peers, &rx, proposed);
+                let _ = resp.send(r.map_err(|e| e.to_string()));
+            }
+            Ok(Work::RemoveMemberJoint { node_id, resp }) => {
+                let proposed = cluster.remove_member_joint(node_id);
+                let r = membership_until_committed(id, &mut cluster, &peers, &rx, proposed);
+                let _ = resp.send(r.map_err(|e| e.to_string()));
+            }
+            Ok(Work::AddMemberJoint { node_id, resp }) => {
+                let proposed = cluster.add_member_joint(node_id);
+                let r = membership_until_committed(id, &mut cluster, &peers, &rx, proposed);
+                let _ = resp.send(r.map_err(|e| e.to_string()));
+            }
             Ok(Work::SetPeers {
                 peers: new_peers,
                 resp,
@@ -823,6 +902,52 @@ fn flush_outbound(self_id: u64, cluster: &mut StoreCluster, peers: &HashMap<u64,
 }
 
 /// Drive put / put_many to majority (RFC-0025 P1.1 coalesce path).
+/// RFC-0121: Queued joint add/remove returns `NotCommitted` after the entry
+/// is on the leader log. Drive `finish_queued_propose` like put, so leave
+/// (0098) actually runs.
+fn membership_until_committed(
+    self_id: u64,
+    cluster: &mut StoreCluster,
+    peers: &HashMap<u64, String>,
+    rx: &Receiver<Work>,
+    r: Result<(), StoreError>,
+) -> Result<(), StoreError> {
+    match r {
+        Ok(()) => {
+            flush_outbound(self_id, cluster, peers);
+        }
+        Err(StoreError::NotCommitted {
+            range_id, index, ..
+        }) => finish_not_committed(self_id, cluster, peers, rx, range_id, index)?,
+        Err(e) => return Err(e),
+    }
+    // RFC-0122: leave appended inside finish_queued_propose may itself be
+    // uncommitted; `leave_joint` no-ops on leave_in_flight.
+    finish_uncommitted_leave_drive(self_id, cluster, peers, rx)
+}
+
+fn finish_uncommitted_leave_drive(
+    self_id: u64,
+    cluster: &mut StoreCluster,
+    peers: &HashMap<u64, String>,
+    rx: &Receiver<Work>,
+) -> Result<(), StoreError> {
+    let deadline = Instant::now() + Duration::from_secs(15);
+    while Instant::now() < deadline {
+        let Some((range_id, index)) = cluster.uncommitted_leave_index() else {
+            break;
+        };
+        finish_not_committed(self_id, cluster, peers, rx, range_id, index)?;
+    }
+    // One last local finish (RFC-0123 data_fate): no-op when already committed.
+    let _ = cluster.finish_uncommitted_leave()?;
+    let still = cluster.uncommitted_leave_index().is_some();
+    if !pedradb_store::queued_leave_finish_ok(still, !still) {
+        return Err(StoreError::Msg("leave joint not committed".into()));
+    }
+    Ok(())
+}
+
 fn put_many_until_committed(
     self_id: u64,
     cluster: &mut StoreCluster,
@@ -1074,6 +1199,15 @@ fn service_nested(self_id: u64, cluster: &mut StoreCluster, peers: &HashMap<u64,
         Work::SetPeers { peers: _, resp } => {
             let _ = resp.send(Err("busy: cannot set-peers nested".into()));
         }
+        Work::LeaveJoint { resp } => {
+            let _ = resp.send(Err("busy: cannot leave-joint nested".into()));
+        }
+        Work::RemoveMemberJoint { resp, .. } => {
+            let _ = resp.send(Err("busy: cannot remove-member-joint nested".into()));
+        }
+        Work::AddMemberJoint { resp, .. } => {
+            let _ = resp.send(Err("busy: cannot add-member-joint nested".into()));
+        }
     }
 }
 
@@ -1263,6 +1397,41 @@ fn cmd_tick(args: &[String]) {
     }
 }
 
+fn cmd_leave_joint(args: &[String]) {
+    let addr = flag_val(args, "--addr").expect("--addr");
+    match client_leave_joint(&addr) {
+        Ok(()) => println!("leave-joint ok"),
+        Err(e) => {
+            eprintln!("leave-joint: {e}");
+            process::exit(1);
+        }
+    }
+}
+
+fn cmd_remove_member_joint(args: &[String]) {
+    let addr = flag_val(args, "--addr").expect("--addr");
+    let id: u64 = flag_val(args, "--id").expect("--id").parse().expect("id");
+    match client_remove_member_joint(&addr, id) {
+        Ok(()) => println!("remove-member-joint ok id={id}"),
+        Err(e) => {
+            eprintln!("remove-member-joint: {e}");
+            process::exit(1);
+        }
+    }
+}
+
+fn cmd_add_member_joint(args: &[String]) {
+    let addr = flag_val(args, "--addr").expect("--addr");
+    let id: u64 = flag_val(args, "--id").expect("--id").parse().expect("id");
+    match client_add_member_joint(&addr, id) {
+        Ok(()) => println!("add-member-joint ok id={id}"),
+        Err(e) => {
+            eprintln!("add-member-joint: {e}");
+            process::exit(1);
+        }
+    }
+}
+
 fn cmd_set_peers(args: &[String]) {
     // Apply the same peer map to every --peer / --addr target (mesh rewire).
     let peers_map = flag_peers(args);
@@ -1355,8 +1524,14 @@ fn cmd_elect_wait(args: &[String]) {
                             )
                         })
                         .collect();
+                    let live = liveness_admitted(false, false, false);
+                    let banner = if live {
+                        elect_claim_banner(true, true, true)
+                    } else {
+                        elect_claim_banner(false, false, false)
+                    };
                     println!(
-                        "elected all ranges ({}) from node {id} status={st}",
+                        "elected all ranges ({}) from node {id} status={st} {banner}",
                         summary.join(" ")
                     );
                     return;

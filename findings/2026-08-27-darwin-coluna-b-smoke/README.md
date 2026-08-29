@@ -25,34 +25,27 @@ pela cauda (p99 28 vs 9) numa caixa suja. ycsb_d p50 empatado/ganho; o
 Isto **não** prova “Mac + `set_sync(true)` = 0.61×”. Prova que, na mesma
 classe `F_FULLFSYNC`, o syscall mediano empatou.
 
-## O que o host Mac realmente chama
+## O que o host Mac realmente chama (CMake, não o sys-crate)
 
-`librocksdb-sys` nesta caixa **não** tem `HAVE_FULLFSYNC`
-(`engines.rs`: default Rocks `WriteOptions.sync` é `fdatasync` ~50 µs,
-não `F_FULLFSYNC` ~5 ms).
+`librocksdb-sys` 0.16 desta árvore **omite** `HAVE_FULLFSYNC` — buraco
+do binding, não do Rocks. CMake / Makefile do C++ Facebook **detectam**
+`F_FULLFSYNC` e o `Sync()` do WAL é `fcntl(F_FULLFSYNC)`. Compat OOTB
+`wal_full_fsync=true` casa **isso**, não o `fdatasync` do crate 0.22.
 
-Compat `Options::set_sync(true)` deixa `wal_full_fsync=true` (default).
-Darwin G1 = `F_FULLFSYNC`.
+Comparar Pedra `set_sync(true)` contra rust-rocksdb 0.22 `fdatasync`
+(~100×) **não** é coluna B. É Pedra CMake-class vs binding aleijado.
+Não é defeito do substituto.
 
-| | Pedra `set_sync(true)` | rust-rocksdb `set_sync(true)` |
-|---|---|---|
-| barreira | `F_FULLFSYNC` ~5 ms | `fdatasync` ~50 µs |
-| vs smoke 25/08 | o que se mediu (Rocks `FULL_SYNC=1`) | **não** foi o peer |
-
-Host Mac que só faz `wopts.set_sync(true)` (API rust-rocksdb, sem knob
-Pedra) sente **~100×** no 1c write, não 0.61×. É mais durável (vantagem)
-e mais lento (defeito que o host sente). Linux coluna B não tem este
-buraco: lá `sync=true` dos dois lados é `fdatasync` (`P11_PASS` 1.013).
-
-O harness **não** tem env para `wal_full_fsync=false`. Não dá para medir
-a classe rust-rocksdb no Darwin sem um corte no bench.
+Linux coluna B: ambos `fdatasync` (`P11_PASS` 1.013). Darwin coluna B:
+ambos `F_FULLFSYNC`.
 
 ## O que falta para fechar Darwin B
 
 1. Quiet 3/3, ops=2000, tree atual — **não** o smoke 200 ops / load 20.
-2. Duas colunas, não uma:
-   - **B-host:** Pedra `set_sync(true)` + `wal_full_fsync=false` vs Rocks
-     `sync=true` `FULL_SYNC=0` (o que o host rust-rocksdb realmente paga).
-   - **B-strong:** ambos `F_FULLFSYNC` (o smoke; p50 já empatou).
-3. Sem (2) o default `wal_full_fsync=true` continua um defeito de
-   velocidade no Mac para quem migra de rust-rocksdb com só `set_sync(true)`.
+2. Peer = CMake class: `CXXFLAGS=-DHAVE_FULLFSYNC` no compile do
+   `librocksdb-sys`, `ROCKS_PARITY_FULL_SYNC=0`. O `FULL_SYNC=1`
+   (File::sync_all em todo `*.log`) é reconstituição; extra `fdatasync`
+   + pode syncar WAL reciclado. Dirty 2026-08-27 já empatou p50 com
+   isso (`../2026-08-27-darwin-b-upstream-ff`, min 0.944).
+3. Não abrir coluna “B-host vs crate fdatasync”. Isso relitiga o
+   binding hole.

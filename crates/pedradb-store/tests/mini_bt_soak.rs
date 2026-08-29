@@ -54,7 +54,7 @@ fn xorshift(rng: &mut u64) -> u64 {
 #[test]
 fn mini_bt_inprocess_model_checked_soak() {
     let dir = temp_dir("e1");
-    let mut c = StoreCluster::open_with_options(&dir, 3, 1, store_opts()).unwrap();
+    let mut c = StoreCluster::open_with_options_lab_direct(&dir, 3, 1, store_opts()).unwrap();
     c.elect_all(100).unwrap();
 
     let mut model: BTreeMap<Vec<u8>, Vec<u8>> = BTreeMap::new();

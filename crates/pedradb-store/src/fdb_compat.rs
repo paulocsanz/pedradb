@@ -476,7 +476,7 @@ mod tests {
     #[test]
     fn fdb_compat_get_set_commit_roundtrip() {
         let dir = temp();
-        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
         c.elect_all(80).unwrap();
         let mut db = FdbDatabase::open(&mut c);
         let mut tr = db.create_transaction();
@@ -494,7 +494,7 @@ mod tests {
     #[test]
     fn fdb_compat_conflict_maps_not_committed() {
         let dir = temp();
-        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
         c.elect_all(80).unwrap();
         let mut db = FdbDatabase::open(&mut c);
         let mut t1 = db.create_transaction();
@@ -510,7 +510,7 @@ mod tests {
     #[test]
     fn fdb_compat_too_old_maps() {
         let dir = temp();
-        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
         c.elect_all(40).unwrap();
         let mut db = FdbDatabase::open(&mut c);
         let mut tr = db.create_transaction();
@@ -525,7 +525,7 @@ mod tests {
     #[test]
     fn phase1_bindingtester_subset_harness() {
         let dir = temp();
-        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
         c.elect_all(100).unwrap();
         let report = run_phase1_bindingtester_subset(&mut c).expect("phase1 harness");
         assert!(

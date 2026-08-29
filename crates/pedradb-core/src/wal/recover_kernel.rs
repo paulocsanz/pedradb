@@ -505,4 +505,17 @@ mod tests {
         }
         assert_eq!(n, (kinds.len() as u32) * 3 * 2 * 4 * 2);
     }
+
+    #[test]
+    fn recover_collect_act_on_live_crc_is_not_ok() {
+        assert_eq!(
+            recover_collect_act(RecoverKind::Crc, 3, true, 0, false),
+            RecoverAct::FailStop
+        );
+        assert_eq!(
+            recover_collect_act_as_is(RecoverKind::Crc, 3, true, 0),
+            RecoverAct::Resync,
+            "AS-IS dente: CRC becomes silent resync"
+        );
+    }
 }

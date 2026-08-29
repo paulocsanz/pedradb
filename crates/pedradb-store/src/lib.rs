@@ -49,8 +49,11 @@ mod compact_kernel;
 pub mod fdb_compat;
 pub mod fdb_layers;
 mod index_val_kernel;
+mod l28;
 pub mod layers;
+mod membership_kernel;
 mod msg;
+mod rpc_mode_kernel;
 mod si_kernel;
 mod snapshot_kernel;
 pub mod tcp;
@@ -64,12 +67,13 @@ pub use client::{
     SnapshotTx, TcpClusterClient, Transaction, MAX_SNAPSHOT_LAG,
 };
 pub use commit_kernel::{
-    joint_election_ok, joint_election_ok_as_is, majority_of, may_commit_at, may_commit_at_as_is,
-    propose_ack_ok, propose_ack_ok_as_is, recover_commit, recover_commit_as_is,
+    may_commit_at, may_commit_at_as_is, propose_ack_ok, propose_ack_ok_as_is, recover_commit,
+    recover_commit_as_is,
 };
 pub use compact_kernel::{
-    compact_index_floor, compact_ready, may_compact_through, may_compact_through_as_is,
-    peer_counts_for_compact, peer_counts_for_compact_as_is,
+    compact_index_floor, compact_ready, compact_through_unleft, compact_through_unleft_as_is,
+    may_compact_through, may_compact_through_as_is, peer_counts_for_compact,
+    peer_counts_for_compact_as_is,
 };
 pub use fdb_compat::{
     run_phase1_bindingtester_subset, FdbDatabase, FdbError, FdbTransaction, Phase1HarnessReport,
@@ -79,13 +83,37 @@ pub use index_val_kernel::{
     exact_value_children, exact_value_children_as_is, len_pref_value, len_pref_value_as_is,
     value_len_tag, value_len_tag_as_is,
 };
+pub use l28::{
+    l28_durability_ok, l28_durability_ok_as_is, l28_leader_kill_ok, l28_leader_kill_ok_as_is,
+    l28_tcp_apply_ok, l28_tcp_apply_ok_as_is, l28_tcp_hw_ok, l28_tcp_hw_ok_as_is, l28_tcp_leave_ok,
+    l28_tcp_leave_ok_as_is, l28_tcp_left_ok, l28_tcp_left_ok_as_is, l28_tcp_napply_ok,
+    l28_tcp_abort_ok, l28_tcp_abort_ok_as_is, l28_tcp_clear_ok, l28_tcp_clear_ok_as_is,
+    l28_tcp_lid_ok, l28_tcp_lid_ok_as_is, l28_tcp_peer_ok, l28_tcp_peer_ok_as_is,
+    l28_tcp_dsc_ok, l28_tcp_dsc_ok_as_is, l28_tcp_pld_ok, l28_tcp_pld_ok_as_is,
+    l28_tcp_pre_ok, l28_tcp_pre_ok_as_is, l28_tcp_rdr_ok, l28_tcp_rdr_ok_as_is,
+    l28_tcp_hnt_ok, l28_tcp_hnt_ok_as_is, l28_tcp_std_ok, l28_tcp_std_ok_as_is,
+    l28_tcp_fence_ok, l28_tcp_fence_ok_as_is,
+    l28_tcp_hist_ok, l28_tcp_hist_ok_as_is,
+    l28_tcp_napply_ok_as_is, l28_tcp_nowms_ok, l28_tcp_nowms_ok_as_is, l28_tcp_odrop_ok,
+    l28_tcp_odrop_ok_as_is, l28_tcp_part_ok,
+    l28_tcp_trunc_ok, l28_tcp_trunc_ok_as_is,
+    l28_tcp_part_ok_as_is, l28_tcp_plant_ok, l28_tcp_plant_ok_as_is, world_seed_l28_ok,
+    world_seed_l28_ok_as_is,
+};
 pub use layers::{
     olap_get, olap_ingest, olap_list_at, olap_stream_range, pg_upsert, pks_one_per_range,
     put_with_secondary_index, raw_keys_one_per_range, sql_multi_table_write, stream_get,
     stream_list_at, stream_publish, table_get, table_put, table_row_key, EtcdNeedFace,
     LeadershipEvent, LeadershipHub, TikvKvFace, WatchEvent, WatchHub,
 };
+pub use membership_kernel::{
+    elect_claim_banner, elect_claim_banner_as_is, high_water_at_least, high_water_at_least_as_is,
+    joint_election_ok, joint_election_ok_as_is, joint_leave_ok, joint_leave_ok_as_is,
+    joint_still_active, joint_still_active_as_is, liveness_admitted, liveness_admitted_as_is,
+    majority_of, queued_leave_finish_ok, queued_leave_finish_ok_as_is,
+};
 pub use msg::PeerMsg;
+pub use rpc_mode_kernel::{allow_direct_rpc, allow_direct_rpc_as_is};
 pub use si_kernel::{
     point_get_prefer_applied, point_get_prefer_applied_as_is, point_get_watermark,
     point_get_watermark_as_is, si_reader_beats, si_reader_beats_as_is, snapshot_read_plan,
@@ -96,8 +124,9 @@ pub use snapshot_kernel::{
     snapshot_touches_user_key_as_is,
 };
 pub use tcp::{
-    client_commit_tx, client_dcs_cas, client_dcs_create, client_dcs_get, client_get, client_put,
-    client_put_batch, client_set_peers, client_status, client_tick, connect as tcp_connect,
+    client_add_member_joint, client_commit_tx, client_dcs_cas, client_dcs_create, client_dcs_get,
+    client_get, client_leave_joint, client_put, client_put_batch, client_remove_member_joint,
+    client_set_peers, client_status, client_tick, connect as tcp_connect,
     connect_host as tcp_connect_host, peer_wire, read_frame, resolve_host_port, write_frame,
     WireMsg,
 };
@@ -253,19 +282,21 @@ use thiserror::Error;
 
 /// How peer RPCs (RequestVote / AppendEntries) are delivered.
 ///
-/// - [`RpcMode::Direct`] (default): in-process sync delivery — same semantics as
-///   the original Montanha-Store MVP; all unit tests use this.
-/// - [`RpcMode::Queued`]: messages go to an outbound queue; the World / harness
-///   must [`StoreCluster::drain_outbound`] and [`StoreCluster::handle_inbound`]
+/// - [`RpcMode::Queued`] (production default, RFC-0067 P2.2): messages go to
+///   an outbound queue; the World / harness must
+///   [`StoreCluster::drain_outbound`] and [`StoreCluster::handle_inbound`]
 ///   (typically via a Net). Client `put` may return [`StoreError::NotCommitted`]
 ///   with the entry **left on the leader log** until majority is reached after
 ///   delivery (no silent discard in Queued mode on that path).
+/// - [`RpcMode::Direct`]: in-process sync delivery of the same `PeerMsg`
+///   (lab leftover). Opt-in via [`StoreCluster::enable_lab_direct_rpc`] for
+///   unpinned unit tests; refused after [`StoreCluster::pin_dst_queued`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum RpcMode {
-    /// Immediate in-process RPC (default).
-    #[default]
+    /// Immediate in-process RPC (lab leftover; opt-in).
     Direct,
     /// Enqueue RPC bytes; deliver via [`StoreCluster::handle_inbound`].
+    #[default]
     Queued,
 }
 
@@ -633,6 +664,12 @@ fn cluster_membership_key() -> Vec<u8> {
     k
 }
 
+fn cluster_high_water_key() -> Vec<u8> {
+    let mut k = CLUSTER_META_PREFIX.to_vec();
+    k.extend_from_slice(b"high_water");
+    k
+}
+
 fn mint_cluster_id() -> [u8; 16] {
     use pedradb_core::rng::{Rng, SystemRng};
     let a = SystemRng.next_u64();
@@ -954,7 +991,7 @@ fn strip_crc(buf: &[u8]) -> Result<&[u8]> {
     let (payload, crc_raw) = buf.split_at(buf.len() - 4);
     let got = u32::from_le_bytes(crc_raw.try_into().unwrap());
     let expect = crc32c::crc32c(payload);
-    if got != expect {
+    if !pedradb_core::wal::crc::crc_match_ok(got, expect) {
         return Err(StoreError::Msg("raft meta CRC mismatch".into()));
     }
     Ok(payload)
@@ -1701,6 +1738,784 @@ fn load_range_peer<E: Env>(
     Ok(peer)
 }
 
+/// RFC-0121 P1.2 / 0066 P2.2: inspect a TCP node's Pedra dir after process
+/// death. True when the recovered committed log has a C-new-only leave
+/// (`MembershipJoint` with `old == new`), or durable membership already
+/// omits `removed` and no still-active joint remains (leave applied, then
+/// compacted). Production [`crate`] `cluster_real --remove-member` gates
+/// exit on [`l28_tcp_left_ok`].
+///
+/// `data` is the `--data` parent (`store-node-{node_id}` lives under it).
+#[must_use]
+pub fn tcp_node_disk_left_joint(data: impl AsRef<Path>, node_id: u64, removed: u64) -> bool {
+    let dir = data.as_ref().join(format!("store-node-{node_id}"));
+    let opts = OpenOptions {
+        wal_full_fsync: true,
+        history: Default::default(),
+        wal_recovery: Default::default(),
+        sync: true,
+        auto_flush_bytes: None,
+        auto_compact_sst_count: None,
+        auto_compact_sst_bytes: None,
+        exclusive: true,
+        large_value_threshold: None,
+    };
+    let Ok(db) = Db::open_with_env(&dir, opts, IoUringEnv::default()) else {
+        return false;
+    };
+    let Ok(peer) = load_range_peer(&db, 1, node_id, &[node_id]) else {
+        return false;
+    };
+    let mut leave = false;
+    let mut still = false;
+    for rec in &peer.log {
+        if let RangeEntry::MembershipJoint { old, new } = &rec.entry {
+            if membership_kernel::joint_still_active(old, new) {
+                still = true;
+            } else {
+                leave = true;
+            }
+        }
+    }
+    if membership_kernel::joint_leave_ok(leave) {
+        return true;
+    }
+    if still {
+        return false;
+    }
+    let Some(raw) = db.get(&cluster_membership_key()) else {
+        return false;
+    };
+    let Ok(ids) = decode_membership(&raw) else {
+        return false;
+    };
+    !ids.contains(&removed) && !ids.is_empty()
+}
+
+/// RFC-0126 P1.2: inspect a TCP node's Pedra dir after process death and
+/// return the durable membership high-water (`0` if missing/unreadable).
+///
+/// `data` is the `--data` parent (`store-node-{node_id}` lives under it).
+#[must_use]
+pub fn tcp_node_disk_high_water(data: impl AsRef<Path>, node_id: u64) -> u64 {
+    let dir = data.as_ref().join(format!("store-node-{node_id}"));
+    let opts = OpenOptions {
+        wal_full_fsync: true,
+        history: Default::default(),
+        wal_recovery: Default::default(),
+        sync: true,
+        auto_flush_bytes: None,
+        auto_compact_sst_count: None,
+        auto_compact_sst_bytes: None,
+        exclusive: true,
+        large_value_threshold: None,
+    };
+    let Ok(db) = Db::open_with_env(&dir, opts, IoUringEnv::default()) else {
+        return 0;
+    };
+    let Some(raw) = db.get(&cluster_high_water_key()) else {
+        return 0;
+    };
+    decode_u64_meta(&raw).unwrap_or(0)
+}
+
+/// RFC-0128 P1.2: reopen a TCP node's Pedra dir with stale CLI membership
+/// after process death. True when `removed` is not participating (kernel
+/// `participating_if_member` on disk `ids`). AS-IS would count a remote
+/// non-member (`nodes` has only self).
+#[must_use]
+pub fn tcp_node_removed_not_participating(
+    data: impl AsRef<Path>,
+    self_id: u64,
+    cli: &[u64],
+    removed: u64,
+) -> bool {
+    let Ok(c) = StoreCluster::open_single_node(data, self_id, cli, 1) else {
+        return false;
+    };
+    !c.is_participating(removed)
+}
+
+/// RFC-0130 P1.2: plant a durable committed-unapplied prefix (Noop at
+/// `last_index+1`, persist log+commit, leave `applied` behind) on a TCP
+/// node's Pedra dir. Production `open_single_node` must recover-apply so
+/// `recover_must_apply` is false. AS-IS skips apply and the gap remains.
+/// Rewinding `applied` is not this tooth — compact may have dropped that
+/// log entry.
+#[must_use]
+pub fn tcp_node_recover_apply_ok(
+    data: impl AsRef<Path>,
+    self_id: u64,
+    cli: &[u64],
+) -> bool {
+    {
+        let Ok(mut c) = StoreCluster::open_single_node(&data, self_id, cli, 1) else {
+            return false;
+        };
+        let Some(n) = c.nodes.get_mut(&self_id) else {
+            return false;
+        };
+        let Some(p) = n.ranges.get_mut(&1) else {
+            return false;
+        };
+        let idx = p.last_index() + 1;
+        p.log.push(LogRec {
+            index: idx,
+            term: p.term.max(1),
+            entry: RangeEntry::Noop,
+        });
+        p.commit = idx;
+        if persist_log_db(&mut n.db, 1, p).is_err() {
+            return false;
+        }
+        if persist_commit_db(&mut n.db, 1, p).is_err() {
+            return false;
+        }
+        if !membership_kernel::recover_must_apply(p.applied, p.commit) {
+            return false;
+        }
+    }
+    let Ok(c) = StoreCluster::open_single_node(data, self_id, cli, 1) else {
+        return false;
+    };
+    let Some(p) = c.nodes.get(&self_id).and_then(|n| n.ranges.get(&1)) else {
+        return false;
+    };
+    !membership_kernel::recover_must_apply(p.applied, p.commit)
+}
+
+/// RFC-0131 P1.2: same plant as 0130, on a replica disk membership already
+/// dropped. Production TCP ctor must recover-apply; AS-IS filters by `ids`.
+#[must_use]
+pub fn tcp_node_removed_recover_apply_ok(
+    data: impl AsRef<Path>,
+    self_id: u64,
+    cli: &[u64],
+) -> bool {
+    if !tcp_node_recover_apply_ok(&data, self_id, cli) {
+        return false;
+    }
+    let Ok(c) = StoreCluster::open_single_node(data, self_id, cli, 1) else {
+        return false;
+    };
+    !c.is_member(self_id)
+}
+
+fn disk_log_has_uncommitted_suffix<E: Env>(db: &Db<E>, commit: u64) -> bool {
+    if let Some(raw) = db.get(&raft_meta_key(1, "log_hi")) {
+        if let Ok(hi) = decode_u64_meta(&raw) {
+            if hi > commit {
+                return true;
+            }
+        }
+    }
+    if let Some(raw) = db.get(&raft_meta_key(1, "log")) {
+        if let Ok(recs) = decode_log(&raw) {
+            if recs.iter().any(|e| e.index > commit) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// RFC-0132 P1.2: plant a durable uncommitted suffix on a replica disk
+/// membership already dropped. Production TCP ctor must persist truncate
+/// so disk has no `index > commit`. AS-IS filters persist by `ids`.
+#[must_use]
+pub fn tcp_node_removed_truncate_ok(
+    data: impl AsRef<Path>,
+    self_id: u64,
+    cli: &[u64],
+) -> bool {
+    let commit;
+    {
+        let Ok(mut c) = StoreCluster::open_single_node(&data, self_id, cli, 1) else {
+            return false;
+        };
+        if c.is_member(self_id) {
+            return false;
+        }
+        {
+            let Some(n) = c.nodes.get_mut(&self_id) else {
+                return false;
+            };
+            let Some(p) = n.ranges.get_mut(&1) else {
+                return false;
+            };
+            commit = p.commit;
+            let idx = p.last_index() + 1;
+            p.log.push(LogRec {
+                index: idx,
+                term: p.term.max(1),
+                entry: RangeEntry::Put {
+                    key: b"rfc0132-tcp".to_vec(),
+                    value: b"uncommitted".to_vec(),
+                    si_gen: 0,
+                },
+            });
+            if persist_log_db(&mut n.db, 1, p).is_err() {
+                return false;
+            }
+        }
+        let Some(n) = c.nodes.get(&self_id) else {
+            return false;
+        };
+        if !disk_log_has_uncommitted_suffix(&n.db, commit) {
+            return false;
+        }
+    }
+    let Ok(c) = StoreCluster::open_single_node(data, self_id, cli, 1) else {
+        return false;
+    };
+    let Some(n) = c.nodes.get(&self_id) else {
+        return false;
+    };
+    !c.is_member(self_id) && !disk_log_has_uncommitted_suffix(&n.db, commit)
+}
+
+/// RFC-0133 P1.2: plant a durable uncommitted suffix (incremental
+/// `log_entry_key`) on a replica disk membership already dropped.
+/// Production TCP ctor must delete that key. 0132 `log_hi` cap is not
+/// this tooth. AS-IS leaves the orphan segment.
+#[must_use]
+pub fn tcp_node_removed_orphan_drop_ok(
+    data: impl AsRef<Path>,
+    self_id: u64,
+    cli: &[u64],
+) -> bool {
+    let orphan;
+    {
+        let Ok(mut c) = StoreCluster::open_single_node(&data, self_id, cli, 1) else {
+            return false;
+        };
+        if c.is_member(self_id) {
+            return false;
+        }
+        let commit;
+        {
+            let Some(n) = c.nodes.get_mut(&self_id) else {
+                return false;
+            };
+            let Some(p) = n.ranges.get_mut(&1) else {
+                return false;
+            };
+            commit = p.commit;
+            let idx = p.last_index() + 1;
+            p.log.push(LogRec {
+                index: idx,
+                term: p.term.max(1),
+                entry: RangeEntry::Put {
+                    key: b"rfc0133-tcp".to_vec(),
+                    value: b"uncommitted".to_vec(),
+                    si_gen: 0,
+                },
+            });
+            if persist_log_db(&mut n.db, 1, p).is_err() {
+                return false;
+            }
+        }
+        orphan = log_entry_key(1, commit.saturating_add(1));
+        let Some(n) = c.nodes.get(&self_id) else {
+            return false;
+        };
+        if n.db.get(&orphan).is_none() {
+            return false;
+        }
+    }
+    let Ok(c) = StoreCluster::open_single_node(data, self_id, cli, 1) else {
+        return false;
+    };
+    let Some(n) = c.nodes.get(&self_id) else {
+        return false;
+    };
+    !c.is_member(self_id) && n.db.get(&orphan).is_none()
+}
+
+/// RFC-0134 P1.2: plant a leftover 2PC intent on a replica disk membership
+/// already dropped. Production TCP ctor must abort it. AS-IS filters abort
+/// by `ids`.
+#[must_use]
+pub fn tcp_node_removed_abort_ok(
+    data: impl AsRef<Path>,
+    self_id: u64,
+    cli: &[u64],
+) -> bool {
+    let ik = intent_key(b"rfc0134-tcp");
+    {
+        let Ok(mut c) = StoreCluster::open_single_node(&data, self_id, cli, 1) else {
+            return false;
+        };
+        if c.is_member(self_id) {
+            return false;
+        }
+        let Some(n) = c.nodes.get_mut(&self_id) else {
+            return false;
+        };
+        if n.db.put(&ik, encode_intent(99, b"pending")).is_err() {
+            return false;
+        }
+        if n.db.get(&ik).is_none() {
+            return false;
+        }
+    }
+    let Ok(c) = StoreCluster::open_single_node(data, self_id, cli, 1) else {
+        return false;
+    };
+    let Some(n) = c.nodes.get(&self_id) else {
+        return false;
+    };
+    !c.is_member(self_id) && n.db.get(&ik).is_none()
+}
+
+fn disk_si_now_ms<E: Env>(n: &StoreNode<E>) -> u64 {
+    n.db
+        .get(&si_meta_key("now_ms"))
+        .and_then(|raw| decode_u64_meta(&raw).ok())
+        .unwrap_or(0)
+}
+
+/// RFC-0135 P1.2: production TCP ctor of a replica already dropped from
+/// `ids` must persist `now_ms` on self. AS-IS filters persist by `ids`.
+#[must_use]
+pub fn tcp_node_removed_now_ms_ok(
+    data: impl AsRef<Path>,
+    self_id: u64,
+    cli: &[u64],
+) -> bool {
+    let Ok(mut c) = StoreCluster::open_single_node(&data, self_id, cli, 1) else {
+        return false;
+    };
+    if c.is_member(self_id) {
+        return false;
+    }
+    c.advance_now_ms(7_000);
+    let Some(n) = c.nodes.get(&self_id) else {
+        return false;
+    };
+    disk_si_now_ms(n) == c.now_ms() && c.now_ms() >= 7_000
+}
+
+/// RFC-0136 P1.2: production TCP ctor of a replica already dropped from
+/// `ids` must persist SI hist on self. AS-IS filters persist by `ids`.
+#[must_use]
+pub fn tcp_node_removed_hist_ok(
+    data: impl AsRef<Path>,
+    self_id: u64,
+    cli: &[u64],
+) -> bool {
+    let Ok(mut c) = StoreCluster::open_single_node(&data, self_id, cli, 1) else {
+        return false;
+    };
+    if c.is_member(self_id) {
+        return false;
+    }
+    let k = b"rfc0136-tcp-hist".to_vec();
+    c.key_history
+        .insert(k.clone(), vec![(1, Some(b"v".to_vec()))]);
+    c.commit_generation = c.commit_generation.max(1);
+    if c.persist_si_keys(&[k.clone()]).is_err() {
+        return false;
+    }
+    let Some(n) = c.nodes.get(&self_id) else {
+        return false;
+    };
+    n.db.get(&hist_key(&k)).is_some()
+}
+
+/// RFC-0137 P1.2: production TCP ctor of a replica already dropped from
+/// `ids` must persist abort fence on self. AS-IS filters persist by `ids`.
+#[must_use]
+pub fn tcp_node_removed_fence_ok(
+    data: impl AsRef<Path>,
+    self_id: u64,
+    cli: &[u64],
+) -> bool {
+    let Ok(mut c) = StoreCluster::open_single_node(&data, self_id, cli, 1) else {
+        return false;
+    };
+    if c.is_member(self_id) {
+        return false;
+    }
+    let tid = 0x0137_1E28u64;
+    if c.fence_txn_aborted(tid).is_err() {
+        return false;
+    }
+    let Some(n) = c.nodes.get(&self_id) else {
+        return false;
+    };
+    n.db.get(&txn_status_key(tid)).as_deref() == Some(b"abort".as_ref())
+}
+
+/// RFC-0138 P1.2: production TCP ctor of a replica already dropped from
+/// `ids` must force-clear stuck intents on self. AS-IS filters clear by `ids`.
+#[must_use]
+pub fn tcp_node_removed_clear_ok(
+    data: impl AsRef<Path>,
+    self_id: u64,
+    cli: &[u64],
+) -> bool {
+    let Ok(mut c) = StoreCluster::open_single_node(&data, self_id, cli, 1) else {
+        return false;
+    };
+    if c.is_member(self_id) {
+        return false;
+    }
+    let k = b"rfc0138-tcp-left".to_vec();
+    let ik = intent_key(&k);
+    let tid = 0x0138_1E28u64;
+    {
+        let Some(n) = c.nodes.get_mut(&self_id) else {
+            return false;
+        };
+        if n.db.put(&ik, encode_intent(tid, b"pending")).is_err() {
+            return false;
+        }
+    }
+    if c.nodes
+        .get(&self_id)
+        .and_then(|n| n.db.get(&ik))
+        .is_none()
+    {
+        return false;
+    }
+    if c.force_local_clear_keys(tid, &[k], false).is_err() {
+        return false;
+    }
+    c.nodes
+        .get(&self_id)
+        .and_then(|n| n.db.get(&ik))
+        .is_none()
+}
+
+/// RFC-0139 P1.2: production TCP ctor of a replica already dropped from
+/// `ids` must drop leftover TX preimages on self. AS-IS filters drop by `ids`.
+#[must_use]
+pub fn tcp_node_removed_pre_ok(
+    data: impl AsRef<Path>,
+    self_id: u64,
+    cli: &[u64],
+) -> bool {
+    let Ok(mut c) = StoreCluster::open_single_node(&data, self_id, cli, 1) else {
+        return false;
+    };
+    if c.is_member(self_id) {
+        return false;
+    }
+    let k = b"rfc0139-tcp-left".to_vec();
+    let tid = 0x0139_1E28u64;
+    let pk = txn_pre_key(tid, &k);
+    {
+        let Some(n) = c.nodes.get_mut(&self_id) else {
+            return false;
+        };
+        if n.db.put(&pk, encode_preimage(Some(b"old"))).is_err() {
+            return false;
+        }
+    }
+    if c.nodes
+        .get(&self_id)
+        .and_then(|n| n.db.get(&pk))
+        .is_none()
+    {
+        return false;
+    }
+    let handle = TxHandle {
+        id: tid,
+        ranges: vec![1],
+        keys_by_range: vec![(1, vec![k])],
+    };
+    if c.drop_preimages(&handle).is_err() {
+        return false;
+    }
+    c.nodes
+        .get(&self_id)
+        .and_then(|n| n.db.get(&pk))
+        .is_none()
+}
+
+/// RFC-0140 P1.2: production TCP ctor of a replica already dropped from
+/// `ids` must load RangePeer from disk C-new, not stale CLI. Observable
+/// via election timeout. 0125 high-water and 0139 drop-preimages are
+/// **not** this tooth. AS-IS would keep CLI n_nodes at load.
+#[must_use]
+pub fn tcp_node_removed_peer_ok(
+    data: impl AsRef<Path>,
+    self_id: u64,
+    cli: &[u64],
+) -> bool {
+    let Ok(c) = StoreCluster::open_single_node(&data, self_id, cli, 1) else {
+        return false;
+    };
+    if c.is_member(self_id) {
+        return false;
+    }
+    let disk = c.ids.clone();
+    if disk.is_empty() || disk.contains(&self_id) {
+        return false;
+    }
+    let Some(got) = c
+        .nodes
+        .get(&self_id)
+        .and_then(|n| n.ranges.get(&1))
+        .map(|p| p.election_timeout)
+    else {
+        return false;
+    };
+    let want = election_timeout_for(self_id, 1, &disk);
+    let stale = election_timeout_for(self_id, 1, cli);
+    got == want && want != stale
+}
+
+/// RFC-0141 P1.2: production TCP ctor of a replica already dropped from
+/// `ids` must not treat HashMap first-key as cluster identity. Plant a
+/// user key; `get` is Err (not `Ok(Some(stale))`). 0140 timeout peek is
+/// **not** this tooth. AS-IS would `get()` the local-only bytes.
+#[must_use]
+pub fn tcp_node_removed_lid_ok(
+    data: impl AsRef<Path>,
+    self_id: u64,
+    cli: &[u64],
+) -> bool {
+    let Ok(mut c) = StoreCluster::open_single_node(&data, self_id, cli, 1) else {
+        return false;
+    };
+    if c.is_member(self_id) {
+        return false;
+    }
+    if c.local_node_id().is_some() {
+        return false;
+    }
+    let k = b"rfc0141-tcp-stale";
+    {
+        let Some(n) = c.nodes.get_mut(&self_id) else {
+            return false;
+        };
+        if n.db.put(k, b"stale").is_err() {
+            return false;
+        }
+    }
+    let got = c.get(k);
+    got.is_err() && got.as_ref().ok().and_then(|v| v.as_deref()) != Some(b"stale".as_ref())
+}
+
+/// RFC-0142 P1.2: production TCP ctor of a replica already dropped from
+/// `ids` must not pick remote `ids.first()` as a LocalApplied reader.
+/// `get` Err contains `empty`, not `bad node`. 0141 local-id None is
+/// **not** this tooth. AS-IS would `get_on` a remote voter.
+#[must_use]
+pub fn tcp_node_removed_rdr_ok(
+    data: impl AsRef<Path>,
+    self_id: u64,
+    cli: &[u64],
+) -> bool {
+    let Ok(c) = StoreCluster::open_single_node(&data, self_id, cli, 1) else {
+        return false;
+    };
+    if c.is_member(self_id) {
+        return false;
+    }
+    if c.best_reader_for_key(b"rfc0142-tcp-get").is_some() {
+        return false;
+    }
+    match c.get(b"rfc0142-tcp-get") {
+        Err(e) => {
+            let msg = e.to_string();
+            msg.contains("empty") && !msg.contains("bad node")
+        }
+        Ok(_) => false,
+    }
+}
+
+/// RFC-0143 P1.2: production TCP ctor of a replica already dropped from
+/// `ids` must live-discard an uncommitted suffix on self. 0132 recover
+/// truncate is **not** this tooth. AS-IS filters discard by `ids`.
+#[must_use]
+pub fn tcp_node_removed_dsc_ok(
+    data: impl AsRef<Path>,
+    self_id: u64,
+    cli: &[u64],
+) -> bool {
+    let Ok(mut c) = StoreCluster::open_single_node(&data, self_id, cli, 1) else {
+        return false;
+    };
+    if c.is_member(self_id) {
+        return false;
+    }
+    let commit;
+    {
+        let Some(n) = c.nodes.get_mut(&self_id) else {
+            return false;
+        };
+        let Some(p) = n.ranges.get_mut(&1) else {
+            return false;
+        };
+        commit = p.commit;
+        let idx = p.last_index() + 1;
+        p.log.push(LogRec {
+            index: idx,
+            term: p.term.max(1),
+            entry: RangeEntry::Put {
+                key: b"rfc0143-tcp".to_vec(),
+                value: b"orphan".to_vec(),
+                si_gen: 0,
+            },
+        });
+        if persist_log_db(&mut n.db, 1, p).is_err() {
+            return false;
+        }
+    }
+    {
+        let Some(n) = c.nodes.get(&self_id) else {
+            return false;
+        };
+        let ram = n
+            .ranges
+            .get(&1)
+            .is_some_and(|p| p.log.iter().any(|e| e.index > commit));
+        if !ram || !disk_log_has_uncommitted_suffix(&n.db, commit) {
+            return false;
+        }
+    }
+    let from = commit.saturating_add(1);
+    if c.discard_uncommitted_from(1, self_id, from).is_err() {
+        return false;
+    }
+    let Some(n) = c.nodes.get(&self_id) else {
+        return false;
+    };
+    n.ranges
+        .get(&1)
+        .is_some_and(|p| p.log.iter().all(|e| e.index <= commit))
+        && !disk_log_has_uncommitted_suffix(&n.db, commit)
+}
+
+/// RFC-0144 P1.2: production TCP ctor of a replica already dropped from
+/// `ids` must pick a **local** persist-leader on no-leader abort so
+/// `next_index` repair runs. 0143 direct discard is **not** this tooth.
+/// AS-IS uses remote `ids.first()` and skips the repair.
+#[must_use]
+pub fn tcp_node_removed_pld_ok(
+    data: impl AsRef<Path>,
+    self_id: u64,
+    cli: &[u64],
+) -> bool {
+    let Ok(mut c) = StoreCluster::open_single_node(&data, self_id, cli, 1) else {
+        return false;
+    };
+    if c.is_member(self_id) {
+        return false;
+    }
+    if c.range_leader(1).is_some() {
+        return false;
+    }
+    let commit;
+    {
+        let Some(n) = c.nodes.get_mut(&self_id) else {
+            return false;
+        };
+        let Some(p) = n.ranges.get_mut(&1) else {
+            return false;
+        };
+        commit = p.commit;
+        let idx = p.last_index() + 1;
+        p.log.push(LogRec {
+            index: idx,
+            term: p.term.max(1),
+            entry: RangeEntry::Put {
+                key: b"rfc0144-tcp".to_vec(),
+                value: b"orphan".to_vec(),
+                si_gen: 0,
+            },
+        });
+        if persist_log_db(&mut n.db, 1, p).is_err() {
+            return false;
+        }
+    }
+    let from = commit.saturating_add(1);
+    for n in c.nodes.values_mut() {
+        for p in n.ranges.values_mut() {
+            p.sent_through.clear();
+        }
+    }
+    if c.finish_queued_propose(1, from, true).is_err() {
+        return false;
+    }
+    c.nodes
+        .get(&self_id)
+        .and_then(|n| n.ranges.get(&1))
+        .and_then(|p| p.next_index.get(&1).copied())
+        == Some(from)
+}
+
+/// RFC-0145 P1.2: production TCP ctor of a replica already dropped from
+/// `ids` must step a planted Leader down on re-install of C-new. 0144
+/// persist-leader and 0128 participating are **not** this tooth. AS-IS
+/// keeps `Role::Leader`.
+#[must_use]
+pub fn tcp_node_removed_std_ok(
+    data: impl AsRef<Path>,
+    self_id: u64,
+    cli: &[u64],
+) -> bool {
+    let Ok(mut c) = StoreCluster::open_single_node(&data, self_id, cli, 1) else {
+        return false;
+    };
+    if c.is_member(self_id) {
+        return false;
+    }
+    {
+        let Some(n) = c.nodes.get_mut(&self_id) else {
+            return false;
+        };
+        let Some(p) = n.ranges.get_mut(&1) else {
+            return false;
+        };
+        p.role = Role::Leader;
+        p.leader_id = Some(self_id);
+    }
+    if !c.node_thinks_leader(self_id, 1) {
+        return false;
+    }
+    let ids = c.ids.clone();
+    if c.install_applied_membership(ids).is_err() {
+        return false;
+    }
+    !c.is_member(self_id) && !c.node_thinks_leader(self_id, 1)
+}
+
+/// RFC-0146 P1.2: production TCP ctor of a **remaining** voter must not
+/// route `leader_hint` to a replica already dropped from `ids`. 0145
+/// step-down is **not** this tooth. AS-IS returns any `leader_id`.
+#[must_use]
+pub fn tcp_node_hint_ok(
+    data: impl AsRef<Path>,
+    self_id: u64,
+    cli: &[u64],
+    removed: u64,
+) -> bool {
+    let Ok(mut c) = StoreCluster::open_single_node(&data, self_id, cli, 1) else {
+        return false;
+    };
+    if !c.is_member(self_id) || c.is_member(removed) {
+        return false;
+    }
+    while c.step_down_range_leader(1).is_ok() {}
+    if c.range_leader(1).is_some() {
+        return false;
+    }
+    {
+        let Some(n) = c.nodes.get_mut(&self_id) else {
+            return false;
+        };
+        let Some(p) = n.ranges.get_mut(&1) else {
+            return false;
+        };
+        p.leader_id = Some(removed);
+    }
+    c.leader_hint(1) != Some(removed)
+}
+
 fn persist_hard_db<E: Env>(db: &mut Db<E>, range_id: u64, peer: &RangePeer) -> Result<()> {
     db.put(
         raft_meta_key(range_id, "hard"),
@@ -1774,6 +2589,7 @@ fn persist_log_db<E: Env>(db: &mut Db<E>, range_id: u64, peer: &mut RangePeer) -
     }
 
     // Full rewrite (truncate, compact, empty, or non-contiguous).
+    let old_hi = peer.disk_log_hi;
     let mut ops = vec![BatchOp::put(
         raft_meta_key(range_id, "log"),
         encode_log(&peer.log),
@@ -1782,6 +2598,13 @@ fn persist_log_db<E: Env>(db: &mut Db<E>, range_id: u64, peer: &mut RangePeer) -
         raft_meta_key(range_id, "log_hi"),
         encode_u64_meta(last),
     ));
+    // RFC-0133: drop incremental segment keys past the new hi.
+    // AS-IS leaves them (0132 leftover — watermark moved, bytes remain).
+    for i in last.saturating_add(1)..=old_hi {
+        if membership_kernel::recover_drop_orphan_seg(i, last) {
+            ops.push(BatchOp::delete(log_entry_key(range_id, i)));
+        }
+    }
     db.apply_batch(ops)?;
     peer.disk_log_hi = last;
     Ok(())
@@ -2019,9 +2842,8 @@ type RangeKvMap = HashMap<u64, Vec<KvPair>>;
 /// Generic over [`Env`] so DST can open every node on a shared `FailingEnv` /
 /// `RecordingEnv` clone (same trip state via `Rc`).
 ///
-/// Peer RPCs use [`RpcMode`]: default [`RpcMode::Direct`] keeps sync in-process
-/// delivery; [`RpcMode::Queued`] exposes AE/RV via [`Self::drain_outbound`] /
-/// [`Self::handle_inbound`] for World/Net simulation.
+/// Peer RPCs use [`RpcMode`]: default [`RpcMode::Queued`] (RFC-0067 P2.2);
+/// [`RpcMode::Direct`] is unpinned lab opt-in via [`Self::enable_lab_direct_rpc`].
 pub struct StoreCluster<E: Env = IoUringEnv> {
     nodes: HashMap<u64, StoreNode<E>>,
     /// Raft voting membership (strict majority of this set).
@@ -2041,6 +2863,8 @@ pub struct StoreCluster<E: Env = IoUringEnv> {
     next_txn_id: u64,
     /// Direct vs queued peer RPC.
     rpc_mode: RpcMode,
+    /// RFC-0067: once true, [`RpcMode::Direct`] is refused (World/DST pin).
+    dst_queued_pin: bool,
     /// Outbound peer messages when [`RpcMode::Queued`] (`from`, `to`, msg).
     outbound: VecDeque<(u64, u64, PeerMsg)>,
     /// In-flight election vote counts: (range_id, term) → votes (includes self).
@@ -2124,6 +2948,19 @@ impl StoreCluster<IoUringEnv> {
         Self::open_with_rng(parent, n_nodes, n_ranges, SeedRng::new(0xA11CE))
     }
 
+    /// Unpinned lab: Direct pump of the same `PeerMsg` (RFC-0067 P2.2).
+    ///
+    /// Production [`Self::open`] is Queued-only. Tests that elect/put
+    /// in-process without a Net must opt in here.
+    ///
+    /// # Errors
+    /// Open / bad args.
+    pub fn open_lab_direct(parent: impl AsRef<Path>, n_nodes: u64, n_ranges: u64) -> Result<Self> {
+        let mut c = Self::open(parent, n_nodes, n_ranges)?;
+        c.enable_lab_direct_rpc();
+        Ok(c)
+    }
+
     /// Open with Pedra durability knobs (RFC-0025). Default `open` = durable.
     ///
     /// Use [`StoreOpenOptions::lab_capacity`] only for bulk/bench (not crash-safe).
@@ -2143,8 +2980,9 @@ impl StoreCluster<IoUringEnv> {
     /// Open **one** local node for multi-host TCP (RFC-0017 P0.1).
     ///
     /// Only `store-node-{self_id}` is opened; `member_ids` is the full Raft
-    /// membership (must include `self_id`). Use [`RpcMode::Queued`] and pump
-    /// outbound PeerMsg over the network to remote peers.
+    /// membership (must include `self_id`). Pins [`RpcMode::Queued`] (RFC-0067
+    /// P1.2) so Direct cannot skip Net mid-run; pump outbound PeerMsg over
+    /// the network to remote peers.
     ///
     /// # Errors
     /// Open / bad args.
@@ -2255,6 +3093,20 @@ impl StoreCluster<IoUringEnv> {
         let mut ids: Vec<u64> = member_ids.to_vec();
         ids.sort_unstable();
         ids.dedup();
+        // RFC-0125: disk voters before load_range_peer (CLI `--peer` is stale after leave).
+        if let Some(raw) = db.get(&cluster_membership_key()) {
+            if let Ok(disk_ids) = decode_membership(&raw) {
+                if membership_kernel::disk_membership_overrides_cli(!disk_ids.is_empty()) {
+                    ids = disk_ids;
+                }
+            }
+        }
+        let mut disk_hw = member_ids.len() as u64;
+        if let Some(raw) = db.get(&cluster_high_water_key()) {
+            if let Ok(h) = decode_u64_meta(&raw) {
+                disk_hw = membership_kernel::high_water_at_least(h, disk_hw);
+            }
+        }
         let mut rmap = HashMap::new();
         for meta in &ranges {
             rmap.insert(meta.id, load_range_peer(&db, meta.id, self_id, &ids)?);
@@ -2265,11 +3117,14 @@ impl StoreCluster<IoUringEnv> {
             StoreNode {
                 db,
                 ranges: rmap,
-                participating: true,
+                participating: membership_kernel::participating_if_member(ids.contains(&self_id)),
             },
         );
         let mut cluster = Self {
-            membership_high_water: ids.len(),
+            membership_high_water: membership_kernel::high_water_at_least(
+                disk_hw,
+                ids.len() as u64,
+            ) as usize,
             engine_opts: opts,
             nodes,
             ids,
@@ -2278,6 +3133,7 @@ impl StoreCluster<IoUringEnv> {
             cluster_id: [0u8; 16],
             next_txn_id: 1,
             rpc_mode: RpcMode::Queued,
+            dst_queued_pin: false,
             outbound: VecDeque::new(),
             election_votes: HashMap::new(),
             election_granted: HashMap::new(),
@@ -2302,6 +3158,9 @@ impl StoreCluster<IoUringEnv> {
         };
         cluster.bind_cluster_identity(store_opts.cluster_id)?;
         cluster.recover_after_open()?;
+        // RFC-0067 P1.2: the TCP ctor is Queued-pinned. Direct cannot skip
+        // Net on `montanha-tcp` / `cluster_real` mid-run.
+        cluster.pin_dst_queued();
         Ok(cluster)
     }
 
@@ -2318,6 +3177,36 @@ impl StoreCluster<IoUringEnv> {
         rng: SeedRng,
     ) -> Result<Self> {
         StoreCluster::open_with_env_rng(parent, n_nodes, n_ranges, IoUringEnv::default(), rng)
+    }
+
+    /// [`open_with_rng`](Self::open_with_rng) then unpinned Direct (RFC-0067 P2.2).
+    ///
+    /// # Errors
+    /// Open / bad args.
+    pub fn open_with_rng_lab_direct(
+        parent: impl AsRef<Path>,
+        n_nodes: u64,
+        n_ranges: u64,
+        rng: SeedRng,
+    ) -> Result<Self> {
+        let mut c = Self::open_with_rng(parent, n_nodes, n_ranges, rng)?;
+        c.enable_lab_direct_rpc();
+        Ok(c)
+    }
+
+    /// [`open_with_options`](Self::open_with_options) then unpinned Direct.
+    ///
+    /// # Errors
+    /// Open / bad args.
+    pub fn open_with_options_lab_direct(
+        parent: impl AsRef<Path>,
+        n_nodes: u64,
+        n_ranges: u64,
+        opts: StoreOpenOptions,
+    ) -> Result<Self> {
+        let mut c = Self::open_with_options(parent, n_nodes, n_ranges, opts)?;
+        c.enable_lab_direct_rpc();
+        Ok(c)
     }
 }
 
@@ -2338,6 +3227,22 @@ impl<E: Env> StoreCluster<E> {
     ) -> Result<Self> {
         let envs: Vec<E> = (0..n_nodes).map(|_| env.clone()).collect();
         Self::open_with_envs_rng(parent, n_nodes, n_ranges, envs, rng)
+    }
+
+    /// [`open_with_env_rng`](Self::open_with_env_rng) then unpinned Direct.
+    ///
+    /// # Errors
+    /// Open / bad args.
+    pub fn open_with_env_rng_lab_direct(
+        parent: impl AsRef<Path>,
+        n_nodes: u64,
+        n_ranges: u64,
+        env: E,
+        rng: SeedRng,
+    ) -> Result<Self> {
+        let mut c = Self::open_with_env_rng(parent, n_nodes, n_ranges, env, rng)?;
+        c.enable_lab_direct_rpc();
+        Ok(c)
     }
 
     /// Open with **one [`Env`] per node** (order = node ids `1..=n_nodes`).
@@ -2362,6 +3267,22 @@ impl<E: Env> StoreCluster<E> {
             rng,
             StoreOpenOptions::default(),
         )
+    }
+
+    /// [`open_with_envs_rng`](Self::open_with_envs_rng) then unpinned Direct.
+    ///
+    /// # Errors
+    /// Open / bad args / env count mismatch.
+    pub fn open_with_envs_rng_lab_direct(
+        parent: impl AsRef<Path>,
+        n_nodes: u64,
+        n_ranges: u64,
+        envs: impl IntoIterator<Item = E>,
+        rng: SeedRng,
+    ) -> Result<Self> {
+        let mut c = Self::open_with_envs_rng(parent, n_nodes, n_ranges, envs, rng)?;
+        c.enable_lab_direct_rpc();
+        Ok(c)
     }
 
     /// Like [`open_with_envs_rng`](Self::open_with_envs_rng) with Pedra durability knobs.
@@ -2420,16 +3341,28 @@ impl<E: Env> StoreCluster<E> {
                 db.enable_write_backpressure_defaults();
             }
             let mut rmap = HashMap::new();
+            // RFC-0140: peek disk membership before load (0125 TCP leftover on
+            // in-process open — CLI `1..=n_nodes` built the peer).
+            let mut peer_ids = ids.clone();
+            if let Some(raw) = db.get(&cluster_membership_key()) {
+                if let Ok(disk_ids) = decode_membership(&raw) {
+                    if membership_kernel::open_peer_uses_disk(!disk_ids.is_empty()) {
+                        peer_ids = disk_ids;
+                    }
+                }
+            }
             for meta in &ranges {
                 // F26: restore durable raft meta (or empty peer on first open).
-                rmap.insert(meta.id, load_range_peer(&db, meta.id, id, &ids)?);
+                rmap.insert(meta.id, load_range_peer(&db, meta.id, id, &peer_ids)?);
             }
             nodes.insert(
                 id,
                 StoreNode {
                     db,
                     ranges: rmap,
-                    participating: true,
+                    participating: membership_kernel::participating_if_member(
+                        peer_ids.contains(&id),
+                    ),
                 },
             );
         }
@@ -2442,7 +3375,8 @@ impl<E: Env> StoreCluster<E> {
             rng,
             cluster_id: [0u8; 16],
             next_txn_id: 1,
-            rpc_mode: RpcMode::Direct,
+            rpc_mode: RpcMode::Queued,
+            dst_queued_pin: false,
             outbound: VecDeque::new(),
             election_votes: HashMap::new(),
             election_granted: HashMap::new(),
@@ -2499,6 +3433,8 @@ impl<E: Env> StoreCluster<E> {
     /// and refuse a node directory that already belongs to another cluster.
     fn bind_cluster_identity(&mut self, configured: Option<[u8; 16]>) -> Result<()> {
         let mut disk: Option<(u64, [u8; 16])> = None;
+        let mut disk_mem: Option<Vec<u64>> = None;
+        let mut disk_hw = 0u64;
         let mut nids: Vec<u64> = self.nodes.keys().copied().collect();
         nids.sort_unstable();
         for nid in &nids {
@@ -2520,7 +3456,15 @@ impl<E: Env> StoreCluster<E> {
                 }
             }
             if let Some(raw) = node.db.get(&cluster_membership_key()) {
-                decode_membership(&raw)?;
+                let ids = decode_membership(&raw)?;
+                if disk_mem.is_none() && !ids.is_empty() {
+                    disk_mem = Some(ids);
+                }
+            }
+            if let Some(raw) = node.db.get(&cluster_high_water_key()) {
+                if let Ok(h) = decode_u64_meta(&raw) {
+                    disk_hw = disk_hw.max(h);
+                }
             }
         }
         let id = match (configured, disk) {
@@ -2536,6 +3480,21 @@ impl<E: Env> StoreCluster<E> {
             (None, None) => mint_cluster_id(),
         };
         self.cluster_id = id;
+        // RFC-0124: durable C-new must not be overwritten by CLI `--peer`.
+        if membership_kernel::disk_membership_overrides_cli(disk_mem.is_some()) {
+            if let Some(ids) = disk_mem {
+                self.ids = ids;
+                self.membership_high_water = self.membership_high_water.max(self.ids.len());
+                let live = self.ids.clone();
+                for (vid, n) in self.nodes.iter_mut() {
+                    n.participating = live.contains(vid);
+                }
+            }
+        }
+        self.membership_high_water = membership_kernel::high_water_at_least(
+            disk_hw,
+            self.membership_high_water as u64,
+        ) as usize;
         self.persist_cluster_identity()
     }
 
@@ -2548,6 +3507,13 @@ impl<E: Env> StoreCluster<E> {
         let id_key = cluster_id_key();
         let mem_key = cluster_membership_key();
         let mem_val = encode_membership(ids);
+        let hw_key = cluster_high_water_key();
+        let hw = membership_kernel::high_water_at_least(
+            self.membership_high_water as u64,
+            ids.len() as u64,
+        );
+        self.membership_high_water = hw as usize;
+        let hw_val = encode_u64_meta(hw);
         let mut nids: Vec<u64> = self.nodes.keys().copied().collect();
         nids.sort_unstable();
         for nid in nids {
@@ -2556,6 +3522,7 @@ impl<E: Env> StoreCluster<E> {
             };
             node.db.put(id_key.as_slice(), self.cluster_id.as_slice())?;
             node.db.put(mem_key.as_slice(), mem_val.as_slice())?;
+            node.db.put(hw_key.as_slice(), hw_val.as_slice())?;
         }
         Ok(())
     }
@@ -2584,6 +3551,35 @@ impl<E: Env> StoreCluster<E> {
         self.recover_next_txn_id()?;
         self.recover_now_ms()?;
         self.persist_truncated_logs()?;
+        self.recover_apply_committed()?;
+        Ok(())
+    }
+
+    /// RFC-0130: committed-but-unapplied prefix must apply on recover.
+    /// AS-IS skips (crash window: joint committed, voters still C-old).
+    fn recover_apply_committed(&mut self) -> Result<()> {
+        let nids: Vec<u64> = self.nodes.keys().copied().collect();
+        let range_ids: Vec<u64> = self.ranges.iter().map(|r| r.id).collect();
+        for nid in nids {
+            let in_ids = self.ids.contains(&nid);
+            if !membership_kernel::recover_apply_node_counts(self.is_local_node(nid), in_ids) {
+                continue;
+            }
+            for &rid in &range_ids {
+                let (applied, commit) = {
+                    let Some(node) = self.nodes.get(&nid) else {
+                        continue;
+                    };
+                    let Some(peer) = node.ranges.get(&rid) else {
+                        continue;
+                    };
+                    (peer.applied, peer.commit)
+                };
+                if membership_kernel::recover_must_apply(applied, commit) {
+                    self.apply_range(nid, rid)?;
+                }
+            }
+        }
         Ok(())
     }
 
@@ -2617,10 +3613,11 @@ impl<E: Env> StoreCluster<E> {
     /// # Errors
     /// Log persist failure (F128 — uncommitted suffix must not remain on disk).
     fn persist_truncated_logs(&mut self) -> Result<()> {
-        let ids = self.ids.clone();
+        let nids: Vec<u64> = self.nodes.keys().copied().collect();
         let range_ids: Vec<u64> = self.ranges.iter().map(|r| r.id).collect();
-        for nid in ids {
-            if !self.is_local_node(nid) {
+        for nid in nids {
+            let in_ids = self.ids.contains(&nid);
+            if !membership_kernel::recover_truncate_node_counts(self.is_local_node(nid), in_ids) {
                 continue;
             }
             let Some(node) = self.nodes.get_mut(&nid) else {
@@ -2638,10 +3635,14 @@ impl<E: Env> StoreCluster<E> {
     fn persist_u64_meta_all(&mut self, kind: &str, n: u64) -> Result<()> {
         let key = si_meta_key(kind);
         let val = encode_u64_meta(n);
-        let ids = self.ids.clone();
+        let nids: Vec<u64> = self.nodes.keys().copied().collect();
         let mut any_ok = false;
         let mut last_err: Option<StoreError> = None;
-        for nid in ids {
+        for nid in nids {
+            let in_ids = self.ids.contains(&nid);
+            if !membership_kernel::persist_meta_node_counts(self.is_local_node(nid), in_ids) {
+                continue;
+            }
             if let Some(node) = self.nodes.get_mut(&nid) {
                 match node.db.put(&key, &val) {
                     Ok(()) => any_ok = true,
@@ -2692,8 +3693,12 @@ impl<E: Env> StoreCluster<E> {
         if !txn_kernel::leftover_txn_is_aborted() {
             return Ok(());
         }
-        let ids = self.ids.clone();
-        for nid in ids {
+        let nids: Vec<u64> = self.nodes.keys().copied().collect();
+        for nid in nids {
+            let in_ids = self.ids.contains(&nid);
+            if !membership_kernel::recover_abort_node_counts(self.is_local_node(nid), in_ids) {
+                continue;
+            }
             let Some(node) = self.nodes.get_mut(&nid) else {
                 continue;
             };
@@ -2833,9 +3838,10 @@ impl<E: Env> StoreCluster<E> {
         if hist_writes.is_empty() {
             return Ok(());
         }
-        let ids = self.ids.clone();
-        for nid in ids {
-            if !self.is_participating(nid) {
+        let nids: Vec<u64> = self.nodes.keys().copied().collect();
+        for nid in nids {
+            let in_ids = self.ids.contains(&nid);
+            if !membership_kernel::persist_hist_node_counts(self.is_local_node(nid), in_ids) {
                 continue;
             }
             if let Some(node) = self.nodes.get_mut(&nid) {
@@ -2901,7 +3907,12 @@ impl<E: Env> StoreCluster<E> {
         // Persist the shrunken set *before* mutating RAM. A FailingEnv trip
         // after retain used to leave World with rm_member_err while the
         // voting set had already shrunk (fail-open membership).
-        let next_ids: Vec<u64> = self.ids.iter().copied().filter(|&id| id != node_id).collect();
+        let next_ids: Vec<u64> = self
+            .ids
+            .iter()
+            .copied()
+            .filter(|&id| id != node_id)
+            .collect();
         self.persist_cluster_identity_with(&next_ids)?;
         self.ids = next_ids;
         if let Some(n) = self.nodes.get_mut(&node_id) {
@@ -2925,6 +3936,9 @@ impl<E: Env> StoreCluster<E> {
                 {
                     p.next_index.remove(&node_id);
                     p.match_index.remove(&node_id);
+                    if membership_kernel::drop_sent_through(ids.contains(&node_id)) {
+                        p.sent_through.remove(&node_id);
+                    }
                 }
             }
         }
@@ -2990,11 +4004,12 @@ impl<E: Env> StoreCluster<E> {
     /// # Errors
     /// Unknown node / empty membership / no leader / joint already pending.
     pub fn remove_member_joint(&mut self, node_id: u64) -> Result<()> {
-        if !self.nodes.contains_key(&node_id) {
-            return Err(StoreError::Msg("remove_member_joint: unknown node".into()));
-        }
-        if !self.ids.contains(&node_id) {
+        let in_ids = self.ids.contains(&node_id);
+        if !in_ids {
             return Ok(());
+        }
+        if !membership_kernel::joint_target_counts(in_ids, self.nodes.contains_key(&node_id)) {
+            return Err(StoreError::Msg("remove_member_joint: unknown node".into()));
         }
         if self.ids.len() <= 1 {
             return Err(StoreError::Msg(
@@ -3008,11 +4023,7 @@ impl<E: Env> StoreCluster<E> {
                 range_id: rid,
                 leader: None,
             })?;
-        if let Some(p) = self
-            .nodes
-            .get(&leader)
-            .and_then(|n| n.ranges.get(&rid))
-        {
+        if let Some(p) = self.nodes.get(&leader).and_then(|n| n.ranges.get(&rid)) {
             if Self::pending_joint_on(p).is_some() {
                 return Err(StoreError::Msg(
                     "remove_member_joint: a joint config is already in flight".into(),
@@ -3021,25 +4032,22 @@ impl<E: Env> StoreCluster<E> {
         }
         let old = self.ids.clone();
         let new: Vec<u64> = old.iter().copied().filter(|&id| id != node_id).collect();
-        self.broadcast_append(
-            rid,
-            leader,
-            Some(RangeEntry::MembershipJoint { old, new }),
-        )
+        self.broadcast_append(rid, leader, Some(RangeEntry::MembershipJoint { old, new }))?;
+        self.leave_joint_after_commit()
     }
 
     /// Log-carried add (RFC-0064). Same joint quorum as
-    /// [`Self::remove_member_joint`]. The joining node must already exist
-    /// in this process (previously removed, or opened then dropped).
+    /// [`Self::remove_member_joint`]. The joining node may live in another
+    /// process (RFC-0119 P1.1: TCP replica `nodes` is `{self}` only).
     ///
     /// # Errors
     /// Unknown node / already a member / no leader / joint in flight.
     pub fn add_member_joint(&mut self, node_id: u64) -> Result<()> {
-        if !self.nodes.contains_key(&node_id) {
-            return Err(StoreError::Msg("add_member_joint: unknown node".into()));
-        }
         if self.ids.contains(&node_id) {
             return Ok(());
+        }
+        if !membership_kernel::joint_add_target_counts(self.nodes.contains_key(&node_id)) {
+            return Err(StoreError::Msg("add_member_joint: unknown node".into()));
         }
         let rid = self.ranges.first().map(|r| r.id).unwrap_or(1);
         let leader = self
@@ -3048,11 +4056,7 @@ impl<E: Env> StoreCluster<E> {
                 range_id: rid,
                 leader: None,
             })?;
-        if let Some(p) = self
-            .nodes
-            .get(&leader)
-            .and_then(|n| n.ranges.get(&rid))
-        {
+        if let Some(p) = self.nodes.get(&leader).and_then(|n| n.ranges.get(&rid)) {
             if Self::pending_joint_on(p).is_some() {
                 return Err(StoreError::Msg(
                     "add_member_joint: a joint config is already in flight".into(),
@@ -3066,11 +4070,178 @@ impl<E: Env> StoreCluster<E> {
         let mut new = old.clone();
         new.push(node_id);
         new.sort_unstable();
+        self.broadcast_append(rid, leader, Some(RangeEntry::MembershipJoint { old, new }))?;
+        self.leave_joint_after_commit()
+    }
+
+    /// Append C-new-only (`old == new`) once a joint is **committed** (RFC-0066 P0).
+    ///
+    /// No-op if no active joint, or the joint is still uncommitted, or a leave
+    /// is already in the log. Election/commit keep old∧new until this commits.
+    ///
+    /// # Errors
+    /// No leader / append I/O.
+    pub fn leave_joint(&mut self) -> Result<()> {
+        let rid = self.ranges.first().map(|r| r.id).unwrap_or(1);
+        let Some(leader) = self.range_leader(rid) else {
+            return Ok(());
+        };
+        let Some(p) = self.nodes.get(&leader).and_then(|n| n.ranges.get(&rid)) else {
+            return Ok(());
+        };
+        let leave_in_flight = p.log.iter().any(|rec| {
+            rec.index > p.commit
+                && matches!(
+                    &rec.entry,
+                    RangeEntry::MembershipJoint { old, new }
+                        if !membership_kernel::joint_still_active(old, new)
+                )
+        });
+        if leave_in_flight {
+            return Ok(());
+        }
+        let Some((idx, old, new)) = Self::pending_joint_on(p) else {
+            return Ok(());
+        };
+        if !membership_kernel::joint_still_active(&old, &new) {
+            return Ok(());
+        }
+        if idx > p.commit {
+            return Ok(());
+        }
         self.broadcast_append(
             rid,
             leader,
-            Some(RangeEntry::MembershipJoint { old, new }),
+            Some(RangeEntry::MembershipJoint {
+                old: new.clone(),
+                new,
+            }),
         )
+    }
+
+    /// RFC-0122: index of an uncommitted C-new-only leave on the leader log.
+    #[must_use]
+    pub fn uncommitted_leave_index(&self) -> Option<(u64, u64)> {
+        let rid = self.ranges.first().map(|r| r.id).unwrap_or(1);
+        let leader = self.range_leader(rid)?;
+        let p = self.nodes.get(&leader).and_then(|n| n.ranges.get(&rid))?;
+        p.log.iter().find_map(|rec| {
+            if rec.index > p.commit
+                && matches!(
+                    &rec.entry,
+                    RangeEntry::MembershipJoint { old, new }
+                        if !membership_kernel::joint_still_active(old, new)
+                )
+            {
+                Some((rid, rec.index))
+            } else {
+                None
+            }
+        })
+    }
+
+    /// RFC-0122: finish a queued leave propose (`index > commit`).
+    ///
+    /// # Errors
+    /// Finish / apply I/O.
+    pub fn finish_uncommitted_leave(&mut self) -> Result<bool> {
+        let Some((rid, idx)) = self.uncommitted_leave_index() else {
+            return Ok(false);
+        };
+        let _ = self.finish_queued_propose(rid, idx, false)?;
+        let committed = self.uncommitted_leave_index().is_none();
+        Ok(membership_kernel::queued_leave_finish_ok(true, committed))
+    }
+
+    /// RFC-0068: plant a committed C-old,new joint with apply lag and no leave.
+    ///
+    /// DST/World seam (same class as BitFlip): the joint is on the leader log
+    /// with `commit == index` and `applied == index-1`, and auto-leave is
+    /// skipped. Production joint election must still require C-new.
+    ///
+    /// `new_member` must already be an opened node that is **not** in the
+    /// current voting set (typically after [`Self::remove_member_joint`]).
+    ///
+    /// # Errors
+    /// Unknown node / already a member / no leader.
+    pub fn plant_committed_joint_without_leave(&mut self, new_member: u64) -> Result<()> {
+        if !self.nodes.contains_key(&new_member) {
+            return Err(StoreError::Msg(
+                "plant_committed_joint_without_leave: unknown node".into(),
+            ));
+        }
+        if self.ids.contains(&new_member) {
+            return Err(StoreError::Msg(
+                "plant_committed_joint_without_leave: already a member".into(),
+            ));
+        }
+        let rid = self.ranges.first().map(|r| r.id).unwrap_or(1);
+        let leader = self
+            .range_leader(rid)
+            .ok_or_else(|| StoreError::NotLeader {
+                range_id: rid,
+                leader: None,
+            })?;
+        let old = self.ids.clone();
+        let mut new = old.clone();
+        new.push(new_member);
+        new.sort_unstable();
+        let p = self
+            .nodes
+            .get_mut(&leader)
+            .and_then(|n| n.ranges.get_mut(&rid))
+            .ok_or_else(|| StoreError::Msg("plant: missing leader range".into()))?;
+        let idx = p.last_index() + 1;
+        p.log.push(LogRec {
+            index: idx,
+            term: p.term,
+            entry: RangeEntry::MembershipJoint { old, new },
+        });
+        p.commit = idx;
+        p.applied = idx.saturating_sub(1);
+        Ok(())
+    }
+
+    /// RFC-0069: admit an *unbounded* eventual-election claim.
+    ///
+    /// Bounded [`Self::elect_all`] does not use this. A liveness claim is
+    /// only admitted when ES-1, ES-2 and ES-3 all hold (the tcp_node_model
+    /// axioms). AS-IS [`liveness_admitted_as_is`] would admit without them.
+    #[must_use]
+    pub fn claim_eventual_election(&self, es1: bool, es2: bool, es3: bool) -> bool {
+        if self.ids.is_empty() {
+            return false;
+        }
+        membership_kernel::liveness_admitted(es1, es2, es3)
+    }
+
+    /// RFC-0068: would a C-old majority elect under the current pending joint?
+    ///
+    /// Plants the same `election_granted` map the live joint-election
+    /// path reads. Must be **false** while a committed C-old,new is active.
+    pub fn probe_old_majority_joint_election(&mut self, range_id: u64) -> bool {
+        let Some(lid) = self.range_leader(range_id) else {
+            return false;
+        };
+        let Some(term) = self
+            .nodes
+            .get(&lid)
+            .and_then(|n| n.ranges.get(&range_id))
+            .map(|p| p.term)
+        else {
+            return false;
+        };
+        let old = self
+            .pending_joint()
+            .map(|(o, _)| o)
+            .unwrap_or_else(|| self.ids.clone());
+        let maj = membership_kernel::majority_of(old.len() as u64) as usize;
+        let granted: Vec<u64> = old.iter().copied().take(maj).collect();
+        self.election_granted
+            .insert((range_id, term, lid), granted.clone());
+        self.election_votes
+            .insert((range_id, term, lid), granted.len() as u64);
+        self.election_has_joint_quorum(range_id, term, lid)
     }
 
     /// Whether `node_id` is in the current Raft membership set.
@@ -3111,7 +4282,6 @@ impl<E: Env> StoreCluster<E> {
             .remove(&node_id)
             .ok_or_else(|| StoreError::Msg(format!("reopen_engine: unknown node {node_id}")))?;
         let path = n.db.path().to_path_buf();
-        let participating = n.participating;
         n.db.close()?;
         let mut db = match Db::open_with_env(&path, self.engine_opts, env) {
             Ok(db) => db,
@@ -3131,6 +4301,22 @@ impl<E: Env> StoreCluster<E> {
         } else {
             db.put(cluster_id_key(), self.cluster_id.as_slice())?;
         }
+        if let Some(raw) = db.get(&cluster_membership_key()) {
+            if let Ok(ids) = decode_membership(&raw) {
+                if membership_kernel::disk_membership_overrides_cli(!ids.is_empty()) {
+                    self.ids = ids;
+                    self.membership_high_water = self.membership_high_water.max(self.ids.len());
+                }
+            }
+        }
+        if let Some(raw) = db.get(&cluster_high_water_key()) {
+            if let Ok(h) = decode_u64_meta(&raw) {
+                self.membership_high_water = membership_kernel::high_water_at_least(
+                    h,
+                    self.membership_high_water as u64,
+                ) as usize;
+            }
+        }
         let mut rmap = HashMap::new();
         for meta in &self.ranges {
             rmap.insert(meta.id, load_range_peer(&db, meta.id, node_id, &self.ids)?);
@@ -3140,9 +4326,14 @@ impl<E: Env> StoreCluster<E> {
             StoreNode {
                 db,
                 ranges: rmap,
-                participating,
+                participating: membership_kernel::participating_if_member(
+                    self.ids.contains(&node_id),
+                ),
             },
         );
+        self.abort_leftover_intents()?;
+        self.persist_truncated_logs()?;
+        self.recover_apply_committed()?;
         Ok(())
     }
 
@@ -3158,7 +4349,6 @@ impl<E: Env> StoreCluster<E> {
             .remove(&node_id)
             .ok_or_else(|| StoreError::Msg(format!("crash_reopen: unknown node {node_id}")))?;
         let path = n.db.path().to_path_buf();
-        let participating = n.participating;
         drop(n.db);
         let mut db = match Db::open_with_env(&path, self.engine_opts, env) {
             Ok(db) => db,
@@ -3176,6 +4366,22 @@ impl<E: Env> StoreCluster<E> {
         } else {
             db.put(cluster_id_key(), self.cluster_id.as_slice())?;
         }
+        if let Some(raw) = db.get(&cluster_membership_key()) {
+            if let Ok(ids) = decode_membership(&raw) {
+                if membership_kernel::disk_membership_overrides_cli(!ids.is_empty()) {
+                    self.ids = ids;
+                    self.membership_high_water = self.membership_high_water.max(self.ids.len());
+                }
+            }
+        }
+        if let Some(raw) = db.get(&cluster_high_water_key()) {
+            if let Ok(h) = decode_u64_meta(&raw) {
+                self.membership_high_water = membership_kernel::high_water_at_least(
+                    h,
+                    self.membership_high_water as u64,
+                ) as usize;
+            }
+        }
         let mut rmap = HashMap::new();
         for meta in &self.ranges {
             rmap.insert(meta.id, load_range_peer(&db, meta.id, node_id, &self.ids)?);
@@ -3185,9 +4391,14 @@ impl<E: Env> StoreCluster<E> {
             StoreNode {
                 db,
                 ranges: rmap,
-                participating,
+                participating: membership_kernel::participating_if_member(
+                    self.ids.contains(&node_id),
+                ),
             },
         );
+        self.abort_leftover_intents()?;
+        self.persist_truncated_logs()?;
+        self.recover_apply_committed()?;
         Ok(())
     }
 
@@ -3250,14 +4461,45 @@ impl<E: Env> StoreCluster<E> {
         )
     }
 
-    /// Set peer RPC delivery mode ([`RpcMode::Direct`] default, [`RpcMode::Queued`] for Net).
+    /// Set peer RPC delivery mode ([`RpcMode::Queued`] production default;
+    /// [`RpcMode::Direct`] is lab opt-in).
+    ///
+    /// After [`Self::pin_dst_queued`], a request for [`RpcMode::Direct`] is a
+    /// no-op (RFC-0067). The AS-IS kernel would still switch.
     pub fn set_rpc_mode(&mut self, mode: RpcMode) {
+        let want_direct = mode == RpcMode::Direct;
+        if !allow_direct_rpc(self.dst_queued_pin, want_direct) {
+            return;
+        }
         self.rpc_mode = mode;
         if mode == RpcMode::Direct {
             self.outbound.clear();
             self.election_votes.clear();
             self.election_granted.clear();
         }
+    }
+
+    /// Pin this cluster to [`RpcMode::Queued`] for World / DST (RFC-0067).
+    ///
+    /// Subsequent [`Self::set_rpc_mode`] of [`RpcMode::Direct`] is refused.
+    /// Call once from `World::run` so Net drop/reorder cannot be silently skipped.
+    pub fn pin_dst_queued(&mut self) {
+        self.dst_queued_pin = true;
+        self.set_rpc_mode(RpcMode::Queued);
+    }
+
+    /// RFC-0067 P2.2: opt-in unpinned in-process Direct pump (lab leftover).
+    ///
+    /// Production [`Self::open`] starts [`RpcMode::Queued`]. After
+    /// [`Self::pin_dst_queued`] this is a no-op.
+    pub fn enable_lab_direct_rpc(&mut self) {
+        self.set_rpc_mode(RpcMode::Direct);
+    }
+
+    /// True after [`Self::pin_dst_queued`].
+    #[must_use]
+    pub fn dst_queued_pin(&self) -> bool {
+        self.dst_queued_pin
     }
 
     /// Current RPC mode.
@@ -3314,6 +4556,21 @@ impl<E: Env> StoreCluster<E> {
         )
     }
 
+    /// [`open_with_host`](Self::open_with_host) then unpinned Direct.
+    ///
+    /// # Errors
+    /// Open / bad args.
+    pub fn open_with_host_lab_direct(
+        parent: impl AsRef<Path>,
+        n_nodes: u64,
+        n_ranges: u64,
+        host: &impl Host<Env = E>,
+    ) -> Result<Self> {
+        let mut c = Self::open_with_host(parent, n_nodes, n_ranges, host)?;
+        c.enable_lab_direct_rpc();
+        Ok(c)
+    }
+
     /// Replace election RNG (e.g. re-seed mid-test). Clones share stream if `SeedRng`.
     pub fn set_rng(&mut self, rng: SeedRng) {
         self.rng = rng;
@@ -3352,10 +4609,15 @@ impl<E: Env> StoreCluster<E> {
     /// participating if they remain in membership [`Self::node_ids`].
     #[must_use]
     pub fn is_participating(&self, node_id: u64) -> bool {
+        let in_ids = self.ids.contains(&node_id);
+        // RFC-0128: a removed voter never counts, even if the flag is stale.
+        if !membership_kernel::participating_if_member(in_ids) {
+            return false;
+        }
         if let Some(n) = self.nodes.get(&node_id) {
             n.participating
         } else {
-            self.ids.contains(&node_id)
+            true
         }
     }
 
@@ -3366,13 +4628,19 @@ impl<E: Env> StoreCluster<E> {
     }
 
     /// Local node id when this process is a single-node multi-host member.
+    ///
+    /// RFC-0141: the HashMap first-key is **not** identity if that node left
+    /// `ids` (TCP removed replica would otherwise `get()` stale local bytes).
     #[must_use]
     pub fn local_node_id(&self) -> Option<u64> {
-        if self.nodes.len() == 1 {
-            self.nodes.keys().next().copied()
-        } else {
-            None
+        if self.nodes.len() != 1 {
+            return None;
         }
+        let id = self.nodes.keys().next().copied()?;
+        if !membership_kernel::local_id_if_member(self.ids.contains(&id)) {
+            return None;
+        }
+        Some(id)
     }
 
     /// Raft membership ids (sorted).
@@ -3773,7 +5041,12 @@ impl<E: Env> StoreCluster<E> {
         self.election_granted.insert((rid, term, cand), vec![cand]);
         let targets = self.vote_targets();
         for pid in targets {
-            if pid == cand || !self.nodes.contains_key(&pid) {
+            if pid == cand {
+                continue;
+            }
+            // Local partitioned node: skip. Remote members are absent from
+            // `nodes` on the multi-host path — still send (Queued → TCP).
+            if self.nodes.get(&pid).is_some_and(|n| !n.participating) {
                 continue;
             }
             let msg = PeerMsg::RequestVote {
@@ -4032,17 +5305,23 @@ impl<E: Env> StoreCluster<E> {
             }
         }
         if vote_granted {
-            let votes = self
-                .election_votes
-                .entry((range_id, term, cand))
-                .or_insert(1);
-            *votes = votes.saturating_add(1);
-            let granted = self
-                .election_granted
-                .entry((range_id, term, cand))
-                .or_default();
-            if !granted.contains(&from) {
-                granted.push(from);
+            let in_ids = self.ids.contains(&from);
+            let in_pending = self
+                .pending_joint()
+                .is_some_and(|(o, n)| o.contains(&from) || n.contains(&from));
+            if membership_kernel::election_grant_from_counts(in_ids, in_pending) {
+                let votes = self
+                    .election_votes
+                    .entry((range_id, term, cand))
+                    .or_insert(1);
+                *votes = votes.saturating_add(1);
+                let granted = self
+                    .election_granted
+                    .entry((range_id, term, cand))
+                    .or_default();
+                if !granted.contains(&from) {
+                    granted.push(from);
+                }
             }
         }
         if self.election_has_joint_quorum(range_id, term, cand) {
@@ -4213,6 +5492,9 @@ impl<E: Env> StoreCluster<E> {
         if !self.is_participating(leader) {
             return Ok(());
         }
+        if membership_kernel::drop_repl_slot(self.ids.contains(&from)) {
+            return Ok(());
+        }
         {
             let Some(n) = self.nodes.get_mut(&leader) else {
                 return Ok(());
@@ -4260,19 +5542,60 @@ impl<E: Env> StoreCluster<E> {
             .count()
     }
 
+    fn unleft_applied_joint_index(p: &RangePeer) -> Option<u64> {
+        let mut last = None;
+        for rec in &p.log {
+            if rec.index > p.applied {
+                break;
+            }
+            if let RangeEntry::MembershipJoint { old, new } = &rec.entry {
+                if membership_kernel::joint_still_active(old, new) {
+                    last = Some(rec.index);
+                } else {
+                    last = None;
+                }
+            }
+        }
+        last
+    }
+
     fn pending_joint_on(p: &RangePeer) -> Option<(u64, Vec<u64>, Vec<u64>)> {
-        p.log.iter().find_map(|rec| {
+        // Uncommitted C-old,new first. An uncommitted leave (old==new) must
+        // not hide a committed active joint (RFC-0066: both quorums until
+        // leave commits).
+        if let Some(found) = p.log.iter().find_map(|rec| {
             if rec.index > p.commit {
                 if let RangeEntry::MembershipJoint { old, new } = &rec.entry {
-                    return Some((rec.index, old.clone(), new.clone()));
+                    if membership_kernel::joint_still_active(old, new) {
+                        return Some((rec.index, old.clone(), new.clone()));
+                    }
                 }
             }
             None
-        })
+        }) {
+            return Some(found);
+        }
+        let mut last: Option<(u64, Vec<u64>, Vec<u64>)> = None;
+        for rec in &p.log {
+            if rec.index > p.commit {
+                break;
+            }
+            if let RangeEntry::MembershipJoint { old, new } = &rec.entry {
+                if membership_kernel::joint_still_active(old, new) {
+                    last = Some((rec.index, old.clone(), new.clone()));
+                } else {
+                    last = None;
+                }
+            }
+        }
+        last
     }
 
     fn pending_joint(&self) -> Option<(Vec<u64>, Vec<u64>)> {
-        for n in self.nodes.values() {
+        for (id, n) in &self.nodes {
+            if !membership_kernel::pending_joint_node_counts(self.ids.contains(id)) {
+                continue;
+            }
             for p in n.ranges.values() {
                 if let Some((_, old, new)) = Self::pending_joint_on(p) {
                     return Some((old, new));
@@ -4311,46 +5634,59 @@ impl<E: Env> StoreCluster<E> {
                 n.len() as u64,
             )
         });
-        commit_kernel::joint_election_ok(old_yes, old.len() as u64, new_yes)
+        membership_kernel::joint_election_ok(old_yes, old.len() as u64, new_yes)
     }
 
     fn try_advance_commit(&mut self, rid: u64, leader: u64) -> Result<()> {
         let ids = self.ids.clone();
-        let Some(n) = self.nodes.get_mut(&leader) else {
-            return Ok(());
-        };
-        let Some(p) = n.ranges.get_mut(&rid) else {
-            return Ok(());
-        };
-        if p.role != Role::Leader {
-            return Ok(());
-        }
-        let joint = Self::pending_joint_on(p);
-        let last = p.last_index();
-        for idx in (1..=last).rev() {
-            let old_maj = ids.len() / 2 + 1;
-            let old_ok = Self::replication_count(p, leader, &ids, idx) >= old_maj;
-            let new_ok = match &joint {
-                Some((jidx, _, new)) if idx >= *jidx => {
-                    let new_maj = new.len() / 2 + 1;
-                    Self::replication_count(p, leader, new, idx) >= new_maj
-                }
-                _ => true,
+        {
+            let Some(n) = self.nodes.get_mut(&leader) else {
+                return Ok(());
             };
-            if commit_kernel::may_commit_at(p.term_at(idx), p.term, old_ok && new_ok) {
-                if idx > p.commit {
-                    // F126: same class as AE leader_commit path — do not leave
-                    // memory commit ahead of durable meta (apply would race).
-                    let old_commit = p.commit;
-                    p.commit = idx;
-                    if persist_commit_db(&mut n.db, rid, p).is_err() {
-                        p.commit = old_commit;
+            let Some(p) = n.ranges.get_mut(&rid) else {
+                return Ok(());
+            };
+            if p.role != Role::Leader {
+                return Ok(());
+            }
+            let joint = Self::pending_joint_on(p);
+            let last = p.last_index();
+            for idx in (1..=last).rev() {
+                let old_maj = ids.len() / 2 + 1;
+                let old_ok = Self::replication_count(p, leader, &ids, idx) >= old_maj;
+                let new_ok = match &joint {
+                    Some((jidx, _, new)) if idx >= *jidx => {
+                        let new_maj = new.len() / 2 + 1;
+                        Self::replication_count(p, leader, new, idx) >= new_maj
                     }
+                    _ => true,
+                };
+                if commit_kernel::may_commit_at(p.term_at(idx), p.term, old_ok && new_ok) {
+                    if idx > p.commit {
+                        // F126: same class as AE leader_commit path — do not leave
+                        // memory commit ahead of durable meta (apply would race).
+                        let old_commit = p.commit;
+                        p.commit = idx;
+                        if persist_commit_db(&mut n.db, rid, p).is_err() {
+                            p.commit = old_commit;
+                        }
+                    }
+                    break;
                 }
-                break;
             }
         }
+        self.leave_joint_after_commit()?;
         Ok(())
+    }
+
+    /// RFC-0098: Queued `leave_joint` may return `NotCommitted` after the
+    /// leave is already on the leader log. That is not a failed leave.
+    fn leave_joint_after_commit(&mut self) -> Result<()> {
+        match self.leave_joint() {
+            Ok(()) => Ok(()),
+            Err(StoreError::NotCommitted { .. }) => Ok(()),
+            Err(e) => Err(e),
+        }
     }
 
     /// Export **user** applied KV for a range (install-snapshot payload).
@@ -4587,6 +5923,9 @@ impl<E: Env> StoreCluster<E> {
         match_index: u64,
     ) -> Result<()> {
         if !self.is_participating(leader) {
+            return Ok(());
+        }
+        if membership_kernel::drop_repl_slot(self.ids.contains(&from)) {
             return Ok(());
         }
         {
@@ -4906,11 +6245,19 @@ impl<E: Env> StoreCluster<E> {
         let leader = self.range_leader(range_id);
         let Some(leader) = leader else {
             if abort_if_uncommitted {
-                // No leader — best-effort discard on all nodes. Note
-                // dropping lives inside the discard (cut-precise; an
-                // escaped entry keeps its notes to match its fate).
-                if let Some(&any) = self.ids.first() {
-                    self.discard_uncommitted_from(range_id, any, index)?;
+                // No leader — discard on local replicas. Persist-leader must
+                // be local so truncate is fail-closed (0143 leftover: ids.first
+                // is a remote voter on the TCP removed replica).
+                let persist_leader = self
+                    .ids
+                    .iter()
+                    .copied()
+                    .chain(self.nodes.keys().copied())
+                    .find(|&id| {
+                        membership_kernel::discard_leader_local(self.is_local_node(id))
+                    });
+                if let Some(lid) = persist_leader {
+                    self.discard_uncommitted_from(range_id, lid, index)?;
                 }
             }
             return Ok(false);
@@ -4959,6 +6306,10 @@ impl<E: Env> StoreCluster<E> {
             }
             // OCC/SI version history — must run even when put() returned NotCommitted.
             self.flush_version_notes_through(range_id, index)?;
+            // RFC-0098: Queued add_member_joint returns NotCommitted before
+            // leave_joint; after the joint commits, append C-new-only
+            // *before* compact can hide the active joint from pending_joint_on.
+            self.leave_joint_after_commit()?;
             self.maybe_compact_logs(range_id)?;
             // Resolution done — stop tracking this propose's entry.
             self.proposed_entries.remove(&(range_id, index));
@@ -5012,20 +6363,33 @@ impl<E: Env> StoreCluster<E> {
         if !compact_kernel::compact_ready(min_applied) {
             return Ok(());
         }
+        // RFC-0100: do not compact an applied still-active joint until leave
+        // is applied (`pending_joint_on` would go None and hide C-old,new).
+        let mut through = min_applied;
+        for &nid in &ids {
+            if !self.is_local_node(nid) {
+                continue;
+            }
+            let p = self.nodes.get(&nid).unwrap().ranges.get(&rid).unwrap();
+            through = compact_kernel::compact_through_unleft(
+                through,
+                Self::unleft_applied_joint_index(p),
+            );
+        }
+        if !compact_kernel::compact_ready(through) {
+            return Ok(());
+        }
         // Compact only local peers (remote peers compact independently).
         for &nid in &ids {
             if !self.is_local_node(nid) {
                 continue;
             }
             let p = self.nodes.get(&nid).unwrap().ranges.get(&rid).unwrap();
-            if p.snapshot_index >= min_applied {
+            if p.snapshot_index >= through {
                 continue;
             }
-            if !compact_kernel::may_compact_through(
-                p.snapshot_index,
-                min_applied,
-                p.term_at(min_applied),
-            ) && p.snapshot_index < min_applied
+            if !compact_kernel::may_compact_through(p.snapshot_index, through, p.term_at(through))
+                && p.snapshot_index < through
             {
                 return Ok(()); // lagging peer missing entry; wait
             }
@@ -5036,12 +6400,12 @@ impl<E: Env> StoreCluster<E> {
             }
             let n = self.nodes.get_mut(&nid).unwrap();
             let p = n.ranges.get_mut(&rid).unwrap();
-            if p.snapshot_index >= min_applied {
+            if p.snapshot_index >= through {
                 continue;
             }
             let before = p.log.len();
-            p.compact_through(min_applied);
-            if p.log.len() != before || p.snapshot_index == min_applied {
+            p.compact_through(through);
+            if p.log.len() != before || p.snapshot_index == through {
                 persist_snap_db(&mut n.db, rid, p)?;
                 persist_log_db(&mut n.db, rid, p)?;
             }
@@ -5083,7 +6447,12 @@ impl<E: Env> StoreCluster<E> {
             return Ok(());
         }
         let ids = self.ids.clone();
-        for &nid in &ids {
+        let nids: Vec<u64> = self.nodes.keys().copied().collect();
+        for nid in nids {
+            let in_ids = self.ids.contains(&nid);
+            if !membership_kernel::discard_node_counts(self.is_local_node(nid), in_ids) {
+                continue;
+            }
             let Some(n) = self.nodes.get_mut(&nid) else {
                 continue;
             };
@@ -5232,9 +6601,10 @@ impl<E: Env> StoreCluster<E> {
             pedradb_core::buggify_hooks::sites::BEFORE_RAFT_APPLY,
         )
         .map_err(|e| StoreError::from(pedradb_core::CoreError::from(e)))?;
+        let mut install_new: Option<Vec<u64>> = None;
+        let applied_to_cap = {
         let node = self.nodes.get_mut(&nid).unwrap();
         // Collect entries to apply, then mutate db + peer separately (borrowck).
-        let mut install_new: Option<Vec<u64>> = None;
         let (start, end, recs) = {
             let peer = node.ranges.get(&rid).unwrap();
             let start = peer.applied + 1;
@@ -5356,12 +6726,22 @@ impl<E: Env> StoreCluster<E> {
             }
             applied_to = rec.index;
         }
+        applied_to.min(end)
+        };
+        // RFC-0124 P1.1: durable C-new before applied advances past the joint.
+        // AS-IS persist applied first (crash: applied high, voters still C-old).
+        if membership_kernel::membership_identity_before_applied(true) {
+            if let Some(new) = install_new.take() {
+                self.install_applied_membership(new)?;
+            }
+        }
+        let node = self.nodes.get_mut(&nid).unwrap();
         let peer = node.ranges.get_mut(&rid).unwrap();
         // F160 residual of F126: do not leave RAM applied ahead of durable meta.
         // AS-IS set applied then `?` on persist fail — cursor stuck high; compact
         // could drop log that reopen still needs for re-apply.
         let old_applied = peer.applied;
-        peer.applied = applied_to.min(end);
+        peer.applied = applied_to_cap;
         if let Err(e) = persist_applied_db(&mut node.db, rid, peer) {
             peer.applied = old_applied;
             return Err(e);
@@ -5384,7 +6764,37 @@ impl<E: Env> StoreCluster<E> {
         self.membership_high_water = self.membership_high_water.max(self.ids.len());
         let live = self.ids.clone();
         for (id, n) in self.nodes.iter_mut() {
-            n.participating = live.contains(id);
+            let in_ids = live.contains(id);
+            n.participating = in_ids;
+            if membership_kernel::removed_steps_down(in_ids) {
+                for p in n.ranges.values_mut() {
+                    if p.role == Role::Leader {
+                        p.role = Role::Follower;
+                        p.leader_id = None;
+                    }
+                }
+            }
+            for p in n.ranges.values_mut() {
+                if let Some(lid) = p.leader_id {
+                    if !membership_kernel::hint_if_member(live.contains(&lid)) {
+                        p.leader_id = None;
+                    }
+                }
+                let keys: Vec<u64> = p
+                    .next_index
+                    .keys()
+                    .chain(p.match_index.keys())
+                    .chain(p.sent_through.keys())
+                    .copied()
+                    .collect();
+                for pid in keys {
+                    if membership_kernel::drop_repl_slot(live.contains(&pid)) {
+                        p.next_index.remove(&pid);
+                        p.match_index.remove(&pid);
+                        p.sent_through.remove(&pid);
+                    }
+                }
+            }
         }
         self.persist_cluster_identity()
     }
@@ -5400,7 +6810,9 @@ impl<E: Env> StoreCluster<E> {
         for n in self.nodes.values() {
             if let Some(p) = n.ranges.get(&range_id) {
                 if let Some(lid) = p.leader_id {
-                    return Some(lid);
+                    if membership_kernel::hint_if_member(self.ids.contains(&lid)) {
+                        return Some(lid);
+                    }
                 }
             }
         }
@@ -6048,8 +7460,12 @@ impl<E: Env> StoreCluster<E> {
         keys: &[Vec<u8>],
         delete_user_values: bool,
     ) -> Result<()> {
-        let ids = self.ids.clone();
-        for nid in ids {
+        let nids: Vec<u64> = self.nodes.keys().copied().collect();
+        for nid in nids {
+            let in_ids = self.ids.contains(&nid);
+            if !membership_kernel::force_clear_node_counts(self.is_local_node(nid), in_ids) {
+                continue;
+            }
             let Some(n) = self.nodes.get_mut(&nid) else {
                 continue;
             };
@@ -6071,8 +7487,12 @@ impl<E: Env> StoreCluster<E> {
     /// F130: fence put failure must surface — a silent miss lets TxnCommit apply.
     fn fence_txn_aborted(&mut self, txn_id: u64) -> Result<()> {
         let key = txn_status_key(txn_id);
-        let ids = self.ids.clone();
-        for nid in ids {
+        let nids: Vec<u64> = self.nodes.keys().copied().collect();
+        for nid in nids {
+            let in_ids = self.ids.contains(&nid);
+            if !membership_kernel::persist_fence_node_counts(self.is_local_node(nid), in_ids) {
+                continue;
+            }
             if let Some(n) = self.nodes.get_mut(&nid) {
                 n.db.put(&key, b"abort")?;
             }
@@ -6309,8 +7729,12 @@ impl<E: Env> StoreCluster<E> {
     /// # Errors
     /// I/O deleting preimage keys (leftover pre confuses later reverts).
     fn drop_preimages(&mut self, handle: &TxHandle) -> Result<()> {
-        let ids = self.ids.clone();
-        for nid in ids {
+        let nids: Vec<u64> = self.nodes.keys().copied().collect();
+        for nid in nids {
+            let in_ids = self.ids.contains(&nid);
+            if !membership_kernel::drop_preimages_node_counts(self.is_local_node(nid), in_ids) {
+                continue;
+            }
             let Some(node) = self.nodes.get_mut(&nid) else {
                 continue;
             };
@@ -6776,7 +8200,7 @@ impl<E: Env> StoreCluster<E> {
                 .best_reader_for_key(start)
                 .or_else(|| self.best_changelog_reader())
                 .or_else(|| self.local_node_id())
-                .or_else(|| self.ids.first().copied())
+                .or_else(|| self.ids_first_if_local())
             {
                 if let Some(n) = self.nodes.get(&nid) {
                     let start_b = Bound::Included(start);
@@ -6977,7 +8401,14 @@ impl<E: Env> StoreCluster<E> {
         }
         self.best_changelog_reader()
             .or_else(|| self.local_node_id())
-            .or_else(|| self.ids.first().copied())
+            .or_else(|| self.ids_first_if_local())
+    }
+
+    /// RFC-0142: `ids.first()` is not a LocalApplied reader unless that node
+    /// is opened in this process (TCP removed replica: first voter is remote).
+    fn ids_first_if_local(&self) -> Option<u64> {
+        let id = *self.ids.first()?;
+        membership_kernel::reader_id_local(self.is_local_node(id)).then_some(id)
     }
 
     /// Read with an explicit policy.
@@ -7039,6 +8470,9 @@ impl<E: Env> StoreCluster<E> {
         // Pick member with highest applied index among followers (or all if no leader).
         let mut best: Option<(u64, u64)> = None; // (applied, node_id)
         for &nid in &self.ids {
+            if !membership_kernel::reader_id_local(self.is_local_node(nid)) {
+                continue;
+            }
             if !self.is_participating(nid) {
                 continue;
             }
@@ -7055,7 +8489,7 @@ impl<E: Env> StoreCluster<E> {
         let node = best
             .map(|(_, n)| n)
             .or(leader)
-            .or_else(|| self.ids.first().copied())
+            .or_else(|| self.ids_first_if_local())
             .ok_or_else(|| StoreError::Msg("no replica".into()))?;
         self.get_with_policy(node, key, ReadPolicy::LocalApplied)
     }
@@ -7336,6 +8770,9 @@ pub fn meta_key(suffix: &[u8]) -> Vec<u8> {
 }
 
 #[cfg(test)]
+mod three_teeth_queued;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -7367,12 +8804,38 @@ mod tests {
         }
     }
 
+    /// RFC-0090 P2.1: production `encode_hard`/`decode_hard` (persist +
+    /// load_range_peer) XOR only the trailer CRC (term/vote intact).
+    /// Decode is crc mismatch. AS-IS would return the stored term.
+    #[test]
+    fn crc_mismatch_on_live_store_raft_meta_is_not_ok() {
+        assert!(!pedradb_core::wal::crc::crc_match_ok(1, 2));
+        assert!(
+            pedradb_core::wal::crc::crc_match_ok_as_is(1, 2),
+            "AS-IS dente: any store raft-meta crc would match"
+        );
+        let mut raw = encode_hard(3, Some(1));
+        assert!(raw.len() >= 9 + 4, "hard meta must have payload + trailer");
+        let last = raw.len() - 1;
+        raw[last] ^= 0xff;
+        match decode_hard(&raw) {
+            Ok((term, _)) => panic!("AS-IS hole: served term {term} after CRC trailer lie"),
+            Err(e) => {
+                let msg = e.to_string();
+                assert!(
+                    msg.to_ascii_lowercase().contains("crc mismatch"),
+                    "must fail on crc_match_ok, not a term parse; got {msg}"
+                );
+            }
+        }
+    }
+
     /// RFC-0013 P1.3: cluster id is minted, persisted, and stable on reopen.
     #[test]
     fn cluster_id_survives_reopen() {
         let dir = temp();
         let id = {
-            let c = StoreCluster::open(&dir, 3, 1).unwrap();
+            let c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
             let id = c.cluster_id();
             assert_ne!(id, [0u8; 16]);
             let raw = c.nodes[&1].db.get(&cluster_id_key()).expect("id key");
@@ -7385,7 +8848,7 @@ mod tests {
             drop(c);
             id
         };
-        let c = StoreCluster::open(&dir, 3, 1).unwrap();
+        let c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
         assert_eq!(c.cluster_id(), id);
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -7396,7 +8859,7 @@ mod tests {
         let dir = temp();
         let pin = [0xC1, 0xD0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x13];
         {
-            let c = StoreCluster::open_with_options(
+            let c = StoreCluster::open_with_options_lab_direct(
                 &dir,
                 3,
                 1,
@@ -7407,7 +8870,7 @@ mod tests {
             drop(c);
         }
         let other = [0xFF; 16];
-        let err = match StoreCluster::open_with_options(
+        let err = match StoreCluster::open_with_options_lab_direct(
             &dir,
             3,
             1,
@@ -7430,14 +8893,14 @@ mod tests {
         let dir_a = temp();
         let dir_b = temp();
         {
-            let _a = StoreCluster::open(&dir_a, 3, 1).unwrap();
-            let _b = StoreCluster::open(&dir_b, 3, 1).unwrap();
+            let _a = StoreCluster::open_lab_direct(&dir_a, 3, 1).unwrap();
+            let _b = StoreCluster::open_lab_direct(&dir_b, 3, 1).unwrap();
         }
         let src = dir_a.join("store-node-2");
         let dst = dir_b.join("store-node-2");
         let _ = std::fs::remove_dir_all(&dst);
         copy_tree(&src, &dst);
-        let err = match StoreCluster::open(&dir_b, 3, 1) {
+        let err = match StoreCluster::open_lab_direct(&dir_b, 3, 1) {
             Err(e) => e,
             Ok(_) => panic!("expected ClusterMismatch, silent merge succeeded"),
         };
@@ -7453,7 +8916,7 @@ mod tests {
     #[test]
     fn cluster_id_key_is_reserved() {
         let dir = temp();
-        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
         c.elect_all(80).unwrap();
         let err = c.put(cluster_id_key(), b"hijack").unwrap_err();
         assert!(
@@ -7475,7 +8938,7 @@ mod tests {
         assert_ne!(a, ab);
         assert_ne!(meta_key(b"smoke"), meta_key(b"smoke/k0"));
         let dir = temp();
-        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
         c.elect_all(80).unwrap();
         c.put(&a, b"ha").unwrap();
         c.put(&ab, b"hab").unwrap();
@@ -7500,7 +8963,7 @@ mod tests {
     #[test]
     fn keys_in_range_at_spans_ranges_after_first_node_partition() {
         let dir = temp();
-        let mut c = StoreCluster::open(&dir, 3, 2).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 2).unwrap();
         c.elect_all(120).unwrap();
         let keys = keys_one_per_range(&c);
         assert!(keys.len() >= 2, "need two ranges");
@@ -7575,7 +9038,7 @@ mod tests {
     #[test]
     fn tick_range_id_drives_only_named_range() {
         let dir = temp();
-        let mut c = StoreCluster::open(&dir, 3, 4).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 4).unwrap();
         c.elect_all(120).unwrap();
         let rid = c.range_metas()[0].id;
         // Put on range 1 should succeed after single-range ticks only.
@@ -7599,7 +9062,7 @@ mod tests {
     fn multi_range_election_timeouts_diversify_leaders() {
         // Root cause of option-A residual: node-only timeouts → one node leads all ranges.
         let dir = temp();
-        let mut c = StoreCluster::open(&dir, 3, 6).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 6).unwrap();
         c.elect_all(200).unwrap();
         let leaders: Vec<(u64, u64)> = c
             .range_metas()
@@ -7635,6 +9098,94 @@ mod tests {
         assert_eq!(election_timeout_for(1, 2, &members), 5); // dist ring: 1 is after 2→3→1 = 2 steps?
                                                              // pref_pos=1 (node2), my_pos=0 (node1): dist = (0+3-1)%3 = 2 → timeout 5
         assert_eq!(election_timeout_for(3, 2, &members), 4);
+    }
+
+    fn any_log_has_c_new_only_leave(c: &StoreCluster) -> bool {
+        c.nodes.values().any(|n| {
+            n.ranges.values().any(|p| {
+                p.log.iter().any(|rec| {
+                    matches!(
+                        &rec.entry,
+                        RangeEntry::MembershipJoint { old, new }
+                            if !membership_kernel::joint_still_active(old, new)
+                    )
+                })
+            })
+        })
+    }
+
+    fn max_c_new_only_leave_index(c: &StoreCluster) -> u64 {
+        let mut m = 0u64;
+        for n in c.nodes.values() {
+            for p in n.ranges.values() {
+                for rec in &p.log {
+                    if let RangeEntry::MembershipJoint { old, new } = &rec.entry {
+                        if !membership_kernel::joint_still_active(old, new) {
+                            m = m.max(rec.index);
+                        }
+                    }
+                }
+            }
+        }
+        m
+    }
+
+    /// RFC-0103/0104: pump+finish until a **new** C-new-only index appears
+    /// (prior add/Direct leave in RAM is not this op's tooth).
+    fn drive_queued_joint_until_leave(
+        c: &mut StoreCluster,
+        result: Result<()>,
+        before_leave: u64,
+        what: &str,
+    ) -> bool {
+        match result {
+            Ok(()) => max_c_new_only_leave_index(c) > before_leave,
+            Err(StoreError::NotCommitted {
+                range_id, index, ..
+            }) => {
+                for _ in 0..96 {
+                    if max_c_new_only_leave_index(c) > before_leave {
+                        return true;
+                    }
+                    pump_queued(c, 1);
+                    let commit = c
+                        .range_leader(range_id)
+                        .map(|lid| c.commit_index(lid, range_id))
+                        .unwrap_or(0);
+                    if commit >= index {
+                        assert!(
+                            c.finish_queued_propose(range_id, index, true).unwrap(),
+                            "{what} must commit after pump"
+                        );
+                    }
+                    if max_c_new_only_leave_index(c) > before_leave {
+                        return true;
+                    }
+                }
+                max_c_new_only_leave_index(c) > before_leave
+            }
+            Err(e) => panic!("{what}: {e}"),
+        }
+    }
+
+    /// RFC-0103/0104: commit the leader's last index so `pending_joint` clears.
+    fn drain_queued_until_joint_idle(c: &mut StoreCluster) {
+        for _ in 0..128 {
+            if c.pending_joint().is_none() {
+                return;
+            }
+            pump_queued(c, 1);
+            let Some(lid) = c.range_leader(1) else {
+                continue;
+            };
+            let (last, commit) = {
+                let p = c.nodes.get(&lid).unwrap().ranges.get(&1).unwrap();
+                (p.last_index(), p.commit)
+            };
+            if last > 0 && commit >= last {
+                let _ = c.finish_queued_propose(1, last, true);
+            }
+        }
     }
 
     /// Pump Queued outbound via in-process delivery (simulates reliable Net).
@@ -7707,9 +9258,10 @@ mod tests {
         let kb = b"p11/b";
         let v = b"same-peermsg";
 
-        // A: Direct (default) — in-process sync dispatch of PeerMsg.
+        // A: Direct (lab opt-in) — in-process sync dispatch of PeerMsg.
         let dir_a = temp();
-        let mut a = StoreCluster::open_with_rng(&dir_a, 3, 1, SeedRng::new(seed)).unwrap();
+        let mut a =
+            StoreCluster::open_with_rng_lab_direct(&dir_a, 3, 1, SeedRng::new(seed)).unwrap();
         for _ in 0..80 {
             a.tick().unwrap();
             if a.range_leader(1).is_some() {
@@ -7720,9 +9272,10 @@ mod tests {
         a.put(ka, v).unwrap();
         a.put(kb, v).unwrap();
 
-        // B: Queued — same PeerMsg travels encode → drain → decode → dispatch.
+        // B: Queued (production default) — same PeerMsg travels encode → drain → decode → dispatch.
         let dir_b = temp();
         let mut b = StoreCluster::open_with_rng(&dir_b, 3, 1, SeedRng::new(seed)).unwrap();
+        assert_eq!(b.rpc_mode(), RpcMode::Queued);
         b.set_rpc_mode(RpcMode::Queued);
         elect_queued(&mut b, 80);
         put_queued(&mut b, ka, v);
@@ -7760,6 +9313,70 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir_b);
     }
 
+    /// RFC-0067 P2.2: production multi-node open is Queued-only.
+    #[test]
+    fn default_open_starts_queued() {
+        let dir = temp();
+        let c = StoreCluster::open_with_rng(&dir, 3, 1, SeedRng::new(0x0667_0002)).unwrap();
+        assert_eq!(c.rpc_mode(), RpcMode::Queued, "production open is Queued");
+        assert!(
+            !c.dst_queued_pin(),
+            "default open is unpinned (lab can opt in)"
+        );
+        let dir2 = temp();
+        let mut d = StoreCluster::open_lab_direct(&dir2, 3, 1).unwrap();
+        assert_eq!(d.rpc_mode(), RpcMode::Direct, "lab opt-in Direct");
+        d.pin_dst_queued();
+        d.set_rpc_mode(RpcMode::Direct);
+        assert_eq!(d.rpc_mode(), RpcMode::Queued);
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&dir2);
+    }
+
+    /// RFC-0067 P0.3 / P2.2: DST pin forces Queued; `set_rpc_mode(Direct)`
+    /// cannot skip Net. Starts from explicit Direct opt-in, then pin.
+    /// AS-IS kernel would still admit Direct.
+    #[test]
+    fn pin_dst_queued_refuses_direct_switch() {
+        let dir = temp();
+        let mut c = StoreCluster::open_with_rng(&dir, 3, 1, SeedRng::new(0x0667_0001)).unwrap();
+        assert_eq!(c.rpc_mode(), RpcMode::Queued, "open_with_rng starts Queued");
+        assert!(!c.dst_queued_pin());
+        c.enable_lab_direct_rpc();
+        assert_eq!(c.rpc_mode(), RpcMode::Direct, "lab opt-in Direct");
+        c.pin_dst_queued();
+        assert!(c.dst_queued_pin());
+        assert_eq!(c.rpc_mode(), RpcMode::Queued);
+        c.set_rpc_mode(RpcMode::Direct);
+        assert_eq!(
+            c.rpc_mode(),
+            RpcMode::Queued,
+            "pinned Direct must stay Queued"
+        );
+        assert!(allow_direct_rpc_as_is(true, true), "AS-IS would switch");
+        assert!(!allow_direct_rpc(true, true));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0067 P1.2: `open_single_node` (montanha-tcp / cluster_real) pins
+    /// Queued at open; `set_rpc_mode(Direct)` cannot drop mid-run.
+    #[test]
+    fn open_single_node_refuses_direct_switch() {
+        let dir = temp();
+        let mut c = StoreCluster::open_single_node(&dir, 1, &[1, 2, 3], 1).unwrap();
+        assert!(c.dst_queued_pin(), "TCP ctor must pin Queued");
+        assert_eq!(c.rpc_mode(), RpcMode::Queued);
+        c.set_rpc_mode(RpcMode::Direct);
+        assert_eq!(
+            c.rpc_mode(),
+            RpcMode::Queued,
+            "TCP node must not drop to Direct"
+        );
+        assert!(allow_direct_rpc_as_is(true, true), "AS-IS would switch");
+        assert!(!allow_direct_rpc(true, true));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// F49: two outstanding Queued proposes must stamp **distinct** durable SI gens.
     ///
     /// `with_si_gen` claimed to reserve gens but only read `commit_generation+1`
@@ -7771,7 +9388,8 @@ mod tests {
     #[test]
     fn queued_double_propose_distinct_si_gens_survive_reopen() {
         let dir = temp();
-        let mut c = StoreCluster::open_with_rng(&dir, 3, 1, SeedRng::new(0x0F49_5101)).unwrap();
+        let mut c =
+            StoreCluster::open_with_rng_lab_direct(&dir, 3, 1, SeedRng::new(0x0F49_5101)).unwrap();
         c.elect_all(80).unwrap();
         c.put(b"f48/a", b"old-a").unwrap();
         c.put(b"f48/b", b"old-b").unwrap();
@@ -7861,7 +9479,8 @@ mod tests {
         // reload SI only from apply-path hist gens (si_gen embedded in log).
         // Apply uses the stamped si_gen; collision ⇒ both keys share one gen.
         drop(c);
-        let mut c = StoreCluster::open_with_rng(&dir, 3, 1, SeedRng::new(0x0F49_5102)).unwrap();
+        let mut c =
+            StoreCluster::open_with_rng_lab_direct(&dir, 3, 1, SeedRng::new(0x0F49_5102)).unwrap();
         c.elect_all(40).unwrap();
         // Happy-path reopen may be healed by persist_si_keys; the log stamp assert
         // above is the primary F49 gate. Still check SI if versions differ.
@@ -7893,7 +9512,8 @@ mod tests {
     #[test]
     fn queued_put_advances_versions_for_tx_occ() {
         let dir = temp();
-        let mut c = StoreCluster::open_with_rng(&dir, 3, 1, SeedRng::new(0x51_0001)).unwrap();
+        let mut c =
+            StoreCluster::open_with_rng_lab_direct(&dir, 3, 1, SeedRng::new(0x51_0001)).unwrap();
         // Seed under Direct so note path is clean, then switch to Queued.
         c.elect_all(80).unwrap();
         c.put(b"qk", b"v0").unwrap();
@@ -7941,7 +9561,7 @@ mod tests {
     #[test]
     fn clear_is_true_delete_not_empty_value() {
         let dir = temp();
-        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
         c.elect_all(80).unwrap();
         c.put(b"gone", b"here").unwrap();
         assert_eq!(c.get(b"gone").unwrap().as_deref(), Some(b"here".as_ref()));
@@ -7967,7 +9587,7 @@ mod tests {
     fn si_hist_survives_reopen_after_put() {
         let dir = temp();
         {
-            let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+            let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
             c.elect_all(80).unwrap();
             c.put(b"si-k", b"v1").unwrap();
             assert!(c.read_version() >= 1);
@@ -7978,7 +9598,7 @@ mod tests {
                 Some(b"v1".as_ref())
             );
         }
-        let c = StoreCluster::open(&dir, 3, 1).unwrap();
+        let c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
         // load_si_from_disk should restore generation + hist
         assert!(
             c.read_version() >= 1,
@@ -8000,7 +9620,7 @@ mod tests {
     fn open_rejects_corrupt_si_generation_meta() {
         let dir = temp();
         {
-            let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+            let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
             c.elect_all(80).unwrap();
             c.put(b"k", b"v1").unwrap();
             assert!(c.read_version() >= 1);
@@ -8012,7 +9632,7 @@ mod tests {
                 }
             }
         }
-        match StoreCluster::open(&dir, 3, 1) {
+        match StoreCluster::open_lab_direct(&dir, 3, 1) {
             Ok(_) => panic!("corrupt generation on all replicas must fail open, not restart at 0"),
             Err(e) => assert!(
                 e.to_string().contains("si meta generation"),
@@ -8027,7 +9647,7 @@ mod tests {
     fn open_uses_max_valid_si_generation_when_sibling_corrupt() {
         let dir = temp();
         let gen_before = {
-            let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+            let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
             c.elect_all(80).unwrap();
             c.put(b"k", b"v1").unwrap();
             let g = c.read_version();
@@ -8039,7 +9659,7 @@ mod tests {
             }
             g
         };
-        let c = StoreCluster::open(&dir, 3, 1).unwrap();
+        let c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
         assert!(
             c.read_version() >= gen_before,
             "valid sibling meta must win over corrupt: got {} want >= {gen_before}",
@@ -8052,7 +9672,7 @@ mod tests {
     #[test]
     fn si_hist_bitrot_fail_closed() {
         let dir = temp();
-        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
         c.elect_all(80).unwrap();
         c.put(b"br", b"good").unwrap();
         // F100: hist_key length-prefixes the user component.
@@ -8084,7 +9704,7 @@ mod tests {
     #[test]
     fn persist_si_hist_rejects_corrupt_does_not_wipe() {
         let dir = temp();
-        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
         c.elect_all(80).unwrap();
         c.put(b"h", b"v1").unwrap();
         c.put(b"h", b"v2").unwrap();
@@ -8120,7 +9740,7 @@ mod tests {
         let dir = temp();
         let g1;
         {
-            let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+            let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
             c.elect_all(80).unwrap();
             c.put(b"h", b"v1").unwrap();
             g1 = c.read_version();
@@ -8136,7 +9756,7 @@ mod tests {
                 }
             }
         }
-        match StoreCluster::open(&dir, 3, 1) {
+        match StoreCluster::open_lab_direct(&dir, 3, 1) {
             Ok(c) => {
                 let got = c.get_at_version(b"h", g1).unwrap();
                 panic!(
@@ -8157,7 +9777,7 @@ mod tests {
         let dir = temp();
         let g1;
         {
-            let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+            let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
             c.elect_all(80).unwrap();
             c.put(b"h", b"v1").unwrap();
             g1 = c.read_version();
@@ -8167,7 +9787,7 @@ mod tests {
                 n.db.put(&hk, b"xx").unwrap();
             }
         }
-        let c = StoreCluster::open(&dir, 3, 1).unwrap();
+        let c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
         assert_eq!(
             c.get_at_version(b"h", g1).unwrap().as_deref(),
             Some(b"v1".as_ref()),
@@ -8180,7 +9800,7 @@ mod tests {
     #[test]
     fn apply_txn_commit_rejects_short_intent() {
         let dir = temp();
-        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
         c.elect_all(80).unwrap();
         let nid = c.ids[0];
         let n = c.nodes.get_mut(&nid).unwrap();
@@ -8208,7 +9828,7 @@ mod tests {
     #[test]
     fn apply_txn_revert_rejects_corrupt_preimage() {
         let dir = temp();
-        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
         c.elect_all(80).unwrap();
         c.put(b"u", b"live").unwrap();
         let nid = c.ids[0];
@@ -8240,7 +9860,9 @@ mod tests {
         let dir = temp();
         // Fail disk after enough ops for open+elect; mid-commit may error.
         let env = FailingEnv::fail_after(120);
-        let mut c = StoreCluster::open_with_env_rng(&dir, 3, 1, env, SeedRng::new(0xF41)).unwrap();
+        let mut c =
+            StoreCluster::open_with_env_rng_lab_direct(&dir, 3, 1, env, SeedRng::new(0xF41))
+                .unwrap();
         let _ = c.elect_all(120);
         if c.range_leader(1).is_none() {
             let _ = std::fs::remove_dir_all(&dir);
@@ -8271,7 +9893,7 @@ mod tests {
     fn keys_in_range_at_after_reopen_sees_pedra() {
         let dir = temp();
         {
-            let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+            let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
             c.elect_all(80).unwrap();
             c.put(b"rr/a", b"1").unwrap();
             c.put(b"rr/b", b"2").unwrap();
@@ -8281,7 +9903,7 @@ mod tests {
             assert!(got.len() >= 2, "before reopen: {got:?}");
         }
         // Reopen: SI meta + history are durable; read at current generation.
-        let c = StoreCluster::open(&dir, 3, 1).unwrap();
+        let c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
         let got = c
             .keys_in_range_at(b"rr/", b"rr0", c.read_version())
             .unwrap();
@@ -8309,7 +9931,8 @@ mod tests {
     #[test]
     fn queued_rpc_failover_put_majority_readable() {
         let dir = temp();
-        let mut c = StoreCluster::open_with_rng(&dir, 3, 1, SeedRng::new(0xFA11_0FE1)).unwrap();
+        let mut c =
+            StoreCluster::open_with_rng_lab_direct(&dir, 3, 1, SeedRng::new(0xFA11_0FE1)).unwrap();
         c.set_rpc_mode(RpcMode::Queued);
         elect_queued(&mut c, 100);
 
@@ -8365,7 +9988,7 @@ mod tests {
     #[test]
     fn multi_range_puts_different_leaders() {
         let dir = temp();
-        let mut c = StoreCluster::open(&dir, 3, 3).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 3).unwrap();
         c.elect_all(80).unwrap();
         let keys = keys_one_per_range(&c);
         assert_eq!(keys.len(), 3);
@@ -8403,7 +10026,7 @@ mod tests {
     #[test]
     fn majority_durable_put_on_three_peers() {
         let dir = temp();
-        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
         c.elect_all(80).unwrap();
         let key = b"maj-key";
         let val = b"maj-val";
@@ -8422,7 +10045,7 @@ mod tests {
     #[test]
     fn put_fails_without_majority_under_partition() {
         let dir = temp();
-        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
         c.elect_all(80).unwrap();
         let rid = c.locate(b"part-k").unwrap();
         let leader = c.range_leader(rid).unwrap();
@@ -8460,7 +10083,7 @@ mod tests {
     #[test]
     fn dcs_create_fails_without_majority_under_partition() {
         let dir = temp();
-        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
         c.elect_all(80).unwrap();
         let key = meta_key(b"part-leader");
         let rid = c.locate(&key).unwrap();
@@ -8503,7 +10126,7 @@ mod tests {
     #[test]
     fn dcs_create_not_committed_heal_retry_put_ok() {
         let dir = temp();
-        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
         c.elect_all(80).unwrap();
         let key = meta_key(b"heal-leader");
         let rid = c.locate(&key).unwrap();
@@ -8565,7 +10188,7 @@ mod tests {
         let dir = temp();
         let key = meta_key(b"reopen-orphan-leader");
         {
-            let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+            let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
             c.elect_all(80).unwrap();
             let rid = c.locate(&key).unwrap();
             let leader = c.range_leader(rid).unwrap();
@@ -8589,7 +10212,7 @@ mod tests {
             // Drop without healing — next open reloads from PedraDB raft meta.
         }
         {
-            let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+            let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
             // All peers participating again after reopen.
             for _ in 0..40 {
                 c.tick().unwrap();
@@ -8622,7 +10245,7 @@ mod tests {
     #[test]
     fn minority_only_append_does_not_commit() {
         let dir = temp();
-        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
         c.elect_all(80).unwrap();
         let rid = c.locate(b"solo").unwrap();
         let leader = c.range_leader(rid).unwrap();
@@ -8645,7 +10268,7 @@ mod tests {
     #[test]
     fn strong_read_refuses_deposed_and_dual_leader() {
         let dir = temp();
-        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
         c.elect_all(80).unwrap();
         let key = b"read-k";
         c.put(key, b"v1").unwrap();
@@ -8724,7 +10347,7 @@ mod tests {
     #[test]
     fn range_failover_after_leader_loss() {
         let dir = temp();
-        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
         c.elect_all(80).unwrap();
         let key = b"ha-key";
         c.put(key, b"before").unwrap();
@@ -8766,7 +10389,7 @@ mod tests {
     #[test]
     fn dcs_on_store_create_replicated() {
         let dir = temp();
-        let mut c = StoreCluster::open(&dir, 3, 2).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 2).unwrap();
         c.elect_all(80).unwrap();
         let key = meta_key(b"cluster1/leader");
         let rev = c.dcs_create(&key, b"node-a").unwrap();
@@ -8800,10 +10423,10 @@ mod tests {
     #[test]
     fn open_with_seed_rng_is_deterministic() {
         let dir = temp();
-        let c = StoreCluster::open_with_rng(&dir, 3, 1, SeedRng::new(12345)).unwrap();
+        let c = StoreCluster::open_with_rng_lab_direct(&dir, 3, 1, SeedRng::new(12345)).unwrap();
         let a = c.rng().next_u64();
         let b = c.rng().next_u64();
-        let c2 = StoreCluster::open_with_rng(temp(), 3, 1, SeedRng::new(12345)).unwrap();
+        let c2 = StoreCluster::open_with_rng_lab_direct(temp(), 3, 1, SeedRng::new(12345)).unwrap();
         assert_eq!(c2.rng().next_u64(), a);
         assert_eq!(c2.rng().next_u64(), b);
         let _ = std::fs::remove_dir_all(&dir);
@@ -8815,11 +10438,11 @@ mod tests {
         use pedradb_core::{DetHost, StdEnv};
         let dir = temp();
         let host = DetHost::with_seed(StdEnv, 0xBEEF);
-        let c = StoreCluster::open_with_host(&dir, 3, 1, &host).unwrap();
+        let c = StoreCluster::open_with_host_lab_direct(&dir, 3, 1, &host).unwrap();
         let a = c.rng().next_u64();
         let b = c.rng().next_u64();
         let host2 = DetHost::with_seed(StdEnv, 0xBEEF);
-        let c2 = StoreCluster::open_with_host(temp(), 3, 1, &host2).unwrap();
+        let c2 = StoreCluster::open_with_host_lab_direct(temp(), 3, 1, &host2).unwrap();
         assert_eq!(c2.rng().next_u64(), a);
         assert_eq!(c2.rng().next_u64(), b);
         let _ = std::fs::remove_dir_all(&dir);
@@ -8829,7 +10452,7 @@ mod tests {
     #[test]
     fn compact_does_not_pass_offline_peer_applied() {
         let dir = temp();
-        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
         c.elect_all(80).unwrap();
         c.put(b"before", b"1").unwrap();
         let rid = c.locate(b"before").unwrap();
@@ -8882,7 +10505,7 @@ mod tests {
     #[test]
     fn raft_log_compacts_after_all_applied() {
         let dir = temp();
-        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
         c.elect_all(80).unwrap();
         // Keys are two-byte [b'k', i] (not ASCII "k0"/"k7").
         for i in 0..8u8 {
@@ -8911,7 +10534,7 @@ mod tests {
         }
         // Reopen: snap + short log load; data intact; further put works.
         drop(c);
-        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
         c.elect_all(80).unwrap();
         assert_eq!(
             c.get_on(1, &[b'k', 3]).unwrap().as_deref(),
@@ -8927,7 +10550,7 @@ mod tests {
     fn open_rejects_leftover_intent_with_corrupt_preimage() {
         let dir = temp();
         {
-            let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+            let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
             c.elect_all(80).unwrap();
             c.put(b"u", b"live").unwrap();
             let tid = 99u64;
@@ -8938,7 +10561,7 @@ mod tests {
                 n.db.put(txn_pre_key(tid, b"u"), b"\xffgarbage").unwrap();
             }
         }
-        match StoreCluster::open(&dir, 3, 1) {
+        match StoreCluster::open_lab_direct(&dir, 3, 1) {
             Ok(_) => {
                 panic!("open must fail closed on leftover corrupt preimage, not swallow revert")
             }
@@ -8954,7 +10577,7 @@ mod tests {
     #[test]
     fn tx_cancel_rejects_corrupt_preimage() {
         let dir = temp();
-        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
         c.elect_all(80).unwrap();
         c.put(b"u", b"live").unwrap();
         let h = c.tx_start([(b"u".as_slice(), b"new".as_slice())]).unwrap();
@@ -8981,7 +10604,7 @@ mod tests {
     #[test]
     fn dcs_delete_reports_corrupt_rev() {
         let dir = temp();
-        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
         c.elect_all(80).unwrap();
         c.dcs_create(b"/k", b"v").unwrap();
         // Apply path already fail-closes on corrupt rev (F113). Poison after a
@@ -9015,7 +10638,7 @@ mod tests {
     fn open_rejects_raft_log_segment_gap() {
         let dir = temp();
         {
-            let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+            let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
             // No elect/put required — inject a segment gap on every node's Pedra.
             let rid = 1u64;
             let rec1 = LogRec {
@@ -9047,7 +10670,7 @@ mod tests {
                     .unwrap();
             }
         }
-        match StoreCluster::open(&dir, 3, 1) {
+        match StoreCluster::open_lab_direct(&dir, 3, 1) {
             Ok(_) => panic!("log segment gap must fail open, not load a holed log"),
             Err(e) => assert!(
                 e.to_string().contains("segment gap") || e.to_string().contains("log segment"),
@@ -9062,7 +10685,7 @@ mod tests {
     fn raft_meta_survives_reopen() {
         let dir = temp();
         {
-            let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+            let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
             c.elect_all(80).unwrap();
             c.put(b"durable-k", b"durable-v").unwrap();
             for nid in c.node_ids().to_vec() {
@@ -9074,7 +10697,7 @@ mod tests {
             }
         }
         // Reopen same directories — applied state + raft watermarks must load.
-        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
         for nid in c.node_ids().to_vec() {
             assert_eq!(
                 c.get_on(nid, b"durable-k").unwrap().as_deref(),
@@ -9102,7 +10725,7 @@ mod tests {
     #[test]
     fn put_rejects_raft_meta_prefix() {
         let dir = temp();
-        let mut c = StoreCluster::open(&dir, 1, 1).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 1, 1).unwrap();
         c.elect_all(20).unwrap();
         let mut bad = b"\0store/raft/".to_vec();
         bad.extend_from_slice(b"1/hard");
@@ -9143,7 +10766,7 @@ mod tests {
         );
         // Round-trip: multi-key TX with sibling user keys stays independent.
         let dir = temp();
-        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
         c.elect_all(80).unwrap();
         c.commit_tx([
             (b"a".as_slice(), b"va".as_slice()),
@@ -9154,7 +10777,7 @@ mod tests {
         assert_eq!(c.get(b"ab").unwrap().as_deref(), Some(b"vab".as_ref()));
         // SI hist load after reopen.
         drop(c);
-        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
         c.elect_all(40).unwrap();
         assert_eq!(c.get(b"a").unwrap().as_deref(), Some(b"va".as_ref()));
         assert_eq!(c.get(b"ab").unwrap().as_deref(), Some(b"vab".as_ref()));
@@ -9165,7 +10788,7 @@ mod tests {
     #[test]
     fn open_rejects_too_many_ranges() {
         let dir = temp();
-        match StoreCluster::open(&dir, 3, 300) {
+        match StoreCluster::open_lab_direct(&dir, 3, 300) {
             Ok(_) => panic!("expected n_ranges > 256 to fail"),
             Err(err) => assert!(err.to_string().contains("256"), "{err}"),
         }
@@ -9176,7 +10799,7 @@ mod tests {
     #[test]
     fn leader_noop_commits_prev_term_after_reelect() {
         let dir = temp();
-        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
         c.elect_all(80).unwrap();
         let key = b"prev-term";
         let rid = c.locate(key).unwrap();
@@ -9216,7 +10839,7 @@ mod tests {
     #[test]
     fn dcs_apply_cas_failed_does_not_stick_pipeline() {
         let dir = temp();
-        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
         c.elect_all(80).unwrap();
         let key = meta_key(b"pipe");
         c.dcs_create(&key, b"a").unwrap();
@@ -9279,7 +10902,7 @@ mod tests {
     #[test]
     fn dcs_apply_create_does_not_steal_live_lock() {
         let dir = temp();
-        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
         c.set_ms_per_tick(0);
         c.elect_all(80).unwrap();
         let key = meta_key(b"live-lock");
@@ -9325,7 +10948,7 @@ mod tests {
     #[test]
     fn put_batch_same_range_majority_atomic() {
         let dir = temp();
-        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
         c.elect_all(80).unwrap();
         c.put_batch([(b"a", b"1"), (b"b", b"2"), (b"c", b"3")])
             .unwrap();
@@ -9345,7 +10968,7 @@ mod tests {
     #[test]
     fn get_strong_and_fast_replica_roundtrip() {
         let dir = temp();
-        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
         c.elect_all(60).unwrap();
         c.put(b"rk", b"v1").unwrap();
         assert_eq!(
@@ -9364,7 +10987,8 @@ mod tests {
     #[test]
     fn get_multi_range_uses_per_range_applied_reader() {
         let dir = temp();
-        let mut c = StoreCluster::open_with_rng(&dir, 3, 2, SeedRng::new(0xF84_0001)).unwrap();
+        let mut c =
+            StoreCluster::open_with_rng_lab_direct(&dir, 3, 2, SeedRng::new(0xF84_0001)).unwrap();
         c.elect_all(100).unwrap();
         // Range 2 starts at 0x80 under a 2-way first-byte split.
         let k1 = vec![0x90, b'x'];
@@ -9392,7 +11016,7 @@ mod tests {
     #[test]
     fn put_buffered_flush_coalesce() {
         let dir = temp();
-        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
         c.elect_all(60).unwrap();
         for i in 0..8u8 {
             c.put_buffered([b'b', i], [i]).unwrap();
@@ -9417,7 +11041,7 @@ mod tests {
     fn put_buffered_flush_keeps_buffer_on_error() {
         let dir = temp();
         // No elect → put_many/put_batch → NotLeader.
-        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
         c.put_buffered(b"keep/me", b"v1").unwrap();
         c.put_buffered(b"keep/me2", b"v2").unwrap();
         assert_eq!(c.buffered_writes(), 2);
@@ -9443,7 +11067,7 @@ mod tests {
     #[test]
     fn put_many_multi_range_is_atomic_on_failure() {
         let dir = temp();
-        let mut c = StoreCluster::open(&dir, 3, 4).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 4).unwrap();
         c.elect_all(100).unwrap();
         // Keys in different first-byte ranges under 4-way split.
         let metas = c.range_metas().to_vec();
@@ -9476,7 +11100,7 @@ mod tests {
     #[test]
     fn put_many_same_range_and_lab_open() {
         let dir = temp();
-        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
         c.elect_all(60).unwrap();
         c.put_many([(b"m1", b"a"), (b"m2", b"b"), (b"m3", b"c")])
             .unwrap();
@@ -9487,8 +11111,13 @@ mod tests {
 
         // Lab capacity open: sync=false still elects and writes (not crash-safe).
         let dir2 = temp();
-        let mut c =
-            StoreCluster::open_with_options(&dir2, 3, 1, StoreOpenOptions::lab_capacity()).unwrap();
+        let mut c = StoreCluster::open_with_options_lab_direct(
+            &dir2,
+            3,
+            1,
+            StoreOpenOptions::lab_capacity(),
+        )
+        .unwrap();
         c.elect_all(60).unwrap();
         c.put(b"lab", b"1").unwrap();
         assert!(c.count_applied_eq(b"lab", b"1") >= 2);
@@ -9501,7 +11130,7 @@ mod tests {
         let dir = temp();
         let opts = StoreOpenOptions::default().with_write_backpressure();
         assert!(opts.pedra_write_backpressure);
-        let c = StoreCluster::open_with_options(&dir, 3, 1, opts).unwrap();
+        let c = StoreCluster::open_with_options_lab_direct(&dir, 3, 1, opts).unwrap();
         for id in &c.ids {
             let n = c.nodes.get(id).expect("node");
             assert_eq!(
@@ -9583,7 +11212,7 @@ mod tests {
     #[test]
     fn put_batch_row_and_secondary_index_style() {
         let dir = temp();
-        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
         c.elect_all(80).unwrap();
         // Co-locate under same first-byte region (single range cluster).
         let row = b"row/user/42";
@@ -9610,7 +11239,7 @@ mod tests {
     #[test]
     fn put_batch_fails_without_majority_no_partial() {
         let dir = temp();
-        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
         c.elect_all(80).unwrap();
         let rid = c.locate(b"bk1").unwrap();
         let leader = c.range_leader(rid).unwrap();
@@ -9644,7 +11273,7 @@ mod tests {
     #[test]
     fn put_batch_cross_range_hard_fails() {
         let dir = temp();
-        let mut c = StoreCluster::open(&dir, 3, 3).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 3).unwrap();
         c.elect_all(80).unwrap();
         let keys = keys_one_per_range(&c);
         assert!(keys.len() >= 2);
@@ -9678,11 +11307,11 @@ mod tests {
     fn put_batch_survives_reopen() {
         let dir = temp();
         {
-            let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+            let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
             c.elect_all(80).unwrap();
             c.put_batch([(b"p1", b"A"), (b"p2", b"B")]).unwrap();
         }
-        let c = StoreCluster::open(&dir, 3, 1).unwrap();
+        let c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
         assert_eq!(c.get_on(1, b"p1").unwrap().as_deref(), Some(b"A".as_ref()));
         assert_eq!(c.get_on(2, b"p2").unwrap().as_deref(), Some(b"B".as_ref()));
         let _ = std::fs::remove_dir_all(&dir);
@@ -9692,7 +11321,7 @@ mod tests {
     #[test]
     fn commit_tx_cross_range_atomic_majority() {
         let dir = temp();
-        let mut c = StoreCluster::open(&dir, 3, 3).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 3).unwrap();
         c.elect_all(80).unwrap();
         let keys = keys_one_per_range(&c);
         assert!(keys.len() >= 2);
@@ -9723,7 +11352,7 @@ mod tests {
     #[test]
     fn commit_tx_finish_fail_after_prepare_no_partial() {
         let dir = temp();
-        let mut c = StoreCluster::open(&dir, 3, 3).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 3).unwrap();
         c.elect_all(80).unwrap();
         let keys = keys_one_per_range(&c);
         assert!(keys.len() >= 2);
@@ -9778,7 +11407,7 @@ mod tests {
         assert!(c.count_applied_eq(&keys[1], b"tx1") >= 2);
         // Across reopen: still no immortal intents from the failed TX.
         drop(c);
-        let mut c = StoreCluster::open(&dir, 3, 3).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 3).unwrap();
         c.elect_all(80).unwrap();
         c.put(&keys[0], b"reopen-ok")
             .expect("reopen put must not hit leftover intent");
@@ -9790,7 +11419,7 @@ mod tests {
     #[test]
     fn commit_tx_cross_range_minority_no_partial() {
         let dir = temp();
-        let mut c = StoreCluster::open(&dir, 3, 3).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 3).unwrap();
         c.elect_all(80).unwrap();
         let keys = keys_one_per_range(&c);
         let r0 = c.locate(&keys[0]).unwrap();
@@ -9821,7 +11450,7 @@ mod tests {
     #[test]
     fn commit_tx_write_write_conflict() {
         let dir = temp();
-        let mut c = StoreCluster::open(&dir, 3, 3).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 3).unwrap();
         c.elect_all(80).unwrap();
         let keys = keys_one_per_range(&c);
         let h1 = c
@@ -9859,7 +11488,7 @@ mod tests {
     #[test]
     fn multi_range_puts_still_work_with_tx_path() {
         let dir = temp();
-        let mut c = StoreCluster::open(&dir, 3, 3).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 3).unwrap();
         c.elect_all(80).unwrap();
         let keys = keys_one_per_range(&c);
         c.put(&keys[0], b"s0").unwrap();
@@ -9879,7 +11508,7 @@ mod tests {
     #[test]
     fn commit_tx_same_range() {
         let dir = temp();
-        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
         c.elect_all(80).unwrap();
         c.commit_tx([(b"x", b"1"), (b"y", b"2")]).unwrap();
         assert!(c.count_applied_eq(b"x", b"1") >= 2);
@@ -9891,7 +11520,7 @@ mod tests {
     #[test]
     fn pending_tx_client_session_atomic_majority() {
         let dir = temp();
-        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
         c.elect_all(80).unwrap();
         let mut tx = c.pending_tx_begin();
         tx.set(b"pt-a", b"1").unwrap();
@@ -9913,7 +11542,7 @@ mod tests {
     #[test]
     fn split_range_at_two_ranges_put() {
         let dir = temp();
-        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
         c.elect_all(80).unwrap();
         assert_eq!(c.range_metas().len(), 1);
         let (left, right) = c.split_range_at([0x80u8]).unwrap();
@@ -9932,7 +11561,7 @@ mod tests {
     #[test]
     fn split_range_during_prepared_tx_finish_or_cancel_safe() {
         let dir = temp();
-        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
         c.elect_all(80).unwrap();
         // Single range; keys will fall on different sides after split at 0x80.
         let h = c
@@ -9968,7 +11597,7 @@ mod tests {
     #[test]
     fn remove_member_during_prepared_tx() {
         let dir = temp();
-        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
         c.elect_all(80).unwrap();
         let h = c.tx_start([(b"k1", b"v1"), (b"k2", b"v2")]).unwrap();
         let rid = c.locate(b"k1").unwrap();
@@ -9990,7 +11619,7 @@ mod tests {
     #[test]
     fn cluster_status_json_has_leaders() {
         let dir = temp();
-        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
         c.elect_all(80).unwrap();
         let js = c.cluster_status_json();
         assert!(js.contains("\"members\""), "{js}");
@@ -10007,7 +11636,7 @@ mod tests {
     #[test]
     fn set_peer_addrs_without_ssh() {
         let dir = temp();
-        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
         c.set_peer_addrs([
             (1u64, "10.0.0.1:9701".into()),
             (2, "10.0.0.2:9701".into()),
@@ -10027,7 +11656,7 @@ mod tests {
     #[test]
     fn region_prefer_dial_order() {
         let dir = temp();
-        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
         c.set_node_region(1, "us-east").unwrap();
         c.set_node_region(2, "us-east").unwrap();
         c.set_node_region(3, "eu-west").unwrap();
@@ -10043,7 +11672,7 @@ mod tests {
     #[test]
     fn commit_tx_rejects_value_too_large() {
         let dir = temp();
-        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
         c.elect_all(40).unwrap();
         let big = vec![7u8; MAX_VALUE_BYTES + 1];
         let err = c.commit_tx([(b"k", big.as_slice())]).unwrap_err();
@@ -10062,7 +11691,7 @@ mod tests {
     #[test]
     fn logical_time_advances_with_tick() {
         let dir = temp();
-        let mut c = StoreCluster::open_with_rng(&dir, 3, 1, SeedRng::new(9)).unwrap();
+        let mut c = StoreCluster::open_with_rng_lab_direct(&dir, 3, 1, SeedRng::new(9)).unwrap();
         assert_eq!(c.logical_now(), 0);
         c.advance_time(5).unwrap();
         assert_eq!(c.logical_now(), 5);
@@ -10072,7 +11701,7 @@ mod tests {
         c.advance_time(10).unwrap();
         assert_eq!(c.logical_now(), t0 + 10);
         // Same advance schedule → same time (deterministic).
-        let mut c2 = StoreCluster::open_with_rng(temp(), 3, 1, SeedRng::new(9)).unwrap();
+        let mut c2 = StoreCluster::open_with_rng_lab_direct(temp(), 3, 1, SeedRng::new(9)).unwrap();
         c2.advance_time(16).unwrap();
         assert_eq!(c2.logical_now(), c.logical_now());
         let _ = std::fs::remove_dir_all(&dir);
@@ -10082,7 +11711,7 @@ mod tests {
     #[test]
     fn remove_member_unblocks_compact_and_majority() {
         let dir = temp();
-        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
         c.elect_all(80).unwrap();
         c.put(b"before-rm", b"1").unwrap();
         c.remove_member(3).unwrap();
@@ -10115,7 +11744,7 @@ mod tests {
     #[test]
     fn remove_member_quorum_floor_refuses_disjoint_shrink() {
         let dir = temp();
-        let mut c = StoreCluster::open(&dir, 7, 1).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 7, 1).unwrap();
         c.elect_all(80).unwrap();
         assert!(c.remove_member(7).is_ok(), "single removal must pass");
         assert!(
@@ -10135,7 +11764,7 @@ mod tests {
     #[test]
     fn log_carried_joint_remove_crosses_out_of_band_floor() {
         let dir = temp();
-        let mut c = StoreCluster::open(&dir, 7, 1).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 7, 1).unwrap();
         c.elect_all(80).unwrap();
         assert!(c.remove_member(7).is_ok());
         assert!(
@@ -10158,19 +11787,12 @@ mod tests {
     #[test]
     fn election_during_joint_add_refuses_old_only_majority() {
         let dir = temp();
-        let mut c = StoreCluster::open(&dir, 4, 1).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 4, 1).unwrap();
         c.elect_all(80).unwrap();
         c.remove_member_joint(4).expect("shrink to 3");
         assert!(!c.is_member(4));
         let lid = c.range_leader(1).expect("leader after shrink");
-        let term = c
-            .nodes
-            .get(&lid)
-            .unwrap()
-            .ranges
-            .get(&1)
-            .unwrap()
-            .term;
+        let term = c.nodes.get(&lid).unwrap().ranges.get(&1).unwrap().term;
         {
             let p = c.nodes.get_mut(&lid).unwrap().ranges.get_mut(&1).unwrap();
             let idx = p.last_index() + 1;
@@ -10190,7 +11812,7 @@ mod tests {
             "2/3 old is not a joint quorum for add-to-4"
         );
         assert!(
-            crate::commit_kernel::joint_election_ok_as_is(2, 3, Some((2, 4))),
+            crate::membership_kernel::joint_election_ok_as_is(2, 3, Some((2, 4))),
             "AS-IS dente: old-only would elect"
         );
         // Drop the planted uncommitted joint so a real add can run.
@@ -10200,6 +11822,3348 @@ mod tests {
         }
         c.add_member_joint(4).expect("joint add 4");
         assert!(c.is_member(4), "Direct joint add must apply");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0096 P0: production `leave_joint` after a committed joint
+    /// without leave writes C-new-only (`old == new`). AS-IS
+    /// `joint_leave_ok` skips leave. Compacted `add_member_joint` logs
+    /// and `cluster_real` L28 leave are not this tooth.
+    #[test]
+    fn leave_joint_on_live_store_is_in_log() {
+        assert!(!membership_kernel::joint_leave_ok(false));
+        assert!(
+            membership_kernel::joint_leave_ok_as_is(false),
+            "AS-IS dente: skip leave"
+        );
+        let dir = temp();
+        let mut c = StoreCluster::open_lab_direct(&dir, 4, 1).unwrap();
+        c.elect_all(80).unwrap();
+        c.remove_member_joint(4).expect("shrink to 3");
+        c.plant_committed_joint_without_leave(4)
+            .expect("plant committed joint without leave");
+        c.leave_joint().expect("production leave");
+        let lid = c.range_leader(1).expect("leader");
+        let p = c.nodes.get(&lid).unwrap().ranges.get(&1).unwrap();
+        let leave = p.log.iter().any(|rec| {
+            matches!(
+                &rec.entry,
+                RangeEntry::MembershipJoint { old, new }
+                    if !membership_kernel::joint_still_active(old, new)
+            )
+        });
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(leave, "leave_joint must append C-new-only leave");
+        assert!(
+            membership_kernel::joint_leave_ok(leave),
+            "kernel must require the leave that production wrote"
+        );
+    }
+
+    /// RFC-0121 P1.2: on-disk C-new-only after live Direct shrink.
+    /// 3-process `cluster_real --remove-member` is the REAL TCP tooth.
+    #[test]
+    fn tcp_node_disk_left_joint_after_direct_remove() {
+        assert!(!l28_tcp_left_ok(false));
+        assert!(
+            l28_tcp_left_ok_as_is(false),
+            "AS-IS dente: skip on-disk C-new-only"
+        );
+        let dir = temp();
+        {
+            let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
+            c.elect_all(80).unwrap();
+            c.remove_member_joint(3).expect("shrink to 2");
+        }
+        let left = tcp_node_disk_left_joint(&dir, 1, 3) || tcp_node_disk_left_joint(&dir, 2, 3);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(left, "Direct remove must persist C-new-only on disk");
+        assert!(membership_kernel::joint_leave_ok(left));
+        assert!(l28_tcp_left_ok(left));
+    }
+
+    /// RFC-0126 P1.2: on-disk high-water after Direct shrink is still 3.
+    /// 3-process `cluster_real --remove-member` is the REAL TCP tooth.
+    #[test]
+    fn tcp_node_disk_high_water_after_direct_remove() {
+        assert!(!l28_tcp_hw_ok(false));
+        assert!(
+            l28_tcp_hw_ok_as_is(false),
+            "AS-IS dente: skip on-disk high-water"
+        );
+        let dir = temp();
+        {
+            let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
+            c.elect_all(80).unwrap();
+            c.remove_member_joint(3).expect("shrink to 2");
+        }
+        let disk_hw = tcp_node_disk_high_water(&dir, 1).max(tcp_node_disk_high_water(&dir, 2));
+        let kept = membership_kernel::high_water_at_least(disk_hw, 2) >= 3;
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(kept, "Direct remove must persist high-water 3, got {disk_hw}");
+        assert!(l28_tcp_hw_ok(kept));
+        assert_eq!(
+            membership_kernel::high_water_at_least_as_is(disk_hw, 2),
+            2,
+            "AS-IS would forget disk high-water"
+        );
+    }
+
+    /// RFC-0128 P1.2: TCP ctor with stale CLI after Direct shrink does not
+    /// count the removed voter. 3-process `cluster_real` is the REAL TCP tooth.
+    #[test]
+    fn tcp_node_removed_not_participating_after_direct_remove() {
+        assert!(!l28_tcp_part_ok(false));
+        assert!(
+            l28_tcp_part_ok_as_is(false),
+            "AS-IS dente: skip TCP participating"
+        );
+        let dir = temp();
+        {
+            let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
+            c.elect_all(80).unwrap();
+            c.remove_member_joint(3).expect("shrink to 2");
+        }
+        let ok = tcp_node_removed_not_participating(&dir, 1, &[1, 2, 3], 3);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(ok, "stale CLI [1,2,3] must not count removed 3 as participating");
+        assert!(l28_tcp_part_ok(ok));
+    }
+
+    /// RFC-0130 P1.2: TCP ctor recover-applies a planted committed-unapplied
+    /// Noop. 3-process `cluster_real` is the REAL TCP tooth.
+    #[test]
+    fn tcp_node_recover_apply_ok_after_direct() {
+        assert!(!l28_tcp_apply_ok(false));
+        assert!(
+            l28_tcp_apply_ok_as_is(false),
+            "AS-IS dente: skip TCP recover apply"
+        );
+        let dir = temp();
+        {
+            let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
+            c.elect_all(80).unwrap();
+        }
+        let ok = tcp_node_recover_apply_ok(&dir, 1, &[1, 2, 3]);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(ok, "open_single_node must recover-apply a planted apply gap");
+        assert!(l28_tcp_apply_ok(ok));
+    }
+
+    /// RFC-0131 P1.2: TCP ctor recover-applies on a replica leave already
+    /// dropped from `ids`. 0130 voter plant is **not** this tooth.
+    #[test]
+    fn tcp_node_removed_recover_apply_ok_after_direct() {
+        assert!(!l28_tcp_napply_ok(false));
+        assert!(
+            l28_tcp_napply_ok_as_is(false),
+            "AS-IS dente: skip TCP removed-replica recover apply"
+        );
+        let dir = temp();
+        {
+            let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
+            c.elect_all(80).unwrap();
+            c.pin_dst_queued();
+            queued_shrink_until_leave_committed(&mut c, 3);
+            assert!(!c.is_member(3), "leave must drop 3 before the TCP plant");
+        }
+        let ok = tcp_node_removed_recover_apply_ok(&dir, 3, &[1, 2, 3]);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(
+            ok,
+            "open_single_node on removed replica must recover-apply"
+        );
+        assert!(l28_tcp_napply_ok(ok));
+    }
+
+    /// RFC-0132 P1.2: TCP ctor persists truncated log on a replica leave
+    /// already dropped from `ids`. 0131 apply plant is **not** this tooth.
+    #[test]
+    fn tcp_node_removed_truncate_ok_after_direct() {
+        assert!(!l28_tcp_trunc_ok(false));
+        assert!(
+            l28_tcp_trunc_ok_as_is(false),
+            "AS-IS dente: skip TCP removed-replica truncate persist"
+        );
+        let dir = temp();
+        {
+            let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
+            c.elect_all(80).unwrap();
+            c.pin_dst_queued();
+            queued_shrink_until_leave_committed(&mut c, 3);
+            assert!(!c.is_member(3), "leave must drop 3 before the TCP plant");
+        }
+        let ok = tcp_node_removed_truncate_ok(&dir, 3, &[1, 2, 3]);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(
+            ok,
+            "open_single_node on removed replica must persist truncated log"
+        );
+        assert!(l28_tcp_trunc_ok(ok));
+    }
+
+    /// RFC-0133 P1.2: TCP ctor drops orphan `log_entry_key` on a replica
+    /// leave already dropped from `ids`. 0132 log_hi cap is **not** this tooth.
+    #[test]
+    fn tcp_node_removed_orphan_drop_ok_after_direct() {
+        assert!(!l28_tcp_odrop_ok(false));
+        assert!(
+            l28_tcp_odrop_ok_as_is(false),
+            "AS-IS dente: skip TCP orphan-segment drop"
+        );
+        let dir = temp();
+        {
+            let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
+            c.elect_all(80).unwrap();
+            c.pin_dst_queued();
+            queued_shrink_until_leave_committed(&mut c, 3);
+            assert!(!c.is_member(3), "leave must drop 3 before the TCP plant");
+        }
+        let ok = tcp_node_removed_orphan_drop_ok(&dir, 3, &[1, 2, 3]);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(
+            ok,
+            "open_single_node on removed replica must drop orphan log_entry_key"
+        );
+        assert!(l28_tcp_odrop_ok(ok));
+    }
+
+    /// RFC-0134 P1.2: TCP ctor aborts leftover 2PC on a replica leave already
+    /// dropped from `ids`. 0133 orphan drop is **not** this tooth.
+    #[test]
+    fn tcp_node_removed_abort_ok_after_direct() {
+        assert!(!l28_tcp_abort_ok(false));
+        assert!(
+            l28_tcp_abort_ok_as_is(false),
+            "AS-IS dente: skip TCP leftover 2PC abort"
+        );
+        let dir = temp();
+        {
+            let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
+            c.elect_all(80).unwrap();
+            c.pin_dst_queued();
+            queued_shrink_until_leave_committed(&mut c, 3);
+            assert!(!c.is_member(3), "leave must drop 3 before the TCP plant");
+        }
+        let ok = tcp_node_removed_abort_ok(&dir, 3, &[1, 2, 3]);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(
+            ok,
+            "open_single_node on removed replica must abort leftover intent"
+        );
+        assert!(l28_tcp_abort_ok(ok));
+    }
+
+    /// RFC-0135 P1.2: TCP ctor persists now_ms on a replica leave already
+    /// dropped from `ids`. 0134 abort is **not** this tooth.
+    #[test]
+    fn tcp_node_removed_now_ms_ok_after_direct() {
+        assert!(!l28_tcp_nowms_ok(false));
+        assert!(
+            l28_tcp_nowms_ok_as_is(false),
+            "AS-IS dente: skip TCP removed-replica now_ms persist"
+        );
+        let dir = temp();
+        {
+            let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
+            c.elect_all(80).unwrap();
+            c.pin_dst_queued();
+            queued_shrink_until_leave_committed(&mut c, 3);
+            assert!(!c.is_member(3), "leave must drop 3 before the TCP plant");
+        }
+        let ok = tcp_node_removed_now_ms_ok(&dir, 3, &[1, 2, 3]);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(
+            ok,
+            "open_single_node on removed replica must persist now_ms"
+        );
+        assert!(l28_tcp_nowms_ok(ok));
+    }
+
+    /// RFC-0136 P1.2: TCP ctor persists SI hist on a replica leave already
+    /// dropped from `ids`. 0135 now_ms is **not** this tooth.
+    #[test]
+    fn tcp_node_removed_hist_ok_after_direct() {
+        assert!(!l28_tcp_hist_ok(false));
+        assert!(
+            l28_tcp_hist_ok_as_is(false),
+            "AS-IS dente: skip TCP removed-replica SI hist persist"
+        );
+        let dir = temp();
+        {
+            let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
+            c.elect_all(80).unwrap();
+            c.pin_dst_queued();
+            queued_shrink_until_leave_committed(&mut c, 3);
+            assert!(!c.is_member(3), "leave must drop 3 before the TCP plant");
+        }
+        let ok = tcp_node_removed_hist_ok(&dir, 3, &[1, 2, 3]);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(
+            ok,
+            "open_single_node on removed replica must persist SI hist"
+        );
+        assert!(l28_tcp_hist_ok(ok));
+    }
+
+    /// RFC-0137 P1.2: TCP ctor persists abort fence on a replica leave already
+    /// dropped from `ids`. 0136 SI hist is **not** this tooth.
+    #[test]
+    fn tcp_node_removed_fence_ok_after_direct() {
+        assert!(!l28_tcp_fence_ok(false));
+        assert!(
+            l28_tcp_fence_ok_as_is(false),
+            "AS-IS dente: skip TCP removed-replica abort-fence persist"
+        );
+        let dir = temp();
+        {
+            let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
+            c.elect_all(80).unwrap();
+            c.pin_dst_queued();
+            queued_shrink_until_leave_committed(&mut c, 3);
+            assert!(!c.is_member(3), "leave must drop 3 before the TCP plant");
+        }
+        let ok = tcp_node_removed_fence_ok(&dir, 3, &[1, 2, 3]);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(
+            ok,
+            "open_single_node on removed replica must persist abort fence"
+        );
+        assert!(l28_tcp_fence_ok(ok));
+    }
+
+    /// RFC-0138 P1.2: TCP ctor force-clears stuck intents on a replica leave
+    /// already dropped from `ids`. 0137 abort fence is **not** this tooth.
+    #[test]
+    fn tcp_node_removed_clear_ok_after_direct() {
+        assert!(!l28_tcp_clear_ok(false));
+        assert!(
+            l28_tcp_clear_ok_as_is(false),
+            "AS-IS dente: skip TCP removed-replica force-local TX clear"
+        );
+        let dir = temp();
+        {
+            let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
+            c.elect_all(80).unwrap();
+            c.pin_dst_queued();
+            queued_shrink_until_leave_committed(&mut c, 3);
+            assert!(!c.is_member(3), "leave must drop 3 before the TCP plant");
+        }
+        let ok = tcp_node_removed_clear_ok(&dir, 3, &[1, 2, 3]);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(
+            ok,
+            "open_single_node on removed replica must force-clear stuck intent"
+        );
+        assert!(l28_tcp_clear_ok(ok));
+    }
+
+    /// RFC-0139 P1.2: TCP ctor drops leftover preimages on a replica leave
+    /// already dropped from `ids`. 0138 force-clear is **not** this tooth.
+    #[test]
+    fn tcp_node_removed_pre_ok_after_direct() {
+        assert!(!l28_tcp_pre_ok(false));
+        assert!(
+            l28_tcp_pre_ok_as_is(false),
+            "AS-IS dente: skip TCP removed-replica drop-preimages"
+        );
+        let dir = temp();
+        {
+            let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
+            c.elect_all(80).unwrap();
+            c.pin_dst_queued();
+            queued_shrink_until_leave_committed(&mut c, 3);
+            assert!(!c.is_member(3), "leave must drop 3 before the TCP plant");
+        }
+        let ok = tcp_node_removed_pre_ok(&dir, 3, &[1, 2, 3]);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(
+            ok,
+            "open_single_node on removed replica must drop leftover preimage"
+        );
+        assert!(l28_tcp_pre_ok(ok));
+    }
+
+    /// RFC-0140 P1.2: TCP ctor election timeout follows disk C-new, not
+    /// stale CLI. 0139 drop-preimages is **not** this tooth.
+    #[test]
+    fn tcp_node_removed_peer_ok_after_direct() {
+        assert!(!l28_tcp_peer_ok(false));
+        assert!(
+            l28_tcp_peer_ok_as_is(false),
+            "AS-IS dente: skip TCP disk-peer election timeout"
+        );
+        assert_ne!(
+            election_timeout_for(3, 1, &[1, 2]),
+            election_timeout_for(3, 1, &[1, 2, 3]),
+            "timeout must differ so the TCP load-order tooth is observable"
+        );
+        let dir = temp();
+        {
+            let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
+            c.elect_all(80).unwrap();
+            c.pin_dst_queued();
+            queued_shrink_until_leave_committed(&mut c, 3);
+            assert!(!c.is_member(3), "leave must drop 3 before the TCP plant");
+        }
+        let ok = tcp_node_removed_peer_ok(&dir, 3, &[1, 2, 3]);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(
+            ok,
+            "open_single_node on removed replica must load peer from disk C-new"
+        );
+        assert!(l28_tcp_peer_ok(ok));
+    }
+
+    /// RFC-0141 P1.2: TCP ctor omits HashMap first-key as identity on a
+    /// replica leave already dropped from `ids`. 0140 timeout peek is
+    /// **not** this tooth.
+    #[test]
+    fn tcp_node_removed_lid_ok_after_direct() {
+        assert!(!l28_tcp_lid_ok(false));
+        assert!(
+            l28_tcp_lid_ok_as_is(false),
+            "AS-IS dente: skip TCP removed-replica local-id gate"
+        );
+        let dir = temp();
+        {
+            let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
+            c.elect_all(80).unwrap();
+            c.pin_dst_queued();
+            queued_shrink_until_leave_committed(&mut c, 3);
+            assert!(!c.is_member(3), "leave must drop 3 before the TCP plant");
+        }
+        let ok = tcp_node_removed_lid_ok(&dir, 3, &[1, 2, 3]);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(
+            ok,
+            "open_single_node on removed replica must omit local identity"
+        );
+        assert!(l28_tcp_lid_ok(ok));
+    }
+
+    /// RFC-0142 P1.2: TCP ctor must not pick remote `ids.first()` as a
+    /// LocalApplied reader. 0141 local-id None is **not** this tooth.
+    #[test]
+    fn tcp_node_removed_rdr_ok_after_direct() {
+        assert!(!l28_tcp_rdr_ok(false));
+        assert!(
+            l28_tcp_rdr_ok_as_is(false),
+            "AS-IS dente: skip TCP removed-replica reader-local gate"
+        );
+        let dir = temp();
+        {
+            let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
+            c.elect_all(80).unwrap();
+            c.pin_dst_queued();
+            queued_shrink_until_leave_committed(&mut c, 3);
+            assert!(!c.is_member(3), "leave must drop 3 before the TCP plant");
+        }
+        let ok = tcp_node_removed_rdr_ok(&dir, 3, &[1, 2, 3]);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(
+            ok,
+            "open_single_node on removed replica must skip remote ids.first"
+        );
+        assert!(l28_tcp_rdr_ok(ok));
+    }
+
+    /// RFC-0143 P1.2: TCP ctor live-discards uncommitted suffix on a replica
+    /// leave already dropped from `ids`. 0132 recover truncate is **not**
+    /// this tooth.
+    #[test]
+    fn tcp_node_removed_dsc_ok_after_direct() {
+        assert!(!l28_tcp_dsc_ok(false));
+        assert!(
+            l28_tcp_dsc_ok_as_is(false),
+            "AS-IS dente: skip TCP removed-replica live discard"
+        );
+        let dir = temp();
+        {
+            let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
+            c.elect_all(80).unwrap();
+            c.pin_dst_queued();
+            queued_shrink_until_leave_committed(&mut c, 3);
+            assert!(!c.is_member(3), "leave must drop 3 before the TCP plant");
+        }
+        let ok = tcp_node_removed_dsc_ok(&dir, 3, &[1, 2, 3]);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(
+            ok,
+            "open_single_node on removed replica must live-discard suffix"
+        );
+        assert!(l28_tcp_dsc_ok(ok));
+    }
+
+    /// RFC-0144 P1.2: TCP ctor no-leader abort uses a local persist-leader.
+    /// 0143 live discard is **not** this tooth.
+    #[test]
+    fn tcp_node_removed_pld_ok_after_direct() {
+        assert!(!l28_tcp_pld_ok(false));
+        assert!(
+            l28_tcp_pld_ok_as_is(false),
+            "AS-IS dente: skip TCP persist-leader locality"
+        );
+        let dir = temp();
+        {
+            let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
+            c.elect_all(80).unwrap();
+            c.pin_dst_queued();
+            queued_shrink_until_leave_committed(&mut c, 3);
+            assert!(!c.is_member(3), "leave must drop 3 before the TCP plant");
+        }
+        let ok = tcp_node_removed_pld_ok(&dir, 3, &[1, 2, 3]);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(
+            ok,
+            "open_single_node on removed replica must repair next_index locally"
+        );
+        assert!(l28_tcp_pld_ok(ok));
+    }
+
+    /// RFC-0145 P1.2: TCP ctor re-install of C-new steps a planted Leader
+    /// down. 0144 persist-leader is **not** this tooth.
+    #[test]
+    fn tcp_node_removed_std_ok_after_direct() {
+        assert!(!l28_tcp_std_ok(false));
+        assert!(
+            l28_tcp_std_ok_as_is(false),
+            "AS-IS dente: skip TCP removed-replica Leader step-down"
+        );
+        let dir = temp();
+        {
+            let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
+            c.elect_all(80).unwrap();
+            c.pin_dst_queued();
+            queued_shrink_until_leave_committed(&mut c, 3);
+            assert!(!c.is_member(3), "leave must drop 3 before the TCP plant");
+        }
+        let ok = tcp_node_removed_std_ok(&dir, 3, &[1, 2, 3]);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(
+            ok,
+            "open_single_node on removed replica must step planted Leader down"
+        );
+        assert!(l28_tcp_std_ok(ok));
+    }
+
+    /// RFC-0146 P1.2: TCP ctor of a remaining voter omits the removed
+    /// replica from `leader_hint`. 0145 step-down is **not** this tooth.
+    #[test]
+    fn tcp_node_hint_ok_after_direct() {
+        assert!(!l28_tcp_hnt_ok(false));
+        assert!(
+            l28_tcp_hnt_ok_as_is(false),
+            "AS-IS dente: skip TCP leader-hint membership filter"
+        );
+        let dir = temp();
+        {
+            let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
+            c.elect_all(80).unwrap();
+            c.pin_dst_queued();
+            queued_shrink_until_leave_committed(&mut c, 3);
+            assert!(!c.is_member(3), "leave must drop 3 before the TCP plant");
+        }
+        let ok = tcp_node_hint_ok(&dir, 1, &[1, 2, 3], 3);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(
+            ok,
+            "open_single_node on remaining voter must omit removed hint"
+        );
+        assert!(l28_tcp_hnt_ok(ok));
+    }
+
+    /// RFC-0097 P0: production RPC is Queued. After a planted committed
+    /// joint, pin Queued and `leave_joint` still writes C-new-only.
+    /// Direct-lab 0096 is not this tooth.
+    #[test]
+    fn leave_joint_on_queued_store_is_in_log() {
+        assert!(!membership_kernel::joint_leave_ok(false));
+        assert!(
+            membership_kernel::joint_leave_ok_as_is(false),
+            "AS-IS dente: skip leave"
+        );
+        let dir = temp();
+        let mut c = StoreCluster::open_lab_direct(&dir, 4, 1).unwrap();
+        c.elect_all(80).unwrap();
+        c.remove_member_joint(4).expect("shrink to 3");
+        c.plant_committed_joint_without_leave(4)
+            .expect("plant committed joint without leave");
+        c.pin_dst_queued();
+        assert_eq!(c.rpc_mode(), RpcMode::Queued, "production fingerprint");
+        match c.leave_joint() {
+            Ok(()) => {}
+            Err(StoreError::NotCommitted {
+                range_id, index, ..
+            }) => {
+                pump_queued(&mut c, 96);
+                assert!(
+                    c.finish_queued_propose(range_id, index, true).unwrap(),
+                    "Queued leave must commit after pump"
+                );
+            }
+            Err(e) => panic!("Queued leave: {e}"),
+        }
+        pump_queued(&mut c, 24);
+        let lid = c.range_leader(1).expect("leader");
+        let p = c.nodes.get(&lid).unwrap().ranges.get(&1).unwrap();
+        let leave = p.log.iter().any(|rec| {
+            matches!(
+                &rec.entry,
+                RangeEntry::MembershipJoint { old, new }
+                    if !membership_kernel::joint_still_active(old, new)
+            )
+        });
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(leave, "Queued leave_joint must append C-new-only leave");
+        assert!(membership_kernel::joint_leave_ok(leave));
+    }
+
+    /// RFC-0098 P0: Queued `add_member_joint` returns NotCommitted before
+    /// `leave_joint`. After pump+finish, C-new-only must be in the log.
+    /// Plant+leave (0096/0097) is not this tooth.
+    #[test]
+    fn leave_joint_on_queued_add_member_is_in_log() {
+        assert!(!membership_kernel::joint_leave_ok(false));
+        assert!(
+            membership_kernel::joint_leave_ok_as_is(false),
+            "AS-IS dente: skip leave"
+        );
+        let dir = temp();
+        let mut c = StoreCluster::open_lab_direct(&dir, 4, 1).unwrap();
+        c.elect_all(80).unwrap();
+        c.remove_member_joint(4).expect("shrink to 3");
+        c.pin_dst_queued();
+        assert_eq!(c.rpc_mode(), RpcMode::Queued);
+        match c.add_member_joint(4) {
+            Ok(()) => {}
+            Err(StoreError::NotCommitted {
+                range_id, index, ..
+            }) => {
+                pump_queued(&mut c, 96);
+                assert!(
+                    c.finish_queued_propose(range_id, index, true).unwrap(),
+                    "Queued add_member_joint must commit after pump"
+                );
+            }
+            Err(e) => panic!("Queued add_member_joint: {e}"),
+        }
+        pump_queued(&mut c, 24);
+        let lid = c.range_leader(1).expect("leader");
+        let p = c.nodes.get(&lid).unwrap().ranges.get(&1).unwrap();
+        let leave = p.log.iter().any(|rec| {
+            matches!(
+                &rec.entry,
+                RangeEntry::MembershipJoint { old, new }
+                    if !membership_kernel::joint_still_active(old, new)
+            )
+        });
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(
+            leave,
+            "Queued add_member_joint must leave C-new-only in the log"
+        );
+        assert!(membership_kernel::joint_leave_ok(leave));
+    }
+
+    /// RFC-0099 P0: Queued `remove_member_joint` must leave after the
+    /// shrink joint commits. Add (0098) is not this tooth.
+    #[test]
+    fn leave_joint_on_queued_remove_member_is_in_log() {
+        assert!(!membership_kernel::joint_leave_ok(false));
+        assert!(
+            membership_kernel::joint_leave_ok_as_is(false),
+            "AS-IS dente: skip leave"
+        );
+        let dir = temp();
+        let mut c = StoreCluster::open_lab_direct(&dir, 4, 1).unwrap();
+        c.elect_all(80).unwrap();
+        c.pin_dst_queued();
+        assert_eq!(c.rpc_mode(), RpcMode::Queued);
+        // Compact after leave-apply drops C-new-only from RAM (0096 class:
+        // remaining 3 catch up; add-path 0098 keeps leave because the
+        // joining node's applied lags). Observe leave before that compact.
+        let mut saw_leave = false;
+        match c.remove_member_joint(4) {
+            Ok(()) => {
+                saw_leave = any_log_has_c_new_only_leave(&c);
+            }
+            Err(StoreError::NotCommitted {
+                range_id, index, ..
+            }) => {
+                for _ in 0..96 {
+                    if any_log_has_c_new_only_leave(&c) {
+                        saw_leave = true;
+                        break;
+                    }
+                    pump_queued(&mut c, 1);
+                    let commit = c
+                        .range_leader(range_id)
+                        .map(|lid| c.commit_index(lid, range_id))
+                        .unwrap_or(0);
+                    if commit >= index {
+                        assert!(
+                            c.finish_queued_propose(range_id, index, true).unwrap(),
+                            "Queued remove_member_joint must commit after pump"
+                        );
+                    }
+                    if any_log_has_c_new_only_leave(&c) {
+                        saw_leave = true;
+                        break;
+                    }
+                }
+            }
+            Err(e) => panic!("Queued remove_member_joint: {e}"),
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(
+            saw_leave,
+            "Queued remove_member_joint must leave C-new-only in the log"
+        );
+        assert!(membership_kernel::joint_leave_ok(saw_leave));
+    }
+
+    /// RFC-0122 P0: after finishing the **joint** propose, C-new-only may
+    /// sit uncommitted (`leave_joint_after_commit` swallows NotCommitted).
+    /// 0121 joint-only finish is **not** this tooth.
+    #[test]
+    fn queued_leave_after_joint_must_be_finished() {
+        assert!(!membership_kernel::queued_leave_finish_ok(true, false));
+        assert!(
+            membership_kernel::queued_leave_finish_ok_as_is(true, false),
+            "AS-IS dente: leave in log is enough"
+        );
+        assert!(membership_kernel::queued_leave_finish_ok(true, true));
+        assert!(membership_kernel::queued_leave_finish_ok(false, false));
+        let dir = temp();
+        let mut c = StoreCluster::open_lab_direct(&dir, 4, 1).unwrap();
+        c.elect_all(80).unwrap();
+        c.pin_dst_queued();
+        let (rid, joint_idx) = match c.remove_member_joint(4) {
+            Err(StoreError::NotCommitted {
+                range_id, index, ..
+            }) => (range_id, index),
+            Ok(()) => panic!("Queued remove_member_joint should NotCommitted"),
+            Err(e) => panic!("Queued remove_member_joint: {e}"),
+        };
+        let mut joint_done = false;
+        for _ in 0..96 {
+            pump_queued(&mut c, 1);
+            let commit = c
+                .range_leader(rid)
+                .map(|lid| c.commit_index(lid, rid))
+                .unwrap_or(0);
+            if commit >= joint_idx {
+                assert!(
+                    c.finish_queued_propose(rid, joint_idx, false).unwrap(),
+                    "joint propose must finish"
+                );
+                joint_done = true;
+                break;
+            }
+        }
+        assert!(joint_done, "joint must commit");
+        assert!(
+            any_log_has_c_new_only_leave(&c),
+            "leave must be on the log after joint finish"
+        );
+        assert!(
+            c.uncommitted_leave_index().is_some(),
+            "0121 leftover: leave appended but not committed"
+        );
+        let leave_idx = max_c_new_only_leave_index(&c);
+        let commit = c
+            .range_leader(rid)
+            .map(|lid| c.commit_index(lid, rid))
+            .unwrap_or(0);
+        assert!(
+            !membership_kernel::queued_leave_finish_ok(true, leave_idx <= commit),
+            "uncommitted leave must fail queued_leave_finish_ok"
+        );
+        for _ in 0..96 {
+            if c.uncommitted_leave_index().is_none() {
+                break;
+            }
+            pump_queued(&mut c, 1);
+            let _ = c.finish_uncommitted_leave();
+        }
+        assert!(
+            c.uncommitted_leave_index().is_none(),
+            "finish_uncommitted_leave must commit C-new-only"
+        );
+        let commit = c
+            .range_leader(rid)
+            .map(|lid| c.commit_index(lid, rid))
+            .unwrap_or(0);
+        assert!(membership_kernel::queued_leave_finish_ok(
+            true,
+            max_c_new_only_leave_index(&c) <= commit
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0123 P1.1: after 0122 finish, persist + crash-reopen must still
+    /// see committed C-new-only (or a snapshot that covers it). RAM-only
+    /// 0122 is **not** this tooth.
+    #[test]
+    fn queued_leave_survives_crash_reopen() {
+        assert!(!membership_kernel::queued_leave_finish_ok(true, false));
+        assert!(
+            membership_kernel::queued_leave_finish_ok_as_is(true, false),
+            "AS-IS dente: skip reopen"
+        );
+        let dir = temp();
+        let mut c = StoreCluster::open_lab_direct(&dir, 4, 1).unwrap();
+        c.elect_all(80).unwrap();
+        c.pin_dst_queued();
+        let (rid, joint_idx) = match c.remove_member_joint(4) {
+            Err(StoreError::NotCommitted {
+                range_id, index, ..
+            }) => (range_id, index),
+            Ok(()) => panic!("Queued remove_member_joint should NotCommitted"),
+            Err(e) => panic!("Queued remove_member_joint: {e}"),
+        };
+        for _ in 0..96 {
+            pump_queued(&mut c, 1);
+            let commit = c
+                .range_leader(rid)
+                .map(|lid| c.commit_index(lid, rid))
+                .unwrap_or(0);
+            if commit >= joint_idx {
+                assert!(c.finish_queued_propose(rid, joint_idx, false).unwrap());
+                break;
+            }
+        }
+        for _ in 0..96 {
+            if c.uncommitted_leave_index().is_none() {
+                break;
+            }
+            pump_queued(&mut c, 1);
+            let _ = c.finish_uncommitted_leave();
+        }
+        assert!(c.uncommitted_leave_index().is_none());
+        let leave_idx = max_c_new_only_leave_index(&c);
+        assert!(leave_idx > 0, "leave must be in the log before reopen");
+        let lid = c.range_leader(rid).expect("leader");
+        {
+            let n = c.nodes.get_mut(&lid).unwrap();
+            persist_log_db(&mut n.db, rid, n.ranges.get_mut(&rid).unwrap()).unwrap();
+            persist_commit_db(&mut n.db, rid, n.ranges.get(&rid).unwrap()).unwrap();
+            persist_applied_db(&mut n.db, rid, n.ranges.get(&rid).unwrap()).unwrap();
+        }
+        c.crash_reopen_engine_on(lid, pedradb_io_uring::IoUringEnv::default())
+            .expect("crash-reopen leader");
+        let p = c.nodes.get(&lid).unwrap().ranges.get(&rid).unwrap();
+        let snap_covers = p.snapshot_index >= leave_idx;
+        let committed_in_log = p.log.iter().any(|rec| {
+            rec.index <= p.commit
+                && matches!(
+                    &rec.entry,
+                    RangeEntry::MembershipJoint { old, new }
+                        if !membership_kernel::joint_still_active(old, new)
+                )
+        });
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(
+            committed_in_log || snap_covers,
+            "committed leave must survive crash-reopen or be snapshotted"
+        );
+        assert!(membership_kernel::queued_leave_finish_ok(
+            committed_in_log,
+            committed_in_log || snap_covers
+        ));
+    }
+
+    fn queued_shrink_until_leave_committed(c: &mut StoreCluster, remove: u64) {
+        let (rid, joint_idx) = match c.remove_member_joint(remove) {
+            Err(StoreError::NotCommitted {
+                range_id, index, ..
+            }) => (range_id, index),
+            Ok(()) => panic!("Queued remove_member_joint should NotCommitted"),
+            Err(e) => panic!("Queued remove_member_joint: {e}"),
+        };
+        for _ in 0..96 {
+            pump_queued(c, 1);
+            let commit = c
+                .range_leader(rid)
+                .map(|lid| c.commit_index(lid, rid))
+                .unwrap_or(0);
+            if commit >= joint_idx {
+                assert!(c.finish_queued_propose(rid, joint_idx, false).unwrap());
+                break;
+            }
+        }
+        for _ in 0..96 {
+            if c.uncommitted_leave_index().is_none() {
+                return;
+            }
+            pump_queued(c, 1);
+            let _ = c.finish_uncommitted_leave();
+        }
+        assert!(
+            c.uncommitted_leave_index().is_none(),
+            "leave must commit"
+        );
+    }
+
+    /// RFC-0124 P0: durable membership must override stale RAM/CLI ids.
+    /// 0123 crash-reopen of the log is **not** this tooth.
+    #[test]
+    fn disk_membership_overrides_cli_after_leave() {
+        assert!(membership_kernel::disk_membership_overrides_cli(true));
+        assert!(
+            !membership_kernel::disk_membership_overrides_cli_as_is(true),
+            "AS-IS dente: CLI --peer overwrites disk"
+        );
+        let dir = temp();
+        let mut c = StoreCluster::open_lab_direct(&dir, 4, 1).unwrap();
+        c.elect_all(80).unwrap();
+        c.pin_dst_queued();
+        queued_shrink_until_leave_committed(&mut c, 4);
+        assert!(!c.is_member(4), "apply must drop 4");
+        let lid = c.range_leader(1).expect("leader");
+        let raw = c
+            .nodes
+            .get(&lid)
+            .unwrap()
+            .db
+            .get(&cluster_membership_key())
+            .expect("disk membership");
+        let disk = decode_membership(&raw).unwrap();
+        assert!(
+            !disk.contains(&4),
+            "disk membership must omit removed node: {disk:?}"
+        );
+        c.ids = vec![1, 2, 3, 4];
+        c.bind_cluster_identity(None).unwrap();
+        assert!(
+            !c.is_member(4),
+            "bind must restore disk voters, not stale CLI ids"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0124 P1.2: crash-reopen reloads voters from disk.
+    #[test]
+    fn crash_reopen_reloads_disk_membership() {
+        assert!(membership_kernel::disk_membership_overrides_cli(true));
+        let dir = temp();
+        let mut c = StoreCluster::open_lab_direct(&dir, 4, 1).unwrap();
+        c.elect_all(80).unwrap();
+        c.pin_dst_queued();
+        queued_shrink_until_leave_committed(&mut c, 4);
+        let lid = c.range_leader(1).expect("leader");
+        {
+            let n = c.nodes.get_mut(&lid).unwrap();
+            persist_log_db(&mut n.db, 1, n.ranges.get_mut(&1).unwrap()).unwrap();
+            persist_commit_db(&mut n.db, 1, n.ranges.get(&1).unwrap()).unwrap();
+            persist_applied_db(&mut n.db, 1, n.ranges.get(&1).unwrap()).unwrap();
+        }
+        c.ids = vec![1, 2, 3, 4];
+        c.crash_reopen_engine_on(lid, pedradb_io_uring::IoUringEnv::default())
+            .expect("crash-reopen");
+        assert!(
+            !c.is_member(4),
+            "crash_reopen must reload C-new from disk"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0125 P0: 4-node high-water survives reopen as 3 nodes; OOB shrink
+    /// still hits the quorum floor. AS-IS high-water=3 would allow it.
+    #[test]
+    fn high_water_survives_reopen_refuses_oob_shrink() {
+        assert_eq!(membership_kernel::high_water_at_least(4, 3), 4);
+        assert_eq!(
+            membership_kernel::high_water_at_least_as_is(4, 3),
+            3,
+            "AS-IS dente: RAM/CLI high-water only"
+        );
+        let dir = temp();
+        {
+            let mut c = StoreCluster::open_lab_direct(&dir, 4, 1).unwrap();
+            c.elect_all(80).unwrap();
+            c.pin_dst_queued();
+            queued_shrink_until_leave_committed(&mut c, 4);
+            assert!(!c.is_member(4));
+        }
+        let mut c2 = StoreCluster::open(&dir, 3, 1).expect("reopen 3");
+        assert!(!c2.is_member(4), "disk membership omits 4");
+        let err = c2.remove_member(3).expect_err("quorum floor");
+        assert!(
+            err.to_string().contains("quorum floor"),
+            "4-node high-water must survive reopen, got {err}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0125 P1.1: TCP ctor loads disk voters before the raft log.
+    /// 0124 bind-after-load is **not** this tooth.
+    #[test]
+    fn open_single_node_stale_cli_loads_disk_membership() {
+        assert!(membership_kernel::disk_membership_overrides_cli(true));
+        let dir = temp();
+        {
+            let mut c = StoreCluster::open_lab_direct(&dir, 4, 1).unwrap();
+            c.elect_all(80).unwrap();
+            c.pin_dst_queued();
+            queued_shrink_until_leave_committed(&mut c, 4);
+        }
+        let c2 = StoreCluster::open_single_node(&dir, 1, &[1, 2, 3, 4], 1)
+            .expect("TCP ctor with stale CLI");
+        assert!(
+            !c2.is_member(4),
+            "open_single_node must take disk C-new, not CLI [1,2,3,4]"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0126 P0: crash-reopen must read durable high-water, not RAM.
+    /// 0125 process-open is **not** this tooth.
+    #[test]
+    fn crash_reopen_restores_high_water() {
+        assert_eq!(membership_kernel::high_water_at_least(4, 3), 4);
+        assert_eq!(
+            membership_kernel::high_water_at_least_as_is(4, 3),
+            3,
+            "AS-IS dente: RAM high-water only"
+        );
+        let dir = temp();
+        let mut c = StoreCluster::open_lab_direct(&dir, 4, 1).unwrap();
+        c.elect_all(80).unwrap();
+        c.pin_dst_queued();
+        queued_shrink_until_leave_committed(&mut c, 4);
+        let lid = c.range_leader(1).expect("leader");
+        {
+            let n = c.nodes.get_mut(&lid).unwrap();
+            persist_log_db(&mut n.db, 1, n.ranges.get_mut(&1).unwrap()).unwrap();
+            persist_commit_db(&mut n.db, 1, n.ranges.get(&1).unwrap()).unwrap();
+            persist_applied_db(&mut n.db, 1, n.ranges.get(&1).unwrap()).unwrap();
+        }
+        c.membership_high_water = 3;
+        c.crash_reopen_engine_on(lid, pedradb_io_uring::IoUringEnv::default())
+            .expect("crash-reopen");
+        let err = c.remove_member(3).expect_err("quorum floor after reopen");
+        assert!(
+            err.to_string().contains("quorum floor"),
+            "disk high-water 4 must survive crash-reopen, got {err}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0127 P0: crash-reopen must not keep a stale participating=true
+    /// on a node that disk membership already dropped.
+    #[test]
+    fn crash_reopen_participating_follows_membership() {
+        assert!(!membership_kernel::participating_if_member(false));
+        assert!(
+            membership_kernel::participating_if_member_as_is(false),
+            "AS-IS dente: keep captured participating"
+        );
+        let dir = temp();
+        let mut c = StoreCluster::open_lab_direct(&dir, 4, 1).unwrap();
+        c.elect_all(80).unwrap();
+        c.pin_dst_queued();
+        queued_shrink_until_leave_committed(&mut c, 4);
+        assert!(!c.is_member(4));
+        {
+            let n = c.nodes.get_mut(&4).unwrap();
+            n.participating = true;
+            persist_log_db(&mut n.db, 1, n.ranges.get_mut(&1).unwrap()).unwrap();
+            persist_commit_db(&mut n.db, 1, n.ranges.get(&1).unwrap()).unwrap();
+            persist_applied_db(&mut n.db, 1, n.ranges.get(&1).unwrap()).unwrap();
+        }
+        c.crash_reopen_engine_on(4, pedradb_io_uring::IoUringEnv::default())
+            .expect("crash-reopen removed node");
+        assert!(!c.is_member(4), "disk membership omits 4");
+        assert!(
+            !c.is_participating(4),
+            "stale participating=true must not survive crash-reopen"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn plant_committed_unapplied_shrink(c: &mut StoreCluster, lid: u64) {
+        let n = c.nodes.get_mut(&lid).unwrap();
+        let p = n.ranges.get_mut(&1).unwrap();
+        let idx = p.last_index() + 1;
+        p.log.push(LogRec {
+            index: idx,
+            term: p.term,
+            entry: RangeEntry::MembershipJoint {
+                old: vec![1, 2, 3, 4],
+                new: vec![1, 2, 3],
+            },
+        });
+        p.commit = idx;
+        persist_log_db(&mut n.db, 1, p).unwrap();
+        persist_commit_db(&mut n.db, 1, p).unwrap();
+    }
+
+    /// RFC-0130 P0: crash-reopen must apply a committed unapplied joint.
+    /// 0124 disk membership of an already-applied joint is **not** this tooth.
+    #[test]
+    fn crash_reopen_applies_committed_unapplied_joint() {
+        assert!(membership_kernel::recover_must_apply(1, 2));
+        assert!(
+            !membership_kernel::recover_must_apply_as_is(1, 2),
+            "AS-IS dente: skip apply on recover"
+        );
+        let dir = temp();
+        let mut c = StoreCluster::open_lab_direct(&dir, 4, 1).unwrap();
+        c.elect_all(80).unwrap();
+        let lid = c.range_leader(1).expect("leader");
+        assert_eq!(c.applied_index(lid, 1), c.commit_index(lid, 1));
+        plant_committed_unapplied_shrink(&mut c, lid);
+        assert!(c.is_member(4), "joint is committed but not applied");
+        c.crash_reopen_engine_on(lid, pedradb_io_uring::IoUringEnv::default())
+            .expect("crash-reopen");
+        assert!(
+            !c.is_member(4),
+            "recover must apply committed joint"
+        );
+        let p = c.nodes.get(&lid).unwrap().ranges.get(&1).unwrap();
+        assert!(
+            p.applied >= p.commit,
+            "applied must catch commit after recover"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0130 P1.1: process open applies a committed unapplied joint.
+    /// crash-reopen is **not** this tooth.
+    #[test]
+    fn open_applies_committed_unapplied_joint() {
+        assert!(membership_kernel::recover_must_apply(0, 1));
+        assert!(
+            !membership_kernel::recover_must_apply_as_is(0, 1),
+            "AS-IS dente: skip apply on recover"
+        );
+        let dir = temp();
+        {
+            let mut c = StoreCluster::open_lab_direct(&dir, 4, 1).unwrap();
+            c.elect_all(80).unwrap();
+            let lid = c.range_leader(1).expect("leader");
+            assert_eq!(c.applied_index(lid, 1), c.commit_index(lid, 1));
+            plant_committed_unapplied_shrink(&mut c, lid);
+            assert!(c.is_member(4), "joint is committed but not applied");
+        }
+        let c2 = StoreCluster::open(&dir, 4, 1).expect("process open");
+        assert!(
+            !c2.is_member(4),
+            "open recover must apply committed joint"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn plant_committed_unapplied_put(c: &mut StoreCluster, nid: u64, key: &[u8], val: &[u8]) {
+        let n = c.nodes.get_mut(&nid).unwrap();
+        let p = n.ranges.get_mut(&1).unwrap();
+        let idx = p.last_index() + 1;
+        p.log.push(LogRec {
+            index: idx,
+            term: p.term.max(1),
+            entry: RangeEntry::Put {
+                key: key.to_vec(),
+                value: val.to_vec(),
+                si_gen: 0,
+            },
+        });
+        p.commit = idx;
+        persist_log_db(&mut n.db, 1, p).unwrap();
+        persist_commit_db(&mut n.db, 1, p).unwrap();
+    }
+
+    /// RFC-0131 P0: recover must apply on a local replica that leave already
+    /// dropped from `ids`. 0130 leader-in-ids plant is **not** this tooth.
+    #[test]
+    fn crash_reopen_applies_committed_on_removed_replica() {
+        assert!(membership_kernel::recover_apply_node_counts(true, false));
+        assert!(
+            !membership_kernel::recover_apply_node_counts_as_is(true, false),
+            "AS-IS dente: skip local non-member"
+        );
+        let dir = temp();
+        let mut c = StoreCluster::open_lab_direct(&dir, 4, 1).unwrap();
+        c.elect_all(80).unwrap();
+        c.pin_dst_queued();
+        queued_shrink_until_leave_committed(&mut c, 4);
+        assert!(!c.is_member(4));
+        let key = b"rfc0131-removed";
+        let val = b"applied-on-recover";
+        plant_committed_unapplied_put(&mut c, 4, key, val);
+        assert!(
+            c.get_on(4, key).unwrap().is_none(),
+            "put is committed but not applied"
+        );
+        c.crash_reopen_engine_on(4, pedradb_io_uring::IoUringEnv::default())
+            .expect("crash-reopen removed replica");
+        assert!(!c.is_member(4), "disk membership still omits 4");
+        let got = c.get_on(4, key).expect("get_on removed replica");
+        assert_eq!(
+            got.as_deref(),
+            Some(val.as_slice()),
+            "recover must apply committed put on removed replica"
+        );
+        let p = c.nodes.get(&4).unwrap().ranges.get(&1).unwrap();
+        assert!(
+            p.applied >= p.commit,
+            "applied must catch commit after recover"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0131 P1.1: process open of n=4 after leave applies on node 4.
+    /// crash-reopen is **not** this tooth.
+    #[test]
+    fn open_applies_committed_on_removed_replica() {
+        assert!(membership_kernel::recover_apply_node_counts(true, false));
+        let dir = temp();
+        {
+            let mut c = StoreCluster::open_lab_direct(&dir, 4, 1).unwrap();
+            c.elect_all(80).unwrap();
+            c.pin_dst_queued();
+            queued_shrink_until_leave_committed(&mut c, 4);
+            assert!(!c.is_member(4));
+            plant_committed_unapplied_put(&mut c, 4, b"rfc0131-open", b"via-open");
+        }
+        let c2 = StoreCluster::open(&dir, 4, 1).expect("process open n=4");
+        assert!(!c2.is_member(4));
+        let got = c2.get_on(4, b"rfc0131-open").expect("get_on");
+        assert_eq!(
+            got.as_deref(),
+            Some(b"via-open".as_slice()),
+            "open recover must apply on removed replica"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn plant_uncommitted_suffix(c: &mut StoreCluster, nid: u64, key: &[u8], val: &[u8]) -> u64 {
+        let n = c.nodes.get_mut(&nid).unwrap();
+        let p = n.ranges.get_mut(&1).unwrap();
+        let commit = p.commit;
+        let idx = p.last_index() + 1;
+        p.log.push(LogRec {
+            index: idx,
+            term: p.term.max(1),
+            entry: RangeEntry::Put {
+                key: key.to_vec(),
+                value: val.to_vec(),
+                si_gen: 0,
+            },
+        });
+        persist_log_db(&mut n.db, 1, p).unwrap();
+        commit
+    }
+
+    fn disk_has_uncommitted_suffix<E: pedradb_core::Env>(
+        db: &pedradb_core::Db<E>,
+        commit: u64,
+    ) -> bool {
+        // load_range_peer walks the blob then segments through log_hi.
+        // Orphan log_entry_key rows past log_hi are not loaded (F128 watermark).
+        if let Some(raw) = db.get(&raft_meta_key(1, "log_hi")) {
+            if let Ok(hi) = decode_u64_meta(&raw) {
+                if hi > commit {
+                    return true;
+                }
+            }
+        }
+        if let Some(raw) = db.get(&raft_meta_key(1, "log")) {
+            if let Ok(recs) = decode_log(&raw) {
+                if recs.iter().any(|e| e.index > commit) {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    /// RFC-0132 P0: crash-reopen must persist the truncated log on a replica
+    /// already dropped from `ids`. 0131 applied-put is **not** this tooth.
+    #[test]
+    fn crash_reopen_truncates_uncommitted_on_removed_replica() {
+        assert!(membership_kernel::recover_truncate_node_counts(true, false));
+        assert!(
+            !membership_kernel::recover_truncate_node_counts_as_is(true, false),
+            "AS-IS dente: skip truncate persist on local non-member"
+        );
+        let dir = temp();
+        let mut c = StoreCluster::open_lab_direct(&dir, 4, 1).unwrap();
+        c.elect_all(80).unwrap();
+        c.pin_dst_queued();
+        queued_shrink_until_leave_committed(&mut c, 4);
+        assert!(!c.is_member(4));
+        let commit = plant_uncommitted_suffix(&mut c, 4, b"rfc0132-suffix", b"uncommitted");
+        assert!(
+            disk_has_uncommitted_suffix(&c.nodes.get(&4).unwrap().db, commit),
+            "plant must leave an uncommitted suffix on disk"
+        );
+        c.crash_reopen_engine_on(4, pedradb_io_uring::IoUringEnv::default())
+            .expect("crash-reopen removed replica");
+        assert!(!c.is_member(4));
+        assert!(
+            !disk_has_uncommitted_suffix(&c.nodes.get(&4).unwrap().db, commit),
+            "recover must persist truncated log on removed replica"
+        );
+        let p = c.nodes.get(&4).unwrap().ranges.get(&1).unwrap();
+        assert!(
+            p.log.iter().all(|e| e.index <= p.commit),
+            "RAM log must not keep the suffix"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0132 P1.1: process open of n=4 after leave truncates node 4 disk.
+    /// crash-reopen is **not** this tooth.
+    #[test]
+    fn open_truncates_uncommitted_on_removed_replica() {
+        assert!(membership_kernel::recover_truncate_node_counts(true, false));
+        let dir = temp();
+        let commit;
+        {
+            let mut c = StoreCluster::open_lab_direct(&dir, 4, 1).unwrap();
+            c.elect_all(80).unwrap();
+            c.pin_dst_queued();
+            queued_shrink_until_leave_committed(&mut c, 4);
+            assert!(!c.is_member(4));
+            commit = plant_uncommitted_suffix(&mut c, 4, b"rfc0132-open", b"uncommitted");
+            assert!(disk_has_uncommitted_suffix(
+                &c.nodes.get(&4).unwrap().db,
+                commit
+            ));
+        }
+        let c2 = StoreCluster::open(&dir, 4, 1).expect("process open n=4");
+        assert!(!c2.is_member(4));
+        assert!(
+            !disk_has_uncommitted_suffix(&c2.nodes.get(&4).unwrap().db, commit),
+            "open recover must persist truncated log on removed replica"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0133 P0: truncate persist must delete orphan `log_entry_key` rows.
+    /// 0132 log_hi cap is **not** this tooth.
+    #[test]
+    fn crash_reopen_drops_orphan_seg_on_removed_replica() {
+        assert!(membership_kernel::recover_drop_orphan_seg(3, 2));
+        assert!(
+            !membership_kernel::recover_drop_orphan_seg_as_is(3, 2),
+            "AS-IS dente: leave orphan log segments"
+        );
+        let dir = temp();
+        let mut c = StoreCluster::open_lab_direct(&dir, 4, 1).unwrap();
+        c.elect_all(80).unwrap();
+        c.pin_dst_queued();
+        queued_shrink_until_leave_committed(&mut c, 4);
+        assert!(!c.is_member(4));
+        let commit = plant_uncommitted_suffix(&mut c, 4, b"rfc0133-orphan", b"uncommitted");
+        let orphan = log_entry_key(1, commit.saturating_add(1));
+        assert!(
+            c.nodes.get(&4).unwrap().db.get(&orphan).is_some(),
+            "plant must write an incremental segment past commit"
+        );
+        c.crash_reopen_engine_on(4, pedradb_io_uring::IoUringEnv::default())
+            .expect("crash-reopen removed replica");
+        assert!(!c.is_member(4));
+        assert!(
+            c.nodes.get(&4).unwrap().db.get(&orphan).is_none(),
+            "recover truncate must drop orphan log_entry_key"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0133 P1.1: process open of n=4 after leave drops node 4 orphans.
+    /// crash-reopen is **not** this tooth.
+    #[test]
+    fn open_drops_orphan_seg_on_removed_replica() {
+        assert!(membership_kernel::recover_drop_orphan_seg(3, 2));
+        let dir = temp();
+        let commit;
+        {
+            let mut c = StoreCluster::open_lab_direct(&dir, 4, 1).unwrap();
+            c.elect_all(80).unwrap();
+            c.pin_dst_queued();
+            queued_shrink_until_leave_committed(&mut c, 4);
+            assert!(!c.is_member(4));
+            commit = plant_uncommitted_suffix(&mut c, 4, b"rfc0133-open", b"uncommitted");
+            assert!(c
+                .nodes
+                .get(&4)
+                .unwrap()
+                .db
+                .get(&log_entry_key(1, commit.saturating_add(1)))
+                .is_some());
+        }
+        let c2 = StoreCluster::open(&dir, 4, 1).expect("process open n=4");
+        assert!(!c2.is_member(4));
+        assert!(
+            c2.nodes
+                .get(&4)
+                .unwrap()
+                .db
+                .get(&log_entry_key(1, commit.saturating_add(1)))
+                .is_none(),
+            "open recover must drop orphan log_entry_key"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0134 P0: recover must abort leftover 2PC on a replica already
+    /// dropped from `ids`. 0132 truncate is **not** this tooth.
+    #[test]
+    fn crash_reopen_aborts_leftover_on_removed_replica() {
+        assert!(membership_kernel::recover_abort_node_counts(true, false));
+        assert!(
+            !membership_kernel::recover_abort_node_counts_as_is(true, false),
+            "AS-IS dente: skip leftover abort on local non-member"
+        );
+        assert!(txn_kernel::leftover_txn_is_aborted());
+        let dir = temp();
+        let mut c = StoreCluster::open_lab_direct(&dir, 4, 1).unwrap();
+        c.elect_all(80).unwrap();
+        c.pin_dst_queued();
+        queued_shrink_until_leave_committed(&mut c, 4);
+        assert!(!c.is_member(4));
+        let ik = intent_key(b"rfc0134-left");
+        {
+            let n = c.nodes.get_mut(&4).unwrap();
+            n.db.put(&ik, encode_intent(99, b"pending")).unwrap();
+        }
+        assert!(c.nodes.get(&4).unwrap().db.get(&ik).is_some());
+        c.crash_reopen_engine_on(4, pedradb_io_uring::IoUringEnv::default())
+            .expect("crash-reopen removed replica");
+        assert!(!c.is_member(4));
+        assert!(
+            c.nodes.get(&4).unwrap().db.get(&ik).is_none(),
+            "recover must abort leftover intent on removed replica"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0134 P1.1: process open of n=4 after leave aborts node 4 intents.
+    /// crash-reopen is **not** this tooth.
+    #[test]
+    fn open_aborts_leftover_on_removed_replica() {
+        assert!(membership_kernel::recover_abort_node_counts(true, false));
+        let dir = temp();
+        let ik = intent_key(b"rfc0134-open");
+        {
+            let mut c = StoreCluster::open_lab_direct(&dir, 4, 1).unwrap();
+            c.elect_all(80).unwrap();
+            c.pin_dst_queued();
+            queued_shrink_until_leave_committed(&mut c, 4);
+            assert!(!c.is_member(4));
+            c.nodes
+                .get_mut(&4)
+                .unwrap()
+                .db
+                .put(&ik, encode_intent(77, b"pending"))
+                .unwrap();
+        }
+        let c2 = StoreCluster::open(&dir, 4, 1).expect("process open n=4");
+        assert!(!c2.is_member(4));
+        assert!(
+            c2.nodes.get(&4).unwrap().db.get(&ik).is_none(),
+            "open recover must abort leftover intent on removed replica"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn disk_now_ms<E: pedradb_core::Env>(n: &StoreNode<E>) -> u64 {
+        n.db
+            .get(&si_meta_key("now_ms"))
+            .and_then(|raw| decode_u64_meta(&raw).ok())
+            .unwrap_or(0)
+    }
+
+    /// RFC-0135 P0: persist_now_ms must write SI meta on a replica already
+    /// dropped from `ids`. 0134 leftover abort is **not** this tooth.
+    #[test]
+    fn persist_now_ms_on_removed_replica() {
+        assert!(membership_kernel::persist_meta_node_counts(true, false));
+        assert!(
+            !membership_kernel::persist_meta_node_counts_as_is(true, false),
+            "AS-IS dente: skip SI meta persist on local non-member"
+        );
+        let dir = temp();
+        let mut c = StoreCluster::open_lab_direct(&dir, 4, 1).unwrap();
+        c.elect_all(80).unwrap();
+        c.pin_dst_queued();
+        queued_shrink_until_leave_committed(&mut c, 4);
+        assert!(!c.is_member(4));
+        c.advance_now_ms(5_000);
+        assert!(c.now_ms() >= 5_000);
+        assert_eq!(
+            disk_now_ms(c.nodes.get(&4).unwrap()),
+            c.now_ms(),
+            "removed replica must persist now_ms"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0135 P1.1: TCP ctor of a removed node must persist now_ms locally.
+    /// in-process n=4 is **not** this tooth.
+    #[test]
+    fn open_single_node_persist_now_ms_when_removed() {
+        assert!(membership_kernel::persist_meta_node_counts(true, false));
+        let dir = temp();
+        {
+            let mut c = StoreCluster::open_lab_direct(&dir, 4, 1).unwrap();
+            c.elect_all(80).unwrap();
+            c.pin_dst_queued();
+            queued_shrink_until_leave_committed(&mut c, 4);
+            assert!(!c.is_member(4));
+        }
+        let mut c2 = StoreCluster::open_single_node(&dir, 4, &[1, 2, 3, 4], 1)
+            .expect("TCP ctor of removed replica");
+        assert!(!c2.is_member(4));
+        c2.advance_now_ms(7_000);
+        assert_eq!(
+            disk_now_ms(c2.nodes.get(&4).unwrap()),
+            c2.now_ms(),
+            "TCP removed replica must persist now_ms on self"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0136 P0: persist_si_keys must write hist on a replica already
+    /// dropped from `ids`. 0135 now_ms is **not** this tooth.
+    #[test]
+    fn persist_si_hist_on_removed_replica() {
+        assert!(membership_kernel::persist_hist_node_counts(true, false));
+        assert!(
+            !membership_kernel::persist_hist_node_counts_as_is(true, false),
+            "AS-IS dente: skip SI hist persist on local non-member"
+        );
+        let dir = temp();
+        let mut c = StoreCluster::open_lab_direct(&dir, 4, 1).unwrap();
+        c.elect_all(80).unwrap();
+        c.pin_dst_queued();
+        queued_shrink_until_leave_committed(&mut c, 4);
+        assert!(!c.is_member(4));
+        let k = b"rfc0136-hist".to_vec();
+        c.key_history
+            .insert(k.clone(), vec![(1, Some(b"v".to_vec()))]);
+        c.commit_generation = c.commit_generation.max(1);
+        c.persist_si_keys(&[k.clone()]).unwrap();
+        assert!(
+            c.nodes.get(&4).unwrap().db.get(&hist_key(&k)).is_some(),
+            "removed replica must persist SI hist"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0136 P1.1: TCP ctor of a removed node must persist SI hist locally.
+    /// in-process n=4 is **not** this tooth.
+    #[test]
+    fn open_single_node_persist_si_hist_when_removed() {
+        assert!(membership_kernel::persist_hist_node_counts(true, false));
+        let dir = temp();
+        {
+            let mut c = StoreCluster::open_lab_direct(&dir, 4, 1).unwrap();
+            c.elect_all(80).unwrap();
+            c.pin_dst_queued();
+            queued_shrink_until_leave_committed(&mut c, 4);
+            assert!(!c.is_member(4));
+        }
+        let mut c2 = StoreCluster::open_single_node(&dir, 4, &[1, 2, 3, 4], 1)
+            .expect("TCP ctor of removed replica");
+        assert!(!c2.is_member(4));
+        let k = b"rfc0136-tcp-hist".to_vec();
+        c2.key_history
+            .insert(k.clone(), vec![(1, Some(b"v".to_vec()))]);
+        c2.commit_generation = c2.commit_generation.max(1);
+        c2.persist_si_keys(&[k.clone()]).unwrap();
+        assert!(
+            c2.nodes.get(&4).unwrap().db.get(&hist_key(&k)).is_some(),
+            "TCP removed replica must persist SI hist on self"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0137 P0: fence_txn_aborted must write abort on a replica already
+    /// dropped from `ids`. 0136 hist is **not** this tooth.
+    #[test]
+    fn fence_txn_aborted_on_removed_replica() {
+        assert!(membership_kernel::persist_fence_node_counts(true, false));
+        assert!(
+            !membership_kernel::persist_fence_node_counts_as_is(true, false),
+            "AS-IS dente: skip abort fence on local non-member"
+        );
+        let dir = temp();
+        let mut c = StoreCluster::open_lab_direct(&dir, 4, 1).unwrap();
+        c.elect_all(80).unwrap();
+        c.pin_dst_queued();
+        queued_shrink_until_leave_committed(&mut c, 4);
+        assert!(!c.is_member(4));
+        let tid = 0x0137u64;
+        c.fence_txn_aborted(tid).unwrap();
+        let got = c
+            .nodes
+            .get(&4)
+            .unwrap()
+            .db
+            .get(&txn_status_key(tid));
+        assert_eq!(
+            got.as_deref(),
+            Some(b"abort".as_slice()),
+            "removed replica must persist abort fence"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0137 P1.1: TCP ctor of a removed node must persist abort fence locally.
+    /// in-process n=4 is **not** this tooth.
+    #[test]
+    fn open_single_node_fence_txn_when_removed() {
+        assert!(membership_kernel::persist_fence_node_counts(true, false));
+        let dir = temp();
+        {
+            let mut c = StoreCluster::open_lab_direct(&dir, 4, 1).unwrap();
+            c.elect_all(80).unwrap();
+            c.pin_dst_queued();
+            queued_shrink_until_leave_committed(&mut c, 4);
+            assert!(!c.is_member(4));
+        }
+        let mut c2 = StoreCluster::open_single_node(&dir, 4, &[1, 2, 3, 4], 1)
+            .expect("TCP ctor of removed replica");
+        assert!(!c2.is_member(4));
+        let tid = 0x0137_0002u64;
+        c2.fence_txn_aborted(tid).unwrap();
+        let got = c2
+            .nodes
+            .get(&4)
+            .unwrap()
+            .db
+            .get(&txn_status_key(tid));
+        assert_eq!(
+            got.as_deref(),
+            Some(b"abort".as_slice()),
+            "TCP removed replica must persist abort fence on self"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0138 P0: force_local_clear_keys must drop intents on a replica already
+    /// dropped from `ids`. 0137 fence is **not** this tooth.
+    #[test]
+    fn force_local_clear_on_removed_replica() {
+        assert!(membership_kernel::force_clear_node_counts(true, false));
+        assert!(
+            !membership_kernel::force_clear_node_counts_as_is(true, false),
+            "AS-IS dente: skip force-local clear on local non-member"
+        );
+        let dir = temp();
+        let mut c = StoreCluster::open_lab_direct(&dir, 4, 1).unwrap();
+        c.elect_all(80).unwrap();
+        c.pin_dst_queued();
+        queued_shrink_until_leave_committed(&mut c, 4);
+        assert!(!c.is_member(4));
+        let k = b"rfc0138-left".to_vec();
+        let ik = intent_key(&k);
+        let tid = 0x0138u64;
+        {
+            let n = c.nodes.get_mut(&4).unwrap();
+            n.db.put(&ik, encode_intent(tid, b"pending")).unwrap();
+        }
+        assert!(c.nodes.get(&4).unwrap().db.get(&ik).is_some());
+        c.force_local_clear_keys(tid, &[k], false)
+            .expect("force-local abort");
+        assert!(
+            c.nodes.get(&4).unwrap().db.get(&ik).is_none(),
+            "removed replica must drop stuck intent"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0138 P1.1: TCP ctor of a removed node must force-clear intents locally.
+    /// in-process n=4 is **not** this tooth.
+    #[test]
+    fn open_single_node_force_clear_when_removed() {
+        assert!(membership_kernel::force_clear_node_counts(true, false));
+        let dir = temp();
+        {
+            let mut c = StoreCluster::open_lab_direct(&dir, 4, 1).unwrap();
+            c.elect_all(80).unwrap();
+            c.pin_dst_queued();
+            queued_shrink_until_leave_committed(&mut c, 4);
+            assert!(!c.is_member(4));
+        }
+        let mut c2 = StoreCluster::open_single_node(&dir, 4, &[1, 2, 3, 4], 1)
+            .expect("TCP ctor of removed replica");
+        assert!(!c2.is_member(4));
+        let k = b"rfc0138-tcp-left".to_vec();
+        let ik = intent_key(&k);
+        let tid = 0x0138_0002u64;
+        {
+            let n = c2.nodes.get_mut(&4).unwrap();
+            n.db.put(&ik, encode_intent(tid, b"pending")).unwrap();
+        }
+        assert!(c2.nodes.get(&4).unwrap().db.get(&ik).is_some());
+        c2.force_local_clear_keys(tid, &[k], false)
+            .expect("TCP force-local abort");
+        assert!(
+            c2.nodes.get(&4).unwrap().db.get(&ik).is_none(),
+            "TCP removed replica must drop stuck intent on self"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0139 P0: drop_preimages must delete pre on a replica already
+    /// dropped from `ids`. 0138 force-clear is **not** this tooth.
+    #[test]
+    fn drop_preimages_on_removed_replica() {
+        assert!(membership_kernel::drop_preimages_node_counts(true, false));
+        assert!(
+            !membership_kernel::drop_preimages_node_counts_as_is(true, false),
+            "AS-IS dente: skip drop-preimages on local non-member"
+        );
+        let dir = temp();
+        let mut c = StoreCluster::open_lab_direct(&dir, 4, 1).unwrap();
+        c.elect_all(80).unwrap();
+        c.pin_dst_queued();
+        queued_shrink_until_leave_committed(&mut c, 4);
+        assert!(!c.is_member(4));
+        let k = b"rfc0139-left".to_vec();
+        let tid = 0x0139u64;
+        let pk = txn_pre_key(tid, &k);
+        {
+            let n = c.nodes.get_mut(&4).unwrap();
+            n.db.put(&pk, encode_preimage(Some(b"old"))).unwrap();
+        }
+        assert!(c.nodes.get(&4).unwrap().db.get(&pk).is_some());
+        let handle = TxHandle {
+            id: tid,
+            ranges: vec![1],
+            keys_by_range: vec![(1, vec![k])],
+        };
+        c.drop_preimages(&handle).expect("drop preimages");
+        assert!(
+            c.nodes.get(&4).unwrap().db.get(&pk).is_none(),
+            "removed replica must drop leftover preimage"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0139 P1.1: TCP ctor of a removed node must drop preimages locally.
+    /// in-process n=4 is **not** this tooth.
+    #[test]
+    fn open_single_node_drop_preimages_when_removed() {
+        assert!(membership_kernel::drop_preimages_node_counts(true, false));
+        let dir = temp();
+        {
+            let mut c = StoreCluster::open_lab_direct(&dir, 4, 1).unwrap();
+            c.elect_all(80).unwrap();
+            c.pin_dst_queued();
+            queued_shrink_until_leave_committed(&mut c, 4);
+            assert!(!c.is_member(4));
+        }
+        let mut c2 = StoreCluster::open_single_node(&dir, 4, &[1, 2, 3, 4], 1)
+            .expect("TCP ctor of removed replica");
+        assert!(!c2.is_member(4));
+        let k = b"rfc0139-tcp-left".to_vec();
+        let tid = 0x0139_0002u64;
+        let pk = txn_pre_key(tid, &k);
+        {
+            let n = c2.nodes.get_mut(&4).unwrap();
+            n.db.put(&pk, encode_preimage(Some(b"old"))).unwrap();
+        }
+        assert!(c2.nodes.get(&4).unwrap().db.get(&pk).is_some());
+        let handle = TxHandle {
+            id: tid,
+            ranges: vec![1],
+            keys_by_range: vec![(1, vec![k])],
+        };
+        c2.drop_preimages(&handle).expect("TCP drop preimages");
+        assert!(
+            c2.nodes.get(&4).unwrap().db.get(&pk).is_none(),
+            "TCP removed replica must drop leftover preimage on self"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0140 P0: in-process open must load RangePeer from disk membership,
+    /// not CLI n_nodes. 0124 bind `!is_member(4)` and 0125 TCP peek are **not**
+    /// this tooth.
+    #[test]
+    fn open_in_process_loads_disk_ids_before_peer() {
+        assert!(membership_kernel::open_peer_uses_disk(true));
+        assert!(
+            !membership_kernel::open_peer_uses_disk_as_is(true),
+            "AS-IS dente: in-process open ignores disk at load"
+        );
+        let disk = [1u64, 2, 3];
+        let cli = [1u64, 2, 3, 4];
+        assert_ne!(
+            election_timeout_for(4, 1, &disk),
+            election_timeout_for(4, 1, &cli),
+            "timeout must differ so the load-order tooth is observable"
+        );
+        let dir = temp();
+        {
+            let mut c = StoreCluster::open_lab_direct(&dir, 4, 1).unwrap();
+            c.elect_all(80).unwrap();
+            c.pin_dst_queued();
+            queued_shrink_until_leave_committed(&mut c, 4);
+            assert!(!c.is_member(4));
+        }
+        let c2 = StoreCluster::open(&dir, 4, 1).expect("process open n=4");
+        assert!(!c2.is_member(4));
+        let got = c2
+            .nodes
+            .get(&4)
+            .unwrap()
+            .ranges
+            .get(&1)
+            .unwrap()
+            .election_timeout;
+        assert_eq!(
+            got,
+            election_timeout_for(4, 1, &disk),
+            "removed replica must load peer from disk C-new, not CLI n=4"
+        );
+        assert_ne!(got, election_timeout_for(4, 1, &cli));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0140 P1.1: lab Direct ctor must peek disk membership before load.
+    /// production `open` is **not** this tooth.
+    #[test]
+    fn open_lab_direct_loads_disk_ids_before_peer() {
+        assert!(membership_kernel::open_peer_uses_disk(true));
+        let dir = temp();
+        {
+            let mut c = StoreCluster::open_lab_direct(&dir, 4, 1).unwrap();
+            c.elect_all(80).unwrap();
+            c.pin_dst_queued();
+            queued_shrink_until_leave_committed(&mut c, 4);
+            assert!(!c.is_member(4));
+        }
+        let c2 = StoreCluster::open_lab_direct(&dir, 4, 1).expect("lab Direct n=4");
+        assert!(!c2.is_member(4));
+        let got = c2
+            .nodes
+            .get(&4)
+            .unwrap()
+            .ranges
+            .get(&1)
+            .unwrap()
+            .election_timeout;
+        assert_eq!(
+            got,
+            election_timeout_for(4, 1, &[1, 2, 3]),
+            "lab Direct removed replica must load peer from disk C-new"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0141 P0: TCP ctor of a removed replica must not treat HashMap
+    /// first-key as cluster identity. 0140 load peek is **not** this tooth.
+    #[test]
+    fn open_single_node_local_id_omits_removed() {
+        assert!(!membership_kernel::local_id_if_member(false));
+        assert!(
+            membership_kernel::local_id_if_member_as_is(false),
+            "AS-IS dente: HashMap first-key even when removed"
+        );
+        let dir = temp();
+        {
+            let mut c = StoreCluster::open_lab_direct(&dir, 4, 1).unwrap();
+            c.elect_all(80).unwrap();
+            c.pin_dst_queued();
+            queued_shrink_until_leave_committed(&mut c, 4);
+            assert!(!c.is_member(4));
+        }
+        let mut c2 = StoreCluster::open_single_node(&dir, 4, &[1, 2, 3, 4], 1)
+            .expect("TCP ctor of removed replica");
+        assert!(!c2.is_member(4));
+        assert_eq!(
+            c2.local_node_id(),
+            None,
+            "removed replica must not claim local identity"
+        );
+        {
+            let n = c2.nodes.get_mut(&4).unwrap();
+            n.db.put(b"rfc0141-stale", b"stale").unwrap();
+        }
+        let got = c2.get(b"rfc0141-stale");
+        assert!(
+            got.as_ref().ok().and_then(|v| v.as_deref()) != Some(b"stale".as_ref()),
+            "removed replica must not serve local-only as cluster LocalApplied"
+        );
+        assert!(got.is_err(), "fail-closed: no local voter");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0141 P1.1: TCP ctor of a remaining member still has local identity.
+    /// removed ctor is **not** this tooth.
+    #[test]
+    fn open_single_node_local_id_keeps_member() {
+        assert!(membership_kernel::local_id_if_member(true));
+        let dir = temp();
+        {
+            let mut c = StoreCluster::open_lab_direct(&dir, 4, 1).unwrap();
+            c.elect_all(80).unwrap();
+            c.pin_dst_queued();
+            queued_shrink_until_leave_committed(&mut c, 4);
+            assert!(!c.is_member(4));
+        }
+        let c2 = StoreCluster::open_single_node(&dir, 1, &[1, 2, 3, 4], 1)
+            .expect("TCP ctor of remaining member");
+        assert!(c2.is_member(1));
+        assert_eq!(
+            c2.local_node_id(),
+            Some(1),
+            "remaining member must keep local identity"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0142 P0: TCP removed replica must not pick remote `ids.first()` as
+    /// a LocalApplied reader. 0141 `local_node_id` None is **not** this tooth.
+    #[test]
+    fn open_single_node_get_skips_remote_ids_first() {
+        assert!(!membership_kernel::reader_id_local(false));
+        assert!(
+            membership_kernel::reader_id_local_as_is(false),
+            "AS-IS dente: ids.first even when not local"
+        );
+        let dir = temp();
+        {
+            let mut c = StoreCluster::open_lab_direct(&dir, 4, 1).unwrap();
+            c.elect_all(80).unwrap();
+            c.pin_dst_queued();
+            queued_shrink_until_leave_committed(&mut c, 4);
+            assert!(!c.is_member(4));
+        }
+        let c2 = StoreCluster::open_single_node(&dir, 4, &[1, 2, 3, 4], 1)
+            .expect("TCP ctor of removed replica");
+        assert!(!c2.is_member(4));
+        assert_eq!(c2.local_node_id(), None);
+        assert!(
+            c2.best_reader_for_key(b"rfc0142-get").is_none(),
+            "removed replica must not pick remote ids.first"
+        );
+        let err = c2
+            .get(b"rfc0142-get")
+            .expect_err("fail-closed: no local reader");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("empty"),
+            "must be empty, not bad-node remote: {msg}"
+        );
+        assert!(
+            !msg.contains("bad node"),
+            "must not attempt get_on of a remote voter: {msg}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0142 P1.1: get_fast_replica must not pick remote `ids.first()`.
+    /// `get` is **not** this tooth.
+    #[test]
+    fn open_single_node_fast_replica_skips_remote_ids_first() {
+        assert!(!membership_kernel::reader_id_local(false));
+        let dir = temp();
+        {
+            let mut c = StoreCluster::open_lab_direct(&dir, 4, 1).unwrap();
+            c.elect_all(80).unwrap();
+            c.pin_dst_queued();
+            queued_shrink_until_leave_committed(&mut c, 4);
+            assert!(!c.is_member(4));
+        }
+        let c2 = StoreCluster::open_single_node(&dir, 4, &[1, 2, 3, 4], 1)
+            .expect("TCP ctor of removed replica");
+        assert!(!c2.is_member(4));
+        let err = c2
+            .get_fast_replica(b"rfc0142-fast")
+            .expect_err("fail-closed: no local replica");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("no replica"),
+            "must be no replica, not bad-node remote: {msg}"
+        );
+        assert!(
+            !msg.contains("bad node"),
+            "must not attempt get_on of a remote voter: {msg}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0143 P0: live discard must drop uncommitted suffix on a replica
+    /// already dropped from `ids`. 0132 recover truncate is **not** this tooth.
+    #[test]
+    fn discard_uncommitted_on_removed_replica() {
+        assert!(membership_kernel::discard_node_counts(true, false));
+        assert!(
+            !membership_kernel::discard_node_counts_as_is(true, false),
+            "AS-IS dente: skip live discard on local non-member"
+        );
+        let dir = temp();
+        let mut c = StoreCluster::open_lab_direct(&dir, 4, 1).unwrap();
+        c.elect_all(80).unwrap();
+        c.pin_dst_queued();
+        queued_shrink_until_leave_committed(&mut c, 4);
+        assert!(!c.is_member(4));
+        let commit = plant_uncommitted_suffix(&mut c, 4, b"rfc0143-left", b"orphan");
+        assert!(
+            c.nodes
+                .get(&4)
+                .unwrap()
+                .ranges
+                .get(&1)
+                .unwrap()
+                .log
+                .iter()
+                .any(|e| e.index > commit),
+            "planted uncommitted suffix"
+        );
+        // Escaped-on-the-wire is F-found, not this tooth: live leaders may
+        // still hold sent_through from pre-leave replication.
+        for n in c.nodes.values_mut() {
+            for p in n.ranges.values_mut() {
+                p.sent_through.clear();
+            }
+        }
+        let from = commit.saturating_add(1);
+        c.discard_uncommitted_from(1, 4, from)
+            .expect("discard on removed replica");
+        let p = c.nodes.get(&4).unwrap().ranges.get(&1).unwrap();
+        assert!(
+            p.log.iter().all(|e| e.index <= commit),
+            "removed replica must drop RAM uncommitted suffix"
+        );
+        assert!(
+            !disk_has_uncommitted_suffix(&c.nodes.get(&4).unwrap().db, commit),
+            "removed replica must persist truncated log"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0143 P1.1: TCP ctor of a removed node must discard locally.
+    /// in-process n=4 is **not** this tooth.
+    #[test]
+    fn open_single_node_discard_uncommitted_when_removed() {
+        assert!(membership_kernel::discard_node_counts(true, false));
+        let dir = temp();
+        {
+            let mut c = StoreCluster::open_lab_direct(&dir, 4, 1).unwrap();
+            c.elect_all(80).unwrap();
+            c.pin_dst_queued();
+            queued_shrink_until_leave_committed(&mut c, 4);
+            assert!(!c.is_member(4));
+        }
+        let mut c2 = StoreCluster::open_single_node(&dir, 4, &[1, 2, 3, 4], 1)
+            .expect("TCP ctor of removed replica");
+        assert!(!c2.is_member(4));
+        let commit = plant_uncommitted_suffix(&mut c2, 4, b"rfc0143-tcp", b"orphan");
+        let from = commit.saturating_add(1);
+        c2.discard_uncommitted_from(1, 4, from)
+            .expect("TCP discard");
+        let p = c2.nodes.get(&4).unwrap().ranges.get(&1).unwrap();
+        assert!(
+            p.log.iter().all(|e| e.index <= commit),
+            "TCP removed replica must drop RAM uncommitted suffix"
+        );
+        assert!(
+            !disk_has_uncommitted_suffix(&c2.nodes.get(&4).unwrap().db, commit),
+            "TCP removed replica must persist truncated log"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0144 P0: no-leader finish_queued_propose must use a local persist-leader.
+    /// 0143 direct discard(leader=4) is **not** this tooth.
+    #[test]
+    fn finish_queued_no_leader_persist_leader_is_local() {
+        assert!(!membership_kernel::discard_leader_local(false));
+        assert!(
+            membership_kernel::discard_leader_local_as_is(false),
+            "AS-IS dente: ids.first persist-leader even when remote"
+        );
+        let dir = temp();
+        {
+            let mut c = StoreCluster::open_lab_direct(&dir, 4, 1).unwrap();
+            c.elect_all(80).unwrap();
+            c.pin_dst_queued();
+            queued_shrink_until_leave_committed(&mut c, 4);
+            assert!(!c.is_member(4));
+        }
+        let mut c2 = StoreCluster::open_single_node(&dir, 4, &[1, 2, 3, 4], 1)
+            .expect("TCP ctor of removed replica");
+        assert!(!c2.is_member(4));
+        assert!(c2.range_leader(1).is_none(), "TCP removed has no local leader");
+        let commit = plant_uncommitted_suffix(&mut c2, 4, b"rfc0144-left", b"orphan");
+        let from = commit.saturating_add(1);
+        for n in c2.nodes.values_mut() {
+            for p in n.ranges.values_mut() {
+                p.sent_through.clear();
+            }
+        }
+        c2.finish_queued_propose(1, from, true)
+            .expect("no-leader abort");
+        let p = c2.nodes.get(&4).unwrap().ranges.get(&1).unwrap();
+        assert_eq!(
+            p.next_index.get(&1).copied(),
+            Some(from),
+            "persist-leader must be local node 4 so next_index repair runs"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0144 P1.1: TCP remaining member still uses local ids.first as persist-leader.
+    /// removed ctor is **not** this tooth.
+    #[test]
+    fn finish_queued_member_persist_leader_stays_first() {
+        assert!(membership_kernel::discard_leader_local(true));
+        let dir = temp();
+        {
+            let mut c = StoreCluster::open_lab_direct(&dir, 4, 1).unwrap();
+            c.elect_all(80).unwrap();
+            c.pin_dst_queued();
+            queued_shrink_until_leave_committed(&mut c, 4);
+            assert!(!c.is_member(4));
+        }
+        let mut c2 = StoreCluster::open_single_node(&dir, 1, &[1, 2, 3, 4], 1)
+            .expect("TCP ctor of remaining member");
+        assert!(c2.is_member(1));
+        assert!(c2.range_leader(1).is_none(), "fresh open is follower");
+        let commit = plant_uncommitted_suffix(&mut c2, 1, b"rfc0144-mem", b"orphan");
+        let from = commit.saturating_add(1);
+        for n in c2.nodes.values_mut() {
+            for p in n.ranges.values_mut() {
+                p.sent_through.clear();
+            }
+        }
+        c2.finish_queued_propose(1, from, true)
+            .expect("no-leader abort");
+        let p = c2.nodes.get(&1).unwrap().ranges.get(&1).unwrap();
+        assert_eq!(
+            p.next_index.get(&2).copied(),
+            Some(from),
+            "member persist-leader stays local ids.first"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0145 P0: joint leave must step a removed Leader down.
+    /// 0128 participating and oob remove_member are **not** this tooth.
+    #[test]
+    fn leave_steps_down_removed_leader() {
+        assert!(membership_kernel::removed_steps_down(false));
+        assert!(
+            !membership_kernel::removed_steps_down_as_is(false),
+            "AS-IS dente: keep Role::Leader after joint leave"
+        );
+        let dir = temp();
+        let mut c = StoreCluster::open_lab_direct(&dir, 4, 1).unwrap();
+        c.elect_all(80).unwrap();
+        c.pin_dst_queued();
+        queued_shrink_until_leave_committed(&mut c, 4);
+        assert!(!c.is_member(4));
+        // AS-IS leftover: joint apply flipped participating but left Role::Leader.
+        {
+            let n = c.nodes.get_mut(&4).unwrap();
+            let p = n.ranges.get_mut(&1).unwrap();
+            p.role = Role::Leader;
+            p.leader_id = Some(4);
+        }
+        assert!(c.node_thinks_leader(4, 1));
+        c.install_applied_membership(c.member_ids().to_vec())
+            .expect("re-apply C-new");
+        assert!(
+            !c.node_thinks_leader(4, 1),
+            "removed replica must not remain Leader"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0145 P1.1: after stepping the removed leader down, remaining
+    /// members still elect a member. in-process Leader plant is **not** this tooth.
+    #[test]
+    fn leave_remaining_elect_member_leader() {
+        assert!(membership_kernel::removed_steps_down(false));
+        let dir = temp();
+        let mut c = StoreCluster::open_lab_direct(&dir, 4, 1).unwrap();
+        c.elect_all(80).unwrap();
+        c.pin_dst_queued();
+        queued_shrink_until_leave_committed(&mut c, 4);
+        assert!(!c.is_member(4));
+        {
+            let n = c.nodes.get_mut(&4).unwrap();
+            let p = n.ranges.get_mut(&1).unwrap();
+            p.role = Role::Leader;
+            p.leader_id = Some(4);
+        }
+        c.install_applied_membership(c.member_ids().to_vec())
+            .expect("re-apply C-new");
+        c.elect_all(80).unwrap();
+        let lead = c.range_leader(1).expect("remaining members elect");
+        assert!(c.is_member(lead), "leader must be a remaining member");
+        assert!(!c.node_thinks_leader(4, 1));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0146 P0: leader_hint must not name a replica already dropped from `ids`.
+    /// 0145 Role::Leader step-down is **not** this tooth.
+    #[test]
+    fn leader_hint_omits_removed_after_leave() {
+        assert!(!membership_kernel::hint_if_member(false));
+        assert!(
+            membership_kernel::hint_if_member_as_is(false),
+            "AS-IS dente: leader_hint returns a removed node"
+        );
+        let dir = temp();
+        let mut c = StoreCluster::open_lab_direct(&dir, 4, 1).unwrap();
+        c.elect_all(80).unwrap();
+        c.pin_dst_queued();
+        queued_shrink_until_leave_committed(&mut c, 4);
+        assert!(!c.is_member(4));
+        while c.step_down_range_leader(1).is_ok() {}
+        assert!(c.range_leader(1).is_none());
+        for nid in 1..=3u64 {
+            let n = c.nodes.get_mut(&nid).unwrap();
+            n.ranges.get_mut(&1).unwrap().leader_id = Some(4);
+        }
+        assert_ne!(
+            c.leader_hint(1),
+            Some(4),
+            "routing hint must not be the removed replica"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0146 P1.1: applying C-new clears stale leader_id on remaining peers.
+    /// `leader_hint` filter is **not** this tooth.
+    #[test]
+    fn install_clears_stale_leader_hint() {
+        assert!(!membership_kernel::hint_if_member(false));
+        let dir = temp();
+        let mut c = StoreCluster::open_lab_direct(&dir, 4, 1).unwrap();
+        c.elect_all(80).unwrap();
+        c.pin_dst_queued();
+        queued_shrink_until_leave_committed(&mut c, 4);
+        assert!(!c.is_member(4));
+        {
+            let n = c.nodes.get_mut(&1).unwrap();
+            n.ranges.get_mut(&1).unwrap().leader_id = Some(4);
+        }
+        c.install_applied_membership(c.member_ids().to_vec())
+            .expect("re-apply C-new");
+        let hint = c.nodes.get(&1).unwrap().ranges.get(&1).unwrap().leader_id;
+        assert_ne!(hint, Some(4), "stale hint of the removed node must be cleared");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0147 P0: C-new apply forgets next/match/sent_through of a removed
+    /// peer. 0146 hint clear is **not** this tooth.
+    #[test]
+    fn install_drops_removed_repl_slots() {
+        assert!(membership_kernel::drop_repl_slot(false));
+        assert!(
+            !membership_kernel::drop_repl_slot_as_is(false),
+            "AS-IS dente: keep next/match/sent_through after joint leave"
+        );
+        let dir = temp();
+        let mut c = StoreCluster::open_lab_direct(&dir, 4, 1).unwrap();
+        c.elect_all(80).unwrap();
+        c.pin_dst_queued();
+        queued_shrink_until_leave_committed(&mut c, 4);
+        assert!(!c.is_member(4));
+        {
+            let n = c.nodes.get_mut(&1).unwrap();
+            let p = n.ranges.get_mut(&1).unwrap();
+            p.next_index.insert(2, 10);
+            p.next_index.insert(4, 99);
+            p.match_index.insert(2, 9);
+            p.match_index.insert(4, 98);
+            p.sent_through.insert(2, 10);
+            p.sent_through.insert(4, 99);
+        }
+        c.install_applied_membership(c.member_ids().to_vec())
+            .expect("re-apply C-new");
+        let p = c.nodes.get(&1).unwrap().ranges.get(&1).unwrap();
+        assert_eq!(
+            p.next_index.get(&2).copied(),
+            Some(10),
+            "remaining-member slot must stay"
+        );
+        assert_eq!(p.match_index.get(&2).copied(), Some(9));
+        assert_eq!(p.sent_through.get(&2).copied(), Some(10));
+        assert!(
+            !p.next_index.contains_key(&4),
+            "removed next_index slot must be dropped"
+        );
+        assert!(
+            !p.match_index.contains_key(&4),
+            "removed match_index slot must be dropped"
+        );
+        assert!(
+            !p.sent_through.contains_key(&4),
+            "removed sent_through slot must be dropped"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0147 P1.1: queued leave itself drops remaining-leader slots for 4.
+    /// plant+re-install is **not** this tooth.
+    #[test]
+    fn leave_drops_removed_repl_slots() {
+        assert!(membership_kernel::drop_repl_slot(false));
+        let dir = temp();
+        let mut c = StoreCluster::open_lab_direct(&dir, 4, 1).unwrap();
+        c.elect_all(80).unwrap();
+        c.pin_dst_queued();
+        let had_slot = (1..=3u64).any(|nid| {
+            let p = c.nodes.get(&nid).unwrap().ranges.get(&1).unwrap();
+            p.next_index.contains_key(&4)
+                || p.match_index.contains_key(&4)
+                || p.sent_through.contains_key(&4)
+        });
+        assert!(
+            had_slot,
+            "pre-leave remaining peers must hold a slot for 4"
+        );
+        queued_shrink_until_leave_committed(&mut c, 4);
+        assert!(!c.is_member(4));
+        for nid in 1..=3u64 {
+            let p = c.nodes.get(&nid).unwrap().ranges.get(&1).unwrap();
+            assert!(
+                !p.next_index.contains_key(&4),
+                "node {nid} next_index must forget removed peer 4"
+            );
+            assert!(
+                !p.match_index.contains_key(&4),
+                "node {nid} match_index must forget removed peer 4"
+            );
+            assert!(
+                !p.sent_through.contains_key(&4),
+                "node {nid} sent_through must forget removed peer 4"
+            );
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0148 P0: oob remove_member forgets sent_through of the removed peer.
+    /// 0147 joint drop_repl_slot and next/match already dropped are **not** this tooth.
+    #[test]
+    fn remove_drops_removed_sent_through() {
+        assert!(membership_kernel::drop_sent_through(false));
+        assert!(
+            !membership_kernel::drop_sent_through_as_is(false),
+            "AS-IS dente: keep sent_through after oob remove_member"
+        );
+        let dir = temp();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
+        {
+            let n = c.nodes.get_mut(&1).unwrap();
+            let p = n.ranges.get_mut(&1).unwrap();
+            p.sent_through.insert(2, 10);
+            p.sent_through.insert(3, 99);
+        }
+        c.remove_member(3).expect("oob 3→2 is under quorum floor");
+        assert!(!c.is_member(3));
+        let p = c.nodes.get(&1).unwrap().ranges.get(&1).unwrap();
+        assert_eq!(
+            p.sent_through.get(&2).copied(),
+            Some(10),
+            "remaining-member sent_through must stay"
+        );
+        assert!(
+            !p.sent_through.contains_key(&3),
+            "removed sent_through slot must be dropped"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0148 P1.1: live replication then oob remove drops sent_through.
+    /// plant is **not** this tooth.
+    #[test]
+    fn oob_remove_drops_live_sent_through() {
+        assert!(membership_kernel::drop_sent_through(false));
+        let dir = temp();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
+        c.elect_all(80).unwrap();
+        c.put(b"rfc0148", b"live").unwrap();
+        let had = (1..=2u64).any(|nid| {
+            c.nodes
+                .get(&nid)
+                .unwrap()
+                .ranges
+                .get(&1)
+                .unwrap()
+                .sent_through
+                .contains_key(&3)
+        });
+        assert!(had, "pre-remove remaining peers must hold sent_through for 3");
+        c.remove_member(3).expect("oob 3→2 is under quorum floor");
+        assert!(!c.is_member(3));
+        for nid in 1..=2u64 {
+            let p = c.nodes.get(&nid).unwrap().ranges.get(&1).unwrap();
+            assert!(
+                !p.sent_through.contains_key(&3),
+                "node {nid} sent_through must forget removed peer 3"
+            );
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0128 P0: live `is_participating` must ignore a stale flag after
+    /// leave. 0127 crash-reopen is **not** this tooth.
+    #[test]
+    fn is_participating_ignores_stale_flag_after_leave() {
+        assert!(!membership_kernel::participating_if_member(false));
+        assert!(
+            membership_kernel::participating_if_member_as_is(false),
+            "AS-IS dente: ignore ids"
+        );
+        let dir = temp();
+        let mut c = StoreCluster::open_lab_direct(&dir, 4, 1).unwrap();
+        c.elect_all(80).unwrap();
+        c.pin_dst_queued();
+        queued_shrink_until_leave_committed(&mut c, 4);
+        assert!(!c.is_member(4));
+        c.nodes.get_mut(&4).unwrap().participating = true;
+        assert!(
+            !c.is_participating(4),
+            "stale participating=true must not count after leave"
+        );
+        c.set_participating(1, false).unwrap();
+        assert!(
+            !c.is_participating(1),
+            "partitioned member still in ids must stay not-participating"
+        );
+        assert!(c.is_member(1));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0103 P0: Queued add then Queued remove must leave both joints.
+    /// 0098 add-only and 0099 Direct-4 remove are not this tooth.
+    #[test]
+    fn leave_joint_on_queued_add_then_remove_is_in_log() {
+        assert!(!membership_kernel::joint_leave_ok(false));
+        assert!(
+            membership_kernel::joint_leave_ok_as_is(false),
+            "AS-IS dente: skip leave"
+        );
+        let dir = temp();
+        let mut c = StoreCluster::open_lab_direct(&dir, 4, 1).unwrap();
+        c.elect_all(80).unwrap();
+        c.remove_member_joint(4).expect("shrink to 3");
+        c.pin_dst_queued();
+        assert_eq!(c.rpc_mode(), RpcMode::Queued);
+        let before_add = max_c_new_only_leave_index(&c);
+        let add_res = c.add_member_joint(4);
+        let add_leave =
+            drive_queued_joint_until_leave(&mut c, add_res, before_add, "Queued add_member_joint");
+        assert!(add_leave, "Queued add must leave C-new-only before shrink");
+        drain_queued_until_joint_idle(&mut c);
+        assert!(c.is_member(4), "add must apply before Queued remove");
+        assert!(
+            c.pending_joint().is_none(),
+            "add leave must commit before a second joint"
+        );
+        let before_remove = max_c_new_only_leave_index(&c);
+        let remove_res = c.remove_member_joint(4);
+        let remove_leave = drive_queued_joint_until_leave(
+            &mut c,
+            remove_res,
+            before_remove,
+            "Queued remove_member_joint after add",
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(
+            remove_leave,
+            "Queued remove after add must leave C-new-only"
+        );
+        assert!(membership_kernel::joint_leave_ok(remove_leave));
+    }
+
+    /// RFC-0104 P0: after Queued shrink leave, a second Queued add must be
+    /// admitted and leave. 0103 stops at remove; 0098 add is after Direct shrink.
+    #[test]
+    fn leave_joint_on_queued_add_remove_add_is_in_log() {
+        assert!(!membership_kernel::joint_leave_ok(false));
+        assert!(
+            membership_kernel::joint_leave_ok_as_is(false),
+            "AS-IS dente: skip leave"
+        );
+        let dir = temp();
+        let mut c = StoreCluster::open_lab_direct(&dir, 4, 1).unwrap();
+        c.elect_all(80).unwrap();
+        c.remove_member_joint(4).expect("shrink to 3");
+        c.pin_dst_queued();
+        assert_eq!(c.rpc_mode(), RpcMode::Queued);
+        let before_add = max_c_new_only_leave_index(&c);
+        let add_res = c.add_member_joint(4);
+        assert!(
+            drive_queued_joint_until_leave(&mut c, add_res, before_add, "Queued add"),
+            "first Queued add must leave"
+        );
+        drain_queued_until_joint_idle(&mut c);
+        assert!(c.is_member(4), "first add must apply");
+        assert!(c.pending_joint().is_none());
+        let before_remove = max_c_new_only_leave_index(&c);
+        let remove_res = c.remove_member_joint(4);
+        assert!(
+            drive_queued_joint_until_leave(&mut c, remove_res, before_remove, "Queued remove"),
+            "Queued remove must leave before re-add"
+        );
+        drain_queued_until_joint_idle(&mut c);
+        assert!(
+            !c.is_member(4),
+            "shrink must apply before second Queued add"
+        );
+        let before_readd = max_c_new_only_leave_index(&c);
+        let readd_res = c.add_member_joint(4);
+        if let Err(StoreError::Msg(m)) = &readd_res {
+            assert!(
+                !m.contains("already in flight"),
+                "shrink leave must free the leader for add: {m}"
+            );
+        }
+        let readd_leave = drive_queued_joint_until_leave(
+            &mut c,
+            readd_res,
+            before_readd,
+            "Queued add_member_joint after shrink",
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(
+            readd_leave,
+            "Queued add after Queued shrink must leave C-new-only"
+        );
+        assert!(membership_kernel::joint_leave_ok(readd_leave));
+    }
+
+    /// RFC-0106 P0: Queued remove then add then remove, each with a new
+    /// leave. 0099 is one shrink; 0104 starts after Direct shrink.
+    #[test]
+    fn leave_joint_on_queued_remove_add_remove_is_in_log() {
+        assert!(!membership_kernel::joint_leave_ok(false));
+        assert!(
+            membership_kernel::joint_leave_ok_as_is(false),
+            "AS-IS dente: skip leave"
+        );
+        let dir = temp();
+        let mut c = StoreCluster::open_lab_direct(&dir, 4, 1).unwrap();
+        c.elect_all(80).unwrap();
+        c.pin_dst_queued();
+        assert_eq!(c.rpc_mode(), RpcMode::Queued);
+        let before_rm1 = max_c_new_only_leave_index(&c);
+        let rm1 = c.remove_member_joint(4);
+        assert!(
+            drive_queued_joint_until_leave(&mut c, rm1, before_rm1, "Queued remove"),
+            "first Queued remove must leave"
+        );
+        drain_queued_until_joint_idle(&mut c);
+        assert!(!c.is_member(4), "first shrink must apply");
+        let before_add = max_c_new_only_leave_index(&c);
+        let add_res = c.add_member_joint(4);
+        if let Err(StoreError::Msg(m)) = &add_res {
+            assert!(
+                !m.contains("already in flight"),
+                "first shrink leave must free the leader for add: {m}"
+            );
+        }
+        assert!(
+            drive_queued_joint_until_leave(&mut c, add_res, before_add, "Queued add after shrink"),
+            "Queued add after Queued shrink must leave"
+        );
+        drain_queued_until_joint_idle(&mut c);
+        assert!(c.is_member(4), "add must apply before second shrink");
+        let before_rm2 = max_c_new_only_leave_index(&c);
+        let rm2 = c.remove_member_joint(4);
+        let rm2_leave =
+            drive_queued_joint_until_leave(&mut c, rm2, before_rm2, "Queued remove after add");
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(rm2_leave, "second Queued remove must leave C-new-only");
+        assert!(membership_kernel::joint_leave_ok(rm2_leave));
+    }
+
+    /// RFC-0111 P0: four-step Queued remove-add-remove-add. 0106 stops at
+    /// the second shrink; 0104 last add is after a Direct shrink.
+    #[test]
+    fn leave_joint_on_queued_remove_add_remove_add_is_in_log() {
+        assert!(!membership_kernel::joint_leave_ok(false));
+        assert!(
+            membership_kernel::joint_leave_ok_as_is(false),
+            "AS-IS dente: skip leave"
+        );
+        let dir = temp();
+        let mut c = StoreCluster::open_lab_direct(&dir, 4, 1).unwrap();
+        c.elect_all(80).unwrap();
+        c.pin_dst_queued();
+        assert_eq!(c.rpc_mode(), RpcMode::Queued);
+        let before_rm1 = max_c_new_only_leave_index(&c);
+        let rm1 = c.remove_member_joint(4);
+        assert!(drive_queued_joint_until_leave(
+            &mut c,
+            rm1,
+            before_rm1,
+            "Queued remove 1"
+        ));
+        drain_queued_until_joint_idle(&mut c);
+        assert!(!c.is_member(4));
+        let before_add1 = max_c_new_only_leave_index(&c);
+        let add1 = c.add_member_joint(4);
+        if let Err(StoreError::Msg(m)) = &add1 {
+            assert!(
+                !m.contains("already in flight"),
+                "first shrink leave must free the leader: {m}"
+            );
+        }
+        assert!(drive_queued_joint_until_leave(
+            &mut c,
+            add1,
+            before_add1,
+            "Queued add 1"
+        ));
+        drain_queued_until_joint_idle(&mut c);
+        assert!(c.is_member(4));
+        let before_rm2 = max_c_new_only_leave_index(&c);
+        let rm2 = c.remove_member_joint(4);
+        assert!(drive_queued_joint_until_leave(
+            &mut c,
+            rm2,
+            before_rm2,
+            "Queued remove 2"
+        ));
+        drain_queued_until_joint_idle(&mut c);
+        assert!(!c.is_member(4), "second shrink must apply before last add");
+        let before_add2 = max_c_new_only_leave_index(&c);
+        let add2 = c.add_member_joint(4);
+        if let Err(StoreError::Msg(m)) = &add2 {
+            assert!(
+                !m.contains("already in flight"),
+                "second shrink leave must free the leader for last add: {m}"
+            );
+        }
+        let add2_leave = drive_queued_joint_until_leave(
+            &mut c,
+            add2,
+            before_add2,
+            "Queued add after two shrinks",
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(
+            add2_leave,
+            "Queued add after two Queued shrinks must leave C-new-only"
+        );
+        assert!(membership_kernel::joint_leave_ok(add2_leave));
+    }
+
+    /// RFC-0119 P0: TCP replica (`open_single_node`) only has self in
+    /// `nodes`. Joint remove of a peer must not be `unknown node`.
+    /// In-process 4-node shrink is **not** this tooth.
+    #[test]
+    fn remove_member_joint_tcp_replica_does_not_require_local_nodes() {
+        assert!(membership_kernel::joint_target_counts(true, false));
+        assert!(
+            !membership_kernel::joint_target_counts_as_is(true, false),
+            "AS-IS dente: require peer in local nodes"
+        );
+        assert!(!membership_kernel::joint_target_counts(false, true));
+        assert!(membership_kernel::joint_target_counts_as_is(false, true));
+        let dir = temp();
+        let mut c = StoreCluster::open_single_node(&dir, 1, &[1, 2, 3], 1).unwrap();
+        assert!(
+            !c.nodes.contains_key(&3),
+            "TCP replica must not have peer 3 in local nodes"
+        );
+        assert!(c.ids.contains(&3));
+        let e = c.remove_member_joint(3).unwrap_err();
+        let msg = e.to_string();
+        assert!(
+            !msg.contains("unknown node"),
+            "TCP replica must name a peer that lives in another process: {msg}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0119 P1.1: TCP replica must joint-add a never-local node.
+    /// In-process add of a previously-removed peer is **not** this tooth.
+    #[test]
+    fn add_member_joint_tcp_replica_does_not_require_local_nodes() {
+        assert!(membership_kernel::joint_add_target_counts(false));
+        assert!(
+            !membership_kernel::joint_add_target_counts_as_is(false),
+            "AS-IS dente: require joiner in local nodes"
+        );
+        let dir = temp();
+        let mut c = StoreCluster::open_single_node(&dir, 1, &[1, 2, 3], 1).unwrap();
+        assert!(!c.nodes.contains_key(&4));
+        assert!(!c.ids.contains(&4));
+        let e = c.add_member_joint(4).unwrap_err();
+        let msg = e.to_string();
+        assert!(
+            !msg.contains("unknown node"),
+            "TCP replica must name a joining process: {msg}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0105 P0: after Queued shrink leave, a removed node's leftover
+    /// C-old,new must not keep `pending_joint` (election reads that).
+    /// 0104 leader-add is not this tooth.
+    #[test]
+    fn pending_joint_ignores_removed_node_after_queued_shrink() {
+        assert!(!membership_kernel::pending_joint_node_counts(false));
+        assert!(
+            membership_kernel::pending_joint_node_counts_as_is(false),
+            "AS-IS dente: count removed node"
+        );
+        let dir = temp();
+        let mut c = StoreCluster::open_lab_direct(&dir, 4, 1).unwrap();
+        c.elect_all(80).unwrap();
+        c.remove_member_joint(4).expect("shrink to 3");
+        c.pin_dst_queued();
+        let before_add = max_c_new_only_leave_index(&c);
+        let add_res = c.add_member_joint(4);
+        assert!(drive_queued_joint_until_leave(
+            &mut c,
+            add_res,
+            before_add,
+            "Queued add"
+        ));
+        drain_queued_until_joint_idle(&mut c);
+        let before_remove = max_c_new_only_leave_index(&c);
+        let remove_res = c.remove_member_joint(4);
+        assert!(drive_queued_joint_until_leave(
+            &mut c,
+            remove_res,
+            before_remove,
+            "Queued remove"
+        ));
+        drain_queued_until_joint_idle(&mut c);
+        assert!(!c.is_member(4));
+        let n4_still_active = c.nodes.get(&4).is_some_and(|n| {
+            n.ranges.values().any(|p| {
+                p.log.iter().any(|rec| {
+                    matches!(
+                        &rec.entry,
+                        RangeEntry::MembershipJoint { old, new }
+                            if membership_kernel::joint_still_active(old, new)
+                    )
+                })
+            })
+        });
+        let pending = c.pending_joint();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(
+            n4_still_active,
+            "removed node must still hold C-old,new (AS-IS would keep joint)"
+        );
+        assert!(
+            pending.is_none(),
+            "pending_joint must ignore the removed node's leftover joint"
+        );
+    }
+
+    /// RFC-0112 P0: after Queued shrink leave, RV `vote_targets` omit the
+    /// removed node. 0105 is pending_joint None; 0107 is quorum.
+    #[test]
+    fn vote_targets_after_queued_shrink_omit_removed_node() {
+        assert!(!membership_kernel::pending_joint_node_counts(false));
+        assert!(
+            membership_kernel::pending_joint_node_counts_as_is(false),
+            "AS-IS dente: count removed node"
+        );
+        let dir = temp();
+        let mut c = StoreCluster::open_lab_direct(&dir, 4, 1).unwrap();
+        c.elect_all(80).unwrap();
+        c.remove_member_joint(4).expect("shrink to 3");
+        c.pin_dst_queued();
+        let before_add = max_c_new_only_leave_index(&c);
+        let add_res = c.add_member_joint(4);
+        assert!(drive_queued_joint_until_leave(
+            &mut c,
+            add_res,
+            before_add,
+            "Queued add"
+        ));
+        drain_queued_until_joint_idle(&mut c);
+        let before_remove = max_c_new_only_leave_index(&c);
+        let remove_res = c.remove_member_joint(4);
+        assert!(drive_queued_joint_until_leave(
+            &mut c,
+            remove_res,
+            before_remove,
+            "Queued remove"
+        ));
+        drain_queued_until_joint_idle(&mut c);
+        assert!(!c.is_member(4));
+        let n4_still_active = c.nodes.get(&4).is_some_and(|n| {
+            n.ranges.values().any(|p| {
+                p.log.iter().any(|rec| {
+                    matches!(
+                        &rec.entry,
+                        RangeEntry::MembershipJoint { old, new }
+                            if membership_kernel::joint_still_active(old, new)
+                    )
+                })
+            })
+        });
+        let targets = c.vote_targets();
+        let mut live = c.ids.clone();
+        live.sort_unstable();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(
+            n4_still_active,
+            "removed node must still hold C-old,new (AS-IS would keep it in targets)"
+        );
+        assert!(
+            !targets.contains(&4),
+            "vote_targets must omit removed node 4, got {targets:?}"
+        );
+        assert_eq!(targets, live, "vote_targets must equal live ids");
+    }
+
+    /// RFC-0113 P0: `start_election` must not queue RequestVote to a lagging
+    /// removed node (`participating=true` but not in ids). 0112 is the helper.
+    #[test]
+    fn request_vote_not_sent_to_lagging_removed_node() {
+        assert!(!membership_kernel::pending_joint_node_counts(false));
+        assert!(
+            membership_kernel::pending_joint_node_counts_as_is(false),
+            "AS-IS dente: count removed node"
+        );
+        let dir = temp();
+        let mut c = StoreCluster::open_lab_direct(&dir, 4, 1).unwrap();
+        c.elect_all(80).unwrap();
+        c.remove_member_joint(4).expect("shrink to 3");
+        c.pin_dst_queued();
+        assert_eq!(c.rpc_mode(), RpcMode::Queued);
+        let before_add = max_c_new_only_leave_index(&c);
+        let add_res = c.add_member_joint(4);
+        assert!(drive_queued_joint_until_leave(
+            &mut c,
+            add_res,
+            before_add,
+            "Queued add"
+        ));
+        drain_queued_until_joint_idle(&mut c);
+        let before_remove = max_c_new_only_leave_index(&c);
+        let remove_res = c.remove_member_joint(4);
+        assert!(drive_queued_joint_until_leave(
+            &mut c,
+            remove_res,
+            before_remove,
+            "Queued remove"
+        ));
+        drain_queued_until_joint_idle(&mut c);
+        assert!(!c.is_member(4));
+        let n4_still_active = c.nodes.get(&4).is_some_and(|n| {
+            n.ranges.values().any(|p| {
+                p.log.iter().any(|rec| {
+                    matches!(
+                        &rec.entry,
+                        RangeEntry::MembershipJoint { old, new }
+                            if membership_kernel::joint_still_active(old, new)
+                    )
+                })
+            })
+        });
+        assert!(
+            n4_still_active,
+            "removed node must still hold C-old,new (AS-IS would RV it)"
+        );
+        c.nodes.get_mut(&4).unwrap().participating = true;
+        let _ = c.drain_outbound();
+        let cand = *c.ids.iter().find(|&&id| id != 4).expect("live member");
+        c.start_election(1, cand).expect("start_election");
+        let outbound = c.drain_outbound();
+        let mut rv_to_removed = 0usize;
+        let mut rv_to_live = 0usize;
+        for (_from, to, bytes) in &outbound {
+            if !matches!(
+                PeerMsg::decode(bytes).ok(),
+                Some(PeerMsg::RequestVote { .. })
+            ) {
+                continue;
+            }
+            if *to == 4 {
+                rv_to_removed += 1;
+            } else if c.ids.contains(to) {
+                rv_to_live += 1;
+            }
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(
+            rv_to_removed, 0,
+            "RequestVote must not be queued to lagging removed node 4"
+        );
+        assert!(
+            rv_to_live > 0,
+            "election must still queue RequestVote to a live peer"
+        );
+    }
+
+    /// RFC-0114 P0: a RequestVote grant from the removed node must not be
+    /// recorded after leave. 0113 is outbound RV only.
+    #[test]
+    fn rv_grant_from_removed_node_is_ignored_after_leave() {
+        assert!(!membership_kernel::election_grant_from_counts(false, false));
+        assert!(
+            membership_kernel::election_grant_from_counts_as_is(false, false),
+            "AS-IS dente: record any grant"
+        );
+        assert!(membership_kernel::election_grant_from_counts(false, true));
+        let dir = temp();
+        let mut c = StoreCluster::open_lab_direct(&dir, 4, 1).unwrap();
+        c.elect_all(80).unwrap();
+        c.remove_member_joint(4).expect("shrink to 3");
+        c.pin_dst_queued();
+        let before_add = max_c_new_only_leave_index(&c);
+        let add_res = c.add_member_joint(4);
+        assert!(drive_queued_joint_until_leave(
+            &mut c,
+            add_res,
+            before_add,
+            "Queued add"
+        ));
+        drain_queued_until_joint_idle(&mut c);
+        let before_remove = max_c_new_only_leave_index(&c);
+        let remove_res = c.remove_member_joint(4);
+        assert!(drive_queued_joint_until_leave(
+            &mut c,
+            remove_res,
+            before_remove,
+            "Queued remove"
+        ));
+        drain_queued_until_joint_idle(&mut c);
+        assert!(!c.is_member(4));
+        assert!(c.pending_joint().is_none());
+        let cand = *c.ids.iter().find(|&&id| id != 4).expect("live member");
+        c.start_election(1, cand).expect("start_election");
+        let term = c
+            .nodes
+            .get(&cand)
+            .and_then(|n| n.ranges.get(&1))
+            .map(|p| p.term)
+            .expect("term");
+        c.on_request_vote_reply(cand, 4, 1, term, true)
+            .expect("reply from removed");
+        let granted = c
+            .election_granted
+            .get(&(1, term, cand))
+            .cloned()
+            .unwrap_or_default();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(
+            !granted.contains(&4),
+            "grant from removed node 4 must not be recorded, got {granted:?}"
+        );
+    }
+
+    /// RFC-0115 P0: during joint add (apply lag), a grant from the joining
+    /// node must be recorded (C-new). 0114 after-leave ignore is not this tooth.
+    #[test]
+    fn rv_grant_from_joining_node_counts_during_joint_add() {
+        assert!(membership_kernel::election_grant_from_counts(false, true));
+        assert!(!membership_kernel::election_grant_from_counts(false, false));
+        assert!(
+            membership_kernel::election_grant_from_counts_as_is(false, false),
+            "AS-IS dente: record any grant"
+        );
+        let dir = temp();
+        let mut c = StoreCluster::open_lab_direct(&dir, 4, 1).unwrap();
+        c.elect_all(80).unwrap();
+        c.remove_member_joint(4).expect("shrink to 3");
+        assert!(!c.is_member(4));
+        c.plant_committed_joint_without_leave(4)
+            .expect("plant committed joint add without leave");
+        assert!(!c.is_member(4), "apply lag: 4 not in ids");
+        assert!(
+            c.pending_joint().is_some(),
+            "planted C-old,new must be pending"
+        );
+        c.pin_dst_queued();
+        assert_eq!(c.rpc_mode(), RpcMode::Queued);
+        let cand = *c.ids.first().expect("live member");
+        c.start_election(1, cand).expect("start_election");
+        let term = c
+            .nodes
+            .get(&cand)
+            .and_then(|n| n.ranges.get(&1))
+            .map(|p| p.term)
+            .expect("term");
+        c.on_request_vote_reply(cand, 4, 1, term, true)
+            .expect("reply from joining node");
+        let granted = c
+            .election_granted
+            .get(&(1, term, cand))
+            .cloned()
+            .unwrap_or_default();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(
+            granted.contains(&4),
+            "grant from joining node 4 must count during joint add, got {granted:?}"
+        );
+    }
+
+    /// RFC-0107 P0: after Queued shrink leave, 2/3 of the live set elects.
+    /// AS-IS counting the removed node's C-old,new would require 3/4 old.
+    /// 0105 is pending_joint None; 0102 is compact+reopen plant.
+    #[test]
+    fn election_after_queued_shrink_ignores_removed_node_joint() {
+        assert!(membership_kernel::joint_election_ok(2, 3, None));
+        assert!(!membership_kernel::joint_election_ok(2, 4, Some((2, 3))));
+        assert!(
+            membership_kernel::pending_joint_node_counts_as_is(false),
+            "AS-IS dente: count removed node"
+        );
+        let dir = temp();
+        let mut c = StoreCluster::open_lab_direct(&dir, 4, 1).unwrap();
+        c.elect_all(80).unwrap();
+        c.remove_member_joint(4).expect("shrink to 3");
+        c.pin_dst_queued();
+        let before_add = max_c_new_only_leave_index(&c);
+        let add_res = c.add_member_joint(4);
+        assert!(drive_queued_joint_until_leave(
+            &mut c,
+            add_res,
+            before_add,
+            "Queued add"
+        ));
+        drain_queued_until_joint_idle(&mut c);
+        let before_remove = max_c_new_only_leave_index(&c);
+        let remove_res = c.remove_member_joint(4);
+        assert!(drive_queued_joint_until_leave(
+            &mut c,
+            remove_res,
+            before_remove,
+            "Queued remove"
+        ));
+        drain_queued_until_joint_idle(&mut c);
+        assert!(!c.is_member(4));
+        assert!(c.pending_joint().is_none());
+        let n4_still_active = c.nodes.get(&4).is_some_and(|n| {
+            n.ranges.values().any(|p| {
+                p.log.iter().any(|rec| {
+                    matches!(
+                        &rec.entry,
+                        RangeEntry::MembershipJoint { old, new }
+                            if membership_kernel::joint_still_active(old, new)
+                    )
+                })
+            })
+        });
+        assert!(
+            n4_still_active,
+            "removed node must still hold C-old,new (AS-IS would keep joint)"
+        );
+        let cand = c.range_leader(1).unwrap_or_else(|| c.ids[0]);
+        let term = c
+            .nodes
+            .get(&cand)
+            .and_then(|n| n.ranges.get(&1))
+            .map(|p| p.term)
+            .expect("candidate range");
+        c.election_granted.insert((1, term, cand), vec![1, 2]);
+        c.election_votes.insert((1, term, cand), 2);
+        let elects = c.election_has_joint_quorum(1, term, cand);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(
+            elects,
+            "2/3 live must elect after shrink leave; zombie joint on node 4 must not apply"
+        );
+    }
+
+    /// RFC-0100 P0: compact must keep an applied still-active joint until
+    /// leave. 0099 observes leave *before* compact; that is not this tooth.
+    #[test]
+    fn compact_does_not_drop_unleft_joint() {
+        assert_eq!(compact_kernel::compact_through_unleft(5, Some(3)), 2);
+        assert_eq!(
+            compact_kernel::compact_through_unleft_as_is(5, Some(3)),
+            5,
+            "AS-IS dente: compact past un-left joint"
+        );
+        let dir = temp();
+        let mut c = StoreCluster::open_lab_direct(&dir, 2, 1).unwrap();
+        c.elect_all(80).unwrap();
+        c.remove_member_joint(2).expect("shrink to 1");
+        c.plant_committed_joint_without_leave(2)
+            .expect("plant committed joint without leave");
+        let lid = c.range_leader(1).expect("leader");
+        let joint_idx = {
+            let p = c.nodes.get(&lid).unwrap().ranges.get(&1).unwrap();
+            let rec = p.log.last().expect("planted joint");
+            match &rec.entry {
+                RangeEntry::MembershipJoint { old, new } => {
+                    assert!(membership_kernel::joint_still_active(old, new));
+                }
+                other => panic!("plant must append MembershipJoint, got {other:?}"),
+            }
+            rec.index
+        };
+        {
+            let p = c.nodes.get_mut(&lid).unwrap().ranges.get_mut(&1).unwrap();
+            p.applied = p.commit;
+        }
+        assert!(joint_idx > 0, "planted joint must have a log index");
+        let applied = c.applied_index(lid, 1);
+        assert_eq!(
+            compact_kernel::compact_through_unleft(applied, Some(joint_idx)),
+            joint_idx.saturating_sub(1)
+        );
+        assert_eq!(
+            compact_kernel::compact_through_unleft_as_is(applied, Some(joint_idx)),
+            applied,
+            "AS-IS would compact through the joint"
+        );
+        c.maybe_compact_logs(1).expect("compact");
+        let p = c.nodes.get(&lid).unwrap().ranges.get(&1).unwrap();
+        let still = p.log.iter().any(|rec| {
+            matches!(
+                &rec.entry,
+                RangeEntry::MembershipJoint { old, new }
+                    if membership_kernel::joint_still_active(old, new)
+            )
+        });
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(still, "compact must keep un-left still-active joint");
+    }
+
+    /// RFC-0101 P0: compact persist + crash-reopen must still show the
+    /// un-left joint. 0100 RAM-only compact is not this tooth.
+    #[test]
+    fn unleft_joint_survives_compact_reopen() {
+        assert_eq!(compact_kernel::compact_through_unleft(5, Some(3)), 2);
+        assert_eq!(
+            compact_kernel::compact_through_unleft_as_is(5, Some(3)),
+            5,
+            "AS-IS dente: compact past un-left joint"
+        );
+        let dir = temp();
+        let mut c = StoreCluster::open_lab_direct(&dir, 2, 1).unwrap();
+        c.elect_all(80).unwrap();
+        c.remove_member_joint(2).expect("shrink to 1");
+        c.plant_committed_joint_without_leave(2)
+            .expect("plant committed joint without leave");
+        let lid = c.range_leader(1).expect("leader");
+        let joint_idx = c
+            .nodes
+            .get(&lid)
+            .unwrap()
+            .ranges
+            .get(&1)
+            .unwrap()
+            .last_index();
+        {
+            let p = c.nodes.get_mut(&lid).unwrap().ranges.get_mut(&1).unwrap();
+            p.applied = p.commit;
+        }
+        {
+            let n = c.nodes.get_mut(&lid).unwrap();
+            persist_log_db(&mut n.db, 1, n.ranges.get_mut(&1).unwrap()).unwrap();
+            persist_commit_db(&mut n.db, 1, n.ranges.get(&1).unwrap()).unwrap();
+            persist_applied_db(&mut n.db, 1, n.ranges.get(&1).unwrap()).unwrap();
+        }
+        c.maybe_compact_logs(1).expect("compact");
+        c.crash_reopen_engine_on(lid, pedradb_io_uring::IoUringEnv::default())
+            .expect("crash-reopen leader");
+        let p = c.nodes.get(&lid).unwrap().ranges.get(&1).unwrap();
+        assert!(
+            p.snapshot_index < joint_idx,
+            "snap must not cover the un-left joint (AS-IS compact would)"
+        );
+        let still = p.log.iter().any(|rec| {
+            matches!(
+                &rec.entry,
+                RangeEntry::MembershipJoint { old, new }
+                    if membership_kernel::joint_still_active(old, new)
+            )
+        });
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(
+            still,
+            "un-left joint must survive compact persist + crash-reopen"
+        );
+    }
+
+    /// RFC-0102 P0: after compact persist + crash-reopen, C-old majority
+    /// still must not elect. 0101 log-only and 0066/0068 RAM plant are
+    /// not this tooth.
+    #[test]
+    fn election_after_compact_reopen_refuses_old_majority() {
+        assert!(!membership_kernel::joint_election_ok(1, 1, Some((1, 2))));
+        assert!(
+            membership_kernel::joint_election_ok_as_is(1, 1, Some((1, 2))),
+            "AS-IS dente: old-only would elect"
+        );
+        let dir = temp();
+        let mut c = StoreCluster::open_lab_direct(&dir, 2, 1).unwrap();
+        c.elect_all(80).unwrap();
+        c.remove_member_joint(2).expect("shrink to 1");
+        c.plant_committed_joint_without_leave(2)
+            .expect("plant committed joint without leave");
+        let lid = c.range_leader(1).expect("leader");
+        {
+            let p = c.nodes.get_mut(&lid).unwrap().ranges.get_mut(&1).unwrap();
+            p.applied = p.commit;
+        }
+        {
+            let n = c.nodes.get_mut(&lid).unwrap();
+            persist_log_db(&mut n.db, 1, n.ranges.get_mut(&1).unwrap()).unwrap();
+            persist_commit_db(&mut n.db, 1, n.ranges.get(&1).unwrap()).unwrap();
+            persist_applied_db(&mut n.db, 1, n.ranges.get(&1).unwrap()).unwrap();
+        }
+        c.maybe_compact_logs(1).expect("compact");
+        c.crash_reopen_engine_on(lid, pedradb_io_uring::IoUringEnv::default())
+            .expect("crash-reopen leader");
+        assert!(
+            c.pending_joint().is_some(),
+            "reopened log must still carry C-old,new"
+        );
+        let term = c.nodes.get(&lid).unwrap().ranges.get(&1).unwrap().term;
+        c.election_granted.insert((1, term, lid), vec![1]);
+        c.election_votes.insert((1, term, lid), 1);
+        assert!(
+            !c.election_has_joint_quorum(1, term, lid),
+            "C-old majority must not elect after compact+reopen of un-left joint"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0066 P0: after the joint **commits** (but apply lags), C-old
+    /// majority still must not elect. AS-IS `pending_joint` died at commit.
+    #[test]
+    fn election_after_committed_joint_still_requires_new_majority() {
+        let dir = temp();
+        let mut c = StoreCluster::open_lab_direct(&dir, 4, 1).unwrap();
+        c.elect_all(80).unwrap();
+        c.remove_member_joint(4).expect("shrink to 3");
+        assert!(!c.is_member(4));
+        let lid = c.range_leader(1).expect("leader after shrink");
+        let term = c.nodes.get(&lid).unwrap().ranges.get(&1).unwrap().term;
+        {
+            let p = c.nodes.get_mut(&lid).unwrap().ranges.get_mut(&1).unwrap();
+            let idx = p.last_index() + 1;
+            p.log.push(LogRec {
+                index: idx,
+                term: p.term,
+                entry: RangeEntry::MembershipJoint {
+                    old: vec![1, 2, 3],
+                    new: vec![1, 2, 3, 4],
+                },
+            });
+            p.commit = idx;
+            p.applied = idx.saturating_sub(1);
+        }
+        assert!(
+            membership_kernel::joint_still_active(&[1, 2, 3], &[1, 2, 3, 4]),
+            "kernel: C-old,new is still a joint"
+        );
+        assert!(
+            !membership_kernel::joint_still_active_as_is(&[1, 2, 3], &[1, 2, 3, 4]),
+            "AS-IS dente: committed joint looks inactive"
+        );
+        c.election_granted.insert((1, term, lid), vec![1, 2]);
+        c.election_votes.insert((1, term, lid), 2);
+        assert!(
+            !c.election_has_joint_quorum(1, term, lid),
+            "2/3 old must not elect after joint commit, before leave"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0068 P0: DST plant API (same crash window as 0066) then C-old
+    /// majority must not elect. AS-IS would drop the committed joint.
+    #[test]
+    fn plant_committed_joint_without_leave_refuses_old_majority() {
+        let dir = temp();
+        let mut c = StoreCluster::open_lab_direct(&dir, 4, 1).unwrap();
+        c.elect_all(80).unwrap();
+        c.remove_member_joint(4).expect("shrink to 3");
+        assert!(!c.is_member(4));
+        c.plant_committed_joint_without_leave(4)
+            .expect("plant committed joint without leave");
+        assert!(membership_kernel::joint_still_active(
+            &[1, 2, 3],
+            &[1, 2, 3, 4]
+        ));
+        assert!(!membership_kernel::joint_still_active_as_is(
+            &[1, 2, 3],
+            &[1, 2, 3, 4]
+        ));
+        assert!(
+            !c.probe_old_majority_joint_election(1),
+            "2/3 old must not elect after planted committed joint"
+        );
+        assert!(
+            membership_kernel::joint_election_ok_as_is(2, 3, Some((2, 4))),
+            "AS-IS dente: old-only would elect"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0069 P0: bounded elect_all still works; an eventual-election
+    /// *claim* without ES-1/2/3 is refused. AS-IS would admit.
+    #[test]
+    fn claim_eventual_election_refused_without_es_axioms() {
+        let dir = temp();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
+        c.elect_all(80).unwrap();
+        assert!(
+            c.range_leader(1).is_some(),
+            "bounded elect must find a leader"
+        );
+        assert!(
+            !c.claim_eventual_election(false, true, true),
+            "missing ES-1 must refuse the liveness claim"
+        );
+        assert!(!c.claim_eventual_election(true, false, true));
+        assert!(!c.claim_eventual_election(true, true, false));
+        assert!(c.claim_eventual_election(true, true, true));
+        assert!(
+            liveness_admitted_as_is(false, false, false),
+            "AS-IS dente: claim without axioms"
+        );
+        assert!(!liveness_admitted(false, true, true));
+        assert_eq!(
+            elect_claim_banner(false, false, false),
+            "bounded-elect not-eventual"
+        );
+        assert!(
+            !elect_claim_banner(false, false, false).contains("live"),
+            "TCP/real banner must not print live without ES"
+        );
+        assert_eq!(
+            elect_claim_banner_as_is(false, false, false),
+            "live",
+            "AS-IS dente: print live without naming ES"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0072 P0: acked put must still be L28-clean after crash-reopen of
+    /// a follower. AS-IS would pass on first get only.
+    #[test]
+    fn l28_durability_ok_requires_after_kill_and_restart() {
+        let dir = temp();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
+        c.elect_all(80).unwrap();
+        c.put(b"l28/k", b"l28/v").unwrap();
+        let get_ok = c.get_strong(b"l28/k").unwrap().as_deref() == Some(b"l28/v".as_ref());
+        assert!(get_ok, "acked put must be strongly visible");
+        let leader = c.range_leader(1).expect("leader");
+        let follower = (1u64..=3).find(|&id| id != leader).expect("follower");
+        c.crash_reopen_engine_on(follower, pedradb_io_uring::IoUringEnv::default())
+            .expect("crash-reopen follower");
+        let after_kill_ok = c.count_applied_eq(b"l28/k", b"l28/v") >= 2;
+        let restart_ok = c.get_strong(b"l28/k").unwrap().as_deref() == Some(b"l28/v".as_ref());
+        assert!(
+            l28_durability_ok(get_ok, after_kill_ok, restart_ok),
+            "get={get_ok} after={after_kill_ok} restart={restart_ok}"
+        );
+        assert!(
+            l28_durability_ok_as_is(true, false, false),
+            "AS-IS dente: get-only would pass"
+        );
+        assert!(!l28_durability_ok(true, false, false));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -10213,7 +15177,7 @@ mod tests {
         let e1 = FailingEnv::passing();
         let e2 = FailingEnv::passing();
         let e3 = FailingEnv::passing();
-        let mut c = StoreCluster::open_with_envs_rng(
+        let mut c = StoreCluster::open_with_envs_rng_lab_direct(
             &dir,
             3,
             1,
@@ -10242,7 +15206,7 @@ mod tests {
         let e1 = FailingEnv::passing();
         let e2 = FailingEnv::passing();
         let e3 = FailingEnv::passing();
-        let mut c = StoreCluster::open_with_envs_rng(
+        let mut c = StoreCluster::open_with_envs_rng_lab_direct(
             &dir,
             3,
             1,
@@ -10266,6 +15230,10 @@ mod tests {
             persist_hard_db(&mut n.db, rid, p).unwrap();
             (t, len)
         };
+        // Joint-election gate (RFC-0064) needs a majority of grants for
+        // this term or try_become_leader returns Ok without touching the log.
+        c.election_granted.insert((rid, term, 1), vec![1, 2]);
+        c.election_votes.insert((rid, term, 1), 2);
         e1.arm_one_failure();
         let err = c.try_become_leader(rid, 1, term);
         assert!(
@@ -10295,7 +15263,7 @@ mod tests {
         let e1 = FailingEnv::passing();
         let e2 = FailingEnv::passing();
         let e3 = FailingEnv::passing();
-        let mut c = StoreCluster::open_with_envs_rng(
+        let mut c = StoreCluster::open_with_envs_rng_lab_direct(
             &dir,
             3,
             1,
@@ -10351,7 +15319,7 @@ mod tests {
         let e1 = FailingEnv::passing();
         let e2 = FailingEnv::passing();
         let e3 = FailingEnv::passing();
-        let mut c = StoreCluster::open_with_envs_rng(
+        let mut c = StoreCluster::open_with_envs_rng_lab_direct(
             &dir,
             3,
             1,
@@ -10396,7 +15364,7 @@ mod tests {
         let e1 = FailingEnv::passing();
         let e2 = FailingEnv::passing();
         let e3 = FailingEnv::passing();
-        let mut c = StoreCluster::open_with_envs_rng(
+        let mut c = StoreCluster::open_with_envs_rng_lab_direct(
             &dir,
             3,
             1,
@@ -10439,7 +15407,7 @@ mod tests {
         let e1 = FailingEnv::passing();
         let e2 = FailingEnv::passing();
         let e3 = FailingEnv::passing();
-        let mut c = StoreCluster::open_with_envs_rng(
+        let mut c = StoreCluster::open_with_envs_rng_lab_direct(
             &dir,
             3,
             1,
@@ -10465,7 +15433,7 @@ mod tests {
         let e1 = FailingEnv::passing();
         let e2 = FailingEnv::passing();
         let e3 = FailingEnv::passing();
-        let mut c = StoreCluster::open_with_envs_rng(
+        let mut c = StoreCluster::open_with_envs_rng_lab_direct(
             &dir,
             3,
             1,
@@ -10516,7 +15484,7 @@ mod tests {
         let e1 = FailingEnv::passing();
         let e2 = FailingEnv::passing();
         let e3 = FailingEnv::passing();
-        let mut c = StoreCluster::open_with_envs_rng(
+        let mut c = StoreCluster::open_with_envs_rng_lab_direct(
             &dir,
             3,
             1,
@@ -10562,7 +15530,7 @@ mod tests {
         let e1 = FailingEnv::passing();
         let e2 = FailingEnv::passing();
         let e3 = FailingEnv::passing();
-        let mut c = StoreCluster::open_with_envs_rng(
+        let mut c = StoreCluster::open_with_envs_rng_lab_direct(
             &dir,
             3,
             1,
@@ -10617,7 +15585,7 @@ mod tests {
         let e1 = FailingEnv::passing();
         let e2 = FailingEnv::passing();
         let e3 = FailingEnv::passing();
-        let mut c = StoreCluster::open_with_envs_rng(
+        let mut c = StoreCluster::open_with_envs_rng_lab_direct(
             &dir,
             3,
             1,
@@ -10664,7 +15632,7 @@ mod tests {
         let e1 = FailingEnv::passing();
         let e2 = FailingEnv::passing();
         let e3 = FailingEnv::passing();
-        let mut c = StoreCluster::open_with_envs_rng(
+        let mut c = StoreCluster::open_with_envs_rng_lab_direct(
             &dir,
             3,
             1,
@@ -10724,7 +15692,7 @@ mod tests {
     #[test]
     fn install_snapshot_catchup_after_remove_compact() {
         let dir = temp();
-        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
         c.elect_all(80).unwrap();
         for i in 0..5u8 {
             c.put([b'k', i], [b'v', i]).unwrap();
@@ -10768,7 +15736,7 @@ mod tests {
     #[test]
     fn install_snapshot_clears_stale_keys_not_in_export() {
         let dir = temp();
-        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
         c.elect_all(80).unwrap();
         c.put(b"stale-k", b"old").unwrap();
         assert!(c.count_applied_eq(b"stale-k", b"old") >= 2);
@@ -10821,7 +15789,7 @@ mod tests {
     #[test]
     fn install_snapshot_stale_reject_is_hint_not_match() {
         let dir = temp();
-        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
         c.elect_all(80).unwrap();
         for i in 0..4u8 {
             c.put([b'a', i], [b'v', i]).unwrap();
@@ -10886,7 +15854,7 @@ mod tests {
     #[test]
     fn install_snapshot_label_is_leader_applied_point() {
         let dir = temp();
-        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
         c.elect_all(80).unwrap();
         for i in 0..6u8 {
             c.put([b'b', i], [b'v', i]).unwrap();
@@ -10964,7 +15932,7 @@ mod tests {
     #[test]
     fn same_term_rival_candidates_do_not_pool_votes() {
         let dir = temp();
-        let mut c = StoreCluster::open(&dir, 5, 1).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 5, 1).unwrap();
         c.elect_all(200).unwrap();
         c.put(b"r", b"1").unwrap();
         let rid = 1;
@@ -11023,7 +15991,7 @@ mod tests {
     #[test]
     fn install_snapshot_user_range_clears_orphan_intents() {
         let dir = temp();
-        let mut c = StoreCluster::open(&dir, 3, 4).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 4).unwrap();
         c.elect_all(80).unwrap();
         let user = b"intent-k"; // 0x69 → mid range
         let user_rid = c.locate(user).unwrap();
@@ -11079,7 +16047,7 @@ mod tests {
     #[test]
     fn install_snapshot_range0_preserves_other_range_raft_meta() {
         let dir = temp();
-        let mut c = StoreCluster::open(&dir, 3, 4).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 4).unwrap();
         c.elect_all(80).unwrap();
         c.put([0x01, b'a'], b"low-v").unwrap();
         c.put(b"high-key", b"hi-v").unwrap();
@@ -11166,7 +16134,7 @@ mod tests {
     #[test]
     fn install_snapshot_does_not_import_leader_raft_meta() {
         let dir = temp();
-        let mut c = StoreCluster::open(&dir, 3, 2).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 2).unwrap();
         c.elect_all(80).unwrap();
         c.put([0x01, b'a'], b"v").unwrap();
         let rid = c.locate(&[0x01, b'a']).unwrap();
@@ -11232,7 +16200,8 @@ mod tests {
     #[test]
     fn strong_read_history_no_dual_leader_fail_open() {
         let dir = temp();
-        let mut c = StoreCluster::open_with_rng(&dir, 3, 1, SeedRng::new(0x5150)).unwrap();
+        let mut c =
+            StoreCluster::open_with_rng_lab_direct(&dir, 3, 1, SeedRng::new(0x5150)).unwrap();
         c.elect_all(80).unwrap();
         let key = b"hist-k";
         c.put(key, b"v0").unwrap();
@@ -11301,7 +16270,8 @@ mod tests {
     #[test]
     fn dcs_lease_ttl_expires_and_recreate_after_advance() {
         let dir = temp();
-        let mut c = StoreCluster::open_with_rng(&dir, 3, 1, SeedRng::new(0x7EA5E)).unwrap();
+        let mut c =
+            StoreCluster::open_with_rng_lab_direct(&dir, 3, 1, SeedRng::new(0x7EA5E)).unwrap();
         c.set_ms_per_tick(0); // control now_ms only via advance_now_ms
         c.elect_all(80).unwrap();
         let key = meta_key(b"leader-lock");
@@ -11338,7 +16308,7 @@ mod tests {
     #[test]
     fn revert_majority_committed_surfaces_raft_fail() {
         let dir = temp();
-        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
         c.elect_all(80).unwrap();
         c.put(b"u", b"old").unwrap();
         let tid = 77u64;
@@ -11379,7 +16349,7 @@ mod tests {
     #[test]
     fn apply_txn_commit_fenced_keeps_abort_status() {
         let dir = temp();
-        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
         c.elect_all(80).unwrap();
         c.put(b"u", b"live").unwrap();
         let tid = 55u64;
@@ -11412,7 +16382,7 @@ mod tests {
         let e1 = FailingEnv::passing();
         let e2 = FailingEnv::passing();
         let e3 = FailingEnv::passing();
-        let mut c = StoreCluster::open_with_envs_rng(
+        let mut c = StoreCluster::open_with_envs_rng_lab_direct(
             &dir,
             3,
             1,
@@ -11467,7 +16437,7 @@ mod tests {
         let e1 = FailingEnv::passing();
         let e2 = FailingEnv::passing();
         let e3 = FailingEnv::passing();
-        let mut c = StoreCluster::open_with_envs_rng(
+        let mut c = StoreCluster::open_with_envs_rng_lab_direct(
             &dir,
             3,
             1,
@@ -11496,7 +16466,7 @@ mod tests {
         let e1 = FailingEnv::passing();
         let e2 = FailingEnv::passing();
         let e3 = FailingEnv::passing();
-        let mut c = StoreCluster::open_with_envs_rng(
+        let mut c = StoreCluster::open_with_envs_rng_lab_direct(
             &dir,
             3,
             1,
@@ -11551,7 +16521,7 @@ mod tests {
         let e1 = FailingEnv::passing();
         let e2 = FailingEnv::passing();
         let e3 = FailingEnv::passing();
-        let mut c = StoreCluster::open_with_envs_rng(
+        let mut c = StoreCluster::open_with_envs_rng_lab_direct(
             &dir,
             3,
             1,
@@ -11602,7 +16572,7 @@ mod tests {
     #[test]
     fn note_tx_commit_rejects_corrupt_preimage_floor() {
         let dir = temp();
-        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
         c.elect_all(80).unwrap();
         // Pedra-only preimage: key exists, RAM hist empty (no SI note yet).
         for nid in c.ids.clone() {
@@ -11628,7 +16598,7 @@ mod tests {
     #[test]
     fn note_tx_commit_rejects_short_intent_value_fallback() {
         let dir = temp();
-        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
         c.elect_all(80).unwrap();
         let h = c.tx_start([(b"k".as_slice(), b"new".as_slice())]).unwrap();
         // Reader sees no live key / pair, only a short intent → old code
@@ -11655,7 +16625,7 @@ mod tests {
         let dir = temp();
         let key = meta_key(b"ttl-lock");
         {
-            let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+            let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
             c.set_ms_per_tick(0);
             c.elect_all(80).unwrap();
             c.dcs_create_ttl(&key, b"holder-a", 50).unwrap();
@@ -11663,7 +16633,7 @@ mod tests {
             c.advance_now_ms(50);
             assert!(c.dcs_get(&key).unwrap().is_none());
         }
-        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
         c.elect_all(40).unwrap();
         assert!(
             c.dcs_get(&key).unwrap().is_none(),
@@ -11684,7 +16654,7 @@ mod tests {
         let e3 = FailingEnv::passing();
         let key = meta_key(b"ttl-lock");
         {
-            let mut c = StoreCluster::open_with_envs_rng(
+            let mut c = StoreCluster::open_with_envs_rng_lab_direct(
                 &dir,
                 3,
                 1,
@@ -11708,7 +16678,7 @@ mod tests {
             e3.disarm();
             c.persist_now_ms();
         }
-        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
         c.elect_all(40).unwrap();
         assert!(
             c.dcs_get_on(1, &key).unwrap().is_none(),
@@ -11728,7 +16698,7 @@ mod tests {
         let e3 = FailingEnv::passing();
         let issued;
         {
-            let mut c = StoreCluster::open_with_envs_rng(
+            let mut c = StoreCluster::open_with_envs_rng_lab_direct(
                 &dir,
                 3,
                 1,
@@ -11751,7 +16721,7 @@ mod tests {
                 Err(_) => issued = id1,
             }
         }
-        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
         c.elect_all(40).unwrap();
         let h3 = c.tx_start([(b"t3".as_slice(), b"c".as_slice())]).unwrap();
         assert!(
@@ -11767,7 +16737,8 @@ mod tests {
     #[test]
     fn rfc20_partition_minority_cannot_commit() {
         let dir = temp();
-        let mut c = StoreCluster::open_with_rng(&dir, 3, 1, SeedRng::new(0x0020_0A17)).unwrap();
+        let mut c =
+            StoreCluster::open_with_rng_lab_direct(&dir, 3, 1, SeedRng::new(0x0020_0A17)).unwrap();
         c.elect_all(80).unwrap();
         let key = b"part-key";
         let rid = c.locate(key).unwrap();
@@ -11804,7 +16775,8 @@ mod tests {
     #[test]
     fn rfc20_leader_kill_after_majority_catchup() {
         let dir = temp();
-        let mut c = StoreCluster::open_with_rng(&dir, 3, 1, SeedRng::new(0x0020_C111)).unwrap();
+        let mut c =
+            StoreCluster::open_with_rng_lab_direct(&dir, 3, 1, SeedRng::new(0x0020_C111)).unwrap();
         c.set_rpc_mode(RpcMode::Queued);
         elect_queued(&mut c, 100);
 
@@ -11860,7 +16832,7 @@ mod tests {
         let gen_clear;
         let gen_before;
         {
-            let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+            let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
             c.elect_all(80).unwrap();
             c.put(b"gk", b"v0").unwrap();
             gen_before = c.read_version();
@@ -11898,7 +16870,7 @@ mod tests {
             );
             drop(c);
         }
-        let c = StoreCluster::open(&dir, 3, 1).unwrap();
+        let c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
         assert_eq!(
             c.get_at_version(b"gk", gen_before).unwrap().as_deref(),
             Some(b"v0".as_ref()),
@@ -11917,7 +16889,8 @@ mod tests {
     #[test]
     fn finish_queued_after_leader_failover_flushes_si_notes() {
         let dir = temp();
-        let mut c = StoreCluster::open_with_rng(&dir, 3, 1, SeedRng::new(0x000F_5001)).unwrap();
+        let mut c =
+            StoreCluster::open_with_rng_lab_direct(&dir, 3, 1, SeedRng::new(0x000F_5001)).unwrap();
         c.set_rpc_mode(RpcMode::Queued);
         elect_queued(&mut c, 120);
         put_queued(&mut c, b"seed", b"0");
@@ -11977,7 +16950,8 @@ mod tests {
     #[test]
     fn finish_queued_abort_earlier_does_not_orphan_later_put() {
         let dir = temp();
-        let mut c = StoreCluster::open_with_rng(&dir, 3, 1, SeedRng::new(0x000F_5002)).unwrap();
+        let mut c =
+            StoreCluster::open_with_rng_lab_direct(&dir, 3, 1, SeedRng::new(0x000F_5002)).unwrap();
         c.set_rpc_mode(RpcMode::Queued);
         elect_queued(&mut c, 120);
         put_queued(&mut c, b"a", b"0");
@@ -12033,7 +17007,7 @@ mod tests {
     #[test]
     fn multi_range_prepare_not_leader_aborts_earlier_intents() {
         let dir = temp();
-        let mut c = StoreCluster::open(&dir, 3, 3).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 3).unwrap();
         c.elect_all(80).unwrap();
         let keys = keys_one_per_range(&c);
         assert!(keys.len() >= 3);
@@ -12074,7 +17048,7 @@ mod tests {
     #[test]
     fn partial_tx_finish_si_hist_matches_restored_preimage() {
         let dir = temp();
-        let mut c = StoreCluster::open(&dir, 3, 3).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 3).unwrap();
         c.elect_all(80).unwrap();
         let keys = keys_one_per_range(&c);
         assert!(keys.len() >= 2);
@@ -12119,7 +17093,7 @@ mod tests {
         );
         // Reopen: durable apply-path hist must not resurrect new-a.
         drop(c);
-        let c = StoreCluster::open(&dir, 3, 3).unwrap();
+        let c = StoreCluster::open_lab_direct(&dir, 3, 3).unwrap();
         assert_eq!(c.get(&keys[0]).unwrap().as_deref(), Some(b"old-a".as_ref()));
         assert_eq!(
             c.get_at_version(&keys[0], c.read_version())
@@ -12135,7 +17109,7 @@ mod tests {
     #[test]
     fn partial_tx_finish_range_scan_no_aborted_write() {
         let dir = temp();
-        let mut c = StoreCluster::open(&dir, 3, 3).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 3).unwrap();
         c.elect_all(80).unwrap();
         let keys = keys_one_per_range(&c);
         c.put(&keys[0], b"old-a").unwrap();
@@ -12170,7 +17144,7 @@ mod tests {
     #[test]
     fn force_local_revert_repairs_si_hist() {
         let dir = temp();
-        let mut c = StoreCluster::open(&dir, 3, 3).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 3).unwrap();
         c.elect_all(80).unwrap();
         let keys = keys_one_per_range(&c);
         c.put(&keys[0], b"old-a").unwrap();
@@ -12189,7 +17163,7 @@ mod tests {
         // Kill first range leader too — reopen must still have repaired hist via force_local.
         let _ = c.step_down_range_leader(first);
         drop(c);
-        let c = StoreCluster::open(&dir, 3, 3).unwrap();
+        let c = StoreCluster::open_lab_direct(&dir, 3, 3).unwrap();
         assert_eq!(c.get(&keys[0]).unwrap().as_deref(), Some(b"old-a".as_ref()));
         assert_eq!(
             c.get_at_version(&keys[0], c.read_version())
@@ -12205,7 +17179,7 @@ mod tests {
     #[test]
     fn watermark_gc_floor_preserves_readable_snap() {
         let dir = temp();
-        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
         c.elect_all(80).unwrap();
         c.put(b"w", b"keep").unwrap();
         let g_put = c.read_version();
@@ -12238,7 +17212,7 @@ mod tests {
     #[test]
     fn range_occ_conflicts_on_clear_inside_range() {
         let dir = temp();
-        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
         c.elect_all(80).unwrap();
         c.put(b"p/a", b"1").unwrap();
         c.put(b"p/b", b"2").unwrap();

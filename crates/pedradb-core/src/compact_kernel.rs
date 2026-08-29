@@ -79,6 +79,18 @@ pub fn compact_pick(
     }
 }
 
+/// AS-IS: never compact (acked versions pile in L0 forever; or the inverse
+/// hole — skip the merge that would drop a live pin).
+#[must_use]
+pub fn compact_pick_as_is(
+    _lowest_level_with_files: Option<u32>,
+    _files_at_max_level: bool,
+    _gc_requested: bool,
+    _max_level: u32,
+) -> CompactPlan {
+    CompactPlan::NoOp
+}
+
 /// What happens to one version of a user key during GC compaction.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum VersionFate {
@@ -189,6 +201,25 @@ pub fn lone_tombstone_fate_as_is_ignore_bottommost(
     } else {
         VersionFate::Keep
     }
+}
+
+/// Snapshot-safe GC floor from the oldest live [`crate::db::SnapshotPin`].
+///
+/// No pin ⇒ cap at `last_seq.min(visible_seq)` (unpublished writes must not
+/// raise the watermark). AS-IS ignores the pin and always uses that cap —
+/// compact-over-snapshot.
+#[must_use]
+pub fn gc_oldest_from_pin(oldest_pin: Option<u64>, last_seq: u64, visible_seq: u64) -> u64 {
+    match oldest_pin {
+        Some(p) => p,
+        None => last_seq.min(visible_seq),
+    }
+}
+
+/// AS-IS: ignore the pin (compact over a live snapshot).
+#[must_use]
+pub fn gc_oldest_from_pin_as_is(_oldest_pin: Option<u64>, last_seq: u64, visible_seq: u64) -> u64 {
+    last_seq.min(visible_seq)
 }
 
 #[cfg(test)]
@@ -325,5 +356,61 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn pin_is_oldest_snapshot_for_point_version_fate() {
+        let pin = 5u64;
+        let last = 10u64;
+        let vis = 9u64;
+        let oldest = gc_oldest_from_pin(Some(pin), last, vis);
+        assert_eq!(oldest, pin);
+        // newer sibling at 8; pin at 5 still reads seq 1.
+        assert_eq!(point_version_fate(1, Some(8), oldest), VersionFate::Keep);
+        let as_is = gc_oldest_from_pin_as_is(Some(pin), last, vis);
+        assert_eq!(as_is, vis.min(last));
+        assert_eq!(
+            point_version_fate(1, Some(8), as_is),
+            VersionFate::Drop,
+            "AS-IS dente: ignore pin ⇒ drop the pinned version"
+        );
+        assert_eq!(gc_oldest_from_pin(None, last, vis), last.min(vis));
+    }
+
+    #[test]
+    fn gc_oldest_from_pin_on_live_reclaim_is_not_ok() {
+        let pin = 5u64;
+        let oldest = gc_oldest_from_pin(Some(pin), 10, 9);
+        assert_eq!(oldest, pin);
+        assert_eq!(point_version_fate(1, Some(8), oldest), VersionFate::Keep);
+        assert_eq!(
+            point_version_fate(1, Some(8), gc_oldest_from_pin_as_is(Some(pin), 10, 9)),
+            VersionFate::Drop,
+            "AS-IS dente: compact over pin"
+        );
+    }
+
+    #[test]
+    fn compact_pick_on_live_merge_is_not_ok() {
+        assert!(matches!(
+            compact_pick(Some(0), false, false, 3),
+            CompactPlan::Merge { from: 0, to: 1 }
+        ));
+        assert_eq!(
+            compact_pick_as_is(Some(0), false, false, 3),
+            CompactPlan::NoOp,
+            "AS-IS dente: skip merge"
+        );
+    }
+
+    #[test]
+    fn point_version_fate_on_live_snapshot_is_not_ok() {
+        // newer sibling at 8; pin at 5 still reads seq 1.
+        assert_eq!(point_version_fate(1, Some(8), 5), VersionFate::Keep);
+        assert_eq!(
+            point_version_fate_as_is_drop_under_snapshot(1, Some(8), 5),
+            VersionFate::Drop,
+            "AS-IS dente: drop a version a snapshot still reads"
+        );
     }
 }

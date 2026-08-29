@@ -12,6 +12,10 @@ report() {
 : > "${OUT:-/dev/null}"
 report "det_io_status $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 report "os=$(uname -s)-$(uname -m)"
+# RFC-0078 P1.2 / RFC-0052: this box is det_io PRELOAD, not RecordingEnv::Lying.
+# Do not AND the two fsync-liar boxes in one process.
+report "kernel=stacked_fsync_liars_admitted"
+report "box=det_io_preload xor RecordingEnv::Lying"
 
 if [[ ! -d "$DET" ]]; then
   report "DET=missing path=$DET"

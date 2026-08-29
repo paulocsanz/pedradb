@@ -170,4 +170,17 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn reopen_outcome_on_live_crc_is_not_ok() {
+        assert_eq!(
+            reopen_outcome(ReopenDamage::Crc, false, false),
+            ReopenOutcome::RefuseOpen
+        );
+        assert_eq!(
+            reopen_outcome_as_is_silent(ReopenDamage::Crc, false, false),
+            ReopenOutcome::ServeAll,
+            "AS-IS dente: damaged WAL served"
+        );
+    }
 }

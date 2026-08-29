@@ -19,9 +19,7 @@
 use std::io::{Read, Write};
 use std::path::Path;
 
-use crate::change_feed::{
-    decode_changelog, CHANGELOG_CORRUPT_FILE_NAME, CHANGELOG_FILE_NAME,
-};
+use crate::change_feed::{decode_changelog, CHANGELOG_CORRUPT_FILE_NAME, CHANGELOG_FILE_NAME};
 use crate::corrupt::CORRUPTLOG_NAME;
 use crate::db::{read_checkpoint_meta, CHECKPOINT_META_FILE};
 use crate::env::{Env, EnvFile};
@@ -119,7 +117,7 @@ fn walk_vlog(buf: &[u8]) -> Result<u64, (u64, String)> {
         }
         let data = &buf[off..off + len];
         let computed = crc32c::crc32c(data);
-        if computed != stored {
+        if !crate::wal::crc::crc_match_ok(stored, computed) {
             return Err((
                 rec_off,
                 format!("vlog crc mismatch stored={stored:#010x} computed={computed:#010x}"),
@@ -179,7 +177,7 @@ fn check_current_pointer<E: Env>(env: &E, dir: &Path, bytes: &[u8]) -> Result<()
     }
     if let Some(expect) = crc {
         let man = read_all(env, &dir.join(&name))?;
-        if crc32c::crc32c(&man) != expect {
+        if !crate::wal::crc::crc_match_ok(expect, crc32c::crc32c(&man)) {
             return Err(format!("CURRENT crc mismatch for {name}"));
         }
     }
@@ -201,7 +199,7 @@ fn check_magic_crc_trailer(bytes: &[u8], magic: &[u8; 8]) -> Result<(), String> 
             .map_err(|_| "crc trailer".to_string())?,
     );
     let computed = crc32c::crc32c(&bytes[..crc_off]);
-    if computed != stored {
+    if !crate::wal::crc::crc_match_ok(stored, computed) {
         return Err(format!(
             "crc mismatch stored={stored:#010x} computed={computed:#010x}"
         ));
@@ -250,13 +248,13 @@ fn check_cfreg(bytes: &[u8]) -> Result<(), String> {
     let payload = if let Some((head, last)) = trimmed.rsplit_once('\n') {
         if let Some(hex) = last.strip_prefix("c:") {
             if hex.len() == 8 && hex.bytes().all(|b| b.is_ascii_hexdigit()) {
-                let expect = u32::from_str_radix(hex, 16)
-                    .map_err(|_| "CFREG crc not hex".to_string())?;
+                let expect =
+                    u32::from_str_radix(hex, 16).map_err(|_| "CFREG crc not hex".to_string())?;
                 let payload = bytes
                     .get(..head.len() + 1)
                     .ok_or_else(|| "CFREG crc payload".to_string())?;
                 let got = crc32c::crc32c(payload);
-                if got != expect {
+                if !crate::wal::crc::crc_match_ok(expect, got) {
                     return Err(format!(
                         "CFREG crc mismatch stored={expect:#010x} computed={got:#010x}"
                     ));
@@ -392,9 +390,11 @@ pub fn verify_at_rest<E: Env>(env: &E, dir: impl AsRef<Path>) -> VerifyReport {
                 report.fail(&name, off, e.to_string());
             }
         } else if name == CHANGELOG_FILE_NAME || name == CHANGELOG_CORRUPT_FILE_NAME {
-            // Cache (F33): open quarantines poison to CHANGELOG.corrupt and
-            // rebuilds from WAL. Scrub CRC-walks both so `pedra verify` names
-            // a rotten live cache *and* a leftover quarantine (P2.6 / P2.24).
+            // RFC-0085 P1.1: same `decode_changelog` / `crc_match_ok` as the
+            // live cache path. Cache (F33): open quarantines poison to
+            // CHANGELOG.corrupt and rebuilds from WAL. Scrub CRC-walks both
+            // so `pedra verify` names a rotten live cache *and* a leftover
+            // quarantine (P2.6 / P2.24).
             report.files = report.files.saturating_add(1);
             report.blocks = report.blocks.saturating_add(1);
             if let Err(e) = decode_changelog(&bytes) {
@@ -402,8 +402,9 @@ pub fn verify_at_rest<E: Env>(env: &E, dir: impl AsRef<Path>) -> VerifyReport {
                 report.fail(&name, off, e.to_string());
             }
         } else if name == CHECKPOINT_META_FILE {
-            // Present only in checkpoint destinations (and copies). Live
-            // DBs have none — missing is not a scrub error.
+            // RFC-0084 P1.2: same `read_checkpoint_meta` / `crc_match_ok` as
+            // the live restore path. Present only in checkpoint destinations
+            // (and copies). Live DBs have none — missing is not a scrub error.
             report.files = report.files.saturating_add(1);
             report.blocks = report.blocks.saturating_add(1);
             if let Err(e) = read_checkpoint_meta(env, dir) {
@@ -882,6 +883,44 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
     }
 
+    /// RFC-0085 P1.1: same CHANGELOG trailer lie as P0; `verify_at_rest`
+    /// names the file and `crc mismatch`. F33 open still Ok. AS-IS
+    /// `crc_match_ok` would scrub clean.
+    #[test]
+    fn crc_mismatch_on_live_changelog_verify_at_rest_is_not_ok() {
+        assert!(!crate::wal::crc::crc_match_ok(1, 2));
+        assert!(
+            crate::wal::crc::crc_match_ok_as_is(1, 2),
+            "AS-IS dente: any changelog crc would match"
+        );
+        let dir = temp_dir();
+        {
+            let mut db = Db::open(&dir).unwrap();
+            db.put(b"k", b"v").unwrap();
+            db.close().unwrap();
+        }
+        let path = dir.join(CHANGELOG_FILE_NAME);
+        let mut bytes = fs::read(&path).unwrap();
+        assert!(bytes.len() >= 12, "CHANGELOG must have payload + trailer");
+        let last = bytes.len() - 1;
+        bytes[last] ^= 0xff;
+        fs::write(&path, &bytes).unwrap();
+        let r = verify_at_rest(&StdEnv, &dir);
+        assert!(!r.is_clean(), "trailer lie must fail the scrub");
+        assert!(
+            r.failures.iter().any(|f| {
+                f.file == CHANGELOG_FILE_NAME
+                    && f.message.to_ascii_lowercase().contains("crc mismatch")
+            }),
+            "must name CHANGELOG crc mismatch, got {:?}",
+            r.failures
+        );
+        let db = Db::open(&dir).expect("F33: trailer lie must not brick open");
+        assert_eq!(db.get(b"k").as_deref(), Some(b"v".as_ref()));
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
     /// RFC-0060 P2.7: `CHECKPOINT` CRC is walked when the file is present
     /// (checkpoint dest). A live DB without it stays clean.
     #[test]
@@ -926,6 +965,78 @@ mod tests {
         );
         let _ = fs::remove_dir_all(&dir);
         let _ = fs::remove_dir_all(&ckpt);
+    }
+
+    /// RFC-0084 P1.2: same CHECKPOINT trailer lie as P0; `verify_at_rest`
+    /// names the file. AS-IS `crc_match_ok` would scrub clean.
+    #[test]
+    fn crc_mismatch_on_live_checkpoint_verify_at_rest_is_not_ok() {
+        assert!(!crate::wal::crc::crc_match_ok(1, 2));
+        assert!(
+            crate::wal::crc::crc_match_ok_as_is(1, 2),
+            "AS-IS dente: any checkpoint crc would match"
+        );
+        let dir = temp_dir();
+        seed_closed_db(&dir);
+        let ckpt = dir.parent().unwrap().join(format!(
+            "{}-ckpt-0084",
+            dir.file_name().unwrap().to_string_lossy()
+        ));
+        let _ = fs::remove_dir_all(&ckpt);
+        {
+            let mut db = Db::open(&dir).unwrap();
+            db.create_checkpoint(&ckpt).unwrap();
+            db.close().unwrap();
+        }
+        let meta = ckpt.join(CHECKPOINT_META_FILE);
+        let mut bytes = fs::read(&meta).unwrap();
+        assert!(bytes.len() >= 12, "CHECKPOINT must have payload + trailer");
+        let last = bytes.len() - 1;
+        bytes[last] ^= 0xff;
+        fs::write(&meta, &bytes).unwrap();
+        let r = verify_at_rest(&StdEnv, &ckpt);
+        let _ = fs::remove_dir_all(&dir);
+        let _ = fs::remove_dir_all(&ckpt);
+        assert!(!r.is_clean(), "trailer lie must fail the scrub");
+        assert!(
+            r.failures.iter().any(|f| {
+                f.file == CHECKPOINT_META_FILE
+                    && f.message.to_ascii_lowercase().contains("crc mismatch")
+            }),
+            "must name CHECKPOINT crc mismatch, got {:?}",
+            r.failures
+        );
+    }
+
+    /// RFC-0084 P2.2: backup `CATALOG` CRC stays RFC-0060 (`check_magic_crc_trailer`
+    /// / ops `crc_mismatch_on_live_ops_catalog_is_not_ok`). Not this RFC.
+    #[test]
+    fn backup_catalog_crc_stays_rfc0060() {
+        assert!(!crate::wal::crc::crc_collision_admitted());
+        assert!(
+            crate::wal::crc::crc_collision_admitted_as_is(),
+            "AS-IS dente: matching CRC looks collision-free"
+        );
+        let dir = temp_dir();
+        fs::create_dir_all(&dir).unwrap();
+        let mut cat = CATALOG_MAGIC.to_vec();
+        cat.extend_from_slice(&[0u8; 24]);
+        let crc = crc32c::crc32c(&cat);
+        cat.extend_from_slice(&crc.to_le_bytes());
+        let last = cat.len() - 1;
+        cat[last] ^= 0xff;
+        fs::write(dir.join("CATALOG"), &cat).unwrap();
+        let r = verify_at_rest(&StdEnv, &dir);
+        let _ = fs::remove_dir_all(&dir);
+        assert!(!r.is_clean(), "CATALOG trailer lie must fail the scrub");
+        assert!(
+            r.failures
+                .iter()
+                .any(|f| f.file == "CATALOG"
+                    && f.message.to_ascii_lowercase().contains("crc mismatch")),
+            "RFC-0060 walk must name CATALOG crc, got {:?}",
+            r.failures
+        );
     }
 
     /// RFC-0060 P2.13: a backup-root-shaped directory (`base-*` with
@@ -1317,9 +1428,7 @@ mod tests {
         let r = verify_at_rest(&StdEnv, &dir);
         assert!(!r.is_clean(), "flipped history MANIFEST must fail");
         assert!(
-            r.failures
-                .iter()
-                .any(|f| f.file == "history/MANIFEST"),
+            r.failures.iter().any(|f| f.file == "history/MANIFEST"),
             "must name history/MANIFEST, got {:?}",
             r.failures
         );
@@ -1357,8 +1466,7 @@ mod tests {
             .iter()
             .position(|n| n.contains(".hist"))
             .expect("history segment in inventory");
-        let applied = xor_durable_bits(&StdEnv, &dir, hist_idx as u64, 1, true)
-            .expect("xor hist");
+        let applied = xor_durable_bits(&StdEnv, &dir, hist_idx as u64, 1, true).expect("xor hist");
         assert!(
             applied.file.contains(".hist"),
             "seed must select the hist file, got {}",

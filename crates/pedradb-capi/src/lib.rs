@@ -31,7 +31,10 @@ use pedradb_store::client::Transaction;
 use pedradb_store::fdb_compat::FdbError;
 use pedradb_store::{StoreCluster, StoreError, MAX_TX_BYTES, MAX_VALUE_BYTES};
 
-use handles::{pack, unpack, Handle, Table, KIND_DB, KIND_TX};
+use handles::{
+    c_len_admitted, c_path_nul_off_admitted, c_path_walk_bytes, pack, unpack, Handle, Table, KIND_DB,
+    KIND_TX,
+};
 
 /// Success.
 pub const MONTAHA_FDB_OK: c_int = 0;
@@ -47,8 +50,8 @@ pub const MONTAHA_FDB_UNAVAILABLE: c_int = 4;
 pub const MONTAHA_FDB_ERROR: c_int = 5;
 
 /// Bytes walked looking for a path NUL. No NUL in this window → create
-/// returns NULL (no unbounded `strlen`).
-pub const MAX_PATH_BYTES: usize = 4096;
+/// returns NULL (no unbounded `strlen`). Bound is `c_path_walk_bytes`.
+pub const MAX_PATH_BYTES: usize = handles::C_PATH_WALK_BYTES;
 /// Key length cap before copying C bytes (store TX budget).
 pub const MAX_C_KEY_BYTES: usize = MAX_TX_BYTES;
 /// Value length cap before copying C bytes.
@@ -63,18 +66,21 @@ fn path_from_c(path: *const c_char) -> Option<PathBuf> {
     if path.is_null() {
         return None;
     }
-    // SAFETY: at most `MAX_PATH_BYTES` are read. `memchr` is
+    // RFC-0075 P1.1: walk bound is the named cap, not a raw 4096 next
+    // to `unsafe`. AS-IS `c_path_walk_bytes_as_is` is usize::MAX (strlen).
+    let window = c_path_walk_bytes();
+    // SAFETY: at most `window` bytes are read. `memchr` is
     // ASan-intercepted: a short heap buffer with no NUL is a C-harness
     // FAIL. A full-window no-NUL buffer is rejected without reading past it.
-    let nul = unsafe { memchr(path.cast(), 0, MAX_PATH_BYTES) };
+    let nul = unsafe { memchr(path.cast(), 0, window) };
     if nul.is_null() {
         return None;
     }
     let n = (nul as usize).wrapping_sub(path as usize);
-    if n >= MAX_PATH_BYTES {
+    if !c_path_nul_off_admitted(n) {
         return None;
     }
-    let bytes = match copy_c_bytes(path.cast(), n, MAX_PATH_BYTES) {
+    let bytes = match copy_c_bytes(path.cast(), n, window) {
         Ok(b) => b,
         Err(_) => return None,
     };
@@ -85,7 +91,7 @@ fn path_from_c(path: *const c_char) -> Option<PathBuf> {
 /// Copy `len` bytes from C. `len == 0` is an empty vec (null `p` allowed).
 /// `len > max` is [`MONTAHA_FDB_LIMIT`] and does **not** read.
 fn copy_c_bytes(p: *const u8, len: usize, max: usize) -> Result<Vec<u8>, c_int> {
-    if len > max {
+    if !c_len_admitted(len, max) {
         return Err(MONTAHA_FDB_LIMIT);
     }
     if len == 0 {
@@ -195,6 +201,9 @@ pub unsafe extern "C" fn montanha_fdb_database_create(
     };
     match StoreCluster::open(&p, n_nodes, n_ranges) {
         Ok(mut cluster) => {
+            // RFC-0067 P2.2: production open is Queued; in-process C face
+            // has no Net, so it opts into the unpinned Direct pump.
+            cluster.enable_lab_direct_rpc();
             if cluster.elect_all(120).is_err() {
                 return ptr::null_mut();
             }
@@ -277,7 +286,7 @@ pub unsafe extern "C" fn montanha_fdb_transaction_set(
     if key.is_null() || (value.is_null() && value_len > 0) {
         return MONTAHA_FDB_ERROR;
     }
-    if key_len > MAX_C_KEY_BYTES || value_len > MAX_C_VALUE_BYTES {
+    if !c_len_admitted(key_len, MAX_C_KEY_BYTES) || !c_len_admitted(value_len, MAX_C_VALUE_BYTES) {
         return MONTAHA_FDB_LIMIT;
     }
     let Some(h) = tx_handle(tr) else {
@@ -322,7 +331,7 @@ pub unsafe extern "C" fn montanha_fdb_transaction_get(
     if key.is_null() || out_ptr.is_null() || out_len.is_null() {
         return MONTAHA_FDB_ERROR;
     }
-    if key_len > MAX_C_KEY_BYTES {
+    if !c_len_admitted(key_len, MAX_C_KEY_BYTES) {
         // SAFETY: `out_*` checked non-null above.
         unsafe {
             *out_ptr = ptr::null_mut();
@@ -447,12 +456,19 @@ pub unsafe extern "C" fn montanha_fdb_transaction_commit(
 /// already-freed pointers are no-ops (not allocator UB). `len` is ignored
 /// for ownership; the table knows the real allocation.
 ///
+/// RFC-0075 P2.2: this table + `from_raw` is TCB (`c_free_table_admitted`
+/// is always false). A twin of `c_len_admitted` is not a free proof.
+///
 /// # Safety
 /// `p` is null or a pointer previously written to `out_ptr` (or garbage,
 /// which is ignored).
 #[no_mangle]
 pub unsafe extern "C" fn montanha_fdb_free(p: *mut u8, len: usize) {
     let _ = len;
+    debug_assert!(
+        !handles::c_free_table_admitted(),
+        "RFC-0075 P2.2: free table is not a proven kernel"
+    );
     if p.is_null() {
         return;
     }
@@ -611,6 +627,51 @@ mod tests {
         }
     }
 
+    /// RFC-0075 P2.2: get-buffer `free` table stays TCB.
+    #[test]
+    fn c_free_table_is_tcb() {
+        assert!(!handles::c_free_table_admitted());
+        assert!(
+            handles::c_free_table_admitted_as_is(),
+            "AS-IS dente: len-cap twin looks like a free-table proof"
+        );
+        let crate_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        assert!(
+            crate_dir.join("verus/c_len.rs").is_file(),
+            "RFC-0075 P2.1: c_len_admitted twin must exist"
+        );
+        assert!(
+            !crate_dir.join("verus/c_free.rs").exists(),
+            "RFC-0075 P2.2: free-table Verus twin must stay absent"
+        );
+        let (dir, path) = temp_path();
+        unsafe {
+            let db = montanha_fdb_database_create(path.as_ptr(), 3, 1);
+            assert!(!db.is_null());
+            let tr = montanha_fdb_transaction_create(db);
+            assert_eq!(
+                montanha_fdb_transaction_set(tr, b"k".as_ptr(), 1, b"v".as_ptr(), 1),
+                MONTAHA_FDB_OK
+            );
+            assert_eq!(montanha_fdb_transaction_commit(db, tr), MONTAHA_FDB_OK);
+            let tr2 = montanha_fdb_transaction_create(db);
+            let mut out = ptr::null_mut();
+            let mut len = 0usize;
+            assert_eq!(
+                montanha_fdb_transaction_get(db, tr2, b"k".as_ptr(), 1, &mut out, &mut len),
+                MONTAHA_FDB_OK
+            );
+            assert_eq!(len, 1);
+            montanha_fdb_free(out, len);
+            montanha_fdb_free(out, len);
+            montanha_fdb_free(ptr::null_mut(), 0);
+            montanha_fdb_free(0x1 as *mut u8, 4);
+            montanha_fdb_transaction_destroy(tr2);
+            montanha_fdb_database_destroy(db);
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn handle_from_other_thread_is_error_not_ub() {
         let (dir, path) = temp_path();
@@ -671,6 +732,32 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// RFC-0075 P0: live C ABI create+tx; oversize key_len is LIMIT and
+    /// does not copy. AS-IS would admit the length.
+    #[test]
+    fn c_len_oversize_on_live_tx_is_limit() {
+        assert!(!handles::c_len_admitted(MAX_C_KEY_BYTES + 1, MAX_C_KEY_BYTES));
+        assert!(handles::c_len_admitted_as_is(
+            MAX_C_KEY_BYTES + 1,
+            MAX_C_KEY_BYTES
+        ));
+        let (dir, path) = temp_path();
+        unsafe {
+            let db = montanha_fdb_database_create(path.as_ptr(), 3, 1);
+            assert!(!db.is_null(), "live database_create");
+            let tr = montanha_fdb_transaction_create(db);
+            assert!(!tr.is_null(), "live transaction_create");
+            let tiny = 1u8;
+            assert_eq!(
+                montanha_fdb_transaction_set(tr, &tiny, MAX_C_KEY_BYTES + 1, &tiny, 1),
+                MONTAHA_FDB_LIMIT
+            );
+            montanha_fdb_transaction_destroy(tr);
+            montanha_fdb_database_destroy(db);
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn slice_cap_oversize_len_is_limit_without_reading() {
         // One-byte buffer + huge len must not read (F215). Null handle is
@@ -714,6 +801,29 @@ mod tests {
         let buf = vec![b'a'; MAX_PATH_BYTES];
         unsafe {
             assert!(montanha_fdb_database_create(buf.as_ptr().cast(), 3, 1).is_null());
+        }
+    }
+
+    /// RFC-0075 P1.1: path NUL walk uses the named `MAX_PATH_BYTES` cap.
+    /// AS-IS would walk `usize::MAX`.
+    #[test]
+    fn c_path_walk_uses_named_cap() {
+        assert_eq!(handles::c_path_walk_bytes(), MAX_PATH_BYTES);
+        assert_eq!(MAX_PATH_BYTES, 4096, "header MONTAHA_FDB_MAX_PATH_BYTES");
+        assert_eq!(handles::c_path_walk_bytes_as_is(), usize::MAX);
+        assert!(handles::c_path_nul_off_admitted(0));
+        assert!(handles::c_path_nul_off_admitted(MAX_PATH_BYTES - 1));
+        assert!(!handles::c_path_nul_off_admitted(MAX_PATH_BYTES));
+        assert!(
+            handles::c_path_nul_off_admitted_as_is(MAX_PATH_BYTES),
+            "AS-IS dente: offset past the window"
+        );
+        let buf = vec![b'a'; MAX_PATH_BYTES];
+        unsafe {
+            assert!(
+                montanha_fdb_database_create(buf.as_ptr().cast(), 3, 1).is_null(),
+                "no NUL in the named window is NULL"
+            );
         }
     }
 }

@@ -1,0 +1,1 @@
+seed=42 hash=48b32d03bae5f932 puts_ok=0 puts_err=6 gets_ok=1 dcs_ok=0 silent_wrong=0 events=184 net_sent=8 dropped=0 rpc=0 disk_arms=3 trip=0 t=166

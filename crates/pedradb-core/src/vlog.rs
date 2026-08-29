@@ -486,14 +486,14 @@ impl<F: EnvFile> ValueLog<F> {
                 "len mismatch in vlog pending at {offset}: stored {stored_len} expect {len}"
             )));
         }
-        if stored_crc != expect_crc {
+        if !crate::wal::crc::crc_match_ok(stored_crc, expect_crc) {
             return Err(CoreError::CorruptValue(format!(
                 "crc mismatch in vlog pending at {offset}"
             )));
         }
         let payload = &self.pending[idx + 8..idx + need];
         let crc = crc32c::crc32c(payload);
-        if crc != expect_crc {
+        if !crate::wal::crc::crc_match_ok(crc, expect_crc) {
             return Err(CoreError::CorruptValue(format!(
                 "data crc mismatch in vlog pending at {offset}"
             )));
@@ -652,6 +652,8 @@ impl<F: EnvFile> ValueLog<F> {
     }
 }
 
+/// RFC-0081 P2.1: live blob/vlog disk read is a catalog caller of
+/// `crc_match_ok` (pair `crc_match`; twin `verus/crc_match.rs`).
 fn read_record_at<E: Env>(
     env: &E,
     path: &Path,
@@ -670,13 +672,13 @@ fn read_record_at<E: Env>(
             "len mismatch at {offset}: stored {stored_len} expect {len}"
         )));
     }
-    if stored_crc != expect_crc {
+    if !crate::wal::crc::crc_match_ok(stored_crc, expect_crc) {
         return Err(CoreError::CorruptValue(format!("crc mismatch at {offset}")));
     }
     let mut buf = vec![0u8; len as usize];
     f.read_exact(&mut buf)?;
     let got = crc32c::crc32c(&buf);
-    if got != expect_crc {
+    if !crate::wal::crc::crc_match_ok(got, expect_crc) {
         return Err(CoreError::CorruptValue(format!(
             "data crc mismatch at {offset}"
         )));
@@ -775,6 +777,126 @@ mod tests {
         assert_eq!(decoded.file_num, 3);
         assert_eq!(decoded.offset, off);
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0081 P0: production append+read; a flipped payload is
+    /// CorruptValue, never a value. AS-IS `crc_match_ok` would accept it.
+    #[test]
+    fn crc_mismatch_on_live_vlog_is_not_ok() {
+        assert!(!crate::wal::crc::crc_match_ok(1, 2));
+        assert!(crate::wal::crc::crc_match_ok_as_is(1, 2));
+        let dir = std::env::temp_dir().join(format!(
+            "pedradb-vlog-crc-0081-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let env = StdEnv;
+        let payload = b"vlog-crc-payload-0081";
+        let (off, len, crc) = {
+            let mut log = ValueLog::open_on(&env, &dir).unwrap();
+            log.append(payload).unwrap()
+        };
+        let path = dir.join(VLOG_FILE_NAME);
+        let mut bytes = fs::read(&path).unwrap();
+        let pos = usize::try_from(off).unwrap().saturating_add(8);
+        assert!(
+            pos < bytes.len(),
+            "payload must be on disk after append+sync"
+        );
+        bytes[pos] ^= 0xff;
+        fs::write(&path, &bytes).unwrap();
+        let log = ValueLog::open_on(&env, &dir).unwrap();
+        let err = log.read_at_on(&env, off, len, crc).unwrap_err();
+        let _ = fs::remove_dir_all(&dir);
+        let msg = err.to_string();
+        assert!(
+            msg.contains("crc"),
+            "flipped vlog must not serve a value; got {err:?}"
+        );
+    }
+
+    /// RFC-0081 P2.2: vlog `crc_match_ok` is not a CRC32C collision theorem.
+    #[test]
+    fn vlog_crc_collision_axiom_remains() {
+        assert!(!crate::wal::crc::crc_collision_admitted());
+        assert!(
+            crate::wal::crc::crc_collision_admitted_as_is(),
+            "AS-IS dente: matching CRC looks collision-free"
+        );
+        assert!(
+            crate::wal::crc::crc_match_ok(1, 1),
+            "equal u32s still match; that is not R-crc"
+        );
+        let residuals = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../scripts/formal/residuals.json");
+        let text = std::fs::read_to_string(&residuals).expect("residuals.json");
+        assert!(
+            text.contains("\"id\": \"R-crc\""),
+            "R-crc must stay in the residual catalog"
+        );
+        assert!(
+            text.contains("\"R-crc\""),
+            "never_floor must still list R-crc"
+        );
+    }
+
+    /// RFC-0081 P1.1: numbered `*.blob` reads use `crc_match_ok` (same gate
+    /// as `VALUES.vlog`). AS-IS would serve the flipped payload.
+    #[test]
+    fn crc_mismatch_on_live_blob_is_not_ok() {
+        assert!(!crate::wal::crc::crc_match_ok(1, 2));
+        assert!(
+            crate::wal::crc::crc_match_ok_as_is(1, 2),
+            "AS-IS dente: any blob crc would match"
+        );
+        let dir = std::env::temp_dir().join(format!(
+            "pedradb-blob-crc-0081-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let env = StdEnv;
+        let payload = b"blob-crc-payload-0081";
+        let ptr = {
+            let mut log = ValueLog::open_blob(&env, &dir, 1).unwrap();
+            let (offset, len, crc) = log.append(payload).unwrap();
+            VlogPtr {
+                file_num: 1,
+                offset,
+                len,
+                crc,
+            }
+        };
+        let path = blob_path(&dir, 1);
+        assert!(
+            path.extension().and_then(|s| s.to_str()) == Some("blob"),
+            "P1.1 tooth is a numbered blob file, not VALUES.vlog"
+        );
+        let mut bytes = fs::read(&path).unwrap();
+        let pos = usize::try_from(ptr.offset).unwrap().saturating_add(8);
+        assert!(
+            pos < bytes.len(),
+            "payload must be on disk after append+sync"
+        );
+        bytes[pos] ^= 0xff;
+        fs::write(&path, &bytes).unwrap();
+        let log = ValueLog::open_on(&env, &dir).unwrap();
+        let err = log
+            .read_ptr_on(&env, &dir, ptr, false)
+            .expect_err("flipped blob must not serve a value");
+        let _ = fs::remove_dir_all(&dir);
+        let msg = err.to_string();
+        assert!(
+            msg.contains("crc"),
+            "must fail on crc_match_ok, not a parse; got {err:?}"
+        );
     }
 
     #[test]

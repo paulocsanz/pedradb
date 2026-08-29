@@ -26,6 +26,12 @@ pub fn lease_live(lease: u64, now_ms: u64) -> bool {
     lease == 0 || now_ms < lease
 }
 
+/// AS-IS: every lease is immortal (the F56 hole).
+#[must_use]
+pub fn lease_live_as_is(_lease: u64, _now_ms: u64) -> bool {
+    true
+}
+
 /// Process-local table (F7): unknown id is **expired** (fail-safe).
 ///
 /// `table_hit = None` — id not in this process's map (restart / never granted).
@@ -154,5 +160,14 @@ mod tests {
             assert!(n >= 1);
             assert_eq!(next_lease_id_as_is(max), 1);
         }
+    }
+
+    #[test]
+    fn lease_live_on_live_expiry_is_not_ok() {
+        assert!(!lease_live(10, 10));
+        assert!(
+            lease_live_as_is(10, 10),
+            "AS-IS dente: expired lease stays live"
+        );
     }
 }

@@ -31,7 +31,7 @@ fn store_opts() -> StoreOpenOptions {
 }
 
 fn open_cluster(dir: &std::path::Path, n_nodes: u64, n_ranges: u64) -> StoreCluster {
-    StoreCluster::open_with_options(dir, n_nodes, n_ranges, store_opts()).expect("open cluster")
+    StoreCluster::open_with_options_lab_direct(dir, n_nodes, n_ranges, store_opts()).expect("open cluster")
 }
 
 fn main() {

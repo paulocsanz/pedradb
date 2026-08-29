@@ -528,3 +528,70 @@ fn adversarial_merge_operator_roundtrip() {
     assert_eq!(db.get(b"k").unwrap().as_deref(), Some(&b"abc"[..]));
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// RFC-0065 P0.3: one `WriteBatch` / one WAL — crash is all-or-nothing across CFs.
+/// A 3-DB / 3-WAL layout is not the design (would let lock land without default).
+#[test]
+fn rfc0065_multi_cf_batch_crash_all_or_nothing() {
+    fn wal_logs(dir: &std::path::Path) -> Vec<String> {
+        std::fs::read_dir(dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .filter(|n| n == "CURRENT.log" || n.starts_with("CURRENT.log."))
+            .collect()
+    }
+
+    // Happy path: one apply, one WAL, three CFs visible after flush+reopen.
+    let dir = tmp("p03-ok", 1);
+    let env = FailingEnv::passing();
+    let db = DB::open_cf_with_env(&g1_opts(), &dir, &["write", "lock"], env).unwrap();
+    let lock = db.cf_handle("lock").unwrap();
+    let write = db.cf_handle("write").unwrap();
+    let mut wb = WriteBatch::new();
+    wb.put(b"dk", b"dv");
+    wb.put_cf(&write, b"wk", b"wv");
+    wb.put_cf(&lock, b"lk", b"lv");
+    db.write(&wb).unwrap();
+    db.flush().unwrap();
+    assert_eq!(wal_logs(&dir).len(), 1, "one WAL, not 3 DBs: {:?}", wal_logs(&dir));
+    drop(db);
+    let db = DB::open_cf_with_env(&g1_opts(), &dir, &["write", "lock"], FailingEnv::passing())
+        .unwrap();
+    let lock = db.cf_handle("lock").unwrap();
+    let write = db.cf_handle("write").unwrap();
+    assert_eq!(db.get(b"dk").unwrap().as_deref(), Some(&b"dv"[..]));
+    assert_eq!(db.get_cf(&write, b"wk").unwrap().as_deref(), Some(&b"wv"[..]));
+    assert_eq!(db.get_cf(&lock, b"lk").unwrap().as_deref(), Some(&b"lv"[..]));
+    let _ = std::fs::remove_dir_all(&dir);
+
+    // Sync-fail mid-commit: recover sees all three keys or none.
+    let dir = tmp("p03-crash", 2);
+    let env = FailingEnv::passing();
+    let db = DB::open_cf_with_env(&g1_opts(), &dir, &["write", "lock"], env.clone()).unwrap();
+    let lock = db.cf_handle("lock").unwrap();
+    let write = db.cf_handle("write").unwrap();
+    env.arm_with_kind(0, false, FaultKind::SyncFail);
+    let mut wb = WriteBatch::new();
+    wb.put(b"dk", b"dv");
+    wb.put_cf(&write, b"wk", b"wv");
+    wb.put_cf(&lock, b"lk", b"lv");
+    let wrote = db.write(&wb);
+    drop(db);
+    let db = DB::open_cf_with_env(&g1_opts(), &dir, &["write", "lock"], FailingEnv::passing())
+        .unwrap();
+    let lock = db.cf_handle("lock").unwrap();
+    let write = db.cf_handle("write").unwrap();
+    let d = db.get(b"dk").unwrap();
+    let w = db.get_cf(&write, b"wk").unwrap();
+    let l = db.get_cf(&lock, b"lk").unwrap();
+    let n = usize::from(d.is_some()) + usize::from(w.is_some()) + usize::from(l.is_some());
+    assert!(
+        n == 0 || n == 3,
+        "partial multi-CF apply (3-DB smell): ok={wrote:?} d={d:?} w={w:?} l={l:?}"
+    );
+    if wrote.is_ok() {
+        assert_eq!(n, 3, "G1 Ok must be durable on all three CFs");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}

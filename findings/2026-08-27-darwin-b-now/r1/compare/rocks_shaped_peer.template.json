@@ -1,0 +1,20 @@
+{
+  "bench": "rocks-side-peer-template",
+  "engine": "rocksdb",
+  "sync": false,
+  "durability": "async-wal (WriteOptions.sync=false, rocksdb default)",
+  "benches": [
+    {
+      "name": "deps_raftlog",
+      "qps": null,
+      "compat_qps_ref": 247.574,
+      "note": "fill qps from real RocksDB same shape"
+    },
+    {
+      "name": "ycsb_a",
+      "qps": null,
+      "compat_qps_ref": 488.709,
+      "note": "fill qps from real RocksDB same shape"
+    }
+  ]
+}

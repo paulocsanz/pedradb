@@ -462,10 +462,11 @@ pub struct RocksEngine {
     wopts_async: rocksdb::WriteOptions,
     wopts_sync: rocksdb::WriteOptions,
     cur_sync: std::sync::atomic::AtomicBool,
-    /// After each durable write, `sync_all` every `*.log` so the peer pays
-    /// `F_FULLFSYNC` (macOS) — same syscall class as Pedra `File::sync_all`.
-    /// librocksdb-sys is built *without* `HAVE_FULLFSYNC`, so default Rocks
-    /// `WriteOptions.sync` is `fdatasync` (~50µs here), not `F_FULLFSYNC` (~5ms).
+    /// After each durable write, `sync_all` every `*.log`. Reconstruction of
+    /// CMake `HAVE_FULLFSYNC` when the linked `librocksdb-sys` omitted it.
+    /// Not equivalent: extra inner `fdatasync`, and every `*.log` not just
+    /// the live WAL fd. Prefer `CXXFLAGS=-DHAVE_FULLFSYNC` on the sys-crate
+    /// compile and leave this off (`ROCKS_PARITY_FULL_SYNC=0`).
     full_sync: bool,
     dir: std::path::PathBuf,
 }
@@ -500,19 +501,25 @@ impl RocksEngine {
     }
 
     fn full_sync_wal(&self) {
-        if !self.full_sync {
+        if !crate::rocks_full_sync_after_write(
+            self.full_sync,
+            self.cur_sync
+                .load(std::sync::atomic::Ordering::Relaxed),
+        ) {
             return;
         }
         let Ok(rd) = std::fs::read_dir(&self.dir) else {
             return;
         };
-        for e in rd.flatten() {
-            if !e.file_name().to_string_lossy().ends_with(".log") {
-                continue;
-            }
-            if let Ok(f) = std::fs::File::open(e.path()) {
-                let _ = f.sync_all();
-            }
+        let ents: Vec<_> = rd
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
+        let Some(name) = crate::live_wal_log_name(ents.iter().map(String::as_str)) else {
+            return;
+        };
+        if let Ok(f) = std::fs::File::open(self.dir.join(name)) {
+            let _ = f.sync_all();
         }
     }
 }

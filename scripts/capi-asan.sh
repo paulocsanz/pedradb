@@ -81,7 +81,26 @@ echo "== link C malicious binary =="
 link_one "$HARNESS/capi_asan_malicious.c" "$OUT/capi_asan_malicious"
 
 echo "== PASS (honest C + rotten handles + oversize caps) =="
-"$OUT/capi_asan"
+pass_log="$OUT/capi_asan.log"
+set +e
+"$OUT/capi_asan" >"$pass_log" 2>&1
+pass_rc=$?
+set -e
+cat "$pass_log"
+if [[ "$pass_rc" -ne 0 ]]; then
+  echo "capi-asan: PASS binary failed (rc=$pass_rc)" >&2
+  exit 1
+fi
+# RFC-0075 P1.2: PASS must name the same LIMIT gate as `c_len_admitted`
+# (null-handle oversize + live create+tx). Dropping those CHECKs without
+# the banners fails this script even if the binary still exits 0.
+for tooth in "LIMIT key" "LIMIT value" "LIMIT get" "LIMIT live-key"; do
+  if ! grep -q "capi_asan: ${tooth}" "$pass_log"; then
+    echo "capi-asan: PASS binary missing ${tooth} (RFC-0075 P1.2)" >&2
+    exit 1
+  fi
+done
+echo "capi-asan: PASS LIMIT teeth present"
 
 asan_hit() {
   local log="$1"

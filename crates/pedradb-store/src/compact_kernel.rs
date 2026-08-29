@@ -53,6 +53,24 @@ pub fn compact_index_floor(through: u64) -> u64 {
     through.saturating_add(1)
 }
 
+/// Cap compact so an applied still-active joint stays until leave.
+///
+/// `unleft_joint` is the log index of a `MembershipJoint` with `old != new`
+/// and no later applied leave (`old == new`). Compact through `j - 1`.
+#[must_use]
+pub fn compact_through_unleft(through: u64, unleft_joint: Option<u64>) -> u64 {
+    match unleft_joint {
+        Some(j) if j > 0 && j <= through => j.saturating_sub(1),
+        _ => through,
+    }
+}
+
+/// AS-IS: compact past an un-left joint (the 0096/0100 hole).
+#[must_use]
+pub fn compact_through_unleft_as_is(through: u64, _unleft_joint: Option<u64>) -> u64 {
+    through
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -89,6 +107,16 @@ mod tests {
     }
 
     #[test]
+    fn unleft_joint_caps_through() {
+        assert_eq!(compact_through_unleft(5, Some(3)), 2);
+        assert_eq!(compact_through_unleft(5, Some(5)), 4);
+        assert_eq!(compact_through_unleft(5, Some(6)), 5);
+        assert_eq!(compact_through_unleft(5, None), 5);
+        assert_eq!(compact_through_unleft(5, Some(0)), 5);
+        assert_eq!(compact_through_unleft_as_is(5, Some(3)), 5);
+    }
+
+    #[test]
     fn theorem_compact_on_finite_domain() {
         for part in [false, true] {
             assert!(peer_counts_for_compact(part));
@@ -105,5 +133,15 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn compact_through_unleft_on_live_joint_is_not_ok() {
+        assert_eq!(compact_through_unleft(5, Some(3)), 2);
+        assert_eq!(
+            compact_through_unleft_as_is(5, Some(3)),
+            5,
+            "AS-IS dente: compact past unleft joint"
+        );
     }
 }

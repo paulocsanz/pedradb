@@ -23,7 +23,7 @@ Run weekly (or after overnight soak):
 | det_io proof | `../determinismo/pedradb-dst/scripts/det_io_proof.sh` | entry exists |
 | Linux CI entry | `../determinismo/pedradb-dst/scripts/linux_det_io_ci.sh` | Darwin → PRELOAD-MISS / RecordingEnv substitute (exit 0); Linux → CONTRACT-OK hard |
 | QEMU subset | `../determinismo/pedradb-dst/scripts/qemu_subset_revalidate.sh` | entry exists; **no guest image** → residual |
-| **pedradb TCG wrapper** | `scripts/tcg_guest_status.sh` | RFC-0052 P2.2: prints `C2.2=residual_no_guest` (CI `tcg-guest-residual`). `TCG_REQUIRED=1` fails closed. Native-vs-guest `trace_hash` is P2.1, not this script. `PEDRA_QEMU_SSH` is the guest hook (RFC-0005). |
+| **pedradb TCG wrapper** | `scripts/tcg_guest_status.sh` | RFC-0052 P2.2 / RFC-0063 P2.3: without `PEDRA_QEMU_SSH` prints `C2.2=residual_no_guest` (CI `tcg-guest-residual`). With the caixote guest (`pedra-tcg-guest`, deterministic TCG) → `C2.2=guest_reachable`. `TCG_REQUIRED=1` fails closed. Native-vs-guest `trace_hash` is P2.1 (`tcg_world_smoke.sh`). Finding `2026-08-27-tcg-caixote-guest`. |
 
 **Residual ticket (honest):** full det_io CONTRACT-OK and QEMU guest revalidation are **blocked** without Linux CI runner + optional guest image. In-tree FailingEnv / RecordingEnv remain the authoritative disk-fault proof on macOS and default CI.
 

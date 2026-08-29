@@ -124,6 +124,65 @@ pub fn scan_reads_file_as_is(
     point_bounds_overlap(smallest, largest, start, end)
 }
 
+/// Tiny SST files may predate the CRC trailer (RFC-0077).
+pub const SST_LEGACY_NO_CRC_MAX: usize = 32;
+
+/// What `SstTable::decode` does with a magic file's trailing CRC32C (RFC-0077).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SstCrcFate {
+    /// Stored CRC matches: payload is the file minus the 4-byte trailer.
+    StripTrailer,
+    /// Mismatch on a tiny file: parse the whole buffer (no trailer).
+    WholeBuffer,
+    /// Mismatch on a modern file: reject. Never a table.
+    Reject,
+}
+
+/// Admit the SST file CRC. Mismatch on a modern file is never a table.
+///
+/// AS-IS always [`SstCrcFate::StripTrailer`] (silent-wrong table).
+#[must_use]
+pub fn sst_crc_fate(stored: u32, computed: u32, buf_len: usize) -> SstCrcFate {
+    if crate::wal::crc::crc_match_ok(stored, computed) {
+        SstCrcFate::StripTrailer
+    } else if buf_len < SST_LEGACY_NO_CRC_MAX {
+        SstCrcFate::WholeBuffer
+    } else {
+        SstCrcFate::Reject
+    }
+}
+
+/// AS-IS RFC-0077: any checksum is a match (corruption served as a table).
+#[must_use]
+pub fn sst_crc_fate_as_is(_stored: u32, _computed: u32, _buf_len: usize) -> SstCrcFate {
+    SstCrcFate::StripTrailer
+}
+
+/// Admit a per-block data CRC (RFC-0077 P1.1). Same gate as the file trailer.
+#[must_use]
+pub fn sst_block_crc_ok(stored: u32, computed: u32) -> bool {
+    crate::wal::crc::crc_match_ok(stored, computed)
+}
+
+/// AS-IS: any block checksum matches (corruption served as a block).
+#[must_use]
+pub fn sst_block_crc_ok_as_is(_stored: u32, _computed: u32) -> bool {
+    true
+}
+
+/// RFC-0077 P2.2 / R-glue: zero remaining glue (handlers proven, `db.rs`
+/// extracted). Always false. `sst_crc_fate` is cataloged; glue stays TCB.
+#[must_use]
+pub fn zero_glue_admitted() -> bool {
+    false
+}
+
+/// AS-IS: extracting `sst_crc_fate` looks like glue is gone (the 0077 P2.2 hole).
+#[must_use]
+pub fn zero_glue_admitted_as_is() -> bool {
+    true
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -175,6 +234,81 @@ mod tests {
             Bound::Included(b"k-a"),
             Bound::Included(b"k-a"),
         ));
+    }
+
+    #[test]
+    fn sst_crc_mismatch_is_reject() {
+        assert_eq!(sst_crc_fate(1, 1, 100), SstCrcFate::StripTrailer);
+        assert_eq!(sst_crc_fate(1, 2, 100), SstCrcFate::Reject);
+        assert_eq!(sst_crc_fate(1, 2, 16), SstCrcFate::WholeBuffer);
+        assert_eq!(
+            sst_crc_fate_as_is(1, 2, 100),
+            SstCrcFate::StripTrailer,
+            "AS-IS dente: ignore mismatch"
+        );
+    }
+
+    /// RFC-0076 P1.1: SST file-trailer fate uses `crc_match_ok` (RFC-0077 P0).
+    #[test]
+    fn sst_file_crc_uses_crc_match_ok() {
+        assert!(crate::wal::crc::crc_match_ok(1, 1));
+        assert!(!crate::wal::crc::crc_match_ok(1, 2));
+        assert!(
+            crate::wal::crc::crc_match_ok_as_is(1, 2),
+            "AS-IS dente: ignore mismatch"
+        );
+        assert_eq!(sst_crc_fate(1, 1, 100), SstCrcFate::StripTrailer);
+        assert_eq!(sst_crc_fate(1, 2, 100), SstCrcFate::Reject);
+        assert_eq!(
+            sst_crc_fate_as_is(1, 2, 100),
+            SstCrcFate::StripTrailer,
+            "AS-IS would strip a flipped trailer"
+        );
+    }
+
+    /// RFC-0077 P1.1: per-block admit is `crc_match_ok` (no tiny-legacy path).
+    #[test]
+    fn sst_block_crc_uses_crc_match_ok() {
+        assert!(sst_block_crc_ok(1, 1));
+        assert!(!sst_block_crc_ok(1, 2));
+        assert!(
+            sst_block_crc_ok_as_is(1, 2),
+            "AS-IS dente: ignore block mismatch"
+        );
+        assert_eq!(sst_block_crc_ok(7, 7), crate::wal::crc::crc_match_ok(7, 7));
+    }
+
+    /// RFC-0077 P2.2: cataloging `sst_crc_fate` is not zero glue.
+    #[test]
+    fn zero_glue_is_a_trajectory() {
+        assert!(!zero_glue_admitted());
+        assert!(
+            zero_glue_admitted_as_is(),
+            "AS-IS dente: extracting sst_crc_fate looks like glue is gone"
+        );
+        let crate_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        assert!(
+            crate_dir.join("verus/sst_crc_fate.rs").is_file(),
+            "RFC-0077 P2.1: sst_crc_fate twin must exist"
+        );
+        assert!(
+            crate_dir.join("verus/scan_guard.rs").is_file(),
+            "RFC-0077 P2.1: scan_guard F167 twin must stay"
+        );
+        assert!(
+            crate_dir.join("src/db.rs").is_file(),
+            "RFC-0077 P2.2: do not extract db.rs"
+        );
+        let residuals = crate_dir.join("../../scripts/formal/residuals.json");
+        let text = std::fs::read_to_string(&residuals).expect("residuals.json");
+        assert!(
+            text.contains("\"db_rs_extracted\": false"),
+            "glue.db_rs_extracted must stay false"
+        );
+        assert!(
+            text.contains("\"id\": \"R-glue\""),
+            "R-glue remains a residual"
+        );
     }
 
     #[test]

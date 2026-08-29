@@ -2,10 +2,10 @@
 //!
 //! Usage:
 //!   cargo run -q --release -p rocksdb-parity-bench --bin rocks-parity-compare -- \
-//!     <compat_bench.json> [out_dir]
+//!     <compat_bench.json> [out_dir] [peer_bench.json]
 //!
-//! Peer: ROCKS_PARITY_PEER=path/to/rocks_parity_bench.json (real engine run,
-//!   scripts/rocks_side_ycsb.sh). Gate: ROCKS_PARITY_RATIO_FLOOR=0.8 fails any
+//! Peer: 3rd arg or ROCKS_PARITY_PEER=path/to/rocks_parity_bench.json (real
+//!   engine run, scripts/rocks_side_ycsb.sh). Gate: ROCKS_PARITY_RATIO_FLOOR=0.8 fails any
 //!   real ratio below it ("none"/unset = report-only). Without a peer the
 //!   report is template mode (parity.pass null) — CI stays green.
 
@@ -36,7 +36,9 @@ fn main() {
     let compat_sync = extract_bool_field(&compat_raw, "sync");
     let compat_durability = extract_string_field(&compat_raw, "durability");
 
-    let peer_path = std::env::var("ROCKS_PARITY_PEER").ok();
+    let peer_path = std::env::args()
+        .nth(3)
+        .or_else(|| std::env::var("ROCKS_PARITY_PEER").ok());
     let peer_raw = peer_path
         .as_ref()
         .and_then(|p| std::fs::read_to_string(p).ok());

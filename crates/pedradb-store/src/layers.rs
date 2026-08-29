@@ -612,7 +612,7 @@ mod tests {
     #[test]
     fn snapshot_tx_begin_mutate_commit() {
         let dir = temp();
-        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
         c.elect_all(80).unwrap();
         let mut tx = c.begin();
         assert_eq!(tx.snapshot_version(), 0);
@@ -629,7 +629,7 @@ mod tests {
     #[test]
     fn snapshot_tx_occ_ww_conflict() {
         let dir = temp();
-        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
         c.elect_all(80).unwrap();
         let mut t1 = c.begin();
         let mut t2 = c.begin();
@@ -645,7 +645,7 @@ mod tests {
     #[test]
     fn snapshot_tx_read_set_conflict() {
         let dir = temp();
-        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
         c.elect_all(80).unwrap();
         c.put(b"x", b"0").unwrap();
         let mut t1 = c.begin();
@@ -661,7 +661,7 @@ mod tests {
     #[test]
     fn snapshot_tx_too_old() {
         let dir = temp();
-        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
         c.elect_all(40).unwrap();
         let mut tx = c.begin();
         assert_eq!(tx.snapshot_version(), 0);
@@ -680,7 +680,7 @@ mod tests {
     #[test]
     fn tx_snapshot_hides_concurrent_commit() {
         let dir = temp();
-        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
         c.elect_all(80).unwrap();
         c.put(b"sk", b"v0").unwrap();
         let mut tx = c.begin();
@@ -703,7 +703,7 @@ mod tests {
     #[test]
     fn tx_range_read_conflict() {
         let dir = temp();
-        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
         c.elect_all(80).unwrap();
         c.put(b"r/a", b"1").unwrap();
         c.put(b"r/b", b"2").unwrap();
@@ -723,7 +723,7 @@ mod tests {
     fn tx_too_old_after_gc_watermark() {
         use crate::VERSION_RETENTION;
         let dir = temp();
-        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
         c.elect_all(60).unwrap();
         let mut tx = c.begin();
         assert_eq!(tx.snapshot_version(), 0);
@@ -747,7 +747,7 @@ mod tests {
     #[test]
     fn live_hub_failover_notifies_without_polling_dcs() {
         let dir = temp();
-        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
         let rid = c.range_metas()[0].id;
         let (_id, rx) = c.subscribe_leadership(rid);
         c.elect_all(80).unwrap();
@@ -794,7 +794,7 @@ mod tests {
     #[test]
     fn store_metrics_count_commits_and_elections() {
         let dir = temp();
-        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
         assert_eq!(c.metrics(), StoreMetrics::default());
         c.elect_all(80).unwrap();
         assert!(
@@ -821,7 +821,7 @@ mod tests {
     #[test]
     fn watch_after_majority_put() {
         let dir = temp();
-        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
         c.elect_all(80).unwrap();
         let (_id, rx) = c.watch_prefix(b"w/");
         c.put(b"w/1", b"hello").unwrap();
@@ -835,7 +835,7 @@ mod tests {
     #[test]
     fn etcd_need_face_create_cas_get() {
         let dir = temp();
-        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
         c.elect_all(80).unwrap();
         let (_id, rx) = c.watch_prefix(EtcdNeedFace::PREFIX);
         let rev = EtcdNeedFace::create(&mut c, b"leader", b"n1").unwrap();
@@ -864,7 +864,7 @@ mod tests {
     #[test]
     fn etcd_need_get_skips_lagging_first_node() {
         let dir = temp();
-        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
         c.elect_all(80).unwrap();
         c.set_participating(1, false).unwrap();
         c.elect_all(120).unwrap();
@@ -888,7 +888,7 @@ mod tests {
             "cp_key(a) must not prefix cp_key(ab): {a:?} vs {ab:?}"
         );
         let dir = temp();
-        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
         c.elect_all(60).unwrap();
         let hub = WatchHub::new();
         cp_put(&mut c, &hub, b"a", b"va").unwrap();
@@ -908,7 +908,7 @@ mod tests {
     #[test]
     fn etcd_need_full_key_not_prefix_of_sibling() {
         let dir = temp();
-        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
         c.elect_all(80).unwrap();
         EtcdNeedFace::create(&mut c, b"a", b"va").unwrap();
         EtcdNeedFace::create(&mut c, b"ab", b"vab").unwrap();
@@ -945,7 +945,7 @@ mod tests {
     #[test]
     fn n_writers_disjoint_ranges() {
         let dir = temp();
-        let mut c = StoreCluster::open(&dir, 3, 4).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 4).unwrap();
         c.elect_all(120).unwrap();
         let keys: Vec<Vec<u8>> = c
             .range_metas()
@@ -998,7 +998,7 @@ mod tests {
     #[test]
     fn secondary_index_via_tx() {
         let dir = temp();
-        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
         c.elect_all(80).unwrap();
         put_with_secondary_index(&mut c, b"users", b"42", b"email", b"a@b.c", b"row-42").unwrap();
         assert_eq!(
@@ -1018,7 +1018,7 @@ mod tests {
     #[test]
     fn table_index_injective_and_clears_stale_on_change() {
         let dir = temp();
-        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
         c.elect_all(90).unwrap();
         // Two different (table,col,pk) must not share a key under old i/t/c/pk.
         let k1 = table_index_key(b"a", b"b/c", b"v", b"d");
@@ -1069,7 +1069,7 @@ mod tests {
     #[test]
     fn table_index_range_does_not_include_nul_value_prefix_sibling() {
         let dir = temp();
-        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
         c.elect_all(80).unwrap();
         put_with_secondary_index(&mut c, b"t", b"1", b"email", b"red", b"row1").unwrap();
         let long = [b'r', b'e', b'd', 0x00, b'f', b'o', b'o'];
@@ -1104,7 +1104,7 @@ mod tests {
     #[test]
     fn tikv_face_n_writers_and_batch() {
         let dir = temp();
-        let mut c = StoreCluster::open(&dir, 3, 4).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 4).unwrap();
         c.elect_all(120).unwrap();
         let keys = raw_keys_one_per_range(&c);
         assert!(
@@ -1145,7 +1145,7 @@ mod tests {
     fn table_sqlite_encode_and_pg_nwriter() {
         let dir = temp();
         // ≥2 ranges so disjoint PKs can prove multi-leader N-writer.
-        let mut c = StoreCluster::open(&dir, 3, 4).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 4).unwrap();
         c.elect_all(120).unwrap();
 
         // Encoding roundtrip (any PK).
@@ -1196,7 +1196,7 @@ mod tests {
     #[test]
     fn olap_ro_and_stream_from_sor() {
         let dir = temp();
-        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
         c.elect_all(60).unwrap();
         olap_ingest(&mut c, b"events", 1, b"e1").unwrap();
         olap_ingest(&mut c, b"events", 2, b"e2").unwrap();
@@ -1222,7 +1222,7 @@ mod tests {
     #[test]
     fn olap_scan_does_not_include_slash_sibling_stream() {
         let dir = temp();
-        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
         c.elect_all(60).unwrap();
         olap_ingest(&mut c, b"events", 1, b"e1").unwrap();
         olap_ingest(&mut c, b"events/extra", 1, b"leak").unwrap();
@@ -1249,7 +1249,7 @@ mod tests {
     #[test]
     fn scylla_need_cp_put_watch() {
         let dir = temp();
-        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
         c.elect_all(60).unwrap();
         let (_id, rx) = c.watch_prefix(b"cp/");
         // Use cluster watch; cp_put also notifies hub param — use cluster hub.
@@ -1268,7 +1268,7 @@ mod tests {
     #[test]
     fn platform_need_faces_scylla_olap_stream() {
         let dir = temp();
-        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
         c.elect_all(80).unwrap();
 
         // Scylla-need CP: durable put under cp/ + watch notify on hub.
@@ -1323,7 +1323,7 @@ mod tests {
     #[test]
     fn stream_list_does_not_include_slash_child_subject() {
         let dir = temp();
-        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
         c.elect_all(90).unwrap();
         stream_publish(&mut c, b"a", 1, b"only-a").unwrap();
         stream_publish(&mut c, b"a/b", 1, b"child").unwrap();
@@ -1362,7 +1362,7 @@ mod tests {
     #[test]
     fn stream_list_does_not_include_nul_subject_sibling() {
         let dir = temp();
-        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
         c.elect_all(90).unwrap();
         stream_publish(&mut c, b"red", 1, b"only-red").unwrap();
         let long = [b'r', b'e', b'd', 0x00, b'x'];

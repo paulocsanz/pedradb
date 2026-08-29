@@ -31,6 +31,24 @@ pub fn txn_commit_action_as_is(_status_is_abort: bool) -> TxnCommitAction {
     TxnCommitAction::Materialise
 }
 
+#[cfg(test)]
+mod three_teeth {
+    use super::*;
+
+    #[test]
+    fn txn_commit_action_on_live_abort_is_not_ok() {
+        assert_eq!(
+            txn_commit_action(true),
+            TxnCommitAction::Revert
+        );
+        assert_eq!(
+            txn_commit_action_as_is(true),
+            TxnCommitAction::Materialise,
+            "AS-IS dente: abort materialises"
+        );
+    }
+}
+
 /// After revert, may we delete the txn status key?
 ///
 /// F47: if the status was abort, keep the fence so a later `TxnCommit` replay

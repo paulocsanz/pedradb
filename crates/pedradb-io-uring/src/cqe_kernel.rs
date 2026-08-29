@@ -93,6 +93,32 @@ pub enum SubmitCompleteAct {
 pub static F208_WAITMORE_AFTER_SUBMIT_ERR: std::sync::atomic::AtomicU64 =
     std::sync::atomic::AtomicU64::new(0);
 
+/// Admit a harvested CQE `res` (RFC-0074). Negative is a kernel errno, not Ok.
+#[must_use]
+pub fn cqe_res_ok(res: i32) -> bool {
+    res >= 0
+}
+
+/// AS-IS: treat any CQE as success (the 0074 hole — false Ok on fsync).
+#[must_use]
+pub fn cqe_res_ok_as_is(_res: i32) -> bool {
+    true
+}
+
+/// RFC-0074 P2.2 / R-uring: a Verus twin of the io_uring *ring* (submit_sqe,
+/// harvest, SQE layout). Always false. `cqe_res_ok` is cataloged; the ring
+/// stays TCB. AS-IS would treat the res-gate twin as a ring proof.
+#[must_use]
+pub fn cqe_ring_model_admitted() -> bool {
+    false
+}
+
+/// AS-IS: the CQE res twin looks like a proven ring (the 0074 P2.2 hole).
+#[must_use]
+pub fn cqe_ring_model_admitted_as_is() -> bool {
+    true
+}
+
 /// Decide what to do after a submit attempt plus a non-blocking CQ drain.
 ///
 /// `submit_ok` is kept so as-is tests can contrast F203/F208 and so the
@@ -167,6 +193,34 @@ mod tests {
         assert_ne!(
             cqe_act(leftover, next),
             cqe_act(TAG_WRITE_AS_IS, TAG_WRITE_AS_IS)
+        );
+    }
+
+    #[test]
+    fn cqe_negative_res_is_not_ok() {
+        assert!(cqe_res_ok(0));
+        assert!(cqe_res_ok(16));
+        assert!(!cqe_res_ok(-5));
+        assert!(!cqe_res_ok(-1));
+        assert!(cqe_res_ok_as_is(-5), "AS-IS dente: negative CQE looks Ok");
+    }
+
+    /// RFC-0074 P2.2: twin of `cqe_res_ok` is not a ring model.
+    #[test]
+    fn cqe_ring_model_is_not_admitted() {
+        assert!(!cqe_ring_model_admitted());
+        assert!(
+            cqe_ring_model_admitted_as_is(),
+            "AS-IS dente: res-gate twin looks like a ring proof"
+        );
+        let crate_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        assert!(
+            crate_dir.join("verus/cqe_res.rs").is_file(),
+            "RFC-0074 P2.1: cqe_res_ok twin must exist"
+        );
+        assert!(
+            !crate_dir.join("verus/ring_model.rs").exists(),
+            "RFC-0074 P2.2: ring Verus twin must stay absent"
         );
     }
 

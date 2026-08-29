@@ -1,0 +1,7 @@
+# Thin public retag of p149a: drop stale p04a prebuilt + link GHCR to a public repo.
+FROM ghcr.io/paulocsanz/pedradb-linux-gate:p149a
+LABEL org.opencontainers.image.source="https://github.com/paulocsanz/pedra-linux-p149"
+COPY scripts/rfc0149_linux_entrypoint.sh /usr/local/bin/p04_entrypoint.sh
+COPY scripts/rfc0149_linux_entrypoint.sh /src/pedradb/scripts/rfc0149_linux_entrypoint.sh
+RUN chmod +x /usr/local/bin/p04_entrypoint.sh /src/pedradb/scripts/rfc0149_linux_entrypoint.sh \
+ && rm -f /usr/local/bin/rocks-parity-bench /usr/local/bin/rocks-parity-compare

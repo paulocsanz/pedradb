@@ -85,7 +85,7 @@ deste RFC (e de `never_floor`) faz o `--ci` falhar.
 - [x] **P2.2** TLS default / encrypt-at-rest: dono continua [0021](0021-security-tls-baseline.md) (lab shipped, não GA) — status: `done`
   (`R-tls` parked; **não** se ligou TLS-by-default)
 - [x] **P2.3** Joint consensus de membership Montanha: dono passou a [0063](0063-fdb-reliability-close-the-system-gap.md) — status: `done`
-  (`R-joint` **open**; P0 log-carried `MembershipJoint` shipped 2026-08-26; election-time joint = 0063 P1.1)
+  (`R-joint` **continuous**; leave-joint RFC-0066 P0; Stateright leave = 0066 P1)
 
 ## Status (living — update with every PR)
 
@@ -99,7 +99,7 @@ deste RFC (e de `never_floor`) faz o `--ci` falhar.
 | P1.3 | p1 | glue LOC no json + freeze | done | glue.kernel_files/loc live; no db.rs | 2026-08-25 |
 | P2.1 | p2 | never-list só muda aqui | done | never_floor + RFC grep + drop test | 2026-08-25 |
 | P2.2 | p2 | TLS default (produto) | done | R-tls parked; RFC-0021 owner | 2026-08-25 |
-| P2.3 | p2 | joint consensus membership | done | R-joint open; RFC-0063 P0 | 2026-08-26 |
+| P2.3 | p2 | joint consensus membership | done | R-joint continuous; RFC-0066 P0 leave | 2026-08-27 |
 
 ## Acceptance Criteria
 

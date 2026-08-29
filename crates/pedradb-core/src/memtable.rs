@@ -6,7 +6,7 @@
 //! the newest such entry wins (delete tombstone hides the key).
 
 use std::cmp::Ordering;
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::ops::Bound;
 use std::sync::{Arc, Mutex};
 
@@ -334,6 +334,9 @@ pub struct MemTable {
     tail_ord: Mutex<Option<Arc<Vec<u32>>>>,
     /// Approximate bytes for flush triggers (user key + value + trailer).
     approx_bytes: usize,
+    /// Bytes per CF prefix (RFC-0065 P1.1). Keyed by `cf_prefix` (empty =
+    /// default-raw). `"default\0…"` is a distinct prefix from empty.
+    cf_bytes: BTreeMap<Bytes, usize>,
     /// Range-tombstone entries (full-map fallback on ranged scan when > 0).
     range_tombstones: usize,
     /// Total internal versions (not distinct user keys).
@@ -349,6 +352,7 @@ impl Clone for MemTable {
             tail_max_seq: self.tail_max_seq,
             tail_ord: Mutex::new(None),
             approx_bytes: self.approx_bytes,
+            cf_bytes: self.cf_bytes.clone(),
             range_tombstones: self.range_tombstones,
             entries: self.entries,
         }
@@ -356,10 +360,20 @@ impl Clone for MemTable {
 }
 
 /// Compat CF encoding is `cf\\0user`. Kernel keys without NUL share one shard.
-fn cf_prefix(key: &[u8]) -> &[u8] {
+pub(crate) fn cf_prefix(key: &[u8]) -> &[u8] {
     match key.iter().position(|&b| b == 0) {
         Some(i) => &key[..i],
         None => &[],
+    }
+}
+
+pub use crate::cf_kernel::{cf_family_of, infer_sst_cf, key_in_cf_family};
+
+fn family_from_prefix(prefix: &[u8]) -> String {
+    if prefix.is_empty() {
+        "default".into()
+    } else {
+        String::from_utf8_lossy(prefix).into_owned()
     }
 }
 
@@ -464,6 +478,99 @@ impl MemTable {
     #[must_use]
     pub fn approx_memory_usage(&self) -> usize {
         self.approx_bytes
+    }
+
+    fn bump_cf_bytes_map(map: &mut BTreeMap<Bytes, usize>, user_key: &[u8], n: usize, add: bool) {
+        let p = cf_prefix(user_key);
+        if let Some(slot) = map.get_mut(p) {
+            *slot = if add {
+                slot.saturating_add(n)
+            } else {
+                slot.saturating_sub(n)
+            };
+            return;
+        }
+        if add && n > 0 {
+            map.insert(Bytes::copy_from_slice(p), n);
+        }
+    }
+
+    fn bump_cf_bytes(&mut self, user_key: &[u8], n: usize, add: bool) {
+        Self::bump_cf_bytes_map(&mut self.cf_bytes, user_key, n, add);
+    }
+
+    /// Approximate memory of one CF family (RFC-0065 P1.1).
+    ///
+    /// `"default"` sums the empty prefix (raw keys) and the `default\0` prefix.
+    #[must_use]
+    pub fn approx_memory_usage_cf(&self, family: &str) -> usize {
+        if family == "default" {
+            let raw = self.cf_bytes.get(&b""[..]).copied().unwrap_or(0);
+            let pref = self.cf_bytes.get(&b"default"[..]).copied().unwrap_or(0);
+            raw.saturating_add(pref)
+        } else {
+            self.cf_bytes.get(family.as_bytes()).copied().unwrap_or(0)
+        }
+    }
+
+    /// Move every key of `family` into a new table (RFC-0065 P1.1).
+    ///
+    /// Keepers are not cloned — the map is partitioned in place so a tiny
+    /// `lock` flush does not memcpy the default memtable.
+    #[must_use]
+    pub fn take_family(&mut self, family: &str) -> Self {
+        self.spill_tail();
+        let map = std::mem::take(&mut self.map);
+        let mut taken_map = BTreeMap::new();
+        for (k, vers) in map {
+            if key_in_cf_family(k.as_ref(), family) {
+                taken_map.insert(k, vers);
+            } else {
+                self.map.insert(k, vers);
+            }
+        }
+        self.recount();
+        let mut taken = Self::new();
+        taken.map = taken_map;
+        taken.recount();
+        taken
+    }
+
+    fn recount(&mut self) {
+        self.approx_bytes = 0;
+        self.entries = 0;
+        self.range_tombstones = 0;
+        self.cf_bytes.clear();
+        self.tail_max_seq = 0;
+        self.tail_idx.clear();
+        self.invalidate_tail_ord();
+        let mut cf_bytes = BTreeMap::new();
+        for (uk, vers) in &self.map {
+            for v in vers.iter() {
+                let n = uk.len() + v.value.len() + 8;
+                self.approx_bytes = self.approx_bytes.saturating_add(n);
+                self.entries = self.entries.saturating_add(1);
+                Self::bump_cf_bytes_map(&mut cf_bytes, uk.as_ref(), n, true);
+                self.tail_max_seq = self.tail_max_seq.max(v.key.sequence);
+                if v.key.kind == ValueType::RangeDeletion {
+                    self.range_tombstones = self.range_tombstones.saturating_add(1);
+                }
+            }
+        }
+        let tail = std::mem::take(&mut self.tail);
+        for (i, v) in tail.iter().enumerate() {
+            let n = v.key.user_key.len() + v.value.len() + 8;
+            self.approx_bytes = self.approx_bytes.saturating_add(n);
+            self.entries = self.entries.saturating_add(1);
+            Self::bump_cf_bytes_map(&mut cf_bytes, v.key.user_key.as_ref(), n, true);
+            self.tail_max_seq = self.tail_max_seq.max(v.key.sequence);
+            if v.key.kind == ValueType::RangeDeletion {
+                self.range_tombstones = self.range_tombstones.saturating_add(1);
+            }
+            self.tail_idx_insert(v.key.user_key.clone(), i);
+        }
+        self.tail = tail;
+        self.cf_bytes = cf_bytes;
     }
 
     /// Whether any insert is still in the unsorted tail.
@@ -590,15 +697,33 @@ impl MemTable {
                 && v.key.user_key == key.user_key
             {
                 let old = std::mem::replace(&mut v.value, value);
+                let old_n = old.len();
+                let new_n = v.value.len();
                 self.approx_bytes = self
                     .approx_bytes
-                    .saturating_sub(old.len())
-                    .saturating_add(v.value.len());
+                    .saturating_sub(old_n)
+                    .saturating_add(new_n);
+                if new_n >= old_n {
+                    Self::bump_cf_bytes_map(
+                        &mut self.cf_bytes,
+                        v.key.user_key.as_ref(),
+                        new_n - old_n,
+                        true,
+                    );
+                } else {
+                    Self::bump_cf_bytes_map(
+                        &mut self.cf_bytes,
+                        v.key.user_key.as_ref(),
+                        old_n - new_n,
+                        false,
+                    );
+                }
                 return;
             }
         }
         self.entries = self.entries.saturating_add(1);
         self.approx_bytes = self.approx_bytes.saturating_add(entry_bytes);
+        self.bump_cf_bytes(key.user_key.as_ref(), entry_bytes, true);
         if is_rd {
             self.range_tombstones = self.range_tombstones.saturating_add(1);
         }
@@ -622,15 +747,33 @@ impl MemTable {
                     && v.key.user_key == key.user_key
                 {
                     let old = std::mem::replace(&mut v.value, value);
+                    let old_n = old.len();
+                    let new_n = v.value.len();
                     self.approx_bytes = self
                         .approx_bytes
-                        .saturating_sub(old.len())
-                        .saturating_add(v.value.len());
+                        .saturating_sub(old_n)
+                        .saturating_add(new_n);
+                    if new_n >= old_n {
+                        Self::bump_cf_bytes_map(
+                            &mut self.cf_bytes,
+                            v.key.user_key.as_ref(),
+                            new_n - old_n,
+                            true,
+                        );
+                    } else {
+                        Self::bump_cf_bytes_map(
+                            &mut self.cf_bytes,
+                            v.key.user_key.as_ref(),
+                            old_n - new_n,
+                            false,
+                        );
+                    }
                     continue;
                 }
             }
             self.entries = self.entries.saturating_add(1);
             self.approx_bytes = self.approx_bytes.saturating_add(entry_bytes);
+            self.bump_cf_bytes(key.user_key.as_ref(), entry_bytes, true);
             if is_rd {
                 self.range_tombstones = self.range_tombstones.saturating_add(1);
             }
@@ -881,16 +1024,15 @@ impl MemTable {
             (None, None) => return None,
         };
         debug_assert_eq!(v.key.user_key.as_ref(), user_key);
-        let look = match v.key.kind {
-            ValueType::Deletion => Lookup::Deleted,
-            ValueType::Value => {
-                if self.range_deleted(user_key, v.key.sequence, snapshot) {
-                    Lookup::Deleted
-                } else {
-                    Lookup::Found(v.value.clone())
-                }
-            }
-            ValueType::RangeDeletion => return None,
+        if v.key.kind == ValueType::RangeDeletion {
+            return None;
+        }
+        let range_hidden = v.key.kind == ValueType::Value
+            && self.range_deleted(user_key, v.key.sequence, snapshot);
+        let look = if crate::merge::visible_at(v.key.kind, range_hidden) {
+            Lookup::Found(v.value.clone())
+        } else {
+            Lookup::Deleted
         };
         Some((v.key.sequence, look))
     }
@@ -997,6 +1139,26 @@ impl MemTable {
             }
         }
         false
+    }
+
+    /// Distinct CF families present in this table (RFC-0065 P0 split flush).
+    ///
+    /// Empty prefix / kernel keys map to `"default"`. Order is sorted.
+    #[must_use]
+    pub fn cf_families(&self) -> Vec<String> {
+        let mut set = BTreeSet::new();
+        for p in self.tail_idx.keys() {
+            set.insert(family_from_prefix(p.as_ref()));
+        }
+        let mut last: Option<&[u8]> = None;
+        for k in self.map.keys() {
+            let p = cf_prefix(k.as_ref());
+            if last != Some(p) {
+                set.insert(family_from_prefix(p));
+                last = Some(p);
+            }
+        }
+        set.into_iter().collect()
     }
 
     /// All internal versions in [`InternalKey`] order (for SST flush).
@@ -1178,19 +1340,20 @@ impl MemTable {
         F: FnMut(&Bytes) -> Bytes,
     {
         self.approx_bytes = 0;
+        self.cf_bytes.clear();
         for (uk, vers) in &mut self.map {
             for v in vers.iter_mut() {
                 v.value = f(&v.value);
-                self.approx_bytes = self
-                    .approx_bytes
-                    .saturating_add(uk.len() + v.value.len() + 8);
+                let n = uk.len() + v.value.len() + 8;
+                self.approx_bytes = self.approx_bytes.saturating_add(n);
+                Self::bump_cf_bytes_map(&mut self.cf_bytes, uk.as_ref(), n, true);
             }
         }
         for v in &mut self.tail {
             v.value = f(&v.value);
-            self.approx_bytes = self
-                .approx_bytes
-                .saturating_add(v.key.user_key.len() + v.value.len() + 8);
+            let n = v.key.user_key.len() + v.value.len() + 8;
+            self.approx_bytes = self.approx_bytes.saturating_add(n);
+            Self::bump_cf_bytes_map(&mut self.cf_bytes, v.key.user_key.as_ref(), n, true);
         }
     }
 
@@ -1799,6 +1962,69 @@ mod tests {
         );
         assert_eq!(mt.get(b"raftlog\0missing", 9000), Lookup::NotFound);
         assert_eq!(mt.tail_idx.len(), 2, "lock + raftlog shards");
+        let fams = mt.cf_families();
+        assert_eq!(fams, vec!["lock".to_string(), "raftlog".to_string()]);
+    }
+
+    #[test]
+    fn cf_family_of_raw_and_prefixed() {
+        assert_eq!(cf_family_of(b"aaa"), "default");
+        assert_eq!(cf_family_of(b"default\0k"), "default");
+        assert_eq!(cf_family_of(b"lock\0k"), "lock");
+        assert!(key_in_cf_family(b"aaa", "default"));
+        assert!(key_in_cf_family(b"default\0k", "default"));
+        assert!(!key_in_cf_family(b"lock\0k", "default"));
+        assert!(key_in_cf_family(b"lock\0k", "lock"));
+        assert_eq!(infer_sst_cf(Some(b"lock\0a"), Some(b"lock\0z")), "lock");
+        assert_eq!(infer_sst_cf(Some(b"aaa"), Some(b"lock\0z")), "");
+        assert_eq!(infer_sst_cf(Some(b"aaa"), Some(b"zzz")), "default");
+    }
+
+    #[test]
+    fn take_family_keeps_other_cf_and_bytes() {
+        let mut mt = MemTable::new();
+        mt.put(b"lock\0a".as_slice(), 1, b"L".as_slice());
+        mt.put(b"default\0a".as_slice(), 2, b"D".as_slice());
+        mt.put(b"default\0b".as_slice(), 3, b"E".as_slice());
+        let lock = mt.take_family("lock");
+        assert_eq!(
+            lock.get(b"lock\0a", 3),
+            Lookup::Found(Bytes::from_static(b"L"))
+        );
+        assert_eq!(mt.get(b"lock\0a", 3), Lookup::NotFound);
+        assert_eq!(
+            mt.get(b"default\0a", 3),
+            Lookup::Found(Bytes::from_static(b"D"))
+        );
+        assert!(mt.approx_memory_usage_cf("lock") == 0);
+        assert!(mt.approx_memory_usage_cf("default") > 0);
+        assert!(lock.approx_memory_usage_cf("lock") > 0);
+    }
+
+    #[test]
+    fn take_family_leaves_other_cf() {
+        let mut mt = MemTable::new();
+        mt.insert(
+            InternalKey::new(Bytes::from_static(b"lock\0a"), 1, ValueType::Value),
+            Bytes::from_static(b"L"),
+        );
+        mt.insert(
+            InternalKey::new(Bytes::from_static(b"default\0a"), 2, ValueType::Value),
+            Bytes::from_static(b"D"),
+        );
+        assert!(mt.approx_memory_usage_cf("lock") > 0);
+        assert!(mt.approx_memory_usage_cf("default") > 0);
+        let lock = mt.take_family("lock");
+        assert_eq!(
+            lock.get(b"lock\0a", 10),
+            Lookup::Found(Bytes::from_static(b"L"))
+        );
+        assert_eq!(
+            mt.get(b"default\0a", 10),
+            Lookup::Found(Bytes::from_static(b"D"))
+        );
+        assert_eq!(mt.get(b"lock\0a", 10), Lookup::NotFound);
+        assert_eq!(lock.approx_memory_usage_cf("default"), 0);
     }
 
     #[test]

@@ -51,7 +51,7 @@
 //! - [`Db::stats`] / [`Db::verify_checksums`] — observability and integrity.
 //! - SST v3 embeds a Bloom filter; get prunes by bounds + filter.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::ops::Bound;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
@@ -71,7 +71,9 @@ use crate::lock::DirLock;
 use crate::manifest::{self, VersionSet};
 use crate::memtable::{Lookup, MemTable};
 use crate::merge::{range_deleted, range_tombstone_covers, StreamingVisibleIter, VisibleKv};
-use crate::sst::{write_l0_sst, write_sst_entries_on, write_sst_try_sorted_on, SstTable};
+use crate::sst::{
+    write_l0_sst, write_l0_sst_for_family, write_sst_entries_on, write_sst_try_sorted_on, SstTable,
+};
 use crate::tx::Transaction;
 use crate::vlog::{self, ValueLog, VlogRewriteStats, VLOG_FILE_NAME};
 use crate::wal::Wal;
@@ -741,6 +743,11 @@ impl<E: Env> PreparedL0Compact<E> {
     /// # Errors
     /// SST encode / I/O. On error the live L0 inventory is unchanged.
     pub fn write(&self) -> Result<SstTable> {
+        let cf = self
+            .inputs
+            .first()
+            .map(|t| t.cf().to_string())
+            .unwrap_or_default();
         write_merged_tables(
             &self.env,
             &self.dir,
@@ -749,7 +756,27 @@ impl<E: Env> PreparedL0Compact<E> {
             self.gc,
             self.sync,
         )
+        .map(|t| t.with_cf(cf))
     }
+}
+
+/// Live SST inventory row (RFC-0065 P0).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SstLiveMeta {
+    /// File name (`NNNNNN.sst`).
+    pub name: String,
+    /// LSM level (0 = L0).
+    pub level: u32,
+    /// Column-family name; empty = mixed / prefix-era file.
+    pub cf: String,
+    /// On-disk size in bytes.
+    pub size: u64,
+    /// Smallest user key (empty if unknown).
+    pub start_key: Vec<u8>,
+    /// Largest user key (empty if unknown).
+    pub end_key: Vec<u8>,
+    /// Internal-key count.
+    pub num_entries: u64,
 }
 
 /// Options for [`Db::compact_with`] (RFC-0009 compaction / version GC).
@@ -934,6 +961,9 @@ pub struct Db<E: Env = StdEnv> {
     ssts: Vec<SstTable>,
     /// LSM level for each entry in [`Self::ssts`] (parallel array; 0 = L0).
     sst_levels: Vec<u32>,
+    /// Registered CF names (RFC-0065). Empty = kernel / no split: every SST
+    /// is one family. Compat sets this from `open_cf` / CFREG.
+    physical_cfs: Vec<String>,
     /// L0 files written without `fdatasync`. Must be synced before WAL rotate
     /// or any MANIFEST publish (RFC-0041). Crash before that is recovered
     /// from WAL; `gc_orphan_ssts` drops the unsynced files.
@@ -961,6 +991,10 @@ pub struct Db<E: Env = StdEnv> {
     published_seq: Arc<AtomicU64>,
     sync: bool,
     auto_flush_bytes: Option<usize>,
+    /// Per-CF auto-flush caps (RFC-0065 P1.1). Empty = use [`Self::auto_flush_bytes`]
+    /// for the whole table (legacy). When non-empty, each registered family
+    /// flushes independently.
+    cf_write_buffer: std::collections::BTreeMap<String, usize>,
     auto_compact_sst_count: Option<usize>,
     auto_compact_sst_bytes: Option<u64>,
     /// Reuses decoded SST handles (verify / reopen path).
@@ -1464,6 +1498,7 @@ impl<E: Env> Db<E> {
             sst_order_newest: Vec::new(),
             ssts,
             sst_levels,
+            physical_cfs: Vec::new(),
             next_file_num,
             manifest_file_num,
             manifest_epoch: 0,
@@ -1473,6 +1508,7 @@ impl<E: Env> Db<E> {
             published_seq: Arc::new(AtomicU64::new(next_seq.saturating_sub(1))),
             sync: opts.sync,
             auto_flush_bytes: opts.auto_flush_bytes.filter(|n| *n > 0),
+            cf_write_buffer: std::collections::BTreeMap::new(),
             auto_compact_sst_count: opts.auto_compact_sst_count.filter(|n| *n > 0),
             auto_compact_sst_bytes: opts.auto_compact_sst_bytes.filter(|n| *n > 0),
             table_cache,
@@ -1620,6 +1656,18 @@ impl<E: Env> Db<E> {
     #[must_use]
     pub fn last_sequence(&self) -> SequenceNumber {
         self.next_seq.saturating_sub(1)
+    }
+
+    /// RFC-0078: admit a “this `fdatasync` Ok proves the drive” claim.
+    ///
+    /// Always false. POSIX rc==0 (RFC-0073) is the product barrier, not a
+    /// media theorem. AS-IS
+    /// [`crate::group_commit_kernel::media_durable_admitted_as_is`] would
+    /// admit after a successful sync.
+    #[must_use]
+    pub fn claim_media_durable(&self) -> bool {
+        let _ = self.last_sequence();
+        crate::group_commit_kernel::media_durable_admitted(true)
     }
 
     /// Latest sequence default reads may observe (durable or no-sync apply).
@@ -1900,6 +1948,100 @@ impl<E: Env> Db<E> {
         self.sst_levels.iter().filter(|&&l| l == level).count()
     }
 
+    /// Register CF names so flush/compact split by family (RFC-0065). Empty
+    /// keeps the kernel one-LSM behaviour (keys with accidental NULs stay
+    /// in one SST forest).
+    pub fn set_physical_cfs(&mut self, names: Vec<String>) {
+        self.physical_cfs = names;
+    }
+
+    /// Per-CF memtable flush threshold (RFC-0065 P1.1). `0` removes the override.
+    pub fn set_cf_write_buffer(&mut self, cf: impl Into<String>, bytes: usize) {
+        let cf = cf.into();
+        if bytes == 0 {
+            self.cf_write_buffer.remove(&cf);
+        } else {
+            self.cf_write_buffer.insert(cf, bytes);
+        }
+    }
+
+    fn write_buffer_for(&self, family: &str) -> Option<usize> {
+        self.cf_write_buffer
+            .get(family)
+            .copied()
+            .filter(|n| *n > 0)
+            .or(self.auto_flush_bytes)
+    }
+
+    /// L0 files tagged with `cf` (empty physical set = global L0).
+    #[must_use]
+    pub fn level_file_count_cf(&self, cf: &str) -> usize {
+        if self.physical_cfs.is_empty() {
+            return self.level_file_count(0);
+        }
+        self.ssts
+            .iter()
+            .zip(self.sst_levels.iter())
+            .filter(|(t, &lvl)| lvl == 0 && t.cf() == cf)
+            .count()
+    }
+
+    fn family_of_user_key<'a>(&'a self, key: &[u8]) -> &'a str {
+        if self.physical_cfs.is_empty() {
+            return "default";
+        }
+        let p = crate::memtable::cf_prefix(key);
+        if p.is_empty() {
+            return "default";
+        }
+        self.physical_cfs
+            .iter()
+            .find(|n| n.as_bytes() == p)
+            .map(String::as_str)
+            .unwrap_or("default")
+    }
+
+    fn batch_families(&self, ops: &[BatchOp]) -> Vec<String> {
+        if self.physical_cfs.is_empty() {
+            return Vec::new();
+        }
+        let mut out = Vec::with_capacity(4);
+        for op in ops {
+            match op {
+                BatchOp::Put { key, .. } | BatchOp::Delete { key } => {
+                    let f = self.family_of_user_key(key.as_ref());
+                    if !out.iter().any(|s| s == f) {
+                        out.push(f.to_string());
+                    }
+                }
+                BatchOp::DeleteRange { start, end } => {
+                    for k in [start.as_ref(), end.as_ref()] {
+                        let f = self.family_of_user_key(k);
+                        if !out.iter().any(|s| s == f) {
+                            out.push(f.to_string());
+                        }
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    /// Whether flush/compact split by CF family.
+    #[must_use]
+    pub fn physical_cfs(&self) -> &[String] {
+        &self.physical_cfs
+    }
+
+    /// Compact grouping key: all files share `""` until CFs are registered.
+    fn compact_family_key<'a>(&self, table: &'a SstTable) -> &'a str {
+        if self.physical_cfs.is_empty() {
+            ""
+        } else {
+            table.cf()
+        }
+    }
+
     /// Shared table cache (open reuse + hit stats).
     #[must_use]
     pub fn table_cache(&self) -> &TableCache {
@@ -2046,9 +2188,11 @@ impl<E: Env> Db<E> {
         // `published_seq`, failing visible-snapshot reads until publish.
         // `for_oldest_snapshot` GC keeps every version newer than the floor,
         // so the in-flight version is retained.
-        let pin_or_last = self
-            .oldest_pinned_sequence()
-            .unwrap_or_else(|| self.last_sequence().min(self.visible_sequence()));
+        let pin_or_last = crate::compact_kernel::gc_oldest_from_pin(
+            self.oldest_pinned_sequence(),
+            self.last_sequence(),
+            self.visible_sequence(),
+        );
         // F201: an open OCC transaction holds the floor even without a pin.
         let pin_or_last = match self.occ_registry_floor() {
             Some(occ) => pin_or_last.min(occ),
@@ -3292,6 +3436,26 @@ impl<E: Env> Db<E> {
         self.try_scan_at_projected(snapshot, start, end, limit, ScanProjection::Full)
     }
 
+    /// Newest version per user key at `snapshot`, with [`crate::WindowKv::snapshot_live`].
+    ///
+    /// Does not apply [`crate::iter_window_keep`] — the caller (compat iterator
+    /// window) keeps or drops from that bit. Hidden rows (deletion / covering
+    /// range tombstone) are included with `snapshot_live == false`.
+    ///
+    /// # Errors
+    /// [`CoreError::SnapshotTooOld`].
+    pub fn try_scan_window_at(
+        &self,
+        snapshot: SequenceNumber,
+        start: Bound<&[u8]>,
+        end: Bound<&[u8]>,
+    ) -> Result<impl Iterator<Item = crate::WindowKv> + '_> {
+        self.ensure_snapshot_readable(Snapshot::at(snapshot))?;
+        Ok(self
+            .scan_at_raw(snapshot, start, end, None, true)
+            .into_window_kvs())
+    }
+
     /// [`scan_at`](Self::scan_at) with projection (panics on too-old snapshot).
     pub fn scan_at_projected(
         &self,
@@ -4002,6 +4166,42 @@ impl<E: Env> Db<E> {
         Ok(())
     }
 
+    /// Flush only `family` to L0 (RFC-0065 P1.1). Other families stay in mem.
+    ///
+    /// # Errors
+    /// SST / MANIFEST I/O.
+    pub fn flush_cf(&mut self, family: &str) -> Result<()> {
+        self.ensure_not_fenced()?;
+        let mut taken = self.mem.take_family(family);
+        if let Some(ref mut imm) = self.imm {
+            taken.absorb(imm.take_family(family));
+            if imm.is_empty() {
+                self.imm = None;
+            }
+        }
+        if taken.is_empty() {
+            return Ok(());
+        }
+        let nums = vec![self.alloc_file_num()];
+        let files = match Self::write_imm_l0_files(&self.env, &self.dir, self.sync, &taken, &nums) {
+            Ok(f) => f,
+            Err(e) => {
+                for (k, v) in taken.iter_internal() {
+                    self.mem.insert(k.clone(), v.clone());
+                }
+                return Err(self.fence_io_err(e));
+            }
+        };
+        let pairs: Vec<_> = files.into_iter().map(|(t, num, _)| (t, num)).collect();
+        if let Err(e) = self.install_l0_ssts(pairs) {
+            for (k, v) in taken.iter_internal() {
+                self.mem.insert(k.clone(), v.clone());
+            }
+            return Err(self.fence_io_err(e));
+        }
+        Ok(())
+    }
+
     /// Rotate a full active mem into the imm slot **without** taking it out.
     ///
     /// Host workers (RFC-0037) stage here so `has_imm` stays true until
@@ -4100,6 +4300,19 @@ impl<E: Env> Db<E> {
         n
     }
 
+    /// Reserve SST numbers for a flush of `imm` (RFC-0065 P0).
+    ///
+    /// One number when CFs are not registered; one per family otherwise.
+    #[must_use]
+    pub fn alloc_file_nums_for_imm(&mut self, imm: &crate::memtable::MemTable) -> Vec<u64> {
+        let n = if self.physical_cfs.is_empty() {
+            1
+        } else {
+            imm.cf_families().len().max(1)
+        };
+        (0..n).map(|_| self.alloc_file_num()).collect()
+    }
+
     /// Snapshot of what off-lock L0 write needs (`Env` is [`Clone`]).
     #[must_use]
     pub fn l0_write_ctx(&self) -> (E, PathBuf, bool) {
@@ -4107,6 +4320,9 @@ impl<E: Env> Db<E> {
     }
 
     /// Write `imm` to `{num:06}.sst` without borrowing `Db` (caller drops the lock).
+    ///
+    /// Whole-memtable (no CF split). Prefer [`Self::write_imm_l0_files`] for
+    /// the flush path.
     ///
     /// # Errors
     /// SST I/O.
@@ -4138,6 +4354,99 @@ impl<E: Env> Db<E> {
                 Err(e)
             }
         }
+    }
+
+    /// Write one L0 SST containing only `family` keys. `None` if the family
+    /// has no entries (no file left behind).
+    ///
+    /// # Errors
+    /// SST I/O.
+    pub fn write_imm_l0_file_for_family(
+        env: &E,
+        dir: &Path,
+        sync: bool,
+        imm: &MemTable,
+        num: u64,
+        family: &str,
+    ) -> Result<Option<(SstTable, u64, PathBuf)>> {
+        let final_path = dir.join(format!("{num:06}.sst"));
+        let tmp_path = dir.join(format!("{num:06}.sst.tmp"));
+        match write_l0_sst_for_family(env, &tmp_path, imm, family, false) {
+            Ok(table) => {
+                if table.is_empty() {
+                    drop(table);
+                    let _ = env.remove_file(&tmp_path);
+                    return Ok(None);
+                }
+                drop(table);
+                env.rename(&tmp_path, &final_path)?;
+                if sync {
+                    env.sync_dir(dir)?;
+                }
+                let table = SstTable::open_on(env, &final_path)?.with_cf(family.to_string());
+                Ok(Some((table, num, final_path)))
+            }
+            Err(e) => {
+                let _ = env.remove_file(&tmp_path);
+                let _ = env.remove_file(&final_path);
+                Err(e)
+            }
+        }
+    }
+
+    /// Split `imm` into one L0 SST per CF family (RFC-0065 P0).
+    ///
+    /// One reserved number ⇒ one SST (kernel). Several numbers ⇒ one file
+    /// per CF family.
+    ///
+    /// # Errors
+    /// SST I/O, or fewer file numbers than families.
+    pub fn write_imm_l0_files(
+        env: &E,
+        dir: &Path,
+        sync: bool,
+        imm: &MemTable,
+        nums: &[u64],
+    ) -> Result<Vec<(SstTable, u64, PathBuf)>> {
+        let families = if nums.len() > 1 {
+            imm.cf_families()
+        } else {
+            Vec::new()
+        };
+        if families.is_empty() || nums.is_empty() {
+            let num = nums.first().copied().unwrap_or(1);
+            let one = Self::write_imm_l0_file(env, dir, sync, imm, num)?;
+            return Ok(vec![one]);
+        }
+        if nums.len() < families.len() {
+            return Err(CoreError::Internal(format!(
+                "need {} SST file numbers for CF split, got {}",
+                families.len(),
+                nums.len()
+            )));
+        }
+        let mut out = Vec::new();
+        let mut written = Vec::new();
+        for (fam, &num) in families.iter().zip(nums.iter()) {
+            match Self::write_imm_l0_file_for_family(env, dir, sync, imm, num, fam) {
+                Ok(Some(t)) => {
+                    written.push(t.2.clone());
+                    out.push(t);
+                }
+                Ok(None) => {}
+                Err(e) => {
+                    for p in &written {
+                        let _ = env.remove_file(p);
+                    }
+                    return Err(e);
+                }
+            }
+        }
+        if out.is_empty() {
+            let one = Self::write_imm_l0_file(env, dir, sync, imm, nums[0])?;
+            return Ok(vec![one]);
+        }
+        Ok(out)
     }
 
     /// Write `imm` to L0 using a **pre-allocated** file number (no Db write lock).
@@ -4186,9 +4495,17 @@ impl<E: Env> Db<E> {
     /// # Errors
     /// MANIFEST I/O (rolls back inventory).
     pub fn install_l0_sst(&mut self, table: SstTable, file_num: u64) -> Result<()> {
+        self.install_l0_ssts(vec![(table, file_num)])
+    }
+
+    /// Install one or more flushed L0 SSTs (MANIFEST before success).
+    ///
+    /// # Errors
+    /// MANIFEST I/O (rolls back inventory).
+    pub fn install_l0_ssts(&mut self, files: Vec<(SstTable, u64)>) -> Result<()> {
         // In-memory only. MANIFEST + SST `fdatasync` wait for WAL rotate so a
         // write burst is not charged one extra fd per 64 MiB flush (RFC-0041).
-        let _undo = self.apply_l0_install(table, file_num);
+        let _undo = self.apply_l0_installs(files);
         self.retire_flush_pin();
         Ok(())
     }
@@ -4392,15 +4709,16 @@ impl<E: Env> Db<E> {
         if imm.is_empty() {
             return Ok(());
         }
-        let (table, file_num, _) = match self.write_memtable_to_l0_file(&imm) {
-            Ok(t) => t,
+        let nums = self.alloc_file_nums_for_imm(&imm);
+        let files = match Self::write_imm_l0_files(&self.env, &self.dir, self.sync, &imm, &nums) {
+            Ok(f) => f,
             Err(e) => {
-                // Put imm back so data is not lost in memory.
                 self.imm = Some(imm);
                 return Err(self.fence_io_err(e));
             }
         };
-        if let Err(e) = self.install_l0_sst(table, file_num) {
+        let pairs: Vec<_> = files.into_iter().map(|(t, num, _)| (t, num)).collect();
+        if let Err(e) = self.install_l0_ssts(pairs) {
             self.imm = Some(imm);
             return Err(self.fence_io_err(e));
         }
@@ -4527,9 +4845,11 @@ impl<E: Env> Db<E> {
     pub fn compact_reclaim(&mut self) -> Result<()> {
         // F211 (auto_gc_floor): cap the no-pin floor at the published
         // sequence — `last_sequence()` counts applied-but-unpublished writes.
-        let oldest = self
-            .oldest_pinned_sequence()
-            .unwrap_or_else(|| self.last_sequence().min(self.visible_sequence()));
+        let oldest = crate::compact_kernel::gc_oldest_from_pin(
+            self.oldest_pinned_sequence(),
+            self.last_sequence(),
+            self.visible_sequence(),
+        );
         // F201: honor open OCC transactions (same floor rule as auto-GC).
         let oldest = match self.occ_registry_floor() {
             Some(occ) => oldest.min(occ),
@@ -4613,9 +4933,11 @@ impl<E: Env> Db<E> {
         // keeps every version newer than the floor and, with `bottommost`,
         // still collapses lone tombstones — equivalent to latest-only when
         // nothing is pinned or in flight.
-        let pin_or_last = self
-            .oldest_pinned_sequence()
-            .unwrap_or_else(|| self.last_sequence().min(self.visible_sequence()));
+        let pin_or_last = crate::compact_kernel::gc_oldest_from_pin(
+            self.oldest_pinned_sequence(),
+            self.last_sequence(),
+            self.visible_sequence(),
+        );
         let gc_floor = match self.occ_registry_floor() {
             Some(occ) => pin_or_last.min(occ),
             None => pin_or_last,
@@ -4721,17 +5043,29 @@ impl<E: Env> Db<E> {
     /// untouched so a write burst does not rewrite the whole level (RFC-0036).
     /// Visibility is unchanged: every version stays in some file.
     fn compact_l0_into_l1(&mut self, options: CompactOptions) -> Result<()> {
-        let input_idxs: Vec<usize> = self
-            .sst_levels
-            .iter()
-            .enumerate()
-            .filter(|(_, &lvl)| lvl == 0)
-            .map(|(i, _)| i)
-            .collect();
-        if input_idxs.is_empty() {
-            return Ok(());
+        let mut families = Vec::new();
+        for (t, &lvl) in self.ssts.iter().zip(self.sst_levels.iter()) {
+            if lvl == 0 {
+                let cf = self.compact_family_key(t).to_string();
+                if !families.contains(&cf) {
+                    families.push(cf);
+                }
+            }
         }
-        self.rewrite_ssts(input_idxs, 1, options)
+        for fam in families {
+            let input_idxs: Vec<usize> = self
+                .ssts
+                .iter()
+                .zip(self.sst_levels.iter())
+                .enumerate()
+                .filter(|(_, (t, &lvl))| lvl == 0 && self.compact_family_key(t) == fam)
+                .map(|(i, _)| i)
+                .collect();
+            if !input_idxs.is_empty() {
+                self.rewrite_ssts(input_idxs, 1, options)?;
+            }
+        }
+        Ok(())
     }
 
     /// Snapshot current L0 tables and reserve an output file number.
@@ -4746,13 +5080,20 @@ impl<E: Env> Db<E> {
         options: CompactOptions,
     ) -> Result<Option<PreparedL0Compact<E>>> {
         self.ensure_not_fenced()?;
-        let inputs: Vec<SstTable> = self
-            .ssts
-            .iter()
-            .zip(self.sst_levels.iter())
-            .filter(|(_, &lvl)| lvl == 0)
-            .map(|(t, _)| t.clone())
-            .collect();
+        let mut by_cf: BTreeMap<String, Vec<SstTable>> = BTreeMap::new();
+        for (t, &lvl) in self.ssts.iter().zip(self.sst_levels.iter()) {
+            if lvl == 0 {
+                by_cf
+                    .entry(self.compact_family_key(t).to_string())
+                    .or_default()
+                    .push(t.clone());
+            }
+        }
+        let inputs = by_cf
+            .into_iter()
+            .max_by_key(|(_, v)| v.len())
+            .map(|(_, v)| v)
+            .unwrap_or_default();
         if inputs.is_empty() {
             return Ok(None);
         }
@@ -4794,30 +5135,108 @@ impl<E: Env> Db<E> {
         Ok(())
     }
 
-    /// Merge all SSTs at `from_level` and `to_level` into one SST at `to_level`.
+    /// Merge SSTs at `from_level` and `to_level` into one SST per CF at `to_level`.
     fn compact_levels(
         &mut self,
         from_level: u32,
         to_level: u32,
         options: CompactOptions,
     ) -> Result<()> {
-        let mut input_idxs: Vec<usize> = Vec::new();
-        for (i, &lvl) in self.sst_levels.iter().enumerate() {
+        let mut families: BTreeSet<String> = BTreeSet::new();
+        for (t, &lvl) in self.ssts.iter().zip(self.sst_levels.iter()) {
             if lvl == from_level || lvl == to_level {
-                input_idxs.push(i);
+                families.insert(self.compact_family_key(t).to_string());
             }
         }
+        for fam in families {
+            let input_idxs: Vec<usize> = self
+                .ssts
+                .iter()
+                .zip(self.sst_levels.iter())
+                .enumerate()
+                .filter(|(_, (t, &lvl))| {
+                    (lvl == from_level || lvl == to_level) && self.compact_family_key(t) == fam
+                })
+                .map(|(i, _)| i)
+                .collect();
+            if input_idxs.is_empty() {
+                continue;
+            }
+            // Single file at target, no GC → nothing to do.
+            if input_idxs.len() == 1
+                && self.sst_levels[input_idxs[0]] == to_level
+                && !options.gc.requests_gc()
+            {
+                continue;
+            }
+            self.rewrite_ssts(input_idxs, to_level, options)?;
+        }
+        Ok(())
+    }
+
+    /// Compact only SSTs of `cf` (RFC-0065 P0.2). Mixed/legacy files (`cf` empty
+    /// on disk) are left alone unless `cf` is itself empty.
+    ///
+    /// # Errors
+    /// SST / MANIFEST I/O.
+    pub fn compact_ssts_only_cf(&mut self, cf: &str) -> Result<()> {
+        let input_idxs: Vec<usize> = self
+            .ssts
+            .iter()
+            .enumerate()
+            .filter(|(_, t)| {
+                crate::cf_kernel::compact_rewrites_sst_cf(t.cf(), cf)
+                    && crate::cf_kernel::key_in_cf_family(
+                        &crate::cf_kernel::encode_cf_key(t.cf(), &[], false),
+                        cf,
+                    )
+            })
+            .map(|(i, _)| i)
+            .collect();
         if input_idxs.is_empty() {
             return Ok(());
         }
-        // Single file at target, no GC → nothing to do.
-        if input_idxs.len() == 1
-            && self.sst_levels[input_idxs[0]] == to_level
-            && !options.gc.requests_gc()
-        {
+        if input_idxs.len() == 1 {
             return Ok(());
         }
-        self.rewrite_ssts(input_idxs, to_level, options)
+        let all_l0 = input_idxs.iter().all(|&i| self.sst_levels[i] == 0);
+        let to_level = if all_l0 {
+            1
+        } else {
+            input_idxs
+                .iter()
+                .map(|&i| self.sst_levels[i])
+                .max()
+                .unwrap_or(1)
+                .max(1)
+        };
+        self.rewrite_ssts(input_idxs, to_level, CompactOptions::default())
+    }
+
+    /// Snapshot of live SST files (name, level, CF, size, bounds).
+    #[must_use]
+    pub fn live_sst_meta(&self) -> Vec<SstLiveMeta> {
+        self.ssts
+            .iter()
+            .zip(self.sst_levels.iter())
+            .map(|(t, &level)| {
+                let name = t
+                    .path()
+                    .file_name()
+                    .map(|s| s.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+                let size = self.env.metadata_len(t.path()).unwrap_or(0);
+                SstLiveMeta {
+                    name,
+                    level,
+                    cf: t.cf().to_string(),
+                    size,
+                    start_key: t.smallest_user_key().unwrap_or(&[]).to_vec(),
+                    end_key: t.largest_user_key().unwrap_or(&[]).to_vec(),
+                    num_entries: t.len() as u64,
+                }
+            })
+            .collect()
     }
 
     /// Rewrite `input_idxs` into one SST at `to_level`; keep every other file.
@@ -4838,8 +5257,13 @@ impl<E: Env> Db<E> {
         gc.bottommost = bottommost;
         let options = CompactOptions { gc, ..options };
         let tables: Vec<SstTable> = input_idxs.iter().map(|&i| self.ssts[i].clone()).collect();
+        let cf = tables
+            .first()
+            .map(|t| t.cf().to_string())
+            .unwrap_or_default();
         let new_table =
-            write_merged_tables(&self.env, &self.dir, num, &tables, options.gc, self.sync)?;
+            write_merged_tables(&self.env, &self.dir, num, &tables, options.gc, self.sync)?
+                .with_cf(cf);
         self.table_cache.insert(Arc::new(new_table.clone()));
         self.next_file_num = num + 1;
 
@@ -5269,7 +5693,7 @@ impl<E: Env> Db<E> {
             match SstTable::open_on(&self.env, dest) {
                 Ok(t) => {
                     old_paths.push(table.path().to_path_buf());
-                    new_tables.push(t);
+                    new_tables.push(t.with_cf(table.cf().to_string()));
                     new_levels.push(level);
                 }
                 Err(e) => {
@@ -5506,7 +5930,7 @@ impl<E: Env> Db<E> {
                             }
                             staged_paths.push(final_path.clone());
                             old_paths.push(table.path().to_path_buf());
-                            new_tables.push(new_table);
+                            new_tables.push(new_table.with_cf(table.cf().to_string()));
                             new_levels.push(level);
                         }
                         Err(e) => {
@@ -6020,7 +6444,9 @@ impl<E: Env> Db<E> {
         batch: impl IntoIterator<Item = BatchOp>,
         durability: WriteOptions,
     ) -> Result<SequenceNumber> {
-        self.ensure_write_admitted()?;
+        let batch: Vec<BatchOp> = batch.into_iter().collect();
+        let families = self.batch_families(&batch);
+        self.ensure_write_admitted_for(&families)?;
         // Assign sequences only for this attempt; roll back `next_seq` if WAL fails
         // so a failed multi-op does not burn sequence space (TX denser / mid-commit).
         let seq_checkpoint = self.next_seq;
@@ -6192,7 +6618,14 @@ impl<E: Env> Db<E> {
                 // Newest mem layer with a point wins (single-writer). Skip SST.
                 self.get_mem_hit.fetch_add(1, Ordering::Relaxed);
                 return match best_point {
-                    Lookup::Found(_) if range_deleted(key, seq, &range_tombs) => Lookup::Deleted,
+                    Lookup::Found(_)
+                        if !crate::merge::visible_at(
+                            crate::key::ValueType::Value,
+                            range_deleted(key, seq, &range_tombs),
+                        ) =>
+                    {
+                        Lookup::Deleted
+                    }
                     other => other,
                 };
             }
@@ -6217,10 +6650,13 @@ impl<E: Env> Db<E> {
         match best_point {
             Lookup::Found(v) => {
                 let seq = best_point_seq.unwrap_or(0);
-                if range_deleted(key, seq, &range_tombs) {
-                    Lookup::Deleted
-                } else {
+                if crate::merge::visible_at(
+                    crate::key::ValueType::Value,
+                    range_deleted(key, seq, &range_tombs),
+                ) {
                     Lookup::Found(v)
+                } else {
+                    Lookup::Deleted
                 }
             }
             Lookup::Deleted => Lookup::Deleted,
@@ -6384,7 +6820,8 @@ impl<E: Env> Db<E> {
     /// no `fdatasync`, no write-group. Tail &lt; 64 KiB may sit until the
     /// next flush / close (Rocks `sync=false`).
     pub(crate) fn commit_async_ops(&mut self, batch: Vec<BatchOp>) -> Result<SequenceNumber> {
-        self.ensure_write_admitted()?;
+        let families = self.batch_families(&batch);
+        self.ensure_write_admitted_for(&families)?;
         let st = self.phase_stats.clone();
         let t0 = st.as_ref().map(|_| Instant::now());
         let (ops, seq) = self.prepare_write_ops(batch)?;
@@ -6444,7 +6881,8 @@ impl<E: Env> Db<E> {
         if ops.is_empty() {
             return Ok(self.last_sequence());
         }
-        self.ensure_write_admitted()?;
+        let families = self.batch_families(&ops);
+        self.ensure_write_admitted_for(&families)?;
         let (records, seq) = self.prepare_write_ops(ops)?;
         if records.is_empty() {
             return Ok(seq);
@@ -6457,8 +6895,10 @@ impl<E: Env> Db<E> {
             let r = w.sync_data();
             (n, r)
         };
-        if let Err(e) = sync_r {
-            self.durability_fenced = true;
+        // RFC-0071: same publish gate as ConcurrentDb off-lock group I/O.
+        if !crate::group_commit_kernel::may_publish_group(sync_r.is_ok()) {
+            let e = sync_r.err().expect("publish refused iff WAL I/O failed");
+            self.fence_durability(&e, FenceClass::of_core(&e));
             return Err(e);
         }
         self.bytes_written_wal = self.bytes_written_wal.saturating_add(n);
@@ -6471,6 +6911,10 @@ impl<E: Env> Db<E> {
         self.note_dirty_points(&records);
         apply_ops_owned(&mut self.mem, records);
         self.publish_sequence(seq);
+        // Same as `commit_ops_with` / `commit_async_ops`. P1.1 lone_sync
+        // skipped this; 1c G1 then never auto-flushed (imm never staged,
+        // write_buffer_size was a no-op for the sequential host).
+        self.maybe_auto_flush_best_effort();
         Ok(seq)
     }
 
@@ -6887,13 +7331,41 @@ impl<E: Env> Db<E> {
 
     /// Refuse writes when L0 or mem is at/above stall limits (open-items §2.3).
     pub(crate) fn ensure_write_admitted(&mut self) -> Result<()> {
+        self.ensure_write_admitted_for(&[])
+    }
+
+    /// Per-CF stall (RFC-0065 P1.2). Empty `families` = global (kernel / mixed group).
+    pub(crate) fn ensure_write_admitted_for(&mut self, families: &[String]) -> Result<()> {
+        let per_cf = !self.physical_cfs.is_empty() && !families.is_empty();
         // Mem bound first: flush is the natural drain for mem pressure.
         if let Some(limit) = self.write_stall_mem_bytes {
-            let mut mem_bytes = self.mem.approx_memory_usage();
+            let mut mem_bytes = if per_cf {
+                families
+                    .iter()
+                    .map(|f| self.mem.approx_memory_usage_cf(f))
+                    .max()
+                    .unwrap_or(0)
+            } else {
+                self.mem.approx_memory_usage()
+            };
             if mem_bytes >= limit {
                 if self.write_stall_drain {
-                    let _ = self.flush();
-                    mem_bytes = self.mem.approx_memory_usage();
+                    if per_cf {
+                        for f in families {
+                            let _ = self.flush_cf(f);
+                        }
+                    } else {
+                        let _ = self.flush();
+                    }
+                    mem_bytes = if per_cf {
+                        families
+                            .iter()
+                            .map(|f| self.mem.approx_memory_usage_cf(f))
+                            .max()
+                            .unwrap_or(0)
+                    } else {
+                        self.mem.approx_memory_usage()
+                    };
                 }
                 if mem_bytes >= limit {
                     self.write_stall_count = self.write_stall_count.saturating_add(1);
@@ -6902,9 +7374,21 @@ impl<E: Env> Db<E> {
             }
         }
 
+        let l0_of = |db: &Self, fam: Option<&str>| -> usize {
+            match fam {
+                Some(f) if !db.physical_cfs.is_empty() => db.level_file_count_cf(f),
+                _ => db.level_file_count(0),
+            }
+        };
+
         // Soft pressure (b): drain once when L0 is elevated, then continue to hard check.
         if let Some(soft) = self.write_pressure_l0 {
-            if self.level_file_count(0) >= soft {
+            let hit = if per_cf {
+                families.iter().any(|f| l0_of(self, Some(f)) >= soft)
+            } else {
+                l0_of(self, None) >= soft
+            };
+            if hit {
                 self.drain_l0_once();
                 self.write_pressure_count = self.write_pressure_count.saturating_add(1);
             }
@@ -6913,14 +7397,30 @@ impl<E: Env> Db<E> {
         let Some(limit) = self.write_stall_l0 else {
             return Ok(());
         };
-        let mut l0 = self.level_file_count(0);
+        let mut l0 = if per_cf {
+            families
+                .iter()
+                .map(|f| l0_of(self, Some(f)))
+                .max()
+                .unwrap_or(0)
+        } else {
+            l0_of(self, None)
+        };
         if l0 < limit {
             return Ok(());
         }
         if self.write_stall_drain {
             // One honest self-help pass — no sleep, no unbounded loop.
             self.drain_l0_once();
-            l0 = self.level_file_count(0);
+            l0 = if per_cf {
+                families
+                    .iter()
+                    .map(|f| l0_of(self, Some(f)))
+                    .max()
+                    .unwrap_or(0)
+            } else {
+                l0_of(self, None)
+            };
             if l0 < limit {
                 return Ok(());
             }
@@ -6933,6 +7433,37 @@ impl<E: Env> Db<E> {
     }
 
     pub(crate) fn maybe_auto_flush(&mut self) -> Result<()> {
+        if !self.physical_cfs.is_empty() {
+            // Hot path: integer compare, not a walk of every memtable key.
+            // `cf_families()` scans tail+map (O(entries)) — with CFs registered
+            // every 1c put paid that (ycsb_a 2M→0.6M qps, RFC-0149).
+            let mem = self.mem.approx_memory_usage();
+            let global_under = self.auto_flush_bytes.map_or(true, |lim| mem < lim);
+            let cf_under = self.cf_write_buffer.values().all(|&n| n == 0 || mem < n);
+            if global_under && cf_under {
+                return Ok(());
+            }
+            let n = self.physical_cfs.len();
+            for i in 0..n {
+                let fam = self.physical_cfs[i].as_str();
+                let Some(limit) = self.write_buffer_for(fam) else {
+                    continue;
+                };
+                if self.mem.approx_memory_usage_cf(fam) < limit {
+                    continue;
+                }
+                let fam = self.physical_cfs[i].clone();
+                if self.defer_auto_compact {
+                    let taken = self.mem.take_family(&fam);
+                    if !taken.is_empty() {
+                        self.push_parked_unflushed(taken);
+                    }
+                } else {
+                    self.flush_cf(&fam)?;
+                }
+            }
+            return Ok(());
+        }
         let Some(limit) = self.auto_flush_bytes else {
             return Ok(());
         };
@@ -7153,7 +7684,15 @@ impl<E: Env> Db<E> {
     /// `fdatasync`s any L0 that was written without sync first so CURRENT
     /// never points at a torn file (RFC-0041).
     fn persist_manifest(&mut self) -> Result<()> {
-        self.fsync_unsynced_ssts()?;
+        let fsync_result = self.fsync_unsynced_ssts();
+        let sst_durable = fsync_result.is_ok() && self.unsynced_ssts.is_empty();
+        if !crate::flush_kernel::may_publish_manifest(sst_durable) {
+            // Kernel is the write gate: AS-IS always-true would fall through
+            // and publish CURRENT naming an unsynced/torn SST.
+            return fsync_result.and(Err(CoreError::Internal(
+                "MANIFEST publish without durable SST".into(),
+            )));
+        }
         match self.take_manifest_persist()?.write() {
             Ok(()) => Ok(()),
             // F196: CURRENT already names the new MANIFEST — the version on
@@ -7243,6 +7782,7 @@ impl<E: Env> Db<E> {
             manifest_file_num: self.manifest_file_num,
             vlog_use_new: self.vlog_use_new,
             earliest_readable_seq: self.earliest_readable_seq,
+            sst_cfs: self.ssts.iter().map(|t| t.cf().to_string()).collect(),
         };
         vs.normalize_levels();
         Ok(vs)
@@ -7273,30 +7813,40 @@ impl<E: Env> Db<E> {
 
     /// Push a flushed L0 SST into the in-memory inventory (no MANIFEST I/O).
     pub fn apply_l0_install(&mut self, table: SstTable, file_num: u64) -> L0InstallUndo {
+        self.apply_l0_installs(vec![(table, file_num)])
+    }
+
+    /// Push flushed L0 SSTs into the in-memory inventory (no MANIFEST I/O).
+    pub fn apply_l0_installs(&mut self, files: Vec<(SstTable, u64)>) -> L0InstallUndo {
         let undo = L0InstallUndo {
             prev_next: self.next_file_num,
             prev_manifest: self.manifest_file_num,
+            n: files.len(),
         };
-        self.note_sst_bytes_written(table.path());
-        self.table_cache.insert(Arc::new(table.clone()));
-        if self.next_file_num <= file_num {
-            self.next_file_num = file_num.saturating_add(1);
+        for (table, file_num) in files {
+            self.note_sst_bytes_written(table.path());
+            self.table_cache.insert(Arc::new(table.clone()));
+            if self.next_file_num <= file_num {
+                self.next_file_num = file_num.saturating_add(1);
+            }
+            self.unsynced_ssts.push(table.path().to_path_buf());
+            self.ssts.push(table);
+            self.sst_levels.push(0);
         }
-        self.unsynced_ssts.push(table.path().to_path_buf());
-        self.ssts.push(table);
-        self.sst_levels.push(0);
         self.note_sst_inventory_changed();
         undo
     }
 
     /// Undo [`Self::apply_l0_install`] after a failed off-lock MANIFEST persist.
     pub fn undo_l0_install(&mut self, undo: L0InstallUndo) {
-        if let Some(t) = self.ssts.last() {
-            let p = t.path().to_path_buf();
-            self.unsynced_ssts.retain(|x| x != &p);
+        for _ in 0..undo.n {
+            if let Some(t) = self.ssts.last() {
+                let p = t.path().to_path_buf();
+                self.unsynced_ssts.retain(|x| x != &p);
+            }
+            let _ = self.ssts.pop();
+            let _ = self.sst_levels.pop();
         }
-        let _ = self.ssts.pop();
-        let _ = self.sst_levels.pop();
         self.next_file_num = undo.prev_next;
         self.manifest_file_num = undo.prev_manifest;
         self.note_sst_inventory_changed();
@@ -7419,6 +7969,7 @@ impl<E: Env> ManifestPersist<E> {
 pub struct L0InstallUndo {
     prev_next: u64,
     prev_manifest: u64,
+    n: usize,
 }
 
 /// Rollback token for [`Db::apply_prepared_l0_compact`].
@@ -7480,7 +8031,7 @@ pub fn read_checkpoint_meta(env: &impl Env, dir: impl AsRef<Path>) -> Result<Che
         .map_err(|_| CoreError::Internal("checkpoint meta CRC truncated".into()))?;
     let stored = u32::from_le_bytes(crc_arr);
     let computed = crc32c::crc32c(payload);
-    if stored != computed {
+    if !crate::wal::crc::crc_match_ok(stored, computed) {
         return Err(CoreError::Internal(format!(
             "checkpoint meta CRC mismatch: stored {stored:#x} computed {computed:#x}"
         )));
@@ -8066,7 +8617,11 @@ fn recover_ssts<E: Env>(
                 }
                 let t = table_cache.get_or_open(env, &path)?;
                 max_seq = max_seq.max(t.max_sequence());
-                tables.push((*t).clone());
+                let mut table = (*t).clone();
+                if let Some(cf) = vs.sst_cfs.get(i).filter(|s| !s.is_empty()) {
+                    table = table.with_cf(cf.clone());
+                }
+                tables.push(table);
                 levels.push(vs.sst_levels.get(i).copied().unwrap_or(0));
             }
             Ok((
@@ -8100,6 +8655,7 @@ fn recover_ssts<E: Env>(
                 manifest_file_num: 0,
                 vlog_use_new: false,
                 earliest_readable_seq: 0,
+                sst_cfs: tables.iter().map(|t| t.cf().to_string()).collect(),
             };
             // Always install so subsequent opens use inventory (even if empty).
             // F196: committed-unsynced during first open = the inventory IS
@@ -8215,6 +8771,27 @@ mod tests {
     use super::*;
     use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    /// RFC-0078 P0: live StdEnv put (real fdatasync before Ok) then a
+    /// media-proof claim is refused. AS-IS would admit after fsync Ok.
+    #[test]
+    fn claim_media_durable_refused_after_fsync_ok() {
+        let dir = temp_dir();
+        let mut db = Db::open(&dir).unwrap();
+        db.put(b"fsync-lie/k", b"fsync-lie/v").unwrap();
+        assert_eq!(db.get(b"fsync-lie/k").as_deref(), Some(&b"fsync-lie/v"[..]));
+        assert!(
+            !db.claim_media_durable(),
+            "fsync Ok must not round to a media theorem"
+        );
+        assert!(
+            crate::group_commit_kernel::media_durable_admitted_as_is(true),
+            "AS-IS dente: fsync Ok would claim the drive"
+        );
+        assert!(!crate::group_commit_kernel::media_durable_admitted(true));
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
 
     /// RFC-0050 P0.1 / P0.7: product surface is FailClosed | PointInTime.
     /// Adding skip-any (or any third variant) fails this exhaustive match.
@@ -8715,6 +9292,229 @@ mod tests {
             wal_recovery: WalRecovery::PointInTime,
             ..sync_opts()
         }
+    }
+
+    /// RFC-0083 P0: production put writes a WAL record; lie only on the
+    /// stored CRC bytes (payload intact). FailClosed `Db::open` is `Crc`.
+    /// AS-IS `crc_match_ok` would replay the intact payload and serve `k`.
+    #[test]
+    fn crc_mismatch_on_live_wal_open_is_not_ok() {
+        assert!(!crate::wal::crc::crc_match_ok(1, 2));
+        assert!(
+            crate::wal::crc::crc_match_ok_as_is(1, 2),
+            "AS-IS dente: any WAL crc would match"
+        );
+        let dir = temp_dir();
+        {
+            let mut db = Db::open(&dir).unwrap();
+            db.put(b"k", b"v").unwrap();
+            db.close().unwrap();
+        }
+        let wal = dir.join(WAL_FILE_NAME);
+        let mut bytes = fs::read(&wal).unwrap();
+        assert!(
+            bytes.len() >= crate::wal::format::HEADER_SIZE,
+            "production WAL must hold a record header"
+        );
+        bytes[0] ^= 0xff;
+        fs::write(&wal, &bytes).unwrap();
+        let err = match Db::open(&dir) {
+            Ok(db) => {
+                let served = db.get(b"k");
+                let _ = db.close();
+                let _ = fs::remove_dir_all(&dir);
+                panic!("WAL CRC-field lie must not open; AS-IS would serve k={served:?}");
+            }
+            Err(e) => e,
+        };
+        let _ = fs::remove_dir_all(&dir);
+        assert!(
+            matches!(err, CoreError::Crc { .. }),
+            "must fail on crc_match_ok, not a payload parse; got {err}"
+        );
+    }
+
+    /// RFC-0083 P2.1: WAL-open `crc_match_ok` is not a CRC32C collision theorem.
+    #[test]
+    fn wal_open_crc_collision_axiom_remains() {
+        assert!(!crate::wal::crc::crc_collision_admitted());
+        assert!(
+            crate::wal::crc::crc_collision_admitted_as_is(),
+            "AS-IS dente: matching CRC looks collision-free"
+        );
+        assert!(
+            crate::wal::crc::crc_match_ok(1, 1),
+            "equal u32s still match; that is not R-crc"
+        );
+        let residuals = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../scripts/formal/residuals.json");
+        let text = std::fs::read_to_string(&residuals).expect("residuals.json");
+        assert!(
+            text.contains("\"id\": \"R-crc\""),
+            "R-crc must stay in the residual catalog"
+        );
+        assert!(
+            text.contains("\"R-crc\""),
+            "never_floor must still list R-crc"
+        );
+    }
+
+    /// RFC-0083 P2.2: PointInTime still reports+serves the WAL prefix (RFC-0047).
+    /// Same CRC-field lie as P0, on the *second* record: FailClosed refuses;
+    /// PIT opens, serves k00, drops k01, publishes a `crc` report.
+    #[test]
+    fn wal_crc_field_lie_point_in_time_serves_prefix() {
+        use crate::wal::reopen_kernel::{
+            reopen_outcome, reopen_outcome_as_is_silent, ReopenDamage, ReopenOutcome,
+        };
+        assert_eq!(
+            reopen_outcome(ReopenDamage::Crc, true, false),
+            ReopenOutcome::ServePrefixReport
+        );
+        assert_eq!(
+            reopen_outcome(ReopenDamage::Crc, false, false),
+            ReopenOutcome::RefuseOpen
+        );
+        assert_eq!(
+            reopen_outcome_as_is_silent(ReopenDamage::Crc, true, false),
+            ReopenOutcome::ServeAll,
+            "AS-IS dente: PIT CRC lie would look like a clean open"
+        );
+        let dir = temp_dir();
+        let wal = dir.join(WAL_FILE_NAME);
+        {
+            let mut db = Db::open_with(&dir, sync_opts()).unwrap();
+            db.put(b"k00", b"v0").unwrap();
+            db.put(b"k01", b"v1").unwrap();
+            db.close().unwrap();
+        }
+        let mut bytes = fs::read(&wal).unwrap();
+        let rec_len =
+            |buf: &[u8], h: usize| 7 + u16::from_le_bytes([buf[h + 4], buf[h + 5]]) as usize;
+        let h1 = rec_len(&bytes, 0);
+        assert!(h1 + crate::wal::format::HEADER_SIZE <= bytes.len());
+        bytes[h1] ^= 0xff;
+        fs::write(&wal, &bytes).unwrap();
+        match Db::open_with(&dir, sync_opts()) {
+            Ok(db) => {
+                let _ = db.close();
+                let _ = fs::remove_dir_all(&dir);
+                panic!("FailClosed must still refuse a CRC-field lie");
+            }
+            Err(CoreError::Crc { .. }) => {}
+            Err(e) => {
+                let _ = fs::remove_dir_all(&dir);
+                panic!("FailClosed must be CoreError::Crc, got {e}");
+            }
+        }
+        let db = Db::open_with(&dir, pit_opts()).expect("PointInTime must open");
+        assert_eq!(db.get(b"k00").as_deref(), Some(b"v0".as_ref()));
+        assert_eq!(db.get(b"k01"), None, "damaged record is not served");
+        let report = db
+            .last_recovery_report()
+            .expect("PointInTime must report the CRC discard");
+        assert_eq!(report.kind, "crc");
+        assert!(report.discarded_bytes > 0);
+        let _ = db.close();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0077 P1.2: production put+flush writes an SST; a flipped payload
+    /// must not `Db::open` / serve the key. AS-IS `sst_crc_fate` would strip.
+    #[test]
+    fn crc_mismatch_on_live_sst_db_open_is_not_ok() {
+        assert_eq!(
+            crate::sst::sst_crc_fate(1, 2, 100),
+            crate::sst::SstCrcFate::Reject
+        );
+        assert_eq!(
+            crate::sst::sst_crc_fate_as_is(1, 2, 100),
+            crate::sst::SstCrcFate::StripTrailer,
+            "AS-IS dente: flipped SST would open as a table"
+        );
+        let dir = temp_dir();
+        {
+            let mut db = Db::open(&dir).unwrap();
+            db.put(b"k", b"sst-db-open-0077").unwrap();
+            db.flush().unwrap();
+            db.close().unwrap();
+        }
+        let sst = fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.path())
+            .find(|p| {
+                p.extension()
+                    .and_then(|s| s.to_str())
+                    .is_some_and(|s| s == "sst")
+            })
+            .expect("flush must write an SST");
+        let mut bytes = fs::read(&sst).unwrap();
+        assert!(
+            bytes.len() >= crate::sst::SST_LEGACY_NO_CRC_MAX,
+            "modern SST must not take the tiny-legacy path"
+        );
+        let pos = bytes.len() / 2;
+        assert!(pos + 4 < bytes.len(), "flip must not be the CRC trailer");
+        bytes[pos] ^= 0xff;
+        fs::write(&sst, &bytes).unwrap();
+        let err = match Db::open(&dir) {
+            Ok(db) => {
+                let served = db.get(b"k");
+                let _ = db.close();
+                let _ = fs::remove_dir_all(&dir);
+                panic!("flipped SST must not open; AS-IS would serve k={served:?}");
+            }
+            Err(e) => e,
+        };
+        let msg = err.to_string();
+        let _ = fs::remove_dir_all(&dir);
+        assert!(
+            msg.contains("CRC mismatch"),
+            "must fail on SST CRC, not serve the flipped key; got {msg}"
+        );
+    }
+
+    /// RFC-0081 P1.2: production large put spills to VALUES.vlog; a flipped
+    /// payload is Err on `get_at` (F1), never the flipped blob. `get` fail-stops
+    /// via the same `resolve_stored_value`. AS-IS `crc_match_ok` would serve it.
+    #[test]
+    fn crc_mismatch_on_live_db_get_large_value_is_not_ok() {
+        assert!(!crate::wal::crc::crc_match_ok(1, 2));
+        assert!(
+            crate::wal::crc::crc_match_ok_as_is(1, 2),
+            "AS-IS dente: any vlog crc would match"
+        );
+        let dir = temp_dir();
+        let payload = vec![b'L'; 800];
+        {
+            let mut db = Db::open_with(&dir, vlog_opts()).unwrap();
+            db.put(b"k", &payload).unwrap();
+            assert_eq!(db.get(b"k").as_deref(), Some(payload.as_slice()));
+            db.close().unwrap();
+        }
+        let path = dir.join(VLOG_FILE_NAME);
+        let mut bytes = fs::read(&path).unwrap();
+        assert!(
+            bytes.len() > 8 + 8,
+            "large put must have spilled a vlog record"
+        );
+        // Magic (8) + len/crc header (8): first payload byte.
+        let pos = 16;
+        assert!(pos < bytes.len());
+        bytes[pos] ^= 0xff;
+        fs::write(&path, &bytes).unwrap();
+        let db = Db::open_with(&dir, vlog_opts()).unwrap();
+        let err = db
+            .get_at(db.snapshot(), b"k")
+            .expect_err("flipped large value must not be Ok");
+        let msg = err.to_string();
+        let _ = db.close();
+        let _ = fs::remove_dir_all(&dir);
+        assert!(
+            msg.to_ascii_lowercase().contains("crc"),
+            "must fail on crc_match_ok, not serve the flipped blob; got {msg}"
+        );
     }
 
     /// RFC-0038 D: a mid-WAL CRC flip is fail-stop (unchanged), journaled,
@@ -10408,6 +11208,272 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
     }
 
+    /// RFC-0065 P0.1: mixed memtable flush emits one SST per CF.
+    #[test]
+    fn flush_splits_sst_per_cf_family() {
+        let dir = temp_dir();
+        let mut db = Db::open(&dir).unwrap();
+        db.set_physical_cfs(vec!["default".into(), "lock".into(), "write".into()]);
+        db.set_defer_auto_compact(true);
+        db.put(b"lock\0k", b"L").unwrap();
+        db.put(b"default\0k", b"D").unwrap();
+        db.put(b"write\0k", b"W").unwrap();
+        db.flush().unwrap();
+        let meta = db.live_sst_meta();
+        let cfs: Vec<_> = {
+            let mut v: Vec<_> = meta.iter().map(|m| m.cf.as_str()).collect();
+            v.sort_unstable();
+            v
+        };
+        assert_eq!(cfs, vec!["default", "lock", "write"], "meta={meta:?}");
+        db.close().unwrap();
+        let db = Db::open(&dir).unwrap();
+        assert_eq!(db.get(b"lock\0k").as_deref(), Some(b"L".as_ref()));
+        assert_eq!(db.get(b"default\0k").as_deref(), Some(b"D".as_ref()));
+        assert_eq!(db.get(b"write\0k").as_deref(), Some(b"W".as_ref()));
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0065 P0.1: prefix-era mixed SST still opens; get of both families works.
+    #[test]
+    fn prefix_era_mixed_sst_opens() {
+        let dir = temp_dir();
+        let mut db = Db::open(&dir).unwrap();
+        db.set_defer_auto_compact(true);
+        db.put(b"lock\0k", b"L").unwrap();
+        db.put(b"default\0k", b"D").unwrap();
+        let imm = db.prepare_flush_imm().unwrap().expect("imm");
+        let num = db.alloc_file_num();
+        let (env, path, sync) = db.l0_write_ctx();
+        let (table, n, _) = Db::write_imm_l0_file(&env, &path, sync, &imm, num).unwrap();
+        assert!(
+            table.cf().is_empty(),
+            "mixed bounds must tag empty CF, got {:?}",
+            table.cf()
+        );
+        db.install_l0_sst(table, n).unwrap();
+        db.persist_manifest_durable().unwrap();
+        db.close().unwrap();
+        let mut db = Db::open(&dir).unwrap();
+        assert_eq!(db.get(b"lock\0k").as_deref(), Some(b"L".as_ref()));
+        assert_eq!(db.get(b"default\0k").as_deref(), Some(b"D".as_ref()));
+        let before: Vec<_> = db
+            .live_sst_meta()
+            .into_iter()
+            .map(|m| (m.name, m.size, m.cf))
+            .collect();
+        db.compact_ssts_only_cf("lock").unwrap();
+        let after: Vec<_> = db
+            .live_sst_meta()
+            .into_iter()
+            .map(|m| (m.name, m.size, m.cf))
+            .collect();
+        assert_eq!(
+            before, after,
+            "mixed SST must stay; compact lock is a no-op"
+        );
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0065 P0.2: compact of lock does not rewrite default SSTs.
+    #[test]
+    fn compact_cf_leaves_other_family_ssts() {
+        let dir = temp_dir();
+        let mut db = Db::open(&dir).unwrap();
+        db.set_physical_cfs(vec!["default".into(), "lock".into()]);
+        db.set_defer_auto_compact(true);
+        db.put(b"lock\0a", b"1").unwrap();
+        db.put(b"default\0a", b"1").unwrap();
+        db.flush().unwrap();
+        db.put(b"lock\0b", b"2").unwrap();
+        db.put(b"default\0b", b"2").unwrap();
+        db.flush().unwrap();
+        let default_before: Vec<_> = db
+            .live_sst_meta()
+            .into_iter()
+            .filter(|m| m.cf == "default")
+            .map(|m| (m.name, m.size, m.level, m.num_entries))
+            .collect();
+        assert!(
+            default_before.len() >= 2,
+            "need ≥2 default SSTs, got {default_before:?}"
+        );
+        db.compact_ssts_only_cf("lock").unwrap();
+        let default_after: Vec<_> = db
+            .live_sst_meta()
+            .into_iter()
+            .filter(|m| m.cf == "default")
+            .map(|m| (m.name, m.size, m.level, m.num_entries))
+            .collect();
+        assert_eq!(default_before, default_after);
+        let lock_after: Vec<_> = db
+            .live_sst_meta()
+            .into_iter()
+            .filter(|m| m.cf == "lock")
+            .collect();
+        assert_eq!(lock_after.len(), 1, "lock compacted to one file");
+        assert_eq!(db.get(b"lock\0a").as_deref(), Some(b"1".as_ref()));
+        assert_eq!(db.get(b"default\0a").as_deref(), Some(b"1".as_ref()));
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0065 P1.1: default auto-flush does not dump lock keys to SST.
+    #[test]
+    fn auto_flush_default_does_not_flush_lock() {
+        let dir = temp_dir();
+        let mut db = Db::open_with(
+            &dir,
+            OpenOptions {
+                auto_flush_bytes: Some(64 * 1024),
+                ..OpenOptions::default()
+            },
+        )
+        .unwrap();
+        db.set_physical_cfs(vec!["default".into(), "lock".into()]);
+        db.set_cf_write_buffer("default", 400);
+        db.set_cf_write_buffer("lock", 64 * 1024);
+        db.put(b"lock\0k", b"L").unwrap();
+        for i in 0..20u8 {
+            let k = [b'd', b'e', b'f', b'a', b'u', b'l', b't', 0, b'k', i];
+            db.put(&k, &[b'x'; 32]).unwrap();
+        }
+        let lock_sst = db
+            .live_sst_meta()
+            .into_iter()
+            .filter(|m| m.cf == "lock")
+            .count();
+        let default_sst = db
+            .live_sst_meta()
+            .into_iter()
+            .filter(|m| m.cf == "default")
+            .count();
+        assert_eq!(lock_sst, 0, "lock must stay in mem");
+        assert!(default_sst >= 1, "default should have auto-flushed");
+        assert_eq!(db.get(b"lock\0k").as_deref(), Some(b"L".as_ref()));
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0149: auto-flush with physical CFs must not scan every memtable
+    /// key. 20k puts under a 64 MiB cap stay in mem and finish in bounded time.
+    #[test]
+    fn maybe_auto_flush_physical_cf_is_not_linear_in_keys() {
+        let dir = temp_dir();
+        let mut db = Db::open_with(
+            &dir,
+            OpenOptions {
+                auto_flush_bytes: Some(64 * 1024 * 1024),
+                sync: false,
+                ..OpenOptions::default()
+            },
+        )
+        .unwrap();
+        db.set_physical_cfs(vec!["default".into(), "lock".into()]);
+        let t0 = std::time::Instant::now();
+        for i in 0..20_000u32 {
+            let mut k = [0u8; 10];
+            k[..7].copy_from_slice(b"default");
+            k[7] = 0;
+            k[8] = (i >> 8) as u8;
+            k[9] = i as u8;
+            db.put(&k, b"v").unwrap();
+        }
+        let dt = t0.elapsed();
+        assert!(
+            dt < std::time::Duration::from_millis(800),
+            "20k physical-CF puts took {dt:?} (cf_families-per-put is back)"
+        );
+        assert!(
+            db.live_sst_meta().is_empty(),
+            "64 MiB cap must not flush 20k tiny keys"
+        );
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0065 P1.3: flush_cf(lock) does not create a default SST; WAL recovers both.
+    #[test]
+    fn flush_cf_lock_does_not_create_default_sst() {
+        let dir = temp_dir();
+        {
+            let mut db = Db::open(&dir).unwrap();
+            db.set_physical_cfs(vec!["default".into(), "lock".into()]);
+            db.set_defer_auto_compact(true);
+            db.put(b"lock\0k", b"L").unwrap();
+            db.put(b"default\0k", b"D").unwrap();
+            let default_before = db
+                .live_sst_meta()
+                .into_iter()
+                .filter(|m| m.cf == "default")
+                .count();
+            db.flush_cf("lock").unwrap();
+            let default_after = db
+                .live_sst_meta()
+                .into_iter()
+                .filter(|m| m.cf == "default")
+                .count();
+            assert_eq!(default_before, default_after);
+            assert!(
+                db.live_sst_meta().iter().any(|m| m.cf == "lock"),
+                "lock SST missing"
+            );
+            std::mem::forget(db);
+        }
+        let db = Db::open(&dir).unwrap();
+        assert_eq!(db.get(b"lock\0k").as_deref(), Some(b"L".as_ref()));
+        assert_eq!(db.get(b"default\0k").as_deref(), Some(b"D".as_ref()));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0065 P1.2: default L0 at the stall limit does not block lock puts.
+    #[test]
+    fn default_l0_stall_does_not_block_lock() {
+        let dir = temp_dir();
+        let mut db = Db::open(&dir).unwrap();
+        db.set_physical_cfs(vec!["default".into(), "lock".into()]);
+        db.set_defer_auto_compact(true);
+        db.set_write_stall_l0(Some(2));
+        db.put(b"default\0a", b"1").unwrap();
+        db.flush().unwrap();
+        db.put(b"default\0b", b"2").unwrap();
+        db.flush().unwrap();
+        assert!(db.level_file_count_cf("default") >= 2);
+        let stalled = db.put(b"default\0c", b"3");
+        assert!(
+            matches!(stalled, Err(CoreError::WriteStall { .. })),
+            "default put should stall, got {stalled:?}"
+        );
+        db.put(b"lock\0k", b"L").unwrap();
+        assert_eq!(db.get(b"lock\0k").as_deref(), Some(b"L".as_ref()));
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0065 P0.3: one WriteBatch / one WAL covers lock+default+write;
+    /// crash after Ok recovers all three (not a 3-DB / 3-WAL design).
+    #[test]
+    fn multi_cf_batch_crash_recovers_all_or_nothing() {
+        let dir = temp_dir();
+        {
+            let mut db = Db::open(&dir).unwrap();
+            db.apply_batch([
+                BatchOp::put(b"lock\0k", b"L"),
+                BatchOp::put(b"default\0k", b"D"),
+                BatchOp::put(b"write\0k", b"W"),
+            ])
+            .unwrap();
+            std::mem::forget(db);
+        }
+        let db = Db::open(&dir).unwrap();
+        assert_eq!(db.get(b"lock\0k").as_deref(), Some(b"L".as_ref()));
+        assert_eq!(db.get(b"default\0k").as_deref(), Some(b"D".as_ref()));
+        assert_eq!(db.get(b"write\0k").as_deref(), Some(b"W".as_ref()));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn prepare_write_install_l0_keeps_inputs_until_install() {
         let dir = temp_dir();
@@ -11616,11 +12682,12 @@ mod tests {
         }
         assert!(dir.join(crate::manifest::CURRENT_FILE).exists());
         let current = fs::read_to_string(dir.join(crate::manifest::CURRENT_FILE)).unwrap();
+        let man_name = current.lines().next().unwrap_or("").trim();
         assert!(
-            current.trim().starts_with(crate::manifest::MANIFEST_PREFIX),
+            man_name.starts_with(crate::manifest::MANIFEST_PREFIX),
             "CURRENT={current:?}"
         );
-        let man_path = dir.join(current.trim());
+        let man_path = dir.join(man_name);
         assert!(man_path.exists(), "manifest file missing");
 
         let db = Db::open(&dir).unwrap();
@@ -11846,6 +12913,72 @@ mod tests {
         restored.close().unwrap();
         let _ = fs::remove_dir_all(&dir);
         let _ = fs::remove_dir_all(&ckpt);
+    }
+
+    /// RFC-0084 P0: production `create_checkpoint` writes CHECKPOINT;
+    /// XOR only the trailer CRC (payload intact). `read_checkpoint_meta`
+    /// is crc mismatch. AS-IS would return Ok meta.
+    #[test]
+    fn crc_mismatch_on_live_checkpoint_meta_is_not_ok() {
+        assert!(!crate::wal::crc::crc_match_ok(1, 2));
+        assert!(
+            crate::wal::crc::crc_match_ok_as_is(1, 2),
+            "AS-IS dente: any checkpoint crc would match"
+        );
+        let dir = temp_dir();
+        let ckpt = temp_dir();
+        {
+            let mut db = Db::open(&dir).unwrap();
+            db.put(b"k", b"v").unwrap();
+            db.create_checkpoint(&ckpt).unwrap();
+            db.close().unwrap();
+        }
+        let meta_path = ckpt.join(CHECKPOINT_META_FILE);
+        let mut bytes = fs::read(&meta_path).unwrap();
+        assert!(bytes.len() >= 12, "CHECKPOINT must have payload + trailer");
+        let last = bytes.len() - 1;
+        bytes[last] ^= 0xff;
+        fs::write(&meta_path, &bytes).unwrap();
+        let err = match read_checkpoint_meta(&StdEnv, &ckpt) {
+            Ok(meta) => {
+                let _ = fs::remove_dir_all(&dir);
+                let _ = fs::remove_dir_all(&ckpt);
+                panic!("CHECKPOINT trailer lie must not load; AS-IS would serve {meta:?}");
+            }
+            Err(e) => e,
+        };
+        let msg = err.to_string();
+        let _ = fs::remove_dir_all(&dir);
+        let _ = fs::remove_dir_all(&ckpt);
+        assert!(
+            msg.to_ascii_lowercase().contains("crc mismatch"),
+            "must fail on crc_match_ok, not a payload parse; got {msg}"
+        );
+    }
+
+    /// RFC-0084 P2.1: checkpoint `crc_match_ok` is not a CRC32C collision theorem.
+    #[test]
+    fn checkpoint_crc_collision_axiom_remains() {
+        assert!(!crate::wal::crc::crc_collision_admitted());
+        assert!(
+            crate::wal::crc::crc_collision_admitted_as_is(),
+            "AS-IS dente: matching CRC looks collision-free"
+        );
+        assert!(
+            crate::wal::crc::crc_match_ok(1, 1),
+            "equal u32s still match; that is not R-crc"
+        );
+        let residuals = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../scripts/formal/residuals.json");
+        let text = std::fs::read_to_string(&residuals).expect("residuals.json");
+        assert!(
+            text.contains("\"id\": \"R-crc\""),
+            "R-crc must stay in the residual catalog"
+        );
+        assert!(
+            text.contains("\"R-crc\""),
+            "never_floor must still list R-crc"
+        );
     }
 
     /// PDBCKP02 carries earliest_readable; checkpoint open restores MANIFEST watermark.
@@ -12452,6 +13585,53 @@ mod tests {
             }
         }
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0082 P0: production flush writes CURRENT+MANIFEST. Lie only on
+    /// the CURRENT CRC line (`ffffffff`) with the MANIFEST bytes intact so
+    /// decode still parses. `crc_match_ok` on `load` is Err; AS-IS would
+    /// admit and `Db::open` would serve `k`.
+    #[test]
+    fn crc_mismatch_on_live_manifest_is_not_ok() {
+        assert!(!crate::wal::crc::crc_match_ok(1, 2));
+        assert!(
+            crate::wal::crc::crc_match_ok_as_is(1, 2),
+            "AS-IS dente: any CURRENT crc would match"
+        );
+        let dir = temp_dir();
+        {
+            let mut db = Db::open(&dir).unwrap();
+            db.put(b"k", b"v").unwrap();
+            db.flush().unwrap();
+            db.close().unwrap();
+        }
+        let current_path = dir.join(crate::manifest::CURRENT_FILE);
+        let current = fs::read_to_string(&current_path).unwrap();
+        let man_name = current.lines().next().unwrap_or("").trim();
+        assert!(
+            current.lines().count() >= 2,
+            "production CURRENT must carry a CRC line, got {current:?}"
+        );
+        assert!(
+            dir.join(man_name).is_file(),
+            "MANIFEST named by CURRENT must stay intact"
+        );
+        fs::write(&current_path, format!("{man_name}\nffffffff\n")).unwrap();
+        let err = match Db::open(&dir) {
+            Ok(db) => {
+                let served = db.get(b"k");
+                let _ = db.close();
+                let _ = fs::remove_dir_all(&dir);
+                panic!("CURRENT crc lie must not open; AS-IS would serve k={served:?}");
+            }
+            Err(e) => e,
+        };
+        let msg = err.to_string();
+        let _ = fs::remove_dir_all(&dir);
+        assert!(
+            msg.contains("crc mismatch"),
+            "must fail on CURRENT crc_match_ok, not a parse error; got {msg}"
+        );
     }
 
     /// RFC-0060 P2.15: live `verify_checksums` re-reads CURRENT (via

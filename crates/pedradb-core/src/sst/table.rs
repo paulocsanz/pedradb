@@ -13,14 +13,20 @@
 //! //   for each block: offset u64, length u32, first_user_key_len u32, first_user_key
 //! ```
 //!
-//! # On-disk v3 (current write path)
+//! # On-disk v3
 //! Same as v2, then a bloom filter section:
 //! ```text
 //! bloom: nbits u32 | k u32 | nbytes u32 | bits[nbytes]
 //! ```
-//! Trailing CRC32C covers the full body (all versions that write CRC).
+//! Trailing file CRC32C covers the full body (all versions that write CRC).
 //!
-//! v1 files (flat entry list) and v2 files are still readable.
+//! # On-disk v4
+//! v3 + lz4-compressed data blocks (no per-block CRC).
+//!
+//! # On-disk v5 (compressed writer default, RFC-0077 P1.1)
+//! v4 + 4-byte CRC32C after each data block (`sst_block_crc_ok`).
+//!
+//! v1–v4 files are still readable.
 //!
 //! # Lazy blocks (RFC-0014 P1.2)
 //!
@@ -54,8 +60,10 @@ pub const SST_VERSION_V1: u32 = 1;
 pub const SST_VERSION_V2: u32 = 2;
 /// Block + sparse index + bloom filter (uncompressed blocks).
 pub const SST_VERSION_V3: u32 = 3;
-/// Block + sparse index + bloom + **lz4-compressed** data blocks (current writer).
-pub const SST_VERSION: u32 = 4;
+/// Block + sparse index + bloom + lz4-compressed data blocks (no per-block CRC).
+pub const SST_VERSION_V4: u32 = 4;
+/// v4 + per-block CRC32C (compressed writer default, RFC-0077 P1.1).
+pub const SST_VERSION: u32 = 5;
 /// Target encoded size per data block (pre-compression).
 pub const BLOCK_TARGET: usize = 4_096;
 
@@ -102,14 +110,6 @@ fn check_sst_entry_count(n: usize, file_len: usize, path: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Heuristic: legacy SSTs (no CRC trailer) parse cleanly as full buffer; if
-/// stripping 4 bytes would break a v2 layout we already reject via CRC path.
-fn looks_like_legacy_sst_without_crc(buf: &[u8]) -> bool {
-    // Prefer CRC-required for all new magic files; only treat as legacy when
-    // the CRC field is not present as a distinct trailer (tiny files).
-    buf.len() < 32
-}
-
 fn check_sst_block_count(num_blocks: usize, file_len: usize, path: &Path) -> Result<()> {
     // Each block handle is at least 8+4+4 = 16 bytes in the index; data ≥ 0.
     let max_blocks = file_len / 16 + 1;
@@ -141,8 +141,10 @@ pub struct SstTable {
     path: PathBuf,
     /// CRC-stripped file body for lazy block decode (empty for legacy v1).
     payload: Arc<[u8]>,
-    /// Whether data blocks are lz4 (SST v4).
+    /// Whether data blocks are lz4 (SST v4+).
     compressed_blocks: bool,
+    /// Whether each data block carries a trailing CRC32C (SST v5).
+    block_crc: bool,
     /// Cached full decode (`None` until first materialize for lazy tables).
     entries: EntriesCache,
     /// Range tombstones extracted at open (lazy tables) or from entries (v1).
@@ -158,6 +160,8 @@ pub struct SstTable {
     smallest_user_key: Option<Bytes>,
     /// Largest user key in file (None if empty).
     largest_user_key: Option<Bytes>,
+    /// Column-family name (RFC-0065). Empty = mixed / prefix-era.
+    cf: String,
 }
 
 impl SstTable {
@@ -310,6 +314,21 @@ impl SstTable {
     #[must_use]
     pub fn largest_user_key(&self) -> Option<&[u8]> {
         self.largest_user_key.as_deref()
+    }
+
+    /// Column-family tag (empty = mixed / unknown).
+    #[must_use]
+    pub fn cf(&self) -> &str {
+        &self.cf
+    }
+
+    /// Overlay the MANIFEST CF tag (empty leaves the inferred value).
+    #[must_use]
+    pub fn with_cf(mut self, cf: String) -> Self {
+        if !cf.is_empty() {
+            self.cf = cf;
+        }
+        self
     }
 
     /// Fast negative: key cannot be in this file (bounds and/or bloom).
@@ -512,7 +531,13 @@ impl SstTable {
             ));
         }
         SST_BLOCKS_DECODED.with(|c| c.set(c.get().saturating_add(1)));
-        decode_block_from_payload(&self.payload, h, self.compressed_blocks, &self.path)
+        decode_block_from_payload(
+            &self.payload,
+            h,
+            self.compressed_blocks,
+            self.block_crc,
+            &self.path,
+        )
     }
 
     /// Whether this file's user-key bounds can meet `[start, end)`.
@@ -690,15 +715,15 @@ impl SstTable {
             let (head, tail) = buf.split_at(buf.len() - 4);
             let stored = u32::from_le_bytes([tail[0], tail[1], tail[2], tail[3]]);
             let computed = crc32c::crc32c(head);
-            if stored == computed {
-                head
-            } else if looks_like_legacy_sst_without_crc(buf) {
-                buf
-            } else {
-                return Err(CoreError::Internal(format!(
-                    "SST file CRC mismatch in {} (stored {stored:#010x}, computed {computed:#010x})",
-                    path.display()
-                )));
+            match super::scan_kernel::sst_crc_fate(stored, computed, buf.len()) {
+                super::scan_kernel::SstCrcFate::StripTrailer => head,
+                super::scan_kernel::SstCrcFate::WholeBuffer => buf,
+                super::scan_kernel::SstCrcFate::Reject => {
+                    return Err(CoreError::Internal(format!(
+                        "SST file CRC mismatch in {} (stored {stored:#010x}, computed {computed:#010x})",
+                        path.display()
+                    )));
+                }
             }
         } else {
             buf
@@ -715,9 +740,10 @@ impl SstTable {
         let version = c.read_u32()?;
         match version {
             SST_VERSION_V1 => Self::decode_v1(path, payload.len(), &mut c),
-            SST_VERSION_V2 => Self::decode_v2_or_v3(path, payload, &mut c, false, false),
-            SST_VERSION_V3 => Self::decode_v2_or_v3(path, payload, &mut c, true, false),
-            SST_VERSION => Self::decode_v2_or_v3(path, payload, &mut c, true, true),
+            SST_VERSION_V2 => Self::decode_v2_or_v3(path, payload, &mut c, false, false, false),
+            SST_VERSION_V3 => Self::decode_v2_or_v3(path, payload, &mut c, true, false, false),
+            SST_VERSION_V4 => Self::decode_v2_or_v3(path, payload, &mut c, true, true, false),
+            SST_VERSION => Self::decode_v2_or_v3(path, payload, &mut c, true, true, true),
             other => Err(CoreError::Internal(format!(
                 "unsupported SST version {other} in {}",
                 path.display()
@@ -757,6 +783,7 @@ impl SstTable {
             BloomFilter::always_true(),
             Arc::from([]),
             false,
+            false,
         ))
     }
 
@@ -767,6 +794,7 @@ impl SstTable {
         c: &mut Cursor<'_>,
         expect_bloom: bool,
         compressed_blocks: bool,
+        block_crc: bool,
     ) -> Result<Self> {
         let n = usize::try_from(c.read_u64()?)
             .map_err(|_| CoreError::Internal("SST entry count does not fit usize".into()))?;
@@ -823,7 +851,7 @@ impl SstTable {
         let mut decoded_n = 0usize;
         let mut last_ikey: Option<InternalKey> = None;
         for h in &index {
-            let block = decode_block_from_payload(buf, h, compressed_blocks, path)?;
+            let block = decode_block_from_payload(buf, h, compressed_blocks, block_crc, path)?;
             for (ikey, value) in block {
                 if let Some(ref prev) = last_ikey {
                     if prev > &ikey {
@@ -859,16 +887,27 @@ impl SstTable {
             // One full pass for bloom rebuild only (v2 legacy).
             let mut all = Vec::with_capacity(n);
             for h in &index {
-                all.extend(decode_block_from_payload(buf, h, compressed_blocks, path)?);
+                all.extend(decode_block_from_payload(
+                    buf,
+                    h,
+                    compressed_blocks,
+                    block_crc,
+                    path,
+                )?);
             }
             rebuild_bloom(&all)
         };
 
         let payload: Arc<[u8]> = Arc::from(buf.to_vec().into_boxed_slice());
+        let cf = crate::cf_kernel::infer_sst_cf(
+            smallest_user_key.as_deref(),
+            largest_user_key.as_deref(),
+        );
         Ok(Self {
             path: path.to_path_buf(),
             payload,
             compressed_blocks,
+            block_crc,
             // Lazy: do not retain full entry vec after open verification.
             entries: Arc::new(Mutex::new(None)),
             range_tombstones,
@@ -878,6 +917,7 @@ impl SstTable {
             bloom,
             smallest_user_key,
             largest_user_key,
+            cf,
         })
     }
 
@@ -889,6 +929,7 @@ impl SstTable {
         bloom: BloomFilter,
         payload: Arc<[u8]>,
         compressed_blocks: bool,
+        block_crc: bool,
     ) -> Self {
         let (smallest_user_key, largest_user_key) = user_key_bounds(&entries);
         let range_tombstones: Vec<_> = entries
@@ -897,10 +938,15 @@ impl SstTable {
             .cloned()
             .collect();
         let num_entries = entries.len();
+        let cf = crate::cf_kernel::infer_sst_cf(
+            smallest_user_key.as_deref(),
+            largest_user_key.as_deref(),
+        );
         Self {
             path,
             payload,
             compressed_blocks,
+            block_crc,
             entries: Arc::new(Mutex::new(Some(entries))),
             range_tombstones,
             num_entries,
@@ -909,6 +955,7 @@ impl SstTable {
             bloom,
             smallest_user_key,
             largest_user_key,
+            cf,
         }
     }
 
@@ -1386,6 +1433,7 @@ fn decode_block_from_payload(
     buf: &[u8],
     h: &BlockHandle,
     compressed_blocks: bool,
+    block_crc: bool,
     path: &Path,
 ) -> Result<Vec<(InternalKey, Bytes)>> {
     let start = usize::try_from(h.offset)
@@ -1400,7 +1448,25 @@ fn decode_block_from_payload(
             path.display()
         )));
     }
-    let raw = &buf[start..end];
+    let mut raw = &buf[start..end];
+    if block_crc {
+        if raw.len() < 4 {
+            return Err(CoreError::Internal(format!(
+                "SST block CRC truncated in {}",
+                path.display()
+            )));
+        }
+        let (body, crc_bytes) = raw.split_at(raw.len() - 4);
+        let stored = u32::from_le_bytes(crc_bytes.try_into().unwrap());
+        let computed = crc32c::crc32c(body);
+        if !crate::sst::sst_block_crc_ok(stored, computed) {
+            return Err(CoreError::Internal(format!(
+                "SST block CRC mismatch in {}",
+                path.display()
+            )));
+        }
+        raw = body;
+    }
     let plain: Vec<u8> = if compressed_blocks {
         lz4_flex::decompress_size_prepended(raw).map_err(|e| {
             CoreError::Internal(format!(
@@ -1539,6 +1605,35 @@ pub fn write_l0_sst(
     )
 }
 
+/// L0 flush of keys belonging to one CF family (RFC-0065 P0).
+///
+/// # Errors
+/// I/O failures.
+pub fn write_l0_sst_for_family(
+    env: &impl Env,
+    path: impl AsRef<Path>,
+    mem: &MemTable,
+    family: &str,
+    sync: bool,
+) -> Result<SstTable> {
+    let fam = family.to_string();
+    write_sst_try_sorted_opts(
+        env,
+        path,
+        mem.iter_internal().filter_map(|(k, v)| {
+            if crate::cf_kernel::key_in_cf_family(k.user_key.as_ref(), &fam) {
+                Some(Ok((k.clone(), v.clone())))
+            } else {
+                None
+            }
+        }),
+        mem.len(),
+        sync,
+        false,
+    )
+    .map(|t| t.with_cf(fam))
+}
+
 /// Write pre-sorted (or sortable) internal entries to SST v2 (block + index).
 ///
 /// # Errors
@@ -1660,12 +1755,18 @@ fn write_sst_try_sorted_body(
             std::mem::take(block_buf)
         };
         let offset = data.len() as u64;
-        let length = u32::try_from(payload.len())
+        let mut on_disk = payload;
+        if compress {
+            // v5: CRC32C of the on-disk block (RFC-0077 P1.1).
+            let crc = crc32c::crc32c(&on_disk);
+            on_disk.extend_from_slice(&crc.to_le_bytes());
+        }
+        let length = u32::try_from(on_disk.len())
             .map_err(|_| CoreError::Internal("SST block too large".into()))?;
         let first = block_first_user
             .take()
             .ok_or_else(|| CoreError::Internal("block missing first key".into()))?;
-        data.extend_from_slice(&payload);
+        data.extend_from_slice(&on_disk);
         block_buf.clear();
         index.push(BlockHandle {
             offset,
@@ -1814,6 +1915,81 @@ mod tests {
             .as_nanos();
         let seq = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         std::env::temp_dir().join(format!("pedradb-sst-{n}-{seq}.sst"))
+    }
+
+    /// RFC-0077 P0: production writer+open; a flipped payload is CRC mismatch,
+    /// never a table. AS-IS `sst_crc_fate` would strip the trailer.
+    #[test]
+    fn crc_mismatch_on_live_sst_is_not_ok() {
+        assert_eq!(
+            crate::sst::sst_crc_fate(1, 2, 100),
+            crate::sst::SstCrcFate::Reject
+        );
+        assert_eq!(
+            crate::sst::sst_crc_fate_as_is(1, 2, 100),
+            crate::sst::SstCrcFate::StripTrailer
+        );
+        let mut mem = MemTable::new();
+        mem.put(b"k".as_slice(), 1, b"sst-crc-payload-0077".as_slice());
+        let path = temp_path();
+        write_sst(&path, &mem).unwrap();
+        let mut bytes = std::fs::read(&path).unwrap();
+        assert!(
+            bytes.len() >= crate::sst::SST_LEGACY_NO_CRC_MAX,
+            "modern SST must not take the tiny-legacy path"
+        );
+        let pos = bytes.len() / 2;
+        assert!(pos + 4 < bytes.len(), "flip must not be the CRC trailer");
+        bytes[pos] ^= 0xff;
+        std::fs::write(&path, &bytes).unwrap();
+        let err = SstTable::open(&path).unwrap_err();
+        let msg = err.to_string();
+        let _ = std::fs::remove_file(&path);
+        assert!(
+            msg.contains("CRC mismatch"),
+            "flipped SST must not open as a table; got {err:?}"
+        );
+    }
+
+    /// RFC-0077 P1.1: production writer (v5) puts a CRC on each data block.
+    /// After a payload flip, rewrite the *file* trailer so `sst_crc_fate`
+    /// would StripTrailer; open still fails on `sst_block_crc_ok`.
+    #[test]
+    fn crc_mismatch_on_live_sst_block_is_not_ok() {
+        assert!(!crate::sst::sst_block_crc_ok(1, 2));
+        assert!(
+            crate::sst::sst_block_crc_ok_as_is(1, 2),
+            "AS-IS dente: ignore block mismatch"
+        );
+        let mut mem = MemTable::new();
+        mem.put(b"k".as_slice(), 1, b"sst-block-crc-0077".as_slice());
+        let path = temp_path();
+        write_sst(&path, &mem).unwrap();
+        let mut bytes = std::fs::read(&path).unwrap();
+        assert!(bytes.len() >= 40 + 8, "header + at least one data block");
+        let ver = u32::from_le_bytes(bytes[8..12].try_into().unwrap());
+        assert_eq!(ver, SST_VERSION, "compressed writer must emit v5");
+        // First data byte (header is 40 B). Not the file trailer.
+        let pos = 40;
+        assert!(pos + 4 < bytes.len() - 4);
+        bytes[pos] ^= 0xff;
+        let body_len = bytes.len() - 4;
+        let file_crc = crc32c::crc32c(&bytes[..body_len]);
+        bytes[body_len..].copy_from_slice(&file_crc.to_le_bytes());
+        let stored = u32::from_le_bytes(bytes[body_len..].try_into().unwrap());
+        assert_eq!(
+            crate::sst::sst_crc_fate(stored, file_crc, bytes.len()),
+            crate::sst::SstCrcFate::StripTrailer,
+            "repaired file trailer must pass sst_crc_fate"
+        );
+        std::fs::write(&path, &bytes).unwrap();
+        let err = SstTable::open(&path).unwrap_err();
+        let msg = err.to_string();
+        let _ = std::fs::remove_file(&path);
+        assert!(
+            msg.contains("CRC mismatch"),
+            "block CRC must reject after a matching file trailer; got {err:?}"
+        );
     }
 
     #[test]
@@ -2113,6 +2289,7 @@ mod tests {
             path: PathBuf::from("/tmp/hand-made-mid-key-split.sst"),
             payload: Arc::from(vec![]),
             compressed_blocks: false,
+            block_crc: false,
             entries: Arc::new(Mutex::new(Some(entries))),
             range_tombstones: Vec::new(),
             num_entries: 5,
@@ -2121,6 +2298,7 @@ mod tests {
             bloom: BloomFilter::always_true(),
             smallest_user_key: Some(Bytes::copy_from_slice(b"a")),
             largest_user_key: Some(Bytes::copy_from_slice(b"z")),
+            cf: String::new(),
         };
 
         // Reference: the point path already defends the split.

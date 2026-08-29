@@ -34,6 +34,9 @@ mod failing;
 mod failing_arc;
 mod recording;
 
+#[cfg(test)]
+mod three_teeth_plants;
+
 pub use failing::{FailingEnv, FaultKind, OpClass};
 pub use failing_arc::FailingEnvArc;
 /// EXPLODE recover injection (byte-level `choose` on the WAL image).
@@ -264,6 +267,43 @@ mod tests {
             exclusive: true,
             large_value_threshold: None,
         }
+    }
+
+    /// RFC-0078 P0: production Db on Lying Env; crash must drop the put.
+    /// AS-IS `fsync_promotes_pending` would recover the key.
+    #[test]
+    fn lying_fsync_does_not_promote_pending() {
+        assert!(!pedradb_core::group_commit_kernel::fsync_promotes_pending(
+            false
+        ));
+        assert!(
+            pedradb_core::group_commit_kernel::fsync_promotes_pending_as_is(false),
+            "AS-IS dente: promote on a lying fsync"
+        );
+        let dir = parent().join(format!(
+            "pedradb-lying-0078-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let rec = RecordingEnv::lying();
+        {
+            let mut db = Db::open_with_env(&dir, opts(), rec.clone()).unwrap();
+            db.put(b"k", b"pending").unwrap();
+            db.close().unwrap();
+        }
+        rec.crash();
+        let db = Db::open_with_env(&dir, opts(), rec).unwrap();
+        assert_eq!(
+            db.get(b"k"),
+            None,
+            "lying fsync must not retain after crash"
+        );
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
     }
 
     /// RFC-0018 inventory trial_ref: SyncFail + RecordingEnv lying.
@@ -820,12 +860,33 @@ mod tests {
 
     #[test]
     fn crash_after_sync_recovers_committed() {
+        use pedradb_core::wal::reopen_kernel::{reopen_outcome, ReopenDamage, ReopenOutcome};
         scenario_crash_after_sync_survives(parent()).unwrap();
+        assert_eq!(
+            reopen_outcome(ReopenDamage::None, false, false),
+            ReopenOutcome::ServeAll
+        );
     }
 
     #[test]
     fn truncate_wal_drops_tail_keeps_prefix() {
         scenario_truncated_tail_loses_unsynced_suffix(parent()).unwrap();
+    }
+
+    #[test]
+    fn recover_collect_act_on_live_exploded_crc_is_not_ok() {
+        use pedradb_core::wal::recover_kernel::{
+            recover_collect_act, recover_collect_act_as_is, RecoverAct, RecoverKind,
+        };
+        explode_choose_crc_fail_stops_reopen();
+        assert_eq!(
+            recover_collect_act(RecoverKind::Crc, 1, true, 0, false),
+            RecoverAct::FailStop
+        );
+        assert_eq!(
+            recover_collect_act_as_is(RecoverKind::Crc, 1, true, 0),
+            RecoverAct::Resync
+        );
     }
 
     #[test]
@@ -2103,7 +2164,11 @@ mod tests {
             env.arm_op_class(OpClass::Rename, n, true, FaultKind::StorageFull);
             if db.compact().is_err() {
                 hit = true;
-                assert_eq!(db.sst_count(), ssts, "inventory rolled back on MANIFEST fail");
+                assert_eq!(
+                    db.sst_count(),
+                    ssts,
+                    "inventory rolled back on MANIFEST fail"
+                );
                 break;
             }
             env.disarm();
@@ -2222,8 +2287,7 @@ mod tests {
         let dir = vrf_dir("eio");
         let _ = fs::remove_dir_all(&dir);
         let env = FailingEnv::passing();
-        let mut db =
-            Db::open_with_env(&dir, OpenOptions::verified(), env.clone()).unwrap();
+        let mut db = Db::open_with_env(&dir, OpenOptions::verified(), env.clone()).unwrap();
         db.put(b"keep", b"1").unwrap();
         env.arm_one_failure();
         assert!(db.put(b"lost", b"x").is_err(), "must inject");
@@ -2245,8 +2309,7 @@ mod tests {
         let dir = vrf_dir("fence");
         let _ = fs::remove_dir_all(&dir);
         let env = FailingEnv::passing();
-        let mut db =
-            Db::open_with_env(&dir, OpenOptions::verified(), env.clone()).unwrap();
+        let mut db = Db::open_with_env(&dir, OpenOptions::verified(), env.clone()).unwrap();
         db.put(b"a", b"1").unwrap();
         assert!(!db.is_durability_fenced());
         env.arm_with_kind(0, false, FaultKind::SyncFail);

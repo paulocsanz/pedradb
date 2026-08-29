@@ -18,6 +18,7 @@ pub mod bloom;
 pub mod buggify_hooks;
 
 pub mod cache;
+pub mod cf_kernel;
 pub mod change_feed;
 pub mod changelog_kernel;
 pub mod compact_kernel;
@@ -52,9 +53,15 @@ pub mod vlog;
 pub mod vlog_gc_kernel;
 pub mod wal;
 
-pub use batch::{WriteOp, WriteRecord, WRITE_RECORD_VERSION};
+pub use batch::{
+    write_record_count_ok, write_record_count_ok_as_is, WriteOp, WriteRecord, WRITE_RECORD_VERSION,
+};
 pub use bloom::{bloom_header_ok, bloom_header_ok_as_is, BloomFilter, DEFAULT_BITS_PER_KEY, MAX_K};
 pub use cache::{BlockCache, TableCache};
+pub use cf_kernel::{
+    cf_encode_effective, cf_family_of, compact_rewrites_sst_cf, compact_rewrites_sst_cf_as_is,
+    decode_cf_key, encode_cf_key, infer_sst_cf, key_in_cf_family, key_in_cf_family_as_is,
+};
 pub use change_feed::{
     decode_changelog, ChangeEntry, ChangeKind, ChangeLog, CHANGELOG_CORRUPT_FILE_NAME,
     CHANGELOG_FILE_NAME,
@@ -68,23 +75,24 @@ pub use db::{
     copy_db_directory, read_checkpoint_meta, BatchOp, BlobGcCandidate, CheckpointMeta,
     CompactOptions, Db, DbStats, FenceClass, FenceRecovery, FenceReport, HistoryHorizon,
     HistoryOptions, OpenOptions, PreparedL0Compact, ReadProbeSnap, RecoveryReport, ScanProjection,
-    Snapshot, SnapshotPin, WalRecovery, WriteOptions, WritePhaseStats, CHECKPOINT_META_FILE,
-    L0_COMPACTION_TRIGGER, MAX_LSM_LEVEL, WAL_FILE_NAME,
+    Snapshot, SnapshotPin, SstLiveMeta, WalRecovery, WriteOptions, WritePhaseStats,
+    CHECKPOINT_META_FILE, L0_COMPACTION_TRIGGER, MAX_LSM_LEVEL, WAL_FILE_NAME,
 };
 pub use env::{AdviseKind, Env, EnvFile, StdEnv};
 pub use error::{CoreError, Result};
 pub use host::{DetHost, Host, StdHost};
 pub use key::{
-    pack_sequence_and_type, unpack_sequence_and_type, InternalKey, SequenceNumber, ValueType,
-    MAX_SEQUENCE_NUMBER,
+    ikey_seq_cmp, pack_sequence_and_type, unpack_sequence_and_type, InternalKey, SequenceNumber,
+    ValueType, MAX_SEQUENCE_NUMBER,
 };
 pub use lock::{DirLock, LOCK_FILE};
 pub use manifest::{VersionSet, CURRENT_FILE, MANIFEST_PREFIX};
 pub use memtable::{Lookup, MemTable};
 pub use merge::{
-    collect_range_tombstones, gc_compact_entries, range_deleted, range_tombstone_covers,
-    range_tombstone_covers_as_is, user_key_in_range, visible_range, visible_range_limited,
-    CompactGcOptions, RangeTombstone, StreamingVisibleIter, VisibleKv,
+    collect_range_tombstones, gc_compact_entries, iter_window_keep, iter_window_keep_as_is,
+    range_deleted, range_tombstone_covers, range_tombstone_covers_as_is, user_key_in_range,
+    visible_at, visible_at_as_is, visible_range, visible_range_limited, CompactGcOptions,
+    RangeTombstone, StreamingVisibleIter, VisibleKv, WindowKv, WindowKvIter,
 };
 pub use occ::OccTransaction;
 pub use prefix::{key_in_prefix_range, prefix_exclusive_end, prefix_exclusive_end_as_is};
@@ -93,7 +101,10 @@ pub use sst::{write_sst, write_sst_entries, write_sst_entries_on, write_sst_on, 
 pub use time::{Clock, ManualClock, SystemClock};
 pub use tx::Transaction;
 pub use verified::{
-    profile_report, ProfileComponent, ProfileState, VerifiedProfile, PROFILE_VERSION,
+    profile_report, ring_model_admitted, ring_model_admitted_as_is, ring_twin_admitted,
+    ring_twin_admitted_as_is, verified_admits_ring, verified_admits_ring_as_is,
+    wal_on_sqe_admitted, wal_on_sqe_admitted_as_is, ProfileComponent, ProfileState,
+    VerifiedProfile, PROFILE_VERSION,
 };
 pub use verify::{verify_at_rest, xor_durable_bits, VerifyFailure, VerifyReport};
 pub use vlog::{

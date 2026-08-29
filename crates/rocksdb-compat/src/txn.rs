@@ -22,12 +22,18 @@
 //! `compact_range_opt`. Prefix extractor / UDT comparator are accepted
 //! no-ops. Versioned CF timestamps remain a gap.
 
-use super::{ColumnFamily, DBRawIteratorWithThreadMode, Error, KeyCodec, Result, DB, DEFAULT_CF};
+use super::locktab::{LockErr, LockTable};
+use super::{
+    ColumnFamily, DBRawIteratorWithThreadMode, Error, ErrorKind, KeyCodec, Result, DB, DEFAULT_CF,
+};
+use bytes::Bytes;
 use parking_lot::Mutex;
 use pedradb_core::{CoreError, Env, OccTransaction};
 use pedradb_io_uring::IoUringEnv;
 use std::ops::{Bound, Deref};
 use std::path::Path;
+use std::sync::Arc;
+use std::time::Duration;
 
 /// rust-rocksdb `WriteOptions` subset. Durability follows the DB
 /// [`super::Options::sync`] (drop-in default false, RFC-0054). `sync` is
@@ -61,6 +67,120 @@ impl OptimisticTransactionOptions {
     pub fn set_snapshot(&mut self, v: bool) -> &mut Self {
         self.snapshot = v;
         self
+    }
+}
+
+/// rust-rocksdb `TransactionOptions` (pessimistic).
+#[derive(Debug, Clone)]
+pub struct TransactionOptions {
+    snapshot: bool,
+    deadlock_detect: bool,
+    /// ms; 0 = no wait; negative = use [`TransactionDBOptions`] default.
+    lock_timeout: i64,
+    expiration: i64,
+    deadlock_detect_depth: i64,
+    max_write_batch_size: usize,
+}
+
+impl Default for TransactionOptions {
+    fn default() -> Self {
+        Self {
+            snapshot: false,
+            deadlock_detect: false,
+            lock_timeout: -1,
+            expiration: -1,
+            deadlock_detect_depth: 50,
+            max_write_batch_size: 0,
+        }
+    }
+}
+
+impl TransactionOptions {
+    /// rust-rocksdb `TransactionOptions::new`.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Skip 2PC prepare (Pedra is 1PC; accepted).
+    pub fn set_skip_prepare(&mut self, _skip_prepare: bool) {}
+
+    /// Pin a snapshot at begin (stricter isolation).
+    pub fn set_snapshot(&mut self, snapshot: bool) {
+        self.snapshot = snapshot;
+    }
+
+    /// Check wait-for cycle before blocking. Default false.
+    pub fn set_deadlock_detect(&mut self, deadlock_detect: bool) {
+        self.deadlock_detect = deadlock_detect;
+    }
+
+    /// Lock wait in ms. `0` = try-once; negative = DB default (1s).
+    pub fn set_lock_timeout(&mut self, lock_timeout: i64) {
+        self.lock_timeout = lock_timeout;
+    }
+
+    /// Txn wall-clock expiration (ms). Stored; not enforced yet.
+    pub fn set_expiration(&mut self, expiration: i64) {
+        self.expiration = expiration;
+    }
+
+    /// Deadlock BFS depth. Stored.
+    pub fn set_deadlock_detect_depth(&mut self, depth: i64) {
+        self.deadlock_detect_depth = depth;
+    }
+
+    /// Write-batch byte cap. `0` = unlimited. Stored.
+    pub fn set_max_write_batch_size(&mut self, size: usize) {
+        self.max_write_batch_size = size;
+    }
+}
+
+/// rust-rocksdb `TransactionDBOptions`.
+#[derive(Debug, Clone)]
+pub struct TransactionDBOptions {
+    default_lock_timeout: i64,
+    txn_lock_timeout: i64,
+    max_num_locks: i64,
+    num_stripes: usize,
+}
+
+impl Default for TransactionDBOptions {
+    fn default() -> Self {
+        Self {
+            default_lock_timeout: 1000,
+            txn_lock_timeout: 1000,
+            max_num_locks: -1,
+            num_stripes: 16,
+        }
+    }
+}
+
+impl TransactionDBOptions {
+    /// rust-rocksdb `TransactionDBOptions::new`.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Timeout for `TransactionDB::put` outside a txn (ms). Default 1000.
+    pub fn set_default_lock_timeout(&mut self, default_lock_timeout: i64) {
+        self.default_lock_timeout = default_lock_timeout;
+    }
+
+    /// Default txn lock wait (ms). Default 1000.
+    pub fn set_txn_lock_timeout(&mut self, txn_lock_timeout: i64) {
+        self.txn_lock_timeout = txn_lock_timeout;
+    }
+
+    /// Max keys locked per CF. Negative = unlimited.
+    pub fn set_max_num_locks(&mut self, max_num_locks: i64) {
+        self.max_num_locks = max_num_locks;
+    }
+
+    /// Lock-table stripes. Stored; table is one mutex.
+    pub fn set_num_stripes(&mut self, num_stripes: usize) {
+        self.num_stripes = num_stripes;
     }
 }
 
@@ -157,6 +277,202 @@ impl<E: Env> Deref for OptimisticTransactionDB<E> {
     }
 }
 
+/// rust-rocksdb `TransactionDB` — pessimistic 2PL on the same Pedra KV.
+///
+/// Puts / `get_for_update` take an exclusive per-key lock (wait or
+/// `Busy`/`TimedOut`). Commit is still one WAL group. Not 2PC: `prepare`
+/// is 1PC Ok; `prepared_transactions` is empty.
+pub struct TransactionDB<E: Env = IoUringEnv> {
+    db: DB<E>,
+    locks: Arc<LockTable>,
+    txn_lock_timeout: Duration,
+    default_lock_timeout: Duration,
+}
+
+impl TransactionDB<IoUringEnv> {
+    /// rust-rocksdb `TransactionDB::open_default`.
+    ///
+    /// # Errors
+    /// Pedra open errors.
+    pub fn open_default(path: impl AsRef<Path>) -> Result<Self> {
+        let mut opts = super::Options::new();
+        opts.create_if_missing(true);
+        Self::open(&opts, &TransactionDBOptions::default(), path)
+    }
+
+    /// rust-rocksdb `TransactionDB::open`.
+    ///
+    /// # Errors
+    /// Pedra open errors.
+    pub fn open(
+        opts: &super::Options,
+        txn_db_opts: &TransactionDBOptions,
+        path: impl AsRef<Path>,
+    ) -> Result<Self> {
+        Self::open_cf(opts, txn_db_opts, path, None::<&str>)
+    }
+
+    /// rust-rocksdb `TransactionDB::open_cf`.
+    ///
+    /// # Errors
+    /// Pedra open errors.
+    pub fn open_cf(
+        opts: &super::Options,
+        txn_db_opts: &TransactionDBOptions,
+        path: impl AsRef<Path>,
+        cfs: impl IntoIterator<Item = impl AsRef<str>>,
+    ) -> Result<Self> {
+        let names: Vec<String> = cfs.into_iter().map(|s| s.as_ref().to_string()).collect();
+        let refs: Vec<&str> = names.iter().map(String::as_str).collect();
+        Ok(Self {
+            db: DB::open_cf(opts, path, &refs)?,
+            locks: Arc::new(LockTable::new()),
+            txn_lock_timeout: ms_to_dur(txn_db_opts.txn_lock_timeout),
+            default_lock_timeout: ms_to_dur(txn_db_opts.default_lock_timeout),
+        })
+    }
+
+    /// rust-rocksdb `TransactionDB::open_cf_descriptors`.
+    ///
+    /// # Errors
+    /// Pedra open errors.
+    pub fn open_cf_descriptors(
+        opts: &super::Options,
+        txn_db_opts: &TransactionDBOptions,
+        path: impl AsRef<Path>,
+        cfs: impl IntoIterator<Item = super::ColumnFamilyDescriptor>,
+    ) -> Result<Self> {
+        Ok(Self {
+            db: DB::open_cf_descriptors(opts, path, cfs)?,
+            locks: Arc::new(LockTable::new()),
+            txn_lock_timeout: ms_to_dur(txn_db_opts.txn_lock_timeout),
+            default_lock_timeout: ms_to_dur(txn_db_opts.default_lock_timeout),
+        })
+    }
+}
+
+fn ms_to_dur(ms: i64) -> Duration {
+    if ms < 0 {
+        Duration::from_secs(u32::MAX as u64)
+    } else if ms == 0 {
+        Duration::ZERO
+    } else {
+        Duration::from_millis(ms as u64)
+    }
+}
+
+fn lock_error(e: LockErr) -> Error {
+    match e {
+        LockErr::Deadlock => Error {
+            msg: "Busy: deadlock".into(),
+            kind: ErrorKind::Busy,
+        },
+        LockErr::TimedOut => Error {
+            msg: "TimedOut: lock wait".into(),
+            kind: ErrorKind::TimedOut,
+        },
+    }
+}
+
+impl<E: Env> TransactionDB<E> {
+    /// Begin a pessimistic transaction (default options).
+    #[must_use]
+    pub fn transaction(&self) -> Transaction<'_, E> {
+        self.transaction_opt(&WriteOptions::default(), &TransactionOptions::default())
+    }
+
+    /// Begin with rust-rocksdb option objects.
+    #[must_use]
+    pub fn transaction_opt(
+        &self,
+        writeopts: &WriteOptions,
+        txn_opts: &TransactionOptions,
+    ) -> Transaction<'_, E> {
+        let _ = writeopts;
+        let timeout = if txn_opts.lock_timeout < 0 {
+            self.txn_lock_timeout
+        } else {
+            ms_to_dur(txn_opts.lock_timeout)
+        };
+        Transaction::new_pessimistic(
+            &self.db,
+            Arc::clone(&self.locks),
+            timeout,
+            txn_opts.deadlock_detect,
+        )
+    }
+
+    /// 2PC recovered txns. Pedra is 1PC — always empty.
+    #[must_use]
+    pub fn prepared_transactions(&self) -> Vec<Transaction<'_, E>> {
+        Vec::new()
+    }
+
+    /// Direct put: exclusive-lock the key, write, unlock (Rocks non-txn write).
+    ///
+    /// # Errors
+    /// Lock wait or Pedra write.
+    pub fn put(&self, key: impl AsRef<[u8]>, value: impl AsRef<[u8]>) -> Result<()> {
+        self.put_named(DEFAULT_CF, key.as_ref(), value.as_ref())
+    }
+
+    /// Direct put on a named CF.
+    ///
+    /// # Errors
+    /// Unknown CF, lock wait, or Pedra write.
+    pub fn put_cf(
+        &self,
+        cf: &ColumnFamily,
+        key: impl AsRef<[u8]>,
+        value: impl AsRef<[u8]>,
+    ) -> Result<()> {
+        self.put_named(cf.name(), key.as_ref(), value.as_ref())
+    }
+
+    fn put_named(&self, cf: &str, key: &[u8], value: &[u8]) -> Result<()> {
+        let enc = Bytes::from(self.db.codec.encode(cf, key));
+        let id = self.locks.alloc_id();
+        self.locks
+            .lock(enc.clone(), id, self.default_lock_timeout, false)
+            .map_err(lock_error)?;
+        let r = if cf == DEFAULT_CF {
+            self.db.put(key, value)
+        } else {
+            match self.db.cf_handle(cf) {
+                Some(h) => self.db.put_cf(&h, key, value),
+                None => Err(Error {
+                    msg: format!("unknown column family {cf}"),
+                    kind: ErrorKind::InvalidArgument,
+                }),
+            }
+        };
+        self.locks.unlock_all(&[enc], id);
+        r
+    }
+
+    /// Direct delete with the same lock as [`Self::put`].
+    ///
+    /// # Errors
+    /// Lock wait or Pedra write.
+    pub fn delete(&self, key: impl AsRef<[u8]>) -> Result<()> {
+        let enc = Bytes::from(self.db.codec.encode(DEFAULT_CF, key.as_ref()));
+        let id = self.locks.alloc_id();
+        self.locks
+            .lock(enc.clone(), id, self.default_lock_timeout, false)
+            .map_err(lock_error)?;
+        let r = self.db.delete(key);
+        self.locks.unlock_all(&[enc], id);
+        r
+    }
+}
+
+impl<E: Env> Deref for TransactionDB<E> {
+    type Target = DB<E>;
+    fn deref(&self) -> &DB<E> {
+        &self.db
+    }
+}
+
 /// rust-rocksdb `Transaction` over Pedra [`OccTransaction`].
 ///
 /// Methods take `&self` (Rocks FFI is internally mutable). Commit
@@ -167,10 +483,24 @@ pub struct Transaction<'a, E: Env = IoUringEnv> {
     pin: pedradb_core::SnapshotPin,
     codec: KeyCodec,
     db: &'a DB<E>,
+    /// `Some` = pessimistic 2PL ([`TransactionDB`]). `None` = OCC.
+    pess: Option<Pess>,
+}
+
+struct Pess {
+    table: Arc<LockTable>,
+    id: u64,
+    held: Mutex<Vec<Bytes>>,
+    timeout: Duration,
+    detect: bool,
 }
 
 impl<E: Env> Drop for Transaction<'_, E> {
     fn drop(&mut self) {
+        if let Some(p) = &self.pess {
+            let held = std::mem::take(&mut *p.held.lock());
+            p.table.unlock_all(&held, p.id);
+        }
         self.db.inner.release_snapshot_pin(self.pin);
     }
 }
@@ -187,7 +517,42 @@ impl<'a, E: Env> Transaction<'a, E> {
             pin,
             codec: db.codec.clone(),
             db,
+            pess: None,
         }
+    }
+
+    pub(crate) fn new_pessimistic(
+        db: &'a DB<E>,
+        table: Arc<LockTable>,
+        timeout: Duration,
+        detect: bool,
+    ) -> Self {
+        let pin = db.inner.pin_snapshot();
+        let id = table.alloc_id();
+        Self {
+            occ: Mutex::new(db.inner.begin_occ()),
+            pin,
+            codec: db.codec.clone(),
+            db,
+            pess: Some(Pess {
+                table,
+                id,
+                held: Mutex::new(Vec::new()),
+                timeout,
+                detect,
+            }),
+        }
+    }
+
+    fn lock_enc(&self, enc: Bytes) -> Result<()> {
+        let Some(p) = self.pess.as_ref() else {
+            return Ok(());
+        };
+        p.table
+            .lock(enc.clone(), p.id, p.timeout, p.detect)
+            .map_err(lock_error)?;
+        p.held.lock().push(enc);
+        Ok(())
     }
 
     fn encode(&self, cf: &str, key: &[u8]) -> Vec<u8> {
@@ -252,9 +617,12 @@ impl<'a, E: Env> Transaction<'a, E> {
     }
 
     fn put_cf_name(&self, cf: &str, key: impl AsRef<[u8]>, value: impl AsRef<[u8]>) -> Result<()> {
-        self.with_encoded(cf, key.as_ref(), |occ, enc| {
-            occ.put(enc, value.as_ref()).map_err(Error::from)
-        })
+        let enc = Bytes::from(self.encode(cf, key.as_ref()));
+        self.lock_enc(enc.clone())?;
+        self.occ
+            .lock()
+            .put(enc.as_ref(), value.as_ref())
+            .map_err(Error::from)
     }
 
     /// Stage a delete.
@@ -274,8 +642,43 @@ impl<'a, E: Env> Transaction<'a, E> {
     }
 
     fn delete_cf_name(&self, cf: &str, key: impl AsRef<[u8]>) -> Result<()> {
-        let enc = self.encode(cf, key.as_ref());
+        let enc = Bytes::from(self.encode(cf, key.as_ref()));
+        self.lock_enc(enc.clone())?;
         self.occ.lock().delete(enc).map_err(Error::from)
+    }
+
+    /// rust-rocksdb `get_for_update` — exclusive lock then snapshot get.
+    /// `exclusive` is accepted; Pedra always takes exclusive (stricter).
+    ///
+    /// # Errors
+    /// Lock wait, deadlock, or Pedra read.
+    pub fn get_for_update(
+        &self,
+        key: impl AsRef<[u8]>,
+        exclusive: bool,
+    ) -> Result<Option<Vec<u8>>> {
+        let _ = exclusive;
+        self.get_for_update_cf_name(DEFAULT_CF, key.as_ref())
+    }
+
+    /// rust-rocksdb `get_for_update_cf`.
+    ///
+    /// # Errors
+    /// Lock wait, deadlock, unknown CF, or Pedra read.
+    pub fn get_for_update_cf(
+        &self,
+        cf: &ColumnFamily,
+        key: impl AsRef<[u8]>,
+        exclusive: bool,
+    ) -> Result<Option<Vec<u8>>> {
+        let _ = exclusive;
+        self.get_for_update_cf_name(cf.name(), key.as_ref())
+    }
+
+    fn get_for_update_cf_name(&self, cf: &str, key: &[u8]) -> Result<Option<Vec<u8>>> {
+        let enc = Bytes::from(self.encode(cf, key));
+        self.lock_enc(enc)?;
+        self.get_cf_name(cf, key)
     }
 
     /// Count live keys in `[start, end)` at the txn snapshot **with the
@@ -413,6 +816,10 @@ impl<'a, E: Env> Transaction<'a, E> {
         let mut g = self.occ.lock();
         let old = std::mem::replace(&mut *g, self.db.inner.begin_occ());
         old.abort();
+        if let Some(p) = &self.pess {
+            let held = std::mem::take(&mut *p.held.lock());
+            p.table.unlock_all(&held, p.id);
+        }
         Ok(())
     }
 }
@@ -829,6 +1236,92 @@ mod tests {
         tx.put(b"s/1", b"doc").unwrap();
         tx.commit().unwrap();
         assert_eq!(db.get(b"s/1").unwrap().as_deref(), Some(&b"doc"[..]));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn transaction_db_put_commit_get() {
+        let dir = tmp("txn-db");
+        let db = TransactionDB::open_default(&dir).unwrap();
+        let tx = db.transaction();
+        tx.put(b"k", b"v").unwrap();
+        assert_eq!(tx.get(b"k").unwrap().as_deref(), Some(&b"v"[..]));
+        tx.commit().unwrap();
+        assert_eq!(db.get(b"k").unwrap().as_deref(), Some(&b"v"[..]));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn transaction_db_second_writer_times_out() {
+        let dir = tmp("txn-lock");
+        let db = TransactionDB::open_default(&dir).unwrap();
+        let mut to = TransactionOptions::new();
+        to.set_lock_timeout(0);
+        let a = db.transaction();
+        a.put(b"k", b"1").unwrap();
+        let b = db.transaction_opt(&WriteOptions::default(), &to);
+        let err = b.put(b"k", b"2").unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::TimedOut);
+        a.commit().unwrap();
+        let c = db.transaction_opt(&WriteOptions::default(), &to);
+        c.put(b"k", b"3").unwrap();
+        c.commit().unwrap();
+        assert_eq!(db.get(b"k").unwrap().as_deref(), Some(&b"3"[..]));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn transaction_db_rollback_releases_lock() {
+        let dir = tmp("txn-rb");
+        let db = TransactionDB::open_default(&dir).unwrap();
+        let a = db.transaction();
+        a.put(b"k", b"1").unwrap();
+        a.rollback().unwrap();
+        drop(a);
+        let b = db.transaction();
+        b.put(b"k", b"2").unwrap();
+        b.commit().unwrap();
+        assert_eq!(db.get(b"k").unwrap().as_deref(), Some(&b"2"[..]));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn transaction_db_get_for_update_locks() {
+        let dir = tmp("txn-gfu");
+        let db = TransactionDB::open_default(&dir).unwrap();
+        db.put(b"k", b"v").unwrap();
+        let a = db.transaction();
+        assert_eq!(
+            a.get_for_update(b"k", true).unwrap().as_deref(),
+            Some(&b"v"[..])
+        );
+        let mut to = TransactionOptions::new();
+        to.set_lock_timeout(0);
+        let b = db.transaction_opt(&WriteOptions::default(), &to);
+        assert_eq!(b.put(b"k", b"x").unwrap_err().kind(), ErrorKind::TimedOut);
+        drop(a);
+        b.put(b"k", b"x").unwrap();
+        b.commit().unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn env_and_sst_file_manager_roundtrip() {
+        let mut env = crate::Env::new().unwrap();
+        env.set_background_threads(4);
+        env.set_high_priority_background_threads(2);
+        env.join_all_threads();
+        assert_eq!(env.background_threads(), 4);
+        let mgr = crate::SstFileManager::new(&env).unwrap();
+        mgr.set_max_allowed_space_usage(1 << 30);
+        mgr.set_delete_rate_bytes_per_second(1024);
+        assert!(!mgr.is_max_allowed_space_reached());
+        let mut opts = Options::new();
+        opts.set_env(&env);
+        opts.set_sst_file_manager(&mgr);
+        opts.create_if_missing(true);
+        let dir = tmp("env-sst");
+        let _db = TransactionDB::open(&opts, &TransactionDBOptions::new(), &dir).unwrap();
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

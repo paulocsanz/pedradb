@@ -201,6 +201,35 @@ proof fn lemma_mutant_loses_tail(mem_empty: bool, imm_present: bool)
 /// Teeth: the AS-IS ignore-pin mutant truncates the WAL exactly when the
 /// pin is live and everything else is idle — the acked-write loss the
 /// fixed kernel refuses.
+pub open spec fn may_publish_manifest_spec(sst_durable: bool) -> bool {
+    sst_durable
+}
+
+pub open spec fn may_publish_manifest_as_is_spec(_sst_durable: bool) -> bool {
+    true
+}
+
+pub fn may_publish_manifest(sst_durable: bool) -> (d: bool)
+    ensures
+        d == may_publish_manifest_spec(sst_durable),
+{
+    sst_durable
+}
+
+pub fn may_publish_manifest_as_is(_sst_durable: bool) -> (d: bool)
+    ensures
+        d == true,
+{
+    true
+}
+
+proof fn lemma_as_is_publishes_unsynced()
+    ensures
+        !may_publish_manifest_spec(false),
+        may_publish_manifest_as_is_spec(false),
+{
+}
+
 proof fn lemma_mutant_ignores_pin()
     ensures
         wal_rotate_decision(WalPinState {

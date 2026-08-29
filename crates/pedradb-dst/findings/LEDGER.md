@@ -23,6 +23,7 @@
 |----|-------|--------|-------------|
 | F47 | failed 2PC finish + heal/reopen majority-installs the TX | closed (2026-08-14) | `fail_after_mid_2pc_restores_preimage` |
 | F49 | outstanding Queued proposes collide on durable `si_gen` | FIXED | `queued_double_propose_distinct_si_gens_survive_reopen` |
+| F-L28 | RequestVote skipped for remote members (`nodes.contains` after joint vote_targets) | FIXED (2026-08-26) | `l28_real_tcp_seed_replay` seed `0x641e28`; leader-kill `l28_real_tcp_leader_kill` seed `0x641e29` |
 
 Files: [`F47-store-failingenv-2pc-reopen-majority.md`](F47-store-failingenv-2pc-reopen-majority.md),
 [`F49-si-gen-collision-outstanding-proposes.md`](F49-si-gen-collision-outstanding-proposes.md).

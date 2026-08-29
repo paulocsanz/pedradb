@@ -6,8 +6,9 @@
 //! (skip-any WAL, dropping SST files without tombstones) are implemented
 //! the Pedra-correct way, not omitted.
 //!
-//! Column families are prefix-encoded (`cf_name \x00 key`). That is the
-//! storage layout, not a missing API: `create_cf` / `drop_cf` / `list_cf` /
+//! Column families are prefix-encoded (`cf_name \x00 key`) in **one** WAL.
+//! Flush emits one SST per CF (RFC-0065 P0); `compact_range_cf` rewrites
+//! only that family. `create_cf` / `drop_cf` / `list_cf` /
 //! `ingest_external_file` / `SstFileWriter` / `WriteBatchWithIndex` /
 //! compaction filters / `delete_file_in_range` all exist and work.
 
@@ -15,7 +16,9 @@
 
 mod api;
 mod env;
+mod iter_kernel;
 mod knobs;
+mod locktab;
 mod txn;
 pub use api::{
     AsColumnFamilyRef, BlockBasedOptions, Cache, ChecksumType, CompactionDecision, DBPinnableSlice,
@@ -26,9 +29,12 @@ pub mod backup;
 pub mod checkpoint;
 pub use backup::{BackupEngine, BackupEngineInfo, BackupEngineOptions, RestoreOptions};
 pub use checkpoint::Checkpoint;
-pub use env::Env;
+pub use env::{Env, SstFileManager};
 pub use knobs::{g2_not_supported, KnobClass, KnobEntry, KNOB_INVENTORY};
-pub use txn::{OptimisticTransactionDB, OptimisticTransactionOptions, Transaction, WriteOptions};
+pub use txn::{
+    OptimisticTransactionDB, OptimisticTransactionOptions, Transaction, TransactionDB,
+    TransactionDBOptions, TransactionOptions, WriteOptions,
+};
 
 use bytes::Bytes;
 use parking_lot::Mutex;
@@ -41,7 +47,8 @@ pub use shape::{
 };
 
 use pedradb_core::{
-    BatchOp, CompactOptions as CoreCompactOptions, ConcurrentDb, CoreError, Env as PedraEnv,
+    cf_encode_effective, decode_cf_key, encode_cf_key, key_in_cf_family, BatchOp,
+    CompactOptions as CoreCompactOptions, ConcurrentDb, CoreError, Env as PedraEnv,
     Snapshot as CoreSnapshot, SnapshotPin, StdEnv, L0_COMPACTION_TRIGGER,
 };
 use pedradb_io_uring::IoUringEnv;
@@ -83,6 +90,10 @@ pub enum ErrorKind {
     Io,
     /// OCC conflict (`TransactionConflict`).
     TransactionConflict,
+    /// rust-rocksdb `Busy` — 2PL deadlock / lock refused.
+    Busy,
+    /// rust-rocksdb `TimedOut` — 2PL lock wait expired.
+    TimedOut,
     /// CAS precondition failed.
     CasMismatch,
     /// Snapshot older than the version-GC watermark.
@@ -103,8 +114,8 @@ pub enum ErrorKind {
 /// Compatibility error surface (rust-rocksdb exposes one opaque `Error`).
 #[derive(Debug, Clone)]
 pub struct Error {
-    msg: String,
-    kind: ErrorKind,
+    pub(crate) msg: String,
+    pub(crate) kind: ErrorKind,
 }
 
 impl Error {
@@ -194,18 +205,13 @@ fn map_property_int<E: PedraEnv>(db: &ConcurrentDb<E>, name: &str) -> Option<u64
 pub struct Options {
     /// Whether to create the database directory when absent.
     pub create_if_missing: bool,
-    /// Memtable flush threshold (Pedra `auto_flush_bytes`, default 4 MiB).
-    /// `0` disables auto-flush (manual [`DB::flush`] only).
-    ///
-    /// Isolated apply (2000× pre+com): 4 MiB + drain **2251** qps vs 64 MiB
-    /// drain **1228** (one 64 MiB SST write at the end). 64 MiB matched Rocks
-    /// `write_buffer_size` and lost apply (RFC-0041).
+    /// Memtable flush threshold. Default **64 MiB** (`0x4000000`) — rust-rocksdb
+    /// / Rocks C++ factory. `0` disables auto-flush (manual [`DB::flush`] only).
+    /// Hosts that `set_write_buffer_size` get exactly that many bytes.
     pub write_buffer_size: usize,
-    /// WAL barrier before Ok. Default **`false`** (RFC-0054): the drop-in
-    /// matches Rocks `WriteOptions.sync=false` — the class people actually
-    /// run. `true` is G1 (Pedra kernel contract): barrier before Ok, and on
-    /// Darwin that barrier is `F_FULLFSYNC` when [`Self::wal_full_fsync`]
-    /// is on (the default). Kernel `OpenOptions.sync` stays `true`.
+    /// WAL barrier before Ok. Default **`false`** (RFC-0054): rust-rocksdb
+    /// `WriteOptions.sync=false` — the factory config every Rocks host
+    /// actually runs. Kernel `OpenOptions.sync` stays `true` (Pedra G1).
     pub sync: bool,
     /// Version GC on auto-compact (Pedra `auto_reclaim`): drops versions
     /// older than the oldest open snapshot pin, like RocksDB compaction
@@ -232,13 +238,13 @@ pub struct Options {
     /// [`WalRecoveryMode::PointInTime`] (serve the prefix, report the
     /// discard). The kernel default is fail-closed.
     pub wal_recovery: WalRecoveryMode,
-    /// Every WAL barrier uses the platform's strongest data class — on
-    /// Darwin `fcntl(F_FULLFSYNC)` (the CMake-RocksDB `sync=true` class);
-    /// on Linux identical to the default. Default **true** (RFC-0036
-    /// addendum v2): `sync=true` means durable-Ok. `false` restores the
-    /// weak `fdatasync`/`fsync` class (what `librocksdb-sys` builds use on
-    /// Darwin) — ~120× faster per commit on Apple hardware, at the cost of
-    /// the power-cut durability claim.
+    /// Strongest WAL barrier (`F_FULLFSYNC` on Darwin). Default **`true`**:
+    /// upstream Rocks CMake on macOS sets `HAVE_FULLFSYNC` (`PosixWritableFile::Sync`
+    /// → `fcntl(F_FULLFSYNC)`). crates.io `librocksdb-sys` 0.16 `build.rs`
+    /// omits that define (CMakeLists.txt does `check_cxx_symbol_exists`);
+    /// later rust-rocksdb forks hardcode it. Drop-in matches **C++ Rocks on
+    /// Darwin**, not the crippled sys crate. `false` = `fdatasync` (Linux
+    /// class / the sys-crate accident).
     pub wal_full_fsync: bool,
     /// rust-rocksdb `enable_blob_files`. Default `false` (Rocks default).
     /// When true, values ≥ [`Self::min_blob_size`] spill to `VALUES.vlog`
@@ -258,6 +264,11 @@ pub struct Options {
     checksum_off: bool,
     /// RFC-0062 P1.6: skip-any WAL recorded; open refuses.
     skip_any: bool,
+    /// rust-rocksdb `Options::set_env`. Pedra I/O stays [`pedradb_core::Env`]
+    /// at open; this is kept so `set_env` + `BackupEngine::open` compile.
+    env: Option<Env>,
+    /// rust-rocksdb / C++ `SstFileManager` (not in crates.io 0.22; we export it).
+    sst_file_manager: Option<SstFileManager>,
 }
 
 type CompactionFilterFn =
@@ -306,6 +317,8 @@ impl fmt::Debug for Options {
                 "background_error_listener",
                 &self.background_error_listener.is_some(),
             )
+            .field("env", &self.env.is_some())
+            .field("sst_file_manager", &self.sst_file_manager.is_some())
             .finish()
     }
 }
@@ -314,7 +327,7 @@ impl Default for Options {
     fn default() -> Self {
         Self {
             create_if_missing: false,
-            write_buffer_size: 4 * 1024 * 1024,
+            write_buffer_size: 64 * 1024 * 1024,
             sync: false,
             auto_reclaim: true,
             auto_resume_transient: true,
@@ -329,6 +342,8 @@ impl Default for Options {
             paranoid_off: false,
             checksum_off: false,
             skip_any: false,
+            env: None,
+            sst_file_manager: None,
         }
     }
 }
@@ -399,8 +414,21 @@ impl Options {
         self
     }
 
+    /// rust-rocksdb `Options::set_env`. Stored; open still uses the Pedra
+    /// [`pedradb_core::Env`] passed to [`DB::open_cf_with_env`].
+    pub fn set_env(&mut self, env: &Env) -> &mut Self {
+        self.env = Some(env.clone());
+        self
+    }
+
+    /// C++ `Options::sst_file_manager`. Stored; compact does not stall yet.
+    pub fn set_sst_file_manager(&mut self, mgr: &SstFileManager) -> &mut Self {
+        self.sst_file_manager = Some(mgr.clone());
+        self
+    }
+
     /// WAL barrier class switch for the whole DB. See
-    /// [`Options::wal_full_fsync`] (default true; `false` = weak class).
+    /// [`Options::wal_full_fsync`] (default **true** = upstream Darwin Rocks).
     pub fn set_wal_full_fsync(&mut self, v: bool) -> &mut Self {
         self.wal_full_fsync = v;
         self
@@ -652,7 +680,7 @@ fn cfreg_payload(raw: &[u8]) -> std::result::Result<&[u8], String> {
                     .get(..head.len() + 1)
                     .ok_or_else(|| "crc payload".to_string())?;
                 let got = crc32c::crc32c(payload);
-                if got != expect {
+                if !pedradb_core::wal::crc::crc_match_ok(expect, got) {
                     return Err(format!(
                         "crc mismatch stored={expect:#010x} computed={got:#010x}"
                     ));
@@ -716,23 +744,24 @@ fn store_cf_registry(
 /// never leak another CF's encoded keys. The flag is frozen in `CFREG`
 /// (F185) — never recomputed from the supplied open list.
 #[derive(Debug, Clone)]
-struct KeyCodec {
+pub(crate) struct KeyCodec {
     default_raw: bool,
 }
 
 impl KeyCodec {
-    fn encode(&self, cf: &str, key: &[u8]) -> Vec<u8> {
-        self.encode_with(cf, key, <[u8]>::to_vec)
+    pub(crate) fn encode(&self, cf: &str, key: &[u8]) -> Vec<u8> {
+        let enc = encode_cf_key(cf, key, self.default_raw);
+        debug_assert!(
+            key_in_cf_family(&enc, cf),
+            "encoded key must belong to family {cf}"
+        );
+        enc
     }
 
     /// Append `cf\\0key` onto `pool` and freeze a shared `Bytes` (one backing
     /// alloc per `write()` instead of one malloc per op).
     fn encode_pooled(&self, cf: &str, key: &[u8], pool: &mut bytes::BytesMut) -> Bytes {
-        let effective = if cf == DEFAULT_CF && self.default_raw {
-            ""
-        } else {
-            cf
-        };
+        let effective = cf_encode_effective(cf, self.default_raw);
         if effective.is_empty() {
             pool.reserve(key.len());
             pool.extend_from_slice(key);
@@ -746,22 +775,19 @@ impl KeyCodec {
         pool.split_to(n).freeze()
     }
 
-    /// `cf\0` run prefix for [`Self::encode_run`] — materialized once per
-    /// same-CF run instead of re-encoding the prefix bytes per key
-    /// (RFC-0054 P1.4 apply path).
-    fn run_prefix(&self, cf: &str) -> Vec<u8> {
-        let effective = if cf == DEFAULT_CF && self.default_raw {
-            ""
-        } else {
-            cf
-        };
-        let mut p = Vec::with_capacity(effective.len() + 1);
-        p.extend_from_slice(effective.as_bytes());
-        p.push(0);
-        p
+    /// `cf\0` run prefix for [`Self::encode_run`] — fill once per same-CF
+    /// run (RFC-0054 P1.4 / RFC-0149 P1.1).
+    fn fill_run_prefix(&self, cf: &str, pfx: &mut Vec<u8>) {
+        pfx.clear();
+        let effective = cf_encode_effective(cf, self.default_raw);
+        if effective.is_empty() {
+            return;
+        }
+        pfx.extend_from_slice(effective.as_bytes());
+        pfx.push(0);
     }
 
-    /// [`Self::encode_pooled`] with the prefix from [`Self::run_prefix`].
+    /// [`Self::encode_pooled`] with a prefix from [`Self::fill_run_prefix`].
     fn encode_run(&self, prefix: &[u8], key: &[u8], pool: &mut bytes::BytesMut) -> Bytes {
         if prefix.is_empty() {
             pool.reserve(key.len());
@@ -777,7 +803,7 @@ impl KeyCodec {
 
     /// Default-CF raw: copy user key; otherwise `cf\\0key` via the pool.
     fn encode_owned(&self, cf: &str, key: &[u8], pool: &mut bytes::BytesMut) -> Bytes {
-        if cf == DEFAULT_CF && self.default_raw {
+        if cf_encode_effective(cf, self.default_raw).is_empty() {
             Bytes::copy_from_slice(key)
         } else {
             self.encode_pooled(cf, key, pool)
@@ -787,11 +813,7 @@ impl KeyCodec {
     /// Encode into a stack buffer when the key fits (RFC-0035 P1.2).
     pub(crate) fn encode_with<R>(&self, cf: &str, key: &[u8], f: impl FnOnce(&[u8]) -> R) -> R {
         const STACK: usize = 192;
-        let effective = if cf == DEFAULT_CF && self.default_raw {
-            ""
-        } else {
-            cf
-        };
+        let effective = cf_encode_effective(cf, self.default_raw);
         if effective.is_empty() {
             return f(key);
         }
@@ -812,15 +834,7 @@ impl KeyCodec {
     }
 
     fn decode<'a>(&self, cf: &str, encoded: &'a [u8]) -> &'a [u8] {
-        let effective = if cf == DEFAULT_CF && self.default_raw {
-            ""
-        } else {
-            cf
-        };
-        if effective.is_empty() {
-            return encoded;
-        }
-        encoded.get(effective.len() + 1..).unwrap_or(&[])
+        decode_cf_key(cf, encoded, self.default_raw)
     }
 }
 
@@ -1457,13 +1471,20 @@ fn page_forward<E: PedraEnv>(
 ) -> Result<Vec<(Vec<u8>, Vec<u8>)>> {
     let s = bound_as_ref(&start);
     inner
-        .with_read(|db| db.range_at_limited(seq, s, end, Some(limit)))
-        .map_err(Error::from)
-        .map(|rows| {
-            rows.into_iter()
-                .map(|(k, v)| (codec.decode(cf, &k).to_vec(), v.to_vec()))
-                .collect()
+        .with_read(|db| {
+            let mut out = Vec::with_capacity(limit);
+            for row in db.try_scan_window_at(seq, s, end)? {
+                if !crate::iter_kernel::iter_window_keep(row.snapshot_live) {
+                    continue;
+                }
+                out.push((codec.decode(cf, &row.key).to_vec(), row.value.to_vec()));
+                if out.len() >= limit {
+                    break;
+                }
+            }
+            Ok::<Vec<(Vec<u8>, Vec<u8>)>, CoreError>(out)
         })
+        .map_err(Error::from)
 }
 
 fn page_last_n<E: PedraEnv>(
@@ -1481,11 +1502,14 @@ fn page_last_n<E: PedraEnv>(
             // Iterator borrows the Db — consume the ring window under the guard.
             let mut ring: VecDeque<(Vec<u8>, Vec<u8>)> =
                 VecDeque::with_capacity(n.saturating_add(1));
-            for pair in db.try_scan_at(seq, start, e, None)? {
+            for row in db.try_scan_window_at(seq, start, e)? {
+                if !crate::iter_kernel::iter_window_keep(row.snapshot_live) {
+                    continue;
+                }
                 if ring.len() == n {
                     ring.pop_front();
                 }
-                ring.push_back((codec.decode(cf, &pair.key).to_vec(), pair.value.to_vec()));
+                ring.push_back((codec.decode(cf, &row.key).to_vec(), row.value.to_vec()));
             }
             Ok::<Vec<(Vec<u8>, Vec<u8>)>, CoreError>(ring.into_iter().collect())
         })
@@ -1727,13 +1751,20 @@ impl DB<IoUringEnv> {
         path: impl AsRef<std::path::Path>,
         cfs: impl IntoIterator<Item = ColumnFamilyDescriptor>,
     ) -> Result<Self> {
-        let names: Vec<String> = cfs.into_iter().map(|d| d.name).collect();
-        let refs: Vec<&str> = names
+        let descs: Vec<ColumnFamilyDescriptor> = cfs.into_iter().collect();
+        let refs: Vec<&str> = descs
             .iter()
-            .map(String::as_str)
+            .map(|d| d.name.as_str())
             .filter(|n| *n != DEFAULT_CF)
             .collect();
-        Self::open_cf(opts, path, &refs)
+        let db = Self::open_cf(opts, path, &refs)?;
+        for d in &descs {
+            if d.options.write_buffer_size > 0 {
+                db.inner
+                    .set_cf_write_buffer(&d.name, d.options.write_buffer_size);
+            }
+        }
+        Ok(db)
     }
 }
 
@@ -1920,6 +1951,7 @@ impl<E: PedraEnv> DB<E> {
         // memmove + ~100x footprint growth otherwise). Core-only users keep
         // the F20 keep-everything default.
         db.set_fold_version_gc(true);
+        db.set_physical_cfs(names.clone());
         // F185: frozen flag from the registry — not derived from `names`
         // (a reopen with a different supplied list must not flip the codec).
         let codec = KeyCodec { default_raw };
@@ -2273,9 +2305,14 @@ impl<E: PedraEnv> DB<E> {
     /// Unknown CF or WAL I/O.
     pub fn write_cf_owned(
         &self,
-        puts: Vec<(&str, Vec<u8>, Vec<u8>)>,
-        deletes: Vec<(&str, Vec<u8>)>,
+        mut puts: Vec<(&str, Vec<u8>, Vec<u8>)>,
+        mut deletes: Vec<(&str, Vec<u8>)>,
     ) -> Result<()> {
+        // Apply prewrite interleaves lock+default 32×; grouping makes
+        // `fill_run_prefix` once per family (RFC-0149 P1.1). Distinct keys
+        // — seq order across CFs is not user-visible after one publish.
+        puts.sort_by(|a, b| a.0.cmp(b.0));
+        deletes.sort_by(|a, b| a.0.cmp(b.0));
         thread_local! {
             static KEY_POOL: std::cell::RefCell<bytes::BytesMut> =
                 std::cell::RefCell::new(bytes::BytesMut::with_capacity(8 * 1024));
@@ -2286,12 +2323,12 @@ impl<E: PedraEnv> DB<E> {
             let mut pool = pool.borrow_mut();
             let mut ops = Vec::with_capacity(puts.len() + deletes.len());
             let mut last_ok: Option<&str> = None;
-            let mut pfx = Vec::new();
+            let mut pfx = Vec::with_capacity(16);
             let mut prev_val: Option<Bytes> = None;
             for (cf, k, v) in puts {
                 if last_ok != Some(cf) {
                     self.check_cf(cf)?;
-                    pfx = self.codec.run_prefix(cf);
+                    self.codec.fill_run_prefix(cf, &mut pfx);
                     last_ok = Some(cf);
                 }
                 // RFC-0062 P1.1: raftlog 16× same yval. Share the Bytes so
@@ -2310,7 +2347,7 @@ impl<E: PedraEnv> DB<E> {
             for (cf, k) in deletes {
                 if last_ok != Some(cf) {
                     self.check_cf(cf)?;
-                    pfx = self.codec.run_prefix(cf);
+                    self.codec.fill_run_prefix(cf, &mut pfx);
                     last_ok = Some(cf);
                 }
                 ops.push(BatchOp::Delete {
@@ -2328,9 +2365,12 @@ impl<E: PedraEnv> DB<E> {
         });
         if r.is_ok() && !warm.is_empty() {
             let epoch = self.cache_epoch_base + self.inner.read_cache_epoch();
+            // Raftlog reads idx-1 of a 16-append (LAST_RING). Fat apply/lock
+            // batches never read-your-writes in the same op.
+            let skip = warm.len().saturating_sub(LAST_RING);
             LAST_CF.with(|t| {
                 let mut t = t.borrow_mut();
-                for (cf, k, v) in warm {
+                for (cf, k, v) in warm.into_iter().skip(skip) {
                     t.store(epoch, cf, &k, v);
                 }
             });
@@ -2916,11 +2956,12 @@ impl<E: PedraEnv> DB<E> {
     /// rust-rocksdb `compact_range_cf`.
     pub fn compact_range_cf<S: AsRef<[u8]>, E2: AsRef<[u8]>>(
         &self,
-        _cf: &ColumnFamily,
-        start: Option<S>,
-        end: Option<E2>,
+        cf: &ColumnFamily,
+        _start: Option<S>,
+        _end: Option<E2>,
     ) {
-        self.compact_range(start, end);
+        let _gate = self.compact_gate.lock();
+        let _ = self.inner.compact_cf(&cf.name);
     }
 
     /// rust-rocksdb `compact_range_cf_opt`.
@@ -2956,6 +2997,7 @@ impl<E: PedraEnv> DB<E> {
             let non_default: Vec<String> =
                 cfs.iter().filter(|c| *c != DEFAULT_CF).cloned().collect();
             store_cf_registry(&self.inner.path(), false, &non_default)?;
+            self.inner.set_physical_cfs(cfs.clone());
         }
         Ok(())
     }
@@ -2976,6 +3018,7 @@ impl<E: PedraEnv> DB<E> {
         let mut cfs = self.cfs.lock();
         cfs.retain(|c| c != name);
         let non_default: Vec<String> = cfs.iter().filter(|c| *c != DEFAULT_CF).cloned().collect();
+        self.inner.set_physical_cfs(cfs.clone());
         drop(cfs);
         store_cf_registry(&self.inner.path(), self.codec.default_raw, &non_default)
     }
@@ -3170,8 +3213,12 @@ impl<E: PedraEnv> DB<E> {
     }
 
     /// rust-rocksdb `flush_cf`.
-    pub fn flush_cf(&self, _cf: &ColumnFamily) -> Result<()> {
-        self.flush()
+    pub fn flush_cf(&self, cf: &ColumnFamily) -> Result<()> {
+        let _gate = self.compact_gate.lock();
+        let r = self.inner.flush_cf(cf.name()).map_err(Error::from);
+        drop(_gate);
+        self.notify_compact();
+        r
     }
 
     /// rust-rocksdb `flush_cf_opt`.
@@ -3181,40 +3228,23 @@ impl<E: PedraEnv> DB<E> {
 
     /// rust-rocksdb `live_files`.
     pub fn live_files(&self) -> Result<Vec<LiveFile>> {
-        let dir = self.inner.path();
-        let mut out = Vec::new();
-        let rd = match std::fs::read_dir(&dir) {
-            Ok(r) => r,
-            Err(e) => {
-                return Err(Error {
-                    msg: format!("live_files: {e}"),
-                    kind: ErrorKind::Io,
-                })
-            }
-        };
-        for ent in rd {
-            let ent = ent.map_err(|e| Error {
-                msg: format!("live_files: {e}"),
-                kind: ErrorKind::Io,
-            })?;
-            let p = ent.path();
-            if p.extension().and_then(|e| e.to_str()) != Some("sst") {
-                continue;
-            }
-            let size = ent.metadata().map(|m| m.len()).unwrap_or(0) as usize;
-            out.push(LiveFile {
-                name: p
-                    .file_name()
-                    .map(|s| s.to_string_lossy().into_owned())
-                    .unwrap_or_default(),
-                size,
-                level: 0,
-                start_key: Vec::new(),
-                end_key: Vec::new(),
-                num_entries: 0,
-            });
-        }
-        Ok(out)
+        let rows = self.inner.live_sst_meta();
+        Ok(rows
+            .into_iter()
+            .map(|r| LiveFile {
+                column_family_name: if r.cf.is_empty() {
+                    DEFAULT_CF.to_string()
+                } else {
+                    r.cf
+                },
+                name: r.name,
+                size: r.size as usize,
+                level: r.level as i32,
+                start_key: r.start_key,
+                end_key: r.end_key,
+                num_entries: r.num_entries,
+            })
+            .collect())
     }
 
     /// rust-rocksdb `raw_iterator`.
@@ -3445,6 +3475,7 @@ mod tests {
         let mut o = Options::new();
         o.create_if_missing(true);
         o.set_sync(true);
+        o.set_wal_full_fsync(true);
         o
     }
 
@@ -3850,8 +3881,17 @@ mod tests {
     }
 
     #[test]
-    fn default_write_buffer_is_4_mib() {
-        assert_eq!(Options::new().write_buffer_size, 4 * 1024 * 1024);
+    fn default_options_match_rust_rocksdb_factory() {
+        let o = Options::new();
+        assert!(!o.sync, "WriteOptions.sync=false");
+        assert_eq!(o.write_buffer_size, 64 * 1024 * 1024, "Rocks C++ 0x4000000");
+        assert!(!o.create_if_missing);
+        assert!(!o.enable_blob_files);
+        assert!(
+            o.wal_full_fsync,
+            "upstream Rocks CMake HAVE_FULLFSYNC on Darwin"
+        );
+        assert_eq!(o.wal_recovery, WalRecoveryMode::PointInTime);
     }
 
     /// RFC-0062 P0.3 + P1.6: G2 setters never Ok with CRC/paranoid/skip-any off.
@@ -3989,6 +4029,55 @@ mod tests {
         }
         assert_eq!(keys, vec![b"a".to_vec()], "post-snapshot put must not leak");
         drop(snap);
+        drop(db);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// RFC-0151 P1: windowed iterator must not emit a key `visible_at` hid.
+    /// AS-IS `iter_window_keep` would keep a deleted / range-covered version.
+    #[test]
+    fn iter_window_keep_on_live_hidden_is_not_ok() {
+        use crate::iter_kernel::{iter_window_keep, iter_window_keep_as_is};
+        use std::ops::Bound;
+        let d = tmp("iter-window-hidden");
+        let mut opts = Options::new();
+        opts.create_if_missing(true);
+        let db = DB::open(&opts, &d).unwrap();
+        db.put(b"a", b"1").unwrap();
+        db.put(b"b", b"2").unwrap();
+        db.put(b"c", b"3").unwrap();
+        db.delete(b"b").unwrap();
+        let seq = db.inner.with_read(|core| core.visible_sequence());
+        let rows: Vec<_> = db
+            .inner
+            .with_read(|core| {
+                core.try_scan_window_at(seq, Bound::Unbounded, Bound::Unbounded)
+                    .map(|it| it.collect::<Vec<_>>())
+            })
+            .unwrap();
+        assert!(
+            rows.iter().any(|r| !r.snapshot_live),
+            "deleted b must arrive as a window candidate with snapshot_live=false"
+        );
+        let kept: Vec<_> = rows
+            .iter()
+            .filter(|r| iter_window_keep(r.snapshot_live))
+            .collect();
+        let leaked: Vec<_> = rows
+            .iter()
+            .filter(|r| iter_window_keep_as_is(r.snapshot_live))
+            .collect();
+        assert!(
+            leaked.len() > kept.len(),
+            "AS-IS keep would emit the hidden row"
+        );
+        let mut it = db.iterator(IteratorMode::Start).unwrap();
+        let keys: Vec<Vec<u8>> = it.collect_rest().into_iter().map(|(k, _)| k).collect();
+        assert_eq!(
+            keys,
+            vec![b"a".to_vec(), b"c".to_vec()],
+            "shipped window keep must not scan deleted b"
+        );
         drop(db);
         let _ = std::fs::remove_dir_all(&d);
     }
@@ -4161,19 +4250,20 @@ mod tests {
 
     #[test]
     fn dropin_default_sync_matches_rocks() {
-        // RFC-0054: the drop-in WAL class is Rocks default (async). G1 is
-        // `set_sync(true)`. Kernel `OpenOptions.sync` stays true.
+        // RFC-0054: drop-in WAL class is Rocks factory (async).
+        // `set_sync(true)` on Darwin is upstream C++ Rocks: F_FULLFSYNC.
         assert!(
             !Options::default().sync,
             "drop-in default must match WriteOptions.sync=false"
         );
         assert!(
             Options::default().wal_full_fsync,
-            "when a host does set_sync(true), Darwin must still be F_FULLFSYNC"
+            "Darwin Sync() in CMake Rocks is F_FULLFSYNC"
         );
         let mut on = Options::new();
         on.set_sync(true);
         assert!(on.sync);
+        assert!(on.wal_full_fsync);
     }
 
     #[test]
@@ -4897,6 +4987,37 @@ mod tests {
     }
 
     #[test]
+    fn write_cf_owned_grouped_multi_cf_is_atomic() {
+        let dir = tmp("cfowned-group");
+        let db = DB::open_cf(&g1_opts(), &dir, &["lock", "default"]).unwrap();
+        // Interleaved lock/default — encode groups by CF; both must land.
+        let puts = vec![
+            ("lock", b"k1".to_vec(), b"L1".to_vec()),
+            ("default", b"k1".to_vec(), b"D1".to_vec()),
+            ("lock", b"k2".to_vec(), b"L2".to_vec()),
+            ("default", b"k2".to_vec(), b"D2".to_vec()),
+        ];
+        db.write_cf_owned(puts, vec![]).unwrap();
+        assert_eq!(
+            db.get_named("lock", b"k1").unwrap().as_deref(),
+            Some(b"L1".as_ref())
+        );
+        assert_eq!(
+            db.get_named("default", b"k1").unwrap().as_deref(),
+            Some(b"D1".as_ref())
+        );
+        assert_eq!(
+            db.get_named("lock", b"k2").unwrap().as_deref(),
+            Some(b"L2".as_ref())
+        );
+        assert_eq!(
+            db.get_named("default", b"k2").unwrap().as_deref(),
+            Some(b"D2".as_ref())
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn write_cf_owned_moves_values_and_is_durable() {
         let dir = tmp("cfowned");
         let db = DB::open_cf(&g1_opts(), &dir, &["raftlog"]).unwrap();
@@ -5212,6 +5333,140 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// RFC-0065 P0.1: flush with lock+default keys yields one SST per family.
+    #[test]
+    fn flush_emits_one_sst_per_cf() {
+        let dir = tmp("cf-split-flush");
+        let db = DB::open_cf(&Options::new(), &dir, &["lock", "write"]).unwrap();
+        let lock = db.cf_handle("lock").unwrap();
+        let write = db.cf_handle("write").unwrap();
+        db.put(b"dk", b"dv").unwrap();
+        db.put_cf(&lock, b"lk", b"lv").unwrap();
+        db.put_cf(&write, b"wk", b"wv").unwrap();
+        db.flush().unwrap();
+        let files = db.live_files().unwrap();
+        let mut cfs: Vec<_> = files
+            .iter()
+            .map(|f| f.column_family_name.as_str())
+            .collect();
+        cfs.sort_unstable();
+        cfs.dedup();
+        assert!(
+            cfs.contains(&"lock") && cfs.contains(&"default") && cfs.contains(&"write"),
+            "expected SST per CF, live={files:?}"
+        );
+        drop(db);
+        let db = DB::open_cf(&Options::new(), &dir, &["lock", "write"]).unwrap();
+        let lock = db.cf_handle("lock").unwrap();
+        let write = db.cf_handle("write").unwrap();
+        assert_eq!(db.get(b"dk").unwrap().as_deref(), Some(&b"dv"[..]));
+        assert_eq!(
+            db.get_cf(&lock, b"lk").unwrap().as_deref(),
+            Some(&b"lv"[..])
+        );
+        assert_eq!(
+            db.get_cf(&write, b"wk").unwrap().as_deref(),
+            Some(&b"wv"[..])
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0065 P1.3: flush_cf(lock) does not emit a default SST.
+    #[test]
+    fn flush_cf_lock_leaves_default_in_mem() {
+        let dir = tmp("cf-flush-lock");
+        let db = DB::open_cf(&g1_opts(), &dir, &["lock"]).unwrap();
+        let lock = db.cf_handle("lock").unwrap();
+        db.put(b"dk", b"dv").unwrap();
+        db.put_cf(&lock, b"lk", b"lv").unwrap();
+        let def_before = db
+            .live_files()
+            .unwrap()
+            .into_iter()
+            .filter(|f| f.column_family_name == "default")
+            .count();
+        db.flush_cf(&lock).unwrap();
+        let def_after = db
+            .live_files()
+            .unwrap()
+            .into_iter()
+            .filter(|f| f.column_family_name == "default")
+            .count();
+        assert_eq!(def_before, def_after);
+        assert!(db
+            .live_files()
+            .unwrap()
+            .iter()
+            .any(|f| f.column_family_name == "lock"));
+        assert_eq!(db.get(b"dk").unwrap().as_deref(), Some(&b"dv"[..]));
+        assert_eq!(
+            db.get_cf(&lock, b"lk").unwrap().as_deref(),
+            Some(&b"lv"[..])
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0065 P0.2: compact_range_cf(lock) does not rewrite default SSTs.
+    #[test]
+    fn compact_range_cf_lock_leaves_default() {
+        let dir = tmp("cf-compact-lock");
+        let db = DB::open_cf(&Options::new(), &dir, &["lock"]).unwrap();
+        let lock = db.cf_handle("lock").unwrap();
+        db.put(b"d0", b"0").unwrap();
+        db.put_cf(&lock, b"l0", b"0").unwrap();
+        db.flush().unwrap();
+        db.put(b"d1", b"1").unwrap();
+        db.put_cf(&lock, b"l1", b"1").unwrap();
+        db.flush().unwrap();
+        let default_before: Vec<_> = db
+            .live_files()
+            .unwrap()
+            .into_iter()
+            .filter(|f| f.column_family_name == "default")
+            .map(|f| (f.name, f.size, f.level, f.num_entries))
+            .collect();
+        assert!(
+            default_before.len() >= 2,
+            "need ≥2 default SSTs, got {default_before:?}"
+        );
+        db.compact_range_cf(&lock, None::<&[u8]>, None::<&[u8]>);
+        let default_after: Vec<_> = db
+            .live_files()
+            .unwrap()
+            .into_iter()
+            .filter(|f| f.column_family_name == "default")
+            .map(|f| (f.name, f.size, f.level, f.num_entries))
+            .collect();
+        assert_eq!(default_before, default_after);
+        assert_eq!(db.get(b"d0").unwrap().as_deref(), Some(&b"0"[..]));
+        assert_eq!(db.get_cf(&lock, b"l0").unwrap().as_deref(), Some(&b"0"[..]));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn keycodec_encode_decode_roundtrip_uses_cf_kernel() {
+        for default_raw in [false, true] {
+            let codec = KeyCodec { default_raw };
+            for (cf, key) in [
+                (DEFAULT_CF, b"k".as_slice()),
+                ("lock", b"lk".as_slice()),
+                ("write", &[0u8, 1, 255][..]),
+            ] {
+                let enc = codec.encode(cf, key);
+                assert_eq!(codec.decode(cf, &enc), key);
+                assert!(
+                    key_in_cf_family(&enc, cf),
+                    "cf={cf} default_raw={default_raw}"
+                );
+                assert_eq!(enc, encode_cf_key(cf, key, default_raw));
+            }
+        }
+        assert!(
+            !key_in_cf_family(&encode_cf_key("lock", b"k", false), "default"),
+            "named CF must not leak into default"
+        );
+    }
+
     #[test]
     fn merge_operator_rmw() {
         let dir = tmp("merge");
@@ -5280,6 +5535,49 @@ mod tests {
             "open must fail-closed on CFREG crc, got {msg}"
         );
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0090 P2.1: production `store_cf_registry` writes `CFREG`; XOR
+    /// only the stored CRC u32 and rewrite as `c:` 8 hex (prefix intact).
+    /// Open is crc mismatch. AS-IS would load the registry. ASCII XOR of
+    /// a hex digit (`cfreg_crc_mismatch_fails_closed`) is not this tooth
+    /// unless it pins `crc_match_ok`.
+    #[test]
+    fn crc_mismatch_on_live_cfreg_is_not_ok() {
+        assert!(!pedradb_core::wal::crc::crc_match_ok(1, 2));
+        assert!(
+            pedradb_core::wal::crc::crc_match_ok_as_is(1, 2),
+            "AS-IS dente: any CFREG crc would match"
+        );
+        let dir = tmp("cfreg-0090");
+        let opts = g1_opts();
+        {
+            let db = DB::open_cf(&opts, &dir, &["write"]).unwrap();
+            db.put(b"k", b"v").unwrap();
+            drop(db);
+        }
+        let path = dir.join("CFREG");
+        let raw = std::fs::read(&path).unwrap();
+        let text = std::str::from_utf8(&raw).unwrap();
+        let trimmed = text.trim_end_matches('\n');
+        let (head, last) = trimmed.rsplit_once('\n').expect("CFREG crc line");
+        let hex = last.strip_prefix("c:").expect("c: trailer");
+        let crc = u32::from_str_radix(hex, 16).expect("CFREG crc hex");
+        std::fs::write(&path, format!("{head}\nc:{:08x}\n", crc ^ 0xffff_ffff)).unwrap();
+        match DB::open_cf(&opts, &dir, &["write"]) {
+            Ok(_) => {
+                let _ = std::fs::remove_dir_all(&dir);
+                panic!("AS-IS hole: opened CFREG after CRC-hex lie");
+            }
+            Err(e) => {
+                let _ = std::fs::remove_dir_all(&dir);
+                let msg = e.to_string();
+                assert!(
+                    msg.to_ascii_lowercase().contains("crc mismatch"),
+                    "must fail on crc_match_ok, not a pointer parse; got {msg}"
+                );
+            }
+        }
     }
 
     #[test]

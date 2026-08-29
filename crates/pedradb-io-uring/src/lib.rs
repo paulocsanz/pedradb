@@ -175,10 +175,29 @@ impl Default for IoUringEnv {
     }
 }
 
+/// RFC-0080 P1.2: full mode uses [`IoBackend::PosixFallback`] when the
+/// ring is unavailable. AS-IS would claim a live ring anyway.
+#[must_use]
+pub fn full_uses_posix_fallback(ring_available: bool) -> bool {
+    !ring_available
+}
+
+/// AS-IS: full mode is rounded to a live ring even when setup failed.
+#[must_use]
+pub fn full_uses_posix_fallback_as_is(_ring_available: bool) -> bool {
+    false
+}
+
 /// Production Env: Linux `io_uring` when the kernel allows it, else POSIX.
 #[must_use]
 pub fn production_env() -> IoUringEnv {
-    IoUringEnv::new().unwrap_or_else(|_| IoUringEnv::posix())
+    let candidate = IoUringEnv::new().unwrap_or_else(|_| IoUringEnv::posix());
+    let ring_available = candidate.backend() == IoBackend::IoUring;
+    if full_uses_posix_fallback(ring_available) {
+        IoUringEnv::posix()
+    } else {
+        candidate
+    }
 }
 
 /// Production concurrent DB (same Env as [`open`]).
@@ -299,6 +318,21 @@ impl Read for IoUringFile {
 
 impl Write for IoUringFile {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        // Production WAL/SST write is POSIX `pwrite` (RFC-0062 / 0080 P2.2).
+        // Linux *tests* use the ring so CQE inject (RFC-0074) hits
+        // [`UringState::pwrite`]. `wal_on_sqe_admitted` is always false.
+        #[cfg(all(test, target_os = "linux"))]
+        {
+            if self.env.backend() == IoBackend::IoUring {
+                return self.uring_write(buf);
+            }
+        }
+        if pedradb_core::wal_on_sqe_admitted() {
+            #[cfg(target_os = "linux")]
+            {
+                return self.uring_write(buf);
+            }
+        }
         self.posix_pwrite(buf)
     }
 
@@ -336,12 +370,18 @@ impl Seek for IoUringFile {
 
 impl EnvFile for IoUringFile {
     fn sync_data(&mut self) -> io::Result<()> {
-        // G1 / coluna B: `submit_and_wait` on every Ok was the Linux tax
-        // (P1.1 first measure ycsb_a min 0.12 vs Rocks sync=true). Tests
-        // still use the ring so CQE inject sees the fsync.
+        // G1 / coluna B: `submit_and_wait` on every Ok was the Linux tax.
+        // Tests still use the ring so CQE inject sees the fsync.
+        // RFC-0080 P2.2: production WAL sync is not SQE.
         #[cfg(all(test, target_os = "linux"))]
         {
             if self.env.backend() == IoBackend::IoUring {
+                return self.uring_fsync(true);
+            }
+        }
+        if pedradb_core::wal_on_sqe_admitted() {
+            #[cfg(target_os = "linux")]
+            {
                 return self.uring_fsync(true);
             }
         }
@@ -490,6 +530,24 @@ mod tests {
         }
     }
 
+    /// RFC-0080 P1.2: where the ring cannot open, full mode is PosixFallback.
+    /// AS-IS would claim a live ring.
+    #[test]
+    fn full_mode_posix_fallback_when_ring_unavailable() {
+        assert!(full_uses_posix_fallback(false));
+        assert!(!full_uses_posix_fallback(true));
+        assert!(
+            !full_uses_posix_fallback_as_is(false),
+            "AS-IS dente: claim live ring when unavailable"
+        );
+        let env = production_env();
+        let ring = env.backend() == IoBackend::IoUring;
+        assert_eq!(
+            env.backend() == IoBackend::PosixFallback,
+            full_uses_posix_fallback(ring)
+        );
+    }
+
     #[test]
     fn env_opens_and_reports_backend() {
         let env = IoUringEnv::new().unwrap();
@@ -546,6 +604,24 @@ mod tests {
         }
         let db = open(&dir).unwrap();
         assert_eq!(db.get(b"a").as_deref(), Some(b"1".as_ref()));
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0080 P2.2: production write/sync is POSIX, not SQE.
+    #[test]
+    fn production_wal_is_not_on_sqe() {
+        assert!(!pedradb_core::wal_on_sqe_admitted());
+        assert!(
+            pedradb_core::wal_on_sqe_admitted_as_is(),
+            "AS-IS dente: WAL back on SQE"
+        );
+        assert!(!pedradb_core::ring_twin_admitted());
+        let dir = temp_dir();
+        let env = IoUringEnv::posix();
+        let mut db = env.open_db(&dir).unwrap();
+        db.put(b"wal-sqe", b"off").unwrap();
+        assert_eq!(db.get(b"wal-sqe").as_deref(), Some(&b"off"[..]));
         db.close().unwrap();
         let _ = fs::remove_dir_all(&dir);
     }
@@ -780,10 +856,19 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
     }
 
-    /// RFC-0050 P0.2: a negative CQE after `io_uring_enter` is Err, never Ok.
+    /// RFC-0074 P0: negative CQE `res` is not Ok. On Linux this injects
+    /// `-EIO` / `-ENOSPC` into the **live ring** harvest (`sync_data` /
+    /// `write_all` under `cfg(test)`), so dropping [`cqe_res_ok`] from
+    /// `UringState::{pwrite,fsync}` fails. Production G1 is POSIX
+    /// `fdatasync` (RFC-0062 / 0073) — this is the only live SQE path.
     #[cfg(target_os = "linux")]
     #[test]
     fn linux_cqe_eio_is_not_ok() {
+        assert!(
+            !crate::cqe_kernel::cqe_res_ok(-libc::EIO),
+            "kernel: -EIO is not Ok"
+        );
+        assert!(crate::cqe_kernel::cqe_res_ok_as_is(-libc::EIO));
         let env = IoUringEnv::new().unwrap();
         assert_eq!(env.backend(), IoBackend::IoUring);
         let dir = temp_dir();

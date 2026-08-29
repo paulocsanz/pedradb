@@ -28,6 +28,42 @@ pub enum FileAdvise {
     DontNeed,
 }
 
+/// Admit a libc `fdatasync` return (RFC-0073). Nonzero is not Ok.
+#[must_use]
+pub fn fdatasync_rc_ok(rc: i32) -> bool {
+    rc == 0
+}
+
+/// AS-IS: ignore rc (the 0073 hole — skip the barrier on EIO/EINTR).
+#[must_use]
+pub fn fdatasync_rc_ok_as_is(_rc: i32) -> bool {
+    true
+}
+
+/// RFC-0073 P2.2 / RFC-0015 H1: retry `fdatasync` on EINTR until rc==0
+/// and return Ok. Always false. One syscall; EINTR/`rc != 0` is Err
+/// (uncertain: the record may already be on disk).
+#[must_use]
+pub fn fdatasync_eintr_retry_admitted() -> bool {
+    false
+}
+
+/// AS-IS: swallow EINTR / loop until Ok (the H1 hole).
+#[must_use]
+pub fn fdatasync_eintr_retry_admitted_as_is() -> bool {
+    true
+}
+
+fn posix_rc_to_io(rc: i32) -> io::Result<()> {
+    if fdatasync_rc_ok(rc) {
+        Ok(())
+    } else if fdatasync_eintr_retry_admitted() {
+        Ok(())
+    } else {
+        Err(io::Error::last_os_error())
+    }
+}
+
 /// `fdatasync(2)` on `file`'s data (not Apple `F_FULLFSYNC`).
 ///
 /// # Errors
@@ -48,11 +84,7 @@ pub fn fdatasync_file(file: &File) -> io::Result<()> {
         // - The linked symbol matches the extern signature above.
         // - Non-zero `rc` leaves errno on this thread for `last_os_error`.
         let rc = unsafe { fdatasync(file.as_raw_fd()) };
-        if rc == 0 {
-            Ok(())
-        } else {
-            Err(io::Error::last_os_error())
-        }
+        posix_rc_to_io(rc)
     }
     #[cfg(not(unix))]
     {
@@ -163,7 +195,23 @@ pub fn preallocate_file(file: &File, len: u64) -> io::Result<()> {
 /// # Errors
 /// Underlying I/O.
 pub fn fsync_file(file: &File) -> io::Result<()> {
-    file.sync_all()
+    // RFC-0073 P1.1: Linux/other unix FFI `fsync` shares `fdatasync_rc_ok`.
+    // Darwin stays `File::sync_all` (`F_FULLFSYNC`) — not this G1 class.
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        use std::os::fd::AsRawFd;
+        // SAFETY: signature is POSIX `int fsync(int fd)`.
+        extern "C" {
+            fn fsync(fd: i32) -> i32;
+        }
+        // SAFETY: `file` is an open `std::fs::File`; `as_raw_fd()` is not stored.
+        let rc = unsafe { fsync(file.as_raw_fd()) };
+        posix_rc_to_io(rc)
+    }
+    #[cfg(not(all(unix, not(target_os = "macos"))))]
+    {
+        file.sync_all()
+    }
 }
 
 /// Directory-entry barrier at the **same class as WAL G1** (`fdatasync`, not
@@ -250,6 +298,53 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// RFC-0073 P1.2: the rc gate is a safe predicate (Miri, no syscall).
+    #[test]
+    fn fdatasync_rc_ok_is_safe_predicate() {
+        assert!(fdatasync_rc_ok(0));
+        assert!(!fdatasync_rc_ok(-1));
+        assert!(!fdatasync_rc_ok(1));
+        assert!(fdatasync_rc_ok_as_is(-1), "AS-IS dente: ignore rc");
+        assert!(
+            !fdatasync_eintr_retry_admitted(),
+            "EINTR must not retry as Ok (RFC-0015 H1)"
+        );
+        assert!(
+            fdatasync_eintr_retry_admitted_as_is(),
+            "AS-IS dente: swallow EINTR"
+        );
+    }
+
+    /// RFC-0073 P2.2 / RFC-0015 H1: EINTR is not retried as Ok.
+    #[test]
+    fn fdatasync_eintr_is_not_retried_as_ok() {
+        assert!(!fdatasync_eintr_retry_admitted());
+        assert!(fdatasync_eintr_retry_admitted_as_is());
+        assert!(!fdatasync_rc_ok(-1), "EINTR is typically rc=-1");
+        let dir = temp_dir();
+        let path = dir.join("h1.bin");
+        let mut f = File::create(&path).unwrap();
+        f.write_all(b"wal").unwrap();
+        fdatasync_file(&f).expect("production path is one syscall, then rc gate");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0073 P0: production `fdatasync_file` on a real file; nonzero rc
+    /// is not Ok. AS-IS would ignore the barrier error.
+    #[test]
+    fn fdatasync_nonzero_rc_is_not_ok() {
+        assert!(fdatasync_rc_ok(0));
+        assert!(!fdatasync_rc_ok(-1));
+        assert!(!fdatasync_rc_ok(1));
+        assert!(fdatasync_rc_ok_as_is(-1), "AS-IS dente: ignore rc");
+        let dir = temp_dir();
+        let path = dir.join("g1.bin");
+        let mut f = File::create(&path).unwrap();
+        f.write_all(b"wal").unwrap();
+        fdatasync_file(&f).expect("production fdatasync_file must succeed");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn fsync_file_ok() {
         let dir = temp_dir();
@@ -280,6 +375,22 @@ mod tests {
         let dir = temp_dir();
         let d = File::open(&dir).unwrap();
         sync_dir_fd(&d).unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0073 P1.1: `fsync_file` / `sync_dir_fd` share `fdatasync_rc_ok`
+    /// where they FFI. Live files succeed; nonzero rc is not Ok.
+    #[test]
+    fn fsync_and_dirfd_share_rc_gate() {
+        assert!(!fdatasync_rc_ok(-1));
+        assert!(fdatasync_rc_ok_as_is(-1), "AS-IS dente: ignore rc");
+        let dir = temp_dir();
+        let path = dir.join("g1.bin");
+        let mut f = File::create(&path).unwrap();
+        f.write_all(b"sst").unwrap();
+        fsync_file(&f).expect("production fsync_file must succeed");
+        let d = File::open(&dir).unwrap();
+        sync_dir_fd(&d).expect("production sync_dir_fd must succeed");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

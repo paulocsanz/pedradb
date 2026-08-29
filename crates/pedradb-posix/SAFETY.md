@@ -13,8 +13,18 @@ This crate is the **only** `unsafe` on Pedra's default I/O path
   **not** `unsafe extern` (stabilized 1.82). The SAFETY comment on the
   block is the signature assertion.
 - Call: `file` is a live `std::fs::File`; `as_raw_fd()` is not stored.
-- `rc == 0` success; else `Error::last_os_error()` (errno on this thread).
+- `rc == 0` success via `fdatasync_rc_ok` (RFC-0073); else `Error::last_os_error()` (errno on this thread).
 - Non-Unix: `File::sync_data()` (Windows `FlushFileBuffers`); no FFI.
+
+### `fsync` (`fsync_file`, Unix except Darwin)
+
+- `extern "C" { fn fsync(fd: i32) -> i32; }` — POSIX `int fsync(int)`.
+- Same `fdatasync_rc_ok` gate as `fdatasync_file` (RFC-0073 P1.1).
+- Darwin: `File::sync_all()` (`F_FULLFSYNC`); no FFI here.
+
+### `sync_dir_fd`
+
+- Calls `fdatasync_file` (same FFI + `fdatasync_rc_ok`). Not Darwin `F_FULLFSYNC`.
 
 **Not `F_FULLFSYNC`.** On Darwin this is weaker than Rust std
 `File::sync_data`. Same barrier class as the rust-rocksdb peer on this
@@ -25,6 +35,8 @@ stays fast). `File::sync_all` on a Darwin **dirfd** is noisy — not used.
 
 `EINTR` / failed `fdatasync` after the kernel may have completed the
 barrier is the RFC-0015 H1 uncertain outcome — not unique to unsafe.
+RFC-0073 P2.2: `fdatasync_eintr_retry_admitted` is always false (no
+retry-as-Ok loop). `rc != 0` (including EINTR / `-1`) is `Err`.
 
 ### `posix_fadvise` (`advise_file`, Linux only)
 

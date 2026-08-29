@@ -285,4 +285,167 @@ proof fn serialized_mutant_diverges_on_intra_group_write()
 {
 }
 
+/// RFC-0071 P2.1: visibility publish only when WAL I/O succeeded.
+pub open spec fn may_publish_group_spec(wal_io_ok: bool) -> bool {
+    wal_io_ok
+}
+
+pub open spec fn may_publish_group_as_is_spec(_wal_io_ok: bool) -> bool {
+    true
+}
+
+pub fn may_publish_group(wal_io_ok: bool) -> (ok: bool)
+    ensures
+        ok == may_publish_group_spec(wal_io_ok),
+{
+    wal_io_ok
+}
+
+pub fn may_publish_group_as_is(_wal_io_ok: bool) -> (ok: bool)
+    ensures
+        ok == may_publish_group_as_is_spec(_wal_io_ok),
+{
+    true
+}
+
+proof fn lemma_failed_wal_does_not_publish()
+    ensures
+        !may_publish_group_spec(false),
+        may_publish_group_as_is_spec(false),
+{
+}
+
+/// RFC-0070 P2.1: finite PCT depth never admits ∀ OS schedules.
+pub open spec fn forall_schedules_admitted_spec(_pct_depth: u64) -> bool {
+    false
+}
+
+pub open spec fn forall_schedules_admitted_as_is_spec(pct_depth: u64) -> bool {
+    pct_depth >= 2
+}
+
+pub fn forall_schedules_admitted(_pct_depth: u64) -> (ok: bool)
+    ensures
+        ok == forall_schedules_admitted_spec(_pct_depth),
+{
+    false
+}
+
+pub fn forall_schedules_admitted_as_is(pct_depth: u64) -> (ok: bool)
+    ensures
+        ok == forall_schedules_admitted_as_is_spec(pct_depth),
+{
+    pct_depth >= 2
+}
+
+proof fn lemma_d2_is_not_forall()
+    ensures
+        !forall_schedules_admitted_spec(2),
+        forall_schedules_admitted_as_is_spec(2),
+{
+}
+
+/// RFC-0070 P2.2: campaign default PCT depth stays 2. d>2 remains RFC-0051.
+pub open spec fn pct_campaign_default_depth_spec() -> u64 {
+    2
+}
+
+pub fn pct_campaign_default_depth() -> (d: u64)
+    ensures
+        d == pct_campaign_default_depth_spec(),
+{
+    2
+}
+
+/// Admit a “0070 raised the default PCT depth” claim. Always false.
+pub open spec fn default_pct_depth_raised_spec() -> bool {
+    false
+}
+
+pub open spec fn default_pct_depth_raised_as_is_spec() -> bool {
+    true
+}
+
+pub fn default_pct_depth_raised() -> (ok: bool)
+    ensures
+        ok == default_pct_depth_raised_spec(),
+{
+    false
+}
+
+pub fn default_pct_depth_raised_as_is() -> (ok: bool)
+    ensures
+        ok == default_pct_depth_raised_as_is_spec(),
+{
+    true
+}
+
+proof fn lemma_default_depth_not_raised()
+    ensures
+        pct_campaign_default_depth_spec() == 2,
+        !default_pct_depth_raised_spec(),
+        default_pct_depth_raised_as_is_spec(),
+{
+}
+
+/// RFC-0078 P2.1: promote pending bytes only when the Env is honest.
+pub open spec fn fsync_promotes_pending_spec(os_honest: bool) -> bool {
+    os_honest
+}
+
+pub open spec fn fsync_promotes_pending_as_is_spec(_os_honest: bool) -> bool {
+    true
+}
+
+pub fn fsync_promotes_pending(os_honest: bool) -> (ok: bool)
+    ensures
+        ok == fsync_promotes_pending_spec(os_honest),
+{
+    os_honest
+}
+
+pub fn fsync_promotes_pending_as_is(_os_honest: bool) -> (ok: bool)
+    ensures
+        ok == fsync_promotes_pending_as_is_spec(_os_honest),
+{
+    true
+}
+
+proof fn lemma_lying_fsync_does_not_promote()
+    ensures
+        !fsync_promotes_pending_spec(false),
+        fsync_promotes_pending_as_is_spec(false),
+{
+}
+
+/// RFC-0078 P2.1: fsync Ok is not a media theorem.
+pub open spec fn media_durable_admitted_spec(_fsync_ok: bool) -> bool {
+    false
+}
+
+pub open spec fn media_durable_admitted_as_is_spec(fsync_ok: bool) -> bool {
+    fsync_ok
+}
+
+pub fn media_durable_admitted(_fsync_ok: bool) -> (ok: bool)
+    ensures
+        ok == media_durable_admitted_spec(_fsync_ok),
+{
+    false
+}
+
+pub fn media_durable_admitted_as_is(fsync_ok: bool) -> (ok: bool)
+    ensures
+        ok == media_durable_admitted_as_is_spec(fsync_ok),
+{
+    fsync_ok
+}
+
+proof fn lemma_fsync_ok_is_not_media_proof()
+    ensures
+        !media_durable_admitted_spec(true),
+        media_durable_admitted_as_is_spec(true),
+{
+}
+
 } // verus!

@@ -19,6 +19,9 @@
 //! - tag 15 DcsGet: key — returns RespValue (user bytes) or empty
 //! - tag 16 RespRev: u64 mod_revision
 //! - tag 17 PutBatch: u32 n + repeated (key, value) — range-grouped put_many (RFC-0025 P1.3)
+//! - tag 18 LeaveJoint (admin: production `leave_joint`, RFC-0117)
+//! - tag 19 RemoveMemberJoint: u64 node_id (admin: production `remove_member_joint`, RFC-0120)
+//! - tag 20 AddMemberJoint: u64 node_id (admin: production `add_member_joint`, RFC-0119/0120)
 
 use crate::msg::PeerMsg;
 use crate::{validate_tx_pairs, Result, StoreError};
@@ -119,6 +122,18 @@ pub enum WireMsg {
     PutBatch {
         /// Key/value pairs (may span ranges).
         pairs: Vec<(Vec<u8>, Vec<u8>)>,
+    },
+    /// Append C-new-only leave-joint (RFC-0117 / Raft §6).
+    LeaveJoint,
+    /// Log-carried joint remove (RFC-0120 / Raft §6).
+    RemoveMemberJoint {
+        /// Node id to drop from C-new.
+        node_id: u64,
+    },
+    /// Log-carried joint add (RFC-0119 P1.2 / RFC-0120 P2.1).
+    AddMemberJoint {
+        /// Joining node id (need not be in local `nodes`).
+        node_id: u64,
     },
 }
 
@@ -252,6 +267,15 @@ impl WireMsg {
                     put_bytes(&mut b, v);
                 }
             }
+            WireMsg::LeaveJoint => b.push(18),
+            WireMsg::RemoveMemberJoint { node_id } => {
+                b.push(19);
+                put_u64(&mut b, *node_id);
+            }
+            WireMsg::AddMemberJoint { node_id } => {
+                b.push(20);
+                put_u64(&mut b, *node_id);
+            }
         }
         b
     }
@@ -370,6 +394,13 @@ impl WireMsg {
                 }
                 Ok(WireMsg::PutBatch { pairs })
             }
+            18 => Ok(WireMsg::LeaveJoint),
+            19 => Ok(WireMsg::RemoveMemberJoint {
+                node_id: take_u64(buf, &mut off)?,
+            }),
+            20 => Ok(WireMsg::AddMemberJoint {
+                node_id: take_u64(buf, &mut off)?,
+            }),
             t => Err(StoreError::Msg(format!("tcp bad tag {t}"))),
         }
     }
@@ -504,6 +535,48 @@ pub fn client_tick(addr: impl AsRef<str>, n: u32) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// Client helper: production `leave_joint` (RFC-0117).
+///
+/// # Errors
+/// Network / server error / NotCommitted.
+pub fn client_leave_joint(addr: impl AsRef<str>) -> Result<()> {
+    let mut s = client_session(addr.as_ref(), Duration::from_secs(10))?;
+    write_frame(&mut s, &WireMsg::LeaveJoint)?;
+    match read_frame(&mut s)? {
+        WireMsg::RespOk => Ok(()),
+        WireMsg::RespErr { message } => Err(StoreError::Msg(message)),
+        other => Err(StoreError::Msg(format!("leave_joint resp {other:?}"))),
+    }
+}
+
+/// Client helper: production `remove_member_joint` (RFC-0120).
+///
+/// # Errors
+/// Network / server error / NotCommitted / unknown node.
+pub fn client_remove_member_joint(addr: impl AsRef<str>, node_id: u64) -> Result<()> {
+    let mut s = client_session(addr.as_ref(), Duration::from_secs(10))?;
+    write_frame(&mut s, &WireMsg::RemoveMemberJoint { node_id })?;
+    match read_frame(&mut s)? {
+        WireMsg::RespOk => Ok(()),
+        WireMsg::RespErr { message } => Err(StoreError::Msg(message)),
+        other => Err(StoreError::Msg(format!("remove_member_joint resp {other:?}"))),
+    }
+}
+
+/// Client helper: production `add_member_joint` (RFC-0119 P1.2 / RFC-0120 P2.1).
+///
+/// # Errors
+/// Network / server error / NotLeader / NotCommitted.
+pub fn client_add_member_joint(addr: impl AsRef<str>, node_id: u64) -> Result<()> {
+    let mut s = client_session(addr.as_ref(), Duration::from_secs(10))?;
+    write_frame(&mut s, &WireMsg::AddMemberJoint { node_id })?;
+    match read_frame(&mut s)? {
+        WireMsg::RespOk => Ok(()),
+        WireMsg::RespErr { message } => Err(StoreError::Msg(message)),
+        other => Err(StoreError::Msg(format!("add_member_joint resp {other:?}"))),
+    }
 }
 
 /// Client helper: status string.
@@ -704,6 +777,50 @@ mod tests {
         assert_eq!(WireMsg::decode(&m.encode()).unwrap(), m);
     }
 
+    /// RFC-0117 P0: LeaveJoint is tag 18; AS-IS unknown tag is decode Err.
+    #[test]
+    fn wire_leave_joint_round_trip() {
+        let m = WireMsg::LeaveJoint;
+        assert_eq!(m.encode(), vec![18]);
+        assert_eq!(WireMsg::decode(&m.encode()).unwrap(), m);
+        let err = WireMsg::decode(&[0]).unwrap_err().to_string();
+        assert!(
+            err.contains("tcp bad tag"),
+            "unknown tag must fail-closed, got {err}"
+        );
+    }
+
+    /// RFC-0119 P1.2 / RFC-0120 P2.1: AddMemberJoint is tag 20 + u64 LE.
+    /// Cluster plant is 0066 P2.2.
+    #[test]
+    fn wire_add_member_joint_round_trip() {
+        let m = WireMsg::AddMemberJoint { node_id: 4 };
+        let enc = m.encode();
+        assert_eq!(enc[0], 20, "add tag");
+        assert_eq!(&enc[1..], 4u64.to_le_bytes());
+        assert_eq!(WireMsg::decode(&enc).unwrap(), m);
+        let err = WireMsg::decode(&[21]).unwrap_err().to_string();
+        assert!(
+            err.contains("tcp bad tag"),
+            "unknown tag must fail-closed, got {err}"
+        );
+    }
+
+    /// RFC-0120 P0: RemoveMemberJoint is tag 19 + u64 LE; AS-IS unknown tag is decode Err.
+    #[test]
+    fn wire_remove_member_joint_round_trip() {
+        let m = WireMsg::RemoveMemberJoint { node_id: 3 };
+        let enc = m.encode();
+        assert_eq!(enc[0], 19);
+        assert_eq!(&enc[1..], 3u64.to_le_bytes());
+        assert_eq!(WireMsg::decode(&enc).unwrap(), m);
+        let err = WireMsg::decode(&[0]).unwrap_err().to_string();
+        assert!(
+            err.contains("tcp bad tag"),
+            "unknown tag must fail-closed, got {err}"
+        );
+    }
+
     #[test]
     fn wire_dcs_create_cas_get_rev() {
         let c = WireMsg::DcsCreate {
@@ -741,6 +858,41 @@ mod tests {
                 assert_eq!(from, 3);
                 assert_eq!(to, 1);
                 assert_eq!(PeerMsg::decode(&body).unwrap(), pm);
+            }
+            _ => panic!("not peer"),
+        }
+    }
+
+    /// RFC-0064: TCP `peer_wire` is the same `PeerMsg` encode as World Queued
+    /// — MembershipJoint in AE must survive the frame (lab=produto for reconfig).
+    #[test]
+    fn wire_peer_membership_joint_append_entries() {
+        use crate::{LogRec, RangeEntry};
+        let entry = RangeEntry::MembershipJoint {
+            old: vec![1, 2, 3],
+            new: vec![1, 2, 3, 4],
+        };
+        let pm = PeerMsg::AppendEntries {
+            range_id: 1,
+            term: 4,
+            leader_id: 1,
+            prev_log_index: 7,
+            prev_log_term: 3,
+            leader_commit: 6,
+            entries: vec![LogRec {
+                index: 8,
+                term: 4,
+                entry,
+            }],
+        };
+        let w = peer_wire(1, 4, &pm);
+        let d = WireMsg::decode(&w.encode()).unwrap();
+        match d {
+            WireMsg::Peer { from, to, body } => {
+                assert_eq!(from, 1);
+                assert_eq!(to, 4);
+                let got = PeerMsg::decode(&body).expect("PeerMsg");
+                assert_eq!(got, pm);
             }
             _ => panic!("not peer"),
         }

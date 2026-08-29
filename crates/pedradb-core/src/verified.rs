@@ -124,6 +124,7 @@ pub fn profile_report() -> &'static [ProfileComponent] {
         on!("group_fence", "group_fence", "one publish watermark per group = max appended member sequence, after WAL durability (RFC-0057 P2.1)"),
         // --- background decisions ---
         on!("flush_decision", "flush_decision", "when to flush (F2/F43/G1)"),
+        on!("flush_publish", "flush_publish", "MANIFEST after durable SST (RFC-0151 P1)"),
         on!("compact_decision", "compact_decision", "when to compact (F177/F20)"),
         on!("compact_retention", "compact_retention", "what compaction retains (F177/F20)"),
         on!("compact", "compact", "merge iterator correctness (F27/F28)"),
@@ -159,14 +160,144 @@ pub fn profile_report() -> &'static [ProfileComponent] {
         on!("origin_path", "origin_path", "origin path resolution (F91/F92)"),
         on!("children", "children", "node children validation (F59)"),
         on!("fields", "fields", "field validation (F60)"),
+        // --- membership / L28 / residuals (catalog pairs; claim On) ---
+        on!("joint_election", "joint_election", "joint election old∧new (RFC-0064)"),
+        on!("joint_leave", "joint_leave", "joint still active until leave (RFC-0066)"),
+        on!("pending_joint_node", "pending_joint_node", "pending joint node counts"),
+        on!("joint_leave_ok", "joint_leave_ok", "joint leave Ok"),
+        on!("election_grant_from", "election_grant_from", "election grant-from member"),
+        on!("joint_target", "joint_target", "joint vote target"),
+        on!("joint_add_target", "joint_add_target", "joint add target"),
+        on!("queued_leave_finish", "queued_leave_finish", "queued leave finish"),
+        on!("disk_membership", "disk_membership", "disk membership overrides CLI"),
+        on!("high_water", "high_water", "high-water survives open"),
+        on!("participating_member", "participating_member", "is_participating requires ids"),
+        on!("identity_before_applied", "identity_before_applied", "identity before applied"),
+        on!("recover_apply", "recover_apply", "recover apply committed"),
+        on!("recover_apply_node", "recover_apply_node", "recover apply on removed replica"),
+        on!("recover_truncate", "recover_truncate", "recover truncate uncommitted"),
+        on!("recover_drop_orphan", "recover_drop_orphan", "recover drop orphan seg"),
+        on!("recover_abort", "recover_abort", "recover abort leftover 2PC"),
+        on!("persist_meta", "persist_meta", "persist meta local non-member"),
+        on!("persist_hist", "persist_hist", "persist SI hist local non-member"),
+        on!("persist_fence", "persist_fence", "persist fence local non-member"),
+        on!("force_clear", "force_clear", "force-clear local non-member"),
+        on!("drop_preimages", "drop_preimages", "drop preimages local non-member"),
+        on!("open_peer_disk", "open_peer_disk", "open peer uses disk ids"),
+        on!("local_id_member", "local_id_member", "local id if member"),
+        on!("reader_local", "reader_local", "reader id local"),
+        on!("discard_uncommitted", "discard_uncommitted", "discard uncommitted local non-member"),
+        on!("discard_leader", "discard_leader", "discard persist-leader local"),
+        on!("removed_step_down", "removed_step_down", "removed replica steps down"),
+        on!("hint_member", "hint_member", "leader hint omits removed"),
+        on!("drop_repl_slot", "drop_repl_slot", "drop repl slot of removed"),
+        on!("drop_sent_through", "drop_sent_through", "drop sent_through of removed"),
+        on!("compact_unleft", "compact_unleft", "compact through unleft joint"),
+        on!("rpc_mode", "rpc_mode", "Queued RPC pin fail-closed"),
+        on!("group_publish", "group_publish", "group publish after WAL durable"),
+        on!("forall_schedules", "forall_schedules", "PCT depth is not ∀ schedules"),
+        on!("l28_durability", "l28_durability", "L28 real TCP durability"),
+        on!("l28_tcp_left", "l28_tcp_left", "L28 TCP leave on disk"),
+        on!("l28_tcp_hw", "l28_tcp_hw", "L28 TCP high-water"),
+        on!("l28_tcp_part", "l28_tcp_part", "L28 TCP participating"),
+        on!("l28_tcp_apply", "l28_tcp_apply", "L28 TCP recover apply"),
+        on!("l28_tcp_napply", "l28_tcp_napply", "L28 TCP recover apply node"),
+        on!("l28_tcp_trunc", "l28_tcp_trunc", "L28 TCP recover truncate"),
+        on!("l28_tcp_odrop", "l28_tcp_odrop", "L28 TCP orphan drop"),
+        on!("l28_tcp_abort", "l28_tcp_abort", "L28 TCP recover abort"),
+        on!("l28_tcp_nowms", "l28_tcp_nowms", "L28 TCP persist now_ms"),
+        on!("l28_tcp_hist", "l28_tcp_hist", "L28 TCP persist hist"),
+        on!("l28_tcp_fence", "l28_tcp_fence", "L28 TCP persist fence"),
+        on!("l28_tcp_clear", "l28_tcp_clear", "L28 TCP force clear"),
+        on!("l28_tcp_pre", "l28_tcp_pre", "L28 TCP drop preimages"),
+        on!("l28_tcp_peer", "l28_tcp_peer", "L28 TCP open peer disk"),
+        on!("l28_tcp_lid", "l28_tcp_lid", "L28 TCP local id"),
+        on!("l28_tcp_rdr", "l28_tcp_rdr", "L28 TCP reader local"),
+        on!("l28_tcp_dsc", "l28_tcp_dsc", "L28 TCP discard"),
+        on!("l28_tcp_pld", "l28_tcp_pld", "L28 TCP persist-leader"),
+        on!("l28_tcp_std", "l28_tcp_std", "L28 TCP removed step-down"),
+        on!("l28_tcp_hnt", "l28_tcp_hnt", "L28 TCP leader hint"),
+        on!("liveness_claim", "liveness_claim", "liveness ES axioms fail-closed"),
+        on!("fsync_promote", "fsync_promote", "fsync promotes pending"),
+        on!("media_durable", "media_durable", "fsync Ok is not media proof"),
+        on!("tcg_guest", "tcg_guest", "TCG guest claim fail-closed"),
+        on!("fdatasync_rc", "fdatasync_rc", "fdatasync nonzero rc is not Ok"),
+        on!("cqe_res", "cqe_res", "negative CQE res is not Ok"),
+        on!("c_len", "c_len", "C API oversize len is LIMIT"),
+        on!("crc_match", "crc_match", "CRC mismatch is not Ok"),
+        on!("sst_crc", "sst_crc", "SST CRC fate fail-closed"),
+        // --- RFC-0150 dictionary / compat kernels ---
+        on!("cf_family", "cf_family", "CF family membership / encode (scan leak fail-closed)"),
+        on!("visible_at", "visible_at", "snapshot merge visibility + F30 range tombstone"),
+        on!("ikey_pack", "ikey_pack", "InternalKey packed trailer + seq-desc Ord"),
+        on!("write_record_count", "write_record_count", "WriteRecord count is atomic (no silent prefix)"),
+        on!("pin_gc", "pin_gc", "SnapshotPin is oldest_snapshot for point_version_fate"),
+        on!("wait_for_deadlock", "wait_for_deadlock", "TransactionDB 2PL wait-for cycle is Deadlock"),
+        on!("iter_window", "iter_window", "compat iterator window vs visible_at (RFC-0151 P1)"),
         // --- contracts without a theorem (published, DST-exercised) ---
         contract!("wal_barrier", "WAL write + fdatasync before Ok (RFC-0001 O1 / RFC-0036) — enforced in code, exercised by the crash/EIO battery"),
         contract!("disk_env", "StdEnv pinned by the verified constructors (Env seam; FailingEnv drives the DST battery)"),
         // --- deliberately off ---
         off!("catchup_window", "pinned to 0 by the verified pin — the merge happens by natural queuing, never by a delay window"),
         off!("async_group_merge", "verified async writes take the write lock themselves (no leader dependency — the pin forces the bypass even under PEDRA_ASYNC_GROUP=1)"),
-        off!("io_uring_ring", "no proven ring model (cqe_kernel twin blocked); verified constructors pin StdEnv — the full mode keeps PosixFallback (RFC-0058 P2.2)"),
+        off!("io_uring_ring", "no proven ring model (cqe_kernel twin blocked); verified constructors pin StdEnv — the full mode keeps PosixFallback (RFC-0058 P2.2 / RFC-0080)"),
     ]
+}
+
+/// Admit a proven io_uring ring model (RFC-0080 / R-uring).
+///
+/// Always false: there is no probable ring model. Verified constructors
+/// pin `StdEnv` / POSIX fallback. AS-IS treats the ring as proven.
+#[must_use]
+pub fn ring_model_admitted() -> bool {
+    false
+}
+
+/// AS-IS: a green verified open is rounded to a proven ring (the 0080 hole).
+#[must_use]
+pub fn ring_model_admitted_as_is() -> bool {
+    true
+}
+
+/// Admit a live ring backend inside the verified profile.
+///
+/// Requires both a request for the ring **and** a proven model. Today
+/// that is never. AS-IS admits whenever the caller wants the ring.
+#[must_use]
+pub fn verified_admits_ring(want_ring: bool) -> bool {
+    want_ring && ring_model_admitted()
+}
+
+/// AS-IS: verified + live ring is fine (WAL back on SQE — the 0080 hole).
+#[must_use]
+pub fn verified_admits_ring_as_is(want_ring: bool) -> bool {
+    want_ring
+}
+
+/// RFC-0080 P2.1: a Verus twin of the io_uring ring is not admitted.
+/// Always false. RFC-0074 twins `cqe_res_ok` only; no ring model twin.
+#[must_use]
+pub fn ring_twin_admitted() -> bool {
+    false
+}
+
+/// AS-IS: the ring looks twin-proven (the 0080 P2.1 hole).
+#[must_use]
+pub fn ring_twin_admitted_as_is() -> bool {
+    true
+}
+
+/// RFC-0080 P2.2: production WAL/SST write+sync on SQE submit.
+/// Always false. G1 stays POSIX `pwrite` / `fdatasync`.
+#[must_use]
+pub fn wal_on_sqe_admitted() -> bool {
+    false
+}
+
+/// AS-IS: WAL is rounded back onto the ring (the 0062 / 0080 hole).
+#[must_use]
+pub fn wal_on_sqe_admitted_as_is() -> bool {
+    true
 }
 
 /// The declared composition (RFC-0058 P0.1 + P2.1).
@@ -308,6 +439,44 @@ mod tests {
                 .unwrap_or_else(|| panic!("missing report row {name}"));
             assert_eq!(c.state, ProfileState::Off, "{name}: {c:?}");
         }
+        let ring = profile_report()
+            .iter()
+            .find(|c| c.component == "io_uring_ring")
+            .unwrap();
+        assert_eq!(
+            ring.state == ProfileState::On,
+            ring_model_admitted(),
+            "io_uring_ring On/Off must track ring_model_admitted"
+        );
+    }
+
+    #[test]
+    fn ring_model_is_not_admitted() {
+        assert!(!ring_model_admitted());
+        assert!(
+            ring_model_admitted_as_is(),
+            "AS-IS dente: ring looks proven"
+        );
+        assert!(!verified_admits_ring(true));
+        assert!(!verified_admits_ring(false));
+        assert!(
+            verified_admits_ring_as_is(true),
+            "AS-IS dente: verified would take a live ring"
+        );
+        assert!(!verified_admits_ring_as_is(false));
+        assert!(!ring_twin_admitted());
+        assert!(
+            ring_twin_admitted_as_is(),
+            "AS-IS dente: ring twin looks proven"
+        );
+        assert!(!wal_on_sqe_admitted());
+        assert!(wal_on_sqe_admitted_as_is(), "AS-IS dente: WAL back on SQE");
+        let twin = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("verus/ring_model.rs");
+        assert!(
+            !twin.exists(),
+            "RFC-0080 P2.1: ring Verus twin must stay absent ({})",
+            twin.display()
+        );
     }
 
     /// P0.1: the options half of the composition is fixed and fail-closed.

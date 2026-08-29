@@ -91,7 +91,7 @@ fn canary_lease_multi_node_exclusive() {
     let dir = temp();
     let key = b"lease/svc-a";
     {
-        let mut c = StoreCluster::open_with_rng(&dir, 3, 1, SeedRng::new(0x17CA_5E01)).unwrap();
+        let mut c = StoreCluster::open_with_rng_lab_direct(&dir, 3, 1, SeedRng::new(0x17CA_5E01)).unwrap();
         c.elect_all(100).unwrap();
         let rev = c.dcs_create(key, b"holder-1").unwrap();
         assert!(rev >= 1);
@@ -111,7 +111,7 @@ fn canary_lease_multi_node_exclusive() {
     }
     // Reopen (process kill): only durable winner.
     {
-        let mut c = StoreCluster::open_with_rng(&dir, 3, 1, SeedRng::new(0x17CA_5E02)).unwrap();
+        let mut c = StoreCluster::open_with_rng_lab_direct(&dir, 3, 1, SeedRng::new(0x17CA_5E02)).unwrap();
         c.elect_all(80).unwrap();
         let kv = c.dcs_get_on(1, key).unwrap().expect("lease after reopen");
         assert_eq!(kv.value.as_slice(), b"holder-1");
@@ -133,7 +133,7 @@ fn canary_index_batch_multi_node() {
         (b"idx/email/a@x".as_slice(), b"42".as_slice()),
     ];
     {
-        let mut c = StoreCluster::open_with_rng(&dir, 3, 1, SeedRng::new(0x17CA_1D01)).unwrap();
+        let mut c = StoreCluster::open_with_rng_lab_direct(&dir, 3, 1, SeedRng::new(0x17CA_1D01)).unwrap();
         c.elect_all(100).unwrap();
         c.put_batch(pairs).unwrap();
         for (k, v) in pairs {
@@ -148,7 +148,7 @@ fn canary_index_batch_multi_node() {
         drop(c);
     }
     {
-        let mut c = StoreCluster::open_with_rng(&dir, 3, 1, SeedRng::new(0x17CA_1D02)).unwrap();
+        let mut c = StoreCluster::open_with_rng_lab_direct(&dir, 3, 1, SeedRng::new(0x17CA_1D02)).unwrap();
         c.elect_all(60).unwrap();
         let mut silent_wrong = 0u64;
         for (k, v) in pairs {
@@ -174,7 +174,7 @@ fn canary_index_batch_multi_node() {
 #[test]
 fn canary_journal_seq_and_replica_lag() {
     let dir = temp();
-    let mut c = StoreCluster::open_with_rng(&dir, 3, 1, SeedRng::new(0x17CA_FE01)).unwrap();
+    let mut c = StoreCluster::open_with_rng_lab_direct(&dir, 3, 1, SeedRng::new(0x17CA_FE01)).unwrap();
     c.set_rpc_mode(RpcMode::Queued);
     elect_queued(&mut c, 120);
     let rid = 1u64;
@@ -204,7 +204,7 @@ fn canary_journal_seq_and_replica_lag() {
     );
     // Close/reopen: journal keys still majority-visible (feed pin proxy).
     drop(c);
-    let mut c = StoreCluster::open_with_rng(&dir, 3, 1, SeedRng::new(0x17CA_FE02)).unwrap();
+    let mut c = StoreCluster::open_with_rng_lab_direct(&dir, 3, 1, SeedRng::new(0x17CA_FE02)).unwrap();
     c.elect_all(80).unwrap();
     let mut silent_wrong = 0u64;
     for i in 0..20u8 {
@@ -221,7 +221,7 @@ fn canary_journal_seq_and_replica_lag() {
 #[test]
 fn fast_replica_may_serve_local_applied() {
     let dir = temp();
-    let mut c = StoreCluster::open_with_rng(&dir, 3, 1, SeedRng::new(0x17CA_F451)).unwrap();
+    let mut c = StoreCluster::open_with_rng_lab_direct(&dir, 3, 1, SeedRng::new(0x17CA_F451)).unwrap();
     c.elect_all(80).unwrap();
     c.put(b"ro-key", b"ro-val").unwrap();
     // All policies agree once majority applied.
@@ -249,7 +249,7 @@ fn fast_replica_may_serve_local_applied() {
 #[test]
 fn multiwrite_multi_range_many_leaders() {
     let dir = temp();
-    let mut c = StoreCluster::open_with_rng(&dir, 3, 4, SeedRng::new(0x17CA_AF01)).unwrap();
+    let mut c = StoreCluster::open_with_rng_lab_direct(&dir, 3, 4, SeedRng::new(0x17CA_AF01)).unwrap();
     c.elect_all(120).unwrap();
     // One key per range.
     let keys: Vec<Vec<u8>> = c
@@ -292,7 +292,7 @@ fn multiwrite_multi_range_many_leaders() {
 fn cluster_dst_lossy_net_i_maj_holds() {
     let dir = temp();
     let mut rng = SeedRng::new(0x17CA_D570);
-    let mut c = StoreCluster::open_with_rng(&dir, 3, 1, SeedRng::new(0x17CA_D571)).unwrap();
+    let mut c = StoreCluster::open_with_rng_lab_direct(&dir, 3, 1, SeedRng::new(0x17CA_D571)).unwrap();
     c.set_rpc_mode(RpcMode::Queued);
     for _ in 0..200 {
         c.tick().unwrap();
@@ -344,7 +344,7 @@ fn cluster_dst_lossy_net_i_maj_holds() {
 fn cluster_dst_seed_replay_stable_leader_and_put() {
     fn run(seed: u64) -> (Option<u64>, u64) {
         let dir = temp();
-        let mut c = StoreCluster::open_with_rng(&dir, 3, 1, SeedRng::new(seed)).unwrap();
+        let mut c = StoreCluster::open_with_rng_lab_direct(&dir, 3, 1, SeedRng::new(seed)).unwrap();
         c.elect_all(100).unwrap();
         let leader = c.range_leader(1);
         c.put(b"sr", b"1").unwrap();
@@ -363,7 +363,7 @@ fn cluster_dst_seed_replay_stable_leader_and_put() {
 #[test]
 fn membership_remove_add_catchup() {
     let dir = temp();
-    let mut c = StoreCluster::open_with_rng(&dir, 3, 1, SeedRng::new(0x17CA_AE11)).unwrap();
+    let mut c = StoreCluster::open_with_rng_lab_direct(&dir, 3, 1, SeedRng::new(0x17CA_AE11)).unwrap();
     c.elect_all(100).unwrap();
     c.put(b"before", b"1").unwrap();
     assert!(c.count_applied_eq(b"before", b"1") >= 2);
@@ -406,7 +406,7 @@ fn membership_remove_add_catchup() {
 #[test]
 fn lagging_partition_heals_and_reads() {
     let dir = temp();
-    let mut c = StoreCluster::open_with_rng(&dir, 3, 1, SeedRng::new(0x17CA_1A61)).unwrap();
+    let mut c = StoreCluster::open_with_rng_lab_direct(&dir, 3, 1, SeedRng::new(0x17CA_1A61)).unwrap();
     c.set_rpc_mode(RpcMode::Queued);
     elect_queued(&mut c, 100);
     put_queued(&mut c, b"k0", b"v0");
@@ -462,7 +462,7 @@ fn multi_process_smoke_still_green() {
 #[test]
 fn p21_rolling_restart_majority_holds() {
     let dir = temp();
-    let mut c = StoreCluster::open_with_rng(&dir, 3, 1, SeedRng::new(0x17CA_0211)).unwrap();
+    let mut c = StoreCluster::open_with_rng_lab_direct(&dir, 3, 1, SeedRng::new(0x17CA_0211)).unwrap();
     c.set_rpc_mode(RpcMode::Queued);
     elect_queued(&mut c, 120);
     put_queued(&mut c, b"roll/0", b"v0");
@@ -516,7 +516,7 @@ fn p21_rolling_restart_majority_holds() {
 #[test]
 fn p21_clock_skew_advance_time_still_maj() {
     let dir = temp();
-    let mut c = StoreCluster::open_with_rng(&dir, 3, 1, SeedRng::new(0x17CA_C10C)).unwrap();
+    let mut c = StoreCluster::open_with_rng_lab_direct(&dir, 3, 1, SeedRng::new(0x17CA_C10C)).unwrap();
     c.set_rpc_mode(RpcMode::Queued);
     elect_queued(&mut c, 100);
     let leader = c.range_leader(1).expect("leader");
@@ -553,7 +553,7 @@ fn p21_disk_full_on_majority_blocks_commit() {
     let e1 = FailingEnv::passing();
     let e2 = FailingEnv::passing();
     let e3 = FailingEnv::passing();
-    let mut c = StoreCluster::open_with_envs_rng(
+    let mut c = StoreCluster::open_with_envs_rng_lab_direct(
         &dir,
         3,
         1,

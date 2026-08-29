@@ -142,9 +142,7 @@ impl<E: Env> FailingEnvArc<E> {
     /// Runtime arm with an explicit fault kind (e.g. [`FaultKind::Panic`]
     /// to model a mid-commit crash).
     pub fn arm_with_kind(&self, after_ops: u64, transient: bool, kind: FaultKind) {
-        self.state
-            .kind
-            .store(kind_to_u64(kind), Ordering::Relaxed);
+        self.state.kind.store(kind_to_u64(kind), Ordering::Relaxed);
         self.state
             .sync_only
             .store(kind.is_sync_only(), Ordering::Relaxed);

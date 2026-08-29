@@ -88,6 +88,14 @@ comportamento. "Callers" é o que o lint do freeze exige chamar a entrada.
 | **group_commit** | `pedradb-core/src/group_commit_kernel.rs` | close | `pedradb-core/concurrent.rs` |
 | **group_fence** | `pedradb-core/src/group_commit_kernel.rs` | close | `pedradb-core/db.rs` |
 | tx_glue | `pedradb-store/src/tx_glue_kernel.rs` | close | `pedradb-store/lib.rs` |
+| **cf_family** | `pedradb-core/src/cf_kernel.rs` | model | `memtable.rs`, `sst/table.rs`, `db.rs`, `rocksdb-compat/lib.rs` |
+| **visible_at** | `pedradb-core/src/merge.rs` | close | `merge.rs`, `memtable.rs`, `db.rs` |
+| **ikey_pack** | `pedradb-core/src/key.rs` | close | `key.rs` |
+| **write_record_count** | `pedradb-core/src/batch.rs` | close | `batch.rs` |
+| **pin_gc** | `pedradb-core/src/compact_kernel.rs` | close | `db.rs` (`compact_reclaim`) |
+| **wait_for_deadlock** | `rocksdb-compat/src/locktab.rs` | model | `locktab.rs` |
+| **flush_publish** | `pedradb-core/src/flush_kernel.rs` | close | `db.rs` (`persist_manifest`) |
+| **iter_window** | `rocksdb-compat/src/iter_kernel.rs` | close | `rocksdb-compat/lib.rs` (`page_forward` / `page_last_n`) |
 
 Extratos Aeneas→Lean (segunda máquina — o próprio código de produção):
 `WalRecover`/`Apply`/`ApplyKernel`/`Bloom` e agora `GroupCommitKernel` +
@@ -111,7 +119,7 @@ na mesma classe de *garantia*.
 | Paralelismo real do SO (interleavings fora do modelo PCT) | RFC-0057 P0.3/P0.4 + RFC-0052 P1.2 | work-stealing `run_swarm`, gate serial-vs-paralelo por `trace_hash`, TSan job | PCT d=2 cobre uma fatia do espaço de schedules — declarado, não total |
 | io_uring ring | RFC-0058 P2.2 (gate documentado) | fora do modo verificado por contrato; full mode usa com `PosixFallback`; twin bloqueado em modelo de ring | sem promessa de prova do ring |
 | **Field/hardware** (bit-rot fora de leitura, CPU errando, discos que somem) | **[RFC-0060](../rfc/0060-field-and-hardware-residuals.md) P0–P2 done** | `pedra verify` / `maintain --verify` (`verify_at_rest`); World `Action::BitFlip` + `silent_wrong==0` | CRC+scrub ≠ prova de ECC/mídia; TCG (RFC-0052 P2) ainda é o "modelo = hardware" |
-| Reconfig out-of-band sem joint consensus | **P0 2026-08-26** RFC-0063: `MembershipJoint` no log + quorum old∧new (`log_carried_joint_remove_crosses_out_of_band_floor`); out-of-band floor permanece | election-time joint = 0063 P1.1 | L28 REAL TCP cluster ainda MEASURE |
+| Reconfig out-of-band sem joint consensus | **P0 2026-08-27** RFC-0066: leave-joint (C-new only) after C-old,new commits; election still old∧new until leave (`election_after_committed_joint_still_requires_new_majority`). Enter-joint: 0063/0064 | Stateright leave = 0066 P1 | campaign, not a theorem |
 | Apuração de voto / snapshot catch-up | **fechado 2026-08-24**: RFC-0059 P0.4c (seed 503976) | tally por candidato; reject de snapshot stale = hint não-match; label no applied | — |
 | CHANGELOG lazy vs get após InstallSnapshot | **fechado 2026-08-24**: RFC-0059 P0.4c (seed 502514) | union per-key no lazy feed; oráculo de ressurreição exige get local ausente | — |
 
@@ -128,17 +136,17 @@ path. On-scrub = the at-rest walk. Holes are named, not hidden.
 | MANIFEST (`MANIFEST-NNNNNN`) | CRC32C trailer of payload | `manifest::load` | yes | no |
 | `CURRENT` | optional CRC32C hex of named MANIFEST (RFC-0060 P2.15); one-line legacy | parse+crc (`manifest::load`) | parse + exists + crc if present (P2.3/P2.15); BitFlip inventory (P2.20) | legacy one-line has no CRC |
 | Compaction/install temps (`*.tmp`, `CURRENT.tmp`, `MANIFEST-*.tmp`) | n/a (not inventory) | not read; open GCs orphans | leftover named FAIL (RFC-0060 P2.16) | leftover is FAIL, not CRC |
-| History MANIFEST (`history/MANIFEST`) | CRC32C trailer (`PHST`) | `HistoryTier::open` | yes (RFC-0060 P2.4) | no |
-| History segments (`history/seg-*.hist`) | CRC32C per record | `walk_segment_records` fail-closed | yes (RFC-0060 P2.4) | no |
-| History bloom (`history/seg-*.bloom`) | CRC32C of body (`PHB1`) | fail-open on read (never prune) | yes, fail-closed (RFC-0060 P2.4) | no |
-| `CHANGELOG` | CRC32C trailer of payload | rebuilt from WAL if missing (F33 quarantine) | yes when present (RFC-0060 P2.6); open still Ok | named: cache, not source of truth |
+| History MANIFEST (`history/MANIFEST`) | CRC32C trailer (`PHST`, `crc_match_ok`, RFC-0086) | `HistoryTier::open` | yes (RFC-0060 P2.4 / RFC-0086) | no |
+| History segments (`history/seg-*.hist`) | CRC32C per record (`crc_match_ok`, RFC-0087) | `walk_segment_records` fail-closed | yes (RFC-0060 P2.4 / RFC-0087) | no |
+| History bloom (`history/seg-*.bloom`) | CRC32C of body (`PHB1`, `crc_match_ok`, RFC-0088); remote put resume `crc_match_ok` + byte-equal (RFC-0093) | fail-open on read (never prune; RFC-0088 P1.1/P2.2, RFC-0093 P2.2) | yes, fail-closed (RFC-0060 P2.4 / RFC-0088 P0) | no |
+| `CHANGELOG` | CRC32C trailer of payload (`crc_match_ok`, RFC-0085) | rebuilt from WAL if missing (F33 quarantine) | yes when present (RFC-0060 P2.6 / RFC-0085 P1.1); open still Ok | named: cache, not source of truth |
 | `CHANGELOG.corrupt` | same as CHANGELOG | F33 rename of poison cache | yes (RFC-0060 P2.24) | leftover quarantine is FAIL |
 | `VALUES.vlog.adopt` | n/a (legacy marker) | open GCs | leftover named FAIL (P2.25) | leftover is FAIL, not CRC |
 | `CHECKPOINT` (checkpoint dest only) | CRC32C trailer (`PDBCKP01`/`PDBCKP02`) | `read_checkpoint_meta` | yes when present (RFC-0060 P2.7) | no |
 | Backup `CATALOG` | CRC32C trailer (`PDBCAT01`) | `BackupEngine::open` | yes (RFC-0060 P2.17) | no |
 | Backup `wal/*.warch` | CRC32C trailer (`PDBWAR01`) | `read_warch` on PITR restore | yes (`verify_at_rest` P2.18 + `verify_wal_archive` P2.9) | no |
-| Remote history (`seg-*-*.hist`) | CRC32C per record + content-addressed name | `walk_segment_records` on restore | `RemoteTier::verify` / `pedra archive verify` (RFC-0060 P2.11) | no |
-| Remote `LATEST` pointer | hex CRC32C of named `MANIFEST-n` | parse+crc or generation walk-back | `archive verify` names mismatch (RFC-0060 P2.12) | torn pointer falls back |
+| Remote history (`seg-*-*.hist`) | CRC32C per record + content-addressed name (`crc_match_ok` + byte-equal resume, RFC-0092) | `walk_segment_records` on restore | `RemoteTier::verify` / `pedra archive verify` (RFC-0060 P2.11) | no |
+| Remote `LATEST` pointer | hex CRC32C of named `MANIFEST-n` (`crc_match_ok`, RFC-0089) | parse+crc or generation walk-back (P1.2: never serve named older) | `archive verify` names mismatch (RFC-0060 P2.12 / RFC-0089) | torn pointer falls back |
 | `LOCK` | none | n/a | skipped | n/a |
 | Unrecognized leftover files | n/a | not read | named FAIL (RFC-0060 P2.27); dotfiles skipped | leftover is FAIL, not CRC |
 | `CORRUPTLOG` | none (append-only TSV) | open counts lines (RFC-0038 D) | parse-walk (RFC-0060 P2.22) | no CRC; garbage is FAIL |

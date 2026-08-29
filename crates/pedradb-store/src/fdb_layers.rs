@@ -397,7 +397,7 @@ mod tests {
     fn safe_allocator_exact_after_crash_retry() {
         let dir = temp();
         {
-            let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+            let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
             c.elect_all(80).unwrap();
             let n1 = SafeAllocator::allocate(&mut c, b"tok-a").unwrap();
             assert_eq!(SafeAllocator::names(&c).unwrap().len(), 1);
@@ -405,7 +405,7 @@ mod tests {
             drop(c);
             let _ = n1;
         }
-        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
         c.elect_all(80).unwrap();
         let n2 = SafeAllocator::allocate(&mut c, b"tok-a").unwrap();
         let names = SafeAllocator::names(&c).unwrap();
@@ -418,7 +418,7 @@ mod tests {
     #[test]
     fn allocator_corrupt_next_does_not_reuse_name_zero() {
         let dir = temp();
-        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
         c.elect_all(80).unwrap();
         let n0 = NaiveAllocator::allocate(&mut c).unwrap();
         c.put(NaiveAllocator::NEXT, b"xxx").unwrap();
@@ -454,12 +454,12 @@ mod tests {
     fn naive_allocator_leaks_name_on_crash_retry() {
         let dir = temp();
         {
-            let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+            let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
             c.elect_all(80).unwrap();
             let _ = NaiveAllocator::allocate(&mut c).unwrap();
             drop(c);
         }
-        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
         c.elect_all(80).unwrap();
         let _ = NaiveAllocator::allocate(&mut c).unwrap();
         let names = NaiveAllocator::names(&c).unwrap();
@@ -476,14 +476,14 @@ mod tests {
     fn idempotent_index_consistent_after_reopen() {
         let dir = temp();
         {
-            let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+            let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
             c.elect_all(80).unwrap();
             IdempotentIndex::put(&mut c, b"k1", b"red").unwrap();
             IdempotentIndex::put(&mut c, b"k2", b"blue").unwrap();
             IdempotentIndex::put(&mut c, b"k1", b"blue").unwrap();
             drop(c);
         }
-        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
         c.elect_all(40).unwrap();
         assert_eq!(
             IdempotentIndex::get(&c, b"k1").unwrap().as_deref(),
@@ -504,7 +504,7 @@ mod tests {
     #[test]
     fn idempotent_index_keys_for_includes_ff_user_key() {
         let dir = temp();
-        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
         c.elect_all(80).unwrap();
         let ff = [0xff, b'z'];
         IdempotentIndex::put(&mut c, b"plain", b"red").unwrap();
@@ -532,7 +532,7 @@ mod tests {
     #[test]
     fn idempotent_index_keys_for_does_not_include_value_prefix_sibling() {
         let dir = temp();
-        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
         c.elect_all(80).unwrap();
         IdempotentIndex::put(&mut c, b"k1", b"red").unwrap();
         IdempotentIndex::put(&mut c, b"k2", b"red/foo").unwrap();
@@ -571,7 +571,7 @@ mod tests {
     #[test]
     fn idempotent_index_keys_for_does_not_include_nul_value_prefix_sibling() {
         let dir = temp();
-        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
         c.elect_all(80).unwrap();
         IdempotentIndex::put(&mut c, b"k1", b"red").unwrap();
         let long_val = [b'r', b'e', b'd', 0x00, b'f', b'o', b'o'];
@@ -605,7 +605,7 @@ mod tests {
     #[test]
     fn idempotent_index_data_key_not_prefix_of_sibling_id() {
         let dir = temp();
-        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
         c.elect_all(80).unwrap();
         IdempotentIndex::put(&mut c, b"a", b"va").unwrap();
         IdempotentIndex::put(&mut c, b"ab", b"vab").unwrap();
@@ -674,12 +674,12 @@ mod tests {
     fn safe_list_no_dup_on_crash_retry() {
         let dir = temp();
         {
-            let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+            let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
             c.elect_all(80).unwrap();
             SafeList::append(&mut c, b"item", b"tok-1").unwrap();
             drop(c);
         }
-        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
         c.elect_all(80).unwrap();
         SafeList::append(&mut c, b"item", b"tok-1").unwrap();
         let items = SafeList::items(&c).unwrap();
@@ -695,7 +695,7 @@ mod tests {
     #[test]
     fn safe_list_seen_token_not_prefix_of_sibling() {
         let dir = temp();
-        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
         c.elect_all(80).unwrap();
         SafeList::append(&mut c, b"i1", b"a").unwrap();
         SafeList::append(&mut c, b"i2", b"ab").unwrap();
@@ -725,7 +725,7 @@ mod tests {
     #[test]
     fn safe_allocator_token_not_prefix_of_sibling() {
         let dir = temp();
-        let mut c = StoreCluster::open(&dir, 3, 1).unwrap();
+        let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
         c.elect_all(80).unwrap();
         let n1 = SafeAllocator::allocate(&mut c, b"a").unwrap();
         let n2 = SafeAllocator::allocate(&mut c, b"ab").unwrap();

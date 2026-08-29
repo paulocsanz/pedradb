@@ -6,25 +6,23 @@
 > still has a deeper correctness model (Titan, UDT, per-CF block cache) — that
 > is engine internals, not a missing method.
 >
-> **Strict substitute bar** (RFC-0062, 2026-08-25): same `WriteOptions.sync`
-> as the host, Linux, min of 3 rounds **>1.0** on every official shape;
-> only advantages; never a defect the host can feel. Not there yet:
-> `deps_raftlog` Linux min still <1× (p50 tied after `pwrite`).
-> `Checkpoint` / `BackupEngine` names **shipped** (RFC-0062 P1.2). Analysis:
-> [`reports/2026-08-25-compat-strict-substitute.md`](reports/2026-08-25-compat-strict-substitute.md).
-> The 0.001× G1-vs-async table is **not** this crate's default (default is
-> async, RFC-0054) and is **not** full-sync.
+> **OOTB = Rocks C++ factory, everywhere.** `Options::default()` is
+> `sync=false`, memtable 64 MiB, blob off. On Darwin, `set_sync(true)` is
+> `F_FULLFSYNC` — what **CMake Rocks** does (`HAVE_FULLFSYNC` from
+> `fcntl.h`). crates.io `librocksdb-sys` 0.16 omits that `#define` (CMake
+> does not); that is a binding hole, not the Rocks default. Official
+> parity is always `sync=false` (coluna A). Linux 17/17 min>1.0
+> (`P04_PASS` 1.014).
 
 ## What shipped
 
 `crates/rocksdb-compat` — a rust-rocksdb-shaped API on top of
 `pedradb-core::ConcurrentDb`:
 
-- **Writes** join the Rocks-style write group (one leader: appends + one
-  barrier if any member asked for sync + apply). Drop-in default is
-  **async** (RFC-0054). A lone client takes the single-writer fast path
-  (`apply_batch_with`, no channel hop). `set_sync(true)` is G1
-  (`F_FULLFSYNC` on Darwin).
+- **Writes** join the Rocks-style write group. Drop-in default is
+  **async** (RFC-0054, Rocks factory `sync=false`). A lone client takes
+  the single-writer fast path. `set_sync(true)` is G1: Linux `fdatasync`,
+  Darwin `F_FULLFSYNC` (upstream `PosixWritableFile::Sync`).
 - **Reads** take `RwLock` read guards (point get, prefix latest, count,
   iterator refill). Composite reads (`last_prefix_then_get`, `count_cf`)
   stay under one guard.
@@ -47,9 +45,12 @@
 | `delete_file_in_range` | ✅ | `delete_range` + flush + compact (tombstones; never unlink SSTs) |
 | `WriteBatchWithIndex` | ✅ | last-write-wins overlay + `get_from_batch_and_db` |
 | compaction filter | ✅ | applied on `compact` / range compact |
-| `create_cf` / `drop_cf` / `list_cf` / `destroy` / `repair` | ✅ | prefix CFs + CFREG |
+| `create_cf` / `drop_cf` / `list_cf` / `destroy` / `repair` | ✅ | prefix keys + SST per CF (RFC-0065 P0); 1 WAL; CFREG |
 | `multi_get` / `get_opt` / `put_opt` / `merge` / `live_files` / `key_may_exist` / `get_pinned` | ✅ | |
-| `Checkpoint` / `backup::BackupEngine` | ✅ | wrap `create_checkpoint` / `pedradb-ops`; `Env` is a stub for `BackupEngine::open` |
+| `Checkpoint` / `backup::BackupEngine` | ✅ | wrap `create_checkpoint` / `pedradb-ops` |
+| `OptimisticTransactionDB` | ✅ | OCC; Surreal 1.5 |
+| `TransactionDB` | ✅ | pessimistic 2PL exclusive locks; 1PC (`prepared_transactions` empty) |
+| `Env` / `SstFileManager` | ✅ | 0.22 Env thread-pool names stored; `set_env`; SstFileManager caps stored (rate Inert) |
 | knobs (`set_*`) | ✅ classified | [`KNOB_INVENTORY`](../crates/rocksdb-compat/src/knobs.rs): Wired / Inert / NotSupported (G2) / SaferDivergent. `set_verify_checksums(false)` → `ErrorKind::NotSupported` |
 
 Dependency swap for a consumer (alias, no crates.io patch):

@@ -44,6 +44,10 @@ fn verified_flag_pins_the_profile_and_survives_reopen() {
         stderr.contains("no io_uring ring"),
         "banner does not name the ring gate (RFC-0058 P2.2): {stderr}"
     );
+    assert!(
+        stderr.contains("verified_admits_ring=0") && stderr.contains("posix()"),
+        "banner must name verified_admits_ring next to posix() (RFC-0080 P1.1): {stderr}"
+    );
     assert!(stdout.contains("reopen ok"), "reopen failed: {stdout}");
     let _ = std::fs::remove_dir_all(&dir);
 }

@@ -1,0 +1,10 @@
+# RFC-0149 P2.1 — coluna A majority >3× on the p04a Linux-gate image.
+FROM ghcr.io/paulocsanz/pedradb-linux-gate:p04a
+LABEL org.opencontainers.image.source="https://github.com/paulocsanz/pedra-linux-p149"
+COPY crates /src/pedradb/crates
+COPY scripts /src/pedradb/scripts
+COPY Cargo.toml Cargo.lock clippy.toml deny.toml /src/pedradb/
+WORKDIR /src/pedradb
+COPY scripts/rfc0149_linux_entrypoint.sh /usr/local/bin/p04_entrypoint.sh
+RUN chmod +x /usr/local/bin/p04_entrypoint.sh /src/pedradb/scripts/rfc0149_linux_entrypoint.sh \
+ && rm -f /usr/local/bin/rocks-parity-bench /usr/local/bin/rocks-parity-compare

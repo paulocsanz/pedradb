@@ -36,8 +36,14 @@ mod tests {
         let a = pct_ready_queue(42, 3, 4);
         let b = pct_ready_queue(42, 3, 4);
         assert_eq!(a, b);
-        assert_eq!(pct_ready_queue_hash(42, 3, 4), pct_ready_queue_hash(42, 3, 4));
-        assert_ne!(pct_ready_queue_hash(42, 3, 4), pct_ready_queue_hash(43, 3, 4));
+        assert_eq!(
+            pct_ready_queue_hash(42, 3, 4),
+            pct_ready_queue_hash(42, 3, 4)
+        );
+        assert_ne!(
+            pct_ready_queue_hash(42, 3, 4),
+            pct_ready_queue_hash(43, 3, 4)
+        );
         assert_eq!(a.len(), 12);
     }
 }

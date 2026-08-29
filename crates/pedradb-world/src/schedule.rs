@@ -129,6 +129,15 @@ pub enum Action {
         /// mutant of the silent-wrong oracle (RFC-0060 P1.2).
         apply: bool,
     },
+    /// RFC-0068: plant a committed C-old,new joint with apply lag and no
+    /// leave (crash window). C-old majority must not elect.
+    PlantCommittedJoint {
+        /// Peer id to add in the planted joint (1-based; must not be a voter).
+        node: u64,
+    },
+    /// RFC-0067 P1.1: after World pins Queued, attempt `RpcMode::Direct`.
+    /// Direct after pin is silent_wrong (Net drop/reorder become no-ops).
+    AttemptDirectRpc,
 }
 
 /// Expand `seed` into a fixed-length schedule (deterministic).
@@ -412,7 +421,8 @@ impl ScheduleCoverage {
                 Action::RemoveMember { .. }
                 | Action::AddMember { .. }
                 | Action::JointRemove { .. }
-                | Action::JointAdd { .. } => c.membership = true,
+                | Action::JointAdd { .. }
+                | Action::PlantCommittedJoint { .. } => c.membership = true,
                 Action::DiskArm { .. } | Action::DiskDisarm { .. } => c.disk = true,
                 Action::NetSpray { .. } | Action::NetTick(_) | Action::NetDrain => c.net = true,
                 Action::CommitUnknown { .. } => {
@@ -424,7 +434,8 @@ impl ScheduleCoverage {
                 Action::StoreTicks(_)
                 | Action::ClockAdvance(_)
                 | Action::CrashReopen
-                | Action::FlushAll => {}
+                | Action::FlushAll
+                | Action::AttemptDirectRpc => {}
             }
         }
         c

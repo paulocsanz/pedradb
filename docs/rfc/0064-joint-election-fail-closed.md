@@ -1,6 +1,6 @@
 # RFC: 0064 — Eleição fail-closed durante joint consensus
 
-**Status:** in-progress
+**Status:** done
 **Updated:** 2026-08-26
 **Parents:** [0063](0063-fdb-reliability-close-the-system-gap.md) (MembershipJoint no log), [0059](0059-massive-scale-parallel-dst-and-cluster-invariants.md), [0002](0002-internal-key-memtable.md) (kernels)
 
@@ -24,29 +24,29 @@ Uma `fn` pura no `commit_kernel` (produção já o chama; twin Verus + mutante A
 ## Delivery slices (mandatory)
 
 ### P0 — must ship first (eleição fail-closed sob joint)
-- [ ] **P0.1** `commit_kernel::joint_election_ok` + AS-IS (ignora `new`) + twin Verus — status: `doing`
-- [ ] **P0.2** Store: tally por voter; RV a `old ∪ new`; promote só com ambas as maiorias — status: `todo`
-- [ ] **P0.3** `add_member_joint` + teste: old-only majority **não** elege durante add — status: `todo`
+- [x] **P0.1** `commit_kernel::joint_election_ok` + AS-IS (ignora `new`) + twin Verus — status: `done`
+- [x] **P0.2** Store: tally por voter; RV a `old ∪ new`; promote só com ambas as maiorias — status: `done`
+- [x] **P0.3** `add_member_joint` + teste: old-only majority **não** elege durante add — status: `done` (`election_during_joint_add_refuses_old_only_majority`, `world_joint_add_after_remove_replays`)
 
 ### P1 — next wave
-- [ ] **P1.1** Stateright no kernel joint (dente AS-IS no model checker) — status: `todo`
-- [ ] **P1.2** World: `Action::JointAdd` + replay hash — status: `todo`
+- [x] **P1.1** Stateright no kernel joint (dente AS-IS no model checker) — status: `done` (`crates/pedradb-raft/tests/joint_model.rs`: `fixed_joint_election_holds`, `as_is_elects_on_old_only`)
+- [x] **P1.2** World: `Action::JointAdd` + replay hash — status: `done`
 
 ### P2 — later
-- [ ] **P2.1** Kernel Verus só de membership (ficheiro próprio) — status: `todo`
-- [ ] **P2.2** L28 REAL TCP (herda 0063 P1.3) — status: `todo`
+- [x] **P2.1** Kernel Verus só de membership (ficheiro próprio) — status: `done` (`membership_kernel.rs` + twin `membership_joint.rs` + clone store + Stateright `joint_model`)
+- [x] **P2.2** L28 REAL TCP (herda 0063 P1.3) — status: `done` (`cluster_real` + `l28_real_tcp_seed_replay`; F-L28 RequestVote remoto; leader-kill `l28_real_tcp_leader_kill` seed `0x641e29` `after=1 restart=1`)
 
 ## Status (living — update with every PR)
 
 | ID | Band | Title | Status | Task / PR | Updated |
 |----|------|-------|--------|-----------|---------|
-| P0.1 | p0 | joint_election_ok kernel + twin | doing | commit_kernel.rs | 2026-08-26 |
-| P0.2 | p0 | election uses old∧new | todo | — | 2026-08-26 |
-| P0.3 | p0 | add_member_joint + old-only tooth | todo | — | 2026-08-26 |
-| P1.1 | p1 | Stateright joint | todo | — | 2026-08-26 |
-| P1.2 | p1 | World JointAdd | todo | — | 2026-08-26 |
-| P2.1 | p2 | dedicated membership kernel | todo | — | 2026-08-26 |
-| P2.2 | p2 | L28 REAL | todo | 0063 | 2026-08-26 |
+| P0.1 | p0 | joint_election_ok kernel + twin | done | commit_kernel.rs + verus/commit_recover.rs | 2026-08-26 |
+| P0.2 | p0 | election uses old∧new | done | election_granted + vote_targets | 2026-08-26 |
+| P0.3 | p0 | add_member_joint + old-only tooth | done | election_during_joint_add_refuses_old_only_majority | 2026-08-26 |
+| P1.1 | p1 | Stateright joint | done | tests/joint_model.rs | 2026-08-26 |
+| P1.2 | p1 | World JointAdd | done | world_joint_add_after_remove_replays | 2026-08-26 |
+| P2.1 | p2 | dedicated membership kernel | done | membership_kernel.rs + verus_membership_joint.sh | 2026-08-27 |
+| P2.2 | p2 | L28 REAL | done | cluster_real + l28_real_tcp_seed_replay | 2026-08-26 |
 
 ## Acceptance Criteria
 

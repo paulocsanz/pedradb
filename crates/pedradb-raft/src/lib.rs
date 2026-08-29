@@ -14,6 +14,7 @@
 pub mod ae_kernel;
 pub mod apply_kernel;
 pub mod commit_kernel;
+pub mod membership_kernel;
 pub mod net;
 pub mod persist;
 pub mod vote_kernel;
@@ -25,9 +26,13 @@ pub use apply_kernel::{
     apply_advance, apply_advance_as_is_skip_holes, ApplyAction,
 };
 pub use commit_kernel::{
-    joint_election_ok, joint_election_ok_as_is, majority_of, may_commit_at, may_commit_at_as_is,
-    propose_ack_ok, propose_ack_ok_as_is, recover_commit, recover_commit_as_is,
-    recover_last_applied, recover_last_applied_as_is,
+    may_commit_at, may_commit_at_as_is, propose_ack_ok, propose_ack_ok_as_is, recover_commit,
+    recover_commit_as_is, recover_last_applied, recover_last_applied_as_is,
+};
+pub use membership_kernel::{
+    elect_claim_banner, elect_claim_banner_as_is, joint_election_ok, joint_election_ok_as_is,
+    joint_leave_ok, joint_leave_ok_as_is, joint_still_active, joint_still_active_as_is,
+    liveness_admitted, liveness_admitted_as_is, majority_of,
 };
 pub use vote_kernel::{
     grant_after_persist, grant_after_persist_as_is, vote_decision, PersistOutcome, VoteDecision,

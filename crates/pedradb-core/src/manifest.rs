@@ -29,8 +29,10 @@ const FORMAT_VERSION_V1: u32 = 1;
 const FORMAT_VERSION_V2: u32 = 2;
 /// Levels + `vlog_use_new` (RFC-0016 crash-safe value-log GC).
 const FORMAT_VERSION_V3: u32 = 3;
-/// Current: v3 + `earliest_readable_seq` (open-items §2.1 watermark across reopen).
-const FORMAT_VERSION: u32 = 4;
+/// v3 + `earliest_readable_seq` (open-items §2.1 watermark across reopen).
+const FORMAT_VERSION_V4: u32 = 4;
+/// Current: v4 + per-SST column-family name (RFC-0065 P0; empty = mixed/legacy).
+const FORMAT_VERSION: u32 = 5;
 
 /// Live SST set + allocator cursor recovered from (or written to) disk.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -47,6 +49,9 @@ pub struct VersionSet {
     pub vlog_use_new: bool,
     /// Version-GC watermark: snapshots with `seq < this` are too old after reopen.
     pub earliest_readable_seq: u64,
+    /// Column-family name for each entry in [`Self::sst_file_nums`] (same
+    /// length; empty = mixed / prefix-era).
+    pub sst_cfs: Vec<String>,
 }
 
 impl VersionSet {
@@ -60,6 +65,7 @@ impl VersionSet {
             manifest_file_num: 0,
             vlog_use_new: false,
             earliest_readable_seq: 0,
+            sst_cfs: Vec::new(),
         }
     }
 
@@ -81,17 +87,27 @@ impl VersionSet {
             self.sst_levels.push(0);
         }
         self.sst_levels.truncate(self.sst_file_nums.len());
+        self.normalize_cfs();
+    }
+
+    /// Ensure `sst_cfs` matches `sst_file_nums` (pad with empty = mixed).
+    pub fn normalize_cfs(&mut self) {
+        while self.sst_cfs.len() < self.sst_file_nums.len() {
+            self.sst_cfs.push(String::new());
+        }
+        self.sst_cfs.truncate(self.sst_file_nums.len());
     }
 }
 
 /// Encode a version set to bytes (payload + trailing CRC32C of the payload).
 ///
-/// Writes format **v4**: each live file is `(file_num u64, level u32)`, then
-/// `vlog_use_new u8`, then `earliest_readable_seq u64`.
+/// Writes format **v5**: each live file is `(file_num u64, level u32)`, then
+/// `vlog_use_new u8`, `earliest_readable_seq u64`, then per file
+/// `(cf_len u16, cf_name)`.
 #[must_use]
 pub fn encode(vs: &VersionSet) -> Vec<u8> {
     let n = vs.sst_file_nums.len();
-    let mut buf = Vec::with_capacity(4 + 4 + 8 + 8 + 4 + n * 12 + 1 + 8 + 4);
+    let mut buf = Vec::with_capacity(4 + 4 + 8 + 8 + 4 + n * 12 + 1 + 8 + n * 4 + 4);
     buf.extend_from_slice(MAGIC);
     buf.extend_from_slice(&FORMAT_VERSION.to_le_bytes());
     buf.extend_from_slice(&vs.next_file_num.to_le_bytes());
@@ -106,12 +122,19 @@ pub fn encode(vs: &VersionSet) -> Vec<u8> {
     }
     buf.push(u8::from(vs.vlog_use_new));
     buf.extend_from_slice(&vs.earliest_readable_seq.to_le_bytes());
+    for i in 0..n {
+        let name = vs.sst_cfs.get(i).map(String::as_bytes).unwrap_or(&[]);
+        let len = u16::try_from(name.len()).unwrap_or(u16::MAX);
+        buf.extend_from_slice(&len.to_le_bytes());
+        let take = usize::from(len).min(name.len());
+        buf.extend_from_slice(&name[..take]);
+    }
     let crc = crc32c::crc32c(&buf);
     buf.extend_from_slice(&crc.to_le_bytes());
     buf
 }
 
-/// Decode a version set from bytes (v1, v2, or v3).
+/// Decode a version set from bytes (v1–v5).
 ///
 /// # Errors
 /// Corrupt or truncated payload.
@@ -136,10 +159,11 @@ pub fn decode(buf: &[u8]) -> Result<VersionSet> {
         return Err(CoreError::CorruptManifest("too short".into()));
     }
     // Trailing CRC32C over the payload (F5: silent empty inventory on bit-flip of `n`).
+    // RFC-0082 P2.1: catalog `crc_match` caller (twin `verus/crc_match.rs`).
     let (payload, crc_bytes) = buf.split_at(buf.len() - 4);
     let stored = u32::from_le_bytes([crc_bytes[0], crc_bytes[1], crc_bytes[2], crc_bytes[3]]);
     let computed = crc32c::crc32c(payload);
-    if stored != computed {
+    if !crate::wal::crc::crc_match_ok(stored, computed) {
         return Err(CoreError::CorruptManifest(format!(
             "CRC mismatch: stored {stored:#010x}, computed {computed:#010x}"
         )));
@@ -178,6 +202,7 @@ pub fn decode(buf: &[u8]) -> Result<VersionSet> {
                 manifest_file_num,
                 vlog_use_new: false,
                 earliest_readable_seq: 0,
+                sst_cfs: vec![String::new(); n],
             })
         }
         FORMAT_VERSION_V2 => {
@@ -204,6 +229,7 @@ pub fn decode(buf: &[u8]) -> Result<VersionSet> {
                 manifest_file_num,
                 vlog_use_new: false,
                 earliest_readable_seq: 0,
+                sst_cfs: vec![String::new(); n],
             })
         }
         FORMAT_VERSION_V3 => {
@@ -231,9 +257,10 @@ pub fn decode(buf: &[u8]) -> Result<VersionSet> {
                 manifest_file_num,
                 vlog_use_new,
                 earliest_readable_seq: 0,
+                sst_cfs: vec![String::new(); n],
             })
         }
-        FORMAT_VERSION => {
+        FORMAT_VERSION_V4 => {
             let need = 28 + n * 12 + 1 + 8;
             if payload.len() < need {
                 return Err(CoreError::CorruptManifest("truncated file list".into()));
@@ -260,6 +287,54 @@ pub fn decode(buf: &[u8]) -> Result<VersionSet> {
                 manifest_file_num,
                 vlog_use_new,
                 earliest_readable_seq,
+                sst_cfs: vec![String::new(); n],
+            })
+        }
+        FORMAT_VERSION => {
+            let mut off = 28;
+            let mut sst_file_nums = Vec::with_capacity(n);
+            let mut sst_levels = Vec::with_capacity(n);
+            for _ in 0..n {
+                if payload.len() < off + 12 {
+                    return Err(CoreError::CorruptManifest("truncated file list".into()));
+                }
+                sst_file_nums.push(le_u64(payload, off)?);
+                sst_levels.push(le_u32(payload, off + 8)?);
+                off += 12;
+            }
+            if payload.len() < off + 1 + 8 {
+                return Err(CoreError::CorruptManifest("truncated file list".into()));
+            }
+            let vlog_use_new = payload[off] != 0;
+            let earliest_readable_seq = le_u64(payload, off + 1)?;
+            off += 9;
+            let mut sst_cfs = Vec::with_capacity(n);
+            for _ in 0..n {
+                if payload.len() < off + 2 {
+                    return Err(CoreError::CorruptManifest("truncated cf names".into()));
+                }
+                let len = u16::from_le_bytes([payload[off], payload[off + 1]]) as usize;
+                off += 2;
+                if payload.len() < off + len {
+                    return Err(CoreError::CorruptManifest("truncated cf name".into()));
+                }
+                let name = String::from_utf8_lossy(&payload[off..off + len]).into_owned();
+                off += len;
+                sst_cfs.push(name);
+            }
+            if payload.len() != off {
+                return Err(CoreError::CorruptManifest(
+                    "trailing garbage before CRC".into(),
+                ));
+            }
+            Ok(VersionSet {
+                next_file_num,
+                sst_file_nums,
+                sst_levels,
+                manifest_file_num,
+                vlog_use_new,
+                earliest_readable_seq,
+                sst_cfs,
             })
         }
         other => Err(CoreError::CorruptManifest(format!(
@@ -296,7 +371,7 @@ pub fn load<E: Env>(env: &E, dir: &Path) -> Result<Option<VersionSet>> {
     let mut buf = Vec::new();
     f.read_to_end(&mut buf)?;
     if let Some(expect) = crc {
-        if crc32c::crc32c(&buf) != expect {
+        if !crate::wal::crc::crc_match_ok(crc32c::crc32c(&buf), expect) {
             return Err(CoreError::CorruptManifest(format!(
                 "CURRENT crc mismatch for {name}"
             )));
@@ -329,9 +404,8 @@ pub fn parse_current_pointer(text: &str) -> Result<(String, Option<u32>)> {
     let crc = match lines.next().map(str::trim).filter(|s| !s.is_empty()) {
         None => None,
         Some(hex) => {
-            let v = u32::from_str_radix(hex, 16).map_err(|_| {
-                CoreError::CorruptManifest(format!("CURRENT crc not hex: {hex:?}"))
-            })?;
+            let v = u32::from_str_radix(hex, 16)
+                .map_err(|_| CoreError::CorruptManifest(format!("CURRENT crc not hex: {hex:?}")))?;
             Some(v)
         }
     };
@@ -514,9 +588,30 @@ mod tests {
             manifest_file_num: 2,
             vlog_use_new: true,
             earliest_readable_seq: 42,
+            sst_cfs: vec!["default".into(), "lock".into(), "write".into()],
         };
         let out = decode(&encode(&vs)).unwrap();
         assert_eq!(out, vs);
+    }
+
+    #[test]
+    fn decode_v4_legacy_empty_cfs() {
+        let mut body = Vec::new();
+        body.extend_from_slice(MAGIC);
+        body.extend_from_slice(&FORMAT_VERSION_V4.to_le_bytes());
+        body.extend_from_slice(&4u64.to_le_bytes());
+        body.extend_from_slice(&1u64.to_le_bytes());
+        body.extend_from_slice(&1u32.to_le_bytes());
+        body.extend_from_slice(&1u64.to_le_bytes());
+        body.extend_from_slice(&0u32.to_le_bytes());
+        body.push(0u8);
+        body.extend_from_slice(&9u64.to_le_bytes());
+        let crc = crc32c::crc32c(&body);
+        body.extend_from_slice(&crc.to_le_bytes());
+        let vs = decode(&body).unwrap();
+        assert_eq!(vs.sst_file_nums, vec![1]);
+        assert_eq!(vs.earliest_readable_seq, 9);
+        assert_eq!(vs.sst_cfs, vec![String::new()]);
     }
 
     #[test]
@@ -567,6 +662,7 @@ mod tests {
             manifest_file_num: 1,
             vlog_use_new: false,
             earliest_readable_seq: 0,
+            sst_cfs: vec![String::new()],
         };
         // Build v2 payload manually (no flag byte).
         let mut body = Vec::new();
@@ -600,6 +696,7 @@ mod tests {
             manifest_file_num: 0,
             vlog_use_new: false,
             earliest_readable_seq: 9,
+            sst_cfs: vec!["default".into(), "lock".into()],
         };
         install_next(&env, &dir, &mut vs, true).unwrap();
         assert_eq!(vs.manifest_file_num, 1);
@@ -631,6 +728,7 @@ mod tests {
             manifest_file_num: 0,
             vlog_use_new: false,
             earliest_readable_seq: 0,
+            sst_cfs: vec![String::new()],
         };
         fs::write(dir.join("000001.sst"), b"a").unwrap();
         install_next(&env, &dir, &mut vs, true).unwrap();
@@ -647,11 +745,33 @@ mod tests {
         // CRC line that does not match the MANIFEST bytes.
         fs::write(dir.join(CURRENT_FILE), "MANIFEST-000001\nffffffff\n").unwrap();
         let err = load(&env, &dir).unwrap_err();
-        assert!(
-            err.to_string().contains("crc mismatch"),
-            "got {err}"
-        );
+        assert!(err.to_string().contains("crc mismatch"), "got {err}");
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0082 P2.2: MANIFEST `crc_match_ok` is not a CRC32C collision theorem.
+    #[test]
+    fn manifest_crc_collision_axiom_remains() {
+        assert!(!crate::wal::crc::crc_collision_admitted());
+        assert!(
+            crate::wal::crc::crc_collision_admitted_as_is(),
+            "AS-IS dente: matching CRC looks collision-free"
+        );
+        assert!(
+            crate::wal::crc::crc_match_ok(1, 1),
+            "equal u32s still match; that is not R-crc"
+        );
+        let residuals = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../scripts/formal/residuals.json");
+        let text = std::fs::read_to_string(&residuals).expect("residuals.json");
+        assert!(
+            text.contains("\"id\": \"R-crc\""),
+            "R-crc must stay in the residual catalog"
+        );
+        assert!(
+            text.contains("\"R-crc\""),
+            "never_floor must still list R-crc"
+        );
     }
 
     #[test]

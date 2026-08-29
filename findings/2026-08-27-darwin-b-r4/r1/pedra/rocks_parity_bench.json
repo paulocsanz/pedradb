@@ -1,0 +1,32 @@
+{
+  "bench": "rocks-parity-v1",
+  "engine": "compat",
+  "sync": true,
+  "peer_policy": "forced-sync",
+  "durability": "strongest-data-barrier-before-ok (F_FULLFSYNC on Darwin, fdatasync on Linux; RFC-0001/0036 v2)",
+  "changelog_interval": 0,
+  "status": "ok",
+  "notes": ["ycsb records=1024 ops=2000 payload=100 dist=zipfian", "engine=compat durability=strongest-data-barrier-before-ok (F_FULLFSYNC on Darwin, fdatasync on Linux; RFC-0001/0036 v2)", "suites: ycsb,deps", "seed: one put per record (not timed)", "cfs: default + write, lock, raftlog (TiKV store shape; raftlog = raftdb)", "deps apply batch txns/commit: 32", "changelog_interval=0", "peer_policy=forced-sync", "host-default write sync: kvrocks=true myrocks=true surreal=true"],
+  "benches": [
+{
+    "name": "ycsb_a",
+    "n": 2000,
+    "qps": 496.032,
+    "p50_ms": 3.7338,
+    "p95_ms": 4.1554,
+    "p99_ms": 4.2520,
+    "max_ms": 7.9959,
+    "wall_s": 4.0320
+  },
+{
+    "name": "deps_raftlog",
+    "n": 2000,
+    "qps": 245.944,
+    "p50_ms": 4.0113,
+    "p95_ms": 4.2323,
+    "p99_ms": 6.0216,
+    "max_ms": 35.6674,
+    "wall_s": 8.1319
+  }
+  ]
+}
