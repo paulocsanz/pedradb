@@ -1,24 +1,17 @@
 [package]
 name = "rocksdb-compat"
 description = "rust-rocksdb 0.22 API on pedradb-core"
-keywords = ["rocksdb", "database", "storage-engine", "lsm", "key-value"]
-categories = ["database-implementations", "database"]
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
-repository.workspace = true
-homepage.workspace = true
-authors.workspace = true
-readme.workspace = true
-documentation = "https://docs.rs/rocksdb-compat"
 
 [dependencies]
-pedradb-core.workspace = true
-pedradb-io-uring.workspace = true
-pedradb-ops.workspace = true
-pedradb-sim.workspace = true
-bytes.workspace = true
+pedradb-core = { path = "../pedradb-core" }
+pedradb-io-uring = { path = "../pedradb-io-uring" }
+pedradb-ops = { path = "../pedradb-ops" }
+pedradb-sim = { path = "../pedradb-sim" }
+bytes = "1"
 parking_lot.workspace = true
 crc32c.workspace = true
 

@@ -4570,7 +4570,6 @@ mod tests {
     /// the two commits regardless (single WAL file, G1), and the recorded
     /// wait includes scheduler overrun on a loaded box.
     #[test]
-    #[ignore = "stale vs lone_sync_commit (RFC-0062 P1.1 p11j): the lone path never bumps commit_inflight; rewrite against the group path is tracked upstream"]
     fn catchup_wait_bounded_by_half_fd() {
         let dir = temp_dir();
         let sleep_us = Arc::new(AtomicU64::new(0));
