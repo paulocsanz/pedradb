@@ -83,6 +83,7 @@ Catalog freeze at start of this slice: pairs include `media_durable`, `fdatasync
 
 ## Out of scope
 
-- Extract `db.rs`. Raise PCT d>2. Invent a TCG guest. Delete `never_floor` ids.
+- Extract `db.rs` (`glue.db_rs_extracted` stays false). Raise PCT default depth above 2. Invent a TCG guest / SSH.
+- Delete `never_floor` ids: R-cpu, R-rustc, R-verus, R-crc, R-deps, R-extract. Delete residual rows R-glue, R-group-glue, R-swarm-real, R-fsync-lie, R-unsafe-posix, R-unsafe-capi, R-es, R-crc, R-uring.
 - rustfmt `lib.rs`. Benches / RFC-0149 / 0153 / 0154 CHV. Pedra vs Rocks `WriteOptions.sync=true`.
-- “Garantia total”, “sem bugs”, seL4, “perfeito”, “acabou”. ∀ TCP traces.
+- “Garantia total”, “sem bugs”, seL4, “perfeito”, “acabou”. ∀ TCP traces. ∀ OS lock interleavings.

@@ -16,9 +16,9 @@
     "R-extract"
   ],
   "glue": {
-    "kernel_files": 41,
-    "kernel_loc": 10197,
-    "handler_loc": 79028,
+    "kernel_files": 43,
+    "kernel_loc": 10953,
+    "handler_loc": 81782,
     "db_rs_extracted": false
   },
   "residuals": [
