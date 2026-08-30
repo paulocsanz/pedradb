@@ -222,6 +222,90 @@ pub fn fsync_lie_closes_tcg_guest_as_is() -> bool {
 mod tests {
     use super::*;
 
+    /// RFC-0157 P1.2 — property sweep over the pure group-commit kernel
+    /// family (deterministic seeded trials; the recorded trial IS the
+    /// shrunk counterexample). Pins: `occ_conflict` == non-empty window
+    /// AND touched; `group_validate` is position-independent
+    /// (simultaneity); `fence_publish_seq` == max member seq; the
+    /// `may_publish_group` AS-IS mutant diverges exactly when WAL I/O
+    /// failed (publish without durability).
+    #[test]
+    fn rfc0157_property_sweep_group_commit_kernel() {
+        use crate::{Rng, SeedRng};
+        // Exhaustive boolean cases first.
+        assert_eq!(may_publish_group(true), true);
+        assert_ne!(
+            may_publish_group(false),
+            may_publish_group_as_is(false),
+            "AS-IS publish mutant must diverge at wal_io_ok=false"
+        );
+        assert_eq!(
+            may_publish_group(true),
+            may_publish_group_as_is(true),
+            "both publish when WAL I/O succeeded"
+        );
+        // The RFC-0051 plant shape stays reachable in the pure kernel:
+        // serialized scheduling conflicts where the group does not.
+        assert!(
+            occ_conflict_as_is_serialized(10, 10, 1, true) && !occ_conflict(10, 10, true),
+            "AS-IS serialized mutant must keep the intra-group tooth"
+        );
+
+        let mut viol: Option<String> = None;
+        'trials: for trial in 0..20_000u64 {
+            let rng = SeedRng::new(0x0157_5712 ^ trial);
+            let last_seq = rng.gen_range(64);
+            let n = 1 + (rng.gen_range(6) as usize);
+            let mut reads = Vec::with_capacity(n);
+            for _ in 0..n {
+                reads.push(OccRead {
+                    snap: rng.gen_range(64),
+                    touched_key_written_after: rng.gen_range(2) == 0,
+                });
+            }
+            let mut seqs = Vec::with_capacity(n);
+            for _ in 0..n {
+                seqs.push(rng.gen_range(64));
+            }
+            for r in &reads {
+                let expect = last_seq > r.snap && r.touched_key_written_after;
+                if occ_conflict(r.snap, last_seq, r.touched_key_written_after) != expect {
+                    viol = Some(format!(
+                        "trial={trial} occ_conflict(snap={}, last_seq={}, touched={})",
+                        r.snap, last_seq, r.touched_key_written_after
+                    ));
+                    break 'trials;
+                }
+            }
+            let flags = group_validate(&reads, last_seq);
+            for i in 0..n {
+                let alone = occ_conflict(
+                    reads[i].snap,
+                    last_seq,
+                    reads[i].touched_key_written_after,
+                );
+                if flags[i] != alone {
+                    viol = Some(format!(
+                        "trial={trial} member {i} flag {} != alone {alone} (group not simultaneous)",
+                        flags[i]
+                    ));
+                    break 'trials;
+                }
+            }
+            let fold_max = seqs.iter().copied().fold(0u64, u64::max);
+            if fence_publish_seq(&seqs) != fold_max {
+                viol = Some(format!("trial={trial} fence != max of {seqs:?}"));
+                break 'trials;
+            }
+            let wal_io_ok = rng.gen_range(2) == 0;
+            if may_publish_group(wal_io_ok) != wal_io_ok {
+                viol = Some(format!("trial={trial} may_publish_group({wal_io_ok})"));
+                break 'trials;
+            }
+        }
+        assert_eq!(viol, None, "rfc0157 sweep counterexample: {viol:?}");
+    }
+
     #[test]
     fn fast_path_same_seq_never_conflicts() {
         assert!(!occ_conflict(7, 7, true));

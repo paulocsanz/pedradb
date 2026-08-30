@@ -1,6 +1,6 @@
 # RFC: 0157 — Multiplicadores de capacidade de verificação
 
-**Status:** draft
+**Status:** in-progress
 **Updated:** 2026-08-30
 **Parents:** [0155](0155-silent-wrong-fail-closed.md), [0156](0156-resolver-os-nove-guards-e-pisos.md)
 
@@ -33,16 +33,16 @@ Quatro multiplicadores, cada um independente e shippable sozinho: (1) toolchain 
 
 ### P0 — multiplicadores imediatos (cada um shippable sozinho)
 
-- [ ] **P0.1** Prova checada por máquina: `scripts/formal/verus_check.sh` pinando o toolchain (binário de release ou container como fallback documentado) e verificando o primeiro conjunto de gêmeos (`verus/l28.rs` + os três do 0155); saída pass/fail por gêmeo. Slice pronto quando UM gêmeo é checado ponta-a-ponta a partir de clone limpo — status: `todo`
-- [ ] **P0.2** Detector de fidelidade: teste de replay diferencial `world_stdenv_diff_replay` — mesmo script semeado de ops+crash+restart+scan contra `World` e contra `StdEnv` em tempdir real; fingerprints observáveis devem ser iguais. Primeiro cenário: put/get/kill/restart — status: `todo`
-- [ ] **P0.3** Campanha TCP K-paralela: harness que roda K clusters REAL simultâneos (seeds distintas, portas distintas), agregando `napply`/kernels/contabilidade de retry por seed; `scripts/rfc0157_tcp_campaign.sh K` com K default 8 e registro em `findings/` — status: `todo`
+- [x] **P0.1** Prova checada por máquina: `scripts/formal/verus_check.sh` pinando o toolchain (binário de release ou container como fallback documentado) e verificando o primeiro conjunto de gêmeos (`verus/l28.rs` + os três do 0155); saída pass/fail por gêmeo. Slice pronto quando UM gêmeo é checado ponta-a-ponta a partir de clone limpo — status: `done` (conjunto padrão 3/3 PASS sob o release pinado `0.2026.08.23.fbbbbcf`; `--all` 53/56 com 3 gêmeos em drift de toolchain registrados em `findings/rfc0157-verus-drift/`)
+- [x] **P0.2** Detector de fidelidade: teste de replay diferencial `world_stdenv_diff_replay` — mesmo script semeado de ops+crash+restart+scan contra `World` e contra `StdEnv` em tempdir real; fingerprints observáveis devem ser iguais. Primeiro cenário: put/get/kill/restart — status: `done` (fingerprints idênticos Mem↔Disk; lado real repete bit-a-bit; divergência plantada de um byte é detectada)
+- [x] **P0.3** Campanha TCP K-paralela: harness que roda K clusters REAL simultâneos (seeds distintas, portas distintas), agregando `napply`/kernels/contabilidade de retry por seed; `scripts/rfc0157_tcp_campaign.sh K` com K default 8 e registro em `findings/` — status: `done` (K=8: 8/8 seeds limpas na 1ª tentativa, fator 1,15× vs solo; seams `L28_BASE_PORT` 26000..26023 + stagger; registro em `findings/rfc0157-tcp-campaign/`)
 
 ### P1 — escala e alcance
 
-- [ ] **P1.1** Guardas de classe no workspace inteiro: seção nova no `pedra_formal.py --lint` varrendo todos os crates pelas três classes do 0156 (FFI rc sem gate, len C sem cap, adoção de CQE por tag constante); site sem gate precisa de waiver nomeando o id de residual — status: `todo`
-- [ ] **P1.2** Fuzz de kernels puros: alvos proptest/fuzz para os kernels de decisão (`may_publish_group`, trio L28, `sst_crc_fate`); contraexemplo encolhido vira `findings/` + dente AS-IS se revelar classe nova — status: `todo`
-- [ ] **P1.3** Interleaving exaustivo pequeno: runner que enumera **todas** as sequências de grant do turnstile para N≤3 tarefas e ≤k yields (sem amostragem), rodando a planta de cadeia-3 e o caminho publish do group commit; relata cobertura exaustiva do espaço enumerado — status: `todo`
-- [ ] **P1.4** Extração `db.rs` estágio 1 — caracterização antes de mover: testes de fingerprint dourado fixando o comportamento atual do caminho open/recovery do `db.rs` (sem extrair nada ainda); o estágio termina com o comportamento travado, pronto para o primeiro kernel ser extraído no estágio 2. `db_rs_extracted` segue `false` — status: `todo`
+- [x] **P1.1** Guardas de classe no workspace inteiro: seção nova no `pedra_formal.py --lint` varrendo todos os crates pelas três classes do 0156 (FFI rc sem gate, len C sem cap, adoção de CQE por tag constante); site sem gate precisa de waiver nomeando o id de residual — status: `done` (varredura `check_class_scan`: 176 arquivos — 5 sites FFI rc, 3 len C ABI, 2 sites CQE, 0 waivers, `0 fail`; waiver = `RFC0157-WAIVER(R-...)` com id registrado)
+- [x] **P1.2** Fuzz de kernels puros: alvos proptest/fuzz para os kernels de decisão (`may_publish_group`, trio L28, `sst_crc_fate`); contraexemplo encolhido vira `findings/` + dente AS-IS se revelar classe nova — status: `done` (sweeps determinísticos 20k trials com shrink embutido: `rfc0157_property_sweep_group_commit_kernel`, `rfc0157_property_sweep_l28_trio` (tabelas-verdade exaustivas + varredura de `attempts`), `rfc0157_property_sweep_sst_crc_fate`; nenhum contraexemplo — nenhuma classe nova)
+- [x] **P1.3** Interleaving exaustivo pequeno: runner que enumera **todas** as sequências de grant do turnstile para N≤3 tarefas e ≤k yields (sem amostragem), rodando a planta de cadeia-3 e o caminho publish do group commit; relata cobertura exaustiva do espaço enumerado — status: `done` (`run_exhaustive` DFS por prefix-replay; plantas d2+cadeia-3: espaço completo |espaço|=66, 60 violadores, 0 divergência; disk-fence com cap: 3000 nós, 570 folhas, 90 violadores, 252 nós divergentes reportados como piso R-glue/R-pct — espaço é lower bound no caminho vivo)
+- [x] **P1.4** Extração `db.rs` estágio 1 — caracterização antes de mover: testes de fingerprint dourado fixando o comportamento atual do caminho open/recovery do `db.rs` (sem extrair nada ainda); o estágio termina com o comportamento travado, pronto para o primeiro kernel ser extraído no estágio 2. `db_rs_extracted` segue `false` — status: `done` (`rfc0157_db_open_recovery_golden`: 3 fases — live misto SST+WAL, close+reopen, kill sem close (`mem::forget`, LOCK roubado por mesmo PID) + reopen; replay duplo idêntico = literal dourado pinado; `db_rs_extracted` continua `false`)
 
 ### P2 — consolidação
 
@@ -54,14 +54,14 @@ Quatro multiplicadores, cada um independente e shippable sozinho: (1) toolchain 
 
 | ID | Band | Title | Status | Task / PR | Updated |
 |----|------|-------|--------|-----------|---------|
-| P0.1 | p0 | verus_check.sh + primeiro gêmeo checado | todo | — | 2026-08-30 |
-| P0.2 | p0 | replay diferencial World↔StdEnv | todo | `world_stdenv_diff_replay` | 2026-08-30 |
-| P0.3 | p0 | campanha TCP K-paralela | todo | `scripts/rfc0157_tcp_campaign.sh` | 2026-08-30 |
-| P1.1 | p1 | varredura de classe workspace-wide | todo | `pedra_formal.py` | 2026-08-30 |
-| P1.2 | p1 | fuzz de kernels puros | todo | alvos proptest | 2026-08-30 |
-| P1.3 | p1 | runner exaustivo N≤3 | todo | turnstile enumerate | 2026-08-30 |
-| P1.4 | p1 | db.rs estágio 1: caracterização | todo | fingerprints dourados | 2026-08-30 |
-| P2.1 | p2 | corpus Verus expandido | todo | `verus_check.sh` | 2026-08-30 |
+| P0.1 | p0 | verus_check.sh + primeiro gêmeo checado | done — 3/3 padrão, 53/56 `--all` | `scripts/formal/verus_check.sh` | 2026-08-30 |
+| P0.2 | p0 | replay diferencial World↔StdEnv | done — divergência plantada detectada | `world_stdenv_diff_replay` | 2026-08-30 |
+| P0.3 | p0 | campanha TCP K-paralela | done — 8/8, fator 1,15× | `scripts/rfc0157_tcp_campaign.sh` | 2026-08-30 |
+| P1.1 | p1 | varredura de classe workspace-wide | done — 0 fail, 0 waivers | `pedra_formal.py --lint` | 2026-08-30 |
+| P1.2 | p1 | fuzz de kernels puros | done — 3 sweeps, 0 contraexemplos | alvos proptest | 2026-08-30 |
+| P1.3 | p1 | runner exaustivo N≤3 | done — plantas completas; disk-fence com piso | turnstile enumerate | 2026-08-30 |
+| P1.4 | p1 | db.rs estágio 1: caracterização | done — dourado travado, `db_rs_extracted=false` | fingerprints dourados | 2026-08-30 |
+| P2.1 | p2 | corpus Verus expandido | todo — 3 gêmeos em drift (ver `findings/rfc0157-verus-drift/`) | `verus_check.sh` | 2026-08-30 |
 | P2.2 | p2 | quadro de capacidade por residual | todo | `candidates.py` | 2026-08-30 |
 | P2.3 | p2 | doc da campanha noturna | todo | `findings/` | 2026-08-30 |
 

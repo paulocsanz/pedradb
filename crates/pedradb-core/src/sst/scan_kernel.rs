@@ -187,6 +187,72 @@ pub fn zero_glue_admitted_as_is() -> bool {
 mod tests {
     use super::*;
 
+    /// RFC-0157 P1.2 — property sweep over `sst_crc_fate` /
+    /// `sst_block_crc_ok`: seeded CRC pairs × boundary buffer lengths
+    /// (including the legacy 32-byte threshold from both sides). Pins:
+    /// match ⇒ StripTrailer at any length; mismatch on a tiny file ⇒
+    /// WholeBuffer; mismatch on a modern file ⇒ Reject — a mismatch is
+    /// NEVER StripTrailer (no silent-wrong table); block gate ==
+    /// `crc_match_ok`.
+    #[test]
+    fn rfc0157_property_sweep_sst_crc_fate() {
+        use crate::{Rng, SeedRng};
+        // Concrete boundary: 31 is tiny, 32 is modern, both mismatched.
+        assert_eq!(
+            sst_crc_fate(0xDEAD_BEEF, 0x0BAD_C0DE, SST_LEGACY_NO_CRC_MAX - 1),
+            SstCrcFate::WholeBuffer
+        );
+        assert_eq!(
+            sst_crc_fate(0xDEAD_BEEF, 0x0BAD_C0DE, SST_LEGACY_NO_CRC_MAX),
+            SstCrcFate::Reject
+        );
+        // Concrete AS-IS divergence tooth: mismatch served as a table.
+        assert_eq!(
+            sst_crc_fate_as_is(0xDEAD_BEEF, 0x0BAD_C0DE, 4096),
+            SstCrcFate::StripTrailer,
+            "AS-IS dente: any checksum is a match"
+        );
+
+        let mut viol: Option<String> = None;
+        'trials: for trial in 0..20_000u64 {
+            let rng = SeedRng::new(0x0157_77C3 ^ trial);
+            let stored = (rng.next_u64() >> 32) as u32;
+            let computed = if rng.gen_range(4) == 0 {
+                stored // force real matches into the sweep
+            } else {
+                (rng.next_u64() >> 32) as u32
+            };
+            for buf_len in [0usize, 1, 31, 32, 33, 4096] {
+                let fate = sst_crc_fate(stored, computed, buf_len);
+                let expect = if stored == computed {
+                    SstCrcFate::StripTrailer
+                } else if buf_len < SST_LEGACY_NO_CRC_MAX {
+                    SstCrcFate::WholeBuffer
+                } else {
+                    SstCrcFate::Reject
+                };
+                if fate != expect {
+                    viol = Some(format!(
+                        "trial={trial} stored={stored:08x} computed={computed:08x} len={buf_len} fate={fate:?}"
+                    ));
+                    break 'trials;
+                }
+                if stored != computed && fate == SstCrcFate::StripTrailer {
+                    viol = Some(format!(
+                        "trial={trial} SILENT-WRONG: mismatch len={buf_len} served as a table"
+                    ));
+                    break 'trials;
+                }
+            }
+            if sst_block_crc_ok(stored, computed) != crate::wal::crc::crc_match_ok(stored, computed)
+            {
+                viol = Some(format!("trial={trial} block gate != crc_match_ok"));
+                break 'trials;
+            }
+        }
+        assert_eq!(viol, None, "rfc0157 sweep counterexample: {viol:?}");
+    }
+
     #[test]
     fn spanning_tombstone_keeps_file() {
         // File points all before the window; tombstone [k-b, k-f) spans into it.

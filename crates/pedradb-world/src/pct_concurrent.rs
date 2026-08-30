@@ -171,11 +171,31 @@ pub fn run_pcts<F>(seed: u64, n: usize, policy: PiPolicy, mk: impl Fn(usize) -> 
 where
     F: FnOnce(&Yielder) + Send + 'static,
 {
+    let k = 16 * n; // generous step bound for change-point placement
+    let mut sched = policy_scheduler(seed, n, k, policy);
+    let tasks: Vec<Box<dyn FnOnce(&Yielder) + Send + 'static>> = (0..n)
+        .map(|task| {
+            let f = mk(task);
+            Box::new(f) as Box<dyn FnOnce(&Yielder) + Send + 'static>
+        })
+        .collect();
+    let mut rep = run_with_sched(n, tasks, sched.as_mut());
+    rep.forall_schedules =
+        pedradb_core::group_commit_kernel::forall_schedules_admitted(policy_pct_depth(policy));
+    rep
+}
+
+/// `run_pcts` with an arbitrary scheduler and pre-built task closures
+/// (shared by the policy runner and the exhaustive enumerator).
+fn run_with_sched(
+    n: usize,
+    tasks: Vec<Box<dyn FnOnce(&Yielder) + Send + 'static>>,
+    sched: &mut dyn Scheduler,
+) -> RunReport {
     let ts = Arc::new(Turnstile::new(n));
     let mut joins = Vec::with_capacity(n);
-    for task in 0..n {
+    for (task, f) in tasks.into_iter().enumerate() {
         let ts = Arc::clone(&ts);
-        let f = mk(task);
         joins.push(std::thread::spawn(move || {
             pedradb_core::pct_hooks::install_worker(Arc::clone(&ts), task);
             struct ExitGuard<'a>(&'a Turnstile, usize);
@@ -199,8 +219,6 @@ where
     // barrier pins the enabled-set sequence to the grant history, so the
     // schedule is a pure function of (seed, policy, n).
     ts.wait_all_entered();
-    let k = 16 * n; // generous step bound for change-point placement
-    let mut sched = policy_scheduler(seed, n, k, policy);
     let mut steps = Vec::new();
     loop {
         ts.wait_ready();
@@ -222,13 +240,155 @@ where
     }
     let schedule_hash = run_steps_hash(&steps);
     let group_ranges = ts.take_group_ranges();
-    let depth = policy_pct_depth(policy);
     RunReport {
+        forall_schedules: false,
         steps,
         schedule_hash,
         group_ranges,
-        forall_schedules: pedradb_core::group_commit_kernel::forall_schedules_admitted(depth),
     }
+}
+
+// -------------------------------------------------------------------------
+// RFC-0157 P1.3 — exhaustive small-space enumeration (no sampling).
+// -------------------------------------------------------------------------
+
+/// Replays a recorded grant prefix; on exhaustion records the enabled set
+/// (the node's branches) and completes on a sticky-first tail. Reports
+/// `diverged` if the run ever deviates from the prefix (a determinism
+/// break — the entry barrier pins enabled-sets to grant history).
+struct PrefixSched {
+    prefix: Vec<usize>,
+    pos: usize,
+    branch: Option<Vec<usize>>,
+    recorded: bool,
+    diverged: bool,
+}
+
+impl Scheduler for PrefixSched {
+    fn next(&mut self, enabled: &[usize]) -> Option<usize> {
+        if enabled.is_empty() {
+            return None;
+        }
+        if self.pos < self.prefix.len() {
+            let t = self.prefix[self.pos];
+            self.pos += 1;
+            if enabled.contains(&t) {
+                Some(t)
+            } else {
+                self.diverged = true;
+                enabled.first().copied()
+            }
+        } else {
+            if !self.recorded {
+                self.recorded = true;
+                self.branch = Some(enabled.to_vec());
+            }
+            // Deterministic completion: lowest-index enabled task hogs the
+            // CPU until it exits; deeper choices are enumerated via the
+            // branch children, not this tail.
+            enabled.first().copied()
+        }
+    }
+}
+
+/// Fresh per-run scenario state for [`run_exhaustive`]: task closures
+/// sharing one new scenario instance, plus a violation oracle probed
+/// after the run joins.
+pub struct ExhaustiveSetup {
+    /// One closure per task (len must equal the `n` passed to the runner).
+    pub tasks: Vec<Box<dyn FnOnce(&Yielder) + Send + 'static>>,
+    /// `Some(reason)` when the completed run violates the invariant.
+    pub probe: Box<dyn FnOnce() -> Option<String>>,
+}
+
+/// Coverage report of one exhaustive enumeration.
+#[derive(Clone, Debug, Default)]
+pub struct ExhaustiveReport {
+    /// Tree nodes visited (one real run each).
+    pub nodes: usize,
+    /// Complete schedules enumerated (leaves).
+    pub leaves: usize,
+    /// Distinct leaf schedule hashes (sanity: == leaves).
+    pub distinct_leaves: usize,
+    /// Violating leaves: (grant sequence, reason).
+    pub violators: Vec<(Vec<usize>, String)>,
+    /// True when `cap_nodes` truncated the DFS — bounded coverage, NOT
+    /// exhaustive; must be reported as such.
+    pub hit_cap: bool,
+    /// True when some run deviated from its recorded prefix (determinism
+    /// break in the harness itself).
+    pub diverged: bool,
+    /// How many nodes deviated from their recorded prefix (per-node count
+    /// behind `diverged`). On non-deterministic scenarios (live engine
+    /// under real threads) the enumerated space is a lower bound.
+    pub diverged_nodes: usize,
+}
+
+/// Enumerate **every** turnstile grant sequence for `n` tasks: DFS over
+/// the schedule tree via prefix replay (no sampling, no seed). Each node
+/// runs the real scenario under a recorded grant prefix; the enabled set
+/// at prefix exhaustion are that node's branches; a prefix that carries
+/// the run to completion is a leaf (one complete schedule). `cap_nodes`
+/// bounds the work (`None` = unbounded); a capped run reports
+/// `hit_cap` and is bounded coverage, never "exhaustive".
+///
+/// Piso que isto NÃO derruba: exhaustive over this harness's grant space
+/// for THIS scenario is not ∀ OS interleavings (R-pct / R-glue seguem);
+/// `forall_schedules_admitted` stays false.
+pub fn run_exhaustive(
+    n: usize,
+    cap_nodes: Option<usize>,
+    setup: impl Fn() -> ExhaustiveSetup,
+) -> ExhaustiveReport {
+    let mut report = ExhaustiveReport::default();
+    let mut seen: std::collections::HashSet<u64> = std::collections::HashSet::new();
+    let mut stack: Vec<Vec<usize>> = vec![Vec::new()];
+    while let Some(prefix) = stack.pop() {
+        if let Some(cap) = cap_nodes {
+            if report.nodes >= cap {
+                report.hit_cap = true;
+                break;
+            }
+        }
+        let st = setup();
+        let mut sched = PrefixSched {
+            prefix: prefix.clone(),
+            pos: 0,
+            branch: None,
+            recorded: false,
+            diverged: false,
+        };
+        let rep = run_with_sched(n, st.tasks, &mut sched);
+        report.nodes += 1;
+        if sched.diverged {
+            report.diverged = true;
+            report.diverged_nodes += 1;
+        }
+        match sched.branch {
+            Some(enabled) => {
+                // Internal node: queue each branch (pushed ascending so the
+                // DFS pops the highest index first — preemption-heavy
+                // prefixes surface early under a cap).
+                for &e in &enabled {
+                    let mut child = prefix.clone();
+                    child.push(e);
+                    stack.push(child);
+                }
+            }
+            None => {
+                // Leaf: the prefix carried the run to completion.
+                report.leaves += 1;
+                if seen.insert(rep.schedule_hash) {
+                    report.distinct_leaves += 1;
+                }
+                if let Some(reason) = (st.probe)() {
+                    let grants = rep.steps.iter().map(|s| s.worker).collect();
+                    report.violators.push((grants, reason));
+                }
+            }
+        }
+    }
+    report
 }
 
 #[cfg(test)]
@@ -416,6 +576,144 @@ mod tests {
             "pct_concurrent: planted d=3 hits {}/{} (first seed {vs}: {vv})",
             violators.len(),
             SEEDS
+        );
+    }
+
+    /// RFC-0157 P1.3 — exhaustive enumeration (no sampling, no seed) of the
+    /// turnstile grant space for the planted scenarios: depth-2 plant
+    /// (N=3, OPS=3) and the chain-3 plant (N=3, OPS=4). The full space is
+    /// enumerated; the violations PCT only samples are counted leaves of a
+    /// complete space. Piso: exhaustive over this harness's grant space is
+    /// still not ∀ OS interleavings (R-pct / R-glue seguem).
+    #[test]
+    fn rfc0157_exhaustive_plants() {
+        const N: usize = 3;
+        for (ops, tag) in [(3usize, "d2"), (4usize, "chain3")] {
+            let report = run_exhaustive(N, None, || {
+                let plant = Arc::new(Plant {
+                    balance: Mutex::new(100),
+                    op_atomic: false,
+                });
+                let mut tasks = Vec::with_capacity(N);
+                for _ in 0..N {
+                    let plant = Arc::clone(&plant);
+                    tasks.push(Box::new(move |y: &Yielder| {
+                        for _ in 0..ops {
+                            plant.withdraw_all(y);
+                        }
+                    }) as Box<dyn FnOnce(&Yielder) + Send + 'static>);
+                }
+                let probe_plant = Arc::clone(&plant);
+                ExhaustiveSetup {
+                    tasks,
+                    probe: Box::new(move || probe_plant.violation()),
+                }
+            });
+            assert!(!report.diverged, "prefix replay diverged (determinism break)");
+            assert!(!report.hit_cap, "{tag}: unbounded enumeration must complete");
+            assert_eq!(
+                report.leaves, report.distinct_leaves,
+                "{tag}: duplicate leaf schedules"
+            );
+            assert!(
+                !report.violators.is_empty(),
+                "{tag}: exhaustive enumeration must contain the planted violation"
+            );
+            eprintln!(
+                "rfc0157_exhaustive_plants {tag}: nodes={} |space|={} violators={} first={:?}",
+                report.nodes,
+                report.leaves,
+                report.violators.len(),
+                report.violators[0]
+            );
+        }
+    }
+
+    /// RFC-0157 P1.3 — the group-commit publish path under the exhaustive
+    /// runner: the disk-fence scenario (single off-lock EIO fencing 2+
+    /// members — the `pct_disk_fence_three_teeth` shape) enumerated under
+    /// a node cap. A capped run is bounded coverage, never "exhaustive";
+    /// `hit_cap` is reported as-is. Piso idem R-pct.
+    #[test]
+    fn rfc0157_exhaustive_disk_fence_bounded() {
+        use pedradb_core::{ConcurrentDb, CoreError, OpenOptions};
+        use pedradb_sim::{FailingEnvArc, FaultKind};
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        const N: usize = 3;
+        const COMMITS: usize = 3;
+        const AFTER_FS: u64 = 5;
+        const CAP: usize = 3000;
+        static NODE: AtomicUsize = AtomicUsize::new(0);
+        let base = std::env::temp_dir().join(format!("pedra-xh-fence-{}", std::process::id()));
+
+        let report = run_exhaustive(N, Some(CAP), || {
+            let dir = base.join(format!("x-{}", NODE.fetch_add(1, Ordering::Relaxed)));
+            let _ = std::fs::remove_dir_all(&dir);
+            let env = FailingEnvArc::passing();
+            let opts = OpenOptions {
+                sync: true,
+                ..OpenOptions::default()
+            };
+            let db = ConcurrentDb::open_with_env(&dir, opts, env.clone()).unwrap();
+            db.set_write_group_catchup_window(std::time::Duration::ZERO);
+            let db = Arc::new(db);
+            // Arm AFTER open: failures only touch this node-run's fsyncs.
+            env.arm_with_kind(AFTER_FS, true, FaultKind::SyncFail);
+            let outcomes: std::sync::Arc<Mutex<Vec<(usize, &'static str)>>> =
+                std::sync::Arc::new(Mutex::new(Vec::new()));
+            let mut tasks = Vec::with_capacity(N);
+            for task in 0..N {
+                let db = Arc::clone(&db);
+                let outcomes = Arc::clone(&outcomes);
+                tasks.push(Box::new(move |_y: &Yielder| {
+                    for i in 0..COMMITS {
+                        let k = format!("fence/{task}/{i}");
+                        let mut tx = db.begin_occ();
+                        tx.put(k.as_bytes(), b"v").unwrap();
+                        let tag = match tx.commit() {
+                            Ok(()) => "ok",
+                            Err(CoreError::Internal(m))
+                                if m.starts_with("group wal write/sync failed") =>
+                            {
+                                "group_fence"
+                            }
+                            Err(CoreError::DurabilityFenced) => "refused",
+                            Err(e) => Box::leak(format!("{e}").into_boxed_str()),
+                        };
+                        outcomes.lock().unwrap().push((task * COMMITS + i, tag));
+                    }
+                }) as Box<dyn FnOnce(&Yielder) + Send + 'static>);
+            }
+            let probe_outcomes = Arc::clone(&outcomes);
+            ExhaustiveSetup {
+                tasks,
+                probe: Box::new(move || {
+                    let members = probe_outcomes
+                        .lock()
+                        .unwrap()
+                        .iter()
+                        .filter(|(_, t)| *t == "group_fence")
+                        .count();
+                    let _ = std::fs::remove_dir_all(&dir);
+                    (members >= 2).then(|| format!("members={members}"))
+                }),
+            }
+        });
+        // No hard `!diverged` assert here: the live ConcurrentDb path is
+        // not prefix-deterministic (that nondeterminism is exactly the
+        // R-glue/R-pct floor); diverged nodes are counted and reported.
+        assert!(
+            !report.violators.is_empty(),
+            "a fencing schedule (members>=2) must appear within {CAP} nodes"
+        );
+        eprintln!(
+            "rfc0157_exhaustive_disk_fence: nodes={} |space|={} violators={} hit_cap={} diverged={} (diverged>0: live ConcurrentDb is not prefix-deterministic — R-glue/R-pct floor; the enumerated space is a lower bound)",
+            report.nodes,
+            report.leaves,
+            report.violators.len(),
+            report.hit_cap,
+            report.diverged_nodes
         );
     }
 

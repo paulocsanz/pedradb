@@ -387,6 +387,73 @@ pub fn l28_tcp_pj_ok_as_is(_ok: bool) -> bool {
 mod tests {
     use super::*;
 
+    /// RFC-0157 P1.2 — property sweep over the L28 trio
+    /// (`l28_durability_ok`, `l28_leader_kill_ok`,
+    /// `l28_tcp_napply_retry_admitted`): exhaustive truth tables for the
+    /// boolean kernels plus a swept `attempts` space for the retry floor.
+    /// Pins: the durability gate is the 3-way conjunction;
+    /// leader-kill is the same triple; harness retries are never a ∀ TCP
+    /// admission (always false, at every attempt count and outcome) while
+    /// the AS-IS mutant rounds a retry success to ∀.
+    #[test]
+    fn rfc0157_property_sweep_l28_trio() {
+        // Exhaustive 8-case truth tables.
+        for get_ok in [false, true] {
+            for after_kill_ok in [false, true] {
+                for restart_ok in [false, true] {
+                    let and3 = get_ok && after_kill_ok && restart_ok;
+                    assert_eq!(
+                        l28_durability_ok(get_ok, after_kill_ok, restart_ok),
+                        and3,
+                        "durability gate must be the 3-way conjunction"
+                    );
+                    assert_eq!(
+                        l28_leader_kill_ok(get_ok, after_kill_ok, restart_ok),
+                        and3,
+                        "leader-kill path is the same durability triple"
+                    );
+                    assert_eq!(
+                        l28_durability_ok_as_is(get_ok, after_kill_ok, restart_ok),
+                        get_ok,
+                        "AS-IS dente: first get is enough"
+                    );
+                }
+            }
+        }
+        // Swept attempts space for the retry floor: never admitted.
+        let attempts_sweep = [
+            0u64,
+            1,
+            2,
+            3,
+            8,
+            64,
+            u64::from(u32::MAX),
+            u64::MAX,
+        ]
+        .into_iter()
+        .chain((0..2_000u64).map(|i| 0x0157_8282 ^ i));
+        for attempts in attempts_sweep {
+            for napply_ok in [false, true] {
+                assert_eq!(
+                    l28_tcp_napply_retry_admitted(attempts, napply_ok),
+                    false,
+                    "retry after {attempts} attempts is not a ∀ TCP theorem"
+                );
+            }
+        }
+        // The AS-IS mutant keeps its tooth: a retry success is rounded
+        // to ∀ TCP exactly when attempts >= 1 && napply_ok.
+        for attempts in [0u64, 1, 5] {
+            for napply_ok in [false, true] {
+                assert_eq!(
+                    l28_tcp_napply_retry_admitted_as_is(attempts, napply_ok),
+                    attempts >= 1 && napply_ok
+                );
+            }
+        }
+    }
+
     #[test]
     fn get_only_is_not_l28_clean() {
         assert!(l28_durability_ok(true, true, true));

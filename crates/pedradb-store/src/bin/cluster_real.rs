@@ -83,6 +83,20 @@ fn tcp_bin() -> PathBuf {
 }
 
 fn alloc_base_port() -> u16 {
+    // RFC-0157 P0.3 campaign seam: pin the per-process port range so K
+    // simultaneous clusters cannot collide — the pid-derived default
+    // overlaps for consecutive pids (pid%1500 + 3 slots each). Only the
+    // parallel campaign sets this; tests keep the historical scheme.
+    if let Ok(p) = env::var("L28_BASE_PORT") {
+        let base: u16 = p
+            .parse()
+            .unwrap_or_else(|_| panic!("L28_BASE_PORT must be a u16, got {p:?}"));
+        assert!(
+            (1024..=65_500).contains(&base),
+            "L28_BASE_PORT out of range: {base}"
+        );
+        return base + PORTS.fetch_add(3, Ordering::Relaxed);
+    }
     let pid = (std::process::id() % 1500) as u16;
     let n = PORTS.fetch_add(3, Ordering::Relaxed);
     23000 + pid + n

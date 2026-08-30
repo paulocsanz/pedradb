@@ -1094,6 +1094,167 @@ def check_verus(root: Path, catalog: dict, r: Report, required: bool) -> None:
             r.good(f"verus {pair['id']}")
 
 
+# RFC-0157 P1.1: workspace-wide class guards — the three RFC-0156 classes.
+# A site without its gate needs an inline waiver naming a REGISTERED
+# residual id: `RFC0157-WAIVER(R-unsafe-posix): ...`. A waiver naming an
+# unknown id fails. The scan covers production code only (before the
+# first `#[cfg(test)]` / `mod tests {` marker).
+FFI_RC_FNS = ("fdatasync(", "fcntl(", "fallocate(", "fsync(", "posix_fadvise(")
+FFI_GATE_TOKENS = ("posix_rc_to_io(rc)", "rc == 0", "rc != 0", "raw_os_error")
+CQE_ROUTE_TOKENS = ("cqe_act(", "next_user_data(", "submit_complete_act(")
+CAP_CAPI_LEN = re.compile(r"([A-Za-z_][A-Za-z0-9_]*len[A-Za-z0-9_]*)\s*:\s*usize")
+CAPI_FN = re.compile(r'pub unsafe extern "C" fn\s+([A-Za-z0-9_]+)\s*\(')
+WAIVER_RE = re.compile(r"RFC0157-WAIVER\(\s*(R-[A-Za-z0-9_-]+)\s*\)")
+
+
+def _production_lines(path: Path) -> list[str]:
+    """File lines before the test module (test code is out of scope).
+
+    Cuts at `mod tests {` — including the `#[cfg(test)]` attribute line
+    above it when present. Inline `#[cfg(test)]` items (test-only fields
+    inside production structs, as in ring.rs) do NOT cut: only a module
+    boundary does.
+    """
+    try:
+        src = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return []
+    lines = src.splitlines()
+    for i, line in enumerate(lines):
+        stripped = line.lstrip()
+        attr = stripped.startswith("#[cfg(test)]")
+        if stripped.startswith("mod tests {") or (
+            attr
+            and any(
+                lines[j].lstrip().startswith("mod ")
+                for j in range(i + 1, min(i + 3, len(lines)))
+            )
+        ):
+            # Drop the attribute line(s) immediately above the module too.
+            start = i
+            while start > 0 and lines[start - 1].lstrip().startswith("#["):
+                start -= 1
+            return lines[:start]
+    return lines
+
+
+def check_class_scan(root: Path, r: Report) -> None:
+    print("== class scan (RFC-0157 P1.1: 0156 classes, waiver = residual id) ==")
+    res = json.loads((root / "scripts/formal/residuals.json").read_text(encoding="utf-8"))
+    ids = {row["id"] for row in res["residuals"]}
+
+    def waivers(lines: list[str], lo: int, hi: int) -> set[str]:
+        found: set[str] = set()
+        for w in lines[max(0, lo) : max(0, hi)]:
+            m = WAIVER_RE.search(w)
+            if m:
+                found.add(m.group(1))
+        return found
+
+    def waivered_ok(w: set[str]) -> bool:
+        if w & ids:
+            return True
+        if w:
+            r.fail(f"class scan: waiver names unknown residual id(s) {sorted(w)}")
+        return False
+
+    files = sorted((root / "crates").glob("*/src/**/*.rs"))
+    ffi = capi = cqe = waivered = 0
+    for f in files:
+        rel = f.relative_to(root).as_posix()
+        lines = _production_lines(f)
+        n = len(lines)
+
+        # (a) R-unsafe-posix: `unsafe` rc-returning FFI must be gated in
+        # the same expression window (same tokens as the 0156 guard test).
+        for i, line in enumerate(lines):
+            if "unsafe {" not in line:
+                continue
+            if not any(fn in line for fn in FFI_RC_FNS):
+                continue
+            ffi += 1
+            if waivered_ok(waivers(lines, i - 3, i + 9)):
+                waivered += 1
+                continue
+            window = "\n".join(lines[i : i + 8])
+            if not any(t in window for t in FFI_GATE_TOKENS):
+                r.fail(
+                    f"class R-unsafe-posix: ungated unsafe FFI rc at "
+                    f"{rel}:{i + 1}: {line.strip()}"
+                )
+
+        # (b) R-unsafe-capi: C ABI length params must be capped
+        # (`c_len_admitted` / `MAX_C_`), explicitly dead, or waivered.
+        i = 0
+        while i < n:
+            m = CAPI_FN.search(lines[i])
+            if not m:
+                i += 1
+                continue
+            j = i
+            sig = lines[i]
+            while "{" not in sig and j + 1 < n:
+                j += 1
+                sig += "\n" + lines[j]
+            params = sig[sig.find("(") : sig.rfind(")") + 1]
+            lens = CAP_CAPI_LEN.findall(params)
+            depth = 0
+            started = False
+            k = j
+            while k < n:
+                depth += lines[k].count("{") - lines[k].count("}")
+                if "{" in lines[k]:
+                    started = True
+                if started and depth <= 0:
+                    break
+                k += 1
+            body_txt = "\n".join(lines[j + 1 : k + 1])
+            for lp in lens:
+                capi += 1
+                if waivered_ok(waivers(lines, i - 3, k + 2)):
+                    waivered += 1
+                    continue
+                dead = f"let _ = {lp};" in body_txt
+                used = re.search(r"\b" + re.escape(lp) + r"\b", body_txt) is not None
+                capped = "c_len_admitted(" in body_txt or "MAX_C_" in body_txt
+                if used and not dead and not capped:
+                    r.fail(
+                        f"class R-unsafe-capi: {rel}:{i + 1} {m.group(1)} "
+                        f"param `{lp}: usize` used without cap "
+                        f"(c_len_admitted / MAX_C_)"
+                    )
+            i = k + 1
+
+        # (c) R-uring: CQE tag adoption must route through the cqe kernel
+        # (minting via `next_user_data`, harvesting via `cqe_act` /
+        # `submit_complete_act`) — never a bare/constant-tag adoption.
+        # Matched sites are reads/adoptions (`.user_data` / `user_data(`);
+        # import continuations (`next_user_data,`) do not match.
+        user_data_site = re.compile(r"\.user_data\b|\buser_data\s*\(")
+        if "pedradb-io-uring" in rel and "cqe_kernel" not in rel:
+            for i, line in enumerate(lines):
+                if not user_data_site.search(line):
+                    continue
+                if line.lstrip().startswith(("//", "use ")):
+                    continue
+                cqe += 1
+                if waivered_ok(waivers(lines, i - 3, i + 7)):
+                    waivered += 1
+                    continue
+                window = "\n".join(lines[max(0, i - 6) : i + 7])
+                if not any(t in window for t in CQE_ROUTE_TOKENS):
+                    r.fail(
+                        f"class R-uring: {rel}:{i + 1} user_data site not "
+                        f"routed through the cqe kernel: {line.strip()}"
+                    )
+
+    r.good(
+        f"class scan: {len(files)} files — {ffi} FFI rc sites, "
+        f"{capi} C ABI len params, {cqe} CQE tag sites, "
+        f"{waivered} waivered"
+    )
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--lint", action="store_true")
@@ -1161,6 +1322,7 @@ def main() -> int:
         check_tcb_freeze(root, catalog, r)
         check_three_teeth(root, catalog, r)
         check_residuals(root, r, catalog)
+        check_class_scan(root, r)
     if args.clones or run_ci:
         check_clones(root, catalog, r)
     if args.twins or run_ci:

@@ -2243,6 +2243,118 @@ mod tests {
         let _ = std::fs::remove_dir_all(&parent);
     }
 
+    /// RFC-0157 P0.2 — differential fidelity detector: the SAME seeded
+    /// op/crash/restart/scan script runs against the World model FS
+    /// (`WorldEnv::Mem`, in-memory virtual FS) and against production
+    /// (`WorldEnv::Disk` = real tempdir through `StdEnv`); the
+    /// client-observable fingerprints (ack accounting + every put/get
+    /// event detail) must be EQUAL. A one-byte script divergence planted
+    /// on one side only (last put key_tag 1→9) must be DETECTED — the
+    /// fingerprints differ.
+    ///
+    /// Piso que isto NÃO derruba: the fate of *un-acked* writes may
+    /// legitimately differ (Mem drops unsynced bytes at crash; the real FS
+    /// keeps its page cache) — the script has no in-flight put at the
+    /// kill, so the oracle pins only the durability contract: acked put
+    /// survives crash+restart, unknown key misses. `silent_wrong == 0`
+    /// on both sides is asserted independently.
+    #[test]
+    fn world_stdenv_diff_replay() {
+        fn script(last_put_key: u8) -> Vec<Action> {
+            let mut s = vec![Action::ClockAdvance(40)];
+            // Four acked puts; a FlushAll after k=2 leaves a mixed layout
+            // (k=1/k=2 SST-resident, k=3/k=4 WAL-tail) at the kill.
+            for (k, v) in [(1u8, 0xA1u8), (2, 0xB2), (3, 0xC3), (4, 0xD4)] {
+                s.push(Action::Put {
+                    key_tag: k,
+                    val_tag: v,
+                });
+                if k == 2 {
+                    s.push(Action::FlushAll);
+                }
+            }
+            s.push(Action::Put {
+                key_tag: last_put_key,
+                val_tag: 0xE5,
+            });
+            s.push(Action::CrashReopen);
+            // Full observable scan: every written key + one unknown key (7),
+            // read on every node through the client API.
+            for k in [1u8, 2, 3, 4, 7] {
+                for n in 1..=3u64 {
+                    s.push(Action::Get { key_tag: k, node: n });
+                }
+            }
+            s
+        }
+        fn fingerprint(t: &Trace) -> Vec<String> {
+            let mut fp = vec![
+                format!("puts_ok={}", t.puts_ok),
+                format!("puts_err={}", t.puts_err),
+                format!("gets_ok={}", t.gets_ok),
+                format!("gets_err={}", t.gets_err),
+                format!("silent_wrong={}", t.silent_wrong),
+            ];
+            for e in &t.events {
+                if matches!(e.kind.as_str(), "get_ok" | "get_err" | "put_ok" | "put_err") {
+                    fp.push(format!("{}|{}", e.kind, e.detail));
+                }
+            }
+            fp
+        }
+        let cfg_for = |mem: bool, tag: &str| WorldConfig {
+            n_nodes: 3,
+            n_ranges: 1,
+            schedule_steps: 8,
+            parent: temp_parent(tag),
+            exchange_rounds: 64,
+            mem_storage: mem,
+            ..Default::default()
+        };
+        let seed = 0x0157_51DE;
+
+        // Equal fingerprints: model FS vs production FS, same seed+script.
+        let sched = script(1);
+        let mem = World::new(seed, cfg_for(true, "diff-mem"))
+            .run_with_schedule(&sched)
+            .unwrap();
+        let disk = World::new(seed, cfg_for(false, "diff-disk"))
+            .run_with_schedule(&sched)
+            .unwrap();
+        assert_eq!(mem.silent_wrong, 0, "{mem:?}");
+        assert_eq!(disk.silent_wrong, 0, "{disk:?}");
+        assert_eq!(
+            fingerprint(&mem),
+            fingerprint(&disk),
+            "world_stdenv_diff_replay: World(Mem) and StdEnv(Disk) disagree on client observables\nmem={mem:?}\ndisk={disk:?}"
+        );
+
+        // The production side itself replays deterministically (real FS).
+        let disk2 = World::new(seed, cfg_for(false, "diff-disk2"))
+            .run_with_schedule(&sched)
+            .unwrap();
+        assert_eq!(
+            fingerprint(&disk),
+            fingerprint(&disk2),
+            "StdEnv(Disk) side must replay identically on the real FS"
+        );
+
+        // Planted divergence: one byte of the script changed on the Disk
+        // side ONLY (last put key 1→9). The detector must see it.
+        let sched_plant = script(9);
+        let mem_p = World::new(seed, cfg_for(true, "diff-mem-p"))
+            .run_with_schedule(&sched)
+            .unwrap();
+        let disk_p = World::new(seed, cfg_for(false, "diff-disk-p"))
+            .run_with_schedule(&sched_plant)
+            .unwrap();
+        assert_ne!(
+            fingerprint(&mem_p),
+            fingerprint(&disk_p),
+            "planted one-byte script divergence went undetected"
+        );
+    }
+
     /// RFC-0063 P0: log-carried joint remove on the World Queued path.
     #[test]
     fn world_joint_remove_is_queued_and_replayable() {
