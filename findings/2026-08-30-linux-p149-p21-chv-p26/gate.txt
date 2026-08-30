@@ -1,0 +1,4 @@
+RESULT=BUILD_OK 12:41:09
+--- P149 gate majority median>3.0 ---
+RESULT=P149_PASS over_med=9/17 min_ratio=0.951
+RESULT=P149_DONE rc=0 2026-08-30T12:42:58Z

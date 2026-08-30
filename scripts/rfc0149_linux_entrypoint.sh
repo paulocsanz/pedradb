@@ -74,19 +74,26 @@ compare() {
 }
 
 echo "P149_COLUMN A async vs rocks-default(sync=false) majority median>3.0"
+echo "split suites: ycsb / deps / kvrocks (engines.rs: extra CFs only when the suite needs them)"
 
 for r in 1 2 3; do
   wait_quiet "r$r"
-  echo "=== round $r async-compat $(date -u +%H:%M:%S) load1=$(load1) ==="
-  run_compat "$OUT/r$r/async" || echo "ROUND-FAIL r$r async"
-  echo "=== round $r rocks-default $(date -u +%H:%M:%S) load1=$(load1) ==="
-  run_rocks "$OUT/r$r/rocks" || echo "ROUND-FAIL r$r rocks"
+  echo "=== round $r ycsb-compat $(date -u +%H:%M:%S) load1=$(load1) ==="
+  run_compat "$OUT/r$r/async" ycsb || echo "ROUND-FAIL r$r ycsb"
+  echo "=== round $r ycsb-rocks $(date -u +%H:%M:%S) load1=$(load1) ==="
+  run_rocks "$OUT/r$r/rocks" ycsb || echo "ROUND-FAIL r$r ycsb-rocks"
+  echo "=== round $r deps-compat $(date -u +%H:%M:%S) load1=$(load1) ==="
+  run_compat "$OUT/r$r/deps" deps || echo "ROUND-FAIL r$r deps"
+  echo "=== round $r deps-rocks $(date -u +%H:%M:%S) load1=$(load1) ==="
+  run_rocks "$OUT/r$r/rocks-deps" deps || echo "ROUND-FAIL r$r deps-rocks"
   echo "=== round $r kvr-compat $(date -u +%H:%M:%S) load1=$(load1) ==="
   run_compat "$OUT/r$r/kvr" kvrocks || echo "ROUND-FAIL r$r kvr"
   echo "=== round $r rocks-kvr $(date -u +%H:%M:%S) load1=$(load1) ==="
   run_rocks "$OUT/r$r/rocks-kvr" kvrocks || echo "ROUND-FAIL r$r rocks-kvr"
   compare "$OUT/r$r/async/rocks_parity_bench.json" \
     "$OUT/r$r/rocks/rocks_parity_bench.json" "$OUT/r$r/compare"
+  compare "$OUT/r$r/deps/rocks_parity_bench.json" \
+    "$OUT/r$r/rocks-deps/rocks_parity_bench.json" "$OUT/r$r/compare-deps"
   compare "$OUT/r$r/kvr/rocks_parity_bench.json" \
     "$OUT/r$r/rocks-kvr/rocks_parity_bench.json" "$OUT/r$r/compare-kvr"
 done
@@ -105,6 +112,14 @@ GATED = [
     "kvrocks_blob_set",
 ]
 KVR = {"kvrocks_get", "kvrocks_set", "kvrocks_scan", "kvrocks_pipelined_set", "kvrocks_blob_set"}
+DEPS = {
+    "deps_cache_overwrite",
+    "deps_lock_prewrite",
+    "deps_mvcc_latest",
+    "deps_apply_batch",
+    "deps_raftlog",
+    "deps_scan",
+}
 
 def qps(path):
     try:
@@ -115,16 +130,20 @@ def qps(path):
 
 per = {}
 for r in (1, 2, 3):
-    async_q = qps(out / f"r{r}/async/rocks_parity_bench.json")
-    rocks_q = qps(out / f"r{r}/rocks/rocks_parity_bench.json")
+    ycsb_q = qps(out / f"r{r}/async/rocks_parity_bench.json")
+    yrocks_q = qps(out / f"r{r}/rocks/rocks_parity_bench.json")
+    deps_q = qps(out / f"r{r}/deps/rocks_parity_bench.json")
+    drocks_q = qps(out / f"r{r}/rocks-deps/rocks_parity_bench.json")
     kvr_q = qps(out / f"r{r}/kvr/rocks_parity_bench.json")
     rkvr_q = qps(out / f"r{r}/rocks-kvr/rocks_parity_bench.json")
     ratios = {}
     for s in GATED:
         if s in KVR:
             c, p = kvr_q.get(s), rkvr_q.get(s)
+        elif s in DEPS:
+            c, p = deps_q.get(s), drocks_q.get(s)
         else:
-            c, p = async_q.get(s), rocks_q.get(s)
+            c, p = ycsb_q.get(s), yrocks_q.get(s)
         if c and p and p > 0:
             ratios[s] = c / p
     per[r] = ratios

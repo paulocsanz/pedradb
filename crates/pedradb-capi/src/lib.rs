@@ -732,6 +732,52 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// RFC-0152 P2.2.38: live C ABI set/get gate `*_len` through
+    /// `c_len_admitted`. Oversize value/key is LIMIT; AS-IS would copy any
+    /// len. Direct `c_len_oversize_on_live_tx_is_limit` /
+    /// `slice_cap_oversize_len_is_limit_without_reading` are not this tooth.
+    #[test]
+    fn c_len_admitted_on_live_capi_is_not_ok() {
+        assert!(!handles::c_len_admitted(
+            MAX_C_VALUE_BYTES + 1,
+            MAX_C_VALUE_BYTES
+        ));
+        assert!(
+            handles::c_len_admitted_as_is(MAX_C_VALUE_BYTES + 1, MAX_C_VALUE_BYTES),
+            "AS-IS dente: copy any len"
+        );
+        let (dir, path) = temp_path();
+        unsafe {
+            let db = montanha_fdb_database_create(path.as_ptr(), 3, 1);
+            assert!(!db.is_null(), "live database_create");
+            let tr = montanha_fdb_transaction_create(db);
+            assert!(!tr.is_null(), "live transaction_create");
+            let tiny = 1u8;
+            assert_eq!(
+                montanha_fdb_transaction_set(tr, b"k".as_ptr(), 1, &tiny, MAX_C_VALUE_BYTES + 1),
+                MONTAHA_FDB_LIMIT
+            );
+            let mut out = ptr::null_mut();
+            let mut len = 1usize;
+            assert_eq!(
+                montanha_fdb_transaction_get(
+                    db,
+                    tr,
+                    &tiny,
+                    MAX_C_KEY_BYTES + 1,
+                    &mut out,
+                    &mut len
+                ),
+                MONTAHA_FDB_LIMIT
+            );
+            assert!(out.is_null());
+            assert_eq!(len, 0);
+            montanha_fdb_transaction_destroy(tr);
+            montanha_fdb_database_destroy(db);
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// RFC-0075 P0: live C ABI create+tx; oversize key_len is LIMIT and
     /// does not copy. AS-IS would admit the length.
     #[test]

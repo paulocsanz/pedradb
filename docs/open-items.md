@@ -4,7 +4,18 @@
 > item is closed, or a new open question emerges. The authoritative source for
 > "what's done, what's next, what's unresolved."
 
-Last updated: 2026-08-29 (RFC-0149 P0: coluna A 12/17 >3× neste Mac; CFs físicas deixam de varrer a memtable em cada put)
+Last updated: 2026-08-30 (RFC-0149 P2.1 CHV **12/17 PASS** P1.8 hold. P2.2–P2.6
+REFUSED — every 1c write-path cut costs ycsb_f/lock their 3×.)
+
+> **Broken on main (2026-08-30, found during P2.6):**
+> `concurrent::tests::catchup_wait_bounded_by_half_fd` fails on pristine
+> HEAD `63d605c` itself (5s "A never entered its commit"). The RFC-0062
+> P1.1 p11j `lone_sync_commit` (one WAL lock encode+write+fd under the Db
+> write guard, no `begin_commit`) replaced the group path the test polls —
+> `commit_inflight` never rises on the lone path. macOS `sample` of the
+> stuck run confirms A sits in `Wal::sync_data` holding the write lock.
+> Stale test, not a live catch-up regression; needs a rewrite against the
+> group path (multi-writer leader), not the lone `put`.
 
 ---
 

@@ -1,0 +1,84 @@
+{
+  "bench": "rocks-parity-v1",
+  "engine": "rocksdb",
+  "sync": false,
+  "peer_policy": "rocks-default",
+  "durability": "async-wal (WriteOptions.sync=false, rocksdb default)",
+  "changelog_interval": 0,
+  "status": "ok",
+  "notes": [
+    "ycsb records=1024 ops=2000 payload=100 dist=zipfian",
+    "engine=rocksdb durability=async-wal (WriteOptions.sync=false, rocksdb default)",
+    "suites: kvrocks",
+    "seed: one put per record (not timed)",
+    "cfs: default + write, lock, raftlog (TiKV store shape; raftlog = raftdb)",
+    "deps apply batch txns/commit: 32",
+    "changelog_interval=0",
+    "peer_policy=rocks-default",
+    "host-default write sync: kvrocks=false myrocks=true surreal=true"
+  ],
+  "benches": [
+    {
+      "name": "kvrocks_get",
+      "n": 2000,
+      "qps": 1737651.165,
+      "p50_ms": 0.0005,
+      "p95_ms": 0.0007,
+      "p99_ms": 0.0008,
+      "max_ms": 0.0098,
+      "wall_s": 0.0012
+    },
+    {
+      "name": "kvrocks_set",
+      "n": 2000,
+      "qps": 389534.076,
+      "p50_ms": 0.0024,
+      "p95_ms": 0.0038,
+      "p99_ms": 0.0045,
+      "max_ms": 0.0254,
+      "wall_s": 0.0051
+    },
+    {
+      "name": "kvrocks_pipelined_set",
+      "n": 2000,
+      "qps": 33282.002,
+      "p50_ms": 0.029,
+      "p95_ms": 0.0377,
+      "p99_ms": 0.0515,
+      "max_ms": 0.2021,
+      "wall_s": 0.0601
+    },
+    {
+      "name": "kvrocks_scan",
+      "n": 2000,
+      "qps": 34479.837,
+      "p50_ms": 0.0284,
+      "p95_ms": 0.0343,
+      "p99_ms": 0.0465,
+      "max_ms": 0.0497,
+      "wall_s": 0.058
+    },
+    {
+      "name": "kvrocks_blob_set",
+      "n": 2000,
+      "qps": 37262.377,
+      "p50_ms": 0.0252,
+      "p95_ms": 0.0334,
+      "p99_ms": 0.0473,
+      "max_ms": 0.393,
+      "wall_s": 0.0537
+    },
+    {
+      "name": "kvrocks_set_mc50",
+      "n": 100000,
+      "qps": 114285.18,
+      "p50_ms": 0.3896,
+      "p95_ms": 0.725,
+      "p99_ms": 1.5974,
+      "max_ms": 3.957,
+      "clients": 50,
+      "errors": 0,
+      "wall_s": 0.875
+    }
+  ]
+}

@@ -36,6 +36,12 @@ pub fn may_advance_pin(pin: u64, applied_through: u64) -> bool {
     applied_through > pin
 }
 
+/// AS-IS H1: always advance (pin on receipt / go backwards).
+#[must_use]
+pub fn may_advance_pin_as_is(_pin: u64, _applied_through: u64) -> bool {
+    true
+}
+
 /// Next pin after a catch-up batch (`None` = empty).
 #[must_use]
 pub fn next_pin(pin: u64, batch_max: Option<u64>) -> u64 {
@@ -74,5 +80,21 @@ mod tests {
         assert_eq!(next_pin(3, None), 3);
         assert_eq!(next_pin(3, Some(2)), 3);
         assert_eq!(next_pin(3, Some(5)), 5);
+    }
+
+    /// Catalog three-teeth plant. Direct `pin_only_after_applied` is **not** this tooth.
+    #[test]
+    fn may_advance_pin_on_live_journal_is_not_ok() {
+        assert!(may_advance_pin(0, 1));
+        assert!(!may_advance_pin(1, 1));
+        assert!(
+            may_advance_pin_as_is(1, 1),
+            "AS-IS dente: pin advances even when applied_through <= pin"
+        );
+        let mut c = crate::JournalConsumer::new();
+        c.pin_after_apply(0);
+        assert_eq!(c.pin, 0, "live pin_after_apply must not move on applied==pin");
+        c.pin_after_apply(1);
+        assert_eq!(c.pin, 1);
     }
 }

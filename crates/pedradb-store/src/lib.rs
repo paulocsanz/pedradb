@@ -43,6 +43,7 @@
 #![warn(missing_docs)]
 
 mod ae_ack_kernel;
+mod apply_kernel;
 pub mod client;
 mod commit_kernel;
 mod compact_kernel;
@@ -60,6 +61,7 @@ pub mod tcp;
 pub mod tls;
 pub mod tx_glue_kernel;
 mod txn_kernel;
+mod vote_kernel;
 
 pub use ae_ack_kernel::{ae_ack_success, ae_ack_success_as_is};
 pub use client::{
@@ -85,20 +87,20 @@ pub use index_val_kernel::{
 };
 pub use l28::{
     l28_durability_ok, l28_durability_ok_as_is, l28_leader_kill_ok, l28_leader_kill_ok_as_is,
-    l28_tcp_apply_ok, l28_tcp_apply_ok_as_is, l28_tcp_hw_ok, l28_tcp_hw_ok_as_is, l28_tcp_leave_ok,
-    l28_tcp_leave_ok_as_is, l28_tcp_left_ok, l28_tcp_left_ok_as_is, l28_tcp_napply_ok,
-    l28_tcp_abort_ok, l28_tcp_abort_ok_as_is, l28_tcp_clear_ok, l28_tcp_clear_ok_as_is,
-    l28_tcp_lid_ok, l28_tcp_lid_ok_as_is, l28_tcp_peer_ok, l28_tcp_peer_ok_as_is,
-    l28_tcp_dsc_ok, l28_tcp_dsc_ok_as_is, l28_tcp_pld_ok, l28_tcp_pld_ok_as_is,
-    l28_tcp_pre_ok, l28_tcp_pre_ok_as_is, l28_tcp_rdr_ok, l28_tcp_rdr_ok_as_is,
-    l28_tcp_hnt_ok, l28_tcp_hnt_ok_as_is, l28_tcp_std_ok, l28_tcp_std_ok_as_is,
-    l28_tcp_fence_ok, l28_tcp_fence_ok_as_is,
-    l28_tcp_hist_ok, l28_tcp_hist_ok_as_is,
-    l28_tcp_napply_ok_as_is, l28_tcp_napply_retry_admitted, l28_tcp_napply_retry_admitted_as_is,
-    l28_tcp_nowms_ok, l28_tcp_nowms_ok_as_is, l28_tcp_odrop_ok,
-    l28_tcp_odrop_ok_as_is, l28_tcp_part_ok,
-    l28_tcp_trunc_ok, l28_tcp_trunc_ok_as_is,
-    l28_tcp_part_ok_as_is, l28_tcp_plant_ok, l28_tcp_plant_ok_as_is, world_seed_l28_ok,
+    l28_tcp_abort_ok, l28_tcp_abort_ok_as_is, l28_tcp_apply_ok, l28_tcp_apply_ok_as_is,
+    l28_tcp_clear_ok, l28_tcp_clear_ok_as_is, l28_tcp_dsc_ok, l28_tcp_dsc_ok_as_is,
+    l28_tcp_fence_ok, l28_tcp_fence_ok_as_is, l28_tcp_hist_ok, l28_tcp_hist_ok_as_is,
+    l28_tcp_hnt_ok, l28_tcp_hnt_ok_as_is, l28_tcp_hw_ok, l28_tcp_hw_ok_as_is, l28_tcp_leave_ok,
+    l28_tcp_leave_ok_as_is, l28_tcp_left_ok, l28_tcp_left_ok_as_is, l28_tcp_lid_ok,
+    l28_tcp_lid_ok_as_is, l28_tcp_napply_ok, l28_tcp_napply_ok_as_is,
+    l28_tcp_napply_retry_admitted, l28_tcp_napply_retry_admitted_as_is, l28_tcp_nowms_ok,
+    l28_tcp_nowms_ok_as_is, l28_tcp_odrop_ok, l28_tcp_odrop_ok_as_is, l28_tcp_part_ok,
+    l28_tcp_part_ok_as_is, l28_tcp_peer_ok, l28_tcp_peer_ok_as_is, l28_tcp_plant_ok,
+    l28_tcp_plant_ok_as_is, l28_tcp_pld_ok, l28_tcp_pld_ok_as_is, l28_tcp_pre_ok,
+    l28_tcp_pre_ok_as_is, l28_tcp_rdr_ok, l28_tcp_rdr_ok_as_is, l28_tcp_slot_ok,
+    l28_tcp_pj_ok, l28_tcp_pj_ok_as_is, l28_tcp_slot_ok_as_is, l28_tcp_std_ok, l28_tcp_sth_ok,
+    l28_tcp_sth_ok_as_is,
+    l28_tcp_std_ok_as_is, l28_tcp_trunc_ok, l28_tcp_trunc_ok_as_is, world_seed_l28_ok,
     world_seed_l28_ok_as_is,
 };
 pub use layers::{
@@ -111,6 +113,7 @@ pub use membership_kernel::{
     elect_claim_banner, elect_claim_banner_as_is, high_water_at_least, high_water_at_least_as_is,
     joint_election_ok, joint_election_ok_as_is, joint_leave_ok, joint_leave_ok_as_is,
     joint_still_active, joint_still_active_as_is, liveness_admitted, liveness_admitted_as_is,
+    plant_joint_schedule_ok, plant_joint_schedule_ok_as_is,
     majority_of, queued_leave_finish_ok, queued_leave_finish_ok_as_is,
 };
 pub use msg::PeerMsg;
@@ -1844,11 +1847,7 @@ pub fn tcp_node_removed_not_participating(
 /// Rewinding `applied` is not this tooth — compact may have dropped that
 /// log entry.
 #[must_use]
-pub fn tcp_node_recover_apply_ok(
-    data: impl AsRef<Path>,
-    self_id: u64,
-    cli: &[u64],
-) -> bool {
+pub fn tcp_node_recover_apply_ok(data: impl AsRef<Path>, self_id: u64, cli: &[u64]) -> bool {
     {
         let Ok(mut c) = StoreCluster::open_single_node(&data, self_id, cli, 1) else {
             return false;
@@ -1924,11 +1923,7 @@ fn disk_log_has_uncommitted_suffix<E: Env>(db: &Db<E>, commit: u64) -> bool {
 /// membership already dropped. Production TCP ctor must persist truncate
 /// so disk has no `index > commit`. AS-IS filters persist by `ids`.
 #[must_use]
-pub fn tcp_node_removed_truncate_ok(
-    data: impl AsRef<Path>,
-    self_id: u64,
-    cli: &[u64],
-) -> bool {
+pub fn tcp_node_removed_truncate_ok(data: impl AsRef<Path>, self_id: u64, cli: &[u64]) -> bool {
     let commit;
     {
         let Ok(mut c) = StoreCluster::open_single_node(&data, self_id, cli, 1) else {
@@ -1980,11 +1975,7 @@ pub fn tcp_node_removed_truncate_ok(
 /// Production TCP ctor must delete that key. 0132 `log_hi` cap is not
 /// this tooth. AS-IS leaves the orphan segment.
 #[must_use]
-pub fn tcp_node_removed_orphan_drop_ok(
-    data: impl AsRef<Path>,
-    self_id: u64,
-    cli: &[u64],
-) -> bool {
+pub fn tcp_node_removed_orphan_drop_ok(data: impl AsRef<Path>, self_id: u64, cli: &[u64]) -> bool {
     let orphan;
     {
         let Ok(mut c) = StoreCluster::open_single_node(&data, self_id, cli, 1) else {
@@ -2037,11 +2028,7 @@ pub fn tcp_node_removed_orphan_drop_ok(
 /// already dropped. Production TCP ctor must abort it. AS-IS filters abort
 /// by `ids`.
 #[must_use]
-pub fn tcp_node_removed_abort_ok(
-    data: impl AsRef<Path>,
-    self_id: u64,
-    cli: &[u64],
-) -> bool {
+pub fn tcp_node_removed_abort_ok(data: impl AsRef<Path>, self_id: u64, cli: &[u64]) -> bool {
     let ik = intent_key(b"rfc0134-tcp");
     {
         let Ok(mut c) = StoreCluster::open_single_node(&data, self_id, cli, 1) else {
@@ -2070,8 +2057,7 @@ pub fn tcp_node_removed_abort_ok(
 }
 
 fn disk_si_now_ms<E: Env>(n: &StoreNode<E>) -> u64 {
-    n.db
-        .get(&si_meta_key("now_ms"))
+    n.db.get(&si_meta_key("now_ms"))
         .and_then(|raw| decode_u64_meta(&raw).ok())
         .unwrap_or(0)
 }
@@ -2079,11 +2065,7 @@ fn disk_si_now_ms<E: Env>(n: &StoreNode<E>) -> u64 {
 /// RFC-0135 P1.2: production TCP ctor of a replica already dropped from
 /// `ids` must persist `now_ms` on self. AS-IS filters persist by `ids`.
 #[must_use]
-pub fn tcp_node_removed_now_ms_ok(
-    data: impl AsRef<Path>,
-    self_id: u64,
-    cli: &[u64],
-) -> bool {
+pub fn tcp_node_removed_now_ms_ok(data: impl AsRef<Path>, self_id: u64, cli: &[u64]) -> bool {
     let Ok(mut c) = StoreCluster::open_single_node(&data, self_id, cli, 1) else {
         return false;
     };
@@ -2100,11 +2082,7 @@ pub fn tcp_node_removed_now_ms_ok(
 /// RFC-0136 P1.2: production TCP ctor of a replica already dropped from
 /// `ids` must persist SI hist on self. AS-IS filters persist by `ids`.
 #[must_use]
-pub fn tcp_node_removed_hist_ok(
-    data: impl AsRef<Path>,
-    self_id: u64,
-    cli: &[u64],
-) -> bool {
+pub fn tcp_node_removed_hist_ok(data: impl AsRef<Path>, self_id: u64, cli: &[u64]) -> bool {
     let Ok(mut c) = StoreCluster::open_single_node(&data, self_id, cli, 1) else {
         return false;
     };
@@ -2127,11 +2105,7 @@ pub fn tcp_node_removed_hist_ok(
 /// RFC-0137 P1.2: production TCP ctor of a replica already dropped from
 /// `ids` must persist abort fence on self. AS-IS filters persist by `ids`.
 #[must_use]
-pub fn tcp_node_removed_fence_ok(
-    data: impl AsRef<Path>,
-    self_id: u64,
-    cli: &[u64],
-) -> bool {
+pub fn tcp_node_removed_fence_ok(data: impl AsRef<Path>, self_id: u64, cli: &[u64]) -> bool {
     let Ok(mut c) = StoreCluster::open_single_node(&data, self_id, cli, 1) else {
         return false;
     };
@@ -2151,11 +2125,7 @@ pub fn tcp_node_removed_fence_ok(
 /// RFC-0138 P1.2: production TCP ctor of a replica already dropped from
 /// `ids` must force-clear stuck intents on self. AS-IS filters clear by `ids`.
 #[must_use]
-pub fn tcp_node_removed_clear_ok(
-    data: impl AsRef<Path>,
-    self_id: u64,
-    cli: &[u64],
-) -> bool {
+pub fn tcp_node_removed_clear_ok(data: impl AsRef<Path>, self_id: u64, cli: &[u64]) -> bool {
     let Ok(mut c) = StoreCluster::open_single_node(&data, self_id, cli, 1) else {
         return false;
     };
@@ -2173,30 +2143,19 @@ pub fn tcp_node_removed_clear_ok(
             return false;
         }
     }
-    if c.nodes
-        .get(&self_id)
-        .and_then(|n| n.db.get(&ik))
-        .is_none()
-    {
+    if c.nodes.get(&self_id).and_then(|n| n.db.get(&ik)).is_none() {
         return false;
     }
     if c.force_local_clear_keys(tid, &[k], false).is_err() {
         return false;
     }
-    c.nodes
-        .get(&self_id)
-        .and_then(|n| n.db.get(&ik))
-        .is_none()
+    c.nodes.get(&self_id).and_then(|n| n.db.get(&ik)).is_none()
 }
 
 /// RFC-0139 P1.2: production TCP ctor of a replica already dropped from
 /// `ids` must drop leftover TX preimages on self. AS-IS filters drop by `ids`.
 #[must_use]
-pub fn tcp_node_removed_pre_ok(
-    data: impl AsRef<Path>,
-    self_id: u64,
-    cli: &[u64],
-) -> bool {
+pub fn tcp_node_removed_pre_ok(data: impl AsRef<Path>, self_id: u64, cli: &[u64]) -> bool {
     let Ok(mut c) = StoreCluster::open_single_node(&data, self_id, cli, 1) else {
         return false;
     };
@@ -2214,11 +2173,7 @@ pub fn tcp_node_removed_pre_ok(
             return false;
         }
     }
-    if c.nodes
-        .get(&self_id)
-        .and_then(|n| n.db.get(&pk))
-        .is_none()
-    {
+    if c.nodes.get(&self_id).and_then(|n| n.db.get(&pk)).is_none() {
         return false;
     }
     let handle = TxHandle {
@@ -2229,10 +2184,7 @@ pub fn tcp_node_removed_pre_ok(
     if c.drop_preimages(&handle).is_err() {
         return false;
     }
-    c.nodes
-        .get(&self_id)
-        .and_then(|n| n.db.get(&pk))
-        .is_none()
+    c.nodes.get(&self_id).and_then(|n| n.db.get(&pk)).is_none()
 }
 
 /// RFC-0140 P1.2: production TCP ctor of a replica already dropped from
@@ -2240,11 +2192,7 @@ pub fn tcp_node_removed_pre_ok(
 /// via election timeout. 0125 high-water and 0139 drop-preimages are
 /// **not** this tooth. AS-IS would keep CLI n_nodes at load.
 #[must_use]
-pub fn tcp_node_removed_peer_ok(
-    data: impl AsRef<Path>,
-    self_id: u64,
-    cli: &[u64],
-) -> bool {
+pub fn tcp_node_removed_peer_ok(data: impl AsRef<Path>, self_id: u64, cli: &[u64]) -> bool {
     let Ok(c) = StoreCluster::open_single_node(&data, self_id, cli, 1) else {
         return false;
     };
@@ -2273,11 +2221,7 @@ pub fn tcp_node_removed_peer_ok(
 /// user key; `get` is Err (not `Ok(Some(stale))`). 0140 timeout peek is
 /// **not** this tooth. AS-IS would `get()` the local-only bytes.
 #[must_use]
-pub fn tcp_node_removed_lid_ok(
-    data: impl AsRef<Path>,
-    self_id: u64,
-    cli: &[u64],
-) -> bool {
+pub fn tcp_node_removed_lid_ok(data: impl AsRef<Path>, self_id: u64, cli: &[u64]) -> bool {
     let Ok(mut c) = StoreCluster::open_single_node(&data, self_id, cli, 1) else {
         return false;
     };
@@ -2305,11 +2249,7 @@ pub fn tcp_node_removed_lid_ok(
 /// `get` Err contains `empty`, not `bad node`. 0141 local-id None is
 /// **not** this tooth. AS-IS would `get_on` a remote voter.
 #[must_use]
-pub fn tcp_node_removed_rdr_ok(
-    data: impl AsRef<Path>,
-    self_id: u64,
-    cli: &[u64],
-) -> bool {
+pub fn tcp_node_removed_rdr_ok(data: impl AsRef<Path>, self_id: u64, cli: &[u64]) -> bool {
     let Ok(c) = StoreCluster::open_single_node(&data, self_id, cli, 1) else {
         return false;
     };
@@ -2332,11 +2272,7 @@ pub fn tcp_node_removed_rdr_ok(
 /// `ids` must live-discard an uncommitted suffix on self. 0132 recover
 /// truncate is **not** this tooth. AS-IS filters discard by `ids`.
 #[must_use]
-pub fn tcp_node_removed_dsc_ok(
-    data: impl AsRef<Path>,
-    self_id: u64,
-    cli: &[u64],
-) -> bool {
+pub fn tcp_node_removed_dsc_ok(data: impl AsRef<Path>, self_id: u64, cli: &[u64]) -> bool {
     let Ok(mut c) = StoreCluster::open_single_node(&data, self_id, cli, 1) else {
         return false;
     };
@@ -2396,11 +2332,7 @@ pub fn tcp_node_removed_dsc_ok(
 /// `next_index` repair runs. 0143 direct discard is **not** this tooth.
 /// AS-IS uses remote `ids.first()` and skips the repair.
 #[must_use]
-pub fn tcp_node_removed_pld_ok(
-    data: impl AsRef<Path>,
-    self_id: u64,
-    cli: &[u64],
-) -> bool {
+pub fn tcp_node_removed_pld_ok(data: impl AsRef<Path>, self_id: u64, cli: &[u64]) -> bool {
     let Ok(mut c) = StoreCluster::open_single_node(&data, self_id, cli, 1) else {
         return false;
     };
@@ -2454,11 +2386,7 @@ pub fn tcp_node_removed_pld_ok(
 /// persist-leader and 0128 participating are **not** this tooth. AS-IS
 /// keeps `Role::Leader`.
 #[must_use]
-pub fn tcp_node_removed_std_ok(
-    data: impl AsRef<Path>,
-    self_id: u64,
-    cli: &[u64],
-) -> bool {
+pub fn tcp_node_removed_std_ok(data: impl AsRef<Path>, self_id: u64, cli: &[u64]) -> bool {
     let Ok(mut c) = StoreCluster::open_single_node(&data, self_id, cli, 1) else {
         return false;
     };
@@ -2489,12 +2417,7 @@ pub fn tcp_node_removed_std_ok(
 /// route `leader_hint` to a replica already dropped from `ids`. 0145
 /// step-down is **not** this tooth. AS-IS returns any `leader_id`.
 #[must_use]
-pub fn tcp_node_hint_ok(
-    data: impl AsRef<Path>,
-    self_id: u64,
-    cli: &[u64],
-    removed: u64,
-) -> bool {
+pub fn tcp_node_hint_ok(data: impl AsRef<Path>, self_id: u64, cli: &[u64], removed: u64) -> bool {
     let Ok(mut c) = StoreCluster::open_single_node(&data, self_id, cli, 1) else {
         return false;
     };
@@ -2515,6 +2438,155 @@ pub fn tcp_node_hint_ok(
         p.leader_id = Some(removed);
     }
     c.leader_hint(1) != Some(removed)
+}
+
+/// RFC-0147 P1.2: production TCP ctor of a **remaining** voter must
+/// forget next/match/sent_through of a replica already dropped from
+/// `ids`. 0146 hint filter is **not** this tooth. AS-IS keeps those slots.
+#[must_use]
+pub fn tcp_node_drop_repl_ok(
+    data: impl AsRef<Path>,
+    self_id: u64,
+    cli: &[u64],
+    removed: u64,
+) -> bool {
+    let Ok(mut c) = StoreCluster::open_single_node(&data, self_id, cli, 1) else {
+        return false;
+    };
+    if !c.is_member(self_id) || c.is_member(removed) {
+        return false;
+    }
+    let Some(keep_id) = c
+        .ids
+        .iter()
+        .copied()
+        .find(|&id| id != self_id && id != removed)
+    else {
+        return false;
+    };
+    {
+        let Some(n) = c.nodes.get_mut(&self_id) else {
+            return false;
+        };
+        let Some(p) = n.ranges.get_mut(&1) else {
+            return false;
+        };
+        p.next_index.insert(keep_id, 10);
+        p.next_index.insert(removed, 99);
+        p.match_index.insert(keep_id, 9);
+        p.match_index.insert(removed, 98);
+        p.sent_through.insert(keep_id, 10);
+        p.sent_through.insert(removed, 99);
+    }
+    let ids = c.ids.clone();
+    if c.install_applied_membership(ids).is_err() {
+        return false;
+    }
+    let Some(p) = c.nodes.get(&self_id).and_then(|n| n.ranges.get(&1)) else {
+        return false;
+    };
+    p.next_index.get(&keep_id).copied() == Some(10)
+        && p.match_index.get(&keep_id).copied() == Some(9)
+        && p.sent_through.get(&keep_id).copied() == Some(10)
+        && !p.next_index.contains_key(&removed)
+        && !p.match_index.contains_key(&removed)
+        && !p.sent_through.contains_key(&removed)
+}
+
+/// RFC-0148 P1.2: production TCP ctor of a **remaining** 3-node voter must
+/// forget `sent_through` of a remote replica on oob `remove_member`.
+/// 0147 joint `drop_repl_slot` / next-match already dropped are **not**
+/// this tooth. AS-IS keeps `sent_through`. The removed id is in `ids`
+/// but not in local `nodes` (TCP ctor).
+#[must_use]
+pub fn tcp_node_drop_st_ok(
+    data: impl AsRef<Path>,
+    self_id: u64,
+    cli: &[u64],
+    removed: u64,
+) -> bool {
+    let Ok(mut c) = StoreCluster::open_single_node(&data, self_id, cli, 1) else {
+        return false;
+    };
+    if !c.is_member(self_id) || !c.is_member(removed) {
+        return false;
+    }
+    if c.nodes.contains_key(&removed) {
+        return false;
+    }
+    let Some(keep_id) = c
+        .ids
+        .iter()
+        .copied()
+        .find(|&id| id != self_id && id != removed)
+    else {
+        return false;
+    };
+    {
+        let Some(n) = c.nodes.get_mut(&self_id) else {
+            return false;
+        };
+        let Some(p) = n.ranges.get_mut(&1) else {
+            return false;
+        };
+        p.sent_through.insert(keep_id, 10);
+        p.sent_through.insert(removed, 99);
+    }
+    if c.remove_member(removed).is_err() {
+        return false;
+    }
+    let Some(p) = c.nodes.get(&self_id).and_then(|n| n.ranges.get(&1)) else {
+        return false;
+    };
+    !c.is_member(removed)
+        && p.sent_through.get(&keep_id).copied() == Some(10)
+        && !p.sent_through.contains_key(&removed)
+}
+
+/// RFC-0068 P2.2: production TCP ctor of a 3-node voter, planted
+/// committed C-old,new without leave, must refuse a C-old majority
+/// elect. 0148 oob `sent_through` is **not** this tooth. AS-IS would
+/// elect on C-old (`joint_election_ok_as_is`).
+#[must_use]
+pub fn tcp_node_plant_joint_ok(
+    data: impl AsRef<Path>,
+    self_id: u64,
+    cli: &[u64],
+    new_member: u64,
+) -> bool {
+    let Ok(mut c) = StoreCluster::open_single_node(&data, self_id, cli, 1) else {
+        return false;
+    };
+    if !c.is_member(self_id) || c.is_member(new_member) {
+        return false;
+    }
+    if c.nodes.contains_key(&new_member) {
+        return false;
+    }
+    {
+        let Some(n) = c.nodes.get_mut(&self_id) else {
+            return false;
+        };
+        let Some(p) = n.ranges.get_mut(&1) else {
+            return false;
+        };
+        p.role = Role::Leader;
+        p.leader_id = Some(self_id);
+    }
+    if c.range_leader(1) != Some(self_id) {
+        return false;
+    }
+    if c.plant_committed_joint_without_leave(new_member).is_err() {
+        return false;
+    }
+    let old = c.ids.clone();
+    let mut new = old.clone();
+    new.push(new_member);
+    new.sort_unstable();
+    membership_kernel::joint_still_active(&old, &new)
+        && !membership_kernel::joint_still_active_as_is(&old, &new)
+        && membership_kernel::joint_election_ok_as_is(2, 3, Some((2, 4)))
+        && !c.probe_old_majority_joint_election(1)
 }
 
 fn persist_hard_db<E: Env>(db: &mut Db<E>, range_id: u64, peer: &RangePeer) -> Result<()> {
@@ -3122,10 +3194,8 @@ impl StoreCluster<IoUringEnv> {
             },
         );
         let mut cluster = Self {
-            membership_high_water: membership_kernel::high_water_at_least(
-                disk_hw,
-                ids.len() as u64,
-            ) as usize,
+            membership_high_water: membership_kernel::high_water_at_least(disk_hw, ids.len() as u64)
+                as usize,
             engine_opts: opts,
             nodes,
             ids,
@@ -3492,10 +3562,9 @@ impl<E: Env> StoreCluster<E> {
                 }
             }
         }
-        self.membership_high_water = membership_kernel::high_water_at_least(
-            disk_hw,
-            self.membership_high_water as u64,
-        ) as usize;
+        self.membership_high_water =
+            membership_kernel::high_water_at_least(disk_hw, self.membership_high_water as u64)
+                as usize;
         self.persist_cluster_identity()
     }
 
@@ -3875,10 +3944,13 @@ impl<E: Env> StoreCluster<E> {
     /// # Errors
     /// Unknown node / would leave empty membership.
     pub fn remove_member(&mut self, node_id: u64) -> Result<()> {
-        if !self.nodes.contains_key(&node_id) {
-            return Err(StoreError::Msg("remove_member: unknown node".into()));
-        }
+        // TCP ctor (`open_single_node`) only has *self* in `nodes`. A remote
+        // id that is still in `ids` is a member — RFC-0148 P1.2 must drop
+        // local `sent_through` without requiring a local StoreNode for it.
         if !self.ids.contains(&node_id) {
+            if !self.nodes.contains_key(&node_id) {
+                return Err(StoreError::Msg("remove_member: unknown node".into()));
+            }
             return Ok(());
         }
         if self.ids.len() <= 1 {
@@ -4166,16 +4238,13 @@ impl<E: Env> StoreCluster<E> {
     /// # Errors
     /// Unknown node / already a member / no leader.
     pub fn plant_committed_joint_without_leave(&mut self, new_member: u64) -> Result<()> {
-        if !self.nodes.contains_key(&new_member) {
-            return Err(StoreError::Msg(
-                "plant_committed_joint_without_leave: unknown node".into(),
-            ));
-        }
         if self.ids.contains(&new_member) {
             return Err(StoreError::Msg(
                 "plant_committed_joint_without_leave: already a member".into(),
             ));
         }
+        // TCP ctor only has *self* in `nodes`. RFC-0068 P2.2 plants add of a
+        // remote / never-opened id (not a local StoreNode).
         let rid = self.ranges.first().map(|r| r.id).unwrap_or(1);
         let leader = self
             .range_leader(rid)
@@ -4312,10 +4381,9 @@ impl<E: Env> StoreCluster<E> {
         }
         if let Some(raw) = db.get(&cluster_high_water_key()) {
             if let Ok(h) = decode_u64_meta(&raw) {
-                self.membership_high_water = membership_kernel::high_water_at_least(
-                    h,
-                    self.membership_high_water as u64,
-                ) as usize;
+                self.membership_high_water =
+                    membership_kernel::high_water_at_least(h, self.membership_high_water as u64)
+                        as usize;
             }
         }
         let mut rmap = HashMap::new();
@@ -4377,10 +4445,9 @@ impl<E: Env> StoreCluster<E> {
         }
         if let Some(raw) = db.get(&cluster_high_water_key()) {
             if let Ok(h) = decode_u64_meta(&raw) {
-                self.membership_high_water = membership_kernel::high_water_at_least(
-                    h,
-                    self.membership_high_water as u64,
-                ) as usize;
+                self.membership_high_water =
+                    membership_kernel::high_water_at_least(h, self.membership_high_water as u64)
+                        as usize;
             }
         }
         let mut rmap = HashMap::new();
@@ -5254,18 +5321,34 @@ impl<E: Env> StoreCluster<E> {
                 vote_granted: false,
             });
         }
-        let can = p.voted_for.is_none() || p.voted_for == Some(candidate_id);
-        let up = last_log_term > p.last_term()
-            || (last_log_term == p.last_term() && last_log_index >= p.last_index());
-        let mut grant = term == p.term && can && up;
-        if grant {
+        let decision = vote_kernel::vote_decision(vote_kernel::VoteInputs {
+            current_term: p.term,
+            voted_for: p.voted_for,
+            last_log_term: p.last_term(),
+            last_log_index: p.last_index(),
+            candidate_term: term,
+            candidate_id,
+            candidate_last_log_term: last_log_term,
+            candidate_last_log_index: last_log_index,
+        });
+        // F15 / RFC-0152 P1.1: wire bit is grant_after_persist, not persist-then-bool.
+        let mut grant = false;
+        if matches!(decision, vote_kernel::VoteDecision::WouldGrant) {
             let prev_voted = p.voted_for;
+            let prev_election_left = p.election_left;
             p.voted_for = Some(candidate_id);
-            p.election_left = p.election_timeout;
-            if persist_hard_db(&mut n.db, range_id, p).is_err() {
-                p.voted_for = prev_voted;
-                grant = false;
-            }
+            let persist_out = match persist_hard_db(&mut n.db, range_id, p) {
+                Ok(()) => {
+                    p.election_left = p.election_timeout;
+                    vote_kernel::PersistOutcome::Ok
+                }
+                Err(_) => {
+                    p.voted_for = prev_voted;
+                    p.election_left = prev_election_left;
+                    vote_kernel::PersistOutcome::Err
+                }
+            };
+            grant = vote_kernel::grant_after_persist(decision, persist_out);
         }
         Ok(PeerMsg::RequestVoteReply {
             range_id,
@@ -5398,7 +5481,8 @@ impl<E: Env> StoreCluster<E> {
         }
         p.leader_id = Some(leader_id);
         let prev = prev_log_index;
-        let consistent = prev == 0 || (p.last_index() >= prev && p.term_at(prev) == prev_log_term);
+        let consistent =
+            ae_ack_kernel::ae_prev_log_ok(prev, prev_log_term, p.last_index(), p.term_at(prev));
         if !consistent {
             return Ok(PeerMsg::AppendEntriesReply {
                 range_id,
@@ -5411,27 +5495,45 @@ impl<E: Env> StoreCluster<E> {
         let mut log_dirty = false;
         let log_before = p.log.clone();
         for e in &entries {
-            if let Some(i) = p.log.iter().position(|x| x.index == e.index) {
-                // Conflict if term *or* payload differs (leader may have
-                // discarded an uncommitted client entry and re-used the index).
-                if p.log[i].term != e.term || p.log[i].entry != e.entry {
-                    // F24: never rewrite a committed index.
-                    if e.index <= p.commit {
-                        ok_append = false;
-                        break;
+            let existing_term = p.log.iter().find(|x| x.index == e.index).map(|x| x.term);
+            match ae_ack_kernel::ae_entry_action(
+                e.index,
+                e.term,
+                existing_term,
+                p.commit,
+                p.last_index(),
+            ) {
+                ae_ack_kernel::AeEntryAction::Keep => {
+                    // Same index+term: still conflict if payload differs
+                    // (leader may have discarded an uncommitted client entry
+                    // and re-used the index).
+                    if let Some(i) = p.log.iter().position(|x| x.index == e.index) {
+                        if p.log[i].entry != e.entry {
+                            if e.index <= p.commit {
+                                ok_append = false;
+                                break;
+                            }
+                            p.log.truncate(i);
+                            p.log.push(e.clone());
+                            log_dirty = true;
+                        }
                     }
-                    p.log.truncate(i);
+                }
+                ae_ack_kernel::AeEntryAction::Append => {
                     p.log.push(e.clone());
                     log_dirty = true;
                 }
-            } else {
-                let expect = p.last_index() + 1;
-                if e.index != expect {
+                ae_ack_kernel::AeEntryAction::TruncateAndInstall => {
+                    if let Some(i) = p.log.iter().position(|x| x.index == e.index) {
+                        p.log.truncate(i);
+                    }
+                    p.log.push(e.clone());
+                    log_dirty = true;
+                }
+                ae_ack_kernel::AeEntryAction::Refuse => {
                     ok_append = false;
                     break;
                 }
-                p.log.push(e.clone());
-                log_dirty = true;
             }
         }
         if !ok_append {
@@ -6254,9 +6356,7 @@ impl<E: Env> StoreCluster<E> {
                     .iter()
                     .copied()
                     .chain(self.nodes.keys().copied())
-                    .find(|&id| {
-                        membership_kernel::discard_leader_local(self.is_local_node(id))
-                    });
+                    .find(|&id| membership_kernel::discard_leader_local(self.is_local_node(id)));
                 if let Some(lid) = persist_leader {
                     self.discard_uncommitted_from(range_id, lid, index)?;
                 }
@@ -6604,130 +6704,138 @@ impl<E: Env> StoreCluster<E> {
         .map_err(|e| StoreError::from(pedradb_core::CoreError::from(e)))?;
         let mut install_new: Option<Vec<u64>> = None;
         let applied_to_cap = {
-        let node = self.nodes.get_mut(&nid).unwrap();
-        // Collect entries to apply, then mutate db + peer separately (borrowck).
-        let (start, end, recs) = {
-            let peer = node.ranges.get(&rid).unwrap();
-            let start = peer.applied + 1;
-            let end = peer.commit;
-            let mut recs = Vec::new();
-            for next in start..=end {
-                if let Some(rec) = peer.log.iter().find(|e| e.index == next) {
-                    recs.push(rec.clone());
-                } else {
-                    break;
+            let node = self.nodes.get_mut(&nid).unwrap();
+            // Collect entries to apply, then mutate db + peer separately (borrowck).
+            let (start, end, recs) = {
+                let peer = node.ranges.get(&rid).unwrap();
+                let start = peer.applied + 1;
+                let end = peer.commit;
+                let mut recs = Vec::new();
+                for next in start..=end {
+                    let present = peer.log.iter().any(|e| e.index == next);
+                    match apply_kernel::apply_advance(next.saturating_sub(1), end, present) {
+                        apply_kernel::ApplyAction::Apply => {
+                            recs.push(
+                                peer.log
+                                    .iter()
+                                    .find(|e| e.index == next)
+                                    .cloned()
+                                    .expect("kernel Apply ⇒ entry present"),
+                            );
+                        }
+                        apply_kernel::ApplyAction::Done | apply_kernel::ApplyAction::Stop => break,
+                    }
                 }
+                (start, end, recs)
+            };
+            if recs.is_empty() {
+                return Ok(());
             }
-            (start, end, recs)
-        };
-        if recs.is_empty() {
-            return Ok(());
-        }
-        let mut applied_to = start - 1;
-        for rec in &recs {
-            match &rec.entry {
-                RangeEntry::Put { key, value, si_gen } => {
-                    if !is_reserved_store_key(key) {
-                        apply_put_or_delete(&mut node.db, key, value)?;
-                        if *si_gen > 0 {
-                            persist_si_hist_on_db(
-                                &mut node.db,
-                                key,
-                                *si_gen,
-                                if value.is_empty() {
-                                    None
-                                } else {
-                                    Some(value.as_slice())
-                                },
-                            )?;
+            let mut applied_to = start - 1;
+            for rec in &recs {
+                match &rec.entry {
+                    RangeEntry::Put { key, value, si_gen } => {
+                        if !is_reserved_store_key(key) {
+                            apply_put_or_delete(&mut node.db, key, value)?;
+                            if *si_gen > 0 {
+                                persist_si_hist_on_db(
+                                    &mut node.db,
+                                    key,
+                                    *si_gen,
+                                    if value.is_empty() {
+                                        None
+                                    } else {
+                                        Some(value.as_slice())
+                                    },
+                                )?;
+                            }
                         }
                     }
-                }
-                RangeEntry::Batch { pairs, si_gen } => {
-                    let mut ops: Vec<BatchOp> = Vec::new();
-                    for (k, v) in pairs {
-                        if is_reserved_store_key(k) {
-                            continue;
-                        }
-                        if v.is_empty() {
-                            ops.push(BatchOp::delete(k));
-                        } else {
-                            ops.push(BatchOp::put(k, v));
-                        }
-                    }
-                    if !ops.is_empty() {
-                        node.db.apply_batch(ops)?;
-                    }
-                    if *si_gen > 0 {
+                    RangeEntry::Batch { pairs, si_gen } => {
+                        let mut ops: Vec<BatchOp> = Vec::new();
                         for (k, v) in pairs {
                             if is_reserved_store_key(k) {
                                 continue;
                             }
-                            persist_si_hist_on_db(
-                                &mut node.db,
-                                k,
-                                *si_gen,
-                                if v.is_empty() {
-                                    None
-                                } else {
-                                    Some(v.as_slice())
-                                },
-                            )?;
-                        }
-                        // F138: generation meta must be durable before applied advances
-                        // (same class as F136 coordinator persist_si_keys).
-                        node.db
-                            .put(si_meta_key("generation"), encode_u64_meta(*si_gen))?;
-                    }
-                }
-                RangeEntry::TxnPrepare { txn_id, pairs } => {
-                    apply_txn_prepare(&mut node.db, *txn_id, pairs)?;
-                }
-                RangeEntry::TxnCommit {
-                    txn_id,
-                    keys,
-                    si_gen,
-                } => {
-                    apply_txn_commit(&mut node.db, *txn_id, keys)?;
-                    if *si_gen > 0 {
-                        for k in keys {
-                            if is_reserved_store_key(k) {
-                                continue;
+                            if v.is_empty() {
+                                ops.push(BatchOp::delete(k));
+                            } else {
+                                ops.push(BatchOp::put(k, v));
                             }
-                            let live = node.db.get(k);
-                            persist_si_hist_on_db(&mut node.db, k, *si_gen, live.as_deref())?;
                         }
+                        if !ops.is_empty() {
+                            node.db.apply_batch(ops)?;
+                        }
+                        if *si_gen > 0 {
+                            for (k, v) in pairs {
+                                if is_reserved_store_key(k) {
+                                    continue;
+                                }
+                                persist_si_hist_on_db(
+                                    &mut node.db,
+                                    k,
+                                    *si_gen,
+                                    if v.is_empty() {
+                                        None
+                                    } else {
+                                        Some(v.as_slice())
+                                    },
+                                )?;
+                            }
+                            // F138: generation meta must be durable before applied advances
+                            // (same class as F136 coordinator persist_si_keys).
+                            node.db
+                                .put(si_meta_key("generation"), encode_u64_meta(*si_gen))?;
+                        }
+                    }
+                    RangeEntry::TxnPrepare { txn_id, pairs } => {
+                        apply_txn_prepare(&mut node.db, *txn_id, pairs)?;
+                    }
+                    RangeEntry::TxnCommit {
+                        txn_id,
+                        keys,
+                        si_gen,
+                    } => {
+                        apply_txn_commit(&mut node.db, *txn_id, keys)?;
+                        if *si_gen > 0 {
+                            for k in keys {
+                                if is_reserved_store_key(k) {
+                                    continue;
+                                }
+                                let live = node.db.get(k);
+                                persist_si_hist_on_db(&mut node.db, k, *si_gen, live.as_deref())?;
+                            }
+                            node.db
+                                .put(si_meta_key("generation"), encode_u64_meta(*si_gen))?;
+                        }
+                    }
+                    RangeEntry::TxnAbort { txn_id, keys } => {
+                        apply_txn_abort(&mut node.db, *txn_id, keys)?;
+                    }
+                    RangeEntry::TxnRevert { txn_id, keys } => {
+                        apply_txn_revert(&mut node.db, *txn_id, keys)?;
+                    }
+                    RangeEntry::Dcs(cmd) => {
+                        let r = apply_dcs_command(&mut node.db, cmd);
+                        if !pedradb_dcs::dcs_apply_should_advance_result(&r) {
+                            return Err(StoreError::Dcs(r.unwrap_err()));
+                        }
+                    }
+                    RangeEntry::Noop => {}
+                    RangeEntry::MembershipJoint { new, .. } => {
+                        install_new = Some(new.clone());
+                    }
+                }
+                // Put path: also bump generation meta when SI gen present.
+                if let RangeEntry::Put { si_gen, .. } = &rec.entry {
+                    if *si_gen > 0 {
                         node.db
                             .put(si_meta_key("generation"), encode_u64_meta(*si_gen))?;
                     }
                 }
-                RangeEntry::TxnAbort { txn_id, keys } => {
-                    apply_txn_abort(&mut node.db, *txn_id, keys)?;
-                }
-                RangeEntry::TxnRevert { txn_id, keys } => {
-                    apply_txn_revert(&mut node.db, *txn_id, keys)?;
-                }
-                RangeEntry::Dcs(cmd) => {
-                    let r = apply_dcs_command(&mut node.db, cmd);
-                    if !pedradb_dcs::dcs_apply_should_advance_result(&r) {
-                        return Err(StoreError::Dcs(r.unwrap_err()));
-                    }
-                }
-                RangeEntry::Noop => {}
-                RangeEntry::MembershipJoint { new, .. } => {
-                    install_new = Some(new.clone());
-                }
+                applied_to = rec.index;
             }
-            // Put path: also bump generation meta when SI gen present.
-            if let RangeEntry::Put { si_gen, .. } = &rec.entry {
-                if *si_gen > 0 {
-                    node.db
-                        .put(si_meta_key("generation"), encode_u64_meta(*si_gen))?;
-                }
-            }
-            applied_to = rec.index;
-        }
-        applied_to.min(end)
+            applied_to.min(end)
         };
         // RFC-0124 P1.1: durable C-new before applied advances past the joint.
         // AS-IS persist applied first (crash: applied high, voters still C-old).
@@ -11901,7 +12009,10 @@ mod tests {
         let disk_hw = tcp_node_disk_high_water(&dir, 1).max(tcp_node_disk_high_water(&dir, 2));
         let kept = membership_kernel::high_water_at_least(disk_hw, 2) >= 3;
         let _ = std::fs::remove_dir_all(&dir);
-        assert!(kept, "Direct remove must persist high-water 3, got {disk_hw}");
+        assert!(
+            kept,
+            "Direct remove must persist high-water 3, got {disk_hw}"
+        );
         assert!(l28_tcp_hw_ok(kept));
         assert_eq!(
             membership_kernel::high_water_at_least_as_is(disk_hw, 2),
@@ -11927,7 +12038,10 @@ mod tests {
         }
         let ok = tcp_node_removed_not_participating(&dir, 1, &[1, 2, 3], 3);
         let _ = std::fs::remove_dir_all(&dir);
-        assert!(ok, "stale CLI [1,2,3] must not count removed 3 as participating");
+        assert!(
+            ok,
+            "stale CLI [1,2,3] must not count removed 3 as participating"
+        );
         assert!(l28_tcp_part_ok(ok));
     }
 
@@ -11947,7 +12061,10 @@ mod tests {
         }
         let ok = tcp_node_recover_apply_ok(&dir, 1, &[1, 2, 3]);
         let _ = std::fs::remove_dir_all(&dir);
-        assert!(ok, "open_single_node must recover-apply a planted apply gap");
+        assert!(
+            ok,
+            "open_single_node must recover-apply a planted apply gap"
+        );
         assert!(l28_tcp_apply_ok(ok));
     }
 
@@ -11970,10 +12087,7 @@ mod tests {
         }
         let ok = tcp_node_removed_recover_apply_ok(&dir, 3, &[1, 2, 3]);
         let _ = std::fs::remove_dir_all(&dir);
-        assert!(
-            ok,
-            "open_single_node on removed replica must recover-apply"
-        );
+        assert!(ok, "open_single_node on removed replica must recover-apply");
         assert!(l28_tcp_napply_ok(ok));
     }
 
@@ -12374,6 +12488,85 @@ mod tests {
         assert!(l28_tcp_hnt_ok(ok));
     }
 
+    /// RFC-0147 P1.2: TCP ctor of a remaining voter drops planted
+    /// next/match/sent_through of the removed replica. 0146 hint is
+    /// **not** this tooth.
+    #[test]
+    fn tcp_node_drop_repl_ok_after_direct() {
+        assert!(!l28_tcp_slot_ok(false));
+        assert!(
+            l28_tcp_slot_ok_as_is(false),
+            "AS-IS dente: skip TCP remaining-voter repl-slot drop"
+        );
+        let dir = temp();
+        {
+            let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
+            c.elect_all(80).unwrap();
+            c.pin_dst_queued();
+            queued_shrink_until_leave_committed(&mut c, 3);
+            assert!(!c.is_member(3), "leave must drop 3 before the TCP plant");
+        }
+        let ok = tcp_node_drop_repl_ok(&dir, 1, &[1, 2, 3], 3);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(
+            ok,
+            "open_single_node on remaining voter must drop removed repl slots"
+        );
+        assert!(l28_tcp_slot_ok(ok));
+    }
+
+    /// RFC-0148 P1.2: TCP ctor of a remaining 3-node voter drops planted
+    /// `sent_through` of a remote replica on oob `remove_member`. 0147
+    /// joint slot drop is **not** this tooth.
+    #[test]
+    fn tcp_node_drop_st_ok_after_direct() {
+        assert!(!l28_tcp_sth_ok(false));
+        assert!(
+            l28_tcp_sth_ok_as_is(false),
+            "AS-IS dente: skip TCP remaining-voter sent_through drop"
+        );
+        let dir = temp();
+        {
+            let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
+            c.elect_all(80).unwrap();
+            c.pin_dst_queued();
+            assert!(c.is_member(3), "0148 tooth needs 3 still in ids");
+        }
+        let ok = tcp_node_drop_st_ok(&dir, 1, &[1, 2, 3], 3);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(
+            ok,
+            "open_single_node oob remove_member must drop remote sent_through"
+        );
+        assert!(l28_tcp_sth_ok(ok));
+    }
+
+    /// RFC-0068 P2.2: TCP ctor of a 3-node voter, planted committed
+    /// C-old,new without leave, refuses C-old majority elect. 0148 oob
+    /// sent_through is **not** this tooth.
+    #[test]
+    fn tcp_node_plant_joint_ok_after_direct() {
+        assert!(!l28_tcp_pj_ok(false));
+        assert!(
+            l28_tcp_pj_ok_as_is(false),
+            "AS-IS dente: skip TCP planted committed-joint-without-leave"
+        );
+        let dir = temp();
+        {
+            let mut c = StoreCluster::open_lab_direct(&dir, 3, 1).unwrap();
+            c.elect_all(80).unwrap();
+            c.pin_dst_queued();
+            assert!(c.is_member(1) && !c.is_member(4));
+        }
+        let ok = tcp_node_plant_joint_ok(&dir, 1, &[1, 2, 3], 4);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(
+            ok,
+            "open_single_node planted joint must refuse C-old majority"
+        );
+        assert!(l28_tcp_pj_ok(ok));
+    }
+
     /// RFC-0097 P0: production RPC is Queued. After a planted committed
     /// joint, pin Queued and `leave_joint` still writes C-new-only.
     /// Direct-lab 0096 is not this tooth.
@@ -12701,10 +12894,7 @@ mod tests {
             pump_queued(c, 1);
             let _ = c.finish_uncommitted_leave();
         }
-        assert!(
-            c.uncommitted_leave_index().is_none(),
-            "leave must commit"
-        );
+        assert!(c.uncommitted_leave_index().is_none(), "leave must commit");
     }
 
     /// RFC-0124 P0: durable membership must override stale RAM/CLI ids.
@@ -12763,10 +12953,7 @@ mod tests {
         c.ids = vec![1, 2, 3, 4];
         c.crash_reopen_engine_on(lid, pedradb_io_uring::IoUringEnv::default())
             .expect("crash-reopen");
-        assert!(
-            !c.is_member(4),
-            "crash_reopen must reload C-new from disk"
-        );
+        assert!(!c.is_member(4), "crash_reopen must reload C-new from disk");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -12919,10 +13106,7 @@ mod tests {
         assert!(c.is_member(4), "joint is committed but not applied");
         c.crash_reopen_engine_on(lid, pedradb_io_uring::IoUringEnv::default())
             .expect("crash-reopen");
-        assert!(
-            !c.is_member(4),
-            "recover must apply committed joint"
-        );
+        assert!(!c.is_member(4), "recover must apply committed joint");
         let p = c.nodes.get(&lid).unwrap().ranges.get(&1).unwrap();
         assert!(
             p.applied >= p.commit,
@@ -12950,10 +13134,7 @@ mod tests {
             assert!(c.is_member(4), "joint is committed but not applied");
         }
         let c2 = StoreCluster::open(&dir, 4, 1).expect("process open");
-        assert!(
-            !c2.is_member(4),
-            "open recover must apply committed joint"
-        );
+        assert!(!c2.is_member(4), "open recover must apply committed joint");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -13272,8 +13453,7 @@ mod tests {
     }
 
     fn disk_now_ms<E: pedradb_core::Env>(n: &StoreNode<E>) -> u64 {
-        n.db
-            .get(&si_meta_key("now_ms"))
+        n.db.get(&si_meta_key("now_ms"))
             .and_then(|raw| decode_u64_meta(&raw).ok())
             .unwrap_or(0)
     }
@@ -13400,12 +13580,7 @@ mod tests {
         assert!(!c.is_member(4));
         let tid = 0x0137u64;
         c.fence_txn_aborted(tid).unwrap();
-        let got = c
-            .nodes
-            .get(&4)
-            .unwrap()
-            .db
-            .get(&txn_status_key(tid));
+        let got = c.nodes.get(&4).unwrap().db.get(&txn_status_key(tid));
         assert_eq!(
             got.as_deref(),
             Some(b"abort".as_slice()),
@@ -13432,12 +13607,7 @@ mod tests {
         assert!(!c2.is_member(4));
         let tid = 0x0137_0002u64;
         c2.fence_txn_aborted(tid).unwrap();
-        let got = c2
-            .nodes
-            .get(&4)
-            .unwrap()
-            .db
-            .get(&txn_status_key(tid));
+        let got = c2.nodes.get(&4).unwrap().db.get(&txn_status_key(tid));
         assert_eq!(
             got.as_deref(),
             Some(b"abort".as_slice()),
@@ -13894,7 +14064,10 @@ mod tests {
         let mut c2 = StoreCluster::open_single_node(&dir, 4, &[1, 2, 3, 4], 1)
             .expect("TCP ctor of removed replica");
         assert!(!c2.is_member(4));
-        assert!(c2.range_leader(1).is_none(), "TCP removed has no local leader");
+        assert!(
+            c2.range_leader(1).is_none(),
+            "TCP removed has no local leader"
+        );
         let commit = plant_uncommitted_suffix(&mut c2, 4, b"rfc0144-left", b"orphan");
         let from = commit.saturating_add(1);
         for n in c2.nodes.values_mut() {
@@ -14053,7 +14226,11 @@ mod tests {
         c.install_applied_membership(c.member_ids().to_vec())
             .expect("re-apply C-new");
         let hint = c.nodes.get(&1).unwrap().ranges.get(&1).unwrap().leader_id;
-        assert_ne!(hint, Some(4), "stale hint of the removed node must be cleared");
+        assert_ne!(
+            hint,
+            Some(4),
+            "stale hint of the removed node must be cleared"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -14122,10 +14299,7 @@ mod tests {
                 || p.match_index.contains_key(&4)
                 || p.sent_through.contains_key(&4)
         });
-        assert!(
-            had_slot,
-            "pre-leave remaining peers must hold a slot for 4"
-        );
+        assert!(had_slot, "pre-leave remaining peers must hold a slot for 4");
         queued_shrink_until_leave_committed(&mut c, 4);
         assert!(!c.is_member(4));
         for nid in 1..=3u64 {
@@ -14197,7 +14371,10 @@ mod tests {
                 .sent_through
                 .contains_key(&3)
         });
-        assert!(had, "pre-remove remaining peers must hold sent_through for 3");
+        assert!(
+            had,
+            "pre-remove remaining peers must hold sent_through for 3"
+        );
         c.remove_member(3).expect("oob 3→2 is under quorum floor");
         assert!(!c.is_member(3));
         for nid in 1..=2u64 {

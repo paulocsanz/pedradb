@@ -1,0 +1,102 @@
+{
+  "bench": "rocks-parity-v1",
+  "engine": "rocksdb",
+  "sync": false,
+  "peer_policy": "rocks-default",
+  "durability": "async-wal (WriteOptions.sync=false, rocksdb default)",
+  "changelog_interval": 0,
+  "status": "ok",
+  "notes": [
+    "ycsb records=1024 ops=2000 payload=100 dist=zipfian",
+    "engine=rocksdb durability=async-wal (WriteOptions.sync=false, rocksdb default)",
+    "suites: ycsb",
+    "seed: one put per record (not timed)",
+    "cfs: default + write, lock, raftlog (TiKV store shape; raftlog = raftdb)",
+    "deps apply batch txns/commit: 32",
+    "changelog_interval=0",
+    "peer_policy=rocks-default",
+    "host-default write sync: kvrocks=false myrocks=true surreal=true"
+  ],
+  "benches": [
+    {
+      "name": "ycsb_a",
+      "n": 2000,
+      "qps": 590740.73,
+      "p50_ms": 0.0022,
+      "p95_ms": 0.0028,
+      "p99_ms": 0.0041,
+      "max_ms": 0.0178,
+      "wall_s": 0.0034
+    },
+    {
+      "name": "ycsb_b",
+      "n": 2000,
+      "qps": 1249287.906,
+      "p50_ms": 0.0006,
+      "p95_ms": 0.0024,
+      "p99_ms": 0.0028,
+      "max_ms": 0.0187,
+      "wall_s": 0.0016
+    },
+    {
+      "name": "ycsb_c",
+      "n": 2000,
+      "qps": 1476526.913,
+      "p50_ms": 0.0006,
+      "p95_ms": 0.0008,
+      "p99_ms": 0.0008,
+      "max_ms": 0.0276,
+      "wall_s": 0.0014
+    },
+    {
+      "name": "ycsb_d",
+      "n": 2000,
+      "qps": 1280738.525,
+      "p50_ms": 0.0006,
+      "p95_ms": 0.0021,
+      "p99_ms": 0.0024,
+      "max_ms": 0.0142,
+      "wall_s": 0.0016
+    },
+    {
+      "name": "ycsb_e",
+      "n": 2000,
+      "qps": 84610.347,
+      "p50_ms": 0.0087,
+      "p95_ms": 0.0206,
+      "p99_ms": 0.0274,
+      "max_ms": 0.0484,
+      "wall_s": 0.0236
+    },
+    {
+      "name": "ycsb_f",
+      "n": 2000,
+      "qps": 428167.422,
+      "p50_ms": 0.0031,
+      "p95_ms": 0.0041,
+      "p99_ms": 0.0054,
+      "max_ms": 0.0142,
+      "wall_s": 0.0047
+    },
+    {
+      "name": "ycsb_b_unif",
+      "n": 2000,
+      "qps": 1143530.192,
+      "p50_ms": 0.0007,
+      "p95_ms": 0.0026,
+      "p99_ms": 0.0031,
+      "max_ms": 0.0166,
+      "wall_s": 0.0017
+    },
+    {
+      "name": "ycsb_c_unif",
+      "n": 2000,
+      "qps": 1339387.364,
+      "p50_ms": 0.0007,
+      "p95_ms": 0.0008,
+      "p99_ms": 0.0009,
+      "max_ms": 0.0191,
+      "wall_s": 0.0015
+    }
+  ]
+}

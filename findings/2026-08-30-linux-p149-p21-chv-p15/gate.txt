@@ -1,0 +1,589 @@
+=== P149_START 2026-08-30T01:58:19Z ===
+RESULT=BUILD_OK 02:04:30
+P149_COLUMN A async vs rocks-default(sync=false) majority median>3.0
+[rocks-parity] ycsb_a done ops=2000 updates=1002 inserts=0 scans=0 errors=0
+[rocks-parity] ycsb_b done ops=2000 updates=108 inserts=0 scans=0 errors=0
+[rocks-parity] ycsb_c done ops=2000 updates=0 inserts=0 scans=0 errors=0
+[rocks-parity] ycsb_d done ops=2000 updates=0 inserts=104 scans=0 errors=0
+[rocks-parity] ycsb_e done ops=2000 updates=0 inserts=97 scans=1903 errors=0
+[rocks-parity] ycsb_f done ops=2000 updates=1048 inserts=0 scans=0 errors=0
+[rocks-parity] ycsb_b_unif done ops=2000 updates=101 inserts=0 scans=0 errors=0
+[rocks-parity] ycsb_c_unif done ops=2000 updates=0 inserts=0 scans=0 errors=0
+    "name": "ycsb_a",
+    "name": "ycsb_b",
+    "name": "ycsb_c",
+    "name": "ycsb_d",
+    "name": "ycsb_e",
+    "name": "ycsb_f",
+    "name": "ycsb_b_unif",
+    "name": "ycsb_c_unif",
+[rocks-parity] ycsb_a done ops=2000 updates=1002 inserts=0 scans=0 errors=0
+[rocks-parity] ycsb_b done ops=2000 updates=108 inserts=0 scans=0 errors=0
+[rocks-parity] ycsb_c done ops=2000 updates=0 inserts=0 scans=0 errors=0
+[rocks-parity] ycsb_d done ops=2000 updates=0 inserts=104 scans=0 errors=0
+[rocks-parity] ycsb_e done ops=2000 updates=0 inserts=97 scans=1903 errors=0
+[rocks-parity] ycsb_f done ops=2000 updates=1048 inserts=0 scans=0 errors=0
+[rocks-parity] ycsb_b_unif done ops=2000 updates=101 inserts=0 scans=0 errors=0
+[rocks-parity] ycsb_c_unif done ops=2000 updates=0 inserts=0 scans=0 errors=0
+    "name": "ycsb_a",
+    "name": "ycsb_b",
+    "name": "ycsb_c",
+    "name": "ycsb_d",
+    "name": "ycsb_e",
+    "name": "ycsb_f",
+    "name": "ycsb_b_unif",
+    "name": "ycsb_c_unif",
+[rocks-parity] deps_apply_batch split p50 build=17.52µs
+[rocks-parity] deps_apply_batch done txns=64000 errors=0
+[rocks-parity] deps_mvcc_latest done reads=2000 errors=0
+[rocks-parity] deps_scan done scans=2000 errors=0
+[rocks-parity] deps_raftlog enter mem_entries=264192
+[rocks-parity] deps_raftlog split p50 build=1.44µs batch=8.57µs mem_after=296192
+[rocks-parity] deps_raftlog done appends=32000 reads=250 errors=0
+[rocks-parity] deps_cache_overwrite done writes=2000 errors=0
+[rocks-parity] deps_lock_prewrite done txns=64000 errors=0
+    "name": "deps_apply_batch",
+    "name": "deps_mvcc_latest",
+    "name": "deps_mvcc_latest_split",
+    "name": "deps_scan",
+    "name": "deps_scan_probe",
+    "name": "deps_raftlog",
+    "name": "deps_cache_overwrite",
+    "name": "deps_lock_prewrite",
+[rocks-parity] deps_apply_batch split p50 build=17.90µs
+[rocks-parity] deps_apply_batch done txns=64000 errors=0
+[rocks-parity] deps_mvcc_latest done reads=2000 errors=0
+[rocks-parity] deps_scan done scans=2000 errors=0
+[rocks-parity] deps_raftlog enter mem_entries=?
+[rocks-parity] deps_raftlog split p50 build=1.36µs batch=9.86µs mem_after=?
+[rocks-parity] deps_raftlog done appends=32000 reads=250 errors=0
+[rocks-parity] deps_cache_overwrite done writes=2000 errors=0
+[rocks-parity] deps_lock_prewrite done txns=64000 errors=0
+    "name": "deps_apply_batch",
+    "name": "deps_mvcc_latest",
+    "name": "deps_mvcc_latest_split",
+    "name": "deps_scan",
+    "name": "deps_scan_probe",
+    "name": "deps_raftlog",
+    "name": "deps_cache_overwrite",
+    "name": "deps_lock_prewrite",
+[rocks-parity] kvrocks_get done gets=2000 errors=0
+[rocks-parity] kvrocks_set done sets=2000 errors=0
+[rocks-parity] kvrocks_pipelined_set done puts=64000 errors=0
+[rocks-parity] kvrocks_scan done scans=2000 errors=0
+[rocks-parity] kvrocks_blob_set done sets=2000 errors=0
+[rocks-parity] kvrocks_set_mc50 done ops=100000 errors=0
+    "name": "kvrocks_get",
+    "name": "kvrocks_set",
+    "name": "kvrocks_pipelined_set",
+    "name": "kvrocks_scan",
+    "name": "kvrocks_blob_set",
+    "name": "kvrocks_set_mc50",
+[rocks-parity] kvrocks_get done gets=2000 errors=0
+[rocks-parity] kvrocks_set done sets=2000 errors=0
+[rocks-parity] kvrocks_pipelined_set done puts=64000 errors=0
+[rocks-parity] kvrocks_scan done scans=2000 errors=0
+[rocks-parity] kvrocks_blob_set done sets=2000 errors=0
+[rocks-parity] kvrocks_set_mc50 done ops=100000 errors=0
+    "name": "kvrocks_get",
+    "name": "kvrocks_set",
+    "name": "kvrocks_pipelined_set",
+    "name": "kvrocks_scan",
+    "name": "kvrocks_blob_set",
+    "name": "kvrocks_set_mc50",
+    "ycsb_a": 1787535.337,
+    "ycsb_b": 4236166.270,
+    "ycsb_b_unif": 4258390.626,
+    "ycsb_c": 5517393.583,
+    "ycsb_c_unif": 5978572.795,
+    "ycsb_d": 4100848.055,
+    "ycsb_e": 1267323.520,
+    "ycsb_f": 1232108.248
+    {"shape":"ycsb_a","compat_keys_per_s":1787535.337,"rocksdb_keys_per_s":610076.388,"compat_over_rocksdb":2.930,"meets_floor":null},
+    {"shape":"ycsb_b","compat_keys_per_s":4236166.270,"rocksdb_keys_per_s":1272704.248,"compat_over_rocksdb":3.328,"meets_floor":null},
+    {"shape":"ycsb_c","compat_keys_per_s":5517393.583,"rocksdb_keys_per_s":1495407.603,"compat_over_rocksdb":3.690,"meets_floor":null},
+    {"shape":"ycsb_d","compat_keys_per_s":4100848.055,"rocksdb_keys_per_s":1310141.214,"compat_over_rocksdb":3.130,"meets_floor":null},
+    {"shape":"ycsb_e","compat_keys_per_s":1267323.520,"rocksdb_keys_per_s":41317.790,"compat_over_rocksdb":30.673,"meets_floor":null},
+    {"shape":"ycsb_f","compat_keys_per_s":1232108.248,"rocksdb_keys_per_s":433459.333,"compat_over_rocksdb":2.843,"meets_floor":null},
+    {"shape":"deps_apply_batch","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"deps_mvcc_latest","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"deps_scan","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"deps_raftlog","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"deps_cache_overwrite","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"ycsb_a_mc4","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"ycsb_f_mc4","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"deps_cache_overwrite_mc4","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"deps_apply_batch_mc4","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"deps_raftlog_mc4","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"deps_lock_prewrite","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"kvrocks_get","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"kvrocks_set","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"kvrocks_pipelined_set","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"kvrocks_scan","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"kvrocks_set_mc50","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"kvrocks_blob_set","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"ycsb_b_unif","compat_keys_per_s":4258390.626,"rocksdb_keys_per_s":1212096.236,"compat_over_rocksdb":3.513,"meets_floor":null},
+    {"shape":"ycsb_c_unif","compat_keys_per_s":5978572.795,"rocksdb_keys_per_s":1439672.331,"compat_over_rocksdb":4.153,"meets_floor":null},
+    {"shape":"ycsb_c_big","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null}
+    "deps_apply_batch": 15015.909,
+    "deps_cache_overwrite": 981522.351,
+    "deps_lock_prewrite": 30513.857,
+    "deps_mvcc_latest": 928872.516,
+    "deps_raftlog": 91687.816,
+    "deps_scan": 946592.315
+    {"shape":"ycsb_a","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"ycsb_b","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"ycsb_c","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"ycsb_d","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"ycsb_e","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"ycsb_f","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"deps_apply_batch","compat_keys_per_s":15015.909,"rocksdb_keys_per_s":7303.272,"compat_over_rocksdb":2.056,"meets_floor":null},
+    {"shape":"deps_mvcc_latest","compat_keys_per_s":928872.516,"rocksdb_keys_per_s":214931.022,"compat_over_rocksdb":4.322,"meets_floor":null},
+    {"shape":"deps_scan","compat_keys_per_s":946592.315,"rocksdb_keys_per_s":187214.644,"compat_over_rocksdb":5.056,"meets_floor":null},
+    {"shape":"deps_raftlog","compat_keys_per_s":91687.816,"rocksdb_keys_per_s":72727.024,"compat_over_rocksdb":1.261,"meets_floor":null},
+    {"shape":"deps_cache_overwrite","compat_keys_per_s":981522.351,"rocksdb_keys_per_s":318424.182,"compat_over_rocksdb":3.082,"meets_floor":null},
+    {"shape":"ycsb_a_mc4","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"ycsb_f_mc4","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"deps_cache_overwrite_mc4","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"deps_apply_batch_mc4","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"deps_raftlog_mc4","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"deps_lock_prewrite","compat_keys_per_s":30513.857,"rocksdb_keys_per_s":11856.801,"compat_over_rocksdb":2.574,"meets_floor":null},
+    {"shape":"kvrocks_get","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"kvrocks_set","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"kvrocks_pipelined_set","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"kvrocks_scan","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"kvrocks_set_mc50","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"kvrocks_blob_set","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"ycsb_b_unif","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"ycsb_c_unif","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"ycsb_c_big","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null}
+    "kvrocks_blob_set": 97775.500,
+    "kvrocks_get": 8342753.693,
+    "kvrocks_pipelined_set": 128455.460,
+    "kvrocks_scan": 1605954.881,
+    "kvrocks_set": 954782.458,
+    "kvrocks_set_mc50": 255216.376
+    {"shape":"ycsb_a","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"ycsb_b","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"ycsb_c","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"ycsb_d","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"ycsb_e","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"ycsb_f","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"deps_apply_batch","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"deps_mvcc_latest","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"deps_scan","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"deps_raftlog","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"deps_cache_overwrite","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"ycsb_a_mc4","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"ycsb_f_mc4","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"deps_cache_overwrite_mc4","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"deps_apply_batch_mc4","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"deps_raftlog_mc4","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"deps_lock_prewrite","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"kvrocks_get","compat_keys_per_s":8342753.693,"rocksdb_keys_per_s":1902022.992,"compat_over_rocksdb":4.386,"meets_floor":null},
+    {"shape":"kvrocks_set","compat_keys_per_s":954782.458,"rocksdb_keys_per_s":364473.925,"compat_over_rocksdb":2.620,"meets_floor":null},
+    {"shape":"kvrocks_pipelined_set","compat_keys_per_s":128455.460,"rocksdb_keys_per_s":30590.514,"compat_over_rocksdb":4.199,"meets_floor":null},
+    {"shape":"kvrocks_scan","compat_keys_per_s":1605954.881,"rocksdb_keys_per_s":37192.100,"compat_over_rocksdb":43.180,"meets_floor":null},
+    {"shape":"kvrocks_set_mc50","compat_keys_per_s":255216.376,"rocksdb_keys_per_s":108374.477,"compat_over_rocksdb":2.355,"meets_floor":null},
+    {"shape":"kvrocks_blob_set","compat_keys_per_s":97775.500,"rocksdb_keys_per_s":37420.139,"compat_over_rocksdb":2.613,"meets_floor":null},
+    {"shape":"ycsb_b_unif","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"ycsb_c_unif","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"ycsb_c_big","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null}
+[rocks-parity] ycsb_a done ops=2000 updates=1002 inserts=0 scans=0 errors=0
+[rocks-parity] ycsb_b done ops=2000 updates=108 inserts=0 scans=0 errors=0
+[rocks-parity] ycsb_c done ops=2000 updates=0 inserts=0 scans=0 errors=0
+[rocks-parity] ycsb_d done ops=2000 updates=0 inserts=104 scans=0 errors=0
+[rocks-parity] ycsb_e done ops=2000 updates=0 inserts=97 scans=1903 errors=0
+[rocks-parity] ycsb_f done ops=2000 updates=1048 inserts=0 scans=0 errors=0
+[rocks-parity] ycsb_b_unif done ops=2000 updates=101 inserts=0 scans=0 errors=0
+[rocks-parity] ycsb_c_unif done ops=2000 updates=0 inserts=0 scans=0 errors=0
+    "name": "ycsb_a",
+    "name": "ycsb_b",
+    "name": "ycsb_c",
+    "name": "ycsb_d",
+    "name": "ycsb_e",
+    "name": "ycsb_f",
+    "name": "ycsb_b_unif",
+    "name": "ycsb_c_unif",
+[rocks-parity] ycsb_a done ops=2000 updates=1002 inserts=0 scans=0 errors=0
+[rocks-parity] ycsb_b done ops=2000 updates=108 inserts=0 scans=0 errors=0
+[rocks-parity] ycsb_c done ops=2000 updates=0 inserts=0 scans=0 errors=0
+[rocks-parity] ycsb_d done ops=2000 updates=0 inserts=104 scans=0 errors=0
+[rocks-parity] ycsb_e done ops=2000 updates=0 inserts=97 scans=1903 errors=0
+[rocks-parity] ycsb_f done ops=2000 updates=1048 inserts=0 scans=0 errors=0
+[rocks-parity] ycsb_b_unif done ops=2000 updates=101 inserts=0 scans=0 errors=0
+[rocks-parity] ycsb_c_unif done ops=2000 updates=0 inserts=0 scans=0 errors=0
+    "name": "ycsb_a",
+    "name": "ycsb_b",
+    "name": "ycsb_c",
+    "name": "ycsb_d",
+    "name": "ycsb_e",
+    "name": "ycsb_f",
+    "name": "ycsb_b_unif",
+    "name": "ycsb_c_unif",
+[rocks-parity] deps_apply_batch split p50 build=16.22µs
+[rocks-parity] deps_apply_batch done txns=64000 errors=0
+[rocks-parity] deps_mvcc_latest done reads=2000 errors=0
+[rocks-parity] deps_scan done scans=2000 errors=0
+[rocks-parity] deps_raftlog enter mem_entries=264192
+[rocks-parity] deps_raftlog split p50 build=1.38µs batch=8.69µs mem_after=296192
+[rocks-parity] deps_raftlog done appends=32000 reads=250 errors=0
+[rocks-parity] deps_cache_overwrite done writes=2000 errors=0
+[rocks-parity] deps_lock_prewrite done txns=64000 errors=0
+    "name": "deps_apply_batch",
+    "name": "deps_mvcc_latest",
+    "name": "deps_mvcc_latest_split",
+    "name": "deps_scan",
+    "name": "deps_scan_probe",
+    "name": "deps_raftlog",
+    "name": "deps_cache_overwrite",
+    "name": "deps_lock_prewrite",
+[rocks-parity] deps_apply_batch split p50 build=20.41µs
+[rocks-parity] deps_apply_batch done txns=64000 errors=0
+[rocks-parity] deps_mvcc_latest done reads=2000 errors=0
+[rocks-parity] deps_scan done scans=2000 errors=0
+[rocks-parity] deps_raftlog enter mem_entries=?
+[rocks-parity] deps_raftlog split p50 build=1.38µs batch=9.96µs mem_after=?
+[rocks-parity] deps_raftlog done appends=32000 reads=250 errors=0
+[rocks-parity] deps_cache_overwrite done writes=2000 errors=0
+[rocks-parity] deps_lock_prewrite done txns=64000 errors=0
+    "name": "deps_apply_batch",
+    "name": "deps_mvcc_latest",
+    "name": "deps_mvcc_latest_split",
+    "name": "deps_scan",
+    "name": "deps_scan_probe",
+    "name": "deps_raftlog",
+    "name": "deps_cache_overwrite",
+    "name": "deps_lock_prewrite",
+[rocks-parity] kvrocks_get done gets=2000 errors=0
+[rocks-parity] kvrocks_set done sets=2000 errors=0
+[rocks-parity] kvrocks_pipelined_set done puts=64000 errors=0
+[rocks-parity] kvrocks_scan done scans=2000 errors=0
+[rocks-parity] kvrocks_blob_set done sets=2000 errors=0
+[rocks-parity] kvrocks_set_mc50 done ops=100000 errors=0
+    "name": "kvrocks_get",
+    "name": "kvrocks_set",
+    "name": "kvrocks_pipelined_set",
+    "name": "kvrocks_scan",
+    "name": "kvrocks_blob_set",
+    "name": "kvrocks_set_mc50",
+[rocks-parity] kvrocks_get done gets=2000 errors=0
+[rocks-parity] kvrocks_set done sets=2000 errors=0
+[rocks-parity] kvrocks_pipelined_set done puts=64000 errors=0
+[rocks-parity] kvrocks_scan done scans=2000 errors=0
+[rocks-parity] kvrocks_blob_set done sets=2000 errors=0
+[rocks-parity] kvrocks_set_mc50 done ops=100000 errors=0
+    "name": "kvrocks_get",
+    "name": "kvrocks_set",
+    "name": "kvrocks_pipelined_set",
+    "name": "kvrocks_scan",
+    "name": "kvrocks_blob_set",
+    "name": "kvrocks_set_mc50",
+    "ycsb_a": 1784898.332,
+    "ycsb_b": 3904267.364,
+    "ycsb_b_unif": 4141163.998,
+    "ycsb_c": 5273816.556,
+    "ycsb_c_unif": 5467827.304,
+    "ycsb_d": 4069076.645,
+    "ycsb_e": 1242182.017,
+    "ycsb_f": 1203480.224
+    {"shape":"ycsb_a","compat_keys_per_s":1784898.332,"rocksdb_keys_per_s":611635.198,"compat_over_rocksdb":2.918,"meets_floor":null},
+    {"shape":"ycsb_b","compat_keys_per_s":3904267.364,"rocksdb_keys_per_s":1284910.207,"compat_over_rocksdb":3.039,"meets_floor":null},
+    {"shape":"ycsb_c","compat_keys_per_s":5273816.556,"rocksdb_keys_per_s":1512104.396,"compat_over_rocksdb":3.488,"meets_floor":null},
+    {"shape":"ycsb_d","compat_keys_per_s":4069076.645,"rocksdb_keys_per_s":1301463.105,"compat_over_rocksdb":3.127,"meets_floor":null},
+    {"shape":"ycsb_e","compat_keys_per_s":1242182.017,"rocksdb_keys_per_s":90729.319,"compat_over_rocksdb":13.691,"meets_floor":null},
+    {"shape":"ycsb_f","compat_keys_per_s":1203480.224,"rocksdb_keys_per_s":490769.485,"compat_over_rocksdb":2.452,"meets_floor":null},
+    {"shape":"deps_apply_batch","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"deps_mvcc_latest","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"deps_scan","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"deps_raftlog","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"deps_cache_overwrite","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"ycsb_a_mc4","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"ycsb_f_mc4","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"deps_cache_overwrite_mc4","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"deps_apply_batch_mc4","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"deps_raftlog_mc4","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"deps_lock_prewrite","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"kvrocks_get","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"kvrocks_set","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"kvrocks_pipelined_set","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"kvrocks_scan","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"kvrocks_set_mc50","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"kvrocks_blob_set","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"ycsb_b_unif","compat_keys_per_s":4141163.998,"rocksdb_keys_per_s":1366713.021,"compat_over_rocksdb":3.030,"meets_floor":null},
+    {"shape":"ycsb_c_unif","compat_keys_per_s":5467827.304,"rocksdb_keys_per_s":1560630.901,"compat_over_rocksdb":3.504,"meets_floor":null},
+    {"shape":"ycsb_c_big","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null}
+    "deps_apply_batch": 15262.718,
+    "deps_cache_overwrite": 944013.843,
+    "deps_lock_prewrite": 30226.740,
+    "deps_mvcc_latest": 483120.495,
+    "deps_raftlog": 91561.571,
+    "deps_scan": 675332.534
+    {"shape":"ycsb_a","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"ycsb_b","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"ycsb_c","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"ycsb_d","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"ycsb_e","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"ycsb_f","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"deps_apply_batch","compat_keys_per_s":15262.718,"rocksdb_keys_per_s":6926.102,"compat_over_rocksdb":2.204,"meets_floor":null},
+    {"shape":"deps_mvcc_latest","compat_keys_per_s":483120.495,"rocksdb_keys_per_s":197987.359,"compat_over_rocksdb":2.440,"meets_floor":null},
+    {"shape":"deps_scan","compat_keys_per_s":675332.534,"rocksdb_keys_per_s":177579.489,"compat_over_rocksdb":3.803,"meets_floor":null},
+    {"shape":"deps_raftlog","compat_keys_per_s":91561.571,"rocksdb_keys_per_s":78739.516,"compat_over_rocksdb":1.163,"meets_floor":null},
+    {"shape":"deps_cache_overwrite","compat_keys_per_s":944013.843,"rocksdb_keys_per_s":269387.371,"compat_over_rocksdb":3.504,"meets_floor":null},
+    {"shape":"ycsb_a_mc4","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"ycsb_f_mc4","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"deps_cache_overwrite_mc4","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"deps_apply_batch_mc4","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"deps_raftlog_mc4","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"deps_lock_prewrite","compat_keys_per_s":30226.740,"rocksdb_keys_per_s":12103.106,"compat_over_rocksdb":2.497,"meets_floor":null},
+    {"shape":"kvrocks_get","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"kvrocks_set","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"kvrocks_pipelined_set","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"kvrocks_scan","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"kvrocks_set_mc50","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"kvrocks_blob_set","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"ycsb_b_unif","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"ycsb_c_unif","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"ycsb_c_big","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null}
+    "kvrocks_blob_set": 98140.921,
+    "kvrocks_get": 8780479.239,
+    "kvrocks_pipelined_set": 135560.419,
+    "kvrocks_scan": 1432656.546,
+    "kvrocks_set": 1057105.360,
+    "kvrocks_set_mc50": 283711.855
+    {"shape":"ycsb_a","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"ycsb_b","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"ycsb_c","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"ycsb_d","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"ycsb_e","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"ycsb_f","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"deps_apply_batch","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"deps_mvcc_latest","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"deps_scan","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"deps_raftlog","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"deps_cache_overwrite","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"ycsb_a_mc4","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"ycsb_f_mc4","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"deps_cache_overwrite_mc4","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"deps_apply_batch_mc4","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"deps_raftlog_mc4","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"deps_lock_prewrite","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"kvrocks_get","compat_keys_per_s":8780479.239,"rocksdb_keys_per_s":1720206.666,"compat_over_rocksdb":5.104,"meets_floor":null},
+    {"shape":"kvrocks_set","compat_keys_per_s":1057105.360,"rocksdb_keys_per_s":397882.707,"compat_over_rocksdb":2.657,"meets_floor":null},
+    {"shape":"kvrocks_pipelined_set","compat_keys_per_s":135560.419,"rocksdb_keys_per_s":33338.307,"compat_over_rocksdb":4.066,"meets_floor":null},
+    {"shape":"kvrocks_scan","compat_keys_per_s":1432656.546,"rocksdb_keys_per_s":36931.719,"compat_over_rocksdb":38.792,"meets_floor":null},
+    {"shape":"kvrocks_set_mc50","compat_keys_per_s":283711.855,"rocksdb_keys_per_s":108086.152,"compat_over_rocksdb":2.625,"meets_floor":null},
+    {"shape":"kvrocks_blob_set","compat_keys_per_s":98140.921,"rocksdb_keys_per_s":37814.503,"compat_over_rocksdb":2.595,"meets_floor":null},
+    {"shape":"ycsb_b_unif","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"ycsb_c_unif","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"ycsb_c_big","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null}
+[rocks-parity] ycsb_a done ops=2000 updates=1002 inserts=0 scans=0 errors=0
+[rocks-parity] ycsb_b done ops=2000 updates=108 inserts=0 scans=0 errors=0
+[rocks-parity] ycsb_c done ops=2000 updates=0 inserts=0 scans=0 errors=0
+[rocks-parity] ycsb_d done ops=2000 updates=0 inserts=104 scans=0 errors=0
+[rocks-parity] ycsb_e done ops=2000 updates=0 inserts=97 scans=1903 errors=0
+[rocks-parity] ycsb_f done ops=2000 updates=1048 inserts=0 scans=0 errors=0
+[rocks-parity] ycsb_b_unif done ops=2000 updates=101 inserts=0 scans=0 errors=0
+[rocks-parity] ycsb_c_unif done ops=2000 updates=0 inserts=0 scans=0 errors=0
+    "name": "ycsb_a",
+    "name": "ycsb_b",
+    "name": "ycsb_c",
+    "name": "ycsb_d",
+    "name": "ycsb_e",
+    "name": "ycsb_f",
+    "name": "ycsb_b_unif",
+    "name": "ycsb_c_unif",
+[rocks-parity] ycsb_a done ops=2000 updates=1002 inserts=0 scans=0 errors=0
+[rocks-parity] ycsb_b done ops=2000 updates=108 inserts=0 scans=0 errors=0
+[rocks-parity] ycsb_c done ops=2000 updates=0 inserts=0 scans=0 errors=0
+[rocks-parity] ycsb_d done ops=2000 updates=0 inserts=104 scans=0 errors=0
+[rocks-parity] ycsb_e done ops=2000 updates=0 inserts=97 scans=1903 errors=0
+[rocks-parity] ycsb_f done ops=2000 updates=1048 inserts=0 scans=0 errors=0
+[rocks-parity] ycsb_b_unif done ops=2000 updates=101 inserts=0 scans=0 errors=0
+[rocks-parity] ycsb_c_unif done ops=2000 updates=0 inserts=0 scans=0 errors=0
+    "name": "ycsb_a",
+    "name": "ycsb_b",
+    "name": "ycsb_c",
+    "name": "ycsb_d",
+    "name": "ycsb_e",
+    "name": "ycsb_f",
+    "name": "ycsb_b_unif",
+    "name": "ycsb_c_unif",
+[rocks-parity] deps_apply_batch split p50 build=17.11µs
+[rocks-parity] deps_apply_batch done txns=64000 errors=0
+[rocks-parity] deps_mvcc_latest done reads=2000 errors=0
+[rocks-parity] deps_scan done scans=2000 errors=0
+[rocks-parity] deps_raftlog enter mem_entries=264192
+[rocks-parity] deps_raftlog split p50 build=1.38µs batch=8.32µs mem_after=296192
+[rocks-parity] deps_raftlog done appends=32000 reads=250 errors=0
+[rocks-parity] deps_cache_overwrite done writes=2000 errors=0
+[rocks-parity] deps_lock_prewrite done txns=64000 errors=0
+    "name": "deps_apply_batch",
+    "name": "deps_mvcc_latest",
+    "name": "deps_mvcc_latest_split",
+    "name": "deps_scan",
+    "name": "deps_scan_probe",
+    "name": "deps_raftlog",
+    "name": "deps_cache_overwrite",
+    "name": "deps_lock_prewrite",
+[rocks-parity] deps_apply_batch split p50 build=20.22µs
+[rocks-parity] deps_apply_batch done txns=64000 errors=0
+[rocks-parity] deps_mvcc_latest done reads=2000 errors=0
+[rocks-parity] deps_scan done scans=2000 errors=0
+[rocks-parity] deps_raftlog enter mem_entries=?
+[rocks-parity] deps_raftlog split p50 build=1.30µs batch=9.95µs mem_after=?
+[rocks-parity] deps_raftlog done appends=32000 reads=250 errors=0
+[rocks-parity] deps_cache_overwrite done writes=2000 errors=0
+[rocks-parity] deps_lock_prewrite done txns=64000 errors=0
+    "name": "deps_apply_batch",
+    "name": "deps_mvcc_latest",
+    "name": "deps_mvcc_latest_split",
+    "name": "deps_scan",
+    "name": "deps_scan_probe",
+    "name": "deps_raftlog",
+    "name": "deps_cache_overwrite",
+    "name": "deps_lock_prewrite",
+[rocks-parity] kvrocks_get done gets=2000 errors=0
+[rocks-parity] kvrocks_set done sets=2000 errors=0
+[rocks-parity] kvrocks_pipelined_set done puts=64000 errors=0
+[rocks-parity] kvrocks_scan done scans=2000 errors=0
+[rocks-parity] kvrocks_blob_set done sets=2000 errors=0
+[rocks-parity] kvrocks_set_mc50 done ops=100000 errors=0
+    "name": "kvrocks_get",
+    "name": "kvrocks_set",
+    "name": "kvrocks_pipelined_set",
+    "name": "kvrocks_scan",
+    "name": "kvrocks_blob_set",
+    "name": "kvrocks_set_mc50",
+[rocks-parity] kvrocks_get done gets=2000 errors=0
+[rocks-parity] kvrocks_set done sets=2000 errors=0
+[rocks-parity] kvrocks_pipelined_set done puts=64000 errors=0
+[rocks-parity] kvrocks_scan done scans=2000 errors=0
+[rocks-parity] kvrocks_blob_set done sets=2000 errors=0
+[rocks-parity] kvrocks_set_mc50 done ops=100000 errors=0
+    "name": "kvrocks_get",
+    "name": "kvrocks_set",
+    "name": "kvrocks_pipelined_set",
+    "name": "kvrocks_scan",
+    "name": "kvrocks_blob_set",
+    "name": "kvrocks_set_mc50",
+    "ycsb_a": 1645793.886,
+    "ycsb_b": 3895044.141,
+    "ycsb_b_unif": 3874707.460,
+    "ycsb_c": 4956543.505,
+    "ycsb_c_unif": 5059422.922,
+    "ycsb_d": 3823718.911,
+    "ycsb_e": 1136129.955,
+    "ycsb_f": 1157769.210
+    {"shape":"ycsb_a","compat_keys_per_s":1645793.886,"rocksdb_keys_per_s":547409.494,"compat_over_rocksdb":3.007,"meets_floor":null},
+    {"shape":"ycsb_b","compat_keys_per_s":3895044.141,"rocksdb_keys_per_s":1125757.846,"compat_over_rocksdb":3.460,"meets_floor":null},
+    {"shape":"ycsb_c","compat_keys_per_s":4956543.505,"rocksdb_keys_per_s":1340718.907,"compat_over_rocksdb":3.697,"meets_floor":null},
+    {"shape":"ycsb_d","compat_keys_per_s":3823718.911,"rocksdb_keys_per_s":1134444.749,"compat_over_rocksdb":3.371,"meets_floor":null},
+    {"shape":"ycsb_e","compat_keys_per_s":1136129.955,"rocksdb_keys_per_s":83207.904,"compat_over_rocksdb":13.654,"meets_floor":null},
+    {"shape":"ycsb_f","compat_keys_per_s":1157769.210,"rocksdb_keys_per_s":444316.876,"compat_over_rocksdb":2.606,"meets_floor":null},
+    {"shape":"deps_apply_batch","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"deps_mvcc_latest","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"deps_scan","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"deps_raftlog","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"deps_cache_overwrite","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"ycsb_a_mc4","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"ycsb_f_mc4","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"deps_cache_overwrite_mc4","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"deps_apply_batch_mc4","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"deps_raftlog_mc4","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"deps_lock_prewrite","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"kvrocks_get","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"kvrocks_set","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"kvrocks_pipelined_set","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"kvrocks_scan","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"kvrocks_set_mc50","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"kvrocks_blob_set","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"ycsb_b_unif","compat_keys_per_s":3874707.460,"rocksdb_keys_per_s":1203872.134,"compat_over_rocksdb":3.219,"meets_floor":null},
+    {"shape":"ycsb_c_unif","compat_keys_per_s":5059422.922,"rocksdb_keys_per_s":1424599.848,"compat_over_rocksdb":3.551,"meets_floor":null},
+    {"shape":"ycsb_c_big","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null}
+    "deps_apply_batch": 15489.715,
+    "deps_cache_overwrite": 923248.931,
+    "deps_lock_prewrite": 31065.393,
+    "deps_mvcc_latest": 833089.655,
+    "deps_raftlog": 95373.626,
+    "deps_scan": 832964.400
+    {"shape":"ycsb_a","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"ycsb_b","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"ycsb_c","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"ycsb_d","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"ycsb_e","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"ycsb_f","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"deps_apply_batch","compat_keys_per_s":15489.715,"rocksdb_keys_per_s":6766.714,"compat_over_rocksdb":2.289,"meets_floor":null},
+    {"shape":"deps_mvcc_latest","compat_keys_per_s":833089.655,"rocksdb_keys_per_s":225973.151,"compat_over_rocksdb":3.687,"meets_floor":null},
+    {"shape":"deps_scan","compat_keys_per_s":832964.400,"rocksdb_keys_per_s":173161.358,"compat_over_rocksdb":4.810,"meets_floor":null},
+    {"shape":"deps_raftlog","compat_keys_per_s":95373.626,"rocksdb_keys_per_s":83851.529,"compat_over_rocksdb":1.137,"meets_floor":null},
+    {"shape":"deps_cache_overwrite","compat_keys_per_s":923248.931,"rocksdb_keys_per_s":332756.998,"compat_over_rocksdb":2.775,"meets_floor":null},
+    {"shape":"ycsb_a_mc4","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"ycsb_f_mc4","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"deps_cache_overwrite_mc4","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"deps_apply_batch_mc4","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"deps_raftlog_mc4","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"deps_lock_prewrite","compat_keys_per_s":31065.393,"rocksdb_keys_per_s":12538.937,"compat_over_rocksdb":2.478,"meets_floor":null},
+    {"shape":"kvrocks_get","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"kvrocks_set","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"kvrocks_pipelined_set","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"kvrocks_scan","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"kvrocks_set_mc50","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"kvrocks_blob_set","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"ycsb_b_unif","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"ycsb_c_unif","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"ycsb_c_big","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null}
+    "kvrocks_blob_set": 93046.448,
+    "kvrocks_get": 8917384.888,
+    "kvrocks_pipelined_set": 144718.554,
+    "kvrocks_scan": 1902911.550,
+    "kvrocks_set": 1036006.403,
+    "kvrocks_set_mc50": 308771.132
+    {"shape":"ycsb_a","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"ycsb_b","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"ycsb_c","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"ycsb_d","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"ycsb_e","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"ycsb_f","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"deps_apply_batch","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"deps_mvcc_latest","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"deps_scan","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"deps_raftlog","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"deps_cache_overwrite","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"ycsb_a_mc4","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"ycsb_f_mc4","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"deps_cache_overwrite_mc4","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"deps_apply_batch_mc4","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"deps_raftlog_mc4","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"deps_lock_prewrite","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"kvrocks_get","compat_keys_per_s":8917384.888,"rocksdb_keys_per_s":1886013.138,"compat_over_rocksdb":4.728,"meets_floor":null},
+    {"shape":"kvrocks_set","compat_keys_per_s":1036006.403,"rocksdb_keys_per_s":421621.954,"compat_over_rocksdb":2.457,"meets_floor":null},
+    {"shape":"kvrocks_pipelined_set","compat_keys_per_s":144718.554,"rocksdb_keys_per_s":33348.036,"compat_over_rocksdb":4.340,"meets_floor":null},
+    {"shape":"kvrocks_scan","compat_keys_per_s":1902911.550,"rocksdb_keys_per_s":33313.861,"compat_over_rocksdb":57.121,"meets_floor":null},
+    {"shape":"kvrocks_set_mc50","compat_keys_per_s":308771.132,"rocksdb_keys_per_s":101675.379,"compat_over_rocksdb":3.037,"meets_floor":null},
+    {"shape":"kvrocks_blob_set","compat_keys_per_s":93046.448,"rocksdb_keys_per_s":31023.719,"compat_over_rocksdb":2.999,"meets_floor":null},
+    {"shape":"ycsb_b_unif","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"ycsb_c_unif","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null},
+    {"shape":"ycsb_c_big","compat_keys_per_s":null,"rocksdb_keys_per_s":null,"compat_over_rocksdb":null,"meets_floor":null}
+--- P149 gate majority median>3.0 ---
+P149_COLUNA_A rounds=3 peer=rocks-default(sync=false) async=PEDRA_PARITY_ASYNC=1
+     ycsb_a                     min=2.918 median=2.930 rounds=[2.93, 2.918, 3.007]
+  >3 ycsb_b                     min=3.039 median=3.328 rounds=[3.328, 3.039, 3.46]
+  >3 ycsb_c                     min=3.488 median=3.690 rounds=[3.69, 3.488, 3.697]
+  >3 ycsb_d                     min=3.127 median=3.130 rounds=[3.13, 3.127, 3.371]
+  >3 ycsb_e                     min=13.654 median=13.691 rounds=[30.673, 13.691, 13.654]
+     ycsb_f                     min=2.452 median=2.606 rounds=[2.843, 2.452, 2.606]
+  >3 deps_cache_overwrite       min=2.775 median=3.082 rounds=[3.082, 3.504, 2.775]
+     deps_lock_prewrite         min=2.478 median=2.497 rounds=[2.574, 2.497, 2.478]
+  >3 deps_mvcc_latest           min=2.440 median=3.687 rounds=[4.322, 2.44, 3.687]
+     deps_apply_batch           min=2.056 median=2.204 rounds=[2.056, 2.204, 2.289]
+     deps_raftlog               min=1.137 median=1.163 rounds=[1.261, 1.163, 1.137]
+  >3 deps_scan                  min=3.803 median=4.810 rounds=[5.056, 3.803, 4.81]
+  >3 kvrocks_get                min=4.386 median=4.728 rounds=[4.386, 5.104, 4.728]
+     kvrocks_set                min=2.457 median=2.620 rounds=[2.62, 2.657, 2.457]
+  >3 kvrocks_scan               min=38.792 median=43.180 rounds=[43.18, 38.792, 57.121]
+  >3 kvrocks_pipelined_set      min=4.066 median=4.199 rounds=[4.199, 4.066, 4.34]
+     kvrocks_blob_set           min=2.595 median=2.613 rounds=[2.613, 2.595, 2.999]
+majority median>3.0 = 10/17 (need >=9); min>3.0 = 8/17
+RESULT=P149_PASS over_med=10/17 min_ratio=1.137
+RESULT=P149_DONE rc=0 2026-08-30T02:06:19Z

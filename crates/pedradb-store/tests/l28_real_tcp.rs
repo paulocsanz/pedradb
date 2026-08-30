@@ -19,7 +19,9 @@ use pedradb_store::{
     l28_tcp_lid_ok, l28_tcp_lid_ok_as_is, l28_tcp_peer_ok, l28_tcp_peer_ok_as_is,
     l28_tcp_dsc_ok, l28_tcp_dsc_ok_as_is, l28_tcp_pld_ok, l28_tcp_pld_ok_as_is,
     l28_tcp_pre_ok, l28_tcp_pre_ok_as_is, l28_tcp_rdr_ok, l28_tcp_rdr_ok_as_is,
-    l28_tcp_hnt_ok, l28_tcp_hnt_ok_as_is, l28_tcp_std_ok, l28_tcp_std_ok_as_is,
+    l28_tcp_hnt_ok, l28_tcp_hnt_ok_as_is, l28_tcp_slot_ok, l28_tcp_slot_ok_as_is,
+    l28_tcp_pj_ok, l28_tcp_pj_ok_as_is, l28_tcp_std_ok, l28_tcp_std_ok_as_is, l28_tcp_sth_ok,
+    l28_tcp_sth_ok_as_is,
     l28_tcp_fence_ok, l28_tcp_fence_ok_as_is,
     l28_tcp_hist_ok, l28_tcp_hist_ok_as_is, l28_tcp_nowms_ok, l28_tcp_nowms_ok_as_is,
     l28_tcp_odrop_ok, l28_tcp_odrop_ok_as_is,
@@ -803,6 +805,94 @@ fn l28_real_tcp_hint() {
     assert!(
         l28_tcp_hnt_ok_as_is(false),
         "AS-IS dente: skip TCP leader-hint membership filter"
+    );
+    eprintln!("{a}");
+}
+
+/// RFC-0147 P1.2: after `--remove-member` plant, process death, TCP ctor
+/// of a remaining voter must forget next/match/sent_through of the
+/// removed replica. 0146 hint is **not** this tooth.
+#[test]
+fn l28_real_tcp_drop_repl() {
+    let seed = 0x0147_1E28_u64;
+    let a = run(seed, &["--remove-member"]);
+    let b = run(seed, &["--remove-member"]);
+    assert_eq!(a, b, "remaining-voter repl-slot fingerprint must replay");
+    assert!(a.contains("remove=1"), "TCP remove plant must fire: {a}");
+    assert!(
+        a.contains("slot=1"),
+        "remaining voter must drop removed repl slots: {a}"
+    );
+    let (get_ok, after_ok, restart_ok) = parse_l28(&a);
+    assert!(
+        l28_durability_ok(get_ok, after_ok, restart_ok),
+        "L28 kernel miss under --remove-member: {a}"
+    );
+    assert!(
+        l28_tcp_slot_ok(a.contains("slot=1")),
+        "TCP remaining-voter repl-slot kernel miss: {a}"
+    );
+    assert!(
+        l28_tcp_slot_ok_as_is(false),
+        "AS-IS dente: skip TCP remaining-voter repl-slot drop"
+    );
+    eprintln!("{a}");
+}
+
+/// RFC-0148 P1.2: after REAL TCP process death, TCP ctor of a remaining
+/// 3-node voter must forget `sent_through` of a remote replica on oob
+/// `remove_member`. 0147 joint slot drop is **not** this tooth.
+#[test]
+fn l28_real_tcp_drop_st() {
+    let seed = 0x0148_1E28_u64;
+    let a = run(seed, &[]);
+    let b = run(seed, &[]);
+    assert_eq!(a, b, "remaining-voter oob sent_through fingerprint must replay");
+    assert!(
+        a.contains("sth=1"),
+        "remaining voter oob remove must drop remote sent_through: {a}"
+    );
+    let (get_ok, after_ok, restart_ok) = parse_l28(&a);
+    assert!(
+        l28_durability_ok(get_ok, after_ok, restart_ok),
+        "L28 kernel miss: {a}"
+    );
+    assert!(
+        l28_tcp_sth_ok(a.contains("sth=1")),
+        "TCP remaining-voter oob sent_through kernel miss: {a}"
+    );
+    assert!(
+        l28_tcp_sth_ok_as_is(false),
+        "AS-IS dente: skip TCP remaining-voter sent_through drop"
+    );
+    eprintln!("{a}");
+}
+
+/// RFC-0068 P2.2: after REAL TCP process death, TCP ctor of a 3-node
+/// voter with a planted committed C-old,new (no leave) must refuse a
+/// C-old majority elect. 0148 oob sent_through is **not** this tooth.
+#[test]
+fn l28_real_tcp_plant_joint() {
+    let seed = 0x0068_1E28_u64;
+    let a = run(seed, &[]);
+    let b = run(seed, &[]);
+    assert_eq!(a, b, "planted committed-joint fingerprint must replay");
+    assert!(
+        a.contains("pj=1"),
+        "planted committed joint must refuse C-old majority: {a}"
+    );
+    let (get_ok, after_ok, restart_ok) = parse_l28(&a);
+    assert!(
+        l28_durability_ok(get_ok, after_ok, restart_ok),
+        "L28 kernel miss: {a}"
+    );
+    assert!(
+        l28_tcp_pj_ok(a.contains("pj=1")),
+        "TCP planted committed-joint kernel miss: {a}"
+    );
+    assert!(
+        l28_tcp_pj_ok_as_is(false),
+        "AS-IS dente: skip TCP planted committed-joint-without-leave"
     );
     eprintln!("{a}");
 }

@@ -307,6 +307,43 @@ impl WriteGroup {
         self.submit_inner(db, ops, do_sync, None)
     }
 
+    /// 1c put/delete: no `Vec<BatchOp>` on the lone-async path (RFC-0154 P1.6).
+    fn submit_one<E: Env>(
+        &self,
+        db: &RwLock<Db<E>>,
+        op: BatchOp,
+        do_sync: bool,
+    ) -> Result<SequenceNumber> {
+        let active = self.begin_submit();
+        if active == 1 && !self.recently_concurrent() && !do_sync {
+            let result = db.write().commit_async_one(op);
+            self.finish_lone();
+            return result;
+        }
+        self.submit_after_begin(db, vec![op], do_sync, None, active)
+    }
+
+    fn begin_submit(&self) -> usize {
+        self.active.fetch_add(1, Ordering::Relaxed);
+        self.submits.fetch_add(1, Ordering::Relaxed);
+        // RFC-0154 P1.6: do not `SystemTime::now` here. Idle uses `active`
+        // (in-flight) then `last_complete_ns` (mark_complete on the way out).
+        #[cfg(feature = "pct")]
+        crate::pct_hooks::maybe_yield("submit_decision");
+        let active = self.active.load(Ordering::Relaxed);
+        if active > 1 {
+            self.last_multi_ns.store(Self::now_ns(), Ordering::Relaxed);
+        }
+        active
+    }
+
+    fn finish_lone(&self) {
+        self.batches.fetch_add(1, Ordering::Relaxed);
+        self.batch_ops.fetch_add(1, Ordering::Relaxed);
+        self.active.fetch_sub(1, Ordering::Relaxed);
+        self.mark_complete();
+    }
+
     fn submit_occ<E: Env>(
         &self,
         db: &RwLock<Db<E>>,
@@ -325,22 +362,18 @@ impl WriteGroup {
         do_sync: bool,
         occ: Option<(SequenceNumber, Vec<Bytes>)>,
     ) -> Result<SequenceNumber> {
-        self.active.fetch_add(1, Ordering::Relaxed);
-        self.submits.fetch_add(1, Ordering::Relaxed);
-        self.last_submit_ns.store(Self::now_ns(), Ordering::Relaxed);
+        let active = self.begin_submit();
+        self.submit_after_begin(db, ops, do_sync, occ, active)
+    }
 
-        // RFC-0051 P1.1: PCT preemption point between the `active`
-        // increment and the lone-vs-group decision. Parking here is what
-        // lets a second writer make the first one take the group path
-        // (lock-free; the queue lock comes later).
-        #[cfg(feature = "pct")]
-        crate::pct_hooks::maybe_yield("submit_decision");
-
-        let active = self.active.load(Ordering::Relaxed);
-        if active > 1 {
-            self.last_multi_ns.store(Self::now_ns(), Ordering::Relaxed);
-        }
-
+    fn submit_after_begin<E: Env>(
+        &self,
+        db: &RwLock<Db<E>>,
+        mut ops: Vec<BatchOp>,
+        do_sync: bool,
+        occ: Option<(SequenceNumber, Vec<Bytes>)>,
+        active: usize,
+    ) -> Result<SequenceNumber> {
         // RFC-0058 P2.1 (verified profile): the merge is back — the
         // group decision is the proved `group_commit_kernel` (first-
         // committer-wins, group atomicity, fence = max member seq).
@@ -356,17 +389,16 @@ impl WriteGroup {
         // enqueue and the host worker can drain imm. Stay off this path
         // for MULTI_HOLD after a concurrent burst so apply's second
         // write() still joins the group (RFC-0040 P1.2). Lone async
-        // (`do_sync=false`) takes the leaner `commit_async_ops`.
+        // (`do_sync=false`) takes `commit_async_one` / `commit_async_ops`.
         if occ.is_none() && active == 1 && !self.recently_concurrent() {
             let result = if do_sync {
                 Self::lone_commit(self, db, ops, do_sync, occ)
+            } else if ops.len() == 1 {
+                db.write().commit_async_one(ops.pop().expect("len checked"))
             } else {
                 db.write().commit_async_ops(ops)
             };
-            self.batches.fetch_add(1, Ordering::Relaxed);
-            self.batch_ops.fetch_add(1, Ordering::Relaxed);
-            self.active.fetch_sub(1, Ordering::Relaxed);
-            self.mark_complete();
+            self.finish_lone();
             return result;
         }
 
@@ -875,6 +907,10 @@ pub struct ConcurrentDb<E: Env = StdEnv> {
     count_cache: Arc<crate::cache::CountCache>,
     /// Invalidate epoch for compat TLS last-count (`deps_scan` zipf).
     read_cache_epoch: Arc<std::sync::atomic::AtomicU64>,
+    /// Fat-apply epoch for compat TLS last-get (RFC-0154 P1.5).
+    point_tls_epoch: Arc<std::sync::atomic::AtomicU64>,
+    /// Per-encoded-key TLS generation (1-key put invalidation).
+    key_gen: Arc<crate::cache::KeyGenMap>,
     /// Published sequence — OCC begin / visible_sequence without the Db lock.
     published_seq: Arc<std::sync::atomic::AtomicU64>,
     /// Snapshot-list version GC during parked folds (rust-rocksdb `Snapshot`
@@ -932,6 +968,8 @@ impl<E: Env> ConcurrentDb<E> {
         let point_cache = db.point_cache_handle();
         let count_cache = db.count_cache_handle();
         let read_cache_epoch = db.read_cache_epoch_handle();
+        let point_tls_epoch = db.point_tls_epoch_handle();
+        let key_gen = db.key_gen_handle();
         let published_seq = db.published_seq_handle();
         let phase_stats = db.write_phase_stats();
         let mut writes = WriteGroup::new();
@@ -950,6 +988,8 @@ impl<E: Env> ConcurrentDb<E> {
             point_cache,
             count_cache,
             read_cache_epoch,
+            point_tls_epoch,
+            key_gen,
             published_seq,
             fold_gc: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             occ_registry,
@@ -985,6 +1025,25 @@ impl<E: Env> ConcurrentDb<E> {
     #[must_use]
     pub fn read_cache_epoch(&self) -> u64 {
         self.read_cache_epoch.load(Ordering::Acquire)
+    }
+
+    /// Fat-apply epoch for compat TLS last-get. 1-key puts leave this still
+    /// (RFC-0154 P1.5).
+    #[must_use]
+    pub fn point_tls_epoch(&self) -> u64 {
+        self.point_tls_epoch.load(Ordering::Acquire)
+    }
+
+    /// TLS generation for an encoded user key (default-raw / already prefixed).
+    #[must_use]
+    pub fn key_tls_gen(&self, key: &[u8]) -> u64 {
+        self.key_gen.gen(key)
+    }
+
+    /// TLS generation for a named-CF user key (`cf\\0key` encoding).
+    #[must_use]
+    pub fn key_tls_gen_prefixed(&self, pfx: &[u8], key: &[u8]) -> u64 {
+        self.key_gen.gen_prefixed(pfx, key)
     }
 
     /// Count live keys in `[start, end)` at the published snapshot.
@@ -1058,6 +1117,13 @@ impl<E: Env> ConcurrentDb<E> {
     /// Opt-in auto-compact reclaim (see [`Db::set_auto_reclaim`]).
     pub fn set_auto_reclaim(&self, enabled: bool) {
         self.inner.write().set_auto_reclaim(enabled);
+    }
+
+    /// Size the SST block cache in bytes (Rocks `NewLRUCache`, RFC-0153).
+    pub fn set_block_cache_budget_bytes(&self, bytes: u64) {
+        self.inner
+            .write()
+            .install_block_cache(crate::cache::BlockCache::with_budget_bytes(bytes));
     }
 
     /// Skip inline auto-compact; host drains L0 (RFC-0037).
@@ -1742,6 +1808,8 @@ impl<E: Env> ConcurrentDb<E> {
             point_cache: _,
             count_cache: _,
             read_cache_epoch: _,
+            point_tls_epoch: _,
+            key_gen: _,
             published_seq: _,
             fold_gc: _,
             occ_registry: _,
@@ -1877,7 +1945,7 @@ impl<E: Env> ConcurrentDb<E> {
         crate::pct_hooks::maybe_yield("op_entry");
         let do_sync = self.resolve_sync(opts);
         self.writes
-            .submit(&self.inner, vec![BatchOp::put(key, value)], do_sync)
+            .submit_one(&self.inner, BatchOp::put(key, value), do_sync)
     }
 
     /// Put only if key is absent (atomic under write lock; RFC-0019 CAS).
@@ -1926,7 +1994,7 @@ impl<E: Env> ConcurrentDb<E> {
     pub fn delete(&self, key: impl AsRef<[u8]>) -> Result<()> {
         let do_sync = self.resolve_sync(WriteOptions::default());
         self.writes
-            .submit(&self.inner, vec![BatchOp::delete(key)], do_sync)
+            .submit_one(&self.inner, BatchOp::delete(key), do_sync)
             .map(|_| ())
     }
 
@@ -2606,6 +2674,56 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
     }
 
+    /// Catalog three-teeth plant. Direct `publish_only_when_wal_io_ok` /
+    /// `failed_wal_sync_does_not_publish_group` /
+    /// `multi_writer_failed_sync_does_not_publish_group` are **not** this tooth.
+    #[test]
+    fn may_publish_group_on_live_group_is_not_ok() {
+        assert!(!crate::group_commit_kernel::may_publish_group(false));
+        assert!(
+            crate::group_commit_kernel::may_publish_group_as_is(false),
+            "AS-IS dente: publish after failed WAL I/O"
+        );
+        let dir = temp_dir();
+        let env = FenceEnv::new();
+        let db = ConcurrentDb::open_with_env(&dir, OpenOptions::default(), env.clone()).unwrap();
+        db.set_write_group_catchup_window(Duration::from_millis(20));
+        db.put(b"warm", b"1").unwrap();
+        env.fail_sync_hold
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        let n = 4usize;
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(n));
+        let mut handles = Vec::new();
+        for i in 0..n {
+            let db = db.clone();
+            let barrier = std::sync::Arc::clone(&barrier);
+            handles.push(thread::spawn(move || {
+                barrier.wait();
+                let k = [b'p', u8::try_from(i).expect("n fits u8")];
+                db.put(&k, b"v")
+            }));
+        }
+        let results: Vec<Result<()>> = handles.into_iter().map(|h| h.join().unwrap()).collect();
+        assert!(
+            results.iter().all(|r| r.is_err()),
+            "live finish_group_off_lock must fail closed: {results:?}"
+        );
+        for i in 0..n {
+            let k = [b'p', u8::try_from(i).expect("n fits u8")];
+            assert_eq!(
+                db.get(&k),
+                None,
+                "live may_publish_group must not publish {i}"
+            );
+        }
+        let (_submits, _queued, groups, group_ops) = db.write_group_stats();
+        assert!(
+            groups >= 1 && group_ops >= 2,
+            "must have taken finish_group_off_lock groups={groups} ops={group_ops}"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
     /// RFC-0080 P0: live verified open+put cannot claim a proven ring.
     /// AS-IS would admit a live ring inside verified. Does not submit SQEs.
     #[test]
@@ -2652,6 +2770,30 @@ mod tests {
             "AS-IS dente: d>=2 would claim forall"
         );
         assert!(!crate::group_commit_kernel::forall_schedules_admitted(2));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Catalog three-teeth plant. Direct `pct_depth_is_not_forall_schedules` /
+    /// `claim_forall_schedules_refused_at_pct_depth2` are **not** this tooth.
+    #[test]
+    fn forall_schedules_admitted_on_live_group_is_not_ok() {
+        assert!(!crate::group_commit_kernel::forall_schedules_admitted(2));
+        assert!(
+            crate::group_commit_kernel::forall_schedules_admitted_as_is(2),
+            "AS-IS dente: PCT d>=2 would claim forall schedules"
+        );
+        let dir = temp_dir();
+        let db = ConcurrentDb::open(&dir).unwrap();
+        db.put(b"forall/k", b"forall/v").unwrap();
+        assert_eq!(db.get(b"forall/k").as_deref(), Some(&b"forall/v"[..]));
+        assert!(
+            !db.claim_forall_schedules(2),
+            "live ConcurrentDb must refuse ∀π after a real put"
+        );
+        assert!(
+            !db.claim_forall_schedules(3),
+            "d>2 is still not a forall theorem"
+        );
         let _ = fs::remove_dir_all(&dir);
     }
 
@@ -2733,6 +2875,40 @@ mod tests {
                 "close must drain async tail without fsync, t/{i}"
             );
         }
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0154 P1.6: lone-async 1-op put is visible without a `Vec<BatchOp>`.
+    #[test]
+    fn lone_async_one_put_is_visible() {
+        let dir = temp_dir();
+        let db = ConcurrentDb::open_with(
+            &dir,
+            OpenOptions {
+                wal_full_fsync: true,
+                history: Default::default(),
+                wal_recovery: Default::default(),
+                sync: false,
+                auto_flush_bytes: None,
+                auto_compact_sst_count: None,
+                auto_compact_sst_bytes: None,
+                exclusive: true,
+                large_value_threshold: None,
+            },
+        )
+        .unwrap();
+        db.put_with(b"k", b"v1", WriteOptions::no_sync()).unwrap();
+        assert_eq!(db.get(b"k").as_deref(), Some(&b"v1"[..]));
+        db.put_with(b"k2", b"v2", WriteOptions::no_sync()).unwrap();
+        assert_eq!(db.get(b"k").as_deref(), Some(&b"v1"[..]));
+        assert_eq!(db.get(b"k2").as_deref(), Some(&b"v2"[..]));
+        db.put_with(b"k", b"v3", WriteOptions::no_sync()).unwrap();
+        assert_eq!(db.get(b"k").as_deref(), Some(&b"v3"[..]));
+        db.close().unwrap();
+        let db = ConcurrentDb::open(&dir).unwrap();
+        assert_eq!(db.get(b"k").as_deref(), Some(&b"v3"[..]));
+        assert_eq!(db.get(b"k2").as_deref(), Some(&b"v2"[..]));
         db.close().unwrap();
         let _ = fs::remove_dir_all(&dir);
     }

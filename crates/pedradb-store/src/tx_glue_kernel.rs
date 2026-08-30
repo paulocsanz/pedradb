@@ -93,10 +93,7 @@ mod tests {
 
     #[test]
     fn tx_range_action_on_live_majority_is_not_ok() {
-        assert_eq!(
-            tx_range_action(true, true),
-            TxRangeAction::MajorityRevert
-        );
+        assert_eq!(tx_range_action(true, true), TxRangeAction::MajorityRevert);
         assert_eq!(
             tx_range_action_as_is_local_only(true, true),
             TxRangeAction::LocalRevert,

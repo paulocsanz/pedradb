@@ -18,6 +18,12 @@
         "handle_request_vote_with_persist",
         "rpc_request_vote"
       ],
+      "live_callers": [
+        {
+          "file": "crates/pedradb-store/src/lib.rs",
+          "handler": "on_request_vote"
+        }
+      ],
       "as_is": "vote_decision_as_is_ignore_log_and_vote",
       "dst_plant": {
         "file": "crates/pedradb-store/src/three_teeth_queued.rs",
@@ -40,6 +46,12 @@
         "handle_append_entries",
         "rpc_append_entries"
       ],
+      "live_callers": [
+        {
+          "file": "crates/pedradb-store/src/lib.rs",
+          "handler": "on_append_entries"
+        }
+      ],
       "as_is": "ae_entry_action_as_is_rewrite_committed",
       "dst_plant": {
         "file": "crates/pedradb-store/src/three_teeth_queued.rs",
@@ -57,6 +69,12 @@
         "crates/pedradb-raft/src/lib.rs"
       ],
       "entry": "ae_ack_success",
+      "live_callers": [
+        {
+          "file": "crates/pedradb-store/src/lib.rs",
+          "handler": "on_append_entries"
+        }
+      ],
       "data_fate": true,
       "handlers": [
         "handle_append_entries",
@@ -80,6 +98,12 @@
         "crates/pedradb-raft/src/net.rs"
       ],
       "entry": "propose_ack_ok",
+      "live_callers": [
+        {
+          "file": "crates/pedradb-store/src/lib.rs",
+          "handler": "broadcast_append_after_propose"
+        }
+      ],
       "data_fate": true,
       "as_is": "propose_ack_ok_as_is",
       "dst_plant": {
@@ -98,6 +122,12 @@
         "crates/pedradb-store/src/lib.rs"
       ],
       "entry": "joint_election_ok",
+      "live_callers": [
+        {
+          "file": "crates/pedradb-store/src/lib.rs",
+          "handler": "election_has_joint_quorum"
+        }
+      ],
       "data_fate": true,
       "handlers": [
         "election_has_joint_quorum"
@@ -119,6 +149,12 @@
         "crates/pedradb-store/src/lib.rs"
       ],
       "entry": "joint_still_active",
+      "live_callers": [
+        {
+          "file": "crates/pedradb-store/src/lib.rs",
+          "handler": "pending_joint_on"
+        }
+      ],
       "data_fate": true,
       "handlers": [
         "pending_joint_on",
@@ -141,6 +177,12 @@
         "crates/pedradb-store/src/lib.rs"
       ],
       "entry": "pending_joint_node_counts",
+      "live_callers": [
+        {
+          "file": "crates/pedradb-store/src/lib.rs",
+          "handler": "pending_joint"
+        }
+      ],
       "data_fate": true,
       "handlers": [
         "pending_joint"
@@ -162,6 +204,12 @@
         "crates/pedradb-store/src/lib.rs"
       ],
       "entry": "joint_leave_ok",
+      "live_callers": [
+        {
+          "file": "crates/pedradb-store/src/lib.rs",
+          "handler": "leave_joint"
+        }
+      ],
       "data_fate": true,
       "handlers": [
         "leave_joint"
@@ -183,6 +231,12 @@
         "crates/pedradb-store/src/lib.rs"
       ],
       "entry": "election_grant_from_counts",
+      "live_callers": [
+        {
+          "file": "crates/pedradb-store/src/lib.rs",
+          "handler": "on_request_vote_reply"
+        }
+      ],
       "data_fate": true,
       "handlers": [
         "on_request_vote_reply"
@@ -204,6 +258,12 @@
         "crates/pedradb-store/src/lib.rs"
       ],
       "entry": "joint_target_counts",
+      "live_callers": [
+        {
+          "file": "crates/pedradb-store/src/lib.rs",
+          "handler": "remove_member_joint"
+        }
+      ],
       "data_fate": true,
       "handlers": [
         "remove_member_joint"
@@ -225,6 +285,12 @@
         "crates/pedradb-store/src/lib.rs"
       ],
       "entry": "joint_add_target_counts",
+      "live_callers": [
+        {
+          "file": "crates/pedradb-store/src/lib.rs",
+          "handler": "add_member_joint"
+        }
+      ],
       "data_fate": true,
       "handlers": [
         "add_member_joint"
@@ -246,6 +312,12 @@
         "crates/pedradb-store/src/lib.rs"
       ],
       "entry": "queued_leave_finish_ok",
+      "live_callers": [
+        {
+          "file": "crates/pedradb-store/src/lib.rs",
+          "handler": "finish_uncommitted_leave"
+        }
+      ],
       "data_fate": true,
       "handlers": [
         "finish_uncommitted_leave"
@@ -267,6 +339,12 @@
         "crates/pedradb-store/src/lib.rs"
       ],
       "entry": "disk_membership_overrides_cli",
+      "live_callers": [
+        {
+          "file": "crates/pedradb-store/src/lib.rs",
+          "handler": "bind_cluster_identity"
+        }
+      ],
       "data_fate": true,
       "handlers": [
         "bind_cluster_identity",
@@ -290,6 +368,12 @@
         "crates/pedradb-store/src/lib.rs"
       ],
       "entry": "high_water_at_least",
+      "live_callers": [
+        {
+          "file": "crates/pedradb-store/src/lib.rs",
+          "handler": "open_single_node_with_rng_opts"
+        }
+      ],
       "data_fate": true,
       "handlers": [
         "open_single_node_with_rng_opts",
@@ -315,6 +399,12 @@
         "crates/pedradb-store/src/lib.rs"
       ],
       "entry": "participating_if_member",
+      "live_callers": [
+        {
+          "file": "crates/pedradb-store/src/lib.rs",
+          "handler": "is_participating"
+        }
+      ],
       "data_fate": true,
       "handlers": [
         "is_participating",
@@ -339,6 +429,12 @@
         "crates/pedradb-store/src/lib.rs"
       ],
       "entry": "membership_identity_before_applied",
+      "live_callers": [
+        {
+          "file": "crates/pedradb-store/src/lib.rs",
+          "handler": "apply_range"
+        }
+      ],
       "data_fate": true,
       "handlers": [
         "apply_range"
@@ -360,6 +456,12 @@
         "crates/pedradb-store/src/lib.rs"
       ],
       "entry": "recover_must_apply",
+      "live_callers": [
+        {
+          "file": "crates/pedradb-store/src/lib.rs",
+          "handler": "recover_apply_committed"
+        }
+      ],
       "data_fate": true,
       "handlers": [
         "recover_apply_committed",
@@ -384,6 +486,12 @@
         "crates/pedradb-store/src/lib.rs"
       ],
       "entry": "recover_apply_node_counts",
+      "live_callers": [
+        {
+          "file": "crates/pedradb-store/src/lib.rs",
+          "handler": "recover_apply_committed"
+        }
+      ],
       "data_fate": true,
       "handlers": [
         "recover_apply_committed"
@@ -405,6 +513,12 @@
         "crates/pedradb-store/src/lib.rs"
       ],
       "entry": "recover_truncate_node_counts",
+      "live_callers": [
+        {
+          "file": "crates/pedradb-store/src/lib.rs",
+          "handler": "persist_truncated_logs"
+        }
+      ],
       "data_fate": true,
       "handlers": [
         "persist_truncated_logs",
@@ -429,6 +543,12 @@
         "crates/pedradb-store/src/lib.rs"
       ],
       "entry": "recover_drop_orphan_seg",
+      "live_callers": [
+        {
+          "file": "crates/pedradb-store/src/lib.rs",
+          "handler": "persist_log_db"
+        }
+      ],
       "data_fate": true,
       "handlers": [
         "persist_log_db"
@@ -450,6 +570,12 @@
         "crates/pedradb-store/src/lib.rs"
       ],
       "entry": "recover_abort_node_counts",
+      "live_callers": [
+        {
+          "file": "crates/pedradb-store/src/lib.rs",
+          "handler": "abort_leftover_intents"
+        }
+      ],
       "data_fate": true,
       "handlers": [
         "abort_leftover_intents",
@@ -474,6 +600,12 @@
         "crates/pedradb-store/src/lib.rs"
       ],
       "entry": "persist_meta_node_counts",
+      "live_callers": [
+        {
+          "file": "crates/pedradb-store/src/lib.rs",
+          "handler": "persist_u64_meta_all"
+        }
+      ],
       "data_fate": true,
       "handlers": [
         "persist_u64_meta_all"
@@ -495,6 +627,12 @@
         "crates/pedradb-store/src/lib.rs"
       ],
       "entry": "persist_hist_node_counts",
+      "live_callers": [
+        {
+          "file": "crates/pedradb-store/src/lib.rs",
+          "handler": "persist_si_keys"
+        }
+      ],
       "data_fate": true,
       "handlers": [
         "persist_si_keys"
@@ -516,6 +654,12 @@
         "crates/pedradb-store/src/lib.rs"
       ],
       "entry": "persist_fence_node_counts",
+      "live_callers": [
+        {
+          "file": "crates/pedradb-store/src/lib.rs",
+          "handler": "fence_txn_aborted"
+        }
+      ],
       "data_fate": true,
       "handlers": [
         "fence_txn_aborted"
@@ -537,6 +681,12 @@
         "crates/pedradb-store/src/lib.rs"
       ],
       "entry": "force_clear_node_counts",
+      "live_callers": [
+        {
+          "file": "crates/pedradb-store/src/lib.rs",
+          "handler": "force_local_clear_keys"
+        }
+      ],
       "data_fate": true,
       "handlers": [
         "force_local_clear_keys"
@@ -558,6 +708,12 @@
         "crates/pedradb-store/src/lib.rs"
       ],
       "entry": "drop_preimages_node_counts",
+      "live_callers": [
+        {
+          "file": "crates/pedradb-store/src/lib.rs",
+          "handler": "drop_preimages"
+        }
+      ],
       "data_fate": true,
       "handlers": [
         "drop_preimages"
@@ -579,6 +735,12 @@
         "crates/pedradb-store/src/lib.rs"
       ],
       "entry": "open_peer_uses_disk",
+      "live_callers": [
+        {
+          "file": "crates/pedradb-store/src/lib.rs",
+          "handler": "open_with_envs_rng_opts"
+        }
+      ],
       "data_fate": true,
       "handlers": [
         "open_with_envs_rng_opts"
@@ -600,6 +762,12 @@
         "crates/pedradb-store/src/lib.rs"
       ],
       "entry": "local_id_if_member",
+      "live_callers": [
+        {
+          "file": "crates/pedradb-store/src/lib.rs",
+          "handler": "local_node_id"
+        }
+      ],
       "data_fate": true,
       "handlers": [
         "local_node_id"
@@ -621,6 +789,12 @@
         "crates/pedradb-store/src/lib.rs"
       ],
       "entry": "reader_id_local",
+      "live_callers": [
+        {
+          "file": "crates/pedradb-store/src/lib.rs",
+          "handler": "ids_first_if_local"
+        }
+      ],
       "data_fate": true,
       "handlers": [
         "ids_first_if_local",
@@ -643,6 +817,12 @@
         "crates/pedradb-store/src/lib.rs"
       ],
       "entry": "discard_node_counts",
+      "live_callers": [
+        {
+          "file": "crates/pedradb-store/src/lib.rs",
+          "handler": "discard_uncommitted_from"
+        }
+      ],
       "data_fate": true,
       "handlers": [
         "discard_uncommitted_from"
@@ -664,6 +844,12 @@
         "crates/pedradb-store/src/lib.rs"
       ],
       "entry": "discard_leader_local",
+      "live_callers": [
+        {
+          "file": "crates/pedradb-store/src/lib.rs",
+          "handler": "finish_queued_propose"
+        }
+      ],
       "data_fate": true,
       "handlers": [
         "finish_queued_propose"
@@ -685,6 +871,12 @@
         "crates/pedradb-store/src/lib.rs"
       ],
       "entry": "removed_steps_down",
+      "live_callers": [
+        {
+          "file": "crates/pedradb-store/src/lib.rs",
+          "handler": "install_applied_membership"
+        }
+      ],
       "data_fate": true,
       "handlers": [
         "install_applied_membership"
@@ -706,6 +898,12 @@
         "crates/pedradb-store/src/lib.rs"
       ],
       "entry": "hint_if_member",
+      "live_callers": [
+        {
+          "file": "crates/pedradb-store/src/lib.rs",
+          "handler": "leader_hint"
+        }
+      ],
       "data_fate": true,
       "handlers": [
         "leader_hint",
@@ -728,6 +926,12 @@
         "crates/pedradb-store/src/lib.rs"
       ],
       "entry": "drop_repl_slot",
+      "live_callers": [
+        {
+          "file": "crates/pedradb-store/src/lib.rs",
+          "handler": "install_applied_membership"
+        }
+      ],
       "data_fate": true,
       "handlers": [
         "install_applied_membership",
@@ -751,6 +955,12 @@
         "crates/pedradb-store/src/lib.rs"
       ],
       "entry": "drop_sent_through",
+      "live_callers": [
+        {
+          "file": "crates/pedradb-store/src/lib.rs",
+          "handler": "remove_member"
+        }
+      ],
       "data_fate": true,
       "handlers": [
         "remove_member"
@@ -790,7 +1000,19 @@
         "crates/pedradb-raft/src/lib.rs"
       ],
       "entry": "dcs_apply_should_advance_result",
-      "token_src": "dcs_apply_should_advance"
+      "token_src": "dcs_apply_should_advance",
+      "as_is": "dcs_apply_should_advance_as_is",
+      "three_teeth": true,
+      "live_callers": [
+        {
+          "file": "crates/pedradb-store/src/lib.rs",
+          "handler": "apply_range"
+        }
+      ],
+      "dst_plant": {
+        "file": "crates/pedradb-store/src/three_teeth_queued.rs",
+        "test": "dcs_apply_should_advance_result_on_live_queued_is_not_ok"
+      }
     },
     {
       "id": "txn",
@@ -820,7 +1042,19 @@
       "callers": [
         "crates/pedradb-store/src/lib.rs"
       ],
-      "entry": "may_compact_through"
+      "entry": "may_compact_through",
+      "as_is": "may_compact_through_as_is",
+      "three_teeth": true,
+      "live_callers": [
+        {
+          "file": "crates/pedradb-store/src/lib.rs",
+          "handler": "maybe_compact_logs"
+        }
+      ],
+      "dst_plant": {
+        "file": "crates/pedradb-store/src/three_teeth_queued.rs",
+        "test": "may_compact_through_on_live_queued_is_not_ok"
+      }
     },
     {
       "id": "compact_unleft",
@@ -853,7 +1087,19 @@
       "callers": [
         "crates/pedradb-store/src/lib.rs"
       ],
-      "entry": "snapshot_touches_user_key"
+      "entry": "snapshot_touches_user_key",
+      "as_is": "snapshot_touches_user_key_as_is",
+      "three_teeth": true,
+      "live_callers": [
+        {
+          "file": "crates/pedradb-store/src/lib.rs",
+          "handler": "on_install_snapshot"
+        }
+      ],
+      "dst_plant": {
+        "file": "crates/pedradb-store/src/three_teeth_queued.rs",
+        "test": "snapshot_touches_user_key_on_live_queued_is_not_ok"
+      }
     },
     {
       "id": "si_reader",
@@ -865,7 +1111,19 @@
       "callers": [
         "crates/pedradb-store/src/lib.rs"
       ],
-      "entry": "si_reader_beats"
+      "entry": "si_reader_beats",
+      "as_is": "si_reader_beats_as_is",
+      "three_teeth": true,
+      "live_callers": [
+        {
+          "file": "crates/pedradb-store/src/lib.rs",
+          "handler": "best_applied_reader"
+        }
+      ],
+      "dst_plant": {
+        "file": "crates/pedradb-store/src/three_teeth_queued.rs",
+        "test": "si_reader_beats_on_live_queued_is_not_ok"
+      }
     },
     {
       "id": "index_val",
@@ -878,7 +1136,19 @@
       "callers": [
         "crates/pedradb-store/src/layers.rs"
       ],
-      "entry": "len_pref_value"
+      "entry": "len_pref_value",
+      "as_is": "len_pref_value_as_is",
+      "three_teeth": true,
+      "live_callers": [
+        {
+          "file": "crates/pedradb-store/src/layers.rs",
+          "handler": "table_index_value_range"
+        }
+      ],
+      "dst_plant": {
+        "file": "crates/pedradb-store/src/three_teeth_queued.rs",
+        "test": "len_pref_value_on_live_queued_is_not_ok"
+      }
     },
     {
       "id": "changelog",
@@ -890,7 +1160,19 @@
       "callers": [
         "crates/pedradb-core/src/db.rs"
       ],
-      "entry": "changelog_needs_sst_rebuild"
+      "entry": "changelog_needs_sst_rebuild",
+      "as_is": "changelog_needs_sst_rebuild_as_is",
+      "three_teeth": true,
+      "live_callers": [
+        {
+          "file": "crates/pedradb-core/src/db.rs",
+          "handler": "maybe_rebuild_feed_from_live"
+        }
+      ],
+      "dst_plant": {
+        "file": "crates/pedradb-store/src/three_teeth_queued.rs",
+        "test": "changelog_needs_sst_rebuild_on_live_queued_is_not_ok"
+      }
     },
     {
       "id": "range_covers",
@@ -903,7 +1185,19 @@
         "crates/pedradb-core/src/merge.rs",
         "crates/pedradb-core/src/db.rs"
       ],
-      "entry": "range_tombstone_covers"
+      "entry": "range_tombstone_covers",
+      "as_is": "range_tombstone_covers_as_is",
+      "three_teeth": true,
+      "live_callers": [
+        {
+          "file": "crates/pedradb-core/src/merge.rs",
+          "handler": "range_deleted"
+        }
+      ],
+      "dst_plant": {
+        "file": "crates/pedradb-store/src/three_teeth_queued.rs",
+        "test": "range_tombstone_covers_on_live_queued_is_not_ok"
+      }
     },
     {
       "id": "prefix",
@@ -919,7 +1213,19 @@
       ],
       "entry": "prefix_exclusive_end",
       "token_src": "prefix_exclusive_end",
-      "token_dst": "*"
+      "token_dst": "*",
+      "as_is": "prefix_exclusive_end_as_is",
+      "three_teeth": true,
+      "live_callers": [
+        {
+          "file": "crates/pedradb-store/src/lib.rs",
+          "handler": "scan_prefix"
+        }
+      ],
+      "dst_plant": {
+        "file": "crates/pedradb-store/src/three_teeth_queued.rs",
+        "test": "prefix_exclusive_end_on_live_queued_is_not_ok"
+      }
     },
     {
       "id": "stream_cursor",
@@ -931,7 +1237,19 @@
       "callers": [
         "crates/pedradb-stream/src/lib.rs"
       ],
-      "entry": "ack_in_order"
+      "entry": "ack_in_order",
+      "as_is": "ack_in_order_as_is",
+      "three_teeth": true,
+      "live_callers": [
+        {
+          "file": "crates/pedradb-stream/src/lib.rs",
+          "handler": "ack"
+        }
+      ],
+      "dst_plant": {
+        "file": "crates/pedradb-stream/src/lib.rs",
+        "test": "ack_in_order_on_live_stream_is_not_ok"
+      }
     },
     {
       "id": "bearer",
@@ -944,7 +1262,19 @@
       "callers": [
         "crates/pedradb-http/src/lib.rs"
       ],
-      "entry": "bearer_token_from_value"
+      "entry": "bearer_token_from_value",
+      "as_is": "bearer_token_from_value_as_is",
+      "three_teeth": true,
+      "live_callers": [
+        {
+          "file": "crates/pedradb-http/src/lib.rs",
+          "handler": "authorize"
+        }
+      ],
+      "dst_plant": {
+        "file": "crates/pedradb-http/src/lib.rs",
+        "test": "bearer_token_from_value_on_live_http_is_not_ok"
+      }
     },
     {
       "id": "content_length",
@@ -956,7 +1286,19 @@
       "callers": [
         "crates/pedradb-http/src/lib.rs"
       ],
-      "entry": "keep_body_without_cl"
+      "entry": "keep_body_without_cl",
+      "as_is": "keep_body_without_cl_as_is",
+      "three_teeth": true,
+      "live_callers": [
+        {
+          "file": "crates/pedradb-http/src/lib.rs",
+          "handler": "read_req"
+        }
+      ],
+      "dst_plant": {
+        "file": "crates/pedradb-http/src/lib.rs",
+        "test": "keep_body_without_cl_on_live_http_is_not_ok"
+      }
     },
     {
       "id": "fail_closed",
@@ -968,7 +1310,19 @@
       "callers": [
         "crates/pedradb-http/src/lib.rs"
       ],
-      "entry": "parse_error_writes_status"
+      "entry": "parse_error_writes_status",
+      "as_is": "parse_error_writes_status_as_is",
+      "three_teeth": true,
+      "live_callers": [
+        {
+          "file": "crates/pedradb-http/src/lib.rs",
+          "handler": "write_wire_err"
+        }
+      ],
+      "dst_plant": {
+        "file": "crates/pedradb-http/src/lib.rs",
+        "test": "parse_error_writes_status_on_live_http_is_not_ok"
+      }
     },
     {
       "id": "form_plus",
@@ -981,7 +1335,19 @@
       "callers": [
         "crates/pedradb-http/src/lib.rs"
       ],
-      "entry": "form_decode"
+      "entry": "form_decode",
+      "as_is": "form_decode_as_is",
+      "three_teeth": true,
+      "live_callers": [
+        {
+          "file": "crates/pedradb-http/src/lib.rs",
+          "handler": "query_decoded_values"
+        }
+      ],
+      "dst_plant": {
+        "file": "crates/pedradb-http/src/lib.rs",
+        "test": "form_decode_on_live_http_is_not_ok"
+      }
     },
     {
       "id": "origin_path",
@@ -996,7 +1362,19 @@
       ],
       "entry": "origin_form_path",
       "token_src": "strip_authority_for_routing",
-      "token_dst": "strip_authority_for_routing"
+      "token_dst": "strip_authority_for_routing",
+      "as_is": "origin_form_path_as_is",
+      "three_teeth": true,
+      "live_callers": [
+        {
+          "file": "crates/pedradb-http/src/lib.rs",
+          "handler": "path_only"
+        }
+      ],
+      "dst_plant": {
+        "file": "crates/pedradb-http/src/lib.rs",
+        "test": "origin_form_path_on_live_http_is_not_ok"
+      }
     },
     {
       "id": "isolated",
@@ -1009,7 +1387,19 @@
       "callers": [
         "crates/pedradb-fold/src/follow.rs"
       ],
-      "entry": "isolated_id_matches"
+      "entry": "isolated_id_matches",
+      "as_is": "isolated_id_matches_as_is",
+      "three_teeth": true,
+      "live_callers": [
+        {
+          "file": "crates/pedradb-fold/src/follow.rs",
+          "handler": "in_prefixes"
+        }
+      ],
+      "dst_plant": {
+        "file": "crates/pedradb-fold/src/isolated_kernel.rs",
+        "test": "isolated_id_matches_on_live_fold_is_not_ok"
+      }
     },
     {
       "id": "children",
@@ -1022,7 +1412,19 @@
       "callers": [
         "crates/montanha-fdb-recipes/src/lib.rs"
       ],
-      "entry": "packed_children_end"
+      "entry": "packed_children_end",
+      "as_is": "packed_children_end_as_is",
+      "three_teeth": true,
+      "live_callers": [
+        {
+          "file": "crates/montanha-fdb-recipes/src/lib.rs",
+          "handler": "range_end"
+        }
+      ],
+      "dst_plant": {
+        "file": "crates/montanha-fdb-recipes/src/children_kernel.rs",
+        "test": "packed_children_end_on_live_subspace_is_not_ok"
+      }
     },
     {
       "id": "fields",
@@ -1035,7 +1437,19 @@
       "callers": [
         "crates/montanha-fdb-recipes/src/lib.rs"
       ],
-      "entry": "encode_fields"
+      "entry": "encode_fields",
+      "as_is": "encode_fields_as_is",
+      "three_teeth": true,
+      "live_callers": [
+        {
+          "file": "crates/montanha-fdb-recipes/src/lib.rs",
+          "handler": "set_user"
+        }
+      ],
+      "dst_plant": {
+        "file": "crates/montanha-fdb-recipes/src/lib.rs",
+        "test": "encode_fields_on_live_directory_is_not_ok"
+      }
     },
     {
       "id": "journal_pin",
@@ -1047,7 +1461,19 @@
       "callers": [
         "crates/pedradb-journal/src/lib.rs"
       ],
-      "entry": "may_advance_pin"
+      "entry": "may_advance_pin",
+      "as_is": "may_advance_pin_as_is",
+      "three_teeth": true,
+      "live_callers": [
+        {
+          "file": "crates/pedradb-journal/src/lib.rs",
+          "handler": "pin_after_apply"
+        }
+      ],
+      "dst_plant": {
+        "file": "crates/pedradb-journal/src/pin_kernel.rs",
+        "test": "may_advance_pin_on_live_journal_is_not_ok"
+      }
     },
     {
       "id": "wal_recover",
@@ -1077,7 +1503,19 @@
       "callers": [
         "crates/montanha-fdb-recipes/src/lib.rs"
       ],
-      "entry": "pack_cut_tag"
+      "entry": "pack_cut_tag",
+      "as_is": "pack_cut_tag_as_is",
+      "three_teeth": true,
+      "live_callers": [
+        {
+          "file": "crates/montanha-fdb-recipes/src/lib.rs",
+          "handler": "pack"
+        }
+      ],
+      "dst_plant": {
+        "file": "crates/montanha-fdb-recipes/src/pack_kernel.rs",
+        "test": "pack_cut_tag_on_live_subspace_is_not_ok"
+      }
     },
     {
       "id": "ship_guard",
@@ -1089,7 +1527,19 @@
       "callers": [
         "crates/pedradb-replicate/src/lib.rs"
       ],
-      "entry": "pull_plan"
+      "entry": "pull_plan",
+      "as_is": "pull_plan_as_is",
+      "three_teeth": true,
+      "live_callers": [
+        {
+          "file": "crates/pedradb-replicate/src/lib.rs",
+          "handler": "pull_on"
+        }
+      ],
+      "dst_plant": {
+        "file": "crates/pedradb-replicate/src/lib.rs",
+        "test": "pull_plan_on_live_ship_is_not_ok"
+      }
     },
     {
       "id": "bloom_header",
@@ -1101,7 +1551,19 @@
       "callers": [
         "crates/pedradb-core/src/bloom.rs"
       ],
-      "entry": "bloom_header_ok"
+      "entry": "bloom_header_ok",
+      "as_is": "bloom_header_ok_as_is",
+      "three_teeth": true,
+      "live_callers": [
+        {
+          "file": "crates/pedradb-core/src/bloom.rs",
+          "handler": "decode"
+        }
+      ],
+      "dst_plant": {
+        "file": "crates/pedradb-core/src/bloom.rs",
+        "test": "bloom_header_ok_on_live_decode_is_not_ok"
+      }
     },
     {
       "id": "bloom_insert",
@@ -1113,7 +1575,19 @@
       "callers": [
         "crates/pedradb-core/src/sst/table.rs"
       ],
-      "entry": "insert"
+      "entry": "insert",
+      "as_is": "insert_as_is",
+      "three_teeth": true,
+      "live_callers": [
+        {
+          "file": "crates/pedradb-core/src/sst/table.rs",
+          "handler": "write_sst_try_sorted_on"
+        }
+      ],
+      "dst_plant": {
+        "file": "crates/pedradb-core/src/bloom.rs",
+        "test": "insert_on_live_sst_is_not_ok"
+      }
     },
     {
       "id": "bloom_may_contain",
@@ -1125,7 +1599,19 @@
       "callers": [
         "crates/pedradb-core/src/sst/table.rs"
       ],
-      "entry": "may_contain"
+      "entry": "may_contain",
+      "as_is": "may_contain_as_is",
+      "three_teeth": true,
+      "live_callers": [
+        {
+          "file": "crates/pedradb-core/src/sst/table.rs",
+          "handler": "point_at"
+        }
+      ],
+      "dst_plant": {
+        "file": "crates/pedradb-core/src/bloom.rs",
+        "test": "may_contain_on_live_sst_is_not_ok"
+      }
     },
     {
       "id": "scan_guard",
@@ -1137,7 +1623,19 @@
       "callers": [
         "crates/pedradb-core/src/sst/table.rs"
       ],
-      "entry": "scan_reads_file"
+      "entry": "scan_reads_file",
+      "as_is": "scan_reads_file_as_is",
+      "three_teeth": true,
+      "live_callers": [
+        {
+          "file": "crates/pedradb-core/src/sst/table.rs",
+          "handler": "entries_in_user_range_capped"
+        }
+      ],
+      "dst_plant": {
+        "file": "crates/pedradb-core/src/sst/scan_kernel.rs",
+        "test": "scan_reads_file_on_live_sst_is_not_ok"
+      }
     },
     {
       "id": "si_read",
@@ -1149,7 +1647,19 @@
       "callers": [
         "crates/pedradb-store/src/lib.rs"
       ],
-      "entry": "snapshot_read_plan"
+      "entry": "snapshot_read_plan",
+      "as_is": "snapshot_read_plan_as_is",
+      "three_teeth": true,
+      "live_callers": [
+        {
+          "file": "crates/pedradb-store/src/lib.rs",
+          "handler": "get_at_version"
+        }
+      ],
+      "dst_plant": {
+        "file": "crates/pedradb-store/src/three_teeth_queued.rs",
+        "test": "snapshot_read_plan_on_live_queued_is_not_ok"
+      }
     },
     {
       "id": "fold_range",
@@ -1162,7 +1672,19 @@
         "crates/pedradb-fold/src/watch.rs",
         "crates/pedradb-fold/src/store.rs"
       ],
-      "entry": "fold_event_hides_key"
+      "entry": "fold_event_hides_key",
+      "as_is": "fold_event_hides_key_as_is",
+      "three_teeth": true,
+      "live_callers": [
+        {
+          "file": "crates/pedradb-fold/src/watch.rs",
+          "handler": "last_per_key"
+        }
+      ],
+      "dst_plant": {
+        "file": "crates/pedradb-fold/src/fold_kernel.rs",
+        "test": "fold_event_hides_key_on_live_fold_is_not_ok"
+      }
     },
     {
       "id": "manifest_recover",
@@ -1238,7 +1760,19 @@
       "callers": [
         "crates/pedradb-core/src/concurrent.rs"
       ],
-      "entry": "occ_conflict"
+      "entry": "occ_conflict",
+      "as_is": "occ_conflict_as_is_serialized",
+      "three_teeth": true,
+      "live_callers": [
+        {
+          "file": "crates/pedradb-core/src/concurrent.rs",
+          "handler": "validate_occ_batch"
+        }
+      ],
+      "dst_plant": {
+        "file": "crates/pedradb-core/src/group_commit_kernel.rs",
+        "test": "occ_conflict_on_live_group_is_not_ok"
+      }
     },
     {
       "id": "group_fence",
@@ -1250,7 +1784,19 @@
       "callers": [
         "crates/pedradb-core/src/db.rs"
       ],
-      "entry": "fence_publish_seq"
+      "entry": "fence_publish_seq",
+      "as_is": "fence_publish_seq_as_is",
+      "three_teeth": true,
+      "live_callers": [
+        {
+          "file": "crates/pedradb-core/src/db.rs",
+          "handler": "max_appended_seq"
+        }
+      ],
+      "dst_plant": {
+        "file": "crates/pedradb-core/src/group_commit_kernel.rs",
+        "test": "fence_publish_seq_on_live_group_is_not_ok"
+      }
     },
     {
       "id": "compact_decision",
@@ -1330,6 +1876,12 @@
       "handlers": [
         "apply_committed"
       ],
+      "live_callers": [
+        {
+          "file": "crates/pedradb-store/src/lib.rs",
+          "handler": "apply_range"
+        }
+      ],
       "as_is": "apply_advance_as_is_skip_holes",
       "dst_plant": {
         "file": "crates/pedradb-store/src/three_teeth_queued.rs",
@@ -1348,6 +1900,12 @@
       ],
       "entry": "grant_after_persist",
       "data_fate": true,
+      "live_callers": [
+        {
+          "file": "crates/pedradb-store/src/lib.rs",
+          "handler": "on_request_vote"
+        }
+      ],
       "as_is": "grant_after_persist_as_is",
       "dst_plant": {
         "file": "crates/pedradb-store/src/three_teeth_queued.rs",
@@ -1427,7 +1985,13 @@
       "callers": [
         "crates/pedradb-store/src/lib.rs"
       ],
-      "entry": "allow_direct_rpc"
+      "entry": "allow_direct_rpc",
+      "as_is": "allow_direct_rpc_as_is",
+      "three_teeth": true,
+      "dst_plant": {
+        "file": "crates/pedradb-store/src/three_teeth_queued.rs",
+        "test": "allow_direct_rpc_on_live_queued_is_not_ok"
+      }
     },
     {
       "id": "group_publish",
@@ -1439,7 +2003,19 @@
       "callers": [
         "crates/pedradb-core/src/concurrent.rs"
       ],
-      "entry": "may_publish_group"
+      "entry": "may_publish_group",
+      "as_is": "may_publish_group_as_is",
+      "three_teeth": true,
+      "live_callers": [
+        {
+          "file": "crates/pedradb-core/src/concurrent.rs",
+          "handler": "finish_group_off_lock"
+        }
+      ],
+      "dst_plant": {
+        "file": "crates/pedradb-core/src/concurrent.rs",
+        "test": "may_publish_group_on_live_group_is_not_ok"
+      }
     },
     {
       "id": "forall_schedules",
@@ -1451,7 +2027,19 @@
       "callers": [
         "crates/pedradb-core/src/concurrent.rs"
       ],
-      "entry": "forall_schedules_admitted"
+      "entry": "forall_schedules_admitted",
+      "as_is": "forall_schedules_admitted_as_is",
+      "three_teeth": true,
+      "live_callers": [
+        {
+          "file": "crates/pedradb-core/src/concurrent.rs",
+          "handler": "claim_forall_schedules"
+        }
+      ],
+      "dst_plant": {
+        "file": "crates/pedradb-core/src/concurrent.rs",
+        "test": "forall_schedules_admitted_on_live_group_is_not_ok"
+      }
     },
     {
       "id": "l28_durability",
@@ -1463,7 +2051,19 @@
       "callers": [
         "crates/pedradb-store/src/bin/cluster_real.rs"
       ],
-      "entry": "l28_durability_ok"
+      "entry": "l28_durability_ok",
+      "as_is": "l28_durability_ok_as_is",
+      "three_teeth": true,
+      "live_callers": [
+        {
+          "file": "crates/pedradb-store/src/bin/cluster_real.rs",
+          "handler": "main"
+        }
+      ],
+      "dst_plant": {
+        "file": "crates/pedradb-store/src/l28.rs",
+        "test": "l28_durability_ok_on_live_store_is_not_ok"
+      }
     },
     {
       "id": "l28_tcp_left",
@@ -1482,9 +2082,15 @@
       ],
       "as_is": "l28_tcp_left_ok_as_is",
       "dst_plant": {
-        "file": "crates/pedradb-store/src/three_teeth_queued.rs",
-        "test": "l28_tcp_left_ok_on_live_queued_is_not_ok"
-      }
+        "file": "crates/pedradb-store/tests/l28_real_tcp.rs",
+        "test": "l28_real_tcp_remove_member_left_on_disk"
+      },
+      "live_callers": [
+        {
+          "file": "crates/pedradb-store/src/bin/cluster_real.rs",
+          "handler": "tcp_node_disk_left_joint"
+        }
+      ]
     },
     {
       "id": "l28_tcp_hw",
@@ -1503,9 +2109,15 @@
       ],
       "as_is": "l28_tcp_hw_ok_as_is",
       "dst_plant": {
-        "file": "crates/pedradb-store/src/three_teeth_queued.rs",
-        "test": "l28_tcp_hw_ok_on_live_queued_is_not_ok"
-      }
+        "file": "crates/pedradb-store/tests/l28_real_tcp.rs",
+        "test": "l28_real_tcp_high_water_after_remove"
+      },
+      "live_callers": [
+        {
+          "file": "crates/pedradb-store/src/bin/cluster_real.rs",
+          "handler": "tcp_node_disk_high_water"
+        }
+      ]
     },
     {
       "id": "l28_tcp_part",
@@ -1524,9 +2136,15 @@
       ],
       "as_is": "l28_tcp_part_ok_as_is",
       "dst_plant": {
-        "file": "crates/pedradb-store/src/three_teeth_queued.rs",
-        "test": "l28_tcp_part_ok_on_live_queued_is_not_ok"
-      }
+        "file": "crates/pedradb-store/tests/l28_real_tcp.rs",
+        "test": "l28_real_tcp_participating_after_remove"
+      },
+      "live_callers": [
+        {
+          "file": "crates/pedradb-store/src/bin/cluster_real.rs",
+          "handler": "tcp_node_removed_not_participating"
+        }
+      ]
     },
     {
       "id": "l28_tcp_apply",
@@ -1545,9 +2163,15 @@
       ],
       "as_is": "l28_tcp_apply_ok_as_is",
       "dst_plant": {
-        "file": "crates/pedradb-store/src/three_teeth_queued.rs",
-        "test": "l28_tcp_apply_ok_on_live_queued_is_not_ok"
-      }
+        "file": "crates/pedradb-store/tests/l28_real_tcp.rs",
+        "test": "l28_real_tcp_recover_apply"
+      },
+      "live_callers": [
+        {
+          "file": "crates/pedradb-store/src/bin/cluster_real.rs",
+          "handler": "tcp_node_recover_apply_ok"
+        }
+      ]
     },
     {
       "id": "l28_tcp_napply",
@@ -1566,9 +2190,15 @@
       ],
       "as_is": "l28_tcp_napply_ok_as_is",
       "dst_plant": {
-        "file": "crates/pedradb-store/src/three_teeth_queued.rs",
-        "test": "l28_tcp_napply_ok_on_live_queued_is_not_ok"
-      }
+        "file": "crates/pedradb-store/tests/l28_real_tcp.rs",
+        "test": "l28_real_tcp_removed_recover_apply"
+      },
+      "live_callers": [
+        {
+          "file": "crates/pedradb-store/src/bin/cluster_real.rs",
+          "handler": "tcp_node_removed_recover_apply_ok"
+        }
+      ]
     },
     {
       "id": "l28_tcp_trunc",
@@ -1587,9 +2217,15 @@
       ],
       "as_is": "l28_tcp_trunc_ok_as_is",
       "dst_plant": {
-        "file": "crates/pedradb-store/src/three_teeth_queued.rs",
-        "test": "l28_tcp_trunc_ok_on_live_queued_is_not_ok"
-      }
+        "file": "crates/pedradb-store/tests/l28_real_tcp.rs",
+        "test": "l28_real_tcp_removed_truncate"
+      },
+      "live_callers": [
+        {
+          "file": "crates/pedradb-store/src/bin/cluster_real.rs",
+          "handler": "tcp_node_removed_truncate_ok"
+        }
+      ]
     },
     {
       "id": "l28_tcp_odrop",
@@ -1608,9 +2244,15 @@
       ],
       "as_is": "l28_tcp_odrop_ok_as_is",
       "dst_plant": {
-        "file": "crates/pedradb-store/src/three_teeth_queued.rs",
-        "test": "l28_tcp_odrop_ok_on_live_queued_is_not_ok"
-      }
+        "file": "crates/pedradb-store/tests/l28_real_tcp.rs",
+        "test": "l28_real_tcp_removed_orphan_drop"
+      },
+      "live_callers": [
+        {
+          "file": "crates/pedradb-store/src/bin/cluster_real.rs",
+          "handler": "tcp_node_removed_orphan_drop_ok"
+        }
+      ]
     },
     {
       "id": "l28_tcp_abort",
@@ -1629,9 +2271,15 @@
       ],
       "as_is": "l28_tcp_abort_ok_as_is",
       "dst_plant": {
-        "file": "crates/pedradb-store/src/three_teeth_queued.rs",
-        "test": "l28_tcp_abort_ok_on_live_queued_is_not_ok"
-      }
+        "file": "crates/pedradb-store/tests/l28_real_tcp.rs",
+        "test": "l28_real_tcp_removed_abort"
+      },
+      "live_callers": [
+        {
+          "file": "crates/pedradb-store/src/bin/cluster_real.rs",
+          "handler": "tcp_node_removed_abort_ok"
+        }
+      ]
     },
     {
       "id": "l28_tcp_nowms",
@@ -1650,9 +2298,15 @@
       ],
       "as_is": "l28_tcp_nowms_ok_as_is",
       "dst_plant": {
-        "file": "crates/pedradb-store/src/three_teeth_queued.rs",
-        "test": "l28_tcp_nowms_ok_on_live_queued_is_not_ok"
-      }
+        "file": "crates/pedradb-store/tests/l28_real_tcp.rs",
+        "test": "l28_real_tcp_removed_now_ms"
+      },
+      "live_callers": [
+        {
+          "file": "crates/pedradb-store/src/bin/cluster_real.rs",
+          "handler": "tcp_node_removed_now_ms_ok"
+        }
+      ]
     },
     {
       "id": "l28_tcp_hist",
@@ -1671,9 +2325,15 @@
       ],
       "as_is": "l28_tcp_hist_ok_as_is",
       "dst_plant": {
-        "file": "crates/pedradb-store/src/three_teeth_queued.rs",
-        "test": "l28_tcp_hist_ok_on_live_queued_is_not_ok"
-      }
+        "file": "crates/pedradb-store/tests/l28_real_tcp.rs",
+        "test": "l28_real_tcp_removed_hist"
+      },
+      "live_callers": [
+        {
+          "file": "crates/pedradb-store/src/bin/cluster_real.rs",
+          "handler": "tcp_node_removed_hist_ok"
+        }
+      ]
     },
     {
       "id": "l28_tcp_fence",
@@ -1692,9 +2352,15 @@
       ],
       "as_is": "l28_tcp_fence_ok_as_is",
       "dst_plant": {
-        "file": "crates/pedradb-store/src/three_teeth_queued.rs",
-        "test": "l28_tcp_fence_ok_on_live_queued_is_not_ok"
-      }
+        "file": "crates/pedradb-store/tests/l28_real_tcp.rs",
+        "test": "l28_real_tcp_removed_fence"
+      },
+      "live_callers": [
+        {
+          "file": "crates/pedradb-store/src/bin/cluster_real.rs",
+          "handler": "tcp_node_removed_fence_ok"
+        }
+      ]
     },
     {
       "id": "l28_tcp_clear",
@@ -1713,9 +2379,15 @@
       ],
       "as_is": "l28_tcp_clear_ok_as_is",
       "dst_plant": {
-        "file": "crates/pedradb-store/src/three_teeth_queued.rs",
-        "test": "l28_tcp_clear_ok_on_live_queued_is_not_ok"
-      }
+        "file": "crates/pedradb-store/tests/l28_real_tcp.rs",
+        "test": "l28_real_tcp_removed_clear"
+      },
+      "live_callers": [
+        {
+          "file": "crates/pedradb-store/src/bin/cluster_real.rs",
+          "handler": "tcp_node_removed_clear_ok"
+        }
+      ]
     },
     {
       "id": "l28_tcp_pre",
@@ -1734,9 +2406,15 @@
       ],
       "as_is": "l28_tcp_pre_ok_as_is",
       "dst_plant": {
-        "file": "crates/pedradb-store/src/three_teeth_queued.rs",
-        "test": "l28_tcp_pre_ok_on_live_queued_is_not_ok"
-      }
+        "file": "crates/pedradb-store/tests/l28_real_tcp.rs",
+        "test": "l28_real_tcp_removed_pre"
+      },
+      "live_callers": [
+        {
+          "file": "crates/pedradb-store/src/bin/cluster_real.rs",
+          "handler": "tcp_node_removed_pre_ok"
+        }
+      ]
     },
     {
       "id": "l28_tcp_peer",
@@ -1755,9 +2433,15 @@
       ],
       "as_is": "l28_tcp_peer_ok_as_is",
       "dst_plant": {
-        "file": "crates/pedradb-store/src/three_teeth_queued.rs",
-        "test": "l28_tcp_peer_ok_on_live_queued_is_not_ok"
-      }
+        "file": "crates/pedradb-store/tests/l28_real_tcp.rs",
+        "test": "l28_real_tcp_removed_peer"
+      },
+      "live_callers": [
+        {
+          "file": "crates/pedradb-store/src/bin/cluster_real.rs",
+          "handler": "tcp_node_removed_peer_ok"
+        }
+      ]
     },
     {
       "id": "l28_tcp_lid",
@@ -1776,9 +2460,15 @@
       ],
       "as_is": "l28_tcp_lid_ok_as_is",
       "dst_plant": {
-        "file": "crates/pedradb-store/src/three_teeth_queued.rs",
-        "test": "l28_tcp_lid_ok_on_live_queued_is_not_ok"
-      }
+        "file": "crates/pedradb-store/tests/l28_real_tcp.rs",
+        "test": "l28_real_tcp_removed_lid"
+      },
+      "live_callers": [
+        {
+          "file": "crates/pedradb-store/src/bin/cluster_real.rs",
+          "handler": "tcp_node_removed_lid_ok"
+        }
+      ]
     },
     {
       "id": "l28_tcp_rdr",
@@ -1797,9 +2487,15 @@
       ],
       "as_is": "l28_tcp_rdr_ok_as_is",
       "dst_plant": {
-        "file": "crates/pedradb-store/src/three_teeth_queued.rs",
-        "test": "l28_tcp_rdr_ok_on_live_queued_is_not_ok"
-      }
+        "file": "crates/pedradb-store/tests/l28_real_tcp.rs",
+        "test": "l28_real_tcp_removed_rdr"
+      },
+      "live_callers": [
+        {
+          "file": "crates/pedradb-store/src/bin/cluster_real.rs",
+          "handler": "tcp_node_removed_rdr_ok"
+        }
+      ]
     },
     {
       "id": "l28_tcp_dsc",
@@ -1818,9 +2514,15 @@
       ],
       "as_is": "l28_tcp_dsc_ok_as_is",
       "dst_plant": {
-        "file": "crates/pedradb-store/src/three_teeth_queued.rs",
-        "test": "l28_tcp_dsc_ok_on_live_queued_is_not_ok"
-      }
+        "file": "crates/pedradb-store/tests/l28_real_tcp.rs",
+        "test": "l28_real_tcp_removed_dsc"
+      },
+      "live_callers": [
+        {
+          "file": "crates/pedradb-store/src/bin/cluster_real.rs",
+          "handler": "tcp_node_removed_dsc_ok"
+        }
+      ]
     },
     {
       "id": "l28_tcp_pld",
@@ -1839,9 +2541,15 @@
       ],
       "as_is": "l28_tcp_pld_ok_as_is",
       "dst_plant": {
-        "file": "crates/pedradb-store/src/three_teeth_queued.rs",
-        "test": "l28_tcp_pld_ok_on_live_queued_is_not_ok"
-      }
+        "file": "crates/pedradb-store/tests/l28_real_tcp.rs",
+        "test": "l28_real_tcp_removed_pld"
+      },
+      "live_callers": [
+        {
+          "file": "crates/pedradb-store/src/bin/cluster_real.rs",
+          "handler": "tcp_node_removed_pld_ok"
+        }
+      ]
     },
     {
       "id": "l28_tcp_std",
@@ -1860,9 +2568,15 @@
       ],
       "as_is": "l28_tcp_std_ok_as_is",
       "dst_plant": {
-        "file": "crates/pedradb-store/src/three_teeth_queued.rs",
-        "test": "l28_tcp_std_ok_on_live_queued_is_not_ok"
-      }
+        "file": "crates/pedradb-store/tests/l28_real_tcp.rs",
+        "test": "l28_real_tcp_removed_std"
+      },
+      "live_callers": [
+        {
+          "file": "crates/pedradb-store/src/bin/cluster_real.rs",
+          "handler": "tcp_node_removed_std_ok"
+        }
+      ]
     },
     {
       "id": "l28_tcp_hnt",
@@ -1881,9 +2595,123 @@
       ],
       "as_is": "l28_tcp_hnt_ok_as_is",
       "dst_plant": {
-        "file": "crates/pedradb-store/src/three_teeth_queued.rs",
-        "test": "l28_tcp_hnt_ok_on_live_queued_is_not_ok"
-      }
+        "file": "crates/pedradb-store/tests/l28_real_tcp.rs",
+        "test": "l28_real_tcp_hint"
+      },
+      "live_callers": [
+        {
+          "file": "crates/pedradb-store/src/bin/cluster_real.rs",
+          "handler": "tcp_node_hint_ok"
+        }
+      ]
+    },
+    {
+      "id": "l28_tcp_slot",
+      "finding": "RFC-0147",
+      "twin_kind": "close",
+      "kernel": "crates/pedradb-store/src/l28.rs",
+      "twin": "crates/pedradb-store/verus/l28.rs",
+      "verus": "scripts/verus_l28.sh",
+      "callers": [
+        "crates/pedradb-store/src/bin/cluster_real.rs"
+      ],
+      "entry": "l28_tcp_slot_ok",
+      "data_fate": true,
+      "handlers": [
+        "tcp_node_drop_repl_ok"
+      ],
+      "as_is": "l28_tcp_slot_ok_as_is",
+      "dst_plant": {
+        "file": "crates/pedradb-store/tests/l28_real_tcp.rs",
+        "test": "l28_real_tcp_drop_repl"
+      },
+      "live_callers": [
+        {
+          "file": "crates/pedradb-store/src/bin/cluster_real.rs",
+          "handler": "tcp_node_drop_repl_ok"
+        }
+      ]
+    },
+    {
+      "id": "l28_tcp_sth",
+      "finding": "RFC-0148",
+      "twin_kind": "close",
+      "kernel": "crates/pedradb-store/src/l28.rs",
+      "twin": "crates/pedradb-store/verus/l28.rs",
+      "verus": "scripts/verus_l28.sh",
+      "callers": [
+        "crates/pedradb-store/src/bin/cluster_real.rs"
+      ],
+      "entry": "l28_tcp_sth_ok",
+      "data_fate": true,
+      "handlers": [
+        "tcp_node_drop_st_ok"
+      ],
+      "as_is": "l28_tcp_sth_ok_as_is",
+      "dst_plant": {
+        "file": "crates/pedradb-store/tests/l28_real_tcp.rs",
+        "test": "l28_real_tcp_drop_st"
+      },
+      "live_callers": [
+        {
+          "file": "crates/pedradb-store/src/bin/cluster_real.rs",
+          "handler": "tcp_node_drop_st_ok"
+        }
+      ]
+    },
+    {
+      "id": "l28_tcp_pj",
+      "finding": "RFC-0068",
+      "twin_kind": "close",
+      "kernel": "crates/pedradb-store/src/l28.rs",
+      "twin": "crates/pedradb-store/verus/l28.rs",
+      "verus": "scripts/verus_l28.sh",
+      "callers": [
+        "crates/pedradb-store/src/bin/cluster_real.rs"
+      ],
+      "entry": "l28_tcp_pj_ok",
+      "data_fate": true,
+      "handlers": [
+        "tcp_node_plant_joint_ok"
+      ],
+      "as_is": "l28_tcp_pj_ok_as_is",
+      "dst_plant": {
+        "file": "crates/pedradb-store/tests/l28_real_tcp.rs",
+        "test": "l28_real_tcp_plant_joint"
+      },
+      "live_callers": [
+        {
+          "file": "crates/pedradb-store/src/bin/cluster_real.rs",
+          "handler": "tcp_node_plant_joint_ok"
+        }
+      ]
+    },
+    {
+      "id": "sched_plant_joint",
+      "finding": "RFC-0068",
+      "twin_kind": "close",
+      "kernel": "crates/pedradb-store/src/membership_kernel.rs",
+      "twin": "crates/pedradb-raft/verus/membership_joint.rs",
+      "verus": "scripts/verus_membership_joint.sh",
+      "callers": [
+        "crates/pedradb-world/src/lib.rs"
+      ],
+      "entry": "plant_joint_schedule_ok",
+      "data_fate": true,
+      "handlers": [
+        "run"
+      ],
+      "as_is": "plant_joint_schedule_ok_as_is",
+      "dst_plant": {
+        "file": "crates/pedradb-world/src/lib.rs",
+        "test": "world_opt_in_schedule_emits_plant_committed_joint"
+      },
+      "live_callers": [
+        {
+          "file": "crates/pedradb-world/src/lib.rs",
+          "handler": "run"
+        }
+      ]
     },
     {
       "id": "liveness_claim",
@@ -1897,7 +2725,19 @@
         "crates/pedradb-store/src/bin/cluster_real.rs",
         "crates/pedradb-store/src/bin/montanha-tcp.rs"
       ],
-      "entry": "liveness_admitted"
+      "entry": "liveness_admitted",
+      "as_is": "liveness_admitted_as_is",
+      "three_teeth": true,
+      "live_callers": [
+        {
+          "file": "crates/pedradb-store/src/lib.rs",
+          "handler": "claim_eventual_election"
+        }
+      ],
+      "dst_plant": {
+        "file": "crates/pedradb-store/src/membership_kernel.rs",
+        "test": "liveness_admitted_on_live_store_is_not_ok"
+      }
     },
     {
       "id": "fsync_promote",
@@ -1909,7 +2749,19 @@
       "callers": [
         "crates/pedradb-sim/src/recording.rs"
       ],
-      "entry": "fsync_promotes_pending"
+      "entry": "fsync_promotes_pending",
+      "as_is": "fsync_promotes_pending_as_is",
+      "three_teeth": true,
+      "live_callers": [
+        {
+          "file": "crates/pedradb-sim/src/recording.rs",
+          "handler": "sync_data"
+        }
+      ],
+      "dst_plant": {
+        "file": "crates/pedradb-sim/src/recording.rs",
+        "test": "fsync_promotes_pending_on_live_sim_is_not_ok"
+      }
     },
     {
       "id": "media_durable",
@@ -1921,7 +2773,19 @@
       "callers": [
         "crates/pedradb-core/src/db.rs"
       ],
-      "entry": "media_durable_admitted"
+      "entry": "media_durable_admitted",
+      "as_is": "media_durable_admitted_as_is",
+      "three_teeth": true,
+      "live_callers": [
+        {
+          "file": "crates/pedradb-core/src/db.rs",
+          "handler": "claim_media_durable"
+        }
+      ],
+      "dst_plant": {
+        "file": "crates/pedradb-core/src/db.rs",
+        "test": "media_durable_admitted_on_live_db_is_not_ok"
+      }
     },
     {
       "id": "tcg_guest",
@@ -1933,7 +2797,19 @@
       "callers": [
         "crates/pedradb-world/src/lib.rs"
       ],
-      "entry": "tcg_guest_admitted"
+      "entry": "tcg_guest_admitted",
+      "as_is": "tcg_guest_admitted_as_is",
+      "three_teeth": true,
+      "live_callers": [
+        {
+          "file": "crates/pedradb-world/src/lib.rs",
+          "handler": "claim_tcg_guest"
+        }
+      ],
+      "dst_plant": {
+        "file": "crates/pedradb-world/src/tcg.rs",
+        "test": "tcg_guest_admitted_on_live_world_is_not_ok"
+      }
     },
     {
       "id": "fdatasync_rc",
@@ -1945,7 +2821,19 @@
       "callers": [
         "crates/pedradb-posix/src/lib.rs"
       ],
-      "entry": "fdatasync_rc_ok"
+      "entry": "fdatasync_rc_ok",
+      "as_is": "fdatasync_rc_ok_as_is",
+      "three_teeth": true,
+      "live_callers": [
+        {
+          "file": "crates/pedradb-posix/src/lib.rs",
+          "handler": "fdatasync_file"
+        }
+      ],
+      "dst_plant": {
+        "file": "crates/pedradb-posix/src/lib.rs",
+        "test": "fdatasync_rc_ok_on_live_posix_is_not_ok"
+      }
     },
     {
       "id": "cqe_res",
@@ -1957,7 +2845,19 @@
       "callers": [
         "crates/pedradb-io-uring/src/ring.rs"
       ],
-      "entry": "cqe_res_ok"
+      "entry": "cqe_res_ok",
+      "as_is": "cqe_res_ok_as_is",
+      "three_teeth": true,
+      "live_callers": [
+        {
+          "file": "crates/pedradb-io-uring/src/ring.rs",
+          "handler": "fsync"
+        }
+      ],
+      "dst_plant": {
+        "file": "crates/pedradb-io-uring/src/lib.rs",
+        "test": "cqe_res_ok_on_live_uring_is_not_ok"
+      }
     },
     {
       "id": "c_len",
@@ -1969,7 +2869,19 @@
       "callers": [
         "crates/pedradb-capi/src/lib.rs"
       ],
-      "entry": "c_len_admitted"
+      "entry": "c_len_admitted",
+      "as_is": "c_len_admitted_as_is",
+      "three_teeth": true,
+      "live_callers": [
+        {
+          "file": "crates/pedradb-capi/src/lib.rs",
+          "handler": "montanha_fdb_transaction_set"
+        }
+      ],
+      "dst_plant": {
+        "file": "crates/pedradb-capi/src/lib.rs",
+        "test": "c_len_admitted_on_live_capi_is_not_ok"
+      }
     },
     {
       "id": "crc_match",
@@ -1987,7 +2899,19 @@
         "crates/pedradb-core/src/change_feed.rs",
         "crates/pedradb-core/src/verify.rs"
       ],
-      "entry": "crc_match_ok"
+      "entry": "crc_match_ok",
+      "as_is": "crc_match_ok_as_is",
+      "three_teeth": true,
+      "live_callers": [
+        {
+          "file": "crates/pedradb-core/src/wal/reader.rs",
+          "handler": "read_record"
+        }
+      ],
+      "dst_plant": {
+        "file": "crates/pedradb-core/src/wal/reader.rs",
+        "test": "crc_match_ok_on_live_wal_is_not_ok"
+      }
     },
     {
       "id": "sst_crc",
@@ -1999,7 +2923,19 @@
       "callers": [
         "crates/pedradb-core/src/sst/table.rs"
       ],
-      "entry": "sst_crc_fate"
+      "entry": "sst_crc_fate",
+      "as_is": "sst_crc_fate_as_is",
+      "three_teeth": true,
+      "live_callers": [
+        {
+          "file": "crates/pedradb-core/src/sst/table.rs",
+          "handler": "decode"
+        }
+      ],
+      "dst_plant": {
+        "file": "crates/pedradb-core/src/sst/table.rs",
+        "test": "sst_crc_fate_on_live_sst_is_not_ok"
+      }
     },
     {
       "id": "cf_family",
@@ -2017,6 +2953,12 @@
       ],
       "entry": "key_in_cf_family",
       "data_fate": true,
+      "live_callers": [
+        {
+          "file": "crates/pedradb-core/src/sst/table.rs",
+          "handler": "write_l0_sst_for_family"
+        }
+      ],
       "as_is": "key_in_cf_family_as_is",
       "dst_plant": {
         "file": "crates/pedradb-sim/src/three_teeth_plants.rs",
@@ -2053,7 +2995,19 @@
       "callers": [
         "crates/pedradb-core/src/key.rs"
       ],
-      "entry": "pack_sequence_and_type"
+      "entry": "pack_sequence_and_type",
+      "as_is": "pack_sequence_and_type_as_is",
+      "three_teeth": true,
+      "live_callers": [
+        {
+          "file": "crates/pedradb-core/src/key.rs",
+          "handler": "encode_into"
+        }
+      ],
+      "dst_plant": {
+        "file": "crates/pedradb-core/src/key.rs",
+        "test": "pack_sequence_and_type_on_live_db_is_not_ok"
+      }
     },
     {
       "id": "write_record_count",
@@ -2284,11 +3238,34 @@
     },
     {
       "id": "ae_ack_raft_store",
-      "finding": "F48",
+      "finding": "F48/F16",
       "a": "crates/pedradb-raft/src/ae_kernel.rs",
       "b": "crates/pedradb-store/src/ae_ack_kernel.rs",
       "fns": [
-        "ae_ack_success"
+        "ae_ack_success",
+        "ae_entry_action",
+        "ae_prev_log_ok"
+      ]
+    },
+    {
+      "id": "vote_raft_store",
+      "finding": "F15",
+      "a": "crates/pedradb-raft/src/vote_kernel.rs",
+      "b": "crates/pedradb-store/src/vote_kernel.rs",
+      "fns": [
+        "vote_decision",
+        "can_vote",
+        "log_up_to_date",
+        "grant_after_persist"
+      ]
+    },
+    {
+      "id": "apply_raft_store",
+      "finding": "F10-apply",
+      "a": "crates/pedradb-raft/src/apply_kernel.rs",
+      "b": "crates/pedradb-store/src/apply_kernel.rs",
+      "fns": [
+        "apply_advance"
       ]
     },
     {

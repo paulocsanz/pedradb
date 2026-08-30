@@ -309,6 +309,32 @@ mod tests {
         s.close().unwrap();
         let _ = std::fs::remove_dir_all(&dir);
     }
+
+    /// F54 live handler: `Stream::ack` refuses a hole. Direct `ack_only_next` is not this tooth.
+    #[test]
+    fn ack_in_order_on_live_stream_is_not_ok() {
+        assert!(!ack_in_order(0, 2));
+        assert!(
+            ack_in_order_as_is(0, 2),
+            "AS-IS dente: any seq>last pins and skips unacked"
+        );
+        let dir = temp();
+        let mut s = Stream::open(&dir, "events").unwrap();
+        assert_eq!(s.publish(b"a").unwrap(), 1);
+        assert_eq!(s.publish(b"b").unwrap(), 2);
+        let err = s.ack("c1", 2);
+        assert!(
+            err.is_err(),
+            "live ack must refuse hole 0→2; AS-IS would pin 2"
+        );
+        assert_eq!(s.consumer_seq("c1"), 0, "cursor must stay unacked");
+        let m = s.peek("c1").unwrap().unwrap();
+        assert_eq!(m.seq, 1, "hole ack must not skip seq 1");
+        assert_eq!(m.data, b"a");
+        s.close().unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// F111: truncated last_seq meta used to become 0 → re-publish seq 1 overwrites.
     #[test]
     fn publish_rejects_truncated_last_seq_meta() {

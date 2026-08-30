@@ -361,6 +361,26 @@ pub fn splice_bitflip_window(actions: &mut Vec<Action>, n_nodes: u64) {
     );
 }
 
+/// RFC-0068 P1.2: splice JointRemove then `PlantCommittedJoint` of the
+/// last node (needs `n_nodes >= 4` so C-old majority 2/3 cannot elect
+/// C-new of 4). Off by default — default `schedule_from_seed` stays
+/// fingerprint-stable.
+pub fn splice_plant_committed_joint(actions: &mut Vec<Action>, n_nodes: u64) {
+    if n_nodes < 4 || actions.is_empty() {
+        return;
+    }
+    let node = n_nodes;
+    let at = 1.min(actions.len());
+    let window = [
+        Action::JointRemove { node },
+        Action::ClockAdvance(20),
+        Action::PlantCommittedJoint { node },
+    ];
+    let tail = actions.split_off(at);
+    actions.extend(window);
+    actions.extend(tail);
+}
+
 /// Fold a string into a running FNV-1a 64-bit hash (stable, no extra deps).
 #[must_use]
 pub fn hash_str(mut h: u64, s: &str) -> u64 {
@@ -588,5 +608,37 @@ mod tests {
         assert_eq!(a.mask(), b.mask());
         assert_eq!(a.primary_arm(), arm_for_seed(42, 3, 16));
         assert!(WORLD_ARMS.contains(&a.primary_arm()));
+    }
+
+    #[test]
+    fn default_schedule_omits_plant_committed_joint() {
+        for s in 0..64u64 {
+            let sch = schedule_from_seed(s, 4, 16);
+            assert!(
+                !sch.iter()
+                    .any(|a| matches!(a, Action::PlantCommittedJoint { .. })),
+                "default seed {s} must not emit PlantCommittedJoint"
+            );
+        }
+    }
+
+    #[test]
+    fn opt_in_splice_emits_plant_committed_joint() {
+        let mut sch = schedule_from_seed(42, 4, 16);
+        assert!(
+            !sch.iter()
+                .any(|a| matches!(a, Action::PlantCommittedJoint { .. }))
+        );
+        splice_plant_committed_joint(&mut sch, 4);
+        assert!(
+            sch.iter()
+                .any(|a| matches!(a, Action::PlantCommittedJoint { node: 4 })),
+            "opt-in splice must emit PlantCommittedJoint of node 4"
+        );
+        assert!(
+            sch.iter()
+                .any(|a| matches!(a, Action::JointRemove { node: 4 })),
+            "opt-in splice must JointRemove 4 before the plant"
+        );
     }
 }

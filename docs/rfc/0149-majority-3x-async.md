@@ -1,7 +1,7 @@
 # RFC: 0149 — coluna A, maioria das shapes >3× vs Rocks default
 
-**Status:** in-progress (P0 done)
-**Updated:** 2026-08-29
+**Status:** done (P0/P1/P2.1 — CHV 12/17 PASS)
+**Updated:** 2026-08-30
 **Parents:** [0065](0065-physical-column-families-one-wal.md) (CFs físicas),
 [0062](0062-launch-readiness-remaining-gaps.md) (substituto min>1.0),
 [0054](0054-close-official-gaps.md)
@@ -40,10 +40,11 @@
 
 ### P2 — later
 
-- [ ] **P2.1** Linux 4 vCPU, mesma regra maioria >3× — status: `doing`
-      (VM caixote TAP nexthop. Medida no metal 4-CPU NVMe: **7/17 FAIL**,
-      [`findings/2026-08-29-linux-p149/`](../../findings/2026-08-29-linux-p149/).
-      Não é QEMU virt. Mac P0 12/17 continua a única maioria.)
+- [x] **P2.1** Linux 4 vCPU, mesma regra maioria >3× — status: `done`
+      CHV 4 vCPU P1.8: **12/17 PASS** min **1.054**,
+      [`findings/2026-08-30-linux-p149-p21-chv-p18/`](../../findings/2026-08-30-linux-p149-p21-chv-p18/).
+      P1.6 was 10/17; P1.8 added `ycsb_f` and `deps_lock_prewrite`.
+      Metal 11/17 is not this virt gate.
 
 ## Status (living — update with every PR)
 
@@ -52,7 +53,7 @@
 | P0.1 | p0 | auto-flush O(CFs) | done | db.rs maybe_auto_flush | 2026-08-29 |
 | P0.2 | p0 | 17 shapes maioria >3× | done | 12/17 med >3× 3x-p01 | 2026-08-29 |
 | P1.1 | p1 | group-by-CF encode | done | write_cf_owned; lock/apply ~2.1× isolado | 2026-08-29 |
-| P2.1 | p2 | Linux maioria >3× | doing | TAP blocked; NVMe 4CPU 7/17 FAIL | 2026-08-29 |
+| P2.1 | p2 | Linux maioria >3× | done | CHV P1.8 12/17 min 1.054 | 2026-08-30 |
 
 ## Acceptance Criteria
 

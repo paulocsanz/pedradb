@@ -266,11 +266,7 @@ impl<E: Env> Engine for CompatEngine<E> {
     fn flush(&self) -> bool {
         self.db.flush().is_ok()
     }
-    fn wbwi_overlay_get(
-        &self,
-        puts: &[(&[u8], &[u8])],
-        key: &[u8],
-    ) -> Result<Option<Vec<u8>>, ()> {
+    fn wbwi_overlay_get(&self, puts: &[(&[u8], &[u8])], key: &[u8]) -> Result<Option<Vec<u8>>, ()> {
         let mut b = rocksdb_compat::WriteBatchWithIndex::new();
         for (k, v) in puts {
             b.put(k, v);
@@ -503,8 +499,7 @@ impl RocksEngine {
     fn full_sync_wal(&self) {
         if !crate::rocks_full_sync_after_write(
             self.full_sync,
-            self.cur_sync
-                .load(std::sync::atomic::Ordering::Relaxed),
+            self.cur_sync.load(std::sync::atomic::Ordering::Relaxed),
         ) {
             return;
         }
@@ -550,11 +545,7 @@ impl Engine for RocksEngine {
     fn flush(&self) -> bool {
         self.db.flush().is_ok()
     }
-    fn wbwi_overlay_get(
-        &self,
-        puts: &[(&[u8], &[u8])],
-        key: &[u8],
-    ) -> Result<Option<Vec<u8>>, ()> {
+    fn wbwi_overlay_get(&self, puts: &[(&[u8], &[u8])], key: &[u8]) -> Result<Option<Vec<u8>>, ()> {
         // rust-rocksdb 0.22 has no WriteBatchWithIndex type; last-write-wins
         // overlay then DB is the same observable as compat WBWI for this shape.
         for (k, v) in puts.iter().rev() {

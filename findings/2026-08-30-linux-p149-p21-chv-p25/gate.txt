@@ -1,0 +1,23 @@
+P149_COLUNA_A rounds=3 peer=rocks-default(sync=false) async=PEDRA_PARITY_ASYNC=1
+  >3 ycsb_a                     min=3.392 median=3.504 rounds=[3.504, 3.892, 3.392]
+  >3 ycsb_b                     min=3.435 median=3.642 rounds=[3.642, 3.709, 3.435]
+  >3 ycsb_c                     min=3.727 median=3.891 rounds=[3.727, 3.891, 5.262]
+  >3 ycsb_d                     min=3.468 median=3.588 rounds=[3.468, 3.588, 4.78]
+  >3 ycsb_e                     min=13.984 median=14.395 rounds=[13.984, 16.016, 14.395]
+     ycsb_f                     min=2.772 median=2.837 rounds=[2.837, 3.04, 2.772]
+     deps_cache_overwrite       min=1.983 median=2.648 rounds=[2.648, 2.775, 1.983]
+     deps_lock_prewrite         min=2.330 median=2.353 rounds=[2.353, 2.33, 2.391]
+  >3 deps_mvcc_latest           min=3.519 median=4.200 rounds=[4.2, 3.519, 4.696]
+     deps_apply_batch           min=1.557 median=1.881 rounds=[1.557, 2.681, 1.881]
+     deps_raftlog               min=1.048 median=1.088 rounds=[1.487, 1.048, 1.088]
+  >3 deps_scan                  min=4.833 median=4.902 rounds=[5.374, 4.833, 4.902]
+  >3 kvrocks_get                min=4.583 median=5.095 rounds=[5.298, 5.095, 4.583]
+     kvrocks_set                min=2.403 median=2.762 rounds=[2.762, 2.403, 2.913]
+  >3 kvrocks_scan               min=41.257 median=55.804 rounds=[68.418, 55.804, 41.257]
+  >3 kvrocks_pipelined_set      min=3.464 median=3.890 rounds=[3.89, 4.184, 3.464]
+     kvrocks_blob_set           min=2.129 median=2.219 rounds=[2.219, 2.511, 2.129]
+majority median>3.0 = 10/17 (need >=9); min>3.0 = 10/17
+RESULT=P149_PASS over_med=10/17 min_ratio=1.048
+RESULT=P149_DONE rc=0 2026-08-30T06:16:46Z
+wrote /tmp/p149/r3/compare-kvr/compare_report.json
+wrote /tmp/p149/r3/compare-kvr/rocks_shaped_peer.template.json (fill keys_per_s then set ROCKS_PARITY_PEER)

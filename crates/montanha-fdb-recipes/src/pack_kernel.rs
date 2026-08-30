@@ -31,4 +31,22 @@ mod tests {
         assert_ne!(pack_cut_tag(3), pack_cut_tag(7));
         assert_eq!(pack_cut_tag_as_is(3), pack_cut_tag_as_is(7));
     }
+
+    /// Catalog three-teeth plant. Direct `pack_is_injective_when_components_contain_nul` is **not** this tooth.
+    #[test]
+    fn pack_cut_tag_on_live_subspace_is_not_ok() {
+        assert_eq!(pack_cut_tag(3), 3);
+        assert_eq!(
+            pack_cut_tag_as_is(3),
+            0,
+            "AS-IS dente: no length at the cut"
+        );
+        let s = crate::Subspace::new(b"t");
+        let a = s.pack(&[b"a\x00b", b"c"]);
+        let b = s.pack(&[b"a", b"b\x00c"]);
+        assert_ne!(
+            a, b,
+            "live Subspace::pack must not collide [a\\0b,c] vs [a,b\\0c]; AS-IS cut tag 0 would"
+        );
+    }
 }

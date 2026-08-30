@@ -486,6 +486,50 @@ mod tests {
         );
     }
 
+    /// Catalog three-teeth plant. Direct `fsync_ok_is_not_media_proof` /
+    /// `lying_fsync_does_not_promote_pending` / `lying_sync_loses_write_after_crash`
+    /// are **not** this tooth.
+    #[test]
+    fn fsync_promotes_pending_on_live_sim_is_not_ok() {
+        assert!(!pedradb_core::group_commit_kernel::fsync_promotes_pending(
+            false
+        ));
+        assert!(
+            pedradb_core::group_commit_kernel::fsync_promotes_pending_as_is(false),
+            "AS-IS dente: fsync Ok always promotes"
+        );
+        let env = RecordingEnv::lying();
+        let dir = PathBuf::from("/virt/db-lie-0152");
+        {
+            let mut db = Db::open_with_env(
+                &dir,
+                OpenOptions {
+                    exclusive: false,
+                    ..OpenOptions::default()
+                },
+                env.clone(),
+            )
+            .unwrap();
+            db.put(b"k", b"pending").unwrap();
+            drop(db);
+        }
+        env.crash();
+        let db = Db::open_with_env(
+            &dir,
+            OpenOptions {
+                exclusive: false,
+                ..OpenOptions::default()
+            },
+            env,
+        )
+        .unwrap();
+        assert_eq!(
+            db.get(b"k"),
+            None,
+            "live RecordingFile::sync_data must not promote pending on a lying fsync"
+        );
+    }
+
     #[test]
     fn short_write_errors() {
         let env = RecordingEnv::new();

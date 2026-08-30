@@ -1,0 +1,37 @@
+Source: https://github.com/facebook/rocksdb/wiki/MemTable
+Fetched: 2026-08-30
+Status: wiki (secondary to rocksdb/memtable/skiplist.h). Used for the official
+comparison table, not as a paper.
+
+Default memtable = SkipListFactory. Alternatives: HashSkipList, HashLinkList,
+Vector.
+
+Skiplist: general good performance read+write, random+scan. Unique:
+Concurrent Insert, Insert with Hint (sequential prev_[] fast path in
+memtable/skiplist.h Insert()).
+
+HashSkipList / HashLinkList: hash on Options.prefix_extractor, then
+skiplist/list in the bucket. "The biggest limitation of the hash based
+memtables is that doing scan across multiple prefixes requires copy and
+sort, which is very slow and memory costly."
+
+Comparison table (wiki):
+
+Mem Table Type | SkipList | HashSkipList | HashLinkList | Vector
+Optimized Use Case | General | Range within a prefix | Range within a prefix,
+  few rows/prefix | Random write heavy
+Index type | binary search | hash + binary search | hash + linear search | linear
+Totally ordered full db scan? | naturally | very costly (copy and sort) |
+  very costly (copy and sort) | very costly (copy and sort)
+Concurrent Insert | Supported | No | No | No
+Insert with Hint | Supported (no concurrent insert) | No | No | No
+
+Primary sequential-insert fast path (rocksdb/memtable/skiplist.h):
+  // fast path for sequential insertion
+  if (!KeyIsAfterNode(key, prev_[0]->NoBarrier_Next(0)) &&
+      (prev_[0] == head_ || KeyIsAfterNode(key, prev_[0]))) { ... }
+
+TiKV (docs): two RocksDB instances — kvdb (default/write/lock CFs) and
+raftdb (raft logs). Raft Engine (PingCAP, 2022): LSM is the wrong
+abstraction for raft logs (WAL+memtable+flush I/O); replace with
+append-only log + in-memory hash. TPC-C: ~4% QPS, 25–40% less write I/O.

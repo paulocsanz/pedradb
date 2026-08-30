@@ -155,6 +155,9 @@ impl BloomFilter {
         }
     }
 
+    /// AS-IS T1: skip setting probe bits — a written key can false-negative.
+    pub fn insert_as_is(&mut self, _key: &[u8]) {}
+
     /// `false` ⇒ key is definitely absent; `true` ⇒ maybe present.
     #[must_use]
     pub fn may_contain(&self, key: &[u8]) -> bool {
@@ -171,6 +174,12 @@ impl BloomFilter {
             i += 1;
         }
         true
+    }
+
+    /// AS-IS T1: query probes `k+1` bits (false negative when the extra bit is clear).
+    #[must_use]
+    pub fn may_contain_as_is(&self, key: &[u8]) -> bool {
+        may_contain_mut_extra_probe(self, key)
     }
 
     /// Encode for SST trailer: `nbits u32 | k u32 | nbytes u32 | bits`.
@@ -479,6 +488,121 @@ mod tests {
         // Header kernel AS-IS accepts it (teeth).
         assert!(bloom_header_ok_as_is(64, u32::MAX, 8, 8));
         assert!(!bloom_header_ok(64, u32::MAX, 8, 8));
+    }
+
+    /// Catalog three-teeth plant. Direct `decode_rejects_hostile_probe_count` is **not** this tooth.
+    #[test]
+    fn bloom_header_ok_on_live_decode_is_not_ok() {
+        assert!(!bloom_header_ok(64, u32::MAX, 8, 8));
+        assert!(
+            bloom_header_ok_as_is(64, u32::MAX, 8, 8),
+            "AS-IS dente: no k bound, accepts u32::MAX probes"
+        );
+        let mut buf = Vec::new();
+        buf.extend_from_slice(&64u32.to_le_bytes());
+        buf.extend_from_slice(&u32::MAX.to_le_bytes());
+        buf.extend_from_slice(&8u32.to_le_bytes());
+        buf.extend_from_slice(&[0u8; 8]);
+        assert!(
+            BloomFilter::decode(&buf).is_err(),
+            "live BloomFilter::decode must fail closed on hostile k"
+        );
+    }
+
+    /// Catalog three-teeth plant. Direct `no_false_negatives` is **not** this tooth.
+    #[test]
+    fn insert_on_live_sst_is_not_ok() {
+        let key = b"rfc0152-bloom-ins";
+        let mut real = BloomFilter::with_capacity(8, DEFAULT_BITS_PER_KEY);
+        real.insert(key);
+        assert!(real.may_contain(key), "REAL insert must set probe bits");
+        let mut as_is = BloomFilter::with_capacity(8, DEFAULT_BITS_PER_KEY);
+        as_is.insert_as_is(key);
+        assert!(
+            !as_is.may_contain(key),
+            "AS-IS dente: skipped insert is a false negative"
+        );
+        let n = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("pedra-bloom-ins-{}-{n}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut db = crate::Db::open_with(
+            &dir,
+            crate::OpenOptions {
+                wal_full_fsync: true,
+                history: Default::default(),
+                wal_recovery: Default::default(),
+                sync: true,
+                auto_flush_bytes: None,
+                auto_compact_sst_count: None,
+                auto_compact_sst_bytes: None,
+                exclusive: true,
+                large_value_threshold: None,
+            },
+        )
+        .unwrap();
+        db.put(key, b"ok").unwrap();
+        db.flush().unwrap();
+        assert_eq!(
+            db.get(key).as_deref(),
+            Some(b"ok".as_ref()),
+            "live SST write must bloom.insert the key; AS-IS skip would miss after flush"
+        );
+        db.close().unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Catalog three-teeth plant. Direct `no_false_negatives` is **not** this tooth.
+    #[test]
+    fn may_contain_on_live_sst_is_not_ok() {
+        let mut teeth = false;
+        for i in 0..512u16 {
+            let key = i.to_le_bytes();
+            let mut f = BloomFilter::with_capacity(8, DEFAULT_BITS_PER_KEY);
+            f.insert(&key);
+            assert!(f.may_contain(&key), "REAL must not false-negative");
+            if !f.may_contain_as_is(&key) {
+                teeth = true;
+                break;
+            }
+        }
+        assert!(
+            teeth,
+            "AS-IS dente: extra probe must false-negative at least one inserted key"
+        );
+        let key = b"rfc0152-bloom-mc";
+        let n = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("pedra-bloom-mc-{}-{n}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut db = crate::Db::open_with(
+            &dir,
+            crate::OpenOptions {
+                wal_full_fsync: true,
+                history: Default::default(),
+                wal_recovery: Default::default(),
+                sync: true,
+                auto_flush_bytes: None,
+                auto_compact_sst_count: None,
+                auto_compact_sst_bytes: None,
+                exclusive: true,
+                large_value_threshold: None,
+            },
+        )
+        .unwrap();
+        db.put(key, b"ok").unwrap();
+        db.flush().unwrap();
+        assert_eq!(
+            db.get(key).as_deref(),
+            Some(b"ok".as_ref()),
+            "live SST get must honour may_contain of an inserted key"
+        );
+        db.close().unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// RFC-0030: `with_capacity` rewrite (no max/clamp/div_ceil) matches

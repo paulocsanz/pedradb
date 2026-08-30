@@ -1917,6 +1917,44 @@ mod tests {
         std::env::temp_dir().join(format!("pedradb-sst-{n}-{seq}.sst"))
     }
 
+    /// RFC-0152 P2.2.40: production `SstTable::decode` gates the file
+    /// trailer through `sst_crc_fate`. Live writer then XOR of the stored
+    /// CRC trailer (payload intact) is Reject; AS-IS would StripTrailer.
+    /// Direct `crc_mismatch_on_live_sst_is_not_ok` /
+    /// `crc_mismatch_on_live_sst_block_is_not_ok` /
+    /// `crc_mismatch_on_live_sst_db_open_is_not_ok` are not this tooth.
+    #[test]
+    fn sst_crc_fate_on_live_sst_is_not_ok() {
+        assert_eq!(
+            crate::sst::sst_crc_fate(1, 2, 100),
+            crate::sst::SstCrcFate::Reject
+        );
+        assert_eq!(
+            crate::sst::sst_crc_fate_as_is(1, 2, 100),
+            crate::sst::SstCrcFate::StripTrailer,
+            "AS-IS dente: mismatch still strips"
+        );
+        let mut mem = MemTable::new();
+        mem.put(b"k".as_slice(), 1, b"sst-crc-trailer-0152".as_slice());
+        let path = temp_path();
+        write_sst(&path, &mem).unwrap();
+        let mut bytes = std::fs::read(&path).unwrap();
+        assert!(
+            bytes.len() >= crate::sst::SST_LEGACY_NO_CRC_MAX,
+            "modern SST must not take the tiny-legacy path"
+        );
+        let n = bytes.len();
+        bytes[n - 1] ^= 0xff;
+        std::fs::write(&path, &bytes).unwrap();
+        let err = SstTable::open(&path).unwrap_err();
+        let msg = err.to_string();
+        let _ = std::fs::remove_file(&path);
+        assert!(
+            msg.contains("CRC mismatch"),
+            "trailer CRC lie must not open as a table; got {err:?}"
+        );
+    }
+
     /// RFC-0077 P0: production writer+open; a flipped payload is CRC mismatch,
     /// never a table. AS-IS `sst_crc_fate` would strip the trailer.
     #[test]

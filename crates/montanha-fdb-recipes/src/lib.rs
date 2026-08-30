@@ -908,6 +908,24 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// Catalog three-teeth plant. Direct `set_user_zip_with_nul_clears_old_index_on_change` is **not** this tooth.
+    #[test]
+    fn encode_fields_on_live_directory_is_not_ok() {
+        let zip = [b'9', 0x00, b'0'];
+        assert_ne!(
+            encode_fields(&[&zip, b"alice"]),
+            encode_fields_as_is(&[&zip, b"alice"]),
+            "AS-IS dente: raw 0x00 join truncates zip"
+        );
+        let (dir, mut c) = open3();
+        let u = IndexedUsers::new();
+        u.set_user(&mut c, b"u1", b"alice", &zip).unwrap();
+        let (z, n) = u.get_user(&c, b"u1").unwrap().expect("u1");
+        assert_eq!(z.as_slice(), zip.as_slice(), "live set_user must keep NUL in zip");
+        assert_eq!(n, b"alice");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// Packed children are `pack(zip) || 0x00 || id`. Splitting the key on the
     /// last `0x00` truncates an id that itself contains `0x00`.
     #[test]

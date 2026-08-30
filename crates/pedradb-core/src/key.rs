@@ -65,6 +65,13 @@ pub fn pack_sequence_and_type(sequence: SequenceNumber, kind: ValueType) -> u64 
     (sequence << 8) | u64::from(kind.as_u8())
 }
 
+/// AS-IS: OR without the shift (the 0150 hole — seq=1 Deletion collides
+/// with seq=0 Value).
+#[must_use]
+pub fn pack_sequence_and_type_as_is(sequence: SequenceNumber, kind: ValueType) -> u64 {
+    sequence | u64::from(kind.as_u8())
+}
+
 /// Unpack an 8-byte trailer into sequence and type.
 ///
 /// # Errors
@@ -200,6 +207,51 @@ mod tests {
         let (seq, kind) = unpack_sequence_and_type(packed).unwrap();
         assert_eq!(seq, 42);
         assert_eq!(kind, ValueType::Value);
+    }
+
+    /// RFC-0152 P2.2.41: production `InternalKey::encode_into` packs
+    /// `(seq << 8) | kind`. AS-IS ORs without the shift so seq=1 Deletion
+    /// collides with seq=0 Value. Direct `pack_unpack_round_trip` /
+    /// `encode_decode_round_trip` are not this tooth.
+    #[test]
+    fn pack_sequence_and_type_on_live_db_is_not_ok() {
+        assert_ne!(
+            pack_sequence_and_type(1, ValueType::Deletion),
+            pack_sequence_and_type(0, ValueType::Value)
+        );
+        assert_eq!(
+            pack_sequence_and_type_as_is(1, ValueType::Deletion),
+            pack_sequence_and_type_as_is(0, ValueType::Value),
+            "AS-IS dente: seq|kind without shift collides"
+        );
+        let del = InternalKey::new(Bytes::from_static(b"k"), 1, ValueType::Deletion);
+        let val = InternalKey::new(Bytes::from_static(b"k"), 0, ValueType::Value);
+        assert_ne!(
+            del.encode(),
+            val.encode(),
+            "live encode_into must keep tombstone distinct from older value"
+        );
+        let dir = std::env::temp_dir().join(format!(
+            "pedra-ikey-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut db = crate::Db::open_with(
+            &dir,
+            crate::OpenOptions {
+                exclusive: true,
+                ..crate::OpenOptions::default()
+            },
+        )
+        .unwrap();
+        db.put(b"k", b"v").unwrap();
+        db.delete(b"k").unwrap();
+        assert_eq!(db.get(b"k"), None, "live tombstone must hide the put");
+        db.close().unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

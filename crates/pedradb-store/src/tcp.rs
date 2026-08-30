@@ -561,7 +561,9 @@ pub fn client_remove_member_joint(addr: impl AsRef<str>, node_id: u64) -> Result
     match read_frame(&mut s)? {
         WireMsg::RespOk => Ok(()),
         WireMsg::RespErr { message } => Err(StoreError::Msg(message)),
-        other => Err(StoreError::Msg(format!("remove_member_joint resp {other:?}"))),
+        other => Err(StoreError::Msg(format!(
+            "remove_member_joint resp {other:?}"
+        ))),
     }
 }
 

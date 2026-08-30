@@ -47,6 +47,49 @@ mod tests {
         assert!(!fold_event_hides_key_as_is(true, b"k-b", b"k-d", b"k-c"));
     }
 
+    /// Catalog three-teeth plant. Direct `as_is_only_hides_start` is **not** this tooth.
+    #[test]
+    fn fold_event_hides_key_on_live_fold_is_not_ok() {
+        assert!(fold_event_hides_key(true, b"k-b", b"k-d", b"k-c"));
+        assert!(
+            !fold_event_hides_key_as_is(true, b"k-b", b"k-d", b"k-c"),
+            "AS-IS dente: range delete hides only the start key"
+        );
+        let dir = std::env::temp_dir().join(format!(
+            "fold-range-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut db = pedradb_core::Db::open_with(
+            &dir,
+            pedradb_core::OpenOptions {
+                exclusive: true,
+                ..pedradb_core::OpenOptions::default()
+            },
+        )
+        .unwrap();
+        db.put(b"k-b", b"vb").unwrap();
+        db.put(b"k-c", b"vc").unwrap();
+        db.delete_range(b"k-b", b"k-d").unwrap();
+        let prefs = crate::PrefixSet::one(b"k-");
+        let sync = crate::last_per_key(&db, &prefs);
+        let live: Vec<&[u8]> = sync
+            .iter()
+            .filter(|u| matches!(u, crate::FoldUpdate::Put { .. }))
+            .map(crate::FoldUpdate::key)
+            .collect();
+        assert!(
+            !live.iter().any(|k| *k == b"k-c"),
+            "live last_per_key must drop covered k-c after DeleteRange [k-b,k-d); live={live:?}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn point_delete_is_exact() {
         assert!(fold_event_hides_key(false, b"k-c", b"", b"k-c"));

@@ -213,15 +213,18 @@ mod tests {
             cqe_ring_model_admitted_as_is(),
             "AS-IS dente: res-gate twin looks like a ring proof"
         );
-        let crate_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-        assert!(
-            crate_dir.join("verus/cqe_res.rs").is_file(),
-            "RFC-0074 P2.1: cqe_res_ok twin must exist"
-        );
-        assert!(
-            !crate_dir.join("verus/ring_model.rs").exists(),
-            "RFC-0074 P2.2: ring Verus twin must stay absent"
-        );
+        #[cfg(not(miri))]
+        {
+            let crate_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+            assert!(
+                crate_dir.join("verus/cqe_res.rs").is_file(),
+                "RFC-0074 P2.1: cqe_res_ok twin must exist"
+            );
+            assert!(
+                !crate_dir.join("verus/ring_model.rs").exists(),
+                "RFC-0074 P2.2: ring Verus twin must stay absent"
+            );
+        }
     }
 
     #[test]
@@ -319,6 +322,7 @@ mod tests {
         let next_u = next_user_data(&mut c);
         assert_eq!(cqe_act(leftover_u, next_u), CqeAct::Discard);
     }
+
     /// RFC-0156 P0.3 (R-uring): sequence sweep — 64 issued ops, and at
     /// every CQ drain position a leftover from every other op may be
     /// visible. Under unique `user_data`, a leftover is always

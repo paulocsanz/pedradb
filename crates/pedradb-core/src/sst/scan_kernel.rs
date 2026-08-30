@@ -213,6 +213,77 @@ mod tests {
         ));
     }
 
+    /// Catalog three-teeth plant. Direct `as_is_misses_spanning_tombstone` is **not** this tooth.
+    #[test]
+    fn scan_reads_file_on_live_sst_is_not_ok() {
+        let tombs: [(&[u8], &[u8]); 1] = [(b"k-b", b"k-f")];
+        assert!(scan_reads_file(
+            Some(b"k-b"),
+            Some(b"k-b"),
+            &tombs,
+            Bound::Included(b"k-e"),
+            Bound::Included(b"k-g"),
+        ));
+        assert!(
+            !scan_reads_file_as_is(
+                Some(b"k-b"),
+                Some(b"k-b"),
+                &tombs,
+                Bound::Included(b"k-e"),
+                Bound::Included(b"k-g"),
+            ),
+            "AS-IS dente: bounds-only skip of spanning tombstone file"
+        );
+        let n = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("pedra-scan-guard-{}-{n}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut db = crate::Db::open_with(
+            &dir,
+            crate::OpenOptions {
+                auto_flush_bytes: None,
+                auto_compact_sst_count: None,
+                auto_compact_sst_bytes: None,
+                exclusive: true,
+                ..crate::OpenOptions::default()
+            },
+        )
+        .unwrap();
+        db.set_defer_auto_compact(true);
+        db.put(b"k-e", b"live").unwrap();
+        db.flush().unwrap();
+        db.put(b"k-b", b"start").unwrap();
+        db.delete_range(b"k-b", b"k-f").unwrap();
+        db.flush().unwrap();
+        assert!(
+            db.live_sst_meta().len() >= 2,
+            "need a point SST and a spanning-tombstone SST, meta={:?}",
+            db.live_sst_meta()
+        );
+        assert_eq!(
+            db.get(b"k-e").as_deref(),
+            None,
+            "point get must see the spanning tombstone"
+        );
+        let scan: Vec<Vec<u8>> = db
+            .range_limited(
+                Bound::Included(b"k-e".as_ref()),
+                Bound::Included(b"k-g".as_ref()),
+                None,
+            )
+            .into_iter()
+            .map(|(k, _)| k.to_vec())
+            .collect();
+        assert!(
+            !scan.iter().any(|k| k.as_slice() == b"k-e"),
+            "scan must hide k-e; AS-IS skip of the tombstone SST would leak it: {scan:?}"
+        );
+        db.close().unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn disjoint_files_still_skipped() {
         // Window strictly after every point and after the tombstone end.

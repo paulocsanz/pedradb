@@ -1,7 +1,7 @@
 # RFC: 0068 — World plant committed-joint-without-leave fail-closed
 
-**Status:** in-progress
-**Updated:** 2026-08-27
+**Status:** done
+**Updated:** 2026-08-30
 **Parents:** [0066](0066-joint-leave-fail-closed.md), [0064](0064-joint-election-fail-closed.md), [0063](0063-fdb-reliability-close-the-system-gap.md), [0051](0051-beyond-fdb-sim-holes.md)
 
 **Residual:** `R-joint` (not `never_floor`). Axis vs FDB Sim2: **membership / reconfig mid-run** (G7 operator change is outside `fdbserver -r simulation`). RFC-0066 P0 closed leave-joint on the store path. The remaining hole is the World schedule: a crash window (joint committed, apply lag, auto-leave skipped) was only planted by poking private log fields in a unit test, not as a World `Action` on the live cluster.
@@ -34,12 +34,12 @@
 - [x] **P0.3** Regression: plant then C-old majority does not elect; AS-IS would — status: `done` (`plant_committed_joint_without_leave_refuses_old_majority`, `world_planted_committed_joint_old_majority_does_not_elect`)
 
 ### P1 — next wave
-- [ ] **P1.1** Stateright model includes leave-joint (0066 P1.1) — status: `todo`
-- [ ] **P1.2** Random scheduler may emit PlantCommittedJoint (fingerprint bump, opt-in) — status: `todo`
+- [x] **P1.1** Stateright model includes leave-joint (0066 P1.1) — status: `done` (RFC-0094)
+- [x] **P1.2** Random scheduler may emit PlantCommittedJoint (fingerprint bump, opt-in) — status: `done` (`world_opt_in_schedule_emits_plant_committed_joint`)
 
 ### P2 — later
 - [x] **P2.1** Verus twin of `joint_still_active` (0066 P2.1) — status: `done` (RFC-0095)
-- [ ] **P2.2** L28 REAL: plant committed-without-leave on `cluster_real` — status: `todo`
+- [x] **P2.2** L28 REAL: plant committed-without-leave on `cluster_real` — status: `done` (`l28_real_tcp_plant_joint`)
 
 ## Status (living — update with every PR)
 
@@ -48,10 +48,10 @@
 | P0.1 | p0 | plant + probe on StoreCluster | done | plant_committed_joint_without_leave | 2026-08-27 |
 | P0.2 | p0 | World Action PlantCommittedJoint | done | schedule.rs + World::run | 2026-08-27 |
 | P0.3 | p0 | old-majority tooth after plant | done | plant_…_refuses_old_majority + world_planted_… | 2026-08-27 |
-| P1.1 | p1 | Stateright leave-joint | todo | — | 2026-08-27 |
-| P1.2 | p1 | scheduler emits plant | todo | — | 2026-08-27 |
+| P1.1 | p1 | Stateright leave-joint | done | RFC-0094 joint_leave_model | 2026-08-28 |
+| P1.2 | p1 | scheduler emits plant | done | world_opt_in_schedule_emits_plant_committed_joint | 2026-08-30 |
 | P2.1 | p2 | Verus joint_still_active | done | RFC-0095 | 2026-08-28 |
-| P2.2 | p2 | L28 REAL plant | todo | — | 2026-08-27 |
+| P2.2 | p2 | L28 REAL plant | done | l28_real_tcp_plant_joint | 2026-08-30 |
 
 ## Acceptance Criteria
 
@@ -59,6 +59,9 @@
   - `plant_committed_joint_without_leave_refuses_old_majority`: open 4, elect, joint-remove 4, plant add-4 without leave, `probe_old_majority_joint_election(1)` is false; `joint_still_active_as_is` is false (AS-IS would drop the joint); `joint_election_ok_as_is(2,3,Some((2,4)))` is true.
   - `world_planted_committed_joint_old_majority_does_not_elect`: World Queued schedule JointRemove then PlantCommittedJoint; `silent_wrong==0`; event `joint_plant_old_refused`.
   - Existing `election_after_committed_joint_still_requires_new_majority` stays green.
+  - P1.1 Stateright leave-joint is RFC-0094 (`fixed_leave_joint_holds` / `as_is_elects_without_leave`).
+  - P1.2 `world_opt_in_schedule_emits_plant_committed_joint`: default `schedule_from_seed` omits `PlantCommittedJoint`; opt-in `splice_plant_committed_joint` emits JointRemove+plant of node 4; `plant_joint_schedule_ok`; World `plant_committed_joint=true` `silent_wrong==0`. Default fingerprints stay. AS-IS skips the opt-in plant.
+  - P2.2 `l28_real_tcp_plant_joint`: seed `0x0068_1E28` twice (default durability); fingerprints match; `pj=1`; production TCP ctor of n1 plants committed C-old,new add-4 without leave (4 not in local `nodes`); `probe_old_majority_joint_election(1)` is false. 0148 oob sent_through is **not** this tooth. Exit via `l28_tcp_pj_ok`. AS-IS would elect on C-old. Runs on Darwin. Does not submit io_uring SQEs.
 - **Telemetry / Analytics:** none — safety invariant. World `silent_wrong` if the tooth fails.
 - **Documentation:** this RFC; `residuals.json` `R-joint` close-text; 0066 P1.2 done.
 - **Screenshots:** backend-only.

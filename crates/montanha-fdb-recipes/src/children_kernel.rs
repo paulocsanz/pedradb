@@ -158,4 +158,24 @@ mod tests {
         }
         assert_eq!(n, 256);
     }
+
+    /// Catalog three-teeth plant. Direct `as_is_leaks_sibling_900` is **not** this tooth.
+    #[test]
+    fn packed_children_end_on_live_subspace_is_not_ok() {
+        let p = pack90();
+        let ss = crate::Subspace::new(p);
+        let start = ss.range_start();
+        let end = ss.range_end();
+        assert_eq!(end, packed_children_end(p));
+        assert_ne!(
+            end,
+            packed_children_end_as_is(p),
+            "AS-IS dente: packed||0xff leaks zip 900"
+        );
+        assert!(key_in_half_open(&child_short(), &start, &end));
+        assert!(
+            !key_in_half_open(&sibling_900(), &start, &end),
+            "live Subspace::range_end must drop sibling 900"
+        );
+    }
 }

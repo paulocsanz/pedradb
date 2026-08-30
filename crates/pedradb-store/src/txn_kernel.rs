@@ -37,10 +37,7 @@ mod three_teeth {
 
     #[test]
     fn txn_commit_action_on_live_abort_is_not_ok() {
-        assert_eq!(
-            txn_commit_action(true),
-            TxnCommitAction::Revert
-        );
+        assert_eq!(txn_commit_action(true), TxnCommitAction::Revert);
         assert_eq!(
             txn_commit_action_as_is(true),
             TxnCommitAction::Materialise,

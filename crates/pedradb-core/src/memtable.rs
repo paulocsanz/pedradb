@@ -6,13 +6,19 @@
 //! the newest such entry wins (delete tombstone hides the key).
 
 use std::cmp::Ordering;
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
+use std::hash::{BuildHasherDefault, Hasher};
 use std::ops::Bound;
+use std::sync::atomic::{AtomicBool, Ordering as AtomicOrdering};
 use std::sync::{Arc, Mutex};
 
 use bytes::Bytes;
 
 use crate::key::{InternalKey, SequenceNumber, ValueType};
+
+/// Copy key for ≤32-byte tail index: `pack32` + len (injective; zero-pad
+/// ties broken by len).
+type PackKey = (u128, u128, u16);
 
 /// Result of a point lookup that found a visible version.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -135,10 +141,11 @@ pub(crate) struct MemInternalMerge<'a> {
 /// [`MemInternalMerge`] first).
 pub(crate) struct MemInternalIdx<'a> {
     map: MemInternalRange<'a>,
-    /// Concrete single-shard `BTreeMap` range (RFC-0054 P1.3: no Box and no
-    /// per-bound `Bytes` clones — the gate in `iter_internal_iter_at` only
-    /// reaches here when the bounds pin one CF shard).
-    idx: std::iter::Peekable<std::collections::btree_map::Range<'a, TailIdxKey, usize>>,
+    /// Concrete single-shard short-key range (RFC-0054 P1.3 / RFC-0149 P2.1:
+    /// no Box and no per-bound `Bytes` clones — the gate in
+    /// `iter_internal_iter_at` only reaches here when the bounds pin one
+    /// CF shard of keys ≤ 32 bytes).
+    idx: std::iter::Peekable<std::collections::btree_map::Range<'a, (u128, u128, u16), usize>>,
     tail: &'a [Version],
 }
 
@@ -220,7 +227,7 @@ impl<'a> MemInternalIdx<'a> {
         while self
             .idx
             .peek()
-            .is_some_and(|((_, _, uk), _)| uk.as_ref() == user)
+            .is_some_and(|(_, &i)| self.tail[i].key.user_key.as_ref() == user)
         {
             self.idx.next();
         }
@@ -254,17 +261,17 @@ impl<'a> Iterator for MemInternalIdx<'a> {
         let tail_item = self
             .idx
             .peek()
-            .map(|((_, _, _), &i)| (&self.tail[i].key, &self.tail[i].value));
+            .map(|(_, &i)| (&self.tail[i].key, &self.tail[i].value));
         match (self.map.peek(), tail_item) {
             (None, None) => None,
             (Some(_), None) => self.map.next(),
             (None, Some(_)) => {
-                let ((_, _, _), &i) = self.idx.next()?;
+                let (_, &i) = self.idx.next()?;
                 Some((&self.tail[i].key, &self.tail[i].value))
             }
             (Some(m), Some(t)) => {
                 if t.0 < m.0 {
-                    let ((_, _, _), &i) = self.idx.next()?;
+                    let (_, &i) = self.idx.next()?;
                     Some((&self.tail[i].key, &self.tail[i].value))
                 } else {
                     self.map.next()
@@ -317,21 +324,24 @@ pub struct MemTable {
     /// on the Ok-path index so `deps_raftlog` after `deps_apply_batch` does
     /// not pay `log(N_all_cfs)` (RFC-0054).
     ///
-    /// RFC-0054 P1.4: shard keys are `(pack32(key), key)` — big-endian
-    /// u128s of the first 32 bytes make tree-walk compares integer
-    /// compares instead of memcmp calls (the #1 apply-profile leaf). 32
-    /// bytes covers the TiKV shape end-to-end (`default\0u/N\0` + 8-byte
-    /// ts ≈ 23), so the ever-growing mvcc ts lands in the integer path
-    /// instead of tying the prefix and falling to a Bytes memcmp per
-    /// insert. Order provably equals raw byte order: `pack32` zero-pads
-    /// the tail, a padding zero compares equal to a real `0x00`, and any
-    /// tie falls through to the full `Bytes` compare (prefix < extension).
-    tail_idx: BTreeMap<Bytes, BTreeMap<TailIdxKey, usize>>,
+    /// Keys ≤ 32 bytes (apply / YCSB / kvrocks) live in a Copy `(pack32, len)`
+    /// tree — no `Bytes` clone per insert (RFC-0149 P2.1). Longer keys keep
+    /// a full-key tree. `pack32` + len is injective for ≤ 32 bytes: zero-pad
+    /// collisions (`"a"` vs `"a\\0"`) differ in `len`.
+    tail_idx: BTreeMap<Bytes, TailShard>,
+    /// Lazy sorted view of HashMap-only shards (`lock`/`default`/`write`) for
+    /// range / last / count. Invalidated with an atomic so apply does not take
+    /// the mutex. The HashMap itself is live (RFC-0154).
+    point_ord: Mutex<BTreeMap<Bytes, Arc<Vec<(PackKey, usize)>>>>,
+    point_ord_live: AtomicBool,
     /// Highest sequence in `tail` (fast-path guard: snapshot ≥ it ⇒ only the
     /// newest version per key can be visible).
     tail_max_seq: SequenceNumber,
-    /// Cached InternalKey order of `tail` (invalidated on insert).
+    /// Cached InternalKey order of `tail`. Writers only flip
+    /// `tail_ord_stale` (no mutex on the 1c put path).
+    #[allow(dead_code)]
     tail_ord: Mutex<Option<Arc<Vec<u32>>>>,
+    tail_ord_stale: AtomicBool,
     /// Approximate bytes for flush triggers (user key + value + trailer).
     approx_bytes: usize,
     /// Bytes per CF prefix (RFC-0065 P1.1). Keyed by `cf_prefix` (empty =
@@ -349,8 +359,11 @@ impl Clone for MemTable {
             map: self.map.clone(),
             tail: self.tail.clone(),
             tail_idx: self.tail_idx.clone(),
+            point_ord: Mutex::new(BTreeMap::new()),
+            point_ord_live: AtomicBool::new(false),
             tail_max_seq: self.tail_max_seq,
             tail_ord: Mutex::new(None),
+            tail_ord_stale: AtomicBool::new(true),
             approx_bytes: self.approx_bytes,
             cf_bytes: self.cf_bytes.clone(),
             range_tombstones: self.range_tombstones,
@@ -393,10 +406,138 @@ fn pack32(key: &[u8]) -> (u128, u128) {
     )
 }
 
-/// `tail_idx` shard key: integer-compare fast path + full-key tiebreak.
+/// `tail_idx` shard key: integer-compare fast path + full-key tiebreak
+/// (oracle / keys > 32 bytes).
+#[cfg(test)]
 type TailIdxKey = (u128, u128, Bytes);
 
+/// rustc-hash Fx mix. SipHash on 64k always-new MVCC keys rehashed the
+/// apply mem path (11.89 → 14.52µs); reserve + this hasher is the 2× cut.
+#[derive(Clone, Debug, Default)]
+struct FxHasher {
+    hash: u64,
+}
+
+const FX_K: u64 = 0x517c_c1b7_2722_0a95;
+
+impl FxHasher {
+    #[inline]
+    fn mix(&mut self, i: u64) {
+        self.hash = (self.hash.rotate_left(5) ^ i).wrapping_mul(FX_K);
+    }
+}
+
+impl Hasher for FxHasher {
+    #[inline]
+    fn finish(&self) -> u64 {
+        self.hash
+    }
+
+    fn write(&mut self, mut bytes: &[u8]) {
+        while bytes.len() >= 8 {
+            let (chunk, rest) = bytes.split_at(8);
+            self.mix(u64::from_ne_bytes(chunk.try_into().unwrap()));
+            bytes = rest;
+        }
+        if bytes.len() >= 4 {
+            let (chunk, rest) = bytes.split_at(4);
+            self.mix(u32::from_ne_bytes(chunk.try_into().unwrap()) as u64);
+            bytes = rest;
+        }
+        for &b in bytes {
+            self.mix(u64::from(b));
+        }
+    }
+
+    #[inline]
+    fn write_u16(&mut self, i: u16) {
+        self.mix(u64::from(i));
+    }
+
+    #[inline]
+    fn write_u64(&mut self, i: u64) {
+        self.mix(i);
+    }
+
+    #[inline]
+    fn write_u128(&mut self, i: u128) {
+        self.mix(i as u64);
+        self.mix((i >> 64) as u64);
+    }
+}
+
+type PointMap = HashMap<PackKey, usize, BuildHasherDefault<FxHasher>>;
+
+/// Point shards (HashMap): `lock` / `default`. `write` stays a BTree —
+/// MVCC latest is reverse-seek (RFC-0154 P1.2). Empty prefix and `raftlog`
+/// stay a BTree (YCSB E / kvrocks SCAN / sequential append). P1.3
+/// (empty→HashMap) **regressed** CHV 7/17→6/17 (`ycsb_c` lost 3×).
+#[inline]
+fn point_cf(pfx: &[u8]) -> bool {
+    pfx == b"lock" || pfx == b"default"
+}
+
+#[inline]
+fn point_reserve(pfx: &[u8]) -> usize {
+    match pfx {
+        b"default" => 1 << 17,
+        b"lock" => 2048,
+        _ => 0,
+    }
+}
+
+/// Per-CF tail index. Short keys (≤ 32 B) are Copy `(pack32, len)` — apply
+/// / SET / YCSB never clone `Bytes` into the tree (RFC-0149 P2.1).
+#[derive(Clone, Debug, Default)]
+struct TailShard {
+    short: BTreeMap<PackKey, usize>,
+    /// Point CFs (`lock` overwrites, `default` point gets). `write` is
+    /// `short` so last_visible is BTree next_back, not copy+sort.
+    point: PointMap,
+    long: BTreeMap<Bytes, usize>,
+}
+
+fn bound_len_le_32(b: Bound<&[u8]>) -> bool {
+    match b {
+        Bound::Unbounded => true,
+        Bound::Included(k) | Bound::Excluded(k) => k.len() <= 32,
+    }
+}
+
+/// Byte bound → `(pack32, len)` for keys ≤ 32 bytes. Same total order as
+/// raw bytes: `pack32` is the first 32 bytes, `len` breaks zero-pad ties.
+fn packed_short_bound(b: Bound<&[u8]>) -> Bound<PackKey> {
+    match b {
+        Bound::Included(k) => {
+            let (p0, p1) = pack32(k);
+            Bound::Included((p0, p1, k.len() as u16))
+        }
+        Bound::Excluded(k) => {
+            let (p0, p1) = pack32(k);
+            Bound::Excluded((p0, p1, k.len() as u16))
+        }
+        Bound::Unbounded => Bound::Unbounded,
+    }
+}
+
+fn pack_bound_start(ord: &[(PackKey, usize)], start: Bound<PackKey>) -> usize {
+    match start {
+        Bound::Unbounded => 0,
+        Bound::Included(s) => ord.partition_point(|&(k, _)| k < s),
+        Bound::Excluded(s) => ord.partition_point(|&(k, _)| k <= s),
+    }
+}
+
+fn pack_bound_end(ord: &[(PackKey, usize)], end: Bound<PackKey>) -> usize {
+    match end {
+        Bound::Unbounded => ord.len(),
+        Bound::Included(e) => ord.partition_point(|&(k, _)| k <= e),
+        Bound::Excluded(e) => ord.partition_point(|&(k, _)| k < e),
+    }
+}
+
 /// Byte-level bound → exact `(pack32, bytes)` shard bound (see `pack32`).
+#[cfg(test)]
 fn packed_bound(b: Bound<&[u8]>) -> Bound<TailIdxKey> {
     match b {
         Bound::Included(b) => {
@@ -415,26 +556,6 @@ fn bound_cf_prefix(b: Bound<&[u8]>) -> Option<&[u8]> {
     match b {
         Bound::Included(k) | Bound::Excluded(k) => Some(cf_prefix(k)),
         Bound::Unbounded => None,
-    }
-}
-
-/// Byte bound → exact `(pack32, empty)` class-floor bound for keys ≤ 32
-/// bytes — no `Bytes` clone. `pack32` is injective there, and the only
-/// >32-byte keys sharing the class extend the bound with zero padding,
-/// which sorts strictly after it — so the floor admits exactly the same
-/// entries as `(pack32, key)` for both `Included` and `Excluded` (see
-/// `pack32`).
-fn class_floor(b: Bound<&[u8]>) -> Bound<TailIdxKey> {
-    match b {
-        Bound::Included(k) if k.len() <= 32 => {
-            let (p0, p1) = pack32(k);
-            Bound::Included((p0, p1, Bytes::new()))
-        }
-        Bound::Excluded(k) if k.len() <= 32 => {
-            let (p0, p1) = pack32(k);
-            Bound::Excluded((p0, p1, Bytes::new()))
-        }
-        other => packed_bound(other),
     }
 }
 
@@ -567,7 +688,7 @@ impl MemTable {
             if v.key.kind == ValueType::RangeDeletion {
                 self.range_tombstones = self.range_tombstones.saturating_add(1);
             }
-            self.tail_idx_insert(v.key.user_key.clone(), i);
+            self.tail_idx_insert(v.key.user_key.as_ref(), i);
         }
         self.tail = tail;
         self.cf_bytes = cf_bytes;
@@ -585,42 +706,132 @@ impl MemTable {
         self.tail.len()
     }
 
+    /// Push onto the shared tail and index by CF prefix. Returns the global index.
+    fn tail_append(&mut self, key: InternalKey, value: Bytes) -> usize {
+        let pfx = cf_prefix(key.user_key.as_ref());
+        let pfx_b = Bytes::copy_from_slice(pfx);
+        let point = point_cf(pfx);
+        let cap = point_reserve(pfx);
+        let s = self.tail_idx.entry(pfx_b).or_insert_with(|| {
+            let mut s = TailShard::default();
+            if cap > 0 {
+                s.point.reserve(cap);
+            }
+            s
+        });
+        let i = self.tail.len();
+        if key.user_key.len() <= 32 {
+            let (p0, p1) = pack32(key.user_key.as_ref());
+            let sk = (p0, p1, key.user_key.len() as u16);
+            if point {
+                s.point.insert(sk, i);
+            } else {
+                s.short.insert(sk, i);
+            }
+        } else {
+            s.long.insert(key.user_key.clone(), i);
+        }
+        self.tail.push(Version { key, value });
+        i
+    }
+
     fn invalidate_tail_ord(&self) {
-        if let Ok(mut g) = self.tail_ord.lock() {
-            *g = None;
+        self.point_ord_live.store(false, AtomicOrdering::Relaxed);
+        self.tail_ord_stale.store(true, AtomicOrdering::Release);
+    }
+
+    fn tail_idx_insert(&mut self, key: &[u8], i: usize) {
+        self.tail_idx_insert_at(key, cf_prefix(key), i);
+    }
+
+    fn tail_idx_insert_at(&mut self, key: &[u8], pfx: &[u8], i: usize) {
+        Self::tail_idx_insert_into(&mut self.tail_idx, key, pfx, i);
+    }
+
+    fn tail_idx_insert_into(
+        idx: &mut BTreeMap<Bytes, TailShard>,
+        key: &[u8],
+        pfx: &[u8],
+        i: usize,
+    ) {
+        if key.len() <= 32 {
+            let (p0, p1) = pack32(key);
+            let sk = (p0, p1, key.len() as u16);
+            if point_cf(pfx) {
+                if let Some(s) = idx.get_mut(pfx) {
+                    s.point.insert(sk, i);
+                    return;
+                }
+                let mut s = TailShard::default();
+                let cap = point_reserve(pfx);
+                if cap > 0 {
+                    s.point.reserve(cap);
+                }
+                s.point.insert(sk, i);
+                idx.insert(Bytes::copy_from_slice(pfx), s);
+                return;
+            }
+            if let Some(s) = idx.get_mut(pfx) {
+                s.short.insert(sk, i);
+                return;
+            }
+            let p = Bytes::copy_from_slice(pfx);
+            idx.entry(p).or_default().short.insert(sk, i);
+        } else {
+            let full = Bytes::copy_from_slice(key);
+            if let Some(s) = idx.get_mut(pfx) {
+                s.long.insert(full, i);
+                return;
+            }
+            let p = Bytes::copy_from_slice(pfx);
+            idx.entry(p).or_default().long.insert(full, i);
         }
     }
 
-    fn tail_idx_insert(&mut self, key: Bytes, i: usize) {
-        // Borrow-first: the shard prefix is almost always already keyed —
-        // allocating a fresh `Bytes` per entry cost one malloc per key on
-        // the apply path (RFC-0054 P1.4). The prefix borrow ends at the
-        // `get_mut` call, so `key` can move into the packed tuple below.
-        let (p0, p1) = pack32(key.as_ref());
-        match self.tail_idx.get_mut(cf_prefix(key.as_ref())) {
-            Some(m) => {
-                m.insert((p0, p1, key), i);
-            }
-            None => {
-                let p = Bytes::copy_from_slice(cf_prefix(key.as_ref()));
-                self.tail_idx.entry(p).or_default().insert((p0, p1, key), i);
-            }
+    fn shard_lookup(shard: &TailShard, user_key: &[u8]) -> Option<usize> {
+        if user_key.len() <= 32 {
+            let (p0, p1) = pack32(user_key);
+            let sk = (p0, p1, user_key.len() as u16);
+            shard
+                .point
+                .get(&sk)
+                .copied()
+                .or_else(|| shard.short.get(&sk).copied())
+        } else {
+            shard.long.get(user_key).copied()
         }
     }
 
-    fn tail_idx_get(&self, user_key: &[u8]) -> Option<&usize> {
-        // Walk the `(pack32, _)` class in order and full-key match. For
-        // keys ≤ 32 bytes the class holds the exact key first (zero
-        // padding sorts a real extension after the exact key) — one tree
-        // descent and one equality check, no probe allocation. Only keys
-        // > 32 bytes sharing the packed prefix walk more than one entry.
-        let (p0, p1) = pack32(user_key);
-        self.tail_idx
-            .get(cf_prefix(user_key))?
-            .range((Bound::Included((p0, p1, Bytes::new())), Bound::Unbounded))
-            .take_while(|(&(ref q0, ref q1, _), _)| *q0 == p0 && *q1 == p1)
-            .find(|&((_, _, ref k), _)| k.as_ref() == user_key)
-            .map(|(_, v)| v)
+    /// Sorted `(pack32, len)` of a HashMap shard. First range after apply
+    /// pays the sort; apply itself never reads this (RFC-0149 P2.1).
+    fn cached_point_ord(&self, pfx: &[u8]) -> Option<Arc<Vec<(PackKey, usize)>>> {
+        if self.point_ord_live.load(AtomicOrdering::Relaxed) {
+            if let Ok(g) = self.point_ord.lock() {
+                if let Some(v) = g.get(pfx) {
+                    return Some(Arc::clone(v));
+                }
+            }
+        }
+        let mut v: Vec<(PackKey, usize)> = {
+            let shard = self.tail_idx.get(pfx)?;
+            if shard.point.is_empty() {
+                return None;
+            }
+            shard.point.iter().map(|(&k, &i)| (k, i)).collect()
+        };
+        v.sort_unstable_by_key(|&(k, _)| k);
+        let arc = Arc::new(v);
+        if let Ok(mut g) = self.point_ord.lock() {
+            g.insert(Bytes::copy_from_slice(pfx), Arc::clone(&arc));
+        }
+        self.point_ord_live.store(true, AtomicOrdering::Relaxed);
+        Some(arc)
+    }
+
+    #[allow(dead_code)]
+    fn tail_idx_get(&self, user_key: &[u8]) -> Option<usize> {
+        let shard = self.tail_idx.get(cf_prefix(user_key))?;
+        Self::shard_lookup(shard, user_key)
     }
 
     /// Fold [`Self::tail`] into the BTree (SST write / fold / tests).
@@ -633,10 +844,9 @@ impl MemTable {
     /// are the reader contract). `None` keeps every version (core default).
     pub fn spill_tail_with_gc(&mut self, floor: Option<SequenceNumber>) {
         self.invalidate_tail_ord();
-        self.tail_idx.clear();
-        // shards dropped; empty_idx stays empty
         self.tail_max_seq = 0;
         let tail = std::mem::take(&mut self.tail);
+        self.tail_idx.clear();
         for v in tail {
             let entry_bytes = v.key.user_key.len() + v.value.len() + 8;
             let is_rd = v.key.kind == ValueType::RangeDeletion;
@@ -729,46 +939,52 @@ impl MemTable {
         }
         self.invalidate_tail_ord();
         self.tail_max_seq = self.tail_max_seq.max(key.sequence);
-        self.tail_idx_insert(key.user_key.clone(), self.tail.len());
-        self.tail.push(Version { key, value });
+        self.tail_append(key, value);
     }
 
     /// Batch insert: one `tail_ord` invalidate (RFC-0044 P1.1 pipeline).
+    ///
+    /// RFC-0154: every key updates live `tail_idx`. hint≥16 still skips the
+    /// consecutive same-seq replace scan (apply keys are distinct) — it does
+    /// **not** skip the index.
     pub fn insert_many(&mut self, items: impl IntoIterator<Item = (InternalKey, Bytes)>) {
         let iter = items.into_iter();
-        self.tail.reserve(iter.size_hint().0);
+        let hint = iter.size_hint().0;
+        let skip_replace = hint >= 16;
         let mut any = false;
         for (key, value) in iter {
             let entry_bytes = key.user_key.len() + value.len() + 8;
             let is_rd = key.kind == ValueType::RangeDeletion;
-            if let Some(v) = self.tail.last_mut() {
-                if v.key.sequence == key.sequence
-                    && v.key.kind == key.kind
-                    && v.key.user_key == key.user_key
-                {
-                    let old = std::mem::replace(&mut v.value, value);
-                    let old_n = old.len();
-                    let new_n = v.value.len();
-                    self.approx_bytes = self
-                        .approx_bytes
-                        .saturating_sub(old_n)
-                        .saturating_add(new_n);
-                    if new_n >= old_n {
-                        Self::bump_cf_bytes_map(
-                            &mut self.cf_bytes,
-                            v.key.user_key.as_ref(),
-                            new_n - old_n,
-                            true,
-                        );
-                    } else {
-                        Self::bump_cf_bytes_map(
-                            &mut self.cf_bytes,
-                            v.key.user_key.as_ref(),
-                            old_n - new_n,
-                            false,
-                        );
+            if !skip_replace {
+                if let Some(v) = self.tail.last_mut() {
+                    if v.key.sequence == key.sequence
+                        && v.key.kind == key.kind
+                        && v.key.user_key == key.user_key
+                    {
+                        let old = std::mem::replace(&mut v.value, value);
+                        let old_n = old.len();
+                        let new_n = v.value.len();
+                        self.approx_bytes = self
+                            .approx_bytes
+                            .saturating_sub(old_n)
+                            .saturating_add(new_n);
+                        if new_n >= old_n {
+                            Self::bump_cf_bytes_map(
+                                &mut self.cf_bytes,
+                                v.key.user_key.as_ref(),
+                                new_n - old_n,
+                                true,
+                            );
+                        } else {
+                            Self::bump_cf_bytes_map(
+                                &mut self.cf_bytes,
+                                v.key.user_key.as_ref(),
+                                old_n - new_n,
+                                false,
+                            );
+                        }
+                        continue;
                     }
-                    continue;
                 }
             }
             self.entries = self.entries.saturating_add(1);
@@ -778,8 +994,7 @@ impl MemTable {
                 self.range_tombstones = self.range_tombstones.saturating_add(1);
             }
             self.tail_max_seq = self.tail_max_seq.max(key.sequence);
-            self.tail_idx_insert(key.user_key.clone(), self.tail.len());
-            self.tail.push(Version { key, value });
+            self.tail_append(key, value);
             any = true;
         }
         if any {
@@ -1038,10 +1253,10 @@ impl MemTable {
     }
 
     fn tail_best(&self, user_key: &[u8], snapshot: SequenceNumber) -> Option<&Version> {
-        let Some(&i) = self.tail_idx_get(user_key) else {
-            return None;
-        };
-        let newest = &self.tail[i];
+        let pfx = cf_prefix(user_key);
+        let shard = self.tail_idx.get(pfx)?;
+        let i = Self::shard_lookup(shard, user_key)?;
+        let newest = self.tail.get(i)?;
         if newest.key.sequence <= snapshot {
             return Some(newest);
         }
@@ -1191,21 +1406,16 @@ impl MemTable {
         end: Bound<&'a [u8]>,
     ) -> MemInternalIter<'a> {
         let map = self.iter_internal_range_cursor(start, end);
-        if self.tail.is_empty() {
+        if !self.has_tail() {
             return MemInternalIter::Map(map);
         }
-        let order = self.cached_tail_order();
-        let tail: Vec<(&InternalKey, &Bytes)> = order
-            .iter()
-            .filter_map(|&i| {
-                let v = &self.tail[i as usize];
-                if crate::merge::user_key_in_range(v.key.user_key.as_ref(), start, end) {
-                    Some((&v.key, &v.value))
-                } else {
-                    None
-                }
-            })
-            .collect();
+        let mut tail: Vec<(&InternalKey, &Bytes)> = Vec::with_capacity(self.tail_len());
+        for v in &self.tail {
+            if crate::merge::user_key_in_range(v.key.user_key.as_ref(), start, end) {
+                tail.push((&v.key, &v.value));
+            }
+        }
+        tail.sort_unstable_by(|a, b| a.0.cmp(b.0));
         MemInternalIter::Merge(MemInternalMerge {
             map,
             tail: tail.into_iter().peekable(),
@@ -1222,44 +1432,134 @@ impl MemTable {
         end: Bound<&'a [u8]>,
         snapshot: SequenceNumber,
     ) -> MemInternalIter<'a> {
-        if self.tail.is_empty() || snapshot < self.tail_max_seq {
+        if !self.has_tail() || snapshot < self.tail_max_seq {
             return self.iter_internal_iter(start, end);
         }
         // Single CF shard: a non-empty `cf\0` prefix on BOTH bounds pins the
         // range inside that shard's key space (shard keys are exactly
         // `cf\0…`; any key of another shard sorts outside `cf\0…`).
-        // Empty-prefix bounds (kernel keys without NUL) and unbounded bounds
-        // are only safe over a one-shard index — a range like `["d/m/",
-        // "d/m0")` has no NUL, yet admits `d/m/\0…` keys that live in the
-        // "d/m/" shard (F220: the empty shard missed them and the scan
-        // silently returned less). Anything else takes the sorted fallback.
+        // Empty-prefix bounds (kernel keys without NUL) are only safe over a
+        // one-shard index — a range like `["d/m/", "d/m0")` has no NUL, yet
+        // admits `d/m/\0…` keys that live in the "d/m/" shard (F220).
+        // RFC-0154: kvrocks/YCSB default-raw is that one empty shard.
         let shard = match (bound_cf_prefix(start), bound_cf_prefix(end)) {
             (Some(a), Some(b)) if a == b && !a.is_empty() && a.len() < 32 => self.tail_idx.get(a),
+            (Some(a), Some(b)) if a == b && a.is_empty() && self.tail_idx.len() == 1 => {
+                self.tail_idx.values().next()
+            }
             _ if self.tail_idx.len() == 1 => self.tail_idx.values().next(),
             _ => None,
         };
         let Some(shard) = shard else {
             return self.iter_internal_iter(start, end);
         };
+        // Long keys keep a Bytes tree; mixed shards fall back to the sorted
+        // tail merge so total order stays exact (RFC-0149 P2.1).
+        if !shard.long.is_empty()
+            || shard.short.is_empty()
+            || !bound_len_le_32(start)
+            || !bound_len_le_32(end)
+        {
+            return self.iter_internal_iter(start, end);
+        }
         let map = self.iter_internal_range_cursor(start, end);
         MemInternalIter::Idx(MemInternalIdx {
             map,
             idx: shard
-                .range((class_floor(start), class_floor(end)))
+                .short
+                .range((packed_short_bound(start), packed_short_bound(end)))
                 .peekable(),
             tail: &self.tail,
         })
     }
 
+    /// Latest-snapshot count over a single CF shard sitting entirely in
+    /// `tail` (deps_scan / kvrocks_scan: no SST, no map). One BTree or
+    /// sorted-point range, no cursor merge (RFC-0154).
+    pub(crate) fn count_latest_in_range(
+        &self,
+        start: Bound<&[u8]>,
+        end: Bound<&[u8]>,
+        limit: usize,
+        snapshot: SequenceNumber,
+    ) -> Option<usize> {
+        if snapshot < self.tail_max_seq || !self.map.is_empty() || self.has_range_tombstones() {
+            return None;
+        }
+        if self.tail_len() == 0 {
+            return Some(0);
+        }
+        let mut pfx_buf = [0u8; 32];
+        let pfx_len = match (bound_cf_prefix(start), bound_cf_prefix(end)) {
+            (Some(a), Some(b)) if a == b && !a.is_empty() && a.len() < 32 => {
+                pfx_buf[..a.len()].copy_from_slice(a);
+                a.len()
+            }
+            (Some(a), Some(b)) if a == b && a.is_empty() && self.tail_idx.len() == 1 => 0,
+            _ => return None,
+        };
+        let pfx = &pfx_buf[..pfx_len];
+        if !bound_len_le_32(start) || !bound_len_le_32(end) {
+            return None;
+        }
+        let lo = packed_short_bound(start);
+        let hi = packed_short_bound(end);
+        let shard = self.tail_idx.get(pfx)?;
+        let has_long = !shard.long.is_empty();
+        let has_point = !shard.point.is_empty();
+        let has_short = !shard.short.is_empty();
+        if has_long {
+            return None;
+        }
+        if has_point {
+            let ord = self.cached_point_ord(pfx)?;
+            let a = pack_bound_start(&ord, lo);
+            let b = pack_bound_end(&ord, hi);
+            let mut n = 0usize;
+            for &(_, i) in &ord[a..b] {
+                if self.tail[i].key.kind == ValueType::Value {
+                    n += 1;
+                    if n >= limit {
+                        break;
+                    }
+                }
+            }
+            return Some(n);
+        }
+        if !has_short {
+            return None;
+        }
+        let mut n = 0usize;
+        for (_, &i) in shard.short.range((lo, hi)) {
+            if self.tail[i].key.kind == ValueType::Value {
+                n += 1;
+                if n >= limit {
+                    break;
+                }
+            }
+        }
+        Some(n)
+    }
+
+    #[allow(dead_code)]
     fn cached_tail_order(&self) -> Arc<Vec<u32>> {
+        if !self.tail_ord_stale.load(AtomicOrdering::Acquire) {
+            let g = self.tail_ord.lock().unwrap_or_else(|e| e.into_inner());
+            if let Some(arc) = g.as_ref() {
+                return Arc::clone(arc);
+            }
+        }
         let mut g = self.tail_ord.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some(arc) = g.as_ref() {
-            return Arc::clone(arc);
+        if !self.tail_ord_stale.load(AtomicOrdering::Acquire) {
+            if let Some(arc) = g.as_ref() {
+                return Arc::clone(arc);
+            }
         }
         let mut idx: Vec<u32> = (0..self.tail.len() as u32).collect();
         idx.sort_unstable_by(|&a, &b| self.tail[a as usize].key.cmp(&self.tail[b as usize].key));
         let arc = Arc::new(idx);
         *g = Some(Arc::clone(&arc));
+        self.tail_ord_stale.store(false, AtomicOrdering::Release);
         arc
     }
 
@@ -1299,6 +1599,8 @@ impl MemTable {
     ) -> Option<(Bytes, Bytes)> {
         let prefix_end = crate::prefix::prefix_exclusive_end(prefix);
         let mut before_owned: Option<Bytes> = before.map(Bytes::copy_from_slice);
+        // RFC-0154 P1.1: a `cf\0…` prefix can only live in that CF shard.
+        let pin = prefix.iter().position(|&b| b == 0).map(|i| &prefix[..i]);
         loop {
             let end_b = match (before_owned.as_deref(), prefix_end.as_deref()) {
                 (Some(b), Some(p)) if b < p => Bound::Excluded(b),
@@ -1315,12 +1617,56 @@ impl MemTable {
                 .range::<[u8], _>((Bound::Included(prefix), end_b))
                 .next_back()
                 .map(|(uk, _)| uk.clone());
-            for shard in self.tail_idx.values() {
-                let lo = packed_bound(Bound::Included(prefix));
-                let hi = packed_bound(end_b);
-                if let Some(((_, _, uk), _)) = shard.range((lo, hi)).next_back() {
+            let lo = packed_short_bound(Bound::Included(prefix));
+            let hi = packed_short_bound(end_b);
+            let short_ok = prefix.len() <= 32 && bound_len_le_32(end_b);
+            let mut point_pfxs: Vec<Bytes> = Vec::new();
+            let consider = |pfx: &Bytes,
+                            shard: &TailShard,
+                            cand: &mut Option<Bytes>,
+                            point_pfxs: &mut Vec<Bytes>| {
+                if short_ok {
+                    if let Some((_, &i)) = shard.short.range((lo, hi)).next_back() {
+                        let uk = &self.tail[i].key.user_key;
+                        if cand.as_ref().is_none_or(|c| uk > c) {
+                            *cand = Some(uk.clone());
+                        }
+                    }
+                }
+                if let Some((uk, _)) = shard
+                    .long
+                    .range::<[u8], _>((Bound::Included(prefix), end_b))
+                    .next_back()
+                {
                     if cand.as_ref().is_none_or(|c| uk > c) {
-                        cand = Some(uk.clone());
+                        *cand = Some(uk.clone());
+                    }
+                }
+                if short_ok && !shard.point.is_empty() {
+                    point_pfxs.push(pfx.clone());
+                }
+            };
+            if let Some(only) = pin {
+                if let Some((pfx, shard)) = self.tail_idx.get_key_value(only) {
+                    consider(pfx, shard, &mut cand, &mut point_pfxs);
+                }
+            } else {
+                for (pfx, shard) in &self.tail_idx {
+                    consider(pfx, shard, &mut cand, &mut point_pfxs);
+                }
+            }
+            for pfx in point_pfxs {
+                let Some(ord) = self.cached_point_ord(pfx.as_ref()) else {
+                    continue;
+                };
+                let a = pack_bound_start(&ord, lo);
+                let b = pack_bound_end(&ord, hi);
+                if b > a {
+                    let i = ord[b - 1].1;
+                    if let Some(uk) = self.tail.get(i).map(|v| v.key.user_key.clone()) {
+                        if cand.as_ref().is_none_or(|c| uk > *c) {
+                            cand = Some(uk);
+                        }
                     }
                 }
             }
@@ -1609,6 +1955,184 @@ mod tests {
         assert!(!mt.has_range_tombstones());
         mt.delete_range(b"a".as_slice(), b"z".as_slice(), 3);
         assert!(mt.has_range_tombstones());
+    }
+
+    #[test]
+    fn insert_many_keeps_live_idx() {
+        let mut mt = MemTable::new();
+        let val = Bytes::from_static(b"v");
+        let mut items = Vec::with_capacity(32);
+        let mut written = Vec::with_capacity(32);
+        for i in 0..32u32 {
+            let mut k = b"default\0u/".to_vec();
+            k.extend_from_slice(&i.to_be_bytes());
+            written.push(k.clone());
+            items.push((
+                InternalKey::new(Bytes::from(k), u64::from(i) + 1, ValueType::Value),
+                val.clone(),
+            ));
+        }
+        mt.insert_many(items);
+        let def = mt
+            .tail_idx
+            .get(&b"default"[..])
+            .expect("default shard live");
+        assert_eq!(def.point.len(), 32, "insert_many indexes default");
+        assert!(def.short.is_empty());
+        for k in &written {
+            assert_eq!(mt.get(k, 32), Lookup::Found(Bytes::from_static(b"v")));
+        }
+        let mut items = Vec::with_capacity(32);
+        for u in 0..32u32 {
+            let mut k = b"write\0u/".to_vec();
+            k.extend_from_slice(format!("{u:02}").as_bytes());
+            items.push((
+                InternalKey::new(Bytes::from(k), 100 + u64::from(u), ValueType::Value),
+                Bytes::from_static(b"c"),
+            ));
+        }
+        mt.insert_many(items);
+        let def = mt
+            .tail_idx
+            .get(&b"default"[..])
+            .expect("default shard still live");
+        let wr = mt.tail_idx.get(&b"write"[..]).expect("write shard live");
+        assert_eq!(def.point.len(), 32, "write inserts leave default idx live");
+        assert_eq!(wr.short.len(), 32, "write CF has its own short idx");
+        let n = mt
+            .count_latest_in_range(
+                Bound::Included(b"write\0u/00".as_slice()),
+                Bound::Excluded(b"write\0u/32".as_slice()),
+                32,
+                200,
+            )
+            .expect("live write shard count");
+        assert_eq!(n, 32);
+        let write = mt.tail_idx.get(&b"write"[..]).expect("write shard live");
+        assert_eq!(write.short.len(), 32, "write stays ordered (RFC-0154 P1.2)");
+        assert!(write.point.is_empty());
+    }
+
+    /// kvrocks/YCSB default-raw: no `cf\0`. Count uses the empty-prefix
+    /// live BTree (Some). P1.3 HashMap here lost `ycsb_c` on CHV.
+    #[test]
+    fn insert_many_empty_prefix_count_matches_gets() {
+        let mut mt = MemTable::new();
+        let val = Bytes::from_static(b"x");
+        let mut keys = Vec::with_capacity(64);
+        let mut items = Vec::with_capacity(64);
+        for i in 0..64u32 {
+            let k = format!("k{i:04}").into_bytes();
+            keys.push(k.clone());
+            items.push((
+                InternalKey::new(Bytes::from(k), u64::from(i) + 1, ValueType::Value),
+                val.clone(),
+            ));
+        }
+        mt.insert_many(items);
+        assert_eq!(mt.tail_idx.len(), 1, "raw keys share the empty shard");
+        let empty = mt.tail_idx.get(&b""[..]).expect("empty prefix shard");
+        assert_eq!(empty.short.len(), 64);
+        assert!(empty.point.is_empty());
+        let start = keys[10].as_slice();
+        let end = keys[35].as_slice();
+        let n = mt
+            .count_latest_in_range(Bound::Included(start), Bound::Excluded(end), 25, 64)
+            .expect("empty-prefix live count (None would be the O(n) fallback)");
+        let mut oracle = 0usize;
+        for k in &keys {
+            if k.as_slice() >= start && k.as_slice() < end {
+                assert_eq!(mt.get(k, 64), Lookup::Found(Bytes::from_static(b"x")));
+                oracle += 1;
+                if oracle == 25 {
+                    break;
+                }
+            }
+        }
+        assert_eq!(n, oracle);
+        assert_eq!(n, 25);
+    }
+
+    #[test]
+    fn last_visible_pins_write_shard_after_apply() {
+        let mut mt = MemTable::new();
+        let mut items = Vec::with_capacity(96);
+        for u in 0..32u32 {
+            let mut lock = b"lock\0u/".to_vec();
+            lock.extend_from_slice(format!("{u:02}").as_bytes());
+            items.push((
+                InternalKey::new(Bytes::from(lock), u64::from(u) + 1, ValueType::Value),
+                Bytes::from_static(b"l"),
+            ));
+            let mut def = b"default\0u/".to_vec();
+            def.extend_from_slice(format!("{u:02}").as_bytes());
+            items.push((
+                InternalKey::new(Bytes::from(def), 50 + u64::from(u), ValueType::Value),
+                Bytes::from_static(b"v"),
+            ));
+            let mut w = b"write\0u/".to_vec();
+            w.extend_from_slice(format!("{u:02}").as_bytes());
+            items.push((
+                InternalKey::new(Bytes::from(w), 100 + u64::from(u), ValueType::Value),
+                Bytes::from_static(b"c"),
+            ));
+        }
+        mt.insert_many(items);
+        assert_eq!(mt.tail_idx.len(), 3);
+        let (k, v) = mt
+            .last_visible_under_prefix(b"write\0u/10", 200, None)
+            .expect("write prefix lives in the write shard");
+        assert!(k.starts_with(b"write\0u/10"), "{k:?}");
+        assert_eq!(v, Bytes::from_static(b"c"));
+        assert!(mt
+            .last_visible_under_prefix(b"write\0z", 200, None)
+            .is_none());
+        let w = mt.tail_idx.get(&b"write"[..]).expect("write");
+        assert!(w.point.is_empty() && w.short.len() == 32);
+    }
+
+    /// RFC-0154 P1.2: reverse-seek on `write` uses the BTree, not a HashMap
+    /// sort. Oracle = `get` of the keys we wrote.
+    #[test]
+    fn write_cf_ordered_last_and_count_match_gets() {
+        let mut mt = MemTable::new();
+        let mut items = Vec::with_capacity(64);
+        let mut keys = Vec::with_capacity(64);
+        for u in 0..64u32 {
+            let mut k = b"write\0u/".to_vec();
+            k.extend_from_slice(format!("{u:02}").as_bytes());
+            keys.push(k.clone());
+            items.push((
+                InternalKey::new(Bytes::from(k), u64::from(u) + 1, ValueType::Value),
+                Bytes::from_static(b"c"),
+            ));
+        }
+        mt.insert_many(items);
+        let w = mt.tail_idx.get(&b"write"[..]).expect("write shard");
+        assert_eq!(w.short.len(), 64);
+        assert!(w.point.is_empty(), "write must not be HashMap");
+        let start = keys[10].as_slice();
+        let end = keys[35].as_slice();
+        let n = mt
+            .count_latest_in_range(Bound::Included(start), Bound::Excluded(end), 25, 64)
+            .expect("ordered write count");
+        let mut oracle = 0usize;
+        for k in &keys {
+            if k.as_slice() >= start && k.as_slice() < end {
+                assert_eq!(mt.get(k, 64), Lookup::Found(Bytes::from_static(b"c")));
+                oracle += 1;
+                if oracle == 25 {
+                    break;
+                }
+            }
+        }
+        assert_eq!(n, oracle);
+        let (last, val) = mt
+            .last_visible_under_prefix(b"write\0u/10", 64, None)
+            .expect("reverse-seek write");
+        assert!(last.starts_with(b"write\0u/10"), "{last:?}");
+        assert_eq!(val, Bytes::from_static(b"c"));
+        assert_eq!(mt.get(&last, 64), Lookup::Found(Bytes::from_static(b"c")));
     }
 
     #[test]
@@ -2049,6 +2573,121 @@ mod tests {
         assert_eq!(&k[k.len() - 8..], &3u64.to_be_bytes(), "newest version");
         // Point range across shards still sees only in-range keys.
         assert!(mt.last_visible_under_prefix(b"u/77", 99, None).is_none());
+    }
+
+    #[test]
+    fn point_hash_write_count_and_last() {
+        let mut mt = MemTable::new();
+        let mut seq = 0u64;
+        for u in 0..40u32 {
+            let mut k = b"write\0u/".to_vec();
+            k.extend_from_slice(format!("{u:02}").as_bytes());
+            seq += 1;
+            mt.put(k, seq, b"c".as_slice());
+            let mut d = b"default\0u/".to_vec();
+            d.extend_from_slice(format!("{u:02}").as_bytes());
+            seq += 1;
+            mt.put(d, seq, b"v".as_slice());
+        }
+        let write = mt.tail_idx.get(&b"write"[..]).expect("write shard");
+        assert!(!write.short.is_empty() && write.point.is_empty());
+        let def = mt.tail_idx.get(&b"default"[..]).expect("default shard");
+        assert!(!def.point.is_empty() && def.short.is_empty());
+        let start = b"write\0u/10".as_slice();
+        let end = b"write\0u/35".as_slice();
+        let n = mt
+            .count_latest_in_range(Bound::Included(start), Bound::Excluded(end), 25, seq)
+            .expect("write short-tree count");
+        assert_eq!(n, 25, "u/10 .. u/34 is 25 keys");
+        let (k, _) = mt
+            .last_visible_under_prefix(b"write\0u/10", seq, None)
+            .expect("last under write prefix");
+        assert!(k.starts_with(b"write\0u/10"), "{k:?}");
+        assert_eq!(
+            mt.get(b"default\0u/00", seq),
+            Lookup::Found(Bytes::from_static(b"v"))
+        );
+    }
+
+    #[test]
+    fn count_latest_in_range_matches_idx_walk() {
+        let mut mt = MemTable::new();
+        let mut seq = 0u64;
+        for u in 0..40u32 {
+            let mut k = b"write\0u/".to_vec();
+            k.extend_from_slice(format!("{u:02}").as_bytes());
+            seq += 1;
+            mt.put(k, seq, b"c".as_slice());
+        }
+        let start = b"write\0u/10".as_slice();
+        let end = b"write\0u/35".as_slice();
+        let n = mt
+            .count_latest_in_range(Bound::Included(start), Bound::Excluded(end), 25, seq)
+            .expect("tail-only latest count");
+        assert_eq!(n, 25, "u/10 .. u/34 is 25 keys");
+        let n2 = mt
+            .count_latest_in_range(Bound::Included(start), Bound::Excluded(end), 8, seq)
+            .unwrap();
+        assert_eq!(n2, 8);
+    }
+
+    /// RFC-0149 P2.1: `(pack32, len)` for keys ≤ 32 bytes equals raw byte
+    /// order (zero-pad ties broken by len, not a `Bytes` clone).
+    #[test]
+    fn tail_idx_short_pack_len_order_matches_bytes() {
+        let mut rng: u64 = 0x9E37_79B9_7F4A_7C15;
+        let mut next = move || {
+            rng ^= rng << 13;
+            rng ^= rng >> 7;
+            rng ^= rng << 17;
+            rng
+        };
+        let mut keys: Vec<Bytes> = Vec::new();
+        for len in 0..=32usize {
+            for variant in 0..3u64 {
+                let mut k = vec![0u8; len];
+                for b in k.iter_mut() {
+                    *b = match variant {
+                        0 => ((next() % 5) as u8).saturating_sub(1),
+                        1 => (next() % 256) as u8,
+                        _ => b'a' + ((next() % 3) as u8),
+                    };
+                }
+                keys.push(Bytes::from(k));
+            }
+        }
+        keys.sort();
+        keys.dedup();
+        let mut packed: BTreeMap<(u128, u128, u16), usize> = BTreeMap::new();
+        let mut plain: BTreeMap<Bytes, usize> = BTreeMap::new();
+        for (i, k) in keys.iter().enumerate() {
+            let (p0, p1) = pack32(k);
+            packed.insert((p0, p1, k.len() as u16), i);
+            plain.insert(k.clone(), i);
+        }
+        let packed_order: Vec<usize> = packed.values().copied().collect();
+        let plain_order: Vec<usize> = plain.values().copied().collect();
+        assert_eq!(
+            packed_order, plain_order,
+            "short-key total order must match"
+        );
+        let mut mt = MemTable::new();
+        for (i, k) in keys.iter().enumerate() {
+            mt.put(k.clone(), i as u64 + 1, b"v".as_slice());
+        }
+        for k in &keys {
+            assert_eq!(
+                mt.get(k.as_ref(), 10_000),
+                Lookup::Found(Bytes::from_static(b"v")),
+                "short-key get {k:?}"
+            );
+        }
+        let long = Bytes::from(vec![b'x'; 40]);
+        mt.put(long.clone(), 99, b"L".as_slice());
+        assert_eq!(
+            mt.get(long.as_ref(), 10_000),
+            Lookup::Found(Bytes::from_static(b"L"))
+        );
     }
 
     /// RFC-0054 P1.4: `(pack32, key)` shard order must equal raw byte order

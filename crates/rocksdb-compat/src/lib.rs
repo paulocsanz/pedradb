@@ -190,9 +190,8 @@ fn map_property_int<E: PedraEnv>(db: &ConcurrentDb<E>, name: &str) -> Option<u64
             Some(u64::from(s.l0_files >= L0_COMPACTION_TRIGGER as u64))
         }
         properties::NUM_RUNNING_COMPACTIONS | properties::NUM_RUNNING_FLUSHES => Some(0),
-        properties::BLOCK_CACHE_USAGE | properties::BLOCK_CACHE_PINNED_USAGE => {
-            Some(s.block_cache_hits.saturating_add(s.block_cache_misses))
-        }
+        properties::BLOCK_CACHE_USAGE => Some(s.block_cache_bytes),
+        properties::BLOCK_CACHE_PINNED_USAGE => Some(0),
         properties::ESTIMATE_TABLE_READERS_MEM => {
             Some(s.table_cache_hits.saturating_add(s.table_cache_misses))
         }
@@ -256,6 +255,9 @@ pub struct Options {
     /// rust-rocksdb / Titan `blob_file_size` (rotate cap). `None` = single
     /// `VALUES.vlog` (no numbered blob generation).
     pub blob_file_size: Option<u64>,
+    /// Rocks `NewLRUCache` / `optimize_for_point_lookup` (RFC-0153). `None`
+    /// = Pedra 8192-entry default.
+    pub block_cache_bytes: Option<u64>,
     compaction_filter: Option<CompactionFilterFn>,
     merge_operator: Option<MergeOperatorFn>,
     /// RFC-0062 P1.6: `set_paranoid_checks(false)` recorded; open refuses.
@@ -313,6 +315,7 @@ impl fmt::Debug for Options {
             .field("enable_blob_files", &self.enable_blob_files)
             .field("min_blob_size", &self.min_blob_size)
             .field("blob_file_size", &self.blob_file_size)
+            .field("block_cache_bytes", &self.block_cache_bytes)
             .field(
                 "background_error_listener",
                 &self.background_error_listener.is_some(),
@@ -337,6 +340,7 @@ impl Default for Options {
             enable_blob_files: false,
             min_blob_size: 4096,
             blob_file_size: None,
+            block_cache_bytes: None,
             compaction_filter: None,
             merge_operator: None,
             paranoid_off: false,
@@ -500,6 +504,9 @@ impl Options {
     /// [`ChecksumType::NoChecksum`] is G2 — recorded so [`DB::open`] refuses.
     pub fn set_block_based_table_factory(&mut self, b: &BlockBasedOptions) {
         self.checksum_off = matches!(b.checksum, ChecksumType::NoChecksum);
+        if let Some(n) = b.block_cache_bytes {
+            self.block_cache_bytes = Some(n);
+        }
     }
 
     /// rust-rocksdb `set_paranoid_checks`. `false` is G2 (open refuses).
@@ -537,8 +544,17 @@ impl Options {
         }
         Ok(())
     }
-    /// rust-rocksdb `optimize_for_point_lookup`.
-    pub fn optimize_for_point_lookup(&mut self, _block_cache_mb: u64) {}
+    /// rust-rocksdb `optimize_for_point_lookup`: size the SST block cache
+    /// to `block_cache_mb` MiB (RFC-0153). Hash-index / bloom extras stay
+    /// Pedra's SST layout.
+    pub fn optimize_for_point_lookup(&mut self, block_cache_mb: u64) {
+        self.block_cache_bytes = Some(block_cache_mb.saturating_mul(1024 * 1024));
+    }
+
+    /// rust-rocksdb `Options::set_block_cache`.
+    pub fn set_block_cache(&mut self, c: &Cache) {
+        self.block_cache_bytes = Some(c.capacity() as u64);
+    }
     /// rust-rocksdb `increase_parallelism` already exists; `prepare_for_bulk_load`.
     pub fn prepare_for_bulk_load(&mut self) {}
     /// rust-rocksdb compaction filter (applied on [`DB::compact`] / range compact).
@@ -850,9 +866,9 @@ fn bound_as_ref(b: &Bound<Vec<u8>>) -> Bound<&[u8]> {
 /// θ=0.99 / 4096 keys / 2000 ops — a few hundred unique keys. 1024 slots
 /// keep the working set so a hit skips CF-prefix encode + the point-cache
 /// mutex (~the 39 ns C still needs for 2.0). 8-probe hash; named CF writes
-/// also land in a 16-slot ring (raftlog idx-1). Epoch drops every slot on
-/// publish.
-const LAST_N: usize = 2048;
+/// also land in a 16-slot ring (raftlog idx-1). Fat apply bumps the TLS
+/// epoch; a 1-key put bumps only that key's gen (RFC-0154 P1.5).
+const LAST_N: usize = 4096;
 /// Hash probe for LAST_GET (default CF) and LAST_CF miss after the write
 /// ring. 8 is enough for zipfian; raftlog idx-1 lives in `LAST_RING`.
 const LAST_PROBE: usize = 8;
@@ -933,10 +949,12 @@ impl TinyBuf {
 }
 
 struct LastGetSlot {
-    /// Epoch the entry was stored under; 0 = never used. A published write
-    /// bumps the shared epoch, so any slot whose epoch differs from the
-    /// reader's is stale — lazy invalidation instead of a clear-all walk.
+    /// Fat-apply epoch (`cache_epoch_base + point_tls_epoch`). 0 = never used.
+    /// 1-key puts leave this still and bump [`Self::gen`] instead (RFC-0154 P1.5).
     epoch: u64,
+    /// Per-encoded-key generation. A put of this key bumps the bucket; other
+    /// zipf keys keep their gen and stay cached.
+    gen: u64,
     cf: TinyBuf,
     key: TinyBuf,
     val: Option<Bytes>,
@@ -954,6 +972,7 @@ impl LastGetTable {
     fn empty_slot() -> LastGetSlot {
         LastGetSlot {
             epoch: 0,
+            gen: 0,
             cf: TinyBuf::empty(),
             key: TinyBuf::empty(),
             val: None,
@@ -973,20 +992,20 @@ impl LastGetTable {
         fx_bytes(fx_bytes(0, cf.as_bytes()), key)
     }
 
-    fn get(&self, epoch: u64, cf: &str, key: &[u8]) -> Option<Option<Bytes>> {
+    fn get(&self, epoch: u64, gen: u64, cf: &str, key: &[u8]) -> Option<Option<Bytes>> {
         let cf_b = cf.as_bytes();
         let n = self.ring_i as usize;
         for k in 0..LAST_RING {
             let i = (n + LAST_RING - 1 - k) % LAST_RING;
             let s = &self.ring[i];
-            if s.epoch == epoch && s.cf.eq(cf_b) && s.key.eq(key) {
+            if s.epoch == epoch && s.gen == gen && s.cf.eq(cf_b) && s.key.eq(key) {
                 return Some(s.val.clone());
             }
         }
         let h = Self::hash(cf, key);
         for p in 0..LAST_PROBE {
             let s = &self.slots[last_slot(h, p)];
-            if s.epoch != epoch {
+            if s.epoch != epoch || s.gen != gen {
                 continue;
             }
             if s.cf.eq(cf_b) && s.key.eq(key) {
@@ -996,7 +1015,7 @@ impl LastGetTable {
         None
     }
 
-    fn store(&mut self, epoch: u64, cf: &str, key: &[u8], val: Option<Bytes>) {
+    fn store(&mut self, epoch: u64, gen: u64, cf: &str, key: &[u8], val: Option<Bytes>) {
         let Some(cf_t) = TinyBuf::from_slice(cf.as_bytes()) else {
             return;
         };
@@ -1008,6 +1027,7 @@ impl LastGetTable {
         // LAST_GET (`store_key`) and named misses that still hash-store.
         self.ring[self.ring_i as usize] = LastGetSlot {
             epoch,
+            gen,
             cf: cf_t,
             key: key_t,
             val,
@@ -1016,11 +1036,11 @@ impl LastGetTable {
     }
 
     /// Default-CF `get()`: hash the user key only (no `default` prefix).
-    fn get_key(&self, epoch: u64, key: &[u8]) -> Option<Option<Bytes>> {
+    fn get_key(&self, epoch: u64, gen: u64, key: &[u8]) -> Option<Option<Bytes>> {
         let h = fx_bytes(0, key);
         for p in 0..LAST_PROBE {
             let s = &self.slots[last_slot(h, p)];
-            if s.epoch != epoch {
+            if s.epoch != epoch || s.gen != gen {
                 continue;
             }
             if s.key.eq(key) {
@@ -1030,7 +1050,7 @@ impl LastGetTable {
         None
     }
 
-    fn store_key(&mut self, epoch: u64, key: &[u8], val: Option<Bytes>) {
+    fn store_key(&mut self, epoch: u64, gen: u64, key: &[u8], val: Option<Bytes>) {
         let Some(key_t) = TinyBuf::from_slice(key) else {
             return;
         };
@@ -1040,6 +1060,7 @@ impl LastGetTable {
             let i = last_slot(h, p);
             let s = &mut self.slots[i];
             if s.epoch == epoch && s.key.eq(key) {
+                s.gen = gen;
                 s.val = val;
                 return;
             }
@@ -1050,11 +1071,30 @@ impl LastGetTable {
         let i = free.unwrap_or_else(|| last_slot(h, LAST_PROBE - 1));
         self.slots[i] = LastGetSlot {
             epoch,
+            gen,
             cf: TinyBuf::empty(),
             key: key_t,
             val,
         };
     }
+}
+
+/// Repeat puts of the same slice (kvrocks SET / YCSB payload) share one `Bytes`
+/// so TLS write-through is a refcount, not a second memcpy (RFC-0154 P1.8).
+fn intern_put_value(v: &[u8]) -> Bytes {
+    thread_local! {
+        static LAST: RefCell<Bytes> = const { RefCell::new(Bytes::new()) };
+    }
+    LAST.with(|slot| {
+        let mut g = slot.borrow_mut();
+        if g.len() == v.len() && !g.is_empty() && g.as_ref() == v {
+            g.clone()
+        } else {
+            let b = Bytes::copy_from_slice(v);
+            *g = b.clone();
+            b
+        }
+    })
 }
 
 thread_local! {
@@ -1945,6 +1985,9 @@ impl<E: PedraEnv> DB<E> {
         if opts.auto_reclaim {
             db.set_auto_reclaim(true);
         }
+        if let Some(n) = opts.block_cache_bytes {
+            db.set_block_cache_budget_bytes(n);
+        }
         // Rocks parity: rust-rocksdb drops superseded versions below the
         // oldest live snapshot (`Snapshot` pins / OCC begins). This bounds
         // parked-fold memory under overwrite-heavy loads (one core of pure
@@ -2002,6 +2045,18 @@ impl<E: PedraEnv> DB<E> {
         }
     }
 
+    /// Fat-apply epoch + per-key gen for TLS last-get (RFC-0154 P1.5).
+    fn tls_point_ids(&self, cf: &str, key: &[u8]) -> (u64, u64) {
+        let epoch = self.cache_epoch_base + self.inner.point_tls_epoch();
+        let effective = cf_encode_effective(cf, self.codec.default_raw);
+        let gen = if effective.is_empty() {
+            self.inner.key_tls_gen(key)
+        } else {
+            self.inner.key_tls_gen_prefixed(effective.as_bytes(), key)
+        };
+        (epoch, gen)
+    }
+
     /// Put into the default CF.
     ///
     /// # Errors
@@ -2009,14 +2064,19 @@ impl<E: PedraEnv> DB<E> {
     pub fn put(&self, key: impl AsRef<[u8]>, value: impl AsRef<[u8]>) -> Result<()> {
         let key = key.as_ref();
         let value = value.as_ref();
+        let interned = intern_put_value(value);
         self.codec
-            .encode_with(DEFAULT_CF, key, |enc| self.inner.put(enc, value))
+            .encode_with(DEFAULT_CF, key, |enc| {
+                self.inner.put(enc, interned.as_ref())
+            })
             .map_err(Error::from)?;
-        let epoch = self.cache_epoch_base + self.inner.read_cache_epoch();
-        LAST_GET.with(|t| {
-            t.borrow_mut()
-                .store_key(epoch, key, Some(Bytes::copy_from_slice(value)))
-        });
+        // Blob SET never GETs in the timed window; copying 16 KiB into TLS
+        // was pure tax (RFC-0149 P2.1). Small YCSB/SET values still warm,
+        // sharing the interned Bytes (RFC-0154 P1.8).
+        if interned.len() <= 1024 {
+            let (epoch, gen) = self.tls_point_ids(DEFAULT_CF, key);
+            LAST_GET.with(|t| t.borrow_mut().store_key(epoch, gen, key, Some(interned)));
+        }
         Ok(())
     }
 
@@ -2033,14 +2093,17 @@ impl<E: PedraEnv> DB<E> {
         self.check_cf(&cf.name)?;
         let key = key.as_ref();
         let value = value.as_ref();
+        let interned = intern_put_value(value);
         self.codec
-            .encode_with(&cf.name, key, |enc| self.inner.put(enc, value))
+            .encode_with(&cf.name, key, |enc| self.inner.put(enc, interned.as_ref()))
             .map_err(Error::from)?;
-        let epoch = self.cache_epoch_base + self.inner.read_cache_epoch();
-        LAST_CF.with(|t| {
-            t.borrow_mut()
-                .store(epoch, &cf.name, key, Some(Bytes::copy_from_slice(value)))
-        });
+        if interned.len() <= 1024 {
+            let (epoch, gen) = self.tls_point_ids(&cf.name, key);
+            LAST_CF.with(|t| {
+                t.borrow_mut()
+                    .store(epoch, gen, &cf.name, key, Some(interned))
+            });
+        }
         Ok(())
     }
 
@@ -2052,14 +2115,14 @@ impl<E: PedraEnv> DB<E> {
         // RFC-0041 YCSB-C: default-CF get hashes the user key only (no
         // `default` prefix / CF compare). Same bytes as `get_named`.
         let key = key.as_ref();
-        let epoch = self.cache_epoch_base + self.inner.read_cache_epoch();
-        if let Some(hit) = LAST_GET.with(|slot| slot.borrow().get_key(epoch, key)) {
+        let (epoch, gen) = self.tls_point_ids(DEFAULT_CF, key);
+        if let Some(hit) = LAST_GET.with(|slot| slot.borrow().get_key(epoch, gen, key)) {
             return Ok(hit.map(|b| b.to_vec()));
         }
         let got = self
             .codec
             .encode_with(DEFAULT_CF, key, |enc| self.inner.get(enc));
-        LAST_GET.with(|slot| slot.borrow_mut().store_key(epoch, key, got.clone()));
+        LAST_GET.with(|slot| slot.borrow_mut().store_key(epoch, gen, key, got.clone()));
         Ok(got.map(|b| b.to_vec()))
     }
 
@@ -2069,14 +2132,14 @@ impl<E: PedraEnv> DB<E> {
     /// Pedra read errors.
     pub fn contains(&self, key: impl AsRef<[u8]>) -> Result<bool> {
         let key = key.as_ref();
-        let epoch = self.cache_epoch_base + self.inner.read_cache_epoch();
-        if let Some(hit) = LAST_GET.with(|slot| slot.borrow().get_key(epoch, key)) {
+        let (epoch, gen) = self.tls_point_ids(DEFAULT_CF, key);
+        if let Some(hit) = LAST_GET.with(|slot| slot.borrow().get_key(epoch, gen, key)) {
             return Ok(hit.is_some());
         }
         let got = self
             .codec
             .encode_with(DEFAULT_CF, key, |enc| self.inner.get(enc));
-        LAST_GET.with(|slot| slot.borrow_mut().store_key(epoch, key, got.clone()));
+        LAST_GET.with(|slot| slot.borrow_mut().store_key(epoch, gen, key, got.clone()));
         Ok(got.is_some())
     }
 
@@ -2098,23 +2161,30 @@ impl<E: PedraEnv> DB<E> {
         // set. Direct-mapped last-N skips CF-prefix encode + point-cache
         // mutex. Bytes stay shared with the point cache; we copy into Vec
         // only for the rust-rocksdb return type. Epoch bumps on publish.
-        let epoch = self.cache_epoch_base + self.inner.read_cache_epoch();
-        if let Some(hit) = LAST_CF.with(|slot| slot.borrow().get(epoch, cf, key)) {
+        let (epoch, gen) = self.tls_point_ids(cf, key);
+        if let Some(hit) = LAST_CF.with(|slot| slot.borrow().get(epoch, gen, cf, key)) {
             return Ok(hit.map(|b| b.to_vec()));
         }
         if cf != DEFAULT_CF {
             self.check_cf(cf)?;
         }
         let got = self.codec.encode_with(cf, key, |enc| self.inner.get(enc));
-        LAST_CF.with(|slot| slot.borrow_mut().store(epoch, cf, key, got.clone()));
+        LAST_CF.with(|slot| slot.borrow_mut().store(epoch, gen, cf, key, got.clone()));
         Ok(got.map(|b| b.to_vec()))
     }
 
     /// Test helper: named get is a LAST_CF hit (no encode / inner get).
     #[cfg(test)]
     fn last_cf_is_hot(&self, cf: &str, key: &[u8]) -> bool {
-        let epoch = self.cache_epoch_base + self.inner.read_cache_epoch();
-        LAST_CF.with(|slot| slot.borrow().get(epoch, cf, key).is_some())
+        let (epoch, gen) = self.tls_point_ids(cf, key);
+        LAST_CF.with(|slot| slot.borrow().get(epoch, gen, cf, key).is_some())
+    }
+
+    /// Test helper: default-CF last-get is a TLS hit.
+    #[cfg(test)]
+    fn last_get_is_hot(&self, key: &[u8]) -> bool {
+        let (epoch, gen) = self.tls_point_ids(DEFAULT_CF, key);
+        LAST_GET.with(|slot| slot.borrow().get_key(epoch, gen, key).is_some())
     }
 
     fn get_at(
@@ -2298,6 +2368,44 @@ impl<E: PedraEnv> DB<E> {
         r
     }
 
+    fn cf_bucket(cf: &str) -> usize {
+        match cf {
+            "default" => 0,
+            "lock" => 1,
+            "write" => 2,
+            "raftlog" => 3,
+            _ => 4,
+        }
+    }
+
+    fn group_cf_puts(puts: Vec<(&str, Vec<u8>, Vec<u8>)>) -> Vec<(&str, Vec<u8>, Vec<u8>)> {
+        let mut b: [Vec<(&str, Vec<u8>, Vec<u8>)>; 5] =
+            [Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new()];
+        for p in puts {
+            let i = Self::cf_bucket(p.0);
+            b[i].push(p);
+        }
+        let mut out = Vec::new();
+        for g in b {
+            out.extend(g);
+        }
+        out
+    }
+
+    fn group_cf_deletes(deletes: Vec<(&str, Vec<u8>)>) -> Vec<(&str, Vec<u8>)> {
+        let mut b: [Vec<(&str, Vec<u8>)>; 5] =
+            [Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new()];
+        for p in deletes {
+            let i = Self::cf_bucket(p.0);
+            b[i].push(p);
+        }
+        let mut out = Vec::new();
+        for g in b {
+            out.extend(g);
+        }
+        out
+    }
+
     /// Like [`Self::write_cf_slices`] but values (and user keys) move into
     /// `Bytes` — no extra 1 KiB payload copy per apply/raftlog op (RFC-0041).
     ///
@@ -2311,14 +2419,28 @@ impl<E: PedraEnv> DB<E> {
         // Apply prewrite interleaves lock+default 32×; grouping makes
         // `fill_run_prefix` once per family (RFC-0149 P1.1). Distinct keys
         // — seq order across CFs is not user-visible after one publish.
-        puts.sort_by(|a, b| a.0.cmp(b.0));
-        deletes.sort_by(|a, b| a.0.cmp(b.0));
+        // One-pass CF buckets — `sort_by` swapped 100 B payloads O(n log n)
+        // on apply (RFC-0149 P2.1). Encode order is still grouped by family.
+        if puts.len() > 1 {
+            puts = Self::group_cf_puts(puts);
+        }
+        if deletes.len() > 1 {
+            deletes = Self::group_cf_deletes(deletes);
+        }
         thread_local! {
             static KEY_POOL: std::cell::RefCell<bytes::BytesMut> =
                 std::cell::RefCell::new(bytes::BytesMut::with_capacity(8 * 1024));
         }
-        let mut warm: Vec<(&str, Vec<u8>, Option<Bytes>)> =
-            Vec::with_capacity(puts.len() + deletes.len());
+        // Raftlog reads idx-1 of a 16-append (LAST_RING). Fat apply/lock
+        // batches never read-your-writes in the same op — skip the warm Vec.
+        let need_warm = puts.len() + deletes.len() <= LAST_RING
+            && deletes.is_empty()
+            && puts.iter().all(|(cf, _, _)| *cf == "raftlog");
+        let mut warm: Vec<(&str, Vec<u8>, Option<Bytes>)> = if need_warm {
+            Vec::with_capacity(puts.len())
+        } else {
+            Vec::new()
+        };
         let r = KEY_POOL.with(|pool| {
             let mut pool = pool.borrow_mut();
             let mut ops = Vec::with_capacity(puts.len() + deletes.len());
@@ -2342,7 +2464,9 @@ impl<E: PedraEnv> DB<E> {
                     key: self.codec.encode_run(&pfx, k.as_ref(), &mut pool),
                     value: val.clone(),
                 });
-                warm.push((cf, k, Some(val)));
+                if need_warm {
+                    warm.push((cf, k, Some(val)));
+                }
             }
             for (cf, k) in deletes {
                 if last_ok != Some(cf) {
@@ -2353,7 +2477,6 @@ impl<E: PedraEnv> DB<E> {
                 ops.push(BatchOp::Delete {
                     key: self.codec.encode_run(&pfx, k.as_ref(), &mut pool),
                 });
-                warm.push((cf, k, None));
             }
             if ops.is_empty() {
                 return Ok(());
@@ -2364,14 +2487,14 @@ impl<E: PedraEnv> DB<E> {
                 .map_err(Error::from)
         });
         if r.is_ok() && !warm.is_empty() {
-            let epoch = self.cache_epoch_base + self.inner.read_cache_epoch();
             // Raftlog reads idx-1 of a 16-append (LAST_RING). Fat apply/lock
             // batches never read-your-writes in the same op.
             let skip = warm.len().saturating_sub(LAST_RING);
             LAST_CF.with(|t| {
                 let mut t = t.borrow_mut();
                 for (cf, k, v) in warm.into_iter().skip(skip) {
-                    t.store(epoch, cf, &k, v);
+                    let (epoch, gen) = self.tls_point_ids(cf, &k);
+                    t.store(epoch, gen, cf, &k, v);
                 }
             });
         }
@@ -4947,7 +5070,7 @@ mod tests {
         assert_eq!(
             db.get_named(DEFAULT_CF, b"hot").unwrap().as_deref(),
             Some(b"v3".as_ref()),
-            "epoch bump must drop every last-N slot"
+            "put of hot must publish the new value"
         );
         assert_eq!(
             db.get_named(DEFAULT_CF, b"hot2").unwrap().as_deref(),
@@ -4981,8 +5104,79 @@ mod tests {
         assert_eq!(
             db.get_named(DEFAULT_CF, [b'k', 0]).unwrap().as_deref(),
             Some([b'v', 0].as_ref()),
-            "epoch bump must not serve a stale last-N value"
+            "1c put of another key must not serve a stale last-N value"
         );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn last_get_survives_put_of_other_key() {
+        let dir = tmp("gettls-other");
+        let db = DB::open_default(&dir).unwrap();
+        db.put(b"hot", b"v1").unwrap();
+        db.put(b"hot2", b"v2").unwrap();
+        assert!(db.last_get_is_hot(b"hot"));
+        assert!(db.last_get_is_hot(b"hot2"));
+        db.put(b"other", b"x").unwrap();
+        assert!(
+            db.last_get_is_hot(b"hot"),
+            "1c put of another key must not wipe TLS of zipf neighbors"
+        );
+        assert!(db.last_get_is_hot(b"hot2"));
+        assert_eq!(db.get(b"hot").unwrap().as_deref(), Some(b"v1".as_ref()));
+        db.put(b"hot", b"v3").unwrap();
+        assert_eq!(db.get(b"hot").unwrap().as_deref(), Some(b"v3".as_ref()));
+        assert_eq!(db.get(b"hot2").unwrap().as_deref(), Some(b"v2".as_ref()));
+        assert!(
+            db.last_get_is_hot(b"hot2"),
+            "overwrite of hot must leave hot2 TLS-hot"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn intern_put_value_shares_repeat_payload() {
+        let a = intern_put_value(b"yyyy");
+        let b = intern_put_value(b"yyyy");
+        assert_eq!(
+            a.as_ptr(),
+            b.as_ptr(),
+            "repeat SET payload must share Bytes"
+        );
+        let c = intern_put_value(b"zzzz");
+        assert_ne!(a.as_ptr(), c.as_ptr());
+        let dir = tmp("intern-put");
+        let db = DB::open_default(&dir).unwrap();
+        db.put(b"k1", b"yyyy").unwrap();
+        db.put(b"k2", b"yyyy").unwrap();
+        assert!(db.last_get_is_hot(b"k2"));
+        assert_eq!(db.get(b"k1").unwrap().as_deref(), Some(b"yyyy".as_ref()));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn last_get_other_thread_sees_put() {
+        let dir = tmp("gettls-thr");
+        let db = std::sync::Arc::new(DB::open_default(&dir).unwrap());
+        db.put(b"k", b"v1").unwrap();
+        let db_r = std::sync::Arc::clone(&db);
+        let h = std::thread::spawn(move || {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            loop {
+                match db_r.get(b"k").unwrap().as_deref() {
+                    Some(b"v1") => {
+                        assert!(
+                            Instant::now() < deadline,
+                            "reader never observed the published put"
+                        );
+                    }
+                    Some(b"v2") => return,
+                    other => panic!("unexpected last-get value {other:?}"),
+                }
+            }
+        });
+        db.put(b"k", b"v2").unwrap();
+        h.join().unwrap();
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -5153,17 +5347,33 @@ mod tests {
     #[test]
     fn last_get_table_lazy_epoch_invalidation() {
         let mut t = LastGetTable::new();
-        t.store_key(1, b"k1", Some(Bytes::from_static(b"v1")));
-        assert_eq!(t.get_key(1, b"k1"), Some(Some(Bytes::from_static(b"v1"))));
+        t.store_key(1, 1, b"k1", Some(Bytes::from_static(b"v1")));
+        assert_eq!(
+            t.get_key(1, 1, b"k1"),
+            Some(Some(Bytes::from_static(b"v1")))
+        );
         // Epoch bump: the stale entry must not answer for the new epoch.
-        assert_eq!(t.get_key(2, b"k1"), None);
+        assert_eq!(t.get_key(2, 1, b"k1"), None);
         // Re-store under the new epoch answers without any clear-all pass.
-        t.store_key(2, b"k1", Some(Bytes::from_static(b"v2")));
-        assert_eq!(t.get_key(2, b"k1"), Some(Some(Bytes::from_static(b"v2"))));
+        t.store_key(2, 1, b"k1", Some(Bytes::from_static(b"v2")));
+        assert_eq!(
+            t.get_key(2, 1, b"k1"),
+            Some(Some(Bytes::from_static(b"v2")))
+        );
         // An entry stored under an old epoch coexists but never leaks.
-        t.store_key(1, b"k2", Some(Bytes::from_static(b"old")));
-        assert_eq!(t.get_key(2, b"k2"), None);
-        assert_eq!(t.get_key(1, b"k2"), Some(Some(Bytes::from_static(b"old"))));
+        t.store_key(1, 1, b"k2", Some(Bytes::from_static(b"old")));
+        assert_eq!(t.get_key(2, 1, b"k2"), None);
+        assert_eq!(
+            t.get_key(1, 1, b"k2"),
+            Some(Some(Bytes::from_static(b"old")))
+        );
+        // Per-key gen bump: same epoch, new gen misses; other gen stays.
+        t.store_key(2, 2, b"k1", Some(Bytes::from_static(b"v3")));
+        assert_eq!(t.get_key(2, 1, b"k1"), None);
+        assert_eq!(
+            t.get_key(2, 2, b"k1"),
+            Some(Some(Bytes::from_static(b"v3")))
+        );
     }
 
     #[test]
@@ -5176,9 +5386,9 @@ mod tests {
             .map(|i| format!("k/{i:06}").into_bytes())
             .collect();
         for k in &keys {
-            t.store_key(7, k, Some(Bytes::from_static(b"v")));
+            t.store_key(7, 1, k, Some(Bytes::from_static(b"v")));
         }
-        let hits = keys.iter().filter(|k| t.get_key(7, k).is_some()).count();
+        let hits = keys.iter().filter(|k| t.get_key(7, 1, k).is_some()).count();
         assert!(hits >= 972, "uniform hot set hit rate {hits}/1024 < 95%");
     }
 
@@ -5614,6 +5824,41 @@ mod tests {
             .property_int_value("rocksdb.no-such-property")
             .unwrap()
             .is_none());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn optimize_for_point_lookup_sizes_cache() {
+        let mut o = Options::new();
+        o.optimize_for_point_lookup(8);
+        assert_eq!(o.block_cache_bytes, Some(8 * 1024 * 1024));
+        o.set_block_cache(&Cache::new_lru_cache(4096));
+        assert_eq!(o.block_cache_bytes, Some(4096));
+        let mut bb = BlockBasedOptions::default();
+        bb.set_block_cache(&Cache::new_lru_cache(12345));
+        let mut o2 = Options::new();
+        o2.set_block_based_table_factory(&bb);
+        assert_eq!(o2.block_cache_bytes, Some(12345));
+    }
+
+    #[test]
+    fn block_cache_usage_is_bytes_not_hits() {
+        let dir = tmp("bc-usage");
+        let mut opts = Options::new();
+        opts.create_if_missing(true);
+        opts.set_block_cache(&Cache::new_lru_cache(1024 * 1024));
+        {
+            let db = DB::open(&opts, &dir).unwrap();
+            db.put(b"k", vec![b'v'; 64]).unwrap();
+            db.flush().unwrap();
+        }
+        let db = DB::open(&opts, &dir).unwrap();
+        let _ = db.get(b"k").unwrap();
+        let usage = db
+            .property_int_value(properties::BLOCK_CACHE_USAGE)
+            .unwrap()
+            .unwrap_or(0);
+        assert!(usage > 16, "occupancy must be payload bytes, got {usage}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -160,6 +160,21 @@ pub struct VlogRewriteStats {
 /// `sync_pending` — same class as async WAL.
 pub const ASYNC_VLOG_BUFFER: usize = 64 * 1024;
 
+/// Payload size that skips the contiguous pending memcpy (RFC-0149 P2.1
+/// `kvrocks_blob_set` is 16 KiB). Held as interned `Bytes` until the 64 KiB
+/// flush concatenates once. Same crash-loss class as async WAL.
+const LARGE_PENDING: usize = 4096;
+
+/// Same chunk as the WAL: delayed allocation must not hit the Ok path.
+const VLOG_PREALLOC_CHUNK: u64 = 8 * 1024 * 1024;
+
+#[derive(Debug)]
+struct PendingLarge {
+    offset: u64,
+    hdr: [u8; 8],
+    data: Bytes,
+}
+
 /// Open or create the value log and append/read records.
 #[derive(Debug)]
 pub struct ValueLog<F: EnvFile> {
@@ -169,8 +184,14 @@ pub struct ValueLog<F: EnvFile> {
     next_offset: u64,
     /// File offset of `pending[0]`. `pending_start + pending.len() == next_offset`.
     pending_start: u64,
-    /// Unwritten tail (headers + payloads). Flushed at [`ASYNC_VLOG_BUFFER`].
+    /// Unwritten tail of small records (headers + payloads).
     pending: Vec<u8>,
+    /// Large records held by `Bytes` (no payload memcpy) until flush.
+    pending_large: Vec<PendingLarge>,
+    /// Sum of `8 + data.len()` over [`Self::pending_large`].
+    pending_large_bytes: usize,
+    /// Logical offset covered by space reservation.
+    prealloc_to: u64,
     /// Bytes have been `write()`n since the last [`Self::sync_pending`].
     /// G1 must not `fdatasync` an empty vlog on every small put (RFC-0062
     /// P1.1: the parity bench enables blob, ycsb_a stays under the
@@ -300,6 +321,9 @@ impl<F: EnvFile> ValueLog<F> {
             next_offset: len,
             pending_start: len,
             pending: Vec::new(),
+            pending_large: Vec::new(),
+            pending_large_bytes: 0,
+            prealloc_to: len,
             needs_sync: false,
         })
     }
@@ -324,6 +348,48 @@ impl<F: EnvFile> ValueLog<F> {
     /// # Errors
     /// I/O on a buffer flush.
     pub fn append_pending(&mut self, data: &[u8]) -> Result<(u64, u32, u32)> {
+        if data.len() >= LARGE_PENDING {
+            self.append_pending_bytes(Bytes::copy_from_slice(data))
+        } else {
+            self.append_pending_small(data)
+        }
+    }
+
+    /// [`Self::append_pending`] taking an already-owned payload so a 16 KiB
+    /// blob is not memcpy'd into the userspace tail (RFC-0149 P2.1).
+    pub(crate) fn append_pending_bytes(&mut self, data: Bytes) -> Result<(u64, u32, u32)> {
+        if data.len() < LARGE_PENDING {
+            return self.append_pending_small(data.as_ref());
+        }
+        crate::buggify_hooks::inject_checked(crate::buggify_hooks::sites::BEFORE_VLOG_APPEND)?;
+        let len = u32::try_from(data.len())
+            .map_err(|_| CoreError::Internal("vlog value too large".into()))?;
+        let crc = crc32c::crc32c(data.as_ref());
+        let rec_len = 8usize
+            .checked_add(data.len())
+            .ok_or_else(|| CoreError::Internal("vlog record overflow".into()))?;
+        if self.staged_len() >= ASYNC_VLOG_BUFFER
+            || self.staged_len().saturating_add(rec_len) > ASYNC_VLOG_BUFFER
+                && self.staged_len() > 0
+        {
+            self.flush_pending()?;
+        }
+        let offset = self.next_offset;
+        let mut hdr = [0u8; 8];
+        hdr[..4].copy_from_slice(&len.to_le_bytes());
+        hdr[4..].copy_from_slice(&crc.to_le_bytes());
+        self.pending_large.push(PendingLarge { offset, hdr, data });
+        self.pending_large_bytes = self.pending_large_bytes.saturating_add(rec_len);
+        self.next_offset = offset
+            .checked_add(rec_len as u64)
+            .ok_or_else(|| CoreError::Internal("vlog offset overflow".into()))?;
+        if self.staged_len() >= ASYNC_VLOG_BUFFER {
+            self.flush_pending()?;
+        }
+        Ok((offset, len, crc))
+    }
+
+    fn append_pending_small(&mut self, data: &[u8]) -> Result<(u64, u32, u32)> {
         crate::buggify_hooks::inject_checked(crate::buggify_hooks::sites::BEFORE_VLOG_APPEND)?;
         let len = u32::try_from(data.len())
             .map_err(|_| CoreError::Internal("vlog value too large".into()))?;
@@ -331,11 +397,9 @@ impl<F: EnvFile> ValueLog<F> {
         let rec_len = 8usize
             .checked_add(data.len())
             .ok_or_else(|| CoreError::Internal("vlog record overflow".into()))?;
-        // A single record larger than the buffer still goes through pending
-        // then flush — one `write()` of the whole record, no fsync.
-        if self.pending.len() >= ASYNC_VLOG_BUFFER
-            || self.pending.len().saturating_add(rec_len) > ASYNC_VLOG_BUFFER
-                && !self.pending.is_empty()
+        if self.staged_len() >= ASYNC_VLOG_BUFFER
+            || self.staged_len().saturating_add(rec_len) > ASYNC_VLOG_BUFFER
+                && self.staged_len() > 0
         {
             self.flush_pending()?;
         }
@@ -346,10 +410,28 @@ impl<F: EnvFile> ValueLog<F> {
         self.next_offset = offset
             .checked_add(rec_len as u64)
             .ok_or_else(|| CoreError::Internal("vlog offset overflow".into()))?;
-        if self.pending.len() >= ASYNC_VLOG_BUFFER {
+        if self.staged_len() >= ASYNC_VLOG_BUFFER {
             self.flush_pending()?;
         }
         Ok((offset, len, crc))
+    }
+
+    fn staged_len(&self) -> usize {
+        self.pending.len().saturating_add(self.pending_large_bytes)
+    }
+
+    fn reserve_space(&mut self, upcoming: u64) {
+        let pos = self.pending_start;
+        self.prealloc_to = self.prealloc_to.max(pos);
+        let need = pos
+            .saturating_add(upcoming)
+            .saturating_add(VLOG_PREALLOC_CHUNK);
+        while self.prealloc_to < need {
+            if self.file.preallocate(VLOG_PREALLOC_CHUNK).is_err() {
+                break;
+            }
+            self.prealloc_to = self.prealloc_to.saturating_add(VLOG_PREALLOC_CHUNK);
+        }
     }
 
     /// `write()` the userspace tail. No fsync.
@@ -357,11 +439,27 @@ impl<F: EnvFile> ValueLog<F> {
     /// # Errors
     /// I/O.
     pub fn flush_pending(&mut self) -> Result<()> {
-        if self.pending.is_empty() {
+        if self.pending.is_empty() && self.pending_large.is_empty() {
             return Ok(());
         }
-        Write::write_all(&mut self.file, &self.pending)?;
-        self.pending.clear();
+        self.reserve_space(self.staged_len() as u64);
+        if !self.pending.is_empty() {
+            Write::write_all(&mut self.file, &self.pending)?;
+            self.pending.clear();
+        }
+        if !self.pending_large.is_empty() {
+            // One contiguous write — `writev` on an O_APPEND handle was
+            // dropping the payload (get read UnexpectedEof). Concat is
+            // once per 64 KiB, not once per 16 KiB put.
+            let mut buf = Vec::with_capacity(self.pending_large_bytes);
+            for rec in &self.pending_large {
+                buf.extend_from_slice(&rec.hdr);
+                buf.extend_from_slice(rec.data.as_ref());
+            }
+            Write::write_all(&mut self.file, &buf)?;
+            self.pending_large.clear();
+            self.pending_large_bytes = 0;
+        }
         self.pending_start = self.next_offset;
         self.needs_sync = true;
         Ok(())
@@ -379,7 +477,7 @@ impl<F: EnvFile> ValueLog<F> {
     /// # Errors
     /// I/O.
     pub fn sync_pending(&mut self) -> Result<()> {
-        if self.pending.is_empty() && !self.needs_sync {
+        if self.pending.is_empty() && self.pending_large.is_empty() && !self.needs_sync {
             return Ok(());
         }
         self.flush_pending()?;
@@ -391,13 +489,13 @@ impl<F: EnvFile> ValueLog<F> {
     /// Whether a G1 `sync_pending` would issue a barrier (tests / probes).
     #[must_use]
     pub fn needs_barrier(&self) -> bool {
-        !self.pending.is_empty() || self.needs_sync
+        !self.pending.is_empty() || !self.pending_large.is_empty() || self.needs_sync
     }
 
     /// Bytes staged in userspace (tests / probes).
     #[must_use]
     pub fn pending_len(&self) -> usize {
-        self.pending.len()
+        self.staged_len()
     }
 
     /// Path that holds `ptr`.
@@ -463,6 +561,30 @@ impl<F: EnvFile> ValueLog<F> {
     }
 
     fn read_pending(&self, offset: u64, len: u32, expect_crc: u32) -> Result<Option<Bytes>> {
+        for rec in &self.pending_large {
+            if rec.offset != offset {
+                continue;
+            }
+            let stored_len = u32::from_le_bytes(rec.hdr[0..4].try_into().unwrap());
+            let stored_crc = u32::from_le_bytes(rec.hdr[4..8].try_into().unwrap());
+            if stored_len != len {
+                return Err(CoreError::CorruptValue(format!(
+                    "len mismatch in vlog pending at {offset}: stored {stored_len} expect {len}"
+                )));
+            }
+            if !crate::wal::crc::crc_match_ok(stored_crc, expect_crc) {
+                return Err(CoreError::CorruptValue(format!(
+                    "crc mismatch in vlog pending at {offset}"
+                )));
+            }
+            let crc = crc32c::crc32c(rec.data.as_ref());
+            if !crate::wal::crc::crc_match_ok(crc, expect_crc) {
+                return Err(CoreError::CorruptValue(format!(
+                    "data crc mismatch in vlog pending at {offset}"
+                )));
+            }
+            return Ok(Some(rec.data.clone()));
+        }
         if self.pending.is_empty() {
             return Ok(None);
         }
@@ -900,6 +1022,33 @@ mod tests {
     }
 
     #[test]
+    fn append_pending_large_readable_before_flush() {
+        let dir = std::env::temp_dir().join(format!(
+            "pedradb-vlog-large-pending-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let env = StdEnv;
+        let mut log = ValueLog::open_on(&env, &dir).unwrap();
+        let data = Bytes::from(vec![7u8; 16 * 1024]);
+        let (off, len, crc) = log.append_pending_bytes(data.clone()).unwrap();
+        assert!(log.pending_len() > 0, "large record stays in userspace");
+        let on_disk = fs::metadata(dir.join(VLOG_FILE_NAME)).unwrap().len();
+        assert_eq!(on_disk, 8, "only magic on disk until flush");
+        let got = log.read_at_on(&env, off, len, crc).unwrap();
+        assert_eq!(got.as_ref(), data.as_ref());
+        log.flush_pending().unwrap();
+        assert_eq!(log.pending_len(), 0);
+        let got = log.read_at_on(&env, off, len, crc).unwrap();
+        assert_eq!(got.as_ref(), data.as_ref());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn append_pending_readable_before_flush() {
         let dir = std::env::temp_dir().join(format!(
             "pedradb-vlog-pending-{}",
@@ -1033,6 +1182,9 @@ mod tests {
             next_offset: MAGIC.len() as u64,
             pending_start: MAGIC.len() as u64,
             pending: Vec::new(),
+            pending_large: Vec::new(),
+            pending_large_bytes: 0,
+            prealloc_to: MAGIC.len() as u64,
             needs_sync: false,
         };
         assert!(!log.needs_barrier());

@@ -1,0 +1,30 @@
+       valid_lft forever preferred_lft forever
+       valid_lft forever preferred_lft forever
+       valid_lft forever preferred_lft forever
+       valid_lft forever preferred_lft forever
+       valid_lft forever preferred_lft forever
+=== P149_START 2026-08-30T02:59:42Z ===
+RESULT=BUILD_OK 03:05:51
+P149_COLUMN A async vs rocks-default(sync=false) majority median>3.0
+--- P149 gate majority median>3.0 ---
+P149_COLUNA_A rounds=3 peer=rocks-default(sync=false) async=PEDRA_PARITY_ASYNC=1
+  >3 ycsb_a                     min=3.246 median=3.410 rounds=[3.41, 3.246, 3.883]
+  >3 ycsb_b                     min=3.337 median=3.820 rounds=[3.82, 3.337, 4.786]
+  >3 ycsb_c                     min=3.678 median=4.150 rounds=[4.15, 3.678, 5.193]
+  >3 ycsb_d                     min=2.944 median=3.591 rounds=[3.591, 2.944, 4.734]
+  >3 ycsb_e                     min=13.738 median=15.647 rounds=[15.647, 23.355, 13.738]
+  >3 ycsb_f                     min=2.673 median=3.055 rounds=[2.673, 3.055, 3.42]
+     deps_cache_overwrite       min=1.471 median=2.819 rounds=[3.28, 2.819, 1.471]
+  >3 deps_lock_prewrite         min=2.516 median=3.461 rounds=[3.461, 2.516, 3.818]
+  >3 deps_mvcc_latest           min=2.763 median=3.959 rounds=[4.456, 3.959, 2.763]
+     deps_apply_batch           min=1.772 median=1.878 rounds=[1.772, 1.878, 2.348]
+     deps_raftlog               min=1.054 median=1.079 rounds=[1.212, 1.079, 1.054]
+  >3 deps_scan                  min=4.048 median=4.434 rounds=[5.042, 4.434, 4.048]
+  >3 kvrocks_get                min=4.145 median=4.823 rounds=[4.145, 4.823, 5.046]
+     kvrocks_set                min=2.200 median=2.457 rounds=[2.457, 2.2, 3.024]
+  >3 kvrocks_scan               min=37.838 median=43.832 rounds=[43.832, 37.838, 60.81]
+  >3 kvrocks_pipelined_set      min=3.485 median=3.750 rounds=[3.485, 3.75, 4.167]
+     kvrocks_blob_set           min=2.201 median=2.251 rounds=[2.201, 2.251, 2.606]
+majority median>3.0 = 12/17 (need >=9); min>3.0 = 8/17
+RESULT=P149_PASS over_med=12/17 min_ratio=1.054
+RESULT=P149_DONE rc=0 2026-08-30T03:07:42Z

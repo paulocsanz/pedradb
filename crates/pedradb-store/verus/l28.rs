@@ -532,6 +532,75 @@ pub fn l28_tcp_hnt_ok_as_is(_ok: bool) -> (d: bool)
     true
 }
 
+/// RFC-0147 P1.2: remaining voter forgets next/match/sent_through of the removed replica.
+pub open spec fn l28_tcp_slot_ok_spec(ok: bool) -> bool {
+    ok
+}
+
+pub open spec fn l28_tcp_slot_ok_as_is_spec(_ok: bool) -> bool {
+    true
+}
+
+pub fn l28_tcp_slot_ok(ok: bool) -> (d: bool)
+    ensures
+        d == l28_tcp_slot_ok_spec(ok),
+{
+    ok
+}
+
+pub fn l28_tcp_slot_ok_as_is(_ok: bool) -> (d: bool)
+    ensures
+        d == l28_tcp_slot_ok_as_is_spec(_ok),
+{
+    true
+}
+
+/// RFC-0148 P1.2: remaining voter forgets sent_through of a remote replica on oob remove.
+pub open spec fn l28_tcp_sth_ok_spec(ok: bool) -> bool {
+    ok
+}
+
+pub open spec fn l28_tcp_sth_ok_as_is_spec(_ok: bool) -> bool {
+    true
+}
+
+pub fn l28_tcp_sth_ok(ok: bool) -> (d: bool)
+    ensures
+        d == l28_tcp_sth_ok_spec(ok),
+{
+    ok
+}
+
+pub fn l28_tcp_sth_ok_as_is(_ok: bool) -> (d: bool)
+    ensures
+        d == l28_tcp_sth_ok_as_is_spec(_ok),
+{
+    true
+}
+
+/// RFC-0068 P2.2: planted committed joint without leave refuses C-old majority.
+pub open spec fn l28_tcp_pj_ok_spec(ok: bool) -> bool {
+    ok
+}
+
+pub open spec fn l28_tcp_pj_ok_as_is_spec(_ok: bool) -> bool {
+    true
+}
+
+pub fn l28_tcp_pj_ok(ok: bool) -> (d: bool)
+    ensures
+        d == l28_tcp_pj_ok_spec(ok),
+{
+    ok
+}
+
+pub fn l28_tcp_pj_ok_as_is(_ok: bool) -> (d: bool)
+    ensures
+        d == l28_tcp_pj_ok_as_is_spec(_ok),
+{
+    true
+}
+
 fn main() {}
 
 } // verus!

@@ -209,14 +209,143 @@ def check_lint(root: Path, catalog: dict, r: Report) -> None:
                         )
                     else:
                         r.good(f"{pair['id']}: data_fate handler {handler} in {caller}")
+        # RFC-0152: store live path must invoke the catalog entry without
+        # inheriting raft handler names (those stay on `callers`).
+        for lc in pair.get("live_callers") or []:
+            if not isinstance(lc, dict):
+                r.fail(f"{pair['id']}: live_callers entry must be {{file, handler}}")
+                continue
+            live_file = lc.get("file") or ""
+            live_handler = lc.get("handler") or ""
+            lsrc = load_text(root, live_file)
+            if lsrc is None:
+                r.fail(f"{pair['id']}: missing live_caller {live_file}")
+                continue
+            if not mentions(lsrc, entry):
+                r.fail(f"{pair['id']}: {live_file} does not call {entry}()")
+            else:
+                r.good(f"{pair['id']}: live_caller {live_file} calls {entry}")
+            if live_handler:
+                if not mentions(lsrc, live_handler):
+                    r.fail(
+                        f"{pair['id']}: live handler {live_handler} missing in {live_file}"
+                    )
+                else:
+                    r.good(f"{pair['id']}: live handler {live_handler} in {live_file}")
+    check_store_live(root, catalog, r)
+    check_raft_store_live(root, catalog, r)
+
+
+# RFC-0152: these catalog kernels must be the store live RV/AE path.
+STORE_LIVE_KERNELS = {
+    "vote": ("crates/pedradb-store/src/lib.rs", "on_request_vote"),
+    "ae_entry": ("crates/pedradb-store/src/lib.rs", "on_append_entries"),
+    "grant_persist": ("crates/pedradb-store/src/lib.rs", "on_request_vote"),
+    "ae_ack": ("crates/pedradb-store/src/lib.rs", "on_append_entries"),
+    "commit_raft": ("crates/pedradb-store/src/lib.rs", "broadcast_append_after_propose"),
+    "joint_election": ("crates/pedradb-store/src/lib.rs", "election_has_joint_quorum"),
+    "joint_leave": ("crates/pedradb-store/src/lib.rs", "pending_joint_on"),
+    "pending_joint_node": ("crates/pedradb-store/src/lib.rs", "pending_joint"),
+    "joint_leave_ok": ("crates/pedradb-store/src/lib.rs", "leave_joint"),
+    "election_grant_from": ("crates/pedradb-store/src/lib.rs", "on_request_vote_reply"),
+    "joint_target": ("crates/pedradb-store/src/lib.rs", "remove_member_joint"),
+    "joint_add_target": ("crates/pedradb-store/src/lib.rs", "add_member_joint"),
+    "queued_leave_finish": ("crates/pedradb-store/src/lib.rs", "finish_uncommitted_leave"),
+    "disk_membership": ("crates/pedradb-store/src/lib.rs", "bind_cluster_identity"),
+    "high_water": ("crates/pedradb-store/src/lib.rs", "open_single_node_with_rng_opts"),
+    "participating_member": ("crates/pedradb-store/src/lib.rs", "is_participating"),
+    "identity_before_applied": ("crates/pedradb-store/src/lib.rs", "apply_range"),
+    "recover_apply": ("crates/pedradb-store/src/lib.rs", "recover_apply_committed"),
+    "recover_apply_node": ("crates/pedradb-store/src/lib.rs", "recover_apply_committed"),
+    "recover_truncate": ("crates/pedradb-store/src/lib.rs", "persist_truncated_logs"),
+    "recover_drop_orphan": ("crates/pedradb-store/src/lib.rs", "persist_log_db"),
+    "recover_abort": ("crates/pedradb-store/src/lib.rs", "abort_leftover_intents"),
+    "persist_meta": ("crates/pedradb-store/src/lib.rs", "persist_u64_meta_all"),
+    "persist_hist": ("crates/pedradb-store/src/lib.rs", "persist_si_keys"),
+    "persist_fence": ("crates/pedradb-store/src/lib.rs", "fence_txn_aborted"),
+    "force_clear": ("crates/pedradb-store/src/lib.rs", "force_local_clear_keys"),
+    "drop_preimages": ("crates/pedradb-store/src/lib.rs", "drop_preimages"),
+    "open_peer_disk": ("crates/pedradb-store/src/lib.rs", "open_with_envs_rng_opts"),
+    "local_id_member": ("crates/pedradb-store/src/lib.rs", "local_node_id"),
+    "reader_local": ("crates/pedradb-store/src/lib.rs", "ids_first_if_local"),
+    "discard_uncommitted": ("crates/pedradb-store/src/lib.rs", "discard_uncommitted_from"),
+    "discard_leader": ("crates/pedradb-store/src/lib.rs", "finish_queued_propose"),
+    "removed_step_down": ("crates/pedradb-store/src/lib.rs", "install_applied_membership"),
+    "hint_member": ("crates/pedradb-store/src/lib.rs", "leader_hint"),
+    "drop_repl_slot": ("crates/pedradb-store/src/lib.rs", "install_applied_membership"),
+    "drop_sent_through": ("crates/pedradb-store/src/lib.rs", "remove_member"),
+    "apply_step": ("crates/pedradb-store/src/lib.rs", "apply_range"),
+}
+
+STORE_LIVE_PATH = "crates/pedradb-store/src/lib.rs"
+
+
+def check_store_live(_root: Path, catalog: dict, r: Report) -> None:
+    """Refuse a vote/ae_entry catalog that is not wired through store live RPC."""
+    print("== store live (RFC-0152: queued RV/AE is the catalog kernel) ==")
+    ids = {p["id"]: p for p in catalog["pairs"]}
+    for pid, (path, handler) in STORE_LIVE_KERNELS.items():
+        pair = ids.get(pid)
+        if pair is None:
+            r.fail(f"{pid}: catalog pair missing (RFC-0152)")
+            continue
+        lcs = pair.get("live_callers") or []
+        hit = next(
+            (
+                lc
+                for lc in lcs
+                if isinstance(lc, dict) and lc.get("file") == path
+            ),
+            None,
+        )
+        if hit is None:
+            r.fail(f"{pid}: missing live_callers {path}")
+            continue
+        if hit.get("handler") != handler:
+            r.fail(f"{pid}: live handler must be {handler}")
+        else:
+            r.good(f"{pid}: live_callers {path} / {handler}")
+
+
+def check_raft_store_live(root: Path, catalog: dict, r: Report) -> None:
+    """Raft-kernel data_fate pair that store lib.rs calls must list live_callers."""
+    print("== raft→store live_callers (RFC-0152 C) ==")
+    store = load_text(root, STORE_LIVE_PATH)
+    if store is None:
+        r.fail(f"missing {STORE_LIVE_PATH}")
+        return
+    for pair in catalog["pairs"]:
+        kernel = pair.get("kernel") or ""
+        if not kernel.startswith("crates/pedradb-raft"):
+            continue
+        if not pair.get("data_fate"):
+            continue
+        entry = pair.get("entry") or ""
+        if not entry or not mentions(store, entry):
+            continue
+        pid = pair["id"]
+        lcs = pair.get("live_callers") or []
+        hit = next(
+            (
+                lc
+                for lc in lcs
+                if isinstance(lc, dict) and lc.get("file") == STORE_LIVE_PATH
+            ),
+            None,
+        )
+        if hit is None:
+            r.fail(f"{pid}: missing live_callers {STORE_LIVE_PATH}")
+        else:
+            r.good(f"{pid}: live_callers {STORE_LIVE_PATH} / {hit.get('handler')}")
 
 
 def check_three_teeth(root: Path, catalog: dict, r: Report) -> None:
-    """RFC-0151: every data_fate pair has AS-IS + twin + named DST plant."""
+    """RFC-0151: every data_fate pair has AS-IS + twin + named DST plant.
+    RFC-0152 P2: pairs with three_teeth=true (non-data_fate) too."""
     print("== three teeth (RFC-0151: AS-IS + twin + named DST plant) ==")
     before = len(r.failed)
     for pair in catalog["pairs"]:
-        if not pair.get("data_fate"):
+        if not pair.get("data_fate") and not pair.get("three_teeth"):
             continue
         pid = pair["id"]
         entry = pair.get("entry") or ""
@@ -255,8 +384,12 @@ def check_three_teeth(root: Path, catalog: dict, r: Report) -> None:
             if "pin_dst_queued" not in psrc and "RpcMode::Queued" not in psrc:
                 r.fail(f"three teeth: {pid} raft plant must pin Queued RPC")
     if len(r.failed) == before:
-        n = sum(1 for p in catalog["pairs"] if p.get("data_fate"))
-        r.good(f"three teeth: {n} data_fate pairs")
+        n = sum(
+            1
+            for p in catalog["pairs"]
+            if p.get("data_fate") or p.get("three_teeth")
+        )
+        r.good(f"three teeth: {n} pairs")
 
 
 def check_clones(root: Path, catalog: dict, r: Report) -> None:

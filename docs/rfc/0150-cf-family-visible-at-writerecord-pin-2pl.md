@@ -64,6 +64,7 @@
 
 - **Tests**
   - `key_in_cf_family` true for raw + `default\0`, false for `lock\0` vs `default`; AS-IS leak true.
+  - `key_in_cf_family_on_live_scan_is_not_ok`: live flush; default SST bounds are in-family; lock keys are not in the default SST. Test-side `range_limited` filter is **not** this tooth.
   - `KeyCodec` encode/decode roundtrip (`keycodec_encode_decode_roundtrip_uses_cf_kernel`).
   - `compact_range_cf_lock_leaves_default` / `compact_cf_leaves_other_family_ssts` still pass; compact path calls `key_in_cf_family`.
   - `visible_at` put+delete+range-del; F30 AS-IS misses interior key.

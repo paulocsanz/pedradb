@@ -1,0 +1,165 @@
+//! Pure RequestVote decision (RFC-0152 P0 / F15).
+//!
+//! Same rules as `pedradb-raft::vote_kernel`. Store does not depend on
+//! `pedradb-raft`; keep the two bodies identical (drift-trap: harness grid).
+
+#![forbid(unsafe_code)]
+
+/// Inputs for a RequestVote decision after the follower has already adopted
+/// `args.term` into hard state when `args.term > current_term` (caller-side).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct VoteInputs {
+    /// Follower current term (post step-down if candidate term was higher).
+    pub current_term: u64,
+    /// Follower `voted_for` in this term (`None` if free or just stepped down).
+    pub voted_for: Option<u64>,
+    /// Follower last log term (0 if empty).
+    pub last_log_term: u64,
+    /// Follower last log index (0 if empty).
+    pub last_log_index: u64,
+    /// Candidate term.
+    pub candidate_term: u64,
+    /// Candidate id.
+    pub candidate_id: u64,
+    /// Candidate last log term.
+    pub candidate_last_log_term: u64,
+    /// Candidate last log index.
+    pub candidate_last_log_index: u64,
+}
+
+/// Outcome of the pure vote rule (Raft §5.2 / §5.4.1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VoteDecision {
+    /// Caller may persist `voted_for = candidate` and, **only if persist Ok**, set `vote_granted`.
+    WouldGrant,
+    /// Do not grant (stale term, already voted elsewhere, or candidate log not up-to-date).
+    Deny,
+}
+
+/// Whether the follower may still vote for `candidate_id` in this term.
+#[must_use]
+pub fn can_vote(voted_for: Option<u64>, candidate_id: u64) -> bool {
+    // Match, not `Option ==`: Aeneas has no model of `PartialEq<Option<u64>>`
+    // (extract would axiom it). `u64 == u64` is in the Lean std.
+    match voted_for {
+        None => true,
+        Some(v) => v == candidate_id,
+    }
+}
+
+/// Raft §5.4.1 log up-to-date (candidate at least as new as local).
+#[must_use]
+pub fn log_up_to_date(
+    my_last_term: u64,
+    my_last_index: u64,
+    cand_last_term: u64,
+    cand_last_index: u64,
+) -> bool {
+    cand_last_term > my_last_term
+        || (cand_last_term == my_last_term && cand_last_index >= my_last_index)
+}
+
+/// Pure RequestVote decision.
+#[must_use]
+pub fn vote_decision(i: VoteInputs) -> VoteDecision {
+    if i.candidate_term != i.current_term {
+        return VoteDecision::Deny;
+    }
+    if can_vote(i.voted_for, i.candidate_id)
+        && log_up_to_date(
+            i.last_log_term,
+            i.last_log_index,
+            i.candidate_last_log_term,
+            i.candidate_last_log_index,
+        )
+    {
+        VoteDecision::WouldGrant
+    } else {
+        VoteDecision::Deny
+    }
+}
+
+/// AS-IS / mutant: grant whenever the term matches, **ignoring** log up-to-date
+/// and existing vote. Used only to prove the model/kernel invariant has teeth.
+#[must_use]
+pub fn vote_decision_as_is_ignore_log_and_vote(i: VoteInputs) -> VoteDecision {
+    if i.candidate_term == i.current_term {
+        VoteDecision::WouldGrant
+    } else {
+        VoteDecision::Deny
+    }
+}
+
+/// Persist result the handler sees (axiom of the environment).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PersistOutcome {
+    /// `persist_hard` returned Ok.
+    Ok,
+    /// `persist_hard` returned Err.
+    Err,
+}
+
+/// F15 protocol: Grant on the wire only if the kernel would grant **and** persist Ok.
+///
+/// This is the refinement of `handle_request_vote_with_persist` minus I/O.
+/// `sent_grant ⇒ persist == Ok`.
+#[must_use]
+pub fn grant_after_persist(decision: VoteDecision, persist: PersistOutcome) -> bool {
+    // Match, not `==` on enums: derived PartialEq extracts to discriminant
+    // `Result` wrappers that Lean cannot `cases` through.
+    matches!(
+        (decision, persist),
+        (VoteDecision::WouldGrant, PersistOutcome::Ok)
+    )
+}
+
+/// AS-IS F15: grant as soon as the kernel says so, persist is ignored.
+#[must_use]
+pub fn grant_after_persist_as_is(decision: VoteDecision, persist: PersistOutcome) -> bool {
+    let _ = persist;
+    decision == VoteDecision::WouldGrant
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn stale_log() -> VoteInputs {
+        VoteInputs {
+            current_term: 5,
+            voted_for: None,
+            last_log_term: 3,
+            last_log_index: 10,
+            candidate_term: 5,
+            candidate_id: 1,
+            candidate_last_log_term: 1,
+            candidate_last_log_index: 1,
+        }
+    }
+
+    #[test]
+    fn as_is_mutant_differs_on_stale_log() {
+        assert_eq!(vote_decision(stale_log()), VoteDecision::Deny);
+        assert_eq!(
+            vote_decision_as_is_ignore_log_and_vote(stale_log()),
+            VoteDecision::WouldGrant
+        );
+    }
+
+    #[test]
+    fn grant_after_persist_implies_ok() {
+        assert!(grant_after_persist(
+            VoteDecision::WouldGrant,
+            PersistOutcome::Ok
+        ));
+        assert!(!grant_after_persist(
+            VoteDecision::WouldGrant,
+            PersistOutcome::Err
+        ));
+        assert!(!grant_after_persist(VoteDecision::Deny, PersistOutcome::Ok));
+        assert!(grant_after_persist_as_is(
+            VoteDecision::WouldGrant,
+            PersistOutcome::Err
+        ));
+    }
+}

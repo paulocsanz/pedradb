@@ -147,6 +147,29 @@ pub fn joint_leave_ok_as_is(_leave_in_log: bool) -> (d: bool)
     true
 }
 
+/// RFC-0068 P1.2: opt-in schedule emits PlantCommittedJoint; default omits it.
+pub open spec fn plant_joint_schedule_ok_spec(opt_in_emits: bool, default_omits: bool) -> bool {
+    opt_in_emits && default_omits
+}
+
+pub open spec fn plant_joint_schedule_ok_as_is_spec(_opt_in_emits: bool, _default_omits: bool) -> bool {
+    true
+}
+
+pub fn plant_joint_schedule_ok(opt_in_emits: bool, default_omits: bool) -> (d: bool)
+    ensures
+        d == plant_joint_schedule_ok_spec(opt_in_emits, default_omits),
+{
+    opt_in_emits && default_omits
+}
+
+pub fn plant_joint_schedule_ok_as_is(_opt_in_emits: bool, _default_omits: bool) -> (d: bool)
+    ensures
+        d == plant_joint_schedule_ok_as_is_spec(_opt_in_emits, _default_omits),
+{
+    true
+}
+
 proof fn lemma_as_is_skips_leave()
     ensures
         !joint_leave_ok_spec(false),

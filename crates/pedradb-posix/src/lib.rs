@@ -329,6 +329,50 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// RFC-0152 P2.2.36: production `fdatasync_file` gates rc through
+    /// `fdatasync_rc_ok`. Live WAL file is Ok (rc==0); live pipe fd is
+    /// Err (nonzero rc). AS-IS would skip the barrier. Direct
+    /// `fdatasync_nonzero_rc_is_not_ok` / `fdatasync_rc_ok_is_safe_predicate`
+    /// are not this tooth.
+    #[test]
+    fn fdatasync_rc_ok_on_live_posix_is_not_ok() {
+        assert!(!fdatasync_rc_ok(-1));
+        assert!(
+            fdatasync_rc_ok_as_is(-1),
+            "AS-IS dente: ignore rc"
+        );
+        let dir = temp_dir();
+        let path = dir.join("wal.bin");
+        let mut f = File::create(&path).unwrap();
+        f.write_all(b"wal").unwrap();
+        fdatasync_file(&f).expect("live fdatasync_file rc==0 is Ok");
+        // Miri: `fdatasync` is only supported on file-backed fds (RFC-0073
+        // island script). Pipe ENOTSUP is a host-syscall tooth.
+        #[cfg(all(unix, not(miri)))]
+        {
+            use std::os::fd::FromRawFd;
+            extern "C" {
+                fn pipe(fds: *mut i32) -> i32;
+                fn close(fd: i32) -> i32;
+            }
+            let mut fds = [0i32; 2];
+            // SAFETY: POSIX `pipe(2)`; both fds are open on rc==0.
+            assert_eq!(unsafe { pipe(fds.as_mut_ptr()) }, 0);
+            // SAFETY: `fds[1]` is the write end we own. `fdatasync` on a
+            // pipe is ENOTSUP/EINVAL (nonzero rc). Drop closes the write end.
+            let w = unsafe { File::from_raw_fd(fds[1]) };
+            assert!(
+                fdatasync_file(&w).is_err(),
+                "live fdatasync_file nonzero rc is Err"
+            );
+            drop(w);
+            unsafe {
+                close(fds[0]);
+            }
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// RFC-0073 P0: production `fdatasync_file` on a real file; nonzero rc
     /// is not Ok. AS-IS would ignore the barrier error.
     #[test]
@@ -426,11 +470,12 @@ mod tests {
     }
 
     /// Darwin G1 is libSystem `fdatasync`, **not** `F_FULLFSYNC` (RFC-0036).
+    /// Host wall-clock class; Miri time is not the disk.
     /// Process crash after Ok is covered by WAL recover tests; drive-cache
     /// power-loss is the weaker class and cannot be simulated in-process.
     /// This test proves the *class*: file + dirfd barriers stay on the fast
     /// `fdatasync` side of `File::sync_all` (`F_FULLFSYNC`, ~100× here).
-    #[cfg(target_os = "macos")]
+    #[cfg(all(target_os = "macos", not(miri)))]
     #[test]
     fn darwin_fdatasync_and_dirfd_are_not_fullfsync_class() {
         use std::time::{Duration, Instant};
@@ -491,6 +536,7 @@ mod tests {
         );
         let _ = std::fs::remove_dir_all(&dir);
     }
+
     /// RFC-0156 P0.1 (R-unsafe-posix): every **production** `unsafe` FFI
     /// site that returns an rc must be gated in the same expression
     /// window (`posix_rc_to_io(rc)` / `rc == 0` / errno match). A new

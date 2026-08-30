@@ -109,17 +109,23 @@ impl AsRef<[u8]> for DBPinnableSlice<'_> {
     }
 }
 
-/// rust-rocksdb `Cache` (accepted; Pedra has its own block cache).
+/// rust-rocksdb `Cache` — byte budget for Pedra's SST block cache (RFC-0153).
 #[derive(Debug, Clone, Default)]
 pub struct Cache {
-    _cap: usize,
+    cap: usize,
 }
 
 impl Cache {
-    /// LRU cache of `size` bytes (no-op capacity on Pedra).
+    /// LRU cache of `size` bytes.
     #[must_use]
     pub fn new_lru_cache(size: usize) -> Self {
-        Self { _cap: size }
+        Self { cap: size }
+    }
+
+    /// Capacity in bytes.
+    #[must_use]
+    pub fn capacity(&self) -> usize {
+        self.cap
     }
 }
 
@@ -127,6 +133,7 @@ impl Cache {
 #[derive(Debug, Clone, Default)]
 pub struct BlockBasedOptions {
     pub(crate) checksum: ChecksumType,
+    pub(crate) block_cache_bytes: Option<u64>,
 }
 
 impl BlockBasedOptions {
@@ -134,8 +141,10 @@ impl BlockBasedOptions {
     pub fn set_block_size(&mut self, _n: usize) {}
     /// Bloom bits per key.
     pub fn set_bloom_filter(&mut self, _bits: f64, _block_based: bool) {}
-    /// Cache.
-    pub fn set_block_cache(&mut self, _c: &Cache) {}
+    /// Cache. Sizes Pedra's SST block cache (RFC-0153).
+    pub fn set_block_cache(&mut self, c: &Cache) {
+        self.block_cache_bytes = Some(c.capacity() as u64);
+    }
     /// Index/filter in block cache.
     pub fn set_cache_index_and_filter_blocks(&mut self, _v: bool) {}
     /// Pin L0 index/filter.

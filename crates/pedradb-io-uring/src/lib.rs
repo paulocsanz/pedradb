@@ -856,6 +856,45 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
     }
 
+    /// RFC-0152 P2.2.37: live `IoUringEnv` harvest gates CQE `res` through
+    /// `cqe_res_ok`. Negative res is Err; AS-IS would Ok a failed fsync.
+    /// Direct `cqe_negative_res_is_not_ok` / `linux_cqe_eio_is_not_ok` are
+    /// not this tooth. Production G1 stays POSIX (RFC-0062 / 0073).
+    #[test]
+    fn cqe_res_ok_on_live_uring_is_not_ok() {
+        assert!(!crate::cqe_kernel::cqe_res_ok(-5));
+        assert!(
+            crate::cqe_kernel::cqe_res_ok_as_is(-5),
+            "AS-IS dente: negative CQE looks Ok"
+        );
+        let env = IoUringEnv::new().unwrap();
+        let dir = temp_dir();
+        env.create_dir_all(&dir).unwrap();
+        let mut f = env.create(&dir.join("cqe.bin")).unwrap();
+        f.write_all(b"wal").unwrap();
+        f.sync_data().unwrap();
+        #[cfg(target_os = "linux")]
+        {
+            assert_eq!(env.backend(), IoBackend::IoUring);
+            assert!(
+                env.inject_next_cqe_res(-libc::EIO),
+                "live ring must accept CQE inject"
+            );
+            let err = f.sync_data().expect_err("EIO CQE must not be Ok");
+            assert_eq!(err.raw_os_error(), Some(libc::EIO));
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            assert_eq!(env.backend(), IoBackend::PosixFallback);
+            assert!(!io_uring_supported());
+            assert!(
+                !env.inject_next_cqe_res(-5),
+                "PosixFallback has no CQE harvest"
+            );
+        }
+        let _ = fs::remove_dir_all(&dir);
+    }
+
     /// RFC-0074 P0: negative CQE `res` is not Ok. On Linux this injects
     /// `-EIO` / `-ENOSPC` into the **live ring** harvest (`sync_data` /
     /// `write_all` under `cfg(test)`), so dropping [`cqe_res_ok`] from

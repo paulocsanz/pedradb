@@ -33,6 +33,10 @@
 //! `pld=1` means no-leader persist-leader is local so next_index repairs (RFC-0144).
 //! `std=1` means a planted Leader on the removed replica is stepped down (RFC-0145).
 //! `hnt=1` means remaining voter's leader_hint omits the removed replica (RFC-0146).
+//! `slot=1` means remaining voter forgets next/match/sent_through of the removed replica (RFC-0147).
+//! `sth=1` means remaining voter oob `remove_member` drops `sent_through` of a remote replica (RFC-0148).
+//! `pj=1` means planted committed C-old,new without leave refuses C-old majority (RFC-0068).
+//! Default / `--leave-joint` fingerprints add `sth=`/`pj=` (3 still in `ids`). `--remove-member` omits them.
 //!
 //! Fingerprint is **outcomes** (put/get/kill/restart), not a World
 //! `trace_hash` — TCP elect uses wall-tick so the leader id is not
@@ -56,8 +60,9 @@ use pedradb_store::{
     l28_tcp_napply_retry_admitted, l28_tcp_nowms_ok,
     l28_tcp_dsc_ok, l28_tcp_hnt_ok, l28_tcp_lid_ok, l28_tcp_odrop_ok, l28_tcp_part_ok,
     l28_tcp_peer_ok, l28_tcp_pld_ok, l28_tcp_plant_ok, l28_tcp_pre_ok, l28_tcp_rdr_ok,
-    l28_tcp_std_ok, l28_tcp_trunc_ok, liveness_admitted, tcp_node_disk_high_water,
-    tcp_node_disk_left_joint, tcp_node_hint_ok, tcp_node_recover_apply_ok,
+    l28_tcp_pj_ok, l28_tcp_slot_ok, l28_tcp_std_ok, l28_tcp_sth_ok, l28_tcp_trunc_ok,
+    liveness_admitted, tcp_node_disk_high_water, tcp_node_disk_left_joint, tcp_node_drop_repl_ok,
+    tcp_node_drop_st_ok, tcp_node_hint_ok, tcp_node_plant_joint_ok, tcp_node_recover_apply_ok,
     tcp_node_removed_abort_ok, tcp_node_removed_clear_ok, tcp_node_removed_dsc_ok,
     tcp_node_removed_fence_ok, tcp_node_removed_hist_ok, tcp_node_removed_lid_ok,
     tcp_node_removed_not_participating, tcp_node_removed_now_ms_ok,
@@ -345,10 +350,21 @@ fn run(seed: u64, kill_leader: bool, do_leave: bool, do_remove: bool) -> String 
     let mut pld_ok = 0u8;
     let mut std_ok = 0u8;
     let mut hnt_ok = 0u8;
+    let mut slot_ok = 0u8;
+    let mut sth_ok = 0u8;
+    let mut pj_ok = 0u8;
     if do_remove {
         let _ = wait_leaders(&addrs, Duration::from_secs(15));
         if remove_any(&addrs, 3, Duration::from_secs(20)) {
             remove_ok = 1;
+        }
+        // Joint is still C-old∪C-new: n3 must catch the remove AE before leave
+        // applies on the leader and drops the replication slot.
+        for _ in 0..25 {
+            for a in &addrs {
+                let _ = client_tick(a, 8);
+            }
+            thread::sleep(Duration::from_millis(40));
         }
         for a in &addrs {
             let _ = client_tick(a, 4);
@@ -359,13 +375,30 @@ fn run(seed: u64, kill_leader: bool, do_leave: bool, do_remove: bool) -> String 
         }
         // Leave is appended as NotCommitted; ticks let it majority-commit
         // and apply so load_range_peer keeps it (uncommitted suffix is dropped).
-        // Require every live process (including n3) to omit 3: {1,2} can
-        // commit leave without n3, and SIGKILL then leaves disk membership
-        // with 3 — every 0131+ removed-replica helper returns false.
-        let _ = wait_member_gone(&addrs, 3, Duration::from_secs(20));
-        for a in &addrs {
-            let _ = client_tick(a, 4);
+        // Require **n3** to omit 3 before SIGKILL: {1,2} can commit leave
+        // without n3, and killing then leaves disk membership with 3 —
+        // every 0131+ removed-replica helper returns false (`napply=0`).
+        let n3 = &addrs[2];
+        let mut n3_left = wait_member_gone(std::slice::from_ref(n3), 3, Duration::from_secs(20));
+        if !n3_left {
+            for _ in 0..80 {
+                for a in &addrs {
+                    let _ = client_tick(a, 8);
+                }
+                if wait_member_gone(std::slice::from_ref(n3), 3, Duration::from_millis(250)) {
+                    n3_left = true;
+                    break;
+                }
+            }
         }
+        let _ = wait_member_gone(&addrs[..2], 3, Duration::from_secs(5));
+        for _ in 0..8 {
+            for a in &addrs {
+                let _ = client_tick(a, 4);
+            }
+            thread::sleep(Duration::from_millis(40));
+        }
+        let _ = n3_left;
         for c in &mut kids.0 {
             let _ = c.kill();
             let _ = c.wait();
@@ -466,20 +499,43 @@ fn run(seed: u64, kill_leader: bool, do_leave: bool, do_remove: bool) -> String 
             &[1, 2, 3],
             3,
         ));
+        slot_ok = u8::from(tcp_node_drop_repl_ok(
+            &parent.join("n1"),
+            1,
+            &[1, 2, 3],
+            3,
+        ));
+    } else {
+        for c in &mut kids.0 {
+            let _ = c.kill();
+            let _ = c.wait();
+        }
+        pj_ok = u8::from(tcp_node_plant_joint_ok(
+            &parent.join("n1"),
+            1,
+            &[1, 2, 3],
+            4,
+        ));
+        sth_ok = u8::from(tcp_node_drop_st_ok(
+            &parent.join("n1"),
+            1,
+            &[1, 2, 3],
+            3,
+        ));
     }
     let _ = std::fs::remove_dir_all(&parent);
     let kind = if kill_leader { "leader" } else { "node" };
     if do_remove {
         format!(
-            "seed={seed:x} kill={kind} put=1 get={get_ok} after={kill_ok} restart={restart_ok} remove={remove_ok} leave={leave_ok} left={left_ok} hw={hw_ok} part={part_ok} apply={apply_ok} napply={napply_ok} trunc={trunc_ok} odrop={odrop_ok} abort={abort_ok} nowms={nowms_ok} hist={hist_ok} fence={fence_ok} clear={clear_ok} pre={pre_ok} peer={peer_ok} lid={lid_ok} rdr={rdr_ok} dsc={dsc_ok} pld={pld_ok} std={std_ok} hnt={hnt_ok}"
+            "seed={seed:x} kill={kind} put=1 get={get_ok} after={kill_ok} restart={restart_ok} remove={remove_ok} leave={leave_ok} left={left_ok} hw={hw_ok} part={part_ok} apply={apply_ok} napply={napply_ok} trunc={trunc_ok} odrop={odrop_ok} abort={abort_ok} nowms={nowms_ok} hist={hist_ok} fence={fence_ok} clear={clear_ok} pre={pre_ok} peer={peer_ok} lid={lid_ok} rdr={rdr_ok} dsc={dsc_ok} pld={pld_ok} std={std_ok} hnt={hnt_ok} slot={slot_ok}"
         )
     } else if do_leave {
         format!(
-            "seed={seed:x} kill={kind} put=1 get={get_ok} after={kill_ok} restart={restart_ok} leave={leave_ok}"
+            "seed={seed:x} kill={kind} put=1 get={get_ok} after={kill_ok} restart={restart_ok} leave={leave_ok} sth={sth_ok} pj={pj_ok}"
         )
     } else {
         format!(
-            "seed={seed:x} kill={kind} put=1 get={get_ok} after={kill_ok} restart={restart_ok}"
+            "seed={seed:x} kill={kind} put=1 get={get_ok} after={kill_ok} restart={restart_ok} sth={sth_ok} pj={pj_ok}"
         )
     }
 }
@@ -636,10 +692,36 @@ fn main() {
             eprintln!("L28 TCP remaining-voter leader-hint miss: {line}");
             std::process::exit(1);
         }
+        let slot_ok = line.contains("slot=1");
+        if !l28_tcp_slot_ok(slot_ok) {
+            eprintln!("L28 TCP remaining-voter repl-slot miss: {line}");
+            std::process::exit(1);
+        }
     } else if do_leave {
         let leave_ok = line.contains("leave=1");
         if !l28_tcp_leave_ok(leave_ok) {
             eprintln!("L28 TCP leave miss: {line}");
+            std::process::exit(1);
+        }
+        let sth_ok = line.contains("sth=1");
+        if !l28_tcp_sth_ok(sth_ok) {
+            eprintln!("L28 TCP remaining-voter oob sent_through miss: {line}");
+            std::process::exit(1);
+        }
+        let pj_ok = line.contains("pj=1");
+        if !l28_tcp_pj_ok(pj_ok) {
+            eprintln!("L28 TCP planted committed-joint-without-leave miss: {line}");
+            std::process::exit(1);
+        }
+    } else {
+        let sth_ok = line.contains("sth=1");
+        if !l28_tcp_sth_ok(sth_ok) {
+            eprintln!("L28 TCP remaining-voter oob sent_through miss: {line}");
+            std::process::exit(1);
+        }
+        let pj_ok = line.contains("pj=1");
+        if !l28_tcp_pj_ok(pj_ok) {
+            eprintln!("L28 TCP planted committed-joint-without-leave miss: {line}");
             std::process::exit(1);
         }
     }

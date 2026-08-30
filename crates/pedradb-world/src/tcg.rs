@@ -48,3 +48,35 @@ pub fn world_runs_guest_ssh() -> bool {
 pub fn world_runs_guest_ssh_as_is() -> bool {
     true
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Catalog three-teeth plant. Direct `claim_tcg_guest_refused_on_native_world`
+    /// is **not** this tooth.
+    #[test]
+    fn tcg_guest_admitted_on_live_world_is_not_ok() {
+        assert!(!tcg_guest_admitted(false));
+        assert!(
+            tcg_guest_admitted_as_is(false),
+            "AS-IS dente: native World would claim TCG guest coverage"
+        );
+        let parent = crate::temp_parent("tcg-0152");
+        let cfg = crate::WorldConfig {
+            n_nodes: 3,
+            n_ranges: 1,
+            schedule_steps: 8,
+            parent: parent.clone(),
+            mem_storage: true,
+            ..Default::default()
+        };
+        let t = crate::World::new(0x0152_0143, cfg).run().unwrap();
+        assert!(!t.events.is_empty(), "World::run must actually schedule");
+        assert!(
+            !t.claim_tcg_guest(),
+            "live native World must refuse TCG guest coverage"
+        );
+        let _ = std::fs::remove_dir_all(&parent);
+    }
+}

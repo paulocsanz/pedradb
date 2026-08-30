@@ -50,31 +50,43 @@ fn fresh_dir(tag: &str) -> PathBuf {
 
 #[test]
 fn key_in_cf_family_on_live_scan_is_not_ok() {
+    assert!(!key_in_cf_family(b"lock\0k", "default"));
+    assert!(
+        key_in_cf_family_as_is(b"lock\0k", "default"),
+        "AS-IS dente: CF scan leak — lock key treated as default"
+    );
     let dir = fresh_dir("cf");
     let env = FailingEnv::passing();
     let mut db = Db::open_with_env(&dir, opts(), env).unwrap();
     db.set_physical_cfs(vec!["default".into(), "lock".into()]);
+    db.set_defer_auto_compact(true);
     db.put(b"lock\0k", b"L").unwrap();
     db.put(b"default\0d", b"D").unwrap();
-    let scanned: Vec<Vec<u8>> = db
-        .range_limited(Bound::Unbounded, Bound::Unbounded, None)
-        .into_iter()
-        .filter(|(k, _)| key_in_cf_family(k, "default"))
-        .map(|(k, _)| k.to_vec())
-        .collect();
+    db.flush().unwrap();
+    let meta = db.live_sst_meta();
+    let default_ssts: Vec<_> = meta.iter().filter(|m| m.cf == "default").collect();
+    let lock_ssts: Vec<_> = meta.iter().filter(|m| m.cf == "lock").collect();
     assert!(
-        scanned.iter().any(|k| k.as_slice() == b"default\0d"),
-        "default key must scan"
+        !default_ssts.is_empty(),
+        "flush must emit a default SST, meta={meta:?}"
     );
     assert!(
-        !scanned.iter().any(|k| k.as_slice() == b"lock\0k"),
-        "lock key must not scan as default"
+        !lock_ssts.is_empty(),
+        "flush must emit a lock SST, meta={meta:?}"
     );
-    assert!(
-        key_in_cf_family_as_is(b"lock\0k", "default"),
-        "AS-IS dente: CF scan leak"
-    );
-    assert!(!key_in_cf_family(b"lock\0k", "default"));
+    for s in &default_ssts {
+        assert!(
+            key_in_cf_family(&s.start_key, "default")
+                && key_in_cf_family(&s.end_key, "default"),
+            "default SST bounds must not be the lock family: {s:?}"
+        );
+        assert!(
+            !s.start_key.starts_with(b"lock\0") && !s.end_key.starts_with(b"lock\0"),
+            "AS-IS leak would flush lock keys into the default SST"
+        );
+    }
+    assert_eq!(db.get(b"lock\0k").as_deref(), Some(b"L".as_ref()));
+    assert_eq!(db.get(b"default\0d").as_deref(), Some(b"D".as_ref()));
     db.close().unwrap();
     let _ = fs::remove_dir_all(&dir);
 }

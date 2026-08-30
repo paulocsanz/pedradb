@@ -60,7 +60,7 @@ use std::time::{Duration, Instant};
 use bytes::Bytes;
 
 use crate::batch::{WriteOp, WriteRecord};
-use crate::cache::{AnswerCache, BlockCache, PointCache, TableCache};
+use crate::cache::{AnswerCache, BlockCache, KeyGenMap, PointCache, TableCache};
 use crate::change_feed::{ChangeEntry, ChangeKind, ChangeLog};
 use crate::changelog_kernel::{changelog_needs_sst_rebuild, changelog_should_store};
 use crate::env::{Env, EnvFile, StdEnv};
@@ -333,6 +333,8 @@ pub struct DbStats {
     pub block_cache_hits: u64,
     /// Block-cache misses.
     pub block_cache_misses: u64,
+    /// Block-cache occupancy in bytes (Rocks `block-cache-usage`).
+    pub block_cache_bytes: u64,
     /// Times auto-compact failed after a successful flush (flush still returned `Ok`).
     pub auto_compact_failures: u64,
     /// Most recent auto-compact error after flush (empty if never failed).
@@ -1018,6 +1020,11 @@ pub struct Db<E: Env = StdEnv> {
     /// Bumped in [`Self::invalidate_read_answers`]. Compat TLS last-count
     /// (`deps_scan` zipf) checks this without encoding or locking the cache.
     read_cache_epoch: Arc<AtomicU64>,
+    /// Fat-apply epoch for compat TLS last-get. 1-key puts leave this still
+    /// and bump [`Self::key_gen`] instead (RFC-0154 P1.5).
+    point_tls_epoch: Arc<AtomicU64>,
+    /// Per-encoded-key generation for 1-key TLS invalidation.
+    key_gen: Arc<KeyGenMap>,
     /// RFC-0045 P0.1 phase timings (`PEDRA_WRITE_PHASE_STATS=1`).
     phase_stats: Option<Arc<WritePhaseStats>>,
     /// RFC-0047 P0.2: set when a [`WalRecovery::PointInTime`] open discarded
@@ -1517,6 +1524,8 @@ impl<E: Env> Db<E> {
             last_prefix_cache,
             count_cache,
             read_cache_epoch: Arc::new(AtomicU64::new(1)),
+            point_tls_epoch: Arc::new(AtomicU64::new(1)),
+            key_gen: Arc::new(KeyGenMap::new()),
             phase_stats: std::env::var_os("PEDRA_WRITE_PHASE_STATS")
                 .map(|_| Arc::new(WritePhaseStats::default())),
             last_recovery: point_in_time_report,
@@ -1703,6 +1712,18 @@ impl<E: Env> Db<E> {
     #[must_use]
     pub fn read_cache_epoch_handle(&self) -> Arc<AtomicU64> {
         Arc::clone(&self.read_cache_epoch)
+    }
+
+    /// Fat-apply epoch for compat TLS last-get (RFC-0154 P1.5).
+    #[must_use]
+    pub fn point_tls_epoch_handle(&self) -> Arc<AtomicU64> {
+        Arc::clone(&self.point_tls_epoch)
+    }
+
+    /// Per-key TLS generation map (RFC-0154 P1.5).
+    #[must_use]
+    pub(crate) fn key_gen_handle(&self) -> Arc<KeyGenMap> {
+        Arc::clone(&self.key_gen)
     }
 
     /// Published sequence handle (ConcurrentDb OCC begin, no Db lock).
@@ -2038,6 +2059,14 @@ impl<E: Env> Db<E> {
         out
     }
 
+    /// Stall knobs off (parity default): collecting CF families is unused.
+    /// RFC-0149 P2.1: `batch_families` used to `to_string()` on every 1c put.
+    fn write_admission_idle(&self) -> bool {
+        self.write_stall_mem_bytes.is_none()
+            && self.write_pressure_l0.is_none()
+            && self.write_stall_l0.is_none()
+    }
+
     /// Whether flush/compact split by CF family.
     #[must_use]
     pub fn physical_cfs(&self) -> &[String] {
@@ -2063,6 +2092,12 @@ impl<E: Env> Db<E> {
     #[must_use]
     pub fn block_cache(&self) -> &BlockCache {
         &self.block_cache
+    }
+
+    /// Replace the SST block cache (RFC-0153). Empty — call before serving
+    /// reads. `None` restores the 8192-entry default; `Some(n)` is a byte budget.
+    pub fn install_block_cache(&mut self, cache: BlockCache) {
+        self.block_cache = cache;
     }
 
     /// Capture a read snapshot of currently committed state (sequence export).
@@ -3041,7 +3076,7 @@ impl<E: Env> Db<E> {
         }
         let vlog = self.vlog.as_ref().expect("just opened");
         let mut guard = vlog.lock();
-        let (off, len, crc) = guard.append_pending(value.as_ref())?;
+        let (off, len, crc) = guard.append_pending_bytes(value)?;
         drop(guard);
         Ok(vlog::encode_vlog_ptr(vlog::VlogPtr {
             file_num: self.blob_active,
@@ -3561,6 +3596,13 @@ impl<E: Env> Db<E> {
         }
         self.last_prefix_cache.clear();
         self.read_cache_epoch.fetch_add(1, Ordering::Release);
+        // RFC-0154 P1.5: 1-key put bumps one TLS gen bucket so zipf gets of
+        // other keys stay cached. Fat apply / unknown dirt still epoch-bumps.
+        if reset || keys.len() != 1 {
+            self.point_tls_epoch.fetch_add(1, Ordering::Release);
+        } else {
+            self.key_gen.touch(&keys[0]);
+        }
     }
 
     /// Distinct visible user keys in `[start, end)` at `snapshot`, capped at
@@ -3576,6 +3618,33 @@ impl<E: Env> Db<E> {
     ) -> usize {
         if snapshot == 0 {
             return 0;
+        }
+        let cap = limit.unwrap_or(usize::MAX);
+        // deps_scan / kvrocks_scan: one memtable, no SST, latest snapshot —
+        // count the live tail index (RFC-0154).
+        if self.ssts.is_empty() {
+            let mut only: Option<&MemTable> = None;
+            let mut many = false;
+            for t in self.scan_mem_layers() {
+                if t.is_empty() {
+                    continue;
+                }
+                if only.is_some() {
+                    many = true;
+                    break;
+                }
+                only = Some(t);
+            }
+            if !many {
+                if let Some(t) = only {
+                    if let Some(n) = t.count_latest_in_range(start, end, cap, snapshot) {
+                        self.scan_ops.fetch_add(1, Ordering::Relaxed);
+                        return n;
+                    }
+                } else {
+                    return 0;
+                }
+            }
         }
         self.scan_ops.fetch_add(1, Ordering::Relaxed);
         // Range tombstones first (G2), exactly like `scan_at_raw`.
@@ -3625,7 +3694,6 @@ impl<E: Env> Db<E> {
                 cursors.push(c);
             }
         }
-        let cap = limit.unwrap_or(usize::MAX);
         let mut count = 0usize;
         // Single-cursor fast path: the k-way min-head scan is pure overhead
         // when only one layer overlaps the window (deps-scan state: one
@@ -3891,6 +3959,7 @@ impl<E: Env> Db<E> {
             table_cache_misses: self.table_cache.misses(),
             block_cache_hits: self.block_cache.hits(),
             block_cache_misses: self.block_cache.misses(),
+            block_cache_bytes: self.block_cache.used_bytes(),
             auto_compact_failures: self.auto_compact_failures,
             last_auto_compact_error: self.last_auto_compact_error.clone().unwrap_or_default(),
             wal_sync_count: self.wal_sync_count.load(Ordering::Relaxed),
@@ -6456,8 +6525,10 @@ impl<E: Env> Db<E> {
         durability: WriteOptions,
     ) -> Result<SequenceNumber> {
         let batch: Vec<BatchOp> = batch.into_iter().collect();
-        let families = self.batch_families(&batch);
-        self.ensure_write_admitted_for(&families)?;
+        if !self.write_admission_idle() {
+            let families = self.batch_families(&batch);
+            self.ensure_write_admitted_for(&families)?;
+        }
         // Assign sequences only for this attempt; roll back `next_seq` if WAL fails
         // so a failed multi-op does not burn sequence space (TX denser / mid-commit).
         let seq_checkpoint = self.next_seq;
@@ -6554,6 +6625,8 @@ impl<E: Env> Db<E> {
         let point_cache = Arc::clone(&self.point_cache);
         let count_cache = Arc::clone(&self.count_cache);
         let read_cache_epoch = Arc::clone(&self.read_cache_epoch);
+        let point_tls_epoch = Arc::clone(&self.point_tls_epoch);
+        let key_gen = Arc::clone(&self.key_gen);
         let published_seq = Arc::clone(&self.published_seq);
         // Detach the old shell: persist what we can, release the dir lock
         // (Drop then has nothing left to release). Do NOT flush the WAL —
@@ -6576,9 +6649,12 @@ impl<E: Env> Db<E> {
         point_cache.clear();
         count_cache.clear();
         read_cache_epoch.fetch_add(1, Ordering::Release);
+        point_tls_epoch.fetch_add(1, Ordering::Release);
         db.point_cache = point_cache;
         db.count_cache = count_cache;
         db.read_cache_epoch = read_cache_epoch;
+        db.point_tls_epoch = point_tls_epoch;
+        db.key_gen = key_gen;
         db.published_seq = published_seq;
         let replayed_through = db.last_sequence();
         db.publish_sequence(replayed_through);
@@ -6769,6 +6845,17 @@ impl<E: Env> Db<E> {
         &mut self,
         batch: impl IntoIterator<Item = BatchOp>,
     ) -> Result<(Vec<WriteOp>, SequenceNumber)> {
+        self.prepare_write_ops_spill(batch, true)
+    }
+
+    /// Assign sequences. `spill` rewrites large values into the vlog (G1).
+    /// Async coluna A (`commit_async_ops`) keeps the payload in the WAL —
+    /// same class as Rocks `sync=false` (RFC-0149 P2.1 blob).
+    pub(crate) fn prepare_write_ops_spill(
+        &mut self,
+        batch: impl IntoIterator<Item = BatchOp>,
+        spill: bool,
+    ) -> Result<(Vec<WriteOp>, SequenceNumber)> {
         self.ensure_not_fenced()?;
         let seq_checkpoint = self.next_seq;
         let batch = batch.into_iter();
@@ -6784,12 +6871,16 @@ impl<E: Env> Db<E> {
             match op {
                 BatchOp::Put { key, value } => {
                     self.bytes_ingested = self.bytes_ingested.saturating_add(value.len() as u64);
-                    let stored = match self.maybe_spill_large_value(value) {
-                        Ok(v) => v,
-                        Err(e) => {
-                            self.next_seq = seq_checkpoint;
-                            return Err(e);
+                    let stored = if spill {
+                        match self.maybe_spill_large_value(value) {
+                            Ok(v) => v,
+                            Err(e) => {
+                                self.next_seq = seq_checkpoint;
+                                return Err(e);
+                            }
                         }
+                    } else {
+                        escape_inline_value(value)
                     };
                     records.push(WriteOp::put(seq, key, stored));
                 }
@@ -6807,6 +6898,39 @@ impl<E: Env> Db<E> {
         crate::batch::share_consecutive_equal_values(&mut records);
         let last = records.last().map_or(self.last_sequence(), |o| o.sequence);
         Ok((records, last))
+    }
+
+    /// Single-op form of [`Self::prepare_write_ops_spill`] (RFC-0154 P1.6).
+    fn prepare_one_spill(&mut self, op: BatchOp, spill: bool) -> Result<(WriteOp, SequenceNumber)> {
+        self.ensure_not_fenced()?;
+        let seq_checkpoint = self.next_seq;
+        let seq = match self.alloc_seq() {
+            Ok(s) => s,
+            Err(e) => {
+                self.next_seq = seq_checkpoint;
+                return Err(e);
+            }
+        };
+        let rec = match op {
+            BatchOp::Put { key, value } => {
+                self.bytes_ingested = self.bytes_ingested.saturating_add(value.len() as u64);
+                let stored = if spill {
+                    match self.maybe_spill_large_value(value) {
+                        Ok(v) => v,
+                        Err(e) => {
+                            self.next_seq = seq_checkpoint;
+                            return Err(e);
+                        }
+                    }
+                } else {
+                    escape_inline_value(value)
+                };
+                WriteOp::put(seq, key, stored)
+            }
+            BatchOp::Delete { key } => WriteOp::delete(seq, key),
+            BatchOp::DeleteRange { start, end } => WriteOp::delete_range(seq, start, end),
+        };
+        Ok((rec, seq))
     }
 
     /// One WAL `fdatasync` for a group of already-appended records.
@@ -6831,11 +6955,13 @@ impl<E: Env> Db<E> {
     /// no `fdatasync`, no write-group. Tail &lt; 64 KiB may sit until the
     /// next flush / close (Rocks `sync=false`).
     pub(crate) fn commit_async_ops(&mut self, batch: Vec<BatchOp>) -> Result<SequenceNumber> {
-        let families = self.batch_families(&batch);
-        self.ensure_write_admitted_for(&families)?;
+        if !self.write_admission_idle() {
+            let families = self.batch_families(&batch);
+            self.ensure_write_admitted_for(&families)?;
+        }
         let st = self.phase_stats.clone();
         let t0 = st.as_ref().map(|_| Instant::now());
-        let (ops, seq) = self.prepare_write_ops(batch)?;
+        let (ops, seq) = self.prepare_write_ops_spill(batch, false)?;
         if let (Some(st), Some(t0)) = (st.as_ref(), t0) {
             st.prepare_ns
                 .fetch_add(t0.elapsed().as_nanos() as u64, Ordering::Relaxed);
@@ -6883,6 +7009,58 @@ impl<E: Env> Db<E> {
         Ok(seq)
     }
 
+    /// Lone-async 1-op put/delete: no `Vec<BatchOp>` / `Vec<WriteOp>`
+    /// (RFC-0154 P1.6). Same WAL bytes as [`Self::commit_async_ops`].
+    pub(crate) fn commit_async_one(&mut self, batch: BatchOp) -> Result<SequenceNumber> {
+        if !self.write_admission_idle() {
+            let families = self.batch_families(std::slice::from_ref(&batch));
+            self.ensure_write_admitted_for(&families)?;
+        }
+        let st = self.phase_stats.clone();
+        let t0 = st.as_ref().map(|_| Instant::now());
+        let (op, seq) = self.prepare_one_spill(batch, false)?;
+        if let (Some(st), Some(t0)) = (st.as_ref(), t0) {
+            st.prepare_ns
+                .fetch_add(t0.elapsed().as_nanos() as u64, Ordering::Relaxed);
+        }
+        self.vlog_prepare_wal(false)?;
+        {
+            let t1 = st.as_ref().map(|_| Instant::now());
+            let mut w = self.wal.lock();
+            w.encode_write_op_batches(&[std::slice::from_ref(&op)])?;
+            w.write_pending_frame_if(false)?;
+            if let (Some(st), Some(t1)) = (st.as_ref(), t1) {
+                st.wal_ns
+                    .fetch_add(t1.elapsed().as_nanos() as u64, Ordering::Relaxed);
+            }
+        }
+        if !self.feed_is_lazy() {
+            self.change_log
+                .extend(std::iter::once(ChangeEntry::from_write_op(&op)));
+        }
+        let t2 = st.as_ref().map(|_| Instant::now());
+        self.note_dirty_points(std::slice::from_ref(&op));
+        apply_ops_owned(&mut self.mem, std::iter::once(op));
+        if let (Some(st), Some(t2)) = (st.as_ref(), t2) {
+            st.mem_ns
+                .fetch_add(t2.elapsed().as_nanos() as u64, Ordering::Relaxed);
+        }
+        let t3 = st.as_ref().map(|_| Instant::now());
+        self.publish_sequence(seq);
+        if let (Some(st), Some(t3)) = (st.as_ref(), t3) {
+            st.publish_ns
+                .fetch_add(t3.elapsed().as_nanos() as u64, Ordering::Relaxed);
+        }
+        let t4 = st.as_ref().map(|_| Instant::now());
+        self.maybe_auto_flush_best_effort();
+        if let (Some(st), Some(t4)) = (st.as_ref(), t4) {
+            st.flush_check_ns
+                .fetch_add(t4.elapsed().as_nanos() as u64, Ordering::Relaxed);
+            st.commits.fetch_add(1, Ordering::Relaxed);
+        }
+        Ok(seq)
+    }
+
     /// Sequential G1 client: prepare, one WAL lock (encode + `write` +
     /// `fdatasync`), apply, publish. Skips [`GroupInFlight`] — that path
     /// still encodes under one lock and write+fd under another (RFC-0062
@@ -6892,8 +7070,10 @@ impl<E: Env> Db<E> {
         if ops.is_empty() {
             return Ok(self.last_sequence());
         }
-        let families = self.batch_families(&ops);
-        self.ensure_write_admitted_for(&families)?;
+        if !self.write_admission_idle() {
+            let families = self.batch_families(&ops);
+            self.ensure_write_admitted_for(&families)?;
+        }
         let (records, seq) = self.prepare_write_ops(ops)?;
         if records.is_empty() {
             return Ok(seq);
@@ -8513,7 +8693,7 @@ fn apply_record(mem: &mut MemTable, rec: &WriteRecord) {
 }
 
 /// RFC-0040: move `WriteOp` Bytes into the memtable (no extra payload memcpy).
-fn apply_ops_owned(mem: &mut MemTable, ops: Vec<WriteOp>) {
+fn apply_ops_owned(mem: &mut MemTable, ops: impl IntoIterator<Item = WriteOp>) {
     mem.insert_many(ops.into_iter().map(|op| {
         (
             crate::key::InternalKey::new(op.key, op.sequence, op.kind),
@@ -8800,6 +8980,34 @@ mod tests {
             "AS-IS dente: fsync Ok would claim the drive"
         );
         assert!(!crate::group_commit_kernel::media_durable_admitted(true));
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Catalog three-teeth plant. Direct `fsync_ok_is_not_media_proof` /
+    /// `claim_media_durable_refused_after_fsync_ok` are **not** this tooth.
+    #[test]
+    fn media_durable_admitted_on_live_db_is_not_ok() {
+        assert!(!crate::group_commit_kernel::media_durable_admitted(true));
+        assert!(
+            crate::group_commit_kernel::media_durable_admitted_as_is(true),
+            "AS-IS dente: fsync Ok is rounded to a media theorem"
+        );
+        let dir = temp_dir();
+        let mut db = Db::open_with(
+            &dir,
+            OpenOptions {
+                exclusive: true,
+                ..OpenOptions::default()
+            },
+        )
+        .unwrap();
+        db.put(b"media/k", b"media/v").unwrap();
+        assert_eq!(db.get(b"media/k").as_deref(), Some(&b"media/v"[..]));
+        assert!(
+            !db.claim_media_durable(),
+            "live Db after fdatasync Ok must refuse a media-proof claim"
+        );
         db.close().unwrap();
         let _ = fs::remove_dir_all(&dir);
     }
@@ -11428,6 +11636,37 @@ mod tests {
         assert!(
             db.live_sst_meta().is_empty(),
             "64 MiB cap must not flush 20k tiny keys"
+        );
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0149 P2.1: stall-off (parity default) still writes physical-CF
+    /// keys; stall-on still refuses using the CF of the batch, not a String
+    /// copy per put.
+    #[test]
+    fn physical_cf_idle_admission_still_stalls_when_armed() {
+        let dir = temp_dir();
+        let mut db = Db::open_with(
+            &dir,
+            OpenOptions {
+                auto_flush_bytes: None,
+                sync: false,
+                ..OpenOptions::default()
+            },
+        )
+        .unwrap();
+        db.set_physical_cfs(vec!["default".into(), "lock".into()]);
+        let mut k = [0u8; 9];
+        k[..7].copy_from_slice(b"default");
+        k[7] = 0;
+        k[8] = b'a';
+        db.put(&k, b"v").unwrap();
+        db.set_write_stall_mem_bytes(Some(8));
+        let err = db.put(&k, &vec![b'x'; 64]).unwrap_err();
+        assert!(
+            matches!(err, CoreError::WriteStallMem { .. }),
+            "expected WriteStallMem, got {err:?}"
         );
         db.close().unwrap();
         let _ = fs::remove_dir_all(&dir);
@@ -14958,6 +15197,82 @@ mod tests {
             .scan_at_raw(snap, Bound::Unbounded, Bound::Unbounded, None, false)
             .count();
         assert_eq!(fast, slow);
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0154: apply_batch (≥16 ops → insert_many) of default-raw keys
+    /// must keep the live tail idx so count_visible matches scan without a
+    /// full-tail replay.
+    #[test]
+    fn apply_batch_raw_keys_count_visible_matches_scan() {
+        let dir = temp_dir();
+        let mut db = Db::open(&dir).unwrap();
+        let ops: Vec<BatchOp> = (0..64u32)
+            .map(|i| {
+                let k = format!("k{i:04}").into_bytes();
+                BatchOp::put(k, b"x")
+            })
+            .collect();
+        db.apply_batch(ops).unwrap();
+        let snap = db.last_sequence();
+        let start = b"k0010".as_slice();
+        let end = b"k0035".as_slice();
+        let fast = db.count_visible(snap, Bound::Included(start), Bound::Excluded(end), Some(25));
+        let slow = db
+            .scan_at_raw(
+                snap,
+                Bound::Included(start),
+                Bound::Excluded(end),
+                Some(25),
+                false,
+            )
+            .count();
+        assert_eq!(fast, slow);
+        assert_eq!(fast, 25);
+        for i in 0..64u32 {
+            let k = format!("k{i:04}").into_bytes();
+            assert_eq!(db.get(&k).as_deref(), Some(b"x".as_ref()), "k={i}");
+        }
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0154 P1.2: apply_batch of `write\0` keys, then reverse-seek
+    /// (`last_under_user_prefix`) + count match `get` / scan (ordered shard).
+    #[test]
+    fn apply_batch_write_cf_last_matches_get() {
+        let dir = temp_dir();
+        let mut db = Db::open(&dir).unwrap();
+        let ops: Vec<BatchOp> = (0..64u32)
+            .map(|u| {
+                let mut k = b"write\0u/".to_vec();
+                k.extend_from_slice(format!("{u:02}").as_bytes());
+                BatchOp::put(k, b"c")
+            })
+            .collect();
+        db.apply_batch(ops).unwrap();
+        let snap = db.last_sequence();
+        let last = db
+            .last_under_user_prefix(snap, b"write\0u/10")
+            .unwrap()
+            .expect("write prefix in mem");
+        assert!(last.starts_with(b"write\0u/10"), "{last:?}");
+        assert_eq!(db.get(&last).as_deref(), Some(b"c".as_ref()));
+        let start = b"write\0u/10".as_slice();
+        let end = b"write\0u/35".as_slice();
+        let fast = db.count_visible(snap, Bound::Included(start), Bound::Excluded(end), Some(25));
+        let slow = db
+            .scan_at_raw(
+                snap,
+                Bound::Included(start),
+                Bound::Excluded(end),
+                Some(25),
+                false,
+            )
+            .count();
+        assert_eq!(fast, slow);
+        assert_eq!(fast, 25);
         db.close().unwrap();
         let _ = fs::remove_dir_all(&dir);
     }

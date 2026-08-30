@@ -6,7 +6,9 @@
 //! - [`PointCache`]: latest-snapshot point-get answers (invalidated on write).
 
 use std::collections::HashMap;
+use std::hash::Hasher;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use bytes::Bytes;
@@ -151,6 +153,8 @@ struct CachedSlot {
     block: CachedBlock,
     /// Recency tick; higher is hotter. Evict min-tick on overflow.
     tick: u64,
+    /// Key + value + 16 B trailer estimate (RFC-0153).
+    bytes: u64,
 }
 
 #[derive(Debug, Default)]
@@ -159,13 +163,23 @@ struct BlockCacheInner {
     /// Monotonic recency. Hit is O(1) — a `VecDeque` walk on every hit was
     /// O(capacity) and ate `deps_scan` after the cache grew to 8192 (RFC-0035).
     tick: u64,
+    /// Max entries; `0` = no entry cap.
     capacity: usize,
+    /// Max payload bytes; `0` = no byte cap (RFC-0153).
+    budget_bytes: u64,
+    used_bytes: u64,
     hits: u64,
     misses: u64,
 }
 
+fn block_payload_bytes(block: &[(InternalKey, Bytes)]) -> u64 {
+    block.iter().fold(0u64, |acc, (k, v)| {
+        acc.saturating_add((k.user_key.len() + v.len() + 16) as u64)
+    })
+}
+
 impl BlockCache {
-    /// Create with max cached blocks (`0` = unlimited).
+    /// Create with max cached blocks (`0` = unlimited entry count).
     #[must_use]
     pub fn new(capacity: usize) -> Self {
         Self {
@@ -173,6 +187,27 @@ impl BlockCache {
                 map: HashMap::new(),
                 tick: 0,
                 capacity,
+                budget_bytes: 0,
+                used_bytes: 0,
+                hits: 0,
+                misses: 0,
+            }),
+        }
+    }
+
+    /// Rocks-shaped LRU: cap by payload bytes, no entry cap (RFC-0153).
+    ///
+    /// `0` is treated as 1 byte so a host that asked for an empty cache
+    /// does not get the unlimited convention of [`Self::new(0)`].
+    #[must_use]
+    pub fn with_budget_bytes(bytes: u64) -> Self {
+        Self {
+            inner: Mutex::new(BlockCacheInner {
+                map: HashMap::new(),
+                tick: 0,
+                capacity: 0,
+                budget_bytes: bytes.max(1),
+                used_bytes: 0,
                 hits: 0,
                 misses: 0,
             }),
@@ -189,6 +224,18 @@ impl BlockCache {
     #[must_use]
     pub fn misses(&self) -> u64 {
         self.inner.lock().misses
+    }
+
+    /// Occupancy in bytes (Rocks `block-cache-usage`).
+    #[must_use]
+    pub fn used_bytes(&self) -> u64 {
+        self.inner.lock().used_bytes
+    }
+
+    /// Configured byte budget (`0` = no byte cap).
+    #[must_use]
+    pub fn budget_bytes(&self) -> u64 {
+        self.inner.lock().budget_bytes
     }
 
     /// Reset hit/miss counters.
@@ -228,27 +275,41 @@ impl BlockCache {
             return hit;
         }
         g.misses = g.misses.saturating_add(1);
-        if g.capacity > 0 {
-            while g.map.len() >= g.capacity {
-                let victim = g.map.iter().min_by_key(|(_, s)| s.tick).map(|(k, _)| *k);
-                match victim {
-                    Some(old) => {
-                        g.map.remove(&old);
-                    }
-                    None => break,
-                }
+        let extra = block_payload_bytes(block.as_ref());
+        while Self::needs_room(&g, extra) {
+            if !Self::evict_one(&mut g) {
+                break;
             }
         }
         let tick = g.tick.saturating_add(1);
         g.tick = tick;
+        g.used_bytes = g.used_bytes.saturating_add(extra);
         g.map.insert(
             key,
             CachedSlot {
                 block: Arc::clone(&block),
                 tick,
+                bytes: extra,
             },
         );
         block
+    }
+
+    fn needs_room(g: &BlockCacheInner, extra: u64) -> bool {
+        let count_full = g.capacity > 0 && g.map.len() >= g.capacity;
+        let bytes_full = g.budget_bytes > 0 && g.used_bytes.saturating_add(extra) > g.budget_bytes;
+        (count_full || bytes_full) && !g.map.is_empty()
+    }
+
+    fn evict_one(g: &mut BlockCacheInner) -> bool {
+        let victim = g.map.iter().min_by_key(|(_, s)| s.tick).map(|(k, _)| *k);
+        let Some(old) = victim else {
+            return false;
+        };
+        if let Some(slot) = g.map.remove(&old) {
+            g.used_bytes = g.used_bytes.saturating_sub(slot.bytes);
+        }
+        true
     }
 
     /// Clear all blocks.
@@ -256,6 +317,7 @@ impl BlockCache {
         let mut g = self.inner.lock();
         g.map.clear();
         g.tick = 0;
+        g.used_bytes = 0;
     }
 }
 
@@ -317,6 +379,71 @@ impl std::hash::Hasher for FxHasher {
     }
     fn finish(&self) -> u64 {
         self.hash
+    }
+}
+
+/// Buckets for compat TLS last-get invalidation (RFC-0154 P1.5).
+///
+/// A 1-key put bumps one slot instead of the process-wide get epoch, so zipf
+/// gets of other keys stay cached. Fat apply still bumps the point TLS
+/// epoch. Collisions are false misses, never stale hits (the slot also
+/// compares the user key).
+pub(crate) const KEY_GEN_N: usize = 4096;
+
+/// Per-encoded-key generation for TLS point answers.
+pub(crate) struct KeyGenMap {
+    buckets: Box<[AtomicU64]>,
+}
+
+impl KeyGenMap {
+    /// Empty map: every bucket starts at generation 1.
+    pub(crate) fn new() -> Self {
+        Self {
+            buckets: (0..KEY_GEN_N).map(|_| AtomicU64::new(1)).collect(),
+        }
+    }
+
+    fn bucket_of(key: &[u8]) -> usize {
+        let mut fx = FxHasher::default();
+        fx.write(key);
+        fx.finish() as usize & (KEY_GEN_N - 1)
+    }
+
+    /// Hash of `pfx || 0 || key`, same bytes as a CF-prefixed user key.
+    fn bucket_prefixed(pfx: &[u8], key: &[u8]) -> usize {
+        if pfx.is_empty() {
+            return Self::bucket_of(key);
+        }
+        const STACK: usize = 192;
+        let n = pfx.len() + 1 + key.len();
+        if n <= STACK {
+            let mut buf = [0u8; STACK];
+            buf[..pfx.len()].copy_from_slice(pfx);
+            buf[pfx.len()] = 0;
+            buf[pfx.len() + 1..n].copy_from_slice(key);
+            Self::bucket_of(&buf[..n])
+        } else {
+            let mut v = Vec::with_capacity(n);
+            v.extend_from_slice(pfx);
+            v.push(0);
+            v.extend_from_slice(key);
+            Self::bucket_of(&v)
+        }
+    }
+
+    /// Current generation for an encoded user key.
+    pub(crate) fn gen(&self, key: &[u8]) -> u64 {
+        self.buckets[Self::bucket_of(key)].load(Ordering::Acquire)
+    }
+
+    /// Current generation for `pfx || 0 || key` (named CF, no alloc on short keys).
+    pub(crate) fn gen_prefixed(&self, pfx: &[u8], key: &[u8]) -> u64 {
+        self.buckets[Self::bucket_prefixed(pfx, key)].load(Ordering::Acquire)
+    }
+
+    /// Bump the bucket for `key` (1-key publish).
+    pub(crate) fn touch(&self, key: &[u8]) {
+        self.buckets[Self::bucket_of(key)].fetch_add(1, Ordering::Release);
     }
 }
 
@@ -895,6 +1022,33 @@ mod tests {
     }
 
     #[test]
+    fn block_cache_byte_budget_evicts_cold() {
+        let cache = BlockCache::with_budget_bytes(80);
+        let path = Path::new("/tmp/byte-budget.sst");
+        let fat = || {
+            vec![(
+                InternalKey::new(Bytes::from_static(b"k"), 1, ValueType::Value),
+                Bytes::from(vec![b'v'; 40]),
+            )]
+        };
+        cache.get_or_insert_with(path, 0, fat);
+        let first = cache.used_bytes();
+        assert!(first > 0 && first <= 80, "first={first}");
+        cache.get_or_insert_with(path, 1, fat);
+        assert!(
+            cache.used_bytes() <= 80,
+            "over budget {}",
+            cache.used_bytes()
+        );
+        let mut reloaded = false;
+        cache.get_or_insert_with(path, 0, || {
+            reloaded = true;
+            fat()
+        });
+        assert!(reloaded, "block 0 must have been evicted by byte budget");
+    }
+
+    #[test]
     fn count_cache_skip_while_empty_retires_racy_insert() {
         use std::ops::Bound;
         let c = CountCache::new(8);
@@ -1021,5 +1175,23 @@ mod tests {
         // Publishes below "m" may hit the unbounded window: recorded.
         c.record_dirty(6, &[Bytes::from_static(b"j")]);
         assert_eq!(c.get(s, e, Some(25)), None);
+    }
+
+    #[test]
+    fn key_gen_prefixed_matches_encoded() {
+        let m = KeyGenMap::new();
+        let encoded = {
+            let mut v = b"lock".to_vec();
+            v.push(0);
+            v.extend_from_slice(b"user-key");
+            v
+        };
+        assert_eq!(m.gen(&encoded), m.gen_prefixed(b"lock", b"user-key"));
+        m.touch(&encoded);
+        assert_eq!(m.gen(&encoded), m.gen_prefixed(b"lock", b"user-key"));
+        let other = m.gen(b"untouched");
+        m.touch(&encoded);
+        assert_eq!(other, m.gen(b"untouched"));
+        assert_ne!(m.gen(&encoded), other);
     }
 }

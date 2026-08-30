@@ -342,6 +342,47 @@ pub fn l28_tcp_hnt_ok_as_is(_ok: bool) -> bool {
     true
 }
 
+/// RFC-0147 P1.2: after REAL TCP plant + process death, TCP ctor of a
+/// remaining voter must forget next/match/sent_through of the removed replica.
+#[must_use]
+pub fn l28_tcp_slot_ok(ok: bool) -> bool {
+    ok
+}
+
+/// AS-IS: skip slot drop (the 0146 leftover — keep next/match/sent_through).
+#[must_use]
+pub fn l28_tcp_slot_ok_as_is(_ok: bool) -> bool {
+    true
+}
+
+/// RFC-0148 P1.2: after REAL TCP process death, TCP ctor of a remaining
+/// 3-node voter must forget `sent_through` of a remote replica on oob
+/// `remove_member`. 0147 joint `drop_repl_slot` is **not** this tooth.
+#[must_use]
+pub fn l28_tcp_sth_ok(ok: bool) -> bool {
+    ok
+}
+
+/// AS-IS: skip oob sent_through drop (the 0147 leftover — keep sent_through).
+#[must_use]
+pub fn l28_tcp_sth_ok_as_is(_ok: bool) -> bool {
+    true
+}
+
+/// RFC-0068 P2.2: after REAL TCP process death, TCP ctor of a 3-node
+/// voter with a planted committed C-old,new (no leave) must refuse a
+/// C-old majority elect.
+#[must_use]
+pub fn l28_tcp_pj_ok(ok: bool) -> bool {
+    ok
+}
+
+/// AS-IS: skip the planted joint (the 0148 leftover — elect on C-old).
+#[must_use]
+pub fn l28_tcp_pj_ok_as_is(_ok: bool) -> bool {
+    true
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -354,6 +395,103 @@ mod tests {
         assert!(!l28_durability_ok(false, true, true));
         assert!(l28_durability_ok_as_is(true, false, false));
         assert!(!l28_durability_ok_as_is(false, true, true));
+    }
+
+    fn pump_queued(c: &mut crate::StoreCluster, rounds: usize) {
+        for _ in 0..rounds {
+            let batch = c.drain_outbound();
+            if batch.is_empty() {
+                break;
+            }
+            for (from, to, bytes) in batch {
+                c.handle_inbound(from, to, &bytes).unwrap();
+            }
+        }
+    }
+
+    /// Catalog three-teeth plant. Direct `get_only_is_not_l28_clean` /
+    /// `l28_durability_ok_requires_after_kill_and_restart` are **not** this tooth.
+    #[test]
+    fn l28_durability_ok_on_live_store_is_not_ok() {
+        assert!(l28_durability_ok(true, true, true));
+        assert!(
+            l28_durability_ok_as_is(true, false, false),
+            "AS-IS dente: first get is enough"
+        );
+        assert!(!l28_durability_ok(true, false, false));
+        let dir = std::env::temp_dir().join(format!(
+            "l28-durability-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut cluster = crate::StoreCluster::open_with_rng(
+            &dir,
+            3,
+            1,
+            pedradb_core::SeedRng::new(0x0152_0141),
+        )
+        .unwrap();
+        cluster.pin_dst_queued();
+        assert_eq!(cluster.rpc_mode(), crate::RpcMode::Queued);
+        for _ in 0..120 {
+            cluster.tick().unwrap();
+            pump_queued(&mut cluster, 48);
+            if cluster.range_leader(1).is_some() {
+                break;
+            }
+        }
+        let leader = cluster
+            .range_leader(1)
+            .expect("Queued 3-node must elect via handle_inbound");
+        let follower = (1u64..=3).find(|&id| id != leader).expect("follower");
+        let key = b"rfc0152-l28".to_vec();
+        let (term, last_idx, last_term) = {
+            let p = cluster.nodes.get(&leader).unwrap().ranges.get(&1).unwrap();
+            (p.term, p.last_index(), p.last_term())
+        };
+        let put_idx = last_idx.saturating_add(1);
+        let _ = cluster.drain_outbound();
+        let put = crate::PeerMsg::AppendEntries {
+            range_id: 1,
+            term,
+            leader_id: leader,
+            prev_log_index: last_idx,
+            prev_log_term: last_term,
+            leader_commit: put_idx,
+            entries: vec![crate::LogRec {
+                index: put_idx,
+                term,
+                entry: crate::RangeEntry::Put {
+                    key: key.clone(),
+                    value: b"ok".to_vec(),
+                    si_gen: 0,
+                },
+            }],
+        }
+        .encode();
+        cluster.handle_inbound(leader, leader, &put).unwrap();
+        pump_queued(&mut cluster, 64);
+        for _ in 0..16 {
+            cluster.tick().unwrap();
+            pump_queued(&mut cluster, 48);
+        }
+        let get_ok = cluster.get_on(leader, &key).unwrap().as_deref() == Some(b"ok".as_ref());
+        assert!(get_ok, "inbound Put must be applied on the leader");
+        cluster
+            .crash_reopen_engine_on(follower, pedradb_io_uring::IoUringEnv::default())
+            .expect("crash-reopen follower");
+        let after_kill_ok = cluster.count_applied_eq(&key, b"ok") >= 2;
+        let restart_ok =
+            cluster.get_on(follower, &key).unwrap().as_deref() == Some(b"ok".as_ref());
+        assert!(
+            l28_durability_ok(get_ok, after_kill_ok, restart_ok),
+            "live cluster_real gate: get={get_ok} after={after_kill_ok} restart={restart_ok}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -381,10 +519,7 @@ mod tests {
     fn l28_tcp_leave_ok_requires_tcp_ok() {
         assert!(l28_tcp_leave_ok(true));
         assert!(!l28_tcp_leave_ok(false));
-        assert!(
-            l28_tcp_leave_ok_as_is(false),
-            "AS-IS dente: skip TCP leave"
-        );
+        assert!(l28_tcp_leave_ok_as_is(false), "AS-IS dente: skip TCP leave");
         assert!(l28_tcp_leave_ok_as_is(true));
     }
 
@@ -654,6 +789,39 @@ mod tests {
         assert!(l28_tcp_hnt_ok_as_is(true));
     }
 
+    #[test]
+    fn l28_tcp_slot_ok_requires_closed() {
+        assert!(l28_tcp_slot_ok(true));
+        assert!(!l28_tcp_slot_ok(false));
+        assert!(
+            l28_tcp_slot_ok_as_is(false),
+            "AS-IS dente: skip TCP remaining-voter repl-slot drop"
+        );
+        assert!(l28_tcp_slot_ok_as_is(true));
+    }
+
+    #[test]
+    fn l28_tcp_sth_ok_requires_closed() {
+        assert!(l28_tcp_sth_ok(true));
+        assert!(!l28_tcp_sth_ok(false));
+        assert!(
+            l28_tcp_sth_ok_as_is(false),
+            "AS-IS dente: skip TCP remaining-voter sent_through drop"
+        );
+        assert!(l28_tcp_sth_ok_as_is(true));
+    }
+
+    #[test]
+    fn l28_tcp_pj_ok_requires_closed() {
+        assert!(l28_tcp_pj_ok(true));
+        assert!(!l28_tcp_pj_ok(false));
+        assert!(
+            l28_tcp_pj_ok_as_is(false),
+            "AS-IS dente: skip TCP planted committed-joint-without-leave"
+        );
+        assert!(l28_tcp_pj_ok_as_is(true));
+    }
+
     /// RFC-0126 P2.1: REAL TCP on-disk high-water is a campaign, not ∀ traces.
     /// `R-joint` / `R-swarm-real` stay continuous.
     #[test]
@@ -760,8 +928,9 @@ mod tests {
     #[test]
     fn l28_tcp_plant_verus_still_never() {
         let crate_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-        let residuals = std::fs::read_to_string(crate_root.join("../../scripts/formal/residuals.json"))
-            .expect("residuals.json");
+        let residuals =
+            std::fs::read_to_string(crate_root.join("../../scripts/formal/residuals.json"))
+                .expect("residuals.json");
         assert!(
             residuals.contains("\"id\": \"R-verus\""),
             "R-verus must stay in the residual catalog"
@@ -792,8 +961,9 @@ mod tests {
     #[test]
     fn l28_tcp_hw_verus_still_never() {
         let crate_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-        let residuals = std::fs::read_to_string(crate_root.join("../../scripts/formal/residuals.json"))
-            .expect("residuals.json");
+        let residuals =
+            std::fs::read_to_string(crate_root.join("../../scripts/formal/residuals.json"))
+                .expect("residuals.json");
         assert!(
             residuals.contains("\"id\": \"R-verus\""),
             "R-verus must stay in the residual catalog"

@@ -545,6 +545,57 @@ mod tests {
         let _ = std::fs::remove_dir_all(&primary);
     }
 
+    /// Catalog three-teeth plant. Direct `rotation_regrow_past_cursor_fails_closed` is **not** this tooth.
+    #[test]
+    fn pull_plan_on_live_ship_is_not_ok() {
+        let stamp = [7u8; SHIP_STAMP_BYTES];
+        let mut new_stamp = [9u8; SHIP_STAMP_BYTES];
+        new_stamp[0] ^= 0xff;
+        assert_eq!(
+            pull_plan(Some(500), 300, 4_000_000, Some(&stamp), &new_stamp),
+            PullPlan::Rotated {
+                file_len: 500,
+                cursor: 300
+            }
+        );
+        assert_eq!(
+            crate::ship_kernel::pull_plan_as_is(
+                Some(500),
+                300,
+                4_000_000,
+                Some(&stamp),
+                &new_stamp
+            ),
+            PullPlan::Ship { bytes: 200 },
+            "AS-IS dente: length-only ships misaligned bytes after rotate-regrow"
+        );
+        let primary = temp_dir("ship-plant");
+        let mut db = open_primary(&primary);
+        for i in 0..40u8 {
+            db.put([b'k', i], [b'v', i]).unwrap();
+        }
+        let mut shipper = WalShipper::follow(&primary).unwrap();
+        let cursor = shipper.offset();
+        assert!(cursor > 0);
+        db.flush().unwrap();
+        for i in 0..40u8 {
+            db.put([b'j', i], [b'w', i]).unwrap();
+        }
+        for i in 0..40u8 {
+            db.put([b'm', i], [b'u', i]).unwrap();
+        }
+        let len_now = std::fs::metadata(primary.join(WAL_FILE_NAME))
+            .unwrap()
+            .len();
+        assert!(len_now > cursor, "regrow must pass the stale cursor");
+        match shipper.pull() {
+            Err(ShipError::WalRotated { .. }) => {}
+            other => panic!("live pull_plan must fail closed on stamp change, got {other:?}"),
+        }
+        db.close().unwrap();
+        let _ = std::fs::remove_dir_all(&primary);
+    }
+
     /// F165: a WAL deleted under an advanced cursor must not read as "caught up".
     #[test]
     fn vanished_wal_under_cursor_fails_closed() {

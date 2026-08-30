@@ -1,0 +1,25 @@
+=== P149_START 2026-08-30T03:42:58Z ===
+RESULT=BUILD_OK 03:49:09
+P149_COLUMN A async vs rocks-default(sync=false) majority median>3.0
+--- P149 gate majority median>3.0 ---
+P149_COLUNA_A rounds=3 peer=rocks-default(sync=false) async=PEDRA_PARITY_ASYNC=1
+  >3 ycsb_a                     min=3.203 median=3.228 rounds=[3.203, 3.242, 3.228]
+  >3 ycsb_b                     min=3.107 median=3.511 rounds=[3.107, 3.511, 3.636]
+  >3 ycsb_c                     min=3.500 median=3.616 rounds=[3.5, 3.616, 3.66]
+  >3 ycsb_d                     min=3.403 median=3.435 rounds=[3.403, 3.509, 3.435]
+  >3 ycsb_e                     min=14.587 median=15.311 rounds=[15.395, 15.311, 14.587]
+     ycsb_f                     min=2.636 median=2.874 rounds=[2.874, 2.876, 2.636]
+     deps_cache_overwrite       min=2.370 median=2.542 rounds=[3.616, 2.542, 2.37]
+     deps_lock_prewrite         min=1.857 median=1.885 rounds=[2.541, 1.857, 1.885]
+  >3 deps_mvcc_latest           min=4.612 median=4.765 rounds=[4.765, 4.819, 4.612]
+     deps_apply_batch           min=1.529 median=2.122 rounds=[2.122, 2.127, 1.529]
+     deps_raftlog               min=1.017 median=1.070 rounds=[1.07, 1.07, 1.017]
+  >3 deps_scan                  min=4.815 median=5.291 rounds=[5.351, 5.291, 4.815]
+  >3 kvrocks_get                min=4.222 median=5.119 rounds=[4.222, 5.119, 34.152]
+     kvrocks_set                min=2.408 median=2.885 rounds=[2.408, 2.885, 3.087]
+  >3 kvrocks_scan               min=44.030 median=52.248 rounds=[44.03, 52.248, 58.064]
+  >3 kvrocks_pipelined_set      min=3.806 median=4.043 rounds=[3.806, 4.043, 4.191]
+     kvrocks_blob_set           min=2.434 median=2.458 rounds=[2.458, 2.434, 2.619]
+majority median>3.0 = 10/17 (need >=9); min>3.0 = 10/17
+RESULT=P149_PASS over_med=10/17 min_ratio=1.017
+RESULT=P149_DONE rc=0 2026-08-30T03:50:58Z

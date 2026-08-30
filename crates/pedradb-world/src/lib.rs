@@ -268,6 +268,10 @@ pub struct WorldConfig {
     /// RFC-0060 P1.2: splice a deterministic BitFlip of a durable page
     /// mid-schedule. Default `false` keeps historical traces.
     pub bitflip: bool,
+    /// RFC-0068 P1.2: splice JointRemove + `PlantCommittedJoint` into the
+    /// seed schedule (fingerprint bump). Default `false` keeps historical
+    /// traces; opt-in only.
+    pub plant_committed_joint: bool,
     /// RFC-0069: name ES-1 (finite adversary) for an eventual-election
     /// claim. Default false — native World is a bounded seed schedule.
     pub es1: bool,
@@ -302,6 +306,7 @@ impl Default for WorldConfig {
             membership_upgrade: false,
             trajectory_check: false,
             bitflip: false,
+            plant_committed_joint: false,
             es1: false,
             es2: false,
             es3: false,
@@ -464,6 +469,17 @@ impl World {
         }
         if self.cfg.bitflip {
             schedule::splice_bitflip_window(&mut actions, self.cfg.n_nodes);
+        }
+        if self.cfg.plant_committed_joint {
+            schedule::splice_plant_committed_joint(&mut actions, self.cfg.n_nodes);
+            let emits = actions
+                .iter()
+                .any(|a| matches!(a, Action::PlantCommittedJoint { .. }));
+            let baseline = schedule_from_seed(self.seed, self.cfg.n_nodes, self.cfg.schedule_steps);
+            let omits = !baseline
+                .iter()
+                .any(|a| matches!(a, Action::PlantCommittedJoint { .. }));
+            let _ = pedradb_store::plant_joint_schedule_ok(emits, omits);
         }
         self.run_with_schedule(&actions)
     }
@@ -2336,6 +2352,49 @@ mod tests {
         assert!(
             t.events.iter().any(|e| e.kind == "joint_plant_old_refused"),
             "planted joint must refuse old-only majority: {t:?}"
+        );
+        let _ = std::fs::remove_dir_all(&parent);
+    }
+
+    /// RFC-0068 P1.2: opt-in World seed schedule emits PlantCommittedJoint;
+    /// default seed omits it. C-old majority still refused.
+    #[test]
+    fn world_opt_in_schedule_emits_plant_committed_joint() {
+        use pedradb_store::{plant_joint_schedule_ok, plant_joint_schedule_ok_as_is};
+        use schedule::{schedule_from_seed, splice_plant_committed_joint, Action};
+        assert!(
+            plant_joint_schedule_ok_as_is(false, false),
+            "AS-IS dente: skip opt-in PlantCommittedJoint"
+        );
+        let baseline = schedule_from_seed(0x0068_0012, 4, 8);
+        let default_omits = !baseline
+            .iter()
+            .any(|a| matches!(a, Action::PlantCommittedJoint { .. }));
+        let mut opt = baseline.clone();
+        splice_plant_committed_joint(&mut opt, 4);
+        let emits = opt
+            .iter()
+            .any(|a| matches!(a, Action::PlantCommittedJoint { .. }));
+        assert!(
+            plant_joint_schedule_ok(emits, default_omits),
+            "opt-in must emit and default must omit"
+        );
+        let parent = temp_parent("joint-plant-optin");
+        let cfg = WorldConfig {
+            n_nodes: 4,
+            n_ranges: 1,
+            schedule_steps: 8,
+            parent: parent.clone(),
+            exchange_rounds: 64,
+            mem_storage: true,
+            plant_committed_joint: true,
+            ..Default::default()
+        };
+        let t = World::new(0x0068_0012, cfg).run().unwrap();
+        assert_eq!(t.silent_wrong, 0, "{t:?}");
+        assert!(
+            t.events.iter().any(|e| e.kind == "joint_plant_old_refused"),
+            "opt-in PlantCommittedJoint must refuse C-old majority: {t:?}"
         );
         let _ = std::fs::remove_dir_all(&parent);
     }

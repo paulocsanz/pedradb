@@ -484,6 +484,29 @@ mod tests {
         assert_eq!(rest, vec![b"second".to_vec(), b"third".to_vec()]);
     }
 
+    /// RFC-0152 P2.2.39: production `WalReader` gates stored vs computed
+    /// through `crc_match_ok`. Live writer then XOR of the stored CRC field
+    /// (payload intact) is Crc; AS-IS would accept. Direct
+    /// `crc_mismatch_on_live_wal_is_not_ok` /
+    /// `crc_mismatch_on_live_wal_open_is_not_ok` / `crc_mismatch_is_not_ok`
+    /// are not this tooth. Equality of two u32s is not R-crc.
+    #[test]
+    fn crc_match_ok_on_live_wal_is_not_ok() {
+        assert!(!crc::crc_match_ok(1, 2));
+        assert!(
+            crc::crc_match_ok_as_is(1, 2),
+            "AS-IS dente: any checksum matches"
+        );
+        let mut writer = WalWriter::new(Cursor::new(Vec::new())).unwrap();
+        writer.add_record(b"durable-payload").unwrap();
+        let mut buf = writer.into_inner().into_inner();
+        assert!(buf.len() > HEADER_SIZE);
+        buf[0] ^= 0xff;
+        let mut reader = WalReader::new(Cursor::new(buf));
+        let err = reader.read_record().unwrap_err();
+        assert!(matches!(err, CoreError::Crc { .. }), "got {err:?}");
+    }
+
     /// RFC-0076 P0: production writer+reader; a flipped payload is Crc,
     /// never a valid record. AS-IS `crc_match_ok` would accept it.
     #[test]

@@ -1,7 +1,7 @@
 # RFC: 0147 — Forget replication slots of a removed node
 
-**Status:** in-progress
-**Updated:** 2026-08-28
+**Status:** done
+**Updated:** 2026-08-30
 **Parents:** [0146](0146-hint-if-member.md), [0143](0143-discard-uncommitted-local-non-member.md), [0061](0061-residuals-sel4-ironfleet.md)
 
 **Residual:** `R-joint` (not `never_floor`). Axis vs FDB Sim2: **G1 process death + G7 reconfig**. Out-of-band `remove_member` drops `next_index`/`match_index` for the removed id. Log-carried joint leave via `install_applied_membership` does not. Remaining leaders keep `sent_through`/`next_index` for the ex-member. That made 0143 tests have to clear `sent_through` so discard would not treat a new uncommitted index as already escaped. AS-IS `drop_repl_slot` is false. This slice: C-new apply forgets slots whose peer is not in `ids`. 0146 hint filter is **not** this tooth.
@@ -31,7 +31,7 @@
 
 ### P1 — next wave
 - [x] **P1.1** After queued leave, remaining peers have no slot for 4 — status: `done` (`leave_drops_removed_repl_slots`)
-- [ ] **P1.2** TCP 3-process — status: `todo`
+- [x] **P1.2** TCP 3-process — status: `done` (`l28_real_tcp_drop_repl`)
 
 ### P2 — later
 - [x] **P2.1** Verus twin + catalog pair — status: `done`
@@ -44,7 +44,7 @@
 | P0.1 | p0 | drop slots on C-new | done | install_applied_membership | 2026-08-28 |
 | P0.2 | p0 | planted slot is gone | done | install_drops_removed_repl_slots | 2026-08-28 |
 | P1.1 | p1 | leave itself drops slots | done | leave_drops_removed_repl_slots | 2026-08-28 |
-| P1.2 | p1 | TCP 3-process | todo | — | 2026-08-28 |
+| P1.2 | p1 | TCP 3-process | done | l28_real_tcp_drop_repl | 2026-08-30 |
 | P2.1 | p2 | Verus twin | done | membership_joint.rs + drop_repl_slot | 2026-08-28 |
 | P2.2 | p2 | not ∀ traces / R-verus | done | drop_repl_slot_campaign_is_not_forall_traces | 2026-08-28 |
 
@@ -54,6 +54,7 @@
   - `drop_repl_slot(false)` true; AS-IS false. Same tokens raft=store.
   - `install_drops_removed_repl_slots`: Queued 4→3 leave; plant `next_index`/`match_index`/`sent_through` for 4 on node 1; `install_applied_membership(C-new)`; those keys gone. 0146 hint clear is **not** this tooth. Runs on Darwin. Does not submit io_uring SQEs.
   - P1.1 `leave_drops_removed_repl_slots`: after leave, remaining local peers have no repl slot for 4. plant+re-install is **not** this tooth.
+  - P1.2 `l28_real_tcp_drop_repl`: seed `0x0147_1E28` twice with `--remove-member`; fingerprints match; `slot=1`; production TCP ctor of a **remaining** voter (n1) plants next/match/sent_through for 2 and 3; `install_applied_membership` keeps 2 and drops 3. 0146 hint is **not** this tooth. Exit via `l28_tcp_slot_ok`. AS-IS keeps those slots. Runs on Darwin. Does not submit io_uring SQEs.
   - P2.1 catalog pair `drop_repl_slot` `entry: drop_repl_slot`; twin `membership_joint.rs`; freeze twins fail if the exec fn is dropped. Does not run `verus`.
   - P2.2 `drop_repl_slot_campaign_is_not_forall_traces`: `R-joint` stays continuous; campaign not a theorem. `drop_repl_slot_verus_still_never`: `never_floor` still lists `R-verus`.
 - **Telemetry / Analytics:** none — safety invariant.

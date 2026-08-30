@@ -392,15 +392,15 @@ pub const KNOB_INVENTORY: &[KnobEntry] = &[
     e("set_universal_compaction_options", KnobClass::Inert, "", ""),
     e(
         "set_block_based_table_factory",
-        KnobClass::Inert,
-        "except checksum_type=NoChecksum",
-        "block size/bloom/cache are Pedra's; NoChecksum is NotSupported",
+        KnobClass::Wired,
+        "checksum + block_cache",
+        "NoChecksum is NotSupported; set_block_cache sizes SST cache",
     ),
     e(
         "optimize_for_point_lookup",
-        KnobClass::Inert,
+        KnobClass::Wired,
         "",
-        "does not size a block cache",
+        "sizes SST block cache to N MiB (RFC-0153)",
     ),
     e("prepare_for_bulk_load", KnobClass::Inert, "", ""),
     e(
@@ -418,9 +418,9 @@ pub const KNOB_INVENTORY: &[KnobEntry] = &[
     ),
     e(
         "set_block_cache",
-        KnobClass::Inert,
-        "BlockBasedOptions",
-        "Cache::new_lru_cache does not size Pedra's cache",
+        KnobClass::Wired,
+        "Options / BlockBasedOptions",
+        "Cache::new_lru_cache is the SST block-cache byte budget (RFC-0153)",
     ),
     e(
         "set_cache_index_and_filter_blocks",
@@ -552,8 +552,8 @@ mod tests {
         assert!(
             KNOB_INVENTORY
                 .iter()
-                .any(|k| k.class == KnobClass::Inert && k.name == "set_block_cache"),
-            "block cache 1GiB is the textbook inert"
+                .any(|k| k.class == KnobClass::Wired && k.name == "set_block_cache"),
+            "set_block_cache sizes the SST cache (RFC-0153)"
         );
         assert!(KNOB_INVENTORY
             .iter()

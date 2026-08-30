@@ -80,6 +80,17 @@ pub fn fence_publish_seq(member_seqs: &[u64]) -> u64 {
     best
 }
 
+/// AS-IS RFC-0057: fence is the first member's seq — later members stay
+/// unpublished at the watermark.
+#[must_use]
+pub fn fence_publish_seq_as_is(member_seqs: &[u64]) -> u64 {
+    if member_seqs.is_empty() {
+        0
+    } else {
+        member_seqs[0]
+    }
+}
+
 /// TEST-ONLY mutant (never called in production): the serialized
 /// scheduler — members commit one at a time, so member `writes_before`
 /// later members validate against `last_seq + writes_before`. With an
@@ -245,12 +256,127 @@ mod tests {
         assert!(occ_conflict_as_is_serialized(10, 10, 1, true));
     }
 
+    /// Catalog three-teeth plant. Direct `group_members_are_simultaneous` is **not** this tooth.
+    #[test]
+    fn occ_conflict_on_live_group_is_not_ok() {
+        assert!(!occ_conflict(10, 10, true));
+        assert!(
+            occ_conflict_as_is_serialized(10, 10, 1, true),
+            "AS-IS dente: serialized scheduler aborts the second intra-group member"
+        );
+        let dir = std::env::temp_dir().join(format!(
+            "group-commit-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        let db = crate::ConcurrentDb::open_with(
+            &dir,
+            crate::OpenOptions {
+                exclusive: true,
+                ..crate::OpenOptions::default()
+            },
+        )
+        .unwrap();
+        db.put(b"k", b"v0").unwrap();
+        let mut tx1 = db.begin_occ();
+        let mut tx2 = db.begin_occ();
+        assert_eq!(tx1.get(b"k").unwrap().as_deref(), Some(b"v0".as_ref()));
+        assert_eq!(tx2.get(b"k").unwrap().as_deref(), Some(b"v0".as_ref()));
+        tx1.put(b"k", b"from1").unwrap();
+        tx2.put(b"k", b"from2").unwrap();
+        tx1.commit().unwrap();
+        let err = tx2.commit().unwrap_err();
+        assert!(
+            matches!(err, crate::CoreError::TransactionConflict),
+            "live ConcurrentDb first-committer-wins must conflict the lagging OCC commit, got {err:?}"
+        );
+        assert_eq!(
+            db.get(b"k").as_deref(),
+            Some(b"from1".as_ref()),
+            "live lone/group OCC path keeps the first committer"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn fence_is_max_member_seq() {
         assert_eq!(fence_publish_seq(&[]), 0);
         assert_eq!(fence_publish_seq(&[3]), 3);
         assert_eq!(fence_publish_seq(&[5, 2, 9, 4]), 9);
         assert_eq!(fence_publish_seq(&[0, 0]), 0);
+    }
+
+    /// Catalog three-teeth plant. Direct `fence_is_max_member_seq` is **not** this tooth.
+    #[test]
+    fn fence_publish_seq_on_live_group_is_not_ok() {
+        assert_eq!(fence_publish_seq(&[5, 2, 9, 4]), 9);
+        assert_eq!(
+            fence_publish_seq_as_is(&[5, 2, 9, 4]),
+            5,
+            "AS-IS dente: fence is the first member, later seqs stay unpublished"
+        );
+        let dir = std::env::temp_dir().join(format!(
+            "group-fence-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        let db = std::sync::Arc::new(
+            crate::ConcurrentDb::open_with(
+                &dir,
+                crate::OpenOptions {
+                    exclusive: true,
+                    ..crate::OpenOptions::default()
+                },
+            )
+            .unwrap(),
+        );
+        db.set_write_group_catchup_window(std::time::Duration::from_millis(20));
+        db.put(b"warm", b"1").unwrap();
+        let n = 8usize;
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(n));
+        let mut handles = Vec::new();
+        for i in 0..n {
+            let db = std::sync::Arc::clone(&db);
+            let barrier = std::sync::Arc::clone(&barrier);
+            handles.push(std::thread::spawn(move || {
+                barrier.wait();
+                let k = [b'k', u8::try_from(i).expect("n fits u8")];
+                db.put(&k, b"v")
+            }));
+        }
+        let results: Vec<_> = handles.into_iter().map(|h| h.join().unwrap()).collect();
+        assert!(
+            results.iter().all(|r| r.is_ok()),
+            "every group member must Ok: {results:?}"
+        );
+        let (submits, _queued, groups, group_ops) = db.write_group_stats();
+        assert_eq!(submits, n as u64 + 1, "warm + {n} grouped puts");
+        assert!(
+            groups < n as u64 && group_ops >= 2,
+            "must have taken max_appended_seq group path groups={groups} ops={group_ops}"
+        );
+        assert_eq!(
+            db.visible_sequence(),
+            db.last_sequence(),
+            "live fence must publish the max member seq, not the first"
+        );
+        for i in 0..n {
+            let k = [b'k', u8::try_from(i).expect("n fits u8")];
+            assert_eq!(
+                db.get(&k).as_deref(),
+                Some(b"v".as_ref()),
+                "live get after group Ok must see member {i}"
+            );
+        }
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

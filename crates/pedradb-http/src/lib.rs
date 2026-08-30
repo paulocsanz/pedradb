@@ -28,9 +28,9 @@ mod form_kernel;
 mod path_kernel;
 
 pub use auth_kernel::{
-    ascii_lower, ascii_upper, authorization_matches, bearer_token_from_value, is_bearer_scheme,
-    is_bearer_scheme_as_is, is_non_bearer_auth_scheme, normalize_http_method,
-    normalize_http_method_as_is,
+    ascii_lower, ascii_upper, authorization_matches, bearer_token_from_value,
+    bearer_token_from_value_as_is, is_bearer_scheme, is_bearer_scheme_as_is,
+    is_non_bearer_auth_scheme, normalize_http_method, normalize_http_method_as_is,
 };
 pub use cl_kernel::{
     content_length_repeat_ok, content_length_repeat_ok_as_is, invalid_cl_as_zero,
@@ -900,6 +900,38 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// Catalog three-teeth plant. Direct `dcs_http_query_plus_is_space` is **not** this tooth.
+    #[test]
+    fn form_decode_on_live_http_is_not_ok() {
+        assert_eq!(form_decode("hello+world"), b"hello world");
+        assert_eq!(
+            form_decode_as_is("hello+world"),
+            b"hello+world",
+            "AS-IS dente: + stays plus"
+        );
+        let dir = temp("form-plant");
+        let addr = bind_ephemeral();
+        let srv = DcsServer::open(&dir).unwrap();
+        thread::spawn(move || {
+            let _ = srv.serve(addr);
+        });
+        thread::sleep(Duration::from_millis(100));
+        let (c1, b1) = http_exchange(
+            addr,
+            "POST",
+            "/dcs/leader?key=hello+world&holder=n1&ttl_ms=8000",
+            b"",
+        )
+        .unwrap();
+        assert_eq!(c1, 200, "{b1:?}");
+        let (c2, body) = http_exchange(addr, "GET", "/dcs/kv/hello%20world", b"").unwrap();
+        assert_eq!(
+            c2, 200,
+            "live form_decode must treat + as space, body={body:?}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// F106: query *names* were not form-decoded. `?%6Bey=lock` did not match
     /// `key`, so acquire used the default `/leader` and GET `/dcs/kv/lock` 404'd.
     #[test]
@@ -1324,6 +1356,27 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// Catalog three-teeth plant. Direct `extracts_token_from_upper_scheme` /
+    /// `kv_http_bearer_scheme_case_insensitive` are **not** this tooth.
+    #[test]
+    fn bearer_token_from_value_on_live_http_is_not_ok() {
+        assert_eq!(bearer_token_from_value("BEARER sekrit"), Some("sekrit"));
+        assert_eq!(
+            bearer_token_from_value_as_is("BEARER sekrit"),
+            Some("BEARER sekrit"),
+            "AS-IS dente: uppercase scheme is the whole header"
+        );
+        let headers = [("Authorization".to_string(), "BEARER sekrit".to_string())];
+        assert!(
+            authorization_matches(&headers, "sekrit"),
+            "live authorize must accept RFC 9110 BEARER"
+        );
+        assert_ne!(
+            bearer_token_from_value("BEARER sekrit"),
+            bearer_token_from_value_as_is("BEARER sekrit")
+        );
+    }
+
     /// F86: HTTP/1.0 PUT without Content-Length still delivered a body after
     /// the header break. `read_req` defaulted CL=0 and `truncate(0)` dropped it,
     /// so the store recorded empty instead of the payload.
@@ -1362,6 +1415,71 @@ mod tests {
         assert_eq!(
             body, b"hello",
             "PUT body after header break must be stored, got {body:?}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Catalog three-teeth plant. Direct `kv_http_put_without_content_length_keeps_body` is **not** this tooth.
+    #[test]
+    fn keep_body_without_cl_on_live_http_is_not_ok() {
+        assert!(keep_body_without_cl());
+        assert!(
+            !keep_body_without_cl_as_is(),
+            "AS-IS dente: truncate(0) drops the body after the header break"
+        );
+        let dir = temp("cl-plant");
+        let addr = bind_ephemeral();
+        let srv = KvServer::open(&dir).unwrap();
+        thread::spawn(move || {
+            let _ = srv.serve(addr);
+        });
+        thread::sleep(Duration::from_millis(100));
+        let mut stream = TcpStream::connect(addr).unwrap();
+        stream
+            .write_all(b"PUT /kv/rfc0152-cl HTTP/1.0\r\nHost: localhost\r\n\r\nhello")
+            .unwrap();
+        let _ = stream.shutdown(std::net::Shutdown::Write);
+        let mut resp = Vec::new();
+        stream.read_to_end(&mut resp).unwrap();
+        let (code, body) = http_exchange(addr, "GET", "/kv/rfc0152-cl", b"").unwrap();
+        assert_eq!(code, 200, "missing CL must not drop PUT body, GET {body:?}");
+        assert_eq!(body, b"hello");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Catalog three-teeth plant. Direct Transfer-Encoding tests are **not** this tooth.
+    #[test]
+    fn parse_error_writes_status_on_live_http_is_not_ok() {
+        assert!(parse_error_writes_status());
+        assert!(
+            !parse_error_writes_status_as_is(),
+            "AS-IS dente: parse Err closes the socket mute"
+        );
+        let dir = temp("fail-closed-plant");
+        let addr = bind_ephemeral();
+        let srv = KvServer::open(&dir).unwrap();
+        thread::spawn(move || {
+            let _ = srv.serve(addr);
+        });
+        thread::sleep(Duration::from_millis(100));
+        let mut stream = TcpStream::connect(addr).unwrap();
+        stream
+            .write_all(
+                b"PUT /kv/te HTTP/1.0\r\nTransfer-Encoding: chunked\r\nHost: localhost\r\n\r\n2\r\nhi\r\n0\r\n\r\n",
+            )
+            .unwrap();
+        let mut resp = Vec::new();
+        stream.read_to_end(&mut resp).unwrap();
+        let text = String::from_utf8_lossy(&resp);
+        let code = text
+            .lines()
+            .next()
+            .and_then(|l| l.split_whitespace().nth(1))
+            .and_then(|c| c.parse::<u16>().ok())
+            .unwrap_or(0);
+        assert_eq!(
+            code, 400,
+            "live parse Err must write HTTP 400; AS-IS would be mute: {text:?}"
         );
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -1622,6 +1740,44 @@ mod tests {
             .map(|i| resp[i + 4..].to_vec())
             .unwrap_or_default();
         assert_eq!(body, b"yes", "absolute-form GET must return value");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Catalog three-teeth plant. Direct `kv_http_absolute_form_request_target` is **not** this tooth.
+    #[test]
+    fn origin_form_path_on_live_http_is_not_ok() {
+        assert_eq!(origin_form_path("http://127.0.0.1:9/kv/x"), "/kv/x");
+        assert_eq!(
+            origin_form_path_as_is("http://127.0.0.1:9/kv/x"),
+            "http://127.0.0.1:9/kv/x",
+            "AS-IS dente: absolute-form never matches /kv/"
+        );
+        let dir = temp("origin-plant");
+        let addr = bind_ephemeral();
+        let srv = KvServer::open(&dir).unwrap();
+        thread::spawn(move || {
+            let _ = srv.serve(addr);
+        });
+        thread::sleep(Duration::from_millis(100));
+        let mut stream = TcpStream::connect(addr).unwrap();
+        let host = format!("{addr}");
+        let req = format!(
+            "PUT http://{host}/kv/rfc0152-orig HTTP/1.0\r\nContent-Length: 2\r\nHost: {host}\r\n\r\nok"
+        );
+        stream.write_all(req.as_bytes()).unwrap();
+        let _ = stream.shutdown(std::net::Shutdown::Write);
+        let mut resp = Vec::new();
+        stream.read_to_end(&mut resp).unwrap();
+        let text = String::from_utf8_lossy(&resp);
+        let put_code = text
+            .lines()
+            .next()
+            .and_then(|l| l.split_whitespace().nth(1))
+            .and_then(|c| c.parse::<u16>().ok())
+            .unwrap_or(0);
+        assert_eq!(put_code, 200, "absolute-form must route, {text:?}");
+        let (code, body) = http_exchange(addr, "GET", "/kv/rfc0152-orig", b"").unwrap();
+        assert_eq!((code, body.as_slice()), (200, b"ok".as_slice()));
         let _ = std::fs::remove_dir_all(&dir);
     }
 

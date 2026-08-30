@@ -95,6 +95,25 @@ pub fn bearer_token_from_value(value: &str) -> Option<&str> {
     Some(v)
 }
 
+/// AS-IS F85: only exact `Bearer ` / `bearer ` prefixes; `BEARER tok` is the
+/// whole header compared to the configured token (401).
+#[must_use]
+pub fn bearer_token_from_value_as_is(value: &str) -> Option<&str> {
+    let v = value.trim();
+    if let Some(rest) = v.strip_prefix("Bearer ") {
+        let tok = rest.trim();
+        return if tok.is_empty() { Some(v) } else { Some(tok) };
+    }
+    if let Some(rest) = v.strip_prefix("bearer ") {
+        let tok = rest.trim();
+        return if tok.is_empty() { Some(v) } else { Some(tok) };
+    }
+    if v.is_empty() {
+        return None;
+    }
+    Some(v)
+}
+
 /// F152: a later valid Bearer must win over an earlier dummy Bearer.
 ///
 /// X-Pedra-Token is fallback only when no Bearer token was extracted (F149).

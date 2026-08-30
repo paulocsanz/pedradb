@@ -1,0 +1,92 @@
+{
+  "bench": "rocks-parity-v1",
+  "engine": "rocksdb",
+  "sync": false,
+  "peer_policy": "rocks-default",
+  "durability": "async-wal (WriteOptions.sync=false, rocksdb default)",
+  "changelog_interval": 0,
+  "status": "ok",
+  "notes": ["ycsb records=1024 ops=2000 payload=100 dist=zipfian", "engine=rocksdb durability=async-wal (WriteOptions.sync=false, rocksdb default)", "suites: ycsb", "seed: one put per record (not timed)", "cfs: default + write, lock, raftlog (TiKV store shape; raftlog = raftdb)", "deps apply batch txns/commit: 32", "changelog_interval=0", "peer_policy=rocks-default", "host-default write sync: kvrocks=false myrocks=true surreal=true"],
+  "benches": [
+{
+    "name": "ycsb_a",
+    "n": 2000,
+    "qps": 449003.022,
+    "p50_ms": 0.0031,
+    "p95_ms": 0.0036,
+    "p99_ms": 0.0068,
+    "max_ms": 0.0418,
+    "wall_s": 0.0045
+  },
+{
+    "name": "ycsb_b",
+    "n": 2000,
+    "qps": 1101907.733,
+    "p50_ms": 0.0007,
+    "p95_ms": 0.0032,
+    "p99_ms": 0.0035,
+    "max_ms": 0.0113,
+    "wall_s": 0.0018
+  },
+{
+    "name": "ycsb_c",
+    "n": 2000,
+    "qps": 1389966.113,
+    "p50_ms": 0.0007,
+    "p95_ms": 0.0008,
+    "p99_ms": 0.0009,
+    "max_ms": 0.0081,
+    "wall_s": 0.0014
+  },
+{
+    "name": "ycsb_d",
+    "n": 2000,
+    "qps": 1160017.447,
+    "p50_ms": 0.0007,
+    "p95_ms": 0.0029,
+    "p99_ms": 0.0030,
+    "max_ms": 0.0120,
+    "wall_s": 0.0017
+  },
+{
+    "name": "ycsb_e",
+    "n": 2000,
+    "qps": 79321.657,
+    "p50_ms": 0.0094,
+    "p95_ms": 0.0221,
+    "p99_ms": 0.0229,
+    "max_ms": 0.0302,
+    "wall_s": 0.0252
+  },
+{
+    "name": "ycsb_f",
+    "n": 2000,
+    "qps": 378174.277,
+    "p50_ms": 0.0036,
+    "p95_ms": 0.0044,
+    "p99_ms": 0.0074,
+    "max_ms": 0.0142,
+    "wall_s": 0.0053
+  },
+{
+    "name": "ycsb_b_unif",
+    "n": 2000,
+    "qps": 1129637.161,
+    "p50_ms": 0.0007,
+    "p95_ms": 0.0031,
+    "p99_ms": 0.0034,
+    "max_ms": 0.0143,
+    "wall_s": 0.0018
+  },
+{
+    "name": "ycsb_c_unif",
+    "n": 2000,
+    "qps": 1379819.451,
+    "p50_ms": 0.0007,
+    "p95_ms": 0.0008,
+    "p99_ms": 0.0009,
+    "max_ms": 0.0083,
+    "wall_s": 0.0014
+  }
+  ]
+}

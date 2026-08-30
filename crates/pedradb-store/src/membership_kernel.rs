@@ -63,6 +63,20 @@ pub fn joint_leave_ok_as_is(_leave_in_log: bool) -> bool {
     true
 }
 
+/// RFC-0068 P1.2: opt-in World schedule emitted `PlantCommittedJoint`
+/// and the default seed scheduler omitted it (fingerprint-stable).
+#[must_use]
+pub fn plant_joint_schedule_ok(opt_in_emits: bool, default_omits: bool) -> bool {
+    opt_in_emits && default_omits
+}
+
+/// AS-IS: skip the opt-in plant (the 0068 P1.2 hole — random scheduler
+/// never emits `PlantCommittedJoint`).
+#[must_use]
+pub fn plant_joint_schedule_ok_as_is(_opt_in_emits: bool, _default_omits: bool) -> bool {
+    true
+}
+
 /// RFC-0122: a leave in the log is not done until it is committed.
 #[must_use]
 pub fn queued_leave_finish_ok(leave_in_log: bool, leave_committed: bool) -> bool {
@@ -468,6 +482,17 @@ mod tests {
     }
 
     #[test]
+    fn plant_joint_schedule_ok_requires_opt_in_and_default_omit() {
+        assert!(plant_joint_schedule_ok(true, true));
+        assert!(!plant_joint_schedule_ok(false, true));
+        assert!(!plant_joint_schedule_ok(true, false));
+        assert!(
+            plant_joint_schedule_ok_as_is(false, false),
+            "AS-IS dente: skip opt-in PlantCommittedJoint"
+        );
+    }
+
+    #[test]
     fn queued_leave_finish_ok_requires_commit() {
         assert!(!queued_leave_finish_ok(true, false));
         assert!(
@@ -484,8 +509,9 @@ mod tests {
     #[test]
     fn queued_leave_finish_campaign_is_not_forall_traces() {
         let crate_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-        let residuals = std::fs::read_to_string(crate_root.join("../../scripts/formal/residuals.json"))
-            .expect("residuals.json");
+        let residuals =
+            std::fs::read_to_string(crate_root.join("../../scripts/formal/residuals.json"))
+                .expect("residuals.json");
         assert!(
             residuals.contains("\"id\": \"R-joint\""),
             "R-joint must stay in the residual catalog"
@@ -519,8 +545,9 @@ mod tests {
     #[test]
     fn queued_leave_finish_twin_campaign_is_not_forall_traces() {
         let crate_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-        let residuals = std::fs::read_to_string(crate_root.join("../../scripts/formal/residuals.json"))
-            .expect("residuals.json");
+        let residuals =
+            std::fs::read_to_string(crate_root.join("../../scripts/formal/residuals.json"))
+                .expect("residuals.json");
         assert!(
             residuals.contains("\"id\": \"R-joint\""),
             "R-joint must stay in the residual catalog"
@@ -543,10 +570,9 @@ mod tests {
             catalog.contains("scripts/verus_membership_joint.sh"),
             "verus script must stay registered (freeze, not exec)"
         );
-        let twin = std::fs::read_to_string(
-            crate_root.join("../pedradb-raft/verus/membership_joint.rs"),
-        )
-        .expect("membership_joint.rs");
+        let twin =
+            std::fs::read_to_string(crate_root.join("../pedradb-raft/verus/membership_joint.rs"))
+                .expect("membership_joint.rs");
         assert!(
             twin.contains("fn queued_leave_finish_ok"),
             "twin freeze of queued_leave_finish_ok is not a Verus exec claim"
@@ -558,8 +584,9 @@ mod tests {
     #[test]
     fn queued_leave_finish_verus_still_never() {
         let crate_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-        let residuals = std::fs::read_to_string(crate_root.join("../../scripts/formal/residuals.json"))
-            .expect("residuals.json");
+        let residuals =
+            std::fs::read_to_string(crate_root.join("../../scripts/formal/residuals.json"))
+                .expect("residuals.json");
         assert!(
             residuals.contains("\"id\": \"R-verus\""),
             "R-verus must stay in the residual catalog"
@@ -578,10 +605,9 @@ mod tests {
             catalog.contains("\"entry\": \"queued_leave_finish_ok\""),
             "catalog entry must stay queued_leave_finish_ok"
         );
-        let twin = std::fs::read_to_string(
-            crate_root.join("../pedradb-raft/verus/membership_joint.rs"),
-        )
-        .expect("membership_joint.rs");
+        let twin =
+            std::fs::read_to_string(crate_root.join("../pedradb-raft/verus/membership_joint.rs"))
+                .expect("membership_joint.rs");
         assert!(
             twin.contains("fn queued_leave_finish_ok"),
             "twin freeze is not a Verus exec claim"
@@ -746,8 +772,9 @@ mod tests {
     #[test]
     fn disk_membership_overrides_cli_campaign_is_not_forall_traces() {
         let crate_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-        let residuals = std::fs::read_to_string(crate_root.join("../../scripts/formal/residuals.json"))
-            .expect("residuals.json");
+        let residuals =
+            std::fs::read_to_string(crate_root.join("../../scripts/formal/residuals.json"))
+                .expect("residuals.json");
         assert!(
             residuals.contains("\"id\": \"R-joint\""),
             "R-joint must stay in the residual catalog"
@@ -777,8 +804,9 @@ mod tests {
     #[test]
     fn high_water_at_least_campaign_is_not_forall_traces() {
         let crate_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-        let residuals = std::fs::read_to_string(crate_root.join("../../scripts/formal/residuals.json"))
-            .expect("residuals.json");
+        let residuals =
+            std::fs::read_to_string(crate_root.join("../../scripts/formal/residuals.json"))
+                .expect("residuals.json");
         assert!(
             residuals.contains("\"id\": \"R-joint\""),
             "R-joint must stay in the residual catalog"
@@ -808,8 +836,9 @@ mod tests {
     #[test]
     fn high_water_at_least_verus_still_never() {
         let crate_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-        let residuals = std::fs::read_to_string(crate_root.join("../../scripts/formal/residuals.json"))
-            .expect("residuals.json");
+        let residuals =
+            std::fs::read_to_string(crate_root.join("../../scripts/formal/residuals.json"))
+                .expect("residuals.json");
         assert!(
             residuals.contains("\"id\": \"R-verus\""),
             "R-verus must stay in the residual catalog"
@@ -828,10 +857,9 @@ mod tests {
             catalog.contains("\"entry\": \"high_water_at_least\""),
             "catalog entry must stay high_water_at_least"
         );
-        let twin = std::fs::read_to_string(
-            crate_root.join("../pedradb-raft/verus/membership_joint.rs"),
-        )
-        .expect("membership_joint.rs");
+        let twin =
+            std::fs::read_to_string(crate_root.join("../pedradb-raft/verus/membership_joint.rs"))
+                .expect("membership_joint.rs");
         assert!(
             twin.contains("fn high_water_at_least"),
             "twin freeze is not a Verus exec claim"
@@ -842,8 +870,9 @@ mod tests {
     #[test]
     fn is_participating_campaign_is_not_forall_traces() {
         let crate_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-        let residuals = std::fs::read_to_string(crate_root.join("../../scripts/formal/residuals.json"))
-            .expect("residuals.json");
+        let residuals =
+            std::fs::read_to_string(crate_root.join("../../scripts/formal/residuals.json"))
+                .expect("residuals.json");
         assert!(
             residuals.contains("\"id\": \"R-joint\""),
             "R-joint must stay in the residual catalog"
@@ -868,8 +897,9 @@ mod tests {
     #[test]
     fn reopen_participating_campaign_is_not_forall_traces() {
         let crate_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-        let residuals = std::fs::read_to_string(crate_root.join("../../scripts/formal/residuals.json"))
-            .expect("residuals.json");
+        let residuals =
+            std::fs::read_to_string(crate_root.join("../../scripts/formal/residuals.json"))
+                .expect("residuals.json");
         assert!(
             residuals.contains("\"id\": \"R-joint\""),
             "R-joint must stay in the residual catalog"
@@ -904,8 +934,9 @@ mod tests {
     #[test]
     fn reopen_participating_verus_still_never() {
         let crate_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-        let residuals = std::fs::read_to_string(crate_root.join("../../scripts/formal/residuals.json"))
-            .expect("residuals.json");
+        let residuals =
+            std::fs::read_to_string(crate_root.join("../../scripts/formal/residuals.json"))
+                .expect("residuals.json");
         assert!(
             residuals.contains("\"id\": \"R-verus\""),
             "R-verus must stay in the residual catalog"
@@ -924,10 +955,9 @@ mod tests {
             catalog.contains("\"entry\": \"participating_if_member\""),
             "catalog entry must stay participating_if_member"
         );
-        let twin = std::fs::read_to_string(
-            crate_root.join("../pedradb-raft/verus/membership_joint.rs"),
-        )
-        .expect("membership_joint.rs");
+        let twin =
+            std::fs::read_to_string(crate_root.join("../pedradb-raft/verus/membership_joint.rs"))
+                .expect("membership_joint.rs");
         assert!(
             twin.contains("fn participating_if_member"),
             "twin freeze is not a Verus exec claim"
@@ -938,8 +968,9 @@ mod tests {
     #[test]
     fn recover_must_apply_campaign_is_not_forall_traces() {
         let crate_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-        let residuals = std::fs::read_to_string(crate_root.join("../../scripts/formal/residuals.json"))
-            .expect("residuals.json");
+        let residuals =
+            std::fs::read_to_string(crate_root.join("../../scripts/formal/residuals.json"))
+                .expect("residuals.json");
         assert!(
             residuals.contains("\"id\": \"R-joint\""),
             "R-joint must stay in the residual catalog"
@@ -968,8 +999,9 @@ mod tests {
     #[test]
     fn recover_must_apply_verus_still_never() {
         let crate_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-        let residuals = std::fs::read_to_string(crate_root.join("../../scripts/formal/residuals.json"))
-            .expect("residuals.json");
+        let residuals =
+            std::fs::read_to_string(crate_root.join("../../scripts/formal/residuals.json"))
+                .expect("residuals.json");
         assert!(
             residuals.contains("\"id\": \"R-verus\""),
             "R-verus must stay in the residual catalog"
@@ -984,10 +1016,9 @@ mod tests {
             catalog.contains("\"id\": \"recover_apply\""),
             "recover_apply catalog pair must stay"
         );
-        let twin = std::fs::read_to_string(
-            crate_root.join("../pedradb-raft/verus/membership_joint.rs"),
-        )
-        .expect("membership_joint.rs");
+        let twin =
+            std::fs::read_to_string(crate_root.join("../pedradb-raft/verus/membership_joint.rs"))
+                .expect("membership_joint.rs");
         assert!(
             twin.contains("fn recover_must_apply"),
             "twin freeze is not a Verus exec claim"
@@ -998,8 +1029,9 @@ mod tests {
     #[test]
     fn recover_apply_node_counts_campaign_is_not_forall_traces() {
         let crate_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-        let residuals = std::fs::read_to_string(crate_root.join("../../scripts/formal/residuals.json"))
-            .expect("residuals.json");
+        let residuals =
+            std::fs::read_to_string(crate_root.join("../../scripts/formal/residuals.json"))
+                .expect("residuals.json");
         assert!(
             residuals.contains("\"id\": \"R-joint\""),
             "R-joint must stay in the residual catalog"
@@ -1028,8 +1060,9 @@ mod tests {
     #[test]
     fn recover_apply_node_counts_verus_still_never() {
         let crate_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-        let residuals = std::fs::read_to_string(crate_root.join("../../scripts/formal/residuals.json"))
-            .expect("residuals.json");
+        let residuals =
+            std::fs::read_to_string(crate_root.join("../../scripts/formal/residuals.json"))
+                .expect("residuals.json");
         assert!(
             residuals.contains("\"id\": \"R-verus\""),
             "R-verus must stay in the residual catalog"
@@ -1044,10 +1077,9 @@ mod tests {
             catalog.contains("\"id\": \"recover_apply_node\""),
             "recover_apply_node catalog pair must stay"
         );
-        let twin = std::fs::read_to_string(
-            crate_root.join("../pedradb-raft/verus/membership_joint.rs"),
-        )
-        .expect("membership_joint.rs");
+        let twin =
+            std::fs::read_to_string(crate_root.join("../pedradb-raft/verus/membership_joint.rs"))
+                .expect("membership_joint.rs");
         assert!(
             twin.contains("fn recover_apply_node_counts"),
             "twin freeze is not a Verus exec claim"
@@ -1058,8 +1090,9 @@ mod tests {
     #[test]
     fn recover_truncate_node_counts_campaign_is_not_forall_traces() {
         let crate_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-        let residuals = std::fs::read_to_string(crate_root.join("../../scripts/formal/residuals.json"))
-            .expect("residuals.json");
+        let residuals =
+            std::fs::read_to_string(crate_root.join("../../scripts/formal/residuals.json"))
+                .expect("residuals.json");
         assert!(
             residuals.contains("\"id\": \"R-joint\""),
             "R-joint must stay in the residual catalog"
@@ -1088,8 +1121,9 @@ mod tests {
     #[test]
     fn recover_truncate_node_counts_verus_still_never() {
         let crate_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-        let residuals = std::fs::read_to_string(crate_root.join("../../scripts/formal/residuals.json"))
-            .expect("residuals.json");
+        let residuals =
+            std::fs::read_to_string(crate_root.join("../../scripts/formal/residuals.json"))
+                .expect("residuals.json");
         assert!(
             residuals.contains("\"id\": \"R-verus\""),
             "R-verus must stay in the residual catalog"
@@ -1104,10 +1138,9 @@ mod tests {
             catalog.contains("\"id\": \"recover_truncate\""),
             "recover_truncate catalog pair must stay"
         );
-        let twin = std::fs::read_to_string(
-            crate_root.join("../pedradb-raft/verus/membership_joint.rs"),
-        )
-        .expect("membership_joint.rs");
+        let twin =
+            std::fs::read_to_string(crate_root.join("../pedradb-raft/verus/membership_joint.rs"))
+                .expect("membership_joint.rs");
         assert!(
             twin.contains("fn recover_truncate_node_counts"),
             "twin freeze is not a Verus exec claim"
@@ -1118,8 +1151,9 @@ mod tests {
     #[test]
     fn recover_drop_orphan_seg_campaign_is_not_forall_traces() {
         let crate_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-        let residuals = std::fs::read_to_string(crate_root.join("../../scripts/formal/residuals.json"))
-            .expect("residuals.json");
+        let residuals =
+            std::fs::read_to_string(crate_root.join("../../scripts/formal/residuals.json"))
+                .expect("residuals.json");
         assert!(
             residuals.contains("\"id\": \"R-joint\""),
             "R-joint must stay in the residual catalog"
@@ -1148,8 +1182,9 @@ mod tests {
     #[test]
     fn recover_drop_orphan_seg_verus_still_never() {
         let crate_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-        let residuals = std::fs::read_to_string(crate_root.join("../../scripts/formal/residuals.json"))
-            .expect("residuals.json");
+        let residuals =
+            std::fs::read_to_string(crate_root.join("../../scripts/formal/residuals.json"))
+                .expect("residuals.json");
         assert!(
             residuals.contains("\"id\": \"R-verus\""),
             "R-verus must stay in the residual catalog"
@@ -1164,10 +1199,9 @@ mod tests {
             catalog.contains("\"id\": \"recover_drop_orphan\""),
             "recover_drop_orphan catalog pair must stay"
         );
-        let twin = std::fs::read_to_string(
-            crate_root.join("../pedradb-raft/verus/membership_joint.rs"),
-        )
-        .expect("membership_joint.rs");
+        let twin =
+            std::fs::read_to_string(crate_root.join("../pedradb-raft/verus/membership_joint.rs"))
+                .expect("membership_joint.rs");
         assert!(
             twin.contains("fn recover_drop_orphan_seg"),
             "twin freeze is not a Verus exec claim"
@@ -1178,8 +1212,9 @@ mod tests {
     #[test]
     fn recover_abort_node_counts_campaign_is_not_forall_traces() {
         let crate_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-        let residuals = std::fs::read_to_string(crate_root.join("../../scripts/formal/residuals.json"))
-            .expect("residuals.json");
+        let residuals =
+            std::fs::read_to_string(crate_root.join("../../scripts/formal/residuals.json"))
+                .expect("residuals.json");
         assert!(
             residuals.contains("\"id\": \"R-joint\""),
             "R-joint must stay in the residual catalog"
@@ -1208,8 +1243,9 @@ mod tests {
     #[test]
     fn recover_abort_node_counts_verus_still_never() {
         let crate_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-        let residuals = std::fs::read_to_string(crate_root.join("../../scripts/formal/residuals.json"))
-            .expect("residuals.json");
+        let residuals =
+            std::fs::read_to_string(crate_root.join("../../scripts/formal/residuals.json"))
+                .expect("residuals.json");
         assert!(
             residuals.contains("\"id\": \"R-verus\""),
             "R-verus must stay in the residual catalog"
@@ -1224,10 +1260,9 @@ mod tests {
             catalog.contains("\"id\": \"recover_abort\""),
             "recover_abort catalog pair must stay"
         );
-        let twin = std::fs::read_to_string(
-            crate_root.join("../pedradb-raft/verus/membership_joint.rs"),
-        )
-        .expect("membership_joint.rs");
+        let twin =
+            std::fs::read_to_string(crate_root.join("../pedradb-raft/verus/membership_joint.rs"))
+                .expect("membership_joint.rs");
         assert!(
             twin.contains("fn recover_abort_node_counts"),
             "twin freeze is not a Verus exec claim"
@@ -1238,8 +1273,9 @@ mod tests {
     #[test]
     fn persist_meta_node_counts_campaign_is_not_forall_traces() {
         let crate_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-        let residuals = std::fs::read_to_string(crate_root.join("../../scripts/formal/residuals.json"))
-            .expect("residuals.json");
+        let residuals =
+            std::fs::read_to_string(crate_root.join("../../scripts/formal/residuals.json"))
+                .expect("residuals.json");
         assert!(
             residuals.contains("\"id\": \"R-joint\""),
             "R-joint must stay in the residual catalog"
@@ -1268,8 +1304,9 @@ mod tests {
     #[test]
     fn persist_meta_node_counts_verus_still_never() {
         let crate_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-        let residuals = std::fs::read_to_string(crate_root.join("../../scripts/formal/residuals.json"))
-            .expect("residuals.json");
+        let residuals =
+            std::fs::read_to_string(crate_root.join("../../scripts/formal/residuals.json"))
+                .expect("residuals.json");
         assert!(
             residuals.contains("\"id\": \"R-verus\""),
             "R-verus must stay in the residual catalog"
@@ -1284,10 +1321,9 @@ mod tests {
             catalog.contains("\"id\": \"persist_meta\""),
             "persist_meta catalog pair must stay"
         );
-        let twin = std::fs::read_to_string(
-            crate_root.join("../pedradb-raft/verus/membership_joint.rs"),
-        )
-        .expect("membership_joint.rs");
+        let twin =
+            std::fs::read_to_string(crate_root.join("../pedradb-raft/verus/membership_joint.rs"))
+                .expect("membership_joint.rs");
         assert!(
             twin.contains("fn persist_meta_node_counts"),
             "twin freeze is not a Verus exec claim"
@@ -1298,8 +1334,9 @@ mod tests {
     #[test]
     fn persist_hist_node_counts_campaign_is_not_forall_traces() {
         let crate_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-        let residuals = std::fs::read_to_string(crate_root.join("../../scripts/formal/residuals.json"))
-            .expect("residuals.json");
+        let residuals =
+            std::fs::read_to_string(crate_root.join("../../scripts/formal/residuals.json"))
+                .expect("residuals.json");
         assert!(
             residuals.contains("\"id\": \"R-joint\""),
             "R-joint must stay in the residual catalog"
@@ -1328,8 +1365,9 @@ mod tests {
     #[test]
     fn persist_hist_node_counts_verus_still_never() {
         let crate_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-        let residuals = std::fs::read_to_string(crate_root.join("../../scripts/formal/residuals.json"))
-            .expect("residuals.json");
+        let residuals =
+            std::fs::read_to_string(crate_root.join("../../scripts/formal/residuals.json"))
+                .expect("residuals.json");
         assert!(
             residuals.contains("\"id\": \"R-verus\""),
             "R-verus must stay in the residual catalog"
@@ -1344,10 +1382,9 @@ mod tests {
             catalog.contains("\"id\": \"persist_hist\""),
             "persist_hist catalog pair must stay"
         );
-        let twin = std::fs::read_to_string(
-            crate_root.join("../pedradb-raft/verus/membership_joint.rs"),
-        )
-        .expect("membership_joint.rs");
+        let twin =
+            std::fs::read_to_string(crate_root.join("../pedradb-raft/verus/membership_joint.rs"))
+                .expect("membership_joint.rs");
         assert!(
             twin.contains("fn persist_hist_node_counts"),
             "twin freeze is not a Verus exec claim"
@@ -1358,8 +1395,9 @@ mod tests {
     #[test]
     fn persist_fence_node_counts_campaign_is_not_forall_traces() {
         let crate_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-        let residuals = std::fs::read_to_string(crate_root.join("../../scripts/formal/residuals.json"))
-            .expect("residuals.json");
+        let residuals =
+            std::fs::read_to_string(crate_root.join("../../scripts/formal/residuals.json"))
+                .expect("residuals.json");
         assert!(
             residuals.contains("\"id\": \"R-joint\""),
             "R-joint must stay in the residual catalog"
@@ -1388,8 +1426,9 @@ mod tests {
     #[test]
     fn persist_fence_node_counts_verus_still_never() {
         let crate_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-        let residuals = std::fs::read_to_string(crate_root.join("../../scripts/formal/residuals.json"))
-            .expect("residuals.json");
+        let residuals =
+            std::fs::read_to_string(crate_root.join("../../scripts/formal/residuals.json"))
+                .expect("residuals.json");
         assert!(
             residuals.contains("\"id\": \"R-verus\""),
             "R-verus must stay in the residual catalog"
@@ -1404,10 +1443,9 @@ mod tests {
             catalog.contains("\"id\": \"persist_fence\""),
             "persist_fence catalog pair must stay"
         );
-        let twin = std::fs::read_to_string(
-            crate_root.join("../pedradb-raft/verus/membership_joint.rs"),
-        )
-        .expect("membership_joint.rs");
+        let twin =
+            std::fs::read_to_string(crate_root.join("../pedradb-raft/verus/membership_joint.rs"))
+                .expect("membership_joint.rs");
         assert!(
             twin.contains("fn persist_fence_node_counts"),
             "twin freeze is not a Verus exec claim"
@@ -1418,8 +1456,9 @@ mod tests {
     #[test]
     fn force_clear_node_counts_campaign_is_not_forall_traces() {
         let crate_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-        let residuals = std::fs::read_to_string(crate_root.join("../../scripts/formal/residuals.json"))
-            .expect("residuals.json");
+        let residuals =
+            std::fs::read_to_string(crate_root.join("../../scripts/formal/residuals.json"))
+                .expect("residuals.json");
         assert!(
             residuals.contains("\"id\": \"R-joint\""),
             "R-joint must stay in the residual catalog"
@@ -1448,8 +1487,9 @@ mod tests {
     #[test]
     fn force_clear_node_counts_verus_still_never() {
         let crate_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-        let residuals = std::fs::read_to_string(crate_root.join("../../scripts/formal/residuals.json"))
-            .expect("residuals.json");
+        let residuals =
+            std::fs::read_to_string(crate_root.join("../../scripts/formal/residuals.json"))
+                .expect("residuals.json");
         assert!(
             residuals.contains("\"id\": \"R-verus\""),
             "R-verus must stay in the residual catalog"
@@ -1464,10 +1504,9 @@ mod tests {
             catalog.contains("\"id\": \"force_clear\""),
             "force_clear catalog pair must stay"
         );
-        let twin = std::fs::read_to_string(
-            crate_root.join("../pedradb-raft/verus/membership_joint.rs"),
-        )
-        .expect("membership_joint.rs");
+        let twin =
+            std::fs::read_to_string(crate_root.join("../pedradb-raft/verus/membership_joint.rs"))
+                .expect("membership_joint.rs");
         assert!(
             twin.contains("fn force_clear_node_counts"),
             "twin freeze is not a Verus exec claim"
@@ -1478,8 +1517,9 @@ mod tests {
     #[test]
     fn drop_preimages_node_counts_campaign_is_not_forall_traces() {
         let crate_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-        let residuals = std::fs::read_to_string(crate_root.join("../../scripts/formal/residuals.json"))
-            .expect("residuals.json");
+        let residuals =
+            std::fs::read_to_string(crate_root.join("../../scripts/formal/residuals.json"))
+                .expect("residuals.json");
         assert!(
             residuals.contains("\"id\": \"R-joint\""),
             "R-joint must stay in the residual catalog"
@@ -1508,8 +1548,9 @@ mod tests {
     #[test]
     fn drop_preimages_node_counts_verus_still_never() {
         let crate_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-        let residuals = std::fs::read_to_string(crate_root.join("../../scripts/formal/residuals.json"))
-            .expect("residuals.json");
+        let residuals =
+            std::fs::read_to_string(crate_root.join("../../scripts/formal/residuals.json"))
+                .expect("residuals.json");
         assert!(
             residuals.contains("\"id\": \"R-verus\""),
             "R-verus must stay in the residual catalog"
@@ -1524,10 +1565,9 @@ mod tests {
             catalog.contains("\"id\": \"drop_preimages\""),
             "drop_preimages catalog pair must stay"
         );
-        let twin = std::fs::read_to_string(
-            crate_root.join("../pedradb-raft/verus/membership_joint.rs"),
-        )
-        .expect("membership_joint.rs");
+        let twin =
+            std::fs::read_to_string(crate_root.join("../pedradb-raft/verus/membership_joint.rs"))
+                .expect("membership_joint.rs");
         assert!(
             twin.contains("fn drop_preimages_node_counts"),
             "twin freeze is not a Verus exec claim"
@@ -1538,8 +1578,9 @@ mod tests {
     #[test]
     fn open_peer_uses_disk_campaign_is_not_forall_traces() {
         let crate_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-        let residuals = std::fs::read_to_string(crate_root.join("../../scripts/formal/residuals.json"))
-            .expect("residuals.json");
+        let residuals =
+            std::fs::read_to_string(crate_root.join("../../scripts/formal/residuals.json"))
+                .expect("residuals.json");
         assert!(
             residuals.contains("\"id\": \"R-joint\""),
             "R-joint must stay in the residual catalog"
@@ -1568,8 +1609,9 @@ mod tests {
     #[test]
     fn open_peer_uses_disk_verus_still_never() {
         let crate_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-        let residuals = std::fs::read_to_string(crate_root.join("../../scripts/formal/residuals.json"))
-            .expect("residuals.json");
+        let residuals =
+            std::fs::read_to_string(crate_root.join("../../scripts/formal/residuals.json"))
+                .expect("residuals.json");
         assert!(
             residuals.contains("\"id\": \"R-verus\""),
             "R-verus must stay in the residual catalog"
@@ -1584,10 +1626,9 @@ mod tests {
             catalog.contains("\"id\": \"open_peer_disk\""),
             "open_peer_disk catalog pair must stay"
         );
-        let twin = std::fs::read_to_string(
-            crate_root.join("../pedradb-raft/verus/membership_joint.rs"),
-        )
-        .expect("membership_joint.rs");
+        let twin =
+            std::fs::read_to_string(crate_root.join("../pedradb-raft/verus/membership_joint.rs"))
+                .expect("membership_joint.rs");
         assert!(
             twin.contains("fn open_peer_uses_disk"),
             "twin freeze is not a Verus exec claim"
@@ -1598,8 +1639,9 @@ mod tests {
     #[test]
     fn local_id_if_member_campaign_is_not_forall_traces() {
         let crate_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-        let residuals = std::fs::read_to_string(crate_root.join("../../scripts/formal/residuals.json"))
-            .expect("residuals.json");
+        let residuals =
+            std::fs::read_to_string(crate_root.join("../../scripts/formal/residuals.json"))
+                .expect("residuals.json");
         assert!(
             residuals.contains("\"id\": \"R-joint\""),
             "R-joint must stay in the residual catalog"
@@ -1628,8 +1670,9 @@ mod tests {
     #[test]
     fn local_id_if_member_verus_still_never() {
         let crate_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-        let residuals = std::fs::read_to_string(crate_root.join("../../scripts/formal/residuals.json"))
-            .expect("residuals.json");
+        let residuals =
+            std::fs::read_to_string(crate_root.join("../../scripts/formal/residuals.json"))
+                .expect("residuals.json");
         assert!(
             residuals.contains("\"id\": \"R-verus\""),
             "R-verus must stay in the residual catalog"
@@ -1644,10 +1687,9 @@ mod tests {
             catalog.contains("\"id\": \"local_id_member\""),
             "local_id_member catalog pair must stay"
         );
-        let twin = std::fs::read_to_string(
-            crate_root.join("../pedradb-raft/verus/membership_joint.rs"),
-        )
-        .expect("membership_joint.rs");
+        let twin =
+            std::fs::read_to_string(crate_root.join("../pedradb-raft/verus/membership_joint.rs"))
+                .expect("membership_joint.rs");
         assert!(
             twin.contains("fn local_id_if_member"),
             "twin freeze is not a Verus exec claim"
@@ -1658,8 +1700,9 @@ mod tests {
     #[test]
     fn reader_id_local_campaign_is_not_forall_traces() {
         let crate_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-        let residuals = std::fs::read_to_string(crate_root.join("../../scripts/formal/residuals.json"))
-            .expect("residuals.json");
+        let residuals =
+            std::fs::read_to_string(crate_root.join("../../scripts/formal/residuals.json"))
+                .expect("residuals.json");
         assert!(
             residuals.contains("\"id\": \"R-joint\""),
             "R-joint must stay in the residual catalog"
@@ -1688,8 +1731,9 @@ mod tests {
     #[test]
     fn reader_id_local_verus_still_never() {
         let crate_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-        let residuals = std::fs::read_to_string(crate_root.join("../../scripts/formal/residuals.json"))
-            .expect("residuals.json");
+        let residuals =
+            std::fs::read_to_string(crate_root.join("../../scripts/formal/residuals.json"))
+                .expect("residuals.json");
         assert!(
             residuals.contains("\"id\": \"R-verus\""),
             "R-verus must stay in the residual catalog"
@@ -1704,10 +1748,9 @@ mod tests {
             catalog.contains("\"id\": \"reader_local\""),
             "reader_local catalog pair must stay"
         );
-        let twin = std::fs::read_to_string(
-            crate_root.join("../pedradb-raft/verus/membership_joint.rs"),
-        )
-        .expect("membership_joint.rs");
+        let twin =
+            std::fs::read_to_string(crate_root.join("../pedradb-raft/verus/membership_joint.rs"))
+                .expect("membership_joint.rs");
         assert!(
             twin.contains("fn reader_id_local"),
             "twin freeze is not a Verus exec claim"
@@ -1718,8 +1761,9 @@ mod tests {
     #[test]
     fn discard_node_counts_campaign_is_not_forall_traces() {
         let crate_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-        let residuals = std::fs::read_to_string(crate_root.join("../../scripts/formal/residuals.json"))
-            .expect("residuals.json");
+        let residuals =
+            std::fs::read_to_string(crate_root.join("../../scripts/formal/residuals.json"))
+                .expect("residuals.json");
         assert!(
             residuals.contains("\"id\": \"R-joint\""),
             "R-joint must stay in the residual catalog"
@@ -1748,8 +1792,9 @@ mod tests {
     #[test]
     fn discard_node_counts_verus_still_never() {
         let crate_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-        let residuals = std::fs::read_to_string(crate_root.join("../../scripts/formal/residuals.json"))
-            .expect("residuals.json");
+        let residuals =
+            std::fs::read_to_string(crate_root.join("../../scripts/formal/residuals.json"))
+                .expect("residuals.json");
         assert!(
             residuals.contains("\"id\": \"R-verus\""),
             "R-verus must stay in the residual catalog"
@@ -1764,10 +1809,9 @@ mod tests {
             catalog.contains("\"id\": \"discard_uncommitted\""),
             "discard_uncommitted catalog pair must stay"
         );
-        let twin = std::fs::read_to_string(
-            crate_root.join("../pedradb-raft/verus/membership_joint.rs"),
-        )
-        .expect("membership_joint.rs");
+        let twin =
+            std::fs::read_to_string(crate_root.join("../pedradb-raft/verus/membership_joint.rs"))
+                .expect("membership_joint.rs");
         assert!(
             twin.contains("fn discard_node_counts"),
             "twin freeze is not a Verus exec claim"
@@ -1778,8 +1822,9 @@ mod tests {
     #[test]
     fn discard_leader_local_campaign_is_not_forall_traces() {
         let crate_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-        let residuals = std::fs::read_to_string(crate_root.join("../../scripts/formal/residuals.json"))
-            .expect("residuals.json");
+        let residuals =
+            std::fs::read_to_string(crate_root.join("../../scripts/formal/residuals.json"))
+                .expect("residuals.json");
         assert!(
             residuals.contains("\"id\": \"R-joint\""),
             "R-joint must stay in the residual catalog"
@@ -1808,8 +1853,9 @@ mod tests {
     #[test]
     fn discard_leader_local_verus_still_never() {
         let crate_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-        let residuals = std::fs::read_to_string(crate_root.join("../../scripts/formal/residuals.json"))
-            .expect("residuals.json");
+        let residuals =
+            std::fs::read_to_string(crate_root.join("../../scripts/formal/residuals.json"))
+                .expect("residuals.json");
         assert!(
             residuals.contains("\"id\": \"R-verus\""),
             "R-verus must stay in the residual catalog"
@@ -1824,10 +1870,9 @@ mod tests {
             catalog.contains("\"id\": \"discard_leader\""),
             "discard_leader catalog pair must stay"
         );
-        let twin = std::fs::read_to_string(
-            crate_root.join("../pedradb-raft/verus/membership_joint.rs"),
-        )
-        .expect("membership_joint.rs");
+        let twin =
+            std::fs::read_to_string(crate_root.join("../pedradb-raft/verus/membership_joint.rs"))
+                .expect("membership_joint.rs");
         assert!(
             twin.contains("fn discard_leader_local"),
             "twin freeze is not a Verus exec claim"
@@ -1838,8 +1883,9 @@ mod tests {
     #[test]
     fn removed_steps_down_campaign_is_not_forall_traces() {
         let crate_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-        let residuals = std::fs::read_to_string(crate_root.join("../../scripts/formal/residuals.json"))
-            .expect("residuals.json");
+        let residuals =
+            std::fs::read_to_string(crate_root.join("../../scripts/formal/residuals.json"))
+                .expect("residuals.json");
         assert!(
             residuals.contains("\"id\": \"R-joint\""),
             "R-joint must stay in the residual catalog"
@@ -1868,8 +1914,9 @@ mod tests {
     #[test]
     fn removed_steps_down_verus_still_never() {
         let crate_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-        let residuals = std::fs::read_to_string(crate_root.join("../../scripts/formal/residuals.json"))
-            .expect("residuals.json");
+        let residuals =
+            std::fs::read_to_string(crate_root.join("../../scripts/formal/residuals.json"))
+                .expect("residuals.json");
         assert!(
             residuals.contains("\"id\": \"R-verus\""),
             "R-verus must stay in the residual catalog"
@@ -1884,10 +1931,9 @@ mod tests {
             catalog.contains("\"id\": \"removed_step_down\""),
             "removed_step_down catalog pair must stay"
         );
-        let twin = std::fs::read_to_string(
-            crate_root.join("../pedradb-raft/verus/membership_joint.rs"),
-        )
-        .expect("membership_joint.rs");
+        let twin =
+            std::fs::read_to_string(crate_root.join("../pedradb-raft/verus/membership_joint.rs"))
+                .expect("membership_joint.rs");
         assert!(
             twin.contains("fn removed_steps_down"),
             "twin freeze is not a Verus exec claim"
@@ -1898,8 +1944,9 @@ mod tests {
     #[test]
     fn hint_if_member_campaign_is_not_forall_traces() {
         let crate_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-        let residuals = std::fs::read_to_string(crate_root.join("../../scripts/formal/residuals.json"))
-            .expect("residuals.json");
+        let residuals =
+            std::fs::read_to_string(crate_root.join("../../scripts/formal/residuals.json"))
+                .expect("residuals.json");
         assert!(
             residuals.contains("\"id\": \"R-joint\""),
             "R-joint must stay in the residual catalog"
@@ -1928,8 +1975,9 @@ mod tests {
     #[test]
     fn hint_if_member_verus_still_never() {
         let crate_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-        let residuals = std::fs::read_to_string(crate_root.join("../../scripts/formal/residuals.json"))
-            .expect("residuals.json");
+        let residuals =
+            std::fs::read_to_string(crate_root.join("../../scripts/formal/residuals.json"))
+                .expect("residuals.json");
         assert!(
             residuals.contains("\"id\": \"R-verus\""),
             "R-verus must stay in the residual catalog"
@@ -1944,10 +1992,9 @@ mod tests {
             catalog.contains("\"id\": \"hint_member\""),
             "hint_member catalog pair must stay"
         );
-        let twin = std::fs::read_to_string(
-            crate_root.join("../pedradb-raft/verus/membership_joint.rs"),
-        )
-        .expect("membership_joint.rs");
+        let twin =
+            std::fs::read_to_string(crate_root.join("../pedradb-raft/verus/membership_joint.rs"))
+                .expect("membership_joint.rs");
         assert!(
             twin.contains("fn hint_if_member"),
             "twin freeze is not a Verus exec claim"
@@ -1958,8 +2005,9 @@ mod tests {
     #[test]
     fn drop_repl_slot_campaign_is_not_forall_traces() {
         let crate_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-        let residuals = std::fs::read_to_string(crate_root.join("../../scripts/formal/residuals.json"))
-            .expect("residuals.json");
+        let residuals =
+            std::fs::read_to_string(crate_root.join("../../scripts/formal/residuals.json"))
+                .expect("residuals.json");
         assert!(
             residuals.contains("\"id\": \"R-joint\""),
             "R-joint must stay in the residual catalog"
@@ -1988,8 +2036,9 @@ mod tests {
     #[test]
     fn drop_repl_slot_verus_still_never() {
         let crate_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-        let residuals = std::fs::read_to_string(crate_root.join("../../scripts/formal/residuals.json"))
-            .expect("residuals.json");
+        let residuals =
+            std::fs::read_to_string(crate_root.join("../../scripts/formal/residuals.json"))
+                .expect("residuals.json");
         assert!(
             residuals.contains("\"id\": \"R-verus\""),
             "R-verus must stay in the residual catalog"
@@ -2004,10 +2053,9 @@ mod tests {
             catalog.contains("\"id\": \"drop_repl_slot\""),
             "drop_repl_slot catalog pair must stay"
         );
-        let twin = std::fs::read_to_string(
-            crate_root.join("../pedradb-raft/verus/membership_joint.rs"),
-        )
-        .expect("membership_joint.rs");
+        let twin =
+            std::fs::read_to_string(crate_root.join("../pedradb-raft/verus/membership_joint.rs"))
+                .expect("membership_joint.rs");
         assert!(
             twin.contains("fn drop_repl_slot"),
             "twin freeze is not a Verus exec claim"
@@ -2018,8 +2066,9 @@ mod tests {
     #[test]
     fn drop_sent_through_campaign_is_not_forall_traces() {
         let crate_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-        let residuals = std::fs::read_to_string(crate_root.join("../../scripts/formal/residuals.json"))
-            .expect("residuals.json");
+        let residuals =
+            std::fs::read_to_string(crate_root.join("../../scripts/formal/residuals.json"))
+                .expect("residuals.json");
         assert!(
             residuals.contains("\"id\": \"R-joint\""),
             "R-joint must stay in the residual catalog"
@@ -2048,8 +2097,9 @@ mod tests {
     #[test]
     fn drop_sent_through_verus_still_never() {
         let crate_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-        let residuals = std::fs::read_to_string(crate_root.join("../../scripts/formal/residuals.json"))
-            .expect("residuals.json");
+        let residuals =
+            std::fs::read_to_string(crate_root.join("../../scripts/formal/residuals.json"))
+                .expect("residuals.json");
         assert!(
             residuals.contains("\"id\": \"R-verus\""),
             "R-verus must stay in the residual catalog"
@@ -2064,10 +2114,9 @@ mod tests {
             catalog.contains("\"id\": \"drop_sent_through\""),
             "drop_sent_through catalog pair must stay"
         );
-        let twin = std::fs::read_to_string(
-            crate_root.join("../pedradb-raft/verus/membership_joint.rs"),
-        )
-        .expect("membership_joint.rs");
+        let twin =
+            std::fs::read_to_string(crate_root.join("../pedradb-raft/verus/membership_joint.rs"))
+                .expect("membership_joint.rs");
         assert!(
             twin.contains("fn drop_sent_through"),
             "twin freeze is not a Verus exec claim"
@@ -2078,8 +2127,9 @@ mod tests {
     #[test]
     fn identity_before_applied_verus_still_never() {
         let crate_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-        let residuals = std::fs::read_to_string(crate_root.join("../../scripts/formal/residuals.json"))
-            .expect("residuals.json");
+        let residuals =
+            std::fs::read_to_string(crate_root.join("../../scripts/formal/residuals.json"))
+                .expect("residuals.json");
         assert!(
             residuals.contains("\"id\": \"R-verus\""),
             "R-verus must stay in the residual catalog"
@@ -2094,10 +2144,9 @@ mod tests {
             catalog.contains("\"id\": \"identity_before_applied\""),
             "identity_before_applied catalog pair must stay"
         );
-        let twin = std::fs::read_to_string(
-            crate_root.join("../pedradb-raft/verus/membership_joint.rs"),
-        )
-        .expect("membership_joint.rs");
+        let twin =
+            std::fs::read_to_string(crate_root.join("../pedradb-raft/verus/membership_joint.rs"))
+                .expect("membership_joint.rs");
         assert!(
             twin.contains("fn membership_identity_before_applied"),
             "twin freeze is not a Verus exec claim"
@@ -2210,16 +2259,70 @@ mod tests {
         );
     }
 
+    /// Catalog three-teeth plant. Direct `liveness_claim_needs_all_three_es_axioms` /
+    /// `claim_eventual_election_refused_without_es_axioms` are **not** this tooth.
+    #[test]
+    fn liveness_admitted_on_live_store_is_not_ok() {
+        assert!(!liveness_admitted(false, false, false));
+        assert!(
+            liveness_admitted_as_is(false, false, false),
+            "AS-IS dente: bounded elect is treated as a liveness theorem"
+        );
+        let dir = std::env::temp_dir().join(format!(
+            "liveness-claim-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut c = crate::StoreCluster::open_with_rng(
+            &dir,
+            3,
+            1,
+            pedradb_core::SeedRng::new(0x0152_0142),
+        )
+        .unwrap();
+        c.pin_dst_queued();
+        assert_eq!(c.rpc_mode(), crate::RpcMode::Queued);
+        for _ in 0..120 {
+            c.tick().unwrap();
+            for _ in 0..48 {
+                let batch = c.drain_outbound();
+                if batch.is_empty() {
+                    break;
+                }
+                for (from, to, bytes) in batch {
+                    c.handle_inbound(from, to, &bytes).unwrap();
+                }
+            }
+            if c.range_leader(1).is_some() {
+                break;
+            }
+        }
+        assert!(
+            c.range_leader(1).is_some(),
+            "Queued bounded elect must find a leader"
+        );
+        assert!(
+            !c.claim_eventual_election(false, false, false),
+            "live StoreCluster must refuse ∀-eventual-election without ES axioms"
+        );
+        assert!(!c.claim_eventual_election(false, true, true));
+        assert!(c.claim_eventual_election(true, true, true));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// RFC-0094 P1.2: raft/store membership clones keep identical tokens
     /// for leave-joint (`joint_still_active`, `joint_leave_ok`). Catalog
     /// `membership_raft_store` lists them. Drift is a freeze `--clones` fail.
     #[test]
     fn membership_raft_store_clone_tokens_stay_identical() {
         let crate_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-        let raft = std::fs::read_to_string(
-            crate_root.join("../pedradb-raft/src/membership_kernel.rs"),
-        )
-        .expect("raft membership_kernel.rs");
+        let raft =
+            std::fs::read_to_string(crate_root.join("../pedradb-raft/src/membership_kernel.rs"))
+                .expect("raft membership_kernel.rs");
         let store = std::fs::read_to_string(crate_root.join("src/membership_kernel.rs"))
             .expect("store membership_kernel.rs");
         for name in ["joint_still_active", "joint_leave_ok"] {
@@ -2227,10 +2330,8 @@ mod tests {
             let b = collapse_fn(&store, name);
             assert_eq!(a, b, "{name} drifted between raft and store clones");
         }
-        let catalog = std::fs::read_to_string(
-            crate_root.join("../../scripts/formal/catalog.json"),
-        )
-        .expect("catalog.json");
+        let catalog = std::fs::read_to_string(crate_root.join("../../scripts/formal/catalog.json"))
+            .expect("catalog.json");
         assert!(
             catalog.contains("\"id\": \"membership_raft_store\""),
             "clone trap must stay registered"
@@ -2247,9 +2348,7 @@ mod tests {
 
     fn collapse_fn(src: &str, name: &str) -> String {
         let sig = format!("pub fn {name}(");
-        let start = src
-            .find(&sig)
-            .unwrap_or_else(|| panic!("missing {name}"));
+        let start = src.find(&sig).unwrap_or_else(|| panic!("missing {name}"));
         let rest = &src[start..];
         let open = rest.find('{').unwrap_or_else(|| panic!("{name} body"));
         let bytes = rest.as_bytes();

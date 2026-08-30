@@ -554,15 +554,26 @@ fn rfc0065_multi_cf_batch_crash_all_or_nothing() {
     wb.put_cf(&lock, b"lk", b"lv");
     db.write(&wb).unwrap();
     db.flush().unwrap();
-    assert_eq!(wal_logs(&dir).len(), 1, "one WAL, not 3 DBs: {:?}", wal_logs(&dir));
+    assert_eq!(
+        wal_logs(&dir).len(),
+        1,
+        "one WAL, not 3 DBs: {:?}",
+        wal_logs(&dir)
+    );
     drop(db);
-    let db = DB::open_cf_with_env(&g1_opts(), &dir, &["write", "lock"], FailingEnv::passing())
-        .unwrap();
+    let db =
+        DB::open_cf_with_env(&g1_opts(), &dir, &["write", "lock"], FailingEnv::passing()).unwrap();
     let lock = db.cf_handle("lock").unwrap();
     let write = db.cf_handle("write").unwrap();
     assert_eq!(db.get(b"dk").unwrap().as_deref(), Some(&b"dv"[..]));
-    assert_eq!(db.get_cf(&write, b"wk").unwrap().as_deref(), Some(&b"wv"[..]));
-    assert_eq!(db.get_cf(&lock, b"lk").unwrap().as_deref(), Some(&b"lv"[..]));
+    assert_eq!(
+        db.get_cf(&write, b"wk").unwrap().as_deref(),
+        Some(&b"wv"[..])
+    );
+    assert_eq!(
+        db.get_cf(&lock, b"lk").unwrap().as_deref(),
+        Some(&b"lv"[..])
+    );
     let _ = std::fs::remove_dir_all(&dir);
 
     // Sync-fail mid-commit: recover sees all three keys or none.
@@ -578,8 +589,8 @@ fn rfc0065_multi_cf_batch_crash_all_or_nothing() {
     wb.put_cf(&lock, b"lk", b"lv");
     let wrote = db.write(&wb);
     drop(db);
-    let db = DB::open_cf_with_env(&g1_opts(), &dir, &["write", "lock"], FailingEnv::passing())
-        .unwrap();
+    let db =
+        DB::open_cf_with_env(&g1_opts(), &dir, &["write", "lock"], FailingEnv::passing()).unwrap();
     let lock = db.cf_handle("lock").unwrap();
     let write = db.cf_handle("write").unwrap();
     let d = db.get(b"dk").unwrap();

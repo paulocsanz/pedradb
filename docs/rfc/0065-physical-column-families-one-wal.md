@@ -1,7 +1,7 @@
 # RFC: 0065 — Column families físicas: N LSM, 1 WAL
 
 **Status:** in-progress
-**Updated:** 2026-08-27
+**Updated:** 2026-08-30
 **Parents:** [0062](0062-launch-readiness-remaining-gaps.md) P2.3,
 [0009](0009-rocksdb-class-engine.md),
 [0047](0047-compat-dropin-failure-profile.md)
@@ -53,7 +53,10 @@ P0 sozinho já é útil: compact do lock deixa de varrer o default. Flush ainda 
 
 ### P2 — later
 
-- [ ] **P2.1** Segundo `DB` no path do raftdb (log Raft); kvdb não mistura `raft` como CF prefixo — status: `todo`
+- [ ] **P2.1** Segundo `DB` no path do raftdb (log Raft); kvdb não mistura
+      `raft` como CF prefixo — status: `todo`
+      **REFUSED** CHV 10/17 min 1.234 (lost `ycsb_f` + lock). Reverted.
+      Evidence: [`findings/2026-08-30-linux-p149-p21-chv-p22/`](../../findings/2026-08-30-linux-p149-p21-chv-p22/).
 - [ ] **P2.2** Cache/block por CF (opcional; default partilhado continua correcto) — status: `todo`
 
 ## Status (living — update with every PR)
@@ -66,7 +69,7 @@ P0 sozinho já é útil: compact do lock deixa de varrer o default. Flush ainda 
 | P1.1 | p1 | per-CF memtable + write_buffer | done | `take_family` / `flush_cf` / `set_cf_write_buffer` | 2026-08-27 |
 | P1.2 | p1 | per-CF L0 stall | done | `ensure_write_admitted_for` | 2026-08-27 |
 | P1.3 | p1 | lock flush ≠ default SST | done | `flush_cf_lock_does_not_create_default_sst` | 2026-08-27 |
-| P2.1 | p2 | raftdb second DB path | todo | — | 2026-08-27 |
+| P2.1 | p2 | raftdb second DB path | todo | REFUSED CHV 10/17 min 1.234; reverted | 2026-08-30 |
 | P2.2 | p2 | per-CF cache | todo | — | 2026-08-27 |
 
 ## Acceptance Criteria

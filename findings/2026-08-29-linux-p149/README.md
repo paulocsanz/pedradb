@@ -57,3 +57,42 @@ Mac P0 was **12/17**. Rocks on Linux is faster; ratios fall. This is
 Linux virt gate still blocked on TAP.
 
 `RESULT=P149_FAIL over_med=7/17 min_ratio=1.058`
+
+## CHV 4 vCPU (official virt shape)
+
+Host default `CAIXOTE_VMM_RUNTIME=cloud-hypervisor`. Guest 4 CPUs,
+~4 GiB, kernel `6.12.94-0-virt`. Image `p149a`, cargo rebuild in-guest
+(not p04a prebuilt). Coluna A, `ops=2000`.
+
+| run | note | majority | min |
+|---|---|---:|---:|
+| 17:12Z | extra 1 vCPU workers on host | **8/17 FAIL** | 0.761 |
+| 17:26Z | quiet; ACPI poweroff mid r3 | no RESULT | — |
+| **20:01Z** | **quiet, 3 rounds** | **4/17 FAIL** | **1.038** |
+
+Quiet table (the Linux virt number):
+
+| shape | min | median | >3 |
+|---|---:|---:|:---:|
+| ycsb_a | 2.068 | 2.234 | |
+| ycsb_b | 1.995 | 2.067 | |
+| ycsb_c | 2.573 | 2.595 | |
+| ycsb_d | 2.337 | 2.400 | |
+| ycsb_e | 12.043 | 12.073 | yes |
+| ycsb_f | 1.869 | 2.070 | |
+| deps_cache_overwrite | 1.129 | 2.556 | |
+| deps_lock_prewrite | 2.025 | 2.032 | |
+| deps_mvcc_latest | 2.419 | 2.442 | |
+| deps_apply_batch | 1.555 | 1.722 | |
+| deps_raftlog | 1.038 | 1.058 | |
+| deps_scan | 2.436 | 2.625 | |
+| kvrocks_get | 4.921 | 5.005 | yes |
+| kvrocks_set | 2.495 | 2.523 | |
+| kvrocks_scan | 23.628 | 43.280 | yes |
+| kvrocks_pipelined_set | 3.346 | 3.484 | yes |
+| kvrocks_blob_set | 2.339 | 2.403 | |
+
+`RESULT=P149_FAIL over_med=4/17 min_ratio=1.038`
+
+Mac P0 12/17 does not count. CHV 4 vCPU is **4/17**. Not a Rocks win
+(async vs `sync=false`).

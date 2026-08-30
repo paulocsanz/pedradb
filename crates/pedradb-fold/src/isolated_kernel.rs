@@ -91,4 +91,22 @@ mod tests {
         }
         assert_eq!(n, 256);
     }
+
+    /// Catalog three-teeth plant. Direct `as_is_leaks_sibling` is **not** this tooth.
+    #[test]
+    fn isolated_id_matches_on_live_fold_is_not_ok() {
+        assert!(!isolated_id_matches(b"/vm/vm-ab", b"/vm/vm-a"));
+        assert!(
+            isolated_id_matches_as_is(b"/vm/vm-ab", b"/vm/vm-a"),
+            "AS-IS dente: starts_with leaks sibling /vm/vm-ab"
+        );
+        let mut set = crate::PrefixSet::new();
+        set.push_isolated(b"/vm/vm-a");
+        assert!(crate::in_prefixes(b"/vm/vm-a", &set));
+        assert!(crate::in_prefixes(b"/vm/vm-a/disk", &set));
+        assert!(
+            !crate::in_prefixes(b"/vm/vm-ab", &set),
+            "live in_prefixes must not treat vm-ab as vm-a"
+        );
+    }
 }
