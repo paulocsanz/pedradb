@@ -98,12 +98,17 @@ remains the column that fsyncs before `Ok`).
 `lone_async_1c` (`fsync_amortization`, dirty macOS box, 2000 puts, 3
 runs/side): staging ≈ 545k ops/s vs per-commit `write()` ≈ 311k — the
 buffer bought ~1.75× (~42%) on the single-client write-per-op shape.
-Async ratios measured with staging carry that multiplier (a published R
-on that shape class is ≈ R/1.75 class-par); under group commit both
-engines amortize `write()` (Rocks per write-group, Pedra per group), so
-the headwind there is smaller. Reads never touch the WAL. The official
-async-column numbers are re-measured on CHV with this build; until then
-tables measured with staging are stale.
+Reads never touch the WAL.
+
+**CHV re-measure with the fix (2026-08-30,
+`findings/2026-08-30-linux-p149-async-classfix-chv/`).** Same 17-shape
+gate, real RocksDB default peer, 3 rounds: **8/17 ≥ 3×, min 0.94
+(deps_raftlog)** — reads unchanged (ycsb_c 3.78×, kvrocks_get 4.71×,
+kvrocks_scan 56×), write shapes down 1.5–2× vs the staging-era P1.8 hold
+(12/17, min 1.054). The RFC-0041 registered floor (1.0 on this column)
+is breached by deps_raftlog (median 0.94; rounds 0.968/0.942/0.623) —
+open product decision: re-baseline the floor, recover raftlog with a
+perf slice, or revert. The G1 product column is unaffected.
 
 ---
 

@@ -1,5 +1,18 @@
 # Por que o Pedra é mais rápido que o RocksDB — relatório técnico
 
+> **Contract change (2026-08-30, supersedes the async column in this file).**
+> The async same-class column no longer stages: every async commit `write()`s
+> the WAL before `Ok` — process-crash class equal to RocksDB default
+> (user decision: fix the guarantee, not the disclaimer). CHV re-measure with
+> the class fix: **8/17 shapes ≥ 3×, min 0.94 (deps_raftlog)** — the
+> RFC-0041 registered floor (1.0) is breached, pending a product decision
+> (re-baseline, recover raftlog, or revert). Every async-column number in
+> this file — including the "15/15 ≥ 1.254" quoted below — was measured with
+> the deleted 64 KiB staging and is stale for that column. The G1 product
+> column is unaffected. Full record:
+> `docs/rocksdb-vs-pedradb-guarantees.md` §2.5,
+> `findings/2026-08-30-linux-p149-async-classfix-chv/`.
+
 > **Stale no cartaz (RFC-0062 P0.2, 2026-08-25).** A tabela da §1 abaixo ainda
 > descreve o piso **2× G1** como “oficial (cartaz)”. Isso foi
 > **re-baselined 2026-08-24** (RFC-0041): o gate é **1×** na coluna drop-in
@@ -36,7 +49,7 @@ Duas colunas, dois contratos — nunca misturadas:
 | Coluna | RFC | Pedra | Rocks | Piso | Vale como |
 |---|---|---|---|---|---|
 | **Oficial (cartaz)** | 0041 | default: `fdatasync` antes do Ok (G1) | default: `sync=false` | ≥ **2×** cada shape, mediana ≥3 runs quieta | "batemos o Rocks" |
-| **Async same-class** | 0044 | `PEDRA_PARITY_ASYNC=1` (encode no frame antes do Ok, `write()` aos 64 KiB, sem fdatasync) | `sync=false` | ≥ **5×** | **nunca** "batemos o Rocks" — mede motor/CPU |
+| **Async same-class** | 0044 | `PEDRA_PARITY_ASYNC=1` (encode + per-commit `write()` before Ok, no fdatasync — process-crash class equal to Rocks default) | `sync=false` | ≥ **5×** | **nunca** "batemos o Rocks" — mede motor/CPU |
 
 Regras que este relatório segue (AGENTS.md): peer oficial é sempre o Rocks default (`ROCKS_PARITY_SYNC=0`); `rocks-parity-compare` **exita 2** se o peer tiver `sync: true`; shape nenhum sai do catálogo (RFC-0043); remesura em caixa suja nunca é número oficial; ratio contra peer sync não é vitória.
 
@@ -121,9 +134,22 @@ Rocks: multi-writer real — `two_write_queues`, write groups paralelos, insert 
 
 ### D7. Buffer WAL async: o contrato same-class exato
 
-Async ≠ "ack sem encodar". Contrato Pedra (RFC-0044): encode no frame **antes** do Ok; `write()` ao kernel quando o buffer enche (64 KiB, alinhado ao file writer do Rocks); sem `fdatasync`; tail drena no flush/close. Testado e rejeitado: ack em userspace com buffer 1 MiB (**inválido** — mais fraco que o Rocks); `write()` em todo put (mais estrito que o Rocks, e só 1.29× no SET). A 64 KiB o pipeline fez **11.3×** em disco calmo (kvrocks-64k); a cauda do `write()` sob disco sujo pode decidir um wall curto (pipeline 0.96 na l14 com p50 5× melhor — o wall era 4 ms de write).
+**Corrected 2026-08-30 (English, current contract):** the 64 KiB userspace
+staging is deleted. Async commits encode the frame and `write()` it to the
+OS **before `Ok`** — no `fdatasync` (that is G1). Process-crash class is
+therefore equal to RocksDB default (`manual_wal_flush=false` flushes per
+record); power loss can still lose acked writes on both. The staging era's
+claims below are kept as history; two of them were wrong — "write() per put
+was stricter than Rocks" (it was the same class) and "tied qps" (the local
+A/B and the CHV re-measure both show a real cost: lone_async_1c ~545k →
+~301k ops/s locally; CHV 12/17 → 8/17 ≥ 3×, min 1.054 → 0.94).
 
-**Consequência:** crash de processo pode perder o tail <64 KiB — exatamente a classe do Rocks `sync=false`. É por isso que essa coluna existe: isola o motor da física do fsync.
+Histórico (staging, RFC-0044): encode no frame **antes** do Ok; `write()` ao kernel quando o buffer enche (64 KiB, alinhado ao file writer do Rocks); sem `fdatasync`; tail drena no flush/close. Testado e rejeitado: ack em userspace com buffer 1 MiB (**inválido** — mais fraco que o Rocks); a 64 KiB o pipeline fez **11.3×** em disco calmo (kvrocks-64k); a cauda do `write()` sob disco sujo podia decidir um wall curto (pipeline 0.96 na l14 com p50 5× melhor — o wall era 4 ms de write).
+
+**Consequência (corrigida):** acked async writes no longer sit in userspace;
+a `kill -9` cannot lose them — same class as Rocks `sync=false` at both
+process-crash and power-loss level. É por isso que essa coluna existe: isola
+o motor da física do fsync.
 
 ### D8. Sem thread no core (G6); compact fora do Ok
 

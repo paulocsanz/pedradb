@@ -53,6 +53,14 @@ loses on both; G1 is the fsyncing column). P0.4 is reverted by this
 change; the ratio tables measured with staging are stale until the CHV
 re-measure of this column.
 
+**CHV outcome (2026-08-30,
+`findings/2026-08-30-linux-p149-async-classfix-chv/`):** with the class
+fix, the same-class column measures **8/17 ≥ 3×, min 0.94
+(deps_raftlog)** vs the staging-era P1.8 hold (12/17, min 1.054). Reads
+unchanged; write shapes down 1.5–2×. The RFC-0041 floor (1.0) is
+breached by deps_raftlog — open product decision (re-baseline / recover
+raftlog / revert); the fix stays on explicit user order.
+
 | shape | Pedra | Rocks | ratio | ≥5×? |
 |---|---:|---:|---:|:---:|
 | `kvrocks_scan` | 1.02 M | 20 k | **50.0** | **sim** |
