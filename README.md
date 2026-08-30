@@ -86,7 +86,11 @@ All numbers are vs **RocksDB default configuration** with
 covering YCSB A–F, kvrocks, MyRocks-class, and dependency-workload patterns.
 
 - **Async WAL column** (Pedra 64 KiB buffered WAL writes, no fdatasync):
-  **12 of 17 shapes ≥ 3×**, all 17 shapes ≥ 1.0×.
+  **12 of 17 shapes ≥ 3×**, all 17 shapes ≥ 1.0×. Same power-loss class
+  as the peer (neither fsyncs), but weaker on process crash: the last
+  64 KiB of acknowledged writes can be lost to a `kill -9`, where RocksDB
+  default flushes the WAL to the OS on every write. The product column is
+  the next one — Pedra fdatasyncs before `Ok`.
 - **Durability column** (Pedra `fdatasync`es before returning `Ok`, the peer
   does not): reads 1.13–1.99×, and single-client write-per-operation shapes
   run below 1× by construction — one full barrier per op against the peer's
