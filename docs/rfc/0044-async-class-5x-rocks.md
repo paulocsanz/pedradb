@@ -1,7 +1,7 @@
 # RFC-0044: ≥ **5×** RocksDB **async** na mesma classe (não é o cartaz G1)
 
 **Status:** in-progress
-**Updated:** 2026-08-24
+**Updated:** 2026-08-30 (async contract corrected — per-commit `write()`, see "Correction 2026-08-30" below)
 **Parked (quiet remesure):** remaining 5× async slices need a quiet 3× host; dirty sandbox is not the official floor.
 **Parents:** [0041](0041-2x-rocks-default.md) (cartaz = Pedra G1 vs Rocks `sync=false`),
 [0043](0043-high-level-2x-expanding-benches.md) (catálogo que só cresce),
@@ -26,6 +26,32 @@ Contrato async = encode + `write()` aos **64 KiB** (Rocks file writer),
 sem `fdatasync`. Lab sujo `findings/rfc0044-p1/kvrocks-64k/` + `ycsb-64k/`.
 Acked em userspace 1 MiB = **inválido**. `write()` em todo o put era mais
 estrito que o Rocks e empatava o qps.
+
+## Correction 2026-08-30 — async contract is per-commit `write()` (class fix)
+
+Two claims registered above are wrong (found during the public-repo
+durability audit; full record in
+`docs/rocksdb-vs-pedradb-guarantees.md` §2.5):
+
+1. **"`write()` em todo o put era mais estrito que o Rocks" — false.**
+   RocksDB default (`manual_wal_flush=false`, `include/rocksdb/options.h:1341`
+   v9.4.0) flushes the WAL to the OS **per record**
+   (`db/log_writer.cc:187-191`, `if (!manual_flush_) dest_->Flush()`).
+   Per-commit `write()` is the same class, not stricter.
+2. **"empatava o qps" — does not reproduce.** Local A/B on `lone_async_1c`
+   (`fsync_amortization`, dirty macOS box, 2000 puts, 3 runs/side):
+   64 KiB staging ≈ 545k ops/s vs per-commit `write()` ≈ 311k — the
+   staged buffer bought ~1.75× (~42%) on the single-client write-per-op
+   shape, and left acked bytes userspace-resident on process crash.
+
+**Decision (user, 2026-08-30): fix the guarantee, not the disclaimer.**
+`ASYNC_WAL_BUFFER` staging is deleted from the WAL; every async commit
+path (`commit_async_ops`, `commit_async_one`, both group paths) calls
+`Wal::write_pending_frame()` — encode + `write()` — before `Ok`. Async
+is now process-crash-equivalent to RocksDB default (power loss still
+loses on both; G1 is the fsyncing column). P0.4 is reverted by this
+change; the ratio tables measured with staging are stale until the CHV
+re-measure of this column.
 
 | shape | Pedra | Rocks | ratio | ≥5×? |
 |---|---:|---:|---:|:---:|
@@ -119,12 +145,13 @@ Não fecha (e não se mente):
 
 - [x] **P0.1** RFC + status viva (este doc) — status: `done`
 - [x] **P0.2** `PEDRA_PARITY_ASYNC=1` + `set_write_sync` no compat;
-      WAL `write_pending_frame_if`; teste
-      `async_puts_are_in_wal_without_fsync` — status: `done`
+      WAL `write_pending_frame`;
+      teste `async_puts_are_in_wal_without_fsync` — status: `done`
 - [x] **P0.3** `commit_async_ops` (sem write-group no async 1-op/batch);
       compact não notifica por put — status: `done`
 - [x] **P0.4** buffer async 64 KiB (Rocks file writer), não 1 MiB —
-      status: `done` (`ASYNC_WAL_BUFFER`; testes 64 KiB + tail no close)
+      status: `reverted` 2026-08-30 (class fix: per-commit `write()`,
+      see Correction above; acked bytes must not sit in userspace)
 - [ ] **P0.5** `kvrocks_set_mc50` ≥ 5.0 async/async — status: `doing` (parked: quiet remesure; 2.02 vs peer são)
       (**veredito quieto: 2.02** vs peer são 152 k — os 3.4–9.2
       anteriores eram Rocks doente sob carga (55 k); merge rejeitado

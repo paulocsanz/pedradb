@@ -67,44 +67,43 @@
 
 ---
 
-## 2.5 Classe async (sync=false): **não** somos equivalentes em crash de processo (achado 2026-08-30)
+## 2.5 Async class (sync=false): process-crash equivalence restored (2026-08-30)
 
-Questão levantada durante o prep do repo público: "no nosso async tem
-menos garantias que o RocksDB?" **Sim, no crash de processo.**
+Question raised during public-repo prep: "does our async give fewer
+guarantees than RocksDB?" **It did — found and fixed the same day.**
 
-| | O que `Ok` significa | crash de processo (`kill -9`) | power loss |
-|---|---|---|---|
-| **RocksDB** default (`sync=false`, `manual_wal_flush=false` default — `include/rocksdb/options.h:1341`) | registro já passou por `write()` → page cache do SO. `db/log_writer.cc:187-191` (v9.4.0): `AddRecord` termina em `if (!manual_flush_) dest_->Flush()` — flush **por record/write-group** | **sobrevive** (bytes no page cache do SO) | perde (sem fsync) |
-| **PedraDB** async (`sync=false` → `commit_async_ops` → `write_pending_frame_if(false)` — `crates/pedradb-core/src/wal/mod.rs:213`, `db.rs:6957`) | registro **pode ainda estar em frame userspace**; `write()` só quando o frame atinge `ASYNC_WAL_BUFFER` = 64 KiB (`wal/format.rs:17`) | **pode perder** a cauda (< 64 KiB) de writes acked | perde (idem + a cauda userspace) |
+**The finding.** Until 2026-08-30 the async column (`PEDRA_PARITY_ASYNC=1`)
+staged acked WAL bytes in a userspace frame and only `write()`d at 64 KiB
+(`ASYNC_WAL_BUFFER`). RocksDB default does not do that: with
+`manual_wal_flush=false` (default, `include/rocksdb/options.h:1341`,
+v9.4.0) `AddRecord` ends in `if (!manual_flush_) dest_->Flush()`
+(`db/log_writer.cc:187-191`) — **every record reaches the OS page cache**.
+So a `kill -9` could lose the last < 64 KiB of acked writes in Pedra, but
+not in Rocks. Power-loss class was equal (neither fsyncs); the
+process-crash class was not. Two in-tree records were wrong the same way:
+the `wal/mod.rs` comment ("like Rocks `sync=false`") and RFC-0044
+("per-put `write()` was stricter than Rocks" / "tied qps").
 
-- O comentário em `wal/mod.rs` ("process crash can lose the tail, like
-  Rocks `sync=false`") está **incorreto**: o Rocks default não retém WAL
-  acked em userspace — ele dá `Flush()` por record. Idem a justificativa
-  no RFC-0044 ("`write()` em todo o put era mais estrito que o Rocks"):
-  não era mais estrito, era a mesma classe.
-- **Não afeta o produto**: o default é G1 (fdatasync antes do Ok) — mais
-  forte que os dois. Afeta a **coluna async** (bench-only,
-  `PEDRA_PARITY_ASYNC=1`), que perde equivalência de classe no nível
-  crash de processo (mantém no nível power loss).
-- Caminhos: (a) flush do frame no fim de cada commit (`write()` por
-  commit = exatamente o que o Rocks paga) + re-medida CHV da coluna
-  async; ou (b) manter o mecanismo e anotar a claim. README público
-  anotado em 2026-08-30 enquanto (a) não decide.
-- **Correção 2026-08-30 (A/B medido):** o RFC-0044 registrou que o
-  flush-por-commit "empatava o qps" — custo ~zero. **Não reproduz.**
-  A/B local (`lone_async_1c`, bench `fsync_amortization`, macOS sujo,
-  2000 puts, 3 runs/lado): staging 64 KiB ≈ 545k ops/s
-  (545095/544866/360534) vs flush-por-commit ≈ 311k
-  (311123/294029/448787) — pular o `write()` por commit vale ~1,75×
-  (~42% de throughput) na shape single-client write-per-op. Logo: parte
-  **material** dos ganhos da coluna async em shapes de escrita É o
-  syscall pulado; razão publicada R numa shape dessas vale ≈ R/1,75 em
-  classe-par (3× → ~1,7×; qualquer coisa entre 1,0–1,75 afunda).
-  Sob group commit os dois lados amortizam `write()` (Rocks: um por
-  write group; Pedra: um por 64 KiB), então o multiplicador lá é menor.
-  Reads não passam pelo WAL — ganhos de leitura intactos. Probe
-  aplicada e revertida (tree limpa). Decisivo: gate CHV 17 shapes com
-  build flush-por-commit — pendente "vai".
+**The fix (user decision: fix the guarantee, not the disclaimer).**
+`ASYNC_WAL_BUFFER` staging is deleted from the WAL. Every async commit
+path — `commit_async_ops`, `commit_async_one`, and both group paths
+(`group_finish`, the concurrent leader) — calls `Wal::write_pending_frame()`
+before `Ok`: encode + `write()`, no `fdatasync`. The value log already
+flushed per commit (`vlog_prepare_wal(false)` → `flush_pending`). Async
+`Ok` now means exactly what RocksDB default `Ok` means: the record is in
+the OS page cache; a process crash cannot lose it; power loss can (G1
+remains the column that fsyncs before `Ok`).
+
+**What the skipped `write()` was worth (local A/B, directional).**
+`lone_async_1c` (`fsync_amortization`, dirty macOS box, 2000 puts, 3
+runs/side): staging ≈ 545k ops/s vs per-commit `write()` ≈ 311k — the
+buffer bought ~1.75× (~42%) on the single-client write-per-op shape.
+Async ratios measured with staging carry that multiplier (a published R
+on that shape class is ≈ R/1.75 class-par); under group commit both
+engines amortize `write()` (Rocks per write-group, Pedra per group), so
+the headwind there is smaller. Reads never touch the WAL. The official
+async-column numbers are re-measured on CHV with this build; until then
+tables measured with staging are stale.
 
 ---
 

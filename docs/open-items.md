@@ -5,9 +5,11 @@
 > "what's done, what's next, what's unresolved."
 
 Last updated: 2026-08-30 (RFC-0149 P2.1 CHV **12/17 PASS** P1.8 hold. P2.2–P2.6
-REFUSED — every 1c write-path cut costs ycsb_f/lock their 3×. Achado
-async: coluna async não é equivalente ao Rocks default em crash de
-processo — ver `docs/rocksdb-vs-pedradb-guarantees.md` §2.5.)
+REFUSED — every 1c write-path cut costs ycsb_f/lock their 3×. Async-class
+fix: 64 KiB userspace WAL staging removed; async commits `write()` per
+commit — process-crash class now equal to RocksDB default (finding + A/B +
+fix in `docs/rocksdb-vs-pedradb-guarantees.md` §2.5; RFC-0044 correction).
+CHV re-measure of the async column pending.)
 
 > **Broken on main (2026-08-30, found during P2.6):**
 > `concurrent::tests::catchup_wait_bounded_by_half_fd` fails on pristine

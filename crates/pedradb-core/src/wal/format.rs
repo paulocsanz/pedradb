@@ -11,11 +11,6 @@
 /// Matches RocksDB's `kBlockSize`.
 pub const BLOCK_SIZE: usize = 32_768;
 
-/// Async WAL userspace buffer before `write()` (RFC-0044).
-/// Matches RocksDB `writable_file_max_buffer_size` default (64 KiB), **not**
-/// 1 MiB. Physical records still fragment at [`BLOCK_SIZE`].
-pub const ASYNC_WAL_BUFFER: usize = 64 * 1024;
-
 /// Size of a physical record header: 4 bytes CRC + 2 bytes length + 1 byte type.
 pub const HEADER_SIZE: usize = 7;
 
