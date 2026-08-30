@@ -48,9 +48,9 @@ Two deliberate differences from the original:
 ## Durability, stated precisely
 
 - The **drop-in defaults to RocksDB's factory WAL class**: async, no barrier
-  per write — the configuration people actually run, and the honest baseline
-  for the benchmark numbers below. `options.set_sync(true)` (or per-write
-  `WriteOptions.sync`) turns on the full barrier before `Ok` returns.
+  per write — the configuration people actually run. `options.set_sync(true)`
+  (or per-write `WriteOptions.sync`) turns on the full barrier before `Ok`
+  returns.
 - The **native engine (`pedradb-core`) defaults to durable**: every commit
   fsyncs the WAL before returning `Ok`. On macOS the barrier is
   `F_FULLFSYNC`-class by default — stronger than what the `librocksdb-sys`
@@ -77,30 +77,6 @@ tx.commit()?;                                 // one WAL record, fsynced before 
 
 Update a row and its index in one atomic, durable commit — the thing every
 system built on RocksDB had to reinvent on top.
-
-## Performance, stated precisely
-
-All numbers are vs **RocksDB default configuration** with
-`WriteOptions.sync=false` (the configuration people actually run), on a
-4-vCPU Linux guest, median of 3 rounds, 2000-op zipf workload, 17 shapes
-covering YCSB A–F, kvrocks, MyRocks-class, and dependency-workload patterns.
-
-- **Async WAL column** (Pedra 64 KiB buffered WAL writes, no fdatasync):
-  **12 of 17 shapes ≥ 3×**, all 17 shapes ≥ 1.0×. Same power-loss class
-  as the peer (neither fsyncs), but weaker on process crash: the last
-  64 KiB of acknowledged writes can be lost to a `kill -9`, where RocksDB
-  default flushes the WAL to the OS on every write. The product column is
-  the next one — Pedra fdatasyncs before `Ok`.
-- **Durability column** (Pedra `fdatasync`es before returning `Ok`, the peer
-  does not): reads 1.13–1.99×, and single-client write-per-operation shapes
-  run below 1× by construction — one full barrier per op against the peer's
-  zero. Group commit closes that gap under concurrency (apply-shaped
-  workload, 4 clients: 2.79×).
-- Per-shape tables, methodology, and the below-1.0 rows are published with
-  every release. Nothing is hidden; a claim you cannot audit is not a claim.
-
-Comparison against RocksDB with `sync=true` is a different (equal-durability)
-class and is never quoted as a win.
 
 ## How it's tested
 
