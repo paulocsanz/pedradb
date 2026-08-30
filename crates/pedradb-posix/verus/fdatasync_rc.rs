@@ -31,9 +31,9 @@ pub fn fdatasync_rc_ok_as_is(_rc: i32) -> (ok: bool)
 
 proof fn lemma_nonzero_rc_is_not_ok()
     ensures
-        fdatasync_rc_ok_spec(0),
-        !fdatasync_rc_ok_spec(-1),
-        fdatasync_rc_ok_as_is_spec(-1),
+        fdatasync_rc_ok_spec(0i32),
+        !fdatasync_rc_ok_spec(-1i32),
+        fdatasync_rc_ok_as_is_spec(-1i32),
 {
 }
 

@@ -5,6 +5,13 @@
 - command: `./scripts/formal/verus_check.sh --all`
 - result: **53 pass / 3 fail** (56 twins total)
 
+> **RESOLVED (P2.1, same day):** the three twins were fixed against the pinned
+> toolchain — `cqe_res`/`fdatasync_rc` needed `i32`-suffixed literals (spec-mode
+> integer literals now default to `int`), `journal_pin` needed a spec twin
+> (`fold_pins_on_read_spec`) because exec-mode calls are rejected in proof
+> `ensures`. `verus_check.sh --all` now reports **56 pass / 0 fail, exit 0**.
+> This note stays as the record of the drift; R-verus stays in `never_floor`.
+
 | twin | failure | shape |
 |------|---------|-------|
 | `cqe_res` | `error[E0308]: mismatched types` ×3 | toolchain API drift |

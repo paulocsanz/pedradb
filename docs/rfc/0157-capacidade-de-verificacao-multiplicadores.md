@@ -46,7 +46,7 @@ Quatro multiplicadores, cada um independente e shippable sozinho: (1) toolchain 
 
 ### P2 — consolidação
 
-- [ ] **P2.1** Corpus Verus expandido: todos os gêmeos puros não-data_fate no `verus_check.sh`; data_fate na sequência — status: `todo`
+- [x] **P2.1** Corpus Verus expandido: todos os gêmeos puros não-data_fate no `verus_check.sh`; data_fate na sequência — status: `done` (drift dos 3 gêmeos resolvido sob o release pinado — `cqe_res`/`fdatasync_rc` literais `i32` no modo spec, `journal_pin` spec-twin para `fold_pins_on_read`; `--all` 56/56 PASS exit 0 = todos os 45 pares não-data_fate (36 runners) + 20 data_fate-only; registro do drift em `findings/rfc0157-verus-drift/`; R-verus segue no never_floor)
 - [ ] **P2.2** Quadro de capacidade por residual: `candidates.py` passa a imprimir, por linha de residual, guard: sim/não, gêmeo checado: sim/não, profundidade de campanha, âncora REAL — status: `todo`
 - [ ] **P2.3** Campanha noturna registrada: doc do runner (TCP K seeds + PCT d=3/4 sweeps) com padrão de registro em `findings/` — status: `todo`
 
@@ -61,7 +61,7 @@ Quatro multiplicadores, cada um independente e shippable sozinho: (1) toolchain 
 | P1.2 | p1 | fuzz de kernels puros | done — 3 sweeps, 0 contraexemplos | alvos proptest | 2026-08-30 |
 | P1.3 | p1 | runner exaustivo N≤3 | done — plantas completas; disk-fence com piso | turnstile enumerate | 2026-08-30 |
 | P1.4 | p1 | db.rs estágio 1: caracterização | done — dourado travado, `db_rs_extracted=false` | fingerprints dourados | 2026-08-30 |
-| P2.1 | p2 | corpus Verus expandido | todo — 3 gêmeos em drift (ver `findings/rfc0157-verus-drift/`) | `verus_check.sh` | 2026-08-30 |
+| P2.1 | p2 | corpus Verus expandido | done — `--all` 56/56, drift resolvido | `verus_check.sh` | 2026-08-30 |
 | P2.2 | p2 | quadro de capacidade por residual | todo | `candidates.py` | 2026-08-30 |
 | P2.3 | p2 | doc da campanha noturna | todo | `findings/` | 2026-08-30 |
 

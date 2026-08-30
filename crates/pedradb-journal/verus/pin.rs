@@ -25,9 +25,15 @@ pub fn catch_up_pins_on_read() -> (d: bool)
     true
 }
 
+/// Spec twin of the kernel decision — proofs must not call exec fns
+/// (pinned Verus rejects exec-mode calls in spec position).
+pub open spec fn fold_pins_on_read_spec() -> bool {
+    false
+}
+
 pub fn fold_pins_on_read() -> (d: bool)
     ensures
-        !d,
+        d == fold_pins_on_read_spec(),
 {
     false
 }
@@ -60,7 +66,7 @@ pub fn next_pin(pin: u64, batch_max: Option<u64>) -> (n: u64)
 proof fn lemma_as_is_pins_on_peek()
     ensures
         peek_pins_cursor_as_is(),
-        !fold_pins_on_read(),
+        !fold_pins_on_read_spec(),
 {
 }
 
