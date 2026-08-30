@@ -1,0 +1,87 @@
+# RFC: 0157 — Multiplicadores de capacidade de verificação
+
+**Status:** draft
+**Updated:** 2026-08-30
+**Parents:** [0155](0155-silent-wrong-fail-closed.md), [0156](0156-resolver-os-nove-guards-e-pisos.md)
+
+**Residual:** este RFC não apaga linha nenhuma (`R-glue`, `R-group-glue`, `R-swarm-real`, `R-fsync-lie`, `R-unsafe-posix`, `R-unsafe-capi`, `R-es`, `R-crc`, `R-uring` ficam). Ele ataca **capacidade**: quanto da codebase a nossa infraestrutura consegue verificar por unidade de esforço. `never_floor` intocado; `db_rs_extracted` só muda no fim do programa de extração (P1.4), nunca antes.
+
+**Refused claims:** mais capacidade não é “garantia total”, “sem bugs”, “perfeito”, “acabou” ou seL4. Verus checado continua confiando no Verus (R-verus). Replay diferencial prova comportamento dos cenários executados, não o dispositivo (R-fsync-lie). Interleaving exaustivo até d=3 não é ∀ (R-group-glue). Campanha de K seeds não é ∀ TCP (R-swarm-real).
+
+## Background
+
+- A divisão kernel/glue está medida e congelada: **43 kernels / 11.021 LOC** verificados por especificação vs **81.752 LOC de handler** (freeze `fc0b80b`). A trajetória zero-glue avança um handler por RFC — mão de obra é o gargalo.
+- **Zero provas são checadas por máquina hoje.** Os gêmeos Verus (`verus/*.rs`) estão congelados como especificação revisada; `verus` não está no PATH (R-verus). Um gêmeo errado continua compilando.
+- A âncora de realidade do modelo é o cluster REAL TCP: **~100 s por seed, serial**. A campanha atual (0156) são 3 seeds ≈ 5 min; escalar K seeds serialmente não escala.
+- PCT cobre interleavings por amostragem: default d=2 (congelado), d=3 explícito medido (0156: 8/16384 numa assinatura de cadeia-3). Não existe runner **exaustivo** de pequenos cenários concorrentes.
+- O `World` prova teoremas sobre o `Env` modelado; a ponte World→`StdEnv` real existe só em testes pontuais (L28). Sem replay diferencial sistemático, a fidelidade modelo↔realidade é inspecionada, não detectada.
+- As guardas de classe do 0156 são por arquivo (posix, capi, uring). Nada impede a mesma classe entrar por outro crate.
+
+## Problems This Solves
+
+- **Problem:** provar exige toolchain rodando; hoje o único verificador de especificação é a revisão humana dos gêmeos.
+- **Problem:** cada REAL seed custa 100 s serial — o custo limita o K das campanhas.
+- **Problem:** interleavings são amostrados (PCT por seed) quando cenários pequenos são exaustivos por enumeração.
+- **Problem:** o World pode divergir do StdEnv sem que nenhum teste perceba.
+- **Problem:** guardas de classe não têm varredura de workspace; extração de handler é arte manual sem caracterização prévia obrigatória.
+
+## Proposed Solution
+
+Quatro multiplicadores, cada um independente e shippable sozinho: (1) toolchain Verus pinado + script que checa gêmeos — primeiro conjunto checado por máquina; (2) replay diferencial World↔StdEnv com fingerprint comparável — detector de divergência de fidelidade; (3) campanha TCP paralela com K seeds no mesmo wall-clock; (4) runner exaustivo de interleavings pequenos sobre o turnstile existente. Depois: varredura de classe workspace-wide, fuzz de kernels puros, e o programa de extração do `db.rs` por estágios com caracterização antes de mover linha alguma.
+
+## Delivery slices (mandatory)
+
+### P0 — multiplicadores imediatos (cada um shippable sozinho)
+
+- [ ] **P0.1** Prova checada por máquina: `scripts/formal/verus_check.sh` pinando o toolchain (binário de release ou container como fallback documentado) e verificando o primeiro conjunto de gêmeos (`verus/l28.rs` + os três do 0155); saída pass/fail por gêmeo. Slice pronto quando UM gêmeo é checado ponta-a-ponta a partir de clone limpo — status: `todo`
+- [ ] **P0.2** Detector de fidelidade: teste de replay diferencial `world_stdenv_diff_replay` — mesmo script semeado de ops+crash+restart+scan contra `World` e contra `StdEnv` em tempdir real; fingerprints observáveis devem ser iguais. Primeiro cenário: put/get/kill/restart — status: `todo`
+- [ ] **P0.3** Campanha TCP K-paralela: harness que roda K clusters REAL simultâneos (seeds distintas, portas distintas), agregando `napply`/kernels/contabilidade de retry por seed; `scripts/rfc0157_tcp_campaign.sh K` com K default 8 e registro em `findings/` — status: `todo`
+
+### P1 — escala e alcance
+
+- [ ] **P1.1** Guardas de classe no workspace inteiro: seção nova no `pedra_formal.py --lint` varrendo todos os crates pelas três classes do 0156 (FFI rc sem gate, len C sem cap, adoção de CQE por tag constante); site sem gate precisa de waiver nomeando o id de residual — status: `todo`
+- [ ] **P1.2** Fuzz de kernels puros: alvos proptest/fuzz para os kernels de decisão (`may_publish_group`, trio L28, `sst_crc_fate`); contraexemplo encolhido vira `findings/` + dente AS-IS se revelar classe nova — status: `todo`
+- [ ] **P1.3** Interleaving exaustivo pequeno: runner que enumera **todas** as sequências de grant do turnstile para N≤3 tarefas e ≤k yields (sem amostragem), rodando a planta de cadeia-3 e o caminho publish do group commit; relata cobertura exaustiva do espaço enumerado — status: `todo`
+- [ ] **P1.4** Extração `db.rs` estágio 1 — caracterização antes de mover: testes de fingerprint dourado fixando o comportamento atual do caminho open/recovery do `db.rs` (sem extrair nada ainda); o estágio termina com o comportamento travado, pronto para o primeiro kernel ser extraído no estágio 2. `db_rs_extracted` segue `false` — status: `todo`
+
+### P2 — consolidação
+
+- [ ] **P2.1** Corpus Verus expandido: todos os gêmeos puros não-data_fate no `verus_check.sh`; data_fate na sequência — status: `todo`
+- [ ] **P2.2** Quadro de capacidade por residual: `candidates.py` passa a imprimir, por linha de residual, guard: sim/não, gêmeo checado: sim/não, profundidade de campanha, âncora REAL — status: `todo`
+- [ ] **P2.3** Campanha noturna registrada: doc do runner (TCP K seeds + PCT d=3/4 sweeps) com padrão de registro em `findings/` — status: `todo`
+
+## Status (living — update with every PR)
+
+| ID | Band | Title | Status | Task / PR | Updated |
+|----|------|-------|--------|-----------|---------|
+| P0.1 | p0 | verus_check.sh + primeiro gêmeo checado | todo | — | 2026-08-30 |
+| P0.2 | p0 | replay diferencial World↔StdEnv | todo | `world_stdenv_diff_replay` | 2026-08-30 |
+| P0.3 | p0 | campanha TCP K-paralela | todo | `scripts/rfc0157_tcp_campaign.sh` | 2026-08-30 |
+| P1.1 | p1 | varredura de classe workspace-wide | todo | `pedra_formal.py` | 2026-08-30 |
+| P1.2 | p1 | fuzz de kernels puros | todo | alvos proptest | 2026-08-30 |
+| P1.3 | p1 | runner exaustivo N≤3 | todo | turnstile enumerate | 2026-08-30 |
+| P1.4 | p1 | db.rs estágio 1: caracterização | todo | fingerprints dourados | 2026-08-30 |
+| P2.1 | p2 | corpus Verus expandido | todo | `verus_check.sh` | 2026-08-30 |
+| P2.2 | p2 | quadro de capacidade por residual | todo | `candidates.py` | 2026-08-30 |
+| P2.3 | p2 | doc da campanha noturna | todo | `findings/` | 2026-08-30 |
+
+## Acceptance Criteria
+
+- **Tests**
+  - `verus_check.sh` sai 0 com o conjunto checado e lista gêmeo-a-gêmeo; sem toolchain no host, o fallback documentado executa o mesmo conjunto.
+  - `world_stdenv_diff_replay`: fingerprints iguais World vs StdEnv no cenário semeado; uma divergência plantada (trocar um byte do script só de um lado) faz o teste falhar — o detector detecta.
+  - Campanha paralela: K=8 seeds completam em < 2× o wall-clock de 1 seed; cada seed reporta `napply`, kernels e retry-accounting; nenhuma seed reutilizada.
+  - Lint com a varredura de classe termina `0 fail` no estado atual (todas as classes do 0156 cobertas ou com waiver).
+  - Runner exaustivo: o espaço enumerado é reportado (|espaço|, violadores) e a planta de cadeia-3 aparece na enumeração d=3.
+  - Estágio 1 do `db.rs`: fingerprints dourados verdes e determinísticos (replay duplo).
+- **Telemetry / Analytics:** nenhuma — invariantes e harness; campanhas registram em `findings/`.
+- **Documentation:** este RFC; scripts com cabeçalho explicando o piso que cada multiplicador **não** derruba.
+- **Screenshots:** backend-only.
+
+## Out of scope
+
+- Modelo formal do SO completo / TCG guest. Provar o dispositivo (R-fsync-lie) ou a mídia. ∀ TCP, ∀ interleavings de lock, ∀ traces.
+- Apagar linhas de residual ou ids do `never_floor` (R-cpu, R-rustc, R-verus, R-crc, R-deps, R-extract). Subir o default do PCT acima de 2.
+- `db_rs_extracted=true` antes do fim do programa de extração; mover linha do `db.rs` sem caracterização prévia.
+- rustfmt de `lib.rs`. Benches / 0149 / 0153 / 0154. Pedra vs Rocks `WriteOptions.sync=true`.
+- “Garantia total”, “sem bugs”, seL4, “perfeito”, “acabou”.
