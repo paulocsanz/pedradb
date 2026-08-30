@@ -3519,6 +3519,53 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
     }
 
+    /// The retired read cache stays bounded when many mems materialize
+    /// while L0 never drains: sustained ingest installs L0s faster than
+    /// compaction, so the clear-on-L0-empty hook never fires — the
+    /// 25M-hydrate OOM, second head. Cache-only layers must drop oldest
+    /// first (SSTs cover the reads) and every key stays readable.
+    #[test]
+    fn retired_cache_bounded_under_many_materializes() {
+        let dir = temp_dir();
+        let db = ConcurrentDb::open_with(
+            &dir,
+            OpenOptions {
+                auto_flush_bytes: Some(16 * 1024),
+                sync: true,
+                ..OpenOptions::default()
+            },
+        )
+        .unwrap();
+        db.set_defer_auto_compact(true);
+        let val = vec![b'v'; 1024];
+        // 24 tables of ~16 KiB each; cap = 4 x 16 KiB = 64 KiB.
+        for t in 0..24u64 {
+            for j in 0..16u64 {
+                db.put(format!("k{t:03}/{j:02}").as_bytes(), &val).unwrap();
+            }
+            let _ = db.with_write(|d| d.stage_flush_imm());
+            while db.park_imm_once() {}
+            assert!(db.materialize_parked_once());
+            assert!(
+                db.with_read(|d| d.retired_mem_bytes()) <= 64 * 1024 + 17 * 1024,
+                "retired cache must stay near the cap, got {}B",
+                db.with_read(|d| d.retired_mem_bytes())
+            );
+        }
+        // No compaction ran: L0 still holds every materialized table.
+        assert!(db.with_read(|d| d.level_file_count(0)) >= 20);
+        for t in [0u64, 11, 23] {
+            for j in 0..16u64 {
+                assert_eq!(
+                    db.get(format!("k{t:03}/{j:02}").as_bytes()).as_deref(),
+                    Some(&val[..]),
+                    "k{t:03}/{j:02}"
+                );
+            }
+        }
+        let _ = fs::remove_dir_all(&dir);
+    }
+
     /// Fold version GC off (core default): every superseded version survives
     /// a parked fold (F20 keep-history).
     #[test]

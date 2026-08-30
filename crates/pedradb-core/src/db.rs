@@ -4335,6 +4335,7 @@ impl<E: Env> Db<E> {
             if !pin.is_empty() {
                 self.retired_pending.push(pin);
                 self.retired_l0s = self.retired_l0s.saturating_add(1);
+                self.trim_retired_cache();
             }
         }
     }
@@ -4344,12 +4345,17 @@ impl<E: Env> Db<E> {
         std::mem::take(&mut self.retired_pending)
     }
 
-    /// Install a fold built off-lock (union of pending pins).
+    /// Install a fold built off-lock (union of pending pins). The union is
+    /// one undividable cache layer: over cap it is dropped whole — reads
+    /// fall back to the covered SSTs.
     pub fn install_retired_fold(&mut self, built: MemTable) {
         if self.retired_fold.is_empty() {
             self.retired_fold = built;
         } else {
             self.retired_fold.absorb(built);
+        }
+        if self.retired_fold.approx_memory_usage() > self.retired_cache_cap() {
+            self.retired_fold = MemTable::new();
         }
     }
 
@@ -4766,7 +4772,47 @@ impl<E: Env> Db<E> {
         if !mem.is_empty() {
             self.retired_pending.push(mem);
             self.retired_l0s = self.retired_l0s.saturating_add(1);
+            self.trim_retired_cache();
         }
+    }
+
+    /// Cap on the retired-BTree read cache (point/MVCC latency layer
+    /// covering L0 SSTs), scaled by the write buffer. Sustained ingest
+    /// installs L0s faster than compaction drains them, so the
+    /// clear-on-L0-empty hook alone would let this cache grow with
+    /// everything written (25M-hydrate OOM, second head).
+    fn retired_cache_cap(&self) -> usize {
+        self.auto_flush_bytes
+            .map_or(16 * 1024 * 1024, |b| 4usize.saturating_mul(b))
+    }
+
+    /// Drop oldest retired layers until the pending pile fits the cap.
+    /// Cache-only layers: every covered L0 SST stays readable, so this
+    /// trades lookup latency for bounded memory, never correctness.
+    fn trim_retired_cache(&mut self) {
+        let cap = self.retired_cache_cap();
+        let mut total: usize = self
+            .retired_pending
+            .iter()
+            .map(|m| m.approx_memory_usage())
+            .fold(0, usize::saturating_add);
+        while total > cap && self.retired_pending.len() > 1 {
+            // Push-ordered: front is the oldest.
+            if let Some(m) = self.retired_pending.first() {
+                total = total.saturating_sub(m.approx_memory_usage());
+            }
+            self.retired_pending.remove(0);
+        }
+    }
+
+    /// Approximate bytes held by the retired read cache (pending + fold).
+    #[must_use]
+    pub fn retired_mem_bytes(&self) -> usize {
+        self.retired_pending
+            .iter()
+            .map(|m| m.approx_memory_usage())
+            .fold(0, usize::saturating_add)
+            .saturating_add(self.retired_fold.approx_memory_usage())
     }
 
     /// Rotate WAL after an off-lock L0 install when mem/imm/pin are idle.
