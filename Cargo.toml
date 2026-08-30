@@ -1,0 +1,42 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/pedradb-posix",
+    "crates/pedradb-core",
+    "crates/pedradb-io-uring",
+    "crates/pedradb-ops",
+    "crates/pedradb-sim",
+    "crates/rocksdb-compat",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+rust-version = "1.88"
+repository = "https://github.com/paulocsanz/pedradb"
+homepage = "https://github.com/paulocsanz/pedradb"
+authors = ["Paulo Cabral Sanz"]
+readme = "README.md"
+
+[workspace.dependencies]
+# Internal — a version is required for `cargo publish` (the path is
+# rewritten to the registry version at packaging time)
+pedradb-posix = { path = "crates/pedradb-posix", version = "0.1.0" }
+pedradb-core = { path = "crates/pedradb-core", version = "0.1.0" }
+pedradb-io-uring = { path = "crates/pedradb-io-uring", version = "0.1.0" }
+pedradb-ops = { path = "crates/pedradb-ops", version = "0.1.0" }
+pedradb-sim = { path = "crates/pedradb-sim", version = "0.1.0" }
+
+# External
+crc32c = "0.6"
+thiserror = "1"
+parking_lot = "0.12"
+bytes = "1"
+tracing = "0.1"
+lz4_flex = { version = "0.11", default-features = false, features = ["std"] }
+
+[profile.release]
+debug = 1
+lto = "thin"
+codegen-units = 1

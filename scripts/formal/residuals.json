@@ -1,0 +1,233 @@
+{
+  "rfc": "0061",
+  "updated": "2026-08-29",
+  "classes": [
+    "never",
+    "continuous",
+    "parked",
+    "open"
+  ],
+  "never_floor": [
+    "R-cpu",
+    "R-rustc",
+    "R-verus",
+    "R-crc",
+    "R-deps",
+    "R-extract"
+  ],
+  "glue": {
+    "kernel_files": 43,
+    "kernel_loc": 11171,
+    "handler_loc": 82002,
+    "db_rs_extracted": false
+  },
+  "residuals": [
+    {
+      "id": "R-cpu",
+      "title": "CPU / microcode / ISA",
+      "class": "never",
+      "owner": "0061",
+      "close": "another project (ISA proof); Pedra never claims this"
+    },
+    {
+      "id": "R-rustc",
+      "title": "rustc / LLVM",
+      "class": "never",
+      "owner": "0061",
+      "close": "CompCert-class verified compiler; TCB"
+    },
+    {
+      "id": "R-verus",
+      "title": "Verus + Z3 (unverified verifier)",
+      "class": "never",
+      "owner": "0053",
+      "close": "verified verifier; TCB"
+    },
+    {
+      "id": "R-crc",
+      "title": "CRC32C collision axiom",
+      "class": "never",
+      "owner": "0060",
+      "close": "same axiom as VeriBetrKV; not a Pedra theorem. 0076 P2.2 crc_collision_admitted always false (crc_collision_axiom_remains); crc_match_ok is u32 equality, not a collision proof. 0081 P2.2 vlog_crc_collision_axiom_remains (same gate on VALUES.vlog / *.blob). 0082 P2.2 manifest_crc_collision_axiom_remains (LSM + history MANIFEST). 0083 P2.1 wal_open_crc_collision_axiom_remains. 0084 P2.1 checkpoint_crc_collision_axiom_remains. RFC-0155 names existing crc_match fail-closed inhabitant; never_floor row stays"
+    },
+    {
+      "id": "R-deps",
+      "title": "lz4_flex / parking_lot / bytes",
+      "class": "never",
+      "owner": "0061",
+      "close": "verified stubs or extract; de-facto TCB"
+    },
+    {
+      "id": "R-extract",
+      "title": "full-engine extraction into the prover",
+      "class": "never",
+      "owner": "0056",
+      "close": "REFUSE (LEDGER L46); production stays Rust"
+    },
+    {
+      "id": "R-glue",
+      "title": "non-kernel glue (handler LOC vs kernel LOC; freeze publishes counts)",
+      "class": "continuous",
+      "owner": "0077",
+      "close": "TCB freeze + caller lint + DST oracles; zero-glue is trajectory not a theorem; do not extract db.rs. 0077 P0 extracted SST CRC fate from table.rs decode into scan_kernel (sst_crc_fate; mismatch on modern file is Reject; AS-IS always StripTrailer; crc_mismatch_on_live_sst_is_not_ok). P1.1 sst_block_crc_ok on v5 data blocks (crc_mismatch_on_live_sst_block_is_not_ok: repaired file trailer still Reject). P1.2 Db::open flipped SST is CRC mismatch (crc_mismatch_on_live_sst_db_open_is_not_ok). P2.1 Verus twin sst_crc_fate (catalog sst_crc; scan_guard stays F167). P2.2 zero_glue_admitted always false (zero_glue_is_a_trajectory; db_rs_extracted false). handler glue stays TCB. RFC-0151: every data_fate pair freezes AS-IS + Verus twin + named DST plant (pedra_formal --lint three teeth); RFC-0152: store live Queued RV/AE calls catalog vote/ae_entry; P1.1\u2013P1.36 inbound vote/ae_ack/propose_ack/joint_election/joint_still_active/pending_joint_node/joint_leave_ok/election_grant_from/joint_target/joint_add_target/queued_leave_finish/disk_membership/high_water/participating_member/identity_before_applied/recover_apply/recover_apply_node/recover_truncate/recover_drop_orphan/recover_abort/persist_meta/persist_hist/persist_fence/force_clear/drop_preimages/open_peer_disk/local_id_member/reader_local/discard_uncommitted/discard_leader/removed_step_down/hint_member/drop_repl_slot/drop_sent_through/apply_step; P2.1 rpc_mode three_teeth; P2.2.1 dcs_apply three_teeth inbound CasFailed; P2.2.2 compact may_compact_through inbound missing-term; P2.2.3 snapshot_touches_user_key inbound skip reserved; P2.2.4 si_reader_beats inbound skip lagging ids[0]; P2.2.5 index_val len_pref_value inbound drop NUL sibling; P2.2 remaining 36; db_rs_extracted stays false. RFC-0155 names catalog pair zero_glue (Db::claim_zero_glue; zero_glue_admitted always false; plant zero_glue_admitted_on_live_db_is_not_ok). Residual row stays"
+    },
+    {
+      "id": "R-group-glue",
+      "title": "lock / WAL I/O / OS scheduler around group_commit",
+      "class": "continuous",
+      "owner": "0071",
+      "close": "kernel proves group decision + publish-after-WAL 0071 P0 (may_publish_group; failed_wal_sync_does_not_publish_group). P1.1 multi_writer_failed_sync_does_not_publish_group (N-thread finish_group_off_lock). P1.2 after_wal_sync yield + pct_after_failed_fd_does_not_publish. P2.1 Verus twin may_publish_group (catalog group_publish). P2.2 lock_interleavings_admitted always false (claim_lock_interleavings_refused_after_put; AS-IS would admit). Lock/OS-scheduler interleavings of ConcurrentDb stay TCB (0056 P2.1) \u2014 campaign not forall \u03c0. RFC-0155 names catalog pair lock_interleavings (claim_lock_interleavings_proven; plant claim_lock_interleavings_refused_after_put). Residual row stays 0156 P1.1 planted_chain3_found_by_pct_d3 (chain-3 signature: d=2 0/256 structural, d=3 8/16384; default stays 2; forall_schedules_admitted(3) false)."
+    },
+    {
+      "id": "R-pct",
+      "title": "OS interleavings outside PCT d=2",
+      "class": "continuous",
+      "owner": "0070",
+      "close": "TSan + swarm serial=parallel; not forall schedules. Production claim_forall_schedules fail-closed 0070 P0 (forall_schedules_admitted always false; AS-IS admits pct_depth>=2). P1.1 World/PCT runner (world_pct_run_refuses_forall_schedules; pct_runner_refuses_forall_schedules_at_depth2). P1.2 serial_parallel_is_forall (hashes match is not \u2200\u03c0; world_swarm_parallel_matches_serial). P2.1 Verus twin forall_schedules_admitted (catalog forall_schedules). P2.2 default PCT depth stays 2 (pct_campaign_default_depth; claim_default_pct_depth_not_raised; world_pct_default_depth_not_raised; pct_runner_default_depth_not_raised; PiPolicy::pct_campaign_default; d>2 remains 0051 planted_depth3_three_teeth; AS-IS default_pct_depth_raised_as_is would admit). Campaign not a theorem of ConcurrentDb interleavings (R-group-glue)"
+    },
+    {
+      "id": "R-fsync-lie",
+      "title": "OS lying on fsync / real torn writes",
+      "class": "continuous",
+      "owner": "0078",
+      "close": "TCG/det_io smoke; recovery kernels cover the model not the drive. 0078 P0: fsync_promotes_pending (Lying does not promote; lying_fsync_does_not_promote_pending) + media_durable_admitted always false (claim_media_durable_refused_after_fsync_ok on live StdEnv put). P1.1 World Lying plant names kernel (world_lying_fsync_plant_names_kernel; crash drops put). P1.2 stacked_fsync_liars_admitted always false (world_run_refuses_stacked_fsync_liars; det_io_status.sh xor RecordingEnv::Lying \u2014 RFC-0052). P2.1 Verus twins fsync_promotes_pending + media_durable_admitted (catalog fsync_promote, media_durable). P2.2 fsync_lie_closes_tcg_guest always false (world_fsync_lie_does_not_invent_tcg_guest; R-tcg-guest stays 0079). Do not delete SyncPolicy::Lying. Not an ECC/drive proof. RFC-0155 names existing media_durable fail-closed inhabitant. Residual row stays"
+    },
+    {
+      "id": "R-tcg-guest",
+      "title": "TCG guest SSH (C2.2=residual_no_guest)",
+      "class": "continuous",
+      "owner": "0079",
+      "script": "scripts/tcg_guest_status.sh",
+      "mechanism": "C2.2=residual_no_guest",
+      "close": "PEDRA_QEMU_SSH + tcg_world_smoke.sh; TCG_REQUIRED=1 fail-closed; C2.2=residual_no_guest without a guest; do not invent a guest. 0079 P0: tcg_guest_admitted (native World::run records false; claim_tcg_guest_refused_on_native_world). P1.1 tcg_guest_status.sh prints kernel=tcg_guest_admitted (tcg_guest_status_script_names_kernel). P1.2 world_smoke --claim-tcg refused unless admitted (allow_claim_tcg_flag; world_smoke_refuses_claim_tcg_on_native). P2.1 Verus twin tcg_guest_admitted (catalog tcg_guest; tcg.rs not *_kernel.rs). P2.2 World still does not SSH (world_runs_guest_ssh always false; world_still_does_not_ssh; probe stays tcg_guest_status.sh). 2026-08-27: caixote pedra-tcg-guest C2.2=guest_reachable; seed 42 hash=48b32d03bae5f932. CI without env stays residual."
+    },
+    {
+      "id": "R-uring",
+      "title": "io_uring ring (no probable ring model)",
+      "class": "continuous",
+      "owner": "0080",
+      "close": "out of verified profile by contract; PosixFallback; twin blocked. 0080 P0: ring_model_admitted always false; verified_admits_ring(true) false (AS-IS admits want_ring); ConcurrentDb::open_verified + claim_uring_ring_refused_on_verified_open. P1.1 CLI open_verified_db names verified_admits_ring next to posix() (verified_flag_pins_the_profile_and_survives_reopen). P1.2 full_uses_posix_fallback (production_env; full_mode_posix_fallback_when_ring_unavailable). P2.1 ring_twin_admitted always false (no verus/ring_model.rs). P2.2 wal_on_sqe_admitted always false (IoUringFile write/sync_data; production_wal_is_not_on_sqe). Production G1 stays POSIX (0062/0073); do not restore WAL onto the ring. RFC-0155 names existing cqe_res / ring_model_admitted refuse. Residual row stays 0156 P0.3 cqe_leftover_sequence_never_false_ok (64 unique tags; leftover at every position Discard; no-own-CQE always WaitMore; false-Ok only in AS-IS twins)."
+    },
+    {
+      "id": "R-hardware",
+      "title": "field bit-rot / CPU miscompute / media after last scrub",
+      "class": "continuous",
+      "owner": "0093",
+      "close": "CRC+scrub + BitFlip; not ECC proof. crc_match_ok 0076-0092. 0076 P0 WAL reader (crc_mismatch_on_live_wal_is_not_ok). P1.1 SST file trailer via sst_crc_fate (0077 P0; sst_file_crc_uses_crc_match_ok). P1.2 Db::open WAL CRC-field lie (0083). P2.1 Verus twin crc_match_ok (catalog crc_match). P2.2 crc_collision_admitted always false (R-crc never_floor). 0081 P0 vlog read (crc_mismatch_on_live_vlog_is_not_ok). P1.1 numbered blob (crc_mismatch_on_live_blob_is_not_ok). P1.2 Db get_at flipped large value (crc_mismatch_on_live_db_get_large_value_is_not_ok). P2.1 catalog crc_match caller vlog.rs. P2.2 vlog_crc_collision_axiom_remains. 0082 P0 LSM MANIFEST/CURRENT (crc_mismatch_on_live_manifest_is_not_ok). P1.2 history MANIFEST (0086 crc_mismatch_on_live_history_manifest_is_not_ok). P2.1 catalog callers manifest.rs + history.rs. P2.2 manifest_crc_collision_axiom_remains. 0083 P1.2 changelog decode (0085 crc_mismatch_on_live_changelog_is_not_ok; F33 open still Ok). P2.1 wal_open_crc_collision_axiom_remains. P2.2 wal_crc_field_lie_point_in_time_serves_prefix (FailClosed still Crc; PIT reports kind crc). 0084 P0 checkpoint meta (crc_mismatch_on_live_checkpoint_meta_is_not_ok). P1.2 verify_at_rest CHECKPOINT (crc_mismatch_on_live_checkpoint_verify_at_rest_is_not_ok). P2.1 checkpoint_crc_collision_axiom_remains. P2.2 backup_catalog_crc_stays_rfc0060 (CATALOG walk RFC-0060). 0085 P1.1 verify_at_rest CHANGELOG (crc_mismatch_on_live_changelog_verify_at_rest_is_not_ok). P2.1 changelog_crc_collision_axiom_remains. P2.2 changelog_crc_mismatch_open_still_quarantines_f33 (F33 CHANGELOG.corrupt; open still Ok). 0086 P2.2 history_manifest_crc_collision_axiom_remains. 0087 P0 last-record CRC (crc_mismatch_on_live_history_segment_is_not_ok). P2.1 history_segment_crc_collision_axiom_remains. P2.2 history_segment_upload_restore_stay_on_walk (put_segment + verify/db/ops callers). 0088 P0 bloom sidecar scrub (crc_mismatch_on_live_history_bloom_is_not_ok). P1.1 sidecar_may_affect fail-open (crc_mismatch_on_live_history_bloom_sidecar_may_affect_still_walks). P2.1 history_bloom_crc_collision_axiom_remains. P2.2 history_bloom_crc_mismatch_prune_stays_fail_open (scrub fail-closed; prune walks; db.rs stays on sidecar_may_affect). 0089 P0 LATEST crc-hex (crc_mismatch_on_live_history_latest_is_not_ok). P1.2 walk-back refuses named older (crc_mismatch_on_live_history_latest_walkback_refuses_named_older). P2.1 history_latest_crc_collision_axiom_remains. P2.2 history_latest_put_readback_stays_rfc0092 (put identity stays 0092). 0092 P0 put_segment resume (crc_mismatch_on_live_history_put_is_not_ok). P1.2 crc_mismatch_on_live_history_put_names_the_object. P2.1 history_put_resume_requires_byte_equal_after_crc (byte-equal after CRC; P0 tooth stays crc mismatch). P2.2 history_put_crc_collision_axiom_remains. 0093 P0 put_sidecar resume (crc_mismatch_on_live_history_sidecar_put_is_not_ok: XOR same-length remote .bloom payload, .hist intact; AS-IS would no-op). P1.1 crc_mismatch_on_live_history_sidecar_put_names_the_object. P1.2 history_sidecar_put_resume_requires_byte_equal_after_crc (byte-equal after CRC; P0 tooth stays crc mismatch). P2.1 history_sidecar_put_crc_collision_axiom_remains. P2.2 history_sidecar_put_prune_stays_fail_open (prune stays RFC-0088 fail-open). Collision axiom is R-crc; bits after last scrub stay residual"
+    },
+    {
+      "id": "R-es",
+      "title": "liveness axioms ES-1/ES-2/ES-3",
+      "class": "continuous",
+      "owner": "0069",
+      "close": "never a theorem; model refutes eventuality without the axioms (0056 P2.2). Production claim_eventual_election fail-closed 0069 P0 (liveness_admitted requires ES-1\u2227ES-2\u2227ES-3; elect_all stays bounded). P1.1 tcp_node_model calls kernel (tcp_node_model_liveness_claim_needs_es_axioms; BFS tests claim_eventual_election). P1.2 World refuses unless axioms named (world_run_refuses_eventual_election_without_es_axioms). P2.1 Verus twin liveness_admitted (catalog liveness_claim). P2.2 TCP/real banner elect_claim_banner (cluster_real + montanha-tcp elect-wait; bounded-elect not-eventual; AS-IS prints live without naming ES). Campaign not unconditional liveness. RFC-0155 names existing liveness_claim fail-closed inhabitant. Residual row stays"
+    },
+    {
+      "id": "R-swarm-real",
+      "title": "REAL multi-process TCP cluster (seed replay + durability)",
+      "class": "continuous",
+      "owner": "0072",
+      "close": "cluster_real + l28_real_tcp_seed_replay; l28_durability_ok kernel 0072 P0 (get\u2227after-kill\u2227restart; AS-IS get-only; cluster_real exits via kernel). P1.1 l28_real_tcp asserts via kernel. P1.2 world_seed_l28_ok (World silent_wrong=0 is not L28 without cluster_real; seed 0x641e28). P2.1 catalog l28_durability + verus/l28.rs. P2.2 l28_leader_kill_ok (cluster_real --leader-kill; AS-IS ignores leader-kill). 0118 P1.2 l28_real_tcp_leave_joint_replay (seed 0x01181e28 --leave-joint; leave=1; L28 still holds; AS-IS skips leave). 0121 P1.2 l28_real_tcp_remove_member_left_on_disk (seed 0x01211e28 --remove-member; remove=1 leave=1 left=1; l28_tcp_left_ok). 0121 P2.1 plant is a campaign, not \u2200 traces \u2014 campaign not a theorem. RFC-0155 P0: l28_tcp_napply_retry_admitted always false (retry-success is not forall TCP; l28_real_tcp_removed_recover_apply; cluster_real live-calls). Residual row stays 0156 P0.4 l28_real_tcp_removed_campaign_seeds (3 fresh seeds, each napply=1 + kernels + per-seed retry refusal; campaign is not forall TCP)."
+    },
+    {
+      "id": "R-unsafe-posix",
+      "title": "unsafe island pedradb-posix (fdatasync FFI)",
+      "class": "continuous",
+      "owner": "0073",
+      "crate": "pedradb-posix",
+      "script": "scripts/miri-unsafe-islands.sh",
+      "safety": "crates/pedradb-posix/SAFETY.md",
+      "close": "SAFETY.md is not a forall proof; Miri ramp is scripts/miri-unsafe-islands.sh. fdatasync_rc_ok 0073 P0 (nonzero rc is not Ok; AS-IS ignores rc; fdatasync_nonzero_rc_is_not_ok). P1.1 fsync_file/sync_dir_fd share the gate (fsync_and_dirfd_share_rc_gate; Darwin fsync_file stays F_FULLFSYNC). P1.2 Miri on safe fn fdatasync_rc_ok_is_safe_predicate. P2.1 Verus twin fdatasync_rc_ok (catalog fdatasync_rc). P2.2 fdatasync_eintr_retry_admitted always false (H1 uncertain; fdatasync_eintr_is_not_retried_as_ok). FFI island stays TCB. RFC-0155 names existing fdatasync_rc fail-closed inhabitant. Residual row stays 0156 P0.1 posix_unsafe_rc_sites_all_gated (scan: every production unsafe FFI rc site gated; new ungated site fails the test)."
+    },
+    {
+      "id": "R-unsafe-uring",
+      "title": "unsafe island pedradb-io-uring (submit_sqe)",
+      "class": "continuous",
+      "owner": "0074",
+      "crate": "pedradb-io-uring",
+      "script": "scripts/miri-unsafe-islands.sh",
+      "safety": "crates/pedradb-io-uring/SAFETY.md",
+      "close": "SAFETY.md is not a forall proof; Miri covers cqe_kernel; ring stays TCB. cqe_res_ok 0074 P0 (negative CQE res is not Ok; AS-IS ignores; linux_cqe_eio_is_not_ok injects -EIO on the test-Linux ring \u2014 production G1 is POSIX fdatasync 0073). P1.1 inject asserts kernel. P1.2 production G1 POSIX. P2.1 Verus twin cqe_res_ok (catalog cqe_res; cqe_kernel leaves TCB allowlist). P2.2 cqe_ring_model_admitted always false (no verus/ring_model.rs; cqe_ring_model_is_not_admitted). submit_sqe stays TCB"
+    },
+    {
+      "id": "R-unsafe-capi",
+      "title": "unsafe island pedradb-capi (C ABI handles)",
+      "class": "continuous",
+      "owner": "0075",
+      "crate": "pedradb-capi",
+      "script": "scripts/capi-asan.sh",
+      "safety": "crates/pedradb-capi/SAFETY.md",
+      "close": "SAFETY.md is not a forall proof; ASan product gate is scripts/capi-asan.sh; Miri sibling scripts/miri-unsafe-islands.sh. c_len_admitted 0075 P0 (oversize *_len is LIMIT; AS-IS copies any len; c_len_oversize_on_live_tx_is_limit). P1.1 c_path_walk_bytes named cap (c_path_walk_uses_named_cap; AS-IS usize::MAX strlen). P1.2 capi-asan.sh greps PASS LIMIT key/value/get/live-key. P2.1 Verus twin c_len_admitted (catalog c_len). P2.2 c_free_table_admitted always false (no verus/c_free.rs; c_free_table_is_tcb). Marshalling unsafe stays TCB. RFC-0155 names existing c_len fail-closed inhabitant. Residual row stays 0156 P0.2 capi_len_boundary_sweep_on_live_tx (len 0/1/cap/cap+1/usize::MAX across set+get: oversize LIMIT without read, no panic; class guard)."
+    },
+    {
+      "id": "R-evacuate",
+      "title": "WalRecovery::Evacuate (B2)",
+      "class": "parked",
+      "owner": "0038",
+      "close": "owner decides 0038 P1.1; surface locked to FailClosed | PointInTime (0050 P0.7)"
+    },
+    {
+      "id": "R-vlog-inc",
+      "title": "incremental vlog GC (pick A)",
+      "class": "parked",
+      "owner": "0027",
+      "close": "0026 P0.3 picked C not A"
+    },
+    {
+      "id": "R-vlog-hash",
+      "title": "hash-partitioned value store (pick B)",
+      "class": "parked",
+      "owner": "0028",
+      "close": "0026 P0.3 picked C not B"
+    },
+    {
+      "id": "R-remesure",
+      "title": "quiet-box remesure vs Rocks default sync=false",
+      "class": "parked",
+      "owner": "0041",
+      "close": "quiet host 3x; dirty sandbox is not the official floor; not a proof residual"
+    },
+    {
+      "id": "R-blob-scan",
+      "title": "kvrocks_blob_set / deps_scan official 2x",
+      "class": "parked",
+      "owner": "0054",
+      "close": "owner deprioritized 2026-08-24"
+    },
+    {
+      "id": "R-fd-ceiling",
+      "title": "ycsb_a 2x vs one fdatasync ceiling",
+      "class": "parked",
+      "owner": "0041",
+      "close": "asserted in code; cannot close without dropping G1/peer/shapes"
+    },
+    {
+      "id": "R-pipeline-iff",
+      "title": "Rocks write pipeline (mem off-lock / N-imm / WAL overlap)",
+      "class": "parked",
+      "owner": "0055",
+      "close": "iff P0 numbers obligate"
+    },
+    {
+      "id": "R-tls",
+      "title": "TLS not the lab default / encrypt-at-rest ops-owned",
+      "class": "parked",
+      "owner": "0021",
+      "close": "lab mTLS shipped (RFC-0021); GA default is a product decision \u2014 not enabled here"
+    },
+    {
+      "id": "R-direct-rpc",
+      "title": "RpcMode::Direct skips Net (same PeerMsg, sync pump)",
+      "class": "continuous",
+      "owner": "0067",
+      "close": "World fingerprint is Queued; pin_dst_queued fail-closed (0067 P0: set_rpc_mode(Direct) refused after pin; pin_dst_queued_refuses_direct_switch). P1.1 Action::AttemptDirectRpc (world_attempt_direct_after_pin_stays_queued). P1.2 open_single_node/montanha-tcp pin (open_single_node_refuses_direct_switch). P2.2 production open is Queued (default_open_starts_queued); Direct is unpinned lab opt-in (open_lab_direct / enable_lab_direct_rpc). Campaign not a theorem that every RPC is TCP"
+    },
+    {
+      "id": "R-joint",
+      "title": "Montanha membership joint consensus (log-carried config)",
+      "class": "continuous",
+      "owner": "0148",
+      "close": "enter joint 0063/0064; leave 0066\u20130129. drop_sent_through 0148 P0 (catalog drop_sent_through; remove_drops_removed_sent_through). drop_repl_slot 0147 P0 (catalog drop_repl_slot; install_drops_removed_repl_slots). 0147 P1.2 REAL TCP remaining-voter drop_repl_slot (l28_tcp_slot_ok; tcp_node_drop_repl_ok; l28_real_tcp_drop_repl). 0148 P1.2 REAL TCP remaining-voter oob sent_through (l28_tcp_sth_ok; tcp_node_drop_st_ok; l28_real_tcp_drop_st). 0068 P2.2 REAL TCP planted committed-joint-without-leave (l28_tcp_pj_ok; tcp_node_plant_joint_ok; l28_real_tcp_plant_joint). 0068 P1.2 opt-in World PlantCommittedJoint (plant_joint_schedule_ok; splice_plant_committed_joint; world_opt_in_schedule_emits_plant_committed_joint). hint_if_member 0146 P0 (catalog hint_member; leader_hint_omits_removed_after_leave). 0146 P1.2 REAL TCP remaining-voter leader-hint (l28_tcp_hnt_ok; tcp_node_hint_ok; l28_real_tcp_hint). removed_steps_down 0145 P0 (catalog removed_step_down; leave_steps_down_removed_leader). 0145 P1.2 REAL TCP removed-replica Leader step-down (l28_tcp_std_ok; tcp_node_removed_std_ok; l28_real_tcp_removed_std). discard_leader_local 0144 P0 (catalog discard_leader; finish_queued_no_leader_persist_leader_is_local). 0144 P1.2 REAL TCP removed-replica persist-leader locality (l28_tcp_pld_ok; tcp_node_removed_pld_ok; l28_real_tcp_removed_pld). discard_node_counts 0143 P0 (catalog discard_uncommitted; discard_uncommitted_on_removed_replica). 0143 P1.2 REAL TCP removed-replica live discard (l28_tcp_dsc_ok; tcp_node_removed_dsc_ok; l28_real_tcp_removed_dsc). reader_id_local 0142 P0 (catalog reader_local; open_single_node_get_skips_remote_ids_first). 0142 P1.2 REAL TCP removed-replica reader-local gate (l28_tcp_rdr_ok; tcp_node_removed_rdr_ok; l28_real_tcp_removed_rdr). local_id_if_member 0141 P0 (catalog local_id_member; open_single_node_local_id_omits_removed). open_peer_uses_disk 0140 P0 (catalog open_peer_disk; open_in_process_loads_disk_ids_before_peer). 0140 P1.2 REAL TCP removed-replica disk-peer timeout (l28_tcp_peer_ok; tcp_node_removed_peer_ok; l28_real_tcp_removed_peer). 0141 P1.2 REAL TCP removed-replica local-id gate (l28_tcp_lid_ok; tcp_node_removed_lid_ok; l28_real_tcp_removed_lid). drop_preimages_node_counts 0139 P0 (catalog drop_preimages; drop_preimages_on_removed_replica). 0139 P1.2 REAL TCP removed-replica drop-preimages (l28_tcp_pre_ok; tcp_node_removed_pre_ok; l28_real_tcp_removed_pre). force_clear_node_counts 0138 P0 (catalog force_clear; force_local_clear_on_removed_replica). 0138 P1.2 REAL TCP removed-replica force-local TX clear (l28_tcp_clear_ok; tcp_node_removed_clear_ok; l28_real_tcp_removed_clear). persist_fence_node_counts 0137 P0 (catalog persist_fence; fence_txn_aborted_on_removed_replica). 0137 P1.2 REAL TCP removed-replica abort-fence persist (l28_tcp_fence_ok; tcp_node_removed_fence_ok; l28_real_tcp_removed_fence). persist_hist_node_counts 0136 P0 (catalog persist_hist; persist_si_hist_on_removed_replica). 0136 P1.2 REAL TCP removed-replica SI hist persist (l28_tcp_hist_ok; tcp_node_removed_hist_ok; l28_real_tcp_removed_hist). persist_meta_node_counts 0135 P0 (catalog persist_meta; persist_now_ms_on_removed_replica). 0135 P1.2 REAL TCP removed-replica now_ms persist (l28_tcp_nowms_ok; tcp_node_removed_now_ms_ok; l28_real_tcp_removed_now_ms). recover_abort_node_counts 0134 P0 (catalog recover_abort; crash_reopen_aborts_leftover_on_removed_replica). 0134 P1.2 REAL TCP removed-replica leftover 2PC abort (l28_tcp_abort_ok; tcp_node_removed_abort_ok; l28_real_tcp_removed_abort). recover_drop_orphan_seg 0133 P0 (catalog recover_drop_orphan; crash_reopen_drops_orphan_seg_on_removed_replica). 0133 P1.2 REAL TCP removed-replica orphan drop (l28_tcp_odrop_ok; tcp_node_removed_orphan_drop_ok; l28_real_tcp_removed_orphan_drop). recover_truncate_node_counts 0132 P0 (catalog recover_truncate; crash_reopen_truncates_uncommitted_on_removed_replica). 0132 P1.2 REAL TCP removed-replica truncate (l28_tcp_trunc_ok; tcp_node_removed_truncate_ok; l28_real_tcp_removed_truncate). recover_apply_node_counts 0131 P0 (catalog recover_apply_node; crash_reopen_applies_committed_on_removed_replica). 0131 P1.2 REAL TCP removed-replica recover apply (l28_tcp_napply_ok; tcp_node_removed_recover_apply_ok; l28_real_tcp_removed_recover_apply). recover_must_apply 0130 P0 (catalog recover_apply; crash_reopen_applies_committed_unapplied_joint). 0130 P1.2 REAL TCP recover apply (l28_tcp_apply_ok; tcp_node_recover_apply_ok; l28_real_tcp_recover_apply). membership_identity_before_applied Verus 0129 P0 (catalog identity_before_applied). is_participating requires ids 0128 (participating_if_member). 0128 P1.2 REAL TCP participating (l28_tcp_part_ok; tcp_node_removed_not_participating; l28_real_tcp_participating_after_remove). 0127 P2.1 reopen participating is a campaign, not \u2200 traces (crash_reopen_participating_follows_membership). 0127 P2.2 twin freeze of participating_if_member is not a verified verifier (R-verus never). disk_membership_overrides_cli 0124. high_water_at_least 0125/0126. 0126 P1.2 REAL TCP high-water (l28_tcp_hw_ok; tcp_node_disk_high_water; l28_real_tcp_high_water_after_remove). REAL on-disk C-new-only 0066 P2.2 (l28_tcp_left_ok; l28_real_tcp_remove_member_left_on_disk). campaigns not \u2200 traces. R-verus never \u2014 campaign not a theorem"
+    }
+  ]
+}
