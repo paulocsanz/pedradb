@@ -1341,7 +1341,10 @@ pub enum IteratorMode<'a> {
 }
 
 /// Page size (RFC-0032 P0.1). Forward refills; never materialises the whole CF.
-const ITER_WINDOW: usize = 64;
+/// 512 amortises the per-refill layer-stream setup (tombstone collect over
+/// every overlapping SST + merge heap init) over 8× more rows; long scans
+/// pay it twice per 1000 rows instead of 16 times.
+const ITER_WINDOW: usize = 512;
 
 /// Windowed CF iterator (RFC-0032 P0.1). Same positioning semantics as v0.
 pub struct DBIterator<E: PedraEnv = StdEnv> {
@@ -1818,6 +1821,11 @@ pub struct DB<E: PedraEnv = IoUringEnv> {
     /// (adversarial FailingEnv stays single-threaded / deterministic).
     compact_tx: Option<SyncSender<CompactCmd>>,
     compact_thread: Option<JoinHandle<()>>,
+    /// Dedicated flush thread (bounded parked memory during sustained
+    /// ingest). Spawned alongside the compact worker; `None` in the same
+    /// injected-Env cases.
+    flush_tx: Option<SyncSender<CompactCmd>>,
+    flush_thread: Option<JoinHandle<()>>,
     compact_gate: Arc<Mutex<()>>,
     /// Last [`DB::resume`] outcome after a durability fence (RFC-0047 P1.1).
     /// `Arc`-shared with the host compact worker (P1.2 auto-resume writes
@@ -1874,6 +1882,9 @@ impl DB<IoUringEnv> {
             db.inner.set_defer_auto_compact(true);
             db.compact_tx = tx;
             db.compact_thread = th;
+            let (ftx, fth) = spawn_flush_worker(db.inner.clone());
+            db.flush_tx = ftx;
+            db.flush_thread = fth;
         }
         Ok(db)
     }
@@ -1930,6 +1941,9 @@ impl DB<StdEnv> {
             db.inner.set_defer_auto_compact(true);
             db.compact_tx = tx;
             db.compact_thread = th;
+            let (ftx, fth) = spawn_flush_worker(db.inner.clone());
+            db.flush_tx = ftx;
+            db.flush_thread = fth;
         }
         Ok(db)
     }
@@ -2102,6 +2116,8 @@ impl<E: PedraEnv> DB<E> {
             codec,
             compact_tx: None,
             compact_thread: None,
+            flush_tx: None,
+            flush_thread: None,
             compact_gate: Arc::new(Mutex::new(())),
             fence_recovery: Arc::new(Mutex::new(None)),
             auto_resume_transient: opts.auto_resume_transient,
@@ -3560,6 +3576,14 @@ impl<E: PedraEnv> DB<E> {
 
 impl<E: PedraEnv> Drop for DB<E> {
     fn drop(&mut self) {
+        // Flush first: the compact worker's shutdown path drains every
+        // parked mem itself, without a racing materializer.
+        if let Some(tx) = self.flush_tx.take() {
+            let _ = tx.send(CompactCmd::Shutdown);
+        }
+        if let Some(h) = self.flush_thread.take() {
+            let _ = h.join();
+        }
         if let Some(tx) = self.compact_tx.take() {
             let _ = tx.send(CompactCmd::Shutdown);
         }
@@ -3683,6 +3707,66 @@ where
         })
         .ok();
     (Some(tx), handle)
+}
+
+/// Dedicated flush thread (Rocks-shaped: a memtable flush never queues
+/// behind compaction). Owns the parked-memory bound: under sustained
+/// ingest (bulk load, bench hydrate) a commit is in flight at nearly
+/// every compact-worker tick, so parked mems — and the fold union, which
+/// absorbs every new table while the count stays flat — used to grow
+/// with everything written since the last 200 ms idle window and OOM
+/// the host (observed at 25M entries on a 4 GiB box). Above 3x the
+/// write buffer this thread materializes mid-burst, paying the lz4/SST
+/// write Rocks pays on every memtable flush; short bursts (gate shapes)
+/// park <= 1 mem and never reach the bound. The drain is budgeted per
+/// tick — an unbounded loop monopolizes the thread because the producer
+/// refills the queue as fast as it drains. Parked tables are immutable
+/// and `materialize_parked_once` serializes on the flush lock, so this
+/// races the compact worker safely; its brief write-lock sections cannot
+/// corrupt an inflight commit, they only insert a sub-ms delay ahead of
+/// its re-acquire.
+fn spawn_flush_worker<E>(
+    inner: ConcurrentDb<E>,
+) -> (Option<SyncSender<CompactCmd>>, Option<JoinHandle<()>>)
+where
+    E: PedraEnv + Send + Sync + 'static,
+    E::File: Send + Sync + 'static,
+{
+    let (tx, rx) = mpsc::sync_channel(1);
+    let handle = thread::Builder::new()
+        .name("pedra-compat-flush".into())
+        .spawn(move || {
+            let poll = Duration::from_millis(5);
+            loop {
+                match rx.recv_timeout(poll) {
+                    Ok(CompactCmd::Shutdown) | Err(RecvTimeoutError::Disconnected) => break,
+                    Ok(CompactCmd::Run) | Err(RecvTimeoutError::Timeout) => {
+                        flush_worker_tick(&inner);
+                    }
+                }
+            }
+        })
+        .ok();
+    (Some(tx), handle)
+}
+
+/// One flush-worker tick: park every staged imm, then enforce the
+/// parked-memory bound. Split out so the policy is unit-testable
+/// without thread or fsync timing.
+fn flush_worker_tick<E: PedraEnv>(inner: &ConcurrentDb<E>) {
+    while inner.park_imm_once() {}
+    let bound = inner
+        .with_read(|db| db.auto_flush_threshold())
+        .map_or(0, |t| 3usize.saturating_mul(t));
+    if bound > 0 && inner.parked_unflushed_bytes() >= bound {
+        let mut budget = 2usize;
+        while budget > 0
+            && inner.materialize_parked_once()
+            && inner.parked_unflushed_bytes() >= bound / 2
+        {
+            budget -= 1;
+        }
+    }
 }
 
 /// One L0→L1 job. I/O runs without the write lock (G5: failed write is not installed).
@@ -4779,6 +4863,87 @@ mod tests {
                 "acked key {i}"
             );
         }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Bounded park policy: under sustained ingest a commit is in flight at
+    /// nearly every compact-worker tick, so parked mems used to grow with
+    /// everything written since the last 200 ms idle window — the
+    /// 25M-hydrate OOM. [`flush_worker_tick`] must drain by a fixed budget
+    /// (never monopolizing the thread) and leave every acked key readable.
+    /// Deterministic: drives the tick directly with the workers disabled,
+    /// so host fsync throughput cannot mask the policy.
+    #[test]
+    fn sustained_ingest_bounds_parked_bytes() {
+        let dir = tmp("parked-bound");
+        let mut opts = Options::new();
+        opts.create_if_missing(true);
+        opts.set_write_buffer_size(8 * 1024);
+        // `open_cf_with_env` spawns no workers — the test drives the tick.
+        let db = DB::open_cf_with_env(&opts, &dir, &[], IoUringEnv::default()).unwrap();
+        db.inner.set_defer_auto_compact(true);
+        let payload = vec![b'x'; 1024];
+        // 6 tables x ~8 KiB = 48 KiB parked, well over the 3 x 8 KiB bound.
+        for i in 0..48u32 {
+            db.put(i.to_be_bytes(), &payload).unwrap();
+            if i % 8 == 7 {
+                let _ = db.inner.with_write(|d| d.stage_flush_imm());
+                while db.inner.park_imm_once() {}
+            }
+        }
+        let before = db.inner.parked_unflushed_count();
+        assert!(before >= 5, "expected a parked pile, got {before}");
+        let bound = 3 * 8 * 1024;
+        assert!(
+            db.inner.parked_unflushed_bytes() >= bound,
+            "parked bytes {}B must exceed the bound",
+            db.inner.parked_unflushed_bytes()
+        );
+        flush_worker_tick(&db.inner);
+        let after = db.inner.parked_unflushed_count();
+        assert_eq!(
+            before.saturating_sub(2),
+            after,
+            "one tick must materialize exactly the budget of 2 tables"
+        );
+        // Below the bound the pile is left alone (the park optimization
+        // for short bursts) — but it must never sit above the bound.
+        for _ in 0..10 {
+            if db.inner.parked_unflushed_bytes() < bound {
+                break;
+            }
+            flush_worker_tick(&db.inner);
+        }
+        assert!(
+            db.inner.parked_unflushed_bytes() < bound,
+            "repeated ticks must bring parked bytes under the bound, got {}B",
+            db.inner.parked_unflushed_bytes()
+        );
+        assert!(
+            db.read_probe().sst_count >= 1,
+            "materialized mems must be L0 files, probe={:?}",
+            db.read_probe()
+        );
+        for i in [0u32, 23, 47] {
+            assert_eq!(
+                db.get(i.to_be_bytes()).unwrap().as_deref(),
+                Some(payload.as_slice()),
+                "key {i}"
+            );
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The default open path must run the flush thread alongside the
+    /// compact worker (bounded parked memory is not best-effort).
+    #[test]
+    fn open_spawns_flush_worker() {
+        let dir = tmp("flush-worker-spawned");
+        let mut opts = Options::new();
+        opts.create_if_missing(true);
+        let db = DB::open(&opts, &dir).unwrap();
+        assert!(db.compact_thread.is_some(), "compact worker must spawn");
+        assert!(db.flush_thread.is_some(), "flush worker must spawn");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

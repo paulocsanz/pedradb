@@ -4709,6 +4709,17 @@ impl<E: Env> Db<E> {
         self.parked_unflushed.len()
     }
 
+    /// Approximate bytes held by parked (no L0 yet) mems. The host worker
+    /// bounds this during sustained ingest — the count alone cannot: the
+    /// fold union absorbs every new table while the count stays flat.
+    #[must_use]
+    pub fn parked_unflushed_bytes(&self) -> usize {
+        self.parked_unflushed
+            .iter()
+            .map(|t| t.approx_memory_usage())
+            .fold(0, usize::saturating_add)
+    }
+
     /// Cheap `Arc` snapshot of the two oldest parked tables, recorded as
     /// the in-flight fold pair (validated at swap time — F174). Fold
     /// deep-clones off the Db lock, then [`Self::replace_oldest_parked_pair`].
