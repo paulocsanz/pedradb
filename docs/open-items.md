@@ -16,6 +16,16 @@ REFUSED — every 1c write-path cut costs ycsb_f/lock their 3×.)
 > stuck run confirms A sits in `Wal::sync_data` holding the write lock.
 > Stale test, not a live catch-up regression; needs a rewrite against the
 > group path (multi-writer leader), not the lone `put`.
+>
+> **Same family, found during pub-repo prep (2026-08-30):**
+> `wal_durability_adversarial::vlog_gc_during_offlock_fsync_window_refuses_then_preserves_acked_sync_write`
+> **deadlocks** (no timeout) when the parked writer takes the lone path —
+> `lone_sync_commit` holds the Db write lock through `Wal::sync_data`, the
+> test's parked `compact_with → flush` blocks on that lock, and
+> `release_park` only runs after `compact_with` returns (ABBA). Passes when
+> the writer joins the group path (default-parallelism runs usually pass;
+> isolated `--test-threads=1` runs hang; reproduced identically here and in
+> the publish tree). Same p11j premise mismatch; needs the same rewrite.
 
 ---
 
