@@ -17,8 +17,8 @@
   ],
   "glue": {
     "kernel_files": 43,
-    "kernel_loc": 10953,
-    "handler_loc": 81567,
+    "kernel_loc": 11021,
+    "handler_loc": 81752,
     "db_rs_extracted": false
   },
   "residuals": [
@@ -76,7 +76,7 @@
       "title": "lock / WAL I/O / OS scheduler around group_commit",
       "class": "continuous",
       "owner": "0071",
-      "close": "kernel proves group decision + publish-after-WAL 0071 P0 (may_publish_group; failed_wal_sync_does_not_publish_group). P1.1 multi_writer_failed_sync_does_not_publish_group (N-thread finish_group_off_lock). P1.2 after_wal_sync yield + pct_after_failed_fd_does_not_publish. P2.1 Verus twin may_publish_group (catalog group_publish). P2.2 lock_interleavings_admitted always false (claim_lock_interleavings_refused_after_put; AS-IS would admit). Lock/OS-scheduler interleavings of ConcurrentDb stay TCB (0056 P2.1) \u2014 campaign not forall \u03c0. RFC-0155 names catalog pair lock_interleavings (claim_lock_interleavings_proven; plant claim_lock_interleavings_refused_after_put). Residual row stays"
+      "close": "kernel proves group decision + publish-after-WAL 0071 P0 (may_publish_group; failed_wal_sync_does_not_publish_group). P1.1 multi_writer_failed_sync_does_not_publish_group (N-thread finish_group_off_lock). P1.2 after_wal_sync yield + pct_after_failed_fd_does_not_publish. P2.1 Verus twin may_publish_group (catalog group_publish). P2.2 lock_interleavings_admitted always false (claim_lock_interleavings_refused_after_put; AS-IS would admit). Lock/OS-scheduler interleavings of ConcurrentDb stay TCB (0056 P2.1) \u2014 campaign not forall \u03c0. RFC-0155 names catalog pair lock_interleavings (claim_lock_interleavings_proven; plant claim_lock_interleavings_refused_after_put). Residual row stays 0156 P1.1 planted_chain3_found_by_pct_d3 (chain-3 signature: d=2 0/256 structural, d=3 8/16384; default stays 2; forall_schedules_admitted(3) false)."
     },
     {
       "id": "R-pct",
@@ -106,7 +106,7 @@
       "title": "io_uring ring (no probable ring model)",
       "class": "continuous",
       "owner": "0080",
-      "close": "out of verified profile by contract; PosixFallback; twin blocked. 0080 P0: ring_model_admitted always false; verified_admits_ring(true) false (AS-IS admits want_ring); ConcurrentDb::open_verified + claim_uring_ring_refused_on_verified_open. P1.1 CLI open_verified_db names verified_admits_ring next to posix() (verified_flag_pins_the_profile_and_survives_reopen). P1.2 full_uses_posix_fallback (production_env; full_mode_posix_fallback_when_ring_unavailable). P2.1 ring_twin_admitted always false (no verus/ring_model.rs). P2.2 wal_on_sqe_admitted always false (IoUringFile write/sync_data; production_wal_is_not_on_sqe). Production G1 stays POSIX (0062/0073); do not restore WAL onto the ring. RFC-0155 names existing cqe_res / ring_model_admitted refuse. Residual row stays"
+      "close": "out of verified profile by contract; PosixFallback; twin blocked. 0080 P0: ring_model_admitted always false; verified_admits_ring(true) false (AS-IS admits want_ring); ConcurrentDb::open_verified + claim_uring_ring_refused_on_verified_open. P1.1 CLI open_verified_db names verified_admits_ring next to posix() (verified_flag_pins_the_profile_and_survives_reopen). P1.2 full_uses_posix_fallback (production_env; full_mode_posix_fallback_when_ring_unavailable). P2.1 ring_twin_admitted always false (no verus/ring_model.rs). P2.2 wal_on_sqe_admitted always false (IoUringFile write/sync_data; production_wal_is_not_on_sqe). Production G1 stays POSIX (0062/0073); do not restore WAL onto the ring. RFC-0155 names existing cqe_res / ring_model_admitted refuse. Residual row stays 0156 P0.3 cqe_leftover_sequence_never_false_ok (64 unique tags; leftover at every position Discard; no-own-CQE always WaitMore; false-Ok only in AS-IS twins)."
     },
     {
       "id": "R-hardware",
@@ -127,7 +127,7 @@
       "title": "REAL multi-process TCP cluster (seed replay + durability)",
       "class": "continuous",
       "owner": "0072",
-      "close": "cluster_real + l28_real_tcp_seed_replay; l28_durability_ok kernel 0072 P0 (get\u2227after-kill\u2227restart; AS-IS get-only; cluster_real exits via kernel). P1.1 l28_real_tcp asserts via kernel. P1.2 world_seed_l28_ok (World silent_wrong=0 is not L28 without cluster_real; seed 0x641e28). P2.1 catalog l28_durability + verus/l28.rs. P2.2 l28_leader_kill_ok (cluster_real --leader-kill; AS-IS ignores leader-kill). 0118 P1.2 l28_real_tcp_leave_joint_replay (seed 0x01181e28 --leave-joint; leave=1; L28 still holds; AS-IS skips leave). 0121 P1.2 l28_real_tcp_remove_member_left_on_disk (seed 0x01211e28 --remove-member; remove=1 leave=1 left=1; l28_tcp_left_ok). 0121 P2.1 plant is a campaign, not \u2200 traces \u2014 campaign not a theorem. RFC-0155 P0: l28_tcp_napply_retry_admitted always false (retry-success is not forall TCP; l28_real_tcp_removed_recover_apply; cluster_real live-calls). Residual row stays"
+      "close": "cluster_real + l28_real_tcp_seed_replay; l28_durability_ok kernel 0072 P0 (get\u2227after-kill\u2227restart; AS-IS get-only; cluster_real exits via kernel). P1.1 l28_real_tcp asserts via kernel. P1.2 world_seed_l28_ok (World silent_wrong=0 is not L28 without cluster_real; seed 0x641e28). P2.1 catalog l28_durability + verus/l28.rs. P2.2 l28_leader_kill_ok (cluster_real --leader-kill; AS-IS ignores leader-kill). 0118 P1.2 l28_real_tcp_leave_joint_replay (seed 0x01181e28 --leave-joint; leave=1; L28 still holds; AS-IS skips leave). 0121 P1.2 l28_real_tcp_remove_member_left_on_disk (seed 0x01211e28 --remove-member; remove=1 leave=1 left=1; l28_tcp_left_ok). 0121 P2.1 plant is a campaign, not \u2200 traces \u2014 campaign not a theorem. RFC-0155 P0: l28_tcp_napply_retry_admitted always false (retry-success is not forall TCP; l28_real_tcp_removed_recover_apply; cluster_real live-calls). Residual row stays 0156 P0.4 l28_real_tcp_removed_campaign_seeds (3 fresh seeds, each napply=1 + kernels + per-seed retry refusal; campaign is not forall TCP)."
     },
     {
       "id": "R-unsafe-posix",
@@ -137,7 +137,7 @@
       "crate": "pedradb-posix",
       "script": "scripts/miri-unsafe-islands.sh",
       "safety": "crates/pedradb-posix/SAFETY.md",
-      "close": "SAFETY.md is not a forall proof; Miri ramp is scripts/miri-unsafe-islands.sh. fdatasync_rc_ok 0073 P0 (nonzero rc is not Ok; AS-IS ignores rc; fdatasync_nonzero_rc_is_not_ok). P1.1 fsync_file/sync_dir_fd share the gate (fsync_and_dirfd_share_rc_gate; Darwin fsync_file stays F_FULLFSYNC). P1.2 Miri on safe fn fdatasync_rc_ok_is_safe_predicate. P2.1 Verus twin fdatasync_rc_ok (catalog fdatasync_rc). P2.2 fdatasync_eintr_retry_admitted always false (H1 uncertain; fdatasync_eintr_is_not_retried_as_ok). FFI island stays TCB. RFC-0155 names existing fdatasync_rc fail-closed inhabitant. Residual row stays"
+      "close": "SAFETY.md is not a forall proof; Miri ramp is scripts/miri-unsafe-islands.sh. fdatasync_rc_ok 0073 P0 (nonzero rc is not Ok; AS-IS ignores rc; fdatasync_nonzero_rc_is_not_ok). P1.1 fsync_file/sync_dir_fd share the gate (fsync_and_dirfd_share_rc_gate; Darwin fsync_file stays F_FULLFSYNC). P1.2 Miri on safe fn fdatasync_rc_ok_is_safe_predicate. P2.1 Verus twin fdatasync_rc_ok (catalog fdatasync_rc). P2.2 fdatasync_eintr_retry_admitted always false (H1 uncertain; fdatasync_eintr_is_not_retried_as_ok). FFI island stays TCB. RFC-0155 names existing fdatasync_rc fail-closed inhabitant. Residual row stays 0156 P0.1 posix_unsafe_rc_sites_all_gated (scan: every production unsafe FFI rc site gated; new ungated site fails the test)."
     },
     {
       "id": "R-unsafe-uring",
@@ -157,7 +157,7 @@
       "crate": "pedradb-capi",
       "script": "scripts/capi-asan.sh",
       "safety": "crates/pedradb-capi/SAFETY.md",
-      "close": "SAFETY.md is not a forall proof; ASan product gate is scripts/capi-asan.sh; Miri sibling scripts/miri-unsafe-islands.sh. c_len_admitted 0075 P0 (oversize *_len is LIMIT; AS-IS copies any len; c_len_oversize_on_live_tx_is_limit). P1.1 c_path_walk_bytes named cap (c_path_walk_uses_named_cap; AS-IS usize::MAX strlen). P1.2 capi-asan.sh greps PASS LIMIT key/value/get/live-key. P2.1 Verus twin c_len_admitted (catalog c_len). P2.2 c_free_table_admitted always false (no verus/c_free.rs; c_free_table_is_tcb). Marshalling unsafe stays TCB. RFC-0155 names existing c_len fail-closed inhabitant. Residual row stays"
+      "close": "SAFETY.md is not a forall proof; ASan product gate is scripts/capi-asan.sh; Miri sibling scripts/miri-unsafe-islands.sh. c_len_admitted 0075 P0 (oversize *_len is LIMIT; AS-IS copies any len; c_len_oversize_on_live_tx_is_limit). P1.1 c_path_walk_bytes named cap (c_path_walk_uses_named_cap; AS-IS usize::MAX strlen). P1.2 capi-asan.sh greps PASS LIMIT key/value/get/live-key. P2.1 Verus twin c_len_admitted (catalog c_len). P2.2 c_free_table_admitted always false (no verus/c_free.rs; c_free_table_is_tcb). Marshalling unsafe stays TCB. RFC-0155 names existing c_len fail-closed inhabitant. Residual row stays 0156 P0.2 capi_len_boundary_sweep_on_live_tx (len 0/1/cap/cap+1/usize::MAX across set+get: oversize LIMIT without read, no panic; class guard)."
     },
     {
       "id": "R-evacuate",

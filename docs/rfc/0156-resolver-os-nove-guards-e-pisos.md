@@ -61,7 +61,7 @@ Estado por ponto antes deste RFC:
 ### P2 — pisos nomeados + registro
 
 - [x] **P2.1** R-glue / R-fsync-lie / R-crc / R-es: pisos nomeados neste RFC (extração fora de escopo; mídia não é provável do userspace; pombal de 32 bits; eventualidade exige ES-1..3). `never_floor` com os seis ids; `db_rs_extracted=false` — status: `done`
-- [ ] **P2.2** close-text dos cinco fortalecidos (`R-unsafe-posix`, `R-unsafe-capi`, `R-uring`, `R-swarm-real`, `R-group-glue`) nomeia 0156 e a planta da guarda; linhas não apagadas; `--lint` 0 fail; freeze == live no fim — status: `todo`
+- [x] **P2.2** close-text dos cinco fortalecidos (`R-unsafe-posix`, `R-unsafe-capi`, `R-uring`, `R-swarm-real`, `R-group-glue`) nomeia 0156 e a planta da guarda; linhas não apagadas; `--lint` 0 fail; freeze == live no fim — status: `done`
 
 ## Status (living — update with every PR)
 
@@ -72,8 +72,8 @@ Estado por ponto antes deste RFC:
 | P0.3 | p0 | uring leftover sweep | done | `cqe_leftover_sequence_never_false_ok` | 2026-08-30 |
 | P0.4 | p0 | campanha REAL 3 seeds | done | `l28_real_tcp_removed_campaign_seeds` | 2026-08-30 |
 | P1.1 | p1 | planta d=3 + PCT d=3 | done | `planted_chain3_found_by_pct_d3` | 2026-08-30 |
-| P2.1 | p2 | pisos nomeados | todo | este RFC | 2026-08-30 |
-| P2.2 | p2 | close-texts + lint + freeze | todo | `residuals.json` | 2026-08-30 |
+| P2.1 | p2 | pisos nomeados | done | este RFC | 2026-08-30 |
+| P2.2 | p2 | close-texts + lint + freeze | done | `residuals.json` | 2026-08-30 |
 
 ## Acceptance Criteria
 
