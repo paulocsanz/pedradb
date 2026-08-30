@@ -321,6 +321,38 @@ fn l28_real_tcp_removed_recover_apply() {
     eprintln!("{a}");
 }
 
+/// RFC-0156 P0.4 (R-swarm-real): multi-seed campaign on the shipped REAL
+/// TCP path. Three fresh seeds, each requiring `napply=1`, the
+/// `l28_durability` / `l28_tcp_napply` kernels, and the retry-refusal
+/// on that seed's own attempt count. A 3-seed campaign is evidence, not
+/// ∀ TCP — the residual row stays.
+#[test]
+fn l28_real_tcp_removed_campaign_seeds() {
+    for seed in [0x0156_1E28_u64, 0x0157_1E28_u64, 0x0158_1E28_u64] {
+        let (a, attempts) = run_counted(seed, &["--remove-member"]);
+        assert!(a.contains("remove=1"), "seed {seed:#x}: remove plant must fire: {a}");
+        assert!(
+            a.contains("napply=1"),
+            "seed {seed:#x}: removed replica recover apply must close the gap: {a}"
+        );
+        let (get_ok, after_ok, restart_ok) = parse_l28(&a);
+        assert!(
+            l28_durability_ok(get_ok, after_ok, restart_ok),
+            "seed {seed:#x}: L28 kernel miss under --remove-member: {a}"
+        );
+        let napply_ok = a.contains("napply=1");
+        assert!(
+            l28_tcp_napply_ok(napply_ok),
+            "seed {seed:#x}: TCP removed-replica recover-apply kernel miss: {a}"
+        );
+        assert!(
+            !l28_tcp_napply_retry_admitted(attempts, napply_ok),
+            "seed {seed:#x}: campaign success is not forall TCP: attempts={attempts} napply_ok={napply_ok} {a}"
+        );
+        eprintln!("campaign seed={seed:#x} attempts={attempts}: {a}");
+    }
+}
+
 /// RFC-0132 P1.2: after `--remove-member` plant, process death, TCP ctor
 /// on the removed replica must persist truncated log. 0131 apply is **not**
 /// this tooth.

@@ -491,4 +491,53 @@ mod tests {
         );
         let _ = std::fs::remove_dir_all(&dir);
     }
+    /// RFC-0156 P0.1 (R-unsafe-posix): every **production** `unsafe` FFI
+    /// site that returns an rc must be gated in the same expression
+    /// window (`posix_rc_to_io(rc)` / `rc == 0` / errno match). A new
+    /// ungated site fails this test with its line number — the class
+    /// "unchecked FFI rc" cannot re-enter silently. Test-only sites
+    /// (this module) are out of the scanned region.
+    #[test]
+    fn posix_unsafe_rc_sites_all_gated() {
+        let src = include_str!("lib.rs");
+        let lines: Vec<&str> = src.lines().collect();
+        let cut = lines
+            .iter()
+            .position(|l| l.contains("mod tests {"))
+            .expect("tests module marker");
+        let ffns = [
+            "fdatasync(",
+            "fcntl(",
+            "fallocate(",
+            "fsync(",
+            "posix_fadvise(",
+        ];
+        let mut sites = 0usize;
+        for (i, line) in lines[..cut].iter().enumerate() {
+            if !line.contains("unsafe {") {
+                continue;
+            }
+            if !ffns.iter().any(|f| line.contains(f)) {
+                continue;
+            }
+            sites += 1;
+            let window: Vec<&str> =
+                lines[i..(i + 8).min(lines.len())].to_vec();
+            let gated = window.iter().any(|w| {
+                w.contains("posix_rc_to_io(rc)")
+                    || w.contains("rc == 0")
+                    || w.contains("rc != 0")
+                    || w.contains("raw_os_error")
+            });
+            assert!(
+                gated,
+                "ungated unsafe FFI rc at line {}: {line}",
+                i + 1
+            );
+        }
+        assert!(
+            sites >= 5,
+            "expected the 5 known production FFI rc sites, found {sites}"
+        );
+    }
 }

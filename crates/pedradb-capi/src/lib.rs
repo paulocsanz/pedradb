@@ -796,6 +796,141 @@ mod tests {
         }
     }
 
+    /// RFC-0156 P0.2 (R-unsafe-capi): boundary sweep over every `*_len`
+    /// parameter of the two exports that copy C bytes, on a live
+    /// database + tx. Admitted lens (exactly the caps, and 0 with a
+    /// null value pointer) are `OK`; oversize (`cap+1`, `usize::MAX`)
+    /// is `LIMIT` and must not read (1-byte buffers); null pointers
+    /// with len > 0 are `ERROR` before any copy; `get` zeroes the outs
+    /// on `LIMIT`. No combination may panic. The AS-IS dente admits
+    /// every length.
+    #[test]
+    fn capi_len_boundary_sweep_on_live_tx() {
+        let (dir, path) = temp_path();
+        unsafe {
+            let db = montanha_fdb_database_create(path.as_ptr(), 3, 1);
+            assert!(!db.is_null(), "live database_create");
+            let tr = montanha_fdb_transaction_create(db);
+            assert!(!tr.is_null(), "live transaction_create");
+
+            let key_cap = vec![1u8; MAX_C_KEY_BYTES];
+            let val_cap = vec![2u8; MAX_C_VALUE_BYTES];
+            let tiny = 1u8;
+
+            // Oversize key lens: LIMIT, does not read (1-byte buffer) and
+            // does not consume the tx budget.
+            for bad in [MAX_C_KEY_BYTES + 1, usize::MAX] {
+                assert_eq!(
+                    montanha_fdb_transaction_set(tr, &tiny, bad, &tiny, 1),
+                    MONTAHA_FDB_LIMIT,
+                    "oversize key_len {bad:?}"
+                );
+            }
+            // Oversize value lens: LIMIT.
+            for bad in [MAX_C_VALUE_BYTES + 1, usize::MAX] {
+                assert_eq!(
+                    montanha_fdb_transaction_set(tr, &tiny, 1, &tiny, bad),
+                    MONTAHA_FDB_LIMIT,
+                    "oversize value_len {bad:?}"
+                );
+            }
+            // Null pointers with len > 0: ERROR before any copy.
+            assert_eq!(
+                montanha_fdb_transaction_set(ptr::null_mut(), ptr::null(), 1, &tiny, 1),
+                MONTAHA_FDB_ERROR
+            );
+            assert_eq!(
+                montanha_fdb_transaction_set(tr, ptr::null(), 1, &tiny, 1),
+                MONTAHA_FDB_ERROR
+            );
+            assert_eq!(
+                montanha_fdb_transaction_set(tr, &tiny, 1, ptr::null(), 1),
+                MONTAHA_FDB_ERROR
+            );
+
+            let mut out_ptr: *mut u8 = ptr::null_mut();
+            let mut out_len: usize = 7;
+            // get: oversize key len is LIMIT and zeroes the outs.
+            for bad in [MAX_C_KEY_BYTES + 1, usize::MAX] {
+                out_len = 7;
+                assert_eq!(
+                    montanha_fdb_transaction_get(db, tr, &tiny, bad, &mut out_ptr, &mut out_len),
+                    MONTAHA_FDB_LIMIT,
+                    "oversize get key_len {bad:?}"
+                );
+                assert!(out_ptr.is_null() && out_len == 0);
+            }
+            // get: null key / null outs are ERROR.
+            assert_eq!(
+                montanha_fdb_transaction_get(db, tr, ptr::null(), 1, &mut out_ptr, &mut out_len),
+                MONTAHA_FDB_ERROR
+            );
+            assert_eq!(
+                montanha_fdb_transaction_get(
+                    db,
+                    tr,
+                    &tiny,
+                    1,
+                    ptr::null_mut(),
+                    &mut out_len
+                ),
+                MONTAHA_FDB_ERROR
+            );
+            assert_eq!(
+                montanha_fdb_transaction_get(
+                    db,
+                    tr,
+                    &tiny,
+                    1,
+                    &mut out_ptr,
+                    ptr::null_mut()
+                ),
+                MONTAHA_FDB_ERROR
+            );
+
+            // Admitted boundaries. The tx budget is cumulative (key+value
+            // per tx), so each at-cap case gets its own fresh tx.
+            let tr_k = montanha_fdb_transaction_create(db);
+            assert!(!tr_k.is_null());
+            assert_eq!(
+                montanha_fdb_transaction_set(
+                    tr_k,
+                    key_cap.as_ptr(),
+                    MAX_C_KEY_BYTES,
+                    ptr::null(),
+                    0,
+                ),
+                MONTAHA_FDB_OK,
+                "key exactly at the cap is admitted"
+            );
+            montanha_fdb_transaction_destroy(tr_k);
+
+            let tr_v = montanha_fdb_transaction_create(db);
+            assert!(!tr_v.is_null());
+            assert_eq!(
+                montanha_fdb_transaction_set(tr_v, &tiny, 1, val_cap.as_ptr(), MAX_C_VALUE_BYTES),
+                MONTAHA_FDB_OK,
+                "value exactly at the cap is admitted"
+            );
+            // Admitted: len 0 with a null value pointer is the empty value.
+            assert_eq!(
+                montanha_fdb_transaction_set(tr_v, &tiny, 1, ptr::null(), 0),
+                MONTAHA_FDB_OK
+            );
+            montanha_fdb_transaction_destroy(tr_v);
+
+            // Dente: AS-IS admits every length.
+            assert!(handles::c_len_admitted_as_is(
+                usize::MAX,
+                MAX_C_KEY_BYTES
+            ));
+
+            montanha_fdb_transaction_destroy(tr);
+            montanha_fdb_database_destroy(db);
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn slice_cap_path_without_nul_in_max_is_null() {
         let buf = vec![b'a'; MAX_PATH_BYTES];

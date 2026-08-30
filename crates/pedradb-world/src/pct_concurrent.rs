@@ -1708,4 +1708,121 @@ mod tests {
             SEEDS.len()
         );
     }
+
+    // ---------------------------------------------------------------------
+    // Planted depth-3 bug (TEST CODE ONLY — never in the engine).
+    // RFC-0156 P1.1: three tasks, one window each between check and act.
+    // The violation signature is ALL THREE succeeding from balance=100
+    // (balance = -200): that requires every check to land before any
+    // act, i.e. the third task checking while two are parked — a
+    // preemption chain of 3. Two-task overdraw (balance = 0, taken=2)
+    // is the depth-2 territory the `Plant` above already covers and is
+    // NOT a violation here.
+    // ---------------------------------------------------------------------
+    struct Plant3 {
+        balance: Mutex<i64>,
+        taken: std::sync::atomic::AtomicI64,
+    }
+
+    impl Plant3 {
+        fn take100(&self, y: &Yielder) {
+            {
+                let b = self.balance.lock().unwrap();
+                if *b < 100 {
+                    return; // nothing to take
+                }
+                drop(b);
+                y.at("p3_read");
+                // act without re-check (the planted bug)
+                *self.balance.lock().unwrap() -= 100;
+            }
+            self.taken
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        }
+
+        fn violation(&self) -> Option<String> {
+            let b = *self.balance.lock().unwrap();
+            let t = self.taken.load(std::sync::atomic::Ordering::SeqCst);
+            (t >= 3 && b <= -200).then(|| format!("triple_take: balance={b} taken={t}"))
+        }
+    }
+
+    fn plant3_violation(seed: u64, n: usize, policy: PiPolicy) -> Option<String> {
+        let plant = Arc::new(Plant3 {
+            balance: Mutex::new(100),
+            taken: std::sync::atomic::AtomicI64::new(0),
+        });
+        run_pcts(seed, n, policy, |_task| {
+            let plant = Arc::clone(&plant);
+            move |y: &Yielder| {
+                plant.take100(y);
+            }
+        });
+        plant.violation()
+    }
+
+    /// RFC-0156 P1.1 (R-group-glue): the chain-3 signature is found by
+    /// PCT d=3 and NOT by d=2 in the measured sweep — evidence that d=3
+    /// expresses interleavings d=2 cannot reach (the 0064 d=3 test runs
+    /// the depth-2 plant deeper; this one plants a signature only a
+    /// chain of 3 can produce). This does not raise the campaign default
+    /// (still 2) and `forall_schedules_admitted(3)` stays false: d=3 is
+    /// still not ∀ lock interleavings of the OS.
+    #[test]
+    fn planted_chain3_found_by_pct_d3() {
+        const N: usize = 3;
+        const SEEDS: u64 = 256;
+
+        // (i) sequential: one task drains (100-100=0), others no-op. Clean.
+        let seq_hits = (0..SEEDS)
+            .filter(|&s| plant3_violation(s, N, PiPolicy::Sequential).is_some())
+            .count();
+        assert_eq!(seq_hits, 0, "sequential must be CLEAN on the depth-3 plant");
+
+        // (ii) PCT d=2 sweep: structural — depth 2 has ONE change point,
+        // so at most one task is ever demoted below another while parked;
+        // the new top then runs to completion (check+act) before the
+        // parked task acts. taken <= 2, balance >= -100: the chain-3
+        // signature (taken=3, balance=-200) cannot appear. Measured 0.
+        let d2_hits = (0..SEEDS)
+            .filter(|&s| plant3_violation(s, N, PiPolicy::Pct { depth: 2 }).is_some())
+            .count();
+        eprintln!("planted_chain3_found_by_pct_d3: d=2 sweep found {d2_hits}/{SEEDS}");
+
+        // (iii) PCT d=3 sweep: two change points at consecutive selection
+        // steps demote the top two tasks — the third checks while both
+        // are parked, and all three acts land. k = 16n positions makes
+        // the alignment rare per seed (~1e-3 with permutation slack), so
+        // the sweep is 16384 deterministic seeds, not 256.
+        let d3_seeds: u64 = 16384;
+        let d3_violators: Vec<(u64, String)> = (0..d3_seeds)
+            .filter_map(|s| {
+                plant3_violation(s, N, PiPolicy::Pct { depth: 3 }).map(|v| (s, v))
+            })
+            .collect();
+        let d3_hits = d3_violators.len();
+        eprintln!("planted_chain3_found_by_pct_d3: d=3 sweep found {d3_hits}/{d3_seeds}");
+
+        // The three teeth: d=2 misses what d=3 finds (when d2_hits == 0),
+        // d=3 finds it, and the refusal travels with the campaign.
+        assert_eq!(
+            d2_hits, 0,
+            "PCT d=2 must NOT reach the chain-3 signature (got {d2_hits}/{SEEDS})"
+        );
+        assert!(
+            d3_hits >= 1,
+            "PCT d=3 must find the chain-3 signature in 0..16383 (got {d3_hits}/{d3_seeds})"
+        );
+
+        // Default stays 2; d=3 is not ∀.
+        assert_eq!(
+            pedradb_core::group_commit_kernel::pct_campaign_default_depth(),
+            2,
+            "campaign default PCT depth stays 2"
+        );
+        assert!(
+            !pedradb_core::group_commit_kernel::forall_schedules_admitted(3),
+            "d=3 campaign is not forall lock interleavings"
+        );
+    }
 }

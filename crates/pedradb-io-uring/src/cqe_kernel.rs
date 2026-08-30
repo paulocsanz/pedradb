@@ -319,4 +319,71 @@ mod tests {
         let next_u = next_user_data(&mut c);
         assert_eq!(cqe_act(leftover_u, next_u), CqeAct::Discard);
     }
+    /// RFC-0156 P0.3 (R-uring): sequence sweep — 64 issued ops, and at
+    /// every CQ drain position a leftover from every other op may be
+    /// visible. Under unique `user_data`, a leftover is always
+    /// `Discard`, `submit_complete_act(_, false)` is always `WaitMore`
+    /// (never a false Ok from someone else's CQE), and a negative `res`
+    /// on our own tag is never Ok. The false-Ok path exists only in the
+    /// AS-IS twins (constant tags + `cqe_res_ok_as_is`) — the dente.
+    #[test]
+    fn cqe_leftover_sequence_never_false_ok() {
+        const OPS: usize = 64;
+        let mut counter = FIRST_USER_DATA;
+        let tags: Vec<u64> = (0..OPS).map(|_| next_user_data(&mut counter)).collect();
+
+        // Tags are unique and never zero (the F203 invariant).
+        let mut seen = std::collections::HashSet::new();
+        for t in &tags {
+            assert_ne!(*t, 0);
+            assert!(seen.insert(*t), "user_data tag collision: {t}");
+        }
+
+        // At every position i, every other tag is a leftover: Discard.
+        // Only the own tag is Take — wrong-tag adoption never happens.
+        for i in 0..OPS {
+            for j in 0..OPS {
+                assert_eq!(
+                    cqe_act(tags[j], tags[i]),
+                    if i == j { CqeAct::Take } else { CqeAct::Discard },
+                    "leftover tag {} at op {} must not be adopted",
+                    tags[j],
+                    tags[i]
+                );
+            }
+        }
+
+        // Any drain that has not seen our tag waits again — a submit
+        // error or an Ok submit with only leftovers is never a false
+        // completion (F208 keeps the caller's buffer alive).
+        for submit_ok in [true, false] {
+            for i in 0..OPS {
+                // Drain contains every leftover except our own tag.
+                for j in 0..OPS {
+                    if i == j {
+                        continue;
+                    }
+                    assert_eq!(cqe_act(tags[j], tags[i]), CqeAct::Discard);
+                }
+                assert_eq!(
+                    submit_complete_act(submit_ok, false),
+                    SubmitCompleteAct::WaitMore,
+                    "no own CQE yet must wait (submit_ok={submit_ok})"
+                );
+            }
+        }
+        // The harvested CQE is the only thing that can produce a result,
+        // and its res is gated: kernel errno is not Ok.
+        assert!(!cqe_res_ok(-5));
+        assert!(cqe_res_ok(0));
+        assert!(cqe_res_ok(4096));
+        assert!(cqe_res_ok_as_is(-5), "AS-IS dente: any res is Ok");
+
+        // AS-IS contrast: constant per-opcode tags make the leftover
+        // fsync (res=0) look like the current fsync → false Ok.
+        let mut c0 = 0u64;
+        let fsync_tag = next_user_data_as_is(&mut c0, TAG_FSYNC_AS_IS);
+        assert_eq!(cqe_act(TAG_FSYNC_AS_IS, fsync_tag), CqeAct::Take);
+        assert!(cqe_res_ok_as_is(0));
+    }
 }
