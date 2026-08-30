@@ -1574,6 +1574,12 @@ impl<E: Env> ConcurrentDb<E> {
         self.inner.read().parked_unflushed_count()
     }
 
+    /// Approximate bytes held by parked mems (host-worker memory bound).
+    #[must_use]
+    pub fn parked_unflushed_bytes(&self) -> usize {
+        self.inner.read().parked_unflushed_bytes()
+    }
+
     /// Whether an immutable memtable is waiting for the host to park/drain.
     #[must_use]
     pub fn has_imm(&self) -> bool {
