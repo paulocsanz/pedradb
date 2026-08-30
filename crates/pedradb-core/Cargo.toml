@@ -3,7 +3,7 @@ name = "pedradb-core"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "PedraDB core LSM-tree storage engine (clean-room Rust reimplementation of RocksDB concepts)"
+description = "PedraDB core LSM-tree storage engine (Rust reimplementation of RocksDB concepts)"
 
 [features]
 default = []

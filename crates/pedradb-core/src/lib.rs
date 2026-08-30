@@ -1,4 +1,4 @@
-//! PedraDB core — clean-room LSM-tree storage engine in Rust.
+//! PedraDB core — LSM-tree storage engine in Rust.
 //!
 //! This crate implements RocksDB-style storage concepts (WAL, MemTable,
 //! SSTable, flush, compaction) from scratch in idiomatic Rust. The real
