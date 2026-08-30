@@ -3,6 +3,9 @@
 //! Outcome fingerprint (put/get/kill/restart) must match. Leader identity
 //! is not in the hash (wall-tick elect). The durability oracle is the
 //! seed-derived value surviving SIGKILL of one node + reopen.
+//!
+//! Production `cluster_real` / `montanha-tcp` open is `RpcMode::Queued`
+//! (RFC-0067). Direct RPC is lab-only.
 
 #![cfg(unix)]
 
@@ -10,7 +13,8 @@ use pedradb_store::{
     l28_durability_ok, l28_leader_kill_ok, l28_leader_kill_ok_as_is, l28_tcp_apply_ok,
     l28_tcp_apply_ok_as_is, l28_tcp_hw_ok, l28_tcp_hw_ok_as_is, l28_tcp_leave_ok,
     l28_tcp_leave_ok_as_is, l28_tcp_left_ok, l28_tcp_left_ok_as_is, l28_tcp_napply_ok,
-    l28_tcp_napply_ok_as_is, l28_tcp_part_ok, l28_tcp_part_ok_as_is, l28_tcp_plant_ok,
+    l28_tcp_napply_ok_as_is, l28_tcp_napply_retry_admitted, l28_tcp_napply_retry_admitted_as_is,
+    l28_tcp_part_ok, l28_tcp_part_ok_as_is, l28_tcp_plant_ok,
     l28_tcp_abort_ok, l28_tcp_abort_ok_as_is, l28_tcp_clear_ok, l28_tcp_clear_ok_as_is,
     l28_tcp_lid_ok, l28_tcp_lid_ok_as_is, l28_tcp_peer_ok, l28_tcp_peer_ok_as_is,
     l28_tcp_dsc_ok, l28_tcp_dsc_ok_as_is, l28_tcp_pld_ok, l28_tcp_pld_ok_as_is,
@@ -23,6 +27,12 @@ use pedradb_store::{
     world_seed_l28_ok_as_is,
 };
 use std::process::Command;
+use std::sync::Mutex;
+
+/// One 3-process TCP cluster at a time. Default `cargo test` threads share
+/// loopback ports and SIGKILL leftovers; parallel `cluster_real` is
+/// `restart=0` / `napply=0` (campaign flake, not a kernel miss).
+static CLUSTER_REAL: Mutex<()> = Mutex::new(());
 
 fn parse_l28(line: &str) -> (bool, bool, bool) {
     (
@@ -32,7 +42,7 @@ fn parse_l28(line: &str) -> (bool, bool, bool) {
     )
 }
 
-fn run(seed: u64, extra: &[&str]) -> String {
+fn run_once(seed: u64, extra: &[&str]) -> Result<String, String> {
     let real = env!("CARGO_BIN_EXE_cluster_real");
     let tcp = env!("CARGO_BIN_EXE_montanha-tcp");
     let mut cmd = Command::new(real);
@@ -44,16 +54,42 @@ fn run(seed: u64, extra: &[&str]) -> String {
     let out = cmd.output().expect("spawn cluster_real");
     let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
     let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
-    assert!(
-        out.status.success(),
-        "cluster_real failed status={:?} stdout={stdout} stderr={stderr}",
-        out.status
-    );
-    stdout
+    let line = stdout
         .lines()
         .find(|l| l.starts_with("cluster_real "))
         .unwrap_or(stdout.trim())
-        .to_string()
+        .to_string();
+    if out.status.success() {
+        Ok(line)
+    } else {
+        Err(format!(
+            "status={:?} stdout={line} stderr={stderr}",
+            out.status
+        ))
+    }
+}
+
+fn run_counted(seed: u64, extra: &[&str]) -> (String, u64) {
+    let _gate = CLUSTER_REAL
+        .lock()
+        .unwrap_or_else(|p| p.into_inner());
+    // Wall-tick elect + n3 leave catch-up is a campaign. One SIGKILL of n3
+    // before leave lands is `napply=0`; retry the same seed, not a kernel skip.
+    let mut last = String::new();
+    for attempt in 1..=3 {
+        match run_once(seed, extra) {
+            Ok(line) => return (line, attempt),
+            Err(e) => {
+                last = e;
+                eprintln!("cluster_real attempt {attempt}/3 failed: {last}");
+            }
+        }
+    }
+    panic!("cluster_real failed after 3 attempts: {last}");
+}
+
+fn run(seed: u64, extra: &[&str]) -> String {
+    run_counted(seed, extra).0
 }
 
 #[test]
@@ -252,7 +288,7 @@ fn l28_real_tcp_recover_apply() {
 #[test]
 fn l28_real_tcp_removed_recover_apply() {
     let seed = 0x0131_1E28_u64;
-    let a = run(seed, &["--remove-member"]);
+    let (a, attempts) = run_counted(seed, &["--remove-member"]);
     let b = run(seed, &["--remove-member"]);
     assert_eq!(a, b, "removed-replica recover-apply fingerprint must replay");
     assert!(a.contains("remove=1"), "TCP remove plant must fire: {a}");
@@ -265,13 +301,22 @@ fn l28_real_tcp_removed_recover_apply() {
         l28_durability_ok(get_ok, after_ok, restart_ok),
         "L28 kernel miss under --remove-member: {a}"
     );
+    let napply_ok = a.contains("napply=1");
     assert!(
-        l28_tcp_napply_ok(a.contains("napply=1")),
+        l28_tcp_napply_ok(napply_ok),
         "TCP removed-replica recover-apply kernel miss: {a}"
     );
     assert!(
         l28_tcp_napply_ok_as_is(false),
         "AS-IS dente: skip TCP removed-replica recover apply"
+    );
+    assert!(
+        !l28_tcp_napply_retry_admitted(attempts, napply_ok),
+        "retry-success is not forall TCP: attempts={attempts} napply_ok={napply_ok} {a}"
+    );
+    assert!(
+        l28_tcp_napply_retry_admitted_as_is(1, true),
+        "AS-IS dente: one successful napply would skip retry as forall"
     );
     eprintln!("{a}");
 }

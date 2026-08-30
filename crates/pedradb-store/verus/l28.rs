@@ -164,6 +164,29 @@ pub fn l28_tcp_napply_ok_as_is(_ok: bool) -> (d: bool)
     true
 }
 
+/// RFC-0155 P0: harness retries are not ∀ TCP traces. Always false.
+pub open spec fn l28_tcp_napply_retry_admitted_spec(_attempts: u64, _napply_ok: bool) -> bool {
+    false
+}
+
+pub open spec fn l28_tcp_napply_retry_admitted_as_is_spec(attempts: u64, napply_ok: bool) -> bool {
+    attempts >= 1 && napply_ok
+}
+
+pub fn l28_tcp_napply_retry_admitted(_attempts: u64, _napply_ok: bool) -> (d: bool)
+    ensures
+        d == l28_tcp_napply_retry_admitted_spec(_attempts, _napply_ok),
+{
+    false
+}
+
+pub fn l28_tcp_napply_retry_admitted_as_is(attempts: u64, napply_ok: bool) -> (d: bool)
+    ensures
+        d == l28_tcp_napply_retry_admitted_as_is_spec(attempts, napply_ok),
+{
+    attempts >= 1 && napply_ok
+}
+
 /// RFC-0132 P1.2: truncate persist on a replica already dropped from `ids`.
 pub open spec fn l28_tcp_trunc_ok_spec(ok: bool) -> bool {
     ok

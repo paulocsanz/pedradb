@@ -2154,6 +2154,78 @@
         "file": "crates/rocksdb-compat/src/lib.rs",
         "test": "iter_window_keep_on_live_hidden_is_not_ok"
       }
+    },
+    {
+      "id": "l28_napply_retry",
+      "finding": "RFC-0155",
+      "twin_kind": "close",
+      "kernel": "crates/pedradb-store/src/l28.rs",
+      "twin": "crates/pedradb-store/verus/l28.rs",
+      "verus": "scripts/verus_l28.sh",
+      "callers": [
+        "crates/pedradb-store/src/bin/cluster_real.rs"
+      ],
+      "entry": "l28_tcp_napply_retry_admitted",
+      "as_is": "l28_tcp_napply_retry_admitted_as_is",
+      "three_teeth": true,
+      "live_callers": [
+        {
+          "file": "crates/pedradb-store/src/bin/cluster_real.rs",
+          "handler": "main"
+        }
+      ],
+      "dst_plant": {
+        "file": "crates/pedradb-store/tests/l28_real_tcp.rs",
+        "test": "l28_real_tcp_removed_recover_apply"
+      }
+    },
+    {
+      "id": "zero_glue",
+      "finding": "RFC-0155",
+      "twin_kind": "close",
+      "kernel": "crates/pedradb-core/src/sst/scan_kernel.rs",
+      "twin": "crates/pedradb-core/verus/sst_crc_fate.rs",
+      "verus": "scripts/verus_sst_crc_fate.sh",
+      "callers": [
+        "crates/pedradb-core/src/db.rs"
+      ],
+      "entry": "zero_glue_admitted",
+      "as_is": "zero_glue_admitted_as_is",
+      "three_teeth": true,
+      "live_callers": [
+        {
+          "file": "crates/pedradb-core/src/db.rs",
+          "handler": "claim_zero_glue"
+        }
+      ],
+      "dst_plant": {
+        "file": "crates/pedradb-core/src/db.rs",
+        "test": "zero_glue_admitted_on_live_db_is_not_ok"
+      }
+    },
+    {
+      "id": "lock_interleavings",
+      "finding": "RFC-0155",
+      "twin_kind": "close",
+      "kernel": "crates/pedradb-core/src/group_commit_kernel.rs",
+      "twin": "crates/pedradb-core/verus/group_commit.rs",
+      "verus": "scripts/verus_group_commit.sh",
+      "callers": [
+        "crates/pedradb-core/src/concurrent.rs"
+      ],
+      "entry": "lock_interleavings_admitted",
+      "as_is": "lock_interleavings_admitted_as_is",
+      "three_teeth": true,
+      "live_callers": [
+        {
+          "file": "crates/pedradb-core/src/concurrent.rs",
+          "handler": "claim_lock_interleavings_proven"
+        }
+      ],
+      "dst_plant": {
+        "file": "crates/pedradb-core/src/concurrent.rs",
+        "test": "claim_lock_interleavings_refused_after_put"
+      }
     }
   ],
   "clones": [

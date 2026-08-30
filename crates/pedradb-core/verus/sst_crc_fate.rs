@@ -58,4 +58,27 @@ proof fn lemma_mismatch_on_modern_file_is_reject()
 {
 }
 
+/// RFC-0155 P2.1 / R-glue: zero remaining glue is not a theorem.
+pub open spec fn zero_glue_admitted_spec() -> bool {
+    false
+}
+
+pub open spec fn zero_glue_admitted_as_is_spec() -> bool {
+    true
+}
+
+pub fn zero_glue_admitted() -> (ok: bool)
+    ensures
+        ok == zero_glue_admitted_spec(),
+{
+    false
+}
+
+pub fn zero_glue_admitted_as_is() -> (ok: bool)
+    ensures
+        ok == zero_glue_admitted_as_is_spec(),
+{
+    true
+}
+
 } // verus!

@@ -234,6 +234,9 @@ pub fn profile_report() -> &'static [ProfileComponent] {
         on!("pin_gc", "pin_gc", "SnapshotPin is oldest_snapshot for point_version_fate"),
         on!("wait_for_deadlock", "wait_for_deadlock", "TransactionDB 2PL wait-for cycle is Deadlock"),
         on!("iter_window", "iter_window", "compat iterator window vs visible_at (RFC-0151 P1)"),
+        on!("l28_napply_retry", "l28_napply_retry", "L28 TCP napply retry is not forall"),
+        on!("zero_glue", "zero_glue", "zero remaining glue is not a theorem"),
+        on!("lock_interleavings", "lock_interleavings", "lock/OS-scheduler interleavings are not forall"),
         // --- contracts without a theorem (published, DST-exercised) ---
         contract!("wal_barrier", "WAL write + fdatasync before Ok (RFC-0001 O1 / RFC-0036) — enforced in code, exercised by the crash/EIO battery"),
         contract!("disk_env", "StdEnv pinned by the verified constructors (Env seam; FailingEnv drives the DST battery)"),

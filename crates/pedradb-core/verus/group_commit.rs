@@ -345,6 +345,29 @@ proof fn lemma_d2_is_not_forall()
 {
 }
 
+/// RFC-0155 P2.1 / R-group-glue: lock/OS-scheduler interleavings are not ∀π.
+pub open spec fn lock_interleavings_admitted_spec() -> bool {
+    false
+}
+
+pub open spec fn lock_interleavings_admitted_as_is_spec() -> bool {
+    true
+}
+
+pub fn lock_interleavings_admitted() -> (ok: bool)
+    ensures
+        ok == lock_interleavings_admitted_spec(),
+{
+    false
+}
+
+pub fn lock_interleavings_admitted_as_is() -> (ok: bool)
+    ensures
+        ok == lock_interleavings_admitted_as_is_spec(),
+{
+    true
+}
+
 /// RFC-0070 P2.2: campaign default PCT depth stays 2. d>2 remains RFC-0051.
 pub open spec fn pct_campaign_default_depth_spec() -> u64 {
     2

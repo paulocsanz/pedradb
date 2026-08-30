@@ -52,7 +52,8 @@ use pedradb_store::{
     client_get, client_leave_joint, client_put, client_remove_member_joint, client_status,
     client_tick, elect_claim_banner, high_water_at_least, l28_durability_ok, l28_leader_kill_ok,
     l28_tcp_abort_ok, l28_tcp_apply_ok, l28_tcp_clear_ok, l28_tcp_fence_ok, l28_tcp_hist_ok,
-    l28_tcp_hw_ok, l28_tcp_leave_ok, l28_tcp_left_ok, l28_tcp_napply_ok, l28_tcp_nowms_ok,
+    l28_tcp_hw_ok, l28_tcp_leave_ok, l28_tcp_left_ok, l28_tcp_napply_ok,
+    l28_tcp_napply_retry_admitted, l28_tcp_nowms_ok,
     l28_tcp_dsc_ok, l28_tcp_hnt_ok, l28_tcp_lid_ok, l28_tcp_odrop_ok, l28_tcp_part_ok,
     l28_tcp_peer_ok, l28_tcp_pld_ok, l28_tcp_plant_ok, l28_tcp_pre_ok, l28_tcp_rdr_ok,
     l28_tcp_std_ok, l28_tcp_trunc_ok, liveness_admitted, tcp_node_disk_high_water,
@@ -554,6 +555,10 @@ fn main() {
         let napply_ok = line.contains("napply=1");
         if !l28_tcp_napply_ok(napply_ok) {
             eprintln!("L28 TCP removed-replica recover apply miss: {line}");
+            std::process::exit(1);
+        }
+        if l28_tcp_napply_retry_admitted(1, napply_ok) {
+            eprintln!("L28 TCP napply retry is not forall traces: {line}");
             std::process::exit(1);
         }
         let trunc_ok = line.contains("trunc=1");

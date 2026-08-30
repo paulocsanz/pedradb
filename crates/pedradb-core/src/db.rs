@@ -1670,6 +1670,17 @@ impl<E: Env> Db<E> {
         crate::group_commit_kernel::media_durable_admitted(true)
     }
 
+    /// RFC-0155: admit a “zero remaining glue” claim.
+    ///
+    /// Always false. SST CRC fate is cataloged; handler glue stays TCB
+    /// (`R-glue`). AS-IS [`crate::sst::zero_glue_admitted_as_is`] would
+    /// admit after a successful put.
+    #[must_use]
+    pub fn claim_zero_glue(&self) -> bool {
+        let _ = self.last_sequence();
+        crate::sst::zero_glue_admitted()
+    }
+
     /// Latest sequence default reads may observe (durable or no-sync apply).
     #[must_use]
     pub fn visible_sequence(&self) -> SequenceNumber {
@@ -8789,6 +8800,34 @@ mod tests {
             "AS-IS dente: fsync Ok would claim the drive"
         );
         assert!(!crate::group_commit_kernel::media_durable_admitted(true));
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Catalog three-teeth plant. Direct `zero_glue_is_a_trajectory` is
+    /// **not** this tooth.
+    #[test]
+    fn zero_glue_admitted_on_live_db_is_not_ok() {
+        assert!(!crate::sst::zero_glue_admitted());
+        assert!(
+            crate::sst::zero_glue_admitted_as_is(),
+            "AS-IS dente: extracting sst_crc_fate looks like glue is gone"
+        );
+        let dir = temp_dir();
+        let mut db = Db::open_with(
+            &dir,
+            OpenOptions {
+                exclusive: true,
+                ..OpenOptions::default()
+            },
+        )
+        .unwrap();
+        db.put(b"glue/k", b"glue/v").unwrap();
+        assert_eq!(db.get(b"glue/k").as_deref(), Some(&b"glue/v"[..]));
+        assert!(
+            !db.claim_zero_glue(),
+            "live Db after put must refuse a zero-glue claim"
+        );
         db.close().unwrap();
         let _ = fs::remove_dir_all(&dir);
     }

@@ -135,6 +135,18 @@ pub fn l28_tcp_napply_ok_as_is(_ok: bool) -> bool {
     true
 }
 
+/// RFC-0155 P0: harness retries are not ∀ TCP traces. Always false.
+#[must_use]
+pub fn l28_tcp_napply_retry_admitted(_attempts: u64, _napply_ok: bool) -> bool {
+    false
+}
+
+/// AS-IS: a successful napply after ≥1 attempt is rounded to ∀ TCP.
+#[must_use]
+pub fn l28_tcp_napply_retry_admitted_as_is(attempts: u64, napply_ok: bool) -> bool {
+    attempts >= 1 && napply_ok
+}
+
 /// RFC-0132 P1.2: after REAL TCP plant + process death, recover truncate
 /// persists so disk has no `index > commit` on a replica dropped from `ids`.
 #[must_use]
@@ -441,6 +453,40 @@ mod tests {
             "AS-IS dente: skip TCP removed-replica recover apply"
         );
         assert!(l28_tcp_napply_ok_as_is(true));
+    }
+
+    /// RFC-0155 P0.3: retry-success is not ∀ TCP. AS-IS would admit.
+    #[test]
+    fn l28_tcp_napply_retry_admitted_is_not_forall() {
+        assert!(!l28_tcp_napply_retry_admitted(1, true));
+        assert!(!l28_tcp_napply_retry_admitted(3, true));
+        assert!(!l28_tcp_napply_retry_admitted(0, false));
+        assert!(
+            l28_tcp_napply_retry_admitted_as_is(1, true),
+            "AS-IS dente: one successful napply would skip retry as forall"
+        );
+        assert!(!l28_tcp_napply_retry_admitted_as_is(0, true));
+        assert!(!l28_tcp_napply_retry_admitted_as_is(1, false));
+        let residuals = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../scripts/formal/residuals.json");
+        let text = std::fs::read_to_string(&residuals).expect("residuals.json");
+        for id in [
+            "R-cpu",
+            "R-rustc",
+            "R-verus",
+            "R-crc",
+            "R-deps",
+            "R-extract",
+        ] {
+            assert!(
+                text.contains(&format!("\"{id}\"")),
+                "never_floor must still list {id}"
+            );
+        }
+        assert!(
+            text.contains("\"db_rs_extracted\": false"),
+            "glue.db_rs_extracted must stay false"
+        );
     }
 
     #[test]

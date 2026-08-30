@@ -18,7 +18,7 @@
   "glue": {
     "kernel_files": 41,
     "kernel_loc": 10197,
-    "handler_loc": 78983,
+    "handler_loc": 79028,
     "db_rs_extracted": false
   },
   "residuals": [
@@ -48,7 +48,7 @@
       "title": "CRC32C collision axiom",
       "class": "never",
       "owner": "0060",
-      "close": "same axiom as VeriBetrKV; not a Pedra theorem. 0076 P2.2 crc_collision_admitted always false (crc_collision_axiom_remains); crc_match_ok is u32 equality, not a collision proof. 0081 P2.2 vlog_crc_collision_axiom_remains (same gate on VALUES.vlog / *.blob). 0082 P2.2 manifest_crc_collision_axiom_remains (LSM + history MANIFEST). 0083 P2.1 wal_open_crc_collision_axiom_remains. 0084 P2.1 checkpoint_crc_collision_axiom_remains"
+      "close": "same axiom as VeriBetrKV; not a Pedra theorem. 0076 P2.2 crc_collision_admitted always false (crc_collision_axiom_remains); crc_match_ok is u32 equality, not a collision proof. 0081 P2.2 vlog_crc_collision_axiom_remains (same gate on VALUES.vlog / *.blob). 0082 P2.2 manifest_crc_collision_axiom_remains (LSM + history MANIFEST). 0083 P2.1 wal_open_crc_collision_axiom_remains. 0084 P2.1 checkpoint_crc_collision_axiom_remains. RFC-0155 names existing crc_match fail-closed inhabitant; never_floor row stays"
     },
     {
       "id": "R-deps",
@@ -69,14 +69,14 @@
       "title": "non-kernel glue (handler LOC vs kernel LOC; freeze publishes counts)",
       "class": "continuous",
       "owner": "0077",
-      "close": "TCB freeze + caller lint + DST oracles; zero-glue is trajectory not a theorem; do not extract db.rs. 0077 P0 extracted SST CRC fate from table.rs decode into scan_kernel (sst_crc_fate; mismatch on modern file is Reject; AS-IS always StripTrailer; crc_mismatch_on_live_sst_is_not_ok). P1.1 sst_block_crc_ok on v5 data blocks (crc_mismatch_on_live_sst_block_is_not_ok: repaired file trailer still Reject). P1.2 Db::open flipped SST is CRC mismatch (crc_mismatch_on_live_sst_db_open_is_not_ok). P2.1 Verus twin sst_crc_fate (catalog sst_crc; scan_guard stays F167). P2.2 zero_glue_admitted always false (zero_glue_is_a_trajectory; db_rs_extracted false). handler glue stays TCB. RFC-0151: every data_fate pair freezes AS-IS + Verus twin + named DST plant (pedra_formal --lint three teeth); db_rs_extracted stays false"
+      "close": "TCB freeze + caller lint + DST oracles; zero-glue is trajectory not a theorem; do not extract db.rs. 0077 P0 extracted SST CRC fate from table.rs decode into scan_kernel (sst_crc_fate; mismatch on modern file is Reject; AS-IS always StripTrailer; crc_mismatch_on_live_sst_is_not_ok). P1.1 sst_block_crc_ok on v5 data blocks (crc_mismatch_on_live_sst_block_is_not_ok: repaired file trailer still Reject). P1.2 Db::open flipped SST is CRC mismatch (crc_mismatch_on_live_sst_db_open_is_not_ok). P2.1 Verus twin sst_crc_fate (catalog sst_crc; scan_guard stays F167). P2.2 zero_glue_admitted always false (zero_glue_is_a_trajectory; db_rs_extracted false). handler glue stays TCB. RFC-0151: every data_fate pair freezes AS-IS + Verus twin + named DST plant (pedra_formal --lint three teeth); db_rs_extracted stays false. RFC-0155 names catalog pair zero_glue (Db::claim_zero_glue; zero_glue_admitted always false; plant zero_glue_admitted_on_live_db_is_not_ok). Residual row stays"
     },
     {
       "id": "R-group-glue",
       "title": "lock / WAL I/O / OS scheduler around group_commit",
       "class": "continuous",
       "owner": "0071",
-      "close": "kernel proves group decision + publish-after-WAL 0071 P0 (may_publish_group; failed_wal_sync_does_not_publish_group). P1.1 multi_writer_failed_sync_does_not_publish_group (N-thread finish_group_off_lock). P1.2 after_wal_sync yield + pct_after_failed_fd_does_not_publish. P2.1 Verus twin may_publish_group (catalog group_publish). P2.2 lock_interleavings_admitted always false (claim_lock_interleavings_refused_after_put; AS-IS would admit). Lock/OS-scheduler interleavings of ConcurrentDb stay TCB (0056 P2.1) \u2014 campaign not forall \u03c0"
+      "close": "kernel proves group decision + publish-after-WAL 0071 P0 (may_publish_group; failed_wal_sync_does_not_publish_group). P1.1 multi_writer_failed_sync_does_not_publish_group (N-thread finish_group_off_lock). P1.2 after_wal_sync yield + pct_after_failed_fd_does_not_publish. P2.1 Verus twin may_publish_group (catalog group_publish). P2.2 lock_interleavings_admitted always false (claim_lock_interleavings_refused_after_put; AS-IS would admit). Lock/OS-scheduler interleavings of ConcurrentDb stay TCB (0056 P2.1) \u2014 campaign not forall \u03c0. RFC-0155 names catalog pair lock_interleavings (claim_lock_interleavings_proven; plant claim_lock_interleavings_refused_after_put). Residual row stays"
     },
     {
       "id": "R-pct",
@@ -90,7 +90,7 @@
       "title": "OS lying on fsync / real torn writes",
       "class": "continuous",
       "owner": "0078",
-      "close": "TCG/det_io smoke; recovery kernels cover the model not the drive. 0078 P0: fsync_promotes_pending (Lying does not promote; lying_fsync_does_not_promote_pending) + media_durable_admitted always false (claim_media_durable_refused_after_fsync_ok on live StdEnv put). P1.1 World Lying plant names kernel (world_lying_fsync_plant_names_kernel; crash drops put). P1.2 stacked_fsync_liars_admitted always false (world_run_refuses_stacked_fsync_liars; det_io_status.sh xor RecordingEnv::Lying \u2014 RFC-0052). P2.1 Verus twins fsync_promotes_pending + media_durable_admitted (catalog fsync_promote, media_durable). P2.2 fsync_lie_closes_tcg_guest always false (world_fsync_lie_does_not_invent_tcg_guest; R-tcg-guest stays 0079). Do not delete SyncPolicy::Lying. Not an ECC/drive proof"
+      "close": "TCG/det_io smoke; recovery kernels cover the model not the drive. 0078 P0: fsync_promotes_pending (Lying does not promote; lying_fsync_does_not_promote_pending) + media_durable_admitted always false (claim_media_durable_refused_after_fsync_ok on live StdEnv put). P1.1 World Lying plant names kernel (world_lying_fsync_plant_names_kernel; crash drops put). P1.2 stacked_fsync_liars_admitted always false (world_run_refuses_stacked_fsync_liars; det_io_status.sh xor RecordingEnv::Lying \u2014 RFC-0052). P2.1 Verus twins fsync_promotes_pending + media_durable_admitted (catalog fsync_promote, media_durable). P2.2 fsync_lie_closes_tcg_guest always false (world_fsync_lie_does_not_invent_tcg_guest; R-tcg-guest stays 0079). Do not delete SyncPolicy::Lying. Not an ECC/drive proof. RFC-0155 names existing media_durable fail-closed inhabitant. Residual row stays"
     },
     {
       "id": "R-tcg-guest",
@@ -106,7 +106,7 @@
       "title": "io_uring ring (no probable ring model)",
       "class": "continuous",
       "owner": "0080",
-      "close": "out of verified profile by contract; PosixFallback; twin blocked. 0080 P0: ring_model_admitted always false; verified_admits_ring(true) false (AS-IS admits want_ring); ConcurrentDb::open_verified + claim_uring_ring_refused_on_verified_open. P1.1 CLI open_verified_db names verified_admits_ring next to posix() (verified_flag_pins_the_profile_and_survives_reopen). P1.2 full_uses_posix_fallback (production_env; full_mode_posix_fallback_when_ring_unavailable). P2.1 ring_twin_admitted always false (no verus/ring_model.rs). P2.2 wal_on_sqe_admitted always false (IoUringFile write/sync_data; production_wal_is_not_on_sqe). Production G1 stays POSIX (0062/0073); do not restore WAL onto the ring"
+      "close": "out of verified profile by contract; PosixFallback; twin blocked. 0080 P0: ring_model_admitted always false; verified_admits_ring(true) false (AS-IS admits want_ring); ConcurrentDb::open_verified + claim_uring_ring_refused_on_verified_open. P1.1 CLI open_verified_db names verified_admits_ring next to posix() (verified_flag_pins_the_profile_and_survives_reopen). P1.2 full_uses_posix_fallback (production_env; full_mode_posix_fallback_when_ring_unavailable). P2.1 ring_twin_admitted always false (no verus/ring_model.rs). P2.2 wal_on_sqe_admitted always false (IoUringFile write/sync_data; production_wal_is_not_on_sqe). Production G1 stays POSIX (0062/0073); do not restore WAL onto the ring. RFC-0155 names existing cqe_res / ring_model_admitted refuse. Residual row stays"
     },
     {
       "id": "R-hardware",
@@ -120,14 +120,14 @@
       "title": "liveness axioms ES-1/ES-2/ES-3",
       "class": "continuous",
       "owner": "0069",
-      "close": "never a theorem; model refutes eventuality without the axioms (0056 P2.2). Production claim_eventual_election fail-closed 0069 P0 (liveness_admitted requires ES-1\u2227ES-2\u2227ES-3; elect_all stays bounded). P1.1 tcp_node_model calls kernel (tcp_node_model_liveness_claim_needs_es_axioms; BFS tests claim_eventual_election). P1.2 World refuses unless axioms named (world_run_refuses_eventual_election_without_es_axioms). P2.1 Verus twin liveness_admitted (catalog liveness_claim). P2.2 TCP/real banner elect_claim_banner (cluster_real + montanha-tcp elect-wait; bounded-elect not-eventual; AS-IS prints live without naming ES). Campaign not unconditional liveness"
+      "close": "never a theorem; model refutes eventuality without the axioms (0056 P2.2). Production claim_eventual_election fail-closed 0069 P0 (liveness_admitted requires ES-1\u2227ES-2\u2227ES-3; elect_all stays bounded). P1.1 tcp_node_model calls kernel (tcp_node_model_liveness_claim_needs_es_axioms; BFS tests claim_eventual_election). P1.2 World refuses unless axioms named (world_run_refuses_eventual_election_without_es_axioms). P2.1 Verus twin liveness_admitted (catalog liveness_claim). P2.2 TCP/real banner elect_claim_banner (cluster_real + montanha-tcp elect-wait; bounded-elect not-eventual; AS-IS prints live without naming ES). Campaign not unconditional liveness. RFC-0155 names existing liveness_claim fail-closed inhabitant. Residual row stays"
     },
     {
       "id": "R-swarm-real",
       "title": "REAL multi-process TCP cluster (seed replay + durability)",
       "class": "continuous",
       "owner": "0072",
-      "close": "cluster_real + l28_real_tcp_seed_replay; l28_durability_ok kernel 0072 P0 (get\u2227after-kill\u2227restart; AS-IS get-only; cluster_real exits via kernel). P1.1 l28_real_tcp asserts via kernel. P1.2 world_seed_l28_ok (World silent_wrong=0 is not L28 without cluster_real; seed 0x641e28). P2.1 catalog l28_durability + verus/l28.rs. P2.2 l28_leader_kill_ok (cluster_real --leader-kill; AS-IS ignores leader-kill). 0118 P1.2 l28_real_tcp_leave_joint_replay (seed 0x01181e28 --leave-joint; leave=1; L28 still holds; AS-IS skips leave). 0121 P1.2 l28_real_tcp_remove_member_left_on_disk (seed 0x01211e28 --remove-member; remove=1 leave=1 left=1; l28_tcp_left_ok). 0121 P2.1 plant is a campaign, not \u2200 traces \u2014 campaign not a theorem"
+      "close": "cluster_real + l28_real_tcp_seed_replay; l28_durability_ok kernel 0072 P0 (get\u2227after-kill\u2227restart; AS-IS get-only; cluster_real exits via kernel). P1.1 l28_real_tcp asserts via kernel. P1.2 world_seed_l28_ok (World silent_wrong=0 is not L28 without cluster_real; seed 0x641e28). P2.1 catalog l28_durability + verus/l28.rs. P2.2 l28_leader_kill_ok (cluster_real --leader-kill; AS-IS ignores leader-kill). 0118 P1.2 l28_real_tcp_leave_joint_replay (seed 0x01181e28 --leave-joint; leave=1; L28 still holds; AS-IS skips leave). 0121 P1.2 l28_real_tcp_remove_member_left_on_disk (seed 0x01211e28 --remove-member; remove=1 leave=1 left=1; l28_tcp_left_ok). 0121 P2.1 plant is a campaign, not \u2200 traces \u2014 campaign not a theorem. RFC-0155 P0: l28_tcp_napply_retry_admitted always false (retry-success is not forall TCP; l28_real_tcp_removed_recover_apply; cluster_real live-calls). Residual row stays"
     },
     {
       "id": "R-unsafe-posix",
@@ -137,7 +137,7 @@
       "crate": "pedradb-posix",
       "script": "scripts/miri-unsafe-islands.sh",
       "safety": "crates/pedradb-posix/SAFETY.md",
-      "close": "SAFETY.md is not a forall proof; Miri ramp is scripts/miri-unsafe-islands.sh. fdatasync_rc_ok 0073 P0 (nonzero rc is not Ok; AS-IS ignores rc; fdatasync_nonzero_rc_is_not_ok). P1.1 fsync_file/sync_dir_fd share the gate (fsync_and_dirfd_share_rc_gate; Darwin fsync_file stays F_FULLFSYNC). P1.2 Miri on safe fn fdatasync_rc_ok_is_safe_predicate. P2.1 Verus twin fdatasync_rc_ok (catalog fdatasync_rc). P2.2 fdatasync_eintr_retry_admitted always false (H1 uncertain; fdatasync_eintr_is_not_retried_as_ok). FFI island stays TCB"
+      "close": "SAFETY.md is not a forall proof; Miri ramp is scripts/miri-unsafe-islands.sh. fdatasync_rc_ok 0073 P0 (nonzero rc is not Ok; AS-IS ignores rc; fdatasync_nonzero_rc_is_not_ok). P1.1 fsync_file/sync_dir_fd share the gate (fsync_and_dirfd_share_rc_gate; Darwin fsync_file stays F_FULLFSYNC). P1.2 Miri on safe fn fdatasync_rc_ok_is_safe_predicate. P2.1 Verus twin fdatasync_rc_ok (catalog fdatasync_rc). P2.2 fdatasync_eintr_retry_admitted always false (H1 uncertain; fdatasync_eintr_is_not_retried_as_ok). FFI island stays TCB. RFC-0155 names existing fdatasync_rc fail-closed inhabitant. Residual row stays"
     },
     {
       "id": "R-unsafe-uring",
@@ -157,7 +157,7 @@
       "crate": "pedradb-capi",
       "script": "scripts/capi-asan.sh",
       "safety": "crates/pedradb-capi/SAFETY.md",
-      "close": "SAFETY.md is not a forall proof; ASan product gate is scripts/capi-asan.sh; Miri sibling scripts/miri-unsafe-islands.sh. c_len_admitted 0075 P0 (oversize *_len is LIMIT; AS-IS copies any len; c_len_oversize_on_live_tx_is_limit). P1.1 c_path_walk_bytes named cap (c_path_walk_uses_named_cap; AS-IS usize::MAX strlen). P1.2 capi-asan.sh greps PASS LIMIT key/value/get/live-key. P2.1 Verus twin c_len_admitted (catalog c_len). P2.2 c_free_table_admitted always false (no verus/c_free.rs; c_free_table_is_tcb). Marshalling unsafe stays TCB"
+      "close": "SAFETY.md is not a forall proof; ASan product gate is scripts/capi-asan.sh; Miri sibling scripts/miri-unsafe-islands.sh. c_len_admitted 0075 P0 (oversize *_len is LIMIT; AS-IS copies any len; c_len_oversize_on_live_tx_is_limit). P1.1 c_path_walk_bytes named cap (c_path_walk_uses_named_cap; AS-IS usize::MAX strlen). P1.2 capi-asan.sh greps PASS LIMIT key/value/get/live-key. P2.1 Verus twin c_len_admitted (catalog c_len). P2.2 c_free_table_admitted always false (no verus/c_free.rs; c_free_table_is_tcb). Marshalling unsafe stays TCB. RFC-0155 names existing c_len fail-closed inhabitant. Residual row stays"
     },
     {
       "id": "R-evacuate",
