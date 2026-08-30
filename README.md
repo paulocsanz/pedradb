@@ -5,12 +5,14 @@
 [![license](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
 ![MSRV](https://img.shields.io/badge/rust-1.88%2B-orange.svg)
 
-Swap your `rocksdb` dependency for `rocksdb-compat` and your rust-rocksdb 0.22
-code compiles unchanged — no C++, no cmake, no FFI. Underneath is an engine
-written for people who ship databases: WAL + memtable + leveled SSTs,
-physical column families over one WAL, MVCC snapshots, transactions,
-backup / PITR, io_uring I/O on Linux, and a deterministic simulation test
-framework.
+`rocksdb-compat` reimplements the rust-rocksdb 0.22 API surface in pure
+Rust: the crate itself builds with no C++ toolchain, no cmake, no FFI. Code
+that stays on the covered surface — the common one — swaps by renaming one
+dependency; code that reaches into `rocksdb::ffi` or uncovered corners fails
+to compile rather than misbehave. Underneath is an engine written for people
+who ship databases: WAL + memtable + leveled SSTs, physical column families
+over one WAL, MVCC snapshots, transactions, backup / PITR, io_uring I/O on
+Linux, and a deterministic simulation test framework.
 
 ## Quickstart: the drop-in swap
 
@@ -31,7 +33,9 @@ db.delete(b"k1")?;
 What compiles by renaming the dependency: `DB`, `Options`, column families,
 `WriteBatch` (+`WithIndex`), iterators, snapshots, `TransactionDB` (2PL) /
 `OptimisticTransactionDB`, `Checkpoint`, `BackupEngine`, `SstFileWriter`,
-`ingest_external_file`, compaction filters.
+`ingest_external_file`, compaction filters. Anything outside that surface —
+`rocksdb::ffi`, `librocksdb-sys` types — is a compile error, never a silent
+stub.
 
 Two deliberate differences from the original:
 
