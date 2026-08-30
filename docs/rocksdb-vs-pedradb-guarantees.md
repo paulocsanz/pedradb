@@ -67,6 +67,33 @@
 
 ---
 
+## 2.5 Classe async (sync=false): **não** somos equivalentes em crash de processo (achado 2026-08-30)
+
+Questão levantada durante o prep do repo público: "no nosso async tem
+menos garantias que o RocksDB?" **Sim, no crash de processo.**
+
+| | O que `Ok` significa | crash de processo (`kill -9`) | power loss |
+|---|---|---|---|
+| **RocksDB** default (`sync=false`, `manual_wal_flush=false` default — `include/rocksdb/options.h:1341`) | registro já passou por `write()` → page cache do SO. `db/log_writer.cc:187-191` (v9.4.0): `AddRecord` termina em `if (!manual_flush_) dest_->Flush()` — flush **por record/write-group** | **sobrevive** (bytes no page cache do SO) | perde (sem fsync) |
+| **PedraDB** async (`sync=false` → `commit_async_ops` → `write_pending_frame_if(false)` — `crates/pedradb-core/src/wal/mod.rs:213`, `db.rs:6957`) | registro **pode ainda estar em frame userspace**; `write()` só quando o frame atinge `ASYNC_WAL_BUFFER` = 64 KiB (`wal/format.rs:17`) | **pode perder** a cauda (< 64 KiB) de writes acked | perde (idem + a cauda userspace) |
+
+- O comentário em `wal/mod.rs` ("process crash can lose the tail, like
+  Rocks `sync=false`") está **incorreto**: o Rocks default não retém WAL
+  acked em userspace — ele dá `Flush()` por record. Idem a justificativa
+  no RFC-0044 ("`write()` em todo o put era mais estrito que o Rocks"):
+  não era mais estrito, era a mesma classe.
+- **Não afeta o produto**: o default é G1 (fdatasync antes do Ok) — mais
+  forte que os dois. Afeta a **coluna async** (bench-only,
+  `PEDRA_PARITY_ASYNC=1`), que perde equivalência de classe no nível
+  crash de processo (mantém no nível power loss).
+- Caminhos: (a) flush do frame no fim de cada commit (`write()` por
+  commit = exatamente o que o Rocks paga; RFC-0044 registrou que isso
+  "empatava o qps" — custo ~zero), via slice + re-medida CHV da coluna
+  async; ou (b) manter o mecanismo e anotar a claim. README público
+  anotado em 2026-08-30 enquanto (a) não decide.
+
+---
+
 ## 3. Veredicto curto
 
 - No **contrato de durabilidade local**, PedraDB = RocksDB em config default correta, e **mais forte que o default de fábrica do RocksDB** (sync ligado vs desligado; fence incondicional vs condicional; fail-closed em corrupção vs point-in-time salvage).
