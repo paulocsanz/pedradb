@@ -1,0 +1,13 @@
+== rfc0157_tcp_campaign K=8 ==
+solo reference: 57s
+0x0157_N001 1 57 seed=641e28 kill=node put=1 get=1 after=1 restart=1 remove=1 leave=1 left=1 hw=1 part=1 apply=1 napply=1 trunc=1 odrop=1 abort=1 nowms=1 hist=1 fence=1 clear=1 pre=1 peer=1 lid=1 rdr=1 dsc=1 pld=1 std=1 hnt=1 slot=1 bounded-elect not-eventual
+0x0157_N002 1 71 seed=641e28 kill=node put=1 get=1 after=1 restart=1 remove=1 leave=1 left=1 hw=1 part=1 apply=1 napply=1 trunc=1 odrop=1 abort=1 nowms=1 hist=1 fence=1 clear=1 pre=1 peer=1 lid=1 rdr=1 dsc=1 pld=1 std=1 hnt=1 slot=1 bounded-elect not-eventual
+0x0157_N003 1 71 seed=641e28 kill=node put=1 get=1 after=1 restart=1 remove=1 leave=1 left=1 hw=1 part=1 apply=1 napply=1 trunc=1 odrop=1 abort=1 nowms=1 hist=1 fence=1 clear=1 pre=1 peer=1 lid=1 rdr=1 dsc=1 pld=1 std=1 hnt=1 slot=1 bounded-elect not-eventual
+0x0157_N004 2 50 seed=641e28 kill=node put=1 get=1 after=1 restart=1 remove=1 leave=1 left=1 hw=1 part=1 apply=1 napply=1 trunc=1 odrop=1 abort=1 nowms=1 hist=1 fence=1 clear=1 pre=1 peer=1 lid=1 rdr=1 dsc=1 pld=1 std=1 hnt=1 slot=1 bounded-elect not-eventual
+0x0157_N005 1 68 seed=641e28 kill=node put=1 get=1 after=1 restart=1 remove=1 leave=1 left=1 hw=1 part=1 apply=1 napply=1 trunc=1 odrop=1 abort=1 nowms=1 hist=1 fence=1 clear=1 pre=1 peer=1 lid=1 rdr=1 dsc=1 pld=1 std=1 hnt=1 slot=1 bounded-elect not-eventual
+0x0157_N006 1 67 seed=641e28 kill=node put=1 get=1 after=1 restart=1 remove=1 leave=1 left=1 hw=1 part=1 apply=1 napply=1 trunc=1 odrop=1 abort=1 nowms=1 hist=1 fence=1 clear=1 pre=1 peer=1 lid=1 rdr=1 dsc=1 pld=1 std=1 hnt=1 slot=1 bounded-elect not-eventual
+0x0157_N007 1 65 seed=641e28 kill=node put=1 get=1 after=1 restart=1 remove=1 leave=1 left=1 hw=1 part=1 apply=1 napply=1 trunc=1 odrop=1 abort=1 nowms=1 hist=1 fence=1 clear=1 pre=1 peer=1 lid=1 rdr=1 dsc=1 pld=1 std=1 hnt=1 slot=1 bounded-elect not-eventual
+0x0157_N008 1 64 seed=641e28 kill=node put=1 get=1 after=1 restart=1 remove=1 leave=1 left=1 hw=1 part=1 apply=1 napply=1 trunc=1 odrop=1 abort=1 nowms=1 hist=1 fence=1 clear=1 pre=1 peer=1 lid=1 rdr=1 dsc=1 pld=1 std=1 hnt=1 slot=1 bounded-elect not-eventual
+
+campaign: 8/8 seeds clean, wall=124s solo=57s factor=2,18
+campaign: FAILED (parallel factor 2,18 >= 2x — not actually parallel)

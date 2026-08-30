@@ -2123,4 +2123,39 @@ mod tests {
             "d=3 campaign is not forall lock interleavings"
         );
     }
+
+    /// RFC-0157 P2.3 (nightly sweep): PCT d=4 on the same chain-3 plant.
+    /// This is depth-headroom EVIDENCE, not new coverage — the P1.3
+    /// exhaustive runner already enumerates every N=3 grant sequence, so
+    /// sampling deeper adds statistical reach only. It measures whether
+    /// the d=4 sampler still reaches the chain-3 signature, at what rate,
+    /// and at what wall cost, so nightly records carry the numbers
+    /// honestly. The campaign default stays d=2 (RFC-0070 P2.2) and
+    /// `forall_schedules_admitted(4)` stays false: d=4 is not ∀.
+    #[test]
+    fn planted_chain3_pct_d4_nightly() {
+        const N: usize = 3;
+        const SEEDS: u64 = 16384;
+
+        let start = std::time::Instant::now();
+        let violators: Vec<(u64, String)> = (0..SEEDS)
+            .filter_map(|s| plant3_violation(s, N, PiPolicy::Pct { depth: 4 }).map(|v| (s, v)))
+            .collect();
+        let hits = violators.len();
+        eprintln!(
+            "planted_chain3_pct_d4_nightly: d=4 sweep found {hits}/{SEEDS} in {:?}",
+            start.elapsed()
+        );
+        assert!(
+            hits >= 1,
+            "PCT d=4 must reach the chain-3 signature in 0..16383 (got {hits}/{SEEDS})"
+        );
+        if let Some((s, v)) = violators.first() {
+            eprintln!("planted_chain3_pct_d4_nightly: first violator seed={s} {v}");
+        }
+        assert!(
+            !pedradb_core::group_commit_kernel::forall_schedules_admitted(4),
+            "d=4 campaign is not forall lock interleavings"
+        );
+    }
 }

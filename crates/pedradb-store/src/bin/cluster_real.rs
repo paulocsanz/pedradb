@@ -374,7 +374,7 @@ fn run(seed: u64, kill_leader: bool, do_leave: bool, do_remove: bool) -> String 
         }
         // Joint is still C-old∪C-new: n3 must catch the remove AE before leave
         // applies on the leader and drops the replication slot.
-        for _ in 0..25 {
+        for _ in 0..60 {
             for a in &addrs {
                 let _ = client_tick(a, 8);
             }
@@ -392,10 +392,14 @@ fn run(seed: u64, kill_leader: bool, do_leave: bool, do_remove: bool) -> String 
         // Require **n3** to omit 3 before SIGKILL: {1,2} can commit leave
         // without n3, and killing then leaves disk membership with 3 —
         // every 0131+ removed-replica helper returns false (`napply=0`).
+        // Patience is generous (0157 P2.3): nightly waves run on loaded
+        // machines; a starved n3 turns into a slow success here, not a
+        // 50s dead attempt + full-seed retry that breaks the K-parallel
+        // wall-clock factor gate.
         let n3 = &addrs[2];
-        let mut n3_left = wait_member_gone(std::slice::from_ref(n3), 3, Duration::from_secs(20));
+        let mut n3_left = wait_member_gone(std::slice::from_ref(n3), 3, Duration::from_secs(40));
         if !n3_left {
-            for _ in 0..80 {
+            for _ in 0..240 {
                 for a in &addrs {
                     let _ = client_tick(a, 8);
                 }

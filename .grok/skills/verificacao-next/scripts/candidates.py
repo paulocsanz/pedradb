@@ -179,6 +179,110 @@ def main() -> int:
     print("  G never_floor + db_rs_extracted must stay false — not a next proof")
     print("  H L28 TCP / PCT / lock interleavings — campaign not forall")
     print("  I benches/0149/crates.io — not verification")
+    return capacity_board(cat, res)
+
+
+# RFC-0157 P2.2 — capacity per residual. The mapping below is id ->
+# evidence anchors ONLY; every anchor is verified against the repo (guard
+# test exists, catalog twin + runner exist, findings path exists) and a
+# broken reference fails the board. Nothing else is hand-written per id.
+GUARD_TESTS = {
+    "R-unsafe-posix": ["posix_unsafe_rc_sites_all_gated"],
+    "R-unsafe-capi": ["capi_len_boundary_sweep_on_live_tx"],
+    "R-unsafe-uring": ["cqe_leftover_sequence_never_false_ok"],
+    "R-group-glue": ["planted_chain3_found_by_pct_d3"],
+}
+TWIN_PAIRS = {
+    "R-unsafe-posix": ["fdatasync_rc"],
+    "R-unsafe-capi": ["c_len"],
+    "R-unsafe-uring": ["cqe_res"],
+    "R-group-glue": [
+        "group_commit", "group_fence", "group_publish", "forall_schedules",
+        "fsync_promote", "media_durable", "lock_interleavings",
+    ],
+    "R-pct": ["forall_schedules"],
+    "R-glue": ["zero_glue"],
+    "R-crc": ["crc_match", "sst_crc"],
+    "R-fsync-lie": ["fsync_promote", "media_durable"],
+    "R-swarm-real": ["l28_durability", "l28_tcp_apply", "l28_tcp_napply", "l28_napply_retry"],
+    "R-es": ["liveness_claim"],
+    "R-tcg-guest": ["tcg_guest"],
+    "R-direct-rpc": ["rpc_mode"],
+    "R-joint": [
+        "joint_election", "joint_leave", "pending_joint_node", "joint_leave_ok",
+        "election_grant_from", "joint_target", "joint_add_target",
+        "queued_leave_finish", "disk_membership",
+    ],
+}
+CAMPAIGN_DEPTH = {
+    "R-pct": "PCT d=3 16384 seeds + d=4 16384 seeds (0157 P2.3) + exaustivo N<=3 (P1.3)",
+    "R-group-glue": "exaustivo N<=3 completo (66 scheds) + disk-fence lower-bound",
+    "R-swarm-real": "TCP REAL K=8 (0156: 3 seeds; 0157: C-campanha + campanhas noturnas)",
+}
+REAL_ANCHORS = {
+    "R-swarm-real": "findings/rfc0157-tcp-campaign/,findings/rfc0157-nightly/",
+}
+
+
+def capacity_board(cat: dict, res: dict) -> int:
+    print()
+    print("== capacity per residual (RFC-0157 P2.2; verified refs) ==")
+    pairs = {p["id"]: p for p in cat.get("pairs") or []}
+    errors: list[str] = []
+    rows = res.get("residuals") or []
+
+    def grep_repo_test(name: str) -> bool:
+        pat = re.compile(r"fn\s+" + re.escape(name) + r"\s*\(")
+        for p in ROOT.glob("crates/*/src/**/*.rs"):
+            if pat.search(p.read_text(encoding="utf-8", errors="replace")):
+                return True
+        return False
+
+    for r in rows:
+        rid = r["id"]
+        guards = GUARD_TESTS.get(rid) or []
+        for g in guards:
+            if not grep_repo_test(g):
+                errors.append(f"{rid}: guard test {g} not found in crates/")
+        guard = "sim (" + ",".join(guards) + ")" if guards else "nao"
+
+        tids = TWIN_PAIRS.get(rid) or []
+        for t in tids:
+            p = pairs.get(t)
+            if p is None:
+                errors.append(f"{rid}: twin pair {t} not in catalog")
+                continue
+            twin_file = ROOT / p.get("twin", "")
+            runner = ROOT / p.get("verus", "")
+            if not twin_file.is_file():
+                errors.append(f"{rid}: twin file missing {p.get('twin')}")
+            if not runner.is_file():
+                errors.append(f"{rid}: runner missing {p.get('verus')}")
+        if rid == "R-verus":
+            twin = "sim (corpus TODO 56/56 no checker pinado)"
+        elif tids:
+            twin = "sim (" + ",".join(tids) + ")"
+        else:
+            twin = "nao" + (
+                " (never_floor: ferramenta/meio)" if r.get("class") == "never" else ""
+            )
+
+        depth = CAMPAIGN_DEPTH.get(rid, "nenhuma")
+
+        anchor = REAL_ANCHORS.get(rid, "")
+        for a in filter(None, anchor.split(",")):
+            if not (ROOT / a.strip()).is_dir():
+                errors.append(f"{rid}: REAL anchor missing {a.strip()}")
+        real = anchor if anchor else "nao"
+
+        print(f"{rid} | {r.get('class')} | guard={guard} | gemeo={twin} | campanha={depth} | real={real}")
+
+    print(f"capacity rows: {len(rows)}")
+    if errors:
+        print("capacity ERRORS:")
+        for e in errors:
+            print("  " + e)
+        return 1
     return 0
 
 

@@ -1,0 +1,195 @@
+== rfc0157_tcp_campaign K=8 ==
+warning: function `ae_entry_action_as_is_rewrite_committed` is never used
+  --> crates/pedradb-store/src/ae_ack_kernel.rs:89:8
+   |
+89 | pub fn ae_entry_action_as_is_rewrite_committed(
+   |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `apply_advance_as_is_skip_holes` is never used
+  --> crates/pedradb-store/src/apply_kernel.rs:36:8
+   |
+36 | pub fn apply_advance_as_is_skip_holes(
+   |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `disk_membership_overrides_cli_as_is` is never used
+   --> crates/pedradb-store/src/membership_kernel.rs:100:8
+    |
+100 | pub fn disk_membership_overrides_cli_as_is(_has_disk: bool) -> bool {
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `membership_identity_before_applied_as_is` is never used
+   --> crates/pedradb-store/src/membership_kernel.rs:112:8
+    |
+112 | pub fn membership_identity_before_applied_as_is(_identity_first: bool) -> bool {
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `recover_must_apply_as_is` is never used
+   --> crates/pedradb-store/src/membership_kernel.rs:136:8
+    |
+136 | pub fn recover_must_apply_as_is(_applied: u64, _commit: u64) -> bool {
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `recover_apply_node_counts_as_is` is never used
+   --> crates/pedradb-store/src/membership_kernel.rs:148:8
+    |
+148 | pub fn recover_apply_node_counts_as_is(is_local: bool, in_ids: bool) -> bool {
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `recover_truncate_node_counts_as_is` is never used
+   --> crates/pedradb-store/src/membership_kernel.rs:160:8
+    |
+160 | pub fn recover_truncate_node_counts_as_is(is_local: bool, in_ids: bool) -> bool {
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `recover_drop_orphan_seg_as_is` is never used
+   --> crates/pedradb-store/src/membership_kernel.rs:172:8
+    |
+172 | pub fn recover_drop_orphan_seg_as_is(_seg_index: u64, _new_hi: u64) -> bool {
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `recover_abort_node_counts_as_is` is never used
+   --> crates/pedradb-store/src/membership_kernel.rs:184:8
+    |
+184 | pub fn recover_abort_node_counts_as_is(is_local: bool, in_ids: bool) -> bool {
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `persist_meta_node_counts_as_is` is never used
+   --> crates/pedradb-store/src/membership_kernel.rs:196:8
+    |
+196 | pub fn persist_meta_node_counts_as_is(is_local: bool, in_ids: bool) -> bool {
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `persist_hist_node_counts_as_is` is never used
+   --> crates/pedradb-store/src/membership_kernel.rs:208:8
+    |
+208 | pub fn persist_hist_node_counts_as_is(is_local: bool, in_ids: bool) -> bool {
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `persist_fence_node_counts_as_is` is never used
+   --> crates/pedradb-store/src/membership_kernel.rs:220:8
+    |
+220 | pub fn persist_fence_node_counts_as_is(is_local: bool, in_ids: bool) -> bool {
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `force_clear_node_counts_as_is` is never used
+   --> crates/pedradb-store/src/membership_kernel.rs:232:8
+    |
+232 | pub fn force_clear_node_counts_as_is(is_local: bool, in_ids: bool) -> bool {
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `drop_preimages_node_counts_as_is` is never used
+   --> crates/pedradb-store/src/membership_kernel.rs:244:8
+    |
+244 | pub fn drop_preimages_node_counts_as_is(is_local: bool, in_ids: bool) -> bool {
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `open_peer_uses_disk_as_is` is never used
+   --> crates/pedradb-store/src/membership_kernel.rs:256:8
+    |
+256 | pub fn open_peer_uses_disk_as_is(_has_disk: bool) -> bool {
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `local_id_if_member_as_is` is never used
+   --> crates/pedradb-store/src/membership_kernel.rs:268:8
+    |
+268 | pub fn local_id_if_member_as_is(_in_ids: bool) -> bool {
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `reader_id_local_as_is` is never used
+   --> crates/pedradb-store/src/membership_kernel.rs:280:8
+    |
+280 | pub fn reader_id_local_as_is(_is_local: bool) -> bool {
+    |        ^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `discard_node_counts_as_is` is never used
+   --> crates/pedradb-store/src/membership_kernel.rs:292:8
+    |
+292 | pub fn discard_node_counts_as_is(is_local: bool, in_ids: bool) -> bool {
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `discard_leader_local_as_is` is never used
+   --> crates/pedradb-store/src/membership_kernel.rs:304:8
+    |
+304 | pub fn discard_leader_local_as_is(_is_local: bool) -> bool {
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `removed_steps_down_as_is` is never used
+   --> crates/pedradb-store/src/membership_kernel.rs:316:8
+    |
+316 | pub fn removed_steps_down_as_is(_in_ids: bool) -> bool {
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `hint_if_member_as_is` is never used
+   --> crates/pedradb-store/src/membership_kernel.rs:328:8
+    |
+328 | pub fn hint_if_member_as_is(_in_ids: bool) -> bool {
+    |        ^^^^^^^^^^^^^^^^^^^^
+
+warning: function `drop_repl_slot_as_is` is never used
+   --> crates/pedradb-store/src/membership_kernel.rs:340:8
+    |
+340 | pub fn drop_repl_slot_as_is(_in_ids: bool) -> bool {
+    |        ^^^^^^^^^^^^^^^^^^^^
+
+warning: function `drop_sent_through_as_is` is never used
+   --> crates/pedradb-store/src/membership_kernel.rs:352:8
+    |
+352 | pub fn drop_sent_through_as_is(_in_ids: bool) -> bool {
+    |        ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `participating_if_member_as_is` is never used
+   --> crates/pedradb-store/src/membership_kernel.rs:364:8
+    |
+364 | pub fn participating_if_member_as_is(_in_ids: bool) -> bool {
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `pending_joint_node_counts_as_is` is never used
+   --> crates/pedradb-store/src/membership_kernel.rs:376:8
+    |
+376 | pub fn pending_joint_node_counts_as_is(_is_member: bool) -> bool {
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `joint_target_counts_as_is` is never used
+   --> crates/pedradb-store/src/membership_kernel.rs:390:8
+    |
+390 | pub fn joint_target_counts_as_is(_in_ids: bool, in_nodes: bool) -> bool {
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `joint_add_target_counts_as_is` is never used
+   --> crates/pedradb-store/src/membership_kernel.rs:403:8
+    |
+403 | pub fn joint_add_target_counts_as_is(in_nodes: bool) -> bool {
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `election_grant_from_counts_as_is` is never used
+   --> crates/pedradb-store/src/membership_kernel.rs:416:8
+    |
+416 | pub fn election_grant_from_counts_as_is(_in_ids: bool, _in_pending_old_or_new: bool) -> bool {
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `vote_decision_as_is_ignore_log_and_vote` is never used
+  --> crates/pedradb-store/src/vote_kernel.rs:85:8
+   |
+85 | pub fn vote_decision_as_is_ignore_log_and_vote(i: VoteInputs) -> VoteDecision {
+   |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `grant_after_persist_as_is` is never used
+   --> crates/pedradb-store/src/vote_kernel.rs:118:8
+    |
+118 | pub fn grant_after_persist_as_is(decision: VoteDecision, persist: PersistOutcome) -> bool {
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+solo reference: 50s
+0x0157_N001 1 50 seed=641e28 kill=node put=1 get=1 after=1 restart=1 remove=1 leave=1 left=1 hw=1 part=1 apply=1 napply=1 trunc=1 odrop=1 abort=1 nowms=1 hist=1 fence=1 clear=1 pre=1 peer=1 lid=1 rdr=1 dsc=1 pld=1 std=1 hnt=1 slot=1 bounded-elect not-eventual
+0x0157_N002 1 50 seed=641e28 kill=node put=1 get=1 after=1 restart=1 remove=1 leave=1 left=1 hw=1 part=1 apply=1 napply=1 trunc=1 odrop=1 abort=1 nowms=1 hist=1 fence=1 clear=1 pre=1 peer=1 lid=1 rdr=1 dsc=1 pld=1 std=1 hnt=1 slot=1 bounded-elect not-eventual
+0x0157_N003 2 54 seed=641e28 kill=node put=1 get=1 after=1 restart=1 remove=1 leave=1 left=1 hw=1 part=1 apply=1 napply=1 trunc=1 odrop=1 abort=1 nowms=1 hist=1 fence=1 clear=1 pre=1 peer=1 lid=1 rdr=1 dsc=1 pld=1 std=1 hnt=1 slot=1 bounded-elect not-eventual
+0x0157_N004 2 51 seed=641e28 kill=node put=1 get=1 after=1 restart=1 remove=1 leave=1 left=1 hw=1 part=1 apply=1 napply=1 trunc=1 odrop=1 abort=1 nowms=1 hist=1 fence=1 clear=1 pre=1 peer=1 lid=1 rdr=1 dsc=1 pld=1 std=1 hnt=1 slot=1 bounded-elect not-eventual
+0x0157_N005 1 50 seed=641e28 kill=node put=1 get=1 after=1 restart=1 remove=1 leave=1 left=1 hw=1 part=1 apply=1 napply=1 trunc=1 odrop=1 abort=1 nowms=1 hist=1 fence=1 clear=1 pre=1 peer=1 lid=1 rdr=1 dsc=1 pld=1 std=1 hnt=1 slot=1 bounded-elect not-eventual
+0x0157_N006 1 50 seed=641e28 kill=node put=1 get=1 after=1 restart=1 remove=1 leave=1 left=1 hw=1 part=1 apply=1 napply=1 trunc=1 odrop=1 abort=1 nowms=1 hist=1 fence=1 clear=1 pre=1 peer=1 lid=1 rdr=1 dsc=1 pld=1 std=1 hnt=1 slot=1 bounded-elect not-eventual
+0x0157_N007 1 50 seed=641e28 kill=node put=1 get=1 after=1 restart=1 remove=1 leave=1 left=1 hw=1 part=1 apply=1 napply=1 trunc=1 odrop=1 abort=1 nowms=1 hist=1 fence=1 clear=1 pre=1 peer=1 lid=1 rdr=1 dsc=1 pld=1 std=1 hnt=1 slot=1 bounded-elect not-eventual
+0x0157_N008 1 50 seed=641e28 kill=node put=1 get=1 after=1 restart=1 remove=1 leave=1 left=1 hw=1 part=1 apply=1 napply=1 trunc=1 odrop=1 abort=1 nowms=1 hist=1 fence=1 clear=1 pre=1 peer=1 lid=1 rdr=1 dsc=1 pld=1 std=1 hnt=1 slot=1 bounded-elect not-eventual
+
+campaign: 8/8 seeds clean, wall=111s solo=50s factor=2,22
+campaign: FAILED (parallel factor 2,22 >= 2x — not actually parallel)

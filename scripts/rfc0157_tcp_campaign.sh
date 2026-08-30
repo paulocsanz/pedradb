@@ -13,19 +13,25 @@
 #   - retry ≤3 é harness, não teorema de liveness (R-es segue).
 #
 # Usage: scripts/rfc0157_tcp_campaign.sh [K]   (default K=8)
+# Env:   RFC0157_SEED_PREFIX (default 0x0157_C0) — fresh, disjoint from every
+#        prior campaign seed before reuse; RFC0157_OUT (default the findings
+#        dir above) + RFC0157_TITLE for registered nightly runs.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 K="${1:-8}"
 STAGGER="${RFC0157_STAGGER:-1.5}"
+SEED_PREFIX="${RFC0157_SEED_PREFIX:-0x0157_C0}"
+TITLE="${RFC0157_TITLE:-RFC-0157 P0.3 — K-parallel REAL TCP campaign registration}"
 [[ "$K" =~ ^[1-9][0-9]*$ ]] || { echo "error: K must be a positive integer" >&2; exit 2; }
-OUT="$ROOT/findings/rfc0157-tcp-campaign"
+OUT="${RFC0157_OUT:-$ROOT/findings/rfc0157-tcp-campaign}"
 LOGS="$OUT/logs"
 mkdir -p "$LOGS"
 
 # Seeds are fresh and disjoint from every prior campaign seed (0156 used
-# 0x0156_1E28 / 0x0157_1E28 / 0x0158_1E28): 0x0157_C001 + i.
-seed_of() { printf '0x0157_C0%02x' "$1"; }
+# 0x0156_1E28 / 0x0157_1E28 / 0x0158_1E28; 0157 P0.3 used 0x0157_C001+):
+# $SEED_PREFIX + i, configurable per registered run via RFC0157_SEED_PREFIX.
+seed_of() { printf '%s%02x' "$SEED_PREFIX" "$1"; }
 # Outside the pid-derived default range (23000..24503) so a concurrently
 # running test binary cannot collide with the campaign.
 port_of() { echo $((26000 + 3 * ($1 - 1))); }
@@ -99,7 +105,7 @@ factor=$(awk "BEGIN{printf \"%.2f\", $wall / ($solo + 0.001)}")
 
 # Aggregate + register.
 {
-  echo "# RFC-0157 P0.3 — K-parallel REAL TCP campaign registration"
+  echo "# $TITLE"
   echo
   echo "- date: $(date -u +%Y-%m-%dT%H:%M:%SZ)  host: $(uname -sm)  K=$K"
   echo "- port ranges: 26000..$((26000 + 3 * K - 1)) (L28_BASE_PORT seam); retries ≤3/seed"

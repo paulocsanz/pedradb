@@ -33,6 +33,10 @@ Then: wire the catalog fn, inbound `handle_inbound` plant (not `entry(` after op
 python3 .grok/skills/verificacao-next/scripts/candidates.py
 ```
 
+The same script also prints the capacity-per-residual table (RFC-0157 P2.2:
+guard / checked twin / campaign depth / REAL anchor for all 28 residuals,
+every reference verified against the repo; broken reference exits 1).
+
 The script **searches** (it is not a memory dump): RFC `- [ ] P*`, catalog
 holes, whether `store/src/lib.rs` mentions each protocol fn, and each
 `data_fate` plant body (`handle_inbound` / `PeerMsg::` vs only `entry(`).

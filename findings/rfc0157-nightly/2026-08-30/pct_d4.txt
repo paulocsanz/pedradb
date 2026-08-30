@@ -1,0 +1,163 @@
+$ cargo test -p pedradb-world --features pct --lib planted_chain3_pct_d4_nightly -- --nocapture
+  --> crates/pedradb-store/src/ae_ack_kernel.rs:89:8
+   |
+89 | pub fn ae_entry_action_as_is_rewrite_committed(
+   |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+  --> crates/pedradb-store/src/apply_kernel.rs:36:8
+   |
+36 | pub fn apply_advance_as_is_skip_holes(
+   |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+   --> crates/pedradb-store/src/membership_kernel.rs:100:8
+    |
+100 | pub fn disk_membership_overrides_cli_as_is(_has_disk: bool) -> bool {
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+   --> crates/pedradb-store/src/membership_kernel.rs:112:8
+    |
+112 | pub fn membership_identity_before_applied_as_is(_identity_first: bool) -> bool {
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+   --> crates/pedradb-store/src/membership_kernel.rs:136:8
+    |
+136 | pub fn recover_must_apply_as_is(_applied: u64, _commit: u64) -> bool {
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^
+
+   --> crates/pedradb-store/src/membership_kernel.rs:148:8
+    |
+148 | pub fn recover_apply_node_counts_as_is(is_local: bool, in_ids: bool) -> bool {
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+   --> crates/pedradb-store/src/membership_kernel.rs:160:8
+    |
+160 | pub fn recover_truncate_node_counts_as_is(is_local: bool, in_ids: bool) -> bool {
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+   --> crates/pedradb-store/src/membership_kernel.rs:172:8
+    |
+172 | pub fn recover_drop_orphan_seg_as_is(_seg_index: u64, _new_hi: u64) -> bool {
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+   --> crates/pedradb-store/src/membership_kernel.rs:184:8
+    |
+184 | pub fn recover_abort_node_counts_as_is(is_local: bool, in_ids: bool) -> bool {
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+   --> crates/pedradb-store/src/membership_kernel.rs:196:8
+    |
+196 | pub fn persist_meta_node_counts_as_is(is_local: bool, in_ids: bool) -> bool {
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+   --> crates/pedradb-store/src/membership_kernel.rs:208:8
+    |
+208 | pub fn persist_hist_node_counts_as_is(is_local: bool, in_ids: bool) -> bool {
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+   --> crates/pedradb-store/src/membership_kernel.rs:220:8
+    |
+220 | pub fn persist_fence_node_counts_as_is(is_local: bool, in_ids: bool) -> bool {
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+   --> crates/pedradb-store/src/membership_kernel.rs:232:8
+    |
+232 | pub fn force_clear_node_counts_as_is(is_local: bool, in_ids: bool) -> bool {
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+   --> crates/pedradb-store/src/membership_kernel.rs:244:8
+    |
+244 | pub fn drop_preimages_node_counts_as_is(is_local: bool, in_ids: bool) -> bool {
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+   --> crates/pedradb-store/src/membership_kernel.rs:256:8
+    |
+256 | pub fn open_peer_uses_disk_as_is(_has_disk: bool) -> bool {
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+   --> crates/pedradb-store/src/membership_kernel.rs:268:8
+    |
+268 | pub fn local_id_if_member_as_is(_in_ids: bool) -> bool {
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^
+
+   --> crates/pedradb-store/src/membership_kernel.rs:280:8
+    |
+280 | pub fn reader_id_local_as_is(_is_local: bool) -> bool {
+    |        ^^^^^^^^^^^^^^^^^^^^^
+
+   --> crates/pedradb-store/src/membership_kernel.rs:292:8
+    |
+292 | pub fn discard_node_counts_as_is(is_local: bool, in_ids: bool) -> bool {
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+   --> crates/pedradb-store/src/membership_kernel.rs:304:8
+    |
+304 | pub fn discard_leader_local_as_is(_is_local: bool) -> bool {
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+   --> crates/pedradb-store/src/membership_kernel.rs:316:8
+    |
+316 | pub fn removed_steps_down_as_is(_in_ids: bool) -> bool {
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^
+
+   --> crates/pedradb-store/src/membership_kernel.rs:328:8
+    |
+328 | pub fn hint_if_member_as_is(_in_ids: bool) -> bool {
+    |        ^^^^^^^^^^^^^^^^^^^^
+
+   --> crates/pedradb-store/src/membership_kernel.rs:340:8
+    |
+340 | pub fn drop_repl_slot_as_is(_in_ids: bool) -> bool {
+    |        ^^^^^^^^^^^^^^^^^^^^
+
+   --> crates/pedradb-store/src/membership_kernel.rs:352:8
+    |
+352 | pub fn drop_sent_through_as_is(_in_ids: bool) -> bool {
+    |        ^^^^^^^^^^^^^^^^^^^^^^^
+
+   --> crates/pedradb-store/src/membership_kernel.rs:364:8
+    |
+364 | pub fn participating_if_member_as_is(_in_ids: bool) -> bool {
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+   --> crates/pedradb-store/src/membership_kernel.rs:376:8
+    |
+376 | pub fn pending_joint_node_counts_as_is(_is_member: bool) -> bool {
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+   --> crates/pedradb-store/src/membership_kernel.rs:390:8
+    |
+390 | pub fn joint_target_counts_as_is(_in_ids: bool, in_nodes: bool) -> bool {
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+   --> crates/pedradb-store/src/membership_kernel.rs:403:8
+    |
+403 | pub fn joint_add_target_counts_as_is(in_nodes: bool) -> bool {
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+   --> crates/pedradb-store/src/membership_kernel.rs:416:8
+    |
+416 | pub fn election_grant_from_counts_as_is(_in_ids: bool, _in_pending_old_or_new: bool) -> bool {
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+  --> crates/pedradb-store/src/vote_kernel.rs:85:8
+   |
+85 | pub fn vote_decision_as_is_ignore_log_and_vote(i: VoteInputs) -> VoteDecision {
+   |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+   --> crates/pedradb-store/src/vote_kernel.rs:118:8
+    |
+118 | pub fn grant_after_persist_as_is(decision: VoteDecision, persist: PersistOutcome) -> bool {
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.09s
+     Running unittests src/lib.rs (target/debug/deps/pedradb_world-61d03ae81874c790)
+
+running 1 test
+planted_chain3_pct_d4_nightly: d=4 sweep found 35/16384 in 3.317037791s
+planted_chain3_pct_d4_nightly: first violator seed=671 triple_take: balance=-200 taken=3
+test pct_concurrent::tests::planted_chain3_pct_d4_nightly ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 89 filtered out; finished in 3.32s
+
