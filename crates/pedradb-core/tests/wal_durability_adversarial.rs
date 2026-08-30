@@ -726,7 +726,6 @@ type _Unused = Mutex<()>;
 ///      quiescent (real rotation) and succeeds;
 ///   4. abrupt drop (crash), reopen: every acked write survives.
 #[test]
-#[ignore = "deadlocks when the parked writer takes the lone path: lone_sync_commit holds the Db write lock through Wal::sync_data, so the parked compact_with->flush blocks and release_park never runs (ABBA). Passes when the writer joins the group path. Stale vs RFC-0062 P1.1 p11j; rewrite tracked upstream."]
 fn vlog_gc_during_offlock_fsync_window_refuses_then_preserves_acked_sync_write() {
     let (env, c) = CountingEnv::new();
     let dir = temp_dir("vlog-gc-race");

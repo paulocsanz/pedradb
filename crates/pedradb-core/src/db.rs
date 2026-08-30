@@ -8964,6 +8964,64 @@ mod tests {
     use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
 
+    /// RFC-0157 P1.4 — db.rs stage 1: golden-fingerprint characterization
+    /// of the CURRENT open/recovery path (nothing extracted;
+    /// `db_rs_extracted` stays false). Client-observable fingerprint over
+    /// three phases: (1) live full-range scan with a mixed layout
+    /// (flushed prefix + WAL tail), (2) clean close + reopen recovery,
+    /// (3) WAL-tail put then kill WITHOUT close (`mem::forget` — no
+    /// flush; same-PID reopen steals the LOCK) + reopen recovery. Double
+    /// replay into fresh dirs must be identical and equal the pinned
+    /// golden literal — any behavior change on the open/recovery path
+    /// fails here, protecting the stage-2 extraction.
+    #[test]
+    fn rfc0157_db_open_recovery_golden() {
+        fn hexify(b: &[u8]) -> String {
+            b.iter().map(|x| format!("{x:02x}")).collect()
+        }
+        fn scan_all(db: &Db) -> String {
+            db.scan(Bound::Unbounded, Bound::Unbounded)
+                .map(|kv| format!("{}={}", hexify(&kv.key), hexify(&kv.value)))
+                .collect::<Vec<_>>()
+                .join(";")
+        }
+        fn run_scenario() -> String {
+            let dir = temp_dir();
+            let mut db = Db::open(&dir).unwrap();
+            db.put(b"golden/a", b"A1").unwrap();
+            db.put(b"golden/b", b"B2").unwrap();
+            db.flush().unwrap(); // prefix becomes SST-resident
+            db.put(b"golden/c", b"C3").unwrap(); // WAL tail
+            let live = scan_all(&db);
+            db.close().unwrap();
+            let mut db2 = Db::open(&dir).unwrap();
+            let after_close = scan_all(&db2);
+            db2.put(b"golden/d", b"D4").unwrap(); // tail before kill
+            std::mem::forget(db2); // kill without close (no flush, LOCK stolen back)
+            let db3 = Db::open(&dir).unwrap();
+            let after_kill = scan_all(&db3);
+            db3.close().unwrap();
+            let _ = fs::remove_dir_all(&dir);
+            format!("{live}|{after_close}|{after_kill}")
+        }
+        let a = run_scenario();
+        let b = run_scenario();
+        assert_eq!(
+            a, b,
+            "db.rs open/recovery scenario must replay deterministically"
+        );
+        eprintln!("RFC0157_GOLDEN={a}");
+        assert_eq!(
+            a,
+            concat!(
+                "676f6c64656e2f61=4131;676f6c64656e2f62=4232;676f6c64656e2f63=4333|",
+                "676f6c64656e2f61=4131;676f6c64656e2f62=4232;676f6c64656e2f63=4333|",
+                "676f6c64656e2f61=4131;676f6c64656e2f62=4232;676f6c64656e2f63=4333;676f6c64656e2f64=4434"
+            ),
+            "golden fingerprint moved — open/recovery behavior changed (stage-2 protection)"
+        );
+    }
+
     /// RFC-0078 P0: live StdEnv put (real fdatasync before Ok) then a
     /// media-proof claim is refused. AS-IS would admit after fsync Ok.
     #[test]
@@ -11607,7 +11665,6 @@ mod tests {
 
     /// RFC-0149: auto-flush with physical CFs must not scan every memtable
     /// key. 20k puts under a 64 MiB cap stay in mem and finish in bounded time.
-    #[ignore = "timing-sensitive under high test parallelism; passes with --test-threads=4 or isolated"]
     #[test]
     fn maybe_auto_flush_physical_cf_is_not_linear_in_keys() {
         let dir = temp_dir();

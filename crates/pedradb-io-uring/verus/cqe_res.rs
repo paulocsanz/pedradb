@@ -31,11 +31,11 @@ pub fn cqe_res_ok_as_is(_res: i32) -> (ok: bool)
 
 proof fn lemma_negative_res_is_not_ok()
     ensures
-        cqe_res_ok_spec(0),
-        cqe_res_ok_spec(16),
-        !cqe_res_ok_spec(-5),
-        !cqe_res_ok_spec(-1),
-        cqe_res_ok_as_is_spec(-5),
+        cqe_res_ok_spec(0i32),
+        cqe_res_ok_spec(16i32),
+        !cqe_res_ok_spec(-5i32),
+        !cqe_res_ok_spec(-1i32),
+        cqe_res_ok_as_is_spec(-5i32),
 {
 }
 

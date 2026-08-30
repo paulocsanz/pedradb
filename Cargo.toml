@@ -20,15 +20,30 @@ authors = ["Paulo Cabral Sanz"]
 readme = "README.md"
 
 [workspace.dependencies]
-# Internal — a version is required for `cargo publish` (the path is
-# rewritten to the registry version at packaging time)
-pedradb-posix = { path = "crates/pedradb-posix", version = "0.1.0" }
-pedradb-core = { path = "crates/pedradb-core", version = "0.1.0" }
-pedradb-io-uring = { path = "crates/pedradb-io-uring", version = "0.1.0" }
-pedradb-ops = { path = "crates/pedradb-ops", version = "0.1.0" }
-pedradb-sim = { path = "crates/pedradb-sim", version = "0.1.0" }
+# Internal
+pedradb-posix = { path = "crates/pedradb-posix" }
+pedradb-core = { path = "crates/pedradb-core" }
+pedradb-sim = { path = "crates/pedradb-sim" }
+pedradb-oracle = { path = "crates/pedradb-oracle" }
+pedradb-apply = { path = "crates/pedradb-apply" }
+pedradb-replicate = { path = "crates/pedradb-replicate" }
+pedradb-raft = { path = "crates/pedradb-raft" }
+pedradb-dcs = { path = "crates/pedradb-dcs" }
+pedradb-sql = { path = "crates/pedradb-sql" }
+pedradb-stream = { path = "crates/pedradb-stream" }
+pedradb-http = { path = "crates/pedradb-http" }
+pedradb-dst = { path = "crates/pedradb-dst" }
+pedradb-store = { path = "crates/pedradb-store" }
+pedradb-capi = { path = "crates/pedradb-capi" }
+pedradb-io-uring = { path = "crates/pedradb-io-uring" }
+pedradb-ops = { path = "crates/pedradb-ops" }
+pedradb-lease = { path = "crates/pedradb-lease" }
+pedradb-index = { path = "crates/pedradb-index" }
+pedradb-journal = { path = "crates/pedradb-journal" }
+pedradb-fold = { path = "crates/pedradb-fold" }
+montanha-fdb-recipes = { path = "crates/montanha-fdb-recipes" }
 
-# External
+# Shared
 crc32c = "0.6"
 thiserror = "1"
 parking_lot = "0.12"
