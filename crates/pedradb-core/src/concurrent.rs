@@ -403,7 +403,7 @@ impl WriteGroup {
         }
 
         // Concurrent writers — sync or async — join the group. Async
-        // members are merged into one frame and one `write()` at 64 KiB
+        // members are merged into one frame and one `write()` per group
         // (RFC-0044 P0.5); `lead` skips the catch-up wait when no member
         // syncs (there is no fd to share). `PEDRA_ASYNC_GROUP=0` keeps the
         // Rocks shape instead: every async writer takes the write lock
@@ -576,7 +576,7 @@ impl WriteGroup {
             let active = self.active.load(Ordering::Relaxed);
             // Async-only group (RFC-0044 P0.5): no fd to share, so the
             // catch-up hold is pure latency — the merge (one encode pass,
-            // one `write()` at 64 KiB) is the whole win.
+            // one `write()` per group) is the whole win.
             let any_sync = batch.iter().any(|p| p.do_sync);
             if any_sync && batch_ops < CATCHUP_SKIP_OPS {
                 if let Some(bound) =
@@ -826,9 +826,9 @@ impl WriteGroup {
         drop(guard);
         let io_err = {
             let mut w = wal.lock();
-            // G1: write + fdatasync before Ok. Async: write() at 64 KiB
-            // (Rocks WritableFileWriter); no fdatasync.
-            w.write_pending_frame_if(need_sync).err().or_else(|| {
+            // G1: write + fdatasync before Ok. Async: write() per group,
+            // no fdatasync — same process-crash class as RocksDB default.
+            w.write_pending_frame().err().or_else(|| {
                 if need_sync {
                     let t_fd = Instant::now();
                     let r = w.sync_data().err();
@@ -2840,7 +2840,7 @@ mod tests {
     }
 
     #[test]
-    fn async_tail_below_64kib_recovers_on_close_without_fsync() {
+    fn async_ack_reaches_os_before_ok_survives_crash_reopen() {
         let dir = temp_dir();
         {
             let db = ConcurrentDb::open_with(
@@ -2858,13 +2858,16 @@ mod tests {
                 },
             )
             .unwrap();
-            // 8 × 1 KiB ≪ 64 KiB: no write() required until close.
+            // 8 × 1 KiB: every async commit write()s its frame before Ok
+            // (RocksDB default class) — a process crash right after the
+            // last Ok must not lose any acked write.
             let payload = vec![b'y'; 1024];
             for i in 0..8u8 {
                 db.put_with([b't', i], &payload, WriteOptions::no_sync())
                     .unwrap();
             }
-            db.close().unwrap();
+            // Process-crash shape: no close drain.
+            std::mem::forget(db);
         }
         let db = ConcurrentDb::open(&dir).unwrap();
         let payload = vec![b'y'; 1024];
@@ -2872,7 +2875,7 @@ mod tests {
             assert_eq!(
                 db.get(&[b't', i]).as_deref(),
                 Some(payload.as_slice()),
-                "close must drain async tail without fsync, t/{i}"
+                "process crash must not lose acked async writes, t/{i}"
             );
         }
         db.close().unwrap();
@@ -2932,20 +2935,15 @@ mod tests {
                 },
             )
             .unwrap();
-            // 80 × 1 KiB fills the 64 KiB Rocks-shaped async buffer.
+            // 80 × 1 KiB: comfortably past one frame; all of it must be in
+            // the OS before the last Ok (per-commit write(), no fsync).
             let payload = vec![b'x'; 1024];
             for i in 0..80u16 {
                 let k = [(i >> 8) as u8, i as u8];
                 db.put_with(k, &payload, WriteOptions::no_sync()).unwrap();
             }
-            let n = fs::metadata(dir.join(crate::db::WAL_FILE_NAME))
-                .map(|m| m.len())
-                .unwrap_or(0);
-            assert!(
-                n >= crate::wal::format::ASYNC_WAL_BUFFER as u64,
-                "async must write() at 64 KiB, got {n}"
-            );
-            db.close().unwrap();
+            // Process-crash shape: no close drain.
+            std::mem::forget(db);
         }
         let db = ConcurrentDb::open(&dir).unwrap();
         let payload = vec![b'x'; 1024];
@@ -2954,7 +2952,7 @@ mod tests {
             assert_eq!(
                 db.get(&k).as_deref(),
                 Some(payload.as_slice()),
-                "lost async put {i} after close without fsync"
+                "process crash must not lose acked async put {i}"
             );
         }
         db.close().unwrap();
@@ -2965,7 +2963,7 @@ mod tests {
     fn async_concurrent_writers_recover() {
         let dir = temp_dir();
         const THREADS: u8 = 8;
-        const PER: u8 = 24; // 8 × 24 × ~1 KiB ≫ 64 KiB async buffer
+        const PER: u8 = 24; // 8 threads × 24 puts of ~1 KiB each
         {
             let db = ConcurrentDb::open_with(
                 &dir,
@@ -4571,8 +4569,8 @@ mod tests {
     /// End-to-end put latency is not the contract: the WAL mutex serializes
     /// the two commits regardless (single WAL file, G1), and the recorded
     /// wait includes scheduler overrun on a loaded box.
-    #[ignore = "stale vs lone_sync_commit (RFC-0062 P1.1 p11j): the lone path never bumps commit_inflight; rewrite against the group path is tracked upstream"]
     #[test]
+    #[ignore = "stale vs lone_sync_commit (RFC-0062 P1.1 p11j): the lone path never bumps commit_inflight; rewrite against the group path is tracked upstream"]
     fn catchup_wait_bounded_by_half_fd() {
         let dir = temp_dir();
         let sleep_us = Arc::new(AtomicU64::new(0));
@@ -5710,16 +5708,17 @@ mod tests {
     }
 
     /// RFC-0058 P0.2 (async half): `WriteOptions::no_sync` under the pin.
-    /// Async Ok never promises durability before a barrier — after `close()`
-    /// the tail must drain (existing full-mode contract), and after an
-    /// explicit [`Self::sync`] barrier a process-style kill (no close) must
-    /// keep the writes. Stats prove the async path never merges either.
+    /// Async Ok `write()`s the WAL before returning (process-crash class =
+    /// RocksDB default); `close()` is not needed to drain. An explicit
+    /// [`Self::sync`] barrier additionally survives power loss. Stats prove
+    /// the async path never merges either.
     #[test]
     fn verified_async_close_and_barrier_reopen() {
         let dir = temp_dir();
         let payload = vec![b'a'; 1024];
         {
-            // Phase 1: 8 × 1 KiB ≪ 64 KiB — nothing hits the file until close.
+            // Phase 1: every async commit write()s the WAL before Ok — a
+            // process crash must not lose any acked write.
             let db = ConcurrentDb::open_verified(&dir).unwrap();
             for i in 0..8u8 {
                 db.put_with([b't', i], &payload, WriteOptions::no_sync())

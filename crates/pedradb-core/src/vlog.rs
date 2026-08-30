@@ -155,14 +155,14 @@ pub struct VlogRewriteStats {
 }
 
 /// Userspace buffer before `write()`, same size as Rocks
-/// `writable_file_max_buffer_size` / WAL [`crate::wal::format::ASYNC_WAL_BUFFER`].
-/// A process crash can lose the tail (&lt; 64 KiB) when the caller does not
-/// `sync_pending` — same class as async WAL.
+/// `writable_file_max_buffer_size`. A process crash can lose the tail
+/// (&lt; 64 KiB) when the caller does not `sync_pending`; the Db commit
+/// paths flush per commit, so acked values do not sit here.
 pub const ASYNC_VLOG_BUFFER: usize = 64 * 1024;
 
 /// Payload size that skips the contiguous pending memcpy (RFC-0149 P2.1
-/// `kvrocks_blob_set` is 16 KiB). Held as interned `Bytes` until the 64 KiB
-/// flush concatenates once. Same crash-loss class as async WAL.
+/// `kvrocks_blob_set` is 16 KiB). Held as interned `Bytes` until the
+/// next flush concatenates once.
 const LARGE_PENDING: usize = 4096;
 
 /// Same chunk as the WAL: delayed allocation must not hit the Ok path.

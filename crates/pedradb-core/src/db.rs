@@ -6951,9 +6951,10 @@ impl<E: Env> Db<E> {
         self.publish_sequence(self.last_sequence());
     }
 
-    /// Async commit: encode WAL, `write()` at 64 KiB (Rocks file writer),
-    /// no `fdatasync`, no write-group. Tail &lt; 64 KiB may sit until the
-    /// next flush / close (Rocks `sync=false`).
+    /// Async commit: encode WAL and `write()` it before `Ok` — same
+    /// process-crash class as RocksDB default (`sync=false`,
+    /// `manual_wal_flush=false` flushes per record). No `fdatasync`
+    /// (that is G1), no write-group.
     pub(crate) fn commit_async_ops(&mut self, batch: Vec<BatchOp>) -> Result<SequenceNumber> {
         if !self.write_admission_idle() {
             let families = self.batch_families(&batch);
@@ -6972,7 +6973,7 @@ impl<E: Env> Db<E> {
             let mut w = self.wal.lock();
             let sl = ops.as_slice();
             w.encode_write_op_batches(&[sl])?;
-            w.write_pending_frame_if(false)?;
+            w.write_pending_frame()?;
             if let (Some(st), Some(t1)) = (st.as_ref(), t1) {
                 st.wal_ns
                     .fetch_add(t1.elapsed().as_nanos() as u64, Ordering::Relaxed);
@@ -7028,7 +7029,7 @@ impl<E: Env> Db<E> {
             let t1 = st.as_ref().map(|_| Instant::now());
             let mut w = self.wal.lock();
             w.encode_write_op_batches(&[std::slice::from_ref(&op)])?;
-            w.write_pending_frame_if(false)?;
+            w.write_pending_frame()?;
             if let (Some(st), Some(t1)) = (st.as_ref(), t1) {
                 st.wal_ns
                     .fetch_add(t1.elapsed().as_nanos() as u64, Ordering::Relaxed);
@@ -7358,7 +7359,7 @@ impl<E: Env> Db<E> {
             if let Err(e) = self.wal_sync_group() {
                 return g.fail_sync(e);
             }
-        } else if let Err(e) = self.wal.lock().write_pending_frame_if(false) {
+        } else if let Err(e) = self.wal.lock().write_pending_frame() {
             self.durability_fenced = true;
             return g.fail_sync(e);
         }

@@ -186,37 +186,17 @@ impl<F: EnvFile> Wal<F> {
 
     /// Write the frame built by [`Self::encode_write_op_batches`].
     ///
-    /// Always hits the file (G1 / close / `Db::sync`). Prefer
-    /// [`Self::write_pending_frame_if`] on the async put path.
+    /// Hits the file (`write()`) on every call — G1, async, close, and
+    /// `Db::sync` all use it. Async callers skip the `fdatasync` (that is
+    /// the only difference from G1), so every acked record reaches the OS
+    /// page cache before `Ok` — the same process-crash class as RocksDB
+    /// default (`sync=false`, `manual_wal_flush=false` flushes per record).
     ///
     /// # Errors
     /// Underlying file write.
     pub fn write_pending_frame(&mut self) -> Result<()> {
-        self.write_pending_frame_if(true)
-    }
-
-    /// Append encoded WAL bytes.
-    ///
-    /// - `force` (G1 / close / `sync`): `write()` the whole frame, then the
-    ///   caller `fdatasync`s.
-    /// - async (`force=false`): `write()` when the frame reaches
-    ///   [`format::ASYNC_WAL_BUFFER`] (64 KiB, Rocks
-    ///   `writable_file_max_buffer_size`). **Not** 1 MiB, not unencoded
-    ///   pending. Process crash can lose the tail (&lt; 64 KiB), like Rocks
-    ///   `sync=false`. Power loss can lose more.
-    ///
-    /// Bytes are always encoded into the frame before Ok (WAL v2 intern is
-    /// still a real record).
-    ///
-    /// # Errors
-    /// Underlying file write.
-    pub fn write_pending_frame_if(&mut self, force: bool) -> Result<()> {
         let mut frame = self.writer.take_frame();
         if frame.is_empty() {
-            self.writer.restore_frame(frame);
-            return Ok(());
-        }
-        if !force && frame.len() < format::ASYNC_WAL_BUFFER {
             self.writer.restore_frame(frame);
             return Ok(());
         }
@@ -394,8 +374,8 @@ mod probe_tests {
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("wal.log");
 
-        // Cross the async buffer several times so `reserve_space` runs and
-        // the file grows past one 64 KiB frame flush.
+        // Cross several frames so `reserve_space` runs and the file
+        // grows past one write.
         let val = bytes::Bytes::from(vec![b'p'; 1024]);
         let mut ops: Vec<crate::batch::WriteOp> = Vec::new();
         for i in 1..=1024u64 {
@@ -408,7 +388,7 @@ mod probe_tests {
         let mut w = Wal::create(&path).unwrap();
         for _ in 0..8 {
             w.append_write_ops(&ops).unwrap();
-            w.write_pending_frame_if(true).unwrap();
+            w.write_pending_frame().unwrap();
         }
         let append_end = w.stream_position().unwrap();
         drop(w);
@@ -425,7 +405,7 @@ mod probe_tests {
     }
 
     /// RFC-0044 P2.2 micro: deps_raftlog WAL floor —
-    /// `encode_write_op_batches` + async-buffered write only (no Db lock,
+    /// `encode_write_op_batches` + frame `write()` only (no Db lock,
     /// memtable, or publish). Run:
     /// `cargo test -p pedradb-core --lib --release wal_encode_raftlog_micro -- --ignored --nocapture`
     /// `WAL_MICRO_OPS` sets ops/batch (default 16), `WAL_MICRO_N` batches.
@@ -456,7 +436,7 @@ mod probe_tests {
         let t0 = std::time::Instant::now();
         for _ in 0..n {
             w.encode_write_op_batches(&[sl]).unwrap();
-            w.write_pending_frame_if(false).unwrap();
+            w.write_pending_frame().unwrap();
         }
         let el = t0.elapsed();
         println!(
