@@ -37,7 +37,7 @@ pub use txn::{
 };
 
 use bytes::Bytes;
-use parking_lot::Mutex;
+use parking_lot::{Mutex, RwLock};
 mod shape;
 pub use shape::{
     properties, BottommostLevelCompaction, ColumnFamilyDescriptor, CompactOptions,
@@ -591,10 +591,12 @@ impl Options {
     }
 }
 
-/// Column family handle (name-keyed emulation).
+/// Column family handle (name-keyed emulation). The name is an `Arc` clone
+/// of the registry entry, so `cf_handle` hands out handles without a
+/// per-call allocation.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ColumnFamily {
-    name: String,
+    name: Arc<str>,
 }
 
 impl ColumnFamily {
@@ -772,6 +774,15 @@ impl KeyCodec {
             "encoded key must belong to family {cf}"
         );
         enc
+    }
+
+    /// Encode without the family `debug_assert`. Iterator resume keys come
+    /// from `decode`, which in a default-raw DB hands back user keys with
+    /// embedded NULs — legal input that re-encodes to the exact original
+    /// bytes, but that the family check (built for user-supplied names)
+    /// would reject.
+    pub(crate) fn encode_resume(&self, cf: &str, key: &[u8]) -> Vec<u8> {
+        encode_cf_key(cf, key, self.default_raw)
     }
 
     /// Append `cf\\0key` onto `pool` and freeze a shared `Bytes` (one backing
@@ -1264,7 +1275,7 @@ impl WriteBatch {
     /// Put into a named CF.
     pub fn put_cf(&mut self, cf: &ColumnFamily, key: impl AsRef<[u8]>, value: impl AsRef<[u8]>) {
         self.ops.push((
-            Some(cf.name.clone()),
+            Some(cf.name.as_ref().to_string()),
             BatchOp::Put {
                 key: Bytes::copy_from_slice(key.as_ref()),
                 value: Bytes::copy_from_slice(value.as_ref()),
@@ -1285,7 +1296,7 @@ impl WriteBatch {
     /// Delete from a named CF.
     pub fn delete_cf(&mut self, cf: &ColumnFamily, key: impl AsRef<[u8]>) {
         self.ops.push((
-            Some(cf.name.clone()),
+            Some(cf.name.as_ref().to_string()),
             BatchOp::Delete {
                 key: Bytes::copy_from_slice(key.as_ref()),
             },
@@ -1300,7 +1311,7 @@ impl WriteBatch {
         end: impl AsRef<[u8]>,
     ) {
         self.ops.push((
-            Some(cf.name.clone()),
+            Some(cf.name.as_ref().to_string()),
             BatchOp::DeleteRange {
                 start: Bytes::copy_from_slice(start.as_ref()),
                 end: Bytes::copy_from_slice(end.as_ref()),
@@ -1343,6 +1354,11 @@ pub struct DBIterator<E: PedraEnv = StdEnv> {
     seq: pedradb_core::SequenceNumber,
     cf_start: Bound<Vec<u8>>,
     cf_end: Bound<Vec<u8>>,
+    /// Encoded last / first key of the current page — the refill resume
+    /// points. Kept aside from `items` because consumed slots are moved
+    /// out (zero-copy handoff), not just index-past.
+    resume_fwd: Vec<u8>,
+    resume_rev: Vec<u8>,
     exhausted: bool,
     /// Last refill error (fix C6 hardening): a failed window refill no
     /// longer vanishes — `status()` reports it instead of a silent truncation.
@@ -1355,10 +1371,11 @@ impl<E: PedraEnv> Iterator for DBIterator<E> {
         if !self.valid() {
             return None;
         }
-        let item = (
-            self.key().to_vec().into_boxed_slice(),
-            self.value().to_vec().into_boxed_slice(),
-        );
+        // Move the slot out instead of copying through `key()`/`value()`:
+        // refill pages decode into exact-capacity Vecs, so the boxed
+        // conversion is a pointer handoff — two fewer allocs per entry.
+        let (k, v) = std::mem::take(&mut self.items[self.idx]);
+        let item = (k.into_boxed_slice(), v.into_boxed_slice());
         DBIterator::advance(self);
         Some(Ok(item))
     }
@@ -1417,7 +1434,7 @@ impl<E: PedraEnv> DBIterator<E> {
     pub fn collect_rest(&mut self) -> Vec<(Vec<u8>, Vec<u8>)> {
         let mut out = Vec::new();
         while self.valid() {
-            out.push((self.key().to_vec(), self.value().to_vec()));
+            out.push(std::mem::take(&mut self.items[self.idx]));
             self.next();
         }
         out
@@ -1448,8 +1465,7 @@ impl<E: PedraEnv> DBIterator<E> {
             self.invalidate();
             return;
         }
-        let last = self.items[self.items.len() - 1].0.clone();
-        let start = Bound::Excluded(self.codec.encode(&self.cf, &last));
+        let start = Bound::Excluded(std::mem::take(&mut self.resume_fwd));
         match page_forward(
             &self.inner,
             &self.codec,
@@ -1460,7 +1476,7 @@ impl<E: PedraEnv> DBIterator<E> {
             ITER_WINDOW,
         ) {
             Ok(page) if !page.is_empty() => {
-                self.items = page;
+                self.set_page(page);
                 self.idx = 0;
             }
             Ok(_) => self.invalidate(),
@@ -1476,8 +1492,7 @@ impl<E: PedraEnv> DBIterator<E> {
             self.invalidate();
             return;
         }
-        let first = self.items[0].0.clone();
-        let end = Bound::Excluded(self.codec.encode(&self.cf, &first));
+        let end = Bound::Excluded(std::mem::take(&mut self.resume_rev));
         match page_last_n(
             &self.inner,
             &self.codec,
@@ -1489,7 +1504,7 @@ impl<E: PedraEnv> DBIterator<E> {
         ) {
             Ok(page) if !page.is_empty() => {
                 self.idx = page.len() - 1;
-                self.items = page;
+                self.set_page(page);
             }
             Ok(_) => self.invalidate(),
             Err(e) => {
@@ -1497,6 +1512,19 @@ impl<E: PedraEnv> DBIterator<E> {
                 self.invalidate();
             }
         }
+    }
+
+    /// Install a fresh page and record its boundary resume keys.
+    fn set_page(&mut self, page: Vec<(Vec<u8>, Vec<u8>)>) {
+        let fwd = page.last().map(|(k, _)| self.codec.encode_resume(&self.cf, k));
+        let rev = page.first().map(|(k, _)| self.codec.encode_resume(&self.cf, k));
+        if let Some(k) = fwd {
+            self.resume_fwd = k;
+        }
+        if let Some(k) = rev {
+            self.resume_rev = k;
+        }
+        self.items = page;
     }
 }
 
@@ -1608,6 +1636,7 @@ impl<E: PedraEnv> Snapshot<'_, E> {
             mode,
             self.snap.sequence(),
             &names,
+            IterBounds::none(),
         )
     }
 }
@@ -1629,25 +1658,76 @@ fn cf_bounds(codec: &KeyCodec, cf: &str) -> (Bound<Vec<u8>>, Bound<Vec<u8>>) {
     }
 }
 
+/// rust-rocksdb iterate bounds (`ReadOptions::lower` / `.upper`, user keys).
+/// `upper` is exclusive, matching rocks. `None` leaves the side unbounded.
+pub(crate) struct IterBounds<'a> {
+    lower: Option<&'a [u8]>,
+    upper: Option<&'a [u8]>,
+}
+
+impl IterBounds<'_> {
+    pub(crate) fn none() -> Self {
+        Self {
+            lower: None,
+            upper: None,
+        }
+    }
+}
+
+/// Tighten a start bound (`Unbounded`/`Included`) up to `k` when `k` sorts
+/// after the current bound. Both are start-side, so only `Included` competes.
+fn max_included(cur: Bound<Vec<u8>>, k: &[u8]) -> Bound<Vec<u8>> {
+    match cur {
+        Bound::Unbounded => Bound::Included(k.to_vec()),
+        Bound::Included(c) if k > c.as_slice() => Bound::Included(k.to_vec()),
+        b => b,
+    }
+}
+
+/// Tighten an end bound (`Unbounded`/`Excluded`) down to `k`. Both are
+/// end-side, so only `Excluded` competes.
+fn min_excluded(cur: Bound<Vec<u8>>, k: &[u8]) -> Bound<Vec<u8>> {
+    match cur {
+        Bound::Unbounded => Bound::Excluded(k.to_vec()),
+        Bound::Excluded(c) if k < c.as_slice() => Bound::Excluded(k.to_vec()),
+        b => b,
+    }
+}
+
 pub(crate) fn scan_cf_at<E: PedraEnv>(
     inner: &ConcurrentDb<E>,
     codec: &KeyCodec,
     cf: &str,
     mode: IteratorMode,
     seq: pedradb_core::SequenceNumber,
-    known: &[String],
+    known: &[Arc<str>],
+    bounds: IterBounds<'_>,
 ) -> Result<DBIterator<E>> {
-    if cf != DEFAULT_CF && !known.iter().any(|c| c == cf) {
+    if cf != DEFAULT_CF && !known.iter().any(|c| c.as_ref() == cf) {
         return Err(Error {
             msg: format!("column family not found: {cf}"),
             kind: ErrorKind::InvalidArgument,
         });
     }
-    let (cf_start, cf_end) = cf_bounds(codec, cf);
+    let (mut cf_start, mut cf_end) = cf_bounds(codec, cf);
+    // Encode is order-preserving, so user-key bounds clamp the encoded
+    // CF range directly; refills and the core scan both stop at `cf_end`.
+    if let Some(lo) = bounds.lower {
+        cf_start = max_included(cf_start, &codec.encode(cf, lo));
+    }
+    if let Some(up) = bounds.upper {
+        cf_end = min_excluded(cf_end, &codec.encode(cf, up));
+    }
     let (items, idx, reverse) = match mode {
         IteratorMode::Start | IteratorMode::From(_, Direction::Forward) => {
             let user_lo = match mode {
-                IteratorMode::From(k, _) => Bound::Included(codec.encode(cf, k)),
+                IteratorMode::From(k, _) => {
+                    let mut lo = Bound::Included(codec.encode(cf, k));
+                    if let Some(l) = bounds.lower {
+                        lo = max_included(lo, &codec.encode(cf, l));
+                    }
+                    lo
+                }
                 _ => cf_start.clone(),
             };
             let page = page_forward(
@@ -1677,7 +1757,10 @@ pub(crate) fn scan_cf_at<E: PedraEnv>(
         IteratorMode::From(k, Direction::Reverse) => {
             let enc = codec.encode(cf, k);
             let hi = match encoded_succ(&enc) {
-                Some(s) => Bound::Excluded(s),
+                Some(s) => match bounds.upper {
+                    Some(up) => min_excluded(Bound::Excluded(s), &codec.encode(cf, up)),
+                    None => Bound::Excluded(s),
+                },
                 None => cf_end.clone(),
             };
             let page = page_last_n(
@@ -1694,6 +1777,14 @@ pub(crate) fn scan_cf_at<E: PedraEnv>(
         }
     };
     let exhausted = items.is_empty();
+    let resume_fwd = items
+        .last()
+        .map(|(k, _)| codec.encode_resume(cf, k))
+        .unwrap_or_default();
+    let resume_rev = items
+        .first()
+        .map(|(k, _)| codec.encode_resume(cf, k))
+        .unwrap_or_default();
     Ok(DBIterator {
         items,
         idx,
@@ -1704,6 +1795,8 @@ pub(crate) fn scan_cf_at<E: PedraEnv>(
         seq,
         cf_start,
         cf_end,
+        resume_fwd,
+        resume_rev,
         exhausted,
         err: None,
     })
@@ -1716,7 +1809,10 @@ pub(crate) fn scan_cf_at<E: PedraEnv>(
 /// guards; the host compact worker reuses the core staged flush pipeline.
 pub struct DB<E: PedraEnv = IoUringEnv> {
     pub(crate) inner: ConcurrentDb<E>,
-    pub(crate) cfs: Mutex<Vec<String>>,
+    /// CF registry. Read-locked per `cf_handle`/`check_cf`: `Arc<str>` names
+    /// make both the handle handout and the membership check allocation-free
+    /// on the read side (writes — `create_cf`/`drop_cf` — stay exclusive).
+    pub(crate) cfs: RwLock<Vec<Arc<str>>>,
     pub(crate) codec: KeyCodec,
     /// Host compact worker (RFC-0037 P2.1). None when the caller injected Env
     /// (adversarial FailingEnv stays single-threaded / deterministic).
@@ -1999,9 +2095,10 @@ impl<E: PedraEnv> DB<E> {
         // (a reopen with a different supplied list must not flip the codec).
         let codec = KeyCodec { default_raw };
         let cache_epoch_base = CACHE_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed) << 32;
+        let registry: Vec<Arc<str>> = names.iter().map(|n| Arc::from(n.as_str())).collect();
         Ok(Self {
             inner: db,
-            cfs: Mutex::new(names),
+            cfs: RwLock::new(registry),
             codec,
             compact_tx: None,
             compact_thread: None,
@@ -2024,18 +2121,18 @@ impl<E: PedraEnv> DB<E> {
     #[must_use]
     pub fn cf_handle(&self, name: &str) -> Option<ColumnFamily> {
         self.cfs
-            .lock()
+            .read()
             .iter()
-            .find(|c| c.as_str() == name)
-            .map(|n| ColumnFamily { name: n.clone() })
+            .find(|c| c.as_ref() == name)
+            .map(|n| ColumnFamily { name: Arc::clone(n) })
     }
 
-    pub(crate) fn cf_names(&self) -> Vec<String> {
-        self.cfs.lock().clone()
+    pub(crate) fn cf_names(&self) -> Vec<Arc<str>> {
+        self.cfs.read().clone()
     }
 
     fn check_cf(&self, cf: &str) -> Result<()> {
-        if cf == DEFAULT_CF || self.cfs.lock().iter().any(|c| c == cf) {
+        if cf == DEFAULT_CF || self.cfs.read().iter().any(|c| c.as_ref() == cf) {
             Ok(())
         } else {
             Err(Error {
@@ -2145,10 +2242,16 @@ impl<E: PedraEnv> DB<E> {
 
     /// Get from a named CF.
     ///
+    /// The handle's name was validated when the handle was created, so the
+    /// per-get path skips the registry check (`get_named` keeps it — it takes
+    /// an arbitrary string). A stale handle used after `drop_cf` reads the
+    /// dropped prefix as empty rather than erroring; rocks makes the same
+    /// use-after-drop the caller's problem.
+    ///
     /// # Errors
-    /// Unknown CF or Pedra read errors.
+    /// Pedra read errors.
     pub fn get_cf(&self, cf: &ColumnFamily, key: impl AsRef<[u8]>) -> Result<Option<Vec<u8>>> {
-        self.get_named(&cf.name, key)
+        self.get_cached(&cf.name, key)
     }
 
     /// Point get by CF name (no handle alloc). Same bytes as [`Self::get_cf`].
@@ -2156,6 +2259,14 @@ impl<E: PedraEnv> DB<E> {
     /// # Errors
     /// Unknown CF or Pedra read errors.
     pub fn get_named(&self, cf: &str, key: impl AsRef<[u8]>) -> Result<Option<Vec<u8>>> {
+        if cf != DEFAULT_CF {
+            self.check_cf(cf)?;
+        }
+        self.get_cached(cf, key)
+    }
+
+    /// TLS-warmed point get on a CF name already known valid.
+    fn get_cached(&self, cf: &str, key: impl AsRef<[u8]>) -> Result<Option<Vec<u8>>> {
         let key = key.as_ref();
         // RFC-0041 YCSB-C: zipf (θ=0.99, 4096 keys) concentrates on a hot
         // set. Direct-mapped last-N skips CF-prefix encode + point-cache
@@ -2164,9 +2275,6 @@ impl<E: PedraEnv> DB<E> {
         let (epoch, gen) = self.tls_point_ids(cf, key);
         if let Some(hit) = LAST_CF.with(|slot| slot.borrow().get(epoch, gen, cf, key)) {
             return Ok(hit.map(|b| b.to_vec()));
-        }
-        if cf != DEFAULT_CF {
-            self.check_cf(cf)?;
         }
         let got = self.codec.encode_with(cf, key, |enc| self.inner.get(enc));
         LAST_CF.with(|slot| slot.borrow_mut().store(epoch, gen, cf, key, got.clone()));
@@ -2584,7 +2692,15 @@ impl<E: PedraEnv> DB<E> {
     pub fn iterator_cf(&self, cf: &ColumnFamily, mode: IteratorMode) -> Result<DBIterator<E>> {
         let seq = self.inner.visible_sequence();
         let names = self.cf_names();
-        scan_cf_at(&self.inner, &self.codec, &cf.name, mode, seq, &names)
+        scan_cf_at(
+            &self.inner,
+            &self.codec,
+            &cf.name,
+            mode,
+            seq,
+            &names,
+            IterBounds::none(),
+        )
     }
 
     /// Last user key in `cf` that starts with `prefix` (RFC-0033).
@@ -3112,15 +3228,19 @@ impl<E: PedraEnv> DB<E> {
             )));
         }
         {
-            let mut cfs = self.cfs.lock();
-            if cfs.iter().any(|c| c == name) {
+            let mut cfs = self.cfs.write();
+            if cfs.iter().any(|c| c.as_ref() == name) {
                 return Ok(());
             }
-            cfs.push(name.to_string());
-            let non_default: Vec<String> =
-                cfs.iter().filter(|c| *c != DEFAULT_CF).cloned().collect();
+            cfs.push(Arc::from(name));
+            let non_default: Vec<String> = cfs
+                .iter()
+                .filter(|c| c.as_ref() != DEFAULT_CF)
+                .map(|c| c.to_string())
+                .collect();
             store_cf_registry(&self.inner.path(), false, &non_default)?;
-            self.inner.set_physical_cfs(cfs.clone());
+            self.inner
+                .set_physical_cfs(cfs.iter().map(|c| c.to_string()).collect());
         }
         Ok(())
     }
@@ -3138,10 +3258,15 @@ impl<E: PedraEnv> DB<E> {
         self.inner.delete_range(start, end).map_err(Error::from)?;
         self.flush()?;
         self.compact()?;
-        let mut cfs = self.cfs.lock();
-        cfs.retain(|c| c != name);
-        let non_default: Vec<String> = cfs.iter().filter(|c| *c != DEFAULT_CF).cloned().collect();
-        self.inner.set_physical_cfs(cfs.clone());
+        let mut cfs = self.cfs.write();
+        cfs.retain(|c| c.as_ref() != name);
+        let non_default: Vec<String> = cfs
+            .iter()
+            .filter(|c| c.as_ref() != DEFAULT_CF)
+            .map(|c| c.to_string())
+            .collect();
+        self.inner
+            .set_physical_cfs(cfs.iter().map(|c| c.to_string()).collect());
         drop(cfs);
         store_cf_registry(&self.inner.path(), self.codec.default_raw, &non_default)
     }
@@ -3382,16 +3507,22 @@ impl<E: PedraEnv> DB<E> {
         self.raw_iterator()
     }
 
-    /// rust-rocksdb `iterator_opt`. Honours snapshot (F180) and refuses
-    /// `set_verify_checksums(false)` (RFC-0062 P1.6).
+    /// rust-rocksdb `iterator_opt`. Honours snapshot (F180), iterate bounds,
+    /// and refuses `set_verify_checksums(false)` (RFC-0062 P1.6).
     pub fn iterator_opt(&self, mode: IteratorMode<'_>, ro: ReadOptions) -> Result<DBIterator<E>> {
         ro.refuse_checksums_off()?;
         let seq = ro.snap.unwrap_or_else(|| self.inner.visible_sequence());
         let names = self.cf_names();
-        scan_cf_at(&self.inner, &self.codec, DEFAULT_CF, mode, seq, &names)
+        let bounds = IterBounds {
+            lower: ro.lower.as_deref(),
+            upper: ro.upper.as_deref(),
+        };
+        scan_cf_at(&self.inner, &self.codec, DEFAULT_CF, mode, seq, &names, bounds)
     }
 
-    /// rust-rocksdb `iterator_cf_opt`.
+    /// rust-rocksdb `iterator_cf_opt`. Iterate bounds are honoured: both are
+    /// clamped into the encoded CF range, so the core scan stops at the
+    /// upper bound instead of over-reading past it.
     pub fn iterator_cf_opt(
         &self,
         cf: &ColumnFamily,
@@ -3401,7 +3532,11 @@ impl<E: PedraEnv> DB<E> {
         ro.refuse_checksums_off()?;
         let seq = ro.snap.unwrap_or_else(|| self.inner.visible_sequence());
         let names = self.cf_names();
-        scan_cf_at(&self.inner, &self.codec, &cf.name, mode, seq, &names)
+        let bounds = IterBounds {
+            lower: ro.lower.as_deref(),
+            upper: ro.upper.as_deref(),
+        };
+        scan_cf_at(&self.inner, &self.codec, &cf.name, mode, seq, &names, bounds)
     }
 
     /// rust-rocksdb `prefix_iterator`.
@@ -4062,6 +4197,77 @@ mod tests {
         opts.set_block_based_table_factory(&bb);
         let err = DB::open(&opts, &d).err().expect("NoChecksum");
         assert_eq!(err.kind(), ErrorKind::NotSupported);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// Iterate bounds (`ReadOptions::lower`/`upper`) must be honoured by
+    /// `iterator_cf_opt` — they used to be stored and silently dropped,
+    /// forcing callers into a manual `starts_with` break past the prefix.
+    #[test]
+    fn iterator_cf_opt_honours_iterate_bounds() {
+        let d = tmp("iter-bounds");
+        let db = DB::open_cf(&Options::new(), &d, &["data"]).unwrap();
+        let cf = db.cf_handle("data").unwrap();
+        for i in 0..10u8 {
+            db.put_cf(&cf, format!("k{i:02}").as_bytes(), [i]).unwrap();
+        }
+        let mut ro = ReadOptions::default();
+        ro.set_iterate_lower_bound(b"k03".to_vec());
+        ro.set_iterate_upper_bound(b"k07".to_vec());
+        let walk = |mode, ro: &ReadOptions| -> Vec<String> {
+            db.iterator_cf_opt(&cf, mode, ro.clone())
+                .unwrap()
+                .map(|r| String::from_utf8(r.unwrap().0.to_vec()).unwrap())
+                .collect()
+        };
+        // Forward: seek below the lower bound clamps up to it; the scan
+        // stops at the exclusive upper bound without a caller-side break.
+        assert_eq!(
+            walk(IteratorMode::From(b"k00", Direction::Forward), &ro),
+            ["k03", "k04", "k05", "k06"]
+        );
+        assert_eq!(walk(IteratorMode::Start, &ro), ["k03", "k04", "k05", "k06"]);
+        // Reverse from above the upper bound: last key inside the range,
+        // walking down to the inclusive lower bound.
+        assert_eq!(
+            walk(IteratorMode::From(b"k09", Direction::Reverse), &ro),
+            ["k06", "k05", "k04", "k03"]
+        );
+        // Bound outside the CF prefix: everything in `data` stays visible.
+        let mut wide = ReadOptions::default();
+        wide.set_iterate_upper_bound(b"zzz".to_vec());
+        assert_eq!(walk(IteratorMode::Start, &wide).len(), 10);
+        drop(db);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// Default-CF (raw-key encoding) bounds plus a multi-window walk
+    /// (10 x ITER_WINDOW keys) so refills resume through the clamped
+    /// range repeatedly.
+    #[test]
+    fn iterator_opt_bounds_and_multiwindow_refill() {
+        let d = tmp("iter-bounds-win");
+        let db = DB::open(&Options::new(), &d).unwrap();
+        for i in 0..10 * ITER_WINDOW {
+            db.put(format!("k{i:04}").as_bytes(), [1]).unwrap();
+        }
+        let mut ro = ReadOptions::default();
+        let lo = format!("k{:04}", 3 * ITER_WINDOW);
+        let hi = format!("k{:04}", 7 * ITER_WINDOW);
+        ro.set_iterate_lower_bound(lo.clone().into_bytes());
+        ro.set_iterate_upper_bound(hi.into_bytes());
+        let got: Vec<String> = db
+            .iterator_opt(IteratorMode::Start, ro)
+            .unwrap()
+            .map(|r| String::from_utf8(r.unwrap().0.to_vec()).unwrap())
+            .collect();
+        assert_eq!(got.len(), 4 * ITER_WINDOW, "bounded window count");
+        assert_eq!(got.first().map(String::as_str), Some(lo.as_str()));
+        let want_last = format!("k{:04}", 7 * ITER_WINDOW - 1);
+        assert_eq!(got.last().map(String::as_str), Some(want_last.as_str()));
+        // Distinct and strictly ascending across window refills.
+        assert!(got.windows(2).all(|w| w[0] < w[1]));
+        drop(db);
         let _ = std::fs::remove_dir_all(&d);
     }
 

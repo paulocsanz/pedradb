@@ -297,9 +297,7 @@ impl WriteBatchWithIndex {
         let k = key.as_ref().to_vec();
         let v = value.as_ref().to_vec();
         self.batch.put_cf(
-            &ColumnFamily {
-                name: cf.to_string(),
-            },
+            &ColumnFamily { name: cf.into() },
             &k,
             &v,
         );
@@ -318,12 +316,7 @@ impl WriteBatchWithIndex {
 
     fn delete_cf_name(&mut self, cf: &str, key: impl AsRef<[u8]>) {
         let k = key.as_ref().to_vec();
-        self.batch.delete_cf(
-            &ColumnFamily {
-                name: cf.to_string(),
-            },
-            &k,
-        );
+        self.batch.delete_cf(&ColumnFamily { name: cf.into() }, &k);
         self.index.insert((cf.to_string(), k), None);
     }
 

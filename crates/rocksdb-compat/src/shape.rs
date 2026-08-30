@@ -451,6 +451,9 @@ impl<'a, D, E: Env> DBRawIteratorWithThreadMode<'a, D, E> {
             mode,
             self.seq,
             &names,
+            // The raw iterator applies its own bounds per step (F181); the
+            // window scan stays unbounded here.
+            super::IterBounds::none(),
         ) {
             Ok(it) => self.inner = Some(it),
             Err(_) => self.inner = None,
