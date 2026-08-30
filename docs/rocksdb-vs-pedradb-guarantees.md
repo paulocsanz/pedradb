@@ -87,10 +87,24 @@ menos garantias que o RocksDB?" **Sim, no crash de processo.**
   `PEDRA_PARITY_ASYNC=1`), que perde equivalência de classe no nível
   crash de processo (mantém no nível power loss).
 - Caminhos: (a) flush do frame no fim de cada commit (`write()` por
-  commit = exatamente o que o Rocks paga; RFC-0044 registrou que isso
-  "empatava o qps" — custo ~zero), via slice + re-medida CHV da coluna
+  commit = exatamente o que o Rocks paga) + re-medida CHV da coluna
   async; ou (b) manter o mecanismo e anotar a claim. README público
   anotado em 2026-08-30 enquanto (a) não decide.
+- **Correção 2026-08-30 (A/B medido):** o RFC-0044 registrou que o
+  flush-por-commit "empatava o qps" — custo ~zero. **Não reproduz.**
+  A/B local (`lone_async_1c`, bench `fsync_amortization`, macOS sujo,
+  2000 puts, 3 runs/lado): staging 64 KiB ≈ 545k ops/s
+  (545095/544866/360534) vs flush-por-commit ≈ 311k
+  (311123/294029/448787) — pular o `write()` por commit vale ~1,75×
+  (~42% de throughput) na shape single-client write-per-op. Logo: parte
+  **material** dos ganhos da coluna async em shapes de escrita É o
+  syscall pulado; razão publicada R numa shape dessas vale ≈ R/1,75 em
+  classe-par (3× → ~1,7×; qualquer coisa entre 1,0–1,75 afunda).
+  Sob group commit os dois lados amortizam `write()` (Rocks: um por
+  write group; Pedra: um por 64 KiB), então o multiplicador lá é menor.
+  Reads não passam pelo WAL — ganhos de leitura intactos. Probe
+  aplicada e revertida (tree limpa). Decisivo: gate CHV 17 shapes com
+  build flush-por-commit — pendente "vai".
 
 ---
 

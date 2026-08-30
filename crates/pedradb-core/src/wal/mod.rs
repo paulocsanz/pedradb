@@ -202,8 +202,10 @@ impl<F: EnvFile> Wal<F> {
     /// - async (`force=false`): `write()` when the frame reaches
     ///   [`format::ASYNC_WAL_BUFFER`] (64 KiB, Rocks
     ///   `writable_file_max_buffer_size`). **Not** 1 MiB, not unencoded
-    ///   pending. Process crash can lose the tail (&lt; 64 KiB), like Rocks
-    ///   `sync=false`. Power loss can lose more.
+    ///   pending. Process crash can lose the tail (&lt; 64 KiB) — RocksDB
+    ///   default (`manual_wal_flush=false`) flushes each record to the OS
+    ///   and survives process crash, so the classes match only for power
+    ///   loss. Power loss can lose more.
     ///
     /// Bytes are always encoded into the frame before Ok (WAL v2 intern is
     /// still a real record).
