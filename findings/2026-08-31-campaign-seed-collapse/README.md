@@ -110,11 +110,16 @@ So the honest claim is: **8 distinct seeds = 3 kill-target classes with
 full coverage, × distinct KV/cluster-id per run** — not 8 behaviorally
 disjoint executions (node-side behavior is OS-timed, not seed-driven).
 
-**Open observability gap (same class as the seed echo):** the fingerprint
-prints `kill=node` without the target, so target coverage is not
-checkable from the artifact — today it is only derivable by re-deriving
-`seed % 3` from source, as done above. Planned fix (blocked: co-agent
-WIP currently breaks `pedradb-core` compile, so it cannot be verified
-and landed): echo the target in the fingerprint (`kill=node{n}`), and
-have the campaign script aggregate per-seed targets and fail registration
-when K≥2 runs collapse to a single target.
+**Closed the same session (2026-08-31):** the fingerprint now echoes the
+resolved target — `kill=node{n}` / `kill=leader{n}` (`tests/l28_real_tcp.rs`'s
+`kill=leader` substring check still matches) — and the campaign script
+aggregates per-seed targets into the registered README
+(`kill targets: … (distinct=N)`) and refuses registration when K≥2 runs
+collapse to a single target (KILL-TARGET COLLAPSE; K=1 exempt). Verified:
+4/4 unit tests (`kill_target_tests`); guard logic exercised on synthetic
+fingerprints in isolation (bare `kill=node` rejected at attempt level,
+collapsed targets refused, diverse pass); live smoke — seeds `0x15d01` and
+`0x15d02` echoed `kill=node3` / `kill=node1` with both fingerprints
+all-green. (First `0x15d01` attempt, run in parallel with another smoke
+while the co-agent's builds hammered the machine, flaked `left/napply`;
+the solo retry was green — campaign flake mode, not a kernel skip.)

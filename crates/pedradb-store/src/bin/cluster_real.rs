@@ -108,6 +108,15 @@ fn cluster_id_hex(seed: u64) -> String {
     format!("{:016x}{:016x}", seed, seed ^ 0xC1D5_7EED_C1D5_7EED)
 }
 
+/// Fingerprint kill field with the resolved target id (`node1`, `leader2`).
+/// The id is behavior-resolved (seed % 3, or the parsed leader under
+/// `--leader-kill`), so kill-target coverage across a campaign's seeds is
+/// checkable from the artifacts instead of re-derivable only from source
+/// (post-script in findings/2026-08-31-campaign-seed-collapse/README.md).
+fn kill_target_field(kind: &str, node: u64) -> String {
+    format!("{kind}{node}")
+}
+
 fn parse_r1_leader(st: &str) -> Option<u64> {
     for part in st.split_whitespace() {
         if let Some(rest) = part.strip_prefix("r1:leader=") {
@@ -551,17 +560,20 @@ fn run(seed: u64, kill_leader: bool, do_leave: bool, do_remove: bool) -> String 
     }
     let _ = std::fs::remove_dir_all(&parent);
     let kind = if kill_leader { "leader" } else { "node" };
+    // `kill=leader{n}` still prefix-matches the `kill=leader` consumer in
+    // tests/l28_real_tcp.rs.
+    let kill_field = kill_target_field(kind, kill_i as u64 + 1);
     if do_remove {
         format!(
-            "seed={seed:x} kill={kind} put=1 get={get_ok} after={kill_ok} restart={restart_ok} remove={remove_ok} leave={leave_ok} left={left_ok} hw={hw_ok} part={part_ok} apply={apply_ok} napply={napply_ok} trunc={trunc_ok} odrop={odrop_ok} abort={abort_ok} nowms={nowms_ok} hist={hist_ok} fence={fence_ok} clear={clear_ok} pre={pre_ok} peer={peer_ok} lid={lid_ok} rdr={rdr_ok} dsc={dsc_ok} pld={pld_ok} std={std_ok} hnt={hnt_ok} slot={slot_ok} dterm={dterm_ok}"
+            "seed={seed:x} kill={kill_field} put=1 get={get_ok} after={kill_ok} restart={restart_ok} remove={remove_ok} leave={leave_ok} left={left_ok} hw={hw_ok} part={part_ok} apply={apply_ok} napply={napply_ok} trunc={trunc_ok} odrop={odrop_ok} abort={abort_ok} nowms={nowms_ok} hist={hist_ok} fence={fence_ok} clear={clear_ok} pre={pre_ok} peer={peer_ok} lid={lid_ok} rdr={rdr_ok} dsc={dsc_ok} pld={pld_ok} std={std_ok} hnt={hnt_ok} slot={slot_ok} dterm={dterm_ok}"
         )
     } else if do_leave {
         format!(
-            "seed={seed:x} kill={kind} put=1 get={get_ok} after={kill_ok} restart={restart_ok} leave={leave_ok} sth={sth_ok} pj={pj_ok}"
+            "seed={seed:x} kill={kill_field} put=1 get={get_ok} after={kill_ok} restart={restart_ok} leave={leave_ok} sth={sth_ok} pj={pj_ok}"
         )
     } else {
         format!(
-            "seed={seed:x} kill={kind} put=1 get={get_ok} after={kill_ok} restart={restart_ok} sth={sth_ok} pj={pj_ok}"
+            "seed={seed:x} kill={kill_field} put=1 get={get_ok} after={kill_ok} restart={restart_ok} sth={sth_ok} pj={pj_ok}"
         )
     }
 }
@@ -791,5 +803,26 @@ mod seed_parse_tests {
         assert_eq!(parse_seed("0x015A_N01"), None);
         assert_eq!(parse_seed("0x015B_N01"), None);
         assert_eq!(parse_seed(""), None);
+    }
+}
+
+#[cfg(test)]
+mod kill_target_tests {
+    use super::kill_target_field;
+
+    #[test]
+    fn kill_target_echoes_resolved_node_id() {
+        assert_eq!(kill_target_field("node", 1), "node1");
+        assert_eq!(kill_target_field("node", 3), "node3");
+        assert_eq!(kill_target_field("leader", 2), "leader2");
+    }
+
+    #[test]
+    fn kill_target_keeps_prefix_consumers_matching() {
+        // tests/l28_real_tcp.rs greps `kill=leader` as a substring; the
+        // echoed id must not break that (or the campaign's `kill=node`
+        // readability).
+        assert!(format!("kill={}", kill_target_field("leader", 3)).contains("kill=leader"));
+        assert!(format!("kill={}", kill_target_field("node", 2)).contains("kill=node"));
     }
 }

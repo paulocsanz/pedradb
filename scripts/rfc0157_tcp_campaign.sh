@@ -22,7 +22,10 @@
 #        campaign-seed-collapse). Seeds are numeric now and each attempt
 #        cross-checks the fingerprint's echoed seed against the request.
 #        RFC0157_OUT (default the findings dir above) + RFC0157_TITLE for
-#        registered nightly runs.
+#        registered nightly runs. Each fingerprint must echo kill=node{n}
+#        (or leader{n}); registration FAILS if K>=2 seeds collapse to a
+#        single kill target (KILL-TARGET COLLAPSE) — target coverage is
+#        part of the diversity claim, so it is checked, not assumed.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -91,6 +94,14 @@ run_seed() {
       echo "attempt $attempt SEED COLLAPSE: asked $seed, cluster ran ${got_seed:-no-seed}" >>"$log"
       ok=0
     fi
+    # The fingerprint must echo WHICH node was killed (kill=node{n}) so
+    # target coverage is checkable from the artifact (post-script in
+    # findings/2026-08-31-campaign-seed-collapse/README.md). A bare
+    # `kill=node` means an outdated binary — refuse, don't register.
+    if ! grep -qE 'kill=(leader|node)[0-9]+' <<<"$fp"; then
+      echo "attempt $attempt KILL TARGET NOT ECHOED (old cluster_real?): $fp" >>"$log"
+      ok=0
+    fi
     for bit in get=1 after=1 restart=1 remove=1 napply=1; do
       grep -q " $bit" <<<" $fp" || ok=0
     done
@@ -136,6 +147,7 @@ factor=$(awk "BEGIN{printf \"%.2f\", $wall / ($solo + 0.001)}")
   echo "|------|----------|---|-------------|"
 } >"$OUT/README.md"
 clean=0
+all_targets=""
 for i in $(seq 1 "$K"); do
   row="$(grep '^0x' "$LOGS/.row_$i" 2>/dev/null || echo "$(seed_of "$i") - - MISSING")"
   rm -f "$LOGS/.row_$i"
@@ -146,19 +158,29 @@ for i in $(seq 1 "$K"); do
   else
     fail=$((fail + 1))
   fi
+  tgt="$(grep -oE 'kill=(leader|node)[0-9]+' <<<"$rest" | head -1)"
+  [[ -n "$tgt" ]] && all_targets="${all_targets}${tgt}"$'\n'
   echo "$row"
 done
+target_summary="$(sort <<<"$all_targets" | grep -E 'kill=' | uniq -c | awk '{printf "%s×%s " , $2, $1}')"
+distinct_targets="$(sort -u <<<"$all_targets" | grep -cE 'kill=' || true)"
 {
   echo
   echo "## Piso"
   echo "- K seeds com get/after/restart/remove/napply=1 é EVIDÊNCIA, não ∀ TCP (R-swarm-real segue no residual)."
   echo "- retry ≤3 é harness; liveness continua não admitida (R-es)."
+  echo "- kill targets: ${target_summary:-none} (distinct=${distinct_targets:-0}) — uma seed dirige só o alvo do kill (seed % 3), KV e cluster-id; RNG/timing dos nós não são seed-driven."
 } >>"$OUT/README.md"
 
 echo
 echo "campaign: $clean/$K seeds clean, wall=${wall}s solo=${solo}s factor=$factor"
+echo "campaign: kill targets ${target_summary:-none} (distinct=${distinct_targets:-0})"
 if [[ "$fail" -gt 0 ]]; then
   echo "campaign: FAILED ($fail seeds without a clean fingerprint)"
+  exit 1
+fi
+if [[ "$K" -ge 2 && "${distinct_targets:-0}" -lt 2 ]]; then
+  echo "campaign: FAILED (KILL-TARGET COLLAPSE: every seed killed the same node — the diversity claim would be void)"
   exit 1
 fi
 awk -v f="$factor" 'BEGIN { exit !(f < 2.0) }' || {
