@@ -3715,10 +3715,15 @@ where
 /// every compact-worker tick, so parked mems — and the fold union, which
 /// absorbs every new table while the count stays flat — used to grow
 /// with everything written since the last 200 ms idle window and OOM
-/// the host (observed at 25M entries on a 4 GiB box). Above 3x the
-/// write buffer this thread materializes mid-burst, paying the lz4/SST
-/// write Rocks pays on every memtable flush; short bursts (gate shapes)
-/// park <= 1 mem and never reach the bound. The drain is budgeted per
+/// the host (observed at 25M entries on a 4 GiB box). Above the write
+/// buffer this thread materializes mid-burst, paying the lz4/SST write
+/// Rocks pays on every memtable flush; short bursts (gate shapes) park
+/// <= 1 partial mem and stay under it. 1x is the honest bound: a parked
+/// mem holds ~3x its KV bytes in memory, so parking even one extra
+/// full memtable overshoots the write buffer the host configured —
+/// at 3x, a 620 MB 2M-entry hydrate (one full 256 MiB mem + a 108 MB
+/// tail) never reached 768 MiB, sat parked until settle, and the drain
+/// OOMed the same 4 GiB box (guest CHV, SETTLE_RSS 1.9 GB -> kill). The drain is budgeted per
 /// tick — an unbounded loop monopolizes the thread because the producer
 /// refills the queue as fast as it drains. Parked tables are immutable
 /// and `materialize_parked_once` serializes on the flush lock, so this
@@ -3757,7 +3762,7 @@ fn flush_worker_tick<E: PedraEnv>(inner: &ConcurrentDb<E>) {
     while inner.park_imm_once() {}
     let bound = inner
         .with_read(|db| db.auto_flush_threshold())
-        .map_or(0, |t| 3usize.saturating_mul(t));
+        .map_or(0, |t| t);
     if bound > 0 && inner.parked_unflushed_bytes() >= bound {
         let mut budget = 2usize;
         while budget > 0
@@ -4883,7 +4888,7 @@ mod tests {
         let db = DB::open_cf_with_env(&opts, &dir, &[], IoUringEnv::default()).unwrap();
         db.inner.set_defer_auto_compact(true);
         let payload = vec![b'x'; 1024];
-        // 6 tables x ~8 KiB = 48 KiB parked, well over the 3 x 8 KiB bound.
+        // 6 tables x ~8 KiB = 48 KiB parked, well over the 8 KiB bound.
         for i in 0..48u32 {
             db.put(i.to_be_bytes(), &payload).unwrap();
             if i % 8 == 7 {
@@ -4893,7 +4898,7 @@ mod tests {
         }
         let before = db.inner.parked_unflushed_count();
         assert!(before >= 5, "expected a parked pile, got {before}");
-        let bound = 3 * 8 * 1024;
+        let bound = 8 * 1024;
         assert!(
             db.inner.parked_unflushed_bytes() >= bound,
             "parked bytes {}B must exceed the bound",
