@@ -204,3 +204,28 @@ their round) plus a fn-level diff of every dirty file vs HEAD:
   fn-level tooth (every pub fn in an enrolled kernel must be an entry,
   an as_is, a clone fn, or explicitly allowlisted) is the hardening
   candidate for a future round.
+
+## Delta re-audit (2026-08-31 later night): WIP drifted while landing
+
+The 11-file WIP kept growing after `97c4593` (214 → 310 insertions
+between two `git diff --stat` snapshots minutes apart — the co-agent is
+actively landing). Re-ran the fn-level delta check on the new state:
+
+- 3 genuinely new private fns since the first re-audit: 2 in `db.rs`
+  (`write_merged_with_cf` :993, `write_imm_l0_files_inner` :5047 —
+  compaction I/O writers, plumbing class; `db.rs` is not an enrolled
+  kernel file, `db_rs_extracted=false`) and 1 in `wal/mod.rs`
+  (`sync_data_inner` :275 — inside the blind spot's file class).
+- `sync_data_inner` is an order-preserving extraction: the durability
+  sequence `write_pending_frame` → `flush` → `sync_data{,_strong}` moved
+  verbatim out of `sync_data` so a timing wrapper can measure it; the
+  wrapper returns the `Result` unchanged (no error swallowing).
+  `set_full_fsync`/`full_fsync` are pre-existing pub fns (RFC-0036).
+- `eintr_then_late_cqe` (cqe_kernel.rs) is a signature reformat
+  (multi-line → one line), not a new fn.
+- Still **0 new pub fns** in any enrolled kernel file. Guard
+  `posix_unsafe_rc_sites_all_gated` re-run green on the drifted WIP
+  (pedradb-posix grew to +34 in the delta).
+- Second data point for the open blind spot: file-level surface clean,
+  hand-check required again. The fn-level tooth remains the fix; until
+  it lands, every co-agent delta costs one manual fn-level diff.
