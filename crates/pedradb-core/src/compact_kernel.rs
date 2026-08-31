@@ -24,6 +24,33 @@
 
 #![forbid(unsafe_code)]
 
+/// Target size of one merged compaction output SST (the Rocks
+/// `target_file_size_base` role). The SST writer buffers one output
+/// file's compressed bytes in memory before the final write, so merging
+/// every input into a single file puts the whole dataset in RAM: a full
+/// compact OOMed a 4 GiB guest at 2M entries (620 MB dataset, +1.1 GB
+/// during compact) and only survived on the 128 GiB host as a ~10 GB
+/// in-memory file. Splitting the sorted merge stream at this bound keeps
+/// the writer's buffer bounded and gives compaction file granularity.
+/// Splits fall between user keys, so every output file holds a disjoint
+/// contiguous key range.
+pub const COMPACT_TARGET_FILE_BYTES: u64 = 256 * 1024 * 1024;
+
+/// Whether a merged-output chunk that has accumulated `written_bytes`
+/// should split before the next entry at `target` bytes (pure policy twin
+/// for the kernel test; the streaming split also waits for a user-key
+/// boundary).
+#[must_use]
+pub fn compact_should_split_at(written_bytes: u64, target: u64) -> bool {
+    written_bytes >= target
+}
+
+/// [`compact_should_split_at`] at [`COMPACT_TARGET_FILE_BYTES`].
+#[must_use]
+pub fn compact_should_split(written_bytes: u64) -> bool {
+    compact_should_split_at(written_bytes, COMPACT_TARGET_FILE_BYTES)
+}
+
 /// What one compaction run does.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum CompactPlan {
@@ -412,5 +439,21 @@ mod tests {
             VersionFate::Drop,
             "AS-IS dente: drop a version a snapshot still reads"
         );
+    }
+
+    #[test]
+    fn compact_should_split_bounds_one_output_file() {
+        assert!(!compact_should_split(0), "empty chunk never splits");
+        assert!(
+            !compact_should_split(COMPACT_TARGET_FILE_BYTES - 1),
+            "below target keeps merging"
+        );
+        assert!(
+            compact_should_split(COMPACT_TARGET_FILE_BYTES),
+            "at target the next entry starts a new file"
+        );
+        assert_eq!(COMPACT_TARGET_FILE_BYTES, 256 * 1024 * 1024);
+        assert!(compact_should_split_at(1_024, 1_024));
+        assert!(!compact_should_split_at(1_023, 1_024));
     }
 }

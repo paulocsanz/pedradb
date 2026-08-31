@@ -208,6 +208,10 @@ pub struct Options {
     /// / Rocks C++ factory. `0` disables auto-flush (manual [`DB::flush`] only).
     /// Hosts that `set_write_buffer_size` get exactly that many bytes.
     pub write_buffer_size: usize,
+    /// Merged compaction output split target (`set_target_file_size_base`
+    /// role). `0` keeps the kernel default (256 MiB): the SST writer buffers
+    /// one output file in memory, so this bounds compaction peak RAM.
+    pub target_file_size_base: u64,
     /// WAL barrier before Ok. Default **`false`** (RFC-0054): rust-rocksdb
     /// `WriteOptions.sync=false` — the factory config every Rocks host
     /// actually runs. Kernel `OpenOptions.sync` stays `true` (Pedra G1).
@@ -331,6 +335,7 @@ impl Default for Options {
         Self {
             create_if_missing: false,
             write_buffer_size: 64 * 1024 * 1024,
+            target_file_size_base: 0,
             sync: false,
             auto_reclaim: true,
             auto_resume_transient: true,
@@ -467,7 +472,9 @@ impl Options {
     pub fn set_avoid_unnecessary_blocking_io(&mut self, _v: bool) {}
     pub fn set_enable_write_thread_adaptive_yield(&mut self, _v: bool) {}
     pub fn set_log_level(&mut self, _l: LogLevel) {}
-    pub fn set_target_file_size_base(&mut self, _n: u64) {}
+    pub fn set_target_file_size_base(&mut self, n: u64) {
+        self.target_file_size_base = n;
+    }
     pub fn set_target_file_size_multiplier(&mut self, _n: i32) {}
     pub fn set_bottommost_compression_type(&mut self, _c: DBCompressionType) {}
     pub fn set_bottommost_zstd_max_train_bytes(&mut self, _n: i32, _enabled: bool) {}
@@ -2082,6 +2089,9 @@ impl<E: PedraEnv> DB<E> {
             core_opts.large_value_threshold = Some(opts.min_blob_size as usize);
         }
         let db = ConcurrentDb::open_with_env(dir, core_opts, env)?;
+        if opts.target_file_size_base > 0 {
+            db.with_write(|d| d.set_compact_target_file_bytes(opts.target_file_size_base));
+        }
         if verified {
             // Lone-commit-only: every commit a single-writer critical
             // section until the group-commit kernel (RFC-0057 P2.1).
@@ -3804,11 +3814,11 @@ fn compat_compact_once<E: PedraEnv>(inner: &ConcurrentDb<E>, gate: &Mutex<()>) -
     let Some(job) = job else {
         return false;
     };
-    let table = match job.write() {
+    let tables = match job.write() {
         Ok(t) => t,
         Err(_) => return false,
     };
-    if !inner.install_prepared_l0_off_lock(job, table) {
+    if !inner.install_prepared_l0_off_lock(job, tables) {
         return false;
     }
     inner.with_read(|db| db.level_file_count(0)) > 0
