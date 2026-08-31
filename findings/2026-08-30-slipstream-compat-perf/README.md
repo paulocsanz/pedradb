@@ -922,3 +922,94 @@ legs.
 
 
 
+
+## Local 6M BLOCK_TARGET A/B + PEDRA_BLOCK_TARGET knob (pre-v21k)
+
+Method fix first: running the bench binary **directly without `--bench`
+puts criterion in smoke-test mode** ("Testing X / Success", no timings —
+criterion lib.rs:963 `(false, _) => true`); the guest entrypoint invokes
+via `cargo bench`, which passes `--bench`. All local criterion runs
+before this point were invalid single-iteration tests (probe percentiles
+were always real — custom harness inside the setup). Also: cargo's bench
+binary hash is graph-derived, not content-derived — a rebuild relinks
+**in place** (`ls -t` can hand you the old or new build; same filename).
+Verify mtime, not name.
+
+Arm A — local 6M, v21j (4 KiB blocks), `--bench`, TMPDIR pinned:
+
+| leg (6M, local)     | pedra    | rocks    | ratio |
+|---------------------|----------|----------|-------|
+| get_hit             | 5.386 µs | 6.774 µs | 1.26× |
+| prefix_scan         | 202.9 µs | 225.7 µs | 1.11× |
+| lookup_100 get_loop | 482 µs   | 608 µs   | 1.26× |
+| lookup_100 multi_get| 436 µs   | 777 µs   | 1.78× |
+
+Local 6M is **>1× on every criterion leg with the current format** — the
+25M guest gaps are guest-regime (5.15 GiB vs a 256 MiB pool on
+qcow2/virtio), not format-inherent.
+
+Arm B — same tree, BLOCK_TARGET 16384 (const flip, pre-knob): raw deltas
+unusable (the concurrent session's builds moved the **rocks** legs
+−13/−18 % between arms on identical rocks code). Normalized
+pedra/rocks ratios A→B: get_hit 0.80→1.07, get_loop 0.79→0.99,
+multi_get 0.56→1.03, scan 0.90→0.92. Direction is consistent with
+theory: 16 KiB blocks lengthen the in-block walk (cache-hot point legs
+lose their edge) and amortize per-block decode/read (scan flat-to-
+better). On the cache-cold guest the scan should gain ~4× fewer block
+reads per scan while point legs stay request-latency-bound (≈neutral).
+
+Knob (v21k, commit d7b53d0): `PEDRA_BLOCK_TARGET` (bytes, clamped
+1 KiB–256 KiB, default 4096) read once via `OnceLock`; only the writer
+consults it, reads are self-describing per block so mixed-target tables
+coexist. Local validation: unset → 203.1 µs scan (reproduces arm A);
+16384 → 198.1 µs. Default stays 4096 until the ladder proves 16 KiB at
+every scale (1M/10M are cache-warm, where the local point-leg regression
+applies). Guest run #14 = v21k: knob + entrypoint
+`PEDRA_BLOCK_TARGET=16384` + a hydrate fd-floor probe
+(`fdprobe.py`: 200 × 230.4 KiB append + fdatasync on /data/stores →
+`FDFSYNC_PROBE per_op_ms=…`; ×24 414 = the structural hydrate floor).
+
+## Guest run #14 (v21k, 25M) — 16 KiB blocks refuted; fd floor measured
+
+v21k = v21j + `PEDRA_BLOCK_TARGET` knob, entrypoint exported to 16384,
++ fd-floor probe. `BENCH_EXIT_pedradb_diag=0`, raw serial:
+`run14-25m-block16k.txt`.
+
+| leg (25M)              | run #13 (4 KiB) | run #14 (16 KiB) | rocks default | #14 ratio |
+|------------------------|-----------------|------------------|---------------|-----------|
+| hydrate                | 143.7 s         | **136.1 s**      | 25.3 s        | 0.19×     |
+| settle                 | 52.0 s          | **47.9 s**       | 8.3 s         | 0.17×     |
+| probe_hit p50          | 33.9 µs         | 48.0 µs          | 45.4 µs       | 0.95×     |
+| probe_miss p50         | 2.5 µs          | 2.6 µs           | rocks-class   | ~1×       |
+| get_hit (criterion)    | 46.7 µs         | 56.0 µs          | 38.59 µs      | 0.69×     |
+| prefix_scan            | 632.6 µs        | 592.5 µs         | 305.6 µs      | 0.52×     |
+| lookup_100 get_loop    | 4.534 ms        | 5.928 ms         | 3.38 ms       | 0.57×     |
+| lookup_100 multi_get   | 4.954 ms        | 6.184 ms         | 3.70 ms       | 0.60×     |
+| on disk after settle   | 5.15 GiB        | 5.04 GiB         | 5.24 GiB      | smaller    |
+
+Honest read:
+- **16 KiB blocks are refuted at 25M guest scale.** Every point leg got
+  worse (probe_hit −42 %, get_hit +15 % p=0.04, lookup_100 +25/+31 %
+  p=0.00 vs the #13 baselines on the same disk) and prefix_scan only
+  moved −6 % (p=0.84, not significant). The scan-is-block-read-bound
+  theory is falsified: the guest scan is dominated by per-key iterator
+  work, which block size does not reduce, while point lookups pay for
+  the wider read and longer in-block walk. Default stays 4096; the knob
+  stays (default-off, cheap, self-describing reads); **the guest
+  entrypoint's `PEDRA_BLOCK_TARGET=16384` export must be dropped in the
+  next injection.**
+- Only wins: hydrate 136.1 s and settle 47.9 s (both best-yet — fewer
+  block boundaries, slightly less write/verify overhead) and disk after
+  settle 5.04 GiB. Not worth the point-leg cost.
+- **fd floor measured** (`FDFSYNC_PROBE n=200 … per_op_ms=1.974`,
+  python3 present in the image): 24 414 hydrate batches × 1.974 ms ≈
+  **48.2 s structural floor** — hydrate at 136.1 s carries ~88 s of
+  non-floor cost. Ingest write-amp (leveled L1-slice rewrites during
+  hydrate; 10.85 GiB written for a 5.04 GiB settled set ≈ 2.15×) is the
+  hydrate lever, not the fd ceiling. Caveat: the probe ran idle; under
+  hydrate's concurrent compaction I/O the effective per-op cost is
+  higher, so 48.2 s is a lower bound on the floor.
+- probe_hit across #11–#14: 43.1 / 38.9 / 33.9 / 48.0 µs — even the
+  custom-harness probe swings ±20 % run-to-run on this guest. The 16 KiB
+  verdict rests on all four point legs agreeing (incl. criterion's own
+  significance tests), not on any single leg.

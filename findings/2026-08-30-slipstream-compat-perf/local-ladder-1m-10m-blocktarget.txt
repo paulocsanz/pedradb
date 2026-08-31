@@ -1,0 +1,84 @@
+=== N=1000000 MODE=default ===
+get_hit/rocksdb         time:   [2.9771 µs 3.1089 µs 3.2700 µs]
+                        time:   [-49.276% -46.450% -44.038%] (p = 0.00 < 0.05)
+get_hit/pedradb         time:   [9.5633 µs 10.462 µs 11.423 µs]
+                        time:   [+51.191% +67.748% +85.627%] (p = 0.00 < 0.05)
+prefix_scan/rocksdb     time:   [237.52 µs 249.19 µs 262.80 µs]
+                        time:   [+45.210% +67.240% +90.634%] (p = 0.00 < 0.05)
+prefix_scan/pedradb     time:   [204.81 µs 212.27 µs 222.82 µs]
+                        time:   [+5.3326% +9.2359% +13.554%] (p = 0.00 < 0.05)
+lookup_100/rocksdb_get_loop
+                        time:   [247.00 µs 250.12 µs 253.76 µs]
+                        time:   [-60.893% -60.122% -59.428%] (p = 0.00 < 0.05)
+lookup_100/rocksdb_multi_get
+                        time:   [214.63 µs 216.05 µs 217.63 µs]
+                        time:   [-67.314% -66.934% -66.553%] (p = 0.00 < 0.05)
+lookup_100/pedradb_get_loop
+                        time:   [291.64 µs 302.78 µs 317.36 µs]
+                        time:   [-54.292% -52.152% -49.598%] (p = 0.00 < 0.05)
+lookup_100/pedradb_multi_get
+                        time:   [1.2603 ms 1.4745 ms 1.7064 ms]
+                        time:   [+92.692% +128.38% +172.66%] (p = 0.00 < 0.05)
+=== N=1000000 MODE=k16 ===
+get_hit/rocksdb         time:   [2.6398 µs 2.6721 µs 2.7067 µs]
+                        time:   [-19.634% -15.334% -10.980%] (p = 0.00 < 0.05)
+get_hit/pedradb         time:   [5.6696 µs 5.9692 µs 6.2923 µs]
+                        time:   [-51.185% -45.601% -39.212%] (p = 0.00 < 0.05)
+prefix_scan/rocksdb     time:   [222.68 µs 226.81 µs 231.79 µs]
+                        time:   [-39.806% -30.271% -19.400%] (p = 0.00 < 0.05)
+prefix_scan/pedradb     time:   [239.95 µs 251.88 µs 264.37 µs]
+                        time:   [+6.6747% +11.713% +16.895%] (p = 0.00 < 0.05)
+lookup_100/rocksdb_get_loop
+                        time:   [271.33 µs 278.26 µs 286.05 µs]
+                        time:   [+8.8821% +12.692% +16.799%] (p = 0.00 < 0.05)
+lookup_100/rocksdb_multi_get
+                        time:   [249.16 µs 257.69 µs 267.55 µs]
+                        time:   [+17.844% +21.142% +24.972%] (p = 0.00 < 0.05)
+lookup_100/pedradb_get_loop
+                        time:   [516.07 µs 533.58 µs 555.43 µs]
+                        time:   [+69.172% +83.483% +101.10%] (p = 0.00 < 0.05)
+lookup_100/pedradb_multi_get
+                        time:   [640.91 µs 704.90 µs 783.94 µs]
+                        time:   [-62.054% -52.356% -37.249%] (p = 0.00 < 0.05)
+=== N=10000000 MODE=default ===
+get_hit/rocksdb         time:   [128.29 µs 134.45 µs 140.50 µs]
+                        time:   [+4634.3% +4806.0% +5043.4%] (p = 0.00 < 0.05)
+get_hit/pedradb         time:   [4.7086 µs 4.8847 µs 5.1729 µs]
+                        time:   [-14.303% -4.8773% +7.9330%] (p = 0.42 > 0.05)
+prefix_scan/rocksdb     time:   [211.08 µs 212.51 µs 214.08 µs]
+                        time:   [-12.237% -7.8925% -4.4816%] (p = 0.00 < 0.05)
+prefix_scan/pedradb     time:   [233.26 µs 277.59 µs 330.53 µs]
+                        time:   [-5.5043% +2.5862% +13.540%] (p = 0.63 > 0.05)
+lookup_100/rocksdb_get_loop
+                        time:   [11.340 ms 11.702 ms 12.093 ms]
+                        time:   [+3822.9% +4009.3% +4193.2%] (p = 0.00 < 0.05)
+lookup_100/rocksdb_multi_get
+                        time:   [6.6873 ms 6.8386 ms 6.9901 ms]
+                        time:   [+2411.3% +2510.9% +2604.9%] (p = 0.00 < 0.05)
+lookup_100/pedradb_get_loop
+                        time:   [439.56 µs 452.16 µs 465.99 µs]
+                        time:   [-26.172% -19.815% -14.540%] (p = 0.00 < 0.05)
+lookup_100/pedradb_multi_get
+                        time:   [438.52 µs 463.33 µs 502.70 µs]
+                        time:   [-48.189% -35.818% -24.328%] (p = 0.00 < 0.05)
+=== N=10000000 MODE=k16 ===
+get_hit/rocksdb         time:   [107.65 µs 109.74 µs 112.10 µs]
+                        time:   [-15.074% -11.275% -7.8293%] (p = 0.00 < 0.05)
+get_hit/pedradb         time:   [6.4307 µs 6.5548 µs 6.7117 µs]
+                        time:   [+14.621% +28.583% +41.257%] (p = 0.00 < 0.05)
+prefix_scan/rocksdb     time:   [208.89 µs 209.67 µs 210.43 µs]
+                        time:   [-3.7681% -2.7981% -1.8543%] (p = 0.00 < 0.05)
+prefix_scan/pedradb     time:   [179.55 µs 184.39 µs 190.56 µs]
+                        time:   [-30.442% -23.232% -16.311%] (p = 0.00 < 0.05)
+lookup_100/rocksdb_get_loop
+                        time:   [10.897 ms 11.192 ms 11.532 ms]
+                        time:   [-8.4536% -4.3598% -0.0441%] (p = 0.04 < 0.05)
+lookup_100/rocksdb_multi_get
+                        time:   [9.5881 ms 10.093 ms 10.780 ms]
+                        time:   [+39.523% +47.590% +58.849%] (p = 0.00 < 0.05)
+lookup_100/pedradb_get_loop
+                        time:   [696.45 µs 749.86 µs 823.92 µs]
+                        time:   [+59.044% +69.434% +84.146%] (p = 0.00 < 0.05)
+lookup_100/pedradb_multi_get
+                        time:   [662.45 µs 672.62 µs 683.77 µs]
+                        time:   [+49.756% +56.039% +61.350%] (p = 0.00 < 0.05)
