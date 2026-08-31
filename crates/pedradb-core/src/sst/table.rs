@@ -93,7 +93,12 @@ pub fn sst_blocks_decoded() -> usize {
 /// Minimum encoded bytes we assume per SST entry (`ikey_len` + `val_len` headers alone).
 const MIN_ENCODED_ENTRY: usize = 8;
 
-fn check_sst_entry_count(n: usize, file_len: usize, path: &Path) -> Result<()> {
+fn check_sst_entry_count(
+    n: usize,
+    file_len: usize,
+    compressed_blocks: bool,
+    path: &Path,
+) -> Result<()> {
     if n > MAX_SST_ENTRIES {
         return Err(CoreError::Internal(format!(
             "SST entry count {n} exceeds MAX_SST_ENTRIES ({MAX_SST_ENTRIES}) in {}",
@@ -101,12 +106,18 @@ fn check_sst_entry_count(n: usize, file_len: usize, path: &Path) -> Result<()> {
         )));
     }
     // Even a 1-byte entry cannot exceed the file; tighter: min encoded size.
-    let max_by_size = file_len / MIN_ENCODED_ENTRY + 1;
-    if n > max_by_size {
-        return Err(CoreError::Internal(format!(
-            "SST entry count {n} impossible for file size {file_len} in {}",
-            path.display()
-        )));
+    // Block compression breaks the per-byte floor — a run of identical
+    // values packs thousands of entries into a few KiB — so only the hard
+    // MAX_SST_ENTRIES cap applies to compressed files (their count is
+    // verified by decoding the blocks either way).
+    if !compressed_blocks {
+        let max_by_size = file_len / MIN_ENCODED_ENTRY + 1;
+        if n > max_by_size {
+            return Err(CoreError::Internal(format!(
+                "SST entry count {n} impossible for file size {file_len} in {}",
+                path.display()
+            )));
+        }
     }
     Ok(())
 }
@@ -862,7 +873,7 @@ impl SstTable {
     fn decode_v1(path: &Path, file_len: usize, c: &mut Cursor<'_>) -> Result<Self> {
         let n = usize::try_from(c.read_u64()?)
             .map_err(|_| CoreError::Internal("SST entry count does not fit usize".into()))?;
-        check_sst_entry_count(n, file_len, path)?;
+        check_sst_entry_count(n, file_len, false, path)?;
         let mut entries = Vec::with_capacity(n);
         let mut max_sequence = 0;
         for _ in 0..n {
@@ -906,7 +917,7 @@ impl SstTable {
     ) -> Result<Self> {
         let n = usize::try_from(c.read_u64()?)
             .map_err(|_| CoreError::Internal("SST entry count does not fit usize".into()))?;
-        check_sst_entry_count(n, buf.len(), path)?;
+        check_sst_entry_count(n, buf.len(), compressed_blocks, path)?;
         let max_sequence = c.read_u64()?;
         let num_blocks = c.read_u32()? as usize;
         check_sst_block_count(num_blocks, buf.len(), path)?;
@@ -2773,6 +2784,58 @@ mod tests {
             err.to_string().contains("CRC mismatch"),
             "corrupt reload must fail closed, got {err:?}"
         );
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// v21b regression: a compressed L0 flush of highly repetitive values
+    /// packs more entries than the uncompressed min-size arithmetic allows.
+    /// The entry-count check rejected the freshly written file, so
+    /// `materialize_parked_once` errored (and retried the same parked
+    /// memtable forever — compat auto-reclaim livelock, every put waiting
+    /// out the 30 s flush-debt ceiling).
+    #[test]
+    fn compressed_repetitive_flush_passes_entry_count_check() {
+        let path = temp_path();
+        let mut mem = MemTable::new();
+        // Same shape as the compat auto-reclaim livelock: a few hot keys,
+        // version piles, near-identical values. 600 versions per key.
+        let val = vec![b'v'; 100];
+        for i in 0..600u32 {
+            mem.put(b"hot".as_slice(), u64::from(i) * 2 + 1, val.clone());
+            let seq8 = format!("{i:08}").into_bytes();
+            mem.put(b"hot2".as_slice(), u64::from(i) * 2 + 2, seq8);
+        }
+        let table = write_l0_sst(&StdEnv, &path, &mem, true).unwrap();
+        assert!(table.compressed_blocks, "L0 flush must write v5 blocks");
+        assert_eq!(table.len(), 1200);
+        let file_len = std::fs::metadata(&path).unwrap().len() as usize;
+        assert!(
+            file_len / MIN_ENCODED_ENTRY + 1 < 1200,
+            "fixture must cross the old uncompressed floor: {file_len} bytes / 1200 entries"
+        );
+        // Reopen from disk: the header count vs file-size check must pass
+        // for a compressed body, and the table must read back whole.
+        let reopened = SstTable::open(&path).unwrap();
+        assert_eq!(reopened.len(), 1200);
+        assert_eq!(reopened.cached_entries_count(), 0);
+        let mut hot_vals = 0usize;
+        let mut hot2_vals = 0usize;
+        let mut it = reopened.iter_internal_streaming();
+        while let Some((k, v)) = it.next_entry().unwrap() {
+            match k.user_key.as_ref() {
+                b"hot" => {
+                    assert_eq!(v.as_ref(), val.as_slice());
+                    hot_vals += 1;
+                }
+                b"hot2" => {
+                    assert_eq!(v.len(), 8);
+                    hot2_vals += 1;
+                }
+                other => panic!("unexpected key {other:?}"),
+            }
+        }
+        assert_eq!(hot_vals, 600);
+        assert_eq!(hot2_vals, 600);
         let _ = std::fs::remove_file(&path);
     }
 }
