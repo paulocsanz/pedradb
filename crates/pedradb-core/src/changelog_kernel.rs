@@ -42,6 +42,30 @@ pub fn changelog_should_store_as_is(commits_since: u64, _interval: u64) -> bool 
     commits_since >= 1
 }
 
+/// Default lazy-feed rebuild budget in entries. Above it the explicit
+/// flush/checkpoint/close store leaves the CHANGELOG cache stale instead of
+/// materializing MemTable ∪ SSTs (~3 live-set copies: BTreeMap + sorted Vec
+/// + encode buffer). The on-disk CHANGELOG is a cache (RFC-0019) — the feed
+/// is rebuilt from WAL / live on demand, so this is a memory bound, not a
+/// durability gate.
+pub const DEFAULT_CHANGELOG_REBUILD_BUDGET_ENTRIES: u64 = 100_000;
+
+/// Lazy-feed rebuild gate: materialize the live set into the CHANGELOG cache
+/// only while the live entry count stays within `budget_entries`
+/// (RFC-0039 P0.3 / RFC-0041 P1.1 — flush stays O(write buffer), not
+/// O(live set)).
+#[must_use]
+pub fn changelog_rebuild_within_budget(live_entries: u64, budget_entries: u64) -> bool {
+    live_entries <= budget_entries
+}
+
+/// AS-IS: always materialize — the 25M OOM dente (guest settle flush held
+/// ~3× live set; killed at 3.3 GB for a 0.61 GiB store).
+#[must_use]
+pub fn changelog_rebuild_within_budget_as_is(_live_entries: u64, _budget_entries: u64) -> bool {
+    true
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -82,6 +106,25 @@ mod tests {
             }
         }
         assert_eq!(n, 2 * 8);
+    }
+
+    #[test]
+    fn rebuild_budget_bounds_materialization() {
+        assert!(changelog_rebuild_within_budget(0, 100));
+        assert!(changelog_rebuild_within_budget(100, 100));
+        assert!(!changelog_rebuild_within_budget(101, 100));
+        assert!(!changelog_rebuild_within_budget(
+            25_000_000,
+            DEFAULT_CHANGELOG_REBUILD_BUDGET_ENTRIES
+        ));
+    }
+
+    #[test]
+    fn rebuild_budget_as_is_always_materializes() {
+        assert!(changelog_rebuild_within_budget_as_is(
+            25_000_000,
+            DEFAULT_CHANGELOG_REBUILD_BUDGET_ENTRIES
+        ));
     }
 
     #[test]

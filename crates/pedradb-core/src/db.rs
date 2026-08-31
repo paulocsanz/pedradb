@@ -1156,6 +1156,12 @@ pub struct Db<E: Env = StdEnv> {
     /// Persist CHANGELOG at most every N durable commits (RFC-0031). `0` = never
     /// on the commit path.
     changelog_interval: u64,
+    /// Lazy-feed rebuild budget in entries: explicit flush / checkpoint /
+    /// close only materializes MemTable ∪ SSTs into the CHANGELOG cache
+    /// while the live entry count stays within it. Above it the cache stays
+    /// stale and the feed is rebuilt on demand (RFC-0019: on-disk CHANGELOG
+    /// is a cache).
+    changelog_rebuild_budget_entries: u64,
     /// Durable commits since the last CHANGELOG store.
     commits_since_changelog: u64,
     /// Successful CHANGELOG stores since open.
@@ -1592,6 +1598,8 @@ impl<E: Env> Db<E> {
             vlog_gc_count: 0,
             change_log,
             changelog_interval: changelog_interval_from_env(),
+            changelog_rebuild_budget_entries:
+                crate::changelog_kernel::DEFAULT_CHANGELOG_REBUILD_BUDGET_ENTRIES,
             commits_since_changelog: 0,
             changelog_store_count: 0,
             unsynced_ssts: Vec::new(),
@@ -1909,6 +1917,15 @@ impl<E: Env> Db<E> {
         self.changelog_interval
     }
 
+    /// Lazy-feed rebuild budget in entries (see
+    /// [`crate::changelog_kernel::changelog_rebuild_within_budget`]). Above it
+    /// the explicit flush / checkpoint / close store leaves the CHANGELOG
+    /// cache stale instead of materializing the live set.
+    pub fn set_changelog_rebuild_budget_entries(&mut self, n: u64) -> &mut Self {
+        self.changelog_rebuild_budget_entries = n;
+        self
+    }
+
     /// Successful CHANGELOG cache stores since open.
     #[must_use]
     pub fn changelog_store_count(&self) -> u64 {
@@ -1924,9 +1941,17 @@ impl<E: Env> Db<E> {
         {
             // Best-effort fill (F1): a corrupt payload keeps the cache stale;
             // the feed is still rebuildable from WAL on reopen.
-            if let Ok(entries) = self.collect_feed_from_live() {
-                if !entries.is_empty() {
-                    self.change_log.replace_sorted(entries);
+            // Bounded (RFC-0039 P0.3 / RFC-0041 P1.1): materializing the
+            // live set costs ~3 live-set copies; above the budget the cache
+            // stays stale and readers rebuild on demand.
+            if crate::changelog_kernel::changelog_rebuild_within_budget(
+                self.live_entry_estimate(),
+                self.changelog_rebuild_budget_entries,
+            ) {
+                if let Ok(entries) = self.collect_feed_from_live() {
+                    if !entries.is_empty() {
+                        self.change_log.replace_sorted(entries);
+                    }
                 }
             }
         }
@@ -6403,6 +6428,15 @@ impl<E: Env> Db<E> {
         self.changelog_interval == 0
     }
 
+    /// Live entry count the lazy CHANGELOG rebuild would materialize
+    /// (mem + imm + every SST). Same view `collect_feed_from_live` walks.
+    fn live_entry_estimate(&self) -> u64 {
+        let mem = self.mem.len() as u64;
+        let imm = self.imm.as_ref().map_or(0, |m| m.len() as u64);
+        let ssts: u64 = self.ssts.iter().map(|t| t.len() as u64).sum();
+        mem + imm + ssts
+    }
+
     /// Full WAL history when the log is still live; last-per-key after rotate.
     ///
     /// # Errors
@@ -6536,6 +6570,14 @@ impl<E: Env> Db<E> {
     fn maybe_rebuild_feed_from_live(&mut self) {
         let feed_empty = self.change_log.max_sequence().unwrap_or(0) == 0;
         if !changelog_needs_sst_rebuild(feed_empty, self.last_sequence()) {
+            return;
+        }
+        // Same rebuild budget as the flush path: above it the cache stays
+        // empty and `lazy_feed_entries` rebuilds on demand (WAL / live).
+        if !crate::changelog_kernel::changelog_rebuild_within_budget(
+            self.live_entry_estimate(),
+            self.changelog_rebuild_budget_entries,
+        ) {
             return;
         }
         // Best-effort cache rebuild: a corrupt payload keeps the (stale but
@@ -14609,6 +14651,69 @@ mod tests {
         let db = Db::open(&dir).unwrap();
         assert_eq!(db.get(&[b'k', 0]).as_deref(), Some([b'v', 0].as_slice()));
         assert_eq!(db.get(&[b'k', 31]).as_deref(), Some([b'v', 31].as_slice()));
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// RFC-0039 P0.3 / RFC-0041 P1.1: above the lazy rebuild budget the
+    /// explicit flush must not materialize the live set into the CHANGELOG
+    /// cache (~3 live-set copies — the 25M guest settle OOM: killed at
+    /// 3.3 GB RSS for a 0.61 GiB store). The cache stays stale; the feed is
+    /// still served by the on-demand live rebuild.
+    #[test]
+    fn changelog_lazy_rebuild_skips_above_budget() {
+        let dir = temp_dir();
+        let chlog = dir.join(crate::change_feed::CHANGELOG_FILE_NAME);
+        {
+            let mut db = Db::open(&dir).unwrap();
+            db.set_changelog_interval(0);
+            db.set_changelog_rebuild_budget_entries(4);
+            for i in 0..5u8 {
+                db.put([b'k', i], [b'v', i]).unwrap();
+            }
+            db.flush().unwrap();
+            let persisted = fs::metadata(&chlog).map(|m| m.len()).unwrap_or(0);
+            assert!(
+                persisted < 100,
+                "above-budget flush must not materialize the feed, got {persisted} B"
+            );
+            assert_eq!(
+                db.changes_after(0).len(),
+                5,
+                "lazy feed still answers last-per-key from the live set"
+            );
+            db.close().unwrap();
+        }
+        let db = Db::open(&dir).unwrap();
+        assert_eq!(db.get(&[b'k', 0]).as_deref(), Some([b'v', 0].as_slice()));
+        assert_eq!(db.get(&[b'k', 4]).as_deref(), Some([b'v', 4].as_slice()));
+        assert_eq!(
+            db.changes_after(0).len(),
+            5,
+            "reopen rebuilds the feed on demand from the live set"
+        );
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Within the budget the explicit flush keeps materializing and
+    /// persisting the feed (fast reopen path unchanged).
+    #[test]
+    fn changelog_lazy_rebuild_within_budget_persists_feed() {
+        let dir = temp_dir();
+        let chlog = dir.join(crate::change_feed::CHANGELOG_FILE_NAME);
+        {
+            let mut db = Db::open(&dir).unwrap();
+            db.set_changelog_interval(0);
+            for i in 0..3u8 {
+                db.put([b'k', i], [b'v', i]).unwrap();
+            }
+            db.flush().unwrap();
+            assert!(chlog.is_file(), "within budget the flush persists the feed");
+            db.close().unwrap();
+        }
+        let db = Db::open(&dir).unwrap();
+        assert_eq!(db.changes_after(0).len(), 3);
         db.close().unwrap();
         let _ = fs::remove_dir_all(&dir);
     }
