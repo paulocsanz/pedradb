@@ -279,6 +279,29 @@ pub fn l28_tcp_nowms_ok_as_is(_ok: bool) -> (d: bool)
     true
 }
 
+/// RFC-0158 P2.1: durable-term rollback on the removed replica's REAL dir.
+pub open spec fn l28_tcp_dterm_ok_spec(ok: bool) -> bool {
+    ok
+}
+
+pub open spec fn l28_tcp_dterm_ok_as_is_spec(_ok: bool) -> bool {
+    true
+}
+
+pub fn l28_tcp_dterm_ok(ok: bool) -> (d: bool)
+    ensures
+        d == l28_tcp_dterm_ok_spec(ok),
+{
+    ok
+}
+
+pub fn l28_tcp_dterm_ok_as_is(_ok: bool) -> (d: bool)
+    ensures
+        d == l28_tcp_dterm_ok_as_is_spec(_ok),
+{
+    true
+}
+
 /// RFC-0136 P1.2: SI hist persist on a replica dropped from `ids`.
 pub open spec fn l28_tcp_hist_ok_spec(ok: bool) -> bool {
     ok
