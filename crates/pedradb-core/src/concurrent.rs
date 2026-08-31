@@ -59,6 +59,11 @@ struct PendingWrite {
 struct WriteGroup {
     /// Queued client writes waiting for a leader group.
     queue: Mutex<WriteGroupState>,
+    /// Set by the host flush worker at attach: a background flusher exists,
+    /// so writers may throttle on parked-mem flush debt (see
+    /// [`WriteGroup::await_flush_debt`]). Without one, parking is the
+    /// caller's business and submits never wait.
+    flusher_attached: AtomicBool,
     /// Signalled whenever a writer pushes onto the queue, so a leader holding
     /// its catch-up window open can absorb the arrival immediately.
     arrived: Condvar,
@@ -193,6 +198,21 @@ struct WriteGroupState {
     leader_active: bool,
 }
 
+/// Flush backpressure poll interval: how long a debt-throttled writer
+/// sleeps between parked-bytes checks (the host flush worker drains it).
+const FLUSH_DEBT_POLL: Duration = Duration::from_millis(2);
+
+/// Ceiling on one writer's flush-debt wait. If the parked set never drops
+/// (flush worker dead / materialize erroring) a hang is undebuggable in a
+/// bench — exceed and proceed; the OOM that follows is observable.
+/// `PEDRA_FLUSH_DEBT_MAX_MS` overrides (tests pin it short).
+fn flush_debt_max_wait() -> Duration {
+    std::env::var("PEDRA_FLUSH_DEBT_MAX_MS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .map_or(Duration::from_secs(30), Duration::from_millis)
+}
+
 impl WriteGroup {
     fn new() -> Self {
         Self {
@@ -200,6 +220,7 @@ impl WriteGroup {
                 pending: VecDeque::new(),
                 leader_active: false,
             }),
+            flusher_attached: AtomicBool::new(false),
             arrived: Condvar::new(),
             active: AtomicUsize::new(0),
             catchup_window_us: AtomicU64::new(
@@ -297,6 +318,43 @@ impl WriteGroup {
         self.lone_count.fetch_add(1, Ordering::Relaxed);
     }
 
+    /// Flush backpressure: while parked-mem debt is at/above one table's
+    /// worth ([`Db::flush_debt_cap`]) and a host flush worker exists to
+    /// drain it, sleep instead of queueing another batch. Every LSM blocks
+    /// writers on flush debt (Rocks memtable/L0 stalls); without this a
+    /// lone fast writer parks 256 MiB tables faster than the worker
+    /// materializes them (~185 MB/s ingest vs ~100 MB/s) and the mem
+    /// layer grows without bound — the 25M slipstream OOM (v11–v15).
+    /// Called before `begin_submit`: a throttled writer is not in flight
+    /// (idle/fold gates must see it as idle-or-blocked, and `active == 1`
+    /// lone-path decisions must not count sleepers). Holds no lock while
+    /// sleeping; the flush worker's brief `write()` sections proceed.
+    fn await_flush_debt<E: Env>(&self, db: &RwLock<Db<E>>) {
+        if !self.flusher_attached.load(Ordering::Relaxed) {
+            return;
+        }
+        let max_wait = flush_debt_max_wait();
+        let mut waited = Duration::ZERO;
+        loop {
+            let cap = db.read().flush_debt_cap();
+            let Some(cap) = cap else { return };
+            if db.read().parked_unflushed_bytes() < cap {
+                return;
+            }
+            if waited >= max_wait {
+                // Flush worker wedged — proceed rather than hang forever;
+                // the memory outcome stays observable on the bench.
+                eprintln!(
+                    "PEDRA flush-debt wait exceeded {max_wait:?} (parked={} cap={cap})",
+                    db.read().parked_unflushed_bytes()
+                );
+                return;
+            }
+            std::thread::sleep(FLUSH_DEBT_POLL);
+            waited += FLUSH_DEBT_POLL;
+        }
+    }
+
     /// Enqueue `ops` and either lead a group commit or wait for the leader.
     fn submit<E: Env>(
         &self,
@@ -314,6 +372,7 @@ impl WriteGroup {
         op: BatchOp,
         do_sync: bool,
     ) -> Result<SequenceNumber> {
+        self.await_flush_debt(db);
         let active = self.begin_submit();
         if active == 1 && !self.recently_concurrent() && !do_sync {
             let result = db.write().commit_async_one(op);
@@ -362,6 +421,7 @@ impl WriteGroup {
         do_sync: bool,
         occ: Option<(SequenceNumber, Vec<Bytes>)>,
     ) -> Result<SequenceNumber> {
+        self.await_flush_debt(db);
         let active = self.begin_submit();
         self.submit_after_begin(db, ops, do_sync, occ, active)
     }
@@ -1592,6 +1652,24 @@ impl<E: Env> ConcurrentDb<E> {
     #[must_use]
     pub fn parked_unflushed_bytes(&self) -> usize {
         self.inner.read().parked_unflushed_bytes()
+    }
+
+    /// Mark that a host flush worker owns parked-mem draining (compat
+    /// `spawn_flush_worker`). While attached, submits throttle on flush
+    /// debt ([`WriteGroup::await_flush_debt`]); without one they never do
+    /// — nothing would drain the debt, so waiting could only deadlock.
+    pub fn set_flush_worker_attached(&self, attached: bool) {
+        self.writes
+            .flusher_attached
+            .store(attached, Ordering::Relaxed);
+    }
+
+    /// Flush-debt cap ([`Db::flush_debt_cap`]) — one parked table's worth.
+    /// The compat worker also uses it to keep the parked fold away from
+    /// full-table debt (a throttled writer looks idle to `writes_idle_for`).
+    #[must_use]
+    pub fn flush_debt_cap(&self) -> Option<usize> {
+        self.inner.read().flush_debt_cap()
     }
 
     /// Active memtable approximate bytes (diag passthrough).
@@ -3167,6 +3245,100 @@ mod tests {
             },
         )
         .unwrap()
+    }
+
+    /// `open_sync` with a 1-byte auto-flush cap: every put stages imm, so a
+    /// `park_imm_once` creates parked debt ≥ [`Db::flush_debt_cap`] without
+    /// writing megabytes.
+    fn open_debt(dir: &std::path::Path) -> ConcurrentDb {
+        ConcurrentDb::open_with(
+            dir,
+            OpenOptions {
+                auto_flush_bytes: Some(1),
+                ..OpenOptions {
+                    wal_full_fsync: true,
+                    history: Default::default(),
+                    wal_recovery: Default::default(),
+                    sync: true,
+                    auto_flush_bytes: None,
+                    auto_compact_sst_count: None,
+                    auto_compact_sst_bytes: None,
+                    exclusive: true,
+                    large_value_threshold: None,
+                }
+            },
+        )
+        .unwrap()
+    }
+
+    /// Flush backpressure: without a flush worker attached a submit never
+    /// waits on parked debt (nothing would drain it); attached, it waits
+    /// out the debt bounded by `PEDRA_FLUSH_DEBT_MAX_MS`.
+    #[test]
+    fn submit_flush_debt_waits_only_with_worker_attached() {
+        std::env::set_var("PEDRA_FLUSH_DEBT_MAX_MS", "120");
+        let dir = temp_dir();
+        let db = open_debt(&dir);
+        db.set_defer_auto_compact(true);
+        db.put(b"k", [b'v'; 1024]).unwrap();
+        assert!(db.park_imm_once());
+        assert_eq!(db.parked_unflushed_count(), 1);
+        let cap = db.flush_debt_cap().expect("cap");
+        assert!(db.parked_unflushed_bytes() >= cap, "debt at/above cap");
+
+        // No worker: submit must go straight through despite the debt.
+        let t0 = std::time::Instant::now();
+        db.put(b"straight", b"through").unwrap();
+        assert!(
+            t0.elapsed() < Duration::from_millis(100),
+            "unattached submit waited {:?}",
+            t0.elapsed()
+        );
+
+        // Attached: submit waits out the debt (120 ms cap), then commits.
+        db.set_flush_worker_attached(true);
+        let t0 = std::time::Instant::now();
+        db.put(b"throttled", b"ok").unwrap();
+        let waited = t0.elapsed();
+        assert!(
+            waited >= Duration::from_millis(100),
+            "attached submit did not throttle (waited {waited:?})"
+        );
+        assert_eq!(db.get(b"throttled").as_deref(), Some(b"ok".as_ref()));
+
+        std::env::remove_var("PEDRA_FLUSH_DEBT_MAX_MS");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// The throttle releases as soon as materialize drains the parked set —
+    /// a live flush worker keeps writers moving (no deadlock, no full cap).
+    #[test]
+    fn submit_flush_debt_releases_on_materialize() {
+        std::env::set_var("PEDRA_FLUSH_DEBT_MAX_MS", "30000");
+        let dir = temp_dir();
+        let db = std::sync::Arc::new(open_debt(&dir));
+        db.set_defer_auto_compact(true);
+        db.put(b"k", [b'v'; 1024]).unwrap();
+        assert!(db.park_imm_once());
+        db.set_flush_worker_attached(true);
+
+        let drainer = std::sync::Arc::clone(&db);
+        let flusher = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(60));
+            assert!(drainer.materialize_parked_once());
+        });
+        let t0 = std::time::Instant::now();
+        db.put(b"after", b"drain").unwrap();
+        let waited = t0.elapsed();
+        flusher.join().expect("drainer");
+        assert!(
+            waited < Duration::from_millis(2000),
+            "submit did not release on drain (waited {waited:?})"
+        );
+        assert_eq!(db.parked_unflushed_count(), 0);
+
+        std::env::remove_var("PEDRA_FLUSH_DEBT_MAX_MS");
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
