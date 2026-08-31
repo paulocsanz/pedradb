@@ -271,6 +271,26 @@ pub fn advise_file(file: &File, offset: u64, len: u64, kind: FileAdvise) -> io::
     }
 }
 
+/// glibc `malloc_trim(0)`: release free arena pages back to the OS.
+/// Used after whole-levels rewrite chunks — glibc pins freed small
+/// chunks next to retained ones (per-block index keys), so RSS creeps
+/// even though nothing is retained (the 6M macOS repro is flat; the
+/// 25M glibc guest climb was monotonic). Advisory only: the rc (1 =
+/// released something, 0 = nothing to release) is deliberately not a
+/// barrier-style gate. No-op off Linux glibc.
+pub fn trim_process_heap() {
+    #[cfg(all(target_os = "linux", not(miri)))]
+    {
+        // SAFETY: signature is glibc `int malloc_trim(size_t pad)`. `0`
+        // means release as much as possible; there is no errno contract.
+        extern "C" {
+            fn malloc_trim(pad: usize) -> i32;
+        }
+        // SAFETY: no pointers, no stored state; rc is advisory.
+        let _rc = unsafe { malloc_trim(0) };
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

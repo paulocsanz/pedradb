@@ -1822,7 +1822,8 @@ pub fn write_sst_entries_on(
 }
 
 /// Write an **already InternalKey-sorted** stream (RFC-0037). One entry in
-/// flight; bloom sized from `bloom_hint`. Does not clone the input set.
+/// flight; bloom built from the distinct keys written (`bloom_hint` > 0
+/// enables the filter). Does not clone the input set.
 ///
 /// # Errors
 /// I/O, encode, or a corrupt/oversized field.
@@ -1886,12 +1887,14 @@ fn write_sst_try_sorted_body(
     compress: bool,
 ) -> Result<SstTable> {
     let path = path.as_ref();
-    let mut bloom = if bloom_hint == 0 {
-        BloomFilter::always_true()
-    } else {
-        BloomFilter::with_capacity(bloom_hint, DEFAULT_BITS_PER_KEY)
-    };
-
+    // Bloom is built AFTER the entry loop from the distinct user keys
+    // actually written. The old `with_capacity(bloom_hint)` sized every
+    // output file by the caller's TOTAL: whole-levels rewrites pass the
+    // sum over all inputs (25M keys), so every 64 MiB chunk carried a
+    // ~31 MB mostly-zero bloom — retained per opened table (a plain
+    // field, never payload-evictable) and shipped on disk. `bloom_hint`
+    // now only gates whether the file gets a filter at all.
+    let mut bloom_keys: Vec<Bytes> = Vec::new();
     let mut data = Vec::new();
     let mut index: Vec<BlockHandle> = Vec::new();
     let mut block_buf = Vec::new();
@@ -1944,7 +1947,7 @@ fn write_sst_try_sorted_body(
         n_entries = n_entries.saturating_add(1);
         let uk = ikey.user_key.as_ref();
         if last_bloom.as_ref().is_none_or(|p| p.as_ref() != uk) {
-            bloom.insert(uk);
+            bloom_keys.push(ikey.user_key.clone());
             last_bloom = Some(ikey.user_key.clone());
         }
         enc_scratch.clear();
@@ -1961,6 +1964,16 @@ fn write_sst_try_sorted_body(
         block_last_user = Some(ikey.user_key.clone());
     }
     flush_block(&mut data, &mut block_buf, &mut block_first_user, &mut index)?;
+
+    let bloom = if bloom_hint == 0 || bloom_keys.is_empty() {
+        BloomFilter::always_true()
+    } else {
+        let mut b = BloomFilter::with_capacity(bloom_keys.len(), DEFAULT_BITS_PER_KEY);
+        for key in &bloom_keys {
+            b.insert(key);
+        }
+        b
+    };
 
     // Header: magic version num_entries max_seq num_blocks data_len (fixed 40 B)
     let mut header = Vec::with_capacity(40);
@@ -2076,6 +2089,41 @@ mod tests {
             .as_nanos();
         let seq = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         std::env::temp_dir().join(format!("pedradb-sst-{n}-{seq}.sst"))
+    }
+
+    /// The bloom is sized by the keys actually written, never by the
+    /// caller's `bloom_hint` (whole-levels rewrites pass the sum over
+    /// all inputs — every 64 MiB chunk then carried a ~31 MB near-zero
+    /// bloom at the 25M scale, retained per opened table and shipped on
+    /// disk). 100 entries with a 100M-key hint must stay a small file.
+    #[test]
+    fn write_sst_bloom_is_sized_by_written_keys_not_hint() {
+        let path = temp_path();
+        let entries: Vec<(InternalKey, Bytes)> = (0..100u32)
+            .map(|i| {
+                (
+                    InternalKey::new(
+                        format!("key{i:06}").into_bytes(),
+                        u64::from(i) + 1,
+                        ValueType::Value,
+                    ),
+                    Bytes::from_static(b"payload"),
+                )
+            })
+            .collect();
+        let table =
+            write_sst_try_sorted_on(&StdEnv, &path, entries.into_iter().map(Ok), 100_000_000)
+                .unwrap();
+        let size = std::fs::metadata(&path).unwrap().len();
+        let _ = std::fs::remove_file(&path);
+        assert_eq!(table.len(), 100);
+        assert!(
+            size < 1_000_000,
+            "bloom must be sized by written keys, not the hint: {size} bytes"
+        );
+        // The filter itself must stay active for the written keys.
+        assert!(table.has_bloom());
+        assert!(table.point_at(b"key000042", u64::MAX).is_some());
     }
 
     /// RFC-0152 P2.2.40: production `SstTable::decode` gates the file
