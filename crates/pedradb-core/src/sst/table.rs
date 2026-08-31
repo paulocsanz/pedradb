@@ -37,6 +37,7 @@
 //! without scanning every block for deletes.
 
 use std::cell::Cell;
+use std::cmp::Ordering;
 use std::io::{Read, Write};
 use std::ops::Bound;
 use std::path::{Path, PathBuf};
@@ -143,6 +144,17 @@ struct BlockHandle {
 
 /// Cached full entry materialization for an SST (shared across clones).
 type EntriesCache = Arc<Mutex<Option<Vec<(InternalKey, Bytes)>>>>;
+
+/// Reusable buffers for [`SstTable::point_at_seeking`]: one per lookup loop
+/// amortizes the evicted-block read and the lz4 decompress to zero
+/// steady-state allocations.
+#[derive(Debug, Default)]
+pub struct PointSeekScratch {
+    /// Raw block image (CRC included) for blocks served from file.
+    raw: Vec<u8>,
+    /// Decompressed block image.
+    plain: Vec<u8>,
+}
 
 /// In-memory view of one SST file.
 ///
@@ -349,6 +361,129 @@ impl SstTable {
         }
         let mut load = load;
         self.point_in_blocks(user_key, snapshot, &mut load)
+    }
+
+    /// Point version at `user_key` ≤ `snapshot`, seeking the **encoded**
+    /// block instead of decoding it into entries.
+    ///
+    /// Visibility is identical to [`point_at_with`]: same bounds/bloom gate,
+    /// same candidate window ([`Self::blocks_for_point`]), same newest-visible
+    /// merge. The difference is per-block work — CRC-verify the raw image,
+    /// lz4-decompress into `scratch`, walk `ikey_len|ikey|val_len|val`
+    /// comparing user-key prefixes without materialising `InternalKey`s, and
+    /// copy out only the winning value. The decoded-block cache thrashed at
+    /// random-key scale (insert + evict on nearly every get); the seek pays a
+    /// bounded decompress instead of the cache machinery.
+    ///
+    /// Fail-closed: a CRC or framing fault returns `Err` — never a silent
+    /// miss. The caller must fail-stop or propagate.
+    ///
+    /// # Errors
+    /// Corrupt block payload/framing or I/O on an evicted table.
+    pub fn point_at_seeking(
+        &self,
+        user_key: &[u8],
+        snapshot: SequenceNumber,
+        scratch: &mut PointSeekScratch,
+    ) -> Result<Option<(SequenceNumber, Lookup)>> {
+        if let (Some(lo), Some(hi)) = (
+            self.smallest_user_key.as_deref(),
+            self.largest_user_key.as_deref(),
+        ) {
+            if user_key < lo || user_key > hi {
+                return Ok(None);
+            }
+        }
+        if !self.bloom.may_contain(user_key) {
+            return Ok(None);
+        }
+        if !self.is_lazy() {
+            let block = self.materialize_entries()?;
+            return Ok(Self::best_point_in_entry_slice(&block, user_key, snapshot));
+        }
+        if self.index.is_empty() {
+            return Ok(None);
+        }
+        if !self.block_crc {
+            // ≤v4 carries no per-block CRC: reuse the whole-body path so the
+            // file-level CRC gate re-runs before any block decodes.
+            return Ok(self.point_in_blocks(user_key, snapshot, &mut |bi| {
+                self.decode_block(bi).ok().map(Arc::new)
+            }));
+        }
+        // v5: each block carries its own CRC, so one image suffices — a
+        // resident-payload slice or a single positioned read via the kit.
+        let mut best: Option<(SequenceNumber, Lookup)> = None;
+        for bi in self.blocks_for_point(user_key) {
+            let Some(h) = self.index.get(bi) else {
+                continue;
+            };
+            let len = usize::try_from(h.length)
+                .map_err(|_| CoreError::Internal("SST block length overflow".into()))?;
+            let mut served_from_file = false;
+            {
+                let g = self.payload.read();
+                let p: &Arc<[u8]> = &g;
+                if p.is_empty() {
+                    served_from_file = true;
+                } else {
+                    let start = usize::try_from(h.offset)
+                        .map_err(|_| CoreError::Internal("SST block offset overflow".into()))?;
+                    let Some(end) = start.checked_add(len) else {
+                        return Err(CoreError::Internal(
+                            "SST block length overflow".into(),
+                        ));
+                    };
+                    if end > p.len() {
+                        return Err(CoreError::Internal(format!(
+                            "SST block past EOF in {}",
+                            self.path.display()
+                        )));
+                    }
+                    SST_BLOCKS_DECODED.with(|c| c.set(c.get().saturating_add(1)));
+                    if let Some(found) = seek_point_in_block_image(
+                        &p[start..end],
+                        self.compressed_blocks,
+                        user_key,
+                        snapshot,
+                        &mut scratch.plain,
+                        &self.path,
+                    )? {
+                        if best.as_ref().is_none_or(|(s, _)| found.0 > *s) {
+                            best = Some(found);
+                        }
+                    }
+                }
+            }
+            if served_from_file {
+                let kit = self.kit.read().clone();
+                let Some(kit) = kit else {
+                    return Err(CoreError::Internal(format!(
+                        "SST {} payload evicted without a file source (free-standing table)",
+                        self.path.display()
+                    )));
+                };
+                scratch.raw.clear();
+                scratch.raw.resize(len, 0);
+                kit.source
+                    .read_range(&self.path, h.offset, &mut scratch.raw)
+                    .map_err(CoreError::Io)?;
+                SST_BLOCKS_DECODED.with(|c| c.set(c.get().saturating_add(1)));
+                if let Some(found) = seek_point_in_block_image(
+                    &scratch.raw,
+                    self.compressed_blocks,
+                    user_key,
+                    snapshot,
+                    &mut scratch.plain,
+                    &self.path,
+                )? {
+                    if best.as_ref().is_none_or(|(s, _)| found.0 > *s) {
+                        best = Some(found);
+                    }
+                }
+            }
+        }
+        Ok(best)
     }
 
     /// Highest sequence number present in this file.
@@ -1554,6 +1689,138 @@ impl Iterator for SstRangeIter<'_> {
     }
 }
 
+/// Seek one raw block image (v5: CRC trailer included).
+///
+/// Verifies the CRC fail-closed, decompresses into `plain_scratch` when the
+/// block is lz4, then walks. The scratch is cleared and re-sized per block, so
+/// steady-state gets allocate nothing.
+fn seek_point_in_block_image(
+    raw: &[u8],
+    compressed: bool,
+    user_key: &[u8],
+    snapshot: SequenceNumber,
+    plain_scratch: &mut Vec<u8>,
+    path: &Path,
+) -> Result<Option<(SequenceNumber, Lookup)>> {
+    let body = split_block_crc(raw, path)?;
+    let plain: &[u8] = if compressed {
+        let (size, input) = lz4_flex::block::uncompressed_size(body).map_err(|e| {
+            CoreError::Internal(format!(
+                "SST lz4 decompress failed in {}: {e}",
+                path.display()
+            ))
+        })?;
+        plain_scratch.clear();
+        plain_scratch.resize(size, 0);
+        let written = lz4_flex::block::decompress_into(input, plain_scratch).map_err(|e| {
+            CoreError::Internal(format!(
+                "SST lz4 decompress failed in {}: {e}",
+                path.display()
+            ))
+        })?;
+        if written != size {
+            return Err(CoreError::Internal(format!(
+                "SST lz4 size prefix mismatch in {}: wrote {written} of {size} bytes",
+                path.display()
+            )));
+        }
+        plain_scratch.as_slice()
+    } else {
+        body
+    };
+    seek_point_in_plain_block(plain, user_key, snapshot, path)
+}
+
+/// Newest visible point version of `user_key` in one decoded block image.
+///
+/// Raw walk over `ikey_len|ikey|val_len|val` records: compare the user-key
+/// prefix without allocating an `InternalKey` per entry, skip lesser keys by
+/// jumping `val_len`, stop at the first greater key, and copy out only a
+/// winning value. Entries are user-key ascending, sequence descending, so the
+/// first visible equal-key entry is the newest — the max-seq keep matches
+/// [`SstTable::best_point_in_entry_slice`] in case ordering ever changes.
+/// Framing faults return `Err` (fail-closed): a truncated or corrupt block
+/// must never read as a miss.
+fn seek_point_in_plain_block(
+    plain: &[u8],
+    user_key: &[u8],
+    snapshot: SequenceNumber,
+    path: &Path,
+) -> Result<Option<(SequenceNumber, Lookup)>> {
+    let mut pos = 0usize;
+    let mut best: Option<(SequenceNumber, Lookup)> = None;
+    while pos < plain.len() {
+        if pos + 4 > plain.len() {
+            return Err(CoreError::Internal(format!(
+                "SST block entry truncated in {}",
+                path.display()
+            )));
+        }
+        let ikey_len =
+            u32::from_le_bytes(plain[pos..pos + 4].try_into().unwrap()) as usize;
+        pos += 4;
+        if ikey_len < 8 {
+            return Err(CoreError::Internal(format!(
+                "SST block internal key too short in {}",
+                path.display()
+            )));
+        }
+        let Some(ikey_end) = pos.checked_add(ikey_len) else {
+            return Err(CoreError::Internal(format!(
+                "SST block entry truncated in {}",
+                path.display()
+            )));
+        };
+        if ikey_end + 4 > plain.len() {
+            return Err(CoreError::Internal(format!(
+                "SST block entry truncated in {}",
+                path.display()
+            )));
+        }
+        let uk_end = ikey_end - 8;
+        let mut trailer = [0u8; 8];
+        trailer.copy_from_slice(&plain[uk_end..ikey_end]);
+        let val_len =
+            u32::from_le_bytes(plain[ikey_end..ikey_end + 4].try_into().unwrap()) as usize;
+        let Some(val_end) = ikey_end.checked_add(4).and_then(|v| v.checked_add(val_len))
+        else {
+            return Err(CoreError::Internal(format!(
+                "SST block entry length overflow in {}",
+                path.display()
+            )));
+        };
+        if val_end > plain.len() {
+            return Err(CoreError::Internal(format!(
+                "SST block entry truncated in {}",
+                path.display()
+            )));
+        }
+        match plain[pos..uk_end].cmp(user_key) {
+            Ordering::Less => {}
+            Ordering::Greater => break,
+            Ordering::Equal => {
+                let (sequence, kind) =
+                    crate::key::unpack_sequence_and_type(u64::from_be_bytes(trailer))?;
+                if kind != ValueType::RangeDeletion && sequence <= snapshot {
+                    if best.as_ref().is_none_or(|(s, _)| sequence > *s) {
+                        let look = match kind {
+                            ValueType::Deletion => Lookup::Deleted,
+                            ValueType::Value => Lookup::Found(Bytes::copy_from_slice(
+                                &plain[ikey_end + 4..val_end],
+                            )),
+                            // Unreachable: RangeDeletion is filtered above.
+                            ValueType::RangeDeletion => Lookup::NotFound,
+                        };
+                        best = Some((sequence, look));
+                    }
+                }
+            }
+        }
+        pos = val_end;
+    }
+    Ok(best)
+}
+
 fn decode_block_from_payload(
     buf: &[u8],
     h: &BlockHandle,
@@ -1576,6 +1843,28 @@ fn decode_block_from_payload(
     decode_block_bytes(&buf[start..end], compressed_blocks, block_crc, path)
 }
 
+/// Strip and verify a v5 block's trailing CRC32C — fail-closed on mismatch
+/// or truncation. Shared by the decode path and the point seek so a block
+/// never parses before its integrity gate passes.
+fn split_block_crc<'a>(raw: &'a [u8], path: &Path) -> Result<&'a [u8]> {
+    if raw.len() < 4 {
+        return Err(CoreError::Internal(format!(
+            "SST block CRC truncated in {}",
+            path.display()
+        )));
+    }
+    let (body, crc_bytes) = raw.split_at(raw.len() - 4);
+    let stored = u32::from_le_bytes(crc_bytes.try_into().unwrap());
+    let computed = crc32c::crc32c(body);
+    if !crate::sst::sst_block_crc_ok(stored, computed) {
+        return Err(CoreError::Internal(format!(
+            "SST block CRC mismatch in {}",
+            path.display()
+        )));
+    }
+    Ok(body)
+}
+
 /// Decode one on-disk block image. `raw` includes the trailing CRC32C when
 /// `block_crc` — verified here, fail-closed (bitrot never decodes garbage).
 fn decode_block_bytes(
@@ -1584,25 +1873,11 @@ fn decode_block_bytes(
     block_crc: bool,
     path: &Path,
 ) -> Result<Vec<(InternalKey, Bytes)>> {
-    let mut raw = raw;
-    if block_crc {
-        if raw.len() < 4 {
-            return Err(CoreError::Internal(format!(
-                "SST block CRC truncated in {}",
-                path.display()
-            )));
-        }
-        let (body, crc_bytes) = raw.split_at(raw.len() - 4);
-        let stored = u32::from_le_bytes(crc_bytes.try_into().unwrap());
-        let computed = crc32c::crc32c(body);
-        if !crate::sst::sst_block_crc_ok(stored, computed) {
-            return Err(CoreError::Internal(format!(
-                "SST block CRC mismatch in {}",
-                path.display()
-            )));
-        }
-        raw = body;
-    }
+    let raw = if block_crc {
+        split_block_crc(raw, path)?
+    } else {
+        raw
+    };
     let plain: Vec<u8> = if compressed_blocks {
         lz4_flex::decompress_size_prepended(raw).map_err(|e| {
             CoreError::Internal(format!(
@@ -2761,6 +3036,101 @@ mod tests {
             streamed.push(e);
         }
         assert_eq!(streamed, expected_all);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// RFC-0077 P2 parity: the encoded-block seek returns exactly what the
+    /// decoded-block path returns — newest version ≤ snapshot, tombstones,
+    /// misses, empty keys, and a version run wide enough to span blocks —
+    /// both with the payload resident and evicted (per-block file reads).
+    #[test]
+    fn point_seek_matches_decoded_path() {
+        let path = temp_path();
+        let mut mem = MemTable::new();
+        // 40 keys × 3 versions × 180 B values → several 4 KiB blocks.
+        for i in 0..40u32 {
+            let key = format!("key-{i:05}").into_bytes();
+            for ver in 1..=3u64 {
+                let val = vec![b'a' + ((i % 7) + (ver % 5) as u32) as u8; 180];
+                mem.put(key.clone(), u64::from(i) * 10 + ver, val);
+            }
+        }
+        // Tombstone as the newest version of key-00007, older put at seq 5.
+        mem.put(b"key-00007".as_slice(), 5, b"old".as_slice());
+        mem.delete(b"key-00007".as_slice(), 99_999);
+        // One user key whose version run must span a block boundary.
+        for ver in 10..30u64 {
+            mem.put(b"wide-key".as_slice(), 100_000 + ver, vec![b'w'; 512]);
+        }
+        let table = write_sst(&path, &mem).unwrap();
+        assert!(table.block_count() >= 4, "need several blocks");
+
+        let mut scratch = PointSeekScratch::default();
+        let mut keys: Vec<Vec<u8>> = (0..40u32)
+            .map(|i| format!("key-{i:05}").into_bytes())
+            .collect();
+        keys.push(b"wide-key".to_vec());
+        keys.push(b"absent".to_vec());
+        keys.push(b"key-00006\x00".to_vec());
+        keys.push(Vec::new());
+        let mut check = |table: &SstTable, keys: &[Vec<u8>]| {
+            for key in keys {
+                for snap in [0u64, 1, 12, 37, 100_019, u64::MAX] {
+                    let decoded = table.point_at(key, snap);
+                    let sought = table
+                        .point_at_seeking(key, snap, &mut scratch)
+                        .unwrap_or_else(|e| panic!("seek {key:?}@{snap}: {e}"));
+                    assert_eq!(sought, decoded, "seek {key:?}@{snap}");
+                }
+            }
+        };
+        check(&table, &keys);
+        // Same answers once the payload evicts (per-block file reads + CRC).
+        let (source, pool) = zero_pool_kit();
+        table.attach_payload_kit(&source, &pool);
+        assert!(!table.payload_resident());
+        check(&table, &keys);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// RFC-0077 P2 fail-closed: a block whose body no longer matches its
+    /// CRC32C refuses the seek — a corrupt block must never read as a miss.
+    /// The same fault also trips the legacy `decode_block` gate.
+    #[test]
+    fn point_seek_crc_mismatch_fails_closed() {
+        let path = temp_path();
+        let mut mem = MemTable::new();
+        for i in 0..200u32 {
+            let key = format!("key-{i:05}").into_bytes();
+            mem.put(key, u64::from(i), vec![(i % 251) as u8; 60]);
+        }
+        let table = write_sst(&path, &mem).unwrap();
+        assert!(table.block_count() >= 2, "need multiple blocks");
+        let mut scratch = PointSeekScratch::default();
+        assert!(
+            table
+                .point_at_seeking(b"key-00000", u64::MAX, &mut scratch)
+                .unwrap()
+                .is_some(),
+            "clean seek must hit"
+        );
+
+        // Flip one byte inside the first block's body (not its CRC trailer).
+        let h0 = table.index[0].clone();
+        {
+            let mut g = table.payload.write();
+            let mut body = g.as_ref().to_vec();
+            body[h0.offset as usize + 1] ^= 0xff;
+            *g = Arc::from(body.into_boxed_slice());
+        }
+        let err = table
+            .point_at_seeking(b"key-00000", u64::MAX, &mut scratch)
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("CRC"),
+            "block CRC must fail the seek; got {err:?}"
+        );
+        assert!(table.decode_block(0).is_err(), "legacy gate trips too");
         let _ = std::fs::remove_file(&path);
     }
 

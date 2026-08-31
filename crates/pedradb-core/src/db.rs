@@ -71,7 +71,9 @@ use crate::lock::DirLock;
 use crate::manifest::{self, VersionSet};
 use crate::memtable::{Lookup, MemTable};
 use crate::merge::{range_deleted, range_tombstone_covers, StreamingVisibleIter, VisibleKv};
-use crate::sst::{write_l0_sst, write_l0_sst_for_family, write_sst_entries_on, SstTable};
+use crate::sst::{
+    write_l0_sst, write_l0_sst_for_family, write_sst_entries_on, PointSeekScratch, SstTable,
+};
 use crate::tx::Transaction;
 use crate::vlog::{self, ValueLog, VlogRewriteStats, VLOG_FILE_NAME};
 use crate::wal::Wal;
@@ -98,6 +100,11 @@ pub const WAL_FILE_NAME: &str = "CURRENT.log";
 /// as a vlog pointer (`VLG1…`/`VLG3…`) or that already start with the marker,
 /// so [`Db::resolve_stored_value`] strips exactly one byte unconditionally.
 const INLINE_ESCAPE: u8 = 0x01;
+
+/// Block-cache id tag for value-resolved slots (see `Db::scan_at_raw`).
+/// Resolving a stored value is not idempotent (`INLINE_ESCAPE` is stripped),
+/// so resolved and raw forms of one block never share a slot.
+const RESOLVED_BLOCK_TAG: u64 = 0x7265_736f_6c76_3d21;
 
 /// F188: stored form of an inline (non-spilled) value. Escaped iff the raw
 /// value could be misread as a vlog pointer, or already starts with the
@@ -736,6 +743,22 @@ fn fail_stop_corrupt_value(context: &str, e: &CoreError) -> ! {
         "pedradb: corrupt value log while resolving {context}: {e}; \
          refusing to serve a silent miss — use get_at/scan_at/verify_checksums \
          for an error-shaped read"
+    )
+}
+
+/// F1 fail-stop sibling of [`fail_stop_corrupt_value`] for the point path's
+/// SST block faults. The pre-seek path swallowed `decode_block` errors with
+/// `unwrap_or_default()`, serving a CRC-broken block as a silent miss —
+/// indistinguishable from deleted data.
+///
+/// # Panics
+/// Always — corruption on a read path must be loud, never silent.
+fn fail_stop_corrupt_block(path: &Path, e: &CoreError) -> ! {
+    panic!(
+        "pedradb: corrupt SST block in {} on point seek: {e}; \
+         refusing to serve a silent miss — use get_at/verify_checksums \
+         for an error-shaped read",
+        path.display()
     )
 }
 
@@ -3997,20 +4020,30 @@ impl<E: Env> Db<E> {
             }
             self.scan_sst_probed.fetch_add(1, Ordering::Relaxed);
             let cache = &self.block_cache;
-            let path = table.path();
+            // Hash the path once per stream, not once per block fetch, and
+            // keep value-resolved blocks under a tagged id: a full scan then
+            // resolves each block once (on miss) and later loads are a pure
+            // Arc clone — no per-load deep clone + vlog re-resolve. Re-resolve
+            // is NOT identity (F188 strips an escape byte), so resolved slots
+            // must never flow into a raw-keyed load.
+            let id = crate::cache::path_id(table.path())
+                ^ if resolve_values { RESOLVED_BLOCK_TAG } else { 0 };
             let db = self;
             let load: Box<
                 dyn FnMut(usize) -> Option<std::sync::Arc<Vec<(InternalKey, Bytes)>>> + '_,
             > = Box::new(move |bi| {
-                let cached = cache
-                    .get_or_insert_with(path, bi, || table.decode_block(bi).unwrap_or_default());
-                if resolve_values {
-                    let mut entries = cached.as_ref().clone();
-                    db.prefetch_resolve_stream(&mut entries);
-                    Some(std::sync::Arc::new(entries))
-                } else {
-                    Some(cached)
-                }
+                Some(cache.get_or_insert_with_id(id, bi, || {
+                    let mut entries = match table.decode_block(bi) {
+                        Ok(entries) => entries,
+                        // F1: a CRC/IO-faulted block must fail loudly —
+                        // `unwrap_or_default` would silently skip its keys.
+                        Err(e) => fail_stop_corrupt_block(table.path(), &e),
+                    };
+                    if resolve_values {
+                        db.prefetch_resolve_stream(&mut entries);
+                    }
+                    entries
+                }))
             });
             streams.push(Box::new(table.iter_user_range(
                 start,
@@ -7101,17 +7134,22 @@ impl<E: Env> Db<E> {
         self.get_sst_fallback.fetch_add(1, Ordering::Relaxed);
         // Newest file with a point wins (L0 before L1). Older files cannot
         // hide a newer point; a newer tombstone is seen first.
+        // Encoded-block seek: CRC-verify + decompress the one candidate block
+        // and copy out only the winning value (the decoded-block cache
+        // thrashed at random-key scale). Block faults fail-stop — a corrupt
+        // block must never read as a miss.
+        let mut seek_scratch = PointSeekScratch::default();
         for &sst_i in self.sst_indices_newest_first() {
             let table = &self.ssts[sst_i];
             table.collect_range_tombstones(snapshot, &mut range_tombs);
-            if let Some((seq, look)) = table.point_at_with(key, snapshot, |bi| {
-                Some(self.block_cache.get_or_insert_with(table.path(), bi, || {
-                    table.decode_block(bi).unwrap_or_default()
-                }))
-            }) {
-                best_point_seq = Some(seq);
-                best_point = look;
-                break;
+            match table.point_at_seeking(key, snapshot, &mut seek_scratch) {
+                Ok(Some((seq, look))) => {
+                    best_point_seq = Some(seq);
+                    best_point = look;
+                    break;
+                }
+                Ok(None) => {}
+                Err(e) => fail_stop_corrupt_block(table.path(), &e),
             }
         }
 
@@ -10899,6 +10937,57 @@ mod tests {
         assert_eq!(a.1.len(), 3000, "scan must not return 20-byte VLG1 pointer");
         let b = scanned.iter().find(|(k, _)| k.as_ref() == b"b").unwrap();
         assert_eq!(b.1.as_ref(), b"tiny");
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Value-resolved block-cache slots must be reused as-is: resolving is
+    /// not idempotent (F188 strips one escape byte), so a resolved slot that
+    /// ever flowed back through a resolve would corrupt 0x01-prefixed
+    /// values. A key-only scan reads the same block under the raw id and
+    /// must not disturb the resolved form.
+    #[test]
+    fn scan_resolved_blocks_reused_verbatim_across_repeated_scans() {
+        use std::ops::Bound;
+        let dir = temp_dir();
+        // vlog-spilled value whose resolved bytes start with the escape byte.
+        let mut big = vec![0xABu8; 3000];
+        big[0] = INLINE_ESCAPE;
+        let mut small = b"inline".to_vec();
+        small.insert(0, INLINE_ESCAPE);
+        let mut db = Db::open_with(&dir, vlog_opts()).unwrap();
+        db.put(b"k-big", &big).unwrap();
+        db.put(b"k-small", &small).unwrap();
+        db.put(b"k-plain", b"v").unwrap();
+        db.flush().unwrap();
+        let snap = db.last_sequence();
+
+        let collect = |db: &Db<StdEnv>| -> Vec<(Bytes, Bytes)> {
+            db.scan(Bound::Unbounded, Bound::Unbounded)
+                .map(|kv| (kv.key, kv.value))
+                .collect()
+        };
+        let first = collect(&db);
+        // Key-only pass over the same blocks (raw slots, same cache).
+        assert_eq!(
+            db.count_in_range(snap, Bound::Unbounded, Bound::Unbounded, None)
+                .unwrap(),
+            3
+        );
+        // Repeat full scans: resolved slots are hits and must be verbatim.
+        for round in 0..3 {
+            let again = collect(&db);
+            assert_eq!(again, first, "scan round {round} diverged");
+        }
+        let big_got = first.iter().find(|(k, _)| k.as_ref() == b"k-big").unwrap();
+        assert_eq!(big_got.1.as_ref(), big.as_slice(), "spilled value verbatim");
+        let small_got = first
+            .iter()
+            .find(|(k, _)| k.as_ref() == b"k-small")
+            .unwrap();
+        assert_eq!(small_got.1.as_ref(), small.as_slice(), "escape-prefixed inline verbatim");
+        assert_eq!(db.get(b"k-big").as_deref(), Some(big.as_slice()));
+        assert_eq!(db.get(b"k-small").as_deref(), Some(small.as_slice()));
         db.close().unwrap();
         let _ = fs::remove_dir_all(&dir);
     }
@@ -15889,9 +15978,12 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
     }
 
-    /// RFC-0034: zipfian point-get must hit the block cache on the second seek.
+    /// RFC-0034, updated for the encoded-block seek: a point-get decodes only
+    /// the candidate window (`blocks_for_point`), and a repeated get does the
+    /// same bounded work for the same answer. The decoded-block cache stays
+    /// on the scan paths.
     #[test]
-    fn point_get_second_seek_hits_block_cache() {
+    fn point_get_seek_decodes_bounded_blocks() {
         let dir = temp_dir();
         let mut db = Db::open(&dir).unwrap();
         let payload = vec![b'y'; 256];
@@ -15905,18 +15997,23 @@ mod tests {
         assert!(db.get(k).is_some());
         let first = crate::sst::sst_blocks_decoded();
         assert!(first >= 1, "first get must decode a block");
+        assert!(first <= 2, "candidate window is at most previous block + run");
         crate::sst::reset_sst_blocks_decoded();
         assert!(db.get(k).is_some());
-        assert_eq!(
-            crate::sst::sst_blocks_decoded(),
-            0,
-            "second get of the same key must not lz4-decode again"
+        // The point cache may serve the repeat outright; when it falls
+        // through, the seek does the same bounded work (≤ candidate window).
+        assert!(
+            crate::sst::sst_blocks_decoded() <= first,
+            "second get of the same key must not decode more than the first \
+             (first={first}, second={})",
+            crate::sst::sst_blocks_decoded()
         );
         db.close().unwrap();
         let _ = fs::remove_dir_all(&dir);
     }
 
-    /// MVCC latest / deps_scan: second seek of the same prefix/range is cache-only.
+    /// MVCC latest / deps_scan: second prefix seek is bounded (block-cache
+    /// walk + one encoded-seek resolve); second range scan is cache-only.
     #[test]
     fn last_under_prefix_and_scan_second_seek_are_cached() {
         let dir = temp_dir();
@@ -15943,10 +16040,14 @@ mod tests {
         crate::sst::reset_sst_blocks_decoded();
         let last2 = db.last_under_prefix(snap, b"u/10").unwrap();
         assert_eq!(last2.as_deref(), Some(last.as_ref()));
-        assert_eq!(
-            crate::sst::sst_blocks_decoded(),
-            0,
-            "second latest must hit the block cache"
+        // The reverse block walk is block-cache served; the final point
+        // resolve runs the encoded seek, which decompresses the one
+        // candidate block (first decoded `first` blocks overall).
+        assert!(
+            crate::sst::sst_blocks_decoded() <= first,
+            "second latest must do no more work than the first \
+             (first={first}, second={})",
+            crate::sst::sst_blocks_decoded()
         );
 
         db.block_cache.clear();

@@ -23,7 +23,12 @@ use crate::sst::SstTable;
 /// Shared decoded block payload.
 pub type CachedBlock = Arc<Vec<(InternalKey, Bytes)>>;
 
-fn path_id(path: &Path) -> u64 {
+/// Stable 64-bit cache id for an SST path.
+///
+/// Hashed once per stream and reused for every block fetch — re-hashing the
+/// path string per fetch was ~4% of a prefix scan at 6M entries.
+#[must_use]
+pub(crate) fn path_id(path: &Path) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut h = std::collections::hash_map::DefaultHasher::new();
     path.hash(&mut h);
@@ -414,7 +419,18 @@ impl BlockCache {
     where
         F: FnOnce() -> Vec<(InternalKey, Bytes)>,
     {
-        let key = (path_id(path), block_idx);
+        self.get_or_insert_with_id(path_id(path), block_idx, load)
+    }
+
+    /// [`Self::get_or_insert_with`] keyed by a precomputed path id, so a
+    /// stream hashes its path once instead of once per block fetch. Ids from
+    /// different tag domains (e.g. value-resolved slots) share the same map;
+    /// a 64-bit hash collision has the same effect as colliding paths.
+    pub fn get_or_insert_with_id<F>(&self, id: u64, block_idx: usize, load: F) -> CachedBlock
+    where
+        F: FnOnce() -> Vec<(InternalKey, Bytes)>,
+    {
+        let key = (id, block_idx);
         {
             let mut guard = self.inner.lock();
             let g = &mut *guard;
