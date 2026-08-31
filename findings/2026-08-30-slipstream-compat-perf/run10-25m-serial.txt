@@ -1,0 +1,313 @@
+=== Caixote Init Starting ===
+CAIXOTE_MEMINFO: MemTotal:        3985624 kB MemFree:         3883344 kB MemAvailable:    3764548 kB 
+Loading kernel modules...
+Loaded virtio_blk
+Loaded evdev
+Loaded acpi button
+[supervisor] input /dev/input/event0 name='Power Button'
+[supervisor] power-button watcher on: /dev/input/event0
+Loaded virtio_balloon
+Loaded af_packet
+Loaded failover
+Loaded net_failover
+Loaded virtio_net
+Loaded crc16
+Loaded crc32c_generic
+Loaded mbcache
+Loaded jbd2
+Loaded ext4
+Loaded overlay
+Waiting for disk devices...
+Disk layout: ROOTFS_DEV=/dev/vdb
+Available filesystems:
+nodev	sysfs
+nodev	tmpfs
+nodev	bdev
+nodev	proc
+nodev	cgroup
+nodev	cgroup2
+nodev	devtmpfs
+nodev	debugfs
+nodev	tracefs
+nodev	securityfs
+nodev	sockfs
+nodev	bpf
+nodev	pipefs
+nodev	ramfs
+nodev	hugetlbfs
+nodev	devpts
+nodev	mqueue
+nodev	pstore
+	ext3
+	ext4
+Block devices:
+brw-rw----    1 0        0         253,   0 Aug 31 19:46 [1;35m/dev/vda[m
+brw-rw----    1 0        0         253,  16 Aug 31 19:46 [1;35m/dev/vdb[m
+Mounting container rootfs from /dev/vdb...
+=== dmesg before mount (last 20 lines with ext4/disk) ===
+[    0.371139] Write protecting the kernel read-only data: 24576k
+[    0.505265] virtio_blk virtio1: [vda] 83886080 512-byte logical blocks (42.9 GB/40.0 GiB)
+[    0.508262] virtio_blk virtio2: [vdb] 125829120 512-byte logical blocks (64.4 GB/60.0 GiB)
+Running e2fsck -p on /dev/vdb...
+/dev/vdb: clean, 66345/3886080 files, 923499/15728640 blocks
+mount: mounting /dev/vdb on /rootfs failed: No such device
+Rootfs disk mounted (ext4 rw)
+/rootfs is mounted
+Mount info:
+/dev/vdb /rootfs ext4 rw,noatime 0 0
+Filesystem                Size      Used Available Use% Mounted on
+/dev/vdb                 59.1G      2.6G     53.5G   5% /rootfs
+Rootfs contents:
+total 24
+drwxr-xr-x    4 0        0             4096 Aug 31 17:17 [1;34m.[m
+drwxr-xr-x   17 0        0              380 Aug 31 19:46 [1;34m..[m
+drwxr-xr-x    3 994      982           4096 Aug 29 17:05 [1;34mcontainer[m
+drwx------    2 0        0            16384 Aug 29 17:05 [1;34mlost+found[m
+Rootfs is writable
+Rootfs remounted read-only
+Mount succeeded (auto-detect)
+/data is mounted
+Filesystem                Size      Used Available Use% Mounted on
+/dev/vda                 39.3G    779.2M     36.6G   2% /data
+Kernel cmdline: console=ttyS0 quiet init=/init caixote.hostname=linux-gate-p149b caixote.vpc=vpc-production-e7c5e0f1 caixote.service=linux-gate-p149b caixote.ip=10.0.0.109/24 caixote.gw=10.0.0.1 caixote.wg_privkey=IRgHIIsQUDRfGHVuEShIrDyHHib/NmhYWxaYaZ7PLGE= caixote.wg_peer_pubkey=krMZvBM6hPRDRjVFs3TBQJZ8x+8DlJ0KJrYjTUYKwmU= caixote.wg_endpoint=198.18.0.1 caixote.wg_port=53414 caixote.local_mesh=10.0.0.102,10.0.0.106,10.0.0.110,10.0.0.111,10.0.0.112 caixote.hosts=vpc-production-61a3fd7f.internal:10.0.0.1,vpc-production-6d85984e.internal:10.0.0.1,vpc-production-e7c5e0f1.internal:10.0.0.1,pedra-tcg-guest.internal:10.0.0.106 caixote.eth0_ip=198.18.0.12/16 caixote.eth0_gw=198.18.0.1
+Parsing cmdline parameters...
+  parsed caixote.hostname=linux-gate-p149b
+  parsed caixote.ip=10.0.0.109/24
+  parsed caixote.gw=10.0.0.1
+  parsed caixote.wg_privkey (len=44)
+  parsed caixote.wg_peer_pubkey (len=44)
+  parsed caixote.wg_endpoint=198.18.0.1
+  parsed caixote.wg_port=53414
+  parsed caixote.local_mesh=10.0.0.102,10.0.0.106,10.0.0.110,10.0.0.111,10.0.0.112
+  parsed caixote.hosts=vpc-production-61a3fd7f.internal:10.0.0.1,vpc-production-6d85984e.internal:10.0.0.1,vpc-production-e7c5e0f1.internal:10.0.0.1,pedra-tcg-guest.internal:10.0.0.106
+=== console /dev/ttyS0 reopened ===
+Configuring eth0 with static 198.18.0.12/16 (gw=198.18.0.1)
+WireGuard config check:
+  CAIXOTE_WG_PRIVKEY set: yes
+  CAIXOTE_WG_PEER_PUBKEY set: yes
+  CAIXOTE_WG_ENDPOINT: 198.18.0.1
+  CAIXOTE_WG_PORT: 53414
+  CAIXOTE_IP: 10.0.0.109/24
+Configuring WireGuard...
+Loading WireGuard modules from /lib/modules/6.12.94-0-virt...
+Loaded udp_tunnel.ko
+Loaded ip6_udp_tunnel.ko
+Loaded libcurve25519-generic.ko
+Loaded curve25519-x86_64.ko
+Module curve25519-neon.ko not found
+Failed to load chacha_generic.ko (may be built-in or already loaded)
+Failed to load poly1305_generic.ko (may be built-in or already loaded)
+Loaded libchacha.ko
+Loaded libpoly1305.ko
+Loaded chacha-x86_64.ko
+Loaded poly1305-x86_64.ko
+Module chacha-neon.ko not found
+Module poly1305-neon.ko not found
+Loaded libchacha20poly1305.ko
+Loaded wireguard.ko
+Installing same-host east-west /32s via eth0
+WireGuard configured: 10.0.0.109 via 198.18.0.1:53414
+[0m[32m[1minterface[0m: [32mwg0[0m
+  [1mpublic key[0m: niKOwNuyOS2hVjbJ9mcmLn5YZuHVf3FChVqMZN6NFAs=
+  [1mprivate key[0m: (hidden)
+  [1mlistening port[0m: 53188
+
+[33m[1mpeer[0m: [33mkrMZvBM6hPRDRjVFs3TBQJZ8x+8DlJ0KJrYjTUYKwmU=[0m
+  [1mendpoint[0m: 198.18.0.1:53414
+  [1mallowed ips[0m: 10.0.0.0[36m/[0m8
+  [1mlatest handshake[0m: Now
+  [1mtransfer[0m: 92 [36mB[0m received, 180 [36mB[0m sent
+  [1mpersistent keepalive[0m: every 25 [36mseconds[0m
+  hosts: 10.0.0.1 vpc-production-61a3fd7f.internal
+  hosts: 10.0.0.1 vpc-production-6d85984e.internal
+  hosts: 10.0.0.1 vpc-production-e7c5e0f1.internal
+  hosts: 10.0.0.106 pedra-tcg-guest.internal
+Static hosts injected from caixote.hosts
+DNS configured to use vigia at 10.0.0.1
+DNS also has bridge gateway at 198.18.0.1
+Network configuration:
+1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN qlen 1000
+    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
+    inet 127.0.0.1/8 scope host lo
+       valid_lft forever preferred_lft forever
+    inet6 ::1/128 scope host 
+       valid_lft forever preferred_lft forever
+2: eth0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc pfifo_fast state UP qlen 1000
+    link/ether 52:54:00:d0:33:d7 brd ff:ff:ff:ff:ff:ff
+    inet 198.18.0.12/16 scope global eth0
+       valid_lft forever preferred_lft forever
+    inet6 fe80::5054:ff:fed0:33d7/64 scope link tentative 
+       valid_lft forever preferred_lft forever
+3: wg0: <POINTOPOINT,NOARP,UP,LOWER_UP> mtu 1420 qdisc noqueue state UNKNOWN qlen 1000
+    link/[65534] 
+    inet 10.0.0.109/24 scope global wg0
+       valid_lft forever preferred_lft forever
+default via 198.18.0.1 dev eth0 
+10.0.0.0/24 dev wg0 scope link  src 10.0.0.109 
+10.0.0.0/8 dev wg0 scope link 
+10.0.0.102 dev eth0 scope link 
+10.0.0.106 dev eth0 scope link 
+10.0.0.110 dev eth0 scope link 
+10.0.0.111 dev eth0 scope link 
+10.0.0.112 dev eth0 scope link 
+198.18.0.0/16 dev eth0 scope link  src 198.18.0.12 
+Setting up container on tmpfs for pivot_root support...
+Overlay tmpfs ceiling: 973M (25% of MemTotal unless caixote.overlay_tmpfs_pct=N)
+Mounted tmpfs at /mnt (size=973M)
+Using disk-based rootfs from /dev/vdb
+Overlay mount result: 0 (lowerdir=/rootfs/container/rootfs)
+Installed caixote-unfreeze hook
+No QGA virtio-port found (host did not configure org.qemu.guest_agent.0);               qemu-ga not started
+Bound host /data (legacy disk_mb) into container at /data
+Filesystem                Size      Used Available Use% Mounted on
+/dev/vda                 39.3G    779.2M     36.6G   2% /data
+Bundle contents:
+total 4
+drwxr-xr-x    3 0        0               80 Aug 31 19:46 [1;34m.[m
+drwxrwxrwt    5 0        0              100 Aug 31 19:46 [1;34m..[m
+-rw-r--r--    1 0        0             3101 Aug 31 19:46 [0;0mconfig.json[m
+drwxr-xr-x    1 0        0               60 Aug 31 19:46 [1;34mrootfs[m
+Rootfs contents (first 5):
+total 64
+drwxr-xr-x    1 0        0               60 Aug 31 19:46 .
+drwxr-xr-x    3 0        0               80 Aug 31 19:46 ..
+lrwxrwxrwx    1 994      982              7 Aug  3 00:00 bin -> usr/bin
+drwxr-xr-x    2 994      982           4096 Aug 29 17:02 boot
+/mnt/container/rootfs is now a mount point (overlay on tmpfs)
+Relevant mounts:
+tmpfs on /mnt type tmpfs (rw,relatime,size=996352k,inode64)
+overlay on /mnt/container/rootfs type overlay (rw,relatime,lowerdir=/rootfs/container/rootfs,upperdir=/mnt/upper,workdir=/mnt/work,uuid=on)
+/dev/vda on /mnt/container/rootfs/data type ext4 (rw,relatime)
+DNS configuration copied to container:
+nameserver 10.0.0.1
+nameserver 198.18.0.1
+Static hosts injected into container rootfs from caixote.hosts
+Added container hostname 'youki' to /etc/hosts
+Running ldconfig in container rootfs...
+[supervisor] [uptime=4.05s] Container supervisor starting
+[supervisor] [uptime=4.05s] Bundle: /mnt/container
+[supervisor] [uptime=4.05s] === Starting container (attempt 1) ===
+[supervisor] [uptime=4.06s] Cleaning up previous container state...
+[supervisor] [uptime=4.06s] Cleanup complete
+CAIXOTE_GUEST_READY
+[supervisor] [uptime=4.06s] Executing: runc run --no-pivot --bundle /mnt/container container0
+Mon Aug 31 19:46:49 UTC 2026
+CG_LIMIT=
+/dev/vda         40G  780M   37G   3% /data
+               total        used        free      shared  buff/cache   available
+Mem:            3892         273        3701          30          99        3618
+=== leg pedradb start Mon Aug 31 19:46:49 UTC 2026 ===
+[1m[92m   Compiling[0m pedradb-posix v0.1.0 (/src/pedradb/crates/pedradb-posix)
+[1m[92m   Compiling[0m pedradb-core v0.1.0 (/src/pedradb/crates/pedradb-core)
+[1m[92m   Compiling[0m pedradb-io-uring v0.1.0 (/src/pedradb/crates/pedradb-io-uring)
+[1m[92m   Compiling[0m pedradb-sim v0.1.0 (/src/pedradb/crates/pedradb-sim)
+[1m[33mwarning[0m[1m: function `cqe_res_ok_as_is` is never used[0m
+   [1m[94m--> [0m/src/pedradb/crates/pedradb-io-uring/src/cqe_kernel.rs:104:8
+    [1m[94m|[0m
+[1m[94m104[0m [1m[94m|[0m pub fn cqe_res_ok_as_is(_res: i32) -> bool {
+    [1m[94m|[0m        [1m[33m^^^^^^^^^^^^^^^^[0m
+    [1m[94m|[0m
+    [1m[94m= [0m[1mnote[0m: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+[1m[33mwarning[0m[1m: function `cqe_ring_model_admitted` is never used[0m
+   [1m[94m--> [0m/src/pedradb/crates/pedradb-io-uring/src/cqe_kernel.rs:112:8
+    [1m[94m|[0m
+[1m[94m112[0m [1m[94m|[0m pub fn cqe_ring_model_admitted() -> bool {
+    [1m[94m|[0m        [1m[33m^^^^^^^^^^^^^^^^^^^^^^^[0m
+
+[1m[33mwarning[0m[1m: function `cqe_ring_model_admitted_as_is` is never used[0m
+   [1m[94m--> [0m/src/pedradb/crates/pedradb-io-uring/src/cqe_kernel.rs:118:8
+    [1m[94m|[0m
+[1m[94m118[0m [1m[94m|[0m pub fn cqe_ring_model_admitted_as_is() -> bool {
+    [1m[94m|[0m        [1m[33m^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+
+[1m[33mwarning[0m: `pedradb-io-uring` (lib) generated 3 warnings
+[1m[92m   Compiling[0m pedradb-ops v0.1.0 (/src/pedradb/crates/pedradb-ops)
+[1m[92m   Compiling[0m rocksdb-compat v0.1.0 (/src/pedradb/crates/rocksdb-compat)
+[1m[33mwarning[0m[1m: function `iter_window_keep_as_is` is never used[0m
+  [1m[94m--> [0m/src/pedradb/crates/rocksdb-compat/src/iter_kernel.rs:16:8
+   [1m[94m|[0m
+[1m[94m16[0m [1m[94m|[0m pub fn iter_window_keep_as_is(_snapshot_live: bool) -> bool {
+   [1m[94m|[0m        [1m[33m^^^^^^^^^^^^^^^^^^^^^^[0m
+   [1m[94m|[0m
+   [1m[94m= [0m[1mnote[0m: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+[1m[92m   Compiling[0m beyond-slipstream v0.7.3 (/src/slipstream)
+[1m[33mwarning[0m: `rocksdb-compat` (lib) generated 1 warning
+[1m[92m    Finished[0m `bench` profile [optimized] target(s) in 24.19s
+[1m[92m     Running[0m benches/snapshot_backends.rs (/data/target/release/deps/snapshot_backends-658f4d3d34281331)
+Gnuplot not found, using plotters backend
+apply_hydrate: skipped at 25000000 entries (>8M); see the one-shot hydration timings printed by the read benchmarks' setup
+hydrate/pedradb: 25000000 entries in 117.6s (0.21M entries/s); on disk 11.06 GiB (475 B/entry)
+SETTLE_RSS before_flush 1748072 kB
+SETTLE_PHASE flush_ms=4200
+SETTLE_RSS after_flush 1205080 kB
+SETTLE_PHASE compact_ms=85418
+SETTLE_RSS after_compact 1172216 kB
+settle/pedradb: 89.6s; on disk after 5.15 GiB
+probe_hit/pedradb: p50 39.8µs / p90 66.1µs / p99 2.1ms / p999 4.8ms / max 10.6ms
+probe_miss/pedradb: p50 3.3µs / p90 3.9µs / p99 6.2µs / p999 2.0ms / max 4.5ms
+Benchmarking get_hit/pedradb
+Benchmarking get_hit/pedradb: Warming up for 3.0000 s
+Benchmarking get_hit/pedradb: Collecting 100 samples in estimated 5.2022 s (76k iterations)
+Benchmarking get_hit/pedradb: Analyzing
+get_hit/pedradb         time:   [52.329 µs 54.126 µs 56.018 µs]
+                        thrpt:  [17.851 Kelem/s 18.475 Kelem/s 19.110 Kelem/s]
+                 change:
+                        time:   [-22.983% -16.304% -9.3707%] (p = 0.00 < 0.05)
+                        thrpt:  [+10.340% +19.480% +29.842%]
+                        Performance has improved.
+Found 6 outliers among 100 measurements (6.00%)
+  1 (1.00%) low mild
+  2 (2.00%) high mild
+  3 (3.00%) high severe
+
+Benchmarking prefix_scan/pedradb
+Benchmarking prefix_scan/pedradb: Warming up for 3.0000 s
+Benchmarking prefix_scan/pedradb: Collecting 100 samples in estimated 6.9107 s (10k iterations)
+Benchmarking prefix_scan/pedradb: Analyzing
+prefix_scan/pedradb     time:   [632.89 µs 644.64 µs 657.69 µs]
+                        thrpt:  [1.5205 Melem/s 1.5513 Melem/s 1.5801 Melem/s]
+                 change:
+                        time:   [-14.825% -10.777% -6.5636%] (p = 0.00 < 0.05)
+                        thrpt:  [+7.0247% +12.079% +17.405%]
+                        Performance has improved.
+Found 10 outliers among 100 measurements (10.00%)
+  2 (2.00%) low mild
+  5 (5.00%) high mild
+  3 (3.00%) high severe
+
+Benchmarking lookup_100/pedradb_get_loop
+Benchmarking lookup_100/pedradb_get_loop: Warming up for 3.0000 s
+Benchmarking lookup_100/pedradb_get_loop: Collecting 100 samples in estimated 5.3570 s (900 iterations)
+Benchmarking lookup_100/pedradb_get_loop: Analyzing
+lookup_100/pedradb_get_loop
+                        time:   [5.0452 ms 5.1911 ms 5.3477 ms]
+                        thrpt:  [18.700 Kelem/s 19.264 Kelem/s 19.821 Kelem/s]
+                 change:
+                        time:   [-24.539% -21.172% -17.525%] (p = 0.00 < 0.05)
+                        thrpt:  [+21.249% +26.858% +32.519%]
+                        Performance has improved.
+Found 3 outliers among 100 measurements (3.00%)
+  3 (3.00%) high mild
+Benchmarking lookup_100/pedradb_multi_get
+Benchmarking lookup_100/pedradb_multi_get: Warming up for 3.0000 s
+Benchmarking lookup_100/pedradb_multi_get: Collecting 100 samples in estimated 5.5942 s (900 iterations)
+Benchmarking lookup_100/pedradb_multi_get: Analyzing
+lookup_100/pedradb_multi_get
+                        time:   [5.7916 ms 6.0227 ms 6.2773 ms]
+                        thrpt:  [15.930 Kelem/s 16.604 Kelem/s 17.266 Kelem/s]
+                 change:
+                        time:   [-13.684% -9.5071% -4.9877%] (p = 0.00 < 0.05)
+                        thrpt:  [+5.2495% +10.506% +15.853%]
+                        Performance has improved.
+Found 4 outliers among 100 measurements (4.00%)
+  3 (3.00%) high mild
+  1 (1.00%) high severe
+
+BENCH_EXIT_pedradb_diag=0
+               total        used        free      shared  buff/cache   available
+Mem:            3892         339        3387          30         406        3553
+/dev/vda         40G  780M   37G   3% /data
+Mon Aug 31 19:51:33 UTC 2026
+=== v17 trim done ===

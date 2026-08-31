@@ -737,5 +737,51 @@ Caveats, stated plainly:
   pass.
 - 25M guest numbers pending: injection staged, blocked on sudo.
 
+## Guest run #10 (v21h, 25M) — read legs improve 9–21% (p=0.00), still <1× at 25M
+
+Injection path correction: the script was always for the **gate host**
+(`192.168.68.109`, SSH key auth, passwordless sudo there — the earlier
+"sudo blocked" was tested on the Mac, wrong host; `losetup`/`md5sum` never
+existed locally). All 9 files md5-verified in-image (`MD5_OK`), guest
+rebuild confirmed (`Finished bench profile in 24.19s`), the in-image
+entrypoint auto-ran the isolated pedra leg. Raw serial:
+`run10-25m-serial.txt`.
+
+| leg (25M)              | run #9 (v21f) | run #10 (v21h) | rocks default | run10 ratio |
+|------------------------|---------------|----------------|---------------|-------------|
+| hydrate                | 103.1 s       | 117.6 s        | 25.3 s        | 0.22×       |
+| settle                 | 79.9 s        | 89.6 s         | 8.3 s         | 0.09×       |
+| probe_hit p50          | 39.5 µs       | 39.8 µs        | 45.4 µs       | **1.14×**   |
+| get_hit (criterion)    | 66.8 µs       | 54.1 µs        | 38.59 µs      | 0.71×       |
+| prefix_scan            | 730 µs        | 644.6 µs       | 305.6 µs      | 0.47×       |
+| lookup_100 get_loop    | 6.585 ms      | 5.191 ms       | 3.38 ms       | 0.65×       |
+| lookup_100 multi_get   | 6.655 ms      | 6.023 ms       | 3.70 ms       | 0.61×       |
+| on disk after settle   | 5.15 GiB      | 5.15 GiB       | 5.24 GiB      | smaller     |
+
+Honest read:
+- Every criterion read leg improved (get_hit −19%, get_loop −21%,
+  multi_get −9.5%, prefix_scan −12%; all p=0.00), but the local 6M
+  "all legs ≥ 1.0×" did **not** transfer to 25M. At 25M the settled L1
+  is 5.15 GiB in 99 disjoint chunks while the payload pool is 256 MiB
+  (~5% resident) — most reads are disk-bound, so the per-get cost is
+  block read + CRC + lz4 + raw walk vs Rocks' block read + search.
+  probe_hit p50 stays ahead of Rocks (1.14×) but the tails do not
+  (p99 2.1 ms / p999 4.8 ms).
+- Memory held: RSS flat ~1.2 GB through the read legs, pool at budget,
+  `ent_e=0` on every tick, `BENCH_EXIT_pedradb_diag=0`. The
+  resolved-slot cache did not blow the box.
+- settle regressed slightly (79.9 → 89.6 s; same whole-level shape, gate
+  noise). Post-settle L1 is 99 **disjoint** chunks — stacked runs only
+  exist during hydrate.
+- Compaction structure (from code + the local 6M settle sample): the
+  hydrate-time worker jobs take **only L0s** (`prepare_l0_compact`
+  never merges into L1 → stacked overlapping L1 runs during hydrate),
+  and settle is one single-threaded whole-level rewrite (86% of the
+  settle wall in `compact_levels → rewrite_ssts → write_merged_tables`,
+  including the output write-verify re-read). The Rocks shape needs
+  overlap-based L1 input selection + a bounded L1 size target +
+  incremental L1→L2 — that single change attacks hydrate, settle, the
+  probe tails, and the 100M disk peak (47 GiB → ~live set) together.
+
 
 
