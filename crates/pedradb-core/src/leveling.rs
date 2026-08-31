@@ -1,4 +1,7 @@
 //! Leveled compaction scheduling (pure selection kernel).
+//! kernel: leveling — enrolled in residuals.json glue.kernel_paths; the
+//! suffix-less enrollment tooth requires this marker (2026-08-31, findings/
+//! 2026-08-31-leveling-kernel-unenrolled). Catalog pair (twin+plant) pending.
 //!
 //! Policy: L0→L1 jobs absorb the L1 slice that overlaps the selected L0s, and
 //! each level `n ≥ 1` is capped at [`level_target_bytes`]. When a level is over

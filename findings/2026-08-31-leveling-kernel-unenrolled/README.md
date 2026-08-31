@@ -64,3 +64,39 @@ Same root-cause class as the seed collapse: a convention doing silent
 work — `.unwrap_or()` picked a world when parsing failed; here a filename
 suffix decides what counts as a kernel. Both fail open; both need the
 registry to be explicit and the miss loud.
+
+## Post-note (same day): option 2 landed — marker⇔registry tooth
+
+`scripts/formal/pedra_formal.py` + `scripts/formal/residuals.json` now
+implement convention-independent kernel discovery:
+
+- `glue.kernel_paths` — explicit 44-entry enrollment list (43 glob +
+  `leveling.rs`). Discovery is **glob ∪ registry**
+  (`decision_kernel_paths`), so a suffix rename can no longer silently
+  unenroll a kernel: every glob match absent from the registry is a FAIL.
+- Suffix-less registry entries must carry a `//! kernel:` marker line
+  (present in `leveling.rs`); a marked file not enrolled is a FAIL. Both
+  directions fail closed.
+- `TCB_FREEZE_ALLOWLIST` carries `leveling.rs` as an explicit
+  transitional state ("pending pair+twin"), printed loud on every lint
+  run; it leaves the allowlist when the catalog pair lands.
+- `glue.kernel_files` 43→44, `glue.kernel_loc` → 11678 (live recompute
+  on the 2026-08-31 dirty tree; the co-agent's 8 kernel WIP files are
+  still dirty, so kernel_loc/handler_loc take one more re-freeze when
+  their tree resolves — `handler_loc` stays drifted (83217 vs live
+  86242) and is theirs, not touched here).
+
+Tooth verified standalone on a fake mini-tree (throwaway
+`/tmp/tooth_test.py`, 10 cases): marked-unenrolled FAIL,
+enrolled-unmarked FAIL, glob-unenrolled FAIL, enrolled-missing FAIL,
+no-registry FAIL, duplicates FAIL, complete pass, discovery-union pass,
+discovery-drops-missing pass, real-repo pass (44 kernels, 1 suffix-less).
+
+Word-based detection was measured and rejected: 6 non-suffix files say
+"kernel" in a leading `//!` block (leveling + 5 false positives), so a
+word grep is advisory only; the marker⇔registry tooth is the mechanical
+truth.
+
+Option 1 (twin + plant for leveling) remains open, blocked on the
+co-agent's `three_teeth_queued.rs` (plant infrastructure) being clean at
+HEAD.

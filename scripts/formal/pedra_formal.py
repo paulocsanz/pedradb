@@ -507,18 +507,131 @@ def check_clones(root: Path, catalog: dict, r: Report) -> None:
 # RFC-0074 P2.1 registered `cqe_kernel.rs` as catalog pair `cqe_res`
 # (entry `cqe_res_ok`). That is not a ring model (P2.2 / R-uring):
 # `cqe_ring_model_admitted` stays false; do not add `verus/ring_model.rs`.
-TCB_FREEZE_ALLOWLIST: dict[str, str] = {}
+TCB_FREEZE_ALLOWLIST: dict[str, str] = {
+    # 2026-08-31: leveling.rs is a pure selection kernel that shipped outside
+    # the *_kernel.rs suffix (findings/2026-08-31-leveling-kernel-unenrolled).
+    # It is enrolled in the explicit registry (glue.kernel_paths + `//! kernel:`
+    # marker); the catalog pair (twin+plant) is pending until the plant
+    # infrastructure file three_teeth_queued.rs is clean at HEAD.
+    "crates/pedradb-core/src/leveling.rs": (
+        "pending pair+twin (findings/2026-08-31-leveling-kernel-unenrolled)"
+    ),
+}
 
 ISLAND_CRATES = ("pedradb-posix", "pedradb-io-uring", "pedradb-capi")
 RFC_0061 = "docs/rfc/0061-residuals-sel4-ironfleet.md"
 
 
+def enrolled_kernel_registry(root: Path) -> set[str]:
+    """Explicit kernel enrollment (residuals.json glue.kernel_paths).
+
+    The *_kernel.rs glob is a naming convention, and conventions fail open:
+    leveling.rs (2026-08-31) shipped as a pure decision kernel invisible to
+    the glob. Discovery is therefore glob UNION registry, and the residuals
+    freeze enforces the tooth in both directions (check_kernel_enrollment).
+    A missing/invalid residuals.json yields an empty registry; that hole is
+    closed by check_residuals, which fails on the same file.
+    """
+    try:
+        data = json.loads((root / "scripts/formal/residuals.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return set()
+    glue = data.get("glue")
+    paths = glue.get("kernel_paths") if isinstance(glue, dict) else None
+    if not isinstance(paths, list):
+        return set()
+    return {p for p in paths if isinstance(p, str)}
+
+
+def kernel_marker(path: Path) -> str | None:
+    """First `//! kernel:` marker line in the file, if any."""
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+    for line in text.splitlines():
+        if line.startswith("//! kernel:"):
+            return line
+    return None
+
+
+def marked_kernel_files(root: Path) -> set[str]:
+    """Non-verus crate sources carrying a `//! kernel:` marker."""
+    return {
+        str(p.relative_to(root))
+        for p in (root / "crates").glob("*/src/**/*.rs")
+        if p.is_file() and "verus" not in p.parts and kernel_marker(p) is not None
+    }
+
+
 def decision_kernel_paths(root: Path) -> list[Path]:
-    return sorted(
-        p
+    globbed = {
+        str(p.relative_to(root))
         for p in (root / "crates").glob("*/src/**/*_kernel.rs")
         if p.is_file() and "verus" not in p.parts
+    }
+    enrolled = {rel for rel in enrolled_kernel_registry(root) if (root / rel).is_file()}
+    return [root / rel for rel in sorted(globbed | enrolled)]
+
+
+def check_kernel_enrollment(root: Path, glue: dict, r: Report) -> None:
+    """Marker<->registry tooth (findings/2026-08-31-leveling-kernel-unenrolled).
+
+    The registry is the explicit side; the `//! kernel:` marker is the
+    in-file side. Both directions fail closed:
+      - every glob-discovered kernel must be enrolled;
+      - every enrolled path must exist and sit in non-verus crates/*/src;
+      - suffix-less enrolled paths must carry the marker;
+      - every marked file must be enrolled.
+    """
+    before = len(r.failed)
+    raw_paths = glue.get("kernel_paths")
+    if not isinstance(raw_paths, list) or not raw_paths:
+        r.fail(
+            "residuals freeze: glue.kernel_paths list required (explicit "
+            "kernel enrollment — findings/2026-08-31-leveling-kernel-unenrolled)"
+        )
+        return
+    bad = [p for p in raw_paths if not isinstance(p, str) or not p.strip()]
+    if bad:
+        r.fail(f"residuals freeze: glue.kernel_paths entries must be non-empty strings: {bad[:3]}")
+    raw = [p for p in raw_paths if isinstance(p, str) and p.strip()]
+    if len(set(raw)) != len(raw):
+        r.fail(f"residuals freeze: glue.kernel_paths duplicates {sorted({p for p in raw if raw.count(p) > 1})}")
+    missing = [p for p in raw if not (root / p).is_file()]
+    for p in missing:
+        r.fail(f"residuals freeze: enrolled kernel {p} is not a file")
+    existing = {p for p in raw if (root / p).is_file()}
+    globbed = {
+        str(p.relative_to(root))
+        for p in (root / "crates").glob("*/src/**/*_kernel.rs")
+        if p.is_file() and "verus" not in p.parts
+    }
+    for p in sorted(globbed - existing):
+        r.fail(
+            f"residuals freeze: kernel {p} matches the *_kernel.rs glob but "
+            "is not enrolled in glue.kernel_paths (register it)"
+        )
+    stray = sorted(
+        p for p in existing
+        if not p.startswith("crates/") or "verus" in Path(p).parts
     )
+    for p in stray:
+        r.fail(f"residuals freeze: enrolled kernel {p} is outside non-verus crates/*/src")
+    suffix_less = sorted(existing - globbed)
+    for p in suffix_less:
+        if kernel_marker(root / p) is None:
+            r.fail(
+                f"residuals freeze: enrolled kernel {p} is suffix-less "
+                "(*_kernel.rs) and carries no `//! kernel:` marker line"
+            )
+    for p in sorted(marked_kernel_files(root) - existing):
+        r.fail(f"residuals freeze: {p} carries `//! kernel:` but is not enrolled in glue.kernel_paths")
+    if len(r.failed) == before:
+        r.good(
+            f"kernel enrollment: {len(existing)} kernels, "
+            f"{len(suffix_less)} suffix-less via `//! kernel:` marker"
+        )
 
 
 def file_loc(path: Path) -> int:
@@ -553,7 +666,7 @@ def check_tcb_freeze(root: Path, catalog: dict, r: Report) -> None:
         if k in registered:
             continue
         if k in TCB_FREEZE_ALLOWLIST:
-            r.good(f"tcb freeze: allowlisted {k}")
+            r.good(f"tcb freeze: allowlisted {k} — {TCB_FREEZE_ALLOWLIST[k]}")
             continue
         r.fail(
             f"tcb freeze: kernel {k} is neither a catalog pair, a catalog "
@@ -703,6 +816,7 @@ def check_residuals(
     else:
         if glue.get("db_rs_extracted") is not False:
             r.fail("residuals freeze: glue.db_rs_extracted must be false (do not extract db.rs)")
+        check_kernel_enrollment(root, glue, r)
         cat = catalog
         if cat is None:
             cat_path = root / "scripts/formal/catalog.json"
