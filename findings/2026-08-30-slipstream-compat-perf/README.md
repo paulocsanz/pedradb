@@ -842,7 +842,49 @@ from every chunk — a tombstone's end key lives in its value, outside
 the bounds). Injection also exports `PEDRA_LEVEL_DIAG=1` in
 `p04_entrypoint.sh` (which exports `PEDRA_FLUSH_DIAG` only — the run #9
 "REWRITEDIAG exported" note does not hold for this image; that is why
-run #10/#11 have zero REWRITEDIAG lines). Result: pending.
+run #10/#11 have zero REWRITEDIAG lines). `BENCH_EXIT_pedradb_diag=0`,
+raw serial: `run12-25m-prune.txt`. Criterion baselines (the `change:`
+lines) are run #11 on the same guest disk.
+
+| leg (25M)              | run #11 (v21i) | run #12 (v21j) | rocks default | v21j ratio |
+|------------------------|----------------|----------------|---------------|------------|
+| hydrate                | 149.2 s        | 146.8 s        | 25.3 s        | 0.17×      |
+| settle                 | 51.4 s         | 51.4 s         | 8.3 s         | 0.16×      |
+| probe_hit p50          | 43.1 µs        | **38.9 µs**    | 45.4 µs       | **1.17×**  |
+| probe_miss p50         | —              | **2.8 µs**     | rocks-class   | ~1×        |
+| get_hit (criterion)    | 49.4 µs        | 54.9 µs ⚠      | 38.59 µs      | 0.70×      |
+| prefix_scan            | 616.1 µs       | 699.9 µs ⚠     | 305.6 µs      | 0.44×      |
+| lookup_100 get_loop    | ~5.13 ms       | 6.137 ms ⚠     | 3.38 ms       | 0.55×      |
+| lookup_100 multi_get   | 5.019 ms       | 5.730 ms ⚠     | 3.70 ms       | 0.65×      |
+| on disk after settle   | 5.15 GiB       | 5.15 GiB       | 5.24 GiB      | smaller    |
+
+LEVELDIAG ground truth at `compact_leveled_done` (the run #10 open
+question — COMPACTDIAG's `l1=5` never meant 5×256 MiB):
+
+- L0 = 0 files · L1 = 5 files / 225 MiB (at the 256 MiB target)
+- L2 = 44 files / 2.46 GiB (just under its fanout-10 2.5 GiB target —
+  the drain stopped correctly, not stalled)
+- L3 = 46 files / 2.47 GiB (last level, unbounded) · total 5.15 GiB ✓
+
+Honest read:
+- The prune wins exactly where predicted: **probe_miss p50 2.8 µs**
+  (miss keys sit above every chunk's largest bound → all point seeks
+  skipped; the walk still collects range tombstones from all 95 chunks
+  and stays rocks-class) and **probe_hit 43.1 → 38.9 µs = 1.17×**.
+- The four ⚠ criterion legs all regressed together (+13–20 %, p ≤ 0.03
+  vs run #11 baselines) — including `prefix_scan`, whose code path
+  v21j does not touch, while settle (pure write throughput) was
+  identical to the second. The prune adds two key compares per chunk;
+  it cannot cost 5–8 µs per op. Read: this run's criterion legs saw a
+  slower guest read path (qcow2 state after the 12th hydrate), not a
+  prune regression. Same-image repeat queued (run #13) to arbitrate;
+  until then the v21i column stays the trusted read baseline.
+- get_hit vs rocks is ~11 µs/get short even on the trusted v21i number.
+  Next fixed-cost candidates: per-get `collect_range_tombstones` over
+  all 95 chunks (bounds cannot prune it — a tombstone's end key can
+  exceed the chunk's largest key — but a cached per-chunk tombstone
+  hull/flag would skip the bench's zero-tombstone chunks entirely),
+  and 4 KiB `BLOCK_TARGET` vs rocks' 16 KiB for the scan leg.
 
 
 
