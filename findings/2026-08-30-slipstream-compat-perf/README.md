@@ -877,14 +877,48 @@ Honest read:
   identical to the second. The prune adds two key compares per chunk;
   it cannot cost 5–8 µs per op. Read: this run's criterion legs saw a
   slower guest read path (qcow2 state after the 12th hydrate), not a
-  prune regression. Same-image repeat queued (run #13) to arbitrate;
-  until then the v21i column stays the trusted read baseline.
+  prune regression. Arbitrated by run #13 (next section): **guest
+  noise — every ⚠ leg came back at or better than its v21i value.**
 - get_hit vs rocks is ~11 µs/get short even on the trusted v21i number.
-  Next fixed-cost candidates: per-get `collect_range_tombstones` over
-  all 95 chunks (bounds cannot prune it — a tombstone's end key can
-  exceed the chunk's largest key — but a cached per-chunk tombstone
-  hull/flag would skip the bench's zero-tombstone chunks entirely),
-  and 4 KiB `BLOCK_TARGET` vs rocks' 16 KiB for the scan leg.
+  Static read of the path kills the tombstone lead:
+  `Table::collect_range_tombstones` early-outs on an in-memory
+  `range_tombstones.is_empty()` (table.rs:287), so collecting from 95
+  zero-tombstone chunks costs ~100 ns/get — not the gap. The walk is
+  also thin (`sst_indices_newest_first` returns a cached order slice;
+  the bounds prune is two memcmps per chunk). Remaining candidates:
+  the per-get block read itself (whole-table payload pool at ~45 MiB
+  granularity vs rocks' 16 KiB block cache; positioned read + CRC +
+  lz4 + in-block scan per get) and 4 KiB `BLOCK_TARGET` vs rocks'
+  16 KiB for the scan leg.
+
+## Guest run #13 (v21j, 25M, same image) — noise arbitration repeat
+
+No re-injection: container stop/start only, entrypoint rebuild + bench
+re-ran. `BENCH_EXIT_pedradb_diag=0`, raw serial:
+`run13-25m-prune-repeat.txt`.
+
+| leg (25M)              | run #11 (v21i) | run #12 (v21j) | run #13 (v21j) | rocks default | v21j ratio |
+|------------------------|----------------|----------------|----------------|---------------|------------|
+| hydrate                | 149.2 s        | 146.8 s        | 143.7 s        | 25.3 s        | 0.18×      |
+| settle                 | 51.4 s         | 51.4 s         | 52.0 s         | 8.3 s         | 0.16×      |
+| probe_hit p50          | 43.1 µs        | 38.9 µs        | **33.9 µs**    | 45.4 µs       | **1.34×**  |
+| probe_miss p50         | —              | 2.8 µs         | 2.5 µs         | rocks-class   | ~1×        |
+| get_hit (criterion)    | 49.4 µs        | 54.9 µs        | **46.7 µs**    | 38.59 µs      | 0.83×      |
+| prefix_scan            | 616.1 µs       | 699.9 µs       | 632.6 µs       | 305.6 µs      | 0.48×      |
+| lookup_100 get_loop    | ~5.13 ms       | 6.137 ms       | **4.534 ms**   | 3.38 ms       | 0.75×      |
+| lookup_100 multi_get   | 5.019 ms       | 5.730 ms       | 4.954 ms       | 3.70 ms       | 0.75×      |
+| on disk after settle   | 5.15 GiB       | 5.15 GiB       | 5.15 GiB       | 5.24 GiB      | smaller    |
+
+Verdict: run #12's four criterion regressions were guest noise — on the
+repeat every one came back at or better than its v21i value (get_hit
+−5.5 %, get_loop −11.6 %, multi_get −1.3 %, prefix_scan +2.7 %), and the
+LEVELDIAG level split reproduced exactly (L1 5/225 MiB, L2 44/2.46 GiB,
+L3 46/2.47 GiB). v21j keeps: probe_hit 1.34×, probe_miss rocks-class,
+get_hit best-yet 0.83×, lookup_100 both variants 0.75×. Lesson recorded:
+single-run criterion deltas on this guest swing ±15 % — never accept or
+reject a lever on one run; the probe legs (custom harness, printed
+percentiles) were far more stable across #11–#13 than the criterion
+legs.
 
 
 
