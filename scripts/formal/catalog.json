@@ -2337,6 +2337,33 @@
       ]
     },
     {
+      "id": "l28_tcp_dterm",
+      "finding": "RFC-0158",
+      "twin_kind": "close",
+      "kernel": "crates/pedradb-store/src/l28.rs",
+      "twin": "crates/pedradb-store/verus/l28.rs",
+      "verus": "scripts/verus_l28.sh",
+      "callers": [
+        "crates/pedradb-store/src/bin/cluster_real.rs"
+      ],
+      "entry": "l28_tcp_dterm_ok",
+      "data_fate": true,
+      "handlers": [
+        "tcp_node_removed_durable_term_ok"
+      ],
+      "as_is": "l28_tcp_dterm_ok_as_is",
+      "dst_plant": {
+        "file": "crates/pedradb-store/tests/l28_real_tcp.rs",
+        "test": "l28_real_tcp_removed_durable_term"
+      },
+      "live_callers": [
+        {
+          "file": "crates/pedradb-store/src/bin/cluster_real.rs",
+          "handler": "tcp_node_removed_durable_term_ok"
+        }
+      ]
+    },
+    {
       "id": "l28_tcp_hist",
       "finding": "RFC-0136",
       "twin_kind": "close",
