@@ -1913,6 +1913,30 @@
       }
     },
     {
+      "id": "durable_term",
+      "finding": "F125/F127",
+      "twin_kind": "close",
+      "kernel": "crates/pedradb-raft/src/vote_kernel.rs",
+      "twin": "crates/pedradb-raft/verus/durable_term.rs",
+      "verus": "scripts/verus_durable_term.sh",
+      "callers": [
+        "crates/pedradb-store/src/lib.rs"
+      ],
+      "entry": "durable_term_if_newer",
+      "data_fate": true,
+      "live_callers": [
+        {
+          "file": "crates/pedradb-store/src/lib.rs",
+          "handler": "durable_become_follower_if_newer"
+        }
+      ],
+      "as_is": "durable_term_if_newer_as_is",
+      "dst_plant": {
+        "file": "crates/pedradb-store/src/three_teeth_queued.rs",
+        "test": "durable_term_rollback_on_live_queued_is_not_ok"
+      }
+    },
+    {
       "id": "vlog_recover",
       "finding": "F51/G-swing",
       "twin_kind": "close",
@@ -3256,7 +3280,8 @@
         "vote_decision",
         "can_vote",
         "log_up_to_date",
-        "grant_after_persist"
+        "grant_after_persist",
+        "durable_term_if_newer"
       ]
     },
     {
