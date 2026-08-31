@@ -199,6 +199,20 @@ pub fn l28_tcp_nowms_ok_as_is(_ok: bool) -> bool {
     true
 }
 
+/// RFC-0158 P2.1: on the removed replica's REAL dir, a newer-term
+/// RequestVote whose hard-state persist fails must roll the term back —
+/// reply, memory and disk keep the previous term (F125/F127).
+#[must_use]
+pub fn l28_tcp_dterm_ok(ok: bool) -> bool {
+    ok
+}
+
+/// AS-IS: keep the undurable raise (memory term above disk hard state).
+#[must_use]
+pub fn l28_tcp_dterm_ok_as_is(_ok: bool) -> bool {
+    true
+}
+
 /// RFC-0136 P1.2: after REAL TCP plant + process death, persist SI hist
 /// on a replica dropped from `ids`.
 #[must_use]
@@ -733,6 +747,17 @@ mod tests {
             "AS-IS dente: skip TCP removed-replica now_ms persist"
         );
         assert!(l28_tcp_nowms_ok_as_is(true));
+    }
+
+    #[test]
+    fn l28_tcp_dterm_ok_requires_rollback() {
+        assert!(l28_tcp_dterm_ok(true));
+        assert!(!l28_tcp_dterm_ok(false));
+        assert!(
+            l28_tcp_dterm_ok_as_is(false),
+            "AS-IS dente: keep the undurable term raise"
+        );
+        assert!(l28_tcp_dterm_ok_as_is(true));
     }
 
     #[test]

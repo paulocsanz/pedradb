@@ -17,7 +17,7 @@ use pedradb_store::{
     l28_tcp_part_ok, l28_tcp_part_ok_as_is, l28_tcp_plant_ok,
     l28_tcp_abort_ok, l28_tcp_abort_ok_as_is, l28_tcp_clear_ok, l28_tcp_clear_ok_as_is,
     l28_tcp_lid_ok, l28_tcp_lid_ok_as_is, l28_tcp_peer_ok, l28_tcp_peer_ok_as_is,
-    l28_tcp_dsc_ok, l28_tcp_dsc_ok_as_is, l28_tcp_pld_ok, l28_tcp_pld_ok_as_is,
+    l28_tcp_dsc_ok, l28_tcp_dsc_ok_as_is, l28_tcp_dterm_ok, l28_tcp_dterm_ok_as_is, l28_tcp_pld_ok, l28_tcp_pld_ok_as_is,
     l28_tcp_pre_ok, l28_tcp_pre_ok_as_is, l28_tcp_rdr_ok, l28_tcp_rdr_ok_as_is,
     l28_tcp_hnt_ok, l28_tcp_hnt_ok_as_is, l28_tcp_slot_ok, l28_tcp_slot_ok_as_is,
     l28_tcp_pj_ok, l28_tcp_pj_ok_as_is, l28_tcp_std_ok, l28_tcp_std_ok_as_is, l28_tcp_sth_ok,
@@ -225,6 +225,37 @@ fn l28_real_tcp_high_water_after_remove() {
     assert!(
         l28_tcp_hw_ok_as_is(false),
         "AS-IS dente: skip on-disk high-water"
+    );
+    eprintln!("{a}");
+}
+
+/// RFC-0158 P2.1: removed replica, newer-term RequestVote, hard-state
+/// persist failing on the replica's REAL dir — the reply and the disk keep
+/// the previous term (F125/F127 rollback), the raise never becomes durable.
+#[test]
+fn l28_real_tcp_removed_durable_term() {
+    let seed = 0x0158_1E28_u64;
+    let a = run(seed, &["--remove-member"]);
+    let b = run(seed, &["--remove-member"]);
+    assert_eq!(a, b, "durable-term fingerprint must replay");
+    assert!(a.contains("remove=1"), "TCP remove plant must fire: {a}");
+    assert!(
+        a.contains("dterm=1"),
+        "REAL TCP durable-term rollback plant must fire: {a}"
+    );
+    let (get_ok, after_ok, restart_ok) = parse_l28(&a);
+    assert!(
+        l28_durability_ok(get_ok, after_ok, restart_ok),
+        "L28 kernel miss under --remove-member: {a}"
+    );
+    let dterm_ok = a.contains("dterm=1");
+    assert!(
+        l28_tcp_dterm_ok(dterm_ok),
+        "L28 kernel miss under durable-term rollback: {a}"
+    );
+    assert!(
+        l28_tcp_dterm_ok_as_is(!dterm_ok),
+        "AS-IS dente: keep the undurable term raise"
     );
     eprintln!("{a}");
 }

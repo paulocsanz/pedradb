@@ -89,6 +89,7 @@ pub use l28::{
     l28_durability_ok, l28_durability_ok_as_is, l28_leader_kill_ok, l28_leader_kill_ok_as_is,
     l28_tcp_abort_ok, l28_tcp_abort_ok_as_is, l28_tcp_apply_ok, l28_tcp_apply_ok_as_is,
     l28_tcp_clear_ok, l28_tcp_clear_ok_as_is, l28_tcp_dsc_ok, l28_tcp_dsc_ok_as_is,
+    l28_tcp_dterm_ok, l28_tcp_dterm_ok_as_is,
     l28_tcp_fence_ok, l28_tcp_fence_ok_as_is, l28_tcp_hist_ok, l28_tcp_hist_ok_as_is,
     l28_tcp_hnt_ok, l28_tcp_hnt_ok_as_is, l28_tcp_hw_ok, l28_tcp_hw_ok_as_is, l28_tcp_leave_ok,
     l28_tcp_leave_ok_as_is, l28_tcp_left_ok, l28_tcp_left_ok_as_is, l28_tcp_lid_ok,
@@ -276,7 +277,7 @@ use std::ops::Bound;
 use std::path::{Path, PathBuf};
 
 use bytes::Bytes;
-use pedradb_core::{BatchOp, Db, Env, Host, OpenOptions, Rng, SeedRng};
+use pedradb_core::{AdviseKind, BatchOp, Db, Env, EnvFile, Host, OpenOptions, Rng, SeedRng};
 use pedradb_dcs::{
     apply_dcs_command, bind_absent_create, check_command_at, dcs_get, dcs_get_at, DcsCommand,
     KeyValue,
@@ -2411,6 +2412,312 @@ pub fn tcp_node_removed_std_ok(data: impl AsRef<Path>, self_id: u64, cli: &[u64]
         return false;
     }
     !c.is_member(self_id) && !c.node_thinks_leader(self_id, 1)
+}
+
+use std::cell::Cell;
+use std::io::{self, Read, Seek, SeekFrom, Write};
+use std::rc::Rc;
+
+/// One-shot write-fault [`Env`] for the REAL-dir removed-replica replay
+/// (RFC-0158 P2.1): the next write-class op fails, then the env heals.
+/// Mirrors `pedradb_sim::FailingEnv::arm_one_failure` semantics without
+/// making the sim harness crate a production dependency of the store.
+#[derive(Clone)]
+struct FailNextIo<E: Env> {
+    inner: E,
+    armed: Rc<Cell<bool>>,
+}
+
+impl<E: Env> FailNextIo<E> {
+    fn passing(inner: E) -> Self {
+        Self {
+            inner,
+            armed: Rc::new(Cell::new(false)),
+        }
+    }
+
+    /// Fail the next write-class op (create / append / write / sync).
+    fn arm_one_failure(&self) {
+        self.armed.set(true);
+    }
+
+    fn gate(&self) -> io::Result<()> {
+        if self.armed.get() {
+            self.armed.set(false);
+            Err(io::Error::new(
+                io::ErrorKind::Other,
+                "fail-next: one-shot injected",
+            ))
+        } else {
+            Ok(())
+        }
+    }
+}
+
+struct FailNextFile<F: EnvFile> {
+    inner: F,
+    armed: Rc<Cell<bool>>,
+}
+
+impl<F: EnvFile> FailNextFile<F> {
+    fn gate(&self) -> io::Result<()> {
+        if self.armed.get() {
+            self.armed.set(false);
+            Err(io::Error::new(
+                io::ErrorKind::Other,
+                "fail-next: one-shot injected",
+            ))
+        } else {
+            Ok(())
+        }
+    }
+}
+
+impl<F: EnvFile> Read for FailNextFile<F> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        self.inner.read(buf)
+    }
+}
+
+impl<F: EnvFile> Write for FailNextFile<F> {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        self.gate()?;
+        self.inner.write(buf)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.inner.flush()
+    }
+}
+
+impl<F: EnvFile> Seek for FailNextFile<F> {
+    fn seek(&mut self, pos: SeekFrom) -> io::Result<u64> {
+        self.inner.seek(pos)
+    }
+}
+
+impl<F: EnvFile> EnvFile for FailNextFile<F> {
+    fn sync_data(&mut self) -> io::Result<()> {
+        self.gate()?;
+        self.inner.sync_data()
+    }
+
+    fn sync_data_strong(&mut self) -> io::Result<()> {
+        self.gate()?;
+        self.inner.sync_data_strong()
+    }
+
+    fn sync_all(&mut self) -> io::Result<()> {
+        self.gate()?;
+        self.inner.sync_all()
+    }
+
+    fn set_len(&mut self, len: u64) -> io::Result<()> {
+        self.gate()?;
+        self.inner.set_len(len)
+    }
+
+    fn preallocate(&mut self, len: u64) -> io::Result<()> {
+        self.inner.preallocate(len)
+    }
+
+    fn len(&mut self) -> io::Result<u64> {
+        self.inner.len()
+    }
+}
+
+impl<E: Env> Env for FailNextIo<E> {
+    type File = FailNextFile<E::File>;
+
+    fn unix_millis(&self) -> u64 {
+        self.inner.unix_millis()
+    }
+
+    fn create_dir_all(&self, path: &Path) -> io::Result<()> {
+        self.inner.create_dir_all(path)
+    }
+
+    fn create(&self, path: &Path) -> io::Result<Self::File> {
+        self.gate()?;
+        Ok(FailNextFile {
+            inner: self.inner.create(path)?,
+            armed: Rc::clone(&self.armed),
+        })
+    }
+
+    fn open_append(&self, path: &Path) -> io::Result<Self::File> {
+        self.gate()?;
+        Ok(FailNextFile {
+            inner: self.inner.open_append(path)?,
+            armed: Rc::clone(&self.armed),
+        })
+    }
+
+    fn open_read(&self, path: &Path) -> io::Result<Self::File> {
+        Ok(FailNextFile {
+            inner: self.inner.open_read(path)?,
+            armed: Rc::clone(&self.armed),
+        })
+    }
+
+    fn sync_dir(&self, path: &Path) -> io::Result<()> {
+        self.gate()?;
+        self.inner.sync_dir(path)
+    }
+
+    fn read_dir_names(&self, path: &Path) -> io::Result<Vec<String>> {
+        self.inner.read_dir_names(path)
+    }
+
+    fn remove_file(&self, path: &Path) -> io::Result<()> {
+        self.inner.remove_file(path)
+    }
+
+    fn rename(&self, from: &Path, to: &Path) -> io::Result<()> {
+        self.inner.rename(from, to)
+    }
+
+    fn exists(&self, path: &Path) -> bool {
+        self.inner.exists(path)
+    }
+
+    fn metadata_len(&self, path: &Path) -> io::Result<u64> {
+        self.inner.metadata_len(path)
+    }
+
+    fn is_dir(&self, path: &Path) -> io::Result<bool> {
+        self.inner.is_dir(path)
+    }
+
+    fn advise(&self, path: &Path, offset: u64, len: u64, kind: AdviseKind) -> io::Result<()> {
+        self.inner.advise(path, offset, len, kind)
+    }
+}
+
+/// RFC-0158 P2.1: REAL-TCP removed-replica guard for the durable term
+/// rollback (F125/F127). `data` is the removed replica's `--data` parent
+/// from the `--remove-member` REAL TCP run. The dir is reopened on the
+/// real disk, the pre-remove membership view is replanted in memory (the
+/// in-flight RequestVote that left the old config before the leave
+/// applied — the participation gate would otherwise drop it), one write is
+/// failed at the env seam, and the production Queued inbound RequestVote
+/// arrives with a newer term. The reply must deny with the RESTORED term,
+/// memory must not keep the raise, and the REAL disk hard state must still
+/// carry the pre-injection term. AS-IS (no rollback) keeps the raise.
+#[must_use]
+pub fn tcp_node_removed_durable_term_ok(
+    data: impl AsRef<Path>,
+    self_id: u64,
+    cli: &[u64],
+) -> bool {
+    let dir = data.as_ref();
+    let env = FailNextIo::passing(IoUringEnv::default());
+    let Ok(mut c) = StoreCluster::open_with_envs_rng(
+        dir,
+        3,
+        1,
+        [env.clone(), env.clone(), env.clone()],
+        SeedRng::new(0x0158_1E28),
+    ) else {
+        return false;
+    };
+    c.pin_dst_queued();
+    // The remove must have landed on the REAL disk: C-new omits self_id.
+    let removed_on_disk = c
+        .nodes
+        .get(&self_id)
+        .and_then(|n| n.db.get(&cluster_membership_key()))
+        .is_some_and(|raw| {
+            decode_membership(&raw)
+                .map(|ids| !ids.contains(&self_id))
+                .unwrap_or(false)
+        });
+    if !removed_on_disk {
+        return false;
+    }
+    // Replant the old-config view so the in-flight RV passes the
+    // participation gate (is_participating consults in-memory ids).
+    c.ids = cli.to_vec();
+    let (prev_term, prev_voted) = {
+        let Some(n) = c.nodes.get_mut(&self_id) else {
+            return false;
+        };
+        n.participating = true;
+        let Some(p) = n.ranges.get_mut(&1) else {
+            return false;
+        };
+        p.role = Role::Leader;
+        p.leader_id = Some(cli[0]);
+        (p.term, p.voted_for)
+    };
+    env.arm_one_failure();
+    let _ = c.drain_outbound();
+    let bytes = PeerMsg::RequestVote {
+        range_id: 1,
+        term: prev_term + 1,
+        candidate_id: cli[0],
+        last_log_index: 0,
+        last_log_term: 0,
+    }
+    .encode();
+    if c.handle_inbound(cli[0], self_id, &bytes).is_err() {
+        return false;
+    }
+    let mut restored_reply = false;
+    for (_from, _to, raw) in c.drain_outbound() {
+        if let Ok(PeerMsg::RequestVoteReply {
+            term: reply_term,
+            vote_granted,
+            ..
+        }) = PeerMsg::decode(&raw)
+        {
+            if !vote_granted && reply_term == prev_term {
+                restored_reply = true;
+            }
+        }
+    }
+    if !restored_reply {
+        return false;
+    }
+    let (term_after, voted_after, role_after, leader_after) = {
+        let Some(n) = c.nodes.get(&self_id) else {
+            return false;
+        };
+        let Some(p) = n.ranges.get(&1) else {
+            return false;
+        };
+        (p.term, p.voted_for, p.role, p.leader_id)
+    };
+    if term_after != prev_term || voted_after != prev_voted {
+        return false;
+    }
+    if !matches!(role_after, Role::Follower) || leader_after.is_some() {
+        return false;
+    }
+    // The raise never hit the REAL disk: reopen clean and read hard state.
+    drop(c);
+    let dir3 = dir.join(format!("store-node-{self_id}"));
+    let opts = OpenOptions {
+        wal_full_fsync: true,
+        history: Default::default(),
+        wal_recovery: Default::default(),
+        sync: true,
+        auto_flush_bytes: None,
+        auto_compact_sst_count: None,
+        auto_compact_sst_bytes: None,
+        exclusive: true,
+        large_value_threshold: None,
+    };
+    let Ok(db) = Db::open_with_env(&dir3, opts, IoUringEnv::default()) else {
+        return false;
+    };
+    let Some(raw) = db.get(&raft_meta_key(1, "hard")) else {
+        return false;
+    };
+    match decode_hard(&raw) {
+        Ok((t, v)) => t == prev_term && v == prev_voted,
+        Err(_) => false,
+    }
 }
 
 /// RFC-0146 P1.2: production TCP ctor of a **remaining** voter must not

@@ -1,6 +1,6 @@
 # RFC: 0158 — O termo só sobe com hard state durável (F125/F127 vira par do catálogo)
 
-**Status:** in-progress
+**Status:** done (P0.1–P0.3, P1.1, P2.1 entregues; residual `R-glue`/`R-swarm-real` seguem contínuos no catálogo)
 **Updated:** 2026-08-30
 **Parents:** [0152](0152-live-queued-vote-ae-catalog-kernel.md), [0155](0155-silent-wrong-fail-closed.md)
 
@@ -38,7 +38,7 @@ Extrair a decisão pura `durable_term_if_newer(termo_atual, termo_recebido, Pers
 
 ### P2 — depois
 
-- [ ] **P2.1** Guarda REAL TCP na família `l28_tcp_*` para o rollback durável (removed-replica + termo novo + persist falho no disco real) — status: `todo`
+- [x] **P2.1** Guarda REAL TCP na família `l28_tcp_*` para o rollback durável (removed-replica + termo novo + persist falho no disco real) — status: `done` (par `l28_tcp_dterm`: contador `dterm=` no fingerprint do `cluster_real --remove-member`; helper `tcp_node_removed_durable_term_ok` reabre o dir REAL da réplica removida, replanta a visão C-old (o RV em voo que o gate de participação deixaria cair), falha UMA escrita pela costura `Env` (`FailNextIo`, espelho one-shot do `FailingEnv::arm_one_failure`) e dirige o inbound Queued de produção: reply nega com o termo RESTAURADO, memória não guarda a elevação, e o hard state REAL em disco segue com o termo pré-injeção; planta `l28_real_tcp_removed_durable_term` verde com replay de seed; `verus_l28.sh` 55/55)
 
 ## Status (living — update with every PR)
 
@@ -48,7 +48,7 @@ Extrair a decisão pura `durable_term_if_newer(termo_atual, termo_recebido, Pers
 | P0.2 | p0 | gêmeo + runner + par no catálogo + live_callers | done | este commit | 2026-08-30 |
 | P0.3 | p0 | planta inbound Queued com persist falho | done | este commit | 2026-08-30 |
 | P1.1 | p1 | alinhar handler do pedradb-raft ao kernel | done | este commit | 2026-08-30 |
-| P2.1 | p2 | guarda REAL TCP do rollback durável | todo | — | 2026-08-30 |
+| P2.1 | p2 | guarda REAL TCP do rollback durável | done | este commit | 2026-08-30 |
 
 ## Acceptance Criteria
 

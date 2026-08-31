@@ -34,6 +34,7 @@
 //! `std=1` means a planted Leader on the removed replica is stepped down (RFC-0145).
 //! `hnt=1` means remaining voter's leader_hint omits the removed replica (RFC-0146).
 //! `slot=1` means remaining voter forgets next/match/sent_through of the removed replica (RFC-0147).
+//! `dterm=1` means the removed replica rolled a newer term back when the hard-state persist failed on its REAL dir (RFC-0158).
 //! `sth=1` means remaining voter oob `remove_member` drops `sent_through` of a remote replica (RFC-0148).
 //! `pj=1` means planted committed C-old,new without leave refuses C-old majority (RFC-0068).
 //! Default / `--leave-joint` fingerprints add `sth=`/`pj=` (3 still in `ids`). `--remove-member` omits them.
@@ -58,13 +59,14 @@ use pedradb_store::{
     l28_tcp_abort_ok, l28_tcp_apply_ok, l28_tcp_clear_ok, l28_tcp_fence_ok, l28_tcp_hist_ok,
     l28_tcp_hw_ok, l28_tcp_leave_ok, l28_tcp_left_ok, l28_tcp_napply_ok,
     l28_tcp_napply_retry_admitted, l28_tcp_nowms_ok,
-    l28_tcp_dsc_ok, l28_tcp_hnt_ok, l28_tcp_lid_ok, l28_tcp_odrop_ok, l28_tcp_part_ok,
+    l28_tcp_dsc_ok, l28_tcp_dterm_ok, l28_tcp_hnt_ok, l28_tcp_lid_ok, l28_tcp_odrop_ok, l28_tcp_part_ok,
     l28_tcp_peer_ok, l28_tcp_pld_ok, l28_tcp_plant_ok, l28_tcp_pre_ok, l28_tcp_rdr_ok,
     l28_tcp_pj_ok, l28_tcp_slot_ok, l28_tcp_std_ok, l28_tcp_sth_ok, l28_tcp_trunc_ok,
     liveness_admitted, tcp_node_disk_high_water, tcp_node_disk_left_joint, tcp_node_drop_repl_ok,
     tcp_node_drop_st_ok, tcp_node_hint_ok, tcp_node_plant_joint_ok, tcp_node_recover_apply_ok,
     tcp_node_removed_abort_ok, tcp_node_removed_clear_ok, tcp_node_removed_dsc_ok,
-    tcp_node_removed_fence_ok, tcp_node_removed_hist_ok, tcp_node_removed_lid_ok,
+    tcp_node_removed_durable_term_ok, tcp_node_removed_fence_ok, tcp_node_removed_hist_ok,
+    tcp_node_removed_lid_ok,
     tcp_node_removed_not_participating, tcp_node_removed_now_ms_ok,
     tcp_node_removed_orphan_drop_ok, tcp_node_removed_peer_ok, tcp_node_removed_pld_ok,
     tcp_node_removed_pre_ok, tcp_node_removed_rdr_ok, tcp_node_removed_recover_apply_ok,
@@ -365,6 +367,7 @@ fn run(seed: u64, kill_leader: bool, do_leave: bool, do_remove: bool) -> String 
     let mut std_ok = 0u8;
     let mut hnt_ok = 0u8;
     let mut slot_ok = 0u8;
+    let mut dterm_ok = 0u8;
     let mut sth_ok = 0u8;
     let mut pj_ok = 0u8;
     if do_remove {
@@ -523,6 +526,11 @@ fn run(seed: u64, kill_leader: bool, do_leave: bool, do_remove: bool) -> String 
             &[1, 2, 3],
             3,
         ));
+        dterm_ok = u8::from(tcp_node_removed_durable_term_ok(
+            &parent.join("n3"),
+            3,
+            &[1, 2, 3],
+        ));
     } else {
         for c in &mut kids.0 {
             let _ = c.kill();
@@ -545,7 +553,7 @@ fn run(seed: u64, kill_leader: bool, do_leave: bool, do_remove: bool) -> String 
     let kind = if kill_leader { "leader" } else { "node" };
     if do_remove {
         format!(
-            "seed={seed:x} kill={kind} put=1 get={get_ok} after={kill_ok} restart={restart_ok} remove={remove_ok} leave={leave_ok} left={left_ok} hw={hw_ok} part={part_ok} apply={apply_ok} napply={napply_ok} trunc={trunc_ok} odrop={odrop_ok} abort={abort_ok} nowms={nowms_ok} hist={hist_ok} fence={fence_ok} clear={clear_ok} pre={pre_ok} peer={peer_ok} lid={lid_ok} rdr={rdr_ok} dsc={dsc_ok} pld={pld_ok} std={std_ok} hnt={hnt_ok} slot={slot_ok}"
+            "seed={seed:x} kill={kind} put=1 get={get_ok} after={kill_ok} restart={restart_ok} remove={remove_ok} leave={leave_ok} left={left_ok} hw={hw_ok} part={part_ok} apply={apply_ok} napply={napply_ok} trunc={trunc_ok} odrop={odrop_ok} abort={abort_ok} nowms={nowms_ok} hist={hist_ok} fence={fence_ok} clear={clear_ok} pre={pre_ok} peer={peer_ok} lid={lid_ok} rdr={rdr_ok} dsc={dsc_ok} pld={pld_ok} std={std_ok} hnt={hnt_ok} slot={slot_ok} dterm={dterm_ok}"
         )
     } else if do_leave {
         format!(
@@ -713,6 +721,11 @@ fn main() {
         let slot_ok = line.contains("slot=1");
         if !l28_tcp_slot_ok(slot_ok) {
             eprintln!("L28 TCP remaining-voter repl-slot miss: {line}");
+            std::process::exit(1);
+        }
+        let dterm_ok = line.contains("dterm=1");
+        if !l28_tcp_dterm_ok(dterm_ok) {
+            eprintln!("L28 TCP removed-replica durable-term rollback miss: {line}");
             std::process::exit(1);
         }
     } else if do_leave {
