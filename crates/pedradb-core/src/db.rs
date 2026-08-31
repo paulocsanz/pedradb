@@ -748,6 +748,10 @@ pub struct PreparedL0Compact<E: Env> {
     /// this wide, so a split past the cap would hand out an unreserved
     /// number.
     chunk_budget: usize,
+    /// Payload-pool kit for the emitted chunks: each chunk is opened with
+    /// its whole body resident, so it must be registered (evictable) the
+    /// moment it exists.
+    kit: Option<crate::cache::PayloadKit>,
 }
 
 impl<E: Env> PreparedL0Compact<E> {
@@ -777,6 +781,7 @@ impl<E: Env> PreparedL0Compact<E> {
             self.sync,
             self.split_target,
             self.chunk_budget,
+            self.kit.as_ref(),
         )
         .map(|ts| {
             ts.into_iter()
@@ -5441,6 +5446,13 @@ impl<E: Env> Db<E> {
         for _ in 1..chunk_budget {
             self.alloc_file_num();
         }
+        let kit = self
+            .sst_source
+            .as_ref()
+            .map(|source| crate::cache::PayloadKit {
+                source: Arc::clone(source),
+                pool: Arc::clone(&self.sst_payload_pool),
+            });
         Ok(Some(PreparedL0Compact {
             inputs,
             file_num,
@@ -5450,6 +5462,7 @@ impl<E: Env> Db<E> {
             sync: self.sync,
             split_target: self.compact_target_file_bytes,
             chunk_budget,
+            kit,
         }))
     }
 
@@ -5606,6 +5619,13 @@ impl<E: Env> Db<E> {
             .first()
             .map(|t| t.cf().to_string())
             .unwrap_or_default();
+        let kit = self
+            .sst_source
+            .as_ref()
+            .map(|source| crate::cache::PayloadKit {
+                source: Arc::clone(source),
+                pool: Arc::clone(&self.sst_payload_pool),
+            });
         let new_tables: Vec<SstTable> = write_merged_tables(
             &self.env,
             &self.dir,
@@ -5618,6 +5638,7 @@ impl<E: Env> Db<E> {
             // `next_file_num` after the write, so no other allocator can
             // interleave: unlimited chunks are safe here.
             usize::MAX,
+            kit.as_ref(),
         )?
         .into_iter()
         .map(|t| t.with_cf(cf.clone()))
@@ -9283,6 +9304,7 @@ fn write_merged_tables(
     do_sync_dir: bool,
     split_target: u64,
     chunk_budget: usize,
+    kit: Option<&crate::cache::PayloadKit>,
 ) -> Result<Vec<SstTable>> {
     let bloom_hint: usize = tables.iter().map(SstTable::len).sum();
     let mut out: Vec<SstTable> = Vec::new();
@@ -9364,7 +9386,18 @@ fn write_merged_tables(
             return Err(e);
         }
         drop(entries);
-        out.push(finish_merged_chunk_on(env, dir, file_num, do_sync_dir)?);
+        let mut chunk = finish_merged_chunk_on(env, dir, file_num, do_sync_dir)?;
+        // Register the chunk's resident body the moment it exists: this
+        // Vec accumulates every chunk of the job, and a freshly opened
+        // chunk holds its whole file body in RAM. Unregistered payloads
+        // are invisible to the pool and can never be evicted — a
+        // whole-levels rewrite then holds its entire output resident
+        // (the 25M settle OOM at ~6 chunks). Idempotent with the
+        // install-time `adopt_sst`.
+        if let Some(kit) = kit {
+            chunk.attach_payload_kit(&kit.source, &kit.pool);
+        }
+        out.push(chunk);
         file_num += 1;
     }
     Ok(out)
@@ -12416,6 +12449,53 @@ mod tests {
         );
         db.install_prepared_l0_compact(job, tables).unwrap();
         assert!(db.get(&[b'k', 0]).is_some(), "store reads after install");
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// v21d regression: rewrite chunks (whole-levels `compact` /
+    /// `rewrite_ssts`) enter the live inventory pool-registered. Each
+    /// freshly opened chunk holds its whole file body resident, and the
+    /// writer accumulates every chunk of the job before returning, so an
+    /// unregistered chunk payload can never be evicted — the 25M guest
+    /// settle OOM'd at ~6 resident chunks (guest run #5).
+    #[test]
+    fn compact_rewrite_chunks_are_pool_evictable() {
+        let dir = temp_dir();
+        let mut opts = OpenOptions {
+            sync: false,
+            auto_flush_bytes: Some(4 * 1024 * 1024),
+            ..OpenOptions::default()
+        };
+        opts.sst_payload_budget_bytes = Some(1); // evict everything, always
+        let mut db = Db::<StdEnv>::open_with_env_bounded(&dir, opts, StdEnv).unwrap();
+        db.set_defer_auto_compact(true);
+        for round in 0..3u32 {
+            for i in 0..200u32 {
+                let k = format!("r{round}-key-{i:04}").into_bytes();
+                let v = vec![(i % 199) as u8; 120];
+                db.put(&k, &v).unwrap();
+            }
+            db.flush().unwrap();
+        }
+        assert!(db.ssts.len() >= 3, "want several L0 tables");
+        // Whole-levels rewrite: L0(+L1) of the family through
+        // `rewrite_ssts`, the same path settle's `compact()` takes.
+        db.compact_ssts_only().unwrap();
+        let resident = db.ssts.iter().filter(|t| t.payload_resident()).count();
+        assert_eq!(
+            resident, 0,
+            "rewrite chunks must be pool-evictable; {resident} live payloads resident at budget 1"
+        );
+        // Evicted chunk reads re-read blocks from file and must be
+        // identical (fail-closed CRC path).
+        for round in 0..3u32 {
+            for i in 0..200u32 {
+                let k = format!("r{round}-key-{i:04}").into_bytes();
+                let want = vec![(i % 199) as u8; 120];
+                assert_eq!(db.get(&k).expect("read after rewrite"), want);
+            }
+        }
         db.close().unwrap();
         let _ = fs::remove_dir_all(&dir);
     }
