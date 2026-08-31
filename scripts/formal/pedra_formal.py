@@ -445,6 +445,54 @@ def check_clones(root: Path, catalog: dict, r: Report) -> None:
             )
         else:
             r.good(f"{clone['id']}: no unregistered identical production fn")
+    # Cross-pair completeness: the clone catalog must cover EVERY
+    # token-identical production fn duplicated across the frozen kernels
+    # (plus the catalog's own non-kernel sides). A new duplicate must be
+    # registered or deliberately diverged, never silently added.
+    files = [str(p.relative_to(root)) for p in decision_kernel_paths(root)]
+    sides = {clone["a"] for clone in catalog.get("clones", [])} | {
+        clone["b"] for clone in catalog.get("clones", [])
+    }
+    files += sorted(sides - set(files))
+    info: dict[tuple[str, str], list[str]] = {}
+    by_name: dict[str, list[str]] = {}
+    for rel in files:
+        src = load_text(root, rel)
+        if src is None:
+            continue
+        offs, cfg = prod_fn_offsets(src)
+        for name, body in exec_fns(src).items():
+            if offs.get(name, cfg) >= cfg:
+                continue
+            info[(rel, name)] = tokens(body)
+            by_name.setdefault(name, []).append(rel)
+    covered = {
+        (cl["a"], cl["b"], n)
+        for cl in catalog.get("clones", [])
+        for n in cl["fns"]
+    } | {
+        (cl["b"], cl["a"], n)
+        for cl in catalog.get("clones", [])
+        for n in cl["fns"]
+    }
+    missed = [
+        f"{name}: {fs[i]} <-> {fs[j]}"
+        for name, fs in sorted(by_name.items())
+        for i in range(len(fs))
+        for j in range(i + 1, len(fs))
+        if info[(fs[i], name)] == info[(fs[j], name)]
+        and (fs[i], fs[j], name) not in covered
+    ]
+    for m in missed:
+        r.fail(
+            f"clones catalog incomplete: unregistered identical "
+            f"production pair {m} — register or diverge"
+        )
+    if not missed:
+        r.good(
+            f"clone catalog complete: {len(covered) // 2} registered fns "
+            f"cover every identical production pair across {len(files)} files"
+        )
 
 
 # ---------------------------------------------------------------------------
