@@ -74,3 +74,47 @@ a clean tree.
   fingerprints did not lie; the tabulation never looked at them.
 - Root cause class: same as the aeneas stamp drift and the clone gaps —
   a silent default where a refusal belonged.
+
+## Post-script 2026-08-31 (r0-dirty): what a distinct seed actually buys
+
+After the fix, the first K=8 distinct-seed campaign ran
+(`findings/rfc0157-nightly/2026-08-31-r0-dirty/`, user-authorized dirty
+tree). Reading `cluster_real.rs`'s `run()` to characterize the diversity
+the "8 distinct worlds" claim rests on:
+
+The seed drives exactly four things — nothing else:
+
+1. `kill_i = seed % 3` (`--remove-member` default path) — WHICH node is
+   killed. This is the only seed-derived choice with protocol
+   significance.
+2. KV bytes: `key = l28-{seed:x}`, `val = v-{seed:x}` (payload, not
+   protocol).
+3. `cluster_id_hex(seed)` — the cluster identity on disk/membership.
+4. Temp dir `pedra-l28-{seed:016x}-{pid}` (isolation only).
+
+The seed does NOT reach the nodes: `spawn_node(bin, id, dir, addr, peers,
+cid)` — no RNG seed argument. Election timing, tick bursts, and OS
+scheduling are not seed-driven (R-swarm-real and R-es unchanged by this
+fix).
+
+Concrete consequences for the two campaigns of 2026-08-31 (targets
+derived from `seed % 3`, since the fingerprint does not echo them — see
+gap below):
+
+- r0-dirty (`0x15c01..0x15c08`): killed nodes 2,3,1,2,3,1,2,3 —
+  node1 ×2, node2 ×3, node3 ×3. All three targets covered.
+- r1 planned (`0x15b01..0x15b08`): nodes 1,2,3,1,2,3,1,2 — node1 ×3,
+  node2 ×3, node3 ×2. All three targets covered.
+
+So the honest claim is: **8 distinct seeds = 3 kill-target classes with
+full coverage, × distinct KV/cluster-id per run** — not 8 behaviorally
+disjoint executions (node-side behavior is OS-timed, not seed-driven).
+
+**Open observability gap (same class as the seed echo):** the fingerprint
+prints `kill=node` without the target, so target coverage is not
+checkable from the artifact — today it is only derivable by re-deriving
+`seed % 3` from source, as done above. Planned fix (blocked: co-agent
+WIP currently breaks `pedradb-core` compile, so it cannot be verified
+and landed): echo the target in the fingerprint (`kill=node{n}`), and
+have the campaign script aggregate per-seed targets and fail registration
+when K≥2 runs collapse to a single target.
