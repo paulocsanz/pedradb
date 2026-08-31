@@ -1155,13 +1155,13 @@ impl<E: Env> ConcurrentDb<E> {
                 Some(j) => j,
             }
         };
-        let table = match job.write() {
+        let tables = match job.write() {
             Ok(t) => t,
             Err(e) => {
                 return Err(e);
             }
         };
-        self.inner.write().install_prepared_l0_compact(job, table)?;
+        self.inner.write().install_prepared_l0_compact(job, tables)?;
         Ok(true)
     }
 
@@ -2325,11 +2325,11 @@ impl<E: Env> ConcurrentDb<E> {
     pub fn install_prepared_l0_off_lock(
         &self,
         job: PreparedL0Compact<E>,
-        table: crate::sst::SstTable,
+        tables: Vec<crate::sst::SstTable>,
     ) -> bool {
         let staged = {
             let mut g = self.inner.write();
-            let Some(undo) = g.apply_prepared_l0_compact(job, table) else {
+            let Some(undo) = g.apply_prepared_l0_compact(job, tables) else {
                 return true;
             };
             let old_paths = undo.old_paths().to_vec();
