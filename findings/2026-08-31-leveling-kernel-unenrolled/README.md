@@ -181,3 +181,26 @@ Not claiming: that the heuristic is exhaustive (a decision fn taking
 only, per the word-grep rejection above); anything about codec/harness
 correctness (plants and oracles exercise those); that clones are
 semantically equivalent.
+
+## Re-sweep (same day, night) on the 11-file co-agent WIP tree
+
+Re-ran `pure_sweep.py` on the dirty tree (pre-landing intelligence for
+their round) plus a fn-level diff of every dirty file vs HEAD:
+
+- **No new pure data-fate surface.** New fns in the whole WIP: 2 diag
+  knobs (`wal/mod.rs::walfd_diag_enabled`,
+  `pedradb-posix::fdsync_diag_enabled` — plumbing/knob class, same as
+  `PEDRA_BLOCK_TARGET`) and one private refactor
+  (`pedradb-posix::fdatasync_file_inner`). 0 new public fns in any
+  enrolled kernel file.
+- The fdatasync refactor is in the durability path: guard
+  `posix_unsafe_rc_sites_all_gated` re-run green on the WIP tree; the
+  `fdatasync_rc` twin/token teeth are file-side and unaffected.
+- **Blind spot found (methodological, open):** the surface is FILE-level
+  (glob ∪ registry ∪ catalog). A NEW pub decision fn added inside an
+  already-enrolled kernel file is invisible to the sweep (file excluded)
+  AND to the teeth (token tooth checks only cataloged entries). Hand-
+  checked clean this time (0 new pub fns in the 11 dirty files); a
+  fn-level tooth (every pub fn in an enrolled kernel must be an entry,
+  an as_is, a clone fn, or explicitly allowlisted) is the hardening
+  candidate for a future round.
