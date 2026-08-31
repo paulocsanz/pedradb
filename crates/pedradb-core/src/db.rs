@@ -9280,6 +9280,36 @@ fn load_ssts_scan<E: Env>(
 /// covers an entire level (guest 25M settle: 48 × ~230 MB L1 files).
 const REWRITE_CHUNK_TARGET_BYTES: u64 = 64 * 1024 * 1024;
 
+/// Current process RSS in KiB for `PEDRA_REWRITE_DIAG` (Linux `/proc`,
+/// `ps` elsewhere). `None` when unavailable.
+fn rewrite_diag_rss_kib() -> Option<u64> {
+    if cfg!(target_os = "linux") {
+        std::fs::read_to_string("/proc/self/status")
+            .ok()
+            .and_then(|s| {
+                s.lines()
+                    .find(|l| l.starts_with("VmRSS:"))
+                    .and_then(|l| l.split_whitespace().nth(1).and_then(|v| v.parse().ok()))
+            })
+    } else {
+        let out = std::process::Command::new("ps")
+            .args(["-o", "rss=", "-p", &std::process::id().to_string()])
+            .output()
+            .ok()?;
+        String::from_utf8_lossy(&out.stdout).trim().parse().ok()
+    }
+}
+
+/// Release allocator-free pages to the OS after each rewrite chunk. glibc
+/// arenas pin freed small chunks next to retained ones (per-block index
+/// keys), so a whole-levels rewrite's RSS creeps even though nothing is
+/// retained — the 6M local repro (macOS) is flat across the job while the
+/// 25M guest climb was monotonic. The glibc FFI lives in `pedradb-posix`
+/// (core is `forbid(unsafe_code)`); no-op elsewhere.
+fn rewrite_trim_allocator() {
+    pedradb_posix::trim_process_heap();
+}
+
 /// Merge `tables` into `{file_num:06}.sst` (RFC-0037 streaming when `!gc.requests_gc()`).
 /// Approximate on-disk footprint of one merged entry (key + value + entry
 /// overhead) — the chunking size proxy for [`write_merged_tables`].
@@ -9349,6 +9379,10 @@ fn write_merged_tables(
     let mut peeked: Option<Result<(InternalKey, Bytes)>> = None;
     let mut stream_ended = false;
     let mut last_user: Option<Bytes> = None;
+    // PEDRA_REWRITE_DIAG: one line per finished chunk (guest 25M settle
+    // OOM hunts — RSS trajectory of the whole-levels rewrite).
+    let rewrite_diag = std::env::var_os("PEDRA_REWRITE_DIAG").is_some();
+    let rewrite_started = std::time::Instant::now();
     while peeked.is_some() || !stream_ended {
         let mut acc = 0u64;
         let mut closed = false;
@@ -9406,7 +9440,7 @@ fn write_merged_tables(
             return Err(e);
         }
         drop(entries);
-        let mut chunk = finish_merged_chunk_on(env, dir, file_num, do_sync_dir)?;
+        let chunk = finish_merged_chunk_on(env, dir, file_num, do_sync_dir)?;
         // Register the chunk's resident body the moment it exists: this
         // Vec accumulates every chunk of the job, and a freshly opened
         // chunk holds its whole file body in RAM. Unregistered payloads
@@ -9418,6 +9452,16 @@ fn write_merged_tables(
             chunk.attach_payload_kit(&kit.source, &kit.pool);
         }
         out.push(chunk);
+        rewrite_trim_allocator();
+        if rewrite_diag {
+            eprintln!(
+                "REWRITEDIAG chunk={file_num:06} out={} pool_b={} rss_kib={} t={:.1}s",
+                out.len(),
+                kit.map(|k| k.pool.resident_bytes()).unwrap_or(0),
+                rewrite_diag_rss_kib().unwrap_or(0),
+                rewrite_started.elapsed().as_secs_f32()
+            );
+        }
         file_num += 1;
     }
     Ok(out)

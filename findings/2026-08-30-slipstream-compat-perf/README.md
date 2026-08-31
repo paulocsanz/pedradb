@@ -452,5 +452,133 @@ worker print one layer breakdown per second:
   the convert filled the host disk (100%), wedged a `losetup` in
   D-state, and was not worth the box — the root cause stands on the
   allocation-path reading above.
+- **Guest run #5 (v21c) — hydrate won at last, settle hit a NEW
+  OOM.** Rebuild confirmed (`Compiling pedradb-core`, 20.84s). Leg
+  `=== start 15:18:32 UTC ===`: **hydrate 25,000,000 entries in
+  105.3 s (0.24 M/s), 11.09 GiB (476 B/e), RSS flat 1.8–2.3 GB,
+  `ent_e=0` on every tick** — and, unlike run #4, **l0 stayed
+  drained** (`COMPACTDIAG l0=0 l1=32→48`): with install no longer
+  corrupted by collisions the compat worker really keeps up. Then
+  `SETTLE_PHASE flush_ms=3654` (1.68 GB after flush) and the compact
+  phase climbed RSS 1.9 → 3.06 GB in ~15 s → SIGKILL (`signal: 9`),
+  no settle line, no panic. The v21c fix held (no CRC mismatch);
+  settle itself now exhausts memory.
+- **v21d (`915ef89`): rewrite chunks were invisible to the payload
+  pool.** Settle's `compact()` runs `compact_with_ssts_only →
+  compact_levels(0→1) → rewrite_ssts` — a whole-levels merge of all
+  48 L1 files (~11 GB) through `write_merged_tables`. Every finished
+  chunk is opened by `SstTable::open_on` with its **whole file body
+  resident**, and the writer accumulates all chunks of the job in its
+  out-Vec before returning. `adopt_sst` existed precisely for
+  "every point a table enters `self.ssts`" but was only called at
+  the four install choke points — never for `rewrite_ssts` output —
+  so those payloads were unregistered: the pool could never evict
+  them, ~230 MB per chunk, kernel kill at ~6 chunks (+1.4 GB — the
+  observed climb). Hydrate never saw it because the compat worker
+  compacts through the prepare/install path (adopted; `pool_n=2`
+  all run long). Fix: `write_merged_tables` takes the payload kit
+  and registers each chunk the moment it is opened, so the pool's
+  FIFO evicts older chunks to budget *while the job is still
+  writing*; both callers build the kit (idempotent with the
+  install-time adopt; legacy unbounded opens unchanged). Regression
+  test `compact_rewrite_chunks_are_pool_evictable` (bounded open at
+  budget 1 → whole-levels compact must leave zero resident payloads,
+  identical reads through the evicted re-read path), negative
+  verified: fails with the registration disabled. Suites: core
+  638/3 known flakes, compat 84/0/3 ignored.
+- **Guest run #6 (v21c+v21d) — settle rewrite now progresses but
+  still peaks out.** Hydrate passed again (103.9 s, l0 drained,
+  `ent_e=0`), flush passed (3.38 s, 1.64 GB after). The whole-levels
+  rewrite then ran **~90 s** (v21d visibly working: RSS oscillating
+  as chunks registered and evicted, dirty spikes from real writes)
+  before a transient peak (~3.1–3.3 GB on a ~2.2 GB floor) hit the
+  ceiling and the kernel killed it. Attribution: at the 256 MiB
+  logical chunk target the per-chunk transient — chunk body `Vec`
+  (with doubling), the 25M-entry-capacity bloom (re-allocated every
+  chunk), and the `open_on` whole-file read-back — is ~0.9–1.3 GB,
+  layered on the hydrate allocator residue plus the 256 MiB pool.
+- **v21e (`77a72e7`): whole-levels rewrites split at 64 MiB logical
+  (RocksDB's own L1 target-file-size shape at this scale).**
+  `rewrite_ssts` now uses `min(compact_target_file_bytes,
+  rewrite_chunk_target_bytes)` — the per-chunk transient drops to a
+  few hundred MB; the hydrate-time compact worker path (2-input
+  merges, already keeping l0 drained within budget) is untouched.
+  The cap is a crate-private field defaulting to the const so the
+  mechanism is testable without a 64 MiB fixture:
+  `rewrite_caps_chunk_size_for_whole_level_merges` sets the compact
+  target to `u64::MAX/2` and the cap to 8 KiB — a whole-levels
+  compact must still split (a revert to the raw compact target emits
+  exactly one file). Suites: core 639/3 known flakes, compat 84/0/3
+  ignored, fmt clean.
+- **Guest run #7 (v21e) — transient peaks gone; settle now dies of a
+  monotonic floor.** Hydrate passed identically (~104 s, l0 drained,
+  `ent_e=0`), flush passed (after_flush 1.68 GB). The compact phase
+  then climbed **monotonically 2.73 → 3.36 GB through the rewrite**
+  — no oscillation, dirty_kb tiny, page cache squeezed to ~160 MB —
+  until the cgroup ceiling (3892 MiB) killed it. v21e removed the
+  big per-chunk transients; what remains is slow accumulation.
+- **Local 6M repro (macOS, `PEDRA_REWRITE_DIAG=1`): the rewrite loop
+  retains nothing — the guest climb is allocator amplification.**
+  One `REWRITEDIAG` line per finished chunk (file number, job chunk
+  count, pool resident bytes, process RSS, elapsed). The settle
+  whole-levels job (24 chunks, ~64 MiB logical each, 17.2 s): RSS
+  ramps only while the pool fills to its budget (4.44 → 4.90 GB over
+  chunks 1–5, `pool_b` → 254 MB) and is then **flat 4.85–4.96 GB
+  through chunk 24** while the pool FIFO-evicts each new chunk
+  against budget. Per-chunk retained state (sparse index + first-key
+  `Bytes` + per-chunk bloom) is ~1 MB — invisible in the flat
+  trajectory. On glibc the same freed small allocations (25M
+  entries' decode churn interleaved with the retained per-chunk
+  index keys) pin arena pages instead of releasing them, which is
+  the monotonic +630 MB seen in the guest. Local run also survived
+  end-to-end (exit 0): settle/pedradb 21.5 s at 6M.
+- **Per-chunk `malloc_trim(0)` via `pedradb-posix`** (core is
+  `#![forbid(unsafe_code)]`, so the glibc FFI lives in the unsafe
+  island with the other allocator/syscall shims; advisory rc, no-op
+  off Linux): releases free arena pages after every rewrite chunk,
+  directly countering the pinning. Run #8 prints post-trim RSS per
+  chunk — flat means trim holds it; still-climbing means real
+  retention at 25M scale that the 6M repro cannot see.
+- **Guest run #8 (v21e + trim) — trim is not the killer's antidote;
+  the diag env was missing.** Build passed (posix FFI island
+  accepted), hydrate passed (103.0 s, l0 drained, `ent_e=0`), flush
+  passed — at a visibly **lower floor** (after_flush 1.30 GB vs
+  1.68 GB in run #7: the hydrate-time per-chunk trims pay off). The
+  compact phase then climbed monotonically again (RSS → 3.50 GB,
+  avail 78 MB) → SIGKILL. Zero `REWRITEDIAG` lines in the serial:
+  `PEDRA_REWRITE_DIAG=1` was never added to the guest entrypoint —
+  the instrumentation ran blind. Fixed for run #9 (the injection now
+  exports it in the entrypoint).
+- **Root cause found: every rewrite chunk carried a whole-job-sized
+  bloom.** `write_sst_try_sorted_body` allocated
+  `BloomFilter::with_capacity(bloom_hint)` UP FRONT, and
+  whole-levels rewrites pass `bloom_hint = Σ all input entry counts`
+  — 25M keys. Every 64 MiB chunk file then serialized a ~31 MB
+  near-zero bloom (10 bits × 25M keys), and `SstTable::open_on`
+  rebuilds that bloom **in RAM per opened table as a plain field —
+  never payload-evictable**. ~170 chunks × 31 MB ≈ 5 GB of
+  retained blooms: exactly the monotonic settle climb that killed
+  runs #5–#8. The 6M local repro was flat because 24 × 7.5 MB =
+  180 MB hides in noise — found only by matching the guest's
+  +2.2 GB against the per-chunk arithmetic and checking the writer.
+  Same bug bloats the payload pool's accounting (each 64 MiB chunk
+  body counted ~95 MB) and the read path (a `may_contain` probe
+  scattered k=7 random reads across 7.5–31 MB of bits).
+- **Fix (`write_sst_try_sorted_body`): build the bloom AFTER the
+  entry loop from the distinct user keys actually written**
+  (transient `Vec<Bytes>`, ~5% of chunk); `bloom_hint` now only
+  gates whether the file gets a filter. Regression test
+  `write_sst_bloom_is_sized_by_written_keys_not_hint` (100 entries
+  with a 100M-key hint must stay a <1 MB file; bloom active; point
+  read works). Local 6M post-fix: settle 21.5 → 12.2 s, settle
+  output 1.40 → 1.24 GiB (−0.16 GiB = exactly the 24 × 7.5 MB
+  predicted bloat), hydrate 13.8 → 10.2 s, REWRITEDIAG trajectory
+  flat, and **get_hit 84.2 → 15.1 µs (5.6×)** — the read-path gap
+  to RocksDB (6.1 µs local) collapsed from 14× to 2.5× as a side
+  effect. Suites: core 640/3 known flakes, compat 84/0/3 (one
+  timing-dependent `compact_range_cf_lock_leaves_default` flake
+  seen once in 9 runs — 0/8 at baseline — consistent with a latent
+  background-auto-compact race; output for its tiny files is
+  byte-identical pre/post fix, so no semantic delta).
 
 
