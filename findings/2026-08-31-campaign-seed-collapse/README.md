@@ -122,4 +122,8 @@ collapsed targets refused, diverse pass); live smoke — seeds `0x15d01` and
 `0x15d02` echoed `kill=node3` / `kill=node1` with both fingerprints
 all-green. (First `0x15d01` attempt, run in parallel with another smoke
 while the co-agent's builds hammered the machine, flaked `left/napply`;
-the solo retry was green — campaign flake mode, not a kernel skip.)
+the solo retry was green — campaign flake mode, not a kernel skip.) All
+three fingerprint variants are live-verified: `--remove-member`
+(seeds above), and the REAL tests `l28_real_tcp_leader_kill`
+(`kill=leader1`, replay-equal) and `l28_real_tcp_leave_joint_replay`
+(`kill=node3`) — both green with the echo.
