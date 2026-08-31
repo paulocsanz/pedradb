@@ -312,6 +312,139 @@ fn grant_after_persist_on_live_queued_is_not_ok() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// RFC-0158 P0.3 / F125/F127: the term rises only when hard state is durable.
+/// Live Queued inbound RequestVote with a NEWER term whose hard-state persist
+/// fails once (FailingEnv seam) must restore term/voted_for, force Follower,
+/// and clear `leader_id` — the kernel's `Restored`, never the AS-IS raise.
+#[test]
+fn durable_term_rollback_on_live_queued_is_not_ok() {
+    use crate::vote_kernel::{durable_term_if_newer, durable_term_if_newer_as_is, DurableTerm};
+    use pedradb_sim::FailingEnv;
+    assert_eq!(
+        durable_term_if_newer(5, 6, PersistOutcome::Err),
+        DurableTerm::Restored
+    );
+    assert_eq!(
+        durable_term_if_newer_as_is(5, 6, PersistOutcome::Err),
+        DurableTerm::Raised,
+        "AS-IS dente: term rises without durability"
+    );
+    let dir = std::env::temp_dir().join(format!(
+        "pedra-queued-durable-term-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let _ = std::fs::remove_dir_all(&dir);
+    let e1 = FailingEnv::passing();
+    let e2 = FailingEnv::passing();
+    let e3 = FailingEnv::passing();
+    let mut cluster = StoreCluster::open_with_envs_rng(
+        &dir,
+        3,
+        1,
+        [e1.clone(), e2.clone(), e3.clone()],
+        SeedRng::new(0x0158_0001),
+    )
+    .unwrap();
+    cluster.pin_dst_queued();
+    assert_eq!(cluster.rpc_mode(), RpcMode::Queued);
+    for _ in 0..80 {
+        cluster.tick().unwrap();
+        pump_queued(&mut cluster, 48);
+        if cluster.range_leader(1).is_some() {
+            break;
+        }
+    }
+    assert!(
+        cluster.range_leader(1).is_some(),
+        "Queued RPC must elect (RV/AE via handle_inbound)"
+    );
+    let leader = cluster.range_leader(1).unwrap();
+    let follower = cluster
+        .ids
+        .iter()
+        .copied()
+        .find(|&id| id != leader)
+        .expect("Queued cluster must have a follower");
+    // The follower must have learned the leader (AE heartbeat) before we
+    // break durability — the cleared leader_id is then observable.
+    let mut learned = false;
+    for _ in 0..240 {
+        let p = cluster.nodes.get(&follower).unwrap().ranges.get(&1).unwrap();
+        if p.leader_id == Some(leader) {
+            learned = true;
+            break;
+        }
+        cluster.tick().unwrap();
+        pump_queued(&mut cluster, 48);
+    }
+    assert!(learned, "follower must learn its leader before the plant");
+    let (term, voted_for, leader_id) = {
+        let p = cluster.nodes.get(&follower).unwrap().ranges.get(&1).unwrap();
+        (p.term, p.voted_for, p.leader_id)
+    };
+    assert_eq!(leader_id, Some(leader), "precondition: leader known");
+    match follower {
+        1 => e1.arm_one_failure(),
+        2 => e2.arm_one_failure(),
+        3 => e3.arm_one_failure(),
+        id => panic!("unexpected follower {id}"),
+    }
+    let _ = cluster.drain_outbound();
+    let bytes = PeerMsg::RequestVote {
+        range_id: 1,
+        term: term + 1,
+        candidate_id: 999,
+        last_log_index: 0,
+        last_log_term: 0,
+    }
+    .encode();
+    cluster.handle_inbound(999, follower, &bytes).unwrap();
+    let replies = cluster.drain_outbound();
+    let mut saw_reply = false;
+    for (_from, _to, raw) in replies {
+        if let Ok(PeerMsg::RequestVoteReply {
+            term: reply_term,
+            vote_granted,
+            ..
+        }) = PeerMsg::decode(&raw)
+        {
+            assert!(
+                !vote_granted,
+                "live Queued inbound must not grant when hard-state persist fails"
+            );
+            assert_eq!(
+                reply_term, term,
+                "reply carries the RESTORED term (F125/F127), not the undurable raise"
+            );
+            saw_reply = true;
+        }
+    }
+    assert!(saw_reply, "expected RequestVoteReply from handle_inbound");
+    let (term_after, voted_after, role_after, leader_after) = {
+        let p = cluster.nodes.get(&follower).unwrap().ranges.get(&1).unwrap();
+        (p.term, p.voted_for, p.role, p.leader_id)
+    };
+    assert_eq!(term_after, term, "persist Err must roll the term back");
+    assert_eq!(
+        voted_after, voted_for,
+        "persist Err must roll voted_for back"
+    );
+    assert_eq!(
+        role_after,
+        crate::Role::Follower,
+        "undurable step forces Follower"
+    );
+    assert_eq!(
+        leader_after, None,
+        "leader_id is cleared after the undurable step"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn ae_entry_action_on_live_queued_is_not_ok() {
     let mut q = LiveQueued::open();

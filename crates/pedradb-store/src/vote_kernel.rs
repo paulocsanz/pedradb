@@ -120,6 +120,51 @@ pub fn grant_after_persist_as_is(decision: VoteDecision, persist: PersistOutcome
     decision == VoteDecision::WouldGrant
 }
 
+/// F125/F127 outcome of stepping to a newer term under a persist result.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DurableTerm {
+    /// Incoming term is not newer — no step.
+    Keep,
+    /// Newer term and hard state durable: follow at the new term.
+    Raised,
+    /// Newer term but persist failed: restore term/vote, force Follower,
+    /// clear `leader_id` — never act at a term that is not on disk.
+    Restored,
+}
+
+/// F125/F127: the term rises only when hard state is durable.
+/// `Raised ⇒ persist == Ok`; `Restored ⇒ previous term/vote survive`.
+#[must_use]
+pub fn durable_term_if_newer(
+    current_term: u64,
+    incoming_term: u64,
+    persist: PersistOutcome,
+) -> DurableTerm {
+    // Match, not `==` on enums: derived PartialEq extracts to discriminant
+    // `Result` wrappers that Lean cannot `cases` through.
+    match (incoming_term > current_term, persist) {
+        (false, _) => DurableTerm::Keep,
+        (true, PersistOutcome::Ok) => DurableTerm::Raised,
+        (true, PersistOutcome::Err) => DurableTerm::Restored,
+    }
+}
+
+/// AS-IS F125/F127 mutant: keep the raised term even when persist failed —
+/// the process acts at a term that never hit disk. Used to prove teeth.
+#[must_use]
+pub fn durable_term_if_newer_as_is(
+    current_term: u64,
+    incoming_term: u64,
+    persist: PersistOutcome,
+) -> DurableTerm {
+    let _ = persist;
+    if incoming_term > current_term {
+        DurableTerm::Raised
+    } else {
+        DurableTerm::Keep
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -161,5 +206,47 @@ mod tests {
             VoteDecision::WouldGrant,
             PersistOutcome::Err
         ));
+    }
+
+    #[test]
+    fn durable_term_keeps_on_stale_or_equal_term() {
+        assert_eq!(
+            durable_term_if_newer(5, 4, PersistOutcome::Ok),
+            DurableTerm::Keep
+        );
+        assert_eq!(
+            durable_term_if_newer(5, 5, PersistOutcome::Err),
+            DurableTerm::Keep
+        );
+    }
+
+    #[test]
+    fn durable_term_raises_only_on_newer_and_ok() {
+        assert_eq!(
+            durable_term_if_newer(5, 6, PersistOutcome::Ok),
+            DurableTerm::Raised
+        );
+    }
+
+    #[test]
+    fn durable_term_restores_on_newer_and_err() {
+        assert_eq!(
+            durable_term_if_newer(5, 6, PersistOutcome::Err),
+            DurableTerm::Restored
+        );
+    }
+
+    /// Mutation: the undurable raise must differ from the fixed rule (teeth).
+    #[test]
+    fn durable_term_as_is_mutant_keeps_undurable_raise() {
+        assert_eq!(
+            durable_term_if_newer_as_is(5, 6, PersistOutcome::Err),
+            DurableTerm::Raised,
+            "mutant keeps a raised term that never hit disk (teeth)"
+        );
+        assert_eq!(
+            durable_term_if_newer(5, 6, PersistOutcome::Err),
+            DurableTerm::Restored
+        );
     }
 }

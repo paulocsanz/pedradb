@@ -2614,14 +2614,23 @@ fn durable_become_follower_if_newer<E: Env>(
     let prev_term = peer.term;
     let prev_voted = peer.voted_for;
     peer.become_follower(term);
-    if persist_hard_db(db, range_id, peer).is_ok() {
-        return true;
+    let persist = match persist_hard_db(db, range_id, peer) {
+        Ok(()) => vote_kernel::PersistOutcome::Ok,
+        Err(_) => vote_kernel::PersistOutcome::Err,
+    };
+    // F125/F127 / RFC-0158 P0.1: the wire bit is the kernel, not an inline `if`.
+    match vote_kernel::durable_term_if_newer(prev_term, term, persist) {
+        vote_kernel::DurableTerm::Raised => true,
+        vote_kernel::DurableTerm::Restored => {
+            peer.term = prev_term;
+            peer.voted_for = prev_voted;
+            peer.role = Role::Follower;
+            peer.leader_id = None;
+            false
+        }
+        // prev_term < term holds here; Keep is unreachable — stay safe.
+        vote_kernel::DurableTerm::Keep => true,
     }
-    peer.term = prev_term;
-    peer.voted_for = prev_voted;
-    peer.role = Role::Follower;
-    peer.leader_id = None;
-    false
 }
 
 /// Persist raft log (RFC-0025 P1.2).
