@@ -229,3 +229,47 @@ actively landing). Re-ran the fn-level delta check on the new state:
 - Second data point for the open blind spot: file-level surface clean,
   hand-check required again. The fn-level tooth remains the fix; until
   it lands, every co-agent delta costs one manual fn-level diff.
+
+## Close (2026-08-31, same night): fn-level tooth landed
+
+Third consecutive delta hand-check in one landing was the trigger.
+`pedra_formal.py::check_kernel_fn_surface` + `glue.kernel_fn_allowlist`
+(residuals.json) now enforce the fn-level surface, fail-closed on
+CHANGE, for every enrolled kernel (glob ∪ registry):
+
+- classified = catalog entry (pair on this kernel) | catalog `as_is`
+  (exact) | `_as_is` naming convention | `_spec` kernel-side spec twin |
+  catalog clone fn (side on this file) | explicit baseline entry;
+- FAIL: unclassified pub/pub(crate) fn (the exact blind-spot scenario —
+  a `set_parallel_jobs` analog in an enrolled file is now loud);
+- FAIL: stale baseline entry (fn gone) — the baseline only shrinks;
+- FAIL: baseline entry that auto-classifies (redundant), baseline key on
+  a non-enrolled file, missing `glue.kernel_fn_allowlist` entirely.
+- Harness (throwaway /tmp/fntooth_test.py, mini-tree like the marker
+  tooth's): 14/14 — clean pass, unclassified method/pub(crate)/marker-
+  file fn FAIL, allowlist pass, stale FAIL, redundant FAIL, wrong-key
+  FAIL, missing-key FAIL, `_as_is`/clone auto-pass, comment mentions
+  don't count, mid-WIP-style new fn FAIL.
+
+### The steady-state finding the tooth itself surfaced
+
+Measuring before building: **425 pub/pub(crate) fns in the 44 kernels;
+326 auto-classify; 93 in 29 files did not.** The blind spot was not a
+hypothetical delta risk — it existed in steady state. The 93 include
+genuine uncataloged decision fns, e.g. `leveling.rs::pick_pushdown`
+(pushdown job selection: modeled inside the `leveling_pick` twin but
+never a pair/entry/plant of its own), `txn_kernel.rs`'s eleven
+(`revert_user_action`, `leftover_txn_is_aborted`,
+`prepare_error_aborts_earlier`, …), the six `cf_kernel.rs`
+encode/decode/decision fns, `cqe_kernel.rs`'s `cqe_act`.
+
+The baseline (date-stamped 2026-08-31) is a WORKLIST, not an absolution:
+every entry must graduate to a real class — enroll as a catalog pair,
+codec/knob/api class, or a named catalog-gap finding — and the tooth
+enforces that the list can only shrink. Same transitional shape as
+`TCB_FREEZE_ALLOWLIST` before the leveling pair landed.
+
+Not claiming: that the 93 are wrong, or that classification is
+verification. The tooth proves every pub fn in an enrolled kernel is
+NAMED; each graduation round is where the verification claim (or the
+published residual row) gets made.

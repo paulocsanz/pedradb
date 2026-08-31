@@ -30,6 +30,11 @@ TOKEN_RE = re.compile(
 )
 SKIP_FN = re.compile(r"(_as_is|_spec)$")
 
+PUB_FN_HEAD = re.compile(
+    r"\bpub(?:\([^)]*\))?\s+(?:unsafe\s+)?(?:const\s+)?fn\s+"
+    r"(?P<name>[A-Za-z_][A-Za-z0-9_]*)"
+)
+
 
 def strip_comments(src: str) -> str:
     """Drop // and /* */ comments without touching // inside strings."""
@@ -658,6 +663,98 @@ def check_kernel_enrollment(root: Path, glue: dict, r: Report) -> None:
         )
 
 
+def kernel_pub_fns(path: Path) -> set[str]:
+    """pub / pub(crate) fn names in a kernel file (comments stripped)."""
+    try:
+        text = strip_comments(path.read_text(encoding="utf-8", errors="replace"))
+    except OSError:
+        return set()
+    return {m.group("name") for m in PUB_FN_HEAD.finditer(text)}
+
+
+def check_kernel_fn_surface(root: Path, catalog: dict, glue: dict, r: Report) -> None:
+    """Fn-level enrollment tooth (findings/2026-08-31-leveling-kernel-unenrolled).
+
+    Enrollment is FILE-level (glob union registry), so a new pub decision fn
+    added inside an already-enrolled kernel file is invisible to the sweep
+    and to the teeth (they check only cataloged entries). Fail-closed at the
+    fn level: every pub/pub(crate) fn in an enrolled kernel must be
+      - a catalog entry (pair whose kernel is this file), or
+      - a catalog as_is mutant (exact name or the `_as_is` convention), or
+      - a `_spec` kernel-side spec twin, or
+      - a catalog clone fn for a clone side on this file, or
+      - in glue.kernel_fn_allowlist (path -> fn names): the date-stamped
+        baseline of not-yet-classified fns; every entry must eventually
+        graduate to a real class or a catalog gap.
+    Stale and auto-classifiable baseline entries fail, so the baseline can
+    only shrink honestly.
+    """
+    before = len(r.failed)
+    entries: dict[str, set[str]] = {}
+    as_is: set[str] = set()
+    for pair in catalog.get("pairs", []):
+        if pair.get("status") == "absent" or not pair.get("kernel"):
+            continue
+        entries.setdefault(pair["kernel"], set()).add(pair["entry"])
+        if pair.get("as_is"):
+            as_is.add(pair["as_is"])
+    clones: dict[str, set[str]] = {}
+    for clone in catalog.get("clones", []):
+        for side in ("a", "b"):
+            clones.setdefault(clone[side], set()).update(clone.get("fns", []))
+    raw_allow = glue.get("kernel_fn_allowlist")
+    if not isinstance(raw_allow, dict):
+        r.fail(
+            "residuals freeze: glue.kernel_fn_allowlist object required "
+            "(fn-level enrollment tooth — findings/2026-08-31-leveling-kernel-unenrolled)"
+        )
+        raw_allow = {}
+    allow: dict[str, set[str]] = {}
+    for k, names in raw_allow.items():
+        if not isinstance(names, list) or not all(
+            isinstance(n, str) and n.strip() for n in names
+        ):
+            r.fail(f"residuals freeze: kernel_fn_allowlist[{k}] must be a list of fn names")
+            continue
+        dupes = sorted({n for n in names if names.count(n) > 1})
+        if dupes:
+            r.fail(f"residuals freeze: kernel_fn_allowlist[{k}] duplicates {dupes}")
+        allow[k] = set(names)
+    enrolled = {str(p.relative_to(root)) for p in decision_kernel_paths(root)}
+    for k in sorted(allow):
+        if k not in enrolled:
+            r.fail(f"residuals freeze: kernel_fn_allowlist key {k} is not an enrolled kernel")
+    n_classified = n_baseline = 0
+    for rel in sorted(enrolled):
+        names = kernel_pub_fns(root / rel)
+        auto = entries.get(rel, set()) | clones.get(rel, set()) | as_is
+        for name in sorted(names):
+            if name in auto or "_as_is" in name or name.endswith("_spec"):
+                n_classified += 1
+                if name in allow.get(rel, set()):
+                    r.fail(
+                        f"residuals freeze: {rel}: baseline entry {name} is "
+                        "auto-classified (entry/as_is/clone) — remove it"
+                    )
+            elif name in allow.get(rel, set()):
+                n_baseline += 1
+            else:
+                r.fail(
+                    f"residuals freeze: {rel}: pub fn {name} is outside the fn "
+                    "surface (no entry/as_is/_as_is/_spec/clone, not in "
+                    "glue.kernel_fn_allowlist) — classify it "
+                    "(findings/2026-08-31-leveling-kernel-unenrolled)"
+                )
+        for name in sorted(allow.get(rel, set()) - names):
+            r.fail(f"residuals freeze: {rel}: stale kernel_fn_allowlist entry {name} (fn gone)")
+    if len(r.failed) == before:
+        r.good(
+            f"kernel fn surface: {n_classified + n_baseline} pub fns in "
+            f"{len(enrolled)} kernels — {n_classified} classified "
+            f"(entry/as_is/clone), {n_baseline} baseline allowlisted"
+        )
+
+
 def file_loc(path: Path) -> int:
     return len(path.read_text(encoding="utf-8", errors="replace").splitlines())
 
@@ -845,6 +942,7 @@ def check_residuals(
         if cat is None:
             cat_path = root / "scripts/formal/catalog.json"
             cat = json.loads(cat_path.read_text(encoding="utf-8")) if cat_path.is_file() else {"pairs": []}
+        check_kernel_fn_surface(root, cat, glue, r)
         n_files, k_loc, h_loc = glue_loc(root, cat)
         for key, live in (
             ("kernel_files", n_files),
