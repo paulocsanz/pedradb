@@ -3299,7 +3299,8 @@
       "fns": [
         "ae_ack_success",
         "ae_entry_action",
-        "ae_prev_log_ok"
+        "ae_prev_log_ok",
+        "ae_entry_action_as_is_rewrite_committed"
       ]
     },
     {
@@ -3312,7 +3313,8 @@
         "can_vote",
         "log_up_to_date",
         "grant_after_persist",
-        "durable_term_if_newer"
+        "durable_term_if_newer",
+        "vote_decision_as_is_ignore_log_and_vote"
       ]
     },
     {
@@ -3321,7 +3323,8 @@
       "a": "crates/pedradb-raft/src/apply_kernel.rs",
       "b": "crates/pedradb-store/src/apply_kernel.rs",
       "fns": [
-        "apply_advance"
+        "apply_advance",
+        "apply_advance_as_is_skip_holes"
       ]
     },
     {
@@ -3331,6 +3334,15 @@
       "b": "crates/pedradb-core/src/merge.rs",
       "fns": [
         "iter_window_keep"
+      ]
+    },
+    {
+      "id": "peek_pin_journal_stream",
+      "finding": "F54",
+      "a": "crates/pedradb-journal/src/pin_kernel.rs",
+      "b": "crates/pedradb-stream/src/cursor_kernel.rs",
+      "fns": [
+        "peek_pins_cursor"
       ]
     }
   ],
