@@ -7,7 +7,7 @@
 # Piso que este multiplicador NÃO derruba (RFC-0157):
 #   - não prova o SO nem o dispositivo (R-fsync-lie); os gêmeos são do kernel
 #     de decisão, não do mundo físico;
-#   - não expande o corpus para os data_fate (P2.1);
+#   - corpus completo desde P2.1: --all cobre também os data_fate;
 #   - R-verus segue no never_floor: um bug no verus/z3 é residual.
 #
 # Toolchain (pinned): GitHub release release/0.2026.08.23.fbbbbcf.

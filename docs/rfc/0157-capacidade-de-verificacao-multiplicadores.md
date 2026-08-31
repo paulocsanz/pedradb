@@ -46,7 +46,7 @@ Quatro multiplicadores, cada um independente e shippable sozinho: (1) toolchain 
 
 ### P2 — consolidação
 
-- [x] **P2.1** Corpus Verus expandido: todos os gêmeos puros não-data_fate no `verus_check.sh`; data_fate na sequência — status: `done` (drift dos 3 gêmeos resolvido sob o release pinado — `cqe_res`/`fdatasync_rc` literais `i32` no modo spec, `journal_pin` spec-twin para `fold_pins_on_read`; `--all` 56/56 PASS exit 0 = todos os 45 pares não-data_fate (36 runners) + 20 data_fate-only; registro do drift em `findings/rfc0157-verus-drift/`; R-verus segue no never_floor)
+- [x] **P2.1** Corpus Verus expandido: todos os gêmeos puros não-data_fate no `verus_check.sh`; data_fate na sequência — status: `done` (drift dos 3 gêmeos resolvido sob o release pinado — `cqe_res`/`fdatasync_rc` literais `i32` no modo spec, `journal_pin` spec-twin para `fold_pins_on_read`; `--all` 56/56 PASS exit 0 = todos os 45 pares não-data_fate (36 runners) + 20 data_fate-only; registro do drift em `findings/rfc0157-verus-drift/`; re-run 2026-08-30 pós-0158 P1.1: `--all` 57/57 PASS exit 0 — 57º runner é o `verus_durable_term.sh` novo; R-verus segue no never_floor)
 - [x] **P2.2** Quadro de capacidade por residual: `candidates.py` passa a imprimir, por linha de residual, guard: sim/não, gêmeo checado: sim/não, profundidade de campanha, âncora REAL — status: `done` (`capacity_board` no `candidates.py`: 28 linhas derivadas de `catalog.json`/`residuals.json`/repo com referências verificadas — teste de guard existe no repo, twin+runner existem no catalog, âncora REAL existe em `findings/`; referência quebrada = exit 1; tabela é visão de capacidade, não alegação de garantia)
 - [x] **P2.3** Campanha noturna registrada: doc do runner (TCP K seeds + PCT d=3/4 sweeps) com padrão de registro em `findings/` — status: `done` (doc `findings/rfc0157-nightly/README.md` + execução real registrada em `findings/rfc0157-nightly/2026-08-30/`: seeds frescas 0x0157_N01..N008, TCP K=8 — 8/8 na 1ª tentativa, wall 207s vs solo 121s, fator 1,71 (waves 1-2 falharam o gate sob carga — 2,18/2,22 — consoles preservados; harness `cluster_real` ganhou paciência no n3-leave); PCT d=3 e d=4 executados: `pct_d3.txt`/`pct_d4.txt` com contagens e custo (d=4 35/16384 ≈ 1,1s — headroom, não cobertura; default continua d=2)
 
@@ -61,7 +61,7 @@ Quatro multiplicadores, cada um independente e shippable sozinho: (1) toolchain 
 | P1.2 | p1 | fuzz de kernels puros | done — 3 sweeps, 0 contraexemplos | alvos proptest | 2026-08-30 |
 | P1.3 | p1 | runner exaustivo N≤3 | done — plantas completas; disk-fence com piso | turnstile enumerate | 2026-08-30 |
 | P1.4 | p1 | db.rs estágio 1: caracterização | done — dourado travado, `db_rs_extracted=false` | fingerprints dourados | 2026-08-30 |
-| P2.1 | p2 | corpus Verus expandido | done — `--all` 56/56, drift resolvido | `verus_check.sh` | 2026-08-30 |
+| P2.1 | p2 | corpus Verus expandido | done — `--all` 57/57 (re-run 2026-08-30), drift resolvido | `verus_check.sh` | 2026-08-30 |
 | P2.2 | p2 | quadro de capacidade por residual | done — 28 linhas, refs verificadas | `candidates.py` | 2026-08-30 |
 | P2.3 | p2 | doc da campanha noturna | done — noite 2026-08-30 registrada, fator 1,71 | `findings/rfc0157-nightly/` | 2026-08-30 |
 

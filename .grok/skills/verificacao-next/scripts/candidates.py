@@ -259,7 +259,12 @@ def capacity_board(cat: dict, res: dict) -> int:
             if not runner.is_file():
                 errors.append(f"{rid}: runner missing {p.get('verus')}")
         if rid == "R-verus":
-            twin = "sim (corpus TODO 56/56 no checker pinado)"
+            n_runners = len(list((ROOT / "scripts").glob("verus_*.sh")))
+            twin = (
+                "sim (corpus verus_check.sh --all "
+                f"{n_runners} runners no checker pinado, RFC-0157 P2.1; "
+                "checker/Z3 seguem TCB no never_floor)"
+            )
         elif tids:
             twin = "sim (" + ",".join(tids) + ")"
         else:
