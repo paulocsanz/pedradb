@@ -135,6 +135,21 @@ def tokens(body: str) -> list[str]:
     return out
 
 
+def prod_fn_offsets(src: str) -> tuple[dict[str, int], int]:
+    """Exec-fn head offsets + offset of the first #[cfg(test)] module."""
+    text = strip_comments(src)
+    cfg = text.find("#[cfg(test)]")
+    if cfg < 0:
+        cfg = len(text)
+    offs: dict[str, int] = {}
+    for m in FN_HEAD.finditer(text):
+        pre = (m.group("pre") or "").split()
+        if "spec" in pre or "proof" in pre:
+            continue
+        offs.setdefault(m.group("name"), m.start())
+    return offs, cfg
+
+
 def load_text(root: Path, rel: str) -> str | None:
     p = root / rel
     if not p.is_file():
@@ -412,6 +427,24 @@ def check_clones(root: Path, catalog: dict, r: Report) -> None:
                 )
             else:
                 r.good(f"{clone['id']}: {name} identical tokens")
+        # Anti-silence: a token-identical production fn duplicated across
+        # the pair must be registered above (or deliberately diverged);
+        # test-module fns are out of scope.
+        oa, ca = prod_fn_offsets(a)
+        ob, cb = prod_fn_offsets(b)
+        hidden = sorted(
+            name
+            for name in (set(af) & set(bf)) - set(clone["fns"])
+            if oa.get(name, ca) < ca and ob.get(name, cb) < cb
+            and tokens(af[name]) == tokens(bf[name])
+        )
+        if hidden:
+            r.fail(
+                f"{clone['id']}: unregistered identical production clone "
+                f"fn(s) {hidden} — add to catalog clones or diverge them"
+            )
+        else:
+            r.good(f"{clone['id']}: no unregistered identical production fn")
 
 
 # ---------------------------------------------------------------------------
