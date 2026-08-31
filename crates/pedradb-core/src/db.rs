@@ -744,6 +744,10 @@ pub struct PreparedL0Compact<E: Env> {
     env: E,
     sync: bool,
     split_target: u64,
+    /// Hard cap on emitted chunks; `file_num`'s reserved range is exactly
+    /// this wide, so a split past the cap would hand out an unreserved
+    /// number.
+    chunk_budget: usize,
 }
 
 impl<E: Env> PreparedL0Compact<E> {
@@ -772,6 +776,7 @@ impl<E: Env> PreparedL0Compact<E> {
             self.gc,
             self.sync,
             self.split_target,
+            self.chunk_budget,
         )
         .map(|ts| {
             ts.into_iter()
@@ -5416,6 +5421,26 @@ impl<E: Env> Db<E> {
             inputs.truncate(max);
         }
         let file_num = self.alloc_file_num();
+        // The off-lock `write()` emits one file per split-target chunk
+        // starting at `file_num`, so only the reserved range is safe: a
+        // concurrent allocator between `write` and `install` would
+        // otherwise land inside the range and its tmp→rename would
+        // clobber a chunk path, leaving a live table reading another
+        // table's bytes (v5 per-block CRC mismatch — guest 25M run #4).
+        // No static bound exists in the writer's split currency (logical
+        // entry bytes) once lz4 shrinks the inputs, so the writer is
+        // CAPPED to this chunk budget instead: the last chunk may exceed
+        // the split target, which is sizing advice, not correctness.
+        let inputs_bytes: u64 = inputs
+            .iter()
+            .map(|t| self.env.metadata_len(t.path()).unwrap_or(0))
+            .sum();
+        let chunk_budget =
+            usize::try_from(inputs_bytes / self.compact_target_file_bytes.max(1) + 2)
+                .unwrap_or(usize::MAX);
+        for _ in 1..chunk_budget {
+            self.alloc_file_num();
+        }
         Ok(Some(PreparedL0Compact {
             inputs,
             file_num,
@@ -5424,6 +5449,7 @@ impl<E: Env> Db<E> {
             env: self.env.clone(),
             sync: self.sync,
             split_target: self.compact_target_file_bytes,
+            chunk_budget,
         }))
     }
 
@@ -5588,6 +5614,10 @@ impl<E: Env> Db<E> {
             options.gc,
             self.sync,
             self.compact_target_file_bytes,
+            // Runs under the `&mut self` write lock and advances
+            // `next_file_num` after the write, so no other allocator can
+            // interleave: unlimited chunks are safe here.
+            usize::MAX,
         )?
         .into_iter()
         .map(|t| t.with_cf(cf.clone()))
@@ -9240,7 +9270,10 @@ fn finish_merged_chunk_on(
 /// survived the same shape only as a ~10 GB in-memory file). Splits fall
 /// between user keys — output files hold disjoint contiguous key ranges
 /// at the same level. File numbers run
-/// `first_file_num ..= first_file_num + n - 1`.
+/// `first_file_num ..= first_file_num + n - 1`; `chunk_budget` is a hard
+/// cap on `n`: when the split target would exceed it, the current chunk
+/// simply grows past target (sizing is advisory; correctness is that the
+/// writer never touches numbers beyond the range its caller reserved).
 fn write_merged_tables(
     env: &impl Env,
     dir: &Path,
@@ -9249,6 +9282,7 @@ fn write_merged_tables(
     gc: crate::merge::CompactGcOptions,
     do_sync_dir: bool,
     split_target: u64,
+    chunk_budget: usize,
 ) -> Result<Vec<SstTable>> {
     let bloom_hint: usize = tables.iter().map(SstTable::len).sum();
     let mut out: Vec<SstTable> = Vec::new();
@@ -9303,13 +9337,16 @@ fn write_merged_tables(
                 }
             };
             if crate::compact_kernel::compact_should_split_at(acc, split_target)
+                && out.len() + 1 < chunk_budget
                 && last_user
                     .as_ref()
                     .is_none_or(|u| u.as_ref() != ok_entry.0.user_key.as_ref())
             {
-                // Target reached and the user key changed — start a new
-                // file with this entry. A same-user version run never
-                // splits: it stays in one file.
+                // Target reached, the user key changed, and one more chunk
+                // still fits the reserved range — start a new file with
+                // this entry. A same-user version run never splits: it
+                // stays in one file. Past the chunk budget the split is
+                // skipped and the chunk runs long instead.
                 peeked = Some(Ok(ok_entry));
                 closed = true;
                 return None;
@@ -12327,6 +12364,59 @@ mod tests {
         db.close().unwrap();
         let db = Db::open(&dir).unwrap();
         assert_eq!(db.get(&[b'k', 0]).as_deref(), Some(&[b'v', 4, 0][..]));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// v21c regression: the off-lock L0 compact writes one file per split
+    /// chunk starting at the number `prepare` reserved; `prepare` must
+    /// reserve every number the job can emit. Otherwise a concurrent
+    /// allocator between `write` and `install` lands inside the chunk
+    /// range and clobbers a chunk path (guest 25M run #4 died in settle
+    /// with `SST block CRC mismatch in .../000018.sst`).
+    #[test]
+    fn prepare_l0_compact_reserves_whole_chunk_range() {
+        let dir = temp_dir();
+        let mut db = Db::open(&dir).unwrap();
+        db.set_defer_auto_compact(true);
+        db.set_compact_target_file_bytes(4 * 1024);
+        for round in 0..4u8 {
+            for i in 0..64u8 {
+                let mut val = vec![0xA5u8; 96];
+                val[0] = round;
+                val[1] = i;
+                db.put([b'k', i], val).unwrap();
+            }
+            db.flush().unwrap();
+        }
+        let job = db
+            .prepare_l0_compact(CompactOptions::default())
+            .unwrap()
+            .expect("L0 job");
+        let tables = job.write().unwrap();
+        assert!(tables.len() >= 2, "fixture must split into chunks");
+        let chunk_num = |t: &SstTable| -> u64 {
+            t.path()
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .and_then(|s| s.parse().ok())
+                .expect("numeric sst name")
+        };
+        let used: Vec<u64> = tables.iter().map(chunk_num).collect();
+        assert!(
+            used.iter().all(|n| *n >= job.file_num),
+            "chunks must start at the reserved number: {used:?} vs {}",
+            job.file_num
+        );
+        // The next allocator must clear the whole chunk range.
+        let next = db.alloc_file_num();
+        let max_used = *used.iter().max().unwrap();
+        assert!(
+            next > max_used,
+            "unreserved chunk number inside the range: next={next}, max used={max_used}"
+        );
+        db.install_prepared_l0_compact(job, tables).unwrap();
+        assert!(db.get(&[b'k', 0]).is_some(), "store reads after install");
+        db.close().unwrap();
         let _ = fs::remove_dir_all(&dir);
     }
 
