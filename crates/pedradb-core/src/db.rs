@@ -1089,6 +1089,9 @@ pub struct Db<E: Env = StdEnv> {
     auto_compact_failures: u64,
     /// Last auto-compact error message (cleared only on successful auto-compact).
     last_auto_compact_error: Option<String>,
+    /// Whole-levels rewrite chunk target (logical bytes); see
+    /// [`REWRITE_CHUNK_TARGET_BYTES`].
+    rewrite_chunk_target_bytes: u64,
     /// Large-value threshold (bytes); `None` = inline only.
     large_value_threshold: Option<usize>,
     /// Append-only value log when large values / existing vlog file present.
@@ -1646,6 +1649,7 @@ impl<E: Env> Db<E> {
             open_opts: opts,
             auto_compact_failures: 0,
             last_auto_compact_error: None,
+            rewrite_chunk_target_bytes: REWRITE_CHUNK_TARGET_BYTES,
             large_value_threshold,
             vlog,
             vlog_rotate_bytes: None,
@@ -5597,7 +5601,8 @@ impl<E: Env> Db<E> {
             .collect()
     }
 
-    /// Rewrite `input_idxs` into one SST at `to_level`; keep every other file.
+    /// Rewrite `input_idxs` into chunked SSTs at `to_level` (split at
+    /// [`REWRITE_CHUNK_TARGET_BYTES`] logical bytes); keep every other file.
     fn rewrite_ssts(
         &mut self,
         input_idxs: Vec<usize>,
@@ -5626,6 +5631,15 @@ impl<E: Env> Db<E> {
                 source: Arc::clone(source),
                 pool: Arc::clone(&self.sst_payload_pool),
             });
+        // Whole-levels rewrites merge every file of two levels, so the
+        // writer's per-chunk transient (chunk body Vec + bloom + the
+        // post-write read-back) rides on top of the full live-set read
+        // traffic. Cap the chunk at 64 MiB logical — RocksDB's own L1
+        // target-file-size shape — so that transient stays small; a
+        // caller-set smaller target wins.
+        let rewrite_split = self
+            .compact_target_file_bytes
+            .min(self.rewrite_chunk_target_bytes);
         let new_tables: Vec<SstTable> = write_merged_tables(
             &self.env,
             &self.dir,
@@ -5633,7 +5647,7 @@ impl<E: Env> Db<E> {
             &tables,
             options.gc,
             self.sync,
-            self.compact_target_file_bytes,
+            rewrite_split,
             // Runs under the `&mut self` write lock and advances
             // `next_file_num` after the write, so no other allocator can
             // interleave: unlimited chunks are safe here.
@@ -9260,6 +9274,12 @@ fn load_ssts_scan<E: Env>(
     Ok((tables, next_file_num, max_seq))
 }
 
+/// Whole-levels rewrite chunk target (logical bytes). RocksDB's default L1
+/// target file size; small enough that the chunked writer's per-chunk
+/// transient (chunk body + bloom + read-back) stays small when a rewrite
+/// covers an entire level (guest 25M settle: 48 × ~230 MB L1 files).
+const REWRITE_CHUNK_TARGET_BYTES: u64 = 64 * 1024 * 1024;
+
 /// Merge `tables` into `{file_num:06}.sst` (RFC-0037 streaming when `!gc.requests_gc()`).
 /// Approximate on-disk footprint of one merged entry (key + value + entry
 /// overhead) — the chunking size proxy for [`write_merged_tables`].
@@ -12496,6 +12516,40 @@ mod tests {
                 assert_eq!(db.get(&k).expect("read after rewrite"), want);
             }
         }
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// v21e regression: whole-levels rewrites split at
+    /// `rewrite_chunk_target_bytes` even when `compact_target_file_bytes`
+    /// is set enormous — the chunked writer's per-chunk transient (chunk
+    /// body + bloom + read-back) must not scale with the configured
+    /// compact target during a full-level merge (guest 25M settle
+    /// peak-OOM'd with 256 MiB chunks on a 3.9 GB box).
+    #[test]
+    fn rewrite_caps_chunk_size_for_whole_level_merges() {
+        let dir = temp_dir();
+        let mut db = Db::open(&dir).unwrap();
+        db.set_defer_auto_compact(true);
+        // Without the cap this merge would emit ONE file.
+        db.set_compact_target_file_bytes(u64::MAX / 2);
+        db.rewrite_chunk_target_bytes = 8 * 1024;
+        for round in 0..2u32 {
+            for i in 0..200u32 {
+                let k = format!("r{round:02}-key-{i:06}").into_bytes();
+                let v = vec![0xA5u8; 300];
+                db.put(&k, &v).unwrap();
+            }
+            db.flush().unwrap();
+        }
+        db.compact_ssts_only().unwrap();
+        assert!(
+            db.ssts.len() >= 2,
+            "rewrite must split at its chunk cap, got {} files",
+            db.ssts.len()
+        );
+        assert!(db.sst_levels.iter().all(|&lvl| lvl == 1));
+        assert!(db.get(b"r00-key-000000").is_some());
         db.close().unwrap();
         let _ = fs::remove_dir_all(&dir);
     }
