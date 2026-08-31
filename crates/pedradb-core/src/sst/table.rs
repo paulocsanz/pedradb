@@ -41,7 +41,7 @@ use std::cmp::Ordering;
 use std::io::{Read, Write};
 use std::ops::Bound;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use bytes::Bytes;
 use parking_lot::{Mutex, RwLock};
@@ -66,8 +66,23 @@ pub const SST_VERSION_V3: u32 = 3;
 pub const SST_VERSION_V4: u32 = 4;
 /// v4 + per-block CRC32C (compressed writer default, RFC-0077 P1.1).
 pub const SST_VERSION: u32 = 5;
-/// Target encoded size per data block (pre-compression).
+/// Default target encoded size per data block (pre-compression). Reads are
+/// self-describing per block (the index carries real offsets), so tables with
+/// different targets coexist; `PEDRA_BLOCK_TARGET` overrides new writes.
 pub const BLOCK_TARGET: usize = 4_096;
+
+/// Effective block target for new writes: `PEDRA_BLOCK_TARGET` (bytes,
+/// clamped 1 KiB–256 KiB) when set, else [`BLOCK_TARGET`].
+#[must_use]
+pub fn block_target() -> usize {
+    static OVERRIDE: OnceLock<usize> = OnceLock::new();
+    *OVERRIDE.get_or_init(|| {
+        std::env::var("PEDRA_BLOCK_TARGET")
+            .ok()
+            .and_then(|v| v.trim().parse::<usize>().ok())
+            .map_or(BLOCK_TARGET, |b| b.clamp(1_024, 262_144))
+    })
+}
 
 /// Absolute ceiling on SST entry count (defense-in-depth vs corrupt headers).
 ///
@@ -2282,7 +2297,7 @@ fn write_sst_try_sorted_body(
         enc_scratch.clear();
         encode_entry_into(&ikey, &value, &mut enc_scratch)?;
         let same_user = block_last_user.as_ref().is_some_and(|u| u.as_ref() == uk);
-        if !block_buf.is_empty() && block_buf.len() + enc_scratch.len() > BLOCK_TARGET && !same_user
+        if !block_buf.is_empty() && block_buf.len() + enc_scratch.len() > block_target() && !same_user
         {
             flush_block(&mut data, &mut block_buf, &mut block_first_user, &mut index)?;
         }
