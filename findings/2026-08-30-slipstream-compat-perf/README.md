@@ -627,5 +627,42 @@ worker print one layer breakdown per second:
   printed fine. Suspect stderr capture in the bench harness
   (`eprintln!` from the compact thread). Only forensic value now
   that settle survives; not chased further.
+- **v21g (`6d49a4a`): LRU file-handle cache for evicted-SST block
+  reads — the `File::open` tax is gone.** Bounded opens now build
+  `CachedEnvSource` + `FileHandleCache` (default 256 handles,
+  `PEDRA_SST_FILE_CACHE` override, `0` disables) instead of
+  `EnvSource`: first miss opens through `Env::open_read` (fault
+  seam intact) and caches the handle; hits do one pread-class
+  positioned read (`EnvFile::positioned_read_exact`, new trait
+  method — `FileExt::read_exact_at` for std `File` and
+  `IoUringFile`, portable seek+read default for in-memory test
+  envs). Deletion routes through `Db::remove_db_file`
+  (remove + invalidate): an open fd pins an unlinked inode's
+  disk space, and a failed SST write rolls `next_file_num` back
+  so a path can be re-allocated with different bytes — both make
+  invalidation part of the delete, not an optimization
+  (regression test: invalidate → new file at same path → new
+  bytes). `open_with_env_bounded` gains `E::File: Send + 'static`
+  (handles now live in the shared source; every real env's file
+  type already satisfies it).
+- **Local 6M A/B, same binary, `PEDRA_SST_FILE_CACHE` 0 vs default
+  (256):**
+
+  | leg (6M local)      | cache off | cache on | speedup |
+  |---------------------|-----------|----------|---------|
+  | probe_hit p50       | 13.1 µs   | 5.2 µs   | **2.52×** |
+  | get_hit             | 15.06 µs  | 7.24 µs  | **2.08×** |
+  | prefix_scan         | 234.1 µs  | 225.5 µs | 1.04× |
+  | lookup_100 get_loop | 1.541 ms  | 721 µs   | **2.14×** |
+  | lookup_100 multi_get| 1.618 ms  | 734 µs   | **2.20×** |
+
+  Cache-off reproduces the post-bloom baseline exactly (15.06 vs
+  15.1 µs) — clean attribution. Against rocks 6M in the same
+  process: get_hit 7.24 vs 5.57 µs (1.30× behind, was 2.5×),
+  lookup_100 721 vs 585 µs (1.23×), prefix_scan 225.5 vs 216.5 µs
+  (1.04×), probe_hit p50 **5.2 vs 6.2 µs (faster)**. prefix_scan
+  barely moves: block-opens are not its bottleneck at 6M. Suites:
+  core 644/3 (same 3 known flakes at HEAD, stash-verified), compat
+  84/0/3, io-uring 22/22. Next: guest run #10 at 25M.
 
 
