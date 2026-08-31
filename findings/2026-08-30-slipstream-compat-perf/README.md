@@ -580,5 +580,52 @@ worker print one layer breakdown per second:
   seen once in 9 runs — 0/8 at baseline — consistent with a latent
   background-auto-compact race; output for its tiny files is
   byte-identical pre/post fix, so no semantic delta).
+- **Read-path profile (macOS `sample`, 5 s during get_hit/pedradb at
+  6M, post-bloom-fix): 41% of all main-thread samples are
+  `std::fs::File::open`.** The chain
+  `Db::get → lookup → point_at_with → BlockCache::get_or_insert_with
+  → decode_block → SstFileSource::read_range → IoUringEnv::open_read
+  → File::open` (1625/3990 samples) shows every 4 KiB block read
+  from an evicted table **opens the file before reading it** — a
+  full path-lookup + vnode syscall per cold block. RocksDB holds
+  open file handles in a file-cache; that is the remaining ~2.5×
+  get_hit gap (15.1 µs vs 6.1 µs local) after the bloom fix removed
+  the 14× bloat. Next lever: an fd/handle cache in `SstFileSource`
+  (LRU-bounded, keyed by path) so `read_range` reuses handles.
+- **Guest run #9 (v21f, 25M) — first full completion.** The memory
+  war is won: hydrate passed (103.1 s, 11.06 GiB on disk after),
+  flush passed, and **settle survived to the end** — `SETTLE_PHASE
+  compact_ms=76240`, `SETTLE_RSS after_compact=1230324 kB` (1.23 GB
+  under the 3.8 GB ceiling; run #8 died at 3.50 GB), settle wall
+  79.9 s, 5.15 GiB on disk after. `BENCH_EXIT_pedradb_diag=0`.
+  Read legs vs the RocksDB-default 25M reference:
+
+  | leg (25M)              | pedradb v21f | rocks default | ratio |
+  |------------------------|--------------|---------------|-------|
+  | probe_hit p50          | 39.5 µs      | 45.4 µs       | **1.15× faster** |
+  | probe_miss p50         | 2.8 µs       | —             | — |
+  | get_hit (criterion)    | 66.8 µs      | 38.59 µs      | 0.58× (1.73× slower) |
+  | prefix_scan            | 730 µs       | 305.6 µs      | 0.42× (2.39× slower) |
+  | lookup_100 get_loop    | 6.585 ms     | 3.38 ms       | ~0.51× |
+  | lookup_100 multi_get   | 6.655 ms     | 3.70 ms       | ~0.56× |
+  | hydrate                | 103.1 s      | 25.3 s        | 0.25× (4.1× slower) |
+  | settle                 | 79.9 s       | 8.3 s         | 0.10× (9.6× slower) |
+  | on disk after settle   | 5.15 GiB     | 5.24 GiB      | smaller |
+
+  Honest read: **probe_hit (the raw point-read path) is now faster
+  than RocksDB default at 25M**; the criterion legs still trail
+  (get_hit 1.73×, prefix_scan 2.39×, lookup_100 ~1.9×) and hydrate/
+  settle are far behind — settle is intrinsic to our stacked
+  overlapping L1 runs + whole-levels rewrite, reported as-is. On-disk
+  size is now on par (5.15 vs 5.24 GiB). The remaining read gap
+  matches the `File::open` profile above: per-block open on evicted
+  tables.
+- **Run #9 forensics gap (low priority): 0 `REWRITEDIAG` lines in
+  the serial** even though `PEDRA_REWRITE_DIAG=1` was verified
+  exported in the guest entrypoint (line 14) before convert-back,
+  and the settle summary lines (`SETTLE_PHASE`, `SETTLE_RSS`)
+  printed fine. Suspect stderr capture in the bench harness
+  (`eprintln!` from the compact thread). Only forensic value now
+  that settle survives; not chased further.
 
 
