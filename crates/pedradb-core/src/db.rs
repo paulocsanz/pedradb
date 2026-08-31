@@ -72,7 +72,7 @@ use crate::manifest::{self, VersionSet};
 use crate::memtable::{Lookup, MemTable};
 use crate::merge::{range_deleted, range_tombstone_covers, StreamingVisibleIter, VisibleKv};
 use crate::sst::{
-    write_l0_sst, write_l0_sst_for_family, write_sst_entries_on, write_sst_try_sorted_on, SstTable,
+    write_l0_sst, write_l0_sst_for_family, write_sst_entries_on, SstTable,
 };
 use crate::tx::Transaction;
 use crate::vlog::{self, ValueLog, VlogRewriteStats, VLOG_FILE_NAME};
@@ -731,6 +731,7 @@ pub struct PreparedL0Compact<E: Env> {
     dir: PathBuf,
     env: E,
     sync: bool,
+    split_target: u64,
 }
 
 impl<E: Env> PreparedL0Compact<E> {
@@ -740,11 +741,12 @@ impl<E: Env> PreparedL0Compact<E> {
         self.inputs.iter().map(|t| t.path().to_path_buf()).collect()
     }
 
-    /// Merge inputs into a new SST (streaming when `gc` is default).
+    /// Merge inputs into one or more SSTs split at the compaction target
+    /// file size (streaming when `gc` is default).
     ///
     /// # Errors
     /// SST encode / I/O. On error the live L0 inventory is unchanged.
-    pub fn write(&self) -> Result<SstTable> {
+    pub fn write(&self) -> Result<Vec<SstTable>> {
         let cf = self
             .inputs
             .first()
@@ -757,8 +759,13 @@ impl<E: Env> PreparedL0Compact<E> {
             &self.inputs,
             self.gc,
             self.sync,
+            self.split_target,
         )
-        .map(|t| t.with_cf(cf))
+        .map(|ts| {
+            ts.into_iter()
+                .map(|t| t.with_cf(cf.clone()))
+                .collect::<Vec<_>>()
+        })
     }
 }
 
@@ -1162,6 +1169,11 @@ pub struct Db<E: Env = StdEnv> {
     /// stale and the feed is rebuilt on demand (RFC-0019: on-disk CHANGELOG
     /// is a cache).
     changelog_rebuild_budget_entries: u64,
+    /// Merged compaction output splits into multiple SSTs at this many
+    /// bytes (the SST writer buffers one output file in memory — see
+    /// [`crate::compact_kernel::COMPACT_TARGET_FILE_BYTES`]). Rocks
+    /// `target_file_size_base` role; operator-tunable.
+    compact_target_file_bytes: u64,
     /// Durable commits since the last CHANGELOG store.
     commits_since_changelog: u64,
     /// Successful CHANGELOG stores since open.
@@ -1600,6 +1612,7 @@ impl<E: Env> Db<E> {
             changelog_interval: changelog_interval_from_env(),
             changelog_rebuild_budget_entries:
                 crate::changelog_kernel::DEFAULT_CHANGELOG_REBUILD_BUDGET_ENTRIES,
+            compact_target_file_bytes: crate::compact_kernel::COMPACT_TARGET_FILE_BYTES,
             commits_since_changelog: 0,
             changelog_store_count: 0,
             unsynced_ssts: Vec::new(),
@@ -1924,6 +1937,13 @@ impl<E: Env> Db<E> {
     pub fn set_changelog_rebuild_budget_entries(&mut self, n: u64) -> &mut Self {
         self.changelog_rebuild_budget_entries = n;
         self
+    }
+
+    /// Merged compaction output file split target in bytes (Rocks
+    /// `target_file_size_base` role). The writer buffers one output file
+    /// in memory, so this bounds compaction's peak RAM.
+    pub fn set_compact_target_file_bytes(&mut self, bytes: u64) {
+        self.compact_target_file_bytes = bytes.max(1);
     }
 
     /// Successful CHANGELOG cache stores since open.
@@ -5267,6 +5287,7 @@ impl<E: Env> Db<E> {
             dir: self.dir.clone(),
             env: self.env.clone(),
             sync: self.sync,
+            split_target: self.compact_target_file_bytes,
         }))
     }
 
@@ -5280,9 +5301,9 @@ impl<E: Env> Db<E> {
     pub fn install_prepared_l0_compact(
         &mut self,
         job: PreparedL0Compact<E>,
-        new_table: SstTable,
+        new_tables: Vec<SstTable>,
     ) -> Result<()> {
-        let Some(undo) = self.apply_prepared_l0_compact(job, new_table) else {
+        let Some(undo) = self.apply_prepared_l0_compact(job, new_tables) else {
             return Ok(());
         };
         let old_paths = undo.old_paths().to_vec();
@@ -5423,18 +5444,29 @@ impl<E: Env> Db<E> {
             .first()
             .map(|t| t.cf().to_string())
             .unwrap_or_default();
-        let new_table =
-            write_merged_tables(&self.env, &self.dir, num, &tables, options.gc, self.sync)?
-                .with_cf(cf);
-        self.table_cache.insert(Arc::new(new_table.clone()));
-        self.next_file_num = num + 1;
+        let new_tables: Vec<SstTable> = write_merged_tables(
+            &self.env,
+            &self.dir,
+            num,
+            &tables,
+            options.gc,
+            self.sync,
+            self.compact_target_file_bytes,
+        )?
+        .into_iter()
+        .map(|t| t.with_cf(cf.clone()))
+        .collect();
+        for t in &new_tables {
+            self.table_cache.insert(Arc::new(t.clone()));
+        }
+        self.next_file_num = num + new_tables.len() as u64;
 
         let old_paths: Vec<PathBuf> = input_idxs
             .iter()
             .map(|&i| self.ssts[i].path().to_path_buf())
             .collect();
 
-        // Keep SSTs not in the input set; append the new file at `to_level`.
+        // Keep SSTs not in the input set; append the new files at `to_level`.
         let mut keep_tables = Vec::new();
         let mut keep_levels = Vec::new();
         for (i, (t, &lvl)) in self.ssts.iter().zip(self.sst_levels.iter()).enumerate() {
@@ -5443,9 +5475,11 @@ impl<E: Env> Db<E> {
                 keep_levels.push(lvl);
             }
         }
-        let new_path = new_table.path().to_path_buf();
-        keep_tables.push(new_table);
-        keep_levels.push(to_level);
+        let new_paths: Vec<PathBuf> = new_tables.iter().map(|t| t.path().to_path_buf()).collect();
+        for t in new_tables {
+            keep_tables.push(t);
+            keep_levels.push(to_level);
+        }
         let prev_tables = std::mem::replace(&mut self.ssts, keep_tables);
         let prev_levels = std::mem::replace(&mut self.sst_levels, keep_levels);
         // F173: the durable state only changes once the MANIFEST install
@@ -5458,8 +5492,10 @@ impl<E: Env> Db<E> {
         let prev_earliest = self.earliest_readable_seq;
         self.note_sst_inventory_changed();
 
-        if let Ok(len) = self.env.metadata_len(&new_path) {
-            self.bytes_written_sst = self.bytes_written_sst.saturating_add(len);
+        for p in &new_paths {
+            if let Ok(len) = self.env.metadata_len(p) {
+                self.bytes_written_sst = self.bytes_written_sst.saturating_add(len);
+            }
         }
         // Raise GC watermark before MANIFEST install (durable across reopen).
         if options.gc.requests_gc() {
@@ -5475,7 +5511,7 @@ impl<E: Env> Db<E> {
         }
 
         for path in old_paths {
-            if path != new_path {
+            if !new_paths.contains(&path) {
                 let _ = self.env.remove_file(&path);
             }
         }
@@ -8149,7 +8185,7 @@ impl<E: Env> Db<E> {
     pub fn apply_prepared_l0_compact(
         &mut self,
         job: PreparedL0Compact<E>,
-        new_table: SstTable,
+        new_tables: Vec<SstTable>,
     ) -> Option<L0CompactUndo> {
         let input_paths: Vec<PathBuf> = job.input_paths();
         let still_live = self
@@ -8157,7 +8193,9 @@ impl<E: Env> Db<E> {
             .iter()
             .any(|t| input_paths.iter().any(|p| t.path() == p.as_path()));
         if !still_live {
-            let _ = self.env.remove_file(new_table.path());
+            for t in &new_tables {
+                let _ = self.env.remove_file(t.path());
+            }
             return None;
         }
         let old_paths = input_paths;
@@ -8170,10 +8208,18 @@ impl<E: Env> Db<E> {
             keep_tables.push(t.clone());
             keep_levels.push(lvl);
         }
-        self.note_sst_bytes_written(new_table.path());
-        self.table_cache.insert(Arc::new(new_table.clone()));
-        keep_tables.push(new_table);
-        keep_levels.push(1);
+        for t in &new_tables {
+            self.note_sst_bytes_written(t.path());
+            self.table_cache.insert(Arc::new(t.clone()));
+            keep_tables.push(t.clone());
+            keep_levels.push(1);
+        }
+        // The prepared job reserved exactly one file number; a split output
+        // consumed `job.file_num ..= job.file_num + n - 1`, so burn the rest.
+        let want = job.file_num.saturating_add(new_tables.len() as u64);
+        if self.next_file_num < want {
+            self.next_file_num = want;
+        }
         let prev_tables = std::mem::replace(&mut self.ssts, keep_tables);
         let prev_levels = std::mem::replace(&mut self.sst_levels, keep_levels);
         let prev_manifest = self.manifest_file_num;
@@ -9010,51 +9056,156 @@ fn load_ssts_scan<E: Env>(env: &E, dir: &Path) -> Result<(Vec<SstTable>, u64, Se
 }
 
 /// Merge `tables` into `{file_num:06}.sst` (RFC-0037 streaming when `!gc.requests_gc()`).
-fn write_merged_tables(
+/// Approximate on-disk footprint of one merged entry (key + value + entry
+/// overhead) — the chunking size proxy for [`write_merged_tables`].
+fn merged_entry_bytes(ikey: &InternalKey, value: &Bytes) -> u64 {
+    (ikey.user_key.len() + value.len() + 24) as u64
+}
+
+/// Finalize one merged chunk file: rename the `.tmp`, fsync the dir, open.
+fn finish_merged_chunk_on(
     env: &impl Env,
     dir: &Path,
     file_num: u64,
-    tables: &[SstTable],
-    gc: crate::merge::CompactGcOptions,
     do_sync_dir: bool,
 ) -> Result<SstTable> {
     let final_path = dir.join(format!("{file_num:06}.sst"));
     let tmp_path = dir.join(format!("{file_num:06}.sst.tmp"));
-    let written = if gc.requests_gc() {
+    env.rename(&tmp_path, &final_path)?;
+    if do_sync_dir {
+        let _ = env.sync_dir(dir);
+    }
+    SstTable::open_on(env, &final_path)
+}
+
+/// Merge `tables` into one **or more** SSTs split at
+/// [`crate::compact_kernel::COMPACT_TARGET_FILE_BYTES`]: the SST writer
+/// buffers one output file in memory, so a single-file merge of every
+/// input would hold the whole dataset in RAM (the 4 GiB settle OOM —
+/// compact added +1.1 GB for a 620 MB dataset, and the 128 GiB host
+/// survived the same shape only as a ~10 GB in-memory file). Splits fall
+/// between user keys — output files hold disjoint contiguous key ranges
+/// at the same level. File numbers run
+/// `first_file_num ..= first_file_num + n - 1`.
+fn write_merged_tables(
+    env: &impl Env,
+    dir: &Path,
+    first_file_num: u64,
+    tables: &[SstTable],
+    gc: crate::merge::CompactGcOptions,
+    do_sync_dir: bool,
+    split_target: u64,
+) -> Result<Vec<SstTable>> {
+    let bloom_hint: usize = tables.iter().map(SstTable::len).sum();
+    let mut out: Vec<SstTable> = Vec::new();
+    let mut file_num = first_file_num;
+    if gc.requests_gc() {
+        // GC needs the version view of the whole input, so the input is
+        // materialized; the OUTPUT is still chunked (bounded writer buffer).
         let mut merged: Vec<(InternalKey, Bytes)> = Vec::new();
         for t in tables {
             merged.extend(t.entries_cloned());
         }
         let merged = crate::merge::gc_compact_entries(merged, gc);
-        write_sst_entries_on(env, &tmp_path, &merged)
-    } else {
-        let bloom_hint: usize = tables.iter().map(SstTable::len).sum();
-        let streams: Vec<_> = tables
-            .iter()
-            .map(SstTable::iter_internal_streaming)
-            .collect();
-        let mut merge = crate::merge::KwayInternalMerge::from_streams(streams)?;
-        write_sst_try_sorted_on(
-            env,
-            &tmp_path,
-            std::iter::from_fn(|| merge.next_entry().transpose()),
-            bloom_hint,
-        )
-    };
-    match written {
-        Ok(table) => {
-            drop(table);
-            env.rename(&tmp_path, &final_path)?;
-            if do_sync_dir {
-                let _ = env.sync_dir(dir);
+        let mut i = 0usize;
+        while i < merged.len() {
+            let mut acc = 0u64;
+            let mut j = i;
+            while j < merged.len() {
+                acc = acc.saturating_add(merged_entry_bytes(&merged[j].0, &merged[j].1));
+                j += 1;
+                if crate::compact_kernel::compact_should_split_at(acc, split_target) {
+                    // Never split one user key's version run across files.
+                    while j < merged.len() && merged[j].0.user_key == merged[j - 1].0.user_key {
+                        acc =
+                            acc.saturating_add(merged_entry_bytes(&merged[j].0, &merged[j].1));
+                        j += 1;
+                    }
+                    break;
+                }
             }
-            SstTable::open_on(env, &final_path)
+            let tmp_path = dir.join(format!("{file_num:06}.sst.tmp"));
+            if let Err(e) = crate::sst::write_sst_sorted_on(
+                env,
+                &tmp_path,
+                merged[i..j].iter().cloned(),
+                bloom_hint,
+            ) {
+                let _ = env.remove_file(&tmp_path);
+                return Err(e);
+            }
+            out.push(finish_merged_chunk_on(env, dir, file_num, do_sync_dir)?);
+            file_num += 1;
+            i = j;
         }
-        Err(e) => {
-            let _ = env.remove_file(&tmp_path);
-            Err(e)
-        }
+        return Ok(out);
     }
+    let streams: Vec<_> = tables
+        .iter()
+        .map(SstTable::iter_internal_streaming)
+        .collect();
+    let mut merge = crate::merge::KwayInternalMerge::from_streams(streams)?;
+    let mut peeked: Option<Result<(InternalKey, Bytes)>> = None;
+    let mut stream_ended = false;
+    let mut last_user: Option<Bytes> = None;
+    while peeked.is_some() || !stream_ended {
+        let mut acc = 0u64;
+        let mut closed = false;
+        let mut entries = std::iter::from_fn(|| {
+            if closed {
+                return None;
+            }
+            let entry = match peeked.take() {
+                Some(e) => e,
+                None => match merge.next_entry() {
+                    Ok(Some(e)) => Ok(e),
+                    Ok(None) => {
+                        stream_ended = true;
+                        closed = true;
+                        return None;
+                    }
+                    Err(e) => {
+                        closed = true;
+                        return Some(Err(e));
+                    }
+                },
+            };
+            let ok_entry = match entry {
+                Ok(e) => e,
+                Err(e) => {
+                    closed = true;
+                    return Some(Err(e));
+                }
+            };
+            if crate::compact_kernel::compact_should_split_at(acc, split_target)
+                && last_user
+                    .as_ref()
+                    .is_none_or(|u| u.as_ref() != ok_entry.0.user_key.as_ref())
+            {
+                // Target reached and the user key changed — start a new
+                // file with this entry. A same-user version run never
+                // splits: it stays in one file.
+                peeked = Some(Ok(ok_entry));
+                closed = true;
+                return None;
+            }
+            acc = acc.saturating_add(merged_entry_bytes(&ok_entry.0, &ok_entry.1));
+            last_user = Some(ok_entry.0.user_key.clone());
+            Some(Ok(ok_entry))
+        });
+        let tmp_path = dir.join(format!("{file_num:06}.sst.tmp"));
+        if let Err(e) =
+            crate::sst::write_sst_try_sorted_on(env, &tmp_path, &mut entries, bloom_hint)
+        {
+            drop(entries);
+            let _ = env.remove_file(&tmp_path);
+            return Err(e);
+        }
+        drop(entries);
+        out.push(finish_merged_chunk_on(env, dir, file_num, do_sync_dir)?);
+        file_num += 1;
+    }
+    Ok(out)
 }
 
 #[cfg(test)]
@@ -11936,9 +12087,9 @@ mod tests {
             extra_l0 > L0_COMPACTION_TRIGGER,
             "flush during write stays L0"
         );
-        let table = job.write().unwrap();
+        let tables = job.write().unwrap();
         assert_eq!(db.level_file_count(0), extra_l0);
-        db.install_prepared_l0_compact(job, table).unwrap();
+        db.install_prepared_l0_compact(job, tables).unwrap();
         assert_eq!(db.level_file_count(0), 1, "L0 flushed during write kept");
         assert!(db.level_file_count(1) >= 1);
         assert_eq!(db.get(&[b'a', 0]).as_deref(), Some([b'1', 0].as_slice()));
@@ -11947,6 +12098,66 @@ mod tests {
         let db = Db::open(&dir).unwrap();
         assert_eq!(db.get(&[b'a', 0]).as_deref(), Some([b'1', 0].as_slice()));
         assert_eq!(db.get(b"zz").as_deref(), Some(b"live".as_slice()));
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// The merged compaction output must split at `compact_target_file_bytes`
+    /// (the SST writer buffers one output file in memory — the unbounded
+    /// single-file merge OOMed a 4 GiB guest at settle). Every key stays
+    /// readable, the split survives reopen, and a same-user version run is
+    /// never divided across files.
+    #[test]
+    fn compact_splits_merged_output_at_target_file_bytes() {
+        let dir = temp_dir();
+        let mut db = Db::open(&dir).unwrap();
+        db.set_compact_target_file_bytes(4 * 1024);
+        // 100 distinct keys x ~134 B ≈ 13 KiB — must split at the 4 KiB target.
+        for i in 0..100u32 {
+            db.put(format!("split/{i:04}").into_bytes(), vec![b'v'; 100])
+                .unwrap();
+        }
+        // One user key with a 40-version run (~5 KiB): the run extends past
+        // the target and must stay inside a single output file.
+        for _ in 0..40u32 {
+            db.put(b"split/zzzz", vec![b'r'; 100]).unwrap();
+        }
+        db.flush().unwrap();
+        assert_eq!(db.level_file_count(0), 1);
+        db.compact().unwrap();
+        assert_eq!(db.level_file_count(0), 0, "compact drains L0");
+        let l1 = db.level_file_count(1);
+        assert!(
+            l1 >= 2,
+            "merged output must split at the 4 KiB target, got {l1} L1 files"
+        );
+        for i in 0..100u32 {
+            let k = format!("split/{i:04}").into_bytes();
+            assert_eq!(
+                db.get(&k).as_deref().map(|v| v.len()),
+                Some(100),
+                "key {i}"
+            );
+        }
+        assert_eq!(
+            db.get(b"split/zzzz").as_deref().map(|v| v.len()),
+            Some(100),
+            "latest version of the run"
+        );
+        db.close().unwrap();
+        let mut db = Db::open(&dir).unwrap();
+        assert!(
+            db.level_file_count(1) >= 2,
+            "split inventory survives reopen"
+        );
+        assert_eq!(
+            db.get(b"split/0042").as_deref().map(|v| v.len()),
+            Some(100)
+        );
+        assert_eq!(
+            db.get(b"split/zzzz").as_deref().map(|v| v.len()),
+            Some(100)
+        );
         db.close().unwrap();
         let _ = fs::remove_dir_all(&dir);
     }
