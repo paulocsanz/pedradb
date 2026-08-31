@@ -53,6 +53,17 @@ Gates da noite (todos devem fechar verde):
    d=4 inteiro, registrar o limite real medido (seeds executadas, tempo) em
    `pct_d4.txt` — não fabricar cobertura.
 
+## Armadilha do launcher (2026-08-31, pescada antes do r1 disparar)
+
+Os guardas PCT vivem em `#[cfg(feature = "pct")] mod pct_concurrent` —
+**sem `--features pct` o filtro casa 0 testes e o cargo sai 0 (verde
+vazio)**. Um launcher que copie só o nome do teste reproduz a classe
+fail-open do colapso de seeds. Todo launcher noturno deve usar os comandos
+acima verbatim (`--features pct --lib`) e conferir no output
+`test result: ok. 1 passed` — 0 matched = falha, não sucesso. O launcher
+r1 foi re-armado com essa checagem mecânica (grep do `1 passed`; ausência
+→ exit 99).
+
 ## Piso (o que a noite NÃO prova)
 
 - K seeds com fingerprint limpo é **evidência**, não ∀ TCP (R-swarm-real).
