@@ -17,8 +17,8 @@
   ],
   "glue": {
     "kernel_files": 43,
-    "kernel_loc": 11345,
-    "handler_loc": 82496,
+    "kernel_loc": 11388,
+    "handler_loc": 82676,
     "db_rs_extracted": false
   },
   "residuals": [

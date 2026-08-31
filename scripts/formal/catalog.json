@@ -1928,6 +1928,10 @@
         {
           "file": "crates/pedradb-store/src/lib.rs",
           "handler": "durable_become_follower_if_newer"
+        },
+        {
+          "file": "crates/pedradb-raft/src/lib.rs",
+          "handler": "handle_request_vote_with_persist"
         }
       ],
       "as_is": "durable_term_if_newer_as_is",
