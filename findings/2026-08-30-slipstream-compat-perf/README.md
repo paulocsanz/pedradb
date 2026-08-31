@@ -312,4 +312,109 @@ worker print one layer breakdown per second:
   bitrot refusal, pool FIFO-to-budget, bounded reopen serves reads
   within budget. Core 632/635 (3 known flakes), compat green.
 
+- **v19 (`beb3709`): L0 flushes write compressed SST v5 (lz4 +
+  per-block CRC32C).** The v18 25M SIGKILL root cause was uncompressed
+  v3 L0 bodies; compressed bodies keep both the writer's in-RAM file
+  body and the pooled payload several times smaller, and streaming
+  merges read one block range instead of reloading whole ≤v4 bodies
+  per input. Compressed flushes are ~2.5× faster, so flush debt clears
+  and the compat compact worker (write-idle gated, `l0 ≥
+  L0_COMPACTION_TRIGGER`, `COMPACT_MAX_L0_INPUTS=2`) starts racing
+  hydrate (COMPACTDIAG l0↔l1 churn mid-hydrate). Two test regressions
+  fixed in-commit: `compact_horizon_reclaims_aged_versions` (constant
+  fill let lz4 crush every round — the byte-ratio measured
+  compression, not reclamation; payloads now LCG-filled) and
+  `remote_sidecar_prunes_segment_fetch` (compressed L0s sit just under
+  the dead-weight doubling threshold → different remote segment set →
+  hole key proven-absent instead of coverage-gap). **Guest runs #1/#2
+  both still OOMed** — compression alone does not close the gap.
+- **v20 diag (`a1335a8`) + guest run #3 (tunables on) — the decisive
+  attribution.** FLUSHDIAG/COMPACTDIAG now print `pool_n= pool_b=
+  ent_e=` (`SstPayloadPool::tracked_tables()/.resident_bytes()`, new
+  `Db::sst_cached_entries()`; `SstTable::cached_entries_count()`).
+  Run #3: `COMPACTDIAG l0=2 l1=6 parked_n=1 pool_n=2 pool_b=256688310
+  ent_e=1154308`; FLUSHDIAG at mat_n=6 sst_n=9: `parked_b=268609536
+  active_b=143370 retired_b=0 rss_kb=2961916 pool_b=256688032
+  ent_e=1154308`; later `sst_n=8 rss_kb=2413960 pool_b=242153747
+  ent_e=0`; then OOM `BENCH_EXIT_pedradb_diag=101`. Conclusions:
+  (1) the v18 payload pool is bounded exactly at its 256 MiB budget —
+  no registration gap; (2) `ent_e=1,154,308` unbounded per-table
+  decoded-entries caches (≈130–250 MB) are a real layer; (3) 550 MB
+  DID return when the caches freed (mmap'd ≥16 KB allocs respect the
+  tunables) — the residual ~2.4 GB floor is arena-pinned sub-16 KB
+  churn (per-entry InternalKey/Bytes allocations, memtable BTree
+  nodes, decoded-block Vecs ~13 KB, just under the 16 KB mmap
+  threshold) interleaved with long-lived allocations.
+- **v21 (`8890425`): compaction GC streams — the ent_e layer is gone.**
+  A PEDRA_MAT_TRACE backtrace named the hydrate-time `materialize_entries`
+  caller: the compat compact worker (`spawn_compact_worker →
+  compat_compact_once → PreparedL0Compact::write → write_merged_tables
+  → entries_cloned → materialize_entries`). With `auto_reclaim`,
+  `compat_compact_once` passes `CompactGcOptions::for_oldest_snapshot`,
+  the old GC branch cloned **every input table** into the persistent
+  per-table entries caches, then `gc_compact_entries` built a full
+  BTreeMap copy (~3× input bytes per L0→L1 job) — during write-only
+  hydrate. `GcMergeSource` now wraps the k-way internal merge and
+  applies the same per-run decisions (oldest-snapshot GC with
+  `point_version_fate`, keep-only-latest with range-deletion coverage
+  and the F177 bottommost tombstone drop, lone-tombstone collapse,
+  `min_sequence` filter) while buffering one user-key run at a time;
+  `write_merged_tables` drives every GC request through it, so no
+  input table is ever materialized. Property test: streaming equals
+  the old `gc_compact_entries` across an 8-variant option matrix on
+  interleaved streams. 6M local leg: `ent_e` 1,087,488 → **0 on every
+  tick**, same flush cadence and disk footprint (2.46 GiB), hydrate
+  11.0 s → 10.5 s.
+- **v21b (`9077d4a`): SST entry-count floor only bounds uncompressed
+  bodies (compat hang fix).** v19 exposed a latent bug:
+  `check_sst_entry_count` rejected any header count above
+  `file_len/8+1` — an uncompressed-file heuristic compressed files
+  legitimately violate (1001 hot-key versions in 7,756 bytes). The
+  freshly written `.sst.tmp` failed its own write-verify decode,
+  `write_imm_l0_files` errored, and `materialize_parked_once`'s
+  `Err(_) => return false` swallowed it — the flush worker retried the
+  SAME parked memtable forever (observed 14,637 retries, zero
+  completions), so `auto_reclaim_worker_gcs_versions` livelocked at
+  the 30 s flush-debt ceiling per put. The byte floor now applies only
+  to uncompressed bodies (v1's eager-allocate guard kept); every
+  header still faces `MAX_SST_ENTRIES`, and compressed counts are
+  verified against the decoded block stream. Regression test writes a
+  repetitive two-hot-key flush that packs below the old floor (fails
+  the old check by construction) and reopens whole. Suites post-fix:
+  compat lib **84/0**/3 ignored (previously hung at 82 on this test),
+  core 636/3 known flakes. The 25M bench never tripped it —
+  pseudo-random payloads compress weakly — so this is a correctness
+  repair, not a bench mover.
+- **Guest run #4 (v21+v21b, entrypoint unchanged from run #3 — tunables
+  present, so the pedradb tree is the single variable).** First start
+  was a **false start**: the injection script died at `rm /tmp/p149.raw`
+  (EPERM — loop still referenced) BEFORE its `chown`/`mv` installed the
+  new image, so that boot silently ran the v20-diag tree again — an
+  accidental control run: same OOM point (mat_n=6, RSS 3.16 GB) with
+  `ent_e` 1,087,488 vs run #3's 1,154,308 (same code, race-timing
+  variance), no rebuild. The v21 image (built but stranded in
+  `/tmp/p149-new.qcow2`) was then md5-verified standalone (merge.rs
+  `5cc85f3e…`, db.rs `90b0a43e…`, table.rs `dcfb8d85…`, compat lib.rs
+  still `d9f472bd…`), installed, and the real run #4 booted.
+- **Guest run #4 result — the memory war is won; a v5 eviction-read
+  integrity bug is the new blocker.** Real run (rebuild confirmed:
+  `Compiling pedradb-core … Finished in 20.75s`): **hydrate completed
+  all 25,000,000 entries in 104.5 s (0.24M entries/s), 11.05 GiB on
+  disk (475 B/entry), RSS flat ~1.8 GB, `ent_e=0` on EVERY
+  FLUSHDIAG/COMPACTDIAG tick** — no OOM, vs run #3's kill at ~3.3M
+  entries / RSS 3.1 GB. Pool stayed at budget (pool_n=9, pool_b≈243
+  MB). Two follow-ups it exposed: (1) the compact worker is write-idle
+  gated, so sustained hydrate left **l0=87 undrained** (l1=8 pinned;
+  settle's own compact pass moved almost nothing: 86 ms); (2) **settle
+  failed closed**: `SST block CRC mismatch in
+  /data/stores/.tmpnjeecn/store/000018.sst` — an early v5 SST read
+  back long after its payload was evicted from the 256 MiB pool (only
+  9 of 93 tables resident). The v18 eviction tests covered ≤v4
+  whole-body reload; **the v5 evicted-block single-range re-read +
+  per-block CRC path has no test** and is the prime suspect
+  (write-verify passed at flush time, so the bytes were valid once;
+  either the re-read computes the CRC over the wrong slice or the
+  block range is off). Fail-closed behavior is correct (refused to
+  decode); the read path is wrong.
+
 
