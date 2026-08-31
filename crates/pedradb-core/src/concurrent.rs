@@ -926,6 +926,14 @@ pub struct ConcurrentDb<E: Env = StdEnv> {
     /// above it (published is monotone).
     occ_registry: Arc<Mutex<std::collections::BTreeMap<u64, SequenceNumber>>>,
     occ_next_id: Arc<std::sync::atomic::AtomicU64>,
+    /// Reads served since open. Retire-cache policy: a materialized parked
+    /// table becomes a retired point/MVCC read cache only while reads are
+    /// actually arriving — sustained zero-read ingest drops it (its data is
+    /// in the L0 just installed). Keeping one BTree per L0 alive as a
+    /// "read" cache during bulk load OOMed a 4 GiB host at 25M entries.
+    reads_served: Arc<std::sync::atomic::AtomicU64>,
+    /// `reads_served` snapshot at the last retire decision.
+    retire_reads_mark: Arc<std::sync::atomic::AtomicU64>,
 }
 
 impl ConcurrentDb<StdEnv> {
@@ -994,6 +1002,8 @@ impl<E: Env> ConcurrentDb<E> {
             fold_gc: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             occ_registry,
             occ_next_id: Arc::new(std::sync::atomic::AtomicU64::new(1)),
+            reads_served: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            retire_reads_mark: Arc::new(std::sync::atomic::AtomicU64::new(0)),
         }
     }
 
@@ -1009,6 +1019,7 @@ impl<E: Env> ConcurrentDb<E> {
     /// (misses fall through to the locked path, which fills the cache).
     #[must_use]
     pub fn get(&self, key: &[u8]) -> Option<Bytes> {
+        self.reads_served.fetch_add(1, Ordering::Relaxed);
         if let Some(v) = self.point_cache.get(key) {
             return v;
         }
@@ -1071,6 +1082,7 @@ impl<E: Env> ConcurrentDb<E> {
     /// # Errors
     /// [`CoreError::SnapshotTooOld`] if `snap` is below the GC watermark.
     pub fn get_at(&self, snap: Snapshot, key: &[u8]) -> Result<Option<Bytes>> {
+        self.reads_served.fetch_add(1, Ordering::Relaxed);
         self.inner.read().get_at(snap, key)
     }
 
@@ -1371,6 +1383,7 @@ impl<E: Env> ConcurrentDb<E> {
     /// Values are resolved through the value log when large-value pointers are present.
     #[must_use]
     pub fn scan_collect(&self, start: Bound<&[u8]>, end: Bound<&[u8]>) -> Vec<(Bytes, Bytes)> {
+        self.reads_served.fetch_add(1, Ordering::Relaxed);
         self.inner
             .read()
             .scan(start, end)
@@ -1390,6 +1403,7 @@ impl<E: Env> ConcurrentDb<E> {
         limit: Option<usize>,
     ) -> Result<Vec<(Bytes, Bytes)>> {
         // Collect under the lock via range_at_limited (same fail-closed path).
+        self.reads_served.fetch_add(1, Ordering::Relaxed);
         self.inner
             .read()
             .range_at_limited(snapshot, start, end, limit)
@@ -1578,6 +1592,18 @@ impl<E: Env> ConcurrentDb<E> {
     #[must_use]
     pub fn parked_unflushed_bytes(&self) -> usize {
         self.inner.read().parked_unflushed_bytes()
+    }
+
+    /// Active memtable approximate bytes (diag passthrough).
+    #[must_use]
+    pub fn active_mem_usage(&self) -> usize {
+        self.inner.read().active_mem_usage()
+    }
+
+    /// Approximate bytes held by the retired read cache (diag passthrough).
+    #[must_use]
+    pub fn retired_mem_bytes(&self) -> usize {
+        self.inner.read().retired_mem_bytes()
     }
 
     /// Whether an immutable memtable is waiting for the host to park/drain.
@@ -1820,6 +1846,8 @@ impl<E: Env> ConcurrentDb<E> {
             fold_gc: _,
             occ_registry: _,
             occ_next_id: _,
+            reads_served: _,
+            retire_reads_mark: _,
         } = self;
         match Arc::try_unwrap(inner) {
             Ok(lock) => lock.into_inner().close(),
@@ -2231,8 +2259,17 @@ impl<E: Env> ConcurrentDb<E> {
             drop(imm);
             if let Some(popped) = popped {
                 // Only this Arc remains (fold cannot run under the lock).
-                let owned = Arc::try_unwrap(popped).unwrap_or_else(|a| (*a).clone());
-                g.retire_mem_as_l0_cache(owned);
+                // Retire-cache policy: keep the table as a point/MVCC read
+                // cache only when reads arrived since the last decision.
+                // Zero-read sustained ingest drops it — one less 256 MiB
+                // BTree (~2x real footprint) per L0; data is durable in
+                // the L0 installed above.
+                let reads = self.reads_served.load(Ordering::Relaxed);
+                let mark = self.retire_reads_mark.swap(reads, Ordering::Relaxed);
+                if reads != mark {
+                    let owned = Arc::try_unwrap(popped).unwrap_or_else(|a| (*a).clone());
+                    g.retire_mem_as_l0_cache(owned);
+                }
             }
         }
         true
@@ -3521,9 +3558,11 @@ mod tests {
 
     /// The retired read cache stays bounded when many mems materialize
     /// while L0 never drains: sustained ingest installs L0s faster than
-    /// compaction, so the clear-on-L0-empty hook never fires — the
-    /// 25M-hydrate OOM, second head. Cache-only layers must drop oldest
-    /// first (SSTs cover the reads) and every key stays readable.
+    /// compaction, so the clear-on-L0-empty hook never fires. With zero
+    /// reads the materialize path now drops tables outright (see
+    /// `materialize_drops_retire_cache_when_no_reads`); this bound is the
+    /// backstop for read-carrying workloads — cache-only layers must drop
+    /// oldest first (SSTs cover the reads) and every key stays readable.
     #[test]
     fn retired_cache_bounded_under_many_materializes() {
         let dir = temp_dir();
@@ -3563,6 +3602,49 @@ mod tests {
                 );
             }
         }
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Retire-cache policy, first line: with zero reads since the last
+    /// decision a materialized parked table is dropped — sustained bulk
+    /// ingest must not hold one BTree per installed L0 as a "read" cache
+    /// (third head of the 25M slipstream hydrate OOM on a 4 GiB host).
+    /// The data stays readable from the L0.
+    #[test]
+    fn materialize_drops_retire_cache_when_no_reads() {
+        let dir = temp_dir();
+        let db = open_sync(&dir);
+        db.set_defer_auto_compact(true);
+        db.put(b"k", vec![b'v'; 64]).unwrap();
+        assert!(db.with_write(|d| d.stage_flush_imm()).unwrap());
+        assert!(db.park_imm_once());
+        assert!(db.materialize_parked_once());
+        assert_eq!(db.with_read(|d| d.parked_unflushed_count()), 0);
+        assert_eq!(db.with_read(|d| d.retired_mem_bytes()), 0);
+        assert_eq!(db.sst_count(), 1);
+        assert_eq!(db.get(b"k").as_deref(), Some(&[b'v'; 64][..]));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Retire-cache policy, second line: once reads are being served the
+    /// cache warms again — the next materialized table is retired.
+    #[test]
+    fn materialize_retires_once_reads_arrive() {
+        let dir = temp_dir();
+        let db = open_sync(&dir);
+        db.set_defer_auto_compact(true);
+        db.put(b"k1", vec![b'v'; 64]).unwrap();
+        assert!(db.with_write(|d| d.stage_flush_imm()).unwrap());
+        assert!(db.park_imm_once());
+        assert!(db.materialize_parked_once(), "first table: dropped, no reads");
+        assert_eq!(db.with_read(|d| d.retired_mem_bytes()), 0);
+        assert_eq!(db.get(b"k1").as_deref(), Some(&[b'v'; 64][..]));
+        db.put(b"k2", vec![b'w'; 64]).unwrap();
+        assert!(db.with_write(|d| d.stage_flush_imm()).unwrap());
+        assert!(db.park_imm_once());
+        assert!(db.materialize_parked_once(), "second table: retired, read arrived");
+        assert!(db.with_read(|d| d.retired_mem_bytes()) > 0);
+        assert_eq!(db.get(b"k2").as_deref(), Some(&[b'w'; 64][..]));
         let _ = fs::remove_dir_all(&dir);
     }
 
