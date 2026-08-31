@@ -445,6 +445,33 @@ def check_clones(root: Path, catalog: dict, r: Report) -> None:
             )
         else:
             r.good(f"{clone['id']}: no unregistered identical production fn")
+        # Anti-silence (name level, 2026-08-31): a production fn NAME shared
+        # across the pair must be registered as identical above or recorded
+        # in "diverged" with a reason. Exact-token equality alone fails open
+        # on near-clones — a new fn added to both sides with slightly
+        # different bodies would stay silent forever.
+        diverged = clone.get("diverged") or {}
+        if not isinstance(diverged, dict):
+            r.fail(f"{clone['id']}: diverged must be an object {{fn: reason}}")
+            diverged = {}
+        shared_prod = {
+            name
+            for name in set(af) & set(bf)
+            if oa.get(name, ca) < ca and ob.get(name, cb) < cb
+        }
+        unlisted = sorted((shared_prod - set(clone["fns"])) - set(diverged))
+        if unlisted:
+            r.fail(
+                f"{clone['id']}: shared production fn(s) {unlisted} neither "
+                "registered identical nor recorded diverged — add to fns or "
+                "to diverged with a reason"
+            )
+        for name in sorted(set(diverged) - shared_prod):
+            r.fail(f"{clone['id']}: stale diverged entry {name} (not a shared production fn)")
+        for name in sorted(set(diverged) & set(clone["fns"])):
+            r.fail(f"{clone['id']}: {name} listed in both fns and diverged")
+        if diverged and unlisted == [] and not (set(diverged) - shared_prod):
+            r.good(f"{clone['id']}: {len(diverged)} recorded divergence(s)")
     # Cross-pair completeness: the clone catalog must cover EVERY
     # token-identical production fn duplicated across the frozen kernels
     # (plus the catalog's own non-kernel sides). A new duplicate must be
