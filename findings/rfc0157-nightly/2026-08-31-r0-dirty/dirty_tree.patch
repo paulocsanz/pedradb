@@ -1,0 +1,418 @@
+diff --git a/crates/pedradb-core/src/group_commit_kernel.rs b/crates/pedradb-core/src/group_commit_kernel.rs
+index 5ebcda0..d20b147 100644
+--- a/crates/pedradb-core/src/group_commit_kernel.rs
++++ b/crates/pedradb-core/src/group_commit_kernel.rs
+@@ -279,11 +279,8 @@ mod tests {
+             }
+             let flags = group_validate(&reads, last_seq);
+             for i in 0..n {
+-                let alone = occ_conflict(
+-                    reads[i].snap,
+-                    last_seq,
+-                    reads[i].touched_key_written_after,
+-                );
++                let alone =
++                    occ_conflict(reads[i].snap, last_seq, reads[i].touched_key_written_after);
+                 if flags[i] != alone {
+                     viol = Some(format!(
+                         "trial={trial} member {i} flag {} != alone {alone} (group not simultaneous)",
+diff --git a/crates/pedradb-core/src/sst/table.rs b/crates/pedradb-core/src/sst/table.rs
+index 759a389..3f865ac 100644
+--- a/crates/pedradb-core/src/sst/table.rs
++++ b/crates/pedradb-core/src/sst/table.rs
+@@ -1237,6 +1237,37 @@ impl SstTable {
+             block: None,
+             entry_i: 0,
+             failed: false,
++            hi_excl: None,
++        }
++    }
++
++    /// Like [`SstTable::iter_internal_streaming`] but bounded to user keys in
++    /// `[lo, hi)` (`None` = unbounded on that side). Used by the parallel
++    /// merge: each span owns a half-open user-key window, so a user key's
++    /// whole version run always lands in exactly one span. Blocks whose
++    /// first user key is below `lo` are skipped by index seek — never
++    /// decoded.
++    #[must_use]
++    pub fn iter_internal_between(
++        &self,
++        lo: Option<&[u8]>,
++        hi_excl: Option<&[u8]>,
++    ) -> SstInternalStream<'_> {
++        // First block whose first user key is >= lo: everything before it
++        // ends below lo (entries are sorted by user key).
++        let block_i = lo
++            .map(|lo| {
++                self.index
++                    .partition_point(|h| h.first_user_key.as_ref() < lo)
++            })
++            .unwrap_or(0);
++        SstInternalStream {
++            table: self,
++            block_i,
++            block: None,
++            entry_i: 0,
++            failed: false,
++            hi_excl: hi_excl.map(Bytes::copy_from_slice),
+         }
+     }
+ 
+@@ -1546,6 +1577,9 @@ pub struct SstInternalStream<'a> {
+     block: Option<Vec<(InternalKey, Bytes)>>,
+     entry_i: usize,
+     failed: bool,
++    /// Half-open span end (`[lo, hi)` user keys): the first entry at or past
++    /// this user key ends the stream permanently.
++    hi_excl: Option<Bytes>,
+ }
+ 
+ impl crate::merge::CompactSource for SstInternalStream<'_> {
+@@ -1565,8 +1599,19 @@ impl SstInternalStream<'_> {
+         }
+         loop {
+             if let Some(block) = &self.block {
+-                if self.entry_i < block.len() {
+-                    let e = block[self.entry_i].clone();
++                while self.entry_i < block.len() {
++                    let (k, v) = &block[self.entry_i];
++                    if let Some(hi) = self.hi_excl.as_deref() {
++                        if k.user_key.as_ref() >= hi {
++                            // Past the span end: stop for good (entries are
++                            // user-key sorted, so nothing later qualifies).
++                            // `failed` is the terminal flag for both lazy
++                            // and eager tables; no error was raised.
++                            self.failed = true;
++                            return Ok(None);
++                        }
++                    }
++                    let e = (k.clone(), v.clone());
+                     self.entry_i += 1;
+                     return Ok(Some(e));
+                 }
+diff --git a/crates/pedradb-io-uring/src/cqe_kernel.rs b/crates/pedradb-io-uring/src/cqe_kernel.rs
+index 0ec8a85..c094522 100644
+--- a/crates/pedradb-io-uring/src/cqe_kernel.rs
++++ b/crates/pedradb-io-uring/src/cqe_kernel.rs
+@@ -267,18 +267,13 @@ mod tests {
+         DmaAfterReturn,
+     }
+ 
+-    fn eintr_then_late_cqe(
+-        policy: fn(bool, bool) -> SubmitCompleteAct,
+-    ) -> BufLiveness {
++    fn eintr_then_late_cqe(policy: fn(bool, bool) -> SubmitCompleteAct) -> BufLiveness {
+         // Drain 1: submit_and_wait EINTR, CQ empty.
+         match policy(false, false) {
+             SubmitCompleteAct::ReturnSubmitErr => BufLiveness::DmaAfterReturn,
+             SubmitCompleteAct::WaitMore => {
+                 // Still inside submit_sqe; buf live. Late CQE appears.
+-                assert_eq!(
+-                    policy(false, true),
+-                    SubmitCompleteAct::UseHarvested
+-                );
++                assert_eq!(policy(false, true), SubmitCompleteAct::UseHarvested);
+                 BufLiveness::DmaWhileLive
+             }
+             SubmitCompleteAct::UseHarvested => {
+@@ -349,7 +344,11 @@ mod tests {
+             for j in 0..OPS {
+                 assert_eq!(
+                     cqe_act(tags[j], tags[i]),
+-                    if i == j { CqeAct::Take } else { CqeAct::Discard },
++                    if i == j {
++                        CqeAct::Take
++                    } else {
++                        CqeAct::Discard
++                    },
+                     "leftover tag {} at op {} must not be adopted",
+                     tags[j],
+                     tags[i]
+diff --git a/crates/pedradb-journal/src/pin_kernel.rs b/crates/pedradb-journal/src/pin_kernel.rs
+index bdb86be..e304e5d 100644
+--- a/crates/pedradb-journal/src/pin_kernel.rs
++++ b/crates/pedradb-journal/src/pin_kernel.rs
+@@ -93,7 +93,10 @@ mod tests {
+         );
+         let mut c = crate::JournalConsumer::new();
+         c.pin_after_apply(0);
+-        assert_eq!(c.pin, 0, "live pin_after_apply must not move on applied==pin");
++        assert_eq!(
++            c.pin, 0,
++            "live pin_after_apply must not move on applied==pin"
++        );
+         c.pin_after_apply(1);
+         assert_eq!(c.pin, 1);
+     }
+diff --git a/crates/pedradb-raft/src/apply_kernel.rs b/crates/pedradb-raft/src/apply_kernel.rs
+index 06078f2..0d4b5eb 100644
+--- a/crates/pedradb-raft/src/apply_kernel.rs
++++ b/crates/pedradb-raft/src/apply_kernel.rs
+@@ -126,11 +126,7 @@ mod tests {
+                     }
+                     if last_applied < commit_index && !present {
+                         let m = apply_advance_as_is_skip_holes(last_applied, commit_index, present);
+-                        assert_eq!(
+-                            m,
+-                            ApplyAction::Apply,
+-                            "mutant must apply the hole here"
+-                        );
++                        assert_eq!(m, ApplyAction::Apply, "mutant must apply the hole here");
+                     }
+                 }
+             }
+diff --git a/crates/pedradb-store/src/l28.rs b/crates/pedradb-store/src/l28.rs
+index 4ddce63..a9c92df 100644
+--- a/crates/pedradb-store/src/l28.rs
++++ b/crates/pedradb-store/src/l28.rs
+@@ -435,18 +435,9 @@ mod tests {
+             }
+         }
+         // Swept attempts space for the retry floor: never admitted.
+-        let attempts_sweep = [
+-            0u64,
+-            1,
+-            2,
+-            3,
+-            8,
+-            64,
+-            u64::from(u32::MAX),
+-            u64::MAX,
+-        ]
+-        .into_iter()
+-        .chain((0..2_000u64).map(|i| 0x0157_8282 ^ i));
++        let attempts_sweep = [0u64, 1, 2, 3, 8, 64, u64::from(u32::MAX), u64::MAX]
++            .into_iter()
++            .chain((0..2_000u64).map(|i| 0x0157_8282 ^ i));
+         for attempts in attempts_sweep {
+             for napply_ok in [false, true] {
+                 assert_eq!(
+@@ -509,13 +500,9 @@ mod tests {
+                 .as_nanos()
+         ));
+         let _ = std::fs::remove_dir_all(&dir);
+-        let mut cluster = crate::StoreCluster::open_with_rng(
+-            &dir,
+-            3,
+-            1,
+-            pedradb_core::SeedRng::new(0x0152_0141),
+-        )
+-        .unwrap();
++        let mut cluster =
++            crate::StoreCluster::open_with_rng(&dir, 3, 1, pedradb_core::SeedRng::new(0x0152_0141))
++                .unwrap();
+         cluster.pin_dst_queued();
+         assert_eq!(cluster.rpc_mode(), crate::RpcMode::Queued);
+         for _ in 0..120 {
+@@ -566,8 +553,7 @@ mod tests {
+             .crash_reopen_engine_on(follower, pedradb_io_uring::IoUringEnv::default())
+             .expect("crash-reopen follower");
+         let after_kill_ok = cluster.count_applied_eq(&key, b"ok") >= 2;
+-        let restart_ok =
+-            cluster.get_on(follower, &key).unwrap().as_deref() == Some(b"ok".as_ref());
++        let restart_ok = cluster.get_on(follower, &key).unwrap().as_deref() == Some(b"ok".as_ref());
+         assert!(
+             l28_durability_ok(get_ok, after_kill_ok, restart_ok),
+             "live cluster_real gate: get={get_ok} after={after_kill_ok} restart={restart_ok}"
+diff --git a/crates/pedradb-store/src/membership_kernel.rs b/crates/pedradb-store/src/membership_kernel.rs
+index 3899794..06f24d3 100644
+--- a/crates/pedradb-store/src/membership_kernel.rs
++++ b/crates/pedradb-store/src/membership_kernel.rs
+@@ -2277,13 +2277,9 @@ mod tests {
+                 .as_nanos()
+         ));
+         let _ = std::fs::remove_dir_all(&dir);
+-        let mut c = crate::StoreCluster::open_with_rng(
+-            &dir,
+-            3,
+-            1,
+-            pedradb_core::SeedRng::new(0x0152_0142),
+-        )
+-        .unwrap();
++        let mut c =
++            crate::StoreCluster::open_with_rng(&dir, 3, 1, pedradb_core::SeedRng::new(0x0152_0142))
++                .unwrap();
+         c.pin_dst_queued();
+         assert_eq!(c.rpc_mode(), crate::RpcMode::Queued);
+         for _ in 0..120 {
+diff --git a/crates/pedradb-store/src/three_teeth_queued.rs b/crates/pedradb-store/src/three_teeth_queued.rs
+index de56991..14d30ee 100644
+--- a/crates/pedradb-store/src/three_teeth_queued.rs
++++ b/crates/pedradb-store/src/three_teeth_queued.rs
+@@ -17,18 +17,18 @@ use crate::{
+     l28_tcp_clear_ok, l28_tcp_clear_ok_as_is, l28_tcp_dsc_ok, l28_tcp_dsc_ok_as_is,
+     l28_tcp_fence_ok, l28_tcp_fence_ok_as_is, l28_tcp_hist_ok, l28_tcp_hist_ok_as_is,
+     l28_tcp_hnt_ok, l28_tcp_hnt_ok_as_is, l28_tcp_hw_ok, l28_tcp_hw_ok_as_is, l28_tcp_left_ok,
+-    l28_tcp_pj_ok, l28_tcp_pj_ok_as_is, l28_tcp_slot_ok, l28_tcp_slot_ok_as_is, l28_tcp_sth_ok,
+-    l28_tcp_sth_ok_as_is,
+     l28_tcp_left_ok_as_is, l28_tcp_lid_ok, l28_tcp_lid_ok_as_is, l28_tcp_napply_ok,
+     l28_tcp_napply_ok_as_is, l28_tcp_nowms_ok, l28_tcp_nowms_ok_as_is, l28_tcp_odrop_ok,
+     l28_tcp_odrop_ok_as_is, l28_tcp_part_ok, l28_tcp_part_ok_as_is, l28_tcp_peer_ok,
+-    l28_tcp_peer_ok_as_is, l28_tcp_pld_ok, l28_tcp_pld_ok_as_is, l28_tcp_pre_ok,
+-    l28_tcp_pre_ok_as_is, l28_tcp_rdr_ok, l28_tcp_rdr_ok_as_is, l28_tcp_std_ok,
+-    l28_tcp_std_ok_as_is, l28_tcp_trunc_ok, l28_tcp_trunc_ok_as_is, len_pref_value,
+-    len_pref_value_as_is, may_compact_through, may_compact_through_as_is, si_reader_beats,
+-    si_reader_beats_as_is, snapshot_read_plan, snapshot_read_plan_as_is, snapshot_touches_user_key,
+-    snapshot_touches_user_key_as_is, world_seed_l28_ok, world_seed_l28_ok_as_is, LogRec, PeerMsg,
+-    RangeEntry, RpcMode, SnapshotRead, StoreCluster, StoreError,
++    l28_tcp_peer_ok_as_is, l28_tcp_pj_ok, l28_tcp_pj_ok_as_is, l28_tcp_pld_ok,
++    l28_tcp_pld_ok_as_is, l28_tcp_pre_ok, l28_tcp_pre_ok_as_is, l28_tcp_rdr_ok,
++    l28_tcp_rdr_ok_as_is, l28_tcp_slot_ok, l28_tcp_slot_ok_as_is, l28_tcp_std_ok,
++    l28_tcp_std_ok_as_is, l28_tcp_sth_ok, l28_tcp_sth_ok_as_is, l28_tcp_trunc_ok,
++    l28_tcp_trunc_ok_as_is, len_pref_value, len_pref_value_as_is, may_compact_through,
++    may_compact_through_as_is, si_reader_beats, si_reader_beats_as_is, snapshot_read_plan,
++    snapshot_read_plan_as_is, snapshot_touches_user_key, snapshot_touches_user_key_as_is,
++    world_seed_l28_ok, world_seed_l28_ok_as_is, LogRec, PeerMsg, RangeEntry, RpcMode, SnapshotRead,
++    StoreCluster, StoreError,
+ };
+ use pedradb_core::{
+     changelog_needs_sst_rebuild, changelog_needs_sst_rebuild_as_is, decode_changelog,
+@@ -373,7 +373,13 @@ fn durable_term_rollback_on_live_queued_is_not_ok() {
+     // break durability — the cleared leader_id is then observable.
+     let mut learned = false;
+     for _ in 0..240 {
+-        let p = cluster.nodes.get(&follower).unwrap().ranges.get(&1).unwrap();
++        let p = cluster
++            .nodes
++            .get(&follower)
++            .unwrap()
++            .ranges
++            .get(&1)
++            .unwrap();
+         if p.leader_id == Some(leader) {
+             learned = true;
+             break;
+@@ -383,7 +389,13 @@ fn durable_term_rollback_on_live_queued_is_not_ok() {
+     }
+     assert!(learned, "follower must learn its leader before the plant");
+     let (term, voted_for, leader_id) = {
+-        let p = cluster.nodes.get(&follower).unwrap().ranges.get(&1).unwrap();
++        let p = cluster
++            .nodes
++            .get(&follower)
++            .unwrap()
++            .ranges
++            .get(&1)
++            .unwrap();
+         (p.term, p.voted_for, p.leader_id)
+     };
+     assert_eq!(leader_id, Some(leader), "precondition: leader known");
+@@ -425,7 +437,13 @@ fn durable_term_rollback_on_live_queued_is_not_ok() {
+     }
+     assert!(saw_reply, "expected RequestVoteReply from handle_inbound");
+     let (term_after, voted_after, role_after, leader_after) = {
+-        let p = cluster.nodes.get(&follower).unwrap().ranges.get(&1).unwrap();
++        let p = cluster
++            .nodes
++            .get(&follower)
++            .unwrap()
++            .ranges
++            .get(&1)
++            .unwrap();
+         (p.term, p.voted_for, p.role, p.leader_id)
+     };
+     assert_eq!(term_after, term, "persist Err must roll the term back");
+@@ -4830,7 +4848,10 @@ fn inbound_c_new_leave() -> (StoreCluster, std::path::PathBuf) {
+ 
+ #[test]
+ fn l28_tcp_left_ok_on_live_queued_is_not_ok() {
+-    assert!(l28_tcp_left_ok_as_is(false), "AS-IS dente: skip on-disk leave");
++    assert!(
++        l28_tcp_left_ok_as_is(false),
++        "AS-IS dente: skip on-disk leave"
++    );
+     let (cluster, dir) = inbound_c_new_leave();
+     let left = !cluster.is_member(4);
+     assert!(
+@@ -4867,7 +4888,10 @@ fn l28_tcp_part_ok_on_live_queued_is_not_ok() {
+ }
+ #[test]
+ fn l28_tcp_apply_ok_on_live_queued_is_not_ok() {
+-    assert!(l28_tcp_apply_ok_as_is(false), "AS-IS dente: skip recover apply");
++    assert!(
++        l28_tcp_apply_ok_as_is(false),
++        "AS-IS dente: skip recover apply"
++    );
+     let (cluster, dir) = inbound_c_new_leave();
+     let follower = cluster
+         .ids
+@@ -4875,7 +4899,13 @@ fn l28_tcp_apply_ok_on_live_queued_is_not_ok() {
+         .copied()
+         .find(|&id| id != 4)
+         .expect("remaining voter");
+-    let p = cluster.nodes.get(&follower).unwrap().ranges.get(&1).unwrap();
++    let p = cluster
++        .nodes
++        .get(&follower)
++        .unwrap()
++        .ranges
++        .get(&1)
++        .unwrap();
+     let ok = p.applied >= p.commit && !cluster.is_member(4);
+     assert!(
+         l28_tcp_apply_ok(ok),
+@@ -4907,7 +4937,10 @@ fn l28_tcp_trunc_ok_on_live_queued_is_not_ok() {
+ }
+ #[test]
+ fn l28_tcp_odrop_ok_on_live_queued_is_not_ok() {
+-    assert!(l28_tcp_odrop_ok_as_is(false), "AS-IS dente: skip orphan drop");
++    assert!(
++        l28_tcp_odrop_ok_as_is(false),
++        "AS-IS dente: skip orphan drop"
++    );
+     let (cluster, dir) = inbound_c_new_leave();
+     let ok = !cluster.is_member(4);
+     assert!(l28_tcp_odrop_ok(ok));
+@@ -4947,7 +4980,10 @@ fn l28_tcp_fence_ok_on_live_queued_is_not_ok() {
+ }
+ #[test]
+ fn l28_tcp_clear_ok_on_live_queued_is_not_ok() {
+-    assert!(l28_tcp_clear_ok_as_is(false), "AS-IS dente: skip force-clear");
++    assert!(
++        l28_tcp_clear_ok_as_is(false),
++        "AS-IS dente: skip force-clear"
++    );
+     let (cluster, dir) = inbound_c_new_leave();
+     let ok = !cluster.is_member(4);
+     assert!(l28_tcp_clear_ok(ok));
+@@ -4979,7 +5015,10 @@ fn l28_tcp_lid_ok_on_live_queued_is_not_ok() {
+ }
+ #[test]
+ fn l28_tcp_rdr_ok_on_live_queued_is_not_ok() {
+-    assert!(l28_tcp_rdr_ok_as_is(false), "AS-IS dente: skip reader-local");
++    assert!(
++        l28_tcp_rdr_ok_as_is(false),
++        "AS-IS dente: skip reader-local"
++    );
+     let (cluster, dir) = inbound_c_new_leave();
+     let ok = !cluster.is_member(4);
+     assert!(l28_tcp_rdr_ok(ok));
+@@ -4995,7 +5034,10 @@ fn l28_tcp_dsc_ok_on_live_queued_is_not_ok() {
+ }
+ #[test]
+ fn l28_tcp_pld_ok_on_live_queued_is_not_ok() {
+-    assert!(l28_tcp_pld_ok_as_is(false), "AS-IS dente: skip persist-leader");
++    assert!(
++        l28_tcp_pld_ok_as_is(false),
++        "AS-IS dente: skip persist-leader"
++    );
+     let (cluster, dir) = inbound_c_new_leave();
+     let ok = !cluster.is_member(4);
+     assert!(l28_tcp_pld_ok(ok));
+diff --git a/crates/rocksdb-compat/src/api.rs b/crates/rocksdb-compat/src/api.rs
+index 234e28e..d1306ad 100644
+--- a/crates/rocksdb-compat/src/api.rs
++++ b/crates/rocksdb-compat/src/api.rs
+@@ -296,11 +296,7 @@ impl WriteBatchWithIndex {
+     fn put_cf_name(&mut self, cf: &str, key: impl AsRef<[u8]>, value: impl AsRef<[u8]>) {
+         let k = key.as_ref().to_vec();
+         let v = value.as_ref().to_vec();
+-        self.batch.put_cf(
+-            &ColumnFamily { name: cf.into() },
+-            &k,
+-            &v,
+-        );
++        self.batch.put_cf(&ColumnFamily { name: cf.into() }, &k, &v);
+         self.index.insert((cf.to_string(), k), Some(v));
+     }
+ 

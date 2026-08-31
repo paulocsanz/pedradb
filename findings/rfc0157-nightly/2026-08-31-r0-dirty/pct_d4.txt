@@ -1,0 +1,77 @@
+error[E0063]: missing field `to_level` in initializer of `PreparedL0Compact<_>`
+    --> crates/pedradb-core/src/db.rs:5545:17
+     |
+5545 |         Ok(Some(PreparedL0Compact {
+     |                 ^^^^^^^^^^^^^^^^^ missing `to_level`
+
+error[E0599]: no method named `block_first_user_keys` found for reference `&SstTable` in the current scope
+    --> crates/pedradb-core/src/db.rs:9453:23
+     |
+9453 |         keys.extend(t.block_first_user_keys());
+     |                       ^^^^^^^^^^^^^^^^^^^^^
+     |
+help: there is a method `block_for_user_key` with a similar name, but with different arguments
+    --> crates/pedradb-core/src/sst/table.rs:948:5
+     |
+ 948 |     pub fn block_for_user_key(&self, user_key: &[u8]) -> Option<usize> {
+     |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[E0382]: use of moved value: `next_file_num`
+    --> crates/pedradb-core/src/db.rs:9685:38
+     |
+9685 |             let handle = scope.spawn(move || {
+     |                                      ^^^^^^^ value moved into closure here, in previous iteration of loop
+9686 |                 let mut alloc = || next_file_num.fetch_add(1, Ordering::Relaxed);
+     |                                    ------------- use occurs due to use in closure
+     |
+     = note: move occurs because `next_file_num` has type `Atomic<u64>`, which does not implement the `Copy` trait
+
+error[E0382]: use of moved value: `hi`
+    --> crates/pedradb-core/src/db.rs:9703:18
+     |
+9684 |             let hi = hi.cloned();
+     |                 -- move occurs because `hi` has type `Option<Vec<u8>>`, which does not implement the `Copy` trait
+9685 |             let handle = scope.spawn(move || {
+     |                                      ------- value moved into closure here
+...
+9697 |                     hi.as_deref(),
+     |                     -- variable moved due to use in closure
+...
+9703 |             lo = hi;
+     |                  ^^ value used here after move
+     |
+help: consider cloning the value before moving it into the closure
+     |
+9685 ~             let value = hi.clone();
+9686 ~             let handle = scope.spawn(move || {
+9687 |                 let mut alloc = || next_file_num.fetch_add(1, Ordering::Relaxed);
+ ...
+9697 |                     span_lo.as_deref(),
+9698 ~                     value.as_deref(),
+     |
+
+error[E0382]: use of moved value: `next_file_num`
+    --> crates/pedradb-core/src/db.rs:9717:20
+     |
+9672 |       let next_file_num = std::sync::atomic::AtomicU64::new(first_file_num);
+     |           ------------- move occurs because `next_file_num` has type `Atomic<u64>`, which does not implement the `Copy` trait
+...
+9675 |       let results: Vec<Result<Vec<SstTable>>> = std::thread::scope(|scope| {
+     |                                                                    ------- value moved into closure here
+9676 |           let mut handles = Vec::with_capacity(parts);
+9677 | /         for (i, hi) in splits
+9678 | |             .iter()
+9679 | |             .map(Some)
+9680 | |             .chain(std::iter::once(None))
+9681 | |             .enumerate()
+     | |________________________- inside of this loop
+...
+9686 |                   let mut alloc = || next_file_num.fetch_add(1, Ordering::Relaxed);
+     |                                      ------------- variable moved due to use in closure
+...
+9717 |       let consumed = next_file_num.into_inner() - first_file_num;
+     |                      ^^^^^^^^^^^^^ value used here after move
+
+Some errors have detailed explanations: E0063, E0382, E0599.
+For more information about an error, try `rustc --explain E0063`.
+error: could not compile `pedradb-core` (lib) due to 5 previous errors

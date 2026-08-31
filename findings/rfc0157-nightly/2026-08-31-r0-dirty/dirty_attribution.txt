@@ -1,0 +1,30 @@
+# dirty-tree attribution — campaign ran on UNCOMMITTED co-agent WIP
+fired: 2026-08-31T20:18:55Z
+HEAD: eced14674a71d63c1bb1e346764fe43e62224841
+eced146 findings: guest run #10 (v21h, 25M) — read legs 9-21% better (p=0.00), still <1x at 25M; compaction structure attributed
+
+## full porcelain
+ M crates/pedradb-core/src/group_commit_kernel.rs
+ M crates/pedradb-core/src/sst/table.rs
+ M crates/pedradb-io-uring/src/cqe_kernel.rs
+ M crates/pedradb-journal/src/pin_kernel.rs
+ M crates/pedradb-raft/src/apply_kernel.rs
+ M crates/pedradb-store/src/l28.rs
+ M crates/pedradb-store/src/membership_kernel.rs
+ M crates/pedradb-store/src/three_teeth_queued.rs
+ M crates/rocksdb-compat/src/api.rs
+ M findings/rfc0029-prefetch-n/stdout.json
+ M scripts/formal/__pycache__/pedra_formal.cpython-314.pyc
+?? crates/pedradb-core/src/leveling.rs
+?? findings/rfc0157-nightly/2026-08-31-r0-dirty/
+
+## sha256 of every dirty crates/ file (this content, not any commit, is what the binary tested)
+a6aee00e9db0248fdbd825dda8377e8eff6434fd448a01d218aea3b6e665e845  crates/pedradb-core/src/group_commit_kernel.rs
+0d1cd94c839ee46ea011e99aca2bccce4e056ca2de83cfb58d3d5181a04f49ef  crates/pedradb-core/src/sst/table.rs
+cdf7f74bc2494407ecbd72db39522e14d7686caa794e4e107e3503bee7e3a236  crates/pedradb-io-uring/src/cqe_kernel.rs
+8045a4e05a6096b0bd7bbbdc4124f025d9cff57c4014dad84f79967d4b614937  crates/pedradb-journal/src/pin_kernel.rs
+b3a40f80d3ba96c855fc808c193ec4320cf43fce3720fcd00e8a4d0f7372c567  crates/pedradb-raft/src/apply_kernel.rs
+eb7021e2c251cf4583747fe2293bf309f42675e59e4cd2a5442d5cbfdceafd90  crates/pedradb-store/src/l28.rs
+1a74f32f677f4a8f5032911cc4136358facbf7f720acfa19fa41feb8666d16a1  crates/pedradb-store/src/membership_kernel.rs
+6d433e98f97501c60f2f8d807f931110510239643f1c4b71a6f7524f9e15e233  crates/pedradb-store/src/three_teeth_queued.rs
+3fbd7bef14a46066574edee3be8565b8134fe071b4fa5b3c3d93416fdf407ac9  crates/rocksdb-compat/src/api.rs
