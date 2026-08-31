@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# Guarda anti-drift aeneas (RFC-0157 follow-up): bloqueia um commit que muda
+# um kernel extraído sem re-carimbar o stamp correspondente. A detecção já
+# existia no pedra_formal.py (FAIL "aeneas SOURCE drifted"); o buraco era a
+# hora do commit — 6 stamps driftaram commitados em 4b243d2 (reparados em
+# c60deda). Dirigido pelos dados: lê path=/sha256= de cada
+# formal/aeneas/out/SOURCE* — kernel novo com stamp novo entra sozinho.
+#
+# Instalar (uma vez por clone): git config core.hooksPath .githooks
+# Emergência:                        git commit --no-verify
+# (o lint completo continua sendo o gate; o hook é a primeira barreira)
+set -uo pipefail
+cd "$(git rev-parse --show-toplevel)"
+
+fail=0
+for stamp in formal/aeneas/out/SOURCE*; do
+  [[ -f "$stamp" ]] || continue
+  kpath=$(sed -n 's/^path=//p' "$stamp" 2>/dev/null)
+  [[ -n "$kpath" ]] || continue
+  # stamp fora do índice (deleção estaged): o lint cuida disso
+  want=$(git show ":$stamp" 2>/dev/null | sed -n 's/^sha256=//p')
+  [[ -n "$want" ]] || continue
+  if git cat-file -e ":$kpath" 2>/dev/null; then
+    k_staged=$(git show ":$kpath" | shasum -a 256 | cut -d' ' -f1)
+  else
+    k_staged=""
+  fi
+  # só exige quando este par mudou em relação ao HEAD
+  k_head=$(git show "HEAD:$kpath" 2>/dev/null | shasum -a 256 | cut -d' ' -f1)
+  w_head=$(git show "HEAD:$stamp" 2>/dev/null | sed -n 's/^sha256=//p')
+  [[ "$k_staged" == "$k_head" && "$want" == "$w_head" ]] && continue
+  if [[ -z "$k_staged" || "$k_staged" != "$want" ]]; then
+    name=${stamp##*/}; name=${name#SOURCE}; name=${name#.}
+    [[ -z "$name" ]] && name=vote
+    echo "pre-commit: drift aeneas — $kpath ≠ $stamp" >&2
+    echo "  re-extraia e carimbe: scripts/aeneas_${name}.sh --required && git add $stamp formal/aeneas/out/lean/" >&2
+    fail=1
+  fi
+done
+exit $fail

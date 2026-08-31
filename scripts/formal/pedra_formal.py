@@ -792,6 +792,15 @@ def check_extract(
     root: Path, r: Report, *, want_charon: bool, charon_required: bool
 ) -> None:
     print("== extract (include crate; Charon/Aeneas optional) ==")
+    hook = root / ".githooks/pre-commit"
+    if not hook.is_file() or not os.access(hook, os.X_OK):
+        r.fail("aeneas stamp guard .githooks/pre-commit missing or not executable")
+    else:
+        hs = hook.read_text(encoding="utf-8")
+        if "formal/aeneas/out/SOURCE" in hs and "sha256=" in hs:
+            r.good("aeneas stamp guard pre-commit hook present (RFC-0157 follow-up)")
+        else:
+            r.fail("aeneas stamp guard pre-commit hook no longer checks SOURCE stamps")
     manifest = root / "formal/aeneas/vote-kernel/Cargo.toml"
     if not manifest.is_file():
         r.fail("formal/aeneas/vote-kernel/Cargo.toml missing")
