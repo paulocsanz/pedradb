@@ -445,4 +445,119 @@ def grant_after_persist_as_is
   VoteDecision.Insts.CoreCmpPartialEqVoteDecision.eq decision
     VoteDecision.WouldGrant
 
+/-- [pedra_aeneas_vote_kernel::DurableTerm]
+    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 178:0-186:1
+    Visibility: public -/
+@[discriminant isize]
+inductive DurableTerm where
+| Keep : DurableTerm
+| Raised : DurableTerm
+| Restored : DurableTerm
+
+/-- [pedra_aeneas_vote_kernel::{impl core::fmt::Debug for pedra_aeneas_vote_kernel::DurableTerm}::fmt]:
+    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 177:9-177:14
+    Visibility: public -/
+def DurableTerm.Insts.CoreFmtDebug.fmt
+  (self : DurableTerm) (f : core.fmt.Formatter) :
+  Result ((core.result.Result Unit core.fmt.Error) × core.fmt.Formatter)
+  := do
+  match self with
+  | DurableTerm.Keep => core.fmt.Formatter.write_str f (toStr "Keep")
+  | DurableTerm.Raised => core.fmt.Formatter.write_str f (toStr "Raised")
+  | DurableTerm.Restored => core.fmt.Formatter.write_str f (toStr "Restored")
+
+/-- Trait implementation: [pedra_aeneas_vote_kernel::{impl core::fmt::Debug for pedra_aeneas_vote_kernel::DurableTerm}]
+    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 177:9-177:14 -/
+@[reducible]
+def DurableTerm.Insts.CoreFmtDebug : core.fmt.Debug DurableTerm := {
+  fmt := DurableTerm.Insts.CoreFmtDebug.fmt
+}
+
+/-- [pedra_aeneas_vote_kernel::{impl core::clone::Clone for pedra_aeneas_vote_kernel::DurableTerm}::clone]:
+    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 177:16-177:21
+    Visibility: public -/
+def DurableTerm.Insts.CoreCloneClone.clone
+  (self : DurableTerm) : Result DurableTerm := do
+  ok self
+
+/-- Trait implementation: [pedra_aeneas_vote_kernel::{impl core::clone::Clone for pedra_aeneas_vote_kernel::DurableTerm}]
+    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 177:16-177:21 -/
+@[reducible]
+def DurableTerm.Insts.CoreCloneClone : core.clone.Clone DurableTerm := {
+  clone := DurableTerm.Insts.CoreCloneClone.clone
+}
+
+/-- Trait implementation: [pedra_aeneas_vote_kernel::{impl core::marker::Copy for pedra_aeneas_vote_kernel::DurableTerm}]
+    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 177:23-177:27 -/
+@[reducible]
+def DurableTerm.Insts.CoreMarkerCopy : core.marker.Copy DurableTerm := {
+  cloneInst := DurableTerm.Insts.CoreCloneClone
+}
+
+/-- Trait implementation: [pedra_aeneas_vote_kernel::{impl core::marker::StructuralPartialEq for pedra_aeneas_vote_kernel::DurableTerm}]
+    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 177:29-177:38 -/
+@[reducible]
+def DurableTerm.Insts.CoreMarkerStructuralPartialEq :
+  core.marker.StructuralPartialEq DurableTerm := {
+}
+
+/-- [pedra_aeneas_vote_kernel::{impl core::cmp::PartialEq<pedra_aeneas_vote_kernel::DurableTerm> for pedra_aeneas_vote_kernel::DurableTerm}::eq]:
+    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 177:29-177:38
+    Visibility: public -/
+def DurableTerm.Insts.CoreCmpPartialEqDurableTerm.eq
+  (self : DurableTerm) (other : DurableTerm) : Result Bool := do
+  let self1 := read_discriminant self
+  let other1 := read_discriminant other
+  ok (self1 = other1)
+
+/-- Trait implementation: [pedra_aeneas_vote_kernel::{impl core::cmp::PartialEq<pedra_aeneas_vote_kernel::DurableTerm> for pedra_aeneas_vote_kernel::DurableTerm}]
+    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 177:29-177:38 -/
+@[reducible]
+def DurableTerm.Insts.CoreCmpPartialEqDurableTerm : core.cmp.PartialEq
+  DurableTerm DurableTerm := {
+  eq := DurableTerm.Insts.CoreCmpPartialEqDurableTerm.eq
+}
+
+/-- [pedra_aeneas_vote_kernel::{impl core::cmp::Eq for pedra_aeneas_vote_kernel::DurableTerm}::assert_fields_are_eq]:
+    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 177:40-177:42
+    Visibility: public -/
+def DurableTerm.Insts.CoreCmpEq.assert_fields_are_eq
+  (self : DurableTerm) : Result Unit := do
+  ok ()
+
+/-- Trait implementation: [pedra_aeneas_vote_kernel::{impl core::cmp::Eq for pedra_aeneas_vote_kernel::DurableTerm}]
+    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 177:40-177:42 -/
+@[reducible]
+def DurableTerm.Insts.CoreCmpEq : core.cmp.Eq DurableTerm := {
+  partialEqInst := DurableTerm.Insts.CoreCmpPartialEqDurableTerm
+  assert_fields_are_eq := DurableTerm.Insts.CoreCmpEq.assert_fields_are_eq
+}
+
+/-- [pedra_aeneas_vote_kernel::durable_term_if_newer]:
+    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 191:0-203:1
+    Visibility: public -/
+def durable_term_if_newer
+  (current_term : Std.U64) (incoming_term : Std.U64) (persist : PersistOutcome)
+  :
+  Result DurableTerm
+  := do
+  if incoming_term > current_term
+  then
+    match persist with
+    | PersistOutcome.Ok => ok DurableTerm.Raised
+    | PersistOutcome.Err => ok DurableTerm.Restored
+  else ok DurableTerm.Keep
+
+/-- [pedra_aeneas_vote_kernel::durable_term_if_newer_as_is]:
+    Source: '../../../crates/pedradb-raft/src/vote_kernel.rs', lines 208:0-219:1
+    Visibility: public -/
+def durable_term_if_newer_as_is
+  (current_term : Std.U64) (incoming_term : Std.U64) (persist : PersistOutcome)
+  :
+  Result DurableTerm
+  := do
+  if incoming_term > current_term
+  then ok DurableTerm.Raised
+  else ok DurableTerm.Keep
+
 end pedra_aeneas_vote_kernel

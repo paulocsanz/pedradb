@@ -248,7 +248,7 @@ def ReopenOutcome.Insts.CoreHashHash : core.hash.Hash ReopenOutcome := {
 }
 
 /-- [pedra_aeneas_reopen_kernel::reopen_outcome]:
-    Source: '../../../crates/pedradb-core/src/wal/reopen_kernel.rs', lines 66:0-81:1
+    Source: '../../../crates/pedradb-core/src/wal/reopen_kernel.rs', lines 66:0-77:1
     Visibility: public -/
 def reopen_outcome
   (damage : ReopenDamage) (point_in_time : Bool) (escalated : Bool) :
@@ -286,7 +286,7 @@ def reopen_outcome
     else ok ReopenOutcome.RefuseOpen
 
 /-- [pedra_aeneas_reopen_kernel::reopen_outcome_as_is_silent]:
-    Source: '../../../crates/pedradb-core/src/wal/reopen_kernel.rs', lines 86:0-92:1
+    Source: '../../../crates/pedradb-core/src/wal/reopen_kernel.rs', lines 82:0-88:1
     Visibility: public -/
 def reopen_outcome_as_is_silent
   (_damage : ReopenDamage) (_point_in_time : Bool) (_escalated : Bool) :
