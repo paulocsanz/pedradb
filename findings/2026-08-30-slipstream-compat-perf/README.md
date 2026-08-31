@@ -665,4 +665,77 @@ worker print one layer breakdown per second:
   core 644/3 (same 3 known flakes at HEAD, stash-verified), compat
   84/0/3, io-uring 22/22. Next: guest run #10 at 25M.
 
+## v21h — encoded-block point seek + resolved block cache (2026-08-31, `8524353`)
+
+User ask: "make it just as fast at least" — read legs ≥ 1.0× vs
+RocksDB default. Two changes, both attributed by profile first:
+
+- **get_hit profile with fd cache ON** (`gethit4.sample`, 4105
+  samples in `get_entry`): ~51% of a get was decoded-block-cache
+  machinery — the 8192-entry `BlockCache` thrashes at 6M random
+  keys (insert + `evict_one` on nearly every get, ~5% hit rate),
+  plus `InternalKey::decode`/`Bytes::copy_from_slice` per entry of
+  every probed block.
+- **Fix (point):** `SstTable::point_at_seeking` — same
+  bounds/bloom gate and candidate window as `point_at_with`, then
+  per block: CRC32C-verify the raw image (fail-closed), lz4 into a
+  caller-owned scratch (`lz4_flex::block::uncompressed_size` +
+  `decompress_into`, zero steady-state allocs), walk
+  `ikey_len|ikey|val_len|val` comparing raw user-key prefixes
+  (no `InternalKey` allocs), copy out only the winning value.
+  `Db::lookup` swaps to it; the decoded-block cache stays for
+  scans. ≤v4 files (no per-block CRC) keep the whole-body path.
+  **Integrity:** the old closure's `decode_block().unwrap_or_default()`
+  served a CRC-broken block as a **silent miss**; seek errors now
+  `fail_stop_corrupt_block` (F1 sibling of `fail_stop_corrupt_value`).
+- **prefix_scan profile** (`v21h-prefix-scan.sample`, macOS
+  `sample`, pedra leg): per block load — `path_id` Sip-hashed the
+  path **string per fetch** (~4%), a full `Vec<(InternalKey,Bytes)>`
+  **deep clone per load** (~4%) to resolve vlog pointers in place,
+  then per-load vlog re-resolve (~5%). Criterion re-scans the same
+  prefix, so every load redid all three.
+- **Fix (scan):** hash the path id once per stream
+  (`BlockCache::get_or_insert_with_id`), and cache **value-resolved**
+  blocks under a tagged id (`RESOLVED_BLOCK_TAG`) so a full scan
+  resolves each block once on miss and later loads are pure `Arc`
+  clones. Resolving is **not idempotent** (`INLINE_ESCAPE` byte is
+  stripped, F188), so resolved slots must never flow back through a
+  resolve — the tag keeps raw (key-only scans) and resolved forms in
+  separate slots. Scan loader fails-stop on decode errors (the old
+  `unwrap_or_default` silently **skipped keys** of a faulted block).
+
+Local 6M, one process, rocks = default `sync=false`
+(`v21h-local6m-ab.log`):
+
+| leg (6M local)        | pedra    | rocks    | ratio |
+|-----------------------|----------|----------|-------|
+| get_hit               | 4.20 µs  | 6.21 µs  | **1.48×** |
+| prefix_scan           | 196.7 µs | 217.3 µs | **1.11×** |
+| lookup_100 get_loop   | 444.5 µs | 604.1 µs | **1.36×** |
+| lookup_100 multi_get  | 439.1 µs | 634.3 µs | **1.44×** |
+
+All read legs ≥ 1.0× within-run (goal met locally). Motion vs the
+fd-cache A/B: get_hit 7.24 → 4.20 µs, prefix_scan 225.5 → 196.7 µs
+(268 → 197 within the ab2 process, −27%).
+
+Suites: core 647/650 (3 pre-existing flakes unchanged), clippy at
+pre-change state (warnings in touched regions pre-date the change).
+New tests: seek parity vs decoded path (resident + evicted payload,
+tombstone/snapshot/multi-block/empty keys), seek CRC fail-closed,
+resolved-slot verbatim reuse across repeated scans interleaved with a
+raw key-only pass (escape-prefixed + vlog-spilled values).
+
+Caveats, stated plainly:
+- Resolved slots are larger than raw (real values vs 20 B pointers):
+  the entry-capped (8192) block cache's byte occupancy grows; it was
+  never byte-budgeted and sits outside the 256 MiB payload knob
+  (pre-existing accounting, unchanged by this commit). Guest RSS at
+  25M must be checked in run #10.
+- Two `decode_block().unwrap_or_default()` swallows remain at
+  `last_visible_under_prefix_with` call sites (key-only, errors
+  become skipped candidates) — pre-existing, flagged for a later F1
+  pass.
+- 25M guest numbers pending: injection staged, blocked on sudo.
+
+
 

@@ -1,0 +1,146 @@
+Gnuplot not found, using plotters backend
+hydrate/fjall: 6000000 entries in 5.7s (1.05M entries/s); on disk 1.27 GiB (227 B/entry)
+settle/fjall: 3.0s; on disk after 2.35 GiB
+hydrate/rocksdb: 6000000 entries in 3.3s (1.80M entries/s); on disk 1.48 GiB (265 B/entry)
+settle/rocksdb: 2.9s; on disk after 1.26 GiB
+hydrate/pedradb: 6000000 entries in 10.9s (0.55M entries/s); on disk 2.50 GiB (447 B/entry)
+settle/pedradb: 9.6s; on disk after 1.24 GiB
+probe_hit/fjall: p50 6.6µs / p90 8.1µs / p99 11.4µs / p999 29.3µs / max 56.4µs
+probe_miss/fjall: p50 375.0ns / p90 375.0ns / p99 458.0ns / p999 500.0ns / max 10.2µs
+probe_hit/rocksdb: p50 6.4µs / p90 7.1µs / p99 9.9µs / p999 14.8µs / max 47.3µs
+probe_miss/rocksdb: p50 250.0ns / p90 292.0ns / p99 375.0ns / p999 375.0ns / max 2.8µs
+probe_hit/pedradb: p50 3.4µs / p90 4.5µs / p99 7.2µs / p999 33.0µs / max 550.0µs
+probe_miss/pedradb: p50 708.0ns / p90 792.0ns / p99 1.8µs / p999 2.6µs / max 546.5µs
+Benchmarking get_hit/fjall
+Benchmarking get_hit/fjall: Warming up for 3.0000 s
+Benchmarking get_hit/fjall: Collecting 100 samples in estimated 5.0210 s (970k iterations)
+Benchmarking get_hit/fjall: Analyzing
+get_hit/fjall           time:   [5.1195 µs 5.1536 µs 5.1881 µs]
+                        thrpt:  [192.75 Kelem/s 194.04 Kelem/s 195.33 Kelem/s]
+                 change:
+                        time:   [-14.116% -13.376% -12.655%] (p = 0.00 < 0.05)
+                        thrpt:  [+14.489% +15.442% +16.436%]
+                        Performance has improved.
+Benchmarking get_hit/rocksdb
+Benchmarking get_hit/rocksdb: Warming up for 3.0000 s
+Benchmarking get_hit/rocksdb: Collecting 100 samples in estimated 5.0169 s (858k iterations)
+Benchmarking get_hit/rocksdb: Analyzing
+get_hit/rocksdb         time:   [6.1336 µs 6.2128 µs 6.2883 µs]
+                        thrpt:  [159.02 Kelem/s 160.96 Kelem/s 163.04 Kelem/s]
+                 change:
+                        time:   [-4.1812% -2.8558% -1.5279%] (p = 0.00 < 0.05)
+                        thrpt:  [+1.5516% +2.9397% +4.3636%]
+                        Performance has improved.
+Benchmarking get_hit/pedradb
+Benchmarking get_hit/pedradb: Warming up for 3.0000 s
+Benchmarking get_hit/pedradb: Collecting 100 samples in estimated 5.0184 s (1.1M iterations)
+Benchmarking get_hit/pedradb: Analyzing
+get_hit/pedradb         time:   [4.1498 µs 4.2028 µs 4.2602 µs]
+                        thrpt:  [234.73 Kelem/s 237.94 Kelem/s 240.97 Kelem/s]
+                 change:
+                        time:   [-12.199% -10.870% -9.5207%] (p = 0.00 < 0.05)
+                        thrpt:  [+10.523% +12.196% +13.893%]
+                        Performance has improved.
+Found 3 outliers among 100 measurements (3.00%)
+  3 (3.00%) high mild
+
+Benchmarking prefix_scan/fjall
+Benchmarking prefix_scan/fjall: Warming up for 3.0000 s
+Benchmarking prefix_scan/fjall: Collecting 100 samples in estimated 5.3702 s (30k iterations)
+Benchmarking prefix_scan/fjall: Analyzing
+prefix_scan/fjall       time:   [175.29 µs 175.62 µs 175.97 µs]
+                        thrpt:  [5.6829 Melem/s 5.6941 Melem/s 5.7049 Melem/s]
+                 change:
+                        time:   [-10.246% -9.4715% -8.8146%] (p = 0.00 < 0.05)
+                        thrpt:  [+9.6666% +10.462% +11.415%]
+                        Performance has improved.
+Found 2 outliers among 100 measurements (2.00%)
+  2 (2.00%) high mild
+Benchmarking prefix_scan/rocksdb
+Benchmarking prefix_scan/rocksdb: Warming up for 3.0000 s
+Benchmarking prefix_scan/rocksdb: Collecting 100 samples in estimated 5.3662 s (25k iterations)
+Benchmarking prefix_scan/rocksdb: Analyzing
+prefix_scan/rocksdb     time:   [214.69 µs 217.28 µs 221.73 µs]
+                        thrpt:  [4.5099 Melem/s 4.6023 Melem/s 4.6578 Melem/s]
+                 change:
+                        time:   [+4.6997% +5.4342% +6.4491%] (p = 0.00 < 0.05)
+                        thrpt:  [-6.0584% -5.1541% -4.4887%]
+                        Performance has regressed.
+Found 6 outliers among 100 measurements (6.00%)
+  3 (3.00%) low mild
+  2 (2.00%) high mild
+  1 (1.00%) high severe
+Benchmarking prefix_scan/pedradb
+Benchmarking prefix_scan/pedradb: Warming up for 3.0000 s
+Benchmarking prefix_scan/pedradb: Collecting 100 samples in estimated 5.1999 s (25k iterations)
+Benchmarking prefix_scan/pedradb: Analyzing
+prefix_scan/pedradb     time:   [193.73 µs 196.70 µs 201.80 µs]
+                        thrpt:  [4.9554 Melem/s 5.0839 Melem/s 5.1619 Melem/s]
+                 change:
+                        time:   [-25.480% -24.373% -22.995%] (p = 0.00 < 0.05)
+                        thrpt:  [+29.862% +32.229% +34.191%]
+                        Performance has improved.
+Found 12 outliers among 100 measurements (12.00%)
+  1 (1.00%) low severe
+  1 (1.00%) low mild
+  6 (6.00%) high mild
+  4 (4.00%) high severe
+
+Benchmarking lookup_100/rocksdb_get_loop
+Benchmarking lookup_100/rocksdb_get_loop: Warming up for 3.0000 s
+Benchmarking lookup_100/rocksdb_get_loop: Collecting 100 samples in estimated 6.2652 s (10k iterations)
+Benchmarking lookup_100/rocksdb_get_loop: Analyzing
+lookup_100/rocksdb_get_loop
+                        time:   [598.25 µs 604.10 µs 611.42 µs]
+                        thrpt:  [163.55 Kelem/s 165.54 Kelem/s 167.15 Kelem/s]
+                 change:
+                        time:   [-5.5540% -4.5022% -3.2343%] (p = 0.00 < 0.05)
+                        thrpt:  [+3.3424% +4.7145% +5.8806%]
+                        Performance has improved.
+Found 7 outliers among 100 measurements (7.00%)
+  6 (6.00%) high mild
+  1 (1.00%) high severe
+Benchmarking lookup_100/rocksdb_multi_get
+Benchmarking lookup_100/rocksdb_multi_get: Warming up for 3.0000 s
+Benchmarking lookup_100/rocksdb_multi_get: Collecting 100 samples in estimated 6.4000 s (10k iterations)
+Benchmarking lookup_100/rocksdb_multi_get: Analyzing
+lookup_100/rocksdb_multi_get
+                        time:   [624.98 µs 634.25 µs 643.71 µs]
+                        thrpt:  [155.35 Kelem/s 157.67 Kelem/s 160.00 Kelem/s]
+                 change:
+                        time:   [-9.0065% -6.8771% -5.0179%] (p = 0.00 < 0.05)
+                        thrpt:  [+5.2829% +7.3849% +9.8979%]
+                        Performance has improved.
+Found 2 outliers among 100 measurements (2.00%)
+  2 (2.00%) high severe
+Benchmarking lookup_100/pedradb_get_loop
+Benchmarking lookup_100/pedradb_get_loop: Warming up for 3.0000 s
+Benchmarking lookup_100/pedradb_get_loop: Collecting 100 samples in estimated 6.6644 s (15k iterations)
+Benchmarking lookup_100/pedradb_get_loop: Analyzing
+lookup_100/pedradb_get_loop
+                        time:   [431.44 µs 444.48 µs 460.36 µs]
+                        thrpt:  [217.22 Kelem/s 224.98 Kelem/s 231.78 Kelem/s]
+                 change:
+                        time:   [-0.1691% +1.7040% +3.6933%] (p = 0.10 > 0.05)
+                        thrpt:  [-3.5618% -1.6754% +0.1694%]
+                        No change in performance detected.
+Found 9 outliers among 100 measurements (9.00%)
+  2 (2.00%) low mild
+  2 (2.00%) high mild
+  5 (5.00%) high severe
+Benchmarking lookup_100/pedradb_multi_get
+Benchmarking lookup_100/pedradb_multi_get: Warming up for 3.0000 s
+Benchmarking lookup_100/pedradb_multi_get: Collecting 100 samples in estimated 6.9678 s (15k iterations)
+Benchmarking lookup_100/pedradb_multi_get: Analyzing
+lookup_100/pedradb_multi_get
+                        time:   [433.99 µs 439.07 µs 444.97 µs]
+                        thrpt:  [224.73 Kelem/s 227.75 Kelem/s 230.42 Kelem/s]
+                 change:
+                        time:   [-0.5720% +1.7850% +4.5146%] (p = 0.22 > 0.05)
+                        thrpt:  [-4.3195% -1.7537% +0.5753%]
+                        No change in performance detected.
+Found 12 outliers among 100 measurements (12.00%)
+  1 (1.00%) low mild
+  4 (4.00%) high mild
+  7 (7.00%) high severe
+
