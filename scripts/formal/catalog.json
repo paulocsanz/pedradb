@@ -1842,7 +1842,7 @@
     },
     {
       "id": "dictionary_link",
-      "finding": "G1/G8 (crash dictionary put\u2192get)",
+      "finding": "G1/G8 (crash dictionary put→get)",
       "twin_kind": "close",
       "kernel": "crates/pedradb-core/src/wal/reopen_kernel.rs",
       "twin": "crates/pedradb-core/verus/dictionary_link.rs",
@@ -3234,6 +3234,63 @@
       "dst_plant": {
         "file": "crates/pedradb-core/src/concurrent.rs",
         "test": "claim_lock_interleavings_refused_after_put"
+      }
+    },
+    {
+      "id": "leveling",
+      "finding": "F-leveling-sweep",
+      "twin_kind": "close",
+      "kernel": "crates/pedradb-core/src/leveling.rs",
+      "twin": "crates/pedradb-core/verus/leveling.rs",
+      "verus": "scripts/verus_leveling.sh",
+      "callers": [
+        "crates/pedradb-core/src/db.rs"
+      ],
+      "entry": "level_target_bytes",
+      "data_fate": true,
+      "handlers": [
+        "prepare_l0_compact",
+        "prepare_pushdown_compact"
+      ],
+      "live_callers": [
+        {
+          "file": "crates/pedradb-core/src/db.rs",
+          "handler": "prepare_pushdown_compact"
+        }
+      ],
+      "as_is": "level_target_bytes_as_is",
+      "dst_plant": {
+        "file": "crates/pedradb-core/src/leveling.rs",
+        "test": "level_target_bytes_on_live_deep_level_is_not_ok"
+      }
+    },
+    {
+      "id": "leveling_pick",
+      "finding": "F-leveling-sweep",
+      "twin_kind": "atom",
+      "atom": "pick_l0_to_l1_model",
+      "kernel": "crates/pedradb-core/src/leveling.rs",
+      "twin": "crates/pedradb-core/verus/leveling_pick.rs",
+      "verus": "scripts/verus_leveling_pick.sh",
+      "callers": [
+        "crates/pedradb-core/src/db.rs"
+      ],
+      "entry": "pick_l0_to_l1",
+      "data_fate": true,
+      "handlers": [
+        "prepare_l0_compact",
+        "prepare_pushdown_compact"
+      ],
+      "live_callers": [
+        {
+          "file": "crates/pedradb-core/src/db.rs",
+          "handler": "prepare_l0_compact"
+        }
+      ],
+      "as_is": "pick_l0_to_l1_as_is_whole_level",
+      "dst_plant": {
+        "file": "crates/pedradb-core/src/leveling.rs",
+        "test": "pick_l0_to_l1_on_live_slice_is_not_ok"
       }
     }
   ],
