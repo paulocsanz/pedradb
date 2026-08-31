@@ -1,7 +1,9 @@
 //! Leveled compaction scheduling (pure selection kernel).
 //! kernel: leveling — enrolled in residuals.json glue.kernel_paths; the
 //! suffix-less enrollment tooth requires this marker (2026-08-31, findings/
-//! 2026-08-31-leveling-kernel-unenrolled). Catalog pair (twin+plant) pending.
+//! 2026-08-31-leveling-kernel-unenrolled). Catalog pairs `leveling` (close)
+//! and `leveling_pick` (atom); twins `verus/leveling.rs` +
+//! `verus/leveling_pick.rs`, plant below.
 //!
 //! Policy: L0→L1 jobs absorb the L1 slice that overlaps the selected L0s, and
 //! each level `n ≥ 1` is capped at [`level_target_bytes`]. When a level is over
@@ -49,6 +51,19 @@ pub(crate) fn level_target_bytes(level: u32, l1_target: u64) -> u64 {
     }
     let exp = (level - 1).min(18) as u32;
     l1_target.saturating_mul(LEVEL_FANOUT.saturating_pow(exp))
+}
+
+/// AS-IS (pair `leveling`): the naive ladder with no exponent cap and
+/// wrapping arithmetic. On deep levels the target wraps downward, so an
+/// over-target level reads under target — the pre-leveled shape where job
+/// sizing is garbage past level 19.
+#[cfg(test)]
+#[must_use]
+pub(crate) fn level_target_bytes_as_is(level: u32, l1_target: u64) -> u64 {
+    if level == 0 {
+        return 0;
+    }
+    l1_target.wrapping_mul(LEVEL_FANOUT.wrapping_pow(level - 1))
 }
 
 /// One scheduling candidate: live-inventory index plus its user-key range and
@@ -118,6 +133,34 @@ pub(crate) fn pick_l0_to_l1(
     ))
 }
 
+/// AS-IS (pair `leveling_pick`): the L0→L1 job reabsorbs the whole L1
+/// regardless of overlap — the pre-leveled whole-level-rewrite shape.
+#[cfg(test)]
+#[must_use]
+pub(crate) fn pick_l0_to_l1_as_is_whole_level(
+    l0: &[LevelFile],
+    l1: &[LevelFile],
+) -> Option<(Vec<usize>, Vec<usize>)> {
+    if l0.is_empty() {
+        return None;
+    }
+    Some((
+        l0.iter().map(|f| f.idx).collect(),
+        l1.iter().map(|f| f.idx).collect(),
+    ))
+}
+
+/// AS-IS (pair `leveling_pick`): every L0 file enters the job, the input
+/// cap is ignored — unbounded job size on a deep L0 stack.
+#[cfg(test)]
+#[must_use]
+pub(crate) fn pick_l0_to_l1_as_is_uncapped(l0: &[LevelFile], _max_l0: usize) -> Option<Vec<usize>> {
+    if l0.is_empty() {
+        return None;
+    }
+    Some(l0.iter().map(|f| f.idx).collect())
+}
+
 /// Inputs for one pushdown job from level `n` to `n+1`: the oldest source
 /// file plus the (disjoint) level-`n+1` files overlapping it.
 ///
@@ -132,6 +175,24 @@ pub(crate) fn pick_pushdown(
     if !is_disjoint(dst) {
         return None;
     }
+    let slice: Vec<usize> = dst
+        .iter()
+        .filter(|f| f.overlaps(&source.lo, &source.hi))
+        .map(|f| f.idx)
+        .collect();
+    Some((source.idx, slice))
+}
+
+/// AS-IS (pair `leveling_pick`): the pushdown skips the disjoint-
+/// destination gate, so a stacked level gets rewritten one file at a
+/// time — the unbounded cascade the gate exists to refuse.
+#[cfg(test)]
+#[must_use]
+pub(crate) fn pick_pushdown_as_is_blind(
+    src: &[LevelFile],
+    dst: &[LevelFile],
+) -> Option<(usize, Vec<usize>)> {
+    let source = src.first().cloned()?;
     let slice: Vec<usize> = dst
         .iter()
         .filter(|f| f.overlaps(&source.lo, &source.hi))
@@ -252,5 +313,56 @@ mod tests {
                 "hull [{a},{b}] broke disjointness with slice {slice:?}"
             );
         }
+    }
+
+    /// Plant (pair `leveling`, entry `level_target_bytes`): on deep levels
+    /// the entry ladder caps the exponent and saturates — never wrapping
+    /// downward — while the as-is mutant's target shrinks, so an
+    /// over-target level reads under target.
+    #[test]
+    fn level_target_bytes_on_live_deep_level_is_not_ok() {
+        assert_eq!(level_target_bytes(19, 2), level_target_bytes(20, 2));
+        assert!(level_target_bytes(20, 2) >= level_target_bytes(19, 2));
+        assert_ne!(level_target_bytes(20, 2), level_target_bytes_as_is(20, 2));
+        assert!(
+            level_target_bytes_as_is(20, 2) < level_target_bytes_as_is(19, 2),
+            "AS-IS dente: deep-level target wraps downward"
+        );
+    }
+
+    /// Plant (pair `leveling_pick`, entry `pick_l0_to_l1`): the entry takes
+    /// only the overlapping disjoint slice under the input cap and refuses
+    /// non-disjoint pushdowns; each as-is mutant accepts one of those
+    /// unbounded job shapes.
+    #[test]
+    fn pick_l0_to_l1_on_live_slice_is_not_ok() {
+        // Whole-level dente: the far L1 file never overlaps the hull, so the
+        // entry keeps it out; the mutant reabsorbs the entire level.
+        let l0 = vec![f(0, "j", "t", 1)];
+        let l1 = vec![f(1, "m", "p", 1), f(2, "zz", "zzz", 1)];
+        let (_, mslice) = pick_l0_to_l1(&l0, &l1, 4).unwrap();
+        let (_, aslice) = pick_l0_to_l1_as_is_whole_level(&l0, &l1).unwrap();
+        assert!(!mslice.contains(&2));
+        assert!(aslice.contains(&2), "AS-IS dente: whole level reabsorbed");
+
+        // Uncapped dente: three L0 files, cap 1 — entry selects one, mutant
+        // selects all three.
+        let l0c = vec![f(0, "a", "z", 1), f(3, "a", "z", 1), f(4, "a", "z", 1)];
+        assert_eq!(pick_l0_to_l1(&l0c, &[], 1).unwrap().0.len(), 1);
+        assert_eq!(
+            pick_l0_to_l1_as_is_uncapped(&l0c, 1).unwrap().len(),
+            3,
+            "AS-IS dente: input cap ignored"
+        );
+
+        // Blind-pushdown dente: a stacked destination is refused by the
+        // entry, blindly rewritten by the mutant.
+        let dst = vec![f(0, "a", "m", 1), f(1, "b", "z", 1)];
+        let src = vec![f(7, "m", "p", 5)];
+        assert!(pick_pushdown(&src, &dst).is_none());
+        assert!(
+            pick_pushdown_as_is_blind(&src, &dst).is_some(),
+            "AS-IS dente: stacked destination rewritten anyway"
+        );
     }
 }

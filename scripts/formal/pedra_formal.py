@@ -534,16 +534,13 @@ def check_clones(root: Path, catalog: dict, r: Report) -> None:
 # RFC-0074 P2.1 registered `cqe_kernel.rs` as catalog pair `cqe_res`
 # (entry `cqe_res_ok`). That is not a ring model (P2.2 / R-uring):
 # `cqe_ring_model_admitted` stays false; do not add `verus/ring_model.rs`.
-TCB_FREEZE_ALLOWLIST: dict[str, str] = {
-    # 2026-08-31: leveling.rs is a pure selection kernel that shipped outside
-    # the *_kernel.rs suffix (findings/2026-08-31-leveling-kernel-unenrolled).
-    # It is enrolled in the explicit registry (glue.kernel_paths + `//! kernel:`
-    # marker); the catalog pair (twin+plant) is pending until the plant
-    # infrastructure file three_teeth_queued.rs is clean at HEAD.
-    "crates/pedradb-core/src/leveling.rs": (
-        "pending pair+twin (findings/2026-08-31-leveling-kernel-unenrolled)"
-    ),
-}
+#
+# 2026-08-31: leveling.rs graduated from this allowlist into catalog pairs
+# `leveling` (close) + `leveling_pick` (atom) — twins
+# verus/leveling{,_pick}.rs, plant in src/leveling.rs (findings/
+# 2026-08-31-leveling-kernel-unenrolled). The allowlist is empty; keep it
+# that way (transitional states get a comment, not a permanent row).
+TCB_FREEZE_ALLOWLIST: dict[str, str] = {}
 
 ISLAND_CRATES = ("pedradb-posix", "pedradb-io-uring", "pedradb-capi")
 RFC_0061 = "docs/rfc/0061-residuals-sel4-ironfleet.md"

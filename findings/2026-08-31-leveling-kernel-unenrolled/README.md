@@ -101,6 +101,43 @@ Option 1 (twin + plant for leveling) remains open, blocked on the
 co-agent's `three_teeth_queued.rs` (plant infrastructure) being clean at
 HEAD.
 
+## Close (same day, later): option 1 landed — catalog pairs `leveling` + `leveling_pick`
+
+Unblocked by putting the plant in the kernel file itself (the
+`<entry>_on_live_…_is_not_ok` convention over `LevelFile` inputs, no Db and
+no `three_teeth_queued.rs` dependency):
+
+- **Pair `leveling` (close, entry `level_target_bytes`)** — twin
+  `verus/leveling.rs` (6 verified, 0 errors): exec == spec under the
+  production no-saturation bound, ladder monotonicity lemma. AS-IS
+  `level_target_bytes_as_is` (no exp cap, wrapping): deep-level target
+  wraps downward. Plant `level_target_bytes_on_live_deep_level_is_not_ok`.
+- **Pair `leveling_pick` (atom, atom `pick_l0_to_l1_model`, entry
+  `pick_l0_to_l1`)** — twin `verus/leveling_pick.rs` (23 verified, 0
+  errors): hull-returning model (sel, hull_lo, hull_hi, slice) with the
+  slice EXACTLY the recursive `overlapping_prefix` over the hull;
+  `lemma_prefix_excludes` (non-overlapping dst file never enters the
+  prefix); pushdown model `None` exactly on empty source or non-disjoint
+  dst; mutants whole-level / uncapped / blind, one verified divergence
+  each. Plant `pick_l0_to_l1_on_live_slice_is_not_ok` (all three dentes).
+- Runners split `verus_leveling.sh` + `verus_leveling_pick.sh` (one SRC=
+  per script — the scripts tooth requires it; also the fix for the
+  cross-file Verus interference below).
+- `TCB_FREEZE_ALLOWLIST` emptied (graduation comment left in place);
+  `glue.kernel_loc` re-frozen 11678 → 11790 (44 kernels, count unchanged).
+  `handler_loc` stays 83217 frozen (the drift line is the co-agent's
+  db.rs WIP, theirs to re-freeze).
+
+### Verus interference note (kept for the next multi-pair twin)
+
+One combined twin file did NOT verify: the mere declaration of the
+recursive spec fn `overlapping_prefix` broke the unrelated
+`level_target_bytes` (nonlinear arithmetic) query. Not opaque-able, not
+resource-bound (`--rlimit 200` no help, ~0.5–1 s runs); root cause inside
+Verus/Z3 query perturbation unidentified. Resolution: file split per pair
+(matches the catalog's one-twin-file-per-pair shape). Do not re-litigate;
+keep the split.
+
 ## Tree sweep (2026-08-31 evening, advisory — was leveling the only one?)
 
 The enrollment tooth enforces; it does not discover. This sweep answers
