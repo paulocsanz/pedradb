@@ -39,6 +39,7 @@ fn opts() -> OpenOptions {
         exclusive: true,
         large_value_threshold: None,
         wal_recovery: Default::default(),
+        sst_payload_budget_bytes: None,
     }
 }
 

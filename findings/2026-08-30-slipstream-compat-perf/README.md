@@ -83,3 +83,233 @@ is a tie (their 1.66× deficit is gone). Settle is now faster than rocks
   path; rocks batches block reads across keys. Our get-loop (367.7 µs)
   beats our multi (507.4 µs) — a batched multi could aim at ≤ get-loop.
 - `probe_hit` max 1.2 ms single outlier (p999 is clean at 29 µs).
+
+## 2026-08-30/31 — the honest-scale campaign (2M → 25M, CHV 4 GiB guest)
+
+Target: PR 19 shapes at 25M entries in the CHV guest (4 vCPU, 3892 MiB
+RAM, `linux-gate-p149b`) — the largest scale that fits the box honestly.
+Getting there took three memory fixes and one read-path bug hunt, all
+measured in-guest at 2M first.
+
+**Harness (guest-only patch, upstream file unchanged in spirit):** each
+backend runs in its own process (`SLIPSTREAM_BACKENDS=fjall|rocksdb|pedradb`
+selects per-backend blocks; store dirs are block-scoped TempDirs). This
+fixes three fairness failures of the single-process layout: disk
+accumulation across legs (old ENOSPC at 25M), cross-backend allocator
+carry-over (~800 MB RSS floor inherited into the pedra leg), and one
+backend's OOM kill ending the remaining legs.
+
+**Core fixes that made 25M survivable (mono `95aab80` / pub `cf6d990`
+era):** bounded CHANGELOG rebuild (Fix 3), parked-memtable bound at 1×
+write buffer with a dedicated flush worker (Fix 4), chunked compaction
+output at 256 MiB target (Fix 5, mono `10c2e0e` / pub `5712e4e`). With
+those, the 2M pedra leg completes in-guest: hydrate 3.7–5.4 s, settle
+7.0–8.1 s, store 0.66→0.41 GiB, peak RSS ~2.7 GB.
+
+**v9d 2M results (first fully clean guest run, per-backend isolation):**
+
+| shape | fjall | rocksdb | pedra |
+|---|---|---|---|
+| hydrate | 3.0 s (0.67 M/s) | 2.2 s (0.92 M/s) | 5.4 s (0.37 M/s) |
+| settle | 1.0 s → 1.05 GiB | 0.9 s → 0.42 GiB | 8.1 s → 0.41 GiB |
+| probe_hit p50 | 7.0 µs | 11.7 µs | 7.8 µs |
+| get_hit (criterion) | 5.90 µs | 6.70 µs | **409 µs** |
+| prefix_scan | 294 µs | 376.8 µs | 644 µs |
+| lookup_100 get-loop | — | 650 µs | 42.6 ms |
+
+The 409 µs get_hit (replicated: 438 µs second run, p=0.26) against a
+7.8 µs probe p50 in the same leg was a stable pathology, not noise.
+
+### Anomaly hunt (v9e → v9f → v9g)
+
+- **v9e A/B** (same boot, pedra-only 2M, only env differs): no
+  `MALLOC_*` knobs → 424 µs; exact v9b knob set → 427 µs. Knobs
+  exonerated for reads (they only taxed the write path: hydrate 3.8 s
+  vs 5.0 s). Peak RSS 2.75 GB without knobs vs 2.70 GB with — no
+  memory reason to keep them either.
+- **v9f hammer** (10×50k uniform gets, per-chunk percentiles, plus
+  `/proc/self/io` before/after): chunk 0 fast (p50 7.5 µs); knee
+  between 50k and 100k gets; chunks 2–9 steady p50 ~517 µs. After a
+  5 s idle, fresh probes pay 523 µs (permanent). `read_bytes`
+  **identical** before/after (zero disk reads) — pure CPU. A repeated
+  hot key stays 351 ns (TLS path fine).
+- **Root cause:** `BlockCache::evict_one` scanned the whole map
+  (`min_by_key(tick)`) to pick the LRU victim, and the insert path
+  calls it on every insert once the byte budget fills. 256 MiB ÷
+  ~5 KiB-per-get ≈ 50k gets to fill — matching the knee; ~65k entries
+  × ~8 ns ≈ the 517 µs steady cost. The RFC-0035 comment in the same
+  struct records the hit path was already fixed for O(capacity); the
+  eviction path kept the scan.
+- **Fix (mono `695d7c6` / pub `49648f2`):** lazy-LRU — a `VecDeque`
+  recency queue in push order; a hit re-pushes its key with a fresh
+  epoch (slot epoch bumped, older queue entries become ghosts);
+  eviction pops from the front skipping ghosts (the `AnswerCache` F178
+  pattern). Hit and evict both O(1) amortized; re-push bounded at
+  4×live+64 so hit-heavy caches cannot grow the queue unboundedly.
+  Cache tests 28/28 both trees; core lib 622/3 (same three known
+  pre-existing flakes); compat 84/0.
+- **v9g verification (same guest, same hammer instrument):** all 10
+  chunks flat p50 7.0–9.4 µs (no knee); probe-after 9.0 µs; criterion
+  `get_hit` **14.7 µs** (was 420.6 µs; −96.6%, p=0.00, measured after
+  500k hammer gets — honest post-fill steady state); `lookup_100`
+  **1.7–1.8 ms/100** (was 42 ms). `BENCH_EXIT=0`.
+
+### 25M harvest (v11)
+
+Per-backend isolation (`SLIPSTREAM_BACKENDS`), pristine bench source,
+patched cache, no `MALLOC_*` env, 5400 s/leg cap.
+
+- **fjall (exit 0):** hydrate 39.8 s (0.63 M/s) → 5.46 GiB (235 B/e);
+  settle 27.4 s → 9.92 GiB; probe_hit p50 67.3 µs / p99 226.9 µs /
+  p999 3.1 ms; probe_miss p50 592 ns; `get_hit` 35.97 µs;
+  `prefix_scan` 305.4 µs.
+- **rocksdb default peer (exit 0, `WriteOptions.sync=false`):**
+  hydrate 25.3 s (0.99 M/s) → 7.78 GiB (334 B/e); settle 8.3 s →
+  5.24 GiB; probe_hit p50 45.4 µs / p99 83.9 µs / p999 1.1 ms;
+  probe_miss p50 521 ns; `get_hit` 38.59 µs; `prefix_scan` 305.6 µs;
+  `lookup_100` 3.38/3.70 ms per 100.
+- **pedra: OOM-killed during hydrate** (cargo exit 101 wrapping
+  SIGKILL). Guest RSS 486 MB → 1.80 GB → 2.91 GB → 3.30 GB within ~8 s
+  of hydrate start (~4 M entries in) on the 3892 MB guest; no kernel
+  OOM lines on serial, kill signature from cargo's `signal: 9` and the
+  RSS trajectory. Disk fine (rocks peaked 7.78 GiB on a 40 G /data).
+
+### 25M pedra OOM diagnosis (v12 → v15)
+
+`PEDRA_FLUSH_DIAG=1` (env-gated, committed) makes the compat flush
+worker print one layer breakdown per second:
+`parked_n/parked_b/active_b/imm/retired_b/sst_n/rss_kb`.
+
+- **v12 (no knobs):** every tracked layer *bounded* while RSS died —
+  parked ≤ 1×256 MiB table (oscillating with materialize), active
+  ≤ 204 MB (CF cap 256 MiB), retired capped ~202–269 MB, `imm` never
+  set. Real:approx drift grew 2.2× → 3.6× → 5.2× over the run.
+- **v13 (`MALLOC_ARENA_MAX=2` + `MALLOC_TRIM_THRESHOLD_=64MiB`):**
+  same SIGKILL at RSS 3.49 GB — knobs are *not* the fix; the growth is
+  live footprint plus table churn, not arena hoarding alone.
+- Root causes found in code after the series pointed there:
+  1. the compact worker folded parked pairs whenever
+     `writes_active() <= 1` — **true during single-writer bulk
+     ingest**, exactly when materialization lags and two 256 MiB
+     parked tables pile up; the fold deep-clones both (~3 tables live,
+     >1.5 GiB real transient) at the worst moment;
+  2. `materialize` retired every parked table into the point/MVCC
+     read cache — one ~256 MiB BTree (~2× real) per installed L0,
+     pure waste while ingest serves zero reads;
+  3. `approx_memory_usage` counts payload only (`key + value + 8`) —
+     real BTree/`Bytes`/malloc overhead is ~2×+, so every
+     approx-denominated bound underestimates real footprint.
+- **Fix (mono `c992c4c` / pub `69bdfaf`):** fold gated to the 200 ms
+  write-idle window; retire gate drops materialized tables unless
+  reads arrived since the last decision (`reads_served` bumped on
+  `get`/`get_at`/`scan_collect*`). Policy tests:
+  drop-without-reads, retire-after-reads, bounded-retire backstop;
+  compat 84/0/3 ignored + 11 integration green.
+- **v14 (fix in, no knobs):** survived ~2× longer than v12/v13; RSS
+  fell 2.9 → 2.3 GB when the first materialized table was *dropped*
+  instead of retired (the fix working), then regrew to 3.22 GB and
+  died. The flush worker's diag went silent after t+7 s right after
+  parking a full table — materialization is not keeping up with the
+  ~185 MB/s ingest (parked debt grows ~1 table/2 s until the box
+  dies).
+- **v15 (worker heartbeats):** `tick_s` = last flush-tick seconds,
+  `mat_n` = materialize count, `COMPACTDIAG` = compact-worker level
+  counts. Series (t≈0…10 s): t2 `mat_n=1` parked 68 MB; t5 parked
+  **268.6 MB (one full table)**, `sst_n=5`, `tick_s=0 mat_n=2`,
+  retired flat 67.8 MB (the c992c4c retire gate holding); t4
+  `MEMDIAGD rss=1.39 GB dirty_kb=0` — disk idle with a full table
+  parked; t7 RSS **3.42 GB (+1.68 GB in 1 s)**; t10 3.57 GB → kill.
+  Verdict: ticks are *fast* (`tick_s=0` always) — the flush thread is
+  not doing slow I/O, it stops printing because the whole tick is
+  stuck inside one materialize sharing the disk with a compaction.
+  `COMPACTDIAG` printed exactly once (t0, `l0=0`): the compact worker
+  entered its L0→L1 merge at trigger=4 and never returned to the poll
+  loop. `prepare_l0_compact` takes **all** L0 files of the family —
+  at the 256 MiB bench buffer that is ≥1 GiB of inputs per job, a
+  multi-second merge that owns the disk while ingest keeps parking
+  256 MiB tables (~512 MiB real each). And nothing anywhere bounds
+  `parked_unflushed`: the concurrent apply path has **no admission
+  control at all** (`ensure_write_admitted` is single-writer-Db
+  only; the compat open path never enables the L0/mem stall knobs).
+- **v16 (fix in):** three scheduling cuts, all worker/apply policy —
+  per-CF `write_buffer_size` untouched:
+  1. **flush-debt writer throttle** — `WriteGroup::await_flush_debt`
+     (core `concurrent.rs`): when the compat flush worker is attached
+     and parked bytes ≥ one table's worth (`Db::flush_debt_cap` =
+     max of auto-flush and per-CF buffer), a submit sleeps (2 ms poll,
+     30 s hard cap, `PEDRA_FLUSH_DEBT_MAX_MS` override) instead of
+     parking another table. Rocks-shaped: every LSM blocks writers on
+     flush debt. Attached-only so core tests without a flusher never
+     wait.
+  2. **bounded merge inputs** — `CompactOptions::max_input_files`
+     (core `db.rs`): `prepare_l0_compact` truncates to the oldest N;
+     the compat worker passes `Some(2)` (`COMPACT_MAX_L0_INPUTS`) so
+     one L0→L1 job holds ≤2×256 MiB inputs and the trigger loop
+     drains L0 in bounded slices.
+  3. **fold stays off debt** — the parked fold also requires
+     `parked_unflushed_bytes < flush_debt_cap`: a debt-throttled
+     writer *looks* idle to `writes_idle_for(200 ms)` and would
+     otherwise re-trigger the c992c4c fold transient.
+  Tests: `prepare_l0_compact_respects_max_input_files`,
+  `submit_flush_debt_waits_only_with_worker_attached`,
+  `submit_flush_debt_releases_on_materialize`; park/materialize/fold/
+  worker subset 21/21; compat lib 84/0/3 ignored + 11 integration.
+  Commit mono `ff133eb` / pub `008cf49`.
+- **v16 guest result: still OOM, but the shape changed (proves the cuts
+  work).** SIGKILL at RSS **2.74 GB** (v15: 3.57) after ~10 s. The debt
+  throttle holds: parked oscillates full→**0** each materialize (v15
+  froze at one full table), `retired_b` stays 0, `mat_n` climbs (2→4),
+  and `COMPACTDIAG` keeps printing — the compact worker now returns to
+  its poll loop (`l0=0 l1=4` after the first bounded merge) instead of
+  vanishing for the whole run. First merge cycle peaked 2.42 GB then
+  **freed 630 MB** (1.79 GB trough). The remaining growth: each
+  park/materialize cycle re-peaks ~250–400 MB higher and never returns
+  (2.62 → 2.74 at kill with parked=1 full, active=57 KB, retired=0 —
+  no merge in flight): allocator fragmentation from dropped BTree
+  tables, plus an unknown container ceiling (killed at 2.74 GB RSS
+  with ~1.3 GB of clean page cache outstanding ⇒ suspect a cgroup
+  limit below the 3892 MB VM). Bench exonerated as the missing memory:
+  it regenerates keys from RNG state and reuses one 1 MiB value pool.
+- **v17 (dead end, reverted):** `malloc_trim(0)` in the flush worker after
+  each materialize drop and in `compat_compact_once` after each install +
+  budget forensics in the sampler. **Compile-refused in the guest**:
+  `pedradb-core` is `#![forbid(unsafe_code)]` and `malloc_trim` needs an
+  `unsafe` FFI call — invisible locally because the trim call sat behind a
+  linux-only cfg and macOS never compiled it. Fully reverted (guest md5s
+  restored). What the leg still bought: the forensics answer. **There is
+  no cgroup** (`CG_LIMIT` empty the whole run; no `memory.max`); the
+  ceiling is the VM itself (MemTotal 3985596 kB ≈ 3.87 GiB, at-rest
+  MemAvailable 3639 MB). So v16's kill at 2.74 GB RSS was not a hidden
+  container cap.
+- **Root cause (re-diagnosis after v16/v17):** every `SstTable` keeps its
+  whole CRC-stripped file body resident (`payload: Arc<[u8]>`) for lazy
+  block decode. At 25M entries that is **~5.9 GB of payloads alone** on a
+  3.87 GiB box — v16's re-peaking cycles and the 2.74 GB kill were the
+  allocator's view of a structurally unbounded data set, not scheduling.
+  v16 arithmetic with the real number: parked ≤ 3×256 MiB + active
+  256 MiB + merge I/O is bounded fine; payloads are not. RocksDB does
+  not do this — it reads 4 KiB blocks on demand through its block cache.
+- **v18 (fix in): bounded resident-payload pool.** `SstTable.payload` is
+  now an evictable shared slot (`Arc<RwLock<Arc<[u8]>>>`, empty =
+  evicted) and evicted blocks are re-read from file, fail-closed:
+  v5 files (compact output, per-block CRC32C) read exactly one block
+  range + verify its CRC; ≤v4 files (evicted L0, no per-block CRC)
+  reload the whole body and re-verify the **file-level** CRC before any
+  decode — bitrot refuses, never decodes garbage. A free-standing table
+  with no file source errors loudly. `SstPayloadPool` (budget, FIFO by
+  install order, Weak self-cleaning) is armed **before recovery** at
+  open (`Db::open_with_env_bounded`, every compat entry point the bench
+  uses; adversarial Rc-env opens stay unbounded by design), and each of
+  the four install choke points adopts the new table. The compat cache
+  knob maps to the pool budget (`SLIPSTREAM_BENCH_CACHE_BYTES` →
+  payload pool; decoded-block cache capped at 32 MiB), so total
+  cache-ish memory tracks the knob like Rocks' block cache. Fairness
+  unchanged: per-CF `write_buffer_size` 256 MiB for every backend.
+  Steady-state RSS estimate ~1.6–1.9 GB (pool 256 MiB + parked
+  ≤3×256 MiB + active 256 MiB + small caches) vs the 3.87 GiB ceiling.
+  Tests: identical reads after budget-0 eviction (per-block equality +
+  streaming iter), fail-closed no-source, v3 whole-body reload +
+  bitrot refusal, pool FIFO-to-budget, bounded reopen serves reads
+  within budget. Core 632/635 (3 known flakes), compat green.
+
+

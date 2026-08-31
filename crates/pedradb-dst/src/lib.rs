@@ -44,6 +44,7 @@ fn durable_opts() -> OpenOptions {
         auto_compact_sst_bytes: None,
         exclusive: true,
         large_value_threshold: None,
+        sst_payload_budget_bytes: None,
     }
 }
 
@@ -361,6 +362,7 @@ pub fn run_volume_soak_ops(
         auto_compact_sst_bytes: None,
         exclusive: true,
         large_value_threshold: None,
+        sst_payload_budget_bytes: None,
     };
     let offset = explore_offset_from_env();
     // Mix offset into host + workload RNG so explore rounds produce distinct stats.

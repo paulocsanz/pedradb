@@ -504,6 +504,7 @@ impl NetworkNode {
                 auto_compact_sst_bytes: None,
                 exclusive: true,
                 large_value_threshold: None,
+                sst_payload_budget_bytes: None,
             },
         )?;
         let meta = persist::raft_meta_dir(data_dir);

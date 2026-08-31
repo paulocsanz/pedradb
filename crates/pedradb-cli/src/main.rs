@@ -166,6 +166,7 @@ fn open_full_db(path: &str) -> pedradb_core::Result<Db<IoUringEnv>> {
             auto_compact_sst_bytes: None,
             exclusive: true,
             large_value_threshold: None,
+            sst_payload_budget_bytes: None,
         },
     )
 }
@@ -415,27 +416,25 @@ fn archive_cmd(args: &[String]) -> std::process::ExitCode {
                 }
             }
         }
-        Some("verify") if args.len() >= 2 => {
-            match (|| -> Result<(), Box<dyn std::error::Error>> {
-                let tier = pedradb_core::history::RemoteTier::new(&args[1]);
-                let r = tier.verify(&production_env())?;
-                println!("{}", r.summary_line());
-                for (file, msg) in &r.failures {
-                    println!("FAIL {file} {msg}");
-                }
-                if r.is_clean() {
-                    Ok(())
-                } else {
-                    Err(format!("archive verify {}", r.summary_line()).into())
-                }
-            })() {
-                Ok(()) => std::process::ExitCode::SUCCESS,
-                Err(e) => {
-                    eprintln!("error: {e}");
-                    std::process::ExitCode::FAILURE
-                }
+        Some("verify") if args.len() >= 2 => match (|| -> Result<(), Box<dyn std::error::Error>> {
+            let tier = pedradb_core::history::RemoteTier::new(&args[1]);
+            let r = tier.verify(&production_env())?;
+            println!("{}", r.summary_line());
+            for (file, msg) in &r.failures {
+                println!("FAIL {file} {msg}");
             }
-        }
+            if r.is_clean() {
+                Ok(())
+            } else {
+                Err(format!("archive verify {}", r.summary_line()).into())
+            }
+        })() {
+            Ok(()) => std::process::ExitCode::SUCCESS,
+            Err(e) => {
+                eprintln!("error: {e}");
+                std::process::ExitCode::FAILURE
+            }
+        },
         Some("restore") if args.len() >= 3 => {
             match (|| -> Result<(), Box<dyn std::error::Error>> {
                 let target = match args.get(3) {

@@ -102,6 +102,7 @@ impl FaultEnv {
                 exclusive: true,
                 large_value_threshold: None,
                 wal_recovery: Default::default(),
+                sst_payload_budget_bytes: None,
             },
         )
     }
@@ -266,6 +267,7 @@ mod tests {
             auto_compact_sst_bytes: None,
             exclusive: true,
             large_value_threshold: None,
+            sst_payload_budget_bytes: None,
         }
     }
 
@@ -426,6 +428,7 @@ mod tests {
             auto_compact_sst_bytes: None,
             exclusive: true,
             large_value_threshold: Some(512),
+            sst_payload_budget_bytes: None,
         };
 
         let mut saw_gc_err = false;
@@ -565,6 +568,7 @@ mod tests {
             auto_compact_sst_bytes: None,
             exclusive: true,
             large_value_threshold: Some(256),
+            sst_payload_budget_bytes: None,
         };
 
         {
@@ -681,6 +685,7 @@ mod tests {
             auto_compact_sst_bytes: None,
             exclusive: true,
             large_value_threshold: None,
+            sst_payload_budget_bytes: None,
         };
 
         // --- Path A: commit_ops_with (Db::put) ---
@@ -796,6 +801,7 @@ mod tests {
             auto_compact_sst_bytes: None,
             exclusive: true,
             large_value_threshold: None,
+            sst_payload_budget_bytes: None,
         };
 
         {
@@ -1050,6 +1056,7 @@ mod tests {
                 auto_compact_sst_bytes: None,
                 exclusive: true,
                 large_value_threshold: None,
+                sst_payload_budget_bytes: None,
             },
             env.clone(),
         )
@@ -1085,6 +1092,7 @@ mod tests {
                 auto_compact_sst_bytes: None,
                 exclusive: true,
                 large_value_threshold: None,
+                sst_payload_budget_bytes: None,
             },
             env,
         )
@@ -1127,6 +1135,7 @@ mod tests {
                 auto_compact_sst_bytes: None,
                 exclusive: true,
                 large_value_threshold: None,
+                sst_payload_budget_bytes: None,
             },
             env,
         );
@@ -1163,6 +1172,7 @@ mod tests {
                 auto_compact_sst_bytes: None,
                 exclusive: true,
                 large_value_threshold: None,
+                sst_payload_budget_bytes: None,
             },
             env.clone(),
         )
@@ -1191,6 +1201,7 @@ mod tests {
                 auto_compact_sst_bytes: None,
                 exclusive: true,
                 large_value_threshold: None,
+                sst_payload_budget_bytes: None,
             },
             env,
         )
@@ -1230,6 +1241,7 @@ mod tests {
                 auto_compact_sst_bytes: None,
                 exclusive: true,
                 large_value_threshold: None,
+                sst_payload_budget_bytes: None,
             },
             env.clone(),
         )
@@ -1265,6 +1277,7 @@ mod tests {
                 auto_compact_sst_bytes: None,
                 exclusive: true,
                 large_value_threshold: None,
+                sst_payload_budget_bytes: None,
             },
             env,
         )
@@ -1312,6 +1325,7 @@ mod tests {
                 auto_compact_sst_bytes: None,
                 exclusive: true,
                 large_value_threshold: None,
+                sst_payload_budget_bytes: None,
             },
             env,
         );
@@ -1345,6 +1359,7 @@ mod tests {
                 auto_compact_sst_bytes: None,
                 exclusive: true,
                 large_value_threshold: None,
+                sst_payload_budget_bytes: None,
             },
             env,
         );
@@ -1384,6 +1399,7 @@ mod tests {
                 auto_compact_sst_bytes: None,
                 exclusive: true,
                 large_value_threshold: None,
+                sst_payload_budget_bytes: None,
             },
             env.clone(),
         )
@@ -1413,6 +1429,7 @@ mod tests {
                 auto_compact_sst_bytes: None,
                 exclusive: true,
                 large_value_threshold: None,
+                sst_payload_budget_bytes: None,
             },
             env,
         )
@@ -1438,6 +1455,7 @@ mod tests {
             auto_compact_sst_bytes: None,
             exclusive: true,
             large_value_threshold: None,
+            sst_payload_budget_bytes: None,
         };
         let big = vec![b'x'; 128];
 
@@ -1499,6 +1517,7 @@ mod tests {
             auto_compact_sst_bytes: None,
             exclusive: true,
             large_value_threshold: None,
+            sst_payload_budget_bytes: None,
         };
 
         for n in 0..40u64 {
@@ -1695,6 +1714,7 @@ mod tests {
                 auto_compact_sst_bytes: None,
                 exclusive: true,
                 large_value_threshold: None,
+                sst_payload_budget_bytes: None,
             },
             env.clone(),
         )
@@ -1733,6 +1753,7 @@ mod tests {
                 auto_compact_sst_bytes: None,
                 exclusive: true,
                 large_value_threshold: None,
+                sst_payload_budget_bytes: None,
             },
             env,
         )
@@ -1775,6 +1796,7 @@ mod tests {
             auto_compact_sst_bytes: None,
             exclusive: true,
             large_value_threshold: None,
+            sst_payload_budget_bytes: None,
         };
         let db = ConcurrentDb::open_with_env(&dir, opts, env.clone()).unwrap();
         db.put(b"a", b"1").unwrap();
@@ -1917,6 +1939,7 @@ mod tests {
                 auto_compact_sst_bytes: None,
                 exclusive: true,
                 large_value_threshold: None,
+                sst_payload_budget_bytes: None,
             },
             env.clone(),
         )
@@ -1943,6 +1966,7 @@ mod tests {
                 auto_compact_sst_bytes: None,
                 exclusive: true,
                 large_value_threshold: None,
+                sst_payload_budget_bytes: None,
             },
             env,
         );
@@ -2067,6 +2091,7 @@ mod tests {
                 auto_compact_sst_bytes: None,
                 exclusive: true,
                 large_value_threshold: None,
+                sst_payload_budget_bytes: None,
             },
             env,
         )

@@ -89,20 +89,18 @@ pub use l28::{
     l28_durability_ok, l28_durability_ok_as_is, l28_leader_kill_ok, l28_leader_kill_ok_as_is,
     l28_tcp_abort_ok, l28_tcp_abort_ok_as_is, l28_tcp_apply_ok, l28_tcp_apply_ok_as_is,
     l28_tcp_clear_ok, l28_tcp_clear_ok_as_is, l28_tcp_dsc_ok, l28_tcp_dsc_ok_as_is,
-    l28_tcp_dterm_ok, l28_tcp_dterm_ok_as_is,
-    l28_tcp_fence_ok, l28_tcp_fence_ok_as_is, l28_tcp_hist_ok, l28_tcp_hist_ok_as_is,
-    l28_tcp_hnt_ok, l28_tcp_hnt_ok_as_is, l28_tcp_hw_ok, l28_tcp_hw_ok_as_is, l28_tcp_leave_ok,
-    l28_tcp_leave_ok_as_is, l28_tcp_left_ok, l28_tcp_left_ok_as_is, l28_tcp_lid_ok,
-    l28_tcp_lid_ok_as_is, l28_tcp_napply_ok, l28_tcp_napply_ok_as_is,
-    l28_tcp_napply_retry_admitted, l28_tcp_napply_retry_admitted_as_is, l28_tcp_nowms_ok,
-    l28_tcp_nowms_ok_as_is, l28_tcp_odrop_ok, l28_tcp_odrop_ok_as_is, l28_tcp_part_ok,
-    l28_tcp_part_ok_as_is, l28_tcp_peer_ok, l28_tcp_peer_ok_as_is, l28_tcp_plant_ok,
-    l28_tcp_plant_ok_as_is, l28_tcp_pld_ok, l28_tcp_pld_ok_as_is, l28_tcp_pre_ok,
-    l28_tcp_pre_ok_as_is, l28_tcp_rdr_ok, l28_tcp_rdr_ok_as_is, l28_tcp_slot_ok,
-    l28_tcp_pj_ok, l28_tcp_pj_ok_as_is, l28_tcp_slot_ok_as_is, l28_tcp_std_ok, l28_tcp_sth_ok,
-    l28_tcp_sth_ok_as_is,
-    l28_tcp_std_ok_as_is, l28_tcp_trunc_ok, l28_tcp_trunc_ok_as_is, world_seed_l28_ok,
-    world_seed_l28_ok_as_is,
+    l28_tcp_dterm_ok, l28_tcp_dterm_ok_as_is, l28_tcp_fence_ok, l28_tcp_fence_ok_as_is,
+    l28_tcp_hist_ok, l28_tcp_hist_ok_as_is, l28_tcp_hnt_ok, l28_tcp_hnt_ok_as_is, l28_tcp_hw_ok,
+    l28_tcp_hw_ok_as_is, l28_tcp_leave_ok, l28_tcp_leave_ok_as_is, l28_tcp_left_ok,
+    l28_tcp_left_ok_as_is, l28_tcp_lid_ok, l28_tcp_lid_ok_as_is, l28_tcp_napply_ok,
+    l28_tcp_napply_ok_as_is, l28_tcp_napply_retry_admitted, l28_tcp_napply_retry_admitted_as_is,
+    l28_tcp_nowms_ok, l28_tcp_nowms_ok_as_is, l28_tcp_odrop_ok, l28_tcp_odrop_ok_as_is,
+    l28_tcp_part_ok, l28_tcp_part_ok_as_is, l28_tcp_peer_ok, l28_tcp_peer_ok_as_is, l28_tcp_pj_ok,
+    l28_tcp_pj_ok_as_is, l28_tcp_plant_ok, l28_tcp_plant_ok_as_is, l28_tcp_pld_ok,
+    l28_tcp_pld_ok_as_is, l28_tcp_pre_ok, l28_tcp_pre_ok_as_is, l28_tcp_rdr_ok,
+    l28_tcp_rdr_ok_as_is, l28_tcp_slot_ok, l28_tcp_slot_ok_as_is, l28_tcp_std_ok,
+    l28_tcp_std_ok_as_is, l28_tcp_sth_ok, l28_tcp_sth_ok_as_is, l28_tcp_trunc_ok,
+    l28_tcp_trunc_ok_as_is, world_seed_l28_ok, world_seed_l28_ok_as_is,
 };
 pub use layers::{
     olap_get, olap_ingest, olap_list_at, olap_stream_range, pg_upsert, pks_one_per_range,
@@ -114,8 +112,8 @@ pub use membership_kernel::{
     elect_claim_banner, elect_claim_banner_as_is, high_water_at_least, high_water_at_least_as_is,
     joint_election_ok, joint_election_ok_as_is, joint_leave_ok, joint_leave_ok_as_is,
     joint_still_active, joint_still_active_as_is, liveness_admitted, liveness_admitted_as_is,
-    plant_joint_schedule_ok, plant_joint_schedule_ok_as_is,
-    majority_of, queued_leave_finish_ok, queued_leave_finish_ok_as_is,
+    majority_of, plant_joint_schedule_ok, plant_joint_schedule_ok_as_is, queued_leave_finish_ok,
+    queued_leave_finish_ok_as_is,
 };
 pub use msg::PeerMsg;
 pub use rpc_mode_kernel::{allow_direct_rpc, allow_direct_rpc_as_is};
@@ -1764,6 +1762,7 @@ pub fn tcp_node_disk_left_joint(data: impl AsRef<Path>, node_id: u64, removed: u
         auto_compact_sst_bytes: None,
         exclusive: true,
         large_value_threshold: None,
+        sst_payload_budget_bytes: None,
     };
     let Ok(db) = Db::open_with_env(&dir, opts, IoUringEnv::default()) else {
         return false;
@@ -1814,6 +1813,7 @@ pub fn tcp_node_disk_high_water(data: impl AsRef<Path>, node_id: u64) -> u64 {
         auto_compact_sst_bytes: None,
         exclusive: true,
         large_value_threshold: None,
+        sst_payload_budget_bytes: None,
     };
     let Ok(db) = Db::open_with_env(&dir, opts, IoUringEnv::default()) else {
         return 0;
@@ -2605,11 +2605,7 @@ impl<E: Env> Env for FailNextIo<E> {
 /// memory must not keep the raise, and the REAL disk hard state must still
 /// carry the pre-injection term. AS-IS (no rollback) keeps the raise.
 #[must_use]
-pub fn tcp_node_removed_durable_term_ok(
-    data: impl AsRef<Path>,
-    self_id: u64,
-    cli: &[u64],
-) -> bool {
+pub fn tcp_node_removed_durable_term_ok(data: impl AsRef<Path>, self_id: u64, cli: &[u64]) -> bool {
     let dir = data.as_ref();
     let env = FailNextIo::passing(IoUringEnv::default());
     let Ok(mut c) = StoreCluster::open_with_envs_rng(
@@ -2707,6 +2703,7 @@ pub fn tcp_node_removed_durable_term_ok(
         auto_compact_sst_bytes: None,
         exclusive: true,
         large_value_threshold: None,
+        sst_payload_budget_bytes: None,
     };
     let Ok(db) = Db::open_with_env(&dir3, opts, IoUringEnv::default()) else {
         return false;
@@ -3472,6 +3469,7 @@ impl StoreCluster<IoUringEnv> {
                 auto_compact_sst_bytes: None,
                 exclusive: true,
                 large_value_threshold: None,
+                sst_payload_budget_bytes: None,
             }
         };
         let dir = parent.join(format!("store-node-{self_id}"));
@@ -3718,6 +3716,7 @@ impl<E: Env> StoreCluster<E> {
                 auto_compact_sst_bytes: None,
                 exclusive: true,
                 large_value_threshold: None,
+                sst_payload_budget_bytes: None,
             }
         };
         for (i, env) in envs.into_iter().enumerate() {

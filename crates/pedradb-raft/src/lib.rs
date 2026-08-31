@@ -22,9 +22,7 @@ pub mod vote_kernel;
 pub use ae_kernel::{
     ae_ack_success, ae_ack_success_as_is, ae_entry_action, ae_prev_log_ok, AeEntryAction,
 };
-pub use apply_kernel::{
-    apply_advance, apply_advance_as_is_skip_holes, ApplyAction,
-};
+pub use apply_kernel::{apply_advance, apply_advance_as_is_skip_holes, ApplyAction};
 pub use commit_kernel::{
     may_commit_at, may_commit_at_as_is, propose_ack_ok, propose_ack_ok_as_is, recover_commit,
     recover_commit_as_is, recover_last_applied, recover_last_applied_as_is,
@@ -324,13 +322,9 @@ impl RaftNode {
         loop {
             // Pure kernel decides the step (F10-apply); caller mutates.
             let next = self.last_applied + 1;
-            let entry_present = self.last_applied < self.commit_index
-                && self.log.iter().any(|e| e.index == next);
-            match apply_kernel::apply_advance(
-                self.last_applied,
-                self.commit_index,
-                entry_present,
-            ) {
+            let entry_present =
+                self.last_applied < self.commit_index && self.log.iter().any(|e| e.index == next);
+            match apply_kernel::apply_advance(self.last_applied, self.commit_index, entry_present) {
                 ApplyAction::Done | ApplyAction::Stop => break,
                 ApplyAction::Apply => {}
             }
@@ -679,6 +673,7 @@ impl RaftCluster {
                     auto_compact_sst_bytes: None,
                     exclusive: true,
                     large_value_threshold: None,
+                    sst_payload_budget_bytes: None,
                 },
             )?;
             // Stagger timeouts slightly by id for deterministic elections.
@@ -1168,6 +1163,7 @@ mod tests {
                     auto_compact_sst_bytes: None,
                     exclusive: true,
                     large_value_threshold: None,
+                    sst_payload_budget_bytes: None,
                 },
             )
             .unwrap();
@@ -1272,6 +1268,7 @@ mod tests {
                     auto_compact_sst_bytes: None,
                     exclusive: true,
                     large_value_threshold: None,
+                    sst_payload_budget_bytes: None,
                 },
             )
             .unwrap();
@@ -1412,7 +1409,10 @@ mod tests {
             },
             |_| Err(RaftError::Persist("injected".into())),
         );
-        assert!(!reply.vote_granted, "undurable term step must deny the vote");
+        assert!(
+            !reply.vote_granted,
+            "undurable term step must deny the vote"
+        );
         assert_eq!(
             reply.term, 5,
             "reply carries the RESTORED term (F125/F127), not the undurable raise"

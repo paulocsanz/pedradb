@@ -30,9 +30,7 @@ use ship_kernel::{pull_plan, PullPlan, SHIP_STAMP_BYTES};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
-use pedradb_core::{
-    Db, Env, EnvFile, OpenOptions as DbOpen, Result as CoreResult, WAL_FILE_NAME,
-};
+use pedradb_core::{Db, Env, EnvFile, OpenOptions as DbOpen, Result as CoreResult, WAL_FILE_NAME};
 use pedradb_io_uring::IoUringEnv;
 use thiserror::Error;
 
@@ -323,6 +321,7 @@ pub fn open_replica(replica_dir: impl AsRef<Path>, exclusive: bool) -> CoreResul
             exclusive,
             large_value_threshold: None,
             wal_recovery: Default::default(),
+            sst_payload_budget_bytes: None,
         },
         IoUringEnv::default(),
     )
@@ -376,6 +375,7 @@ mod tests {
                 auto_compact_sst_bytes: None,
                 exclusive: true,
                 large_value_threshold: None,
+                sst_payload_budget_bytes: None,
             },
         )
         .unwrap()

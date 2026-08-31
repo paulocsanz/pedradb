@@ -259,8 +259,10 @@ pub struct Options {
     /// rust-rocksdb / Titan `blob_file_size` (rotate cap). `None` = single
     /// `VALUES.vlog` (no numbered blob generation).
     pub blob_file_size: Option<u64>,
-    /// Rocks `NewLRUCache` / `optimize_for_point_lookup` (RFC-0153). `None`
-    /// = Pedra 8192-entry default.
+    /// Rocks `NewLRUCache` / `optimize_for_point_lookup`. `None` = Pedra
+    /// 8192-entry block-cache default. `Some(n)` (RFC-0042 v18) bounds the
+    /// resident SST payload pool — Pedra's equivalent of Rocks' compressed
+    /// block cache — to `n` bytes; the decoded-block cache stays small.
     pub block_cache_bytes: Option<u64>,
     compaction_filter: Option<CompactionFilterFn>,
     merge_operator: Option<MergeOperatorFn>,
@@ -1526,8 +1528,12 @@ impl<E: PedraEnv> DBIterator<E> {
 
     /// Install a fresh page and record its boundary resume keys.
     fn set_page(&mut self, page: Vec<(Vec<u8>, Vec<u8>)>) {
-        let fwd = page.last().map(|(k, _)| self.codec.encode_resume(&self.cf, k));
-        let rev = page.first().map(|(k, _)| self.codec.encode_resume(&self.cf, k));
+        let fwd = page
+            .last()
+            .map(|(k, _)| self.codec.encode_resume(&self.cf, k));
+        let rev = page
+            .first()
+            .map(|(k, _)| self.codec.encode_resume(&self.cf, k));
         if let Some(k) = fwd {
             self.resume_fwd = k;
         }
@@ -1877,7 +1883,16 @@ impl DB<IoUringEnv> {
         path: impl AsRef<std::path::Path>,
         cfs: &[&str],
     ) -> Result<Self> {
-        let mut db = Self::open_cf_with_env(opts, path, cfs, IoUringEnv::default())?;
+        let mut db = Self::open_cf_inner(
+            opts,
+            path,
+            cfs,
+            IoUringEnv::default(),
+            false,
+            |dir, core_opts, env| {
+                ConcurrentDb::open_with_env_bounded(dir, core_opts, env).map_err(Error::from)
+            },
+        )?;
         let (tx, th) = spawn_compact_worker(
             db.inner.clone(),
             Arc::clone(&db.compact_gate),
@@ -1936,7 +1951,16 @@ impl DB<StdEnv> {
         path: impl AsRef<std::path::Path>,
         cfs: &[&str],
     ) -> Result<Self> {
-        let mut db = Self::open_cf_inner(opts, path, cfs, StdEnv::default(), true)?;
+        let mut db = Self::open_cf_inner(
+            opts,
+            path,
+            cfs,
+            StdEnv::default(),
+            true,
+            |dir, core_opts, env| {
+                ConcurrentDb::open_with_env_bounded(dir, core_opts, env).map_err(Error::from)
+            },
+        )?;
         let (tx, th) = spawn_compact_worker(
             db.inner.clone(),
             Arc::clone(&db.compact_gate),
@@ -1956,8 +1980,16 @@ impl DB<StdEnv> {
     }
 }
 
+/// Cap on the decoded-block cache when the caller sets a cache budget
+/// (RFC-0042 v18): the budget bounds the resident SST payload pool (compressed
+/// data, the Rocks block-cache role); this is only the small decompressed
+/// reuse layer on top. 32 MiB ≈ Pedra's 8192-entry default footprint.
+const COMPAT_DECODED_BLOCK_CACHE_BYTES: u64 = 32 * 1024 * 1024;
+
 impl<E: PedraEnv> DB<E> {
     /// Open with an explicit [`Env`] (adversarial `FailingEnv` campaigns).
+    /// The payload pool stays unarmed on this path — Rc-based fault envs are
+    /// not `Send`/`Sync`; eviction needs a shareable file source.
     ///
     /// # Errors
     /// Pedra open errors; duplicate CF names.
@@ -1967,16 +1999,22 @@ impl<E: PedraEnv> DB<E> {
         cfs: &[&str],
         env: E,
     ) -> Result<Self> {
-        Self::open_cf_inner(opts, path, cfs, env, false)
+        Self::open_cf_inner(opts, path, cfs, env, false, |dir, core_opts, env| {
+            ConcurrentDb::open_with_env(dir, core_opts, env).map_err(Error::from)
+        })
     }
 
-    fn open_cf_inner(
+    fn open_cf_inner<O>(
         opts: &Options,
         path: impl AsRef<std::path::Path>,
         cfs: &[&str],
         env: E,
         verified: bool,
-    ) -> Result<Self> {
+        open: O,
+    ) -> Result<Self>
+    where
+        O: FnOnce(std::path::PathBuf, pedradb_core::OpenOptions, E) -> Result<ConcurrentDb<E>>,
+    {
         opts.refuse_g2()?;
         let dir = path.as_ref();
         if !dir.exists() {
@@ -2085,10 +2123,14 @@ impl<E: PedraEnv> DB<E> {
         } else {
             Some(opts.write_buffer_size)
         };
+        // RFC-0042 v18: the caller's cache knob bounds resident SST payloads
+        // (the compressed-data role a Rocks block cache plays); the decoded
+        // block cache stays small. `None` keeps core's legacy resident mode.
+        core_opts.sst_payload_budget_bytes = opts.block_cache_bytes;
         if opts.enable_blob_files {
             core_opts.large_value_threshold = Some(opts.min_blob_size as usize);
         }
-        let db = ConcurrentDb::open_with_env(dir, core_opts, env)?;
+        let db = open(dir.to_path_buf(), core_opts, env)?;
         if opts.target_file_size_base > 0 {
             db.with_write(|d| d.set_compact_target_file_bytes(opts.target_file_size_base));
         }
@@ -2106,7 +2148,10 @@ impl<E: PedraEnv> DB<E> {
             db.set_auto_reclaim(true);
         }
         if let Some(n) = opts.block_cache_bytes {
-            db.set_block_cache_budget_bytes(n);
+            // RFC-0042 v18: the budget itself went to the payload pool at
+            // open; the decoded-block cache stays at a small fixed footprint
+            // (Rocks decompresses per read and caches nothing by default).
+            db.set_block_cache_budget_bytes(n.min(COMPAT_DECODED_BLOCK_CACHE_BYTES));
         }
         // Rocks parity: rust-rocksdb drops superseded versions below the
         // oldest live snapshot (`Snapshot` pins / OCC begins). This bounds
@@ -2150,7 +2195,9 @@ impl<E: PedraEnv> DB<E> {
             .read()
             .iter()
             .find(|c| c.as_ref() == name)
-            .map(|n| ColumnFamily { name: Arc::clone(n) })
+            .map(|n| ColumnFamily {
+                name: Arc::clone(n),
+            })
     }
 
     pub(crate) fn cf_names(&self) -> Vec<Arc<str>> {
@@ -3543,7 +3590,15 @@ impl<E: PedraEnv> DB<E> {
             lower: ro.lower.as_deref(),
             upper: ro.upper.as_deref(),
         };
-        scan_cf_at(&self.inner, &self.codec, DEFAULT_CF, mode, seq, &names, bounds)
+        scan_cf_at(
+            &self.inner,
+            &self.codec,
+            DEFAULT_CF,
+            mode,
+            seq,
+            &names,
+            bounds,
+        )
     }
 
     /// rust-rocksdb `iterator_cf_opt`. Iterate bounds are honoured: both are
@@ -3562,7 +3617,15 @@ impl<E: PedraEnv> DB<E> {
             lower: ro.lower.as_deref(),
             upper: ro.upper.as_deref(),
         };
-        scan_cf_at(&self.inner, &self.codec, &cf.name, mode, seq, &names, bounds)
+        scan_cf_at(
+            &self.inner,
+            &self.codec,
+            &cf.name,
+            mode,
+            seq,
+            &names,
+            bounds,
+        )
     }
 
     /// rust-rocksdb `prefix_iterator`.

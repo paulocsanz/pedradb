@@ -43,9 +43,10 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use bytes::Bytes;
-use parking_lot::Mutex;
+use parking_lot::{Mutex, RwLock};
 
 use crate::bloom::{BloomFilter, DEFAULT_BITS_PER_KEY};
+use crate::cache::{PayloadKit, PayloadSlot};
 use crate::env::{Env, EnvFile, StdEnv};
 use crate::error::{CoreError, Result};
 use crate::key::{InternalKey, SequenceNumber, ValueType};
@@ -139,14 +140,22 @@ type EntriesCache = Arc<Mutex<Option<Vec<(InternalKey, Bytes)>>>>;
 #[derive(Debug, Clone)]
 pub struct SstTable {
     path: PathBuf,
-    /// CRC-stripped file body for lazy block decode (empty for legacy v1).
-    payload: Arc<[u8]>,
+    /// CRC-stripped file body for lazy block decode, behind an evictable
+    /// shared slot (RFC-0042 v18). Empty slot = evicted, blocks served from
+    /// file via `kit`. Empty at construction for legacy v1.
+    payload: Arc<PayloadSlot>,
+    /// Byte length of the (possibly evicted) file body; 0 for v1/eager.
+    payload_len: usize,
     /// Whether data blocks are lz4 (SST v4+).
     compressed_blocks: bool,
     /// Whether each data block carries a trailing CRC32C (SST v5).
     block_crc: bool,
     /// Cached full decode (`None` until first materialize for lazy tables).
     entries: EntriesCache,
+    /// Owning `Db`'s file source + payload pool (RFC-0042 v18), shared with
+    /// every clone of this handle. `None` on a free-standing table — its
+    /// payload then never evicts and never reloads.
+    kit: Arc<RwLock<Option<PayloadKit>>>,
     /// Range tombstones extracted at open (lazy tables) or from entries (v1).
     range_tombstones: Vec<(InternalKey, Bytes)>,
     /// Header entry count (or materialized length for v1).
@@ -190,10 +199,48 @@ impl SstTable {
         self.num_entries == 0
     }
 
-    /// Whether this table uses on-demand block decode (v2+ with retained payload).
+    /// Whether this table decodes blocks on demand (v2+). Residency of the
+    /// payload does not change laziness: an evicted body (RFC-0042 v18) is
+    /// served from file block-by-block instead.
     #[must_use]
     pub fn is_lazy(&self) -> bool {
-        !self.payload.is_empty() && !self.index.is_empty()
+        !self.index.is_empty()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn payload_bytes(&self) -> usize {
+        self.payload_len
+    }
+
+    #[cfg(test)]
+    pub(crate) fn payload_resident(&self) -> bool {
+        !self.payload.read().is_empty()
+    }
+
+    /// Weak handle to the shared payload slot (pool registration).
+    pub(crate) fn payload_slot_weak(&self) -> std::sync::Weak<PayloadSlot> {
+        Arc::downgrade(&self.payload)
+    }
+
+    /// Attach the owning `Db`'s file source + payload pool (RFC-0042 v18)
+    /// and register the payload. Idempotent; a v1/eager table is a no-op.
+    pub(crate) fn attach_payload_kit(
+        &self,
+        source: &Arc<dyn crate::env::SstFileSource>,
+        pool: &Arc<crate::cache::SstPayloadPool>,
+    ) {
+        if self.payload_len == 0 {
+            return;
+        }
+        *self.kit.write() = Some(PayloadKit {
+            source: Arc::clone(source),
+            pool: Arc::clone(pool),
+        });
+        pool.register(
+            &self.path,
+            self.payload_slot_weak(),
+            self.payload_len as u64,
+        );
     }
 
     #[cfg(test)]
@@ -516,8 +563,12 @@ impl SstTable {
     /// Decode one data block by index (v2+). Verified at open; re-decode is infallible
     /// unless payload was corrupted in RAM — then returns `Err`.
     ///
+    /// An evicted payload (RFC-0042 v18) is served from file: v5+ reads the
+    /// block and verifies its CRC32C; ≤v4 re-reads the whole body and
+    /// re-verifies the file-level CRC. Both fail closed.
+    ///
     /// # Errors
-    /// Corrupt block payload or invalid index.
+    /// Corrupt block payload, invalid index, or I/O on an evicted table.
     pub fn decode_block(&self, block_idx: usize) -> Result<Vec<(InternalKey, Bytes)>> {
         let h = self.index.get(block_idx).ok_or_else(|| {
             CoreError::Internal(format!(
@@ -525,19 +576,85 @@ impl SstTable {
                 self.path.display()
             ))
         })?;
-        if self.payload.is_empty() {
-            return Err(CoreError::Internal(
-                "decode_block on v1/eager SST without payload".into(),
-            ));
+        {
+            let g = self.payload.read();
+            let p: &Arc<[u8]> = &g;
+            if !p.is_empty() {
+                SST_BLOCKS_DECODED.with(|c| c.set(c.get().saturating_add(1)));
+                return decode_block_from_payload(
+                    p,
+                    h,
+                    self.compressed_blocks,
+                    self.block_crc,
+                    &self.path,
+                );
+            }
         }
-        SST_BLOCKS_DECODED.with(|c| c.set(c.get().saturating_add(1)));
-        decode_block_from_payload(
-            &self.payload,
-            h,
-            self.compressed_blocks,
-            self.block_crc,
+        self.decode_block_on_file(h)
+    }
+
+    /// Serve one block of an evicted payload through the attached source.
+    fn decode_block_on_file(&self, h: &BlockHandle) -> Result<Vec<(InternalKey, Bytes)>> {
+        let kit = self.kit.read().clone();
+        let Some(kit) = kit else {
+            return Err(CoreError::Internal(format!(
+                "SST {} payload evicted without a file source (free-standing table)",
+                self.path.display()
+            )));
+        };
+        if self.block_crc {
+            // v5: read exactly this block (CRC included) — rocks-shaped 4 KiB I/O.
+            let len = usize::try_from(h.length)
+                .map_err(|_| CoreError::Internal("SST block length overflow".into()))?;
+            let mut raw = vec![0u8; len];
+            kit.source
+                .read_range(&self.path, h.offset, &mut raw)
+                .map_err(CoreError::Io)?;
+            SST_BLOCKS_DECODED.with(|c| c.set(c.get().saturating_add(1)));
+            decode_block_bytes(&raw, self.compressed_blocks, true, &self.path)
+        } else {
+            // ≤v4 has no per-block CRC: reload the whole body so the
+            // file-level CRC gate re-runs before any block decodes.
+            let payload = self.ensure_payload(&kit)?;
+            SST_BLOCKS_DECODED.with(|c| c.set(c.get().saturating_add(1)));
+            decode_block_from_payload(
+                &payload,
+                h,
+                self.compressed_blocks,
+                self.block_crc,
+                &self.path,
+            )
+        }
+    }
+
+    /// Make the CRC-stripped file body resident again (whole-file read, file
+    /// CRC verified — fail-closed) and re-register it with the pool.
+    fn ensure_payload(&self, kit: &PayloadKit) -> Result<Arc<[u8]>> {
+        {
+            let g = self.payload.read();
+            let p: &Arc<[u8]> = &g;
+            if !p.is_empty() {
+                return Ok(Arc::clone(p));
+            }
+        }
+        let buf = kit.source.read_all(&self.path).map_err(CoreError::Io)?;
+        let body = crc_stripped_body(&buf, &self.path)?;
+        let body: Arc<[u8]> = Arc::from(body.to_vec().into_boxed_slice());
+        if body.len() != self.payload_len {
+            return Err(CoreError::Internal(format!(
+                "SST {} payload length drift on reload: {} != {}",
+                self.path.display(),
+                body.len(),
+                self.payload_len
+            )));
+        }
+        *self.payload.write() = Arc::clone(&body);
+        kit.pool.register(
             &self.path,
-        )
+            self.payload_slot_weak(),
+            self.payload_len as u64,
+        );
+        Ok(body)
     }
 
     /// Whether this file's user-key bounds can meet `[start, end)`.
@@ -711,23 +828,7 @@ impl SstTable {
         // If the file starts with our magic and has a trailer, require a match
         // (fail-stop on bitrot). Legacy files without a valid trailer still parse
         // the full buffer for upgrade.
-        let payload = if buf.len() >= 12 && buf.starts_with(SST_MAGIC) {
-            let (head, tail) = buf.split_at(buf.len() - 4);
-            let stored = u32::from_le_bytes([tail[0], tail[1], tail[2], tail[3]]);
-            let computed = crc32c::crc32c(head);
-            match super::scan_kernel::sst_crc_fate(stored, computed, buf.len()) {
-                super::scan_kernel::SstCrcFate::StripTrailer => head,
-                super::scan_kernel::SstCrcFate::WholeBuffer => buf,
-                super::scan_kernel::SstCrcFate::Reject => {
-                    return Err(CoreError::Internal(format!(
-                        "SST file CRC mismatch in {} (stored {stored:#010x}, computed {computed:#010x})",
-                        path.display()
-                    )));
-                }
-            }
-        } else {
-            buf
-        };
+        let payload = crc_stripped_body(buf, path)?;
 
         let mut c = Cursor::new(payload);
         let magic = c.read_slice(8)?;
@@ -899,17 +1000,20 @@ impl SstTable {
         };
 
         let payload: Arc<[u8]> = Arc::from(buf.to_vec().into_boxed_slice());
+        let payload_len = payload.len();
         let cf = crate::cf_kernel::infer_sst_cf(
             smallest_user_key.as_deref(),
             largest_user_key.as_deref(),
         );
         Ok(Self {
             path: path.to_path_buf(),
-            payload,
+            payload: Arc::new(parking_lot::RwLock::new(payload)),
+            payload_len,
             compressed_blocks,
             block_crc,
             // Lazy: do not retain full entry vec after open verification.
             entries: Arc::new(Mutex::new(None)),
+            kit: Arc::new(RwLock::new(None)),
             range_tombstones,
             num_entries: n,
             max_sequence,
@@ -942,12 +1046,15 @@ impl SstTable {
             smallest_user_key.as_deref(),
             largest_user_key.as_deref(),
         );
+        let payload_len = payload.len();
         Self {
             path,
-            payload,
+            payload: Arc::new(parking_lot::RwLock::new(payload)),
+            payload_len,
             compressed_blocks,
             block_crc,
             entries: Arc::new(Mutex::new(Some(entries))),
+            kit: Arc::new(RwLock::new(None)),
             range_tombstones,
             num_entries,
             max_sequence,
@@ -1448,7 +1555,18 @@ fn decode_block_from_payload(
             path.display()
         )));
     }
-    let mut raw = &buf[start..end];
+    decode_block_bytes(&buf[start..end], compressed_blocks, block_crc, path)
+}
+
+/// Decode one on-disk block image. `raw` includes the trailing CRC32C when
+/// `block_crc` — verified here, fail-closed (bitrot never decodes garbage).
+fn decode_block_bytes(
+    raw: &[u8],
+    compressed_blocks: bool,
+    block_crc: bool,
+    path: &Path,
+) -> Result<Vec<(InternalKey, Bytes)>> {
+    let mut raw = raw;
     if block_crc {
         if raw.len() < 4 {
             return Err(CoreError::Internal(format!(
@@ -1483,6 +1601,28 @@ fn decode_block_from_payload(
         entries.push(read_entry(&mut bc)?);
     }
     Ok(entries)
+}
+
+/// CRC-stripped file body: new files append a 4-byte LE CRC32C trailer (F3);
+/// a stored/computed mismatch refuses the file (fail-stop on bitrot), legacy
+/// trailer-less files parse the whole buffer. Shared by open and the evicted
+/// whole-body reload (RFC-0042 v18) so both run the same integrity gate.
+fn crc_stripped_body<'a>(buf: &'a [u8], path: &Path) -> Result<&'a [u8]> {
+    if buf.len() >= 12 && buf.starts_with(SST_MAGIC) {
+        let (head, tail) = buf.split_at(buf.len() - 4);
+        let stored = u32::from_le_bytes([tail[0], tail[1], tail[2], tail[3]]);
+        let computed = crc32c::crc32c(head);
+        match super::scan_kernel::sst_crc_fate(stored, computed, buf.len()) {
+            super::scan_kernel::SstCrcFate::StripTrailer => Ok(head),
+            super::scan_kernel::SstCrcFate::WholeBuffer => Ok(buf),
+            super::scan_kernel::SstCrcFate::Reject => Err(CoreError::Internal(format!(
+                "SST file CRC mismatch in {} (stored {stored:#010x}, computed {computed:#010x})",
+                path.display()
+            ))),
+        }
+    } else {
+        Ok(buf)
+    }
 }
 
 fn user_key_bounds(entries: &[(InternalKey, Bytes)]) -> (Option<Bytes>, Option<Bytes>) {
@@ -2325,10 +2465,12 @@ mod tests {
         ];
         let table = SstTable {
             path: PathBuf::from("/tmp/hand-made-mid-key-split.sst"),
-            payload: Arc::from(vec![]),
+            payload: Arc::new(parking_lot::RwLock::new(Arc::from(vec![]))),
+            payload_len: 0,
             compressed_blocks: false,
             block_crc: false,
             entries: Arc::new(Mutex::new(Some(entries))),
+            kit: Arc::new(parking_lot::RwLock::new(None)),
             range_tombstones: Vec::new(),
             num_entries: 5,
             max_sequence: 5,
@@ -2482,6 +2624,135 @@ mod tests {
                 table.block_count()
             );
         }
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// RFC-0042 v18: attach a budget-0 pool (armed) — every registration
+    /// evicts — then confirm reads are byte-identical from file.
+    fn zero_pool_kit() -> (
+        Arc<dyn crate::env::SstFileSource>,
+        Arc<crate::cache::SstPayloadPool>,
+    ) {
+        let source: Arc<dyn crate::env::SstFileSource> = Arc::new(crate::env::EnvSource(StdEnv));
+        let pool = Arc::new(crate::cache::SstPayloadPool::with_budget(Some(0)));
+        pool.arm();
+        (source, pool)
+    }
+
+    #[test]
+    fn evicted_payload_serves_identical_blocks() {
+        let path = temp_path();
+        let mut mem = MemTable::new();
+        for i in 0..300u32 {
+            let key = format!("key-{i:05}").into_bytes();
+            let val = vec![(i % 251) as u8; 40];
+            mem.put(key, u64::from(i), val);
+        }
+        let table = write_sst(&path, &mem).unwrap();
+        assert!(table.block_count() >= 3, "need multiple blocks");
+        assert!(table.block_crc, "v5 writer default");
+        let expected_all = table.entries_cloned();
+        let Lookup::Found(expected_get) = table.get(b"key-00150", 1_000) else {
+            panic!("baseline get must hit");
+        };
+
+        let (source, pool) = zero_pool_kit();
+        table.attach_payload_kit(&source, &pool);
+        assert!(!table.payload_resident(), "budget 0 must evict");
+        assert_eq!(pool.resident_bytes(), 0);
+        assert!(
+            table.payload_bytes() > 0,
+            "evicted table still knows its file-body length"
+        );
+
+        // Identical answers from file (per-block read + CRC).
+        assert_eq!(table.get(b"key-00150", 1_000), Lookup::Found(expected_get));
+        for bi in 0..table.block_count() {
+            let from_file = table.decode_block(bi).unwrap();
+            let from_payload = expected_all
+                .iter()
+                .filter(|(k, _)| {
+                    table
+                        .index
+                        .get(bi)
+                        .is_some_and(|h| h.first_user_key.as_ref() <= k.user_key.as_ref())
+                        && table
+                            .index
+                            .get(bi + 1)
+                            .is_none_or(|n| k.user_key.as_ref() < n.first_user_key.as_ref())
+                })
+                .cloned()
+                .collect::<Vec<_>>();
+            assert_eq!(from_file, from_payload, "block {bi}");
+        }
+        let mut stream = table.iter_internal_streaming();
+        let mut streamed = Vec::new();
+        while let Some(e) = stream.next_entry().unwrap() {
+            streamed.push(e);
+        }
+        assert_eq!(streamed, expected_all);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn evicted_payload_without_kit_fails_closed() {
+        let path = temp_path();
+        let mut mem = MemTable::new();
+        mem.put(&b"k"[..], 1, &b"v"[..]);
+        let table = write_sst(&path, &mem).unwrap();
+        // Free-standing table: force-clear the slot, no kit attached.
+        *table.payload.write() = Arc::from([]);
+        let err = table.decode_block(0).unwrap_err();
+        assert!(
+            err.to_string().contains("file source"),
+            "want loud no-source error, got {err:?}"
+        );
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn evicted_v3_reloads_whole_body_and_rejects_bitrot() {
+        let path = temp_path();
+        let mut mem = MemTable::new();
+        for i in 0..40u32 {
+            let key = format!("v3-{i:03}").into_bytes();
+            mem.put(key, u64::from(i), &b"payload-value"[..]);
+        }
+        // Uncompressed writer = SST v3, no per-block CRC.
+        let table = crate::sst::write_l0_sst(&StdEnv, &path, &mem, true).unwrap();
+        assert!(table.is_lazy());
+        assert!(!table.block_crc, "v3 has no per-block CRC");
+        let expected = table.entries_cloned();
+        // Drop the decoded-entries cache warmed above so the reload test
+        // actually walks the payload path instead of answering from cache.
+        *table.entries.lock() = None;
+
+        // Pool big enough to hold this file: a budget-0 pool would re-evict
+        // the reload the instant `ensure_payload` re-registers it.
+        let source: Arc<dyn crate::env::SstFileSource> = Arc::new(crate::env::EnvSource(StdEnv));
+        let pool = Arc::new(crate::cache::SstPayloadPool::with_budget(Some(1 << 20)));
+        pool.arm();
+        table.attach_payload_kit(&source, &pool);
+        assert!(table.payload_resident(), "fits the budget, stays resident");
+        // Force eviction by hand (pool is at no pressure).
+        *table.payload.write() = Arc::from([]);
+        assert!(!table.payload_resident());
+        let reloaded = table.materialize_entries().unwrap();
+        assert_eq!(reloaded, expected, "whole-body reload must decode equally");
+        // ≤v4 reload makes the payload resident again (file CRC re-verified).
+        assert!(table.payload_resident());
+
+        // Bitrot after eviction must refuse, never decode garbage.
+        *table.payload.write() = Arc::from([]);
+        let raw = std::fs::read(&path).unwrap();
+        let mut corrupt = raw.clone();
+        corrupt[60] ^= 0x40;
+        std::fs::write(&path, &corrupt).unwrap();
+        let err = table.decode_block(0).unwrap_err();
+        assert!(
+            err.to_string().contains("CRC mismatch"),
+            "corrupt reload must fail closed, got {err:?}"
+        );
         let _ = std::fs::remove_file(&path);
     }
 }

@@ -34,6 +34,25 @@ fn path_id(path: &Path) -> u64 {
 #[derive(Debug, Default)]
 pub struct TableCache {
     inner: Mutex<TableCacheInner>,
+    /// Payload pool kit (RFC-0042 v18): attached to every table this cache
+    /// opens so recovery-time registration bounds residency during reopen.
+    kit: Mutex<Option<PayloadKit>>,
+}
+
+/// Attached file source + pool handed to tables (RFC-0042 v18).
+#[derive(Clone)]
+pub(crate) struct PayloadKit {
+    pub source: Arc<dyn crate::env::SstFileSource>,
+    pub pool: Arc<SstPayloadPool>,
+}
+
+impl std::fmt::Debug for PayloadKit {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PayloadKit")
+            .field("source", &self.source)
+            .field("pool", &self.pool)
+            .finish()
+    }
 }
 
 #[derive(Debug, Default)]
@@ -55,6 +74,7 @@ impl TableCache {
                 hits: 0,
                 misses: 0,
             }),
+            kit: Mutex::new(None),
         }
     }
 
@@ -124,6 +144,9 @@ impl TableCache {
             return Ok(t);
         }
         let table = Arc::new(SstTable::open_on(env, path)?);
+        if let Some(kit) = self.payload_kit() {
+            table.attach_payload_kit(&kit.source, &kit.pool);
+        }
         {
             let mut g = self.inner.lock();
             g.misses = g.misses.saturating_add(1);
@@ -137,9 +160,138 @@ impl TableCache {
         Ok(table)
     }
 
+    /// Install the payload pool kit: every table this cache opens is attached
+    /// and registered (RFC-0042 v18). Called by a bounded `Db` open before
+    /// recovery.
+    pub(crate) fn set_payload_kit(&self, kit: PayloadKit) {
+        *self.kit.lock() = Some(kit);
+    }
+
+    /// Clone of the installed kit, if any.
+    pub(crate) fn payload_kit(&self) -> Option<PayloadKit> {
+        self.kit.lock().clone()
+    }
+
     /// Drop all cached tables.
     pub fn clear(&self) {
         self.inner.lock().map.clear();
+    }
+}
+
+/// Shared, evictable SST payload slot (RFC-0042 v18).
+///
+/// Non-empty = file body resident; empty = evicted, blocks served from file.
+pub type PayloadSlot = parking_lot::RwLock<Arc<[u8]>>;
+
+/// Bounds the total resident bytes of SST file bodies (RFC-0042 v18).
+///
+/// Every v2+ SST retains its CRC-stripped file body for lazy block decode, so
+/// an unbounded LSM keeps its whole dataset in RAM (25M slipstream: 5.9 GB of
+/// payloads on a 3.9 GB guest — the v16 OOM; RocksDB reads blocks on demand).
+/// The pool keeps the most recently registered payloads resident up to
+/// `budget` and clears the rest. Evicted blocks are re-read through the
+/// table's [`SstFileSource`](crate::env::SstFileSource) with CRC verification
+/// (per-block on v5+, whole-file on ≤v4), so eviction never weakens the
+/// fail-closed integrity gate.
+///
+/// Eviction only runs once `arm`ed — i.e. when every registered table carries
+/// a file source — so a legacy open (no source) keeps payloads resident.
+/// Decode never touches the pool: registration order is the eviction order
+/// and there is no hot-path locking.
+#[derive(Debug)]
+pub struct SstPayloadPool {
+    inner: Mutex<PoolInner>,
+}
+
+#[derive(Debug, Default)]
+struct PoolInner {
+    budget: Option<u64>,
+    /// Evict only when registered tables can reload (source attached).
+    armed: bool,
+    tick: u64,
+    total: u64,
+    map: HashMap<PathBuf, PoolEntry>,
+}
+
+#[derive(Debug)]
+struct PoolEntry {
+    slot: std::sync::Weak<PayloadSlot>,
+    bytes: u64,
+    last: u64,
+}
+
+impl SstPayloadPool {
+    /// Create a pool; `None` = unbounded (never evicts, no bookkeeping).
+    #[must_use]
+    pub fn with_budget(budget: Option<u64>) -> Self {
+        Self {
+            inner: Mutex::new(PoolInner {
+                budget,
+                ..PoolInner::default()
+            }),
+        }
+    }
+
+    /// Allow eviction. Caller guarantees every registered (and future)
+    /// table has a file source attached.
+    pub(crate) fn arm(&self) {
+        let mut g = self.inner.lock();
+        g.armed = true;
+        Self::evict_to_budget(&mut g);
+    }
+
+    /// Record (or refresh) a resident payload and enforce the budget.
+    /// No-op when unbounded.
+    pub(crate) fn register(&self, path: &Path, slot: std::sync::Weak<PayloadSlot>, bytes: u64) {
+        let mut g = self.inner.lock();
+        if g.budget.is_none() {
+            return;
+        }
+        if let Some(old) = g.map.remove(path) {
+            g.total = g.total.saturating_sub(old.bytes);
+        }
+        g.tick = g.tick.wrapping_add(1);
+        let last = g.tick;
+        g.total = g.total.saturating_add(bytes);
+        g.map
+            .insert(path.to_path_buf(), PoolEntry { slot, bytes, last });
+        Self::evict_to_budget(&mut g);
+    }
+
+    /// Resident bytes currently accounted (≤ budget once armed).
+    #[must_use]
+    pub fn resident_bytes(&self) -> u64 {
+        self.inner.lock().total
+    }
+
+    /// Tracked table count (observability).
+    #[must_use]
+    pub fn tracked_tables(&self) -> usize {
+        self.inner.lock().map.len()
+    }
+
+    /// Drop the oldest registrations until within budget. Clearing a slot is
+    /// safe under concurrent readers: they hold `Arc` clones of the payload,
+    /// which frees when the last reader finishes.
+    fn evict_to_budget(g: &mut PoolInner) {
+        while g.armed && g.budget.is_some_and(|budget| g.total > budget) {
+            let Some(victim) = g
+                .map
+                .iter()
+                .min_by_key(|(_, e)| e.last)
+                .map(|(p, _)| p.clone())
+            else {
+                break;
+            };
+            let Some(entry) = g.map.remove(&victim) else {
+                continue;
+            };
+            // A dropped table leaves a dead Weak: entry removed, bytes returned.
+            if let Some(slot) = entry.slot.upgrade() {
+                *slot.write() = Arc::from([]);
+            }
+            g.total = g.total.saturating_sub(entry.bytes);
+        }
     }
 }
 
@@ -1269,5 +1421,55 @@ mod tests {
         m.touch(&encoded);
         assert_eq!(other, m.gen(b"untouched"));
         assert_ne!(m.gen(&encoded), other);
+    }
+
+    /// RFC-0042 v18: the pool evicts oldest-first down to budget; a dropped
+    /// table's dead Weak self-cleans on the next pass.
+    #[test]
+    fn payload_pool_evicts_fifo_to_budget() {
+        use std::sync::Arc as StdArc;
+
+        let pool = SstPayloadPool::with_budget(Some(150));
+        assert_eq!(pool.resident_bytes(), 0);
+
+        let mk = |bytes: &[u8]| StdArc::new(parking_lot::RwLock::new(Arc::from(bytes.to_vec())));
+        let s1 = mk(&[1u8; 100]);
+        let s2 = mk(&[2u8; 100]);
+        let s3 = mk(&[3u8; 100]);
+
+        // Unarmed: registration records but never evicts.
+        pool.register(Path::new("a.sst"), StdArc::downgrade(&s1), 100);
+        pool.register(Path::new("b.sst"), StdArc::downgrade(&s2), 100);
+        assert_eq!(pool.resident_bytes(), 200);
+        assert!(!s1.read().is_empty());
+
+        pool.arm();
+        // Eviction clears whole entries: 200 - 100 (oldest) = 100 ≤ 150.
+        assert_eq!(pool.resident_bytes(), 100, "arming enforces the budget");
+        assert!(s1.read().is_empty(), "oldest registration evicted first");
+        assert!(!s2.read().is_empty());
+
+        // New table: evicts s2, keeps the newcomer.
+        pool.register(Path::new("c.sst"), StdArc::downgrade(&s3), 100);
+        assert_eq!(pool.resident_bytes(), 100);
+        assert!(s2.read().is_empty());
+        assert!(!s3.read().is_empty());
+        assert_eq!(pool.tracked_tables(), 1, "evicted entries leave the map");
+
+        // A reader holding a payload clone keeps its bytes: eviction clears
+        // the slot only; the clone frees when the reader drops it.
+        let held: Arc<[u8]> = {
+            let g = s3.read();
+            Arc::clone(&g)
+        };
+        let s4 = mk(&[4u8; 100]);
+        pool.register(Path::new("d.sst"), StdArc::downgrade(&s4), 100);
+        assert_eq!(pool.resident_bytes(), 100);
+        assert!(s3.read().is_empty());
+        assert_eq!(
+            &held[..3],
+            &[3u8, 3, 3],
+            "held reader bytes survive eviction"
+        );
     }
 }

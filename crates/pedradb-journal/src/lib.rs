@@ -94,6 +94,7 @@ pub fn workload_feed_watermark(dir: impl AsRef<Path>) -> Result<WorkloadReport> 
         auto_compact_sst_bytes: None,
         exclusive: true,
         large_value_threshold: None,
+        sst_payload_budget_bytes: None,
     };
     let mut silent_wrong = 0u64;
     let mut consumer = JournalConsumer::new();

@@ -92,6 +92,7 @@ impl<E: Env> PedraFold<E> {
             exclusive: true,
             large_value_threshold: None,
             wal_recovery: Default::default(),
+            sst_payload_budget_bytes: None,
         };
         let db = Db::open_with_env(path, opts, env)?;
         let cursor = match db.get(CURSOR_KEY) {
@@ -401,7 +402,10 @@ mod keyset_tests {
         }];
         fold.apply_updates(&batch, FoldCursor(7)).unwrap();
         assert_eq!(fold.cursor_value().seq(), 7);
-        assert_eq!(fold.get_value(b"k1").unwrap().as_deref(), Some(b"v1".as_ref()));
+        assert_eq!(
+            fold.get_value(b"k1").unwrap().as_deref(),
+            Some(b"v1".as_ref())
+        );
         drop(fold);
         let _ = std::fs::remove_dir_all(&dir);
     }

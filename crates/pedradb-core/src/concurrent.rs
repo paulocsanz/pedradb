@@ -1075,6 +1075,18 @@ impl<E: Env> ConcurrentDb<E> {
         Ok(Self::from_db(Db::open_with_env(path, opts, env)?))
     }
 
+    /// Open with an explicit [`Env`] and the SST payload pool armed
+    /// (RFC-0042 v18) — see [`Db::open_with_env_bounded`].
+    ///
+    /// # Errors
+    /// Same as [`Db::open_with_env`].
+    pub fn open_with_env_bounded(path: impl AsRef<Path>, opts: OpenOptions, env: E) -> Result<Self>
+    where
+        E: Env + Send + Sync + 'static,
+    {
+        Ok(Self::from_db(Db::open_with_env_bounded(path, opts, env)?))
+    }
+
     /// Point get. A point-cache hit answers without the Db read lock
     /// (misses fall through to the locked path, which fills the cache).
     #[must_use]
@@ -1233,7 +1245,9 @@ impl<E: Env> ConcurrentDb<E> {
                 return Err(e);
             }
         };
-        self.inner.write().install_prepared_l0_compact(job, tables)?;
+        self.inner
+            .write()
+            .install_prepared_l0_compact(job, tables)?;
         Ok(true)
     }
 
@@ -2976,6 +2990,7 @@ mod tests {
                     auto_compact_sst_bytes: None,
                     exclusive: true,
                     large_value_threshold: None,
+                    sst_payload_budget_bytes: None,
                 },
             )
             .unwrap();
@@ -3019,6 +3034,7 @@ mod tests {
                 auto_compact_sst_bytes: None,
                 exclusive: true,
                 large_value_threshold: None,
+                sst_payload_budget_bytes: None,
             },
         )
         .unwrap();
@@ -3053,6 +3069,7 @@ mod tests {
                     auto_compact_sst_bytes: None,
                     exclusive: true,
                     large_value_threshold: None,
+                    sst_payload_budget_bytes: None,
                 },
             )
             .unwrap();
@@ -3098,6 +3115,7 @@ mod tests {
                     auto_compact_sst_bytes: None,
                     exclusive: true,
                     large_value_threshold: None,
+                    sst_payload_budget_bytes: None,
                 },
             )
             .unwrap();
@@ -3153,6 +3171,7 @@ mod tests {
                     auto_compact_sst_bytes: None,
                     exclusive: true,
                     large_value_threshold: None,
+                    sst_payload_budget_bytes: None,
                 },
             )
             .unwrap();
@@ -3207,6 +3226,7 @@ mod tests {
                     auto_compact_sst_bytes: None,
                     exclusive: true,
                     large_value_threshold: None,
+                    sst_payload_budget_bytes: None,
                 },
             )
             .unwrap();
@@ -3242,6 +3262,7 @@ mod tests {
                 auto_compact_sst_bytes: None,
                 exclusive: true,
                 large_value_threshold: None,
+                sst_payload_budget_bytes: None,
             },
         )
         .unwrap()
@@ -3265,6 +3286,7 @@ mod tests {
                     auto_compact_sst_bytes: None,
                     exclusive: true,
                     large_value_threshold: None,
+                    sst_payload_budget_bytes: None,
                 }
             },
         )
@@ -3358,6 +3380,7 @@ mod tests {
                 auto_compact_sst_bytes: None,
                 exclusive: true,
                 large_value_threshold: Some(512),
+                sst_payload_budget_bytes: None,
             },
         )
         .unwrap();
@@ -3384,6 +3407,7 @@ mod tests {
                 auto_compact_sst_bytes: None,
                 exclusive: true,
                 large_value_threshold: None,
+                sst_payload_budget_bytes: None,
             },
         )
         .unwrap();
@@ -3530,6 +3554,7 @@ mod tests {
                 auto_compact_sst_bytes: None,
                 exclusive: true,
                 large_value_threshold: None,
+                sst_payload_budget_bytes: None,
             },
         )
         .unwrap();
@@ -3808,13 +3833,19 @@ mod tests {
         db.put(b"k1", vec![b'v'; 64]).unwrap();
         assert!(db.with_write(|d| d.stage_flush_imm()).unwrap());
         assert!(db.park_imm_once());
-        assert!(db.materialize_parked_once(), "first table: dropped, no reads");
+        assert!(
+            db.materialize_parked_once(),
+            "first table: dropped, no reads"
+        );
         assert_eq!(db.with_read(|d| d.retired_mem_bytes()), 0);
         assert_eq!(db.get(b"k1").as_deref(), Some(&[b'v'; 64][..]));
         db.put(b"k2", vec![b'w'; 64]).unwrap();
         assert!(db.with_write(|d| d.stage_flush_imm()).unwrap());
         assert!(db.park_imm_once());
-        assert!(db.materialize_parked_once(), "second table: retired, read arrived");
+        assert!(
+            db.materialize_parked_once(),
+            "second table: retired, read arrived"
+        );
         assert!(db.with_read(|d| d.retired_mem_bytes()) > 0);
         assert_eq!(db.get(b"k2").as_deref(), Some(&[b'w'; 64][..]));
         let _ = fs::remove_dir_all(&dir);
@@ -4594,6 +4625,7 @@ mod tests {
                     auto_compact_sst_bytes: None,
                     exclusive: true,
                     large_value_threshold: None,
+                    sst_payload_budget_bytes: None,
                 },
             )
             .unwrap(),
@@ -4893,6 +4925,7 @@ mod tests {
             auto_compact_sst_bytes: None,
             exclusive: true,
             large_value_threshold: None,
+            sst_payload_budget_bytes: None,
         };
         let db = ConcurrentDb::open_with_env(&dir, opts.clone(), env.clone()).unwrap();
         db.set_write_group_catchup_window(Duration::from_millis(500));
@@ -5048,6 +5081,7 @@ mod tests {
                 auto_compact_sst_bytes: None,
                 exclusive: true,
                 large_value_threshold: None,
+                sst_payload_budget_bytes: None,
             },
         )
         .unwrap();
@@ -5114,6 +5148,7 @@ mod tests {
                 auto_compact_sst_bytes: None,
                 exclusive: true,
                 large_value_threshold: None,
+                sst_payload_budget_bytes: None,
             },
         )
         .unwrap();
@@ -5292,6 +5327,7 @@ mod tests {
                 auto_compact_sst_bytes: None,
                 exclusive: true,
                 large_value_threshold: None,
+                sst_payload_budget_bytes: None,
             },
         )
         .unwrap();
@@ -5334,6 +5370,7 @@ mod tests {
                 auto_compact_sst_bytes: None,
                 exclusive: true,
                 large_value_threshold: None,
+                sst_payload_budget_bytes: None,
             },
         )
         .unwrap();
@@ -5411,6 +5448,7 @@ mod tests {
                 auto_compact_sst_bytes: None,
                 exclusive: true,
                 large_value_threshold: None,
+                sst_payload_budget_bytes: None,
             },
         )
         .unwrap();
@@ -5646,6 +5684,7 @@ mod tests {
                 auto_compact_sst_bytes: None,
                 exclusive: true,
                 large_value_threshold: Some(512),
+                sst_payload_budget_bytes: None,
             },
         )
         .unwrap();
@@ -5687,6 +5726,7 @@ mod tests {
                 auto_compact_sst_bytes: None,
                 exclusive: true,
                 large_value_threshold: Some(512),
+                sst_payload_budget_bytes: None,
             },
         )
         .unwrap();
@@ -5738,6 +5778,7 @@ mod tests {
                 auto_compact_sst_bytes: None,
                 exclusive: true,
                 large_value_threshold: None,
+                sst_payload_budget_bytes: None,
             },
         )
         .unwrap();
@@ -5795,6 +5836,7 @@ mod tests {
                 auto_compact_sst_bytes: None,
                 exclusive: true,
                 large_value_threshold: Some(512),
+                sst_payload_budget_bytes: None,
             },
         )
         .unwrap();
@@ -5855,6 +5897,7 @@ mod tests {
                 auto_compact_sst_bytes: None,
                 exclusive: true,
                 large_value_threshold: None,
+                sst_payload_budget_bytes: None,
             },
         )
         .unwrap();
@@ -5887,6 +5930,7 @@ mod tests {
                 auto_compact_sst_bytes: None,
                 exclusive: true,
                 large_value_threshold: None,
+                sst_payload_budget_bytes: None,
             },
         )
         .unwrap();

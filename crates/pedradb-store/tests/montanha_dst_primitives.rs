@@ -477,6 +477,7 @@ fn hist_bitrot_does_not_silent_wrong_old_snapshot() {
             auto_compact_sst_bytes: None,
             exclusive: true,
             large_value_threshold: None,
+            sst_payload_budget_bytes: None,
         };
         let mut hk = b"\0store/hist/".to_vec();
         hk.extend_from_slice(b"hk");

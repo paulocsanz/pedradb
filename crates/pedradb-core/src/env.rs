@@ -218,6 +218,52 @@ pub fn fdatasync_file(file: &File) -> io::Result<()> {
     pedradb_posix::fdatasync_file(file)
 }
 
+/// Object-safe byte source for SST files (RFC-0042 v18 payload pool).
+///
+/// Every v2+ [`SstTable`](crate::sst::SstTable) retains its CRC-stripped file
+/// body for lazy block decode; under a byte budget evicted bodies are served
+/// back from the file through this seam. It is deliberately not [`Env`]:
+/// tables must hold a source without a generic parameter, so the owning
+/// `Db` builds one `Arc<dyn SstFileSource>` (via [`EnvSource`]) at open.
+pub trait SstFileSource: Send + Sync {
+    /// Fill `buf` exactly with the bytes of `path` at `offset`.
+    ///
+    /// # Errors
+    /// Underlying I/O (missing file, short read).
+    fn read_range(&self, path: &Path, offset: u64, buf: &mut [u8]) -> io::Result<()>;
+
+    /// Read the whole file into memory.
+    ///
+    /// # Errors
+    /// Underlying I/O.
+    fn read_all(&self, path: &Path) -> io::Result<Vec<u8>>;
+}
+
+impl std::fmt::Debug for dyn SstFileSource {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SstFileSource").finish_non_exhaustive()
+    }
+}
+
+/// [`SstFileSource`] over any [`Env`] (open → seek → read).
+#[derive(Debug, Clone, Copy)]
+pub struct EnvSource<E>(pub E);
+
+impl<E: Env + Send + Sync> SstFileSource for EnvSource<E> {
+    fn read_range(&self, path: &Path, offset: u64, buf: &mut [u8]) -> io::Result<()> {
+        let mut file = self.0.open_read(path)?;
+        file.seek(SeekFrom::Start(offset))?;
+        file.read_exact(buf)
+    }
+
+    fn read_all(&self, path: &Path) -> io::Result<Vec<u8>> {
+        let mut file = self.0.open_read(path)?;
+        let mut out = Vec::new();
+        file.read_to_end(&mut out)?;
+        Ok(out)
+    }
+}
+
 impl EnvFile for File {
     fn sync_data(&mut self) -> io::Result<()> {
         fdatasync_file(self)

@@ -71,9 +71,7 @@ use crate::lock::DirLock;
 use crate::manifest::{self, VersionSet};
 use crate::memtable::{Lookup, MemTable};
 use crate::merge::{range_deleted, range_tombstone_covers, StreamingVisibleIter, VisibleKv};
-use crate::sst::{
-    write_l0_sst, write_l0_sst_for_family, write_sst_entries_on, SstTable,
-};
+use crate::sst::{write_l0_sst, write_l0_sst_for_family, write_sst_entries_on, SstTable};
 use crate::tx::Transaction;
 use crate::vlog::{self, ValueLog, VlogRewriteStats, VLOG_FILE_NAME};
 use crate::wal::Wal;
@@ -255,7 +253,20 @@ pub struct OpenOptions {
     /// archived to a capped local history tier and then GCed (pin-aware).
     /// `HistoryHorizon::All` (F20) is the explicit opt-out.
     pub history: HistoryOptions,
+    /// Byte budget for resident SST file bodies (RFC-0042 v18 payload pool).
+    /// `None` (default) = every payload stays resident (legacy behavior).
+    /// `Some(n)` takes effect only on a bounded open
+    /// ([`Db::open_with_env_bounded`]): the freshest `n` bytes of payloads
+    /// stay in RAM, the rest are served from file block-by-block,
+    /// CRC-verified. The bounded-open default budget is
+    /// [`DEFAULT_SST_PAYLOAD_BUDGET_BYTES`] (256 MiB).
+    pub sst_payload_budget_bytes: Option<u64>,
 }
+
+/// Default bounded-open SST payload budget (RFC-0042 v18): 256 MiB. RocksDB's
+/// defaults never hold a whole LSM in RAM; this is the matching bar for the
+/// drop-in surface (compat maps the caller's cache knob onto it).
+pub const DEFAULT_SST_PAYLOAD_BUDGET_BYTES: u64 = 256 * 1024 * 1024;
 
 /// MVCC history horizon (RFC-0046 P0.1).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -681,6 +692,7 @@ impl Default for OpenOptions {
             exclusive: true,
             large_value_threshold: None,
             history: HistoryOptions::default(),
+            sst_payload_budget_bytes: None,
         }
     }
 }
@@ -1016,6 +1028,12 @@ pub struct Db<E: Env = StdEnv> {
     table_cache: TableCache,
     /// Decompressed block cache (hit stats for read path).
     block_cache: BlockCache,
+    /// Bounded SST payload residency (RFC-0042 v18). Budget `None` = legacy
+    /// (every payload resident). Armed only by a bounded open.
+    sst_payload_pool: Arc<crate::cache::SstPayloadPool>,
+    /// File source for evicted-payload reloads; `None` on a legacy open
+    /// (the pool then never evicts — decode never fails for lack of a source).
+    sst_source: Option<Arc<dyn crate::env::SstFileSource>>,
     /// Latest-snapshot point answers; per-key inval on write (RFC-0035 / 0041).
     /// `Arc` so [`crate::concurrent::ConcurrentDb`] answers a hit without the
     /// Db read lock (YCSB C hit path).
@@ -1228,11 +1246,55 @@ impl<E: Env> Db<E> {
 
     /// Open with an explicit [`Env`] (fault injection, in-memory, …).
     ///
+    /// Payloads of recovered SSTs stay fully resident (legacy behavior); use
+    /// [`Self::open_with_env_bounded`] to bound residency.
+    ///
     /// # Errors
     /// I/O failures, corrupt logical records, CRC errors, [`CoreError::AlreadyOpen`],
     /// or corrupt MANIFEST.
-    #[allow(clippy::too_many_lines)] // recover WAL + CHANGELOG + vlog in one open path
     pub fn open_with_env(path: impl AsRef<Path>, opts: OpenOptions, env: E) -> Result<Self> {
+        Self::open_with_env_sourced(path, opts, env, None)
+    }
+
+    /// Open with an explicit [`Env`] **and the SST payload pool armed**
+    /// (RFC-0042 v18). Resident file bodies are held to
+    /// `opts.sst_payload_budget_bytes` (default
+    /// [`DEFAULT_SST_PAYLOAD_BUDGET_BYTES`]); eviction happens during
+    /// recovery, so reopening a multi-GiB store does not transiently hold
+    /// the whole dataset in RAM. Requires `E: Send + Sync + 'static` because
+    /// evicted tables re-read their file through a shared
+    /// [`SstFileSource`](crate::env::SstFileSource) built from the env.
+    ///
+    /// # Errors
+    /// Same as [`Self::open_with_env`].
+    pub fn open_with_env_bounded(
+        path: impl AsRef<Path>,
+        mut opts: OpenOptions,
+        env: E,
+    ) -> Result<Self>
+    where
+        E: Env + Send + Sync + 'static,
+    {
+        if opts.sst_payload_budget_bytes.is_none() {
+            opts.sst_payload_budget_bytes = Some(DEFAULT_SST_PAYLOAD_BUDGET_BYTES);
+        }
+        let source: Arc<dyn crate::env::SstFileSource> =
+            Arc::new(crate::env::EnvSource(<E as Clone>::clone(&env)));
+        Self::open_with_env_sourced(path, opts, env, Some(source))
+    }
+
+    /// Shared open path; `source = Some` arms the payload pool before
+    /// recovery so reopen never materializes the whole dataset in RAM.
+    ///
+    /// # Errors
+    /// Same as [`Self::open_with_env`].
+    #[allow(clippy::too_many_lines)] // recover WAL + CHANGELOG + vlog in one open path
+    fn open_with_env_sourced(
+        path: impl AsRef<Path>,
+        opts: OpenOptions,
+        env: E,
+        source: Option<Arc<dyn crate::env::SstFileSource>>,
+    ) -> Result<Self> {
         crate::buggify_hooks::inject_checked(crate::buggify_hooks::sites::AFTER_OPEN_LOCK)?;
         let dir = path.as_ref().to_path_buf();
         env.create_dir_all(&dir)?;
@@ -1247,6 +1309,16 @@ impl<E: Env> Db<E> {
 
         let table_cache = TableCache::new(64);
         let block_cache = BlockCache::new(8192);
+        let sst_payload_pool = Arc::new(crate::cache::SstPayloadPool::with_budget(
+            opts.sst_payload_budget_bytes,
+        ));
+        if let Some(src) = &source {
+            sst_payload_pool.arm();
+            table_cache.set_payload_kit(crate::cache::PayloadKit {
+                source: Arc::clone(src),
+                pool: Arc::clone(&sst_payload_pool),
+            });
+        }
         // Official YCSB records=4096 (zipfian). 2048 FIFO + sequential load
         // evicted the hot low IDs; C then started cold (parkfold2 C 1.6×).
         let point_cache = Arc::new(PointCache::new(8192));
@@ -1544,6 +1616,8 @@ impl<E: Env> Db<E> {
             auto_compact_sst_bytes: opts.auto_compact_sst_bytes.filter(|n| *n > 0),
             table_cache,
             block_cache,
+            sst_payload_pool,
+            sst_source: source,
             point_cache,
             last_prefix_cache,
             count_cache,
@@ -1623,6 +1697,14 @@ impl<E: Env> Db<E> {
             changelog_store_count: 0,
             unsynced_ssts: Vec::new(),
         };
+        // RFC-0042 v18: `ScanAndInstall` recovery (legacy dirs, no MANIFEST)
+        // opens tables outside the table cache — attach + register them here
+        // so the armed pool bounds them too.
+        if let Some(src) = &db.sst_source {
+            for t in &db.ssts {
+                t.attach_payload_kit(src, &db.sst_payload_pool);
+            }
+        }
         db.rebuild_sst_order();
         db.maybe_rebuild_feed_from_live();
         // RFC-0046 P0.2: restore the archive floor across reopens (a cap
@@ -2149,6 +2231,21 @@ impl<E: Env> Db<E> {
     /// reads. `None` restores the 8192-entry default; `Some(n)` is a byte budget.
     pub fn install_block_cache(&mut self, cache: BlockCache) {
         self.block_cache = cache;
+    }
+
+    /// Attach + register a newly installed table's payload with the pool
+    /// (RFC-0042 v18). No-op on a legacy open (no source) or a v1/eager
+    /// table. Call at every point a table enters `self.ssts`.
+    fn adopt_sst(&self, table: &SstTable) {
+        if let Some(src) = &self.sst_source {
+            table.attach_payload_kit(src, &self.sst_payload_pool);
+        }
+    }
+
+    /// Shared payload pool (observability).
+    #[must_use]
+    pub fn sst_payload_pool(&self) -> &crate::cache::SstPayloadPool {
+        &self.sst_payload_pool
     }
 
     /// Capture a read snapshot of currently committed state (sequence export).
@@ -5160,6 +5257,7 @@ impl<E: Env> Db<E> {
         self.env.rename(&tmp_path, &final_path)?;
         self.sync_dir_if_required(&self.dir)?;
         let new_table = SstTable::open_on(&self.env, &final_path)?;
+        self.adopt_sst(&new_table);
         self.table_cache.insert(Arc::new(new_table.clone()));
         let prev_next = self.next_file_num;
         self.next_file_num = num + 1;
@@ -6047,6 +6145,7 @@ impl<E: Env> Db<E> {
         }
         self.bytes_written_sst = self.bytes_written_sst.saturating_add(staged_bytes);
         for t in &self.ssts {
+            self.adopt_sst(t);
             self.table_cache.insert(Arc::new(t.clone()));
         }
         for path in old_paths {
@@ -8187,6 +8286,7 @@ impl<E: Env> Db<E> {
             n: files.len(),
         };
         for (table, file_num) in files {
+            self.adopt_sst(&table);
             self.note_sst_bytes_written(table.path());
             self.table_cache.insert(Arc::new(table.clone()));
             if self.next_file_num <= file_num {
@@ -8245,6 +8345,7 @@ impl<E: Env> Db<E> {
             keep_levels.push(lvl);
         }
         for t in &new_tables {
+            self.adopt_sst(t);
             self.note_sst_bytes_written(t.path());
             self.table_cache.insert(Arc::new(t.clone()));
             keep_tables.push(t.clone());
@@ -9011,7 +9112,7 @@ fn recover_ssts<E: Env>(
             // Kernel contract: ScanAndInstall implies absent inventory.
             debug_assert!(loaded.is_ok() && loaded.as_ref().unwrap().is_none());
             // Legacy / first open: scan directory, then write initial MANIFEST.
-            let (tables, next_file_num, max_seq) = load_ssts_scan(env, dir)?;
+            let (tables, next_file_num, max_seq) = load_ssts_scan(env, dir, table_cache)?;
             let levels = vec![0u32; tables.len()];
             let mut vs = VersionSet {
                 next_file_num,
@@ -9070,7 +9171,14 @@ fn recover_ssts<E: Env>(
 }
 
 /// Load `NNNNNN.sst` files ascending; return tables, next file num, max sequence.
-fn load_ssts_scan<E: Env>(env: &E, dir: &Path) -> Result<(Vec<SstTable>, u64, SequenceNumber)> {
+/// `table_cache` supplies the payload kit (RFC-0042 v18): each opened table is
+/// attached + registered so a bounded open stays within budget during the scan.
+fn load_ssts_scan<E: Env>(
+    env: &E,
+    dir: &Path,
+    table_cache: &TableCache,
+) -> Result<(Vec<SstTable>, u64, SequenceNumber)> {
+    let kit = table_cache.payload_kit();
     let mut files: Vec<(u64, PathBuf)> = Vec::new();
     if env.exists(dir) {
         for name in env.read_dir_names(dir)? {
@@ -9085,6 +9193,9 @@ fn load_ssts_scan<E: Env>(env: &E, dir: &Path) -> Result<(Vec<SstTable>, u64, Se
     let mut tables = Vec::with_capacity(files.len());
     for (_, path) in files {
         let t = SstTable::open_on(env, path)?;
+        if let Some(kit) = &kit {
+            t.attach_payload_kit(&kit.source, &kit.pool);
+        }
         max_seq = max_seq.max(t.max_sequence());
         tables.push(t);
     }
@@ -9153,8 +9264,7 @@ fn write_merged_tables(
                 if crate::compact_kernel::compact_should_split_at(acc, split_target) {
                     // Never split one user key's version run across files.
                     while j < merged.len() && merged[j].0.user_key == merged[j - 1].0.user_key {
-                        acc =
-                            acc.saturating_add(merged_entry_bytes(&merged[j].0, &merged[j].1));
+                        acc = acc.saturating_add(merged_entry_bytes(&merged[j].0, &merged[j].1));
                         j += 1;
                     }
                     break;
@@ -9848,6 +9958,62 @@ mod tests {
         dir
     }
 
+    /// RFC-0042 v18: a bounded open keeps SST payloads within budget and
+    /// still serves identical reads across eviction (flush installs adopt
+    /// tables into the pool; eviction pushes blocks to file reads).
+    #[test]
+    fn bounded_open_serves_reads_after_pool_eviction() {
+        let dir = temp_dir();
+        let mut opts = OpenOptions {
+            sync: false,
+            auto_flush_bytes: Some(4 * 1024 * 1024),
+            ..OpenOptions::default()
+        };
+        opts.sst_payload_budget_bytes = Some(1); // evict everything, always
+        let mut db = Db::<StdEnv>::open_with_env_bounded(&dir, opts, StdEnv).unwrap();
+        for round in 0..3u32 {
+            for i in 0..200u32 {
+                let k = format!("r{round}-key-{i:04}").into_bytes();
+                let v = vec![(i % 199) as u8; 120];
+                db.put(&k, &v).unwrap();
+            }
+            db.flush().unwrap();
+        }
+        assert!(
+            db.ssts.len() >= 3,
+            "want several tables, got {}",
+            db.ssts.len()
+        );
+        assert!(
+            db.sst_payload_pool().resident_bytes() <= 1,
+            "pool must hold (almost) nothing at budget 1"
+        );
+        for round in 0..3u32 {
+            for i in 0..200u32 {
+                let k = format!("r{round}-key-{i:04}").into_bytes();
+                let want = vec![(i % 199) as u8; 120];
+                assert_eq!(db.get(&k).expect("read after eviction"), want);
+            }
+        }
+        // Bounded reopen: recovery itself must stay within budget.
+        drop(db);
+        let mut opts2 = OpenOptions {
+            sync: false,
+            ..OpenOptions::default()
+        };
+        opts2.sst_payload_budget_bytes = Some(1);
+        let db2 = Db::<StdEnv>::open_with_env_bounded(&dir, opts2, StdEnv).unwrap();
+        assert!(
+            db2.sst_payload_pool().resident_bytes() <= 1,
+            "recovery must evict during reopen, not after"
+        );
+        assert_eq!(
+            db2.get("r1-key-0150".as_bytes()).expect("reopen read"),
+            vec![(150 % 199) as u8; 120]
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
     fn vlog_opts() -> OpenOptions {
         OpenOptions {
             wal_full_fsync: true,
@@ -9859,6 +10025,7 @@ mod tests {
             exclusive: true,
             large_value_threshold: Some(512),
             wal_recovery: WalRecovery::FailClosed,
+            sst_payload_budget_bytes: None,
         }
     }
 
@@ -9873,6 +10040,7 @@ mod tests {
             exclusive: true,
             large_value_threshold: None,
             wal_recovery: WalRecovery::FailClosed,
+            sst_payload_budget_bytes: None,
         }
     }
 
@@ -11142,6 +11310,7 @@ mod tests {
                     auto_compact_sst_bytes: None,
                     exclusive: true,
                     large_value_threshold: Some(256),
+                    sst_payload_budget_bytes: None,
                 },
             )
             .unwrap();
@@ -11208,6 +11377,7 @@ mod tests {
                     auto_compact_sst_bytes: None,
                     exclusive: true,
                     large_value_threshold: Some(256),
+                    sst_payload_budget_bytes: None,
                 },
             )
             .unwrap();
@@ -11309,6 +11479,7 @@ mod tests {
                     auto_compact_sst_bytes: None,
                     exclusive: true,
                     large_value_threshold: None,
+                    sst_payload_budget_bytes: None,
                 },
             )
             .unwrap();
@@ -11465,6 +11636,7 @@ mod tests {
                     auto_compact_sst_bytes: None,
                     exclusive: true,
                     large_value_threshold: None,
+                    sst_payload_budget_bytes: None,
                 },
             )
             .unwrap();
@@ -12204,11 +12376,7 @@ mod tests {
         );
         for i in 0..100u32 {
             let k = format!("split/{i:04}").into_bytes();
-            assert_eq!(
-                db.get(&k).as_deref().map(|v| v.len()),
-                Some(100),
-                "key {i}"
-            );
+            assert_eq!(db.get(&k).as_deref().map(|v| v.len()), Some(100), "key {i}");
         }
         assert_eq!(
             db.get(b"split/zzzz").as_deref().map(|v| v.len()),
@@ -12221,14 +12389,8 @@ mod tests {
             db.level_file_count(1) >= 2,
             "split inventory survives reopen"
         );
-        assert_eq!(
-            db.get(b"split/0042").as_deref().map(|v| v.len()),
-            Some(100)
-        );
-        assert_eq!(
-            db.get(b"split/zzzz").as_deref().map(|v| v.len()),
-            Some(100)
-        );
+        assert_eq!(db.get(b"split/0042").as_deref().map(|v| v.len()), Some(100));
+        assert_eq!(db.get(b"split/zzzz").as_deref().map(|v| v.len()), Some(100));
         db.close().unwrap();
         let _ = fs::remove_dir_all(&dir);
     }
@@ -12248,6 +12410,7 @@ mod tests {
                 auto_compact_sst_bytes: None,
                 exclusive: true,
                 large_value_threshold: None,
+                sst_payload_budget_bytes: None,
             },
         )
         .unwrap();
@@ -12284,6 +12447,7 @@ mod tests {
                 auto_compact_sst_bytes: None,
                 exclusive: true,
                 large_value_threshold: None,
+                sst_payload_budget_bytes: None,
             },
         )
         .unwrap();
@@ -12316,6 +12480,7 @@ mod tests {
                     auto_compact_sst_bytes: None,
                     exclusive: true,
                     large_value_threshold: None,
+                    sst_payload_budget_bytes: None,
                 },
             )
             .unwrap();
@@ -12352,6 +12517,7 @@ mod tests {
                     auto_compact_sst_bytes: None,
                     exclusive: true,
                     large_value_threshold: None,
+                    sst_payload_budget_bytes: None,
                 },
             )
             .unwrap();
@@ -12392,6 +12558,7 @@ mod tests {
                     auto_compact_sst_bytes: None,
                     exclusive: true,
                     large_value_threshold: Some(512),
+                    sst_payload_budget_bytes: None,
                 },
             )
             .unwrap();
@@ -12415,6 +12582,7 @@ mod tests {
                 auto_compact_sst_bytes: None,
                 exclusive: true,
                 large_value_threshold: Some(512),
+                sst_payload_budget_bytes: None,
             },
         )
         .unwrap();
@@ -12447,6 +12615,7 @@ mod tests {
                     auto_compact_sst_bytes: None,
                     exclusive: true,
                     large_value_threshold: None,
+                    sst_payload_budget_bytes: None,
                 },
             )
             .unwrap();
@@ -12491,6 +12660,7 @@ mod tests {
                     auto_compact_sst_bytes: None,
                     exclusive: true,
                     large_value_threshold: None,
+                    sst_payload_budget_bytes: None,
                 },
             )
             .unwrap();
@@ -12528,6 +12698,7 @@ mod tests {
                 auto_compact_sst_bytes: None,
                 exclusive: true,
                 large_value_threshold: None,
+                sst_payload_budget_bytes: None,
             },
         )
         .unwrap();
@@ -12668,6 +12839,7 @@ mod tests {
                 auto_compact_sst_bytes: None,
                 exclusive: true,
                 large_value_threshold: None,
+                sst_payload_budget_bytes: None,
             },
             env,
         )
@@ -12720,6 +12892,7 @@ mod tests {
                 auto_compact_sst_bytes: None,
                 exclusive: true,
                 large_value_threshold: None,
+                sst_payload_budget_bytes: None,
             },
         )
         .unwrap();
@@ -12757,6 +12930,7 @@ mod tests {
                 auto_compact_sst_bytes: None,
                 exclusive: true,
                 large_value_threshold: None,
+                sst_payload_budget_bytes: None,
             },
         )
         .unwrap();
@@ -12817,6 +12991,7 @@ mod tests {
                 auto_compact_sst_bytes: None,
                 exclusive: true,
                 large_value_threshold: None,
+                sst_payload_budget_bytes: None,
             },
         )
         .unwrap();
@@ -12865,6 +13040,7 @@ mod tests {
                 auto_compact_sst_bytes: None,
                 exclusive: true,
                 large_value_threshold: None,
+                sst_payload_budget_bytes: None,
             },
         )
         .unwrap();
@@ -12921,6 +13097,7 @@ mod tests {
                 auto_compact_sst_bytes: None,
                 exclusive: true,
                 large_value_threshold: None,
+                sst_payload_budget_bytes: None,
             },
         )
         .unwrap();
@@ -12965,6 +13142,7 @@ mod tests {
                 auto_compact_sst_bytes: None,
                 exclusive: true,
                 large_value_threshold: None,
+                sst_payload_budget_bytes: None,
             },
         )
         .unwrap();
@@ -13010,6 +13188,7 @@ mod tests {
                 auto_compact_sst_bytes: None,
                 exclusive: true,
                 large_value_threshold: None,
+                sst_payload_budget_bytes: None,
             },
         )
         .unwrap();
@@ -13379,6 +13558,7 @@ mod tests {
             auto_compact_sst_bytes: None,
             exclusive: false,
             large_value_threshold: None,
+            sst_payload_budget_bytes: None,
         };
         let db = Db::open_with(&dir, opts).unwrap();
         assert!(
@@ -13752,6 +13932,7 @@ mod tests {
                     auto_compact_sst_bytes: None,
                     exclusive: true,
                     large_value_threshold: Some(512),
+                    sst_payload_budget_bytes: None,
                 },
             )
             .unwrap();
@@ -13773,6 +13954,7 @@ mod tests {
                 auto_compact_sst_bytes: None,
                 exclusive: true,
                 large_value_threshold: Some(512),
+                sst_payload_budget_bytes: None,
             },
         )
         .unwrap();
@@ -13845,6 +14027,7 @@ mod tests {
                     auto_compact_sst_bytes: None,
                     exclusive: true,
                     large_value_threshold: Some(512),
+                    sst_payload_budget_bytes: None,
                 },
             )
             .unwrap();
@@ -13889,6 +14072,7 @@ mod tests {
                 auto_compact_sst_bytes: None,
                 exclusive: true,
                 large_value_threshold: Some(512),
+                sst_payload_budget_bytes: None,
             },
         )
         .unwrap();
@@ -13956,6 +14140,7 @@ mod tests {
                 auto_compact_sst_bytes: None,
                 exclusive: true,
                 large_value_threshold: None,
+                sst_payload_budget_bytes: None,
             },
         )
         .unwrap();
@@ -14029,6 +14214,7 @@ mod tests {
                 auto_compact_sst_bytes: None,
                 exclusive: true,
                 large_value_threshold: None,
+                sst_payload_budget_bytes: None,
             },
         )
         .unwrap();
@@ -14096,6 +14282,7 @@ mod tests {
                 auto_compact_sst_bytes: None,
                 exclusive: true,
                 large_value_threshold: None,
+                sst_payload_budget_bytes: None,
             },
         )
         .unwrap();
@@ -14176,6 +14363,7 @@ mod tests {
                     auto_compact_sst_bytes: None,
                     exclusive: true,
                     large_value_threshold: None,
+                    sst_payload_budget_bytes: None,
                 },
             )
             .unwrap();
@@ -14422,6 +14610,7 @@ mod tests {
                     auto_compact_sst_bytes: None,
                     exclusive: true,
                     large_value_threshold: None,
+                    sst_payload_budget_bytes: None,
                 },
             )
             .unwrap();
@@ -14725,6 +14914,7 @@ mod tests {
                     auto_compact_sst_bytes: None,
                     exclusive: true,
                     large_value_threshold: None,
+                    sst_payload_budget_bytes: None,
                 },
             )
             .unwrap(),
@@ -14813,6 +15003,7 @@ mod tests {
                     auto_compact_sst_bytes: None,
                     exclusive: true,
                     large_value_threshold: None,
+                    sst_payload_budget_bytes: None,
                 },
             )
             .unwrap();
@@ -14841,6 +15032,7 @@ mod tests {
                 auto_compact_sst_bytes: None,
                 exclusive: true,
                 large_value_threshold: None,
+                sst_payload_budget_bytes: None,
             },
         )
         .unwrap();
@@ -14873,6 +15065,7 @@ mod tests {
                 auto_compact_sst_bytes: None,
                 exclusive: true,
                 large_value_threshold: None,
+                sst_payload_budget_bytes: None,
             },
         )
         .unwrap();
@@ -14908,6 +15101,7 @@ mod tests {
                     auto_compact_sst_bytes: None,
                     exclusive: true,
                     large_value_threshold: None,
+                    sst_payload_budget_bytes: None,
                 },
             )
             .unwrap();
@@ -15050,6 +15244,7 @@ mod tests {
                     auto_compact_sst_bytes: None,
                     exclusive: true,
                     large_value_threshold: None,
+                    sst_payload_budget_bytes: None,
                 },
             )
             .unwrap();
@@ -15095,6 +15290,7 @@ mod tests {
                     auto_compact_sst_bytes: None,
                     exclusive: true,
                     large_value_threshold: None,
+                    sst_payload_budget_bytes: None,
                 },
             )
             .unwrap();
@@ -15939,6 +16135,7 @@ mod tests {
             exclusive: true,
             large_value_threshold: None,
             wal_recovery: WalRecovery::FailClosed,
+            sst_payload_budget_bytes: None,
         }
     }
 

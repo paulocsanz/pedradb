@@ -127,6 +127,7 @@ pub fn workload_index_tx_crash(dir: impl AsRef<Path>) -> Result<WorkloadReport> 
         auto_compact_sst_bytes: None,
         exclusive: true,
         large_value_threshold: None,
+        sst_payload_budget_bytes: None,
     };
     let mut silent_wrong = 0u64;
     let mut trials = 0u64;

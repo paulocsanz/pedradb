@@ -57,7 +57,7 @@ pub use batch::{
     write_record_count_ok, write_record_count_ok_as_is, WriteOp, WriteRecord, WRITE_RECORD_VERSION,
 };
 pub use bloom::{bloom_header_ok, bloom_header_ok_as_is, BloomFilter, DEFAULT_BITS_PER_KEY, MAX_K};
-pub use cache::{BlockCache, TableCache};
+pub use cache::{BlockCache, SstPayloadPool, TableCache};
 pub use cf_kernel::{
     cf_encode_effective, cf_family_of, compact_rewrites_sst_cf, compact_rewrites_sst_cf_as_is,
     decode_cf_key, encode_cf_key, infer_sst_cf, key_in_cf_family, key_in_cf_family_as_is,
@@ -76,9 +76,10 @@ pub use db::{
     CompactOptions, Db, DbStats, FenceClass, FenceRecovery, FenceReport, HistoryHorizon,
     HistoryOptions, OpenOptions, PreparedL0Compact, ReadProbeSnap, RecoveryReport, ScanProjection,
     Snapshot, SnapshotPin, SstLiveMeta, WalRecovery, WriteOptions, WritePhaseStats,
-    CHECKPOINT_META_FILE, L0_COMPACTION_TRIGGER, MAX_LSM_LEVEL, WAL_FILE_NAME,
+    CHECKPOINT_META_FILE, DEFAULT_SST_PAYLOAD_BUDGET_BYTES, L0_COMPACTION_TRIGGER, MAX_LSM_LEVEL,
+    WAL_FILE_NAME,
 };
-pub use env::{AdviseKind, Env, EnvFile, StdEnv};
+pub use env::{AdviseKind, Env, EnvFile, EnvSource, SstFileSource, StdEnv};
 pub use error::{CoreError, Result};
 pub use host::{DetHost, Host, StdHost};
 pub use key::{
