@@ -3656,6 +3656,7 @@ where
                         break;
                     }
                     Ok(CompactCmd::Run) | Err(RecvTimeoutError::Timeout) => {
+                        compact_diag(&inner);
                         let fenced = inner.is_durability_fenced();
                         if fenced && !fence_notified {
                             if let (Some(listener), Some(report)) =
@@ -3697,7 +3698,12 @@ where
                         // transient that OOMed a 4 GiB host at 25M entries.
                         // Fold only once writers have been idle; the idle
                         // branch below then materializes what is left.
-                        let may_fold = inner.writes_idle_for(persist_idle);
+                        // A flush-debt-throttled writer looks idle to
+                        // `writes_idle_for` while it sleeps — never fold
+                        // (deep-clone) the full parked tables it waits on.
+                        let may_fold = inner.writes_idle_for(persist_idle)
+                            && inner.parked_unflushed_bytes()
+                                < inner.flush_debt_cap().unwrap_or(usize::MAX);
                         if may_fold && inner.parked_unflushed_count() >= 2 {
                             let _ = inner.fold_parked_once_off_lock();
                         }
@@ -3754,6 +3760,13 @@ where
     E::File: Send + Sync + 'static,
 {
     let (tx, rx) = mpsc::sync_channel(1);
+    // Flush backpressure is armed: with this worker draining parked mems,
+    // submits may block on flush debt (WriteGroup::await_flush_debt).
+    inner.set_flush_worker_attached(true);
+    let tick_secs = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let mat_count = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let tick_secs_w = std::sync::Arc::clone(&tick_secs);
+    let mat_count_w = std::sync::Arc::clone(&mat_count);
     let handle = thread::Builder::new()
         .name("pedra-compat-flush".into())
         .spawn(move || {
@@ -3762,14 +3775,32 @@ where
                 match rx.recv_timeout(poll) {
                     Ok(CompactCmd::Shutdown) | Err(RecvTimeoutError::Disconnected) => break,
                     Ok(CompactCmd::Run) | Err(RecvTimeoutError::Timeout) => {
+                        let t0 = std::time::Instant::now();
+                        let before = inner.parked_unflushed_count();
                         flush_worker_tick(&inner);
+                        if inner.parked_unflushed_count() < before {
+                            mat_count_w.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        }
+                        tick_secs_w
+                            .store(t0.elapsed().as_secs(), std::sync::atomic::Ordering::Relaxed);
                     }
                 }
             }
         })
         .ok();
+    if let Ok(mut s) = FLUSH_DIAG_STATE.lock() {
+        *s = Some((tick_secs, mat_count));
+    }
     (Some(tx), handle)
 }
+
+/// Shared flush-worker diag state (last-tick seconds, materialize count).
+static FLUSH_DIAG_STATE: std::sync::Mutex<
+    Option<(
+        std::sync::Arc<std::sync::atomic::AtomicU64>,
+        std::sync::Arc<std::sync::atomic::AtomicU64>,
+    )>,
+> = std::sync::Mutex::new(None);
 
 /// `PEDRA_FLUSH_DIAG=1`: at most one stderr line per second with the
 /// memory-layer breakdown (parked/active/imm/retired/sst/rss), so
@@ -3800,8 +3831,16 @@ fn flush_worker_diag<E: PedraEnv>(inner: &ConcurrentDb<E>) {
                 .and_then(|f| f.parse::<u64>().ok())
         })
         .map_or(0, |pages| pages.saturating_mul(4096) / 1024);
+    let (tick_s, mat_n) = FLUSH_DIAG_STATE
+        .lock()
+        .ok()
+        .and_then(|s| {
+            s.as_ref()
+                .map(|(t, m)| (t.load(Ordering::Relaxed), m.load(Ordering::Relaxed)))
+        })
+        .map_or((0, 0), |v| v);
     eprintln!(
-        "FLUSHDIAG parked_n={} parked_b={} active_b={} imm={} retired_b={} sst_n={} rss_kb={}",
+        "FLUSHDIAG parked_n={} parked_b={} active_b={} imm={} retired_b={} sst_n={} rss_kb={} tick_s={} mat_n={}",
         inner.parked_unflushed_count(),
         inner.parked_unflushed_bytes(),
         inner.active_mem_usage(),
@@ -3809,6 +3848,35 @@ fn flush_worker_diag<E: PedraEnv>(inner: &ConcurrentDb<E>) {
         inner.retired_mem_bytes(),
         inner.sst_count(),
         rss_kb,
+        tick_s,
+        mat_n,
+    );
+}
+
+/// `PEDRA_FLUSH_DIAG=1` also heartbeats the compact worker (level counts),
+/// so flush starvation vs compaction activity is attributable in situ.
+fn compact_diag<E: PedraEnv>(inner: &ConcurrentDb<E>) {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static LAST_NS: AtomicU64 = AtomicU64::new(0);
+    if std::env::var_os("PEDRA_FLUSH_DIAG").is_none() {
+        return;
+    }
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_nanos() as u64);
+    let last = LAST_NS.load(Ordering::Relaxed);
+    if now.saturating_sub(last) < 1_000_000_000
+        || LAST_NS
+            .compare_exchange(last, now, Ordering::Relaxed, Ordering::Relaxed)
+            .is_err()
+    {
+        return;
+    }
+    eprintln!(
+        "COMPACTDIAG l0={} l1={} parked_n={}",
+        inner.with_read(|db| db.level_file_count(0)),
+        inner.with_read(|db| db.level_file_count(1)),
+        inner.parked_unflushed_count(),
     );
 }
 
@@ -3832,6 +3900,14 @@ fn flush_worker_tick<E: PedraEnv>(inner: &ConcurrentDb<E>) {
     }
 }
 
+/// Cap on L0 inputs per host-worker merge job. An unbounded job merges every
+/// L0 of the family at once — at the 256 MiB bench buffer that is ≥1 GiB of
+/// inputs per job, a multi-second merge that monopolizes the disk while
+/// ingest keeps parking tables and RSS spikes (+1.7 GB/s observed at 25M
+/// slipstream, v15). Two inputs per job bound merge memory and time; the
+/// trigger loop still drains L0 to zero, just in bounded slices.
+const COMPACT_MAX_L0_INPUTS: usize = 2;
+
 /// One L0→L1 job. I/O runs without the write lock (G5: failed write is not installed).
 fn compat_compact_once<E: PedraEnv>(inner: &ConcurrentDb<E>, gate: &Mutex<()>) -> bool {
     // Only invoked when writers are idle — drain every leftover L0 so a
@@ -3853,9 +3929,13 @@ fn compat_compact_once<E: PedraEnv>(inner: &ConcurrentDb<E>, gate: &Mutex<()>) -
                 .unwrap_or_else(|| db.last_sequence());
             CoreCompactOptions {
                 gc: pedradb_core::merge::CompactGcOptions::for_oldest_snapshot(oldest),
+                max_input_files: Some(COMPACT_MAX_L0_INPUTS),
             }
         } else {
-            CoreCompactOptions::default()
+            CoreCompactOptions {
+                max_input_files: Some(COMPACT_MAX_L0_INPUTS),
+                ..CoreCompactOptions::default()
+            }
         };
         db.prepare_l0_compact(opts).ok().flatten()
     });

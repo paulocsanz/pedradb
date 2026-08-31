@@ -793,6 +793,11 @@ pub struct SstLiveMeta {
 pub struct CompactOptions {
     /// Version GC policy applied while rewriting SSTs.
     pub gc: crate::merge::CompactGcOptions,
+    /// Cap on input L0 files per prepared job (`None` = all, single-writer
+    /// default). The compat host worker bounds this so one L0→L1 merge
+    /// holds a bounded input/output set instead of every parked L0 at once
+    /// (25M slipstream OOM: 5 × 256 MiB inputs spiked RSS +1.7 GB/s).
+    pub max_input_files: Option<usize>,
 }
 
 impl CompactOptions {
@@ -801,6 +806,7 @@ impl CompactOptions {
     pub fn latest_only() -> Self {
         Self {
             gc: crate::merge::CompactGcOptions::latest_only(),
+            max_input_files: None,
         }
     }
 }
@@ -4683,6 +4689,22 @@ impl<E: Env> Db<E> {
         self.auto_flush_bytes
     }
 
+    /// Flush-debt cap for concurrent writer backpressure: one parked
+    /// table's worth — the max of the global auto-flush and per-CF buffer
+    /// thresholds (whichever one parks tables). Writers above it wait for
+    /// the host flush worker instead of parking faster than it drains
+    /// (25M slipstream: 185 MB/s ingest vs ~100 MB/s materialize OOMed a
+    /// 3892 MB box with nothing bounding `parked_unflushed`).
+    pub(crate) fn flush_debt_cap(&self) -> Option<usize> {
+        let mut cap = self.auto_flush_bytes.filter(|n| *n > 0);
+        for &n in self.cf_write_buffer.values() {
+            if n > 0 && cap.is_none_or(|c| n > c) {
+                cap = Some(n);
+            }
+        }
+        cap
+    }
+
     /// Mem / imm / pin / parked (no SST yet) / folded retired / pending pins.
     fn mem_layers(&self) -> impl Iterator<Item = &MemTable> {
         // F184: the fold is the union of drained pins — always the OLDEST
@@ -5039,6 +5061,7 @@ impl<E: Env> Db<E> {
         };
         self.compact_with(CompactOptions {
             gc: crate::merge::CompactGcOptions::for_oldest_snapshot(oldest),
+            max_input_files: None,
         })
     }
 
@@ -5072,6 +5095,7 @@ impl<E: Env> Db<E> {
             MAX_LSM_LEVEL,
             CompactOptions {
                 gc: crate::merge::CompactGcOptions::for_oldest_snapshot(floor),
+                max_input_files: None,
             },
         )?;
         let mut after: u64 = 0;
@@ -5271,13 +5295,20 @@ impl<E: Env> Db<E> {
                     .push(t.clone());
             }
         }
-        let inputs = by_cf
+        let mut inputs = by_cf
             .into_iter()
             .max_by_key(|(_, v)| v.len())
             .map(|(_, v)| v)
             .unwrap_or_default();
         if inputs.is_empty() {
             return Ok(None);
+        }
+        // `ssts` is append-ordered, so the family vec is oldest-first; a
+        // truncated prefix is the oldest N L0 files. Any subset is a valid
+        // merge: newer L0 files stay live and shadow the output at read
+        // time exactly as they shadowed the inputs.
+        if let Some(max) = options.max_input_files.filter(|m| *m > 0) {
+            inputs.truncate(max);
         }
         let file_num = self.alloc_file_num();
         Ok(Some(PreparedL0Compact {
@@ -7862,11 +7893,13 @@ impl<E: Env> Db<E> {
                     } else {
                         CompactOptions {
                             gc: crate::merge::CompactGcOptions::for_oldest_snapshot(floor),
+                            max_input_files: None,
                         }
                     }
                 }
                 Some((floor, false)) => CompactOptions {
                     gc: crate::merge::CompactGcOptions::for_oldest_snapshot(floor),
+                    max_input_files: None,
                 },
                 None => CompactOptions::default(),
             };
@@ -7882,12 +7915,14 @@ impl<E: Env> Db<E> {
                     } else {
                         self.compact_with_ssts_only(CompactOptions {
                             gc: crate::merge::CompactGcOptions::for_oldest_snapshot(floor),
+                            max_input_files: None,
                         })?;
                     }
                 }
                 Some((floor, false)) => {
                     self.compact_with_ssts_only(CompactOptions {
                         gc: crate::merge::CompactGcOptions::for_oldest_snapshot(floor),
+                        max_input_files: None,
                     })?;
                 }
                 None => {
@@ -7929,6 +7964,7 @@ impl<E: Env> Db<E> {
                             MAX_LSM_LEVEL,
                             CompactOptions {
                                 gc: crate::merge::CompactGcOptions::for_oldest_snapshot(floor),
+                                max_input_files: None,
                             },
                         )?;
                         let mut after: u64 = 0;
@@ -12058,6 +12094,41 @@ mod tests {
         assert_eq!(db.get(b"lock\0k").as_deref(), Some(b"L".as_ref()));
         assert_eq!(db.get(b"default\0k").as_deref(), Some(b"D".as_ref()));
         assert_eq!(db.get(b"write\0k").as_deref(), Some(b"W".as_ref()));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// `CompactOptions::max_input_files` bounds one prepared job to the
+    /// oldest N L0 files; the rest stay live at L0 and shadow the merged
+    /// output exactly as they shadowed the inputs (host worker merges in
+    /// bounded slices instead of every L0 at once).
+    #[test]
+    fn prepare_l0_compact_respects_max_input_files() {
+        let dir = temp_dir();
+        let mut db = Db::open(&dir).unwrap();
+        db.set_defer_auto_compact(true);
+        for round in 0..5u8 {
+            for i in 0..4u8 {
+                db.put([b'k', i], [b'v', round, i]).unwrap();
+            }
+            db.flush().unwrap();
+        }
+        assert_eq!(db.level_file_count(0), 5);
+        let job = db
+            .prepare_l0_compact(CompactOptions {
+                max_input_files: Some(2),
+                ..CompactOptions::default()
+            })
+            .unwrap()
+            .expect("L0 job");
+        let tables = job.write().unwrap();
+        db.install_prepared_l0_compact(job, tables).unwrap();
+        assert_eq!(db.level_file_count(0), 3, "only two oldest L0s merged");
+        assert!(db.level_file_count(1) >= 1);
+        // Newest version wins across the slice boundary.
+        assert_eq!(db.get(&[b'k', 0]).as_deref(), Some(&[b'v', 4, 0][..]));
+        db.close().unwrap();
+        let db = Db::open(&dir).unwrap();
+        assert_eq!(db.get(&[b'k', 0]).as_deref(), Some(&[b'v', 4, 0][..]));
         let _ = fs::remove_dir_all(&dir);
     }
 
