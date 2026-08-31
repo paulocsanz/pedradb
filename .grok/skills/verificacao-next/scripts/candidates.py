@@ -221,6 +221,9 @@ CAMPAIGN_DEPTH = {
 }
 REAL_ANCHORS = {
     "R-swarm-real": "findings/rfc0157-tcp-campaign/,findings/rfc0157-nightly/",
+    "R-fsync-lie": "findings/2026-08-24-tcg-world-smoke/,findings/2026-08-27-upstream-fullfsync/",
+    "R-tcg-guest": "findings/2026-08-27-tcg-caixote-guest/",
+    "R-direct-rpc": "findings/2026-08-30-direct-rpc-lab/",
 }
 
 
