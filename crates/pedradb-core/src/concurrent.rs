@@ -34,7 +34,7 @@ use parking_lot::{Condvar, Mutex, RwLock};
 
 use crate::db::{
     BatchOp, BlobGcCandidate, CheckpointMeta, CompactOptions, Db, DbStats, OpenOptions,
-    PreparedL0Compact, Snapshot, SnapshotPin, SstLiveMeta, WriteOptions,
+    ParallelMergeEnv, PreparedL0Compact, Snapshot, SnapshotPin, SstLiveMeta, WriteOptions,
 };
 use crate::env::{Env, StdEnv};
 use crate::error::{CoreError, Result};
@@ -1085,7 +1085,9 @@ impl<E: Env> ConcurrentDb<E> {
         E: Env + Send + Sync + 'static,
         E::File: Send + 'static,
     {
-        Ok(Self::from_db(Db::open_with_env_bounded(path, opts, env)?))
+        let mut db = Db::open_with_env_bounded(path, opts, env.clone())?;
+        db.set_parallel_merge(Arc::new(ParallelMergeEnv::new(env)));
+        Ok(Self::from_db(db))
     }
 
     /// Point get. A point-cache hit answers without the Db read lock
@@ -2449,10 +2451,47 @@ impl<E: Env> ConcurrentDb<E> {
         }
     }
 
-    /// Publish a prepared L0→L1 compact: mem install under the write lock,
-    /// MANIFEST `fsync` off-lock (RFC-0041 P1.1).
+    /// Publish a prepared leveled compact: mem install under the write lock,
+    /// MANIFEST `fsync` off-lock (RFC-0041 P1.1). After a successful install
+    /// it drives bounded pushdown jobs ([`Db::prepare_pushdown_compact`]):
+    /// with no core-owned compaction thread, the host tick that just grew a
+    /// level past its target is also the cheapest place to relieve it — the
+    /// next L0→L1 job's overlap slice stays bounded instead of growing into
+    /// a whole-level rewrite.
     #[must_use]
     pub fn install_prepared_l0_off_lock(
+        &self,
+        job: PreparedL0Compact<E>,
+        tables: Vec<crate::sst::SstTable>,
+    ) -> bool {
+        if !self.install_prepared_one(job, tables) {
+            return false;
+        }
+        if !crate::leveling::leveled_enabled() {
+            return true;
+        }
+        // Bounded relief per tick: one L0→L1 job adds at most its L0 inputs
+        // over target; each pushdown moves one chunk out. Four covers a
+        // 4-buffer burst; anything larger waits for the next tick.
+        for _ in 0..4 {
+            let job = match self.inner.write().prepare_pushdown_compact() {
+                Ok(Some(j)) => j,
+                _ => break,
+            };
+            let tables = match job.write() {
+                Ok(t) => t,
+                Err(_) => break,
+            };
+            if !self.install_prepared_one(job, tables) {
+                break;
+            }
+        }
+        true
+    }
+
+    /// Single prepared-job install (no follow-ups).
+    #[must_use]
+    fn install_prepared_one(
         &self,
         job: PreparedL0Compact<E>,
         tables: Vec<crate::sst::SstTable>,
@@ -2503,16 +2542,18 @@ impl<E: Env> ConcurrentDb<E> {
         true
     }
 
-    /// Compact: flush pipeline first, then compact under write lock.
+    /// Compact: flush pipeline first, then bounded leveled drain
+    /// ([`Db::compact_leveled`]) — L0 drain plus per-level pushdowns, not a
+    /// whole-level rewrite.
     ///
     /// Flush I/O releases the lock (see [`Self::flush`]); the compact merge still
     /// needs exclusive access to the SST inventory for install safety.
     ///
     /// # Errors
-    /// I/O.
+    /// SST / MANIFEST I/O.
     pub fn compact(&self) -> Result<()> {
         self.flush()?;
-        self.inner.write().compact_ssts_only()
+        self.inner.write().compact_leveled()
     }
 
     /// Compact only SSTs of `cf` (RFC-0065 P0.2). Flushes first so mem keys

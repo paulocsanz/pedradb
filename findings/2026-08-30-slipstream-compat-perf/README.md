@@ -783,5 +783,66 @@ Honest read:
   incremental L1→L2 — that single change attacks hydrate, settle, the
   probe tails, and the 100M disk peak (47 GiB → ~live set) together.
 
+## Guest run #11 (v21i, 25M) — leveled compaction + parallel merge spans
+
+Implemented in core (`leveling.rs` new; `db.rs`, `concurrent.rs`,
+`sst/table.rs`, `lib.rs`): leveled selection kernel (L0→L1 jobs absorb
+the disjoint L1 overlap slice, hull-closure-capped at 4× the 256 MiB L1
+target; over-cap → bounded pushdown L1→L2/L2→L3 of the oldest chunk plus
+its overlap), `Db::compact_leveled` settle drain (stacked-level repair +
+bounded jobs, 100k safety valve), pushdowns piggyback on every worker
+install (≤4/tick), and a type-erased `ParallelMerge` seam so merge jobs
+run as Rocks-shaped key-space subcompactions (`std::thread::scope`,
+shared file-number atomic) — `E: Send + Sync` holds only on the host
+open path (`ConcurrentDb::open_with_env_bounded`), compat stays
+untouched (the crate compiles against it with zero edits). Kill
+switches: `PEDRA_LEVELED=0`, `PEDRA_MERGE_SPANS=N`. Core suite: 654
+pass; the 3 failures (`catchup_wait_bounded_by_half_fd`,
+`verified_report_matches_catalog`, `maybe_auto_flush…`) reproduce
+**at HEAD in a clean worktree** — pre-existing, not from this change.
+Property test `leveling::job_output_keeps_level_disjoint` initially
+failed on its own generator (decimal keys invert byte order across
+digit-count boundaries — ranges production never produces); zero-padded
+keys pass all 200 cases. Raw serial: `run11-25m-leveled.txt`. Local 1M
+sanity: hydrate 1.0 s vs rocks 0.9 s, 8 parallel spans visible.
+
+| leg (25M)              | run #10 (v21h) | run #11 (v21i) | rocks default | v21i ratio |
+|------------------------|----------------|----------------|---------------|------------|
+| hydrate                | 117.6 s        | 149.2 s        | 25.3 s        | 0.17×      |
+| settle                 | 89.6 s         | **51.4 s**     | 8.3 s         | 0.16×      |
+| probe_hit p50          | 39.8 µs        | 43.1 µs        | 45.4 µs       | 1.05×      |
+| get_hit (criterion)    | 54.1 µs        | **49.4 µs**    | 38.59 µs      | 0.78×      |
+| prefix_scan            | 644.6 µs       | 616.1 µs       | 305.6 µs      | 0.50×      |
+| lookup_100 multi_get   | 6.023 ms       | **5.019 ms**   | 3.70 ms       | 0.74×      |
+| on disk after settle   | 5.15 GiB       | 5.15 GiB       | 5.24 GiB      | smaller    |
+
+Honest read:
+- settle −43%, get_hit +9.5%, lookup_100 multi_get +17% — but hydrate
+  **+27%** (117.6 → 149.2 s): leveled jobs rewrite the L1 slice per tick
+  and pushdowns run during ingest, so hydrate pays I/O it used to defer
+  to settle. Net hydrate+settle 207.2 → 200.6 s — roughly break-even,
+  with a far better read structure as the residual win.
+- Post-settle `COMPACTDIAG l0=0 l1=5 sst_n=95` — but run #10's settle
+  already produced 99 **disjoint** chunks, so stacking was never the
+  settled-read bottleneck: the gap is per-get candidate cost (every
+  chunk bloom-checked, ~95 chunks ≈ the 10.8 µs get_hit gap over rocks)
+  and per-block scan cost (4 KiB `BLOCK_TARGET` vs rocks 16 KiB).
+- Hydrate is **fd-floor-bound**: 24 414 sequential apply batches × one
+  fdatasync each (G1 product, fdatasync-before-Ok) on qcow2/virtio vs
+  the peer's zero fsyncs (`sync=false`). Even perfect compaction overlap
+  cannot reach 1× on this disk class — the registered single-client
+  fd-ceiling disclosure applies to this leg (local Mac: 0.9×).
+
+## Guest run #12 (v21j, 25M) — point-lookup range prune (+ LEVELDIAG)
+
+`Db::lookup` now skips the point seek for chunks whose
+smallest/largest user key excludes the key (bounds span every entry's
+user key, deletion markers included; range tombstones still collected
+from every chunk — a tombstone's end key lives in its value, outside
+the bounds). Injection also exports `PEDRA_LEVEL_DIAG=1` in
+`p04_entrypoint.sh` (which exports `PEDRA_FLUSH_DIAG` only — the run #9
+"REWRITEDIAG exported" note does not hold for this image; that is why
+run #10/#11 have zero REWRITEDIAG lines). Result: pending.
+
 
 

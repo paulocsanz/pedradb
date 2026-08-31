@@ -1227,16 +1227,56 @@ impl SstTable {
         self.entries_cloned().into_iter()
     }
 
+    /// First user key of every data block, from the in-memory index (no I/O).
+    /// Used to sample key-space split points for the parallel merge.
+    #[must_use]
+    pub fn block_first_user_keys(&self) -> Vec<&[u8]> {
+        self.index
+            .iter()
+            .map(|h| h.first_user_key.as_ref())
+            .collect()
+    }
+
     /// Internal versions one block at a time (RFC-0037 compact). Does **not**
     /// fill the materialize cache on a lazy table.
     #[must_use]
-    pub fn iter_internal_streaming(&self) -> SstInternalStream<'_> {
-        SstInternalStream {
+    pub fn iter_internal_streaming(&self) -> SstInternalStream<'_> {        SstInternalStream {
             table: self,
             block_i: 0,
             block: None,
             entry_i: 0,
             failed: false,
+            hi_excl: None,
+        }
+    }
+
+    /// Like [`SstTable::iter_internal_streaming`] but bounded to user keys in
+    /// `[lo, hi)` (`None` = unbounded on that side). Used by the parallel
+    /// merge: each span owns a half-open user-key window, so a user key's
+    /// whole version run always lands in exactly one span. Blocks whose
+    /// first user key is below `lo` are skipped by index seek — never
+    /// decoded.
+    #[must_use]
+    pub fn iter_internal_between(
+        &self,
+        lo: Option<&[u8]>,
+        hi_excl: Option<&[u8]>,
+    ) -> SstInternalStream<'_> {
+        // First block whose first user key is >= lo: everything before it
+        // ends below lo (entries are sorted by user key).
+        let block_i = lo
+            .map(|lo| {
+                self.index
+                    .partition_point(|h| h.first_user_key.as_ref() < lo)
+            })
+            .unwrap_or(0);
+        SstInternalStream {
+            table: self,
+            block_i,
+            block: None,
+            entry_i: 0,
+            failed: false,
+            hi_excl: hi_excl.map(Bytes::copy_from_slice),
         }
     }
 
@@ -1546,6 +1586,9 @@ pub struct SstInternalStream<'a> {
     block: Option<Vec<(InternalKey, Bytes)>>,
     entry_i: usize,
     failed: bool,
+    /// Half-open span end (`[lo, hi)` user keys): the first entry at or past
+    /// this user key ends the stream permanently.
+    hi_excl: Option<Bytes>,
 }
 
 impl crate::merge::CompactSource for SstInternalStream<'_> {
@@ -1565,8 +1608,19 @@ impl SstInternalStream<'_> {
         }
         loop {
             if let Some(block) = &self.block {
-                if self.entry_i < block.len() {
-                    let e = block[self.entry_i].clone();
+                while self.entry_i < block.len() {
+                    let (k, v) = &block[self.entry_i];
+                    if let Some(hi) = self.hi_excl.as_deref() {
+                        if k.user_key.as_ref() >= hi {
+                            // Past the span end: stop for good (entries are
+                            // user-key sorted, so nothing later qualifies).
+                            // `failed` is the terminal flag for both lazy
+                            // and eager tables; no error was raised.
+                            self.failed = true;
+                            return Ok(None);
+                        }
+                    }
+                    let e = (k.clone(), v.clone());
                     self.entry_i += 1;
                     return Ok(Some(e));
                 }

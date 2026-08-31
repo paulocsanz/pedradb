@@ -772,12 +772,16 @@ pub enum ScanProjection {
     KeyOnly,
 }
 
-/// L0 files snapshotted for an off-lock rewrite (RFC-0037 P1.2).
+/// Files snapshotted for an off-lock leveled rewrite (RFC-0037 P1.2; the job
+/// may mix L0 inputs with the L1 slice they overlap, or one L`n` file with
+/// its L`n+1` overlaps — a pushdown).
 ///
 /// Inputs stay in the live inventory until [`Db::install_prepared_l0_compact`].
 /// [`Self::write`] does not need the `Db` write lock.
 pub struct PreparedL0Compact<E: Env> {
     inputs: Vec<SstTable>,
+    /// Level the outputs land at (1 for L0→L1, `n+1` for a pushdown).
+    to_level: u32,
     file_num: u64,
     gc: crate::merge::CompactGcOptions,
     dir: PathBuf,
@@ -792,6 +796,72 @@ pub struct PreparedL0Compact<E: Env> {
     /// its whole body resident, so it must be registered (evictable) the
     /// moment it exists.
     kit: Option<crate::cache::PayloadKit>,
+    /// Type-erased parallel merge executor (see [`Db::set_parallel_merge`]).
+    parallel: Option<Arc<dyn ParallelMerge>>,
+}
+
+/// Type-erased key-space-parallel merge executor. `E` cannot be shared
+/// across threads generically (`Env: Clone` only), and the compat host
+/// drives compaction through unbounded generic code — so the host open
+/// path (where `E: Send + Sync + 'static` holds) installs one concrete
+/// implementation behind this seam, and prepared jobs inherit it.
+pub(crate) trait ParallelMerge: Send + Sync {
+    /// Merge `tables` into chunked SSTs (see [`write_merged_tables`]),
+    /// in parallel across key-space spans when the inputs are large.
+    ///
+    /// # Errors
+    /// SST encode / I/O.
+    fn merge(
+        &self,
+        first_file_num: u64,
+        tables: &[SstTable],
+        dir: &Path,
+        gc: crate::merge::CompactGcOptions,
+        do_sync_dir: bool,
+        split_target: u64,
+        chunk_budget: usize,
+        kit: Option<crate::cache::PayloadKit>,
+    ) -> Result<Vec<SstTable>>;
+}
+
+/// Concrete [`ParallelMerge`] for any thread-shareable env.
+pub(crate) struct ParallelMergeEnv<E> {
+    env: E,
+}
+
+impl<E> ParallelMergeEnv<E> {
+    pub(crate) fn new(env: E) -> Self {
+        Self { env }
+    }
+}
+
+impl<E> ParallelMerge for ParallelMergeEnv<E>
+where
+    E: Env + Send + Sync + 'static,
+{
+    fn merge(
+        &self,
+        first_file_num: u64,
+        tables: &[SstTable],
+        dir: &Path,
+        gc: crate::merge::CompactGcOptions,
+        do_sync_dir: bool,
+        split_target: u64,
+        chunk_budget: usize,
+        kit: Option<crate::cache::PayloadKit>,
+    ) -> Result<Vec<SstTable>> {
+        write_merged_tables_parallel(
+            &self.env,
+            dir,
+            first_file_num,
+            tables,
+            gc,
+            do_sync_dir,
+            split_target,
+            chunk_budget,
+            kit.as_ref(),
+        )
+    }
 }
 
 impl<E: Env> PreparedL0Compact<E> {
@@ -802,7 +872,9 @@ impl<E: Env> PreparedL0Compact<E> {
     }
 
     /// Merge inputs into one or more SSTs split at the compaction target
-    /// file size (streaming when `gc` is default).
+    /// file size (streaming when `gc` is default). Large jobs run as
+    /// parallel key-space spans through the [`ParallelMerge`] seam when the
+    /// host installed one ([`Db::set_parallel_merge`]); otherwise sequential.
     ///
     /// # Errors
     /// SST encode / I/O. On error the live L0 inventory is unchanged.
@@ -812,18 +884,30 @@ impl<E: Env> PreparedL0Compact<E> {
             .first()
             .map(|t| t.cf().to_string())
             .unwrap_or_default();
-        write_merged_tables(
-            &self.env,
-            &self.dir,
-            self.file_num,
-            &self.inputs,
-            self.gc,
-            self.sync,
-            self.split_target,
-            self.chunk_budget,
-            self.kit.as_ref(),
-        )
-        .map(|ts| {
+        let merged = match &self.parallel {
+            Some(pm) => pm.merge(
+                self.file_num,
+                &self.inputs,
+                &self.dir,
+                self.gc,
+                self.sync,
+                self.split_target,
+                self.chunk_budget,
+                self.kit.clone(),
+            ),
+            None => write_merged_tables(
+                &self.env,
+                &self.dir,
+                self.file_num,
+                &self.inputs,
+                self.gc,
+                self.sync,
+                self.split_target,
+                self.chunk_budget,
+                self.kit.as_ref(),
+            ),
+        };
+        merged.map(|ts| {
             ts.into_iter()
                 .map(|t| t.with_cf(cf.clone()))
                 .collect::<Vec<_>>()
@@ -1255,6 +1339,16 @@ pub struct Db<E: Env = StdEnv> {
     /// [`crate::compact_kernel::COMPACT_TARGET_FILE_BYTES`]). Rocks
     /// `target_file_size_base` role; operator-tunable.
     compact_target_file_bytes: u64,
+    /// Size target of L1 for the leveled scheduler ([`crate::leveling`]);
+    /// L`n+1` targets multiply by the fanout. Rocks `max_bytes_for_level_base`
+    /// role. Independent of [`Self::compact_target_file_bytes`] so small-file
+    /// tests do not trip level pushdowns.
+    l1_target_bytes: u64,
+    /// Key-space-parallel merge executor for prepared leveled jobs, shared
+    /// with every job [`Self::build_prepared`] snapshots. Installed by the
+    /// bounded host open path ([`ConcurrentDb::open_with_env_bounded`]) where
+    /// `E: Send + Sync + 'static` holds; `None` = sequential merges.
+    parallel_merge: Option<Arc<dyn ParallelMerge>>,
     /// Durable commits since the last CHANGELOG store.
     commits_since_changelog: u64,
     /// Successful CHANGELOG stores since open.
@@ -1764,6 +1858,8 @@ impl<E: Env> Db<E> {
             changelog_rebuild_budget_entries:
                 crate::changelog_kernel::DEFAULT_CHANGELOG_REBUILD_BUDGET_ENTRIES,
             compact_target_file_bytes: crate::compact_kernel::COMPACT_TARGET_FILE_BYTES,
+            l1_target_bytes: crate::compact_kernel::COMPACT_TARGET_FILE_BYTES,
+            parallel_merge: None,
             commits_since_changelog: 0,
             changelog_store_count: 0,
             unsynced_ssts: Vec::new(),
@@ -5223,6 +5319,104 @@ impl<E: Env> Db<E> {
         self.compact_with(CompactOptions::default())
     }
 
+    /// Settle with bounded leveled jobs ([`crate::leveling`]): drain L0 with
+    /// overlap-closed L0→L1 merges, then push over-target levels down one
+    /// oldest-file job at a time, until the shape is quiet. On a DB whose
+    /// steady state already holds (hydrate drained as it wrote), this is a
+    /// handful of small jobs — not a whole-database rewrite. A stacked
+    /// (non-disjoint) level — a DB written before leveling — is repaired
+    /// first with one whole-level rewrite per family.
+    ///
+    /// `PEDRA_LEVELED=0` selects the historical whole-level [`Self::compact`].
+    ///
+    /// # Errors
+    /// SST / MANIFEST I/O.
+    pub fn compact_leveled(&mut self) -> Result<()> {
+        if !crate::leveling::leveled_enabled() {
+            return self.compact_with(CompactOptions::default());
+        }
+        self.repair_stacked_levels()?;
+        // Safety valve only: every job strictly removes an L0 file or moves
+        // one file out of an over-target level, so the loop converges.
+        for _ in 0..100_000 {
+            let job = match self.prepare_l0_compact(CompactOptions::default())? {
+                Some(j) => Some(j),
+                None => self.prepare_pushdown_compact()?,
+            };
+            let Some(job) = job else {
+                self.dump_level_diag("compact_leveled_done");
+                return Ok(());
+            };
+            let tables = job.write()?;
+            self.install_prepared_l0_compact(job, tables)?;
+        }
+        Ok(())
+    }
+
+    /// `PEDRA_LEVEL_DIAG=1`: per-level file count + on-disk bytes at a
+    /// scheduling milestone (settle end, repair end) — the shape the read
+    /// path faces, on the guest serial console.
+    fn dump_level_diag(&self, tag: &str) {
+        if std::env::var_os("PEDRA_LEVEL_DIAG").is_none() {
+            return;
+        }
+        for level in 0..=MAX_LSM_LEVEL {
+            let mut n = 0usize;
+            let mut bytes = 0u64;
+            for (t, &lvl) in self.ssts.iter().zip(self.sst_levels.iter()) {
+                if lvl == level {
+                    n += 1;
+                    bytes += self.table_bytes(t);
+                }
+            }
+            eprintln!("LEVELDIAG {tag} level={level} files={n} bytes={bytes}");
+        }
+    }
+
+    /// One whole-level rewrite per stacked (non-disjoint) family level until
+    /// every level is a disjoint sorted run set — the precondition for
+    /// bounded overlap-sliced jobs (see [`crate::leveling`]).
+    fn repair_stacked_levels(&mut self) -> Result<()> {
+        while crate::leveling::leveled_enabled() {
+            let mut target: Option<(u32, Vec<usize>)> = None;
+            'search: for level in 1..=MAX_LSM_LEVEL {
+                let families: Vec<String> = self
+                    .ssts
+                    .iter()
+                    .zip(self.sst_levels.iter())
+                    .filter(|(_, &lvl)| lvl == level)
+                    .map(|(t, _)| self.compact_family_key(t).to_string())
+                    .collect::<BTreeSet<_>>()
+                    .into_iter()
+                    .collect();
+                for cf in families {
+                    let view = self.level_view(level, &cf);
+                    if view.len() >= 2 && !crate::leveling::is_disjoint(&view) {
+                        target = Some((
+                            level,
+                            view.iter().map(|f| f.idx).collect(),
+                        ));
+                        break 'search;
+                    }
+                }
+            }
+            let Some((level, idxs)) = target else {
+                return Ok(());
+            };
+            let inputs: Vec<SstTable> = idxs.iter().map(|&i| self.ssts[i].clone()).collect();
+            let Some(job) = self.build_prepared(
+                inputs,
+                level,
+                crate::merge::CompactGcOptions::default(),
+            )? else {
+                return Ok(());
+            };
+            let tables = job.write()?;
+            self.install_prepared_l0_compact(job, tables)?;
+        }
+        Ok(())
+    }
+
     /// Compact with version GC options (RFC-0009 P1.3).
     ///
     /// # Errors
@@ -5479,6 +5673,14 @@ impl<E: Env> Db<E> {
     /// Inputs stay readable. Call [`PreparedL0Compact::write`] without this
     /// lock, then [`Self::install_prepared_l0_compact`].
     ///
+    /// Leveled selection: when the family's L1 is a disjoint sorted run set,
+    /// the job also absorbs the L1 slice overlapping the selected L0s, so L1
+    /// never degenerates into stacked full-range runs (see
+    /// [`crate::leveling`]). A stacked L1 (legacy DB) keeps the L0-only job.
+    /// When the overlapping slice is larger than the L1 slice cap, a pushdown
+    /// job ([`Self::prepare_pushdown_compact`]) is returned instead — it is
+    /// the bounded way to shrink the slice before the next L0→L1 merge.
+    ///
     /// # Errors
     /// None today (reservation cannot fail); `Result` for fence / I/O later.
     pub fn prepare_l0_compact(
@@ -5486,6 +5688,7 @@ impl<E: Env> Db<E> {
         options: CompactOptions,
     ) -> Result<Option<PreparedL0Compact<E>>> {
         self.ensure_not_fenced()?;
+        let leveled = crate::leveling::leveled_enabled();
         let mut by_cf: BTreeMap<String, Vec<SstTable>> = BTreeMap::new();
         for (t, &lvl) in self.ssts.iter().zip(self.sst_levels.iter()) {
             if lvl == 0 {
@@ -5495,10 +5698,10 @@ impl<E: Env> Db<E> {
                     .push(t.clone());
             }
         }
-        let mut inputs = by_cf
+        let (cf, mut inputs) = by_cf
             .into_iter()
             .max_by_key(|(_, v)| v.len())
-            .map(|(_, v)| v)
+            .map(|(cf, v)| (cf, v))
             .unwrap_or_default();
         if inputs.is_empty() {
             return Ok(None);
@@ -5506,9 +5709,99 @@ impl<E: Env> Db<E> {
         // `ssts` is append-ordered, so the family vec is oldest-first; a
         // truncated prefix is the oldest N L0 files. Any subset is a valid
         // merge: newer L0 files stay live and shadow the output at read
-        // time exactly as they shadowed the inputs.
+        // time exactly as they shadowed the inputs. The caller's bound is
+        // the contract (compat's 2-input ticks bound merge memory — the
+        // v15 25M OOM); leveled job size is bounded separately by the L1
+        // slice cap below.
         if let Some(max) = options.max_input_files.filter(|m| *m > 0) {
             inputs.truncate(max);
+        }
+        if leveled {
+            let l0_view = self.level_view(0, &cf);
+            let l1_view = self.level_view(1, &cf);
+            if crate::leveling::is_disjoint(&l1_view) {
+                if let Some((_l0_sel, slice)) = crate::leveling::pick_l0_to_l1(
+                    &l0_view,
+                    &l1_view,
+                    options
+                        .max_input_files
+                        .filter(|m| *m > 0)
+                        .unwrap_or(usize::MAX),
+                ) {
+                    let slice_tables: Vec<SstTable> =
+                        slice.iter().map(|&i| self.ssts[i].clone()).collect();
+                    let slice_bytes: u64 =
+                        slice_tables.iter().map(|t| self.table_bytes(t)).sum();
+                    let cap = self.l1_target_bytes.saturating_mul(4);
+                    if slice_bytes > cap {
+                        // Overlapping L1 is too fat for one bounded job:
+                        // shrink it by pushdown first (oldest chunks leave
+                        // L1 entirely). Falls through to L0-only stacking
+                        // only when nothing can push down.
+                        if let Some(job) = self.prepare_pushdown_compact()? {
+                            return Ok(Some(job));
+                        }
+                    } else {
+                        inputs.extend(slice_tables);
+                    }
+                }
+            }
+        }
+        self.build_prepared(inputs, 1, options.gc)
+    }
+
+    /// Next bounded pushdown job: the oldest file of the lowest level that
+    /// exceeds its size target, merged with the overlapping files one level
+    /// down. `None` when every level is within target (or its destination is
+    /// a stacked, non-disjoint level — those need a repair rewrite first).
+    ///
+    /// # Errors
+    /// None today (reservation cannot fail); `Result` for fence / I/O later.
+    pub fn prepare_pushdown_compact(&mut self) -> Result<Option<PreparedL0Compact<E>>> {
+        if !crate::leveling::leveled_enabled() || self.ssts.is_empty() {
+            return Ok(None);
+        }
+        let families: Vec<String> = self
+            .ssts
+            .iter()
+            .map(|t| self.compact_family_key(t).to_string())
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .collect();
+        for level in 1..MAX_LSM_LEVEL {
+            let target = crate::leveling::level_target_bytes(level, self.l1_target_bytes);
+            for cf in &families {
+                let src_view = self.level_view(level, cf);
+                if src_view.is_empty()
+                    || crate::leveling::total_bytes(&src_view) <= target
+                {
+                    continue;
+                }
+                let dst_view = self.level_view(level + 1, cf);
+                let Some((src_idx, slice)) = crate::leveling::pick_pushdown(&src_view, &dst_view)
+                else {
+                    continue;
+                };
+                let mut inputs: Vec<SstTable> = vec![self.ssts[src_idx].clone()];
+                for i in slice {
+                    inputs.push(self.ssts[i].clone());
+                }
+                return self.build_prepared(inputs, level + 1, crate::merge::CompactGcOptions::default());
+            }
+        }
+        Ok(None)
+    }
+
+    /// Reservation tail shared by every prepared leveled job: burn a chunk
+    /// range wide enough for the whole output, snapshot dir/env/kit.
+    fn build_prepared(
+        &mut self,
+        inputs: Vec<SstTable>,
+        to_level: u32,
+        gc: crate::merge::CompactGcOptions,
+    ) -> Result<Option<PreparedL0Compact<E>>> {
+        if inputs.is_empty() {
+            return Ok(None);
         }
         let file_num = self.alloc_file_num();
         // The off-lock `write()` emits one file per split-target chunk
@@ -5525,8 +5818,11 @@ impl<E: Env> Db<E> {
             .iter()
             .map(|t| self.env.metadata_len(t.path()).unwrap_or(0))
             .sum();
+        // Margin for the parallel spans: each span's last chunk can run
+        // past target and one extra chunk absorbs split-key skew.
+        let span_margin = merge_span_count(&self.env, &inputs).saturating_sub(1) as u64;
         let chunk_budget =
-            usize::try_from(inputs_bytes / self.compact_target_file_bytes.max(1) + 2)
+            usize::try_from(inputs_bytes / self.compact_target_file_bytes.max(1) + 2 + span_margin)
                 .unwrap_or(usize::MAX);
         for _ in 1..chunk_budget {
             self.alloc_file_num();
@@ -5540,15 +5836,47 @@ impl<E: Env> Db<E> {
             });
         Ok(Some(PreparedL0Compact {
             inputs,
+            to_level,
             file_num,
-            gc: options.gc,
+            gc,
             dir: self.dir.clone(),
             env: self.env.clone(),
             sync: self.sync,
             split_target: self.compact_target_file_bytes,
             chunk_budget,
             kit,
+            parallel: self.parallel_merge.clone(),
         }))
+    }
+
+    /// Install a key-space-parallel merge executor (host open path, where
+    /// `E: Send + Sync + 'static` holds). Without one, prepared jobs merge
+    /// sequentially.
+    pub(crate) fn set_parallel_merge(&mut self, pm: Arc<dyn ParallelMerge>) {
+        self.parallel_merge = Some(pm);
+    }
+
+    /// Scheduling view of one family's files at `level` (inventory indices
+    /// with user-key range and on-disk size).
+    fn level_view(&self, level: u32, cf: &str) -> Vec<crate::leveling::LevelFile> {
+        self.ssts
+            .iter()
+            .zip(self.sst_levels.iter())
+            .enumerate()
+            .filter(|(_, (t, &lvl))| lvl == level && self.compact_family_key(t) == cf)
+            .map(|(i, (t, _))| crate::leveling::LevelFile {
+                idx: i,
+                lo: t.smallest_user_key().unwrap_or_default().to_vec(),
+                hi: t.largest_user_key().unwrap_or_default().to_vec(),
+                bytes: self.table_bytes(t),
+            })
+            .collect()
+    }
+
+    /// On-disk size of one live table (0 when the stat fails — a missing
+    /// file reports as empty, the conservative direction for sizing).
+    fn table_bytes(&self, t: &SstTable) -> u64 {
+        self.env.metadata_len(t.path()).unwrap_or(0)
     }
 
     /// Publish a prepared L0→L1 SST. L0s flushed while `write` ran are kept.
@@ -7141,7 +7469,20 @@ impl<E: Env> Db<E> {
         let mut seek_scratch = PointSeekScratch::default();
         for &sst_i in self.sst_indices_newest_first() {
             let table = &self.ssts[sst_i];
+            // Range tombstones always flow: a tombstone's end key lives in
+            // its value, so the table bounds below do not cover its span.
             table.collect_range_tombstones(snapshot, &mut range_tombs);
+            // Range-prune the point seek: the bounds span every entry's
+            // user key (deletion markers included), so a key outside them
+            // has no point version here. Without this, a get walks every
+            // chunk's bloom — ~95 disjoint chunks after leveled settle
+            // measured ~10 µs/get of pure candidate checking (25M guest).
+            if let (Some(lo), Some(hi)) = (table.smallest_user_key(), table.largest_user_key())
+            {
+                if key < lo || key > hi {
+                    continue;
+                }
+            }
             match table.point_at_seeking(key, snapshot, &mut seek_scratch) {
                 Ok(Some((seq, look))) => {
                     best_point_seq = Some(seq);
@@ -8478,10 +8819,14 @@ impl<E: Env> Db<E> {
         new_tables: Vec<SstTable>,
     ) -> Option<L0CompactUndo> {
         let input_paths: Vec<PathBuf> = job.input_paths();
-        let still_live = self
-            .ssts
+        // Every input must still be live. With leveled jobs the inputs can
+        // mix levels, and a concurrent install may have taken only *some* of
+        // them: this job's outputs merge the data of inputs that are gone,
+        // so installing them would duplicate live versions (G2). Another
+        // install's outputs already cover the gone inputs — skip entirely.
+        let still_live = input_paths
             .iter()
-            .any(|t| input_paths.iter().any(|p| t.path() == p.as_path()));
+            .all(|p| self.ssts.iter().any(|t| t.path() == p.as_path()));
         if !still_live {
             for t in &new_tables {
                 let _ = self.remove_db_file(t.path());
@@ -8503,7 +8848,7 @@ impl<E: Env> Db<E> {
             self.note_sst_bytes_written(t.path());
             self.table_cache.insert(Arc::new(t.clone()));
             keep_tables.push(t.clone());
-            keep_levels.push(1);
+            keep_levels.push(job.to_level);
         }
         // The prepared job reserved exactly one file number; a split output
         // consumed `job.file_num ..= job.file_num + n - 1`, so burn the rest.
@@ -9415,38 +9760,86 @@ fn finish_merged_chunk_on(
     SstTable::open_on(env, &final_path)
 }
 
-/// Merge `tables` into one **or more** SSTs split at
-/// [`crate::compact_kernel::COMPACT_TARGET_FILE_BYTES`]: the SST writer
-/// buffers one output file in memory, so a single-file merge of every
-/// input would hold the whole dataset in RAM (the 4 GiB settle OOM —
-/// compact added +1.1 GB for a 620 MB dataset, and the 128 GiB host
-/// survived the same shape only as a ~10 GB in-memory file). Splits fall
-/// between user keys — output files hold disjoint contiguous key ranges
-/// at the same level. File numbers run
-/// `first_file_num ..= first_file_num + n - 1`; `chunk_budget` is a hard
-/// cap on `n`: when the split target would exceed it, the current chunk
-/// simply grows past target (sizing is advisory; correctness is that the
-/// writer never touches numbers beyond the range its caller reserved).
-fn write_merged_tables(
+/// How many key-space spans a merge job should be split into (Rocks-shaped
+/// subcompactions). 1 = sequential. Gated on total input size: small jobs pay
+/// more in thread setup and straggler skew than they gain. `PEDRA_MERGE_SPANS`
+/// overrides (A/B on the guest without a rebuild).
+fn merge_span_count(env: &impl Env, tables: &[SstTable]) -> usize {
+    if let Ok(v) = std::env::var("PEDRA_MERGE_SPANS") {
+        if let Ok(n) = v.trim().parse::<usize>() {
+            return n.max(1);
+        }
+    }
+    const PARALLEL_MIN_INPUT_BYTES: u64 = 96 * 1024 * 1024;
+    let total: u64 = tables
+        .iter()
+        .map(|t| env.metadata_len(t.path()).unwrap_or(0))
+        .sum();
+    if total < PARALLEL_MIN_INPUT_BYTES {
+        return 1;
+    }
+    std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(1)
+        .min(8)
+}
+
+/// `parts - 1` user-key split points sampled from the inputs' in-memory block
+/// indexes (no data read). Consecutive splits define half-open spans
+/// `[split_i, split_{i+1})`; a user key's whole version run stays inside one
+/// span, so per-user-key GC decisions remain complete per span.
+fn sample_span_splits(tables: &[SstTable], parts: usize) -> Vec<Vec<u8>> {
+    let mut keys: Vec<&[u8]> = Vec::new();
+    for t in tables {
+        keys.extend(t.block_first_user_keys());
+    }
+    keys.sort_unstable();
+    keys.dedup();
+    if keys.len() < parts {
+        return Vec::new();
+    }
+    (1..parts)
+        .map(|i| {
+            let at = (keys.len() * i) / parts;
+            keys[at.min(keys.len() - 1)].to_vec()
+        })
+        .collect()
+}
+
+/// Merge `tables` into one **or more** SSTs bounded to user keys in `[lo, hi)`
+/// (`None` = unbounded on that side), split at `split_target` logical bytes.
+/// Splits fall between user keys — output files hold disjoint contiguous key
+/// ranges at the same level. `file_alloc` hands out the next output file
+/// number (reserved by the caller); `span_budget` is a hard cap on this
+/// span's chunk count: when the split target would exceed it, the current
+/// chunk simply grows past target (sizing is advisory; correctness is that
+/// the writer never touches numbers beyond the reserved range).
+///
+/// GC rewrites stream too: `GcMergeSource` applies the same retention
+/// decisions per user-key run, so no input table is ever materialized.
+#[allow(clippy::too_many_arguments)]
+fn write_merged_tables_span(
     env: &impl Env,
     dir: &Path,
-    first_file_num: u64,
     tables: &[SstTable],
     gc: crate::merge::CompactGcOptions,
     do_sync_dir: bool,
     split_target: u64,
-    chunk_budget: usize,
+    span_budget: usize,
     kit: Option<&crate::cache::PayloadKit>,
+    lo: Option<&[u8]>,
+    hi: Option<&[u8]>,
+    file_alloc: &mut dyn FnMut() -> u64,
+    span_tag: usize,
 ) -> Result<Vec<SstTable>> {
     let bloom_hint: usize = tables.iter().map(SstTable::len).sum();
     let mut out: Vec<SstTable> = Vec::new();
-    let mut file_num = first_file_num;
     if tables.is_empty() {
         return Ok(out);
     }
     let streams: Vec<_> = tables
         .iter()
-        .map(SstTable::iter_internal_streaming)
+        .map(|t| t.iter_internal_between(lo, hi))
         .collect();
     let merge = crate::merge::KwayInternalMerge::from_streams(streams)?;
     // GC rewrites stream too: `GcMergeSource` applies the same retention
@@ -9495,16 +9888,16 @@ fn write_merged_tables(
                 }
             };
             if crate::compact_kernel::compact_should_split_at(acc, split_target)
-                && out.len() + 1 < chunk_budget
+                && out.len() + 1 < span_budget
                 && last_user
                     .as_ref()
                     .is_none_or(|u| u.as_ref() != ok_entry.0.user_key.as_ref())
             {
                 // Target reached, the user key changed, and one more chunk
-                // still fits the reserved range — start a new file with
-                // this entry. A same-user version run never splits: it
-                // stays in one file. Past the chunk budget the split is
-                // skipped and the chunk runs long instead.
+                // still fits this span's share of the reserved range —
+                // start a new file with this entry. A same-user version run
+                // never splits: it stays in one file. Past the span budget
+                // the split is skipped and the chunk runs long instead.
                 peeked = Some(Ok(ok_entry));
                 closed = true;
                 return None;
@@ -9513,6 +9906,7 @@ fn write_merged_tables(
             last_user = Some(ok_entry.0.user_key.clone());
             Some(Ok(ok_entry))
         });
+        let file_num = file_alloc();
         let tmp_path = dir.join(format!("{file_num:06}.sst.tmp"));
         if let Err(e) =
             crate::sst::write_sst_try_sorted_on(env, &tmp_path, &mut entries, bloom_hint)
@@ -9537,15 +9931,144 @@ fn write_merged_tables(
         rewrite_trim_allocator();
         if rewrite_diag {
             eprintln!(
-                "REWRITEDIAG chunk={file_num:06} out={} pool_b={} rss_kib={} t={:.1}s",
+                "REWRITEDIAG span={span_tag} chunk={file_num:06} out={} pool_b={} rss_kib={} t={:.1}s",
                 out.len(),
                 kit.map(|k| k.pool.resident_bytes()).unwrap_or(0),
                 rewrite_diag_rss_kib().unwrap_or(0),
                 rewrite_started.elapsed().as_secs_f32()
             );
         }
-        file_num += 1;
     }
+    Ok(out)
+}
+
+/// Merge `tables` into one **or more** SSTs split at `split_target` logical
+/// bytes (sequential; bounded jobs and small inputs). `chunk_budget` caps the
+/// chunk count (the reserved file-number range).
+fn write_merged_tables(
+    env: &impl Env,
+    dir: &Path,
+    first_file_num: u64,
+    tables: &[SstTable],
+    gc: crate::merge::CompactGcOptions,
+    do_sync_dir: bool,
+    split_target: u64,
+    chunk_budget: usize,
+    kit: Option<&crate::cache::PayloadKit>,
+) -> Result<Vec<SstTable>> {
+    let mut next = first_file_num;
+    let mut alloc = || {
+        let n = next;
+        next += 1;
+        n
+    };
+    write_merged_tables_span(
+        env,
+        dir,
+        tables,
+        gc,
+        do_sync_dir,
+        split_target,
+        chunk_budget,
+        kit,
+        None,
+        None,
+        &mut alloc,
+        0,
+    )
+}
+
+/// [`write_merged_tables`] with key-space parallelism when the inputs are
+/// large ([`merge_span_count`]): Rocks-shaped subcompactions. File numbers
+/// come from one shared atomic over the reserved range, so spans interleave
+/// but never collide and stay gapless.
+fn write_merged_tables_parallel<E: Env + Sync>(
+    env: &E,
+    dir: &Path,
+    first_file_num: u64,
+    tables: &[SstTable],
+    gc: crate::merge::CompactGcOptions,
+    do_sync_dir: bool,
+    split_target: u64,
+    chunk_budget: usize,
+    kit: Option<&crate::cache::PayloadKit>,
+) -> Result<Vec<SstTable>> {
+    let parts = merge_span_count(env, tables).min(chunk_budget.max(1));
+    if parts <= 1 {
+        return write_merged_tables(
+            env,
+            dir,
+            first_file_num,
+            tables,
+            gc,
+            do_sync_dir,
+            split_target,
+            chunk_budget,
+            kit,
+        );
+    }
+    let splits = sample_span_splits(tables, parts);
+    let parts = splits.len() + 1;
+    let span_budget = (chunk_budget / parts).max(1);
+    let next_file_num = std::sync::atomic::AtomicU64::new(first_file_num);
+    let alloc_next = &next_file_num;
+    // Half-open spans: [None, s0), [s0, s1), ... [s_{n-1}, None).
+    let mut lo: Option<Vec<u8>> = None;
+    let results: Vec<Result<Vec<SstTable>>> = std::thread::scope(|scope| {
+        let mut handles = Vec::with_capacity(parts);
+        for (i, hi) in splits
+            .iter()
+            .map(Some)
+            .chain(std::iter::once(None))
+            .enumerate()
+        {
+            let span_lo = lo.clone();
+            let hi = hi.cloned();
+            let span_hi = hi.clone();
+            let handle = scope.spawn(move || {
+                let mut alloc = || alloc_next.fetch_add(1, Ordering::Relaxed);
+                write_merged_tables_span(
+                    env,
+                    dir,
+                    tables,
+                    gc,
+                    do_sync_dir,
+                    split_target,
+                    span_budget,
+                    kit,
+                    span_lo.as_deref(),
+                    span_hi.as_deref(),
+                    &mut alloc,
+                    i,
+                )
+            });
+            handles.push(handle);
+            lo = hi;
+        }
+        handles
+            .into_iter()
+            .map(|h| {
+                h.join()
+                    .unwrap_or_else(|_| Err(CoreError::Internal("merge span panicked".into())))
+            })
+            .collect()
+    });
+    let mut out: Vec<SstTable> = Vec::new();
+    for r in results {
+        out.extend(r?);
+    }
+    let consumed = next_file_num.into_inner() - first_file_num;
+    debug_assert_eq!(
+        consumed,
+        out.len() as u64,
+        "span file numbers must be gapless"
+    );
+    // Spans are key-disjoint; present them in key order for a tidy inventory.
+    out.sort_by(|a, b| {
+        a.smallest_user_key()
+            .unwrap_or(&[])
+            .cmp(b.smallest_user_key().unwrap_or(&[]))
+    });
     Ok(out)
 }
 

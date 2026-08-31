@@ -32,6 +32,8 @@ pub mod group_commit_kernel;
 pub mod history;
 pub mod host;
 pub mod key;
+mod leveling;
+
 pub mod lock;
 pub mod manifest;
 pub mod manifest_kernel;
