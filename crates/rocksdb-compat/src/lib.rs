@@ -3690,8 +3690,14 @@ where
                             let _ = inner.try_stage_if_full();
                         }
                         while inner.park_imm_once() {}
-                        let may_fold =
-                            inner.writes_active() <= 1 && !inner.recently_multi(fold_multi_hold);
+                        // Fold deep-clones the pair (~3 tables live mid-merge).
+                        // "Not multi-writer" still fired during single-writer
+                        // bulk ingest, exactly when materialization lagged and
+                        // two 256 MiB parked tables piled up — a >1.5 GiB
+                        // transient that OOMed a 4 GiB host at 25M entries.
+                        // Fold only once writers have been idle; the idle
+                        // branch below then materializes what is left.
+                        let may_fold = inner.writes_idle_for(persist_idle);
                         if may_fold && inner.parked_unflushed_count() >= 2 {
                             let _ = inner.fold_parked_once_off_lock();
                         }
@@ -3765,11 +3771,53 @@ where
     (Some(tx), handle)
 }
 
+/// `PEDRA_FLUSH_DIAG=1`: at most one stderr line per second with the
+/// memory-layer breakdown (parked/active/imm/retired/sst/rss), so
+/// sustained-ingest growth is attributable in situ (25M slipstream
+/// hydrate OOM forensics). Zero cost when the env is unset.
+fn flush_worker_diag<E: PedraEnv>(inner: &ConcurrentDb<E>) {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static LAST_NS: AtomicU64 = AtomicU64::new(0);
+    if std::env::var_os("PEDRA_FLUSH_DIAG").is_none() {
+        return;
+    }
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_nanos() as u64);
+    let last = LAST_NS.load(Ordering::Relaxed);
+    if now.saturating_sub(last) < 1_000_000_000
+        || LAST_NS
+            .compare_exchange(last, now, Ordering::Relaxed, Ordering::Relaxed)
+            .is_err()
+    {
+        return;
+    }
+    let rss_kb = std::fs::read_to_string("/proc/self/statm")
+        .ok()
+        .and_then(|s| {
+            s.split_whitespace()
+                .nth(1)
+                .and_then(|f| f.parse::<u64>().ok())
+        })
+        .map_or(0, |pages| pages.saturating_mul(4096) / 1024);
+    eprintln!(
+        "FLUSHDIAG parked_n={} parked_b={} active_b={} imm={} retired_b={} sst_n={} rss_kb={}",
+        inner.parked_unflushed_count(),
+        inner.parked_unflushed_bytes(),
+        inner.active_mem_usage(),
+        inner.has_imm(),
+        inner.retired_mem_bytes(),
+        inner.sst_count(),
+        rss_kb,
+    );
+}
+
 /// One flush-worker tick: park every staged imm, then enforce the
 /// parked-memory bound. Split out so the policy is unit-testable
 /// without thread or fsync timing.
 fn flush_worker_tick<E: PedraEnv>(inner: &ConcurrentDb<E>) {
     while inner.park_imm_once() {}
+    flush_worker_diag(inner);
     let bound = inner
         .with_read(|db| db.auto_flush_threshold())
         .map_or(0, |t| t);
