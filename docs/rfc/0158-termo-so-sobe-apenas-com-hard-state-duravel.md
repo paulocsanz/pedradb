@@ -34,7 +34,7 @@ Extrair a decisão pura `durable_term_if_newer(termo_atual, termo_recebido, Pers
 
 ### P1 — próxima onda
 
-- [ ] **P1.1** Alinhar `handle_request_vote_with_persist` (pedradb-raft) ao mesmo kernel — hoje ele sobe o termo em memória e só persiste o voto (formato AS-IS; legal porque produção passa pelo store, mas o dente do crate vive emprestado) — status: `todo`
+- [x] **P1.1** Alinhar `handle_request_vote_with_persist` (pedradb-raft) ao mesmo kernel — hoje ele sobe o termo em memória e só persiste o voto (formato AS-IS; legal porque produção passa pelo store, mas o dente do crate vive emprestado) — status: `done` (o passo do termo sai do canal interno `become_follower`/`persist_hard` e entra pela mesma costura injetada `FnMut`; `durable_term_if_newer` decide, `Restored` restaura termo/voto, força Follower, limpa `leader_id` e nega; planta nomeada `durable_term_rollback_on_request_vote_with_persist_is_not_ok` afirma reply de termo 5 restaurado; `cargo test -p pedradb-raft` 81/0; catálogo ganha `live_callers` no handler do raft)
 
 ### P2 — depois
 
@@ -47,7 +47,7 @@ Extrair a decisão pura `durable_term_if_newer(termo_atual, termo_recebido, Pers
 | P0.1 | p0 | kernel + AS-IS + testes unitários nas duas cópias | done | este commit | 2026-08-30 |
 | P0.2 | p0 | gêmeo + runner + par no catálogo + live_callers | done | este commit | 2026-08-30 |
 | P0.3 | p0 | planta inbound Queued com persist falho | done | este commit | 2026-08-30 |
-| P1.1 | p1 | alinhar handler do pedradb-raft ao kernel | todo | — | 2026-08-30 |
+| P1.1 | p1 | alinhar handler do pedradb-raft ao kernel | done | este commit | 2026-08-30 |
 | P2.1 | p2 | guarda REAL TCP do rollback durável | todo | — | 2026-08-30 |
 
 ## Acceptance Criteria

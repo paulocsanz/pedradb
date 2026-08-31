@@ -440,15 +440,42 @@ fn persist_hard_state(meta_dir: Option<&Path>, hard: &HardState) -> Result<()> {
 
 /// RequestVote after the pure kernel: persist, then grant only on Ok (F15).
 ///
-/// `persist` is the only I/O. Tests inject failure here; production uses
+/// `persist` is the only I/O, called at most twice (term step, then vote
+/// step) — hence `FnMut`. Tests inject failure here; production uses
 /// [`persist_hard_state`] (same `store_hard` as [`RaftNode::persist_hard`]).
 pub fn handle_request_vote_with_persist(
     node: &mut RaftNode,
     args: &RequestVoteArgs,
-    persist: impl FnOnce(&HardState) -> Result<()>,
+    mut persist: impl FnMut(&HardState) -> Result<()>,
 ) -> RequestVoteReply {
     if args.term > node.hard.current_term {
-        node.become_follower(args.term);
+        // F125/F127 / RFC-0158 P1.1: the term step goes through the same
+        // injected persist seam as the vote, and the decision is the catalog
+        // kernel `durable_term_if_newer` — not an inline `if` (and not the
+        // separate internal `persist_hard` channel of `become_follower`).
+        let prev_term = node.hard.current_term;
+        let prev_voted = node.hard.voted_for;
+        node.hard.current_term = args.term;
+        node.hard.voted_for = None;
+        node.role = Role::Follower;
+        node.leader_id = None;
+        node.election_ticks_left = node.election_timeout;
+        let persist_out = match persist(&node.hard) {
+            Ok(()) => vote_kernel::PersistOutcome::Ok,
+            Err(_) => vote_kernel::PersistOutcome::Err,
+        };
+        if let vote_kernel::DurableTerm::Restored =
+            vote_kernel::durable_term_if_newer(prev_term, args.term, persist_out)
+        {
+            node.hard.current_term = prev_term;
+            node.hard.voted_for = prev_voted;
+            node.role = Role::Follower;
+            node.leader_id = None;
+            return RequestVoteReply {
+                term: prev_term,
+                vote_granted: false,
+            };
+        }
     }
     let mut vote_granted = false;
     let decision = vote_kernel::vote_decision(VoteInputs {
@@ -1358,6 +1385,49 @@ mod tests {
         );
         assert!(!reply.vote_granted);
         assert_eq!(n.hard.voted_for, None);
+        let _ = std::fs::remove_dir_all(&parent);
+    }
+
+    /// RFC-0158 P1.1 / F125/F127: a newer term whose hard-state persist fails
+    /// must not raise the term in memory — the reply and the node keep the
+    /// previous term/vote, the node is forced Follower with no leader hint.
+    /// The aligned handler matches kernel `Restored`; the grant-then-persist
+    /// mutant family keeps the undurable raise.
+    #[test]
+    fn durable_term_rollback_on_request_vote_with_persist_is_not_ok() {
+        let parent = temp_parent();
+        let mut cluster = RaftCluster::open(&parent, 1).unwrap();
+        let n = cluster.node_mut(1).unwrap();
+        n.hard.current_term = 5;
+        n.hard.voted_for = Some(3);
+        n.role = Role::Leader;
+        n.leader_id = Some(1);
+        let reply = handle_request_vote_with_persist(
+            n,
+            &RequestVoteArgs {
+                term: 6,
+                candidate_id: 2,
+                last_log_index: 0,
+                last_log_term: 0,
+            },
+            |_| Err(RaftError::Persist("injected".into())),
+        );
+        assert!(!reply.vote_granted, "undurable term step must deny the vote");
+        assert_eq!(
+            reply.term, 5,
+            "reply carries the RESTORED term (F125/F127), not the undurable raise"
+        );
+        assert_eq!(n.hard.current_term, 5, "term not raised without durability");
+        assert_eq!(
+            n.hard.voted_for,
+            Some(3),
+            "previous vote survives the failed step"
+        );
+        assert_eq!(n.role, Role::Follower, "undurable step forces Follower");
+        assert_eq!(
+            n.leader_id, None,
+            "leader hint cleared after the undurable step"
+        );
         let _ = std::fs::remove_dir_all(&parent);
     }
 
