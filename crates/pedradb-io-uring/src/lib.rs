@@ -419,6 +419,15 @@ impl EnvFile for IoUringFile {
     fn len(&mut self) -> io::Result<u64> {
         Ok(self.file.metadata()?.len())
     }
+
+    /// `pread`-class override (file-cache reads): stateless in the kernel,
+    /// so the shadow cursor `pos` is never touched. Matches the POSIX data
+    /// path ([`Self::posix_pwrite`]) — reads do not go through the ring.
+    #[cfg(unix)]
+    fn positioned_read_exact(&mut self, buf: &mut [u8], offset: u64) -> io::Result<()> {
+        use std::os::unix::fs::FileExt;
+        self.file.read_exact_at(buf, offset)
+    }
 }
 
 impl Env for IoUringEnv {

@@ -1083,6 +1083,7 @@ impl<E: Env> ConcurrentDb<E> {
     pub fn open_with_env_bounded(path: impl AsRef<Path>, opts: OpenOptions, env: E) -> Result<Self>
     where
         E: Env + Send + Sync + 'static,
+        E::File: Send + 'static,
     {
         Ok(Self::from_db(Db::open_with_env_bounded(path, opts, env)?))
     }

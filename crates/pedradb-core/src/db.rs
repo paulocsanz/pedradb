@@ -268,6 +268,23 @@ pub struct OpenOptions {
 /// drop-in surface (compat maps the caller's cache knob onto it).
 pub const DEFAULT_SST_PAYLOAD_BUDGET_BYTES: u64 = 256 * 1024 * 1024;
 
+/// Default read-handle cache size for bounded opens
+/// ([`crate::env::FileHandleCache`]): covers the post-settle file count of
+/// the 25M slipstream shape (~85 SSTs) with fd headroom. RocksDB holds the
+/// equivalent per-DB file cache; `open()`-per-block was 41% of the 6M
+/// `get_hit` profile.
+pub const DEFAULT_SST_FILE_CACHE_ENTRIES: usize = 256;
+
+/// `PEDRA_SST_FILE_CACHE` — read-handle cache size override (bench A/B
+/// knob; `0` disables handle reuse). Unset or unparsable →
+/// [`DEFAULT_SST_FILE_CACHE_ENTRIES`].
+fn sst_file_cache_entries_from_env() -> usize {
+    std::env::var("PEDRA_SST_FILE_CACHE")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(DEFAULT_SST_FILE_CACHE_ENTRIES)
+}
+
 /// MVCC history horizon (RFC-0046 P0.1).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HistoryHorizon {
@@ -1044,6 +1061,10 @@ pub struct Db<E: Env = StdEnv> {
     /// File source for evicted-payload reloads; `None` on a legacy open
     /// (the pool then never evicts — decode never fails for lack of a source).
     sst_source: Option<Arc<dyn crate::env::SstFileSource>>,
+    /// Read-handle cache behind [`Self::sst_source`] (bounded opens):
+    /// evicted-table block reads reuse open handles instead of paying
+    /// `open()` per 4 KiB block. Empty (capacity 0) on legacy opens.
+    sst_file_cache: Arc<crate::env::FileHandleCache>,
     /// Latest-snapshot point answers; per-key inval on write (RFC-0035 / 0041).
     /// `Arc` so [`crate::concurrent::ConcurrentDb`] answers a hit without the
     /// Db read lock (YCSB C hit path).
@@ -1266,7 +1287,13 @@ impl<E: Env> Db<E> {
     /// I/O failures, corrupt logical records, CRC errors, [`CoreError::AlreadyOpen`],
     /// or corrupt MANIFEST.
     pub fn open_with_env(path: impl AsRef<Path>, opts: OpenOptions, env: E) -> Result<Self> {
-        Self::open_with_env_sourced(path, opts, env, None)
+        Self::open_with_env_sourced(
+            path,
+            opts,
+            env,
+            None,
+            Arc::new(crate::env::FileHandleCache::new(0)),
+        )
     }
 
     /// Open with an explicit [`Env`] **and the SST payload pool armed**
@@ -1287,13 +1314,18 @@ impl<E: Env> Db<E> {
     ) -> Result<Self>
     where
         E: Env + Send + Sync + 'static,
+        E::File: Send + 'static,
     {
         if opts.sst_payload_budget_bytes.is_none() {
             opts.sst_payload_budget_bytes = Some(DEFAULT_SST_PAYLOAD_BUDGET_BYTES);
         }
-        let source: Arc<dyn crate::env::SstFileSource> =
-            Arc::new(crate::env::EnvSource(<E as Clone>::clone(&env)));
-        Self::open_with_env_sourced(path, opts, env, Some(source))
+        let file_cache = Arc::new(crate::env::FileHandleCache::new(
+            sst_file_cache_entries_from_env(),
+        ));
+        let source: Arc<dyn crate::env::SstFileSource> = Arc::new(
+            crate::env::CachedEnvSource::new(<E as Clone>::clone(&env), Arc::clone(&file_cache)),
+        );
+        Self::open_with_env_sourced(path, opts, env, Some(source), file_cache)
     }
 
     /// Shared open path; `source = Some` arms the payload pool before
@@ -1307,6 +1339,7 @@ impl<E: Env> Db<E> {
         opts: OpenOptions,
         env: E,
         source: Option<Arc<dyn crate::env::SstFileSource>>,
+        sst_file_cache: Arc<crate::env::FileHandleCache>,
     ) -> Result<Self> {
         crate::buggify_hooks::inject_checked(crate::buggify_hooks::sites::AFTER_OPEN_LOCK)?;
         let dir = path.as_ref().to_path_buf();
@@ -1631,6 +1664,7 @@ impl<E: Env> Db<E> {
             block_cache,
             sst_payload_pool,
             sst_source: source,
+            sst_file_cache,
             point_cache,
             last_prefix_cache,
             count_cache,
@@ -4555,6 +4589,20 @@ impl<E: Env> Db<E> {
         n
     }
 
+    /// Remove a DB-owned file and drop any cached read handle for its path.
+    ///
+    /// Invalidation is part of the delete, not an optimization: a cached
+    /// handle keeps an unlinked inode (and its disk space) alive, and a
+    /// failed SST write rolls `next_file_num` back, so the path can be
+    /// re-allocated with different bytes. Every removal of a file that was
+    /// adopted (visible to reads) routes here; write-path cleanup of files
+    /// that were never adopted never entered the cache.
+    fn remove_db_file(&self, path: &Path) -> std::io::Result<()> {
+        self.env.remove_file(path)?;
+        self.sst_file_cache.invalidate(path);
+        Ok(())
+    }
+
     /// Reserve SST numbers for a flush of `imm` (RFC-0065 P0).
     ///
     /// One number when CFs are not registered; one per family otherwise.
@@ -5307,14 +5355,14 @@ impl<E: Env> Db<E> {
             self.next_file_num = prev_next;
             self.earliest_readable_seq = prev_earliest;
             self.note_sst_inventory_changed();
-            let _ = self.env.remove_file(&final_path);
+            let _ = self.remove_db_file(&final_path);
             let _ = self.env.sync_dir(&self.dir);
             return Err(e);
         }
 
         for path in old_paths {
             if path != final_path {
-                let _ = self.env.remove_file(&path);
+                let _ = self.remove_db_file(&path);
             }
         }
         self.compact_count = self.compact_count.saturating_add(1);
@@ -5491,7 +5539,7 @@ impl<E: Env> Db<E> {
             return Err(e);
         }
         for path in old_paths {
-            let _ = self.env.remove_file(&path);
+            let _ = self.remove_db_file(&path);
         }
         self.compact_count = self.compact_count.saturating_add(1);
         Ok(())
@@ -5713,7 +5761,7 @@ impl<E: Env> Db<E> {
 
         for path in old_paths {
             if !new_paths.contains(&path) {
-                let _ = self.env.remove_file(&path);
+                let _ = self.remove_db_file(&path);
             }
         }
         self.compact_count = self.compact_count.saturating_add(1);
@@ -5952,7 +6000,7 @@ impl<E: Env> Db<E> {
         let prepared = match self.prepare_remapped_ssts_blob(file_num, &remap) {
             Ok(p) => p,
             Err(e) => {
-                let _ = self.env.remove_file(&vlog::blob_path(&self.dir, dest_num));
+                let _ = self.remove_db_file(&vlog::blob_path(&self.dir, dest_num));
                 return Err(e);
             }
         };
@@ -5973,7 +6021,7 @@ impl<E: Env> Db<E> {
             self.sst_levels = prev_levels;
             self.next_file_num = prev_next;
             self.note_sst_inventory_changed();
-            let _ = self.env.remove_file(&vlog::blob_path(&self.dir, dest_num));
+            let _ = self.remove_db_file(&vlog::blob_path(&self.dir, dest_num));
             return Err(e);
         }
 
@@ -5987,9 +6035,9 @@ impl<E: Env> Db<E> {
             self.table_cache.insert(Arc::new(t.clone()));
         }
         for path in old_paths {
-            let _ = self.env.remove_file(&path);
+            let _ = self.remove_db_file(&path);
         }
-        let _ = self.env.remove_file(&src);
+        let _ = self.remove_db_file(&src);
         let _ = self.env.sync_dir(&self.dir);
         self.vlog_gc_count = self.vlog_gc_count.saturating_add(1);
         Ok(stats)
@@ -6076,14 +6124,14 @@ impl<E: Env> Db<E> {
                 Ok(_) => {}
                 Err(e) => {
                     for p in &staged_paths {
-                        let _ = self.env.remove_file(p);
+                        let _ = self.remove_db_file(p);
                     }
                     return Err(e);
                 }
             }
             if let Err(e) = self.env.rename(&tmp, &dest) {
                 for p in &staged_paths {
-                    let _ = self.env.remove_file(p);
+                    let _ = self.remove_db_file(p);
                 }
                 return Err(CoreError::Io(e));
             }
@@ -6097,7 +6145,7 @@ impl<E: Env> Db<E> {
                 }
                 Err(e) => {
                     for p in &staged_paths {
-                        let _ = self.env.remove_file(p);
+                        let _ = self.remove_db_file(p);
                     }
                     return Err(e);
                 }
@@ -6160,9 +6208,7 @@ impl<E: Env> Db<E> {
         let prepared = match self.prepare_remapped_ssts(&remap) {
             Ok(p) => p,
             Err(e) => {
-                let _ = self
-                    .env
-                    .remove_file(&self.dir.join(crate::vlog::VLOG_NEW_NAME));
+                let _ = self.remove_db_file(&self.dir.join(crate::vlog::VLOG_NEW_NAME));
                 return Err(e);
             }
         };
@@ -6195,9 +6241,7 @@ impl<E: Env> Db<E> {
             self.next_file_num = prev_next;
             self.vlog_use_new = false;
             self.note_sst_inventory_changed();
-            let _ = self
-                .env
-                .remove_file(&self.dir.join(crate::vlog::VLOG_NEW_NAME));
+            let _ = self.remove_db_file(&self.dir.join(crate::vlog::VLOG_NEW_NAME));
             return Err(e);
         }
 
@@ -6221,7 +6265,7 @@ impl<E: Env> Db<E> {
             self.table_cache.insert(Arc::new(t.clone()));
         }
         for path in old_paths {
-            let _ = self.env.remove_file(&path);
+            let _ = self.remove_db_file(&path);
         }
         Ok(stats)
     }
@@ -6314,12 +6358,12 @@ impl<E: Env> Db<E> {
                 Ok(t) => {
                     drop(t);
                     if let Err(e) = self.env.rename(&tmp_path, &final_path) {
-                        let _ = self.env.remove_file(&tmp_path);
+                        let _ = self.remove_db_file(&tmp_path);
                         cleanup_staged(&self.env, &staged_paths);
                         return Err(e.into());
                     }
                     if let Err(e) = self.sync_dir_if_required(&self.dir) {
-                        let _ = self.env.remove_file(&final_path);
+                        let _ = self.remove_db_file(&final_path);
                         cleanup_staged(&self.env, &staged_paths);
                         return Err(e);
                     }
@@ -6334,14 +6378,14 @@ impl<E: Env> Db<E> {
                             new_levels.push(level);
                         }
                         Err(e) => {
-                            let _ = self.env.remove_file(&final_path);
+                            let _ = self.remove_db_file(&final_path);
                             cleanup_staged(&self.env, &staged_paths);
                             return Err(e);
                         }
                     }
                 }
                 Err(e) => {
-                    let _ = self.env.remove_file(&tmp_path);
+                    let _ = self.remove_db_file(&tmp_path);
                     cleanup_staged(&self.env, &staged_paths);
                     return Err(e);
                 }
@@ -8402,7 +8446,7 @@ impl<E: Env> Db<E> {
             .any(|t| input_paths.iter().any(|p| t.path() == p.as_path()));
         if !still_live {
             for t in &new_tables {
-                let _ = self.env.remove_file(t.path());
+                let _ = self.remove_db_file(t.path());
             }
             return None;
         }
