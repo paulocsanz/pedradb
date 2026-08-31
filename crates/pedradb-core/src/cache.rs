@@ -6,6 +6,7 @@
 //! - [`PointCache`]: latest-snapshot point-get answers (invalidated on write).
 
 use std::collections::HashMap;
+use std::collections::VecDeque;
 use std::hash::Hasher;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -151,8 +152,9 @@ pub struct BlockCache {
 #[derive(Debug, Clone)]
 struct CachedSlot {
     block: CachedBlock,
-    /// Recency tick; higher is hotter. Evict min-tick on overflow.
-    tick: u64,
+    /// Epoch of the live `order` entry for this slot. Bumped on a hit's
+    /// re-push; older queue entries for the same key become ghosts.
+    ins_epoch: u64,
     /// Key + value + 16 B trailer estimate (RFC-0153).
     bytes: u64,
 }
@@ -160,9 +162,17 @@ struct CachedSlot {
 #[derive(Debug, Default)]
 struct BlockCacheInner {
     map: HashMap<(u64, usize), CachedSlot>,
-    /// Monotonic recency. Hit is O(1) — a `VecDeque` walk on every hit was
-    /// O(capacity) and ate `deps_scan` after the cache grew to 8192 (RFC-0035).
-    tick: u64,
+    /// Recency queue, least-recent-first: `(key, epoch)` in push order. A
+    /// hit re-pushes with a fresh epoch (lazy LRU); the entry's earlier
+    /// queue slots become ghosts that eviction skips and drains. This
+    /// replaces the old `min_by_key(tick)` full-map scan, which made every
+    /// insert O(capacity) once the cache filled — on a byte-budgeted
+    /// 256 MiB cache (~65k blocks) each post-fill point get paid the whole
+    /// scan (~500 µs; slipstream fold, guest v9f). Hit and evict are now
+    /// both O(1) amortized.
+    order: VecDeque<((u64, usize), u64)>,
+    /// Monotonic push epoch (ghost matching).
+    epoch: u64,
     /// Max entries; `0` = no entry cap.
     capacity: usize,
     /// Max payload bytes; `0` = no byte cap (RFC-0153).
@@ -185,7 +195,8 @@ impl BlockCache {
         Self {
             inner: Mutex::new(BlockCacheInner {
                 map: HashMap::new(),
-                tick: 0,
+                order: VecDeque::new(),
+                epoch: 0,
                 capacity,
                 budget_bytes: 0,
                 used_bytes: 0,
@@ -204,7 +215,8 @@ impl BlockCache {
         Self {
             inner: Mutex::new(BlockCacheInner {
                 map: HashMap::new(),
-                tick: 0,
+                order: VecDeque::new(),
+                epoch: 0,
                 capacity: 0,
                 budget_bytes: bytes.max(1),
                 used_bytes: 0,
@@ -252,47 +264,63 @@ impl BlockCache {
     {
         let key = (path_id(path), block_idx);
         {
-            let mut g = self.inner.lock();
-            if let Some(block) = g.map.get(&key).map(|s| Arc::clone(&s.block)) {
+            let mut guard = self.inner.lock();
+            let g = &mut *guard;
+            let live = g.map.len();
+            if let Some(slot) = g.map.get_mut(&key) {
                 g.hits = g.hits.saturating_add(1);
-                let tick = g.tick.saturating_add(1);
-                g.tick = tick;
-                if let Some(slot) = g.map.get_mut(&key) {
-                    slot.tick = tick;
-                }
-                return block;
+                Self::touch(&mut g.order, &mut g.epoch, live, &key, slot);
+                return Arc::clone(&slot.block);
             }
         }
         let block = Arc::new(load());
-        let mut g = self.inner.lock();
-        if let Some(hit) = g.map.get(&key).map(|s| Arc::clone(&s.block)) {
+        let mut guard = self.inner.lock();
+        let g = &mut *guard;
+        let live = g.map.len();
+        if let Some(slot) = g.map.get_mut(&key) {
             g.hits = g.hits.saturating_add(1);
-            let tick = g.tick.saturating_add(1);
-            g.tick = tick;
-            if let Some(slot) = g.map.get_mut(&key) {
-                slot.tick = tick;
-            }
-            return hit;
+            Self::touch(&mut g.order, &mut g.epoch, live, &key, slot);
+            return Arc::clone(&slot.block);
         }
         g.misses = g.misses.saturating_add(1);
         let extra = block_payload_bytes(block.as_ref());
-        while Self::needs_room(&g, extra) {
-            if !Self::evict_one(&mut g) {
+        while Self::needs_room(g, extra) {
+            if !Self::evict_one(g) {
                 break;
             }
         }
-        let tick = g.tick.saturating_add(1);
-        g.tick = tick;
+        g.epoch = g.epoch.wrapping_add(1);
+        let ins_epoch = g.epoch;
         g.used_bytes = g.used_bytes.saturating_add(extra);
         g.map.insert(
             key,
             CachedSlot {
                 block: Arc::clone(&block),
-                tick,
+                ins_epoch,
                 bytes: extra,
             },
         );
+        g.order.push_back((key, ins_epoch));
         block
+    }
+
+    /// Lazy-LRU touch: re-push at the back with a fresh epoch. Bounded —
+    /// beyond `4 * live + 64` pending entries the hit keeps its old queue
+    /// position (CLOCK-like degradation) so a hit-heavy cache with no
+    /// eviction pressure cannot grow the queue without bound.
+    fn touch(
+        order: &mut VecDeque<((u64, usize), u64)>,
+        epoch: &mut u64,
+        live: usize,
+        key: &(u64, usize),
+        slot: &mut CachedSlot,
+    ) {
+        if order.len() >= live.saturating_mul(4).max(64) {
+            return;
+        }
+        *epoch = epoch.wrapping_add(1);
+        slot.ins_epoch = *epoch;
+        order.push_back((*key, *epoch));
     }
 
     fn needs_room(g: &BlockCacheInner, extra: u64) -> bool {
@@ -301,22 +329,27 @@ impl BlockCache {
         (count_full || bytes_full) && !g.map.is_empty()
     }
 
+    /// O(1)-amortized LRU evict: pop queue entries until one's epoch still
+    /// matches its live slot (ghosts from hit re-pushes and re-inserts are
+    /// skipped and drained here — the `AnswerCache` F178 pattern).
     fn evict_one(g: &mut BlockCacheInner) -> bool {
-        let victim = g.map.iter().min_by_key(|(_, s)| s.tick).map(|(k, _)| *k);
-        let Some(old) = victim else {
-            return false;
-        };
-        if let Some(slot) = g.map.remove(&old) {
-            g.used_bytes = g.used_bytes.saturating_sub(slot.bytes);
+        while let Some((old, epoch)) = g.order.pop_front() {
+            if g.map.get(&old).is_some_and(|s| s.ins_epoch == epoch) {
+                if let Some(slot) = g.map.remove(&old) {
+                    g.used_bytes = g.used_bytes.saturating_sub(slot.bytes);
+                }
+                return true;
+            }
         }
-        true
+        false
     }
 
     /// Clear all blocks.
     pub fn clear(&self) {
         let mut g = self.inner.lock();
         g.map.clear();
-        g.tick = 0;
+        g.order.clear();
+        g.epoch = 0;
         g.used_bytes = 0;
     }
 }
@@ -1046,6 +1079,49 @@ mod tests {
             fat()
         });
         assert!(reloaded, "block 0 must have been evicted by byte budget");
+    }
+
+    #[test]
+    fn block_cache_churn_keeps_budget_under_ghost_pressure() {
+        // Regression shape for the lazy-LRU queue: sustained miss-insert
+        // churn past a byte budget interleaved with hit re-pushes (ghost
+        // producers). The budget must hold on every insert — ghost skips
+        // cannot strand accounting — and hits must keep landing.
+        let budget = 2_000u64;
+        let cache = BlockCache::with_budget_bytes(budget);
+        let path = Path::new("/tmp/churn.sst");
+        let block = |i: usize| {
+            vec![(
+                InternalKey::new(
+                    Bytes::from(format!("k{i:04}").into_bytes()),
+                    1,
+                    ValueType::Value,
+                ),
+                Bytes::from(vec![b'v'; 96]),
+            )]
+        };
+        // ~130 B payload each: ~15 blocks fit in budget.
+        let mut i = 0usize;
+        for round in 0..40 {
+            for _ in 0..8 {
+                cache.get_or_insert_with(path, i, || block(i));
+                i += 1;
+            }
+            // Re-push pressure: cycle hits over everything still live.
+            for hot in i.saturating_sub(15)..i {
+                cache.get_or_insert_with(path, hot, || panic!("{hot} just inserted"));
+            }
+            assert!(
+                cache.used_bytes() <= budget,
+                "round {round}: used {} > budget {}",
+                cache.used_bytes(),
+                budget
+            );
+        }
+        assert!(cache.hits() > 0, "churn produced no hits");
+        let hits_before = cache.hits();
+        cache.get_or_insert_with(path, i - 1, || panic!("latest block must be cached"));
+        assert_eq!(cache.hits(), hits_before + 1);
     }
 
     #[test]
