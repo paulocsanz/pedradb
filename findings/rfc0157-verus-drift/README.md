@@ -31,3 +31,16 @@
   by design: the aggregator does not round a compile-drifted twin to ok.
 - R-verus stays in `never_floor`: this note is itself evidence that the
   pinned toolchain is a moving dependency.
+
+## Re-run 2026-08-31 (HEAD 998574e)
+
+- command: `./scripts/formal/verus_check.sh --all`
+- result: **57 pass / 0 fail** (57 twins — `durable_term` added by RFC-0158,
+  count 56 → 57)
+- pinned: `release/0.2026.08.23.fbbbbcf` (binary unchanged)
+- teeth check: flipping the `vote_decision` twin postcondition
+  (`==` → `!=` on `should_grant`) fails its runner — `postcondition not
+  satisfied`, exit 1; restored, it passes again.
+- context: re-run after eight days of landed commits (v21f/v21g/v21h read
+  paths); twin files unchanged since the 2026-08-30 resolution, so this
+  confirms no toolchain or runner drift in the interim.
