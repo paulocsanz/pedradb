@@ -9253,51 +9253,23 @@ fn write_merged_tables(
     let bloom_hint: usize = tables.iter().map(SstTable::len).sum();
     let mut out: Vec<SstTable> = Vec::new();
     let mut file_num = first_file_num;
-    if gc.requests_gc() {
-        // GC needs the version view of the whole input, so the input is
-        // materialized; the OUTPUT is still chunked (bounded writer buffer).
-        let mut merged: Vec<(InternalKey, Bytes)> = Vec::new();
-        for t in tables {
-            merged.extend(t.entries_cloned());
-        }
-        let merged = crate::merge::gc_compact_entries(merged, gc);
-        let mut i = 0usize;
-        while i < merged.len() {
-            let mut acc = 0u64;
-            let mut j = i;
-            while j < merged.len() {
-                acc = acc.saturating_add(merged_entry_bytes(&merged[j].0, &merged[j].1));
-                j += 1;
-                if crate::compact_kernel::compact_should_split_at(acc, split_target) {
-                    // Never split one user key's version run across files.
-                    while j < merged.len() && merged[j].0.user_key == merged[j - 1].0.user_key {
-                        acc = acc.saturating_add(merged_entry_bytes(&merged[j].0, &merged[j].1));
-                        j += 1;
-                    }
-                    break;
-                }
-            }
-            let tmp_path = dir.join(format!("{file_num:06}.sst.tmp"));
-            if let Err(e) = crate::sst::write_sst_sorted_on(
-                env,
-                &tmp_path,
-                merged[i..j].iter().cloned(),
-                bloom_hint,
-            ) {
-                let _ = env.remove_file(&tmp_path);
-                return Err(e);
-            }
-            out.push(finish_merged_chunk_on(env, dir, file_num, do_sync_dir)?);
-            file_num += 1;
-            i = j;
-        }
+    if tables.is_empty() {
         return Ok(out);
     }
     let streams: Vec<_> = tables
         .iter()
         .map(SstTable::iter_internal_streaming)
         .collect();
-    let mut merge = crate::merge::KwayInternalMerge::from_streams(streams)?;
+    let merge = crate::merge::KwayInternalMerge::from_streams(streams)?;
+    // GC rewrites stream too: `GcMergeSource` applies the same retention
+    // decisions per user-key run, so no input table is ever materialized
+    // (the old batch path held every decoded input table plus a BTreeMap
+    // copy — at bulk-load scale that tripled the merge footprint).
+    let mut source: Box<dyn crate::merge::CompactSource> = if gc.requests_gc() {
+        Box::new(crate::merge::GcMergeSource::new(merge, gc))
+    } else {
+        Box::new(merge)
+    };
     let mut peeked: Option<Result<(InternalKey, Bytes)>> = None;
     let mut stream_ended = false;
     let mut last_user: Option<Bytes> = None;
@@ -9310,7 +9282,7 @@ fn write_merged_tables(
             }
             let entry = match peeked.take() {
                 Some(e) => e,
-                None => match merge.next_entry() {
+                None => match source.next_entry() {
                     Ok(Some(e)) => Ok(e),
                     Ok(None) => {
                         stream_ended = true;
@@ -11979,6 +11951,53 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
     }
 
+    /// GC compaction must stream: no input table's decoded-entries cache may
+    /// be filled (2026-08-31 25M OOM: the batch GC path materialized every
+    /// input via `entries_cloned`, holding 1.15M cached entries live
+    /// mid-hydrate). Clones share the cache Arc, so the assert sees exactly
+    /// what the compaction touched.
+    #[test]
+    fn compact_l0_with_gc_leaves_inputs_unmaterialized() {
+        let dir = temp_dir();
+        let mut db = Db::open(&dir).unwrap();
+        for round in 0..2u64 {
+            db.put(&round.to_be_bytes(), b"v").unwrap();
+            db.put(b"a", format!("a{round}").as_bytes()).unwrap();
+            db.delete(b"b").unwrap();
+            db.put(b"b", b"gone").unwrap();
+            db.flush().unwrap();
+        }
+        assert_eq!(db.level_file_count(0), 2);
+        let inputs: Vec<SstTable> = db
+            .ssts
+            .iter()
+            .zip(db.sst_levels.iter())
+            .filter(|(_, &lvl)| lvl == 0)
+            .map(|(t, _)| t.clone())
+            .collect();
+        assert!(
+            inputs.iter().all(|t| !t.materialize_cache_filled()),
+            "L0 inputs must start unmaterialized"
+        );
+
+        let gc = crate::merge::CompactGcOptions::for_oldest_snapshot(6);
+        db.compact_l0_into_l1(CompactOptions {
+            gc,
+            ..CompactOptions::default()
+        })
+        .unwrap();
+
+        assert_eq!(db.level_file_count(0), 0);
+        assert!(
+            inputs.iter().all(|t| !t.materialize_cache_filled()),
+            "GC compact must not materialize its input tables"
+        );
+        assert_eq!(db.get(b"a").as_deref(), Some(b"a1".as_slice()));
+        assert_eq!(db.get(b"b").as_deref(), Some(b"gone".as_slice()));
+        db.close().unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
     /// RFC-0065 P0.1: mixed memtable flush emits one SST per CF.
     #[test]
     fn flush_splits_sst_per_cf_family() {
@@ -12391,7 +12410,7 @@ mod tests {
             "latest version of the run"
         );
         db.close().unwrap();
-        let mut db = Db::open(&dir).unwrap();
+        let db = Db::open(&dir).unwrap();
         assert!(
             db.level_file_count(1) >= 2,
             "split inventory survives reopen"

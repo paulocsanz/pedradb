@@ -6,7 +6,7 @@
 //! merge path that does not require materialising the full keyspace first.
 
 use std::cmp::Ordering;
-use std::collections::{BTreeMap, BinaryHeap};
+use std::collections::{BTreeMap, BinaryHeap, VecDeque};
 use std::ops::Bound;
 
 use bytes::Bytes;
@@ -723,6 +723,12 @@ impl CompactSource for std::vec::IntoIter<(InternalKey, Bytes)> {
     }
 }
 
+impl<S: CompactSource> CompactSource for KwayInternalMerge<S> {
+    fn next_entry(&mut self) -> Result<Option<(InternalKey, Bytes)>> {
+        KwayInternalMerge::next_entry(self)
+    }
+}
+
 impl<S: CompactSource> KwayInternalMerge<S> {
     /// Seed the heap from each stream's first entry.
     ///
@@ -764,6 +770,156 @@ impl<S: CompactSource> KwayInternalMerge<S> {
             }
             self.last = Some(head.key.clone());
             return Ok(Some((head.key, head.value)));
+        }
+    }
+}
+
+/// Streaming GC compaction over a k-way merge.
+///
+/// Applies the retention decisions of [`gc_compact_entries`] without
+/// materializing the whole input — the batch path held every decoded input
+/// table plus a `BTreeMap` copy, which tripled the merge footprint and
+/// OOMed a 4 GiB host under sustained L0→L1 compaction (25M-entry slipstream
+/// hydrate, 2026-08-31).
+///
+/// Equivalence with the batch path: the merge yields [`InternalKey`] order,
+/// so one user key's version run arrives contiguously (sequence descending),
+/// and every range tombstone that can cover key K sorts at its start key
+/// ≤ K — i.e. it is already in `tombs` when K's run closes. Run decisions
+/// are therefore identical to the batch map walk, and emitting survivors at
+/// their stream position equals the batch's final global sort.
+pub struct GcMergeSource<S: CompactSource> {
+    merge: KwayInternalMerge<S>,
+    gc: CompactGcOptions,
+    tombs: Vec<RangeTombstone>,
+    run: Vec<(InternalKey, Bytes)>,
+    out: VecDeque<(InternalKey, Bytes)>,
+}
+
+impl<S: CompactSource> GcMergeSource<S> {
+    /// Wrap a k-way merge with GC options.
+    #[must_use]
+    pub fn new(merge: KwayInternalMerge<S>, gc: CompactGcOptions) -> Self {
+        Self {
+            merge,
+            gc,
+            tombs: Vec::new(),
+            run: Vec::new(),
+            out: VecDeque::new(),
+        }
+    }
+
+    /// Decide the buffered run (one user key) and queue its survivors.
+    fn close_run(&mut self) {
+        // This run's tombstones have start == this user key, so they can
+        // cover this run's keys: collect them before the coverage decision
+        // (the batch path builds `tombs` from every deletion, including
+        // ones a bottommost rewrite later drops from the output).
+        // Bottommost latest-only drops the tombstones themselves (F177
+        // mirrors `gc_compact_entries`); every other mode passes them
+        // through. `oldest_snapshot` takes precedence over keep-only-latest.
+        let drop_tombs =
+            self.gc.oldest_snapshot.is_none() && self.gc.keep_only_latest && self.gc.bottommost;
+        for (ikey, value) in &self.run {
+            if ikey.kind == ValueType::RangeDeletion {
+                self.tombs.push(RangeTombstone {
+                    start: ikey.user_key.clone(),
+                    end: value.clone(),
+                    sequence: ikey.sequence,
+                });
+            }
+        }
+        let user = self.run[0].0.user_key.clone();
+        let mut keep = vec![false; self.run.len()];
+        let points: Vec<usize> = (0..self.run.len())
+            .filter(|&i| self.run[i].0.kind != ValueType::RangeDeletion)
+            .collect();
+        if let Some(oldest) = self.gc.oldest_snapshot {
+            // `gc_snapshot_safe`: newest always kept; each older version
+            // drops when the newest kept sibling has sequence <= oldest;
+            // a lone bottommost tombstone collapses away.
+            let mut newer_kept: Option<SequenceNumber> = None;
+            for &i in &points {
+                if crate::compact_kernel::point_version_fate(
+                    self.run[i].0.sequence,
+                    newer_kept,
+                    oldest,
+                ) == crate::compact_kernel::VersionFate::Drop
+                {
+                    continue;
+                }
+                keep[i] = true;
+                newer_kept = Some(self.run[i].0.sequence);
+            }
+            let kept: Vec<usize> = points.iter().copied().filter(|&i| keep[i]).collect();
+            let lone = kept.len() == 1 && self.run[kept[0]].0.kind == ValueType::Deletion;
+            if crate::compact_kernel::lone_tombstone_fate(self.gc.bottommost, lone)
+                == crate::compact_kernel::VersionFate::Drop
+            {
+                for &i in &kept {
+                    keep[i] = false;
+                }
+            }
+        } else if self.gc.keep_only_latest {
+            // Keep only the newest version; drop it when a newer range
+            // tombstone covers it. A point tombstone survives a partial
+            // rewrite (F177) and collapses on a bottommost one.
+            if let Some(&i) = points.first() {
+                let ikey = &self.run[i].0;
+                keep[i] = match ikey.kind {
+                    ValueType::Value => !range_deleted(user.as_ref(), ikey.sequence, &self.tombs),
+                    ValueType::Deletion => !self.gc.bottommost,
+                    ValueType::RangeDeletion => false,
+                };
+            }
+        } else {
+            // Pure min-sequence floor: every surviving point is kept.
+            for &i in &points {
+                keep[i] = true;
+            }
+        }
+        let run = std::mem::take(&mut self.run);
+        for (i, (ikey, value)) in run.into_iter().enumerate() {
+            if ikey.kind == ValueType::RangeDeletion {
+                if !drop_tombs {
+                    self.out.push_back((ikey, value));
+                }
+            } else if keep[i] {
+                self.out.push_back((ikey, value));
+            }
+        }
+    }
+}
+
+impl<S: CompactSource> CompactSource for GcMergeSource<S> {
+    fn next_entry(&mut self) -> Result<Option<(InternalKey, Bytes)>> {
+        loop {
+            if let Some(pair) = self.out.pop_front() {
+                return Ok(Some(pair));
+            }
+            match self.merge.next_entry()? {
+                Some((ikey, value)) => {
+                    // Same pre-filter as the batch path: the floor applies
+                    // to point versions and range tombstones alike.
+                    if ikey.sequence < self.gc.min_sequence {
+                        continue;
+                    }
+                    if self
+                        .run
+                        .last()
+                        .is_some_and(|(k, _)| k.user_key != ikey.user_key)
+                    {
+                        self.close_run();
+                    }
+                    self.run.push((ikey, value));
+                }
+                None => {
+                    if self.run.is_empty() {
+                        return Ok(None);
+                    }
+                    self.close_run();
+                }
+            }
         }
     }
 }
@@ -1029,6 +1185,131 @@ mod tests {
             got.push(pair);
         }
         assert_eq!(got, expected);
+    }
+
+    /// Randomized cross-validation: the streaming GC source must reproduce
+    /// `gc_compact_entries` exactly (same survivors, same order) across the
+    /// whole option matrix. Small key space forces multi-version runs and
+    /// overlapping range tombstones.
+    #[test]
+    fn gc_merge_source_matches_batch_across_option_matrix() {
+        let keys: [&[u8]; 5] = [b"a", b"b", b"c", b"d", b"e"];
+        let mut state = 0x243F_6A88_85A3_08D3u64;
+        let mut next = move || {
+            state = state
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            state
+        };
+        let mut all: Vec<(InternalKey, Bytes)> = Vec::new();
+        let mut seq = 0u64;
+        for _ in 0..400 {
+            seq += 1 + next() % 3;
+            let idx = (next() % keys.len() as u64) as usize;
+            let kind = match next() % 10 {
+                0..=1 => ValueType::Deletion,
+                2..=3 => ValueType::RangeDeletion,
+                _ => ValueType::Value,
+            };
+            let end = if idx + 1 < keys.len() {
+                keys[idx + 1 + (next() % (keys.len() - idx - 1) as u64) as usize]
+            } else {
+                b"z"
+            };
+            let value = if kind == ValueType::RangeDeletion {
+                Bytes::copy_from_slice(end)
+            } else {
+                Bytes::from(format!("v{seq}"))
+            };
+            all.push((ik(keys[idx], seq, kind), value));
+        }
+        all.sort_by(|a, b| a.0.cmp(&b.0));
+        // Deal sorted entries round-robin into three sorted streams so the
+        // k-way merge interleaves all of them.
+        let mut streams: [Vec<(InternalKey, Bytes)>; 3] = [Vec::new(), Vec::new(), Vec::new()];
+        for (i, pair) in all.iter().enumerate() {
+            streams[i % 3].push(pair.clone());
+        }
+        let variants = [
+            CompactGcOptions::default(),
+            CompactGcOptions {
+                min_sequence: 300,
+                ..CompactGcOptions::default()
+            },
+            CompactGcOptions::latest_only(),
+            CompactGcOptions {
+                bottommost: true,
+                ..CompactGcOptions::latest_only()
+            },
+            CompactGcOptions::for_oldest_snapshot(5),
+            CompactGcOptions {
+                bottommost: true,
+                ..CompactGcOptions::for_oldest_snapshot(5)
+            },
+            CompactGcOptions::for_oldest_snapshot(u64::MAX),
+            // Both flags set: oldest_snapshot takes precedence, and the
+            // tombstone-drop condition must not fire in that branch.
+            CompactGcOptions {
+                bottommost: true,
+                keep_only_latest: true,
+                ..CompactGcOptions::for_oldest_snapshot(7)
+            },
+        ];
+        for gc in variants {
+            let expected = gc_compact_entries(all.clone(), gc);
+            let merge = KwayInternalMerge::from_streams(vec![
+                streams[0].clone().into_iter(),
+                streams[1].clone().into_iter(),
+                streams[2].clone().into_iter(),
+            ])
+            .unwrap();
+            let mut src = GcMergeSource::new(merge, gc);
+            let mut got = Vec::new();
+            while let Some(pair) = src.next_entry().unwrap() {
+                got.push(pair);
+            }
+            assert_eq!(got, expected, "streaming GC diverged for {gc:?}");
+        }
+    }
+
+    /// A bottommost latest-only rewrite drops the range tombstone from the
+    /// output but must still use it as coverage for the point it hides
+    /// (the batch path builds `tombs` before deciding tombstone drops).
+    #[test]
+    fn gc_stream_bottommost_dropped_tombstone_still_covers() {
+        let entries = |bottommost: bool| {
+            let stream = vec![
+                (
+                    ik(b"k", 9, ValueType::RangeDeletion),
+                    Bytes::from_static(b"z"),
+                ),
+                (ik(b"k", 5, ValueType::Value), Bytes::from_static(b"v5")),
+            ];
+            let gc = CompactGcOptions {
+                bottommost,
+                ..CompactGcOptions::latest_only()
+            };
+            let expected = gc_compact_entries(stream.clone(), gc);
+            let mut src = GcMergeSource::new(
+                KwayInternalMerge::from_streams(vec![stream.into_iter()]).unwrap(),
+                gc,
+            );
+            let mut got = Vec::new();
+            while let Some(pair) = src.next_entry().unwrap() {
+                got.push(pair);
+            }
+            assert_eq!(got, expected, "mismatch for bottommost={bottommost}");
+            // The covered value is gone in both modes; only the partial
+            // rewrite keeps (and passes through) the tombstone itself.
+            if bottommost {
+                assert!(got.is_empty());
+            } else {
+                assert_eq!(got.len(), 1);
+                assert_eq!(got[0].0.kind, ValueType::RangeDeletion);
+            }
+        };
+        entries(true);
+        entries(false);
     }
 
     #[test]
