@@ -416,5 +416,41 @@ worker print one layer breakdown per second:
   either the re-read computes the CRC over the wrong slice or the
   block range is off). Fail-closed behavior is correct (refused to
   decode); the read path is wrong.
+- **v21c (`18669e4`): the run #4 CRC panic was a file-number TOCTOU,
+  not a v5 eviction-read bug.** Re-reading the code paths killed the
+  eviction-read theory: `prepare_l0_compact` reserved exactly **one**
+  file number (`alloc_file_num()`), but the v21 chunked writer emits
+  `file_num, file_num+1, …` — numbers past the reservation. The
+  off-lock `write()` runs between `prepare` and `install`; a
+  concurrent L0 flush (allocating under the same Db write lock) can be
+  handed the same numbers, and its tmp→rename clobbers a chunk path
+  (or vice versa). The surviving file no longer matches the other
+  table's in-memory index, so v5 per-block re-reads at stale offsets
+  fail the block CRC — exactly the observed error, on `000018.sst`,
+  an early file from the compaction-churn-against-flush window of
+  run #4 (93 tables, l0=87). The local 6M leg never hit it because
+  settle has no concurrent writer. **Fix:** splitting is advisory
+  sizing, so `prepare` now reserves `chunk_budget = Σ input on-disk
+  bytes / compact_target + 2` numbers and the writer is **capped**
+  to that many chunks — past the budget the last chunk runs long
+  (correct, less even). Collision is structurally impossible; no
+  compat-visible signature changed (the budget rides inside
+  `PreparedL0Compact`). `rewrite_ssts` keeps unlimited chunks: it
+  runs under the `&mut self` write lock and advances `next_file_num`
+  only after the write, so nothing can interleave. A static writer
+  bound was ruled out first — the writer splits on *uncompressed*
+  logical entry bytes while inputs shrink ~35× under lz4, so no
+  compressed-size formula bounds the chunk count (a reservation-only
+  attempt failed its own regression test 3 numbers short before the
+  cap existed). Regression test
+  `prepare_l0_compact_reserves_whole_chunk_range`: a compressible
+  multi-flush fixture must produce ≥2 chunks whose file numbers all
+  sit inside the reservation and the next `alloc_file_num()` must
+  exceed them. Suites: compat 84/0/3 ignored, core 637/3 known
+  flakes. Forensic confirmation from the run #4 data disk was
+  attempted (stop → convert 42 G data.qcow2 → mount) but abandoned:
+  the convert filled the host disk (100%), wedged a `losetup` in
+  D-state, and was not worth the box — the root cause stands on the
+  allocation-path reading above.
 
 
