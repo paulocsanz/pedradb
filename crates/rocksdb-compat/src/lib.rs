@@ -3894,6 +3894,16 @@ fn flush_worker_diag<E: PedraEnv>(inner: &ConcurrentDb<E>) {
                 .and_then(|f| f.parse::<u64>().ok())
         })
         .map_or(0, |pages| pages.saturating_mul(4096) / 1024);
+    // v19 forensics: payload-pool occupancy (must sit at/below the budget)
+    // and per-table decoded-entries caches (unbounded per table — the
+    // other table-sized layer a growing RSS floor can come from).
+    let (pool_n, pool_b, ent_e) = inner.with_read(|db| {
+        (
+            db.sst_payload_pool().tracked_tables(),
+            db.sst_payload_pool().resident_bytes(),
+            db.sst_cached_entries(),
+        )
+    });
     let (tick_s, mat_n) = FLUSH_DIAG_STATE
         .lock()
         .ok()
@@ -3903,7 +3913,7 @@ fn flush_worker_diag<E: PedraEnv>(inner: &ConcurrentDb<E>) {
         })
         .map_or((0, 0), |v| v);
     eprintln!(
-        "FLUSHDIAG parked_n={} parked_b={} active_b={} imm={} retired_b={} sst_n={} rss_kb={} tick_s={} mat_n={}",
+        "FLUSHDIAG parked_n={} parked_b={} active_b={} imm={} retired_b={} sst_n={} rss_kb={} tick_s={} mat_n={} pool_n={} pool_b={} ent_e={}",
         inner.parked_unflushed_count(),
         inner.parked_unflushed_bytes(),
         inner.active_mem_usage(),
@@ -3913,6 +3923,9 @@ fn flush_worker_diag<E: PedraEnv>(inner: &ConcurrentDb<E>) {
         rss_kb,
         tick_s,
         mat_n,
+        pool_n,
+        pool_b,
+        ent_e,
     );
 }
 
@@ -3936,10 +3949,13 @@ fn compact_diag<E: PedraEnv>(inner: &ConcurrentDb<E>) {
         return;
     }
     eprintln!(
-        "COMPACTDIAG l0={} l1={} parked_n={}",
+        "COMPACTDIAG l0={} l1={} parked_n={} pool_n={} pool_b={} ent_e={}",
         inner.with_read(|db| db.level_file_count(0)),
         inner.with_read(|db| db.level_file_count(1)),
         inner.parked_unflushed_count(),
+        inner.with_read(|db| db.sst_payload_pool().tracked_tables()),
+        inner.with_read(|db| db.sst_payload_pool().resident_bytes()),
+        inner.with_read(|db| db.sst_cached_entries()),
     );
 }
 

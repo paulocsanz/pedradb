@@ -2248,6 +2248,13 @@ impl<E: Env> Db<E> {
         &self.sst_payload_pool
     }
 
+    /// Total entries held in per-table decoded-entries caches across all
+    /// installed SSTs (observability — the caches are unbounded per table).
+    #[must_use]
+    pub fn sst_cached_entries(&self) -> usize {
+        self.ssts.iter().map(SstTable::cached_entries_count).sum()
+    }
+
     /// Capture a read snapshot of currently committed state (sequence export).
     ///
     /// Does **not** register a pin — use [`Self::pin_snapshot`] when you need

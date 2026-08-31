@@ -248,6 +248,13 @@ impl SstTable {
         self.entries.lock().is_some()
     }
 
+    /// Decoded-entries cache occupancy (observability): 0 when cold. The
+    /// cache is unbounded per table, so diag callers sum this across tables.
+    #[must_use]
+    pub fn cached_entries_count(&self) -> usize {
+        self.entries.lock().as_ref().map_or(0, Vec::len)
+    }
+
     /// Append range tombstones visible at `snapshot` into `out` (no full materialize).
     pub fn collect_range_tombstones(
         &self,
