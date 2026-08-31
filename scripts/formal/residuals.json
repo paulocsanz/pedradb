@@ -65,7 +65,160 @@
     "kernel_files": 44,
     "kernel_loc": 11790,
     "handler_loc": 83217,
-    "db_rs_extracted": false
+    "db_rs_extracted": false,
+    "kernel_fn_allowlist": {
+      "crates/montanha-fdb-recipes/src/children_kernel.rs": [
+        "key_in_half_open",
+        "next_byte_in_packed_children",
+        "packed_children_start"
+      ],
+      "crates/montanha-fdb-recipes/src/fields_kernel.rs": [
+        "child_bytes_after",
+        "decode_fields",
+        "decode_pair_first_nul",
+        "field_kept"
+      ],
+      "crates/pedradb-core/src/cf_kernel.rs": [
+        "cf_encode_effective",
+        "cf_family_of",
+        "compact_rewrites_sst_cf",
+        "decode_cf_key",
+        "encode_cf_key",
+        "infer_sst_cf"
+      ],
+      "crates/pedradb-core/src/changelog_kernel.rs": [
+        "changelog_rebuild_within_budget",
+        "changelog_should_store"
+      ],
+      "crates/pedradb-core/src/compact_kernel.rs": [
+        "compact_should_split",
+        "compact_should_split_at",
+        "lone_tombstone_fate"
+      ],
+      "crates/pedradb-core/src/flush_kernel.rs": [
+        "flush_plan"
+      ],
+      "crates/pedradb-core/src/group_commit_kernel.rs": [
+        "default_pct_depth_raised",
+        "fsync_lie_closes_tcg_guest",
+        "group_validate",
+        "pct_campaign_default_depth",
+        "stacked_fsync_liars_admitted"
+      ],
+      "crates/pedradb-core/src/leveling.rs": [
+        "is_disjoint",
+        "leveled_enabled",
+        "overlaps",
+        "pick_pushdown",
+        "total_bytes"
+      ],
+      "crates/pedradb-core/src/manifest_kernel.rs": [
+        "first_install_action"
+      ],
+      "crates/pedradb-core/src/sst/scan_kernel.rs": [
+        "key_in_window",
+        "point_bounds_overlap",
+        "sst_block_crc_ok",
+        "tombstone_reaches_window"
+      ],
+      "crates/pedradb-core/src/wal/recover_kernel.rs": [
+        "fragment_act",
+        "from_record_type",
+        "is_length_resyncable",
+        "physical_payload_act"
+      ],
+      "crates/pedradb-dcs/src/apply_kernel.rs": [
+        "dcs_apply_should_advance"
+      ],
+      "crates/pedradb-dcs/src/lease_kernel.rs": [
+        "lease_table_expired",
+        "next_lease_id_after"
+      ],
+      "crates/pedradb-fold/src/isolated_kernel.rs": [
+        "isolated_child_byte"
+      ],
+      "crates/pedradb-http/src/auth_kernel.rs": [
+        "ascii_lower",
+        "ascii_upper",
+        "authorization_matches",
+        "is_bearer_scheme",
+        "is_non_bearer_auth_scheme",
+        "normalize_http_method"
+      ],
+      "crates/pedradb-http/src/cl_kernel.rs": [
+        "content_length_repeat_ok",
+        "invalid_cl_as_zero",
+        "short_body_vs_cl_is_error"
+      ],
+      "crates/pedradb-http/src/form_kernel.rs": [
+        "form_plus_byte",
+        "from_hex",
+        "plus_before_percent",
+        "query_part_is_bare_name",
+        "query_u64_conflict",
+        "query_values_conflict"
+      ],
+      "crates/pedradb-http/src/path_kernel.rs": [
+        "host_authority_mismatch",
+        "path_after_authority",
+        "request_target_authority",
+        "split_host_port",
+        "strip_authority_for_routing",
+        "strip_http_authority",
+        "strip_uri_fragment"
+      ],
+      "crates/pedradb-io-uring/src/cqe_kernel.rs": [
+        "cqe_act",
+        "cqe_ring_model_admitted",
+        "next_user_data",
+        "submit_complete_act"
+      ],
+      "crates/pedradb-journal/src/pin_kernel.rs": [
+        "catch_up_pins_on_read",
+        "fold_pins_on_read",
+        "next_pin"
+      ],
+      "crates/pedradb-raft/src/ae_kernel.rs": [
+        "ae_f16_safe"
+      ],
+      "crates/pedradb-raft/src/commit_kernel.rs": [
+        "recover_last_applied"
+      ],
+      "crates/pedradb-replicate/src/ship_kernel.rs": [
+        "stamp_changed"
+      ],
+      "crates/pedradb-store/src/compact_kernel.rs": [
+        "compact_index_floor",
+        "compact_ready",
+        "peer_counts_for_compact"
+      ],
+      "crates/pedradb-store/src/index_val_kernel.rs": [
+        "exact_value_children",
+        "value_len_tag"
+      ],
+      "crates/pedradb-store/src/si_kernel.rs": [
+        "point_get_prefer_applied",
+        "point_get_watermark"
+      ],
+      "crates/pedradb-store/src/snapshot_kernel.rs": [
+        "snapshot_needs_txn_meta_clear"
+      ],
+      "crates/pedradb-store/src/txn_kernel.rs": [
+        "discard_cut",
+        "leftover_txn_is_aborted",
+        "next_txn_id_after",
+        "prepare_error_aborts_earlier",
+        "recover_si_generation",
+        "reserve_si_gen",
+        "revert_clears_status",
+        "revert_user_action",
+        "should_repair_si_hist",
+        "unreserve_si_gen"
+      ],
+      "crates/pedradb-stream/src/cursor_kernel.rs": [
+        "next_seq"
+      ]
+    }
   },
   "residuals": [
     {
