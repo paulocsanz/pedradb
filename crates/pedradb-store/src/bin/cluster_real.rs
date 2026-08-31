@@ -566,19 +566,31 @@ fn run(seed: u64, kill_leader: bool, do_leave: bool, do_remove: bool) -> String 
     }
 }
 
+fn parse_seed(arg: &str) -> Option<u64> {
+    let t = arg.trim();
+    match t.strip_prefix("0x").or_else(|| t.strip_prefix("0X")) {
+        Some(h) => u64::from_str_radix(h, 16).ok(),
+        None => t.parse().ok().or_else(|| u64::from_str_radix(t, 16).ok()),
+    }
+}
+
 fn main() {
-    let seed: u64 = env::args()
-        .nth(1)
-        .and_then(|s| {
-            let t = s.trim();
-            t.strip_prefix("0x")
-                .or_else(|| t.strip_prefix("0X"))
-                .map_or_else(
-                    || t.parse().ok().or_else(|| u64::from_str_radix(t, 16).ok()),
-                    |h| u64::from_str_radix(h, 16).ok(),
-                )
-        })
-        .unwrap_or(0x0064_1E28);
+    let arg = env::args().nth(1);
+    let seed: u64 = match arg.as_deref().and_then(parse_seed) {
+        Some(s) => s,
+        None => {
+            // RFC-0157 correction (2026-08-31): the old silent default
+            // 0x0064_1E28 collapsed every campaign seed of the form
+            // `0x015A_N01` (underscore + non-hex mnemonic) to one world.
+            // A bad seed now refuses to run instead of picking a world.
+            eprintln!(
+                "cluster_real: seed arg {:?} is not decimal or 0x-hex u64 — refusing \
+                 (no silent default; see findings/2026-08-31-campaign-seed-collapse)",
+                arg.as_deref().unwrap_or("")
+            );
+            std::process::exit(2);
+        }
+    };
     let kill_leader = env::args().any(|a| a == "--leader-kill")
         || env::var("L28_KILL").ok().as_deref() == Some("leader");
     let do_leave = env::args().any(|a| a == "--leave-joint")
@@ -755,5 +767,29 @@ fn main() {
             eprintln!("L28 TCP planted committed-joint-without-leave miss: {line}");
             std::process::exit(1);
         }
+    }
+}
+
+#[cfg(test)]
+mod seed_parse_tests {
+    use super::parse_seed;
+
+    #[test]
+    fn decimal_and_plain_hex_parse() {
+        assert_eq!(parse_seed("671"), Some(671));
+        assert_eq!(parse_seed(" 42 "), Some(42));
+        assert_eq!(parse_seed("0x15b001"), Some(0x15b001));
+        assert_eq!(parse_seed("0X15B001"), Some(0x15b001));
+    }
+
+    #[test]
+    fn mnemonic_prefixes_are_refused_not_defaulted() {
+        // 2026-08-31: every RFC-0157 campaign seed of this shape silently
+        // collapsed to the 0x641e28 default (113 fingerprint rows); the
+        // parser must refuse them so the world choice is never silent.
+        assert_eq!(parse_seed("0x0157_C01"), None);
+        assert_eq!(parse_seed("0x015A_N01"), None);
+        assert_eq!(parse_seed("0x015B_N01"), None);
+        assert_eq!(parse_seed(""), None);
     }
 }

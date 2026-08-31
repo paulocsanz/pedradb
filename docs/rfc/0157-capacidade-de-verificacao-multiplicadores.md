@@ -35,7 +35,7 @@ Quatro multiplicadores, cada um independente e shippable sozinho: (1) toolchain 
 
 - [x] **P0.1** Prova checada por máquina: `scripts/formal/verus_check.sh` pinando o toolchain (binário de release ou container como fallback documentado) e verificando o primeiro conjunto de gêmeos (`verus/l28.rs` + os três do 0155); saída pass/fail por gêmeo. Slice pronto quando UM gêmeo é checado ponta-a-ponta a partir de clone limpo — status: `done` (conjunto padrão 3/3 PASS sob o release pinado `0.2026.08.23.fbbbbcf`; `--all` 53/56 com 3 gêmeos em drift de toolchain registrados em `findings/rfc0157-verus-drift/`)
 - [x] **P0.2** Detector de fidelidade: teste de replay diferencial `world_stdenv_diff_replay` — mesmo script semeado de ops+crash+restart+scan contra `World` e contra `StdEnv` em tempdir real; fingerprints observáveis devem ser iguais. Primeiro cenário: put/get/kill/restart — status: `done` (fingerprints idênticos Mem↔Disk; lado real repete bit-a-bit; divergência plantada de um byte é detectada)
-- [x] **P0.3** Campanha TCP K-paralela: harness que roda K clusters REAL simultâneos (seeds distintas, portas distintas), agregando `napply`/kernels/contabilidade de retry por seed; `scripts/rfc0157_tcp_campaign.sh K` com K default 8 e registro em `findings/` — status: `done` (K=8: 8/8 seeds limpas na 1ª tentativa, fator 1,15× vs solo; seams `L28_BASE_PORT` 26000..26023 + stagger; registro em `findings/rfc0157-tcp-campaign/`)
+- [x] **P0.3** Campanha TCP K-paralela: harness que roda K clusters REAL simultâneos (seeds distintas, portas distintas), agregando `napply`/kernels/contabilidade de retry por seed; `scripts/rfc0157_tcp_campaign.sh K` com K default 8 e registro em `findings/` — status: `done` (K=8: 8/8 seeds limpas na 1ª tentativa, fator 1,15× vs solo; seams `L28_BASE_PORT` 26000..26023 + stagger; registro em `findings/rfc0157-tcp-campaign/`; CORREÇÃO 2026-08-31: as "seeds distintas" nunca chegaram ao binário — os mnemônicos `0x0157_C001+` não são u64 e o `cluster_real` tinha fallback silencioso para `0x641e28`, um único mundo em todos os registros; parser estrito + sementes numéricas + cross-check do eco `seed=` landed (findings/2026-08-31-campaign-seed-collapse))
 
 ### P1 — escala e alcance
 
@@ -48,7 +48,7 @@ Quatro multiplicadores, cada um independente e shippable sozinho: (1) toolchain 
 
 - [x] **P2.1** Corpus Verus expandido: todos os gêmeos puros não-data_fate no `verus_check.sh`; data_fate na sequência — status: `done` (drift dos 3 gêmeos resolvido sob o release pinado — `cqe_res`/`fdatasync_rc` literais `i32` no modo spec, `journal_pin` spec-twin para `fold_pins_on_read`; `--all` 56/56 PASS exit 0 = todos os 45 pares não-data_fate (36 runners) + 20 data_fate-only; registro do drift em `findings/rfc0157-verus-drift/`; re-run 2026-08-30 pós-0158 P1.1: `--all` 57/57 PASS exit 0 — 57º runner é o `verus_durable_term.sh` novo; R-verus segue no never_floor)
 - [x] **P2.2** Quadro de capacidade por residual: `candidates.py` passa a imprimir, por linha de residual, guard: sim/não, gêmeo checado: sim/não, profundidade de campanha, âncora REAL — status: `done` (`capacity_board` no `candidates.py`: 28 linhas derivadas de `catalog.json`/`residuals.json`/repo com referências verificadas — teste de guard existe no repo, twin+runner existem no catalog, âncora REAL existe em `findings/`; referência quebrada = exit 1; tabela é visão de capacidade, não alegação de garantia)
-- [x] **P2.3** Campanha noturna registrada: doc do runner (TCP K seeds + PCT d=3/4 sweeps) com padrão de registro em `findings/` — status: `done` (doc `findings/rfc0157-nightly/README.md` + execução real registrada em `findings/rfc0157-nightly/2026-08-30/`: seeds frescas 0x0157_N01..N008, TCP K=8 — 8/8 na 1ª tentativa, wall 207s vs solo 121s, fator 1,71 (waves 1-2 falharam o gate sob carga — 2,18/2,22 — consoles preservados; harness `cluster_real` ganhou paciência no n3-leave); PCT d=3 e d=4 executados: `pct_d3.txt`/`pct_d4.txt` com contagens e custo (d=4 35/16384 ≈ 1,1s — headroom, não cobertura; default continua d=2)
+- [x] **P2.3** Campanha noturna registrada: doc do runner (TCP K seeds + PCT d=3/4 sweeps) com padrão de registro em `findings/` — status: `done` (doc `findings/rfc0157-nightly/README.md` + execução real registrada em `findings/rfc0157-nightly/2026-08-30/`: seeds frescas 0x0157_N01..N008, TCP K=8 — 8/8 na 1ª tentativa, wall 207s vs solo 121s, fator 1,71 (waves 1-2 falharam o gate sob carga — 2,18/2,22 — consoles preservados; harness `cluster_real` ganhou paciência no n3-leave); PCT d=3 e d=4 executados: `pct_d3.txt`/`pct_d4.txt` com contagens e custo (d=4 35/16384 ≈ 1,1s — headroom, não cobertura; default continua d=2; CORREÇÃO 2026-08-31: as "seeds frescas 0x0157_N01..N008" colapsaram no mundo único 0x641e28 (mesma causa de P0.3, findings/2026-08-31-campaign-seed-collapse); noite com mundos realmente distintos pendente de árvore limpa)
 
 ## Status (living — update with every PR)
 
@@ -56,21 +56,21 @@ Quatro multiplicadores, cada um independente e shippable sozinho: (1) toolchain 
 |----|------|-------|--------|-----------|---------|
 | P0.1 | p0 | verus_check.sh + primeiro gêmeo checado | done — 3/3 padrão, 53/56 `--all` | `scripts/formal/verus_check.sh` | 2026-08-30 |
 | P0.2 | p0 | replay diferencial World↔StdEnv | done — divergência plantada detectada | `world_stdenv_diff_replay` | 2026-08-30 |
-| P0.3 | p0 | campanha TCP K-paralela | done — 8/8, fator 1,15× | `scripts/rfc0157_tcp_campaign.sh` | 2026-08-30 |
+| P0.3 | p0 | campanha TCP K-paralela | done — 8/8, fator 1,15×; 2026-08-31: colapso de semente corrigido (todos os registros rodaram o mundo único 0x641e28) | `scripts/rfc0157_tcp_campaign.sh` | 2026-08-31 |
 | P1.1 | p1 | varredura de classe workspace-wide | done — 0 fail, 0 waivers | `pedra_formal.py --lint` | 2026-08-30 |
 | P1.2 | p1 | fuzz de kernels puros | done — 3 sweeps, 0 contraexemplos | alvos proptest | 2026-08-30 |
 | P1.3 | p1 | runner exaustivo N≤3 | done — plantas completas; disk-fence com piso | turnstile enumerate | 2026-08-30 |
 | P1.4 | p1 | db.rs estágio 1: caracterização | done — dourado travado, `db_rs_extracted=false` | fingerprints dourados | 2026-08-30 |
 | P2.1 | p2 | corpus Verus expandido | done — `--all` 57/57 (re-run 2026-08-30), drift resolvido | `verus_check.sh` | 2026-08-30 |
 | P2.2 | p2 | quadro de capacidade por residual | done — 28 linhas, refs verificadas | `candidates.py` | 2026-08-30 |
-| P2.3 | p2 | doc da campanha noturna | done — noite 2026-08-30 registrada, fator 1,71 | `findings/rfc0157-nightly/` | 2026-08-30 |
+| P2.3 | p2 | doc da campanha noturna | done — noite 2026-08-30 registrada, fator 1,71; 2026-08-31: sementes daquela noite colapsaram no mundo 0x641e28 | `findings/rfc0157-nightly/` | 2026-08-31 |
 
 ## Acceptance Criteria
 
 - **Tests**
   - `verus_check.sh` sai 0 com o conjunto checado e lista gêmeo-a-gêmeo; sem toolchain no host, o fallback documentado executa o mesmo conjunto.
   - `world_stdenv_diff_replay`: fingerprints iguais World vs StdEnv no cenário semeado; uma divergência plantada (trocar um byte do script só de um lado) faz o teste falhar — o detector detecta.
-  - Campanha paralela: K=8 seeds completam em < 2× o wall-clock de 1 seed; cada seed reporta `napply`, kernels e retry-accounting; nenhuma seed reutilizada.
+  - Campanha paralela: K=8 seeds completam em < 2× o wall-clock de 1 seed; cada seed reporta `napply`, kernels e retry-accounting; nenhuma seed reutilizada. Correção 2026-08-31: nos registros até 2026-08-30 as *strings* de semente eram distintas mas o binário rodou todas num único mundo (0x641e28, fallback silencioso); agora as sementes são numéricas e o `seed=` ecoado no fingerprint é conferido contra a pedida em cada tentativa.
   - Lint com a varredura de classe termina `0 fail` no estado atual (todas as classes do 0156 cobertas ou com waiver).
   - Runner exaustivo: o espaço enumerado é reportado (|espaço|, violadores) e a planta de cadeia-3 aparece na enumeração d=3.
   - Estágio 1 do `db.rs`: fingerprints dourados verdes e determinísticos (replay duplo).
